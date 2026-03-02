@@ -24,9 +24,32 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 ENTITIES_FILE = os.path.join(DATA_DIR, "entities.json")
 BEATS_FILE = os.path.join(DATA_DIR, "beats.json")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+PORT_FILE = os.path.join(DATA_DIR, "port.txt")
+
+# 全局变量存储实际端口号
+ACTUAL_PORT = None
 
 # 确保数据目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def save_port(port: int):
+    """保存端口号到文件"""
+    global ACTUAL_PORT
+    ACTUAL_PORT = port
+    with open(PORT_FILE, "w", encoding="utf-8") as f:
+        f.write(str(port))
+
+
+def load_port() -> Optional[int]:
+    """从文件读取端口号"""
+    if os.path.exists(PORT_FILE):
+        try:
+            with open(PORT_FILE, "r", encoding="utf-8") as f:
+                return int(f.read().strip())
+        except (ValueError, IOError):
+            pass
+    return None
 
 
 # 初始化 FastAPI 应用
@@ -317,6 +340,12 @@ async def health_check():
     return {"status": "ok", "service": "Velluma AI"}
 
 
+@app.get("/api/port")
+async def get_port():
+    """获取当前服务端口号"""
+    return {"port": ACTUAL_PORT}
+
+
 # ==================== 静态文件服务 (SPA 支持) ====================
 
 @app.get("/{path:path}")
@@ -332,4 +361,14 @@ async def serve_static(path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    
+    # 使用动态端口 (port=0 让系统分配)
+    config = uvicorn.Config(app, host="127.0.0.1", port=0)
+    server = uvicorn.Server(config)
+    
+    # 获取实际分配的端口并保存
+    save_port(server.config.port)
+    print(f"后端服务启动，端口: {server.config.port}")
+    
+    # 启动服务器
+    server.run()

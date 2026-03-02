@@ -14,8 +14,8 @@ from pathlib import Path
 
 # 配置参数
 HOST = "127.0.0.1"
-PORT = 8000
-BACKEND_URL = f"http://{HOST}:{PORT}"
+PORT = 0  # 使用 0 表示动态端口
+BACKEND_URL = None  # 将在启动时动态生成
 
 # 开发模式配置 - 如果前端正在开发中，设置为 True 以使用 Vite 开发服务器
 DEV_MODE = False
@@ -30,17 +30,28 @@ WINDOW_HEIGHT = 900
 def start_backend():
     """
     在后台线程中启动 FastAPI 服务
+    返回实际分配的端口号
     """
-    # 导入 FastAPI 应用
-    from backend.main import app
+    from backend.main import app, save_port
+    import uvicorn
     
-    # 使用 uvicorn 运行服务
-    uvicorn.run(
+    config = uvicorn.Config(
         app,
         host=HOST,
-        port=PORT,
+        port=PORT,  # 0 表示动态端口
         log_level="info"
     )
+    server = uvicorn.Server(config)
+    
+    actual_port = server.config.port
+    save_port(actual_port)
+    
+    global BACKEND_URL
+    BACKEND_URL = f"http://{HOST}:{actual_port}"
+    
+    server.run()
+    
+    return actual_port
 
 
 def wait_for_backend(timeout: int = 30) -> bool:
@@ -123,6 +134,8 @@ def main():
         if not wait_for_backend(timeout=30):
             print("❌ 后端服务启动超时，请检查日志")
             sys.exit(1)
+        
+        print(f"✅ 后端服务已启动: {BACKEND_URL}")
     else:
         print("⚠️  开发模式: 后端服务需要手动启动")
         print(f"   请运行: python -m backend.main")

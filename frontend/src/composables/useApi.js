@@ -3,7 +3,25 @@
  * 提供 Entity、Beat 和 Config 的 CRUD 操作
  */
 
-const API_BASE = '/api'
+let API_BASE = '/api'
+let API_PORT = null
+
+/**
+ * 初始化 API，获取后端端口号
+ */
+export async function initApi() {
+  try {
+    const response = await fetch('/api/port')
+    const data = await response.json()
+    if (data.port) {
+      API_PORT = data.port
+      API_BASE = `http://localhost:${data.port}/api`
+      console.log(`API 已初始化，端口: ${data.port}`)
+    }
+  } catch (e) {
+    console.warn('无法获取端口号，使用默认相对路径')
+  }
+}
 
 /**
  * 通用 fetch 封装
