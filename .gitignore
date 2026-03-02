@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+/backend/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -8,6 +9,14 @@ __pycache__/
 dist/
 build/
 .eggs/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
 
 # 环境
 .env
@@ -15,6 +24,7 @@ build/
 env/
 venv/
 ENV/
+.env.local
 
 # 数据文件
 data/port.txt
@@ -24,6 +34,13 @@ data/*.json
 frontend/node_modules/
 frontend/dist/
 frontend/.env
+frontend/.vite/
+frontend/.turbo/
+
+# Electron
+electron/dist/
+electron/node_modules/
+*.asar
 
 # IDE
 .vscode/
@@ -31,7 +48,18 @@ frontend/.env
 .trae/specs
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# 测试
+coverage/
+.nyc_output/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
