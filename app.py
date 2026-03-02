@@ -34,24 +34,31 @@ def start_backend():
     """
     from backend.main import app, save_port
     import uvicorn
+    import socket
+    
+    # 先创建一个临时 socket 获取可用端口
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((HOST, 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    
+    print(f"后端服务启动，端口: {port}")
+    save_port(port)
+    
+    global BACKEND_URL
+    BACKEND_URL = f"http://{HOST}:{port}"
     
     config = uvicorn.Config(
         app,
         host=HOST,
-        port=PORT,  # 0 表示动态端口
-        log_level="info"
+        port=port,
+        log_level="error"
     )
     server = uvicorn.Server(config)
     
-    actual_port = server.config.port
-    save_port(actual_port)
-    
-    global BACKEND_URL
-    BACKEND_URL = f"http://{HOST}:{actual_port}"
-    
     server.run()
     
-    return actual_port
+    return port
 
 
 def wait_for_backend(timeout: int = 30) -> bool:

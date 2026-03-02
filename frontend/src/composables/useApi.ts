@@ -4,15 +4,15 @@
  */
 
 let API_BASE = '/api'
-let API_PORT = null
+let API_PORT: number | null = null
 
 /**
  * 初始化 API，获取后端端口号
  */
-export async function initApi() {
+export async function initApi(): Promise<void> {
   try {
     const response = await fetch('/api/port')
-    const data = await response.json()
+    const data = await response.json() as { port: number }
     if (data.port) {
       API_PORT = data.port
       API_BASE = `http://localhost:${data.port}/api`
@@ -26,7 +26,7 @@ export async function initApi() {
 /**
  * 通用 fetch 封装
  */
-async function fetchApi(url, options = {}) {
+async function fetchApi<T = any>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -37,7 +37,7 @@ async function fetchApi(url, options = {}) {
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: '请求失败' }))
-    throw new Error(error.detail || '请求失败')
+    throw new Error((error as any).detail || '请求失败')
   }
   
   return response.json()
@@ -47,26 +47,17 @@ async function fetchApi(url, options = {}) {
  * Entity API
  */
 export const entityApi = {
-  // 获取所有实体
   getAll: () => fetchApi('/entities'),
-  
-  // 获取单个实体
-  get: (id) => fetchApi(`/entities/${id}`),
-  
-  // 创建实体
-  create: (data) => fetchApi('/entities', {
+  get: (id: string) => fetchApi(`/entities/${id}`),
+  create: (data: any) => fetchApi('/entities', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  
-  // 更新实体
-  update: (id, data) => fetchApi(`/entities/${id}`, {
+  update: (id: string, data: any) => fetchApi(`/entities/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
-  
-  // 删除实体
-  delete: (id) => fetchApi(`/entities/${id}`, {
+  delete: (id: string) => fetchApi(`/entities/${id}`, {
     method: 'DELETE'
   })
 }
@@ -75,26 +66,17 @@ export const entityApi = {
  * Beat API
  */
 export const beatApi = {
-  // 获取所有节拍
   getAll: () => fetchApi('/beats'),
-  
-  // 获取单个节拍
-  get: (id) => fetchApi(`/beats/${id}`),
-  
-  // 创建节拍
-  create: (data) => fetchApi('/beats', {
+  get: (id: string) => fetchApi(`/beats/${id}`),
+  create: (data: any) => fetchApi('/beats', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  
-  // 更新节拍
-  update: (id, data) => fetchApi(`/beats/${id}`, {
+  update: (id: string, data: any) => fetchApi(`/beats/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
-  
-  // 删除节拍
-  delete: (id) => fetchApi(`/beats/${id}`, {
+  delete: (id: string) => fetchApi(`/beats/${id}`, {
     method: 'DELETE'
   })
 }
@@ -103,11 +85,8 @@ export const beatApi = {
  * Config API
  */
 export const configApi = {
-  // 获取配置
   get: () => fetchApi('/config'),
-  
-  // 更新配置
-  update: (data) => fetchApi('/config', {
+  update: (data: any) => fetchApi('/config', {
     method: 'POST',
     body: JSON.stringify(data)
   })
@@ -117,14 +96,7 @@ export const configApi = {
  * 生成 API (流式)
  */
 export const generateApi = {
-  /**
-   * 流式生成文本
-   * @param {Object} data - 生成请求数据
-   * @param {Function} onChunk - 接收文本片段的回调
-   * @param {Function} onDone - 生成完成的回调
-   * @param {Function} onError - 错误的回调
-   */
-  stream: (data, onChunk, onDone, onError) => {
+  stream: (data: any, onChunk?: (chunk: string) => void, onDone?: () => void, onError?: (error: string) => void) => {
     fetch(`${API_BASE}/generate`, {
       method: 'POST',
       headers: {
@@ -136,7 +108,12 @@ export const generateApi = {
         throw new Error('生成请求失败')
       }
       
-      const reader = response.body.getReader()
+      const reader = response.body?.getReader()
+      if (!reader) {
+        onError?.('无法读取响应')
+        return
+      }
+      
       const decoder = new TextDecoder()
       
       function read() {

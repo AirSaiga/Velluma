@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import EntityPanel from './components/EntityPanel.vue'
 import BeatEditor from './components/BeatEditor.vue'
 import ConfigPanel from './components/ConfigPanel.vue'
-import { entityApi, beatApi, configApi, generateApi } from './composables/useApi.js'
+import { entityApi, beatApi, configApi, generateApi } from './composables/useApi'
 
 // 数据状态
 const entities = ref([])
