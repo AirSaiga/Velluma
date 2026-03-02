@@ -132,8 +132,10 @@ class Config(BaseModel):
         base_url: OpenAI Base URL
         model: 默认模型
         style: 全局写作风格
+        theme: 主题设置 (light/dark)
     """
     api_key: str = Field(default="", description="OpenAI API Key")
     base_url: str = Field(default="", description="自定义API端点")
     model: str = Field(default="gpt-4o-mini", description="默认模型")
     style: str = Field(default="", description="全局写作风格偏好")
+    theme: str = Field(default="light", description="主题设置 (light/dark)")

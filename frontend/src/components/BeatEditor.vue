@@ -96,10 +96,10 @@ function toggleEntity(beat, entityId) {
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-slate-950">
+  <div class="h-full flex flex-col bg-[var(--bg-primary)]">
     <!-- 头部 -->
-    <div class="p-4 border-b border-slate-800 flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-slate-100">大纲编辑器</h2>
+    <div class="p-4 border-b border-[var(--border-color)] flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-[var(--text-primary)]">大纲编辑器</h2>
       <button
         @click="addBeat"
         class="px-3 py-1.5 bg-primary-600 hover:bg-primary-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1"
@@ -116,17 +116,17 @@ function toggleEntity(beat, entityId) {
       <div
         v-for="beat in sortedBeats"
         :key="beat.id"
-        class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden"
+        class="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden"
       >
         <!-- 节拍头部 -->
-        <div class="px-4 py-3 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
+        <div class="px-4 py-3 bg-[var(--bg-tertiary)]/50 border-b border-[var(--border-color)] flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <span class="text-sm font-medium text-slate-500">#{{ beat.order }}</span>
+            <span class="text-sm font-medium text-[var(--text-muted)]">#{{ beat.order }}</span>
             <div class="flex items-center gap-1">
               <button
                 @click="moveBeat(beat, 'up')"
                 :disabled="beat.order === 1"
-                class="p-1 text-slate-500 hover:text-slate-300 disabled:opacity-30 transition-colors"
+                class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
@@ -135,7 +135,7 @@ function toggleEntity(beat, entityId) {
               <button
                 @click="moveBeat(beat, 'down')"
                 :disabled="beat.order === sortedBeats.length"
-                class="p-1 text-slate-500 hover:text-slate-300 disabled:opacity-30 transition-colors"
+                class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -145,7 +145,7 @@ function toggleEntity(beat, entityId) {
           </div>
           <button
             @click="deleteBeat(beat)"
-            class="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
+            class="p-1.5 text-[var(--text-muted)] hover:text-rose-400 transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -157,19 +157,19 @@ function toggleEntity(beat, entityId) {
         <div class="p-4 space-y-4">
           <!-- 剧情指令输入 -->
           <div>
-            <label class="block text-xs text-slate-500 mb-1.5">剧情指令</label>
+            <label class="block text-xs text-[var(--text-muted)] mb-1.5">剧情指令</label>
             <textarea
               :value="beat.instruction"
               @input="e => updateBeat(beat, { instruction: e.target.value })"
               rows="2"
-              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:border-primary-500 resize-none"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
               placeholder="输入当前节拍的剧情指令..."
             />
           </div>
           
           <!-- 实体选择器 -->
           <div>
-            <label class="block text-xs text-slate-500 mb-1.5">涉及设定</label>
+            <label class="block text-xs text-[var(--text-muted)] mb-1.5">涉及设定</label>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="entity in entities"
@@ -178,11 +178,11 @@ function toggleEntity(beat, entityId) {
                 class="px-2.5 py-1 text-xs rounded-full border transition-all"
                 :class="beat.entity_ids.includes(entity.id) 
                   ? 'bg-primary-600/20 border-primary-500 text-primary-400' 
-                  : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600'"
+                  : 'bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--text-muted)]'"
               >
                 {{ entity.name }}
               </button>
-              <span v-if="entities.length === 0" class="text-xs text-slate-600">
+              <span v-if="entities.length === 0" class="text-xs text-[var(--text-muted)]">
                 暂无可用设定，请先在左侧添加
               </span>
             </div>
@@ -193,7 +193,7 @@ function toggleEntity(beat, entityId) {
             <button
               @click="startGenerate(beat)"
               :disabled="generatingBeatId === beat.id || !beat.instruction.trim()"
-              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] text-white text-sm rounded-lg transition-colors flex items-center gap-2"
             >
               <svg v-if="generatingBeatId === beat.id" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -207,34 +207,34 @@ function toggleEntity(beat, entityId) {
           </div>
           
           <!-- 生成中的文本预览 -->
-          <div v-if="generatingBeatId === beat.id && generatingText" class="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap typing-cursor">{{ generatingText }}</p>
+          <div v-if="generatingBeatId === beat.id && generatingText" class="p-3 bg-[var(--bg-tertiary)]/50 rounded-lg border border-[var(--border-color)]">
+            <p class="text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap typing-cursor">{{ generatingText }}</p>
           </div>
           
           <!-- 已生成的正文 -->
-          <div v-if="beat.generated_text" class="p-3 bg-slate-800/30 rounded-lg border border-slate-800">
+          <div v-if="beat.generated_text" class="p-3 bg-[var(--bg-tertiary)]/30 rounded-lg border border-[var(--border-color)]">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs text-slate-500">已生成正文</span>
+              <span class="text-xs text-[var(--text-muted)]">已生成正文</span>
               <button
                 @click="updateBeat(beat, { generated_text: '' })"
-                class="text-xs text-slate-500 hover:text-rose-400 transition-colors"
+                class="text-xs text-[var(--text-muted)] hover:text-rose-400 transition-colors"
               >
                 清除
               </button>
             </div>
-            <p class="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{{ beat.generated_text }}</p>
+            <p class="text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{{ beat.generated_text }}</p>
           </div>
         </div>
       </div>
       
       <!-- 空状态 -->
       <div v-if="sortedBeats.length === 0" class="text-center py-12">
-        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800 flex items-center justify-center">
-          <svg class="w-8 h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center">
+          <svg class="w-8 h-8 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
         </div>
-        <p class="text-slate-500 text-sm">暂无节拍，点击上方按钮添加</p>
+        <p class="text-[var(--text-muted)] text-sm">暂无节拍，点击上方按钮添加</p>
       </div>
     </div>
   </div>
