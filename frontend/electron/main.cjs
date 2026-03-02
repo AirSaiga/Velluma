@@ -8,23 +8,8 @@ const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 let backendProcess = null
 let pythonCmd = process.platform === 'win32' ? 'python.exe' : 'python'
 
-const VITE_PORTS = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180]
-const BACKEND_START_PORT = 8001
-
-function findAvailablePort(startPort = BACKEND_START_PORT) {
-  return new Promise((resolve) => {
-    const server = net.createServer()
-    server.listen(startPort, () => {
-      const address = server.address()
-      server.close(() => {
-        resolve(address.port)
-      })
-    })
-    server.on('error', () => {
-      resolve(findAvailablePort(startPort + 1))
-    })
-  })
-}
+const FIXED_VITE_PORT = 5175
+const FIXED_BACKEND_PORT = 8002
 
 function waitForPort(port, timeout = 30000) {
   return new Promise((resolve, reject) => {
@@ -53,28 +38,15 @@ function waitForPort(port, timeout = 30000) {
   })
 }
 
-async function findVitePort() {
-  for (const port of VITE_PORTS) {
-    try {
-      await waitForPort(port, 2000)
-      return port
-    } catch {
-      continue
-    }
-  }
-  throw new Error('Vite server not found')
-}
-
 async function startBackend() {
-  const port = await findAvailablePort()
-  console.log(`Starting backend on port ${port}`)
+  const port = FIXED_BACKEND_PORT
+  console.log(`Starting backend on fixed port ${port}`)
   
   const projectRoot = dirname(dirname(__dirname))
-  const env = { ...process.env, VELLUMA_PORT: port.toString() }
 
   backendProcess = spawn(pythonCmd, ['-m', 'backend.main'], {
     cwd: projectRoot,
-    env,
+    env: { ...process.env, VELLUMA_PORT: port.toString() },
     stdio: ['ignore', 'pipe', 'pipe']
   })
 
@@ -98,11 +70,11 @@ async function startBackend() {
 
 async function createWindow() {
   let backendPort = null
-  let vitePort = 5173
+  let vitePort = FIXED_VITE_PORT
 
   if (isDev) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      const csp = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
+      const csp = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"
       callback({
         responseHeaders: {
           ...details.responseHeaders,
@@ -112,10 +84,10 @@ async function createWindow() {
     })
 
     try {
-      vitePort = await findVitePort()
-      console.log(`Found Vite on port ${vitePort}`)
+      await waitForPort(FIXED_VITE_PORT, 2000)
+      console.log(`Found Vite on port ${FIXED_VITE_PORT}`)
     } catch (e) {
-      console.error('Vite server not found:', e)
+      console.error(`Vite server not found on port ${FIXED_VITE_PORT}, please start Vite first`)
     }
 
     try {
@@ -126,8 +98,8 @@ async function createWindow() {
   }
 
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1920,
+    height: 1080,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -136,7 +108,9 @@ async function createWindow() {
   })
 
   if (isDev) {
-    win.loadURL(`http://localhost:${vitePort}`)
+    const url = `http://localhost:${vitePort}?backendPort=${backendPort}`
+    console.log(`Loading URL: ${url}`)
+    win.loadURL(url)
     win.webContents.openDevTools()
   } else {
     win.loadFile(join(__dirname, '../dist/index.html'))

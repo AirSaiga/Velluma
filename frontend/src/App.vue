@@ -1,41 +1,59 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import EntityPanel from './components/EntityPanel.vue'
-import BeatEditor from './components/BeatEditor.vue'
-import ConfigPanel from './components/ConfigPanel.vue'
+import { ref, onMounted, watch } from 'vue'
+import CharacterPanel from './components/CharacterPanel.vue'
+import ChapterEditor from './components/ChapterEditor.vue'
+import BookConfigPanel from './components/BookConfigPanel.vue'
 import SettingsModal from './components/SettingsModal.vue'
-import { entityApi, beatApi, configApi, generateApi } from './composables/useApi'
+import { bookApi, characterApi, chapterApi, relationshipApi } from './composables/useApi'
 import { useTheme } from './composables/useTheme'
 
-// 设置弹窗状态
-const showSettings = ref(false)
-
-// 初始化主题
 const { initTheme } = useTheme()
 
-// 数据状态
-const entities = ref([])
-const beats = ref([])
-const config = ref({
+const books = ref([])
+const currentBookId = ref(null)
+const characters = ref([])
+const chapters = ref([])
+const relationships = ref([])
+const apiConfig = ref({
+  provider: 'openrouter',
   api_key: '',
   base_url: '',
-  model: 'gpt-4o-mini',
-  style: ''
+  model: 'google/gemini-2.0-flash-001'
 })
 const loading = ref(false)
+const showBookModal = ref(false)
+const showSettingsModal = ref(false)
+const bookForm = ref({ title: '', genre: '', global_sys_prompt: '' })
 
-// 加载数据
-async function loadData() {
+async function loadBooks() {
+  try {
+    books.value = await bookApi.getAll()
+    if (books.value.length > 0 && !currentBookId.value) {
+      currentBookId.value = books.value[0].id
+    }
+  } catch (error) {
+    console.error('加载书籍失败:', error)
+  }
+}
+
+async function loadCurrentBookData() {
+  if (!currentBookId.value) {
+    characters.value = []
+    chapters.value = []
+    relationships.value = []
+    return
+  }
+  
   loading.value = true
   try {
-    const [entitiesData, beatsData, configData] = await Promise.all([
-      entityApi.getAll(),
-      beatApi.getAll(),
-      configApi.get()
+    const [chars, chaps, rels] = await Promise.all([
+      characterApi.getAll(currentBookId.value),
+      chapterApi.getAll(currentBookId.value),
+      relationshipApi.getAll(currentBookId.value)
     ])
-    entities.value = entitiesData
-    beats.value = beatsData
-    config.value = { ...config.value, ...configData }
+    characters.value = chars
+    chapters.value = chaps
+    relationships.value = rels
   } catch (error) {
     console.error('加载数据失败:', error)
   } finally {
@@ -43,168 +61,297 @@ async function loadData() {
   }
 }
 
-// Entity 操作
-async function createEntity(data) {
+watch(currentBookId, loadCurrentBookData)
+
+async function createBook() {
+  if (!bookForm.value.title.trim()) return
   try {
-    const newEntity = await entityApi.create(data)
-    entities.value.push(newEntity)
+    const newBook = await bookApi.create({
+      ...bookForm.value,
+      global_sys_prompt: bookForm.value.global_sys_prompt || ''
+    })
+    books.value.push(newBook)
+    currentBookId.value = newBook.id
+    showBookModal.value = false
+    bookForm.value = { title: '', genre: '', global_sys_prompt: '' }
   } catch (error) {
     alert('创建失败: ' + error.message)
   }
 }
 
-async function updateEntity(id, data) {
+async function updateBook(data) {
+  if (!currentBookId.value) return
   try {
-    const updated = await entityApi.update(id, data)
-    const index = entities.value.findIndex(e => e.id === id)
+    const updated = await bookApi.update(currentBookId.value, data)
+    const index = books.value.findIndex(b => b.id === currentBookId.value)
     if (index !== -1) {
-      entities.value[index] = updated
+      books.value[index] = updated
+    }
+  } catch (error) {
+    console.error('更新失败:', error)
+  }
+}
+
+async function updateApiConfig(data) {
+  apiConfig.value = { ...apiConfig.value, ...data }
+  localStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
+}
+
+async function createCharacter(data) {
+  if (!currentBookId.value) {
+    alert('请先创建或选择一本书籍')
+    return
+  }
+  try {
+    const newChar = await characterApi.create({
+      ...data,
+      book_id: currentBookId.value
+    })
+    characters.value.push(newChar)
+  } catch (error) {
+    alert('创建失败: ' + error.message)
+  }
+}
+
+async function updateCharacter(id, data) {
+  try {
+    const updated = await characterApi.update(id, data)
+    const index = characters.value.findIndex(c => c.id === id)
+    if (index !== -1) {
+      characters.value[index] = updated
     }
   } catch (error) {
     alert('更新失败: ' + error.message)
   }
 }
 
-async function deleteEntity(id) {
+async function deleteCharacter(id) {
   try {
-    await entityApi.delete(id)
-    entities.value = entities.value.filter(e => e.id !== id)
+    await characterApi.delete(id)
+    characters.value = characters.value.filter(c => c.id !== id)
   } catch (error) {
     alert('删除失败: ' + error.message)
   }
 }
 
-// Beat 操作
-async function createBeat(data) {
+async function createRelationship(data) {
+  if (!currentBookId.value) {
+    alert('请先创建或选择一本书籍')
+    return
+  }
   try {
-    const newBeat = await beatApi.create(data)
-    beats.value.push(newBeat)
+    const newRel = await relationshipApi.create({
+      ...data,
+      book_id: currentBookId.value
+    })
+    relationships.value.push(newRel)
   } catch (error) {
     alert('创建失败: ' + error.message)
   }
 }
 
-async function updateBeat(id, data) {
+async function deleteRelationship(id) {
   try {
-    const updated = await beatApi.update(id, data)
-    const index = beats.value.findIndex(b => b.id === id)
+    await relationshipApi.delete(id)
+    relationships.value = relationships.value.filter(r => r.id !== id)
+  } catch (error) {
+    alert('删除失败: ' + error.message)
+  }
+}
+
+async function createChapter(data) {
+  if (!currentBookId.value) {
+    alert('请先创建或选择一本书籍')
+    return
+  }
+  try {
+    const newChapter = await chapterApi.create({
+      ...data,
+      book_id: currentBookId.value
+    })
+    chapters.value.push(newChapter)
+  } catch (error) {
+    alert('创建失败: ' + error.message)
+  }
+}
+
+async function updateChapter(id, data) {
+  try {
+    const updated = await chapterApi.update(id, data)
+    const index = chapters.value.findIndex(c => c.id === id)
     if (index !== -1) {
-      beats.value[index] = updated
+      chapters.value[index] = updated
     }
   } catch (error) {
     alert('更新失败: ' + error.message)
   }
 }
 
-async function deleteBeat(id) {
+async function deleteChapter(id) {
   try {
-    await beatApi.delete(id)
-    beats.value = beats.value.filter(b => b.id !== id)
+    await chapterApi.delete(id)
+    chapters.value = chapters.value.filter(c => c.id !== id)
   } catch (error) {
     alert('删除失败: ' + error.message)
   }
 }
 
-// 生成文本
-function generateText(beat, onChunk, onDone, onError) {
-  const requestData = {
-    beat: beat,
-    style: config.value.style,
-    api_key: config.value.api_key,
-    base_url: config.value.base_url || undefined,
-    model: config.value.model
-  }
-  
-  generateApi.stream(requestData, onChunk, onDone, onError)
-}
-
-// 保存生成的文本
-async function saveGeneratedText(beatId, text) {
+async function saveGeneratedContent(chapterId, content) {
   try {
-    const updated = await beatApi.update(beatId, { generated_text: text })
-    const index = beats.value.findIndex(b => b.id === beatId)
+    const updated = await chapterApi.update(chapterId, { content_text: content })
+    const index = chapters.value.findIndex(c => c.id === chapterId)
     if (index !== -1) {
-      beats.value[index] = updated
+      chapters.value[index] = updated
     }
   } catch (error) {
     console.error('保存失败:', error)
   }
 }
 
-// 配置更新
-async function updateConfig(newConfig) {
-  try {
-    const updated = await configApi.update(newConfig)
-    config.value = { ...config.value, ...updated }
-  } catch (error) {
-    alert('保存配置失败: ' + error.message)
-  }
+function getCurrentBook() {
+  return books.value.find(b => b.id === currentBookId.value)
 }
 
-// 初始化
 onMounted(async () => {
-  await loadData()
+  const savedConfig = localStorage.getItem('velluma_api_config')
+  if (savedConfig) {
+    apiConfig.value = JSON.parse(savedConfig)
+  }
+  await loadBooks()
   initTheme()
 })
 </script>
 
 <template>
   <div class="h-full w-full bg-[var(--bg-primary)] flex flex-col">
-    <!-- 顶部栏 -->
-    <div class="h-12 flex-shrink-0 flex items-center justify-end px-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-      <!-- 设置按钮 -->
+    <div class="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-bold text-[var(--text-primary)]">Velluma AI</h1>
+        
+        <div class="flex items-center gap-2 ml-6">
+          <select
+            :value="currentBookId"
+            @change="e => currentBookId = e.target.value"
+            class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 min-w-[160px]"
+          >
+            <option v-for="book in books" :key="book.id" :value="book.id">
+              {{ book.title }}
+            </option>
+          </select>
+          
+          <button
+            @click="showBookModal = true"
+            class="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded-lg transition-colors"
+            title="新建书籍"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
       <button
-        @click="showSettings = true"
-        class="flex items-center gap-2 px-3 py-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] transition-colors"
+        @click="showSettingsModal = true"
+        class="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded-lg transition-colors flex items-center gap-2 text-sm"
+        title="设置"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-        </svg>
-        <span class="text-sm font-medium">设置</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        <span>设置</span>
       </button>
     </div>
     
-    <!-- 主内容区 -->
     <div class="flex-1 flex min-h-0">
-      <!-- 左侧：设定库 -->
-      <div class="w-72 flex-shrink-0 h-full">
-        <EntityPanel
-          :entities="entities"
-          @create="createEntity"
-          @update="updateEntity"
-          @delete="deleteEntity"
-        />
-      </div>
-      
-      <!-- 中间：编辑器工作区 -->
-      <div class="flex-1 h-full min-w-0">
-        <BeatEditor
-          :beats="beats"
-          :entities="entities"
-          :config="config"
-          @create="createBeat"
-          @update="updateBeat"
-          @delete="deleteBeat"
-          @generate="generateText"
-          @save-generated="saveGeneratedText"
-        />
-      </div>
-      
-      <!-- 右侧：配置面板 -->
       <div class="w-80 flex-shrink-0 h-full">
-        <ConfigPanel
-          :config="{ style: config.style }"
-          @update="updateConfig"
+        <CharacterPanel
+          :characters="characters"
+          :relationships="relationships"
+          @create-character="createCharacter"
+          @update-character="updateCharacter"
+          @delete-character="deleteCharacter"
+          @create-relationship="createRelationship"
+          @delete-relationship="deleteRelationship"
+        />
+      </div>
+      
+      <div class="flex-1 h-full min-w-0">
+        <ChapterEditor
+          :chapters="chapters"
+          :characters="characters"
+          :api-config="apiConfig"
+          @create-chapter="createChapter"
+          @update-chapter="updateChapter"
+          @delete-chapter="deleteChapter"
+          @save-generated="saveGeneratedContent"
+        />
+      </div>
+      
+      <div class="w-80 flex-shrink-0 h-full">
+        <BookConfigPanel
+          :book-config="getCurrentBook() || {}"
+          @update-book-config="updateBook"
         />
       </div>
     </div>
     
-    <!-- 设置弹窗 -->
     <SettingsModal
-      :visible="showSettings"
-      :config="{ api_key: config.api_key, base_url: config.base_url, model: config.model }"
-      @close="showSettings = false"
-      @update="updateConfig"
+      :is-open="showSettingsModal"
+      :config="apiConfig"
+      @close="showSettingsModal = false"
+      @save="updateApiConfig"
     />
+    
+    <div v-if="showBookModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showBookModal = false">
+      <div class="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] p-6 w-full max-w-md mx-4">
+        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">新建书籍</h3>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">书名</label>
+            <input
+              v-model="bookForm.title"
+              type="text"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+              placeholder="输入书籍名称"
+            />
+          </div>
+          
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">类型</label>
+            <input
+              v-model="bookForm.genre"
+              type="text"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+              placeholder="如：科幻、奇幻、都市"
+            />
+          </div>
+          
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">全局提示词 (可选)</label>
+            <textarea
+              v-model="bookForm.global_sys_prompt"
+              rows="3"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-primary-500 resize-none"
+              placeholder="书籍的整体风格和基调..."
+            />
+          </div>
+        </div>
+        
+        <div class="flex justify-end gap-3 mt-6">
+          <button
+            @click="showBookModal = false"
+            class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            取消
+          </button>
+          <button
+            @click="createBook"
+            class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+          >
+            创建
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

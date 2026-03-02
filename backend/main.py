@@ -108,15 +108,6 @@ async def get_port():
     return {"port": ACTUAL_PORT}
 
 
-@app.get("/{path:path}")
-async def serve_static(path: str):
-    """服务静态文件"""
-    file_path = os.path.join(FRONTEND_DIST, path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-    return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
-
-
 @app.get("/api/books", response_model=List[BookResponse])
 async def get_books(
     db: AsyncSession = Depends(get_db),
@@ -451,6 +442,8 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
     Returns:
         dict: 包含 system_prompt 和 user_prompt 的字典
     """
+    print(f"[DEBUG] build_chapter_prompt: 开始构建, chapter_id={chapter_id}")
+    
     chapter_result = await db.execute(
         select(Chapter)
         .options(selectinload(Chapter.book))
@@ -458,7 +451,10 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
     )
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
+        print(f"[DEBUG] build_chapter_prompt: 章节不存在")
         raise HTTPException(status_code=404, detail="章节不存在")
+
+    print(f"[DEBUG] build_chapter_prompt: 找到章节: {chapter.title}")
 
     book = chapter.book
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -469,6 +465,7 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
         .where(ChapterEntity.chapter_id == chapter_id)
     )
     entities = entities_result.scalars().all()
+    print(f"[DEBUG] build_chapter_prompt: 找到 {len(entities)} 个实体")
 
     static_states = []
     dynamic_states = []
@@ -484,7 +481,9 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
                 dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
 
     relationships_result = await db.execute(
-        select(CharacterRelationship).where(
+        select(CharacterRelationship)
+        .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
+        .where(
             CharacterRelationship.source_char_id.in_(character_ids),
             CharacterRelationship.target_char_id.in_(character_ids)
         )
@@ -523,6 +522,8 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
 
 请直接输出小说正文，不需要任何额外说明或标记。"""
 
+    print(f"[DEBUG] build_chapter_prompt: 构建完成")
+    
     return {
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
@@ -530,31 +531,37 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
     }
 
 
-async def generate_stream_response(chapter_id: UUID, api_key: str, base_url: Optional[str], model: str, db: AsyncSession):
+async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str):
     """
     生成 SSE 流式响应的异步生成器
 
     Args:
-        chapter_id: 章节ID
+        system_prompt: 系统提示词
+        user_prompt: 用户提示词
         api_key: OpenAI API Key
         base_url: 自定义 API 端点
         model: 使用的模型名称
-        db: 数据库会话
 
     Yields:
         SSE 格式的文本片段
     """
-    prompt_data = await build_chapter_prompt(chapter_id, db)
-    system_prompt = prompt_data["system_prompt"]
-    user_prompt = prompt_data["user_prompt"]
-
-    client_kwargs = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
-
-    client = AsyncOpenAI(**client_kwargs)
-
+    import os
+    import traceback
+    print(f"[DEBUG] generate_stream_response: 开始生成, model={model}, base_url={base_url}")
+    print(f"[DEBUG] api_key 前5位: {api_key[:5] if api_key else 'None'}")
+    print(f"[DEBUG] 环境变量检查: HTTP_PROXY={os.environ.get('HTTP_PROXY')}, HTTPS_PROXY={os.environ.get('HTTPS_PROXY')}, ALL_PROXY={os.environ.get('ALL_PROXY')}")
+    
     try:
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+
+        print(f"[DEBUG] client_kwargs: {list(client_kwargs.keys())}")
+        
+        print(f"[DEBUG] 即将创建 AsyncOpenAI...")
+        client = AsyncOpenAI(**client_kwargs)
+        print(f"[DEBUG] AsyncOpenAI 创建成功")
+
         stream = await client.chat.completions.create(
             model=model,
             messages=[
@@ -565,16 +572,23 @@ async def generate_stream_response(chapter_id: UUID, api_key: str, base_url: Opt
             temperature=0.7,
             max_tokens=4000
         )
+        print(f"[DEBUG] generate_stream_response: API 调用成功, 开始流式输出...")
 
+        chunk_count = 0
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
+                chunk_count += 1
                 yield f"data: {json.dumps({'content': content}, ensure_ascii=False)}\n\n"
 
+        print(f"[DEBUG] generate_stream_response: 流式输出完成, 共 {chunk_count} 个 chunks")
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
     except Exception as e:
+        import traceback
         error_msg = str(e)
+        traceback.print_exc()
+        print(f"[DEBUG] generate_stream_response: 发生异常: {error_msg}")
         yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
@@ -592,33 +606,54 @@ async def generate_chapter(
     Prompt 组装公式:
     Prompt_Total = F_Sys_Global + F_Static_State + F_Dynamic_State + F_Relationships + F_Task_Outline
     """
+    print(f"[DEBUG] generate_chapter: 开始处理章节 {request.chapter_id}")
+    
     chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
+        print(f"[DEBUG] generate_chapter: 章节不存在 {request.chapter_id}")
         raise HTTPException(status_code=404, detail="章节不存在")
 
+    print(f"[DEBUG] generate_chapter: 正在构建 Prompt...")
+    prompt_data = await build_chapter_prompt(request.chapter_id, db)
+    print(f"[DEBUG] generate_chapter: Prompt 构建完成, system_prompt 长度: {len(prompt_data['system_prompt'])}, user_prompt 长度: {len(prompt_data['user_prompt'])}")
+
+    print(f"[DEBUG] generate_chapter: 开始流式响应...")
     return StreamingResponse(
         generate_stream_response(
-            chapter_id=request.chapter_id,
+            system_prompt=prompt_data["system_prompt"],
+            user_prompt=prompt_data["user_prompt"],
             api_key=request.api_key,
             base_url=request.base_url,
-            model=request.model,
-            db=db
+            model=request.model
         ),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
+
+
+@app.get("/{path:path}")
+async def serve_static(path: str):
+    """服务静态文件"""
+    # 显式禁止 API 路径回退到 index.html，避免混淆
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+
+    file_path = os.path.join(FRONTEND_DIST, path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    env_port = os.environ.get('VELLUMA_PORT')
-    if env_port:
-        port = int(env_port)
-        print(f"🚀 使用环境变量指定的端口: {port}")
-    else:
-        port = 0
-        print(f"🚀 使用动态端口分配")
+    port = 8002
+    print(f"🚀 后端服务启动，固定端口: {port}")
 
     config = uvicorn.Config(app, host="127.0.0.1", port=port)
     server = uvicorn.Server(config)

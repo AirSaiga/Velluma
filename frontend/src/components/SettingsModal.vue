@@ -1,255 +1,208 @@
 <script setup>
-import { ref, watch } from 'vue'
-import { useTheme } from '../composables/useTheme'
+import { ref, watch, computed } from 'vue'
 
 const props = defineProps({
-  visible: {
+  isOpen: {
     type: Boolean,
     default: false
   },
   config: {
     type: Object,
     default: () => ({
+      provider: 'openrouter',
       api_key: '',
-      base_url: '',
-      model: 'gpt-4o-mini'
+      base_url: 'https://openrouter.ai/api/v1',
+      model: 'google/gemini-2.0-flash-001'
     })
   }
 })
 
-const emit = defineEmits(['close', 'update'])
+const emit = defineEmits(['close', 'save'])
 
-const { theme, setTheme } = useTheme()
-
-const localConfig = ref({ ...props.config })
-
-watch(() => props.config, (newConfig) => {
-  localConfig.value = { ...newConfig }
-}, { deep: true })
-
-const modelPresets = [
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
-]
-
-function handleThemeChange(newTheme) {
-  setTheme(newTheme)
+const PROVIDERS = {
+  openrouter: {
+    name: 'OpenRouter (推荐)',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: [
+      'google/gemini-2.0-flash-001',
+      'openai/gpt-4o-mini',
+      'anthropic/claude-3-haiku',
+      'meta-llama/llama-3-8b-instruct'
+    ]
+  },
+  openai: {
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo']
+  },
+  deepseek: {
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    models: ['deepseek-chat', 'deepseek-reasoner']
+  },
+  custom: {
+    name: '自定义 / Custom',
+    baseUrl: '',
+    models: []
+  }
 }
 
-function handleMaskClick() {
+const formData = ref({
+  provider: 'openrouter',
+  api_key: '',
+  base_url: '',
+  model: ''
+})
+
+const isManualModel = ref(false)
+
+// 当打开模态框时，初始化表单数据
+watch(() => props.isOpen, (newVal) => {
+  if (newVal) {
+    formData.value = { ...props.config }
+    // 如果没有 provider 字段（旧数据），尝试根据 base_url 推断或默认为 custom
+    if (!formData.value.provider) {
+      const match = Object.entries(PROVIDERS).find(([key, p]) => p.baseUrl === formData.value.base_url)
+      formData.value.provider = match ? match[0] : 'custom'
+    }
+    
+    // 检查当前模型是否在预定义列表中，如果不在，切换到手动模式
+    const provider = PROVIDERS[formData.value.provider]
+    if (provider && provider.models.length > 0 && !provider.models.includes(formData.value.model)) {
+      isManualModel.value = true
+    } else {
+      isManualModel.value = false
+    }
+  }
+})
+
+const currentProvider = computed(() => PROVIDERS[formData.value.provider] || PROVIDERS.custom)
+const isCustomProvider = computed(() => formData.value.provider === 'custom')
+
+function handleProviderChange() {
+  const provider = PROVIDERS[formData.value.provider]
+  if (provider && formData.value.provider !== 'custom') {
+    formData.value.base_url = provider.baseUrl
+    // 切换服务商时，重置手动模式并选中第一个模型
+    isManualModel.value = false
+    if (provider.models.length > 0) {
+      formData.value.model = provider.models[0]
+    } else {
+      formData.value.model = ''
+    }
+  }
+}
+
+function handleSave() {
+  emit('save', { ...formData.value })
   emit('close')
-}
-
-function saveConfig() {
-  emit('update', { ...localConfig.value })
 }
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="fade">
-      <div
-        v-if="visible"
-        class="fixed inset-0 z-50 flex items-center justify-center"
-      >
-        <!-- 遮罩层 -->
-        <div
-          class="absolute inset-0 bg-black/50"
-          @click="handleMaskClick"
-        ></div>
-
-        <!-- 弹窗内容 -->
-        <div
-          class="relative w-full max-w-md mx-4 rounded-xl shadow-xl"
-          :class="theme === 'dark' ? 'bg-slate-800' : 'bg-white'"
+  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div class="bg-[var(--bg-secondary)] rounded-xl shadow-2xl w-full max-w-lg border border-[var(--border-color)] flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
+        <h2 class="text-lg font-semibold text-[var(--text-primary)]">API 设置</h2>
+        <button 
+          @click="$emit('close')"
+          class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         >
-          <!-- 头部 -->
-          <div
-            class="flex items-center justify-between p-4 border-b"
-            :class="theme === 'dark' ? 'border-slate-700' : 'border-slate-200'"
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-6 space-y-5 overflow-y-auto">
+        <!-- Provider Select -->
+        <div>
+          <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">服务商</label>
+          <select
+            v-model="formData.provider"
+            @change="handleProviderChange"
+            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
           >
-            <h2
-              class="text-lg font-semibold"
-              :class="theme === 'dark' ? 'text-slate-100' : 'text-slate-800'"
+            <option v-for="(p, key) in PROVIDERS" :key="key" :value="key">
+              {{ p.name }}
+            </option>
+          </select>
+        </div>
+
+        <!-- API Key -->
+        <div>
+          <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">API Key</label>
+          <input
+            v-model="formData.api_key"
+            type="password"
+            placeholder="sk-..."
+            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+          />
+          <p class="mt-1 text-xs text-[var(--text-muted)]">
+            您的 API Key 仅存储在本地浏览器中，不会上传到服务器。
+          </p>
+        </div>
+
+        <!-- Base URL -->
+        <div>
+          <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">Base URL</label>
+          <input
+            v-model="formData.base_url"
+            type="text"
+            :placeholder="isCustomProvider ? 'https://api.example.com/v1' : ''"
+            :readonly="!isCustomProvider"
+            :class="['w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500', !isCustomProvider && 'opacity-75 cursor-not-allowed']"
+          />
+        </div>
+
+        <!-- Model -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-sm font-medium text-[var(--text-primary)]">模型</label>
+            <button 
+              v-if="!isCustomProvider && currentProvider.models.length > 0"
+              @click="isManualModel = !isManualModel"
+              class="text-xs text-primary-600 hover:text-primary-700 font-medium transition-colors"
             >
-              设置
-            </h2>
-            <button
-              @click="emit('close')"
-              class="p-1 rounded-lg transition-colors"
-              :class="theme === 'dark' 
-                ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' 
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              {{ isManualModel ? '从列表选择' : '手动输入' }}
             </button>
           </div>
-
-          <!-- 内容区 -->
-          <div class="p-4 space-y-6">
-            <!-- 主题设置 -->
-            <div class="space-y-3">
-              <h3
-                class="text-sm font-medium"
-                :class="theme === 'dark' ? 'text-slate-300' : 'text-slate-700'"
-              >
-                主题
-              </h3>
-              <div class="flex gap-3">
-                <!-- 浅色主题选项 -->
-                <button
-                  @click="handleThemeChange('light')"
-                  class="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all"
-                  :class="theme === 'light'
-                    ? 'border-primary-500 bg-primary-500/10'
-                    : theme === 'dark' 
-                      ? 'border-slate-600 bg-slate-700 hover:border-slate-500' 
-                      : 'border-slate-300 bg-slate-50 hover:border-slate-400'"
-                >
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                  </svg>
-                  <span
-                    class="text-sm font-medium"
-                    :class="theme === 'light' 
-                      ? 'text-primary-600' 
-                      : theme === 'dark' 
-                        ? 'text-slate-300' 
-                        : 'text-slate-700'"
-                  >
-                    浅色
-                  </span>
-                </button>
-
-                <!-- 深色主题选项 -->
-                <button
-                  @click="handleThemeChange('dark')"
-                  class="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all"
-                  :class="theme === 'dark'
-                    ? 'border-primary-500 bg-primary-500/10'
-                    : 'border-slate-300 bg-slate-50 hover:border-slate-400'"
-                >
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                  </svg>
-                  <span
-                    class="text-sm font-medium"
-                    :class="theme === 'dark' 
-                      ? 'text-primary-400' 
-                      : 'text-slate-700'"
-                  >
-                    深色
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <!-- API 配置 -->
-            <div class="space-y-3">
-              <h3
-                class="text-sm font-medium"
-                :class="theme === 'dark' ? 'text-slate-300' : 'text-slate-700'"
-              >
-                API 配置
-              </h3>
-              
-              <div>
-                <label 
-                  class="block text-xs mb-1.5"
-                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
-                >
-                  API Key
-                  <span class="text-rose-500">*</span>
-                </label>
-                <input
-                  v-model="localConfig.api_key"
-                  type="password"
-                  @blur="saveConfig"
-                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
-                  :class="theme === 'dark' 
-                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
-                    : 'bg-white border-slate-300 text-slate-800'"
-                  placeholder="sk-..."
-                />
-              </div>
-              
-              <div>
-                <label 
-                  class="block text-xs mb-1.5"
-                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
-                >
-                  Base URL (可选)
-                </label>
-                <input
-                  v-model="localConfig.base_url"
-                  type="text"
-                  @blur="saveConfig"
-                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
-                  :class="theme === 'dark' 
-                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
-                    : 'bg-white border-slate-300 text-slate-800'"
-                  placeholder="https://api.openai.com/v1"
-                />
-              </div>
-              
-              <div>
-                <label 
-                  class="block text-xs mb-1.5"
-                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
-                >
-                  模型
-                </label>
-                <div class="space-y-2">
-                  <input
-                    v-model="localConfig.model"
-                    type="text"
-                    @blur="saveConfig"
-                    @keyup.enter="saveConfig"
-                    class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
-                    :class="theme === 'dark' 
-                      ? 'bg-slate-700 border-slate-600 text-slate-100' 
-                      : 'bg-white border-slate-300 text-slate-800'"
-                    placeholder="输入模型名称，如 gpt-4o-mini"
-                  />
-                  <div class="flex flex-wrap gap-1.5">
-                    <button
-                      v-for="preset in modelPresets"
-                      :key="preset.value"
-                      @click="localConfig.model = preset.value; saveConfig()"
-                      class="px-2 py-1 text-xs rounded border transition-all"
-                      :class="localConfig.model === preset.value
-                        ? (theme === 'dark' 
-                            ? 'border-primary-500 bg-primary-500/20 text-primary-400' 
-                            : 'border-primary-500 bg-primary-50 text-primary-600')
-                        : (theme === 'dark'
-                            ? 'border-slate-600 bg-slate-700 text-slate-300 hover:border-slate-500'
-                            : 'border-slate-300 bg-slate-50 text-slate-600 hover:border-slate-400')"
-                    >
-                      {{ preset.label }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          
+          <div v-if="!isCustomProvider && currentProvider.models.length > 0 && !isManualModel">
+            <select
+              v-model="formData.model"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            >
+              <option v-for="m in currentProvider.models" :key="m" :value="m">
+                {{ m }}
+              </option>
+            </select>
           </div>
+          <input
+            v-else
+            v-model="formData.model"
+            type="text"
+            placeholder="例如: gpt-4o"
+            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+          />
         </div>
       </div>
-    </Transition>
-  </Teleport>
+
+      <!-- Footer -->
+      <div class="p-4 border-t border-[var(--border-color)] flex justify-end space-x-3">
+        <button 
+          @click="$emit('close')"
+          class="px-4 py-2 text-sm font-medium text-[var(--text-primary)] bg-transparent hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+        >
+          取消
+        </button>
+        <button 
+          @click="handleSave"
+          class="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors"
+        >
+          保存设置
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-</style>
