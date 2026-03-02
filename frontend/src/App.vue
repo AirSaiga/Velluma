@@ -193,7 +193,7 @@ onMounted(async () => {
       <!-- 右侧：配置面板 -->
       <div class="w-80 flex-shrink-0 h-full">
         <ConfigPanel
-          :config="config"
+          :config="{ style: config.style }"
           @update="updateConfig"
         />
       </div>
@@ -202,7 +202,9 @@ onMounted(async () => {
     <!-- 设置弹窗 -->
     <SettingsModal
       :visible="showSettings"
+      :config="{ api_key: config.api_key, base_url: config.base_url, model: config.model }"
       @close="showSettings = false"
+      @update="updateConfig"
     />
   </div>
 </template>

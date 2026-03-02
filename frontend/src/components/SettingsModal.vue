@@ -1,16 +1,38 @@
 <script setup>
+import { ref, watch } from 'vue'
 import { useTheme } from '../composables/useTheme'
 
-defineProps({
+const props = defineProps({
   visible: {
     type: Boolean,
     default: false
+  },
+  config: {
+    type: Object,
+    default: () => ({
+      api_key: '',
+      base_url: '',
+      model: 'gpt-4o-mini'
+    })
   }
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'update'])
 
 const { theme, setTheme } = useTheme()
+
+const localConfig = ref({ ...props.config })
+
+watch(() => props.config, (newConfig) => {
+  localConfig.value = { ...newConfig }
+}, { deep: true })
+
+const models = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+]
 
 function handleThemeChange(newTheme) {
   setTheme(newTheme)
@@ -18,6 +40,10 @@ function handleThemeChange(newTheme) {
 
 function handleMaskClick() {
   emit('close')
+}
+
+function saveConfig() {
+  emit('update', { ...localConfig.value })
 }
 </script>
 
@@ -64,7 +90,7 @@ function handleMaskClick() {
           </div>
 
           <!-- 内容区 -->
-          <div class="p-4">
+          <div class="p-4 space-y-6">
             <!-- 主题设置 -->
             <div class="space-y-3">
               <h3
@@ -119,6 +145,76 @@ function handleMaskClick() {
                     深色
                   </span>
                 </button>
+              </div>
+            </div>
+
+            <!-- API 配置 -->
+            <div class="space-y-3">
+              <h3
+                class="text-sm font-medium"
+                :class="theme === 'dark' ? 'text-slate-300' : 'text-slate-700'"
+              >
+                API 配置
+              </h3>
+              
+              <div>
+                <label 
+                  class="block text-xs mb-1.5"
+                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
+                >
+                  API Key
+                  <span class="text-rose-500">*</span>
+                </label>
+                <input
+                  v-model="localConfig.api_key"
+                  type="password"
+                  @blur="saveConfig"
+                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
+                  :class="theme === 'dark' 
+                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
+                    : 'bg-white border-slate-300 text-slate-800'"
+                  placeholder="sk-..."
+                />
+              </div>
+              
+              <div>
+                <label 
+                  class="block text-xs mb-1.5"
+                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
+                >
+                  Base URL (可选)
+                </label>
+                <input
+                  v-model="localConfig.base_url"
+                  type="text"
+                  @blur="saveConfig"
+                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
+                  :class="theme === 'dark' 
+                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
+                    : 'bg-white border-slate-300 text-slate-800'"
+                  placeholder="https://api.openai.com/v1"
+                />
+              </div>
+              
+              <div>
+                <label 
+                  class="block text-xs mb-1.5"
+                  :class="theme === 'dark' ? 'text-slate-400' : 'text-slate-600'"
+                >
+                  模型
+                </label>
+                <select
+                  v-model="localConfig.model"
+                  @change="saveConfig"
+                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
+                  :class="theme === 'dark' 
+                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
+                    : 'bg-white border-slate-300 text-slate-800'"
+                >
+                  <option v-for="model in models" :key="model.value" :value="model.value">
+                    {{ model.label }}
+                  </option>
+                </select>
               </div>
             </div>
           </div>
