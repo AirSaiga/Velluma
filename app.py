@@ -19,7 +19,8 @@ BACKEND_URL = None  # 将在启动时动态生成
 
 # 开发模式配置 - 如果前端正在开发中，设置为 True 以使用 Vite 开发服务器
 DEV_MODE = False
-DEV_FRONTEND_URL = "http://localhost:5173"
+# 支持多个常见的 Vite 开发服务器端口
+DEV_FRONTEND_URLS = ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:3000"]
 
 # 窗口配置
 WINDOW_TITLE = "Velluma AI 小说写作助手"
@@ -90,14 +91,36 @@ def wait_for_backend(timeout: int = 30) -> bool:
     return False
 
 
+def find_dev_server():
+    """
+    查找可用的 Vite 开发服务器
+    """
+    import urllib.request
+    for url in DEV_FRONTEND_URLS:
+        try:
+            response = urllib.request.urlopen(f"{url}/", timeout=1)
+            if response.status == 200:
+                return url
+        except Exception:
+            continue
+    return None
+
+
 def create_window():
     """
     创建桌面窗口
     """
     # 确定要加载的 URL
     if DEV_MODE:
-        url = DEV_FRONTEND_URL
-        print(f"🚀 开发模式: 连接到前端开发服务器 {url}")
+        dev_url = find_dev_server()
+        if dev_url:
+            url = dev_url
+            print(f"🚀 开发模式: 连接到前端开发服务器 {url}")
+        else:
+            print(f"⚠️  开发模式: 未找到可用的前端开发服务器")
+            print(f"   请确保前端开发服务器已启动 (npm run dev)")
+            print(f"   尝试过的端口: {', '.join(DEV_FRONTEND_URLS)}")
+            url = BACKEND_URL
     else:
         url = BACKEND_URL
         print(f"🚀 生产模式: 连接到后端服务 {url}")

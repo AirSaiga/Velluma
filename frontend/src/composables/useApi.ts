@@ -3,28 +3,11 @@
  * 提供 Entity、Beat 和 Config 的 CRUD 操作
  */
 
-let API_BASE = '/api'
-let API_PORT: number | null = null
-
-/**
- * 初始化 API，获取后端端口号
- */
-export async function initApi(): Promise<void> {
-  try {
-    const response = await fetch('/api/port')
-    const data = await response.json() as { port: number }
-    if (data.port) {
-      API_PORT = data.port
-      API_BASE = `http://localhost:${data.port}/api`
-      console.log(`API 已初始化，端口: ${data.port}`)
-    }
-  } catch (e) {
-    console.warn('无法获取端口号，使用默认相对路径')
-  }
-}
+const API_BASE = '/api'
 
 /**
  * 通用 fetch 封装
+ * 使用 Vite 代理，相对路径会自动转发到后端
  */
 async function fetchApi<T = any>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {

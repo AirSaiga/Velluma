@@ -3,6 +3,11 @@ FastAPI 核心接口与路由
 提供 Entity 和 Beat 的 CRUD 操作，以及 AI 生成功能
 """
 
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 import json
 import os
 from datetime import datetime
@@ -362,13 +367,17 @@ async def serve_static(path: str):
 if __name__ == "__main__":
     import uvicorn
     
-    # 使用动态端口 (port=0 让系统分配)
-    config = uvicorn.Config(app, host="127.0.0.1", port=0)
+    env_port = os.environ.get('VELLUMA_PORT')
+    if env_port:
+        port = int(env_port)
+        print(f"🚀 使用环境变量指定的端口: {port}")
+    else:
+        port = 0
+        print(f"🚀 使用动态端口分配")
+    
+    config = uvicorn.Config(app, host="127.0.0.1", port=port)
     server = uvicorn.Server(config)
     
-    # 获取实际分配的端口并保存
-    save_port(server.config.port)
-    print(f"后端服务启动，端口: {server.config.port}")
+    print(f"✅ 后端服务启动")
     
-    # 启动服务器
     server.run()

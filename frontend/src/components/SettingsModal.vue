@@ -27,7 +27,7 @@ watch(() => props.config, (newConfig) => {
   localConfig.value = { ...newConfig }
 }, { deep: true })
 
-const models = [
+const modelPresets = [
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
@@ -203,18 +203,36 @@ function saveConfig() {
                 >
                   模型
                 </label>
-                <select
-                  v-model="localConfig.model"
-                  @change="saveConfig"
-                  class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
-                  :class="theme === 'dark' 
-                    ? 'bg-slate-700 border-slate-600 text-slate-100' 
-                    : 'bg-white border-slate-300 text-slate-800'"
-                >
-                  <option v-for="model in models" :key="model.value" :value="model.value">
-                    {{ model.label }}
-                  </option>
-                </select>
+                <div class="space-y-2">
+                  <input
+                    v-model="localConfig.model"
+                    type="text"
+                    @blur="saveConfig"
+                    @keyup.enter="saveConfig"
+                    class="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:border-primary-500"
+                    :class="theme === 'dark' 
+                      ? 'bg-slate-700 border-slate-600 text-slate-100' 
+                      : 'bg-white border-slate-300 text-slate-800'"
+                    placeholder="输入模型名称，如 gpt-4o-mini"
+                  />
+                  <div class="flex flex-wrap gap-1.5">
+                    <button
+                      v-for="preset in modelPresets"
+                      :key="preset.value"
+                      @click="localConfig.model = preset.value; saveConfig()"
+                      class="px-2 py-1 text-xs rounded border transition-all"
+                      :class="localConfig.model === preset.value
+                        ? (theme === 'dark' 
+                            ? 'border-primary-500 bg-primary-500/20 text-primary-400' 
+                            : 'border-primary-500 bg-primary-50 text-primary-600')
+                        : (theme === 'dark'
+                            ? 'border-slate-600 bg-slate-700 text-slate-300 hover:border-slate-500'
+                            : 'border-slate-300 bg-slate-50 text-slate-600 hover:border-slate-400')"
+                    >
+                      {{ preset.label }}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
