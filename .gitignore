@@ -17,6 +17,7 @@ htmlcov/
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
+.env.example
 
 # 环境
 .env

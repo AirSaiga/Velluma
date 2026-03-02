@@ -1,6 +1,12 @@
 """
 FastAPI 核心接口与路由
-提供 Entity 和 Beat 的 CRUD 操作，以及 AI 生成功能
+StoryWeaver-Core 长篇小说特化 AI 写作平台后端 API
+
+包含:
+- 叙事主干系统 CRUD (Book, Chapter)
+- 世界观与关系图谱 CRUD (Character, CharacterRelationship)
+- 向量记忆 CRUD (MemoryChunk)
+- 核心 AI 章节生成引擎 (generate_chapter)
 """
 
 import sys
@@ -10,31 +16,32 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import json
 import os
-from datetime import datetime
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException
+from uuid import UUID
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from openai import AsyncOpenAI
 
-from backend.models import (
-    Entity, EntityCreate, EntityUpdate,
-    Beat, BeatCreate, BeatUpdate,
-    GenerateRequest, Config
+from backend.database import get_db, init_db
+from backend.models import Book, Chapter, Character, CharacterRelationship, MemoryChunk, ChapterEntity
+from backend.schemas import (
+    BookCreate, BookUpdate, BookResponse,
+    ChapterCreate, ChapterUpdate, ChapterResponse,
+    CharacterCreate, CharacterUpdate, CharacterResponse,
+    RelationshipCreate, RelationshipResponse,
+    MemoryChunkCreate, MemoryChunkResponse,
+    GenerateChapterRequest,
+    ChapterEntityCreate
 )
-from backend.ai_service import get_ai_service
 
-
-# 数据文件路径
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-ENTITIES_FILE = os.path.join(DATA_DIR, "entities.json")
-BEATS_FILE = os.path.join(DATA_DIR, "beats.json")
-CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 PORT_FILE = os.path.join(DATA_DIR, "port.txt")
-
-# 全局变量存储实际端口号
 ACTUAL_PORT = None
 
-# 确保数据目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
@@ -57,14 +64,12 @@ def load_port() -> Optional[int]:
     return None
 
 
-# 初始化 FastAPI 应用
 app = FastAPI(
-    title="Velluma AI 小说写作助手",
-    description="专为 AI 长篇小说写作特化的桌面应用后端 API",
-    version="0.1.0"
+    title="StoryWeaver-Core API",
+    description="长篇小说特化 AI 写作平台后端引擎",
+    version="1.0.0"
 )
 
-# 配置 CORS (允许前端跨域访问)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -73,11 +78,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 静态文件配置
 FRONTEND_DIST = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), 
+    os.path.dirname(os.path.dirname(__file__)),
     "frontend", "dist"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时初始化数据库"""
+    await init_db()
 
 
 @app.get("/")
@@ -86,263 +96,10 @@ async def serve_index():
     return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 
-# ==================== 数据持久化辅助函数 ====================
-
-def load_json_file(filepath: str, default: list) -> list:
-    """加载 JSON 文件，如果不存在则返回默认值"""
-    if not os.path.exists(filepath):
-        return default
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return default
-
-
-def save_json_file(filepath: str, data: list):
-    """保存数据到 JSON 文件"""
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def load_entities() -> List[Entity]:
-    """加载所有实体"""
-    data = load_json_file(ENTITIES_FILE, [])
-    return [Entity(**item) for item in data]
-
-
-def save_entities(entities: List[Entity]):
-    """保存所有实体"""
-    data = [entity.model_dump() for entity in entities]
-    save_json_file(ENTITIES_FILE, data)
-
-
-def load_beats() -> List[Beat]:
-    """加载所有节拍"""
-    data = load_json_file(BEATS_FILE, [])
-    return [Beat(**item) for item in data]
-
-
-def save_beats(beats: List[Beat]):
-    """保存所有节拍"""
-    data = [beat.model_dump() for beat in beats]
-    save_json_file(BEATS_FILE, data)
-
-
-def load_config() -> Config:
-    """加载配置"""
-    data = load_json_file(CONFIG_FILE, {})
-    if isinstance(data, list):
-        data = {}
-    return Config(**data)
-
-
-def save_config(config: Config):
-    """保存配置"""
-    save_json_file(CONFIG_FILE, config.model_dump())
-
-
-# ==================== Entity API ====================
-
-@app.get("/api/entities", response_model=List[Entity])
-async def get_entities():
-    """获取所有实体列表"""
-    return load_entities()
-
-
-@app.get("/api/entities/{entity_id}", response_model=Entity)
-async def get_entity(entity_id: str):
-    """获取单个实体详情"""
-    entities = load_entities()
-    for entity in entities:
-        if entity.id == entity_id:
-            return entity
-    raise HTTPException(status_code=404, detail="实体不存在")
-
-
-@app.post("/api/entities", response_model=Entity)
-async def create_entity(entity_create: EntityCreate):
-    """创建新实体"""
-    entities = load_entities()
-    
-    new_entity = Entity(
-        name=entity_create.name,
-        type=entity_create.type,
-        description=entity_create.description
-    )
-    
-    entities.append(new_entity)
-    save_entities(entities)
-    
-    return new_entity
-
-
-@app.put("/api/entities/{entity_id}", response_model=Entity)
-async def update_entity(entity_id: str, entity_update: EntityUpdate):
-    """更新实体"""
-    entities = load_entities()
-    
-    for i, entity in enumerate(entities):
-        if entity.id == entity_id:
-            update_data = entity_update.model_dump(exclude_unset=True)
-            update_data["updated_at"] = datetime.now().isoformat()
-            
-            for key, value in update_data.items():
-                setattr(entity, key, value)
-            
-            entities[i] = entity
-            save_entities(entities)
-            return entity
-    
-    raise HTTPException(status_code=404, detail="实体不存在")
-
-
-@app.delete("/api/entities/{entity_id}")
-async def delete_entity(entity_id: str):
-    """删除实体"""
-    entities = load_entities()
-    
-    for i, entity in enumerate(entities):
-        if entity.id == entity_id:
-            entities.pop(i)
-            save_entities(entities)
-            return {"message": "实体已删除", "id": entity_id}
-    
-    raise HTTPException(status_code=404, detail="实体不存在")
-
-
-# ==================== Beat API ====================
-
-@app.get("/api/beats", response_model=List[Beat])
-async def get_beats():
-    """获取所有节拍列表 (按 order 排序)"""
-    beats = load_beats()
-    return sorted(beats, key=lambda x: x.order)
-
-
-@app.get("/api/beats/{beat_id}", response_model=Beat)
-async def get_beat(beat_id: str):
-    """获取单个节拍详情"""
-    beats = load_beats()
-    for beat in beats:
-        if beat.id == beat_id:
-            return beat
-    raise HTTPException(status_code=404, detail="节拍不存在")
-
-
-@app.post("/api/beats", response_model=Beat)
-async def create_beat(beat_create: BeatCreate):
-    """创建新节拍"""
-    beats = load_beats()
-    
-    # 如果没有指定 order，自动设置为最大值+1
-    order = beat_create.order
-    if order == 0 and beats:
-        order = max(b.order for b in beats) + 1
-    
-    new_beat = Beat(
-        order=order,
-        instruction=beat_create.instruction,
-        entity_ids=beat_create.entity_ids
-    )
-    
-    beats.append(new_beat)
-    save_beats(beats)
-    
-    return new_beat
-
-
-@app.put("/api/beats/{beat_id}", response_model=Beat)
-async def update_beat(beat_id: str, beat_update: BeatUpdate):
-    """更新节拍"""
-    beats = load_beats()
-    
-    for i, beat in enumerate(beats):
-        if beat.id == beat_id:
-            update_data = beat_update.model_dump(exclude_unset=True)
-            update_data["updated_at"] = datetime.now().isoformat()
-            
-            for key, value in update_data.items():
-                setattr(beat, key, value)
-            
-            beats[i] = beat
-            save_beats(beats)
-            return beat
-    
-    raise HTTPException(status_code=404, detail="节拍不存在")
-
-
-@app.delete("/api/beats/{beat_id}")
-async def delete_beat(beat_id: str):
-    """删除节拍"""
-    beats = load_beats()
-    
-    for i, beat in enumerate(beats):
-        if beat.id == beat_id:
-            beats.pop(i)
-            save_beats(beats)
-            return {"message": "节拍已删除", "id": beat_id}
-    
-    raise HTTPException(status_code=404, detail="节拍不存在")
-
-
-# ==================== AI 生成 API ====================
-
-@app.post("/api/generate")
-async def generate_text(request: GenerateRequest):
-    """
-    流式生成小说正文
-    
-    接收当前 Beat 和全局 style，返回 SSE 流式响应
-    """
-    # 加载所有实体
-    all_entities = {e.id: e for e in load_entities()}
-    
-    # 获取当前 Beat 引用的实体
-    referenced_entities = [
-        all_entities.get(eid) for eid in request.beat.entity_ids
-        if eid in all_entities
-    ]
-    
-    # 获取 AI 服务实例
-    ai_service = get_ai_service(
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model
-    )
-    
-    # 返回流式响应
-    return StreamingResponse(
-        ai_service.generate_stream(
-            beat=request.beat,
-            entities=referenced_entities,
-            style=request.style
-        ),
-        media_type="text/event-stream"
-    )
-
-
-# ==================== Config API ====================
-
-@app.get("/api/config", response_model=Config)
-async def get_config():
-    """获取应用配置"""
-    return load_config()
-
-
-@app.post("/api/config", response_model=Config)
-async def update_config(config: Config):
-    """更新应用配置"""
-    save_config(config)
-    return config
-
-
-# ==================== 健康检查 ====================
-
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "service": "Velluma AI"}
+    return {"status": "ok", "service": "StoryWeaver-Core"}
 
 
 @app.get("/api/port")
@@ -351,22 +108,510 @@ async def get_port():
     return {"port": ACTUAL_PORT}
 
 
-# ==================== 静态文件服务 (SPA 支持) ====================
-
 @app.get("/{path:path}")
 async def serve_static(path: str):
-    """服务静态文件 (必须放在所有 API 路由之后)"""
+    """服务静态文件"""
     file_path = os.path.join(FRONTEND_DIST, path)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
     return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 
-# ==================== 启动入口 ====================
+@app.get("/api/books", response_model=List[BookResponse])
+async def get_books(
+    db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000)
+):
+    """获取所有书籍列表"""
+    result = await db.execute(select(Book).offset(skip).limit(limit))
+    return result.scalars().all()
+
+
+@app.get("/api/books/{book_id}", response_model=BookResponse)
+async def get_book(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取单个书籍详情"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return book
+
+
+@app.post("/api/books", response_model=BookResponse, status_code=201)
+async def create_book(book_data: BookCreate, db: AsyncSession = Depends(get_db)):
+    """创建新书籍"""
+    book = Book(**book_data.model_dump())
+    db.add(book)
+    await db.commit()
+    await db.refresh(book)
+    return book
+
+
+@app.put("/api/books/{book_id}", response_model=BookResponse)
+async def update_book(book_id: UUID, book_data: BookUpdate, db: AsyncSession = Depends(get_db)):
+    """更新书籍"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    update_dict = book_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(book, key, value)
+
+    await db.commit()
+    await db.refresh(book)
+    return book
+
+
+@app.delete("/api/books/{book_id}")
+async def delete_book(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """删除书籍"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    await db.delete(book)
+    await db.commit()
+    return {"message": "书籍已删除", "id": str(book_id)}
+
+
+@app.get("/api/books/{book_id}/chapters", response_model=List[ChapterResponse])
+async def get_chapters(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取书籍的所有章节"""
+    result = await db.execute(
+        select(Chapter)
+        .where(Chapter.book_id == book_id)
+        .order_by(Chapter.chapter_number)
+    )
+    return result.scalars().all()
+
+
+@app.get("/api/chapters/{chapter_id}", response_model=ChapterResponse)
+async def get_chapter(chapter_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取单个章节详情"""
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return chapter
+
+
+@app.post("/api/books/{book_id}/chapters", response_model=ChapterResponse, status_code=201)
+async def create_chapter(book_id: UUID, chapter_data: ChapterCreate, db: AsyncSession = Depends(get_db)):
+    """创建新章节"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    chapter = Chapter(**chapter_data.model_dump())
+    db.add(chapter)
+    await db.commit()
+    await db.refresh(chapter)
+    return chapter
+
+
+@app.put("/api/chapters/{chapter_id}", response_model=ChapterResponse)
+async def update_chapter(chapter_id: UUID, chapter_data: ChapterUpdate, db: AsyncSession = Depends(get_db)):
+    """更新章节"""
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    update_dict = chapter_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(chapter, key, value)
+
+    await db.commit()
+    await db.refresh(chapter)
+    return chapter
+
+
+@app.delete("/api/chapters/{chapter_id}")
+async def delete_chapter(chapter_id: UUID, db: AsyncSession = Depends(get_db)):
+    """删除章节"""
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    await db.delete(chapter)
+    await db.commit()
+    return {"message": "章节已删除", "id": str(chapter_id)}
+
+
+@app.post("/api/chapters/{chapter_id}/entities", response_model=ChapterResponse)
+async def link_entity_to_chapter(
+    chapter_id: UUID,
+    entity_data: ChapterEntityCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """将角色关联到章节"""
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    entity_result = await db.execute(select(Character).where(Character.id == entity_data.entity_id))
+    entity = entity_result.scalar_one_or_none()
+    if not entity:
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    chapter_entity = ChapterEntity(
+        chapter_id=chapter_id,
+        entity_id=entity_data.entity_id,
+        entity_type=entity_data.entity_type
+    )
+    db.add(chapter_entity)
+    await db.commit()
+
+    return chapter
+
+
+@app.get("/api/books/{book_id}/characters", response_model=List[CharacterResponse])
+async def get_characters(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取书籍的所有角色"""
+    result = await db.execute(
+        select(Character)
+        .where(Character.book_id == book_id)
+        .order_by(Character.importance_level.desc())
+    )
+    return result.scalars().all()
+
+
+@app.get("/api/characters/{character_id}", response_model=CharacterResponse)
+async def get_character(character_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取单个角色详情"""
+    result = await db.execute(select(Character).where(Character.id == character_id))
+    character = result.scalar_one_or_none()
+    if not character:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    return character
+
+
+@app.post("/api/characters", response_model=CharacterResponse, status_code=201)
+async def create_character(character_data: CharacterCreate, db: AsyncSession = Depends(get_db)):
+    """创建新角色"""
+    result = await db.execute(select(Book).where(Book.id == character_data.book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    character = Character(**character_data.model_dump())
+    db.add(character)
+    await db.commit()
+    await db.refresh(character)
+    return character
+
+
+@app.put("/api/characters/{character_id}", response_model=CharacterResponse)
+async def update_character(character_id: UUID, character_data: CharacterUpdate, db: AsyncSession = Depends(get_db)):
+    """更新角色"""
+    result = await db.execute(select(Character).where(Character.id == character_id))
+    character = result.scalar_one_or_none()
+    if not character:
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    update_dict = character_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(character, key, value)
+
+    await db.commit()
+    await db.refresh(character)
+    return character
+
+
+@app.delete("/api/characters/{character_id}")
+async def delete_character(character_id: UUID, db: AsyncSession = Depends(get_db)):
+    """删除角色"""
+    result = await db.execute(select(Character).where(Character.id == character_id))
+    character = result.scalar_one_or_none()
+    if not character:
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    await db.delete(character)
+    await db.commit()
+    return {"message": "角色已删除", "id": str(character_id)}
+
+
+@app.get("/api/relationships", response_model=List[RelationshipResponse])
+async def get_relationships(
+    book_id: Optional[UUID] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取角色关系列表"""
+    if book_id:
+        result = await db.execute(
+            select(CharacterRelationship)
+            .join(Character, CharacterRelationship.source_char_id == Character.id)
+            .where(Character.book_id == book_id)
+        )
+    else:
+        result = await db.execute(select(CharacterRelationship))
+    return result.scalars().all()
+
+
+@app.post("/api/relationships", response_model=RelationshipResponse, status_code=201)
+async def create_relationship(relationship_data: RelationshipCreate, db: AsyncSession = Depends(get_db)):
+    """创建角色关系"""
+    source_result = await db.execute(select(Character).where(Character.id == relationship_data.source_char_id))
+    source_char = source_result.scalar_one_or_none()
+    if not source_char:
+        raise HTTPException(status_code=404, detail="源角色不存在")
+
+    target_result = await db.execute(select(Character).where(Character.id == relationship_data.target_char_id))
+    target_char = target_result.scalar_one_or_none()
+    if not target_char:
+        raise HTTPException(status_code=404, detail="目标角色不存在")
+
+    existing = await db.execute(
+        select(CharacterRelationship).where(
+            CharacterRelationship.source_char_id == relationship_data.source_char_id,
+            CharacterRelationship.target_char_id == relationship_data.target_char_id
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="关系已存在")
+
+    relationship = CharacterRelationship(**relationship_data.model_dump())
+    db.add(relationship)
+    await db.commit()
+    await db.refresh(relationship)
+    return relationship
+
+
+@app.delete("/api/relationships/{relationship_id}")
+async def delete_relationship(relationship_id: UUID, db: AsyncSession = Depends(get_db)):
+    """删除角色关系"""
+    result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.id == relationship_id))
+    relationship = result.scalar_one_or_none()
+    if not relationship:
+        raise HTTPException(status_code=404, detail="关系不存在")
+
+    await db.delete(relationship)
+    await db.commit()
+    return {"message": "关系已删除", "id": str(relationship_id)}
+
+
+@app.get("/api/memories", response_model=List[MemoryChunkResponse])
+async def get_memories(
+    book_id: Optional[UUID] = None,
+    chapter_id: Optional[UUID] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取记忆片段列表"""
+    query = select(MemoryChunk)
+    if book_id:
+        query = query.where(MemoryChunk.book_id == book_id)
+    if chapter_id:
+        query = query.where(MemoryChunk.chapter_id == chapter_id)
+
+    result = await db.execute(query.order_by(MemoryChunk.created_at.desc()))
+    return result.scalars().all()
+
+
+@app.post("/api/memories", response_model=MemoryChunkResponse, status_code=201)
+async def create_memory(memory_data: MemoryChunkCreate, db: AsyncSession = Depends(get_db)):
+    """创建记忆片段"""
+    result = await db.execute(select(Book).where(Book.id == memory_data.book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    memory = MemoryChunk(**memory_data.model_dump())
+    db.add(memory)
+    await db.commit()
+    await db.refresh(memory)
+    return memory
+
+
+@app.delete("/api/memories/{memory_id}")
+async def delete_memory(memory_id: UUID, db: AsyncSession = Depends(get_db)):
+    """删除记忆片段"""
+    result = await db.execute(select(MemoryChunk).where(MemoryChunk.id == memory_id))
+    memory = result.scalar_one_or_none()
+    if not memory:
+        raise HTTPException(status_code=404, detail="记忆片段不存在")
+
+    await db.delete(memory)
+    await db.commit()
+    return {"message": "记忆片段已删除", "id": str(memory_id)}
+
+
+async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
+    """
+    构建章节生成所需的完整 Prompt
+
+    组装公式: Prompt_Total = F_Sys_Global + F_Static_State + F_Dynamic_State + F_Relationships + F_Task_Outline
+
+    Returns:
+        dict: 包含 system_prompt 和 user_prompt 的字典
+    """
+    chapter_result = await db.execute(
+        select(Chapter)
+        .options(selectinload(Chapter.book))
+        .where(Chapter.id == chapter_id)
+    )
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    book = chapter.book
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+
+    entities_result = await db.execute(
+        select(ChapterEntity)
+        .options(selectinload(ChapterEntity.character))
+        .where(ChapterEntity.chapter_id == chapter_id)
+    )
+    entities = entities_result.scalars().all()
+
+    static_states = []
+    dynamic_states = []
+    character_ids = []
+
+    for entity in entities:
+        character = entity.character
+        if character:
+            character_ids.append(character.id)
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
+            if character.dynamic_state:
+                dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
+
+    relationships_result = await db.execute(
+        select(CharacterRelationship).where(
+            CharacterRelationship.source_char_id.in_(character_ids),
+            CharacterRelationship.target_char_id.in_(character_ids)
+        )
+    )
+    relationships = relationships_result.scalars().all()
+
+    relationship_prompts = []
+    for rel in relationships:
+        if rel.interaction_prompt:
+            source_name = rel.source_character.name if rel.source_character else "角色"
+            target_name = rel.target_character.name if rel.target_character else "角色"
+            relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+
+    system_prompt_parts = [
+        global_sys_prompt,
+        "\n\n## 角色静态设定",
+        "\n".join(static_states) if static_states else "暂无角色设定",
+        "\n\n## 角色动态状态",
+        "\n".join(dynamic_states) if dynamic_states else "暂无动态状态",
+        "\n\n## 角色互动约束",
+        "\n".join(relationship_prompts) if relationship_prompts else "暂无互动约束",
+        "\n\n## 核心规则",
+        "1. 严格遵循章节大纲进行创作",
+        "2. 保持角色性格和互动方式的连贯性",
+        "3. 根据角色关系约束调整互动氛围",
+        "4. 输出应为完整的小说段落，包含环境描写、动作描写、心理描写等",
+    ]
+
+    system_prompt = "\n".join(system_prompt_parts)
+
+    user_prompt = f"""请根据以下章节大纲进行扩写:
+
+【章节标题】{chapter.title or '未命名'}
+【章节大纲】
+{chapter.outline_text or '暂无大纲'}
+
+请直接输出小说正文，不需要任何额外说明或标记。"""
+
+    return {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "chapter": chapter
+    }
+
+
+async def generate_stream_response(chapter_id: UUID, api_key: str, base_url: Optional[str], model: str, db: AsyncSession):
+    """
+    生成 SSE 流式响应的异步生成器
+
+    Args:
+        chapter_id: 章节ID
+        api_key: OpenAI API Key
+        base_url: 自定义 API 端点
+        model: 使用的模型名称
+        db: 数据库会话
+
+    Yields:
+        SSE 格式的文本片段
+    """
+    prompt_data = await build_chapter_prompt(chapter_id, db)
+    system_prompt = prompt_data["system_prompt"]
+    user_prompt = prompt_data["user_prompt"]
+
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+
+    client = AsyncOpenAI(**client_kwargs)
+
+    try:
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            stream=True,
+            temperature=0.7,
+            max_tokens=4000
+        )
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                yield f"data: {json.dumps({'content': content}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+    except Exception as e:
+        error_msg = str(e)
+        yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/generate_chapter")
+async def generate_chapter(
+    request: GenerateChapterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    核心 AI 章节生成接口
+
+    执行完整的 Prompt 组装流水线并返回 SSE 流式响应
+
+    Prompt 组装公式:
+    Prompt_Total = F_Sys_Global + F_Static_State + F_Dynamic_State + F_Relationships + F_Task_Outline
+    """
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    return StreamingResponse(
+        generate_stream_response(
+            chapter_id=request.chapter_id,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            db=db
+        ),
+        media_type="text/event-stream"
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     env_port = os.environ.get('VELLUMA_PORT')
     if env_port:
         port = int(env_port)
@@ -374,10 +619,10 @@ if __name__ == "__main__":
     else:
         port = 0
         print(f"🚀 使用动态端口分配")
-    
+
     config = uvicorn.Config(app, host="127.0.0.1", port=port)
     server = uvicorn.Server(config)
-    
-    print(f"✅ 后端服务启动")
-    
+
+    print(f"✅ StoryWeaver-Core 后端服务启动")
+
     server.run()
