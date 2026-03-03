@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useChapterGenerator } from '../composables/useChapterGenerator'
+import { generateApi } from '../composables/useApi'
 import RichTextEditor from './RichTextEditor.vue'
 import type { Chapter, Character } from '../types'
 
@@ -21,6 +22,13 @@ const emit = defineEmits(['create-chapter', 'update-chapter', 'delete-chapter', 
 
 const selectedChapterId = ref<string | null>(null)
 const { isGenerating, generatedText, error, startGeneration, reset } = useChapterGenerator()
+
+const wordCount = ref(2000)
+const wordCountMin = ref(500)
+const wordCountMax = ref(10000)
+const isStreamMode = ref(true)
+
+const isEditorDisabled = computed(() => isGenerating.value)
 
 const selectedChapter = computed(() => {
   return props.chapters.find(c => c.id === selectedChapterId.value)
@@ -92,13 +100,16 @@ function toggleCharacter(charId) {
 
 const editorRef = ref()
 
-function startGenerate() {
+async function startGenerate() {
   if (!selectedChapter.value || !props.apiConfig.api_key) {
     alert('请先选择章节并配置 API Key')
     return
   }
   
-  if (selectedChapter.value.content_text && selectedChapter.value.content_text.trim()) {
+  const editor = editorRef.value?.editor
+  const editorContent = editor ? editor.getText().trim() : ''
+  
+  if (editorContent) {
     if (!confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
       return
     }
@@ -109,16 +120,40 @@ function startGenerate() {
   
   reset()
   
-  startGeneration({
+  const requestData = {
     chapter_id: selectedChapter.value.id,
     api_key: props.apiConfig.api_key,
     base_url: props.apiConfig.base_url || undefined,
-    model: props.apiConfig.model
-  }, (chunk) => {
-    if (editorRef.value) {
-      editorRef.value.insertContent(chunk)
+    model: props.apiConfig.model,
+    word_count: wordCount.value
+  }
+  
+  if (isStreamMode.value) {
+    startGeneration(requestData, (chunk) => {
+      if (editorRef.value) {
+        editorRef.value.insertContent(chunk)
+      }
+    }, () => {
+      if (editorRef.value) {
+        editorRef.value.flushBuffer()
+      }
+      alert('本章正文生成完成！')
+    })
+  } else {
+    isGenerating.value = true
+    try {
+      const result = await generateApi.generateSync(requestData)
+      if (editorRef.value && result.content) {
+        editorRef.value.clearContent()
+        editorRef.value.insertContent(result.content)
+      }
+      alert('本章正文生成完成！')
+    } catch (err) {
+      alert('生成失败: ' + err.message)
+    } finally {
+      isGenerating.value = false
     }
-  })
+  }
 }
 
 // Debounce update to avoid spamming API
@@ -245,9 +280,47 @@ function isCharacterSelected(charId) {
               />
             </div>
 
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-xs text-[var(--text-muted)]">期望字数</label>
+                <span class="text-xs font-medium text-primary-400">{{ wordCount }} 字</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <input
+                  type="range"
+                  v-model="wordCount"
+                  :min="wordCountMin"
+                  :max="wordCountMax"
+                  step="100"
+                  class="flex-1 h-2 bg-[var(--bg-tertiary)] rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                <input
+                  type="number"
+                  v-model="wordCountMin"
+                  class="w-16 px-2 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+                  placeholder="最小"
+                />
+                <span class="text-xs text-[var(--text-muted)]">-</span>
+                <input
+                  type="number"
+                  v-model="wordCountMax"
+                  class="w-16 px-2 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+                  placeholder="最大"
+                />
+              </div>
+            </div>
+
             <div class="flex items-center justify-between gap-3">
               <div v-if="error" class="text-sm text-rose-400 truncate">{{ error }}</div>
               <div class="flex-1"></div>
+              <button
+                @click="isStreamMode = !isStreamMode"
+                :disabled="isGenerating"
+                class="px-3 py-2 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors border border-[var(--border-color)]"
+                :title="isStreamMode ? '当前：流式输出' : '当前：一次性输出'"
+              >
+                {{ isStreamMode ? '🔄 流式' : '📦 一次性' }}
+              </button>
               <button
                 @click="startGenerate"
                 :disabled="isGenerating || !selectedChapter.outline_text.trim()"
@@ -270,6 +343,7 @@ function isCharacterSelected(charId) {
               ref="editorRef"
               :model-value="selectedChapter.content_text"
               @update:model-value="handleContentUpdate"
+              :disabled="isEditorDisabled"
               placeholder="在此处开始写作或生成内容..."
             />
           </div>

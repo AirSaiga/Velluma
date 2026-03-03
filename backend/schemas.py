@@ -160,6 +160,7 @@ class GenerateChapterRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
+    word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
 
 
 class ChapterEntityLink(BaseModel):

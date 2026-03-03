@@ -514,7 +514,7 @@ async def delete_memory(memory_id: UUID, db: AsyncSession = Depends(get_db)):
     return {"message": "记忆片段已删除", "id": str(memory_id)}
 
 
-async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
+async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession, word_count: int = 2000) -> dict:
     """
     构建章节生成所需的完整 Prompt
 
@@ -589,11 +589,16 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
         "\n".join(dynamic_states) if dynamic_states else "暂无动态状态",
         "\n\n## 角色互动约束",
         "\n".join(relationship_prompts) if relationship_prompts else "暂无互动约束",
+        "\n\n## 【强制字数要求 - 最高优先级】",
+        f"★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)",
+        "★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制",
+        "★ 规划好内容结构，确保最终字数符合要求",
         "\n\n## 核心规则",
         "1. 严格遵循章节大纲进行创作",
         "2. 保持角色性格和互动方式的连贯性",
         "3. 根据角色关系约束调整互动氛围",
         "4. 输出应为完整的小说段落，包含环境描写、动作描写、心理描写等",
+        "5. 生成内容必须满足上述字数要求",
     ]
 
     system_prompt = "\n".join(system_prompt_parts)
@@ -603,8 +608,9 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
+【字数要求】必须生成恰好 {word_count} 字的小说正文（±100字误差可接受）
 
-请直接输出小说正文，不需要任何额外说明或标记。"""
+请直接输出小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
 
     print(f"[DEBUG] build_chapter_prompt: 构建完成")
     
@@ -732,7 +738,9 @@ async def generate_chapter(
         raise HTTPException(status_code=404, detail="章节不存在")
 
     print(f"[DEBUG] generate_chapter: 正在构建 Prompt...")
-    prompt_data = await build_chapter_prompt(request.chapter_id, db)
+    word_count = request.word_count or 2000
+    print(f"[DEBUG] generate_chapter: 字数要求: {word_count}")
+    prompt_data = await build_chapter_prompt(request.chapter_id, db, word_count)
     print(f"[DEBUG] generate_chapter: Prompt 构建完成, system_prompt 长度: {len(prompt_data['system_prompt'])}, user_prompt 长度: {len(prompt_data['user_prompt'])}")
 
     print(f"[DEBUG] generate_chapter: 开始流式响应...")
@@ -751,6 +759,65 @@ async def generate_chapter(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.post("/api/generate_chapter_sync")
+async def generate_chapter_sync(
+    request: GenerateChapterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    非流式章节生成接口
+
+    等待完整内容生成后一次性返回
+    """
+    import httpx
+    
+    print(f"[DEBUG] generate_chapter_sync: 开始处理章节 {request.chapter_id}")
+    
+    for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
+        if env_var in os.environ:
+            del os.environ[env_var]
+    
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        print(f"[DEBUG] generate_chapter_sync: 章节不存在 {request.chapter_id}")
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    print(f"[DEBUG] generate_chapter_sync: 正在构建 Prompt...")
+    word_count = request.word_count or 2000
+    prompt_data = await build_chapter_prompt(request.chapter_id, db, word_count)
+    print(f"[DEBUG] generate_chapter_sync: Prompt 构建完成")
+
+    print(f"[DEBUG] generate_chapter_sync: 开始非流式生成...")
+    
+    client_kwargs = {"api_key": request.api_key}
+    if request.base_url:
+        client_kwargs["base_url"] = request.base_url
+    
+    http_client = httpx.AsyncClient(trust_env=False)
+    client_kwargs["http_client"] = http_client
+    
+    try:
+        client = AsyncOpenAI(**client_kwargs)
+        
+        response = await client.chat.completions.create(
+            model=request.model,
+            messages=[
+                {"role": "system", "content": prompt_data["system_prompt"]},
+                {"role": "user", "content": prompt_data["user_prompt"]}
+            ],
+            temperature=0.7,
+            max_tokens=4000
+        )
+        
+        content = response.choices[0].message.content if response.choices else ""
+        print(f"[DEBUG] generate_chapter_sync: 生成完成, 内容长度: {len(content)}")
+        
+        return {"content": content}
+    finally:
+        await http_client.aclose()
 
 
 @app.get("/{path:path}")

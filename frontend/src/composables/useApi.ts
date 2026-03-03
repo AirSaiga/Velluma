@@ -238,5 +238,22 @@ export const generateApi = {
       console.error('[DEBUG] generateApi.stream: fetch 错误', err)
       onError?.(err.message)
     })
+  },
+  
+  generateSync: async (data) => {
+    const baseUrl = await getApiBase()
+    console.log('[DEBUG] generateApi.generateSync: 开始请求', { baseUrl, chapter_id: data.chapter_id })
+    
+    const response = await fetch(`${baseUrl}/generate_chapter_sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    
+    if (!response.ok) {
+      throw new Error(`生成请求失败: ${response.status} ${response.statusText}`)
+    }
+    
+    return await response.json()
   }
 }

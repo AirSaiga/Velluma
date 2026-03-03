@@ -6,7 +6,7 @@ export function useChapterGenerator() {
   const generatedText = ref('')
   const error = ref(null)
 
-  function startGeneration(request, onChunk?: (chunk: string) => void) {
+  function startGeneration(request, onChunk?: (chunk: string) => void, onComplete?: () => void) {
     if (isGenerating.value) {
       return
     }
@@ -24,6 +24,7 @@ export function useChapterGenerator() {
       },
       () => {
         isGenerating.value = false
+        if (onComplete) onComplete()
       },
       (err) => {
         error.value = err
