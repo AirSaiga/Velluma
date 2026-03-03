@@ -6,7 +6,7 @@ export function useChapterGenerator() {
   const generatedText = ref('')
   const error = ref(null)
 
-  function startGeneration(request) {
+  function startGeneration(request, onChunk?: (chunk: string) => void) {
     if (isGenerating.value) {
       return
     }
@@ -15,10 +15,12 @@ export function useChapterGenerator() {
     generatedText.value = ''
     error.value = null
 
+    // @ts-ignore
     generateApi.stream(
       request,
       (chunk) => {
         generatedText.value += chunk
+        if (onChunk) onChunk(chunk)
       },
       () => {
         isGenerating.value = false

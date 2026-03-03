@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session } = require('electron')
+const { app, BrowserWindow, session, ipcMain } = require('electron')
 const { join, dirname } = require('path')
 const { spawn } = require('child_process')
 const net = require('net')
@@ -6,7 +6,6 @@ const net = require('net')
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 let backendProcess = null
-let pythonCmd = process.platform === 'win32' ? 'python.exe' : 'python'
 
 const FIXED_VITE_PORT = 5175
 const FIXED_BACKEND_PORT = 8002
@@ -43,8 +42,11 @@ async function startBackend() {
   console.log(`Starting backend on fixed port ${port}`)
   
   const projectRoot = dirname(dirname(__dirname))
+  const venvPython = process.platform === 'win32' 
+    ? join(projectRoot, 'venv', 'Scripts', 'python.exe')
+    : join(projectRoot, 'venv', 'bin', 'python')
 
-  backendProcess = spawn(pythonCmd, ['-m', 'backend.main'], {
+  backendProcess = spawn(venvPython, ['-m', 'backend.main'], {
     cwd: projectRoot,
     env: { ...process.env, VELLUMA_PORT: port.toString() },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -115,10 +117,45 @@ async function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../dist/index.html'))
   }
+
+  return { win, backendPort, vitePort }
 }
 
-app.whenReady().then(() => {
-  createWindow()
+function createDebugWindow(backendPort, vitePort) {
+  const debugWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    title: 'Prompt Debug',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: join(__dirname, 'preload.cjs')
+    }
+  })
+
+  if (isDev) {
+    debugWindow.loadURL(`http://localhost:${vitePort}?backendPort=${backendPort}&debug=true`)
+  } else {
+    debugWindow.loadFile(join(__dirname, '../dist/index.html'), { query: { debug: 'true' } })
+  }
+
+  return debugWindow
+}
+
+app.whenReady().then(async () => {
+  const { win, backendPort, vitePort } = await createWindow()
+  
+  let debugWin = createDebugWindow(backendPort, vitePort)
+  
+  debugWin.on('closed', () => {
+    debugWin = null
+  })
+  
+  ipcMain.on('prompt-data', (event, data) => {
+    if (debugWin && !debugWin.isDestroyed()) {
+      debugWin.webContents.send('prompt-data', data)
+    }
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

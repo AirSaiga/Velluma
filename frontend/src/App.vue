@@ -1,13 +1,21 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
 import CharacterPanel from './components/CharacterPanel.vue'
 import ChapterEditor from './components/ChapterEditor.vue'
 import BookConfigPanel from './components/BookConfigPanel.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import DebugPromptWindow from './components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from './composables/useApi'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
+
+const isDebugMode = computed(() => {
+  const urlParams = new URLSearchParams(window.location.search)
+  return urlParams.get('debug') === 'true'
+})
 
 const books = ref([])
 const currentBookId = ref(null)
@@ -223,7 +231,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-full w-full bg-[var(--bg-primary)] flex flex-col">
+  <DebugPromptWindow v-if="isDebugMode" />
+  <div v-else class="h-full w-full bg-[var(--bg-primary)] flex flex-col">
     <div class="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
       <div class="flex items-center gap-3">
         <h1 class="text-lg font-bold text-[var(--text-primary)]">Velluma AI</h1>
@@ -261,37 +270,45 @@ onMounted(async () => {
       </button>
     </div>
     
-    <div class="flex-1 flex min-h-0">
-      <div class="w-80 flex-shrink-0 h-full">
-        <CharacterPanel
-          :characters="characters"
-          :relationships="relationships"
-          @create-character="createCharacter"
-          @update-character="updateCharacter"
-          @delete-character="deleteCharacter"
-          @create-relationship="createRelationship"
-          @delete-relationship="deleteRelationship"
-        />
-      </div>
-      
-      <div class="flex-1 h-full min-w-0">
-        <ChapterEditor
-          :chapters="chapters"
-          :characters="characters"
-          :api-config="apiConfig"
-          @create-chapter="createChapter"
-          @update-chapter="updateChapter"
-          @delete-chapter="deleteChapter"
-          @save-generated="saveGeneratedContent"
-        />
-      </div>
-      
-      <div class="w-80 flex-shrink-0 h-full">
-        <BookConfigPanel
-          :book-config="getCurrentBook() || {}"
-          @update-book-config="updateBook"
-        />
-      </div>
+    <div class="flex-1 min-h-0 relative">
+      <splitpanes class="default-theme" style="height: 100%">
+        <pane min-size="15" size="20">
+          <div class="h-full overflow-hidden bg-[var(--bg-secondary)] border-r border-[var(--border-color)]">
+            <CharacterPanel
+              :characters="characters"
+              :relationships="relationships"
+              @create-character="createCharacter"
+              @update-character="updateCharacter"
+              @delete-character="deleteCharacter"
+              @create-relationship="createRelationship"
+              @delete-relationship="deleteRelationship"
+            />
+          </div>
+        </pane>
+        
+        <pane min-size="30">
+          <div class="h-full overflow-hidden bg-[var(--bg-primary)]">
+            <ChapterEditor
+              :chapters="chapters"
+              :characters="characters"
+              :api-config="apiConfig"
+              @create-chapter="createChapter"
+              @update-chapter="updateChapter"
+              @delete-chapter="deleteChapter"
+              @save-generated="saveGeneratedContent"
+            />
+          </div>
+        </pane>
+        
+        <pane min-size="15" size="20">
+          <div class="h-full overflow-hidden bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
+            <BookConfigPanel
+              :book-config="getCurrentBook() || {}"
+              @update-book-config="updateBook"
+            />
+          </div>
+        </pane>
+      </splitpanes>
     </div>
     
     <SettingsModal
@@ -355,3 +372,30 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style>
+/* Splitpanes Theme Customization */
+.splitpanes.default-theme .splitpanes__splitter {
+  background-color: var(--border-color) !important;
+  box-sizing: border-box;
+  position: relative;
+  flex-shrink: 0;
+  width: 4px !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+.splitpanes.default-theme .splitpanes__splitter:before,
+.splitpanes.default-theme .splitpanes__splitter:after {
+  background-color: var(--text-muted) !important;
+  opacity: 0.5;
+}
+
+.splitpanes.default-theme .splitpanes__splitter:hover {
+  background-color: var(--primary-color, #3b82f6) !important;
+}
+
+.splitpanes.default-theme .splitpanes__pane {
+  background-color: transparent !important;
+}
+</style>

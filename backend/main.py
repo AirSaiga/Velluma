@@ -547,14 +547,23 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
     """
     import os
     import traceback
+    import httpx
+    for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
+        if env_var in os.environ:
+            del os.environ[env_var]
     print(f"[DEBUG] generate_stream_response: 开始生成, model={model}, base_url={base_url}")
     print(f"[DEBUG] api_key 前5位: {api_key[:5] if api_key else 'None'}")
     print(f"[DEBUG] 环境变量检查: HTTP_PROXY={os.environ.get('HTTP_PROXY')}, HTTPS_PROXY={os.environ.get('HTTPS_PROXY')}, ALL_PROXY={os.environ.get('ALL_PROXY')}")
     
+    yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
+    
+    http_client = None
     try:
         client_kwargs = {"api_key": api_key}
         if base_url:
             client_kwargs["base_url"] = base_url
+        http_client = httpx.AsyncClient(trust_env=False)
+        client_kwargs["http_client"] = http_client
 
         print(f"[DEBUG] client_kwargs: {list(client_kwargs.keys())}")
         
@@ -586,11 +595,35 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
 
     except Exception as e:
         import traceback
-        error_msg = str(e)
+        raw_error_msg = str(e).strip()
+        error_type = type(e).__name__
+        response = getattr(e, "response", None)
+        status_code = getattr(response, "status_code", None) if response is not None else None
+        response_text = None
+        if response is not None:
+            try:
+                response_text = response.text
+            except Exception:
+                response_text = None
+        if isinstance(response_text, str):
+            response_text = response_text.strip()
+            if len(response_text) > 500:
+                response_text = response_text[:500] + "..."
+        parts = [error_type]
+        if raw_error_msg:
+            parts.append(raw_error_msg)
+        if status_code:
+            parts.append(f"status={status_code}")
+        if response_text:
+            parts.append(response_text)
+        error_msg = " | ".join(parts)
         traceback.print_exc()
         print(f"[DEBUG] generate_stream_response: 发生异常: {error_msg}")
         yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+    finally:
+        if http_client is not None:
+            await http_client.aclose()
 
 
 @app.post("/api/generate_chapter")

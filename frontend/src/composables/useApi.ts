@@ -186,8 +186,12 @@ export const generateApi = {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6))
-                console.log('[DEBUG] generateApi.stream: 收到数据', { hasContent: !!data.content, hasError: !!data.error, hasDone: !!data.done })
-                if (data.content) {
+                console.log('[DEBUG] generateApi.stream: 收到数据', { hasContent: !!data.content, hasError: !!data.error, hasDone: !!data.done, hasPrompt: !!data.prompt })
+                if (data.prompt && data.prompt.system_prompt && data.prompt.user_prompt) {
+                  if (window.electronAPI) {
+                    window.electronAPI.send('prompt-data', data.prompt)
+                  }
+                } else if (data.content) {
                   hasContent = true
                   onChunk?.(data.content)
                 } else if (data.error) {

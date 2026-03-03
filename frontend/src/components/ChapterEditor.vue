@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useChapterGenerator } from '../composables/useChapterGenerator'
+import RichTextEditor from './RichTextEditor.vue'
 import type { Chapter, Character } from '../types'
 
 interface ApiConfig {
@@ -80,6 +81,8 @@ function toggleCharacter(charId) {
   updateChapter({ character_ids: newCharacterIds })
 }
 
+const editorRef = ref()
+
 function startGenerate() {
   if (!selectedChapter.value || !props.apiConfig.api_key) {
     alert('请先选择章节并配置 API Key')
@@ -93,17 +96,22 @@ function startGenerate() {
     api_key: props.apiConfig.api_key,
     base_url: props.apiConfig.base_url || undefined,
     model: props.apiConfig.model
-  })
-  
-  const interval = setInterval(() => {
-    if (!isGenerating.value) {
-      clearInterval(interval)
-      if (generatedText.value) {
-        emit('save-generated', selectedChapter.value.id, generatedText.value)
-      }
+  }, (chunk) => {
+    if (editorRef.value) {
+      editorRef.value.insertContent(chunk)
     }
-  }, 100)
+  })
 }
+
+// Debounce update to avoid spamming API
+let updateTimeout
+function handleContentUpdate(content) {
+  clearTimeout(updateTimeout)
+  updateTimeout = setTimeout(() => {
+    updateChapter({ content_text: content })
+  }, 1000)
+}
+
 
 function isCharacterSelected(charId) {
   return selectedChapter.value?.character_ids?.includes(charId) || false
@@ -218,28 +226,17 @@ function isCharacterSelected(charId) {
             </button>
           </div>
           
-          <div v-if="isGenerating && generatedText" class="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg border border-[var(--border-color)]">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs text-[var(--text-muted)]">生成预览</span>
-            </div>
-            <p class="text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{{ generatedText }}</p>
-          </div>
-          
           <div v-if="error" class="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg">
             <p class="text-sm text-rose-400">{{ error }}</p>
           </div>
           
-          <div v-if="selectedChapter.content_text" class="p-4 bg-[var(--bg-tertiary)]/30 rounded-lg border border-[var(--border-color)]">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs text-[var(--text-muted)]">已保存正文</span>
-              <button
-                @click="updateChapter({ content_text: '' })"
-                class="text-xs text-[var(--text-muted)] hover:text-rose-400 transition-colors"
-              >
-                清除
-              </button>
-            </div>
-            <p class="text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{{ selectedChapter.content_text }}</p>
+          <div class="flex-1 min-h-[500px]">
+            <RichTextEditor
+              ref="editorRef"
+              :model-value="selectedChapter.content_text"
+              @update:model-value="handleContentUpdate"
+              placeholder="在此处开始写作或生成内容..."
+            />
           </div>
         </div>
         
