@@ -325,7 +325,7 @@ async function createChapterFromOutlinePanel() {
     : 0
   await createChapter({
     chapter_number: maxNumber + 1,
-    title: `第${maxNumber + 1}章`,
+    title: '',
     outline_text: '',
     content_text: '',
     status: 'draft'
@@ -496,7 +496,9 @@ onMounted(async () => {
               />
               <div class="flex items-center justify-between pl-1.5">
                 <div class="min-w-0">
-                  <p class="text-xs font-medium truncate">{{ chapter.title }}</p>
+                  <p class="text-xs font-medium truncate" :class="!chapter.title ? 'text-[var(--text-muted)] italic' : ''">
+                    {{ chapter.title || `(无标题)` }}
+                  </p>
                   <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Ch.{{ chapter.chapter_number }}</p>
                 </div>
                 <button

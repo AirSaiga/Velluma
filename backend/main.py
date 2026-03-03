@@ -16,6 +16,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import json
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -72,10 +73,19 @@ def load_port() -> Optional[int]:
     return None
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: 初始化数据库
+    await init_db()
+    yield
+    # Shutdown: 如果有需要在应用关闭时清理的资源，可以在这里添加
+
+
 app = FastAPI(
     title="StoryWeaver-Core API",
     description="长篇小说特化 AI 写作平台后端引擎",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -92,10 +102,7 @@ FRONTEND_DIST = os.path.join(
 )
 
 
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时初始化数据库"""
-    await init_db()
+
 
 
 @app.get("/")

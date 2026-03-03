@@ -266,15 +266,20 @@ function isCharacterSelected(charId: string) {
 <template>
   <div class="h-full overflow-y-auto px-6 py-4">
     <div v-if="selectedChapter" class="max-w-[920px] mx-auto space-y-3">
-      <div class="flex items-center justify-between">
-        <input
-          :value="selectedChapter.title"
-          @input="handleTitleInput"
-          class="flex-1 text-lg font-semibold text-[var(--text-primary)] bg-transparent focus:outline-none px-1"
-          placeholder="章节标题"
-        />
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex-1 flex items-center gap-2">
+          <span class="text-lg font-bold text-[var(--text-primary)] shrink-0">
+            第{{ selectedChapter.chapter_number }}章
+          </span>
+          <input
+            :value="selectedChapter.title"
+            @input="handleTitleInput"
+            class="flex-1 text-lg font-semibold text-[var(--text-primary)] bg-transparent hover:bg-black/5 focus:bg-white focus:ring-1 focus:ring-[var(--accent-500)] focus:outline-none px-2 py-1 rounded-lg transition-all placeholder:text-[var(--text-muted)] placeholder:font-normal"
+            placeholder="输入章节标题..."
+          />
+        </div>
         <button
-          class="ml-2 px-2 py-1 text-xs rounded-lg bg-white/90 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          class="px-2 py-1 text-xs rounded-lg bg-white/90 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shadow-sm ring-1 ring-slate-900/5"
           @click="toggleMetaCollapsed"
         >
           {{ getMetaCollapsedLabel() }}
