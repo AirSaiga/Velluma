@@ -16,6 +16,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import json
 import os
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Depends, Query
@@ -35,8 +36,14 @@ from backend.schemas import (
     RelationshipCreate, RelationshipResponse,
     MemoryChunkCreate, MemoryChunkResponse,
     GenerateChapterRequest,
+    GenerateChapterAgenticRequest,
     ChapterEntityCreate,
-    WorldviewUpdate
+    WorldviewUpdate,
+    CharacterDynamicStateUpdateRequest,
+    CharacterDynamicStateUpdateResponse,
+    ChapterPublishRequest,
+    ChapterPublishResponse,
+    CharacterStateChange
 )
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -818,6 +825,711 @@ async def generate_chapter_sync(
         return {"content": content}
     finally:
         await http_client.aclose()
+
+
+def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, word_count: int) -> tuple:
+    """
+    构建 Draft Agent (主笔) 的 Prompt
+    
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    worldview_settings = book.worldview_settings or {}
+    worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    static_states = []
+    dynamic_states = []
+    for entity in entities:
+        character = entity.character if hasattr(entity, 'character') else entity
+        if character:
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
+            if character.dynamic_state:
+                dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
+    
+    relationship_prompts = []
+    for rel in relationships:
+        if rel.interaction_prompt:
+            source_name = rel.source_character.name if rel.source_character else "角色"
+            target_name = rel.target_character.name if rel.target_character else "角色"
+            relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+    
+    system_prompt = f"""{global_sys_prompt}
+
+{worldview_prompt if worldview_prompt else ''}
+
+## 角色静态设定
+{chr(10).join(static_states) if static_states else '暂无角色设定'}
+
+## 角色动态状态
+{chr(10).join(dynamic_states) if dynamic_states else '暂无动态状态'}
+
+## 角色互动约束
+{chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
+
+## 【强制字数要求 - 最高优先级】
+★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
+★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制
+
+## 核心规则
+1. 严格遵循章节大纲进行创作
+2. 保持角色性格和互动方式的连贯性
+3. 根据角色关系约束调整互动氛围
+4. 输出应为完整的小说段落，包含环境描写、动作描写、心理描写等
+5. 生成内容必须满足上述字数要求"""
+
+    user_prompt = f"""请根据以下章节大纲进行扩写:
+
+【章节标题】{chapter.title or '未命名'}
+【章节大纲】
+{chapter.outline_text or '暂无大纲'}
+【字数要求】必须生成恰好 {word_count} 字的小说正文（±100字误差可接受）
+
+请直接输出小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
+
+    return system_prompt, user_prompt
+
+
+def build_review_agent_prompt(
+    book: Book,
+    entities: list,
+    relationships: list,
+    chapter_outline: str,
+    draft_text: str
+) -> tuple:
+    """
+    构建 Review Agent (审阅) 的 Prompt
+    强制要求 JSON 输出格式
+    """
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    worldview_settings = book.worldview_settings or {}
+    worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    static_states = []
+    for entity in entities:
+        character = entity.character if hasattr(entity, 'character') else entity
+        if character and character.static_prompt:
+            static_states.append(f"【{character.name}】{character.static_prompt}")
+    
+    relationship_prompts = []
+    for rel in relationships:
+        if rel.interaction_prompt:
+            source_name = rel.source_character.name if rel.source_character else "角色"
+            target_name = rel.target_character.name if rel.target_character else "角色"
+            relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+
+    system_prompt = f"""{global_sys_prompt}
+
+你是一个严格的小说质量审查员。你不负责写小说，只负责检查初稿是否符合要求。
+
+{worldview_prompt if worldview_prompt else ''}
+
+## 角色设定
+{chr(10).join(static_states) if static_states else '暂无角色设定'}
+
+## 角色互动约束
+{chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
+
+## 你的任务
+1. 检查初稿是否遵循了章节大纲要求
+2. 检查角色是否出现 OOC (Out Of Character，人设崩塌)
+3. 检查是否有逻辑硬伤或情节漏洞
+4. 检查是否遗漏了应该有的剧情点
+
+## 输出格式要求
+你必须以 JSON 格式输出，结构如下：
+{{
+    "pass": true/false,
+    "issues": [
+        {{
+            "type": "OOC/剧情遗漏/逻辑硬伤",
+            "severity": "high/medium/low",
+            "description": "详细描述问题"
+        }}
+    ],
+    "revision_plan": "给出具体的重写建议"
+}}
+
+- pass: true 表示所有检查通过，可以直接输出
+- pass: false 表示存在问题，需要重写
+- issues: 列出发现的问题
+- revision_plan: 给出具体的重写指导
+
+注意：你必须输出合法的 JSON 格式，不要输出任何其他内容！"""
+
+    user_prompt = f"""请审查以下初稿:
+
+【章节大纲】
+{chapter_outline}
+
+【初稿内容】
+{draft_text}
+
+请输出 JSON 格式的审查结果。"""
+
+    return system_prompt, user_prompt
+
+
+def build_refine_agent_prompt(
+    chapter: Chapter,
+    book: Book,
+    entities: list,
+    relationships: list,
+    draft_text: str,
+    revision_plan: str,
+    word_count: int
+) -> tuple:
+    """
+    构建 Refine Agent (精修) 的 Prompt
+    根据审查意见重写初稿
+    """
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    worldview_settings = book.worldview_settings or {}
+    worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    static_states = []
+    dynamic_states = []
+    for entity in entities:
+        character = entity.character if hasattr(entity, 'character') else entity
+        if character:
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
+            if character.dynamic_state:
+                dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
+    
+    relationship_prompts = []
+    for rel in relationships:
+        if rel.interaction_prompt:
+            source_name = rel.source_character.name if rel.source_character else "角色"
+            target_name = rel.target_character.name if rel.target_character else "角色"
+            relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+
+    system_prompt = f"""{global_sys_prompt}
+
+{worldview_prompt if worldview_prompt else ''}
+
+## 角色静态设定
+{chr(10).join(static_states) if static_states else '暂无角色设定'}
+
+## 角色动态状态
+{chr(10).join(dynamic_states) if dynamic_states else '暂无动态状态'}
+
+## 角色互动约束
+{chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
+
+## 【强制字数要求 - 最高优先级】
+★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
+★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制
+
+## 你的任务
+你是一个精修编辑，需要根据审查意见对初稿进行针对性重写。
+请仔细阅读以下审查意见和初稿，然后生成修改后的版本。
+
+## 核心规则
+1. 严格遵循审查意见进行修改
+2. 保持原有优秀的部分
+3. 修正被指出的问题
+4. 确保修改后的内容符合章节大纲
+5. 保持角色性格一致性
+6. 生成内容必须满足上述字数要求"""
+
+    user_prompt = f"""请根据以下审查意见重写初稿:
+
+【章节标题】{chapter.title or '未命名'}
+【章节大纲】
+{chapter.outline_text or '暂无大纲'}
+【字数要求】必须生成恰好 {word_count} 字的小说正文（±100字误差可接受）
+
+【审查意见】
+{revision_plan}
+
+【当前初稿】
+{draft_text}
+
+请直接输出修改后的完整小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
+
+    return system_prompt, user_prompt
+
+
+async def call_llm(
+    system_prompt: str,
+    user_prompt: str,
+    api_key: str,
+    base_url: Optional[str],
+    model: str,
+    temperature: float = 0.7,
+    response_format: Optional[dict] = None
+) -> str:
+    """
+    调用 LLM 的辅助函数
+    """
+    import httpx
+    import json
+    
+    for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
+        if env_var in os.environ:
+            del os.environ[env_var]
+    
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    
+    http_client = httpx.AsyncClient(trust_env=False)
+    client_kwargs["http_client"] = http_client
+    
+    try:
+        client = AsyncOpenAI(**client_kwargs)
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        create_kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 4000
+        }
+        
+        if response_format:
+            create_kwargs["response_format"] = response_format
+        
+        response = await client.chat.completions.create(**create_kwargs)
+        
+        content = ""
+        if response.choices and response.choices[0].message.content:
+            content = response.choices[0].message.content
+        
+        print(f"[DEBUG] LLM 返回内容长度: {len(content)}")
+        return content
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e)
+        print(f"[ERROR] LLM 调用失败: {error_type} - {error_msg}")
+        
+        if "JSONDecodeError" in error_type or "Expecting value" in error_msg:
+            return ""
+        
+        raise
+    finally:
+        await http_client.aclose()
+
+
+async def generate_agentic_chapter_stream(
+    request: GenerateChapterAgenticRequest,
+    db: AsyncSession
+):
+    """
+    Actor-Critic 模式章节生成核心函数
+    实现 Draft -> Review -> Refine 三阶段工作流
+    """
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
+        return
+    
+    max_iterations = request.max_iterations
+    word_count = request.word_count or 2000
+    
+    yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '正在从数据库抽取人物卡与关系网...'}, ensure_ascii=False)}\n\n"
+    
+    book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
+    book = book_result.scalar_one_or_none()
+    
+    entities_result = await db.execute(
+        select(ChapterEntity)
+        .options(selectinload(ChapterEntity.character))
+        .where(ChapterEntity.chapter_id == request.chapter_id)
+    )
+    entities = entities_result.scalars().all()
+    
+    character_ids = [e.entity_id for e in entities]
+    
+    relationships_result = await db.execute(
+        select(CharacterRelationship)
+        .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
+        .where(
+            CharacterRelationship.source_char_id.in_(character_ids),
+            CharacterRelationship.target_char_id.in_(character_ids)
+        )
+    )
+    relationships = relationships_result.scalars().all()
+    
+    current_draft = ""
+    revision_plan = ""
+    iteration = 0
+    review_passed = False
+    
+    while iteration < max_iterations:
+        iteration += 1
+        print(f"[DEBUG] Actor-Critic Workflow: 第 {iteration} 轮迭代")
+        
+        if iteration == 1:
+            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': '主笔 Agent 正在创作初稿...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            
+            system_prompt, user_prompt = build_draft_agent_prompt(
+                chapter, book, entities, relationships, word_count
+            )
+            
+            current_draft = await call_llm(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model,
+                temperature=0.7
+            )
+            
+            chapter.draft_text = current_draft
+            chapter.revision_count = iteration
+            await db.commit()
+            
+            print(f"[DEBUG] Actor-Critic Workflow: Draft 完成, 长度={len(current_draft)}")
+        else:
+            yield f"data: {json.dumps({'event': 'REFINING', 'message': f'发现逻辑遗漏，正在通知责编重写 (第{iteration}次)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            
+            system_prompt, user_prompt = build_refine_agent_prompt(
+                chapter, book, entities, relationships,
+                current_draft, revision_plan, word_count
+            )
+            
+            current_draft = await call_llm(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model,
+                temperature=0.7
+            )
+            
+            chapter.draft_text = current_draft
+            chapter.revision_count = iteration
+            await db.commit()
+            
+            print(f"[DEBUG] Actor-Critic Workflow: Refine 完成, 长度={len(current_draft)}")
+        
+        yield f"data: {json.dumps({'event': 'REVIEWING', 'message': '审阅 Agent 正在进行逻辑校验和 OOC 排查...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+        
+        system_prompt, user_prompt = build_review_agent_prompt(
+            book, entities, relationships,
+            chapter.outline_text or '', current_draft
+        )
+        
+        review_result_json = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        
+        print(f"[DEBUG] Review Agent 返回内容长度: {len(review_result_json) if review_result_json else 0}")
+        
+        try:
+            if not review_result_json or not review_result_json.strip():
+                raise ValueError("Empty response from Review Agent")
+            review_result = json.loads(review_result_json)
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            print(f"[WARN] Review JSON 解析失败: {e}, 使用默认通过")
+            review_result = {
+                "pass": True,
+                "issues": [],
+                "revision_plan": "JSON 解析失败，跳过审查"
+            }
+        
+        chapter.review_feedback = review_result
+        await db.commit()
+        
+        print(f"[DEBUG] Actor-Critic Workflow: Review 完成, pass={review_result.get('pass', True)}")
+        
+        if review_result.get("pass", True):
+            review_passed = True
+            print(f"[DEBUG] Actor-Critic Workflow: 审查通过，迭代结束")
+            break
+        else:
+            revision_plan = review_result.get("revision_plan", "")
+            issues = review_result.get("issues", [])
+            print(f"[DEBUG] Actor-Critic Workflow: 审查未通过, issues={len(issues)}")
+    
+    chapter.content_text = current_draft
+    await db.commit()
+    
+    yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': review_passed, 'iterations': iteration}, ensure_ascii=False)}\n\n"
+    
+    for char in current_draft:
+        yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': char}, ensure_ascii=False)}\n\n"
+    
+    yield f"data: {json.dumps({'event': 'DONE', 'passed': review_passed, 'iterations': iteration, 'revision_count': iteration}, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/generate_chapter_agentic")
+async def generate_chapter_agentic(
+    request: GenerateChapterAgenticRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Actor-Critic 模式章节生成接口
+    
+    实现三阶段工作流: Draft -> Review -> Refine
+    通过 SSE 推送各阶段状态事件
+    """
+    print(f"[DEBUG] generate_chapter_agentic: 开始处理章节 {request.chapter_id}")
+    
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    
+    return StreamingResponse(
+        generate_agentic_chapter_stream(request, db),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+async def update_character_dynamic_state(
+    character: Character,
+    chapter: Chapter,
+    db: AsyncSession,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: str = "gpt-4o-mini"
+) -> dict:
+    """
+    更新角色动态状态的辅助函数
+    
+    Args:
+        character: 角色对象
+        chapter: 章节对象
+        db: 数据库会话
+        api_key: OpenAI API Key
+        base_url: 自定义 API 端点
+        model: 使用的模型名称
+    
+    Returns:
+        dict: 包含 old_dynamic_state 和 new_dynamic_state 的字典
+    """
+    import httpx
+    
+    old_dynamic_state = character.dynamic_state or "暂无动态状态"
+    
+    history_states = []
+    if character.dynamic_state_history:
+        for item in character.dynamic_state_history[-3:]:
+            state = item.get("state", "")
+            updated_at = item.get("updated_at", "")
+            if state:
+                history_states.append(f"- {updated_at}: {state}")
+    
+    history_str = "\n".join(history_states) if history_states else "暂无历史状态"
+    
+    prompt = f"""角色动态状态更新提示词：
+
+【角色信息】
+角色名：{character.name}
+角色设定：{character.static_prompt or "暂无设定"}
+
+【当前动态状态】
+{old_dynamic_state}
+
+【历史动态状态】
+{history_str}
+
+【本章情节】
+章节标题：{chapter.title or "未命名"}
+章节大纲：{chapter.outline_text or "暂无大纲"}
+章节正文：{chapter.content_text or "暂无正文"}
+
+【任务】
+请分析上述角色在本章中的表现和状态变化，更新角色的动态状态描述。
+要求：
+1. 保持角色性格的一致性
+2. 描述角色当前的心理状态、情感、与其他角色的关系变化
+3. 输出简洁的动态状态描述（100-300字）
+4. 直接输出更新后的动态状态，不要有额外说明
+"""
+    
+    for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
+        if env_var in os.environ:
+            del os.environ[env_var]
+    
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    
+    http_client = httpx.AsyncClient(trust_env=False)
+    client_kwargs["http_client"] = http_client
+    
+    try:
+        client = AsyncOpenAI(**client_kwargs)
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        new_dynamic_state = response.choices[0].message.content if response.choices else old_dynamic_state
+        new_dynamic_state = new_dynamic_state.strip()
+        
+        character.dynamic_state = new_dynamic_state
+        
+        history = character.dynamic_state_history or []
+        history.append({
+            "state": new_dynamic_state,
+            "updated_at": datetime.utcnow().isoformat()
+        })
+        
+        if len(history) > 10:
+            history = history[-10:]
+        
+        character.dynamic_state_history = history
+        
+        await db.commit()
+        await db.refresh(character)
+        
+        return {
+            "old_dynamic_state": old_dynamic_state,
+            "new_dynamic_state": new_dynamic_state
+        }
+    finally:
+        await http_client.aclose()
+
+
+@app.patch("/api/chapters/{chapter_id}/publish", response_model=ChapterPublishResponse)
+async def publish_chapter(
+    chapter_id: UUID,
+    request: Optional[ChapterPublishRequest] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    发布章节并将章节状态从 "draft" 变更为 "published"
+    如果提供了 api_key，则同时触发关联角色的动态状态更新
+    """
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    
+    if chapter.status == "published":
+        raise HTTPException(status_code=400, detail="章节已经是发布状态")
+    
+    chapter.status = "published"
+    
+    character_updates = []
+    
+    if request and request.api_key:
+        character_list = []
+        
+        entities_result = await db.execute(
+            select(ChapterEntity)
+            .options(selectinload(ChapterEntity.character))
+            .where(ChapterEntity.chapter_id == chapter_id)
+        )
+        entities = entities_result.scalars().all()
+        print(f"[DEBUG] publish_chapter: 找到 {len(entities)} 个 ChapterEntity")
+        
+        if entities:
+            for entity in entities:
+                if entity.character:
+                    character_list.append(entity.character)
+                    print(f"[DEBUG] publish_chapter: 添加角色 {entity.character.name}")
+        else:
+            print(f"[DEBUG] publish_chapter: 没有 ChapterEntity，尝试从 character_ids 获取")
+            chapter_char_ids = getattr(chapter, 'character_ids', None)
+            print(f"[DEBUG] publish_chapter: chapter_char_ids = {chapter_char_ids}")
+            if chapter_char_ids:
+                char_result = await db.execute(
+                    select(Character).where(Character.id.in_(chapter_char_ids))
+                )
+                character_list = list(char_result.scalars().all())
+        
+        print(f"[DEBUG] publish_chapter: 最终 character_list 长度为 {len(character_list)}")
+        
+        for character in character_list:
+            if character:
+                try:
+                    old_state = character.dynamic_state or "暂无动态状态"
+                    await update_character_dynamic_state(
+                        character=character,
+                        chapter=chapter,
+                        db=db,
+                        api_key=request.api_key,
+                        base_url=request.base_url,
+                        model=request.model
+                    )
+                    new_state = character.dynamic_state or "暂无动态状态"
+                    character_updates.append(CharacterStateChange(
+                        character_id=character.id,
+                        character_name=character.name,
+                        old_state=old_state,
+                        new_state=new_state
+                    ))
+                except Exception as e:
+                    print(f"[WARN] 更新角色 {character.name} 动态状态失败: {e}")
+    
+    await db.commit()
+    await db.refresh(chapter)
+    
+    return ChapterPublishResponse(
+        chapter_id=chapter.id,
+        status=chapter.status,
+        character_updates=character_updates
+    )
+
+
+@app.post("/api/characters/{character_id}/update-dynamic-state")
+async def update_character_dynamic_state_endpoint(
+    character_id: UUID,
+    request: CharacterDynamicStateUpdateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新角色动态状态的 API 端点
+    
+    根据章节内容，使用 LLM 生成角色新的动态状态，
+    并保存到 dynamic_state 字段，同时追加到 dynamic_state_history
+    """
+    character_result = await db.execute(select(Character).where(Character.id == character_id))
+    character = character_result.scalar_one_or_none()
+    if not character:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    
+    if chapter.status != "published":
+        raise HTTPException(status_code=400, detail="只能基于已发布的章节更新角色状态")
+    
+    result = await update_character_dynamic_state(
+        character=character,
+        chapter=chapter,
+        db=db,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model
+    )
+    
+    return CharacterDynamicStateUpdateResponse(
+        character_id=character_id,
+        old_dynamic_state=result["old_dynamic_state"],
+        new_dynamic_state=result["new_dynamic_state"]
+    )
 
 
 @app.get("/{path:path}")

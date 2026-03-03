@@ -49,6 +49,9 @@ class ChapterBase(BaseModel):
     title: Optional[str] = Field(None, max_length=500)
     outline_text: Optional[str] = None
     content_text: Optional[str] = None
+    draft_text: Optional[str] = None
+    review_feedback: Optional[dict] = Field(default_factory=dict)
+    revision_count: int = Field(default=0)
     status: str = Field(default="draft")
 
 
@@ -104,9 +107,25 @@ class CharacterResponse(CharacterBase):
     id: UUID
     book_id: UUID
     created_at: datetime
+    dynamic_state_history: List[dict] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
+
+
+class CharacterDynamicStateUpdateRequest(BaseModel):
+    """角色动态状态更新请求模型"""
+    chapter_id: UUID
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+
+
+class CharacterDynamicStateUpdateResponse(BaseModel):
+    """角色动态状态更新响应模型"""
+    character_id: UUID
+    old_dynamic_state: str
+    new_dynamic_state: str
 
 
 class RelationshipBase(BaseModel):
@@ -163,6 +182,16 @@ class GenerateChapterRequest(BaseModel):
     word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
 
 
+class GenerateChapterAgenticRequest(BaseModel):
+    """Actor-Critic 模式章节生成请求模型"""
+    chapter_id: UUID
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+    word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
+    max_iterations: int = Field(default=2, ge=1, le=5, description="最大重写次数")
+
+
 class ChapterEntityLink(BaseModel):
     """章节-角色关联模型"""
     entity_id: UUID
@@ -173,3 +202,25 @@ class ChapterEntityCreate(BaseModel):
     """创建章节-角色关联请求模型"""
     entity_id: UUID
     entity_type: str = Field(default="character")
+
+
+class ChapterPublishRequest(BaseModel):
+    """章节发布请求模型"""
+    api_key: Optional[str] = Field(None, min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+
+
+class CharacterStateChange(BaseModel):
+    """角色状态变更模型"""
+    character_id: UUID
+    character_name: str
+    old_state: str
+    new_state: str
+
+
+class ChapterPublishResponse(BaseModel):
+    """章节发布响应模型"""
+    chapter_id: UUID
+    status: str
+    character_updates: List[CharacterStateChange] = Field(default_factory=list)

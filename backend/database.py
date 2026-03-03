@@ -81,6 +81,30 @@ async def run_migrations(conn):
             "definition": "JSONB DEFAULT '{}'",
             "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'books' AND column_name = 'worldview_settings'"
         },
+        {
+            "table": "characters",
+            "column": "dynamic_state_history",
+            "definition": "JSONB DEFAULT '[]'",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'characters' AND column_name = 'dynamic_state_history'"
+        },
+        {
+            "table": "chapters",
+            "column": "draft_text",
+            "definition": "TEXT",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'draft_text'"
+        },
+        {
+            "table": "chapters",
+            "column": "review_feedback",
+            "definition": "JSONB DEFAULT '{}'",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'review_feedback'"
+        },
+        {
+            "table": "chapters",
+            "column": "revision_count",
+            "definition": "INTEGER DEFAULT 0",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'revision_count'"
+        },
     ]
     
     for migration in migrations:

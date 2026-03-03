@@ -10,6 +10,7 @@ export interface Character {
   name: string
   static_prompt: string
   dynamic_state: string
+  dynamic_state_history?: Array<{ state: string; updated_at: string }>
   importance_level: number
 }
 

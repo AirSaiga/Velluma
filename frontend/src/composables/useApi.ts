@@ -122,7 +122,8 @@ export const chapterApi = {
   update: (id, data) => fetchApi(`/chapters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => fetchApi(`/chapters/${id}`, { method: 'DELETE' }),
   getEntities: (chapterId) => fetchApi(`/chapters/${chapterId}/entities`),
-  updateEntities: (chapterId, entityIds) => fetchApi(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) })
+  updateEntities: (chapterId, entityIds) => fetchApi(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
+  publish: (chapterId, data) => fetchApi(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) })
 }
 
 export const relationshipApi = {
@@ -255,5 +256,107 @@ export const generateApi = {
     }
     
     return await response.json()
+  },
+
+  streamAgentic: async (data, callbacks: {
+    onEvent?: (event: string, data: any) => void,
+    onChunk?: (chunk: string) => void,
+    onDone?: (result: any) => void,
+    onError?: (error: string) => void
+  }) => {
+    const baseUrl = await getApiBase()
+    console.log('[DEBUG] generateApi.streamAgentic: 开始请求', { baseUrl, chapter_id: data.chapter_id })
+    
+    fetch(`${baseUrl}/generate_chapter_agentic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(response => {
+      console.log('[DEBUG] generateApi.streamAgentic: 收到响应', { status: response.status, ok: response.ok, statusText: response.statusText })
+      
+      if (!response.ok) {
+        throw new Error(`生成请求失败: ${response.status} ${response.statusText}`)
+      }
+      
+      const reader = response.body?.getReader()
+      if (!reader) {
+        console.error('[DEBUG] generateApi.streamAgentic: 无法获取 reader')
+        callbacks.onError?.('无法读取响应')
+        return
+      }
+      
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let ended = false
+      
+      const finalize = () => {
+        if (ended) return
+        ended = true
+        reader.cancel().catch(() => {})
+      }
+      
+      function read() {
+        reader.read().then(({ done, value }) => {
+          console.log('[DEBUG] generateApi.streamAgentic: read()', { done, valueLength: value?.length })
+          
+          if (done) {
+            finalize()
+            return
+          }
+          
+          const chunk = decoder.decode(value, { stream: true })
+          console.log('[DEBUG] generateApi.streamAgentic: 解码 chunk', { chunkLength: chunk.length })
+          
+          buffer += chunk
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                console.log('[DEBUG] generateApi.streamAgentic: 收到数据', { event: data.event, hasContent: !!data.content, hasError: !!data.error, hasDone: !!data.done })
+                
+                if (data.error) {
+                  ended = true
+                  reader.cancel().catch(() => {})
+                  callbacks.onError?.(data.error)
+                  return
+                }
+                
+                if (data.event) {
+                  callbacks.onEvent?.(data.event, data)
+                  
+                  if (data.event === 'TEXT_CHUNK' && data.content) {
+                    callbacks.onChunk?.(data.content)
+                  } else if (data.event === 'DONE') {
+                    callbacks.onDone?.({
+                      passed: data.passed,
+                      iterations: data.iterations,
+                      revision_count: data.revision_count
+                    })
+                    finalize()
+                    return
+                  }
+                }
+              } catch (e) {
+                console.error('[DEBUG] generateApi.streamAgentic: JSON 解析错误', e)
+              }
+            }
+          }
+          
+          read()
+        }).catch(err => {
+          console.error('[DEBUG] generateApi.streamAgentic: read() 错误', err)
+          if (ended) return
+          callbacks.onError?.(err?.message || '未知错误')
+        })
+      }
+      
+      read()
+    }).catch(err => {
+      console.error('[DEBUG] generateApi.streamAgentic: fetch 错误', err)
+      callbacks.onError?.(err.message)
+    })
   }
 }

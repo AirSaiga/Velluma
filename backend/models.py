@@ -53,6 +53,9 @@ class Chapter(Base):
         title: 章节标题
         outline_text: 本章大纲
         content_text: 最终正文
+        draft_text: 主笔 Agent 生成的初稿
+        review_feedback: 审阅 Agent 返回的结构化质检报告 (JSONB)
+        revision_count: 当前章节经历的重写次数
         status: 状态 (draft/published)
         created_at: 创建时间
     """
@@ -64,6 +67,9 @@ class Chapter(Base):
     title = Column(String(500), nullable=True)
     outline_text = Column(Text, nullable=True)
     content_text = Column(Text, nullable=True)
+    draft_text = Column(Text, nullable=True)
+    review_feedback = Column(JSONB, default=dict)
+    revision_count = Column(Integer, default=0)
     status = Column(String(50), default="draft")
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -117,6 +123,7 @@ class Character(Base):
     aliases = Column(JSONB, default=list)
     static_prompt = Column(Text, nullable=True)
     dynamic_state = Column(Text, nullable=True)
+    dynamic_state_history = Column(JSONB, default=list)
     importance_level = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 

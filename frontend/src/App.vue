@@ -317,6 +317,16 @@ async function deleteCurrentBook() {
   }
 }
 
+async function loadCharacters() {
+  if (!currentBookId.value) return
+  try {
+    const chars = await characterApi.getAll(currentBookId.value)
+    characters.value = chars
+  } catch (error) {
+    console.error('加载角色失败:', error)
+  }
+}
+
 onMounted(async () => {
   const savedConfig = localStorage.getItem('velluma_api_config')
   if (savedConfig) {
@@ -407,6 +417,7 @@ onMounted(async () => {
               @delete-chapter="deleteChapter"
               @save-generated="saveGeneratedContent"
               @update-meta-collapsed="handleMetaCollapsedChange"
+              @refresh-characters="loadCharacters"
             />
           </div>
         </pane>
