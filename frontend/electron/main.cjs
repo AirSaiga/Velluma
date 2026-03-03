@@ -40,6 +40,12 @@ function waitForPort(port, timeout = 30000) {
 async function startBackend() {
   const port = FIXED_BACKEND_PORT
   console.log(`Starting backend on fixed port ${port}`)
+
+  try {
+    await waitForPort(port, 300)
+    console.log(`Backend already running on port ${port}`)
+    return port
+  } catch {}
   
   const projectRoot = dirname(dirname(__dirname))
   const venvPython = process.platform === 'win32' 
@@ -50,6 +56,10 @@ async function startBackend() {
     cwd: projectRoot,
     env: { ...process.env, VELLUMA_PORT: port.toString() },
     stdio: ['ignore', 'pipe', 'pipe']
+  })
+
+  backendProcess.on('error', (err) => {
+    console.error('Backend spawn failed:', err)
   })
 
   backendProcess.stdout.on('data', (data) => {

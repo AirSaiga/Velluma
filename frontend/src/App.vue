@@ -9,6 +9,7 @@ import SettingsModal from './components/SettingsModal.vue'
 import DebugPromptWindow from './components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from './composables/useApi'
 import { useTheme } from './composables/useTheme'
+import { loadUiPrefs, saveUiPrefs } from './composables/useUiPrefs'
 
 const { initTheme } = useTheme()
 
@@ -28,10 +29,13 @@ const apiConfig = ref({
   base_url: '',
   model: 'google/gemini-2.0-flash-001'
 })
+const uiPrefs = ref(loadUiPrefs())
 const loading = ref(false)
 const showBookModal = ref(false)
+const showManageBookModal = ref(false)
 const showSettingsModal = ref(false)
 const bookForm = ref({ title: '', genre: '', global_sys_prompt: '' })
+const manageBookForm = ref({ title: '', genre: '' })
 
 async function loadBooks() {
   try {
@@ -106,14 +110,32 @@ async function updateBook(data) {
     if (index !== -1) {
       books.value[index] = updated
     }
+    return updated
   } catch (error) {
     console.error('更新失败:', error)
+    throw error
   }
 }
 
 async function updateApiConfig(data) {
   apiConfig.value = { ...apiConfig.value, ...data }
   localStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
+}
+
+function handleSplitResized(sizes) {
+  if (!Array.isArray(sizes) || sizes.length !== 3) return
+  uiPrefs.value = { ...uiPrefs.value, splitSizes: sizes }
+  saveUiPrefs(uiPrefs.value)
+}
+
+function handleRightTabChange(tab) {
+  uiPrefs.value = { ...uiPrefs.value, rightTab: tab }
+  saveUiPrefs(uiPrefs.value)
+}
+
+function handleMetaCollapsedChange(val) {
+  uiPrefs.value = { ...uiPrefs.value, chapterMetaCollapsed: !!val }
+  saveUiPrefs(uiPrefs.value)
 }
 
 async function createCharacter(data) {
@@ -166,6 +188,18 @@ async function createRelationship(data) {
     relationships.value.push(newRel)
   } catch (error) {
     alert('创建失败: ' + error.message)
+  }
+}
+
+async function updateRelationship(id, data) {
+  try {
+    const updated = await relationshipApi.update(id, data)
+    const index = relationships.value.findIndex(r => r.id === id)
+    if (index !== -1) {
+      relationships.value[index] = updated
+    }
+  } catch (error) {
+    alert('更新失败: ' + error.message)
   }
 }
 
@@ -243,6 +277,46 @@ function getCurrentBook() {
   return books.value.find(b => b.id === currentBookId.value)
 }
 
+function openManageBookModal() {
+  const book = getCurrentBook()
+  if (!book) return
+  manageBookForm.value = {
+    title: book.title || '',
+    genre: book.genre || ''
+  }
+  showManageBookModal.value = true
+}
+
+async function saveManageBook() {
+  if (!currentBookId.value) return
+  if (!manageBookForm.value.title.trim()) return
+  await updateBook({
+    title: manageBookForm.value.title,
+    genre: manageBookForm.value.genre
+  })
+  showManageBookModal.value = false
+}
+
+async function deleteCurrentBook() {
+  if (!currentBookId.value) return
+  const book = getCurrentBook()
+  const ok = confirm(`确定要删除书籍 "${book?.title || ''}" 吗？此操作会删除其下所有章节与角色。`)
+  if (!ok) return
+  try {
+    const deletingId = currentBookId.value
+    await bookApi.delete(deletingId)
+    books.value = books.value.filter(b => b.id !== deletingId)
+    if (books.value.length > 0) {
+      currentBookId.value = books.value[0].id
+    } else {
+      currentBookId.value = null
+    }
+    showManageBookModal.value = false
+  } catch (error) {
+    alert('删除失败: ' + error.message)
+  }
+}
+
 onMounted(async () => {
   const savedConfig = localStorage.getItem('velluma_api_config')
   if (savedConfig) {
@@ -270,6 +344,17 @@ onMounted(async () => {
               {{ book.title }}
             </option>
           </select>
+
+          <button
+            @click="openManageBookModal"
+            :disabled="!currentBookId"
+            class="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] disabled:opacity-40 disabled:hover:bg-transparent rounded-lg transition-colors"
+            title="管理书籍"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+          </button>
           
           <button
             @click="showBookModal = true"
@@ -294,8 +379,8 @@ onMounted(async () => {
     </div>
     
     <div class="flex-1 min-h-0 relative">
-      <splitpanes class="default-theme" style="height: 100%">
-        <pane min-size="15" size="20">
+      <splitpanes class="default-theme" style="height: 100%" @resized="handleSplitResized">
+        <pane min-size="15" :size="uiPrefs.splitSizes[0]">
           <div class="h-full overflow-hidden bg-[var(--bg-secondary)] border-r border-[var(--border-color)]">
             <CharacterPanel
               :characters="characters"
@@ -304,30 +389,35 @@ onMounted(async () => {
               @update-character="updateCharacter"
               @delete-character="deleteCharacter"
               @create-relationship="createRelationship"
+              @update-relationship="updateRelationship"
               @delete-relationship="deleteRelationship"
             />
           </div>
         </pane>
         
-        <pane min-size="30">
+        <pane min-size="30" :size="uiPrefs.splitSizes[1]">
           <div class="h-full overflow-hidden bg-[var(--bg-primary)]">
             <ChapterEditor
               :chapters="chapters"
               :characters="characters"
               :api-config="apiConfig"
+              :meta-collapsed="uiPrefs.chapterMetaCollapsed"
               @create-chapter="createChapter"
               @update-chapter="updateChapter"
               @delete-chapter="deleteChapter"
               @save-generated="saveGeneratedContent"
+              @update-meta-collapsed="handleMetaCollapsedChange"
             />
           </div>
         </pane>
         
-        <pane min-size="15" size="20">
+        <pane min-size="15" :size="uiPrefs.splitSizes[2]">
           <div class="h-full overflow-hidden bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
             <BookConfigPanel
               :book-config="getCurrentBook() || {}"
-              @update-book-config="updateBook"
+              :update-book="updateBook"
+              :initial-tab="uiPrefs.rightTab"
+              @tab-change="handleRightTabChange"
             />
           </div>
         </pane>
@@ -390,6 +480,57 @@ onMounted(async () => {
           >
             创建
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showManageBookModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showManageBookModal = false">
+      <div class="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] p-6 w-full max-w-md mx-4">
+        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">管理书籍</h3>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">书名</label>
+            <input
+              v-model="manageBookForm.title"
+              type="text"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+              placeholder="输入书籍名称"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">类型</label>
+            <input
+              v-model="manageBookForm.genre"
+              type="text"
+              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-primary-500"
+              placeholder="如：科幻、奇幻、都市"
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between gap-3 mt-6">
+          <button
+            @click="deleteCurrentBook"
+            class="px-4 py-2 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+          >
+            删除书籍
+          </button>
+          <div class="flex gap-3">
+            <button
+              @click="showManageBookModal = false"
+              class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="saveManageBook"
+              class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+            >
+              保存
+            </button>
+          </div>
         </div>
       </div>
     </div>

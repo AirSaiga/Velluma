@@ -39,6 +39,10 @@ class BookResponse(BookBase):
         from_attributes = True
 
 
+class WorldviewUpdate(BaseModel):
+    worldview_settings: dict = Field(default_factory=dict)
+
+
 class ChapterBase(BaseModel):
     """章节基础模型"""
     chapter_number: int = Field(..., ge=1)

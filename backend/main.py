@@ -35,7 +35,8 @@ from backend.schemas import (
     RelationshipCreate, RelationshipResponse,
     MemoryChunkCreate, MemoryChunkResponse,
     GenerateChapterRequest,
-    ChapterEntityCreate
+    ChapterEntityCreate,
+    WorldviewUpdate
 )
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -182,7 +183,7 @@ async def get_worldview_settings(book_id: UUID, db: AsyncSession = Depends(get_d
 @app.patch("/api/books/{book_id}/worldview")
 async def update_worldview_settings(
     book_id: UUID,
-    worldview_settings: str,
+    payload: WorldviewUpdate,
     db: AsyncSession = Depends(get_db)
 ):
     """更新书籍的世界观设定"""
@@ -191,7 +192,7 @@ async def update_worldview_settings(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    book.worldview_settings = worldview_settings
+    book.worldview_settings = payload.worldview_settings or {}
     await db.commit()
     await db.refresh(book)
     return {"worldview_settings": book.worldview_settings}

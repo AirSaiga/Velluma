@@ -12,7 +12,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['create-character', 'update-character', 'delete-character', 'create-relationship', 'delete-relationship'])
+const emit = defineEmits(['create-character', 'update-character', 'delete-character', 'create-relationship', 'update-relationship', 'delete-relationship'])
 
 const searchQuery = ref('')
 const selectedCharacter = ref(null)
@@ -39,6 +39,7 @@ const relationshipForm = ref({
   affinity_score: 50,
   interaction_prompt: ''
 })
+const editingRelationshipId = ref(null)
 
 function openCreateDrawer() {
   selectedCharacter.value = null
@@ -91,7 +92,16 @@ function saveRelationship() {
     return
   }
   
-  emit('create-relationship', relationshipForm.value)
+  if (editingRelationshipId.value) {
+    emit('update-relationship', editingRelationshipId.value, relationshipForm.value)
+  } else {
+    emit('create-relationship', relationshipForm.value)
+  }
+  resetRelationshipForm()
+}
+
+function resetRelationshipForm() {
+  editingRelationshipId.value = null
   relationshipForm.value = {
     source_char_id: '',
     target_char_id: '',
@@ -99,6 +109,18 @@ function saveRelationship() {
     affinity_score: 50,
     interaction_prompt: ''
   }
+}
+
+function editRelationship(rel) {
+  editingRelationshipId.value = rel.id
+  relationshipForm.value = {
+    source_char_id: rel.source_char_id,
+    target_char_id: rel.target_char_id,
+    relation_type: rel.relation_type,
+    affinity_score: rel.affinity_score ?? 50,
+    interaction_prompt: rel.interaction_prompt ?? ''
+  }
+  showRelationshipPanel.value = true
 }
 
 function deleteRelationship(id) {
@@ -340,7 +362,14 @@ function getImportanceColor(level) {
             @click="saveRelationship"
             class="w-full px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
           >
-            添加关系
+            {{ editingRelationshipId ? '保存修改' : '添加关系' }}
+          </button>
+          <button
+            v-if="editingRelationshipId"
+            @click="resetRelationshipForm"
+            class="w-full px-4 py-2 bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-primary)] rounded-lg transition-colors"
+          >
+            取消编辑
           </button>
         </div>
         
@@ -357,14 +386,26 @@ function getImportanceColor(level) {
                 <span class="text-[var(--text-muted)]">{{ rel.relation_type }}</span>
                 <span class="text-[var(--text-primary)]">{{ getCharacterName(rel.target_char_id) }}</span>
               </div>
-              <button
-                @click="deleteRelationship(rel.id)"
-                class="text-[var(--text-muted)] hover:text-rose-400 transition-colors"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="editRelationship(rel)"
+                  class="text-[var(--text-muted)] hover:text-primary-400 transition-colors"
+                  title="编辑"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                  </svg>
+                </button>
+                <button
+                  @click="deleteRelationship(rel.id)"
+                  class="text-[var(--text-muted)] hover:text-rose-400 transition-colors"
+                  title="删除"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
             </div>
             <div v-if="relationships.length === 0" class="text-center py-4 text-[var(--text-muted)] text-sm">
               暂无关系配置

@@ -14,9 +14,10 @@ const props = defineProps<{
   chapters: Chapter[]
   characters: Character[]
   apiConfig: ApiConfig
+  metaCollapsed?: boolean
 }>()
 
-const emit = defineEmits(['create-chapter', 'update-chapter', 'delete-chapter', 'save-generated'])
+const emit = defineEmits(['create-chapter', 'update-chapter', 'delete-chapter', 'save-generated', 'update-meta-collapsed'])
 
 const selectedChapterId = ref<string | null>(null)
 const { isGenerating, generatedText, error, startGeneration, reset } = useChapterGenerator()
@@ -35,12 +36,12 @@ function selectChapter(chapter: Chapter) {
 
 function handleTitleInput(e: Event) {
   const target = e.target as HTMLInputElement
-  updateChapter({ title: target.value })
+  scheduleMetaUpdate({ title: target.value })
 }
 
 function handleOutlineInput(e: Event) {
   const target = e.target as HTMLTextAreaElement
-  updateChapter({ outline_text: target.value })
+  scheduleMetaUpdate({ outline_text: target.value })
 }
 
 function addChapter() {
@@ -59,6 +60,14 @@ function addChapter() {
 function updateChapter(updates) {
   if (!selectedChapter.value) return
   emit('update-chapter', selectedChapter.value.id, updates)
+}
+
+let metaUpdateTimeout: ReturnType<typeof setTimeout> | undefined
+function scheduleMetaUpdate(updates) {
+  clearTimeout(metaUpdateTimeout)
+  metaUpdateTimeout = setTimeout(() => {
+    updateChapter(updates)
+  }, 500)
 }
 
 function deleteChapter(chapter) {
@@ -93,6 +102,9 @@ function startGenerate() {
     if (!confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
       return
     }
+    if (editorRef.value) {
+      editorRef.value.clearContent()
+    }
   }
   
   reset()
@@ -116,6 +128,17 @@ function handleContentUpdate(content) {
   updateTimeout = setTimeout(() => {
     updateChapter({ content_text: content })
   }, 1000)
+}
+
+const localMetaCollapsed = ref(props.metaCollapsed ?? false)
+
+function toggleMetaCollapsed() {
+  localMetaCollapsed.value = !localMetaCollapsed.value
+  emit('update-meta-collapsed', localMetaCollapsed.value)
+}
+
+function getMetaCollapsedLabel() {
+  return localMetaCollapsed.value ? '展开信息' : '收起信息'
 }
 
 
@@ -173,70 +196,76 @@ function isCharacterSelected(charId) {
         </div>
       </div>
       
-      <div class="flex-1 overflow-y-auto p-4">
-        <div v-if="selectedChapter" class="space-y-4">
-          <div class="flex items-center gap-4">
+      <div class="flex-1 min-h-0 flex flex-col">
+        <div v-if="selectedChapter" class="flex flex-col min-h-0">
+          <div class="p-4 border-b border-[var(--border-color)] bg-[var(--bg-primary)] flex items-center gap-3">
             <input
               :value="selectedChapter.title"
               @input="handleTitleInput"
               class="flex-1 px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] font-medium focus:outline-none focus:border-primary-500"
               placeholder="章节标题"
             />
-          </div>
-          
-          <div>
-            <label class="block text-xs text-[var(--text-muted)] mb-2">出场人物</label>
-            <div class="flex flex-wrap gap-2 p-3 bg-[var(--bg-tertiary)] rounded-lg border border-[var(--border-color)]">
-              <button
-                v-for="char in characters"
-                :key="char.id"
-                @click="toggleCharacter(char.id)"
-                class="px-2.5 py-1 text-xs rounded-full border transition-all"
-                :class="isCharacterSelected(char.id) 
-                  ? 'bg-primary-600/20 border-primary-500 text-primary-400' 
-                  : 'bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--text-muted)]'"
-              >
-                {{ char.name }}
-              </button>
-              <span v-if="characters.length === 0" class="text-xs text-[var(--text-muted)]">
-                暂无角色，请在左侧添加
-              </span>
-            </div>
-          </div>
-          
-          <div>
-            <label class="block text-xs text-[var(--text-muted)] mb-2">剧情指令</label>
-            <textarea
-              :value="selectedChapter.outline_text"
-              @input="handleOutlineInput"
-              rows="4"
-              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
-              placeholder="本章要发生的情节..."
-            />
-          </div>
-          
-          <div class="flex justify-end">
             <button
-              @click="startGenerate"
-              :disabled="isGenerating || !selectedChapter.outline_text.trim()"
-              class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+              class="px-3 py-2 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
+              @click="toggleMetaCollapsed"
             >
-              <svg v-if="isGenerating" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-              </svg>
-              {{ isGenerating ? '生成中...' : '生成本章正文' }}
+              {{ getMetaCollapsedLabel() }}
             </button>
           </div>
-          
-          <div v-if="error" class="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg">
-            <p class="text-sm text-rose-400">{{ error }}</p>
+
+          <div v-show="!localMetaCollapsed" class="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-primary)] space-y-3">
+            <div>
+              <label class="block text-xs text-[var(--text-muted)] mb-2">出场人物</label>
+              <div class="flex flex-wrap gap-2 p-3 bg-[var(--bg-tertiary)] rounded-lg border border-[var(--border-color)] max-h-28 overflow-y-auto">
+                <button
+                  v-for="char in characters"
+                  :key="char.id"
+                  @click="toggleCharacter(char.id)"
+                  class="px-2.5 py-1 text-xs rounded-full border transition-all"
+                  :class="isCharacterSelected(char.id) 
+                    ? 'bg-primary-600/20 border-primary-500 text-primary-400' 
+                    : 'bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--text-muted)]'"
+                >
+                  {{ char.name }}
+                </button>
+                <span v-if="characters.length === 0" class="text-xs text-[var(--text-muted)]">
+                  暂无角色，请在左侧添加
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs text-[var(--text-muted)] mb-2">剧情指令</label>
+              <textarea
+                :value="selectedChapter.outline_text"
+                @input="handleOutlineInput"
+                rows="3"
+                class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
+                placeholder="本章要发生的情节..."
+              />
+            </div>
+
+            <div class="flex items-center justify-between gap-3">
+              <div v-if="error" class="text-sm text-rose-400 truncate">{{ error }}</div>
+              <div class="flex-1"></div>
+              <button
+                @click="startGenerate"
+                :disabled="isGenerating || !selectedChapter.outline_text.trim()"
+                class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+              >
+                <svg v-if="isGenerating" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                {{ isGenerating ? '生成中...' : '生成本章正文' }}
+              </button>
+            </div>
           </div>
-          
-          <div class="flex-1 min-h-[500px]">
+
+          <div class="flex-1 min-h-0 p-4">
             <RichTextEditor
               ref="editorRef"
               :model-value="selectedChapter.content_text"

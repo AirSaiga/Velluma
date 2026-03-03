@@ -11,42 +11,150 @@ const props = defineProps({
 
 const emit = defineEmits(['update-worldview'])
 
-const localWorldview = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
-const lastSaved = ref(false)
+const status = ref('idle')
+const errorText = ref('')
+const showImportExport = ref(false)
+const importExportText = ref('')
+
+const items = ref([])
+let autosaveTimer
 
 async function loadWorldview() {
   if (!props.bookId) return
   isLoading.value = true
   try {
     const data = await bookApi.getWorldview(props.bookId)
-    localWorldview.value = typeof data.worldview_settings === 'string' ? data.worldview_settings : JSON.stringify(data.worldview_settings || {})
+    items.value = normalizeToItems(data.worldview_settings)
+    status.value = 'idle'
+    errorText.value = ''
   } catch (error) {
     console.error('加载世界观设定失败:', error)
-    localWorldview.value = ''
+    items.value = []
+    status.value = 'error'
+    errorText.value = '加载失败'
   } finally {
     isLoading.value = false
+  }
+}
+
+function makeId() {
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function normalizeToItems(worldviewSettings) {
+  if (!worldviewSettings) return []
+
+  if (typeof worldviewSettings === 'string') {
+    try {
+      const parsed = JSON.parse(worldviewSettings)
+      return normalizeToItems(parsed)
+    } catch {
+      return [{ id: makeId(), title: '未结构化内容', content: worldviewSettings, collapsed: false }]
+    }
+  }
+
+  if (typeof worldviewSettings === 'object') {
+    if (worldviewSettings.version === 1 && Array.isArray(worldviewSettings.items)) {
+      return worldviewSettings.items.map((it) => ({
+        id: it.id || makeId(),
+        title: it.title || '',
+        content: it.content || '',
+        collapsed: !!it.collapsed
+      }))
+    }
+
+    const entries = Object.entries(worldviewSettings)
+    return entries.map(([k, v]) => ({
+      id: makeId(),
+      title: k,
+      content: typeof v === 'string' ? v : JSON.stringify(v ?? '', null, 2),
+      collapsed: false
+    }))
+  }
+
+  return []
+}
+
+function toPayload() {
+  return {
+    version: 1,
+    items: items.value.map((it) => ({
+      id: it.id,
+      title: it.title,
+      content: it.content,
+      collapsed: !!it.collapsed
+    }))
   }
 }
 
 async function saveWorldview() {
   if (!props.bookId) return
   isSaving.value = true
-  lastSaved.value = false
+  status.value = 'saving'
+  errorText.value = ''
   try {
     const data = await bookApi.updateWorldview(props.bookId, {
-      worldview_settings: localWorldview.value
+      worldview_settings: toPayload()
     })
     emit('update-worldview', data)
-    lastSaved.value = true
+    status.value = 'saved'
     setTimeout(() => {
-      lastSaved.value = false
-    }, 2000)
+      if (status.value === 'saved') status.value = 'idle'
+    }, 1500)
   } catch (error) {
     console.error('保存世界观设定失败:', error)
+    status.value = 'error'
+    errorText.value = error?.message || '保存失败'
   } finally {
     isSaving.value = false
+  }
+}
+
+function markDirty() {
+  if (isLoading.value) return
+  status.value = 'dirty'
+  errorText.value = ''
+  clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    if (status.value !== 'dirty' || isSaving.value) return
+    saveWorldview()
+  }, 1200)
+}
+
+function addItem() {
+  items.value.unshift({ id: makeId(), title: '', content: '', collapsed: false })
+  markDirty()
+}
+
+function removeItem(id) {
+  const ok = confirm('确定要删除这一条设定吗？')
+  if (!ok) return
+  items.value = items.value.filter((it) => it.id !== id)
+  markDirty()
+}
+
+function toggleItemCollapse(id) {
+  const idx = items.value.findIndex((it) => it.id === id)
+  if (idx === -1) return
+  items.value[idx].collapsed = !items.value[idx].collapsed
+  markDirty()
+}
+
+function openImportExport() {
+  showImportExport.value = true
+  importExportText.value = JSON.stringify(toPayload(), null, 2)
+}
+
+function applyImport() {
+  try {
+    const parsed = JSON.parse(importExportText.value || '')
+    items.value = normalizeToItems(parsed)
+    showImportExport.value = false
+    markDirty()
+  } catch {
+    alert('导入内容不是合法 JSON')
   }
 }
 
@@ -64,12 +172,24 @@ watch(() => props.bookId, (newId) => {
         世界观设定
       </label>
       <div class="flex items-center gap-2">
-        <span v-if="isSaving" class="text-xs text-[var(--text-muted)]">
-          保存中...
-        </span>
-        <span v-else-if="lastSaved" class="text-xs text-[var(--text-muted)]">
-          已保存
-        </span>
+        <span v-if="status === 'dirty'" class="text-xs text-[var(--text-muted)]">未保存</span>
+        <span v-else-if="status === 'saving'" class="text-xs text-[var(--text-muted)]">保存中...</span>
+        <span v-else-if="status === 'saved'" class="text-xs text-[var(--text-muted)]">已保存</span>
+        <span v-else-if="status === 'error'" class="text-xs text-rose-400">{{ errorText }}</span>
+        <button
+          @click="openImportExport"
+          class="px-3 py-1 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-primary)] rounded transition-colors"
+          :disabled="isLoading"
+        >
+          导入/导出
+        </button>
+        <button
+          @click="addItem"
+          class="px-3 py-1 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-primary)] rounded transition-colors"
+          :disabled="isLoading"
+        >
+          新增条目
+        </button>
         <button
           @click="saveWorldview"
           :disabled="isSaving"
@@ -82,23 +202,86 @@ watch(() => props.bookId, (newId) => {
     <p class="text-xs text-[var(--text-muted)] mb-2">
       定义故事的世界背景、规则、历史等设定，会在生成章节时自动融入
     </p>
-    <textarea
-      v-model="localWorldview"
-      @blur="saveWorldview"
-      rows="12"
-      class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
-      placeholder="例如：
-【时代背景】
-21世纪末，全球气候变暖导致海平面上升...
+    <div v-if="isLoading" class="text-xs text-[var(--text-muted)] mt-1">加载中...</div>
 
-【世界规则】
-这个世界的魔法基于星尘能量...
+    <div v-else class="space-y-3">
+      <div v-if="items.length === 0" class="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-muted)]">
+        暂无世界观条目，可点击“新增条目”开始添加
+      </div>
 
-【重要历史】
-三战结束后，联合国解体..."
-    />
-    <div v-if="isLoading" class="text-xs text-[var(--text-muted)] mt-1">
-      加载中...
+      <div
+        v-for="it in items"
+        :key="it.id"
+        class="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg"
+      >
+        <div class="flex items-center gap-2">
+          <button
+            class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded transition-colors"
+            @click="toggleItemCollapse(it.id)"
+            :title="it.collapsed ? '展开' : '收起'"
+          >
+            <svg v-if="it.collapsed" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <input
+            v-model="it.title"
+            @input="markDirty"
+            type="text"
+            class="flex-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500"
+            placeholder="条目标题（如：时代背景 / 世界规则 / 历史事件）"
+          />
+
+          <button
+            class="p-1 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+            @click="removeItem(it.id)"
+            title="删除"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+        </div>
+
+        <div v-show="!it.collapsed" class="mt-2">
+          <textarea
+            v-model="it.content"
+            @input="markDirty"
+            rows="6"
+            class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
+            placeholder="填写该条目的详细设定..."
+          />
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showImportExport" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showImportExport = false">
+      <div class="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">世界观导入 / 导出</h3>
+        <textarea
+          v-model="importExportText"
+          rows="14"
+          class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none font-mono"
+        />
+        <div class="flex justify-end gap-3 mt-4">
+          <button
+            @click="showImportExport = false"
+            class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            关闭
+          </button>
+          <button
+            @click="applyImport"
+            class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+          >
+            导入并应用
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

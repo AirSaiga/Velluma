@@ -97,6 +97,16 @@ function handleSave() {
   emit('save', { ...formData.value })
   emit('close')
 }
+
+function handleResetLocal() {
+  const ok = confirm('将清除本地保存的 API 配置、主题与布局偏好。不会删除任何书籍/章节/角色数据。确定继续？')
+  if (!ok) return
+  localStorage.removeItem('velluma_api_config')
+  localStorage.removeItem('velluma_theme')
+  localStorage.removeItem('velluma_ui_prefs_v1')
+  emit('close')
+  window.location.reload()
+}
 </script>
 
 <template>
@@ -190,6 +200,12 @@ function handleSave() {
 
       <!-- Footer -->
       <div class="p-4 border-t border-[var(--border-color)] flex justify-end space-x-3">
+        <button
+          @click="handleResetLocal"
+          class="px-4 py-2 text-sm font-medium text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+        >
+          重置本地设置
+        </button>
         <button 
           @click="$emit('close')"
           class="px-4 py-2 text-sm font-medium text-[var(--text-primary)] bg-transparent hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
