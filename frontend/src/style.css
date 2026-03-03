@@ -4,30 +4,38 @@
 
 /* 主题 CSS 变量 - 浅色主题 */
 :root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8fafc;
-  --bg-tertiary: #f1f5f9;
-  --text-primary: #1e293b;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
-  --hover-bg: #f1f5f9;
-  --scrollbar-thumb: #cbd5e1;
-  --scrollbar-thumb-hover: #94a3b8;
+  --bg-primary: #f5f3ee;
+  --bg-secondary: #f8f6f1;
+  --bg-tertiary: #efece4;
+  --bg-canvas: #f0ece3;
+  --bg-panel: #ece8de;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #8b95a7;
+  --border-color: #ddd8cd;
+  --hover-bg: #ece8de;
+  --scrollbar-thumb: #c6c1b4;
+  --scrollbar-thumb-hover: #9e9787;
+  --accent-500: #6366f1;
+  --accent-600: #4f46e5;
 }
 
 /* 主题 CSS 变量 - 深色主题 */
 :root.dark {
-  --bg-primary: #020617;
-  --bg-secondary: #0f172a;
-  --bg-tertiary: #1e293b;
-  --text-primary: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #64748b;
-  --border-color: #334155;
-  --hover-bg: #1e293b;
-  --scrollbar-thumb: #475569;
-  --scrollbar-thumb-hover: #64748b;
+  --bg-primary: #111318;
+  --bg-secondary: #181b22;
+  --bg-tertiary: #222632;
+  --bg-canvas: #141820;
+  --bg-panel: #202531;
+  --text-primary: #f2f4f8;
+  --text-secondary: #cad0da;
+  --text-muted: #8e97a7;
+  --border-color: #2e3442;
+  --hover-bg: #262c39;
+  --scrollbar-thumb: #4f5768;
+  --scrollbar-thumb-hover: #6a7488;
+  --accent-500: #818cf8;
+  --accent-600: #a5b4fc;
 }
 
 /* 全局样式 */
@@ -44,9 +52,11 @@ html, body, #app {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 /* 滚动条样式 */

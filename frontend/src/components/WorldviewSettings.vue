@@ -175,62 +175,58 @@ onUnmounted(() => {
 <template>
   <div class="worldview-editor">
     <div class="flex items-center justify-between mb-2">
-      <label class="block text-sm font-medium text-[var(--text-primary)]">
+      <label class="block text-xs font-medium text-[var(--text-primary)]">
         世界观设定
       </label>
-      <div class="flex items-center gap-2">
-        <span v-if="status === 'dirty'" class="text-xs text-[var(--text-muted)]">未保存</span>
-        <span v-else-if="status === 'saving'" class="text-xs text-[var(--text-muted)]">保存中...</span>
-        <span v-else-if="status === 'saved'" class="text-xs text-[var(--text-muted)]">已保存</span>
-        <span v-else-if="status === 'error'" class="text-xs text-rose-400">{{ errorText }}</span>
+      <div class="flex items-center gap-1">
         <button
           @click="openImportExport"
-          class="px-3 py-1 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-primary)] rounded transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-white hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
           :disabled="isLoading"
         >
           导入/导出
         </button>
         <button
           @click="addItem"
-          class="px-3 py-1 text-sm bg-[var(--bg-tertiary)] hover:bg-[var(--hover-bg)] text-[var(--text-primary)] rounded transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-white hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
           :disabled="isLoading"
         >
-          新增条目
+          +新增
         </button>
         <button
           @click="saveWorldview"
           :disabled="isSaving"
-          class="px-3 py-1 text-sm bg-primary-600 hover:bg-primary-500 disabled:bg-[var(--bg-tertiary)] text-white rounded transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-[var(--accent-500)] disabled:bg-[var(--bg-panel)] text-white rounded-lg transition-colors"
         >
           保存
         </button>
       </div>
     </div>
-    <p class="text-xs text-[var(--text-muted)] mb-2">
-      定义故事的世界背景、规则、历史等设定，会在生成章节时自动融入
+    <p class="text-[10px] text-[var(--text-muted)] mb-2">
+      定义世界背景、规则、历史等设定
     </p>
-    <div v-if="isLoading" class="text-xs text-[var(--text-muted)] mt-1">加载中...</div>
+    <div v-if="isLoading" class="text-[10px] text-[var(--text-muted)] mt-1">加载中...</div>
 
-    <div v-else class="space-y-3">
-      <div v-if="items.length === 0" class="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-muted)]">
-        暂无世界观条目，可点击“新增条目”开始添加
+    <div v-else class="space-y-2">
+      <div v-if="items.length === 0" class="p-2 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)]">
+        暂无条目，点击"+新增"开始添加
       </div>
 
       <div
         v-for="it in items"
         :key="it.id"
-        class="p-3 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg"
+        class="p-2 bg-[var(--bg-panel)] rounded-xl"
       >
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
           <button
-            class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded transition-colors"
+            class="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded transition-colors"
             @click="toggleItemCollapse(it.id)"
             :title="it.collapsed ? '展开' : '收起'"
           >
-            <svg v-if="it.collapsed" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-if="it.collapsed" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
-            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -239,40 +235,40 @@ onUnmounted(() => {
             v-model="it.title"
             @input="markDirty"
             type="text"
-            class="flex-1 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500"
-            placeholder="条目标题（如：时代背景 / 世界规则 / 历史事件）"
+            class="flex-1 px-2 py-1 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+            placeholder="条目标题"
           />
 
           <button
-            class="p-1 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+            class="p-0.5 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
             @click="removeItem(it.id)"
             title="删除"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
             </svg>
           </button>
         </div>
 
-        <div v-show="!it.collapsed" class="mt-2">
+        <div v-show="!it.collapsed" class="mt-1.5">
           <textarea
             v-model="it.content"
             @input="markDirty"
-            rows="6"
-            class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
-            placeholder="填写该条目的详细设定..."
+            rows="4"
+            class="w-full px-2 py-1.5 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+            placeholder="填写详细设定..."
           />
         </div>
       </div>
     </div>
 
     <div v-if="showImportExport" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showImportExport = false">
-      <div class="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">世界观导入 / 导出</h3>
         <textarea
           v-model="importExportText"
           rows="14"
-          class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none font-mono"
+          class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none font-mono"
         />
         <div class="flex justify-end gap-3 mt-4">
           <button
@@ -283,7 +279,7 @@ onUnmounted(() => {
           </button>
           <button
             @click="applyImport"
-            class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+            class="px-4 py-2 bg-[var(--accent-500)] text-white rounded-full transition-colors"
           >
             导入并应用
           </button>
