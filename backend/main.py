@@ -822,7 +822,7 @@ async def generate_chapter_sync(
         content = response.choices[0].message.content if response.choices else ""
         print(f"[DEBUG] generate_chapter_sync: 生成完成, 内容长度: {len(content)}")
         
-        return {"content": content}
+        return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}
     finally:
         await http_client.aclose()
 
@@ -1173,6 +1173,8 @@ async def generate_agentic_chapter_stream(
             system_prompt, user_prompt = build_draft_agent_prompt(
                 chapter, book, entities, relationships, word_count
             )
+            
+            yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
             
             current_draft = await call_llm(
                 system_prompt=system_prompt,

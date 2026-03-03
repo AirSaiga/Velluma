@@ -36,12 +36,22 @@ const showManageBookModal = ref(false)
 const showSettingsModal = ref(false)
 const bookForm = ref({ title: '', genre: '', global_sys_prompt: '' })
 const manageBookForm = ref({ title: '', genre: '' })
+const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
 
 async function loadBooks() {
   try {
     books.value = await bookApi.getAll()
-    if (books.value.length > 0 && !currentBookId.value) {
-      currentBookId.value = books.value[0].id
+    if (books.value.length === 0) {
+      currentBookId.value = null
+      return
+    }
+
+    const savedBookId = localStorage.getItem(CURRENT_BOOK_STORAGE_KEY)
+    const hasSavedBook = !!savedBookId && books.value.some(book => book.id === savedBookId)
+    const nextBookId = hasSavedBook ? savedBookId : books.value[0].id
+
+    if (currentBookId.value !== nextBookId) {
+      currentBookId.value = nextBookId
     }
   } catch (error) {
     console.error('加载书籍失败:', error)
@@ -84,7 +94,14 @@ async function loadCurrentBookData() {
   }
 }
 
-watch(currentBookId, loadCurrentBookData)
+watch(currentBookId, (newBookId) => {
+  if (newBookId) {
+    localStorage.setItem(CURRENT_BOOK_STORAGE_KEY, newBookId)
+  } else {
+    localStorage.removeItem(CURRENT_BOOK_STORAGE_KEY)
+  }
+  loadCurrentBookData()
+})
 
 async function createBook() {
   if (!bookForm.value.title.trim()) return
@@ -138,9 +155,10 @@ function handleMetaCollapsedChange(val) {
   saveUiPrefs(uiPrefs.value)
 }
 
-async function createCharacter(data) {
+async function createCharacter(data, onDone) {
   if (!currentBookId.value) {
     alert('请先创建或选择一本书籍')
+    onDone?.(false)
     return
   }
   try {
@@ -149,20 +167,24 @@ async function createCharacter(data) {
       book_id: currentBookId.value
     })
     characters.value.push(newChar)
+    onDone?.(true)
   } catch (error) {
     alert('创建失败: ' + error.message)
+    onDone?.(false)
   }
 }
 
-async function updateCharacter(id, data) {
+async function updateCharacter(id, data, onDone) {
   try {
     const updated = await characterApi.update(id, data)
     const index = characters.value.findIndex(c => c.id === id)
     if (index !== -1) {
       characters.value[index] = updated
     }
+    onDone?.(true)
   } catch (error) {
     alert('更新失败: ' + error.message)
+    onDone?.(false)
   }
 }
 

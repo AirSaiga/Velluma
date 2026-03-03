@@ -1,15 +1,31 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { readStoredPromptData, subscribePromptData } from '../composables/useApi'
 
 const systemPrompt = ref('')
 const userPrompt = ref('')
 const currentPrompt = ref(null)
+let unsubscribePromptChannel = null
 
 function handlePrompt(data) {
-  if (data && data.system_prompt && data.user_prompt) {
-    currentPrompt.value = data
-    systemPrompt.value = data.system_prompt
-    userPrompt.value = data.user_prompt
+  if (!data || typeof data !== 'object') return
+  const nextSystemPrompt = typeof data.system_prompt === 'string' ? data.system_prompt : ''
+  const nextUserPrompt = typeof data.user_prompt === 'string' ? data.user_prompt : ''
+  if (!nextSystemPrompt && !nextUserPrompt) return
+  currentPrompt.value = {
+    system_prompt: nextSystemPrompt,
+    user_prompt: nextUserPrompt
+  }
+  systemPrompt.value = nextSystemPrompt
+  userPrompt.value = nextUserPrompt
+}
+
+function handleStorageChange(event) {
+  if (event.key !== 'velluma_last_prompt' || !event.newValue) return
+  try {
+    handlePrompt(JSON.parse(event.newValue))
+  } catch (e) {
+    console.warn('解析 storage prompt 失败', e)
   }
 }
 
@@ -20,12 +36,23 @@ function clearPrompt() {
 }
 
 onMounted(() => {
+  const storedPrompt = readStoredPromptData()
+  if (storedPrompt) {
+    handlePrompt(storedPrompt)
+  }
+  unsubscribePromptChannel = subscribePromptData(handlePrompt)
+  window.addEventListener('storage', handleStorageChange)
   if (window.electronAPI) {
     window.electronAPI.on('prompt-data', handlePrompt)
   }
 })
 
 onUnmounted(() => {
+  if (unsubscribePromptChannel) {
+    unsubscribePromptChannel()
+    unsubscribePromptChannel = null
+  }
+  window.removeEventListener('storage', handleStorageChange)
   if (window.electronAPI) {
     window.electronAPI.removeListener('prompt-data', handlePrompt)
   }

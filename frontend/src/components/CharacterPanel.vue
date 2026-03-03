@@ -72,11 +72,18 @@ function saveCharacter() {
   if (!formData.value.name.trim()) return
   
   if (selectedCharacter.value) {
-    emit('update-character', selectedCharacter.value.id, formData.value)
+    emit('update-character', selectedCharacter.value.id, formData.value, (ok) => {
+      if (ok !== false) {
+        closeDrawer()
+      }
+    })
   } else {
-    emit('create-character', formData.value)
+    emit('create-character', formData.value, (ok) => {
+      if (ok !== false) {
+        closeDrawer()
+      }
+    })
   }
-  closeDrawer()
 }
 
 function deleteCharacter(character) {

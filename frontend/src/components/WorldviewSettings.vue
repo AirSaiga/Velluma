@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { bookApi } from '../composables/useApi'
 
 const props = defineProps({
@@ -163,6 +163,13 @@ watch(() => props.bookId, (newId) => {
     loadWorldview()
   }
 }, { immediate: true })
+
+onUnmounted(() => {
+  clearTimeout(autosaveTimer)
+  if (status.value === 'dirty' && !isSaving.value) {
+    saveWorldview()
+  }
+})
 </script>
 
 <template>

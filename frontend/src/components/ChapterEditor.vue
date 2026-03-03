@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useChapterGenerator } from '../composables/useChapterGenerator'
-import { generateApi, chapterApi } from '../composables/useApi'
+import { generateApi, chapterApi, publishPromptData } from '../composables/useApi'
 import RichTextEditor from './RichTextEditor.vue'
 import type { Chapter, Character } from '../types'
 
@@ -235,6 +235,7 @@ async function startGenerate() {
     isGenerating.value = true
     try {
       const result = await generateApi.generateSync(requestData)
+      publishPromptData(result.prompt)
       if (editorRef.value && result.content) {
         editorRef.value.clearContent()
         editorRef.value.insertContent(result.content)

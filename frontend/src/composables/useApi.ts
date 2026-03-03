@@ -56,6 +56,68 @@ interface FetchOptions {
 
 let apiBasePromise: Promise<string> | null = null
 
+const PROMPT_STORAGE_KEY = 'velluma_last_prompt'
+const PROMPT_CHANNEL_KEY = 'velluma_prompt_debug'
+let promptChannel: BroadcastChannel | null = null
+
+function normalizePromptData(data: any): { system_prompt: string; user_prompt: string } | null {
+  if (!data || typeof data !== 'object') return null
+  const system_prompt = typeof data.system_prompt === 'string' ? data.system_prompt : ''
+  const user_prompt = typeof data.user_prompt === 'string' ? data.user_prompt : ''
+  if (!system_prompt && !user_prompt) return null
+  return { system_prompt, user_prompt }
+}
+
+function getPromptChannel() {
+  if (promptChannel) return promptChannel
+  if (typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return null
+  promptChannel = new BroadcastChannel(PROMPT_CHANNEL_KEY)
+  return promptChannel
+}
+
+export function publishPromptData(data: any) {
+  const prompt = normalizePromptData(data)
+  if (!prompt) return
+  try {
+    localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(prompt))
+  } catch (e) {
+    console.warn('保存 prompt 到 localStorage 失败', e)
+  }
+  const channel = getPromptChannel()
+  if (channel) {
+    channel.postMessage(prompt)
+  }
+  if (window.electronAPI) {
+    window.electronAPI.send('prompt-data', prompt)
+  }
+}
+
+export function readStoredPromptData() {
+  try {
+    const raw = localStorage.getItem(PROMPT_STORAGE_KEY)
+    if (!raw) return null
+    return normalizePromptData(JSON.parse(raw))
+  } catch (e) {
+    console.warn('读取 localStorage prompt 失败', e)
+    return null
+  }
+}
+
+export function subscribePromptData(handler: (data: { system_prompt: string; user_prompt: string }) => void) {
+  const channel = getPromptChannel()
+  if (!channel) return () => {}
+  const listener = (event: MessageEvent) => {
+    const prompt = normalizePromptData(event.data)
+    if (prompt) {
+      handler(prompt)
+    }
+  }
+  channel.addEventListener('message', listener)
+  return () => {
+    channel.removeEventListener('message', listener)
+  }
+}
+
 async function fetchApi(url: string, options: FetchOptions = {}) {
   if (!apiBasePromise) {
     apiBasePromise = getApiBase()
@@ -192,10 +254,8 @@ export const generateApi = {
               try {
                 const data = JSON.parse(line.slice(6))
                 console.log('[DEBUG] generateApi.stream: 收到数据', { hasContent: !!data.content, hasError: !!data.error, hasDone: !!data.done, hasPrompt: !!data.prompt })
-                if (data.prompt && data.prompt.system_prompt && data.prompt.user_prompt) {
-                  if (window.electronAPI) {
-                    window.electronAPI.send('prompt-data', data.prompt)
-                  }
+                if (data.prompt) {
+                  publishPromptData(data.prompt)
                 } else if (data.content) {
                   hasContent = true
                   onChunk?.(data.content)
@@ -316,6 +376,9 @@ export const generateApi = {
               try {
                 const data = JSON.parse(line.slice(6))
                 console.log('[DEBUG] generateApi.streamAgentic: 收到数据', { event: data.event, hasContent: !!data.content, hasError: !!data.error, hasDone: !!data.done })
+                if (data.prompt) {
+                  publishPromptData(data.prompt)
+                }
                 
                 if (data.error) {
                   ended = true
