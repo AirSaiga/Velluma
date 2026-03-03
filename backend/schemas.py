@@ -14,6 +14,7 @@ class BookBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
+    worldview_settings: Optional[dict] = Field(default_factory=dict)
 
 
 class BookCreate(BookBase):
@@ -26,6 +27,7 @@ class BookUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
+    worldview_settings: Optional[dict] = None
 
 
 class BookResponse(BookBase):

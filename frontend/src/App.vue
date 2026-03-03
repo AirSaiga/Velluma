@@ -60,8 +60,19 @@ async function loadCurrentBookData() {
       relationshipApi.getAll(currentBookId.value)
     ])
     characters.value = chars
-    chapters.value = chaps
     relationships.value = rels
+    
+    const chaptersWithEntities = await Promise.all(
+      chaps.map(async (chapter) => {
+        try {
+          const entityData = await chapterApi.getEntities(chapter.id)
+          return { ...chapter, character_ids: entityData.entity_ids || [] }
+        } catch {
+          return { ...chapter, character_ids: [] }
+        }
+      })
+    )
+    chapters.value = chaptersWithEntities
   } catch (error) {
     console.error('加载数据失败:', error)
   } finally {
@@ -185,10 +196,22 @@ async function createChapter(data) {
 
 async function updateChapter(id, data) {
   try {
-    const updated = await chapterApi.update(id, data)
-    const index = chapters.value.findIndex(c => c.id === id)
-    if (index !== -1) {
-      chapters.value[index] = updated
+    const { character_ids, ...chapterData } = data
+    
+    if (Object.keys(chapterData).length > 0) {
+      const updated = await chapterApi.update(id, chapterData)
+      const index = chapters.value.findIndex(c => c.id === id)
+      if (index !== -1) {
+        chapters.value[index] = { ...chapters.value[index], ...updated }
+      }
+    }
+    
+    if (character_ids !== undefined) {
+      await chapterApi.updateEntities(id, character_ids)
+      const index = chapters.value.findIndex(c => c.id === id)
+      if (index !== -1) {
+        chapters.value[index].character_ids = character_ids
+      }
     }
   } catch (error) {
     alert('更新失败: ' + error.message)

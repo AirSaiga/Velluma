@@ -57,6 +57,7 @@ async def init_db():
     初始化数据库表结构
 
     在 FastAPI 应用启动时调用，创建所有表并确保 pgvector 扩展可用
+    同时执行必要的数据库迁移
     """
     from backend.models import Book, Chapter, ChapterEntity, Character, CharacterRelationship, MemoryChunk
     from sqlalchemy import text
@@ -64,3 +65,31 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
+        await run_migrations(conn)
+
+
+async def run_migrations(conn):
+    """
+    执行数据库迁移，自动添加缺失的列
+    """
+    from sqlalchemy import text
+    
+    migrations = [
+        {
+            "table": "books",
+            "column": "worldview_settings",
+            "definition": "JSONB DEFAULT '{}'",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'books' AND column_name = 'worldview_settings'"
+        },
+    ]
+    
+    for migration in migrations:
+        try:
+            result = await conn.execute(text(migration["check"]))
+            if result.fetchone() is None:
+                await conn.execute(text(
+                    f"ALTER TABLE {migration['table']} ADD COLUMN {migration['column']} {migration['definition']};"
+                ))
+                print(f"[MIGRATION] Added column {migration['table']}.{migration['column']}")
+        except Exception as e:
+            print(f"[MIGRATION] Skipped {migration['table']}.{migration['column']}: {e}")

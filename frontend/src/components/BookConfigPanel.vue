@@ -1,10 +1,11 @@
 <script setup>
 import { ref, watch } from 'vue'
+import WorldviewSettings from './WorldviewSettings.vue'
 
 const props = defineProps({
   bookConfig: {
     type: Object,
-    default: () => ({ global_sys_prompt: '' })
+    default: () => ({ global_sys_prompt: '', id: null })
   }
 })
 
@@ -18,6 +19,10 @@ watch(() => props.bookConfig, (newVal) => {
 
 function saveGlobalPrompt() {
   emit('update-book-config', { global_sys_prompt: localGlobalPrompt.value })
+}
+
+function handleWorldviewUpdate(data) {
+  console.log('世界观设定已更新:', data)
 }
 </script>
 
@@ -41,6 +46,13 @@ function saveGlobalPrompt() {
           rows="12"
           class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] text-sm focus:outline-none focus:border-primary-500 resize-none"
           placeholder="例如：这是一本硬科幻小说，文风偏向刘慈欣，冷峻克制..."
+        />
+      </div>
+
+      <div v-if="bookConfig.id" class="border-t border-[var(--border-color)] pt-6">
+        <WorldviewSettings
+          :book-id="bookConfig.id"
+          @update-worldview="handleWorldviewUpdate"
         />
       </div>
     </div>

@@ -89,6 +89,12 @@ function startGenerate() {
     return
   }
   
+  if (selectedChapter.value.content_text && selectedChapter.value.content_text.trim()) {
+    if (!confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
+      return
+    }
+  }
+  
   reset()
   
   startGeneration({

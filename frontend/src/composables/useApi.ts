@@ -96,7 +96,9 @@ export const bookApi = {
   get: (id) => fetchApi(`/books/${id}`),
   create: (data) => fetchApi('/books', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/books/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => fetchApi(`/books/${id}`, { method: 'DELETE' })
+  delete: (id) => fetchApi(`/books/${id}`, { method: 'DELETE' }),
+  getWorldview: (id) => fetchApi(`/books/${id}/worldview`),
+  updateWorldview: (id, data) => fetchApi(`/books/${id}/worldview`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 export const characterApi = {
@@ -118,7 +120,9 @@ export const chapterApi = {
   get: (id) => fetchApi(`/chapters/${id}`),
   create: (data) => fetchApi(`/books/${data.book_id}/chapters`, { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/chapters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => fetchApi(`/chapters/${id}`, { method: 'DELETE' })
+  delete: (id) => fetchApi(`/chapters/${id}`, { method: 'DELETE' }),
+  getEntities: (chapterId) => fetchApi(`/chapters/${chapterId}/entities`),
+  updateEntities: (chapterId, entityIds) => fetchApi(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) })
 }
 
 export const relationshipApi = {

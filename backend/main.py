@@ -169,6 +169,34 @@ async def delete_book(book_id: UUID, db: AsyncSession = Depends(get_db)):
     return {"message": "书籍已删除", "id": str(book_id)}
 
 
+@app.get("/api/books/{book_id}/worldview")
+async def get_worldview_settings(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """获取书籍的世界观设定"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"worldview_settings": book.worldview_settings or {}}
+
+
+@app.patch("/api/books/{book_id}/worldview")
+async def update_worldview_settings(
+    book_id: UUID,
+    worldview_settings: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """更新书籍的世界观设定"""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    book.worldview_settings = worldview_settings
+    await db.commit()
+    await db.refresh(book)
+    return {"worldview_settings": book.worldview_settings}
+
+
 @app.get("/api/books/{book_id}/chapters", response_model=List[ChapterResponse])
 async def get_chapters(book_id: UUID, db: AsyncSession = Depends(get_db)):
     """获取书籍的所有章节"""
@@ -233,6 +261,58 @@ async def delete_chapter(chapter_id: UUID, db: AsyncSession = Depends(get_db)):
     await db.delete(chapter)
     await db.commit()
     return {"message": "章节已删除", "id": str(chapter_id)}
+
+
+@app.put("/api/chapters/{chapter_id}/entities")
+async def update_chapter_entities(
+    chapter_id: UUID,
+    entity_ids: List[UUID],
+    db: AsyncSession = Depends(get_db)
+):
+    """批量更新章节的角色关联"""
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    existing_result = await db.execute(
+        select(ChapterEntity).where(ChapterEntity.chapter_id == chapter_id)
+    )
+    existing_entities = existing_result.scalars().all()
+    existing_ids = {e.entity_id for e in existing_entities}
+
+    new_ids = set(entity_ids)
+
+    for entity_id in new_ids - existing_ids:
+        character_result = await db.execute(select(Character).where(Character.id == entity_id))
+        if character_result.scalar_one_or_none():
+            new_entity = ChapterEntity(
+                chapter_id=chapter_id,
+                entity_id=entity_id,
+                entity_type="character"
+            )
+            db.add(new_entity)
+
+    for existing in existing_entities:
+        if existing.entity_id not in new_ids:
+            await db.delete(existing)
+
+    await db.commit()
+
+    return {"message": "角色关联已更新", "chapter_id": str(chapter_id)}
+
+
+@app.get("/api/chapters/{chapter_id}/entities")
+async def get_chapter_entities(
+    chapter_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取章节的角色关联"""
+    result = await db.execute(
+        select(ChapterEntity).where(ChapterEntity.chapter_id == chapter_id)
+    )
+    entities = result.scalars().all()
+    return {"entity_ids": [str(e.entity_id) for e in entities]}
 
 
 @app.post("/api/chapters/{chapter_id}/entities", response_model=ChapterResponse)
@@ -458,6 +538,8 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
 
     book = chapter.book
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    worldview_settings = book.worldview_settings
+    worldview_prompt = f"【世界观设定】\n{worldview_settings}" if worldview_settings else None
 
     entities_result = await db.execute(
         select(ChapterEntity)
@@ -499,6 +581,7 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession) -> dict:
 
     system_prompt_parts = [
         global_sys_prompt,
+        worldview_prompt if worldview_prompt else "",
         "\n\n## 角色静态设定",
         "\n".join(static_states) if static_states else "暂无角色设定",
         "\n\n## 角色动态状态",
