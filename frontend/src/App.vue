@@ -385,6 +385,20 @@ async function deleteChapter(id) {
   }
 }
 
+async function generateChapterEmbedding(id) {
+  const target = chapters.value.find((c) => c.id === id)
+  if (!target?.summary) {
+    alert('该章节暂无摘要，请先发布章节生成摘要')
+    return
+  }
+  try {
+    const result = await chapterApi.generateEmbedding(id, {})
+    alert(`向量生成成功！维度: ${result.vector_dim}\n预览: ${result.preview}`)
+  } catch (error) {
+    alert('生成失败: ' + error.message)
+  }
+}
+
 function openManageBookModal() {
   if (!currentBook.value) return
   manageBookForm.value = {
@@ -515,14 +529,25 @@ onMounted(async () => {
                   </p>
                   <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Ch.{{ chapter.chapter_number }}</p>
                 </div>
-                <button
-                  @click.stop="deleteChapter(chapter.id)"
-                  class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-rose-400 transition"
-                >
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                  </svg>
-                </button>
+                <div class="flex items-center gap-1">
+                  <button
+                    @click.stop="generateChapterEmbedding(chapter.id)"
+                    class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-indigo-500 transition"
+                    title="生成向量"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                  </button>
+                  <button
+                    @click.stop="deleteChapter(chapter.id)"
+                    class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-rose-400 transition"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </button>
             <div v-if="sortedChapters.length === 0" class="text-center py-4 text-xs text-[var(--text-muted)]">

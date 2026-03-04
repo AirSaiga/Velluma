@@ -95,6 +95,41 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
             await http_client.aclose()
 
 
+async def generate_summary(
+    text: str,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: str = "google/gemini-2.0-flash-001",
+) -> str:
+    """
+    生成章节摘要。
+    """
+    import asyncio
+    
+    system_prompt = "你是一个专业的小说编辑。请为以下章节生成 200 字以内的摘要，概括主要情节和关键伏笔。"
+    
+    # 简单的指数退避重试 (最多 3 次)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return await call_llm(
+                system_prompt=system_prompt,
+                user_prompt=text,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+            )
+        except Exception as e:
+            if attempt == max_retries - 1:
+                print(f"[Summary Error] Final attempt failed: {e}")
+                raise e
+            wait_time = (2 ** attempt) * 1  # 1s, 2s, 4s
+            print(f"[Summary Warning] Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+            await asyncio.sleep(wait_time)
+    return ""
+
+
+
 async def call_llm(
     system_prompt: str,
     user_prompt: str,
@@ -147,4 +182,45 @@ async def call_llm(
         raise
     finally:
         # 显式关闭，释放连接
-        await http_client.aclose()
+        if http_client is not None:
+            await http_client.aclose()
+
+
+async def get_embedding(
+    text: str,
+    api_key: str = None,
+    base_url: Optional[str] = None,
+    model: str = "text-embedding-v3",
+    timeout: int = 60,
+) -> list[float]:
+    """
+    调用阿里云 DashScope Embedding API 获取文本向量。
+    始终从环境变量 DASHSCOPE_API_KEY 读取，不使用前端传入的 api_key。
+    """
+    import dashscope
+    import os
+    from dashscope import TextEmbedding
+
+    api_key_to_use = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key_to_use:
+        print("[Embedding Error] No api key provided. Set DASHSCOPE_API_KEY environment variable.")
+        return []
+    
+    dashscope.api_key = api_key_to_use
+
+    try:
+        response = TextEmbedding.call(
+            model=TextEmbedding.Models.text_embedding_v2,
+            input=text,
+            timeout=timeout
+        )
+
+        if response.status_code == 200:
+            return response.output['embeddings'][0]['embedding']
+        else:
+            print(f"[Embedding Error] Status: {response.status_code}, Message: {response.message}")
+            return []
+    except Exception as e:
+        print(f"[Embedding Error] {e}")
+        return []
+

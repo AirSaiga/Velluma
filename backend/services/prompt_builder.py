@@ -118,13 +118,22 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     return {"system_prompt": system_prompt, "user_prompt": user_prompt, "chapter": chapter}
 
 
-def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, word_count: int):
+def build_draft_agent_prompt(
+    chapter: Chapter,
+    book: Book,
+    entities: list,
+    relationships: list,
+    word_count: int,
+    previous_summary: str = None,
+    relevant_memories: list = None
+):
     """
     构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
 
     与 build_chapter_prompt 的区别：
     - 该函数用于单轮生成，该函数用于代理工作流 (多轮迭代)
     - 输入是已加载的 ORM 对象，而非从 DB 查询
+    - 新增 context 注入：previous_summary (前情提要) 和 relevant_memories (RAG 检索)
 
     核心任务：根据章节大纲生成符合角色设定和关系约束的初稿。
     """
@@ -132,6 +141,18 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    prev_summary_prompt = f"## 前情提要\n{previous_summary}" if previous_summary else None
+    
+    memories_prompt = None
+    if relevant_memories:
+        memories_text = "\n".join([f"- {m.chunk_text}" for m in relevant_memories])
+        memories_prompt = f"## 相关记忆/伏笔\n{memories_text}"
+    
+    # Debug logging
+    print(f"[DEBUG] Prompt Builder - Summary present: {bool(prev_summary_prompt)}")
+    print(f"[DEBUG] Prompt Builder - Memories present: {bool(memories_prompt)}")
+
     static_states = []
     dynamic_states = []
     seen_character_ids = set()
@@ -153,6 +174,10 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
     system_prompt = f"""{global_sys_prompt}
 
 {worldview_prompt if worldview_prompt else ''}
+
+{prev_summary_prompt if prev_summary_prompt else ''}
+
+{memories_prompt if memories_prompt else ''}
 
 ## 角色静态设定
 {chr(10).join(static_states) if static_states else '暂无角色设定'}

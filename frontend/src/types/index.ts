@@ -21,6 +21,8 @@ export interface Chapter {
   title: string
   outline_text: string
   content_text: string
+  draft_text?: string
+  summary?: string
   status: string
   character_ids?: string[]
 }

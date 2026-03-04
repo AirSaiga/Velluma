@@ -38,6 +38,7 @@ async def update_character_dynamic_state(
     警示：若章节内容为空，LLM 可能产生不准确的推理。
     """
     import httpx
+    import asyncio
 
     # 步骤1：准备历史状态上下文 (最近3条)，帮助 LLM 理解状态演变
     old_dynamic_state = character.dynamic_state or "暂无动态状态"
@@ -69,35 +70,69 @@ async def update_character_dynamic_state(
 章节正文：{chapter.content_text or "暂无正文"}
 
 【任务】
-请分析上述角色在本章中的表现和状态变化，更新角色的动态状态描述。
-要求：
-1. 保持角色性格的一致性
-2. 描述角色当前的心理状态、情感、与其他角色的关系变化
-3. 输出简洁的动态状态描述，字数必须严格控制在 50-150 字之间，严禁超长
-4. 严禁罗列剧情流水账，只提取关键状态变化
-5. 直接输出更新后的动态状态，不要有额外说明
+请基于"当前动态状态"，结合"本章情节"中的新发展，更新角色的动态状态描述。
+
+【核心要求】
+1. **必须保留**关键身份信息（如年龄、家族、核心能力、职业等），不要丢失上下文。
+2. **整合**本章中发生的重大事件、心理变化和人际关系进展。
+3. 保持角色性格一致性。
+4. 字数控制在 100-200 字之间，内容要充实但精炼。
+5. 严禁罗列流水账，侧重于"状态"和"影响"。
+6. 直接输出更新后的段落，不要包含"更新后："等前缀。
 """
 
-    # 步骤3：调用 LLM 分析并更新状态
+    # 步骤3：调用 LLM 分析并更新状态 (增加重试机制)
     _clear_proxy_env()
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
-    http_client = httpx.AsyncClient(trust_env=False)
-    client_kwargs["http_client"] = http_client
-    try:
-        client = AsyncOpenAI(**client_kwargs)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
-            max_tokens=1000,
-        )
+    
+    max_retries = 3
+    new_state = None
+    
+    for attempt in range(max_retries):
+        http_client = None
+        try:
+            http_client = httpx.AsyncClient(trust_env=False)
+            client_kwargs["http_client"] = http_client
+            client = AsyncOpenAI(**client_kwargs)
+            
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=1000,
+            )
+            
+            if response.choices and response.choices[0].message.content:
+                new_state = response.choices[0].message.content.strip()
+                break
+                
+        except Exception as e:
+            if attempt == max_retries - 1:
+                print(f"[Character State Error] Final attempt failed for {character.name}: {e}")
+                # 抛出异常以便上层捕获
+                raise e
+            
+            wait_time = (2 ** attempt) * 1
+            print(f"[Character State Warning] Attempt {attempt + 1} failed for {character.name}, retrying in {wait_time}s: {e}")
+            await asyncio.sleep(wait_time)
+            
+        finally:
+            if http_client is not None:
+                await http_client.aclose()
+    
+    if new_state:
         # 步骤4：后处理 LLM 输出，去除常见的前缀干扰
-        new_dynamic_state = response.choices[0].message.content if response.choices else old_dynamic_state
+        llm_content = new_state
+        if not llm_content:
+            return {}
+
+        new_dynamic_state = llm_content.strip()
+        
         new_dynamic_state = re.sub(r"^[【\[].*?[】\]]\s*", "", new_dynamic_state.strip())
         new_dynamic_state = re.sub(r"^角色动态状态[：:]\s*", "", new_dynamic_state)
         new_dynamic_state = re.sub(r"^更新后的动态状态[：:]\s*", "", new_dynamic_state)
@@ -115,5 +150,5 @@ async def update_character_dynamic_state(
         await db.commit()
         await db.refresh(character)
         return {"old_dynamic_state": old_dynamic_state, "new_dynamic_state": new_dynamic_state}
-    finally:
-        await http_client.aclose()
+
+    return {}

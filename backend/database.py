@@ -146,6 +146,12 @@ async def run_migrations(conn):
         },
         {
             "table": "chapters",
+            "column": "summary",
+            "definition": "TEXT",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'summary'"
+        },
+        {
+            "table": "chapters",
             "column": "chapter_name",
             "definition": "VARCHAR(200)",
             "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'chapter_name'"

@@ -2,9 +2,12 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.dependencies import get_book_repository, get_memory_repository
-from backend.repositories import BookRepository, MemoryRepository
+from backend.core.dependencies import get_book_repository, get_memory_repository, get_chapter_repository, get_db
+from backend.models import MemoryChunk
+from backend.repositories import BookRepository, ChapterRepository, MemoryRepository
+from backend.repositories.base import QuerySpec
 from backend.schemas import MemoryChunkCreate, MemoryChunkResponse
 
 router = APIRouter(prefix="/api", tags=["memories"])
@@ -93,3 +96,73 @@ async def delete_memory(memory_id: UUID, repo: MemoryRepository = Depends(get_me
         raise HTTPException(status_code=404, detail="记忆片段不存在")
     await repo.delete(memory)
     return {"message": "记忆片段已删除", "id": str(memory_id)}
+
+
+# =============================================================================
+# 章节向量生成 - 用于测试 RAG 功能
+# =============================================================================
+
+from pydantic import BaseModel
+
+class GenerateEmbeddingRequest(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+@router.post("/chapters/{chapter_id}/generate-embedding")
+async def generate_chapter_embedding(
+    chapter_id: UUID,
+    request: GenerateEmbeddingRequest = None,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+    memory_repo: MemoryRepository = Depends(get_memory_repository),
+    db: AsyncSession = Depends(get_db),
+):
+    """手动为章节生成向量并存储到记忆库（用于测试 RAG 功能）
+
+    参数来源：
+    - chapter_id: 路径参数，章节 ID
+    - request: 请求体，包含 api_key, base_url, model
+
+    业务逻辑：
+    1. 获取章节的 summary 字段
+    2. 调用 embedding API 生成向量
+    3. 存储到 memory_chunks 表
+    """
+    chapter = await chapter_repo.get_by_id(chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    if not chapter.summary:
+        raise HTTPException(status_code=400, detail="章节暂无摘要，请先发布章节生成摘要")
+
+    from backend.services.llm_client import get_embedding
+
+    embedding = await get_embedding(
+        text=chapter.summary,
+        api_key=request.api_key,
+        base_url=request.base_url
+    )
+
+    if not embedding:
+        raise HTTPException(status_code=500, detail="向量生成失败，请检查 API Key 配置")
+
+    existing = await memory_repo.find_all(
+        spec=QuerySpec.create().where(MemoryChunk.chapter_id == chapter_id)
+    )
+    for mem in existing:
+        await memory_repo.delete(mem)
+
+    memory_data = {
+        "book_id": chapter.book_id,
+        "chapter_id": chapter_id,
+        "chunk_text": f"【第{chapter.chapter_number}章摘要】{chapter.summary}",
+        "embedding": embedding
+    }
+    await memory_repo.create(memory_data)
+
+    return {
+        "message": "向量生成成功",
+        "chapter_id": str(chapter_id),
+        "vector_dim": len(embedding),
+        "preview": chapter.summary[:100] + "..." if len(chapter.summary) > 100 else chapter.summary
+    }

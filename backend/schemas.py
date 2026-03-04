@@ -110,6 +110,7 @@ class ChapterBase(BaseModel):
     outline_text: Optional[str] = None
     content_text: Optional[str] = None
     draft_text: Optional[str] = None
+    summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
@@ -142,6 +143,7 @@ class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=500)
     outline_text: Optional[str] = None
     content_text: Optional[str] = None
+    summary: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -464,4 +466,5 @@ class ChapterPublishResponse(BaseModel):
     """
     chapter_id: UUID
     status: str
+    summary: Optional[str] = None
     character_updates: List[CharacterStateChange] = Field(default_factory=list)

@@ -30,6 +30,7 @@ const characterUpdates = ref<Array<{
   old_state: string
   new_state: string
 }>>([])
+const chapterSummary = ref<string | null>(null)
 
 const wordCount = ref(2000)
 const wordCountMin = ref(500)
@@ -104,11 +105,14 @@ async function publishChapter() {
       emit('refresh-characters')
       
       characterUpdates.value = result.character_updates || []
-      if (characterUpdates.value.length > 0) {
-        showPublishModal.value = true
-      } else {
-        alert('本章已发布！')
+      
+      // 直接从响应中获取摘要
+      if (result.summary) {
+        chapterSummary.value = result.summary
+        emit('update-chapter', selectedChapter.value.id, { summary: result.summary })
       }
+      
+      showPublishModal.value = true
     } catch (err: any) {
       publishError.value = err.message
       alert('发布失败: ' + err.message)
@@ -121,6 +125,7 @@ async function publishChapter() {
 function closePublishModal() {
   showPublishModal.value = false
   characterUpdates.value = []
+  chapterSummary.value = null
 }
 
 function toggleCharacter(charId) {
@@ -229,7 +234,8 @@ let updateTimeout: ReturnType<typeof setTimeout> | undefined
 function handleContentUpdate(content: string) {
   clearTimeout(updateTimeout)
   updateTimeout = setTimeout(() => {
-    updateChapter({ content_text: content })
+    // 同时更新 draft_text 和 content_text
+    updateChapter({ content_text: content, draft_text: content })
   }, 1000)
 }
 
@@ -384,7 +390,7 @@ function isCharacterSelected(charId: string) {
       <div class="rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] min-h-[60vh] flex flex-col">
         <RichTextEditor
           ref="editorRef"
-          :model-value="selectedChapter.content_text"
+          :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
           :disabled="isEditorDisabled"
           placeholder="在此处开始写作或生成内容..."
@@ -407,33 +413,59 @@ function isCharacterSelected(charId: string) {
   <div v-if="showPublishModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="closePublishModal">
     <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
       <div class="p-4 border-b border-white/60 flex items-center justify-between">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)]">本章已发布，角色动态状态更新</h3>
+        <h3 class="text-lg font-semibold text-[var(--text-primary)]">发布成功</h3>
         <button @click="closePublishModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
         </button>
       </div>
-      <div class="p-4 overflow-y-auto max-h-[60vh]">
-        <div v-for="update in characterUpdates" :key="update.character_id" class="mb-4 p-3 bg-[var(--bg-panel)] rounded-2xl">
-          <div class="flex items-center gap-2 mb-2">
-            <span class="font-medium text-primary-400">{{ update.character_name }}</span>
-          </div>
-          <div class="space-y-2 text-sm">
-            <div>
-              <span class="text-[var(--text-muted)]">旧状态：</span>
-              <p class="text-[var(--text-secondary)] mt-1">{{ update.old_state || '暂无' }}</p>
-            </div>
-            <div>
-              <span class="text-[var(--text-muted)]">新状态：</span>
-              <p class="text-[var(--text-primary)] mt-1">{{ update.new_state || '暂无' }}</p>
+      <div class="p-4 overflow-y-auto max-h-[70vh] space-y-6">
+        <!-- 摘要部分 -->
+        <div v-if="chapterSummary" class="bg-[var(--bg-panel)] rounded-xl p-4 border border-[var(--border-color)]">
+          <h4 class="text-sm font-semibold text-[var(--text-primary)] mb-2 flex items-center gap-2">
+            <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            本章摘要 (自动生成)
+          </h4>
+          <p class="text-sm text-[var(--text-secondary)] leading-relaxed">{{ chapterSummary }}</p>
+        </div>
+
+        <!-- 角色状态变更部分 -->
+        <div v-if="characterUpdates.length > 0">
+          <h4 class="text-sm font-semibold text-[var(--text-primary)] mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            角色状态更新
+          </h4>
+          <div class="grid gap-3">
+            <div v-for="update in characterUpdates" :key="update.character_id" class="p-3 bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)]">
+              <div class="flex items-center justify-between mb-2">
+                <span class="font-medium text-indigo-400 text-sm">{{ update.character_name }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-4 text-xs">
+                <div class="opacity-70">
+                  <div class="mb-1 text-[var(--text-muted)]">旧状态</div>
+                  <div class="text-[var(--text-secondary)] line-clamp-2">{{ update.old_state || '暂无' }}</div>
+                </div>
+                <div>
+                  <div class="mb-1 text-[var(--text-muted)]">新状态</div>
+                  <div class="text-[var(--text-primary)] line-clamp-2">{{ update.new_state || '暂无' }}</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+        
+        <div v-if="!chapterSummary && characterUpdates.length === 0" class="text-center text-[var(--text-muted)] py-4">
+          发布成功，暂无状态变更。
+        </div>
       </div>
       <div class="p-4 border-t border-white/60 flex justify-end">
-        <button @click="closePublishModal" class="px-4 py-2 bg-[var(--accent-500)] text-white rounded-full transition-colors">
-          确定
+        <button @click="closePublishModal" class="px-4 py-2 bg-[var(--accent-500)] text-white text-sm font-medium rounded-lg hover:bg-[var(--accent-600)] transition-colors">
+          完成
         </button>
       </div>
     </div>

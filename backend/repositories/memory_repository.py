@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from backend.models import MemoryChunk
@@ -37,3 +37,17 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         return await self.find_all(
             spec=spec
         )
+
+    async def search_similar(self, embedding: List[float], book_id: UUID, limit: int = 5):
+        """
+        向量相似度检索。
+        """
+        from sqlalchemy import select
+
+        stmt = select(MemoryChunk).where(MemoryChunk.book_id == book_id)
+        # 使用 cosine distance (<=>) 进行排序
+        stmt = stmt.order_by(MemoryChunk.embedding.cosine_distance(embedding)).limit(limit)
+
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+

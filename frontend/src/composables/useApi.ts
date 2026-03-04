@@ -185,7 +185,8 @@ export const chapterApi = {
   delete: (id) => fetchApi(`/chapters/${id}`, { method: 'DELETE' }),
   getEntities: (chapterId) => fetchApi(`/chapters/${chapterId}/entities`),
   updateEntities: (chapterId, entityIds) => fetchApi(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
-  publish: (chapterId, data) => fetchApi(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) })
+  publish: (chapterId, data) => fetchApi(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
+  generateEmbedding: (chapterId, apiConfig) => fetchApi(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify(apiConfig || {}) })
 }
 
 export const relationshipApi = {

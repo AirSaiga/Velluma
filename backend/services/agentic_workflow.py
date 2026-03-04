@@ -4,9 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity
+from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, MemoryChunk
+from backend.repositories import MemoryRepository
 from backend.schemas import GenerateChapterAgenticRequest
-from backend.services.llm_client import call_llm
+from backend.services.llm_client import call_llm, get_embedding, generate_summary
 from backend.services.prompt_builder import (
     build_draft_agent_prompt,
     build_refine_agent_prompt,
@@ -68,6 +69,39 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     )
     relationships = relationships_result.scalars().all()
 
+    # 步骤2.5：增强上下文 (前情提要 + RAG)
+    yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '正在回顾前文与检索相关伏笔...'}, ensure_ascii=False)}\n\n"
+
+    # 1. 获取上一章摘要
+    prev_chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
+    )
+    prev_chapter = prev_chapter_result.scalar_one_or_none()
+    previous_summary = prev_chapter.summary if prev_chapter else None
+    
+    # Debug log for context injection
+    print(f"[DEBUG] Context Injection - Chapter {chapter.chapter_number}")
+    print(f"[DEBUG] Previous Summary (Ch {chapter.chapter_number - 1}): {bool(previous_summary)}")
+    if previous_summary:
+        print(f"[DEBUG] Summary Preview: {previous_summary[:50]}...")
+
+    # 2. RAG 检索
+    relevant_memories = []
+    if chapter.outline_text:
+        try:
+            embedding = await get_embedding(chapter.outline_text, request.api_key, request.base_url)
+            if embedding:
+                memory_repo = MemoryRepository(db)
+                relevant_memories = await memory_repo.search_similar(embedding, chapter.book_id, limit=3)
+                print(f"[DEBUG] RAG Search: Found {len(relevant_memories)} relevant memories")
+                for m in relevant_memories:
+                    print(f"[DEBUG] Memory: {m.chunk_text[:50]}...")
+            else:
+                print("[DEBUG] RAG Search: Failed to generate embedding")
+        except Exception as e:
+            print(f"[RAG Error] {e}")
+
     # 迭代状态初始化
     current_draft = ""
     revision_plan = ""
@@ -80,7 +114,11 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
         if iteration == 1:
             # 首次迭代：生成初稿
             yield f"data: {json.dumps({'event': 'DRAFTING', 'message': '主笔 Agent 正在创作初稿...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            system_prompt, user_prompt = build_draft_agent_prompt(chapter, book, entities, relationships, word_count)
+            system_prompt, user_prompt = build_draft_agent_prompt(
+                chapter, book, entities, relationships, word_count,
+                previous_summary=previous_summary,
+                relevant_memories=relevant_memories
+            )
             yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
             current_draft = await call_llm(
                 system_prompt=system_prompt,

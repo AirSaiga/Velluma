@@ -87,6 +87,7 @@ class Chapter(Base):
     outline_text = Column(Text, nullable=True)
     content_text = Column(Text, nullable=True)
     draft_text = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
     review_feedback = Column(JSONB, default=dict)
     revision_count = Column(Integer, default=0)
     status = Column(String(50), default="draft")
