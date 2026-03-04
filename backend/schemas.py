@@ -46,6 +46,7 @@ class WorldviewUpdate(BaseModel):
 class ChapterBase(BaseModel):
     """章节基础模型"""
     chapter_number: int = Field(..., ge=1)
+    chapter_name: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
     outline_text: Optional[str] = None
     content_text: Optional[str] = None
@@ -63,6 +64,7 @@ class ChapterCreate(ChapterBase):
 class ChapterUpdate(BaseModel):
     """更新章节请求模型"""
     chapter_number: Optional[int] = Field(None, ge=1)
+    chapter_name: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
     outline_text: Optional[str] = None
     content_text: Optional[str] = None

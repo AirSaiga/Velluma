@@ -64,6 +64,7 @@ class Chapter(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     chapter_number = Column(Integer, nullable=False)
+    chapter_name = Column(String(200), nullable=True)
     title = Column(String(500), nullable=True)
     outline_text = Column(Text, nullable=True)
     content_text = Column(Text, nullable=True)

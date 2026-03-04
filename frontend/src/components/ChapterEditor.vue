@@ -139,6 +139,12 @@ function toggleCharacter(charId) {
 
 const editorRef = ref<any>(null)
 
+let generateStartTime = 0
+function getDurationText() {
+  const duration = (Date.now() - generateStartTime) / 1000
+  return `耗时 ${duration.toFixed(1)} 秒`
+}
+
 async function startGenerate() {
   if (!selectedChapter.value || !props.apiConfig.api_key) {
     alert('请先选择章节并配置 API Key')
@@ -158,6 +164,7 @@ async function startGenerate() {
   }
   
   reset()
+  generateStartTime = Date.now()
   
   const requestData = {
     chapter_id: selectedChapter.value.id,
@@ -182,9 +189,10 @@ async function startGenerate() {
         if (editorRef.value) {
           editorRef.value.flushBuffer()
         }
+        const durationText = getDurationText()
         const statusMsg = result.passed 
-          ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次`
-          : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次`
+          ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次 (${durationText})`
+          : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次 (${durationText})`
         alert(statusMsg)
       }
     })
@@ -197,7 +205,7 @@ async function startGenerate() {
       if (editorRef.value) {
         editorRef.value.flushBuffer()
       }
-      alert('本章正文生成完成！')
+      alert(`本章正文生成完成！(${getDurationText()})`)
     })
   } else {
     isGenerating.value = true
@@ -208,7 +216,7 @@ async function startGenerate() {
         editorRef.value.clearContent()
         editorRef.value.insertContent(result.content)
       }
-      alert('本章正文生成完成！')
+      alert(`本章正文生成完成！(${getDurationText()})`)
     } catch (err) {
       alert('生成失败: ' + (err as Error).message)
     } finally {
@@ -269,7 +277,7 @@ function isCharacterSelected(charId: string) {
       <div class="flex items-center justify-between gap-3">
         <div class="flex-1 flex items-center gap-2">
           <span class="text-lg font-bold text-[var(--text-primary)] shrink-0">
-            第{{ selectedChapter.chapter_number }}章
+            {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}
           </span>
           <input
             :value="selectedChapter.title"

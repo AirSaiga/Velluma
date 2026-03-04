@@ -89,22 +89,39 @@ let contentBuffer = ''
 
 const insertContent = (content) => {
   if (editor.value) {
-    contentBuffer += content
-    const buffer = contentBuffer.trim()
+    // 1. 标准化换行符：统一将 \r\n 转换为 \n
+    let normalizedContent = content.replace(/\r\n/g, '\n')
     
-    const hasParagraphBreak = buffer.includes('。</p>') || buffer.includes('！</p>') || buffer.includes('？</p>') || 
-                             buffer.includes('。\n') || buffer.includes('！\n') || buffer.includes('？\n') ||
-                             buffer.includes('。</') || buffer.includes('！</') || buffer.includes('？</')
+    // 2. 将内容追加到缓冲区
+    contentBuffer += normalizedContent
     
-    if (hasParagraphBreak) {
-      if (buffer.includes('<')) {
-        editor.value.commands.insertContent(contentBuffer)
-      } else {
-        const paragraphs = buffer.split(/\n\n+/)
-        const htmlContent = paragraphs.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
-        editor.value.commands.insertContent(htmlContent)
+    // 3. 处理缓冲区：寻找确定的段落结束标记（双换行）
+    if (contentBuffer.includes('\n\n')) {
+      // 找到最后一个双换行的位置
+      const lastSplitIndex = contentBuffer.lastIndexOf('\n\n')
+      
+      // 提取可以渲染的完整段落部分
+      const toRender = contentBuffer.substring(0, lastSplitIndex)
+      
+      // 更新缓冲区，只保留剩余部分（跳过那个 \n\n）
+      contentBuffer = contentBuffer.substring(lastSplitIndex + 2)
+      
+      if (toRender) {
+        // 分割段落
+        const paragraphs = toRender.split(/\n\n+/)
+        
+        // 生成 HTML：
+        // 1. 过滤空段落
+        // 2. 移除段落内部的单个换行符 \n（这是关键：避免段落内断行）
+        const htmlContent = paragraphs
+          .filter(p => p.trim())
+          .map(p => `<p>${p.replace(/\n/g, '')}</p>`)
+          .join('')
+          
+        if (htmlContent) {
+          editor.value.commands.insertContent(htmlContent)
+        }
       }
-      contentBuffer = ''
     }
   }
 }
@@ -114,10 +131,14 @@ const flushBuffer = () => {
     const buffer = contentBuffer.trim()
     if (buffer) {
       if (buffer.includes('<')) {
+        // 如果包含 HTML 标签，直接插入
         editor.value.commands.insertContent(buffer)
       } else {
+        // 按双换行分割
         const paragraphs = buffer.split(/\n\n+/)
-        const htmlContent = paragraphs.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
+        const htmlContent = paragraphs
+          .map(p => `<p>${p.replace(/\n/g, '')}</p>`)
+          .join('')
         editor.value.commands.insertContent(htmlContent)
       }
     }

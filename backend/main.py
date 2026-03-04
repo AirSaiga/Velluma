@@ -16,6 +16,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -241,7 +242,11 @@ async def create_chapter(book_id: UUID, chapter_data: ChapterCreate, db: AsyncSe
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    chapter = Chapter(**chapter_data.model_dump())
+    chapter_payload = chapter_data.model_dump()
+    if not chapter_payload.get("chapter_name"):
+        chapter_payload["chapter_name"] = f"第{chapter_payload['chapter_number']}章"
+
+    chapter = Chapter(**chapter_payload)
     db.add(chapter)
     await db.commit()
     await db.refresh(chapter)
@@ -259,6 +264,8 @@ async def update_chapter(chapter_id: UUID, chapter_data: ChapterUpdate, db: Asyn
     update_dict = chapter_data.model_dump(exclude_unset=True)
     for key, value in update_dict.items():
         setattr(chapter, key, value)
+    if not chapter.chapter_name:
+        chapter.chapter_name = f"第{chapter.chapter_number}章"
 
     await db.commit()
     await db.refresh(chapter)
@@ -552,6 +559,7 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession, word_count: i
     print(f"[DEBUG] build_chapter_prompt: 找到章节: {chapter.title}")
 
     book = chapter.book
+    chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings
     worldview_prompt = f"【世界观设定】\n{worldview_settings}" if worldview_settings else None
@@ -567,10 +575,12 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession, word_count: i
     static_states = []
     dynamic_states = []
     character_ids = []
+    seen_character_ids = set()
 
     for entity in entities:
         character = entity.character
-        if character:
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
             character_ids.append(character.id)
             if character.static_prompt:
                 static_states.append(f"【{character.name}】{character.static_prompt}")
@@ -613,12 +623,15 @@ async def build_chapter_prompt(chapter_id: UUID, db: AsyncSession, word_count: i
         "3. 根据角色关系约束调整互动氛围",
         "4. 输出应为完整的小说段落，包含环境描写、动作描写、心理描写等",
         "5. 生成内容必须满足上述字数要求",
+        "6. 段落之间请使用双换行符（\\n\\n）分隔，以确保排版清晰。",
+        "7. 严禁使用 Markdown 格式（如加粗、斜体、列表等），仅输出纯文本。",
     ]
 
     system_prompt = "\n".join(system_prompt_parts)
 
     user_prompt = f"""请根据以下章节大纲进行扩写:
 
+【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
@@ -841,15 +854,18 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
     Returns:
         (system_prompt, user_prompt)
     """
+    chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     
     static_states = []
     dynamic_states = []
+    seen_character_ids = set()
     for entity in entities:
         character = entity.character if hasattr(entity, 'character') else entity
-        if character:
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
             if character.static_prompt:
                 static_states.append(f"【{character.name}】{character.static_prompt}")
             if character.dynamic_state:
@@ -884,10 +900,13 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
 2. 保持角色性格和互动方式的连贯性
 3. 根据角色关系约束调整互动氛围
 4. 输出应为完整的小说段落，包含环境描写、动作描写、心理描写等
-5. 生成内容必须满足上述字数要求"""
+5. 生成内容必须满足上述字数要求
+6. 段落之间请使用双换行符（\\n\\n）分隔，以确保排版清晰。
+7. 严禁使用 Markdown 格式（如加粗、斜体、列表等），仅输出纯文本。"""
 
     user_prompt = f"""请根据以下章节大纲进行扩写:
 
+【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
@@ -899,6 +918,7 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
 
 
 def build_review_agent_prompt(
+    chapter: Chapter,
     book: Book,
     entities: list,
     relationships: list,
@@ -909,15 +929,19 @@ def build_review_agent_prompt(
     构建 Review Agent (审阅) 的 Prompt
     强制要求 JSON 输出格式
     """
+    chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     
     static_states = []
+    seen_character_ids = set()
     for entity in entities:
         character = entity.character if hasattr(entity, 'character') else entity
-        if character and character.static_prompt:
-            static_states.append(f"【{character.name}】{character.static_prompt}")
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
     
     relationship_prompts = []
     for rel in relationships:
@@ -967,6 +991,8 @@ def build_review_agent_prompt(
 
     user_prompt = f"""请审查以下初稿:
 
+【章节名】{chapter_name}
+【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter_outline}
 
@@ -991,15 +1017,18 @@ def build_refine_agent_prompt(
     构建 Refine Agent (精修) 的 Prompt
     根据审查意见重写初稿
     """
+    chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     
     static_states = []
     dynamic_states = []
+    seen_character_ids = set()
     for entity in entities:
         character = entity.character if hasattr(entity, 'character') else entity
-        if character:
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
             if character.static_prompt:
                 static_states.append(f"【{character.name}】{character.static_prompt}")
             if character.dynamic_state:
@@ -1043,6 +1072,7 @@ def build_refine_agent_prompt(
 
     user_prompt = f"""请根据以下审查意见重写初稿:
 
+【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
@@ -1057,6 +1087,68 @@ def build_refine_agent_prompt(
 请直接输出修改后的完整小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
 
     return system_prompt, user_prompt
+
+
+def parse_review_result(review_result_raw: str) -> tuple[dict, Optional[str]]:
+    text = (review_result_raw or "").strip()
+    if not text:
+        return {
+            "pass": False,
+            "issues": [
+                {
+                    "type": "审查异常",
+                    "severity": "high",
+                    "description": "Review Agent 返回为空，无法完成质检。"
+                }
+            ],
+            "revision_plan": "请基于章节大纲重新审查，并仅输出合法 JSON。"
+        }, "Empty response from Review Agent"
+
+    candidates = [text]
+    fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    candidates.extend(block.strip() for block in fenced_blocks if block and block.strip())
+
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidates.append(text[first_brace:last_brace + 1].strip())
+
+    parsed_obj = None
+    parse_error = None
+    for candidate in candidates:
+        try:
+            parsed_obj = json.loads(candidate)
+            break
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            parse_error = str(e)
+
+    if not isinstance(parsed_obj, dict):
+        return {
+            "pass": False,
+            "issues": [
+                {
+                    "type": "审查异常",
+                    "severity": "high",
+                    "description": "Review Agent 返回内容无法解析为合法 JSON。"
+                }
+            ],
+            "revision_plan": "请严格按约定 JSON 结构输出审查结论，不要附加解释文本。"
+        }, parse_error or "Review JSON parse failed"
+
+    issues = parsed_obj.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+
+    revision_plan = parsed_obj.get("revision_plan")
+    if not isinstance(revision_plan, str) or not revision_plan.strip():
+        revision_plan = "请按章节大纲与角色设定修复逻辑问题，并返回完整正文。"
+
+    result = {
+        "pass": bool(parsed_obj.get("pass", False)),
+        "issues": issues,
+        "revision_plan": revision_plan
+    }
+    return result, None
 
 
 async def call_llm(
@@ -1223,6 +1315,7 @@ async def generate_agentic_chapter_stream(
         yield f"data: {json.dumps({'event': 'REVIEWING', 'message': '审阅 Agent 正在进行逻辑校验和 OOC 排查...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
         
         system_prompt, user_prompt = build_review_agent_prompt(
+            chapter,
             book, entities, relationships,
             chapter.outline_text or '', current_draft
         )
@@ -1239,17 +1332,9 @@ async def generate_agentic_chapter_stream(
         
         print(f"[DEBUG] Review Agent 返回内容长度: {len(review_result_json) if review_result_json else 0}")
         
-        try:
-            if not review_result_json or not review_result_json.strip():
-                raise ValueError("Empty response from Review Agent")
-            review_result = json.loads(review_result_json)
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"[WARN] Review JSON 解析失败: {e}, 使用默认通过")
-            review_result = {
-                "pass": True,
-                "issues": [],
-                "revision_plan": "JSON 解析失败，跳过审查"
-            }
+        review_result, parse_error = parse_review_result(review_result_json)
+        if parse_error:
+            print(f"[WARN] Review JSON 解析失败: {parse_error}, 使用默认不通过")
         
         chapter.review_feedback = review_result
         await db.commit()
@@ -1363,8 +1448,9 @@ async def update_character_dynamic_state(
 要求：
 1. 保持角色性格的一致性
 2. 描述角色当前的心理状态、情感、与其他角色的关系变化
-3. 输出简洁的动态状态描述（100-300字）
-4. 直接输出更新后的动态状态，不要有额外说明
+3. 输出简洁的动态状态描述，字数必须严格控制在 50-150 字之间，严禁超长
+4. 严禁罗列剧情流水账，只提取关键状态变化
+5. 直接输出更新后的动态状态，不要有额外说明
 """
     
     for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
@@ -1392,6 +1478,11 @@ async def update_character_dynamic_state(
         )
         
         new_dynamic_state = response.choices[0].message.content if response.choices else old_dynamic_state
+        
+        # 清洗 LLM 输出，去除可能的前缀
+        new_dynamic_state = re.sub(r"^[【\[].*?[】\]]\s*", "", new_dynamic_state.strip())
+        new_dynamic_state = re.sub(r"^角色动态状态[：:]\s*", "", new_dynamic_state)
+        new_dynamic_state = re.sub(r"^更新后的动态状态[：:]\s*", "", new_dynamic_state)
         new_dynamic_state = new_dynamic_state.strip()
         
         character.dynamic_state = new_dynamic_state
@@ -1442,6 +1533,7 @@ async def publish_chapter(
     
     if request and request.api_key:
         character_list = []
+        seen_char_ids = set()
         
         entities_result = await db.execute(
             select(ChapterEntity)
@@ -1453,8 +1545,9 @@ async def publish_chapter(
         
         if entities:
             for entity in entities:
-                if entity.character:
+                if entity.character and entity.character.id not in seen_char_ids:
                     character_list.append(entity.character)
+                    seen_char_ids.add(entity.character.id)
                     print(f"[DEBUG] publish_chapter: 添加角色 {entity.character.name}")
         else:
             print(f"[DEBUG] publish_chapter: 没有 ChapterEntity，尝试从 character_ids 获取")
@@ -1464,7 +1557,11 @@ async def publish_chapter(
                 char_result = await db.execute(
                     select(Character).where(Character.id.in_(chapter_char_ids))
                 )
-                character_list = list(char_result.scalars().all())
+                chars = char_result.scalars().all()
+                for char in chars:
+                    if char.id not in seen_char_ids:
+                        character_list.append(char)
+                        seen_char_ids.add(char.id)
         
         print(f"[DEBUG] publish_chapter: 最终 character_list 长度为 {len(character_list)}")
         

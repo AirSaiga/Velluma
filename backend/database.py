@@ -105,6 +105,12 @@ async def run_migrations(conn):
             "definition": "INTEGER DEFAULT 0",
             "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'revision_count'"
         },
+        {
+            "table": "chapters",
+            "column": "chapter_name",
+            "definition": "VARCHAR(200)",
+            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'chapter_name'"
+        },
     ]
     
     for migration in migrations:

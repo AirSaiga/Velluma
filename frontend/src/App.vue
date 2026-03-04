@@ -325,6 +325,7 @@ async function createChapterFromOutlinePanel() {
     : 0
   await createChapter({
     chapter_number: maxNumber + 1,
+    chapter_name: `第${maxNumber + 1}章`,
     title: '',
     outline_text: '',
     content_text: '',
@@ -333,26 +334,39 @@ async function createChapterFromOutlinePanel() {
 }
 
 async function updateChapter(id, data) {
-  try {
-    const { character_ids, ...chapterData } = data
+  let retries = 3
+  while (retries >= 0) {
+    try {
+      const { character_ids, ...chapterData } = data
 
-    if (Object.keys(chapterData).length > 0) {
-      const updated = await chapterApi.update(id, chapterData)
-      const index = chapters.value.findIndex(c => c.id === id)
-      if (index !== -1) {
-        chapters.value[index] = { ...chapters.value[index], ...updated }
+      if (Object.keys(chapterData).length > 0) {
+        const updated = await chapterApi.update(id, chapterData)
+        const index = chapters.value.findIndex(c => c.id === id)
+        if (index !== -1) {
+          chapters.value[index] = { ...chapters.value[index], ...updated }
+        }
       }
-    }
 
-    if (character_ids !== undefined) {
-      await chapterApi.updateEntities(id, character_ids)
-      const index = chapters.value.findIndex(c => c.id === id)
-      if (index !== -1) {
-        chapters.value[index].character_ids = character_ids
+      if (character_ids !== undefined) {
+        await chapterApi.updateEntities(id, character_ids)
+        const index = chapters.value.findIndex(c => c.id === id)
+        if (index !== -1) {
+          chapters.value[index].character_ids = character_ids
+        }
       }
+      break // Success
+    } catch (error) {
+      const isNetworkError = error.message.includes('Failed to fetch') || error.message.toLowerCase().includes('network error')
+      if (isNetworkError && retries > 0) {
+        console.warn(`更新失败，正在重试 (${retries}次剩余)...`, error)
+        retries--
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        continue
+      }
+      
+      alert('更新失败: ' + error.message)
+      break
     }
-  } catch (error) {
-    alert('更新失败: ' + error.message)
   }
 }
 

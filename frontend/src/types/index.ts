@@ -17,6 +17,7 @@ export interface Character {
 export interface Chapter {
   id: string
   chapter_number: number
+  chapter_name?: string
   title: string
   outline_text: string
   content_text: string
