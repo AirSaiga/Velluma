@@ -14,11 +14,37 @@ from backend.services.chapter_generation import (
 router = APIRouter(prefix="/api", tags=["generate"])
 
 
+# =============================================================================
+# 流式章节生成 - 实时推送生成内容
+# =============================================================================
+
 @router.post("/generate_chapter")
 async def generate_chapter(
     request: GenerateChapterRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
 ):
+    """业务目的：流式生成章节内容，用于实时展示 AI 写作过程。
+
+    参数来源：
+    - request: 请求体，包含 chapter_id（目标章节）、word_count、api_key、base_url、model
+
+    数据流：
+    1. 获取章节信息（用于上下文）
+    2. 构建 prompt（包含世界观、角色设定、记忆片段等）
+    3. 以 SSE（Server-Sent Events）流式返回 AI 生成内容
+
+    副作用：
+    - 不写入数据库，仅返回流式文本
+    - 章节内容需用户确认后手动保存
+
+    性能考量：
+    - 流式响应降低首字节时间（TTFB），用户体验更好
+    - 需要前端支持 event-stream 解析
+
+    风险点：
+    - API Key 暴露风险：前端传 vs 后端配置
+    - 当前设计由前端传入，适合 SaaS 场景；内部部署应考虑后端配置
+    """
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
@@ -37,11 +63,33 @@ async def generate_chapter(
     )
 
 
+# =============================================================================
+# 同步章节生成 - 一次性返回完整内容
+# =============================================================================
+
 @router.post("/generate_chapter_sync")
 async def generate_chapter_sync(
     request: GenerateChapterRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
 ):
+    """业务目的：同步生成章节内容，适用于不需要实时预览的场景。
+
+    参数来源：
+    - 与流式接口相同
+
+    数据流：
+    1-2. 同流式接口
+    3. 等待完整响应后一次性返回
+
+    权衡点 vs 流式接口：
+    - 优点：实现简单，前端处理容易
+    - 缺点：长文本生成时等待时间长（可能超时）
+    - 适用场景：短章节、API 超时限制宽松、离线批处理
+
+    性能考量：
+    - 默认 temperature=0.7，兼顾创造性与稳定性
+    - 返回完整 prompt 便于调试和追溯
+    """
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
@@ -58,11 +106,38 @@ async def generate_chapter_sync(
     return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}
 
 
+# =============================================================================
+# Agentic 章节生成 - 多轮迭代的智能写作
+# =============================================================================
+
 @router.post("/generate_chapter_agentic")
 async def generate_chapter_agentic(
     request: GenerateChapterAgenticRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
 ):
+    """业务目的：使用 Agent 模式生成章节，支持多轮反思和修订。
+
+    参数来源：
+    - request: 包含章节 ID 和 Agent 配置
+
+    核心差异 vs 基础生成：
+    - 基础生成：单次 LLM 调用，prompt → 内容
+    - Agentic 生成：多轮循环，评估 → 反思 → 重写 → 再评估
+
+    数据流：
+    - build_chapter_prompt 构建初始 prompt
+    - generate_agentic_chapter_stream 内部处理多轮迭代
+    - 流式返回每轮输出和最终结果
+
+    副作用：
+    - 多次 LLM 调用，成本更高
+    - 生成时间更长，但质量通常更好
+
+    适用场景：
+    - 重要章节需要高质量输出
+    - 需要 AI 自我纠错能力
+    - 复杂世界观下的内容一致性要求高
+    """
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")

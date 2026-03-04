@@ -10,6 +10,25 @@ from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity
 
 
 async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2000) -> dict:
+    """
+    构建简单章节生成的提示词 (单轮 LLM 调用)。
+
+    提示词结构设计 (按优先级排列)：
+    1. 全局角色定义 (global_sys_prompt) - LLM 行为基线
+    2. 世界观设定 - 场景上下文
+    3. 角色静态设定 - 不变的人设
+    4. 角色动态状态 - 当前心理/情感 (随章节变化)
+    5. 角色互动约束 - 关系规则
+    6. 字数要求 - 最高优先级约束 (LLM 容易忽略，需强调)
+
+    数据流：
+    - chapter_id → 查询 Chapter → 获取章节大纲
+    - chapter_id → 查询 ChapterEntity → 获取涉及的角色
+    - 角色ID集合 → 查询 CharacterRelationship → 获取角色关系
+
+    权衡：使用 selectinload 避免 N+1 查询，但一次性加载所有关系可能影响大规模章节性能。
+    """
+    # 步骤1：加载章节基础信息 (含关联的 Book)
     chapter_result = await db.execute(select(Chapter).options(selectinload(Chapter.book)).where(Chapter.id == chapter_id))
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
@@ -21,6 +40,8 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     worldview_settings = book.worldview_settings
     worldview_prompt = f"【世界观设定】\n{worldview_settings}" if worldview_settings else None
 
+    # 步骤2：加载本章涉及的角色及其动态状态
+    # 关键：去重逻辑防止同一角色出现多次 (一个角色可能多处出场)
     entities_result = await db.execute(
         select(ChapterEntity).options(selectinload(ChapterEntity.character)).where(ChapterEntity.chapter_id == chapter_id)
     )
@@ -40,6 +61,8 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
             if character.dynamic_state:
                 dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
 
+    # 步骤3：加载角色间关系约束
+    # 关键：只查询本章出场的角色间关系，避免无关关系干扰
     relationships_result = await db.execute(
         select(CharacterRelationship)
         .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
@@ -57,6 +80,7 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
             target_name = rel.target_character.name if rel.target_character else "角色"
             relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
 
+    # 步骤4：组装 system prompt (分层级结构确保 LLM 理解优先级)
     system_prompt_parts = [
         global_sys_prompt,
         worldview_prompt if worldview_prompt else "",
@@ -81,6 +105,7 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     ]
     system_prompt = "\n".join(system_prompt_parts)
 
+    # 步骤5：构建 user prompt (包含章节创作任务)
     user_prompt = f"""请根据以下章节大纲进行扩写:
 
 【章节名】{chapter_name}
@@ -94,6 +119,15 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
 
 
 def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, word_count: int):
+    """
+    构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
+
+    与 build_chapter_prompt 的区别：
+    - 该函数用于单轮生成，该函数用于代理工作流 (多轮迭代)
+    - 输入是已加载的 ORM 对象，而非从 DB 查询
+
+    核心任务：根据章节大纲生成符合角色设定和关系约束的初稿。
+    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
@@ -154,6 +188,21 @@ def build_draft_agent_prompt(chapter: Chapter, book: Book, entities: list, relat
 
 
 def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str):
+    """
+    构建审阅 Agent (Review Agent) 的提示词，负责质量检查。
+
+    核心任务：
+    1. OOC 检测 (Out Of Character) - 角色行为是否符合性格设定
+    2. 剧情合规性 - 是否遵循章节大纲
+    3. 逻辑完整性 - 是否有情节漏洞
+
+    特殊设计：
+    - 只传入静态设定，不传动态状态 (避免审阅时受到当前状态的过度影响)
+    - 强制 JSON 输出格式 (便于程序化解析)
+    - temperature=0.1 (低温度保证判断一致性)
+
+    数据流：draft_text (待审内容) → LLM 审查 → JSON 格式审查结果
+    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
@@ -225,6 +274,19 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 
 def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, draft_text: str, revision_plan: str, word_count: int):
+    """
+    构建精修 Agent (Refine Agent) 的提示词，根据审查意见重写初稿。
+
+    核心任务：
+    - 基于 revision_plan 针对性修改
+    - 保持原有优秀部分不被破坏
+    - 确保修改后仍符合字数要求
+
+    数据流：
+    - revision_plan (来自 Review Agent) + draft_text → LLM 重写 → 修改后的正文
+
+    关键设计：将审查意见作为显式约束注入 prompt，而非让 LLM 自行理解上下文。
+    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
@@ -293,6 +355,22 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 
 def parse_review_result(review_result_raw: str):
+    """
+    解析审阅 Agent 返回的 JSON 结果。
+
+    容错设计：LLM 可能输出各种格式的"伪 JSON" (如带 markdown 包裹、前后有文本等)，
+    因此需要多策略尝试解析：
+    1. 原始文本
+    2. markdown 代码块中的 JSON
+    3. 首尾大括号包围的内容
+
+    副作用：正则匹配可能误捕获嵌套代码块，但嵌套情况罕见可忽略。
+
+    错误处理：
+    - 空响应 → 返回默认失败结果 (pass=false)
+    - JSON 解析失败 → 返回默认失败结果 + 解析错误信息
+    - 字段缺失 → 使用默认值填充 (如 issues=[])
+    """
     text = (review_result_raw or "").strip()
     if not text:
         return {
@@ -301,12 +379,15 @@ def parse_review_result(review_result_raw: str):
             "revision_plan": "请基于章节大纲重新审查，并仅输出合法 JSON。",
         }, "Empty response from Review Agent"
     candidates = [text]
+    # 策略1：提取 markdown 代码块中的 JSON
     fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
     candidates.extend(block.strip() for block in fenced_blocks if block and block.strip())
+    # 策略2：提取首尾大括号包围的内容
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         candidates.append(text[first_brace : last_brace + 1].strip())
+    # 尝试多策略解析，直到成功
     parsed_obj = None
     parse_error = None
     for candidate in candidates:
@@ -321,6 +402,7 @@ def parse_review_result(review_result_raw: str):
             "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回内容无法解析为合法 JSON。"}],
             "revision_plan": "请严格按约定 JSON 结构输出审查结论，不要附加解释文本。",
         }, parse_error or "Review JSON parse failed"
+    # 字段提取，缺失时使用默认值
     issues = parsed_obj.get("issues")
     if not isinstance(issues, list):
         issues = []

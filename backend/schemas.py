@@ -9,8 +9,25 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+# ============================================================
+# 书籍 Schema 层 - Book 实体的事务封装
+# ============================================================
+# 验证规则设计意图：
+#   - min_length=1 防止空标题（空标题在业务上无意义）
+#   - max_length=500 是 UI 渲染约束，避免前端布局崩溃
+#   - worldview_settings 使用 default_factory=dict 确保字段始终存在（避免 None 判断）
+#
+# 序列化/反序列化业务规则：
+#   - from_attributes = True 启用 ORM 模式，允许从 SQLAlchemy 模型直接构造
+#   - 这是一个"只读"配置，写入时仍走 Create/Update 模型
 class BookBase(BaseModel):
-    """书籍基础模型"""
+    """书籍基础模型
+
+    业务规则：
+    - title 必填，非空字符串（防止空格标题绕过验证）
+    - genre 可选但有长度约束（保持分类体系一致性）
+    - worldview_settings 默认为空字典（不是 None），简化前端渲染逻辑
+    """
     title: str = Field(..., min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
@@ -18,12 +35,28 @@ class BookBase(BaseModel):
 
 
 class BookCreate(BookBase):
-    """创建书籍请求模型"""
+    """创建书籍请求模型
+
+    设计意图：
+    - 继承 BookBase 所有验证规则
+    - 创建时不需要传 id（后端生成 UUID）
+    - 不需要传 created_at（数据库自动填充）
+    """
     pass
 
 
 class BookUpdate(BaseModel):
-    """更新书籍请求模型"""
+    """更新书籍请求模型
+
+    设计意图：
+    - 所有字段 Optional，允许部分更新
+    - min_length=1 确保更新时不能改为空标题
+    - worldview_settings 允许设为 None（表示"清除"设定）
+
+    警示：
+    - Pydantic 默认行为：传 {} 会被解析为 None（如果字段 Optional）
+    - 若需区分"不传"和"传空字典"，需自定义 validator
+    """
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
@@ -31,7 +64,12 @@ class BookUpdate(BaseModel):
 
 
 class BookResponse(BookBase):
-    """书籍响应模型"""
+    """书籍响应模型
+
+    业务规则：
+    - 包含完整信息：id（前端路由关键字段）+ created_at（时间戳展示）
+    - 响应模型应该稳定，避免向存量客户端暴露新字段导致解析失败
+    """
     id: UUID
     created_at: datetime
 
@@ -40,11 +78,32 @@ class BookResponse(BookBase):
 
 
 class WorldviewUpdate(BaseModel):
+    """世界观设定更新请求
+
+    用途：专门用于快速更新世界观设定，避免传递整个 Book 对象
+    """
     worldview_settings: dict = Field(default_factory=dict)
 
 
+# ============================================================
+# 章节 Schema 层 - 创作工作流的状态机
+# ============================================================
+# 验证规则设计意图：
+#   - chapter_number: ge=1 确保章节编号从 1 开始（业务规范）
+#   - revision_count: default=0 新章节初始重写次数为 0
+#   - status: default="draft" 确保新章节处于可编辑状态
+#
+# 序列化/反序列化业务规则：
+#   - content_text/draft_text 在响应中可能很长，需考虑分页或压缩
+#   - review_feedback 是 JSONB，响应时保持结构化（前端可解析）
 class ChapterBase(BaseModel):
-    """章节基础模型"""
+    """章节基础模型
+
+    业务规则：
+    - chapter_number 必须是正整数（负数或零无意义）
+    - status 字段虽无枚举约束，但业务层应限制为 ["draft", "published"]
+    - review_feedback 默认为空字典（不是 None），简化前端渲染
+    """
     chapter_number: int = Field(..., ge=1)
     chapter_name: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
@@ -57,12 +116,27 @@ class ChapterBase(BaseModel):
 
 
 class ChapterCreate(ChapterBase):
-    """创建章节请求模型"""
+    """创建章节请求模型
+
+    业务规则：
+    - 必须指定 book_id（章节必须归属于某本书）
+    - book_id 通常来自 URL path 参数，后端应校验其存在性
+    """
     book_id: UUID
 
 
 class ChapterUpdate(BaseModel):
-    """更新章节请求模型"""
+    """更新章节请求模型
+
+    业务规则：
+    - chapter_number 可更新但需确保唯一性（同一书籍内）
+    - status 更新时需触发业务逻辑（发布时锁定内容）
+    - content_text 更新受限：已发布章节不应允许修改（业务层校验）
+
+    警示：
+    - 不允许更新 draft_text/revision_count（这些由生成流程控制）
+    - 若前端传了这些字段，应被忽略而非报错（使用 Field + exclude）
+    """
     chapter_number: Optional[int] = Field(None, ge=1)
     chapter_name: Optional[str] = Field(None, max_length=200)
     title: Optional[str] = Field(None, max_length=500)
@@ -72,7 +146,12 @@ class ChapterUpdate(BaseModel):
 
 
 class ChapterResponse(ChapterBase):
-    """章节响应模型"""
+    """章节响应模型
+
+    业务规则：
+    - 包含 book_id（前端可能需要构建跳转链接）
+    - 包含 created_at（用于排序或展示）
+    """
     id: UUID
     book_id: UUID
     created_at: datetime
@@ -81,8 +160,24 @@ class ChapterResponse(ChapterBase):
         from_attributes = True
 
 
+# ============================================================
+# 角色 Schema 层 - 双态模型的设计考量
+# ============================================================
+# 验证规则设计意图：
+#   - name: min_length=1 防止匿名角色（业务要求）
+#   - importance_level: ge=1, le=10 限制在固定范围内（前端 UI 组件依赖）
+#
+# 序列化/反序列化业务规则：
+#   - dynamic_state_history 在响应中返回（前端需要展示状态演变）
+#   - Create 时不需要 history（后端初始化为空列表）
 class CharacterBase(BaseModel):
-    """角色基础模型"""
+    """角色基础模型
+
+    业务规则：
+    - name 必填且非空（角色必须有标识）
+    - aliases 默认为空列表（角色可以没有别名）
+    - importance_level 默认为 1（新角色默认低优先级）
+    """
     name: str = Field(..., min_length=1, max_length=200)
     aliases: List[str] = Field(default_factory=list)
     static_prompt: Optional[str] = None
@@ -91,12 +186,26 @@ class CharacterBase(BaseModel):
 
 
 class CharacterCreate(CharacterBase):
-    """创建角色请求模型"""
+    """创建角色请求模型
+
+    业务规则：
+    - 必须指定 book_id（角色必须归属于某本书）
+    - 初始化时 dynamic_state_history 为空（由后续章节发布触发更新）
+    """
     book_id: UUID
 
 
 class CharacterUpdate(BaseModel):
-    """更新角色请求模型"""
+    """更新角色请求模型
+
+    业务规则：
+    - 所有字段 Optional，允许部分更新
+    - importance_level 范围校验防止前端传入非法值
+
+    警示：
+    - dynamic_state_history 不在此模型中（只能通过专用接口更新）
+    - 这样做是为了将"状态更新"与"基本信息更新"分离，职责清晰
+    """
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     aliases: Optional[List[str]] = None
     static_prompt: Optional[str] = None
@@ -105,7 +214,12 @@ class CharacterUpdate(BaseModel):
 
 
 class CharacterResponse(CharacterBase):
-    """角色响应模型"""
+    """角色响应模型
+
+    业务规则：
+    - 包含完整的 dynamic_state_history（用于前端状态展示）
+    - 响应体积可能较大（history 累积后），考虑分页或压缩策略
+    """
     id: UUID
     book_id: UUID
     created_at: datetime
@@ -116,7 +230,18 @@ class CharacterResponse(CharacterBase):
 
 
 class CharacterDynamicStateUpdateRequest(BaseModel):
-    """角色动态状态更新请求模型"""
+    """角色动态状态更新请求模型
+
+    用途：专门用于 LLM 驱动的状态更新（而非手动编辑）
+
+    业务规则：
+    - chapter_id 必填（状态更新必须关联到特定章节）
+    - api_key/base_url/model 用于调用 LLM 生成新的动态状态
+    - 默认使用 gpt-4o-mini（成本优化）
+
+    数据流：
+    - 前端提交 → 后端提取角色信息 + 章节上下文 → 调用 LLM → 解析结果 → 更新 DB
+    """
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
@@ -124,14 +249,34 @@ class CharacterDynamicStateUpdateRequest(BaseModel):
 
 
 class CharacterDynamicStateUpdateResponse(BaseModel):
-    """角色动态状态更新响应模型"""
+    """角色动态状态更新响应模型
+
+    业务规则：
+    - 返回 old_dynamic_state 和 new_dynamic_state（便于前端展示变化）
+    """
     character_id: UUID
     old_dynamic_state: str
     new_dynamic_state: str
 
 
+# ============================================================
+# 关系 Schema 层 - 图谱构建的边界控制
+# ============================================================
+# 验证规则设计意图：
+#   - affinity_score: ge=-100, le=100 限制在固定范围内（标准化处理）
+#   - relation_type: max_length=100 防止过长的关系类型字符串
+#
+# 序列化/反序列化业务规则：
+#   - is_public 默认为 True（大多数关系应对 LLM 可见）
+#   - 关系创建后需触发图谱重建（若有缓存）
 class RelationshipBase(BaseModel):
-    """角色关系基础模型"""
+    """角色关系基础模型
+
+    业务规则：
+    - source_char_id ≠ target_char_id 需业务层校验（防止自环）
+    - affinity_score 范围 [-100, 100]：负数=敌对，0=中立，正数=友好
+    - is_public 控制 LLM 是否能"知道"这段关系
+    """
     source_char_id: UUID
     target_char_id: UUID
     relation_type: str = Field(..., max_length=100)
@@ -141,12 +286,21 @@ class RelationshipBase(BaseModel):
 
 
 class RelationshipCreate(RelationshipBase):
-    """创建角色关系请求模型"""
+    """创建角色关系请求模型
+
+    设计意图：
+    - 继承所有验证规则
+    - 后端应校验 source_char_id 和 target_char_id 属于同一本书
+    """
     pass
 
 
 class RelationshipResponse(RelationshipBase):
-    """角色关系响应模型"""
+    """角色关系响应模型
+
+    业务规则：
+    - 包含 created_at（用于排序或展示）
+    """
     id: UUID
     created_at: datetime
 
@@ -154,19 +308,44 @@ class RelationshipResponse(RelationshipBase):
         from_attributes = True
 
 
+# ============================================================
+# 记忆 Schema 层 - RAG 系统的输入契约
+# ============================================================
+# 验证规则设计意图：
+#   - chunk_text: min_length=1 防止空记忆（检索无意义）
+#   - chapter_id 可选（支持全局记忆）
+#
+# 序列化/反序列化业务规则：
+#   - embedding 不在 Schema 中（向量由后端异步生成，前端不需要知道）
+#   - 创建响应时不返回 embedding（减少响应体积）
 class MemoryChunkBase(BaseModel):
-    """记忆片段基础模型"""
+    """记忆片段基础模型
+
+    业务规则：
+    - chunk_text 必填且非空（空文本无法向量化）
+    - chapter_id 可选：None 表示全局记忆，否则为章节级记忆
+    """
     chunk_text: str = Field(..., min_length=1)
     chapter_id: Optional[UUID] = None
 
 
 class MemoryChunkCreate(MemoryChunkBase):
-    """创建记忆片段请求模型"""
+    """创建记忆片段请求模型
+
+    业务规则：
+    - 必须指定 book_id（记忆必须归属于某本书）
+    - embedding 由后端在异步任务中生成（不在请求中）
+    """
     book_id: UUID
 
 
 class MemoryChunkResponse(MemoryChunkBase):
-    """记忆片段响应模型"""
+    """记忆片段响应模型
+
+    业务规则：
+    - 包含 book_id 和 created_at（用于检索或展示）
+    - 不包含 embedding（前端不需要，后端向量检索返回时再给）
+    """
     id: UUID
     book_id: UUID
     created_at: datetime
@@ -175,8 +354,25 @@ class MemoryChunkResponse(MemoryChunkBase):
         from_attributes = True
 
 
+# ============================================================
+# Agent 调用 Schema 层 - LLM 交互的边界定义
+# ============================================================
+# 设计意图：
+#   - 统一管理 LLM 调用参数（api_key, base_url, model）
+#   - word_count 是期望值而非硬约束（LLM 输出可能略有差异）
+#   - max_iterations 控制重写循环次数，防止无限迭代
+#
+# 警示：
+#   - api_key 是敏感字段，后端不应将其存入数据库或日志
+#   - base_url 允许自定义（支持 OpenAI 兼容 API，如本地部署）
 class GenerateChapterRequest(BaseModel):
-    """章节生成请求模型"""
+    """章节生成请求模型
+
+    业务规则：
+    - api_key 必填（LLM 调用必需）
+    - word_count 期望值，非严格约束
+    - 默认使用 gpt-4o-mini（平衡成本与质量）
+    """
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
@@ -185,7 +381,16 @@ class GenerateChapterRequest(BaseModel):
 
 
 class GenerateChapterAgenticRequest(BaseModel):
-    """Actor-Critic 模式章节生成请求模型"""
+    """Actor-Critic 模式章节生成请求模型
+
+    业务规则：
+    - max_iterations 限制重写次数，防止成本失控
+    - 默认 2 次迭代：1 次初稿 + 1 次重写（平衡质量与成本）
+    - 迭代上限 5 次是硬约束（超过后强制终止）
+
+    工作流：
+    - 主笔生成初稿 → 审阅 Agent 质检 → 不合格则重写 → 达到迭代次数或合格则结束
+    """
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
@@ -194,27 +399,56 @@ class GenerateChapterAgenticRequest(BaseModel):
     max_iterations: int = Field(default=2, ge=1, le=5, description="最大重写次数")
 
 
+# ============================================================
+# 章节-实体关联 Schema 层
+# ============================================================
+# 设计意图：
+#   - 简化关联操作，无需传完整对象，只传 ID
+#   - entity_type 预留扩展性（目前仅支持 character）
 class ChapterEntityLink(BaseModel):
-    """章节-角色关联模型"""
+    """章节-角色关联模型
+
+    用途：用于响应中返回关联信息
+    """
     entity_id: UUID
     entity_type: str = Field(default="character")
 
 
 class ChapterEntityCreate(BaseModel):
-    """创建章节-角色关联请求模型"""
+    """创建章节-角色关联请求模型
+
+    业务规则：
+    - 需配合章节 ID 使用（URL path 参数）
+    - 后端应校验 entity 属于同一本书
+    """
     entity_id: UUID
     entity_type: str = Field(default="character")
 
 
+# ============================================================
+# 章节发布 Schema 层 - 状态变更的边界控制
+# ============================================================
+# 设计意图：
+#   - 发布是单向操作（draft → published），不可逆
+#   - 发布时可选择是否调用 LLM 进行最终润色（api_key 可选）
+#   - 若不传 api_key，则直接发布已有 draft_text 作为 content_text
 class ChapterPublishRequest(BaseModel):
-    """章节发布请求模型"""
+    """章节发布请求模型
+
+    业务规则：
+    - api_key 可选：不传则跳过 LLM 润色步骤
+    - model 默认 gpt-4o-mini（发布润色通常不需要高端模型）
+    """
     api_key: Optional[str] = Field(None, min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
 
 
 class CharacterStateChange(BaseModel):
-    """角色状态变更模型"""
+    """角色状态变更模型
+
+    用途：章节发布后返回哪些角色的状态发生了变化
+    """
     character_id: UUID
     character_name: str
     old_state: str
@@ -222,7 +456,12 @@ class CharacterStateChange(BaseModel):
 
 
 class ChapterPublishResponse(BaseModel):
-    """章节发布响应模型"""
+    """章节发布响应模型
+
+    业务规则：
+    - 包含 character_updates：展示本次发布触发的角色状态变化
+    - 前端可根据此信息更新角色面板
+    """
     chapter_id: UUID
     status: str
     character_updates: List[CharacterStateChange] = Field(default_factory=list)

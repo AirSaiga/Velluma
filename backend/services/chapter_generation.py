@@ -1,3 +1,16 @@
+"""
+章节生成服务模块 (Facade)。
+
+职责：统一导出所有章节生成相关的服务函数，供上层 (API 路由) 消费。
+内部实现分布在：
+- llm_client.py: LLM 调用封装
+- prompt_builder.py: 提示词构建
+- agentic_workflow.py: 代理工作流
+- character_state.py: 角色状态管理
+
+设计模式：Facade Pattern，隐藏底层复杂度，提供统一入口。
+"""
+
 from backend.services.agentic_workflow import generate_agentic_chapter_stream
 from backend.services.character_state import update_character_dynamic_state
 from backend.services.llm_client import call_llm, generate_stream_response

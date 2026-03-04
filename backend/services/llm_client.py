@@ -6,24 +6,48 @@ from openai import AsyncOpenAI
 
 
 def _clear_proxy_env():
+    """
+    清除代理环境变量，防止企业内网环境下调用 LLM API 时被代理干扰。
+
+    副作用：修改进程级环境变量，影响全局 HTTP 行为。
+    权衡：生产环境应使用配置管理而非运行时清理。
+    """
     for env_var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
         if env_var in os.environ:
             del os.environ[env_var]
 
 
 async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str):
+    """
+    流式响应生成器，用于 SSE (Server-Sent Events) 实时输出 LLM 推理结果。
+
+    数据流：
+    - 输入：system_prompt (角色定义) + user_prompt (用户输入) → LLM API
+    - 输出：SSE 格式的 data 帧，逐块yield给前端
+
+    关键设计点：
+    1. 首帧发送完整 prompt (用于前端调试/展示)
+    2. 末尾发送 done=true 标记结束
+    3. 异常时发送 error 帧但不中断流，确保前端能收到终止信号
+
+    性能考量：httpx.AsyncClient 手动管理而非全局复用，避免连接泄漏。
+    """
     import httpx
 
     _clear_proxy_env()
+    # 首帧：输出 prompt 供前端调试
     yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
     http_client = None
     try:
+        # 构建客户端：支持自定义 base_url (兼容 OpenAI 兼容 API)
         client_kwargs = {"api_key": api_key}
         if base_url:
             client_kwargs["base_url"] = base_url
+        # 禁用 httpx 默认代理继承，避免被系统代理截获
         http_client = httpx.AsyncClient(trust_env=False)
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
+        # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
         stream = await client.chat.completions.create(
             model=model,
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
@@ -31,12 +55,15 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
             temperature=0.7,
             max_tokens=4000,
         )
+        # 逐块转发 LLM 输出，保持实时性
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 yield f"data: {json.dumps({'content': content}, ensure_ascii=False)}\n\n"
+        # 正常结束标记
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     except Exception as e:
+        # 异常聚合：提取多种错误信息供调试，截断过长响应防止 SSE 帧溢出
         raw_error_msg = str(e).strip()
         error_type = type(e).__name__
         response = getattr(e, "response", None)
@@ -59,9 +86,11 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         if response_text:
             parts.append(response_text)
         error_msg = " | ".join(parts)
+        # 发送错误帧后仍发送 done 帧，确保前端不会无限等待
         yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     finally:
+        # 显式关闭 HTTP 客户端，释放连接池资源
         if http_client is not None:
             await http_client.aclose()
 
@@ -75,6 +104,20 @@ async def call_llm(
     temperature: float = 0.7,
     response_format: Optional[dict] = None,
 ) -> str:
+    """
+    同步调用 LLM API 获取完整响应。
+
+    警告：当前实现【无重试策略】，网络抖动或 API 限流时会直接失败。
+    权衡：为简化实现牺牲了可靠性，生产环境应添加指数退避重试 (如 tenacity 库)。
+
+    数据流：
+    - 输入：prompt + 配置参数 → LLM API
+    - 输出：LLM 生成的文本内容
+
+    特殊处理：
+    - JSON 解析失败时返回空字符串 (静默失败，供上游处理)
+    - response_format 支持强制 JSON 输出 (依赖模型支持)
+    """
     import httpx
 
     _clear_proxy_env()
@@ -87,6 +130,7 @@ async def call_llm(
         client = AsyncOpenAI(**client_kwargs)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         create_kwargs = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": 4000}
+        # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)
         if response_format:
             create_kwargs["response_format"] = response_format
         response = await client.chat.completions.create(**create_kwargs)
@@ -97,8 +141,10 @@ async def call_llm(
     except Exception as e:
         error_type = type(e).__name__
         error_msg = str(e)
+        # 静默失败：JSON 解析异常返回空字符串，避免上层崩溃
         if "JSONDecodeError" in error_type or "Expecting value" in error_msg:
             return ""
         raise
     finally:
+        # 显式关闭，释放连接
         await http_client.aclose()

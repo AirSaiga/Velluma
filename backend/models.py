@@ -17,16 +17,26 @@ def generate_uuid() -> uuid.UUID:
     return uuid.uuid4()
 
 
+# ============================================================
+# 叙事主体层 - Book 是整个系统的根节点
+# ============================================================
+# 设计意图：Velluma 采用"书籍 → 章节 → 角色"的三级树状结构
+# 选择 UUID 而非自增ID的原因：
+#   1. 支持多实例部署时ID不会冲突
+#   2. 便于前端缓存和离线场景
+#   3. 避免 ID 枚举攻击（书籍ID不可预测）
 class Book(Base):
     """
     书籍表 - 叙事主干系统的根实体
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        title: 书籍标题
-        genre: 书籍类型/题材
-        global_sys_prompt: 全局系统提示词
-        created_at: 创建时间
+    业务含义：
+    - 代表一个独立的创作项目，是所有其他实体的直接或间接所有者
+    - worldview_settings 存储全局世界观设定（如时间线、规则、物理法则）
+    - global_sys_prompt 用于注入 LLM 的系统级上下文（世界观约束）
+
+    表关系设计依据：
+    - 使用 cascade="all, delete-orphan" 确保删除书籍时级联清理所有关联数据
+    - 这是数据安全的重要保障，避免"孤儿数据"堆积
     """
     __tablename__ = "books"
 
@@ -42,22 +52,30 @@ class Book(Base):
     memories = relationship("MemoryChunk", back_populates="book", cascade="all, delete-orphan")
 
 
+# ============================================================
+# 叙事单元层 - Chapter 是创作的最小工作单元
+# ============================================================
+# 工作流设计：
+#   draft_text (主笔生成) → review_feedback (审阅质检) → content_text (定稿)
+#   revision_count 记录重写次数，用于成本控制和迭代收敛判断
+#
+# 隐性行为：status 字段变更会触发不同的业务逻辑
+#   - "draft": 可编辑，LLM 可继续生成
+#   - "published": 不可变更，触发角色状态快照
 class Chapter(Base):
     """
     章节表 - 书籍的章节结构
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        book_id: 关联书籍ID
-        chapter_number: 章节序号
-        title: 章节标题
-        outline_text: 本章大纲
-        content_text: 最终正文
-        draft_text: 主笔 Agent 生成的初稿
-        review_feedback: 审阅 Agent 返回的结构化质检报告 (JSONB)
-        revision_count: 当前章节经历的重写次数
-        status: 状态 (draft/published)
-        created_at: 创建时间
+    业务含义：
+    - draft_text 是主笔 Agent 的"草稿输出"，可能包含不符合风格的表达
+    - review_feedback 存储审阅 Agent 的结构化质检报告（JSONB），包含改进建议
+    - content_text 是最终定稿，仅在章节发布时从 draft_text 同步（保留历史版本能力）
+    - revision_count 是关键指标：若超过阈值（如 5 次）需人工介入，防止无限重写
+
+    数据流：
+    - book_id 来源于 URL path 参数或前端隐藏字段
+    - chapter_number 由前端计算（max(existing) + 1），需事务保护防止并发冲突
+    - status 变更时需触发：发布流程 = 内容锁定 + 角色状态快照 + 向量化记忆提取
     """
     __tablename__ = "chapters"
 
@@ -79,17 +97,26 @@ class Chapter(Base):
     memories = relationship("MemoryChunk", back_populates="chapter", cascade="all, delete-orphan")
 
 
+# ============================================================
+# 关联表层 - 解决多对多关系的中间表
+# ============================================================
+# 权衡考量：
+#   为什么不用外键数组？PostgreSQL 数组 + GIN 索引虽可行，但：
+#   1. 数组不便于存储额外属性（如 entity_type）
+#   2. 关联表更灵活，未来可扩展到多种实体类型（角色、地点、物品）
+#   3. SQLAlchemy relationship 提供了便捷的查询接口
 class ChapterEntity(Base):
     """
     章节-实体关联表 (多对多)
 
-    用于关联章节和角色/其他实体
+    业务含义：
+    - 标记特定章节涉及哪些角色（用于上下文检索和关系影响分析）
+    - entity_type 预留扩展性：未来可能支持 "location", "item" 等实体类型
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        chapter_id: 章节ID
-        entity_id: 关联的角色ID
-        entity_type: 实体类型 (character等)
+    数据流：
+    - chapter_id 来自当前编辑的章节
+    - entity_id 来自用户选择的角色列表
+    - 创建时需校验 entity 确实属于同一本书（业务约束，数据库层面未强制）
     """
     __tablename__ = "chapter_entities"
 
@@ -102,19 +129,32 @@ class ChapterEntity(Base):
     character = relationship("Character", back_populates="chapter_entities")
 
 
+# ============================================================
+# 角色系统层 - Character 是世界观和关系图谱的核心
+# ============================================================
+# 双态设计：
+#   static_prompt: 不变设定（出身、性格、外貌）- LLM 每次调用都注入
+#   dynamic_state: 瞬时状态（情绪、位置、状态）- 随章节推进演变
+#
+# importance_level 的用途：
+#   - 控制 LLM 上下文窗口分配（高重要性角色获得更多 token 预算）
+#   - 影响记忆检索的权重排序
 class Character(Base):
     """
     角色表 - 世界观与关系图谱的核心实体
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        book_id: 关联书籍ID
-        name: 角色名称 (必填)
-        aliases: 角色别名 (JSONB数组)
-        static_prompt: 静态设定 (不变的角色背景)
-        dynamic_state: 动态设定 (当前状态、情感等)
-        importance_level: 重要程度 (1-10)
-        created_at: 创建时间
+    业务含义：
+    - static_prompt 是"永恒设定"，每次 LLM 调用都作为 system prompt 注入
+    - dynamic_state 是"瞬时快照"，记录当前章节结束时角色的情绪/状态
+    - dynamic_state_history 保留所有历史状态，支持"时间回溯"或"状态追溯"
+    - importance_level (1-10) 是资源分配优先级，影响上下文窗口分配策略
+
+    表关系设计：
+    - chapter_entities 实现"章节-角色"多对多（某角色可在多章出现）
+    - source_relationships + target_relationships 实现有向关系图
+
+    性能隐患：
+    - 动态状态历史可能膨胀，需考虑归档策略（如只保留最近 N 个版本）
     """
     __tablename__ = "characters"
 
@@ -144,19 +184,32 @@ class Character(Base):
     )
 
 
+# ============================================================
+# 关系图谱层 - CharacterRelationship 构建角色互动网络
+# ============================================================
+# 关系类型设计：
+#   - affinity_score (-100 ~ 100) 是数值化亲密度，影响 LLM 生成时的行为倾向
+#   - interaction_prompt 是"关系约束"，如"两人交谈时 A 总是隐瞒某事"
+#   - is_public 控制关系是否对 LLM 可见（隐藏关系可制造信息不对称）
+#
+# 唯一性约束：
+#   (source_char_id, target_char_id) 唯一，避免重复创建相同关系
 class CharacterRelationship(Base):
     """
     角色关系推演表 - 管理角色间的关系网络
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        source_char_id: 源角色ID
-        target_char_id: 目标角色ID
-        relation_type: 关系类型 (friend, enemy, family等)
-        affinity_score: 亲密度分数 (-100到100)
-        interaction_prompt: 核心互动约束
-        is_public: 是否公开可见
-        created_at: 创建时间
+    业务含义：
+    - 有向边设计：source → target，代表"源角色对目标角色的认知"
+    - 关系不对称：AB 可能是"父子"但 A 对 B 的态度与 B 对 A 不同
+    - affinity_score 是数值化指标，LLM 生成对话时据此调整语气/内容倾向
+
+    数据流：
+    - source_char_id, target_char_id 来自用户创建关系时的选择
+    - 关系创建后会影响 LLM 的 system prompt，注入角色互动约束
+
+    警示：
+    - 需防范自环（source == target），业务层应校验
+    - 大量角色（>100）时关系查询可能成为瓶颈，考虑定期物化
     """
     __tablename__ = "character_relationships"
 
@@ -193,19 +246,38 @@ class CharacterRelationship(Base):
     )
 
 
+# ============================================================
+# 记忆系统层 - MemoryChunk 是 RAG 检索的基石
+# ============================================================
+# 向量设计：
+#   - 使用 pgvector 的 Vector(1536) 存储 OpenAI text-embedding-3-small 的输出
+#   - 1536 维向量在欧氏距离和余弦相似度下均有良好表现
+#
+# 检索策略：
+#   - chunk_text 是原始文本片段（可能来自章节正文、角色设定或关系描述）
+#   - chapter_id 可选，支撑"章节内检索"和"全局检索"两种模式
+#   - embedding 允许 null（手动添加的记忆可能尚未向量化）
+#
+# 性能权衡：
+#   - 每个章节发布时自动提取 N 个记忆块，可能导致向量数据快速膨胀
+#   - 建议定期清理低相似度的记忆，或采用分层存储策略
 class MemoryChunk(Base):
     """
     向量记忆表 - 存储可检索的文本片段
 
-    使用 pgvector 的 Vector 类型存储 1536 维向量
+    业务含义：
+    - RAG 系统的核心数据源，章节发布时自动提取关键信息存入
+    - 支持"语义检索"：根据当前上下文找到最相关的历史记忆
+    - chapter_id 为空时代表"全局记忆"（如世界观设定、重要事件）
 
-    Attributes:
-        id: 唯一标识符 (UUID)
-        book_id: 关联书籍ID
-        chapter_id: 关联章节ID (可选)
-        chunk_text: 记忆文本内容
-        embedding: 1536维向量特征
-        created_at: 创建时间
+    数据流：
+    - chunk_text 来源：章节正文切片、角色设定、关系描述、审阅反馈摘要
+    - embedding 由 LLM 生成（text-embedding-3-small），在后台异步任务中完成
+    - 检索时：用户输入 → 向量化 → 向量数据库相似度搜索 → 返回 top-K chunks
+
+    隐性行为：
+    - 删除章节时级联删除该章节的记忆块（ondelete="CASCADE"）
+    - 但全局记忆（chapter_id=null）不受章节删除影响
     """
     __tablename__ = "memory_chunks"
 
