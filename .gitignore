@@ -49,7 +49,6 @@ electron/node_modules/
 .trae/specs
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
