@@ -341,16 +341,6 @@ function isCharacterSelected(charId: string) {
             <span class="text-[10px] font-medium text-[var(--accent-600)]">{{ wordCount }}</span>
           </div>
           <div class="flex items-center gap-1">
-            <div
-              v-if="isGenerating && isAgenticMode"
-              class="mr-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
-            >
-              <span class="text-[10px] font-medium">{{ getWorkflowStageLabel() }}</span>
-              <span v-if="workflowState.iteration > 0" class="text-[10px]">#{{ workflowState.iteration }}</span>
-              <span v-if="workflowState.message" class="text-[10px] text-indigo-600/90 max-w-[130px] truncate">
-                {{ workflowState.message }}
-              </span>
-            </div>
             <button
               @click="isAgenticMode = !isAgenticMode"
               :disabled="isGenerating"
@@ -387,7 +377,29 @@ function isCharacterSelected(charId: string) {
         </div>
       </div>
 
-      <div class="rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] min-h-[60vh] flex flex-col">
+      <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] min-h-[60vh] flex flex-col">
+        <div 
+          v-if="isGenerating && isAgenticMode" 
+          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+        >
+          <div class="relative flex items-center justify-center w-24 h-24 mb-8">
+            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-50"></div>
+            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-500 border-t-transparent animate-spin"></div>
+            <div v-if="workflowState.iteration > 0" class="absolute inset-0 flex items-center justify-center text-3xl font-bold text-indigo-600">
+              #{{ workflowState.iteration }}
+            </div>
+          </div>
+          
+          <div class="flex flex-col items-center gap-3">
+            <h3 class="text-3xl font-bold text-indigo-900 tracking-tight">
+              {{ getWorkflowStageLabel() }}...
+            </h3>
+            <p v-if="workflowState.message" class="text-lg text-indigo-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
+              {{ workflowState.message }}
+            </p>
+          </div>
+        </div>
+
         <RichTextEditor
           ref="editorRef"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"

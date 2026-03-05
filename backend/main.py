@@ -3,6 +3,18 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+
+# 加载环境变量
+# 确保在导入其他模块之前加载，以便 database.py 等模块能正确获取配置
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+if os.path.exists(ENV_PATH):
+    print(f"[Main] Loading environment variables from {ENV_PATH}")
+    load_dotenv(ENV_PATH)
+else:
+    print(f"[Main] Warning: .env file not found at {ENV_PATH}")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse

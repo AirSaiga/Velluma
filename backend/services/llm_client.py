@@ -203,7 +203,16 @@ async def get_embedding(
 
     api_key_to_use = os.getenv("DASHSCOPE_API_KEY")
     if not api_key_to_use:
-        print("[Embedding Error] No api key provided. Set DASHSCOPE_API_KEY environment variable.")
+        # 尝试重新加载环境变量（应对某些极端情况）
+        from dotenv import load_dotenv
+        BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ENV_PATH = os.path.join(BASE_DIR, ".env")
+        if os.path.exists(ENV_PATH):
+            load_dotenv(ENV_PATH)
+            api_key_to_use = os.getenv("DASHSCOPE_API_KEY")
+            
+    if not api_key_to_use:
+        print(f"[Embedding Error] No api key provided. CWD: {os.getcwd()}")
         return []
     
     dashscope.api_key = api_key_to_use
