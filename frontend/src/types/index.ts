@@ -53,6 +53,27 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   rag_lambda: number
 }
 
+export interface ConfirmedStoryBeat {
+  position: number
+  beat_id?: string
+  summary: string
+  location?: string
+  pov_character?: string
+  action_summary?: string
+  worldbuilding_instruction?: string
+  word_count_target: number
+  target_words: number
+  hook_ids: string[]
+}
+
+export interface GenerateChapterAgenticPreviewResponse {
+  beats: ConfirmedStoryBeat[]
+}
+
+export interface GenerateChapterAgenticWithBeatsPayload extends GenerateChapterAgenticPayload {
+  beats: ConfirmedStoryBeat[]
+}
+
 export interface AgenticFormState {
   word_count: number
   max_iterations: number

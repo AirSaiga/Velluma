@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger, SceneIntent, StoryBeat
 from backend.repositories import MemoryRepository
-from backend.schemas import GenerateChapterAgenticRequest
+from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.services.llm_client import call_llm, get_embedding
 from backend.services.prompts import (
     build_chunk_draft_prompt,
@@ -89,6 +89,138 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     权衡：使用 while 循环 + break 实现迭代，最多为 max_iterations 次。
     警告：若审查一直不通过，会达到最大迭代次数后退出，可能产生低质量内容。
     """
+    async for frame in _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=None):
+        yield frame
+
+
+async def generate_agentic_chapter_stream_with_confirmed_beats(
+    request: GenerateChapterAgenticRequest,
+    db: AsyncSession,
+    confirmed_beats: list[dict] | list[ConfirmedStoryBeat],
+):
+    async for frame in _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=confirmed_beats):
+        yield frame
+
+
+def _normalize_confirmed_beats(beats: list[dict] | list[ConfirmedStoryBeat], word_count: int) -> list[dict]:
+    normalized: list[dict] = []
+    total = max(1, len(beats))
+    for idx, beat in enumerate(beats, start=1):
+        beat_dict = beat.model_dump() if isinstance(beat, ConfirmedStoryBeat) else dict(beat or {})
+        summary = str(beat_dict.get("summary") or "").strip()
+        if not summary:
+            continue
+        position = beat_dict.get("position")
+        if not isinstance(position, int) or position <= 0:
+            position = idx
+        word_count_target = beat_dict.get("word_count_target")
+        if not isinstance(word_count_target, int) or word_count_target <= 0:
+            word_count_target = beat_dict.get("target_words")
+        if not isinstance(word_count_target, int) or word_count_target <= 0:
+            word_count_target = max(200, word_count // total)
+        beat_id = str(beat_dict.get("beat_id") or f"beat-{idx}").strip() or f"beat-{idx}"
+        hook_ids = beat_dict.get("hook_ids") if isinstance(beat_dict.get("hook_ids"), list) else []
+        normalized.append(
+            {
+                "position": position,
+                "beat_id": beat_id,
+                "summary": summary,
+                "location": str(beat_dict.get("location") or "").strip(),
+                "pov_character": str(beat_dict.get("pov_character") or "").strip(),
+                "action_summary": str(beat_dict.get("action_summary") or "").strip() or summary,
+                "worldbuilding_instruction": str(beat_dict.get("worldbuilding_instruction") or "").strip(),
+                "word_count_target": word_count_target,
+                "target_words": word_count_target,
+                "hook_ids": [str(item).strip() for item in hook_ids if str(item).strip()],
+            }
+        )
+    return normalized
+
+
+async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: AsyncSession) -> list[dict]:
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        return []
+    word_count = request.word_count or 2000
+    book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
+    book = book_result.scalar_one_or_none()
+    entities_result = await db.execute(
+        select(ChapterEntity).options(selectinload(ChapterEntity.character)).where(ChapterEntity.chapter_id == request.chapter_id)
+    )
+    entities = entities_result.scalars().all()
+    character_ids = [e.entity_id for e in entities]
+    relationships_result = await db.execute(
+        select(CharacterRelationship)
+        .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
+        .where(
+            CharacterRelationship.source_char_id.in_(character_ids),
+            CharacterRelationship.target_char_id.in_(character_ids),
+        )
+    )
+    relationships = relationships_result.scalars().all()
+    open_hook_result = await db.execute(
+        select(PlotLedger).where(
+            PlotLedger.book_id == chapter.book_id,
+            PlotLedger.status == "open",
+        )
+    )
+    open_hook_rows = open_hook_result.scalars().all()
+    open_hooks = []
+    for row in open_hook_rows:
+        content = str(getattr(row, "content", "") or "").strip()
+        if not content:
+            continue
+        hook_id = str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip()
+        open_hooks.append(
+            {
+                "hook_id": hook_id,
+                "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
+                "content": content,
+            }
+        )
+    
+    # 获取上一章摘要
+    prev_chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
+    )
+    prev_chapter = prev_chapter_result.scalar_one_or_none()
+    previous_summary = None
+    if prev_chapter:
+        if prev_chapter.summary:
+            previous_summary = prev_chapter.summary
+        elif prev_chapter.draft_text:
+            # 如果没有摘要，截取上一章最后 1000 字作为参考
+            previous_summary = f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
+
+    planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
+        chapter=chapter,
+        book=book,
+        entities=entities,
+        relationships=relationships,
+        word_count=word_count,
+        open_hooks=open_hooks,
+        previous_chapter_summary=previous_summary,
+    )
+    planner_result_raw = await call_llm(
+        system_prompt=planner_system_prompt,
+        user_prompt=planner_user_prompt,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model,
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+    return _normalize_confirmed_beats(beats, word_count)
+
+
+async def _generate_agentic_chapter_stream(
+    request: GenerateChapterAgenticRequest,
+    db: AsyncSession,
+    confirmed_beats: list[dict] | list[ConfirmedStoryBeat] | None,
+):
     # 步骤1：加载章节基础信息
     chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
     chapter = chapter_result.scalar_one_or_none()
@@ -126,7 +258,13 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
         .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
     )
     prev_chapter = prev_chapter_result.scalar_one_or_none()
-    previous_summary = prev_chapter.summary if prev_chapter else None
+    previous_summary = None
+    if prev_chapter:
+        if prev_chapter.summary:
+            previous_summary = prev_chapter.summary
+        elif prev_chapter.draft_text:
+            # 如果没有摘要，截取上一章最后 1000 字作为参考
+            previous_summary = f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
     open_hook_result = await db.execute(
         select(PlotLedger).where(
             PlotLedger.book_id == chapter.book_id,
@@ -189,26 +327,32 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     while iteration < max_iterations:
         iteration += 1
         if iteration == 1:
-            yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
-                chapter=chapter,
-                book=book,
-                entities=entities,
-                relationships=relationships,
-                word_count=word_count,
-                open_hooks=open_hooks,
-            )
-            yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
-            planner_result_raw = await call_llm(
-                system_prompt=planner_system_prompt,
-                user_prompt=planner_user_prompt,
-                api_key=request.api_key,
-                base_url=request.base_url,
-                model=request.model,
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+            if confirmed_beats:
+                beats = _normalize_confirmed_beats(confirmed_beats, word_count)
+                yield f"data: {json.dumps({'event': 'PLANNING', 'message': f'已加载并确认 {len(beats)} 个剧情节拍，准备进入正文生成...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
+                    chapter=chapter,
+                    book=book,
+                    entities=entities,
+                    relationships=relationships,
+                    word_count=word_count,
+                    open_hooks=open_hooks,
+                    previous_chapter_summary=previous_summary,
+                )
+                yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
+                planner_result_raw = await call_llm(
+                    system_prompt=planner_system_prompt,
+                    user_prompt=planner_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                )
+                beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+                beats = _normalize_confirmed_beats(beats, word_count)
             generated_chunks = [None] * len(beats)
             story_beats = []
 

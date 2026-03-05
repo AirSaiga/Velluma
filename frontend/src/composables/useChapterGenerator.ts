@@ -72,7 +72,8 @@ export function useChapterGenerator() {
       onEvent?: (event: string, data: any) => void
       onChunk?: (chunk: string) => void
       onComplete?: (result: any) => void
-    }
+    },
+    endpoint = '/generate_chapter_agentic'
   ) {
     if (isGenerating.value) {
       return
@@ -160,7 +161,7 @@ export function useChapterGenerator() {
         error.value = err
         isGenerating.value = false
       }
-    })
+    }, endpoint)
   }
 
   function reset() {

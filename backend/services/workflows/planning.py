@@ -3,7 +3,7 @@ from backend.services.llm_client import call_llm
 from backend.models import StoryBeat
 
 
-async def generate_beats(chapter, book, entities, relationships, word_count, open_hooks, api_key, base_url, model):
+async def generate_beats(chapter, book, entities, relationships, word_count, open_hooks, api_key, base_url, model, previous_chapter_summary=None):
     """
     生成章节故事节拍 (Story Beats)。
     
@@ -17,6 +17,7 @@ async def generate_beats(chapter, book, entities, relationships, word_count, ope
         relationships=relationships,
         word_count=word_count,
         open_hooks=open_hooks,
+        previous_chapter_summary=previous_chapter_summary,
     )
     
     planner_result_raw = await call_llm(

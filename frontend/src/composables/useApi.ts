@@ -361,16 +361,33 @@ export const generateApi = {
     return await response.json()
   },
 
+  previewAgenticBeats: async (data) => {
+    const baseUrl = await getApiBase()
+    console.log('[DEBUG] generateApi.previewAgenticBeats: 开始请求', { baseUrl, chapter_id: data.chapter_id })
+
+    const response = await fetch(`${baseUrl}/generate_chapter_agentic_preview_beats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`节拍预览请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return await response.json()
+  },
+
   streamAgentic: async (data, callbacks: {
     onEvent?: (event: string, data: any) => void,
     onChunk?: (chunk: string) => void,
     onDone?: (result: any) => void,
     onError?: (error: string) => void
-  }) => {
+  }, endpoint = '/generate_chapter_agentic') => {
     const baseUrl = await getApiBase()
     console.log('[DEBUG] generateApi.streamAgentic: 开始请求', { baseUrl, chapter_id: data.chapter_id })
     
-    fetch(`${baseUrl}/generate_chapter_agentic`, {
+    fetch(`${baseUrl}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)

@@ -12,7 +12,7 @@ import {
   validateAgenticForm
 } from '../composables/useAgenticConfig'
 import RichTextEditor from './RichTextEditor.vue'
-import type { AgenticFormState, Chapter, Character } from '../types'
+import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload } from '../types'
 
 interface ApiConfig {
   api_key: string
@@ -34,6 +34,7 @@ const isPublishing = ref(false)
 const publishError = ref<string | null>(null)
 const showPublishModal = ref(false)
 const showAgenticSettingsModal = ref(false)
+const showBeatReviewModal = ref(false)
 const characterUpdates = ref<Array<{
   character_id: string
   character_name: string
@@ -41,6 +42,11 @@ const characterUpdates = ref<Array<{
   new_state: string
 }>>([])
 const chapterSummary = ref<string | null>(null)
+const beatPreviewLoading = ref(false)
+const beatPreviewError = ref('')
+const previewBeats = ref<ConfirmedStoryBeat[]>([])
+const pendingAgenticPayload = ref<GenerateChapterAgenticPayload | null>(null)
+const pendingClearEditorOnConfirm = ref(false)
 
 const agenticForm = ref<AgenticFormState>({ ...AGENTIC_DEFAULTS })
 const wordCountMin = ref(500)
@@ -166,6 +172,78 @@ function closeAgenticSettingsModal() {
   showAgenticSettingsModal.value = false
 }
 
+function closeBeatReviewModal() {
+  showBeatReviewModal.value = false
+  beatPreviewError.value = ''
+  previewBeats.value = []
+  pendingAgenticPayload.value = null
+  pendingClearEditorOnConfirm.value = false
+}
+
+async function previewBeatsForReview(payload: GenerateChapterAgenticPayload, clearEditorOnConfirm: boolean) {
+  beatPreviewLoading.value = true
+  beatPreviewError.value = ''
+  try {
+    const result = await generateApi.previewAgenticBeats(payload)
+    const beats = Array.isArray(result?.beats) ? result.beats : []
+    if (!beats.length) {
+      throw new Error('未生成可用节拍，请调整大纲后重试')
+    }
+    previewBeats.value = beats
+    pendingAgenticPayload.value = payload
+    pendingClearEditorOnConfirm.value = clearEditorOnConfirm
+    showBeatReviewModal.value = true
+  } catch (err) {
+    beatPreviewError.value = (err as Error).message || '节拍预览失败'
+    alert('节拍预览失败: ' + beatPreviewError.value)
+  } finally {
+    beatPreviewLoading.value = false
+  }
+}
+
+function getBeatHookLabel(beat: ConfirmedStoryBeat) {
+  if (!Array.isArray(beat.hook_ids) || beat.hook_ids.length === 0) return '无'
+  return beat.hook_ids.join(' / ')
+}
+
+function confirmBeatsAndGenerate() {
+  if (!pendingAgenticPayload.value || previewBeats.value.length === 0) {
+    alert('当前没有可用节拍，请重新生成')
+    return
+  }
+  if (pendingClearEditorOnConfirm.value && editorRef.value) {
+    editorRef.value.clearContent()
+  }
+  const payload = {
+    ...pendingAgenticPayload.value,
+    beats: previewBeats.value
+  }
+  closeBeatReviewModal()
+  reset()
+  formError.value = ''
+  generateStartTime = Date.now()
+  startAgenticGeneration(payload, {
+    onEvent: (event, data) => {
+      console.log('[Workflow Event]', event, data)
+    },
+    onChunk: (chunk) => {
+      if (editorRef.value) {
+        editorRef.value.insertContent(chunk)
+      }
+    },
+    onComplete: (result) => {
+      if (editorRef.value) {
+        editorRef.value.flushBuffer()
+      }
+      const durationText = getDurationText()
+      const statusMsg = result.passed
+        ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次 (${durationText})`
+        : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次 (${durationText})`
+      alert(statusMsg)
+    }
+  }, '/generate_chapter_agentic_with_beats')
+}
+
 function toggleCharacter(charId) {
   if (!selectedChapter.value) return
   
@@ -200,19 +278,10 @@ async function startGenerate() {
   
   const editor = editorRef.value?.editor
   const editorContent = editor ? editor.getText().trim() : ''
-  
-  if (editorContent) {
-    if (!confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
-      return
-    }
-    if (editorRef.value) {
-      editorRef.value.clearContent()
-    }
+  const hasEditorContent = Boolean(editorContent)
+  if (hasEditorContent && !confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
+    return
   }
-  
-  reset()
-  formError.value = ''
-  generateStartTime = Date.now()
 
   const requestData = {
     chapter_id: selectedChapter.value.id,
@@ -241,27 +310,14 @@ async function startGenerate() {
       alert(formError.value)
       return
     }
-    startAgenticGeneration(payload, {
-      onEvent: (event, data) => {
-        console.log('[Workflow Event]', event, data)
-      },
-      onChunk: (chunk) => {
-        if (editorRef.value) {
-          editorRef.value.insertContent(chunk)
-        }
-      },
-      onComplete: (result) => {
-        if (editorRef.value) {
-          editorRef.value.flushBuffer()
-        }
-        const durationText = getDurationText()
-        const statusMsg = result.passed 
-          ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次 (${durationText})`
-          : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次 (${durationText})`
-        alert(statusMsg)
-      }
-    })
+    await previewBeatsForReview(payload, hasEditorContent)
   } else if (isStreamMode.value) {
+    reset()
+    formError.value = ''
+    generateStartTime = Date.now()
+    if (hasEditorContent && editorRef.value) {
+      editorRef.value.clearContent()
+    }
     startGeneration(requestData, (chunk) => {
       if (editorRef.value) {
         editorRef.value.insertContent(chunk)
@@ -273,6 +329,12 @@ async function startGenerate() {
       alert(`本章正文生成完成！(${getDurationText()})`)
     })
   } else {
+    reset()
+    formError.value = ''
+    generateStartTime = Date.now()
+    if (hasEditorContent && editorRef.value) {
+      editorRef.value.clearContent()
+    }
     isGenerating.value = true
     try {
       const result = await generateApi.generateSync(requestData)
@@ -381,8 +443,14 @@ function getWorkflowStageLabel() {
   switch (workflowState.value.currentEvent) {
     case 'ASSEMBLING_CONTEXT':
       return '组装上下文'
+    case 'PLANNING':
+      return '规划节拍'
     case 'DRAFTING':
       return '起草'
+    case 'SCENE_INTENT':
+      return '拆解场景意图'
+    case 'STITCHING':
+      return '统稿拼接'
     case 'REVIEWING':
       return '审阅'
     case 'REFINING':
@@ -497,10 +565,10 @@ function isCharacterSelected(charId: string) {
             </button>
             <button
               @click="startGenerate"
-              :disabled="isGenerating || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
+              :disabled="isGenerating || beatPreviewLoading || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
               class="px-3 py-1 rounded-lg bg-[var(--accent-500)] text-white text-xs font-medium disabled:opacity-40 transition-colors"
             >
-              {{ isGenerating ? '生成中' : '生成' }}
+              {{ beatPreviewLoading ? '规划中' : (isGenerating ? '生成中' : '生成') }}
             </button>
             <button
               @click="publishChapter"
@@ -662,6 +730,53 @@ function isCharacterSelected(charId: string) {
         <p v-if="formError || firstFieldFeedback || agenticValidation.errors.length > 0" class="text-[10px] text-rose-500">
           {{ formError || firstFieldFeedback || agenticValidation.errors[0] }}
         </p>
+      </div>
+    </div>
+  </div>
+
+  <div
+    v-if="showBeatReviewModal && isAgenticMode"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
+    @click.self="closeBeatReviewModal"
+  >
+    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
+      <div class="p-3 border-b border-white/60 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-[var(--text-primary)]">剧情节拍预览</h3>
+        <button @click="closeBeatReviewModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-4 overflow-y-auto max-h-[calc(85vh-124px)] space-y-3">
+        <div v-if="beatPreviewError" class="text-xs text-rose-500">
+          {{ beatPreviewError }}
+        </div>
+        <div v-for="beat in previewBeats" :key="`${beat.position}-${beat.beat_id || beat.summary}`" class="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-semibold text-[var(--text-primary)]">节拍 {{ beat.position }}</div>
+            <div class="text-[10px] text-[var(--text-muted)]">建议字数 {{ beat.word_count_target || beat.target_words || 0 }}</div>
+          </div>
+          <p class="text-xs text-[var(--text-primary)] leading-relaxed">{{ beat.summary }}</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] text-[var(--text-secondary)]">
+            <div>场景：{{ beat.location || '未指定' }}</div>
+            <div>视角：{{ beat.pov_character || '未指定' }}</div>
+            <div>动作摘要：{{ beat.action_summary || '未指定' }}</div>
+            <div>绑定伏笔：{{ getBeatHookLabel(beat) }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="p-3 border-t border-white/60 flex items-center justify-end gap-2">
+        <button @click="closeBeatReviewModal" class="px-3 py-1.5 rounded-lg bg-white text-[var(--text-secondary)] text-xs ring-1 ring-slate-200">
+          取消
+        </button>
+        <button
+          @click="confirmBeatsAndGenerate"
+          :disabled="previewBeats.length === 0 || isGenerating"
+          class="px-3 py-1.5 rounded-lg bg-[var(--accent-500)] text-white text-xs font-medium disabled:opacity-40"
+        >
+          确认并生成正文
+        </button>
       </div>
     </div>
   </div>

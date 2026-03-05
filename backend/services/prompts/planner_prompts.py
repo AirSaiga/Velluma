@@ -11,6 +11,7 @@ def build_planner_agent_prompt(
     relationships: list,
     word_count: int,
     open_hooks: list = None,
+    previous_chapter_summary: str = None,
 ):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -83,6 +84,8 @@ def build_planner_agent_prompt(
 
 【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
+【上一章情节概要】
+{previous_chapter_summary if previous_chapter_summary else '暂无上一章概要'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
 【目标字数】{word_count}

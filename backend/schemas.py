@@ -586,6 +586,27 @@ class GenerateChapterAgenticRequest(BaseModel):
         return self
 
 
+class ConfirmedStoryBeat(BaseModel):
+    position: int = Field(..., ge=1)
+    beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    summary: str = Field(..., min_length=1)
+    location: Optional[str] = None
+    pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    action_summary: Optional[str] = None
+    worldbuilding_instruction: Optional[str] = None
+    word_count_target: int = Field(default=0, ge=0)
+    target_words: int = Field(default=0, ge=0)
+    hook_ids: List[str] = Field(default_factory=list)
+
+
+class GenerateChapterAgenticPreviewResponse(BaseModel):
+    beats: List[ConfirmedStoryBeat] = Field(default_factory=list)
+
+
+class GenerateChapterAgenticWithBeatsRequest(GenerateChapterAgenticRequest):
+    beats: List[ConfirmedStoryBeat] = Field(..., min_length=1, max_length=6)
+
+
 # ============================================================
 # 章节-实体关联 Schema 层
 # ============================================================
