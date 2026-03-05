@@ -361,6 +361,21 @@ export const generateApi = {
     return await response.json()
   },
 
+  optimize: async (data: any) => {
+    const baseUrl = await getApiBase()
+    const response = await fetch(`${baseUrl}/optimize_chapter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    
+    if (!response.ok) {
+      throw new Error(`优化请求失败: ${response.status} ${response.statusText}`)
+    }
+    
+    return await response.json()
+  },
+
   previewAgenticBeats: async (data) => {
     const baseUrl = await getApiBase()
     console.log('[DEBUG] generateApi.previewAgenticBeats: 开始请求', { baseUrl, chapter_id: data.chapter_id })

@@ -547,6 +547,27 @@ class GenerateChapterRequest(BaseModel):
     model: str = Field(default="gpt-4o-mini")
     word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
 
+
+class OptimizeChapterRequest(BaseModel):
+    """章节优化请求模型
+
+    业务目的：
+    - 根据用户反馈对已生成的章节内容进行优化
+
+    参数来源：
+    - chapter_id: 目标章节
+    - optimization_feedback: 用户输入的优化建议
+    - word_count: 期望字数（可选）
+    - api_key/base_url/model: LLM 配置
+    """
+    chapter_id: UUID
+    optimization_feedback: str = Field(..., min_length=1, description="用户优化建议")
+    word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+
+
 AGENTIC_DEFAULT_WORD_COUNT = 2000
 AGENTIC_DEFAULT_MAX_ITERATIONS = 2
 AGENTIC_DEFAULT_RAG_TOP_K = 3

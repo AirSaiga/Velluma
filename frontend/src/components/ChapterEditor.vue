@@ -28,7 +28,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters'])
-const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, reset } = useChapterGenerator()
+const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
 
 const isPublishing = ref(false)
 const publishError = ref<string | null>(null)
@@ -470,6 +470,33 @@ function getWorkflowStageLabel() {
 function isCharacterSelected(charId: string) {
   return selectedChapter.value?.character_ids?.includes(charId) || false
 }
+
+const optimizationFeedback = ref('')
+
+async function handleOptimize() {
+  if (!selectedChapter.value || !optimizationFeedback.value.trim() || isGenerating.value) return
+  
+  try {
+    const optimizedContent = await optimizeChapter({
+      chapter_id: selectedChapter.value.id,
+      optimization_feedback: optimizationFeedback.value,
+      word_count: agenticForm.value.word_count,
+      api_key: props.apiConfig.api_key,
+      base_url: props.apiConfig.base_url,
+      model: props.apiConfig.model
+    })
+    
+    if (optimizedContent) {
+      updateChapter({ 
+        content_text: optimizedContent,
+        draft_text: optimizedContent 
+      })
+      optimizationFeedback.value = ''
+    }
+  } catch (e) {
+    console.error('Optimization failed', e)
+  }
+}
 </script>
 
 <template>
@@ -576,6 +603,25 @@ function isCharacterSelected(charId: string) {
               class="px-3 py-1 rounded-lg bg-white text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xs disabled:opacity-40 transition-colors"
             >
               {{ isPublishing ? '发布中' : (selectedChapter.status === 'published' ? '已发布' : '发布') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="selectedChapter.content_text || selectedChapter.draft_text" class="pt-2 border-t border-slate-100 mt-2">
+          <div class="flex items-center gap-2">
+            <input
+              v-model="optimizationFeedback"
+              class="flex-1 px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] placeholder:text-[var(--text-muted)]"
+              placeholder="输入优化建议..."
+              @keyup.enter="handleOptimize"
+            />
+            <button
+              @click="handleOptimize"
+              :disabled="isGenerating || !optimizationFeedback.trim()"
+              class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-medium disabled:opacity-40 transition-colors flex items-center justify-center gap-1 shrink-0"
+            >
+              <span v-if="isGenerating && workflowState.currentEvent === 'REFINING'" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+              {{ isGenerating && workflowState.currentEvent === 'REFINING' ? '优化中...' : '优化' }}
             </button>
           </div>
         </div>

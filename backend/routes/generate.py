@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from backend.models import Chapter, ChapterEntity, CharacterRelationship
 
 from backend.core.dependencies import get_chapter_repository
 from backend.repositories import ChapterRepository
@@ -8,6 +11,7 @@ from backend.schemas import (
     GenerateChapterAgenticRequest,
     GenerateChapterAgenticPreviewResponse,
     GenerateChapterAgenticWithBeatsRequest,
+    OptimizeChapterRequest,
 )
 from backend.services.chapter_generation import (
     build_chapter_prompt,
@@ -16,6 +20,7 @@ from backend.services.chapter_generation import (
     generate_agentic_chapter_stream,
     generate_agentic_chapter_stream_with_confirmed_beats,
     preview_agentic_beats,
+    refine_draft,
 )
 
 router = APIRouter(prefix="/api", tags=["generate"])
@@ -68,6 +73,94 @@ async def generate_chapter(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+# =============================================================================
+# 章节优化 - 根据用户反馈调整内容
+# =============================================================================
+
+@router.post("/optimize_chapter")
+async def optimize_chapter(
+    request: OptimizeChapterRequest,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+):
+    """业务目的：根据用户反馈优化章节内容。
+
+    参数来源：
+    - request: 包含 chapter_id, optimization_feedback, api_key 等
+
+    数据流：
+    1. 获取章节、书籍、角色、关系上下文
+    2. 调用 Refine Agent 进行重写
+    3. 返回优化后的内容
+
+    注意：此操作不会直接修改数据库，需要用户确认后保存
+    """
+    db = chapter_repo.db
+    chapter_id = request.chapter_id
+
+    # 1. 获取章节和书籍
+    # 使用 selectinload 预加载 book，避免 session 关闭后访问出错
+    result = await db.execute(
+        select(Chapter).options(selectinload(Chapter.book)).where(Chapter.id == chapter_id)
+    )
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    
+    book = chapter.book
+
+    # 2. 获取相关角色 (Entities)
+    entities_result = await db.execute(
+        select(ChapterEntity)
+        .options(selectinload(ChapterEntity.character))
+        .where(ChapterEntity.chapter_id == chapter_id)
+    )
+    entities = entities_result.scalars().all()
+    
+    # 3. 获取角色关系
+    character_ids = []
+    seen_ids = set()
+    for e in entities:
+        if e.character and e.character.id not in seen_ids:
+            seen_ids.add(e.character.id)
+            character_ids.append(e.character.id)
+            
+    relationships = []
+    if character_ids:
+        relationships_result = await db.execute(
+            select(CharacterRelationship)
+            .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
+            .where(
+                CharacterRelationship.source_char_id.in_(character_ids),
+                CharacterRelationship.target_char_id.in_(character_ids),
+            )
+        )
+        relationships = relationships_result.scalars().all()
+
+    # 4. 获取当前草稿内容
+    # 优先使用 content_text (已保存内容)，其次 draft_text (生成中内容)
+    current_draft = chapter.content_text or chapter.draft_text or ""
+    if not current_draft:
+        raise HTTPException(status_code=400, detail="当前章节没有内容可优化")
+    
+    # 5. 调用 Refine Agent
+    # 注意：refine_draft 需要的 entities 是 ChapterEntity 对象列表
+    # relationships 是 CharacterRelationship 对象列表
+    refined_text = await refine_draft(
+        chapter=chapter,
+        book=book,
+        entities=entities,
+        relationships=relationships,
+        current_draft=current_draft,
+        revision_plan=request.optimization_feedback,
+        word_count=request.word_count,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model,
+    )
+    
+    return {"optimized_content": refined_text}
 
 
 # =============================================================================

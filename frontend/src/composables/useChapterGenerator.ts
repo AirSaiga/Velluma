@@ -164,6 +164,37 @@ export function useChapterGenerator() {
     }, endpoint)
   }
 
+  async function optimizeChapter(request: any) {
+    if (isGenerating.value) return
+    
+    isGenerating.value = true
+    error.value = null
+    workflowState.value = {
+      currentEvent: 'REFINING' as any,
+      message: '正在根据您的反馈进行优化...',
+      iteration: 0,
+      passed: false,
+      revisionCount: 0
+    }
+    
+    try {
+      const result = await generateApi.optimize(request)
+      return result.optimized_content
+    } catch (err: any) {
+      error.value = err.message || 'Optimization failed'
+      throw err
+    } finally {
+      isGenerating.value = false
+      workflowState.value = {
+        currentEvent: 'DONE' as any,
+        message: '优化完成',
+        iteration: 0,
+        passed: true,
+        revisionCount: 0
+      }
+    }
+  }
+
   function reset() {
     isGenerating.value = false
     generatedText.value = ''
@@ -184,6 +215,7 @@ export function useChapterGenerator() {
     workflowState,
     startGeneration,
     startAgenticGeneration,
+    optimizeChapter,
     reset
   }
 }

@@ -16,6 +16,7 @@ from backend.services.agentic_workflow import (
     generate_agentic_chapter_stream_with_confirmed_beats,
     preview_agentic_beats,
 )
+from backend.services.workflows.refining import refine_draft
 from backend.services.character_state import update_character_dynamic_state
 from backend.services.llm_client import call_llm, generate_stream_response
 from backend.services.prompts import (
@@ -38,4 +39,5 @@ __all__ = [
     "generate_agentic_chapter_stream_with_confirmed_beats",
     "preview_agentic_beats",
     "update_character_dynamic_state",
+    "refine_draft",
 ]
