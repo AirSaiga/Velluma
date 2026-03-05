@@ -9,7 +9,7 @@ from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, 
 from backend.repositories import MemoryRepository
 from backend.schemas import GenerateChapterAgenticRequest
 from backend.services.llm_client import call_llm, get_embedding
-from backend.services.prompt_builder import (
+from backend.services.prompts import (
     build_chunk_draft_prompt,
     build_draft_agent_prompt,
     build_planner_agent_prompt,

@@ -47,6 +47,7 @@ electron/node_modules/
 .vscode/
 .idea/
 .trae/specs
+.trae/documents
 *.swp
 *.swo
 

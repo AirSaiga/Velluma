@@ -1,5 +1,7 @@
 from backend.routes.books import router as books_router
 from backend.routes.chapters import router as chapters_router
+from backend.routes.chapter_entities import router as chapter_entities_router
+from backend.routes.chapter_publishing import router as chapter_publishing_router
 from backend.routes.characters import router as characters_router
 from backend.routes.relationships import router as relationships_router
 from backend.routes.memories import router as memories_router

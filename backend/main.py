@@ -24,6 +24,8 @@ from backend.database import init_db
 from backend.routes import (
     books_router,
     chapters_router,
+    chapter_entities_router,
+    chapter_publishing_router,
     characters_router,
     relationships_router,
     memories_router,
@@ -102,6 +104,8 @@ app.add_middleware(
 app.include_router(system_router)
 app.include_router(books_router)
 app.include_router(chapters_router)
+app.include_router(chapter_entities_router)
+app.include_router(chapter_publishing_router)
 app.include_router(characters_router)
 app.include_router(relationships_router)
 app.include_router(memories_router)
