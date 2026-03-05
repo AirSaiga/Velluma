@@ -93,7 +93,7 @@ async def update_character_dynamic_state(
     for attempt in range(max_retries):
         http_client = None
         try:
-            http_client = httpx.AsyncClient(trust_env=False)
+            http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
             client_kwargs["http_client"] = http_client
             client = AsyncOpenAI(**client_kwargs)
             

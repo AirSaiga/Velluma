@@ -67,15 +67,21 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         beta: float = 0.2,
         gamma: float = 0.2,
         lambda_decay: float = 0.1,
+        exclude_chapter_id: Optional[UUID] = None,
     ):
         candidate_limit = max(limit * 3, limit)
         distance_expr = MemoryChunk.embedding.cosine_distance(embedding)
-        stmt = (
-            select(MemoryChunk, distance_expr.label("distance"))
-            .where(MemoryChunk.book_id == book_id, MemoryChunk.embedding.is_not(None))
-            .order_by(distance_expr)
-            .limit(candidate_limit)
+        
+        query = select(MemoryChunk, distance_expr.label("distance")).where(
+            MemoryChunk.book_id == book_id, 
+            MemoryChunk.embedding.is_not(None)
         )
+        
+        if exclude_chapter_id:
+            query = query.where(MemoryChunk.chapter_id != exclude_chapter_id)
+            
+        stmt = query.order_by(distance_expr).limit(candidate_limit)
+        
         result = await self.db.execute(stmt)
         rows = result.all()
         if not rows:

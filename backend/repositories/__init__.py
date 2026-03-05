@@ -3,3 +3,4 @@ from backend.repositories.chapter_repository import ChapterRepository
 from backend.repositories.character_repository import CharacterRepository
 from backend.repositories.relationship_repository import RelationshipRepository
 from backend.repositories.memory_repository import MemoryRepository
+from backend.repositories.map_repository import MapLocationRepository

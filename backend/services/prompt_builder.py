@@ -40,12 +40,32 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     worldview_settings = book.worldview_settings
     worldview_prompt = f"【世界观设定】\n{worldview_settings}" if worldview_settings else None
 
+    map_activity_range = getattr(chapter, "map_activity_range", None)
+    map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
+
     # 步骤2：加载本章涉及的角色及其动态状态
     # 关键：去重逻辑防止同一角色出现多次 (一个角色可能多处出场)
     entities_result = await db.execute(
         select(ChapterEntity).options(selectinload(ChapterEntity.character)).where(ChapterEntity.chapter_id == chapter_id)
     )
     entities = entities_result.scalars().all()
+
+    # 加载本章涉及的地点
+    from backend.models import ChapterMapLocation
+    locations_result = await db.execute(
+        select(ChapterMapLocation).options(selectinload(ChapterMapLocation.location)).where(ChapterMapLocation.chapter_id == chapter_id)
+    )
+    locations = locations_result.scalars().all()
+    location_prompts = []
+    for loc_rel in locations:
+        if loc_rel.location:
+            desc = f"【{loc_rel.location.name}】{loc_rel.location.description or ''}"
+            location_prompts.append(desc)
+    
+    if map_prompt:
+        location_prompts.append(map_prompt)
+    
+    final_map_prompt = "\n".join(location_prompts) if location_prompts else None
 
     static_states = []
     dynamic_states = []
@@ -84,6 +104,7 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     system_prompt_parts = [
         global_sys_prompt,
         worldview_prompt if worldview_prompt else "",
+        f"【场景与地图】\n{final_map_prompt}" if final_map_prompt else "",
         "\n\n## 角色静态设定",
         "\n".join(static_states) if static_states else "暂无角色设定",
         "\n\n## 角色动态状态",
@@ -144,6 +165,10 @@ def build_draft_agent_prompt(
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    map_activity_range = getattr(chapter, "map_activity_range", None)
+    map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
+
     tone_instruction = (
         getattr(chapter, "tone", None)
         or getattr(book, "tone", None)
@@ -214,6 +239,8 @@ def build_draft_agent_prompt(
     system_prompt = f"""{global_sys_prompt}
 
 {worldview_prompt if worldview_prompt else ''}
+
+{map_prompt if map_prompt else ''}
 
 {prev_summary_prompt if prev_summary_prompt else ''}
 
@@ -552,6 +579,7 @@ def build_chunk_draft_prompt(
     previous_summary: str = None,
     relevant_memories: list = None,
     hook_contexts: list = None,
+    context_beat_summaries: dict = None,
 ):
     system_prompt, user_prompt = build_draft_agent_prompt(
         chapter=chapter,
@@ -565,7 +593,25 @@ def build_chunk_draft_prompt(
         scene_intent=scene_intent,
         hook_contexts=hook_contexts,
     )
-    continuity_text = "\n\n".join(previous_chunks[-2:]) if previous_chunks else "暂无已生成内容"
+    
+    continuity_section = ""
+    if previous_chunks:
+        continuity_text = "\n\n".join(previous_chunks[-2:])
+        continuity_section = f"【连贯性参考（最近已生成内容）】\n{continuity_text}"
+    else:
+        # 并行模式下的上下文注入
+        context_parts = []
+        if context_beat_summaries:
+            if context_beat_summaries.get('prev'):
+                context_parts.append(f"前一节拍梗概：{context_beat_summaries['prev']}")
+            if context_beat_summaries.get('next'):
+                context_parts.append(f"后一节拍梗概：{context_beat_summaries['next']}")
+        
+        if context_parts:
+            continuity_section = "【上下文情节参考】\n" + "\n".join(context_parts) + "\n请根据上下文梗概，确保本段落的开头和结尾能与前后情节自然衔接。"
+        else:
+            continuity_section = "【连贯性参考】\n暂无已生成内容"
+
     chunk_user_prompt = f"""{user_prompt}
 
 【当前 Story Beat】
@@ -583,8 +629,7 @@ BeatID：{beat.get("beat_id", "")}
 风险：{scene_intent.get("stakes") or "无"}
 约束：{", ".join(scene_intent.get("constraints", [])) if scene_intent.get("constraints") else "无"}
 
-【连贯性参考（最近已生成内容）】
-{continuity_text}
+{continuity_section}
 
 请只输出当前 beat 对应的正文 chunk，不要重复前文，不要输出解释。"""
     return system_prompt, chunk_user_prompt
@@ -594,13 +639,15 @@ def build_stitch_prompt(chapter: Chapter, beats: list[dict], chunks: list[str], 
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     beat_lines = [f"{idx + 1}. {beat.get('summary', '')}" for idx, beat in enumerate(beats)]
     chunk_lines = [f"### Chunk {idx + 1}\n{chunk}" for idx, chunk in enumerate(chunks)]
-    system_prompt = f"""你是小说统稿编辑。请将多个 chunk 融合成连贯的章节正文，并保持约 {word_count} 字（±100）。
+    system_prompt = f"""你是小说统稿编辑。请将多个并行生成的 chunk 融合成连贯的章节正文，并保持约 {word_count} 字（±100）。
 
 要求：
-1. 保持剧情顺序与逻辑连贯
-2. 消除重复信息与风格断裂
-3. 统一人称、时态与语气
-4. 输出纯文本，不要标题或解释"""
+1. **重点修复**：检查各 Chunk 之间的连接点，消除任何突兀的场景转换或逻辑断裂。如果前后文不搭，请重写过渡段落。
+2. 保持剧情顺序与逻辑连贯。
+3. 消除重复信息与风格断裂。
+4. 统一人称、时态与语气。
+5. 移除任何残留的元数据（如 JSON 标记、Markdown 代码块等）。
+6. 输出纯文本，不要标题或解释。"""
     user_prompt = f"""请统稿以下内容：
 
 【章节名】{chapter_name}

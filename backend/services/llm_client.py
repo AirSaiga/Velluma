@@ -43,7 +43,7 @@ def _should_retry_exception(exception: Exception) -> bool:
 @retry(
     retry=retry_if_exception_type(Exception) & retry_if_exception(_should_retry_exception),
     stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
+    wait=wait_exponential(multiplier=2, min=2, max=60),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True
 )
@@ -82,7 +82,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         if base_url:
             client_kwargs["base_url"] = base_url
         # 禁用 httpx 默认代理继承，避免被系统代理截获
-        http_client = httpx.AsyncClient(trust_env=False)
+        http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
         # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
@@ -201,7 +201,7 @@ async def call_llm(
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
-    http_client = httpx.AsyncClient(trust_env=False)
+    http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
     client_kwargs["http_client"] = http_client
     try:
         client = AsyncOpenAI(**client_kwargs)

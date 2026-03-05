@@ -299,14 +299,14 @@ async def publish_chapter(
                     request.base_url,
                     request.model,
                 ),
-                timeout=90,
+                timeout=180,
             )
             print(f"[DEBUG] Summary generated: {bool(summary)}")
             if summary:
                 chapter.summary = summary
                 summary_embedding = await asyncio.wait_for(
                     get_embedding(summary, request.api_key, request.base_url),
-                    timeout=60,
+                    timeout=120,
                 )
                 print(f"[DEBUG] Embedding generated: {bool(summary_embedding)}")
                 if summary_embedding:
@@ -366,7 +366,7 @@ async def publish_chapter(
                             base_url=request.base_url,
                             model=request.model,
                         ),
-                        timeout=90,
+                        timeout=180,
                     )
                     new_state = character.dynamic_state or "暂无动态状态"
                     character_updates.append(

@@ -49,7 +49,7 @@ const isStreamMode = ref(true)
 const isAgenticMode = ref(true)
 const formError = ref('')
 
-const isEditorDisabled = computed(() => isGenerating.value)
+const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value)
 
 const selectedChapter = computed(() => {
   return props.selectedChapter
@@ -536,8 +536,28 @@ function isCharacterSelected(charId: string) {
           </div>
         </div>
 
+        <div 
+          v-if="isPublishing" 
+          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+        >
+          <div class="relative flex items-center justify-center w-24 h-24 mb-8">
+            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-50"></div>
+            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-500 border-t-transparent animate-spin"></div>
+          </div>
+          
+          <div class="flex flex-col items-center gap-3">
+            <h3 class="text-3xl font-bold text-indigo-900 tracking-tight">
+              发布中...
+            </h3>
+            <p class="text-lg text-indigo-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
+              正在更新章节状态及角色动态...
+            </p>
+          </div>
+        </div>
+
         <RichTextEditor
           ref="editorRef"
+          :id="selectedChapter.id"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
           :disabled="isEditorDisabled"

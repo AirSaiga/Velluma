@@ -56,6 +56,7 @@ class Book(Base):
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
+    locations = relationship("MapLocation", back_populates="book", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="book", cascade="all, delete-orphan")
     story_beats = relationship("StoryBeat", back_populates="book", cascade="all, delete-orphan")
     scene_intents = relationship("SceneIntent", back_populates="book", cascade="all, delete-orphan")
@@ -99,12 +100,14 @@ class Chapter(Base):
     draft_text = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     review_feedback = Column(JSONB, default=dict)
+    map_activity_range = Column(Text, nullable=True)
     revision_count = Column(Integer, default=0)
     status = Column(String(50), default="draft")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="chapters")
     entities = relationship("ChapterEntity", back_populates="chapter", cascade="all, delete-orphan")
+    locations = relationship("ChapterMapLocation", back_populates="chapter", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="chapter", cascade="all, delete-orphan")
     story_beats = relationship("StoryBeat", back_populates="chapter", cascade="all, delete-orphan")
     scene_intents = relationship("SceneIntent", back_populates="chapter", cascade="all, delete-orphan")
@@ -151,6 +154,44 @@ class ChapterEntity(Base):
 
     chapter = relationship("Chapter", back_populates="entities")
     character = relationship("Character", back_populates="chapter_entities")
+
+
+class MapLocation(Base):
+    """
+    地图/地点表 - 管理世界观中的地理位置信息
+
+    业务含义：
+    - 存储地点名称和描述（用于 Prompt 上下文）
+    - 可在章节中被引用，作为环境约束或场景设定
+    """
+    __tablename__ = "map_locations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="locations")
+    chapter_locations = relationship("ChapterMapLocation", back_populates="location", cascade="all, delete-orphan")
+
+
+class ChapterMapLocation(Base):
+    """
+    章节-地点关联表 (多对多)
+
+    业务含义：
+    - 标记特定章节涉及哪些地点
+    """
+    __tablename__ = "chapter_map_locations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    location_id = Column(UUID(as_uuid=True), ForeignKey("map_locations.id", ondelete="CASCADE"), nullable=False)
+    
+    chapter = relationship("Chapter", back_populates="locations")
+    location = relationship("MapLocation", back_populates="chapter_locations")
+
 
 
 # ============================================================

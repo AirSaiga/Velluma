@@ -85,6 +85,49 @@ class WorldviewUpdate(BaseModel):
     worldview_settings: dict = Field(default_factory=dict)
 
 
+class MapLocationBase(BaseModel):
+    """地图/地点基础模型"""
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+
+
+class MapLocationCreate(MapLocationBase):
+    """创建地点请求模型"""
+    book_id: UUID
+
+
+class MapLocationUpdate(BaseModel):
+    """更新地点请求模型"""
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = None
+
+
+class MapLocationResponse(MapLocationBase):
+    """地点响应模型"""
+    id: UUID
+    book_id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChapterMapLocationCreate(BaseModel):
+    """章节-地点关联创建请求"""
+    location_id: UUID
+
+
+class ChapterMapLocationResponse(BaseModel):
+    """章节-地点关联响应"""
+    id: UUID
+    chapter_id: UUID
+    location_id: UUID
+    location: MapLocationResponse
+
+    class Config:
+        from_attributes = True
+
+
 # ============================================================
 # 章节 Schema 层 - 创作工作流的状态机
 # ============================================================
@@ -112,6 +155,7 @@ class ChapterBase(BaseModel):
     draft_text: Optional[str] = None
     summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
+    map_activity_range: Optional[str] = None
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
 
@@ -145,6 +189,7 @@ class ChapterUpdate(BaseModel):
     content_text: Optional[str] = None
     summary: Optional[str] = None
     status: Optional[str] = None
+    map_activity_range: Optional[str] = None
 
 
 class ChapterResponse(ChapterBase):

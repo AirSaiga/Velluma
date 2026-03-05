@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { characterApi } from '../composables/useApi'
 
 const props = defineProps({
   characters: {
@@ -9,6 +10,14 @@ const props = defineProps({
   relationships: {
     type: Array,
     default: () => []
+  },
+  selectedChapterId: {
+    type: String,
+    default: null
+  },
+  apiConfig: {
+    type: Object,
+    default: () => ({})
   }
 })
 
@@ -40,6 +49,39 @@ const relationshipForm = ref({
   interaction_prompt: ''
 })
 const editingRelationshipId = ref(null)
+const isUpdatingState = ref(false)
+
+async function handleUpdateDynamicState() {
+  if (!selectedCharacter.value || !props.selectedChapterId) return
+  
+  if (!props.apiConfig.api_key) {
+    alert('请先在设置中配置 API Key')
+    return
+  }
+  
+  if (!confirm('确定要基于当前章节内容更新角色的动态状态吗？\n此操作会分析章节正文并直接更新数据库。')) {
+    return
+  }
+
+  isUpdatingState.value = true
+  try {
+    const result = await characterApi.updateDynamicState(selectedCharacter.value.id, {
+      chapter_id: props.selectedChapterId,
+      api_key: props.apiConfig.api_key,
+      base_url: props.apiConfig.base_url,
+      model: props.apiConfig.model
+    })
+    
+    if (result.new_dynamic_state) {
+      formData.value.dynamic_state = result.new_dynamic_state
+      alert('动态状态更新成功')
+    }
+  } catch (error) {
+    alert('更新失败: ' + (error.message || '未知错误'))
+  } finally {
+    isUpdatingState.value = false
+  }
+}
 
 function openCreateDrawer() {
   selectedCharacter.value = null
@@ -274,7 +316,18 @@ function getImportanceColor(level) {
           </div>
           
           <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">动态状态 (当前状态)</label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-sm text-[var(--text-muted)]">动态状态 (当前状态)</label>
+              <button
+                v-if="selectedCharacter && selectedChapterId"
+                @click="handleUpdateDynamicState"
+                :disabled="isUpdatingState"
+                class="px-2 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                title="基于当前章节内容自动更新"
+              >
+                {{ isUpdatingState ? '更新中...' : 'AI 自动更新' }}
+              </button>
+            </div>
             <textarea
               v-model="formData.dynamic_state"
               rows="3"

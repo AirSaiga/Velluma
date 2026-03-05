@@ -8,6 +8,7 @@ from backend.repositories import (
     CharacterRepository,
     RelationshipRepository,
     MemoryRepository,
+    MapLocationRepository,
 )
 
 
@@ -45,3 +46,8 @@ def get_relationship_repository(db: AsyncSession = Depends(get_db)) -> Relations
 def get_memory_repository(db: AsyncSession = Depends(get_db)) -> MemoryRepository:
     # 用途：记忆管理的数据访问层，绑定到同一个数据库会话
     return MemoryRepository(db)
+
+
+def get_map_repository(db: AsyncSession = Depends(get_db)) -> MapLocationRepository:
+    # 用途：地图管理的数据访问层
+    return MapLocationRepository(db)

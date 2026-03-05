@@ -24,6 +24,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  id: {
+    type: [String, Number],
+    default: null,
+  }
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -61,11 +65,27 @@ const editor = useEditor({
   },
 })
 
-watch(() => props.modelValue, (newValue) => {
+watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId]) => {
+  // 1. 如果 ID 变了（切换章节），强制更新内容
+  if (newId !== oldId) {
+    editor.value.commands.setContent(newValue, false)
+    return
+  }
+
+  // 2. 如果内容完全一致，不需要更新
   const isSame = editor.value.getHTML() === newValue
   if (isSame) {
     return
   }
+
+  // 3. 如果 ID 没变且内容不一致：
+  //    - 如果编辑器有焦点，说明可能是用户正在输入触发的回流，或者是中文输入法中间态
+  //      此时不应该更新，否则会打断输入法并重置光标
+  //    - 如果编辑器没焦点，说明是外部更新（如自动生成、协同编辑），应该更新
+  if (editor.value.isFocused) {
+    return
+  }
+
   editor.value.commands.setContent(newValue, false)
 })
 

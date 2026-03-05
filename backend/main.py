@@ -29,6 +29,7 @@ from backend.routes import (
     memories_router,
     generate_router,
     system_router,
+    maps_router,
 )
 
 # =============================================================================
@@ -105,6 +106,7 @@ app.include_router(characters_router)
 app.include_router(relationships_router)
 app.include_router(memories_router)
 app.include_router(generate_router)
+app.include_router(maps_router)
 
 # =============================================================================
 # 前端静态文件服务（SPA 路由处理）

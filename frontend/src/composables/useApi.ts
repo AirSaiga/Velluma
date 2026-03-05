@@ -150,6 +150,10 @@ async function fetchApi(url: string, options: FetchOptions = {}) {
     throw new Error(error.detail || '请求失败')
   }
   
+  if (response.status === 204) {
+    return null
+  }
+  
   return response.json()
 }
 
@@ -171,7 +175,8 @@ export const characterApi = {
   get: (id) => fetchApi(`/characters/${id}`),
   create: (data) => fetchApi('/characters', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/characters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id) => fetchApi(`/characters/${id}`, { method: 'DELETE' })
+  delete: (id) => fetchApi(`/characters/${id}`, { method: 'DELETE' }),
+  updateDynamicState: (id, data) => fetchApi(`/characters/${id}/update-dynamic-state`, { method: 'POST', body: JSON.stringify(data) })
 }
 
 export const chapterApi = {
@@ -197,6 +202,43 @@ export const relationshipApi = {
   create: (data) => fetchApi('/relationships', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/relationships/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => fetchApi(`/relationships/${id}`, { method: 'DELETE' })
+}
+
+export const mapApi = {
+  getLocations(bookId: string) {
+    return fetchApi(`/books/${bookId}/locations`)
+  },
+  createLocation(bookId: string, data: any) {
+    return fetchApi(`/books/${bookId}/locations`, {
+      method: 'POST',
+      body: JSON.stringify({ ...data, book_id: bookId })
+    })
+  },
+  updateLocation(id: string, data: any) {
+    return fetchApi(`/locations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  },
+  deleteLocation(id: string) {
+    return fetchApi(`/locations/${id}`, {
+      method: 'DELETE'
+    })
+  },
+  getChapterLocations(chapterId: string) {
+    return fetchApi(`/chapters/${chapterId}/locations`)
+  },
+  addLocationToChapter(chapterId: string, locationId: string) {
+    return fetchApi(`/chapters/${chapterId}/locations`, {
+      method: 'POST',
+      body: JSON.stringify({ location_id: locationId })
+    })
+  },
+  removeLocationFromChapter(chapterId: string, locationId: string) {
+    return fetchApi(`/chapters/${chapterId}/locations/${locationId}`, {
+      method: 'DELETE'
+    })
+  }
 }
 
 export const generateApi = {

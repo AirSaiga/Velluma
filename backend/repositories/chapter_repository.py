@@ -63,3 +63,55 @@ class ChapterRepository(BaseRepository[Chapter]):
         警示：这是物理删除，关联移除后无法直接恢复（需重新调用 add_entity）。
         """
         await self.db.delete(entity)
+        await self.db.commit()
+
+    async def list_locations(self, chapter_id: UUID):
+        """
+        查询章节关联的所有地点
+        """
+        from backend.models import ChapterMapLocation
+        spec = QuerySpec.create(ChapterMapLocation).where(ChapterMapLocation.chapter_id == chapter_id)
+        return await self.find_all(spec=spec)
+
+    async def list_locations_with_details(self, chapter_id: UUID):
+        """
+        查询章节关联地点并预加载详情
+        """
+        from backend.models import ChapterMapLocation
+        spec = (
+            QuerySpec.create(ChapterMapLocation)
+            .where(ChapterMapLocation.chapter_id == chapter_id)
+            .with_options(selectinload(ChapterMapLocation.location))
+        )
+        return await self.find_all(spec=spec)
+
+    async def add_location(self, chapter_id: UUID, location_id: UUID):
+        """
+        为章节添加地点关联
+        """
+        from backend.models import ChapterMapLocation
+        chapter_location = ChapterMapLocation(chapter_id=chapter_id, location_id=location_id)
+        self.db.add(chapter_location)
+        await self.db.commit()
+
+    async def delete_location(self, location: "ChapterMapLocation"):
+        """
+        删除章节地点关联
+        """
+        await self.db.delete(location)
+        await self.db.commit()
+
+    async def remove_location_by_ids(self, chapter_id: UUID, location_id: UUID):
+        """
+        直接通过 chapter_id 和 location_id 删除关联
+        """
+        from backend.models import ChapterMapLocation
+        from sqlalchemy import delete
+
+        stmt = delete(ChapterMapLocation).where(
+            ChapterMapLocation.chapter_id == chapter_id,
+            ChapterMapLocation.location_id == location_id
+        )
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        return result.rowcount > 0

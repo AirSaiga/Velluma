@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import CharacterPanel from './components/CharacterPanel.vue'
 import ChapterEditor from './components/ChapterEditor.vue'
 import WorldviewSettings from './components/WorldviewSettings.vue'
+import MapSettings from './components/MapSettings.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import DebugPromptWindow from './components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from './composables/useApi'
@@ -587,6 +588,13 @@ onMounted(async () => {
               </button>
               <button
                 class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
+                :class="rightTab === 'map' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
+                @click="rightTab = 'map'"
+              >
+                地图
+              </button>
+              <button
+                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
                 :class="rightTab === 'notes' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
                 @click="rightTab = 'notes'"
               >
@@ -609,6 +617,8 @@ onMounted(async () => {
               v-if="rightTab === 'characters'"
               :characters="characters"
               :relationships="relationships"
+              :selected-chapter-id="selectedChapterId"
+              :api-config="apiConfig"
               @create-character="createCharacter"
               @update-character="updateCharacter"
               @delete-character="deleteCharacter"
@@ -620,6 +630,15 @@ onMounted(async () => {
             <div v-else-if="rightTab === 'worldview'" class="h-full overflow-y-auto p-3">
               <WorldviewSettings v-if="currentBookId" :book-id="currentBookId" />
               <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
+            </div>
+
+            <div v-else-if="rightTab === 'map'" class="h-full overflow-y-auto">
+              <MapSettings 
+                v-if="selectedChapter" 
+                :chapter="selectedChapter" 
+                @update-chapter="updateChapter"
+              />
+              <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>
             </div>
 
             <div v-else class="h-full overflow-y-auto p-3">

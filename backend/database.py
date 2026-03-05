@@ -93,6 +93,12 @@ MIGRATIONS: list[dict[str, Any]] = [
     },
     {
         "table": "chapters",
+        "column": "map_activity_range",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "chapters",
         "column": "chapter_name",
         "definition": "VARCHAR(200)",
         "expected_udt_names": {"varchar"},
@@ -225,8 +231,10 @@ async def init_db():
         Book,
         Chapter,
         ChapterEntity,
+        ChapterMapLocation,
         Character,
         CharacterRelationship,
+        MapLocation,
         MemoryChunk,
         PlotLedger,
         SceneIntent,
