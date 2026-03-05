@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test:agentic-config": "rm -rf .test-dist && tsc -p tsconfig.test.json && node --test .test-dist/tests/useAgenticConfig.test.js && rm -rf .test-dist",
     "preview": "vite preview",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder",

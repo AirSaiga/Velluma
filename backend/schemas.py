@@ -4,9 +4,9 @@ Pydantic 验证模型
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================
@@ -356,6 +356,127 @@ class MemoryChunkResponse(MemoryChunkBase):
         from_attributes = True
 
 
+class StoryBeatBase(BaseModel):
+    chapter_id: Optional[UUID] = None
+    beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    beat_type: str = Field(default="progression", max_length=100)
+    position: int = Field(default=0, ge=0)
+    location: Optional[str] = None
+    pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    action_summary: Optional[str] = None
+    worldbuilding_instruction: Optional[str] = None
+    word_count_target: int = Field(default=0, ge=0)
+    summary: str = Field(..., min_length=1)
+    meta: dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="planned", max_length=50)
+
+
+class StoryBeatCreate(StoryBeatBase):
+    book_id: UUID
+
+
+class StoryBeatUpdate(BaseModel):
+    chapter_id: Optional[UUID] = None
+    beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    beat_type: Optional[str] = Field(None, max_length=100)
+    position: Optional[int] = Field(None, ge=0)
+    location: Optional[str] = None
+    pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    action_summary: Optional[str] = None
+    worldbuilding_instruction: Optional[str] = None
+    word_count_target: Optional[int] = Field(None, ge=0)
+    summary: Optional[str] = Field(None, min_length=1)
+    meta: Optional[dict[str, Any]] = None
+    status: Optional[str] = Field(None, max_length=50)
+
+
+class StoryBeatResponse(StoryBeatBase):
+    id: UUID
+    book_id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SceneIntentBase(BaseModel):
+    chapter_id: UUID
+    story_beat_id: Optional[UUID] = None
+    intent_label: str = Field(..., min_length=1, max_length=120)
+    character_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    goal: str = Field(..., min_length=1)
+    obstacle: Optional[str] = None
+    tactic: Optional[str] = None
+    stakes: Optional[str] = None
+    constraints: List[str] = Field(default_factory=list)
+    priority: int = Field(default=0, ge=0)
+
+
+class SceneIntentCreate(SceneIntentBase):
+    book_id: UUID
+
+
+class SceneIntentUpdate(BaseModel):
+    chapter_id: Optional[UUID] = None
+    story_beat_id: Optional[UUID] = None
+    intent_label: Optional[str] = Field(None, min_length=1, max_length=120)
+    character_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    goal: Optional[str] = Field(None, min_length=1)
+    obstacle: Optional[str] = None
+    tactic: Optional[str] = None
+    stakes: Optional[str] = None
+    constraints: Optional[List[str]] = None
+    priority: Optional[int] = Field(None, ge=0)
+
+
+class SceneIntentResponse(SceneIntentBase):
+    id: UUID
+    book_id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PlotLedgerBase(BaseModel):
+    chapter_id: Optional[UUID] = None
+    story_beat_id: Optional[UUID] = None
+    ledger_key: str = Field(..., min_length=1, max_length=150)
+    hook_id: Optional[str] = Field(None, min_length=1, max_length=150)
+    entry_type: str = Field(default="foreshadow", max_length=50)
+    content: str = Field(..., min_length=1)
+    status: Literal["open", "closed", "dropped"] = Field(default="open")
+    created_at_chapter: Optional[int] = Field(None, ge=1)
+    resolved_in_chapter_id: Optional[UUID] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlotLedgerCreate(PlotLedgerBase):
+    book_id: UUID
+
+
+class PlotLedgerUpdate(BaseModel):
+    chapter_id: Optional[UUID] = None
+    story_beat_id: Optional[UUID] = None
+    ledger_key: Optional[str] = Field(None, min_length=1, max_length=150)
+    hook_id: Optional[str] = Field(None, min_length=1, max_length=150)
+    entry_type: Optional[str] = Field(None, max_length=50)
+    content: Optional[str] = Field(None, min_length=1)
+    status: Optional[Literal["open", "closed", "dropped"]] = None
+    created_at_chapter: Optional[int] = Field(None, ge=1)
+    resolved_in_chapter_id: Optional[UUID] = None
+    meta: Optional[dict[str, Any]] = None
+
+
+class PlotLedgerResponse(PlotLedgerBase):
+    id: UUID
+    book_id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ============================================================
 # Agent 调用 Schema 层 - LLM 交互的边界定义
 # ============================================================
@@ -381,6 +502,13 @@ class GenerateChapterRequest(BaseModel):
     model: str = Field(default="gpt-4o-mini")
     word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
 
+AGENTIC_DEFAULT_WORD_COUNT = 2000
+AGENTIC_DEFAULT_MAX_ITERATIONS = 2
+AGENTIC_DEFAULT_RAG_TOP_K = 3
+AGENTIC_DEFAULT_RAG_ALPHA = 0.6
+AGENTIC_DEFAULT_RAG_BETA = 0.2
+AGENTIC_DEFAULT_RAG_GAMMA = 0.2
+AGENTIC_DEFAULT_RAG_LAMBDA = 0.1
 
 class GenerateChapterAgenticRequest(BaseModel):
     """Actor-Critic 模式章节生成请求模型
@@ -397,8 +525,20 @@ class GenerateChapterAgenticRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
-    word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
-    max_iterations: int = Field(default=2, ge=1, le=5, description="最大重写次数")
+    word_count: Optional[int] = Field(default=AGENTIC_DEFAULT_WORD_COUNT, ge=1, description="期望生成的字数")
+    max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")
+    rag_top_k: int = Field(default=AGENTIC_DEFAULT_RAG_TOP_K, ge=1, le=20, description="RAG 返回记忆数量")
+    rag_alpha: float = Field(default=AGENTIC_DEFAULT_RAG_ALPHA, ge=0.0, le=1.0, description="语义相似度权重")
+    rag_beta: float = Field(default=AGENTIC_DEFAULT_RAG_BETA, ge=0.0, le=1.0, description="时间衰减权重")
+    rag_gamma: float = Field(default=AGENTIC_DEFAULT_RAG_GAMMA, ge=0.0, le=1.0, description="剧情伏笔权重")
+    rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
+
+    @model_validator(mode="after")
+    def validate_rag_weight_sum(self):
+        total = round(self.rag_alpha + self.rag_beta + self.rag_gamma, 6)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError("rag_alpha + rag_beta + rag_gamma 必须等于 1")
+        return self
 
 
 # ============================================================

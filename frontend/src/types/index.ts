@@ -42,3 +42,23 @@ export interface GenerateChapterRequest {
   base_url?: string
   model?: string
 }
+
+export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
+  word_count: number
+  max_iterations: number
+  rag_top_k: number
+  rag_alpha: number
+  rag_beta: number
+  rag_gamma: number
+  rag_lambda: number
+}
+
+export interface AgenticFormState {
+  word_count: number
+  max_iterations: number
+  rag_top_k: number
+  rag_alpha: number
+  rag_beta: number
+  rag_gamma: number
+  rag_lambda: number
+}

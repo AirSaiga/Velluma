@@ -5,7 +5,8 @@ SQLAlchemy ORM 模型定义
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint, JSON, Boolean
+from enum import Enum
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -15,6 +16,12 @@ from backend.database import Base
 def generate_uuid() -> uuid.UUID:
     """生成 UUID 主键"""
     return uuid.uuid4()
+
+
+class PlotLedgerStatus(str, Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+    DROPPED = "dropped"
 
 
 # ============================================================
@@ -50,6 +57,9 @@ class Book(Base):
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="book", cascade="all, delete-orphan")
+    story_beats = relationship("StoryBeat", back_populates="book", cascade="all, delete-orphan")
+    scene_intents = relationship("SceneIntent", back_populates="book", cascade="all, delete-orphan")
+    plot_ledgers = relationship("PlotLedger", back_populates="book", cascade="all, delete-orphan")
 
 
 # ============================================================
@@ -96,6 +106,19 @@ class Chapter(Base):
     book = relationship("Book", back_populates="chapters")
     entities = relationship("ChapterEntity", back_populates="chapter", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="chapter", cascade="all, delete-orphan")
+    story_beats = relationship("StoryBeat", back_populates="chapter", cascade="all, delete-orphan")
+    scene_intents = relationship("SceneIntent", back_populates="chapter", cascade="all, delete-orphan")
+    plot_ledgers = relationship(
+        "PlotLedger",
+        foreign_keys="PlotLedger.chapter_id",
+        back_populates="chapter",
+        cascade="all, delete-orphan",
+    )
+    resolved_plot_ledgers = relationship(
+        "PlotLedger",
+        foreign_keys="PlotLedger.resolved_in_chapter_id",
+        back_populates="resolved_in_chapter",
+    )
 
 
 # ============================================================
@@ -291,3 +314,93 @@ class MemoryChunk(Base):
 
     book = relationship("Book", back_populates="memories")
     chapter = relationship("Chapter", back_populates="memories")
+
+
+class StoryBeat(Base):
+    __tablename__ = "story_beats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True)
+    beat_id = Column(String(120), nullable=True)
+    beat_type = Column(String(100), default="progression")
+    position = Column(Integer, default=0)
+    location = Column(Text, nullable=True)
+    pov_character = Column(String(120), nullable=True)
+    action_summary = Column(Text, nullable=True)
+    worldbuilding_instruction = Column(Text, nullable=True)
+    word_count_target = Column(Integer, default=0)
+    summary = Column(Text, nullable=False)
+    meta = Column("metadata", JSONB, default=dict)
+    status = Column(String(50), default="planned")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="story_beats")
+    chapter = relationship("Chapter", back_populates="story_beats")
+    scene_intents = relationship("SceneIntent", back_populates="story_beat")
+    plot_ledgers = relationship("PlotLedger", back_populates="story_beat")
+
+
+class SceneIntent(Base):
+    __tablename__ = "scene_intents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    story_beat_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("story_beats.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    intent_label = Column(String(120), nullable=False)
+    character_name = Column(String(120), nullable=True)
+    goal = Column(Text, nullable=False)
+    obstacle = Column(Text, nullable=True)
+    tactic = Column(Text, nullable=True)
+    stakes = Column(Text, nullable=True)
+    constraints = Column(JSONB, default=list)
+    priority = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="scene_intents")
+    chapter = relationship("Chapter", back_populates="scene_intents")
+    story_beat = relationship("StoryBeat", back_populates="scene_intents")
+
+
+class PlotLedger(Base):
+    __tablename__ = "plot_ledgers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True)
+    story_beat_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("story_beats.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ledger_key = Column(String(150), nullable=False)
+    hook_id = Column(String(150), nullable=True)
+    entry_type = Column(String(50), default="foreshadow")
+    content = Column(Text, nullable=False)
+    status = Column(String(20), default=PlotLedgerStatus.OPEN.value, nullable=False)
+    created_at_chapter = Column(Integer, nullable=True)
+    resolved_in_chapter_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chapters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    meta = Column("metadata", JSONB, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="plot_ledgers")
+    chapter = relationship("Chapter", foreign_keys=[chapter_id], back_populates="plot_ledgers")
+    story_beat = relationship("StoryBeat", back_populates="plot_ledgers")
+    resolved_in_chapter = relationship("Chapter", foreign_keys=[resolved_in_chapter_id], back_populates="resolved_plot_ledgers")
+
+    __table_args__ = (
+        UniqueConstraint("book_id", "ledger_key", name="uq_plot_ledger_book_key"),
+        CheckConstraint(
+            "status IN ('open', 'closed', 'dropped')",
+            name="ck_plot_ledgers_status_valid",
+        ),
+    )

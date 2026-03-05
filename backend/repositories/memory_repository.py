@@ -1,8 +1,28 @@
+import math
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from backend.models import MemoryChunk
+from sqlalchemy import select
+
+from backend.models import MemoryChunk, PlotLedger
 from backend.repositories.base import BaseRepository, QuerySpec
+
+
+def compute_memory_score(
+    cosine_similarity: float,
+    delta_days: float,
+    plot_weight: float,
+    alpha: float = 0.6,
+    beta: float = 0.2,
+    gamma: float = 0.2,
+    lambda_decay: float = 0.1,
+) -> float:
+    safe_cosine = max(0.0, min(1.0, cosine_similarity))
+    safe_delta_days = max(0.0, delta_days)
+    safe_plot_weight = max(0.0, min(1.0, plot_weight))
+    time_score = math.exp(-lambda_decay * safe_delta_days)
+    return alpha * safe_cosine + beta * time_score + gamma * safe_plot_weight
 
 
 class MemoryRepository(BaseRepository[MemoryChunk]):
@@ -38,16 +58,59 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             spec=spec
         )
 
-    async def search_similar(self, embedding: List[float], book_id: UUID, limit: int = 5):
-        """
-        向量相似度检索。
-        """
-        from sqlalchemy import select
-
-        stmt = select(MemoryChunk).where(MemoryChunk.book_id == book_id)
-        # 使用 cosine distance (<=>) 进行排序
-        stmt = stmt.order_by(MemoryChunk.embedding.cosine_distance(embedding)).limit(limit)
-
+    async def search_similar(
+        self,
+        embedding: List[float],
+        book_id: UUID,
+        limit: int = 5,
+        alpha: float = 0.6,
+        beta: float = 0.2,
+        gamma: float = 0.2,
+        lambda_decay: float = 0.1,
+    ):
+        candidate_limit = max(limit * 3, limit)
+        distance_expr = MemoryChunk.embedding.cosine_distance(embedding)
+        stmt = (
+            select(MemoryChunk, distance_expr.label("distance"))
+            .where(MemoryChunk.book_id == book_id, MemoryChunk.embedding.is_not(None))
+            .order_by(distance_expr)
+            .limit(candidate_limit)
+        )
         result = await self.db.execute(stmt)
-        return result.scalars().all()
+        rows = result.all()
+        if not rows:
+            return []
 
+        chapter_ids = {chunk.chapter_id for chunk, _ in rows if chunk.chapter_id}
+        unresolved_ledger_chapter_ids = set()
+        if chapter_ids:
+            plot_stmt = select(PlotLedger.chapter_id).where(
+                PlotLedger.book_id == book_id,
+                PlotLedger.chapter_id.in_(chapter_ids),
+                PlotLedger.status == "open",
+            )
+            plot_result = await self.db.execute(plot_stmt)
+            unresolved_ledger_chapter_ids = set(plot_result.scalars().all())
+
+        now = datetime.now(timezone.utc)
+        ranked = []
+        for chunk, distance in rows:
+            created_at = chunk.created_at or now
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            delta_days = (now - created_at).total_seconds() / 86400
+            cosine_similarity = 1 - float(distance)
+            plot_weight = 1.0 if chunk.chapter_id in unresolved_ledger_chapter_ids else 0.0
+            score = compute_memory_score(
+                cosine_similarity=cosine_similarity,
+                delta_days=delta_days,
+                plot_weight=plot_weight,
+                alpha=alpha,
+                beta=beta,
+                gamma=gamma,
+                lambda_decay=lambda_decay,
+            )
+            ranked.append((score, cosine_similarity, chunk.created_at or datetime.min, chunk))
+
+        ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return [item[3] for item in ranked[:limit]]

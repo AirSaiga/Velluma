@@ -13,7 +13,8 @@
 """
 
 import os
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Optional, Sequence
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
@@ -53,6 +54,141 @@ AsyncSessionLocal = async_sessionmaker(
 
 Base = declarative_base()
 
+MIGRATIONS: list[dict[str, Any]] = [
+    {
+        "table": "books",
+        "column": "worldview_settings",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "characters",
+        "column": "dynamic_state_history",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "draft_text",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "chapters",
+        "column": "review_feedback",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "revision_count",
+        "definition": "INTEGER DEFAULT 0",
+        "expected_udt_names": {"int4"},
+    },
+    {
+        "table": "chapters",
+        "column": "summary",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "chapters",
+        "column": "chapter_name",
+        "definition": "VARCHAR(200)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "beat_id",
+        "definition": "VARCHAR(120)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "location",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "pov_character",
+        "definition": "VARCHAR(120)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "action_summary",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "worldbuilding_instruction",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "word_count_target",
+        "definition": "INTEGER DEFAULT 0",
+        "expected_udt_names": {"int4"},
+    },
+    {
+        "table": "story_beats",
+        "column": "metadata",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "scene_intents",
+        "column": "character_name",
+        "definition": "VARCHAR(120)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "scene_intents",
+        "column": "obstacle",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "scene_intents",
+        "column": "tactic",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "scene_intents",
+        "column": "constraints",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "hook_id",
+        "definition": "VARCHAR(150)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "status",
+        "definition": "VARCHAR(20) DEFAULT 'open'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "created_at_chapter",
+        "definition": "INTEGER",
+        "expected_udt_names": {"int4"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "metadata",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+]
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -85,8 +221,17 @@ async def init_db():
     警告：run_migrations 使用朴素的条件判断，不支持回滚。
     生产环境应使用 Alembic 或 Flyway 等专业迁移工具。
     """
-    from backend.models import Book, Chapter, ChapterEntity, Character, CharacterRelationship, MemoryChunk
-    from sqlalchemy import text
+    from backend.models import (
+        Book,
+        Chapter,
+        ChapterEntity,
+        Character,
+        CharacterRelationship,
+        MemoryChunk,
+        PlotLedger,
+        SceneIntent,
+        StoryBeat,
+    )
 
     async with engine.begin() as conn:
         # 关键：pgvector 必须在使用向量类型前创建，且需超级用户权限
@@ -96,7 +241,32 @@ async def init_db():
         await run_migrations(conn)
 
 
-async def run_migrations(conn):
+async def _get_column_info(conn, table_name: str, column_name: str) -> Optional[dict[str, Any]]:
+    result = await conn.execute(
+        text(
+            """
+            SELECT data_type, udt_name, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND column_name = :column_name
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+
+def _is_column_compatible(column_info: dict[str, Any], migration: dict[str, Any]) -> bool:
+    expected_udt_names: set[str] = migration.get("expected_udt_names", set())
+    if not expected_udt_names:
+        return True
+    actual_udt_name = str(column_info.get("udt_name", "")).lower()
+    return actual_udt_name in expected_udt_names
+
+
+async def run_migrations(conn, migrations: Optional[Sequence[dict[str, Any]]] = None):
     """
     执行数据库迁移，自动添加缺失的列。
 
@@ -111,60 +281,26 @@ async def run_migrations(conn):
 
     适配场景：开发阶段或字段较少的项目。
     """
-    from sqlalchemy import text
-
-    migrations = [
-        {
-            "table": "books",
-            "column": "worldview_settings",
-            "definition": "JSONB DEFAULT '{}'",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'books' AND column_name = 'worldview_settings'"
-        },
-        {
-            "table": "characters",
-            "column": "dynamic_state_history",
-            "definition": "JSONB DEFAULT '[]'",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'characters' AND column_name = 'dynamic_state_history'"
-        },
-        {
-            "table": "chapters",
-            "column": "draft_text",
-            "definition": "TEXT",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'draft_text'"
-        },
-        {
-            "table": "chapters",
-            "column": "review_feedback",
-            "definition": "JSONB DEFAULT '{}'",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'review_feedback'"
-        },
-        {
-            "table": "chapters",
-            "column": "revision_count",
-            "definition": "INTEGER DEFAULT 0",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'revision_count'"
-        },
-        {
-            "table": "chapters",
-            "column": "summary",
-            "definition": "TEXT",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'summary'"
-        },
-        {
-            "table": "chapters",
-            "column": "chapter_name",
-            "definition": "VARCHAR(200)",
-            "check": "SELECT 1 FROM information_schema.columns WHERE table_name = 'chapters' AND column_name = 'chapter_name'"
-        },
-    ]
+    migrations = migrations or MIGRATIONS
 
     for migration in migrations:
+        table_name = migration["table"]
+        column_name = migration["column"]
         try:
-            result = await conn.execute(text(migration["check"]))
-            if result.fetchone() is None:
-                await conn.execute(text(
-                    f"ALTER TABLE {migration['table']} ADD COLUMN {migration['column']} {migration['definition']};"
-                ))
-                print(f"[MIGRATION] Added column {migration['table']}.{migration['column']}")
+            column_info = await _get_column_info(conn, table_name=table_name, column_name=column_name)
+            if column_info:
+                if not _is_column_compatible(column_info, migration):
+                    print(
+                        f"[MIGRATION][WARN] Column conflict on {table_name}.{column_name}: "
+                        f"actual_type={column_info.get('udt_name')} expected={sorted(migration.get('expected_udt_names', []))}"
+                    )
+                continue
+            await conn.execute(
+                text(
+                    f'ALTER TABLE "{table_name}" '
+                    f'ADD COLUMN IF NOT EXISTS "{column_name}" {migration["definition"]};'
+                )
+            )
+            print(f"[MIGRATION] Added column {table_name}.{column_name}")
         except Exception as e:
-            print(f"[MIGRATION] Skipped {migration['table']}.{migration['column']}: {e}")
+            print(f"[MIGRATION] Skipped {table_name}.{column_name}: {e}")

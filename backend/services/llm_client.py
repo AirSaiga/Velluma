@@ -1,8 +1,20 @@
 import json
 import os
 from typing import Optional
+import asyncio
 
 from openai import AsyncOpenAI
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    retry_if_exception,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _clear_proxy_env():
@@ -15,6 +27,32 @@ def _clear_proxy_env():
     for env_var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
         if env_var in os.environ:
             del os.environ[env_var]
+
+
+def _should_retry_exception(exception: Exception) -> bool:
+    from openai import APIConnectionError, RateLimitError, InternalServerError, APIStatusError
+    
+    if isinstance(exception, (APIConnectionError, RateLimitError, InternalServerError)):
+        return True
+    if isinstance(exception, APIStatusError):
+        # Retry on 5xx errors
+        return exception.status_code >= 500
+    return False
+
+
+@retry(
+    retry=retry_if_exception_type(Exception) & retry_if_exception(_should_retry_exception),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True
+)
+async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
+    """
+    带有重试机制的 OpenAI Chat Completion 创建函数。
+    仅重试网络错误、限流和 5xx 服务器错误。
+    """
+    return await client.chat.completions.create(**kwargs)
 
 
 async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str):
@@ -48,7 +86,8 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
         # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
-        stream = await client.chat.completions.create(
+        stream = await _create_chat_completion(
+            client=client,
             model=model,
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             stream=True,
@@ -142,8 +181,10 @@ async def call_llm(
     """
     同步调用 LLM API 获取完整响应。
 
-    警告：当前实现【无重试策略】，网络抖动或 API 限流时会直接失败。
-    权衡：为简化实现牺牲了可靠性，生产环境应添加指数退避重试 (如 tenacity 库)。
+    已集成 tenacity 重试策略：
+    - 网络错误/5xx 错误：指数退避重试 (2s -> 4s -> ... -> 30s)
+    - 4xx 错误 (除 429)：直接抛出
+    - JSON 解析失败：返回空字符串 (保持原行为)
 
     数据流：
     - 输入：prompt + 配置参数 → LLM API
@@ -168,7 +209,7 @@ async def call_llm(
         # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)
         if response_format:
             create_kwargs["response_format"] = response_format
-        response = await client.chat.completions.create(**create_kwargs)
+        response = await _create_chat_completion(client=client, **create_kwargs)
         content = ""
         if response.choices and response.choices[0].message.content:
             content = response.choices[0].message.content

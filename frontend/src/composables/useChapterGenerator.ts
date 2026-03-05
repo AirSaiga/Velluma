@@ -3,7 +3,10 @@ import { generateApi } from './useApi'
 
 export type WorkflowEvent = 
   | 'ASSEMBLING_CONTEXT' 
+  | 'PLANNING'
   | 'DRAFTING' 
+  | 'SCENE_INTENT'
+  | 'STITCHING'
   | 'REVIEWING' 
   | 'REFINING' 
   | 'FINAL_TEXT_STREAM' 
@@ -95,10 +98,25 @@ export function useChapterGenerator() {
             state.currentEvent = 'ASSEMBLING_CONTEXT'
             state.message = data.message || '正在从数据库抽取人物卡与关系网...'
             break
+          case 'PLANNING':
+            state.currentEvent = 'PLANNING'
+            state.message = data.message || 'Planner 正在拆分章节 beats...'
+            state.iteration = data.iteration || 1
+            break
           case 'DRAFTING':
             state.currentEvent = 'DRAFTING'
             state.message = data.message || '主笔 Agent 正在创作初稿...'
             state.iteration = data.iteration || 1
+            break
+          case 'SCENE_INTENT':
+            state.currentEvent = 'SCENE_INTENT'
+            state.message = data.message || '正在计算 SceneIntent...'
+            state.iteration = data.iteration || state.iteration
+            break
+          case 'STITCHING':
+            state.currentEvent = 'STITCHING'
+            state.message = data.message || '统稿 Agent 正在拼接 chunks...'
+            state.iteration = data.iteration || state.iteration
             break
           case 'REVIEWING':
             state.currentEvent = 'REVIEWING'

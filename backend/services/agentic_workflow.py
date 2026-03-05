@@ -4,15 +4,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, MemoryChunk
+from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger, SceneIntent, StoryBeat
 from backend.repositories import MemoryRepository
 from backend.schemas import GenerateChapterAgenticRequest
-from backend.services.llm_client import call_llm, get_embedding, generate_summary
+from backend.services.llm_client import call_llm, get_embedding
 from backend.services.prompt_builder import (
+    build_chunk_draft_prompt,
     build_draft_agent_prompt,
+    build_planner_agent_prompt,
     build_refine_agent_prompt,
     build_review_agent_prompt,
+    build_scene_intent_prompt,
+    build_stitch_prompt,
+    parse_planner_result,
     parse_review_result,
+    parse_scene_intent_result,
 )
 
 
@@ -79,6 +85,26 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     )
     prev_chapter = prev_chapter_result.scalar_one_or_none()
     previous_summary = prev_chapter.summary if prev_chapter else None
+    open_hook_result = await db.execute(
+        select(PlotLedger).where(
+            PlotLedger.book_id == chapter.book_id,
+            PlotLedger.status == "open",
+        )
+    )
+    open_hook_rows = open_hook_result.scalars().all()
+    open_hooks = []
+    for row in open_hook_rows:
+        content = str(getattr(row, "content", "") or "").strip()
+        if not content:
+            continue
+        hook_id = str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip()
+        open_hooks.append(
+            {
+                "hook_id": hook_id,
+                "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
+                "content": content,
+            }
+        )
     
     # Debug log for context injection
     print(f"[DEBUG] Context Injection - Chapter {chapter.chapter_number}")
@@ -93,7 +119,15 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
             embedding = await get_embedding(chapter.outline_text, request.api_key, request.base_url)
             if embedding:
                 memory_repo = MemoryRepository(db)
-                relevant_memories = await memory_repo.search_similar(embedding, chapter.book_id, limit=3)
+                relevant_memories = await memory_repo.search_similar(
+                    embedding,
+                    chapter.book_id,
+                    limit=request.rag_top_k,
+                    alpha=request.rag_alpha,
+                    beta=request.rag_beta,
+                    gamma=request.rag_gamma,
+                    lambda_decay=request.rag_lambda,
+                )
                 print(f"[DEBUG] RAG Search: Found {len(relevant_memories)} relevant memories")
                 for m in relevant_memories:
                     print(f"[DEBUG] Memory: {m.chunk_text[:50]}...")
@@ -112,23 +146,142 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     while iteration < max_iterations:
         iteration += 1
         if iteration == 1:
-            # 首次迭代：生成初稿
-            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': '主笔 Agent 正在创作初稿...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            system_prompt, user_prompt = build_draft_agent_prompt(
-                chapter, book, entities, relationships, word_count,
-                previous_summary=previous_summary,
-                relevant_memories=relevant_memories
+            yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
+                chapter=chapter,
+                book=book,
+                entities=entities,
+                relationships=relationships,
+                word_count=word_count,
+                open_hooks=open_hooks,
             )
-            yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
-            current_draft = await call_llm(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+            planner_result_raw = await call_llm(
+                system_prompt=planner_system_prompt,
+                user_prompt=planner_user_prompt,
                 api_key=request.api_key,
                 base_url=request.base_url,
                 model=request.model,
-                temperature=0.7,
+                temperature=0.2,
+                response_format={"type": "json_object"},
             )
-            # 持久化初稿到 DB，支持断点续传
+            beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+            generated_chunks = []
+            for beat_index, beat in enumerate(beats, start=1):
+                story_beat = StoryBeat(
+                    book_id=chapter.book_id,
+                    chapter_id=chapter.id,
+                    beat_id=beat.get("beat_id"),
+                    beat_type="progression",
+                    position=beat.get("position", beat_index),
+                    location=beat.get("location"),
+                    pov_character=beat.get("pov_character"),
+                    action_summary=beat.get("action_summary"),
+                    worldbuilding_instruction=beat.get("worldbuilding_instruction"),
+                    word_count_target=beat.get("word_count_target", beat.get("target_words", 0)),
+                    summary=beat.get("summary", ""),
+                    meta={"target_words": beat.get("target_words", 0)},
+                    status="planned",
+                )
+                db.add(story_beat)
+                await db.flush()
+                beat_hook_ids = set(beat.get("hook_ids", []))
+                beat_open_hooks = []
+                if beat_hook_ids:
+                    beat_open_hooks = [
+                        item
+                        for item in open_hooks
+                        if item["hook_id"] in beat_hook_ids or item["ledger_key"] in beat_hook_ids
+                    ]
+                if not beat_open_hooks and beat_index == 1:
+                    beat_open_hooks = open_hooks[:2]
+                yield f"data: {json.dumps({'event': 'SCENE_INTENT', 'message': f'正在计算 SceneIntent ({beat_index}/{len(beats)})...', 'iteration': iteration, 'beat_index': beat_index, 'beat_total': len(beats)}, ensure_ascii=False)}\n\n"
+                scene_system_prompt, scene_user_prompt = build_scene_intent_prompt(
+                    chapter=chapter,
+                    beat=beat,
+                    open_hooks=beat_open_hooks,
+                )
+                scene_intent_raw = await call_llm(
+                    system_prompt=scene_system_prompt,
+                    user_prompt=scene_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                )
+                scene_intent_data = parse_scene_intent_result(scene_intent_raw, beat.get("summary", ""))
+                scene_intent = SceneIntent(
+                    book_id=chapter.book_id,
+                    chapter_id=chapter.id,
+                    story_beat_id=story_beat.id,
+                    intent_label=scene_intent_data["intent_label"],
+                    goal=scene_intent_data["goal"],
+                    stakes=scene_intent_data["stakes"],
+                    constraints=scene_intent_data["constraints"],
+                    priority=beat_index,
+                )
+                db.add(scene_intent)
+                target_words = beat.get("word_count_target")
+                if not isinstance(target_words, int) or target_words <= 0:
+                    target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
+                chunk_system_prompt, chunk_user_prompt = build_chunk_draft_prompt(
+                    chapter=chapter,
+                    book=book,
+                    entities=entities,
+                    relationships=relationships,
+                    beat=beat,
+                    scene_intent=scene_intent_data,
+                    target_words=target_words,
+                    previous_chunks=generated_chunks,
+                    previous_summary=previous_summary,
+                    relevant_memories=relevant_memories,
+                    hook_contexts=beat_open_hooks,
+                )
+                yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'主笔 Agent 正在创作第{beat_index}段...', 'iteration': iteration, 'beat_index': beat_index, 'beat_total': len(beats)}, ensure_ascii=False)}\n\n"
+                chunk_text = await call_llm(
+                    system_prompt=chunk_system_prompt,
+                    user_prompt=chunk_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.7,
+                )
+                generated_chunks.append(chunk_text.strip())
+            yield f"data: {json.dumps({'event': 'STITCHING', 'message': '统稿 Agent 正在拼接 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(
+                chapter=chapter,
+                beats=beats,
+                chunks=generated_chunks,
+                word_count=word_count,
+            )
+            current_draft = await call_llm(
+                system_prompt=stitch_system_prompt,
+                user_prompt=stitch_user_prompt,
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model,
+                temperature=0.4,
+            )
+            if not current_draft.strip():
+                current_draft = "\n\n".join(generated_chunks).strip()
+            if not current_draft.strip():
+                fallback_system_prompt, fallback_user_prompt = build_draft_agent_prompt(
+                    chapter,
+                    book,
+                    entities,
+                    relationships,
+                    word_count,
+                    previous_summary=previous_summary,
+                    relevant_memories=relevant_memories,
+                )
+                current_draft = await call_llm(
+                    system_prompt=fallback_system_prompt,
+                    user_prompt=fallback_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.7,
+                )
             chapter.draft_text = current_draft
             chapter.revision_count = iteration
             await db.commit()

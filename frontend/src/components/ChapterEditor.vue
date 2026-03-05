@@ -2,8 +2,17 @@
 import { ref, computed } from 'vue'
 import { useChapterGenerator } from '../composables/useChapterGenerator'
 import { generateApi, chapterApi, publishPromptData } from '../composables/useApi'
+import {
+  AGENTIC_DEFAULTS,
+  AGENTIC_FIELD_CONFIG,
+  AGENTIC_GROUPS,
+  buildAgenticPayload,
+  getAgenticFieldFeedback,
+  normalizeAgenticForm,
+  validateAgenticForm
+} from '../composables/useAgenticConfig'
 import RichTextEditor from './RichTextEditor.vue'
-import type { Chapter, Character } from '../types'
+import type { AgenticFormState, Chapter, Character } from '../types'
 
 interface ApiConfig {
   api_key: string
@@ -24,6 +33,7 @@ const { isGenerating, generatedText, error, workflowState, startGeneration, star
 const isPublishing = ref(false)
 const publishError = ref<string | null>(null)
 const showPublishModal = ref(false)
+const showAgenticSettingsModal = ref(false)
 const characterUpdates = ref<Array<{
   character_id: string
   character_name: string
@@ -32,16 +42,35 @@ const characterUpdates = ref<Array<{
 }>>([])
 const chapterSummary = ref<string | null>(null)
 
-const wordCount = ref(2000)
+const agenticForm = ref<AgenticFormState>({ ...AGENTIC_DEFAULTS })
 const wordCountMin = ref(500)
 const wordCountMax = ref(10000)
 const isStreamMode = ref(true)
 const isAgenticMode = ref(true)
+const formError = ref('')
 
 const isEditorDisabled = computed(() => isGenerating.value)
 
 const selectedChapter = computed(() => {
   return props.selectedChapter
+})
+const agenticValidation = computed(() => validateAgenticForm(agenticForm.value))
+const agenticFieldFeedback = computed(() => getAgenticFieldFeedback(agenticForm.value))
+const agenticGroupFields = computed(() => ({
+  generation: ['word_count'] as Array<keyof AgenticFormState>,
+  memory: ['rag_top_k', 'rag_alpha', 'rag_beta', 'rag_gamma', 'rag_lambda'] as Array<keyof AgenticFormState>,
+  workflow: ['max_iterations'] as Array<keyof AgenticFormState>
+}))
+const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
+const firstFieldFeedback = computed(() => {
+  return Object.values(agenticFieldFeedback.value).find(Boolean) || ''
+})
+const canSubmitAgentic = computed(() => {
+  return agenticValidation.value.errors.length === 0 && !hasFieldFeedback.value
+})
+const ragWeightTotal = computed(() => {
+  const sum = agenticForm.value.rag_alpha + agenticForm.value.rag_beta + agenticForm.value.rag_gamma
+  return Math.round(sum * 1000) / 1000
 })
 
 function updateChapter(updates) {
@@ -128,6 +157,15 @@ function closePublishModal() {
   chapterSummary.value = null
 }
 
+function openAgenticSettingsModal() {
+  if (!isAgenticMode.value || isGenerating.value) return
+  showAgenticSettingsModal.value = true
+}
+
+function closeAgenticSettingsModal() {
+  showAgenticSettingsModal.value = false
+}
+
 function toggleCharacter(charId) {
   if (!selectedChapter.value) return
   
@@ -151,8 +189,12 @@ function getDurationText() {
 }
 
 async function startGenerate() {
-  if (!selectedChapter.value || !props.apiConfig.api_key) {
-    alert('请先选择章节并配置 API Key')
+  if (!selectedChapter.value) {
+    alert('请先选择章节')
+    return
+  }
+  if (!isAgenticMode.value && !props.apiConfig.api_key) {
+    alert('请先配置 API Key')
     return
   }
   
@@ -169,19 +211,37 @@ async function startGenerate() {
   }
   
   reset()
+  formError.value = ''
   generateStartTime = Date.now()
-  
+
   const requestData = {
     chapter_id: selectedChapter.value.id,
     api_key: props.apiConfig.api_key,
     base_url: props.apiConfig.base_url || undefined,
     model: props.apiConfig.model,
-    word_count: wordCount.value,
-    max_iterations: 2
+    word_count: agenticForm.value.word_count
   }
   
   if (isAgenticMode.value) {
-    startAgenticGeneration(requestData, {
+    const rawFeedback = getAgenticFieldFeedback(agenticForm.value)
+    const firstFeedback = Object.values(rawFeedback).find(Boolean)
+    if (firstFeedback) {
+      formError.value = firstFeedback
+      alert(formError.value)
+      return
+    }
+    const { payload, errors } = buildAgenticPayload({
+      chapterId: selectedChapter.value.id,
+      apiConfig: props.apiConfig,
+      form: agenticForm.value
+    })
+    agenticForm.value = normalizeAgenticForm(agenticForm.value)
+    if (!payload) {
+      formError.value = errors[0] || '表单参数不合法'
+      alert(formError.value)
+      return
+    }
+    startAgenticGeneration(payload, {
       onEvent: (event, data) => {
         console.log('[Workflow Event]', event, data)
       },
@@ -228,6 +288,73 @@ async function startGenerate() {
       isGenerating.value = false
     }
   }
+}
+
+function normalizeAgenticField() {
+  const before = getAgenticFieldFeedback(agenticForm.value)
+  agenticForm.value = normalizeAgenticForm(agenticForm.value)
+  if (Object.keys(before).length > 0) {
+    formError.value = '检测到无效输入，已自动恢复为有效值'
+  } else if (!hasFieldFeedback.value) {
+    formError.value = ''
+  }
+}
+
+function restoreAgenticDefaults() {
+  agenticForm.value = { ...AGENTIC_DEFAULTS }
+  formError.value = ''
+}
+
+function restoreAgenticField(field: keyof AgenticFormState) {
+  agenticForm.value = {
+    ...agenticForm.value,
+    [field]: AGENTIC_DEFAULTS[field]
+  }
+  formError.value = ''
+}
+
+function getAgenticFieldValue(field: keyof AgenticFormState) {
+  return agenticForm.value[field]
+}
+
+function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
+  const target = event.target as HTMLInputElement
+  const nextValue = Number(target.value)
+  agenticForm.value = {
+    ...agenticForm.value,
+    [field]: nextValue
+  }
+}
+
+function getAgenticFieldInputType(field: keyof AgenticFormState) {
+  if (field === 'word_count' || field === 'max_iterations' || field === 'rag_top_k') {
+    return 'number'
+  }
+  return 'number'
+}
+
+function getAgenticFieldStep(field: keyof AgenticFormState) {
+  if (field === 'word_count') return 100
+  if (field === 'max_iterations' || field === 'rag_top_k') return 1
+  return 0.01
+}
+
+function getAgenticFieldMin(field: keyof AgenticFormState) {
+  if (field === 'word_count') return 500
+  if (field === 'max_iterations' || field === 'rag_top_k') return 1
+  return 0
+}
+
+function getAgenticFieldMax(field: keyof AgenticFormState) {
+  if (field === 'word_count') return 10000
+  if (field === 'max_iterations') return 5
+  if (field === 'rag_top_k') return 20
+  if (field === 'rag_alpha' || field === 'rag_beta' || field === 'rag_gamma') return 1
+  return undefined
+}
+
+function getAgenticFieldFeedbackText(field: keyof AgenticFormState) {
+  return agenticFieldFeedback.value[field] || ''
 }
 
 let updateTimeout: ReturnType<typeof setTimeout> | undefined
@@ -332,13 +459,14 @@ function isCharacterSelected(charId: string) {
             <span class="text-[10px] text-[var(--text-muted)]">字数:</span>
             <input
               type="range"
-              v-model="wordCount"
+              v-model.number="agenticForm.word_count"
+              @change="normalizeAgenticField"
               :min="wordCountMin"
               :max="wordCountMax"
               step="100"
               class="w-24 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-500)]"
             />
-            <span class="text-[10px] font-medium text-[var(--accent-600)]">{{ wordCount }}</span>
+            <span class="text-[10px] font-medium text-[var(--accent-600)]">{{ agenticForm.word_count }}</span>
           </div>
           <div class="flex items-center gap-1">
             <button
@@ -349,7 +477,15 @@ function isCharacterSelected(charId: string) {
                 ? 'bg-[var(--accent-500)]/15 text-[var(--accent-600)]'
                 : 'bg-white text-[var(--text-secondary)]'"
             >
-              {{ isAgenticMode ? 'Agentic' : '传统' }}
+              {{ isAgenticMode ? '智能生成' : '传统模式' }}
+            </button>
+            <button
+              v-if="isAgenticMode"
+              @click="openAgenticSettingsModal"
+              :disabled="isGenerating"
+              class="px-2 py-0.5 text-[10px] rounded-lg bg-white text-[var(--text-secondary)] disabled:opacity-40"
+            >
+              生成设置
             </button>
             <button
               v-if="isAgenticMode"
@@ -361,7 +497,7 @@ function isCharacterSelected(charId: string) {
             </button>
             <button
               @click="startGenerate"
-              :disabled="isGenerating || !selectedChapter.outline_text.trim()"
+              :disabled="isGenerating || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
               class="px-3 py-1 rounded-lg bg-[var(--accent-500)] text-white text-xs font-medium disabled:opacity-40 transition-colors"
             >
               {{ isGenerating ? '生成中' : '生成' }}
@@ -418,6 +554,94 @@ function isCharacterSelected(charId: string) {
           </svg>
         </div>
         <p class="text-xs text-[var(--text-muted)]">选择一个章节或新建章节开始编辑</p>
+      </div>
+    </div>
+  </div>
+
+  <div
+    v-if="showAgenticSettingsModal && isAgenticMode"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
+    @click.self="closeAgenticSettingsModal"
+  >
+    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden">
+      <div class="p-3 border-b border-white/60 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-[var(--text-primary)]">智能生成设置</h3>
+        <button @click="closeAgenticSettingsModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-3 overflow-y-auto max-h-[calc(85vh-56px)] space-y-2.5">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] text-[var(--text-muted)]">可按需调节以下参数，生成时会自动写入请求。</p>
+          <button
+            @click="restoreAgenticDefaults"
+            :disabled="isGenerating"
+            class="px-2 py-0.5 rounded-md text-[10px] bg-white text-[var(--text-secondary)] ring-1 ring-slate-200 disabled:opacity-40"
+          >
+            恢复推荐值
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <section
+            v-for="(fieldKeys, groupKey) in agenticGroupFields"
+            :key="groupKey"
+            class="rounded-lg bg-white p-2 ring-1 ring-slate-200/90 space-y-2"
+          >
+            <header>
+              <h4 class="text-[11px] font-semibold text-[var(--text-primary)]">{{ AGENTIC_GROUPS[groupKey].title }}</h4>
+              <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_GROUPS[groupKey].description }}</p>
+            </header>
+            <div class="space-y-1.5">
+              <div
+                v-for="field in fieldKeys"
+                :key="field"
+                class="rounded-md border border-slate-200/90 px-2 py-1.5"
+                :class="getAgenticFieldFeedbackText(field) ? 'border-rose-300 bg-rose-50/40' : 'bg-white'"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <label class="text-[10px] font-medium text-[var(--text-primary)]">{{ AGENTIC_FIELD_CONFIG[field].label }}</label>
+                  <button
+                    @click="restoreAgenticField(field)"
+                    :disabled="isGenerating"
+                    class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  >
+                    还原
+                  </button>
+                </div>
+                <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_FIELD_CONFIG[field].description }}</p>
+                <div class="flex items-center gap-2 mt-1">
+                  <input
+                    :value="getAgenticFieldValue(field)"
+                    @input="setAgenticFieldValue(field, $event)"
+                    @blur="normalizeAgenticField"
+                    :type="getAgenticFieldInputType(field)"
+                    :step="getAgenticFieldStep(field)"
+                    :min="getAgenticFieldMin(field)"
+                    :max="getAgenticFieldMax(field)"
+                    :disabled="isGenerating"
+                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60"
+                  />
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                  <span class="text-[10px] text-[var(--text-muted)]">{{ AGENTIC_FIELD_CONFIG[field].rangeHint }}</span>
+                  <span class="text-[10px] text-[var(--text-muted)]">{{ AGENTIC_FIELD_CONFIG[field].recommended }}</span>
+                </div>
+                <p v-if="getAgenticFieldFeedbackText(field)" class="text-[10px] text-rose-500 mt-1">
+                  {{ getAgenticFieldFeedbackText(field) }}
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-[var(--text-muted)]">三项回顾偏好合计</span>
+          <span :class="Math.abs(ragWeightTotal - 1) <= 0.001 ? 'text-emerald-600 font-medium' : 'text-rose-500 font-medium'">{{ ragWeightTotal }}</span>
+        </div>
+        <p v-if="formError || firstFieldFeedback || agenticValidation.errors.length > 0" class="text-[10px] text-rose-500">
+          {{ formError || firstFieldFeedback || agenticValidation.errors[0] }}
+        </p>
       </div>
     </div>
   </div>

@@ -58,6 +58,10 @@ desktop.ini
 # 测试
 coverage/
 .nyc_output/
+/backend/tests
+/frontend/tests
+/docs
+/frontend/tsconfig.test.json
 
 # 临时文件
 tmp/
