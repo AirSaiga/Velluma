@@ -55,7 +55,7 @@ async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
     return await client.chat.completions.create(**kwargs)
 
 
-async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str):
+async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str, max_tokens: int = 8192):
     """
     流式响应生成器，用于 SSE (Server-Sent Events) 实时输出 LLM 推理结果。
 
@@ -92,7 +92,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             stream=True,
             temperature=0.7,
-            max_tokens=4000,
+            max_tokens=max_tokens,
         )
         # 逐块转发 LLM 输出，保持实时性
         async for chunk in stream:
@@ -177,6 +177,7 @@ async def call_llm(
     model: str,
     temperature: float = 0.7,
     response_format: Optional[dict] = None,
+    max_tokens: int = 8192,
 ) -> str:
     """
     同步调用 LLM API 获取完整响应。
@@ -205,7 +206,7 @@ async def call_llm(
     try:
         client = AsyncOpenAI(**client_kwargs)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-        create_kwargs = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": 4000}
+        create_kwargs = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)
         if response_format:
             create_kwargs["response_format"] = response_format

@@ -155,6 +155,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
                 word_count=word_count,
                 open_hooks=open_hooks,
             )
+            yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
             planner_result_raw = await call_llm(
                 system_prompt=planner_system_prompt,
                 user_prompt=planner_user_prompt,
@@ -200,6 +201,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
                     beat=beat,
                     open_hooks=beat_open_hooks,
                 )
+                yield f"data: {json.dumps({'prompt': {'system_prompt': scene_system_prompt, 'user_prompt': scene_user_prompt}}, ensure_ascii=False)}\n\n"
                 scene_intent_raw = await call_llm(
                     system_prompt=scene_system_prompt,
                     user_prompt=scene_user_prompt,
@@ -238,6 +240,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
                     hook_contexts=beat_open_hooks,
                 )
                 yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'主笔 Agent 正在创作第{beat_index}段...', 'iteration': iteration, 'beat_index': beat_index, 'beat_total': len(beats)}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'prompt': {'system_prompt': chunk_system_prompt, 'user_prompt': chunk_user_prompt}}, ensure_ascii=False)}\n\n"
                 chunk_text = await call_llm(
                     system_prompt=chunk_system_prompt,
                     user_prompt=chunk_user_prompt,
@@ -254,6 +257,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
                 chunks=generated_chunks,
                 word_count=word_count,
             )
+            yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
             current_draft = await call_llm(
                 system_prompt=stitch_system_prompt,
                 user_prompt=stitch_user_prompt,
@@ -274,6 +278,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
                     previous_summary=previous_summary,
                     relevant_memories=relevant_memories,
                 )
+                yield f"data: {json.dumps({'prompt': {'system_prompt': fallback_system_prompt, 'user_prompt': fallback_user_prompt}}, ensure_ascii=False)}\n\n"
                 current_draft = await call_llm(
                     system_prompt=fallback_system_prompt,
                     user_prompt=fallback_user_prompt,
@@ -291,6 +296,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
             system_prompt, user_prompt = build_refine_agent_prompt(
                 chapter, book, entities, relationships, current_draft, revision_plan, word_count
             )
+            yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
             current_draft = await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -308,6 +314,7 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
         system_prompt, user_prompt = build_review_agent_prompt(
             chapter, book, entities, relationships, chapter.outline_text or "", current_draft
         )
+        yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
         review_result_json = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
