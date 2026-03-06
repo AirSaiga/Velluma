@@ -282,7 +282,7 @@ function handleOptimizationFeedbackInput(event: Event) {
 
         <RichTextEditor
           v-show="!isLoadingOverlay"
-          :ref="editorRef"
+          ref="editorRef"
           :id="selectedChapter.id"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
