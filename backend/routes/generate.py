@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from backend.models import Chapter, ChapterEntity, CharacterRelationship
+from uuid import UUID
+from backend.models import Chapter, ChapterEntity, CharacterRelationship, Book, Character, PlotLedger, PlotLedgerStatus
 
 from backend.core.dependencies import get_chapter_repository
 from backend.repositories import ChapterRepository
@@ -13,6 +14,8 @@ from backend.schemas import (
     GenerateChapterAgenticWithBeatsRequest,
     OptimizeChapterRequest,
     FormatTextRequest,
+    InspirationRequest,
+    InspirationResponse,
 )
 from backend.services.chapter_generation import (
     build_chapter_prompt,
@@ -24,6 +27,11 @@ from backend.services.chapter_generation import (
     refine_draft,
 )
 from backend.services.llm_client import format_text_with_llm
+from backend.services.prompts.inspiration_prompts import build_inspiration_agent_prompt
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
@@ -296,3 +304,168 @@ async def generate_chapter_agentic_with_beats(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/generate_inspiration", response_model=InspirationResponse)
+async def generate_inspiration(
+    request: InspirationRequest,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+):
+    """点子启发 API - 为作者提供后续剧情灵感
+
+    轻量级接口，只加载最少断连的上下文：
+    1. 核心世界观
+    2. 前情提要
+    3. 核心角色简介
+    4. 开放状态的伏笔
+
+    使用高 Temperature (默认 0.9) 增强发散性，
+    强制返回结构化的 JSON 灵感卡片。
+    """
+    db = chapter_repo.db
+
+    book_result = await db.execute(select(Book).where(Book.id == request.book_id))
+    book = book_result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    worldview_summary = ""
+    if book.worldview_settings:
+        settings = book.worldview_settings
+        if isinstance(settings, dict):
+            genre = settings.get("genre", "")
+            timeline = settings.get("timeline", "")
+            rules = settings.get("rules", "")
+            locations = settings.get("locations", "")
+            worldview_summary = f"题材类型：{genre}\n时间线：{timeline}\n世界规则：{rules}\n主要地点：{locations}"
+    if book.global_sys_prompt:
+        worldview_summary += f"\n全局设定：{book.global_sys_prompt[:500]}"
+    if not worldview_summary:
+        worldview_summary = "（暂无详细世界观设定）"
+
+    recent_context = request.current_context_snippet
+    if not recent_context.strip():
+        if chapter.outline_text:
+            recent_context = f"本章大纲：{chapter.outline_text}"
+        elif chapter.summary:
+            recent_context = f"本章摘要：{chapter.summary}"
+        else:
+            recent_context = "（暂无前情提要）"
+
+    characters_brief = ""
+    if request.active_character_ids:
+        char_ids = [char_id for char_id in request.active_character_ids if char_id]
+        if char_ids:
+            try:
+                uuid_char_ids = [UUID(cid) for cid in char_ids]
+            except ValueError:
+                uuid_char_ids = []
+            if uuid_char_ids:
+                char_result = await db.execute(
+                    select(Character).where(Character.id.in_(uuid_char_ids))
+                )
+                characters = char_result.scalars().all()
+                if characters:
+                    char_lines = []
+                    for char in characters:
+                        brief = char.static_prompt[:100] if char.static_prompt else "暂无设定"
+                        char_lines.append(f"- {char.name}: {brief}")
+                    characters_brief = "\n".join(char_lines)
+    if not characters_brief:
+        characters_brief = "（当前场景暂无指定角色）"
+
+    hooks_result = await db.execute(
+        select(PlotLedger)
+        .where(
+            PlotLedger.book_id == request.book_id,
+            PlotLedger.status == PlotLedgerStatus.OPEN.value,
+        )
+        .order_by(PlotLedger.created_at.desc())
+        .limit(10)
+    )
+    open_hooks = hooks_result.scalars().all()
+    if open_hooks:
+        hook_lines = []
+        for hook in open_hooks:
+            hook_lines.append(f"- {hook.ledger_key}: {hook.content[:100]}")
+        open_hooks_text = "\n".join(hook_lines)
+    else:
+        open_hooks_text = "（暂无未解决的伏笔）"
+
+    prompt_messages = build_inspiration_agent_prompt(
+        worldview_summary=worldview_summary,
+        recent_context=recent_context,
+        characters_brief=characters_brief,
+        open_hooks=open_hooks_text,
+    )
+
+    max_retries = 3
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"开始生成灵感，尝试 {attempt + 1}/{max_retries}")
+            raw_content = await call_llm(
+                system_prompt=prompt_messages[0]["content"],
+                user_prompt=prompt_messages[1]["content"],
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model,
+                temperature=request.temperature,
+                response_format={"type": "json_object"},
+                max_tokens=2048,
+            )
+
+            if not raw_content:
+                raise ValueError("LLM 返回空内容")
+
+            data = json.loads(raw_content)
+
+            inspirations_data = []
+            if isinstance(data, list):
+                inspirations_data = data
+            elif isinstance(data, dict):
+                inspirations_data = data.get("inspirations", [])
+                if not inspirations_data or len(inspirations_data) < 3:
+                    inspirations_data = data.get("ideas", []) or data.get("results", []) or []
+            else:
+                # 既不是 list 也不是 dict，无法处理
+                raise ValueError(f"LLM 返回了不支持的 JSON 结构: {type(data)}")
+
+            # 过滤非字典项
+            inspirations_data = [item for item in inspirations_data if isinstance(item, dict)]
+
+            if len(inspirations_data) >= 3:
+                inspirations_data = inspirations_data[:3]
+            else:
+                raise ValueError(f"返回的有效灵感数量不足：{len(inspirations_data)}")
+
+            inspirations = []
+            for item in inspirations_data:
+                idea_type = item.get("idea_type", "plot_twist")
+                if idea_type not in ["plot_twist", "key_conflict", "new_hook"]:
+                    idea_type = "plot_twist"
+                inspirations.append({
+                    "idea_type": idea_type,
+                    "title": item.get("title", "未命名点子"),
+                    "description": item.get("description", ""),
+                    "impact": item.get("impact", ""),
+                })
+
+            response = InspirationResponse(inspirations=inspirations)
+            return response
+
+        except Exception as e:
+            logger.error(f"生成灵感失败 (尝试 {attempt + 1}/{max_retries}): {e}", exc_info=True)
+            last_error = e
+            if attempt < max_retries - 1:
+                import asyncio
+                await asyncio.sleep(1 * (attempt + 1))
+                continue
+
+    logger.error(f"生成灵感最终失败: {last_error}")
+    raise HTTPException(status_code=500, detail=f"生成灵感失败: {last_error}")

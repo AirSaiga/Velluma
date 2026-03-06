@@ -1,6 +1,9 @@
 <script setup>
 import { ref, watch, onUnmounted } from 'vue'
 import { bookApi } from '../services/api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const props = defineProps({
   bookId: {
@@ -154,7 +157,7 @@ function applyImport() {
     showImportExport.value = false
     markDirty()
   } catch {
-    alert('导入内容不是合法 JSON')
+    showToast('导入内容不是合法 JSON', 'error')
   }
 }
 

@@ -8,9 +8,12 @@ import SettingsModal from '../../../components/SettingsModal.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
+import { useToast } from '../../../composables/useToast'
+import Toast from '../../../components/Toast.vue'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 
 const { initTheme } = useTheme()
+const { toasts, showToast, removeToast } = useToast()
 
 const isDebugMode = computed(() => {
   const urlParams = new URLSearchParams(window.location.search)
@@ -162,7 +165,7 @@ async function createBook() {
     showBookModal.value = false
     bookForm.value = { title: '', genre: '', global_sys_prompt: '' }
   } catch (error) {
-    alert('创建失败: ' + error.message)
+    showToast('创建失败: ' + error.message, 'error')
   }
 }
 
@@ -225,7 +228,7 @@ function selectChapter(chapterId: string) {
 
 async function createCharacter(data, onDone) {
   if (!currentBookId.value) {
-    alert('请先创建或选择一本书籍')
+    showToast('请先创建或选择一本书籍', 'warning')
     onDone?.(false)
     return
   }
@@ -237,7 +240,7 @@ async function createCharacter(data, onDone) {
     characters.value.push(newChar)
     onDone?.(true)
   } catch (error) {
-    alert('创建失败: ' + error.message)
+    showToast('创建失败: ' + error.message, 'error')
     onDone?.(false)
   }
 }
@@ -251,7 +254,7 @@ async function updateCharacter(id, data, onDone) {
     }
     onDone?.(true)
   } catch (error) {
-    alert('更新失败: ' + error.message)
+    showToast('更新失败: ' + error.message, 'error')
     onDone?.(false)
   }
 }
@@ -261,13 +264,13 @@ async function deleteCharacter(id) {
     await characterApi.delete(id)
     characters.value = characters.value.filter(c => c.id !== id)
   } catch (error) {
-    alert('删除失败: ' + error.message)
+    showToast('删除失败: ' + error.message, 'error')
   }
 }
 
 async function createRelationship(data) {
   if (!currentBookId.value) {
-    alert('请先创建或选择一本书籍')
+    showToast('请先创建或选择一本书籍', 'warning')
     return
   }
   try {
@@ -277,7 +280,7 @@ async function createRelationship(data) {
     })
     relationships.value.push(newRel)
   } catch (error) {
-    alert('创建失败: ' + error.message)
+    showToast('创建失败: ' + error.message, 'error')
   }
 }
 
@@ -289,7 +292,7 @@ async function updateRelationship(id, data) {
       relationships.value[index] = updated
     }
   } catch (error) {
-    alert('更新失败: ' + error.message)
+    showToast('更新失败: ' + error.message, 'error')
   }
 }
 
@@ -298,13 +301,13 @@ async function deleteRelationship(id) {
     await relationshipApi.delete(id)
     relationships.value = relationships.value.filter(r => r.id !== id)
   } catch (error) {
-    alert('删除失败: ' + error.message)
+    showToast('删除失败: ' + error.message, 'error')
   }
 }
 
 async function createChapter(data) {
   if (!currentBookId.value) {
-    alert('请先创建或选择一本书籍')
+    showToast('请先创建或选择一本书籍', 'warning')
     return
   }
   try {
@@ -316,7 +319,7 @@ async function createChapter(data) {
     selectedChapterId.value = newChapter.id
     return newChapter
   } catch (error) {
-    alert('创建失败: ' + error.message)
+    showToast('创建失败: ' + error.message, 'error')
   }
 }
 
@@ -364,8 +367,8 @@ async function updateChapter(id, data) {
         await new Promise(resolve => setTimeout(resolve, 1000))
         continue
       }
-      
-      alert('更新失败: ' + error.message)
+
+      showToast('更新失败: ' + error.message, 'error')
       break
     }
   }
@@ -382,21 +385,21 @@ async function deleteChapter(id) {
       selectedChapterId.value = sortedChapters.value[0]?.id || null
     }
   } catch (error) {
-    alert('删除失败: ' + error.message)
+    showToast('删除失败: ' + error.message, 'error')
   }
 }
 
 async function generateChapterEmbedding(id) {
   const target = chapters.value.find((c) => c.id === id)
   if (!target?.summary) {
-    alert('该章节暂无摘要，请先发布章节生成摘要')
+    showToast('该章节暂无摘要，请先发布章节生成摘要', 'warning')
     return
   }
   try {
     const result = await chapterApi.generateEmbedding(id, {})
-    alert(`向量生成成功！维度: ${result.vector_dim}\n预览: ${result.preview}`)
+    showToast(`向量生成成功！维度: ${result.vector_dim}`, 'success')
   } catch (error) {
-    alert('生成失败: ' + error.message)
+    showToast('生成失败: ' + error.message, 'error')
   }
 }
 
@@ -434,7 +437,7 @@ async function deleteCurrentBook() {
     }
     showManageBookModal.value = false
   } catch (error) {
-    alert('删除失败: ' + error.message)
+    showToast('删除失败: ' + error.message, 'error')
   }
 }
 
@@ -459,6 +462,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <Toast :toasts="toasts" @remove="removeToast" />
   <DebugPromptWindow v-if="isDebugMode" />
   <div v-else class="h-full w-full bg-[var(--bg-primary)] p-3">
     <div class="h-full min-h-0 rounded-2xl bg-[var(--bg-canvas)]/90 shadow-[0_20px_60px_rgba(20,33,61,0.08)] overflow-hidden">
@@ -562,6 +566,7 @@ onMounted(async () => {
             :selected-chapter="selectedChapter"
             :characters="characters"
             :api-config="apiConfig"
+            :book-id="currentBookId"
             :meta-collapsed="uiPrefs.chapterMetaCollapsed"
             @update-chapter="updateChapter"
             @update-meta-collapsed="handleMetaCollapsedChange"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Chapter, Character } from '../../../types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
+import InspirationModal from '../../../components/InspirationModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
 
 interface ApiConfig {
@@ -13,6 +14,7 @@ const props = defineProps<{
   selectedChapter: Chapter | null
   characters: Character[]
   apiConfig: ApiConfig
+  bookId?: string
   metaCollapsed?: boolean
 }>()
 
@@ -60,6 +62,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :handle-outline-input="viewModel.handleOutlineInput"
     :handle-tension-level-input="viewModel.handleTensionLevelInput"
     :handle-title-input="viewModel.handleTitleInput"
+    :inspiration-active-character-ids="viewModel.inspirationActiveCharacterIds.value"
     :is-agentic-mode="viewModel.isAgenticMode.value"
     :is-character-selected="viewModel.isCharacterSelected"
     :is-editor-disabled="viewModel.isEditorDisabled.value"
@@ -71,6 +74,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :local-meta-collapsed="viewModel.localMetaCollapsed.value"
     :normalize-agentic-field="viewModel.normalizeAgenticField"
     :open-agentic-settings-modal="viewModel.openAgenticSettingsModal"
+    :open-inspiration-modal="viewModel.openInspirationModal"
     :pacing-style-options="viewModel.pacingStyleOptions"
     :optimization-feedback="viewModel.optimizationFeedback.value"
     :preview-beats="viewModel.previewBeats.value"
@@ -86,6 +90,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :show-agentic-settings-modal="viewModel.showAgenticSettingsModal.value"
     :show-beat-review-modal="viewModel.showBeatReviewModal.value"
     :show-completion-modal="viewModel.showCompletionModal.value"
+    :show-inspiration-modal="viewModel.showInspirationModal.value"
     :show-publish-modal="viewModel.showPublishModal.value"
     :start-generate="viewModel.startGenerate"
     :toggle-agentic-mode="viewModel.toggleAgenticMode"
@@ -95,5 +100,18 @@ const viewModel = useChapterEditorContainer(props, emit)
     :word-count-max="viewModel.wordCountMax.value"
     :word-count-min="viewModel.wordCountMin.value"
     :workflow-state="viewModel.workflowState.value"
+    :api-config="props.apiConfig"
+    :book-id="props.bookId"
+  />
+
+  <InspirationModal
+    :show="viewModel.showInspirationModal.value"
+    :book-id="props.bookId || ''"
+    :chapter-id="viewModel.selectedChapter.value?.id || ''"
+    :current-context="viewModel.selectedChapter.value?.outline_text || viewModel.selectedChapter.value?.summary || ''"
+    :active-character-ids="viewModel.inspirationActiveCharacterIds.value"
+    :api-config="props.apiConfig"
+    @update:show="viewModel.closeInspirationModal"
+    @apply-to-outline="viewModel.handleApplyInspirationToOutline"
   />
 </template>

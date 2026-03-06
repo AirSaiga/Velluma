@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { useChapterGenerator } from '../../../composables/useChapterGenerator'
+import { useToast } from '../../../composables/useToast'
 import { chapterApi, generateApi, publishPromptData } from '../../../services/api'
 import {
   AGENTIC_DEFAULTS,
@@ -60,6 +61,7 @@ const beatFieldMap = {
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
+  const { showToast } = useToast()
 
   const isPublishing = ref(false)
   const publishError = ref<string | null>(null)
@@ -186,10 +188,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           publishError.value = null
           await chapterApi.update(selectedChapter.value.id, { status: 'draft' })
           emit('update-chapter', selectedChapter.value.id, { status: 'draft' })
-          alert('已取消发布')
+          showToast('已取消发布', 'success')
         } catch (err: any) {
           publishError.value = err.message
-          alert('取消发布失败: ' + err.message)
+          showToast('取消发布失败: ' + err.message, 'error')
         } finally {
           isPublishing.value = false
         }
@@ -198,7 +200,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
 
     if (!props.apiConfig.api_key) {
-      alert('请先在设置中配置 API Key 以启用角色动态状态更新功能')
+      showToast('请先在设置中配置 API Key 以启用角色动态状态更新功能', 'warning')
     }
 
     if (confirm('确定要发布本章吗？发布后将会自动更新涉及角色的动态状态。')) {
@@ -220,7 +222,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         showPublishModal.value = true
       } catch (err: any) {
         publishError.value = err.message
-        alert('发布失败: ' + err.message)
+        showToast('发布失败: ' + err.message, 'error')
       } finally {
         isPublishing.value = false
       }
@@ -281,7 +283,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       showBeatReviewModal.value = true
     } catch (err) {
       beatPreviewError.value = (err as Error).message || '节拍预览失败'
-      alert('节拍预览失败: ' + beatPreviewError.value)
+      showToast('节拍预览失败: ' + beatPreviewError.value, 'error')
     } finally {
       beatPreviewLoading.value = false
     }
@@ -299,7 +301,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     
     try {
       if (!props.apiConfig.api_key) {
-        alert('请先在设置中配置 API Key 以使用智能格式整理功能')
+        showToast('请先在设置中配置 API Key 以使用智能格式整理功能', 'warning')
         return
       }
 
@@ -333,7 +335,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       }
     } catch (e: any) {
       console.error('Format text failed', e)
-      alert('格式整理失败: ' + e.message)
+      showToast('格式整理失败: ' + e.message, 'error')
     } finally {
       isFormatting.value = false
     }
@@ -358,7 +360,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function confirmBeatsAndGenerate() {
     if (!pendingAgenticPayload.value || previewBeats.value.length === 0) {
-      alert('当前没有可用节拍，请重新生成')
+      showToast('当前没有可用节拍，请重新生成', 'warning')
       return
     }
     if (pendingClearEditorOnConfirm.value && editorRef.value) {
@@ -441,11 +443,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   async function startGenerate() {
     if (!selectedChapter.value) {
-      alert('请先选择章节')
+      showToast('请先选择章节', 'warning')
       return
     }
     if (!isAgenticMode.value && !props.apiConfig.api_key) {
-      alert('请先配置 API Key')
+      showToast('请先配置 API Key', 'warning')
       return
     }
 
@@ -469,7 +471,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const firstFeedback = Object.values(rawFeedback).find(Boolean)
       if (firstFeedback) {
         formError.value = firstFeedback
-        alert(formError.value)
+        showToast(formError.value, 'warning')
         return
       }
       const { payload, errors } = buildAgenticPayload({
@@ -480,7 +482,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       agenticForm.value = normalizeAgenticForm(agenticForm.value)
       if (!payload) {
         formError.value = errors[0] || '表单参数不合法'
-        alert(formError.value)
+        showToast(formError.value, 'warning')
         return
       }
       await previewBeatsForReview(payload, hasEditorContent)
@@ -524,7 +526,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       }
       openCompletionModal('生成完成', `本章正文生成完成！(${getDurationText()})`)
     } catch (err) {
-      alert('生成失败: ' + (err as Error).message)
+      showToast('生成失败: ' + (err as Error).message, 'error')
     } finally {
       isGenerating.value = false
     }
@@ -654,6 +656,29 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     optimizationFeedback.value = value
   }
 
+  const showInspirationModal = ref(false)
+  const inspirationActiveCharacterIds = ref<string[]>([])
+
+  function openInspirationModal() {
+    if (!selectedChapter.value) return
+    const charIds = props.characters
+      .filter(char => selectedChapter.value?.character_ids?.includes(char.id))
+      .map(char => char.id)
+    inspirationActiveCharacterIds.value = charIds
+    showInspirationModal.value = true
+  }
+
+  function closeInspirationModal() {
+    showInspirationModal.value = false
+  }
+
+  function handleApplyInspirationToOutline(content: string) {
+    if (!selectedChapter.value) return
+    const currentOutline = selectedChapter.value.outline_text || ''
+    const newOutline = currentOutline ? `${currentOutline}\n${content}` : content
+    scheduleMetaUpdate({ outline_text: newOutline })
+  }
+
   function toggleAgenticMode() {
     isAgenticMode.value = !isAgenticMode.value
   }
@@ -734,6 +759,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     handleOutlineInput,
     handleTensionLevelInput,
     handleTitleInput,
+    inspirationActiveCharacterIds,
     isAgenticMode,
     isCharacterSelected,
     isEditorDisabled,
@@ -745,6 +771,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     localMetaCollapsed,
     normalizeAgenticField,
     openAgenticSettingsModal,
+    openInspirationModal,
     optimizationFeedback,
     pacingStyleOptions,
     previewBeats,
@@ -759,6 +786,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     setWordCount,
     showAgenticSettingsModal,
     showBeatReviewModal,
+    showInspirationModal,
     showPublishModal,
     startGenerate,
     toggleAgenticMode,
@@ -767,6 +795,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     toggleStreamMode,
     wordCountMax,
     wordCountMin,
-    workflowState
+    workflowState,
+    handleApplyInspirationToOutline,
+    closeInspirationModal
   }
 }

@@ -12,6 +12,7 @@ const props = defineProps<{
   selectedChapter: Chapter | null
   characters: Character[]
   apiConfig: ApiConfig
+  bookId?: string | null
   metaCollapsed?: boolean
 }>()
 
@@ -35,6 +36,7 @@ function handleRefreshCharacters() {
     :selected-chapter="props.selectedChapter"
     :characters="props.characters"
     :api-config="props.apiConfig"
+    :book-id="props.bookId"
     :meta-collapsed="props.metaCollapsed"
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"

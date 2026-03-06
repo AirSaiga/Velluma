@@ -18,7 +18,11 @@ logger = logging.getLogger(__name__)
 
 # [User Request] Explicitly set proxy to bypass region restrictions
 # Please update this URL to match your local proxy settings (e.g., http://127.0.0.1:7890)
-PROXY_URL = "http://127.0.0.1:4780"
+# Priority: Env var PROXY_URL > Hardcoded value
+_default_proxy = "http://127.0.0.1:4780"
+PROXY_URL = os.getenv("PROXY_URL", _default_proxy)
+if not PROXY_URL:
+    PROXY_URL = None
 
 
 def _clear_proxy_env():

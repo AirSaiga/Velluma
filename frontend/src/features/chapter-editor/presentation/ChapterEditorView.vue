@@ -18,6 +18,12 @@ interface BeatPreviewItem {
   hook_ids: string[]
 }
 
+interface ApiConfig {
+  api_key: string
+  base_url: string
+  model: string
+}
+
 const props = defineProps<{
   AGENTIC_FIELD_CONFIG: Record<string, any>
   AGENTIC_GROUPS: Record<string, any>
@@ -62,6 +68,7 @@ const props = defineProps<{
   handleOutlineInput: (event: Event) => void
   handleTensionLevelInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
+  inspirationActiveCharacterIds: string[]
   isAgenticMode: boolean
   isCharacterSelected: (charId: string) => boolean
   isEditorDisabled: boolean
@@ -73,6 +80,7 @@ const props = defineProps<{
   localMetaCollapsed: boolean
   normalizeAgenticField: () => void
   openAgenticSettingsModal: () => void
+  openInspirationModal: () => void
   pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
   previewBeats: BeatPreviewItem[]
@@ -88,6 +96,7 @@ const props = defineProps<{
   showAgenticSettingsModal: boolean
   showBeatReviewModal: boolean
   showCompletionModal: boolean
+  showInspirationModal: boolean
   showPublishModal: boolean
   startGenerate: () => void
   toggleAgenticMode: () => void
@@ -97,6 +106,8 @@ const props = defineProps<{
   wordCountMax: number
   wordCountMin: number
   workflowState: any
+  apiConfig: ApiConfig
+  bookId?: string
 }>()
 
 const editorRef = ref<any>(null)
@@ -139,14 +150,25 @@ function handleOptimizationFeedbackInput(event: Event) {
       </div>
 
       <div v-show="!localMetaCollapsed" class="rounded-xl bg-[var(--bg-panel)] px-3 py-2.5 space-y-2">
-        <div>
+        <div class="flex items-start gap-2">
           <textarea
             :value="selectedChapter.outline_text"
             @input="handleOutlineInput"
             rows="2"
-            class="w-full px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+            class="flex-1 px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
             placeholder="本章要发生的情节..."
           />
+          <button
+            @click="openInspirationModal"
+            :disabled="!selectedChapter || !apiConfig?.api_key"
+            class="shrink-0 px-2 py-1.5 text-[10px] rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600 hover:from-amber-100 hover:to-orange-100 ring-1 ring-amber-200/50 disabled:opacity-40 transition-all flex items-center gap-1"
+            title="获取灵感点子"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+            点子
+          </button>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">

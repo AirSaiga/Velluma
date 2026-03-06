@@ -1,5 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const props = defineProps({
   characters: {
@@ -58,7 +61,7 @@ async function handleUpdateDynamicState() {
   if (!selectedCharacter.value || !props.selectedChapterId || !props.updateDynamicStateAction) return
 
   if (!props.canUpdateDynamicState) {
-    alert('请先在设置中配置 API Key')
+    showToast('请先在设置中配置 API Key', 'warning')
     return
   }
 
@@ -71,10 +74,10 @@ async function handleUpdateDynamicState() {
     const newDynamicState = await props.updateDynamicStateAction(selectedCharacter.value.id, formData.value.dynamic_state)
     if (newDynamicState) {
       formData.value.dynamic_state = newDynamicState
-      alert('动态状态更新成功')
+      showToast('动态状态更新成功', 'success')
     }
   } catch (error) {
-    alert('更新失败: ' + (error.message || '未知错误'))
+    showToast('更新失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     isUpdatingState.value = false
   }

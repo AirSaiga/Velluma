@@ -1,6 +1,9 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { mapApi } from '../services/api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const props = defineProps({
   chapter: {
@@ -84,7 +87,7 @@ async function createLocation() {
     locations.value.push(newLoc)
     showCreateModal.value = false
   } catch (e) {
-    alert('创建失败: ' + e.message)
+    showToast('创建失败: ' + e.message, 'error')
   }
 }
 
@@ -102,7 +105,7 @@ async function updateLocation() {
     }
     showEditModal.value = false
   } catch (e) {
-    alert('更新失败: ' + e.message)
+    showToast('更新失败: ' + e.message, 'error')
   }
 }
 
@@ -113,7 +116,7 @@ async function deleteLocation(id) {
     locations.value = locations.value.filter(l => l.id !== id)
     chapterLocations.value = chapterLocations.value.filter(cl => cl.location_id !== id)
   } catch (e) {
-    alert('删除失败: ' + e.message)
+    showToast('删除失败: ' + e.message, 'error')
   }
 }
 

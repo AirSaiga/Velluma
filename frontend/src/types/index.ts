@@ -92,3 +92,27 @@ export interface AgenticFormState {
   rag_gamma: number
   rag_lambda: number
 }
+
+export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook'
+
+export interface InspirationIdea {
+  idea_type: InspirationIdeaType
+  title: string
+  description: string
+  impact: string
+}
+
+export interface InspirationResponse {
+  inspirations: InspirationIdea[]
+}
+
+export interface InspirationRequest {
+  book_id: string
+  chapter_id: string
+  current_context_snippet: string
+  active_character_ids: string[]
+  temperature: number
+  api_key: string
+  base_url?: string
+  model?: string
+}

@@ -321,5 +321,27 @@ export const generateApi = {
     }
 
     return await response.json()
+  },
+
+  generateInspiration: async (data: {
+    book_id: string
+    chapter_id: string
+    current_context_snippet: string
+    active_character_ids: string[]
+    temperature: number
+    api_key: string
+    base_url?: string
+    model?: string
+  }) => {
+    const response = await requestRaw('/generate_inspiration', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`点子启发请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return await response.json()
   }
 }

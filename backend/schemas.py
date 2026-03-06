@@ -734,3 +734,52 @@ class ChapterPublishResponse(BaseModel):
     status: str
     summary: Optional[str] = None
     character_updates: List[CharacterStateChange] = Field(default_factory=list)
+
+
+# ============================================================
+# 点子启发 Schema 层 - 轻量级灵感获取
+# ============================================================
+
+class InspirationRequest(BaseModel):
+    """点子启发请求模型
+
+    业务规则：
+    - book_id 和 chapter_id 必填，用于获取上下文
+    - current_context_snippet 是当前场景的简短描述
+    - active_character_ids 可选，标记当前场景涉及的角色
+    - temperature 默认 0.9，高温度增强发散性
+    """
+    book_id: UUID
+    chapter_id: UUID
+    current_context_snippet: str = Field(..., description="最近几百字的半成品正文或当前场景的一句话简述")
+    active_character_ids: List[str] = Field(default=[], description="当前场景涉及的角色 ID")
+    temperature: float = Field(default=0.9, ge=0.0, le=2.0)
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+
+
+class InspirationIdea(BaseModel):
+    """灵感卡片模型
+
+    业务规则：
+    - idea_type 三选一：剧情转折、关键冲突、新设伏笔
+    - title 简短标题
+    - description 百字左右的事件描述
+    - impact 对后续格局的影响
+    """
+    idea_type: Literal["plot_twist", "key_conflict", "new_hook"] = Field(
+        ..., description="点子类型：走向转折 / 关键冲突 / 新设伏笔"
+    )
+    title: str = Field(..., description="点子的简短标题，如'暗中的背叛者'")
+    description: str = Field(..., description="百字左右的具体事件描述")
+    impact: str = Field(..., description="这步棋对后续格局的影响/好处")
+
+
+class InspirationResponse(BaseModel):
+    """点子启发响应模型
+
+    业务规则：
+    - 返回 3 个不同维度的灵感卡片
+    """
+    inspirations: List[InspirationIdea] = Field(..., min_items=3, max_items=3)
