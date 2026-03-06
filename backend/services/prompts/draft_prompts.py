@@ -14,6 +14,7 @@ def build_draft_agent_prompt(
     beat: dict = None,
     scene_intent: dict = None,
     hook_contexts: list = None,
+    locations: list = None,
 ):
     """
     构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
@@ -32,6 +33,19 @@ def build_draft_agent_prompt(
     
     map_activity_range = getattr(chapter, "map_activity_range", None)
     map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
+    
+    location_prompts = []
+    if locations:
+        for loc_rel in locations:
+            location = getattr(loc_rel, "location", None)
+            if location:
+                desc = f"【{location.name}】{location.description or ''}"
+                location_prompts.append(desc)
+    
+    if map_prompt:
+        location_prompts.append(map_prompt)
+    
+    final_map_prompt = "\n".join(location_prompts) if location_prompts else None
 
     tone_instruction = (
         getattr(chapter, "tone", None)
@@ -104,7 +118,7 @@ def build_draft_agent_prompt(
 
 {worldview_prompt if worldview_prompt else ''}
 
-{map_prompt if map_prompt else ''}
+{final_map_prompt if final_map_prompt else ''}
 
 {prev_summary_prompt if prev_summary_prompt else ''}
 
@@ -200,6 +214,7 @@ def build_chunk_draft_prompt(
     relevant_memories: list = None,
     hook_contexts: list = None,
     context_beat_summaries: dict = None,
+    locations: list = None,
 ):
     system_prompt, user_prompt = build_draft_agent_prompt(
         chapter=chapter,
@@ -212,6 +227,7 @@ def build_chunk_draft_prompt(
         beat=beat,
         scene_intent=scene_intent,
         hook_contexts=hook_contexts,
+        locations=locations,
     )
     
     continuity_section = ""

@@ -1,17 +1,23 @@
 import asyncio
 import json
+import os
+import time
+from typing import Union, Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger, SceneIntent, StoryBeat
+from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger, SceneIntent, StoryBeat, ChapterMapLocation
 from backend.repositories import MemoryRepository
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.services.llm_client import call_llm, get_embedding
 from backend.services.prompts import (
     build_chunk_draft_prompt,
+    build_chunk_review_prompt,
+    build_chunk_refine_prompt,
     build_draft_agent_prompt,
+    build_formatting_prompt,
     build_planner_agent_prompt,
     build_refine_agent_prompt,
     build_review_agent_prompt,
@@ -64,6 +70,63 @@ def _clean_llm_output(text: str) -> str:
     return text
 
 
+def _clamp_int(value: int, min_value: int, max_value: int) -> int:
+    return max(min_value, min(max_value, value))
+
+
+def _safe_int_from_env(name: str, default: int, min_value: int, max_value: int) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return _clamp_int(parsed, min_value, max_value)
+
+
+def _safe_bool_from_env(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _to_secs(elapsed: float) -> float:
+    return round(max(0.0, elapsed), 3)
+
+
+def _needs_formatting(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if len(stripped) < 800:
+        return False
+    if "\n\n" in stripped:
+        return False
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if not lines:
+        return False
+    long_lines = [line for line in lines if len(line) >= 180]
+    return len(long_lines) >= 2
+
+
+def _is_minor_only_review(review_result: dict) -> bool:
+    issues = review_result.get("issues")
+    if not isinstance(issues, list) or not issues:
+        return False
+    for issue in issues:
+        if not isinstance(issue, dict):
+            return False
+        severity = str(issue.get("severity", "")).strip().lower()
+        issue_type = str(issue.get("type", "")).strip().upper()
+        if severity not in {"low", "minor"}:
+            return False
+        if issue_type in {"STRUCTURE", "CHARACTER", "CONSISTENCY"}:
+            return False
+    return True
+
+
 async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest, db: AsyncSession):
     """
     代理工作流章节生成 (多轮迭代)。
@@ -96,13 +159,13 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
 async def generate_agentic_chapter_stream_with_confirmed_beats(
     request: GenerateChapterAgenticRequest,
     db: AsyncSession,
-    confirmed_beats: list[dict] | list[ConfirmedStoryBeat],
+    confirmed_beats: Union[list[dict], list[ConfirmedStoryBeat]],
 ):
     async for frame in _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=confirmed_beats):
         yield frame
 
 
-def _normalize_confirmed_beats(beats: list[dict] | list[ConfirmedStoryBeat], word_count: int) -> list[dict]:
+def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]], word_count: int) -> list[dict]:
     normalized: list[dict] = []
     total = max(1, len(beats))
     for idx, beat in enumerate(beats, start=1):
@@ -120,15 +183,20 @@ def _normalize_confirmed_beats(beats: list[dict] | list[ConfirmedStoryBeat], wor
             word_count_target = max(200, word_count // total)
         beat_id = str(beat_dict.get("beat_id") or f"beat-{idx}").strip() or f"beat-{idx}"
         hook_ids = beat_dict.get("hook_ids") if isinstance(beat_dict.get("hook_ids"), list) else []
+        
+        pov_character = str(beat_dict.get("pov_character") or "").strip()
+        location = str(beat_dict.get("location") or "").strip()
+        worldbuilding_instruction = str(beat_dict.get("worldbuilding_instruction") or "").strip()
+
         normalized.append(
             {
                 "position": position,
                 "beat_id": beat_id,
                 "summary": summary,
-                "location": str(beat_dict.get("location") or "").strip(),
-                "pov_character": str(beat_dict.get("pov_character") or "").strip(),
+                "location": location if location else None,
+                "pov_character": pov_character if pov_character else None,
                 "action_summary": str(beat_dict.get("action_summary") or "").strip() or summary,
-                "worldbuilding_instruction": str(beat_dict.get("worldbuilding_instruction") or "").strip(),
+                "worldbuilding_instruction": worldbuilding_instruction if worldbuilding_instruction else None,
                 "word_count_target": word_count_target,
                 "target_words": word_count_target,
                 "hook_ids": [str(item).strip() for item in hook_ids if str(item).strip()],
@@ -159,10 +227,35 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
         )
     )
     relationships = relationships_result.scalars().all()
+    
+    # 加载章节地图位置
+    locations_result = await db.execute(
+        select(ChapterMapLocation)
+        .options(selectinload(ChapterMapLocation.location))
+        .where(ChapterMapLocation.chapter_id == request.chapter_id)
+    )
+    locations = locations_result.scalars().all()
+    
+    hook_max_chapter_number = chapter.chapter_number - 1
+    historical_chapter_exists = (
+        select(Chapter.id)
+        .where(
+            Chapter.id == PlotLedger.chapter_id,
+            Chapter.chapter_number <= hook_max_chapter_number,
+        )
+        .exists()
+    )
     open_hook_result = await db.execute(
         select(PlotLedger).where(
             PlotLedger.book_id == chapter.book_id,
             PlotLedger.status == "open",
+            or_(
+                PlotLedger.created_at_chapter <= hook_max_chapter_number,
+                and_(
+                    PlotLedger.created_at_chapter.is_(None),
+                    or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
+                ),
+            ),
         )
     )
     open_hook_rows = open_hook_result.scalars().all()
@@ -202,6 +295,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
         word_count=word_count,
         open_hooks=open_hooks,
         previous_chapter_summary=previous_summary,
+        locations=locations,
     )
     planner_result_raw = await call_llm(
         system_prompt=planner_system_prompt,
@@ -219,19 +313,107 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
 async def _generate_agentic_chapter_stream(
     request: GenerateChapterAgenticRequest,
     db: AsyncSession,
-    confirmed_beats: list[dict] | list[ConfirmedStoryBeat] | None,
+    confirmed_beats: Optional[Union[list[dict], list[ConfirmedStoryBeat]]],
 ):
-    # 步骤1：加载章节基础信息
+    run_started_at = time.perf_counter()
+    stage_seconds: dict[str, float] = {}
+    llm_stage_stats: dict[str, dict[str, Union[int, float]]] = {}
+    beat_stage_seconds: dict[int, dict[str, float]] = {}
+    beat_concurrency = _safe_int_from_env("AGENTIC_BEAT_CONCURRENCY", default=6, min_value=1, max_value=12)
+
+    def record_stage(stage: str, elapsed: float, beat_index: Optional[int] = None):
+        stage_seconds[stage] = round(stage_seconds.get(stage, 0.0) + elapsed, 3)
+        if beat_index is not None:
+            beat_bucket = beat_stage_seconds.setdefault(beat_index, {})
+            beat_bucket[stage] = round(beat_bucket.get(stage, 0.0) + elapsed, 3)
+
+    def record_llm(stage: str, elapsed: float, success: bool):
+        bucket = llm_stage_stats.setdefault(stage, {"calls": 0, "seconds": 0.0, "failures": 0})
+        bucket["calls"] = int(bucket["calls"]) + 1
+        bucket["seconds"] = round(float(bucket["seconds"]) + elapsed, 3)
+        if not success:
+            bucket["failures"] = int(bucket["failures"]) + 1
+
+    def top_stage_items(source: dict[str, float], limit: int = 5) -> list[dict]:
+        return [
+            {"stage": stage, "seconds": secs}
+            for stage, secs in sorted(source.items(), key=lambda item: item[1], reverse=True)[:limit]
+        ]
+
+    def metric_frame(label: str, iteration: Optional[int] = None, extra: Optional[dict] = None) -> str:
+        llm_calls = sum(int(item["calls"]) for item in llm_stage_stats.values())
+        llm_failures = sum(int(item["failures"]) for item in llm_stage_stats.values())
+        llm_seconds = round(sum(float(item["seconds"]) for item in llm_stage_stats.values()), 3)
+        wall_clock_stage_seconds = {
+            key: value
+            for key, value in stage_seconds.items()
+            if not key.startswith("llm:") and key not in {"BEAT_TOTAL", "ITERATION_TOTAL"}
+        }
+        aggregate_stage_seconds = {
+            key: value
+            for key, value in stage_seconds.items()
+            if key in {"BEAT_TOTAL", "ITERATION_TOTAL"}
+        }
+        payload = {
+            "event": "METRICS",
+            "label": label,
+            "iteration": iteration,
+            "metrics": {
+                "total_seconds": _to_secs(time.perf_counter() - run_started_at),
+                "top_stage_seconds": top_stage_items(wall_clock_stage_seconds, 5),
+                "aggregate_stage_seconds": top_stage_items(aggregate_stage_seconds, 5),
+                "llm": {
+                    "calls": llm_calls,
+                    "failures": llm_failures,
+                    "seconds": llm_seconds,
+                    "top_stage_seconds": top_stage_items(
+                        {key: float(value["seconds"]) for key, value in llm_stage_stats.items()},
+                        5,
+                    ),
+                },
+                "beat_seconds": [
+                    {
+                        "beat_index": beat_idx,
+                        "top_stage_seconds": top_stage_items(stage_map, 3),
+                    }
+                    for beat_idx, stage_map in sorted(beat_stage_seconds.items(), key=lambda item: item[0])
+                ],
+            },
+        }
+        if extra:
+            payload["metrics"].update(extra)
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    async def call_llm_timed(
+        stage: str,
+        *,
+        beat_index: Optional[int] = None,
+        **kwargs,
+    ) -> str:
+        llm_started_at = time.perf_counter()
+        success = True
+        try:
+            return await call_llm(**kwargs)
+        except Exception:
+            success = False
+            raise
+        finally:
+            elapsed = _to_secs(time.perf_counter() - llm_started_at)
+            record_stage(f"llm:{stage}", elapsed, beat_index=beat_index)
+            record_llm(stage, elapsed, success=success)
+
     chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
         yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
         return
-    max_iterations = request.max_iterations
+    force_fast_mode = _safe_bool_from_env("AGENTIC_FORCE_FAST_MODE", default=False)
+    effective_fast_mode = bool(request.fast_mode or force_fast_mode)
+    max_iterations = 1 if effective_fast_mode else request.max_iterations
     word_count = request.word_count or 2000
     yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '正在从数据库抽取人物卡与关系网...'}, ensure_ascii=False)}\n\n"
 
-    # 步骤2：加载书籍和角色上下文 (一次性加载，避免N+1)
+    context_started_at = time.perf_counter()
     book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
     book = book_result.scalar_one_or_none()
     entities_result = await db.execute(
@@ -249,10 +431,16 @@ async def _generate_agentic_chapter_stream(
     )
     relationships = relationships_result.scalars().all()
 
-    # 步骤2.5：增强上下文 (前情提要 + RAG)
+    # 加载章节地图位置
+    locations_result = await db.execute(
+        select(ChapterMapLocation)
+        .options(selectinload(ChapterMapLocation.location))
+        .where(ChapterMapLocation.chapter_id == request.chapter_id)
+    )
+    locations = locations_result.scalars().all()
+
     yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '正在回顾前文与检索相关伏笔...'}, ensure_ascii=False)}\n\n"
 
-    # 1. 获取上一章摘要
     prev_chapter_result = await db.execute(
         select(Chapter)
         .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
@@ -265,10 +453,26 @@ async def _generate_agentic_chapter_stream(
         elif prev_chapter.draft_text:
             # 如果没有摘要，截取上一章最后 1000 字作为参考
             previous_summary = f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
+    hook_max_chapter_number = chapter.chapter_number - 1
+    historical_chapter_exists = (
+        select(Chapter.id)
+        .where(
+            Chapter.id == PlotLedger.chapter_id,
+            Chapter.chapter_number <= hook_max_chapter_number,
+        )
+        .exists()
+    )
     open_hook_result = await db.execute(
         select(PlotLedger).where(
             PlotLedger.book_id == chapter.book_id,
             PlotLedger.status == "open",
+            or_(
+                PlotLedger.created_at_chapter <= hook_max_chapter_number,
+                and_(
+                    PlotLedger.created_at_chapter.is_(None),
+                    or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
+                ),
+            ),
         )
     )
     open_hook_rows = open_hook_result.scalars().all()
@@ -292,7 +496,6 @@ async def _generate_agentic_chapter_stream(
     if previous_summary:
         print(f"[DEBUG] Summary Preview: {previous_summary[:50]}...")
 
-    # 2. RAG 检索
     relevant_memories = []
     if chapter.outline_text:
         try:
@@ -308,6 +511,7 @@ async def _generate_agentic_chapter_stream(
                     gamma=request.rag_gamma,
                     lambda_decay=request.rag_lambda,
                     exclude_chapter_id=chapter.id,
+                    max_chapter_number=chapter.chapter_number - 1,
                 )
                 print(f"[DEBUG] RAG Search: Found {len(relevant_memories)} relevant memories")
                 for m in relevant_memories:
@@ -316,21 +520,23 @@ async def _generate_agentic_chapter_stream(
                 print("[DEBUG] RAG Search: Failed to generate embedding")
         except Exception as e:
             print(f"[RAG Error] {e}")
+    record_stage("ASSEMBLING_CONTEXT", _to_secs(time.perf_counter() - context_started_at))
+    yield metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra={"fast_mode": effective_fast_mode})
 
-    # 迭代状态初始化
     current_draft = ""
     revision_plan = ""
     iteration = 0
     review_passed = False
 
-    # 步骤3：迭代工作流 (Draft → Review → Refine 循环)
     while iteration < max_iterations:
+        iteration_started_at = time.perf_counter()
         iteration += 1
         if iteration == 1:
             if confirmed_beats:
                 beats = _normalize_confirmed_beats(confirmed_beats, word_count)
                 yield f"data: {json.dumps({'event': 'PLANNING', 'message': f'已加载并确认 {len(beats)} 个剧情节拍，准备进入正文生成...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
             else:
+                planning_started_at = time.perf_counter()
                 yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
                 planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
                     chapter=chapter,
@@ -340,9 +546,11 @@ async def _generate_agentic_chapter_stream(
                     word_count=word_count,
                     open_hooks=open_hooks,
                     previous_chapter_summary=previous_summary,
+                    locations=locations,
                 )
                 yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
-                planner_result_raw = await call_llm(
+                planner_result_raw = await call_llm_timed(
+                    "planner",
                     system_prompt=planner_system_prompt,
                     user_prompt=planner_user_prompt,
                     api_key=request.api_key,
@@ -350,13 +558,15 @@ async def _generate_agentic_chapter_stream(
                     model=request.model,
                     temperature=0.2,
                     response_format={"type": "json_object"},
+                    max_tokens=1800,
                 )
                 beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
                 beats = _normalize_confirmed_beats(beats, word_count)
+                record_stage("PLANNING", _to_secs(time.perf_counter() - planning_started_at))
+                yield metric_frame("PLANNING_DONE", iteration=iteration, extra={"beat_count": len(beats)})
             generated_chunks = [None] * len(beats)
             story_beats = []
 
-            # 1. 预先创建所有 StoryBeat 记录 (串行 DB 操作)
             for beat_index, beat in enumerate(beats, start=1):
                 story_beat = StoryBeat(
                     book_id=chapter.book_id,
@@ -377,10 +587,9 @@ async def _generate_agentic_chapter_stream(
                 story_beats.append(story_beat)
             await db.flush()
 
-            # 2. 定义并行处理函数
             async def process_beat(beat_index, beat, story_beat):
+                beat_started_at = time.perf_counter()
                 try:
-                    # 计算 open_hooks
                     beat_hook_ids = set(beat.get("hook_ids", []))
                     beat_open_hooks = []
                     if beat_hook_ids:
@@ -392,13 +601,14 @@ async def _generate_agentic_chapter_stream(
                     if not beat_open_hooks and beat_index == 1:
                         beat_open_hooks = open_hooks[:2]
 
-                    # Scene Intent
                     scene_system_prompt, scene_user_prompt = build_scene_intent_prompt(
                         chapter=chapter,
                         beat=beat,
                         open_hooks=beat_open_hooks,
                     )
-                    scene_intent_raw = await call_llm(
+                    scene_intent_raw = await call_llm_timed(
+                        "scene_intent",
+                        beat_index=beat_index,
                         system_prompt=scene_system_prompt,
                         user_prompt=scene_user_prompt,
                         api_key=request.api_key,
@@ -406,26 +616,20 @@ async def _generate_agentic_chapter_stream(
                         model=request.model,
                         temperature=0.2,
                         response_format={"type": "json_object"},
+                        max_tokens=900,
                     )
                     scene_intent_data = parse_scene_intent_result(scene_intent_raw, beat.get("summary", ""))
-                    
-                    # 这里的 SceneIntent 写入需要注意并发，但 AsyncSession 不支持并发写入
-                    # 暂时跳过写入 SceneIntent 到 DB，或者稍后统一写入
-                    # 为了性能，这里仅保留内存对象用于传递给 Draft Agent
-                    
+
                     target_words = beat.get("word_count_target")
                     if not isinstance(target_words, int) or target_words <= 0:
                         target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
 
-                    # Calculate context summaries
                     context_summaries = {}
                     if beat_index > 1:
                         context_summaries['prev'] = beats[beat_index - 2].get('summary', '')
                     if beat_index < len(beats):
                         context_summaries['next'] = beats[beat_index].get('summary', '')
 
-                    # Draft Chunk
-                    # 注意：并行时 previous_chunks 为空，依赖 Stitcher 修复连贯性
                     chunk_system_prompt, chunk_user_prompt = build_chunk_draft_prompt(
                         chapter=chapter,
                         book=book,
@@ -439,42 +643,104 @@ async def _generate_agentic_chapter_stream(
                         relevant_memories=relevant_memories,
                         hook_contexts=beat_open_hooks,
                         context_beat_summaries=context_summaries,
+                        locations=locations,
                     )
-                    
-                    chunk_text = await call_llm(
+
+                    chunk_text = await call_llm_timed(
+                        "chunk_draft",
+                        beat_index=beat_index,
                         system_prompt=chunk_system_prompt,
                         user_prompt=chunk_user_prompt,
                         api_key=request.api_key,
                         base_url=request.base_url,
                         model=request.model,
                         temperature=0.7,
+                        max_tokens=_clamp_int(max(1200, target_words * 3), 1200, 5200),
                     )
-                    return beat_index - 1, _clean_llm_output(chunk_text)
+                    chunk_text = _clean_llm_output(chunk_text)
+                    chunk_iteration = 0
+                    max_chunk_retries = 1
+                    compact_chunk_text = chunk_text.strip()
+                    has_abnormal_length = len(compact_chunk_text) < max(120, int(target_words * 0.5))
+                    has_abnormal_structure = ("\n\n" not in compact_chunk_text) and len(compact_chunk_text) > 500
+                    run_chunk_qc = has_abnormal_length or has_abnormal_structure
+                    while run_chunk_qc and chunk_iteration < max_chunk_retries:
+                        try:
+                            c_sys, c_user = build_chunk_review_prompt(
+                                chapter, book, entities, relationships, beat.get("summary", ""), chunk_text
+                            )
+                            c_res_raw = await call_llm_timed(
+                                "chunk_review",
+                                beat_index=beat_index,
+                                system_prompt=c_sys,
+                                user_prompt=c_user,
+                                api_key=request.api_key,
+                                base_url=request.base_url,
+                                model=request.model,
+                                temperature=0.1,
+                                response_format={"type": "json_object"},
+                                max_tokens=1000,
+                            )
+                            try:
+                                c_res = json.loads(_clean_llm_output(c_res_raw))
+                            except json.JSONDecodeError:
+                                break
+                            if c_res.get("pass", False):
+                                break
+                            instruction = c_res.get("revision_instruction", "") or "; ".join(c_res.get("issues", []))
+                            if not instruction:
+                                break
+                            print(f"[Chunk Refine] Beat {beat_index} Refine {chunk_iteration+1}: {instruction}")
+                            r_sys, r_user = build_chunk_refine_prompt(
+                                chapter, book, entities, relationships, beat.get("summary", ""), chunk_text, instruction
+                            )
+                            chunk_text = await call_llm_timed(
+                                "chunk_refine",
+                                beat_index=beat_index,
+                                system_prompt=r_sys,
+                                user_prompt=r_user,
+                                api_key=request.api_key,
+                                base_url=request.base_url,
+                                model=request.model,
+                                temperature=0.7,
+                                max_tokens=_clamp_int(max(1200, target_words * 3), 1200, 5200),
+                            )
+                            chunk_text = _clean_llm_output(chunk_text)
+                            chunk_iteration += 1
+                        except Exception as inner_e:
+                            print(f"[Chunk Loop Error] Beat {beat_index}: {inner_e}")
+                            break
+
+                    record_stage("BEAT_TOTAL", _to_secs(time.perf_counter() - beat_started_at), beat_index=beat_index)
+                    return beat_index - 1, chunk_text
                 except Exception as e:
                     print(f"[Beat Error] Beat {beat_index} failed: {e}")
                     return beat_index - 1, ""
 
-            # 3. 并行执行所有 beats
-            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            
-            # 使用 Semaphore 限制并发数
-            sem = asyncio.Semaphore(5)
+            drafting_started_at = time.perf_counter()
+            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段 (含自动质检)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            sem = asyncio.Semaphore(beat_concurrency)
             async def sem_task(task):
                 async with sem:
                     return await task
 
             tasks = [
-                sem_task(process_beat(i, b, sb)) 
+                sem_task(process_beat(i, b, sb))
                 for i, b, sb in zip(range(1, len(beats)+1), beats, story_beats)
             ]
-            
             results = await asyncio.gather(*tasks)
-            
-            # 4. 收集结果
+            record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
+            yield metric_frame(
+                "DRAFTING_DONE",
+                iteration=iteration,
+                extra={"beat_count": len(beats), "concurrency": beat_concurrency},
+            )
+
             generated_chunks = [""] * len(beats)
             for idx, text in results:
                 generated_chunks[idx] = text
 
+            stitching_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'STITCHING', 'message': '统稿 Agent 正在拼接 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
             stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(
                 chapter=chapter,
@@ -483,13 +749,15 @@ async def _generate_agentic_chapter_stream(
                 word_count=word_count,
             )
             yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
-            current_draft = await call_llm(
+            current_draft = await call_llm_timed(
+                "stitch",
                 system_prompt=stitch_system_prompt,
                 user_prompt=stitch_user_prompt,
                 api_key=request.api_key,
                 base_url=request.base_url,
                 model=request.model,
                 temperature=0.4,
+                max_tokens=_clamp_int(max(2200, word_count * 3), 2200, 7000),
             )
             current_draft = _clean_llm_output(current_draft)
             if not current_draft.strip():
@@ -505,45 +773,54 @@ async def _generate_agentic_chapter_stream(
                     relevant_memories=relevant_memories,
                 )
                 yield f"data: {json.dumps({'prompt': {'system_prompt': fallback_system_prompt, 'user_prompt': fallback_user_prompt}}, ensure_ascii=False)}\n\n"
-                current_draft = await call_llm(
+                current_draft = await call_llm_timed(
+                    "fallback_draft",
                     system_prompt=fallback_system_prompt,
                     user_prompt=fallback_user_prompt,
                     api_key=request.api_key,
                     base_url=request.base_url,
                     model=request.model,
                     temperature=0.7,
+                    max_tokens=_clamp_int(max(2400, word_count * 3), 2400, 7000),
                 )
                 current_draft = _clean_llm_output(current_draft)
+            record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
             chapter.draft_text = current_draft
             chapter.revision_count = iteration
             await db.commit()
+            yield metric_frame("STITCHING_DONE", iteration=iteration)
         else:
-            # 后续迭代：根据审查意见精修
+            refining_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'REFINING', 'message': f'发现逻辑遗漏，正在通知责编重写 (第{iteration}次)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
             system_prompt, user_prompt = build_refine_agent_prompt(
                 chapter, book, entities, relationships, current_draft, revision_plan, word_count
             )
             yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
-            current_draft = await call_llm(
+            current_draft = await call_llm_timed(
+                "refine",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 api_key=request.api_key,
                 base_url=request.base_url,
                 model=request.model,
                 temperature=0.7,
+                max_tokens=_clamp_int(max(2400, word_count * 3), 2400, 7000),
             )
             current_draft = _clean_llm_output(current_draft)
+            record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
             chapter.draft_text = current_draft
             chapter.revision_count = iteration
             await db.commit()
+            yield metric_frame("REFINING_DONE", iteration=iteration)
 
-        # 步骤4：质量审查 (每轮迭代后必执行)
+        reviewing_started_at = time.perf_counter()
         yield f"data: {json.dumps({'event': 'REVIEWING', 'message': '审阅 Agent 正在进行逻辑校验和 OOC 排查...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
         system_prompt, user_prompt = build_review_agent_prompt(
             chapter, book, entities, relationships, chapter.outline_text or "", current_draft
         )
         yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
-        review_result_json = await call_llm(
+        review_result_json = await call_llm_timed(
+            "review",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             api_key=request.api_key,
@@ -551,19 +828,60 @@ async def _generate_agentic_chapter_stream(
             model=request.model,
             temperature=0.1,
             response_format={"type": "json_object"},
+            max_tokens=1600,
         )
         review_result, _ = parse_review_result(review_result_json)
+        record_stage("REVIEWING", _to_secs(time.perf_counter() - reviewing_started_at))
         chapter.review_feedback = review_result
         await db.commit()
+        yield metric_frame("REVIEWING_DONE", iteration=iteration, extra={"review_pass": review_result.get("pass", True)})
 
-        # 步骤5：检查审查结果
         if review_result.get("pass", True):
             review_passed = True
+            record_stage("ITERATION_TOTAL", _to_secs(time.perf_counter() - iteration_started_at))
             break
-        # 提取修改建议，进入下一轮精修
+        if request.skip_minor_refine and _is_minor_only_review(review_result):
+            review_passed = True
+            record_stage("ITERATION_TOTAL", _to_secs(time.perf_counter() - iteration_started_at))
+            yield metric_frame(
+                "REVIEWING_MINOR_ACCEPTED",
+                iteration=iteration,
+                extra={"review_pass": False, "minor_only_accepted": True},
+            )
+            break
         revision_plan = review_result.get("revision_plan", "")
+        record_stage("ITERATION_TOTAL", _to_secs(time.perf_counter() - iteration_started_at))
 
-    # 步骤6：最终定稿 (无论是否通过审查都输出内容)
+    if current_draft and current_draft.strip():
+        if _needs_formatting(current_draft):
+            formatting_started_at = time.perf_counter()
+            yield f"data: {json.dumps({'event': 'FORMATTING', 'message': '正在进行最终段落排版...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            format_system_prompt, format_user_prompt = build_formatting_prompt(current_draft)
+            yield f"data: {json.dumps({'prompt': {'system_prompt': format_system_prompt, 'user_prompt': format_user_prompt}}, ensure_ascii=False)}\n\n"
+            try:
+                formatted_text = await call_llm_timed(
+                    "formatting",
+                    system_prompt=format_system_prompt,
+                    user_prompt=format_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.1,
+                    max_tokens=_clamp_int(max(2000, word_count * 3), 2000, 7000),
+                )
+                formatted_text = _clean_llm_output(formatted_text)
+                if formatted_text and len(formatted_text) > len(current_draft) * 0.5:
+                    current_draft = formatted_text
+                else:
+                    print("[Format Warning] Formatted text suspiciously short or empty. Fallback to original.")
+            except Exception as e:
+                print(f"[Format Error] {e}")
+            record_stage("FORMATTING", _to_secs(time.perf_counter() - formatting_started_at))
+            yield metric_frame("FORMATTING_DONE", iteration=iteration)
+        else:
+            record_stage("FORMATTING_SKIPPED", 0.0)
+            yield metric_frame("FORMATTING_SKIPPED", iteration=iteration)
+
     chapter.content_text = current_draft
     await db.commit()
     yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': review_passed, 'iterations': iteration}, ensure_ascii=False)}\n\n"
@@ -572,4 +890,33 @@ async def _generate_agentic_chapter_stream(
     for char in current_draft:
         yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': char}, ensure_ascii=False)}\n\n"
 
-    yield f"data: {json.dumps({'event': 'DONE', 'passed': review_passed, 'iterations': iteration, 'revision_count': iteration}, ensure_ascii=False)}\n\n"
+    total_elapsed = _to_secs(time.perf_counter() - run_started_at)
+    wall_clock_stage_seconds = {
+        key: value
+        for key, value in stage_seconds.items()
+        if not key.startswith("llm:") and key not in {"BEAT_TOTAL", "ITERATION_TOTAL"}
+    }
+    aggregate_stage_seconds = {
+        key: value
+        for key, value in stage_seconds.items()
+        if key in {"BEAT_TOTAL", "ITERATION_TOTAL"}
+    }
+    top_stage_seconds = top_stage_items(wall_clock_stage_seconds, 5)
+    done_payload = {
+        "event": "DONE",
+        "passed": review_passed,
+        "iterations": iteration,
+        "revision_count": iteration,
+        "metrics": {
+            "total_seconds": total_elapsed,
+            "fast_mode": effective_fast_mode,
+            "top_stage_seconds": top_stage_seconds,
+            "aggregate_stage_seconds": top_stage_items(aggregate_stage_seconds, 5),
+            "llm": {
+                "calls": sum(int(item["calls"]) for item in llm_stage_stats.values()),
+                "failures": sum(int(item["failures"]) for item in llm_stage_stats.values()),
+                "seconds": round(sum(float(item["seconds"]) for item in llm_stage_stats.values()), 3),
+            },
+        },
+    }
+    yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"

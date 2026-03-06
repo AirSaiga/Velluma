@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from backend.models import MemoryChunk, PlotLedger
+from backend.models import Chapter, MemoryChunk, PlotLedger
 from backend.repositories.base import BaseRepository, QuerySpec
 
 
@@ -68,6 +68,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         gamma: float = 0.2,
         lambda_decay: float = 0.1,
         exclude_chapter_id: Optional[UUID] = None,
+        max_chapter_number: Optional[int] = None,
     ):
         candidate_limit = max(limit * 3, limit)
         distance_expr = MemoryChunk.embedding.cosine_distance(embedding)
@@ -76,6 +77,14 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             MemoryChunk.book_id == book_id, 
             MemoryChunk.embedding.is_not(None)
         )
+
+        if max_chapter_number is not None:
+            query = query.outerjoin(Chapter, Chapter.id == MemoryChunk.chapter_id).where(
+                or_(
+                    MemoryChunk.chapter_id.is_(None),
+                    Chapter.chapter_number <= max_chapter_number,
+                )
+            )
         
         if exclude_chapter_id:
             query = query.where(MemoryChunk.chapter_id != exclude_chapter_id)

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onUnmounted } from 'vue'
-import { bookApi } from '../composables/useApi'
+import { bookApi } from '../services/api'
 
 const props = defineProps({
   bookId: {

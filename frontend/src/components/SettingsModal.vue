@@ -24,21 +24,15 @@ const PROVIDERS = {
     name: 'OpenRouter (推荐)',
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      'google/gemini-2.0-flash-001',
-      'openai/gpt-4o-mini',
-      'anthropic/claude-3-haiku',
-      'meta-llama/llama-3-8b-instruct'
+      'z-ai/glm-5',
+      'moonshotai/kimi-k2.5',
+      'qwen/qwen3.5-plus-02-15',
     ]
   },
-  openai: {
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo']
-  },
-  deepseek: {
-    name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    models: ['deepseek-chat', 'deepseek-reasoner']
+  aliyun: {
+    name: '阿里云 (通义千问)',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen3-max', 'qwen3.5-plus']
   },
   custom: {
     name: '自定义 / Custom',

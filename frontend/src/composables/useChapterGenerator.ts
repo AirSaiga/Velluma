@@ -9,6 +9,8 @@ export type WorkflowEvent =
   | 'STITCHING'
   | 'REVIEWING' 
   | 'REFINING' 
+  | 'FORMATTING'
+  | 'METRICS'
   | 'FINAL_TEXT_STREAM' 
   | 'TEXT_CHUNK' 
   | 'DONE'
@@ -128,6 +130,14 @@ export function useChapterGenerator() {
             state.currentEvent = 'REFINING'
             state.message = data.message || '发现逻辑遗漏，正在通知责编重写...'
             state.iteration = data.iteration || state.iteration + 1
+            break
+          case 'FORMATTING':
+            state.currentEvent = 'FORMATTING'
+            state.message = data.message || '正在进行最终段落排版...'
+            state.iteration = data.iteration || state.iteration
+            break
+          case 'METRICS':
+            state.message = data.label ? `耗时统计更新: ${data.label}` : state.message
             break
           case 'FINAL_TEXT_STREAM':
             state.currentEvent = 'FINAL_TEXT_STREAM'

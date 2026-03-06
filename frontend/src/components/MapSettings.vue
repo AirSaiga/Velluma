@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import { mapApi } from '../composables/useApi'
+import { mapApi } from '../services/api'
 
 const props = defineProps({
   chapter: {

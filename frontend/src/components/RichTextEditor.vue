@@ -168,6 +168,7 @@ const flushBuffer = () => {
 
 const clearContent = () => {
   if (editor.value) {
+    contentBuffer = ''
     editor.value.commands.clearContent()
   }
 }

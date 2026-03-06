@@ -80,7 +80,8 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         # 构建客户端：支持自定义 base_url (兼容 OpenAI 兼容 API)
         client_kwargs = {"api_key": api_key}
         if base_url:
-            client_kwargs["base_url"] = base_url
+            # 移除末尾的斜杠以避免双重斜杠问题，这是常见的 API 兼容性陷阱
+            client_kwargs["base_url"] = base_url.rstrip("/")
         # 禁用 httpx 默认代理继承，避免被系统代理截获
         http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
         client_kwargs["http_client"] = http_client
@@ -200,11 +201,14 @@ async def call_llm(
     _clear_proxy_env()
     client_kwargs = {"api_key": api_key}
     if base_url:
-        client_kwargs["base_url"] = base_url
+        # 移除末尾的斜杠以避免双重斜杠问题
+        client_kwargs["base_url"] = base_url.rstrip("/")
+    # 禁用 httpx 默认代理继承
     http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
     client_kwargs["http_client"] = http_client
+    client = AsyncOpenAI(**client_kwargs)
+
     try:
-        client = AsyncOpenAI(**client_kwargs)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         create_kwargs = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)

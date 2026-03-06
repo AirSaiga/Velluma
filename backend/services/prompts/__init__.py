@@ -7,7 +7,10 @@ from backend.services.prompts.review_prompts import (
     build_review_agent_prompt,
     build_refine_agent_prompt,
     parse_review_result,
+    build_chunk_review_prompt,
+    build_chunk_refine_prompt,
 )
+from backend.services.prompts.format_prompts import build_formatting_prompt
 
 __all__ = [
     "build_chapter_prompt",
@@ -21,4 +24,7 @@ __all__ = [
     "build_review_agent_prompt",
     "build_refine_agent_prompt",
     "parse_review_result",
+    "build_chunk_review_prompt",
+    "build_chunk_refine_prompt",
+    "build_formatting_prompt",
 ]

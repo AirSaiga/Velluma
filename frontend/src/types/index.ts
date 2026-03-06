@@ -51,6 +51,8 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   rag_beta: number
   rag_gamma: number
   rag_lambda: number
+  fast_mode?: boolean
+  skip_minor_refine?: boolean
 }
 
 export interface ConfirmedStoryBeat {

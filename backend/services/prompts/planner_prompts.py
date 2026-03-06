@@ -12,11 +12,30 @@ def build_planner_agent_prompt(
     word_count: int,
     open_hooks: list = None,
     previous_chapter_summary: str = None,
+    locations: list = None,
 ):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+    
+    map_activity_range = getattr(chapter, "map_activity_range", None)
+    map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
+    
+    location_prompts = []
+    if locations:
+        for loc_rel in locations:
+            # Handle both ChapterMapLocation object or dict/mock
+            location = getattr(loc_rel, "location", None)
+            if location:
+                desc = f"【{location.name}】{location.description or ''}"
+                location_prompts.append(desc)
+    
+    if map_prompt:
+        location_prompts.append(map_prompt)
+    
+    final_map_prompt = "\n".join(location_prompts) if location_prompts else None
+
     character_names = []
     seen_character_ids = set()
     for entity in entities:
@@ -54,6 +73,8 @@ def build_planner_agent_prompt(
 你是章节规划师。请把章节拆分成可执行的 story beats，并仅输出 JSON。
 
 {worldview_prompt if worldview_prompt else ''}
+
+{final_map_prompt if final_map_prompt else ''}
 
 ## 输出 JSON 结构
 {{

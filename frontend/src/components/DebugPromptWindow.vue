@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { readStoredPromptData, subscribePromptData } from '../composables/useApi'
+import { readStoredPromptData, subscribePromptData } from '../services/api'
 
 const systemPrompt = ref('')
 const userPrompt = ref('')

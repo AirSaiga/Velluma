@@ -157,7 +157,9 @@ export function buildAgenticPayload(params: {
       rag_alpha: normalized.rag_alpha,
       rag_beta: normalized.rag_beta,
       rag_gamma: normalized.rag_gamma,
-      rag_lambda: normalized.rag_lambda
+      rag_lambda: normalized.rag_lambda,
+      fast_mode: true,
+      skip_minor_refine: true
     },
     errors: []
   }

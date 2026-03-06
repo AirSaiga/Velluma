@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -46,10 +46,26 @@ async def load_chapter_context(chapter_id, db: AsyncSession, api_key: str = None
     prev_chapter = prev_chapter_result.scalar_one_or_none()
     previous_summary = prev_chapter.summary if prev_chapter else None
     
+    hook_max_chapter_number = chapter.chapter_number - 1
+    historical_chapter_exists = (
+        select(Chapter.id)
+        .where(
+            Chapter.id == PlotLedger.chapter_id,
+            Chapter.chapter_number <= hook_max_chapter_number,
+        )
+        .exists()
+    )
     open_hook_result = await db.execute(
         select(PlotLedger).where(
             PlotLedger.book_id == chapter.book_id,
             PlotLedger.status == "open",
+            or_(
+                PlotLedger.created_at_chapter <= hook_max_chapter_number,
+                and_(
+                    PlotLedger.created_at_chapter.is_(None),
+                    or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
+                ),
+            ),
         )
     )
     open_hook_rows = open_hook_result.scalars().all()
@@ -80,6 +96,7 @@ async def load_chapter_context(chapter_id, db: AsyncSession, api_key: str = None
                     gamma=rag_gamma,
                     lambda_decay=rag_lambda,
                     exclude_chapter_id=chapter.id,
+                    max_chapter_number=chapter.chapter_number - 1,
                 )
         except Exception as e:
             print(f"[RAG Error] {e}")

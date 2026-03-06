@@ -56,6 +56,8 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 3. 检查是否有逻辑硬伤或情节漏洞
 4. 检查是否遗漏了应该有的剧情点
 
+注意：初稿已经过分段质检，请重点关注**段落间的连贯性**和**全局逻辑**，对于细枝末节的措辞问题可适当放宽。
+
 ## 输出格式要求
 你必须以 JSON 格式输出，结构如下：
 {{
@@ -224,3 +226,105 @@ def parse_review_result(review_result_raw: str):
         revision_plan = "请按章节大纲与角色设定修复逻辑问题，并返回完整正文。"
     result = {"pass": bool(parsed_obj.get("pass", False)), "issues": issues, "revision_plan": revision_plan}
     return result, None
+
+
+def build_chunk_review_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str):
+    """
+    构建分段审阅 Agent (Chunk Review Agent) 的提示词。
+    
+    相比全章审阅，分段审阅更关注：
+    1. 局部 OOC (Out Of Character)
+    2. 是否完成了 Beat 的指令 (summary)
+    3. 基础文笔流畅度
+    
+    忽略：
+    1. 前后文连贯性 (因为是分段并行生成，缺乏上下文)
+    2. 全局伏笔
+    """
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    
+    # 简化版角色设定 (只取名字和静态设定，减少 Token)
+    static_states = []
+    seen_character_ids = set()
+    for entity in entities:
+        character = entity.character if hasattr(entity, "character") else entity
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
+    
+    system_prompt = f"""{global_sys_prompt}
+
+你是一个严格的小说片段质检员。
+请检查生成的片段是否符合剧情要求，且角色行为符合设定。
+
+## 角色设定
+{chr(10).join(static_states) if static_states else '暂无角色设定'}
+
+## 检查标准
+1. **剧情符合度**: 是否完成了剧情摘要(Summary)中的关键动作？
+2. **角色一致性**: 是否存在严重 OOC (Out Of Character)？
+3. **文本质量**: 是否有严重的重复、乱码或未完成的句子？
+
+## 输出格式 (JSON)
+{{
+    "pass": true/false,
+    "issues": ["简短描述问题1", "简短描述问题2"],
+    "revision_instruction": "一句话修改指令"
+}}
+注意：若问题不严重（如轻微措辞不当），请优先判定为 pass: true。仅在严重逻辑错误或 OOC 时返回 false。"""
+
+    user_prompt = f"""请质检以下小说片段:
+
+【剧情摘要】
+{beat_summary}
+
+【生成片段】
+{chunk_text}
+
+请输出 JSON 格式质检结果。"""
+
+    return system_prompt, user_prompt
+
+
+def build_chunk_refine_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str, revision_instruction: str):
+    """
+    构建分段精修 Agent (Chunk Refine Agent) 的提示词。
+    """
+    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    
+    # 简化版角色设定
+    static_states = []
+    seen_character_ids = set()
+    for entity in entities:
+        character = entity.character if hasattr(entity, "character") else entity
+        if character and character.id not in seen_character_ids:
+            seen_character_ids.add(character.id)
+            if character.static_prompt:
+                static_states.append(f"【{character.name}】{character.static_prompt}")
+
+    system_prompt = f"""{global_sys_prompt}
+
+你是一个精修编辑。请根据修改指令，对小说片段进行快速修正。
+
+## 角色设定
+{chr(10).join(static_states) if static_states else '暂无角色设定'}
+
+## 你的任务
+根据指令重写片段，保持原有风格，修复指出的问题。
+直接输出修改后的正文，不要包含任何解释。"""
+
+    user_prompt = f"""请重写以下片段:
+
+【剧情摘要】
+{beat_summary}
+
+【修改指令】
+{revision_instruction}
+
+【原片段】
+{chunk_text}
+
+请直接输出修改后的正文。"""
+
+    return system_prompt, user_prompt

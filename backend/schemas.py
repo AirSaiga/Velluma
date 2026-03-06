@@ -407,7 +407,7 @@ class StoryBeatBase(BaseModel):
     beat_type: str = Field(default="progression", max_length=100)
     position: int = Field(default=0, ge=0)
     location: Optional[str] = None
-    pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    pov_character: Optional[str] = Field(None, max_length=120)
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
     word_count_target: int = Field(default=0, ge=0)
@@ -598,6 +598,8 @@ class GenerateChapterAgenticRequest(BaseModel):
     rag_beta: float = Field(default=AGENTIC_DEFAULT_RAG_BETA, ge=0.0, le=1.0, description="时间衰减权重")
     rag_gamma: float = Field(default=AGENTIC_DEFAULT_RAG_GAMMA, ge=0.0, le=1.0, description="剧情伏笔权重")
     rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
+    fast_mode: bool = Field(default=False, description="快速模式：仅生成首轮结果，不进入二轮重写")
+    skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
 
     @model_validator(mode="after")
     def validate_rag_weight_sum(self):
