@@ -38,6 +38,19 @@ export function publishPromptData(data: any) {
   if (window.electronAPI) {
     window.electronAPI.send('prompt-data', prompt)
   }
+
+  formatText: async (data: { text: string; api_key?: string; base_url?: string; model?: string }) => {
+    const response = await requestRaw('/format_text', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`格式整理请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  }
 }
 
 export function readStoredPromptData() {
@@ -295,5 +308,18 @@ export const generateApi = {
         callbacks.onError?.(err.message)
       }
     })
+  },
+
+  formatText: async (data: { text: string; api_key?: string; base_url?: string; model?: string }) => {
+    const response = await requestRaw('/format_text', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`格式整理请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return await response.json()
   }
 }

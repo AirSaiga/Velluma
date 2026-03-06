@@ -68,7 +68,7 @@ async function handleUpdateDynamicState() {
 
   isUpdatingState.value = true
   try {
-    const newDynamicState = await props.updateDynamicStateAction(selectedCharacter.value.id)
+    const newDynamicState = await props.updateDynamicStateAction(selectedCharacter.value.id, formData.value.dynamic_state)
     if (newDynamicState) {
       formData.value.dynamic_state = newDynamicState
       alert('动态状态更新成功')

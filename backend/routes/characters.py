@@ -190,6 +190,7 @@ async def update_character_dynamic_state_endpoint(
         api_key=request.api_key,
         base_url=request.base_url,
         model=request.model,
+        manual_current_state=request.manual_current_state,
     )
     return CharacterDynamicStateUpdateResponse(
         character_id=character_id,

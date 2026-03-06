@@ -16,6 +16,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# [User Request] Explicitly set proxy to bypass region restrictions
+# Please update this URL to match your local proxy settings (e.g., http://127.0.0.1:7890)
+PROXY_URL = "http://127.0.0.1:4780"
+
 
 def _clear_proxy_env():
     """
@@ -72,7 +76,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
     """
     import httpx
 
-    _clear_proxy_env()
+    # _clear_proxy_env()
     # 首帧：输出 prompt 供前端调试
     yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
     http_client = None
@@ -82,8 +86,8 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         if base_url:
             # 移除末尾的斜杠以避免双重斜杠问题，这是常见的 API 兼容性陷阱
             client_kwargs["base_url"] = base_url.rstrip("/")
-        # 禁用 httpx 默认代理继承，避免被系统代理截获
-        http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
+        # 显式设置代理，解决 403 地区限制问题
+        http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
         # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
@@ -169,6 +173,33 @@ async def generate_summary(
     return ""
 
 
+async def format_text_with_llm(
+    text: str,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: str = "google/gemini-2.0-flash-001",
+) -> str:
+    """
+    使用 LLM 智能整理文本格式。
+    """
+    system_prompt = """你是一个专业的文本编辑助手。你的任务是整理用户提供的文本格式。
+具体要求：
+1. 智能分段：根据语义和上下文，将过长的段落拆分为合理的短段落，增强阅读体验。
+2. 标点修正：修正文中错误或缺失的标点符号。
+3. 格式规范：确保段落之间有适当的空行（如果需要），去除多余的空格。
+4. 内容保持：绝对不要修改文本的原意、语气或用词，只调整格式和标点。
+请直接返回整理后的纯文本，不要使用 Markdown 代码块标记（如 ```），也不要包含任何解释或额外的对话。"""
+    
+    return await call_llm(
+        system_prompt=system_prompt,
+        user_prompt=text,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        temperature=0.3, # 低温确保格式稳定
+    )
+
+
 
 async def call_llm(
     system_prompt: str,
@@ -198,13 +229,13 @@ async def call_llm(
     """
     import httpx
 
-    _clear_proxy_env()
+    # _clear_proxy_env()
     client_kwargs = {"api_key": api_key}
     if base_url:
         # 移除末尾的斜杠以避免双重斜杠问题
         client_kwargs["base_url"] = base_url.rstrip("/")
-    # 禁用 httpx 默认代理继承
-    http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
+    # 显式设置代理，解决 403 地区限制问题
+    http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
     client_kwargs["http_client"] = http_client
     client = AsyncOpenAI(**client_kwargs)
 

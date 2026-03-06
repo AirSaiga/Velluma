@@ -36,12 +36,14 @@ const props = defineProps<{
   getMetaCollapsedLabel: () => string
   getWorkflowStageLabel: () => string
   handleContentUpdate: (content: string) => void
+  handleFormatText: (text: string) => void
   handleOptimize: () => void
   handleOutlineInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
   isAgenticMode: boolean
   isCharacterSelected: (charId: string) => boolean
   isEditorDisabled: boolean
+  isFormatting: boolean
   isGenerating: boolean
   isLoadingOverlay: boolean
   isPublishing: boolean
@@ -286,7 +288,9 @@ function handleOptimizationFeedbackInput(event: Event) {
           :id="selectedChapter.id"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
+          @request-format="handleFormatText"
           :disabled="isEditorDisabled"
+          :is-formatting="isFormatting"
           placeholder="在此处开始写作或生成内容..."
         />
       </div>
@@ -480,11 +484,11 @@ function handleOptimizationFeedbackInput(event: Event) {
               <div class="grid grid-cols-2 gap-4 text-xs">
                 <div class="opacity-70">
                   <div class="mb-1 text-[var(--text-muted)]">旧状态</div>
-                  <div class="text-[var(--text-secondary)] line-clamp-2">{{ update.old_state || '暂无' }}</div>
+                  <div class="text-[var(--text-secondary)] whitespace-pre-wrap">{{ update.old_state || '暂无' }}</div>
                 </div>
                 <div>
                   <div class="mb-1 text-[var(--text-muted)]">新状态</div>
-                  <div class="text-[var(--text-primary)] line-clamp-2">{{ update.new_state || '暂无' }}</div>
+                  <div class="text-[var(--text-primary)] whitespace-pre-wrap">{{ update.new_state || '暂无' }}</div>
                 </div>
               </div>
             </div>

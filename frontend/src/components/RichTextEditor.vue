@@ -27,10 +27,14 @@ const props = defineProps({
   id: {
     type: [String, Number],
     default: null,
+  },
+  isFormatting: {
+    type: Boolean,
+    default: false,
   }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'request-format'])
 
 const textColor = ref('#000000')
 const highlightColor = ref('#FFFF00')
@@ -146,6 +150,16 @@ const insertContent = (content) => {
   }
 }
 
+const formatContent = () => {
+  if (!editor.value || props.isFormatting) return
+  
+  // 获取纯文本内容
+  const text = editor.value.getText()
+  if (!text.trim()) return
+
+  emit('request-format', text)
+}
+
 const flushBuffer = () => {
   if (contentBuffer && editor.value) {
     const buffer = contentBuffer.trim()
@@ -215,6 +229,15 @@ defineExpose({
         title="删除线"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.8 3.3 3.6 3.9h.2"></path><path d="M8.7 19.1c2.3.6 4.4 1 6.2.9 2.7 0 5.3-.7 5.3-3.6 0-1.5-1.8-3.3-3.6-3.9h-.2"></path><line x1="3" y1="12" x2="21" y2="12"></line></svg>
+      </button>
+      <button 
+        @click="formatContent" 
+        :class="{ 'opacity-50 cursor-not-allowed': isFormatting }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors relative"
+        title="智能格式整理（AI分段、标点修正）"
+      >
+        <svg v-if="!isFormatting" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>
+        <svg v-else class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
       </button>
       <div class="w-px h-3 bg-[var(--border-color)] mx-1"></div>
       <label class="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--hover-bg)] transition-colors cursor-pointer" title="文字颜色">

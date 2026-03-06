@@ -12,6 +12,7 @@ from backend.schemas import (
     GenerateChapterAgenticPreviewResponse,
     GenerateChapterAgenticWithBeatsRequest,
     OptimizeChapterRequest,
+    FormatTextRequest,
 )
 from backend.services.chapter_generation import (
     build_chapter_prompt,
@@ -22,8 +23,30 @@ from backend.services.chapter_generation import (
     preview_agentic_beats,
     refine_draft,
 )
+from backend.services.llm_client import format_text_with_llm
 
 router = APIRouter(prefix="/api", tags=["generate"])
+
+
+# =============================================================================
+# 文本格式整理
+# =============================================================================
+
+@router.post("/format_text")
+async def format_text(request: FormatTextRequest):
+    """
+    智能整理文本格式（分段、标点、空行等）。
+    """
+    if not request.text.strip():
+        return {"formatted_text": ""}
+        
+    formatted_text = await format_text_with_llm(
+        text=request.text,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model,
+    )
+    return {"formatted_text": formatted_text}
 
 
 # =============================================================================

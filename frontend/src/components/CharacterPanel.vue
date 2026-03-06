@@ -52,14 +52,15 @@ function forwardDeleteRelationship(id) {
   emit('delete-relationship', id)
 }
 
-async function handleUpdateDynamicState(characterId) {
+async function handleUpdateDynamicState(characterId, currentState) {
   if (!characterId || !props.selectedChapterId) return ''
 
   const result = await characterApi.updateDynamicState(characterId, {
     chapter_id: props.selectedChapterId,
     api_key: props.apiConfig.api_key,
     base_url: props.apiConfig.base_url,
-    model: props.apiConfig.model
+    model: props.apiConfig.model,
+    manual_current_state: currentState
   })
 
   return result?.new_dynamic_state || ''

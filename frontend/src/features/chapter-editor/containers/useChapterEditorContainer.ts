@@ -196,6 +196,53 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     return beat.hook_ids.join(' / ')
   }
 
+  const isFormatting = ref(false)
+
+  async function handleFormatText(text: string) {
+    if (isFormatting.value || !text) return
+    
+    try {
+      if (!props.apiConfig.api_key) {
+        alert('请先在设置中配置 API Key 以使用智能格式整理功能')
+        return
+      }
+
+      isFormatting.value = true
+      const { formatted_text } = await generateApi.formatText({
+        text,
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
+        model: props.apiConfig.model || 'google/gemini-2.0-flash-001'
+      })
+      
+      if (formatted_text && editorRef.value) {
+        // 将返回的文本按行分割，构建 Tiptap JSON 结构以确保正确分段
+        // 1. 按换行符分割（兼容 \n, \r\n）
+        // 2. 过滤掉空行
+        // 3. 构造 paragraph 节点
+        const paragraphs = formatted_text
+          .split(/\r?\n/)
+          .filter((line: string) => line.trim().length > 0)
+        
+        const jsonContent = {
+          type: 'doc',
+          content: paragraphs.map((text: string) => ({
+            type: 'paragraph',
+            content: [{ type: 'text', text: text.trim() }]
+          }))
+        }
+
+        // 使用 setContent 替换编辑器内容
+        editorRef.value.editor.commands.setContent(jsonContent)
+      }
+    } catch (e: any) {
+      console.error('Format text failed', e)
+      alert('格式整理失败: ' + e.message)
+    } finally {
+      isFormatting.value = false
+    }
+  }
+
   const editorRef = ref<any>(null)
   function setEditorRef(editor: any) {
     editorRef.value = editor
@@ -558,12 +605,14 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     getMetaCollapsedLabel,
     getWorkflowStageLabel,
     handleContentUpdate,
+    handleFormatText,
     handleOptimize,
     handleOutlineInput,
     handleTitleInput,
     isAgenticMode,
     isCharacterSelected,
     isEditorDisabled,
+    isFormatting,
     isGenerating,
     isLoadingOverlay,
     isPublishing,

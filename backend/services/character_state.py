@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Character, Chapter
-from backend.services.llm_client import _clear_proxy_env
+from backend.services.llm_client import _clear_proxy_env, PROXY_URL
 
 
 async def update_character_dynamic_state(
@@ -16,6 +16,7 @@ async def update_character_dynamic_state(
     api_key: str,
     base_url: Optional[str] = None,
     model: str = "gpt-4o-mini",
+    manual_current_state: Optional[str] = None,
 ) -> dict:
     """
     更新角色动态状态 (角色在特定章节中的心理/情感变化)。
@@ -24,6 +25,7 @@ async def update_character_dynamic_state(
     1. 动态状态 = 角色当前的心理状态、情感、与其他角色的关系变化
     2. 每次更新记录到 history (最多保留10条)，支持追溯
     3. 仅分析涉及该角色的章节，未出场则不更新
+    4. manual_current_state: 若提供，则以此作为"当前状态"进行更新，而非数据库中的值（用于用户手动干预/重试）
 
     触发条件：
     - 章节生成完成后自动触发 (章节内容已写入 DB)
@@ -41,7 +43,7 @@ async def update_character_dynamic_state(
     import asyncio
 
     # 步骤1：准备历史状态上下文 (最近3条)，帮助 LLM 理解状态演变
-    old_dynamic_state = character.dynamic_state or "暂无动态状态"
+    old_dynamic_state = manual_current_state if manual_current_state is not None else (character.dynamic_state or "暂无动态状态")
     history_states = []
     if character.dynamic_state_history:
         for item in character.dynamic_state_history[-3:]:
@@ -82,7 +84,7 @@ async def update_character_dynamic_state(
 """
 
     # 步骤3：调用 LLM 分析并更新状态 (增加重试机制)
-    _clear_proxy_env()
+    # _clear_proxy_env()
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
@@ -93,7 +95,7 @@ async def update_character_dynamic_state(
     for attempt in range(max_retries):
         http_client = None
         try:
-            http_client = httpx.AsyncClient(trust_env=False, timeout=600.0)
+            http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
             client_kwargs["http_client"] = http_client
             client = AsyncOpenAI(**client_kwargs)
             

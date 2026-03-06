@@ -293,6 +293,7 @@ class CharacterDynamicStateUpdateRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
+    manual_current_state: Optional[str] = None
 
 
 class CharacterDynamicStateUpdateResponse(BaseModel):
@@ -546,6 +547,14 @@ class PlotLedgerResponse(PlotLedgerBase):
 # 警示：
 #   - api_key 是敏感字段，后端不应将其存入数据库或日志
 #   - base_url 允许自定义（支持 OpenAI 兼容 API，如本地部署）
+class FormatTextRequest(BaseModel):
+    """文本格式整理请求"""
+    text: str
+    api_key: str
+    base_url: Optional[str] = None
+    model: str = "google/gemini-2.0-flash-001"
+
+
 class GenerateChapterRequest(BaseModel):
     """章节生成请求模型
 
