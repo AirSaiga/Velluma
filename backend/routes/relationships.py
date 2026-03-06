@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.dependencies import get_character_repository, get_relationship_repository
 from backend.repositories import CharacterRepository, RelationshipRepository
-from backend.schemas import RelationshipCreate, RelationshipResponse
+from backend.schemas import RelationshipCreate, RelationshipResponse, RelationshipUpdate
 
 router = APIRouter(prefix="/api", tags=["relationships"])
 
@@ -78,6 +78,32 @@ async def create_relationship(
     if existing:
         raise HTTPException(status_code=400, detail="关系已存在")
     return await relationship_repo.create(relationship_data.model_dump())
+
+
+@router.put("/relationships/{relationship_id}", response_model=RelationshipResponse)
+async def update_relationship(
+    relationship_id: UUID,
+    relationship_data: RelationshipUpdate,
+    repo: RelationshipRepository = Depends(get_relationship_repository),
+):
+    """业务目的：更新角色间关系。
+
+    参数来源：
+    - relationship_id: 路径参数
+    - relationship_data: 请求体，包含要更新的字段
+
+    数据流：
+    1. 验证关系是否存在
+    2. 执行更新
+    3. 返回更新后的对象
+
+    副作用：
+    - 数据库 UPDATE 操作
+    """
+    relationship = await repo.get_by_id(relationship_id)
+    if not relationship:
+        raise HTTPException(status_code=404, detail="关系不存在")
+    return await repo.update(relationship, relationship_data.model_dump(exclude_unset=True))
 
 
 @router.delete("/relationships/{relationship_id}")

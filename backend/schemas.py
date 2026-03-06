@@ -342,6 +342,19 @@ class RelationshipCreate(RelationshipBase):
     pass
 
 
+class RelationshipUpdate(BaseModel):
+    """更新角色关系请求模型
+
+    业务规则：
+    - 仅允许更新关系属性，不允许修改 source/target（那是另一段关系）
+    - 字段均为 Optional，支持部分更新
+    """
+    relation_type: Optional[str] = Field(None, max_length=100)
+    affinity_score: Optional[int] = Field(None, ge=-100, le=100)
+    interaction_prompt: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
 class RelationshipResponse(RelationshipBase):
     """角色关系响应模型
 
