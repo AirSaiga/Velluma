@@ -1,7 +1,22 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
-import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat } from '../../../types'
+import type { AgenticFormState, Chapter, Character, PacingStyle } from '../../../types'
+
+interface BeatPreviewItem {
+  position: number
+  beat_id?: string
+  summary: string
+  location?: string
+  pov_character?: string
+  action_summary?: string
+  openingState: string
+  stoppingState: string
+  forbiddenEventsText: string
+  word_count_target: number
+  target_words: number
+  hook_ids: string[]
+}
 
 const props = defineProps<{
   AGENTIC_FIELD_CONFIG: Record<string, any>
@@ -22,8 +37,11 @@ const props = defineProps<{
   characters: Character[]
   closeAgenticSettingsModal: () => void
   closeBeatReviewModal: () => void
+  closeCompletionModal: () => void
   closePublishModal: () => void
   confirmBeatsAndGenerate: () => void
+  completionMessage: string
+  completionTitle: string
   firstFieldFeedback: string
   formError: string
   getAgenticFieldFeedbackText: (field: keyof AgenticFormState) => string
@@ -32,13 +50,17 @@ const props = defineProps<{
   getAgenticFieldMin: (field: keyof AgenticFormState) => number
   getAgenticFieldStep: (field: keyof AgenticFormState) => number
   getAgenticFieldValue: (field: keyof AgenticFormState) => number
-  getBeatHookLabel: (beat: ConfirmedStoryBeat) => string
+  getBeatHookLabel: (beat: BeatPreviewItem) => string
   getMetaCollapsedLabel: () => string
+  getPacingStyleValue: () => PacingStyle
+  getTensionLevelValue: () => number
   getWorkflowStageLabel: () => string
+  handlePacingStyleInput: (event: Event) => void
   handleContentUpdate: (content: string) => void
   handleFormatText: (text: string) => void
   handleOptimize: () => void
   handleOutlineInput: (event: Event) => void
+  handleTensionLevelInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
   isAgenticMode: boolean
   isCharacterSelected: (charId: string) => boolean
@@ -51,8 +73,9 @@ const props = defineProps<{
   localMetaCollapsed: boolean
   normalizeAgenticField: () => void
   openAgenticSettingsModal: () => void
+  pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
-  previewBeats: ConfirmedStoryBeat[]
+  previewBeats: BeatPreviewItem[]
   publishChapter: () => void
   ragWeightTotal: number
   restoreAgenticDefaults: () => void
@@ -64,6 +87,7 @@ const props = defineProps<{
   setWordCount: (value: number) => void
   showAgenticSettingsModal: boolean
   showBeatReviewModal: boolean
+  showCompletionModal: boolean
   showPublishModal: boolean
   startGenerate: () => void
   toggleAgenticMode: () => void
@@ -139,6 +163,34 @@ function handleOptimizationFeedbackInput(event: Event) {
             {{ char.name }}
           </button>
           <span v-if="characters.length === 0" class="text-[10px] text-[var(--text-muted)]">暂无</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
+            <label class="text-[10px] text-[var(--text-muted)] shrink-0">剧情紧张程度</label>
+            <input
+              type="range"
+              :value="getTensionLevelValue()"
+              @input="handleTensionLevelInput"
+              min="1"
+              max="10"
+              step="1"
+              class="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-500)]"
+            />
+            <span class="text-[10px] font-medium text-[var(--accent-600)] min-w-[14px] text-right">{{ getTensionLevelValue() }}</span>
+          </div>
+          <div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
+            <label class="text-[10px] text-[var(--text-muted)] shrink-0">叙事节奏</label>
+            <select
+              :value="getPacingStyleValue()"
+              @change="handlePacingStyleInput"
+              class="flex-1 text-[10px] px-2 py-1 rounded-md bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+            >
+              <option v-for="option in pacingStyleOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
         </div>
 
         <div class="flex items-center justify-between gap-2">
@@ -431,6 +483,33 @@ function handleOptimizationFeedbackInput(event: Event) {
             <div>动作摘要：{{ beat.action_summary || '未指定' }}</div>
             <div>绑定伏笔：{{ getBeatHookLabel(beat) }}</div>
           </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段开场状态</label>
+              <input
+                v-model="beat.openingState"
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                placeholder="例如：双方试探，尚未摊牌"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段停在何处</label>
+              <input
+                v-model="beat.stoppingState"
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                placeholder="例如：关系仍紧绷但未爆发"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段禁止发生</label>
+            <textarea
+              v-model="beat.forbiddenEventsText"
+              class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
+              rows="2"
+              placeholder="每行一条，例如：主角主动出手"
+            ></textarea>
+          </div>
         </div>
       </div>
       <div class="p-3 border-t border-white/60 flex items-center justify-end gap-2">
@@ -505,5 +584,28 @@ function handleOptimizationFeedbackInput(event: Event) {
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Completion Modal -->
+  <div v-if="showCompletionModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md border border-[var(--border-color)] p-6 transform transition-all animate-in fade-in zoom-in-95 duration-200">
+        <div class="flex items-start gap-4">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-600"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-2">{{ completionTitle || '生成完成' }}</h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm leading-relaxed whitespace-pre-line">{{ completionMessage }}</p>
+          </div>
+        </div>
+        <div class="mt-6 flex justify-end">
+          <button
+            @click="closeCompletionModal"
+            class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            确定
+          </button>
+        </div>
+      </div>
   </div>
 </template>

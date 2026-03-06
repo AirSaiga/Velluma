@@ -41,6 +41,7 @@ const highlightColor = ref('#FFFF00')
 
 const editor = useEditor({
   content: props.modelValue,
+  editable: !props.disabled,
   extensions: [
     StarterKit,
     Placeholder.configure({
@@ -67,6 +68,10 @@ const editor = useEditor({
   onUpdate: ({ editor }) => {
     emit('update:modelValue', editor.getHTML())
   },
+})
+
+watch(() => props.disabled, (val) => {
+  editor.value?.setEditable(!val)
 })
 
 watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId]) => {
@@ -196,7 +201,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="rich-text-editor bg-white overflow-hidden flex flex-col h-full" :class="{ 'opacity-60 pointer-events-none': disabled }">
+  <div class="rich-text-editor bg-white overflow-hidden flex flex-col h-full" :class="{ 'opacity-60': disabled }">
     <div v-if="editor && !disabled" class="toolbar flex items-center gap-0.5 px-3 py-1.5 bg-white border-b border-[var(--border-color)] overflow-x-auto whitespace-nowrap">
       <button 
         @click="toggleBold" 

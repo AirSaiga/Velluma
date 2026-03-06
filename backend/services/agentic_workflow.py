@@ -183,10 +183,13 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
             word_count_target = max(200, word_count // total)
         beat_id = str(beat_dict.get("beat_id") or f"beat-{idx}").strip() or f"beat-{idx}"
         hook_ids = beat_dict.get("hook_ids") if isinstance(beat_dict.get("hook_ids"), list) else []
+        red_lines = beat_dict.get("red_lines") if isinstance(beat_dict.get("red_lines"), list) else []
         
         pov_character = str(beat_dict.get("pov_character") or "").strip()
         location = str(beat_dict.get("location") or "").strip()
         worldbuilding_instruction = str(beat_dict.get("worldbuilding_instruction") or "").strip()
+        entry_state = str(beat_dict.get("entry_state") or "").strip()
+        exit_state = str(beat_dict.get("exit_state") or "").strip()
 
         normalized.append(
             {
@@ -197,6 +200,9 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
                 "pov_character": pov_character if pov_character else None,
                 "action_summary": str(beat_dict.get("action_summary") or "").strip() or summary,
                 "worldbuilding_instruction": worldbuilding_instruction if worldbuilding_instruction else None,
+                "entry_state": entry_state if entry_state else None,
+                "exit_state": exit_state if exit_state else None,
+                "red_lines": [str(item).strip() for item in red_lines if str(item).strip()],
                 "word_count_target": word_count_target,
                 "target_words": word_count_target,
                 "hook_ids": [str(item).strip() for item in hook_ids if str(item).strip()],
@@ -206,7 +212,11 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
 
 
 async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: AsyncSession) -> list[dict]:
-    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter_result = await db.execute(
+        select(Chapter)
+        .options(selectinload(Chapter.story_beats))
+        .where(Chapter.id == request.chapter_id)
+    )
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
         return []
@@ -402,7 +412,11 @@ async def _generate_agentic_chapter_stream(
             record_stage(f"llm:{stage}", elapsed, beat_index=beat_index)
             record_llm(stage, elapsed, success=success)
 
-    chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+    chapter_result = await db.execute(
+        select(Chapter)
+        .options(selectinload(Chapter.story_beats))
+        .where(Chapter.id == request.chapter_id)
+    )
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
         yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
@@ -578,6 +592,9 @@ async def _generate_agentic_chapter_stream(
                     pov_character=beat.get("pov_character"),
                     action_summary=beat.get("action_summary"),
                     worldbuilding_instruction=beat.get("worldbuilding_instruction"),
+                    entry_state=beat.get("entry_state"),
+                    exit_state=beat.get("exit_state"),
+                    red_lines=beat.get("red_lines", []),
                     word_count_target=beat.get("word_count_target", beat.get("target_words", 0)),
                     summary=beat.get("summary", ""),
                     meta={"target_words": beat.get("target_words", 0)},

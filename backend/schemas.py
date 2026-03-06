@@ -8,6 +8,8 @@ from typing import Any, List, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
+PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
+
 
 # ============================================================
 # 书籍 Schema 层 - Book 实体的事务封装
@@ -156,6 +158,8 @@ class ChapterBase(BaseModel):
     summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
     map_activity_range: Optional[str] = None
+    tension_level: int = Field(default=5, ge=1, le=10)
+    pacing_style: PacingStyle = Field(default="balanced")
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
 
@@ -190,6 +194,8 @@ class ChapterUpdate(BaseModel):
     summary: Optional[str] = None
     status: Optional[str] = None
     map_activity_range: Optional[str] = None
+    tension_level: Optional[int] = Field(None, ge=1, le=10)
+    pacing_style: Optional[PacingStyle] = None
 
 
 class ChapterResponse(ChapterBase):
@@ -424,6 +430,9 @@ class StoryBeatBase(BaseModel):
     pov_character: Optional[str] = Field(None, max_length=120)
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
+    entry_state: Optional[str] = Field(None, min_length=1)
+    exit_state: Optional[str] = Field(None, min_length=1)
+    red_lines: List[str] = Field(default_factory=list)
     word_count_target: int = Field(default=0, ge=0)
     summary: str = Field(..., min_length=1)
     meta: dict[str, Any] = Field(default_factory=dict)
@@ -443,6 +452,9 @@ class StoryBeatUpdate(BaseModel):
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
+    entry_state: Optional[str] = Field(None, min_length=1)
+    exit_state: Optional[str] = Field(None, min_length=1)
+    red_lines: Optional[List[str]] = None
     word_count_target: Optional[int] = Field(None, ge=0)
     summary: Optional[str] = Field(None, min_length=1)
     meta: Optional[dict[str, Any]] = None
@@ -639,6 +651,9 @@ class ConfirmedStoryBeat(BaseModel):
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
+    entry_state: Optional[str] = Field(None, min_length=1)
+    exit_state: Optional[str] = Field(None, min_length=1)
+    red_lines: List[str] = Field(default_factory=list)
     word_count_target: int = Field(default=0, ge=0)
     target_words: int = Field(default=0, ge=0)
     hook_ids: List[str] = Field(default_factory=list)

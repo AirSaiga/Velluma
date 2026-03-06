@@ -3,6 +3,56 @@ import json
 from backend.models import Chapter, Book
 
 
+def _normalize_text(value, default: str = "") -> str:
+    text = str(value or "").strip()
+    return text or default
+
+
+def _normalize_text_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _render_boundary_constraints(entry_state: str, exit_state: str, red_lines: list[str]) -> str:
+    red_line_text = "；".join(red_lines) if red_lines else "无"
+    return (
+        "## 【绝对红线边界约束 - 最高优先级】\n"
+        "1. 本区块优先级高于其他所有写作建议，任何情况下都不得违反。\n"
+        f"2. 切入状态（entry_state）：{entry_state}\n"
+        f"3. 强制切出状态（exit_state）：{exit_state}\n"
+        f"4. 绝对禁忌（red_lines）：{red_line_text}\n"
+        "5. 若剧情自然推进将越过 exit_state，必须立即收束并停在 exit_state。"
+    )
+
+
+def _render_scene_intent_prompt(scene_intent_data) -> str | None:
+    if isinstance(scene_intent_data, dict):
+        constraints = _normalize_text_list(scene_intent_data.get("constraints"))
+        return (
+            "## SceneIntent\n"
+            f"标签：{_normalize_text(scene_intent_data.get('intent_label'), '推进剧情')}\n"
+            f"目标：{_normalize_text(scene_intent_data.get('goal'), '推进剧情')}\n"
+            f"风险：{_normalize_text(scene_intent_data.get('stakes'), '无')}\n"
+            f"约束：{', '.join(constraints) if constraints else '无'}"
+        )
+    if isinstance(scene_intent_data, list) and scene_intent_data:
+        latest_intent = scene_intent_data[-1]
+        if isinstance(latest_intent, dict):
+            constraints = _normalize_text_list(latest_intent.get("constraints"))
+            return (
+                "## SceneIntent\n"
+                f"标签：{_normalize_text(latest_intent.get('intent_label'), '推进剧情')}\n"
+                f"目标：{_normalize_text(latest_intent.get('goal'), '推进剧情')}\n"
+                f"风险：{_normalize_text(latest_intent.get('stakes'), '无')}\n"
+                f"约束：{', '.join(constraints) if constraints else '无'}"
+            )
+        normalized_latest_intent = _normalize_text(latest_intent)
+        return f"## SceneIntent\n{normalized_latest_intent}" if normalized_latest_intent else None
+    normalized_scene_intent = _normalize_text(scene_intent_data)
+    return f"## SceneIntent\n{normalized_scene_intent}" if normalized_scene_intent else None
+
+
 def build_draft_agent_prompt(
     chapter: Chapter,
     book: Book,
@@ -53,6 +103,15 @@ def build_draft_agent_prompt(
         or "整体基调保持与章节冲突和人物状态一致。"
     )
     beat_data = beat if isinstance(beat, dict) else {}
+    beat_summary = _normalize_text(beat_data.get("summary"))
+    beat_action_summary = _normalize_text(beat_data.get("action_summary"), beat_summary)
+    entry_state = _normalize_text(beat_data.get("entry_state"), f"承接上文并切入：{beat_summary[:40]}" if beat_summary else "承接上文并切入当前节拍。")
+    exit_state = _normalize_text(beat_data.get("exit_state"), f"停在本节拍收束点：{beat_action_summary[:40]}" if beat_action_summary else "停在当前节拍收束状态，不越界推进。")
+    red_lines = _normalize_text_list(beat_data.get("red_lines"))
+    if not red_lines:
+        red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
+    boundary_constraints_prompt = _render_boundary_constraints(entry_state, exit_state, red_lines)
+
     worldbuilding_instruction = (
         beat_data.get("worldbuilding_instruction")
         or getattr(chapter, "worldbuilding_instruction", None)
@@ -72,29 +131,7 @@ def build_draft_agent_prompt(
         or getattr(chapter, "scene_intent_data", None)
         or getattr(chapter, "scene_intents", None)
     )
-    scene_intent_prompt = None
-    if isinstance(scene_intent_data, dict):
-        scene_intent_prompt = (
-            "## SceneIntent\n"
-            f"标签：{scene_intent_data.get('intent_label', '推进剧情')}\n"
-            f"目标：{scene_intent_data.get('goal', '推进剧情')}\n"
-            f"风险：{scene_intent_data.get('stakes') or '无'}\n"
-            f"约束：{', '.join(scene_intent_data.get('constraints', [])) if scene_intent_data.get('constraints') else '无'}"
-        )
-    elif isinstance(scene_intent_data, list) and scene_intent_data:
-        latest_intent = scene_intent_data[-1]
-        if isinstance(latest_intent, dict):
-            scene_intent_prompt = (
-                "## SceneIntent\n"
-                f"标签：{latest_intent.get('intent_label', '推进剧情')}\n"
-                f"目标：{latest_intent.get('goal', '推进剧情')}\n"
-                f"风险：{latest_intent.get('stakes') or '无'}\n"
-                f"约束：{', '.join(latest_intent.get('constraints', [])) if latest_intent.get('constraints') else '无'}"
-            )
-        else:
-            scene_intent_prompt = f"## SceneIntent\n{latest_intent}"
-    elif scene_intent_data:
-        scene_intent_prompt = f"## SceneIntent\n{scene_intent_data}"
+    scene_intent_prompt = _render_scene_intent_prompt(scene_intent_data)
 
     static_states = []
     dynamic_states = []
@@ -140,6 +177,8 @@ def build_draft_agent_prompt(
 ## 角色互动约束
 {chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
 
+{boundary_constraints_prompt}
+
 ## 【强制字数要求 - 最高优先级】
 ★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
 ★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制
@@ -153,9 +192,9 @@ def build_draft_agent_prompt(
 6. 段落之间请使用双换行符（\\n\\n）分隔，以确保排版清晰。
 7. 严禁使用 Markdown 格式（如加粗、斜体、列表等），仅输出纯文本。"""
     action_summary = (
-        beat_data.get("action_summary")
+        beat_action_summary
         or getattr(chapter, "action_summary", None)
-        or beat_data.get("summary")
+        or beat_summary
         or chapter.outline_text
         or "围绕本段冲突推进关键动作。"
     )
@@ -216,6 +255,24 @@ def build_chunk_draft_prompt(
     context_beat_summaries: dict = None,
     locations: list = None,
 ):
+    beat_data = beat if isinstance(beat, dict) else {}
+    scene_intent_data = scene_intent if isinstance(scene_intent, dict) else {}
+    beat_summary = _normalize_text(beat_data.get("summary"))
+    beat_action_summary = _normalize_text(beat_data.get("action_summary"), beat_summary)
+    entry_state = _normalize_text(beat_data.get("entry_state"), f"承接上文并切入：{beat_summary[:40]}" if beat_summary else "承接上文并切入当前节拍。")
+    exit_state = _normalize_text(beat_data.get("exit_state"), f"停在本节拍收束点：{beat_action_summary[:40]}" if beat_action_summary else "停在当前节拍收束状态，不越界推进。")
+    red_lines = _normalize_text_list(beat_data.get("red_lines"))
+    if not red_lines:
+        red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
+    chunk_boundary_section = (
+        "【Chunk 边界约束（最高优先级）】\n"
+        f"- 切入状态 entry_state：{entry_state}\n"
+        f"- 强制切出状态 exit_state：{exit_state}\n"
+        f"- 绝对禁忌 red_lines：{'；'.join(red_lines)}\n"
+        "- 若将要越界到 exit_state 之后的事件，必须立即回收并停在 exit_state。"
+    )
+    intent_constraints = _normalize_text_list(scene_intent_data.get("constraints"))
+
     system_prompt, user_prompt = build_draft_agent_prompt(
         chapter=chapter,
         book=book,
@@ -224,8 +281,8 @@ def build_chunk_draft_prompt(
         word_count=target_words,
         previous_summary=previous_summary,
         relevant_memories=relevant_memories,
-        beat=beat,
-        scene_intent=scene_intent,
+        beat=beat_data,
+        scene_intent=scene_intent_data,
         hook_contexts=hook_contexts,
         locations=locations,
     )
@@ -250,19 +307,21 @@ def build_chunk_draft_prompt(
     chunk_user_prompt = f"""{user_prompt}
 
 【当前 Story Beat】
-位置：{beat.get("position", 1)}
-BeatID：{beat.get("beat_id", "")}
-摘要：{beat.get("summary", "")}
-动作摘要：{beat.get("action_summary", beat.get("summary", ""))}
-场景：{beat.get("location") or "未指定"}
-视角角色：{beat.get("pov_character") or "未指定"}
+位置：{beat_data.get("position", 1)}
+BeatID：{_normalize_text(beat_data.get("beat_id"))}
+摘要：{beat_summary}
+动作摘要：{beat_action_summary}
+场景：{_normalize_text(beat_data.get("location"), "未指定")}
+视角角色：{_normalize_text(beat_data.get("pov_character"), "未指定")}
 建议字数：{target_words}
 
+{chunk_boundary_section}
+
 【Scene Intent】
-标签：{scene_intent.get("intent_label", "推进剧情")}
-目标：{scene_intent.get("goal", "推进剧情")}
-风险：{scene_intent.get("stakes") or "无"}
-约束：{", ".join(scene_intent.get("constraints", [])) if scene_intent.get("constraints") else "无"}
+标签：{_normalize_text(scene_intent_data.get("intent_label"), "推进剧情")}
+目标：{_normalize_text(scene_intent_data.get("goal"), "推进剧情")}
+风险：{_normalize_text(scene_intent_data.get("stakes"), "无")}
+约束：{", ".join(intent_constraints) if intent_constraints else "无"}
 
 {continuity_section}
 

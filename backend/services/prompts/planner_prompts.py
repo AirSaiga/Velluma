@@ -4,6 +4,9 @@ import re
 from backend.models import Chapter, Book
 
 
+LOW_TENSION_RED_LINES = ["避免正面冲突", "避免战斗升级"]
+
+
 def build_planner_agent_prompt(
     chapter: Chapter,
     book: Book,
@@ -16,6 +19,10 @@ def build_planner_agent_prompt(
 ):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    tension_level = getattr(chapter, "tension_level", 5)
+    if not isinstance(tension_level, int):
+        tension_level = 5
+    pacing_style = str(getattr(chapter, "pacing_style", "balanced") or "balanced").strip() or "balanced"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     
@@ -68,6 +75,13 @@ def build_planner_agent_prompt(
         if normalized_hooks
         else "暂无开放伏笔"
     )
+    low_tension_rule = ""
+    if tension_level <= 3:
+        low_tension_rule = (
+            f"\n8. 当前章节张力等级为 {tension_level}（低张力），每个 beat 的 red_lines 必须包含："
+            f"{'、'.join(LOW_TENSION_RED_LINES)}\n"
+            "9. 低张力章节禁止设计直接爆发式冲突，剧情推进以铺垫与悬停为主"
+        )
     system_prompt = f"""{global_sys_prompt}
 
 你是章节规划师。请把章节拆分成可执行的 story beats，并仅输出 JSON。
@@ -87,6 +101,9 @@ def build_planner_agent_prompt(
       "pov_character": "视角角色",
       "action_summary": "动作化执行摘要",
       "worldbuilding_instruction": "本段生效的世界构建约束",
+      "entry_state": "本段切入时角色与局面的起始状态",
+      "exit_state": "本段必须停住的收束状态（不得越界）",
+      "red_lines": ["本段禁止发生1", "本段禁止发生2"],
       "word_count_target": 600,
       "hook_ids": ["hk-1"]
     }}
@@ -100,11 +117,16 @@ def build_planner_agent_prompt(
 4. action_summary 必须可执行、动作化
 5. word_count_target 为正整数，总和接近章节目标字数
 6. 若存在开放伏笔，至少在一个 beat 的 hook_ids 中绑定
-7. 只输出 JSON，不要额外解释"""
+7. 每个 beat 必须显式填写 entry_state、exit_state、red_lines，且 red_lines 至少 1 条
+{low_tension_rule if low_tension_rule else ''}
+10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
+11. 只输出 JSON，不要额外解释"""
     user_prompt = f"""请规划以下章节：
 
 【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
+【剧情张力等级】{tension_level}
+【叙事节奏偏好】{pacing_style}
 【上一章情节概要】
 {previous_chapter_summary if previous_chapter_summary else '暂无上一章概要'}
 【章节大纲】
@@ -156,8 +178,18 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
             pov_character = str(beat.get("pov_character") or "").strip() or None
             action_summary = str(beat.get("action_summary") or "").strip() or summary
             worldbuilding_instruction = str(beat.get("worldbuilding_instruction") or "").strip() or None
+            entry_state = str(beat.get("entry_state") or "").strip()
+            if not entry_state:
+                entry_state = f"承接上文并切入：{summary[:40]}"
+            exit_state = str(beat.get("exit_state") or "").strip()
+            if not exit_state:
+                exit_state = f"停在本节拍收束点：{action_summary[:40]}"
             raw_hook_ids = beat.get("hook_ids")
+            raw_red_lines = beat.get("red_lines")
             hook_ids = [str(item).strip() for item in raw_hook_ids if str(item).strip()] if isinstance(raw_hook_ids, list) else []
+            red_lines = [str(item).strip() for item in raw_red_lines if str(item).strip()] if isinstance(raw_red_lines, list) else []
+            if not red_lines:
+                red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
             beats.append(
                 {
                     "position": position,
@@ -167,6 +199,9 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
                     "pov_character": pov_character,
                     "action_summary": action_summary,
                     "worldbuilding_instruction": worldbuilding_instruction,
+                    "entry_state": entry_state or None,
+                    "exit_state": exit_state or None,
+                    "red_lines": red_lines,
                     "word_count_target": word_count_target,
                     "target_words": word_count_target,
                     "hook_ids": hook_ids,
@@ -183,6 +218,9 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
                 "pov_character": None,
                 "action_summary": fallback_summary,
                 "worldbuilding_instruction": None,
+                "entry_state": "承接上文并切入本节拍",
+                "exit_state": "停在本节拍收束点，不推进后续事件",
+                "red_lines": ["不得越过本节拍 exit_state 指向的剧情停点"],
                 "word_count_target": word_count,
                 "target_words": word_count,
                 "hook_ids": [],

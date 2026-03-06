@@ -5,6 +5,8 @@ export interface Book {
   global_sys_prompt: string
 }
 
+export type PacingStyle = 'slow_burn' | 'balanced' | 'fast_paced'
+
 export interface Character {
   id: string
   name: string
@@ -23,6 +25,8 @@ export interface Chapter {
   content_text: string
   draft_text?: string
   summary?: string
+  tension_level: number
+  pacing_style: PacingStyle
   status: string
   character_ids?: string[]
 }
@@ -63,6 +67,9 @@ export interface ConfirmedStoryBeat {
   pov_character?: string
   action_summary?: string
   worldbuilding_instruction?: string
+  entry_state?: string
+  exit_state?: string
+  red_lines: string[]
   word_count_target: number
   target_words: number
   hook_ids: string[]

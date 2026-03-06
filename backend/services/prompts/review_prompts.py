@@ -4,6 +4,67 @@ import re
 from backend.models import Chapter, Book
 
 
+def _render_boundary_brief(chapter: Chapter) -> str:
+    beats = getattr(chapter, "story_beats", None)
+    if not isinstance(beats, list) or not beats:
+        return "暂无节拍边界数据，请结合章节大纲谨慎判定越界与配速风险。"
+    ordered_beats = sorted(beats, key=lambda beat: getattr(beat, "position", 0) or 0)
+    lines = []
+    for idx, beat in enumerate(ordered_beats, start=1):
+        summary = str(getattr(beat, "summary", "") or "").strip() or f"Beat {idx}"
+        entry_state = str(getattr(beat, "entry_state", "") or "").strip() or "未提供"
+        exit_state = str(getattr(beat, "exit_state", "") or "").strip() or "未提供"
+        red_lines = getattr(beat, "red_lines", None)
+        if isinstance(red_lines, list):
+            red_line_items = [str(item).strip() for item in red_lines if str(item).strip()]
+        else:
+            red_line_items = []
+        red_line_text = "；".join(red_line_items) if red_line_items else "无"
+        lines.append(
+            f"{idx}. {summary}\n"
+            f"   - entry_state: {entry_state}\n"
+            f"   - exit_state: {exit_state}\n"
+            f"   - red_lines: {red_line_text}"
+        )
+    return "\n".join(lines)
+
+
+def _normalize_issue_type(raw_type, description: str) -> str:
+    issue_type = str(raw_type or "").strip()
+    normalized = issue_type.upper()
+    description_text = str(description or "")
+    if (
+        normalized == "PACING_OVERFLOW"
+        or "PACING_OVERFLOW" in normalized
+        or "越界" in issue_type
+        or "越过" in issue_type
+        or "超速" in issue_type
+        or "收束" in issue_type
+        or "exit_state" in issue_type.lower()
+        or "red_line" in issue_type.lower()
+        or "越界" in description_text
+        or "越过" in description_text
+        or "超速" in description_text
+        or "收束" in description_text
+        or "exit_state" in description_text.lower()
+        or "red_line" in description_text.lower()
+    ):
+        return "PACING_OVERFLOW"
+    if "OOC" in normalized:
+        return "OOC"
+    if "剧情遗漏" in issue_type or "PLOT MISSING" in normalized or "MISSING" in normalized:
+        return "剧情遗漏"
+    if "逻辑" in issue_type or "LOGIC" in normalized or "FLAW" in normalized:
+        return "逻辑硬伤"
+    return "逻辑硬伤"
+
+
+def _build_default_revision_plan(has_pacing_overflow: bool) -> str:
+    if has_pacing_overflow:
+        return "请先回退到越界前的收束节点，删除触发 red_lines 的情节，放慢叙事节奏并悬停在对应 exit_state，再补齐必要动机后输出完整正文。"
+    return "请按章节大纲与角色设定修复逻辑问题，并返回完整正文。"
+
+
 def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str):
     """
     构建审阅 Agent (Review Agent) 的提示词，负责质量检查。
@@ -38,6 +99,7 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
             source_name = rel.source_character.name if rel.source_character else "角色"
             target_name = rel.target_character.name if rel.target_character else "角色"
             relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+    boundary_brief = _render_boundary_brief(chapter)
     system_prompt = f"""{global_sys_prompt}
 
 你是一个严格的小说质量审查员。你不负责写小说，只负责检查初稿是否符合要求。
@@ -50,11 +112,15 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 ## 角色互动约束
 {chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
 
+## Boundary & Pacing 边界基线
+{boundary_brief}
+
 ## 你的任务
 1. 检查初稿是否遵循了章节大纲要求
 2. 检查角色是否出现 OOC (Out Of Character，人设崩塌)
 3. 检查是否有逻辑硬伤或情节漏洞
 4. 检查是否遗漏了应该有的剧情点
+5. 检查是否出现 Boundary & Pacing 越界（越过 exit_state 或触发 red_lines）
 
 注意：初稿已经过分段质检，请重点关注**段落间的连贯性**和**全局逻辑**，对于细枝末节的措辞问题可适当放宽。
 
@@ -64,7 +130,7 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
     "pass": true/false,
     "issues": [
         {{
-            "type": "OOC/剧情遗漏/逻辑硬伤",
+            "type": "OOC/剧情遗漏/逻辑硬伤/PACING_OVERFLOW",
             "severity": "high/medium/low",
             "description": "详细描述问题"
         }}
@@ -75,7 +141,11 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 - pass: true 表示所有检查通过，可以直接输出
 - pass: false 表示存在问题，需要重写
 - issues: 列出发现的问题
+- 当存在以下任一情况时，必须新增一条 issue.type = "PACING_OVERFLOW"：
+  1) 文本越过任一 beat 的 exit_state
+  2) 文本触发任一 beat 的 red_lines 禁忌事件
 - revision_plan: 给出具体的重写指导
+- 若存在 PACING_OVERFLOW，revision_plan 必须明确“回退到越界前状态、放慢节奏、悬停在对应 exit_state”
 
 注意：你必须输出合法的 JSON 格式，不要输出任何其他内容！"""
     user_prompt = f"""请审查以下初稿:
@@ -84,6 +154,9 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter_outline}
+
+【Boundary & Pacing 边界基线】
+{boundary_brief}
 
 【初稿内容】
 {draft_text}
@@ -127,6 +200,7 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
             source_name = rel.source_character.name if rel.source_character else "角色"
             target_name = rel.target_character.name if rel.target_character else "角色"
             relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
+    boundary_brief = _render_boundary_brief(chapter)
     system_prompt = f"""{global_sys_prompt}
 
 {worldview_prompt if worldview_prompt else ''}
@@ -139,6 +213,9 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 ## 角色互动约束
 {chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
+
+## Boundary & Pacing 边界基线
+{boundary_brief}
 
 ## 【强制字数要求 - 最高优先级】
 ★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
@@ -154,7 +231,8 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 3. 修正被指出的问题
 4. 确保修改后的内容符合章节大纲
 5. 保持角色性格一致性
-6. 生成内容必须满足上述字数要求"""
+6. 如审查意见包含 PACING_OVERFLOW，必须执行“回退-降速-悬停”策略：先回退越界剧情，再放慢推进，最后停在对应 exit_state
+7. 生成内容必须满足上述字数要求"""
     user_prompt = f"""请根据以下审查意见重写初稿:
 
 【章节名】{chapter_name}
@@ -163,11 +241,19 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 {chapter.outline_text or '暂无大纲'}
 【字数要求】必须生成恰好 {word_count} 字的小说正文（±100字误差可接受）
 
+【Boundary & Pacing 边界基线】
+{boundary_brief}
+
 【审查意见】
 {revision_plan}
 
 【当前初稿】
 {draft_text}
+
+若审查意见涉及 PACING_OVERFLOW，请执行以下回退策略：
+1) 删除越过 exit_state 之后的推进内容
+2) 撤销触发 red_lines 的事件与行为
+3) 放慢叙事推进并停在对应 exit_state，保留必要悬念
 
 请直接输出修改后的完整小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
     return system_prompt, user_prompt
@@ -218,13 +304,49 @@ def parse_review_result(review_result_raw: str):
             "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回内容无法解析为合法 JSON。"}],
             "revision_plan": "请严格按约定 JSON 结构输出审查结论，不要附加解释文本。",
         }, parse_error or "Review JSON parse failed"
-    issues = parsed_obj.get("issues")
-    if not isinstance(issues, list):
-        issues = []
+    raw_issues = parsed_obj.get("issues")
+    normalized_issues = []
+    if isinstance(raw_issues, list):
+        for issue in raw_issues:
+            if isinstance(issue, dict):
+                description = str(issue.get("description") or "").strip()
+                issue_type = _normalize_issue_type(issue.get("type"), description)
+                severity = str(issue.get("severity") or "").strip().lower()
+                if severity not in {"high", "medium", "low"}:
+                    severity = "medium"
+                normalized_issues.append(
+                    {
+                        "type": issue_type,
+                        "severity": severity,
+                        "description": description or "未提供问题描述",
+                    }
+                )
+            elif isinstance(issue, str) and issue.strip():
+                description = issue.strip()
+                normalized_issues.append(
+                    {
+                        "type": _normalize_issue_type("", description),
+                        "severity": "medium",
+                        "description": description,
+                    }
+                )
     revision_plan = parsed_obj.get("revision_plan")
+    has_pacing_overflow = any(issue.get("type") == "PACING_OVERFLOW" for issue in normalized_issues)
     if not isinstance(revision_plan, str) or not revision_plan.strip():
-        revision_plan = "请按章节大纲与角色设定修复逻辑问题，并返回完整正文。"
-    result = {"pass": bool(parsed_obj.get("pass", False)), "issues": issues, "revision_plan": revision_plan}
+        revision_plan = _build_default_revision_plan(has_pacing_overflow)
+    elif has_pacing_overflow:
+        lowered_revision_plan = revision_plan.lower()
+        if (
+            "回退" not in revision_plan
+            and "exit_state" not in lowered_revision_plan
+            and "悬停" not in revision_plan
+            and "收束" not in revision_plan
+        ):
+            revision_plan = (
+                f"{revision_plan.rstrip()}\n"
+                "补充要求：请先回退越界剧情，放慢推进并悬停在对应 exit_state，确保不触发 red_lines。"
+            )
+    result = {"pass": bool(parsed_obj.get("pass", False)), "issues": normalized_issues, "revision_plan": revision_plan}
     return result, None
 
 

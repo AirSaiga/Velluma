@@ -35,7 +35,7 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     future=True,
-    pool_pre_ping=True,
+    pool_pre_ping=False,  # 暂时关闭以修复 Windows 下 asyncpg + greenlet 的兼容性问题
     pool_size=10,
     max_overflow=20,
 )
@@ -192,6 +192,66 @@ MIGRATIONS: list[dict[str, Any]] = [
         "column": "metadata",
         "definition": "JSONB DEFAULT '{}'",
         "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "tension_level",
+        "definition": "INTEGER DEFAULT 5 NOT NULL",
+        "expected_udt_names": {"int4"},
+    },
+    {
+        "table": "chapters",
+        "column": "pacing_style",
+        "definition": "VARCHAR(50) DEFAULT 'balanced' NOT NULL",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "entry_state",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "exit_state",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "red_lines",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "story_beats",
+        "column": "beat_type",
+        "definition": "VARCHAR(100) DEFAULT 'progression'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "position",
+        "definition": "INTEGER DEFAULT 0",
+        "expected_udt_names": {"int4"},
+    },
+    {
+        "table": "story_beats",
+        "column": "status",
+        "definition": "VARCHAR(50) DEFAULT 'planned'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "entry_type",
+        "definition": "VARCHAR(50) DEFAULT 'foreshadow'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "content",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
     },
 ]
 

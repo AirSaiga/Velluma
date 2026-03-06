@@ -4,9 +4,33 @@ import json
 from backend.models import Chapter
 
 
+PACING_MICRO_INSTRUCTIONS = {
+    "slow_burn": [
+        "单段只推进一个小动作，不触发关系爆点",
+        "增加环境或心理层面的细节垫层，避免结论跳跃",
+        "冲突表达以试探、停顿、回避为主，不直接摊牌",
+    ],
+    "fast_paced": [
+        "每段至少出现一个可见动作变化，减少铺垫冗余",
+        "优先保留关键决策与结果反馈，压缩背景解释",
+        "句式更短、更直接，推动信息快速抵达",
+    ],
+    "balanced": [
+        "动作推进与情绪描写保持均衡，避免单侧堆叠",
+        "每段包含一次可感知变化并补充必要动机",
+        "冲突与缓冲交替出现，保持阅读节奏稳定",
+    ],
+}
+
+
 def build_scene_intent_prompt(chapter: Chapter, beat: dict, open_hooks: list = None):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     beat_summary = beat.get("summary", "")
+    pacing_style = str(getattr(chapter, "pacing_style", "balanced") or "balanced").strip() or "balanced"
+    if pacing_style not in PACING_MICRO_INSTRUCTIONS:
+        pacing_style = "balanced"
+    pacing_micro_lines = PACING_MICRO_INSTRUCTIONS[pacing_style]
+    exit_state = str(beat.get("exit_state") or "").strip() or "停在当前 beat 的收束状态，不越界推进"
     system_prompt = """你是场景意图分析师。请根据输入剧情节拍输出 JSON。
 
 输出结构：
@@ -20,7 +44,9 @@ def build_scene_intent_prompt(chapter: Chapter, beat: dict, open_hooks: list = N
 要求：
 1. goal 必须具体
 2. constraints 必须是字符串数组
-3. 只输出 JSON"""
+3. constraints 中必须包含节奏微观指令，并显式声明“停在 exit_state”
+4. 不得让场景推进越过 exit_state
+5. 只输出 JSON"""
     open_hooks_text = "暂无开放伏笔"
     if isinstance(open_hooks, list) and open_hooks:
         hook_lines = []
@@ -42,6 +68,13 @@ def build_scene_intent_prompt(chapter: Chapter, beat: dict, open_hooks: list = N
 【节拍位置】{beat.get("position", 1)}
 【节拍内容】
 {beat_summary}
+【节拍收束状态 exit_state】
+{exit_state}
+【叙事节奏偏好】{pacing_style}
+【节奏微观指令（必须写入 constraints）】
+- {pacing_micro_lines[0]}
+- {pacing_micro_lines[1]}
+- {pacing_micro_lines[2]}
 【开放伏笔】
 {open_hooks_text}"""
     return system_prompt, user_prompt

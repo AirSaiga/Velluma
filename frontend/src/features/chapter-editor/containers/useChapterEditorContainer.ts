@@ -10,7 +10,7 @@ import {
   normalizeAgenticForm,
   validateAgenticForm
 } from '../../../composables/useAgenticConfig'
-import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload } from '../../../types'
+import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
 
 interface ApiConfig {
   api_key: string
@@ -26,6 +26,37 @@ export interface ChapterEditorContainerProps {
 }
 
 type ChapterEditorEmit = (event: string, ...args: any[]) => void
+
+interface BeatEditorState {
+  position: number
+  beat_id?: string
+  summary: string
+  location?: string
+  pov_character?: string
+  action_summary?: string
+  worldbuilding_instruction?: string
+  openingState: string
+  stoppingState: string
+  forbiddenEventsText: string
+  word_count_target: number
+  target_words: number
+  hook_ids: string[]
+}
+
+const TENSION_LEVEL_MIN = 1
+const TENSION_LEVEL_MAX = 10
+const DEFAULT_TENSION_LEVEL = 5
+const DEFAULT_PACING_STYLE: PacingStyle = 'balanced'
+const pacingStyleOptions: Array<{ value: PacingStyle; label: string }> = [
+  { value: 'slow_burn', label: '慢热推进' },
+  { value: 'balanced', label: '平衡节奏' },
+  { value: 'fast_paced', label: '快节奏推进' }
+]
+const beatFieldMap = {
+  openingState: 'entry_state',
+  stoppingState: 'exit_state',
+  forbiddenEventsText: 'red_lines'
+} as const
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
@@ -44,9 +75,14 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const chapterSummary = ref<string | null>(null)
   const beatPreviewLoading = ref(false)
   const beatPreviewError = ref('')
-  const previewBeats = ref<ConfirmedStoryBeat[]>([])
+  const previewBeats = ref<BeatEditorState[]>([])
   const pendingAgenticPayload = ref<GenerateChapterAgenticPayload | null>(null)
   const pendingClearEditorOnConfirm = ref(false)
+  
+  // 生成完成提示弹窗状态
+  const showCompletionModal = ref(false)
+  const completionMessage = ref('')
+  const completionTitle = ref('')
 
   const agenticForm = ref<AgenticFormState>({ ...AGENTIC_DEFAULTS })
   const wordCountMin = ref(500)
@@ -67,6 +103,18 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }))
   const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
   const firstFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).find(Boolean) || '')
+
+  function openCompletionModal(title: string, message: string) {
+    completionTitle.value = title
+    completionMessage.value = message
+    showCompletionModal.value = true
+  }
+
+  function closeCompletionModal() {
+    showCompletionModal.value = false
+    completionMessage.value = ''
+    completionTitle.value = ''
+  }
   const canSubmitAgentic = computed(() => agenticValidation.value.errors.length === 0 && !hasFieldFeedback.value)
   const ragWeightTotal = computed(() => {
     const sum = agenticForm.value.rag_alpha + agenticForm.value.rag_beta + agenticForm.value.rag_gamma
@@ -86,6 +134,38 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function handleOutlineInput(e: Event) {
     const target = e.target as HTMLTextAreaElement
     scheduleMetaUpdate({ outline_text: target.value })
+  }
+
+  function normalizeTensionLevel(value: unknown, fallback = DEFAULT_TENSION_LEVEL) {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return fallback
+    const rounded = Math.round(numeric)
+    return Math.max(TENSION_LEVEL_MIN, Math.min(TENSION_LEVEL_MAX, rounded))
+  }
+
+  function normalizePacingStyle(value: unknown, fallback: PacingStyle = DEFAULT_PACING_STYLE): PacingStyle {
+    if (value === 'slow_burn' || value === 'balanced' || value === 'fast_paced') {
+      return value
+    }
+    return fallback
+  }
+
+  function getTensionLevelValue() {
+    return normalizeTensionLevel(selectedChapter.value?.tension_level, DEFAULT_TENSION_LEVEL)
+  }
+
+  function getPacingStyleValue() {
+    return normalizePacingStyle(selectedChapter.value?.pacing_style, DEFAULT_PACING_STYLE)
+  }
+
+  function handleTensionLevelInput(event: Event) {
+    const target = event.target as HTMLInputElement
+    updateChapter({ tension_level: normalizeTensionLevel(target.value, getTensionLevelValue()) })
+  }
+
+  function handlePacingStyleInput(event: Event) {
+    const target = event.target as HTMLSelectElement
+    updateChapter({ pacing_style: normalizePacingStyle(target.value, getPacingStyleValue()) })
   }
 
   let metaUpdateTimeout: ReturnType<typeof setTimeout> | undefined
@@ -179,7 +259,23 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       if (!beats.length) {
         throw new Error('未生成可用节拍，请调整大纲后重试')
       }
-      previewBeats.value = beats
+      previewBeats.value = beats.map((beat: ConfirmedStoryBeat) => ({
+        position: Number(beat.position) || 1,
+        beat_id: beat.beat_id,
+        summary: String(beat.summary || '').trim(),
+        location: beat.location,
+        pov_character: beat.pov_character,
+        action_summary: beat.action_summary,
+        worldbuilding_instruction: beat.worldbuilding_instruction,
+        openingState: String(beat[beatFieldMap.openingState] || '').trim(),
+        stoppingState: String(beat[beatFieldMap.stoppingState] || '').trim(),
+        forbiddenEventsText: Array.isArray(beat[beatFieldMap.forbiddenEventsText])
+          ? beat[beatFieldMap.forbiddenEventsText].join('\n')
+          : '',
+        word_count_target: Math.max(0, Number(beat.word_count_target) || 0),
+        target_words: Math.max(0, Number(beat.target_words) || 0),
+        hook_ids: Array.isArray(beat.hook_ids) ? beat.hook_ids.filter(Boolean) : []
+      }))
       pendingAgenticPayload.value = payload
       pendingClearEditorOnConfirm.value = clearEditorOnConfirm
       showBeatReviewModal.value = true
@@ -191,7 +287,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
   }
 
-  function getBeatHookLabel(beat: ConfirmedStoryBeat) {
+  function getBeatHookLabel(beat: Pick<BeatEditorState, 'hook_ids'>) {
     if (!Array.isArray(beat.hook_ids) || beat.hook_ids.length === 0) return '无'
     return beat.hook_ids.join(' / ')
   }
@@ -270,7 +366,27 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
     const payload = {
       ...pendingAgenticPayload.value,
-      beats: previewBeats.value
+      beats: previewBeats.value.map((beat) => {
+        const redLines = beat.forbiddenEventsText
+          .split(/\r?\n|[,，]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+        return {
+          position: Math.max(1, Math.round(Number(beat.position) || 1)),
+          beat_id: beat.beat_id,
+          summary: beat.summary.trim() || `节拍${beat.position}`,
+          location: beat.location,
+          pov_character: beat.pov_character,
+          action_summary: beat.action_summary,
+          worldbuilding_instruction: beat.worldbuilding_instruction,
+          [beatFieldMap.openingState]: beat.openingState.trim() || undefined,
+          [beatFieldMap.stoppingState]: beat.stoppingState.trim() || undefined,
+          [beatFieldMap.forbiddenEventsText]: redLines,
+          word_count_target: Math.max(0, Math.round(Number(beat.word_count_target) || 0)),
+          target_words: Math.max(0, Math.round(Number(beat.target_words) || 0)),
+          hook_ids: Array.isArray(beat.hook_ids) ? beat.hook_ids.filter(Boolean) : []
+        } as ConfirmedStoryBeat
+      })
     }
     closeBeatReviewModal()
     reset()
@@ -306,7 +422,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         const statusMsg = result.passed
           ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
           : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
-        alert(statusMsg)
+        openCompletionModal('生成完成', statusMsg)
       }
     }, '/generate_chapter_agentic_with_beats')
   }
@@ -387,7 +503,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           editorRef.value.flushBuffer()
         }
         syncGeneratedContentToChapter()
-        alert(`本章正文生成完成！(${getDurationText()})`)
+        openCompletionModal('生成完成', `本章正文生成完成！(${getDurationText()})`)
       })
       return
     }
@@ -406,7 +522,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         editorRef.value.clearContent()
         editorRef.value.insertContent(result.content)
       }
-      alert(`本章正文生成完成！(${getDurationText()})`)
+      openCompletionModal('生成完成', `本章正文生成完成！(${getDurationText()})`)
     } catch (err) {
       alert('生成失败: ' + (err as Error).message)
     } finally {
@@ -579,9 +695,14 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   return {
     AGENTIC_FIELD_CONFIG,
     AGENTIC_GROUPS,
+    showCompletionModal: showCompletionModal,
+    completionMessage: completionMessage,
+    completionTitle: completionTitle,
+    closeCompletionModal,
     agenticForm,
     agenticGroupFields,
     agenticValidation,
+    agenticFieldFeedback,
     beatPreviewError,
     beatPreviewLoading,
     canSubmitAgentic,
@@ -603,11 +724,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     getAgenticFieldValue,
     getBeatHookLabel,
     getMetaCollapsedLabel,
+    getPacingStyleValue,
+    getTensionLevelValue,
     getWorkflowStageLabel,
+    handlePacingStyleInput,
     handleContentUpdate,
     handleFormatText,
     handleOptimize,
     handleOutlineInput,
+    handleTensionLevelInput,
     handleTitleInput,
     isAgenticMode,
     isCharacterSelected,
@@ -621,6 +746,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     normalizeAgenticField,
     openAgenticSettingsModal,
     optimizationFeedback,
+    pacingStyleOptions,
     previewBeats,
     publishChapter,
     ragWeightTotal,
