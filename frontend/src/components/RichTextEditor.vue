@@ -9,7 +9,7 @@ import { Color, BackgroundColor } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
 import Subscript from '@tiptap/extension-subscript'
 import Superscript from '@tiptap/extension-superscript'
-import { watch, onBeforeUnmount, ref, nextTick } from 'vue'
+import { watch, onBeforeUnmount, onMounted, ref, nextTick } from 'vue'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -87,17 +87,110 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'request-format', 'request-partial-optimize'])
+const emit = defineEmits(['update:modelValue', 'request-format', 'request-partial-optimize', 'entity-focus-change'])
 
 const textColor = ref('#000000')
 const highlightColor = ref('#FFFF00')
+const AI_INTENT_MODE_STORAGE_KEY = 'velluma_ai_intent_mode'
 const editorContainerRef = ref(null)
+const selectionMenuRef = ref(null)
 const showSelectionMenu = ref(false)
 const selectionMenuPos = ref({ top: 0, left: 0 })
 const optimizationInstruction = ref('')
 const currentSelection = ref(null)
-const optimizationState = ref('idle') // 'idle' | 'input' | 'processing' | 'reviewing'
+const optimizationState = ref('idle') // 'idle' | 'toolbar' | 'input' | 'processing' | 'reviewing'
 const tempOptimizationData = ref(null)
+const aiInstructionInputRef = ref(null)
+const readStoredAiIntentMode = () => {
+  try {
+    const raw = localStorage.getItem(AI_INTENT_MODE_STORAGE_KEY)
+    if (raw === 'polish' || raw === 'expand' || raw === 'compress') {
+      return { mode: raw, fromStorage: true }
+    }
+  } catch {}
+  return { mode: 'polish', fromStorage: false }
+}
+
+const storedAiIntentMode = readStoredAiIntentMode()
+const aiIntentMode = ref(storedAiIntentMode.mode)
+const hasStoredAiIntentMode = ref(storedAiIntentMode.fromStorage)
+const showUndoHint = ref(false)
+const lastAppliedOptimization = ref(null)
+let undoHintTimer = null
+
+const detectEntityAroundCursor = (editor, from) => {
+  const start = Math.max(0, from - 24)
+  const end = Math.min(editor.state.doc.content.size, from + 24)
+  const before = editor.state.doc.textBetween(start, from)
+  const after = editor.state.doc.textBetween(from, end)
+  const merged = `${before}${after}`
+  const cursorIndex = before.length
+  const matcher = /[\u4e00-\u9fa5A-Za-z0-9_]{2,}/g
+  let picked = ''
+  let bestDistance = Number.POSITIVE_INFINITY
+  let token
+  while ((token = matcher.exec(merged)) !== null) {
+    const tokenStart = token.index
+    const tokenEnd = token.index + token[0].length
+    const distance = tokenStart <= cursorIndex && cursorIndex <= tokenEnd
+      ? 0
+      : Math.min(Math.abs(cursorIndex - tokenStart), Math.abs(cursorIndex - tokenEnd))
+    if (distance < bestDistance) {
+      bestDistance = distance
+      picked = token[0]
+    }
+  }
+  return picked
+}
+
+const emitEntityFocus = (keyword = '') => {
+  const normalized = (keyword || '').trim()
+  emit('entity-focus-change', normalized)
+}
+
+const handleSelectionMenuOutsidePress = (event) => {
+  if (!showSelectionMenu.value) return
+  const target = event.target
+  const menuEl = selectionMenuRef.value
+  const containerEl = editorContainerRef.value
+  if (menuEl && menuEl.contains(target)) return
+  if (containerEl && containerEl.contains(target)) return
+  resetOptimization()
+}
+
+const clearUndoHint = () => {
+  if (undoHintTimer) {
+    clearTimeout(undoHintTimer)
+    undoHintTimer = null
+  }
+  showUndoHint.value = false
+}
+
+const inferAiIntentMode = () => {
+  const selectedText = (currentSelection.value?.text || '').trim()
+  const length = selectedText.length
+  if (!selectedText) return 'polish'
+  if (length < 36) return 'expand'
+  if (length > 180) return 'compress'
+  if (/[“”"'「」『』]/.test(selectedText)) return 'polish'
+  return 'polish'
+}
+
+const getAiIntentLabel = (mode = aiIntentMode.value) => {
+  if (mode === 'expand') return '扩写'
+  if (mode === 'compress') return '压缩'
+  return '润色'
+}
+
+const getDynamicInstructionPlaceholder = () => {
+  if (aiIntentMode.value === 'expand') {
+    return '扩写方向：补充细节、情绪与动作（Enter 执行）'
+  }
+  if (aiIntentMode.value === 'compress') {
+    return '压缩方向：保留关键信息并提升节奏（Enter 执行）'
+  }
+  return '润色方向：优化语气、描写和句式（Enter 执行）'
+}
 
 const editor = useEditor({
   content: props.modelValue,
@@ -141,10 +234,11 @@ const editor = useEditor({
 
       const { from, to, empty } = editor.state.selection
       
-      // 如果没有选择文本，隐藏菜单
+      // 如果没有选择文本，隐藏菜单，并同步光标附近实体
       if (empty) {
         showSelectionMenu.value = false
         optimizationState.value = 'idle'
+        emitEntityFocus(detectEntityAroundCursor(editor, from))
         return
       }
 
@@ -182,13 +276,24 @@ const editor = useEditor({
       }
       
       showSelectionMenu.value = true
-      optimizationState.value = 'input'
+      optimizationState.value = 'toolbar'
+      emitEntityFocus(currentSelection.value.text)
+      nextTick(() => {
+        selectionMenuRef.value?.focus()
+      })
     }, 50)
   }
 })
 
 watch(() => props.disabled, (val) => {
   editor.value?.setEditable(!val)
+})
+
+watch(aiIntentMode, (mode) => {
+  hasStoredAiIntentMode.value = true
+  try {
+    localStorage.setItem(AI_INTENT_MODE_STORAGE_KEY, mode)
+  } catch {}
 })
 
 watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId]) => {
@@ -216,7 +321,15 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
 })
 
 onBeforeUnmount(() => {
+  clearUndoHint()
+  document.removeEventListener('mousedown', handleSelectionMenuOutsidePress)
+  document.removeEventListener('keydown', handleGlobalKeydown)
   editor.value.destroy()
+})
+
+onMounted(() => {
+  document.addEventListener('mousedown', handleSelectionMenuOutsidePress)
+  document.addEventListener('keydown', handleGlobalKeydown)
 })
 
 const toggleBold = () => editor.value.chain().focus().toggleBold().run()
@@ -325,15 +438,66 @@ const handleOptimizeSelection = () => {
   if (!currentSelection.value || !optimizationInstruction.value.trim()) return
   
   optimizationState.value = 'processing'
+  const intentLabel = getAiIntentLabel()
+  const mergedInstruction = `[${intentLabel}] ${optimizationInstruction.value.trim()}`
   
   emit('request-partial-optimize', {
     selection: currentSelection.value,
-    instruction: optimizationInstruction.value
+    instruction: mergedInstruction
   })
   
   // 不要清空 instruction，也不要关闭菜单
   // optimizationInstruction.value = '' 
   // showSelectionMenu.value = false
+}
+
+const openAiRewrite = async () => {
+  if (!hasStoredAiIntentMode.value) {
+    aiIntentMode.value = inferAiIntentMode()
+  }
+  optimizationState.value = 'input'
+  if (editor.value) {
+    editor.value.commands.setFakeSelection(true)
+  }
+  await nextTick()
+  aiInstructionInputRef.value?.focus()
+}
+
+const setAiIntentMode = (mode) => {
+  aiIntentMode.value = mode
+  nextTick(() => aiInstructionInputRef.value?.focus())
+}
+
+const backToToolbar = () => {
+  optimizationState.value = 'toolbar'
+  if (editor.value) {
+    editor.value.commands.setFakeSelection(false)
+  }
+}
+
+const handleInstructionKeydown = (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault()
+    handleOptimizeSelection()
+    return
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    handleOptimizeSelection()
+  }
+}
+
+const handleEscapeShortcut = () => {
+  if (optimizationState.value === 'processing') return
+  if (optimizationState.value === 'reviewing') {
+    rejectOptimization()
+    return
+  }
+  if (optimizationState.value === 'input') {
+    backToToolbar()
+    return
+  }
+  resetOptimization()
 }
 
 const applyOptimizationDiff = (optimizedText) => {
@@ -374,6 +538,9 @@ const confirmOptimization = () => {
   if (!editor.value || !tempOptimizationData.value) return
 
   const { originalFrom, originalTo, newFrom, newTo } = tempOptimizationData.value
+  const originalText = currentSelection.value?.text || ''
+  const originalLength = originalTo - originalFrom
+  const newLength = newTo - newFrom
 
   // 1. 清除新文的高亮
   editor.value.chain()
@@ -385,6 +552,20 @@ const confirmOptimization = () => {
   editor.value.chain()
     .deleteRange({ from: originalFrom, to: originalTo })
     .run()
+
+  const appliedFrom = Math.max(0, newFrom - originalLength)
+  const appliedTo = appliedFrom + newLength
+  lastAppliedOptimization.value = {
+    from: appliedFrom,
+    to: appliedTo,
+    originalText
+  }
+  clearUndoHint()
+  showUndoHint.value = true
+  undoHintTimer = setTimeout(() => {
+    showUndoHint.value = false
+    undoHintTimer = null
+  }, 4500)
 
   resetOptimization()
 }
@@ -415,9 +596,32 @@ const resetOptimization = () => {
   optimizationInstruction.value = ''
   currentSelection.value = null
   tempOptimizationData.value = null
+  emitEntityFocus('')
   if (editor.value) {
     editor.value.commands.setFakeSelection(false)
   }
+}
+
+const undoLastOptimization = () => {
+  const snapshot = lastAppliedOptimization.value
+  if (!editor.value || !snapshot) return
+  const maxSize = editor.value.state.doc.content.size
+  const from = Math.max(0, Math.min(snapshot.from, maxSize))
+  const to = Math.max(from, Math.min(snapshot.to, maxSize))
+  editor.value.chain()
+    .deleteRange({ from, to })
+    .insertContentAt(from, snapshot.originalText)
+    .run()
+  lastAppliedOptimization.value = null
+  clearUndoHint()
+}
+
+const handleGlobalKeydown = (event) => {
+  if (!showUndoHint.value) return
+  const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z'
+  if (!isUndo) return
+  event.preventDefault()
+  undoLastOptimization()
 }
 
 defineExpose({
@@ -570,28 +774,96 @@ defineExpose({
     
     <editor-content :editor="editor" class="flex-1 overflow-y-auto custom-scrollbar" />
 
-    <!-- Selection Optimization Menu -->
-    <div 
-      v-if="showSelectionMenu"
-      :style="{ top: selectionMenuPos.top + 'px', left: selectionMenuPos.left + 'px' }"
-      class="absolute z-50 bg-white shadow-lg border border-[var(--border-color)] rounded-lg p-2 flex items-center gap-2"
-      @mousedown.stop
-    >
-      <template v-if="optimizationState === 'input'">
+    <transition name="copilot-menu">
+      <div 
+        v-if="showSelectionMenu"
+        ref="selectionMenuRef"
+        tabindex="-1"
+        :style="{ top: selectionMenuPos.top + 'px', left: selectionMenuPos.left + 'px' }"
+        class="absolute z-50 bg-white/95 backdrop-blur border border-slate-200 rounded-xl p-2 flex items-center gap-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)]"
+        @mousedown.prevent.stop
+        @keydown.esc.prevent.stop="handleEscapeShortcut"
+      >
+      <template v-if="optimizationState === 'toolbar'">
+        <button
+          @click="toggleBold"
+          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('bold') }"
+          title="加粗"
+        >
+          B
+        </button>
+        <button
+          @click="toggleItalic"
+          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors italic"
+          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('italic') }"
+          title="斜体"
+        >
+          I
+        </button>
+        <button
+          @click="toggleUnderline"
+          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors underline"
+          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('underline') }"
+          title="下划线"
+        >
+          U
+        </button>
+        <div class="w-px h-4 bg-slate-200"></div>
+        <button
+          @click="openAiRewrite"
+          class="px-2.5 py-1 text-[11px] rounded-md bg-indigo-600 text-white font-medium hover:bg-indigo-500 transition-colors"
+        >
+          ✨ AI 润色/改写
+        </button>
+      </template>
+
+      <template v-else-if="optimizationState === 'input'">
+        <div class="flex items-center gap-1">
+          <button
+            @click="setAiIntentMode('polish')"
+            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            :class="aiIntentMode === 'polish' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+          >
+            润色
+          </button>
+          <button
+            @click="setAiIntentMode('expand')"
+            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            :class="aiIntentMode === 'expand' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+          >
+            扩写
+          </button>
+          <button
+            @click="setAiIntentMode('compress')"
+            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            :class="aiIntentMode === 'compress' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+          >
+            压缩
+          </button>
+        </div>
         <input 
+          ref="aiInstructionInputRef"
           v-model="optimizationInstruction"
           @focus="handleInputFocus"
           @blur="handleInputBlur"
-          @keydown.enter="handleOptimizeSelection"
-          placeholder="输入优化建议..."
-          class="text-sm border border-[var(--border-color)] rounded px-2 py-1 outline-none focus:border-[var(--accent-600)] w-64 text-[var(--text-primary)] bg-white"
+          @keydown="handleInstructionKeydown"
+          :placeholder="getDynamicInstructionPlaceholder()"
+          class="text-xs border border-[var(--border-color)] rounded-lg px-2 py-1.5 outline-none focus:border-[var(--accent-600)] w-72 text-[var(--text-primary)] bg-white"
         />
         <button 
           @click="handleOptimizeSelection" 
-          class="text-[var(--accent-600)] hover:text-[var(--accent-700)] p-1 rounded hover:bg-[var(--hover-bg)] transition-colors"
+          class="px-2 py-1 rounded-md text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
           title="执行优化"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          执行
+        </button>
+        <button 
+          @click="backToToolbar" 
+          class="px-2 py-1 rounded-md text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 transition-colors"
+          title="取消"
+        >
+          取消
         </button>
       </template>
 
@@ -610,16 +882,27 @@ defineExpose({
           @click="confirmOptimization"
           class="px-3 py-1 text-xs bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded border border-emerald-200 transition-colors"
         >
-          使用新版
+          替换原文
         </button>
         <button 
           @click="rejectOptimization"
           class="px-3 py-1 text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 transition-colors"
         >
-          保留原版
+          保留原文
         </button>
       </template>
-    </div>
+      </div>
+    </transition>
+
+    <transition name="undo-hint">
+      <button
+        v-if="showUndoHint"
+        class="absolute right-4 bottom-4 z-40 px-3 py-1.5 rounded-full text-xs bg-slate-900 text-white shadow-lg hover:bg-slate-800 transition-colors"
+        @click="undoLastOptimization"
+      >
+        已替换 · 撤销
+      </button>
+    </transition>
   </div>
 </template>
 
@@ -662,5 +945,27 @@ defineExpose({
 }
 :deep(.fake-selection-highlight) {
   background-color: #b4d5fe;
+}
+
+.copilot-menu-enter-active,
+.copilot-menu-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.copilot-menu-enter-from,
+.copilot-menu-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+}
+
+.undo-hint-enter-active,
+.undo-hint-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.undo-hint-enter-from,
+.undo-hint-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 </style>

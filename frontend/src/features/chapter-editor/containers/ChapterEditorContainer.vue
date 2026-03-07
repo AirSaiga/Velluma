@@ -18,7 +18,7 @@ const props = defineProps<{
   metaCollapsed?: boolean
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
 const viewModel = useChapterEditorContainer(props, emit)
 </script>
 
@@ -46,6 +46,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :form-error="viewModel.formError.value"
     :get-agentic-field-feedback-text="viewModel.getAgenticFieldFeedbackText"
     :get-agentic-field-input-type="viewModel.getAgenticFieldInputType"
+    :get-agentic-field-options="viewModel.getAgenticFieldOptions"
     :get-agentic-field-max="viewModel.getAgenticFieldMax"
     :get-agentic-field-min="viewModel.getAgenticFieldMin"
     :get-agentic-field-step="viewModel.getAgenticFieldStep"
@@ -57,6 +58,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :get-workflow-stage-label="viewModel.getWorkflowStageLabel"
     :handle-pacing-style-input="viewModel.handlePacingStyleInput"
     :handle-content-update="viewModel.handleContentUpdate"
+    :handle-editor-entity-focus="viewModel.handleEditorEntityFocus"
     :handle-format-text="viewModel.handleFormatText"
     :handle-optimize="viewModel.handleOptimize"
     :handle-partial-optimize="viewModel.handlePartialOptimize"
@@ -76,6 +78,7 @@ const viewModel = useChapterEditorContainer(props, emit)
     :normalize-agentic-field="viewModel.normalizeAgenticField"
     :open-agentic-settings-modal="viewModel.openAgenticSettingsModal"
     :open-inspiration-modal="viewModel.openInspirationModal"
+    :is-agentic-field-select="viewModel.isAgenticFieldSelect"
     :pacing-style-options="viewModel.pacingStyleOptions"
     :optimization-feedback="viewModel.optimizationFeedback.value"
     :preview-beats="viewModel.previewBeats.value"

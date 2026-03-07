@@ -26,6 +26,14 @@ const props = defineProps({
   updateDynamicStateAction: {
     type: Function,
     default: null
+  },
+  prioritizedCharacterIds: {
+    type: Array,
+    default: () => []
+  },
+  focusedEntity: {
+    type: String,
+    default: ''
   }
 })
 
@@ -41,6 +49,49 @@ const filteredCharacters = computed(() => {
     c.name.toLowerCase().includes(searchQuery.value.toLowerCase())
   )
 })
+
+const characterHighlightLevelMap = computed(() => {
+  const levelMap = new Map()
+  for (const id of (props.prioritizedCharacterIds || [])) {
+    levelMap.set(id, 'weak')
+  }
+
+  const focused = (props.focusedEntity || '').trim().toLowerCase()
+  if (!focused) return levelMap
+
+  for (const char of props.characters) {
+    const name = (char.name || '').trim().toLowerCase()
+    if (!name) continue
+    const isStrong = name === focused || focused.includes(name)
+    const isWeak = name.includes(focused)
+    if (isStrong) {
+      levelMap.set(char.id, 'strong')
+      continue
+    }
+    if (isWeak && !levelMap.has(char.id)) {
+      levelMap.set(char.id, 'weak')
+    }
+  }
+
+  return levelMap
+})
+
+const sortedCharacters = computed(() => {
+  const levelMap = characterHighlightLevelMap.value
+  return [...filteredCharacters.value].sort((a, b) => {
+    const scoreA = levelMap.get(a.id) === 'strong' ? 2 : (levelMap.get(a.id) === 'weak' ? 1 : 0)
+    const scoreB = levelMap.get(b.id) === 'strong' ? 2 : (levelMap.get(b.id) === 'weak' ? 1 : 0)
+    if (scoreA !== scoreB) return scoreB - scoreA
+    return (b.importance_level || 0) - (a.importance_level || 0)
+  })
+})
+
+function getCharacterHighlightClass(charId) {
+  const level = characterHighlightLevelMap.value.get(charId)
+  if (level === 'strong') return 'ring-amber-300 bg-amber-50/60 animate-pulse'
+  if (level === 'weak') return 'ring-indigo-300 bg-indigo-50/40'
+  return 'ring-transparent'
+}
 
 const formData = ref({
   name: '',
@@ -246,9 +297,10 @@ function getImportanceColor(level) {
 
     <div class="flex-1 overflow-y-auto p-2 space-y-1.5">
       <div
-        v-for="char in filteredCharacters"
+        v-for="char in sortedCharacters"
         :key="char.id"
-        class="group p-2 bg-white rounded-xl hover:shadow-sm transition-all cursor-pointer"
+        class="group p-2 bg-white rounded-xl hover:shadow-sm transition-all cursor-pointer ring-1"
+        :class="getCharacterHighlightClass(char.id)"
         @click="openEditDrawer(char)"
       >
         <div class="flex items-start justify-between">
@@ -261,6 +313,13 @@ function getImportanceColor(level) {
                 {{ getImportanceLabel(char.importance_level) }}
               </span>
               <span class="text-xs font-medium text-[var(--text-primary)] truncate">{{ char.name }}</span>
+              <span
+                v-if="characterHighlightLevelMap.get(char.id)"
+                class="px-1.5 py-0.5 text-[9px] rounded-full"
+                :class="characterHighlightLevelMap.get(char.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'"
+              >
+                {{ characterHighlightLevelMap.get(char.id) === 'strong' ? '焦点强匹配' : '焦点弱匹配' }}
+              </span>
             </div>
             <p class="text-[10px] text-[var(--text-muted)] line-clamp-1">{{ char.static_prompt || '暂无设定' }}</p>
           </div>
@@ -285,7 +344,7 @@ function getImportanceColor(level) {
         </div>
       </div>
 
-      <div v-if="filteredCharacters.length === 0" class="text-center py-4 text-[var(--text-muted)] text-xs">
+      <div v-if="sortedCharacters.length === 0" class="text-center py-4 text-[var(--text-muted)] text-xs">
         暂无角色数据
       </div>
     </div>

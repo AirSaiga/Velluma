@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { mapApi } from '../services/api'
 import { useToast } from '../composables/useToast'
 import { useConfirmDialog } from '../composables/useConfirmDialog'
@@ -11,6 +11,14 @@ const props = defineProps({
   chapter: {
     type: Object,
     required: true
+  },
+  focusedEntity: {
+    type: String,
+    default: ''
+  },
+  activeCharacterNames: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -25,6 +33,53 @@ const showEditModal = ref(false)
 const editingLocation = ref(null)
 const locationForm = ref({ name: '', description: '' })
 const isLoading = ref(false)
+const normalizedFocusedEntity = computed(() => (props.focusedEntity || '').trim().toLowerCase())
+const normalizedActiveNames = computed(() =>
+  (props.activeCharacterNames || [])
+    .map((name) => String(name || '').trim().toLowerCase())
+    .filter(Boolean)
+)
+
+const locationHighlightLevelMap = computed(() => {
+  const focused = normalizedFocusedEntity.value
+  const activeNames = normalizedActiveNames.value
+  const map = new Map()
+  for (const loc of locations.value) {
+    const name = (loc?.name || '').toLowerCase()
+    const description = (loc?.description || '').toLowerCase()
+    if (focused && name && (name === focused || focused.includes(name))) {
+      map.set(loc.id, 'strong')
+      continue
+    }
+    if (focused && ((name && name.includes(focused)) || (description && description.includes(focused)))) {
+      map.set(loc.id, 'weak')
+      continue
+    }
+    if (activeNames.length > 0 && activeNames.some((token) => token && (name.includes(token) || description.includes(token)))) {
+      map.set(loc.id, 'weak')
+    }
+  }
+  return map
+})
+
+const sortedLocations = computed(() => {
+  const levelMap = locationHighlightLevelMap.value
+  return [...locations.value].sort((a, b) => {
+    const scoreA = levelMap.get(a.id) === 'strong' ? 2 : (levelMap.get(a.id) === 'weak' ? 1 : 0)
+    const scoreB = levelMap.get(b.id) === 'strong' ? 2 : (levelMap.get(b.id) === 'weak' ? 1 : 0)
+    if (scoreA !== scoreB) return scoreB - scoreA
+    return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN')
+  })
+})
+
+function getLocationHighlightClass(locId) {
+  const level = locationHighlightLevelMap.value.get(locId)
+  if (level === 'strong') return 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 animate-pulse'
+  if (level === 'weak') return 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-100'
+  return isSelected(locId)
+    ? 'bg-indigo-50 border-indigo-200 hover:border-indigo-300'
+    : 'bg-[var(--bg-panel)] border-transparent hover:border-slate-200'
+}
 
 // Initialize
 watch(() => props.chapter?.id, async (newId, oldId) => {
@@ -174,20 +229,18 @@ async function toggleLocation(loc) {
       </div>
       
       <div class="flex-1 overflow-y-auto space-y-2 pr-1">
-        <div v-if="isLoading && locations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
+        <div v-if="isLoading && sortedLocations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
           加载中...
         </div>
-        <div v-else-if="locations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
+        <div v-else-if="sortedLocations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
           暂无地点，点击上方 + 号创建
         </div>
         
         <div 
-          v-for="loc in locations" 
+          v-for="loc in sortedLocations" 
           :key="loc.id"
           class="group relative p-2 rounded-lg border transition-all cursor-pointer"
-          :class="isSelected(loc.id) 
-            ? 'bg-indigo-50 border-indigo-200 hover:border-indigo-300' 
-            : 'bg-[var(--bg-panel)] border-transparent hover:border-slate-200'"
+          :class="getLocationHighlightClass(loc.id)"
           @click="toggleLocation(loc)"
         >
           <div class="flex items-start justify-between">
@@ -202,6 +255,13 @@ async function toggleLocation(loc) {
                   </svg>
                 </div>
                 <span class="text-xs font-medium text-[var(--text-primary)] truncate">{{ loc.name }}</span>
+                <span
+                  v-if="locationHighlightLevelMap.get(loc.id)"
+                  class="px-1 py-0.5 text-[9px] rounded-full"
+                  :class="locationHighlightLevelMap.get(loc.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'"
+                >
+                  {{ locationHighlightLevelMap.get(loc.id) === 'strong' ? '强匹配' : '弱匹配' }}
+                </span>
               </div>
               <p class="mt-1 text-[10px] text-[var(--text-secondary)] line-clamp-2 pl-4.5">{{ loc.description || '暂无描述' }}</p>
             </div>

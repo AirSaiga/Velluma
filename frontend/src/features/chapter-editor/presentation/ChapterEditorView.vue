@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import type { AgenticFormState, Chapter, Character, PacingStyle } from '../../../types'
+import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
 
 interface BeatPreviewItem {
   position: number
@@ -52,10 +53,11 @@ const props = defineProps<{
   formError: string
   getAgenticFieldFeedbackText: (field: keyof AgenticFormState) => string
   getAgenticFieldInputType: (field: keyof AgenticFormState) => string
+  getAgenticFieldOptions: (field: keyof AgenticFormState) => AgenticFieldOption[]
   getAgenticFieldMax: (field: keyof AgenticFormState) => number | undefined
   getAgenticFieldMin: (field: keyof AgenticFormState) => number
   getAgenticFieldStep: (field: keyof AgenticFormState) => number
-  getAgenticFieldValue: (field: keyof AgenticFormState) => number
+  getAgenticFieldValue: (field: keyof AgenticFormState) => string | number
   getBeatHookLabel: (beat: BeatPreviewItem) => string
   getMetaCollapsedLabel: () => string
   getPacingStyleValue: () => PacingStyle
@@ -63,6 +65,7 @@ const props = defineProps<{
   getWorkflowStageLabel: () => string
   handlePacingStyleInput: (event: Event) => void
   handleContentUpdate: (content: string) => void
+  handleEditorEntityFocus: (keyword: string) => void
   handleFormatText: (text: string) => void
   handleOptimize: () => void
   handlePartialOptimize: (payload: { selection: any, instruction: string }) => void
@@ -82,6 +85,7 @@ const props = defineProps<{
   normalizeAgenticField: () => void
   openAgenticSettingsModal: () => void
   openInspirationModal: () => void
+  isAgenticFieldSelect: (field: keyof AgenticFormState) => boolean
   pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
   previewBeats: BeatPreviewItem[]
@@ -116,15 +120,6 @@ watch(editorRef, (editor) => {
   props.setEditorRef(editor)
 })
 
-function handleWordCountInput(event: Event) {
-  const target = event.target as HTMLInputElement
-  props.setWordCount(Number(target.value))
-}
-
-function handleOptimizationFeedbackInput(event: Event) {
-  const target = event.target as HTMLInputElement
-  props.setOptimizationFeedback(target.value)
-}
 </script>
 
 <template>
@@ -142,34 +137,17 @@ function handleOptimizationFeedbackInput(event: Event) {
             placeholder="输入章节标题..."
           />
         </div>
-        <button
-          class="px-2 py-1 text-xs rounded-lg bg-white/90 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shadow-sm ring-1 ring-slate-900/5"
-          @click="toggleMetaCollapsed"
-        >
-          {{ getMetaCollapsedLabel() }}
-        </button>
       </div>
 
-      <div v-show="!localMetaCollapsed" class="rounded-xl bg-[var(--bg-panel)] px-3 py-2.5 space-y-2 flex-shrink-0">
+      <div class="rounded-xl bg-[var(--bg-panel)] px-3 py-2.5 space-y-2 flex-shrink-0">
         <div class="flex items-start gap-2">
           <textarea
             :value="selectedChapter.outline_text"
             @input="handleOutlineInput"
             rows="2"
             class="flex-1 px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
-            placeholder="本章要发生的情节..."
+            placeholder="输入章节摘要..."
           />
-          <button
-            @click="openInspirationModal"
-            :disabled="!selectedChapter || !apiConfig?.api_key"
-            class="shrink-0 px-2 py-1.5 text-[10px] rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600 hover:from-amber-100 hover:to-orange-100 ring-1 ring-amber-200/50 disabled:opacity-40 transition-all flex items-center gap-1"
-            title="获取灵感点子"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-            </svg>
-            点子
-          </button>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
@@ -188,109 +166,23 @@ function handleOptimizationFeedbackInput(event: Event) {
           <span v-if="characters.length === 0" class="text-[10px] text-[var(--text-muted)]">暂无</span>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
-            <label class="text-[10px] text-[var(--text-muted)] shrink-0">剧情紧张程度</label>
-            <input
-              type="range"
-              :value="getTensionLevelValue()"
-              @input="handleTensionLevelInput"
-              min="1"
-              max="10"
-              step="1"
-              class="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-500)]"
-            />
-            <span class="text-[10px] font-medium text-[var(--accent-600)] min-w-[14px] text-right">{{ getTensionLevelValue() }}</span>
-          </div>
-          <div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
-            <label class="text-[10px] text-[var(--text-muted)] shrink-0">叙事节奏</label>
-            <select
-              :value="getPacingStyleValue()"
-              @change="handlePacingStyleInput"
-              class="flex-1 text-[10px] px-2 py-1 rounded-md bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-            >
-              <option v-for="option in pacingStyleOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
-        </div>
-
         <div class="flex items-center justify-between gap-2">
+          <div class="flex-1"></div>
           <div class="flex items-center gap-2">
-            <span class="text-[10px] text-[var(--text-muted)]">字数:</span>
-            <input
-              type="range"
-              :value="agenticForm.word_count"
-              @input="handleWordCountInput"
-              @change="normalizeAgenticField"
-              :min="wordCountMin"
-              :max="wordCountMax"
-              step="100"
-              class="w-24 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-500)]"
-            />
-            <span class="text-[10px] font-medium text-[var(--accent-600)]">{{ agenticForm.word_count }}</span>
-          </div>
-          <div class="flex items-center gap-1">
             <button
-              @click="toggleAgenticMode"
-              :disabled="isGenerating"
-              class="px-2 py-0.5 text-[10px] rounded-lg transition-colors"
-              :class="isAgenticMode
-                ? 'bg-[var(--accent-500)]/15 text-[var(--accent-600)]'
-                : 'bg-white text-[var(--text-secondary)]'"
-            >
-              {{ isAgenticMode ? '智能生成' : '传统模式' }}
-            </button>
-            <button
-              v-if="isAgenticMode"
               @click="openAgenticSettingsModal"
-              :disabled="isGenerating"
-              class="px-2 py-0.5 text-[10px] rounded-lg bg-white text-[var(--text-secondary)] disabled:opacity-40"
+              :disabled="isGenerating || !isAgenticMode"
+              title="智能生成设置"
+              class="h-7 w-7 flex items-center justify-center rounded-lg bg-white text-[var(--text-secondary)] text-sm ring-1 ring-slate-200 disabled:opacity-40"
             >
-              生成设置
-            </button>
-            <button
-              v-if="isAgenticMode"
-              @click="toggleStreamMode"
-              :disabled="isGenerating"
-              class="px-2 py-0.5 text-[10px] rounded-lg bg-white text-[var(--text-secondary)]"
-            >
-              {{ isStreamMode ? '流' : '一次' }}
+              ⚙️
             </button>
             <button
               @click="startGenerate"
               :disabled="isGenerating || beatPreviewLoading || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
-              class="px-3 py-1 rounded-lg bg-[var(--accent-500)] text-white text-xs font-medium disabled:opacity-40 transition-colors"
+              class="px-4 py-1.5 rounded-lg bg-[var(--accent-500)] text-white text-xs font-semibold shadow-sm shadow-indigo-400/40 disabled:opacity-40 transition-colors"
             >
-              {{ beatPreviewLoading ? '规划中' : (isGenerating ? '生成中' : '生成') }}
-            </button>
-            <button
-              @click="publishChapter"
-              :disabled="isPublishing"
-              class="px-3 py-1 rounded-lg bg-white text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-xs disabled:opacity-40 transition-colors"
-            >
-              {{ isPublishing ? '发布中' : (selectedChapter.status === 'published' ? '已发布' : '发布') }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="selectedChapter.content_text || selectedChapter.draft_text" class="pt-2 border-t border-slate-100 mt-2">
-          <div class="flex items-center gap-2">
-            <input
-              :value="optimizationFeedback"
-              class="flex-1 px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] placeholder:text-[var(--text-muted)]"
-              placeholder="输入优化建议..."
-              @input="handleOptimizationFeedbackInput"
-              @keyup.enter="handleOptimize"
-            />
-            <button
-              @click="handleOptimize"
-              :disabled="isGenerating || !optimizationFeedback.trim()"
-              class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-medium disabled:opacity-40 transition-colors flex items-center justify-center gap-1 shrink-0"
-            >
-              <span v-if="isGenerating && workflowState.currentEvent === 'REFINING'" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
-              {{ isGenerating && workflowState.currentEvent === 'REFINING' ? '优化中...' : '优化' }}
+              {{ beatPreviewLoading ? '规划中...' : (isGenerating ? '生成中...' : '✨ 智能生成本章') }}
             </button>
           </div>
         </div>
@@ -299,23 +191,13 @@ function handleOptimizationFeedbackInput(event: Event) {
       <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isGenerating && isAgenticMode"
-          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-white/78 backdrop-blur-[1px] rounded-2xl transition-all duration-300"
         >
-          <div class="relative flex items-center justify-center w-24 h-24 mb-8">
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-50"></div>
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-500 border-t-transparent animate-spin"></div>
-            <div v-if="workflowState.iteration > 0" class="absolute inset-0 flex items-center justify-center text-3xl font-bold text-indigo-600">
-              #{{ workflowState.iteration }}
-            </div>
-          </div>
-
-          <div class="flex flex-col items-center gap-3">
-            <h3 class="text-3xl font-bold text-indigo-900 tracking-tight">
+          <div class="flex items-center gap-2 rounded-full bg-white px-4 py-2 ring-1 ring-indigo-100 shadow-sm">
+            <div class="w-4 h-4 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+            <div class="text-xs font-medium text-indigo-700">
               {{ getWorkflowStageLabel() }}...
-            </h3>
-            <p v-if="workflowState.message" class="text-lg text-indigo-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
-              {{ workflowState.message }}
-            </p>
+            </div>
           </div>
         </div>
 
@@ -362,6 +244,7 @@ function handleOptimizationFeedbackInput(event: Event) {
           :id="selectedChapter.id"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
+          @entity-focus-change="handleEditorEntityFocus"
           @request-format="handleFormatText"
           @request-partial-optimize="handlePartialOptimize"
           :disabled="isEditorDisabled"
@@ -446,6 +329,22 @@ function handleOptimizationFeedbackInput(event: Event) {
                     class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60 resize-none"
                     rows="3"
                   ></textarea>
+                  <select
+                    v-else-if="isAgenticFieldSelect(field)"
+                    :value="getAgenticFieldValue(field)"
+                    @change="setAgenticFieldValue(field, $event)"
+                    @blur="normalizeAgenticField"
+                    :disabled="isGenerating"
+                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60"
+                  >
+                    <option
+                      v-for="option in getAgenticFieldOptions(field)"
+                      :key="`${field}-${option.value}`"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
                   <input
                     v-else
                     :value="getAgenticFieldValue(field)"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import CharacterPanel from '../../../components/CharacterPanel.vue'
 import ChapterEditor from '../../../components/ChapterEditor.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
@@ -37,6 +37,8 @@ const apiConfig = ref({
 })
 const uiPrefs = ref(loadUiPrefs())
 const loading = ref(false)
+const editorFocusedEntity = ref('')
+let editorEntityDecayTimer: ReturnType<typeof setTimeout> | null = null
 const showBookModal = ref(false)
 const showManageBookModal = ref(false)
 const showSettingsModal = ref(false)
@@ -57,6 +59,28 @@ const currentBook = computed(() => {
 
 const selectedChapter = computed(() => {
   return chapters.value.find((c) => c.id === selectedChapterId.value) || null
+})
+
+const autoHighlightedCharacterIds = computed(() => {
+  const focused = editorFocusedEntity.value.trim().toLowerCase()
+  const selectedIds = selectedChapter.value?.character_ids || []
+  const merged = new Set<string>(selectedIds)
+  if (focused) {
+    for (const char of characters.value) {
+      const name = (char?.name || '').toLowerCase()
+      if (name && (name.includes(focused) || focused.includes(name))) {
+        merged.add(char.id)
+      }
+    }
+  }
+  return Array.from(merged)
+})
+
+const autoHighlightedCharacterNames = computed(() => {
+  const idSet = new Set(autoHighlightedCharacterIds.value)
+  return characters.value
+    .filter((char) => idSet.has(char.id))
+    .map((char) => char.name)
 })
 
 const rightTab = computed({
@@ -228,6 +252,20 @@ function handleBookChange(event: Event) {
 
 function selectChapter(chapterId: string) {
   selectedChapterId.value = chapterId
+}
+
+function handleEditorEntityFocus(keyword: string) {
+  const nextKeyword = (keyword || '').trim()
+  editorFocusedEntity.value = nextKeyword
+  if (editorEntityDecayTimer) {
+    clearTimeout(editorEntityDecayTimer)
+    editorEntityDecayTimer = null
+  }
+  if (!nextKeyword) return
+  editorEntityDecayTimer = setTimeout(() => {
+    editorFocusedEntity.value = ''
+    editorEntityDecayTimer = null
+  }, 2200)
 }
 
 async function createCharacter(data, onDone) {
@@ -469,6 +507,13 @@ onMounted(async () => {
   await loadBooks()
   initTheme()
 })
+
+onBeforeUnmount(() => {
+  if (editorEntityDecayTimer) {
+    clearTimeout(editorEntityDecayTimer)
+    editorEntityDecayTimer = null
+  }
+})
 </script>
 
 <template>
@@ -587,6 +632,7 @@ onMounted(async () => {
             @update-chapter="updateChapter"
             @update-meta-collapsed="handleMetaCollapsedChange"
             @refresh-characters="loadCharacters"
+            @editor-entity-focus="handleEditorEntityFocus"
           />
         </main>
 
@@ -639,6 +685,8 @@ onMounted(async () => {
               :characters="characters"
               :relationships="relationships"
               :selected-chapter-id="selectedChapterId"
+              :prioritized-character-ids="autoHighlightedCharacterIds"
+              :focused-entity="editorFocusedEntity"
               :api-config="apiConfig"
               @create-character="createCharacter"
               @update-character="updateCharacter"
@@ -657,6 +705,8 @@ onMounted(async () => {
               <MapSettings 
                 v-if="selectedChapter" 
                 :chapter="selectedChapter" 
+                :focused-entity="editorFocusedEntity"
+                :active-character-names="autoHighlightedCharacterNames"
                 @update-chapter="updateChapter"
               />
               <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>

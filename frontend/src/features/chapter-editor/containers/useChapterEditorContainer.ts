@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -6,12 +6,17 @@ import { chapterApi, generateApi, publishPromptData } from '../../../services/ap
 import {
   AGENTIC_DEFAULTS,
   AGENTIC_FIELD_CONFIG,
+  AGENTIC_FIELD_OPTIONS,
   AGENTIC_GROUPS,
+  buildLegacyAgenticFields,
   buildAgenticPayload,
+  deserializeAgenticForm,
   getAgenticFieldFeedback,
   normalizeAgenticForm,
+  serializeAgenticForm,
   validateAgenticForm
 } from '../../../composables/useAgenticConfig'
+import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
 import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
 
 interface ApiConfig {
@@ -59,6 +64,7 @@ const beatFieldMap = {
   stoppingState: 'exit_state',
   forbiddenEventsText: 'red_lines'
 } as const
+const AGENTIC_STORAGE_KEY = 'velluma_agentic_settings'
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
@@ -88,7 +94,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const completionMessage = ref('')
   const completionTitle = ref('')
 
-  const agenticForm = ref<AgenticFormState>({ ...AGENTIC_DEFAULTS })
+  const agenticForm = ref<AgenticFormState>(readStoredAgenticForm())
   const wordCountMin = ref(500)
   const wordCountMax = ref(10000)
   const isStreamMode = ref(true)
@@ -101,10 +107,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const agenticValidation = computed(() => validateAgenticForm(agenticForm.value))
   const agenticFieldFeedback = computed(() => getAgenticFieldFeedback(agenticForm.value))
   const agenticGroupFields = computed(() => ({
+    steering: ['author_intent'] as Array<keyof AgenticFormState>,
     generation: ['word_count'] as Array<keyof AgenticFormState>,
-    memory: ['rag_top_k', 'rag_alpha', 'rag_beta', 'rag_gamma', 'rag_lambda'] as Array<keyof AgenticFormState>,
-    workflow: ['max_iterations'] as Array<keyof AgenticFormState>,
-    steering: ['author_intent'] as Array<keyof AgenticFormState>
+    memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'] as Array<keyof AgenticFormState>,
+    workflow: ['refinement_depth'] as Array<keyof AgenticFormState>
   }))
   const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
   const firstFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).find(Boolean) || '')
@@ -122,9 +128,40 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
   const canSubmitAgentic = computed(() => agenticValidation.value.errors.length === 0 && !hasFieldFeedback.value)
   const ragWeightTotal = computed(() => {
-    const sum = agenticForm.value.rag_alpha + agenticForm.value.rag_beta + agenticForm.value.rag_gamma
+    const legacyFields = buildLegacyAgenticFields(agenticForm.value)
+    const sum = legacyFields.rag_alpha + legacyFields.rag_beta + legacyFields.rag_gamma
     return Math.round(sum * 1000) / 1000
   })
+
+  function readStoredAgenticForm() {
+    if (typeof window === 'undefined') {
+      return { ...AGENTIC_DEFAULTS }
+    }
+    try {
+      const raw = localStorage.getItem(AGENTIC_STORAGE_KEY)
+      if (!raw) return { ...AGENTIC_DEFAULTS }
+      return deserializeAgenticForm(JSON.parse(raw))
+    } catch {
+      return { ...AGENTIC_DEFAULTS }
+    }
+  }
+
+  function handleEditorEntityFocus(keyword: string) {
+    emit('editor-entity-focus', keyword)
+  }
+
+  function persistAgenticForm(value: AgenticFormState) {
+    if (typeof window === 'undefined') {
+      return
+    }
+    try {
+      localStorage.setItem(AGENTIC_STORAGE_KEY, JSON.stringify(serializeAgenticForm(value)))
+    } catch {}
+  }
+
+  watch(agenticForm, (value) => {
+    persistAgenticForm(value)
+  }, { deep: true })
 
   function updateChapter(updates: Record<string, any>) {
     if (!selectedChapter.value) return
@@ -576,16 +613,27 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement
-    const nextValue = field === 'author_intent' ? target.value : Number(target.value)
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    const nextValue = field === 'word_count' || field === 'rag_lambda' ? Number(target.value) : target.value
     agenticForm.value = {
       ...agenticForm.value,
-      [field]: nextValue
+      [field]: nextValue as AgenticFormState[keyof AgenticFormState]
     }
   }
 
+  function isAgenticFieldSelect(field: keyof AgenticFormState) {
+    return Boolean(AGENTIC_FIELD_OPTIONS[field])
+  }
+
+  function getAgenticFieldOptions(field: keyof AgenticFormState): AgenticFieldOption[] {
+    return AGENTIC_FIELD_OPTIONS[field] || []
+  }
+
   function getAgenticFieldInputType(field: keyof AgenticFormState) {
-    if (field === 'word_count' || field === 'max_iterations' || field === 'rag_top_k') {
+    if (isAgenticFieldSelect(field)) {
+      return 'select'
+    }
+    if (field === 'word_count') {
       return 'number'
     }
     if (field === 'author_intent') {
@@ -596,21 +644,19 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function getAgenticFieldStep(field: keyof AgenticFormState) {
     if (field === 'word_count') return 100
-    if (field === 'max_iterations' || field === 'rag_top_k') return 1
+    if (field === 'rag_lambda') return 0.1
     return 0.01
   }
 
   function getAgenticFieldMin(field: keyof AgenticFormState) {
     if (field === 'word_count') return 500
-    if (field === 'max_iterations' || field === 'rag_top_k') return 1
+    if (field === 'rag_lambda') return 0
     return 0
   }
 
   function getAgenticFieldMax(field: keyof AgenticFormState) {
     if (field === 'word_count') return 10000
-    if (field === 'max_iterations') return 5
-    if (field === 'rag_top_k') return 20
-    if (field === 'rag_alpha' || field === 'rag_beta' || field === 'rag_gamma') return 1
+    if (field === 'rag_lambda') return undefined
     return undefined
   }
 
@@ -803,6 +849,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     generatedText,
     getAgenticFieldFeedbackText,
     getAgenticFieldInputType,
+    getAgenticFieldOptions,
     getAgenticFieldMax,
     getAgenticFieldMin,
     getAgenticFieldStep,
@@ -814,6 +861,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     getWorkflowStageLabel,
     handlePacingStyleInput,
     handleContentUpdate,
+    handleEditorEntityFocus,
     handleFormatText,
     handleOptimize,
     handlePartialOptimize,
@@ -833,6 +881,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     normalizeAgenticField,
     openAgenticSettingsModal,
     openInspirationModal,
+    isAgenticFieldSelect,
     optimizationFeedback,
     pacingStyleOptions,
     previewBeats,

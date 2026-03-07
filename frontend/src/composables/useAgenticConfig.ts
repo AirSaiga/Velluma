@@ -1,35 +1,66 @@
 import type { AgenticFormState, GenerateChapterAgenticPayload } from '../types'
 
 const FLOAT_PRECISION = 1000
+const MEMORY_SPAN_TOP_K = {
+  recent_only: 2,
+  balanced_reference: 3,
+  deep_dive: 6
+} as const
+const CREATIVITY_ALPHA = {
+  strict_prompt: 0.75,
+  balanced_creation: 0.6,
+  wild_imagination: 0.45
+} as const
+const PROGRESSION_BETA_RATIO = {
+  focus_scene_action: 0.75,
+  push_mainline: 0.35
+} as const
+const REFINEMENT_ITERATIONS = {
+  light: 1,
+  standard: 2,
+  deep: 4
+} as const
+
+export interface AgenticLegacyFields {
+  max_iterations: number
+  rag_top_k: number
+  rag_alpha: number
+  rag_beta: number
+  rag_gamma: number
+}
 
 export const AGENTIC_GROUPS = {
+  steering: {
+    title: '创作意图',
+    description: '指导 AI 的写作方向。'
+  },
   generation: {
     title: '生成控制',
     description: '控制本章篇幅与生成稳定性。'
   },
   memory: {
     title: '前文回顾策略',
-    description: '调整系统参考历史内容时的侧重点。'
+    description: '按语义挡位配置记忆检索与推进偏好。'
   },
   workflow: {
     title: '生成流程设置',
-    description: '设置自动检查与改写的次数。'
-  },
-  steering: {
-    title: '创作意图',
-    description: '指导 AI 的写作方向。'
+    description: '调节改写深度，平衡耗时与质量。'
   }
 } as const
 
 export const AGENTIC_DEFAULTS: AgenticFormState = {
   word_count: 2000,
-  max_iterations: 2,
-  rag_top_k: 3,
-  rag_alpha: 0.6,
-  rag_beta: 0.2,
-  rag_gamma: 0.2,
+  memory_span: 'balanced_reference',
+  creativity_level: 'balanced_creation',
+  progression_preference: 'focus_scene_action',
+  refinement_depth: 'standard',
   rag_lambda: 0.1,
   author_intent: ''
+}
+
+export interface AgenticFieldOption {
+  label: string
+  value: string | number
 }
 
 export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
@@ -46,46 +77,39 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     recommended: '推荐 2000',
     group: 'generation'
   },
-  max_iterations: {
-    label: '自动改写次数',
-    description: '内容不理想时，系统最多再尝试几次。',
-    rangeHint: '范围 1~5',
-    recommended: '推荐 2',
+  memory_span: {
+    label: 'AI 记忆回溯跨度',
+    description: '控制系统回看前文的范围深度。',
+    rangeHint: '可选：仅看近期 / 正常参考 / 深挖伏笔',
+    recommended: '默认：正常参考',
+    group: 'memory'
+  },
+  creativity_level: {
+    label: '自由发挥程度',
+    description: '控制生成内容相对提示词的约束强度。',
+    rangeHint: '可选：紧扣提示词 / 均衡发展 / 天马行空',
+    recommended: '默认：均衡发展',
+    group: 'memory'
+  },
+  progression_preference: {
+    label: '剧情推进偏好',
+    description: '决定更偏向当前场景动作或主线推进。',
+    rangeHint: '可选：聚焦当前场景动作 / 强推主线大纲进度',
+    recommended: '默认：聚焦当前场景动作',
+    group: 'memory'
+  },
+  refinement_depth: {
+    label: '精雕细琢深度',
+    description: '深度越高耗时越长，但细节质量通常更高。',
+    rangeHint: '可选：轻度 / 标准 / 深度',
+    recommended: '默认：标准',
     group: 'workflow'
   },
-  rag_top_k: {
-    label: '参考前文条目数',
-    description: '每次生成参考的历史片段数量。',
-    rangeHint: '范围 1~20',
-    recommended: '推荐 3',
-    group: 'memory'
-  },
-  rag_alpha: {
-    label: '情节相关程度',
-    description: '提高后会更优先参考和当前情节最贴近的前文。',
-    rangeHint: '范围 0~1',
-    recommended: '推荐 0.6',
-    group: 'memory'
-  },
-  rag_beta: {
-    label: '最近章节优先',
-    description: '提高后会更优先参考最近发生的内容。',
-    rangeHint: '范围 0~1',
-    recommended: '推荐 0.2',
-    group: 'memory'
-  },
-  rag_gamma: {
-    label: '主线线索优先',
-    description: '提高后会更优先参考关键剧情线索。',
-    rangeHint: '范围 0~1',
-    recommended: '推荐 0.2',
-    group: 'memory'
-  },
   rag_lambda: {
-    label: '旧内容淡出速度',
-    description: '数值越大，系统越少引用较早内容。',
-    rangeHint: '范围 ≥ 0',
-    recommended: '推荐 0.1',
+    label: '旧内容淡出强度',
+    description: '决定系统减少早期内容引用的速度。',
+    rangeHint: '可选：关闭 / 轻度 / 中度 / 强',
+    recommended: '默认：轻度',
     group: 'memory'
   },
   author_intent: {
@@ -95,6 +119,34 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     recommended: '可选',
     group: 'steering'
   }
+}
+
+export const AGENTIC_FIELD_OPTIONS: Partial<Record<keyof AgenticFormState, AgenticFieldOption[]>> = {
+  memory_span: [
+    { label: '仅看近期', value: 'recent_only' },
+    { label: '正常参考', value: 'balanced_reference' },
+    { label: '深挖伏笔', value: 'deep_dive' }
+  ],
+  creativity_level: [
+    { label: '紧扣提示词', value: 'strict_prompt' },
+    { label: '均衡发展', value: 'balanced_creation' },
+    { label: '天马行空', value: 'wild_imagination' }
+  ],
+  progression_preference: [
+    { label: '聚焦当前场景动作', value: 'focus_scene_action' },
+    { label: '强推主线大纲进度', value: 'push_mainline' }
+  ],
+  refinement_depth: [
+    { label: '轻度', value: 'light' },
+    { label: '标准', value: 'standard' },
+    { label: '深度', value: 'deep' }
+  ],
+  rag_lambda: [
+    { label: '关闭', value: 0 },
+    { label: '轻度', value: 0.1 },
+    { label: '中度', value: 0.3 },
+    { label: '强', value: 0.6 }
+  ]
 }
 
 function toNumber(value: unknown, fallback: number) {
@@ -112,29 +164,128 @@ function roundFloat(value: number) {
   return Math.round(value * FLOAT_PRECISION) / FLOAT_PRECISION
 }
 
-export function normalizeAgenticForm(input: Partial<AgenticFormState>) {
-  const normalized: AgenticFormState = {
+function pickNearestByValue<T extends string>(value: number, mapping: Record<T, number>, fallback: T) {
+  let selected = fallback
+  let minDistance = Number.POSITIVE_INFINITY
+  for (const key of Object.keys(mapping) as T[]) {
+    const distance = Math.abs(mapping[key] - value)
+    if (distance < minDistance) {
+      minDistance = distance
+      selected = key
+    }
+  }
+  return selected
+}
+
+function normalizeSelect<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) {
+    return value as T
+  }
+  return fallback
+}
+
+function normalizeProgressionFromLegacy(input: Partial<AgenticLegacyFields>) {
+  const rawBeta = toNumber(input.rag_beta, NaN)
+  const rawGamma = toNumber(input.rag_gamma, NaN)
+  if (!Number.isFinite(rawBeta) || !Number.isFinite(rawGamma)) {
+    return AGENTIC_DEFAULTS.progression_preference
+  }
+  const total = rawBeta + rawGamma
+  if (total <= 0) {
+    return AGENTIC_DEFAULTS.progression_preference
+  }
+  const ratio = rawBeta / total
+  return pickNearestByValue(ratio, PROGRESSION_BETA_RATIO, AGENTIC_DEFAULTS.progression_preference)
+}
+
+function normalizeMemorySpanFromLegacy(input: Partial<AgenticLegacyFields>) {
+  const topK = Math.round(clamp(toNumber(input.rag_top_k, MEMORY_SPAN_TOP_K[AGENTIC_DEFAULTS.memory_span]), 1, 20))
+  return pickNearestByValue(topK, MEMORY_SPAN_TOP_K, AGENTIC_DEFAULTS.memory_span)
+}
+
+function normalizeCreativityFromLegacy(input: Partial<AgenticLegacyFields>) {
+  const alpha = roundFloat(clamp(toNumber(input.rag_alpha, CREATIVITY_ALPHA[AGENTIC_DEFAULTS.creativity_level]), 0, 1))
+  return pickNearestByValue(alpha, CREATIVITY_ALPHA, AGENTIC_DEFAULTS.creativity_level)
+}
+
+function normalizeRefinementFromLegacy(input: Partial<AgenticLegacyFields>) {
+  const iterations = Math.round(clamp(toNumber(input.max_iterations, 2), 1, 5))
+  return pickNearestByValue(iterations, REFINEMENT_ITERATIONS, AGENTIC_DEFAULTS.refinement_depth)
+}
+
+export function normalizeAgenticForm(input: Partial<AgenticFormState & AgenticLegacyFields>) {
+  const normalizedMemorySpan = normalizeSelect(
+    input.memory_span,
+    Object.keys(MEMORY_SPAN_TOP_K) as Array<AgenticFormState['memory_span']>,
+    normalizeMemorySpanFromLegacy(input)
+  )
+  const normalizedCreativity = normalizeSelect(
+    input.creativity_level,
+    Object.keys(CREATIVITY_ALPHA) as Array<AgenticFormState['creativity_level']>,
+    normalizeCreativityFromLegacy(input)
+  )
+  const normalizedProgression = normalizeSelect(
+    input.progression_preference,
+    Object.keys(PROGRESSION_BETA_RATIO) as Array<AgenticFormState['progression_preference']>,
+    normalizeProgressionFromLegacy(input)
+  )
+  const normalizedRefinement = normalizeSelect(
+    input.refinement_depth,
+    Object.keys(REFINEMENT_ITERATIONS) as Array<AgenticFormState['refinement_depth']>,
+    normalizeRefinementFromLegacy(input)
+  )
+
+  return {
     word_count: Math.round(clamp(toNumber(input.word_count, AGENTIC_DEFAULTS.word_count), 1)),
-    max_iterations: Math.round(clamp(toNumber(input.max_iterations, AGENTIC_DEFAULTS.max_iterations), 1, 5)),
-    rag_top_k: Math.round(clamp(toNumber(input.rag_top_k, AGENTIC_DEFAULTS.rag_top_k), 1, 20)),
-    rag_alpha: roundFloat(clamp(toNumber(input.rag_alpha, AGENTIC_DEFAULTS.rag_alpha), 0, 1)),
-    rag_beta: roundFloat(clamp(toNumber(input.rag_beta, AGENTIC_DEFAULTS.rag_beta), 0, 1)),
-    rag_gamma: roundFloat(clamp(toNumber(input.rag_gamma, AGENTIC_DEFAULTS.rag_gamma), 0, 1)),
+    memory_span: normalizedMemorySpan,
+    creativity_level: normalizedCreativity,
+    progression_preference: normalizedProgression,
+    refinement_depth: normalizedRefinement,
     rag_lambda: roundFloat(clamp(toNumber(input.rag_lambda, AGENTIC_DEFAULTS.rag_lambda), 0)),
     author_intent: (input.author_intent || '').trim()
   }
-  return normalized
 }
 
-export function validateAgenticForm(input: Partial<AgenticFormState>) {
+export function buildLegacyAgenticFields(form: Partial<AgenticFormState>): AgenticLegacyFields {
+  const normalized = normalizeAgenticForm(form)
+  const ragTopK = MEMORY_SPAN_TOP_K[normalized.memory_span]
+  const ragAlpha = CREATIVITY_ALPHA[normalized.creativity_level]
+  const betaRatio = PROGRESSION_BETA_RATIO[normalized.progression_preference]
+  const residual = roundFloat(1 - ragAlpha)
+  const ragBeta = roundFloat(residual * betaRatio)
+  const ragGamma = roundFloat(1 - ragAlpha - ragBeta)
+  const maxIterations = REFINEMENT_ITERATIONS[normalized.refinement_depth]
+
+  return {
+    max_iterations: maxIterations,
+    rag_top_k: ragTopK,
+    rag_alpha: ragAlpha,
+    rag_beta: ragBeta,
+    rag_gamma: ragGamma
+  }
+}
+
+export function serializeAgenticForm(form: Partial<AgenticFormState>) {
+  const normalized = normalizeAgenticForm(form)
+  const legacy = buildLegacyAgenticFields(normalized)
+  return {
+    ...normalized,
+    ...legacy
+  }
+}
+
+export function deserializeAgenticForm(input: unknown) {
+  if (!input || typeof input !== 'object') {
+    return { ...AGENTIC_DEFAULTS }
+  }
+  return normalizeAgenticForm(input as Partial<AgenticFormState & AgenticLegacyFields>)
+}
+
+export function validateAgenticForm(input: Partial<AgenticFormState & AgenticLegacyFields>) {
   const normalized = normalizeAgenticForm(input)
   const errors: string[] = []
-  const weightSum = roundFloat(normalized.rag_alpha + normalized.rag_beta + normalized.rag_gamma)
 
   if (normalized.word_count < 1) errors.push('字数目标必须大于 0')
-  if (normalized.max_iterations < 1 || normalized.max_iterations > 5) errors.push('自动改写次数必须在 1~5 之间')
-  if (normalized.rag_top_k < 1 || normalized.rag_top_k > 20) errors.push('前文参考条目数必须在 1~20 之间')
-  if (Math.abs(weightSum - 1) > 0.001) errors.push('三项回顾偏好总和必须为 1')
   if (normalized.rag_lambda < 0) errors.push('旧内容淡出速度必须大于等于 0')
 
   return {
@@ -146,9 +297,10 @@ export function validateAgenticForm(input: Partial<AgenticFormState>) {
 export function buildAgenticPayload(params: {
   chapterId: string
   apiConfig: { api_key: string; base_url?: string; model?: string }
-  form: Partial<AgenticFormState>
+  form: Partial<AgenticFormState & AgenticLegacyFields>
 }): { payload: GenerateChapterAgenticPayload | null; errors: string[] } {
   const { normalized, errors } = validateAgenticForm(params.form)
+  const legacyFields = buildLegacyAgenticFields(normalized)
   const apiKey = (params.apiConfig.api_key || '').trim()
   if (!apiKey) {
     errors.push('请先配置 API Key')
@@ -165,11 +317,11 @@ export function buildAgenticPayload(params: {
       base_url: params.apiConfig.base_url || undefined,
       model: params.apiConfig.model || 'gpt-4o-mini',
       word_count: normalized.word_count,
-      max_iterations: normalized.max_iterations,
-      rag_top_k: normalized.rag_top_k,
-      rag_alpha: normalized.rag_alpha,
-      rag_beta: normalized.rag_beta,
-      rag_gamma: normalized.rag_gamma,
+      max_iterations: legacyFields.max_iterations,
+      rag_top_k: legacyFields.rag_top_k,
+      rag_alpha: legacyFields.rag_alpha,
+      rag_beta: legacyFields.rag_beta,
+      rag_gamma: legacyFields.rag_gamma,
       rag_lambda: normalized.rag_lambda,
       author_intent: normalized.author_intent,
       fast_mode: true,
@@ -189,49 +341,26 @@ export function getAgenticFieldFeedback(input: Partial<AgenticFormState>) {
     }
     return value
   }
+  const checkSelect = (key: keyof AgenticFormState, allowed: string[]) => {
+    const value = input[key]
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      feedback[key] = `${AGENTIC_FIELD_CONFIG[key].label}选项无效`
+    }
+  }
 
   const wordCount = checkNumber('word_count')
   if (wordCount !== null && (wordCount < 500 || wordCount > 10000)) {
     feedback.word_count = `${AGENTIC_FIELD_CONFIG.word_count.label}需在 500~10000 之间`
   }
 
-  const maxIterations = checkNumber('max_iterations')
-  if (maxIterations !== null && (maxIterations < 1 || maxIterations > 5)) {
-    feedback.max_iterations = `${AGENTIC_FIELD_CONFIG.max_iterations.label}需在 1~5 之间`
-  }
-
-  const topK = checkNumber('rag_top_k')
-  if (topK !== null && (topK < 1 || topK > 20)) {
-    feedback.rag_top_k = `${AGENTIC_FIELD_CONFIG.rag_top_k.label}需在 1~20 之间`
-  }
-
-  const alpha = checkNumber('rag_alpha')
-  if (alpha !== null && (alpha < 0 || alpha > 1)) {
-    feedback.rag_alpha = `${AGENTIC_FIELD_CONFIG.rag_alpha.label}需在 0~1 之间`
-  }
-
-  const beta = checkNumber('rag_beta')
-  if (beta !== null && (beta < 0 || beta > 1)) {
-    feedback.rag_beta = `${AGENTIC_FIELD_CONFIG.rag_beta.label}需在 0~1 之间`
-  }
-
-  const gamma = checkNumber('rag_gamma')
-  if (gamma !== null && (gamma < 0 || gamma > 1)) {
-    feedback.rag_gamma = `${AGENTIC_FIELD_CONFIG.rag_gamma.label}需在 0~1 之间`
-  }
+  checkSelect('memory_span', Object.keys(MEMORY_SPAN_TOP_K))
+  checkSelect('creativity_level', Object.keys(CREATIVITY_ALPHA))
+  checkSelect('progression_preference', Object.keys(PROGRESSION_BETA_RATIO))
+  checkSelect('refinement_depth', Object.keys(REFINEMENT_ITERATIONS))
 
   const lambdaValue = checkNumber('rag_lambda')
   if (lambdaValue !== null && lambdaValue < 0) {
     feedback.rag_lambda = `${AGENTIC_FIELD_CONFIG.rag_lambda.label}需大于等于 0`
-  }
-
-  if (alpha !== null && beta !== null && gamma !== null) {
-    const sum = roundFloat(alpha + beta + gamma)
-    if (Math.abs(sum - 1) > 0.001) {
-      feedback.rag_alpha = '三项回顾权重总和必须为 1'
-      feedback.rag_beta = '三项回顾权重总和必须为 1'
-      feedback.rag_gamma = '三项回顾权重总和必须为 1'
-    }
   }
 
   return feedback

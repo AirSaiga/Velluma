@@ -6,7 +6,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": false,
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["ESNext"]
   },
   "include": [
     "src/composables/useAgenticConfig.ts",

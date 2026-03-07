@@ -86,11 +86,10 @@ export interface GenerateChapterAgenticWithBeatsPayload extends GenerateChapterA
 
 export interface AgenticFormState {
   word_count: number
-  max_iterations: number
-  rag_top_k: number
-  rag_alpha: number
-  rag_beta: number
-  rag_gamma: number
+  memory_span: 'recent_only' | 'balanced_reference' | 'deep_dive'
+  creativity_level: 'strict_prompt' | 'balanced_creation' | 'wild_imagination'
+  progression_preference: 'focus_scene_action' | 'push_mainline'
+  refinement_depth: 'light' | 'standard' | 'deep'
   rag_lambda: number
   author_intent?: string
 }

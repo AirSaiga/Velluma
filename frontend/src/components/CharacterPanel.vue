@@ -19,6 +19,14 @@ const props = defineProps({
   apiConfig: {
     type: Object,
     default: () => ({})
+  },
+  prioritizedCharacterIds: {
+    type: Array,
+    default: () => []
+  },
+  focusedEntity: {
+    type: String,
+    default: ''
   }
 })
 
@@ -72,6 +80,8 @@ async function handleUpdateDynamicState(characterId, currentState) {
     :characters="characters"
     :relationships="relationships"
     :selected-chapter-id="selectedChapterId"
+    :prioritized-character-ids="prioritizedCharacterIds"
+    :focused-entity="focusedEntity"
     :can-update-dynamic-state="canUpdateDynamicState"
     :update-dynamic-state-action="handleUpdateDynamicState"
     @create-character="forwardCreateCharacter"

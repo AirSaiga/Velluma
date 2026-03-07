@@ -16,7 +16,7 @@ const props = defineProps<{
   metaCollapsed?: boolean
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
 
 function handleUpdateChapter(id: string, updates: Record<string, unknown>) {
   emit('update-chapter', id, updates)
@@ -28,6 +28,10 @@ function handleMetaCollapsed(value: boolean) {
 
 function handleRefreshCharacters() {
   emit('refresh-characters')
+}
+
+function handleEditorEntityFocus(keyword: string) {
+  emit('editor-entity-focus', keyword)
 }
 </script>
 
@@ -41,5 +45,6 @@ function handleRefreshCharacters() {
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"
     @refresh-characters="handleRefreshCharacters"
+    @editor-entity-focus="handleEditorEntityFocus"
   />
 </template>
