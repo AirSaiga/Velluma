@@ -309,6 +309,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       if (!beats.length) {
         throw new Error('未生成可用节拍，请调整大纲后重试')
       }
+      if (result.debug_prompt) {
+        publishPromptData(result.debug_prompt)
+      }
       previewBeats.value = beats.map((beat: ConfirmedStoryBeat) => ({
         position: Number(beat.position) || 1,
         beat_id: beat.beat_id,
@@ -445,6 +448,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     startAgenticGeneration(payload, {
       onEvent: (event, data) => {
         console.log('[Workflow Event]', event, data)
+        if (event === 'DONE' && data.debug_history && (window as any).electronAPI) {
+          (window as any).electronAPI.send('prompt-data', data.debug_history)
+        }
       },
       onChunk: (chunk) => {
         if (editorRef.value) {

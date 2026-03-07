@@ -688,6 +688,7 @@ class ConfirmedStoryBeat(BaseModel):
 
 class GenerateChapterAgenticPreviewResponse(BaseModel):
     beats: List[ConfirmedStoryBeat] = Field(default_factory=list)
+    debug_prompt: Optional[dict] = None  # 新增调试字段
 
 
 class GenerateChapterAgenticWithBeatsRequest(GenerateChapterAgenticRequest):

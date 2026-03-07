@@ -350,8 +350,9 @@ async def generate_chapter_agentic_preview_beats(
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-    beats = await preview_agentic_beats(request, chapter_repo.db)
-    return {"beats": beats}
+    result = await preview_agentic_beats(request, chapter_repo.db)
+    # result structure: {"beats": [...], "debug_prompt": {...}}
+    return result
 
 
 @router.post("/generate_chapter_agentic_with_beats")

@@ -211,7 +211,7 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
     return normalized
 
 
-async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: AsyncSession) -> list[dict]:
+async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: AsyncSession) -> dict:
     chapter_result = await db.execute(
         select(Chapter)
         .options(selectinload(Chapter.story_beats))
@@ -219,7 +219,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     )
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
-        return []
+        return {"beats": [], "debug_prompt": None}
     word_count = request.word_count or 2000
     book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
     book = book_result.scalar_one_or_none()
@@ -319,7 +319,13 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
         response_format={"type": "json_object"},
     )
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
-    return _normalize_confirmed_beats(beats, word_count)
+    return {
+        "beats": _normalize_confirmed_beats(beats, word_count),
+        "debug_prompt": {
+            "system_prompt": planner_system_prompt,
+            "user_prompt": planner_user_prompt
+        }
+    }
 
 
 async def _generate_agentic_chapter_stream(
@@ -543,6 +549,9 @@ async def _generate_agentic_chapter_stream(
     revision_plan = ""
     iteration = 0
     review_passed = False
+    
+    # 全局 Prompt 调试记录
+    debug_history = []
 
     while iteration < max_iterations:
         iteration_started_at = time.perf_counter()
@@ -566,7 +575,14 @@ async def _generate_agentic_chapter_stream(
                     global_taboos=book.core_motifs_taboos if book else None,
                     author_intent=request.author_intent,
                 )
+                
                 yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
+                debug_history.append({
+                    "stage": "PLANNING",
+                    "iteration": iteration,
+                    "system_prompt": planner_system_prompt,
+                    "user_prompt": planner_user_prompt
+                })
                 planner_result_raw = await call_llm_timed(
                     "planner",
                     system_prompt=planner_system_prompt,
@@ -610,6 +626,7 @@ async def _generate_agentic_chapter_stream(
 
             async def process_beat(beat_index, beat, story_beat):
                 beat_started_at = time.perf_counter()
+                beat_prompts = []
                 try:
                     beat_hook_ids = set(beat.get("hook_ids", []))
                     beat_open_hooks = []
@@ -627,6 +644,12 @@ async def _generate_agentic_chapter_stream(
                         beat=beat,
                         open_hooks=beat_open_hooks,
                     )
+                    beat_prompts.append({
+                        "stage": "SCENE_INTENT",
+                        "beat_index": beat_index,
+                        "system_prompt": scene_system_prompt,
+                        "user_prompt": scene_user_prompt
+                    })
                     scene_intent_raw = await call_llm_timed(
                         "scene_intent",
                         beat_index=beat_index,
@@ -666,6 +689,12 @@ async def _generate_agentic_chapter_stream(
                         context_beat_summaries=context_summaries,
                         locations=locations,
                     )
+                    beat_prompts.append({
+                        "stage": "CHUNK_DRAFT",
+                        "beat_index": beat_index,
+                        "system_prompt": chunk_system_prompt,
+                        "user_prompt": chunk_user_prompt
+                    })
 
                     chunk_text = await call_llm_timed(
                         "chunk_draft",
@@ -690,6 +719,13 @@ async def _generate_agentic_chapter_stream(
                             c_sys, c_user = build_chunk_review_prompt(
                                 chapter, book, entities, relationships, beat.get("summary", ""), chunk_text
                             )
+                            beat_prompts.append({
+                                "stage": "CHUNK_REVIEW",
+                                "beat_index": beat_index,
+                                "iteration": chunk_iteration,
+                                "system_prompt": c_sys,
+                                "user_prompt": c_user
+                            })
                             c_res_raw = await call_llm_timed(
                                 "chunk_review",
                                 beat_index=beat_index,
@@ -715,6 +751,13 @@ async def _generate_agentic_chapter_stream(
                             r_sys, r_user = build_chunk_refine_prompt(
                                 chapter, book, entities, relationships, beat.get("summary", ""), chunk_text, instruction
                             )
+                            beat_prompts.append({
+                                "stage": "CHUNK_REFINE",
+                                "beat_index": beat_index,
+                                "iteration": chunk_iteration,
+                                "system_prompt": r_sys,
+                                "user_prompt": r_user
+                            })
                             chunk_text = await call_llm_timed(
                                 "chunk_refine",
                                 beat_index=beat_index,
@@ -733,10 +776,10 @@ async def _generate_agentic_chapter_stream(
                             break
 
                     record_stage("BEAT_TOTAL", _to_secs(time.perf_counter() - beat_started_at), beat_index=beat_index)
-                    return beat_index - 1, chunk_text
+                    return beat_index - 1, chunk_text, beat_prompts
                 except Exception as e:
                     print(f"[Beat Error] Beat {beat_index} failed: {e}")
-                    return beat_index - 1, ""
+                    return beat_index - 1, "", beat_prompts
 
             drafting_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段 (含自动质检)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
@@ -758,8 +801,18 @@ async def _generate_agentic_chapter_stream(
             )
 
             generated_chunks = [""] * len(beats)
-            for idx, text in results:
+            all_beat_prompts = []
+            for idx, text, b_prompts in results:
                 generated_chunks[idx] = text
+                all_beat_prompts.extend(b_prompts)
+            
+            # 将 beat prompts 按 beat_index 和 stage 排序后加入 debug_history
+            all_beat_prompts.sort(key=lambda x: (x.get("beat_index", 0), x.get("stage", "")))
+            debug_history.append({
+                "stage": "DRAFTING",
+                "iteration": iteration,
+                "beat_prompts": all_beat_prompts
+            })
 
             stitching_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'STITCHING', 'message': '统稿 Agent 正在拼接 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
@@ -770,6 +823,12 @@ async def _generate_agentic_chapter_stream(
                 word_count=word_count,
             )
             yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
+            debug_history.append({
+                "stage": "STITCHING",
+                "iteration": iteration,
+                "system_prompt": stitch_system_prompt,
+                "user_prompt": stitch_user_prompt
+            })
             current_draft = await call_llm_timed(
                 "stitch",
                 system_prompt=stitch_system_prompt,
@@ -794,6 +853,12 @@ async def _generate_agentic_chapter_stream(
                     relevant_memories=relevant_memories,
                 )
                 yield f"data: {json.dumps({'prompt': {'system_prompt': fallback_system_prompt, 'user_prompt': fallback_user_prompt}}, ensure_ascii=False)}\n\n"
+                debug_history.append({
+                    "stage": "FALLBACK_DRAFT",
+                    "iteration": iteration,
+                    "system_prompt": fallback_system_prompt,
+                    "user_prompt": fallback_user_prompt
+                })
                 current_draft = await call_llm_timed(
                     "fallback_draft",
                     system_prompt=fallback_system_prompt,
@@ -817,6 +882,12 @@ async def _generate_agentic_chapter_stream(
                 chapter, book, entities, relationships, current_draft, revision_plan, word_count
             )
             yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
+            debug_history.append({
+                "stage": "REFINING",
+                "iteration": iteration,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt
+            })
             current_draft = await call_llm_timed(
                 "refine",
                 system_prompt=system_prompt,
@@ -840,6 +911,12 @@ async def _generate_agentic_chapter_stream(
             chapter, book, entities, relationships, chapter.outline_text or "", current_draft
         )
         yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
+        debug_history.append({
+            "stage": "REVIEWING",
+            "iteration": iteration,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt
+        })
         review_result_json = await call_llm_timed(
             "review",
             system_prompt=system_prompt,
@@ -879,6 +956,12 @@ async def _generate_agentic_chapter_stream(
             yield f"data: {json.dumps({'event': 'FORMATTING', 'message': '正在进行最终段落排版...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
             format_system_prompt, format_user_prompt = build_formatting_prompt(current_draft)
             yield f"data: {json.dumps({'prompt': {'system_prompt': format_system_prompt, 'user_prompt': format_user_prompt}}, ensure_ascii=False)}\n\n"
+            debug_history.append({
+                "stage": "FORMATTING",
+                "iteration": iteration,
+                "system_prompt": format_system_prompt,
+                "user_prompt": format_user_prompt
+            })
             try:
                 formatted_text = await call_llm_timed(
                     "formatting",
@@ -928,6 +1011,7 @@ async def _generate_agentic_chapter_stream(
         "passed": review_passed,
         "iterations": iteration,
         "revision_count": iteration,
+        "debug_history": debug_history,
         "metrics": {
             "total_seconds": total_elapsed,
             "fast_mode": effective_fast_mode,

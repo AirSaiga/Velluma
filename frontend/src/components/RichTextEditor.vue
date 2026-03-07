@@ -117,6 +117,7 @@ const hasStoredAiIntentMode = ref(storedAiIntentMode.fromStorage)
 const showUndoHint = ref(false)
 const lastAppliedOptimization = ref(null)
 let undoHintTimer = null
+let selectionDebounceTimer = null
 
 const detectEntityAroundCursor = (editor, from) => {
   const start = Math.max(0, from - 24)
@@ -153,9 +154,23 @@ const handleSelectionMenuOutsidePress = (event) => {
   const target = event.target
   const menuEl = selectionMenuRef.value
   const containerEl = editorContainerRef.value
+  
+  // 如果点击的是菜单本身，不做处理
   if (menuEl && menuEl.contains(target)) return
-  if (containerEl && containerEl.contains(target)) return
-  resetOptimization()
+  
+  // 如果点击的是编辑器内部
+  if (containerEl && containerEl.contains(target)) {
+    // 如果处于审核状态，点击编辑器内部视为放弃优化（恢复原文）
+    if (optimizationState.value === 'reviewing') {
+      rejectOptimization()
+      return
+    }
+    // 其他状态（toolbar/input）保持菜单显示
+    return
+  }
+  
+  // 点击编辑器外部 -> 执行退出逻辑
+  handleEscapeShortcut()
 }
 
 const clearUndoHint = () => {
@@ -223,65 +238,69 @@ const editor = useEditor({
     emit('update:modelValue', editor.getHTML())
   },
   onSelectionUpdate: ({ editor }) => {
-    // 使用 setTimeout 让选择状态稳定
-    setTimeout(() => {
-      if (!editorContainerRef.value) return
+    // 如果正在处理或审核优化，不要更新选区菜单状态
+    if (['processing', 'reviewing'].includes(optimizationState.value)) {
+      return
+    }
 
-      // 如果正在处理或审核优化，不要更新选区菜单状态（保持菜单显示）
-      if (optimizationState.value !== 'idle' && optimizationState.value !== 'input') {
-        return
-      }
+    // 清除上一次的防抖计时器
+    if (selectionDebounceTimer) {
+      clearTimeout(selectionDebounceTimer)
+      selectionDebounceTimer = null
+    }
 
-      const { from, to, empty } = editor.state.selection
+    const { from, to, empty } = editor.state.selection
+    
+    // 如果没有选择文本，隐藏菜单
+    if (empty) {
+      showSelectionMenu.value = false
+      optimizationState.value = 'idle'
+      emitEntityFocus(detectEntityAroundCursor(editor, from))
+      return
+    }
+
+    // 选中文本后，使用防抖逻辑延迟显示菜单
+    selectionDebounceTimer = setTimeout(() => {
+      // 再次检查编辑器状态
+      if (!editorContainerRef.value || !editor.isEditable) return
       
-      // 如果没有选择文本，隐藏菜单，并同步光标附近实体
-      if (empty) {
+      // 如果状态变了，不再处理
+      if (['processing', 'reviewing'].includes(optimizationState.value)) return
+      
+      const current = editor.state.selection
+      
+      // 1. 如果现在变成空选区了，不显示
+      if (current.empty) {
         showSelectionMenu.value = false
         optimizationState.value = 'idle'
-        emitEntityFocus(detectEntityAroundCursor(editor, from))
         return
       }
-
-      // 获取选区坐标
-      const startCoords = editor.view.coordsAtPos(from)
+      
+      // 3. 执行显示逻辑
+      const startCoords = editor.view.coordsAtPos(current.from)
       const containerRect = editorContainerRef.value.getBoundingClientRect()
       
-      // 计算相对坐标
-      // 默认显示在选区上方
       let top = startCoords.top - containerRect.top - 50
       let left = startCoords.left - containerRect.left
       
-      // 边界检查：防止超出顶部
-      if (top < 0) {
-        // 如果上方空间不足，显示在下方
-        top = startCoords.bottom - containerRect.top + 10
-      }
-      
-      // 边界检查：防止超出左侧
+      if (top < 0) top = startCoords.bottom - containerRect.top + 10
       if (left < 0) left = 0
-      // 防止超出右侧 (假设菜单宽度约 300px)
-      if (left + 300 > containerRect.width) {
-        left = containerRect.width - 300
-      }
+      if (left + 300 > containerRect.width) left = containerRect.width - 300
 
       selectionMenuPos.value = { top, left }
       
-      // 记录当前选区信息
       currentSelection.value = {
-        from,
-        to,
-        text: editor.state.doc.textBetween(from, to),
-        contextBefore: editor.state.doc.textBetween(Math.max(0, from - 1000), from),
-        contextAfter: editor.state.doc.textBetween(to, Math.min(editor.state.doc.content.size, to + 1000))
+          from: current.from,
+          to: current.to,
+          text: editor.state.doc.textBetween(current.from, current.to),
+          contextBefore: editor.state.doc.textBetween(Math.max(0, current.from - 1000), current.from),
+          contextAfter: editor.state.doc.textBetween(current.to, Math.min(editor.state.doc.content.size, current.to + 1000))
       }
       
       showSelectionMenu.value = true
       optimizationState.value = 'toolbar'
       emitEntityFocus(currentSelection.value.text)
-      nextTick(() => {
-        selectionMenuRef.value?.focus()
-      })
-    }, 50)
+    }, 600) // 延迟 600ms 以确保选区稳定
   }
 })
 
@@ -488,7 +507,11 @@ const handleInstructionKeydown = (event) => {
 }
 
 const handleEscapeShortcut = () => {
-  if (optimizationState.value === 'processing') return
+  // 如果正在处理中，允许取消（但不中断后端请求，只重置前端状态）
+  if (optimizationState.value === 'processing') {
+    resetOptimization()
+    return
+  }
   if (optimizationState.value === 'reviewing') {
     rejectOptimization()
     return

@@ -45,13 +45,19 @@ def build_planner_agent_prompt(
     
     final_map_prompt = "\n".join(location_prompts) if location_prompts else None
 
-    character_names = []
+    character_prompts = []
     seen_character_ids = set()
     for entity in entities:
         character = entity.character if hasattr(entity, "character") else entity
         if character and character.id not in seen_character_ids:
             seen_character_ids.add(character.id)
-            character_names.append(character.name)
+            char_desc = f"【{character.name}】"
+            if character.static_prompt:
+                char_desc += f"\n静态设定：{character.static_prompt}"
+            if character.dynamic_state:
+                char_desc += f"\n当前动态状态：{character.dynamic_state}"
+            character_prompts.append(char_desc)
+    
     relationship_prompts = []
     for rel in relationships:
         if rel.interaction_prompt:
@@ -146,7 +152,8 @@ def build_planner_agent_prompt(
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
 【目标字数】{word_count}
-【角色】{", ".join(character_names) if character_names else "暂无"}
+【角色设定】
+{chr(10).join(character_prompts) if character_prompts else "暂无角色详情"}
 【关系约束】
 {chr(10).join(relationship_prompts) if relationship_prompts else "暂无互动约束"}
 【开放伏笔】
