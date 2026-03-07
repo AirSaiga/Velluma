@@ -2,8 +2,10 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { bookApi } from '../services/api'
 import { useToast } from '../composables/useToast'
+import { useConfirmDialog } from '../composables/useConfirmDialog'
 
 const { showToast } = useToast()
+const { show: showConfirm } = useConfirmDialog()
 
 const props = defineProps({
   bookId: {
@@ -131,8 +133,11 @@ function addItem() {
   markDirty()
 }
 
-function removeItem(id) {
-  const ok = confirm('确定要删除这一条设定吗？')
+async function removeItem(id) {
+  const ok = await showConfirm({
+    title: '确认删除',
+    message: '确定要删除这一条设定吗？'
+  })
   if (!ok) return
   items.value = items.value.filter((it) => it.id !== id)
   markDirty()

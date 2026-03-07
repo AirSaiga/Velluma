@@ -1,5 +1,8 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
+import { useConfirmDialog } from '../composables/useConfirmDialog'
+
+const { show: showConfirm } = useConfirmDialog()
 
 const props = defineProps({
   isOpen: {
@@ -94,8 +97,11 @@ function handleSave() {
   emit('close')
 }
 
-function handleResetLocal() {
-  const ok = confirm('将清除本地保存的 API 配置、主题与布局偏好。不会删除任何书籍/章节/角色数据。确定继续？')
+async function handleResetLocal() {
+  const ok = await showConfirm({
+    title: '确认重置',
+    message: '将清除本地保存的 API 配置、主题与布局偏好。不会删除任何书籍/章节/角色数据。确定继续？'
+  })
   if (!ok) return
   localStorage.removeItem('velluma_api_config')
   localStorage.removeItem('velluma_theme')

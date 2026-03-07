@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useToast } from '../composables/useToast'
+import { useConfirmDialog } from '../composables/useConfirmDialog'
 
 const { showToast } = useToast()
+const { show: showConfirm } = useConfirmDialog()
 
 const props = defineProps({
   characters: {
@@ -65,7 +67,12 @@ async function handleUpdateDynamicState() {
     return
   }
 
-  if (!confirm('确定要基于当前章节内容更新角色的动态状态吗？\n此操作会分析章节正文并直接更新数据库。')) {
+  const ok = await showConfirm({
+    title: '确认更新',
+    message: '确定要基于当前章节内容更新角色的动态状态吗？\n此操作会分析章节正文并直接更新数据库。',
+    warning: '此操作会直接修改数据库中的角色状态'
+  })
+  if (!ok) {
     return
   }
 
@@ -128,8 +135,12 @@ function saveCharacter() {
   }
 }
 
-function deleteCharacter(character) {
-  if (confirm(`确定要删除 "${character.name}" 吗？`)) {
+async function deleteCharacter(character) {
+  const ok = await showConfirm({
+    title: '确认删除',
+    message: `确定要删除 "${character.name}" 吗？`
+  })
+  if (ok) {
     emit('delete-character', character.id)
   }
 }
@@ -172,8 +183,12 @@ function editRelationship(rel) {
   showRelationshipPanel.value = true
 }
 
-function deleteRelationship(id) {
-  if (confirm('确定要删除这条关系吗？')) {
+async function deleteRelationship(id) {
+  const ok = await showConfirm({
+    title: '确认删除',
+    message: '确定要删除这条关系吗？'
+  })
+  if (ok) {
     emit('delete-relationship', id)
   }
 }

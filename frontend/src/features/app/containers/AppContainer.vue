@@ -9,11 +9,14 @@ import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import Toast from '../../../components/Toast.vue'
+import ConfirmDialog from '../../../components/ConfirmDialog.vue'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 
 const { initTheme } = useTheme()
 const { toasts, showToast, removeToast } = useToast()
+const { visible: confirmDialogVisible, options: confirmDialogOptions, show: showConfirm, handleConfirm: handleConfirmDialog, handleCancel: handleCancelDialog } = useConfirmDialog()
 
 const isDebugMode = computed(() => {
   const urlParams = new URLSearchParams(window.location.search)
@@ -377,7 +380,7 @@ async function updateChapter(id, data) {
 
 async function deleteChapter(id) {
   const target = chapters.value.find((c) => c.id === id)
-  const ok = confirm(`确定要删除"${target?.title || '该章节'}"吗？`)
+  const ok = await showConfirm({ title: '确认删除', message: `确定要删除"${target?.title || '该章节'}"吗？` })
   if (!ok) return
   try {
     await chapterApi.delete(id)
@@ -427,7 +430,11 @@ async function saveManageBook() {
 
 async function deleteCurrentBook() {
   if (!currentBookId.value) return
-  const ok = confirm(`确定要删除书籍 "${currentBook.value?.title || ''}" 吗？此操作会删除其下所有章节与角色。`)
+  const ok = await showConfirm({
+    title: '确认删除',
+    message: `确定要删除书籍 "${currentBook.value?.title || ''}" 吗？此操作会删除其下所有章节与角色。`,
+    warning: '此操作不可撤销'
+  })
   if (!ok) return
   try {
     const deletingId = currentBookId.value
@@ -466,6 +473,12 @@ onMounted(async () => {
 
 <template>
   <Toast :toasts="toasts" @remove="removeToast" />
+  <ConfirmDialog
+    :visible="confirmDialogVisible"
+    :options="confirmDialogOptions"
+    @confirm="handleConfirmDialog"
+    @cancel="handleCancelDialog"
+  />
   <DebugPromptWindow v-if="isDebugMode" />
   <div v-else class="h-full w-full bg-[var(--bg-primary)] p-3">
     <div class="h-full min-h-0 rounded-2xl bg-[var(--bg-canvas)]/90 shadow-[0_20px_60px_rgba(20,33,61,0.08)] overflow-hidden">

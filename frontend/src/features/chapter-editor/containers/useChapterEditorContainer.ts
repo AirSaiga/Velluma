@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi, publishPromptData } from '../../../services/api'
 import {
   AGENTIC_DEFAULTS,
@@ -62,6 +63,7 @@ const beatFieldMap = {
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
   const { showToast } = useToast()
+  const { show: showConfirm } = useConfirmDialog()
 
   const isPublishing = ref(false)
   const publishError = ref<string | null>(null)
@@ -183,19 +185,22 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (!selectedChapter.value) return
 
     if (selectedChapter.value.status === 'published') {
-      if (confirm('本章已发布，确定要取消发布吗？')) {
-        try {
-          isPublishing.value = true
-          publishError.value = null
-          await chapterApi.update(selectedChapter.value.id, { status: 'draft' })
-          emit('update-chapter', selectedChapter.value.id, { status: 'draft' })
-          showToast('已取消发布', 'success')
-        } catch (err: any) {
-          publishError.value = err.message
-          showToast('取消发布失败: ' + err.message, 'error')
-        } finally {
-          isPublishing.value = false
-        }
+      const ok = await showConfirm({
+        title: '确认取消发布',
+        message: '本章已发布，确定要取消发布吗？'
+      })
+      if (!ok) return
+      try {
+        isPublishing.value = true
+        publishError.value = null
+        await chapterApi.update(selectedChapter.value.id, { status: 'draft' })
+        emit('update-chapter', selectedChapter.value.id, { status: 'draft' })
+        showToast('已取消发布', 'success')
+      } catch (err: any) {
+        publishError.value = err.message
+        showToast('取消发布失败: ' + err.message, 'error')
+      } finally {
+        isPublishing.value = false
       }
       return
     }
@@ -204,29 +209,34 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       showToast('请先在设置中配置 API Key 以启用角色动态状态更新功能', 'warning')
     }
 
-    if (confirm('确定要发布本章吗？发布后将会自动更新涉及角色的动态状态。')) {
-      try {
-        isPublishing.value = true
-        publishError.value = null
-        const result = await chapterApi.publish(selectedChapter.value.id, {
-          api_key: props.apiConfig.api_key || undefined,
-          base_url: props.apiConfig.base_url || undefined,
-          model: props.apiConfig.model || 'gpt-4o-mini'
-        })
-        emit('update-chapter', selectedChapter.value.id, { status: 'published' })
-        emit('refresh-characters')
-        characterUpdates.value = result.character_updates || []
-        if (result.summary) {
-          chapterSummary.value = result.summary
-          emit('update-chapter', selectedChapter.value.id, { summary: result.summary })
-        }
-        showPublishModal.value = true
-      } catch (err: any) {
-        publishError.value = err.message
-        showToast('发布失败: ' + err.message, 'error')
-      } finally {
-        isPublishing.value = false
+    const ok = await showConfirm({
+      title: '确认发布',
+      message: '确定要发布本章吗？发布后将会自动更新涉及角色的动态状态。',
+      warning: '发布后会自动分析章节内容并更新角色动态状态'
+    })
+    if (!ok) return
+
+    try {
+      isPublishing.value = true
+      publishError.value = null
+      const result = await chapterApi.publish(selectedChapter.value.id, {
+        api_key: props.apiConfig.api_key || undefined,
+        base_url: props.apiConfig.base_url || undefined,
+        model: props.apiConfig.model || 'gpt-4o-mini'
+      })
+      emit('update-chapter', selectedChapter.value.id, { status: 'published' })
+      emit('refresh-characters')
+      characterUpdates.value = result.character_updates || []
+      if (result.summary) {
+        chapterSummary.value = result.summary
+        emit('update-chapter', selectedChapter.value.id, { summary: result.summary })
       }
+      showPublishModal.value = true
+    } catch (err: any) {
+      publishError.value = err.message
+      showToast('发布失败: ' + err.message, 'error')
+    } finally {
+      isPublishing.value = false
     }
   }
 
@@ -455,8 +465,13 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     const editor = editorRef.value?.editor
     const editorContent = editor ? editor.getText().trim() : ''
     const hasEditorContent = Boolean(editorContent)
-    if (hasEditorContent && !confirm('当前章节已有内容，生成新内容将覆盖原有内容。是否继续？')) {
-      return
+    if (hasEditorContent) {
+      const ok = await showConfirm({
+        title: '确认覆盖',
+        message: '当前章节已有内容，生成新内容将覆盖原有内容。是否继续？',
+        warning: '原有内容将被完全替换'
+      })
+      if (!ok) return
     }
 
     const requestData = {

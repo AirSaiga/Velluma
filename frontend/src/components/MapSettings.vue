@@ -2,8 +2,10 @@
 import { ref, watch, onMounted } from 'vue'
 import { mapApi } from '../services/api'
 import { useToast } from '../composables/useToast'
+import { useConfirmDialog } from '../composables/useConfirmDialog'
 
 const { showToast } = useToast()
+const { show: showConfirm } = useConfirmDialog()
 
 const props = defineProps({
   chapter: {
@@ -110,7 +112,11 @@ async function updateLocation() {
 }
 
 async function deleteLocation(id) {
-  if (!confirm('确定要删除这个地点吗？这将移除所有关联。')) return
+  const ok = await showConfirm({
+    title: '确认删除',
+    message: '确定要删除这个地点吗？这将移除所有关联。'
+  })
+  if (!ok) return
   try {
     await mapApi.deleteLocation(id)
     locations.value = locations.value.filter(l => l.id !== id)
