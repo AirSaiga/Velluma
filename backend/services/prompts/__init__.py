@@ -1,3 +1,29 @@
+"""
+提示词构建模块（统一出口）。
+
+职责：聚合所有 Agent 提示词构建函数，提供统一的导入入口。
+
+设计模式：Facade Pattern，隐藏底层实现细节。
+
+模块组织：
+- chapter_prompts.py: 基础章节生成提示词
+- draft_prompts.py: 主笔 Agent 提示词（初稿生成）
+- planner_prompts.py: 规划师 Agent 提示词（故事节奏拆分）
+- scene_intent_prompts.py: 场景意图分析提示词
+- stitch_prompts.py: 统稿 Agent 提示词（片段拼接）
+- review_prompts.py: 审阅/精修 Agent 提示词
+- format_prompts.py: 文本格式整理提示词
+- inspiration_prompts.py: 灵感生成提示词
+
+使用场景：
+- agentic_workflow.py: 调用各 Agent 提示词构建函数
+- routes/: 直接导入使用
+
+业务规则：
+- 所有 prompt 函数遵循一致的返回格式：(system_prompt: str, user_prompt: str)
+- 解析函数负责将 LLM 输出转换为结构化数据
+"""
+
 from backend.services.prompts.chapter_prompts import build_chapter_prompt
 from backend.services.prompts.draft_prompts import build_draft_agent_prompt, build_chunk_draft_prompt
 from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result

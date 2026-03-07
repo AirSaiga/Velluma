@@ -1,3 +1,24 @@
+"""
+角色关系管理路由模块。
+
+职责：提供角色之间关系的 CRUD API，管理角色间的关联。
+
+业务场景：
+- 创建角色关系（指定关系类型、描述）
+- 获取书籍的角色关系列表
+- 获取两个角色间的关系详情
+- 更新关系信息
+- 删除关系
+
+设计说明：
+- 关系模型为有向边（A → B），需双向查询获得完整关系图
+- 支持多种关系类型（亲友、敌对、师生等）
+
+数据模型：
+- CharacterRelationship: 关系实体（有向边）
+- RelationshipResponse: API 响应模型
+"""
+
 from typing import List, Optional
 from uuid import UUID
 

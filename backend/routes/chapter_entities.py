@@ -1,3 +1,23 @@
+"""
+章节-实体关联管理路由模块。
+
+职责：管理章节与角色/地点的关联关系，支持多对多关联。
+
+业务场景：
+- 为章节添加角色出场
+- 为章节添加地点设定
+- 获取章节关联的所有实体
+- 移除章节的实体关联
+
+设计说明：
+- ChapterEntity 为多态关联表，通过 entity_type 区分关联类型
+- 支持角色（character）和地点（location）两种实体类型
+- 同一实体可多次关联同一章节（表示多次出场）
+
+数据模型：
+- ChapterEntity: 多态关联表
+"""
+
 from typing import List
 from uuid import UUID
 

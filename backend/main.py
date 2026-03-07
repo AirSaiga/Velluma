@@ -30,6 +30,10 @@ from backend.routes import (
     relationships_router,
     memories_router,
     generate_router,
+    text_formatting_router,
+    chapter_generation_router,
+    chapter_optimization_router,
+    inspiration_router,
     system_router,
     maps_router,
 )
@@ -110,6 +114,10 @@ app.include_router(characters_router)
 app.include_router(relationships_router)
 app.include_router(memories_router)
 app.include_router(generate_router)
+app.include_router(text_formatting_router)
+app.include_router(chapter_generation_router)
+app.include_router(chapter_optimization_router)
+app.include_router(inspiration_router)
 app.include_router(maps_router)
 
 # =============================================================================

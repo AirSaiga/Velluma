@@ -1,3 +1,21 @@
+"""
+系统健康检查与配置路由模块。
+
+职责：提供系统级 API，用于健康检查和运行时配置查询。
+
+业务场景：
+- 健康检查（/health）
+- 获取后端实际端口（开发环境动态分配）
+- 系统信息查询
+
+设计说明：
+- /health 用于容器编排系统（K8s/Docker）健康探测
+- 端口获取解决开发环境动态切换端口的问题
+
+数据来源：
+- 端口信息来自 core/config.py 的运行时配置
+"""
+
 from fastapi import APIRouter
 
 from backend.core.config import get_actual_port

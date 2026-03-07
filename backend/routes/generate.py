@@ -1,3 +1,28 @@
+"""
+基础生成路由模块（向后兼容）。
+
+职责：提供各类 AI 生成 API，用于智能写作辅助。
+
+业务场景：
+- 文本格式整理（分段、标点规范化）
+- 流式章节生成（实时展示生成过程）
+- 章节优化（基于用户反馈重写）
+- 选中文本优化（局部精修）
+- 同步章节生成（非流式）
+- Agentic 章节生成（多轮迭代）
+- 灵感生成（剧情点子启发）
+
+设计说明：
+- 此文件为向后兼容保留，新功能已拆分到独立路由文件：
+  - text_formatting.py: 文本格式
+  - chapter_generation.py: 章节生成
+  - chapter_optimization.py: 章节优化
+  - inspiration.py: 灵感生成
+
+数据来源：
+- 上下文数据来自章节、书籍、角色、关系、伏笔等数据库实体
+"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select

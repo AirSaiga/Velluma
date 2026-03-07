@@ -1,3 +1,23 @@
+"""
+章节管理路由模块。
+
+职责：提供章节的基础 CRUD API，处理章节的创建、读取、更新、删除操作。
+
+业务场景：
+- 创建新章节（自动编号）
+- 获取书籍的章节列表
+- 获取章节详情
+- 更新章节信息（大纲、标题、状态）
+- 删除章节
+
+数据模型：
+- Chapter: 章节实体
+
+注意：章节与角色的关联（ChapterEntity）由 chapter_entities.py 管理
+注意：章节与地点的关联由 chapter_entities.py 或 maps.py 管理
+注意：章节的发布流程由 chapter_publishing.py 管理
+"""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException

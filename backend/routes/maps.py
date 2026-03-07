@@ -1,3 +1,25 @@
+"""
+地图/地点管理路由模块。
+
+职责：提供地点的 CRUD API，管理书籍中的地理位置数据。
+
+业务场景：
+- 创建地点（如"长安城"、"新手村"）
+- 获取书籍的地点列表
+- 获取地点详情
+- 更新地点信息（描述、坐标等）
+- 删除地点
+- 章节与地点的关联管理
+
+设计说明：
+- 地点从属于书籍，支持层级结构（如"长安城→朱雀大街"）
+- 章节与地点的关联记录在 ChapterMapLocation 表
+
+数据模型：
+- MapLocation: 地点实体
+- ChapterMapLocation: 章节-地点关联
+"""
+
 import asyncio
 from typing import List
 from uuid import UUID

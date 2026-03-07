@@ -1,3 +1,21 @@
+"""
+角色管理路由模块。
+
+职责：提供角色的 CRUD API，管理书籍中的角色实体。
+
+业务场景：
+- 创建新角色（设置静态设定、重要性等级）
+- 获取书籍的角色列表
+- 获取角色详情
+- 更新角色信息（设定、状态）
+- 删除角色
+- 更新角色动态状态（章节生成后自动更新）
+
+数据模型：
+- Character: 角色实体
+- CharacterResponse: API 响应模型
+"""
+
 from typing import List
 from uuid import UUID
 
