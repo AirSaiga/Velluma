@@ -16,6 +16,8 @@ def build_planner_agent_prompt(
     open_hooks: list = None,
     previous_chapter_summary: str = None,
     locations: list = None,
+    global_taboos: str = None,
+    author_intent: str = None,
 ):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -121,7 +123,19 @@ def build_planner_agent_prompt(
 {low_tension_rule if low_tension_rule else ''}
 10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
 11. 只输出 JSON，不要额外解释"""
-    user_prompt = f"""请规划以下章节：
+    
+    user_prompt_parts = []
+    
+    # 0. 绝对最高优先级指令 (Absolute Highest Priority)
+    if global_taboos or author_intent:
+        user_prompt_parts.append("## 0. 绝对最高优先级指令 (Absolute Highest Priority)")
+        if global_taboos:
+            user_prompt_parts.append(f"【全局禁忌/核心母题】\n{global_taboos}")
+        if author_intent:
+            user_prompt_parts.append(f"【作者创作意图】\n{author_intent}")
+        user_prompt_parts.append("")
+
+    user_prompt_parts.append(f"""请规划以下章节：
 
 【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
@@ -136,7 +150,9 @@ def build_planner_agent_prompt(
 【关系约束】
 {chr(10).join(relationship_prompts) if relationship_prompts else "暂无互动约束"}
 【开放伏笔】
-{open_hooks_text}"""
+{open_hooks_text}""")
+
+    user_prompt = "\n".join(user_prompt_parts)
     return system_prompt, user_prompt
 
 

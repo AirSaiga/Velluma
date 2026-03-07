@@ -57,6 +57,7 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   rag_lambda: number
   fast_mode?: boolean
   skip_minor_refine?: boolean
+  author_intent?: string
 }
 
 export interface ConfirmedStoryBeat {
@@ -91,9 +92,10 @@ export interface AgenticFormState {
   rag_beta: number
   rag_gamma: number
   rag_lambda: number
+  author_intent?: string
 }
 
-export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook'
+export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook' | 'smooth_narrative'
 
 export interface InspirationIdea {
   idea_type: InspirationIdeaType

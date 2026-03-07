@@ -9,7 +9,60 @@ import { Color, BackgroundColor } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
 import Subscript from '@tiptap/extension-subscript'
 import Superscript from '@tiptap/extension-superscript'
-import { watch, onBeforeUnmount, ref } from 'vue'
+import { watch, onBeforeUnmount, ref, nextTick } from 'vue'
+import { Extension } from '@tiptap/core'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+
+// Extension to fake selection highlighting when editor loses focus
+const SelectionHighlighter = Extension.create({
+  name: 'selectionHighlighter',
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('selectionHighlighter'),
+        props: {
+          decorations(state) {
+            const { selection } = state
+            // Get current plugin state
+            const isHighlightEnabled = this.getState(state)
+            
+            if (isHighlightEnabled && !selection.empty) {
+                return DecorationSet.create(state.doc, [
+                    Decoration.inline(selection.from, selection.to, {
+                        class: 'fake-selection-highlight',
+                    }),
+                ])
+            }
+            return DecorationSet.empty
+          },
+        },
+        state: {
+            init() { return false },
+            apply(tr, value) {
+                const meta = tr.getMeta('setFakeSelection')
+                if (meta !== undefined) {
+                    return meta
+                }
+                return value
+            }
+        }
+      }),
+    ]
+  },
+  
+  addCommands() {
+      return {
+          setFakeSelection: (enabled) => ({ tr, dispatch }) => {
+              if (dispatch) {
+                  tr.setMeta('setFakeSelection', enabled)
+              }
+              return true
+          }
+      }
+  }
+})
 
 const props = defineProps({
   modelValue: {
@@ -34,10 +87,17 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'request-format'])
+const emit = defineEmits(['update:modelValue', 'request-format', 'request-partial-optimize'])
 
 const textColor = ref('#000000')
 const highlightColor = ref('#FFFF00')
+const editorContainerRef = ref(null)
+const showSelectionMenu = ref(false)
+const selectionMenuPos = ref({ top: 0, left: 0 })
+const optimizationInstruction = ref('')
+const currentSelection = ref(null)
+const optimizationState = ref('idle') // 'idle' | 'input' | 'processing' | 'reviewing'
+const tempOptimizationData = ref(null)
 
 const editor = useEditor({
   content: props.modelValue,
@@ -59,6 +119,7 @@ const editor = useEditor({
     }),
     Subscript,
     Superscript,
+    SelectionHighlighter,
   ],
   editorProps: {
     attributes: {
@@ -68,6 +129,62 @@ const editor = useEditor({
   onUpdate: ({ editor }) => {
     emit('update:modelValue', editor.getHTML())
   },
+  onSelectionUpdate: ({ editor }) => {
+    // 使用 setTimeout 让选择状态稳定
+    setTimeout(() => {
+      if (!editorContainerRef.value) return
+
+      // 如果正在处理或审核优化，不要更新选区菜单状态（保持菜单显示）
+      if (optimizationState.value !== 'idle' && optimizationState.value !== 'input') {
+        return
+      }
+
+      const { from, to, empty } = editor.state.selection
+      
+      // 如果没有选择文本，隐藏菜单
+      if (empty) {
+        showSelectionMenu.value = false
+        optimizationState.value = 'idle'
+        return
+      }
+
+      // 获取选区坐标
+      const startCoords = editor.view.coordsAtPos(from)
+      const containerRect = editorContainerRef.value.getBoundingClientRect()
+      
+      // 计算相对坐标
+      // 默认显示在选区上方
+      let top = startCoords.top - containerRect.top - 50
+      let left = startCoords.left - containerRect.left
+      
+      // 边界检查：防止超出顶部
+      if (top < 0) {
+        // 如果上方空间不足，显示在下方
+        top = startCoords.bottom - containerRect.top + 10
+      }
+      
+      // 边界检查：防止超出左侧
+      if (left < 0) left = 0
+      // 防止超出右侧 (假设菜单宽度约 300px)
+      if (left + 300 > containerRect.width) {
+        left = containerRect.width - 300
+      }
+
+      selectionMenuPos.value = { top, left }
+      
+      // 记录当前选区信息
+      currentSelection.value = {
+        from,
+        to,
+        text: editor.state.doc.textBetween(from, to),
+        contextBefore: editor.state.doc.textBetween(Math.max(0, from - 1000), from),
+        contextAfter: editor.state.doc.textBetween(to, Math.min(editor.state.doc.content.size, to + 1000))
+      }
+      
+      showSelectionMenu.value = true
+      optimizationState.value = 'input'
+    }, 50)
+  }
 })
 
 watch(() => props.disabled, (val) => {
@@ -192,17 +309,130 @@ const clearContent = () => {
   }
 }
 
+const handleInputFocus = () => {
+  if (editor.value && showSelectionMenu.value && optimizationState.value === 'input') {
+    editor.value.commands.setFakeSelection(true)
+  }
+}
+
+const handleInputBlur = () => {
+  if (editor.value && optimizationState.value === 'input') {
+    editor.value.commands.setFakeSelection(false)
+  }
+}
+
+const handleOptimizeSelection = () => {
+  if (!currentSelection.value || !optimizationInstruction.value.trim()) return
+  
+  optimizationState.value = 'processing'
+  
+  emit('request-partial-optimize', {
+    selection: currentSelection.value,
+    instruction: optimizationInstruction.value
+  })
+  
+  // 不要清空 instruction，也不要关闭菜单
+  // optimizationInstruction.value = '' 
+  // showSelectionMenu.value = false
+}
+
+const applyOptimizationDiff = (optimizedText) => {
+  if (!editor.value || !currentSelection.value) return
+
+  optimizationState.value = 'reviewing'
+  editor.value.commands.setFakeSelection(false) // 移除伪造的高亮
+
+  const { from, to } = currentSelection.value
+  
+  // 1. 标记原文 (Strike + Red Highlight)
+  editor.value.chain()
+    .setTextSelection({ from, to })
+    .setStrike()
+    .setHighlight({ color: '#ffcccc' })
+    .run()
+
+  // 2. 插入新文 (Green Highlight)
+  // 注意：插入后位置会变，需要计算
+  const insertPos = to
+  editor.value.chain()
+    .insertContentAt(insertPos, optimizedText)
+    .setTextSelection({ from: insertPos, to: insertPos + optimizedText.length })
+    .unsetStrike()
+    .setHighlight({ color: '#ccffcc' })
+    .run()
+
+  // 记录临时数据以便确认/取消
+  tempOptimizationData.value = {
+    originalFrom: from,
+    originalTo: to,
+    newFrom: to, // 原文之后
+    newTo: to + optimizedText.length
+  }
+}
+
+const confirmOptimization = () => {
+  if (!editor.value || !tempOptimizationData.value) return
+
+  const { originalFrom, originalTo, newFrom, newTo } = tempOptimizationData.value
+
+  // 1. 清除新文的高亮
+  editor.value.chain()
+    .setTextSelection({ from: newFrom, to: newTo })
+    .unsetHighlight()
+    .run()
+
+  // 2. 删除原文
+  editor.value.chain()
+    .deleteRange({ from: originalFrom, to: originalTo })
+    .run()
+
+  resetOptimization()
+}
+
+const rejectOptimization = () => {
+  if (!editor.value || !tempOptimizationData.value) return
+
+  const { originalFrom, originalTo, newFrom, newTo } = tempOptimizationData.value
+
+  // 1. 删除新文
+  editor.value.chain()
+    .deleteRange({ from: newFrom, to: newTo })
+    .run()
+
+  // 2. 恢复原文样式 (移除 Strike 和 Highlight)
+  editor.value.chain()
+    .setTextSelection({ from: originalFrom, to: originalTo })
+    .unsetStrike()
+    .unsetHighlight()
+    .run()
+
+  resetOptimization()
+}
+
+const resetOptimization = () => {
+  optimizationState.value = 'idle'
+  showSelectionMenu.value = false
+  optimizationInstruction.value = ''
+  currentSelection.value = null
+  tempOptimizationData.value = null
+  if (editor.value) {
+    editor.value.commands.setFakeSelection(false)
+  }
+}
+
 defineExpose({
   insertContent,
   clearContent,
   flushBuffer,
-  editor
+  editor,
+  applyOptimizationDiff,
+  resetOptimization
 })
 </script>
 
 <template>
-  <div class="rich-text-editor bg-white overflow-hidden flex flex-col h-full" :class="{ 'opacity-60': disabled }">
-    <div v-if="editor && !disabled" class="toolbar flex items-center gap-0.5 px-3 py-1.5 bg-white border-b border-[var(--border-color)] overflow-x-auto whitespace-nowrap">
+  <div ref="editorContainerRef" class="rich-text-editor bg-white overflow-hidden flex flex-col h-full relative" :class="{ 'opacity-60': disabled }">
+    <div v-if="editor && !disabled" class="toolbar flex items-center gap-0.5 px-3 py-1.5 bg-white border-b border-[var(--border-color)] overflow-x-auto whitespace-nowrap flex-shrink-0">
       <button 
         @click="toggleBold" 
         :class="{ 'is-active': editor.isActive('bold') }"
@@ -339,6 +569,57 @@ defineExpose({
     </div>
     
     <editor-content :editor="editor" class="flex-1 overflow-y-auto custom-scrollbar" />
+
+    <!-- Selection Optimization Menu -->
+    <div 
+      v-if="showSelectionMenu"
+      :style="{ top: selectionMenuPos.top + 'px', left: selectionMenuPos.left + 'px' }"
+      class="absolute z-50 bg-white shadow-lg border border-[var(--border-color)] rounded-lg p-2 flex items-center gap-2"
+      @mousedown.stop
+    >
+      <template v-if="optimizationState === 'input'">
+        <input 
+          v-model="optimizationInstruction"
+          @focus="handleInputFocus"
+          @blur="handleInputBlur"
+          @keydown.enter="handleOptimizeSelection"
+          placeholder="输入优化建议..."
+          class="text-sm border border-[var(--border-color)] rounded px-2 py-1 outline-none focus:border-[var(--accent-600)] w-64 text-[var(--text-primary)] bg-white"
+        />
+        <button 
+          @click="handleOptimizeSelection" 
+          class="text-[var(--accent-600)] hover:text-[var(--accent-700)] p-1 rounded hover:bg-[var(--hover-bg)] transition-colors"
+          title="执行优化"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </template>
+
+      <template v-else-if="optimizationState === 'processing'">
+        <div class="flex items-center gap-2 px-2 text-sm text-[var(--text-muted)]">
+          <svg class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>优化生成中...</span>
+        </div>
+      </template>
+
+      <template v-else-if="optimizationState === 'reviewing'">
+        <button 
+          @click="confirmOptimization"
+          class="px-3 py-1 text-xs bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded border border-emerald-200 transition-colors"
+        >
+          使用新版
+        </button>
+        <button 
+          @click="rejectOptimization"
+          class="px-3 py-1 text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 transition-colors"
+        >
+          保留原版
+        </button>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -349,33 +630,37 @@ defineExpose({
 }
 
 /* Custom Scrollbar for Editor Content */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: var(--border-color);
-  border-radius: 3px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: var(--text-muted);
-}
-
-/* Tiptap Prose Customization */
-:deep(.ProseMirror) {
-  height: 100%;
-  outline: none;
-  font-family: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
-  font-size: 1.15rem;
-  line-height: 1.95;
-}
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 3px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+  }
+  
+  /* Tiptap Prose Customization */
+  :deep(.ProseMirror) {
+    height: 100%;
+    outline: none;
+    font-family: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+    font-size: 1.15rem;
+    line-height: 1.95;
+    /* Move padding to ProseMirror for internal scrolling if needed, but here we rely on parent's overflow */
+  }
 :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-muted);
   content: attr(data-placeholder);
   float: left;
   height: 0;
   pointer-events: none;
+}
+:deep(.fake-selection-highlight) {
+  background-color: #b4d5fe;
 }
 </style>

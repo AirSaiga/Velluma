@@ -13,6 +13,7 @@ const props = defineProps<{
   show: boolean
   bookId: string | null | undefined
   chapterId: string
+  chapterTitle?: string
   currentContext: string
   activeCharacterIds: string[]
   apiConfig: ApiConfig
@@ -26,17 +27,20 @@ const emit = defineEmits<{
 const loading = ref(false)
 const error = ref('')
 const inspirations = ref<InspirationIdea[]>([])
+const authorIntent = ref('')
 
 const ideaTypeLabels: Record<InspirationIdeaType, string> = {
   plot_twist: '剧情转折',
   key_conflict: '关键冲突',
-  new_hook: '新设伏笔'
+  new_hook: '新设伏笔',
+  smooth_narrative: '平稳叙事'
 }
 
 const ideaTypeColors: Record<InspirationIdeaType, string> = {
   plot_twist: 'bg-amber-100 text-amber-700 ring-amber-300',
   key_conflict: 'bg-rose-100 text-rose-700 ring-rose-300',
-  new_hook: 'bg-emerald-100 text-emerald-700 ring-emerald-300'
+  new_hook: 'bg-emerald-100 text-emerald-700 ring-emerald-300',
+  smooth_narrative: 'bg-blue-100 text-blue-700 ring-blue-300'
 }
 
 watch(() => props.show, async (newVal) => {
@@ -59,8 +63,10 @@ async function fetchInspirations() {
     const response = await generateApi.generateInspiration({
       book_id: props.bookId,
       chapter_id: props.chapterId,
+      chapter_title: props.chapterTitle,
       current_context_snippet: props.currentContext,
       active_character_ids: props.activeCharacterIds,
+      author_intent: authorIntent.value,
       temperature: 0.9,
       api_key: props.apiConfig.api_key,
       base_url: props.apiConfig.base_url,
@@ -112,7 +118,31 @@ function handleBackdropClick(e: MouseEvent) {
       </div>
 
       <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)]">
-        <div v-if="loading" class="flex flex-col items-center justify-center py-12">
+        <div class="mb-4">
+          <label class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">作者意图引导 (可选)</label>
+          <div class="flex gap-2">
+            <textarea
+              v-model="authorIntent"
+              rows="2"
+              class="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              placeholder="你想看到什么类型的灵感？例如：'增加悬疑感'，'让主角陷入困境'..."
+              @keydown.enter.prevent="fetchInspirations"
+            />
+            <button
+              @click="fetchInspirations"
+              :disabled="loading"
+              class="px-4 rounded-xl bg-indigo-500 text-white text-xs font-medium hover:bg-indigo-600 disabled:opacity-50 transition-colors flex flex-col items-center justify-center gap-1 min-w-[60px]"
+            >
+              <svg v-if="loading" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span v-else>生成</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="loading" class="flex flex-col items-center justify-center py-8">
           <div class="relative flex items-center justify-center w-16 h-16 mb-4">
             <div class="absolute inset-0 rounded-full border-4 border-indigo-50"></div>
             <div class="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin"></div>
@@ -120,7 +150,7 @@ function handleBackdropClick(e: MouseEvent) {
           <p class="text-sm text-[var(--text-secondary)]">正在思考灵感...</p>
         </div>
 
-        <div v-else-if="error" class="flex flex-col items-center justify-center py-12">
+        <div v-else-if="error" class="flex flex-col items-center justify-center py-8">
           <div class="w-12 h-12 mb-4 rounded-full bg-rose-100 flex items-center justify-center">
             <svg class="w-6 h-6 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -191,7 +221,7 @@ function handleBackdropClick(e: MouseEvent) {
           </div>
         </div>
 
-        <div v-else class="flex flex-col items-center justify-center py-12">
+        <div v-else class="flex flex-col items-center justify-center py-8">
           <p class="text-sm text-[var(--text-muted)]">暂无灵感数据</p>
         </div>
       </div>

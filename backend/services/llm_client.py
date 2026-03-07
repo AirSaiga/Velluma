@@ -204,7 +204,6 @@ async def format_text_with_llm(
     )
 
 
-
 async def call_llm(
     system_prompt: str,
     user_prompt: str,
@@ -214,6 +213,7 @@ async def call_llm(
     temperature: float = 0.7,
     response_format: Optional[dict] = None,
     max_tokens: int = 8192,
+    top_p: float = 1.0,
 ) -> str:
     """
     同步调用 LLM API 获取完整响应。
@@ -245,7 +245,13 @@ async def call_llm(
 
     try:
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-        create_kwargs = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+        create_kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "top_p": top_p,
+        }
         # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)
         if response_format:
             create_kwargs["response_format"] = response_format
@@ -314,3 +320,55 @@ async def get_embedding(
         print(f"[Embedding Error] {e}")
         return []
 
+
+async def optimize_selection_with_llm(
+    selected_text: str,
+    context_before: str,
+    context_after: str,
+    outline: str,
+    user_instruction: str,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: str = "gpt-4o-mini",
+) -> str:
+    """
+    使用 LLM 优化选中的文本片段。
+    """
+    system_prompt = """你是一个专业的小说编辑和写作助手。
+你的任务是根据用户的指令，优化选中的文本片段。
+请专注于文风、细节描写、情感表达等方面的提升，尽量不要改变原有的剧情走向，除非用户指令中明确要求。
+
+参考信息：
+1. 选中文本的前后文（用于保持上下文连贯）。
+2. 章节大纲（用于把握整体基调，权重较低）。
+3. 用户指令（最重要的优化依据）。
+
+请直接返回优化后的文本，不要包含任何解释、前言或后续。"""
+
+    user_prompt = f"""
+【章节大纲】
+{outline}
+
+【前文】
+{context_before}
+
+【选中文本】
+{selected_text}
+
+【后文】
+{context_after}
+
+【用户指令】
+{user_instruction}
+
+请提供【选中文本】的优化版本：
+"""
+
+    return await call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        temperature=0.7,
+    )

@@ -253,6 +253,12 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT",
         "expected_udt_names": {"text"},
     },
+    {
+        "table": "books",
+        "column": "core_motifs_taboos",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
 ]
 
 

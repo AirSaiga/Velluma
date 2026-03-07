@@ -14,6 +14,10 @@ export const AGENTIC_GROUPS = {
   workflow: {
     title: '生成流程设置',
     description: '设置自动检查与改写的次数。'
+  },
+  steering: {
+    title: '创作意图',
+    description: '指导 AI 的写作方向。'
   }
 } as const
 
@@ -24,7 +28,8 @@ export const AGENTIC_DEFAULTS: AgenticFormState = {
   rag_alpha: 0.6,
   rag_beta: 0.2,
   rag_gamma: 0.2,
-  rag_lambda: 0.1
+  rag_lambda: 0.1,
+  author_intent: ''
 }
 
 export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
@@ -82,6 +87,13 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     rangeHint: '范围 ≥ 0',
     recommended: '推荐 0.1',
     group: 'memory'
+  },
+  author_intent: {
+    label: '创作意图',
+    description: '在此输入具体的指导说明，如“增加悬疑感”、“重点描写环境”等。',
+    rangeHint: '自由文本',
+    recommended: '可选',
+    group: 'steering'
   }
 }
 
@@ -108,7 +120,8 @@ export function normalizeAgenticForm(input: Partial<AgenticFormState>) {
     rag_alpha: roundFloat(clamp(toNumber(input.rag_alpha, AGENTIC_DEFAULTS.rag_alpha), 0, 1)),
     rag_beta: roundFloat(clamp(toNumber(input.rag_beta, AGENTIC_DEFAULTS.rag_beta), 0, 1)),
     rag_gamma: roundFloat(clamp(toNumber(input.rag_gamma, AGENTIC_DEFAULTS.rag_gamma), 0, 1)),
-    rag_lambda: roundFloat(clamp(toNumber(input.rag_lambda, AGENTIC_DEFAULTS.rag_lambda), 0))
+    rag_lambda: roundFloat(clamp(toNumber(input.rag_lambda, AGENTIC_DEFAULTS.rag_lambda), 0)),
+    author_intent: (input.author_intent || '').trim()
   }
   return normalized
 }
@@ -158,6 +171,7 @@ export function buildAgenticPayload(params: {
       rag_beta: normalized.rag_beta,
       rag_gamma: normalized.rag_gamma,
       rag_lambda: normalized.rag_lambda,
+      author_intent: normalized.author_intent,
       fast_mode: true,
       skip_minor_refine: true
     },

@@ -33,6 +33,7 @@ class BookBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
+    core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = Field(default_factory=dict)
 
 
@@ -62,6 +63,7 @@ class BookUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
     global_sys_prompt: Optional[str] = None
+    core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = None
 
 
@@ -602,6 +604,30 @@ class OptimizeChapterRequest(BaseModel):
     model: str = Field(default="gpt-4o-mini")
 
 
+class OptimizeSelectionRequest(BaseModel):
+    """文本选择优化请求模型
+    
+    业务目的：
+    - 对用户选中的特定文本片段进行优化（润色、细节描写等）
+    
+    参数来源：
+    - chapter_id: 目标章节
+    - selected_text: 选中的文本
+    - context_before: 选中文本的前文（用于上下文理解）
+    - context_after: 选中文本的后文（用于上下文理解）
+    - user_instruction: 用户的优化指令
+    - api_key/base_url/model: LLM 配置
+    """
+    chapter_id: UUID
+    selected_text: str = Field(..., min_length=1)
+    context_before: str = Field(default="")
+    context_after: str = Field(default="")
+    user_instruction: str = Field(default="")
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+
+
 AGENTIC_DEFAULT_WORD_COUNT = 2000
 AGENTIC_DEFAULT_MAX_ITERATIONS = 2
 AGENTIC_DEFAULT_RAG_TOP_K = 3
@@ -626,6 +652,7 @@ class GenerateChapterAgenticRequest(BaseModel):
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
     word_count: Optional[int] = Field(default=AGENTIC_DEFAULT_WORD_COUNT, ge=1, description="期望生成的字数")
+    author_intent: Optional[str] = Field(None, description="作者的创作意图")
     max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")
     rag_top_k: int = Field(default=AGENTIC_DEFAULT_RAG_TOP_K, ge=1, le=20, description="RAG 返回记忆数量")
     rag_alpha: float = Field(default=AGENTIC_DEFAULT_RAG_ALPHA, ge=0.0, le=1.0, description="语义相似度权重")
@@ -751,9 +778,11 @@ class InspirationRequest(BaseModel):
     """
     book_id: UUID
     chapter_id: UUID
+    chapter_title: Optional[str] = None
     current_context_snippet: str = Field(..., description="最近几百字的半成品正文或当前场景的一句话简述")
     active_character_ids: List[str] = Field(default=[], description="当前场景涉及的角色 ID")
-    temperature: float = Field(default=0.9, ge=0.0, le=2.0)
+    author_intent: Optional[str] = Field(None, description="作者的创作意图")
+    temperature: float = Field(default=0.75, ge=0.0, le=2.0)
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
@@ -768,8 +797,8 @@ class InspirationIdea(BaseModel):
     - description 百字左右的事件描述
     - impact 对后续格局的影响
     """
-    idea_type: Literal["plot_twist", "key_conflict", "new_hook"] = Field(
-        ..., description="点子类型：走向转折 / 关键冲突 / 新设伏笔"
+    idea_type: Literal["plot_twist", "key_conflict", "new_hook", "smooth_narrative"] = Field(
+        ..., description="点子类型：剧情转折 / 关键冲突 / 新设伏笔 / 平稳叙事"
     )
     title: str = Field(..., description="点子的简短标题，如'暗中的背叛者'")
     description: str = Field(..., description="百字左右的具体事件描述")
@@ -780,6 +809,6 @@ class InspirationResponse(BaseModel):
     """点子启发响应模型
 
     业务规则：
-    - 返回 3 个不同维度的灵感卡片
+    - 返回 4 个不同维度的灵感卡片
     """
-    inspirations: List[InspirationIdea] = Field(..., min_items=3, max_items=3)
+    inspirations: List[InspirationIdea] = Field(..., min_items=4, max_items=4)

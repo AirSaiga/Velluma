@@ -101,7 +101,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const agenticGroupFields = computed(() => ({
     generation: ['word_count'] as Array<keyof AgenticFormState>,
     memory: ['rag_top_k', 'rag_alpha', 'rag_beta', 'rag_gamma', 'rag_lambda'] as Array<keyof AgenticFormState>,
-    workflow: ['max_iterations'] as Array<keyof AgenticFormState>
+    workflow: ['max_iterations'] as Array<keyof AgenticFormState>,
+    steering: ['author_intent'] as Array<keyof AgenticFormState>
   }))
   const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
   const firstFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).find(Boolean) || '')
@@ -560,8 +561,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
-    const target = event.target as HTMLInputElement
-    const nextValue = Number(target.value)
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement
+    const nextValue = field === 'author_intent' ? target.value : Number(target.value)
     agenticForm.value = {
       ...agenticForm.value,
       [field]: nextValue
@@ -571,6 +572,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function getAgenticFieldInputType(field: keyof AgenticFormState) {
     if (field === 'word_count' || field === 'max_iterations' || field === 'rag_top_k') {
       return 'number'
+    }
+    if (field === 'author_intent') {
+      return 'textarea'
     }
     return 'number'
   }
@@ -717,6 +721,47 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
   }
 
+  async function handlePartialOptimize(payload: { selection: any, instruction: string }) {
+    if (!selectedChapter.value || !props.apiConfig.api_key) {
+        showToast('请先配置 API Key', 'warning')
+        return
+    }
+    
+    isFormatting.value = true
+    
+    try {
+        const { optimized_text } = await generateApi.optimizeSelection({
+            chapter_id: selectedChapter.value.id,
+            selected_text: payload.selection.text,
+            context_before: payload.selection.contextBefore,
+            context_after: payload.selection.contextAfter,
+            user_instruction: payload.instruction,
+            api_key: props.apiConfig.api_key,
+            base_url: props.apiConfig.base_url,
+            model: props.apiConfig.model
+        })
+        
+        if (optimized_text && editorRef.value) {
+            // 调用 applyOptimizationDiff 而不是直接替换
+            editorRef.value.applyOptimizationDiff(optimized_text)
+            showToast('优化生成完成，请确认', 'success')
+        } else {
+            // 如果没有返回文本，重置状态
+            editorRef.value.resetOptimization()
+            showToast('优化未返回有效结果', 'warning')
+        }
+    } catch (e: any) {
+        console.error('Optimization failed', e)
+        showToast('优化失败: ' + e.message, 'error')
+        // 出错时重置状态
+        if (editorRef.value) {
+            editorRef.value.resetOptimization()
+        }
+    } finally {
+        isFormatting.value = false
+    }
+  }
+
   return {
     AGENTIC_FIELD_CONFIG,
     AGENTIC_GROUPS,
@@ -756,6 +801,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     handleContentUpdate,
     handleFormatText,
     handleOptimize,
+    handlePartialOptimize,
     handleOutlineInput,
     handleTensionLevelInput,
     handleTitleInput,

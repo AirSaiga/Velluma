@@ -38,19 +38,6 @@ export function publishPromptData(data: any) {
   if (window.electronAPI) {
     window.electronAPI.send('prompt-data', prompt)
   }
-
-  formatText: async (data: { text: string; api_key?: string; base_url?: string; model?: string }) => {
-    const response = await requestRaw('/format_text', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-
-    if (!response.ok) {
-      throw new Error(`格式整理请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
-  }
 }
 
 export function readStoredPromptData() {
@@ -231,6 +218,19 @@ export const generateApi = {
     return response.json()
   },
 
+  optimizeSelection: async (data: any) => {
+    const response = await requestRaw('/optimize_selection', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`优化请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  },
+
   previewAgenticBeats: async (data: any) => {
     const baseUrl = await getApiBase()
     console.log('[DEBUG] generateApi.previewAgenticBeats: 开始请求', { baseUrl, chapter_id: data.chapter_id })
@@ -326,12 +326,14 @@ export const generateApi = {
   generateInspiration: async (data: {
     book_id: string
     chapter_id: string
+    chapter_title?: string
     current_context_snippet: string
     active_character_ids: string[]
     temperature: number
     api_key: string
     base_url?: string
     model?: string
+    author_intent?: string
   }) => {
     const response = await requestRaw('/generate_inspiration', {
       method: 'POST',

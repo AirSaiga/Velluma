@@ -65,6 +65,7 @@ const props = defineProps<{
   handleContentUpdate: (content: string) => void
   handleFormatText: (text: string) => void
   handleOptimize: () => void
+  handlePartialOptimize: (payload: { selection: any, instruction: string }) => void
   handleOutlineInput: (event: Event) => void
   handleTensionLevelInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
@@ -127,9 +128,9 @@ function handleOptimizationFeedbackInput(event: Event) {
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto px-6 py-4">
-    <div v-if="selectedChapter" class="max-w-[920px] mx-auto space-y-3">
-      <div class="flex items-center justify-between gap-3">
+  <div class="h-full flex flex-col overflow-hidden px-6 py-4">
+    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-3">
+      <div class="flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex-1 flex items-center gap-2">
           <span class="text-lg font-bold text-[var(--text-primary)] shrink-0">
             {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}
@@ -149,7 +150,7 @@ function handleOptimizationFeedbackInput(event: Event) {
         </button>
       </div>
 
-      <div v-show="!localMetaCollapsed" class="rounded-xl bg-[var(--bg-panel)] px-3 py-2.5 space-y-2">
+      <div v-show="!localMetaCollapsed" class="rounded-xl bg-[var(--bg-panel)] px-3 py-2.5 space-y-2 flex-shrink-0">
         <div class="flex items-start gap-2">
           <textarea
             :value="selectedChapter.outline_text"
@@ -295,7 +296,7 @@ function handleOptimizationFeedbackInput(event: Event) {
         </div>
       </div>
 
-      <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] min-h-[60vh] flex flex-col">
+      <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isGenerating && isAgenticMode"
           class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
@@ -357,12 +358,12 @@ function handleOptimizationFeedbackInput(event: Event) {
         </div>
 
         <RichTextEditor
-          v-show="!isLoadingOverlay"
           ref="editorRef"
           :id="selectedChapter.id"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
           @request-format="handleFormatText"
+          @request-partial-optimize="handlePartialOptimize"
           :disabled="isEditorDisabled"
           :is-formatting="isFormatting"
           placeholder="在此处开始写作或生成内容..."
@@ -436,7 +437,17 @@ function handleOptimizationFeedbackInput(event: Event) {
                 </div>
                 <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_FIELD_CONFIG[field].description }}</p>
                 <div class="flex items-center gap-2 mt-1">
+                  <textarea
+                    v-if="getAgenticFieldInputType(field) === 'textarea'"
+                    :value="getAgenticFieldValue(field)"
+                    @input="setAgenticFieldValue(field, $event)"
+                    @blur="normalizeAgenticField"
+                    :disabled="isGenerating"
+                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60 resize-none"
+                    rows="3"
+                  ></textarea>
                   <input
+                    v-else
                     :value="getAgenticFieldValue(field)"
                     @input="setAgenticFieldValue(field, $event)"
                     @blur="normalizeAgenticField"
@@ -473,7 +484,6 @@ function handleOptimizationFeedbackInput(event: Event) {
   <div
     v-if="showBeatReviewModal && isAgenticMode"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
-    @click.self="closeBeatReviewModal"
   >
     <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
       <div class="p-3 border-b border-white/60 flex items-center justify-between">
@@ -630,4 +640,5 @@ function handleOptimizationFeedbackInput(event: Event) {
         </div>
       </div>
   </div>
+
 </template>

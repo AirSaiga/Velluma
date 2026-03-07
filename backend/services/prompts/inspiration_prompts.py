@@ -1,8 +1,7 @@
 """
 点子启发 Prompt 构建模块
 
-提供轻量级的 Prompt 构建函数，用于生成灵感卡片。
-仅加载 4 个支柱上下文：世界观、前情提要、角色简介、开放伏笔。
+提供基于“金牌网文编辑”人设的 Prompt 构建函数，用于生成高质量的剧情灵感。
 """
 
 from typing import List
@@ -13,57 +12,109 @@ def build_inspiration_agent_prompt(
     recent_context: str,
     characters_brief: str,
     open_hooks: str,
+    location_context: str = "",
+    current_chapter_context: str = "",
+    chapter_title: str = "",
+    global_taboos: str = None,
+    author_intent: str = None,
 ) -> List[dict]:
     """
     构建点子启发 Agent 的 Prompt。
 
-    只加载最少断连的上下文，高 Temperature 调用 LLM，
-    强制返回结构化的 JSON 灵感卡片。
+    采用“金牌网文编辑”人设，结合 Negative Guardrails (负面护栏) 和
+    层级化的 User Prompt 结构，强制 LLM 输出结构化、高可用的剧情灵感。
 
     Args:
         worldview_summary: 核心世界观的极简设定摘要
-        recent_context: 前情提要/当前在此处的剧情
+        recent_context: 前情提要/上一章结尾
         characters_brief: 在场核心角色的一句话快照
-        open_hooks: 当前未解决的悬念/伏笔列表
+        open_hooks: 当前伏笔列表（包含已解决和未解决）
+        location_context: 地图和活动范围限制
+        current_chapter_context: 当前章节已有的部分大纲/正文
+        chapter_title: 当前章节标题
+        global_taboos: 全局禁忌/核心母题（最高优先级）
+        author_intent: 作者创作意图/临时指令（最高优先级）
 
     Returns:
         符合 OpenAI messages 格式的列表，包含 system 和 user prompt
     """
-    sys_prompt = """你是一位顶尖的网文金牌编辑和剧情规划师。当前作者思路卡壳，需要你提供后续剧情的灵感碎片。
+    sys_prompt = """你是一位拥有十五年经验的“金牌网文编辑”和剧情架构师。你深谙网文读者的爽点、期待感管理（Expectation Management）和节奏把控。
+你的任务是协助作者突破瓶颈，基于现有上下文，提供高价值、可落地的剧情灵感碎片。
 
-你必须输出符合特定 JSON Schema 的结果，包含 3 个不同维度的剧情点子：
+## 核心原则与负面护栏 (Negative Guardrails)
+1. **拒绝陈词滥调**：不要提供俗套、甚至读者都能猜到的剧情发展。点子应当具有新意或独特的切入点。
+2. **严禁 OOC (Out Of Character)**：所有点子必须严格符合角色性格逻辑，不得为了推剧情而强行让角色降智或行为异常。
+3. **拒绝模糊指令**：不要说“发生了一场冲突”，要具体描述“谁因何事与谁发生了肢体冲突，导致了什么后果”。内容必须具体、画面感强。
+4. **逻辑自洽**：点子不得与世界观规则或已知前文产生硬性逻辑冲突。
 
-1. plot_twist (剧情转折点)：一个意外的事件走向或外力介入，打破当前的僵局。
+## 输出任务定义
+你必须返回一个符合 JSON Schema 的对象，包含 `inspirations` 列表，其中有且仅有 4 个不同维度的灵感卡片：
 
-2. key_conflict (关键冲突点)：揭示或激化在场角色之间的核心矛盾，推高情绪张力。
+1. **plot_twist (剧情转折)**：意料之外、情理之中的反转，打破当前平衡，引入新的变数。
+2. **key_conflict (核心冲突)**：激化现有矛盾，制造高潮或情绪爆发点，推动人物关系变化。
+3. **new_hook (新设伏笔)**：埋下草蛇灰线，抛出神秘线索或诡异细节，为未来剧情制造悬念。
+4. **smooth_narrative (平滑推进)**：在低张力区间丰富细节、铺垫情感、扩展世界观或进行日常互动，为下一波高潮蓄势。
 
-3. new_hook (新设伏笔/草蛇灰线)：抛出一个看似不起眼的诡异细节或神秘线索，利用现有伏笔或为未来做铺垫。
+## JSON 输出格式
+请严格遵守以下 JSON 结构，不要包含任何 markdown 代码块标记或其他文字：
 
-格式要求：必须返回合法的 JSON 对象，包含 3 个点子，每个点子包含以下字段：
-- idea_type: "plot_twist" | "key_conflict" | "new_hook"
-- title: 点子的简短标题
-- description: 百字左右的具体事件描述
-- impact: 这步棋对后续格局的影响/好处
+{
+  "inspirations": [
+    {
+      "idea_type": "plot_twist" | "key_conflict" | "new_hook" | "smooth_narrative",
+      "title": "简练有力的标题 (10字内)",
+      "description": "具体的剧情事件描述 (50-100字)。必须包含：谁(Who)、做了什么(Action)、结果如何(Result)。",
+      "impact": "该情节对后续格局的价值或对读者的情绪影响 (30字内)。"
+    }
+  ]
+}
+"""
 
-请严格按照 JSON 格式输出，不要包含任何其他文字。"""
+    # 构建层级化的 User Prompt
+    user_prompt_parts = []
 
-    user_prompt = f"""### 1. 故事基本盘
+    # 0. 绝对最高优先级指令 (Absolute Highest Priority)
+    if global_taboos or author_intent:
+        user_prompt_parts.append("## 0. 绝对最高优先级指令 (Absolute Highest Priority)")
+        if global_taboos:
+            user_prompt_parts.append(f"【全局禁忌/核心母题】\n{global_taboos}")
+        if author_intent:
+            user_prompt_parts.append(f"【作者创作意图】\n{author_intent}")
+        user_prompt_parts.append("")
 
-{worldview_summary}
+    user_prompt_parts.extend([
+        "请基于以下小说上下文，为我构思后续剧情灵感：",
+        "",
+        "## 1. 世界观与基础设定 (Worldview)",
+        worldview_summary or "（暂无特殊世界观设定）",
+        "",
+        "## 2. 前情提要 (Story So Far)",
+        recent_context or "（暂无前情提要）",
+        "",
+        f"## 3. 当前章节进度 (Current Chapter: {chapter_title or '未命名'})",
+        current_chapter_context if current_chapter_context else "（本章尚未开始撰写，处于开头阶段）",
+        "",
+        "## 4. 登场角色快照 (Active Characters)",
+        characters_brief or "（暂无活跃角色信息）",
+        "",
+        "## 5. 待解决伏笔 (Open Hooks)",
+        open_hooks or "（暂无记录的伏笔）",
+    ])
 
-### 2. 前情提要/当前在此处的剧情
+    if location_context:
+        user_prompt_parts.extend([
+            "",
+            "## 6. 场景与限制 (Location & Constraints)",
+            location_context,
+        ])
 
-{recent_context}
+    user_prompt_parts.extend([
+        "",
+        "---",
+        "请立即开始头脑风暴，严格按照 System Prompt 定义的 JSON 格式输出 4 个灵感卡片。"
+    ])
 
-### 3. 在场核心角色 (快照)
-
-{characters_brief}
-
-### 4. 当前未解决的悬念/伏笔 (Plot Ledger)
-
-{open_hooks}
-
-请根据以上受限的上下文，头脑风暴并输出紧扣这四个支柱的 3 个灵感卡片。不要生成正文对话，只要干练的情节梗概！"""
+    user_prompt = "\n".join(user_prompt_parts)
 
     return [
         {"role": "system", "content": sys_prompt},

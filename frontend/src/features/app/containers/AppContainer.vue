@@ -40,8 +40,8 @@ const showSettingsModal = ref(false)
 const notesStatus = ref('idle')
 const notesError = ref('')
 const localBookNotes = ref('')
-const bookForm = ref({ title: '', genre: '', global_sys_prompt: '' })
-const manageBookForm = ref({ title: '', genre: '' })
+const bookForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' })
+const manageBookForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
 
 const sortedChapters = computed(() => {
@@ -158,12 +158,13 @@ async function createBook() {
   try {
     const newBook = await bookApi.create({
       ...bookForm.value,
-      global_sys_prompt: bookForm.value.global_sys_prompt || ''
+      global_sys_prompt: bookForm.value.global_sys_prompt || '',
+      core_motifs_taboos: bookForm.value.core_motifs_taboos || ''
     })
     books.value.push(newBook)
     currentBookId.value = newBook.id
     showBookModal.value = false
-    bookForm.value = { title: '', genre: '', global_sys_prompt: '' }
+    bookForm.value = { title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' }
   } catch (error) {
     showToast('创建失败: ' + error.message, 'error')
   }
@@ -407,7 +408,8 @@ function openManageBookModal() {
   if (!currentBook.value) return
   manageBookForm.value = {
     title: currentBook.value.title || '',
-    genre: currentBook.value.genre || ''
+    genre: currentBook.value.genre || '',
+    core_motifs_taboos: currentBook.value.core_motifs_taboos || ''
   }
   showManageBookModal.value = true
 }
@@ -417,7 +419,8 @@ async function saveManageBook() {
   if (!manageBookForm.value.title.trim()) return
   await updateBook({
     title: manageBookForm.value.title,
-    genre: manageBookForm.value.genre
+    genre: manageBookForm.value.genre,
+    core_motifs_taboos: manageBookForm.value.core_motifs_taboos
   })
   showManageBookModal.value = false
 }
@@ -702,6 +705,16 @@ onMounted(async () => {
               placeholder="书籍的整体风格和基调..."
             />
           </div>
+
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">核心母题与禁忌 (可选)</label>
+            <textarea
+              v-model="bookForm.core_motifs_taboos"
+              rows="3"
+              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              placeholder="列出本书的核心主题、反复出现的意象，以及绝对不能出现的情节或风格..."
+            />
+          </div>
         </div>
 
         <div class="flex justify-end gap-3 mt-6">
@@ -743,6 +756,16 @@ onMounted(async () => {
               type="text"
               class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
               placeholder="如：科幻、奇幻、都市"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">核心母题与禁忌 (可选)</label>
+            <textarea
+              v-model="manageBookForm.core_motifs_taboos"
+              rows="3"
+              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              placeholder="列出本书的核心主题、反复出现的意象，以及绝对不能出现的情节或风格..."
             />
           </div>
         </div>

@@ -51,6 +51,7 @@ class Book(Base):
     title = Column(String(500), nullable=False)
     genre = Column(String(100), nullable=True)
     global_sys_prompt = Column(Text, nullable=True)
+    core_motifs_taboos = Column(Text, nullable=True)
     worldview_settings = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
 

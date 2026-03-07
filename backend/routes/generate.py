@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
-from backend.models import Chapter, ChapterEntity, CharacterRelationship, Book, Character, PlotLedger, PlotLedgerStatus
+from backend.models import Chapter, ChapterEntity, CharacterRelationship, Book, Character, PlotLedger, PlotLedgerStatus, MapLocation, ChapterMapLocation
 
 from backend.core.dependencies import get_chapter_repository
 from backend.repositories import ChapterRepository
@@ -13,6 +13,7 @@ from backend.schemas import (
     GenerateChapterAgenticPreviewResponse,
     GenerateChapterAgenticWithBeatsRequest,
     OptimizeChapterRequest,
+    OptimizeSelectionRequest,
     FormatTextRequest,
     InspirationRequest,
     InspirationResponse,
@@ -26,7 +27,7 @@ from backend.services.chapter_generation import (
     preview_agentic_beats,
     refine_draft,
 )
-from backend.services.llm_client import format_text_with_llm
+from backend.services.llm_client import format_text_with_llm, optimize_selection_with_llm
 from backend.services.prompts.inspiration_prompts import build_inspiration_agent_prompt
 import json
 import logging
@@ -131,9 +132,14 @@ async def optimize_chapter(
     chapter_id = request.chapter_id
 
     # 1. 获取章节和书籍
-    # 使用 selectinload 预加载 book，避免 session 关闭后访问出错
+    # 使用 selectinload 预加载 book 和 story_beats，避免 session 关闭后访问出错
     result = await db.execute(
-        select(Chapter).options(selectinload(Chapter.book)).where(Chapter.id == chapter_id)
+        select(Chapter)
+        .options(
+            selectinload(Chapter.book),
+            selectinload(Chapter.story_beats)
+        )
+        .where(Chapter.id == chapter_id)
     )
     chapter = result.scalar_one_or_none()
     if not chapter:
@@ -192,6 +198,38 @@ async def optimize_chapter(
     )
     
     return {"optimized_content": refined_text}
+
+
+# =============================================================================
+# 选中文本优化
+# =============================================================================
+
+@router.post("/optimize_selection")
+async def optimize_selection(
+    request: OptimizeSelectionRequest,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+):
+    """
+    对用户选中的文本进行优化。
+    """
+    chapter = await chapter_repo.get_by_id(request.chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+        
+    outline = chapter.outline_text or "（暂无大纲）"
+    
+    optimized_text = await optimize_selection_with_llm(
+        selected_text=request.selected_text,
+        context_before=request.context_before,
+        context_after=request.context_after,
+        outline=outline,
+        user_instruction=request.user_instruction,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model,
+    )
+    
+    return {"optimized_text": optimized_text}
 
 
 # =============================================================================
@@ -348,14 +386,37 @@ async def generate_inspiration(
     if not worldview_summary:
         worldview_summary = "（暂无详细世界观设定）"
 
-    recent_context = request.current_context_snippet
-    if not recent_context.strip():
-        if chapter.outline_text:
-            recent_context = f"本章大纲：{chapter.outline_text}"
-        elif chapter.summary:
-            recent_context = f"本章摘要：{chapter.summary}"
+    prev_chapters_result = await db.execute(
+        select(Chapter)
+        .where(
+            Chapter.book_id == request.book_id,
+            Chapter.chapter_number < chapter.chapter_number
+        )
+        .order_by(Chapter.chapter_number.desc())
+        .limit(1)
+    )
+    prev_chapter = prev_chapters_result.scalar_one_or_none()
+    if prev_chapter:
+        context_parts = []
+        ch_title = f"第{prev_chapter.chapter_number}章"
+        if prev_chapter.outline_text:
+            context_parts.append(f"{ch_title}大纲：{prev_chapter.outline_text[:300]}")
+        if prev_chapter.content_text:
+            context_parts.append(f"{ch_title}结尾：{prev_chapter.content_text[-300:]}")
+        if prev_chapter.summary:
+            context_parts.append(f"{ch_title}摘要：{prev_chapter.summary[:200]}")
+        recent_context = "\n".join(context_parts) if context_parts else "（暂无前情提要）"
+    else:
+        recent_context = "（暂无前情提要）"
+
+    current_chapter_context = ""
+    if chapter.outline_text:
+        current_chapter_context = f"当前本章已有大纲：{chapter.outline_text[:500]}"
+    if chapter.content_text and len(chapter.content_text) > 50:
+        if current_chapter_context:
+            current_chapter_context += f"\n当前本章正文已写：{chapter.content_text[-300:]}"
         else:
-            recent_context = "（暂无前情提要）"
+            current_chapter_context = f"当前本章正文已写：{chapter.content_text[-300:]}"
 
     characters_brief = ""
     if request.active_character_ids:
@@ -381,27 +442,49 @@ async def generate_inspiration(
 
     hooks_result = await db.execute(
         select(PlotLedger)
-        .where(
-            PlotLedger.book_id == request.book_id,
-            PlotLedger.status == PlotLedgerStatus.OPEN.value,
-        )
+        .where(PlotLedger.book_id == request.book_id)
         .order_by(PlotLedger.created_at.desc())
-        .limit(10)
+        .limit(20)
     )
-    open_hooks = hooks_result.scalars().all()
-    if open_hooks:
+    all_hooks = hooks_result.scalars().all()
+    open_hooks = [h for h in all_hooks if h.status == PlotLedgerStatus.OPEN.value]
+    recent_hooks = all_hooks[:10]
+    hooks_to_show = open_hooks[:10] if len(open_hooks) >= 10 else (open_hooks + recent_hooks[:10 - len(open_hooks)])
+    if hooks_to_show:
         hook_lines = []
-        for hook in open_hooks:
-            hook_lines.append(f"- {hook.ledger_key}: {hook.content[:100]}")
+        for hook in hooks_to_show:
+            status_tag = "[未解决]" if hook.status == PlotLedgerStatus.OPEN.value else "[已解决]"
+            hook_lines.append(f"- {hook.ledger_key} {status_tag}: {hook.content[:80]}")
         open_hooks_text = "\n".join(hook_lines)
     else:
-        open_hooks_text = "（暂无未解决的伏笔）"
+        open_hooks_text = "（暂无伏笔记录）"
+
+    chapter_locations_result = await db.execute(
+        select(ChapterMapLocation)
+        .where(ChapterMapLocation.chapter_id == request.chapter_id)
+        .options(selectinload(ChapterMapLocation.location))
+    )
+    chapter_locations = chapter_locations_result.scalars().all()
+
+    location_context = ""
+    if chapter_locations:
+        location_names = []
+        for cl in chapter_locations:
+            if cl.location:
+                location_names.append(cl.location.name)
+        if location_names:
+            location_context = f"本章涉及地点：{', '.join(location_names)}"
 
     prompt_messages = build_inspiration_agent_prompt(
         worldview_summary=worldview_summary,
         recent_context=recent_context,
         characters_brief=characters_brief,
         open_hooks=open_hooks_text,
+        location_context=location_context,
+        current_chapter_context=current_chapter_context,
+        chapter_title=request.chapter_title or chapter.title or "",
+        global_taboos=book.core_motifs_taboos if book else None,
+        author_intent=request.author_intent,
     )
 
     max_retries = 3
@@ -416,6 +499,7 @@ async def generate_inspiration(
                 base_url=request.base_url,
                 model=request.model,
                 temperature=request.temperature,
+                top_p=0.9, # 通用大模型优化参数: 截断长尾，减少幻觉
                 response_format={"type": "json_object"},
                 max_tokens=2048,
             )
@@ -439,15 +523,15 @@ async def generate_inspiration(
             # 过滤非字典项
             inspirations_data = [item for item in inspirations_data if isinstance(item, dict)]
 
-            if len(inspirations_data) >= 3:
-                inspirations_data = inspirations_data[:3]
+            if len(inspirations_data) >= 4:
+                inspirations_data = inspirations_data[:4]
             else:
                 raise ValueError(f"返回的有效灵感数量不足：{len(inspirations_data)}")
 
             inspirations = []
             for item in inspirations_data:
                 idea_type = item.get("idea_type", "plot_twist")
-                if idea_type not in ["plot_twist", "key_conflict", "new_hook"]:
+                if idea_type not in ["plot_twist", "key_conflict", "new_hook", "smooth_narrative"]:
                     idea_type = "plot_twist"
                 inspirations.append({
                     "idea_type": idea_type,

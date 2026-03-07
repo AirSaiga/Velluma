@@ -306,6 +306,8 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
         open_hooks=open_hooks,
         previous_chapter_summary=previous_summary,
         locations=locations,
+        global_taboos=book.core_motifs_taboos if book else None,
+        author_intent=request.author_intent,
     )
     planner_result_raw = await call_llm(
         system_prompt=planner_system_prompt,
@@ -561,6 +563,8 @@ async def _generate_agentic_chapter_stream(
                     open_hooks=open_hooks,
                     previous_chapter_summary=previous_summary,
                     locations=locations,
+                    global_taboos=book.core_motifs_taboos if book else None,
+                    author_intent=request.author_intent,
                 )
                 yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
                 planner_result_raw = await call_llm_timed(
