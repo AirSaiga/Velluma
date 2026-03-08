@@ -220,6 +220,13 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
         return {"beats": [], "debug_prompt": None}
+    
+    # Update chapter settings from request for preview
+    if request.tension_level is not None:
+        chapter.tension_level = request.tension_level
+    if request.pacing_style:
+        chapter.pacing_style = request.pacing_style
+
     word_count = request.word_count or 2000
     book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
     book = book_result.scalar_one_or_none()
@@ -429,6 +436,13 @@ async def _generate_agentic_chapter_stream(
     if not chapter:
         yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
         return
+    
+    # Update chapter settings from request
+    if request.tension_level is not None:
+        chapter.tension_level = request.tension_level
+    if request.pacing_style:
+        chapter.pacing_style = request.pacing_style
+    
     force_fast_mode = _safe_bool_from_env("AGENTIC_FORCE_FAST_MODE", default=False)
     effective_fast_mode = bool(request.fast_mode or force_fast_mode)
     max_iterations = 1 if effective_fast_mode else request.max_iterations

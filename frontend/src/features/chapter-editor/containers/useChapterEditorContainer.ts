@@ -17,13 +17,7 @@ import {
   validateAgenticForm
 } from '../../../composables/useAgenticConfig'
 import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
-import type { AgenticFormState, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
-
-interface ApiConfig {
-  api_key: string
-  base_url: string
-  model: string
-}
+import type { AgenticFormState, ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
 
 export interface ChapterEditorContainerProps {
   selectedChapter: Chapter | null
@@ -108,6 +102,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const agenticFieldFeedback = computed(() => getAgenticFieldFeedback(agenticForm.value))
   const agenticGroupFields = computed(() => ({
     steering: ['author_intent'] as Array<keyof AgenticFormState>,
+    style: ['tension_level', 'pacing_style'] as Array<keyof AgenticFormState>,
     generation: ['word_count'] as Array<keyof AgenticFormState>,
     memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'] as Array<keyof AgenticFormState>,
     workflow: ['refinement_depth'] as Array<keyof AgenticFormState>
@@ -620,7 +615,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    const nextValue = field === 'word_count' || field === 'rag_lambda' ? Number(target.value) : target.value
+    const nextValue = field === 'word_count' || field === 'rag_lambda' || field === 'tension_level' ? Number(target.value) : target.value
     agenticForm.value = {
       ...agenticForm.value,
       [field]: nextValue as AgenticFormState[keyof AgenticFormState]
@@ -651,18 +646,21 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function getAgenticFieldStep(field: keyof AgenticFormState) {
     if (field === 'word_count') return 100
     if (field === 'rag_lambda') return 0.1
+    if (field === 'tension_level') return 1
     return 0.01
   }
 
   function getAgenticFieldMin(field: keyof AgenticFormState) {
     if (field === 'word_count') return 500
     if (field === 'rag_lambda') return 0
+    if (field === 'tension_level') return 1
     return 0
   }
 
   function getAgenticFieldMax(field: keyof AgenticFormState) {
     if (field === 'word_count') return 10000
     if (field === 'rag_lambda') return undefined
+    if (field === 'tension_level') return 10
     return undefined
   }
 

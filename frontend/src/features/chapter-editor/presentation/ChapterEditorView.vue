@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
-import type { AgenticFormState, Chapter, Character, PacingStyle } from '../../../types'
+import type { AgenticFormState, ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
 import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
 
 interface BeatPreviewItem {
@@ -17,12 +17,6 @@ interface BeatPreviewItem {
   word_count_target: number
   target_words: number
   hook_ids: string[]
-}
-
-interface ApiConfig {
-  api_key: string
-  base_url: string
-  model: string
 }
 
 const props = defineProps<{

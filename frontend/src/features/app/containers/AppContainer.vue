@@ -232,7 +232,7 @@ async function saveBookNotes() {
 
 async function updateApiConfig(data) {
   apiConfig.value = { ...apiConfig.value, ...data }
-  localStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
+  sessionStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
 }
 
 function handleRightTabChange(tab) {
@@ -500,7 +500,7 @@ async function loadCharacters() {
 }
 
 onMounted(async () => {
-  const savedConfig = localStorage.getItem('velluma_api_config')
+  const savedConfig = sessionStorage.getItem('velluma_api_config')
   if (savedConfig) {
     apiConfig.value = JSON.parse(savedConfig)
   }

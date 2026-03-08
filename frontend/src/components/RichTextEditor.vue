@@ -118,6 +118,10 @@ const showUndoHint = ref(false)
 const lastAppliedOptimization = ref(null)
 let undoHintTimer = null
 let selectionDebounceTimer = null
+const pendingExternalUpdate = ref(null)
+
+const SELECTION_DEBOUNCE_MS = 600
+const UNDO_HINT_DURATION_MS = 4500
 
 const detectEntityAroundCursor = (editor, from) => {
   const start = Math.max(0, from - 24)
@@ -237,6 +241,9 @@ const editor = useEditor({
   onUpdate: ({ editor }) => {
     emit('update:modelValue', editor.getHTML())
   },
+  onBlur: ({ editor }) => {
+    applyPendingExternalUpdate()
+  },
   onSelectionUpdate: ({ editor }) => {
     // 如果正在处理或审核优化，不要更新选区菜单状态
     if (['processing', 'reviewing'].includes(optimizationState.value)) {
@@ -300,7 +307,7 @@ const editor = useEditor({
       showSelectionMenu.value = true
       optimizationState.value = 'toolbar'
       emitEntityFocus(currentSelection.value.text)
-    }, 600) // 延迟 600ms 以确保选区稳定
+    }, SELECTION_DEBOUNCE_MS) // 延迟以确保选区稳定
   }
 })
 
@@ -319,12 +326,14 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
   // 1. 如果 ID 变了（切换章节），强制更新内容
   if (newId !== oldId) {
     editor.value.commands.setContent(newValue, false)
+    pendingExternalUpdate.value = null
     return
   }
 
   // 2. 如果内容完全一致，不需要更新
   const isSame = editor.value.getHTML() === newValue
   if (isSame) {
+    pendingExternalUpdate.value = null
     return
   }
 
@@ -333,11 +342,20 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
   //      此时不应该更新，否则会打断输入法并重置光标
   //    - 如果编辑器没焦点，说明是外部更新（如自动生成、协同编辑），应该更新
   if (editor.value.isFocused) {
+    pendingExternalUpdate.value = newValue
     return
   }
 
   editor.value.commands.setContent(newValue, false)
+  pendingExternalUpdate.value = null
 })
+
+const applyPendingExternalUpdate = () => {
+  if (pendingExternalUpdate.value && !editor.value?.isFocused) {
+    editor.value?.commands.setContent(pendingExternalUpdate.value, false)
+    pendingExternalUpdate.value = null
+  }
+}
 
 onBeforeUnmount(() => {
   clearUndoHint()
@@ -588,7 +606,7 @@ const confirmOptimization = () => {
   undoHintTimer = setTimeout(() => {
     showUndoHint.value = false
     undoHintTimer = null
-  }, 4500)
+  }, UNDO_HINT_DURATION_MS)
 
   resetOptimization()
 }

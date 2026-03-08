@@ -25,6 +25,7 @@ const importExportText = ref('')
 
 const items = ref([])
 let autosaveTimer
+const AUTOSAVE_DELAY_MS = 2000
 
 async function loadWorldview() {
   if (!props.bookId) return
@@ -125,7 +126,7 @@ function markDirty() {
   autosaveTimer = setTimeout(() => {
     if (status.value !== 'dirty' || isSaving.value) return
     saveWorldview()
-  }, 1200)
+  }, AUTOSAVE_DELAY_MS)
 }
 
 function addItem() {

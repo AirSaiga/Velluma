@@ -139,6 +139,7 @@ def build_planner_agent_prompt(
             user_prompt_parts.append(f"【全局禁忌/核心母题】\n{global_taboos}")
         if author_intent:
             user_prompt_parts.append(f"【作者创作意图】\n{author_intent}")
+            user_prompt_parts.append("重要提示：若【作者创作意图】与【章节大纲】的内容顺序或逻辑存在冲突，请优先满足【作者创作意图】。你可以调整大纲事件的顺序、改写开头或重新设计情节结构（例如采用倒叙、直接切入冲突等），以确保创作意图得到完美执行。")
         user_prompt_parts.append("")
 
     user_prompt_parts.append(f"""请规划以下章节：

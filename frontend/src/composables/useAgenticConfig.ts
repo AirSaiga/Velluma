@@ -34,6 +34,10 @@ export const AGENTIC_GROUPS = {
     title: '创作意图',
     description: '指导 AI 的写作方向。'
   },
+  style: {
+    title: '风格基调',
+    description: '调节剧情张力与叙事节奏。'
+  },
   generation: {
     title: '生成控制',
     description: '控制本章篇幅与生成稳定性。'
@@ -50,6 +54,8 @@ export const AGENTIC_GROUPS = {
 
 export const AGENTIC_DEFAULTS: AgenticFormState = {
   word_count: 2000,
+  tension_level: 5,
+  pacing_style: 'balanced',
   memory_span: 'balanced_reference',
   creativity_level: 'balanced_creation',
   progression_preference: 'focus_scene_action',
@@ -76,6 +82,20 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     rangeHint: '范围 500~10000',
     recommended: '推荐 2000',
     group: 'generation'
+  },
+  tension_level: {
+    label: '剧情张力等级',
+    description: '控制冲突的激烈程度与节奏紧迫感。',
+    rangeHint: '范围 1~10',
+    recommended: '默认：5',
+    group: 'style'
+  },
+  pacing_style: {
+    label: '叙事节奏偏好',
+    description: '决定情节推进的速度与细节描写的比重。',
+    rangeHint: '可选：慢热 / 平衡 / 快节奏',
+    recommended: '默认：平衡',
+    group: 'style'
   },
   memory_span: {
     label: 'AI 记忆回溯跨度',
@@ -122,6 +142,11 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
 }
 
 export const AGENTIC_FIELD_OPTIONS: Partial<Record<keyof AgenticFormState, AgenticFieldOption[]>> = {
+  pacing_style: [
+    { label: '慢热', value: 'slow_burn' },
+    { label: '平衡', value: 'balanced' },
+    { label: '快节奏', value: 'fast_paced' }
+  ],
   memory_span: [
     { label: '仅看近期', value: 'recent_only' },
     { label: '正常参考', value: 'balanced_reference' },
@@ -234,9 +259,16 @@ export function normalizeAgenticForm(input: Partial<AgenticFormState & AgenticLe
     Object.keys(REFINEMENT_ITERATIONS) as Array<AgenticFormState['refinement_depth']>,
     normalizeRefinementFromLegacy(input)
   )
+  const normalizedPacing = normalizeSelect(
+    input.pacing_style,
+    ['slow_burn', 'balanced', 'fast_paced'] as Array<AgenticFormState['pacing_style']>,
+    AGENTIC_DEFAULTS.pacing_style
+  )
 
   return {
     word_count: Math.round(clamp(toNumber(input.word_count, AGENTIC_DEFAULTS.word_count), 1)),
+    tension_level: Math.round(clamp(toNumber(input.tension_level, AGENTIC_DEFAULTS.tension_level), 1, 10)),
+    pacing_style: normalizedPacing,
     memory_span: normalizedMemorySpan,
     creativity_level: normalizedCreativity,
     progression_preference: normalizedProgression,
@@ -253,7 +285,7 @@ export function buildLegacyAgenticFields(form: Partial<AgenticFormState>): Agent
   const betaRatio = PROGRESSION_BETA_RATIO[normalized.progression_preference]
   const residual = roundFloat(1 - ragAlpha)
   const ragBeta = roundFloat(residual * betaRatio)
-  const ragGamma = roundFloat(1 - ragAlpha - ragBeta)
+  const ragGamma = roundFloat(Math.max(0, 1 - ragAlpha - ragBeta))
   const maxIterations = REFINEMENT_ITERATIONS[normalized.refinement_depth]
 
   return {
@@ -317,6 +349,8 @@ export function buildAgenticPayload(params: {
       base_url: params.apiConfig.base_url || undefined,
       model: params.apiConfig.model || 'gpt-4o-mini',
       word_count: normalized.word_count,
+      tension_level: normalized.tension_level,
+      pacing_style: normalized.pacing_style,
       max_iterations: legacyFields.max_iterations,
       rag_top_k: legacyFields.rag_top_k,
       rag_alpha: legacyFields.rag_alpha,
@@ -352,6 +386,12 @@ export function getAgenticFieldFeedback(input: Partial<AgenticFormState>) {
   if (wordCount !== null && (wordCount < 500 || wordCount > 10000)) {
     feedback.word_count = `${AGENTIC_FIELD_CONFIG.word_count.label}需在 500~10000 之间`
   }
+
+  const tension = checkNumber('tension_level')
+  if (tension !== null && (tension < 1 || tension > 10)) {
+    feedback.tension_level = `${AGENTIC_FIELD_CONFIG.tension_level.label}需在 1~10 之间`
+  }
+  checkSelect('pacing_style', ['slow_burn', 'balanced', 'fast_paced'])
 
   checkSelect('memory_span', Object.keys(MEMORY_SPAN_TOP_K))
   checkSelect('creativity_level', Object.keys(CREATIVITY_ALPHA))

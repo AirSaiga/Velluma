@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { InspirationIdea, InspirationIdeaType } from '../types'
+import type { InspirationIdea, InspirationIdeaType, ApiConfig } from '../types'
 import { generateApi } from '../services/api'
-
-interface ApiConfig {
-  api_key: string
-  base_url: string
-  model: string
-}
 
 const props = defineProps<{
   show: boolean
@@ -17,6 +11,7 @@ const props = defineProps<{
   currentContext: string
   activeCharacterIds: string[]
   apiConfig: ApiConfig
+  initialAuthorIntent?: string
 }>()
 
 const emit = defineEmits<{
@@ -45,6 +40,7 @@ const ideaTypeColors: Record<InspirationIdeaType, string> = {
 
 watch(() => props.show, async (newVal) => {
   if (newVal) {
+    authorIntent.value = props.initialAuthorIntent || ''
     await fetchInspirations()
   }
 })

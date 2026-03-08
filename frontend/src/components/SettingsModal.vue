@@ -103,9 +103,9 @@ async function handleResetLocal() {
     message: '将清除本地保存的 API 配置、主题与布局偏好。不会删除任何书籍/章节/角色数据。确定继续？'
   })
   if (!ok) return
-  localStorage.removeItem('velluma_api_config')
   localStorage.removeItem('velluma_theme')
   localStorage.removeItem('velluma_ui_prefs_v1')
+  sessionStorage.removeItem('velluma_api_config')
   emit('close')
   window.location.reload()
 }

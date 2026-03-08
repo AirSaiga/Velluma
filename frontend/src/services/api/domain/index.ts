@@ -158,17 +158,10 @@ export const mapApi = {
 export const generateApi = {
   stream: async (data: any, onChunk?: (chunk: string) => void, onDone?: () => void, onError?: (error: string) => void) => {
     const baseUrl = await getApiBase()
-    console.log('[DEBUG] generateApi.stream: 开始请求', { baseUrl, chapter_id: data.chapter_id })
 
     streamSse('/generate_chapter', data, {
       tolerateIncompleteWhenHasContent: true,
       onPayload: payload => {
-        console.log('[DEBUG] generateApi.stream: 收到数据', {
-          hasContent: !!payload.content,
-          hasError: !!payload.error,
-          hasDone: !!payload.done,
-          hasPrompt: !!payload.prompt
-        })
         if (payload.prompt) {
           publishPromptData(payload.prompt)
         } else if (payload.content) {
@@ -184,15 +177,11 @@ export const generateApi = {
         onError?.(message)
       }
     }).catch(err => {
-      console.error('[DEBUG] generateApi.stream: fetch 错误', err)
       onError?.(err.message)
     })
   },
 
   generateSync: async (data: any) => {
-    const baseUrl = await getApiBase()
-    console.log('[DEBUG] generateApi.generateSync: 开始请求', { baseUrl, chapter_id: data.chapter_id })
-
     const response = await requestRaw('/generate_chapter_sync', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -232,9 +221,6 @@ export const generateApi = {
   },
 
   previewAgenticBeats: async (data: any) => {
-    const baseUrl = await getApiBase()
-    console.log('[DEBUG] generateApi.previewAgenticBeats: 开始请求', { baseUrl, chapter_id: data.chapter_id })
-
     const response = await requestRaw('/generate_chapter_agentic_preview_beats', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -257,20 +243,10 @@ export const generateApi = {
     },
     endpoint = '/generate_chapter_agentic'
   ) => {
-    const baseUrl = await getApiBase()
-    console.log('[DEBUG] generateApi.streamAgentic: 开始请求', { baseUrl, chapter_id: data.chapter_id })
-
     let hasCompleted = false
 
     streamSse(endpoint, data, {
       onPayload: payload => {
-        console.log('[DEBUG] generateApi.streamAgentic: 收到数据', {
-          event: payload.event,
-          hasContent: !!payload.content,
-          hasError: !!payload.error,
-          hasDone: !!payload.done
-        })
-
         if (payload.prompt) {
           publishPromptData(payload.prompt)
         }
@@ -294,7 +270,6 @@ export const generateApi = {
       },
       onDone: () => {
         if (!hasCompleted) {
-          console.warn('[DEBUG] generateApi.streamAgentic: 流意外结束，未收到 DONE 事件')
           callbacks.onError?.('生成过程意外中断，未收到完成信号')
         }
       },
@@ -303,7 +278,6 @@ export const generateApi = {
         callbacks.onError?.(message)
       }
     }).catch(err => {
-      console.error('[DEBUG] generateApi.streamAgentic: fetch 错误', err)
       if (!hasCompleted) {
         callbacks.onError?.(err.message)
       }

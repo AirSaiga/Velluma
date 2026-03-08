@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import ChapterEditorContainer from '../features/chapter-editor/containers/ChapterEditorContainer.vue'
-import type { Chapter, Character } from '../types'
-
-interface ApiConfig {
-  api_key: string
-  base_url: string
-  model: string
-}
+import type { Chapter, Character, ApiConfig } from '../types'
 
 const props = defineProps<{
   selectedChapter: Chapter | null

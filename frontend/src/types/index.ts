@@ -3,6 +3,13 @@ export interface Book {
   title: string
   genre: string
   global_sys_prompt: string
+  core_motifs_taboos?: string
+}
+
+export interface ApiConfig {
+  api_key: string
+  base_url: string
+  model: string
 }
 
 export type PacingStyle = 'slow_burn' | 'balanced' | 'fast_paced'
@@ -58,6 +65,8 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   fast_mode?: boolean
   skip_minor_refine?: boolean
   author_intent?: string
+  tension_level?: number
+  pacing_style?: PacingStyle
 }
 
 export interface ConfirmedStoryBeat {
@@ -91,7 +100,9 @@ export interface AgenticFormState {
   progression_preference: 'focus_scene_action' | 'push_mainline'
   refinement_depth: 'light' | 'standard' | 'deep'
   rag_lambda: number
-  author_intent?: string
+  author_intent: string
+  tension_level: number
+  pacing_style: 'slow_burn' | 'balanced' | 'fast_paced'
 }
 
 export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook' | 'smooth_narrative'

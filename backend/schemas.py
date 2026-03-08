@@ -661,6 +661,8 @@ class GenerateChapterAgenticRequest(BaseModel):
     rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
     fast_mode: bool = Field(default=False, description="快速模式：仅生成首轮结果，不进入二轮重写")
     skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
+    tension_level: Optional[int] = Field(None, ge=1, le=10, description="剧情张力等级 (1-10)")
+    pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
 
     @model_validator(mode="after")
     def validate_rag_weight_sum(self):
