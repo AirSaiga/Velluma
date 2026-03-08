@@ -56,6 +56,8 @@ def _normalize_issue_type(raw_type, description: str) -> str:
     issue_type = str(raw_type or "").strip()
     normalized = issue_type.upper()
     description_text = str(description or "")
+    lowered_issue_type = issue_type.lower()
+    lowered_description = description_text.lower()
     if (
         normalized == "PACING_OVERFLOW"
         or "PACING_OVERFLOW" in normalized
@@ -73,6 +75,23 @@ def _normalize_issue_type(raw_type, description: str) -> str:
         or "red_line" in description_text.lower()
     ):
         return "PACING_OVERFLOW"
+    if (
+        "完整性" in issue_type
+        or "段落" in issue_type
+        or "删段" in issue_type
+        or "删减" in issue_type
+        or "压缩" in issue_type
+        or "integrity" in lowered_issue_type
+        or "paragraph" in lowered_issue_type
+        or "完整性" in description_text
+        or "段落" in description_text
+        or "删段" in description_text
+        or "删减" in description_text
+        or "压缩" in description_text
+        or "integrity" in lowered_description
+        or "paragraph" in lowered_description
+    ):
+        return "完整性缺失"
     if "OOC" in normalized:
         return "OOC"
     if "剧情遗漏" in issue_type or "PLOT MISSING" in normalized or "MISSING" in normalized:
@@ -85,7 +104,7 @@ def _normalize_issue_type(raw_type, description: str) -> str:
 def _build_default_revision_plan(has_pacing_overflow: bool) -> str:
     if has_pacing_overflow:
         return "请先回退到越界前的收束节点，删除触发 red_lines 的情节，放慢叙事节奏并悬停在对应 exit_state，再补齐必要动机后输出完整正文。"
-    return "请按章节大纲与角色设定修复逻辑问题，并返回完整正文。"
+    return "请按章节大纲与角色设定修复逻辑问题，保留原文关键段落结构，避免大幅删段，并返回完整正文。"
 
 
 def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str):
@@ -144,6 +163,7 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 3. 检查是否有逻辑硬伤或情节漏洞
 4. 检查是否遗漏了应该有的剧情点
 5. 检查是否出现 Boundary & Pacing 越界（越过 exit_state 或触发 red_lines）
+6. 检查是否存在大幅删段、关键段落缺失或过度压缩导致的完整性损伤
 
 注意：初稿已经过分段质检，请重点关注**段落间的连贯性**和**全局逻辑**，对于细枝末节的措辞问题可适当放宽。
 
@@ -153,7 +173,7 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
     "pass": true/false,
     "issues": [
         {{
-            "type": "OOC/剧情遗漏/逻辑硬伤/PACING_OVERFLOW",
+            "type": "OOC/剧情遗漏/逻辑硬伤/PACING_OVERFLOW/完整性缺失",
             "severity": "high/medium/low",
             "description": "详细描述问题"
         }}
@@ -167,8 +187,10 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 - 当存在以下任一情况时，必须新增一条 issue.type = "PACING_OVERFLOW"：
   1) 文本越过任一 beat 的 exit_state
   2) 文本触发任一 beat 的 red_lines 禁忌事件
+- 当发现重写版本相对原有叙事出现大幅删段、关键段落被删除且未等价重建时，必须新增一条 issue.type = "完整性缺失"
 - revision_plan: 给出具体的重写指导
 - 若存在 PACING_OVERFLOW，revision_plan 必须明确“回退到越界前状态、放慢节奏、悬停在对应 exit_state”
+- 若存在完整性缺失，revision_plan 必须明确“补回被删减的关键段落信息，禁止继续大幅删段”
 
 注意：你必须输出合法的 JSON 格式，不要输出任何其他内容！"""
     user_prompt = f"""请审查以下初稿:
@@ -195,7 +217,7 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
     核心任务：
     - 基于 revision_plan 针对性修改
     - 保持原有优秀部分不被破坏
-    - 确保修改后仍符合字数要求
+    - 强约束正文完整性，禁止通过大幅删段完成修改
 
     数据流：
     - revision_plan (来自 Review Agent) + draft_text → LLM 重写 → 修改后的正文
@@ -240,11 +262,6 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 ## Boundary & Pacing 边界基线
 {boundary_brief}
 
-## 【字数说明】
-★ 目标字数约 {word_count} 字仅供参考。
-★ 优先保证剧情的完整性与流畅度，不要为了凑字数或减字数而牺牲阅读体验。
-★ 如果为了把故事讲好、讲透，导致字数超出预期，是完全可以接受的。
-
 ## 你的任务
 你是一个精修编辑，需要根据审查意见对初稿进行针对性重写。
 请仔细阅读以下审查意见和初稿，然后生成修改后的版本。
@@ -256,14 +273,14 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 4. 确保修改后的内容符合章节大纲
 5. 保持角色性格一致性
 6. 如审查意见包含 PACING_OVERFLOW，必须执行“回退-降速-悬停”策略：先回退越界剧情，再放慢推进，最后停在对应 exit_state
-7. 生成内容应尽可能完整流畅，不要机械删减字数"""
+7. 重写时必须保留原稿的关键段落信息与叙事骨架，不得大幅删除段落
+8. 若必须删除局部段落，必须以等价的新段落补回信息、动机与情绪链路，保证前后完整"""
     user_prompt = f"""请根据以下审查意见重写初稿:
 
 【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
-【字数建议】约 {word_count} 字（仅供参考，完整性优先）
 
 【Boundary & Pacing 边界基线】
 {boundary_brief}
@@ -278,6 +295,11 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 1) 删除越过 exit_state 之后的推进内容
 2) 撤销触发 red_lines 的事件与行为
 3) 放慢叙事推进并停在对应 exit_state，保留必要悬念
+
+额外完整性要求：
+1) 不得为追求简洁而大幅删段
+2) 必须保留原稿中的关键情节节点、动机链与情绪递进
+3) 如需调整结构，只能重写优化，不可直接删去关键段落
 
 请直接输出修改后的完整小说正文，不需要任何额外说明或标记。请确保剧情完整连贯。"""
     return system_prompt, user_prompt

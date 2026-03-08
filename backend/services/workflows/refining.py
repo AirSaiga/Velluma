@@ -46,6 +46,7 @@ async def refine_draft(
         base_url=base_url,
         model=model,
         temperature=0.7,
+        max_tokens=10000,
     )
     
     return clean_llm_output(refined_text)

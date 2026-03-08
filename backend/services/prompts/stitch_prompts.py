@@ -31,7 +31,7 @@ def build_stitch_prompt(
         chapter: 章节实体，包含章节名、大纲等信息
         beats: 剧情节拍列表，每个节拍包含 summary、position 等信息
         chunks: 已生成的文本片段列表
-        word_count: 目标字数
+        word_count: 目标字数（保留参数，当前统稿阶段不做字数约束）
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -52,7 +52,8 @@ def build_stitch_prompt(
 4. 统一人称、时态与语气。
 5. 移除任何残留的元数据（如 JSON 标记、Markdown 代码块等）。
 6. 输出纯文本，不要标题或解释。
-7. **字数说明**：目标字数约 {word_count} 字仅供参考。请优先保证剧情的完整性与流畅度，不要为了凑字数或减字数而牺牲阅读体验。"""
+7. 统稿时不设字数上限，不得通过粗暴删段来压缩文本。
+8. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。"""
     user_prompt = f"""请统稿以下内容：
 
 【章节名】{chapter_name}

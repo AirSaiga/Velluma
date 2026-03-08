@@ -105,7 +105,7 @@ async function handleResetLocal() {
   if (!ok) return
   localStorage.removeItem('velluma_theme')
   localStorage.removeItem('velluma_ui_prefs_v1')
-  sessionStorage.removeItem('velluma_api_config')
+  localStorage.removeItem('velluma_api_config')
   emit('close')
   window.location.reload()
 }

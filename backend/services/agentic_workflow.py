@@ -112,6 +112,25 @@ def _needs_formatting(text: str) -> bool:
     return len(long_lines) >= 2
 
 
+def _is_refine_output_suspiciously_short(original_text: str, refined_text: str, revision_plan: str) -> bool:
+    original = (original_text or "").strip()
+    refined = (refined_text or "").strip()
+    if not original or not refined:
+        return False
+    if len(refined) >= len(original):
+        return False
+    ratio = len(refined) / max(1, len(original))
+    lowered_plan = str(revision_plan or "").lower()
+    has_boundary_rollback = (
+        "pacing_overflow" in lowered_plan
+        or "回退" in lowered_plan
+        or "exit_state" in lowered_plan
+        or "red_lines" in lowered_plan
+    )
+    threshold = 0.55 if has_boundary_rollback else 0.70
+    return ratio < threshold and len(original) >= 1200
+
+
 def _is_minor_only_review(review_result: dict) -> bool:
     issues = review_result.get("issues")
     if not isinstance(issues, list) or not issues:
@@ -1007,7 +1026,7 @@ async def _generate_agentic_chapter_stream(
                 base_url=request.base_url,
                 model=request.model,
                 temperature=0.4,
-                max_tokens=_clamp_int(max(2200, word_count * 3), 2200, 7000),
+                max_tokens=10000,
             )
             current_draft = _clean_llm_output(current_draft)
             if not current_draft.strip():
@@ -1048,6 +1067,7 @@ async def _generate_agentic_chapter_stream(
         else:
             refining_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'REFINING', 'message': f'发现逻辑遗漏，正在通知责编重写 (第{iteration}次)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            draft_before_refine = current_draft
             system_prompt, user_prompt = build_refine_agent_prompt(
                 chapter, book, entities, relationships, current_draft, revision_plan, word_count
             )
@@ -1066,9 +1086,30 @@ async def _generate_agentic_chapter_stream(
                 base_url=request.base_url,
                 model=request.model,
                 temperature=0.7,
-                max_tokens=_clamp_int(max(2400, word_count * 3), 2400, 7000),
+                max_tokens=10000,
             )
             current_draft = _clean_llm_output(current_draft)
+            if _is_refine_output_suspiciously_short(draft_before_refine, current_draft, revision_plan):
+                retry_user_prompt = (
+                    f"{user_prompt}\n\n"
+                    "【纠偏指令】你上一版疑似发生了内容截断或过度删段。"
+                    "请基于【当前初稿】重新完整重写，必须保留关键段落信息与叙事链路，禁止大幅删段。"
+                )
+                current_draft_retry = await call_llm_timed(
+                    "refine_retry",
+                    system_prompt=system_prompt,
+                    user_prompt=retry_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.7,
+                    max_tokens=10000,
+                )
+                current_draft_retry = _clean_llm_output(current_draft_retry)
+                if not _is_refine_output_suspiciously_short(draft_before_refine, current_draft_retry, revision_plan):
+                    current_draft = current_draft_retry
+                else:
+                    current_draft = draft_before_refine
             record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
             chapter.draft_text = current_draft
             chapter.revision_count = iteration
