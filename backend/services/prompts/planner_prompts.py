@@ -113,7 +113,9 @@ def build_planner_agent_prompt(
       "exit_state": "本段必须停住的收束状态（不得越界）",
       "red_lines": ["本段禁止发生1", "本段禁止发生2"],
       "word_count_target": 600,
-      "hook_ids": ["hk-1"]
+      "hook_ids": ["hk-1"],
+      "pacing_type": "Medium",
+      "weight": 3
     }}
   ]
 }}
@@ -126,6 +128,8 @@ def build_planner_agent_prompt(
 5. word_count_target 为正整数，总和接近章节目标字数
 6. 若存在开放伏笔，至少在一个 beat 的 hook_ids 中绑定
 7. 每个 beat 必须显式填写 entry_state、exit_state、red_lines，且 red_lines 至少 1 条
+8. pacing_type 必须是 Fast, Medium, Slow 之一
+9. weight 必须是 1-5 之间的整数
 {low_tension_rule if low_tension_rule else ''}
 10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
 11. 只输出 JSON，不要额外解释"""
@@ -214,6 +218,17 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
             red_lines = [str(item).strip() for item in raw_red_lines if str(item).strip()] if isinstance(raw_red_lines, list) else []
             if not red_lines:
                 red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
+            
+            pacing_type = str(beat.get("pacing_type") or "Medium").strip()
+            if pacing_type not in ["Fast", "Medium", "Slow"]:
+                pacing_type = "Medium"
+            
+            weight = beat.get("weight")
+            if not isinstance(weight, int):
+                weight = 3
+            else:
+                weight = max(1, min(5, weight))
+
             beats.append(
                 {
                     "position": position,
@@ -229,6 +244,8 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
                     "word_count_target": word_count_target,
                     "target_words": word_count_target,
                     "hook_ids": hook_ids,
+                    "pacing_type": pacing_type,
+                    "weight": weight,
                 }
             )
     if not beats:
@@ -248,6 +265,8 @@ def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_cou
                 "word_count_target": word_count,
                 "target_words": word_count,
                 "hook_ids": [],
+                "pacing_type": "Medium",
+                "weight": 3,
             }
         ]
     beats.sort(key=lambda item: item["position"])

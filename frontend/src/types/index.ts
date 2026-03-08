@@ -102,7 +102,7 @@ export interface AgenticFormState {
   rag_lambda: number
   author_intent: string
   tension_level: number
-  pacing_style: 'slow_burn' | 'balanced' | 'fast_paced'
+  pacing_style: PacingStyle
 }
 
 export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook' | 'smooth_narrative'

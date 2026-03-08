@@ -439,6 +439,8 @@ class StoryBeatBase(BaseModel):
     summary: str = Field(..., min_length=1)
     meta: dict[str, Any] = Field(default_factory=dict)
     status: str = Field(default="planned", max_length=50)
+    pacing_type: Optional[str] = Field(None, max_length=50)
+    weight: Optional[int] = Field(default=1, ge=1)
 
 
 class StoryBeatCreate(StoryBeatBase):
@@ -686,6 +688,8 @@ class ConfirmedStoryBeat(BaseModel):
     word_count_target: int = Field(default=0, ge=0)
     target_words: int = Field(default=0, ge=0)
     hook_ids: List[str] = Field(default_factory=list)
+    pacing_type: Optional[str] = Field(None, max_length=50)
+    weight: Optional[int] = Field(default=1, ge=1)
 
 
 class GenerateChapterAgenticPreviewResponse(BaseModel):

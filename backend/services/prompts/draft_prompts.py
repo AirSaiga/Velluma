@@ -183,6 +183,22 @@ def build_draft_agent_prompt(
 ★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
 ★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制
 
+## 🛑 海明威极致叙事与反AI味协议（最高优先级约束）
+
+在扩写时，你的文字必须像手术刀一样干净利落，充满高密度的画面感。一旦触发以下“AI味”特征，将被系统判定为不及格：
+
+### ❌ 绝对禁止（触发即失败）：
+1. **禁止设定倾倒（Info-dumping）**：绝不准在动作或紧张情节发生时，打断节奏去大段解释世界观名词（如解释某个阶级、某种武器的背景）。让世界观自然消融在物理环境和对话中。
+2. **禁止预告片式说教旁白**：严禁出现“命运的齿轮开始转动”、“时代的洪流”、“他此时还不知道自己将卷入怎样的旋涡”、“一场改变世界格局的战争开始了”这类上帝视角的虚词和评价词。主角只关注眼前的生死！
+3. **禁止“紫壶文风（Purple Prose）”与形容词堆砌**：一个名词前最多只能有一个修饰语。绝对禁止诸如“廉价的、生锈的、过滤不彻底的空气”这类连环定语。做减法！
+
+### ✅ 必须执行的句式编排：
+1. **极致短句与碎镜式排版**：在面对危机爆发（如防空警报骤响、爆炸、遇袭）时，必须大量使用短句（字数少于10个字），甚至使用只有主谓结构的词组片段，并频繁使用回车键单独换行，以制造呼吸急促的压迫感。
+   - *反面示例*：突然，一种毫无征兆的悸动从脚下的金属地板深处传了过来，那是一种低频的、足以引起内脏共鸣的颤栗。
+   - *正面示例*：地板深处传来悸动。一种低频的颤栗。足以引起内脏共鸣。
+2. **行为视角的局限性**：主角拥有强烈的认知局限。如果主角是底层劳工，他不会去思考“防线被饱和式轰炸瓦解”，他只会感受到“头顶的混凝土砸了下来，灰尘堵住了喉咙”。
+3. **冰山理论（Show, Don't Tell）**：不要总结情绪（如“他感到无比绝望”），直接描写物理反应（如“汗水流进眼睛带来火辣辣的刺痛，他死死咬住发抖的牙关”）。
+
 ## 核心规则
 1. 严格遵循章节大纲进行创作
 2. 保持角色性格和互动方式的连贯性
@@ -269,9 +285,20 @@ def build_chunk_draft_prompt(
         f"- 切入状态 entry_state：{entry_state}\n"
         f"- 强制切出状态 exit_state：{exit_state}\n"
         f"- 绝对禁忌 red_lines：{'；'.join(red_lines)}\n"
-        "- 若将要越界到 exit_state 之后的事件，必须立即回收并停在 exit_state。"
+        "- 若将要越界到 exit_state 之后的事件，必须立即回收并停在 exit_state。\n"
+        f"- 此段落必须严格锁定在【{beat_data.get('pov_character', '未指定')}】的第一/第三人称有限视角，禁止描写该角色视线/感知外的事物！"
     )
     intent_constraints = _normalize_text_list(scene_intent_data.get("constraints"))
+
+    # Extract pacing_type and define instructions
+    pacing_type = beat_data.get("pacing_type", "Medium")
+    pacing_instructions = {
+        "Fast": "多用短句、动词，减少修饰语。强调动作的紧凑衔接，营造紧张感或速度感。避免过长的心理描写或静态环境描写。",
+        "Medium": "平衡长短句，叙事节奏平稳。交替使用动作描写与心理/环境描写，推动情节稳步发展。",
+        "Slow": "多用长句、感官细节描写（视觉、听觉、嗅觉等）。强调氛围渲染与内心独白，放慢叙事速度，通过细节堆叠增强沉浸感。",
+    }
+    pacing_instruction = pacing_instructions.get(pacing_type, pacing_instructions["Medium"])
+    pacing_section = f"【节奏与句式控制 (Pacing: {pacing_type})】\n{pacing_instruction}"
 
     system_prompt, user_prompt = build_draft_agent_prompt(
         chapter=chapter,
@@ -324,6 +351,8 @@ BeatID：{_normalize_text(beat_data.get("beat_id"))}
 约束：{", ".join(intent_constraints) if intent_constraints else "无"}
 
 {continuity_section}
+
+{pacing_section}
 
 请只输出当前 beat 对应的正文 chunk，不要重复前文，不要输出解释。"""
     return system_prompt, chunk_user_prompt

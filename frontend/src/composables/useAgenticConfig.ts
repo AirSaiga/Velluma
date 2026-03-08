@@ -358,7 +358,7 @@ export function buildAgenticPayload(params: {
       rag_gamma: legacyFields.rag_gamma,
       rag_lambda: normalized.rag_lambda,
       author_intent: normalized.author_intent,
-      fast_mode: true,
+      fast_mode: false,
       skip_minor_refine: true
     },
     errors: []

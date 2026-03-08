@@ -37,6 +37,7 @@ from backend.services.prompts.review_prompts import (
     build_chunk_refine_prompt,
 )
 from backend.services.prompts.format_prompts import build_formatting_prompt
+from backend.services.prompts.pov_prompts import build_pov_assignment_prompt, parse_pov_assignment_result
 
 __all__ = [
     "build_chapter_prompt",
@@ -53,4 +54,6 @@ __all__ = [
     "build_chunk_review_prompt",
     "build_chunk_refine_prompt",
     "build_formatting_prompt",
+    "build_pov_assignment_prompt",
+    "parse_pov_assignment_result",
 ]

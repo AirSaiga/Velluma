@@ -380,6 +380,8 @@ class StoryBeat(Base):
     summary = Column(Text, nullable=False)
     meta = Column("metadata", JSONB, default=dict)
     status = Column(String(50), default="planned")
+    pacing_type = Column(String(50), nullable=True)
+    weight = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="story_beats")

@@ -259,6 +259,18 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT",
         "expected_udt_names": {"text"},
     },
+    {
+        "table": "story_beats",
+        "column": "pacing_type",
+        "definition": "VARCHAR(50)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "weight",
+        "definition": "INTEGER DEFAULT 1",
+        "expected_udt_names": {"int4"},
+    },
 ]
 
 

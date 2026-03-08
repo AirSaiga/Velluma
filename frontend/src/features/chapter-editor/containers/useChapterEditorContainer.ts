@@ -100,13 +100,16 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const selectedChapter = computed(() => props.selectedChapter)
   const agenticValidation = computed(() => validateAgenticForm(agenticForm.value))
   const agenticFieldFeedback = computed(() => getAgenticFieldFeedback(agenticForm.value))
-  const agenticGroupFields = computed(() => ({
-    steering: ['author_intent'] as Array<keyof AgenticFormState>,
-    style: ['tension_level', 'pacing_style'] as Array<keyof AgenticFormState>,
-    generation: ['word_count'] as Array<keyof AgenticFormState>,
-    memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'] as Array<keyof AgenticFormState>,
-    workflow: ['refinement_depth'] as Array<keyof AgenticFormState>
-  }))
+  const agenticGroupFields = computed(() => {
+    // 明确指定分组和字段顺序
+    return {
+      steering: ['author_intent'],
+      style: ['tension_level', 'pacing_style'],
+      generation: ['word_count'],
+      memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'],
+      workflow: ['refinement_depth']
+    } as any
+  })
   const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
   const firstFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).find(Boolean) || '')
 

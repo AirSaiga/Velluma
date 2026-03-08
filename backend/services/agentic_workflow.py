@@ -12,6 +12,7 @@ from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, 
 from backend.repositories import MemoryRepository
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.services.llm_client import call_llm, get_embedding
+from backend.services.workflows.planning import assign_pov_to_beats
 from backend.services.prompts import (
     build_chunk_draft_prompt,
     build_chunk_review_prompt,
@@ -165,23 +166,107 @@ async def generate_agentic_chapter_stream_with_confirmed_beats(
         yield frame
 
 
+def _calculate_beat_word_counts(beats: list[dict], total_chapter_words: int) -> dict[str, int]:
+    """
+    Calculate target word count for each beat based on pacing and weight.
+    Multipliers: Fast=0.8, Medium=1.0, Slow=1.2
+    Formula: score = weight * multiplier
+    Result: (score / total_score) * total_chapter_words
+    """
+    multipliers = {
+        "Fast": 0.8,
+        "Medium": 1.0,
+        "Slow": 1.2,
+    }
+    
+    # 1. Calculate scores
+    beat_data = []
+    total_score = 0.0
+    
+    for beat in beats:
+        # Ensure beat_id exists (handled in caller usually, but safe check)
+        beat_id = str(beat.get("beat_id") or "").strip()
+        
+        # Get weight (default 1.0)
+        val = beat.get("weight", 1.0)
+        try:
+            weight = float(val)
+        except (ValueError, TypeError):
+            weight = 1.0
+            
+        # Get pacing (default Medium)
+        pacing_raw = str(beat.get("pacing_type", "")).strip()
+        # Handle case-insensitive match
+        pacing_title = pacing_raw.title()
+        if pacing_title in multipliers:
+            multiplier = multipliers[pacing_title]
+        else:
+            multiplier = multipliers["Medium"]
+            
+        score = weight * multiplier
+        beat_data.append({"beat_id": beat_id, "score": score})
+        total_score += score
+
+    # 2. Distribute words
+    result = {}
+    if total_score <= 0:
+        # Fallback to even split
+        count = total_chapter_words // max(1, len(beats))
+        for item in beat_data:
+            if item["beat_id"]:
+                result[item["beat_id"]] = count
+        return result
+        
+    current_allocated = 0
+    for i, item in enumerate(beat_data):
+        b_id = item["beat_id"]
+        if not b_id:
+            continue
+            
+        if i == len(beat_data) - 1:
+            # Last item gets the remainder
+            count = max(0, total_chapter_words - current_allocated)
+        else:
+            count = int((item["score"] / total_score) * total_chapter_words)
+            current_allocated += count
+        
+        result[b_id] = count
+        
+    return result
+
+
 def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]], word_count: int) -> list[dict]:
-    normalized: list[dict] = []
-    total = max(1, len(beats))
+    # Pre-process to list of dicts to facilitate calculation
+    raw_beats: list[dict] = []
     for idx, beat in enumerate(beats, start=1):
-        beat_dict = beat.model_dump() if isinstance(beat, ConfirmedStoryBeat) else dict(beat or {})
+        if isinstance(beat, ConfirmedStoryBeat):
+            b_dict = beat.model_dump()
+        else:
+            b_dict = dict(beat or {})
+        
+        # Ensure beat_id exists for mapping
+        if not b_dict.get("beat_id"):
+             b_dict["beat_id"] = f"beat-{idx}"
+        raw_beats.append(b_dict)
+        
+    # Calculate word counts
+    word_count_map = _calculate_beat_word_counts(raw_beats, word_count)
+
+    normalized: list[dict] = []
+    for idx, beat_dict in enumerate(raw_beats, start=1):
         summary = str(beat_dict.get("summary") or "").strip()
         if not summary:
             continue
+            
         position = beat_dict.get("position")
         if not isinstance(position, int) or position <= 0:
             position = idx
-        word_count_target = beat_dict.get("word_count_target")
-        if not isinstance(word_count_target, int) or word_count_target <= 0:
-            word_count_target = beat_dict.get("target_words")
-        if not isinstance(word_count_target, int) or word_count_target <= 0:
-            word_count_target = max(200, word_count // total)
-        beat_id = str(beat_dict.get("beat_id") or f"beat-{idx}").strip() or f"beat-{idx}"
+            
+        beat_id = str(beat_dict.get("beat_id")).strip()
+        
+        # Assign calculated word count
+        final_word_count = word_count_map.get(beat_id, 0)
+        
         hook_ids = beat_dict.get("hook_ids") if isinstance(beat_dict.get("hook_ids"), list) else []
         red_lines = beat_dict.get("red_lines") if isinstance(beat_dict.get("red_lines"), list) else []
         
@@ -203,8 +288,8 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
                 "entry_state": entry_state if entry_state else None,
                 "exit_state": exit_state if exit_state else None,
                 "red_lines": [str(item).strip() for item in red_lines if str(item).strip()],
-                "word_count_target": word_count_target,
-                "target_words": word_count_target,
+                "word_count_target": final_word_count,
+                "target_words": final_word_count,
                 "hook_ids": [str(item).strip() for item in hook_ids if str(item).strip()],
             }
         )
@@ -612,6 +697,52 @@ async def _generate_agentic_chapter_stream(
                 beats = _normalize_confirmed_beats(beats, word_count)
                 record_stage("PLANNING", _to_secs(time.perf_counter() - planning_started_at))
                 yield metric_frame("PLANNING_DONE", iteration=iteration, extra={"beat_count": len(beats)})
+            
+            # ------------------------------------------------------------------
+            # Auto-Assign POV to Beats
+            # ------------------------------------------------------------------
+            try:
+                yield f"data: {json.dumps({'event': 'PLANNING', 'message': '正在为剧情节拍分配 POV 角色...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                
+                # Construct character list for POV assignment
+                pov_candidates = []
+                for entity in entities:
+                    char = entity.character
+                    if char:
+                        role_desc = "Main Character" if char.importance_level >= 8 else "Supporting Character"
+                        pov_candidates.append({
+                            "name": char.name,
+                            "role": role_desc,
+                            "description": char.static_prompt or ""
+                        })
+                
+                book_title = book.title if book else "Unknown Book"
+                story_premise = f"Title: {book_title}\nChapter Outline: {chapter.outline_text or ''}"
+                
+                beats, pov_prompt_data = await assign_pov_to_beats(
+                    beats=beats,
+                    characters=pov_candidates,
+                    story_premise=story_premise,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                )
+
+                yield f"data: {json.dumps({'prompt': pov_prompt_data}, ensure_ascii=False)}\n\n"
+                debug_history.append({
+                    "stage": "POV_ASSIGNMENT",
+                    "iteration": iteration,
+                    "system_prompt": pov_prompt_data["system_prompt"],
+                    "user_prompt": pov_prompt_data["user_prompt"]
+                })
+                
+                # Re-normalize to ensure structure is consistent
+                beats = _normalize_confirmed_beats(beats, word_count)
+                
+            except Exception as e:
+                print(f"[POV Assignment Error] {e}")
+                # Continue even if assignment fails, beats will have default/empty POV
+            
             generated_chunks = [None] * len(beats)
             story_beats = []
 
