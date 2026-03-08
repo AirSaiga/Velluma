@@ -424,6 +424,28 @@ class MemoryChunkResponse(MemoryChunkBase):
 
 
 class StoryBeatBase(BaseModel):
+    """
+    故事节拍 (Story Beat) 的基础 Schema。
+
+    业务含义：
+    - 代表章节内的最小剧情单元，是 Agentic 工作流的核心数据模型
+    - 用于支撑"并行生成 → 统稿"的工作流模式
+
+    字段说明：
+    - chapter_id: 所属章节 ID
+    - beat_id: 节拍唯一标识（如 "beat-001"）
+    - beat_type: 节拍类型 (progression/turnpoint/climax)
+    - position: 位置索引，用于排序
+    - location: 场景地点
+    - pov_character: 视角角色名
+    - action_summary: 动作化执行摘要
+    - entry_state/exit_state: 进入/退出状态
+    - red_lines: 红线约束列表
+    - word_count_target: 目标字数
+    - summary: 剧情概述
+    - pacing_type: 节奏类型 (Fast/Medium/Slow)
+    - weight: 权重 (1-5)
+    """
     chapter_id: Optional[UUID] = None
     beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
     beat_type: str = Field(default="progression", max_length=100)
@@ -475,6 +497,26 @@ class StoryBeatResponse(StoryBeatBase):
 
 
 class SceneIntentBase(BaseModel):
+    """
+    场景意图 (Scene Intent) 的基础 Schema。
+
+    业务含义：
+    - 代表单个节拍 (Beat) 内的场景级 AI 生成指令
+    - 包含目标 (goal)、障碍 (obstacle)、策略 (tactic)、风险 (stakes) 等元素
+    - 用于在 Draft 阶段为 LLM 提供更精细的生成指导
+
+    字段说明：
+    - chapter_id: 所属章节 ID
+    - story_beat_id: 关联的故事节拍 ID
+    - intent_label: 意图标签（如 "说服"、"追逐"、"谈判"）
+    - character_name: 涉及的角色名
+    - goal: 场景目标/任务
+    - obstacle: 需要克服的障碍
+    - tactic: 达成目标的策略/手段
+    - stakes: 失败的后果/风险
+    - constraints: 约束条件列表
+    - priority: 优先级
+    """
     chapter_id: UUID
     story_beat_id: Optional[UUID] = None
     intent_label: str = Field(..., min_length=1, max_length=120)
@@ -514,6 +556,25 @@ class SceneIntentResponse(SceneIntentBase):
 
 
 class PlotLedgerBase(BaseModel):
+    """
+    情节账本 (Plot Ledger) 的基础 Schema。
+
+    业务含义：
+    - 管理伏笔/钩子的生命周期
+    - 支持伏笔的创建、绑定、解决、废弃等状态流转
+    - 用于实现"草蛇灰线，伏脉千里"的叙事技法
+
+    字段说明：
+    - chapter_id: 所属章节 ID
+    - story_beat_id: 关联的故事节拍 ID
+    - ledger_key: 伏笔唯一标识（如 "hero-backstory-reveal"）
+    - hook_id: 可读的唯一标识（如 "hk-001"）
+    - entry_type: 伏笔类型 (foreshadow/callback/twist/revelation)
+    - content: 伏笔内容描述
+    - status: 状态 (open/closed/dropped)
+    - created_at_chapter: 创建伏笔的章节序号
+    - resolved_in_chapter_id: 解决伏笔的章节 ID
+    """
     chapter_id: Optional[UUID] = None
     story_beat_id: Optional[UUID] = None
     ledger_key: str = Field(..., min_length=1, max_length=150)

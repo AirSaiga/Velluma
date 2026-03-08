@@ -1,3 +1,30 @@
+"""
+StoryWeaver-Core 后端入口模块。
+
+职责：提供 FastAPI 应用实例、路由注册、中间件配置、SPA 静态文件服务。
+
+业务场景：
+- 作为 StoryWeaver 长篇小说 AI 写作平台的后端服务器
+- 提供 RESTful API 接口供前端调用
+- 托管打包后的前端静态资源（SPA 模式）
+
+主要功能：
+- 书籍、章节、角色、关系、记忆的 CRUD 接口
+- 章节生成工作流（规划→起草→统稿→审阅→精修）
+- 向量记忆 RAG 检索
+- 实时流式输出（SSE）
+
+依赖项：
+- FastAPI: Web 框架
+- SQLAlchemy: ORM
+- PostgreSQL + pgvector: 数据库
+- Uvicorn: ASGI 服务器
+
+使用方式：
+- 开发模式: python backend/main.py
+- 生产模式: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+"""
+
 import io
 import os
 import sys

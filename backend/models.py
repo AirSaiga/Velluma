@@ -361,6 +361,26 @@ class MemoryChunk(Base):
 
 
 class StoryBeat(Base):
+    """
+    故事节拍表 - 章节内的剧情单元。
+
+    业务含义：
+    - 代表章节内的最小剧情单元（Beat），是 Agentic 工作流的核心数据模型
+    - 每个 beat 包含：位置、视角角色、动作摘要、进入/退出状态、红线约束等
+    - 用于支撑"并行生成 → 统稿"的工作流模式
+
+    数据流：
+    - 由 Planner Agent 生成，分配给 Draft Agent 并行创作
+    - 每个 beat 可关联 SceneIntent（场景意图）
+    - 可关联 PlotLedger（伏笔钩子）实现跨章节剧情连贯
+
+    核心字段：
+    - summary: 节拍剧情概述，用于 LLM 理解本节核心内容
+    - action_summary: 动作化执行摘要，用于指导生成动作类内容
+    - entry_state / exit_state: 进入/退出状态，确保剧情不越界
+    - red_lines: 红线约束列表，防止生成违规内容
+    - pacing_type: 节奏类型 (Fast/Medium/Slow)，影响字数分配权重
+    """
     __tablename__ = "story_beats"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
@@ -391,6 +411,25 @@ class StoryBeat(Base):
 
 
 class SceneIntent(Base):
+    """
+    场景意图表 - 单个节拍内的场景级 AI 指令。
+
+    业务含义：
+    - 代表一个节拍（Beat）内的场景级 AI 生成指令
+    - 包含目标（goal）、障碍（obstacle）、策略（tactic）、 stakes（风险）等元素
+    - 用于在 Draft 阶段为 LLM 提供更精细的生成指导
+
+    数据流：
+    - 由 Scene Intent Agent 生成（独立于 Planner）
+    - 关联到具体的 StoryBeat
+    - 在生成 chunk 时作为上下文注入
+
+    核心字段：
+    - goal: 场景目标/任务
+    - obstacle: 需要克服的障碍
+    - tactic: 达成目标的策略/手段
+    - stakes: 失败的后果/风险
+    """
     __tablename__ = "scene_intents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
@@ -417,6 +456,31 @@ class SceneIntent(Base):
 
 
 class PlotLedger(Base):
+    """
+    情节账本表 - 管理伏笔/钩子的生命周期。
+
+    业务含义：
+    - 跟踪跨章节的伏笔（Plot Hook）生命周期
+    - 支持伏笔的创建、绑定、解决、废弃等状态流转
+    - 用于实现"草蛇灰线，伏脉千里"的叙事技法
+
+    数据流：
+    - 由系统或用户创建伏笔（hook）
+    - 在章节生成时绑定到 StoryBeat
+    - 伏笔被解决后标记为 closed，或主动废弃标记为 dropped
+
+    核心字段：
+    - ledger_key: 伏笔的唯一标识（如 "hero-backstory-reveal"）
+    - hook_id: 可读的唯一标识（如 "hk-001"）
+    - entry_type: 伏笔类型（foreshadow / callback / twist 等）
+    - status: 状态 (open/closed/dropped)
+    - resolved_in_chapter_id: 解决伏笔的章节 ID
+
+    状态流转：
+    - open: 伏笔已创建，等待在后续章节中揭示
+    - closed: 伏笔已在某章节中解决
+    - dropped: 伏笔被废弃，不再需要解决
+    """
     __tablename__ = "plot_ledgers"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)

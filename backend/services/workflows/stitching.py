@@ -1,13 +1,32 @@
+from typing import Any, List
+
 from backend.services.prompts import build_stitch_prompt
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
+from backend.models import Chapter
 
 
-async def stitch_chunks(chapter, beats, chunks, word_count, api_key, base_url, model):
-    """
-    将多个并行生成的chunks统稿成连贯的章节正文。
-    
-    返回:
+async def stitch_chunks(
+    chapter: Chapter,
+    beats: List[dict],
+    chunks: List[str],
+    word_count: int,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> str:
+    """将多个并行生成的 chunks 统稿成连贯的章节正文。
+
+    Args:
+        chapter: 章节实体
+        beats: 剧情节拍列表
+        chunks: 已生成的文本片段列表
+        word_count: 目标字数
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: LLM Model Name
+
+    Returns:
         str: 统稿后的正文
     """
     stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(

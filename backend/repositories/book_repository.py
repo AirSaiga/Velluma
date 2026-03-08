@@ -1,3 +1,5 @@
+from typing import List
+
 from uuid import UUID
 
 from backend.models import Book, Chapter
@@ -13,12 +15,17 @@ class BookRepository(BaseRepository[Book]):
     """
     model = Book
 
-    async def list_chapters(self, book_id: UUID):
-        """
-        获取某书籍的所有章节：用于目录展示或全量导出场景。
+    async def list_chapters(self, book_id: UUID) -> List[Chapter]:
+        """获取某书籍的所有章节：用于目录展示或全量导出场景。
 
         数据流：book_id → WHERE book_id = ? → 按 chapter_number 排序 → List[Chapter]
         关键点：按章节号排序而非创建时间，确保阅读顺序正确。
+
+        Args:
+            book_id: 书籍 UUID
+
+        Returns:
+            List[Chapter]: 按章节号排序的章节列表
         """
         spec = QuerySpec.create(Chapter).where(Chapter.book_id == book_id).order(Chapter.chapter_number)
         return await self.find_all(

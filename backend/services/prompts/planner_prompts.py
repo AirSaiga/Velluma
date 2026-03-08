@@ -1,9 +1,31 @@
+"""
+规划提示词模块。
+
+职责：提供章节规划（Planner）阶段的提示词构建和结果解析功能。
+
+业务场景：
+- 将章节大纲拆分为可执行的 story beats（剧情节拍）
+- 每个 beat 包含位置、视角角色、动作摘要、进入/退出状态、红线约束等
+- 支持低张力模式、伏笔绑定、POV 分配等高级功能
+
+工作流位置：
+- 位于 Agentic 工作流的起始阶段
+- 输入：章节信息、角色列表、关系约束、开放伏笔、目标字数
+- 输出：结构化的 beats 列表，用于后续的并行生成
+
+常量说明：
+- LOW_TENSION_RED_LINES: 低张力章节的默认红线约束
+"""
+
 import json
 import re
+from typing import Optional
 
 from backend.models import Chapter, Book
 
 
+# 低张力章节的默认红线约束
+# 用于 tension_level <= 3 时的自动注入
 LOW_TENSION_RED_LINES = ["避免正面冲突", "避免战斗升级"]
 
 
@@ -13,12 +35,37 @@ def build_planner_agent_prompt(
     entities: list,
     relationships: list,
     word_count: int,
-    open_hooks: list = None,
-    previous_chapter_summary: str = None,
-    locations: list = None,
-    global_taboos: str = None,
-    author_intent: str = None,
-):
+    open_hooks: Optional[list] = None,
+    previous_chapter_summary: Optional[str] = None,
+    locations: Optional[list] = None,
+    global_taboos: Optional[str] = None,
+    author_intent: Optional[str] = None,
+) -> tuple[str, str]:
+    """构建规划阶段的提示词。
+
+    将章节大纲拆分为可执行的 story beats。
+
+    Args:
+        chapter: 章节实体，包含章节名、大纲、张力等级、节奏偏好等信息
+        book: 书籍实体，包含全局系统提示词、世界观设定、核心母题禁忌等
+        entities: 章节关联的角色实体列表（ChapterEntity）
+        relationships: 角色关系列表
+        word_count: 目标字数
+        open_hooks: 开放伏笔列表，用于绑定到 beats
+        previous_chapter_summary: 上一章摘要，用于上下文连贯性
+        locations: 章节关联的地点列表
+        global_taboos: 全局禁忌/核心母题（Book 级别）
+        author_intent: 作者创作意图（Request 级别）
+
+    Returns:
+        tuple[str, str]: (system_prompt, user_prompt)
+        - system_prompt: 包含角色设定、关系约束、世界观、输出格式要求
+        - user_prompt: 包含章节信息、大纲、目标字数、绝对最高优先级指令
+
+    提示词设计说明：
+    - system_prompt: 定义 JSON 输出格式、beat 数量限制、pacing_type 约束等
+    - user_prompt: 包含实际章节内容，global_taboos 和 author_intent 作为绝对最高优先级注入
+    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     tension_level = getattr(chapter, "tension_level", 5)
@@ -168,7 +215,42 @@ def build_planner_agent_prompt(
     return system_prompt, user_prompt
 
 
-def parse_planner_result(planner_result_raw: str, chapter_outline: str, word_count: int):
+def parse_planner_result(
+    planner_result_raw: str,
+    chapter_outline: str,
+    word_count: int,
+) -> list[dict]:
+    """解析规划结果的 JSON 输出。
+
+    从 LLM 返回的原始文本中提取 beats 列表，并进行数据清洗和类型转换。
+
+    解析策略（优先级从高到低）：
+    1. 尝试直接解析整个文本为 JSON
+    2. 尝试提取 Markdown 代码块中的 JSON
+    3. 尝试提取 { } 包裹的 JSON 对象
+    4. 若全部失败，使用章节大纲作为 fallback beat
+
+    Args:
+        planner_result_raw: LLM 返回的原始文本
+        chapter_outline: 章节大纲（用于 fallback）
+        word_count: 目标字数（用于 fallback 计算）
+
+    Returns:
+        list[dict]: 结构化的 beats 列表，每个 beat 包含：
+        - position: 位置索引
+        - beat_id: 节拍唯一标识
+        - summary: 剧情概述
+        - location: 场景地点
+        - pov_character: 视角角色
+        - action_summary: 动作化执行摘要
+        - entry_state: 进入状态
+        - exit_state: 退出状态
+        - red_lines: 红线约束列表
+        - word_count_target: 目标字数
+        - hook_ids: 关联的伏笔 ID 列表
+        - pacing_type: 节奏类型 (Fast/Medium/Slow)
+        - weight: 权重 (1-5)
+    """
     text = (planner_result_raw or "").strip()
     candidates = [text] if text else []
     fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)

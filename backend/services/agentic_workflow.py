@@ -769,7 +769,32 @@ async def _generate_agentic_chapter_stream(
                 story_beats.append(story_beat)
             await db.flush()
 
-            async def process_beat(beat_index, beat, story_beat):
+            async def process_beat(
+                beat_index: int,
+                beat: dict,
+                story_beat: StoryBeat,
+            ) -> tuple[int, str, list[dict]]:
+                """处理单个剧情节拍的生成流程。
+
+                包含三个阶段：
+                1. Scene Intent - 构建场景意图
+                2. Chunk Draft - 生成草稿内容
+                3. Chunk QC - 质量检查循环（可选）
+
+                Args:
+                    beat_index: 节拍索引（从1开始）
+                    beat: 包含节拍信息的字典，如 summary、word_count_target、pov_character 等
+                    story_beat: 数据库中的 StoryBeat 实体对象
+
+                Returns:
+                    tuple[int, str, list[dict]]:
+                    - beat_index - 1: 返回索引（从0开始）
+                    - chunk_text: 生成的文本内容
+                    - beat_prompts: 调试用的提示词历史列表
+
+                Raises:
+                    Exception: 任何在处理过程中发生的异常都会被捕获并记录，返回空字符串
+                """
                 beat_started_at = time.perf_counter()
                 beat_prompts = []
                 try:

@@ -1,3 +1,26 @@
+"""
+审阅提示词模块。
+
+职责：提供章节审阅（Review）和精修（Refine）阶段的提示词构建和结果解析功能。
+
+业务场景：
+- Review Agent: 对章节初稿进行质量检查，包括 OOC、剧情合规性、逻辑完整性
+- Refine Agent: 根据审阅意见重写初稿
+- Chunk Review/Refine: 对单个片段进行快速质检和修正
+
+工作流位置：
+- 位于 Agentic 工作流的 DRAFTING 阶段之后
+- 输入：章节信息、初稿文本、审查意见
+- 输出：审阅结果或修改后的正文
+
+主要函数：
+- build_review_agent_prompt: 构建审阅提示词
+- build_refine_agent_prompt: 构建精修提示词
+- parse_review_result: 解析审阅结果
+- build_chunk_review_prompt: 构建分段审阅提示词
+- build_chunk_refine_prompt: 构建分段精修提示词
+"""
+
 import json
 import re
 

@@ -1,3 +1,5 @@
+from typing import Any, Optional
+
 from backend.services.prompts import (
     build_planner_agent_prompt,
     parse_planner_result,
@@ -6,15 +8,37 @@ from backend.services.prompts import (
 )
 import json
 from backend.services.llm_client import call_llm
-from backend.models import StoryBeat
+from backend.models import Chapter, Book, Character, CharacterRelationship, StoryBeat
 
 
-async def generate_beats(chapter, book, entities, relationships, word_count, open_hooks, api_key, base_url, model, previous_chapter_summary=None):
-    """
-    生成章节故事节拍 (Story Beats)。
-    
-    返回:
-        list: beats列表
+async def generate_beats(
+    chapter: Chapter,
+    book: Book,
+    entities: list[Any],
+    relationships: list[CharacterRelationship],
+    word_count: int,
+    open_hooks: list[Any],
+    api_key: str,
+    base_url: str,
+    model: str,
+    previous_chapter_summary: Optional[str] = None,
+) -> tuple[list[dict], list[StoryBeat]]:
+    """生成章节故事节拍 (Story Beats)。
+
+    Args:
+        chapter: 章节实体
+        book: 书籍实体
+        entities: 章节关联的角色实体列表
+        relationships: 角色关系列表
+        word_count: 目标字数
+        open_hooks: 开放伏笔列表
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: LLM Model Name
+        previous_chapter_summary: 上一章摘要
+
+    Returns:
+        tuple[list[dict], list[StoryBeat]]: (beats 字典列表, StoryBeat 实体列表)
     """
     planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
         chapter=chapter,
@@ -64,26 +88,25 @@ async def generate_beats(chapter, book, entities, relationships, word_count, ope
 
 
 async def assign_pov_to_beats(
-    beats,
-    characters,
-    story_premise,
-    api_key,
-    base_url,
-    model,
-):
-    """
-    为节拍分配 POV 角色。
-    
+    beats: list[dict],
+    characters: list[dict],
+    story_premise: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> tuple[list[dict], dict[str, str]]:
+    """为节拍分配 POV 角色。
+
     Args:
-        beats: 节拍列表 (可以是 list[dict] 或 list[StoryBeat])
+        beats: 节拍列表 (list[dict])
         characters: 角色列表 (list[dict], 每个包含 name, role, description)
         story_premise: 故事概要
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
-        
+
     Returns:
-        tuple: (更新后的节拍列表, prompt_debug_info)
+        tuple[list[dict], dict[str, str]]: (更新后的节拍列表, prompt_debug_info)
     """
     # 转换 beats 为 dict 列表供 prompt 使用
     beats_for_prompt = []

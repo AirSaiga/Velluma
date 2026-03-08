@@ -1,3 +1,5 @@
+from typing import List
+
 from uuid import UUID
 
 from backend.models import Character
@@ -13,25 +15,33 @@ class CharacterRepository(BaseRepository[Character]):
     """
     model = Character
 
-    async def list_by_book(self, book_id: UUID):
-        """
-        按书籍查询角色列表：用于书籍详情页或角色管理界面。
+    async def list_by_book(self, book_id: UUID) -> List[Character]:
+        """按书籍查询角色列表：用于书籍详情页或角色管理界面。
 
         数据流：book_id → WHERE book_id = ? → 按 importance_level 降序 → List[Character]
         设计意图：importance_level.desc() 确保主角/重要角色排在前面，符合阅读习惯。
+
+        Args:
+            book_id: 书籍 UUID
+
+        Returns:
+            List[Character]: 按重要性排序的角色列表
         """
         spec = QuerySpec.create().where(Character.book_id == book_id).order(Character.importance_level.desc())
-        return await self.find_all(
-            spec=spec
-        )
+        return await self.find_all(spec=spec)
 
-    async def list_by_ids(self, ids):
-        """
-        批量查询角色：用于"已知角色 ID 列表，获取角色详情"场景。
+    async def list_by_ids(self, ids: List[UUID]) -> List[Character]:
+        """批量查询角色：用于"已知角色 ID 列表，获取角色详情"场景。
 
         数据流：ids (list) → WHERE id IN (?, ?, ...) → List[Character]
         边界处理：空列表直接返回空数组，避免无效查询。
         性能考量：IN 查询在大批量（>1000）时可能需分批处理。
+
+        Args:
+            ids: 角色 UUID 列表
+
+        Returns:
+            List[Character]: 查询到的角色列表
         """
         if not ids:
             return []
