@@ -10,6 +10,8 @@ interface BeatPreviewItem {
   summary: string
   location?: string
   pov_character?: string
+  anchor_pov?: string
+  original_actor?: string
   action_summary?: string
   openingState: string
   stoppingState: string
@@ -83,6 +85,7 @@ const props = defineProps<{
   pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
   previewBeats: BeatPreviewItem[]
+  anchorPov: string | null
   publishChapter: () => void
   ragWeightTotal: number
   restoreAgenticDefaults: () => void
@@ -436,6 +439,11 @@ watch(() => props.critiqueResult, (newVal) => {
         </button>
       </div>
       <div class="p-4 overflow-y-auto max-h-[calc(85vh-124px)] space-y-3">
+        <div v-if="anchorPov" class="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+          <div class="text-xs font-semibold text-amber-700">🎯 本章锚点视点 (Anchor POV)</div>
+          <div class="text-sm font-bold text-amber-800">{{ anchorPov }}</div>
+          <div class="text-[10px] text-amber-600 mt-1">所有 Beats 将统一使用此视点进行叙事</div>
+        </div>
         <div v-if="beatPreviewError" class="text-xs text-rose-500">
           {{ beatPreviewError }}
         </div>

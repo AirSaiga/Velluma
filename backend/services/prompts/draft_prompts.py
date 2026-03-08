@@ -65,6 +65,7 @@ def build_draft_agent_prompt(
     scene_intent: dict = None,
     hook_contexts: list = None,
     locations: list = None,
+    anchor_pov: str = None,
 ):
     """
     构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
@@ -111,6 +112,15 @@ def build_draft_agent_prompt(
     if not red_lines:
         red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
     boundary_constraints_prompt = _render_boundary_constraints(entry_state, exit_state, red_lines)
+
+    anchor_pov_protocol = None
+    if anchor_pov:
+        anchor_pov_protocol = f"""## 绝对锚点视界与动作接续协议
+1. **单一摄影机法则**：你的文字必须像VR游戏一样，绝对锁定在【{anchor_pov}】的大脑中。只能描写他可见、可听、可触之事。严禁开启上帝视角跨越空间。
+2. **直接动作起手**：第一句话必须严格基于 `entry_state` 的物理姿态或环境状态开始。禁止凭空回顾上文。
+3. **毒性词库硬拦截**：禁止使用任何破坏连续性的时间/空间转场副词作为段落起手。
+   - ❌ 绝对禁用："与此同时"、"此时"、"画面一转"、"殊不知"、"在另一边"、"而在这时"。
+   - ✅ 正确做法：利用环境音、光线变化或角色的动作反应自然过渡。"""
 
     worldbuilding_instruction = (
         beat_data.get("worldbuilding_instruction")
@@ -182,6 +192,22 @@ def build_draft_agent_prompt(
 ## 【字数与内容完整性建议】
 ★ 目标字数：约 {word_count} 字 (允许根据剧情需要适度超出)
 ★ 优先级说明：请优先保证本节拍的剧情完整性、情感铺垫和动作细节。如果为了把故事讲好、讲透，导致字数超出预期，是完全可以接受的。切勿为了压缩字数而牺牲关键细节！
+
+{anchor_pov_protocol if anchor_pov_protocol else ''}
+
+## 🛑 危机递进与物理预警法则 (Escalation & Sensory Bridge Protocol)
+
+在处理"日常平静状态"向"突发危机/激烈动作"转换的剧情点时，**绝对禁止从 0 直接跳到 100**。必须通过局部的微观物理变化来建立情绪的压迫感。
+
+### ❌ 绝对禁止的转场方式：
+1. **禁用偷懒的声明式过渡句**：严禁使用"这种宁静在下一秒被打破"、"突然"、"就在这时"、"毫无征兆地"作为段落的开头。
+2. **禁止瞬间爆发**：禁止上一句话还在写微风和月光，下一句话立刻变成导弹爆炸。
+
+### ✅ 必须执行的三段式危机爬升（Rule of Three）：
+当剧变即将发生时，你的文字必须放慢速度，拆解为以下三个层次：
+1. **微弱的异常（Anomaly）**：危机到来前的一两秒，先写极其细微的物理异样。（如：水杯里不自然的波纹、空气中突然刺耳的高频静电音、飞虫的惊落，气压气味的变化）。
+2. **角色的错愕（Disconnect）**：主角的第一反应不应该是立刻明白发生了战争，而是短暂的疑惑或误判（如：以为是机器故障、以为是错觉），目光顺着异常看过去。
+3. **彻底的爆发（Impact）**：在极度的安静或错愕中，真正的灾难或动作才以最猛烈的具象化形态砸在主角脸上。
 
 ## 🛑 海明威极致叙事与反AI味协议（最高优先级约束）
 
@@ -285,6 +311,8 @@ def build_chunk_draft_prompt(
     hook_contexts: list = None,
     context_beat_summaries: dict = None,
     locations: list = None,
+    anchor_pov: str = None,
+    sensory_translation_rule: str = None,
 ):
     beat_data = beat if isinstance(beat, dict) else {}
     scene_intent_data = scene_intent if isinstance(scene_intent, dict) else {}
@@ -327,7 +355,12 @@ def build_chunk_draft_prompt(
         scene_intent=scene_intent_data,
         hook_contexts=hook_contexts,
         locations=locations,
+        anchor_pov=anchor_pov,
     )
+    
+    if sensory_translation_rule:
+        sensory_constraint = f"## 【最高优先级约束：感官转化法则】\n{sensory_translation_rule}"
+        system_prompt = f"{sensory_constraint}\n\n{system_prompt}"
     
     continuity_section = ""
     if previous_chunks:

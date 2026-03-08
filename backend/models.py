@@ -391,6 +391,8 @@ class StoryBeat(Base):
     position = Column(Integer, default=0)
     location = Column(Text, nullable=True)
     pov_character = Column(String(120), nullable=True)
+    anchor_pov = Column(String(120), nullable=True)
+    original_actor = Column(String(120), nullable=True)
     action_summary = Column(Text, nullable=True)
     worldbuilding_instruction = Column(Text, nullable=True)
     entry_state = Column(Text, nullable=True)

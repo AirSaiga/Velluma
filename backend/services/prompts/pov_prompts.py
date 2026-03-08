@@ -88,3 +88,98 @@ def parse_pov_assignment_result(llm_response: Dict[str, Any]) -> Dict[str, str]:
     except Exception as e:
         print(f"Error parsing POV assignment result: {e}")
         return {}
+
+
+def build_anchor_pov_prompt(
+    story_premise: str,
+    characters: List[Dict[str, Any]],
+    beats: List[Dict[str, Any]],
+    previous_chapter_summary: str = None,
+):
+    """
+    构建用于确定章节核心主角 (Anchor POV) 的 Prompt。
+    
+    Args:
+        story_premise: 故事前提/概要
+        characters: 角色列表，每个角色包含 name 和 description/role
+        beats: 节拍列表，每个节拍包含 summary 和 action_summary
+        previous_chapter_summary: 上一章摘要（可选）
+        
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    system_prompt = """
+你是一个精通叙事学的专业小说策划师。你的任务是分析一个章节中所有故事节拍（Beats），推断出本章的"核心主角"（Anchor POV）。
+
+"核心主角"是指在本章中：
+1. 占据最多节拍数或最重要节拍的角色
+2. 推动本章主要情节发展的角色
+3. 在多个节拍中有重要行动或心理描写的角色
+4. 章节的核心冲突主要围绕其展开
+
+请仔细分析提供的所有节拍信息，包括每个节拍的 summary 和 action_summary，统计各角色的出现频率和重要性，
+结合上一章的情节发展，确定本章最合适的核心主角（Anchor POV）。
+
+请输出 JSON 格式，包含：
+- `anchor_pov`: 核心主角的名字（必须是提供的角色列表中的名字之一）
+- `reasoning`: 选择该主角的简要推理说明
+- `character_appearances`: 各角色在节拍中的出现情况统计
+"""
+
+    chars_str = "\n".join([
+        f"- {c.get('name')}: {c.get('role', '')} {c.get('description', '')}" 
+        for c in characters
+    ])
+    
+    beats_str = "\n".join([
+        f"Beat {b.get('beat_id', b.get('position', 'N/A'))}:\n"
+        f"  Summary: {b.get('summary', '')}\n"
+        f"  Action: {b.get('action_summary', '')}\n"
+        for b in beats
+    ])
+
+    user_prompt = f"""
+故事概要：
+{story_premise}
+
+可用角色列表：
+{chars_str}
+
+"""
+    
+    if previous_chapter_summary:
+        user_prompt += f"""
+上一章摘要：
+{previous_chapter_summary}
+
+"""
+
+    user_prompt += f"""
+本章所有节拍（Beats）：
+{beats_str}
+
+请分析上述节拍，确定本章的核心主角（Anchor POV），并解释选择理由。
+"""
+
+    return system_prompt, user_prompt
+
+
+def parse_anchor_pov_result(llm_response: Dict[str, Any]) -> str:
+    """
+    解析 LLM 返回的 Anchor POV 结果。
+    
+    Args:
+        llm_response: LLM 返回的 JSON 对象
+        
+    Returns:
+        str: 核心主角的名字，如果解析失败返回空字符串
+    """
+    try:
+        anchor_pov = llm_response.get("anchor_pov", "")
+        if not anchor_pov:
+            print("Warning: No anchor_pov found in LLM response")
+            return ""
+        return str(anchor_pov).strip()
+    except Exception as e:
+        print(f"Error parsing anchor POV result: {e}")
+        return ""

@@ -22,6 +22,7 @@ def build_stitch_prompt(
     beats: list[dict],
     chunks: list[str],
     word_count: int,
+    anchor_pov: str = None,
 ) -> tuple[str, str]:
     """构建统稿阶段的提示词。
 
@@ -32,6 +33,7 @@ def build_stitch_prompt(
         beats: 剧情节拍列表，每个节拍包含 summary、position 等信息
         chunks: 已生成的文本片段列表
         word_count: 目标字数（保留参数，当前统稿阶段不做字数约束）
+        anchor_pov: 主导视角角色名，用于反蒙太奇剪辑规则
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -43,7 +45,24 @@ def build_stitch_prompt(
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     beat_lines = [f"{idx + 1}. {beat.get('summary', '')}" for idx, beat in enumerate(beats)]
     chunk_lines = [f"### Chunk {idx + 1}\n{chunk}" for idx, chunk in enumerate(chunks)]
-    system_prompt = f"""你是小说统稿编辑。请将多个并行生成的 chunk 融合成连贯的章节正文。
+
+    if anchor_pov:
+        system_prompt = f"""你是小说统稿编辑，但现在你是一个**反蒙太奇剪辑师**。你的任务是将多个并行生成的 chunk 融合成单一连续时间线的章节正文。
+
+## 核心剪辑规则（最高优先级）
+
+1. **单一连续时间线**：如果收到的 Chunks 中出现了空间跨越（例如 Chunk A 在地下，Chunk B 切到了天上），你拥有最高剪辑权。你必须抹去非【{anchor_pov}】视角的描写，将其合并为主视角的背景板感知流，确保文章时间线顺滑地流淌，无割裂感。
+
+2. **抹除劣质胶水词**：全文检索并强行删去"与此同时"、"视角回到"、"在这关键时刻"等着相的转场词。用具体的动作和物理状态（如视线偏移、耳边的轰鸣）代替结构性的生硬拼接。
+
+3. **收束去AI味**：去除段落末尾那种尝试总结命运、拔高立意的"旁白说教"。
+
+## 输出要求
+- 输出纯文本，不要标题或解释
+- 统稿时不设字数上限，不得通过粗暴删段来压缩文本
+- 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然"""
+    else:
+        system_prompt = """你是小说统稿编辑。请将多个并行生成的 chunk 融合成连贯的章节正文。
 
 要求：
 1. **重点修复**：检查各 Chunk 之间的连接点，消除任何突兀的场景转换或逻辑断裂。如果前后文不搭，请重写过渡段落。
@@ -51,9 +70,11 @@ def build_stitch_prompt(
 3. 消除重复信息与风格断裂。
 4. 统一人称、时态与语气。
 5. 移除任何残留的元数据（如 JSON 标记、Markdown 代码块等）。
-6. 输出纯文本，不要标题或解释。
-7. 统稿时不设字数上限，不得通过粗暴删段来压缩文本。
-8. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。"""
+6. **抹除劣质胶水词**：全文检索并强行删去"与此同时"、"视角回到"、"在这关键时刻"等着相的转场词。用具体的动作和物理状态（如视线偏移、耳边的轰鸣）代替结构性的生硬拼接。
+7. 输出纯文本，不要标题或解释。
+8. 统稿时不设字数上限，不得通过粗暴删段来压缩文本。
+9. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。"""
+
     user_prompt = f"""请统稿以下内容：
 
 【章节名】{chapter_name}

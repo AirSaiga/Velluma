@@ -1065,56 +1065,61 @@ async def _generate_agentic_chapter_stream(
             await db.commit()
             yield metric_frame("STITCHING_DONE", iteration=iteration)
         else:
-            refining_started_at = time.perf_counter()
-            yield f"data: {json.dumps({'event': 'REFINING', 'message': f'发现逻辑遗漏，正在通知责编重写 (第{iteration}次)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            draft_before_refine = current_draft
-            system_prompt, user_prompt = build_refine_agent_prompt(
-                chapter, book, entities, relationships, current_draft, revision_plan, word_count
-            )
-            yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
-            debug_history.append({
-                "stage": "REFINING",
-                "iteration": iteration,
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt
-            })
-            current_draft = await call_llm_timed(
-                "refine",
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                api_key=request.api_key,
-                base_url=request.base_url,
-                model=request.model,
-                temperature=0.7,
-                max_tokens=10000,
-            )
-            current_draft = _clean_llm_output(current_draft)
-            if _is_refine_output_suspiciously_short(draft_before_refine, current_draft, revision_plan):
-                retry_user_prompt = (
-                    f"{user_prompt}\n\n"
-                    "【纠偏指令】你上一版疑似发生了内容截断或过度删段。"
-                    "请基于【当前初稿】重新完整重写，必须保留关键段落信息与叙事链路，禁止大幅删段。"
-                )
-                current_draft_retry = await call_llm_timed(
-                    "refine_retry",
-                    system_prompt=system_prompt,
-                    user_prompt=retry_user_prompt,
-                    api_key=request.api_key,
-                    base_url=request.base_url,
-                    model=request.model,
-                    temperature=0.7,
-                    max_tokens=10000,
-                )
-                current_draft_retry = _clean_llm_output(current_draft_retry)
-                if not _is_refine_output_suspiciously_short(draft_before_refine, current_draft_retry, revision_plan):
-                    current_draft = current_draft_retry
-                else:
-                    current_draft = draft_before_refine
-            record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
-            chapter.draft_text = current_draft
-            chapter.revision_count = iteration
-            await db.commit()
-            yield metric_frame("REFINING_DONE", iteration=iteration)
+            # ============================================================
+            # [暂时禁用] Refine 步骤已跳过，直接进入下一轮或结束
+            # 保留代码以便后续可能的测试
+            # ============================================================
+            pass
+            # refining_started_at = time.perf_counter()
+            # yield f"data: {json.dumps({'event': 'REFINING', 'message': f'发现逻辑遗漏，正在通知责编重写 (第{iteration}次)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            # draft_before_refine = current_draft
+            # system_prompt, user_prompt = build_refine_agent_prompt(
+            #     chapter, book, entities, relationships, current_draft, revision_plan, word_count
+            # )
+            # yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
+            # debug_history.append({
+            #     "stage": "REFINING",
+            #     "iteration": iteration,
+            #     "system_prompt": system_prompt,
+            #     "user_prompt": user_prompt
+            # })
+            # current_draft = await call_llm_timed(
+            #     "refine",
+            #     system_prompt=system_prompt,
+            #     user_prompt=user_prompt,
+            #     api_key=request.api_key,
+            #     base_url=request.base_url,
+            #     model=request.model,
+            #     temperature=0.7,
+            #     max_tokens=10000,
+            # )
+            # current_draft = _clean_llm_output(current_draft)
+            # if _is_refine_output_suspiciously_short(draft_before_refine, current_draft, revision_plan):
+            #     retry_user_prompt = (
+            #         f"{user_prompt}\n\n"
+            #         "【纠偏指令】你上一版疑似发生了内容截断或过度删段。"
+            #         "请基于【当前初稿】重新完整重写，必须保留关键段落信息与叙事链路，禁止大幅删段。"
+            #     )
+            #     current_draft_retry = await call_llm_timed(
+            #         "refine_retry",
+            #         system_prompt=system_prompt,
+            #         user_prompt=retry_user_prompt,
+            #         api_key=request.api_key,
+            #         base_url=request.base_url,
+            #         model=request.model,
+            #         temperature=0.7,
+            #         max_tokens=10000,
+            #     )
+            #     current_draft_retry = _clean_llm_output(current_draft_retry)
+            #     if not _is_refine_output_suspiciously_short(draft_before_refine, current_draft_retry, revision_plan):
+            #         current_draft = current_draft_retry
+            #     else:
+            #         current_draft = draft_before_refine
+            # record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
+            # chapter.draft_text = current_draft
+            # chapter.revision_count = iteration
+            # await db.commit()
+            # yield metric_frame("REFINING_DONE", iteration=iteration)
 
         reviewing_started_at = time.perf_counter()
         yield f"data: {json.dumps({'event': 'REVIEWING', 'message': '审阅 Agent 正在进行逻辑校验和 OOC 排查...', 'iteration': iteration}, ensure_ascii=False)}\n\n"

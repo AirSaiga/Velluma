@@ -34,6 +34,8 @@ interface BeatEditorState {
   summary: string
   location?: string
   pov_character?: string
+  anchor_pov?: string
+  original_actor?: string
   action_summary?: string
   worldbuilding_instruction?: string
   openingState: string
@@ -80,6 +82,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const beatPreviewLoading = ref(false)
   const beatPreviewError = ref('')
   const previewBeats = ref<BeatEditorState[]>([])
+  const anchorPov = ref<string | null>(null)
   const pendingAgenticPayload = ref<GenerateChapterAgenticPayload | null>(null)
   const pendingClearEditorOnConfirm = ref(false)
   
@@ -892,6 +895,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     optimizationFeedback,
     pacingStyleOptions,
     previewBeats,
+    anchorPov,
     publishChapter,
     ragWeightTotal,
     restoreAgenticDefaults,

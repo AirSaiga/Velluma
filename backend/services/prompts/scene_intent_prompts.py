@@ -23,28 +23,58 @@ PACING_MICRO_INSTRUCTIONS = {
 }
 
 
-def build_scene_intent_prompt(chapter: Chapter, beat: dict, open_hooks: list = None):
+def build_scene_intent_prompt(
+    chapter: Chapter,
+    beat: dict,
+    open_hooks: list = None,
+    anchor_pov: str = None,
+    original_actor: str = None,
+):
+    """
+    构建场景意图分析 prompt。
+
+    Args:
+        chapter: 章节对象
+        beat: 节拍数据字典，需包含 summary、position、exit_state、original_actor 等字段
+        open_hooks: 开放伏笔列表
+        anchor_pov: 锁定的绝对主视角角色名，若与 beat 的 original_actor 不同则触发感官转化约束
+        original_actor: 显式传入的执行者角色名，优先级高于 beat.original_actor
+
+    Returns:
+        (system_prompt, user_prompt) 元组
+    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     beat_summary = beat.get("summary", "")
+    beat_original_actor = original_actor or beat.get("original_actor") or ""
     pacing_style = str(getattr(chapter, "pacing_style", "balanced") or "balanced").strip() or "balanced"
     if pacing_style not in PACING_MICRO_INSTRUCTIONS:
         pacing_style = "balanced"
     pacing_micro_lines = PACING_MICRO_INSTRUCTIONS[pacing_style]
     exit_state = str(beat.get("exit_state") or "").strip() or "停在当前 beat 的收束状态，不越界推进"
-    system_prompt = """你是场景意图分析师。请根据输入剧情节拍输出 JSON。
 
-输出结构：
-{
+    sensory_transform_constraint = ""
+    if anchor_pov and beat_original_actor and anchor_pov != beat_original_actor:
+        sensory_transform_constraint = f"""
+[特级约束：非主视角事件转化]
+当前 Beat 的主要动作是由【{beat_original_actor}】执行的，但本章的绝对锁定视角是【{anchor_pov}】。
+你生成的 intent_label 和 constraints 必须包含"感官转化法则"。
+**绝对禁止**建议大模型切换镜头去写【{beat_original_actor}】。必须将该事件转化为【{anchor_pov}】在此刻环境中所能感知到的物理异象（如：远处的爆炸闷响、地面的剧震、战术雷达的红光跳动、通讯频道的盲音等）。
+"""
+
+    system_prompt = f"""你是场景意图分析师。请根据输入剧情节拍输出 JSON。
+
+输出结构：{sensory_transform_constraint}
+{{
   "intent_label": "场景标签",
   "goal": "本场景目标",
   "stakes": "失败代价或风险",
   "constraints": ["约束1", "约束2"]
-}
+}}
 
 要求：
 1. goal 必须具体
 2. constraints 必须是字符串数组
-3. constraints 中必须包含节奏微观指令，并显式声明“停在 exit_state”
+3. constraints 中必须包含节奏微观指令，并显式声明"停在 exit_state"
 4. 不得让场景推进越过 exit_state
 5. 只输出 JSON"""
     open_hooks_text = "暂无开放伏笔"
@@ -103,15 +133,18 @@ def parse_scene_intent_result(scene_intent_raw: str, beat_summary: str):
         stakes = str(stakes_raw).strip() if stakes_raw is not None else ""
         constraints_raw = parsed_obj.get("constraints")
         constraints = [str(item).strip() for item in constraints_raw if str(item).strip()] if isinstance(constraints_raw, list) else []
+        sensory_translation_rule = parsed_obj.get("sensory_translation_rule")
         return {
             "intent_label": intent_label,
             "goal": goal,
             "stakes": stakes or None,
             "constraints": constraints,
+            "sensory_translation_rule": str(sensory_translation_rule).strip() if sensory_translation_rule is not None else None,
         }
     return {
         "intent_label": "推进剧情",
         "goal": beat_summary or "推进剧情",
         "stakes": None,
         "constraints": [],
+        "sensory_translation_rule": None,
     }
