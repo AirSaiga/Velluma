@@ -8,9 +8,10 @@ const props = defineProps<{
   apiConfig: ApiConfig
   bookId?: string | null
   metaCollapsed?: boolean
+  critiqueResult?: any
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique'])
 
 function handleUpdateChapter(id: string, updates: Record<string, unknown>) {
   emit('update-chapter', id, updates)
@@ -36,9 +37,11 @@ function handleEditorEntityFocus(keyword: string) {
     :api-config="props.apiConfig"
     :book-id="props.bookId"
     :meta-collapsed="props.metaCollapsed"
+    :critique-result="props.critiqueResult"
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"
     @refresh-characters="handleRefreshCharacters"
     @editor-entity-focus="handleEditorEntityFocus"
+    @request-critique="(content) => emit('request-critique', content)"
   />
 </template>

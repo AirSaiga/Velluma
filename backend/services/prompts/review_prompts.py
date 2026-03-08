@@ -240,9 +240,10 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 ## Boundary & Pacing 边界基线
 {boundary_brief}
 
-## 【强制字数要求 - 最高优先级】
-★ 生成内容必须精确控制在 {word_count} 字 (±100字误差可接受)
-★ 这是最强约束，必须严格遵守，不得少于或超过此字数限制
+## 【字数说明】
+★ 目标字数约 {word_count} 字仅供参考。
+★ 优先保证剧情的完整性与流畅度，不要为了凑字数或减字数而牺牲阅读体验。
+★ 如果为了把故事讲好、讲透，导致字数超出预期，是完全可以接受的。
 
 ## 你的任务
 你是一个精修编辑，需要根据审查意见对初稿进行针对性重写。
@@ -255,14 +256,14 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 4. 确保修改后的内容符合章节大纲
 5. 保持角色性格一致性
 6. 如审查意见包含 PACING_OVERFLOW，必须执行“回退-降速-悬停”策略：先回退越界剧情，再放慢推进，最后停在对应 exit_state
-7. 生成内容必须满足上述字数要求"""
+7. 生成内容应尽可能完整流畅，不要机械删减字数"""
     user_prompt = f"""请根据以下审查意见重写初稿:
 
 【章节名】{chapter_name}
 【章节标题】{chapter.title or '未命名'}
 【章节大纲】
 {chapter.outline_text or '暂无大纲'}
-【字数要求】必须生成恰好 {word_count} 字的小说正文（±100字误差可接受）
+【字数建议】约 {word_count} 字（仅供参考，完整性优先）
 
 【Boundary & Pacing 边界基线】
 {boundary_brief}
@@ -278,7 +279,7 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 2) 撤销触发 red_lines 的事件与行为
 3) 放慢叙事推进并停在对应 exit_state，保留必要悬念
 
-请直接输出修改后的完整小说正文，不需要任何额外说明或标记。确保最终输出字数符合上述要求！"""
+请直接输出修改后的完整小说正文，不需要任何额外说明或标记。请确保剧情完整连贯。"""
     return system_prompt, user_prompt
 
 

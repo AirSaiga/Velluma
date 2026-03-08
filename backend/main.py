@@ -61,6 +61,7 @@ from backend.routes import (
     chapter_generation_router,
     chapter_optimization_router,
     inspiration_router,
+    critique_router,
     system_router,
     maps_router,
 )
@@ -145,6 +146,7 @@ app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
+app.include_router(critique_router)
 app.include_router(maps_router)
 
 # =============================================================================

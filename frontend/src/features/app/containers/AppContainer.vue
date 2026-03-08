@@ -2,11 +2,12 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import CharacterPanel from '../../../components/CharacterPanel.vue'
 import ChapterEditor from '../../../components/ChapterEditor.vue'
+import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
 import SettingsModal from '../../../components/SettingsModal.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
-import { bookApi, characterApi, chapterApi, relationshipApi } from '../../../services/api'
+import { bookApi, characterApi, chapterApi, relationshipApi, generateApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -37,6 +38,8 @@ const apiConfig = ref({
 })
 const uiPrefs = ref(loadUiPrefs())
 const loading = ref(false)
+const critiqueResult = ref<any>(null)
+const critiqueLoading = ref(false)
 const editorFocusedEntity = ref('')
 let editorEntityDecayTimer: ReturnType<typeof setTimeout> | null = null
 const showBookModal = ref(false)
@@ -252,6 +255,33 @@ function handleBookChange(event: Event) {
 
 function selectChapter(chapterId: string) {
   selectedChapterId.value = chapterId
+}
+
+async function handleRequestCritique(content: string) {
+  if (!content) return
+  if (content.length < 10) {
+    showToast('章节内容太短，无法进行审阅（至少10个字）', 'warning')
+    return
+  }
+  
+  rightTab.value = 'critique'
+  critiqueLoading.value = true
+  critiqueResult.value = null
+  
+  try {
+    const result = await generateApi.critiqueChapter({
+      chapter_content: content,
+      chapter_title: selectedChapter.value?.title || '',
+      api_key: apiConfig.value.api_key,
+      base_url: apiConfig.value.base_url,
+      model: apiConfig.value.model
+    })
+    critiqueResult.value = result
+  } catch (error: any) {
+    showToast('获取指导失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    critiqueLoading.value = false
+  }
 }
 
 function handleEditorEntityFocus(keyword: string) {
@@ -629,10 +659,12 @@ onBeforeUnmount(() => {
             :api-config="apiConfig"
             :book-id="currentBookId"
             :meta-collapsed="uiPrefs.chapterMetaCollapsed"
+            :critique-result="critiqueResult"
             @update-chapter="updateChapter"
             @update-meta-collapsed="handleMetaCollapsedChange"
             @refresh-characters="loadCharacters"
             @editor-entity-focus="handleEditorEntityFocus"
+            @request-critique="handleRequestCritique"
           />
         </main>
 
@@ -659,6 +691,13 @@ onBeforeUnmount(() => {
                 @click="rightTab = 'map'"
               >
                 地图
+              </button>
+              <button
+                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
+                :class="rightTab === 'critique' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
+                @click="rightTab = 'critique'"
+              >
+                指导
               </button>
               <button
                 class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
@@ -710,6 +749,13 @@ onBeforeUnmount(() => {
                 @update-chapter="updateChapter"
               />
               <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>
+            </div>
+
+            <div v-else-if="rightTab === 'critique'" class="h-full overflow-hidden p-3">
+              <CritiquePanel
+                :result="critiqueResult"
+                :loading="critiqueLoading"
+              />
             </div>
 
             <div v-else class="h-full overflow-y-auto p-3">

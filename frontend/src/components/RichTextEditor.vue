@@ -1,15 +1,18 @@
 <script setup>
-import { useEditor, EditorContent } from '@tiptap/vue-3'
+import { useEditor, EditorContent, BubbleMenu } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
+import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import Placeholder from '@tiptap/extension-placeholder'
-import TextAlign from '@tiptap/extension-text-align'
-import Underline from '@tiptap/extension-underline'
-import Strike from '@tiptap/extension-strike'
-import { Color, BackgroundColor } from '@tiptap/extension-text-style'
-import Highlight from '@tiptap/extension-highlight'
-import Subscript from '@tiptap/extension-subscript'
-import Superscript from '@tiptap/extension-superscript'
-import { watch, onBeforeUnmount, onMounted, ref, nextTick } from 'vue'
+  import TextAlign from '@tiptap/extension-text-align'
+  import Underline from '@tiptap/extension-underline'
+  import Strike from '@tiptap/extension-strike'
+  import TextStyle from '@tiptap/extension-text-style'
+  import Color from '@tiptap/extension-color'
+  import Highlight from '@tiptap/extension-highlight'
+  import Subscript from '@tiptap/extension-subscript'
+  import Superscript from '@tiptap/extension-superscript'
+  import { CritiqueMark } from '../extensions/CritiqueMark'
+  import { watch, onBeforeUnmount, onMounted, ref, nextTick, computed } from 'vue'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -215,7 +218,12 @@ const editor = useEditor({
   content: props.modelValue,
   editable: !props.disabled,
   extensions: [
-    StarterKit,
+    StarterKit.configure({
+      history: false,
+    }),
+    BubbleMenuExtension.configure({
+      pluginKey: 'bubbleMenu',
+    }),
     Placeholder.configure({
       placeholder: props.placeholder,
     }),
@@ -224,14 +232,15 @@ const editor = useEditor({
     }),
     Underline,
     Strike,
+    TextStyle,
     Color,
-    BackgroundColor,
     Highlight.configure({
       multicolor: true,
     }),
     Subscript,
     Superscript,
     SelectionHighlighter,
+    CritiqueMark,
   ],
   editorProps: {
     attributes: {
@@ -657,6 +666,163 @@ const undoLastOptimization = () => {
   clearUndoHint()
 }
 
+const currentCritique = ref(null)
+
+const shouldShowCritiqueMenu = ({ editor }) => {
+  const isCritique = editor.isActive('critiqueHighlight')
+  if (isCritique) {
+    currentCritique.value = editor.getAttributes('critiqueHighlight')
+  } else {
+    currentCritique.value = null
+  }
+  return isCritique
+}
+
+const CRITIQUE_LOOSE_IGNORE_RE = /[\s"'“”‘’「」『』`，。！？；：、,.!?;:()（）【】《》<>]/
+
+const normalizeCritiqueQuote = (quote) => {
+  const text = String(quote || '').trim()
+  if (!text) return ''
+  return text.replace(/^["“”‘’「」『』`]+|["“”‘’「」『』`]+$/g, '').trim()
+}
+
+const toLooseText = (text) => {
+  return String(text || '')
+    .split('')
+    .filter(ch => !CRITIQUE_LOOSE_IGNORE_RE.test(ch))
+    .join('')
+}
+
+const rangesOverlap = (a, b) => {
+  return a.from < b.to && b.from < a.to
+}
+
+const findRangeByMappedText = (text, map, query, usedRanges) => {
+  if (!query) return null
+  let cursor = 0
+  while (cursor < text.length) {
+    const index = text.indexOf(query, cursor)
+    if (index === -1) return null
+    const from = map[index]
+    const last = map[index + query.length - 1]
+    if (from !== undefined && last !== undefined) {
+      const candidate = { from, to: last + 1 }
+      const overlapped = usedRanges.some(item => rangesOverlap(item, candidate))
+      if (!overlapped) {
+        return candidate
+      }
+    }
+    cursor = index + 1
+  }
+  return null
+}
+
+const buildCritiqueSearchIndex = (doc) => {
+  let rawText = ''
+  const rawMap = []
+  const looseChars = []
+  const looseMap = []
+
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true
+    const text = node.text || ''
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i]
+      const absPos = pos + i
+      rawText += ch
+      rawMap.push(absPos)
+      if (!CRITIQUE_LOOSE_IGNORE_RE.test(ch)) {
+        looseChars.push(ch)
+        looseMap.push(absPos)
+      }
+    }
+    return true
+  })
+
+  return {
+    rawText,
+    rawMap,
+    looseText: looseChars.join(''),
+    looseMap
+  }
+}
+
+const setCritiqueData = (data) => {
+  if (!editor.value || !data || !Array.isArray(data.comments)) return
+
+  const tr = editor.value.state.tr
+  const doc = tr.doc
+  doc.descendants((node, pos) => {
+    if (node.isText) {
+      const marks = node.marks
+      const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
+      if (critiqueMark) {
+        tr.removeMark(pos, pos + node.nodeSize, critiqueMark.type)
+      }
+    }
+  })
+
+  if (tr.steps.length > 0) {
+    editor.value.view.dispatch(tr)
+  }
+
+  const searchIndex = buildCritiqueSearchIndex(editor.value.state.doc)
+  const usedRanges = []
+  const matchedRanges = []
+  const unmatched = []
+
+  data.comments.forEach((comment, index) => {
+    const quote = normalizeCritiqueQuote(comment.exact_quote)
+    if (!quote) {
+      unmatched.push(comment)
+      return
+    }
+
+    let range = findRangeByMappedText(searchIndex.rawText, searchIndex.rawMap, quote, usedRanges)
+    if (!range) {
+      const looseQuote = toLooseText(quote)
+      if (looseQuote.length >= 4) {
+        range = findRangeByMappedText(searchIndex.looseText, searchIndex.looseMap, looseQuote, usedRanges)
+      }
+    }
+
+    if (!range) {
+      unmatched.push(comment)
+      return
+    }
+
+    usedRanges.push(range)
+    matchedRanges.push({
+      from: range.from,
+      to: range.to,
+      attrs: {
+        id: comment.id || `${Date.now()}-${index}`,
+        comment: comment.reader_feeling,
+        type: comment.type,
+        reader_feeling: comment.reader_feeling,
+        suggestion: comment.suggestion
+      }
+    })
+  })
+
+  if (matchedRanges.length > 0) {
+    const markType = editor.value.state.schema.marks.critiqueHighlight
+    if (markType) {
+      const applyTr = editor.value.state.tr
+      matchedRanges.forEach(item => {
+        applyTr.addMark(item.from, item.to, markType.create(item.attrs))
+      })
+      if (applyTr.steps.length > 0) {
+        editor.value.view.dispatch(applyTr)
+      }
+    }
+  }
+
+  if (unmatched.length > 0) {
+    console.warn('Unmatched critiques:', unmatched)
+  }
+}
+
 const handleGlobalKeydown = (event) => {
   if (!showUndoHint.value) return
   const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z'
@@ -671,7 +837,8 @@ defineExpose({
   flushBuffer,
   editor,
   applyOptimizationDiff,
-  resetOptimization
+  resetOptimization,
+  setCritiqueData
 })
 </script>
 
@@ -814,6 +981,23 @@ defineExpose({
     </div>
     
     <editor-content :editor="editor" class="flex-1 overflow-y-auto custom-scrollbar" />
+
+    <bubble-menu
+      v-if="editor"
+      :editor="editor"
+      :tippy-options="{ duration: 100, placement: 'bottom' }"
+      :should-show="shouldShowCritiqueMenu"
+    >
+      <div v-if="currentCritique" class="bg-white border border-slate-200 shadow-lg rounded-lg p-3 max-w-sm flex flex-col gap-2 text-sm">
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-slate-800">{{ currentCritique.type }}</span>
+        </div>
+        <div class="text-slate-600 leading-relaxed">{{ currentCritique.comment }}</div>
+        <div v-if="currentCritique.suggestion" class="text-slate-500 text-xs italic border-t pt-2 mt-1">
+          建议：{{ currentCritique.suggestion }}
+        </div>
+      </div>
+    </bubble-menu>
 
     <transition name="copilot-menu">
       <div 
@@ -977,6 +1161,15 @@ defineExpose({
     line-height: 1.95;
     /* Move padding to ProseMirror for internal scrolling if needed, but here we rely on parent's overflow */
   }
+:deep(.critique-highlight) {
+  background-color: rgba(255, 215, 0, 0.2);
+  border-bottom: 2px solid #fbbf24;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+:deep(.critique-highlight:hover) {
+  background-color: rgba(255, 215, 0, 0.4);
+}
 :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-muted);
   content: attr(data-placeholder);

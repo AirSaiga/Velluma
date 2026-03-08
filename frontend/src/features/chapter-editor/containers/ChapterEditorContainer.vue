@@ -10,9 +10,10 @@ const props = defineProps<{
   apiConfig: ApiConfig
   bookId?: string
   metaCollapsed?: boolean
+  critiqueResult?: any
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique'])
 const viewModel = useChapterEditorContainer(props, emit)
 </script>
 
@@ -100,6 +101,8 @@ const viewModel = useChapterEditorContainer(props, emit)
     :workflow-state="viewModel.workflowState.value"
     :api-config="props.apiConfig"
     :book-id="props.bookId"
+    :critique-result="props.critiqueResult"
+    @request-critique="(content) => emit('request-critique', content)"
   />
 
   <InspirationModal

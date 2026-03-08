@@ -319,5 +319,18 @@ export const generateApi = {
     }
 
     return await response.json()
+  },
+
+  critiqueChapter: async (data: any) => {
+    const response = await requestRaw('/critique_chapter', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`主编指导请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return await response.json()
   }
 }

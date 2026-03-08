@@ -880,3 +880,30 @@ class InspirationResponse(BaseModel):
     - 返回 4 个不同维度的灵感卡片
     """
     inspirations: List[InspirationIdea] = Field(..., min_items=4, max_items=4)
+
+
+# ============================================================
+# 章节审阅 Critique Schema 层
+# ============================================================
+
+class CritiqueRequest(BaseModel):
+    """章节审阅请求模型"""
+    chapter_content: str = Field(..., min_length=10, description="待审阅的章节内容")
+    chapter_title: Optional[str] = Field(None, description="章节标题")
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+
+
+class CritiqueItem(BaseModel):
+    exact_quote: str
+    type: str
+    reader_feeling: str
+    suggestion: str
+
+
+class CritiqueResponse(BaseModel):
+    """章节审阅响应模型"""
+    comments: List[CritiqueItem]
+    overall_praise: str
