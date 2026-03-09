@@ -223,7 +223,7 @@ async function handleResetLocal() {
       </div>
 
       <!-- 代理设置 -->
-      <div class="space-y-3">
+      <div class="px-6 pb-6 space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-sm font-medium text-[var(--text-primary)]">使用代理</label>
           <button

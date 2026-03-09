@@ -23,6 +23,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.core.dependencies import get_book_repository
 from backend.repositories import BookRepository
 from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate
+from pydantic import BaseModel
+from typing import List
+
+
+class GoldenSnippetsUpdate(BaseModel):
+    golden_snippets: List[str]
+
+
+class StyleBlacklistUpdate(BaseModel):
+    style_blacklist: List[str]
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -208,3 +218,85 @@ async def get_chapters(book_id: UUID, repo: BookRepository = Depends(get_book_re
     - 未来考虑拆分为 list（仅标题+摘要）和 detail（完整内容）两个接口
     """
     return await repo.list_chapters(book_id)
+
+
+# =============================================================================
+# 黄金锚点与风格黑名单 - AI生成风格控制
+# =============================================================================
+
+@router.get("/books/{book_id}/golden-snippets")
+async def get_golden_snippets(book_id: UUID, repo: BookRepository = Depends(get_book_repository)):
+    """业务目的：获取书籍的黄金锚点片段，用于指导AI生成风格。
+
+    参数来源：
+    - book_id: 路径参数
+
+    数据流：
+    - 从 book.golden_snippets 字段读取（JSONB 数组类型）
+    - 返回字符串数组
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"golden_snippets": book.golden_snippets or []}
+
+
+@router.put("/books/{book_id}/golden-snippets")
+async def update_golden_snippets(
+    book_id: UUID,
+    payload: GoldenSnippetsUpdate,
+    repo: BookRepository = Depends(get_book_repository),
+):
+    """业务目的：更新书籍的黄金锚点片段。
+
+    参数来源：
+    - book_id: 路径参数
+    - payload: 包含 golden_snippets 字符串数组
+
+    副作用：
+    - 数据库 UPDATE 操作
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    await repo.update(book, {"golden_snippets": payload.golden_snippets})
+    return {"golden_snippets": payload.golden_snippets}
+
+
+@router.get("/books/{book_id}/style-blacklist")
+async def get_style_blacklist(book_id: UUID, repo: BookRepository = Depends(get_book_repository)):
+    """业务目的：获取书籍的风格黑名单，用于指导AI避免特定表达方式。
+
+    参数来源：
+    - book_id: 路径参数
+
+    数据流：
+    - 从 book.style_blacklist 字段读取（JSONB 数组类型）
+    - 返回字符串数组
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"style_blacklist": book.style_blacklist or []}
+
+
+@router.put("/books/{book_id}/style-blacklist")
+async def update_style_blacklist(
+    book_id: UUID,
+    payload: StyleBlacklistUpdate,
+    repo: BookRepository = Depends(get_book_repository),
+):
+    """业务目的：更新书籍的风格黑名单。
+
+    参数来源：
+    - book_id: 路径参数
+    - payload: 包含 style_blacklist 字符串数组
+
+    副作用：
+    - 数据库 UPDATE 操作
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    await repo.update(book, {"style_blacklist": payload.style_blacklist})
+    return {"style_blacklist": payload.style_blacklist}

@@ -74,7 +74,13 @@ export const bookApi = {
   delete: (id: string) => requestJson(`/books/${id}`, { method: 'DELETE' }),
   getWorldview: (id: string) => requestJson(`/books/${id}/worldview`),
   updateWorldview: (id: string, data: any) =>
-    requestJson(`/books/${id}/worldview`, { method: 'PATCH', body: JSON.stringify(data) })
+    requestJson(`/books/${id}/worldview`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getGoldenSnippets: (id: string) => requestJson(`/books/${id}/golden-snippets`),
+  updateGoldenSnippets: (id: string, data: string[]) =>
+    requestJson(`/books/${id}/golden-snippets`, { method: 'PUT', body: JSON.stringify({ golden_snippets: data }) }),
+  getStyleBlacklist: (id: string) => requestJson(`/books/${id}/style-blacklist`),
+  updateStyleBlacklist: (id: string, data: string[]) =>
+    requestJson(`/books/${id}/style-blacklist`, { method: 'PUT', body: JSON.stringify({ style_blacklist: data }) })
 }
 
 export const characterApi = {

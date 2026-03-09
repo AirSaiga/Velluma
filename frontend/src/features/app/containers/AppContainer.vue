@@ -5,6 +5,7 @@ import ChapterEditor from '../../../components/ChapterEditor.vue'
 import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
+import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
 import SettingsModal from '../../../components/SettingsModal.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi, generateApi } from '../../../services/api'
@@ -670,7 +671,7 @@ onBeforeUnmount(() => {
 
         <aside class="h-full min-h-0 flex flex-col bg-transparent px-3 py-3">
           <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1 flex-wrap">
               <button
                 class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
                 :class="rightTab === 'characters' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
@@ -684,6 +685,13 @@ onBeforeUnmount(() => {
                 @click="rightTab = 'worldview'"
               >
                 规则
+              </button>
+              <button
+                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
+                :class="rightTab === 'style' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
+                @click="rightTab = 'style'"
+              >
+                风格
               </button>
               <button
                 class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
@@ -737,6 +745,11 @@ onBeforeUnmount(() => {
 
             <div v-else-if="rightTab === 'worldview'" class="h-full overflow-y-auto p-3">
               <WorldviewSettings v-if="currentBookId" :book-id="currentBookId" />
+              <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
+            </div>
+
+            <div v-else-if="rightTab === 'style'" class="h-full overflow-y-auto p-3">
+              <GoldenSnippetsManager v-if="currentBookId" :book-id="currentBookId" />
               <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
             </div>
 
