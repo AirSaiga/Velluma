@@ -670,6 +670,7 @@ async def _generate_agentic_chapter_stream(
     
     # 全局 Prompt 调试记录
     debug_history = []
+    skip_drafting_stitching = False
 
     while iteration < max_iterations:
         iteration_started_at = time.perf_counter()
@@ -970,30 +971,35 @@ async def _generate_agentic_chapter_stream(
                     print(f"[Beat Error] Beat {beat_index} failed: {e}")
                     return beat_index - 1, "", beat_prompts
 
-            drafting_started_at = time.perf_counter()
-            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段 (含自动质检)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-            sem = asyncio.Semaphore(beat_concurrency)
-            async def sem_task(task):
-                async with sem:
-                    return await task
+            if skip_drafting_stitching and 'beat_chunk_map' in dir() and beat_chunk_map:
+                yield f"data: {json.dumps({'event': 'SKIP_DRAFTING', 'message': '局部精修后跳过 DRAFTING，使用已缓存的 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                generated_chunks = [beat_chunk_map.get(f"beat_{i+1}", "") for i in range(len(beats))]
+                all_beat_prompts = []
+            else:
+                drafting_started_at = time.perf_counter()
+                yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段 (含自动质检)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                sem = asyncio.Semaphore(beat_concurrency)
+                async def sem_task(task):
+                    async with sem:
+                        return await task
 
-            tasks = [
-                sem_task(process_beat(i, b, sb))
-                for i, b, sb in zip(range(1, len(beats)+1), beats, story_beats)
-            ]
-            results = await asyncio.gather(*tasks)
-            record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
-            yield metric_frame(
-                "DRAFTING_DONE",
-                iteration=iteration,
-                extra={"beat_count": len(beats), "concurrency": beat_concurrency},
-            )
+                tasks = [
+                    sem_task(process_beat(i, b, sb))
+                    for i, b, sb in zip(range(1, len(beats)+1), beats, story_beats)
+                ]
+                results = await asyncio.gather(*tasks)
+                record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
+                yield metric_frame(
+                    "DRAFTING_DONE",
+                    iteration=iteration,
+                    extra={"beat_count": len(beats), "concurrency": beat_concurrency},
+                )
 
-            generated_chunks = [""] * len(beats)
-            all_beat_prompts = []
-            for idx, text, b_prompts in results:
-                generated_chunks[idx] = text
-                all_beat_prompts.extend(b_prompts)
+                generated_chunks = [""] * len(beats)
+                all_beat_prompts = []
+                for idx, text, b_prompts in results:
+                    generated_chunks[idx] = text
+                    all_beat_prompts.extend(b_prompts)
             
             # 将 beat prompts 按 beat_index 和 stage 排序后加入 debug_history
             all_beat_prompts.sort(key=lambda x: (x.get("beat_index", 0), x.get("stage", "")))
@@ -1002,6 +1008,8 @@ async def _generate_agentic_chapter_stream(
                 "iteration": iteration,
                 "beat_prompts": all_beat_prompts
             })
+
+            beat_chunk_map = {f"beat_{i+1}": chunk for i, chunk in enumerate(generated_chunks) if chunk}
 
             stitching_started_at = time.perf_counter()
             yield f"data: {json.dumps({'event': 'STITCHING', 'message': '统稿 Agent 正在拼接 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
@@ -1124,7 +1132,7 @@ async def _generate_agentic_chapter_stream(
         reviewing_started_at = time.perf_counter()
         yield f"data: {json.dumps({'event': 'REVIEWING', 'message': '审阅 Agent 正在进行逻辑校验和 OOC 排查...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
         system_prompt, user_prompt = build_review_agent_prompt(
-            chapter, book, entities, relationships, chapter.outline_text or "", current_draft
+            chapter, book, entities, relationships, chapter.outline_text or "", current_draft, beats
         )
         yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
         debug_history.append({
@@ -1164,6 +1172,101 @@ async def _generate_agentic_chapter_stream(
             )
             break
         revision_plan = review_result.get("revision_plan", "")
+        target_beat_ids = review_result.get("target_beat_ids", [])
+        all_issues = review_result.get("issues", [])
+
+        if target_beat_ids and isinstance(target_beat_ids, list) and len(target_beat_ids) > 0:
+            valid_beat_ids = [bid for bid in target_beat_ids if bid in beat_chunk_map]
+            if not valid_beat_ids:
+                print(f"[Refine Warning] Review returned invalid beat_ids: {target_beat_ids}. Valid keys: {list(beat_chunk_map.keys())}. Skipping localized refine.")
+            else:
+                refining_started_at = time.perf_counter()
+                yield f"data: {json.dumps({'event': 'REFINING', 'message': f'正在对 {len(valid_beat_ids)} 个问题片段进行局部精修...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+
+                for beat_id in valid_beat_ids:
+                    original_chunk = beat_chunk_map.get(beat_id, "")
+                    if not original_chunk:
+                        print(f"[Refine Warning] Beat {beat_id} has no chunk text, skipping.")
+                        continue
+
+                    beat_idx = int(beat_id.split("_")[1]) - 1
+                    beat_info = beats[beat_idx] if beat_idx < len(beats) else {}
+                    beat_summary = beat_info.get("summary", "")
+
+                    issue_descriptions = []
+                    for issue in all_issues:
+                        issue_beat_ids = issue.get("target_beat_ids", [])
+                        if beat_id in issue_beat_ids:
+                            issue_descriptions.append(issue.get("description", ""))
+
+                    revision_instruction = f"【全局纠偏】{revision_plan}\n\n【问题定位】" + "; ".join(issue_descriptions) if issue_descriptions else revision_plan
+
+                    r_sys, r_user = build_chunk_refine_prompt(
+                        chapter, book, entities, relationships, beat_summary, original_chunk, revision_instruction
+                    )
+
+                    debug_history.append({
+                        "stage": "CHUNK_REFINE_LOCAL",
+                        "iteration": iteration,
+                        "beat_id": beat_id,
+                        "system_prompt": r_sys,
+                        "user_prompt": r_user
+                    })
+
+                    refined_chunk = await call_llm_timed(
+                        "chunk_refine_local",
+                        system_prompt=r_sys,
+                        user_prompt=r_user,
+                        api_key=request.api_key,
+                        base_url=request.base_url,
+                        model=request.model,
+                        temperature=0.7,
+                        max_tokens=_clamp_int(max(1200, target_words * 3), 1200, 5200),
+                    )
+                    refined_chunk = _clean_llm_output(refined_chunk)
+                    beat_chunk_map[beat_id] = refined_chunk
+                    print(f"[Local Refine] Beat {beat_id} refined successfully.")
+
+                record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
+                yield metric_frame("REFINING_DONE", iteration=iteration, extra={"refined_beats": valid_beat_ids})
+
+                stitching_started_at = time.perf_counter()
+                yield f"data: {json.dumps({'event': 'STITCHING', 'message': '统稿 Agent 正在重组精修后的 chunks...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                updated_chunks = [beat_chunk_map.get(f"beat_{i+1}", "") for i in range(len(beats))]
+                stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(
+                    chapter=chapter,
+                    beats=beats,
+                    chunks=updated_chunks,
+                    word_count=word_count,
+                )
+                yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
+                debug_history.append({
+                    "stage": "STITCHING_AFTER_REFINE",
+                    "iteration": iteration,
+                    "system_prompt": stitch_system_prompt,
+                    "user_prompt": stitch_user_prompt
+                })
+                current_draft = await call_llm_timed(
+                    "stitch_after_refine",
+                    system_prompt=stitch_system_prompt,
+                    user_prompt=stitch_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.4,
+                    max_tokens=10000,
+                )
+                current_draft = _clean_llm_output(current_draft)
+                if not current_draft.strip():
+                    current_draft = "\n\n".join(updated_chunks).strip()
+                record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
+                chapter.draft_text = current_draft
+                chapter.revision_count = iteration
+                await db.commit()
+                yield metric_frame("STITCHING_DONE", iteration=iteration)
+
+                skip_drafting_stitching = True
+
         record_stage("ITERATION_TOTAL", _to_secs(time.perf_counter() - iteration_started_at))
 
     if current_draft and current_draft.strip():

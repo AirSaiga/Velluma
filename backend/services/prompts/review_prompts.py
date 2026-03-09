@@ -107,7 +107,7 @@ def _build_default_revision_plan(has_pacing_overflow: bool) -> str:
     return "请按章节大纲与角色设定修复逻辑问题，保留原文关键段落结构，避免大幅删段，并返回完整正文。"
 
 
-def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str):
+def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str, beats: list = None):
     """
     构建审阅 Agent (Review Agent) 的提示词，负责质量检查。
 
@@ -122,6 +122,9 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
     - temperature=0.1 (低温度保证判断一致性)
 
     数据流：draft_text (待审内容) → LLM 审查 → JSON 格式审查结果
+
+    新增参数：
+    - beats: 剧情节拍列表，用于构建 Reference_Beats 地图，帮助定位问题所属的 Beat
     """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -142,6 +145,16 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
             target_name = rel.target_character.name if rel.target_character else "角色"
             relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
     boundary_brief = _render_boundary_brief(chapter)
+
+    reference_beats_text = ""
+    if beats and isinstance(beats, list):
+        beats_info = []
+        for idx, beat in enumerate(beats, start=1):
+            beat_id = beat.get("beat_id", f"beat_{idx:02d}")
+            summary = beat.get("summary", "") or f"Beat {idx}"
+            beats_info.append(f'{{"beat_id": "{beat_id}", "summary": "{summary}"}}')
+        reference_beats_text = f"\n## 剧情节拍规划 (Reference Beats)\n你正在审阅合并后的完整章节文本。为了方便后续精修定位，我为你提供了本章原本的剧情节拍规划。\n当你在正文中发现 OOC、逻辑硬伤或越界问题时，请对照这个规划表，**推理出该问题情节属于哪个或哪几个 Beat**，并将对应的 `beat_id` 填入 `target_beat_ids` 字段。\n\n[{', '.join(beats_info)}]"
+
     system_prompt = f"""{global_sys_prompt}
 
 你是一个严格的小说质量审查员。你不负责写小说，只负责检查初稿是否符合要求。
@@ -156,6 +169,7 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 ## Boundary & Pacing 边界基线
 {boundary_brief}
+{reference_beats_text}
 
 ## 你的任务
 1. 检查初稿是否遵循了章节大纲要求
@@ -175,7 +189,8 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
         {{
             "type": "OOC/剧情遗漏/逻辑硬伤/PACING_OVERFLOW/完整性缺失",
             "severity": "high/medium/low",
-            "description": "详细描述问题"
+            "description": "详细描述问题",
+            "target_beat_ids": ["beat_01", "beat_02"]
         }}
     ],
     "revision_plan": "给出具体的重写建议"
@@ -184,13 +199,14 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 - pass: true 表示所有检查通过，可以直接输出
 - pass: false 表示存在问题，需要重写
 - issues: 列出发现的问题
+- **重要**：每个 issue 必须包含 `target_beat_ids` 字段，值为问题所属的 Beat ID 列表（如 ["beat_03", "beat_04"]）。请根据正文内容与 Reference Beats 地图进行推理定位。
 - 当存在以下任一情况时，必须新增一条 issue.type = "PACING_OVERFLOW"：
   1) 文本越过任一 beat 的 exit_state
   2) 文本触发任一 beat 的 red_lines 禁忌事件
 - 当发现重写版本相对原有叙事出现大幅删段、关键段落被删除且未等价重建时，必须新增一条 issue.type = "完整性缺失"
 - revision_plan: 给出具体的重写指导
-- 若存在 PACING_OVERFLOW，revision_plan 必须明确“回退到越界前状态、放慢节奏、悬停在对应 exit_state”
-- 若存在完整性缺失，revision_plan 必须明确“补回被删减的关键段落信息，禁止继续大幅删段”
+- 若存在 PACING_OVERFLOW，revision_plan 必须明确"回退到越界前状态、放慢节奏、悬停在对应 exit_state"
+- 若存在完整性缺失，revision_plan 必须明确"补回被删减的关键段落信息，禁止继续大幅删段"
 
 注意：你必须输出合法的 JSON 格式，不要输出任何其他内容！"""
     user_prompt = f"""请审查以下初稿:
@@ -326,8 +342,9 @@ def parse_review_result(review_result_raw: str):
     if not text:
         return {
             "pass": False,
-            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回为空，无法完成质检。"}],
+            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回为空，无法完成质检。", "target_beat_ids": []}],
             "revision_plan": "请基于章节大纲重新审查，并仅输出合法 JSON。",
+            "target_beat_ids": [],
         }, "Empty response from Review Agent"
     candidates = [text]
     fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
@@ -347,11 +364,13 @@ def parse_review_result(review_result_raw: str):
     if not isinstance(parsed_obj, dict):
         return {
             "pass": False,
-            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回内容无法解析为合法 JSON。"}],
+            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回内容无法解析为合法 JSON。", "target_beat_ids": []}],
             "revision_plan": "请严格按约定 JSON 结构输出审查结论，不要附加解释文本。",
+            "target_beat_ids": [],
         }, parse_error or "Review JSON parse failed"
     raw_issues = parsed_obj.get("issues")
     normalized_issues = []
+    all_target_beat_ids = set()
     if isinstance(raw_issues, list):
         for issue in raw_issues:
             if isinstance(issue, dict):
@@ -360,11 +379,17 @@ def parse_review_result(review_result_raw: str):
                 severity = str(issue.get("severity") or "").strip().lower()
                 if severity not in {"high", "medium", "low"}:
                     severity = "medium"
+                target_beat_ids = issue.get("target_beat_ids")
+                if isinstance(target_beat_ids, list):
+                    for bid in target_beat_ids:
+                        if isinstance(bid, str) and bid.strip():
+                            all_target_beat_ids.add(bid.strip())
                 normalized_issues.append(
                     {
                         "type": issue_type,
                         "severity": severity,
                         "description": description or "未提供问题描述",
+                        "target_beat_ids": target_beat_ids if isinstance(target_beat_ids, list) else [],
                     }
                 )
             elif isinstance(issue, str) and issue.strip():
@@ -374,6 +399,7 @@ def parse_review_result(review_result_raw: str):
                         "type": _normalize_issue_type("", description),
                         "severity": "medium",
                         "description": description,
+                        "target_beat_ids": [],
                     }
                 )
     revision_plan = parsed_obj.get("revision_plan")
@@ -392,7 +418,12 @@ def parse_review_result(review_result_raw: str):
                 f"{revision_plan.rstrip()}\n"
                 "补充要求：请先回退越界剧情，放慢推进并悬停在对应 exit_state，确保不触发 red_lines。"
             )
-    result = {"pass": bool(parsed_obj.get("pass", False)), "issues": normalized_issues, "revision_plan": revision_plan}
+    result = {
+        "pass": bool(parsed_obj.get("pass", False)),
+        "issues": normalized_issues,
+        "revision_plan": revision_plan,
+        "target_beat_ids": list(all_target_beat_ids)
+    }
     return result, None
 
 
