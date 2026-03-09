@@ -348,7 +348,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   const isFormatting = ref(false)
 
-  async function handleFormatText(text: string) {
+  async function handleFormatText(payload: string | { text: string; selection?: { from: number; to: number } }) {
+    const text = typeof payload === 'string' ? payload : payload.text
+    const selection = typeof payload === 'string' ? undefined : payload.selection
+    
     if (isFormatting.value || !text) return
     
     try {
@@ -366,10 +369,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       })
       
       if (formatted_text && editorRef.value) {
-        // 将返回的文本按行分割，构建 Tiptap JSON 结构以确保正确分段
-        // 1. 按换行符分割（兼容 \n, \r\n）
-        // 2. 过滤掉空行
-        // 3. 构造 paragraph 节点
         const paragraphs = formatted_text
           .split(/\r?\n/)
           .filter((line: string) => line.trim().length > 0)
@@ -382,8 +381,14 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           }))
         }
 
-        // 使用 setContent 替换编辑器内容
-        editorRef.value.editor.commands.setContent(jsonContent)
+        if (selection) {
+          // 选中文本部分替换
+          editorRef.value.editor.commands.setTextSelection(selection)
+          editorRef.value.editor.commands.insertContent(jsonContent)
+        } else {
+          // 全文替换
+          editorRef.value.editor.commands.setContent(jsonContent)
+        }
       }
     } catch (e: any) {
       console.error('Format text failed', e)

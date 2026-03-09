@@ -496,11 +496,26 @@ const insertContent = (content) => {
 const formatContent = () => {
   if (!editor.value || props.isFormatting) return
   
-  // 获取纯文本内容
+  // 检查是否有选中的文本
+  if (currentSelection.value && currentSelection.value.text) {
+    const selectedText = currentSelection.value.text.trim()
+    if (selectedText) {
+      emit('request-format', {
+        text: selectedText,
+        selection: {
+          from: currentSelection.value.from,
+          to: currentSelection.value.to
+        }
+      })
+      return
+    }
+  }
+  
+  // 没有选中文本，格式化全文
   const text = editor.value.getText()
   if (!text.trim()) return
 
-  emit('request-format', text)
+  emit('request-format', { text })
 }
 
 const flushBuffer = () => {
