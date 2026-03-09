@@ -15,6 +15,10 @@ const props = defineProps<{
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique'])
 const viewModel = useChapterEditorContainer(props, emit)
+
+defineExpose({
+  scrollToCritique: viewModel.scrollToCritique
+})
 </script>
 
 <template>
@@ -82,8 +86,10 @@ const viewModel = useChapterEditorContainer(props, emit)
     :restore-agentic-defaults="viewModel.restoreAgenticDefaults"
     :restore-agentic-field="viewModel.restoreAgenticField"
     :selected-chapter="viewModel.selectedChapter.value"
+    :anchor-pov="viewModel.anchorPov.value"
     :set-agentic-field-value="viewModel.setAgenticFieldValue"
     :set-editor-ref="viewModel.setEditorRef"
+    :scroll-to-critique="viewModel.scrollToCritique"
     :set-optimization-feedback="viewModel.setOptimizationFeedback"
     :set-word-count="viewModel.setWordCount"
     :show-agentic-settings-modal="viewModel.showAgenticSettingsModal.value"

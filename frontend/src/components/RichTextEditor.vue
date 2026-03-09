@@ -885,6 +885,83 @@ const setCritiqueData = (data) => {
   }
 }
 
+const scrollToCritiqueById = (commentId) => {
+  if (!editor.value || !commentId) return
+
+  const doc = editor.value.state.doc
+  let foundPos = null
+
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true
+    const marks = node.marks
+    const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight' && m.attrs.id === commentId)
+    if (critiqueMark) {
+      foundPos = pos
+      return false
+    }
+    return true
+  })
+
+  if (foundPos !== null) {
+    console.log('[RichTextEditor] foundPos:', foundPos)
+    editor.value.commands.setTextSelection({ from: foundPos, to: foundPos })
+    editor.value.commands.scrollIntoView()
+    editor.value.view.dispatch(editor.value.state.tr)
+  } else {
+    console.log('[RichTextEditor] not found matching position')
+  }
+}
+
+const scrollToCritiqueByQuote = (exactQuote) => {
+  if (!editor.value || !exactQuote) return
+
+  const doc = editor.value.state.doc
+  const quoteText = exactQuote.trim()
+  const normalizedQuote = quoteText.replace(/\s+/g, ' ')
+  let foundPos = null
+
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true
+    const text = node.text || ''
+    const normalizedText = text.replace(/\s+/g, ' ')
+    
+    if (normalizedText.includes(normalizedQuote) || text.includes(quoteText)) {
+      const marks = node.marks
+      const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
+      if (critiqueMark) {
+        foundPos = pos
+        return false
+      }
+    }
+    return true
+  })
+
+  if (foundPos !== null) {
+    const { view } = editor.value
+    const coords = view.coordsAtPos(foundPos)
+    
+    const editorContainer = editorContainerRef.value
+    if (editorContainer) {
+      const scrollElement = editorContainer.querySelector('.ProseMirror')
+      if (scrollElement) {
+        const domNode = view.domAtPos(foundPos)
+        if (domNode && domNode.node) {
+          const element = domNode.node.nodeType === Node.TEXT_NODE ? domNode.node.parentNode : domNode.node
+          if (element && typeof element.scrollIntoView === 'function') {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          } else {
+            scrollElement.scrollTop = coords.top - scrollElement.getBoundingClientRect().top - scrollElement.clientHeight / 2
+          }
+        }
+      }
+    }
+    
+    editor.value.commands.setTextSelection({ from: foundPos, to: foundPos })
+    editor.value.commands.scrollIntoView()
+    editor.value.view.dispatch(editor.value.state.tr)
+  }
+}
+
 const handleGlobalKeydown = (event) => {
   if (!showUndoHint.value) return
   const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z'
@@ -900,7 +977,9 @@ defineExpose({
   editor,
   applyOptimizationDiff,
   resetOptimization,
-  setCritiqueData
+  setCritiqueData,
+  scrollToCritiqueById,
+  scrollToCritiqueByQuote
 })
 </script>
 

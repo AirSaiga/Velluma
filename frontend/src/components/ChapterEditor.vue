@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import ChapterEditorContainer from '../features/chapter-editor/containers/ChapterEditorContainer.vue'
 import type { Chapter, Character, ApiConfig } from '../types'
 
@@ -12,6 +13,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique'])
+
+const containerRef = ref<any>(null)
 
 function handleUpdateChapter(id: string, updates: Record<string, unknown>) {
   emit('update-chapter', id, updates)
@@ -28,10 +31,21 @@ function handleRefreshCharacters() {
 function handleEditorEntityFocus(keyword: string) {
   emit('editor-entity-focus', keyword)
 }
+
+function scrollToCritique(comment: any) {
+  if (containerRef.value?.scrollToCritique) {
+    containerRef.value.scrollToCritique(comment)
+  }
+}
+
+defineExpose({
+  scrollToCritique
+})
 </script>
 
 <template>
   <ChapterEditorContainer
+    ref="containerRef"
     :selected-chapter="props.selectedChapter"
     :characters="props.characters"
     :api-config="props.apiConfig"

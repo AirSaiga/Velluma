@@ -93,6 +93,7 @@ const props = defineProps<{
   selectedChapter: Chapter | null
   setAgenticFieldValue: (field: keyof AgenticFormState, event: Event) => void
   setEditorRef: (editor: any) => void
+  scrollToCritique: (comment: any) => void
   setOptimizationFeedback: (value: string) => void
   setWordCount: (value: number) => void
   showAgenticSettingsModal: boolean

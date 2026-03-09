@@ -49,6 +49,7 @@ const showSettingsModal = ref(false)
 const notesStatus = ref('idle')
 const notesError = ref('')
 const localBookNotes = ref('')
+const chapterEditorRef = ref<any>(null)
 const bookForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' })
 const manageBookForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
@@ -282,6 +283,13 @@ async function handleRequestCritique(content: string) {
     showToast('获取指导失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     critiqueLoading.value = false
+  }
+}
+
+function handleJumpToCritique(comment: any) {
+  if (!comment) return
+  if (chapterEditorRef.value?.scrollToCritique) {
+    chapterEditorRef.value.scrollToCritique(comment)
   }
 }
 
@@ -655,6 +663,7 @@ onBeforeUnmount(() => {
 
         <main class="h-full min-h-0 overflow-hidden border-x border-white/60">
           <ChapterEditor
+            ref="chapterEditorRef"
             :selected-chapter="selectedChapter"
             :characters="characters"
             :api-config="apiConfig"
@@ -768,6 +777,7 @@ onBeforeUnmount(() => {
               <CritiquePanel
                 :result="critiqueResult"
                 :loading="critiqueLoading"
+                @jump-to-critique="handleJumpToCritique"
               />
             </div>
 

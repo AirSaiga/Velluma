@@ -398,6 +398,18 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     editorRef.value = editor
   }
 
+  function scrollToCritique(comment: any) {
+    if (!editorRef.value || !comment) return
+    if (comment.exact_quote && editorRef.value.scrollToCritiqueByQuote) {
+      editorRef.value.scrollToCritiqueByQuote(comment.exact_quote)
+    } else {
+      const commentId = comment.id || comment._id
+      if (commentId && editorRef.value.scrollToCritiqueById) {
+        editorRef.value.scrollToCritiqueById(commentId)
+      }
+    }
+  }
+
   function syncGeneratedContentToChapter() {
     const html = editorRef.value?.editor?.getHTML?.()
     if (!html || typeof html !== 'string') return
@@ -903,6 +915,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     selectedChapter,
     setAgenticFieldValue,
     setEditorRef,
+    scrollToCritique,
     setOptimizationFeedback,
     setWordCount,
     showAgenticSettingsModal,

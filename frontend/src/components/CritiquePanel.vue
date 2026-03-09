@@ -38,7 +38,17 @@
 
         <!-- 详细评论 -->
         <div v-if="result.comments && result.comments.length > 0" class="space-y-3">
-          <div v-for="(comment, index) in result.comments" :key="index" class="bg-white rounded-xl border border-slate-200 p-3 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div
+            v-for="(comment, index) in result.comments"
+            :key="index"
+            :class="[
+              'bg-white rounded-xl border p-3 shadow-sm transition-all duration-200',
+              comment.exact_quote
+                ? 'cursor-pointer hover:shadow-md hover:border-indigo-300 hover:bg-indigo-50/30'
+                : 'border-slate-200'
+            ]"
+            @click="handleCommentClick(comment)"
+          >
             <div class="flex items-center justify-between mb-2">
               <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-600">
                 {{ comment.type || '一般建议' }}
@@ -81,6 +91,16 @@ defineProps<{
   result: any
   loading: boolean
 }>()
+
+const emit = defineEmits<{
+  (e: 'jump-to-critique', comment: any): void
+}>()
+
+const handleCommentClick = (comment: any) => {
+  if (comment.exact_quote) {
+    emit('jump-to-critique', comment)
+  }
+}
 </script>
 
 <style scoped>
