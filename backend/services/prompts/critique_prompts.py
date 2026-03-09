@@ -38,7 +38,7 @@ def build_critique_system_prompt() -> str:
 }
 ```
 
-请确保输出是合法的 JSON 格式。限制在 3 到 5 条最核心的建议。
+请确保输出是合法的 JSON 格式。建议数量控制在 10-15 条，覆盖全文的各个方面。
 """
 
 def build_critique_user_prompt(chapter_content: str, chapter_title: Optional[str] = None) -> str:

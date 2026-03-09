@@ -5,9 +5,21 @@
         <span>📝</span>
         主编指导意见
       </h3>
-      <div v-if="loading" class="flex items-center gap-2 text-xs text-indigo-600">
-        <div class="w-3 h-3 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
-        分析中...
+      <div class="flex items-center gap-2">
+        <div v-if="loading" class="flex items-center gap-2 text-xs text-indigo-600">
+          <div class="w-3 h-3 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+          分析中...
+        </div>
+        <button
+          v-if="result"
+          @click="emit('close-critique')"
+          class="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+          title="关闭指导"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
       </div>
     </div>
     
@@ -94,6 +106,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'jump-to-critique', comment: any): void
+  (e: 'close-critique'): void
 }>()
 
 const handleCommentClick = (comment: any) => {

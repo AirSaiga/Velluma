@@ -293,6 +293,10 @@ function handleJumpToCritique(comment: any) {
   }
 }
 
+function handleCloseCritique() {
+  critiqueResult.value = null
+}
+
 function handleEditorEntityFocus(keyword: string) {
   const nextKeyword = (keyword || '').trim()
   editorFocusedEntity.value = nextKeyword
@@ -778,6 +782,7 @@ onBeforeUnmount(() => {
                 :result="critiqueResult"
                 :loading="critiqueLoading"
                 @jump-to-critique="handleJumpToCritique"
+                @close-critique="handleCloseCritique"
               />
             </div>
 

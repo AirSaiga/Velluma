@@ -37,7 +37,7 @@ async def critique_chapter(request: CritiqueRequest):
                 model=request.model,
                 temperature=request.temperature,
                 top_p=0.9,
-                max_tokens=2048,
+                max_tokens=4096,
                 response_format={"type": "json_object"}
             )
             

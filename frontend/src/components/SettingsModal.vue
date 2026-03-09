@@ -31,6 +31,7 @@ const PROVIDERS = {
       'z-ai/glm-5',
       'moonshotai/kimi-k2.5',
       'qwen/qwen3.5-plus-02-15',
+      'deepseek/deepseek-v3.2',
       'google/gemini-3-flash-preview',
       'google/gemini-3.1-pro-preview'
     ]

@@ -124,8 +124,11 @@ watch(editorRef, (editor) => {
 })
 
 watch(() => props.critiqueResult, (newVal) => {
-  if (newVal && editorRef.value) {
+  if (!editorRef.value) return
+  if (newVal) {
     editorRef.value.setCritiqueData(newVal)
+  } else {
+    editorRef.value.setCritiqueData(null)
   }
 })
 
@@ -207,7 +210,7 @@ watch(() => props.critiqueResult, (newVal) => {
               </svg>
             </button>
             <button
-              @click="emit('request-critique', selectedChapter.content_text || selectedChapter.draft_text || '')"
+              @click="emit('request-critique', editorRef?.getContent() || selectedChapter.content_text || selectedChapter.draft_text || '')"
               :disabled="isGenerating"
               title="获取主编指导"
               class="h-7 px-2 flex items-center justify-center rounded-lg bg-white text-[var(--text-secondary)] text-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors gap-1"

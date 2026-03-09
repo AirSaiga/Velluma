@@ -825,7 +825,27 @@ const buildCritiqueSearchIndex = (doc) => {
 }
 
 const setCritiqueData = (data) => {
-  if (!editor.value || !data || !Array.isArray(data.comments)) return
+  if (!editor.value) return
+
+  if (!data) {
+    const tr = editor.value.state.tr
+    const doc = tr.doc
+    doc.descendants((node, pos) => {
+      if (node.isText) {
+        const marks = node.marks
+        const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
+        if (critiqueMark) {
+          tr.removeMark(pos, pos + node.nodeSize, critiqueMark.type)
+        }
+      }
+    })
+    if (tr.steps.length > 0) {
+      editor.value.view.dispatch(tr)
+    }
+    return
+  }
+
+  if (!data || !Array.isArray(data.comments)) return
 
   const tr = editor.value.state.tr
   const doc = tr.doc
@@ -951,6 +971,30 @@ const scrollToCritiqueByQuote = (exactQuote) => {
     return true
   })
 
+  if (foundPos === null) {
+    // 降级：使用全文搜索逻辑 (buildCritiqueSearchIndex)
+    // 这能处理跨节点文本匹配，且支持模糊匹配 (looseText)
+    const searchIndex = buildCritiqueSearchIndex(doc)
+    const quote = normalizeCritiqueQuote(exactQuote)
+    
+    if (quote) {
+      // 尝试精确匹配
+      let range = findRangeByMappedText(searchIndex.rawText, searchIndex.rawMap, quote, [])
+      
+      // 如果失败，尝试模糊匹配 (忽略标点符号和空格)
+      if (!range) {
+        const looseQuote = toLooseText(quote)
+        if (looseQuote.length >= 4) {
+          range = findRangeByMappedText(searchIndex.looseText, searchIndex.looseMap, looseQuote, [])
+        }
+      }
+      
+      if (range) {
+        foundPos = range.from
+      }
+    }
+  }
+
   if (foundPos !== null) {
     const { view } = editor.value
     const coords = view.coordsAtPos(foundPos)
@@ -994,7 +1038,8 @@ defineExpose({
   resetOptimization,
   setCritiqueData,
   scrollToCritiqueById,
-  scrollToCritiqueByQuote
+  scrollToCritiqueByQuote,
+  getContent: () => editor.value?.getHTML() || ''
 })
 </script>
 
