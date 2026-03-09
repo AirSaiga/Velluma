@@ -287,6 +287,7 @@ watch(() => props.critiqueResult, (newVal) => {
         <RichTextEditor
           ref="editorRef"
           :id="selectedChapter.id"
+          :book-id="bookId"
           :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
           @update:model-value="handleContentUpdate"
           @entity-focus-change="handleEditorEntityFocus"

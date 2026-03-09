@@ -260,6 +260,18 @@ MIGRATIONS: list[dict[str, Any]] = [
         "expected_udt_names": {"text"},
     },
     {
+        "table": "books",
+        "column": "golden_snippets",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "books",
+        "column": "style_blacklist",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
         "table": "story_beats",
         "column": "pacing_type",
         "definition": "VARCHAR(50)",

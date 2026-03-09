@@ -53,6 +53,8 @@ class Book(Base):
     global_sys_prompt = Column(Text, nullable=True)
     core_motifs_taboos = Column(Text, nullable=True)
     worldview_settings = Column(JSONB, default=dict)
+    golden_snippets = Column(JSONB, default=list)
+    style_blacklist = Column(JSONB, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")

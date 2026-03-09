@@ -16,6 +16,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { bookApi } from '../services/api/domain'
 
 // Extension to fake selection highlighting when editor loses focus
 const SelectionHighlighter = Extension.create({
@@ -87,6 +88,10 @@ const props = defineProps({
   isFormatting: {
     type: Boolean,
     default: false,
+  },
+  bookId: {
+    type: String,
+    default: null,
   }
 })
 
@@ -122,6 +127,63 @@ const lastAppliedOptimization = ref(null)
 let undoHintTimer = null
 let selectionDebounceTimer = null
 const pendingExternalUpdate = ref(null)
+
+const hasSelection = computed(() => {
+  if (!editor.value) return false
+  const { from, to } = editor.value.state.selection
+  return from !== to
+})
+
+const getSelectedText = () => {
+  if (!editor.value) return ''
+  const { from, to } = editor.value.state.selection
+  if (from === to) return ''
+  return editor.value.state.doc.textBetween(from, to, ' ')
+}
+
+async function addToGoldenSnippets() {
+  const selectedText = getSelectedText()
+  if (!selectedText) {
+    alert('请先选中要添加的文本')
+    return
+  }
+  if (!props.bookId) {
+    alert('需要先打开书籍')
+    return
+  }
+  try {
+    const currentBook = await bookApi.get(props.bookId)
+    const currentSnippets = currentBook.golden_snippets || []
+    currentSnippets.push(selectedText)
+    await bookApi.update(props.bookId, { golden_snippets: currentSnippets })
+    alert('已添加到黄金锚点')
+  } catch (e) {
+    console.error('添加黄金片段失败:', e)
+    alert('添加失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function addToBlacklist() {
+  const selectedText = getSelectedText()
+  if (!selectedText) {
+    alert('请先选中要添加的文本')
+    return
+  }
+  if (!props.bookId) {
+    alert('需要先打开书籍')
+    return
+  }
+  try {
+    const currentBook = await bookApi.get(props.bookId)
+    const currentBlacklist = currentBook.style_blacklist || []
+    currentBlacklist.push(selectedText)
+    await bookApi.update(props.bookId, { style_blacklist: currentBlacklist })
+    alert('已添加到黑名单')
+  } catch (e) {
+    console.error('添加黑名单失败:', e)
+    alert('添加失败: ' + (e.message || '未知错误'))
+  }
+}
 
 const SELECTION_DEBOUNCE_MS = 600
 const UNDO_HINT_DURATION_MS = 4500
@@ -1040,6 +1102,23 @@ defineExpose({
           class="px-2.5 py-1 text-[11px] rounded-md bg-indigo-600 text-white font-medium hover:bg-indigo-500 transition-colors"
         >
           ✨ AI 润色/改写
+        </button>
+        <div class="w-px h-4 bg-slate-200"></div>
+        <button
+          @click="addToGoldenSnippets"
+          :disabled="!props.bookId || !hasSelection"
+          class="px-2 py-1 text-[10px] rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="将选中片段添加到黄金锚点"
+        >
+          ⭐ 黄金片段
+        </button>
+        <button
+          @click="addToBlacklist"
+          :disabled="!props.bookId || !hasSelection"
+          class="px-2 py-1 text-[10px] rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="将选中片段添加到黑名单"
+        >
+          🚫 黑名单
         </button>
       </template>
 

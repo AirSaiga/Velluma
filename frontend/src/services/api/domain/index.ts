@@ -334,3 +334,9 @@ export const generateApi = {
     return await response.json()
   }
 }
+
+export const systemApi = {
+  getProxyConfig: () => requestJson('/system/proxy'),
+  updateProxyConfig: (config: { enabled: boolean; url: string }) => 
+    requestJson('/system/proxy', { method: 'PUT', body: JSON.stringify(config) })
+}

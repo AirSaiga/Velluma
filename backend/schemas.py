@@ -35,6 +35,8 @@ class BookBase(BaseModel):
     global_sys_prompt: Optional[str] = None
     core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = Field(default_factory=dict)
+    golden_snippets: Optional[list] = Field(default_factory=list)
+    style_blacklist: Optional[list] = Field(default_factory=list)
 
 
 class BookCreate(BookBase):
@@ -65,6 +67,8 @@ class BookUpdate(BaseModel):
     global_sys_prompt: Optional[str] = None
     core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = None
+    golden_snippets: Optional[list] = None
+    style_blacklist: Optional[list] = None
 
 
 class BookResponse(BookBase):

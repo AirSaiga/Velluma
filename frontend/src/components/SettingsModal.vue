@@ -1,6 +1,7 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { useConfirmDialog } from '../composables/useConfirmDialog'
+import { systemApi } from '../services/api/domain'
 
 const { show: showConfirm } = useConfirmDialog()
 
@@ -53,7 +54,20 @@ const formData = ref({
   model: ''
 })
 
+const proxyEnabled = ref(true)
+const proxyUrl = ref('http://127.0.0.1:4780')
+
 const isManualModel = ref(false)
+
+onMounted(async () => {
+  try {
+    const config = await systemApi.getProxyConfig()
+    proxyEnabled.value = config.enabled
+    proxyUrl.value = config.url
+  } catch (e) {
+    console.error('Failed to load proxy config:', e)
+  }
+})
 
 // 当打开模态框时，初始化表单数据
 watch(() => props.isOpen, (newVal) => {
@@ -92,8 +106,16 @@ function handleProviderChange() {
   }
 }
 
-function handleSave() {
+async function handleSave() {
   emit('save', { ...formData.value })
+  try {
+    await systemApi.updateProxyConfig({
+      enabled: proxyEnabled.value,
+      url: proxyUrl.value
+    })
+  } catch (e) {
+    console.error('Failed to save proxy config:', e)
+  }
   emit('close')
 }
 
@@ -195,6 +217,36 @@ async function handleResetLocal() {
             v-model="formData.model"
             type="text"
             placeholder="例如: gpt-4o"
+            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+          />
+        </div>
+      </div>
+
+      <!-- 代理设置 -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <label class="text-sm font-medium text-[var(--text-primary)]">使用代理</label>
+          <button
+            @click="proxyEnabled = !proxyEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+              proxyEnabled ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                proxyEnabled ? 'translate-x-6' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+        <div v-if="proxyEnabled">
+          <label class="text-xs text-[var(--text-secondary)] block mb-1">代理地址</label>
+          <input
+            v-model="proxyUrl"
+            type="text"
+            placeholder="http://127.0.0.1:7890"
             class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
           />
         </div>

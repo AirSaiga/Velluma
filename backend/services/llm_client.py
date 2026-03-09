@@ -16,13 +16,36 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# [User Request] Explicitly set proxy to bypass region restrictions
-# Please update this URL to match your local proxy settings (e.g., http://127.0.0.1:7890)
-# Priority: Env var PROXY_URL > Hardcoded value
 _default_proxy = "http://127.0.0.1:4780"
 PROXY_URL = os.getenv("PROXY_URL", _default_proxy)
 if not PROXY_URL:
     PROXY_URL = None
+
+_proxy_config = {
+    "enabled": True,
+    "url": PROXY_URL
+}
+
+
+def get_proxy_config() -> dict:
+    """获取当前代理配置"""
+    return _proxy_config
+
+
+def set_proxy_config(enabled: bool, url: str):
+    """设置代理配置"""
+    _proxy_config["enabled"] = enabled
+    _proxy_config["url"] = url
+
+
+def _get_active_proxy() -> Optional[str]:
+    """获取当前生效的代理地址，如果未启用代理则返回 None"""
+    if not _proxy_config.get("enabled", True):
+        return None
+    url = _proxy_config.get("url")
+    if not url:
+        return None
+    return url
 
 
 def _clear_proxy_env():
@@ -90,8 +113,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         if base_url:
             # 移除末尾的斜杠以避免双重斜杠问题，这是常见的 API 兼容性陷阱
             client_kwargs["base_url"] = base_url.rstrip("/")
-        # 显式设置代理，解决 403 地区限制问题
-        http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
+        http_client = httpx.AsyncClient(trust_env=False, proxy=_get_active_proxy(), timeout=600.0)
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
         # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
@@ -238,8 +260,7 @@ async def call_llm(
     if base_url:
         # 移除末尾的斜杠以避免双重斜杠问题
         client_kwargs["base_url"] = base_url.rstrip("/")
-    # 显式设置代理，解决 403 地区限制问题
-    http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
+    http_client = httpx.AsyncClient(trust_env=False, proxy=_get_active_proxy(), timeout=600.0)
     client_kwargs["http_client"] = http_client
     client = AsyncOpenAI(**client_kwargs)
 

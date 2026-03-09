@@ -17,10 +17,17 @@
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from backend.core.config import get_actual_port
+from backend.services.llm_client import get_proxy_config, set_proxy_config
 
 router = APIRouter(prefix="/api", tags=["system"])
+
+
+class ProxyConfig(BaseModel):
+    enabled: bool
+    url: str
 
 
 # =============================================================================
@@ -66,3 +73,16 @@ async def get_port():
       因为单实例部署场景，客户端通过网关访问
     """
     return {"port": get_actual_port()}
+
+
+@router.get("/system/proxy")
+async def get_proxy_config_endpoint():
+    """获取当前代理配置"""
+    return get_proxy_config()
+
+
+@router.put("/system/proxy")
+async def update_proxy_config_endpoint(config: ProxyConfig):
+    """更新代理配置"""
+    set_proxy_config(config.enabled, config.url)
+    return get_proxy_config()
