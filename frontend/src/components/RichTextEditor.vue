@@ -445,6 +445,11 @@ const toggleItalic = () => editor.value.chain().focus().toggleItalic().run()
 const toggleUnderline = () => editor.value.chain().focus().toggleUnderline().run()
 const toggleStrike = () => editor.value.chain().focus().toggleStrike().run()
 const toggleHeading = (level) => editor.value.chain().focus().toggleHeading({ level }).run()
+const setParagraph = () => editor.value.chain().focus().setParagraph().run()
+const toggleCodeBlock = () => editor.value.chain().focus().toggleCodeBlock().run()
+const toggleBlockquote = () => editor.value.chain().focus().toggleBlockquote().run()
+const toggleBulletList = () => editor.value.chain().focus().toggleBulletList().run()
+const toggleOrderedList = () => editor.value.chain().focus().toggleOrderedList().run()
 
 const setTextAlign = (align) => editor.value.chain().focus().setTextAlign(align).run()
 const setTextColor = (color) => editor.value.chain().focus().setColor(color).run()
@@ -1178,6 +1183,72 @@ defineExpose({
         title="标题 3"
       >
         H3
+      </button>
+      <button 
+        @click="toggleHeading(4)" 
+        :class="{ 'is-active': editor.isActive('heading', { level: 4 }) }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        title="标题 4"
+      >
+        H4
+      </button>
+      <button 
+        @click="toggleHeading(5)" 
+        :class="{ 'is-active': editor.isActive('heading', { level: 5 }) }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        title="标题 5"
+      >
+        H5
+      </button>
+      <button 
+        @click="toggleHeading(6)" 
+        :class="{ 'is-active': editor.isActive('heading', { level: 6 }) }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        title="标题 6"
+      >
+        H6
+      </button>
+      <div class="w-px h-3 bg-[var(--border-color)] mx-1"></div>
+      <button 
+        @click="setParagraph" 
+        :class="{ 'is-active': editor.isActive('paragraph') }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
+        title="正文"
+      >
+        正文
+      </button>
+      <button 
+        @click="toggleCodeBlock" 
+        :class="{ 'is-active': editor.isActive('codeBlock') }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-mono"
+        title="代码块"
+      >
+        &lt;/&gt;
+      </button>
+      <button 
+        @click="toggleBlockquote" 
+        :class="{ 'is-active': editor.isActive('blockquote') }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
+        title="引用"
+      >
+        ❝
+      </button>
+      <div class="w-px h-3 bg-[var(--border-color)] mx-1"></div>
+      <button 
+        @click="toggleBulletList" 
+        :class="{ 'is-active': editor.isActive('bulletList') }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        title="无序列表"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+      </button>
+      <button 
+        @click="toggleOrderedList" 
+        :class="{ 'is-active': editor.isActive('orderedList') }"
+        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        title="有序列表"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18" x2="21" y2="18"></line><path d="M4 6h1v4"></path><path d="M4 10h2"></path><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path></svg>
       </button>
     </div>
     

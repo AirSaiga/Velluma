@@ -209,6 +209,8 @@ async def update_character_dynamic_state_endpoint(
         base_url=request.base_url,
         model=request.model,
         manual_current_state=request.manual_current_state,
+        proxy_enabled=request.proxy_enabled,
+        proxy_url=request.proxy_url,
     )
     return CharacterDynamicStateUpdateResponse(
         character_id=character_id,

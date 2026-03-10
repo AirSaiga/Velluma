@@ -306,6 +306,8 @@ class CharacterDynamicStateUpdateRequest(BaseModel):
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
     manual_current_state: Optional[str] = None
+    proxy_enabled: bool = Field(default=True)
+    proxy_url: Optional[str] = None
 
 
 class CharacterDynamicStateUpdateResponse(BaseModel):
@@ -809,6 +811,8 @@ class ChapterPublishRequest(BaseModel):
     api_key: Optional[str] = Field(None, min_length=1)
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini")
+    proxy_enabled: bool = Field(default=True)
+    proxy_url: Optional[str] = None
 
 
 class CharacterStateChange(BaseModel):

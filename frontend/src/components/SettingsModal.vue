@@ -108,7 +108,11 @@ function handleProviderChange() {
 }
 
 async function handleSave() {
-  emit('save', { ...formData.value })
+  emit('save', {
+    ...formData.value,
+    proxy_enabled: proxyEnabled.value,
+    proxy_url: proxyUrl.value
+  })
   try {
     await systemApi.updateProxyConfig({
       enabled: proxyEnabled.value,

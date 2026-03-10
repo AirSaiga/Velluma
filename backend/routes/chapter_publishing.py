@@ -143,6 +143,8 @@ async def publish_chapter(
                             api_key=request.api_key,
                             base_url=request.base_url,
                             model=request.model,
+                            proxy_enabled=request.proxy_enabled,
+                            proxy_url=request.proxy_url,
                         ),
                         timeout=180,
                     )

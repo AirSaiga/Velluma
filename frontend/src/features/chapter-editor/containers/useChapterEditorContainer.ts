@@ -260,7 +260,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const result = await chapterApi.publish(selectedChapter.value.id, {
         api_key: props.apiConfig.api_key || undefined,
         base_url: props.apiConfig.base_url || undefined,
-        model: props.apiConfig.model || 'gpt-4o-mini'
+        model: props.apiConfig.model || 'gpt-4o-mini',
+        proxy_enabled: props.apiConfig.proxy_enabled !== false,
+        proxy_url: props.apiConfig.proxy_url || undefined
       })
       emit('update-chapter', selectedChapter.value.id, { status: 'published' })
       emit('refresh-characters')

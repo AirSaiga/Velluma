@@ -10,6 +10,8 @@ export interface ApiConfig {
   api_key: string
   base_url: string
   model: string
+  proxy_enabled?: boolean
+  proxy_url?: string
 }
 
 export type PacingStyle = 'slow_burn' | 'balanced' | 'fast_paced'

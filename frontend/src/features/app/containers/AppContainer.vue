@@ -35,7 +35,9 @@ const apiConfig = ref({
   provider: 'openrouter',
   api_key: '',
   base_url: '',
-  model: 'google/gemini-2.0-flash-001'
+  model: 'google/gemini-2.0-flash-001',
+  proxy_enabled: true,
+  proxy_url: ''
 })
 const uiPrefs = ref(loadUiPrefs())
 const loading = ref(false)

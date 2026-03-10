@@ -6,7 +6,6 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Character, Chapter
-from backend.services.llm_client import _clear_proxy_env, PROXY_URL
 
 
 async def update_character_dynamic_state(
@@ -17,6 +16,8 @@ async def update_character_dynamic_state(
     base_url: Optional[str] = None,
     model: str = "gpt-4o-mini",
     manual_current_state: Optional[str] = None,
+    proxy_enabled: bool = True,
+    proxy_url: Optional[str] = None,
 ) -> dict:
     """
     更新角色动态状态 (角色在特定章节中的心理/情感变化)。
@@ -83,8 +84,15 @@ async def update_character_dynamic_state(
 6. 直接输出更新后的段落，不要包含"更新后："等前缀。
 """
 
+    from backend.services.llm_client import _get_active_proxy
+
+    effective_proxy = None
+    if proxy_url:
+        effective_proxy = proxy_url
+    elif proxy_enabled:
+        effective_proxy = _get_active_proxy()
+
     # 步骤3：调用 LLM 分析并更新状态 (增加重试机制)
-    # _clear_proxy_env()
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
@@ -95,7 +103,7 @@ async def update_character_dynamic_state(
     for attempt in range(max_retries):
         http_client = None
         try:
-            http_client = httpx.AsyncClient(trust_env=False, proxy=PROXY_URL, timeout=600.0)
+            http_client = httpx.AsyncClient(trust_env=False, proxy=effective_proxy, timeout=600.0)
             client_kwargs["http_client"] = http_client
             client = AsyncOpenAI(**client_kwargs)
             
