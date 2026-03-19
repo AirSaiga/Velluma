@@ -1,30 +1,39 @@
 """
-起草模块 - 冰山模型与混合流水线实现。
+起草模块 - V2.5 认知流式生成 (Cognitive Streaming) 实现。
 
-职责：提供基于"潜意识-正文"双层架构的章节内容生成功能。
+职责：提供基于"潜意识-正文"双层架构 + 动态认知组件的章节内容生成功能。
 
 核心架构：
 - 双模型路由：逻辑推理模型(Reasoning) vs 创意生成模型(Creative)
 - 混合流水线：Scene Intent + Subconscious 并行生成，Prose Draft 串行滑动窗口生成
 - Rolling Prefix：Beat n 接收 Beat n-1 的末尾 300 字符作为上下文
+- V2.5 新增认知组件：
+  - Entity State Lock (物理边界锁定)：防幻觉边界
+  - Emotional Scratchpad (情绪暂存器)：性格微演变
+  - Fail-Fast Micro-Review (即时断言)：防错重试机制
 
 主要功能：
 - execute_draft_stage: 主入口，执行完整的混合流水线
 - _generate_subconscious_batch: 并行生成潜意识层
 - _generate_scene_intent_batch: 并行生成场景意图
-- _generate_prose_serial: 串行生成正文（Rolling Prefix）
+- _generate_prose_serial_v25: V2.5 串行生成正文（Rolling Prefix + 认知组件）
 """
 
 import asyncio
+import json
 import time
 from typing import Any, List, Optional
 from pydantic import BaseModel
 
+from backend.schemas import DynamicContext, DraftingFeatureFlags, MicroReviewResult
 from backend.services.prompts import (
     build_scene_intent_prompt,
     parse_scene_intent_result,
     build_subconscious_prompt,
     build_prose_draft_prompt,
+    build_prose_draft_prompt_v25,
+    build_micro_review_prompt,
+    build_emotional_update_prompt,
     build_chunk_review_prompt,
     build_chunk_refine_prompt,
 )
@@ -70,15 +79,22 @@ async def execute_draft_stage(
     relevant_memories: Optional[List[Any]] = None,
     locations: Optional[List[Any]] = None,
     enable_qc: bool = True,
+    feature_flags: Optional[DraftingFeatureFlags] = None,
+    physical_state_lock: Optional[str] = None,
 ) -> List[BeatDraftResult]:
     """
-    执行混合流水线起草阶段。
+    执行混合流水线起草阶段 (V2.5 认知流式生成)。
     
     职责：协调双层生成流程，先并行生成轻量级思考层，再串行滑动窗口生成正文。
     
+    V2.5 增强：
+    - 引入 DynamicContext 跨 Beat 流转状态
+    - Fail-Fast 即时断言与回溯重试
+    - Emotional Scratchpad 动态情绪更新
+    
     流程:
         1. 并行生成所有 Beat 的 Scene Intent 和 Subconscious (步骤 A)
-        2. 串行滑动窗口生成正文，使用 Rolling Prefix 机制保证连贯性 (步骤 B)
+        2. 串行滑动窗口生成正文，使用 Rolling Prefix + DynamicContext (步骤 B-V25)
         3. 可选的 Chunk QC 质检与修复
     
     Args:
@@ -90,13 +106,15 @@ async def execute_draft_stage(
         open_hooks: 开放伏笔列表
         api_key: LLM API Key
         base_url: LLM Base URL
-        reasoning_model: 高逻辑模型（用于 Scene Intent + Subconscious）
-        creative_model: 高创意模型（用于 Prose Draft，当前可与 reasoning_model 相同）
+        reasoning_model: 高逻辑模型（用于 Scene Intent / Subconscious / Review）
+        creative_model: 高创意模型（用于 Prose Draft）
         word_count: 目标总字数
         previous_summary: 上一章摘要（可选）
         relevant_memories: RAG 检索的相关记忆（可选）
         locations: 地图地点列表（可选）
         enable_qc: 是否启用自动质检（默认 True）
+        feature_flags: V2.5 功能开关配置（可选）
+        physical_state_lock: 主角物理状态锁定描述（可选）
     
     Returns:
         List[BeatDraftResult]: 按 Beat 顺序排列的生成结果列表
@@ -104,7 +122,11 @@ async def execute_draft_stage(
     if not beats:
         return []
     
-    print(f"[Draft Stage] 开始混合流水线，共 {len(beats)} 个 Beats")
+    # 初始化功能开关（使用默认值）
+    flags = feature_flags or DraftingFeatureFlags()
+    
+    print(f"[Draft Stage] 开始 V2.5 认知流式生成，共 {len(beats)} 个 Beats")
+    print(f"[Draft Stage] 功能开关: FailFast={flags.enable_fail_fast}, Emotional={flags.enable_emotional_scratchpad}")
     stage_start = time.perf_counter()
     
     # ========================================================================
@@ -137,12 +159,12 @@ async def execute_draft_stage(
     print(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
     
     # ========================================================================
-    # 步骤 B: 串行滑动窗口生成正文（Rolling Prefix）
+    # 步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + DynamicContext）
     # ========================================================================
-    print("[Draft Stage] 步骤 B: 串行生成正文（Rolling Prefix）...")
+    print("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
     step_b_start = time.perf_counter()
     
-    prose_results = await _generate_prose_serial(
+    prose_results = await _generate_prose_serial_v25(
         beats=beats,
         scene_intent_results=scene_intent_results,
         subconscious_results=subconscious_results,
@@ -152,15 +174,18 @@ async def execute_draft_stage(
         relationships=relationships,
         api_key=api_key,
         base_url=base_url,
-        model=creative_model,
+        creative_model=creative_model,
+        reasoning_model=reasoning_model,
         word_count=word_count,
         previous_summary=previous_summary,
         relevant_memories=relevant_memories,
         locations=locations,
         enable_qc=enable_qc,
+        feature_flags=flags,
+        physical_state_lock=physical_state_lock,
     )
     
-    print(f"[Draft Stage] 步骤 B 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
+    print(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
     
     # ========================================================================
     # 组装结果
@@ -335,7 +360,7 @@ async def _generate_subconscious_batch(
     return list(results)
 
 
-async def _generate_prose_serial(
+async def _generate_prose_serial_v25(
     beats: List[dict],
     scene_intent_results: List[dict],
     subconscious_results: List[str],
@@ -345,22 +370,32 @@ async def _generate_prose_serial(
     relationships: List[Any],
     api_key: str,
     base_url: str,
-    model: str,
+    creative_model: str,
+    reasoning_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
     locations: Optional[List[Any]] = None,
     enable_qc: bool = True,
+    feature_flags: DraftingFeatureFlags = None,
+    physical_state_lock: Optional[str] = None,
 ) -> List[dict]:
     """
-    步骤 B: 串行滑动窗口生成正文（Rolling Prefix 机制）。
+    步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + 认知组件）。
+    
+    V2.5 增强特性：
+    - DynamicContext: 跨 Beat 流转的动态上下文容器
+    - Fail-Fast: 即时断言检查与回溯重试机制
+    - Emotional Scratchpad: 动态情绪状态更新
     
     核心机制：
-    - Beat 1: 基于 Subconscious_1 生成 Prose_1，提取末尾 300 字符作为 Tail_1
-    - Beat 2: 基于 Subconscious_2 + Tail_1 生成 Prose_2，提取末尾 300 字符作为 Tail_2
-    - Beat N: 基于 Subconscious_N + Tail_(N-1) 生成 Prose_N
+    - Beat 1: 基于 Subconscious_1 + DynamicContext_0 生成 Prose_1
+    - 断言检查: Fail-Fast 验证 Prose_1 物理/逻辑合法性
+    - 状态更新: Emotional Scratchpad 更新 DynamicContext_1
+    - Beat 2: 基于 Subconscious_2 + DynamicContext_1 生成 Prose_2
+    - ...
     
-    公式: Context_n = Subconscious_n + LastTail_(n-1)
+    公式: Context_n = Subconscious_n + DynamicContext_(n-1)
     
     Args:
         beats: 节拍数据列表
@@ -372,22 +407,44 @@ async def _generate_prose_serial(
         relationships: 角色关系列表
         api_key: LLM API Key
         base_url: LLM Base URL
-        model: 模型名称
+        creative_model: 高创意模型（用于正文生成）
+        reasoning_model: 高逻辑模型（用于断言检查）
         word_count: 目标总字数
         previous_summary: 上一章摘要
         relevant_memories: RAG 相关记忆
         locations: 地图地点列表
         enable_qc: 是否启用质检
+        feature_flags: V2.5 功能开关配置
+        physical_state_lock: 主角物理状态锁定描述
     
     Returns:
         List[dict]: 按 Beat 顺序排列的结果列表，每项包含 {"text": str, "prompts": list}
     """
+    # 初始化功能开关（如果未提供）
+    flags = feature_flags or DraftingFeatureFlags()
+    
     results: List[dict] = []
-    previous_tail = ""  # Rolling Prefix：存储上一个 Beat 的末尾文本
+    
+    # ========================================================================
+    # 初始化跨 Beat 动态上下文 (DynamicContext)
+    # ========================================================================
+    # 从第一章节提取初始情绪状态（使用 entry_state）
+    initial_emotional_state = "初始状态：未知"
+    if beats and beats[0].get("entry_state"):
+        initial_emotional_state = f"初始状态：{beats[0].get('entry_state')}"
+    
+    dynamic_context = DynamicContext(
+        previous_tail="",
+        current_emotional_state=initial_emotional_state,
+        physical_state_lock=physical_state_lock or "",
+    )
+    
+    print(f"[Prose V25] 初始化 DynamicContext: emotional='{initial_emotional_state[:30]}...', physical='{physical_state_lock[:30] if physical_state_lock else '无'}...'")
     
     for i, beat in enumerate(beats):
         beat_index = i + 1
         beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
+        pov_character = beat.get("pov_character", "主角")
         
         try:
             # 计算目标字数
@@ -395,45 +452,86 @@ async def _generate_prose_serial(
             if not isinstance(target_words, int) or target_words <= 0:
                 target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
             
-            # 构建 Prose Draft Prompt（极简输入）
-            system_prompt, user_prompt = build_prose_draft_prompt(
-                chapter=chapter,
-                book=book,
-                beat=beat,
-                scene_intent=scene_intent_results[i],
-                subconscious_thought=subconscious_results[i],
-                previous_tail=previous_tail,
-                target_words=target_words,
-            )
+            # ========================================================================
+            # Fail-Fast 重试循环
+            # ========================================================================
+            max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+            chunk_text = ""
+            is_valid = False
+            attempt = 0
+            current_temp = 0.75  # 基础温度
             
-            prompts_history = [{
-                "stage": "PROSE_DRAFT",
-                "beat_index": beat_index,
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-            }]
+            prompts_history = []
             
-            print(f"[Prose Draft] Beat {beat_index}/{len(beats)} 开始生成...")
-            prose_start = time.perf_counter()
+            while attempt < max_attempts and not is_valid:
+                attempt += 1
+                
+                # 构建 V2.5 增强版 Prose Draft Prompt
+                system_prompt, user_prompt = build_prose_draft_prompt_v25(
+                    chapter=chapter,
+                    book=book,
+                    beat=beat,
+                    scene_intent=scene_intent_results[i],
+                    subconscious_thought=subconscious_results[i],
+                    previous_tail=dynamic_context.previous_tail,
+                    target_words=target_words,
+                    physical_state_lock=dynamic_context.physical_state_lock,
+                    current_emotional_state=dynamic_context.current_emotional_state,
+                )
+                
+                prompts_history.append({
+                    "stage": f"PROSE_DRAFT_ATTEMPT_{attempt}",
+                    "beat_index": beat_index,
+                    "temperature": current_temp,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                })
+                
+                print(f"[Prose V25] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts} (temp={current_temp:.2f})...")
+                prose_start = time.perf_counter()
+                
+                # 生成正文
+                response = await call_llm(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=creative_model,
+                    temperature=current_temp,
+                    max_tokens=_clamp_tokens(target_words),
+                )
+                
+                chunk_text = clean_llm_output(response).strip()
+                print(f"[Prose V25] Beat {beat_index} 生成完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(chunk_text)}")
+                
+                # ========================================================================
+                # Fail-Fast 断言检查 (Feature A)
+                # ========================================================================
+                if flags.enable_fail_fast and attempt < max_attempts:
+                    is_valid, fail_reason = await _micro_review_assertion(
+                        chunk_text=chunk_text,
+                        dynamic_context=dynamic_context,
+                        pov_character=pov_character,
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=reasoning_model,
+                    )
+                    
+                    if not is_valid:
+                        print(f"[Fail-Fast] Beat {beat_index} 断言失败: {fail_reason}")
+                        # 提高温度，增加多样性，准备重试
+                        current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
+                    else:
+                        print(f"[Fail-Fast] Beat {beat_index} 断言通过")
+                else:
+                    is_valid = True
             
-            # 生成正文
-            response = await call_llm(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                temperature=0.75,  # 比原来略高，增强创意
-                max_tokens=_clamp_tokens(target_words),
-            )
-            
-            prose_text = clean_llm_output(response).strip()
-            print(f"[Prose Draft] Beat {beat_index} 完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(prose_text)}")
-            
-            # 可选：自动质检与修复
+            # ========================================================================
+            # 可选：自动质检与修复（原有 QC 逻辑）
+            # ========================================================================
             if enable_qc:
-                prose_text, qc_prompts = await _quick_qc(
-                    prose_text=prose_text,
+                chunk_text, qc_prompts = await _quick_qc(
+                    prose_text=chunk_text,
                     beat=beat,
                     beat_index=beat_index,
                     chapter=chapter,
@@ -442,21 +540,37 @@ async def _generate_prose_serial(
                     relationships=relationships,
                     api_key=api_key,
                     base_url=base_url,
-                    model=model,
+                    model=creative_model,
                     target_words=target_words,
                 )
                 prompts_history.extend(qc_prompts)
             
-            # 提取末尾 300 字符作为下一个 Beat 的 Rolling Prefix
-            previous_tail = _extract_tail(prose_text, max_chars=300)
+            # ========================================================================
+            # 更新动态上下文 (Feature B: Emotional Scratchpad)
+            # ========================================================================
+            # 1. 更新 Rolling Prefix (previous_tail)
+            dynamic_context.previous_tail = _extract_tail(chunk_text, max_chars=300)
+            
+            # 2. 更新情绪状态
+            if flags.enable_emotional_scratchpad:
+                new_emotion = await _update_emotional_state(
+                    chunk_text=chunk_text,
+                    current_emotional_state=dynamic_context.current_emotional_state,
+                    pov_character=pov_character,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=reasoning_model,  # 使用轻量级模型即可
+                )
+                dynamic_context.current_emotional_state = new_emotion
+                print(f"[Emotional Scratchpad] Beat {beat_index} 情绪更新: '{new_emotion[:40]}...'")
             
             results.append({
-                "text": prose_text,
+                "text": chunk_text,
                 "prompts": prompts_history,
             })
             
         except Exception as e:
-            print(f"[Prose Draft Error] Beat {beat_index}: {e}")
+            print(f"[Prose V25 Error] Beat {beat_index}: {e}")
             # 返回空文本，但保持 Rolling Prefix 不变（尝试用上一个 tail 继续）
             results.append({
                 "text": "",
@@ -464,6 +578,141 @@ async def _generate_prose_serial(
             })
     
     return results
+
+
+async def _micro_review_assertion(
+    chunk_text: str,
+    dynamic_context: DynamicContext,
+    pov_character: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> tuple[bool, str]:
+    """
+    Fail-Fast 微审查断言。
+    
+    职责：极速检查生成的文本是否存在物理/逻辑硬伤。
+    
+    设计原则：
+    - 使用轻量级模型，追求最低延迟
+    - 只关注物理/逻辑崩塌，不评判文笔
+    - 返回严格的结构化结果
+    
+    Args:
+        chunk_text: 待检查的文本片段
+        dynamic_context: 动态上下文（包含物理状态锁）
+        pov_character: 视角角色名
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: 模型名称（建议使用轻量级模型）
+    
+    Returns:
+        tuple[bool, str]: (是否通过, 失败原因)
+    """
+    try:
+        system_prompt, user_prompt = build_micro_review_prompt(
+            chunk_text=chunk_text,
+            physical_state_lock=dynamic_context.physical_state_lock,
+            pov_character=pov_character,
+        )
+        
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=0.0,  # 确定性输出
+            response_format={"type": "json_object"},
+            max_tokens=200,  # 极短输出
+        )
+        
+        # 解析 JSON 结果
+        result_text = clean_llm_output(response).strip()
+        result = json.loads(result_text)
+        
+        review_result = MicroReviewResult(**result)
+        
+        if review_result.pass_check:
+            return True, ""
+        else:
+            return False, review_result.reason or "未知逻辑错误"
+            
+    except json.JSONDecodeError as e:
+        print(f"[Fail-Fast Warning] JSON 解析失败: {e}")
+        # JSON 解析失败时，保守起见允许通过（避免阻塞）
+        return True, ""
+    except Exception as e:
+        print(f"[Fail-Fast Warning] 断言检查异常: {e}")
+        # 异常时允许通过，避免阻塞主流程
+        return True, ""
+
+
+async def _update_emotional_state(
+    chunk_text: str,
+    current_emotional_state: str,
+    pov_character: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> str:
+    """
+    更新情绪暂存器。
+    
+    职责：基于刚生成的剧情，总结主角心理状态的微小演变。
+    
+    设计原则：
+    - 极简输出：20字以内的一句话总结
+    - 微演变：强调心理状态的变化，而非静态描述
+    
+    Args:
+        chunk_text: 刚生成的剧情文本
+        current_emotional_state: 之前的心理状态
+        pov_character: 视角角色名
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: 模型名称（轻量级即可）
+    
+    Returns:
+        str: 新的心理状态描述（20字以内）
+    """
+    try:
+        system_prompt, user_prompt = build_emotional_update_prompt(
+            chunk_text=chunk_text,
+            previous_emotional_state=current_emotional_state,
+            pov_character=pov_character,
+        )
+        
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=0.3,  # 低温度，保持确定性
+            max_tokens=100,  # 极短输出
+        )
+        
+        new_emotion = clean_llm_output(response).strip()
+        
+        # 长度限制：如果超过 30 字，尝试截断
+        if len(new_emotion) > 30:
+            # 找到最后一个句号或逗号
+            for punct in [".", "。", ",", "，"]:
+                last_punct = new_emotion.rfind(punct, 0, 30)
+                if last_punct > 10:  # 至少保留 10 个字符
+                    new_emotion = new_emotion[:last_punct + 1]
+                    break
+            else:
+                # 没找到合适的标点，强制截断
+                new_emotion = new_emotion[:30] + "..."
+        
+        return new_emotion
+        
+    except Exception as e:
+        print(f"[Emotional Update Warning] 情绪更新失败: {e}")
+        # 失败时返回原状态，避免破坏上下文
+        return current_emotional_state
 
 
 async def _quick_qc(

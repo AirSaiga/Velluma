@@ -677,3 +677,236 @@ BeatID：{_normalize_text(beat_data.get("beat_id"))}
 
 请只输出当前 beat 对应的正文 chunk，不要重复前文，不要输出解释。"""
     return system_prompt, chunk_user_prompt
+
+
+# ========================================================================
+# V2.5 Cognitive Streaming - 增强版 Prose Draft Prompt
+# ========================================================================
+
+def build_prose_draft_prompt_v25(
+    chapter: Chapter,
+    book: Book,
+    beat: dict,
+    scene_intent: dict,
+    subconscious_thought: str,
+    previous_tail: str,
+    target_words: int,
+    physical_state_lock: str,
+    current_emotional_state: str,
+) -> tuple[str, str]:
+    """
+    V2.5 认知流式生成 - 增强版正文生成提示词。
+    
+    新增特性：
+    - **物理边界锁定 (Physical State Lock)**：绝对物理状态约束，防幻觉边界
+    - **情绪暂存器 (Emotional Scratchpad)**：动态心理状态，实现性格微演变
+    """
+    beat_data = beat if isinstance(beat, dict) else {}
+    
+    pov_character = _normalize_text(beat_data.get("pov_character"), "我")
+    location = _normalize_text(beat_data.get("location"), "")
+    beat_summary = _normalize_text(beat_data.get("summary"))
+    
+    intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
+    intent_constraints = _normalize_text_list(scene_intent.get("constraints"))
+    
+    pacing_type = beat_data.get("pacing_type", "Medium")
+    pacing_instructions = {
+        "Fast": "多用短句、动词，减少修饰语。强调动作的紧凑衔接，营造紧张感或速度感。",
+        "Medium": "平衡长短句，叙事节奏平稳。交替使用动作描写与心理/环境描写。",
+        "Slow": "多用长句、感官细节描写。强调氛围渲染与内心独白，放慢叙事速度。",
+    }
+    pacing_instruction = pacing_instructions.get(pacing_type, pacing_instructions["Medium"])
+    
+    style_control = _render_style_control_prompt(book)
+    
+    continuity_section = ""
+    if previous_tail:
+        continuity_section = f"""【前文尾巴 - 必须无缝衔接】
+{previous_tail}
+
+关键要求：
+- 第一句话必须紧接上文尾巴的语气、节奏和动作状态
+- 禁止任何突兀的时间/空间跳跃
+- 禁止使用"与此同时"、"就在这时"等转场词
+- 通过环境细节或角色反应自然过渡"""
+    
+    physical_lock_section = ""
+    if physical_state_lock:
+        physical_lock_section = f"""## 【物理边界锁定 (Physical State Lock) - 最高优先级】
+你必须严格遵守主角当前的物理实体状态：{physical_state_lock}
+
+绝对禁止的行为：
+- 给主角凭空变出不属于该状态的能力或装备
+- 肉身状态使用机械/机甲功能（如推进器、扫描器）
+- 受伤状态下做出超出身体能力的动作
+- 当前场景不存在的道具/武器突然出现在手中
+
+检查清单：在生成每一个动作前，问自己："以当前的物理状态，这个动作可能吗？"""
+
+    emotional_section = ""
+    if current_emotional_state:
+        emotional_section = f"""## 【当前心理状态 (Emotional Scratchpad)】
+紧接上一幕，主角当前的心境是：{current_emotional_state}
+
+情绪连贯性要求：
+- 让后续的动作选择顺应这一心理惯性
+- 情绪转变必须是渐进的，禁止突兀切换
+- 通过身体反应和环境感知体现情绪，而非直接陈述"他感到..."""
+
+    system_prompt = f"""你是专业小说写手。请根据提供的潜意识独白，沉浸式续写小说正文。
+
+## 【核心任务】
+将角色的内心独白转化为具象化的动作、对话和环境描写。
+
+## 【叙事原则】
+1. **单一视角锁定**：绝对锁定在【{pov_character}】的感官范围内
+2. **动作即性格**：通过角色的动作选择展现性格，不要直接解释
+3. **环境即情绪**：让环境描写映射角色的心理状态
+4. **对话即冲突**：对话推动剧情，每句台词都要有目的
+
+## 【节奏控制 ({pacing_type})】
+{pacing_instruction}
+
+{physical_lock_section}
+
+{emotional_section}
+
+## 【反AI味协议 - 必须遵守】
+1. **禁止设定倾倒**：不要在动作中打断解释世界观
+2. **禁止预告片旁白**：严禁"命运的齿轮"、"时代的洪流"这类虚词
+3. **禁止形容词堆砌**：一个名词前最多一个修饰语
+4. **Show, Don't Tell**：直接描写物理反应，不要总结情绪
+5. **短句制造紧张**：危机时刻用少于10个字的短句，甚至词组片段
+
+{style_control if style_control else ''}
+
+## 【续写要求】
+- 目标字数：约 {target_words} 字（允许适度超出，完整性优先）
+- 只输出正文，不要解释
+- 段落之间用双换行符分隔
+- 禁止使用 Markdown 格式
+
+{continuity_section if continuity_section else ''}"""
+
+    user_prompt = f"""请根据以下信息续写小说正文：
+
+【POV角色】
+{pov_character}
+
+【当前场景】
+{location if location else "未指定具体地点"}
+
+【场景目标】
+{intent_goal}
+
+【角色潜意识独白 - 情感锚点】
+{subconscious_thought}
+
+【约束条件】
+{chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
+
+请直接输出小说正文，从前文尾巴的自然延续开始写起。"""
+
+    return system_prompt, user_prompt
+
+
+# ========================================================================
+# V2.5 Cognitive Streaming - Fail-Fast 断言检查 Prompt
+# ========================================================================
+
+def build_micro_review_prompt(
+    chunk_text: str,
+    physical_state_lock: str,
+    pov_character: str = "主角",
+) -> tuple[str, str]:
+    """
+    构建 Fail-Fast 微审查提示词。
+    
+    职责：极速检查生成的文本是否存在物理/逻辑硬伤。
+    """
+    system_prompt = """你是一个无情的物理与逻辑断言机（Assertion Checker）。
+
+你的任务：快速检查小说片段是否发生了极其荒谬的物理或逻辑崩塌。
+
+【检查标准】
+仔细寻找以下毁灭级幻觉：
+1. **物理状态冲突**：肉身喷火、血肉之躯发射激光、徒手举起重物等
+2. **装备/能力幻觉**：当前不存在的装备突然使用、未提及的能力突然出现
+3. **实体混淆**：已被摧毁的物体重新出现、当前场景不存在的角色突然说话
+4. **时空错乱**：时间线跳跃无逻辑、场景切换无过渡
+
+【重要原则】
+- 只查硬伤：文字不优美、修辞平淡、节奏拖沓 —— 这些都不属于错误
+- 聚焦物理：重点关注物理状态与能力的合法性
+- 不评文笔：不要评价写得是否生动、是否有文学性
+- 不查剧情：不要判断剧情是否合理、是否符合人物性格
+
+【输出格式】
+必须返回严格的 JSON 格式，不要有任何其他内容：
+{
+  "pass_check": true/false,
+  "reason": "如果为false，用一句话指出荒谬之处。如果为true则留空。"
+}"""
+
+    user_prompt = f"""【已知合法状态】
+视角角色：{pov_character}
+物理状态约束：{physical_state_lock if physical_state_lock else "无特殊约束"}
+
+【待检片段】
+{chunk_text}
+
+请执行断言检查，返回 JSON 结果。"""
+
+    return system_prompt, user_prompt
+
+
+# ========================================================================
+# V2.5 Cognitive Streaming - 情绪暂存器更新 Prompt
+# ========================================================================
+
+def build_emotional_update_prompt(
+    chunk_text: str,
+    previous_emotional_state: str,
+    pov_character: str = "主角",
+) -> tuple[str, str]:
+    """
+    构建情绪暂存器更新提示词。
+    
+    职责：基于刚生成的剧情，总结主角心理状态的微小演变。
+    """
+    system_prompt = """你是一个心理学观察员，专门追踪角色的心理状态演变。
+
+你的任务：用极为简短的一句话（20字以内），总结角色经历了剧情后，心理状态发生了怎样的微小偏移或演变。
+
+【核心要求】
+1. **聚焦演变**：重点描述"变化"，而非静态状态
+2. **因果明确**：体现"因为经历了 X，所以现在 Y"的逻辑
+3. **字数限制**：严格控制在20个汉字以内
+4. **第一人称感**：用角色的视角描述，而非外部评价
+
+【优秀示例】
+- "从之前的惊恐万分，转变为肾上腺素飙升后的疯狂求生欲。"
+- "挫败感逐渐被冷静的计算所取代，开始寻找反击的机会。"
+- "原本的犹豫在生死瞬间凝固为决绝的一搏。"
+- "愤怒并未消退，而是沉淀为一种冰冷的专注。"
+
+【禁止事项】
+- 超过20字
+- 静态描述（如"他很害怕"）
+- 外部评价（如"这表现了他的勇敢"）
+- 预告未来（如"他将面临更大的挑战"）
+
+直接输出总结句，不要任何解释。"""
+
+    user_prompt = f"""【角色】{pov_character}
+
+【前情中心理状态】
+{previous_emotional_state}
+
+【刚刚发生的剧情】
+{chunk_text[:500] if len(chunk_text) > 500 else chunk_text}
+
+请总结心理状态演变（20字以内）："""
+
+    return system_prompt, user_prompt

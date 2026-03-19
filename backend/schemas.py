@@ -705,6 +705,76 @@ AGENTIC_DEFAULT_RAG_BETA = 0.2
 AGENTIC_DEFAULT_RAG_GAMMA = 0.2
 AGENTIC_DEFAULT_RAG_LAMBDA = 0.1
 
+
+# ============================================================
+# V2.5 Cognitive Streaming - 动态上下文与功能开关
+# ============================================================
+
+class DraftingFeatureFlags(BaseModel):
+    """
+    V2.5 认知流式生成功能开关配置
+    
+    设计意图：
+    - 支持渐进式启用新特性，便于灰度测试与 A/B 对比
+    - 每个开关控制一个轻量级认知组件的启用/禁用
+    
+    功能说明：
+    - enable_fail_fast: 即时断言与回溯机制（防错重试）
+    - enable_emotional_scratchpad: 动态情绪暂存器（性格微演变）
+    - enable_whisper_memory: RAG 记忆暂存（预留接口）
+    """
+    enable_fail_fast: bool = Field(default=True, description="启用 Fail-Fast 断言检查与回溯重试")
+    enable_emotional_scratchpad: bool = Field(default=True, description="启用动态情绪暂存器更新")
+    enable_whisper_memory: bool = Field(default=False, description="启用 RAG 记忆暂存（预留）")
+    fail_fast_max_attempts: int = Field(default=2, ge=1, le=3, description="Fail-Fast 最大重试次数")
+    fail_fast_temperature_step: float = Field(default=0.2, ge=0.0, le=0.5, description="每次重试温度增量")
+
+
+class DynamicContext(BaseModel):
+    """
+    V2.5 动态流式上下文 - 跨 Beat 流转的状态容器
+    
+    设计意图：
+    - 在串行生成流水线中持续流转、变异
+    - 承载三类认知状态：物理边界、情绪演化、上下文记忆
+    
+    字段说明：
+    - previous_tail: Rolling Prefix 机制的上文尾部（默认 300 字符）
+    - current_emotional_state: 主角当前心理状态的动态描述
+    - physical_state_lock: 绝对物理状态约束（防幻觉边界）
+    - active_whispers: 激活的 RAG 记忆片段（预留）
+    """
+    previous_tail: str = Field(default="", description="上文尾部（Rolling Prefix）")
+    current_emotional_state: str = Field(
+        default="初始状态：未知", 
+        description="主角当前心理状态（随剧情演变）"
+    )
+    physical_state_lock: str = Field(
+        default="", 
+        description="主角绝对物理状态约束（防幻觉）"
+    )
+    active_whispers: dict[str, str] = Field(
+        default_factory=dict, 
+        description="激活的 RAG 记忆片段（预留）"
+    )
+
+    class Config:
+        """允许运行时动态更新字段"""
+        validate_assignment = True
+
+
+class MicroReviewResult(BaseModel):
+    """
+    Fail-Fast 断言检查结果
+    
+    设计意图：
+    - 严格的 JSON 格式返回，便于程序化处理
+    - 只检查物理/逻辑硬伤，不评判文笔
+    """
+    pass_check: bool = Field(..., description="是否通过断言检查")
+    reason: str = Field(default="", description="未通过时的原因说明（一句话）")
+
+
 class GenerateChapterAgenticRequest(BaseModel):
     """Actor-Critic 模式章节生成请求模型（双模型架构）
 
@@ -739,6 +809,10 @@ class GenerateChapterAgenticRequest(BaseModel):
     skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
     tension_level: Optional[int] = Field(None, ge=1, le=10, description="剧情张力等级 (1-10)")
     pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
+    feature_flags: Optional[DraftingFeatureFlags] = Field(
+        default_factory=DraftingFeatureFlags,
+        description="V2.5 认知流式生成功能开关配置"
+    )
 
     @model_validator(mode="after")
     def validate_rag_weight_sum(self):

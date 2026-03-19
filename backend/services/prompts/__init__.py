@@ -30,6 +30,10 @@ from backend.services.prompts.draft_prompts import (
     build_chunk_draft_prompt,
     build_subconscious_prompt,
     build_prose_draft_prompt,
+    # V2.5 Cognitive Streaming (NEW)
+    build_prose_draft_prompt_v25,
+    build_micro_review_prompt,
+    build_emotional_update_prompt,
 )
 from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result
 from backend.services.prompts.scene_intent_prompts import build_scene_intent_prompt, parse_scene_intent_result
@@ -52,6 +56,10 @@ __all__ = [
     # Iceberg Model (NEW)
     "build_subconscious_prompt",
     "build_prose_draft_prompt",
+    # V2.5 Cognitive Streaming (NEW)
+    "build_prose_draft_prompt_v25",
+    "build_micro_review_prompt",
+    "build_emotional_update_prompt",
     # Review & Refine
     "build_refine_agent_prompt",
     "build_review_agent_prompt",

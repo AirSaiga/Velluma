@@ -988,6 +988,16 @@ async def _generate_agentic_chapter_stream(
                 reasoning_model = request.reasoning_model or request.model
                 creative_model = request.creative_model or reasoning_model
                 
+                # V2.5 功能开关配置
+                feature_flags = getattr(request, 'feature_flags', None)
+                
+                # 尝试从章节或书籍中提取物理状态锁定描述
+                physical_state_lock = None
+                if hasattr(chapter, 'entry_state') and chapter.entry_state:
+                    physical_state_lock = chapter.entry_state
+                elif beats and beats[0].get('entry_state'):
+                    physical_state_lock = beats[0].get('entry_state')
+                
                 draft_results = await execute_draft_stage(
                     chapter=chapter,
                     book=book,
@@ -1004,6 +1014,8 @@ async def _generate_agentic_chapter_stream(
                     relevant_memories=relevant_memories,
                     locations=locations,
                     enable_qc=True,
+                    feature_flags=feature_flags,
+                    physical_state_lock=physical_state_lock,
                 )
                 
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
