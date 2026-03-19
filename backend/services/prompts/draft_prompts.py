@@ -100,6 +100,225 @@ def _render_style_control_prompt(book: Book) -> Optional[str]:
     return None
 
 
+# ========================================================================
+# 新增：冰山模型 - Subconscious 层 Prompt
+# ========================================================================
+
+def build_subconscious_prompt(
+    chapter: Chapter,
+    beat: dict,
+    scene_intent: dict,
+    entities: list,
+) -> tuple[str, str]:
+    """
+    构建潜意识层提示词。
+    
+    职责：生成 POV 角色的内心独白，为后续 Prose 生成提供情感锚点。
+    
+    设计原则：
+    - 50-100 字第一人称内心独白
+    - 无需华丽辞藻，专注感官直觉
+    - 回答三个核心问题：
+      1. "我现在感觉如何？"
+      2. "环境里最刺眼的是什么？"
+      3. "我接下来的本能反应是什么？"
+    
+    Args:
+        chapter: 章节实体
+        beat: Beat 数据字典
+        scene_intent: Scene Intent 分析结果（目标/风险/约束）
+        entities: 角色实体列表（用于提取 POV 角色特征）
+    
+    Returns:
+        tuple[str, str]: (system_prompt, user_prompt)
+    """
+    beat_data = beat if isinstance(beat, dict) else {}
+    pov_character = _normalize_text(beat_data.get("pov_character"), "我")
+    entry_state = _normalize_text(beat_data.get("entry_state"), "")
+    location = _normalize_text(beat_data.get("location"), "当前场景")
+    
+    # 提取 POV 角色的基础特征
+    pov_traits = ""
+    for entity in entities:
+        character = entity.character if hasattr(entity, "character") else entity
+        if character and character.name == pov_character:
+            if character.static_prompt:
+                pov_traits = character.static_prompt
+            break
+    
+    # Scene Intent 信息
+    intent_goal = _normalize_text(scene_intent.get("goal"), beat_data.get("summary", ""))
+    intent_stakes = _normalize_text(scene_intent.get("stakes"), "")
+    
+    system_prompt = f"""你是{chapter.chapter_name or '本章'}中角色【{pov_character}】的潜意识。
+
+你的任务是生成一段50-100字的内心独白，代表角色在当前场景下的即时感官直觉。
+
+【核心要求】
+1. **第一人称视角**：必须是{ pov_character }的内心独白，用"我"开头
+2. **感官直觉**：专注回答三个问题：
+   - 我现在感觉如何？（情绪、身体反应）
+   - 环境里最刺眼/最异常的是什么？（视觉、听觉、触觉、气味）
+   - 我接下来的本能反应是什么？（直觉、冲动、下意识动作）
+3. **简洁直接**：无需华丽辞藻，像_raw_的意识流，不要文学修饰
+4. **长度限制**：严格控制在50-100个汉字之间
+
+【禁止事项】
+- 禁止解释背景设定
+- 禁止预告未来剧情
+- 禁止使用第三人称描述
+- 禁止超过100字"""
+
+    user_prompt = f"""请生成【{pov_character}】在当前场景下的内心独白。
+
+【切入状态】
+{entry_state}
+
+【当前场景】
+{location}
+
+【场景目标】
+{intent_goal}
+
+【失败风险】
+{intent_stakes if intent_stakes else "暂无特定风险"}
+
+【角色特征】
+{pov_traits if pov_traits else "普通角色，无特殊设定"}
+
+请直接输出内心独白（50-100字），不要任何解释或标题。"""
+
+    return system_prompt, user_prompt
+
+
+# ========================================================================
+# 新增：冰山模型 - Prose Draft 层 Prompt
+# ========================================================================
+
+def build_prose_draft_prompt(
+    chapter: Chapter,
+    book: Book,
+    beat: dict,
+    scene_intent: dict,
+    subconscious_thought: str,
+    previous_tail: str,
+    target_words: int,
+) -> tuple[str, str]:
+    """
+    构建沉浸式正文生成提示词。
+    
+    职责：基于潜意识独白和前文尾巴，生成连贯的小说正文。
+    
+    设计原则：
+    - **极简输入**：只传入 subconscious_thought、场景环境、previous_tail
+    - **严禁传入**：red_lines、exit_state、庞大的世界观设定
+    - **沉浸式续写**：让模型专注于动作和对话的自然流动
+    - **Rolling Prefix**：接收前一个 Beat 的末尾 300 字符作为语气衔接
+    
+    Args:
+        chapter: 章节实体
+        book: 书籍实体
+        beat: Beat 数据字典
+        scene_intent: Scene Intent 分析结果
+        subconscious_thought: 来自 subconscious 层的内心独白
+        previous_tail: 前一个 Beat 的末尾文本（Rolling Prefix，约300字符）
+        target_words: 目标字数
+    
+    Returns:
+        tuple[str, str]: (system_prompt, user_prompt)
+    """
+    beat_data = beat if isinstance(beat, dict) else {}
+    
+    # 基础信息
+    pov_character = _normalize_text(beat_data.get("pov_character"), "我")
+    location = _normalize_text(beat_data.get("location"), "")
+    beat_summary = _normalize_text(beat_data.get("summary"))
+    
+    # Scene Intent
+    intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
+    intent_constraints = _normalize_text_list(scene_intent.get("constraints"))
+    
+    # 节奏控制
+    pacing_type = beat_data.get("pacing_type", "Medium")
+    pacing_instructions = {
+        "Fast": "多用短句、动词，减少修饰语。强调动作的紧凑衔接，营造紧张感或速度感。",
+        "Medium": "平衡长短句，叙事节奏平稳。交替使用动作描写与心理/环境描写。",
+        "Slow": "多用长句、感官细节描写。强调氛围渲染与内心独白，放慢叙事速度。",
+    }
+    pacing_instruction = pacing_instructions.get(pacing_type, pacing_instructions["Medium"])
+    
+    # 文风控制（黄金锚点 + 黑名单）
+    style_control = _render_style_control_prompt(book)
+    
+    # Rolling Prefix 上下文
+    continuity_section = ""
+    if previous_tail:
+        continuity_section = f"""【前文尾巴 - 必须无缝衔接】
+{previous_tail}
+
+**关键要求**：
+- 第一句话必须紧接上文尾巴的语气、节奏和动作状态
+- 禁止任何突兀的时间/空间跳跃
+- 禁止使用"与此同时"、"就在这时"等转场词
+- 通过环境细节或角色反应自然过渡"""
+    
+    system_prompt = f"""你是专业小说写手。请根据提供的潜意识独白，沉浸式续写小说正文。
+
+## 【核心任务】
+将角色的内心独白转化为具象化的动作、对话和环境描写。
+
+## 【叙事原则】
+1. **单一视角锁定**：绝对锁定在【{pov_character}】的感官范围内
+2. **动作即性格**：通过角色的动作选择展现性格，不要直接解释
+3. **环境即情绪**：让环境描写映射角色的心理状态
+4. **对话即冲突**：对话推动剧情，每句台词都要有目的
+
+## 【节奏控制 ({pacing_type})】
+{pacing_instruction}
+
+## 【反AI味协议 - 必须遵守】
+1. **禁止设定倾倒**：不要在动作中打断解释世界观
+2. **禁止预告片旁白**：严禁"命运的齿轮"、"时代的洪流"这类虚词
+3. **禁止形容词堆砌**：一个名词前最多一个修饰语
+4. **Show, Don't Tell**：直接描写物理反应，不要总结情绪
+5. **短句制造紧张**：危机时刻用少于10个字的短句，甚至词组片段
+
+{style_control if style_control else ''}
+
+## 【续写要求】
+- 目标字数：约 {target_words} 字（允许适度超出，完整性优先）
+- 只输出正文，不要解释
+- 段落之间用双换行符（\\n\\n）分隔
+- 禁止使用 Markdown 格式
+
+{continuity_section if continuity_section else ''}"""
+
+    user_prompt = f"""请根据以下信息续写小说正文：
+
+【POV角色】
+{pov_character}
+
+【当前场景】
+{location if location else "未指定具体地点"}
+
+【场景目标】
+{intent_goal}
+
+【角色潜意识独白 - 情感锚点】
+{subconscious_thought}
+
+【约束条件】
+{chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
+
+请直接输出小说正文，从前文尾巴的自然延续开始写起。"""
+
+    return system_prompt, user_prompt
+
+
+# ========================================================================
+# 兼容性保留：原有的 Draft Prompt 函数
+# ========================================================================
+
 def build_draft_agent_prompt(
     chapter: Chapter,
     book: Book,
@@ -115,12 +334,10 @@ def build_draft_agent_prompt(
     anchor_pov: str = None,
 ):
     """
-    构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
+    【兼容性保留】构建主笔 Agent (Draft Agent) 的提示词，负责初稿创作。
 
-    与 build_chapter_prompt 的区别：
-    - 该函数用于单轮生成，该函数用于代理工作流 (多轮迭代)
-    - 输入是已加载的 ORM 对象，而非从 DB 查询
-    - 新增 context 注入：previous_summary (前情提要) 和 relevant_memories (RAG 检索)
+    警告：此函数为旧版实现，输入包含大量约束条件（red_lines、exit_state、世界观）。
+    新项目请使用 build_subconscious_prompt + build_prose_draft_prompt 组合。
 
     核心任务：根据章节大纲生成符合角色设定和关系约束的初稿。
     """
@@ -262,34 +479,34 @@ def build_draft_agent_prompt(
 
 ## 🛑 海明威极致叙事与反AI味协议（最高优先级约束）
 
-在扩写时，你的文字必须像手术刀一样干净利落，充满高密度的画面感。一旦触发以下“AI味”特征，将被系统判定为不及格：
+在扩写时，你的文字必须像手术刀一样干净利落，充满高密度的画面感。一旦触发以下"AI味"特征，将被系统判定为不及格：
 
 ### ❌ 绝对禁止（触发即失败）：
 1. **禁止设定倾倒（Info-dumping）**：绝不准在动作或紧张情节发生时，打断节奏去大段解释世界观名词（如解释某个阶级、某种武器的背景）。让世界观自然消融在物理环境和对话中。
-2. **禁止预告片式说教旁白**：严禁出现“命运的齿轮开始转动”、“时代的洪流”、“他此时还不知道自己将卷入怎样的旋涡”、“一场改变世界格局的战争开始了”这类上帝视角的虚词和评价词。主角只关注眼前的生死！
-3. **禁止“紫壶文风（Purple Prose）”与形容词堆砌**：一个名词前最多只能有一个修饰语。绝对禁止诸如“廉价的、生锈的、过滤不彻底的空气”这类连环定语。做减法！
+2. **禁止预告片式说教旁白**：严禁出现"命运的齿轮开始转动"、"时代的洪流"、"他此时还不知道自己将卷入怎样的旋涡"、"一场改变世界格局的战争开始了"这类上帝视角的虚词和评价词。主角只关注眼前的生死！
+3. **禁止"紫壶文风（Purple Prose）"与形容词堆砌**：一个名词前最多只能有一个修饰语。绝对禁止诸如"廉价的、生锈的、过滤不彻底的空气"这类连环定语。做减法！
 
 ### ✅ 必须执行的句式编排：
 1. **极致短句与碎镜式排版**：在面对危机爆发（如防空警报骤响、爆炸、遇袭）时，必须大量使用短句（字数少于10个字），甚至使用只有主谓结构的词组片段，并频繁使用回车键单独换行，以制造呼吸急促的压迫感。
    - *反面示例*：突然，一种毫无征兆的悸动从脚下的金属地板深处传了过来，那是一种低频的、足以引起内脏共鸣的颤栗。
    - *正面示例*：地板深处传来悸动。一种低频的颤栗。足以引起内脏共鸣。
-2. **行为视角的局限性**：主角拥有强烈的认知局限。如果主角是底层劳工，他不会去思考“防线被饱和式轰炸瓦解”，他只会感受到“头顶的混凝土砸了下来，灰尘堵住了喉咙”。
-3. **冰山理论（Show, Don't Tell）**：不要总结情绪（如“他感到无比绝望”），直接描写物理反应（如“汗水流进眼睛带来火辣辣的刺痛，他死死咬住发抖的牙关”）。
+2. **行为视角的局限性**：主角拥有强烈的认知局限。如果主角是底层劳工，他不会去思考"防线被饱和式轰炸瓦解"，他只会感受到"头顶的混凝土砸了下来，灰尘堵住了喉咙"。
+3. **冰山理论（Show, Don't Tell）**：不要总结情绪（如"他感到无比绝望"），直接描写物理反应（如"汗水流进眼睛带来火辣辣的刺痛，他死死咬住发抖的牙关"）。
 
 ## 🛑 原住民视角与设定名词脱敏协议（In-Universe Protocol）
 
-在使用设定集中的专有名词（如特定的机甲名、势力、术语）时，必须绝对摒弃“百科全书式的科普”，采取“原住民盲视原则”。
+在使用设定集中的专有名词（如特定的机甲名、势力、术语）时，必须绝对摒弃"百科全书式的科普"，采取"原住民盲视原则"。
 
 ### ❌ 绝对禁止的名词出场方式：
-1. **禁止“定语贴标签”**：严禁出现 `[等级/定语] + [名词]` 直接贴脸的句式。
-   - *反面典型*：“那是苏璃驾驶的A级机甲苍穹。” / “作为基因劣质者的底层劳工…”
+1. **禁止"定语贴标签"**：严禁出现 `[等级/定语] + [名词]` 直接贴脸的句式。
+   - *反面典型*："那是苏璃驾驶的A级机甲苍穹。" / "作为基因劣质者的底层劳工…"
 2. **禁止突兀的说明**：不要在动作进行中突然停下来解释这个名词的来历、参数或社会地位。如果你必须要让读者知道它的特殊性，请通过**角色的反应、对话或系统UI的反馈**来侧面展现。
 
 ### ✅ 必须执行的名词出场方式：
 1. **冰山式抛出（脱敏态）**：直接以代称或裸词出现，假装读者已经认识它。
-   - *正面典型*：“启动第二阶段防御方案。”白霆的声音低沉而冷静，“让‘红月’待命。”（利用对话极其自然地抛出名字，绝不加多余解释）。
+   - *正面典型*："启动第二阶段防御方案。"白霆的声音低沉而冷静，"让'红月'待命。"（利用对话极其自然地抛出名字，绝不加多余解释）。
 2. **先有形，后有名**：如果一台机甲首次登场，先写它造成的物理压迫感或视觉特征（如：巨大的阴影遮蔽了穹顶、液态核心在搏动），最后再通过角色的意识流或战术面板的锁定信息自然带出它的名字。
-3. **常识词免检（豁免名录）**：对于具有现实认知基础的“软科幻复合词”（如：相位干扰弹、高周波震动刃、全息隐匿涂层），请直接当作日常用品写出，作者和读者都有常识，**绝对不要停下来解释它们是什么。**
+3. **常识词免检（豁免名录）**：对于具有现实认知基础的"软科幻复合词"（如：相位干扰弹、高周波震动刃、全息隐匿涂层），请直接当作日常用品写出，作者和读者都有常识，**绝对不要停下来解释它们是什么。**
 
 ## 核心规则
 1. 严格遵循章节大纲进行创作
@@ -365,6 +582,11 @@ def build_chunk_draft_prompt(
     anchor_pov: str = None,
     sensory_translation_rule: str = None,
 ):
+    """
+    【兼容性保留】构建分段 Draft Prompt。
+    
+    警告：此函数为旧版实现，新项目请使用 build_prose_draft_prompt。
+    """
     beat_data = beat if isinstance(beat, dict) else {}
     scene_intent_data = scene_intent if isinstance(scene_intent, dict) else {}
     beat_summary = _normalize_text(beat_data.get("summary"))

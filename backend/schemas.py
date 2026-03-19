@@ -706,12 +706,17 @@ AGENTIC_DEFAULT_RAG_GAMMA = 0.2
 AGENTIC_DEFAULT_RAG_LAMBDA = 0.1
 
 class GenerateChapterAgenticRequest(BaseModel):
-    """Actor-Critic 模式章节生成请求模型
+    """Actor-Critic 模式章节生成请求模型（双模型架构）
 
     业务规则：
     - max_iterations 限制重写次数，防止成本失控
     - 默认 2 次迭代：1 次初稿 + 1 次重写（平衡质量与成本）
     - 迭代上限 5 次是硬约束（超过后强制终止）
+    
+    双模型架构（冰山模型）：
+    - reasoning_model: 高逻辑模型，用于 Scene Intent、Subconscious、Review 阶段
+    - creative_model: 高创意模型，用于 Prose Draft 阶段
+    - 如未提供 creative_model，则默认使用 reasoning_model（单模型模式）
 
     工作流：
     - 主笔生成初稿 → 审阅 Agent 质检 → 不合格则重写 → 达到迭代次数或合格则结束
@@ -719,7 +724,9 @@ class GenerateChapterAgenticRequest(BaseModel):
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
     base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
+    model: str = Field(default="gpt-4o-mini", description="默认模型（向后兼容）")
+    reasoning_model: Optional[str] = Field(None, description="高逻辑模型（用于 Scene Intent / Subconscious / Review）")
+    creative_model: Optional[str] = Field(None, description="高创意模型（用于 Prose Draft），默认使用 reasoning_model")
     word_count: Optional[int] = Field(default=AGENTIC_DEFAULT_WORD_COUNT, ge=1, description="期望生成的字数")
     author_intent: Optional[str] = Field(None, description="作者的创作意图")
     max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")

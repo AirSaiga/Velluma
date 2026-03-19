@@ -66,7 +66,7 @@ async function fetchInspirations() {
       temperature: 0.9,
       api_key: props.apiConfig.api_key,
       base_url: props.apiConfig.base_url,
-      model: props.apiConfig.model || 'gpt-4o-mini'
+      model: props.apiConfig.reasoning_model || props.apiConfig.model || 'gpt-4o-mini'
     })
 
     inspirations.value = response.inspirations || []

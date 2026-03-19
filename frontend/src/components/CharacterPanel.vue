@@ -67,7 +67,7 @@ async function handleUpdateDynamicState(characterId, currentState) {
     chapter_id: props.selectedChapterId,
     api_key: props.apiConfig.api_key,
     base_url: props.apiConfig.base_url,
-    model: props.apiConfig.model,
+    model: props.apiConfig.reasoning_model || props.apiConfig.model,
     manual_current_state: currentState,
     proxy_enabled: props.apiConfig.proxy_enabled !== false,
     proxy_url: props.apiConfig.proxy_url || undefined

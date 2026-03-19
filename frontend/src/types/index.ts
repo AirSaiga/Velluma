@@ -10,6 +10,8 @@ export interface ApiConfig {
   api_key: string
   base_url: string
   model: string
+  reasoning_model?: string  // 高逻辑模型（用于 Scene Intent / Subconscious / Review）
+  creative_model?: string   // 高创意模型（用于 Prose Draft），如未设置则使用 model
   proxy_enabled?: boolean
   proxy_url?: string
 }
@@ -54,6 +56,8 @@ export interface GenerateChapterRequest {
   api_key: string
   base_url?: string
   model?: string
+  reasoning_model?: string  // 高逻辑模型
+  creative_model?: string   // 高创意模型
 }
 
 export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {

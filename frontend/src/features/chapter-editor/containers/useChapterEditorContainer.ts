@@ -260,7 +260,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const result = await chapterApi.publish(selectedChapter.value.id, {
         api_key: props.apiConfig.api_key || undefined,
         base_url: props.apiConfig.base_url || undefined,
-        model: props.apiConfig.model || 'gpt-4o-mini',
+        model: props.apiConfig.reasoning_model || props.apiConfig.model || 'gpt-4o-mini',
         proxy_enabled: props.apiConfig.proxy_enabled !== false,
         proxy_url: props.apiConfig.proxy_url || undefined
       })
@@ -367,7 +367,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         text,
         api_key: props.apiConfig.api_key,
         base_url: props.apiConfig.base_url,
-        model: props.apiConfig.model || 'google/gemini-2.0-flash-001'
+        model: props.apiConfig.reasoning_model || props.apiConfig.model || 'google/gemini-2.0-flash-001'
       })
       
       if (formatted_text && editorRef.value) {
@@ -541,7 +541,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       chapter_id: selectedChapter.value.id,
       api_key: props.apiConfig.api_key,
       base_url: props.apiConfig.base_url || undefined,
-      model: props.apiConfig.model,
+      model: props.apiConfig.reasoning_model || props.apiConfig.model,
       word_count: agenticForm.value.word_count
     }
 
@@ -797,7 +797,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         word_count: agenticForm.value.word_count,
         api_key: props.apiConfig.api_key,
         base_url: props.apiConfig.base_url,
-        model: props.apiConfig.model
+        model: props.apiConfig.reasoning_model || props.apiConfig.model
       })
       if (optimizedContent) {
         updateChapter({
@@ -828,7 +828,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
             user_instruction: payload.instruction,
             api_key: props.apiConfig.api_key,
             base_url: props.apiConfig.base_url,
-            model: props.apiConfig.model
+            model: props.apiConfig.reasoning_model || props.apiConfig.model
         })
         
         if (optimized_text && editorRef.value) {

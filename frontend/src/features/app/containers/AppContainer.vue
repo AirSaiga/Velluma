@@ -36,6 +36,8 @@ const apiConfig = ref({
   api_key: '',
   base_url: '',
   model: 'google/gemini-2.0-flash-001',
+  reasoning_model: '',  // 高逻辑模型（用于 Scene Intent / Subconscious / Review）
+  creative_model: '',   // 高创意模型（用于 Prose Draft）
   proxy_enabled: true,
   proxy_url: ''
 })
@@ -278,7 +280,7 @@ async function handleRequestCritique(content: string) {
       chapter_title: selectedChapter.value?.title || '',
       api_key: apiConfig.value.api_key,
       base_url: apiConfig.value.base_url,
-      model: apiConfig.value.model
+      model: apiConfig.value.reasoning_model || apiConfig.value.model
     })
     critiqueResult.value = result
   } catch (error: any) {

@@ -328,7 +328,7 @@ export function validateAgenticForm(input: Partial<AgenticFormState & AgenticLeg
 
 export function buildAgenticPayload(params: {
   chapterId: string
-  apiConfig: { api_key: string; base_url?: string; model?: string }
+  apiConfig: { api_key: string; base_url?: string; model?: string; reasoning_model?: string; creative_model?: string }
   form: Partial<AgenticFormState & AgenticLegacyFields>
 }): { payload: GenerateChapterAgenticPayload | null; errors: string[] } {
   const { normalized, errors } = validateAgenticForm(params.form)
@@ -342,12 +342,20 @@ export function buildAgenticPayload(params: {
     return { payload: null, errors }
   }
 
+  // 双模型配置处理
+  const hasDualModel = !!(params.apiConfig.reasoning_model || params.apiConfig.creative_model)
+  const baseModel = params.apiConfig.model || 'gpt-4o-mini'
+  
   return {
     payload: {
       chapter_id: params.chapterId,
       api_key: apiKey,
       base_url: params.apiConfig.base_url || undefined,
-      model: params.apiConfig.model || 'gpt-4o-mini',
+      // 向后兼容：保留 model 字段
+      model: baseModel,
+      // 双模型配置
+      reasoning_model: hasDualModel ? (params.apiConfig.reasoning_model || baseModel) : undefined,
+      creative_model: hasDualModel ? (params.apiConfig.creative_model || baseModel) : undefined,
       word_count: normalized.word_count,
       tension_level: normalized.tension_level,
       pacing_style: normalized.pacing_style,

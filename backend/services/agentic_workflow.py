@@ -28,6 +28,7 @@ from backend.services.prompts import (
     parse_review_result,
     parse_scene_intent_result,
 )
+from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
 
 
 def _clean_llm_output(text: str) -> str:
@@ -976,30 +977,60 @@ async def _generate_agentic_chapter_stream(
                 generated_chunks = [beat_chunk_map.get(f"beat_{i+1}", "") for i in range(len(beats))]
                 all_beat_prompts = []
             else:
+                # ========================================================================
+                # 新架构：混合流水线（冰山模型 + Rolling Prefix）
+                # ========================================================================
                 drafting_started_at = time.perf_counter()
-                yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在并行创作 {len(beats)} 个剧情片段 (含自动质检)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
-                sem = asyncio.Semaphore(beat_concurrency)
-                async def sem_task(task):
-                    async with sem:
-                        return await task
-
-                tasks = [
-                    sem_task(process_beat(i, b, sb))
-                    for i, b, sb in zip(range(1, len(beats)+1), beats, story_beats)
-                ]
-                results = await asyncio.gather(*tasks)
+                yield f"data: {json.dumps({'event': 'DRAFTING', 'message': f'正在执行混合流水线：SceneIntent→Subconscious→Prose (Rolling Prefix)...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                
+                # 使用新的 execute_draft_stage 替代原有的并行生成
+                # 双模型配置：如果提供了 reasoning_model/creative_model 则使用，否则使用默认 model
+                reasoning_model = request.reasoning_model or request.model
+                creative_model = request.creative_model or reasoning_model
+                
+                draft_results = await execute_draft_stage(
+                    chapter=chapter,
+                    book=book,
+                    entities=entities,
+                    relationships=relationships,
+                    beats=beats,
+                    open_hooks=open_hooks,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    reasoning_model=reasoning_model,
+                    creative_model=creative_model,
+                    word_count=word_count,
+                    previous_summary=previous_summary,
+                    relevant_memories=relevant_memories,
+                    locations=locations,
+                    enable_qc=True,
+                )
+                
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
                 yield metric_frame(
                     "DRAFTING_DONE",
                     iteration=iteration,
-                    extra={"beat_count": len(beats), "concurrency": beat_concurrency},
+                    extra={
+                        "beat_count": len(beats),
+                        "concurrency": 1,  # Rolling Prefix 串行生成
+                        "iceberg_model": True,
+                    },
                 )
 
-                generated_chunks = [""] * len(beats)
+                # 提取生成结果
+                generated_chunks = [result.draft_chunk for result in draft_results]
+                
+                # 组装 prompts 用于 debug
                 all_beat_prompts = []
-                for idx, text, b_prompts in results:
-                    generated_chunks[idx] = text
-                    all_beat_prompts.extend(b_prompts)
+                for result in draft_results:
+                    all_beat_prompts.extend(result.prompts)
+                    # 添加 subconscious 阶段的 prompt 记录
+                    all_beat_prompts.append({
+                        "stage": "SUBCONSCIOUS",
+                        "beat_index": result.beat_index,
+                        "beat_id": result.beat_id,
+                        "subconscious_thought": result.subconscious_thought,
+                    })
             
             # 将 beat prompts 按 beat_index 和 stage 排序后加入 debug_history
             all_beat_prompts.sort(key=lambda x: (x.get("beat_index", 0), x.get("stage", "")))
