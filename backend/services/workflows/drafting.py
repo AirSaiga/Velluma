@@ -25,7 +25,12 @@ import time
 from typing import Any, List, Optional
 from pydantic import BaseModel
 
-from backend.schemas import DynamicContext, DraftingFeatureFlags, MicroReviewResult
+from backend.schemas import (
+    DynamicContext, 
+    DraftingFeatureFlags, 
+    MicroReviewResult,
+    DynamicStateUpdateResult,  # V2.5+ NEW
+)
 from backend.services.prompts import (
     build_scene_intent_prompt,
     parse_scene_intent_result,
@@ -36,6 +41,8 @@ from backend.services.prompts import (
     build_emotional_update_prompt,
     build_chunk_review_prompt,
     build_chunk_refine_prompt,
+    # V2.5+ NEW
+    build_dynamic_state_update_prompt,
 )
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
@@ -426,20 +433,28 @@ async def _generate_prose_serial_v25(
     results: List[dict] = []
     
     # ========================================================================
-    # 初始化跨 Beat 动态上下文 (DynamicContext)
+    # 初始化跨 Beat 动态上下文 (DynamicContext) - V2.5+ 增强版
     # ========================================================================
     # 从第一章节提取初始情绪状态（使用 entry_state）
     initial_emotional_state = "初始状态：未知"
     if beats and beats[0].get("entry_state"):
         initial_emotional_state = f"初始状态：{beats[0].get('entry_state')}"
     
+    # V2.5+ NEW: 构建初始关系状态锁
+    initial_relational_state = _build_initial_relational_state(relationships, entities)
+    
     dynamic_context = DynamicContext(
         previous_tail="",
         current_emotional_state=initial_emotional_state,
         physical_state_lock=physical_state_lock or "",
+        accumulated_summary="",           # V2.5+ NEW: 宏观剧情累加器
+        relational_state_lock=initial_relational_state,  # V2.5+ NEW: 关系状态锁
     )
     
-    print(f"[Prose V25] 初始化 DynamicContext: emotional='{initial_emotional_state[:30]}...', physical='{physical_state_lock[:30] if physical_state_lock else '无'}...'")
+    print(f"[Prose V25+] 初始化 DynamicContext: "
+          f"emotional='{initial_emotional_state[:30]}...', "
+          f"physical='{physical_state_lock[:30] if physical_state_lock else '无'}...', "
+          f"relational='{initial_relational_state[:30] if initial_relational_state else '无'}...'")
     
     for i, beat in enumerate(beats):
         beat_index = i + 1
@@ -466,7 +481,7 @@ async def _generate_prose_serial_v25(
             while attempt < max_attempts and not is_valid:
                 attempt += 1
                 
-                # 构建 V2.5 增强版 Prose Draft Prompt
+                # 构建 V2.5+ 增强版 Prose Draft Prompt
                 system_prompt, user_prompt = build_prose_draft_prompt_v25(
                     chapter=chapter,
                     book=book,
@@ -477,6 +492,10 @@ async def _generate_prose_serial_v25(
                     target_words=target_words,
                     physical_state_lock=dynamic_context.physical_state_lock,
                     current_emotional_state=dynamic_context.current_emotional_state,
+                    # V2.5+ NEW PARAMETERS:
+                    accumulated_summary=dynamic_context.accumulated_summary,
+                    relational_state_lock=dynamic_context.relational_state_lock,
+                    red_lines=beat.get("red_lines"),
                 )
                 
                 prompts_history.append({
@@ -505,13 +524,14 @@ async def _generate_prose_serial_v25(
                 print(f"[Prose V25] Beat {beat_index} 生成完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(chunk_text)}")
                 
                 # ========================================================================
-                # Fail-Fast 断言检查 (Feature A)
+                # Fail-Fast 断言检查 (V2.5+ 增强版)
                 # ========================================================================
                 if flags.enable_fail_fast and attempt < max_attempts:
                     is_valid, fail_reason = await _micro_review_assertion(
                         chunk_text=chunk_text,
                         dynamic_context=dynamic_context,
                         pov_character=pov_character,
+                        beat=beat,  # V2.5+ NEW: 传递 beat 以检查 red_lines
                         api_key=api_key,
                         base_url=base_url,
                         model=reasoning_model,
@@ -546,23 +566,42 @@ async def _generate_prose_serial_v25(
                 prompts_history.extend(qc_prompts)
             
             # ========================================================================
-            # 更新动态上下文 (Feature B: Emotional Scratchpad)
+            # 更新动态上下文 (V2.5+ 增强版状态更新)
             # ========================================================================
             # 1. 更新 Rolling Prefix (previous_tail)
             dynamic_context.previous_tail = _extract_tail(chunk_text, max_chars=300)
             
-            # 2. 更新情绪状态
+            # 2. 升级状态更新（情绪 + 关系 + 摘要）
             if flags.enable_emotional_scratchpad:
-                new_emotion = await _update_emotional_state(
+                state_update = await _update_dynamic_state(
                     chunk_text=chunk_text,
                     current_emotional_state=dynamic_context.current_emotional_state,
                     pov_character=pov_character,
                     api_key=api_key,
                     base_url=base_url,
-                    model=reasoning_model,  # 使用轻量级模型即可
+                    model=reasoning_model,
+                    relational_state_lock=dynamic_context.relational_state_lock,  # NEW
+                    beat_context=beat,  # NEW: 传递 beat 上下文
                 )
-                dynamic_context.current_emotional_state = new_emotion
-                print(f"[Emotional Scratchpad] Beat {beat_index} 情绪更新: '{new_emotion[:40]}...'")
+                
+                # 更新情绪状态
+                dynamic_context.current_emotional_state = state_update.new_emotional_state
+                
+                # NEW: 更新关系状态锁
+                if state_update.relational_delta:
+                    dynamic_context.relational_state_lock = _merge_relational_delta(
+                        dynamic_context.relational_state_lock,
+                        state_update.relational_delta
+                    )
+                
+                # NEW: 更新宏观剧情累加器
+                if state_update.beat_summary:
+                    dynamic_context.update_summary(state_update.beat_summary)
+                
+                print(f"[Dynamic State] Beat {beat_index} 更新: "
+                      f"E='{state_update.new_emotional_state[:30]}...', "
+                      f"R_delta='{state_update.relational_delta[:30] if state_update.relational_delta else '无'}...', "
+                      f"S='{state_update.beat_summary[:30]}...'")
             
             results.append({
                 "text": chunk_text,
@@ -584,24 +623,37 @@ async def _micro_review_assertion(
     chunk_text: str,
     dynamic_context: DynamicContext,
     pov_character: str,
-    api_key: str,
-    base_url: str,
-    model: str,
+    # ========================================
+    # NEW: Beat parameter for red_lines access
+    # ========================================
+    beat: Optional[dict] = None,
+    api_key: str = "",
+    base_url: str = "",
+    model: str = "",
 ) -> tuple[bool, str]:
     """
-    Fail-Fast 微审查断言。
+    Fail-Fast 微审查断言（V2.5+ 增强版）。
     
-    职责：极速检查生成的文本是否存在物理/逻辑硬伤。
+    职责：极速检查生成的文本是否存在物理/逻辑/关系/OOC 硬伤。
     
-    设计原则：
-    - 使用轻量级模型，追求最低延迟
-    - 只关注物理/逻辑崩塌，不评判文笔
-    - 返回严格的结构化结果
+    断言决策树:
+    ```
+    IF Violate(red_lines):
+        RETURN (False, "触碰红线约束")
+    IF Physical_Hallucination:
+        RETURN (False, "物理状态冲突")
+    IF OOC_Behavior:
+        RETURN (False, "角色行为偏离设定")
+    IF Relationship_Jump:
+        RETURN (False, "人物关系无逻辑突变")
+    RETURN (True, "")
+    ```
     
     Args:
         chunk_text: 待检查的文本片段
-        dynamic_context: 动态上下文（包含物理状态锁）
+        dynamic_context: 动态上下文（包含物理状态锁、关系状态锁）
         pov_character: 视角角色名
+        beat: Beat 数据字典（用于获取 red_lines）
         api_key: LLM API Key
         base_url: LLM Base URL
         model: 模型名称（建议使用轻量级模型）
@@ -610,10 +662,17 @@ async def _micro_review_assertion(
         tuple[bool, str]: (是否通过, 失败原因)
     """
     try:
+        # V2.5+ NEW: 提取角色设定用于 OOC 检查
+        char_prompts = _extract_character_prompts_for_beat(beat, dynamic_context) if beat else None
+        
         system_prompt, user_prompt = build_micro_review_prompt(
             chunk_text=chunk_text,
             physical_state_lock=dynamic_context.physical_state_lock,
             pov_character=pov_character,
+            # V2.5+ NEW: 传递增强参数
+            red_lines=beat.get("red_lines") if beat else None,
+            relational_state_lock=dynamic_context.relational_state_lock,
+            character_static_prompts=char_prompts,
         )
         
         response = await call_llm(
@@ -633,10 +692,15 @@ async def _micro_review_assertion(
         
         review_result = MicroReviewResult(**result)
         
+        # V2.5+ NEW: 构建包含失败检查项的原因
+        failed_reason = review_result.reason or "未知逻辑错误"
+        if review_result.failed_checks:
+            failed_reason = f"[检查项 {', '.join(review_result.failed_checks)}] {failed_reason}"
+        
         if review_result.pass_check:
             return True, ""
         else:
-            return False, review_result.reason or "未知逻辑错误"
+            return False, failed_reason
             
     except json.JSONDecodeError as e:
         print(f"[Fail-Fast Warning] JSON 解析失败: {e}")
@@ -1064,3 +1128,260 @@ async def generate_chunks_parallel(
         generated_chunks[idx] = text
     
     return generated_chunks
+
+
+
+# ========================================================================
+# V2.5+ Cognitive Streaming - 增强版状态更新与辅助函数
+# ========================================================================
+
+async def _update_dynamic_state(
+    chunk_text: str,
+    current_emotional_state: str,
+    pov_character: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    relational_state_lock: str = "",
+    beat_context: Optional[Any] = None,
+) -> DynamicStateUpdateResult:
+    """
+    更新动态状态（V2.5+ 升级版）。
+    
+    职责：基于刚生成的剧情，总结：
+    - 新的角色内心状态 $E_{new}$
+    - 角色关系变化 $R_{delta}$
+    - 本段剧情摘要 $S_{new}$
+    
+    状态演化公式:
+    $$\Delta_{state} = f_{llm}(Text_{chunk}, State_{prev}, Rel_{current})$$
+    $$State_{new} = State_{prev} \oplus \Delta_{state}$$
+    
+    Args:
+        chunk_text: 刚生成的剧情文本
+        current_emotional_state: 之前的心理状态
+        pov_character: 视角角色名
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: 模型名称
+        relational_state_lock: 当前关系状态锁
+        beat_context: Beat 上下文信息
+    
+    Returns:
+        DynamicStateUpdateResult: 结构化状态更新结果
+    """
+    try:
+        system_prompt, user_prompt = build_dynamic_state_update_prompt(
+            chunk_text=chunk_text,
+            previous_emotional_state=current_emotional_state,
+            pov_character=pov_character,
+            relational_state_lock=relational_state_lock,
+            beat_context=beat_context,
+        )
+        
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=0.3,  # 低温度，保持确定性
+            response_format={"type": "json_object"},
+            max_tokens=300,  # 足够容纳 JSON 结构
+        )
+        
+        result_text = clean_llm_output(response).strip()
+        result_json = json.loads(result_text)
+        
+        # 使用 Pydantic 验证和解析
+        result = DynamicStateUpdateResult(**result_json)
+        return result
+        
+    except json.JSONDecodeError as e:
+        print(f"[Dynamic State Update Warning] JSON 解析失败: {e}")
+        # 降级处理：返回默认结果
+        return DynamicStateUpdateResult(
+            new_emotional_state=current_emotional_state,
+            relational_delta="",
+            beat_summary=_extract_fallback_summary(chunk_text)
+        )
+    except Exception as e:
+        print(f"[Dynamic State Update Warning] 状态更新失败: {e}")
+        # 降级处理
+        return DynamicStateUpdateResult(
+            new_emotional_state=current_emotional_state,
+            relational_delta="",
+            beat_summary=_extract_fallback_summary(chunk_text)
+        )
+
+
+def _extract_fallback_summary(text: str, max_len: int = 40) -> str:
+    """
+    提取剧情摘要的降级方案（当 LLM 调用失败时使用）。
+    
+    策略：取前 max_len 个字符，尝试在句子边界截断
+    """
+    if len(text) <= max_len:
+        return text
+    
+    # 尝试在句子边界截断
+    truncated = text[:max_len]
+    for punct in ["，", "。", "！", "？", ",", ".", "!"]:
+        idx = truncated.rfind(punct)
+        if idx > 10:
+            return truncated[:idx + 1]
+    
+    return truncated + "..."
+
+
+def _build_initial_relational_state(relationships: List[Any], entities: List[Any]) -> str:
+    """
+    构建初始关系状态锁。
+    
+    基于 relationships 列表生成关系状态描述
+    """
+    if not relationships:
+        return ""
+    
+    rel_descriptions = []
+    for rel in relationships:
+        source = rel.source_character.name if hasattr(rel, 'source_character') and rel.source_character else "?"
+        target = rel.target_character.name if hasattr(rel, 'target_character') and rel.target_character else "?"
+        rel_type = rel.relation_type if hasattr(rel, 'relation_type') else "未知关系"
+        affinity = rel.affinity_score if hasattr(rel, 'affinity_score') else 0
+        
+        # 将数值亲和度转化为描述
+        if affinity <= -50:
+            affinity_desc = "敌对"
+        elif affinity <= -20:
+            affinity_desc = "不信任"
+        elif affinity < 20:
+            affinity_desc = "中立"
+        elif affinity < 50:
+            affinity_desc = "友好"
+        else:
+            affinity_desc = "亲密"
+        
+        desc = f"{source} ↔ {target}: {rel_type}（{affinity_desc}）"
+        
+        if hasattr(rel, 'interaction_prompt') and rel.interaction_prompt:
+            desc += f" - {rel.interaction_prompt}"
+        
+        rel_descriptions.append(desc)
+    
+    return "\n".join(rel_descriptions)
+
+
+def _merge_relational_delta(current_state: str, delta: str) -> str:
+    """
+    合并关系变化到当前关系状态锁。
+    
+    策略：
+    - 保留当前状态的主要信息
+    - 追加新的变化描述
+    - 控制总长度（$$L_{relational} \le 300$$）
+    """
+    MAX_LEN = 300
+    
+    if not delta:
+        return current_state
+    
+    # 简单追加策略
+    new_state = f"{current_state}\n[更新]: {delta}" if current_state else delta
+    
+    if len(new_state) > MAX_LEN:
+        # 保留最近的更新
+        return new_state[-MAX_LEN:]
+    
+    return new_state
+
+
+def _extract_character_prompts_for_beat(
+    beat: Optional[dict], 
+    dynamic_context: DynamicContext
+) -> Optional[dict[str, str]]:
+    """
+    从 beat 中提取在场角色的静态设定。
+    
+    用于 OOC 检测时的角色设定参考
+    
+    Args:
+        beat: Beat 数据字典
+        dynamic_context: 动态上下文
+    
+    Returns:
+        dict[str, str]: {角色名: 静态设定} 的字典，或 None
+    """
+    if not beat:
+        return None
+    
+    # 从 beat 提取角色名列表
+    pov_character = beat.get("pov_character", "")
+    present_characters = beat.get("present_characters", []) or [pov_character] if pov_character else []
+    
+    # 如果没有角色信息，返回 None
+    if not present_characters:
+        return None
+    
+    # 简化实现：返回空字典占位
+    # 实际实现中应该：
+    # 1. 从 entities 或数据库查询 Character 记录
+    # 2. 提取 static_prompt 字段
+    # 3. 构建 {角色名: 静态设定} 的字典
+    
+    return {}  # Placeholder - 实际实现需要接入 Character 查询
+
+
+# ========================================================================
+# 兼容性保留：旧版情绪更新函数
+# ========================================================================
+
+async def _update_emotional_state(
+    chunk_text: str,
+    current_emotional_state: str,
+    pov_character: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> str:
+    """
+    【兼容性保留】更新情绪暂存器。
+    
+    职责：基于刚生成的剧情，总结主角心理状态的微小演变。
+    
+    注意：此函数为旧版实现，新项目请使用 _update_dynamic_state。
+    """
+    try:
+        system_prompt, user_prompt = build_emotional_update_prompt(
+            chunk_text=chunk_text,
+            previous_emotional_state=current_emotional_state,
+            pov_character=pov_character,
+        )
+        
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=0.3,
+            max_tokens=100,
+        )
+        
+        new_emotion = clean_llm_output(response).strip()
+        
+        # 长度限制
+        if len(new_emotion) > 30:
+            for punct in [".", "。", ",", "，"]:
+                last_punct = new_emotion.rfind(punct, 0, 30)
+                if last_punct > 10:
+                    new_emotion = new_emotion[:last_punct + 1]
+                    break
+            else:
+                new_emotion = new_emotion[:30] + "..."
+        
+        return new_emotion
+        
+    except Exception as e:
+        print(f"[Emotional Update Warning] 情绪更新失败: {e}")
+        return current_emotional_state

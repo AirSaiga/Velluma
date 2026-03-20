@@ -732,16 +732,18 @@ class DraftingFeatureFlags(BaseModel):
 
 class DynamicContext(BaseModel):
     """
-    V2.5 动态流式上下文 - 跨 Beat 流转的状态容器
+    V2.5+ 动态流式上下文 - 跨 Beat 流转的状态容器（增强版）
     
     设计意图：
     - 在串行生成流水线中持续流转、变异
-    - 承载三类认知状态：物理边界、情绪演化、上下文记忆
+    - 承载五类认知状态：物理边界、情绪演化、上下文记忆、剧情摘要、关系状态
     
     字段说明：
-    - previous_tail: Rolling Prefix 机制的上文尾部（默认 300 字符）
+    - previous_tail: Rolling Prefix 机制上文尾部（默认 300 字符）
     - current_emotional_state: 主角当前心理状态的动态描述
     - physical_state_lock: 绝对物理状态约束（防幻觉边界）
+    - accumulated_summary: 宏观剧情累加器（跨 Beat 剧情摘要，$$L_{summary} \le 500$$）
+    - relational_state_lock: 在场角色动态关系锁（防止关系错乱）
     - active_whispers: 激活的 RAG 记忆片段（预留）
     """
     previous_tail: str = Field(default="", description="上文尾部（Rolling Prefix）")
@@ -753,6 +755,19 @@ class DynamicContext(BaseModel):
         default="", 
         description="主角绝对物理状态约束（防幻觉）"
     )
+    # ========================================
+    # NEW FIELDS for V2.5+ Relational Cognition
+    # ========================================
+    accumulated_summary: str = Field(
+        default="", 
+        max_length=500,  # 硬性约束：Token 预算控制
+        description="已生成 Beat 的极简剧情摘要（宏观累加器）"
+    )
+    relational_state_lock: str = Field(
+        default="", 
+        description="在场角色之间的动态关系状态锁"
+    )
+    # ========================================
     active_whispers: dict[str, str] = Field(
         default_factory=dict, 
         description="激活的 RAG 记忆片段（预留）"
@@ -761,6 +776,74 @@ class DynamicContext(BaseModel):
     class Config:
         """允许运行时动态更新字段"""
         validate_assignment = True
+        
+    def update_summary(self, new_beat_summary: str) -> None:
+        """
+        更新累加摘要，确保总长度不超过 500 字符。
+        
+        策略：
+        - 追加新摘要，用 " → " 连接
+        - 超限后，从最早的内容开始裁剪（保留最近剧情）
+        - 数学约束: $$L_{total} = \sum_{i=1}^{n} L_{beat_i} + (n-1) \cdot L_{sep} \le 500$$
+        """
+        SEPARATOR = " → "
+        MAX_LENGTH = 500
+        
+        if not self.accumulated_summary:
+            self.accumulated_summary = new_beat_summary[:MAX_LENGTH]
+            return
+            
+        new_accumulated = self.accumulated_summary + SEPARATOR + new_beat_summary
+        
+        if len(new_accumulated) <= MAX_LENGTH:
+            self.accumulated_summary = new_accumulated
+        else:
+            # 超限裁剪：保留尾部（最近剧情更重要）
+            self.accumulated_summary = new_accumulated[-MAX_LENGTH:]
+            # 确保不从中间切断
+            if SEPARATOR in self.accumulated_summary[1:]:
+                first_sep_idx = self.accumulated_summary.find(SEPARATOR, 1)
+                self.accumulated_summary = self.accumulated_summary[first_sep_idx + len(SEPARATOR):]
+
+
+class DynamicStateUpdateResult(BaseModel):
+    """
+    V2.5+ 动态状态更新结果 - 结构化输出
+    
+    数学模型：
+    $$State_{new} = State_{old} + \Delta_{emotion} + \Delta_{relationship} + Summary_{beat}$$
+    
+    字段说明：
+    - new_emotional_state ($E_{new}$): 角色新生成的心理状态
+    - relational_delta ($R_{delta}$): 角色关系的变化描述
+    - beat_summary ($S_{new}$): 本段剧情的一句话摘要
+    """
+    new_emotional_state: str = Field(
+        ..., 
+        max_length=50,
+        description="角色新的心理状态（20字以内）"
+    )
+    relational_delta: str = Field(
+        default="", 
+        max_length=100,
+        description="角色关系变化（如'与XXX的信任度下降'）"
+    )
+    beat_summary: str = Field(
+        ..., 
+        max_length=80,
+        description="本段剧情的一句话摘要（用于宏观累加）"
+    )
+    
+    @model_validator(mode='after')
+    def validate_lengths(self):
+        """确保各字段长度符合约束"""
+        if len(self.new_emotional_state) > 50:
+            self.new_emotional_state = self.new_emotional_state[:47] + "..."
+        if len(self.relational_delta) > 100:
+            self.relational_delta = self.relational_delta[:97] + "..."
+        if len(self.beat_summary) > 80:
+            self.beat_summary = self.beat_summary[:77] + "..."
+        return self
 
 
 class MicroReviewResult(BaseModel):
@@ -773,6 +856,7 @@ class MicroReviewResult(BaseModel):
     """
     pass_check: bool = Field(..., description="是否通过断言检查")
     reason: str = Field(default="", description="未通过时的原因说明（一句话）")
+    failed_checks: list[str] = Field(default_factory=list, description="失败的检查项编号列表")
 
 
 class GenerateChapterAgenticRequest(BaseModel):

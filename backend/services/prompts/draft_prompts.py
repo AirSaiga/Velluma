@@ -310,6 +310,8 @@ def build_prose_draft_prompt(
 【约束条件】
 {chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
 
+{accumulated_section}
+
 请直接输出小说正文，从前文尾巴的自然延续开始写起。"""
 
     return system_prompt, user_prompt
@@ -693,13 +695,26 @@ def build_prose_draft_prompt_v25(
     target_words: int,
     physical_state_lock: str,
     current_emotional_state: str,
+    # ========================================
+    # NEW PARAMETERS for V2.5+
+    # ========================================
+    accumulated_summary: str = "",
+    relational_state_lock: str = "",
+    red_lines: Optional[list[str]] = None,
+    # ========================================
 ) -> tuple[str, str]:
     """
-    V2.5 认知流式生成 - 增强版正文生成提示词。
+    V2.5+ 认知流式生成 - 增强版正文生成提示词（关系感知版）
     
     新增特性：
-    - **物理边界锁定 (Physical State Lock)**：绝对物理状态约束，防幻觉边界
-    - **情绪暂存器 (Emotional Scratchpad)**：动态心理状态，实现性格微演变
+    - **物理边界锁定 (Physical State Lock)**：绝对物理状态约束
+    - **情绪暂存器 (Emotional Scratchpad)**：动态心理状态
+    - **宏观剧情累加器 (Accumulated Summary)**：跨 Beat 剧情记忆
+    - **关系状态锁 (Relational State Lock)**：防止人物关系错乱
+    - **红线约束 (Red Lines)**：最高优先级边界限制
+    
+    约束传播公式:
+    $$Prompt_{effective} = Prompt_{base} \oplus Constraints_{red\_lines} \oplus State_{relational}$$
     """
     beat_data = beat if isinstance(beat, dict) else {}
     
@@ -719,6 +734,47 @@ def build_prose_draft_prompt_v25(
     pacing_instruction = pacing_instructions.get(pacing_type, pacing_instructions["Medium"])
     
     style_control = _render_style_control_prompt(book)
+    
+    # ========================================
+    # NEW: 红线约束区块（最高优先级）
+    # ========================================
+    red_lines_list = red_lines or _normalize_text_list(beat_data.get("red_lines"))
+    red_lines_section = ""
+    if red_lines_list:
+        red_lines_text = "\n".join([f"  - {rl}" for rl in red_lines_list])
+        red_lines_section = f"""## 【红线绝对约束 (Red Lines) - 最高优先级】
+以下约束具有**绝对优先权**，任何情况下都不得违反：
+
+{red_lines_text}
+
+违规判定：
+- 任何触碰红线的生成内容将被立即判定为无效
+- 必须完全重写生成的 Beat，直到满足所有红线约束"""
+    
+    # ========================================
+    # NEW: 在场角色与动态关系区块
+    # ========================================
+    relational_section = ""
+    if relational_state_lock:
+        relational_section = f"""## 【在场角色与动态关系 (Relational State)】
+当前场景中角色之间的动态关系状态：
+
+{relational_state_lock}
+
+关系约束要求：
+- 角色互动必须符合上述关系状态
+- 禁止无逻辑的关系突变（如死敌突然友好）
+- 关系演变必须是渐进的，有明确的事件驱动"""
+    
+    # ========================================
+    # UPDATED: 前情累积摘要（紧贴 Rolling Prefix）
+    # ========================================
+    accumulated_section = ""
+    if accumulated_summary:
+        accumulated_section = f"""【前情累积摘要】
+{accumulated_summary}
+
+注：以上是对前文剧情的极简回顾，用于保持宏观剧情连贯性。"""
     
     continuity_section = ""
     if previous_tail:
@@ -772,6 +828,10 @@ def build_prose_draft_prompt_v25(
 
 {emotional_section}
 
+{relational_section}
+
+{red_lines_section}
+
 ## 【反AI味协议 - 必须遵守】
 1. **禁止设定倾倒**：不要在动作中打断解释世界观
 2. **禁止预告片旁白**：严禁"命运的齿轮"、"时代的洪流"这类虚词
@@ -819,39 +879,119 @@ def build_micro_review_prompt(
     chunk_text: str,
     physical_state_lock: str,
     pov_character: str = "主角",
+    # ========================================
+    # NEW PARAMETERS
+    # ========================================
+    red_lines: Optional[list[str]] = None,
+    relational_state_lock: str = "",
+    character_static_prompts: Optional[dict[str, str]] = None,
 ) -> tuple[str, str]:
     """
-    构建 Fail-Fast 微审查提示词。
+    构建增强版 Fail-Fast 微审查提示词（V2.5+）。
     
-    职责：极速检查生成的文本是否存在物理/逻辑硬伤。
+    职责：极速检查生成的文本是否存在物理/逻辑/关系/OOC 硬伤。
+    
+    检查项扩展：
+    1. 物理状态冲突（原有）
+    2. 装备/能力幻觉（原有）
+    3. 实体混淆（原有）
+    4. 时空错乱（原有）
+    5. **人物关系硬伤（NEW）**
+    6. **OOC 行为检测（NEW）**
+    7. **红线约束违反（NEW）**
+    
+    断言评分公式:
+    $$Pass_{total} = \bigwedge_{i=1}^{n} Pass_{check_i} \land \neg Violate_{red\_lines}$$
     """
-    system_prompt = """你是一个无情的物理与逻辑断言机（Assertion Checker）。
+    
+    # ========================================
+    # NEW: 关系检查区块
+    # ========================================
+    relationship_check = ""
+    if relational_state_lock:
+        relationship_check = """
+5. **人物关系硬伤检查**：
+   - 死敌之间是否突然无逻辑地友好互动？
+   - 信任度极低的角色是否突然共享敏感信息？
+   - 角色互动是否符合当前关系状态描述？
+   - 关系变化是否有明确的事件驱动？（禁止无逻辑突变）"""
+    
+    # ========================================
+    # NEW: OOC 检查区块
+    # ========================================
+    ooc_check = ""
+    if character_static_prompts:
+        char_traits = "\n".join([f"     - {name}: {traits[:50]}..." 
+                                for name, traits in character_static_prompts.items()])
+        ooc_check = f"""
+6. **OOC（偏离角色设定）检查**：
+   角色静态设定参考：
+{char_traits}
+   
+   检查项：
+   - 角色的言行是否符合其性格设定？
+   - 角色是否做出了违背其价值观的决定？
+   - 角色的反应是否与其过往行为模式一致？
+   - 是否出现了"性格突变"而无合理铺垫？"""
+    
+    # ========================================
+    # NEW: 红线检查区块
+    # ========================================
+    red_lines_check = ""
+    if red_lines:
+        red_lines_text = "\n     - ".join([""] + list(red_lines))
+        red_lines_check = f"""
+7. **红线绝对约束检查**：
+   以下红线绝对禁止触碰：{red_lines_text}
+   
+   判定标准：
+   - 任何触碰红线的内容，无论其他检查是否通过，均判定为失败
+   - 红线具有最高优先级"""
+    
+    system_prompt = f"""你是一个无情的物理、逻辑与角色一致性断言机（Assertion Checker）。
 
-你的任务：快速检查小说片段是否发生了极其荒谬的物理或逻辑崩塌。
+你的任务：快速检查小说片段是否发生了极其荒谬的物理、逻辑、关系或角色设定崩塌。
 
-【检查标准】
+【检查项列表】
 仔细寻找以下毁灭级幻觉：
+
 1. **物理状态冲突**：肉身喷火、血肉之躯发射激光、徒手举起重物等
 2. **装备/能力幻觉**：当前不存在的装备突然使用、未提及的能力突然出现
 3. **实体混淆**：已被摧毁的物体重新出现、当前场景不存在的角色突然说话
-4. **时空错乱**：时间线跳跃无逻辑、场景切换无过渡
+4. **时空错乱**：时间线跳跃无逻辑、场景切换无过渡{relationship_check}{ooc_check}{red_lines_check}
 
 【重要原则】
 - 只查硬伤：文字不优美、修辞平淡、节奏拖沓 —— 这些都不属于错误
-- 聚焦物理：重点关注物理状态与能力的合法性
+- 聚焦物理与逻辑：重点关注物理状态、逻辑连贯性、角色一致性
+- 关系红线：人物关系的突变必须有明确的事件驱动
+- OOC 红线：角色行为必须与其设定一致
 - 不评文笔：不要评价写得是否生动、是否有文学性
-- 不查剧情：不要判断剧情是否合理、是否符合人物性格
 
 【输出格式】
 必须返回严格的 JSON 格式，不要有任何其他内容：
-{
+{{
   "pass_check": true/false,
-  "reason": "如果为false，用一句话指出荒谬之处。如果为true则留空。"
-}"""
+  "reason": "如果为false，用一句话指出荒谬之处。如果为true则留空。",
+  "failed_checks": ["列出失败的检查项编号，如['5', '7']"]
+}}"""
+
+    # 构建关系状态描述
+    rel_state_section = ""
+    if relational_state_lock:
+        rel_state_section = f"""
+【在场角色关系状态】
+{relational_state_lock}"""
+
+    # 构建红线描述
+    red_lines_section = ""
+    if red_lines:
+        red_lines_section = f"""
+【红线约束（最高优先级）】
+{chr(10).join(['- ' + rl for rl in red_lines])}"""
 
     user_prompt = f"""【已知合法状态】
 视角角色：{pov_character}
-物理状态约束：{physical_state_lock if physical_state_lock else "无特殊约束"}
+物理状态约束：{physical_state_lock if physical_state_lock else "无特殊约束"}{rel_state_section}{red_lines_section}
 
 【待检片段】
 {chunk_text}
@@ -908,5 +1048,97 @@ def build_emotional_update_prompt(
 {chunk_text[:500] if len(chunk_text) > 500 else chunk_text}
 
 请总结心理状态演变（20字以内）："""
+
+    return system_prompt, user_prompt
+
+
+# ========================================================================
+# V2.5+ Cognitive Streaming - 动态状态更新 Prompt（升级版）
+# ========================================================================
+
+def build_dynamic_state_update_prompt(
+    chunk_text: str,
+    previous_emotional_state: str,
+    pov_character: str = "主角",
+    relational_state_lock: str = "",
+    beat_context: Optional[dict] = None,
+) -> tuple[str, str]:
+    """
+    构建动态状态更新提示词（V2.5+ 升级版）。
+    
+    职责：基于刚生成的剧情，输出结构化状态更新：
+    1. 新的心理状态 $E_{new}$
+    2. 关系变化 $R_{delta}$  
+    3. 剧情摘要 $S_{new}$
+    
+    输出格式：严格的 JSON，符合 DynamicStateUpdateResult 结构
+    """
+    beat_info = ""
+    if beat_context:
+        beat_summary = beat_context.get("summary", "")
+        beat_location = beat_context.get("location", "")
+        beat_pov = beat_context.get("pov_character", pov_character)
+        beat_info = f"""
+【当前 Beat 信息】
+- 摘要：{beat_summary}
+- 地点：{beat_location}
+- 视角：{beat_pov}"""
+
+    system_prompt = """你是一个专业的小说剧情分析器，负责追踪角色状态和关系演变。
+
+你的任务：分析刚生成的剧情片段，提取三类信息并以严格的 JSON 格式返回。
+
+【输出格式】
+必须返回以下结构的 JSON，不要有任何其他内容：
+
+```json
+{
+  "new_emotional_state": "角色当前的心理状态（20字以内，强调演变）",
+  "relational_delta": "角色关系的变化（如'与盟友的信任度上升'，无变化则留空）",
+  "beat_summary": "本段剧情的极简一句话摘要（用于宏观剧情累加）"
+}
+```
+
+【分析要求】
+
+1. **new_emotional_state ($E_{new}$)**：
+   - 聚焦心理状态的变化，而非静态描述
+   - 格式："从[之前状态]转变为[新状态]"
+   - 字数限制：严格控制在 20 个汉字以内
+   - 示例："从恐惧的僵直转变为肾上腺素驱动的求生本能"
+
+2. **relational_delta ($R_{delta}$)**：
+   - 分析角色间关系的微妙变化
+   - 记录信任度、敌意、合作意愿等的升降
+   - 如果无显著变化，返回空字符串
+   - 示例："与李铭的互不信任加深，但共同利益维系着脆弱的同盟"
+
+3. **beat_summary ($S_{new}$)**：
+   - 将本段剧情压缩为一句话
+   - 保留核心冲突和关键转折
+   - 用于宏观剧情累加器，帮助后续 Beat 理解前文
+   - 示例："楚言在废墟中遭遇敌方巡逻队，被迫躲入下水道"
+   - 字数限制：40 字以内
+
+【禁止事项】
+- 禁止输出 JSON 以外的任何内容
+- 禁止超过字数限制
+- 禁止静态描述（如"他很害怕"）
+- 禁止预告未来剧情"""
+
+    user_prompt = f"""【POV角色】{pov_character}
+
+【前情中心理状态】
+{previous_emotional_state}
+
+{beat_info}
+
+【当前在场角色关系状态】
+{relational_state_lock if relational_state_lock else "未指定"}
+
+【刚刚生成的剧情片段】
+{chunk_text[:800] if len(chunk_text) > 800 else chunk_text}
+
+请分析上述剧情，返回 JSON 格式的状态更新结果。"""
 
     return system_prompt, user_prompt

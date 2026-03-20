@@ -29,6 +29,7 @@ from backend.services.prompts import (
     parse_scene_intent_result,
 )
 from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
+from backend.services.prompt_logger import PromptLogger, create_logger, get_logger, clear_logger
 
 
 def _clean_llm_output(text: str) -> str:
@@ -450,6 +451,14 @@ async def _generate_agentic_chapter_stream(
     llm_stage_stats: dict[str, dict[str, Union[int, float]]] = {}
     beat_stage_seconds: dict[int, dict[str, float]] = {}
     beat_concurrency = _safe_int_from_env("AGENTIC_BEAT_CONCURRENCY", default=6, min_value=1, max_value=12)
+    
+    # ========================================================================
+    # 初始化 Prompt 日志记录器
+    # ========================================================================
+    prompt_logger = create_logger(
+        chapter_id=str(request.chapter_id),
+        book_id=None  # 将在加载 chapter 后更新
+    )
 
     def record_stage(stage: str, elapsed: float, beat_index: Optional[int] = None):
         stage_seconds[stage] = round(stage_seconds.get(stage, 0.0) + elapsed, 3)
@@ -541,6 +550,11 @@ async def _generate_agentic_chapter_stream(
     if not chapter:
         yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
         return
+    
+    # ========================================================================
+    # 更新日志记录器的 book_id
+    # ========================================================================
+    prompt_logger.book_id = str(chapter.book_id) if chapter.book_id else None
     
     # Update chapter settings from request
     if request.tension_level is not None:
@@ -662,6 +676,39 @@ async def _generate_agentic_chapter_stream(
         except Exception as e:
             print(f"[RAG Error] {e}")
     record_stage("ASSEMBLING_CONTEXT", _to_secs(time.perf_counter() - context_started_at))
+    
+    # ========================================================================
+    # 设置日志记录器的上下文信息
+    # ========================================================================
+    prompt_logger.set_context(
+        chapter_info={
+            "id": str(chapter.id),
+            "title": chapter.title,
+            "chapter_number": chapter.chapter_number,
+            "chapter_name": chapter.chapter_name,
+            "outline_preview": chapter.outline_text[:500] if chapter.outline_text else "",
+            "tension_level": chapter.tension_level,
+            "pacing_style": chapter.pacing_style
+        },
+        book_info={
+            "id": str(book.id) if book else None,
+            "title": book.title if book else None,
+            "genre": book.genre if book else None
+        } if book else None,
+        entities=entities,  # 直接传递原始 entities 对象列表
+        relationships=relationships,  # 直接传递原始 relationships 对象列表
+        request_params={
+            "model": request.model,
+            "reasoning_model": request.reasoning_model,
+            "creative_model": request.creative_model,
+            "word_count": request.word_count,
+            "max_iterations": request.max_iterations,
+            "fast_mode": effective_fast_mode,
+            "rag_top_k": request.rag_top_k,
+            "rag_alpha": request.rag_alpha
+        }
+    )
+    
     yield metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra={"fast_mode": effective_fast_mode})
 
     current_draft = ""
@@ -696,6 +743,23 @@ async def _generate_agentic_chapter_stream(
                     author_intent=request.author_intent,
                 )
                 
+                # ========================================================================
+                # 记录 PLANNING 阶段的 Prompt
+                # ========================================================================
+                prompt_logger.start_stage("PLANNING", iteration=iteration)
+                prompt_logger.log_inputs(
+                    word_count=word_count,
+                    open_hooks_count=len(open_hooks),
+                    has_previous_summary=bool(previous_summary)
+                )
+                prompt_logger.log_prompts(
+                    system_prompt=planner_system_prompt,
+                    user_prompt=planner_user_prompt,
+                    model=request.model,
+                    temperature=0.2,
+                    max_tokens=1800
+                )
+                
                 yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
                 debug_history.append({
                     "stage": "PLANNING",
@@ -717,6 +781,16 @@ async def _generate_agentic_chapter_stream(
                 beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
                 beats = _normalize_confirmed_beats(beats, word_count)
                 record_stage("PLANNING", _to_secs(time.perf_counter() - planning_started_at))
+                
+                # ========================================================================
+                # 记录 PLANNING 阶段的输出
+                # ========================================================================
+                prompt_logger.log_outputs(
+                    beat_count=len(beats),
+                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats[:3]]
+                )
+                prompt_logger.end_stage(success=True)
+                
                 yield metric_frame("PLANNING_DONE", iteration=iteration, extra={"beat_count": len(beats)})
             
             # ------------------------------------------------------------------
@@ -756,6 +830,18 @@ async def _generate_agentic_chapter_stream(
                     "system_prompt": pov_prompt_data["system_prompt"],
                     "user_prompt": pov_prompt_data["user_prompt"]
                 })
+                
+                # ========================================================================
+                # 记录 POV_ASSIGNMENT 阶段的 Prompt
+                # ========================================================================
+                prompt_logger.start_stage("POV_ASSIGNMENT", iteration=iteration)
+                prompt_logger.log_inputs(pov_candidates_count=len(pov_candidates))
+                prompt_logger.log_prompts(
+                    system_prompt=pov_prompt_data.get("system_prompt", ""),
+                    user_prompt=pov_prompt_data.get("user_prompt", ""),
+                    model=request.model
+                )
+                prompt_logger.end_stage(success=True)
                 
                 # Re-normalize to ensure structure is consistent
                 beats = _normalize_confirmed_beats(beats, word_count)
@@ -1019,6 +1105,36 @@ async def _generate_agentic_chapter_stream(
                 )
                 
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
+                
+                # ========================================================================
+                # 记录 DRAFTING 阶段的结果
+                # ========================================================================
+                for result in draft_results:
+                    prompt_logger.start_stage(
+                        "DRAFTING", 
+                        iteration=iteration,
+                        beat_index=result.beat_index,
+                        beat_id=result.beat_id
+                    )
+                    prompt_logger.log_inputs(
+                        beat_summary=result.scene_intent.get("goal", "")[:100] if result.scene_intent else "",
+                        target_words=result.scene_intent.get("target_words", 0) if result.scene_intent else 0
+                    )
+                    # 记录每个 Beat 的 prompts
+                    for prompt_record in result.prompts:
+                        if "system_prompt" in prompt_record and "user_prompt" in prompt_record:
+                            prompt_logger.log_prompts(
+                                system_prompt=prompt_record.get("system_prompt", ""),
+                                user_prompt=prompt_record.get("user_prompt", ""),
+                                model=creative_model if "PROSE" in str(prompt_record.get("stage", "")) else reasoning_model,
+                                temperature=prompt_record.get("temperature", 0.7)
+                            )
+                    prompt_logger.log_outputs(
+                        draft_chunk_preview=result.draft_chunk[:200] if result.draft_chunk else "",
+                        draft_chunk_length=len(result.draft_chunk) if result.draft_chunk else 0,
+                        subconscious_thought=result.subconscious_thought
+                    )
+                    prompt_logger.end_stage(success=bool(result.draft_chunk))
                 yield metric_frame(
                     "DRAFTING_DONE",
                     iteration=iteration,
@@ -1062,6 +1178,23 @@ async def _generate_agentic_chapter_stream(
                 chunks=generated_chunks,
                 word_count=word_count,
             )
+            
+            # ========================================================================
+            # 记录 STITCHING 阶段的 Prompt
+            # ========================================================================
+            prompt_logger.start_stage("STITCHING", iteration=iteration)
+            prompt_logger.log_inputs(
+                chunk_count=len(generated_chunks),
+                total_chunks_length=sum(len(c) for c in generated_chunks)
+            )
+            prompt_logger.log_prompts(
+                system_prompt=stitch_system_prompt,
+                user_prompt=stitch_user_prompt,
+                model=request.model,
+                temperature=0.4,
+                max_tokens=10000
+            )
+            
             yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
             debug_history.append({
                 "stage": "STITCHING",
@@ -1080,6 +1213,16 @@ async def _generate_agentic_chapter_stream(
                 max_tokens=10000,
             )
             current_draft = _clean_llm_output(current_draft)
+            
+            # ========================================================================
+            # 记录 STITCHING 阶段的输出
+            # ========================================================================
+            prompt_logger.log_outputs(
+                draft_length=len(current_draft),
+                draft_preview=current_draft[:300] if current_draft else ""
+            )
+            prompt_logger.end_stage(success=bool(current_draft))
+            
             if not current_draft.strip():
                 current_draft = "\n\n".join(generated_chunks).strip()
             if not current_draft.strip():
@@ -1099,6 +1242,17 @@ async def _generate_agentic_chapter_stream(
                     "system_prompt": fallback_system_prompt,
                     "user_prompt": fallback_user_prompt
                 })
+                
+                # ========================================================================
+                # 记录 FALLBACK_DRAFT 阶段的 Prompt
+                # ========================================================================
+                prompt_logger.start_stage("FALLBACK_DRAFT", iteration=iteration)
+                prompt_logger.log_prompts(
+                    system_prompt=fallback_system_prompt,
+                    user_prompt=fallback_user_prompt,
+                    model=request.model,
+                    temperature=0.7
+                )
                 current_draft = await call_llm_timed(
                     "fallback_draft",
                     system_prompt=fallback_system_prompt,
@@ -1110,6 +1264,16 @@ async def _generate_agentic_chapter_stream(
                     max_tokens=_clamp_int(max(2400, word_count * 3), 2400, 7000),
                 )
                 current_draft = _clean_llm_output(current_draft)
+                
+                # ========================================================================
+                # 记录 FALLBACK_DRAFT 的输出
+                # ========================================================================
+                prompt_logger.log_outputs(
+                    draft_length=len(current_draft),
+                    draft_preview=current_draft[:300] if current_draft else ""
+                )
+                prompt_logger.end_stage(success=bool(current_draft))
+            
             record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
             chapter.draft_text = current_draft
             chapter.revision_count = iteration
@@ -1177,6 +1341,23 @@ async def _generate_agentic_chapter_stream(
         system_prompt, user_prompt = build_review_agent_prompt(
             chapter, book, entities, relationships, chapter.outline_text or "", current_draft, beats
         )
+        
+        # ========================================================================
+        # 记录 REVIEWING 阶段的 Prompt
+        # ========================================================================
+        prompt_logger.start_stage("REVIEWING", iteration=iteration)
+        prompt_logger.log_inputs(
+            draft_length=len(current_draft),
+            beat_count=len(beats)
+        )
+        prompt_logger.log_prompts(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=request.model,
+            temperature=0.1,
+            max_tokens=1600
+        )
+        
         yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
         debug_history.append({
             "stage": "REVIEWING",
@@ -1197,6 +1378,18 @@ async def _generate_agentic_chapter_stream(
         )
         review_result, _ = parse_review_result(review_result_json)
         record_stage("REVIEWING", _to_secs(time.perf_counter() - reviewing_started_at))
+        
+        # ========================================================================
+        # 记录 REVIEWING 阶段的输出
+        # ========================================================================
+        prompt_logger.log_outputs(
+            review_pass=review_result.get("pass", True),
+            issues_count=len(review_result.get("issues", [])),
+            issues_preview=[i.get("description", "")[:100] for i in review_result.get("issues", [])[:3]],
+            revision_plan=review_result.get("revision_plan", "")[:200]
+        )
+        prompt_logger.end_stage(success=review_result.get("pass", True))
+        
         chapter.review_feedback = review_result
         await db.commit()
         yield metric_frame("REVIEWING_DONE", iteration=iteration, extra={"review_pass": review_result.get("pass", True)})
@@ -1255,6 +1448,22 @@ async def _generate_agentic_chapter_stream(
                         "system_prompt": r_sys,
                         "user_prompt": r_user
                     })
+                    
+                    # ========================================================================
+                    # 记录 CHUNK_REFINE_LOCAL 阶段的 Prompt
+                    # ========================================================================
+                    prompt_logger.start_stage("CHUNK_REFINE_LOCAL", iteration=iteration, beat_id=beat_id)
+                    prompt_logger.log_inputs(
+                        beat_summary=beat_summary[:100],
+                        original_chunk_length=len(original_chunk),
+                        revision_instruction=revision_instruction[:200]
+                    )
+                    prompt_logger.log_prompts(
+                        system_prompt=r_sys,
+                        user_prompt=r_user,
+                        model=request.model,
+                        temperature=0.7
+                    )
 
                     refined_chunk = await call_llm_timed(
                         "chunk_refine_local",
@@ -1268,6 +1477,16 @@ async def _generate_agentic_chapter_stream(
                     )
                     refined_chunk = _clean_llm_output(refined_chunk)
                     beat_chunk_map[beat_id] = refined_chunk
+                    
+                    # ========================================================================
+                    # 记录 CHUNK_REFINE_LOCAL 的输出
+                    # ========================================================================
+                    prompt_logger.log_outputs(
+                        refined_chunk_length=len(refined_chunk),
+                        refined_chunk_preview=refined_chunk[:200] if refined_chunk else ""
+                    )
+                    prompt_logger.end_stage(success=bool(refined_chunk))
+                    
                     print(f"[Local Refine] Beat {beat_id} refined successfully.")
 
                 record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
@@ -1282,6 +1501,22 @@ async def _generate_agentic_chapter_stream(
                     chunks=updated_chunks,
                     word_count=word_count,
                 )
+                
+                # ========================================================================
+                # 记录 STITCHING_AFTER_REFINE 阶段的 Prompt
+                # ========================================================================
+                prompt_logger.start_stage("STITCHING_AFTER_REFINE", iteration=iteration)
+                prompt_logger.log_inputs(
+                    refined_beat_count=len(valid_beat_ids),
+                    updated_chunks_length=sum(len(c) for c in updated_chunks)
+                )
+                prompt_logger.log_prompts(
+                    system_prompt=stitch_system_prompt,
+                    user_prompt=stitch_user_prompt,
+                    model=request.model,
+                    temperature=0.4
+                )
+                
                 yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
                 debug_history.append({
                     "stage": "STITCHING_AFTER_REFINE",
@@ -1302,6 +1537,16 @@ async def _generate_agentic_chapter_stream(
                 current_draft = _clean_llm_output(current_draft)
                 if not current_draft.strip():
                     current_draft = "\n\n".join(updated_chunks).strip()
+                
+                # ========================================================================
+                # 记录 STITCHING_AFTER_REFINE 的输出
+                # ========================================================================
+                prompt_logger.log_outputs(
+                    stitched_length=len(current_draft),
+                    stitched_preview=current_draft[:300] if current_draft else ""
+                )
+                prompt_logger.end_stage(success=bool(current_draft))
+                
                 record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
                 chapter.draft_text = current_draft
                 chapter.revision_count = iteration
@@ -1324,6 +1569,19 @@ async def _generate_agentic_chapter_stream(
                 "system_prompt": format_system_prompt,
                 "user_prompt": format_user_prompt
             })
+            
+            # ========================================================================
+            # 记录 FORMATTING 阶段的 Prompt
+            # ========================================================================
+            prompt_logger.start_stage("FORMATTING", iteration=iteration)
+            prompt_logger.log_inputs(draft_length=len(current_draft))
+            prompt_logger.log_prompts(
+                system_prompt=format_system_prompt,
+                user_prompt=format_user_prompt,
+                model=request.model,
+                temperature=0.1
+            )
+            
             try:
                 formatted_text = await call_llm_timed(
                     "formatting",
@@ -1338,10 +1596,21 @@ async def _generate_agentic_chapter_stream(
                 formatted_text = _clean_llm_output(formatted_text)
                 if formatted_text and len(formatted_text) > len(current_draft) * 0.5:
                     current_draft = formatted_text
+                    
+                    # ========================================================================
+                    # 记录 FORMATTING 的输出
+                    # ========================================================================
+                    prompt_logger.log_outputs(
+                        formatted_length=len(current_draft),
+                        formatted_preview=current_draft[:300]
+                    )
+                    prompt_logger.end_stage(success=True)
                 else:
                     print("[Format Warning] Formatted text suspiciously short or empty. Fallback to original.")
+                    prompt_logger.end_stage(success=False, reason="Formatted text too short")
             except Exception as e:
                 print(f"[Format Error] {e}")
+                prompt_logger.end_stage(success=False, reason=str(e))
             record_stage("FORMATTING", _to_secs(time.perf_counter() - formatting_started_at))
             yield metric_frame("FORMATTING_DONE", iteration=iteration)
         else:
@@ -1350,6 +1619,16 @@ async def _generate_agentic_chapter_stream(
 
     chapter.content_text = current_draft
     await db.commit()
+    
+    # ========================================================================
+    # 完成日志记录
+    # ========================================================================
+    prompt_logger.finalize(
+        final_text_length=len(current_draft) if current_draft else 0,
+        total_iterations=iteration,
+        review_passed=review_passed
+    )
+    
     yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': review_passed, 'iterations': iteration}, ensure_ascii=False)}\n\n"
 
     # 逐字符输出 (模拟打字机效果，同时便于前端逐段接收)
