@@ -221,7 +221,7 @@ class PromptLogger:
             "beat_id": beat_id,
             "start_time": time.time(),
             "inputs": {},      # 输入参数
-            "prompts": {},     # Prompt 内容
+            "prompts": [],     # Prompt 内容列表（支持多个prompts）
             "outputs": {},     # 输出结果
             "metrics": {}      # 性能指标
         }
@@ -249,9 +249,10 @@ class PromptLogger:
                     user_prompt: str,
                     model: Optional[str] = None,
                     temperature: Optional[float] = None,
-                    max_tokens: Optional[int] = None):
+                    max_tokens: Optional[int] = None,
+                    prompt_label: Optional[str] = None):
         """
-        记录 Prompt 内容
+        记录 Prompt 内容（支持同一阶段的多个 prompts）
         
         Args:
             system_prompt: 系统提示词
@@ -259,11 +260,13 @@ class PromptLogger:
             model: 使用的模型
             temperature: 温度参数
             max_tokens: 最大 token 数
+            prompt_label: Prompt 标签（如 "SCENE_INTENT", "SUBCONSCIOUS", "PROSE" 等）
         """
         if self._current_stage_idx < 0:
             return
         
-        self.log_data["stages"][self._current_stage_idx]["prompts"] = {
+        prompt_record = {
+            "label": prompt_label,
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "system_prompt_length": len(system_prompt),
@@ -273,6 +276,8 @@ class PromptLogger:
             "temperature": temperature,
             "max_tokens": max_tokens
         }
+        
+        self.log_data["stages"][self._current_stage_idx]["prompts"].append(prompt_record)
     
     def log_outputs(self, **kwargs):
         """记录阶段输出结果"""

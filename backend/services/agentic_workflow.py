@@ -758,7 +758,8 @@ async def _generate_agentic_chapter_stream(
                     user_prompt=planner_user_prompt,
                     model=request.model,
                     temperature=0.2,
-                    max_tokens=1800
+                    max_tokens=1800,
+                    prompt_label="PLANNER"
                 )
                 
                 yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
@@ -840,7 +841,8 @@ async def _generate_agentic_chapter_stream(
                 prompt_logger.log_prompts(
                     system_prompt=pov_prompt_data.get("system_prompt", ""),
                     user_prompt=pov_prompt_data.get("user_prompt", ""),
-                    model=request.model
+                    model=request.model,
+                    prompt_label="POV_ASSIGNMENT"
                 )
                 prompt_logger.end_stage(success=True)
                 
@@ -1123,14 +1125,15 @@ async def _generate_agentic_chapter_stream(
                         beat_summary=result.scene_intent.get("goal", "")[:100] if result.scene_intent else "",
                         target_words=result.scene_intent.get("target_words", 0) if result.scene_intent else 0
                     )
-                    # 记录每个 Beat 的 prompts
+                    # 记录每个 Beat 的 prompts（SCENE_INTENT + SUBCONSCIOUS + PROSE）
                     for prompt_record in result.prompts:
                         if "system_prompt" in prompt_record and "user_prompt" in prompt_record:
                             prompt_logger.log_prompts(
                                 system_prompt=prompt_record.get("system_prompt", ""),
                                 user_prompt=prompt_record.get("user_prompt", ""),
                                 model=creative_model if "PROSE" in str(prompt_record.get("stage", "")) else reasoning_model,
-                                temperature=prompt_record.get("temperature", 0.7)
+                                temperature=prompt_record.get("temperature", 0.7),
+                                prompt_label=prompt_record.get("stage", "UNKNOWN")
                             )
                     prompt_logger.log_outputs(
                         draft_chunk_preview=result.draft_chunk[:200] if result.draft_chunk else "",
@@ -1152,16 +1155,10 @@ async def _generate_agentic_chapter_stream(
                 generated_chunks = [result.draft_chunk for result in draft_results]
                 
                 # 组装 prompts 用于 debug
+                # 注意：result.prompts 已包含全流程 prompts：Scene Intent + Subconscious + Prose Draft
                 all_beat_prompts = []
                 for result in draft_results:
                     all_beat_prompts.extend(result.prompts)
-                    # 添加 subconscious 阶段的 prompt 记录
-                    all_beat_prompts.append({
-                        "stage": "SUBCONSCIOUS",
-                        "beat_index": result.beat_index,
-                        "beat_id": result.beat_id,
-                        "subconscious_thought": result.subconscious_thought,
-                    })
             
             # 将 beat prompts 按 beat_index 和 stage 排序后加入 debug_history
             all_beat_prompts.sort(key=lambda x: (x.get("beat_index", 0), x.get("stage", "")))
@@ -1195,7 +1192,8 @@ async def _generate_agentic_chapter_stream(
                 user_prompt=stitch_user_prompt,
                 model=request.model,
                 temperature=0.4,
-                max_tokens=10000
+                max_tokens=10000,
+                prompt_label="STITCHING"
             )
             
             yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
@@ -1254,7 +1252,8 @@ async def _generate_agentic_chapter_stream(
                     system_prompt=fallback_system_prompt,
                     user_prompt=fallback_user_prompt,
                     model=request.model,
-                    temperature=0.7
+                    temperature=0.7,
+                    prompt_label="FALLBACK_DRAFT"
                 )
                 current_draft = await call_llm_timed(
                     "fallback_draft",
@@ -1358,7 +1357,8 @@ async def _generate_agentic_chapter_stream(
             user_prompt=user_prompt,
             model=request.model,
             temperature=0.1,
-            max_tokens=1600
+            max_tokens=1600,
+            prompt_label="REVIEWING"
         )
         
         yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
@@ -1417,8 +1417,180 @@ async def _generate_agentic_chapter_stream(
         if target_beat_ids and isinstance(target_beat_ids, list) and len(target_beat_ids) > 0:
             valid_beat_ids = [bid for bid in target_beat_ids if bid in beat_chunk_map]
             if not valid_beat_ids:
-                print(f"[Refine Warning] Review returned invalid beat_ids: {target_beat_ids}. Valid keys: {list(beat_chunk_map.keys())}. Skipping localized refine.")
+                print(f"[Refine Warning] Review returned invalid beat_ids: {target_beat_ids}. Valid keys: {list(beat_chunk_map.keys())}. Triggering broadcast iterative refine.")
+                
+                # ============================================================
+                # 广播式切片精修 (Broadcast Iterative Refine)
+                # 触发条件：Review 返回了无法匹配的 beat_ids（如幻觉的 beat-13）
+                # 策略：将 revision_plan 广播给所有 active beats，逐一进行局部重写
+                # ============================================================
+                refining_started_at = time.perf_counter()
+                yield f"data: {json.dumps({'event': 'REFINING', 'message': f'审阅返回的 beat IDs 无效，正在对所有 {len(beats)} 个片段进行广播式精修...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                
+                global_revision_plan = review_result.get("revision_plan", "")
+                
+                # 遍历所有 beats，逐一调用安全的局部精修
+                for beat_idx, beat in enumerate(beats):
+                    beat_id = f"beat_{beat_idx + 1}"
+                    original_chunk = beat_chunk_map.get(beat_id, "")
+                    if not original_chunk:
+                        print(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
+                        continue
+                    
+                    # 获取前一 beat 的尾巴文本用于语气衔接
+                    previous_tail = ""
+                    if beat_idx > 0:
+                        prev_beat_id = f"beat_{beat_idx}"
+                        prev_chunk = beat_chunk_map.get(prev_beat_id, "")
+                        if prev_chunk:
+                            previous_tail = prev_chunk[-500:]
+                    
+                    try:
+                        print(f"[Broadcast Refine] Refining beat {beat_id}...")
+                        
+                        # 记录广播精修阶段的 Prompt
+                        prompt_logger.start_stage("BROADCAST_REFINE", iteration=iteration, beat_id=beat_id)
+                        prompt_logger.log_inputs(
+                            beat_summary=beat.get("summary", "")[:100],
+                            original_chunk_length=len(original_chunk),
+                            revision_plan=global_revision_plan[:200]
+                        )
+                        
+                        # 构建并记录精修 prompts
+                        refine_system_prompt = f"""{book.global_sys_prompt or "你是一个专业的小说写作助手。"}
+
+你是一个精修编辑。你之前的草稿被编辑驳回，请根据以下修改指令重新生成本段内容。
+
+【审查驳回原因与修改指令】
+你之前的草稿被编辑驳回。原因及修改计划如下：
+{global_revision_plan}
+针对本段的具体问题：
+- 基于审阅反馈的全局修订
+
+请严格遵守上述修改计划，重新生成本段的内容。保持原有的优秀动作描写，但必须彻底根除上面指出的问题！
+
+## 你的任务
+根据修改指令重写片段，保持原有风格和情节连贯性，同时彻底修复指出的所有问题。
+直接输出修改后的正文，不要包含任何解释、标题或元信息。"""
+                        
+                        refine_user_prompt = f"""请重写以下片段：
+
+【剧情摘要】
+{beat.get("summary", "")}
+
+【视角人物】
+{beat.get("pov_character", "未指定")}
+
+【入场状态】
+{beat.get("entry_state", "未指定")}
+
+【退场状态】
+{beat.get("exit_state", "未指定")}
+
+【待修改的原始草稿】
+---
+{original_chunk}
+---
+
+请直接输出修改后的正文，不要包含任何解释或标记。"""
+                        
+                        prompt_logger.log_prompts(
+                            system_prompt=refine_system_prompt,
+                            user_prompt=refine_user_prompt,
+                            model=reasoning_model,
+                            temperature=0.7,
+                            prompt_label="BROADCAST_REFINE"
+                        )
+                        
+                        # 复用已有的安全精修函数
+                        refined_chunk = await refine_single_beat(
+                            beat=beat,
+                            original_chunk=original_chunk,
+                            revision_guide=global_revision_plan,
+                            issue_descriptions=["基于审阅反馈的全局修订"],
+                            chapter=chapter,
+                            book=book,
+                            api_key=request.api_key,
+                            base_url=request.base_url,
+                            model=reasoning_model,
+                            previous_tail=previous_tail,
+                        )
+                        
+                        beat_chunk_map[beat_id] = refined_chunk
+                        
+                        prompt_logger.log_outputs(
+                            refined_chunk_length=len(refined_chunk),
+                            refined_chunk_preview=refined_chunk[:200] if refined_chunk else ""
+                        )
+                        prompt_logger.end_stage(success=bool(refined_chunk))
+                        
+                        print(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                        
+                    except Exception as e:
+                        print(f"[Broadcast Refine Error] Failed to refine beat {beat_id}: {e}")
+                        prompt_logger.end_stage(success=False, error=str(e))
+                        continue
+                
+                record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
+                yield metric_frame("REFINING_DONE", iteration=iteration, extra={"refined_beats": len(beats), "mode": "broadcast"})
+                
+                # 精修后需要重新统稿
+                stitching_started_at = time.perf_counter()
+                yield f"data: {json.dumps({'event': 'STITCHING', 'message': '广播精修完成，正在重组所有片段...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                
+                updated_chunks = [beat_chunk_map.get(f"beat_{i+1}", "") for i in range(len(beats))]
+                stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(
+                    chapter=chapter,
+                    beats=beats,
+                    chunks=updated_chunks,
+                    word_count=word_count,
+                )
+                
+                # 记录广播精修后的统稿阶段
+                prompt_logger.start_stage("STITCHING_AFTER_BROADCAST", iteration=iteration)
+                prompt_logger.log_inputs(
+                    refined_beat_count=len(beats),
+                    updated_chunks_length=sum(len(c) for c in updated_chunks)
+                )
+                prompt_logger.log_prompts(
+                    system_prompt=stitch_system_prompt,
+                    user_prompt=stitch_user_prompt,
+                    model=request.model,
+                    temperature=0.4,
+                    prompt_label="STITCHING_AFTER_BROADCAST"
+                )
+                
+                current_draft = await call_llm_timed(
+                    "stitch_after_broadcast",
+                    system_prompt=stitch_system_prompt,
+                    user_prompt=stitch_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=request.model,
+                    temperature=0.4,
+                    max_tokens=10000,
+                )
+                current_draft = _clean_llm_output(current_draft)
+                if not current_draft.strip():
+                    current_draft = "\n\n".join(updated_chunks).strip()
+                
+                prompt_logger.log_outputs(
+                    stitched_length=len(current_draft),
+                    stitched_preview=current_draft[:300] if current_draft else ""
+                )
+                prompt_logger.end_stage(success=bool(current_draft))
+                
+                record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
+                chapter.draft_text = current_draft
+                chapter.revision_count = iteration
+                await db.commit()
+                yield metric_frame("STITCHING_DONE", iteration=iteration)
+                
+                # 打上已精修标记，下一轮跳过 DRAFTING
+                skip_drafting_stitching = True
+                
             else:
+                # target_beat_ids 有效，执行定向局部精修
                 refining_started_at = time.perf_counter()
                 yield f"data: {json.dumps({'event': 'REFINING', 'message': f'正在对 {len(valid_beat_ids)} 个问题片段进行局部精修...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
 
@@ -1455,6 +1627,52 @@ async def _generate_agentic_chapter_stream(
                         original_chunk_length=len(original_chunk),
                         revision_plan=revision_plan[:200],
                         issue_count=len(issue_descriptions)
+                    )
+                    
+                    # 构建并记录精修 prompts
+                    refine_system_prompt = f"""{book.global_sys_prompt or "你是一个专业的小说写作助手。"}
+
+你是一个精修编辑。你之前的草稿被编辑驳回，请根据以下修改指令重新生成本段内容。
+
+【审查驳回原因与修改指令】
+你之前的草稿被编辑驳回。原因及修改计划如下：
+{revision_plan}
+针对本段的具体问题：
+{"\n".join(f"- {desc}" for desc in issue_descriptions if desc)}
+
+请严格遵守上述修改计划，重新生成本段的内容。保持原有的优秀动作描写，但必须彻底根除上面指出的问题！
+
+## 你的任务
+根据修改指令重写片段，保持原有风格和情节连贯性，同时彻底修复指出的所有问题。
+直接输出修改后的正文，不要包含任何解释、标题或元信息。"""
+                    
+                    refine_user_prompt = f"""请重写以下片段：
+
+【剧情摘要】
+{beat_info.get("summary", "")}
+
+【视角人物】
+{beat_info.get("pov_character", "未指定")}
+
+【入场状态】
+{beat_info.get("entry_state", "未指定")}
+
+【退场状态】
+{beat_info.get("exit_state", "未指定")}
+
+【待修改的原始草稿】
+---
+{original_chunk}
+---
+
+请直接输出修改后的正文，不要包含任何解释或标记。"""
+                    
+                    prompt_logger.log_prompts(
+                        system_prompt=refine_system_prompt,
+                        user_prompt=refine_user_prompt,
+                        model=reasoning_model,
+                        temperature=0.7,
+                        prompt_label="CHUNK_REFINE_LOCAL"
                     )
 
                     debug_history.append({
@@ -1520,7 +1738,8 @@ async def _generate_agentic_chapter_stream(
                     system_prompt=stitch_system_prompt,
                     user_prompt=stitch_user_prompt,
                     model=request.model,
-                    temperature=0.4
+                    temperature=0.4,
+                    prompt_label="STITCHING_AFTER_REFINE"
                 )
                 
                 yield f"data: {json.dumps({'prompt': {'system_prompt': stitch_system_prompt, 'user_prompt': stitch_user_prompt}}, ensure_ascii=False)}\n\n"
@@ -1560,6 +1779,176 @@ async def _generate_agentic_chapter_stream(
                 yield metric_frame("STITCHING_DONE", iteration=iteration)
 
                 skip_drafting_stitching = True
+        else:
+            # ============================================================
+            # 广播式切片精修 (Broadcast Iterative Refine) - 无 target_beat_ids 时
+            # 触发条件：Review 未返回具体的 beat IDs（如仅给出整体修改意见）
+            # 策略：将 revision_plan 广播给所有 active beats，逐一进行局部重写
+            # ============================================================
+            refining_started_at = time.perf_counter()
+            yield f"data: {json.dumps({'event': 'REFINING', 'message': f'审阅未指定具体片段，正在对所有 {len(beats)} 个片段进行广播式精修...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            
+            global_revision_plan = review_result.get("revision_plan", "")
+            
+            # 遍历所有 beats，逐一调用安全的局部精修
+            for beat_idx, beat in enumerate(beats):
+                beat_id = f"beat_{beat_idx + 1}"
+                original_chunk = beat_chunk_map.get(beat_id, "")
+                if not original_chunk:
+                    print(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
+                    continue
+                
+                # 获取前一 beat 的尾巴文本用于语气衔接
+                previous_tail = ""
+                if beat_idx > 0:
+                    prev_beat_id = f"beat_{beat_idx}"
+                    prev_chunk = beat_chunk_map.get(prev_beat_id, "")
+                    if prev_chunk:
+                        previous_tail = prev_chunk[-500:]
+                
+                try:
+                    print(f"[Broadcast Refine] Refining beat {beat_id}...")
+                    
+                    # 记录广播精修阶段的 Prompt
+                    prompt_logger.start_stage("BROADCAST_REFINE", iteration=iteration, beat_id=beat_id)
+                    prompt_logger.log_inputs(
+                        beat_summary=beat.get("summary", "")[:100],
+                        original_chunk_length=len(original_chunk),
+                        revision_plan=global_revision_plan[:200]
+                    )
+                    
+                    # 构建并记录精修 prompts
+                    refine_system_prompt = f"""{book.global_sys_prompt or "你是一个专业的小说写作助手。"}
+
+你是一个精修编辑。你之前的草稿被编辑驳回，请根据以下修改指令重新生成本段内容。
+
+【审查驳回原因与修改指令】
+你之前的草稿被编辑驳回。原因及修改计划如下：
+{global_revision_plan}
+针对本段的具体问题：
+- 基于审阅反馈的全局修订
+
+请严格遵守上述修改计划，重新生成本段的内容。保持原有的优秀动作描写，但必须彻底根除上面指出的问题！
+
+## 你的任务
+根据修改指令重写片段，保持原有风格和情节连贯性，同时彻底修复指出的所有问题。
+直接输出修改后的正文，不要包含任何解释、标题或元信息。"""
+                    
+                    refine_user_prompt = f"""请重写以下片段：
+
+【剧情摘要】
+{beat.get("summary", "")}
+
+【视角人物】
+{beat.get("pov_character", "未指定")}
+
+【入场状态】
+{beat.get("entry_state", "未指定")}
+
+【退场状态】
+{beat.get("exit_state", "未指定")}
+
+【待修改的原始草稿】
+---
+{original_chunk}
+---
+
+请直接输出修改后的正文，不要包含任何解释或标记。"""
+                    
+                    prompt_logger.log_prompts(
+                        system_prompt=refine_system_prompt,
+                        user_prompt=refine_user_prompt,
+                        model=reasoning_model,
+                        temperature=0.7,
+                        prompt_label="BROADCAST_REFINE"
+                    )
+                    
+                    # 复用已有的安全精修函数
+                    refined_chunk = await refine_single_beat(
+                        beat=beat,
+                        original_chunk=original_chunk,
+                        revision_guide=global_revision_plan,
+                        issue_descriptions=["基于审阅反馈的全局修订"],
+                        chapter=chapter,
+                        book=book,
+                        api_key=request.api_key,
+                        base_url=request.base_url,
+                        model=reasoning_model,
+                        previous_tail=previous_tail,
+                    )
+                    
+                    beat_chunk_map[beat_id] = refined_chunk
+                    
+                    prompt_logger.log_outputs(
+                        refined_chunk_length=len(refined_chunk),
+                        refined_chunk_preview=refined_chunk[:200] if refined_chunk else ""
+                    )
+                    prompt_logger.end_stage(success=bool(refined_chunk))
+                    
+                    print(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                    
+                except Exception as e:
+                    print(f"[Broadcast Refine Error] Failed to refine beat {beat_id}: {e}")
+                    prompt_logger.end_stage(success=False, error=str(e))
+                    continue
+            
+            record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
+            yield metric_frame("REFINING_DONE", iteration=iteration, extra={"refined_beats": len(beats), "mode": "broadcast"})
+            
+            # 精修后需要重新统稿
+            stitching_started_at = time.perf_counter()
+            yield f"data: {json.dumps({'event': 'STITCHING', 'message': '广播精修完成，正在重组所有片段...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+            
+            updated_chunks = [beat_chunk_map.get(f"beat_{i+1}", "") for i in range(len(beats))]
+            stitch_system_prompt, stitch_user_prompt = build_stitch_prompt(
+                chapter=chapter,
+                beats=beats,
+                chunks=updated_chunks,
+                word_count=word_count,
+            )
+            
+            # 记录广播精修后的统稿阶段
+            prompt_logger.start_stage("STITCHING_AFTER_BROADCAST", iteration=iteration)
+            prompt_logger.log_inputs(
+                refined_beat_count=len(beats),
+                updated_chunks_length=sum(len(c) for c in updated_chunks)
+            )
+            prompt_logger.log_prompts(
+                system_prompt=stitch_system_prompt,
+                user_prompt=stitch_user_prompt,
+                model=request.model,
+                temperature=0.4,
+                prompt_label="STITCHING_AFTER_BROADCAST"
+            )
+            
+            current_draft = await call_llm_timed(
+                "stitch_after_broadcast",
+                system_prompt=stitch_system_prompt,
+                user_prompt=stitch_user_prompt,
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model,
+                temperature=0.4,
+                max_tokens=10000,
+            )
+            current_draft = _clean_llm_output(current_draft)
+            if not current_draft.strip():
+                current_draft = "\n\n".join(updated_chunks).strip()
+            
+            prompt_logger.log_outputs(
+                stitched_length=len(current_draft),
+                stitched_preview=current_draft[:300] if current_draft else ""
+            )
+            prompt_logger.end_stage(success=bool(current_draft))
+            
+            record_stage("STITCHING", _to_secs(time.perf_counter() - stitching_started_at))
+            chapter.draft_text = current_draft
+            chapter.revision_count = iteration
+            await db.commit()
+            yield metric_frame("STITCHING_DONE", iteration=iteration)
+            
+            # 打上已精修标记，下一轮跳过 DRAFTING
+            skip_drafting_stitching = True
 
         record_stage("ITERATION_TOTAL", _to_secs(time.perf_counter() - iteration_started_at))
 
@@ -1585,7 +1974,8 @@ async def _generate_agentic_chapter_stream(
                 system_prompt=format_system_prompt,
                 user_prompt=format_user_prompt,
                 model=request.model,
-                temperature=0.1
+                temperature=0.1,
+                prompt_label="FORMATTING"
             )
             
             try:

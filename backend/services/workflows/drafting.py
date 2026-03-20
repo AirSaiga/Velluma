@@ -148,7 +148,7 @@ async def execute_draft_stage(
     step_a_start = time.perf_counter()
     
     # A-1: 并行生成 Scene Intent
-    scene_intent_results = await _generate_scene_intent_batch(
+    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
         beats=beats,
         chapter=chapter,
         open_hooks=open_hooks,
@@ -158,7 +158,7 @@ async def execute_draft_stage(
     )
     
     # A-2: 并行生成 Subconscious（依赖 Scene Intent）
-    subconscious_results, mcts_rollout_results = await _generate_subconscious_batch(
+    subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
         beats=beats,
         scene_intent_results=scene_intent_results,
         chapter=chapter,
@@ -207,13 +207,21 @@ async def execute_draft_stage(
     results: List[BeatDraftResult] = []
     for i, beat in enumerate(beats):
         beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+        
+        # 合并所有 prompts：Scene Intent -> Subconscious -> Prose Draft
+        # 注意：Rolling Prefix 锚定标签已在 prose_results 中通过 previous_tail 体现
+        all_prompts = []
+        all_prompts.extend(scene_intent_prompts_list[i])
+        all_prompts.extend(subconscious_prompts_list[i])
+        all_prompts.extend(prose_results[i]["prompts"])
+        
         result = BeatDraftResult(
             beat_id=beat_id,
             beat_index=i + 1,
             scene_intent=scene_intent_results[i],
             subconscious_thought=subconscious_results[i],
             draft_chunk=prose_results[i]["text"],
-            prompts=prose_results[i]["prompts"],
+            prompts=all_prompts,  # 全流程 prompts: Scene Intent + Subconscious + Prose Draft
             mcts_rollout=mcts_rollout_results[i],  # MCTS 可观测性（Risk 5 修复）
         )
         results.append(result)
@@ -229,7 +237,7 @@ async def _generate_scene_intent_batch(
     api_key: str,
     base_url: str,
     model: str,
-) -> List[dict]:
+) -> tuple[List[dict], List[List[dict]]]:
     """
     步骤 A-1: 批量并行生成 Scene Intent。
     
@@ -245,10 +253,15 @@ async def _generate_scene_intent_batch(
         model: 模型名称
     
     Returns:
-        List[dict]: 按 Beat 顺序排列的 Scene Intent 结果列表
+        tuple[List[dict], List[List[dict]]]: (Scene Intent 结果列表, 每个 Beat 的 prompts 列表)
     """
-    async def _single_scene_intent(beat: dict, beat_index: int) -> dict:
-        """生成单个 Beat 的 Scene Intent。"""
+    async def _single_scene_intent(beat: dict, beat_index: int) -> tuple[dict, List[dict]]:
+        """生成单个 Beat 的 Scene Intent。
+        
+        Returns:
+            tuple[dict, List[dict]]: (Scene Intent 结果, prompts 列表)
+        """
+        prompts_history = []
         try:
             # 构建该 Beat 关联的 hooks
             beat_hook_ids = set(beat.get("hook_ids", []))
@@ -267,6 +280,15 @@ async def _generate_scene_intent_batch(
                 open_hooks=beat_hooks,
             )
             
+            # 记录 Scene Intent prompt
+            prompts_history.append({
+                "stage": "SCENE_INTENT",
+                "beat_index": beat_index,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": 0.2,
+            })
+            
             response = await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -279,7 +301,7 @@ async def _generate_scene_intent_batch(
             )
             
             scene_intent = parse_scene_intent_result(response, beat.get("summary", ""))
-            return scene_intent
+            return scene_intent, prompts_history
             
         except Exception as e:
             print(f"[Scene Intent Error] Beat {beat_index}: {e}")
@@ -290,7 +312,7 @@ async def _generate_scene_intent_batch(
                 "stakes": None,
                 "constraints": [],
                 "sensory_translation_rule": None,
-            }
+            }, prompts_history
     
     # 并行生成所有 Scene Intent
     tasks = [
@@ -299,7 +321,10 @@ async def _generate_scene_intent_batch(
     ]
     
     results = await asyncio.gather(*tasks)
-    return list(results)
+    # 解构结果为两个列表
+    scene_intents = [r[0] for r in results]
+    prompts_list = [r[1] for r in results]
+    return scene_intents, prompts_list
 
 
 async def _generate_subconscious_batch(
@@ -310,7 +335,7 @@ async def _generate_subconscious_batch(
     api_key: str,
     base_url: str,
     model: str,
-) -> tuple[List[str], List[Optional[list]]]:
+) -> tuple[List[str], List[Optional[list]], List[List[dict]]]:
     """
     步骤 A-2: 批量并行生成 Subconscious（潜意识层）。
     
@@ -327,14 +352,15 @@ async def _generate_subconscious_batch(
         model: 模型名称
     
     Returns:
-        tuple[List[str], List[Optional[list]]]: (潜意识独白列表, MCTS rollout 列表)
+        tuple[List[str], List[Optional[list]], List[List[dict]]]: (潜意识独白列表, MCTS rollout 列表, 每个 Beat 的 prompts 列表)
     """
-    async def _single_subconscious(beat: dict, scene_intent: dict, beat_index: int) -> tuple[str, Optional[list]]:
+    async def _single_subconscious(beat: dict, scene_intent: dict, beat_index: int) -> tuple[str, Optional[list], List[dict]]:
         """生成单个 Beat 的 Subconscious（MCTS 潜意识树搜索）。
         
         Returns:
-            tuple[str, Optional[list]]: (潜意识思考文本, MCTS rollout 数据)
+            tuple[str, Optional[list], List[dict]]: (潜意识思考文本, MCTS rollout 数据, prompts 列表)
         """
+        prompts_history = []
         try:
             # ========================================================================
             # 构建伪前文（Risk 2 修复）- 基于前一个 beat 的状态
@@ -361,6 +387,15 @@ async def _generate_subconscious_batch(
                 red_lines=beat.get("red_lines", []),
                 previous_tail=pseudo_tail,  # 使用伪前文替代空字符串
             )
+            
+            # 记录 Subconscious prompt（包含 MCTS 动机连贯性检查规则）
+            prompts_history.append({
+                "stage": "SUBCONSCIOUS",
+                "beat_index": beat_index,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": 0.4,
+            })
             
             response = await call_llm(
                 system_prompt=system_prompt,
@@ -399,13 +434,13 @@ async def _generate_subconscious_batch(
             if len(thought) < 20:
                 thought = f"{thought}... 内心的紧张感在蔓延。"
             
-            return thought, mcts_rollout_data  # 返回元组：(思考文本, MCTS rollout)
+            return thought, mcts_rollout_data, prompts_history  # 返回元组：(思考文本, MCTS rollout, prompts)
             
         except Exception as e:
             print(f"[Subconscious Error] Beat {beat_index}: {e}")
             # 返回默认的内心独白
             pov_character = beat.get("pov_character", "我")
-            return f"{pov_character}深吸一口气，试图平复内心的波动。接下来该怎么办？", None
+            return f"{pov_character}深吸一口气，试图平复内心的波动。接下来该怎么办？", None, prompts_history
     
     # 并行生成所有 Subconscious
     tasks = [
@@ -415,10 +450,11 @@ async def _generate_subconscious_batch(
     
     results = await asyncio.gather(*tasks)
     
-    # 解构 tuple 结果为两个列表：(thoughts, mcts_rollouts)
+    # 解构 tuple 结果为三个列表：(thoughts, mcts_rollouts, prompts)
     thoughts = [r[0] for r in results]
     mcts_rollouts = [r[1] for r in results]
-    return thoughts, mcts_rollouts
+    prompts_list = [r[2] for r in results]
+    return thoughts, mcts_rollouts, prompts_list
 
 
 async def _generate_prose_serial_v25(
@@ -640,8 +676,11 @@ async def _generate_prose_serial_v25(
             # ========================================================================
             # 更新动态上下文 (V2.5+ 增强版状态更新)
             # ========================================================================
-            # 1. 更新 Rolling Prefix (previous_tail)
-            dynamic_context.previous_tail = _extract_tail(chunk_text, max_chars=300)
+            # 1. 更新 Rolling Prefix (previous_tail) - 追加视角锚定标签防止 POV 漂移
+            tail_text = _extract_tail(chunk_text, max_chars=300)
+            next_entry_state = beats[i+1].get('entry_state', '未指定') if i+1 < len(beats) else '章节结束'
+            pov_anchor = f"\n[System Tracker: 当前主语视角强锁定为 {pov_character} | 当前退出状态: {beat.get('exit_state', '未指定')} | 下一拍进入状态: {next_entry_state}]"
+            dynamic_context.previous_tail = tail_text + pov_anchor
             
             # 2. 升级状态更新（情绪 + 关系 + 摘要）
             if flags.enable_emotional_scratchpad:

@@ -168,6 +168,7 @@ class ChapterBase(BaseModel):
     pacing_style: PacingStyle = Field(default="balanced")
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
+    chapter_assets_schema: Optional[str] = None
 
 
 class ChapterCreate(ChapterBase):
