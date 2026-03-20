@@ -22,7 +22,7 @@
 import asyncio
 import json
 import time
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from backend.schemas import (
@@ -30,6 +30,7 @@ from backend.schemas import (
     DraftingFeatureFlags, 
     MicroReviewResult,
     DynamicStateUpdateResult,  # V2.5+ NEW
+    CharacterPhysicalState,  # V2.5+ NEW: 用于 entity_spatial_ledger
 )
 from backend.services.prompts import (
     build_scene_intent_prompt,
@@ -61,6 +62,7 @@ class BeatDraftResult(BaseModel):
         subconscious_thought: 角色的潜意识/内心独白网络（50-100字）
         draft_chunk: 生成的小说正文
         prompts: 调试用的提示词历史列表
+        mcts_rollout: 完整的 MCTS 三分支推演记录（Risk 5 可观测性）
     """
     beat_id: str
     beat_index: int
@@ -68,6 +70,7 @@ class BeatDraftResult(BaseModel):
     subconscious_thought: str
     draft_chunk: str
     prompts: List[dict] = []
+    mcts_rollout: Optional[list] = None  # MCTS 可观测性（Risk 5 修复）
 
 
 async def execute_draft_stage(
@@ -88,6 +91,8 @@ async def execute_draft_stage(
     enable_qc: bool = True,
     feature_flags: Optional[DraftingFeatureFlags] = None,
     physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
 ) -> List[BeatDraftResult]:
     """
     执行混合流水线起草阶段 (V2.5 认知流式生成)。
@@ -153,7 +158,7 @@ async def execute_draft_stage(
     )
     
     # A-2: 并行生成 Subconscious（依赖 Scene Intent）
-    subconscious_results = await _generate_subconscious_batch(
+    subconscious_results, mcts_rollout_results = await _generate_subconscious_batch(
         beats=beats,
         scene_intent_results=scene_intent_results,
         chapter=chapter,
@@ -190,6 +195,8 @@ async def execute_draft_stage(
         enable_qc=enable_qc,
         feature_flags=flags,
         physical_state_lock=physical_state_lock,
+        entity_spatial_ledger=entity_spatial_ledger,
+        chapter_assets_schema=chapter_assets_schema,
     )
     
     print(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
@@ -207,6 +214,7 @@ async def execute_draft_stage(
             subconscious_thought=subconscious_results[i],
             draft_chunk=prose_results[i]["text"],
             prompts=prose_results[i]["prompts"],
+            mcts_rollout=mcts_rollout_results[i],  # MCTS 可观测性（Risk 5 修复）
         )
         results.append(result)
     
@@ -302,7 +310,7 @@ async def _generate_subconscious_batch(
     api_key: str,
     base_url: str,
     model: str,
-) -> List[str]:
+) -> tuple[List[str], List[Optional[list]]]:
     """
     步骤 A-2: 批量并行生成 Subconscious（潜意识层）。
     
@@ -319,16 +327,39 @@ async def _generate_subconscious_batch(
         model: 模型名称
     
     Returns:
-        List[str]: 按 Beat 顺序排列的潜意识独白列表
+        tuple[List[str], List[Optional[list]]]: (潜意识独白列表, MCTS rollout 列表)
     """
-    async def _single_subconscious(beat: dict, scene_intent: dict, beat_index: int) -> str:
-        """生成单个 Beat 的 Subconscious。"""
+    async def _single_subconscious(beat: dict, scene_intent: dict, beat_index: int) -> tuple[str, Optional[list]]:
+        """生成单个 Beat 的 Subconscious（MCTS 潜意识树搜索）。
+        
+        Returns:
+            tuple[str, Optional[list]]: (潜意识思考文本, MCTS rollout 数据)
+        """
         try:
+            # ========================================================================
+            # 构建伪前文（Risk 2 修复）- 基于前一个 beat 的状态
+            # ========================================================================
+            pseudo_tail = ""
+            if beat_index > 1:  # beat_index 是 1-based
+                prev_beat = beats[beat_index - 2]  # 转换为 0-based 索引
+                prev_exit = prev_beat.get("exit_state", "")
+                current_entry = beat.get("entry_state", "")
+                if prev_exit or current_entry:
+                    pseudo_tail = f"前一节拍结束状态：{prev_exit}。当前切入：{current_entry}"
+            
+            # ========================================================================
+            # pov_perception_state 优先级取值链（Risk 4 配套）
+            # ========================================================================
+            pov_perception_state = beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
+            
             system_prompt, user_prompt = build_subconscious_prompt(
                 chapter=chapter,
                 beat=beat,
                 scene_intent=scene_intent,
                 entities=entities,
+                pov_perception_state=pov_perception_state,
+                red_lines=beat.get("red_lines", []),
+                previous_tail=pseudo_tail,  # 使用伪前文替代空字符串
             )
             
             response = await call_llm(
@@ -337,25 +368,44 @@ async def _generate_subconscious_batch(
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
-                temperature=0.6,  # 略高于 Scene Intent，允许更多情感波动
-                max_tokens=200,
+                temperature=0.4,  # 推理任务需更确定
+                max_tokens=1000,  # JSON 结构需更多 token
+                response_format={"type": "json_object"},
             )
             
-            # 清理输出，确保 50-100 字范围
-            thought = clean_llm_output(response).strip()
-            # 限制长度在 50-150 字之间
+            # 清理并尝试解析 MCTS JSON
+            cleaned = clean_llm_output(response).strip()
+            
+            # 尝试解析 MCTS JSON
+            mcts_rollout_data = None  # MCTS 可观测性（Risk 5 修复）
+            try:
+                mcts_result = json.loads(cleaned)
+                thought = mcts_result.get("best_subconscious", "").strip()
+                # 保存完整的 MCTS rollout 数据
+                mcts_rollout_data = mcts_result.get("mcts_rollout", None)
+                if not thought:
+                    # 回退：从 rollout 中选最高分
+                    rollout = mcts_result.get("mcts_rollout", [])
+                    if rollout:
+                        best = max(rollout, key=lambda x: x.get("score", 0))
+                        thought = best.get("thought", "")
+            except (json.JSONDecodeError, TypeError, KeyError):
+                # JSON 解析失败，回退到纯文本模式
+                thought = cleaned
+            
+            # 长度约束
             if len(thought) > 150:
                 thought = thought[:147] + "..."
             if len(thought) < 20:
                 thought = f"{thought}... 内心的紧张感在蔓延。"
             
-            return thought
+            return thought, mcts_rollout_data  # 返回元组：(思考文本, MCTS rollout)
             
         except Exception as e:
             print(f"[Subconscious Error] Beat {beat_index}: {e}")
             # 返回默认的内心独白
             pov_character = beat.get("pov_character", "我")
-            return f"{pov_character}深吸一口气，试图平复内心的波动。接下来该怎么办？"
+            return f"{pov_character}深吸一口气，试图平复内心的波动。接下来该怎么办？", None
     
     # 并行生成所有 Subconscious
     tasks = [
@@ -364,7 +414,11 @@ async def _generate_subconscious_batch(
     ]
     
     results = await asyncio.gather(*tasks)
-    return list(results)
+    
+    # 解构 tuple 结果为两个列表：(thoughts, mcts_rollouts)
+    thoughts = [r[0] for r in results]
+    mcts_rollouts = [r[1] for r in results]
+    return thoughts, mcts_rollouts
 
 
 async def _generate_prose_serial_v25(
@@ -386,6 +440,8 @@ async def _generate_prose_serial_v25(
     enable_qc: bool = True,
     feature_flags: DraftingFeatureFlags = None,
     physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
 ) -> List[dict]:
     """
     步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + 认知组件）。
@@ -443,13 +499,24 @@ async def _generate_prose_serial_v25(
     # V2.5+ NEW: 构建初始关系状态锁
     initial_relational_state = _build_initial_relational_state(relationships, entities)
     
+    # V3.0 NEW: 初始化 pov_perception_state（三级优先级链：pov_perception_state > entry_state > "正常"）
+    def _get_pov_perception_state(beat: dict) -> str:
+        """取值优先级：beat.pov_perception_state > beat.entry_state > "正常" """
+        return beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
+    
+    initial_pov_perception_state = _get_pov_perception_state(beats[0]) if beats else "正常"
+    
     dynamic_context = DynamicContext(
         previous_tail="",
         current_emotional_state=initial_emotional_state,
         physical_state_lock=physical_state_lock or "",
         accumulated_summary="",           # V2.5+ NEW: 宏观剧情累加器
         relational_state_lock=initial_relational_state,  # V2.5+ NEW: 关系状态锁
+        entity_spatial_ledger=entity_spatial_ledger or {},  # V2.5+ NEW: 空间账本
     )
+    
+    # V3.0 NEW: 存储 pov_perception_state（因为 DynamicContext 可能没有此属性，使用独立变量）
+    current_pov_perception_state = initial_pov_perception_state
     
     print(f"[Prose V25+] 初始化 DynamicContext: "
           f"emotional='{initial_emotional_state[:30]}...', "
@@ -496,6 +563,10 @@ async def _generate_prose_serial_v25(
                     accumulated_summary=dynamic_context.accumulated_summary,
                     relational_state_lock=dynamic_context.relational_state_lock,
                     red_lines=beat.get("red_lines"),
+                    entity_spatial_ledger=dynamic_context.entity_spatial_ledger if dynamic_context.entity_spatial_ledger else None,
+                    # V3.0 NEW PARAMETERS (四重锁):
+                    chapter_assets_schema=chapter_assets_schema or getattr(chapter, 'chapter_assets_schema', '') or '',
+                    pov_perception_state=current_pov_perception_state,
                 )
                 
                 prompts_history.append({
@@ -535,6 +606,7 @@ async def _generate_prose_serial_v25(
                         api_key=api_key,
                         base_url=base_url,
                         model=reasoning_model,
+                        entity_spatial_ledger=dynamic_context.entity_spatial_ledger if dynamic_context.entity_spatial_ledger else None,
                     )
                     
                     if not is_valid:
@@ -582,6 +654,7 @@ async def _generate_prose_serial_v25(
                     model=reasoning_model,
                     relational_state_lock=dynamic_context.relational_state_lock,  # NEW
                     beat_context=beat,  # NEW: 传递 beat 上下文
+                    book_genre=getattr(book, 'genre', '通用小说'),  # NEW: 传递书籍类型
                 )
                 
                 # 更新情绪状态
@@ -602,6 +675,11 @@ async def _generate_prose_serial_v25(
                       f"E='{state_update.new_emotional_state[:30]}...', "
                       f"R_delta='{state_update.relational_delta[:30] if state_update.relational_delta else '无'}...', "
                       f"S='{state_update.beat_summary[:30]}...'")
+            
+            # V3.0 NEW: 更新 pov_perception_state（使用三级优先级链从下一个 beat 获取）
+            if i + 1 < len(beats):
+                next_beat = beats[i + 1]
+                current_pov_perception_state = _get_pov_perception_state(next_beat)
             
             results.append({
                 "text": chunk_text,
@@ -630,6 +708,7 @@ async def _micro_review_assertion(
     api_key: str = "",
     base_url: str = "",
     model: str = "",
+    entity_spatial_ledger: Optional[dict] = None,
 ) -> tuple[bool, str]:
     """
     Fail-Fast 微审查断言（V2.5+ 增强版）。
@@ -657,6 +736,7 @@ async def _micro_review_assertion(
         api_key: LLM API Key
         base_url: LLM Base URL
         model: 模型名称（建议使用轻量级模型）
+        entity_spatial_ledger: 角色空间账本（可选）
     
     Returns:
         tuple[bool, str]: (是否通过, 失败原因)
@@ -665,9 +745,17 @@ async def _micro_review_assertion(
         # V2.5+ NEW: 提取角色设定用于 OOC 检查
         char_prompts = _extract_character_prompts_for_beat(beat, dynamic_context) if beat else None
         
+        # V2.5+ NEW: 增强物理状态锁，加入空间账本信息
+        effective_physical_lock = dynamic_context.physical_state_lock
+        if entity_spatial_ledger:
+            from backend.services.prompts.draft_prompts import _format_entity_spatial_ledger
+            spatial_info = _format_entity_spatial_ledger(entity_spatial_ledger)
+            if spatial_info:
+                effective_physical_lock = f"{effective_physical_lock}\n\n【角色空间绑定】:\n{spatial_info}"
+        
         system_prompt, user_prompt = build_micro_review_prompt(
             chunk_text=chunk_text,
-            physical_state_lock=dynamic_context.physical_state_lock,
+            physical_state_lock=effective_physical_lock,
             pov_character=pov_character,
             # V2.5+ NEW: 传递增强参数
             red_lines=beat.get("red_lines") if beat else None,
@@ -1144,6 +1232,7 @@ async def _update_dynamic_state(
     model: str,
     relational_state_lock: str = "",
     beat_context: Optional[Any] = None,
+    book_genre: str = "通用小说",
 ) -> DynamicStateUpdateResult:
     """
     更新动态状态（V2.5+ 升级版）。
@@ -1166,6 +1255,7 @@ async def _update_dynamic_state(
         model: 模型名称
         relational_state_lock: 当前关系状态锁
         beat_context: Beat 上下文信息
+        book_genre: 书籍类型（默认"通用小说"）
     
     Returns:
         DynamicStateUpdateResult: 结构化状态更新结果
@@ -1177,6 +1267,7 @@ async def _update_dynamic_state(
             pov_character=pov_character,
             relational_state_lock=relational_state_lock,
             beat_context=beat_context,
+            book_genre=book_genre,
         )
         
         response = await call_llm(

@@ -295,6 +295,18 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "VARCHAR(120)",
         "expected_udt_names": {"varchar"},
     },
+    {
+        "table": "chapters",
+        "column": "chapter_assets_schema",
+        "definition": "TEXT DEFAULT ''",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "story_beats",
+        "column": "pov_perception_state",
+        "definition": "TEXT DEFAULT '正常'",
+        "expected_udt_names": {"text"},
+    },
 ]
 
 

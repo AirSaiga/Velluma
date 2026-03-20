@@ -66,6 +66,7 @@ const props = defineProps<{
   handleOptimize: () => void
   handlePartialOptimize: (payload: { selection: any, instruction: string }) => void
   handleOutlineInput: (event: Event) => void
+  handleAssetsSchemaInput: (event: Event) => void
   handleTensionLevelInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
   inspirationActiveCharacterIds: string[]
@@ -179,6 +180,25 @@ watch(() => props.critiqueResult, (newVal) => {
             placeholder="输入章节摘要..."
           />
         </div>
+
+        <!-- 资产定义编辑面板 -->
+        <details class="group">
+          <summary class="flex items-center gap-1.5 cursor-pointer text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] select-none">
+            <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+            章节资产定义 (Asset Schema)
+          </summary>
+          <div class="mt-1.5">
+            <textarea
+              :value="selectedChapter.chapter_assets_schema || ''"
+              @input="handleAssetsSchemaInput"
+              rows="3"
+              class="w-full px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-y"
+              placeholder="例如：【血噬】：2-3米高的重型实体机甲，采用外部驾驶舱包裹。"
+            />
+          </div>
+        </details>
 
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-[10px] text-[var(--text-muted)]">人物:</span>

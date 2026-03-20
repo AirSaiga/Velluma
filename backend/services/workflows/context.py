@@ -75,6 +75,20 @@ async def load_chapter_context(
         rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda
     )
 
+    # 构建角色物理形态映射 (entity_spatial_ledger)
+    entity_spatial_ledger = {}
+    for entity in entities:
+        # entity 是 ChapterEntity 对象，通过 selectinload 预加载了 character
+        character = entity.character
+        if character and character.name:
+            # 构建默认的物理状态结构，与 CharacterPhysicalState schema 对应
+            entity_spatial_ledger[character.name] = {
+                "is_in_vehicle": False,
+                "vehicle_or_mech_name": "",
+                "equipped_weapons": [],
+                "movement_constraints": ""
+            }
+
     return {
         "chapter": chapter,
         "book": book,
@@ -83,6 +97,8 @@ async def load_chapter_context(
         "previous_summary": previous_summary,
         "open_hooks": open_hooks,
         "relevant_memories": relevant_memories,
+        "chapter_assets_schema": chapter.chapter_assets_schema or "",
+        "entity_spatial_ledger": entity_spatial_ledger,
     }
 
 

@@ -40,6 +40,7 @@ export interface Chapter {
   pacing_style: PacingStyle
   status: string
   character_ids?: string[]
+  chapter_assets_schema?: string
 }
 
 export interface Relationship {

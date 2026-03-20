@@ -109,25 +109,28 @@ def build_subconscious_prompt(
     beat: dict,
     scene_intent: dict,
     entities: list,
+    pov_perception_state: str = "",
+    red_lines: list[str] = None,
+    previous_tail: str = "",
 ) -> tuple[str, str]:
     """
-    构建潜意识层提示词。
+    构建 MCTS 潜意识树搜索提示词。
     
-    职责：生成 POV 角色的内心独白，为后续 Prose 生成提供情感锚点。
+    职责：生成 POV 角色的潜意识分支推演，为后续 Prose 生成提供情感锚点。
     
     设计原则：
-    - 50-100 字第一人称内心独白
-    - 无需华丽辞藻，专注感官直觉
-    - 回答三个核心问题：
-      1. "我现在感觉如何？"
-      2. "环境里最刺眼的是什么？"
-      3. "我接下来的本能反应是什么？"
+    - 基于 MCTS 展开 3 条潜意识分支
+    - 根据红线和物理知觉状态进行评估打分
+    - 选择得分最高且绝对安全的分支作为最终结果
     
     Args:
         chapter: 章节实体
         beat: Beat 数据字典
         scene_intent: Scene Intent 分析结果（目标/风险/约束）
         entities: 角色实体列表（用于提取 POV 角色特征）
+        pov_perception_state: POV 角色当前物理知觉状态
+        red_lines: 红线约束列表
+        previous_tail: 前文尾巴
     
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -136,6 +139,20 @@ def build_subconscious_prompt(
     pov_character = _normalize_text(beat_data.get("pov_character"), "我")
     entry_state = _normalize_text(beat_data.get("entry_state"), "")
     location = _normalize_text(beat_data.get("location"), "当前场景")
+    beat_summary = _normalize_text(beat_data.get("summary") or beat_data.get("action_summary"), "")
+    
+    # 处理 pov_perception_state
+    effective_perception_state = pov_perception_state if pov_perception_state else entry_state
+    
+    # 处理 red_lines
+    effective_red_lines = red_lines if red_lines is not None else beat_data.get("red_lines", [])
+    if effective_red_lines:
+        red_lines_text = "\n".join([f"- {rl}" for rl in effective_red_lines])
+    else:
+        red_lines_text = "- 无特定红线"
+    
+    # 处理 previous_tail
+    effective_previous_tail = previous_tail if previous_tail else "（无前文）"
     
     # 提取 POV 角色的基础特征
     pov_traits = ""
@@ -147,29 +164,34 @@ def build_subconscious_prompt(
             break
     
     # Scene Intent 信息
-    intent_goal = _normalize_text(scene_intent.get("goal"), beat_data.get("summary", ""))
-    intent_stakes = _normalize_text(scene_intent.get("stakes"), "")
+    intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
     
-    system_prompt = f"""你是{chapter.chapter_name or '本章'}中角色【{pov_character}】的潜意识。
+    system_prompt = f"""你是一个顶级小说导演与心理学推演机。
+当前视角角色（POV）：【{pov_character}】
+当前物理知觉状态：【{effective_perception_state}】 (警告：如果状态为半昏迷或受限，潜意识中绝不可出现主动反击、清醒说话的意图！)
 
-你的任务是生成一段50-100字的内心独白，代表角色在当前场景下的即时感官直觉。
+【章节红线 (Red Lines) - 绝对不能触碰的天条】：
+{red_lines_text}
 
-【核心要求】
-1. **第一人称视角**：必须是{ pov_character }的内心独白，用"我"开头
-2. **感官直觉**：专注回答三个问题：
-   - 我现在感觉如何？（情绪、身体反应）
-   - 环境里最刺眼/最异常的是什么？（视觉、听觉、触觉、气味）
-   - 我接下来的本能反应是什么？（直觉、冲动、下意识动作）
-3. **简洁直接**：无需华丽辞藻，像_raw_的意识流，不要文学修饰
-4. **长度限制**：严格控制在50-100个汉字之间
+【前情提要】：{effective_previous_tail}
+【本段剧情目标】：{beat_summary}
 
-【禁止事项】
-- 禁止解释背景设定
-- 禁止预告未来剧情
-- 禁止使用第三人称描述
-- 禁止超过100字"""
+【MCTS 潜意识推演任务】：
+请在角色的脑海中同时展开 3 条绝不相同的潜意识心理分支（每条50字左右），并根据【红线】和【物理知觉状态】对它们进行打分测试（0-100分）。
+- **展开（Expansion）**：
+  分支A：基于本能反抗或冲动的思维（可能极易违背红线）。
+  分支B：基于当前知觉受限条件下的无力感、痛觉或冷酷本能的思维。
+  分支C：结合特定性格设定的战术/极端环境思维。
+- **评估（Evaluation）**：任何有一丝可能导致后续动作违背【红线】，或违背【物理知觉状态】的分支，直接打分为 0 且标记淘汰。
+- **剪枝选择（Selection）**：选出得分最高且绝对安全的那个分支。
 
-    user_prompt = f"""请生成【{pov_character}】在当前场景下的内心独白。
+请必须以严格的 JSON 格式输出推理过程与最终结果：
+{{"mcts_rollout": [{{"branch_id": "A", "thought": "...", "score": 0, "reason": "..."}}, {{"branch_id": "B", "thought": "...", "score": 95, "reason": "..."}}, {{"branch_id": "C", "thought": "...", "score": 0, "reason": "..."}}], "best_subconscious": "填入获胜分支的thought内文，这将作为驱动角色行为的情感引擎。"}}"""
+
+    user_prompt = f"""请为角色【{pov_character}】执行 MCTS 潜意识推演。
+
+【角色特征】
+{pov_traits if pov_traits else "普通角色，无特殊设定"}
 
 【切入状态】
 {entry_state}
@@ -177,16 +199,10 @@ def build_subconscious_prompt(
 【当前场景】
 {location}
 
-【场景目标】
+【场景意图】
 {intent_goal}
 
-【失败风险】
-{intent_stakes if intent_stakes else "暂无特定风险"}
-
-【角色特征】
-{pov_traits if pov_traits else "普通角色，无特殊设定"}
-
-请直接输出内心独白（50-100字），不要任何解释或标题。"""
+请严格以 JSON 格式输出推演结果。"""
 
     return system_prompt, user_prompt
 
@@ -685,6 +701,27 @@ BeatID：{_normalize_text(beat_data.get("beat_id"))}
 # V2.5 Cognitive Streaming - 增强版 Prose Draft Prompt
 # ========================================================================
 
+def _format_entity_spatial_ledger(ledger: dict) -> str:
+    """将实体空间账本转化为 Prompt 可读的自然语言。"""
+    if not ledger:
+        return ""
+    lines = []
+    for char_name, state in ledger.items():
+        parts = [f"【{char_name}】"]
+        if state.is_in_vehicle and state.vehicle_or_mech_name:
+            parts.append(f"当前处于【{state.vehicle_or_mech_name}】内部（封闭状态）")
+        elif state.is_in_vehicle:
+            parts.append("当前处于载具/机甲内部（封闭状态）")
+        else:
+            parts.append("当前为肉身状态")
+        if state.equipped_weapons:
+            parts.append(f"装备：{', '.join(state.equipped_weapons)}")
+        if state.movement_constraints and state.movement_constraints != "无特殊限制":
+            parts.append(f"⚠ 限制：{state.movement_constraints}")
+        lines.append(" → ".join(parts))
+    return "\n".join(lines)
+
+
 def build_prose_draft_prompt_v25(
     chapter: Chapter,
     book: Book,
@@ -693,14 +730,20 @@ def build_prose_draft_prompt_v25(
     subconscious_thought: str,
     previous_tail: str,
     target_words: int,
-    physical_state_lock: str,
-    current_emotional_state: str,
+    physical_state_lock: str = "",
+    current_emotional_state: str = "",
     # ========================================
     # NEW PARAMETERS for V2.5+
     # ========================================
     accumulated_summary: str = "",
     relational_state_lock: str = "",
     red_lines: Optional[list[str]] = None,
+    entity_spatial_ledger: Optional[dict] = None,
+    # ========================================
+    # NEW PARAMETERS for V3.0 四重锁
+    # ========================================
+    chapter_assets_schema: str = "",
+    pov_perception_state: str = "",
     # ========================================
 ) -> tuple[str, str]:
     """
@@ -800,6 +843,28 @@ def build_prose_draft_prompt_v25(
 
 检查清单：在生成每一个动作前，问自己："以当前的物理状态，这个动作可能吗？"""
 
+    book_genre = getattr(book, 'genre', None) or "通用小说"
+    tonality_lock_section = f"""
+【世界观基调锁 (Tonality Lock) - 极高优先级】
+- 本书的核心题材与世界观基调是：【{book_genre}】。
+- 你必须严格遵守该题材固有的物理法则与常识，【绝对禁止】发生"题材污染（Genre Bleeding）"。
+- 警告范例：如果是科幻文，严禁机甲产生修仙魔法或长出真实血肉内脏；如果是低武武侠，严禁出现现代热兵器或超自然法术。
+- 允许使用生动、夸张的比喻来增强文本的画面张力（例如形容机器像"野兽"），但【绝不能】把比喻写成脱离当前世界观的真实物理异变。请死守当前世界的设定边界！
+"""
+
+    # ====== 实体空间绑定锁 ======
+    spatial_ledger_section = ""
+    if entity_spatial_ledger:
+        formatted_ledger = _format_entity_spatial_ledger(entity_spatial_ledger)
+        if formatted_ledger:
+            spatial_ledger_section = f"""## 【绝对物理与空间绑定锁 - P0级权重】
+当前场景中，核心角色的绝对物理形态与空间从属关系如下，你绝不可篡改：
+{formatted_ledger}
+
+【防幻觉警报】：
+1. 严禁发生"容器穿透"：如果角色被标记为处于载具/重型装甲内，其所有的对外界交互必须通过面板、操纵杆、受击震荡来体现，【绝对禁止】描写其肉身直接接触环境或徒手战斗。
+2. 严禁凭空产生动作：如果角色处于限制状态（如昏迷、被缚），严禁生成其主动发起战术动作的描写。"""
+
     emotional_section = ""
     if current_emotional_state:
         emotional_section = f"""## 【当前心理状态 (Emotional Scratchpad)】
@@ -810,44 +875,77 @@ def build_prose_draft_prompt_v25(
 - 情绪转变必须是渐进的，禁止突兀切换
 - 通过身体反应和环境感知体现情绪，而非直接陈述"他感到..."""
 
-    system_prompt = f"""你是专业小说写手。请根据提供的潜意识独白，沉浸式续写小说正文。
+    # ========================================
+    # V3.0 四重锁：构建变量
+    # ========================================
+    # 锁1：核心资产体积锁
+    chapter_assets_schema_text = chapter_assets_schema if chapter_assets_schema else "（本章未定义特殊资产）"
+    
+    # 锁2：知觉与感官遮罩层
+    pov_perception_state_text = pov_perception_state if pov_perception_state else (physical_state_lock if physical_state_lock else "正常")
+    
+    # 锁3：世界观基调锁
+    book_genre = getattr(book, 'genre', '未指定') or '未指定'
+    
+    # 锁4：大纲红线
+    red_lines_list = red_lines or _normalize_text_list(beat_data.get("red_lines"))
+    if red_lines_list:
+        red_lines_text = "\n".join([f"- {rl}" for rl in red_lines_list])
+    else:
+        red_lines_text = "（无特殊红线）"
+    
+    # 前文尾巴
+    previous_tail_text = previous_tail if previous_tail else "（章节开头，无前文）"
 
-## 【核心任务】
-将角色的内心独白转化为具象化的动作、对话和环境描写。
+    system_prompt = f"""你是专精长文本渲染的专业小说家。你的任务是根据提供的最优潜意识，极其克制地沉浸式续写正文。
+
+【锁1：核心资产体积锁 (Asset Schema Lock) - P0级特权】
+请死死记住以下资产的物理体型与设定，严禁自行魔改其物理形态！
+{chapter_assets_schema_text}
+> 警告：严禁把重型机甲写成"钻入体内的纳米神经"、"吸附在皮肤上的液体战甲"或"外骨骼"！机甲就是巨大的钢铁造物！
+
+【锁2：知觉与感官遮罩层 (Perception Masking)】
+当前POV角色的状态为：【{pov_perception_state_text}】。
+> 警告：如果该状态包含"昏迷/重伤/失去控制"，你【绝对禁止】描写该角色做出清醒、精准的主动战术动作（主动挥拳、精准射击、躲避、开口大叫等）。
+该角色的一切动作只能是被动的：例如"被惯性抛飞"、"躯体不受控制地痉挛"、"在混沌中感知到震动"、"无意识的喘息"。必须写出命悬一线的巨物支配感！
+
+【锁3：世界观基调锁 (Tonality Lock)】
+本书基调：【{book_genre}】。
+> 警告：绝不可发生题材污染。允许使用生动比喻（如"像野兽般咆哮"），但【严禁】把比喻当成物理现实写出来（如：机甲绝对不能长出真实的血肉、触手或骨齿；不能施展魔法光效）。
+
+【锁4：大纲红线 (Red Lines) - 撞线即判废】
+{red_lines_text}
+
+## 【物理边界锁定】
+你必须严格遵守主角当前的物理实体状态：{physical_state_lock if physical_state_lock else "未指定"}
+
+## 【当前心理状态 (Emotional Scratchpad)】
+紧接上一幕，主角当前的心境是：{current_emotional_state if current_emotional_state else "未指定"}
+
+## 【在场角色与动态关系 (Relational State)】
+{relational_state_lock if relational_state_lock else "（无特殊关系约束）"}
 
 ## 【叙事原则】
-1. **单一视角锁定**：绝对锁定在【{pov_character}】的感官范围内
-2. **动作即性格**：通过角色的动作选择展现性格，不要直接解释
-3. **环境即情绪**：让环境描写映射角色的心理状态
-4. **对话即冲突**：对话推动剧情，每句台词都要有目的
+1. 单一视角锁定：绝对锁定在【{pov_character}】的感官范围内
+2. 动作即性格：通过角色的动作选择展现性格
+3. 环境即情绪：让环境描写映射角色的心理状态
+4. 对话即冲突：每句台词都要有目的
 
-## 【节奏控制 ({pacing_type})】
-{pacing_instruction}
-
-{physical_lock_section}
-
-{emotional_section}
-
-{relational_section}
-
-{red_lines_section}
-
-## 【反AI味协议 - 必须遵守】
-1. **禁止设定倾倒**：不要在动作中打断解释世界观
-2. **禁止预告片旁白**：严禁"命运的齿轮"、"时代的洪流"这类虚词
-3. **禁止形容词堆砌**：一个名词前最多一个修饰语
-4. **Show, Don't Tell**：直接描写物理反应，不要总结情绪
-5. **短句制造紧张**：危机时刻用少于10个字的短句，甚至词组片段
-
-{style_control if style_control else ''}
+## 【反AI味协议】
+- 禁止设定倾倒（不要解释世界观设定）
+- 禁止预告旁白（不要暗示后续剧情）
+- 禁止形容词堆砌（用具体动作替代抽象描述）
+- 摒弃一切华丽虚词，用具体、短促的动作展现张力
 
 ## 【续写要求】
 - 目标字数：约 {target_words} 字（允许适度超出，完整性优先）
 - 只输出正文，不要解释
 - 段落之间用双换行符分隔
 - 禁止使用 Markdown 格式
+- 直接输出纯文本
 
-{continuity_section if continuity_section else ''}"""
+【前文尾巴 - 必须无缝衔接】
+{previous_tail_text}"""
 
     user_prompt = f"""请根据以下信息续写小说正文：
 
@@ -860,13 +958,19 @@ def build_prose_draft_prompt_v25(
 【场景目标】
 {intent_goal}
 
-【角色潜意识独白 - 情感锚点】
+【角色最优潜意识（情感锚点）】
 {subconscious_thought}
+
+【本段剧情目标（Beat）】
+{beat_summary if beat_summary else "推进剧情"}
 
 【约束条件】
 {chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
 
-请直接输出小说正文，从前文尾巴的自然延续开始写起。"""
+【前情累积摘要】
+{accumulated_summary if accumulated_summary else "（无前情摘要）"}
+
+请衔接前文尾巴，以极具质感的画面描写和物理碰撞感输出正文。直接输出纯文本，禁用 Markdown 格式。"""
 
     return system_prompt, user_prompt
 
@@ -1009,35 +1113,27 @@ def build_emotional_update_prompt(
     chunk_text: str,
     previous_emotional_state: str,
     pov_character: str = "主角",
+    character_static_prompt: str = "",
 ) -> tuple[str, str]:
     """
     构建情绪暂存器更新提示词。
     
     职责：基于刚生成的剧情，总结主角心理状态的微小演变。
     """
-    system_prompt = """你是一个心理学观察员，专门追踪角色的心理状态演变。
+    system_prompt = f"""你是一个精通心理学的观察员。你的任务是推演角色在经历刚才的事件后，当下的微观心理状态。
 
-你的任务：用极为简短的一句话（20字以内），总结角色经历了剧情后，心理状态发生了怎样的微小偏移或演变。
+【角色底层性格（绝对引力锚）】：{character_static_prompt}
+(注意：无论遇到多大刺激，角色的本能最终都会将其拉回或试图掩盖成这种底层性格)
 
-【核心要求】
-1. **聚焦演变**：重点描述"变化"，而非静态状态
-2. **因果明确**：体现"因为经历了 X，所以现在 Y"的逻辑
-3. **字数限制**：严格控制在20个汉字以内
-4. **第一人称感**：用角色的视角描述，而非外部评价
+【前情心理状态】：{previous_emotional_state}
+【刚刚发生的剧情】：{chunk_text}
 
-【优秀示例】
-- "从之前的惊恐万分，转变为肾上腺素飙升后的疯狂求生欲。"
-- "挫败感逐渐被冷静的计算所取代，开始寻找反击的机会。"
-- "原本的犹豫在生死瞬间凝固为决绝的一搏。"
-- "愤怒并未消退，而是沉淀为一种冰冷的专注。"
+请用极为简短的一句话（20字以内），总结角色此刻的最新心理状态。
+公式要求：新情绪 = (外部刺激带来的短暂生理/心理反应) + (被底层性格强压或扭转后的最终表现)
+【警告】：严禁让角色发展成与底层性格完全相反的精神病态！
 
-【禁止事项】
-- 超过20字
-- 静态描述（如"他很害怕"）
-- 外部评价（如"这表现了他的勇敢"）
-- 预告未来（如"他将面临更大的挑战"）
-
-直接输出总结句，不要任何解释。"""
+示例输出格式："虽然内心因失控而战栗，但极强的自控力让他表面恢复了冷酷与肃杀。"
+"""
 
     user_prompt = f"""【角色】{pov_character}
 
@@ -1062,6 +1158,7 @@ def build_dynamic_state_update_prompt(
     pov_character: str = "主角",
     relational_state_lock: str = "",
     beat_context: Optional[dict] = None,
+    book_genre: str = "通用小说",
 ) -> tuple[str, str]:
     """
     构建动态状态更新提示词（V2.5+ 升级版）。
@@ -1084,47 +1181,27 @@ def build_dynamic_state_update_prompt(
 - 地点：{beat_location}
 - 视角：{beat_pov}"""
 
-    system_prompt = """你是一个专业的小说剧情分析器，负责追踪角色状态和关系演变。
+    system_prompt = f"""你是一个无情的战场行为逻辑分析师。
+请根据刚才发生的剧情，更新角色的心理状态与实体关系矩阵。
 
-你的任务：分析刚生成的剧情片段，提取三类信息并以严格的 JSON 格式返回。
+【状态机更新规则】：
+新状态 = (受到刺激后的即时反应) - (被该角色底层人设强行修正后的结果)
 
-【输出格式】
-必须返回以下结构的 JSON，不要有任何其他内容：
+【词汇清洗协议 - 强制执行】：
+1. 必须根据作品基调（{book_genre}）使用严谨的分析判断词汇。
+2. 严禁使用任何带有浪漫主义、主观同情或拟人泛滥的词汇。
+   禁用词汇黑名单：羁绊、凄美、共生、牺牲、宿命、救赎、灵魂共鸣、命运交织。
+3. 角色间的合作或救助行为，必须被翻译为冷硬的分析表述：
+   - ✅ "出于战术利益的考量" / "顺位优先级的变更" / "防备下的妥协"
+   - ❌ "内心深处的牵绊驱使他伸出了手"
 
-```json
-{
-  "new_emotional_state": "角色当前的心理状态（20字以内，强调演变）",
-  "relational_delta": "角色关系的变化（如'与盟友的信任度上升'，无变化则留空）",
-  "beat_summary": "本段剧情的极简一句话摘要（用于宏观剧情累加）"
-}
-```
-
-【分析要求】
-
-1. **new_emotional_state ($E_{new}$)**：
-   - 聚焦心理状态的变化，而非静态描述
-   - 格式："从[之前状态]转变为[新状态]"
-   - 字数限制：严格控制在 20 个汉字以内
-   - 示例："从恐惧的僵直转变为肾上腺素驱动的求生本能"
-
-2. **relational_delta ($R_{delta}$)**：
-   - 分析角色间关系的微妙变化
-   - 记录信任度、敌意、合作意愿等的升降
-   - 如果无显著变化，返回空字符串
-   - 示例："与李铭的互不信任加深，但共同利益维系着脆弱的同盟"
-
-3. **beat_summary ($S_{new}$)**：
-   - 将本段剧情压缩为一句话
-   - 保留核心冲突和关键转折
-   - 用于宏观剧情累加器，帮助后续 Beat 理解前文
-   - 示例："楚言在废墟中遭遇敌方巡逻队，被迫躲入下水道"
-   - 字数限制：40 字以内
-
-【禁止事项】
-- 禁止输出 JSON 以外的任何内容
-- 禁止超过字数限制
-- 禁止静态描述（如"他很害怕"）
-- 禁止预告未来剧情"""
+【输出格式要求】：
+请严格按以下 JSON 格式输出，不要有任何额外文字：
+{{{{
+  "new_emotional_state": "角色当前的心理状态（20字以内，强调从前一状态到新状态的演变）",
+  "relational_delta": "角色关系的变化（如'与盟友的战术信任度因联合作战小幅上升'，无变化则留空）",
+  "beat_summary": "本段剧情的极简一句话摘要（用于宏观剧情累加，40字以内）"
+}}}}"""
 
     user_prompt = f"""【POV角色】{pov_character}
 

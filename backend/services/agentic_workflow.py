@@ -29,6 +29,7 @@ from backend.services.prompts import (
     parse_scene_intent_result,
 )
 from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
+from backend.services.workflows.refining import refine_single_beat
 from backend.services.prompt_logger import PromptLogger, create_logger, get_logger, clear_logger
 
 
@@ -1102,6 +1103,8 @@ async def _generate_agentic_chapter_stream(
                     enable_qc=True,
                     feature_flags=feature_flags,
                     physical_state_lock=physical_state_lock,
+                    entity_spatial_ledger=None,
+                    chapter_assets_schema=chapter.chapter_assets_schema or "",
                 )
                 
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
@@ -1419,7 +1422,7 @@ async def _generate_agentic_chapter_stream(
                 refining_started_at = time.perf_counter()
                 yield f"data: {json.dumps({'event': 'REFINING', 'message': f'正在对 {len(valid_beat_ids)} 个问题片段进行局部精修...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
 
-                for beat_id in valid_beat_ids:
+                for idx, beat_id in enumerate(valid_beat_ids):
                     original_chunk = beat_chunk_map.get(beat_id, "")
                     if not original_chunk:
                         print(f"[Refine Warning] Beat {beat_id} has no chunk text, skipping.")
@@ -1427,55 +1430,57 @@ async def _generate_agentic_chapter_stream(
 
                     beat_idx = int(beat_id.split("_")[1]) - 1
                     beat_info = beats[beat_idx] if beat_idx < len(beats) else {}
-                    beat_summary = beat_info.get("summary", "")
 
+                    # 提取该 beat 对应的 issue descriptions
                     issue_descriptions = []
                     for issue in all_issues:
                         issue_beat_ids = issue.get("target_beat_ids", [])
                         if beat_id in issue_beat_ids:
                             issue_descriptions.append(issue.get("description", ""))
 
-                    revision_instruction = f"【全局纠偏】{revision_plan}\n\n【问题定位】" + "; ".join(issue_descriptions) if issue_descriptions else revision_plan
+                    # 获取前一个 beat 的尾部文本用于语气衔接
+                    previous_tail = ""
+                    if beat_idx > 0:
+                        prev_beat_id = f"beat_{beat_idx}"
+                        prev_chunk = beat_chunk_map.get(prev_beat_id, "")
+                        if prev_chunk:
+                            previous_tail = prev_chunk[-500:]
 
-                    r_sys, r_user = build_chunk_refine_prompt(
-                        chapter, book, entities, relationships, beat_summary, original_chunk, revision_instruction
+                    # ========================================================================
+                    # 记录 CHUNK_REFINE_LOCAL 阶段的 Prompt
+                    # ========================================================================
+                    prompt_logger.start_stage("CHUNK_REFINE_LOCAL", iteration=iteration, beat_id=beat_id)
+                    prompt_logger.log_inputs(
+                        beat_summary=beat_info.get("summary", "")[:100],
+                        original_chunk_length=len(original_chunk),
+                        revision_plan=revision_plan[:200],
+                        issue_count=len(issue_descriptions)
                     )
 
                     debug_history.append({
                         "stage": "CHUNK_REFINE_LOCAL",
                         "iteration": iteration,
                         "beat_id": beat_id,
-                        "system_prompt": r_sys,
-                        "user_prompt": r_user
+                        "revision_plan": revision_plan,
+                        "issue_descriptions": issue_descriptions
                     })
-                    
-                    # ========================================================================
-                    # 记录 CHUNK_REFINE_LOCAL 阶段的 Prompt
-                    # ========================================================================
-                    prompt_logger.start_stage("CHUNK_REFINE_LOCAL", iteration=iteration, beat_id=beat_id)
-                    prompt_logger.log_inputs(
-                        beat_summary=beat_summary[:100],
-                        original_chunk_length=len(original_chunk),
-                        revision_instruction=revision_instruction[:200]
-                    )
-                    prompt_logger.log_prompts(
-                        system_prompt=r_sys,
-                        user_prompt=r_user,
-                        model=request.model,
-                        temperature=0.7
-                    )
 
-                    refined_chunk = await call_llm_timed(
-                        "chunk_refine_local",
-                        system_prompt=r_sys,
-                        user_prompt=r_user,
+                    # 使用新的 refine_single_beat 函数进行精修
+                    refine_started_at = time.perf_counter()
+                    refined_chunk = await refine_single_beat(
+                        beat=beat_info,
+                        original_chunk=original_chunk,
+                        revision_guide=revision_plan,
+                        issue_descriptions=issue_descriptions,
+                        chapter=chapter,
+                        book=book,
                         api_key=request.api_key,
                         base_url=request.base_url,
-                        model=request.model,
-                        temperature=0.7,
-                        max_tokens=_clamp_int(max(1200, target_words * 3), 1200, 5200),
+                        model=reasoning_model,  # 使用 reasoning_model 以获得强指令遵循能力
+                        previous_tail=previous_tail,
                     )
-                    refined_chunk = _clean_llm_output(refined_chunk)
+                    refine_elapsed = time.perf_counter() - refine_started_at
+
                     beat_chunk_map[beat_id] = refined_chunk
                     
                     # ========================================================================
@@ -1483,7 +1488,8 @@ async def _generate_agentic_chapter_stream(
                     # ========================================================================
                     prompt_logger.log_outputs(
                         refined_chunk_length=len(refined_chunk),
-                        refined_chunk_preview=refined_chunk[:200] if refined_chunk else ""
+                        refined_chunk_preview=refined_chunk[:200] if refined_chunk else "",
+                        elapsed_seconds=_to_secs(refine_elapsed)
                     )
                     prompt_logger.end_stage(success=bool(refined_chunk))
                     

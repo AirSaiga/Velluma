@@ -4,7 +4,7 @@ Pydantic 验证模型
 """
 
 from datetime import datetime
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
@@ -202,6 +202,7 @@ class ChapterUpdate(BaseModel):
     map_activity_range: Optional[str] = None
     tension_level: Optional[int] = Field(None, ge=1, le=10)
     pacing_style: Optional[PacingStyle] = None
+    chapter_assets_schema: Optional[str] = None
 
 
 class ChapterResponse(ChapterBase):
@@ -730,6 +731,14 @@ class DraftingFeatureFlags(BaseModel):
     fail_fast_temperature_step: float = Field(default=0.2, ge=0.0, le=0.5, description="每次重试温度增量")
 
 
+class CharacterPhysicalState(BaseModel):
+    """角色的绝对物理形态与空间从属关系"""
+    is_in_vehicle: bool = Field(default=False, description="是否处于载具/机甲内部")
+    vehicle_or_mech_name: Optional[str] = Field(None, description="所在载具/机甲名称")
+    equipped_weapons: List[str] = Field(default_factory=list, description="当前装备的武器列表")
+    movement_constraints: str = Field(default="无特殊限制", description="移动限制说明，例如'深度昏迷，无法自主移动'")
+
+
 class DynamicContext(BaseModel):
     """
     V2.5+ 动态流式上下文 - 跨 Beat 流转的状态容器（增强版）
@@ -755,6 +764,7 @@ class DynamicContext(BaseModel):
         default="", 
         description="主角绝对物理状态约束（防幻觉）"
     )
+    pov_perception_state: str = ""  # 当前 POV 角色的清醒程度与物理行动力
     # ========================================
     # NEW FIELDS for V2.5+ Relational Cognition
     # ========================================
@@ -771,6 +781,10 @@ class DynamicContext(BaseModel):
     active_whispers: dict[str, str] = Field(
         default_factory=dict, 
         description="激活的 RAG 记忆片段（预留）"
+    )
+    entity_spatial_ledger: Dict[str, CharacterPhysicalState] = Field(
+        default_factory=dict,
+        description="在场核心角色的绝对物理形态与空间从属映射，键为角色名"
     )
 
     class Config:

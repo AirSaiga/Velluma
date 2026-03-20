@@ -108,6 +108,8 @@ class Chapter(Base):
     pacing_style = Column(String(50), default="balanced", nullable=False)
     revision_count = Column(Integer, default=0)
     status = Column(String(50), default="draft")
+    # V3.0 资产字典：存储当前场景出现的专有名词的物理定义（如机甲体积、武器形态）
+    chapter_assets_schema = Column(Text, nullable=True, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="chapters")
@@ -393,6 +395,8 @@ class StoryBeat(Base):
     position = Column(Integer, default=0)
     location = Column(Text, nullable=True)
     pov_character = Column(String(120), nullable=True)
+    # POV 角色的知觉状态（意识清醒程度与物理行动力），由 Planner 生成
+    pov_perception_state = Column(Text, nullable=True, default="正常")
     anchor_pov = Column(String(120), nullable=True)
     original_actor = Column(String(120), nullable=True)
     action_summary = Column(Text, nullable=True)

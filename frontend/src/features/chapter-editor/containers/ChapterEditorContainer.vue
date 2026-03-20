@@ -62,6 +62,7 @@ defineExpose({
     :handle-optimize="viewModel.handleOptimize"
     :handle-partial-optimize="viewModel.handlePartialOptimize"
     :handle-outline-input="viewModel.handleOutlineInput"
+    :handle-assets-schema-input="viewModel.handleAssetsSchemaInput"
     :handle-tension-level-input="viewModel.handleTensionLevelInput"
     :handle-title-input="viewModel.handleTitleInput"
     :inspiration-active-character-ids="viewModel.inspirationActiveCharacterIds.value"

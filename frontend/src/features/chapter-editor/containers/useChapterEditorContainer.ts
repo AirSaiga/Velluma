@@ -179,6 +179,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     scheduleMetaUpdate({ outline_text: target.value })
   }
 
+  function handleAssetsSchemaInput(e: Event) {
+    const target = e.target as HTMLTextAreaElement
+    scheduleMetaUpdate({ chapter_assets_schema: target.value })
+  }
+
   function normalizeTensionLevel(value: unknown, fallback = DEFAULT_TENSION_LEVEL) {
     const numeric = Number(value)
     if (!Number.isFinite(numeric)) return fallback
@@ -895,6 +900,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     handleOptimize,
     handlePartialOptimize,
     handleOutlineInput,
+    handleAssetsSchemaInput,
     handleTensionLevelInput,
     handleTitleInput,
     inspirationActiveCharacterIds,

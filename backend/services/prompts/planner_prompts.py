@@ -154,6 +154,7 @@ def build_planner_agent_prompt(
       "summary": "本段剧情概述",
       "location": "场景地点",
       "pov_character": "视角角色",
+      "pov_perception_state": "正常",
       "action_summary": "动作化执行摘要",
       "worldbuilding_instruction": "本段生效的世界构建约束",
       "entry_state": "本段切入时角色与局面的起始状态",
@@ -179,7 +180,11 @@ def build_planner_agent_prompt(
 9. weight 必须是 1-5 之间的整数
 {low_tension_rule if low_tension_rule else ''}
 10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
-11. 只输出 JSON，不要额外解释"""
+11. pov_perception_state: 当前视角角色的意识清醒程度与物理行动力。必须从以下标准化描述中选择或组合：
+    "正常" / "轻伤但行动自如" / "重伤行动受限" / "半昏迷" / "失去身体控制权" / "完全昏迷" / "神经过载"
+    也可以自由描述，但必须明确表达角色的意识状态和身体可控程度。
+    如果角色在本节拍处于受伤/昏迷等状态，pov_perception_state 必须如实反映，不能默认写"正常"。
+12. 只输出 JSON，不要额外解释"""
     
     user_prompt_parts = []
     
@@ -242,6 +247,7 @@ def parse_planner_result(
         - summary: 剧情概述
         - location: 场景地点
         - pov_character: 视角角色
+        - pov_perception_state: POV 角色的知觉状态（意识清醒程度与物理行动力）
         - action_summary: 动作化执行摘要
         - entry_state: 进入状态
         - exit_state: 退出状态
@@ -286,6 +292,8 @@ def parse_planner_result(
             beat_id = str(beat.get("beat_id") or f"beat-{position}").strip() or f"beat-{position}"
             location = str(beat.get("location") or "").strip() or None
             pov_character = str(beat.get("pov_character") or "").strip() or None
+            # POV 角色知觉状态：由 Planner 显式输出
+            pov_perception_state = str(beat.get("pov_perception_state") or "正常").strip() or "正常"
             action_summary = str(beat.get("action_summary") or "").strip() or summary
             worldbuilding_instruction = str(beat.get("worldbuilding_instruction") or "").strip() or None
             entry_state = str(beat.get("entry_state") or "").strip()
@@ -318,6 +326,7 @@ def parse_planner_result(
                     "summary": summary,
                     "location": location,
                     "pov_character": pov_character,
+                    "pov_perception_state": pov_perception_state,
                     "action_summary": action_summary,
                     "worldbuilding_instruction": worldbuilding_instruction,
                     "entry_state": entry_state or None,
@@ -339,6 +348,7 @@ def parse_planner_result(
                 "summary": fallback_summary,
                 "location": None,
                 "pov_character": None,
+                "pov_perception_state": "正常",
                 "action_summary": fallback_summary,
                 "worldbuilding_instruction": None,
                 "entry_state": "承接上文并切入本节拍",

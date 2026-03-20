@@ -74,6 +74,7 @@ async def generate_beats(
             position=beat.get("position", beat_index),
             location=beat.get("location"),
             pov_character=beat.get("pov_character"),
+            pov_perception_state=beat.get("pov_perception_state", "正常"),
             anchor_pov=None,
             original_actor=beat.get("pov_character"),
             action_summary=beat.get("action_summary"),
