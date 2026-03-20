@@ -21,9 +21,13 @@
 
 import asyncio
 import json
+import logging
 import time
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 
 from backend.schemas import (
     DynamicContext, 
@@ -137,14 +141,14 @@ async def execute_draft_stage(
     # 初始化功能开关（使用默认值）
     flags = feature_flags or DraftingFeatureFlags()
     
-    print(f"[Draft Stage] 开始 V2.5 认知流式生成，共 {len(beats)} 个 Beats")
-    print(f"[Draft Stage] 功能开关: FailFast={flags.enable_fail_fast}, Emotional={flags.enable_emotional_scratchpad}")
+    logger.info(f"[Draft Stage] 开始 V2.5 认知流式生成，共 {len(beats)} 个 Beats")
+    logger.info(f"[Draft Stage] 功能开关: FailFast={flags.enable_fail_fast}, Emotional={flags.enable_emotional_scratchpad}")
     stage_start = time.perf_counter()
     
     # ========================================================================
     # 步骤 A: 并行生成轻量级思考层（无文本依赖）
     # ========================================================================
-    print("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
+    logger.info("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
     step_a_start = time.perf_counter()
     
     # A-1: 并行生成 Scene Intent
@@ -168,12 +172,12 @@ async def execute_draft_stage(
         model=reasoning_model,
     )
     
-    print(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
+    logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
     
     # ========================================================================
     # 步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + DynamicContext）
     # ========================================================================
-    print("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
+    logger.info("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
     step_b_start = time.perf_counter()
     
     prose_results = await _generate_prose_serial_v25(
@@ -199,7 +203,7 @@ async def execute_draft_stage(
         chapter_assets_schema=chapter_assets_schema,
     )
     
-    print(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
+    logger.info(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
     
     # ========================================================================
     # 组装结果
@@ -226,7 +230,7 @@ async def execute_draft_stage(
         )
         results.append(result)
     
-    print(f"[Draft Stage] 混合流水线完成，总耗时 {time.perf_counter() - stage_start:.2f}s")
+    logger.info(f"[Draft Stage] 混合流水线完成，总耗时 {time.perf_counter() - stage_start:.2f}s")
     return results
 
 
@@ -304,7 +308,7 @@ async def _generate_scene_intent_batch(
             return scene_intent, prompts_history
             
         except Exception as e:
-            print(f"[Scene Intent Error] Beat {beat_index}: {e}")
+            logger.error(f"[Scene Intent] Beat {beat_index}: {e}")
             # 返回默认的 Scene Intent
             return {
                 "intent_label": "推进剧情",
@@ -437,7 +441,7 @@ async def _generate_subconscious_batch(
             return thought, mcts_rollout_data, prompts_history  # 返回元组：(思考文本, MCTS rollout, prompts)
             
         except Exception as e:
-            print(f"[Subconscious Error] Beat {beat_index}: {e}")
+            logger.error(f"[Subconscious] Beat {beat_index}: {e}")
             # 返回默认的内心独白
             pov_character = beat.get("pov_character", "我")
             return f"{pov_character}深吸一口气，试图平复内心的波动。接下来该怎么办？", None, prompts_history
@@ -554,10 +558,10 @@ async def _generate_prose_serial_v25(
     # V3.0 NEW: 存储 pov_perception_state（因为 DynamicContext 可能没有此属性，使用独立变量）
     current_pov_perception_state = initial_pov_perception_state
     
-    print(f"[Prose V25+] 初始化 DynamicContext: "
-          f"emotional='{initial_emotional_state[:30]}...', "
-          f"physical='{physical_state_lock[:30] if physical_state_lock else '无'}...', "
-          f"relational='{initial_relational_state[:30] if initial_relational_state else '无'}...'")
+    logger.info(f"[Prose V25+] 初始化 DynamicContext: "
+                f"emotional='{initial_emotional_state[:30]}...', "
+                f"physical='{physical_state_lock[:30] if physical_state_lock else '无'}...', "
+                f"relational='{initial_relational_state[:30] if initial_relational_state else '无'}...'")
     
     for i, beat in enumerate(beats):
         beat_index = i + 1
@@ -613,7 +617,7 @@ async def _generate_prose_serial_v25(
                     "user_prompt": user_prompt,
                 })
                 
-                print(f"[Prose V25] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts} (temp={current_temp:.2f})...")
+                logger.info(f"[Prose V25] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts} (temp={current_temp:.2f})...")
                 prose_start = time.perf_counter()
                 
                 # 生成正文
@@ -628,7 +632,7 @@ async def _generate_prose_serial_v25(
                 )
                 
                 chunk_text = clean_llm_output(response).strip()
-                print(f"[Prose V25] Beat {beat_index} 生成完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(chunk_text)}")
+                logger.info(f"[Prose V25] Beat {beat_index} 生成完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(chunk_text)}")
                 
                 # ========================================================================
                 # Fail-Fast 断言检查 (V2.5+ 增强版)
@@ -646,11 +650,11 @@ async def _generate_prose_serial_v25(
                     )
                     
                     if not is_valid:
-                        print(f"[Fail-Fast] Beat {beat_index} 断言失败: {fail_reason}")
+                        logger.warning(f"[Fail-Fast] Beat {beat_index} 断言失败: {fail_reason}")
                         # 提高温度，增加多样性，准备重试
                         current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
                     else:
-                        print(f"[Fail-Fast] Beat {beat_index} 断言通过")
+                        logger.info(f"[Fail-Fast] Beat {beat_index} 断言通过")
                 else:
                     is_valid = True
             
@@ -710,10 +714,10 @@ async def _generate_prose_serial_v25(
                 if state_update.beat_summary:
                     dynamic_context.update_summary(state_update.beat_summary)
                 
-                print(f"[Dynamic State] Beat {beat_index} 更新: "
-                      f"E='{state_update.new_emotional_state[:30]}...', "
-                      f"R_delta='{state_update.relational_delta[:30] if state_update.relational_delta else '无'}...', "
-                      f"S='{state_update.beat_summary[:30]}...'")
+                logger.info(f"[Dynamic State] Beat {beat_index} 更新: "
+                            f"E='{state_update.new_emotional_state[:30]}...', "
+                            f"R_delta='{state_update.relational_delta[:30] if state_update.relational_delta else '无'}...', "
+                            f"S='{state_update.beat_summary[:30]}...'")
             
             # V3.0 NEW: 更新 pov_perception_state（使用三级优先级链从下一个 beat 获取）
             if i + 1 < len(beats):
@@ -726,7 +730,7 @@ async def _generate_prose_serial_v25(
             })
             
         except Exception as e:
-            print(f"[Prose V25 Error] Beat {beat_index}: {e}")
+            logger.error(f"[Prose V25] Beat {beat_index}: {e}")
             # 返回空文本，但保持 Rolling Prefix 不变（尝试用上一个 tail 继续）
             results.append({
                 "text": "",
@@ -830,11 +834,11 @@ async def _micro_review_assertion(
             return False, failed_reason
             
     except json.JSONDecodeError as e:
-        print(f"[Fail-Fast Warning] JSON 解析失败: {e}")
+        logger.warning(f"[Fail-Fast] JSON 解析失败: {e}")
         # JSON 解析失败时，保守起见允许通过（避免阻塞）
         return True, ""
     except Exception as e:
-        print(f"[Fail-Fast Warning] 断言检查异常: {e}")
+        logger.warning(f"[Fail-Fast] 断言检查异常: {e}")
         # 异常时允许通过，避免阻塞主流程
         return True, ""
 
@@ -901,7 +905,7 @@ async def _update_emotional_state(
         return new_emotion
         
     except Exception as e:
-        print(f"[Emotional Update Warning] 情绪更新失败: {e}")
+        logger.warning(f"[Emotional Update] 情绪更新失败: {e}")
         # 失败时返回原状态，避免破坏上下文
         return current_emotional_state
 
@@ -952,7 +956,7 @@ async def _quick_qc(
     if not has_abnormal_length and not has_abnormal_structure:
         return prose_text, prompts
     
-    print(f"[QC] Beat {beat_index} 检测到异常，开始修复...")
+    logger.info(f"[QC] Beat {beat_index} 检测到异常，开始修复...")
     
     try:
         # 构建 Review Prompt
@@ -998,7 +1002,7 @@ async def _quick_qc(
             issues = review_result.get("issues", [])
             instruction = "; ".join(issues) if issues else "修正文本质量问题"
         
-        print(f"[QC] Beat {beat_index} 修复指令: {instruction[:50]}...")
+        logger.info(f"[QC] Beat {beat_index} 修复指令: {instruction[:50]}...")
         
         # 构建 Refine Prompt
         refine_system, refine_user = build_chunk_refine_prompt(
@@ -1029,12 +1033,12 @@ async def _quick_qc(
         )
         
         refined_text = clean_llm_output(refine_response).strip()
-        print(f"[QC] Beat {beat_index} 修复完成，新字数 {len(refined_text)}")
+        logger.info(f"[QC] Beat {beat_index} 修复完成，新字数 {len(refined_text)}")
         
         return refined_text, prompts
         
     except Exception as e:
-        print(f"[QC Error] Beat {beat_index}: {e}")
+        logger.error(f"[QC] Beat {beat_index}: {e}")
         return prose_text, prompts
 
 
@@ -1213,7 +1217,7 @@ async def generate_chunks_parallel(
             )
             return beat_index - 1, clean_llm_output(chunk_text)
         except Exception as e:
-            print(f"[Beat Error] Beat {beat_index} failed: {e}")
+            logger.error(f"[Beat] Beat {beat_index} failed: {e}")
             return beat_index - 1, ""
     
     def _build_beat_hooks(beat: dict, all_hooks: List[dict], beat_index: int) -> List[dict]:
@@ -1328,7 +1332,7 @@ async def _update_dynamic_state(
         return result
         
     except json.JSONDecodeError as e:
-        print(f"[Dynamic State Update Warning] JSON 解析失败: {e}")
+        logger.warning(f"[Dynamic State Update] JSON 解析失败: {e}")
         # 降级处理：返回默认结果
         return DynamicStateUpdateResult(
             new_emotional_state=current_emotional_state,
@@ -1336,7 +1340,7 @@ async def _update_dynamic_state(
             beat_summary=_extract_fallback_summary(chunk_text)
         )
     except Exception as e:
-        print(f"[Dynamic State Update Warning] 状态更新失败: {e}")
+        logger.warning(f"[Dynamic State Update] 状态更新失败: {e}")
         # 降级处理
         return DynamicStateUpdateResult(
             new_emotional_state=current_emotional_state,
@@ -1513,5 +1517,5 @@ async def _update_emotional_state(
         return new_emotion
         
     except Exception as e:
-        print(f"[Emotional Update Warning] 情绪更新失败: {e}")
+        logger.warning(f"[Emotional Update] 情绪更新失败: {e}")
         return current_emotional_state

@@ -12,7 +12,11 @@
 """
 
 import json
+import logging
 from typing import Any, Optional
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -289,5 +293,5 @@ async def _load_relevant_memories(
             max_chapter_number=chapter.chapter_number - 1,
         )
     except Exception as e:
-        print(f"[RAG Error] {e}")
+        logger.error(f"[RAG] {e}")
         return []

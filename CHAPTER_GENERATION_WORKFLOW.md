@@ -10,12 +10,18 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         文章生成主流程 (最多5轮迭代)                      │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  ASSEMBLING_CONTEXT → PLANNING → DRAFTING → STITCHING → REVIEWING      │
-│                                                          ↓ 未通过       │
-│  FORMATTING ←───────────────────────────────────────── REFINING        │
+│  ASSEMBLING_CONTEXT → PLANNING → POV_ASSIGNMENT → DRAFTING → STITCHING │
+│                                                               ↓ 未通过  │
+│  FORMATTING ←──────────────────────────────────────────── REFINING      │
 │      ↓                                                                  │
 │  FINAL_TEXT_STREAM                                                      │
 └─────────────────────────────────────────────────────────────────────────┘
+
+核心特性：
+- 双模型架构：reasoning_model（高逻辑）+ creative_model（高创意）
+- V2.5 认知流式生成：Scene Intent + Subconscious 并行，Prose 串行 Rolling Prefix
+- DynamicContext：跨 Beat 流转的五维认知状态容器
+- Fail-Fast 机制：即时断言检查与回溯重试
 ```
 
 ---
@@ -115,11 +121,48 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 ---
 
-### Phase 3: DRAFTING（起草）- V2.5 认知流式生成
+### Phase 3: POV_ASSIGNMENT（视角分配）- Anchor POV 机制
+
+**文件**: `backend/services/workflows/planning.py`
+
+**核心函数**: `assign_pov_to_beats()` (行 95-210)
+
+**职责**: 为章节确定统一的锚定视角角色（Anchor POV），确保全文视角一致性
+
+**Anchor POV 机制**:
+- 由 `determine_chapter_anchor_pov()` 分析章节内容，选定最适合的主视角角色
+- 所有 Beat 的 `pov_character` 统一设置为 anchor_pov
+- 保留原始角色到 `original_actor` 字段，用于感官转化法则
+
+**关键设计**:
+```python
+for beat in beats:
+    beat["original_actor"] = original_pov  # 保留原始执行者
+    beat["pov_character"] = anchor_pov      # 统一锚定视角
+    beat["anchor_pov"] = anchor_pov         # 标记锚定角色
+```
+
+**感官转化法则**: 当 Beat 的 original_actor ≠ anchor_pov 时，需将该事件转化为 anchor_pov 能感知的物理异象（如远处的爆炸声、地面的震动等）
+
+---
+
+### Phase 4: DRAFTING（起草）- V2.5 认知流式生成
 
 **文件**: `backend/services/workflows/drafting.py`
 
-**核心函数**: `execute_draft_stage()` (行 76-223)
+**核心函数**: `execute_draft_stage()` (行 76-230)
+
+**输出数据结构** `BeatDraftResult`:
+```python
+class BeatDraftResult(BaseModel):
+    beat_id: str                    # Beat 唯一标识
+    beat_index: int                 # Beat 位置索引（从1开始）
+    scene_intent: dict              # Scene Intent 分析结果
+    subconscious_thought: str       # 角色潜意识/内心独白（50-100字）
+    draft_chunk: str                # 生成的小说正文
+    prompts: List[dict]             # 全流程提示词历史（Scene Intent + Subconscious + Prose）
+    mcts_rollout: Optional[list]    # MCTS 三分支推演记录（可观测性）
+```
 
 **架构**: **混合流水线** - 并行思考层 + 串行正文层
 
@@ -210,15 +253,22 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 2. **DynamicContext 动态上下文** (V2.5+):
    ```python
-   DynamicContext(
-       previous_tail="",           # Rolling Prefix
-       current_emotional_state="",  # 情绪暂存器
-       physical_state_lock="",      # 物理状态锁定
-       accumulated_summary="",      # 宏观剧情累加器
-       relational_state_lock="",    # 关系状态锁
-       entity_spatial_ledger={},    # 空间账本
-   )
+   class DynamicContext(BaseModel):
+       previous_tail: str = ""                    # Rolling Prefix（上文尾部300字符）
+       current_emotional_state: str = "初始状态：未知"  # 主角当前心理状态（随剧情演变）
+       physical_state_lock: str = ""              # 绝对物理状态约束（防幻觉边界）
+       pov_perception_state: str = ""             # POV角色清醒程度与物理行动力
+       accumulated_summary: str = ""              # 宏观剧情累加器（跨Beat剧情摘要，≤500字符）
+       relational_state_lock: str = ""            # 在场角色动态关系锁（防止关系错乱）
+       active_whispers: dict = {}                 # 激活的RAG记忆片段（预留）
+       entity_spatial_ledger: Dict[str, CharacterPhysicalState] = {}  # 角色物理形态与空间从属
    ```
+   
+   **CharacterPhysicalState 字段**:
+   - `is_in_vehicle`: 是否处于载具/机甲内部
+   - `vehicle_or_mech_name`: 所在载具/机甲名称
+   - `equipped_weapons`: 当前装备的武器列表
+   - `movement_constraints`: 移动限制说明（如"深度昏迷，无法自主移动"）
 
 3. **Fail-Fast 断言检查** (行 700-801):
    ```python
@@ -372,14 +422,27 @@ def _is_refine_output_suspiciously_short():
 | 阶段 | Prompt 文件 | 核心函数 | 温度 | 关键变量 |
 |------|-------------|----------|------|----------|
 | PLANNING | `planner_prompts.py` | `build_planner_agent_prompt` | 0.2 | `chapter`, `book`, `entities`, `relationships`, `word_count`, `open_hooks`, `global_taboos`, `author_intent` |
-| SCENE_INTENT | `scene_intent_prompts.py` | `build_scene_intent_prompt` | 0.2 | `chapter`, `beat`, `open_hooks`, `pacing_style` |
-| SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines` |
+| POV_ASSIGNMENT | `planning.py` | `assign_pov_to_beats` | 0.3 | `beats`, `characters`, `story_premise`, `previous_chapter_summary` |
+| SCENE_INTENT | `scene_intent_prompts.py` | `build_scene_intent_prompt` | 0.2 | `chapter`, `beat`, `open_hooks`, `pacing_style`, `anchor_pov` |
+| SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines`, `previous_tail` |
 | PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context` |
 | STITCHING | `stitch_prompts.py` | `build_stitch_prompt` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov` |
 | REVIEWING | `review_prompts.py` | `build_review_agent_prompt` | 0.1 | `chapter`, `book`, `entities`, `relationships`, `chapter_outline`, `draft_text`, `beats` |
 | REFINING | `review_prompts.py` | `build_refine_agent_prompt` | 0.7 | `chapter`, `book`, `entities`, `relationships`, `draft_text`, `revision_plan`, `word_count` |
 | CHUNK_REFINE | `review_prompts.py` | `build_chunk_refine_prompt` | 0.7 | `chapter`, `book`, `entities`, `relationships`, `beat_summary`, `chunk_text`, `revision_instruction` |
 | FORMATTING | `format_prompts.py` | `build_formatting_prompt` | 0.1 | `draft_text` |
+
+### V2.5 功能开关配置 (DraftingFeatureFlags)
+
+**定义**: `backend/schemas.py` (行 715-732)
+
+| 开关 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enable_fail_fast` | bool | True | 启用 Fail-Fast 断言检查与回溯重试 |
+| `enable_emotional_scratchpad` | bool | True | 启用动态情绪暂存器更新 |
+| `enable_whisper_memory` | bool | False | 启用 RAG 记忆暂存（预留接口） |
+| `fail_fast_max_attempts` | int | 2 | Fail-Fast 最大重试次数（范围 1-3） |
+| `fail_fast_temperature_step` | float | 0.2 | 每次重试温度增量（范围 0.0-0.5） |
 
 ---
 
@@ -403,6 +466,11 @@ def _is_refine_output_suspiciously_short():
               │ (生成 beats 列表)│
               └─────────────────┘
                           ↓
+              ┌─────────────────┐
+              │ POV_ASSIGNMENT  │
+              │ (Anchor POV分配)│
+              └─────────────────┘
+                          ↓
        ┌──────────────────┼──────────────────┐
        ↓                  ↓                  ↓
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
@@ -411,14 +479,14 @@ def _is_refine_output_suspiciously_short():
 └─────────────┘   └─────────────┘   └─────────────┘
        ↓                  ↓                  ↓
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ Subconscious│   │ Subconscious│   │ Subconscious│  ← 并行生成
+│ Subconscious│   │ Subconscious│   │ Subconscious│  ← 并行生成 (MCTS)
 │  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │
 └─────────────┘   └─────────────┘   └─────────────┘
        ↓                  ↓                  ↓
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
 │ Prose Draft │──→│ Prose Draft │──→│ Prose Draft │  ← 串行 Rolling
-│  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │     Prefix
-└─────────────┘   └─────────────┘   └─────────────┘
+│  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │     Prefix + 
+└─────────────┘   └─────────────┘   └─────────────┘     DynamicContext
        └──────────────────┼──────────────────┘
                           ↓
               ┌─────────────────┐
@@ -454,20 +522,76 @@ def _is_refine_output_suspiciously_short():
                     (返回 REVIEWING)
 ```
 
+### DynamicContext 跨 Beat 流转示意
+
+```
+Beat 1:  Subconscious_1 ──→ Prose_1 ──→ DynamicContext_1
+                                              ↓
+Beat 2:  Subconscious_2 ──→ Prose_2 ──→ DynamicContext_2
+                                              ↓
+                         ...
+                                              ↓
+Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
+
+公式: Context_n = Subconscious_n + DynamicContext_(n-1)
+```
+
 ---
 
 ## 六、核心设计思想
 
-系统的核心设计思想是**分层生成 + 迭代精修**：
+系统的核心设计思想是**分层生成 + 迭代精修 + 认知状态流转**：
 
-1. **冰山模型**: 将生成拆分为 Subconscious（潜意识层）和 Prose（正文层），前者负责情感锚点，后者负责沉浸式叙事
+### 1. 冰山模型 (Iceberg Model)
+将生成拆分为两层：
+- **Subconscious（潜意识层）**: 50-100字的第一人称内心独白，为 Prose 提供情感锚点
+- **Prose（正文层）**: 基于潜意识沉浸式续写，专注于动作和对话的自然流动
+- **双模型路由**: reasoning_model 处理逻辑层，creative_model 处理创意层
 
-2. **蒙特卡洛树搜索 (MCTS)**: 在潜意识层展开多分支推演，根据红线和物理状态进行打分剪枝，选择最安全且得分最高的分支
+### 2. 蒙特卡洛树搜索 (MCTS) 潜意识推演
+在 Subconscious 阶段展开 3 条分支：
+- **分支A**: 本能反抗/冲动思维（可能违背红线）
+- **分支B**: 知觉受限条件下的无力感/痛觉思维
+- **分支C**: 结合性格设定的战术/极端环境思维
 
-3. **Rolling Prefix**: 通过传递前一个 Beat 的末尾 300 字符，保证 Beat 间的语气和节奏连贯性
+**评估与剪枝**: 任何可能导致违背红线或物理状态的分支，直接打分为 0 并淘汰
 
-4. **DynamicContext**: 跨 Beat 流转的动态上下文容器，包含情绪状态、物理状态锁、关系状态锁、空间账本等
+### 3. Rolling Prefix 连贯性机制
+- Beat n 接收 Beat n-1 的末尾 **300 字符** 作为上下文
+- 保证 Beat 间的语气、节奏和动作状态无缝衔接
+- 禁止"与此同时"、"就在这时"等生硬转场词
 
-5. **Fail-Fast 机制**: 即时断言检查生成的文本，发现红线违规、物理幻觉、OOC 行为时立即重试
+### 4. DynamicContext 五维认知状态
+跨 Beat 流转的动态上下文容器：
+| 维度 | 字段 | 作用 |
+|------|------|------|
+| 物理边界 | `physical_state_lock` | 防幻觉边界锁定 |
+| 情绪演化 | `current_emotional_state` | 性格微演变跟踪 |
+| 上下文记忆 | `previous_tail` | Rolling Prefix 机制 |
+| 剧情摘要 | `accumulated_summary` | 宏观剧情累加器（≤500字符） |
+| 关系状态 | `relational_state_lock` | 在场角色动态关系锁 |
 
-6. **局部精修**: Review 发现问题后，只针对特定 Beat 进行重写，而非整章重写，提高效率并保留优质内容
+### 5. Fail-Fast 防错机制
+**触发条件**: `enable_fail_fast=True`（默认开启）
+
+**断言检查项**:
+- 是否触碰 red_lines（红线约束）
+- 是否存在 Physical Hallucination（物理状态冲突）
+- 是否存在 OOC Behavior（角色行为偏离设定）
+- 是否存在 Relationship Jump（人物关系无逻辑突变）
+
+**回溯策略**: 断言失败时提高温度（`+fail_fast_temperature_step`）并重试，最多 `fail_fast_max_attempts` 次
+
+### 6. Anchor POV 视角统一机制
+- 由 LLM 分析章节内容，选定最适合的 **单一主视角角色**
+- 所有 Beat 的 `pov_character` 统一设置为 anchor_pov
+- 保留原始角色到 `original_actor`，用于**感官转化法则**
+- **感官转化法则**: 非主视角事件必须转化为主视角能感知的物理异象
+
+### 7. 局部精修闭环
+Review 发现问题后：
+1. 通过 `target_beat_ids` 定位问题 Beat
+2. 仅对问题 Beat 调用 `refine_single_beat()`
+3. 使用 `previous_tail` 保持语气衔接
+4. 精修后重新 Stitching，而非整章重写
+5. **纠偏机制**: 检测精修后文本是否过度缩短，触发 retry

@@ -1,8 +1,12 @@
+import logging
 import re
 from datetime import datetime
 from typing import Optional
 
 from openai import AsyncOpenAI
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Character, Chapter
@@ -99,41 +103,41 @@ async def update_character_dynamic_state(
     
     max_retries = 3
     new_state = None
+    http_client = None
     
-    for attempt in range(max_retries):
-        http_client = None
-        try:
-            http_client = httpx.AsyncClient(trust_env=False, proxy=effective_proxy, timeout=600.0)
-            client_kwargs["http_client"] = http_client
-            client = AsyncOpenAI(**client_kwargs)
-            
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.7,
-                max_tokens=1000,
-            )
-            
-            if response.choices and response.choices[0].message.content:
-                new_state = response.choices[0].message.content.strip()
-                break
+    try:
+        # 在循环外创建 HTTP 客户端，避免重复创建/销毁
+        http_client = httpx.AsyncClient(trust_env=False, proxy=effective_proxy, timeout=600.0)
+        client_kwargs["http_client"] = http_client
+        client = AsyncOpenAI(**client_kwargs)
+        
+        for attempt in range(max_retries):
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.7,
+                    max_tokens=1000,
+                )
                 
-        except Exception as e:
-            if attempt == max_retries - 1:
-                print(f"[Character State Error] Final attempt failed for {character.name}: {e}")
-                # 抛出异常以便上层捕获
-                raise e
-            
-            wait_time = (2 ** attempt) * 1
-            print(f"[Character State Warning] Attempt {attempt + 1} failed for {character.name}, retrying in {wait_time}s: {e}")
-            await asyncio.sleep(wait_time)
-            
-        finally:
-            if http_client is not None:
-                await http_client.aclose()
+                if response.choices and response.choices[0].message.content:
+                    new_state = response.choices[0].message.content.strip()
+                    break
+                    
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"[Character State] Final attempt failed for {character.name}: {e}")
+                    raise
+                
+                wait_time = (2 ** attempt) * 1
+                logger.warning(f"[Character State] Attempt {attempt + 1} failed for {character.name}, retrying in {wait_time}s: {e}")
+                await asyncio.sleep(wait_time)
+    finally:
+        if http_client is not None:
+            await http_client.aclose()
     
     if new_state:
         # 步骤4：后处理 LLM 输出，去除常见的前缀干扰

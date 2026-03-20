@@ -1,9 +1,13 @@
+import logging
 from typing import Any, Tuple, Optional
 
 from backend.services.prompts import build_review_agent_prompt, parse_review_result, build_chunk_refine_prompt
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.models import Chapter, Book, Character, CharacterRelationship
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 
 
 async def review_draft(
@@ -199,13 +203,13 @@ target_exit_state: "停在准备开门，但未看到门外"
         
         # 如果裁剪后的文本过短，回退到原文
         if len(refined_text) < len(draft_text) * 0.5:
-            print(f"[Surgical Refinement] 裁剪后文本过短，回退到原文")
+            logger.warning(f"[Surgical Refinement] 裁剪后文本过短，回退到原文")
             return draft_text
         
         return refined_text
         
     except Exception as e:
-        print(f"[Surgical Refinement Error] {e}")
+        logger.error(f"[Surgical Refinement] {e}")
         return draft_text
 
 
@@ -268,5 +272,5 @@ async def quick_boundary_fix(
         return clean_llm_output(response).strip()
         
     except Exception as e:
-        print(f"[Quick Boundary Fix Error] {e}")
+        logger.error(f"[Quick Boundary Fix] {e}")
         return chunk_text

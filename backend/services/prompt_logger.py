@@ -1,10 +1,15 @@
+import logging
+
 """
-Prompt 日志记录模块
+Prompt 日志记录模块。
 
 职责：记录章节生成流程中每个阶段的 Prompt 和关键参数
 """
 
 import json
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 import os
 import time
 from datetime import datetime
@@ -381,9 +386,9 @@ class PromptLogger:
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(self.log_data, f, ensure_ascii=False, indent=2)
-            print(f"[PromptLogger] Log saved to: {filepath}")
+            logger.info(f"[PromptLogger] Log saved to: {filepath}")
         except Exception as e:
-            print(f"[PromptLogger Error] Failed to save log: {e}")
+            logger.error(f"[PromptLogger] Failed to save log: {e}")
     
     def get_debug_history(self) -> list:
         """

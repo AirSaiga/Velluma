@@ -12,7 +12,9 @@
 - 迁移策略：应用启动时检查并添加缺失列 (非生产级，建议使用 Alembic)
 """
 
+import logging
 import os
+import sys
 from typing import Any, AsyncGenerator, Optional, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -21,10 +23,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver"
 )
+
+# 连接池预检配置：
+# - 默认在 Windows 上禁用（asyncpg + greenlet 兼容性问题）
+# - 在其他平台默认启用，避免空闲连接失效
+# - 可通过环境变量 DB_POOL_PRE_PING 强制覆盖
+_DEFAULT_POOL_PRE_PING = False if sys.platform == "win32" else True
+POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", str(_DEFAULT_POOL_PRE_PING)).lower() in ("true", "1", "yes")
 
 # 连接池配置说明：
 # - pool_size=10: 常规连接数，支撑正常并发请求
@@ -35,7 +47,7 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     future=True,
-    pool_pre_ping=False,  # 暂时关闭以修复 Windows 下 asyncpg + greenlet 的兼容性问题
+    pool_pre_ping=POOL_PRE_PING,
     pool_size=10,
     max_overflow=20,
 )
@@ -412,8 +424,8 @@ async def run_migrations(conn, migrations: Optional[Sequence[dict[str, Any]]] = 
             column_info = await _get_column_info(conn, table_name=table_name, column_name=column_name)
             if column_info:
                 if not _is_column_compatible(column_info, migration):
-                    print(
-                        f"[MIGRATION][WARN] Column conflict on {table_name}.{column_name}: "
+                    logger.warning(
+                        f"[MIGRATION] Column conflict on {table_name}.{column_name}: "
                         f"actual_type={column_info.get('udt_name')} expected={sorted(migration.get('expected_udt_names', []))}"
                     )
                 continue
@@ -423,6 +435,6 @@ async def run_migrations(conn, migrations: Optional[Sequence[dict[str, Any]]] = 
                     f'ADD COLUMN IF NOT EXISTS "{column_name}" {migration["definition"]};'
                 )
             )
-            print(f"[MIGRATION] Added column {table_name}.{column_name}")
+            logger.info(f"[MIGRATION] Added column {table_name}.{column_name}")
         except Exception as e:
-            print(f"[MIGRATION] Skipped {table_name}.{column_name}: {e}")
+            logger.warning(f"[MIGRATION] Skipped {table_name}.{column_name}: {e}")

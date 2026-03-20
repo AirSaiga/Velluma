@@ -19,8 +19,12 @@
 """
 
 import asyncio
+import logging
 from typing import Optional
 from uuid import UUID
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -72,11 +76,11 @@ async def publish_chapter(
         chapter.content_text = chapter.draft_text
 
     text_to_summarize = chapter.content_text or chapter.draft_text
-    print(f"[DEBUG] Summarizing text length: {len(text_to_summarize) if text_to_summarize else 0}")
+    logger.debug(f"[Publish] Summarizing text length: {len(text_to_summarize) if text_to_summarize else 0}")
     
     if request and request.api_key and text_to_summarize:
         try:
-            print("[DEBUG] Generating summary...")
+            logger.debug("[Publish] Generating summary...")
             summary = await asyncio.wait_for(
                 generate_summary(
                     text_to_summarize,
@@ -86,14 +90,14 @@ async def publish_chapter(
                 ),
                 timeout=180,
             )
-            print(f"[DEBUG] Summary generated: {bool(summary)}")
+            logger.debug(f"[Publish] Summary generated: {bool(summary)}")
             if summary:
                 chapter.summary = summary
                 summary_embedding = await asyncio.wait_for(
                     get_embedding(summary, request.api_key, request.base_url),
                     timeout=120,
                 )
-                print(f"[DEBUG] Embedding generated: {bool(summary_embedding)}")
+                logger.debug(f"[Publish] Embedding generated: {bool(summary_embedding)}")
                 if summary_embedding:
                     new_memory = MemoryChunk(
                         book_id=chapter.book_id,
@@ -103,9 +107,9 @@ async def publish_chapter(
                     )
                     chapter_repo.db.add(new_memory)
         except asyncio.TimeoutError:
-            print("[Auto-Summary Timeout] Summary or embedding generation timed out")
+            logger.warning("[Publish] Auto-Summary timed out")
         except Exception as e:
-            print(f"[Auto-Summary Error] {e}")
+            logger.error(f"[Publish] Auto-Summary error: {e}")
             import traceback
             traceback.print_exc()
 
@@ -158,7 +162,7 @@ async def publish_chapter(
                         )
                     )
                 except asyncio.TimeoutError:
-                    print(f"Error updating character {character.name}: timeout")
+                    logger.warning(f"[Publish] Character {character.name} update timeout")
                     character_updates.append(
                         CharacterStateChange(
                             character_id=character.id,
@@ -168,7 +172,7 @@ async def publish_chapter(
                         )
                     )
                 except Exception as e:
-                    print(f"Error updating character {character.name}: {e}")
+                    logger.error(f"[Publish] Character {character.name} update error: {e}")
                     character_updates.append(
                         CharacterStateChange(
                             character_id=character.id,

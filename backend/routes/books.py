@@ -24,7 +24,6 @@ from backend.core.dependencies import get_book_repository
 from backend.repositories import BookRepository
 from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate
 from pydantic import BaseModel
-from typing import List
 
 
 class GoldenSnippetsUpdate(BaseModel):

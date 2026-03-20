@@ -191,10 +191,10 @@ async def generate_summary(
             )
         except Exception as e:
             if attempt == max_retries - 1:
-                print(f"[Summary Error] Final attempt failed: {e}")
-                raise e
+                logger.error(f"[Summary] Final attempt failed: {e}")
+                raise
             wait_time = (2 ** attempt) * 1  # 1s, 2s, 4s
-            print(f"[Summary Warning] Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+            logger.warning(f"[Summary] Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
             await asyncio.sleep(wait_time)
     return ""
 
@@ -281,12 +281,10 @@ async def call_llm(
         if response.choices and response.choices[0].message.content:
             content = response.choices[0].message.content
         return content
-    except Exception as e:
-        error_type = type(e).__name__
-        error_msg = str(e)
-        # 静默失败：JSON 解析异常返回空字符串，避免上层崩溃
-        if "JSONDecodeError" in error_type or "Expecting value" in error_msg:
-            return ""
+    except json.JSONDecodeError:
+        # JSON 解析失败返回空字符串，避免上层崩溃
+        return ""
+    except Exception:
         raise
     finally:
         # 显式关闭，释放连接
@@ -320,7 +318,7 @@ async def get_embedding(
             api_key_to_use = os.getenv("DASHSCOPE_API_KEY")
             
     if not api_key_to_use:
-        print(f"[Embedding Error] No api key provided. CWD: {os.getcwd()}")
+        logger.error(f"[Embedding] No api key provided. CWD: {os.getcwd()}")
         return []
     
     dashscope.api_key = api_key_to_use
@@ -335,10 +333,10 @@ async def get_embedding(
         if response.status_code == 200:
             return response.output['embeddings'][0]['embedding']
         else:
-            print(f"[Embedding Error] Status: {response.status_code}, Message: {response.message}")
+            logger.error(f"[Embedding] Status: {response.status_code}, Message: {response.message}")
             return []
     except Exception as e:
-        print(f"[Embedding Error] {e}")
+        logger.error(f"[Embedding] {e}")
         return []
 
 

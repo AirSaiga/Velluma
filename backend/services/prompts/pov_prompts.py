@@ -1,5 +1,9 @@
 import json
+import logging
 from typing import List, Dict, Any
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
 
 def build_pov_assignment_prompt(
     story_premise: str,
@@ -86,7 +90,7 @@ def parse_pov_assignment_result(llm_response: Dict[str, Any]) -> Dict[str, str]:
                 result[beat_id] = pov_char
         return result
     except Exception as e:
-        print(f"Error parsing POV assignment result: {e}")
+        logger.error(f"Error parsing POV assignment result: {e}")
         return {}
 
 
@@ -177,9 +181,9 @@ def parse_anchor_pov_result(llm_response: Dict[str, Any]) -> str:
     try:
         anchor_pov = llm_response.get("anchor_pov", "")
         if not anchor_pov:
-            print("Warning: No anchor_pov found in LLM response")
+            logger.warning("No anchor_pov found in LLM response")
             return ""
         return str(anchor_pov).strip()
     except Exception as e:
-        print(f"Error parsing anchor POV result: {e}")
+        logger.error(f"Error parsing anchor POV result: {e}")
         return ""

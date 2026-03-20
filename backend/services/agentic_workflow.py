@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import time
 from typing import Union, Optional
@@ -31,6 +32,17 @@ from backend.services.prompts import (
 from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
 from backend.services.workflows.refining import refine_single_beat
 from backend.services.prompt_logger import PromptLogger, create_logger, get_logger, clear_logger
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# 工作流常量定义
+# =============================================================================
+# Beat 并发控制约束
+BEAT_CONCURRENCY_MIN = 1
+BEAT_CONCURRENCY_MAX = 12
+BEAT_CONCURRENCY_DEFAULT = 6
 
 
 def _clean_llm_output(text: str) -> str:
@@ -451,7 +463,7 @@ async def _generate_agentic_chapter_stream(
     stage_seconds: dict[str, float] = {}
     llm_stage_stats: dict[str, dict[str, Union[int, float]]] = {}
     beat_stage_seconds: dict[int, dict[str, float]] = {}
-    beat_concurrency = _safe_int_from_env("AGENTIC_BEAT_CONCURRENCY", default=6, min_value=1, max_value=12)
+    beat_concurrency = _safe_int_from_env("AGENTIC_BEAT_CONCURRENCY", default=BEAT_CONCURRENCY_DEFAULT, min_value=BEAT_CONCURRENCY_MIN, max_value=BEAT_CONCURRENCY_MAX)
     
     # ========================================================================
     # 初始化 Prompt 日志记录器
@@ -647,10 +659,10 @@ async def _generate_agentic_chapter_stream(
         )
     
     # Debug log for context injection
-    print(f"[DEBUG] Context Injection - Chapter {chapter.chapter_number}")
-    print(f"[DEBUG] Previous Summary (Ch {chapter.chapter_number - 1}): {bool(previous_summary)}")
+    logger.debug(f"[Context Injection] Chapter {chapter.chapter_number}")
+    logger.debug(f"[Context Injection] Previous Summary (Ch {chapter.chapter_number - 1}): {bool(previous_summary)}")
     if previous_summary:
-        print(f"[DEBUG] Summary Preview: {previous_summary[:50]}...")
+        logger.debug(f"[Context Injection] Summary Preview: {previous_summary[:50]}...")
 
     relevant_memories = []
     if chapter.outline_text:
@@ -669,13 +681,13 @@ async def _generate_agentic_chapter_stream(
                     exclude_chapter_id=chapter.id,
                     max_chapter_number=chapter.chapter_number - 1,
                 )
-                print(f"[DEBUG] RAG Search: Found {len(relevant_memories)} relevant memories")
+                logger.debug(f"[RAG Search] Found {len(relevant_memories)} relevant memories")
                 for m in relevant_memories:
-                    print(f"[DEBUG] Memory: {m.chunk_text[:50]}...")
+                    logger.debug(f"[RAG Search] Memory: {m.chunk_text[:50]}...")
             else:
-                print("[DEBUG] RAG Search: Failed to generate embedding")
+                logger.warning("[RAG Search] Failed to generate embedding")
         except Exception as e:
-            print(f"[RAG Error] {e}")
+            logger.error(f"[RAG Search] {e}")
     record_stage("ASSEMBLING_CONTEXT", _to_secs(time.perf_counter() - context_started_at))
     
     # ========================================================================
@@ -850,7 +862,7 @@ async def _generate_agentic_chapter_stream(
                 beats = _normalize_confirmed_beats(beats, word_count)
                 
             except Exception as e:
-                print(f"[POV Assignment Error] {e}")
+                logger.error(f"[POV Assignment] {e}")
                 # Continue even if assignment fails, beats will have default/empty POV
             
             generated_chunks = [None] * len(beats)
@@ -1027,7 +1039,7 @@ async def _generate_agentic_chapter_stream(
                             instruction = c_res.get("revision_instruction", "") or "; ".join(c_res.get("issues", []))
                             if not instruction:
                                 break
-                            print(f"[Chunk Refine] Beat {beat_index} Refine {chunk_iteration+1}: {instruction}")
+                            logger.info(f"[Chunk Refine] Beat {beat_index} Refine {chunk_iteration+1}: {instruction}")
                             r_sys, r_user = build_chunk_refine_prompt(
                                 chapter, book, entities, relationships, beat.get("summary", ""), chunk_text, instruction
                             )
@@ -1052,13 +1064,13 @@ async def _generate_agentic_chapter_stream(
                             chunk_text = _clean_llm_output(chunk_text)
                             chunk_iteration += 1
                         except Exception as inner_e:
-                            print(f"[Chunk Loop Error] Beat {beat_index}: {inner_e}")
+                            logger.error(f"[Chunk Loop] Beat {beat_index}: {inner_e}")
                             break
 
                     record_stage("BEAT_TOTAL", _to_secs(time.perf_counter() - beat_started_at), beat_index=beat_index)
                     return beat_index - 1, chunk_text, beat_prompts
                 except Exception as e:
-                    print(f"[Beat Error] Beat {beat_index} failed: {e}")
+                    logger.error(f"[Beat] Beat {beat_index} failed: {e}")
                     return beat_index - 1, "", beat_prompts
 
             if skip_drafting_stitching and 'beat_chunk_map' in dir() and beat_chunk_map:
@@ -1417,7 +1429,7 @@ async def _generate_agentic_chapter_stream(
         if target_beat_ids and isinstance(target_beat_ids, list) and len(target_beat_ids) > 0:
             valid_beat_ids = [bid for bid in target_beat_ids if bid in beat_chunk_map]
             if not valid_beat_ids:
-                print(f"[Refine Warning] Review returned invalid beat_ids: {target_beat_ids}. Valid keys: {list(beat_chunk_map.keys())}. Triggering broadcast iterative refine.")
+                logger.warning(f"[Refine] Review returned invalid beat_ids: {target_beat_ids}. Valid keys: {list(beat_chunk_map.keys())}. Triggering broadcast iterative refine.")
                 
                 # ============================================================
                 # 广播式切片精修 (Broadcast Iterative Refine)
@@ -1434,7 +1446,7 @@ async def _generate_agentic_chapter_stream(
                     beat_id = f"beat_{beat_idx + 1}"
                     original_chunk = beat_chunk_map.get(beat_id, "")
                     if not original_chunk:
-                        print(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
+                        logger.info(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
                         continue
                     
                     # 获取前一 beat 的尾巴文本用于语气衔接
@@ -1446,7 +1458,7 @@ async def _generate_agentic_chapter_stream(
                             previous_tail = prev_chunk[-500:]
                     
                     try:
-                        print(f"[Broadcast Refine] Refining beat {beat_id}...")
+                        logger.info(f"[Broadcast Refine] Refining beat {beat_id}...")
                         
                         # 记录广播精修阶段的 Prompt
                         prompt_logger.start_stage("BROADCAST_REFINE", iteration=iteration, beat_id=beat_id)
@@ -1524,10 +1536,10 @@ async def _generate_agentic_chapter_stream(
                         )
                         prompt_logger.end_stage(success=bool(refined_chunk))
                         
-                        print(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                        logger.info(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
                         
                     except Exception as e:
-                        print(f"[Broadcast Refine Error] Failed to refine beat {beat_id}: {e}")
+                        logger.error(f"[Broadcast Refine] Failed to refine beat {beat_id}: {e}")
                         prompt_logger.end_stage(success=False, error=str(e))
                         continue
                 
@@ -1597,7 +1609,7 @@ async def _generate_agentic_chapter_stream(
                 for idx, beat_id in enumerate(valid_beat_ids):
                     original_chunk = beat_chunk_map.get(beat_id, "")
                     if not original_chunk:
-                        print(f"[Refine Warning] Beat {beat_id} has no chunk text, skipping.")
+                        logger.warning(f"[Refine] Beat {beat_id} has no chunk text, skipping.")
                         continue
 
                     beat_idx = int(beat_id.split("_")[1]) - 1
@@ -1711,7 +1723,7 @@ async def _generate_agentic_chapter_stream(
                     )
                     prompt_logger.end_stage(success=bool(refined_chunk))
                     
-                    print(f"[Local Refine] Beat {beat_id} refined successfully.")
+                    logger.info(f"[Local Refine] Beat {beat_id} refined successfully.")
 
                 record_stage("REFINING", _to_secs(time.perf_counter() - refining_started_at))
                 yield metric_frame("REFINING_DONE", iteration=iteration, extra={"refined_beats": valid_beat_ids})
@@ -1795,7 +1807,7 @@ async def _generate_agentic_chapter_stream(
                 beat_id = f"beat_{beat_idx + 1}"
                 original_chunk = beat_chunk_map.get(beat_id, "")
                 if not original_chunk:
-                    print(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
+                    logger.info(f"[Broadcast Refine] Beat {beat_id} has no chunk text, skipping.")
                     continue
                 
                 # 获取前一 beat 的尾巴文本用于语气衔接
@@ -1807,7 +1819,7 @@ async def _generate_agentic_chapter_stream(
                         previous_tail = prev_chunk[-500:]
                 
                 try:
-                    print(f"[Broadcast Refine] Refining beat {beat_id}...")
+                    logger.info(f"[Broadcast Refine] Refining beat {beat_id}...")
                     
                     # 记录广播精修阶段的 Prompt
                     prompt_logger.start_stage("BROADCAST_REFINE", iteration=iteration, beat_id=beat_id)
@@ -1885,10 +1897,10 @@ async def _generate_agentic_chapter_stream(
                     )
                     prompt_logger.end_stage(success=bool(refined_chunk))
                     
-                    print(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                    logger.info(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
                     
                 except Exception as e:
-                    print(f"[Broadcast Refine Error] Failed to refine beat {beat_id}: {e}")
+                    logger.error(f"[Broadcast Refine] Failed to refine beat {beat_id}: {e}")
                     prompt_logger.end_stage(success=False, error=str(e))
                     continue
             
@@ -2002,10 +2014,10 @@ async def _generate_agentic_chapter_stream(
                     )
                     prompt_logger.end_stage(success=True)
                 else:
-                    print("[Format Warning] Formatted text suspiciously short or empty. Fallback to original.")
+                    logger.warning("[Format] Formatted text suspiciously short or empty. Fallback to original.")
                     prompt_logger.end_stage(success=False, reason="Formatted text too short")
             except Exception as e:
-                print(f"[Format Error] {e}")
+                logger.error(f"[Format] {e}")
                 prompt_logger.end_stage(success=False, reason=str(e))
             record_stage("FORMATTING", _to_secs(time.perf_counter() - formatting_started_at))
             yield metric_frame("FORMATTING_DONE", iteration=iteration)
