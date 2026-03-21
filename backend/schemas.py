@@ -6,7 +6,7 @@ Pydantic 验证模型
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 
 PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
 
@@ -180,6 +180,7 @@ class ChapterBase(BaseModel):
     - chapter_number 必须是正整数（负数或零无意义）
     - status 字段虽无枚举约束，但业务层应限制为 ["draft", "published"]
     - review_feedback 默认为空字典（不是 None），简化前端渲染
+    - tension_level 自动裁剪到 1-5 范围内（兼容历史数据）
     """
     chapter_number: int = Field(..., ge=1)
     chapter_name: Optional[str] = Field(None, max_length=200)
@@ -192,6 +193,16 @@ class ChapterBase(BaseModel):
     map_activity_range: Optional[str] = None
     tension_level: int = Field(default=3, ge=1, le=5, description="剧情张力等级 (1-5)，决定工作流层级")
     pacing_style: PacingStyle = Field(default="balanced")
+
+    @field_validator('tension_level', mode='before')
+    @classmethod
+    def clamp_tension_level(cls, v):
+        if v is not None:
+            try:
+                return max(1, min(5, int(v)))
+            except (ValueError, TypeError):
+                return 3
+        return v
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
     chapter_assets_schema: Optional[str] = None
@@ -230,6 +241,16 @@ class ChapterUpdate(BaseModel):
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[PacingStyle] = None
     chapter_assets_schema: Optional[str] = None
+
+    @field_validator('tension_level', mode='before')
+    @classmethod
+    def clamp_tension_level(cls, v):
+        if v is not None:
+            try:
+                return max(1, min(5, int(v)))
+            except (ValueError, TypeError):
+                return None
+        return v
 
 
 class ChapterResponse(ChapterBase):
@@ -941,6 +962,16 @@ class GenerateChapterAgenticRequest(BaseModel):
         default_factory=DraftingFeatureFlags,
         description="V2.5 认知流式生成功能开关配置"
     )
+
+    @field_validator('tension_level', mode='before')
+    @classmethod
+    def clamp_tension_level(cls, v):
+        if v is not None:
+            try:
+                return max(1, min(5, int(v)))
+            except (ValueError, TypeError):
+                return None
+        return v
 
     @model_validator(mode="after")
     def validate_rag_weight_sum(self):

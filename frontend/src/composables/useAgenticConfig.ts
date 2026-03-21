@@ -267,7 +267,7 @@ export function normalizeAgenticForm(input: Partial<AgenticFormState & AgenticLe
 
   return {
     word_count: Math.round(clamp(toNumber(input.word_count, AGENTIC_DEFAULTS.word_count), 1)),
-    tension_level: Math.round(clamp(toNumber(input.tension_level, AGENTIC_DEFAULTS.tension_level), 1, 10)),
+    tension_level: Math.round(clamp(toNumber(input.tension_level, AGENTIC_DEFAULTS.tension_level), 1, 5)),
     pacing_style: normalizedPacing,
     memory_span: normalizedMemorySpan,
     creativity_level: normalizedCreativity,
@@ -396,8 +396,8 @@ export function getAgenticFieldFeedback(input: Partial<AgenticFormState>) {
   }
 
   const tension = checkNumber('tension_level')
-  if (tension !== null && (tension < 1 || tension > 10)) {
-    feedback.tension_level = `${AGENTIC_FIELD_CONFIG.tension_level.label}需在 1~10 之间`
+  if (tension !== null && (tension < 1 || tension > 5)) {
+    feedback.tension_level = `${AGENTIC_FIELD_CONFIG.tension_level.label}需在 1~5 之间`
   }
   checkSelect('pacing_style', ['slow_burn', 'balanced', 'fast_paced'])
 

@@ -47,8 +47,8 @@ interface BeatEditorState {
 }
 
 const TENSION_LEVEL_MIN = 1
-const TENSION_LEVEL_MAX = 10
-const DEFAULT_TENSION_LEVEL = 5
+const TENSION_LEVEL_MAX = 5
+const DEFAULT_TENSION_LEVEL = 3
 const DEFAULT_PACING_STYLE: PacingStyle = 'balanced'
 const pacingStyleOptions: Array<{ value: PacingStyle; label: string }> = [
   { value: 'slow_burn', label: '慢热推进' },
@@ -690,7 +690,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function getAgenticFieldMax(field: keyof AgenticFormState) {
     if (field === 'word_count') return 10000
     if (field === 'rag_lambda') return undefined
-    if (field === 'tension_level') return 10
+    if (field === 'tension_level') return 5
     return undefined
   }
 
