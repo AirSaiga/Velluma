@@ -54,7 +54,7 @@ export const AGENTIC_GROUPS = {
 
 export const AGENTIC_DEFAULTS: AgenticFormState = {
   word_count: 2000,
-  tension_level: 5,
+  tension_level: 3,  // V3.0: 默认改为 3 (均衡流)
   pacing_style: 'balanced',
   memory_span: 'balanced_reference',
   creativity_level: 'balanced_creation',
@@ -84,10 +84,10 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     group: 'generation'
   },
   tension_level: {
-    label: '剧情张力等级',
-    description: '控制冲突的激烈程度与节奏紧迫感。',
-    rangeHint: '范围 1~10',
-    recommended: '默认：5',
+    label: '剧情张力等级 (V3.0)',
+    description: '控制冲突的激烈程度，同时决定智能路由层级：Level 1-2 疾速流(低算力) / Level 3 均衡流 / Level 4-5 堡垒流(全功能)',
+    rangeHint: '范围 1~5',
+    recommended: '默认：3 (均衡流)',
     group: 'style'
   },
   pacing_style: {

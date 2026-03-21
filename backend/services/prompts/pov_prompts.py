@@ -168,17 +168,29 @@ def build_anchor_pov_prompt(
     return system_prompt, user_prompt
 
 
-def parse_anchor_pov_result(llm_response: Dict[str, Any]) -> str:
+def parse_anchor_pov_result(llm_response: Any) -> str:
     """
     解析 LLM 返回的 Anchor POV 结果。
     
     Args:
-        llm_response: LLM 返回的 JSON 对象
+        llm_response: LLM 返回的 JSON 对象或列表
         
     Returns:
         str: 核心主角的名字，如果解析失败返回空字符串
     """
     try:
+        # 处理 LLM 返回列表的情况
+        if isinstance(llm_response, list):
+            if len(llm_response) > 0 and isinstance(llm_response[0], dict):
+                llm_response = llm_response[0]
+            else:
+                logger.warning(f"Anchor POV response is a list without valid dict: {llm_response}")
+                return ""
+        
+        if not isinstance(llm_response, dict):
+            logger.warning(f"Anchor POV response is not a dict: {type(llm_response)}")
+            return ""
+        
         anchor_pov = llm_response.get("anchor_pov", "")
         if not anchor_pov:
             logger.warning("No anchor_pov found in LLM response")

@@ -25,8 +25,8 @@ from backend.models import Chapter, Book
 
 
 # 低张力章节的默认红线约束
-# 用于 tension_level <= 3 时的自动注入
-LOW_TENSION_RED_LINES = ["避免正面冲突", "避免战斗升级"]
+# V3.0: 用于 tension_level <= 2 时的自动注入
+LOW_TENSION_RED_LINES = ["禁止发生任何武力冲突或战斗升级", "避免正面冲突"]
 
 
 def build_planner_agent_prompt(
@@ -130,8 +130,9 @@ def build_planner_agent_prompt(
         if normalized_hooks
         else "暂无开放伏笔"
     )
+    # V3.0: 低张力规则改为 tension_level <= 2
     low_tension_rule = ""
-    if tension_level <= 3:
+    if tension_level <= 2:
         low_tension_rule = (
             f"\n8. 当前章节张力等级为 {tension_level}（低张力），每个 beat 的 red_lines 必须包含："
             f"{'、'.join(LOW_TENSION_RED_LINES)}\n"
@@ -165,7 +166,8 @@ def build_planner_agent_prompt(
       "pacing_type": "Medium",
       "weight": 3
     }}
-  ]
+  ],
+  "workflow_tier": "TIER_2_STANDARD"
 }}
 
 约束：
@@ -180,6 +182,10 @@ def build_planner_agent_prompt(
 9. weight 必须是 1-5 之间的整数
 {low_tension_rule if low_tension_rule else ''}
 10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
+11. workflow_tier 必须基于 tension_level 自动计算：
+    - tension_level 为 1 或 2 时 → "TIER_1_FAST" (疾速流)
+    - tension_level 为 3 时 → "TIER_2_STANDARD" (均衡流)
+    - tension_level 为 4 或 5 时 → "TIER_3_FORTRESS" (堡垒流)
 11. pov_perception_state: 当前视角角色的意识清醒程度与物理行动力。必须从以下标准化描述中选择或组合：
     "正常" / "轻伤但行动自如" / "重伤行动受限" / "半昏迷" / "失去身体控制权" / "完全昏迷" / "神经过载"
     也可以自由描述，但必须明确表达角色的意识状态和身体可控程度。
@@ -230,6 +236,8 @@ def parse_planner_result(
 ) -> list[dict]:
     """解析规划结果的 JSON 输出。
 
+    V3.0 更新：新增 workflow_tier 字段解析。
+
     从 LLM 返回的原始文本中提取 beats 列表，并进行数据清洗和类型转换。
 
     解析策略（优先级从高到低）：
@@ -259,6 +267,7 @@ def parse_planner_result(
         - hook_ids: 关联的伏笔 ID 列表
         - pacing_type: 节奏类型 (Fast/Medium/Slow)
         - weight: 权重 (1-5)
+        - workflow_tier: 工作流层级 (V3.0 新增)
     """
     text = (planner_result_raw or "").strip()
     candidates = [text] if text else []
@@ -275,6 +284,14 @@ def parse_planner_result(
             break
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
+    
+    # V3.0: 解析 workflow_tier，默认为 TIER_2_STANDARD
+    workflow_tier = "TIER_2_STANDARD"
+    if isinstance(parsed_obj, dict):
+        tier = parsed_obj.get("workflow_tier")
+        if tier in ["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]:
+            workflow_tier = tier
+    
     beats = []
     if isinstance(parsed_obj, dict) and isinstance(parsed_obj.get("beats"), list):
         for idx, beat in enumerate(parsed_obj["beats"], start=1):
@@ -340,6 +357,7 @@ def parse_planner_result(
                     "hook_ids": hook_ids,
                     "pacing_type": pacing_type,
                     "weight": weight,
+                    "workflow_tier": workflow_tier,  # V3.0: 注入工作流层级
                 }
             )
     if not beats:
@@ -362,6 +380,7 @@ def parse_planner_result(
                 "hook_ids": [],
                 "pacing_type": "Medium",
                 "weight": 3,
+                "workflow_tier": workflow_tier,  # V3.0: fallback 也注入工作流层级
             }
         ]
     beats.sort(key=lambda item: item["position"])

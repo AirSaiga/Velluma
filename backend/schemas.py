@@ -10,6 +10,32 @@ from pydantic import BaseModel, Field, model_validator
 
 PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
 
+# V3.0: 智能路由工作流层级
+WorkflowTier = Literal["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]
+
+
+def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
+    """
+    将 tension_level 映射为工作流层级。
+    
+    V3.0 智能路由映射规则：
+    - Level 1, 2 -> TIER_1_FAST (疾速流)
+    - Level 3 -> TIER_2_STANDARD (均衡流)  
+    - Level 4, 5 -> TIER_3_FORTRESS (堡垒流)
+    
+    Args:
+        tension_level: 剧情张力等级 (1-5)
+    
+    Returns:
+        WorkflowTier: 对应的工作流层级
+    """
+    if tension_level <= 2:
+        return "TIER_1_FAST"
+    elif tension_level == 3:
+        return "TIER_2_STANDARD"
+    else:  # 4-5
+        return "TIER_3_FORTRESS"
+
 
 # ============================================================
 # 书籍 Schema 层 - Book 实体的事务封装
@@ -164,7 +190,7 @@ class ChapterBase(BaseModel):
     summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
     map_activity_range: Optional[str] = None
-    tension_level: int = Field(default=5, ge=1, le=10)
+    tension_level: int = Field(default=3, ge=1, le=5, description="剧情张力等级 (1-5)，决定工作流层级")
     pacing_style: PacingStyle = Field(default="balanced")
     revision_count: int = Field(default=0)
     status: str = Field(default="draft")
@@ -201,7 +227,7 @@ class ChapterUpdate(BaseModel):
     summary: Optional[str] = None
     status: Optional[str] = None
     map_activity_range: Optional[str] = None
-    tension_level: Optional[int] = Field(None, ge=1, le=10)
+    tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[PacingStyle] = None
     chapter_assets_schema: Optional[str] = None
 
@@ -714,22 +740,25 @@ AGENTIC_DEFAULT_RAG_LAMBDA = 0.1
 
 class DraftingFeatureFlags(BaseModel):
     """
-    V2.5 认知流式生成功能开关配置
+    V3.0 认知流式生成功能开关配置
     
     设计意图：
     - 支持渐进式启用新特性，便于灰度测试与 A/B 对比
     - 每个开关控制一个轻量级认知组件的启用/禁用
+    - V3.0 新增智能路由工作流层级控制
     
     功能说明：
     - enable_fail_fast: 即时断言与回溯机制（防错重试）
     - enable_emotional_scratchpad: 动态情绪暂存器（性格微演变）
     - enable_whisper_memory: RAG 记忆暂存（预留接口）
+    - workflow_tier: 智能路由工作流层级控制
     """
     enable_fail_fast: bool = Field(default=True, description="启用 Fail-Fast 断言检查与回溯重试")
     enable_emotional_scratchpad: bool = Field(default=True, description="启用动态情绪暂存器更新")
     enable_whisper_memory: bool = Field(default=False, description="启用 RAG 记忆暂存（预留）")
     fail_fast_max_attempts: int = Field(default=2, ge=1, le=3, description="Fail-Fast 最大重试次数")
     fail_fast_temperature_step: float = Field(default=0.2, ge=0.0, le=0.5, description="每次重试温度增量")
+    workflow_tier: WorkflowTier = Field(default="TIER_2_STANDARD", description="智能路由工作流层级: TIER_1_FAST/均衡流/堡垒流")
 
 
 class CharacterPhysicalState(BaseModel):
@@ -906,7 +935,7 @@ class GenerateChapterAgenticRequest(BaseModel):
     rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
     fast_mode: bool = Field(default=False, description="快速模式：仅生成首轮结果，不进入二轮重写")
     skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
-    tension_level: Optional[int] = Field(None, ge=1, le=10, description="剧情张力等级 (1-10)")
+    tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)，Level 1-2: 疾速流, Level 3: 均衡流, Level 4-5: 堡垒流")
     pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
     feature_flags: Optional[DraftingFeatureFlags] = Field(
         default_factory=DraftingFeatureFlags,
@@ -922,6 +951,11 @@ class GenerateChapterAgenticRequest(BaseModel):
 
 
 class ConfirmedStoryBeat(BaseModel):
+    """
+    确认的故事节拍模型。
+    
+    V3.0 新增 workflow_tier 字段，用于在 Beat 级别传递工作流层级信息。
+    """
     position: int = Field(..., ge=1)
     beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
     summary: str = Field(..., min_length=1)
@@ -937,6 +971,10 @@ class ConfirmedStoryBeat(BaseModel):
     hook_ids: List[str] = Field(default_factory=list)
     pacing_type: Optional[str] = Field(None, max_length=50)
     weight: Optional[int] = Field(default=1, ge=1)
+    workflow_tier: Optional[WorkflowTier] = Field(
+        default=None, 
+        description="工作流层级：TIER_1_FAST(疾速流) / TIER_2_STANDARD(均衡流) / TIER_3_FORTRESS(堡垒流)"
+    )
 
 
 class GenerateChapterAgenticPreviewResponse(BaseModel):

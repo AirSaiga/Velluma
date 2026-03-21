@@ -51,6 +51,8 @@ from backend.schemas import (
     MicroReviewResult,
     DynamicStateUpdateResult,  # V2.5+ NEW
     CharacterPhysicalState,  # V2.5+ NEW: 用于 entity_spatial_ledger
+    WorkflowTier,  # V3.0 NEW
+    map_tension_to_workflow_tier,  # V3.0 NEW
 )
 from backend.services.prompts import (
     build_scene_intent_prompt,
@@ -113,28 +115,24 @@ async def execute_draft_stage(
     physical_state_lock: Optional[str] = None,
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
+    workflow_tier: Optional[WorkflowTier] = None,  # V3.0 NEW
 ) -> List[BeatDraftResult]:
     """
-    执行混合流水线起草阶段 (V2.5 认知流式生成)。
+    V3.0 智能路由起草阶段主入口。
     
-    职责：协调双层生成流程，先并行生成轻量级思考层，再串行滑动窗口生成正文。
+    职责：根据 workflow_tier 动态选择执行路径，实现算力资源的智能分配。
     
-    V2.5 增强：
-    - 引入 DynamicContext 跨 Beat 流转状态
-    - Fail-Fast 即时断言与回溯重试
-    - Emotional Scratchpad 动态情绪更新
-    
-    流程:
-        1. 并行生成所有 Beat 的 Scene Intent 和 Subconscious (步骤 A)
-        2. 串行滑动窗口生成正文，使用 Rolling Prefix + DynamicContext (步骤 B-V25)
-        3. 可选的 Chunk QC 质检与修复
+    V3.0 路由策略：
+    - TIER_1_FAST (Level 1-2): 疾速流，跳过复杂思考层，直接生成
+    - TIER_2_STANDARD (Level 3): 均衡流，轻量级思考 + 串行生成
+    - TIER_3_FORTRESS (Level 4-5): 堡垒流，算力全开，保持 V2.5 完整流程
     
     Args:
         chapter: 章节实体
         book: 书籍实体
         entities: 章节关联的角色实体列表
         relationships: 角色关系列表
-        beats: 节拍数据列表
+        beats: 节拍数据列表（V3.0: 每个 beat 可包含 workflow_tier）
         open_hooks: 开放伏笔列表
         api_key: LLM API Key
         base_url: LLM Base URL
@@ -145,8 +143,9 @@ async def execute_draft_stage(
         relevant_memories: RAG 检索的相关记忆（可选）
         locations: 地图地点列表（可选）
         enable_qc: 是否启用自动质检（默认 True）
-        feature_flags: V2.5 功能开关配置（可选）
+        feature_flags: V3.0 功能开关配置（可选）
         physical_state_lock: 主角物理状态锁定描述（可选）
+        workflow_tier: 工作流层级（可选，默认从 beats[0] 或 flags 获取）
     
     Returns:
         List[BeatDraftResult]: 按 Beat 顺序排列的生成结果列表
@@ -157,97 +156,86 @@ async def execute_draft_stage(
     # 初始化功能开关（使用默认值）
     flags = feature_flags or DraftingFeatureFlags()
     
-    logger.info(f"[Draft Stage] 开始 V2.5 认知流式生成，共 {len(beats)} 个 Beats")
-    logger.info(f"[Draft Stage] 功能开关: FailFast={flags.enable_fail_fast}, Emotional={flags.enable_emotional_scratchpad}")
-    stage_start = time.perf_counter()
+    # V3.0: 确定工作流层级（优先级: 传入参数 > chapter.tension_level 映射 > beat 元数据 > flags 默认值）
+    effective_tier = workflow_tier
     
-    # ========================================================================
-    # 步骤 A: 并行生成轻量级思考层（无文本依赖）
-    # ========================================================================
-    logger.info("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
-    step_a_start = time.perf_counter()
+    # 尝试从 chapter.tension_level 计算（最可靠，基于用户输入）
+    if not effective_tier and chapter:
+        tension_level = getattr(chapter, 'tension_level', None)
+        if tension_level and isinstance(tension_level, int) and 1 <= tension_level <= 5:
+            effective_tier = map_tension_to_workflow_tier(tension_level)
+            logger.info(f"[Draft Stage] 从 chapter.tension_level={tension_level} 映射到 {effective_tier}")
     
-    # A-1: 并行生成 Scene Intent
-    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
-        beats=beats,
-        chapter=chapter,
-        open_hooks=open_hooks,
-        api_key=api_key,
-        base_url=base_url,
-        model=reasoning_model,
-    )
+    # 尝试从 beat 的 workflow_tier 获取（LLM 输出，备用）
+    if not effective_tier and beats:
+        effective_tier = beats[0].get("workflow_tier")
     
-    # A-2: 并行生成 Subconscious（依赖 Scene Intent）
-    subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
-        beats=beats,
-        scene_intent_results=scene_intent_results,
-        chapter=chapter,
-        entities=entities,
-        api_key=api_key,
-        base_url=base_url,
-        model=reasoning_model,
-    )
+    # 使用 flags 默认值
+    if not effective_tier:
+        effective_tier = flags.workflow_tier
     
-    logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
+    logger.info(f"[Draft Stage] V3.0 智能路由启动，工作流层级: {effective_tier}，共 {len(beats)} 个 Beats")
     
-    # ========================================================================
-    # 步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + DynamicContext）
-    # ========================================================================
-    logger.info("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
-    step_b_start = time.perf_counter()
-    
-    prose_results = await _generate_prose_serial_v25(
-        beats=beats,
-        scene_intent_results=scene_intent_results,
-        subconscious_results=subconscious_results,
-        chapter=chapter,
-        book=book,
-        entities=entities,
-        relationships=relationships,
-        api_key=api_key,
-        base_url=base_url,
-        creative_model=creative_model,
-        reasoning_model=reasoning_model,
-        word_count=word_count,
-        previous_summary=previous_summary,
-        relevant_memories=relevant_memories,
-        locations=locations,
-        enable_qc=enable_qc,
-        feature_flags=flags,
-        physical_state_lock=physical_state_lock,
-        entity_spatial_ledger=entity_spatial_ledger,
-        chapter_assets_schema=chapter_assets_schema,
-    )
-    
-    logger.info(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
-    
-    # ========================================================================
-    # 组装结果
-    # ========================================================================
-    results: List[BeatDraftResult] = []
-    for i, beat in enumerate(beats):
-        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
-        
-        # 合并所有 prompts：Scene Intent -> Subconscious -> Prose Draft
-        # 注意：Rolling Prefix 锚定标签已在 prose_results 中通过 previous_tail 体现
-        all_prompts = []
-        all_prompts.extend(scene_intent_prompts_list[i])
-        all_prompts.extend(subconscious_prompts_list[i])
-        all_prompts.extend(prose_results[i]["prompts"])
-        
-        result = BeatDraftResult(
-            beat_id=beat_id,
-            beat_index=i + 1,
-            scene_intent=scene_intent_results[i],
-            subconscious_thought=subconscious_results[i],
-            draft_chunk=prose_results[i]["text"],
-            prompts=all_prompts,  # 全流程 prompts: Scene Intent + Subconscious + Prose Draft
-            mcts_rollout=mcts_rollout_results[i],  # MCTS 可观测性（Risk 5 修复）
+    # V3.0: 根据 workflow_tier 路由到不同的执行路径
+    if effective_tier == "TIER_1_FAST":
+        return await _execute_fast_path(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            beats=beats,
+            open_hooks=open_hooks,
+            api_key=api_key,
+            base_url=base_url,
+            reasoning_model=reasoning_model,
+            creative_model=creative_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
         )
-        results.append(result)
-    
-    logger.info(f"[Draft Stage] 混合流水线完成，总耗时 {time.perf_counter() - stage_start:.2f}s")
-    return results
+    elif effective_tier == "TIER_2_STANDARD":
+        return await _execute_standard_path(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            beats=beats,
+            open_hooks=open_hooks,
+            api_key=api_key,
+            base_url=base_url,
+            reasoning_model=reasoning_model,
+            creative_model=creative_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            enable_qc=enable_qc,
+            feature_flags=flags,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+        )
+    else:  # TIER_3_FORTRESS
+        return await _execute_fortress_path(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            beats=beats,
+            open_hooks=open_hooks,
+            api_key=api_key,
+            base_url=base_url,
+            reasoning_model=reasoning_model,
+            creative_model=creative_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            enable_qc=enable_qc,
+            feature_flags=flags,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+        )
 
 
 async def _generate_scene_intent_batch(
@@ -651,14 +639,14 @@ async def _generate_prose_serial_v25(
                 logger.info(f"[Prose V25] Beat {beat_index} 生成完成，耗时 {time.perf_counter() - prose_start:.2f}s，字数 {len(chunk_text)}")
                 
                 # ========================================================================
-                # Fail-Fast 断言检查 (V2.5+ 增强版)
+                # Fail-Fast 断言检查 (V3.0 增强版 - 智能回溯策略)
                 # ========================================================================
                 if flags.enable_fail_fast and attempt < max_attempts:
-                    is_valid, fail_reason = await _micro_review_assertion(
+                    is_valid, fail_reason, fail_categories = await _micro_review_assertion(
                         chunk_text=chunk_text,
                         dynamic_context=dynamic_context,
                         pov_character=pov_character,
-                        beat=beat,  # V2.5+ NEW: 传递 beat 以检查 red_lines
+                        beat=beat,
                         api_key=api_key,
                         base_url=base_url,
                         model=reasoning_model,
@@ -666,9 +654,23 @@ async def _generate_prose_serial_v25(
                     )
                     
                     if not is_valid:
-                        logger.warning(f"[Fail-Fast] Beat {beat_index} 断言失败: {fail_reason}")
-                        # 提高温度，增加多样性，准备重试
-                        current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
+                        logger.warning(f"[Fail-Fast] Beat {beat_index} 断言失败: {fail_reason} [类别: {', '.join(fail_categories)}]")
+                        
+                        # V3.0: 智能温度调整策略
+                        if "文风" in fail_categories:
+                            # 文风问题：提高温度重新采样
+                            current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
+                            logger.info(f"[Fail-Fast] 文风问题，提高温度至 {current_temp:.2f}")
+                        else:
+                            # 逻辑越界/红线/物理幻觉：保持或降低温度，注入错误提示
+                            current_temp = max(0.3, current_temp - 0.1)
+                            logger.info(f"[Fail-Fast] 逻辑错误，降低温度至 {current_temp:.2f}")
+                            
+                            # V3.0: 在 prompt 中叠加错误信息（仅用于下一次重试）
+                            error_hint = f"\n\n【修正要求】上一版本存在以下问题：{fail_reason}。请保持原语境，仅修复该冲突，不要改变整体文风。"
+                            # 注意：这里的 user_prompt 需要在下次循环时包含此提示
+                            # 通过修改外部作用域的变量来实现
+                            user_prompt = user_prompt + error_hint
                     else:
                         logger.info(f"[Fail-Fast] Beat {beat_index} 断言通过")
                 else:
@@ -768,23 +770,27 @@ async def _micro_review_assertion(
     base_url: str = "",
     model: str = "",
     entity_spatial_ledger: Optional[dict] = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, List[str]]:
     """
-    Fail-Fast 微审查断言（V2.5+ 增强版）。
+    V3.0 Fail-Fast 微审查断言（增强版）。
     
     职责：极速检查生成的文本是否存在物理/逻辑/关系/OOC 硬伤。
+    
+    V3.0 更新：返回失败类别，用于智能温度调整策略。
     
     断言决策树:
     ```
     IF Violate(red_lines):
-        RETURN (False, "触碰红线约束")
+        RETURN (False, "触碰红线约束", ["红线"])
     IF Physical_Hallucination:
-        RETURN (False, "物理状态冲突")
+        RETURN (False, "物理状态冲突", ["物理幻觉"])
     IF OOC_Behavior:
-        RETURN (False, "角色行为偏离设定")
+        RETURN (False, "角色行为偏离设定", ["OOC"])
     IF Relationship_Jump:
-        RETURN (False, "人物关系无逻辑突变")
-    RETURN (True, "")
+        RETURN (False, "人物关系无逻辑突变", ["关系"])
+    IF Style_Issue:
+        RETURN (False, "文风问题", ["文风"])
+    RETURN (True, "", [])
     ```
     
     Args:
@@ -798,7 +804,8 @@ async def _micro_review_assertion(
         entity_spatial_ledger: 角色空间账本（可选）
     
     Returns:
-        tuple[bool, str]: (是否通过, 失败原因)
+        tuple[bool, str, List[str]]: (是否通过, 失败原因, 失败类别列表)
+        失败类别: ["红线", "物理幻觉", "OOC", "关系", "文风", "其他"]
     """
     try:
         # V2.5+ NEW: 提取角色设定用于 OOC 检查
@@ -844,19 +851,72 @@ async def _micro_review_assertion(
         if review_result.failed_checks:
             failed_reason = f"[检查项 {', '.join(review_result.failed_checks)}] {failed_reason}"
         
+        # V3.0: 推断失败类别
+        fail_categories = _infer_fail_categories(failed_reason, review_result.failed_checks or [])
+        
         if review_result.pass_check:
-            return True, ""
+            return True, "", []
         else:
-            return False, failed_reason
+            return False, failed_reason, fail_categories
             
     except json.JSONDecodeError as e:
         logger.warning(f"[Fail-Fast] JSON 解析失败: {e}")
         # JSON 解析失败时，保守起见允许通过（避免阻塞）
-        return True, ""
+        return True, "", []
     except Exception as e:
         logger.warning(f"[Fail-Fast] 断言检查异常: {e}")
         # 异常时允许通过，避免阻塞主流程
-        return True, ""
+        return True, "", []
+
+
+def _infer_fail_categories(fail_reason: str, failed_checks: List[str]) -> List[str]:
+    """
+    V3.0: 从失败原因和检查项中推断失败类别。
+    
+    Args:
+        fail_reason: 失败原因描述
+        failed_checks: 失败的检查项列表
+    
+    Returns:
+        List[str]: 失败类别列表
+    """
+    categories = []
+    reason_lower = fail_reason.lower()
+    checks_lower = [c.lower() for c in failed_checks]
+    
+    # 基于检查项推断
+    for check in checks_lower:
+        if any(kw in check for kw in ["red_line", "红线", "禁忌"]):
+            categories.append("红线")
+        elif any(kw in check for kw in ["physical", "物理", "状态", "空间", "位置"]):
+            categories.append("物理幻觉")
+        elif any(kw in check for kw in ["ooc", "角色", "设定", "性格"]):
+            categories.append("OOC")
+        elif any(kw in check for kw in ["relation", "关系", "态度", "信任"]):
+            categories.append("关系")
+        elif any(kw in check for kw in ["style", "文风", "文笔", "语言"]):
+            categories.append("文风")
+    
+    # 基于失败原因推断
+    if any(kw in reason_lower for kw in ["红线", "禁忌", "禁止"]):
+        categories.append("红线")
+    if any(kw in reason_lower for kw in ["物理", "空间", "位置", "幻觉", "瞬移"]):
+        categories.append("物理幻觉")
+    if any(kw in reason_lower for kw in ["ooc", "角色", "设定", "性格", "行为偏离"]):
+        categories.append("OOC")
+    if any(kw in reason_lower for kw in ["关系", "态度", "信任", "敌对", "友好"]):
+        categories.append("关系")
+    if any(kw in reason_lower for kw in ["文风", "白开水", "ai味", "平淡", "机械", "套路", "模板"]):
+        categories.append("文风")
+    
+    # 去重
+    unique_categories = list(set(categories))
+    
+    # 如果没有识别出类别，归为"其他"
+    if not unique_categories:
+        unique_categories.append("其他")
+    
+    return unique_categories
 
 
 async def _update_emotional_state(
@@ -1535,3 +1595,473 @@ async def _update_emotional_state(
     except Exception as e:
         logger.warning(f"[Emotional Update] 情绪更新失败: {e}")
         return current_emotional_state
+
+
+# ========================================================================
+# V3.0: 智能路由三档执行路径
+# ========================================================================
+
+async def _execute_fast_path(
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    beats: List[dict],
+    open_hooks: List[dict],
+    api_key: str,
+    base_url: str,
+    reasoning_model: str,
+    creative_model: str,
+    word_count: int,
+    previous_summary: Optional[str] = None,
+) -> List[BeatDraftResult]:
+    """
+    V3.0 Tier 1: 疾速流 (Fast-Path)
+    
+    特点:
+    - 跳过 Scene Intent 和 Subconscious 独立调用
+    - 仅保留 previous_tail 作为上下文
+    - 单次调用 creative_model 生成正文
+    - 跳过 Stitching（直接拼接）
+    
+    适用场景: 低张力日常剧情 (tension_level 1-2)
+    """
+    logger.info("[Fast Path] 启动疾速流生成...")
+    results: List[BeatDraftResult] = []
+    previous_tail = ""
+    
+    for i, beat in enumerate(beats):
+        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+        target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
+        
+        # 构建简化版 Prompt
+        system_prompt, user_prompt = build_fast_path_prompt(
+            chapter=chapter,
+            book=book,
+            beat=beat,
+            previous_tail=previous_tail,
+            target_words=target_words,
+            previous_summary=previous_summary,
+        )
+        
+        # 单次调用 creative_model
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=creative_model,
+            temperature=0.75,
+            max_tokens=_clamp_tokens(target_words),
+        )
+        
+        chunk_text = clean_llm_output(response).strip()
+        
+        # 更新 previous_tail
+        previous_tail = _extract_tail(chunk_text, max_chars=300)
+        
+        results.append(BeatDraftResult(
+            beat_id=beat_id,
+            beat_index=i + 1,
+            scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
+            subconscious_thought="",
+            draft_chunk=chunk_text,
+            prompts=[{"stage": "FAST_PATH", "system_prompt": system_prompt, "user_prompt": user_prompt}],
+            mcts_rollout=None,
+        ))
+    
+    logger.info(f"[Fast Path] 疾速流生成完成，共 {len(results)} 个 Beats")
+    return results
+
+
+async def _execute_standard_path(
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    beats: List[dict],
+    open_hooks: List[dict],
+    api_key: str,
+    base_url: str,
+    reasoning_model: str,
+    creative_model: str,
+    word_count: int,
+    previous_summary: Optional[str] = None,
+    relevant_memories: Optional[List[Any]] = None,
+    locations: Optional[List[Any]] = None,
+    enable_qc: bool = True,
+    feature_flags: Optional[DraftingFeatureFlags] = None,
+    physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
+) -> List[BeatDraftResult]:
+    """
+    V3.0 Tier 2: 均衡流 (Standard-Path)
+    
+    特点:
+    - 轻量级 Subconscious（关闭 MCTS，单次生成 50 字内心定调）
+    - CoreDynamicContext（previous_tail + physical_state_lock）
+    - 串行调用 creative_model 生成正文
+    - 标准 Reviewing（失败后局部 Refine）
+    
+    适用场景: 中等张力剧情 (tension_level 3)
+    """
+    logger.info("[Standard Path] 启动均衡流生成...")
+    flags = feature_flags or DraftingFeatureFlags()
+    
+    # 步骤 A: 轻量级 Scene Intent
+    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
+        beats=beats,
+        chapter=chapter,
+        open_hooks=open_hooks,
+        api_key=api_key,
+        base_url=base_url,
+        model=reasoning_model,
+    )
+    
+    # 步骤 B: 轻量级 Subconscious（无 MCTS）
+    subconscious_results = await _generate_lightweight_subconscious(
+        beats=beats,
+        scene_intent_results=scene_intent_results,
+        chapter=chapter,
+        api_key=api_key,
+        base_url=base_url,
+        model=reasoning_model,
+    )
+    
+    # 步骤 C: 串行生成正文（使用简化版 DynamicContext）
+    results: List[BeatDraftResult] = []
+    previous_tail = ""
+    current_physical_lock = physical_state_lock or ""
+    
+    for i, beat in enumerate(beats):
+        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+        target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
+        
+        # 构建简化版 Prompt（仅使用 previous_tail 和 physical_state_lock）
+        system_prompt, user_prompt = build_standard_path_prompt(
+            chapter=chapter,
+            book=book,
+            beat=beat,
+            scene_intent=scene_intent_results[i],
+            subconscious=subconscious_results[i],
+            previous_tail=previous_tail,
+            physical_state_lock=current_physical_lock,
+            target_words=target_words,
+        )
+        
+        # 调用 creative_model
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=creative_model,
+            temperature=0.75,
+            max_tokens=_clamp_tokens(target_words),
+        )
+        
+        chunk_text = clean_llm_output(response).strip()
+        
+        # 可选：标准 QC
+        if enable_qc:
+            chunk_text, _ = await _quick_qc(
+                prose_text=chunk_text,
+                beat=beat,
+                beat_index=i + 1,
+                chapter=chapter,
+                book=book,
+                entities=entities,
+                relationships=relationships,
+                api_key=api_key,
+                base_url=base_url,
+                model=creative_model,
+                target_words=target_words,
+            )
+        
+        # 更新上下文
+        previous_tail = _extract_tail(chunk_text, max_chars=300)
+        
+        prompts_history = [{
+            "stage": "STANDARD_PATH",
+            "beat_index": i + 1,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+        }]
+        
+        results.append(BeatDraftResult(
+            beat_id=beat_id,
+            beat_index=i + 1,
+            scene_intent=scene_intent_results[i],
+            subconscious_thought=subconscious_results[i],
+            draft_chunk=chunk_text,
+            prompts=prompts_history,
+            mcts_rollout=None,
+        ))
+    
+    logger.info(f"[Standard Path] 均衡流生成完成，共 {len(results)} 个 Beats")
+    return results
+
+
+async def _execute_fortress_path(
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    beats: List[dict],
+    open_hooks: List[dict],
+    api_key: str,
+    base_url: str,
+    reasoning_model: str,
+    creative_model: str,
+    word_count: int,
+    previous_summary: Optional[str] = None,
+    relevant_memories: Optional[List[Any]] = None,
+    locations: Optional[List[Any]] = None,
+    enable_qc: bool = True,
+    feature_flags: Optional[DraftingFeatureFlags] = None,
+    physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
+) -> List[BeatDraftResult]:
+    """
+    V3.0 Tier 3: 堡垒流 (Fortress-Path)
+    
+    特点:
+    - MCTS 三分支 Subconscious 搜索
+    - 全部 5 维 DynamicContext
+    - Fail-Fast 断言检查
+    - 完整 STITCHING -> REVIEWING -> REFINING 闭环
+    
+    适用场景: 高张力关键剧情 (tension_level 4-5)
+    
+    注意：此函数保持 V2.5 完整实现，算力全开。
+    """
+    logger.info("[Fortress Path] 启动堡垒流生成（V2.5 完整管线）...")
+    flags = feature_flags or DraftingFeatureFlags()
+    stage_start = time.perf_counter()
+    
+    # ========================================================================
+    # 步骤 A: 并行生成轻量级思考层（无文本依赖）
+    # ========================================================================
+    logger.info("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
+    step_a_start = time.perf_counter()
+    
+    # A-1: 并行生成 Scene Intent
+    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
+        beats=beats,
+        chapter=chapter,
+        open_hooks=open_hooks,
+        api_key=api_key,
+        base_url=base_url,
+        model=reasoning_model,
+    )
+    
+    # A-2: 并行生成 Subconscious（依赖 Scene Intent，带 MCTS）
+    subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
+        beats=beats,
+        scene_intent_results=scene_intent_results,
+        chapter=chapter,
+        entities=entities,
+        api_key=api_key,
+        base_url=base_url,
+        model=reasoning_model,
+    )
+    
+    logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
+    
+    # ========================================================================
+    # 步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + DynamicContext）
+    # ========================================================================
+    logger.info("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
+    step_b_start = time.perf_counter()
+    
+    prose_results = await _generate_prose_serial_v25(
+        beats=beats,
+        scene_intent_results=scene_intent_results,
+        subconscious_results=subconscious_results,
+        chapter=chapter,
+        book=book,
+        entities=entities,
+        relationships=relationships,
+        api_key=api_key,
+        base_url=base_url,
+        creative_model=creative_model,
+        reasoning_model=reasoning_model,
+        word_count=word_count,
+        previous_summary=previous_summary,
+        relevant_memories=relevant_memories,
+        locations=locations,
+        enable_qc=enable_qc,
+        feature_flags=flags,
+        physical_state_lock=physical_state_lock,
+        entity_spatial_ledger=entity_spatial_ledger,
+        chapter_assets_schema=chapter_assets_schema,
+    )
+    
+    logger.info(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
+    
+    # ========================================================================
+    # 组装结果
+    # ========================================================================
+    results: List[BeatDraftResult] = []
+    for i, beat in enumerate(beats):
+        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+        
+        all_prompts = []
+        all_prompts.extend(scene_intent_prompts_list[i])
+        all_prompts.extend(subconscious_prompts_list[i])
+        all_prompts.extend(prose_results[i]["prompts"])
+        
+        result = BeatDraftResult(
+            beat_id=beat_id,
+            beat_index=i + 1,
+            scene_intent=scene_intent_results[i],
+            subconscious_thought=subconscious_results[i],
+            draft_chunk=prose_results[i]["text"],
+            prompts=all_prompts,
+            mcts_rollout=mcts_rollout_results[i],
+        )
+        results.append(result)
+    
+    logger.info(f"[Fortress Path] 堡垒流完成，总耗时 {time.perf_counter() - stage_start:.2f}s")
+    return results
+
+
+def build_fast_path_prompt(
+    chapter: Any,
+    book: Any,
+    beat: dict,
+    previous_tail: str,
+    target_words: int,
+    previous_summary: Optional[str] = None,
+) -> tuple[str, str]:
+    """V3.0 Fast-Path: 构建疾速流的简化 Prompt"""
+    
+    pov_character = beat.get("pov_character", "主角")
+    location = beat.get("location", "未指定")
+    summary = beat.get("summary", "")
+    red_lines = beat.get("red_lines", [])
+    
+    continuity = ""
+    if previous_tail:
+        continuity = f"\n【前文衔接】必须无缝衔接：{previous_tail}\n"
+    
+    previous_context = ""
+    if previous_summary:
+        previous_context = f"\n【前情回顾】{previous_summary}\n"
+    
+    red_lines_text = ""
+    if red_lines:
+        red_lines_text = f"\n【红线约束】{', '.join(red_lines)}"
+    
+    system_prompt = f"""你是专业小说写手。请根据以下信息直接生成小说正文。
+
+【章节背景】{getattr(chapter, 'chapter_name', f'第{getattr(chapter, "chapter_number", 1)}章')}
+【角色视角】{pov_character}
+【场景地点】{location}{previous_context}{continuity}{red_lines_text}
+
+要求：
+1. 直接输出小说正文，不要解释、不要总结
+2. 紧扣剧情目标，不偏离红线约束
+3. 字数约 {target_words} 字，允许适度超出
+4. 保持叙事连贯性，与前文无缝衔接
+5. 使用自然流畅的文学语言，避免AI腔
+"""
+    
+    user_prompt = f"【剧情目标】{summary}\n\n请生成以上内容的小说正文："
+    
+    return system_prompt, user_prompt
+
+
+def build_standard_path_prompt(
+    chapter: Any,
+    book: Any,
+    beat: dict,
+    scene_intent: dict,
+    subconscious: str,
+    previous_tail: str,
+    physical_state_lock: str,
+    target_words: int,
+) -> tuple[str, str]:
+    """V3.0 Standard-Path: 构建均衡流的 Prompt"""
+    
+    pov_character = beat.get("pov_character", "主角")
+    location = beat.get("location", "未指定")
+    summary = beat.get("summary", "")
+    
+    continuity = ""
+    if previous_tail:
+        continuity = f"\n【前文衔接】必须无缝衔接：{previous_tail}\n"
+    
+    physical_context = ""
+    if physical_state_lock:
+        physical_context = f"\n【物理状态锁】{physical_state_lock}\n"
+    
+    system_prompt = f"""你是专业小说写手。请根据以下信息生成小说正文。
+
+【章节背景】{getattr(chapter, 'chapter_name', f'第{getattr(chapter, "chapter_number", 1)}章')}
+【角色视角】{pov_character}
+【场景地点】{location}{continuity}{physical_context}
+
+【场景意图】{scene_intent.get('goal', summary)}
+【内心独白】{subconscious}
+
+要求：
+1. 将内心独白转化为具象化的动作、对话和环境描写
+2. 直接输出小说正文，不要解释
+3. 字数约 {target_words} 字
+4. 保持叙事连贯性
+"""
+    
+    user_prompt = f"【剧情目标】{summary}\n\n请生成以上内容的小说正文："
+    
+    return system_prompt, user_prompt
+
+
+async def _generate_lightweight_subconscious(
+    beats: List[dict],
+    scene_intent_results: List[dict],
+    chapter: Any,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> List[str]:
+    """
+    V3.0 Standard-Path: 轻量级 Subconscious（无 MCTS，单次生成 50 字内心定调）
+    """
+    async def _single_lightweight(beat: dict, scene_intent: dict) -> str:
+        system_prompt = "你是一位擅长内心独白描写的作家。请用一句话（50字以内）概括角色此刻的内心状态。"
+        
+        pov_character = beat.get("pov_character", "主角")
+        goal = scene_intent.get("goal", beat.get("summary", ""))
+        
+        user_prompt = f"""角色：{pov_character}
+场景目标：{goal}
+
+请输出角色此刻的内心独白（一句话，50字以内）："""
+        
+        try:
+            response = await call_llm(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                temperature=0.4,
+                max_tokens=100,
+            )
+            thought = clean_llm_output(response).strip()
+            # 限制长度
+            if len(thought) > 60:
+                thought = thought[:57] + "..."
+            return thought
+        except Exception as e:
+            logger.warning(f"[Lightweight Subconscious] 生成失败: {e}")
+            return f"{pov_character}深吸一口气，准备面对接下来的挑战。"
+    
+    tasks = [
+        _single_lightweight(beat, scene_intent_results[i])
+        for i, beat in enumerate(beats)
+    ]
+    return await asyncio.gather(*tasks)
