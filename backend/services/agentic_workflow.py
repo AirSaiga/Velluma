@@ -502,6 +502,14 @@ async def _generate_agentic_chapter_stream(
         if not success:
             bucket["failures"] = int(bucket["failures"]) + 1
 
+    # 为 drafting.py 提供的统计回调适配器
+    def drafting_stats_callback(stage: str, elapsed: float, success: bool, beat_index: Optional[int] = None):
+        """适配 drafting.py 的统计回调到 agentic_workflow 的统计系统"""
+        record_llm(stage, elapsed, success)
+        # 同时记录到 beat 级别的统计（如果提供了 beat_index）
+        if beat_index is not None:
+            record_stage(f"llm:{stage}", elapsed, beat_index=beat_index)
+
     def top_stage_items(source: dict[str, float], limit: int = 5) -> list[dict]:
         return [
             {"stage": stage, "seconds": secs}
@@ -1135,6 +1143,7 @@ async def _generate_agentic_chapter_stream(
                     physical_state_lock=physical_state_lock,
                     entity_spatial_ledger=None,
                     chapter_assets_schema=chapter.chapter_assets_schema or "",
+                    stats_callback=drafting_stats_callback,
                 )
                 
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
@@ -1530,18 +1539,23 @@ async def _generate_agentic_chapter_stream(
                             prompt_label="BROADCAST_REFINE"
                         )
                         
-                        # 复用已有的安全精修函数
+                        # =======================================================================
+                        # Bug 1 修复：精准制导打点精修
+                        # 传入 beat_id 和 all_issues，让 refine_single_beat 内部过滤适用当前 beat 的问题
+                        # =======================================================================
                         refined_chunk = await refine_single_beat(
                             beat=beat,
                             original_chunk=original_chunk,
                             revision_guide=global_revision_plan,
-                            issue_descriptions=["基于审阅反馈的全局修订"],
+                            issue_descriptions=[],  # 空列表，让函数内部基于 all_issues 过滤
                             chapter=chapter,
                             book=book,
                             api_key=request.api_key,
                             base_url=request.base_url,
                             model=reasoning_model,
                             previous_tail=previous_tail,
+                            beat_id=beat_id,  # Bug 1 修复：传入当前 beat_id
+                            all_issues=all_issues,  # Bug 1 修复：传入所有 issues 供内部过滤
                         )
                         
                         beat_chunk_map[beat_id] = refined_chunk
@@ -1552,7 +1566,7 @@ async def _generate_agentic_chapter_stream(
                         )
                         prompt_logger.end_stage(success=bool(refined_chunk))
                         
-                        logger.info(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                        logger.info(f"[Targeted Refine] Beat {beat_id} refined with targeted issues only.")
                         
                     except Exception as e:
                         logger.error(f"[Broadcast Refine] Failed to refine beat {beat_id}: {e}")
@@ -1711,19 +1725,24 @@ async def _generate_agentic_chapter_stream(
                         "issue_descriptions": issue_descriptions
                     })
 
-                    # 使用新的 refine_single_beat 函数进行精修
+                    # =======================================================================
+                    # Bug 1 修复：使用精准制导打点精修
+                    # 传入 beat_id 和 all_issues，由 refine_single_beat 内部统一处理过滤逻辑
+                    # =======================================================================
                     refine_started_at = time.perf_counter()
                     refined_chunk = await refine_single_beat(
                         beat=beat_info,
                         original_chunk=original_chunk,
                         revision_guide=revision_plan,
-                        issue_descriptions=issue_descriptions,
+                        issue_descriptions=issue_descriptions,  # 保留已过滤的描述作为备选
                         chapter=chapter,
                         book=book,
                         api_key=request.api_key,
                         base_url=request.base_url,
                         model=reasoning_model,  # 使用 reasoning_model 以获得强指令遵循能力
                         previous_tail=previous_tail,
+                        beat_id=beat_id,  # Bug 1 修复：传入当前 beat_id
+                        all_issues=all_issues,  # Bug 1 修复：传入所有 issues 供内部过滤
                     )
                     refine_elapsed = time.perf_counter() - refine_started_at
 
@@ -1891,18 +1910,23 @@ async def _generate_agentic_chapter_stream(
                         prompt_label="BROADCAST_REFINE"
                     )
                     
-                    # 复用已有的安全精修函数
+                    # =======================================================================
+                    # Bug 1 修复：精准制导打点精修
+                    # 传入 beat_id 和 all_issues，让 refine_single_beat 内部过滤适用当前 beat 的问题
+                    # =======================================================================
                     refined_chunk = await refine_single_beat(
                         beat=beat,
                         original_chunk=original_chunk,
                         revision_guide=global_revision_plan,
-                        issue_descriptions=["基于审阅反馈的全局修订"],
+                        issue_descriptions=[],  # 空列表，让函数内部基于 all_issues 过滤
                         chapter=chapter,
                         book=book,
                         api_key=request.api_key,
                         base_url=request.base_url,
                         model=reasoning_model,
                         previous_tail=previous_tail,
+                        beat_id=beat_id,  # Bug 1 修复：传入当前 beat_id
+                        all_issues=all_issues,  # Bug 1 修复：传入所有 issues 供内部过滤
                     )
                     
                     beat_chunk_map[beat_id] = refined_chunk
@@ -1913,7 +1937,7 @@ async def _generate_agentic_chapter_stream(
                     )
                     prompt_logger.end_stage(success=bool(refined_chunk))
                     
-                    logger.info(f"[Broadcast Refine] Beat {beat_id} refined successfully.")
+                    logger.info(f"[Targeted Refine] Beat {beat_id} refined with targeted issues only.")
                     
                 except Exception as e:
                     logger.error(f"[Broadcast Refine] Failed to refine beat {beat_id}: {e}")

@@ -183,6 +183,10 @@ def build_subconscious_prompt(
     intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
     
     system_prompt = f"""你是一个顶级小说导演与心理学推演机。
+
+🔒 【绝对系统指令 - 最高优先级 POV 锁定】
+你当前附身（POV）的角色是【{pov_character}】。哪怕当前剧情（Beat）正在集中描写其他角色的死亡或受难，你的潜意识也绝对【不能】代入受害者！你只能输出【{pov_character}】作为一个旁观者或执行者的心理动态和生理反应！严禁代入被描写对象的主观感受！
+
 当前视角角色（POV）：【{pov_character}】
 当前物理知觉状态：【{effective_perception_state}】 (警告：如果状态为半昏迷或受限，潜意识中绝不可出现主动反击、清醒说话的意图！)
 

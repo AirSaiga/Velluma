@@ -39,7 +39,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable, Awaitable
 from pydantic import BaseModel
 
 # 配置模块级日志记录器
@@ -69,6 +69,75 @@ from backend.services.prompts import (
 )
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
+
+# =============================================================================
+# LLM 调用统计回调类型定义
+# =============================================================================
+# 设计意图：允许外部（如 agentic_workflow）注入统计回调，统一追踪 LLM 调用次数和耗时
+# 使用方式：
+#   - 外部传入 callback: Callable[[str, float, bool, Optional[int]], None]
+#   - 参数：stage_name(阶段名), elapsed_seconds(耗时), success(是否成功), beat_index(Beat索引,可选)
+LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]
+
+
+async def _call_llm_with_stats(
+    stage: str,
+    *,
+    api_key: str,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    system_prompt: str = "",
+    user_prompt: str = "",
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    response_format: Optional[dict] = None,
+    top_p: float = 1.0,
+    beat_index: Optional[int] = None,
+    stats_callback: LLMStatsCallback = None,
+) -> str:
+    """
+    带统计追踪的 LLM 调用包装器。
+    
+    职责：在调用 call_llm 的同时，通过回调函数记录调用统计信息。
+    
+    Args:
+        stage: 阶段标识符（如 "scene_intent", "subconscious", "prose_draft"）
+        api_key: LLM API Key
+        base_url: LLM Base URL
+        model: 模型名称
+        system_prompt: 系统提示词
+        user_prompt: 用户提示词
+        temperature: 温度参数
+        max_tokens: 最大 token 数
+        response_format: 响应格式（如 JSON 模式）
+        top_p: Top-p 采样参数
+        beat_index: Beat 索引（用于按 Beat 统计）
+        stats_callback: 统计回调函数，若为 None 则跳过统计
+    
+    Returns:
+        str: LLM 生成的文本内容
+    """
+    start_time = time.perf_counter()
+    success = True
+    try:
+        return await call_llm(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            top_p=top_p,
+        )
+    except Exception:
+        success = False
+        raise
+    finally:
+        if stats_callback:
+            elapsed = time.perf_counter() - start_time
+            stats_callback(stage, elapsed, success, beat_index)
 
 
 class BeatDraftResult(BaseModel):
@@ -116,6 +185,7 @@ async def execute_draft_stage(
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
     workflow_tier: Optional[WorkflowTier] = None,  # V3.0 NEW
+    stats_callback: LLMStatsCallback = None,  # LLM 调用统计回调（可选）
 ) -> List[BeatDraftResult]:
     """
     V3.0 智能路由起草阶段主入口。
@@ -146,6 +216,7 @@ async def execute_draft_stage(
         feature_flags: V3.0 功能开关配置（可选）
         physical_state_lock: 主角物理状态锁定描述（可选）
         workflow_tier: 工作流层级（可选，默认从 beats[0] 或 flags 获取）
+        stats_callback: LLM 调用统计回调函数（可选），用于追踪各阶段调用次数和耗时
     
     Returns:
         List[BeatDraftResult]: 按 Beat 顺序排列的生成结果列表
@@ -191,6 +262,7 @@ async def execute_draft_stage(
             creative_model=creative_model,
             word_count=word_count,
             previous_summary=previous_summary,
+            stats_callback=stats_callback,
         )
     elif effective_tier == "TIER_2_STANDARD":
         return await _execute_standard_path(
@@ -213,6 +285,7 @@ async def execute_draft_stage(
             physical_state_lock=physical_state_lock,
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
+            stats_callback=stats_callback,
         )
     else:  # TIER_3_FORTRESS
         return await _execute_fortress_path(
@@ -235,6 +308,7 @@ async def execute_draft_stage(
             physical_state_lock=physical_state_lock,
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
+            stats_callback=stats_callback,
         )
 
 
@@ -245,6 +319,7 @@ async def _generate_scene_intent_batch(
     api_key: str,
     base_url: str,
     model: str,
+    stats_callback: LLMStatsCallback = None,
 ) -> tuple[List[dict], List[List[dict]]]:
     """
     步骤 A-1: 批量并行生成 Scene Intent。
@@ -259,6 +334,7 @@ async def _generate_scene_intent_batch(
         api_key: LLM API Key
         base_url: LLM Base URL
         model: 模型名称
+        stats_callback: LLM 调用统计回调（可选）
     
     Returns:
         tuple[List[dict], List[List[dict]]]: (Scene Intent 结果列表, 每个 Beat 的 prompts 列表)
@@ -297,7 +373,8 @@ async def _generate_scene_intent_batch(
                 "temperature": 0.2,
             })
             
-            response = await call_llm(
+            response = await _call_llm_with_stats(
+                stage="scene_intent",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 api_key=api_key,
@@ -306,6 +383,8 @@ async def _generate_scene_intent_batch(
                 temperature=0.2,
                 response_format={"type": "json_object"},
                 max_tokens=600,
+                beat_index=beat_index,
+                stats_callback=stats_callback,
             )
             
             scene_intent = parse_scene_intent_result(response, beat.get("summary", ""))
@@ -343,6 +422,7 @@ async def _generate_subconscious_batch(
     api_key: str,
     base_url: str,
     model: str,
+    stats_callback: LLMStatsCallback = None,
 ) -> tuple[List[str], List[Optional[list]], List[List[dict]]]:
     """
     步骤 A-2: 批量并行生成 Subconscious（潜意识层）。
@@ -358,6 +438,7 @@ async def _generate_subconscious_batch(
         api_key: LLM API Key
         base_url: LLM Base URL
         model: 模型名称
+        stats_callback: LLM 调用统计回调（可选）
     
     Returns:
         tuple[List[str], List[Optional[list]], List[List[dict]]]: (潜意识独白列表, MCTS rollout 列表, 每个 Beat 的 prompts 列表)
@@ -405,7 +486,8 @@ async def _generate_subconscious_batch(
                 "temperature": 0.4,
             })
             
-            response = await call_llm(
+            response = await _call_llm_with_stats(
+                stage="subconscious",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 api_key=api_key,
@@ -414,6 +496,8 @@ async def _generate_subconscious_batch(
                 temperature=0.4,  # 推理任务需更确定
                 max_tokens=1000,  # JSON 结构需更多 token
                 response_format={"type": "json_object"},
+                beat_index=beat_index,
+                stats_callback=stats_callback,
             )
             
             # 清理并尝试解析 MCTS JSON
@@ -486,6 +570,7 @@ async def _generate_prose_serial_v25(
     physical_state_lock: Optional[str] = None,
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
+    stats_callback: LLMStatsCallback = None,
 ) -> List[dict]:
     """
     步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + 认知组件）。
@@ -523,6 +608,7 @@ async def _generate_prose_serial_v25(
         enable_qc: 是否启用质检
         feature_flags: V2.5 功能开关配置
         physical_state_lock: 主角物理状态锁定描述
+        stats_callback: LLM 调用统计回调（可选）
     
     Returns:
         List[dict]: 按 Beat 顺序排列的结果列表，每项包含 {"text": str, "prompts": list}
@@ -624,8 +710,9 @@ async def _generate_prose_serial_v25(
                 logger.info(f"[Prose V25] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts} (temp={current_temp:.2f})...")
                 prose_start = time.perf_counter()
                 
-                # 生成正文
-                response = await call_llm(
+                # 生成正文（带统计追踪）
+                response = await _call_llm_with_stats(
+                    stage="prose_draft",
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     api_key=api_key,
@@ -633,6 +720,8 @@ async def _generate_prose_serial_v25(
                     model=creative_model,
                     temperature=current_temp,
                     max_tokens=_clamp_tokens(target_words),
+                    beat_index=beat_index,
+                    stats_callback=stats_callback,
                 )
                 
                 chunk_text = clean_llm_output(response).strip()
@@ -651,6 +740,8 @@ async def _generate_prose_serial_v25(
                         base_url=base_url,
                         model=reasoning_model,
                         entity_spatial_ledger=dynamic_context.entity_spatial_ledger if dynamic_context.entity_spatial_ledger else None,
+                        beat_index=beat_index,
+                        stats_callback=stats_callback,
                     )
                     
                     if not is_valid:
@@ -770,6 +861,8 @@ async def _micro_review_assertion(
     base_url: str = "",
     model: str = "",
     entity_spatial_ledger: Optional[dict] = None,
+    beat_index: Optional[int] = None,
+    stats_callback: LLMStatsCallback = None,
 ) -> tuple[bool, str, List[str]]:
     """
     V3.0 Fail-Fast 微审查断言（增强版）。
@@ -802,6 +895,8 @@ async def _micro_review_assertion(
         base_url: LLM Base URL
         model: 模型名称（建议使用轻量级模型）
         entity_spatial_ledger: 角色空间账本（可选）
+        beat_index: Beat 索引（用于统计）
+        stats_callback: LLM 调用统计回调（可选）
     
     Returns:
         tuple[bool, str, List[str]]: (是否通过, 失败原因, 失败类别列表)
@@ -829,7 +924,8 @@ async def _micro_review_assertion(
             character_static_prompts=char_prompts,
         )
         
-        response = await call_llm(
+        response = await _call_llm_with_stats(
+            stage="micro_review",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             api_key=api_key,
@@ -838,6 +934,8 @@ async def _micro_review_assertion(
             temperature=0.0,  # 确定性输出
             response_format={"type": "json_object"},
             max_tokens=200,  # 极短输出
+            beat_index=beat_index,
+            stats_callback=stats_callback,
         )
         
         # 解析 JSON 结果
@@ -1614,6 +1712,7 @@ async def _execute_fast_path(
     creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
+    stats_callback: LLMStatsCallback = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 Tier 1: 疾速流 (Fast-Path)
@@ -1644,8 +1743,9 @@ async def _execute_fast_path(
             previous_summary=previous_summary,
         )
         
-        # 单次调用 creative_model
-        response = await call_llm(
+        # 单次调用 creative_model（带统计追踪）
+        response = await _call_llm_with_stats(
+            stage="fast_path_prose",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             api_key=api_key,
@@ -1653,6 +1753,8 @@ async def _execute_fast_path(
             model=creative_model,
             temperature=0.75,
             max_tokens=_clamp_tokens(target_words),
+            beat_index=i + 1,
+            stats_callback=stats_callback,
         )
         
         chunk_text = clean_llm_output(response).strip()
@@ -1694,6 +1796,7 @@ async def _execute_standard_path(
     physical_state_lock: Optional[str] = None,
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
+    stats_callback: LLMStatsCallback = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 Tier 2: 均衡流 (Standard-Path)
@@ -1717,6 +1820,7 @@ async def _execute_standard_path(
         api_key=api_key,
         base_url=base_url,
         model=reasoning_model,
+        stats_callback=stats_callback,
     )
     
     # 步骤 B: 轻量级 Subconscious（无 MCTS）
@@ -1727,6 +1831,7 @@ async def _execute_standard_path(
         api_key=api_key,
         base_url=base_url,
         model=reasoning_model,
+        stats_callback=stats_callback,
     )
     
     # 步骤 C: 串行生成正文（使用简化版 DynamicContext）
@@ -1750,8 +1855,9 @@ async def _execute_standard_path(
             target_words=target_words,
         )
         
-        # 调用 creative_model
-        response = await call_llm(
+        # 调用 creative_model（带统计追踪）
+        response = await _call_llm_with_stats(
+            stage="standard_path_prose",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             api_key=api_key,
@@ -1759,6 +1865,8 @@ async def _execute_standard_path(
             model=creative_model,
             temperature=0.75,
             max_tokens=_clamp_tokens(target_words),
+            beat_index=i + 1,
+            stats_callback=stats_callback,
         )
         
         chunk_text = clean_llm_output(response).strip()
@@ -1823,6 +1931,7 @@ async def _execute_fortress_path(
     physical_state_lock: Optional[str] = None,
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
+    stats_callback: LLMStatsCallback = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 Tier 3: 堡垒流 (Fortress-Path)
@@ -1855,6 +1964,7 @@ async def _execute_fortress_path(
         api_key=api_key,
         base_url=base_url,
         model=reasoning_model,
+        stats_callback=stats_callback,
     )
     
     # A-2: 并行生成 Subconscious（依赖 Scene Intent，带 MCTS）
@@ -1866,6 +1976,7 @@ async def _execute_fortress_path(
         api_key=api_key,
         base_url=base_url,
         model=reasoning_model,
+        stats_callback=stats_callback,
     )
     
     logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
@@ -1897,6 +2008,7 @@ async def _execute_fortress_path(
         physical_state_lock=physical_state_lock,
         entity_spatial_ledger=entity_spatial_ledger,
         chapter_assets_schema=chapter_assets_schema,
+        stats_callback=stats_callback,
     )
     
     logger.info(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
@@ -2026,11 +2138,12 @@ async def _generate_lightweight_subconscious(
     api_key: str,
     base_url: str,
     model: str,
+    stats_callback: LLMStatsCallback = None,
 ) -> List[str]:
     """
     V3.0 Standard-Path: 轻量级 Subconscious（无 MCTS，单次生成 50 字内心定调）
     """
-    async def _single_lightweight(beat: dict, scene_intent: dict) -> str:
+    async def _single_lightweight(beat: dict, scene_intent: dict, beat_index: int) -> str:
         system_prompt = "你是一位擅长内心独白描写的作家。请用一句话（50字以内）概括角色此刻的内心状态。"
         
         pov_character = beat.get("pov_character", "主角")
@@ -2042,7 +2155,8 @@ async def _generate_lightweight_subconscious(
 请输出角色此刻的内心独白（一句话，50字以内）："""
         
         try:
-            response = await call_llm(
+            response = await _call_llm_with_stats(
+                stage="lightweight_subconscious",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 api_key=api_key,
@@ -2050,6 +2164,8 @@ async def _generate_lightweight_subconscious(
                 model=model,
                 temperature=0.4,
                 max_tokens=100,
+                beat_index=beat_index,
+                stats_callback=stats_callback,
             )
             thought = clean_llm_output(response).strip()
             # 限制长度
@@ -2061,7 +2177,7 @@ async def _generate_lightweight_subconscious(
             return f"{pov_character}深吸一口气，准备面对接下来的挑战。"
     
     tasks = [
-        _single_lightweight(beat, scene_intent_results[i])
+        _single_lightweight(beat, scene_intent_results[i], i + 1)
         for i, beat in enumerate(beats)
     ]
     return await asyncio.gather(*tasks)

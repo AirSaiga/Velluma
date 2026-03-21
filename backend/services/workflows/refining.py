@@ -79,34 +79,66 @@ async def refine_single_beat(
     base_url: str,
     model: str,
     previous_tail: str = "",
+    beat_id: str = None,
+    all_issues: list[dict] = None,
 ) -> str:
     """对单个 Beat 进行精准局部重写。
 
     基于 Review Agent 给出的审查驳回原因和修改计划，对指定 Beat 的草稿
     进行针对性精修。通过强调驳回原因和具体问题，确保 LLM 严格遵循修改指令。
 
+    【Bug 1 修复 - 精准制导打点精修】
+    实现算法：I_k = { i ∈ I | k ∈ i.target_beat_ids }
+    只将 target_beat_ids 包含当前 beat_id 的 issues 传入该 beat 的精修。
+
     Args:
         beat: Beat 信息字典，应包含 summary、pov_character、entry_state、
               exit_state、red_lines 等字段
         original_chunk: 待修改的原始草稿文本
         revision_guide: Review Agent 给出的全局修改计划
-        issue_descriptions: 针对该 beat 的具体问题描述列表
+        issue_descriptions: 针对该 beat 的具体问题描述列表（兼容性保留）
         chapter: 章节实体
         book: 书籍实体
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
         previous_tail: 前一 Beat 的尾巴文本，用于保持语气衔接
+        beat_id: 当前 Beat 的唯一标识（用于精准匹配 issues）
+        all_issues: Review Agent 返回的所有 issues 列表，包含 target_beat_ids
 
     Returns:
         str: 精修后的正文
     """
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
 
+    # =======================================================================
+    # Bug 1 修复：精准制导打点精修 - 只传入与当前 beat 相关的 issues
+    # 算法：I_k = { i ∈ I | k ∈ i.target_beat_ids }
+    # =======================================================================
+    targeted_issues = []
+    
+    if all_issues and isinstance(all_issues, list):
+        # 从 beat 中提取 beat_id
+        current_beat_id = beat_id or beat.get("beat_id") or beat.get("id")
+        if current_beat_id:
+            for issue in all_issues:
+                if isinstance(issue, dict):
+                    target_beat_ids = issue.get("target_beat_ids", [])
+                    # 如果 issue 没有指定 target_beat_ids，或包含当前 beat_id，则适用
+                    if not target_beat_ids or current_beat_id in target_beat_ids:
+                        targeted_issues.append(issue.get("description", ""))
+    
+    # 合并传入的 issue_descriptions（兼容性处理）
+    if issue_descriptions:
+        targeted_issues.extend([desc for desc in issue_descriptions if desc])
+    
+    # 去重
+    targeted_issues = list(dict.fromkeys(targeted_issues))
+
     # 构建问题描述列表
     issues_text = ""
-    if issue_descriptions:
-        issues_list = "\n".join(f"- {desc}" for desc in issue_descriptions if desc)
+    if targeted_issues:
+        issues_list = "\n".join(f"- {desc}" for desc in targeted_issues if desc)
         issues_text = f"""
 针对本段的具体问题：
 {issues_list}
