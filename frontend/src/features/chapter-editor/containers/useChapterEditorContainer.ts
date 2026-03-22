@@ -306,13 +306,24 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     previewBeats.value = []
     pendingAgenticPayload.value = null
     pendingClearEditorOnConfirm.value = false
+    // 取消进行中的预览请求
+    if (previewAbortController) {
+      previewAbortController.abort()
+      previewAbortController = null
+    }
   }
 
   async function previewBeatsForReview(payload: GenerateChapterAgenticPayload, clearEditorOnConfirm: boolean) {
+    // 取消之前的请求（如果有）
+    if (previewAbortController) {
+      previewAbortController.abort()
+    }
+    previewAbortController = new AbortController()
+
     beatPreviewLoading.value = true
     beatPreviewError.value = ''
     try {
-      const result = await generateApi.previewAgenticBeats(payload)
+      const result = await generateApi.previewAgenticBeats(payload, previewAbortController.signal)
       const beats = Array.isArray(result?.beats) ? result.beats : []
       if (!beats.length) {
         throw new Error('未生成可用节拍，请调整大纲后重试')
@@ -341,10 +352,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       pendingClearEditorOnConfirm.value = clearEditorOnConfirm
       showBeatReviewModal.value = true
     } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        // 用户主动取消，不显示错误
+        return
+      }
       beatPreviewError.value = (err as Error).message || '节拍预览失败'
       showToast('节拍预览失败: ' + beatPreviewError.value, 'error')
     } finally {
       beatPreviewLoading.value = false
+      previewAbortController = null
     }
   }
 
@@ -354,6 +370,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   const isFormatting = ref(false)
+  let previewAbortController: AbortController | null = null
 
   async function handleFormatText(payload: string | { text: string; selection?: { from: number; to: number } }) {
     const text = typeof payload === 'string' ? payload : payload.text
@@ -486,6 +503,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         if (editorRef.value) {
           editorRef.value.flushBuffer()
         }
+        if (result.text) {
+          if (editorRef.value) {
+            editorRef.value.clearContent()
+            editorRef.value.insertContent(result.text)
+          }
+        }
         syncGeneratedContentToChapter()
         const durationText = getDurationText()
         const metrics = result?.metrics
@@ -500,9 +523,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         const llmCalls = Number(metrics?.llm?.calls || 0)
         const llmFailures = Number(metrics?.llm?.failures || 0)
         const llmText = llmCalls > 0 ? `；LLM调用 ${llmCalls} 次（失败 ${llmFailures} 次）` : ''
+        // 双轨模式返回 revision_count，普通模式可能返回 iterations
+        const revisionCount = result.revision_count ?? result.iterations ?? 0
         const statusMsg = result.passed
-          ? `本章正文生成完成！审查通过，共重写 ${result.revision_count} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
-          : `本章正文生成完成！已达成最大迭代次数，共重写 ${result.revision_count} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
+          ? `本章正文生成完成！审查通过，共重写 ${revisionCount} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
+          : `本章正文生成完成！已达成最大迭代次数，共重写 ${revisionCount} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
         openCompletionModal('生成完成', statusMsg)
       }
     }, '/generate_chapter_agentic_with_beats')

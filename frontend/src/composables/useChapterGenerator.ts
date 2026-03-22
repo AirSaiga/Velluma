@@ -163,7 +163,8 @@ export function useChapterGenerator() {
       },
       onDone: (result) => {
         workflowState.value.passed = result.passed
-        workflowState.value.revisionCount = result.revision_count
+        // 双轨模式返回 revision_count，普通模式可能返回 iterations
+        workflowState.value.revisionCount = result.revision_count ?? result.iterations ?? 0
         isGenerating.value = false
         callbacks.onComplete?.(result)
       },

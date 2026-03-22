@@ -161,6 +161,59 @@ export const mapApi = {
   }
 }
 
+async function streamDualTrackFn(
+  chapterId: string,
+  data: any,
+  callbacks: {
+    onEvent?: (event: string, data: any) => void
+    onChunk?: (chunk: string) => void
+    onDone?: (result: any) => void
+    onError?: (error: string) => void
+  }
+) {
+  let hasCompleted = false
+
+  streamSse(`/chapters/${chapterId}/generate-dual-track`, data, {
+    onPayload: payload => {
+      if (payload.prompt) {
+        publishPromptData(payload.prompt)
+      }
+
+      if (payload.event) {
+        callbacks.onEvent?.(payload.event, payload)
+
+        if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            text: payload.text,
+            stats: payload.stats,
+            alignment_score: payload.alignment_score,
+            passed: payload.passed,
+            iterations: payload.iterations,
+            revision_count: payload.revision_count
+          })
+          return true
+        }
+      }
+    },
+    onDone: () => {
+      if (!hasCompleted) {
+        callbacks.onError?.('生成过程意外中断，未收到完成信号')
+      }
+    },
+    onError: message => {
+      hasCompleted = true
+      callbacks.onError?.(message)
+    }
+  }).catch(err => {
+    if (!hasCompleted) {
+      callbacks.onError?.(err.message)
+    }
+  })
+}
+
 export const generateApi = {
   stream: async (data: any, onChunk?: (chunk: string) => void, onDone?: () => void, onError?: (error: string) => void) => {
     const baseUrl = await getApiBase()
@@ -226,11 +279,17 @@ export const generateApi = {
     return response.json()
   },
 
-  previewAgenticBeats: async (data: any) => {
-    const response = await requestRaw('/generate_chapter_agentic_preview_beats', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
+  previewAgenticBeats: async (data: any, abortSignal?: AbortSignal) => {
+    // 节拍预览需要调用 LLM，设置 5 分钟超时
+    const response = await requestRaw(
+      '/generate_chapter_agentic_preview_beats',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+        signal: abortSignal
+      },
+      300000
+    )
 
     if (!response.ok) {
       throw new Error(`节拍预览请求失败: ${response.status} ${response.statusText}`)
@@ -239,6 +298,10 @@ export const generateApi = {
     return response.json()
   },
 
+  /**
+   * Agentic 章节生成（V3.5 默认使用双轨对抗架构）
+   * @param useLegacyMode - 是否使用传统单轨模式（默认 false，使用双轨）
+   */
   streamAgentic: async (
     data: any,
     callbacks: {
@@ -247,8 +310,13 @@ export const generateApi = {
       onDone?: (result: any) => void
       onError?: (error: string) => void
     },
-    endpoint = '/generate_chapter_agentic'
+    endpoint = '/generate_chapter_agentic',
+    useLegacyMode = false
   ) => {
+    // V3.5 默认使用双轨模式，除非显式指定使用传统模式
+    if (!useLegacyMode && data.chapter_id) {
+      return streamDualTrackFn(data.chapter_id, data, callbacks)
+    }
     let hasCompleted = false
 
     streamSse(endpoint, data, {
@@ -338,6 +406,39 @@ export const generateApi = {
     }
 
     return await response.json()
+  },
+
+  /**
+   * V3.5 双轨生成 - 流式输出
+   * 使用双轨对抗架构生成章节，包含短文生成和对抗校对
+   */
+  streamDualTrack: async (
+    chapterId: string,
+    data: any,
+    callbacks: {
+      onEvent?: (event: string, data: any) => void
+      onChunk?: (chunk: string) => void
+      onDone?: (result: any) => void
+      onError?: (error: string) => void
+    }
+  ) => {
+    return streamDualTrackFn(chapterId, data, callbacks)
+  },
+
+  /**
+   * V3.5 双轨生成 - 非流式（简化版）
+   */
+  generateDualTrackSimple: async (chapterId: string, data: any) => {
+    const response = await requestRaw(`/chapters/${chapterId}/generate-dual-track-simple`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`双轨生成请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
   }
 }
 

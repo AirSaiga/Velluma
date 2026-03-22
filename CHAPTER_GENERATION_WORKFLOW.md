@@ -6,6 +6,10 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 - **reasoning_model**: 高逻辑模型，用于 Scene Intent、Subconscious、Review 阶段
 - **creative_model**: 高创意模型，用于 Prose Draft 阶段
 
+### V3.0 智能路由架构
+
+基于 `tension_level`（剧情张力等级 1-5）自动选择执行路径，实现算力资源的智能分配：
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         文章生成主流程 (最多5轮迭代)                      │
@@ -17,11 +21,129 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 │  FINAL_TEXT_STREAM                                                      │
 └─────────────────────────────────────────────────────────────────────────┘
 
+V3.0 智能路由三档执行路径：
+┌─────────────────┬─────────────────┬─────────────────────────────────────┐
+│   TIER_1_FAST   │ TIER_2_STANDARD │        TIER_3_FORTRESS              │
+│    (疾速流)      │    (均衡流)      │         (堡垒流)                    │
+├─────────────────┼─────────────────┼─────────────────────────────────────┤
+│ tension: 1-2    │ tension: 3      │ tension: 4-5                        │
+│ Scene Intent: ✗ │ Scene Intent: ✓ │ Scene Intent: ✓                     │
+│ Subconscious: ✗ │ Subconscious: ✓ │ Subconscious: ✓ (MCTS三分支)         │
+│ DynamicContext: │ CoreDC only     │ Full 5D DynamicContext              │
+│   Rolling Prefix│                 │                                     │
+│ Fail-Fast: ✗    │ Fail-Fast: ✓    │ Fail-Fast: ✓                        │
+│ Stitching: ✗    │ Stitching: ✓    │ Stitching: ✓                        │
+│ Reviewing: 简版 │ Reviewing: 标准 │ Reviewing: 完整                     │
+└─────────────────┴─────────────────┴─────────────────────────────────────┘
+
 核心特性：
 - 双模型架构：reasoning_model（高逻辑）+ creative_model（高创意）
 - V2.5 认知流式生成：Scene Intent + Subconscious 并行，Prose 串行 Rolling Prefix
 - DynamicContext：跨 Beat 流转的五维认知状态容器
 - Fail-Fast 机制：即时断言检查与回溯重试
+- V3.0 四重锁：Asset Schema + Perception Masking + Tonality + Red Lines
+
+### V3.5 双轨对抗架构 (Dual Track)
+
+为解决**并行生成连贯性差**与**串行生成耗时长**的矛盾，引入双轨架构：
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     V3.5 双轨对抗架构 (推荐用于多节拍章节)                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Phase 1: 节拍生成 (PLANNING)                                            │
+│       ↓                                                                 │
+│  Phase 2: 双轨并行生成 (DUAL TRACK GENERATION)                           │
+│       ├─ Track A: 节拍扩写 (Drafting) ──────────────────────────────┐   │
+│       │   Beat[1] → Text[1], Beat[2] → Text[2], ...                 │   │
+│       │                                                             │   │
+│       └─ Track B: 短文生成 (Sketch) ────────────────────────────────┤   │
+│           基于 Beats 生成连贯速写 (40-50% 字数)                     │   │
+│           输出: Sketch + 转折点映射 + 情绪曲线                       │   │
+│                                                                    ↓   │
+│  Phase 3: 节拍统稿 (STITCHING) ─────→ Draft_A                       │   │
+│                                                                    ↓   │
+│  Phase 4: 对抗校对 (ADVERSARIAL ALIGNMENT)                          │   │
+│           对比 Draft_A vs Sketch                                   │   │
+│           - 结构对齐: 转折点位置偏移检测                            │   │
+│           - 情绪对齐: 情绪曲线一致性                                │   │
+│           - 信息对齐: 关键信息揭示时机                              │   │
+│           - 归因分析: beat_design / expansion_drift / segment_boundary │
+│                                                                    ↓   │
+│  Phase 5: 融合精修 (FUSION REFINEMENT) ─────────────────────────────┘   │
+│           基于 Alignment Plan 修复 Draft_A                              │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**双轨架构 vs 传统方案：**
+
+| 维度 | 串行生成 | 纯并行 | 双轨对抗 |
+|------|---------|--------|---------|
+| 时间复杂度 | N × T | T | T (并行+轻量校对) |
+| 连贯性 | ⭐⭐⭐ | ⭐ | ⭐⭐⭐ |
+| 跨节拍过渡 | ⭐⭐⭐ | ⭐ | ⭐⭐⭐ |
+| 算力消耗 | 中 | 低 | 中 (+1次 Sketch 调用) |
+
+**核心组件：**
+
+1. **SketchGenerator** (`workflows/sketch_generator.py`)
+   - 职责：生成连贯速写短文（Track B）
+   - 特点：连续叙述流，不标记节拍边界，记录转折点映射
+   - 字数：正文字数的 40-50%（默认 45%）
+   - 输出：`SketchResult` (sketch_text, turn_markers, emotion_arc)
+
+2. **AdversarialAligner** (`workflows/adversarial_aligner.py`)
+   - 职责：对比 Draft_A 和 Sketch，检测差异
+   - 检测维度：结构对齐、情绪对齐、信息对齐、首尾对齐
+   - 归因分析：判断问题根源（beat_design/expansion_drift/segment_boundary/sketch_hallucination）
+   - 输出：`AdjustmentPlan` (alignment_score, gaps, beat_adjustments)
+
+3. **DualTrackWorkflow** (`workflows/dual_track.py`)
+   - 职责：整合双轨流程，提供统一入口
+   - 使用：`execute_dual_track_generation()` 便捷函数
+   - 配置：`DualTrackConfig` (enable_sketch_track, alignment_threshold, ...)
+
+**使用方式：**
+
+```python
+from backend.services.workflows.dual_track import (
+    DualTrackWorkflow, DualTrackConfig
+)
+
+workflow = DualTrackWorkflow(
+    api_key=api_key,
+    base_url=base_url,
+    reasoning_model=reasoning_model,
+    creative_model=creative_model,
+    config=DualTrackConfig(
+        enable_sketch_track=True,
+        enable_adversarial_alignment=True,
+        alignment_threshold=70.0,
+    ),
+)
+
+result = await workflow.execute(
+    chapter=chapter,
+    book=book,
+    beats=beats,
+    entities=entities,
+    relationships=relationships,
+    word_count=word_count,
+)
+
+# result.final_text: 最终正文
+# result.sketch_result: 速写结果
+# result.adjustment_plan: 对抗校对结果（含 alignment_score）
+```
+
+**推荐场景：**
+- ✅ 节拍数 > 3 的章节
+- ✅ 对连贯性要求高的场景（情感文、悬疑文）
+- ✅ 可以接受 10-20% 时间增加换取更高连贯性
+- ❌ 单节拍章节（没必要）
+- ❌ 极致速度要求（使用 TIER_1_FAST）
 ```
 
 ---
@@ -30,7 +152,7 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 ### Phase 1: ASSEMBLING_CONTEXT（上下文组装）
 
-**文件**: `backend/services/agentic_workflow.py` (行 600-713)
+**文件**: `backend/services/agentic_workflow.py` (行 600-750)
 
 **职责**: 从数据库加载所有必要的上下文信息
 
@@ -38,7 +160,7 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 | 变量 | 类型 | 用途 |
 |------|------|------|
-| `chapter` | Chapter | 当前章节实体（大纲、标题、张力等级等） |
+| `chapter` | Chapter | 当前章节实体（大纲、标题、张力等级、节奏偏好等） |
 | `book` | Book | 书籍实体（全局系统提示、世界观设定、核心母题禁忌） |
 | `entities` | List[ChapterEntity] | 章节关联的角色列表 |
 | `relationships` | List[CharacterRelationship] | 角色间关系列表 |
@@ -61,9 +183,15 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 **文件**: `backend/services/prompts/planner_prompts.py`
 
-**核心函数**: `build_planner_agent_prompt()` (行 32-220)
+**核心函数**: `build_planner_agent_prompt()` (行 32-234)
 
-**职责**: 将章节大纲拆分为可执行的 **Story Beats（剧情节拍）**
+**职责**: 将章节大纲拆分为可执行的 **Story Beats（剧情节拍）**，并自动计算工作流层级
+
+**V3.0 新增特性**:
+- **workflow_tier 自动计算**：基于 `tension_level` 自动输出工作流层级
+  - tension_level 1-2 → "TIER_1_FAST"
+  - tension_level 3 → "TIER_2_STANDARD"
+  - tension_level 4-5 → "TIER_3_FORTRESS"
 
 **Prompt 设计**:
 
@@ -78,17 +206,19 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
       "summary": "本段剧情概述",
       "location": "场景地点",
       "pov_character": "视角角色",
-      "pov_perception_state": "正常",  # 角色意识清醒程度
+      "pov_perception_state": "正常",  # 角色意识清醒程度与物理行动力
       "action_summary": "动作化执行摘要",
+      "worldbuilding_instruction": "本段生效的世界构建约束",
       "entry_state": "本段切入时的起始状态",
       "exit_state": "本段必须停住的收束状态",
-      "red_lines": ["禁止发生1", "禁止发生2"],  # 红线约束
+      "red_lines": ["禁止发生1", "禁止发生2"],
       "word_count_target": 600,
-      "hook_ids": ["hk-1"],  # 绑定的伏笔
+      "hook_ids": ["hk-1"],
       "pacing_type": "Medium",  # Fast/Medium/Slow
-      "weight": 3  # 1-5 权重
+      "weight": 3  # 1-5 权重，用于字数分配
     }
-  ]
+  ],
+  "workflow_tier": "TIER_2_STANDARD"  # V3.0 新增
 }
 ```
 
@@ -96,26 +226,21 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 - beats 数量: 1-6 个
 - 每个 beat 必须有 entry_state、exit_state、red_lines
 - exit_state 是硬停点，不能把后续 beat 事件提前
-- 低张力章节(tension_level<=3)自动注入红线: `["避免正面冲突", "避免战斗升级"]`
+- **跨章接缝绝对定标**：第一个 beat 的 `entry_state` 必须与上一章结尾的物理空间、视角角色保持 100% 连续性
+- **跨 Beat 状态过渡动作强制规则**：角色物理形态突变时，必须显式包含过渡动作
 
-**User Prompt 结构**:
-```
-## 0. 绝对最高优先级指令 (Absolute Highest Priority)
-【全局禁忌/核心母题】{global_taboos}
-【作者创作意图】{author_intent} (优先级高于大纲)
+**V3.0 低张力规则**（tension_level <= 2）：
+- 自动注入红线: `["禁止发生任何武力冲突或战斗升级", "避免正面冲突"]`
+- 禁止设计直接爆发式冲突，剧情推进以铺垫与悬停为主
 
-【章节名】{chapter_name}
-【剧情张力等级】{tension_level}
-【叙事节奏偏好】{pacing_style}
-【上一章情节概要】{previous_chapter_summary}
-【章节大纲】{outline_text}
-【目标字数】{word_count}
-【角色设定】...
-【关系约束】...
-【开放伏笔】...
+**字数分配算法** (`_calculate_beat_word_counts`):
+```python
+# Multipliers: Fast=0.8, Medium=1.0, Slow=1.2
+# Formula: score = weight * multiplier
+# Result: (score / total_score) * total_chapter_words
 ```
 
-**输出解析**: `parse_planner_result()` (行 223-366)
+**输出解析**: `parse_planner_result()` (行 237-392)
 - 容错解析: 直接解析 → Markdown代码块 → 首尾大括号
 - 失败回退: 使用大纲生成单个 fallback beat
 
@@ -125,7 +250,7 @@ Velluma 采用 **Agentic Workflow（智能体工作流）** 架构，通过多�
 
 **文件**: `backend/services/workflows/planning.py`
 
-**核心函数**: `assign_pov_to_beats()` (行 95-210)
+**核心函数**: `assign_pov_to_beats()` (行 111-233), `determine_chapter_anchor_pov()` (行 236-307)
 
 **职责**: 为章节确定统一的锚定视角角色（Anchor POV），确保全文视角一致性
 
@@ -146,11 +271,11 @@ for beat in beats:
 
 ---
 
-### Phase 4: DRAFTING（起草）- V2.5 认知流式生成
+### Phase 4: DRAFTING（起草）- V3.0 智能路由生成
 
 **文件**: `backend/services/workflows/drafting.py`
 
-**核心函数**: `execute_draft_stage()` (行 76-230)
+**核心函数**: `execute_draft_stage()` (行 167-313)
 
 **输出数据结构** `BeatDraftResult`:
 ```python
@@ -160,7 +285,7 @@ class BeatDraftResult(BaseModel):
     scene_intent: dict              # Scene Intent 分析结果
     subconscious_thought: str       # 角色潜意识/内心独白（50-100字）
     draft_chunk: str                # 生成的小说正文
-    prompts: List[dict]             # 全流程提示词历史（Scene Intent + Subconscious + Prose）
+    prompts: List[dict]             # 全流程提示词历史
     mcts_rollout: Optional[list]    # MCTS 三分支推演记录（可观测性）
 ```
 
@@ -182,7 +307,28 @@ class BeatDraftResult(BaseModel):
 └────────────────────────────────────────────────────────────┘
 ```
 
-#### 3.1 Scene Intent 生成
+#### V3.0 三档执行路径
+
+**TIER_1_FAST (疾速流)** - `execute_fast_path()`:
+- 跳过 Scene Intent 和 Subconscious
+- 单次调用 creative_model 生成正文
+- 仅保留 previous_tail 作为上下文
+- 跳过 Stitching（直接拼接）
+
+**TIER_2_STANDARD (均衡流)** - `execute_standard_path()`:
+- 轻量级 Scene Intent
+- 轻量级 Subconscious（无 MCTS）
+- CoreDynamicContext（previous_tail + physical_state_lock）
+- 标准 Reviewing
+
+**TIER_3_FORTRESS (堡垒流)** - `execute_fortress_path()`:
+- 完整 V2.5 实现
+- MCTS 三分支 Subconscious
+- 全部 5 维 DynamicContext
+- Fail-Fast 断言检查
+- 完整 STITCHING → REVIEWING → REFINING 闭环
+
+#### 4.1 Scene Intent 生成
 
 **文件**: `backend/services/prompts/scene_intent_prompts.py`
 
@@ -194,8 +340,7 @@ class BeatDraftResult(BaseModel):
   "intent_label": "场景标签",
   "goal": "本场景目标",
   "stakes": "失败代价或风险",
-  "constraints": ["约束1", "约束2"],
-  "sensory_translation_rule": "感官转化规则（非主视角事件）"
+  "constraints": ["约束1", "约束2"]
 }
 ```
 
@@ -204,9 +349,9 @@ class BeatDraftResult(BaseModel):
 - **fast_paced**: 每段至少一个可见动作变化，句式更短更直接
 - **balanced**: 动作推进与情绪描写保持均衡
 
-#### 3.2 Subconscious 生成（MCTS 潜意识树搜索）
+#### 4.2 Subconscious 生成（MCTS 潜意识树搜索）
 
-**文件**: `backend/services/prompts/draft_prompts.py` (行 107-207)
+**文件**: `backend/services/prompts/draft_prompts.py` (行 123-231)
 
 **函数**: `build_subconscious_prompt()`
 
@@ -218,7 +363,9 @@ class BeatDraftResult(BaseModel):
 分支C：结合特定性格设定的战术/极端环境思维
 
 # 评估与剪枝
-- 任何有一丝可能导致后续动作违背【红线】的分支，直接打分为 0
+- 任何有一丝可能导致违背【红线】的分支，直接打分为 0
+- 任何违背【动机连贯性】（与前一时刻核心动机矛盾）的分支，打分为 0
+- 任何违背【物理知觉状态】的分支，打分为 0
 - 选出得分最高且绝对安全的分支
 
 # 输出格式
@@ -234,13 +381,13 @@ class BeatDraftResult(BaseModel):
 **关键变量**:
 | 变量 | 用途 |
 |------|------|
-| `pov_perception_state` | POV 角色当前物理知觉状态（"正常"/"半昏迷"/"重伤行动受限"等） |
+| `pov_perception_state` | POV 角色当前物理知觉状态（三级优先级链） |
 | `red_lines` | 红线约束列表，用于评估分支安全性 |
 | `previous_tail` | 伪前文（前一 beat 的 exit_state + 当前 entry_state） |
 
-#### 3.3 Prose Draft 生成（V2.5 串行滑动窗口）
+#### 4.3 Prose Draft 生成（V3.0 串行滑动窗口 + 四重锁）
 
-**文件**: `backend/services/workflows/drafting.py` (行 424-698)
+**文件**: `backend/services/workflows/drafting.py` (行 552-850)
 
 **函数**: `_generate_prose_serial_v25()`
 
@@ -255,37 +402,51 @@ class BeatDraftResult(BaseModel):
    ```python
    class DynamicContext(BaseModel):
        previous_tail: str = ""                    # Rolling Prefix（上文尾部300字符）
-       current_emotional_state: str = "初始状态：未知"  # 主角当前心理状态（随剧情演变）
+       current_emotional_state: str = "初始状态：未知"  # 主角当前心理状态
        physical_state_lock: str = ""              # 绝对物理状态约束（防幻觉边界）
        pov_perception_state: str = ""             # POV角色清醒程度与物理行动力
-       accumulated_summary: str = ""              # 宏观剧情累加器（跨Beat剧情摘要，≤500字符）
-       relational_state_lock: str = ""            # 在场角色动态关系锁（防止关系错乱）
-       active_whispers: dict = {}                 # 激活的RAG记忆片段（预留）
-       entity_spatial_ledger: Dict[str, CharacterPhysicalState] = {}  # 角色物理形态与空间从属
+       accumulated_summary: str = ""              # 宏观剧情累加器（≤500字符）
+       relational_state_lock: str = ""            # 在场角色动态关系锁
+       active_whispers: dict = {}                 # 激活的RAG记忆片段
+       entity_spatial_ledger: Dict[str, CharacterPhysicalState]  # 角色物理形态与空间从属
    ```
-   
-   **CharacterPhysicalState 字段**:
-   - `is_in_vehicle`: 是否处于载具/机甲内部
-   - `vehicle_or_mech_name`: 所在载具/机甲名称
-   - `equipped_weapons`: 当前装备的武器列表
-   - `movement_constraints`: 移动限制说明（如"深度昏迷，无法自主移动"）
 
-3. **Fail-Fast 断言检查** (行 700-801):
+3. **V3.0 四重锁机制** (Prose Draft Prompt):
+   ```python
+   【锁1：核心资产体积锁 (Asset Schema Lock) - P0级特权】
+   严禁把重型机甲写成"钻入体内的纳米神经"、"吸附在皮肤上的液体战甲"或"外骨骼"
+   
+   【锁2：知觉与感官遮罩层 (Perception Masking)】
+   如果状态包含"昏迷/重伤/失去控制"，绝对禁止描写该角色做出清醒、精准的主动战术动作
+   
+   【锁3：世界观基调锁 (Tonality Lock)】
+   严禁题材污染（如科幻文出现修仙魔法）
+   
+   【锁4：大纲红线 (Red Lines) - 撞线即判废】
+   触碰红线的生成内容将被立即判定为无效
+   ```
+
+4. **Fail-Fast 断言检查** (行 852-968):
    ```python
    async def _micro_review_assertion():
        # 断言决策树
-       IF Violate(red_lines): RETURN (False, "触碰红线约束")
-       IF Physical_Hallucination: RETURN (False, "物理状态冲突")
-       IF OOC_Behavior: RETURN (False, "角色行为偏离设定")
-       IF Relationship_Jump: RETURN (False, "人物关系无逻辑突变")
-       RETURN (True, "")
+       IF Violate(red_lines): RETURN (False, "触碰红线约束", ["红线"])
+       IF Physical_Hallucination: RETURN (False, "物理状态冲突", ["物理幻觉"])
+       IF OOC_Behavior: RETURN (False, "角色行为偏离设定", ["OOC"])
+       IF Relationship_Jump: RETURN (False, "人物关系无逻辑突变", ["关系"])
+       IF Style_Issue: RETURN (False, "文风问题", ["文风"])
+       RETURN (True, "", [])
    ```
+   
+   **智能温度调整策略**:
+   - 文风问题 → 提高温度重新采样
+   - 逻辑错误 → 降低温度，注入错误提示
 
-4. **Emotional Scratchpad 状态更新** (行 803-868):
+5. **Emotional Scratchpad 状态更新** (行 1443-1524):
    - 基于刚生成的剧情，总结新的角色内心状态
    - 更新关系状态锁、宏观剧情累加器
 
-**Prompt 构建**: `build_prose_draft_prompt_v25()` (行 540+)
+**Prompt 构建**: `build_prose_draft_prompt_v25()` (行 749-999)
 
 **关键约束**:
 - **单一视角锁定**: 绝对锁定在 POV 角色的感官范围内
@@ -294,11 +455,11 @@ class BeatDraftResult(BaseModel):
 
 ---
 
-### Phase 4: STITCHING（统稿）
+### Phase 5: STITCHING（统稿）
 
 **文件**: `backend/services/prompts/stitch_prompts.py`
 
-**函数**: `build_stitch_prompt()` (行 20-106)
+**函数**: `build_stitch_prompt()` (行 20-105)
 
 **职责**: 将多个 Beat 生成的 chunks 融合成连贯的章节正文
 
@@ -308,12 +469,134 @@ class BeatDraftResult(BaseModel):
 3. **收束去AI味**: 去除段落末尾拔高立意的"旁白说教"
 4. **黑名单词库约束**: 避免使用 style_blacklist 中的词汇
 5. **单一连续时间线**: 抹去非主视角的描写，合并为主视角的背景板感知流
+6. **反蒙太奇剪辑**: 当使用 anchor_pov 时，拥有最高剪辑权
 
 **温度设置**: `temperature=0.4`（较低，保持稳定性）
 
 ---
 
-### Phase 5: REVIEWING（审阅）
+### Phase 4.5: 双轨并行生成 (V3.5 可选增强)
+
+**文件**: `backend/services/workflows/dual_track.py`, `sketch_generator.py`
+
+**核心函数**: 
+- `DualTrackWorkflow.execute()` (行 100-250)
+- `SketchGenerator.generate()` (行 80-180)
+
+**职责**: 在单轨 Drafting 基础上，并行生成连贯速写短文，作为连贯性锚点。
+
+**触发条件**:
+- `DualTrackConfig.enable_sketch_track = True`
+- 推荐用于节拍数 > 3 的章节
+
+**双轨架构**:
+```
+Track A: 节拍扩写 (execute_draft_stage)     Track B: 短文生成 (SketchGenerator)
+├─ Beat[1] → Text[1]                         ├─ 连续叙述，不标记节拍边界
+├─ Beat[2] → Text[2]                         ├─ 强连贯性，情绪一气呵成
+└─ Beat[N] → Text[N]                         └─ 输出转折点映射 + 情绪曲线
+         │                                              │
+         └──────────────────┬───────────────────────────┘
+                            ↓
+                    同时完成，耗时 ≈ max(Time_A, Time_B)
+```
+
+**Track B (Sketch) 详细设计**:
+
+```python
+class SketchResult(BaseModel):
+    sketch_text: str              # 速写正文（正文字数的 40-50%）
+    turn_markers: List[TurnMarker]  # 转折点位置映射
+    emotion_arc: List[dict]       # 情绪曲线
+    word_count: int
+    generation_time: float
+```
+
+**Sketch Prompt 核心要求**:
+1. **连续叙述流**: 禁止标记节拍边界，用自然过渡句连接
+2. **强连贯性**: 情绪、节奏、信息传递一气呵成
+3. **首尾呼应**: 开头承接上文，结尾形成情感闭环
+4. **转折点映射**: 记录每个关键转折点的位置（百分比）
+
+**与 Track A 的关系**:
+- Track A 和 Track B 完全并行，互不等待
+- 两者基于同一组 Beats 生成
+- Track B 的结果用于 Phase 5.5 的对抗校对
+
+**性能指标**:
+- Sketch 生成耗时: ~30-40% of Track A
+- 额外 Token 消耗: ~40-50% of 正文
+- 对齐度提升: 从 60-70 分 → 80-90 分
+
+---
+
+### Phase 5.5: 对抗校对 (Adversarial Alignment) - V3.5
+
+**文件**: `backend/services/workflows/adversarial_aligner.py`
+
+**核心函数**: `AdversarialAligner.align()` (行 70-180)
+
+**职责**: 对比节拍统稿 (Draft_A) 和连贯速写 (Sketch)，检测差异并生成修复方案。
+
+**核心问题**: 解决并行生成导致的节拍间连贯性问题
+
+**检测维度**:
+
+| 维度 | 检测内容 | 输出 |
+|------|---------|------|
+| **结构对齐** | 转折点位置偏移 | 每个 beat 的预期 vs 实际位置 |
+| **情绪对齐** | 情绪曲线一致性 | 情绪强度、极性的差异 |
+| **信息对齐** | 关键信息揭示时机 | 信息揭示的位置和方式差异 |
+| **首尾对齐** | 开头结尾呼应 | entry_state / exit_state 一致性 |
+
+**归因分析 (Gap Source)**:
+
+```python
+class GapSource(str, Enum):
+    BEAT_DESIGN = "beat_design"          # 节拍设计缺陷（entry/exit state 问题）
+    EXPANSION_DRIFT = "expansion_drift"  # 扩写偏离（Track A 执行问题）
+    SEGMENT_BOUNDARY = "segment_boundary"  # 衔接断裂（节拍间过渡问题）
+    SKETCH_HALLUCINATION = "sketch_hallucination"  # 短文幻觉（Sketch 过度发挥）
+```
+
+**AdjustmentPlan 结构**:
+
+```python
+@dataclass
+class AdjustmentPlan:
+    alignment_score: float           # 0-100 整体对齐度得分
+    needs_adjustment: bool           # 是否需要修复（< threshold）
+    gaps: List[AlignmentGap]         # 差异列表
+    beat_adjustments: Dict[int, List[str]]  # 按节拍的修复指令
+    global_adjustments: List[str]    # 全局修复指令
+```
+
+**修复策略**:
+
+| 问题类型 | 修复方式 | 说明 |
+|---------|---------|------|
+| beat_design | 调整 entry/exit state | 修改节拍框架 |
+| expansion_drift | 局部重扩 | 重生成特定节拍 |
+| segment_boundary | 过渡重织 | 用 Sketch 的过渡方式重写边界 |
+| sketch_hallucination | 忽略或评估 | Sketch 可能更好，需人工判断 |
+
+**阈值配置**:
+- `alignment_threshold`: 70.0 (默认)
+- 低于阈值触发自动精修
+- 高于阈值跳过精修，直接使用 Draft_A
+
+**与 Phase 6 (Reviewing) 的区别**:
+
+| | Phase 5.5 对抗校对 | Phase 6 审阅 |
+|--|-------------------|-------------|
+| **对比对象** | Draft_A vs Sketch | Draft vs 大纲/角色设定 |
+| **关注点** | 连贯性、过渡自然 | 逻辑正确性、OOC |
+| **修复粒度** | 节拍级/句子级 | 节拍级 |
+| **触发条件** | 双轨模式启用 | 所有模式 |
+
+---
+
+### Phase 6: REVIEWING（审阅）
 
 **文件**: `backend/services/prompts/review_prompts.py`
 
@@ -353,23 +636,34 @@ class BeatDraftResult(BaseModel):
 
 ---
 
-### Phase 6: REFINING（精修）- 局部精修模式
+### Phase 7: REFINING（精修）- 局部精修模式
 
 **文件**: `backend/services/workflows/refining.py`
 
-**函数**: `refine_single_beat()` (行 114+)
+**函数**: `refine_single_beat()` (行 71-221)
 
 **触发条件**:
 - Review 未通过 (`pass: false`)
 - 存在 `target_beat_ids` 定位问题 Beat
 - `iteration < max_iterations`
 
-**局部精修流程**:
-1. 根据 `target_beat_ids` 提取需要精修的 Beat chunks
-2. 提取该 Beat 对应的 issue descriptions
-3. 获取前一个 Beat 的尾部文本 (`previous_tail`) 用于语气衔接
-4. 对每个问题 Beat 调用 `refine_single_beat()`
-5. 精修后重新进行 **STITCHING_AFTER_REFINE**
+**V3.0 广播式切片精修** (Broadcast Iterative Refine):
+
+当 Review 返回的 beat_ids 无效时（如幻觉的 beat-13），触发广播式精修：
+1. 将 revision_plan 广播给所有 active beats
+2. 逐一调用 `refine_single_beat()` 进行局部重写
+3. 精修后重新进行 **STITCHING_AFTER_BROADCAST**
+
+**精准制导打点精修** (Bug 1 修复):
+```python
+# 算法：I_k = { i ∈ I | k ∈ i.target_beat_ids }
+# 只将 target_beat_ids 包含当前 beat_id 的 issues 传入该 beat 的精修
+targeted_issues = []
+for issue in all_issues:
+    target_beat_ids = issue.get("target_beat_ids", [])
+    if not target_beat_ids or current_beat_id in target_beat_ids:
+        targeted_issues.append(issue.get("description", ""))
+```
 
 **纠偏机制**:
 ```python
@@ -380,7 +674,7 @@ def _is_refine_output_suspiciously_short():
 
 ---
 
-### Phase 7: FORMATTING（格式化）
+### Phase 8: FORMATTING（格式化）
 
 **文件**: `backend/services/prompts/format_prompts.py`
 
@@ -421,20 +715,22 @@ def _is_refine_output_suspiciously_short():
 
 | 阶段 | Prompt 文件 | 核心函数 | 温度 | 关键变量 |
 |------|-------------|----------|------|----------|
-| PLANNING | `planner_prompts.py` | `build_planner_agent_prompt` | 0.2 | `chapter`, `book`, `entities`, `relationships`, `word_count`, `open_hooks`, `global_taboos`, `author_intent` |
-| POV_ASSIGNMENT | `planning.py` | `assign_pov_to_beats` | 0.3 | `beats`, `characters`, `story_premise`, `previous_chapter_summary` |
+| PLANNING | `planner_prompts.py` | `build_planner_agent_prompt` | 0.2 | `chapter`, `book`, `entities`, `relationships`, `word_count`, `open_hooks`, `global_taboos`, `author_intent`, `tension_level` |
+| POV_ASSIGNMENT | `planning.py` | `assign_pov_to_beats` | - | `beats`, `characters`, `story_premise`, `previous_chapter_summary` |
 | SCENE_INTENT | `scene_intent_prompts.py` | `build_scene_intent_prompt` | 0.2 | `chapter`, `beat`, `open_hooks`, `pacing_style`, `anchor_pov` |
 | SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines`, `previous_tail` |
-| PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context` |
+| PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context`, `chapter_assets_schema`, `pov_perception_state` |
 | STITCHING | `stitch_prompts.py` | `build_stitch_prompt` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov` |
+| SKETCH_GEN | `sketch_generator.py` | `_build_sketch_prompt` | 0.8 | `chapter`, `book`, `beats`, `entities`, `relationships`, `target_words`, `previous_summary`, `anchor_pov` |
+| ADV_ALIGNMENT | `adversarial_aligner.py` | `_detect_information_gaps` | 0.1 | `draft_text`, `sketch_text`, `beats`, `chapter`, `book` |
 | REVIEWING | `review_prompts.py` | `build_review_agent_prompt` | 0.1 | `chapter`, `book`, `entities`, `relationships`, `chapter_outline`, `draft_text`, `beats` |
-| REFINING | `review_prompts.py` | `build_refine_agent_prompt` | 0.7 | `chapter`, `book`, `entities`, `relationships`, `draft_text`, `revision_plan`, `word_count` |
+| REFINING | `refining.py` | `refine_single_beat` | 0.7 | `beat`, `original_chunk`, `revision_guide`, `all_issues`, `chapter`, `book` |
 | CHUNK_REFINE | `review_prompts.py` | `build_chunk_refine_prompt` | 0.7 | `chapter`, `book`, `entities`, `relationships`, `beat_summary`, `chunk_text`, `revision_instruction` |
 | FORMATTING | `format_prompts.py` | `build_formatting_prompt` | 0.1 | `draft_text` |
 
-### V2.5 功能开关配置 (DraftingFeatureFlags)
+### V3.0 功能开关配置 (DraftingFeatureFlags)
 
-**定义**: `backend/schemas.py` (行 715-732)
+**定义**: `backend/schemas.py` (行 762-783)
 
 | 开关 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -443,6 +739,31 @@ def _is_refine_output_suspiciously_short():
 | `enable_whisper_memory` | bool | False | 启用 RAG 记忆暂存（预留接口） |
 | `fail_fast_max_attempts` | int | 2 | Fail-Fast 最大重试次数（范围 1-3） |
 | `fail_fast_temperature_step` | float | 0.2 | 每次重试温度增量（范围 0.0-0.5） |
+| `workflow_tier` | WorkflowTier | TIER_2_STANDARD | 智能路由工作流层级 |
+
+### V3.5 双轨配置 (DualTrackConfig)
+
+**定义**: `backend/services/workflows/dual_track.py` (行 30-60)
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `enable_sketch_track` | bool | True | 启用 Track B (短文生成) |
+| `enable_adversarial_alignment` | bool | True | 启用对抗校对 |
+| `use_sketch_for_refinement` | bool | True | 使用 Sketch 指导精修 |
+| `alignment_threshold` | float | 70.0 | 对齐度阈值，低于此值触发精修 |
+| `sketch_ratio` | float | 0.45 | Sketch 字数 / 正文字数 |
+
+### WorkflowTier 映射规则
+
+```python
+def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
+    if tension_level <= 2:
+        return "TIER_1_FAST"      # 疾速流
+    elif tension_level == 3:
+        return "TIER_2_STANDARD"  # 均衡流
+    else:
+        return "TIER_3_FORTRESS"  # 堡垒流
+```
 
 ---
 
@@ -464,6 +785,7 @@ def _is_refine_output_suspiciously_short():
               ┌─────────────────┐
               │    PLANNING     │
               │ (生成 beats 列表)│
+              │ (含 workflow_tier)│
               └─────────────────┘
                           ↓
               ┌─────────────────┐
@@ -472,21 +794,17 @@ def _is_refine_output_suspiciously_short():
               └─────────────────┘
                           ↓
        ┌──────────────────┼──────────────────┐
+       │                  │                  │
        ↓                  ↓                  ↓
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ SceneIntent │   │ SceneIntent │   │ SceneIntent │  ← 并行生成
-│  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │
+│  TIER_1_FAST│   │TIER_2_STAND │   │TIER_3_FORT  │
+│  (疾速流)    │   │  (均衡流)    │   │  (堡垒流)    │
+├─────────────┤   ├─────────────┤   ├─────────────┤
+│跳过Scene/Sub│   │轻量级Scene  │   │完整Scene    │
+│单次生成     │   │轻量级Sub    │   │MCTS三分支   │
+│直接拼接     │   │CoreDynamicC │   │Full 5D DC   │
 └─────────────┘   └─────────────┘   └─────────────┘
-       ↓                  ↓                  ↓
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ Subconscious│   │ Subconscious│   │ Subconscious│  ← 并行生成 (MCTS)
-│  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │
-└─────────────┘   └─────────────┘   └─────────────┘
-       ↓                  ↓                  ↓
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ Prose Draft │──→│ Prose Draft │──→│ Prose Draft │  ← 串行 Rolling
-│  (Beat 1)   │   │  (Beat 2)   │   │  (Beat n)   │     Prefix + 
-└─────────────┘   └─────────────┘   └─────────────┘     DynamicContext
+       │                  │                  │
        └──────────────────┼──────────────────┘
                           ↓
               ┌─────────────────┐
@@ -505,13 +823,13 @@ def _is_refine_output_suspiciously_short():
               └─────────────────┘
                           ↓
               ┌─────────────────┐
-              │  target_beat_ids│
+              │  target_beat_ids?│
               │  (定位问题Beat)  │
               └─────────────────┘
                           ↓
               ┌─────────────────┐
-              │ CHUNK_REFINE    │
-              │ (局部精修)       │
+              │ 有效? → 精准制导 │
+              │ 无效? → 广播精修 │
               └─────────────────┘
                           ↓
               ┌─────────────────┐
@@ -540,7 +858,7 @@ Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
 
 ## 六、核心设计思想
 
-系统的核心设计思想是**分层生成 + 迭代精修 + 认知状态流转**：
+系统的核心设计思想是**分层生成 + 迭代精修 + 认知状态流转 + 智能路由**：
 
 ### 1. 冰山模型 (Iceberg Model)
 将生成拆分为两层：
@@ -554,7 +872,7 @@ Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
 - **分支B**: 知觉受限条件下的无力感/痛觉思维
 - **分支C**: 结合性格设定的战术/极端环境思维
 
-**评估与剪枝**: 任何可能导致违背红线或物理状态的分支，直接打分为 0 并淘汰
+**评估与剪枝**: 任何可能导致违背红线、物理状态或动机连贯性的分支，直接打分为 0 并淘汰
 
 ### 3. Rolling Prefix 连贯性机制
 - Beat n 接收 Beat n-1 的末尾 **300 字符** 作为上下文
@@ -570,6 +888,7 @@ Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
 | 上下文记忆 | `previous_tail` | Rolling Prefix 机制 |
 | 剧情摘要 | `accumulated_summary` | 宏观剧情累加器（≤500字符） |
 | 关系状态 | `relational_state_lock` | 在场角色动态关系锁 |
+| 空间账本 | `entity_spatial_ledger` | 角色物理形态与空间从属 |
 
 ### 5. Fail-Fast 防错机制
 **触发条件**: `enable_fail_fast=True`（默认开启）
@@ -579,8 +898,13 @@ Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
 - 是否存在 Physical Hallucination（物理状态冲突）
 - 是否存在 OOC Behavior（角色行为偏离设定）
 - 是否存在 Relationship Jump（人物关系无逻辑突变）
+- 是否存在 Style Issue（文风问题）
 
-**回溯策略**: 断言失败时提高温度（`+fail_fast_temperature_step`）并重试，最多 `fail_fast_max_attempts` 次
+**回溯策略**: 
+- 断言失败时根据失败类别调整温度
+- 文风问题：提高温度重新采样
+- 逻辑错误：降低温度并注入错误提示
+- 最多 `fail_fast_max_attempts` 次重试
 
 ### 6. Anchor POV 视角统一机制
 - 由 LLM 分析章节内容，选定最适合的 **单一主视角角色**
@@ -588,10 +912,37 @@ Beat N:  Subconscious_N ──→ Prose_N ──→ DynamicContext_N
 - 保留原始角色到 `original_actor`，用于**感官转化法则**
 - **感官转化法则**: 非主视角事件必须转化为主视角能感知的物理异象
 
-### 7. 局部精修闭环
+### 7. V3.0 智能路由三档执行路径
+基于 `tension_level` 自动选择执行路径，实现算力资源的智能分配：
+
+| 特性 | TIER_1_FAST | TIER_2_STANDARD | TIER_3_FORTRESS |
+|------|-------------|-----------------|-----------------|
+| 适用张力 | 1-2 | 3 | 4-5 |
+| 场景 | 日常/过渡 | 中等冲突 | 高潮/关键剧情 |
+| Scene Intent | ✗ | ✓ | ✓ |
+| Subconscious | ✗ | 轻量级 | MCTS三分支 |
+| DynamicContext | Rolling Prefix | Core | Full 5D |
+| Fail-Fast | ✗ | ✓ | ✓ |
+| 算力消耗 | 低 | 中 | 高 |
+
+### 8. 局部精修闭环
 Review 发现问题后：
 1. 通过 `target_beat_ids` 定位问题 Beat
-2. 仅对问题 Beat 调用 `refine_single_beat()`
-3. 使用 `previous_tail` 保持语气衔接
-4. 精修后重新 Stitching，而非整章重写
-5. **纠偏机制**: 检测精修后文本是否过度缩短，触发 retry
+2. **精准制导**: 只传入与该 Beat 相关的 issues（算法：I_k = { i ∈ I | k ∈ i.target_beat_ids }）
+3. **广播精修**: 若 beat_ids 无效，对所有 beats 进行广播式精修
+4. 使用 `previous_tail` 保持语气衔接
+5. 精修后重新 Stitching，而非整章重写
+6. **纠偏机制**: 检测精修后文本是否过度缩短，触发 retry
+
+### 9. 字数分配算法
+基于 `pacing_type` 和 `weight` 自动计算每个 beat 的目标字数：
+```python
+multipliers = {"Fast": 0.8, "Medium": 1.0, "Slow": 1.2}
+score = weight * multiplier
+word_count = (score / total_score) * total_chapter_words
+```
+
+---
+
+*最后更新: 2026-03-22*
+*版本: V3.5 双轨对抗架构*

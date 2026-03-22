@@ -71,6 +71,15 @@ from backend.routes import (
     maps_router,
 )
 
+# V3.5 双轨架构路由（可选导入）
+try:
+    from backend.routes.chapter_generation_dual_track import router as chapter_generation_dual_track_router
+    DUAL_TRACK_ROUTER_AVAILABLE = True
+    logger.info("[Main] 双轨生成路由已加载")
+except Exception as e:
+    DUAL_TRACK_ROUTER_AVAILABLE = False
+    logger.warning(f"[Main] 双轨生成路由加载失败: {e}")
+
 # =============================================================================
 # 启动阶段：解决终端编码问题
 # =============================================================================
@@ -149,6 +158,12 @@ app.include_router(memories_router)
 app.include_router(generate_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
+
+# V3.5 双轨生成路由（如果可用）
+if DUAL_TRACK_ROUTER_AVAILABLE:
+    app.include_router(chapter_generation_dual_track_router)
+    logger.info("[Main] 双轨生成路由已注册: /api/chapters/{id}/generate-dual-track")
+
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
 app.include_router(critique_router)
