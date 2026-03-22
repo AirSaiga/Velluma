@@ -848,6 +848,7 @@ class DraftingFeatureFlags(BaseModel):
     fail_fast_temperature_step: float = Field(default=0.2, ge=0.0, le=0.5, description="每次重试温度增量")
     workflow_tier: WorkflowTier = Field(default="TIER_2_STANDARD", description="智能路由工作流层级: TIER_1_FAST/均衡流/堡垒流")
     force_parallel_prose: bool = Field(default=False, description="强制正文并发生成（无视连贯性）")
+    semi_parallel_prose: bool = Field(default=False, description="半并行生成：Beat 1 串行 → 中间 Beats 并行 → Beat N 串行（平衡连贯性与速度）")
 
 
 class CharacterPhysicalState(BaseModel):

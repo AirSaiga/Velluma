@@ -631,6 +631,33 @@ async def _generate_prose_serial_v25(
     # V3.0 并发模式判断
     # ========================================================================
     force_parallel = getattr(flags, 'force_parallel_prose', False)
+    semi_parallel = getattr(flags, 'semi_parallel_prose', False)
+    
+    if semi_parallel and len(beats) > 2:
+        logger.info("[Prose V25] 半并行模式启用：Beat 1 串行 → 中间并行 → Beat N 串行")
+        return await _generate_prose_semi_parallel_v25(
+            beats=beats,
+            scene_intent_results=scene_intent_results,
+            subconscious_results=subconscious_results,
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            api_key=api_key,
+            base_url=base_url,
+            creative_model=creative_model,
+            reasoning_model=reasoning_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            enable_qc=enable_qc,
+            feature_flags=flags,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+            stats_callback=stats_callback,
+        )
     
     if force_parallel:
         logger.info("[Prose V25] 强制并行模式启用：将无视前文衔接，并发生成所有 Beats")
@@ -1127,6 +1154,452 @@ async def _generate_prose_parallel_v25(
     
     logger.info(f"[Prose V25-Parallel] 并行生成完成，共 {len(processed_results)} 个 Beats")
     return processed_results
+
+
+async def _generate_prose_semi_parallel_v25(
+    beats: List[dict],
+    scene_intent_results: List[dict],
+    subconscious_results: List[str],
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    api_key: str,
+    base_url: str,
+    creative_model: str,
+    reasoning_model: str,
+    word_count: int,
+    previous_summary: Optional[str] = None,
+    relevant_memories: Optional[List[Any]] = None,
+    locations: Optional[List[Any]] = None,
+    enable_qc: bool = True,
+    feature_flags: DraftingFeatureFlags = None,
+    physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
+    stats_callback: LLMStatsCallback = None,
+) -> List[dict]:
+    """
+    半并行模式正文生成 - 平衡连贯性与速度。
+
+    策略：Beat 1 串行（建立上下文锚点）→ Beats 2~(N-1) 并行 → Beat N 串行（尾部锚定收束）
+
+    时间估算（5 Beats，每 Beat 耗时 T）：
+    - 全串行:    5T
+    - 半并行:   3T（Beat1 + 中间并行最大 + BeatN）
+    - 全并行:    1T（无锚点）
+
+    连贯性代价：
+    - Beat 1 与 Beat N 有严格 Rolling Prefix（最佳效果）
+    - 中间 Beats 共享 Beat 1 的 tail 作为前文锚点（轻度退化）
+
+    Args:
+        beats: 节拍数据列表（至少 3 个）
+        scene_intent_results: Scene Intent 结果列表
+        subconscious_results: Subconscious 结果列表
+        其余参数同 _generate_prose_serial_v25
+
+    Returns:
+        List[dict]: 按 Beat 顺序排列的结果列表
+    """
+    flags = feature_flags or DraftingFeatureFlags()
+    n = len(beats)
+
+    if n <= 2:
+        logger.warning("[Prose Semi-Parallel] Beats <= 2，降级为全串行模式")
+        return await _generate_prose_serial_v25(
+            beats=beats,
+            scene_intent_results=scene_intent_results,
+            subconscious_results=subconscious_results,
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            api_key=api_key,
+            base_url=base_url,
+            creative_model=creative_model,
+            reasoning_model=reasoning_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            enable_qc=enable_qc,
+            feature_flags=flags,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+            stats_callback=stats_callback,
+        )
+
+    # ============================================================
+    # 工具函数
+    # ============================================================
+    def _get_pov_profile(pov_character: str) -> str:
+        if not pov_character or not entities:
+            return ""
+        for entity in entities:
+            char = getattr(entity, 'character', None) or entity
+            char_name = getattr(char, 'name', '') or ''
+            if char_name and pov_character in char_name:
+                raw_profile = getattr(char, 'static_prompt', '') or ''
+                return raw_profile[:150] if raw_profile else ''
+        return ""
+
+    def _get_pov_perception(beat: dict) -> str:
+        return beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
+
+    def _calc_target_words(beat: dict) -> int:
+        t = beat.get("word_count_target") or beat.get("target_words") or max(200, word_count // n)
+        return t if isinstance(t, int) and t > 0 else max(200, word_count // n)
+
+    # ============================================================
+    # 初始化 DynamicContext
+    # ============================================================
+    initial_emotional_state = "初始状态：未知"
+    if beats[0].get("entry_state"):
+        initial_emotional_state = f"初始状态：{beats[0].get('entry_state')}"
+    initial_relational_state = _build_initial_relational_state(relationships, entities)
+
+    dynamic_context = DynamicContext(
+        previous_tail="",
+        current_emotional_state=initial_emotional_state,
+        physical_state_lock=physical_state_lock or "",
+        accumulated_summary="",
+        relational_state_lock=initial_relational_state,
+        entity_spatial_ledger=entity_spatial_ledger or {},
+    )
+    current_pov_perception_state = _get_pov_perception(beats[0])
+
+    # ============================================================
+    # 阶段1：Beat 1 串行（建立上下文锚点）
+    # ============================================================
+    logger.info("[Prose Semi-Parallel] 阶段1: Beat 1 串行生成（锚点建立）...")
+    beat_0 = beats[0]
+    pov_char_0 = beat_0.get("pov_character", "主角")
+    pov_profile_0 = _get_pov_profile(pov_char_0)
+    target_words_0 = _calc_target_words(beat_0)
+    max_att_0 = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+    chunk_text_0 = ""
+    is_valid_0 = False
+    attempt_0 = 0
+    current_temp_0 = 0.75
+    prompts_0 = []
+    user_prompt_0 = ""
+
+    while attempt_0 < max_att_0 and not is_valid_0:
+        attempt_0 += 1
+        system_prompt_0, user_prompt_0 = build_prose_draft_prompt_v25(
+            chapter=chapter,
+            book=book,
+            beat=beat_0,
+            scene_intent=scene_intent_results[0],
+            subconscious_thought=subconscious_results[0],
+            previous_tail=dynamic_context.previous_tail,
+            target_words=target_words_0,
+            physical_state_lock=dynamic_context.physical_state_lock,
+            current_emotional_state=dynamic_context.current_emotional_state,
+            accumulated_summary=dynamic_context.accumulated_summary,
+            relational_state_lock=dynamic_context.relational_state_lock,
+            red_lines=beat_0.get("red_lines"),
+            entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
+            chapter_assets_schema=chapter_assets_schema or '',
+            pov_perception_state=current_pov_perception_state,
+            pov_character_profile=pov_profile_0,
+        )
+        prompts_0.append({
+            "stage": f"PROSE_DRAFT_ATTEMPT_{attempt_0}",
+            "beat_index": 1,
+            "temperature": current_temp_0,
+            "system_prompt": system_prompt_0,
+            "user_prompt": user_prompt_0,
+        })
+        response_0 = await _call_llm_with_stats(
+            stage="prose_draft",
+            system_prompt=system_prompt_0,
+            user_prompt=user_prompt_0,
+            api_key=api_key,
+            base_url=base_url,
+            model=creative_model,
+            temperature=current_temp_0,
+            max_tokens=_clamp_tokens(target_words_0),
+            beat_index=1,
+            stats_callback=stats_callback,
+        )
+        chunk_text_0 = clean_llm_output(response_0).strip()
+
+        if flags.enable_fail_fast and attempt_0 < max_att_0:
+            is_valid_0, fail_reason_0, fail_cats_0 = await _micro_review_assertion(
+                chunk_text=chunk_text_0,
+                dynamic_context=dynamic_context,
+                pov_character=pov_char_0,
+                beat=beat_0,
+                api_key=api_key,
+                base_url=base_url,
+                model=reasoning_model,
+                entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
+                beat_index=1,
+                stats_callback=stats_callback,
+            )
+            if not is_valid_0:
+                if "文风" in fail_cats_0:
+                    current_temp_0 = min(1.0, current_temp_0 + flags.fail_fast_temperature_step)
+                else:
+                    current_temp_0 = max(0.3, current_temp_0 - 0.1)
+                    user_prompt_0 = user_prompt_0 + f"\n\n【修正要求】上一版本存在以下问题：{fail_reason_0}。请保持原语境，仅修复该冲突。"
+            else:
+                is_valid_0 = True
+        else:
+            is_valid_0 = True
+
+    if enable_qc:
+        chunk_text_0, qc_p0 = await _quick_qc(
+            prose_text=chunk_text_0, beat=beat_0, beat_index=1,
+            chapter=chapter, book=book, entities=entities, relationships=relationships,
+            api_key=api_key, base_url=base_url, model=creative_model, target_words=target_words_0,
+        )
+        prompts_0.extend(qc_p0)
+
+    # 更新 DynamicContext（Beat 1 → Context_1）
+    next_entry_0 = beats[1].get('entry_state', '未指定') if n > 1 else '章节结束'
+    pov_anchor_0 = (
+        f"\n[System Tracker: 当前主语视角强锁定为 {pov_char_0} "
+        f"| 当前退出状态: {beat_0.get('exit_state', '未指定')} "
+        f"| 下一拍进入状态: {next_entry_0}]"
+    )
+    dynamic_context.previous_tail = _extract_tail(chunk_text_0, max_chars=300) + pov_anchor_0
+
+    if flags.enable_emotional_scratchpad:
+        state_update_0 = await _update_dynamic_state(
+            chunk_text=chunk_text_0,
+            current_emotional_state=dynamic_context.current_emotional_state,
+            pov_character=pov_char_0,
+            api_key=api_key,
+            base_url=base_url,
+            model=reasoning_model,
+            relational_state_lock=dynamic_context.relational_state_lock,
+            beat_context=beat_0,
+            book_genre=getattr(book, 'genre', '通用小说'),
+        )
+        dynamic_context.current_emotional_state = state_update_0.new_emotional_state
+        if state_update_0.relational_delta:
+            dynamic_context.relational_state_lock = _merge_relational_delta(
+                dynamic_context.relational_state_lock, state_update_0.relational_delta)
+        if state_update_0.beat_summary:
+            dynamic_context.update_summary(state_update_0.beat_summary)
+
+    result_beat_1 = {"text": chunk_text_0, "prompts": prompts_0}
+    logger.info(f"[Prose Semi-Parallel] Beat 1 完成，字数={len(chunk_text_0)}")
+
+    # ============================================================
+    # 阶段2：Beats 2~(N-1) 并行（共享 DynamicContext_1 快照）
+    # ============================================================
+    middle_beats = beats[1:n - 1]
+    middle_scene_intents = scene_intent_results[1:n - 1]
+    middle_subconsciouses = subconscious_results[1:n - 1]
+
+    # 快照 DynamicContext_1，所有中间 Beat 只读使用
+    dc1 = dynamic_context.model_copy(deep=True)
+
+    logger.info(f"[Prose Semi-Parallel] 阶段2: Beats 2~{n - 1} 并行生成（{len(middle_beats)} 个）...")
+
+    async def _middle_task(local_idx: int, beat: dict, scene_intent: dict, subconscious: str) -> dict:
+        """中间 Beat 并行生成任务，使用 DynamicContext_1 快照作为前文锚点。"""
+        pov_ch = beat.get("pov_character", "主角")
+        pov_pf = _get_pov_profile(pov_ch)
+        pov_ps = _get_pov_perception(beat)
+        tw = _calc_target_words(beat)
+        max_att = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+        chunk = ""
+        is_ok = False
+        att = 0
+        temp = 0.75
+        prompts = []
+        usr_p = ""
+
+        while att < max_att and not is_ok:
+            att += 1
+            sys_p, usr_p = build_prose_draft_prompt_v25(
+                chapter=chapter, book=book, beat=beat,
+                scene_intent=scene_intent, subconscious_thought=subconscious,
+                previous_tail=dc1.previous_tail,
+                target_words=tw,
+                physical_state_lock=dc1.physical_state_lock,
+                current_emotional_state=dc1.current_emotional_state,
+                accumulated_summary=dc1.accumulated_summary,
+                relational_state_lock=dc1.relational_state_lock,
+                red_lines=beat.get("red_lines"),
+                entity_spatial_ledger=dc1.entity_spatial_ledger or None,
+                chapter_assets_schema=chapter_assets_schema or '',
+                pov_perception_state=pov_ps,
+                pov_character_profile=pov_pf,
+            )
+            prompts.append({
+                "stage": f"PROSE_DRAFT_ATTEMPT_{att}",
+                "beat_index": local_idx,
+                "temperature": temp,
+                "system_prompt": sys_p,
+                "user_prompt": usr_p,
+            })
+            resp = await _call_llm_with_stats(
+                stage="prose_draft",
+                system_prompt=sys_p, user_prompt=usr_p,
+                api_key=api_key, base_url=base_url, model=creative_model,
+                temperature=temp, max_tokens=_clamp_tokens(tw),
+                beat_index=local_idx, stats_callback=stats_callback,
+            )
+            chunk = clean_llm_output(resp).strip()
+
+            if flags.enable_fail_fast and att < max_att:
+                is_ok, fail_r, fail_c = await _micro_review_assertion(
+                    chunk_text=chunk, dynamic_context=dc1,
+                    pov_character=pov_ch, beat=beat,
+                    api_key=api_key, base_url=base_url, model=reasoning_model,
+                    entity_spatial_ledger=dc1.entity_spatial_ledger or None,
+                    beat_index=local_idx, stats_callback=stats_callback,
+                )
+                if not is_ok:
+                    if "文风" in fail_c:
+                        temp = min(1.0, temp + flags.fail_fast_temperature_step)
+                    else:
+                        temp = max(0.3, temp - 0.1)
+                        usr_p = usr_p + f"\n\n【修正要求】上一版本存在以下问题：{fail_r}。请保持原语境，仅修复该冲突。"
+                else:
+                    is_ok = True
+            else:
+                is_ok = True
+
+        if enable_qc:
+            chunk, qc_ps = await _quick_qc(
+                prose_text=chunk, beat=beat, beat_index=local_idx,
+                chapter=chapter, book=book, entities=entities, relationships=relationships,
+                api_key=api_key, base_url=base_url, model=creative_model, target_words=tw,
+            )
+            prompts.extend(qc_ps)
+
+        return {"text": chunk, "prompts": prompts}
+
+    middle_tasks = [
+        _middle_task(i + 2, middle_beats[i], middle_scene_intents[i], middle_subconsciouses[i])
+        for i in range(len(middle_beats))
+    ]
+    middle_raw = await asyncio.gather(*middle_tasks, return_exceptions=True)
+    middle_results = []
+    for r in middle_raw:
+        if isinstance(r, Exception):
+            logger.error(f"[Prose Semi-Parallel] 中间 Beat 异常: {r}")
+            middle_results.append({"text": "", "prompts": []})
+        else:
+            middle_results.append(r)
+
+    logger.info(f"[Prose Semi-Parallel] 阶段2 完成，{len(middle_results)} 个中间 Beat 生成完毕")
+
+    # ============================================================
+    # 阶段3：Beat N 串行（使用 Beat N-1 的 tail 作为物理锚点）
+    # ============================================================
+    last_beat = beats[-1]
+    last_beat_idx = n
+    last_pov_ch = last_beat.get("pov_character", "主角")
+    last_pov_pf = _get_pov_profile(last_pov_ch)
+    last_pov_ps = _get_pov_perception(last_beat)
+    last_tw = _calc_target_words(last_beat)
+
+    # 取 Beat N-1 的 tail（倒数第二 beat，即 middle_beats[-1]）
+    prev_text_for_last = middle_results[-1]["text"] if middle_results else chunk_text_0
+    prev_beat_for_last = middle_beats[-1] if middle_beats else beats[0]
+    tail_n_minus_1 = _extract_tail(prev_text_for_last, max_chars=300)
+    pov_anchor_last = (
+        f"\n[System Tracker: 当前主语视角强锁定为 {prev_beat_for_last.get('pov_character', '主角')} "
+        f"| 当前退出状态: {prev_beat_for_last.get('exit_state', '未指定')} "
+        f"| 下一拍进入状态: {last_beat.get('entry_state', '未指定')}]"
+    )
+
+    context_last = DynamicContext(
+        previous_tail=tail_n_minus_1 + pov_anchor_last,
+        current_emotional_state=dynamic_context.current_emotional_state,
+        physical_state_lock=physical_state_lock or "",
+        accumulated_summary=dynamic_context.accumulated_summary,
+        relational_state_lock=dynamic_context.relational_state_lock,
+        entity_spatial_ledger=entity_spatial_ledger or {},
+    )
+
+    logger.info(f"[Prose Semi-Parallel] 阶段3: Beat {last_beat_idx} 串行生成（尾部锚定）...")
+    max_att_last = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+    chunk_last = ""
+    is_ok_last = False
+    att_last = 0
+    temp_last = 0.75
+    prompts_last = []
+    user_prompt_last = ""
+
+    while att_last < max_att_last and not is_ok_last:
+        att_last += 1
+        sys_p_last, user_prompt_last = build_prose_draft_prompt_v25(
+            chapter=chapter, book=book, beat=last_beat,
+            scene_intent=scene_intent_results[-1], subconscious_thought=subconscious_results[-1],
+            previous_tail=context_last.previous_tail,
+            target_words=last_tw,
+            physical_state_lock=context_last.physical_state_lock,
+            current_emotional_state=context_last.current_emotional_state,
+            accumulated_summary=context_last.accumulated_summary,
+            relational_state_lock=context_last.relational_state_lock,
+            red_lines=last_beat.get("red_lines"),
+            entity_spatial_ledger=context_last.entity_spatial_ledger or None,
+            chapter_assets_schema=chapter_assets_schema or '',
+            pov_perception_state=last_pov_ps,
+            pov_character_profile=last_pov_pf,
+        )
+        prompts_last.append({
+            "stage": f"PROSE_DRAFT_ATTEMPT_{att_last}",
+            "beat_index": last_beat_idx,
+            "temperature": temp_last,
+            "system_prompt": sys_p_last,
+            "user_prompt": user_prompt_last,
+        })
+        resp_last = await _call_llm_with_stats(
+            stage="prose_draft",
+            system_prompt=sys_p_last, user_prompt=user_prompt_last,
+            api_key=api_key, base_url=base_url, model=creative_model,
+            temperature=temp_last, max_tokens=_clamp_tokens(last_tw),
+            beat_index=last_beat_idx, stats_callback=stats_callback,
+        )
+        chunk_last = clean_llm_output(resp_last).strip()
+
+        if flags.enable_fail_fast and att_last < max_att_last:
+            is_ok_last, fail_r_last, fail_c_last = await _micro_review_assertion(
+                chunk_text=chunk_last, dynamic_context=context_last,
+                pov_character=last_pov_ch, beat=last_beat,
+                api_key=api_key, base_url=base_url, model=reasoning_model,
+                entity_spatial_ledger=context_last.entity_spatial_ledger or None,
+                beat_index=last_beat_idx, stats_callback=stats_callback,
+            )
+            if not is_ok_last:
+                if "文风" in fail_c_last:
+                    temp_last = min(1.0, temp_last + flags.fail_fast_temperature_step)
+                else:
+                    temp_last = max(0.3, temp_last - 0.1)
+                    user_prompt_last = user_prompt_last + f"\n\n【修正要求】上一版本存在以下问题：{fail_r_last}。请保持原语境，仅修复该冲突。"
+            else:
+                is_ok_last = True
+        else:
+            is_ok_last = True
+
+    if enable_qc:
+        chunk_last, qc_plast = await _quick_qc(
+            prose_text=chunk_last, beat=last_beat, beat_index=last_beat_idx,
+            chapter=chapter, book=book, entities=entities, relationships=relationships,
+            api_key=api_key, base_url=base_url, model=creative_model, target_words=last_tw,
+        )
+        prompts_last.extend(qc_plast)
+
+    result_last = {"text": chunk_last, "prompts": prompts_last}
+    logger.info(f"[Prose Semi-Parallel] Beat {last_beat_idx} 完成，字数={len(chunk_last)}")
+
+    # ============================================================
+    # 组装最终结果（顺序：Beat1 + 中间 Beats + BeatN）
+    # ============================================================
+    final_results = [result_beat_1] + middle_results + [result_last]
+    logger.info(f"[Prose Semi-Parallel] 半并行生成完成，共 {n} 个 Beats")
+    return final_results
 
 
 async def _micro_review_assertion(
