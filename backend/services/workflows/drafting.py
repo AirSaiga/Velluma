@@ -94,6 +94,7 @@ async def _call_llm_with_stats(
     top_p: float = 1.0,
     beat_index: Optional[int] = None,
     stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,  # 推理模式配置
 ) -> str:
     """
     带统计追踪的 LLM 调用包装器。
@@ -113,6 +114,7 @@ async def _call_llm_with_stats(
         top_p: Top-p 采样参数
         beat_index: Beat 索引（用于按 Beat 统计）
         stats_callback: 统计回调函数，若为 None 则跳过统计
+        reasoning_config: 推理模式配置（OpenRouter Reasoning Tokens 支持）
     
     Returns:
         str: LLM 生成的文本内容
@@ -130,6 +132,7 @@ async def _call_llm_with_stats(
             max_tokens=max_tokens,
             response_format=response_format,
             top_p=top_p,
+            reasoning_config=reasoning_config,
         )
     except Exception:
         success = False
@@ -186,6 +189,7 @@ async def execute_draft_stage(
     chapter_assets_schema: str = "",
     workflow_tier: Optional[WorkflowTier] = None,  # V3.0 NEW
     stats_callback: LLMStatsCallback = None,  # LLM 调用统计回调（可选）
+    reasoning_config: Optional[dict] = None,  # 推理模式配置（OpenRouter Reasoning Tokens）
 ) -> List[BeatDraftResult]:
     """
     V3.0 智能路由起草阶段主入口。
@@ -217,6 +221,7 @@ async def execute_draft_stage(
         physical_state_lock: 主角物理状态锁定描述（可选）
         workflow_tier: 工作流层级（可选，默认从 beats[0] 或 flags 获取）
         stats_callback: LLM 调用统计回调函数（可选），用于追踪各阶段调用次数和耗时
+        reasoning_config: 推理模式配置（可选），用于 OpenRouter 推理模型
     
     Returns:
         List[BeatDraftResult]: 按 Beat 顺序排列的生成结果列表
@@ -385,6 +390,7 @@ async def _generate_scene_intent_batch(
                 max_tokens=600,
                 beat_index=beat_index,
                 stats_callback=stats_callback,
+                reasoning_config=reasoning_config,  # 推理模式配置
             )
             
             scene_intent = parse_scene_intent_result(response, beat.get("summary", ""))
@@ -498,6 +504,7 @@ async def _generate_subconscious_batch(
                 response_format={"type": "json_object"},
                 beat_index=beat_index,
                 stats_callback=stats_callback,
+                reasoning_config=reasoning_config,  # 推理模式配置
             )
             
             # 清理并尝试解析 MCTS JSON
@@ -1709,8 +1716,8 @@ async def _update_dynamic_state(
     - 本段剧情摘要 $S_{new}$
     
     状态演化公式:
-    $$\Delta_{state} = f_{llm}(Text_{chunk}, State_{prev}, Rel_{current})$$
-    $$State_{new} = State_{prev} \oplus \Delta_{state}$$
+    $$\\Delta_{state} = f_{llm}(Text_{chunk}, State_{prev}, Rel_{current})$$
+    $$State_{new} = State_{prev} \\oplus \\Delta_{state}$$
     
     Args:
         chunk_text: 刚生成的剧情文本
@@ -1836,7 +1843,7 @@ def _merge_relational_delta(current_state: str, delta: str) -> str:
     策略：
     - 保留当前状态的主要信息
     - 追加新的变化描述
-    - 控制总长度（$$L_{relational} \le 300$$）
+    - 控制总长度（$$L_{relational} \\le 300$$）
     """
     MAX_LEN = 300
     

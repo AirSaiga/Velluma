@@ -1,4 +1,4 @@
-import type { AgenticFormState, GenerateChapterAgenticPayload } from '../types'
+import type { AgenticFormState, GenerateChapterAgenticPayload, ReasoningConfig } from '../types'
 
 const FLOAT_PRECISION = 1000
 const MEMORY_SPAN_TOP_K = {
@@ -337,7 +337,25 @@ export function validateAgenticForm(input: Partial<AgenticFormState & AgenticLeg
 
 export function buildAgenticPayload(params: {
   chapterId: string
-  apiConfig: { api_key: string; base_url?: string; model?: string; reasoning_model?: string; creative_model?: string }
+  apiConfig: { 
+    api_key: string
+    base_url?: string
+    model?: string
+    reasoning_model?: string
+    creative_model?: string
+    // 默认模型的推理模式配置
+    reasoning_enabled?: boolean
+    reasoning_effort?: ReasoningConfig['effort']
+    reasoning_exclude?: boolean
+    // 逻辑推理模型的推理模式配置
+    reasoning_model_reasoning_enabled?: boolean
+    reasoning_model_reasoning_effort?: ReasoningConfig['effort']
+    reasoning_model_reasoning_exclude?: boolean
+    // 创意生成模型的推理模式配置
+    creative_model_reasoning_enabled?: boolean
+    creative_model_reasoning_effort?: ReasoningConfig['effort']
+    creative_model_reasoning_exclude?: boolean
+  }
   form: Partial<AgenticFormState & AgenticLegacyFields>
 }): { payload: GenerateChapterAgenticPayload | null; errors: string[] } {
   const { normalized, errors } = validateAgenticForm(params.form)
@@ -354,6 +372,40 @@ export function buildAgenticPayload(params: {
   // 双模型配置处理
   const hasDualModel = !!(params.apiConfig.reasoning_model || params.apiConfig.creative_model)
   const baseModel = params.apiConfig.model || 'gpt-4o-mini'
+  
+  // 单模型模式的推理模式配置处理
+  let reasoningConfig: ReasoningConfig | undefined = undefined
+  if (!hasDualModel && params.apiConfig.reasoning_enabled) {
+    reasoningConfig = {
+      enabled: true,
+      effort: params.apiConfig.reasoning_effort || 'medium',
+      exclude: params.apiConfig.reasoning_exclude || false
+    }
+  }
+  
+  // 双模型模式的推理模式配置处理
+  let reasoningModelReasoningConfig: ReasoningConfig | undefined = undefined
+  let creativeModelReasoningConfig: ReasoningConfig | undefined = undefined
+  
+  if (hasDualModel) {
+    // 逻辑推理模型的推理配置
+    if (params.apiConfig.reasoning_model_reasoning_enabled) {
+      reasoningModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.reasoning_model_reasoning_effort || 'high',
+        exclude: params.apiConfig.reasoning_model_reasoning_exclude || false
+      }
+    }
+    
+    // 创意生成模型的推理配置
+    if (params.apiConfig.creative_model_reasoning_enabled) {
+      creativeModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.creative_model_reasoning_effort || 'low',
+        exclude: params.apiConfig.creative_model_reasoning_exclude || false
+      }
+    }
+  }
   
   return {
     payload: {
@@ -377,7 +429,12 @@ export function buildAgenticPayload(params: {
       author_intent: normalized.author_intent,
       fast_mode: false,
       skip_minor_refine: true,
-      force_parallel_prose: normalized.force_parallel_prose
+      force_parallel_prose: normalized.force_parallel_prose,
+      // 单模型模式的推理模式配置
+      reasoning_config: reasoningConfig,
+      // 双模型模式的推理模式配置
+      reasoning_model_reasoning_config: reasoningModelReasoningConfig,
+      creative_model_reasoning_config: creativeModelReasoningConfig
     },
     errors: []
   }

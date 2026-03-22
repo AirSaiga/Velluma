@@ -56,7 +56,19 @@ const formData = ref({
   base_url: '',
   model: '',
   reasoning_model: '',
-  creative_model: ''
+  creative_model: '',
+  // 默认模型的推理模式配置
+  reasoning_enabled: false,
+  reasoning_effort: 'medium',
+  reasoning_exclude: false,
+  // 逻辑推理模型的推理模式配置（用于 Scene Intent / Subconscious / Review）
+  reasoning_model_reasoning_enabled: false,
+  reasoning_model_reasoning_effort: 'high',
+  reasoning_model_reasoning_exclude: false,
+  // 创意生成模型的推理模式配置（用于 Prose Draft）
+  creative_model_reasoning_enabled: false,
+  creative_model_reasoning_effort: 'low',
+  creative_model_reasoning_exclude: false
 })
 
 const proxyEnabled = ref(true)
@@ -64,6 +76,11 @@ const proxyUrl = ref('http://127.0.0.1:4780')
 
 const isManualModel = ref(false)
 const enableDualModel = ref(false)
+
+// 测试连接状态
+const isTestingConnection = ref(false)
+/** @type {{ success: boolean; message: string; reasoning_supported?: boolean; reasoning_message?: string; response_time_ms?: number } | null} */
+const testResult = ref(null)
 
 onMounted(async () => {
   try {
@@ -82,7 +99,19 @@ watch(() => props.isOpen, (newVal) => {
       ...props.config,
       // 确保新字段有默认值
       reasoning_model: props.config.reasoning_model || '',
-      creative_model: props.config.creative_model || ''
+      creative_model: props.config.creative_model || '',
+      // 默认模型的推理模式配置初始化
+      reasoning_enabled: props.config.reasoning_enabled ?? false,
+      reasoning_effort: props.config.reasoning_effort || 'medium',
+      reasoning_exclude: props.config.reasoning_exclude ?? false,
+      // 逻辑推理模型的推理模式配置初始化
+      reasoning_model_reasoning_enabled: props.config.reasoning_model_reasoning_enabled ?? false,
+      reasoning_model_reasoning_effort: props.config.reasoning_model_reasoning_effort || 'high',
+      reasoning_model_reasoning_exclude: props.config.reasoning_model_reasoning_exclude ?? false,
+      // 创意生成模型的推理模式配置初始化
+      creative_model_reasoning_enabled: props.config.creative_model_reasoning_enabled ?? false,
+      creative_model_reasoning_effort: props.config.creative_model_reasoning_effort || 'low',
+      creative_model_reasoning_exclude: props.config.creative_model_reasoning_exclude ?? false
     }
     
     // 检查是否启用了双模型
@@ -143,10 +172,32 @@ async function handleSave() {
     proxy_url: proxyUrl.value
   }
   
-  // 如果未启用双模型，清空专用字段
+  // 如果未启用双模型，清空专用字段和推理配置
   if (!enableDualModel.value) {
     configToSave.reasoning_model = ''
     configToSave.creative_model = ''
+    configToSave.reasoning_model_reasoning_enabled = false
+    configToSave.reasoning_model_reasoning_effort = 'high'
+    configToSave.reasoning_model_reasoning_exclude = false
+    configToSave.creative_model_reasoning_enabled = false
+    configToSave.creative_model_reasoning_effort = 'low'
+    configToSave.creative_model_reasoning_exclude = false
+  } else {
+    // 双模型模式：如果未启用推理模式，重置推理配置
+    if (!formData.value.reasoning_model_reasoning_enabled) {
+      configToSave.reasoning_model_reasoning_effort = 'high'
+      configToSave.reasoning_model_reasoning_exclude = false
+    }
+    if (!formData.value.creative_model_reasoning_enabled) {
+      configToSave.creative_model_reasoning_effort = 'low'
+      configToSave.creative_model_reasoning_exclude = false
+    }
+  }
+  
+  // 单模型模式：如果未启用推理模式，重置推理配置
+  if (!formData.value.reasoning_enabled) {
+    configToSave.reasoning_effort = 'medium'
+    configToSave.reasoning_exclude = false
   }
   
   emit('save', configToSave)
@@ -172,6 +223,127 @@ async function handleResetLocal() {
   localStorage.removeItem('velluma_api_config')
   emit('close')
   window.location.reload()
+}
+
+async function handleTestConnection() {
+  if (!formData.value.api_key) {
+    testResult.value = {
+      success: false,
+      message: '请先输入 API Key'
+    }
+    return
+  }
+  
+  // 双模型模式：测试两个模型
+  if (enableDualModel.value) {
+    // 测试逻辑推理模型
+    if (!formData.value.reasoning_model) {
+      testResult.value = {
+        success: false,
+        message: '请先输入逻辑推理模型名称'
+      }
+      return
+    }
+    
+    isTestingConnection.value = true
+    testResult.value = null
+    
+    try {
+      // 先测试逻辑推理模型
+      const reasoningResult = await systemApi.testModel({
+        api_key: formData.value.api_key,
+        base_url: formData.value.base_url || undefined,
+        model: formData.value.reasoning_model,
+        reasoning_enabled: formData.value.reasoning_model_reasoning_enabled,
+        reasoning_effort: formData.value.reasoning_model_reasoning_effort
+      })
+      
+      if (!reasoningResult.success) {
+        testResult.value = {
+          success: false,
+          message: `逻辑推理模型测试失败: ${reasoningResult.message}`
+        }
+        isTestingConnection.value = false
+        return
+      }
+      
+      // 如果有创意生成模型，也测试它
+      if (formData.value.creative_model) {
+        const creativeResult = await systemApi.testModel({
+          api_key: formData.value.api_key,
+          base_url: formData.value.base_url || undefined,
+          model: formData.value.creative_model,
+          reasoning_enabled: formData.value.creative_model_reasoning_enabled,
+          reasoning_effort: formData.value.creative_model_reasoning_effort
+        })
+        
+        if (!creativeResult.success) {
+          testResult.value = {
+            success: false,
+            message: `创意生成模型测试失败: ${creativeResult.message}`
+          }
+          isTestingConnection.value = false
+          return
+        }
+        
+        // 两个模型都成功
+        testResult.value = {
+          success: true,
+          message: `双模型测试成功！逻辑推理: ${reasoningResult.message.split('，')[0]}，创意: ${creativeResult.message.split('，')[0]}`,
+          reasoning_supported: reasoningResult.reasoning_supported,
+          reasoning_message: reasoningResult.reasoning_message,
+          response_time_ms: (reasoningResult.response_time_ms || 0) + (creativeResult.response_time_ms || 0)
+        }
+      } else {
+        // 只有逻辑推理模型
+        testResult.value = reasoningResult
+      }
+    } catch (e) {
+      testResult.value = {
+        success: false,
+        message: `测试失败: ${e.message || '未知错误'}`
+      }
+    } finally {
+      isTestingConnection.value = false
+    }
+    return
+  }
+  
+  // 单模型模式
+  if (!formData.value.model) {
+    testResult.value = {
+      success: false,
+      message: '请先选择或输入模型名称'
+    }
+    return
+  }
+  
+  isTestingConnection.value = true
+  testResult.value = null
+  
+  try {
+    const result = await systemApi.testModel({
+      api_key: formData.value.api_key,
+      base_url: formData.value.base_url || undefined,
+      model: formData.value.model,
+      reasoning_enabled: formData.value.reasoning_enabled,
+      reasoning_effort: formData.value.reasoning_effort
+    })
+    
+    testResult.value = result
+    
+    // 如果启用了推理模式但模型不支持，显示警告
+    if (formData.value.reasoning_enabled && result.success && result.reasoning_supported === false) {
+      // 用户已看到警告，无需额外处理
+    }
+  } catch (e) {
+    testResult.value = {
+      success: false,
+      message: `测试失败: ${e.message || '未知错误'}`
+    }
+  } finally {
+    isTestingConnection.value = false
+  }
 }
 </script>
 
@@ -266,6 +438,57 @@ async function handleResetLocal() {
           </p>
         </div>
 
+        <!-- Test Connection Button -->
+        <div class="border-t border-[var(--border-color)] pt-4">
+          <button
+            @click="handleTestConnection"
+            :disabled="isTestingConnection"
+            :class="[
+              'w-full px-4 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2',
+              isTestingConnection 
+                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed' 
+                : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] border border-[var(--border-color)]'
+            ]"
+          >
+            <svg v-if="isTestingConnection" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            {{ isTestingConnection ? '测试中...' : '测试连接' }}
+          </button>
+          
+          <!-- Test Result -->
+          <div v-if="testResult" class="mt-3 p-3 rounded-lg text-sm" :class="testResult.success ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'">
+            <div class="flex items-start gap-2">
+              <svg v-if="testResult.success" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 mt-0.5 shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-500 mt-0.5 shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+              <div class="flex-1">
+                <p :class="testResult.success ? 'text-green-400' : 'text-red-400'">{{ testResult.message }}</p>
+                <p v-if="testResult.response_time_ms" class="text-xs text-[var(--text-muted)] mt-1">
+                  响应时间: {{ testResult.response_time_ms.toFixed(0) }}ms
+                </p>
+              </div>
+            </div>
+            
+            <!-- Reasoning Support Warning -->
+            <div v-if="testResult.success && testResult.reasoning_supported === false && formData.reasoning_enabled" class="mt-2 pt-2 border-t border-amber-500/30">
+              <div class="flex items-start gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500 mt-0.5 shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <p class="text-amber-400 text-xs">{{ testResult.reasoning_message }}</p>
+              </div>
+            </div>
+            
+            <!-- Reasoning Support Success -->
+            <div v-if="testResult.success && testResult.reasoning_supported === true && formData.reasoning_enabled" class="mt-2 pt-2 border-t border-green-500/30">
+              <div class="flex items-start gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 mt-0.5 shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <p class="text-green-400 text-xs">{{ testResult.reasoning_message }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Dual Model Toggle -->
         <div class="border-t border-[var(--border-color)] pt-4">
           <div class="flex items-center justify-between">
@@ -305,12 +528,50 @@ async function handleResetLocal() {
             <input
               v-model="formData.reasoning_model"
               type="text"
-              placeholder="例如: gpt-4o, claude-3-5-sonnet, qwen-max"
+              placeholder="例如: openai/o3-mini, anthropic/claude-3.7-sonnet, deepseek/deepseek-r1"
               class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
             />
             <p class="mt-1 text-xs text-[var(--text-muted)]">
               用于 Scene Intent 分析、潜意识生成、审阅与精修阶段
             </p>
+            
+            <!-- 逻辑推理模型的推理模式配置 -->
+            <div class="mt-3 pl-3 border-l-2 border-blue-500/30">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-xs font-medium text-[var(--text-secondary)]">启用推理模式</label>
+                <button
+                  @click="formData.reasoning_model_reasoning_enabled = !formData.reasoning_model_reasoning_enabled"
+                  :class="[
+                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                    formData.reasoning_model_reasoning_enabled ? 'bg-blue-500' : 'bg-[var(--bg-tertiary)]'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                      formData.reasoning_model_reasoning_enabled ? 'translate-x-5' : 'translate-x-1'
+                    ]"
+                  />
+                </button>
+              </div>
+              <p class="text-xs text-[var(--text-muted)] mb-2">逻辑推理模型最推荐启用推理模式</p>
+              
+              <div v-if="formData.reasoning_model_reasoning_enabled" class="space-y-2">
+                <select
+                  v-model="formData.reasoning_model_reasoning_effort"
+                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[var(--text-primary)]"
+                >
+                  <option value="xhigh">极高 (xhigh) - 约 95% tokens 用于推理</option>
+                  <option value="high">高 (high) - 约 80% tokens 用于推理</option>
+                  <option value="medium">中 (medium) - 约 50% tokens 用于推理</option>
+                  <option value="low">低 (low) - 约 20% tokens 用于推理</option>
+                </select>
+                <div class="flex items-center gap-2">
+                  <input type="checkbox" v-model="formData.reasoning_model_reasoning_exclude" class="rounded" />
+                  <span class="text-xs text-[var(--text-muted)]">排除推理 tokens（不返回推理过程）</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Creative Model -->
@@ -330,6 +591,44 @@ async function handleResetLocal() {
             <p class="mt-1 text-xs text-[var(--text-muted)]">
               用于正文起草阶段，需要较强的创意和写作能力
             </p>
+            
+            <!-- 创意生成模型的推理模式配置 -->
+            <div class="mt-3 pl-3 border-l-2 border-amber-500/30">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-xs font-medium text-[var(--text-secondary)]">启用推理模式</label>
+                <button
+                  @click="formData.creative_model_reasoning_enabled = !formData.creative_model_reasoning_enabled"
+                  :class="[
+                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                    formData.creative_model_reasoning_enabled ? 'bg-amber-500' : 'bg-[var(--bg-tertiary)]'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                      formData.creative_model_reasoning_enabled ? 'translate-x-5' : 'translate-x-1'
+                    ]"
+                  />
+                </button>
+              </div>
+              <p class="text-xs text-[var(--text-muted)] mb-2">创意写作通常不需要推理模式</p>
+              
+              <div v-if="formData.creative_model_reasoning_enabled" class="space-y-2">
+                <select
+                  v-model="formData.creative_model_reasoning_effort"
+                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[var(--text-primary)]"
+                >
+                  <option value="high">高 (high) - 约 80% tokens 用于推理</option>
+                  <option value="medium">中 (medium) - 约 50% tokens 用于推理</option>
+                  <option value="low">低 (low) - 约 20% tokens 用于推理</option>
+                  <option value="minimal">极低 (minimal) - 约 10% tokens 用于推理</option>
+                </select>
+                <div class="flex items-center gap-2">
+                  <input type="checkbox" v-model="formData.creative_model_reasoning_exclude" class="rounded" />
+                  <span class="text-xs text-[var(--text-muted)]">排除推理 tokens（不返回推理过程）</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 使用说明 -->
@@ -341,15 +640,111 @@ async function handleResetLocal() {
             <div class="space-y-1.5 text-xs text-[var(--text-muted)]">
               <p class="flex items-start gap-2">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0"></span>
-                <span><strong class="text-[var(--text-secondary)]">逻辑推理模型</strong>：用于 Scene Intent 分析、潜意识生成、审阅指导、灵感生成、文本润色等</span>
+                <span><strong class="text-[var(--text-secondary)]">逻辑推理模型</strong>：用于 Scene Intent 分析、潜意识生成、审阅指导、灵感生成、文本润色等。推荐使用推理模型（如 o3-mini、deepseek-r1）并启用推理模式。</span>
               </p>
               <p class="flex items-start gap-2">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0"></span>
-                <span><strong class="text-[var(--text-secondary)]">创意生成模型</strong>：仅用于 Agentic 文章生成的正文起草阶段（Prose Draft）</span>
+                <span><strong class="text-[var(--text-secondary)]">创意生成模型</strong>：仅用于 Agentic 文章生成的正文起草阶段（Prose Draft）。通常不需要推理模式。</span>
               </p>
               <p class="flex items-start gap-2">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 shrink-0"></span>
                 <span>其他功能（格式化、发布、角色状态更新）使用逻辑推理模型或默认模型</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 推理模式设置（仅单模型模式时显示） -->
+      <div v-if="!enableDualModel" class="px-6 pb-6 space-y-3 border-t border-[var(--border-color)] pt-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-[var(--text-primary)]">启用推理模式</label>
+            <p class="text-xs text-[var(--text-muted)] mt-0.5">
+              适用于 OpenRouter 推理模型（o1, o3, GPT-5, Claude thinking 等）
+            </p>
+          </div>
+          <button
+            @click="formData.reasoning_enabled = !formData.reasoning_enabled"
+            :class="[
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+              formData.reasoning_enabled ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                formData.reasoning_enabled ? 'translate-x-6' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+        
+        <!-- 推理模式详细配置 -->
+        <div v-if="formData.reasoning_enabled" class="space-y-4 border border-[var(--border-color)] rounded-lg p-4 bg-[var(--bg-tertiary)]/50">
+          <!-- 推理努力程度 -->
+          <div>
+            <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">
+              推理努力程度
+            </label>
+            <select
+              v-model="formData.reasoning_effort"
+              class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            >
+              <option value="xhigh">极高 (xhigh) - 约 95% tokens 用于推理</option>
+              <option value="high">高 (high) - 约 80% tokens 用于推理</option>
+              <option value="medium">中 (medium) - 约 50% tokens 用于推理</option>
+              <option value="low">低 (low) - 约 20% tokens 用于推理</option>
+              <option value="minimal">极低 (minimal) - 约 10% tokens 用于推理</option>
+              <option value="none">禁用 (none)</option>
+            </select>
+            <p class="mt-1 text-xs text-[var(--text-muted)]">
+              推理努力程度越高，模型在生成前会进行更深入的思考，但响应时间也会增加。
+            </p>
+          </div>
+          
+          <!-- 排除推理 tokens -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium text-[var(--text-primary)]">排除推理 tokens</label>
+              <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                模型仍会推理，但不在响应中返回推理过程
+              </p>
+            </div>
+            <button
+              @click="formData.reasoning_exclude = !formData.reasoning_exclude"
+              :class="[
+                'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                formData.reasoning_exclude ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                  formData.reasoning_exclude ? 'translate-x-5' : 'translate-x-1'
+                ]"
+              />
+            </button>
+          </div>
+          
+          <!-- 使用说明 -->
+          <div class="mt-4 pt-4 border-t border-[var(--border-color)]">
+            <h4 class="text-xs font-medium text-[var(--text-primary)] mb-2 flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              推理模式说明
+            </h4>
+            <div class="space-y-1.5 text-xs text-[var(--text-muted)]">
+              <p class="flex items-start gap-2">
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0"></span>
+                <span><strong class="text-[var(--text-secondary)]">支持的模型</strong>：OpenAI o1/o3/GPT-5、Anthropic Claude 3.7+、Gemini thinking、xAI Grok 等</span>
+              </p>
+              <p class="flex items-start gap-2">
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 shrink-0"></span>
+                <span><strong class="text-[var(--text-secondary)]">适用场景</strong>：Scene Intent 分析、审阅精修、复杂逻辑推理等任务</span>
+              </p>
+              <p class="flex items-start gap-2">
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0"></span>
+                <span><strong class="text-[var(--text-secondary)]">注意事项</strong>：推理 tokens 会计入输出 token 并收费，启用后响应时间会增加</span>
               </p>
             </div>
           </div>

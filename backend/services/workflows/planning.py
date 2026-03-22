@@ -116,6 +116,7 @@ async def assign_pov_to_beats(
     base_url: str,
     model: str,
     previous_chapter_summary: Optional[str] = None,
+    prompt_logger = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """为节拍分配 POV 角色。
 
@@ -139,6 +140,7 @@ async def assign_pov_to_beats(
         api_key=api_key,
         base_url=base_url,
         model=model,
+        prompt_logger=prompt_logger,
     )
 
     for beat in beats:
@@ -241,6 +243,7 @@ async def determine_chapter_anchor_pov(
     api_key: str = None,
     base_url: str = None,
     model: str = None,
+    prompt_logger = None,
 ) -> str:
     """确定章节的核心主角 (Anchor POV)。
 
@@ -290,6 +293,20 @@ async def determine_chapter_anchor_pov(
         previous_chapter_summary=previous_chapter_summary,
     )
 
+    # 记录 Prompt 到 logger（如果提供）
+    if prompt_logger:
+        prompt_logger.start_stage("POV_ASSIGNMENT", iteration=1)
+        prompt_logger.log_inputs(
+            pov_candidates_count=len(characters),
+            has_previous_summary=bool(previous_chapter_summary),
+        )
+        prompt_logger.log_prompts(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            prompt_label="ANCHOR_POV",
+        )
+
     llm_result_raw = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -302,6 +319,14 @@ async def determine_chapter_anchor_pov(
     try:
         llm_result = json.loads(llm_result_raw)
         anchor_pov = parse_anchor_pov_result(llm_result)
+        
+        # 记录输出到 logger
+        if prompt_logger:
+            prompt_logger.log_outputs(anchor_pov=anchor_pov)
+            prompt_logger.end_stage(success=True)
+        
         return anchor_pov
     except json.JSONDecodeError:
+        if prompt_logger:
+            prompt_logger.end_stage(success=False)
         return ""

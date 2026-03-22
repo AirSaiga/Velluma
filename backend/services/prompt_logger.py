@@ -133,7 +133,10 @@ class PromptLogger:
             
             # 提取角色信息
             if char:
-                name = getattr(char, 'name', None) or e.get('name', 'Unknown') if isinstance(e, dict) else 'Unknown'
+                # 注意：getattr 可能返回空字符串，空字符串是 falsy，需要显式检查
+                name = getattr(char, 'name', None)
+                if not name:  # 同时处理 None 和空字符串
+                    name = e.get('name', 'Unknown') if isinstance(e, dict) else 'Unknown'
                 importance = getattr(char, 'importance_level', 1)
                 static_prompt = getattr(char, 'static_prompt', '') or ''
                 

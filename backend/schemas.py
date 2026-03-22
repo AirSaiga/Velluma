@@ -13,6 +13,73 @@ PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
 # V3.0: 智能路由工作流层级
 WorkflowTier = Literal["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]
 
+# ============================================================
+# 推理模式配置 - OpenRouter Reasoning Tokens 支持
+# ============================================================
+ReasoningEffortLevel = Literal["xhigh", "high", "medium", "low", "minimal", "none"]
+
+
+class ReasoningConfig(BaseModel):
+    """
+    推理模式配置模型 (OpenRouter Reasoning Tokens 支持)
+    
+    业务含义：
+    - 控制支持推理的模型（如 o1, o3, GPT-5, Claude, Gemini thinking 等）的推理强度
+    - 统一不同提供商的推理参数配置方式
+    
+    字段说明：
+    - enabled: 是否启用推理模式（默认 False，需要显式启用）
+    - effort: 推理努力程度，影响推理 token 分配比例
+      - xhigh: 约 95% max_tokens 用于推理
+      - high: 约 80% max_tokens 用于推理
+      - medium: 约 50% max_tokens 用于推理
+      - low: 约 20% max_tokens 用于推理
+      - minimal: 约 10% max_tokens 用于推理
+      - none: 禁用推理
+    - max_tokens: 直接指定推理 token 数量（用于 Anthropic/Gemini 等）
+    - exclude: 是否在响应中排除推理 tokens（仍会推理但不返回）
+    
+    使用场景：
+    - 复杂逻辑推理任务（Scene Intent 分析、审阅等）可启用高推理强度
+    - 创意写作任务通常不需要推理模式
+    """
+    enabled: bool = Field(default=False, description="是否启用推理模式")
+    effort: Optional[ReasoningEffortLevel] = Field(
+        default="medium", 
+        description="推理努力程度: xhigh/high/medium/low/minimal/none"
+    )
+    max_tokens: Optional[int] = Field(
+        default=None, 
+        ge=100, 
+        le=32000,
+        description="推理 token 数量限制（用于 Anthropic/Gemini 模型）"
+    )
+    exclude: bool = Field(
+        default=False, 
+        description="是否在响应中排除推理 tokens"
+    )
+    
+    def to_api_params(self) -> dict:
+        """
+        转换为 API 调用参数格式
+        
+        Returns:
+            dict: 可直接传入 extra_body 的 reasoning 参数
+        """
+        if not self.enabled:
+            return {}
+        
+        params = {"enabled": True}
+        
+        if self.effort:
+            params["effort"] = self.effort
+        if self.max_tokens is not None:
+            params["max_tokens"] = self.max_tokens
+        if self.exclude:
+            params["exclude"] = True
+            
+        return {"reasoning": params}
+
 
 def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
     """
@@ -803,7 +870,7 @@ class DynamicContext(BaseModel):
     - previous_tail: Rolling Prefix 机制上文尾部（默认 300 字符）
     - current_emotional_state: 主角当前心理状态的动态描述
     - physical_state_lock: 绝对物理状态约束（防幻觉边界）
-    - accumulated_summary: 宏观剧情累加器（跨 Beat 剧情摘要，$$L_{summary} \le 500$$）
+    - accumulated_summary: 宏观剧情累加器（跨 Beat 剧情摘要，$$L_{summary} \\le 500$$）
     - relational_state_lock: 在场角色动态关系锁（防止关系错乱）
     - active_whispers: 激活的 RAG 记忆片段（预留）
     """
@@ -850,7 +917,7 @@ class DynamicContext(BaseModel):
         策略：
         - 追加新摘要，用 " → " 连接
         - 超限后，从最早的内容开始裁剪（保留最近剧情）
-        - 数学约束: $$L_{total} = \sum_{i=1}^{n} L_{beat_i} + (n-1) \cdot L_{sep} \le 500$$
+        - 数学约束: $$L_{total} = \\sum_{i=1}^{n} L_{beat_i} + (n-1) \\cdot L_{sep} \\le 500$$
         """
         SEPARATOR = " → "
         MAX_LENGTH = 500
@@ -877,7 +944,7 @@ class DynamicStateUpdateResult(BaseModel):
     V2.5+ 动态状态更新结果 - 结构化输出
     
     数学模型：
-    $$State_{new} = State_{old} + \Delta_{emotion} + \Delta_{relationship} + Summary_{beat}$$
+    $$State_{new} = State_{old} + \\Delta_{emotion} + \\Delta_{relationship} + Summary_{beat}$$
     
     字段说明：
     - new_emotional_state ($E_{new}$): 角色新生成的心理状态
@@ -938,6 +1005,11 @@ class GenerateChapterAgenticRequest(BaseModel):
     - creative_model: 高创意模型，用于 Prose Draft 阶段
     - 如未提供 creative_model，则默认使用 reasoning_model（单模型模式）
 
+    推理模式配置：
+    - reasoning_config: 控制支持推理的模型的推理强度
+    - 适用于 OpenRouter 提供商的推理模型（o1, o3, GPT-5, Claude thinking 等）
+    - 推理模式可显著提升复杂逻辑任务的质量
+
     工作流：
     - 主笔生成初稿 → 审阅 Agent 质检 → 不合格则重写 → 达到迭代次数或合格则结束
     """
@@ -962,6 +1034,19 @@ class GenerateChapterAgenticRequest(BaseModel):
     feature_flags: Optional[DraftingFeatureFlags] = Field(
         default_factory=DraftingFeatureFlags,
         description="V2.5 认知流式生成功能开关配置"
+    )
+    reasoning_config: Optional[ReasoningConfig] = Field(
+        default_factory=lambda: ReasoningConfig(),
+        description="推理模式配置（单模型模式使用，OpenRouter Reasoning Tokens 支持）"
+    )
+    # 双模型推理模式配置
+    reasoning_model_reasoning_config: Optional[ReasoningConfig] = Field(
+        default_factory=lambda: ReasoningConfig(),
+        description="逻辑推理模型的推理模式配置（双模型模式使用）"
+    )
+    creative_model_reasoning_config: Optional[ReasoningConfig] = Field(
+        default_factory=lambda: ReasoningConfig(),
+        description="创意生成模型的推理模式配置（双模型模式使用）"
     )
 
     @field_validator('tension_level', mode='before')

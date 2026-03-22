@@ -7,6 +7,7 @@
 - 健康检查（/health）
 - 获取后端实际端口（开发环境动态分配）
 - 系统信息查询
+- 模型连接测试（含推理模式支持检测）
 
 设计说明：
 - /health 用于容器编排系统（K8s/Docker）健康探测
@@ -16,13 +17,17 @@
 - 端口信息来自 core/config.py 的运行时配置
 """
 
+import logging
+from typing import Optional
+
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.core.config import get_actual_port
-from backend.services.llm_client import get_proxy_config, set_proxy_config
+from backend.services.llm_client import get_proxy_config, set_proxy_config, call_llm
 
 router = APIRouter(prefix="/api", tags=["system"])
+logger = logging.getLogger(__name__)
 
 
 class ProxyConfig(BaseModel):
@@ -30,9 +35,29 @@ class ProxyConfig(BaseModel):
     url: str
 
 
+class ModelTestRequest(BaseModel):
+    """模型连接测试请求"""
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+    # 推理模式配置
+    reasoning_enabled: bool = Field(default=False)
+    reasoning_effort: str = Field(default="medium")
+
+
+class ModelTestResponse(BaseModel):
+    """模型连接测试响应"""
+    success: bool
+    message: str
+    model_info: Optional[dict] = None
+    reasoning_supported: Optional[bool] = None
+    reasoning_message: Optional[str] = None
+    response_time_ms: Optional[float] = None
+
+
 # =============================================================================
 # 健康检查与配置查询
-# =============================================================================
+ # =============================================================================
 
 @router.get("/health")
 async def health_check():
@@ -86,3 +111,176 @@ async def update_proxy_config_endpoint(config: ProxyConfig):
     """更新代理配置"""
     set_proxy_config(config.enabled, config.url)
     return get_proxy_config()
+
+
+# =============================================================================
+# 模型连接测试
+# =============================================================================
+
+# 已知支持推理模式的模型列表
+# 参考: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+REASONING_SUPPORTED_MODELS = {
+    # OpenAI 推理模型
+    "openai/o1",
+    "openai/o1-mini",
+    "openai/o1-preview",
+    "openai/o3",
+    "openai/o3-mini",
+    "openai/o4-mini",
+    "openai/gpt-5",
+    # Anthropic 推理模型
+    "anthropic/claude-3.7-sonnet",
+    "anthropic/claude-3.7-sonnet:thinking",
+    "anthropic/claude-sonnet-4",
+    "anthropic/claude-sonnet-4:thinking",
+    # Gemini thinking 模型
+    "google/gemini-2.0-flash-thinking",
+    "google/gemini-2.0-flash-thinking-exp",
+    "google/gemini-2.5-pro-preview",
+    "google/gemini-2.5-pro-preview-05-06",
+    # xAI Grok
+    "x-ai/grok-3",
+    "x-ai/grok-3-mini",
+    "x-ai/grok-3-r1",
+    # DeepSeek R1
+    "deepseek/deepseek-r1",
+    "deepseek/deepseek-reasoner",
+    # 其他推理模型
+    "z-ai/glm-4.5",
+    "z-ai/glm-z1",
+    "moonshotai/kimi-k2-thinking",
+    "qwen/qwen-3-235b",
+}
+
+# 推理模型关键词（用于模糊匹配）
+REASONING_KEYWORDS = [
+    "o1", "o3", "o4", "gpt-5",
+    "thinking", "reasoner", "r1",
+    "claude-3.7", "claude-sonnet-4",
+    "grok-3", "glm-z1", "kimi-k2-thinking"
+]
+
+
+def _check_reasoning_support(model: str) -> tuple[bool, str]:
+    """
+    检查模型是否支持推理模式。
+    
+    Args:
+        model: 模型名称
+        
+    Returns:
+        tuple[bool, str]: (是否支持, 说明消息)
+    """
+    model_lower = model.lower()
+    
+    # 精确匹配
+    for supported in REASONING_SUPPORTED_MODELS:
+        if model_lower == supported.lower():
+            return True, f"模型 {model} 已确认支持推理模式"
+    
+    # 关键词匹配
+    for keyword in REASONING_KEYWORDS:
+        if keyword in model_lower:
+            return True, f"模型 {model} 可能支持推理模式（基于名称匹配）"
+    
+    return False, f"模型 {model} 可能不支持推理模式。支持推理的模型包括：OpenAI o1/o3/GPT-5、Anthropic Claude 3.7+、Gemini thinking、xAI Grok、DeepSeek R1 等"
+
+
+@router.post("/system/test-model", response_model=ModelTestResponse)
+async def test_model_connection(request: ModelTestRequest):
+    """
+    测试模型连接并检测推理模式支持。
+    
+    业务目的：
+    - 验证 API Key 和 Base URL 是否正确配置
+    - 检测模型是否可用
+    - 如果启用推理模式，检测模型是否支持推理功能
+    
+    测试流程：
+    1. 发送简单的测试请求验证连接
+    2. 检查模型名称是否在已知支持推理的列表中
+    3. 如果启用推理，尝试带推理参数的请求
+    
+    Returns:
+        ModelTestResponse: 包含连接状态、推理支持信息等
+    """
+    import time
+    
+    start_time = time.perf_counter()
+    
+    try:
+        # 构建推理配置（如果启用）
+        reasoning_config = None
+        if request.reasoning_enabled:
+            reasoning_config = {
+                "reasoning": {
+                    "enabled": True,
+                    "effort": request.reasoning_effort
+                }
+            }
+        
+        # 发送测试请求
+        test_prompt = "请回复'连接测试成功'这六个字，不要输出其他内容。"
+        response = await call_llm(
+            system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
+            user_prompt=test_prompt,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            temperature=0.1,
+            max_tokens=50,
+            reasoning_config=reasoning_config,
+        )
+        
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        
+        # 检查推理模式支持
+        reasoning_supported = None
+        reasoning_message = None
+        
+        if request.reasoning_enabled:
+            # 检查模型名称
+            reasoning_supported, reasoning_message = _check_reasoning_support(request.model)
+            
+            # 如果模型名称匹配，但实际请求可能失败（API 不支持）
+            # 这里我们基于模型名称判断，实际使用时如果 API 不支持会报错
+        
+        return ModelTestResponse(
+            success=True,
+            message=f"模型连接成功，响应: {response[:50]}..." if len(response) > 50 else f"模型连接成功，响应: {response}",
+            model_info={
+                "model": request.model,
+                "base_url": request.base_url or "默认"
+            },
+            reasoning_supported=reasoning_supported,
+            reasoning_message=reasoning_message,
+            response_time_ms=round(elapsed_ms, 2)
+        )
+        
+    except Exception as e:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        error_msg = str(e)
+        
+        # 解析常见错误类型
+        if "401" in error_msg or "Unauthorized" in error_msg or "invalid_api_key" in error_msg.lower():
+            message = "API Key 无效或未授权，请检查 API Key 是否正确"
+        elif "404" in error_msg or "not_found" in error_msg.lower() or "model" in error_msg.lower():
+            message = f"模型 {request.model} 不存在或不可用，请检查模型名称"
+        elif "429" in error_msg or "rate_limit" in error_msg.lower():
+            message = "请求过于频繁，请稍后重试"
+        elif "timeout" in error_msg.lower():
+            message = "连接超时，请检查网络或代理设置"
+        elif "connection" in error_msg.lower():
+            message = "无法连接到 API 服务器，请检查 Base URL 或网络设置"
+        elif "reasoning" in error_msg.lower():
+            message = f"推理模式不支持：该模型可能不支持推理功能。错误: {error_msg[:100]}"
+        else:
+            message = f"连接测试失败: {error_msg[:200]}"
+        
+        logger.warning(f"[Model Test] Failed for model {request.model}: {error_msg}")
+        
+        return ModelTestResponse(
+            success=False,
+            message=message,
+            response_time_ms=round(elapsed_ms, 2)
+        )

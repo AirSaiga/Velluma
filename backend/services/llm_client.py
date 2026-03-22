@@ -102,7 +102,7 @@ async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
     return await client.chat.completions.create(**kwargs)
 
 
-async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str, max_tokens: int = 8192):
+async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str, max_tokens: int = 8192, reasoning_config: Optional[dict] = None):
     """
     流式响应生成器，用于 SSE (Server-Sent Events) 实时输出 LLM 推理结果。
 
@@ -114,6 +114,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
     1. 首帧发送完整 prompt (用于前端调试/展示)
     2. 末尾发送 done=true 标记结束
     3. 异常时发送 error 帧但不中断流，确保前端能收到终止信号
+    4. 支持 reasoning_config 参数传递给 OpenRouter 推理模型
 
     性能考量：httpx.AsyncClient 手动管理而非全局复用，避免连接泄漏。
     """
@@ -132,15 +133,22 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         http_client = httpx.AsyncClient(trust_env=False, proxy=_get_active_proxy(), timeout=600.0)
         client_kwargs["http_client"] = http_client
         client = AsyncOpenAI(**client_kwargs)
-        # 流式调用：temperature=0.7 平衡创造力与稳定性，max_tokens 防止无限生成
-        stream = await _create_chat_completion(
-            client=client,
-            model=model,
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            stream=True,
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )
+        
+        # 构建调用参数
+        create_kwargs = {
+            "model": model,
+            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            "stream": True,
+            "temperature": 0.7,
+            "max_tokens": max_tokens,
+        }
+        
+        # reasoning_config 支持 OpenRouter 推理模式
+        if reasoning_config:
+            create_kwargs["extra_body"] = reasoning_config
+        
+        # 流式调用
+        stream = await _create_chat_completion(client=client, **create_kwargs)
         # 逐块转发 LLM 输出，保持实时性
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
@@ -252,6 +260,7 @@ async def call_llm(
     response_format: Optional[dict] = None,
     max_tokens: int = 8192,
     top_p: float = 1.0,
+    reasoning_config: Optional[dict] = None,
 ) -> str:
     """
     同步调用 LLM API 获取完整响应。
@@ -268,6 +277,7 @@ async def call_llm(
     特殊处理：
     - JSON 解析失败时返回空字符串 (静默失败，供上游处理)
     - response_format 支持强制 JSON 输出 (依赖模型支持)
+    - reasoning_config 支持 OpenRouter 推理模式参数传递
     """
     import httpx
 
@@ -292,6 +302,12 @@ async def call_llm(
         # response_format 强制模型输出结构化 JSON (需要模型支持 json_object 模式)
         if response_format:
             create_kwargs["response_format"] = response_format
+        
+        # reasoning_config 支持 OpenRouter 推理模式
+        # 通过 extra_body 传递，OpenAI SDK 会将其作为额外参数发送
+        if reasoning_config:
+            create_kwargs["extra_body"] = reasoning_config
+        
         response = await _create_chat_completion(client=client, **create_kwargs)
         content = ""
         if response.choices and response.choices[0].message.content:

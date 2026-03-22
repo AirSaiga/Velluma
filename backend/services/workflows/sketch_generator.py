@@ -257,14 +257,20 @@ class SketchGenerator:
         # 世界观信息
         world_info = getattr(book, 'world_building', '') or ''
         
-        # 上一章衔接
+        # 上一章衔接（增强版：强调跨章接缝）
         continuity_hint = ""
         if previous_summary:
+            # 截取最后 500 字符以获取更多上下文
+            prev_text = previous_summary[-500:] if len(previous_summary) > 500 else previous_summary
             continuity_hint = f"""
-## 前文衔接
-上一章结尾：{previous_summary[-300:] if len(previous_summary) > 300 else previous_summary}
+## 前文衔接（重要）
+上一章结尾：
+{prev_text}
 
-重要：本章开头必须自然承接上文的情绪和状态。
+⚠️ **跨章接缝要求**：
+1. 本章开头必须自然承接上文的物理状态和视角
+2. 如果上文结尾角色处于某种状态（如昏迷、受伤），本章开头必须延续该状态
+3. 如果需要切换视角，必须通过明确的场景过渡（如时间跳跃、空间转移）
 """
         
         system_prompt = f"""你是一位直觉型小说家，擅长用流畅的叙述书写故事速写。
@@ -381,14 +387,22 @@ class SketchGenerator:
         return "\n".join(lines)
     
     def _build_characters_info(self, entities: List[Any]) -> str:
-        """构建角色信息摘要"""
+        """构建角色信息摘要（带去重）"""
         if not entities:
             return "（无特定角色）"
         
         lines = []
+        seen_char_ids = set()  # 去重：避免同一角色重复出现
         for entity in entities:
             char = getattr(entity, 'character', None)
             if char:
+                # 使用角色 ID 去重
+                char_id = getattr(char, 'id', None)
+                if char_id and char_id in seen_char_ids:
+                    continue
+                if char_id:
+                    seen_char_ids.add(char_id)
+                
                 name = getattr(char, 'name', '未知')
                 desc = getattr(char, 'static_prompt', '') or getattr(char, 'description', '')
                 lines.append(f"- {name}: {desc[:100] if desc else '（无详细描述）'}")

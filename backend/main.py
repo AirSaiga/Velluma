@@ -25,6 +25,7 @@ StoryWeaver-Core 后端入口模块。
 - 生产模式: uvicorn backend.main:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -36,6 +37,45 @@ from dotenv import load_dotenv
 # 配置基础日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Windows asyncio ProactorEventLoop 异常处理器
+# =============================================================================
+# 用途：静默处理 Windows 上 ProactorEventLoop 的无害连接重置错误
+# 背景：Python 3.8+ 在 Windows 上默认使用 ProactorEventLoop，当 SSE 客户端断开时，
+#       会在 _call_connection_lost 回调中触发 ConnectionResetError (WinError 10054)
+# 影响：此错误发生在连接关闭后的清理阶段，不影响业务逻辑，仅为日志噪音
+def _handle_asyncio_exception(loop, context):
+    """
+    自定义 asyncio 异常处理器，静默处理 Windows 上的无害连接错误。
+
+    静默的错误类型：
+    - ConnectionResetError (WinError 10054): 远程主机强迫关闭连接
+    - ConnectionAbortedError (WinError 10053): 连接被本地中止
+    - OSError: 管道/套接字已关闭时的操作
+
+    其他异常仍会正常记录到日志。
+    """
+    exception = context.get("exception")
+    message = context.get("message", "")
+
+    # 静默处理 Windows ProactorEventLoop 的无害连接错误
+    if exception is not None:
+        if isinstance(exception, (ConnectionResetError, ConnectionAbortedError)):
+            # WinError 10054/10053 - 客户端断开连接，无需处理
+            return
+        if isinstance(exception, OSError):
+            # 检查是否为 Windows 特定的连接错误
+            error_code = getattr(exception, "winerror", None) or getattr(exception, "errno", None)
+            if error_code in (10054, 10053, 9, 32, 57):  # 常见的连接/管道错误码
+                return
+
+    # 其他异常正常记录
+    if exception:
+        logger.warning(f"[asyncio] 未处理的异常: {message} - {exception}")
+    else:
+        logger.warning(f"[asyncio] 未处理的事件: {message}")
 
 # 加载环境变量
 # 确保在导入其他模块之前加载，以便 database.py 等模块能正确获取配置
@@ -107,6 +147,11 @@ def save_port(port: int):
 # 副作用：FastAPI 在应用启动时自动执行 init_db()，在关闭时自动清理资源
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # 启动阶段：注册 asyncio 异常处理器（处理 Windows ProactorEventLoop 的无害错误）
+    loop = asyncio.get_event_loop()
+    loop.set_exception_handler(_handle_asyncio_exception)
+    logger.info("[Lifespan] 已注册 asyncio 异常处理器")
+
     # 启动阶段：初始化数据库（创建表结构、连接池）
     await init_db()
     yield

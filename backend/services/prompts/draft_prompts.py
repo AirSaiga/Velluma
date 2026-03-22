@@ -781,7 +781,7 @@ def build_prose_draft_prompt_v25(
     - **红线约束 (Red Lines)**：最高优先级边界限制
     
     约束传播公式:
-    $$Prompt_{effective} = Prompt_{base} \oplus Constraints_{red\_lines} \oplus State_{relational}$$
+    $$Prompt_{effective} = Prompt_{base} \\oplus Constraints_{red\\_lines} \\oplus State_{relational}$$
     """
     beat_data = beat if isinstance(beat, dict) else {}
     
@@ -1029,7 +1029,7 @@ def build_micro_review_prompt(
     7. **红线约束违反（NEW）**
     
     断言评分公式:
-    $$Pass_{total} = \bigwedge_{i=1}^{n} Pass_{check_i} \land \neg Violate_{red\_lines}$$
+    $$Pass_{total} = \\bigwedge_{i=1}^{n} Pass_{check_i} \\land \\neg Violate_{red\\_lines}$$
     """
     
     # ========================================

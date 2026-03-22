@@ -222,8 +222,24 @@ async def generate_agentic_chapter_stream(request: GenerateChapterAgenticRequest
     权衡：使用 while 循环 + break 实现迭代，最多为 max_iterations 次。
     警告：若审查一直不通过，会达到最大迭代次数后退出，可能产生低质量内容。
     """
-    async for frame in _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=None):
-        yield frame
+    # 使用 try-finally 确保日志在异常时也能保存
+    gen = _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=None)
+    try:
+        async for frame in gen:
+            yield frame
+    finally:
+        # 确保生成器被正确关闭
+        await gen.aclose()
+        # 通过全局函数获取 logger 并确保 finalize 被调用
+        current_logger = get_logger()
+        if current_logger and hasattr(current_logger, '_finalized') and not getattr(current_logger, '_finalized', False):
+            logger.warning("[PromptLogger] 生成器异常退出，强制保存日志")
+            current_logger.finalize(
+                final_text_length=getattr(current_logger, '_final_text_length', 0),
+                total_iterations=getattr(current_logger, '_total_iterations', 1),
+                review_passed=getattr(current_logger, '_review_passed', False)
+            )
+            current_logger._finalized = True
 
 
 async def generate_agentic_chapter_stream_with_confirmed_beats(
@@ -231,8 +247,24 @@ async def generate_agentic_chapter_stream_with_confirmed_beats(
     db: AsyncSession,
     confirmed_beats: Union[list[dict], list[ConfirmedStoryBeat]],
 ):
-    async for frame in _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=confirmed_beats):
-        yield frame
+    # 使用 try-finally 确保日志在异常时也能保存
+    gen = _generate_agentic_chapter_stream(request=request, db=db, confirmed_beats=confirmed_beats)
+    try:
+        async for frame in gen:
+            yield frame
+    finally:
+        # 确保生成器被正确关闭
+        await gen.aclose()
+        # 通过全局函数获取 logger 并确保 finalize 被调用
+        current_logger = get_logger()
+        if current_logger and hasattr(current_logger, '_finalized') and not getattr(current_logger, '_finalized', False):
+            logger.warning("[PromptLogger] 生成器异常退出，强制保存日志")
+            current_logger.finalize(
+                final_text_length=getattr(current_logger, '_final_text_length', 0),
+                total_iterations=getattr(current_logger, '_total_iterations', 1),
+                review_passed=getattr(current_logger, '_review_passed', False)
+            )
+            current_logger._finalized = True
 
 
 def _calculate_beat_word_counts(beats: list[dict], total_chapter_words: int) -> dict[str, int]:
@@ -507,6 +539,12 @@ async def _generate_agentic_chapter_stream(
         chapter_id=str(request.chapter_id),
         book_id=None  # 将在加载 chapter 后更新
     )
+    
+    # 用于跟踪 finalize 是否已调用，确保异常时也能保存日志
+    prompt_logger._finalized = False
+    prompt_logger._final_text_length = 0
+    prompt_logger._total_iterations = 1
+    prompt_logger._review_passed = False
 
     def record_stage(stage: str, elapsed: float, beat_index: Optional[int] = None):
         stage_seconds[stage] = round(stage_seconds.get(stage, 0.0) + elapsed, 3)
@@ -659,11 +697,19 @@ async def _generate_agentic_chapter_stream(
     prev_chapter = prev_chapter_result.scalar_one_or_none()
     previous_summary = None
     if prev_chapter:
+        # 优先使用摘要，其次使用正文内容
         if prev_chapter.summary:
             previous_summary = prev_chapter.summary
         elif prev_chapter.draft_text:
             # 如果没有摘要，截取上一章最后 1000 字作为参考
             previous_summary = f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
+        elif prev_chapter.content_text:
+            # 如果没有 draft_text，使用 content_text
+            previous_summary = f"（上一章末尾原文）...{prev_chapter.content_text[-1000:]}"
+        else:
+            # 如果什么都没有，至少提供章节信息
+            prev_chapter_name = prev_chapter.chapter_name or f"第{prev_chapter.chapter_number}章"
+            previous_summary = f"（上一章【{prev_chapter_name}】内容未生成，标题：{prev_chapter.title or '未命名'}）"
     hook_max_chapter_number = chapter.chapter_number - 1
     historical_chapter_exists = (
         select(Chapter.id)
@@ -1163,6 +1209,7 @@ async def _generate_agentic_chapter_stream(
                     entity_spatial_ledger=None,
                     chapter_assets_schema=chapter.chapter_assets_schema or "",
                     stats_callback=drafting_stats_callback,
+                    reasoning_config=request.reasoning_config.to_api_params() if request.reasoning_config and request.reasoning_config.enabled else None,
                 )
                 
                 record_stage("DRAFTING", _to_secs(time.perf_counter() - drafting_started_at))
@@ -1820,13 +1867,21 @@ async def _generate_agentic_chapter_stream(
     await db.commit()
     
     # ========================================================================
+    # 更新最终状态（用于异常时保存日志）
+    # ========================================================================
+    prompt_logger._final_text_length = len(current_draft) if current_draft else 0
+    prompt_logger._total_iterations = iteration
+    prompt_logger._review_passed = review_passed
+    
+    # ========================================================================
     # 完成日志记录
     # ========================================================================
     prompt_logger.finalize(
-        final_text_length=len(current_draft) if current_draft else 0,
-        total_iterations=iteration,
-        review_passed=review_passed
+        final_text_length=prompt_logger._final_text_length,
+        total_iterations=prompt_logger._total_iterations,
+        review_passed=prompt_logger._review_passed
     )
+    prompt_logger._finalized = True
     
     yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': review_passed, 'iterations': iteration}, ensure_ascii=False)}\n\n"
 

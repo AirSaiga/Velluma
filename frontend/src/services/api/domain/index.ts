@@ -186,9 +186,28 @@ async function streamDualTrackFn(
           callbacks.onChunk?.(payload.content)
         } else if (payload.event === 'COMPLETE') {
           hasCompleted = true
+          // 将双轨模式的 stats 适配为标准 metrics 格式，保持与普通模式兼容
+          const stats = payload.stats || {}
+          const metrics = {
+            total_seconds: stats.total_time,
+            fast_mode: false,
+            top_stage_seconds: [
+              { stage: 'TRACK_GENERATION', seconds: stats.track_time || 0 },
+              { stage: 'STITCHING', seconds: stats.stitch_time || 0 }
+            ].filter(s => s.seconds > 0),
+            aggregate_stage_seconds: [],
+            llm: {
+              calls: 0,
+              failures: 0,
+              seconds: stats.total_time || 0
+            },
+            // 保留原始 stats 数据
+            raw_stats: stats
+          }
           callbacks.onDone?.({
             text: payload.text,
             stats: payload.stats,
+            metrics: metrics,
             alignment_score: payload.alignment_score,
             passed: payload.passed,
             iterations: payload.iterations,
@@ -445,5 +464,30 @@ export const generateApi = {
 export const systemApi = {
   getProxyConfig: () => requestJson('/system/proxy'),
   updateProxyConfig: (config: { enabled: boolean; url: string }) => 
-    requestJson('/system/proxy', { method: 'PUT', body: JSON.stringify(config) })
+    requestJson('/system/proxy', { method: 'PUT', body: JSON.stringify(config) }),
+  
+  /**
+   * 测试模型连接
+   * @param config 模型配置，包含 api_key, base_url, model, reasoning_enabled, reasoning_effort
+   * @returns 测试结果，包含连接状态和推理模式支持信息
+   */
+  testModel: async (config: {
+    api_key: string
+    base_url?: string
+    model: string
+    reasoning_enabled?: boolean
+    reasoning_effort?: string
+  }): Promise<{
+    success: boolean
+    message: string
+    model_info?: { model: string; base_url: string }
+    reasoning_supported?: boolean
+    reasoning_message?: string
+    response_time_ms?: number
+  }> => {
+    return requestJson('/system/test-model', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
+  }
 }

@@ -14,9 +14,32 @@ export interface ApiConfig {
   creative_model?: string   // 高创意模型（用于 Prose Draft），如未设置则使用 model
   proxy_enabled?: boolean
   proxy_url?: string
+  // 默认模型的推理模式配置
+  reasoning_enabled?: boolean
+  reasoning_effort?: ReasoningEffortLevel
+  reasoning_exclude?: boolean
+  // 逻辑推理模型的推理模式配置
+  reasoning_model_reasoning_enabled?: boolean
+  reasoning_model_reasoning_effort?: ReasoningEffortLevel
+  reasoning_model_reasoning_exclude?: boolean
+  // 创意生成模型的推理模式配置
+  creative_model_reasoning_enabled?: boolean
+  creative_model_reasoning_effort?: ReasoningEffortLevel
+  creative_model_reasoning_exclude?: boolean
 }
 
 export type PacingStyle = 'slow_burn' | 'balanced' | 'fast_paced'
+
+// 推理模式努力程度类型
+export type ReasoningEffortLevel = 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none'
+
+// 推理模式配置接口
+export interface ReasoningConfig {
+  enabled: boolean
+  effort: ReasoningEffortLevel
+  max_tokens?: number
+  exclude: boolean
+}
 
 export interface Character {
   id: string
@@ -75,6 +98,11 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   tension_level?: number
   pacing_style?: PacingStyle
   force_parallel_prose?: boolean
+  // 单模型模式的推理模式配置
+  reasoning_config?: ReasoningConfig
+  // 双模型模式的推理模式配置
+  reasoning_model_reasoning_config?: ReasoningConfig
+  creative_model_reasoning_config?: ReasoningConfig
 }
 
 export interface ConfirmedStoryBeat {
