@@ -205,6 +205,52 @@ CREATE EXTENSION IF NOT EXISTS vector;
    - 基于 revision_plan 重写
    - 支持跳过仅轻微问题的章节
 
+### 双轨对抗架构 (V3.5)
+
+为解决并行生成连贯性差的问题，引入双轨架构：
+
+**核心思想**：并行生成 + 连贯性锚定
+
+```
+Track A: 节拍扩写              Track B: 短文生成
+├─ Beat[1] → Text[1]           ├─ 基于 Beats 生成连贯速写
+├─ Beat[2] → Text[2]           │   (40-50% 字数，连续叙述)
+└─ Beat[N] → Text[N]           └─ 输出: Sketch + 转折点映射
+         ↓                              ↓
+         └──────────┬────────────────────┘
+                    ↓
+            统稿 → Draft_A
+                    ↓
+            对抗校对 (Adversarial Alignment)
+            Draft_A vs Sketch → 差异检测
+                    ↓
+            融合精修 (可选)
+```
+
+**关键组件**：
+- `SketchGenerator`: 生成连贯速写，提供连贯性锚点
+- `AdversarialAligner`: 对比 Draft 和 Sketch，检测结构/情绪/信息差异
+- `DualTrackWorkflow`: 整合双轨流程
+
+**使用方式**：
+```python
+from backend.services.workflows.dual_track import execute_dual_track_generation
+
+final_text, debug_info = await execute_dual_track_generation(
+    chapter=chapter,
+    book=book,
+    beats=beats,
+    # ... 其他参数
+    enable_dual_track=True,
+)
+```
+
+**API 端点**：
+- `POST /api/chapters/{id}/generate-dual-track` - 流式双轨生成
+- `POST /api/chapters/{id}/generate-dual-track-simple` - 非流式
+
+详见: `DUAL_TRACK_ARCHITECTURE.md`
+
 ### 数据模型层级
 
 ```
