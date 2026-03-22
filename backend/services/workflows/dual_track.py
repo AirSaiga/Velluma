@@ -669,7 +669,7 @@ class DualTrackWorkflow:
                         book=book,
                         api_key=self.api_key,
                         base_url=self.base_url,
-                        model=self.creative_model,
+                        model=self.reasoning_model,
                         previous_tail=previous_tail,
                         beat_id=beat.get("beat_id"),
                         prompt_logger=self.prompt_logger,
@@ -853,7 +853,7 @@ class DualTrackWorkflow:
             self.prompt_logger.log_prompts(
                 system_prompt="[global_refinement] 调用 refine_draft",
                 user_prompt=f"revision_plan_preview={revision_plan[:300]}...",
-                model=self.creative_model,
+                model=self.reasoning_model,
                 temperature=0.7,
                 max_tokens=10000,
                 prompt_label="GLOBAL_REFINEMENT",
@@ -870,7 +870,7 @@ class DualTrackWorkflow:
                 word_count=original_word_count,
                 api_key=self.api_key,
                 base_url=self.base_url,
-                model=self.creative_model,
+                model=self.reasoning_model,
             )
             return refined_text
         except Exception as e:
