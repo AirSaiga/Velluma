@@ -61,7 +61,8 @@ export const AGENTIC_DEFAULTS: AgenticFormState = {
   progression_preference: 'focus_scene_action',
   refinement_depth: 'standard',
   rag_lambda: 0.1,
-  author_intent: ''
+  author_intent: '',
+  force_parallel_prose: false
 }
 
 export interface AgenticFieldOption {
@@ -138,6 +139,13 @@ export const AGENTIC_FIELD_CONFIG: Record<keyof AgenticFormState, {
     rangeHint: '自由文本',
     recommended: '可选',
     group: 'steering'
+  },
+  force_parallel_prose: {
+    label: '极速模式（正文并行生成）',
+    description: '开启后所有正文段落将同时生成，极大提升速度但可能损失段落间连贯性。适合对连贯性要求不高的场景。',
+    rangeHint: '可选：开启/关闭',
+    recommended: '默认：关闭',
+    group: 'workflow'
   }
 }
 
@@ -274,7 +282,8 @@ export function normalizeAgenticForm(input: Partial<AgenticFormState & AgenticLe
     progression_preference: normalizedProgression,
     refinement_depth: normalizedRefinement,
     rag_lambda: roundFloat(clamp(toNumber(input.rag_lambda, AGENTIC_DEFAULTS.rag_lambda), 0)),
-    author_intent: (input.author_intent || '').trim()
+    author_intent: (input.author_intent || '').trim(),
+    force_parallel_prose: Boolean(input.force_parallel_prose)
   }
 }
 
@@ -367,7 +376,8 @@ export function buildAgenticPayload(params: {
       rag_lambda: normalized.rag_lambda,
       author_intent: normalized.author_intent,
       fast_mode: false,
-      skip_minor_refine: true
+      skip_minor_refine: true,
+      force_parallel_prose: normalized.force_parallel_prose
     },
     errors: []
   }

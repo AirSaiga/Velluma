@@ -575,12 +575,16 @@ async def _generate_prose_serial_v25(
     """
     步骤 B-V25: 串行滑动窗口生成正文（Rolling Prefix + 认知组件）。
     
+    V3.0 新增：支持强制并行模式（force_parallel_prose）
+    - 串行模式：严格 Rolling Prefix，保证连贯性
+    - 并行模式：无视前文衔接，极速生成
+    
     V2.5 增强特性：
     - DynamicContext: 跨 Beat 流转的动态上下文容器
     - Fail-Fast: 即时断言检查与回溯重试机制
     - Emotional Scratchpad: 动态情绪状态更新
     
-    核心机制：
+    核心机制（串行模式）：
     - Beat 1: 基于 Subconscious_1 + DynamicContext_0 生成 Prose_1
     - 断言检查: Fail-Fast 验证 Prose_1 物理/逻辑合法性
     - 状态更新: Emotional Scratchpad 更新 DynamicContext_1
@@ -616,6 +620,37 @@ async def _generate_prose_serial_v25(
     # 初始化功能开关（如果未提供）
     flags = feature_flags or DraftingFeatureFlags()
     
+    # ========================================================================
+    # V3.0 并发模式判断
+    # ========================================================================
+    force_parallel = getattr(flags, 'force_parallel_prose', False)
+    
+    if force_parallel:
+        logger.info("[Prose V25] 强制并行模式启用：将无视前文衔接，并发生成所有 Beats")
+        return await _generate_prose_parallel_v25(
+            beats=beats,
+            scene_intent_results=scene_intent_results,
+            subconscious_results=subconscious_results,
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            api_key=api_key,
+            base_url=base_url,
+            creative_model=creative_model,
+            reasoning_model=reasoning_model,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            enable_qc=enable_qc,
+            feature_flags=flags,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+            stats_callback=stats_callback,
+        )
+    
     results: List[dict] = []
     
     # ========================================================================
@@ -648,7 +683,7 @@ async def _generate_prose_serial_v25(
     # V3.0 NEW: 存储 pov_perception_state（因为 DynamicContext 可能没有此属性，使用独立变量）
     current_pov_perception_state = initial_pov_perception_state
     
-    logger.info(f"[Prose V25+] 初始化 DynamicContext: "
+    logger.info(f"[Prose V25+] 初始化 DynamicContext (串行模式): "
                 f"emotional='{initial_emotional_state[:30]}...', "
                 f"physical='{physical_state_lock[:30] if physical_state_lock else '无'}...', "
                 f"relational='{initial_relational_state[:30] if initial_relational_state else '无'}...'")
@@ -847,6 +882,220 @@ async def _generate_prose_serial_v25(
             })
     
     return results
+
+
+async def _generate_prose_parallel_v25(
+    beats: List[dict],
+    scene_intent_results: List[dict],
+    subconscious_results: List[str],
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    api_key: str,
+    base_url: str,
+    creative_model: str,
+    reasoning_model: str,
+    word_count: int,
+    previous_summary: Optional[str] = None,
+    relevant_memories: Optional[List[Any]] = None,
+    locations: Optional[List[Any]] = None,
+    enable_qc: bool = True,
+    feature_flags: DraftingFeatureFlags = None,
+    physical_state_lock: Optional[str] = None,
+    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
+    chapter_assets_schema: str = "",
+    stats_callback: LLMStatsCallback = None,
+) -> List[dict]:
+    """
+    V3.0 并行模式正文生成 - 极速但可能损失连贯性。
+    
+    特点：
+    - 无视 Rolling Prefix，所有 Beat 同时生成
+    - previous_tail 始终为空字符串
+    - current_emotional_state 始终使用初始值，不跨 Beat 累加
+    - Fail-Fast 检查仍然执行，但不影响其他 Beat
+    
+    适用场景：用户明确选择速度优先于质量时。
+    """
+    flags = feature_flags or DraftingFeatureFlags()
+    
+    # 初始化固定的上下文状态（所有 Beat 使用相同的初始状态）
+    initial_emotional_state = "初始状态：未知"
+    if beats and beats[0].get("entry_state"):
+        initial_emotional_state = f"初始状态：{beats[0].get('entry_state')}"
+    
+    initial_relational_state = _build_initial_relational_state(relationships, entities)
+    
+    logger.info(f"[Prose V25-Parallel] 启动并行生成，共 {len(beats)} 个 Beats")
+    
+    async def _single_prose_task(
+        beat_index: int,
+        beat: dict,
+        scene_intent: dict,
+        subconscious: str,
+    ) -> dict:
+        """单个 Beat 的生成任务（用于并行执行）。"""
+        beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
+        pov_character = beat.get("pov_character", "主角")
+        
+        try:
+            # 计算目标字数
+            target_words = beat.get("word_count_target")
+            if not isinstance(target_words, int) or target_words <= 0:
+                target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
+            
+            # Fail-Fast 重试循环（每个 Beat 独立）
+            max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+            chunk_text = ""
+            is_valid = False
+            attempt = 0
+            current_temp = 0.75
+            
+            prompts_history = []
+            
+            # 并行模式下使用固定的初始状态，不跨 Beat 更新
+            pov_perception_state = beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
+            
+            while attempt < max_attempts and not is_valid:
+                attempt += 1
+                
+                # 构建 Prose Draft Prompt（previous_tail 始终为空）
+                system_prompt, user_prompt = build_prose_draft_prompt_v25(
+                    chapter=chapter,
+                    book=book,
+                    beat=beat,
+                    scene_intent=scene_intent,
+                    subconscious_thought=subconscious,
+                    previous_tail="",  # 并行模式：无视前文
+                    target_words=target_words,
+                    physical_state_lock=physical_state_lock or "",
+                    current_emotional_state=initial_emotional_state,  # 并行模式：使用初始状态
+                    accumulated_summary="",  # 并行模式：无累加摘要
+                    relational_state_lock=initial_relational_state,
+                    red_lines=beat.get("red_lines"),
+                    entity_spatial_ledger=entity_spatial_ledger or None,
+                    chapter_assets_schema=chapter_assets_schema or '',
+                    pov_perception_state=pov_perception_state,
+                )
+                
+                prompts_history.append({
+                    "stage": f"PROSE_PARALLEL_ATTEMPT_{attempt}",
+                    "beat_index": beat_index,
+                    "temperature": current_temp,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                })
+                
+                logger.info(f"[Prose V25-Parallel] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts}...")
+                
+                # 生成正文
+                response = await _call_llm_with_stats(
+                    stage="prose_draft_parallel",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=creative_model,
+                    temperature=current_temp,
+                    max_tokens=_clamp_tokens(target_words),
+                    beat_index=beat_index,
+                    stats_callback=stats_callback,
+                )
+                
+                chunk_text = clean_llm_output(response).strip()
+                
+                # Fail-Fast 断言检查（并行模式下仍执行，但不阻塞其他 Beat）
+                if flags.enable_fail_fast and attempt < max_attempts:
+                    # 并行模式下使用临时 DynamicContext
+                    temp_context = DynamicContext(
+                        previous_tail="",
+                        current_emotional_state=initial_emotional_state,
+                        physical_state_lock=physical_state_lock or "",
+                        accumulated_summary="",
+                        relational_state_lock=initial_relational_state,
+                        entity_spatial_ledger=entity_spatial_ledger or {},
+                    )
+                    
+                    is_valid, fail_reason, fail_categories = await _micro_review_assertion(
+                        chunk_text=chunk_text,
+                        dynamic_context=temp_context,
+                        pov_character=pov_character,
+                        beat=beat,
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=reasoning_model,
+                        entity_spatial_ledger=entity_spatial_ledger,
+                        beat_index=beat_index,
+                        stats_callback=stats_callback,
+                    )
+                    
+                    if not is_valid:
+                        logger.warning(f"[Fail-Fast Parallel] Beat {beat_index} 断言失败: {fail_reason}")
+                        # 温度调整
+                        if "文风" in fail_categories:
+                            current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
+                        else:
+                            current_temp = max(0.3, current_temp - 0.1)
+                    else:
+                        logger.info(f"[Fail-Fast Parallel] Beat {beat_index} 断言通过")
+                else:
+                    is_valid = True
+            
+            # 可选：自动质检
+            if enable_qc:
+                chunk_text, qc_prompts = await _quick_qc(
+                    prose_text=chunk_text,
+                    beat=beat,
+                    beat_index=beat_index,
+                    chapter=chapter,
+                    book=book,
+                    entities=entities,
+                    relationships=relationships,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=creative_model,
+                    target_words=target_words,
+                )
+                prompts_history.extend(qc_prompts)
+            
+            return {
+                "text": chunk_text,
+                "prompts": prompts_history,
+            }
+            
+        except Exception as e:
+            logger.error(f"[Prose V25-Parallel] Beat {beat_index}: {e}")
+            return {
+                "text": "",
+                "prompts": [],
+            }
+    
+    # 创建所有 Beat 的并发任务
+    tasks = [
+        _single_prose_task(
+            beat_index=i + 1,
+            beat=beat,
+            scene_intent=scene_intent_results[i],
+            subconscious=subconscious_results[i],
+        )
+        for i, beat in enumerate(beats)
+    ]
+    
+    # 并发执行所有任务
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 处理结果（将异常转换为空结果）
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"[Prose V25-Parallel] Beat {i+1} 发生异常: {result}")
+            processed_results.append({"text": "", "prompts": []})
+        else:
+            processed_results.append(result)
+    
+    logger.info(f"[Prose V25-Parallel] 并行生成完成，共 {len(processed_results)} 个 Beats")
+    return processed_results
 
 
 async def _micro_review_assertion(
@@ -1715,65 +1964,104 @@ async def _execute_fast_path(
     stats_callback: LLMStatsCallback = None,
 ) -> List[BeatDraftResult]:
     """
-    V3.0 Tier 1: 疾速流 (Fast-Path)
+    V3.0 Tier 1: 疾速流 (Fast-Path) - 完全并发版本
     
     特点:
     - 跳过 Scene Intent 和 Subconscious 独立调用
-    - 仅保留 previous_tail 作为上下文
+    - 完全并发生成所有 Beat，无视 previous_tail 依赖
     - 单次调用 creative_model 生成正文
     - 跳过 Stitching（直接拼接）
     
-    适用场景: 低张力日常剧情 (tension_level 1-2)
+    适用场景: 低张力日常剧情 (tension_level 1-2)，追求极致速度
     """
-    logger.info("[Fast Path] 启动疾速流生成...")
-    results: List[BeatDraftResult] = []
-    previous_tail = ""
+    logger.info("[Fast Path] 启动疾速流生成（完全并发）...")
     
-    for i, beat in enumerate(beats):
-        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+    async def _single_fast_beat(
+        beat_index: int,
+        beat: dict,
+    ) -> BeatDraftResult:
+        """单个 Beat 的疾速生成任务。"""
+        beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
         target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
         
-        # 构建简化版 Prompt
-        system_prompt, user_prompt = build_fast_path_prompt(
-            chapter=chapter,
-            book=book,
-            beat=beat,
-            previous_tail=previous_tail,
-            target_words=target_words,
-            previous_summary=previous_summary,
-        )
-        
-        # 单次调用 creative_model（带统计追踪）
-        response = await _call_llm_with_stats(
-            stage="fast_path_prose",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=creative_model,
-            temperature=0.75,
-            max_tokens=_clamp_tokens(target_words),
-            beat_index=i + 1,
-            stats_callback=stats_callback,
-        )
-        
-        chunk_text = clean_llm_output(response).strip()
-        
-        # 更新 previous_tail
-        previous_tail = _extract_tail(chunk_text, max_chars=300)
-        
-        results.append(BeatDraftResult(
-            beat_id=beat_id,
-            beat_index=i + 1,
-            scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
-            subconscious_thought="",
-            draft_chunk=chunk_text,
-            prompts=[{"stage": "FAST_PATH", "system_prompt": system_prompt, "user_prompt": user_prompt}],
-            mcts_rollout=None,
-        ))
+        try:
+            # 构建简化版 Prompt（previous_tail 为空，完全无视前文）
+            system_prompt, user_prompt = build_fast_path_prompt(
+                chapter=chapter,
+                book=book,
+                beat=beat,
+                previous_tail="",  # 疾速流：无视前文
+                target_words=target_words,
+                previous_summary=previous_summary,
+            )
+            
+            # 单次调用 creative_model
+            response = await _call_llm_with_stats(
+                stage="fast_path_prose",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                api_key=api_key,
+                base_url=base_url,
+                model=creative_model,
+                temperature=0.75,
+                max_tokens=_clamp_tokens(target_words),
+                beat_index=beat_index,
+                stats_callback=stats_callback,
+            )
+            
+            chunk_text = clean_llm_output(response).strip()
+            
+            return BeatDraftResult(
+                beat_id=beat_id,
+                beat_index=beat_index,
+                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
+                subconscious_thought="",
+                draft_chunk=chunk_text,
+                prompts=[{"stage": "FAST_PATH", "system_prompt": system_prompt, "user_prompt": user_prompt}],
+                mcts_rollout=None,
+            )
+        except Exception as e:
+            logger.error(f"[Fast Path] Beat {beat_index} 生成失败: {e}")
+            return BeatDraftResult(
+                beat_id=beat_id,
+                beat_index=beat_index,
+                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
+                subconscious_thought="",
+                draft_chunk="",
+                prompts=[],
+                mcts_rollout=None,
+            )
     
-    logger.info(f"[Fast Path] 疾速流生成完成，共 {len(results)} 个 Beats")
-    return results
+    # 创建所有 Beat 的并发任务
+    tasks = [
+        _single_fast_beat(beat_index=i + 1, beat=beat)
+        for i, beat in enumerate(beats)
+    ]
+    
+    # 并发执行所有任务
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 处理结果
+    processed_results: List[BeatDraftResult] = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"[Fast Path] Beat {i+1} 发生异常: {result}")
+            beat = beats[i]
+            beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
+            processed_results.append(BeatDraftResult(
+                beat_id=beat_id,
+                beat_index=i + 1,
+                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
+                subconscious_thought="",
+                draft_chunk="",
+                prompts=[],
+                mcts_rollout=None,
+            ))
+        else:
+            processed_results.append(result)
+    
+    logger.info(f"[Fast Path] 疾速流生成完成，共 {len(processed_results)} 个 Beats")
+    return processed_results
 
 
 async def _execute_standard_path(

@@ -74,6 +74,7 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   author_intent?: string
   tension_level?: number
   pacing_style?: PacingStyle
+  force_parallel_prose?: boolean
 }
 
 export interface ConfirmedStoryBeat {
@@ -110,6 +111,7 @@ export interface AgenticFormState {
   author_intent: string
   tension_level: number
   pacing_style: PacingStyle
+  force_parallel_prose: boolean
 }
 
 export type InspirationIdeaType = 'plot_twist' | 'key_conflict' | 'new_hook' | 'smooth_narrative'

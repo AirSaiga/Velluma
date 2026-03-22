@@ -110,7 +110,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       style: ['tension_level', 'pacing_style'],
       generation: ['word_count'],
       memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'],
-      workflow: ['refinement_depth']
+      workflow: ['refinement_depth', 'force_parallel_prose']
     } as any
   })
   const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
@@ -645,6 +645,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    // 处理 checkbox 类型的布尔值
+    if (field === 'force_parallel_prose') {
+      const checkboxTarget = event.target as HTMLInputElement
+      agenticForm.value = {
+        ...agenticForm.value,
+        [field]: checkboxTarget.checked
+      }
+      return
+    }
     const nextValue = field === 'word_count' || field === 'rag_lambda' || field === 'tension_level' ? Number(target.value) : target.value
     agenticForm.value = {
       ...agenticForm.value,
@@ -661,6 +670,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   function getAgenticFieldInputType(field: keyof AgenticFormState) {
+    if (field === 'force_parallel_prose') {
+      return 'checkbox'
+    }
     if (isAgenticFieldSelect(field)) {
       return 'select'
     }

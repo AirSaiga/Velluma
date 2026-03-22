@@ -53,7 +53,7 @@ const props = defineProps<{
   getAgenticFieldMax: (field: keyof AgenticFormState) => number | undefined
   getAgenticFieldMin: (field: keyof AgenticFormState) => number
   getAgenticFieldStep: (field: keyof AgenticFormState) => number
-  getAgenticFieldValue: (field: keyof AgenticFormState) => string | number
+  getAgenticFieldValue: (field: keyof AgenticFormState) => string | number | boolean
   getBeatHookLabel: (beat: BeatPreviewItem) => string
   getMetaCollapsedLabel: () => string
   getPacingStyleValue: () => PacingStyle
@@ -392,7 +392,7 @@ watch(() => props.critiqueResult, (newVal) => {
                 <div class="flex items-center gap-2 mt-1">
                   <textarea
                     v-if="getAgenticFieldInputType(field) === 'textarea'"
-                    :value="getAgenticFieldValue(field)"
+                    :value="getAgenticFieldValue(field) as string | number"
                     @input="setAgenticFieldValue(field, $event)"
                     @blur="normalizeAgenticField"
                     :disabled="isGenerating"
@@ -415,6 +415,19 @@ watch(() => props.critiqueResult, (newVal) => {
                       {{ option.label }}
                     </option>
                   </select>
+                  <div
+                    v-else-if="getAgenticFieldInputType(field) === 'checkbox'"
+                    class="flex items-center gap-2"
+                  >
+                    <input
+                      :checked="getAgenticFieldValue(field) as boolean"
+                      @change="setAgenticFieldValue(field, $event)"
+                      type="checkbox"
+                      :disabled="isGenerating"
+                      class="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span class="text-[11px] text-[var(--text-muted)]">{{ getAgenticFieldValue(field) ? '已开启' : '已关闭' }}</span>
+                  </div>
                   <input
                     v-else
                     :value="getAgenticFieldValue(field)"
