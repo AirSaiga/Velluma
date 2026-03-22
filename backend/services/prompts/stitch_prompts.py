@@ -33,7 +33,7 @@ def build_stitch_prompt(
         chapter: 章节实体，包含章节名、大纲等信息
         beats: 剧情节拍列表，每个节拍包含 summary、position 等信息
         chunks: 已生成的文本片段列表
-        word_count: 目标字数（保留参数，当前统稿阶段不做字数约束）
+        word_count: 目标字数，用于字数下限约束
         anchor_pov: 主导视角角色名，用于反蒙太奇剪辑规则
         book: 书籍实体，用于获取 style_blacklist 等文风控制数据
 
@@ -48,6 +48,13 @@ def build_stitch_prompt(
     beat_lines = [f"{idx + 1}. {beat.get('summary', '')}" for idx, beat in enumerate(beats)]
     chunk_lines = [f"### Chunk {idx + 1}\n{chunk}" for idx, chunk in enumerate(chunks)]
 
+    # 计算 chunks 总字数，用于字数下限约束
+    total_chunks_chars = sum(len(c) for c in chunks)
+    # anti-montage 路径（有 anchor_pov）会合法压缩非 POV 内容，下限宽松为 75%
+    # 通用路径无合并逻辑，严格保留 90%
+    min_ratio = 0.75 if anchor_pov else 0.90
+    min_chars = int(total_chunks_chars * min_ratio)
+
     style_blacklist = []
     if book:
         style_blacklist = getattr(book, 'style_blacklist', None) or []
@@ -61,6 +68,16 @@ def build_stitch_prompt(
         blacklist_text = "、".join(style_blacklist)
         blacklist_section = f"\n\n## 黑名单词库约束（最高优先级）\n在平滑缝合各个 Chunk 时，你的原创过渡句绝对不能包含以下黑名单词汇：{blacklist_text}。一旦发现此类词汇，请立即替换为更自然的表达。"
 
+    # 字数约束提示（嵌入两种模式的 system_prompt）
+    min_percent = int(min_ratio * 100)
+    word_count_constraint = f"""
+## 字数约束（硬性规定）
+- 原始 Chunks 总字数：约 {total_chunks_chars} 字
+- **统稿结果字数下限：{min_chars} 字**（不得低于原始 chunks 总字数的 {min_percent}%）
+- 统稿时不设上限，章节目标字数约 {word_count} 字
+- **严禁通过粗暴删段、合并段落或省略剧情来缩减字数**
+- 若过渡处需要补写新文字，必须写；若原有内容完整，则完整保留"""
+
     if anchor_pov:
         system_prompt = f"""你是小说统稿编辑，但现在你是一个**反蒙太奇剪辑师**。你的任务是将多个并行生成的 chunk 融合成单一连续时间线的章节正文。
 
@@ -72,10 +89,10 @@ def build_stitch_prompt(
 
 3. **收束去AI味**：去除段落末尾那种尝试总结命运、拔高立意的"旁白说教"。
 {blacklist_section}
+{word_count_constraint}
 
 ## 输出要求
 - 输出纯文本，不要标题或解释
-- 统稿时不设字数上限，不得通过粗暴删段来压缩文本
 - 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然"""
     else:
         system_prompt = f"""你是小说统稿编辑。请将多个并行生成的 chunk 融合成连贯的章节正文。
@@ -88,8 +105,8 @@ def build_stitch_prompt(
 5. 移除任何残留的元数据（如 JSON 标记、Markdown 代码块等）。
 6. **抹除劣质胶水词**：全文检索并强行删去"与此同时"、"视角回到"、"在这关键时刻"等着相的转场词。用具体的动作和物理状态（如视线偏移、耳边的轰鸣）代替结构性的生硬拼接。
 7. 输出纯文本，不要标题或解释。
-8. 统稿时不设字数上限，不得通过粗暴删段来压缩文本。
-9. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。{blacklist_section}"""
+8. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。{blacklist_section}
+{word_count_constraint}"""
 
     user_prompt = f"""请统稿以下内容：
 

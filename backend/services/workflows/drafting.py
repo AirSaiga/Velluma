@@ -700,6 +700,17 @@ async def _generate_prose_serial_v25(
         beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
         pov_character = beat.get("pov_character", "主角")
         
+        # 提取 POV 角色的静态设定（用于正文生成中的角色行为约束）
+        pov_profile = ""
+        if pov_character and entities:
+            for entity in entities:
+                char = getattr(entity, 'character', None) or entity
+                char_name = getattr(char, 'name', '') or ''
+                if char_name and pov_character in char_name:
+                    raw_profile = getattr(char, 'static_prompt', '') or ''
+                    pov_profile = raw_profile[:150] if raw_profile else ''
+                    break
+        
         try:
             # 计算目标字数
             target_words = beat.get("word_count_target")
@@ -739,6 +750,7 @@ async def _generate_prose_serial_v25(
                     # V3.0 NEW PARAMETERS (四重锁):
                     chapter_assets_schema=chapter_assets_schema or getattr(chapter, 'chapter_assets_schema', '') or '',
                     pov_perception_state=current_pov_perception_state,
+                    pov_character_profile=pov_profile,
                 )
                 
                 prompts_history.append({
@@ -946,6 +958,17 @@ async def _generate_prose_parallel_v25(
         beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
         pov_character = beat.get("pov_character", "主角")
         
+        # 提取 POV 角色的静态设定
+        pov_profile = ""
+        if pov_character and entities:
+            for entity in entities:
+                char = getattr(entity, 'character', None) or entity
+                char_name = getattr(char, 'name', '') or ''
+                if char_name and pov_character in char_name:
+                    raw_profile = getattr(char, 'static_prompt', '') or ''
+                    pov_profile = raw_profile[:150] if raw_profile else ''
+                    break
+        
         try:
             # 计算目标字数
             target_words = beat.get("word_count_target")
@@ -984,6 +1007,7 @@ async def _generate_prose_parallel_v25(
                     entity_spatial_ledger=entity_spatial_ledger or None,
                     chapter_assets_schema=chapter_assets_schema or '',
                     pov_perception_state=pov_perception_state,
+                    pov_character_profile=pov_profile,
                 )
                 
                 prompts_history.append({

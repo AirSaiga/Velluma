@@ -117,6 +117,7 @@ async def assign_pov_to_beats(
     model: str,
     previous_chapter_summary: Optional[str] = None,
     prompt_logger = None,
+    chapter_narrative_anchor: str = "",
 ) -> tuple[list[dict], dict[str, str]]:
     """为节拍分配 POV 角色。
 
@@ -141,6 +142,7 @@ async def assign_pov_to_beats(
         base_url=base_url,
         model=model,
         prompt_logger=prompt_logger,
+        chapter_narrative_anchor_hint=chapter_narrative_anchor,
     )
 
     for beat in beats:
@@ -244,6 +246,7 @@ async def determine_chapter_anchor_pov(
     base_url: str = None,
     model: str = None,
     prompt_logger = None,
+    chapter_narrative_anchor_hint: str = "",
 ) -> str:
     """确定章节的核心主角 (Anchor POV)。
 
@@ -255,10 +258,41 @@ async def determine_chapter_anchor_pov(
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
+        chapter_narrative_anchor_hint: Planner 已声明的叙事核心角色（可选）。
+            若非空且合法（存在于角色列表中），将直接作为快速路径返回，跳过 LLM 调用。
+            同时作为高优先级提示注入 Anchor POV prompt，防止 LLM 因 Beat 出现频次
+            误判叙事核心（尤其适用于主角昏迷/幕后等场景）。
 
     Returns:
         str: 核心主角的名字，如果无法确定返回空字符串
     """
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+
+    # ── 快速路径：Planner 已声明且合法，直接使用，跳过 LLM ──────────────
+    if chapter_narrative_anchor_hint:
+        valid_names = {c.get("name", "") for c in characters}
+        if chapter_narrative_anchor_hint in valid_names:
+            _logger.info(
+                f"[AnchorPOV] 使用 Planner 声明的叙事核心: {chapter_narrative_anchor_hint}（跳过 LLM）"
+            )
+            if prompt_logger:
+                prompt_logger.start_stage("POV_ASSIGNMENT", iteration=1)
+                prompt_logger.log_inputs(
+                    pov_candidates_count=len(characters),
+                    has_previous_summary=bool(previous_chapter_summary),
+                    fast_path=True,
+                    planner_hint=chapter_narrative_anchor_hint,
+                )
+                prompt_logger.log_prompts(
+                    system_prompt="[快速路径] Planner 已声明叙事核心，跳过 LLM 调用",
+                    user_prompt=f"chapter_narrative_anchor_hint = {chapter_narrative_anchor_hint}",
+                    model="(skipped)",
+                    prompt_label="ANCHOR_POV_FAST_PATH",
+                )
+                prompt_logger.log_outputs(anchor_pov=chapter_narrative_anchor_hint)
+                prompt_logger.end_stage(success=True)
+            return chapter_narrative_anchor_hint
     beats_for_prompt = []
     for beat in beats:
         if isinstance(beat, dict):
@@ -291,6 +325,7 @@ async def determine_chapter_anchor_pov(
         characters=characters,
         beats=beats_for_prompt,
         previous_chapter_summary=previous_chapter_summary,
+        chapter_narrative_anchor_hint=chapter_narrative_anchor_hint,
     )
 
     # 记录 Prompt 到 logger（如果提供）

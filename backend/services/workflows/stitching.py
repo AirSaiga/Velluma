@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 from backend.services.prompts import build_stitch_prompt
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.models import Chapter
+from backend.services.prompt_logger import PromptLogger
 
 
 async def stitch_chunks(
@@ -30,6 +31,8 @@ async def stitch_chunks(
     api_key: str,
     base_url: str,
     model: str,
+    anchor_pov: Optional[str] = None,
+    prompt_logger: Optional[PromptLogger] = None,
 ) -> str:
     """将多个并行生成的 chunks 统稿成连贯的章节正文。
 
@@ -41,6 +44,8 @@ async def stitch_chunks(
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
+        anchor_pov: 主导视角角色名，启用反蒙太奇剪辑规则
+        prompt_logger: 可选的日志记录器，用于记录统稿 prompt
 
     Returns:
         str: 统稿后的正文
@@ -50,7 +55,23 @@ async def stitch_chunks(
         beats=beats,
         chunks=chunks,
         word_count=word_count,
+        anchor_pov=anchor_pov,
     )
+    
+    # 按原始 chunks 总字数 * 3 作为上限（中文 token 约 1.5字/token，预留 buffer）
+    total_chunks_chars = sum(len(c) for c in chunks)
+    safe_max_tokens = max(10000, total_chunks_chars * 3)
+    
+    # 记录统稿 prompt
+    if prompt_logger:
+        prompt_logger.log_prompts(
+            system_prompt=stitch_system_prompt,
+            user_prompt=stitch_user_prompt,
+            model=model,
+            temperature=0.4,
+            max_tokens=safe_max_tokens,
+            prompt_label="STITCH",
+        )
     
     stitched_text = await call_llm(
         system_prompt=stitch_system_prompt,
@@ -59,6 +80,7 @@ async def stitch_chunks(
         base_url=base_url,
         model=model,
         temperature=0.4,
+        max_tokens=safe_max_tokens,
     )
     
     stitched_text = clean_llm_output(stitched_text)

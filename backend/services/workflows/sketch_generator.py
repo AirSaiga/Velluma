@@ -116,6 +116,7 @@ class SketchGenerator:
         word_count: int,
         previous_summary: Optional[str] = None,
         anchor_pov: Optional[str] = None,
+        chapter_assets_schema: str = "",
     ) -> SketchResult:
         """
         生成连贯速写短文
@@ -151,6 +152,7 @@ class SketchGenerator:
             target_words=target_words,
             previous_summary=previous_summary,
             anchor_pov=anchor_pov,
+            chapter_assets_schema=chapter_assets_schema,
         )
         
         prompts_history = [{
@@ -242,6 +244,7 @@ class SketchGenerator:
         target_words: int,
         previous_summary: Optional[str] = None,
         anchor_pov: Optional[str] = None,
+        chapter_assets_schema: str = "",
     ) -> Tuple[str, str]:
         """构建速写生成的 Prompt"""
         
@@ -329,6 +332,9 @@ class SketchGenerator:
 {'视角角色：' + anchor_pov if anchor_pov else '使用第三人称或根据内容自然选择视角'}
 - 绝对锁定在 POV 角色的感官范围内
 - 非 POV 角色的事件必须转化为 POV 能感知的物理异象
+
+### 7. 核心资产物理约束（重要）
+{f"以下是本章核心资产的物理设定，必须严格遵守，禁止自行改变其形态：\\n{chapter_assets_schema}" if chapter_assets_schema else "（无特殊资产约束）"}
 
 ## 禁止事项
 - 不要写大纲式总结
@@ -503,6 +509,7 @@ async def generate_sketch_for_alignment(
     word_count: int,
     previous_summary: Optional[str] = None,
     anchor_pov: Optional[str] = None,
+    chapter_assets_schema: str = "",
 ) -> SketchResult:
     """
     便捷函数：生成用于对抗校对的速写短文
@@ -524,4 +531,5 @@ async def generate_sketch_for_alignment(
         word_count=word_count,
         previous_summary=previous_summary,
         anchor_pov=anchor_pov,
+        chapter_assets_schema=chapter_assets_schema,
     )

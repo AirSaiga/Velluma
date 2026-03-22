@@ -42,6 +42,7 @@ from backend.services.prompts import (
     build_scene_intent_prompt,
     build_stitch_prompt,
     parse_planner_result,
+    parse_planner_full_result,
     parse_review_result,
     parse_scene_intent_result,
 )
@@ -825,6 +826,7 @@ async def _generate_agentic_chapter_stream(
     while iteration < max_iterations:
         iteration_started_at = time.perf_counter()
         iteration += 1
+        _chapter_narrative_anchor = ""  # 每次迭代重置，Planner 调用后更新
         if iteration == 1:
             if confirmed_beats:
                 beats = _normalize_confirmed_beats(confirmed_beats, word_count)
@@ -857,7 +859,7 @@ async def _generate_agentic_chapter_stream(
                 prompt_logger.log_prompts(
                     system_prompt=planner_system_prompt,
                     user_prompt=planner_user_prompt,
-                    model=request.model,
+                    model=request.reasoning_model or request.model,
                     temperature=0.2,
                     max_tokens=1800,
                     prompt_label="PLANNER"
@@ -876,12 +878,12 @@ async def _generate_agentic_chapter_stream(
                     user_prompt=planner_user_prompt,
                     api_key=request.api_key,
                     base_url=request.base_url,
-                    model=request.model,
+                    model=request.reasoning_model or request.model,
                     temperature=0.2,
                     response_format={"type": "json_object"},
                     max_tokens=1800,
                 )
-                beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+                beats, _chapter_narrative_anchor = parse_planner_full_result(planner_result_raw, chapter.outline_text or "", word_count)
                 beats = _normalize_confirmed_beats(beats, word_count)
                 record_stage("PLANNING", _to_secs(time.perf_counter() - planning_started_at))
                 
@@ -890,11 +892,12 @@ async def _generate_agentic_chapter_stream(
                 # ========================================================================
                 prompt_logger.log_outputs(
                     beat_count=len(beats),
-                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats[:3]]
+                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats[:3]],
+                    chapter_narrative_anchor=_chapter_narrative_anchor or None,
                 )
                 prompt_logger.end_stage(success=True)
                 
-                yield metric_frame("PLANNING_DONE", iteration=iteration, extra={"beat_count": len(beats)})
+                yield metric_frame("PLANNING_DONE", iteration=iteration, extra={"beat_count": len(beats), "chapter_narrative_anchor": _chapter_narrative_anchor})
             
             # ------------------------------------------------------------------
             # Auto-Assign POV to Beats
@@ -923,7 +926,8 @@ async def _generate_agentic_chapter_stream(
                     story_premise=story_premise,
                     api_key=request.api_key,
                     base_url=request.base_url,
-                    model=request.model,
+                    model=request.reasoning_model or request.model,
+                    chapter_narrative_anchor=_chapter_narrative_anchor,
                 )
 
                 yield f"data: {json.dumps({'prompt': pov_prompt_data}, ensure_ascii=False)}\n\n"
@@ -942,7 +946,7 @@ async def _generate_agentic_chapter_stream(
                 prompt_logger.log_prompts(
                     system_prompt=pov_prompt_data.get("system_prompt", ""),
                     user_prompt=pov_prompt_data.get("user_prompt", ""),
-                    model=request.model,
+                    model=request.reasoning_model or request.model,
                     prompt_label="POV_ASSIGNMENT"
                 )
                 prompt_logger.end_stage(success=True)

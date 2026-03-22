@@ -167,7 +167,8 @@ def build_planner_agent_prompt(
       "weight": 3
     }}
   ],
-  "workflow_tier": "TIER_2_STANDARD"
+  "workflow_tier": "TIER_2_STANDARD",
+  "chapter_narrative_anchor": "角色名"
 }}
 
 约束：
@@ -212,7 +213,11 @@ def build_planner_agent_prompt(
     - ❌ 严禁直接描写突变后的动作结果而不交代过渡过程
     - ✅ 必须先写过渡动作，再写突变后的状态
     - 目的：避免动作突变和空间瞬移的幻觉，保持叙事的物理连续性
-14. 只输出 JSON，不要额外解释"""
+14. 只输出 JSON，不要额外解释
+15. chapter_narrative_anchor: 本章的**叙事核心角色**（读者情感跟随、命运归宿所在的主体）。
+    - 叙事核心 ≠ 镜头时间最多：若某角色在大部分 beat 中处于昏迷/被动/幕后状态，但所有事件均因其命运而发生、所有行动方的目标均指向其时，仍应将其填为叙事核心
+    - 必须从【角色设定】中的角色名中选择一个，若多人均等则填 "Ensemble"
+    - 此字段由你作为规划师主动判断，优先级高于 beat 出现频次"""
     
     user_prompt_parts = []
     
@@ -257,22 +262,15 @@ def build_planner_agent_prompt(
     return system_prompt, user_prompt
 
 
-def parse_planner_result(
+def parse_planner_full_result(
     planner_result_raw: str,
     chapter_outline: str,
     word_count: int,
-) -> list[dict]:
-    """解析规划结果的 JSON 输出。
+) -> tuple[list[dict], str]:
+    """解析规划结果，返回 beats 列表和章节叙事核心角色。
 
-    V3.0 更新：新增 workflow_tier 字段解析。
-
-    从 LLM 返回的原始文本中提取 beats 列表，并进行数据清洗和类型转换。
-
-    解析策略（优先级从高到低）：
-    1. 尝试直接解析整个文本为 JSON
-    2. 尝试提取 Markdown 代码块中的 JSON
-    3. 尝试提取 { } 包裹的 JSON 对象
-    4. 若全部失败，使用章节大纲作为 fallback beat
+    在 parse_planner_result 的基础上，额外返回 chapter_narrative_anchor 字段，
+    供 POV_ASSIGNMENT 阶段优先使用，避免仅凭 beat 出现频次错误判断叙事核心。
 
     Args:
         planner_result_raw: LLM 返回的原始文本
@@ -280,22 +278,7 @@ def parse_planner_result(
         word_count: 目标字数（用于 fallback 计算）
 
     Returns:
-        list[dict]: 结构化的 beats 列表，每个 beat 包含：
-        - position: 位置索引
-        - beat_id: 节拍唯一标识
-        - summary: 剧情概述
-        - location: 场景地点
-        - pov_character: 视角角色
-        - pov_perception_state: POV 角色的知觉状态（意识清醒程度与物理行动力）
-        - action_summary: 动作化执行摘要
-        - entry_state: 进入状态
-        - exit_state: 退出状态
-        - red_lines: 红线约束列表
-        - word_count_target: 目标字数
-        - hook_ids: 关联的伏笔 ID 列表
-        - pacing_type: 节奏类型 (Fast/Medium/Slow)
-        - weight: 权重 (1-5)
-        - workflow_tier: 工作流层级 (V3.0 新增)
+        tuple[list[dict], str]: (beats 列表, chapter_narrative_anchor 角色名或空字符串)
     """
     text = (planner_result_raw or "").strip()
     candidates = [text] if text else []
@@ -312,14 +295,19 @@ def parse_planner_result(
             break
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
-    
+
     # V3.0: 解析 workflow_tier，默认为 TIER_2_STANDARD
     workflow_tier = "TIER_2_STANDARD"
     if isinstance(parsed_obj, dict):
         tier = parsed_obj.get("workflow_tier")
         if tier in ["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]:
             workflow_tier = tier
-    
+
+    # 解析叙事核心角色（Planner 主动声明，优先于 beat 频次统计）
+    chapter_narrative_anchor = ""
+    if isinstance(parsed_obj, dict):
+        chapter_narrative_anchor = str(parsed_obj.get("chapter_narrative_anchor", "")).strip()
+
     beats = []
     if isinstance(parsed_obj, dict) and isinstance(parsed_obj.get("beats"), list):
         for idx, beat in enumerate(parsed_obj["beats"], start=1):
@@ -356,11 +344,11 @@ def parse_planner_result(
             red_lines = [str(item).strip() for item in raw_red_lines if str(item).strip()] if isinstance(raw_red_lines, list) else []
             if not red_lines:
                 red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
-            
+
             pacing_type = str(beat.get("pacing_type") or "Medium").strip()
             if pacing_type not in ["Fast", "Medium", "Slow"]:
                 pacing_type = "Medium"
-            
+
             weight = beat.get("weight")
             if not isinstance(weight, int):
                 weight = 3
@@ -412,4 +400,26 @@ def parse_planner_result(
             }
         ]
     beats.sort(key=lambda item: item["position"])
+    return beats, chapter_narrative_anchor
+
+
+def parse_planner_result(
+    planner_result_raw: str,
+    chapter_outline: str,
+    word_count: int,
+) -> list[dict]:
+    """解析规划结果的 JSON 输出（向后兼容包装器）。
+
+    仅返回 beats 列表，忽略 chapter_narrative_anchor。
+    新代码应使用 parse_planner_full_result 以获取叙事核心角色信息。
+
+    Args:
+        planner_result_raw: LLM 返回的原始文本
+        chapter_outline: 章节大纲（用于 fallback）
+        word_count: 目标字数（用于 fallback 计算）
+
+    Returns:
+        list[dict]: 结构化的 beats 列表
+    """
+    beats, _ = parse_planner_full_result(planner_result_raw, chapter_outline, word_count)
     return beats

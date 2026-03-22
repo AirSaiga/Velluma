@@ -166,87 +166,130 @@ class AdversarialAligner:
         )
     
     def _detect_structural_gaps(self, draft_text: str, sketch_result: SketchResult, beats: List[dict]) -> List[AlignmentGap]:
-        """检测结构偏移差异"""
+        """
+        检测结构差异。
+        
+        原有逻辑以 Sketch 自报告的节拍位置为"标准"来评判 Draft，
+        但 Sketch 的位置信息只是 Sketch 自身的分布，无法作为 Draft 的质量标准。
+        因此此方法返回空列表，结构问题通过 LLM 质量比较步骤处理。
+        """
+        return []
+    
+    async def _detect_emotional_gaps(self, draft_text: str, sketch_result: SketchResult, beats: List[dict]) -> List[AlignmentGap]:
+        """
+        检测情绪参考信息。
+        
+        Sketch 的 emotion_arc 是 Sketch 自身的情绪弧度，不能作为 Draft 情绪的质量标准。
+        此方法仅作为 LOW 级别的参考信息，不触发融合精修。
+        实际质量判断由 _detect_information_gaps 的 LLM 质量比较步骤负责。
+        """
         gaps = []
-        turn_markers = sketch_result.turn_markers
+        emotion_arc = sketch_result.emotion_arc
         
-        if not turn_markers:
+        if not emotion_arc or len(emotion_arc) < 2 or not draft_text:
             return gaps
         
-        draft_length = len(draft_text)
-        if draft_length == 0:
-            return gaps
-        
-        for i, beat in enumerate(beats, 1):
-            beat_id = beat.get("beat_id", f"beat-{i}")
+        # 仅记录极端情绪跳跃作为 LOW 级别参考（不触发精修）
+        for i in range(len(emotion_arc) - 1):
+            current = emotion_arc[i]
+            next_point = emotion_arc[i + 1]
+            current_intensity = current.get("intensity", 5)
+            next_intensity = next_point.get("intensity", 5)
+            intensity_diff = abs(next_intensity - current_intensity)
             
-            sketch_marker = None
-            for marker in turn_markers:
-                if marker.beat_index == i:
-                    sketch_marker = marker
-                    break
-            
-            if not sketch_marker:
-                continue
-            
-            expected_position = ((i - 0.5) / len(beats)) * 100
-            sketch_position = sketch_marker.position_percent
-            offset = abs(sketch_position - expected_position)
-            
-            if offset > self.config.structural_offset_threshold:
-                severity = GapSeverity.HIGH if offset > 25 else GapSeverity.MEDIUM
-                
+            # 仅报告极端跳跃（> 5），且只作为 LOW 级参考
+            if intensity_diff > 5:
+                position = current.get("position", "")
+                beat_index = self._estimate_beat_from_position(position, len(beats))
                 gaps.append(AlignmentGap(
-                    gap_type=GapType.STRUCTURAL,
-                    severity=severity,
-                    beat_index=i,
-                    beat_id=beat_id,
-                    description=f"节拍 {i} 位置偏移过大（Sketch: {sketch_position:.1f}%, Draft 预期: {expected_position:.1f}%）",
-                    draft_value=f"预期位置: {expected_position:.1f}%",
-                    sketch_value=f"实际位置: {sketch_position:.1f}%",
+                    gap_type=GapType.EMOTIONAL,
+                    severity=GapSeverity.LOW,  # 始终为 LOW，不触发精修
+                    beat_index=beat_index,
+                    beat_id=beats[beat_index - 1].get("beat_id") if beat_index and beat_index <= len(beats) else None,
+                    description=f"[参考] Sketch 情绪弧度在 {position} 处有较大跳跃（{current.get('emotion', '?')} → {next_point.get('emotion', '?')}，差值 {intensity_diff}）",
+                    draft_value="Draft 此处情绪过渡是否自然，需人工判断",
+                    sketch_value=f"Sketch 情绪强度变化: {intensity_diff}",
                     source=GapSource.UNKNOWN,
-                    fix_suggestion=f"调整节拍 {i} 的内容比重，使其在文中位置接近 {sketch_position:.1f}%",
-                    position_percent=expected_position,
+                    fix_suggestion=f"可参考 Sketch 在 {position} 附近的情绪过渡方式",
                 ))
         
         return gaps
     
-    async def _detect_emotional_gaps(self, draft_text: str, sketch_result: SketchResult, beats: List[dict]) -> List[AlignmentGap]:
-        """检测情绪对齐差异"""
-        gaps = []
-        emotion_arc = sketch_result.emotion_arc
+    def _estimate_beat_from_position(self, position: str, total_beats: int) -> Optional[int]:
+        """
+        根据位置描述估算 beat 索引
         
-        if not emotion_arc:
-            return gaps
+        position 可能是：开头、中段、结尾、1/3处 等
+        """
+        if not position or total_beats == 0:
+            return None
         
-        return gaps
+        position_lower = position.lower()
+        
+        if "开头" in position_lower or "开始" in position_lower or "首" in position_lower:
+            return 1
+        elif "结尾" in position_lower or "末尾" in position_lower or "结束" in position_lower:
+            return total_beats
+        elif "中" in position_lower:
+            return (total_beats + 1) // 2
+        elif "1/3" in position_lower or "三分之一" in position_lower:
+            return max(1, total_beats // 3)
+        elif "2/3" in position_lower or "三分之二" in position_lower:
+            return max(1, (total_beats * 2) // 3)
+        
+        return None
     
     async def _detect_information_gaps(
         self, draft_text: str, sketch_text: str, beats: List[dict], chapter: Any, book: Any
     ) -> Tuple[List[AlignmentGap], List[dict]]:
-        """检测信息对齐差异"""
+        """
+        质量比较分析。
+        
+        对比 Draft 和 Sketch 在各叙事节点的质量，判断哪个版本更优秀。
+        只有当 Sketch 的处理明显优于 Draft 时才生成改进建议，
+        而不是让 Draft 与 Sketch 对齐。
+        """
         gaps = []
         prompts = []
         
-        system_prompt = """你是一位信息对齐分析专家。对比两份同一故事的不同版本，分析关键信息揭示的时机和方式是否一致。
+        system_prompt = """你是一位资深文学编辑，专注于提升小说叙事质量。
 
-【重要】你必须且只能输出一个合法的 JSON 对象，不要输出任何其他内容。不要添加解释、不要添加 markdown 代码块、只输出纯 JSON。
+任务：对比同一故事情节的两个版本（节拍统稿 Draft 和连贯速写 Sketch），在关键叙事节点处判断哪个版本更优秀。
+
+评判标准：
+- 逻辑合理性：人物行为动机是否清晰，情节发展是否自然
+- 叙事流畅性：段落衔接是否顺滑，节奏是否恰当
+- 信息揭示节奏：关键信息引入时机是否合适
+
+重要原则：
+- 目标是改进 Draft，而非让 Draft 模仿 Sketch
+- 只有当 Sketch 的处理明显优于 Draft 时，才输出改进建议
+- 如果 Draft 已处理得更好或两者质量相当，该节点不输出任何条目
+- Sketch 可能存在细节错误（幻觉），遇到时应忽略该对比点
+
+【必须且只能输出一个合法的 JSON 对象，不要输出任何其他内容，不要 markdown 代码块】
 
 输出格式：
 {
-  "info_alignments": [
+  "quality_comparisons": [
     {
-      "info_key": "信息描述",
-      "draft_position": "在Draft中的大致位置",
-      "sketch_position": "在Sketch中的大致位置",
-      "aligned": true/false,
-      "issue": "如果未对齐，描述问题",
-      "severity": "high/medium/low"
+      "narrative_point": "描述对比的叙事节点（简短）",
+      "better_version": "sketch",
+      "reason": "Sketch 更好的原因（具体指出 Draft 的弱点）",
+      "draft_improvement": "Draft 应如何改进（借鉴 Sketch 哪个具体做法，不要说'参考Sketch'这种模糊指令）",
+      "severity": "high 或 medium"
     }
   ]
-}"""
+}
+
+注意：better_version 只能填 "sketch"，只输出 Draft 需要改进的条目。"""
 
         key_beats = [b for b in beats if self._is_key_beat(b)]
+        # 当命中关键词的节拍太少时（少于3个或少于总数的一半），
+        # 退化为使用全部节拍，保证 LLM 质量比较覆盖足够场景。
+        min_required = min(3, len(beats))
+        if len(key_beats) < min_required:
+            key_beats = beats[:6]  # 最多取 6 个，避免 token 过长
         if len(key_beats) == 0:
             return gaps, prompts
         
@@ -255,19 +298,19 @@ class AdversarialAligner:
             for i, b in enumerate(key_beats, 1)
         ])
         
-        user_prompt = f"""【节拍框架 - 关键情节点】
+        user_prompt = f"""【节拍框架 - 叙事参考】
 {beats_summary}
 
-【版本 A：节拍统稿】
-{draft_text[:2000]}...
+【版本 A：节拍统稿（Draft）】
+{draft_text[:2000]}
 
-【版本 B：连贯速写】
-{sketch_text[:2000]}...
+【版本 B：连贯速写（Sketch）】
+{sketch_text[:2000]}
 
-请分析以上两个版本中，关键信息揭示的时机是否一致。输出 JSON 格式的分析结果。"""
+请对比以上两个版本，找出 Draft 在哪些叙事节点处不如 Sketch，并给出具体改进建议。若 Draft 整体质量较好，quality_comparisons 可以为空数组。"""
 
         try:
-            prompts.append({"stage": "INFO_ALIGNMENT_ANALYSIS", "system_prompt": system_prompt, "user_prompt": user_prompt})
+            prompts.append({"stage": "QUALITY_COMPARISON_ANALYSIS", "system_prompt": system_prompt, "user_prompt": user_prompt})
             
             response = await call_llm(
                 api_key=self.api_key,
@@ -280,33 +323,112 @@ class AdversarialAligner:
             )
             
             result = json.loads(clean_llm_output(response))
-            alignments = result.get("info_alignments", [])
+            comparisons = result.get("quality_comparisons", [])
             
-            for alignment in alignments:
-                if not alignment.get("aligned", True):
-                    severity_str = alignment.get("severity", "medium")
-                    severity = GapSeverity(severity_str) if severity_str in ["high", "medium", "low"] else GapSeverity.MEDIUM
-                    
-                    gaps.append(AlignmentGap(
-                        gap_type=GapType.INFORMATION,
-                        severity=severity,
-                        beat_index=None,
-                        beat_id=None,
-                        description=alignment.get("issue", "信息揭示时机不一致"),
-                        draft_value=alignment.get("draft_position", "未知"),
-                        sketch_value=alignment.get("sketch_position", "未知"),
-                        source=GapSource.UNKNOWN,
-                        fix_suggestion=f"调整'{alignment.get('info_key')}'的揭示时机和方式，参考 Sketch 的自然过渡",
-                    ))
+            for comp in comparisons:
+                # 只处理 Sketch 更好的情况
+                if comp.get("better_version") != "sketch":
+                    continue
+                
+                severity_str = comp.get("severity", "medium")
+                severity = GapSeverity(severity_str) if severity_str in ["high", "medium", "low"] else GapSeverity.MEDIUM
+                
+                gaps.append(AlignmentGap(
+                    gap_type=GapType.INFORMATION,
+                    severity=severity,
+                    beat_index=None,
+                    beat_id=None,
+                    description=f"{comp.get('narrative_point', '')}: {comp.get('reason', '')}",
+                    draft_value="Draft 此处处理较弱",
+                    sketch_value="Sketch 此处处理更优",
+                    source=GapSource.EXPANSION_DRIFT,
+                    fix_suggestion=comp.get("draft_improvement", ""),
+                ))
         except Exception as e:
-            logger.warning(f"[AdversarialAligner] 信息对齐分析失败: {e}")
+            logger.warning(f"[AdversarialAligner] 质量比较分析失败: {e}")
         
         return gaps, prompts
     
     async def _detect_boundary_gaps(self, draft_text: str, sketch_text: str, beats: List[dict]) -> List[AlignmentGap]:
-        """检测开头和结尾的对齐差异"""
+        """
+        检测结尾质量问题。
+        
+        只检查 Draft 自身的结尾完整性，不要求开头风格与 Sketch 一致。
+        （开头风格是两轨并行生成的自然差异，不是问题）
+        """
         gaps = []
+        
+        if not draft_text or not sketch_text:
+            return gaps
+        
+        draft_ending = draft_text[-300:].strip()
+        sketch_ending = sketch_text[-300:].strip()
+        
+        # 检测 1: Draft 结尾是否有明确的情节收束
+        draft_has_closure = self._has_narrative_closure(draft_ending)
+        sketch_has_closure = self._has_narrative_closure(sketch_ending)
+        
+        if not draft_has_closure and sketch_has_closure:
+            gaps.append(AlignmentGap(
+                gap_type=GapType.ENDING,
+                severity=GapSeverity.MEDIUM,
+                beat_index=len(beats) if beats else None,
+                beat_id=beats[-1].get("beat_id") if beats else None,
+                description="结尾缺少情节收束感，Sketch 有明确的收束而 Draft 没有",
+                draft_value="Draft 结尾可能显得仓促或戛然而止",
+                sketch_value="Sketch 结尾有明确的情节收束",
+                source=GapSource.BEAT_DESIGN,
+                fix_suggestion="为结尾添加适当的情节收束：情绪落点、悬念设置或场景定格均可",
+            ))
+        
+        # 检测 2: 结尾是否以对话或省略号突然中断
+        if draft_ending.endswith('"') or draft_ending.endswith('\u201d') or draft_ending.endswith('——'):
+            gaps.append(AlignmentGap(
+                gap_type=GapType.ENDING,
+                severity=GapSeverity.LOW,
+                beat_index=len(beats) if beats else None,
+                beat_id=beats[-1].get("beat_id") if beats else None,
+                description="结尾以对话或省略结束，可能显得不完整",
+                draft_value=f"Draft 结尾: ...{draft_ending[-50:]}",
+                sketch_value="建议添加叙述性收束",
+                source=GapSource.EXPANSION_DRIFT,
+                fix_suggestion="在对话后添加简短的叙述或动作描写作为收束",
+            ))
+        
         return gaps
+    
+    def _has_scene_description(self, text: str) -> bool:
+        """
+        检测文本是否包含场景描写
+        
+        通过关键词启发式判断
+        """
+        scene_keywords = [
+            "阳光", "月光", "风", "雨", "雪", "天空", "大地",
+            "房间", "街道", "树", "花", "水", "火",
+            "站在", "坐在", "躺在", "走进", "走出",
+            "看着", "望着", "凝视",
+        ]
+        return any(kw in text for kw in scene_keywords)
+    
+    def _has_narrative_closure(self, text: str) -> bool:
+        """
+        检测文本是否有叙事收束感
+        
+        通过句末标点和关键词判断
+        """
+        # 检查是否以陈述句结尾（句号、省略号）
+        closure_endings = ["。", "……", '。"', '……"']
+        has_proper_ending = any(text.rstrip().endswith(e) for e in closure_endings)
+        
+        # 检查是否有收束性关键词
+        closure_keywords = [
+            "终于", "最终", "至此", "就这样", "从此",
+            "不再", "结束", "完成", "落幕", "告一段落",
+        ]
+        has_closure_keyword = any(kw in text[-100:] for kw in closure_keywords)
+        
+        return has_proper_ending or has_closure_keyword
     
     def _attribute_gaps(self, gaps: List[AlignmentGap], beats: List[dict]) -> List[AlignmentGap]:
         """归因分析"""

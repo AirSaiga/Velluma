@@ -768,6 +768,7 @@ def build_prose_draft_prompt_v25(
     # ========================================
     chapter_assets_schema: str = "",
     pov_perception_state: str = "",
+    pov_character_profile: str = "",
     # ========================================
 ) -> tuple[str, str]:
     """
@@ -954,6 +955,9 @@ def build_prose_draft_prompt_v25(
 2. 动作即性格：通过角色的动作选择展现性格
 3. 环境即情绪：让环境描写映射角色的心理状态
 4. 对话即冲突：每句台词都要有目的
+
+## 【POV角色核心设定】
+{pov_character_profile if pov_character_profile else f"（{pov_character} 无额外设定）"}
 
 ## 【反AI味协议】
 - 禁止设定倾倒（不要解释世界观设定）

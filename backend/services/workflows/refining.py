@@ -20,6 +20,7 @@ from backend.services.prompts import build_refine_agent_prompt
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.models import Chapter, Book, Character, CharacterRelationship
+from backend.services.prompt_logger import PromptLogger
 
 
 async def refine_draft(
@@ -81,6 +82,7 @@ async def refine_single_beat(
     previous_tail: str = "",
     beat_id: str = None,
     all_issues: list[dict] = None,
+    prompt_logger: Optional[PromptLogger] = None,
 ) -> str:
     """对单个 Beat 进行精准局部重写。
 
@@ -207,6 +209,17 @@ async def refine_single_beat(
 ---
 
 请直接输出修改后的正文，不要包含任何解释或标记。"""
+
+    if prompt_logger:
+        beat_label = f"FUSION_REFINE_BEAT_{beat_id or beat.get('beat_id', 'unknown')}"
+        prompt_logger.log_prompts(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=0.7,
+            max_tokens=6000,
+            prompt_label=beat_label,
+        )
 
     refined_text = await call_llm(
         system_prompt=system_prompt,

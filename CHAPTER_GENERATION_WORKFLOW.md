@@ -244,6 +244,25 @@ result = await workflow.execute(
 - 容错解析: 直接解析 → Markdown代码块 → 首尾大括号
 - 失败回退: 使用大纲生成单个 fallback beat
 
+**双轨模式快速路径 (confirmed_beats fast path)**:
+
+当前端用户在 Beat 预览弹窗中手动确认节拍后，后端可跳过 LLM PLANNING 调用，直接使用用户确认的 beats：
+
+```python
+# chapter_generation_dual_track.py
+if request.beats and len(request.beats) > 0:
+    # 快速路径：直接使用用户确认的节拍，0秒完成 PLANNING
+    beats = [b.model_dump() for b in request.beats]
+    # log: fast_path=true, source="confirmed_beats_from_frontend"
+else:
+    # 标准路径：调用 LLM 重新规划
+    beats, _ = await generate_beats(...)
+```
+
+- **触发条件**: `DualTrackGenerationRequest.beats` 字段非空
+- **日志标记**: `fast_path=true, source="confirmed_beats_from_frontend"`
+- **注意事项**: `_save_story_beats()` 在保存前会先 DELETE 旧记录，防止多次生成重复累积
+
 ---
 
 ### Phase 3: POV_ASSIGNMENT（视角分配）- Anchor POV 机制
@@ -480,8 +499,8 @@ class BeatDraftResult(BaseModel):
 **文件**: `backend/services/workflows/dual_track.py`, `sketch_generator.py`
 
 **核心函数**: 
-- `DualTrackWorkflow.execute()` (行 100-250)
-- `SketchGenerator.generate()` (行 80-180)
+- `DualTrackWorkflow.execute()` (行 148-345)
+- `SketchGenerator.generate()` (行 109-218)
 
 **职责**: 在单轨 Drafting 基础上，并行生成连贯速写短文，作为连贯性锚点。
 
@@ -523,10 +542,13 @@ class SketchResult(BaseModel):
 - 两者基于同一组 Beats 生成
 - Track B 的结果用于 Phase 5.5 的对抗校对
 
-**性能指标**:
-- Sketch 生成耗时: ~30-40% of Track A
-- 额外 Token 消耗: ~40-50% of 正文
-- 对齐度提升: 从 60-70 分 → 80-90 分
+**性能指标**（基于实测日志）:
+- Sketch 生成耗时: ~15-20% of Track A（实测 11-15s vs Track A 86-102s）
+- 额外 Token 消耗: ~50-55% of 正文（Sketch 实际字数常超目标 30-60%）
+- Sketch 字数超出警告: 模型(Gemini Flash Lite)倾向超量生成，实测达目标字数 150-163%
+- 对齐度得分 (alignment_score): 实测范围 36-62（低于文档期望的 80-90）
+  - 原因：`_is_key_beat` 关键节拍过滤逻辑限制（见 Phase 5.5）
+  - 融合精修触发后字数净变化: 约 +200 至 +300 字（补充内容为主）
 
 ---
 
@@ -534,7 +556,7 @@ class SketchResult(BaseModel):
 
 **文件**: `backend/services/workflows/adversarial_aligner.py`
 
-**核心函数**: `AdversarialAligner.align()` (行 70-180)
+**核心函数**: `AdversarialAligner.align()` (行 114-166)
 
 **职责**: 对比节拍统稿 (Draft_A) 和连贯速写 (Sketch)，检测差异并生成修复方案。
 
@@ -542,12 +564,42 @@ class SketchResult(BaseModel):
 
 **检测维度**:
 
-| 维度 | 检测内容 | 输出 |
-|------|---------|------|
-| **结构对齐** | 转折点位置偏移 | 每个 beat 的预期 vs 实际位置 |
-| **情绪对齐** | 情绪曲线一致性 | 情绪强度、极性的差异 |
-| **信息对齐** | 关键信息揭示时机 | 信息揭示的位置和方式差异 |
-| **首尾对齐** | 开头结尾呼应 | entry_state / exit_state 一致性 |
+| 维度 | 检测内容 | 实现函数 | 输出 |
+|------|---------|---------|------|
+| **结构对齐** | 转折点位置偏移 | `_detect_structural_gaps()` | 每个 beat 的预期 vs 实际位置 |
+| **情绪对齐** | 情绪曲线一致性 | `_detect_emotional_gaps()` (行 214-297) | 情绪跳跃、情绪断层、情绪基调错位 |
+| **信息对齐** | 关键信息揭示时机 | `_detect_information_gaps()` | 信息揭示的位置和方式差异 |
+| **首尾对齐** | 开头结尾呼应 | `_detect_boundary_gaps()` (行 389-475) | 开头风格、结尾收束感 |
+
+**情绪对齐检测详细逻辑** (`_detect_emotional_gaps`):
+1. 遍历 Sketch 的 `emotion_arc`，检测相邻情绪点的强度变化
+2. 若强度差超过 `emotion_diff_threshold` (默认 2.0)，记录为情绪跳跃
+3. 检测开头情绪是否过于强烈（强度 > 8 可能显得突兀）
+4. 通过 `_estimate_beat_from_position()` 将位置描述映射到 beat 索引
+
+**信息对齐检测 `_is_key_beat` 过滤规则**:
+
+`_detect_information_gaps()` 在将 beats 送入 LLM 前会过滤出"关键节拍"：
+
+```python
+key_beats = [b for b in beats if self._is_key_beat(b)]
+# 关键词: ["发现", "转折", "决定", "冲突", "高潮"]
+
+# 修复后的 fallback 规则（v3.5.1+）：
+# 如果命中关键词的节拍 < min(3, total_beats)，则扩展为全部节拍
+min_required = min(3, len(beats))
+if len(key_beats) < min_required:
+    key_beats = beats[:6]  # 最多取 6 个，避免 token 过长
+```
+
+- **背景**: 旧版仅当 `key_beats == []` 时才 fallback，导致只有 1/5 个 beat 被分析（如含"发现"的 beat）
+- **现行规则**: 命中数 < `min(3, len(beats))` 即触发扩展
+- **LLM prompt 可观测性**: `INFO_ALIGNMENT_ANALYSIS` prompt 现在通过 `prompt_logger.log_prompts()` 记录，label 为 `INFO_ALIGNMENT_ANALYSIS`
+
+**首尾对齐检测详细逻辑** (`_detect_boundary_gaps`):
+1. **开头风格检测**: 对比 Draft 和 Sketch 开头是否都有场景描写
+2. **结尾收束检测**: 检测 Draft 结尾是否有叙事收束感（句号、省略号、收束关键词）
+3. **突兀结尾检测**: 检测是否以对话或省略号中断结束
 
 **归因分析 (Gap Source)**:
 
@@ -573,12 +625,57 @@ class AdjustmentPlan:
 
 **修复策略**:
 
-| 问题类型 | 修复方式 | 说明 |
-|---------|---------|------|
-| beat_design | 调整 entry/exit state | 修改节拍框架 |
-| expansion_drift | 局部重扩 | 重生成特定节拍 |
-| segment_boundary | 过渡重织 | 用 Sketch 的过渡方式重写边界 |
-| sketch_hallucination | 忽略或评估 | Sketch 可能更好，需人工判断 |
+| 问题类型 | 修复方式 | 实现函数 | 说明 |
+|---------|---------|---------|------|
+| beat_design | 调整 entry/exit state | `_execute_fusion_refinement()` | 修改节拍框架 |
+| expansion_drift | 局部重扩 | `refine_single_beat()` | 重生成特定节拍 |
+| segment_boundary | 过渡重织 | `_build_revision_guide()` | 用 Sketch 的过渡方式重写边界 |
+| sketch_hallucination | 忽略或评估 | - | Sketch 可能更好，需人工判断 |
+
+**融合精修详细实现** (`_execute_fusion_refinement`, 行 492-720):
+
+```python
+# 核心修复流程
+1. 根据 adjustment_plan.beat_adjustments 定位问题 Beat
+2. 调用 _segment_draft_by_beats() 按字数比例将统稿分段
+3. 对每个问题 Beat 调用 refine_single_beat() 进行局部重写
+4. 构建修复指导 (_build_revision_guide):
+   - 问题描述列表
+   - 特殊处理建议（SEGMENT_BOUNDARY/BEAT_DESIGN）
+   - Sketch 参考片段 (_extract_sketch_reference)
+5. 合并精修后的片段
+
+# 辅助方法
+- _segment_draft_by_beats(): 按 beat 字数比例分段
+- _build_revision_guide(): 构建包含 Sketch 参考的修复指导
+- _extract_sketch_reference(): 从 Sketch 提取对应位置的参考文本（±5%范围）
+- _execute_global_refinement(): 处理无法定位到具体 beat 的全局问题
+```
+
+**完整 Stage 日志 (v3.5.1+)**:
+
+FUSION_REFINEMENT 阶段现有完整的 `prompt_logger` 埋点：
+
+```python
+# stage inputs（对齐结果摘要）
+{
+  "alignment_score": 62.0,
+  "gaps_count": 3,
+  "beats_to_refine": [2, 3],        # 实际触发精修的 beat 索引
+  "has_global_adjustments": true
+}
+
+# stage outputs（精修前后对比）
+{
+  "final_word_count": 3357,
+  "stitched_word_count": 3111,
+  "word_diff": 246                   # 正数=补充内容，负数=删减
+}
+```
+
+`refine_single_beat()` 内部 LLM 调用现在也记录到 FUSION_REFINEMENT 阶段的 prompts 列表：
+- **label 格式**: `FUSION_REFINE_BEAT_{beat_id}`（如 `FUSION_REFINE_BEAT_beat-2`）
+- **文件**: `backend/services/workflows/refining.py`（新增 `prompt_logger: Optional[PromptLogger]` 参数）
 
 **阈值配置**:
 - `alignment_threshold`: 70.0 (默认)
@@ -721,8 +818,9 @@ def _is_refine_output_suspiciously_short():
 | SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines`, `previous_tail` |
 | PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context`, `chapter_assets_schema`, `pov_perception_state` |
 | STITCHING | `stitch_prompts.py` | `build_stitch_prompt` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov` |
-| SKETCH_GEN | `sketch_generator.py` | `_build_sketch_prompt` | 0.8 | `chapter`, `book`, `beats`, `entities`, `relationships`, `target_words`, `previous_summary`, `anchor_pov` |
-| ADV_ALIGNMENT | `adversarial_aligner.py` | `_detect_information_gaps` | 0.1 | `draft_text`, `sketch_text`, `beats`, `chapter`, `book` |
+| SKETCH_GEN | `sketch_generator.py` | `SketchGenerator.generate()` | 0.8 | `chapter`, `book`, `beats`, `entities`, `relationships`, `target_words`, `previous_summary`, `anchor_pov` |
+| ADV_ALIGNMENT | `adversarial_aligner.py` | `AdversarialAligner.align()` | 0.1 | `draft_text`, `sketch_result`, `beats`, `chapter`, `book` |
+| FUSION_REFINE | `dual_track.py` + `refining.py` | `_execute_fusion_refinement()` + `refine_single_beat()` | 0.7 | `stitched_draft`, `sketch_result`, `adjustment_plan`, `beats`, `chapter`, `book`; prompt label: `FUSION_REFINE_BEAT_{beat_id}` |
 | REVIEWING | `review_prompts.py` | `build_review_agent_prompt` | 0.1 | `chapter`, `book`, `entities`, `relationships`, `chapter_outline`, `draft_text`, `beats` |
 | REFINING | `refining.py` | `refine_single_beat` | 0.7 | `beat`, `original_chunk`, `revision_guide`, `all_issues`, `chapter`, `book` |
 | CHUNK_REFINE | `review_prompts.py` | `build_chunk_refine_prompt` | 0.7 | `chapter`, `book`, `entities`, `relationships`, `beat_summary`, `chunk_text`, `revision_instruction` |
@@ -944,5 +1042,12 @@ word_count = (score / total_score) * total_chapter_words
 
 ---
 
-*最后更新: 2026-03-22*
-*版本: V3.5 双轨对抗架构*
+*最后更新: 2026-03-23*
+*版本: V3.5.2 双轨对抗架构 - 全链路 PromptLogger 完整覆盖*
+
+**V3.5.2 变更摘要**:
+- PLANNING 双轨快速路径（confirmed_beats_from_frontend），0秒完成节拍规划
+- `_save_story_beats` 幂等化（先 DELETE 旧记录再 INSERT）
+- `_is_key_beat` fallback 阈值从 `==0` 提升为 `<min(3, len(beats))`，确保 LLM 信息对齐分析覆盖足够场景
+- STITCHING / INFO_ALIGNMENT_ANALYSIS / FUSION_REFINEMENT / FUSION_REFINE_BEAT_{id} 全部接入 PromptLogger
+- FUSION_REFINEMENT 阶段新增 `beats_to_refine` + `word_diff` 输出字段，实现前后字数变化可观测

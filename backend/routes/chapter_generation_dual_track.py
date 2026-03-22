@@ -50,7 +50,7 @@ from backend.models import (
     Chapter, Book, ChapterEntity, CharacterRelationship,
     ChapterMapLocation, PlotLedger, StoryBeat
 )
-from backend.schemas import GenerateChapterAgenticRequest
+from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackConfig,
@@ -92,6 +92,9 @@ def _metric_frame(
 
 class DualTrackGenerationRequest(GenerateChapterAgenticRequest):
     """双轨生成请求（扩展原有请求）"""
+    
+    # 用户在 beat 预览弹窗中确认的节拍（若提供则跳过内部 PLANNING，直接使用）
+    beats: Optional[List[ConfirmedStoryBeat]] = None
     
     # 双轨特有配置
     enable_sketch_track: bool = True
@@ -211,71 +214,110 @@ async def generate_chapter_dual_track(
             yield f"data: {json.dumps({'event': 'CONTEXT_LOADED', 'message': f'加载 {len(entities)} 个角色, {len(relationships)} 组关系'}, ensure_ascii=False)}\n\n"
             
             # ========================================================================
-            # PLANNING 阶段：节拍生成
+            # PLANNING 阶段：节拍生成（若请求携带 confirmed beats，则走快速路径）
             # ========================================================================
             planning_started_at = time.perf_counter()
-            yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': 1}, ensure_ascii=False)}\n\n"
             
             from backend.services.workflows.planning import assign_pov_to_beats
-            from backend.services.prompts import build_planner_agent_prompt, parse_planner_result
+            from backend.services.prompts import build_planner_agent_prompt, parse_planner_full_result
             from backend.services.llm_client import call_llm
             
-            # 构建 Planner Prompt
-            planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
-                chapter=chapter,
-                book=book,
-                entities=entities,
-                relationships=relationships,
-                word_count=request.word_count,
-                open_hooks=open_hooks,
-                previous_chapter_summary=previous_summary,
-                locations=locations,
-                global_taboos=book.core_motifs_taboos if book else None,
-                author_intent=getattr(request, 'author_intent', None),
-            )
+            confirmed_beats = request.beats  # 前端 beat 预览弹窗中用户确认的节拍
             
-            # 记录 PLANNING 阶段的 Prompt
-            prompt_logger.start_stage("PLANNING", iteration=1)
-            prompt_logger.log_inputs(
-                word_count=request.word_count,
-                open_hooks_count=len(open_hooks),
-                has_previous_summary=bool(previous_summary)
-            )
-            prompt_logger.log_prompts(
-                system_prompt=planner_system_prompt,
-                user_prompt=planner_user_prompt,
-                model=request.model,
-                temperature=0.2,
-                max_tokens=1800,
-                prompt_label="PLANNER"
-            )
-            
-            # 发送 prompt 到前端（用于 Debug 窗口）
-            yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
-            
-            # 调用 LLM 生成节拍
-            planner_result_raw = await call_llm(
-                system_prompt=planner_system_prompt,
-                user_prompt=planner_user_prompt,
-                api_key=request.api_key,
-                base_url=request.base_url,
-                model=request.model,
-                temperature=0.2,
-                response_format={"type": "json_object"},
-                max_tokens=1800,
-            )
-            
-            beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", request.word_count)
-            
-            # 记录 PLANNING 阶段的输出
-            prompt_logger.log_outputs(
-                beat_count=len(beats),
-                beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats[:3]]
-            )
-            prompt_logger.end_stage(success=True)
+            if confirmed_beats and len(confirmed_beats) > 0:
+                # ── 快速路径：直接使用用户确认的节拍，跳过 LLM PLANNING ──
+                yield f"data: {json.dumps({'event': 'PLANNING', 'message': f'使用用户确认的 {len(confirmed_beats)} 个节拍，跳过重新规划', 'iteration': 1}, ensure_ascii=False)}\n\n"
+                
+                beats = []
+                for b in confirmed_beats:
+                    beat_dict = b.model_dump()
+                    # 保证 target_words 有值
+                    if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
+                        beat_dict["target_words"] = beat_dict.get("word_count_target") or max(200, request.word_count // len(confirmed_beats))
+                    beats.append(beat_dict)
+                
+                # 叙事核心角色：取第一个有 pov_character 的 beat，或空字符串
+                chapter_narrative_anchor = next(
+                    (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
+                )
+                
+                prompt_logger.start_stage("PLANNING", iteration=1)
+                prompt_logger.log_inputs(
+                    word_count=request.word_count,
+                    open_hooks_count=len(open_hooks),
+                    has_previous_summary=bool(previous_summary),
+                    fast_path=True,
+                    source="confirmed_beats_from_frontend",
+                )
+                prompt_logger.log_outputs(
+                    beat_count=len(beats),
+                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats],
+                    chapter_narrative_anchor=chapter_narrative_anchor or None,
+                )
+                prompt_logger.end_stage(success=True)
+                
+            else:
+                # ── 标准路径：调用 LLM 重新规划节拍 ──
+                yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+                
+                # 构建 Planner Prompt
+                planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
+                    chapter=chapter,
+                    book=book,
+                    entities=entities,
+                    relationships=relationships,
+                    word_count=request.word_count,
+                    open_hooks=open_hooks,
+                    previous_chapter_summary=previous_summary,
+                    locations=locations,
+                    global_taboos=book.core_motifs_taboos if book else None,
+                    author_intent=getattr(request, 'author_intent', None),
+                )
+                
+                # 记录 PLANNING 阶段的 Prompt
+                prompt_logger.start_stage("PLANNING", iteration=1)
+                prompt_logger.log_inputs(
+                    word_count=request.word_count,
+                    open_hooks_count=len(open_hooks),
+                    has_previous_summary=bool(previous_summary)
+                )
+                _planning_model = request.reasoning_model or request.model
+                prompt_logger.log_prompts(
+                    system_prompt=planner_system_prompt,
+                    user_prompt=planner_user_prompt,
+                    model=_planning_model,
+                    temperature=0.2,
+                    max_tokens=1800,
+                    prompt_label="PLANNER"
+                )
+                
+                # 发送 prompt 到前端（用于 Debug 窗口）
+                yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
+                
+                # 调用 LLM 生成节拍
+                planner_result_raw = await call_llm(
+                    system_prompt=planner_system_prompt,
+                    user_prompt=planner_user_prompt,
+                    api_key=request.api_key,
+                    base_url=request.base_url,
+                    model=_planning_model,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                    max_tokens=1800,
+                )
+                
+                beats, chapter_narrative_anchor = parse_planner_full_result(planner_result_raw, chapter.outline_text or "", request.word_count)
+                
+                # 记录 PLANNING 阶段的输出
+                prompt_logger.log_outputs(
+                    beat_count=len(beats),
+                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats],
+                    chapter_narrative_anchor=chapter_narrative_anchor or None,
+                )
+                prompt_logger.end_stage(success=True)
             
             # 发送统计帧
-            yield _metric_frame("PLANNING_DONE", iteration=1, extra={"beat_count": len(beats)})
+            yield _metric_frame("PLANNING_DONE", iteration=1, extra={"beat_count": len(beats), "chapter_narrative_anchor": chapter_narrative_anchor})
             
             # ========================================================================
             # POV_ASSIGNMENT 阶段：视角分配
@@ -283,10 +325,16 @@ async def generate_chapter_dual_track(
             try:
                 yield f"data: {json.dumps({'event': 'POV_ASSIGNMENT', 'message': '正在为剧情节拍分配 POV 角色...', 'iteration': 1}, ensure_ascii=False)}\n\n"
                 
-                pov_candidates = [
-                    {"name": e.character.name, "role": "Main" if e.character.importance_level >= 8 else "Supporting", "description": e.character.static_prompt or ""}
-                    for e in entities if e.character
-                ]
+                seen_char_ids: set = set()
+                pov_candidates = []
+                for e in entities:
+                    if e.character and str(e.character.id) not in seen_char_ids:
+                        seen_char_ids.add(str(e.character.id))
+                        pov_candidates.append({
+                            "name": e.character.name,
+                            "role": "Main" if e.character.importance_level >= 8 else "Supporting",
+                            "description": e.character.static_prompt or "",
+                        })
                 
                 book_title = book.title if book else "Unknown Book"
                 story_premise = f"Title: {book_title}\nChapter Outline: {chapter.outline_text or ''}"
@@ -297,9 +345,10 @@ async def generate_chapter_dual_track(
                     story_premise=story_premise,
                     api_key=request.api_key,
                     base_url=request.base_url,
-                    model=request.model,
+                    model=request.reasoning_model or request.model,
                     previous_chapter_summary=previous_summary,
                     prompt_logger=prompt_logger,
+                    chapter_narrative_anchor=chapter_narrative_anchor,
                 )
                 
                 # 发送 POV prompt 到前端
@@ -457,27 +506,41 @@ async def generate_chapter_dual_track_simple(
     # P1: 加载 RAG 相关记忆
     relevant_memories = await _load_relevant_memories(db, chapter, request)
     
-    # 节拍生成
+    # 节拍生成（若请求携带 confirmed beats，直接使用；否则调用 LLM 重新规划）
     from backend.services.workflows.planning import generate_beats, assign_pov_to_beats
     
-    beats, _ = await generate_beats(
-        chapter=chapter,
-        book=book,
-        entities=entities,
-        relationships=relationships,
-        word_count=request.word_count,
-        open_hooks=open_hooks,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
-        previous_chapter_summary=previous_summary,
-    )
+    if request.beats and len(request.beats) > 0:
+        beats = []
+        for b in request.beats:
+            beat_dict = b.model_dump()
+            if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
+                beat_dict["target_words"] = beat_dict.get("word_count_target") or max(200, request.word_count // len(request.beats))
+            beats.append(beat_dict)
+    else:
+        beats, _ = await generate_beats(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            word_count=request.word_count,
+            open_hooks=open_hooks,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            previous_chapter_summary=previous_summary,
+        )
     
-    # POV 分配
-    pov_candidates = [
-        {"name": e.character.name, "role": "Main" if e.character.importance_level >= 8 else "Supporting", "description": e.character.static_prompt or ""}
-        for e in entities if e.character
-    ]
+    # POV 分配（confirmed beats 通常已带 pov_character，assign 仍可兜底补全）
+    seen_char_ids_simple: set = set()
+    pov_candidates = []
+    for e in entities:
+        if e.character and str(e.character.id) not in seen_char_ids_simple:
+            seen_char_ids_simple.add(str(e.character.id))
+            pov_candidates.append({
+                "name": e.character.name,
+                "role": "Main" if e.character.importance_level >= 8 else "Supporting",
+                "description": e.character.static_prompt or "",
+            })
     
     beats, _ = await assign_pov_to_beats(
         beats=beats,
@@ -711,7 +774,11 @@ async def _save_story_beats(
     chapter: Chapter,
     beats: List[dict]
 ) -> List[StoryBeat]:
-    """保存 StoryBeat 到数据库"""
+    """保存 StoryBeat 到数据库（先清除该章节的旧记录，再写入新记录，防止多次生成产生重复）"""
+    from sqlalchemy import delete as sa_delete
+    # 清除旧记录，避免多次生成后前端看到重复 beats
+    await db.execute(sa_delete(StoryBeat).where(StoryBeat.chapter_id == chapter.id))
+    await db.flush()
     story_beats = []
     for beat_index, beat in enumerate(beats, start=1):
         story_beat = StoryBeat(

@@ -37,7 +37,7 @@ from backend.services.prompts.draft_prompts import (
     # V2.5+ Dynamic State Update (NEW)
     build_dynamic_state_update_prompt,
 )
-from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result
+from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result, parse_planner_full_result
 from backend.services.prompts.scene_intent_prompts import build_scene_intent_prompt, parse_scene_intent_result
 from backend.services.prompts.stitch_prompts import build_stitch_prompt
 from backend.services.prompts.review_prompts import (
@@ -73,6 +73,7 @@ __all__ = [
     # Planning
     "build_planner_agent_prompt",
     "parse_planner_result",
+    "parse_planner_full_result",
     # Scene Intent
     "build_scene_intent_prompt",
     "parse_scene_intent_result",
