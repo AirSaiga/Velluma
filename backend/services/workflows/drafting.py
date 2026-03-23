@@ -291,6 +291,7 @@ async def execute_draft_stage(
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
             stats_callback=stats_callback,
+            reasoning_config=reasoning_config,
         )
     else:  # TIER_3_FORTRESS
         return await _execute_fortress_path(
@@ -314,6 +315,7 @@ async def execute_draft_stage(
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
             stats_callback=stats_callback,
+            reasoning_config=reasoning_config,
         )
 
 
@@ -325,6 +327,7 @@ async def _generate_scene_intent_batch(
     base_url: str,
     model: str,
     stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,
 ) -> tuple[List[dict], List[List[dict]]]:
     """
     步骤 A-1: 批量并行生成 Scene Intent。
@@ -429,6 +432,7 @@ async def _generate_subconscious_batch(
     base_url: str,
     model: str,
     stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,
 ) -> tuple[List[str], List[Optional[list]], List[List[dict]]]:
     """
     步骤 A-2: 批量并行生成 Subconscious（潜意识层）。
@@ -744,6 +748,8 @@ async def _generate_prose_serial_v25(
             if not isinstance(target_words, int) or target_words <= 0:
                 target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
             
+            logger.info(f"[Prose V25] 开始生成 Beat {beat_index}/{len(beats)}，目标字数: {target_words}")
+            
             # ========================================================================
             # Fail-Fast 重试循环
             # ========================================================================
@@ -920,11 +926,14 @@ async def _generate_prose_serial_v25(
             })
             
         except Exception as e:
-            logger.error(f"[Prose V25] Beat {beat_index}: {e}")
+            import traceback
+            logger.error(f"[Prose V25] Beat {beat_index} 生成失败: {type(e).__name__}: {e}")
+            logger.debug(f"[Prose V25] Beat {beat_index} 异常堆栈:\n{traceback.format_exc()}")
             # 返回空文本，但保持 Rolling Prefix 不变（尝试用上一个 tail 继续）
             results.append({
                 "text": "",
                 "prompts": [],
+                "error": f"{type(e).__name__}: {e}",
             })
     
     return results
@@ -1415,68 +1424,90 @@ async def _generate_prose_semi_parallel_v25(
         temp = 0.75
         prompts = []
         usr_p = ""
+        last_error = None
 
         while att < max_att and not is_ok:
             att += 1
-            sys_p, usr_p = build_prose_draft_prompt_v25(
-                chapter=chapter, book=book, beat=beat,
-                scene_intent=scene_intent, subconscious_thought=subconscious,
-                previous_tail=dc1.previous_tail,
-                target_words=tw,
-                physical_state_lock=dc1.physical_state_lock,
-                current_emotional_state=dc1.current_emotional_state,
-                accumulated_summary=dc1.accumulated_summary,
-                relational_state_lock=dc1.relational_state_lock,
-                red_lines=beat.get("red_lines"),
-                entity_spatial_ledger=dc1.entity_spatial_ledger or None,
-                chapter_assets_schema=chapter_assets_schema or '',
-                pov_perception_state=pov_ps,
-                pov_character_profile=pov_pf,
-            )
-            prompts.append({
-                "stage": f"PROSE_DRAFT_ATTEMPT_{att}",
-                "beat_index": local_idx,
-                "temperature": temp,
-                "system_prompt": sys_p,
-                "user_prompt": usr_p,
-            })
-            resp = await _call_llm_with_stats(
-                stage="prose_draft",
-                system_prompt=sys_p, user_prompt=usr_p,
-                api_key=api_key, base_url=base_url, model=creative_model,
-                temperature=temp, max_tokens=_clamp_tokens(tw),
-                beat_index=local_idx, stats_callback=stats_callback,
-            )
-            chunk = clean_llm_output(resp).strip()
-
-            if flags.enable_fail_fast and att < max_att:
-                is_ok, fail_r, fail_c = await _micro_review_assertion(
-                    chunk_text=chunk, dynamic_context=dc1,
-                    pov_character=pov_ch, beat=beat,
-                    api_key=api_key, base_url=base_url, model=reasoning_model,
+            try:
+                sys_p, usr_p = build_prose_draft_prompt_v25(
+                    chapter=chapter, book=book, beat=beat,
+                    scene_intent=scene_intent, subconscious_thought=subconscious,
+                    previous_tail=dc1.previous_tail,
+                    target_words=tw,
+                    physical_state_lock=dc1.physical_state_lock,
+                    current_emotional_state=dc1.current_emotional_state,
+                    accumulated_summary=dc1.accumulated_summary,
+                    relational_state_lock=dc1.relational_state_lock,
+                    red_lines=beat.get("red_lines"),
                     entity_spatial_ledger=dc1.entity_spatial_ledger or None,
+                    chapter_assets_schema=chapter_assets_schema or '',
+                    pov_perception_state=pov_ps,
+                    pov_character_profile=pov_pf,
+                )
+                prompts.append({
+                    "stage": f"PROSE_DRAFT_ATTEMPT_{att}",
+                    "beat_index": local_idx,
+                    "temperature": temp,
+                    "system_prompt": sys_p,
+                    "user_prompt": usr_p,
+                })
+                resp = await _call_llm_with_stats(
+                    stage="prose_draft",
+                    system_prompt=sys_p, user_prompt=usr_p,
+                    api_key=api_key, base_url=base_url, model=creative_model,
+                    temperature=temp, max_tokens=_clamp_tokens(tw),
                     beat_index=local_idx, stats_callback=stats_callback,
                 )
-                if not is_ok:
-                    if "文风" in fail_c:
-                        temp = min(1.0, temp + flags.fail_fast_temperature_step)
+                chunk = clean_llm_output(resp).strip()
+
+                # 检查是否返回空内容
+                if not chunk:
+                    logger.warning(f"[Prose Semi-Parallel] Beat {local_idx} 第{att}次尝试返回空文本")
+                    last_error = "Empty response from LLM"
+                    if att < max_att:
+                        temp = min(1.0, temp + 0.1)  # 稍微提高温度重试
+                        continue
+
+                if flags.enable_fail_fast and att < max_att:
+                    is_ok, fail_r, fail_c = await _micro_review_assertion(
+                        chunk_text=chunk, dynamic_context=dc1,
+                        pov_character=pov_ch, beat=beat,
+                        api_key=api_key, base_url=base_url, model=reasoning_model,
+                        entity_spatial_ledger=dc1.entity_spatial_ledger or None,
+                        beat_index=local_idx, stats_callback=stats_callback,
+                    )
+                    if not is_ok:
+                        logger.warning(f"[Prose Semi-Parallel] Beat {local_idx} 第{att}次断言失败: {fail_r}")
+                        last_error = f"Assertion failed: {fail_r}"
+                        if "文风" in fail_c:
+                            temp = min(1.0, temp + flags.fail_fast_temperature_step)
+                        else:
+                            temp = max(0.3, temp - 0.1)
+                            usr_p = usr_p + f"\n\n【修正要求】上一版本存在以下问题：{fail_r}。请保持原语境，仅修复该冲突。"
                     else:
-                        temp = max(0.3, temp - 0.1)
-                        usr_p = usr_p + f"\n\n【修正要求】上一版本存在以下问题：{fail_r}。请保持原语境，仅修复该冲突。"
+                        is_ok = True
                 else:
                     is_ok = True
-            else:
-                is_ok = True
+            except Exception as e:
+                logger.error(f"[Prose Semi-Parallel] Beat {local_idx} 第{att}次尝试异常: {type(e).__name__}: {e}")
+                last_error = str(e)
+                if att >= max_att:
+                    raise  # 重试次数耗尽，抛出异常
+                # 短暂延迟后重试
+                await asyncio.sleep(1)
 
-        if enable_qc:
-            chunk, qc_ps = await _quick_qc(
-                prose_text=chunk, beat=beat, beat_index=local_idx,
-                chapter=chapter, book=book, entities=entities, relationships=relationships,
-                api_key=api_key, base_url=base_url, model=creative_model, target_words=tw,
-            )
-            prompts.extend(qc_ps)
+        if enable_qc and chunk:
+            try:
+                chunk, qc_ps = await _quick_qc(
+                    prose_text=chunk, beat=beat, beat_index=local_idx,
+                    chapter=chapter, book=book, entities=entities, relationships=relationships,
+                    api_key=api_key, base_url=base_url, model=creative_model, target_words=tw,
+                )
+                prompts.extend(qc_ps)
+            except Exception as e:
+                logger.warning(f"[Prose Semi-Parallel] Beat {local_idx} QC 失败: {e}")
 
-        return {"text": chunk, "prompts": prompts}
+        return {"text": chunk, "prompts": prompts, "error": last_error}
 
     middle_tasks = [
         _middle_task(i + 2, middle_beats[i], middle_scene_intents[i], middle_subconsciouses[i])
@@ -1484,11 +1515,19 @@ async def _generate_prose_semi_parallel_v25(
     ]
     middle_raw = await asyncio.gather(*middle_tasks, return_exceptions=True)
     middle_results = []
-    for r in middle_raw:
+    for i, r in enumerate(middle_raw):
+        beat_idx = i + 2  # 中间 Beat 从 2 开始
         if isinstance(r, Exception):
-            logger.error(f"[Prose Semi-Parallel] 中间 Beat 异常: {r}")
+            logger.error(f"[Prose Semi-Parallel] Beat {beat_idx} 异常: {type(r).__name__}: {r}")
+            # 记录异常堆栈以便诊断
+            import traceback
+            logger.debug(f"[Prose Semi-Parallel] Beat {beat_idx} 异常堆栈:\n{traceback.format_exc()}")
             middle_results.append({"text": "", "prompts": []})
+        elif not r.get("text"):
+            logger.warning(f"[Prose Semi-Parallel] Beat {beat_idx} 返回空文本")
+            middle_results.append(r)
         else:
+            logger.info(f"[Prose Semi-Parallel] Beat {beat_idx} 成功，字数={len(r.get('text', ''))}")
             middle_results.append(r)
 
     logger.info(f"[Prose Semi-Parallel] 阶段2 完成，{len(middle_results)} 个中间 Beat 生成完毕")
@@ -1530,66 +1569,87 @@ async def _generate_prose_semi_parallel_v25(
     temp_last = 0.75
     prompts_last = []
     user_prompt_last = ""
+    last_error_last = None
 
     while att_last < max_att_last and not is_ok_last:
         att_last += 1
-        sys_p_last, user_prompt_last = build_prose_draft_prompt_v25(
-            chapter=chapter, book=book, beat=last_beat,
-            scene_intent=scene_intent_results[-1], subconscious_thought=subconscious_results[-1],
-            previous_tail=context_last.previous_tail,
-            target_words=last_tw,
-            physical_state_lock=context_last.physical_state_lock,
-            current_emotional_state=context_last.current_emotional_state,
-            accumulated_summary=context_last.accumulated_summary,
-            relational_state_lock=context_last.relational_state_lock,
-            red_lines=last_beat.get("red_lines"),
-            entity_spatial_ledger=context_last.entity_spatial_ledger or None,
-            chapter_assets_schema=chapter_assets_schema or '',
-            pov_perception_state=last_pov_ps,
-            pov_character_profile=last_pov_pf,
-        )
-        prompts_last.append({
-            "stage": f"PROSE_DRAFT_ATTEMPT_{att_last}",
-            "beat_index": last_beat_idx,
-            "temperature": temp_last,
-            "system_prompt": sys_p_last,
-            "user_prompt": user_prompt_last,
-        })
-        resp_last = await _call_llm_with_stats(
-            stage="prose_draft",
-            system_prompt=sys_p_last, user_prompt=user_prompt_last,
-            api_key=api_key, base_url=base_url, model=creative_model,
-            temperature=temp_last, max_tokens=_clamp_tokens(last_tw),
-            beat_index=last_beat_idx, stats_callback=stats_callback,
-        )
-        chunk_last = clean_llm_output(resp_last).strip()
-
-        if flags.enable_fail_fast and att_last < max_att_last:
-            is_ok_last, fail_r_last, fail_c_last = await _micro_review_assertion(
-                chunk_text=chunk_last, dynamic_context=context_last,
-                pov_character=last_pov_ch, beat=last_beat,
-                api_key=api_key, base_url=base_url, model=reasoning_model,
+        try:
+            sys_p_last, user_prompt_last = build_prose_draft_prompt_v25(
+                chapter=chapter, book=book, beat=last_beat,
+                scene_intent=scene_intent_results[-1], subconscious_thought=subconscious_results[-1],
+                previous_tail=context_last.previous_tail,
+                target_words=last_tw,
+                physical_state_lock=context_last.physical_state_lock,
+                current_emotional_state=context_last.current_emotional_state,
+                accumulated_summary=context_last.accumulated_summary,
+                relational_state_lock=context_last.relational_state_lock,
+                red_lines=last_beat.get("red_lines"),
                 entity_spatial_ledger=context_last.entity_spatial_ledger or None,
+                chapter_assets_schema=chapter_assets_schema or '',
+                pov_perception_state=last_pov_ps,
+                pov_character_profile=last_pov_pf,
+            )
+            prompts_last.append({
+                "stage": f"PROSE_DRAFT_ATTEMPT_{att_last}",
+                "beat_index": last_beat_idx,
+                "temperature": temp_last,
+                "system_prompt": sys_p_last,
+                "user_prompt": user_prompt_last,
+            })
+            resp_last = await _call_llm_with_stats(
+                stage="prose_draft",
+                system_prompt=sys_p_last, user_prompt=user_prompt_last,
+                api_key=api_key, base_url=base_url, model=creative_model,
+                temperature=temp_last, max_tokens=_clamp_tokens(last_tw),
                 beat_index=last_beat_idx, stats_callback=stats_callback,
             )
-            if not is_ok_last:
-                if "文风" in fail_c_last:
-                    temp_last = min(1.0, temp_last + flags.fail_fast_temperature_step)
+            chunk_last = clean_llm_output(resp_last).strip()
+
+            # 检查是否返回空内容
+            if not chunk_last:
+                logger.warning(f"[Prose Semi-Parallel] Beat {last_beat_idx} 第{att_last}次尝试返回空文本")
+                last_error_last = "Empty response from LLM"
+                if att_last < max_att_last:
+                    temp_last = min(1.0, temp_last + 0.1)
+                    continue
+
+            if flags.enable_fail_fast and att_last < max_att_last:
+                is_ok_last, fail_r_last, fail_c_last = await _micro_review_assertion(
+                    chunk_text=chunk_last, dynamic_context=context_last,
+                    pov_character=last_pov_ch, beat=last_beat,
+                    api_key=api_key, base_url=base_url, model=reasoning_model,
+                    entity_spatial_ledger=context_last.entity_spatial_ledger or None,
+                    beat_index=last_beat_idx, stats_callback=stats_callback,
+                )
+                if not is_ok_last:
+                    logger.warning(f"[Prose Semi-Parallel] Beat {last_beat_idx} 第{att_last}次断言失败: {fail_r_last}")
+                    last_error_last = f"Assertion failed: {fail_r_last}"
+                    if "文风" in fail_c_last:
+                        temp_last = min(1.0, temp_last + flags.fail_fast_temperature_step)
+                    else:
+                        temp_last = max(0.3, temp_last - 0.1)
+                        user_prompt_last = user_prompt_last + f"\n\n【修正要求】上一版本存在以下问题：{fail_r_last}。请保持原语境，仅修复该冲突。"
                 else:
-                    temp_last = max(0.3, temp_last - 0.1)
-                    user_prompt_last = user_prompt_last + f"\n\n【修正要求】上一版本存在以下问题：{fail_r_last}。请保持原语境，仅修复该冲突。"
+                    is_ok_last = True
             else:
                 is_ok_last = True
-        else:
-            is_ok_last = True
+        except Exception as e:
+            logger.error(f"[Prose Semi-Parallel] Beat {last_beat_idx} 第{att_last}次尝试异常: {type(e).__name__}: {e}")
+            last_error_last = str(e)
+            if att_last >= max_att_last:
+                break  # 重试次数耗尽，使用当前结果
+            await asyncio.sleep(1)
 
-    if enable_qc:
-        chunk_last, qc_plast = await _quick_qc(
-            prose_text=chunk_last, beat=last_beat, beat_index=last_beat_idx,
-            chapter=chapter, book=book, entities=entities, relationships=relationships,
-            api_key=api_key, base_url=base_url, model=creative_model, target_words=last_tw,
-        )
-        prompts_last.extend(qc_plast)
+    if enable_qc and chunk_last:
+        try:
+            chunk_last, qc_plast = await _quick_qc(
+                prose_text=chunk_last, beat=last_beat, beat_index=last_beat_idx,
+                chapter=chapter, book=book, entities=entities, relationships=relationships,
+                api_key=api_key, base_url=base_url, model=creative_model, target_words=last_tw,
+            )
+            prompts_last.extend(qc_plast)
+        except Exception as e:
+            logger.warning(f"[Prose Semi-Parallel] Beat {last_beat_idx} QC 失败: {e}")
 
     result_last = {"text": chunk_last, "prompts": prompts_last}
     logger.info(f"[Prose Semi-Parallel] Beat {last_beat_idx} 完成，字数={len(chunk_last)}")
@@ -2589,6 +2649,7 @@ async def _execute_standard_path(
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
     stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 Tier 2: 均衡流 (Standard-Path)
@@ -2613,6 +2674,7 @@ async def _execute_standard_path(
         base_url=base_url,
         model=reasoning_model,
         stats_callback=stats_callback,
+        reasoning_config=reasoning_config,
     )
     
     # 步骤 B: 轻量级 Subconscious（无 MCTS）
@@ -2724,6 +2786,7 @@ async def _execute_fortress_path(
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
     stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 Tier 3: 堡垒流 (Fortress-Path)
@@ -2757,6 +2820,7 @@ async def _execute_fortress_path(
         base_url=base_url,
         model=reasoning_model,
         stats_callback=stats_callback,
+        reasoning_config=reasoning_config,
     )
     
     # A-2: 并行生成 Subconscious（依赖 Scene Intent，带 MCTS）
@@ -2769,6 +2833,7 @@ async def _execute_fortress_path(
         base_url=base_url,
         model=reasoning_model,
         stats_callback=stats_callback,
+        reasoning_config=reasoning_config,
     )
     
     logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")

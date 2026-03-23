@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 _default_proxy = "http://127.0.0.1:4780"
 PROXY_URL = os.getenv("PROXY_URL", _default_proxy)
+# 允许通过环境变量 DISABLE_PROXY=1 临时禁用代理
+if os.getenv("DISABLE_PROXY") == "1":
+    PROXY_URL = None
 if not PROXY_URL:
     PROXY_URL = None
 
