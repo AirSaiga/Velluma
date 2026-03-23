@@ -393,6 +393,9 @@ async def generate_chapter_dual_track(
             
             yield f"data: {json.dumps({'event': 'DUAL_TRACK_START', 'message': '启动双轨并行生成...'}, ensure_ascii=False)}\n\n"
             
+            # 发送 DRAFTING 事件，表示 Track A (节拍扩写) 开始
+            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': '主笔 Agent 正在并行扩写节拍...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+            
             # P1: 获取 reasoning_config（如果启用）
             reasoning_config = None
             if hasattr(request, 'reasoning_config') and request.reasoning_config and request.reasoning_config.enabled:
@@ -418,26 +421,38 @@ async def generate_chapter_dual_track(
             prompt_logger._final_text_length = len(result.final_text) if result.final_text else 0
             prompt_logger._review_passed = not (result.adjustment_plan and result.adjustment_plan.needs_adjustment)
             
-            # 发送 Track A 完成事件
+            # 发送 Track A 完成事件（内部事件，前端主要关注 DRAFTING 状态）
             yield f"data: {json.dumps({'event': 'TRACK_A_DONE', 'message': f'节拍扩写完成，{len(result.beat_drafts)} 个片段'}, ensure_ascii=False)}\n\n"
             
-            # 发送 Track B 完成事件（如果有）
+            # 发送 Track B 完成事件（如果有，内部事件）
             if result.sketch_result:
                 yield f"data: {json.dumps({'event': 'TRACK_B_DONE', 'message': f'速写生成完成，{result.sketch_result.word_count} 字'}, ensure_ascii=False)}\n\n"
             
-            # 发送统稿完成事件
-            yield f"data: {json.dumps({'event': 'STITCHING_DONE', 'message': f'统稿完成，{len(result.stitched_draft)} 字'}, ensure_ascii=False)}\n\n"
+            # 发送统稿事件（使用前端期望的 STITCHING 而非 STITCHING_DONE）
+            yield f"data: {json.dumps({'event': 'STITCHING', 'message': f'统稿完成，{len(result.stitched_draft)} 字'}, ensure_ascii=False)}\n\n"
             
-            # 发送对抗校对结果
+            # 计算是否需要调整（提前定义以便后续使用）
+            needs_adjustment = result.adjustment_plan.needs_adjustment if result.adjustment_plan else False
+            
+            # 发送审阅事件（使用前端期望的 REVIEWING 而非 ALIGNMENT_DONE）
             if result.adjustment_plan:
                 score = result.adjustment_plan.alignment_score
                 needs_fix = result.adjustment_plan.needs_adjustment
-                yield f"data: {json.dumps({'event': 'ALIGNMENT_DONE', 'message': f'对齐度得分: {score:.1f}', 'score': score, 'needs_fix': needs_fix}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'event': 'REVIEWING', 'message': f'审阅完成，对齐度得分: {score:.1f}', 'score': score, 'needs_fix': needs_fix}, ensure_ascii=False)}\n\n"
             
-            # 发送最终结果
-            needs_adjustment = result.adjustment_plan.needs_adjustment if result.adjustment_plan else False
+            # 发送最终文本流事件（模拟流式输出以兼容前端）
+            yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': not needs_adjustment}, ensure_ascii=False)}\n\n"
+            
+            # 发送文本内容（分块以支持流式显示效果）
+            final_text = result.final_text or ""
+            chunk_size = 100  # 每块约100字符
+            for i in range(0, len(final_text), chunk_size):
+                chunk = final_text[i:i + chunk_size]
+                yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            # 发送最终结果（使用前端期望的 DONE 而非 COMPLETE）
             yield f"data: {json.dumps({
-                'event': 'COMPLETE',
+                'event': 'DONE',
                 'text': result.final_text,
                 'stats': result.stats,
                 'alignment_score': result.adjustment_plan.alignment_score if result.adjustment_plan else None,
