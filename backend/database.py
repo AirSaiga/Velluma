@@ -319,6 +319,39 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT DEFAULT '正常'",
         "expected_udt_names": {"text"},
     },
+    # V3.5: 叙事光圈与持久状态锚点
+    {
+        "table": "story_beats",
+        "column": "pov_aperture",
+        "definition": "VARCHAR(50) DEFAULT 'subjective_observation'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "story_beats",
+        "column": "persistent_state_anchors",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    # 世界状态快照：章节发布时提取
+    {
+        "table": "chapters",
+        "column": "world_snapshot",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    # 此刻状态：角色和场景从世界快照中提取的实时状态
+    {
+        "table": "characters",
+        "column": "current_state",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "map_locations",
+        "column": "current_state",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
 ]
 
 

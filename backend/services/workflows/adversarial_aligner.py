@@ -298,14 +298,19 @@ class AdversarialAligner:
             for i, b in enumerate(key_beats, 1)
         ])
         
+        # 改进：分段采样覆盖全文，而非只看前 2000 字
+        # 取开头、中间、结尾三段，确保覆盖过渡问题高发区域
+        draft_sample = self._sample_text_segments(draft_text, max_total=3000)
+        sketch_sample = self._sample_text_segments(sketch_text, max_total=3000)
+        
         user_prompt = f"""【节拍框架 - 叙事参考】
 {beats_summary}
 
-【版本 A：节拍统稿（Draft）】
-{draft_text[:2000]}
+【版本 A：节拍统稿（Draft）- 分段采样】
+{draft_sample}
 
-【版本 B：连贯速写（Sketch）】
-{sketch_text[:2000]}
+【版本 B：连贯速写（Sketch）- 分段采样】
+{sketch_sample}
 
 请对比以上两个版本，找出 Draft 在哪些叙事节点处不如 Sketch，并给出具体改进建议。若 Draft 整体质量较好，quality_comparisons 可以为空数组。"""
 
@@ -397,10 +402,45 @@ class AdversarialAligner:
         
         return gaps
     
+    def _sample_text_segments(self, text: str, max_total: int = 3000) -> str:
+        """
+        分段采样文本，覆盖开头、中间、结尾。
+    
+        解决只分析前 2000 字遗漏过渡问题的问题。
+        过渡问题通常发生在节拍边界，即文章的中间部分。
+    
+        Args:
+            text: 原始文本
+            max_total: 最大采样总字数
+    
+        Returns:
+            采样后的文本片段
+        """
+        if not text:
+            return ""
+    
+        text_len = len(text)
+        if text_len <= max_total:
+            return text
+    
+        # 分三段采样：开头 40%、中间 20%、结尾 40%
+        head_len = int(max_total * 0.4)
+        tail_len = int(max_total * 0.4)
+        mid_len = max_total - head_len - tail_len
+    
+        head = text[:head_len]
+        tail = text[-tail_len:]
+    
+        # 中间部分从文本中点采样
+        mid_start = (text_len - mid_len) // 2
+        mid = text[mid_start:mid_start + mid_len]
+    
+        return f"【开头部分】\n{head}\n\n【中间部分】\n{mid}\n\n【结尾部分】\n{tail}"
+    
     def _has_scene_description(self, text: str) -> bool:
         """
         检测文本是否包含场景描写
-        
+    
         通过关键词启发式判断
         """
         scene_keywords = [

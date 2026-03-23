@@ -1,5 +1,7 @@
+from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from backend.models import Chapter, ChapterEntity
@@ -115,3 +117,29 @@ class ChapterRepository(BaseRepository[Chapter]):
         result = await self.db.execute(stmt)
         await self.db.commit()
         return result.rowcount > 0
+
+    async def get_previous_chapter(self, chapter: Chapter) -> Optional[Chapter]:
+        """获取上一章（按 chapter_number 排序）。
+
+        用于获取前一章的状态快照作为当前章的参考。
+
+        Args:
+            chapter: 当前章节实体
+
+        Returns:
+            Optional[Chapter]: 上一章实体，不存在返回 None
+        """
+        if not chapter or not chapter.book_id:
+            return None
+
+        stmt = (
+            select(Chapter)
+            .where(
+                Chapter.book_id == chapter.book_id,
+                Chapter.chapter_number < chapter.chapter_number
+            )
+            .order_by(Chapter.chapter_number.desc())
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

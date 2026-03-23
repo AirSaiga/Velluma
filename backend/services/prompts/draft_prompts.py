@@ -770,6 +770,11 @@ def build_prose_draft_prompt_v25(
     pov_perception_state: str = "",
     pov_character_profile: str = "",
     # ========================================
+    # NEW PARAMETERS for V3.5 叙事光圈与持久状态锚点
+    # ========================================
+    pov_aperture: Optional[str] = None,
+    persistent_state_anchors: Optional[list[dict]] = None,
+    # ========================================
 ) -> tuple[str, str]:
     """
     V2.5+ 认知流式生成 - 增强版正文生成提示词（关系感知版）
@@ -780,9 +785,11 @@ def build_prose_draft_prompt_v25(
     - **宏观剧情累加器 (Accumulated Summary)**：跨 Beat 剧情记忆
     - **关系状态锁 (Relational State Lock)**：防止人物关系错乱
     - **红线约束 (Red Lines)**：最高优先级边界限制
+    - **叙事光圈 (PovAperture)**：V3.5 控制 POV 视角景深
+    - **持久状态锚点 (Persistent State Anchors)**：V3.5 实现跨 Beat 状态连贯
     
     约束传播公式:
-    $$Prompt_{effective} = Prompt_{base} \\oplus Constraints_{red\\_lines} \\oplus State_{relational}$$
+    $$Prompt_{effective} = Prompt_{base} \\oplus Constraints_{red\\_lines} \\oplus State_{relational} \\oplus Aperture_{pov}$$
     """
     beat_data = beat if isinstance(beat, dict) else {}
     
@@ -901,7 +908,67 @@ def build_prose_draft_prompt_v25(
 - 通过身体反应和环境感知体现情绪，而非直接陈述"他感到..."""
 
     # ========================================
-    # V3.0 四重锁：构建变量
+    # V3.5: 认知视角系统与持久状态锚点
+    # ========================================
+    # 处理 pov_aperture 默认值
+    effective_pov_aperture = pov_aperture or beat_data.get("pov_aperture", "subjective_observation")
+    if effective_pov_aperture not in ["internal_only", "subjective_observation", "systemic_sense"]:
+        effective_pov_aperture = "subjective_observation"
+    
+    # 构建认知视角系统指令
+    aperture_mode_descriptions = {
+        "internal_only": f"仅限 {pov_character} 的内心与自我感知，强制屏蔽外部可见但不被注意的细节。",
+        "subjective_observation": f"允许描写其他角色动作，但必须通过 {pov_character} 的认知/判断包裹。",
+        "systemic_sense": f"允许全景感知，但在叙事上依然以 {pov_character} 为锚点（适用于高张力动作场景）。"
+    }
+    aperture_mode_desc = aperture_mode_descriptions.get(effective_pov_aperture, aperture_mode_descriptions["subjective_observation"])
+    
+    cognitive_aperture_section = f"""
+【认知视角系统 (Cognitive Aperture System) - V3.5】
+当前光圈: {effective_pov_aperture}
+模式说明: {aperture_mode_desc}
+
+[核心指令]: 你不必强制排除其他角色，但必须遵循"认知过滤法则"：
+1. **视角锚定**: 所有的叙事必须以 {pov_character} 的感知为起点。
+2. **动作包裹**: "其他角色的动作"不能独立存在，必须嵌套在视角角色的观察/反应中。
+   - 错误示例 (上帝视角): "李四走到门口，捡起枪，开了火。"
+   - 正确示例 (认知包裹): "{pov_character} 听到了门口的脚步声（感官输入），紧接着看到李四俯身捡起枪（视觉观察），这让{pov_character}背脊发凉（主观反应），这显然是场处决。"
+3. **禁止上帝独白**: 严禁描写任何非视角角色的内心独白、想法或意图。
+4. **感知边界**: 若当前光圈为 internal_only，{pov_character} 未注意到或无法感知的细节绝对禁止描写。
+"""
+    
+    # 构建持久状态锚点区块
+    persistent_anchors_section = ""
+    effective_anchors = persistent_state_anchors or beat_data.get("persistent_state_anchors", [])
+    if effective_anchors:
+        anchors_lines = []
+        for anchor in effective_anchors:
+            if isinstance(anchor, dict):
+                anchor_type = anchor.get("anchor_type", "unknown")
+                description = anchor.get("description", "")
+                involved = anchor.get("involved_characters", [])
+                if isinstance(involved, list):
+                    involved_str = f" (涉及: {', '.join(involved)})" if involved else ""
+                else:
+                    involved_str = ""
+                if description:
+                    anchors_lines.append(f"- [{anchor_type}] {description}{involved_str}")
+        
+        if anchors_lines:
+            anchors_text = "\n".join(anchors_lines)
+            persistent_anchors_section = f"""
+【持久状态锚点 (Persistent State Anchors) - V3.5】
+以下状态必须在当前 Beat 中保持连贯，禁止突兀改变：
+{anchors_text}
+
+锚点约束：
+- 情感基调必须渐进演变，禁止无逻辑的情绪突变
+- 物理位置依附关系必须保持一致
+- 未解决冲突必须在当前 Beat 中维持其未解决状态（除非本 Beat 明确解决它）
+"""
+
+    # ========================================
+    # V3.0 四重锁 + V3.5 跨章连续性锁：构建变量
     # ========================================
     # 锁1：核心资产体积锁
     chapter_assets_schema_text = chapter_assets_schema if chapter_assets_schema else "（本章未定义特殊资产）"
@@ -918,6 +985,23 @@ def build_prose_draft_prompt_v25(
         red_lines_text = "\n".join([f"- {rl}" for rl in red_lines_list])
     else:
         red_lines_text = "（无特殊红线）"
+    
+    # 🔒 锁5：跨章物理连续性锁（P0级 - 绝对不可跳过）
+    world_snapshot_constraints = beat_data.get("_world_snapshot_constraints", "")
+    if world_snapshot_constraints:
+        cross_chapter_lock_text = f"""
+【跨章物理连续性锁 (Cross-Chapter Continuity Lock) - V3.5 P0级】
+以下是上一章末尾的世界状态快照，你必须严格遵守其中的物理约束：
+
+{world_snapshot_constraints}
+
+⚠️ 强制规则：
+1. Beat 1 的 entry_state 必须与上述「场景位置」和「角色状态」保持100%连续性
+2. 严禁让角色产生"瞬移"或状态突变
+3. 关键锚点必须在当前 Beat 中被处理或明确说明状态变化
+"""
+    else:
+        cross_chapter_lock_text = ""
     
     # 前文尾巴
     previous_tail_text = previous_tail if previous_tail else "（章节开头，无前文）"
@@ -941,6 +1025,8 @@ def build_prose_draft_prompt_v25(
 【锁4：大纲红线 (Red Lines) - 撞线即判废】
 {red_lines_text}
 
+{cross_chapter_lock_text}
+
 ## 【物理边界锁定】
 你必须严格遵守主角当前的物理实体状态：{physical_state_lock if physical_state_lock else "未指定"}
 
@@ -949,6 +1035,10 @@ def build_prose_draft_prompt_v25(
 
 ## 【在场角色与动态关系 (Relational State)】
 {relational_state_lock if relational_state_lock else "（无特殊关系约束）"}
+
+{cognitive_aperture_section}
+
+{persistent_anchors_section}
 
 ## 【叙事原则】
 1. 单一视角锁定：绝对锁定在【{pov_character}】的感官范围内

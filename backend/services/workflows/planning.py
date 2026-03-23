@@ -27,6 +27,46 @@ from backend.services.prompts import (
 import json
 from backend.services.llm_client import call_llm
 from backend.models import Chapter, Book, Character, CharacterRelationship, StoryBeat
+from backend.schemas import PovAperture
+
+
+def infer_pov_aperture(beat: dict, tension_level: int) -> str:
+    """
+    基于 Scene Intent 和 Tension Level 推断 POV Aperture。
+    
+    V3.5: 智能光圈推断算法
+    - 优先使用 Planner 已提供的 pov_aperture
+    - 基于 tension_level 和 pacing_type 进行推断
+    
+    规则：
+    - INTERNAL_ONLY: 深度心理描写、独处的内省场景 (Slow pacing, 低张力独白)
+    - SYSTEMIC_SENSE: 高张力动作场景、需要全局感知的战斗场面 (Fast pacing + 高张力)
+    - SUBJECTIVE_OBSERVATION: 默认，常规场景
+    
+    Args:
+        beat: Beat 数据字典，包含 pacing_type 和可能的 pov_aperture
+        tension_level: 章节张力等级 (1-5)
+    
+    Returns:
+        str: 推断的 pov_aperture 值
+    """
+    # 如果 Planner 已提供有效值，直接使用
+    existing = beat.get("pov_aperture")
+    if existing in ["internal_only", "subjective_observation", "systemic_sense"]:
+        return existing
+    
+    pacing_type = beat.get("pacing_type", "Medium")
+    
+    # 高张力 + 快节奏 = 全景感知
+    if tension_level >= 4 and pacing_type == "Fast":
+        return "systemic_sense"
+    
+    # 低张力 + 慢节奏 = 内心独白
+    if tension_level <= 2 and pacing_type == "Slow":
+        return "internal_only"
+    
+    # 默认：主观观察
+    return "subjective_observation"
 
 
 async def generate_beats(
@@ -81,7 +121,15 @@ async def generate_beats(
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
     
     story_beats = []
+    tension_level = getattr(chapter, "tension_level", 3) or 3
+    
     for beat_index, beat in enumerate(beats, start=1):
+        # V3.5: 推断或使用 pov_aperture
+        pov_aperture = infer_pov_aperture(beat, tension_level)
+        
+        # V3.5: 获取持久状态锚点
+        persistent_state_anchors = beat.get("persistent_state_anchors", [])
+        
         story_beat = StoryBeat(
             book_id=chapter.book_id,
             chapter_id=chapter.id,
@@ -90,6 +138,8 @@ async def generate_beats(
             position=beat.get("position", beat_index),
             location=beat.get("location"),
             pov_character=beat.get("pov_character"),
+            pov_aperture=pov_aperture,  # V3.5: 叙事光圈
+            persistent_state_anchors=persistent_state_anchors,  # V3.5: 持久状态锚点
             pov_perception_state=beat.get("pov_perception_state", "正常"),
             anchor_pov=None,
             original_actor=beat.get("pov_character"),
@@ -100,7 +150,11 @@ async def generate_beats(
             red_lines=beat.get("red_lines", []),
             word_count_target=beat.get("word_count_target", beat.get("target_words", 0)),
             summary=beat.get("summary", ""),
-            meta={"target_words": beat.get("target_words", 0)},
+            meta={
+                "target_words": beat.get("target_words", 0),
+                "pov_aperture": pov_aperture,  # V3.5: 也存入 meta 方便调试
+                "persistent_state_anchors_count": len(persistent_state_anchors),
+            },
             status="planned",
         )
         story_beats.append(story_beat)

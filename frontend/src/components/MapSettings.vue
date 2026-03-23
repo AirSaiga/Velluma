@@ -31,7 +31,7 @@ const chapterLocations = ref([]) // Locations associated with this chapter
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editingLocation = ref(null)
-const locationForm = ref({ name: '', description: '' })
+const locationForm = ref({ name: '', description: '', current_state: '' })
 const isLoading = ref(false)
 const normalizedFocusedEntity = computed(() => (props.focusedEntity || '').trim().toLowerCase())
 const normalizedActiveNames = computed(() =>
@@ -127,13 +127,13 @@ function saveRange() {
 
 // Location Management Logic
 function openCreateModal() {
-  locationForm.value = { name: '', description: '' }
+  locationForm.value = { name: '', description: '', current_state: '' }
   showCreateModal.value = true
 }
 
 function openEditModal(loc) {
   editingLocation.value = loc
-  locationForm.value = { name: loc.name, description: loc.description }
+  locationForm.value = { name: loc.name, description: loc.description, current_state: loc.current_state || '' }
   showEditModal.value = true
 }
 
@@ -264,6 +264,9 @@ async function toggleLocation(loc) {
                 </span>
               </div>
               <p class="mt-1 text-[10px] text-[var(--text-secondary)] line-clamp-2 pl-4.5">{{ loc.description || '暂无描述' }}</p>
+              <p v-if="loc.current_state" class="mt-0.5 text-[10px] text-amber-600 line-clamp-1 pl-4.5">
+                <span class="font-medium">此刻:</span> {{ loc.current_state }}
+              </p>
             </div>
             
             <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
@@ -327,10 +330,20 @@ async function toggleLocation(loc) {
             <label class="block text-xs text-slate-500 mb-1">描述 (Prompt上下文)</label>
             <textarea 
               v-model="locationForm.description"
-              rows="4"
+              rows="3"
               class="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
               placeholder="详细描述该地点的环境、氛围、规则等..."
             ></textarea>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">此刻状态 (实时快照)</label>
+            <textarea 
+              v-model="locationForm.current_state"
+              rows="2"
+              class="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              placeholder="从世界快照中提取的此刻场景状态..."
+            ></textarea>
+            <p class="text-[10px] text-slate-400 mt-0.5">此字段通常在章节发布时自动更新</p>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-4">

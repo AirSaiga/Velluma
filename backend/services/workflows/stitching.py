@@ -33,6 +33,9 @@ async def stitch_chunks(
     model: str,
     anchor_pov: Optional[str] = None,
     prompt_logger: Optional[PromptLogger] = None,
+    sketch_text: Optional[str] = None,
+    book: Optional[Any] = None,
+    persistent_state_anchors: Optional[list[dict]] = None,
 ) -> str:
     """将多个并行生成的 chunks 统稿成连贯的章节正文。
 
@@ -46,6 +49,9 @@ async def stitch_chunks(
         model: LLM Model Name
         anchor_pov: 主导视角角色名，启用反蒙太奇剪辑规则
         prompt_logger: 可选的日志记录器，用于记录统稿 prompt
+        sketch_text: 连贯速写文本，作为连贯性参考（双轨模式）
+        book: 书籍实体，用于获取文风控制数据
+        persistent_state_anchors: 持久状态锚点列表，用于跨 Beat 状态平滑 (V3.5)
 
     Returns:
         str: 统稿后的正文
@@ -56,6 +62,9 @@ async def stitch_chunks(
         chunks=chunks,
         word_count=word_count,
         anchor_pov=anchor_pov,
+        book=book,
+        sketch_text=sketch_text,
+        persistent_state_anchors=persistent_state_anchors,
     )
     
     # 按原始 chunks 总字数 * 3 作为上限（中文 token 约 1.5字/token，预留 buffer）

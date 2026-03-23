@@ -147,6 +147,7 @@ function openCreateDrawer() {
     name: '',
     static_prompt: '',
     dynamic_state: '',
+    current_state: '',
     importance_level: 1
   }
   showCharacterDrawer.value = true
@@ -158,6 +159,7 @@ function openEditDrawer(character) {
     name: character.name,
     static_prompt: character.static_prompt,
     dynamic_state: character.dynamic_state,
+    current_state: character.current_state,
     importance_level: character.importance_level
   }
   showCharacterDrawer.value = true
@@ -322,6 +324,14 @@ function getImportanceColor(level) {
               </span>
             </div>
             <p class="text-[10px] text-[var(--text-muted)] line-clamp-1">{{ char.static_prompt || '暂无设定' }}</p>
+            <div class="mt-1.5 space-y-0.5">
+              <p v-if="char.dynamic_state" class="text-[10px] text-indigo-600 line-clamp-1">
+                <span class="font-medium">动态:</span> {{ char.dynamic_state }}
+              </p>
+              <p v-if="char.current_state" class="text-[10px] text-amber-600 line-clamp-1">
+                <span class="font-medium">此刻:</span> {{ char.current_state }}
+              </p>
+            </div>
           </div>
           <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
             <button
@@ -391,7 +401,7 @@ function getImportanceColor(level) {
 
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="block text-sm text-[var(--text-muted)]">动态状态 (当前状态)</label>
+              <label class="block text-sm text-[var(--text-muted)]">动态状态 (章节级快照)</label>
               <button
                 v-if="selectedCharacter && selectedChapterId"
                 @click="handleUpdateDynamicState"
@@ -408,6 +418,17 @@ function getImportanceColor(level) {
               class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
               placeholder="角色当前的状态，如：在第X章受伤、情绪低落等..."
             />
+          </div>
+
+          <div>
+            <label class="block text-sm text-[var(--text-muted)] mb-1">此刻状态 (实时快照)</label>
+            <textarea
+              v-model="formData.current_state"
+              rows="2"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              placeholder="从世界快照中提取的此刻状态，如：重伤倒地、正在逃跑..."
+            />
+            <p class="text-[10px] text-[var(--text-muted)] mt-1">此字段通常在章节发布时自动更新</p>
           </div>
         </div>
 

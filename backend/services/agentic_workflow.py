@@ -834,6 +834,11 @@ async def _generate_agentic_chapter_stream(
             else:
                 planning_started_at = time.perf_counter()
                 yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': iteration}, ensure_ascii=False)}\n\n"
+                # 获取上一章的世界状态快照
+                previous_chapter_snapshot = None
+                if prev_chapter and prev_chapter.world_snapshot:
+                    previous_chapter_snapshot = prev_chapter.world_snapshot
+
                 planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
                     chapter=chapter,
                     book=book,
@@ -845,6 +850,7 @@ async def _generate_agentic_chapter_stream(
                     locations=locations,
                     global_taboos=book.core_motifs_taboos if book else None,
                     author_intent=request.author_intent,
+                    previous_chapter_snapshot=previous_chapter_snapshot,
                 )
                 
                 # ========================================================================
@@ -1289,6 +1295,7 @@ async def _generate_agentic_chapter_stream(
                 beats=beats,
                 chunks=generated_chunks,
                 word_count=word_count,
+                previous_chapter_snapshot=previous_chapter_snapshot,
             )
             
             # ========================================================================

@@ -110,6 +110,8 @@ class Chapter(Base):
     status = Column(String(50), default="draft")
     # V3.0 资产字典：存储当前场景出现的专有名词的物理定义（如机甲体积、武器形态）
     chapter_assets_schema = Column(Text, nullable=True, default="")
+    # 世界状态快照：章节发布时提取，作为下一章的初始约束
+    world_snapshot = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="chapters")
@@ -169,6 +171,7 @@ class MapLocation(Base):
 
     业务含义：
     - 存储地点名称和描述（用于 Prompt 上下文）
+    - current_state 是"此刻状态"，从世界快照中提取的场景实时状态
     - 可在章节中被引用，作为环境约束或场景设定
     """
     __tablename__ = "map_locations"
@@ -177,6 +180,7 @@ class MapLocation(Base):
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    current_state = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="locations")
@@ -218,6 +222,7 @@ class Character(Base):
     业务含义：
     - static_prompt 是"永恒设定"，每次 LLM 调用都作为 system prompt 注入
     - dynamic_state 是"瞬时快照"，记录当前章节结束时角色的情绪/状态
+    - current_state 是"此刻状态"，从世界快照中提取的角色实时物理/心理状态
     - dynamic_state_history 保留所有历史状态，支持"时间回溯"或"状态追溯"
     - importance_level (1-10) 是资源分配优先级，影响上下文窗口分配策略
 
@@ -236,6 +241,7 @@ class Character(Base):
     aliases = Column(JSONB, default=list)
     static_prompt = Column(Text, nullable=True)
     dynamic_state = Column(Text, nullable=True)
+    current_state = Column(Text, nullable=True)
     dynamic_state_history = Column(JSONB, default=list)
     importance_level = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -384,6 +390,8 @@ class StoryBeat(Base):
     - entry_state / exit_state: 进入/退出状态，确保剧情不越界
     - red_lines: 红线约束列表，防止生成违规内容
     - pacing_type: 节奏类型 (Fast/Medium/Slow)，影响字数分配权重
+    - pov_aperture: 叙事光圈，控制 Drafting 阶段的视角景深 (V3.5)
+    - persistent_state_anchors: 持久状态锚点列表 (V3.5)
     """
     __tablename__ = "story_beats"
 
@@ -395,6 +403,10 @@ class StoryBeat(Base):
     position = Column(Integer, default=0)
     location = Column(Text, nullable=True)
     pov_character = Column(String(120), nullable=True)
+    # V3.5: 叙事光圈，控制 Drafting 阶段的视角景深
+    pov_aperture = Column(String(50), nullable=True, default="subjective_observation")
+    # V3.5: 持久状态锚点列表，用于跨 Beat 状态连贯
+    persistent_state_anchors = Column(JSONB, default=list)
     # POV 角色的知觉状态（意识清醒程度与物理行动力），由 Planner 生成
     pov_perception_state = Column(Text, nullable=True, default="正常")
     anchor_pov = Column(String(120), nullable=True)

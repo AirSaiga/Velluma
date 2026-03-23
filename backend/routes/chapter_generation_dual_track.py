@@ -169,6 +169,10 @@ async def generate_chapter_dual_track(
             # P0: 加载上一章摘要（跨章衔接核心）
             previous_summary = await _load_previous_summary(db, chapter)
             logger.debug(f"[DualTrack] Previous Summary: {bool(previous_summary)}")
+
+            # P0: 加载上一章世界状态快照
+            previous_chapter_snapshot = await _load_previous_world_snapshot(db, chapter)
+            logger.debug(f"[DualTrack] Previous World Snapshot: {bool(previous_chapter_snapshot)}")
             
             # P0: 加载开放伏笔
             open_hooks = await _load_open_hooks(db, chapter)
@@ -221,12 +225,22 @@ async def generate_chapter_dual_track(
             from backend.services.workflows.planning import assign_pov_to_beats
             from backend.services.prompts import build_planner_agent_prompt, parse_planner_full_result
             from backend.services.llm_client import call_llm
+            from backend.services.prompts.world_state_prompts import format_snapshot_for_planner
             
             confirmed_beats = request.beats  # 前端 beat 预览弹窗中用户确认的节拍
             
             if confirmed_beats and len(confirmed_beats) > 0:
                 # ── 快速路径：直接使用用户确认的节拍，跳过 LLM PLANNING ──
-                yield f"data: {json.dumps({'event': 'PLANNING', 'message': f'使用用户确认的 {len(confirmed_beats)} 个节拍，跳过重新规划', 'iteration': 1}, ensure_ascii=False)}\n\n"
+                # ⚠️ 重要：即使走快速路径，世界状态快照约束也必须注入！
+                # 注意：确认 beats 后直接进入生成，不再记录 PLANNING 阶段
+                
+                # ========================================================================
+                # 强制注入：世界状态快照约束（P0级 - 不可跳过）
+                # ========================================================================
+                world_snapshot_constraints = ""
+                if previous_chapter_snapshot:
+                    world_snapshot_constraints = format_snapshot_for_planner(previous_chapter_snapshot)
+                    logger.info(f"[快速路径] 注入世界状态快照约束: {bool(world_snapshot_constraints)}")
                 
                 beats = []
                 for b in confirmed_beats:
@@ -234,6 +248,9 @@ async def generate_chapter_dual_track(
                     # 保证 target_words 有值
                     if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
                         beat_dict["target_words"] = beat_dict.get("word_count_target") or max(200, request.word_count // len(confirmed_beats))
+                    # 🔒 强制附加世界状态约束到每个beat（供DRAFTING阶段使用）
+                    if world_snapshot_constraints:
+                        beat_dict["_world_snapshot_constraints"] = world_snapshot_constraints
                     beats.append(beat_dict)
                 
                 # 叙事核心角色：取第一个有 pov_character 的 beat，或空字符串
@@ -241,13 +258,12 @@ async def generate_chapter_dual_track(
                     (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
                 )
                 
-                prompt_logger.start_stage("PLANNING", iteration=1)
+                # 记录用户确认的 beats（无 LLM 调用，但记录最终执行的 beats）
+                prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
                 prompt_logger.log_inputs(
                     word_count=request.word_count,
-                    open_hooks_count=len(open_hooks),
                     has_previous_summary=bool(previous_summary),
-                    fast_path=True,
-                    source="confirmed_beats_from_frontend",
+                    source="user_confirmed_beats",
                 )
                 prompt_logger.log_outputs(
                     beat_count=len(beats),
@@ -272,6 +288,7 @@ async def generate_chapter_dual_track(
                     locations=locations,
                     global_taboos=book.core_motifs_taboos if book else None,
                     author_intent=getattr(request, 'author_intent', None),
+                    previous_chapter_snapshot=previous_chapter_snapshot,
                 )
                 
                 # 记录 PLANNING 阶段的 Prompt
@@ -690,6 +707,23 @@ async def _load_previous_summary(db: AsyncSession, chapter: Chapter) -> Optional
     else:
         prev_chapter_name = prev_chapter.chapter_name or f"第{prev_chapter.chapter_number}章"
         return f"（上一章【{prev_chapter_name}】内容未生成，标题：{prev_chapter.title or '未命名'}）"
+
+
+async def _load_previous_world_snapshot(db: AsyncSession, chapter: Chapter) -> Optional[dict]:
+    """加载上一章的世界状态快照
+
+    用于跨章状态连续性约束。
+    """
+    prev_chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
+    )
+    prev_chapter = prev_chapter_result.scalar_one_or_none()
+
+    if not prev_chapter:
+        return None
+
+    return prev_chapter.world_snapshot if prev_chapter.world_snapshot else None
 
 
 async def _load_open_hooks(db: AsyncSession, chapter: Chapter) -> List[Dict[str, str]]:

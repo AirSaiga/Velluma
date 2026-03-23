@@ -22,6 +22,10 @@ import re
 from typing import Optional
 
 from backend.models import Chapter, Book
+from backend.services.prompts.world_state_prompts import (
+    build_world_state_constraint_prompt,
+    format_snapshot_for_planner,
+)
 
 
 # 低张力章节的默认红线约束
@@ -40,6 +44,7 @@ def build_planner_agent_prompt(
     locations: Optional[list] = None,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
+    previous_chapter_snapshot: Optional[dict] = None,
 ) -> tuple[str, str]:
     """构建规划阶段的提示词。
 
@@ -56,15 +61,17 @@ def build_planner_agent_prompt(
         locations: 章节关联的地点列表
         global_taboos: 全局禁忌/核心母题（Book 级别）
         author_intent: 作者创作意图（Request 级别）
+        previous_chapter_snapshot: 上一章的世界状态快照（用于跨章状态连续性约束）
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
         - system_prompt: 包含角色设定、关系约束、世界观、输出格式要求
-        - user_prompt: 包含章节信息、大纲、目标字数、绝对最高优先级指令
+        - user_prompt: 包含实际章节内容，global_taboos 和 author_intent 作为绝对最高优先级注入
 
     提示词设计说明：
     - system_prompt: 定义 JSON 输出格式、beat 数量限制、pacing_type 约束等
     - user_prompt: 包含实际章节内容，global_taboos 和 author_intent 作为绝对最高优先级注入
+    - previous_chapter_snapshot: 注入世界状态约束，确保跨章物理连续性
     """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -72,6 +79,9 @@ def build_planner_agent_prompt(
     if not isinstance(tension_level, int):
         tension_level = 5
     pacing_style = str(getattr(chapter, "pacing_style", "balanced") or "balanced").strip() or "balanced"
+    
+    # 获取叙事锚定视角角色
+    anchor_pov = getattr(chapter, "anchor_pov", None)
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     
@@ -156,6 +166,14 @@ def build_planner_agent_prompt(
       "location": "场景地点",
       "pov_character": "视角角色",
       "pov_perception_state": "正常",
+      "pov_aperture": "subjective_observation",
+      "persistent_state_anchors": [
+        {{
+          "anchor_type": "unresolved_conflict",
+          "description": "描述当前未解决的冲突",
+          "involved_characters": ["角色名"]
+        }}
+      ],
       "action_summary": "动作化执行摘要",
       "worldbuilding_instruction": "本段生效的世界构建约束",
       "entry_state": "本段切入时角色与局面的起始状态",
@@ -217,7 +235,17 @@ def build_planner_agent_prompt(
 15. chapter_narrative_anchor: 本章的**叙事核心角色**（读者情感跟随、命运归宿所在的主体）。
     - 叙事核心 ≠ 镜头时间最多：若某角色在大部分 beat 中处于昏迷/被动/幕后状态，但所有事件均因其命运而发生、所有行动方的目标均指向其时，仍应将其填为叙事核心
     - 必须从【角色设定】中的角色名中选择一个，若多人均等则填 "Ensemble"
-    - 此字段由你作为规划师主动判断，优先级高于 beat 出现频次"""
+    - 此字段由你作为规划师主动判断，优先级高于 beat 出现频次
+16. **【V3.5 新增】pov_aperture (叙事光圈)**: 控制 Drafting 阶段的视角景深，必须从以下选项中选择：
+    - "internal_only": 仅限 {anchor_pov or '视角角色'} 的内心与自我感知，强制屏蔽不可见环境细节。适用于深度心理描写、独处的内省场景。
+    - "subjective_observation" (默认): 允许描写其他角色动作，但必须通过 {anchor_pov or '视角角色'} 的认知/判断包裹。适用于常规场景。
+    - "systemic_sense": 允许全景感知，但在叙事上依然以 {anchor_pov or '视角角色'} 为锚点。适用于高张力动作场景、需要全局感知的战斗场面。
+    选择依据：基于 scene_intent 和 tension_level 自动推断，高张力动作场景用 systemic_sense，深度心理描写用 internal_only。
+17. **【V3.5 新增】persistent_state_anchors (持久状态锚点)**: 每个 beat 必须输出状态锚点列表，用于跨 Beat 状态连贯。必须包含以下类型：
+    - unresolved_conflict: 当前未解决的冲突（如"角色A对角色B的怀疑尚未消除"）
+    - emotional_tone: 角色情感基调（如"主角处于焦虑但克制的状态"）
+    - spatial_attachment: 物理位置依附关系（如"角色C仍在机甲内部，未脱离"）
+    这些锚点将在 Drafting 阶段作为结构化数据注入，禁止合并为纯文本。"""
     
     user_prompt_parts = []
     
@@ -231,6 +259,13 @@ def build_planner_agent_prompt(
             user_prompt_parts.append("重要提示：若【作者创作意图】与【章节大纲】的内容顺序或逻辑存在冲突，请优先满足【作者创作意图】。你可以调整大纲事件的顺序、改写开头或重新设计情节结构（例如采用倒叙、直接切入冲突等），以确保创作意图得到完美执行。")
         user_prompt_parts.append("")
 
+    # 添加世界状态快照约束（如果存在）
+    world_snapshot_section = ""
+    if previous_chapter_snapshot:
+        world_snapshot_section = format_snapshot_for_planner(previous_chapter_snapshot)
+        if world_snapshot_section:
+            world_snapshot_section = f"\n{world_snapshot_section}\n"
+
     user_prompt_parts.append(f"""请规划以下章节：
 
 【章节名】{chapter_name}
@@ -239,7 +274,7 @@ def build_planner_agent_prompt(
 【叙事节奏偏好】{pacing_style}
 【上一章情节概要】
 {previous_chapter_summary if previous_chapter_summary else '暂无上一章概要（这是第一章或上一章未生成）'}
-
+{world_snapshot_section}
 ⚠️ **跨章接缝提醒**：
 请仔细分析上述【上一章情节概要】的最后 200 字，提取：
 1. 结尾视角角色是谁？
@@ -330,6 +365,29 @@ def parse_planner_full_result(
             pov_character = str(beat.get("pov_character") or "").strip() or None
             # POV 角色知觉状态：由 Planner 显式输出
             pov_perception_state = str(beat.get("pov_perception_state") or "正常").strip() or "正常"
+            # V3.5: 解析叙事光圈，默认为 subjective_observation
+            pov_aperture = str(beat.get("pov_aperture") or "subjective_observation").strip()
+            if pov_aperture not in ["internal_only", "subjective_observation", "systemic_sense"]:
+                pov_aperture = "subjective_observation"
+            # V3.5: 解析持久状态锚点
+            persistent_state_anchors = []
+            raw_anchors = beat.get("persistent_state_anchors")
+            if isinstance(raw_anchors, list):
+                for anchor in raw_anchors:
+                    if isinstance(anchor, dict):
+                        anchor_type = str(anchor.get("anchor_type") or "").strip()
+                        description = str(anchor.get("description") or "").strip()
+                        involved_chars = anchor.get("involved_characters", [])
+                        if isinstance(involved_chars, list):
+                            involved_characters = [str(c).strip() for c in involved_chars if str(c).strip()]
+                        else:
+                            involved_characters = []
+                        if anchor_type and description:
+                            persistent_state_anchors.append({
+                                "anchor_type": anchor_type,
+                                "description": description,
+                                "involved_characters": involved_characters
+                            })
             action_summary = str(beat.get("action_summary") or "").strip() or summary
             worldbuilding_instruction = str(beat.get("worldbuilding_instruction") or "").strip() or None
             entry_state = str(beat.get("entry_state") or "").strip()
@@ -363,6 +421,8 @@ def parse_planner_full_result(
                     "location": location,
                     "pov_character": pov_character,
                     "pov_perception_state": pov_perception_state,
+                    "pov_aperture": pov_aperture,  # V3.5: 叙事光圈
+                    "persistent_state_anchors": persistent_state_anchors,  # V3.5: 持久状态锚点
                     "action_summary": action_summary,
                     "worldbuilding_instruction": worldbuilding_instruction,
                     "entry_state": entry_state or None,
@@ -386,6 +446,8 @@ def parse_planner_full_result(
                 "location": None,
                 "pov_character": None,
                 "pov_perception_state": "正常",
+                "pov_aperture": "subjective_observation",  # V3.5: 默认叙事光圈
+                "persistent_state_anchors": [],  # V3.5: 默认空锚点列表
                 "action_summary": fallback_summary,
                 "worldbuilding_instruction": None,
                 "entry_state": "承接上文并切入本节拍",

@@ -264,13 +264,23 @@ class DualTrackWorkflow:
                 word_count=word_count,
                 note="与SKETCH_GENERATION并行执行，elapsed为Track A真实耗时",
             )
+            # ── 记录每个 Beat 的详细 prompts（Scene Intent / Subconscious / Prose Draft）──
+            for draft in beat_drafts:
+                for p in (draft.prompts or []):
+                    self.prompt_logger.log_prompts(
+                        system_prompt=p.get("system_prompt", ""),
+                        user_prompt=p.get("user_prompt", ""),
+                        model=self.reasoning_model if p.get("stage") in ["SCENE_INTENT", "SUBCONSCIOUS"] else self.creative_model,
+                        temperature=p.get("temperature", 0.7),
+                        prompt_label=f"{p.get('stage', 'UNKNOWN')}_BEAT_{draft.beat_index}",
+                    )
             total_draft_words = sum(len(d.draft_chunk) for d in beat_drafts)
             self.prompt_logger.log_outputs(
                 beat_count=len(beat_drafts),
                 total_draft_words=total_draft_words,
                 beat_previews=[
-                    {"id": d.beat_id, "words": len(d.draft_chunk)}
-                    for d in beat_drafts  # 全量输出，不截断
+                    {"id": d.beat_id, "words": len(d.draft_chunk), "preview": d.draft_chunk[:300]}
+                    for d in beat_drafts  # 全量输出，含预览
                 ],
             )
             self.prompt_logger.end_stage(success=True)
@@ -304,6 +314,8 @@ class DualTrackWorkflow:
             model=self.creative_model,
             anchor_pov=anchor_pov,
             prompt_logger=self.prompt_logger,
+            sketch_text=sketch_result.sketch_text if sketch_result else None,
+            book=book,
         )
         
         stitch_time = time.perf_counter() - stitch_start
@@ -312,6 +324,7 @@ class DualTrackWorkflow:
         if self.prompt_logger:
             self.prompt_logger.log_outputs(
                 stitched_word_count=len(stitched_draft),
+                stitched_text=stitched_draft,  # 完整统稿正文
             )
             self.prompt_logger.end_stage(success=bool(stitched_draft))
         
@@ -559,7 +572,7 @@ class DualTrackWorkflow:
                 word_count=result.word_count,
                 turn_markers_count=len(result.turn_markers),
                 generation_time=result.generation_time,
-                sketch_preview=result.sketch_text[:500] if result.sketch_text else "",
+                sketch_text=result.sketch_text,  # 完整速写正文
             )
             self.prompt_logger.end_stage(success=bool(result.sketch_text))
         

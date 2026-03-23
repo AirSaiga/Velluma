@@ -4,6 +4,7 @@ Pydantic 验证模型
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, model_validator, field_validator
@@ -12,6 +13,21 @@ PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
 
 # V3.0: 智能路由工作流层级
 WorkflowTier = Literal["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]
+
+# ============================================================
+# V3.5: 叙事光圈系统 - 解决 POV 僵化问题
+# ============================================================
+class PovAperture(str, Enum):
+    """
+    叙事光圈枚举 - 控制 Drafting 阶段的视角景深。
+    
+    INTERNAL_ONLY: 仅限内心与自我感知，强制屏蔽不可见环境细节。
+    SUBJECTIVE_OBSERVATION: 允许描写其他角色动作，但必须通过视角角色的"认知/判断"包裹。
+    SYSTEMIC_SENSE: 允许全景感知，但在叙事上依然以视角角色为锚点（适用于高张力动作场景）。
+    """
+    INTERNAL_ONLY = "internal_only"
+    SUBJECTIVE_OBSERVATION = "subjective_observation"
+    SYSTEMIC_SENSE = "systemic_sense"
 
 # ============================================================
 # 推理模式配置 - OpenRouter Reasoning Tokens 支持
@@ -187,9 +203,16 @@ class WorldviewUpdate(BaseModel):
 
 
 class MapLocationBase(BaseModel):
-    """地图/地点基础模型"""
+    """地图/地点基础模型
+
+    字段说明：
+    - name: 地点名称
+    - description: 地点描述（静态设定）
+    - current_state: 此刻状态（从世界快照提取的实时场景状态）
+    """
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
+    current_state: Optional[str] = None
 
 
 class MapLocationCreate(MapLocationBase):
@@ -201,6 +224,7 @@ class MapLocationUpdate(BaseModel):
     """更新地点请求模型"""
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
+    current_state: Optional[str] = None
 
 
 class MapLocationResponse(MapLocationBase):
@@ -260,6 +284,7 @@ class ChapterBase(BaseModel):
     map_activity_range: Optional[str] = None
     tension_level: int = Field(default=3, ge=1, le=5, description="剧情张力等级 (1-5)，决定工作流层级")
     pacing_style: PacingStyle = Field(default="balanced")
+    world_snapshot: Optional[dict] = Field(default=None, description="章节发布时提取的世界状态快照")
 
     @field_validator('tension_level', mode='before')
     @classmethod
@@ -352,11 +377,15 @@ class CharacterBase(BaseModel):
     - name 必填且非空（角色必须有标识）
     - aliases 默认为空列表（角色可以没有别名）
     - importance_level 默认为 1（新角色默认低优先级）
+    - static_prompt: 静态设定（永恒不变）
+    - dynamic_state: 动态状态（章节级快照）
+    - current_state: 此刻状态（从世界快照提取的实时状态）
     """
     name: str = Field(..., min_length=1, max_length=200)
     aliases: List[str] = Field(default_factory=list)
     static_prompt: Optional[str] = None
     dynamic_state: Optional[str] = None
+    current_state: Optional[str] = None
     importance_level: int = Field(default=1, ge=1, le=10)
 
 
@@ -385,6 +414,7 @@ class CharacterUpdate(BaseModel):
     aliases: Optional[List[str]] = None
     static_prompt: Optional[str] = None
     dynamic_state: Optional[str] = None
+    current_state: Optional[str] = None
     importance_level: Optional[int] = Field(None, ge=1, le=10)
 
 
@@ -393,6 +423,7 @@ class CharacterResponse(CharacterBase):
 
     业务规则：
     - 包含完整的 dynamic_state_history（用于前端状态展示）
+    - 包含三种状态：static_prompt（静态）、dynamic_state（动态）、current_state（此刻）
     - 响应体积可能较大（history 累积后），考虑分页或压缩策略
     """
     id: UUID
@@ -545,6 +576,27 @@ class MemoryChunkResponse(MemoryChunkBase):
         from_attributes = True
 
 
+# ============================================================
+# V3.5: 持久状态锚点模型
+# ============================================================
+class PersistentStateAnchor(BaseModel):
+    """
+    持久状态锚点 - 用于在 Planning 阶段捕获跨 Beat 需要保持的状态。
+    
+    业务含义：
+    - 在 PLANNING 阶段由 LLM 输出，作为 DynamicContext 的核心注入 Drafting 阶段
+    - 禁止将其合并为纯文本，必须作为结构化数据处理
+    
+    锚点类型：
+    - unresolved_conflict: 当前未解决冲突
+    - emotional_tone: 角色情感基调
+    - spatial_attachment: 物理位置依附关系
+    """
+    anchor_type: str = Field(..., description="锚点类型: unresolved_conflict/emotional_tone/spatial_attachment")
+    description: str = Field(..., description="锚点描述")
+    involved_characters: List[str] = Field(default_factory=list, description="涉及的角色名列表")
+
+
 class StoryBeatBase(BaseModel):
     """
     故事节拍 (Story Beat) 的基础 Schema。
@@ -560,6 +612,8 @@ class StoryBeatBase(BaseModel):
     - position: 位置索引，用于排序
     - location: 场景地点
     - pov_character: 视角角色名
+    - pov_aperture: 叙事光圈，控制 Drafting 阶段的视角景深
+    - persistent_state_anchors: 持久状态锚点列表
     - action_summary: 动作化执行摘要
     - entry_state/exit_state: 进入/退出状态
     - red_lines: 红线约束列表
@@ -574,6 +628,8 @@ class StoryBeatBase(BaseModel):
     position: int = Field(default=0, ge=0)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, max_length=120)
+    pov_aperture: Optional[PovAperture] = Field(default=PovAperture.SUBJECTIVE_OBSERVATION, description="叙事光圈，控制视角景深")
+    persistent_state_anchors: List[PersistentStateAnchor] = Field(default_factory=list, description="持久状态锚点列表")
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
     entry_state: Optional[str] = Field(None, min_length=1)
@@ -598,6 +654,8 @@ class StoryBeatUpdate(BaseModel):
     position: Optional[int] = Field(None, ge=0)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    pov_aperture: Optional[PovAperture] = Field(None, description="叙事光圈，控制视角景深")
+    persistent_state_anchors: Optional[List[PersistentStateAnchor]] = Field(None, description="持久状态锚点列表")
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
     entry_state: Optional[str] = Field(None, min_length=1)
@@ -1073,12 +1131,21 @@ class ConfirmedStoryBeat(BaseModel):
     确认的故事节拍模型。
     
     V3.0 新增 workflow_tier 字段，用于在 Beat 级别传递工作流层级信息。
+    V3.5 新增 pov_aperture 和 persistent_state_anchors 字段，支持叙事光圈和持久状态锚点。
     """
     position: int = Field(..., ge=1)
     beat_id: Optional[str] = Field(None, min_length=1, max_length=120)
     summary: str = Field(..., min_length=1)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    pov_aperture: Optional[PovAperture] = Field(
+        default=None, 
+        description="叙事光圈：internal_only/subjective_observation/systemic_sense"
+    )
+    persistent_state_anchors: Optional[List[PersistentStateAnchor]] = Field(
+        default=None, 
+        description="持久状态锚点列表"
+    )
     action_summary: Optional[str] = None
     worldbuilding_instruction: Optional[str] = None
     entry_state: Optional[str] = Field(None, min_length=1)
@@ -1167,12 +1234,14 @@ class ChapterPublishResponse(BaseModel):
 
     业务规则：
     - 包含 character_updates：展示本次发布触发的角色状态变化
-    - 前端可根据此信息更新角色面板
+    - 包含 world_snapshot：本次发布提取的世界状态快照
+    - 前端可根据此信息更新角色面板和状态显示
     """
     chapter_id: UUID
     status: str
     summary: Optional[str] = None
     character_updates: List[CharacterStateChange] = Field(default_factory=list)
+    world_snapshot: Optional[dict] = Field(default=None, description="本次发布提取的世界状态快照")
 
 
 # ============================================================

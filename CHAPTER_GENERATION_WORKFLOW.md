@@ -476,11 +476,19 @@ class BeatDraftResult(BaseModel):
 
 ### Phase 5: STITCHING（统稿）
 
-**文件**: `backend/services/prompts/stitch_prompts.py`
+**文件**: `backend/services/prompts/stitch_prompts.py`, `backend/services/workflows/stitching.py`
 
-**函数**: `build_stitch_prompt()` (行 20-105)
+**核心函数**: 
+- `build_stitch_prompt()` - 构建统稿提示词
+- `stitch_chunks()` - 执行统稿
 
 **职责**: 将多个 Beat 生成的 chunks 融合成连贯的章节正文
+
+**V3.5.3 新增参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `sketch_text` | Optional[str] | 连贯速写文本，作为连贯性参考（双轨模式） |
+| `book` | Optional[Book] | 书籍实体，用于文风控制 |
 
 **统稿规则**:
 1. **重点修复**: 检查各 Chunk 之间的连接点，消除突兀的场景转换
@@ -489,6 +497,23 @@ class BeatDraftResult(BaseModel):
 4. **黑名单词库约束**: 避免使用 style_blacklist 中的词汇
 5. **单一连续时间线**: 抹去非主视角的描写，合并为主视角的背景板感知流
 6. **反蒙太奇剪辑**: 当使用 anchor_pov 时，拥有最高剪辑权
+
+**V3.5.3 连贯性参考机制**:
+
+当双轨模式启用时，统稿器会接收 Sketch 文本作为连贯性参考：
+
+```
+## 连贯性参考（来自连贯速写）
+以下是一段连续生成的速写文本，展示了自然流畅的场景过渡方式...
+
+**参考要点**：
+- 学习上述文本中场景转换的自然方式
+- 注意情绪流动的平滑性
+- 你的统稿正文应比速写更详细、更丰富，但过渡方式可借鉴
+- 不要照搬速写内容，只借鉴其过渡技巧
+```
+
+**设计意图**: 让统稿器主动学习 Sketch 的过渡技巧，预防式改善节拍间的衔接问题。
 
 **温度设置**: `temperature=0.4`（较低，保持稳定性）
 
@@ -546,9 +571,11 @@ class SketchResult(BaseModel):
 - Sketch 生成耗时: ~15-20% of Track A（实测 11-15s vs Track A 86-102s）
 - 额外 Token 消耗: ~50-55% of 正文（Sketch 实际字数常超目标 30-60%）
 - Sketch 字数超出警告: 模型(Gemini Flash Lite)倾向超量生成，实测达目标字数 150-163%
-- 对齐度得分 (alignment_score): 实测范围 36-62（低于文档期望的 80-90）
-  - 原因：`_is_key_beat` 关键节拍过滤逻辑限制（见 Phase 5.5）
-  - 融合精修触发后字数净变化: 约 +200 至 +300 字（补充内容为主）
+- 对齐度得分 (alignment_score):
+  - **V3.5.3 改进后**: 实测 84+（大幅提升）
+  - **V3.5.2 及之前**: 实测范围 36-62
+  - 改进原因：统稿阶段学习 Sketch 连贯性 + 对抗校对分段采样
+- 融合精修触发后字数净变化: 约 +200 至 +300 字（补充内容为主）
 
 ---
 
@@ -595,6 +622,29 @@ if len(key_beats) < min_required:
 - **背景**: 旧版仅当 `key_beats == []` 时才 fallback，导致只有 1/5 个 beat 被分析（如含"发现"的 beat）
 - **现行规则**: 命中数 < `min(3, len(beats))` 即触发扩展
 - **LLM prompt 可观测性**: `INFO_ALIGNMENT_ANALYSIS` prompt 现在通过 `prompt_logger.log_prompts()` 记录，label 为 `INFO_ALIGNMENT_ANALYSIS`
+
+**V3.5.3 分段采样机制**:
+
+解决旧版只分析前 2000 字符遗漏过渡问题的问题：
+
+```python
+def _sample_text_segments(self, text: str, max_total: int = 3000) -> str:
+    """
+    分段采样文本，覆盖开头、中间、结尾。
+    过渡问题通常发生在节拍边界，即文章的中间部分。
+    """
+    head_len = int(max_total * 0.4)  # 开头 40%
+    tail_len = int(max_total * 0.4)  # 结尾 40%
+    mid_len = max_total - head_len - tail_len  # 中间 20%
+    
+    return f"【开头部分】\n{head}\n\n【中间部分】\n{mid}\n\n【结尾部分】\n{tail}"
+```
+
+| 改进前 | 改进后 |
+|--------|--------|
+| 只分析前 2000 字符 | 分段采样覆盖全文 |
+| 遗漏中间过渡问题 | 开头 40% + 中间 20% + 结尾 40% |
+| 对齐度得分 ~61 | 实测对齐度得分 84+ |
 
 **首尾对齐检测详细逻辑** (`_detect_boundary_gaps`):
 1. **开头风格检测**: 对比 Draft 和 Sketch 开头是否都有场景描写
@@ -817,7 +867,7 @@ def _is_refine_output_suspiciously_short():
 | SCENE_INTENT | `scene_intent_prompts.py` | `build_scene_intent_prompt` | 0.2 | `chapter`, `beat`, `open_hooks`, `pacing_style`, `anchor_pov` |
 | SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines`, `previous_tail` |
 | PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context`, `chapter_assets_schema`, `pov_perception_state` |
-| STITCHING | `stitch_prompts.py` | `build_stitch_prompt` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov` |
+| STITCHING | `stitch_prompts.py` + `stitching.py` | `build_stitch_prompt` / `stitch_chunks` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov`, `sketch_text`, `book` |
 | SKETCH_GEN | `sketch_generator.py` | `SketchGenerator.generate()` | 0.8 | `chapter`, `book`, `beats`, `entities`, `relationships`, `target_words`, `previous_summary`, `anchor_pov` |
 | ADV_ALIGNMENT | `adversarial_aligner.py` | `AdversarialAligner.align()` | 0.1 | `draft_text`, `sketch_result`, `beats`, `chapter`, `book` |
 | FUSION_REFINE | `dual_track.py` + `refining.py` | `_execute_fusion_refinement()` + `refine_single_beat()` | 0.7 | `stitched_draft`, `sketch_result`, `adjustment_plan`, `beats`, `chapter`, `book`; prompt label: `FUSION_REFINE_BEAT_{beat_id}` |
@@ -1043,7 +1093,13 @@ word_count = (score / total_score) * total_chapter_words
 ---
 
 *最后更新: 2026-03-23*
-*版本: V3.5.2 双轨对抗架构 - 全链路 PromptLogger 完整覆盖*
+*版本: V3.5.3 双轨对抗架构 - 连贯性预防式改进*
+
+**V3.5.3 变更摘要**:
+- **统稿阶段传入 Sketch 参考**: `stitch_chunks()` 新增 `sketch_text` 参数，统稿器主动学习 Sketch 的过渡技巧
+- **对抗校对分段采样**: `_sample_text_segments()` 替代硬截取前 2000 字，覆盖开头 40% + 中间 20% + 结尾 40%
+- **对齐度得分提升**: 实测从 ~61 提升至 84+，大幅减少融合精修触发
+- **预防式改进架构**: 通过统稿阶段学习 Sketch 连贯性，而非事后修复
 
 **V3.5.2 变更摘要**:
 - PLANNING 双轨快速路径（confirmed_beats_from_frontend），0秒完成节拍规划
