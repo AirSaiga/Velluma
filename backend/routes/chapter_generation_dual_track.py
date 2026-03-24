@@ -234,6 +234,9 @@ async def generate_chapter_dual_track(
                 # ⚠️ 重要：即使走快速路径，世界状态快照约束也必须注入！
                 # 注意：确认 beats 后直接进入生成，不再记录 PLANNING 阶段
                 
+                # 通知前端使用已确认的beats
+                yield f"data: {json.dumps({'event': 'BEATS_CONFIRMED', 'message': f'使用用户确认的 {len(confirmed_beats)} 个节拍', 'iteration': 1}, ensure_ascii=False)}\n\n"
+                
                 # ========================================================================
                 # 强制注入：世界状态快照约束（P0级 - 不可跳过）
                 # ========================================================================

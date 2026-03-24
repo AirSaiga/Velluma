@@ -38,6 +38,11 @@ from backend.services.prompts.world_state_prompts import (
     parse_world_state_snapshot,
 )
 from backend.services.prompt_logger import create_logger
+from backend.services.workflows.snapshot_extractor import (
+    SnapshotExtractorAgent,
+    extract_world_terminal_state,
+)
+from backend.world_state_schemas import WorldTerminalState
 from backend.models import MemoryChunk
 
 
@@ -301,91 +306,71 @@ async def publish_chapter(
                     )
 
         # ========================================================================
-        # 世界状态快照提取
+        # V3.6: 世界终端状态提取 (WorldTerminalState)
         # ========================================================================
-        # 创建 PromptLogger 用于记录世界状态提取的 prompt
-        world_state_logger = None
-        if request and request.api_key:
-            world_state_logger = create_logger(
-                chapter_id=str(chapter_id),
-                book_id=str(chapter.book_id) if chapter.book_id else None
-            )
-            world_state_logger.set_context(
-                chapter_info={
-                    "id": str(chapter.id),
-                    "title": chapter.title,
-                    "chapter_number": chapter.chapter_number,
-                    "chapter_name": chapter.chapter_name,
-                },
-                book_info={
-                    "id": str(chapter.book_id) if chapter.book_id else None,
-                } if chapter.book_id else None,
-            )
-
-        if text_to_summarize:
+        if text_to_summarize and request and request.api_key:
             try:
-                # 获取上一章的状态快照作为参考
+                # 获取上一章的状态作为参考
                 prev_chapter = await chapter_repo.get_previous_chapter(chapter)
-                previous_snapshot = None
+                previous_state = None
                 if prev_chapter and prev_chapter.world_snapshot:
-                    previous_snapshot = prev_chapter.world_snapshot
+                    previous_state = WorldTerminalState.from_chapter_snapshot(
+                        prev_chapter.world_snapshot
+                    )
 
-                snapshot = await asyncio.wait_for(
-                    extract_world_state_snapshot(
+                # 使用 V3.6 SnapshotExtractorAgent
+                world_state = await asyncio.wait_for(
+                    extract_world_terminal_state(
                         chapter_content=text_to_summarize,
                         character_list=character_list,
+                        reasoning_model=request.model,
                         api_key=request.api_key,
                         base_url=request.base_url,
-                        model=request.model,
-                        previous_snapshot=previous_snapshot,
-                        prompt_logger=world_state_logger,
+                        chapter_id=chapter.id,
+                        book_id=chapter.book_id,
+                        previous_state=previous_state,
                     ),
                     timeout=150,
                 )
-                if snapshot:
-                    chapter.world_snapshot = snapshot
-                    logger.info(f"[Publish] World snapshot saved for chapter {chapter_id}")
+                
+                if world_state:
+                    chapter.world_snapshot = world_state.model_dump()
+                    logger.info(
+                        f"[Publish] V3.6 WorldTerminalState saved for chapter {chapter_id}: "
+                        f"{len(world_state.characters)} characters, "
+                        f"location: {world_state.scene.location_summary[:30]}..."
+                    )
 
                     # ========================================================================
-                    # 更新角色此刻状态 (current_state)
+                    # V3.6: 更新角色此刻状态 (current_state)
                     # ========================================================================
-                    character_snapshots = snapshot.get("character_snapshots", {})
                     for character in character_list:
-                        if character and str(character.id) in character_snapshots:
-                            char_snapshot = character_snapshots[str(character.id)]
-                            current_state = char_snapshot.get("current_state")
-                            if current_state:
-                                character.current_state = current_state
+                        if character and str(character.id) in world_state.characters:
+                            char_state = world_state.characters[str(character.id)]
+                            if char_state.emotional_state:
+                                character.current_state = char_state.emotional_state
                                 logger.debug(f"[Publish] Updated current_state for character {character.name}")
 
                     # ========================================================================
-                    # 更新场景此刻状态 (current_state)
+                    # V3.6: 更新场景此刻状态
                     # ========================================================================
-                    scene_state = snapshot.get("scene_state", {})
-                    scene_current_state = scene_state.get("current_state")
-                    if scene_current_state:
-                        # 获取章节关联的地点并更新此刻状态
+                    if world_state.scene.atmosphere:
                         chapter_locations = await chapter_repo.list_locations_with_details(chapter_id)
                         for ch_loc in chapter_locations:
                             if ch_loc.location:
-                                ch_loc.location.current_state = scene_current_state
+                                ch_loc.location.current_state = world_state.scene.atmosphere
                                 logger.debug(f"[Publish] Updated current_state for location {ch_loc.location.name}")
+                
+                else:
+                    logger.warning("[Publish] V3.6 WorldTerminalState extraction returned None")
 
             except asyncio.TimeoutError:
-                logger.warning("[Publish] World state snapshot extraction timed out")
+                logger.warning("[Publish] V3.6 WorldTerminalState extraction timed out")
             except Exception as e:
-                logger.error(f"[Publish] World state snapshot extraction error: {e}")
+                logger.error(f"[Publish] V3.6 WorldTerminalState extraction error: {e}")
 
     await chapter_repo.commit()
     await chapter_repo.refresh(chapter)
-
-    # 完成 prompt 日志记录
-    if world_state_logger:
-        world_state_logger.finalize(
-            final_text_length=len(text_to_summarize) if text_to_summarize else 0,
-            total_iterations=1,
-            review_passed=bool(chapter.world_snapshot)
-        )
 
     return ChapterPublishResponse(
         chapter_id=chapter.id,

@@ -22,6 +22,7 @@ import re
 from typing import Optional
 
 from backend.models import Chapter, Book
+from backend.world_state_schemas import WorldTerminalState
 from backend.services.prompts.world_state_prompts import (
     build_world_state_constraint_prompt,
     format_snapshot_for_planner,
@@ -45,6 +46,7 @@ def build_planner_agent_prompt(
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
     previous_chapter_snapshot: Optional[dict] = None,
+    previous_world_terminal_state: Optional[WorldTerminalState] = None,  # V3.6: 新增参数
 ) -> tuple[str, str]:
     """构建规划阶段的提示词。
 
@@ -72,6 +74,7 @@ def build_planner_agent_prompt(
     - system_prompt: 定义 JSON 输出格式、beat 数量限制、pacing_type 约束等
     - user_prompt: 包含实际章节内容，global_taboos 和 author_intent 作为绝对最高优先级注入
     - previous_chapter_snapshot: 注入世界状态约束，确保跨章物理连续性
+    - previous_world_terminal_state: V3.6 结构化世界终端状态，强制物理约束
     """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -148,6 +151,16 @@ def build_planner_agent_prompt(
             f"{'、'.join(LOW_TENSION_RED_LINES)}\n"
             "9. 低张力章节禁止设计直接爆发式冲突，剧情推进以铺垫与悬停为主"
         )
+    # =================================================================
+    # V3.6: 构建世界终端状态约束段落
+    # =================================================================
+    world_state_constraint = ""
+    if previous_world_terminal_state:
+        world_state_constraint = previous_world_terminal_state.to_prompt_format()
+    elif previous_chapter_snapshot:
+        # 回退到旧版格式
+        world_state_constraint = format_snapshot_for_planner(previous_chapter_snapshot)
+    
     system_prompt = f"""{global_sys_prompt}
 
 你是章节规划师。请把章节拆分成可执行的 story beats，并仅输出 JSON。
@@ -209,19 +222,25 @@ def build_planner_agent_prompt(
     "正常" / "轻伤但行动自如" / "重伤行动受限" / "半昏迷" / "失去身体控制权" / "完全昏迷" / "神经过载"
     也可以自由描述，但必须明确表达角色的意识状态和身体可控程度。
     如果角色在本节拍处于受伤/昏迷等状态，pov_perception_state 必须如实反映，不能默认写"正常"。
-12. 【跨章接缝绝对定标 ($T_{{-1}} \\rightarrow T_0$) - 最高优先级】
+12. 【跨章接缝绝对定标 ($T_{{-1}} \rightarrow T_0$) - 最高优先级】
     **这是最高优先级约束，违反将导致章节无法衔接！**
     
-    你必须仔细分析【上一章情节概要】的最后部分，提取以下关键信息：
+    {world_state_constraint if world_state_constraint else '''你必须仔细分析【上一章情节概要】的最后部分，提取以下关键信息：
     - **上一章结尾的视角角色**：是谁的 POV？
     - **上一章结尾的物理位置**：角色在哪里？做什么？
     - **上一章结尾的角色状态**：意识是否清醒？身体状态如何？
-    - **上一章结尾的最后动作**：最后一个发生的事件是什么？
+    - **上一章结尾的最后动作**：最后一个发生的事件是什么？'''}
     
     然后，你的第一个节拍（Beat 1）必须满足：
     - `entry_state` 必须与上一章结尾的物理空间、视角角色、角色状态保持 100% 连续性
     - 如果需要切换视角（从角色 A 切换到角色 B），Beat 1 必须是一个明确的【摄像机过渡节拍】，清晰交代物理时间或空间的转移
     - 严禁让角色产生"瞬移"幻觉或状态突变
+    
+    **【V3.6 强制规则 - 世界状态约束】**
+    1. **物理连续性**: Beat 1 的 entry_state 必须严格匹配「前一章末尾世界状态快照」中的位置和状态
+    2. **角色离场检查**: 如果 snapshot 中角色的 physical_condition 为 inactive/dead，严禁为其分配任何 Beat
+    3. **意图延续**: 角色的 immediate_intention 必须作为 Beat 1 的行为驱动基础
+    4. **锚点处理**: physical_anchors 列表中的物品/状态必须在某个 Beat 中被处理或说明
     
     **示例（错误 vs 正确）**：
     - ❌ 错误：上一章结尾"楚言昏迷"，本章 Beat 1 entry_state 写"楚言意识清醒站立"
@@ -245,7 +264,12 @@ def build_planner_agent_prompt(
     - unresolved_conflict: 当前未解决的冲突（如"角色A对角色B的怀疑尚未消除"）
     - emotional_tone: 角色情感基调（如"主角处于焦虑但克制的状态"）
     - spatial_attachment: 物理位置依附关系（如"角色C仍在机甲内部，未脱离"）
-    这些锚点将在 Drafting 阶段作为结构化数据注入，禁止合并为纯文本。"""
+    这些锚点将在 Drafting 阶段作为结构化数据注入，禁止合并为纯文本。
+18. **【V3.6 新增】world_state_constraint (世界状态强制约束)**: 
+    - 如果提供了「前一章末尾世界状态快照」，必须将其作为物理现实的金标准
+    - Beats 规划严禁违反 snapshot 中的任何物理状态、位置或意图
+    - Beat 1 的 entry_state 必须完全锚定 snapshot 中的状态，禁止任何偏离
+    - 角色离场检查：physical_condition 为 inactive/dead 的角色严禁分配 Beat"""
     
     user_prompt_parts = []
     

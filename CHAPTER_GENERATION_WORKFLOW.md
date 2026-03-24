@@ -263,6 +263,33 @@ else:
 - **日志标记**: `fast_path=true, source="confirmed_beats_from_frontend"`
 - **注意事项**: `_save_story_beats()` 在保存前会先 DELETE 旧记录，防止多次生成重复累积
 
+**BEATS_CONFIRMED 阶段 (V3.5.4+)**:
+
+在快速路径下，系统会记录一个特殊的 `BEATS_CONFIRMED` 阶段，用于审计追踪：
+
+```python
+# 通知前端使用已确认的beats
+yield {"event": "BEATS_CONFIRMED", "message": "使用用户确认的 N 个节拍"}
+
+# 记录到 PromptLogger
+prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
+prompt_logger.log_inputs(
+    word_count=request.word_count,
+    has_previous_summary=bool(previous_summary),
+    source="user_confirmed_beats",
+)
+prompt_logger.log_outputs(
+    beat_count=len(beats),
+    beats_preview=[...],  # beats摘要
+    chapter_narrative_anchor=anchor_pov,
+)
+```
+
+- **目的**: 区分 AI 生成的 PLANNING 与用户确认的 beats，保证可观测性
+- **特点**: 无 LLM 调用，仅记录用户确认的最终执行 beats
+- **前置条件**: ASSEMBLING_CONTEXT（数据加载不可跳过）
+- **后续流程**: POV_ASSIGNMENT → DRAFTING（跳过 LLM PLANNING）
+
 ---
 
 ### Phase 3: POV_ASSIGNMENT（视角分配）- Anchor POV 机制
@@ -467,6 +494,26 @@ class BeatDraftResult(BaseModel):
 
 **Prompt 构建**: `build_prose_draft_prompt_v25()` (行 749-999)
 
+**跨章物理连续性锁优化 (V3.5.4+)**:
+
+为避免在每个 Beat 重复注入完整的世界状态快照（约500+ tokens），引入 `is_first_beat` 参数：
+
+```python
+def build_prose_draft_prompt_v25(
+    ...,
+    is_first_beat: bool = True,  # 新增参数
+):
+    # 只在 Beat 1 显示完整的跨章物理连续性锁
+    if world_snapshot_constraints and is_first_beat:
+        cross_chapter_lock_text = f"【跨章物理连续性锁】..."
+    else:
+        cross_chapter_lock_text = ""  # Beat 2+ 通过 entry_state 保持连续性
+```
+
+- **Beat 1**: 显示完整的【跨章物理连续性锁】（约500+ tokens）
+- **Beat 2+**: 仅通过 `entry_state` 和 `previous_tail` 保持连续性，节省约400 tokens/beat
+- **收益**: 5-beat 章节可节省约1600 tokens，降低 LLM 调用成本
+
 **关键约束**:
 - **单一视角锁定**: 绝对锁定在 POV 角色的感官范围内
 - **反AI味协议**: 禁止设定倾倒、预告片旁白、形容词堆砌
@@ -497,6 +544,16 @@ class BeatDraftResult(BaseModel):
 4. **黑名单词库约束**: 避免使用 style_blacklist 中的词汇
 5. **单一连续时间线**: 抹去非主视角的描写，合并为主视角的背景板感知流
 6. **反蒙太奇剪辑**: 当使用 anchor_pov 时，拥有最高剪辑权
+
+**字数约束 (V3.5.4+)**:
+```python
+# 计算字数下限
+min_ratio = 0.85 if anchor_pov else 0.90  # anti-montage路径85%，通用路径90%
+min_chars = int(total_chunks_chars * min_ratio)
+```
+- **Anti-Montage路径** (有 anchor_pov): 下限为原始 chunks 的 **85%**（允许合理压缩非POV内容）
+- **通用路径**: 下限为原始 chunks 的 **90%**（严格保留）
+- **硬性规定**: 严禁通过粗暴删段、合并段落或省略剧情来缩减字数
 
 **V3.5.3 连贯性参考机制**:
 
@@ -866,7 +923,7 @@ def _is_refine_output_suspiciously_short():
 | POV_ASSIGNMENT | `planning.py` | `assign_pov_to_beats` | - | `beats`, `characters`, `story_premise`, `previous_chapter_summary` |
 | SCENE_INTENT | `scene_intent_prompts.py` | `build_scene_intent_prompt` | 0.2 | `chapter`, `beat`, `open_hooks`, `pacing_style`, `anchor_pov` |
 | SUBCONSCIOUS | `draft_prompts.py` | `build_subconscious_prompt` | 0.4 | `chapter`, `beat`, `scene_intent`, `entities`, `pov_perception_state`, `red_lines`, `previous_tail` |
-| PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context`, `chapter_assets_schema`, `pov_perception_state` |
+| PROSE_DRAFT | `draft_prompts.py` | `build_prose_draft_prompt_v25` | 0.75 | `chapter`, `book`, `beat`, `scene_intent`, `subconscious_thought`, `previous_tail`, `target_words`, `dynamic_context`, `chapter_assets_schema`, `pov_perception_state`, `is_first_beat` (V3.5.4+) |
 | STITCHING | `stitch_prompts.py` + `stitching.py` | `build_stitch_prompt` / `stitch_chunks` | 0.4 | `chapter`, `beats`, `chunks`, `word_count`, `anchor_pov`, `sketch_text`, `book` |
 | SKETCH_GEN | `sketch_generator.py` | `SketchGenerator.generate()` | 0.8 | `chapter`, `book`, `beats`, `entities`, `relationships`, `target_words`, `previous_summary`, `anchor_pov` |
 | ADV_ALIGNMENT | `adversarial_aligner.py` | `AdversarialAligner.align()` | 0.1 | `draft_text`, `sketch_result`, `beats`, `chapter`, `book` |
@@ -1092,8 +1149,14 @@ word_count = (score / total_score) * total_chapter_words
 
 ---
 
-*最后更新: 2026-03-23*
-*版本: V3.5.3 双轨对抗架构 - 连贯性预防式改进*
+*最后更新: 2026-03-24*
+*版本: V3.5.4 双轨对抗架构 - Track A 流程优化*
+
+**V3.5.4 变更摘要**:
+- **BEATS_CONFIRMED 阶段**: 用户确认 beats 后新增结构化日志阶段，区分 AI 生成与用户确认，保证可观测性
+- **STITCHING 字数约束**: anti-montage 路径字数下限从 75% 提升至 85%，防止统稿过度删减内容
+- **跨章约束 Prompt 优化**: PROSE_DRAFT 新增 `is_first_beat` 参数，Beat 2+ 不再重复注入完整世界状态快照，节省约 400 tokens/beat
+- **快速路径事件通知**: 用户确认 beats 后向前端发送 `BEATS_CONFIRMED` 事件，改善进度显示
 
 **V3.5.3 变更摘要**:
 - **统稿阶段传入 Sketch 参考**: `stitch_chunks()` 新增 `sketch_text` 参数，统稿器主动学习 Sketch 的过渡技巧

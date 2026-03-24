@@ -57,9 +57,9 @@ def build_stitch_prompt(
 
     # 计算 chunks 总字数，用于字数下限约束
     total_chunks_chars = sum(len(c) for c in chunks)
-    # anti-montage 路径（有 anchor_pov）会合法压缩非 POV 内容，下限宽松为 75%
+    # anti-montage 路径（有 anchor_pov）会合法压缩非 POV 内容，下限为 85%
     # 通用路径无合并逻辑，严格保留 90%
-    min_ratio = 0.75 if anchor_pov else 0.90
+    min_ratio = 0.85 if anchor_pov else 0.90
     min_chars = int(total_chunks_chars * min_ratio)
 
     style_blacklist = []
@@ -77,13 +77,17 @@ def build_stitch_prompt(
 
     # 字数约束提示（嵌入两种模式的 system_prompt）
     min_percent = int(min_ratio * 100)
+    # V3.5.4: 明确字数下限优先于目标字数，避免LLM困惑
+    effective_target = max(word_count, min_chars)
     word_count_constraint = f"""
-## 字数约束（硬性规定）
+## 字数约束（硬性规定 - 优先级最高）
 - 原始 Chunks 总字数：约 {total_chunks_chars} 字
 - **统稿结果字数下限：{min_chars} 字**（不得低于原始 chunks 总字数的 {min_percent}%）
-- 统稿时不设上限，章节目标字数约 {word_count} 字
+- **必须满足字数下限，即使超过目标字数 {word_count} 字也优先保留下限**
+- 统稿时不设上限，确保最终字数 ≥ {min_chars} 字
 - **严禁通过粗暴删段、合并段落或省略剧情来缩减字数**
-- 若过渡处需要补写新文字，必须写；若原有内容完整，则完整保留"""
+- 若过渡处需要补写新文字，必须写；若原有内容完整，则完整保留
+- ⚠️ **重要**：如果删减后字数可能低于 {min_chars} 字，宁可保留原文也不要过度精简"""
 
     # 构建连贯性参考部分（双轨模式核心改进）
     coherence_reference = ""

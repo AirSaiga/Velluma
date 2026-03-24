@@ -128,6 +128,7 @@ def build_subconscious_prompt(
     pov_perception_state: str = "",
     red_lines: list[str] = None,
     previous_tail: str = "",
+    present_characters: Optional[List[dict]] = None,  # V3.6: 在场角色状态
 ) -> tuple[str, str]:
     """
     构建 MCTS 潜意识树搜索提示词。
@@ -138,6 +139,7 @@ def build_subconscious_prompt(
     - 基于 MCTS 展开 3 条潜意识分支
     - 根据红线和物理知觉状态进行评估打分
     - 选择得分最高且绝对安全的分支作为最终结果
+    - V3.6: 评估在场其他角色状态，防止 POV 视角过于封闭
     
     Args:
         chapter: 章节实体
@@ -147,6 +149,7 @@ def build_subconscious_prompt(
         pov_perception_state: POV 角色当前物理知觉状态
         red_lines: 红线约束列表
         previous_tail: 前文尾巴
+        present_characters: V3.6 在场角色状态列表，用于扩展 POV 感知
     
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -182,6 +185,38 @@ def build_subconscious_prompt(
     # Scene Intent 信息
     intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
     
+    # =================================================================
+    # V3.6: 构建在场角色评估段落
+    # =================================================================
+    present_chars_section = ""
+    if present_characters:
+        char_lines = []
+        for char in present_characters:
+            if isinstance(char, dict):
+                char_name = char.get("name", "")
+                char_state = char.get("state", "")
+                char_location = char.get("location", "")
+                if char_name and char_name != pov_character:  # 排除 POV 角色自己
+                    desc = f"- {char_name}"
+                    if char_state:
+                        desc += f": 状态[{char_state}]"
+                    if char_location:
+                        desc += f", 位置[{char_location}]"
+                    char_lines.append(desc)
+        
+        if char_lines:
+            present_chars_section = """
+## 【在场角色状态感知 - V3.6】
+当前场景中，POV 角色感知到其他角色的存在和状态：
+""" + "\n".join(char_lines) + """
+
+**强制指令**：
+1. 在潜意识独白中，必须包含对在场角色状态的感知和评估
+2. 将其他角色的存在作为 POV 角色心理反应的刺激源
+3. 即使不直接互动，也要有"感知到对方存在"的心理痕迹
+4. 其他角色的状态（受伤/紧张/敌意）必须影响 POV 角色的心理推演
+"""
+    
     system_prompt = f"""你是一个顶级小说导演与心理学推演机。
 
 🔒 【绝对系统指令 - 最高优先级 POV 锁定】
@@ -203,11 +238,16 @@ def build_subconscious_prompt(
   分支B：基于当前知觉受限条件下的无力感、痛觉或冷酷本能的思维。
   分支C：结合特定性格设定的战术/极端环境思维。
 - **评估（Evaluation）**：任何有一丝可能导致后续动作违背【红线】，或违背【物理知觉状态】的分支，直接打分为 0 且标记淘汰。
-- **动机连贯性检查（Intent Contiguity）**：评估各分支得分 $S$ 时，除了考虑安全性 $R(safety)$，必须引入连贯性 $C(intent\\_alignment)$。
+- **动机连贯性检查（Intent Contiguity）**：评估各分支得分 $S$ 时，除了考虑安全性 $R(safety)$，必须引入连贯性 $C(intent\_alignment)$。
   - 检查该 thought 是否与角色前一时刻的核心动机保持逻辑惯性。
   - 如果没有遭受强烈的外部突发刺激，角色绝不会在下一秒产生与刚刚完全相反的倾向（例如前一秒想毁灭机甲，这一秒突然想保护机甲）。
   - 任何违背"动机惯性原则"的突兀反转分支，必须直接打分为 0 并被剪枝。
+- **在场角色感知评估（V3.6）**：在展开每条潜意识分支时，必须考虑在场其他角色的状态对 POV 角色心理的影响。
+  - 评估：其他角色的存在/状态如何影响当前分支的可行性？
+  - 例如：如果分支 A 设想主动攻击，但感知到对方处于警戒状态，该分支的风险评分应降低
 - **剪枝选择（Selection）**：选出得分最高且绝对安全的那个分支。
+
+{present_chars_section}
 
 请必须以严格的 JSON 格式输出推理过程与最终结果：
 {{"mcts_rollout": [{{"branch_id": "A", "thought": "...", "score": 0, "reason": "..."}}, {{"branch_id": "B", "thought": "...", "score": 95, "reason": "..."}}, {{"branch_id": "C", "thought": "...", "score": 0, "reason": "..."}}], "best_subconscious": "填入获胜分支的thought内文，这将作为驱动角色行为的情感引擎。"}}"""
@@ -349,8 +389,6 @@ def build_prose_draft_prompt(
 
 【约束条件】
 {chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
-
-{accumulated_section}
 
 请直接输出小说正文，从前文尾巴的自然延续开始写起。"""
 
@@ -775,6 +813,10 @@ def build_prose_draft_prompt_v25(
     pov_aperture: Optional[str] = None,
     persistent_state_anchors: Optional[list[dict]] = None,
     # ========================================
+    # NEW PARAMETER for 跨章连续性锁优化
+    # ========================================
+    is_first_beat: bool = True,
+    # ========================================
 ) -> tuple[str, str]:
     """
     V2.5+ 认知流式生成 - 增强版正文生成提示词（关系感知版）
@@ -987,8 +1029,9 @@ def build_prose_draft_prompt_v25(
         red_lines_text = "（无特殊红线）"
     
     # 🔒 锁5：跨章物理连续性锁（P0级 - 绝对不可跳过）
+    # 优化：只在 Beat 1 显示完整的跨章约束，其他 Beat 通过 entry_state 保持连续性
     world_snapshot_constraints = beat_data.get("_world_snapshot_constraints", "")
-    if world_snapshot_constraints:
+    if world_snapshot_constraints and is_first_beat:
         cross_chapter_lock_text = f"""
 【跨章物理连续性锁 (Cross-Chapter Continuity Lock) - V3.5 P0级】
 以下是上一章末尾的世界状态快照，你必须严格遵守其中的物理约束：

@@ -784,6 +784,8 @@ async def _generate_prose_serial_v25(
                     chapter_assets_schema=chapter_assets_schema or getattr(chapter, 'chapter_assets_schema', '') or '',
                     pov_perception_state=current_pov_perception_state,
                     pov_character_profile=pov_profile,
+                    # 优化：只在 Beat 1 显示完整跨章约束
+                    is_first_beat=(beat_index == 0),
                 )
                 
                 prompts_history.append({
@@ -1044,6 +1046,8 @@ async def _generate_prose_parallel_v25(
                     chapter_assets_schema=chapter_assets_schema or '',
                     pov_perception_state=pov_perception_state,
                     pov_character_profile=pov_profile,
+                    # 优化：只在 Beat 1 显示完整跨章约束
+                    is_first_beat=(beat_index == 0),
                 )
                 
                 prompts_history.append({
@@ -1314,6 +1318,8 @@ async def _generate_prose_semi_parallel_v25(
             chapter_assets_schema=chapter_assets_schema or '',
             pov_perception_state=current_pov_perception_state,
             pov_character_profile=pov_profile_0,
+            # Beat 0 是第一个 beat，显示完整跨章约束
+            is_first_beat=True,
         )
         prompts_0.append({
             "stage": f"PROSE_DRAFT_ATTEMPT_{attempt_0}",
@@ -1443,6 +1449,8 @@ async def _generate_prose_semi_parallel_v25(
                     chapter_assets_schema=chapter_assets_schema or '',
                     pov_perception_state=pov_ps,
                     pov_character_profile=pov_pf,
+                    # 阶段2处理中间 beats，非第一个
+                    is_first_beat=False,
                 )
                 prompts.append({
                     "stage": f"PROSE_DRAFT_ATTEMPT_{att}",
@@ -1588,6 +1596,8 @@ async def _generate_prose_semi_parallel_v25(
                 chapter_assets_schema=chapter_assets_schema or '',
                 pov_perception_state=last_pov_ps,
                 pov_character_profile=last_pov_pf,
+                # 最后一个 beat，非第一个
+                is_first_beat=False,
             )
             prompts_last.append({
                 "stage": f"PROSE_DRAFT_ATTEMPT_{att_last}",

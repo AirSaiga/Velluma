@@ -25,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger
 from backend.repositories import MemoryRepository
 from backend.services.llm_client import get_embedding
+from backend.world_state_schemas import WorldTerminalState
 
 
 async def load_chapter_context(
@@ -93,6 +94,15 @@ async def load_chapter_context(
                 "movement_constraints": ""
             }
 
+    # =================================================================
+    # V3.6: 加载前一章的世界终端状态 (WorldTerminalState)
+    # =================================================================
+    previous_world_state = await _load_previous_world_terminal_state(chapter, db)
+    if previous_world_state:
+        logger.debug(f"[Context] Loaded previous world state: {previous_world_state.scene.location_summary}")
+    else:
+        logger.debug(f"[Context] No previous world state (chapter {chapter.chapter_number})")
+
     return {
         "chapter": chapter,
         "book": book,
@@ -103,6 +113,7 @@ async def load_chapter_context(
         "relevant_memories": relevant_memories,
         "chapter_assets_schema": chapter.chapter_assets_schema or "",
         "entity_spatial_ledger": entity_spatial_ledger,
+        "previous_world_state": previous_world_state,  # V3.6: 新增世界终端状态
     }
 
 
@@ -295,3 +306,64 @@ async def _load_relevant_memories(
     except Exception as e:
         logger.error(f"[RAG] {e}")
         return []
+
+
+# =============================================================================
+# V3.6: 世界终端状态加载函数
+# =============================================================================
+
+async def _load_previous_world_terminal_state(
+    chapter: Chapter,
+    db: AsyncSession
+) -> Optional[WorldTerminalState]:
+    """加载前一章的世界终端状态。
+
+    在 ASSEMBLING_CONTEXT 阶段调用，用于获取前一章末尾的物理状态约束。
+    如果是第一章（chapter_number <= 1），返回 None。
+
+    Args:
+        chapter: 当前章节实体
+        db: 数据库会话
+
+    Returns:
+        Optional[WorldTerminalState]: 前一章的世界终端状态，不存在或第一章返回 None
+    """
+    # 第一章没有前一章状态
+    if chapter.chapter_number <= 1:
+        logger.debug(f"[WorldState] Chapter {chapter.chapter_number} is first chapter, no previous state")
+        return None
+
+    try:
+        # 查询前一章
+        prev_chapter_result = await db.execute(
+            select(Chapter).where(
+                Chapter.book_id == chapter.book_id,
+                Chapter.chapter_number == chapter.chapter_number - 1
+            )
+        )
+        prev_chapter = prev_chapter_result.scalar_one_or_none()
+
+        if not prev_chapter:
+            logger.debug(f"[WorldState] Previous chapter not found for chapter {chapter.chapter_number}")
+            return None
+
+        # 从 world_snapshot 解析 WorldTerminalState
+        if prev_chapter.world_snapshot:
+            world_state = WorldTerminalState.from_chapter_snapshot(prev_chapter.world_snapshot)
+            if world_state:
+                logger.info(
+                    f"[WorldState] Loaded state from chapter {prev_chapter.chapter_number}: "
+                    f"{len(world_state.characters)} characters, "
+                    f"location: {world_state.scene.location_summary[:30]}..."
+                )
+                return world_state
+            else:
+                logger.warning(f"[WorldState] Failed to parse world_snapshot from chapter {prev_chapter.chapter_number}")
+                return None
+        else:
+            logger.debug(f"[WorldState] Chapter {prev_chapter.chapter_number} has no world_snapshot")
+            return None
+
+    except Exception as e:
+        logger.error(f"[WorldState] Error loading previous world state: {e}")
+        return None

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
+import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
 import type { AgenticFormState, ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
 import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
 
@@ -260,32 +261,33 @@ watch(() => props.critiqueResult, (newVal) => {
       <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isGenerating && isAgenticMode"
-          class="absolute inset-0 z-10 flex items-center justify-center bg-white/78 backdrop-blur-[1px] rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-white/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
         >
-          <div class="flex items-center gap-2 rounded-full bg-white px-4 py-2 ring-1 ring-indigo-100 shadow-sm">
-            <div class="w-4 h-4 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
-            <div class="text-xs font-medium text-indigo-700">
-              {{ getWorkflowStageLabel() }}...
+          <div class="w-full max-w-2xl mx-4">
+            <div class="bg-white rounded-2xl p-6 shadow-xl ring-1 ring-slate-200">
+              <WorkflowProgressGraph
+                :current-event="workflowState?.currentEvent"
+                :message="workflowState?.message"
+                :iteration="workflowState?.iteration"
+                :revision-count="workflowState?.revisionCount"
+              />
             </div>
           </div>
         </div>
 
         <div
           v-if="beatPreviewLoading"
-          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-white/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
         >
-          <div class="relative flex items-center justify-center w-24 h-24 mb-8">
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-50"></div>
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-500 border-t-transparent animate-spin"></div>
-          </div>
-
-          <div class="flex flex-col items-center gap-3">
-            <h3 class="text-3xl font-bold text-indigo-900 tracking-tight">
-              正在规划节拍...
-            </h3>
-            <p class="text-lg text-indigo-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
-              正在根据大纲和前文分析剧情走向...
-            </p>
+          <div class="w-full max-w-2xl mx-4">
+            <div class="bg-white rounded-2xl p-6 shadow-xl ring-1 ring-slate-200">
+              <WorkflowProgressGraph
+                current-event="PLANNING"
+                message="正在根据大纲和前文分析剧情走向..."
+                :iteration="1"
+                :revision-count="0"
+              />
+            </div>
           </div>
         </div>
 
