@@ -116,21 +116,30 @@ async def generate_chapter_dual_track(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    使用双轨架构生成章节
-    
-    这是 V3.5 推荐的高级生成模式，特点：
-    - 并行生成节拍扩写和连贯速写
-    - 自动进行对抗校对
-    - 修复节拍间的连贯性问题
-    
+    使用双轨架构生成章节正文。
+
+    职责边界：本接口只负责【生成】，不做规划。
+    调用方必须先通过 /generate_chapter_agentic_preview_beats 获取节拍，
+    经用户确认后将 beats 附在请求体中发给本接口。
+
     Args:
         chapter_id: 章节 ID
-        request: 双轨生成请求
-        
+        request: 双轨生成请求，request.beats 不得为空
+
     Returns:
         流式 SSE 响应，包含生成进度和最终结果
     """
-    
+    # 职责校验：beats 必须由调用方提供，本接口不兜底规划
+    if not request.beats:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "beats 不能为空。"
+                "请先通过 /generate_chapter_agentic_preview_beats 获取节拍，"
+                "经用户确认后再调用本接口。"
+            ),
+        )
+
     async def generate_stream():
         # 初始化 Prompt 日志记录器
         prompt_logger = create_logger(chapter_id=chapter_id, book_id=None)
@@ -218,125 +227,49 @@ async def generate_chapter_dual_track(
             yield f"data: {json.dumps({'event': 'CONTEXT_LOADED', 'message': f'加载 {len(entities)} 个角色, {len(relationships)} 组关系'}, ensure_ascii=False)}\n\n"
             
             # ========================================================================
-            # PLANNING 阶段：节拍生成（若请求携带 confirmed beats，则走快速路径）
+            # BEATS 接收：直接使用调用方提供的已确认节拍，注入跨章状态约束
             # ========================================================================
-            planning_started_at = time.perf_counter()
-            
             from backend.services.workflows.planning import assign_pov_to_beats
-            from backend.services.prompts import build_planner_agent_prompt, parse_planner_full_result
-            from backend.services.llm_client import call_llm
             from backend.services.prompts.world_state_prompts import format_snapshot_for_planner
-            
-            confirmed_beats = request.beats  # 前端 beat 预览弹窗中用户确认的节拍
-            
-            if confirmed_beats and len(confirmed_beats) > 0:
-                # ── 快速路径：直接使用用户确认的节拍，跳过 LLM PLANNING ──
-                # ⚠️ 重要：即使走快速路径，世界状态快照约束也必须注入！
-                # 注意：确认 beats 后直接进入生成，不再记录 PLANNING 阶段
-                
-                # 通知前端使用已确认的beats
-                yield f"data: {json.dumps({'event': 'BEATS_CONFIRMED', 'message': f'使用用户确认的 {len(confirmed_beats)} 个节拍', 'iteration': 1}, ensure_ascii=False)}\n\n"
-                
-                # ========================================================================
-                # 强制注入：世界状态快照约束（P0级 - 不可跳过）
-                # ========================================================================
-                world_snapshot_constraints = ""
-                if previous_chapter_snapshot:
-                    world_snapshot_constraints = format_snapshot_for_planner(previous_chapter_snapshot)
-                    logger.info(f"[快速路径] 注入世界状态快照约束: {bool(world_snapshot_constraints)}")
-                
-                beats = []
-                for b in confirmed_beats:
-                    beat_dict = b.model_dump()
-                    # 保证 target_words 有值
-                    if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
-                        beat_dict["target_words"] = beat_dict.get("word_count_target") or max(200, request.word_count // len(confirmed_beats))
-                    # 🔒 强制附加世界状态约束到每个beat（供DRAFTING阶段使用）
-                    if world_snapshot_constraints:
-                        beat_dict["_world_snapshot_constraints"] = world_snapshot_constraints
-                    beats.append(beat_dict)
-                
-                # 叙事核心角色：取第一个有 pov_character 的 beat，或空字符串
-                chapter_narrative_anchor = next(
-                    (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
-                )
-                
-                # 记录用户确认的 beats（无 LLM 调用，但记录最终执行的 beats）
-                prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
-                prompt_logger.log_inputs(
-                    word_count=request.word_count,
-                    has_previous_summary=bool(previous_summary),
-                    source="user_confirmed_beats",
-                )
-                prompt_logger.log_outputs(
-                    beat_count=len(beats),
-                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats],
-                    chapter_narrative_anchor=chapter_narrative_anchor or None,
-                )
-                prompt_logger.end_stage(success=True)
-                
-            else:
-                # ── 标准路径：调用 LLM 重新规划节拍 ──
-                yield f"data: {json.dumps({'event': 'PLANNING', 'message': 'Planner 正在拆分章节 beats...', 'iteration': 1}, ensure_ascii=False)}\n\n"
-                
-                # 构建 Planner Prompt
-                planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
-                    chapter=chapter,
-                    book=book,
-                    entities=entities,
-                    relationships=relationships,
-                    word_count=request.word_count,
-                    open_hooks=open_hooks,
-                    previous_chapter_summary=previous_summary,
-                    locations=locations,
-                    global_taboos=book.core_motifs_taboos if book else None,
-                    author_intent=getattr(request, 'author_intent', None),
-                    previous_chapter_snapshot=previous_chapter_snapshot,
-                )
-                
-                # 记录 PLANNING 阶段的 Prompt
-                prompt_logger.start_stage("PLANNING", iteration=1)
-                prompt_logger.log_inputs(
-                    word_count=request.word_count,
-                    open_hooks_count=len(open_hooks),
-                    has_previous_summary=bool(previous_summary)
-                )
-                _planning_model = request.reasoning_model or request.model
-                prompt_logger.log_prompts(
-                    system_prompt=planner_system_prompt,
-                    user_prompt=planner_user_prompt,
-                    model=_planning_model,
-                    temperature=0.2,
-                    max_tokens=1800,
-                    prompt_label="PLANNER"
-                )
-                
-                # 发送 prompt 到前端（用于 Debug 窗口）
-                yield f"data: {json.dumps({'prompt': {'system_prompt': planner_system_prompt, 'user_prompt': planner_user_prompt}}, ensure_ascii=False)}\n\n"
-                
-                # 调用 LLM 生成节拍
-                planner_result_raw = await call_llm(
-                    system_prompt=planner_system_prompt,
-                    user_prompt=planner_user_prompt,
-                    api_key=request.api_key,
-                    base_url=request.base_url,
-                    model=_planning_model,
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                    max_tokens=1800,
-                )
-                
-                beats, chapter_narrative_anchor = parse_planner_full_result(planner_result_raw, chapter.outline_text or "", request.word_count)
-                
-                # 记录 PLANNING 阶段的输出
-                prompt_logger.log_outputs(
-                    beat_count=len(beats),
-                    beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats],
-                    chapter_narrative_anchor=chapter_narrative_anchor or None,
-                )
-                prompt_logger.end_stage(success=True)
-            
-            # 发送统计帧
+
+            # 强制注入世界状态快照约束（P0 级 - 不可跳过）
+            world_snapshot_constraints = ""
+            if previous_chapter_snapshot:
+                world_snapshot_constraints = format_snapshot_for_planner(previous_chapter_snapshot)
+                logger.info(f"[生成] 注入世界状态快照约束: {bool(world_snapshot_constraints)}")
+
+            beats = []
+            for b in request.beats:
+                beat_dict = b.model_dump()
+                if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
+                    beat_dict["target_words"] = (
+                        beat_dict.get("word_count_target")
+                        or max(200, request.word_count // len(request.beats))
+                    )
+                if world_snapshot_constraints:
+                    beat_dict["_world_snapshot_constraints"] = world_snapshot_constraints
+                beats.append(beat_dict)
+
+            chapter_narrative_anchor = next(
+                (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
+            )
+
+            yield f"data: {json.dumps({'event': 'BEATS_CONFIRMED', 'message': f'已接收 {len(beats)} 个节拍，开始生成正文...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+
+            # 记录已确认的 beats（无 LLM 调用，仅记录最终执行的节拍列表）
+            prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
+            prompt_logger.log_inputs(
+                word_count=request.word_count,
+                has_previous_summary=bool(previous_summary),
+                source="user_confirmed_beats",
+            )
+            prompt_logger.log_outputs(
+                beat_count=len(beats),
+                beats_preview=[{"id": b.get("beat_id"), "summary": b.get("summary", "")[:100]} for b in beats],
+                chapter_narrative_anchor=chapter_narrative_anchor or None,
+            )
+            prompt_logger.end_stage(success=True)
+
             yield _metric_frame("PLANNING_DONE", iteration=1, extra={"beat_count": len(beats), "chapter_narrative_anchor": chapter_narrative_anchor})
             
             # ========================================================================

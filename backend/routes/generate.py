@@ -36,7 +36,6 @@ from backend.schemas import (
     GenerateChapterRequest,
     GenerateChapterAgenticRequest,
     GenerateChapterAgenticPreviewResponse,
-    GenerateChapterAgenticWithBeatsRequest,
     OptimizeChapterRequest,
     OptimizeSelectionRequest,
     FormatTextRequest,
@@ -47,8 +46,6 @@ from backend.services.chapter_generation import (
     build_chapter_prompt,
     generate_stream_response,
     call_llm,
-    generate_agentic_chapter_stream,
-    generate_agentic_chapter_stream_with_confirmed_beats,
     preview_agentic_beats,
     refine_draft,
 )
@@ -300,48 +297,6 @@ async def generate_chapter_sync(
     return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}
 
 
-# =============================================================================
-# Agentic 章节生成 - 多轮迭代的智能写作
-# =============================================================================
-
-@router.post("/generate_chapter_agentic")
-async def generate_chapter_agentic(
-    request: GenerateChapterAgenticRequest,
-    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
-):
-    """业务目的：使用 Agent 模式生成章节，支持多轮反思和修订。
-
-    参数来源：
-    - request: 包含章节 ID 和 Agent 配置
-
-    核心差异 vs 基础生成：
-    - 基础生成：单次 LLM 调用，prompt → 内容
-    - Agentic 生成：多轮循环，评估 → 反思 → 重写 → 再评估
-
-    数据流：
-    - build_chapter_prompt 构建初始 prompt
-    - generate_agentic_chapter_stream 内部处理多轮迭代
-    - 流式返回每轮输出和最终结果
-
-    副作用：
-    - 多次 LLM 调用，成本更高
-    - 生成时间更长，但质量通常更好
-
-    适用场景：
-    - 重要章节需要高质量输出
-    - 需要 AI 自我纠错能力
-    - 复杂世界观下的内容一致性要求高
-    """
-    chapter = await chapter_repo.get_by_id(request.chapter_id)
-    if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
-    return StreamingResponse(
-        generate_agentic_chapter_stream(request, chapter_repo.db),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
-    )
-
-
 @router.post("/generate_chapter_agentic_preview_beats", response_model=GenerateChapterAgenticPreviewResponse)
 async def generate_chapter_agentic_preview_beats(
     request: GenerateChapterAgenticRequest,
@@ -353,21 +308,6 @@ async def generate_chapter_agentic_preview_beats(
     result = await preview_agentic_beats(request, chapter_repo.db)
     # result structure: {"beats": [...], "debug_prompt": {...}}
     return result
-
-
-@router.post("/generate_chapter_agentic_with_beats")
-async def generate_chapter_agentic_with_beats(
-    request: GenerateChapterAgenticWithBeatsRequest,
-    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
-):
-    chapter = await chapter_repo.get_by_id(request.chapter_id)
-    if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
-    return StreamingResponse(
-        generate_agentic_chapter_stream_with_confirmed_beats(request, chapter_repo.db, request.beats),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
-    )
 
 
 @router.post("/generate_inspiration", response_model=InspirationResponse)

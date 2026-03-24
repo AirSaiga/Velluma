@@ -12,8 +12,6 @@
 """
 
 from backend.services.agentic_workflow import (
-    generate_agentic_chapter_stream,
-    generate_agentic_chapter_stream_with_confirmed_beats,
     preview_agentic_beats,
 )
 from backend.services.workflows.refining import refine_draft
@@ -35,8 +33,6 @@ __all__ = [
     "build_refine_agent_prompt",
     "parse_review_result",
     "call_llm",
-    "generate_agentic_chapter_stream",
-    "generate_agentic_chapter_stream_with_confirmed_beats",
     "preview_agentic_beats",
     "update_character_dynamic_state",
     "refine_draft",
