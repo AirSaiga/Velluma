@@ -132,6 +132,15 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
         entry_state = str(beat_dict.get("entry_state") or "").strip()
         exit_state = str(beat_dict.get("exit_state") or "").strip()
 
+        # V3.6: POV 模式字段
+        pov_mode = str(beat_dict.get("pov_mode") or "single").strip()
+        if pov_mode not in ("single", "ensemble", "omniscient"):
+            pov_mode = "single"
+        raw_pov_characters = beat_dict.get("pov_characters")
+        pov_characters = [str(c).strip() for c in raw_pov_characters if str(c).strip()] if isinstance(raw_pov_characters, list) else []
+        pov_aperture = str(beat_dict.get("pov_aperture") or "").strip() or None
+        pov_perception_state = str(beat_dict.get("pov_perception_state") or "正常").strip()
+
         normalized.append(
             {
                 "position": position,
@@ -139,6 +148,10 @@ def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]
                 "summary": summary,
                 "location": location if location else None,
                 "pov_character": pov_character if pov_character else None,
+                "pov_mode": pov_mode,                          # V3.6
+                "pov_characters": pov_characters,             # V3.6
+                "pov_aperture": pov_aperture,                 # V3.5
+                "pov_perception_state": pov_perception_state, # V3.5
                 "action_summary": str(beat_dict.get("action_summary") or "").strip() or summary,
                 "worldbuilding_instruction": worldbuilding_instruction if worldbuilding_instruction else None,
                 "entry_state": entry_state if entry_state else None,
