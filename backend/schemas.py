@@ -29,6 +29,24 @@ class PovAperture(str, Enum):
     SUBJECTIVE_OBSERVATION = "subjective_observation"
     SYSTEMIC_SENSE = "systemic_sense"
 
+
+# ============================================================
+# V3.6: 叙事视角模式 - 支持多角色共存视角
+# ============================================================
+class PovMode(str, Enum):
+    """
+    叙事视角模式枚举 - V3.6 多角色共存视角支持。
+
+    SINGLE: 单一视角（默认），锁定在一个角色的感官范围内。
+    ENSEMBLE: 多角色共存视角，摄像机在多个角色间游走，每个角色均有内心展现。
+             适用于多人对峙、密谋、博弈等场景。
+    OMNISCIENT: 全知视角，允许自由描写所有角色的内心。
+               适用于宏观战场、世界性事件等场景。
+    """
+    SINGLE = "single"
+    ENSEMBLE = "ensemble"
+    OMNISCIENT = "omniscient"
+
 # ============================================================
 # 推理模式配置 - OpenRouter Reasoning Tokens 支持
 # ============================================================
@@ -628,6 +646,14 @@ class StoryBeatBase(BaseModel):
     position: int = Field(default=0, ge=0)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, max_length=120)
+    pov_mode: Optional[PovMode] = Field(
+        default=PovMode.SINGLE,
+        description="V3.6 叙事视角模式：single(单视角)/ensemble(多角色共存)/omniscient(全知)"
+    )
+    pov_characters: List[str] = Field(
+        default_factory=list,
+        description="V3.6 ensemble/omniscient模式下的多视角角色列表"
+    )
     pov_aperture: Optional[PovAperture] = Field(default=PovAperture.SUBJECTIVE_OBSERVATION, description="叙事光圈，控制视角景深")
     persistent_state_anchors: List[PersistentStateAnchor] = Field(default_factory=list, description="持久状态锚点列表")
     action_summary: Optional[str] = None
@@ -654,6 +680,14 @@ class StoryBeatUpdate(BaseModel):
     position: Optional[int] = Field(None, ge=0)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    pov_mode: Optional[PovMode] = Field(
+        default=None,
+        description="V3.6 叙事视角模式：single/ensemble/omniscient"
+    )
+    pov_characters: Optional[List[str]] = Field(
+        default=None,
+        description="V3.6 ensemble模式下的多视角角色列表"
+    )
     pov_aperture: Optional[PovAperture] = Field(None, description="叙事光圈，控制视角景深")
     persistent_state_anchors: Optional[List[PersistentStateAnchor]] = Field(None, description="持久状态锚点列表")
     action_summary: Optional[str] = None
@@ -1138,6 +1172,14 @@ class ConfirmedStoryBeat(BaseModel):
     summary: str = Field(..., min_length=1)
     location: Optional[str] = None
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
+    pov_mode: Optional[PovMode] = Field(
+        default=PovMode.SINGLE,
+        description="V3.6 叙事视角模式：single(单视角)/ensemble(多角色共存)/omniscient(全知)"
+    )
+    pov_characters: List[str] = Field(
+        default_factory=list,
+        description="V3.6 ensemble/omniscient模式下的多视角角色列表"
+    )
     pov_aperture: Optional[PovAperture] = Field(
         default=None, 
         description="叙事光圈：internal_only/subjective_observation/systemic_sense"

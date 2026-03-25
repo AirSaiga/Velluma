@@ -75,7 +75,7 @@ class SketchGeneratorConfig:
     min_words: int = 500
     
     # 最大字数（防止过长）
-    max_words: int = 3000
+    max_words: int = 5000
     
     # 温度：比正文稍高，鼓励流畅
     temperature: float = 0.8
@@ -251,6 +251,19 @@ class SketchGenerator:
         # 构建节拍摘要（不含内部边界标记）
         beats_summary = self._build_beats_summary(beats)
         
+        # 活取第一个 beat 的物理入场约束（完整文本）
+        world_snapshot_section = ""
+        if beats:
+            snapshot_constraints = beats[0].get('_world_snapshot_constraints', '')
+            if snapshot_constraints:
+                # 取前 600 字防止过长，保留场景/角色入场状态关键信息
+                preview = snapshot_constraints[:600]
+                world_snapshot_section = f"""
+### 8. 跨章物理入场约束（最高优先级）
+{preview}
+⚠️ 速写开篇必须与上述状态 100% 连续，禁止角色磁玄或状态突变。
+"""
+        
         # 角色信息
         characters_info = self._build_characters_info(entities)
         
@@ -334,8 +347,8 @@ class SketchGenerator:
 - 非 POV 角色的事件必须转化为 POV 能感知的物理异象
 
 ### 7. 核心资产物理约束（重要）
-{f"以下是本章核心资产的物理设定，必须严格遵守，禁止自行改变其形态：\\n{chapter_assets_schema}" if chapter_assets_schema else "（无特殊资产约束）"}
-
+{f"以下是本章核心资产的物理设定，必须严格遵守，禁止自行改变其形态：\n{chapter_assets_schema}" if chapter_assets_schema else "（无特殊资产约束）"}
+{world_snapshot_section}
 ## 禁止事项
 - 不要写大纲式总结
 - 不要使用"首先"、"其次"、"最后"等分点词
@@ -377,7 +390,7 @@ class SketchGenerator:
         return system_prompt, user_prompt
     
     def _build_beats_summary(self, beats: List[dict]) -> str:
-        """构建节拍摘要（无边界标记版）"""
+        """构建节拍摘要（无边界标记版，含物理约束）"""
         lines = []
         for i, beat in enumerate(beats, 1):
             summary = beat.get('summary', '')

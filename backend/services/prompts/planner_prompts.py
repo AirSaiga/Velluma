@@ -160,7 +160,13 @@ def build_planner_agent_prompt(
     elif previous_chapter_snapshot:
         # 回退到旧版格式
         world_state_constraint = format_snapshot_for_planner(previous_chapter_snapshot)
-    
+
+    # V3.6: 基于目标字数计算推荐 beats 数量
+    beats_min = max(2, word_count // 1000)           # 1000字→2, 2000字→2, 2001字→3
+    beats_min = min(beats_min, 4)                    # 上限不超过4（避免强制过碎）
+    beats_recommended = max(2, min(6, round(word_count / 600)))  # 每beat约600字
+    beats_recommended = max(beats_recommended, beats_min)
+
     system_prompt = f"""{global_sys_prompt}
 
 你是章节规划师。请把章节拆分成可执行的 story beats，并仅输出 JSON。
@@ -169,29 +175,31 @@ def build_planner_agent_prompt(
 
 {final_map_prompt if final_map_prompt else ''}
 
-## 输出 JSON 结构
+## 输出 JSON 结构（示例值仅供格式参考，必须替换为本章实际内容）
 {{
   "beats": [
     {{
       "position": 1,
       "beat_id": "beat-1",
-      "summary": "本段剧情概述",
-      "location": "场景地点",
-      "pov_character": "视角角色",
+      "summary": "白霆在实验室发现血嗤已觉醒，两人爆发正面冲突，血嗤以压倒性力量将白霆击退至走廊",
+      "location": "0号计划核心实验室",
+      "pov_character": "白霆",
+      "pov_mode": "single",
+      "pov_characters": [],
       "pov_perception_state": "正常",
       "pov_aperture": "subjective_observation",
       "persistent_state_anchors": [
         {{
           "anchor_type": "unresolved_conflict",
-          "description": "描述当前未解决的冲突",
-          "involved_characters": ["角色名"]
+          "description": "白霆对血嗤觉醒程度的判断尚未确认，局势主动权在血嗤一侧",
+          "involved_characters": ["白霆", "血嗤"]
         }}
       ],
-      "action_summary": "动作化执行摘要",
-      "worldbuilding_instruction": "本段生效的世界构建约束",
-      "entry_state": "本段切入时角色与局面的起始状态",
-      "exit_state": "本段必须停住的收束状态（不得越界）",
-      "red_lines": ["本段禁止发生1", "本段禁止发生2"],
+      "action_summary": "白霆拔枪射击，血嗤徒手偏转弹道，反手将白霆摔出三米远",
+      "worldbuilding_instruction": "0号计划实验室设有电磁屏蔽层，外部信号无法进入",
+      "entry_state": "白霆持枪站在实验室入口，血嗤站在培养舱旁，双方对峙，空气凝滞",
+      "exit_state": "白霆倒在走廊地板，血嗤仍在实验室内未追出，双方短暂脱离接触",
+      "red_lines": ["禁止白霆在此节拍中获胜或压制血嗤", "禁止血嗤在此节拍中离开实验室"],
       "word_count_target": 600,
       "hook_ids": ["hk-1"],
       "pacing_type": "Medium",
@@ -199,11 +207,16 @@ def build_planner_agent_prompt(
     }}
   ],
   "workflow_tier": "TIER_2_STANDARD",
-  "chapter_narrative_anchor": "角色名"
+  "chapter_narrative_anchor": "白霆"
 }}
 
+⚠️ **严禁照抄示例**：上方 JSON 中的所有字符串值（summary、location、pov_character、entry_state、exit_state、red_lines 等）均为示例，**必须全部替换为本章大纲的真实内容**。
+
 约束：
-1. beats 至少 1 个，最多 6 个
+1. beats 数量：**至少 {beats_min} 个，最多 6 个**。
+   基于本章【目标字数 {word_count} 字】，推荐生成 **{beats_recommended} 个 beats**（每个 beat 约 400-800 字）。
+   - 严禁在大纲内容足够的情况下只规划 1 个 beat
+   - 若大纲包含多个明显的场景切换或视角转移，应按实际场景数拆分，不要强行合并
 2. position 从 1 开始递增
 3. summary 具体、可执行，不要空泛
 4. action_summary 必须可执行、动作化
@@ -255,11 +268,18 @@ def build_planner_agent_prompt(
     - 叙事核心 ≠ 镜头时间最多：若某角色在大部分 beat 中处于昏迷/被动/幕后状态，但所有事件均因其命运而发生、所有行动方的目标均指向其时，仍应将其填为叙事核心
     - 必须从【角色设定】中的角色名中选择一个，若多人均等则填 "Ensemble"
     - 此字段由你作为规划师主动判断，优先级高于 beat 出现频次
-16. **【V3.5 新增】pov_aperture (叙事光圈)**: 控制 Drafting 阶段的视角景深，必须从以下选项中选择：
+16. **》V3.5 新增「pov_aperture (叙事光圈)**: 控制 Drafting 阶段的视角景深，仅在 pov_mode="single" 时有效，必须从以下选项中选择：
     - "internal_only": 仅限 {anchor_pov or '视角角色'} 的内心与自我感知，强制屏蔽不可见环境细节。适用于深度心理描写、独处的内省场景。
     - "subjective_observation" (默认): 允许描写其他角色动作，但必须通过 {anchor_pov or '视角角色'} 的认知/判断包裹。适用于常规场景。
     - "systemic_sense": 允许全景感知，但在叙事上依然以 {anchor_pov or '视角角色'} 为锚点。适用于高张力动作场景、需要全局感知的战斗场面。
     选择依据：基于 scene_intent 和 tension_level 自动推断，高张力动作场景用 systemic_sense，深度心理描写用 internal_only。
+16b. **》V3.6 新增「pov_mode (叙事视角模式)**: 根据场景类型选择最合适的视角策略：
+    - "single"(默认)：单一视角，锁定在 pov_character 的感官范围内。适用：独处内省、单角色是核心的动作场景。
+    - "ensemble"：多角色共存视角，摄像机在多个角色间自然游走，每个角色均有内心展现。
+      适用：**多人对峙**、**密谋策划**、**多方博弈**等多角色同场且每人动机均重要的场景。
+      → 选择 ensemble 时，必须同时填写 pov_characters 列表（2-4 个角色名，按内心权重由高到低排序）。pov_character 填列表中第一个角色名。
+    - "omniscient"：全知视角，可自由展现所有角色内心。适用：宏观战场全景、世界性事件。
+    ❗注意：pov_mode="ensemble"/"omniscient" 时，pov_aperture 字段可不填写。
 17. **【V3.5 新增】persistent_state_anchors (持久状态锚点)**: 每个 beat 必须输出状态锚点列表，用于跨 Beat 状态连贯。必须包含以下类型：
     - unresolved_conflict: 当前未解决的冲突（如"角色A对角色B的怀疑尚未消除"）
     - emotional_tone: 角色情感基调（如"主角处于焦虑但克制的状态"）
@@ -387,6 +407,19 @@ def parse_planner_full_result(
             beat_id = str(beat.get("beat_id") or f"beat-{position}").strip() or f"beat-{position}"
             location = str(beat.get("location") or "").strip() or None
             pov_character = str(beat.get("pov_character") or "").strip() or None
+            # V3.6: 解析叙事视角模式，默认为 single
+            pov_mode = str(beat.get("pov_mode") or "single").strip()
+            if pov_mode not in ["single", "ensemble", "omniscient"]:
+                pov_mode = "single"
+            # V3.6: 解析多视角角色列表（ensemble/omniscient 模式下有效）
+            pov_characters_raw = beat.get("pov_characters")
+            if isinstance(pov_characters_raw, list):
+                pov_characters = [str(c).strip() for c in pov_characters_raw if str(c).strip()]
+            else:
+                pov_characters = []
+            # 若 ensemble 模式且 pov_character 为空，自动取列表第一个
+            if pov_mode == "ensemble" and not pov_character and pov_characters:
+                pov_character = pov_characters[0]
             # POV 角色知觉状态：由 Planner 显式输出
             pov_perception_state = str(beat.get("pov_perception_state") or "正常").strip() or "正常"
             # V3.5: 解析叙事光圈，默认为 subjective_observation
@@ -444,6 +477,8 @@ def parse_planner_full_result(
                     "summary": summary,
                     "location": location,
                     "pov_character": pov_character,
+                    "pov_mode": pov_mode,       # V3.6: 叙事视角模式
+                    "pov_characters": pov_characters,  # V3.6: ensemble 多视角角色列表
                     "pov_perception_state": pov_perception_state,
                     "pov_aperture": pov_aperture,  # V3.5: 叙事光圈
                     "persistent_state_anchors": persistent_state_anchors,  # V3.5: 持久状态锚点

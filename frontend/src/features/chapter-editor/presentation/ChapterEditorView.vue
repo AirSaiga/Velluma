@@ -11,6 +11,9 @@ interface BeatPreviewItem {
   summary: string
   location?: string
   pov_character?: string
+  pov_mode: 'single' | 'ensemble' | 'omniscient'  // V3.6
+  pov_characters: string[]                         // V3.6
+  pov_aperture?: string                            // V3.5
   anchor_pov?: string
   original_actor?: string
   action_summary?: string
@@ -87,7 +90,6 @@ const props = defineProps<{
   pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
   previewBeats: BeatPreviewItem[]
-  anchorPov: string | null
   publishChapter: () => void
   ragWeightTotal: number
   restoreAgenticDefaults: () => void
@@ -115,6 +117,19 @@ const props = defineProps<{
   bookId?: string
   critiqueResult?: any
 }>()
+
+// V3.6: pov_mode 切换时同步角色列表
+function handlePovModeChange(beat: BeatPreviewItem) {
+  if (beat.pov_mode === 'ensemble') {
+    if (!beat.pov_characters || beat.pov_characters.length === 0) {
+      beat.pov_characters = beat.pov_character ? [beat.pov_character] : []
+    }
+  } else {
+    if (beat.pov_characters && beat.pov_characters.length > 0) {
+      beat.pov_character = beat.pov_characters[0]
+    }
+  }
+}
 
 const emit = defineEmits<{
   (e: 'request-critique', content: string): void
@@ -479,31 +494,95 @@ watch(() => props.critiqueResult, (newVal) => {
         </button>
       </div>
       <div class="p-4 overflow-y-auto max-h-[calc(85vh-124px)] space-y-3">
-        <div v-if="anchorPov" class="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-          <div class="text-xs font-semibold text-amber-700">🎯 本章锚点视点 (Anchor POV)</div>
-          <div class="text-sm font-bold text-amber-800">{{ anchorPov }}</div>
-          <div class="text-[10px] text-amber-600 mt-1">所有 Beats 将统一使用此视点进行叙事</div>
-        </div>
         <div v-if="beatPreviewError" class="text-xs text-rose-500">
           {{ beatPreviewError }}
         </div>
         <div v-for="beat in previewBeats" :key="`${beat.position}-${beat.beat_id || beat.summary}`" class="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
+          <!-- 头部：序号 + pov_mode badge + 字数 -->
           <div class="flex items-center justify-between gap-2">
-            <div class="text-xs font-semibold text-[var(--text-primary)]">节拍 {{ beat.position }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-semibold text-[var(--text-primary)]">节拍 {{ beat.position }}</span>
+              <span
+                class="px-1.5 py-0.5 text-[9px] font-medium rounded-full"
+                :class="beat.pov_mode === 'ensemble' ? 'bg-purple-100 text-purple-600' : beat.pov_mode === 'omniscient' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'"
+              >{{ beat.pov_mode === 'ensemble' ? '多视角' : beat.pov_mode === 'omniscient' ? '全知' : '单视角' }}</span>
+            </div>
             <div class="text-[10px] text-[var(--text-muted)]">建议字数 {{ beat.word_count_target || beat.target_words || 0 }}</div>
           </div>
+
+          <!-- 剧情摘要 -->
           <textarea
             v-model="beat.summary"
             class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
             rows="3"
             placeholder="输入节拍内容..."
           ></textarea>
+
+          <!-- 视角模式选择 -->
+          <div class="flex items-center gap-2">
+            <label class="text-[10px] text-[var(--text-muted)] shrink-0 w-14">视角模式</label>
+            <select
+              v-model="beat.pov_mode"
+              @change="handlePovModeChange(beat)"
+              class="flex-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]"
+            >
+              <option value="single">单视角 (single)</option>
+              <option value="ensemble">多视角 (ensemble)</option>
+              <option value="omniscient">全知 (omniscient)</option>
+            </select>
+          </div>
+
+          <!-- single/omniscient: 单角色输入 -->
+          <div v-if="beat.pov_mode !== 'ensemble'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">视角角色</label>
+              <input
+                v-model="beat.pov_character"
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                placeholder="例如：楚言"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">场景</label>
+              <input
+                :value="beat.location || ''"
+                readonly
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50/50 border border-slate-200 text-xs text-[var(--text-secondary)] cursor-default"
+                placeholder="未指定"
+              />
+            </div>
+          </div>
+
+          <!-- ensemble: 多角色列表编辑 -->
+          <div v-else class="space-y-1.5">
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">视角角色列表（每行一个，按内心权重由高到低排序）</label>
+              <textarea
+                :value="(beat.pov_characters || []).join('\n')"
+                @input="(beat.pov_characters = ($event.target as HTMLTextAreaElement).value.split('\n').map((s: string) => s.trim()).filter(Boolean))"
+                rows="3"
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
+                placeholder="每行一个角色名，例如：&#10;楚言&#10;敖先"
+              ></textarea>
+            </div>
+            <div>
+              <label class="block text-[10px] text-[var(--text-muted)] mb-1">场景</label>
+              <input
+                :value="beat.location || ''"
+                readonly
+                class="w-full px-2 py-1.5 rounded-lg bg-slate-50/50 border border-slate-200 text-xs text-[var(--text-secondary)] cursor-default"
+                placeholder="未指定"
+              />
+            </div>
+          </div>
+
+          <!-- 只读信息行：动作摘要、伏笔 -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] text-[var(--text-secondary)]">
-            <div>场景：{{ beat.location || '未指定' }}</div>
-            <div>视角：{{ beat.pov_character || '未指定' }}</div>
             <div>动作摘要：{{ beat.action_summary || '未指定' }}</div>
             <div>绑定伏笔：{{ getBeatHookLabel(beat) }}</div>
           </div>
+
+          <!-- 状态边界 -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
             <div>
               <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段开场状态</label>
@@ -522,6 +601,8 @@ watch(() => props.critiqueResult, (newVal) => {
               />
             </div>
           </div>
+
+          <!-- 禁止事项 -->
           <div>
             <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段禁止发生</label>
             <textarea

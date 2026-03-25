@@ -87,7 +87,6 @@ defineExpose({
     :restore-agentic-defaults="viewModel.restoreAgenticDefaults"
     :restore-agentic-field="viewModel.restoreAgenticField"
     :selected-chapter="viewModel.selectedChapter.value"
-    :anchor-pov="viewModel.anchorPov.value"
     :set-agentic-field-value="viewModel.setAgenticFieldValue"
     :set-editor-ref="viewModel.setEditorRef"
     :scroll-to-critique="viewModel.scrollToCritique"

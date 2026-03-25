@@ -295,6 +295,16 @@ class DualTrackWorkflow:
         # 提取 chunks
         chunks = [draft.draft_chunk for draft in beat_drafts]
         
+        # V3.5: 从 beats 构建持久状态锚点，供统稿阶段平滑跨 Beat 状态
+        persistent_state_anchors = []
+        for i, beat in enumerate(beats):
+            exit_state = beat.get("exit_state", "")
+            if exit_state:
+                persistent_state_anchors.append({
+                    "anchor_type": f"beat_{i + 1}_exit",
+                    "description": f"Beat {i + 1} 退出状态: {exit_state}",
+                })
+        
         # ── STITCHING 阶段日志 ──
         if self.prompt_logger:
             self.prompt_logger.start_stage("STITCHING", iteration=1)
@@ -316,6 +326,7 @@ class DualTrackWorkflow:
             prompt_logger=self.prompt_logger,
             sketch_text=sketch_result.sketch_text if sketch_result else None,
             book=book,
+            persistent_state_anchors=persistent_state_anchors or None,
         )
         
         stitch_time = time.perf_counter() - stitch_start

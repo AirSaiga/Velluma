@@ -201,12 +201,21 @@ async def assign_pov_to_beats(
 
     for beat in beats:
         original_pov = None
+        # V3.6: ensemble/omniscient beats 保留 Planner 分配的多视角，不参与 anchor 覆盖
         if isinstance(beat, dict):
+            beat_pov_mode = beat.get("pov_mode", "single") or "single"
+            if beat_pov_mode in ("ensemble", "omniscient"):
+                beat["anchor_pov"] = anchor_pov  # 仅记录 anchor但不覆盖
+                continue
             original_pov = beat.get("pov_character")
             beat["original_actor"] = original_pov
             beat["pov_character"] = anchor_pov
             beat["anchor_pov"] = anchor_pov
         elif hasattr(beat, "pov_character"):
+            beat_pov_mode = getattr(beat, "pov_mode", "single") or "single"
+            if beat_pov_mode in ("ensemble", "omniscient"):
+                beat.anchor_pov = anchor_pov
+                continue
             original_pov = getattr(beat, "pov_character", None)
             beat.original_actor = original_pov
             beat.pov_character = anchor_pov

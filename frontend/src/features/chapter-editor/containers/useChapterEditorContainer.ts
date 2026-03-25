@@ -34,6 +34,9 @@ interface BeatEditorState {
   summary: string
   location?: string
   pov_character?: string
+  pov_mode: 'single' | 'ensemble' | 'omniscient'  // V3.6
+  pov_characters: string[]                         // V3.6
+  pov_aperture?: string                            // V3.5
   anchor_pov?: string
   original_actor?: string
   action_summary?: string
@@ -337,6 +340,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         summary: String(beat.summary || '').trim(),
         location: beat.location,
         pov_character: beat.pov_character,
+        pov_mode: (beat.pov_mode || 'single') as 'single' | 'ensemble' | 'omniscient',
+        pov_characters: Array.isArray(beat.pov_characters) ? beat.pov_characters.filter(Boolean) : [],
+        pov_aperture: beat.pov_aperture || undefined,
         action_summary: beat.action_summary,
         worldbuilding_instruction: beat.worldbuilding_instruction,
         openingState: String(beat[beatFieldMap.openingState] || '').trim(),
@@ -463,15 +469,22 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       ...pendingAgenticPayload.value,
       beats: previewBeats.value.map((beat) => {
         const redLines = beat.forbiddenEventsText
-          .split(/\r?\n|[,，]/)
+          .split(/\r?\n|[,\uff0c]/)
           .map((item) => item.trim())
           .filter(Boolean)
+        // ensemble 模式下自动取第一个角色作为 pov_character
+        const effectivePovCharacter = beat.pov_mode === 'ensemble' && beat.pov_characters.length > 0
+          ? beat.pov_characters[0]
+          : beat.pov_character
         return {
           position: Math.max(1, Math.round(Number(beat.position) || 1)),
           beat_id: beat.beat_id,
           summary: beat.summary.trim() || `节拍${beat.position}`,
           location: beat.location,
-          pov_character: beat.pov_character,
+          pov_character: effectivePovCharacter,
+          pov_mode: beat.pov_mode || 'single',
+          pov_characters: Array.isArray(beat.pov_characters) ? beat.pov_characters.filter(Boolean) : [],
+          pov_aperture: beat.pov_aperture,
           action_summary: beat.action_summary,
           worldbuilding_instruction: beat.worldbuilding_instruction,
           [beatFieldMap.openingState]: beat.openingState.trim() || undefined,
@@ -958,6 +971,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     pacingStyleOptions,
     previewBeats,
     anchorPov,
+    // anchorPov kept for backward-compat but no longer displayed
     publishChapter,
     ragWeightTotal,
     restoreAgenticDefaults,

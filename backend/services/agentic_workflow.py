@@ -270,7 +270,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
         model=planning_model,
         temperature=0.2,
         response_format={"type": "json_object"},
-        max_tokens=1800,
+        max_tokens=6000,  # V3.6: 扩大上限，支持3-6个完整beat输出（原1800导致JSON截断→fallback）
     )
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
     return {

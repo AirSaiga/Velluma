@@ -111,6 +111,9 @@ export interface ConfirmedStoryBeat {
   summary: string
   location?: string
   pov_character?: string
+  pov_mode?: 'single' | 'ensemble' | 'omniscient'  // V3.6
+  pov_characters?: string[]                          // V3.6
+  pov_aperture?: string                              // V3.5
   action_summary?: string
   worldbuilding_instruction?: string
   entry_state?: string

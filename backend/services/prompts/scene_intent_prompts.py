@@ -52,6 +52,23 @@ def build_scene_intent_prompt(
     pacing_micro_lines = PACING_MICRO_INSTRUCTIONS[pacing_style]
     exit_state = str(beat.get("exit_state") or "").strip() or "停在当前 beat 的收束状态，不越界推进"
 
+    # V3.6: 检测 ensemble 模式并构建多角色目标区块
+    pov_mode = beat.get("pov_mode", "single") or "single"
+    pov_characters_list = beat.get("pov_characters", []) or []
+    is_ensemble = pov_mode in ("ensemble", "omniscient") and len(pov_characters_list) >= 2
+
+    ensemble_section = ""
+    if is_ensemble:
+        chars_str = "\n".join([f"  - 【{c}】" for c in pov_characters_list])
+        mode_label = "多角色共存" if pov_mode == "ensemble" else "全知"
+        ensemble_section = f"""
+[视角策略：{mode_label}模式]
+本 Beat 采用【{mode_label}】视角，以下角色均需内心展现：
+{chars_str}
+- constraints 中必须为每个角色指定其动机目标（格式：“[角色名]目标：...”）
+- 确保每个角色在生成文本中至少获得一次内心切入
+"""
+
     sensory_transform_constraint = ""
     if anchor_pov and beat_original_actor and anchor_pov != beat_original_actor:
         sensory_transform_constraint = f"""
@@ -63,7 +80,7 @@ def build_scene_intent_prompt(
 
     system_prompt = f"""你是场景意图分析师。请根据输入剧情节拍输出 JSON。
 
-输出结构：{sensory_transform_constraint}
+输出结构：{sensory_transform_constraint}{ensemble_section}
 {{
   "intent_label": "场景标签",
   "goal": "本场景目标",

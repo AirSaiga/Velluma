@@ -839,6 +839,12 @@ def build_prose_draft_prompt_v25(
     location = _normalize_text(beat_data.get("location"), "")
     beat_summary = _normalize_text(beat_data.get("summary"))
     
+    # V3.6: 检测叙事视角模式
+    pov_mode = beat_data.get("pov_mode", "single") or "single"
+    pov_characters_list = beat_data.get("pov_characters", []) or []
+    is_ensemble = pov_mode == "ensemble" and len(pov_characters_list) >= 2
+    is_omniscient = pov_mode == "omniscient"
+    
     intent_goal = _normalize_text(scene_intent.get("goal"), beat_summary)
     intent_constraints = _normalize_text_list(scene_intent.get("constraints"))
     
@@ -949,23 +955,41 @@ def build_prose_draft_prompt_v25(
 - 情绪转变必须是渐进的，禁止突兀切换
 - 通过身体反应和环境感知体现情绪，而非直接陈述"他感到..."""
 
+   # ========================================
+    # V3.5/V3.6: 认知视角系统与持久状态锚点
     # ========================================
-    # V3.5: 认知视角系统与持久状态锚点
-    # ========================================
-    # 处理 pov_aperture 默认值
-    effective_pov_aperture = pov_aperture or beat_data.get("pov_aperture", "subjective_observation")
-    if effective_pov_aperture not in ["internal_only", "subjective_observation", "systemic_sense"]:
-        effective_pov_aperture = "subjective_observation"
-    
-    # 构建认知视角系统指令
-    aperture_mode_descriptions = {
-        "internal_only": f"仅限 {pov_character} 的内心与自我感知，强制屏蔽外部可见但不被注意的细节。",
-        "subjective_observation": f"允许描写其他角色动作，但必须通过 {pov_character} 的认知/判断包裹。",
-        "systemic_sense": f"允许全景感知，但在叙事上依然以 {pov_character} 为锚点（适用于高张力动作场景）。"
-    }
-    aperture_mode_desc = aperture_mode_descriptions.get(effective_pov_aperture, aperture_mode_descriptions["subjective_observation"])
-    
-    cognitive_aperture_section = f"""
+    if is_ensemble or is_omniscient:
+        # ensemble/omniscient 模式：多角色游走规则
+        chars_display = "、".join(pov_characters_list) if pov_characters_list else pov_character
+        mode_label = "多角色共存(ensemble)" if is_ensemble else "全知(omniscient)"
+        cognitive_aperture_section = f"""
+【多角色视角系统 (Multi-POV System) - V3.6】
+当前模式: {mode_label}
+视角角色: {chars_display}
+
+[核心指令]: 本 Beat 采用多视角叙事，必须遵循以下规则：
+1. **摄像机游走**: 视角可在段落边界自由切换，每次切换需有自然过渡（动作/空间/时间）。
+2. **角色均衡**: 每个角色（{chars_display}）至少获得一次内心切入，禁止某角色全程无内心独白。
+3. **声音区分**: 不同角色的内心独白需体现各自语气/词汇/关注点，禁止同质化。
+4. **戏剧反讽**: 充分利用"读者知道多角色想法但单角色不知"的张力，渲染信息不对称。
+5. **段落标记**: 视角切换时，用行为动作（非括号标注）自然引导读者识别视角变换。
+"""
+    else:
+        # single 模式：保持原有单视角认知光圈逻辑
+        # 处理 pov_aperture 默认值
+        effective_pov_aperture = pov_aperture or beat_data.get("pov_aperture", "subjective_observation")
+        if effective_pov_aperture not in ["internal_only", "subjective_observation", "systemic_sense"]:
+            effective_pov_aperture = "subjective_observation"
+        
+        # 构建认知视角系统指令
+        aperture_mode_descriptions = {
+            "internal_only": f"仅限 {pov_character} 的内心与自我感知，强制屏蔽外部可见但不被注意的细节。",
+            "subjective_observation": f"允许描写其他角色动作，但必须通过 {pov_character} 的认知/判断包裹。",
+            "systemic_sense": f"允许全景感知，但在叙事上依然以 {pov_character} 为锚点（适用于高张力动作场景）。"
+        }
+        aperture_mode_desc = aperture_mode_descriptions.get(effective_pov_aperture, aperture_mode_descriptions["subjective_observation"])
+        
+        cognitive_aperture_section = f"""
 【认知视角系统 (Cognitive Aperture System) - V3.5】
 当前光圈: {effective_pov_aperture}
 模式说明: {aperture_mode_desc}
@@ -1150,6 +1174,9 @@ def build_micro_review_prompt(
     red_lines: Optional[list[str]] = None,
     relational_state_lock: str = "",
     character_static_prompts: Optional[dict[str, str]] = None,
+    # V3.6: ensemble/multi-POV
+    pov_mode: str = "single",
+    pov_characters: Optional[list[str]] = None,
 ) -> tuple[str, str]:
     """
     构建增强版 Fail-Fast 微审查提示词（V2.5+）。
@@ -1213,6 +1240,22 @@ def build_micro_review_prompt(
    - 任何触碰红线的内容，无论其他检查是否通过，均判定为失败
    - 红线具有最高优先级"""
     
+    # ========================================
+    # V3.6: ensemble OOC 检查区块
+    # ========================================
+    ensemble_pov_check = ""
+    is_ensemble_review = pov_mode in ("ensemble", "omniscient") and pov_characters and len(pov_characters) >= 2
+    if is_ensemble_review:
+        chars_str = "、".join(pov_characters)
+        ensemble_pov_check = f"""
+8. **多视角覆盖检查（ensemble 专属）**：
+   本 Beat 视角角色列表：{chars_str}
+   检查项：
+   - 以上每个角色是否至少获得一次内心独白或主观感知描写？
+   - 是否存在某角色全程仅作为背景/道具而无主观视角？
+   - 不同角色的声音（语气/词汇/关注点）是否有区分？
+   判定：若有角色完全缺席内心展现，判定为失败。"""
+    
     system_prompt = f"""你是一个无情的物理、逻辑与角色一致性断言机（Assertion Checker）。
 
 你的任务：快速检查小说片段是否发生了极其荒谬的物理、逻辑、关系或角色设定崩塌。
@@ -1223,7 +1266,7 @@ def build_micro_review_prompt(
 1. **物理状态冲突**：肉身喷火、血肉之躯发射激光、徒手举起重物等
 2. **装备/能力幻觉**：当前不存在的装备突然使用、未提及的能力突然出现
 3. **实体混淆**：已被摧毁的物体重新出现、当前场景不存在的角色突然说话
-4. **时空错乱**：时间线跳跃无逻辑、场景切换无过渡{relationship_check}{ooc_check}{red_lines_check}
+4. **时空错乱**：时间线跳跃无逻辑、场景切换无过渡{relationship_check}{ooc_check}{red_lines_check}{ensemble_pov_check}
 
 【重要原则】
 - 只查硬伤：文字不优美、修辞平淡、节奏拖沓 —— 这些都不属于错误
@@ -1254,8 +1297,13 @@ def build_micro_review_prompt(
 【红线约束（最高优先级）】
 {chr(10).join(['- ' + rl for rl in red_lines])}"""
 
+    # V3.6: ensemble 视角角色列表补充
+    ensemble_pov_section = ""
+    if is_ensemble_review and pov_characters:
+        ensemble_pov_section = f"\n【多视角角色列表】\n" + "\n".join([f"- {c}" for c in pov_characters])
+
     user_prompt = f"""【已知合法状态】
-视角角色：{pov_character}
+视角角色：{pov_character}{ensemble_pov_section}
 物理状态约束：{physical_state_lock if physical_state_lock else "无特殊约束"}{rel_state_section}{red_lines_section}
 
 【待检片段】

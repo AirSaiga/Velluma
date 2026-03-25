@@ -487,6 +487,18 @@ async def _generate_subconscious_batch(
                 previous_tail=pseudo_tail,  # 使用伪前文替代空字符串
             )
             
+            # V3.6: ensemble 模式下，修改 system_prompt 操描多角色内心
+            pov_mode_beat = beat.get("pov_mode", "single") or "single"
+            pov_chars_beat = beat.get("pov_characters", []) or []
+            if pov_mode_beat in ("ensemble", "omniscient") and len(pov_chars_beat) >= 2:
+                chars_list = "、".join(pov_chars_beat)
+                ensemble_prefix = (
+                    f"【V3.6 多角色潜意识模式】本 Beat 采用{'多角色共存' if pov_mode_beat == 'ensemble' else '全知'}视角，"
+                    f"必须为以下每个角色各生成一条简短内心独白：{chars_list}。"
+                    f"输出格式：{{\"best_subconscious\": \"[角色A]内心：... [角色B]内心：...\", \"mcts_rollout\": []}}"
+                )
+                system_prompt = ensemble_prefix + "\n" + system_prompt
+            
             # 记录 Subconscious prompt（包含 MCTS 动机连贯性检查规则）
             prompts_history.append({
                 "stage": "SUBCONSCIOUS",
@@ -758,6 +770,7 @@ async def _generate_prose_serial_v25(
             is_valid = False
             attempt = 0
             current_temp = 0.75  # 基础温度
+            pending_error_hint = ""  # Fail-Fast 跨迭代错误提示（下次重试 prompt 重建后注入）
             
             prompts_history = []
             
@@ -785,8 +798,11 @@ async def _generate_prose_serial_v25(
                     pov_perception_state=current_pov_perception_state,
                     pov_character_profile=pov_profile,
                     # 优化：只在 Beat 1 显示完整跨章约束
-                    is_first_beat=(beat_index == 0),
+                    is_first_beat=(beat_index == 1),
                 )
+                # Fail-Fast：将上次重试的错误提示注入到本次 prompt（在 prompt 重建后追加）
+                if pending_error_hint:
+                    user_prompt = user_prompt + pending_error_hint
                 
                 prompts_history.append({
                     "stage": f"PROSE_DRAFT_ATTEMPT_{attempt}",
@@ -845,12 +861,9 @@ async def _generate_prose_serial_v25(
                             # 逻辑越界/红线/物理幻觉：保持或降低温度，注入错误提示
                             current_temp = max(0.3, current_temp - 0.1)
                             logger.info(f"[Fail-Fast] 逻辑错误，降低温度至 {current_temp:.2f}")
-                            
-                            # V3.0: 在 prompt 中叠加错误信息（仅用于下一次重试）
-                            error_hint = f"\n\n【修正要求】上一版本存在以下问题：{fail_reason}。请保持原语境，仅修复该冲突，不要改变整体文风。"
-                            # 注意：这里的 user_prompt 需要在下次循环时包含此提示
-                            # 通过修改外部作用域的变量来实现
-                            user_prompt = user_prompt + error_hint
+                                                    
+                            # 将错误提示保存到 pending_error_hint，下次重试重建 prompt 后注入
+                            pending_error_hint = f"\n\n【修正要求】上一版本存在以下问题：{fail_reason}。请保持原语境，仅修复该冲突，不要改变整体文风。"
                     else:
                         logger.info(f"[Fail-Fast] Beat {beat_index} 断言通过")
                 else:
@@ -881,7 +894,15 @@ async def _generate_prose_serial_v25(
             # 1. 更新 Rolling Prefix (previous_tail) - 追加视角锚定标签防止 POV 漂移
             tail_text = _extract_tail(chunk_text, max_chars=300)
             next_entry_state = beats[i+1].get('entry_state', '未指定') if i+1 < len(beats) else '章节结束'
-            pov_anchor = f"\n[System Tracker: 当前主语视角强锁定为 {pov_character} | 当前退出状态: {beat.get('exit_state', '未指定')} | 下一拍进入状态: {next_entry_state}]"
+            
+            # V3.6: ensemble 模式使用场景状态快照，单视角使用角色锚定标签
+            beat_pov_mode = beat.get("pov_mode", "single") or "single"
+            beat_pov_chars = beat.get("pov_characters", []) or []
+            if beat_pov_mode in ("ensemble", "omniscient") and len(beat_pov_chars) >= 2:
+                chars_str = "、".join(beat_pov_chars)
+                pov_anchor = f"\n[System Tracker: 当前 Beat 已结束 | 多角色视角（{chars_str}）均需覆盖 | 退出状态: {beat.get('exit_state', '未指定')} | 下一拍进入: {next_entry_state}]"
+            else:
+                pov_anchor = f"\n[System Tracker: 当前主语视角强锁定为 {pov_character} | 当前退出状态: {beat.get('exit_state', '未指定')} | 下一拍进入状态: {next_entry_state}]"
             dynamic_context.previous_tail = tail_text + pov_anchor
             
             # 2. 升级状态更新（情绪 + 关系 + 摘要）
@@ -1047,7 +1068,7 @@ async def _generate_prose_parallel_v25(
                     pov_perception_state=pov_perception_state,
                     pov_character_profile=pov_profile,
                     # 优化：只在 Beat 1 显示完整跨章约束
-                    is_first_beat=(beat_index == 0),
+                    is_first_beat=(beat_index == 1),
                 )
                 
                 prompts_history.append({
@@ -1296,6 +1317,7 @@ async def _generate_prose_semi_parallel_v25(
     is_valid_0 = False
     attempt_0 = 0
     current_temp_0 = 0.75
+    pending_error_hint_0 = ""  # Fail-Fast 跨迭代错误提示
     prompts_0 = []
     user_prompt_0 = ""
 
@@ -1321,6 +1343,9 @@ async def _generate_prose_semi_parallel_v25(
             # Beat 0 是第一个 beat，显示完整跨章约束
             is_first_beat=True,
         )
+        # Fail-Fast：将上次重试的错误提示注入到本次 prompt
+        if pending_error_hint_0:
+            user_prompt_0 = user_prompt_0 + pending_error_hint_0
         prompts_0.append({
             "stage": f"PROSE_DRAFT_ATTEMPT_{attempt_0}",
             "beat_index": 1,
@@ -1360,7 +1385,7 @@ async def _generate_prose_semi_parallel_v25(
                     current_temp_0 = min(1.0, current_temp_0 + flags.fail_fast_temperature_step)
                 else:
                     current_temp_0 = max(0.3, current_temp_0 - 0.1)
-                    user_prompt_0 = user_prompt_0 + f"\n\n【修正要求】上一版本存在以下问题：{fail_reason_0}。请保持原语境，仅修复该冲突。"
+                    pending_error_hint_0 = f"\n\n【修正要求】上一版本存在以下问题：{fail_reason_0}。请保持原语境，仅修复该冲突。"
             else:
                 is_valid_0 = True
         else:
@@ -1431,6 +1456,7 @@ async def _generate_prose_semi_parallel_v25(
         prompts = []
         usr_p = ""
         last_error = None
+        pending_hint = ""  # Fail-Fast 跨迭代错误提示
 
         while att < max_att and not is_ok:
             att += 1
@@ -1449,9 +1475,12 @@ async def _generate_prose_semi_parallel_v25(
                     chapter_assets_schema=chapter_assets_schema or '',
                     pov_perception_state=pov_ps,
                     pov_character_profile=pov_pf,
-                    # 阶段2处理中间 beats，非第一个
+                    # 阶斵2处理中间 beats，非第一个
                     is_first_beat=False,
                 )
+                # Fail-Fast：将上次重试的错误提示注入到本次 prompt
+                if pending_hint:
+                    usr_p = usr_p + pending_hint
                 prompts.append({
                     "stage": f"PROSE_DRAFT_ATTEMPT_{att}",
                     "beat_index": local_idx,
@@ -1491,7 +1520,7 @@ async def _generate_prose_semi_parallel_v25(
                             temp = min(1.0, temp + flags.fail_fast_temperature_step)
                         else:
                             temp = max(0.3, temp - 0.1)
-                            usr_p = usr_p + f"\n\n【修正要求】上一版本存在以下问题：{fail_r}。请保持原语境，仅修复该冲突。"
+                            pending_hint = f"\n\n【修正要求】上一版本存在以下问题：{fail_r}。请保持原语境，仅修复该冲突。"
                     else:
                         is_ok = True
                 else:
@@ -1578,6 +1607,7 @@ async def _generate_prose_semi_parallel_v25(
     prompts_last = []
     user_prompt_last = ""
     last_error_last = None
+    pending_error_hint_last = ""  # Fail-Fast 跨迭代错误提示
 
     while att_last < max_att_last and not is_ok_last:
         att_last += 1
@@ -1599,6 +1629,9 @@ async def _generate_prose_semi_parallel_v25(
                 # 最后一个 beat，非第一个
                 is_first_beat=False,
             )
+            # Fail-Fast：将上次重试的错误提示注入到本次 prompt
+            if pending_error_hint_last:
+                user_prompt_last = user_prompt_last + pending_error_hint_last
             prompts_last.append({
                 "stage": f"PROSE_DRAFT_ATTEMPT_{att_last}",
                 "beat_index": last_beat_idx,
@@ -1638,7 +1671,7 @@ async def _generate_prose_semi_parallel_v25(
                         temp_last = min(1.0, temp_last + flags.fail_fast_temperature_step)
                     else:
                         temp_last = max(0.3, temp_last - 0.1)
-                        user_prompt_last = user_prompt_last + f"\n\n【修正要求】上一版本存在以下问题：{fail_r_last}。请保持原语境，仅修复该冲突。"
+                        pending_error_hint_last = f"\n\n【修正要求】上一版本存在以下问题：{fail_r_last}。请保持原语境，仅修复该冲突。"
                 else:
                     is_ok_last = True
             else:
@@ -1745,6 +1778,9 @@ async def _micro_review_assertion(
             red_lines=beat.get("red_lines") if beat else None,
             relational_state_lock=dynamic_context.relational_state_lock,
             character_static_prompts=char_prompts,
+            # V3.6: ensemble 多视角参数
+            pov_mode=beat.get("pov_mode", "single") if beat else "single",
+            pov_characters=beat.get("pov_characters", []) if beat else [],
         )
         
         response = await _call_llm_with_stats(
