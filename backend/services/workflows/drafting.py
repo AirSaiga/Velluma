@@ -540,8 +540,19 @@ async def _generate_subconscious_batch(
                         best = max(rollout, key=lambda x: x.get("score", 0))
                         thought = best.get("thought", "")
             except (json.JSONDecodeError, TypeError, KeyError):
-                # JSON 解析失败，回退到纯文本模式
-                thought = cleaned
+                # JSON 解析失败：先用 regex 二次提取 best_subconscious
+                import re as _re
+                _match = _re.search(r'"best_subconscious"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+                if _match:
+                    thought = _match.group(1).strip()
+                    logger.debug(f"[Subconscious] Beat {beat_index}: regex 二次提取成功")
+                elif cleaned.startswith('{') or cleaned.startswith('['):
+                    # 响应是 JSON 片段但完全无法解析，用安全默认值，避免原始 JSON 污染 Prompt
+                    pov_ch_fb = beat.get("pov_character", "主角")
+                    thought = f"{pov_ch_fb}内心正在权衡当前局势，高度警觉。"
+                    logger.warning(f"[Subconscious] Beat {beat_index}: JSON 解析+regex 均失败，使用默认独白")
+                else:
+                    thought = cleaned
             
             # 长度约束
             if len(thought) > 150:
@@ -1430,12 +1441,21 @@ async def _generate_prose_semi_parallel_v25(
         # 更新 DynamicContext：为下一 Beat 准备真实的 previous_tail
         if beat_idx_0 < n - 1:
             next_entry = beats[beat_idx_0 + 1].get('entry_state', '未指定')
+            current_exit = beat.get('exit_state', '未指定')
             pov_anchor = (
                 f"\n[System Tracker: 当前主语视角强锁定为 {pov_ch} "
-                f"| 当前退出状态: {beat.get('exit_state', '未指定')} "
+                f"| 当前退出状态: {current_exit} "
                 f"| 下一拍进入状态: {next_entry}]"
             )
             dynamic_context.previous_tail = _extract_tail(chunk, max_chars=300) + pov_anchor
+
+            # 用当前 Beat 的 exit_state 更新物理状态锁：
+            # 避免后续 Beat 仍然使用章节初始物理约束（如 Beat 1 的"站在入口"）
+            if current_exit and current_exit != '未指定':
+                dynamic_context.physical_state_lock = (
+                    f"{pov_ch}当前态势（{beat.get('beat_title', f'Beat {beat_number}')}结束）：{current_exit}"
+                )
+                logger.debug(f"[Prose Serial-Cascade] Beat {beat_number} 更新 physical_state_lock: {current_exit[:50]}...")
 
             if flags.enable_emotional_scratchpad:
                 state_update = await _update_dynamic_state(
