@@ -348,11 +348,12 @@ async function handleTestConnection() {
 </script>
 
 <template>
-  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-    <div class="bg-[var(--bg-secondary)] rounded-xl shadow-2xl w-full max-w-2xl border border-[var(--border-color)] flex flex-col max-h-[90vh]">
+  <Transition name="modal">
+    <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div class="modal-content bg-[var(--bg-secondary)] rounded-2xl shadow-xl w-full max-w-2xl border border-[var(--border-color)] flex flex-col max-h-[90vh]">
       <!-- Header -->
       <div class="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
-        <h2 class="text-lg font-semibold text-[var(--text-primary)]">API 设置</h2>
+        <h2 class="text-lg font-heading font-semibold text-[var(--text-primary)]">API 设置</h2>
         <button 
           @click="$emit('close')"
           class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -369,7 +370,7 @@ async function handleTestConnection() {
           <select
             v-model="formData.provider"
             @change="handleProviderChange"
-            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
           >
             <option v-for="(p, key) in PROVIDERS" :key="key" :value="key">
               {{ p.name }}
@@ -384,7 +385,7 @@ async function handleTestConnection() {
             v-model="formData.api_key"
             type="password"
             placeholder="sk-..."
-            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
             您的 API Key 仅存储在本地浏览器中，不会上传到服务器。
@@ -399,7 +400,7 @@ async function handleTestConnection() {
             type="text"
             :placeholder="isCustomProvider ? 'https://api.example.com/v1' : ''"
             :readonly="!isCustomProvider"
-            :class="['w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500', !isCustomProvider && 'opacity-75 cursor-not-allowed']"
+            :class="['w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40', !isCustomProvider && 'opacity-75 cursor-not-allowed']"
           />
         </div>
 
@@ -410,7 +411,7 @@ async function handleTestConnection() {
             <button 
               v-if="!isCustomProvider && currentProvider.models.length > 0"
               @click="isManualModel = !isManualModel"
-              class="text-xs text-primary-600 hover:text-primary-700 font-medium transition-colors"
+              class="text-xs text-accent-600 hover:text-accent-700 font-medium transition-colors"
             >
               {{ isManualModel ? '从列表选择' : '手动输入' }}
             </button>
@@ -419,7 +420,7 @@ async function handleTestConnection() {
           <div v-if="!isCustomProvider && currentProvider.models.length > 0 && !isManualModel">
             <select
               v-model="formData.model"
-              class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
             >
               <option v-for="m in currentProvider.models" :key="m" :value="m">
                 {{ m }}
@@ -431,7 +432,7 @@ async function handleTestConnection() {
             v-model="formData.model"
             type="text"
             placeholder="例如: gpt-4o"
-            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
           />
           <p class="mt-1 text-xs text-[var(--text-muted)]">
             当未启用双模型时，使用此模型进行所有生成任务。
@@ -446,8 +447,8 @@ async function handleTestConnection() {
             :class="[
               'w-full px-4 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2',
               isTestingConnection 
-                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed' 
-                : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] border border-[var(--border-color)]'
+                ? 'bg-[var(--bg-panel)] text-[var(--text-muted)] cursor-not-allowed' 
+                : 'bg-[var(--bg-panel)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] ring-1 ring-[var(--border-color)]'
             ]"
           >
             <svg v-if="isTestingConnection" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -502,7 +503,7 @@ async function handleTestConnection() {
               @click="enableDualModel = !enableDualModel; handleDualModelToggle()"
               :class="[
                 'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                enableDualModel ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+                enableDualModel ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
               ]"
             >
               <span
@@ -516,7 +517,7 @@ async function handleTestConnection() {
         </div>
 
         <!-- Dual Model Settings -->
-        <div v-if="enableDualModel" class="space-y-4 border border-[var(--border-color)] rounded-lg p-4 bg-[var(--bg-tertiary)]/50">
+        <div v-if="enableDualModel" class="space-y-4 border border-[var(--border-color)] rounded-xl p-4 bg-[var(--bg-panel)]/50 ring-1 ring-[var(--border-color)]/60">
           <!-- Reasoning Model -->
           <div>
             <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
@@ -529,7 +530,7 @@ async function handleTestConnection() {
               v-model="formData.reasoning_model"
               type="text"
               placeholder="例如: openai/o3-mini, anthropic/claude-3.7-sonnet, deepseek/deepseek-r1"
-              class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
             />
             <p class="mt-1 text-xs text-[var(--text-muted)]">
               用于 Scene Intent 分析、潜意识生成、审阅与精修阶段
@@ -543,7 +544,7 @@ async function handleTestConnection() {
                   @click="formData.reasoning_model_reasoning_enabled = !formData.reasoning_model_reasoning_enabled"
                   :class="[
                     'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                    formData.reasoning_model_reasoning_enabled ? 'bg-blue-500' : 'bg-[var(--bg-tertiary)]'
+                    formData.reasoning_model_reasoning_enabled ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
                   ]"
                 >
                   <span
@@ -559,7 +560,7 @@ async function handleTestConnection() {
               <div v-if="formData.reasoning_model_reasoning_enabled" class="space-y-2">
                 <select
                   v-model="formData.reasoning_model_reasoning_effort"
-                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[var(--text-primary)]"
+                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
                 >
                   <option value="xhigh">极高 (xhigh) - 约 95% tokens 用于推理</option>
                   <option value="high">高 (high) - 约 80% tokens 用于推理</option>
@@ -586,7 +587,7 @@ async function handleTestConnection() {
               v-model="formData.creative_model"
               type="text"
               placeholder="例如: claude-3-haiku, gemini-flash, qwen-plus"
-              class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
             />
             <p class="mt-1 text-xs text-[var(--text-muted)]">
               用于正文起草阶段，需要较强的创意和写作能力
@@ -600,7 +601,7 @@ async function handleTestConnection() {
                   @click="formData.creative_model_reasoning_enabled = !formData.creative_model_reasoning_enabled"
                   :class="[
                     'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                    formData.creative_model_reasoning_enabled ? 'bg-amber-500' : 'bg-[var(--bg-tertiary)]'
+                    formData.creative_model_reasoning_enabled ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
                   ]"
                 >
                   <span
@@ -616,7 +617,7 @@ async function handleTestConnection() {
               <div v-if="formData.creative_model_reasoning_enabled" class="space-y-2">
                 <select
                   v-model="formData.creative_model_reasoning_effort"
-                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[var(--text-primary)]"
+                  class="w-full px-2 py-1.5 text-xs bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
                 >
                   <option value="high">高 (high) - 约 80% tokens 用于推理</option>
                   <option value="medium">中 (medium) - 约 50% tokens 用于推理</option>
@@ -668,7 +669,7 @@ async function handleTestConnection() {
             @click="formData.reasoning_enabled = !formData.reasoning_enabled"
             :class="[
               'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-              formData.reasoning_enabled ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+              formData.reasoning_enabled ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
             ]"
           >
             <span
@@ -681,7 +682,7 @@ async function handleTestConnection() {
         </div>
         
         <!-- 推理模式详细配置 -->
-        <div v-if="formData.reasoning_enabled" class="space-y-4 border border-[var(--border-color)] rounded-lg p-4 bg-[var(--bg-tertiary)]/50">
+        <div v-if="formData.reasoning_enabled" class="space-y-4 border border-[var(--border-color)] rounded-xl p-4 bg-[var(--bg-panel)]/50 ring-1 ring-[var(--border-color)]/60">
           <!-- 推理努力程度 -->
           <div>
             <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">
@@ -689,7 +690,7 @@ async function handleTestConnection() {
             </label>
             <select
               v-model="formData.reasoning_effort"
-              class="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
             >
               <option value="xhigh">极高 (xhigh) - 约 95% tokens 用于推理</option>
               <option value="high">高 (high) - 约 80% tokens 用于推理</option>
@@ -715,7 +716,7 @@ async function handleTestConnection() {
               @click="formData.reasoning_exclude = !formData.reasoning_exclude"
               :class="[
                 'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                formData.reasoning_exclude ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+                formData.reasoning_exclude ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
               ]"
             >
               <span
@@ -759,7 +760,7 @@ async function handleTestConnection() {
             @click="proxyEnabled = !proxyEnabled"
             :class="[
               'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-              proxyEnabled ? 'bg-primary-500' : 'bg-[var(--bg-tertiary)]'
+              proxyEnabled ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
             ]"
           >
             <span
@@ -776,7 +777,7 @@ async function handleTestConnection() {
             v-model="proxyUrl"
             type="text"
             placeholder="http://127.0.0.1:7890"
-            class="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+            class="w-full px-3 py-2 bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40"
           />
         </div>
       </div>
@@ -785,23 +786,24 @@ async function handleTestConnection() {
       <div class="p-4 border-t border-[var(--border-color)] flex justify-end space-x-3">
         <button
           @click="handleResetLocal"
-          class="px-4 py-2 text-sm font-medium text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+          class="px-4 py-2 text-sm font-medium text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors"
         >
           重置本地设置
         </button>
         <button 
           @click="$emit('close')"
-          class="px-4 py-2 text-sm font-medium text-[var(--text-primary)] bg-transparent hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+          class="px-4 py-2 text-sm font-medium text-[var(--text-primary)] bg-transparent hover:bg-[var(--bg-panel)] rounded-xl transition-colors"
         >
           取消
         </button>
         <button 
           @click="handleSave"
-          class="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors"
+          class="px-4 py-2 text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 rounded-xl shadow-sm transition-colors"
         >
           保存设置
         </button>
       </div>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>

@@ -306,7 +306,7 @@ const editor = useEditor({
   ],
   editorProps: {
     attributes: {
-      class: 'prose prose-lg max-w-none mx-auto focus:outline-none min-h-[560px] px-10 py-8 text-[var(--text-primary)]',
+      class: 'prose prose-lg max-w-3xl mx-auto focus:outline-none min-h-[560px] px-12 py-10 text-[var(--text-primary)] leading-[2.0]',
     },
   },
   onUpdate: ({ editor }) => {
@@ -1049,12 +1049,12 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="editorContainerRef" class="rich-text-editor bg-white overflow-hidden flex flex-col h-full relative" :class="{ 'opacity-60': disabled }">
-    <div v-if="editor && !disabled" class="toolbar flex items-center gap-0.5 px-3 py-1.5 bg-white border-b border-[var(--border-color)] overflow-x-auto whitespace-nowrap flex-shrink-0">
+  <div ref="editorContainerRef" class="rich-text-editor bg-parchment-50 overflow-hidden flex flex-col h-full relative" :class="{ 'opacity-60': disabled }">
+    <div v-if="editor && !disabled" class="toolbar flex items-center gap-1 px-3 py-1.5 bg-[var(--bg-secondary)]/80 backdrop-blur-sm border-b border-[var(--border-color)]/40 overflow-x-auto whitespace-nowrap flex-shrink-0">
       <button 
         @click="toggleBold" 
         :class="{ 'is-active': editor.isActive('bold') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="加粗"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path></svg>
@@ -1062,7 +1062,7 @@ defineExpose({
       <button 
         @click="toggleItalic" 
         :class="{ 'is-active': editor.isActive('italic') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="斜体"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"></line><line x1="14" y1="20" x2="5" y2="20"></line><line x1="15" y1="4" x2="9" y2="20"></line></svg>
@@ -1070,7 +1070,7 @@ defineExpose({
       <button 
         @click="toggleUnderline" 
         :class="{ 'is-active': editor.isActive('underline') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="下划线"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"></path><line x1="4" y1="21" x2="20" y2="21"></line></svg>
@@ -1078,7 +1078,7 @@ defineExpose({
       <button 
         @click="toggleStrike" 
         :class="{ 'is-active': editor.isActive('strike') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="删除线"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.8 3.3 3.6 3.9h.2"></path><path d="M8.7 19.1c2.3.6 4.4 1 6.2.9 2.7 0 5.3-.7 5.3-3.6 0-1.5-1.8-3.3-3.6-3.9h-.2"></path><line x1="3" y1="12" x2="21" y2="12"></line></svg>
@@ -1086,7 +1086,7 @@ defineExpose({
       <button 
         @click="formatContent" 
         :class="{ 'opacity-50 cursor-not-allowed': isFormatting }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors relative"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors relative"
         title="智能格式整理（AI分段、标点修正）"
       >
         <svg v-if="!isFormatting" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>
@@ -1113,7 +1113,7 @@ defineExpose({
       <button 
         @click="setTextAlign('left')" 
         :class="{ 'is-active': editor.isActive({ textAlign: 'left' }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="左对齐"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="9" y2="12"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
@@ -1121,7 +1121,7 @@ defineExpose({
       <button 
         @click="setTextAlign('center')" 
         :class="{ 'is-active': editor.isActive({ textAlign: 'center' }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="居中"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="18" y1="12" x2="6" y2="12"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
@@ -1129,7 +1129,7 @@ defineExpose({
       <button 
         @click="setTextAlign('right')" 
         :class="{ 'is-active': editor.isActive({ textAlign: 'right' }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="右对齐"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="15" y2="12"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
@@ -1137,7 +1137,7 @@ defineExpose({
       <button 
         @click="setTextAlign('justify')" 
         :class="{ 'is-active': editor.isActive({ textAlign: 'justify' }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="两端对齐"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="3" y2="12"></line><line x1="21" y1="18" x2="3" y2="18"></line><line x1="21" y1="6" x2="21" y2="18"></line></svg>
@@ -1146,7 +1146,7 @@ defineExpose({
       <button 
         @click="toggleSuperscript" 
         :class="{ 'is-active': editor.isActive('superscript') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="上标"
       >
         X<sup>2</sup>
@@ -1154,7 +1154,7 @@ defineExpose({
       <button 
         @click="toggleSubscript" 
         :class="{ 'is-active': editor.isActive('subscript') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="下标"
       >
         X<sub>2</sub>
@@ -1163,7 +1163,7 @@ defineExpose({
       <button 
         @click="toggleHeading(1)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 1 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 1"
       >
         H1
@@ -1171,7 +1171,7 @@ defineExpose({
       <button 
         @click="toggleHeading(2)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 2 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 2"
       >
         H2
@@ -1179,7 +1179,7 @@ defineExpose({
       <button 
         @click="toggleHeading(3)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 3 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 3"
       >
         H3
@@ -1187,7 +1187,7 @@ defineExpose({
       <button 
         @click="toggleHeading(4)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 4 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 4"
       >
         H4
@@ -1195,7 +1195,7 @@ defineExpose({
       <button 
         @click="toggleHeading(5)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 5 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 5"
       >
         H5
@@ -1203,7 +1203,7 @@ defineExpose({
       <button 
         @click="toggleHeading(6)" 
         :class="{ 'is-active': editor.isActive('heading', { level: 6 }) }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-bold"
         title="标题 6"
       >
         H6
@@ -1212,7 +1212,7 @@ defineExpose({
       <button 
         @click="setParagraph" 
         :class="{ 'is-active': editor.isActive('paragraph') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
         title="正文"
       >
         正文
@@ -1220,7 +1220,7 @@ defineExpose({
       <button 
         @click="toggleCodeBlock" 
         :class="{ 'is-active': editor.isActive('codeBlock') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-mono"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px] font-mono"
         title="代码块"
       >
         &lt;/&gt;
@@ -1228,7 +1228,7 @@ defineExpose({
       <button 
         @click="toggleBlockquote" 
         :class="{ 'is-active': editor.isActive('blockquote') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
+        class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
         title="引用"
       >
         ❝
@@ -1237,7 +1237,7 @@ defineExpose({
       <button 
         @click="toggleBulletList" 
         :class="{ 'is-active': editor.isActive('bulletList') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="无序列表"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -1245,7 +1245,7 @@ defineExpose({
       <button 
         @click="toggleOrderedList" 
         :class="{ 'is-active': editor.isActive('orderedList') }"
-        class="p-1 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        class="p-1.5 rounded hover:bg-parchment-300/50 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         title="有序列表"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18" x2="21" y2="18"></line><path d="M4 6h1v4"></path><path d="M4 10h2"></path><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path></svg>
@@ -1260,12 +1260,12 @@ defineExpose({
       :tippy-options="{ duration: 100, placement: 'bottom' }"
       :should-show="shouldShowCritiqueMenu"
     >
-      <div v-if="currentCritique" class="bg-white border border-slate-200 shadow-lg rounded-lg p-3 max-w-sm flex flex-col gap-2 text-sm">
+      <div v-if="currentCritique" class="bg-[var(--bg-primary)] border border-[var(--border-color)] shadow-lg rounded-lg p-3 max-w-sm flex flex-col gap-2 text-sm">
         <div class="flex items-center gap-2">
-          <span class="font-bold text-slate-800">{{ currentCritique.type }}</span>
+          <span class="font-bold text-ink-800">{{ currentCritique.type }}</span>
         </div>
-        <div class="text-slate-600 leading-relaxed">{{ currentCritique.comment }}</div>
-        <div v-if="currentCritique.suggestion" class="text-slate-500 text-xs italic border-t pt-2 mt-1">
+        <div class="text-ink-600 leading-relaxed">{{ currentCritique.comment }}</div>
+        <div v-if="currentCritique.suggestion" class="text-ink-500 text-xs italic border-t pt-2 mt-1">
           建议：{{ currentCritique.suggestion }}
         </div>
       </div>
@@ -1277,43 +1277,43 @@ defineExpose({
         ref="selectionMenuRef"
         tabindex="-1"
         :style="{ top: selectionMenuPos.top + 'px', left: selectionMenuPos.left + 'px' }"
-        class="absolute z-50 bg-white/95 backdrop-blur border border-slate-200 rounded-xl p-2 flex items-center gap-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)]"
+        class="absolute z-50 bg-[var(--bg-primary)]/95 backdrop-blur border border-[var(--border-color)] rounded-xl p-2 flex items-center gap-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)]"
         @mousedown.prevent.stop
         @keydown.esc.prevent.stop="handleEscapeShortcut"
       >
       <template v-if="optimizationState === 'toolbar'">
         <button
           @click="toggleBold"
-          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('bold') }"
+          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors"
+          :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('bold') }"
           title="加粗"
         >
           B
         </button>
         <button
           @click="toggleItalic"
-          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors italic"
-          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('italic') }"
+          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors italic"
+          :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('italic') }"
           title="斜体"
         >
           I
         </button>
         <button
           @click="toggleUnderline"
-          class="px-2 py-1 text-[11px] rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors underline"
-          :class="{ 'bg-indigo-50 text-indigo-600': editor?.isActive('underline') }"
+          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors underline"
+          :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('underline') }"
           title="下划线"
         >
           U
         </button>
-        <div class="w-px h-4 bg-slate-200"></div>
+        <div class="w-px h-4 bg-[var(--border-color)]"></div>
         <button
           @click="openAiRewrite"
-          class="px-2.5 py-1 text-[11px] rounded-md bg-indigo-600 text-white font-medium hover:bg-indigo-500 transition-colors"
+          class="px-2.5 py-1 text-[11px] rounded-md bg-accent-600 text-white font-medium hover:bg-accent-500 transition-colors"
         >
           ✨ AI 润色/改写
         </button>
-        <div class="w-px h-4 bg-slate-200"></div>
+        <div class="w-px h-4 bg-[var(--border-color)]"></div>
         <button
           @click="addToGoldenSnippets"
           :disabled="!props.bookId || !hasSelection"
@@ -1337,21 +1337,21 @@ defineExpose({
           <button
             @click="setAiIntentMode('polish')"
             class="px-2 py-1 text-[10px] rounded-md border transition-colors"
-            :class="aiIntentMode === 'polish' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+            :class="aiIntentMode === 'polish' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             润色
           </button>
           <button
             @click="setAiIntentMode('expand')"
             class="px-2 py-1 text-[10px] rounded-md border transition-colors"
-            :class="aiIntentMode === 'expand' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+            :class="aiIntentMode === 'expand' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             扩写
           </button>
           <button
             @click="setAiIntentMode('compress')"
             class="px-2 py-1 text-[10px] rounded-md border transition-colors"
-            :class="aiIntentMode === 'compress' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'"
+            :class="aiIntentMode === 'compress' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             压缩
           </button>
@@ -1363,18 +1363,18 @@ defineExpose({
           @blur="handleInputBlur"
           @keydown="handleInstructionKeydown"
           :placeholder="getDynamicInstructionPlaceholder()"
-          class="text-xs border border-[var(--border-color)] rounded-lg px-2 py-1.5 outline-none focus:border-[var(--accent-600)] w-72 text-[var(--text-primary)] bg-white"
+          class="text-xs border border-[var(--border-color)] rounded-lg px-2 py-1.5 outline-none focus:border-[var(--accent-600)] w-72 text-[var(--text-primary)] bg-[var(--bg-canvas)]"
         />
         <button 
           @click="handleOptimizeSelection" 
-          class="px-2 py-1 rounded-md text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+          class="px-2 py-1 rounded-md text-xs bg-accent-50 text-accent-600 hover:bg-accent-100 transition-colors"
           title="执行优化"
         >
           执行
         </button>
         <button 
           @click="backToToolbar" 
-          class="px-2 py-1 rounded-md text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 transition-colors"
+          class="px-2 py-1 rounded-md text-xs bg-parchment-100 text-ink-600 hover:bg-parchment-200 transition-colors"
           title="取消"
         >
           取消
@@ -1400,7 +1400,7 @@ defineExpose({
         </button>
         <button 
           @click="rejectOptimization"
-          class="px-3 py-1 text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 transition-colors"
+          class="px-3 py-1 text-xs bg-parchment-100 text-ink-600 hover:bg-parchment-200 rounded border border-[var(--border-color)] transition-colors"
         >
           保留原文
         </button>
@@ -1411,7 +1411,7 @@ defineExpose({
     <transition name="undo-hint">
       <button
         v-if="showUndoHint"
-        class="absolute right-4 bottom-4 z-40 px-3 py-1.5 rounded-full text-xs bg-slate-900 text-white shadow-lg hover:bg-slate-800 transition-colors"
+        class="absolute right-4 bottom-4 z-40 px-3 py-1.5 rounded-full text-xs bg-ink-900 text-white shadow-lg hover:bg-ink-800 transition-colors"
         @click="undoLastOptimization"
       >
         已替换 · 撤销
@@ -1422,7 +1422,8 @@ defineExpose({
 
 <style scoped>
 .rich-text-editor .is-active {
-  background-color: rgba(99, 102, 241, 0.12);
+  /* 使用 accent 色系的透明背景 */
+  background-color: hsla(260, 60%, 55%, 0.12);
   color: var(--accent-600);
 }
 
@@ -1446,9 +1447,13 @@ defineExpose({
     height: 100%;
     outline: none;
     font-family: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
-    font-size: 1.15rem;
-    line-height: 1.95;
-    /* Move padding to ProseMirror for internal scrolling if needed, but here we rely on parent's overflow */
+    font-size: 1rem;
+    line-height: 2.0;
+    color: var(--text-primary);
+  }
+  
+  :deep(.ProseMirror p) {
+    margin-bottom: 1.25em;
   }
 :deep(.critique-highlight) {
   background-color: rgba(255, 215, 0, 0.2);
@@ -1461,6 +1466,7 @@ defineExpose({
 }
 :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-muted);
+  /* ink-400 色调 */
   content: attr(data-placeholder);
   float: left;
   height: 0;

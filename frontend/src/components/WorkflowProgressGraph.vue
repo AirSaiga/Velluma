@@ -141,8 +141,8 @@ const progressWidth = computed(() => {
   <div class="workflow-progress-graph">
     <!-- 标题区域 -->
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-semibold text-slate-700">生成进度</h3>
-      <span v-if="getIterationText()" class="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
+      <h3 class="text-sm font-semibold text-ink-700">生成进度</h3>
+      <span v-if="getIterationText()" class="text-xs px-2 py-0.5 bg-accent-100 text-accent-700 rounded-full">
         {{ getIterationText() }}
       </span>
     </div>
@@ -150,11 +150,11 @@ const progressWidth = computed(() => {
     <!-- 节点流程图 -->
     <div class="relative">
       <!-- 连接线 -->
-      <div class="absolute top-6 left-8 right-8 h-0.5 bg-slate-200 -translate-y-1/2 z-0"></div>
+      <div class="absolute top-6 left-8 right-8 h-0.5 bg-ink-200 -translate-y-1/2 z-0"></div>
       
       <!-- 已完成的连接线 -->
       <div 
-        class="absolute top-6 left-8 h-0.5 bg-indigo-500 -translate-y-1/2 z-0 transition-all duration-500"
+        class="absolute top-6 left-8 h-0.5 bg-accent-500 -translate-y-1/2 z-0 transition-all duration-500"
         :style="{ width: progressWidth }"
       ></div>
       
@@ -171,11 +171,11 @@ const progressWidth = computed(() => {
             class="w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 border-2"
             :class="{
               // 已完成状态
-              'bg-indigo-500 border-indigo-500': getNodeStatus(node.id) === 'completed',
+              'bg-accent-500 border-accent-500': getNodeStatus(node.id) === 'completed',
               // 进行中状态
-              'bg-white border-indigo-500 shadow-lg shadow-indigo-200 scale-110': getNodeStatus(node.id) === 'active',
+              'bg-parchment-50 border-accent-500 shadow-lg shadow-accent-200 scale-110': getNodeStatus(node.id) === 'active',
               // 待处理状态
-              'bg-white border-slate-300': getNodeStatus(node.id) === 'pending'
+              'bg-parchment-50 border-ink-300': getNodeStatus(node.id) === 'pending'
             }"
           >
             <!-- 完成图标 -->
@@ -191,9 +191,9 @@ const progressWidth = computed(() => {
             
             <!-- 进行中动画 -->
             <template v-else-if="getNodeStatus(node.id) === 'active'">
-              <div class="absolute inset-0 rounded-full border-2 border-indigo-500 animate-ping opacity-30"></div>
-              <svg 
-                class="w-5 h-5 text-indigo-500 animate-spin"
+              <div class="absolute inset-0 rounded-full border-2 border-accent-500 animate-ping opacity-30"></div>
+              <svg
+                class="w-5 h-5 text-accent-500 animate-spin"
                 fill="none" 
                 viewBox="0 0 24 24"
               >
@@ -203,9 +203,9 @@ const progressWidth = computed(() => {
             </template>
             
             <!-- 待处理图标 -->
-            <svg 
+            <svg
               v-else
-              class="w-5 h-5 text-slate-400"
+              class="w-5 h-5 text-ink-400"
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24"
@@ -219,16 +219,16 @@ const progressWidth = computed(() => {
             <div 
               class="text-xs font-medium transition-colors duration-300"
               :class="{
-                'text-indigo-600': getNodeStatus(node.id) === 'active',
-                'text-slate-600': getNodeStatus(node.id) === 'completed',
-                'text-slate-400': getNodeStatus(node.id) === 'pending'
+                 'text-accent-600': getNodeStatus(node.id) === 'active',
+                'text-ink-600': getNodeStatus(node.id) === 'completed',
+                'text-ink-400': getNodeStatus(node.id) === 'pending'
               }"
             >
               {{ node.label }}
             </div>
             <div 
               v-if="getNodeStatus(node.id) === 'active' && message"
-              class="text-[10px] text-slate-500 mt-0.5 max-w-[80px] truncate"
+              class="text-[10px] text-ink-500 mt-0.5 max-w-[80px] truncate"
               :title="message"
             >
               {{ message }}
@@ -241,11 +241,11 @@ const progressWidth = computed(() => {
     <!-- 当前状态信息 -->
     <div 
       v-if="currentEvent && currentEvent !== 'DONE' && currentEvent !== 'TEXT_CHUNK'"
-      class="mt-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100"
+      class="mt-4 p-3 bg-accent-50 rounded-lg border border-accent-100"
     >
       <div class="flex items-center gap-2">
-        <div class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></div>
-        <span class="text-xs text-indigo-700 font-medium">
+        <div class="w-2 h-2 rounded-full bg-accent-500 animate-pulse"></div>
+        <span class="text-xs text-accent-700 font-medium">
           {{ workflowNodes.find(n => n.id === currentEvent)?.description || message }}
         </span>
       </div>

@@ -5,6 +5,8 @@ const DEFAULT_PREFS = {
   splitSizes: [22, 56, 22],
   rightTab: 'characters',
   chapterMetaCollapsed: false,
+  sidebarCollapsed: false,
+  rightDrawerOpen: false,
 }
 
 export type UiPrefs = typeof DEFAULT_PREFS

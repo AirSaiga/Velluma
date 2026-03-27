@@ -75,10 +75,10 @@ const sortedLocations = computed(() => {
 function getLocationHighlightClass(locId) {
   const level = locationHighlightLevelMap.value.get(locId)
   if (level === 'strong') return 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 animate-pulse'
-  if (level === 'weak') return 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-100'
+  if (level === 'weak') return 'bg-accent-50 border-accent-200 ring-1 ring-accent-100'
   return isSelected(locId)
-    ? 'bg-indigo-50 border-indigo-200 hover:border-indigo-300'
-    : 'bg-[var(--bg-panel)] border-transparent hover:border-slate-200'
+    ? 'bg-accent-50 border-accent-200 hover:border-accent-300'
+    : 'bg-[var(--bg-panel)] border-transparent hover:border-ink-200'
 }
 
 // Initialize
@@ -219,7 +219,7 @@ async function toggleLocation(loc) {
         <h3 class="text-xs font-medium text-[var(--text-primary)]">场景地图库</h3>
         <button 
           @click="openCreateModal"
-          class="p-1 rounded hover:bg-black/5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          class="p-1 rounded hover:bg-ink-100 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           title="新建地点"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -239,7 +239,7 @@ async function toggleLocation(loc) {
         <div 
           v-for="loc in sortedLocations" 
           :key="loc.id"
-          class="group relative p-2 rounded-lg border transition-all cursor-pointer"
+          class="group relative p-2 rounded-xl ring-1 ring-[var(--border-color)]/60 transition-all cursor-pointer hover:shadow-md"
           :class="getLocationHighlightClass(loc.id)"
           @click="toggleLocation(loc)"
         >
@@ -248,7 +248,7 @@ async function toggleLocation(loc) {
               <div class="flex items-center gap-1.5">
                 <div 
                   class="w-3 h-3 rounded-full border flex items-center justify-center transition-colors"
-                  :class="isSelected(loc.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300'"
+                  :class="isSelected(loc.id) ? 'bg-accent-500 border-accent-500' : 'border-ink-300'"
                 >
                   <svg v-if="isSelected(loc.id)" class="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
@@ -258,7 +258,7 @@ async function toggleLocation(loc) {
                 <span
                   v-if="locationHighlightLevelMap.get(loc.id)"
                   class="px-1 py-0.5 text-[9px] rounded-full"
-                  :class="locationHighlightLevelMap.get(loc.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'"
+                  :class="locationHighlightLevelMap.get(loc.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-accent-100 text-accent-700'"
                 >
                   {{ locationHighlightLevelMap.get(loc.id) === 'strong' ? '强匹配' : '弱匹配' }}
                 </span>
@@ -272,7 +272,7 @@ async function toggleLocation(loc) {
             <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
               <button 
                 @click.stop="openEditModal(loc)"
-                class="p-1 text-slate-400 hover:text-indigo-600"
+                class="p-1 text-ink-400 hover:text-accent-600 transition-colors"
               >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
@@ -280,7 +280,7 @@ async function toggleLocation(loc) {
               </button>
               <button 
                 @click.stop="deleteLocation(loc.id)"
-                class="p-1 text-slate-400 hover:text-rose-500"
+                class="p-1 text-ink-400 hover:text-rose-500 transition-colors"
               >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -293,13 +293,13 @@ async function toggleLocation(loc) {
     </div>
 
     <!-- Specific Constraints -->
-    <div class="h-1/3 flex flex-col border-t border-slate-100 pt-3">
+    <div class="h-1/3 flex flex-col border-t border-ink-100 pt-3">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-xs font-medium text-[var(--text-primary)]">本章活动范围限制</h3>
         <button 
           v-if="isDirty"
           @click="saveRange"
-          class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-500 transition-colors"
+          class="px-2 py-1 text-xs bg-accent-600 text-white rounded-xl hover:bg-accent-500 transition-colors"
         >
           保存
         </button>
@@ -308,54 +308,54 @@ async function toggleLocation(loc) {
       <textarea
         v-model="mapActivityRange"
         @input="handleChange"
-        class="flex-1 w-full p-2 text-xs bg-[var(--bg-panel)] text-[var(--text-primary)] rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500 border border-transparent focus:border-indigo-500 transition-all"
+        class="flex-1 w-full p-2 text-xs bg-[var(--bg-panel)] text-[var(--text-primary)] rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40 ring-1 ring-[var(--border-color)] transition-all"
         placeholder="在此输入针对本章的具体路线或活动范围限制..."
       ></textarea>
     </div>
 
     <!-- Modals -->
-    <div v-if="showCreateModal || showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm" @click.self="showCreateModal = false; showEditModal = false">
-      <div class="bg-white rounded-xl shadow-xl w-full max-w-sm p-4 mx-4">
-        <h3 class="text-sm font-semibold text-slate-800 mb-3">{{ showEditModal ? '编辑地点' : '新建地点' }}</h3>
+    <div v-if="showCreateModal || showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showCreateModal = false; showEditModal = false">
+      <div class="bg-parchment-50 rounded-2xl shadow-xl w-full max-w-sm p-4 mx-4">
+        <h3 class="text-sm font-heading font-semibold text-ink-800 mb-3">{{ showEditModal ? '编辑地点' : '新建地点' }}</h3>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs text-slate-500 mb-1">名称</label>
+            <label class="block text-xs text-ink-500 mb-1">名称</label>
             <input 
               v-model="locationForm.name"
-              class="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               placeholder="例如：暴风城、幽暗密林"
             />
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">描述 (Prompt上下文)</label>
+            <label class="block text-xs text-ink-500 mb-1">描述 (Prompt上下文)</label>
             <textarea 
               v-model="locationForm.description"
               rows="3"
-              class="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="详细描述该地点的环境、氛围、规则等..."
             ></textarea>
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">此刻状态 (实时快照)</label>
+            <label class="block text-xs text-ink-500 mb-1">此刻状态 (实时快照)</label>
             <textarea 
               v-model="locationForm.current_state"
               rows="2"
-              class="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="从世界快照中提取的此刻场景状态..."
             ></textarea>
-            <p class="text-[10px] text-slate-400 mt-0.5">此字段通常在章节发布时自动更新</p>
+            <p class="text-[10px] text-ink-400 mt-0.5">此字段通常在章节发布时自动更新</p>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button 
             @click="showCreateModal = false; showEditModal = false"
-            class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            class="px-3 py-1.5 text-xs text-ink-600 hover:bg-ink-100 rounded-xl transition-colors"
           >
             取消
           </button>
           <button 
             @click="showEditModal ? updateLocation() : createLocation()"
-            class="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors"
+            class="px-3 py-1.5 text-xs bg-accent-600 text-white rounded-xl hover:bg-accent-500 transition-colors"
           >
             确定
           </button>

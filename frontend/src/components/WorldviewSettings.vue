@@ -190,14 +190,14 @@ onUnmounted(() => {
       <div class="flex items-center gap-1">
         <button
           @click="openImportExport"
-          class="px-2 py-0.5 text-[10px] bg-white hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
           :disabled="isLoading"
         >
           导入/导出
         </button>
         <button
           @click="addItem"
-          class="px-2 py-0.5 text-[10px] bg-white hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
           :disabled="isLoading"
         >
           +新增
@@ -217,14 +217,14 @@ onUnmounted(() => {
     <div v-if="isLoading" class="text-[10px] text-[var(--text-muted)] mt-1">加载中...</div>
 
     <div v-else class="space-y-2">
-      <div v-if="items.length === 0" class="p-2 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)]">
+      <div v-if="items.length === 0" class="p-2 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
         暂无条目，点击"+新增"开始添加
       </div>
 
       <div
         v-for="it in items"
         :key="it.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl"
+        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
       >
         <div class="flex items-center gap-1.5">
           <button
@@ -244,7 +244,7 @@ onUnmounted(() => {
             v-model="it.title"
             @input="markDirty"
             type="text"
-            class="flex-1 px-2 py-1 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+            class="flex-1 px-2 py-1 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
             placeholder="条目标题"
           />
 
@@ -264,20 +264,20 @@ onUnmounted(() => {
             v-model="it.content"
             @input="markDirty"
             rows="4"
-            class="w-full px-2 py-1.5 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+            class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
             placeholder="填写详细设定..."
           />
         </div>
       </div>
     </div>
 
-    <div v-if="showImportExport" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showImportExport = false">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">世界观导入 / 导出</h3>
+    <div v-if="showImportExport" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showImportExport = false">
+      <div class="bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-heading font-semibold text-[var(--text-primary)] mb-4">世界观导入 / 导出</h3>
         <textarea
           v-model="importExportText"
           rows="14"
-          class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none font-mono"
+          class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none font-mono"
         />
         <div class="flex justify-end gap-3 mt-4">
           <button

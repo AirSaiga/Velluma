@@ -4,38 +4,60 @@
 
 /* 主题 CSS 变量 - 浅色主题 */
 :root {
-  --bg-primary: #f5f3ee;
-  --bg-secondary: #f8f6f1;
-  --bg-tertiary: #efece4;
-  --bg-canvas: #f0ece3;
-  --bg-panel: #ece8de;
-  --text-primary: #1f2937;
-  --text-secondary: #4b5563;
-  --text-muted: #8b95a7;
-  --border-color: #ddd8cd;
-  --hover-bg: #ece8de;
-  --scrollbar-thumb: #c6c1b4;
-  --scrollbar-thumb-hover: #9e9787;
-  --accent-500: #6366f1;
-  --accent-600: #4f46e5;
+  /* 背景色 - 暖纸张系 */
+  --bg-primary: #f7f4ed;
+  --bg-secondary: #faf8f4;
+  --bg-tertiary: #f0ece3;
+  --bg-canvas: #fefdfb;
+  --bg-panel: #f0ece3;
+
+  /* 文本色 - 深墨色系 */
+  --text-primary: #2c2c2c;
+  --text-secondary: #6b6560;
+  --text-muted: #a89e90;
+
+  /* 边框 - 暖灰 */
+  --border-color: #e0dbd3;
+  --hover-bg: #eee9df;
+
+  /* 滚动条 - 暖色系 */
+  --scrollbar-thumb: #c8c0b4;
+  --scrollbar-thumb-hover: #a89e90;
+
+  /* 强调色 - 暖靛紫 */
+  --accent-500: #7c6aad;
+  --accent-600: #6d5dab;
+
+  /* 字体 */
+  --font-body: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --font-heading: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', 'PingFang SC', serif;
 }
 
 /* 主题 CSS 变量 - 深色主题 */
 :root.dark {
-  --bg-primary: #111318;
-  --bg-secondary: #181b22;
-  --bg-tertiary: #222632;
-  --bg-canvas: #141820;
-  --bg-panel: #202531;
-  --text-primary: #f2f4f8;
-  --text-secondary: #cad0da;
-  --text-muted: #8e97a7;
-  --border-color: #2e3442;
-  --hover-bg: #262c39;
-  --scrollbar-thumb: #4f5768;
-  --scrollbar-thumb-hover: #6a7488;
-  --accent-500: #818cf8;
-  --accent-600: #a5b4fc;
+  /* 背景色 - 暖深色（深牛皮纸感） */
+  --bg-primary: #1a1815;
+  --bg-secondary: #211f1b;
+  --bg-tertiary: #2c2923;
+  --bg-canvas: #1e1c18;
+  --bg-panel: #2c2923;
+
+  /* 文本色 - 暖白 */
+  --text-primary: #ede8df;
+  --text-secondary: #bfb8ab;
+  --text-muted: #8a8275;
+
+  /* 边框 - 暖灰 */
+  --border-color: #3a3530;
+  --hover-bg: #33302a;
+
+  /* 滚动条 */
+  --scrollbar-thumb: #4a4540;
+  --scrollbar-thumb-hover: #5c5650;
+
+  /* 强调色 - 深色模式稍亮 */
+  --accent-500: #a78bfa;
+  --accent-600: #c4b5fd;
 }
 
 /* 全局样式 */
@@ -52,7 +74,7 @@ html, body, #app {
 }
 
 body {
-  font-family: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: var(--bg-primary);
@@ -97,5 +119,83 @@ textarea,
 
 /* 选中文字样式 */
 ::selection {
-  background: rgba(14, 165, 233, 0.3);
+  background: rgba(124, 106, 173, 0.25);
+}
+
+/* ====== 全局交互动效 ====== */
+
+/* 主按钮微交互 */
+.btn-primary {
+  transition: all 0.2s ease-out;
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.2);
+}
+.btn-primary:active {
+  transform: scale(0.98) translateY(0);
+}
+
+/* 卡片悬停效果 */
+.card-hover {
+  transition: all 0.2s ease-out;
+}
+.card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(120, 100, 70, 0.08);
+}
+
+/* 模态框进出动画 */
+.modal-enter-active {
+  transition: all 0.25s ease-out;
+}
+.modal-leave-active {
+  transition: all 0.2s ease-in;
+}
+.modal-enter-from {
+  opacity: 0;
+}
+.modal-enter-from .modal-content {
+  transform: scale(0.95) translateY(8px);
+  opacity: 0;
+}
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-leave-to .modal-content {
+  transform: scale(0.95) translateY(8px);
+  opacity: 0;
+}
+
+/* 模态内容过渡 */
+.modal-content {
+  transition: all 0.25s ease-out;
+}
+
+/* 淡入动画（用于标签页内容切换） */
+.fade-enter-active {
+  transition: opacity 0.2s ease-out;
+}
+.fade-leave-active {
+  transition: opacity 0.15s ease-in;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 滑入动画（用于侧边面板） */
+.slide-fade-enter-active {
+  transition: all 0.25s ease-out;
+}
+.slide-fade-leave-active {
+  transition: all 0.2s ease-in;
+}
+.slide-fade-enter-from {
+  opacity: 0;
+  transform: translateX(8px);
+}
+.slide-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
 }

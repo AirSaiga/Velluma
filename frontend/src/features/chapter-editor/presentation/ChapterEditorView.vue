@@ -152,17 +152,18 @@ watch(() => props.critiqueResult, (newVal) => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden px-6 py-4">
-    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-3">
+  <div class="h-full flex flex-col overflow-hidden px-8 py-5">
+    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-4">
       <div class="flex items-center justify-between gap-3 flex-shrink-0">
+        <!-- 按钮行间距增加 -->
         <div class="flex-1 flex items-center gap-2">
-          <span class="text-lg font-bold text-[var(--text-primary)] shrink-0">
+          <span class="text-xl font-heading font-bold text-[var(--text-primary)] shrink-0">
             {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}
           </span>
           <input
             :value="selectedChapter.title"
             @input="handleTitleInput"
-            class="flex-1 text-lg font-semibold text-[var(--text-primary)] bg-transparent hover:bg-black/5 focus:bg-white focus:ring-1 focus:ring-[var(--accent-500)] focus:outline-none px-2 py-1 rounded-lg transition-all placeholder:text-[var(--text-muted)] placeholder:font-normal"
+            class="flex-1 text-xl font-heading font-semibold text-[var(--text-primary)] bg-transparent hover:bg-black/5 focus:bg-[var(--bg-canvas)] focus:ring-1 focus:ring-[var(--accent-500)] focus:outline-none px-3 py-1.5 rounded-lg transition-all placeholder:text-[var(--text-muted)] placeholder:font-normal"
             placeholder="输入章节标题..."
           />
         </div>
@@ -172,7 +173,7 @@ watch(() => props.critiqueResult, (newVal) => {
           class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 shadow-sm"
           :class="selectedChapter.status === 'published' 
             ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200 hover:bg-emerald-100' 
-            : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'"
+            : 'bg-[var(--bg-primary)] text-ink-600 ring-1 ring-[var(--border-color)] hover:bg-parchment-100'"
         >
           <svg v-if="isPublishing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -192,7 +193,7 @@ watch(() => props.critiqueResult, (newVal) => {
             :value="selectedChapter.outline_text"
             @input="handleOutlineInput"
             rows="2"
-            class="flex-1 px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+            class="flex-1 px-2 py-2 rounded-lg bg-[var(--bg-canvas)] text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
             placeholder="输入章节摘要..."
           />
         </div>
@@ -210,7 +211,7 @@ watch(() => props.critiqueResult, (newVal) => {
               :value="selectedChapter.chapter_assets_schema || ''"
               @input="handleAssetsSchemaInput"
               rows="3"
-              class="w-full px-2 py-1.5 rounded-lg bg-white text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-y"
+              class="w-full px-2 py-1.5 rounded-lg bg-[var(--bg-canvas)] text-[var(--text-primary)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-y"
               placeholder="例如：【血噬】：2-3米高的重型实体机甲，采用外部驾驶舱包裹。"
             />
           </div>
@@ -224,8 +225,8 @@ watch(() => props.critiqueResult, (newVal) => {
             @click="toggleCharacter(char.id)"
             class="px-2 py-0.5 text-[10px] rounded-full transition-all ring-1"
             :class="isCharacterSelected(char.id)
-              ? 'bg-indigo-100 text-indigo-700 ring-indigo-300'
-              : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50'"
+              ? 'bg-accent-100 text-accent-700 ring-accent-300'
+              : 'bg-white text-ink-700 ring-ink-300 hover:bg-parchment-100'"
           >
             {{ char.name }}
           </button>
@@ -234,12 +235,12 @@ watch(() => props.critiqueResult, (newVal) => {
 
         <div class="flex items-center justify-between gap-2">
           <div class="flex-1"></div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-3">
             <button
               @click="openInspirationModal"
               :disabled="isGenerating"
               title="点子启发"
-              class="h-7 w-7 flex items-center justify-center rounded-lg bg-white text-[var(--text-secondary)] text-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+              class="h-7 w-7 flex items-center justify-center rounded-lg bg-[var(--bg-primary)] text-[var(--text-secondary)] text-sm ring-1 ring-[var(--border-color)] hover:bg-parchment-100 disabled:opacity-40 transition-colors"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -249,7 +250,7 @@ watch(() => props.critiqueResult, (newVal) => {
               @click="emit('request-critique', editorRef?.getContent() || selectedChapter.content_text || selectedChapter.draft_text || '')"
               :disabled="isGenerating"
               title="获取主编指导"
-              class="h-7 px-2 flex items-center justify-center rounded-lg bg-white text-[var(--text-secondary)] text-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors gap-1"
+              class="h-7 px-2 flex items-center justify-center rounded-lg bg-[var(--bg-primary)] text-[var(--text-secondary)] text-sm ring-1 ring-[var(--border-color)] hover:bg-parchment-100 disabled:opacity-40 transition-colors gap-1"
             >
               <span>📝</span>
               <span class="hidden xl:inline text-xs">主编指导</span>
@@ -258,14 +259,14 @@ watch(() => props.critiqueResult, (newVal) => {
               @click="openAgenticSettingsModal"
               :disabled="isGenerating || !isAgenticMode"
               title="智能生成设置"
-              class="h-7 w-7 flex items-center justify-center rounded-lg bg-white text-[var(--text-secondary)] text-sm ring-1 ring-slate-200 disabled:opacity-40"
+              class="h-7 w-7 flex items-center justify-center rounded-lg bg-[var(--bg-primary)] text-[var(--text-secondary)] text-sm ring-1 ring-[var(--border-color)] disabled:opacity-40"
             >
               ⚙️
             </button>
             <button
               @click="startGenerate"
               :disabled="isGenerating || beatPreviewLoading || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
-              class="px-4 py-1.5 rounded-lg bg-[var(--accent-500)] text-white text-xs font-semibold shadow-sm shadow-indigo-400/40 disabled:opacity-40 transition-colors"
+              class="px-4 py-1.5 rounded-lg bg-[var(--accent-500)] text-white text-xs font-semibold shadow-sm shadow-accent-400/40 disabled:opacity-40 transition-colors"
             >
               {{ beatPreviewLoading ? '规划中...' : (isGenerating ? '生成中...' : '✨ 智能生成本章') }}
             </button>
@@ -273,13 +274,13 @@ watch(() => props.critiqueResult, (newVal) => {
         </div>
       </div>
 
-      <div class="relative rounded-2xl bg-white shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div class="relative rounded-2xl bg-parchment-50 shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isGenerating && isAgenticMode"
-          class="absolute inset-0 z-10 flex items-center justify-center bg-white/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-parchment-50/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
         >
           <div class="w-full max-w-2xl mx-4">
-            <div class="bg-white rounded-2xl p-6 shadow-xl ring-1 ring-slate-200">
+            <div class="bg-[var(--bg-primary)] rounded-2xl p-6 shadow-xl ring-1 ring-[var(--border-color)]">
               <WorkflowProgressGraph
                 :current-event="workflowState?.currentEvent"
                 :message="workflowState?.message"
@@ -292,10 +293,10 @@ watch(() => props.critiqueResult, (newVal) => {
 
         <div
           v-if="beatPreviewLoading"
-          class="absolute inset-0 z-10 flex items-center justify-center bg-white/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-parchment-50/85 backdrop-blur-sm rounded-2xl transition-all duration-300"
         >
           <div class="w-full max-w-2xl mx-4">
-            <div class="bg-white rounded-2xl p-6 shadow-xl ring-1 ring-slate-200">
+            <div class="bg-[var(--bg-primary)] rounded-2xl p-6 shadow-xl ring-1 ring-[var(--border-color)]">
               <WorkflowProgressGraph
                 current-event="PLANNING"
                 message="正在根据大纲和前文分析剧情走向..."
@@ -308,18 +309,18 @@ watch(() => props.critiqueResult, (newVal) => {
 
         <div
           v-if="isPublishing"
-          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-parchment-50/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
         >
           <div class="relative flex items-center justify-center w-24 h-24 mb-8">
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-50"></div>
-            <div class="absolute inset-0 rounded-full border-[6px] border-indigo-500 border-t-transparent animate-spin"></div>
+            <div class="absolute inset-0 rounded-full border-[6px] border-accent-100"></div>
+            <div class="absolute inset-0 rounded-full border-[6px] border-accent-500 border-t-transparent animate-spin"></div>
           </div>
 
           <div class="flex flex-col items-center gap-3">
-            <h3 class="text-3xl font-bold text-indigo-900 tracking-tight">
+            <h3 class="text-3xl font-heading font-bold text-accent-900 tracking-tight">
               发布中...
             </h3>
-            <p class="text-lg text-indigo-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
+            <p class="text-lg text-accent-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
               正在更新章节状态及角色动态...
             </p>
           </div>
@@ -373,7 +374,7 @@ watch(() => props.critiqueResult, (newVal) => {
           <button
             @click="restoreAgenticDefaults"
             :disabled="isGenerating"
-            class="px-2 py-0.5 rounded-md text-[10px] bg-white text-[var(--text-secondary)] ring-1 ring-slate-200 disabled:opacity-40"
+            class="px-2 py-0.5 rounded-md text-[10px] bg-[var(--bg-primary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-color)] disabled:opacity-40"
           >
             恢复推荐值
           </button>
@@ -382,7 +383,7 @@ watch(() => props.critiqueResult, (newVal) => {
           <section
             v-for="(fieldKeys, groupKey) in agenticGroupFields"
             :key="groupKey"
-            class="rounded-lg bg-white p-2 ring-1 ring-slate-200/90 space-y-2"
+            class="rounded-lg bg-[var(--bg-primary)] p-2 ring-1 ring-[var(--border-color)] space-y-2"
           >
             <header>
               <h4 class="text-[11px] font-semibold text-[var(--text-primary)]">{{ AGENTIC_GROUPS[groupKey].title }}</h4>
@@ -392,8 +393,8 @@ watch(() => props.critiqueResult, (newVal) => {
               <div
                 v-for="field in fieldKeys"
                 :key="field"
-                class="rounded-md border border-slate-200/90 px-2 py-1.5"
-                :class="getAgenticFieldFeedbackText(field) ? 'border-rose-300 bg-rose-50/40' : 'bg-white'"
+                class="rounded-md border border-[var(--border-color)] px-2 py-1.5"
+                :class="getAgenticFieldFeedbackText(field) ? 'border-rose-300 bg-rose-50/40' : 'bg-[var(--bg-canvas)]'"
               >
                 <div class="flex items-center justify-between gap-2">
                   <label class="text-[10px] font-medium text-[var(--text-primary)]">{{ AGENTIC_FIELD_CONFIG[field].label }}</label>
@@ -413,7 +414,7 @@ watch(() => props.critiqueResult, (newVal) => {
                     @input="setAgenticFieldValue(field, $event)"
                     @blur="normalizeAgenticField"
                     :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60 resize-none"
+                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60 resize-none"
                     rows="3"
                   ></textarea>
                   <select
@@ -422,7 +423,7 @@ watch(() => props.critiqueResult, (newVal) => {
                     @change="setAgenticFieldValue(field, $event)"
                     @blur="normalizeAgenticField"
                     :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60"
+                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60"
                   >
                     <option
                       v-for="option in getAgenticFieldOptions(field)"
@@ -441,7 +442,7 @@ watch(() => props.critiqueResult, (newVal) => {
                       @change="setAgenticFieldValue(field, $event)"
                       type="checkbox"
                       :disabled="isGenerating"
-                      class="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                      class="w-4 h-4 rounded border-ink-300 text-accent-600 focus:ring-accent-500"
                     />
                     <span class="text-[11px] text-[var(--text-muted)]">{{ getAgenticFieldValue(field) ? '已开启' : '已关闭' }}</span>
                   </div>
@@ -455,7 +456,7 @@ watch(() => props.critiqueResult, (newVal) => {
                     :min="getAgenticFieldMin(field)"
                     :max="getAgenticFieldMax(field)"
                     :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-white ring-1 ring-slate-200 text-[11px] disabled:opacity-60"
+                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60"
                   />
                 </div>
                 <div class="flex items-center justify-between mt-1">
@@ -497,14 +498,14 @@ watch(() => props.critiqueResult, (newVal) => {
         <div v-if="beatPreviewError" class="text-xs text-rose-500">
           {{ beatPreviewError }}
         </div>
-        <div v-for="beat in previewBeats" :key="`${beat.position}-${beat.beat_id || beat.summary}`" class="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
+        <div v-for="beat in previewBeats" :key="`${beat.position}-${beat.beat_id || beat.summary}`" class="bg-[var(--bg-primary)] rounded-xl border border-[var(--border-color)] p-3 space-y-2">
           <!-- 头部：序号 + pov_mode badge + 字数 -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5">
               <span class="text-xs font-semibold text-[var(--text-primary)]">节拍 {{ beat.position }}</span>
               <span
                 class="px-1.5 py-0.5 text-[9px] font-medium rounded-full"
-                :class="beat.pov_mode === 'ensemble' ? 'bg-purple-100 text-purple-600' : beat.pov_mode === 'omniscient' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'"
+                :class="beat.pov_mode === 'ensemble' ? 'bg-purple-100 text-purple-600' : beat.pov_mode === 'omniscient' ? 'bg-accent-100 text-accent-600' : 'bg-ink-100 text-ink-500'"
               >{{ beat.pov_mode === 'ensemble' ? '多视角' : beat.pov_mode === 'omniscient' ? '全知' : '单视角' }}</span>
             </div>
             <div class="text-[10px] text-[var(--text-muted)]">建议字数 {{ beat.word_count_target || beat.target_words || 0 }}</div>
@@ -513,7 +514,7 @@ watch(() => props.critiqueResult, (newVal) => {
           <!-- 剧情摘要 -->
           <textarea
             v-model="beat.summary"
-            class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
+            class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
             rows="3"
             placeholder="输入节拍内容..."
           ></textarea>
@@ -524,7 +525,7 @@ watch(() => props.critiqueResult, (newVal) => {
             <select
               v-model="beat.pov_mode"
               @change="handlePovModeChange(beat)"
-              class="flex-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]"
+              class="flex-1 px-2 py-1 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]"
             >
               <option value="single">单视角 (single)</option>
               <option value="ensemble">多视角 (ensemble)</option>
@@ -538,7 +539,7 @@ watch(() => props.critiqueResult, (newVal) => {
               <label class="block text-[10px] text-[var(--text-muted)] mb-1">视角角色</label>
               <input
                 v-model="beat.pov_character"
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
                 placeholder="例如：楚言"
               />
             </div>
@@ -547,7 +548,7 @@ watch(() => props.critiqueResult, (newVal) => {
               <input
                 :value="beat.location || ''"
                 readonly
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50/50 border border-slate-200 text-xs text-[var(--text-secondary)] cursor-default"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100/50 border border-[var(--border-color)] text-xs text-[var(--text-secondary)] cursor-default"
                 placeholder="未指定"
               />
             </div>
@@ -561,7 +562,7 @@ watch(() => props.critiqueResult, (newVal) => {
                 :value="(beat.pov_characters || []).join('\n')"
                 @input="(beat.pov_characters = ($event.target as HTMLTextAreaElement).value.split('\n').map((s: string) => s.trim()).filter(Boolean))"
                 rows="3"
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
                 placeholder="每行一个角色名，例如：&#10;楚言&#10;敖先"
               ></textarea>
             </div>
@@ -570,7 +571,7 @@ watch(() => props.critiqueResult, (newVal) => {
               <input
                 :value="beat.location || ''"
                 readonly
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50/50 border border-slate-200 text-xs text-[var(--text-secondary)] cursor-default"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100/50 border border-[var(--border-color)] text-xs text-[var(--text-secondary)] cursor-default"
                 placeholder="未指定"
               />
             </div>
@@ -588,7 +589,7 @@ watch(() => props.critiqueResult, (newVal) => {
               <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段开场状态</label>
               <input
                 v-model="beat.openingState"
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
                 placeholder="例如：双方试探，尚未摊牌"
               />
             </div>
@@ -596,7 +597,7 @@ watch(() => props.critiqueResult, (newVal) => {
               <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段停在何处</label>
               <input
                 v-model="beat.stoppingState"
-                class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
+                class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)]"
                 placeholder="例如：关系仍紧绷但未爆发"
               />
             </div>
@@ -607,7 +608,7 @@ watch(() => props.critiqueResult, (newVal) => {
             <label class="block text-[10px] text-[var(--text-muted)] mb-1">本段禁止发生</label>
             <textarea
               v-model="beat.forbiddenEventsText"
-              class="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
+              class="w-full px-2 py-1.5 rounded-lg bg-parchment-100 border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)] focus:border-[var(--accent-500)] resize-y"
               rows="2"
               placeholder="每行一条，例如：主角主动出手"
             ></textarea>
@@ -615,7 +616,7 @@ watch(() => props.critiqueResult, (newVal) => {
         </div>
       </div>
       <div class="p-3 border-t border-white/60 flex items-center justify-end gap-2">
-        <button @click="closeBeatReviewModal" class="px-3 py-1.5 rounded-lg bg-white text-[var(--text-secondary)] text-xs ring-1 ring-slate-200">
+        <button @click="closeBeatReviewModal" class="px-3 py-1.5 rounded-lg bg-[var(--bg-primary)] text-[var(--text-secondary)] text-xs ring-1 ring-[var(--border-color)]">
           取消
         </button>
         <button
@@ -642,7 +643,7 @@ watch(() => props.critiqueResult, (newVal) => {
       <div class="p-4 overflow-y-auto max-h-[70vh] space-y-6">
         <div v-if="chapterSummary" class="bg-[var(--bg-panel)] rounded-xl p-4 border border-[var(--border-color)]">
           <h4 class="text-sm font-semibold text-[var(--text-primary)] mb-2 flex items-center gap-2">
-            <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg class="w-4 h-4 text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             本章摘要 (自动生成)
@@ -660,7 +661,7 @@ watch(() => props.critiqueResult, (newVal) => {
           <div class="grid gap-3">
             <div v-for="update in characterUpdates" :key="update.character_id" class="p-3 bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)]">
               <div class="flex items-center justify-between mb-2">
-                <span class="font-medium text-indigo-400 text-sm">{{ update.character_name }}</span>
+                <span class="font-medium text-accent-500 text-sm">{{ update.character_name }}</span>
               </div>
               <div class="grid grid-cols-2 gap-4 text-xs">
                 <div class="opacity-70">
@@ -690,20 +691,20 @@ watch(() => props.critiqueResult, (newVal) => {
 
   <!-- Completion Modal -->
   <div v-if="showCompletionModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md border border-[var(--border-color)] p-6 transform transition-all animate-in fade-in zoom-in-95 duration-200">
+      <div class="bg-[var(--bg-primary)] dark:bg-ink-800 rounded-xl shadow-2xl w-full max-w-md border border-[var(--border-color)] p-6 transform transition-all animate-in fade-in zoom-in-95 duration-200">
         <div class="flex items-start gap-4">
           <div class="flex-shrink-0 w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-600"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           </div>
           <div class="flex-1">
-            <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-2">{{ completionTitle || '生成完成' }}</h3>
-            <p class="text-slate-600 dark:text-slate-300 text-sm leading-relaxed whitespace-pre-line">{{ completionMessage }}</p>
+            <h3 class="text-lg font-semibold text-ink-900 dark:text-white mb-2">{{ completionTitle || '生成完成' }}</h3>
+            <p class="text-ink-600 dark:text-ink-300 text-sm leading-relaxed whitespace-pre-line">{{ completionMessage }}</p>
           </div>
         </div>
         <div class="mt-6 flex justify-end">
           <button
             @click="closeCompletionModal"
-            class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            class="px-4 py-2 bg-accent-600 hover:bg-accent-700 text-white rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2"
           >
             确定
           </button>

@@ -95,15 +95,16 @@ function handleBackdropClick(e: MouseEvent) {
 </script>
 
 <template>
-  <div
-    v-if="show"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
-    @click="handleBackdropClick"
-  >
-    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
+  <Transition name="modal">
+    <div
+      v-if="show"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3"
+      @click="handleBackdropClick"
+    >
+      <div class="modal-content bg-[var(--bg-primary)] rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
       <div class="p-4 border-b border-white/60 flex items-center justify-between">
         <div>
-          <h3 class="text-base font-semibold text-[var(--text-primary)]">点子启发</h3>
+          <h3 class="text-base font-heading font-semibold text-[var(--text-primary)]">点子启发</h3>
           <p class="text-[11px] text-[var(--text-muted)] mt-0.5">为您的剧情提供灵感火花</p>
         </div>
         <button @click="closeModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
@@ -120,14 +121,14 @@ function handleBackdropClick(e: MouseEvent) {
             <textarea
               v-model="authorIntent"
               rows="2"
-              class="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              class="flex-1 px-3 py-2 rounded-xl bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="你想看到什么类型的灵感？例如：'增加悬疑感'，'让主角陷入困境'..."
               @keydown.enter.prevent="fetchInspirations"
             />
             <button
               @click="fetchInspirations"
               :disabled="loading"
-              class="px-4 rounded-xl bg-indigo-500 text-white text-xs font-medium hover:bg-indigo-600 disabled:opacity-50 transition-colors flex flex-col items-center justify-center gap-1 min-w-[60px]"
+              class="px-4 rounded-xl bg-accent-500 text-white text-xs font-medium hover:bg-accent-600 disabled:opacity-50 transition-colors flex flex-col items-center justify-center gap-1 min-w-[60px]"
             >
               <svg v-if="loading" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -140,8 +141,8 @@ function handleBackdropClick(e: MouseEvent) {
 
         <div v-if="loading" class="flex flex-col items-center justify-center py-8">
           <div class="relative flex items-center justify-center w-16 h-16 mb-4">
-            <div class="absolute inset-0 rounded-full border-4 border-indigo-50"></div>
-            <div class="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin"></div>
+            <div class="absolute inset-0 rounded-full border-4 border-accent-50"></div>
+            <div class="absolute inset-0 rounded-full border-4 border-accent-500 border-t-transparent animate-spin"></div>
           </div>
           <p class="text-sm text-[var(--text-secondary)]">正在思考灵感...</p>
         </div>
@@ -155,7 +156,7 @@ function handleBackdropClick(e: MouseEvent) {
           <p class="text-sm text-rose-500 mb-3">{{ error }}</p>
           <button
             @click="fetchInspirations"
-            class="px-4 py-2 rounded-lg bg-indigo-500 text-white text-sm hover:bg-indigo-600 transition-colors"
+            class="px-4 py-2 rounded-xl bg-accent-500 text-white text-sm hover:bg-accent-600 transition-colors"
           >
             重试
           </button>
@@ -165,7 +166,7 @@ function handleBackdropClick(e: MouseEvent) {
           <div
             v-for="(idea, index) in inspirations"
             :key="index"
-            class="bg-white rounded-xl border border-slate-200 p-4 space-y-3"
+            class="bg-parchment-50 rounded-xl ring-1 ring-[var(--border-color)]/60 p-4 space-y-3 hover:shadow-md transition-all duration-200"
           >
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2">
@@ -177,7 +178,7 @@ function handleBackdropClick(e: MouseEvent) {
                 </span>
                 <input
                   v-model="idea.title"
-                  class="text-sm font-semibold text-[var(--text-primary)] bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none px-0.5"
+                  class="text-sm font-semibold text-[var(--text-primary)] bg-transparent border-b border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none px-0.5"
                   placeholder="输入标题..."
                 />
               </div>
@@ -188,7 +189,7 @@ function handleBackdropClick(e: MouseEvent) {
               <textarea
                 v-model="idea.description"
                 rows="3"
-                class="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-y"
                 placeholder="输入描述..."
               ></textarea>
             </div>
@@ -198,7 +199,7 @@ function handleBackdropClick(e: MouseEvent) {
               <textarea
                 v-model="idea.impact"
                 rows="2"
-                class="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] ring-1 ring-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-y"
                 placeholder="输入影响说明..."
               ></textarea>
             </div>
@@ -226,17 +227,18 @@ function handleBackdropClick(e: MouseEvent) {
         <button
           @click="fetchInspirations"
           :disabled="loading"
-          class="px-3 py-1.5 rounded-lg bg-white text-[var(--text-secondary)] text-xs ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+          class="px-3 py-1.5 rounded-xl bg-parchment-50 text-[var(--text-secondary)] text-xs ring-1 ring-[var(--border-color)]/60 hover:bg-ink-50 hover:shadow-md transition-all duration-200 disabled:opacity-40"
         >
           重新生成
         </button>
         <button
           @click="closeModal"
-          class="px-4 py-1.5 rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] text-xs hover:bg-slate-100 transition-colors"
+          class="px-4 py-1.5 rounded-xl bg-[var(--bg-panel)] text-[var(--text-secondary)] text-xs hover:bg-ink-50 hover:shadow-md transition-all duration-200"
         >
           关闭
         </button>
       </div>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>

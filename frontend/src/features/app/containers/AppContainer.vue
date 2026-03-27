@@ -97,6 +97,59 @@ const rightTab = computed({
   set: (val) => handleRightTabChange(val),
 })
 
+// 侧边栏折叠状态
+const sidebarCollapsed = computed({
+  get: () => uiPrefs.value.sidebarCollapsed ?? false,
+  set: (val) => {
+    uiPrefs.value = { ...uiPrefs.value, sidebarCollapsed: val }
+    saveUiPrefs(uiPrefs.value)
+  }
+})
+
+// 右侧抽屉状态
+const rightDrawerOpen = computed({
+  get: () => uiPrefs.value.rightDrawerOpen ?? false,
+  set: (val) => {
+    uiPrefs.value = { ...uiPrefs.value, rightDrawerOpen: val }
+    saveUiPrefs(uiPrefs.value)
+  }
+})
+
+// 抽屉标签配置
+const drawerTabs = [
+  { key: 'characters', label: '角色', icon: '👤' },
+  { key: 'worldview', label: '规则', icon: '📜' },
+  { key: 'style', label: '风格', icon: '✨' },
+  { key: 'map', label: '地图', icon: '📍' },
+  { key: 'critique', label: '指导', icon: '📝' },
+  { key: 'notes', label: '笔记', icon: '📒' },
+]
+
+// 切换侧边栏
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+// 切换右侧抽屉
+function toggleDrawer(tab: string) {
+  if (!rightDrawerOpen.value) {
+    // 抽屉关闭 → 打开并设置标签
+    rightDrawerOpen.value = true
+    rightTab.value = tab
+  } else if (rightTab.value === tab) {
+    // 点击同一标签 → 关闭抽屉
+    rightDrawerOpen.value = false
+  } else {
+    // 点击不同标签 → 切换
+    rightTab.value = tab
+  }
+}
+
+// 关闭抽屉
+function closeDrawer() {
+  rightDrawerOpen.value = false
+}
+
 watch(currentBook, (book) => {
   localBookNotes.value = book?.global_sys_prompt || ''
   notesStatus.value = 'idle'
@@ -271,6 +324,7 @@ async function handleRequestCritique(content: string) {
   }
   
   rightTab.value = 'critique'
+  rightDrawerOpen.value = true
   critiqueLoading.value = true
   critiqueResult.value = null
   
@@ -573,104 +627,184 @@ onBeforeUnmount(() => {
   />
   <DebugPromptWindow v-if="isDebugMode" />
   <div v-else class="h-full w-full bg-[var(--bg-primary)] p-3">
-    <div class="h-full min-h-0 rounded-2xl bg-[var(--bg-canvas)]/90 shadow-[0_20px_60px_rgba(20,33,61,0.08)] overflow-hidden">
-      <div class="h-full min-h-0 grid grid-cols-[220px_minmax(0,1fr)_280px]">
-        <aside class="h-full min-h-0 flex flex-col bg-transparent px-3 py-3">
-          <div class="flex items-center justify-between mb-2">
-            <h1 class="text-xs font-semibold tracking-wide text-[var(--text-secondary)]">写作大纲</h1>
-            <button
-              @click="showSettingsModal = true"
-              class="p-1.5 rounded-full text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/80 transition-colors"
-              title="设置"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+    <div class="h-full min-h-0 rounded-2xl bg-[var(--bg-canvas)]/90 shadow-[0_20px_60px_rgba(120,100,70,0.06)] border border-[var(--border-color)]/50 overflow-hidden">
+      <div class="h-full min-h-0 flex">
+        <!-- 左侧栏 -->
+        <aside
+          :class="sidebarCollapsed ? 'w-[60px]' : 'w-[240px]'"
+          class="h-full flex-shrink-0 transition-all duration-300 ease-in-out flex flex-col bg-transparent overflow-hidden"
+        >
+          <!-- 折叠态内容 -->
+          <div v-if="sidebarCollapsed" class="h-full flex flex-col items-center py-4 gap-3">
+            <!-- 展开按钮 -->
+            <button @click="toggleSidebar" class="p-2 rounded-lg hover:bg-parchment-300/50 text-ink-500" title="展开侧边栏">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
             </button>
-          </div>
 
-          <div class="space-y-1.5">
-            <select
-              :value="currentBookId"
-              @change="handleBookChange"
-              class="w-full px-2 py-1.5 bg-white/90 rounded-xl text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-            >
-              <option v-for="book in books" :key="book.id" :value="book.id">
-                {{ book.title }}
-              </option>
-            </select>
-            <div class="flex items-center gap-1.5">
+            <!-- 书籍首字 avatar -->
+            <div v-if="currentBook" class="w-9 h-9 rounded-full bg-accent-500/10 text-accent-700 flex items-center justify-center text-sm font-heading cursor-default" :title="currentBook.title">
+              {{ currentBook.title?.charAt(0) || '书' }}
+            </div>
+
+            <!-- 章节数字列表 -->
+            <div class="flex-1 min-h-0 overflow-y-auto w-full flex flex-col items-center gap-1 mt-2">
               <button
-                @click="showBookModal = true"
-                class="flex-1 px-2 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-medium shadow-sm ring-1 ring-indigo-600/40 hover:bg-indigo-500 transition-colors"
+                v-for="chapter in sortedChapters"
+                :key="chapter.id"
+                @click="selectChapter(chapter.id)"
+                :title="chapter.title || `第${chapter.chapter_number}章`"
+                :class="selectedChapterId === chapter.id
+                  ? 'bg-accent-500/15 text-accent-700 font-medium'
+                  : 'text-ink-400 hover:text-ink-600 hover:bg-parchment-300/50'"
+                class="w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-colors"
               >
-                新建
-              </button>
-              <button
-                @click="openManageBookModal"
-                :disabled="!currentBookId"
-                class="px-2 py-1.5 rounded-xl bg-white/90 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors"
-              >
-                管理
+                {{ chapter.chapter_number }}
               </button>
             </div>
-            <button
-              @click="createChapterFromOutlinePanel"
-              class="w-full px-2 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-medium shadow-sm ring-1 ring-indigo-600/40 hover:bg-indigo-500 transition-colors"
-            >
-              新建章节
+
+            <!-- 新建章节 + 按钮 -->
+            <button v-if="currentBookId" @click="createChapterFromOutlinePanel" class="p-2 rounded-lg hover:bg-accent-500/10 text-ink-400 hover:text-accent-600" title="新建章节">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+
+            <!-- 设置按钮 -->
+            <button @click="showSettingsModal = true" class="p-2 rounded-lg hover:bg-parchment-300/50 text-ink-400 hover:text-ink-600" title="设置">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+              </svg>
             </button>
           </div>
 
-          <div class="mt-2 flex-1 min-h-0 overflow-y-auto pr-1 space-y-1">
-            <div v-if="loading" class="text-center py-3 text-xs text-[var(--text-muted)]">加载中...</div>
-            <button
-              v-for="chapter in sortedChapters"
-              :key="chapter.id"
-              @click="selectChapter(chapter.id)"
-              class="relative w-full text-left px-2 py-1.5 rounded-xl transition-all group"
-              :class="selectedChapterId === chapter.id
-                ? 'bg-white text-[var(--text-primary)] shadow-sm'
-                : 'text-[var(--text-secondary)] hover:bg-white/70'"
-            >
-              <span
-                class="absolute left-0 top-1 bottom-1 w-0.5 rounded-r-full bg-[var(--accent-500)] transition-opacity"
-                :class="selectedChapterId === chapter.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'"
-              />
-              <div class="flex items-center justify-between pl-1.5">
-                <div class="min-w-0">
-                  <p class="text-xs font-medium truncate" :class="!chapter.title ? 'text-[var(--text-muted)] italic' : ''">
-                    {{ chapter.title || `(无标题)` }}
-                  </p>
-                  <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Ch.{{ chapter.chapter_number }}</p>
-                </div>
-                <div class="flex items-center gap-1">
-                  <button
-                    @click.stop="generateChapterEmbedding(chapter.id)"
-                    class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-indigo-500 transition"
-                    title="生成向量"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                    </svg>
-                  </button>
-                  <button
-                    @click.stop="deleteChapter(chapter.id)"
-                    class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-rose-400 transition"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                  </button>
-                </div>
+          <!-- 展开态内容 -->
+          <div v-else class="h-full flex flex-col px-4 py-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <button @click="toggleSidebar" class="p-1.5 rounded-lg hover:bg-parchment-300/50 text-ink-400" title="折叠侧边栏">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                  </svg>
+                </button>
+                <h1 class="text-xs font-semibold tracking-wide text-[var(--text-secondary)]">写作大纲</h1>
               </div>
-            </button>
-            <div v-if="sortedChapters.length === 0" class="text-center py-4 text-xs text-[var(--text-muted)]">
-              暂无章节
+              <button
+                @click="showSettingsModal = true"
+                class="p-1.5 rounded-full text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/80 transition-colors"
+                title="设置"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+
+            <div class="space-y-1.5">
+              <select
+                :value="currentBookId"
+                @change="handleBookChange"
+                class="w-full px-2 py-2 bg-white/90 rounded-xl text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+              >
+                <option v-for="book in books" :key="book.id" :value="book.id">
+                  {{ book.title }}
+                </option>
+              </select>
+              <div class="flex items-center gap-1.5">
+                <button
+                  @click="showBookModal = true"
+                  class="flex-1 px-2 py-2 rounded-xl bg-accent-600 text-white text-xs font-medium shadow-sm ring-1 ring-accent-600/40 hover:bg-accent-500 transition-colors"
+                >
+                  新建
+                </button>
+                <button
+                  @click="openManageBookModal"
+                  :disabled="!currentBookId"
+                  class="px-2 py-2 rounded-xl bg-white/90 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors"
+                >
+                  管理
+                </button>
+              </div>
+              <button
+                @click="createChapterFromOutlinePanel"
+                class="w-full px-2 py-2 rounded-xl bg-accent-600 text-white text-xs font-medium shadow-sm ring-1 ring-accent-600/40 hover:bg-accent-500 transition-colors"
+              >
+                新建章节
+              </button>
+            </div>
+
+            <div class="mt-2 flex-1 min-h-0 overflow-y-auto pr-1 space-y-2">
+              <div v-if="loading" class="text-center py-3 text-xs text-[var(--text-muted)]">加载中...</div>
+              <button
+                v-for="chapter in sortedChapters"
+                :key="chapter.id"
+                @click="selectChapter(chapter.id)"
+                class="relative w-full text-left px-2 py-1.5 rounded-xl transition-all group"
+                :class="selectedChapterId === chapter.id
+                  ? 'bg-white text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:bg-white/70'"
+              >
+                <span
+                  class="absolute left-0 top-1 bottom-1 w-0.5 rounded-r-full bg-[var(--accent-500)] transition-opacity"
+                  :class="selectedChapterId === chapter.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'"
+                />
+                <div class="flex items-center justify-between pl-1.5">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium truncate" :class="!chapter.title ? 'text-[var(--text-muted)] italic' : ''">
+                      {{ chapter.title || `(无标题)` }}
+                    </p>
+                    <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Ch.{{ chapter.chapter_number }}</p>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <button
+                      @click.stop="generateChapterEmbedding(chapter.id)"
+                      class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-accent-500 transition"
+                      title="生成向量"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                      </svg>
+                    </button>
+                    <button
+                      @click.stop="deleteChapter(chapter.id)"
+                      class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-rose-400 transition"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </button>
+              <div v-if="sortedChapters.length === 0" class="text-center py-4 text-xs text-[var(--text-muted)]">
+                暂无章节
+              </div>
             </div>
           </div>
         </aside>
 
-        <main class="h-full min-h-0 overflow-hidden border-x border-white/60">
-          <ChapterEditor
+        <!-- 主内容区 -->
+        <main class="h-full flex-1 min-w-0 overflow-hidden border-l border-[var(--border-color)]/30 flex flex-col">
+          <!-- 右侧面板触发按钮（顶部工具栏） -->
+          <div class="flex-shrink-0 flex justify-end px-3 pt-3">
+            <div class="flex items-center gap-1 bg-[var(--bg-canvas)]/80 backdrop-blur-sm rounded-xl px-2 py-1.5 shadow-sm ring-1 ring-[var(--border-color)]/30">
+              <button
+                v-for="tab in drawerTabs"
+                :key="tab.key"
+                @click="toggleDrawer(tab.key)"
+                :title="tab.label"
+                :class="rightDrawerOpen && rightTab === tab.key
+                  ? 'bg-accent-500/15 text-accent-700'
+                  : 'text-ink-400 hover:text-ink-600 hover:bg-parchment-300/50'"
+                class="p-1.5 rounded-lg transition-colors"
+              >
+                <span class="text-xs">{{ tab.icon }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 min-h-0 overflow-hidden">
+            <ChapterEditor
             ref="chapterEditorRef"
             :selected-chapter="selectedChapter"
             :characters="characters"
@@ -684,121 +818,107 @@ onBeforeUnmount(() => {
             @editor-entity-focus="handleEditorEntityFocus"
             @request-critique="handleRequestCritique"
           />
+          </div>
         </main>
 
-        <aside class="h-full min-h-0 flex flex-col bg-transparent px-3 py-3">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1 flex-wrap">
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'characters' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'characters'"
-              >
-                角色
-              </button>
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'worldview' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'worldview'"
-              >
-                规则
-              </button>
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'style' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'style'"
-              >
-                风格
-              </button>
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'map' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'map'"
-              >
-                地图
-              </button>
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'critique' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'critique'"
-              >
-                指导
-              </button>
-              <button
-                class="px-2 py-1 rounded-lg text-xs transition-colors ring-1"
-                :class="rightTab === 'notes' ? 'bg-indigo-600 text-white ring-indigo-600/40' : 'bg-white/90 text-slate-700 ring-slate-300 hover:bg-white'"
-                @click="rightTab = 'notes'"
-              >
-                笔记
-              </button>
-            </div>
-            <div class="flex items-center gap-1">
-              <button
-                @click="saveBookNotes"
-                :disabled="!currentBookId || notesStatus === 'saving'"
-                class="px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-500)] disabled:opacity-40 transition-colors"
-              >
-                {{ notesStatus === 'saved' ? '已保存' : '保存' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="mt-1 flex-1 min-h-0 overflow-hidden rounded-xl bg-white/70">
-            <CharacterPanel
-              v-if="rightTab === 'characters'"
-              :characters="characters"
-              :relationships="relationships"
-              :selected-chapter-id="selectedChapterId"
-              :prioritized-character-ids="autoHighlightedCharacterIds"
-              :focused-entity="editorFocusedEntity"
-              :api-config="apiConfig"
-              @create-character="createCharacter"
-              @update-character="updateCharacter"
-              @delete-character="deleteCharacter"
-              @create-relationship="createRelationship"
-              @update-relationship="updateRelationship"
-              @delete-relationship="deleteRelationship"
-            />
-
-            <div v-else-if="rightTab === 'worldview'" class="h-full overflow-y-auto p-3">
-              <WorldviewSettings v-if="currentBookId" :book-id="currentBookId" />
-              <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
+        <!-- 右侧抽屉 -->
+        <aside
+          v-show="rightDrawerOpen"
+          :class="rightDrawerOpen ? 'w-[320px]' : 'w-0'"
+          class="h-full flex-shrink-0 overflow-hidden border-l border-[var(--border-color)]/30 transition-all duration-300 ease-in-out"
+        >
+          <div class="h-full flex flex-col bg-transparent px-4 py-4 min-w-[320px]">
+            <!-- 抽屉头部：标签页 + 关闭按钮 -->
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-1 flex-wrap">
+                <button
+                  v-for="tab in drawerTabs"
+                  :key="tab.key"
+                  class="px-3 py-1.5 rounded-lg text-xs transition-colors ring-1"
+                  :class="rightTab === tab.key ? 'bg-accent-500/10 text-accent-700 ring-accent-500/40' : 'text-ink-500 ring-transparent hover:text-ink-700 hover:bg-parchment-300/50'"
+                  @click="rightTab = tab.key"
+                >
+                  {{ tab.label }}
+                </button>
+              </div>
+              <div class="flex items-center gap-1">
+                <button
+                  v-if="rightTab === 'notes'"
+                  @click="saveBookNotes"
+                  :disabled="!currentBookId || notesStatus === 'saving'"
+                  class="px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-500)] disabled:opacity-40 transition-colors"
+                >
+                  {{ notesStatus === 'saved' ? '已保存' : '保存' }}
+                </button>
+                <button @click="closeDrawer" class="p-1.5 rounded-lg hover:bg-parchment-300/50 text-ink-400 hover:text-ink-600" title="关闭面板">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            <div v-else-if="rightTab === 'style'" class="h-full overflow-y-auto p-3">
-              <GoldenSnippetsManager v-if="currentBookId" :book-id="currentBookId" />
-              <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
-            </div>
+            <!-- 内容区 -->
+            <div class="flex-1 min-h-0 overflow-hidden rounded-xl bg-[var(--bg-secondary)]/70">
+              <Transition name="fade" mode="out-in">
+                <CharacterPanel
+                  v-if="rightTab === 'characters'"
+                  key="characters"
+                  :characters="characters"
+                  :relationships="relationships"
+                  :selected-chapter-id="selectedChapterId"
+                  :prioritized-character-ids="autoHighlightedCharacterIds"
+                  :focused-entity="editorFocusedEntity"
+                  :api-config="apiConfig"
+                  @create-character="createCharacter"
+                  @update-character="updateCharacter"
+                  @delete-character="deleteCharacter"
+                  @create-relationship="createRelationship"
+                  @update-relationship="updateRelationship"
+                  @delete-relationship="deleteRelationship"
+                />
 
-            <div v-else-if="rightTab === 'map'" class="h-full overflow-y-auto">
-              <MapSettings 
-                v-if="selectedChapter" 
-                :chapter="selectedChapter" 
-                :focused-entity="editorFocusedEntity"
-                :active-character-names="autoHighlightedCharacterNames"
-                @update-chapter="updateChapter"
-              />
-              <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>
-            </div>
+                <div v-else-if="rightTab === 'worldview'" key="worldview" class="h-full overflow-y-auto p-3">
+                  <WorldviewSettings v-if="currentBookId" :book-id="currentBookId" />
+                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
+                </div>
 
-            <div v-else-if="rightTab === 'critique'" class="h-full overflow-hidden p-3">
-              <CritiquePanel
-                :result="critiqueResult"
-                :loading="critiqueLoading"
-                @jump-to-critique="handleJumpToCritique"
-                @close-critique="handleCloseCritique"
-              />
-            </div>
+                <div v-else-if="rightTab === 'style'" key="style" class="h-full overflow-y-auto p-3">
+                  <GoldenSnippetsManager v-if="currentBookId" :book-id="currentBookId" />
+                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
+                </div>
 
-            <div v-else class="h-full overflow-y-auto p-3">
-              <h3 class="text-xs font-medium text-[var(--text-primary)]">创作笔记</h3>
-              <textarea
-                v-model="localBookNotes"
-                rows="12"
-                class="mt-2 w-full px-2 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] text-xs resize-none focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-                placeholder="记录风格、基调、伏笔或暂存思路..."
-              />
-              <div v-if="notesStatus === 'dirty'" class="text-[10px] text-[var(--text-muted)] mt-1">未保存</div>
+                <div v-else-if="rightTab === 'map'" key="map" class="h-full overflow-y-auto">
+                  <MapSettings
+                    v-if="selectedChapter"
+                    :chapter="selectedChapter"
+                    :focused-entity="editorFocusedEntity"
+                    :active-character-names="autoHighlightedCharacterNames"
+                    @update-chapter="updateChapter"
+                  />
+                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>
+                </div>
+
+                <div v-else-if="rightTab === 'critique'" key="critique" class="h-full overflow-hidden p-3">
+                  <CritiquePanel
+                    :result="critiqueResult"
+                    :loading="critiqueLoading"
+                    @jump-to-critique="handleJumpToCritique"
+                    @close-critique="handleCloseCritique"
+                  />
+                </div>
+
+                <div v-else key="notes" class="h-full overflow-y-auto p-3">
+                  <h3 class="text-xs font-medium text-[var(--text-primary)]">创作笔记</h3>
+                  <textarea
+                    v-model="localBookNotes"
+                    rows="12"
+                    class="mt-2 w-full px-2 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] text-xs resize-none focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+                    placeholder="记录风格、基调、伏笔或暂存思路..."
+                  />
+                  <div v-if="notesStatus === 'dirty'" class="text-[10px] text-[var(--text-muted)] mt-1">未保存</div>
+                </div>
+              </Transition>
             </div>
           </div>
         </aside>

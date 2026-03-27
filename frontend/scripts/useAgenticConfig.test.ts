@@ -11,32 +11,29 @@ import {
 test('normalizeAgenticForm 会把非法输入回退到允许范围', () => {
   const normalized = normalizeAgenticForm({
     word_count: -10,
-    max_iterations: 99,
-    rag_top_k: 0,
-    rag_alpha: 5,
-    rag_beta: -2,
-    rag_gamma: 0.2,
+    tension_level: 10,
     rag_lambda: -3
   })
 
   assert.equal(normalized.word_count, 1)
-  assert.equal(normalized.max_iterations, 5)
-  assert.equal(normalized.rag_top_k, 1)
-  assert.equal(normalized.rag_alpha, 1)
-  assert.equal(normalized.rag_beta, 0)
-  assert.equal(normalized.rag_gamma, 0.2)
+  assert.equal(normalized.tension_level, 5)
   assert.equal(normalized.rag_lambda, 0)
 })
 
-test('validateAgenticForm 会检出权重和不为 1 的失败场景', () => {
+test('validateAgenticForm 会规范化输入并返回合法配置', () => {
+  // 注意：validateAgenticForm 内部会先调用 normalizeAgenticForm 规范化输入
+  // 所有非法值都会被自动修正，因此通常不会返回错误
   const result = validateAgenticForm({
     ...AGENTIC_DEFAULTS,
-    rag_alpha: 0.4,
-    rag_beta: 0.4,
-    rag_gamma: 0.4
+    word_count: -100,
+    rag_lambda: -1
   })
 
-  assert.equal(result.errors.includes('三项回顾偏好总和必须为 1'), true)
+  // 非法值被规范化后不会触发错误
+  assert.equal(result.errors.length, 0)
+  // 验证规范化后的值
+  assert.equal(result.normalized.word_count, 1)
+  assert.equal(result.normalized.rag_lambda, 0)
 })
 
 test('buildAgenticPayload 在配置合法时输出完整 payload', () => {
@@ -52,7 +49,7 @@ test('buildAgenticPayload 在配置合法时输出完整 payload', () => {
   assert.equal(payload?.api_key, 'key-123')
   assert.equal(payload?.base_url, 'https://api.example.com')
   assert.equal(payload?.model, 'gpt-test')
-  assert.equal(payload?.fast_mode, true)
+  assert.equal(payload?.fast_mode, false)
   assert.equal(payload?.skip_minor_refine, true)
 })
 
@@ -70,19 +67,21 @@ test('buildAgenticPayload 在缺少 API Key 时返回失败', () => {
 test('getAgenticFieldFeedback 会为越界字段返回逐项提示', () => {
   const feedback = getAgenticFieldFeedback({
     word_count: 12000,
-    max_iterations: 0,
-    rag_top_k: 30,
-    rag_alpha: 0.6,
-    rag_beta: 0.3,
-    rag_gamma: 0.3,
+    tension_level: 10,
+    pacing_style: 'invalid_style' as any,
+    memory_span: 'invalid_span' as any,
+    creativity_level: 'invalid_creativity' as any,
+    progression_preference: 'invalid_progression' as any,
+    refinement_depth: 'invalid_refinement' as any,
     rag_lambda: -1
   })
 
   assert.equal(feedback.word_count, '本章篇幅需在 500~10000 之间')
-  assert.equal(feedback.max_iterations, '自动改写次数需在 1~5 之间')
-  assert.equal(feedback.rag_top_k, '参考前文条目数需在 1~20 之间')
-  assert.equal(feedback.rag_lambda, '旧内容淡出速度需大于等于 0')
-  assert.equal(feedback.rag_alpha, '三项回顾权重总和必须为 1')
-  assert.equal(feedback.rag_beta, '三项回顾权重总和必须为 1')
-  assert.equal(feedback.rag_gamma, '三项回顾权重总和必须为 1')
+  assert.equal(feedback.tension_level, '剧情张力等级 (V3.0)需在 1~5 之间')
+  assert.equal(feedback.pacing_style, '叙事节奏偏好选项无效')
+  assert.equal(feedback.memory_span, 'AI 记忆回溯跨度选项无效')
+  assert.equal(feedback.creativity_level, '自由发挥程度选项无效')
+  assert.equal(feedback.progression_preference, '剧情推进偏好选项无效')
+  assert.equal(feedback.refinement_depth, '精雕细琢深度选项无效')
+  assert.equal(feedback.rag_lambda, '旧内容淡出强度需大于等于 0')
 })

@@ -89,7 +89,7 @@ const sortedCharacters = computed(() => {
 function getCharacterHighlightClass(charId) {
   const level = characterHighlightLevelMap.value.get(charId)
   if (level === 'strong') return 'ring-amber-300 bg-amber-50/60 animate-pulse'
-  if (level === 'weak') return 'ring-indigo-300 bg-indigo-50/40'
+  if (level === 'weak') return 'ring-accent-300 bg-accent-50/40'
   return 'ring-transparent'
 }
 
@@ -258,31 +258,31 @@ function getImportanceLabel(level) {
 
 function getImportanceColor(level) {
   const colors = {
-    1: 'bg-slate-100 text-slate-600',
-    2: 'bg-blue-100 text-blue-700',
+    1: 'bg-ink-100 text-ink-600',
+    2: 'bg-accent-100 text-accent-700',
     3: 'bg-violet-100 text-violet-700',
     4: 'bg-amber-100 text-amber-700'
   }
-  return colors[level] || 'bg-slate-100 text-slate-600'
+  return colors[level] || 'bg-ink-100 text-ink-600'
 }
 </script>
 
 <template>
   <div class="h-full flex flex-col bg-transparent">
-    <div class="p-2">
+    <div class="p-3">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-xs font-semibold text-[var(--text-primary)]">角色库</h2>
         <div class="flex gap-1">
           <button
             @click="showRelationshipPanel = true"
-            class="px-2 py-1 bg-white text-slate-700 text-[10px] rounded-lg ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
+            class="px-2 py-1 bg-parchment-50 text-ink-700 text-[10px] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:bg-ink-50 hover:shadow-md transition-all duration-200"
             title="关系配置"
           >
             关系
           </button>
           <button
             @click="openCreateDrawer"
-            class="px-2 py-1 bg-indigo-600 text-white text-[10px] font-medium rounded-lg shadow-sm ring-1 ring-indigo-600/40 hover:bg-indigo-500 transition-colors flex items-center gap-1"
+            class="px-2 py-1 bg-accent-600 text-white text-[10px] font-medium rounded-xl shadow-sm hover:bg-accent-500 transition-colors flex items-center gap-1"
           >
             + 新建
           </button>
@@ -293,39 +293,39 @@ function getImportanceColor(level) {
         v-model="searchQuery"
         type="text"
         placeholder="搜索角色..."
-        class="w-full px-2 py-1.5 bg-white rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+        class="w-full px-2 py-2 bg-parchment-50 rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-xs focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
       />
     </div>
 
-    <div class="flex-1 overflow-y-auto p-2 space-y-1.5">
+    <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
       <div
         v-for="char in sortedCharacters"
         :key="char.id"
-        class="group p-2 bg-white rounded-xl hover:shadow-sm transition-all cursor-pointer ring-1"
+        class="group p-3 bg-parchment-50 rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200 cursor-pointer"
         :class="getCharacterHighlightClass(char.id)"
         @click="openEditDrawer(char)"
       >
         <div class="flex items-start justify-between">
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1.5 mb-0.5">
+            <div class="flex items-center gap-1.5 mb-1">
               <span
-                class="px-1.5 py-0.5 text-[9px] rounded-full"
+                class="px-1.5 py-1 text-[9px] rounded-full"
                 :class="getImportanceColor(char.importance_level)"
               >
                 {{ getImportanceLabel(char.importance_level) }}
               </span>
-              <span class="text-xs font-medium text-[var(--text-primary)] truncate">{{ char.name }}</span>
+              <span class="text-sm font-medium text-[var(--text-primary)] truncate">{{ char.name }}</span>
               <span
                 v-if="characterHighlightLevelMap.get(char.id)"
                 class="px-1.5 py-0.5 text-[9px] rounded-full"
-                :class="characterHighlightLevelMap.get(char.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'"
+                :class="characterHighlightLevelMap.get(char.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-accent-100 text-accent-700'"
               >
                 {{ characterHighlightLevelMap.get(char.id) === 'strong' ? '焦点强匹配' : '焦点弱匹配' }}
               </span>
             </div>
-            <p class="text-[10px] text-[var(--text-muted)] line-clamp-1">{{ char.static_prompt || '暂无设定' }}</p>
-            <div class="mt-1.5 space-y-0.5">
-              <p v-if="char.dynamic_state" class="text-[10px] text-indigo-600 line-clamp-1">
+            <p class="text-[11px] text-[var(--text-muted)] line-clamp-1">{{ char.static_prompt || '暂无设定' }}</p>
+            <div class="mt-1.5 space-y-1">
+              <p v-if="char.dynamic_state" class="text-[10px] text-accent-600 line-clamp-1">
                 <span class="font-medium">动态:</span> {{ char.dynamic_state }}
               </p>
               <p v-if="char.current_state" class="text-[10px] text-amber-600 line-clamp-1">
@@ -359,9 +359,10 @@ function getImportanceColor(level) {
       </div>
     </div>
 
-    <div v-if="showCharacterDrawer" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="closeDrawer">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">
+    <Transition name="modal">
+      <div v-if="showCharacterDrawer" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" @click.self="closeDrawer">
+        <div class="modal-content bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-heading font-semibold text-[var(--text-primary)] mb-4">
           {{ selectedCharacter ? '编辑角色' : '新建角色' }}
         </h3>
 
@@ -371,7 +372,7 @@ function getImportanceColor(level) {
             <input
               v-model="formData.name"
               type="text"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               placeholder="输入角色名称"
             />
           </div>
@@ -380,7 +381,7 @@ function getImportanceColor(level) {
             <label class="block text-sm text-[var(--text-muted)] mb-1">重要程度</label>
             <select
               v-model="formData.importance_level"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
             >
               <option :value="1">普通</option>
               <option :value="2">重要</option>
@@ -394,7 +395,7 @@ function getImportanceColor(level) {
             <textarea
               v-model="formData.static_prompt"
               rows="3"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="角色的外貌、基础性格等不易变更的属性..."
             />
           </div>
@@ -406,7 +407,7 @@ function getImportanceColor(level) {
                 v-if="selectedCharacter && selectedChapterId"
                 @click="handleUpdateDynamicState"
                 :disabled="isUpdatingState"
-                class="px-2 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                class="px-2 py-0.5 text-[10px] rounded-xl bg-accent-50 text-accent-600 hover:bg-accent-100 disabled:opacity-50 transition-colors"
                 title="基于当前章节内容自动更新"
               >
                 {{ isUpdatingState ? '更新中...' : 'AI 自动更新' }}
@@ -415,7 +416,7 @@ function getImportanceColor(level) {
             <textarea
               v-model="formData.dynamic_state"
               rows="3"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="角色当前的状态，如：在第X章受伤、情绪低落等..."
             />
           </div>
@@ -425,7 +426,7 @@ function getImportanceColor(level) {
             <textarea
               v-model="formData.current_state"
               rows="2"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="从世界快照中提取的此刻状态，如：重伤倒地、正在逃跑..."
             />
             <p class="text-[10px] text-[var(--text-muted)] mt-1">此字段通常在章节发布时自动更新</p>
@@ -446,12 +447,14 @@ function getImportanceColor(level) {
             保存
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </Transition>
 
-    <div v-if="showRelationshipPanel" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showRelationshipPanel = false">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">角色关系配置</h3>
+    <Transition name="modal">
+      <div v-if="showRelationshipPanel" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showRelationshipPanel = false">
+        <div class="modal-content bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-heading font-semibold text-[var(--text-primary)] mb-4">角色关系配置</h3>
 
         <div class="space-y-4 mb-6">
           <div class="grid grid-cols-2 gap-4">
@@ -459,7 +462,7 @@ function getImportanceColor(level) {
               <label class="block text-sm text-[var(--text-muted)] mb-1">源角色</label>
               <select
                 v-model="relationshipForm.source_char_id"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               >
                 <option value="">选择角色</option>
                 <option v-for="char in characters" :key="char.id" :value="char.id">
@@ -471,7 +474,7 @@ function getImportanceColor(level) {
               <label class="block text-sm text-[var(--text-muted)] mb-1">目标角色</label>
               <select
                 v-model="relationshipForm.target_char_id"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               >
                 <option value="">选择角色</option>
                 <option v-for="char in characters" :key="char.id" :value="char.id">
@@ -487,7 +490,7 @@ function getImportanceColor(level) {
               <input
                 v-model="relationshipForm.relation_type"
                 type="text"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
                 placeholder="如：朋友、敌人、恋人"
               />
             </div>
@@ -508,7 +511,7 @@ function getImportanceColor(level) {
             <textarea
               v-model="relationshipForm.interaction_prompt"
               rows="2"
-              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="描述两人互动时的行为模式，如：A一直暗恋B且说话结巴"
             />
           </div>
@@ -522,19 +525,19 @@ function getImportanceColor(level) {
           <button
             v-if="editingRelationshipId"
             @click="resetRelationshipForm"
-            class="w-full px-4 py-2 bg-[var(--bg-panel)] hover:bg-white text-[var(--text-primary)] rounded-full transition-colors"
+            class="w-full px-4 py-2 bg-[var(--bg-panel)] hover:bg-parchment-50 text-[var(--text-primary)] rounded-full ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
           >
             取消编辑
           </button>
         </div>
 
-        <div class="border-t border-white/60 pt-4">
+        <div class="border-t border-[var(--border-color)]/60 pt-4">
           <h4 class="text-sm font-medium text-[var(--text-primary)] mb-3">已有关系</h4>
           <div class="space-y-2">
             <div
               v-for="rel in relationships"
               :key="rel.id"
-              class="flex items-center justify-between p-3 bg-[var(--bg-panel)] rounded-2xl"
+              class="flex items-center justify-between p-3 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
             >
               <div class="flex items-center gap-2 text-sm">
                 <span class="text-[var(--text-primary)]">{{ getCharacterName(rel.source_char_id) }}</span>
@@ -576,7 +579,8 @@ function getImportanceColor(level) {
             关闭
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>

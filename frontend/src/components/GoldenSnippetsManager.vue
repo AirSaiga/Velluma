@@ -222,7 +222,7 @@ onUnmounted(() => {
       <div class="flex items-center gap-1">
         <button
           @click="activeTab === 'golden' ? addGoldenSnippet() : addBlacklistItem()"
-          class="px-2 py-0.5 text-[10px] bg-white hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg transition-colors"
+          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
           :disabled="isLoading"
         >
           +新增
@@ -249,14 +249,14 @@ onUnmounted(() => {
 
     <!-- Golden Snippets List -->
     <div v-else-if="activeTab === 'golden'" class="space-y-2">
-      <div v-if="goldenSnippets.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)]">
+      <div v-if="goldenSnippets.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
         暂无黄金锚点，点击"+新增"添加参考文本片段
       </div>
 
       <div
         v-for="item in goldenSnippets"
         :key="item.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl group"
+        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 group hover:shadow-md transition-all duration-200"
       >
         <div class="flex items-start gap-2">
           <div class="flex-1">
@@ -264,7 +264,7 @@ onUnmounted(() => {
               :value="item.text"
               @input="updateGoldenText(item.id, $event.target.value)"
               rows="3"
-              class="w-full px-2 py-1.5 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
+              class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               placeholder="输入文本片段..."
             />
           </div>
@@ -283,14 +283,14 @@ onUnmounted(() => {
 
     <!-- Blacklist List -->
     <div v-else class="space-y-2">
-      <div v-if="styleBlacklist.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)]">
+      <div v-if="styleBlacklist.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
         暂无黑名单条目，点击"+新增"添加需要避免的表达方式
       </div>
 
       <div
         v-for="item in styleBlacklist"
         :key="item.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl group"
+        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 group hover:shadow-md transition-all duration-200"
       >
         <div class="flex items-center gap-2">
           <div class="flex-1">
@@ -298,7 +298,7 @@ onUnmounted(() => {
               :value="item.text"
               @input="updateBlacklistText(item.id, $event.target.value)"
               type="text"
-              class="w-full px-2 py-1.5 bg-white rounded-lg text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
+              class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               placeholder="输入需要避免的表达方式..."
             />
           </div>
