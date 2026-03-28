@@ -30,7 +30,12 @@ from tenacity import (
 )
 import logging
 
+from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_RAG, LOG_PREFIX_EMBEDDING, LOG_PREFIX_SUMMARY
+
 logger = logging.getLogger(__name__)
+svc_logger_rag = ServiceLogger(logger, LOG_PREFIX_RAG)
+svc_logger_embedding = ServiceLogger(logger, LOG_PREFIX_EMBEDDING)
+svc_logger_summary = ServiceLogger(logger, LOG_PREFIX_SUMMARY)
 
 _default_proxy = "http://127.0.0.1:4780"
 PROXY_URL = os.getenv("PROXY_URL", _default_proxy)
@@ -218,10 +223,10 @@ async def generate_summary(
             )
         except Exception as e:
             if attempt == max_retries - 1:
-                logger.error(f"[Summary] Final attempt failed: {e}")
+                svc_logger_summary.error("Final attempt failed", error=str(e))
                 raise
             wait_time = (2 ** attempt) * 1  # 1s, 2s, 4s
-            logger.warning(f"[Summary] Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+            svc_logger_summary.warning("Attempt failed, retrying", attempt=attempt + 1, wait_time=wait_time, error=str(e))
             await asyncio.sleep(wait_time)
     return ""
 
@@ -368,10 +373,10 @@ async def get_embedding(
         if response.status_code == 200:
             return response.output['embeddings'][0]['embedding']
         else:
-            logger.error(f"[Embedding] Status: {response.status_code}, Message: {response.message}")
+            svc_logger_embedding.error("API error", status=response.status_code, message=response.message)
             return []
     except Exception as e:
-        logger.error(f"[Embedding] {e}")
+        svc_logger_embedding.error("Exception occurred", error=str(e))
         return []
 
 

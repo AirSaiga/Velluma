@@ -1,5 +1,3 @@
-import logging
-
 """
 Prompt 日志记录模块。
 
@@ -7,14 +5,18 @@ Prompt 日志记录模块。
 """
 
 import json
-
-# 配置模块级日志记录器
-logger = logging.getLogger(__name__)
+import logging
 import os
 import time
 from datetime import datetime
 from typing import Any, Optional
 from pathlib import Path
+
+from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_PROMPT_LOGGER
+
+# 配置模块级日志记录器
+logger = logging.getLogger(__name__)
+svc_logger = ServiceLogger(logger, LOG_PREFIX_PROMPT_LOGGER)
 
 
 class PromptLogger:
@@ -389,9 +391,9 @@ class PromptLogger:
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(self.log_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"[PromptLogger] Log saved to: {filepath}")
+            svc_logger.info("Log saved", path=str(filepath))
         except Exception as e:
-            logger.error(f"[PromptLogger] Failed to save log: {e}")
+            svc_logger.error("Failed to save log", error=str(e))
     
     def get_debug_history(self) -> list:
         """
@@ -424,23 +426,25 @@ class PromptLogger:
         return debug_history
 
 
-# 全局日志记录器实例（用于当前请求）
-_current_logger: Optional[PromptLogger] = None
+# 使用上下文变量管理当前请求的日志记录器（线程/协程安全）
+import contextvars
+_current_logger: contextvars.ContextVar[Optional[PromptLogger]] = contextvars.ContextVar(
+    'current_logger', default=None
+)
 
 
 def create_logger(chapter_id: str, book_id: Optional[str] = None) -> PromptLogger:
-    """创建新的日志记录器"""
-    global _current_logger
-    _current_logger = PromptLogger(chapter_id, book_id)
-    return _current_logger
+    """创建新的日志记录器（协程安全）"""
+    logger = PromptLogger(chapter_id, book_id)
+    _current_logger.set(logger)
+    return logger
 
 
 def get_logger() -> Optional[PromptLogger]:
-    """获取当前日志记录器"""
-    return _current_logger
+    """获取当前协程的日志记录器"""
+    return _current_logger.get()
 
 
 def clear_logger():
-    """清除当前日志记录器"""
-    global _current_logger
-    _current_logger = None
+    """清除当前协程的日志记录器"""
+    _current_logger.set(None)

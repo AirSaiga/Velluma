@@ -26,7 +26,10 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW
+
 logger = logging.getLogger(__name__)
+svc_logger = ServiceLogger(logger, LOG_PREFIX_WORKFLOW)
 
 from backend.config.intent_driven import (
     CreativeIntentType,
@@ -336,7 +339,7 @@ async def generate_with_intent(request: IntentDrivenGenerateRequest):
                 ))
             except ValueError:
                 # 记录警告日志，不静默忽略无效意图
-                logger.warning(f"无效的意图类型被忽略: {intent_type}")
+                svc_logger.warning("Invalid intent type ignored", intent_type=intent_type)
     
     # 2. 构建目标对象
     goals = None

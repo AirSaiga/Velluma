@@ -525,7 +525,7 @@ class GenerationConfig(BaseModel):
         config.validate_all()  # 执行所有校验
     """
     # 元信息
-    editor_mode: EditorMode = Field(default=EditorMode.BASIC, description="编辑模式")
+    editor_mode: EditorMode = Field(default=EditorMode.INTENT, description="编辑模式")
     chapter_id: Optional[UUID] = Field(default=None, description="章节 ID")
     book_id: Optional[UUID] = Field(default=None, description="书籍 ID")
     
@@ -662,8 +662,9 @@ class GenerationConfig(BaseModel):
             enable_cross_chapter_validation=req_dict.get("enable_cross_chapter_validation", True),
         )
         
-        # 确定编辑模式
-        editor_mode = EditorMode.EXPERT if req_dict.get("expert_mode") else EditorMode.BASIC
+        # V3.8+: 编辑模式已简化为仅保留意图驱动模式
+        # 忽略 expert_mode 参数，统一使用 INTENT 模式
+        editor_mode = EditorMode.INTENT
         
         return cls(
             editor_mode=editor_mode,

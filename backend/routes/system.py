@@ -23,11 +23,13 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from backend.core.config import get_actual_port
+from backend.core.config import get_actual_port, check_reasoning_support
 from backend.services.llm_client import get_proxy_config, set_proxy_config, call_llm
+from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_SYSTEM
 
 router = APIRouter(prefix="/api", tags=["system"])
 logger = logging.getLogger(__name__)
+svc_logger = ServiceLogger(logger, LOG_PREFIX_SYSTEM)
 
 
 class ProxyConfig(BaseModel):
@@ -117,75 +119,6 @@ async def update_proxy_config_endpoint(config: ProxyConfig):
 # 模型连接测试
 # =============================================================================
 
-# 已知支持推理模式的模型列表
-# 参考: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
-REASONING_SUPPORTED_MODELS = {
-    # OpenAI 推理模型
-    "openai/o1",
-    "openai/o1-mini",
-    "openai/o1-preview",
-    "openai/o3",
-    "openai/o3-mini",
-    "openai/o4-mini",
-    "openai/gpt-5",
-    # Anthropic 推理模型
-    "anthropic/claude-3.7-sonnet",
-    "anthropic/claude-3.7-sonnet:thinking",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-sonnet-4:thinking",
-    # Gemini thinking 模型
-    "google/gemini-2.0-flash-thinking",
-    "google/gemini-2.0-flash-thinking-exp",
-    "google/gemini-2.5-pro-preview",
-    "google/gemini-2.5-pro-preview-05-06",
-    # xAI Grok
-    "x-ai/grok-3",
-    "x-ai/grok-3-mini",
-    "x-ai/grok-3-r1",
-    # DeepSeek R1
-    "deepseek/deepseek-r1",
-    "deepseek/deepseek-reasoner",
-    # 其他推理模型
-    "z-ai/glm-4.5",
-    "z-ai/glm-z1",
-    "moonshotai/kimi-k2-thinking",
-    "qwen/qwen-3-235b",
-}
-
-# 推理模型关键词（用于模糊匹配）
-REASONING_KEYWORDS = [
-    "o1", "o3", "o4", "gpt-5",
-    "thinking", "reasoner", "r1",
-    "claude-3.7", "claude-sonnet-4",
-    "grok-3", "glm-z1", "kimi-k2-thinking"
-]
-
-
-def _check_reasoning_support(model: str) -> tuple[bool, str]:
-    """
-    检查模型是否支持推理模式。
-    
-    Args:
-        model: 模型名称
-        
-    Returns:
-        tuple[bool, str]: (是否支持, 说明消息)
-    """
-    model_lower = model.lower()
-    
-    # 精确匹配
-    for supported in REASONING_SUPPORTED_MODELS:
-        if model_lower == supported.lower():
-            return True, f"模型 {model} 已确认支持推理模式"
-    
-    # 关键词匹配
-    for keyword in REASONING_KEYWORDS:
-        if keyword in model_lower:
-            return True, f"模型 {model} 可能支持推理模式（基于名称匹配）"
-    
-    return False, f"模型 {model} 可能不支持推理模式。支持推理的模型包括：OpenAI o1/o3/GPT-5、Anthropic Claude 3.7+、Gemini thinking、xAI Grok、DeepSeek R1 等"
-
-
 @router.post("/system/test-model", response_model=ModelTestResponse)
 async def test_model_connection(request: ModelTestRequest):
     """
@@ -240,7 +173,7 @@ async def test_model_connection(request: ModelTestRequest):
         
         if request.reasoning_enabled:
             # 检查模型名称
-            reasoning_supported, reasoning_message = _check_reasoning_support(request.model)
+            reasoning_supported, reasoning_message = check_reasoning_support(request.model)
             
             # 如果模型名称匹配，但实际请求可能失败（API 不支持）
             # 这里我们基于模型名称判断，实际使用时如果 API 不支持会报错
@@ -277,7 +210,7 @@ async def test_model_connection(request: ModelTestRequest):
         else:
             message = f"连接测试失败: {error_msg[:200]}"
         
-        logger.warning(f"[Model Test] Failed for model {request.model}: {error_msg}")
+        svc_logger.warning("Model test failed", model=request.model, error=error_msg)
         
         return ModelTestResponse(
             success=False,

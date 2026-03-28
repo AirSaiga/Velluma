@@ -13,6 +13,8 @@
 - prompt_builder.py: 提示词构建（已拆分为 prompts/ 目录）
 - prompts/: 按 Agent 类型拆分的提示词模块
 - workflows/: 工作流阶段模块
+- context_loader.py: 上下文数据加载服务
+- logging_utils.py: 日志工具模块
 
 使用场景：
 - routes/: 业务路由层，通过此模块调用底层服务
@@ -27,4 +29,38 @@ from backend.services.chapter_generation import (
     build_chapter_prompt,
     generate_stream_response,
     update_character_dynamic_state,
+)
+
+# V3.8: 新增服务层模块导出
+from backend.services.context_loader import (
+    load_full_chapter_context,
+    load_chapter,
+    load_book,
+    load_chapter_entities,
+    load_character_relationships,
+    ChapterContext,
+    save_story_beats,
+    build_physical_state_lock,
+)
+from backend.services.logging_utils import (
+    ServiceLogger,
+    build_sse_event,
+    build_sse_metric_frame,
+    build_sse_done,
+    LOG_PREFIX_DUAL_TRACK,
+    LOG_PREFIX_RAG,
+    LOG_PREFIX_WORKFLOW,
+)
+from backend.services.inspiration_service import (
+    load_inspiration_context,
+    generate_inspirations,
+    InspirationContext,
+    InspirationItem,
+)
+from backend.services.world_state_service import (
+    extract_world_state_snapshot,
+    generate_chapter_summary,
+    generate_summary_embedding,
+    update_character_states,
+    CharacterUpdateResult,
 )

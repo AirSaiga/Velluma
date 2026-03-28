@@ -1,17 +1,21 @@
 from uuid import UUID
 import json
 import logging
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from backend.core.dependencies import get_chapter_repository
+from backend.core.exceptions import not_found, generation_error
 from backend.repositories import ChapterRepository
 from backend.models import Chapter, Book, Character, PlotLedger, PlotLedgerStatus, ChapterMapLocation
 from backend.schemas import InspirationRequest, InspirationResponse
 from backend.services.chapter_generation import call_llm
 from backend.services.prompts.inspiration_prompts import build_inspiration_agent_prompt
+from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW
 
 logger = logging.getLogger(__name__)
+svc_logger = ServiceLogger(logger, LOG_PREFIX_WORKFLOW)
 
 router = APIRouter(prefix="/api", tags=["inspiration"])
 
@@ -37,12 +41,12 @@ async def generate_inspiration(
     book_result = await db.execute(select(Book).where(Book.id == request.book_id))
     book = book_result.scalar_one_or_none()
     if not book:
-        raise HTTPException(status_code=404, detail="书籍不存在")
+        raise not_found("书籍", str(request.book_id))
 
     chapter_result = await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
     chapter = chapter_result.scalar_one_or_none()
     if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
+        raise not_found("章节", str(request.chapter_id))
 
     worldview_summary = ""
     if book.worldview_settings:
@@ -163,7 +167,7 @@ async def generate_inspiration(
     last_error = None
     for attempt in range(max_retries):
         try:
-            logger.info(f"开始生成灵感，尝试 {attempt + 1}/{max_retries}")
+            svc_logger.info("Generating inspiration", attempt=attempt + 1, max_retries=max_retries)
             raw_content = await call_llm(
                 system_prompt=prompt_messages[0]["content"],
                 user_prompt=prompt_messages[1]["content"],
@@ -214,12 +218,11 @@ async def generate_inspiration(
             return response
 
         except Exception as e:
-            logger.error(f"生成灵感失败 (尝试 {attempt + 1}/{max_retries}): {e}", exc_info=True)
+            svc_logger.error("Inspiration generation failed", attempt=attempt + 1, max_retries=max_retries, error=str(e))
             last_error = e
             if attempt < max_retries - 1:
-                import asyncio
                 await asyncio.sleep(1 * (attempt + 1))
                 continue
 
-    logger.error(f"生成灵感最终失败: {last_error}")
-    raise HTTPException(status_code=500, detail=f"生成灵感失败: {last_error}")
+    svc_logger.error("Inspiration generation ultimately failed", error=str(last_error))
+    raise generation_error("生成灵感失败", last_error)

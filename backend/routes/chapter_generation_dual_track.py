@@ -37,19 +37,12 @@ API 端点：
 
 import json
 import logging
-import time
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
-from sqlalchemy.orm import selectinload
 
 from backend.core.dependencies import get_db
-from backend.models import (
-    Chapter, Book, ChapterEntity, CharacterRelationship,
-    ChapterMapLocation, PlotLedger, StoryBeat
-)
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.services.agentic_workflow import resolve_high_level_params
 from backend.services.workflows.dual_track import (
@@ -59,36 +52,22 @@ from backend.services.workflows.dual_track import (
 )
 from backend.services.workflows.sketch_generator import SketchGeneratorConfig
 from backend.services.workflows.adversarial_aligner import AdversarialAlignerConfig
-from backend.services.prompt_logger import create_logger, get_logger
-from backend.services.llm_client import get_embedding
-from backend.repositories import MemoryRepository
+from backend.services.prompt_logger import create_logger
+from backend.services.logging_utils import (
+    ServiceLogger, LOG_PREFIX_DUAL_TRACK,
+    build_sse_event, build_sse_metric_frame, build_sse_done
+)
+from backend.services.context_loader import (
+    load_full_chapter_context,
+    save_story_beats,
+    build_physical_state_lock,
+    ChapterContext,
+)
 
 logger = logging.getLogger(__name__)
+svc_logger = ServiceLogger(logger, LOG_PREFIX_DUAL_TRACK)
 
 router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-dual-track"])
-
-
-# =============================================================================
-# 观测性辅助函数
-# =============================================================================
-
-def _to_secs(elapsed: float) -> float:
-    """将秒转换为保留3位小数的浮点数"""
-    return round(elapsed, 3)
-
-
-def _metric_frame(
-    event: str,
-    iteration: int = 1,
-    extra: Optional[Dict[str, Any]] = None,
-) -> str:
-    """生成统计帧 SSE 消息"""
-    payload = {
-        "event": event,
-        "iteration": iteration,
-        "metrics": extra or {},
-    }
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 class DualTrackGenerationRequest(GenerateChapterAgenticRequest):
@@ -157,15 +136,30 @@ async def generate_chapter_dual_track(
         try:
             # V3.8: 解析高层参数（基础模式自动推导 RAG 参数）
             resolved_params = resolve_high_level_params(request)
-            logger.info(f"[DualTrack] Editor mode: {request.editor_mode}, resolved RAG params: top_k={resolved_params['rag_top_k']}, alpha={resolved_params['rag_alpha']}")
+            svc_logger.info(
+                "Editor mode resolved",
+                mode=request.editor_mode,
+                top_k=resolved_params['rag_top_k'],
+                alpha=resolved_params['rag_alpha']
+            )
             
             # 加载上下文
-            yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '加载章节上下文...'}, ensure_ascii=False)}\n\n"
+            yield build_sse_event("ASSEMBLING_CONTEXT", "加载章节上下文...")
             
-            chapter = await _load_chapter(db, chapter_id)
-            if not chapter:
-                yield f"data: {json.dumps({'error': '章节不存在'}, ensure_ascii=False)}\n\n"
+            # 使用统一的上下文加载服务
+            context = await load_full_chapter_context(
+                db, chapter_id,
+                rag_params=resolved_params if request.is_basic_mode() else None,
+                api_key=request.api_key,
+                base_url=request.base_url,
+            )
+            
+            if not context:
+                yield build_sse_event("ERROR", "章节不存在")
                 return
+            
+            chapter = context.chapter
+            book = context.book
             
             # 更新日志记录器的 book_id
             prompt_logger.book_id = str(chapter.book_id) if chapter.book_id else None
@@ -176,39 +170,12 @@ async def generate_chapter_dual_track(
             if request.pacing_style:
                 chapter.pacing_style = request.pacing_style
             
-            book = await _load_book(db, chapter.book_id)
-            entities = await _load_entities(db, chapter_id)
-            relationships = await _load_relationships(db, entities)
+            yield build_sse_event("ASSEMBLING_CONTEXT", "正在回顾前文与检索相关伏笔...")
             
-            # P1: 加载地图位置
-            locations = await _load_locations(db, chapter_id)
-            
-            yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '正在回顾前文与检索相关伏笔...'}, ensure_ascii=False)}\n\n"
-            
-            # P0: 加载上一章摘要（跨章衔接核心）
-            previous_summary = await _load_previous_summary(db, chapter)
-            logger.debug(f"[DualTrack] Previous Summary: {bool(previous_summary)}")
-
-            # P0: 加载上一章世界状态快照
-            previous_chapter_snapshot = await _load_previous_world_snapshot(db, chapter)
-            logger.debug(f"[DualTrack] Previous World Snapshot: {bool(previous_chapter_snapshot)}")
-            
-            # P0: 加载开放伏笔
-            open_hooks = await _load_open_hooks(db, chapter)
-            logger.debug(f"[DualTrack] Open Hooks: {len(open_hooks)}")
-            
-            # P1: 加载 RAG 相关记忆（使用推导后的参数）
-            relevant_memories = await _load_relevant_memories(db, chapter, request, resolved_params)
-            logger.debug(f"[DualTrack] Relevant Memories: {len(relevant_memories)}")
+            svc_logger.debug("Context loaded", **context.to_dict())
             
             # 发送上下文加载完成统计帧
-            yield _metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra={
-                "entities_count": len(entities),
-                "relationships_count": len(relationships),
-                "locations_count": len(locations),
-                "open_hooks_count": len(open_hooks),
-                "has_previous_summary": bool(previous_summary),
-            })
+            yield build_sse_metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra=context.to_dict())
             
             # 设置日志记录器的上下文信息
             prompt_logger.set_context(
@@ -224,8 +191,8 @@ async def generate_chapter_dual_track(
                     "title": book.title if book else None,
                     "genre": book.genre if book else None,
                 },
-                entities=list(entities),
-                relationships=list(relationships),
+                entities=list(context.entities),
+                relationships=list(context.relationships),
                 request_params={
                     "model": request.model,
                     "reasoning_model": request.reasoning_model,
@@ -234,7 +201,10 @@ async def generate_chapter_dual_track(
                 }
             )
             
-            yield f"data: {json.dumps({'event': 'CONTEXT_LOADED', 'message': f'加载 {len(entities)} 个角色, {len(relationships)} 组关系'}, ensure_ascii=False)}\n\n"
+            yield build_sse_event(
+                "CONTEXT_LOADED",
+                f"加载 {len(context.entities)} 个角色, {len(context.relationships)} 组关系"
+            )
             
             # ========================================================================
             # BEATS 接收：直接使用调用方提供的已确认节拍，注入跨章状态约束
@@ -244,9 +214,9 @@ async def generate_chapter_dual_track(
 
             # 强制注入世界状态快照约束（P0 级 - 不可跳过）
             world_snapshot_constraints = ""
-            if previous_chapter_snapshot:
-                world_snapshot_constraints = format_snapshot_for_planner(previous_chapter_snapshot)
-                logger.info(f"[生成] 注入世界状态快照约束: {bool(world_snapshot_constraints)}")
+            if context.previous_world_snapshot:
+                world_snapshot_constraints = format_snapshot_for_planner(context.previous_world_snapshot)
+                svc_logger.info("World snapshot constraints injected", enabled=bool(world_snapshot_constraints))
 
             beats = []
             for b in request.beats:
@@ -264,13 +234,17 @@ async def generate_chapter_dual_track(
                 (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
             )
 
-            yield f"data: {json.dumps({'event': 'BEATS_CONFIRMED', 'message': f'已接收 {len(beats)} 个节拍，开始生成正文...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+            yield build_sse_event(
+                "BEATS_CONFIRMED",
+                f"已接收 {len(beats)} 个节拍，开始生成正文...",
+                iteration=1
+            )
 
             # 记录已确认的 beats（无 LLM 调用，仅记录最终执行的节拍列表）
             prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
             prompt_logger.log_inputs(
                 word_count=request.word_count,
-                has_previous_summary=bool(previous_summary),
+                has_previous_summary=bool(context.previous_summary),
                 source="user_confirmed_beats",
             )
             prompt_logger.log_outputs(
@@ -280,17 +254,25 @@ async def generate_chapter_dual_track(
             )
             prompt_logger.end_stage(success=True)
 
-            yield _metric_frame("PLANNING_DONE", iteration=1, extra={"beat_count": len(beats), "chapter_narrative_anchor": chapter_narrative_anchor})
+            yield build_sse_metric_frame(
+                "PLANNING_DONE",
+                iteration=1,
+                extra={"beat_count": len(beats), "chapter_narrative_anchor": chapter_narrative_anchor}
+            )
             
             # ========================================================================
             # POV_ASSIGNMENT 阶段：视角分配
             # ========================================================================
             try:
-                yield f"data: {json.dumps({'event': 'POV_ASSIGNMENT', 'message': '正在为剧情节拍分配 POV 角色...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+                yield build_sse_event(
+                    "POV_ASSIGNMENT",
+                    "正在为剧情节拍分配 POV 角色...",
+                    iteration=1
+                )
                 
                 seen_char_ids: set = set()
                 pov_candidates = []
-                for e in entities:
+                for e in context.entities:
                     if e.character and str(e.character.id) not in seen_char_ids:
                         seen_char_ids.add(str(e.character.id))
                         pov_candidates.append({
@@ -309,7 +291,7 @@ async def generate_chapter_dual_track(
                     api_key=request.api_key,
                     base_url=request.base_url,
                     model=request.reasoning_model or request.model,
-                    previous_chapter_summary=previous_summary,
+                    previous_chapter_summary=context.previous_summary,
                     prompt_logger=prompt_logger,
                     chapter_narrative_anchor=chapter_narrative_anchor,
                 )
@@ -318,17 +300,17 @@ async def generate_chapter_dual_track(
                 yield f"data: {json.dumps({'prompt': pov_prompt_data}, ensure_ascii=False)}\n\n"
                 
             except Exception as e:
-                logger.error(f"[POV Assignment] {e}")
+                svc_logger.error("POV Assignment failed", error=str(e))
                 # Continue even if assignment fails
             
             anchor_pov = beats[0].get("pov_character") if beats else None
             
             # P1: 构建物理状态锁定
-            physical_state_lock = _build_physical_state_lock(beats)
+            physical_state_lock = build_physical_state_lock(beats)
             
             # P2: 保存 StoryBeat 到数据库
-            story_beats = await _save_story_beats(db, chapter, beats)
-            logger.debug(f"[DualTrack] Saved {len(story_beats)} StoryBeats to database")
+            story_beats = await save_story_beats(db, chapter, beats)
+            svc_logger.debug("StoryBeats saved", count=len(story_beats))
             
             # 构建双轨配置
             config = DualTrackConfig(
@@ -354,10 +336,10 @@ async def generate_chapter_dual_track(
                 prompt_logger=prompt_logger,
             )
             
-            yield f"data: {json.dumps({'event': 'DUAL_TRACK_START', 'message': '启动双轨并行生成...'}, ensure_ascii=False)}\n\n"
+            yield build_sse_event("DUAL_TRACK_START", "启动双轨并行生成...")
             
             # 发送 DRAFTING 事件，表示 Track A (节拍扩写) 开始
-            yield f"data: {json.dumps({'event': 'DRAFTING', 'message': '主笔 Agent 正在并行扩写节拍...', 'iteration': 1}, ensure_ascii=False)}\n\n"
+            yield build_sse_event("DRAFTING", "主笔 Agent 正在并行扩写节拍...", iteration=1)
             
             # P1: 获取 reasoning_config（如果启用）
             reasoning_config = None
@@ -375,12 +357,12 @@ async def generate_chapter_dual_track(
                         chapter=chapter,
                         book=book,
                         beats=beats,
-                        entities=entities,
-                        relationships=relationships,
+                        entities=context.entities,
+                        relationships=context.relationships,
                         word_count=request.word_count,
-                        previous_summary=previous_summary,  # P0: 跨章衔接
-                        relevant_memories=relevant_memories,  # P1: RAG 记忆
-                        locations=locations,  # P1: 地图位置
+                        previous_summary=context.previous_summary,  # P0: 跨章衔接
+                        relevant_memories=context.relevant_memories,  # P1: RAG 记忆
+                        locations=context.locations,  # P1: 地图位置
                         physical_state_lock=physical_state_lock,  # P1: 物理状态锁
                         chapter_assets_schema=chapter.chapter_assets_schema or "",  # P1: 章节资产模式
                         anchor_pov=anchor_pov,
@@ -422,14 +404,20 @@ async def generate_chapter_dual_track(
             prompt_logger._review_passed = not (result.adjustment_plan and result.adjustment_plan.needs_adjustment)
             
             # 发送 Track A 完成事件（内部事件，前端主要关注 DRAFTING 状态）
-            yield f"data: {json.dumps({'event': 'TRACK_A_DONE', 'message': f'节拍扩写完成，{len(result.beat_drafts)} 个片段'}, ensure_ascii=False)}\n\n"
+            yield build_sse_event(
+                "TRACK_A_DONE",
+                f"节拍扩写完成，{len(result.beat_drafts)} 个片段"
+            )
             
             # 发送 Track B 完成事件（如果有，内部事件）
             if result.sketch_result:
-                yield f"data: {json.dumps({'event': 'TRACK_B_DONE', 'message': f'速写生成完成，{result.sketch_result.word_count} 字'}, ensure_ascii=False)}\n\n"
+                yield build_sse_event(
+                    "TRACK_B_DONE",
+                    f"速写生成完成，{result.sketch_result.word_count} 字"
+                )
             
             # 发送统稿开始事件（STITCHING 表示进行中状态）
-            yield f"data: {json.dumps({'event': 'STITCHING', 'message': '正在统稿拼接各节拍内容...'}, ensure_ascii=False)}\n\n"
+            yield build_sse_event("STITCHING", "正在统稿拼接各节拍内容...")
             
             # 计算是否需要调整（提前定义以便后续使用）
             needs_adjustment = result.adjustment_plan.needs_adjustment if result.adjustment_plan else False
@@ -438,10 +426,19 @@ async def generate_chapter_dual_track(
             if result.adjustment_plan:
                 score = result.adjustment_plan.alignment_score
                 needs_fix = result.adjustment_plan.needs_adjustment
-                yield f"data: {json.dumps({'event': 'REVIEWING', 'message': f'审阅完成，对齐度得分: {score:.1f}', 'score': score, 'needs_fix': needs_fix}, ensure_ascii=False)}\n\n"
+                yield build_sse_event(
+                    "REVIEWING",
+                    f"审阅完成，对齐度得分: {score:.1f}",
+                    score=score,
+                    needs_fix=needs_fix
+                )
             
             # 发送最终文本流事件（模拟流式输出以兼容前端）
-            yield f"data: {json.dumps({'event': 'FINAL_TEXT_STREAM', 'message': '正在输出最终文本...', 'passed': not needs_adjustment}, ensure_ascii=False)}\n\n"
+            yield build_sse_event(
+                "FINAL_TEXT_STREAM",
+                "正在输出最终文本...",
+                passed=not needs_adjustment
+            )
             
             # 发送文本内容（分块以支持流式显示效果）
             final_text = result.final_text or ""
@@ -451,15 +448,14 @@ async def generate_chapter_dual_track(
                 yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
             
             # 发送最终结果（使用前端期望的 DONE 而非 COMPLETE）
-            yield f"data: {json.dumps({
-                'event': 'DONE',
-                'text': result.final_text,
-                'stats': result.stats,
-                'alignment_score': result.adjustment_plan.alignment_score if result.adjustment_plan else None,
-                'passed': not needs_adjustment,
-                'iterations': 1,
-                'revision_count': 1 if needs_adjustment else 0,
-            }, ensure_ascii=False)}\n\n"
+            yield build_sse_done(
+                text=result.final_text,
+                stats=result.stats,
+                alignment_score=result.adjustment_plan.alignment_score if result.adjustment_plan else None,
+                passed=not needs_adjustment,
+                iterations=1,
+                revision_count=1 if needs_adjustment else 0,
+            )
             
             # 完成日志记录
             prompt_logger.finalize(
@@ -472,7 +468,7 @@ async def generate_chapter_dual_track(
         finally:
             # 确保异常时也能保存日志
             if not prompt_logger._finalized:
-                logger.warning("[DualTrack] 生成器异常退出，强制保存日志")
+                svc_logger.warning("Generator exited abnormally, forcing log save")
                 prompt_logger.finalize(
                     final_text_length=prompt_logger._final_text_length,
                     total_iterations=prompt_logger._total_iterations,
@@ -495,31 +491,19 @@ async def generate_chapter_dual_track_simple(
     
     返回完整的生成结果，不包含中间进度。
     """
-    chapter = await _load_chapter(db, chapter_id)
-    if not chapter:
+    # 使用统一的上下文加载服务
+    context = await load_full_chapter_context(db, chapter_id)
+    if not context:
         raise HTTPException(status_code=404, detail="章节不存在")
+    
+    chapter = context.chapter
+    book = context.book
     
     # P2: 更新章节设置
     if request.tension_level is not None:
         chapter.tension_level = request.tension_level
     if request.pacing_style:
         chapter.pacing_style = request.pacing_style
-    
-    book = await _load_book(db, chapter.book_id)
-    entities = await _load_entities(db, chapter_id)
-    relationships = await _load_relationships(db, entities)
-    
-    # P1: 加载地图位置
-    locations = await _load_locations(db, chapter_id)
-    
-    # P0: 加载上一章摘要
-    previous_summary = await _load_previous_summary(db, chapter)
-    
-    # P0: 加载开放伏笔
-    open_hooks = await _load_open_hooks(db, chapter)
-    
-    # P1: 加载 RAG 相关记忆
-    relevant_memories = await _load_relevant_memories(db, chapter, request)
     
     # 节拍生成（若请求携带 confirmed beats，直接使用；否则调用 LLM 重新规划）
     from backend.services.workflows.planning import generate_beats, assign_pov_to_beats
@@ -535,20 +519,20 @@ async def generate_chapter_dual_track_simple(
         beats, _ = await generate_beats(
             chapter=chapter,
             book=book,
-            entities=entities,
-            relationships=relationships,
+            entities=context.entities,
+            relationships=context.relationships,
             word_count=request.word_count,
-            open_hooks=open_hooks,
+            open_hooks=context.open_hooks,
             api_key=request.api_key,
             base_url=request.base_url,
             model=request.model,
-            previous_chapter_summary=previous_summary,
+            previous_chapter_summary=context.previous_summary,
         )
     
     # POV 分配（confirmed beats 通常已带 pov_character，assign 仍可兜底补全）
     seen_char_ids_simple: set = set()
     pov_candidates = []
-    for e in entities:
+    for e in context.entities:
         if e.character and str(e.character.id) not in seen_char_ids_simple:
             seen_char_ids_simple.add(str(e.character.id))
             pov_candidates.append({
@@ -564,16 +548,16 @@ async def generate_chapter_dual_track_simple(
         api_key=request.api_key,
         base_url=request.base_url,
         model=request.model,
-        previous_chapter_summary=previous_summary,
+        previous_chapter_summary=context.previous_summary,
     )
     
     anchor_pov = beats[0].get("pov_character") if beats else None
     
     # P1: 构建物理状态锁定
-    physical_state_lock = _build_physical_state_lock(beats)
+    physical_state_lock = build_physical_state_lock(beats)
     
     # P2: 保存 StoryBeat 到数据库
-    await _save_story_beats(db, chapter, beats)
+    await save_story_beats(db, chapter, beats)
     
     # 执行双轨生成
     config = DualTrackConfig(
@@ -593,12 +577,12 @@ async def generate_chapter_dual_track_simple(
         chapter=chapter,
         book=book,
         beats=beats,
-        entities=entities,
-        relationships=relationships,
+        entities=context.entities,
+        relationships=context.relationships,
         word_count=request.word_count,
-        previous_summary=previous_summary,
-        relevant_memories=relevant_memories,
-        locations=locations,
+        previous_summary=context.previous_summary,
+        relevant_memories=context.relevant_memories,
+        locations=context.locations,
         physical_state_lock=physical_state_lock,
         chapter_assets_schema=chapter.chapter_assets_schema or "",
         anchor_pov=anchor_pov,
@@ -621,238 +605,5 @@ async def generate_chapter_dual_track_simple(
 # 辅助函数
 # =============================================================================
 
-async def _load_chapter(db: AsyncSession, chapter_id: str) -> Optional[Chapter]:
-    """加载章节"""
-    result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.story_beats))
-        .where(Chapter.id == chapter_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def _load_book(db: AsyncSession, book_id: str) -> Optional[Book]:
-    """加载书籍"""
-    result = await db.execute(select(Book).where(Book.id == book_id))
-    return result.scalar_one_or_none()
-
-
-async def _load_entities(db: AsyncSession, chapter_id: str) -> list:
-    """加载章节实体"""
-    result = await db.execute(
-        select(ChapterEntity)
-        .options(selectinload(ChapterEntity.character))
-        .where(ChapterEntity.chapter_id == chapter_id)
-    )
-    return result.scalars().all()
-
-
-async def _load_relationships(db: AsyncSession, entities: list) -> list:
-    """加载角色关系"""
-    character_ids = [e.entity_id for e in entities]
-    if not character_ids:
-        return []
-    
-    result = await db.execute(
-        select(CharacterRelationship)
-        .options(
-            selectinload(CharacterRelationship.source_character),
-            selectinload(CharacterRelationship.target_character)
-        )
-        .where(
-            CharacterRelationship.source_char_id.in_(character_ids),
-            CharacterRelationship.target_char_id.in_(character_ids),
-        )
-    )
-    return result.scalars().all()
-
-
-async def _load_previous_summary(db: AsyncSession, chapter: Chapter) -> Optional[str]:
-    """加载上一章摘要
-    
-    优先级：summary > draft_text > content_text > 章节信息提示
-    """
-    prev_chapter_result = await db.execute(
-        select(Chapter)
-        .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
-    )
-    prev_chapter = prev_chapter_result.scalar_one_or_none()
-    
-    if not prev_chapter:
-        return None
-    
-    if prev_chapter.summary:
-        return prev_chapter.summary
-    elif prev_chapter.draft_text:
-        return f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
-    elif prev_chapter.content_text:
-        return f"（上一章末尾原文）...{prev_chapter.content_text[-1000:]}"
-    else:
-        prev_chapter_name = prev_chapter.chapter_name or f"第{prev_chapter.chapter_number}章"
-        return f"（上一章【{prev_chapter_name}】内容未生成，标题：{prev_chapter.title or '未命名'}）"
-
-
-async def _load_previous_world_snapshot(db: AsyncSession, chapter: Chapter) -> Optional[dict]:
-    """加载上一章的世界状态快照
-
-    用于跨章状态连续性约束。
-    """
-    prev_chapter_result = await db.execute(
-        select(Chapter)
-        .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
-    )
-    prev_chapter = prev_chapter_result.scalar_one_or_none()
-
-    if not prev_chapter:
-        return None
-
-    return prev_chapter.world_snapshot if prev_chapter.world_snapshot else None
-
-
-async def _load_open_hooks(db: AsyncSession, chapter: Chapter) -> List[Dict[str, str]]:
-    """加载开放的伏笔/情节点"""
-    hook_max_chapter_number = chapter.chapter_number - 1
-    historical_chapter_exists = (
-        select(Chapter.id)
-        .where(
-            Chapter.id == PlotLedger.chapter_id,
-            Chapter.chapter_number <= hook_max_chapter_number,
-        )
-        .exists()
-    )
-    
-    open_hook_result = await db.execute(
-        select(PlotLedger).where(
-            PlotLedger.book_id == chapter.book_id,
-            PlotLedger.status == "open",
-            or_(
-                PlotLedger.created_at_chapter <= hook_max_chapter_number,
-                and_(
-                    PlotLedger.created_at_chapter.is_(None),
-                    or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
-                ),
-            ),
-        )
-    )
-    open_hook_rows = open_hook_result.scalars().all()
-    
-    open_hooks = []
-    for row in open_hook_rows:
-        content = str(getattr(row, "content", "") or "").strip()
-        if not content:
-            continue
-        hook_id = str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip()
-        open_hooks.append({
-            "hook_id": hook_id,
-            "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
-            "content": content,
-        })
-    
-    return open_hooks
-
-
-async def _load_locations(db: AsyncSession, chapter_id: str) -> List[Any]:
-    """加载章节地图位置"""
-    result = await db.execute(
-        select(ChapterMapLocation)
-        .options(selectinload(ChapterMapLocation.location))
-        .where(ChapterMapLocation.chapter_id == chapter_id)
-    )
-    return list(result.scalars().all())
-
-
-async def _load_relevant_memories(
-    db: AsyncSession,
-    chapter: Chapter,
-    request: "DualTrackGenerationRequest",
-    resolved_params: Optional[Dict[str, Any]] = None
-) -> List[Any]:
-    """
-    加载 RAG 相关记忆
-    
-    V3.8 更新：支持使用解析后的参数，基础模式下使用推导值
-    
-    Args:
-        db: 数据库会话
-        chapter: 章节实体
-        request: 请求对象
-        resolved_params: 解析后的参数字典（基础模式推导值，专家模式原值）
-    """
-    relevant_memories = []
-    
-    if not chapter.outline_text:
-        return relevant_memories
-    
-    # 使用解析后的参数，若未提供则从 request 获取
-    rag_top_k = resolved_params.get("rag_top_k", request.rag_top_k) if resolved_params else request.rag_top_k
-    rag_alpha = resolved_params.get("rag_alpha", request.rag_alpha) if resolved_params else request.rag_alpha
-    rag_beta = resolved_params.get("rag_beta", request.rag_beta) if resolved_params else request.rag_beta
-    rag_gamma = resolved_params.get("rag_gamma", request.rag_gamma) if resolved_params else request.rag_gamma
-    
-    try:
-        embedding = await get_embedding(chapter.outline_text, request.api_key, request.base_url)
-        if embedding:
-            memory_repo = MemoryRepository(db)
-            relevant_memories = await memory_repo.search_similar(
-                embedding,
-                chapter.book_id,
-                limit=rag_top_k,
-                alpha=rag_alpha,
-                beta=rag_beta,
-                gamma=rag_gamma,
-                lambda_decay=request.rag_lambda,
-                exclude_chapter_id=chapter.id,
-                max_chapter_number=chapter.chapter_number - 1,
-            )
-            logger.debug(f"[RAG Search] Found {len(relevant_memories)} relevant memories with top_k={rag_top_k}, alpha={rag_alpha}")
-    except Exception as e:
-        logger.error(f"[RAG Search] {e}")
-    
-    return relevant_memories
-
-
-def _build_physical_state_lock(beats: List[dict]) -> Optional[str]:
-    """构建物理状态锁定描述"""
-    if beats and beats[0].get("entry_state"):
-        return beats[0].get("entry_state")
-    return None
-
-
-async def _save_story_beats(
-    db: AsyncSession,
-    chapter: Chapter,
-    beats: List[dict]
-) -> List[StoryBeat]:
-    """保存 StoryBeat 到数据库（先清除该章节的旧记录，再写入新记录，防止多次生成产生重复）"""
-    from sqlalchemy import delete as sa_delete
-    # 清除旧记录，避免多次生成后前端看到重复 beats
-    await db.execute(sa_delete(StoryBeat).where(StoryBeat.chapter_id == chapter.id))
-    await db.flush()
-    story_beats = []
-    for beat_index, beat in enumerate(beats, start=1):
-        story_beat = StoryBeat(
-            book_id=chapter.book_id,
-            chapter_id=chapter.id,
-            beat_id=beat.get("beat_id"),
-            beat_type="progression",
-            position=beat.get("position", beat_index),
-            location=beat.get("location"),
-            pov_character=beat.get("pov_character"),
-            pov_perception_state=beat.get("pov_perception_state", "正常"),
-            anchor_pov=beat.get("anchor_pov"),
-            original_actor=beat.get("original_actor"),
-            action_summary=beat.get("action_summary"),
-            worldbuilding_instruction=beat.get("worldbuilding_instruction"),
-            entry_state=beat.get("entry_state"),
-            exit_state=beat.get("exit_state"),
-            red_lines=beat.get("red_lines", []),
-            word_count_target=beat.get("word_count_target", beat.get("target_words", 0)),
-            summary=beat.get("summary", ""),
-            meta={"target_words": beat.get("target_words", 0)},
-            status="planned",
-        )
-        db.add(story_beat)
-        story_beats.append(story_beat)
-    
-    await db.flush()
-    return story_beats
+# 注意：所有数据加载函数已下沉到 backend.services.context_loader 模块
+# 本路由文件仅保留 API 层逻辑，业务逻辑下沉到服务层
