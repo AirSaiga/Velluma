@@ -110,38 +110,18 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const editorMode = ref<EditorMode>(readStoredEditorMode())
   
   function readStoredEditorMode(): EditorMode {
-    if (typeof window === 'undefined') return 'basic'
-    try {
-      const stored = localStorage.getItem(EDITOR_MODE_STORAGE_KEY)
-      if (stored === 'basic' || stored === 'expert') return stored
-      return 'basic'
-    } catch {
-      return 'basic'
-    }
-  }
-  
-  function toggleEditorMode() {
-    editorMode.value = editorMode.value === 'basic' ? 'expert' : 'basic'
-    persistEditorMode(editorMode.value)
+    // 编辑模式已统一为意图驱动
+    return 'intent'
   }
   
   function persistEditorMode(mode: EditorMode) {
-    if (typeof window === 'undefined') return
-    try {
-      localStorage.setItem(EDITOR_MODE_STORAGE_KEY, mode)
-    } catch {}
+    // 已废弃，保留以兼容
   }
   
-  // 根据编辑模式过滤显示的字段
-  const visibleAgenticFields = computed(() => {
-    const basicFields = [...BASIC_MODE_FIELDS]
-    if (editorMode.value === 'expert') {
-      return [...basicFields, ...EXPERT_MODE_EXTRA_FIELDS]
-    }
-    return basicFields
-  })
+  // 编辑模式固定为 intent
+  const visibleAgenticFields = computed(() => [...BASIC_MODE_FIELDS, ...EXPERT_MODE_EXTRA_FIELDS])
   
-  const editorModeConfig = computed(() => EDITOR_MODE_CONFIG[editorMode.value])
+  const editorModeConfig = computed(() => EDITOR_MODE_CONFIG['intent'])
 
   const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value)
   const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value)
@@ -1039,10 +1019,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     workflowState,
     handleApplyInspirationToOutline,
     closeInspirationModal,
-    // V3.8 编辑模式
+    // 编辑模式（已固定为 intent）
     editorMode,
     editorModeConfig,
-    visibleAgenticFields,
-    toggleEditorMode
+    visibleAgenticFields
   }
 }

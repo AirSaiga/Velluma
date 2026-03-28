@@ -13,7 +13,7 @@ const props = defineProps<{
   critiqueResult?: any
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique', 'intent-generate'])
 const viewModel = useChapterEditorContainer(props, emit)
 
 defineExpose({
@@ -30,7 +30,6 @@ defineExpose({
     :editor-mode="viewModel.editorMode.value"
     :editor-mode-config="viewModel.editorModeConfig.value"
     :visible-agentic-fields="viewModel.visibleAgenticFields.value"
-    :toggle-editor-mode="viewModel.toggleEditorMode"
     :agentic-validation="viewModel.agenticValidation.value"
     :beat-preview-error="viewModel.beatPreviewError.value"
     :beat-preview-loading="viewModel.beatPreviewLoading.value"
@@ -113,6 +112,7 @@ defineExpose({
     :book-id="props.bookId"
     :critique-result="props.critiqueResult"
     @request-critique="(content) => emit('request-critique', content)"
+    @intent-generate="(payload) => emit('intent-generate', payload)"
   />
 
   <InspirationModal

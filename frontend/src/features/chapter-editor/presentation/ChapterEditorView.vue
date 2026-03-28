@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
+import { IntentDrivenPanel } from '../../intent-driven'
 import type { AgenticFormState, ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
 import type { AgenticFieldOption, EditorMode } from '../../../composables/useAgenticConfig'
 
@@ -30,11 +31,10 @@ const props = defineProps<{
   AGENTIC_GROUPS: Record<string, any>
   agenticForm: AgenticFormState
   agenticGroupFields: Record<string, Array<keyof AgenticFormState>>
-  // V3.8 编辑模式
+  // 编辑模式（固定为 intent）
   editorMode: EditorMode
   editorModeConfig: { title: string; description: string; icon: string }
   visibleAgenticFields: string[]
-  toggleEditorMode: () => void
   agenticValidation: { errors: string[] }
   beatPreviewError: string
   beatPreviewLoading: boolean
@@ -138,6 +138,7 @@ function handlePovModeChange(beat: BeatPreviewItem) {
 
 const emit = defineEmits<{
   (e: 'request-critique', content: string): void
+  (e: 'intent-generate', payload: any): void
 }>()
 
 const editorRef = ref<any>(null)
@@ -368,31 +369,7 @@ watch(() => props.critiqueResult, (newVal) => {
       <div class="p-3 border-b border-white/60 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <h3 class="text-sm font-semibold text-[var(--text-primary)]">智能生成设置</h3>
-          <!-- V3.8 编辑模式切换 -->
-          <div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)]">
-            <button
-              @click="toggleEditorMode"
-              :disabled="isGenerating"
-              class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all"
-              :class="editorMode === 'basic' 
-                ? 'bg-accent-500 text-white shadow-sm' 
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'"
-            >
-              <span>\U0001F4DD</span>
-              <span>基础</span>
-            </button>
-            <button
-              @click="toggleEditorMode"
-              :disabled="isGenerating"
-              class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all"
-              :class="editorMode === 'expert' 
-                ? 'bg-accent-500 text-white shadow-sm' 
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'"
-            >
-              <span>\u2699\uFE0F</span>
-              <span>专家</span>
-            </button>
-          </div>
+          <span class="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-accent-100 text-accent-700">🎯 意图驱动</span>
         </div>
         <button @click="closeAgenticSettingsModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -400,125 +377,13 @@ watch(() => props.critiqueResult, (newVal) => {
           </svg>
         </button>
       </div>
-      <div class="p-3 overflow-y-auto max-h-[calc(85vh-56px)] space-y-2.5">
-        <!-- 模式说明 -->
-        <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)]">
-          <span class="text-base">{{ editorModeConfig.icon }}</span>
-          <div class="flex-1">
-            <div class="text-[11px] font-medium text-[var(--text-primary)]">{{ editorModeConfig.title }}</div>
-            <div class="text-[10px] text-[var(--text-muted)]">{{ editorModeConfig.description }}</div>
-          </div>
-        </div>
-        
-        <div class="flex items-center justify-between">
-          <p class="text-[10px] text-[var(--text-muted)]">可按需调节以下参数，生成时会自动写入请求。</p>
-          <button
-            @click="restoreAgenticDefaults"
-            :disabled="isGenerating"
-            class="px-2 py-0.5 rounded-md text-[10px] bg-[var(--bg-primary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-color)] disabled:opacity-40"
-          >
-            恢复推荐值
-          </button>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <section
-            v-for="(fieldKeys, groupKey) in agenticGroupFields"
-            :key="groupKey"
-            class="rounded-lg bg-[var(--bg-primary)] p-2 ring-1 ring-[var(--border-color)] space-y-2"
-          >
-            <header>
-              <h4 class="text-[11px] font-semibold text-[var(--text-primary)]">{{ AGENTIC_GROUPS[groupKey].title }}</h4>
-              <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_GROUPS[groupKey].description }}</p>
-            </header>
-            <div class="space-y-1.5">
-              <template v-for="field in fieldKeys" :key="field">
-                <div
-                  v-if="visibleAgenticFields.includes(field)"
-                  class="rounded-md border border-[var(--border-color)] px-2 py-1.5"
-                :class="getAgenticFieldFeedbackText(field) ? 'border-rose-300 bg-rose-50/40' : 'bg-[var(--bg-canvas)]'"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <label class="text-[10px] font-medium text-[var(--text-primary)]">{{ AGENTIC_FIELD_CONFIG[field].label }}</label>
-                  <button
-                    @click="restoreAgenticField(field)"
-                    :disabled="isGenerating"
-                    class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40"
-                  >
-                    还原
-                  </button>
-                </div>
-                <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_FIELD_CONFIG[field].description }}</p>
-                <div class="flex items-center gap-2 mt-1">
-                  <textarea
-                    v-if="getAgenticFieldInputType(field) === 'textarea'"
-                    :value="getAgenticFieldValue(field) as string | number"
-                    @input="setAgenticFieldValue(field, $event)"
-                    @blur="normalizeAgenticField"
-                    :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60 resize-none"
-                    rows="3"
-                  ></textarea>
-                  <select
-                    v-else-if="isAgenticFieldSelect(field)"
-                    :value="getAgenticFieldValue(field)"
-                    @change="setAgenticFieldValue(field, $event)"
-                    @blur="normalizeAgenticField"
-                    :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60"
-                  >
-                    <option
-                      v-for="option in getAgenticFieldOptions(field)"
-                      :key="`${field}-${option.value}`"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                  <div
-                    v-else-if="getAgenticFieldInputType(field) === 'checkbox'"
-                    class="flex items-center gap-2"
-                  >
-                    <input
-                      :checked="getAgenticFieldValue(field) as boolean"
-                      @change="setAgenticFieldValue(field, $event)"
-                      type="checkbox"
-                      :disabled="isGenerating"
-                      class="w-4 h-4 rounded border-ink-300 text-accent-600 focus:ring-accent-500"
-                    />
-                    <span class="text-[11px] text-[var(--text-muted)]">{{ getAgenticFieldValue(field) ? '已开启' : '已关闭' }}</span>
-                  </div>
-                  <input
-                    v-else
-                    :value="getAgenticFieldValue(field)"
-                    @input="setAgenticFieldValue(field, $event)"
-                    @blur="normalizeAgenticField"
-                    :type="getAgenticFieldInputType(field)"
-                    :step="getAgenticFieldStep(field)"
-                    :min="getAgenticFieldMin(field)"
-                    :max="getAgenticFieldMax(field)"
-                    :disabled="isGenerating"
-                    class="w-full px-1.5 py-1 rounded bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)] text-[11px] disabled:opacity-60"
-                  />
-                </div>
-                <div class="flex items-center justify-between mt-1">
-                  <span class="text-[10px] text-[var(--text-muted)]">{{ AGENTIC_FIELD_CONFIG[field].rangeHint }}</span>
-                  <span class="text-[10px] text-[var(--text-muted)]">{{ AGENTIC_FIELD_CONFIG[field].recommended }}</span>
-                </div>
-                <p v-if="getAgenticFieldFeedbackText(field)" class="text-[10px] text-rose-500 mt-1">
-                  {{ getAgenticFieldFeedbackText(field) }}
-                </p>
-              </div>
-              </template>
-            </div>
-          </section>
-        </div>
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-[var(--text-muted)]">三项回顾偏好合计</span>
-          <span :class="Math.abs(ragWeightTotal - 1) <= 0.001 ? 'text-emerald-600 font-medium' : 'text-rose-500 font-medium'">{{ ragWeightTotal }}</span>
-        </div>
-        <p v-if="formError || firstFieldFeedback || agenticValidation.errors.length > 0" class="text-[10px] text-rose-500">
-          {{ formError || firstFieldFeedback || agenticValidation.errors[0] }}
-        </p>
+      <div class="p-3 overflow-y-auto max-h-[calc(85vh-56px)]">
+        <!-- 意图驱动模式面板 -->
+        <IntentDrivenPanel
+          :chapter-id="selectedChapter?.id || ''"
+          :api-config="apiConfig"
+          @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"
+        />
       </div>
     </div>
   </div>

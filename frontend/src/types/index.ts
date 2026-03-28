@@ -85,8 +85,8 @@ export interface GenerateChapterRequest {
 }
 
 export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
-  // === V3.8 编辑模式 ===
-  editor_mode?: 'basic' | 'expert'
+  // === 编辑模式（已统一为意图驱动）===
+  editor_mode?: 'intent'
   
   // === V3.8 高层语义参数（基础模式推荐）===
   memory_strategy?: 'recent_only' | 'balanced_reference' | 'deep_dive'
