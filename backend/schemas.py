@@ -1103,17 +1103,55 @@ class GenerateChapterAgenticRequest(BaseModel):
     - 适用于 OpenRouter 提供商的推理模型（o1, o3, GPT-5, Claude thinking 等）
     - 推理模式可显著提升复杂逻辑任务的质量
 
+    V3.8 高层语义参数（基础模式）：
+    - editor_mode: 编辑模式（basic/expert），默认 basic
+    - memory_strategy: 记忆检索策略预设，自动推导 RAG 参数
+    - creativity_level: 创作自由度，自动推导并行策略
+    - refinement_depth: 精修深度，自动推导校验阈值
+    
+    基础模式时，只需传递高层语义参数，后端自动推导底层技术参数。
+    专家模式时，可以精确控制所有技术参数。
+
     工作流：
     - 主笔生成初稿 → 审阅 Agent 质检 → 不合格则重写 → 达到迭代次数或合格则结束
     """
+    # === 必填参数 ===
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
+    
+    # === V3.8 编辑模式 ===
+    editor_mode: str = Field(
+        default="basic", 
+        description="编辑模式：basic（基础模式）或 expert（专家模式）"
+    )
+    
+    # === V3.8 高层语义参数（基础模式推荐）===
+    memory_strategy: Optional[str] = Field(
+        default=None, 
+        description="记忆检索策略：recent_only（最近章节）/balanced_reference（平衡参考）/deep_dive（深度挖掘）"
+    )
+    creativity_level: Optional[str] = Field(
+        default=None, 
+        description="创作自由度：strict_prompt（严格遵循）/balanced_creation（平衡创作）/wild_imagination（自由想象）"
+    )
+    refinement_depth: Optional[str] = Field(
+        default=None, 
+        description="精修深度：light（轻度）/standard（标准）/deep（深度）"
+    )
+    
+    # === 连接参数 ===
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini", description="默认模型（向后兼容）")
     reasoning_model: Optional[str] = Field(None, description="高逻辑模型（用于 Scene Intent / Subconscious / Review）")
     creative_model: Optional[str] = Field(None, description="高创意模型（用于 Prose Draft），默认使用 reasoning_model")
+    
+    # === 章节参数 ===
     word_count: Optional[int] = Field(default=AGENTIC_DEFAULT_WORD_COUNT, ge=1, description="期望生成的字数")
     author_intent: Optional[str] = Field(None, description="作者的创作意图")
+    tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)，Level 1-2: 疾速流, Level 3: 均衡流, Level 4-5: 堡垒流")
+    pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
+    
+    # === 专家模式参数（基础模式自动隐藏）===
     max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")
     rag_top_k: int = Field(default=AGENTIC_DEFAULT_RAG_TOP_K, ge=1, le=20, description="RAG 返回记忆数量")
     rag_alpha: float = Field(default=AGENTIC_DEFAULT_RAG_ALPHA, ge=0.0, le=1.0, description="语义相似度权重")
@@ -1122,17 +1160,16 @@ class GenerateChapterAgenticRequest(BaseModel):
     rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
     fast_mode: bool = Field(default=False, description="快速模式：仅生成首轮结果，不进入二轮重写")
     skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
-    tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)，Level 1-2: 疾速流, Level 3: 均衡流, Level 4-5: 堡垒流")
-    pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
     feature_flags: Optional[DraftingFeatureFlags] = Field(
         default_factory=DraftingFeatureFlags,
         description="V2.5 认知流式生成功能开关配置"
     )
+    
+    # === 推理模式配置 ===
     reasoning_config: Optional[ReasoningConfig] = Field(
         default_factory=lambda: ReasoningConfig(),
         description="推理模式配置（单模型模式使用，OpenRouter Reasoning Tokens 支持）"
     )
-    # 双模型推理模式配置
     reasoning_model_reasoning_config: Optional[ReasoningConfig] = Field(
         default_factory=lambda: ReasoningConfig(),
         description="逻辑推理模型的推理模式配置（双模型模式使用）"
@@ -1154,10 +1191,16 @@ class GenerateChapterAgenticRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_rag_weight_sum(self):
-        total = round(self.rag_alpha + self.rag_beta + self.rag_gamma, 6)
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError("rag_alpha + rag_beta + rag_gamma 必须等于 1")
+        # 仅在专家模式下校验 RAG 权重
+        if self.editor_mode == "expert":
+            total = round(self.rag_alpha + self.rag_beta + self.rag_gamma, 6)
+            if abs(total - 1.0) > 1e-6:
+                raise ValueError("rag_alpha + rag_beta + rag_gamma 必须等于 1")
         return self
+    
+    def is_basic_mode(self) -> bool:
+        """判断是否为基础模式"""
+        return self.editor_mode != "expert"
 
 
 class ConfirmedStoryBeat(BaseModel):

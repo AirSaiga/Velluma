@@ -35,7 +35,16 @@
 - 返回格式统一为异步生成器或结构化数据
 """
 
-from backend.services.workflows.context import load_chapter_context
+from backend.services.workflows.context import (
+    load_chapter_context,
+    load_chapter_context_v2,
+    load_chapter_context_v3,  # V3.8: 完全基于新 RAG 架构
+    get_context_for_stage,
+    get_planning_context,
+    get_drafting_context,
+    get_reviewing_context,
+    get_refining_context,
+)
 from backend.services.workflows.planning import generate_beats
 from backend.services.workflows.drafting import generate_chunks_parallel
 from backend.services.workflows.stitching import stitch_chunks
@@ -90,6 +99,13 @@ except Exception as e:
 __all__ = [
     # 原有模块
     "load_chapter_context",
+    "load_chapter_context_v2",  # V3.7: 增强型 RAG
+    "load_chapter_context_v3",  # V3.8: 完全新 RAG 架构
+    "get_context_for_stage",
+    "get_planning_context",
+    "get_drafting_context",
+    "get_reviewing_context",
+    "get_refining_context",
     "generate_beats",
     "generate_chunks_parallel",
     "stitch_chunks",

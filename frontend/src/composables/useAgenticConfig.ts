@@ -1,5 +1,42 @@
 import type { AgenticFormState, GenerateChapterAgenticPayload, ReasoningConfig } from '../types'
 
+// =============================================================================
+// V3.8 编辑模式配置
+// =============================================================================
+
+export type EditorMode = 'basic' | 'expert'
+
+export const EDITOR_MODE_CONFIG = {
+  basic: {
+    title: '基础模式',
+    description: '简洁参数，智能推荐',
+    icon: '📝'
+  },
+  expert: {
+    title: '专家模式',
+    description: '完整控制，精确调优',
+    icon: '⚙️'
+  }
+} as const
+
+// 基础模式显示的字段
+export const BASIC_MODE_FIELDS = [
+  'word_count',
+  'tension_level',
+  'pacing_style',
+  'memory_span',
+  'creativity_level',
+  'refinement_depth',
+  'author_intent'
+] as const
+
+// 专家模式额外显示的字段
+export const EXPERT_MODE_EXTRA_FIELDS = [
+  'progression_preference',
+  'rag_lambda',
+  'force_parallel_prose'
+] as const
+
 const FLOAT_PRECISION = 1000
 const MEMORY_SPAN_TOP_K = {
   recent_only: 2,
@@ -357,6 +394,7 @@ export function buildAgenticPayload(params: {
     creative_model_reasoning_exclude?: boolean
   }
   form: Partial<AgenticFormState & AgenticLegacyFields>
+  editorMode?: EditorMode
 }): { payload: GenerateChapterAgenticPayload | null; errors: string[] } {
   const { normalized, errors } = validateAgenticForm(params.form)
   const legacyFields = buildLegacyAgenticFields(normalized)
@@ -369,6 +407,10 @@ export function buildAgenticPayload(params: {
     return { payload: null, errors }
   }
 
+  // 确定编辑模式
+  const editorMode = params.editorMode || 'basic'
+  const isBasicMode = editorMode === 'basic'
+  
   // 双模型配置处理
   const hasDualModel = !!(params.apiConfig.reasoning_model || params.apiConfig.creative_model)
   const baseModel = params.apiConfig.model || 'gpt-4o-mini'
@@ -407,36 +449,66 @@ export function buildAgenticPayload(params: {
     }
   }
   
-  return {
-    payload: {
-      chapter_id: params.chapterId,
-      api_key: apiKey,
-      base_url: params.apiConfig.base_url || undefined,
-      // 向后兼容：保留 model 字段
-      model: baseModel,
-      // 双模型配置
-      reasoning_model: hasDualModel ? (params.apiConfig.reasoning_model || baseModel) : undefined,
-      creative_model: hasDualModel ? (params.apiConfig.creative_model || baseModel) : undefined,
-      word_count: normalized.word_count,
-      tension_level: normalized.tension_level,
-      pacing_style: normalized.pacing_style,
-      max_iterations: legacyFields.max_iterations,
-      rag_top_k: legacyFields.rag_top_k,
-      rag_alpha: legacyFields.rag_alpha,
-      rag_beta: legacyFields.rag_beta,
-      rag_gamma: legacyFields.rag_gamma,
-      rag_lambda: normalized.rag_lambda,
-      author_intent: normalized.author_intent,
-      fast_mode: false,
-      skip_minor_refine: true,
-      force_parallel_prose: normalized.force_parallel_prose,
-      // 单模型模式的推理模式配置
-      reasoning_config: reasoningConfig,
-      // 双模型模式的推理模式配置
-      reasoning_model_reasoning_config: reasoningModelReasoningConfig,
-      creative_model_reasoning_config: creativeModelReasoningConfig
-    },
-    errors: []
+  // === V3.8 根据编辑模式构建不同的 payload ===
+  const basePayload = {
+    chapter_id: params.chapterId,
+    api_key: apiKey,
+    base_url: params.apiConfig.base_url || undefined,
+    // 向后兼容：保留 model 字段
+    model: baseModel,
+    // 双模型配置
+    reasoning_model: hasDualModel ? (params.apiConfig.reasoning_model || baseModel) : undefined,
+    creative_model: hasDualModel ? (params.apiConfig.creative_model || baseModel) : undefined,
+    word_count: normalized.word_count,
+    tension_level: normalized.tension_level,
+    pacing_style: normalized.pacing_style,
+    author_intent: normalized.author_intent,
+    fast_mode: false,
+    skip_minor_refine: true,
+    // 单模型模式的推理模式配置
+    reasoning_config: reasoningConfig,
+    // 双模型模式的推理模式配置
+    reasoning_model_reasoning_config: reasoningModelReasoningConfig,
+    creative_model_reasoning_config: creativeModelReasoningConfig
+  } as const
+  
+  if (isBasicMode) {
+    // 基础模式：只发送高层语义参数，后端自动推导
+    return {
+      payload: {
+        ...basePayload,
+        editor_mode: 'basic',
+        // V3.8 高层语义参数
+        memory_strategy: normalized.memory_span,
+        creativity_level: normalized.creativity_level,
+        refinement_depth: normalized.refinement_depth,
+        // 不发送 RAG 技术参数，让后端自动推导
+        max_iterations: 2,  // 默认值
+        rag_top_k: 3,       // 默认值
+        rag_alpha: 0.6,     // 默认值
+        rag_beta: 0.2,      // 默认值
+        rag_gamma: 0.2,     // 默认值
+        rag_lambda: normalized.rag_lambda,
+      },
+      errors: []
+    }
+  } else {
+    // 专家模式：发送完整技术参数
+    return {
+      payload: {
+        ...basePayload,
+        editor_mode: 'expert',
+        // 专家模式：发送完整的技术参数
+        max_iterations: legacyFields.max_iterations,
+        rag_top_k: legacyFields.rag_top_k,
+        rag_alpha: legacyFields.rag_alpha,
+        rag_beta: legacyFields.rag_beta,
+        rag_gamma: legacyFields.rag_gamma,
+        rag_lambda: normalized.rag_lambda,
+        force_parallel_prose: normalized.force_parallel_prose,
+      },
+      errors: []
+    }
   }
 }
 

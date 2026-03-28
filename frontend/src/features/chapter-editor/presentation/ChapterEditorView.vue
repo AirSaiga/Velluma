@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
 import type { AgenticFormState, ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
-import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
+import type { AgenticFieldOption, EditorMode } from '../../../composables/useAgenticConfig'
 
 interface BeatPreviewItem {
   position: number
@@ -30,6 +30,11 @@ const props = defineProps<{
   AGENTIC_GROUPS: Record<string, any>
   agenticForm: AgenticFormState
   agenticGroupFields: Record<string, Array<keyof AgenticFormState>>
+  // V3.8 编辑模式
+  editorMode: EditorMode
+  editorModeConfig: { title: string; description: string; icon: string }
+  visibleAgenticFields: string[]
+  toggleEditorMode: () => void
   agenticValidation: { errors: string[] }
   beatPreviewError: string
   beatPreviewLoading: boolean
@@ -361,7 +366,34 @@ watch(() => props.critiqueResult, (newVal) => {
   >
     <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden">
       <div class="p-3 border-b border-white/60 flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-[var(--text-primary)]">智能生成设置</h3>
+        <div class="flex items-center gap-3">
+          <h3 class="text-sm font-semibold text-[var(--text-primary)]">智能生成设置</h3>
+          <!-- V3.8 编辑模式切换 -->
+          <div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)]">
+            <button
+              @click="toggleEditorMode"
+              :disabled="isGenerating"
+              class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all"
+              :class="editorMode === 'basic' 
+                ? 'bg-accent-500 text-white shadow-sm' 
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'"
+            >
+              <span>\U0001F4DD</span>
+              <span>基础</span>
+            </button>
+            <button
+              @click="toggleEditorMode"
+              :disabled="isGenerating"
+              class="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all"
+              :class="editorMode === 'expert' 
+                ? 'bg-accent-500 text-white shadow-sm' 
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'"
+            >
+              <span>\u2699\uFE0F</span>
+              <span>专家</span>
+            </button>
+          </div>
+        </div>
         <button @click="closeAgenticSettingsModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -369,6 +401,15 @@ watch(() => props.critiqueResult, (newVal) => {
         </button>
       </div>
       <div class="p-3 overflow-y-auto max-h-[calc(85vh-56px)] space-y-2.5">
+        <!-- 模式说明 -->
+        <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[var(--bg-canvas)] ring-1 ring-[var(--border-color)]">
+          <span class="text-base">{{ editorModeConfig.icon }}</span>
+          <div class="flex-1">
+            <div class="text-[11px] font-medium text-[var(--text-primary)]">{{ editorModeConfig.title }}</div>
+            <div class="text-[10px] text-[var(--text-muted)]">{{ editorModeConfig.description }}</div>
+          </div>
+        </div>
+        
         <div class="flex items-center justify-between">
           <p class="text-[10px] text-[var(--text-muted)]">可按需调节以下参数，生成时会自动写入请求。</p>
           <button
@@ -390,10 +431,10 @@ watch(() => props.critiqueResult, (newVal) => {
               <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{{ AGENTIC_GROUPS[groupKey].description }}</p>
             </header>
             <div class="space-y-1.5">
-              <div
-                v-for="field in fieldKeys"
-                :key="field"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1.5"
+              <template v-for="field in fieldKeys" :key="field">
+                <div
+                  v-if="visibleAgenticFields.includes(field)"
+                  class="rounded-md border border-[var(--border-color)] px-2 py-1.5"
                 :class="getAgenticFieldFeedbackText(field) ? 'border-rose-300 bg-rose-50/40' : 'bg-[var(--bg-canvas)]'"
               >
                 <div class="flex items-center justify-between gap-2">
@@ -467,6 +508,7 @@ watch(() => props.critiqueResult, (newVal) => {
                   {{ getAgenticFieldFeedbackText(field) }}
                 </p>
               </div>
+              </template>
             </div>
           </section>
         </div>

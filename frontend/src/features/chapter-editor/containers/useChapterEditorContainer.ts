@@ -8,6 +8,10 @@ import {
   AGENTIC_FIELD_CONFIG,
   AGENTIC_FIELD_OPTIONS,
   AGENTIC_GROUPS,
+  BASIC_MODE_FIELDS,
+  EXPERT_MODE_EXTRA_FIELDS,
+  EDITOR_MODE_CONFIG,
+  type EditorMode,
   buildLegacyAgenticFields,
   buildAgenticPayload,
   deserializeAgenticForm,
@@ -64,6 +68,7 @@ const beatFieldMap = {
   forbiddenEventsText: 'red_lines'
 } as const
 const AGENTIC_STORAGE_KEY = 'velluma_agentic_settings'
+const EDITOR_MODE_STORAGE_KEY = 'velluma_editor_mode'
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
@@ -100,6 +105,43 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const isStreamMode = ref(true)
   const isAgenticMode = ref(true)
   const formError = ref('')
+  
+  // V3.8 编辑模式状态
+  const editorMode = ref<EditorMode>(readStoredEditorMode())
+  
+  function readStoredEditorMode(): EditorMode {
+    if (typeof window === 'undefined') return 'basic'
+    try {
+      const stored = localStorage.getItem(EDITOR_MODE_STORAGE_KEY)
+      if (stored === 'basic' || stored === 'expert') return stored
+      return 'basic'
+    } catch {
+      return 'basic'
+    }
+  }
+  
+  function toggleEditorMode() {
+    editorMode.value = editorMode.value === 'basic' ? 'expert' : 'basic'
+    persistEditorMode(editorMode.value)
+  }
+  
+  function persistEditorMode(mode: EditorMode) {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(EDITOR_MODE_STORAGE_KEY, mode)
+    } catch {}
+  }
+  
+  // 根据编辑模式过滤显示的字段
+  const visibleAgenticFields = computed(() => {
+    const basicFields = [...BASIC_MODE_FIELDS]
+    if (editorMode.value === 'expert') {
+      return [...basicFields, ...EXPERT_MODE_EXTRA_FIELDS]
+    }
+    return basicFields
+  })
+  
+  const editorModeConfig = computed(() => EDITOR_MODE_CONFIG[editorMode.value])
 
   const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value)
   const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value)
@@ -599,7 +641,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const { payload, errors } = buildAgenticPayload({
         chapterId: selectedChapter.value.id,
         apiConfig: props.apiConfig,
-        form: agenticForm.value
+        form: agenticForm.value,
+        editorMode: editorMode.value
       })
       agenticForm.value = normalizeAgenticForm(agenticForm.value)
       if (!payload) {
@@ -995,6 +1038,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     wordCountMin,
     workflowState,
     handleApplyInspirationToOutline,
-    closeInspirationModal
+    closeInspirationModal,
+    // V3.8 编辑模式
+    editorMode,
+    editorModeConfig,
+    visibleAgenticFields,
+    toggleEditorMode
   }
 }

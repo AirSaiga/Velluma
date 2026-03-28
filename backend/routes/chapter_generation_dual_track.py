@@ -51,6 +51,7 @@ from backend.models import (
     ChapterMapLocation, PlotLedger, StoryBeat
 )
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
+from backend.services.agentic_workflow import resolve_high_level_params
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackConfig,
@@ -154,6 +155,10 @@ async def generate_chapter_dual_track(
         progress_queue = asyncio.Queue()
         
         try:
+            # V3.8: 解析高层参数（基础模式自动推导 RAG 参数）
+            resolved_params = resolve_high_level_params(request)
+            logger.info(f"[DualTrack] Editor mode: {request.editor_mode}, resolved RAG params: top_k={resolved_params['rag_top_k']}, alpha={resolved_params['rag_alpha']}")
+            
             # 加载上下文
             yield f"data: {json.dumps({'event': 'ASSEMBLING_CONTEXT', 'message': '加载章节上下文...'}, ensure_ascii=False)}\n\n"
             
@@ -192,8 +197,8 @@ async def generate_chapter_dual_track(
             open_hooks = await _load_open_hooks(db, chapter)
             logger.debug(f"[DualTrack] Open Hooks: {len(open_hooks)}")
             
-            # P1: 加载 RAG 相关记忆
-            relevant_memories = await _load_relevant_memories(db, chapter, request)
+            # P1: 加载 RAG 相关记忆（使用推导后的参数）
+            relevant_memories = await _load_relevant_memories(db, chapter, request, resolved_params)
             logger.debug(f"[DualTrack] Relevant Memories: {len(relevant_memories)}")
             
             # 发送上下文加载完成统计帧
@@ -759,13 +764,30 @@ async def _load_locations(db: AsyncSession, chapter_id: str) -> List[Any]:
 async def _load_relevant_memories(
     db: AsyncSession,
     chapter: Chapter,
-    request: "DualTrackGenerationRequest"
+    request: "DualTrackGenerationRequest",
+    resolved_params: Optional[Dict[str, Any]] = None
 ) -> List[Any]:
-    """加载 RAG 相关记忆"""
+    """
+    加载 RAG 相关记忆
+    
+    V3.8 更新：支持使用解析后的参数，基础模式下使用推导值
+    
+    Args:
+        db: 数据库会话
+        chapter: 章节实体
+        request: 请求对象
+        resolved_params: 解析后的参数字典（基础模式推导值，专家模式原值）
+    """
     relevant_memories = []
     
     if not chapter.outline_text:
         return relevant_memories
+    
+    # 使用解析后的参数，若未提供则从 request 获取
+    rag_top_k = resolved_params.get("rag_top_k", request.rag_top_k) if resolved_params else request.rag_top_k
+    rag_alpha = resolved_params.get("rag_alpha", request.rag_alpha) if resolved_params else request.rag_alpha
+    rag_beta = resolved_params.get("rag_beta", request.rag_beta) if resolved_params else request.rag_beta
+    rag_gamma = resolved_params.get("rag_gamma", request.rag_gamma) if resolved_params else request.rag_gamma
     
     try:
         embedding = await get_embedding(chapter.outline_text, request.api_key, request.base_url)
@@ -774,15 +796,15 @@ async def _load_relevant_memories(
             relevant_memories = await memory_repo.search_similar(
                 embedding,
                 chapter.book_id,
-                limit=request.rag_top_k,
-                alpha=request.rag_alpha,
-                beta=request.rag_beta,
-                gamma=request.rag_gamma,
+                limit=rag_top_k,
+                alpha=rag_alpha,
+                beta=rag_beta,
+                gamma=rag_gamma,
                 lambda_decay=request.rag_lambda,
                 exclude_chapter_id=chapter.id,
                 max_chapter_number=chapter.chapter_number - 1,
             )
-            logger.debug(f"[RAG Search] Found {len(relevant_memories)} relevant memories")
+            logger.debug(f"[RAG Search] Found {len(relevant_memories)} relevant memories with top_k={rag_top_k}, alpha={rag_alpha}")
     except Exception as e:
         logger.error(f"[RAG Search] {e}")
     

@@ -85,6 +85,14 @@ export interface GenerateChapterRequest {
 }
 
 export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
+  // === V3.8 编辑模式 ===
+  editor_mode?: 'basic' | 'expert'
+  
+  // === V3.8 高层语义参数（基础模式推荐）===
+  memory_strategy?: 'recent_only' | 'balanced_reference' | 'deep_dive'
+  creativity_level?: 'strict_prompt' | 'balanced_creation' | 'wild_imagination'
+  refinement_depth?: 'light' | 'standard' | 'deep'
+  
   word_count: number
   max_iterations: number
   rag_top_k: number
