@@ -86,8 +86,9 @@ def adapt_request_to_config(
         GenerationConfig: 统一配置对象
     """
     # 确定编辑模式
-    is_basic = request.is_basic_mode()
-    editor_mode = EditorMode.BASIC if is_basic else EditorMode.EXPERT
+    # V3.8+ 简化：仅支持意图驱动模式
+    editor_mode = EditorMode.INTENT
+    is_basic = True  # 始终使用参数推导逻辑
     
     # 构建 StoryConfig
     story_config = StoryConfig()
@@ -129,7 +130,7 @@ def adapt_request_to_config(
         llm_config.creative_model_config.enabled = request.creative_model_reasoning_config.enabled
         llm_config.creative_model_config.effort = request.creative_model_reasoning_config.effort or "low"
     
-    # === 构建 RAGPolicy（基础模式自动推导）===
+    # === 构建 RAGPolicy（自动推导）===
     # 解析记忆策略
     memory_strategy = MemoryStrategy.BALANCED_REFERENCE
     if request.memory_strategy:
@@ -138,22 +139,11 @@ def adapt_request_to_config(
         except ValueError:
             logger.warning(f"[Adapter] 未知的记忆策略: {request.memory_strategy}")
     
-    if is_basic:
-        # 基础模式：使用策略预设，忽略技术参数
-        rag_policy = RAGPolicy(memory_strategy=memory_strategy)
-        rag_policy.apply_strategy_preset()  # 自动推导 RAG 参数
-    else:
-        # 专家模式：使用用户指定的技术参数
-        rag_policy = RAGPolicy(
-            memory_strategy=memory_strategy,
-            top_k=request.rag_top_k,
-            semantic_weight=request.rag_alpha,
-            time_decay_weight=request.rag_beta,
-            foreshadowing_weight=request.rag_gamma,
-            decay_factor=request.rag_lambda,
-        )
+    # V3.8+ 简化：始终使用策略预设，自动推导 RAG 参数
+    rag_policy = RAGPolicy(memory_strategy=memory_strategy)
+    rag_policy.apply_strategy_preset()
     
-    # === 构建 WorkflowPolicy（基础模式自动推导）===
+    # === 构建 WorkflowPolicy（自动推导）===
     # 解析创作自由度
     creativity_level = CreativityLevel.BALANCED_CREATION
     if request.creativity_level:
@@ -179,9 +169,8 @@ def adapt_request_to_config(
         skip_minor_refine=request.skip_minor_refine,
     )
     
-    # V3.8: 基础模式下根据 refinement_depth 推导 max_iterations
-    if is_basic:
-        workflow_policy.derive_from_refinement_depth()
+    # V3.8+ 简化：始终根据 refinement_depth 推导 max_iterations
+    workflow_policy.derive_from_refinement_depth()
     
     # 从 feature_flags 提取配置
     if request.feature_flags:
@@ -226,10 +215,9 @@ def adapt_request_to_config(
         features=feature_flags,
     )
     
-    # 执行推导（仅基础模式需要）
-    if is_basic:
-        engine = DerivationEngine()
-        config = engine.derive(config)
+    # 执行参数推导
+    engine = DerivationEngine()
+    config = engine.derive(config)
     
     # 验证
     valid, errors = ConfigValidator.validate(config)

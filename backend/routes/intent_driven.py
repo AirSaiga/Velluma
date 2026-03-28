@@ -20,10 +20,13 @@
 提供意图模板查询、推荐方案生成、意图驱动生成等接口
 """
 
+import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from backend.config.intent_driven import (
     CreativeIntentType,
@@ -320,13 +323,20 @@ async def generate_with_intent(request: IntentDrivenGenerateRequest):
     if request.creative_intents:
         for i, intent_type in enumerate(request.creative_intents[:2]):
             try:
+                # 安全获取优先级，防止数组越界
+                priority = (
+                    request.intent_priorities[i]
+                    if request.intent_priorities and i < len(request.intent_priorities)
+                    else 2 - i
+                )
                 intents.append(CreativeIntent(
                     intent_type=CreativeIntentType(intent_type),
-                    priority=request.intent_priorities[i] if request.intent_priorities else 2 - i,
+                    priority=priority,
                     custom_description=request.custom_intent_description
                 ))
             except ValueError:
-                pass
+                # 记录警告日志，不静默忽略无效意图
+                logger.warning(f"无效的意图类型被忽略: {intent_type}")
     
     # 2. 构建目标对象
     goals = None
@@ -383,6 +393,7 @@ def _build_legacy_request(
         "memory_strategy": policy.memory_span,
         "creativity_level": policy.creativity_level,
         "refinement_depth": policy.refinement_depth,
+        "progression_preference": policy.progression_preference,
         
         # RAG 参数
         "rag_top_k": policy.rag_top_k,
@@ -398,8 +409,8 @@ def _build_legacy_request(
         # 意图信息
         "author_intent": request.author_intent,
         
-        # 编辑模式
-        "editor_mode": "intent_driven",
+        # 编辑模式 - 统一使用 'intent' 与前端的 editor_mode 保持一致
+        "editor_mode": "intent",
         
         # 功能开关
         "feature_flags": {

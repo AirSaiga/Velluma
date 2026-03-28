@@ -48,6 +48,12 @@ try:
         load_chapter_context_v3,
         get_context_for_stage,
     )
+    # 统一从 config 模块导入参数映射，避免重复定义
+    from backend.config import (
+        MEMORY_STRATEGY_PRESETS,
+        CREATIVITY_TO_PARALLEL_RULE,
+        REFINEMENT_TO_THRESHOLD_RULE,
+    )
     ENHANCED_RAG_AVAILABLE = True
 except ImportError:
     ENHANCED_RAG_AVAILABLE = False
@@ -60,26 +66,6 @@ logger = logging.getLogger(__name__)
 # V3.8 高层语义参数推导适配器
 # ============================================================
 
-# 高层参数映射配置
-MEMORY_STRATEGY_TOP_K = {
-    "recent_only": 2,
-    "balanced_reference": 3,
-    "deep_dive": 6,
-}
-
-CREATIVITY_ALPHA = {
-    "strict_prompt": 0.75,
-    "balanced_creation": 0.6,
-    "wild_imagination": 0.45,
-}
-
-REFINEMENT_ITERATIONS = {
-    "light": 1,
-    "standard": 2,
-    "deep": 4,
-}
-
-
 def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     """
     V3.8 高层语义参数推导适配器
@@ -88,16 +74,14 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     基础模式：使用高层参数推导 RAG 参数
     专家模式：使用传入的技术参数
     
+    注意：此函数保留用于向后兼容，新代码应直接使用 HighLevelParameterProcessor
+    或 DerivationEngine 进行参数推导。
+    
     Args:
         request: 生成请求
         
     Returns:
-        dict: 推导后的技术参数字典，包含:
-        - max_iterations: 最大重写次数
-        - rag_top_k: RAG 返回记忆数量
-        - rag_alpha: 语义相似度权重
-        - rag_beta: 时间衰减权重
-        - rag_gamma: 剧情伏笔权重
+        dict: 推导后的技术参数字典
     """
     # 如果是专家模式，直接使用传入的技术参数
     if not request.is_basic_mode():
@@ -109,38 +93,32 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
             "rag_gamma": request.rag_gamma,
         }
     
-    # 基础模式：从高层参数推导
-    # 1. 推导 rag_top_k
-    if request.memory_strategy and request.memory_strategy in MEMORY_STRATEGY_TOP_K:
-        rag_top_k = MEMORY_STRATEGY_TOP_K[request.memory_strategy]
-    else:
-        rag_top_k = AGENTIC_DEFAULT_RAG_TOP_K  # 默认值
-    
-    # 2. 推导 rag_alpha
-    if request.creativity_level and request.creativity_level in CREATIVITY_ALPHA:
-        rag_alpha = CREATIVITY_ALPHA[request.creativity_level]
-    else:
-        rag_alpha = AGENTIC_DEFAULT_RAG_ALPHA  # 默认值
-    
-    # 3. 推导 max_iterations
-    if request.refinement_depth and request.refinement_depth in REFINEMENT_ITERATIONS:
-        max_iterations = REFINEMENT_ITERATIONS[request.refinement_depth]
-    else:
-        max_iterations = AGENTIC_DEFAULT_MAX_ITERATIONS  # 默认值
-    
-    # 4. 计算 rag_beta 和 rag_gamma
-    # 基础模式默认: beta=0.2, gamma 根据约束计算
-    residual = 1.0 - rag_alpha
-    rag_beta = 0.2 * residual  # beta 占残差的 20%
-    rag_gamma = max(0.0, residual - rag_beta)  # gamma 占剩余部分
-    
-    return {
-        "max_iterations": max_iterations,
-        "rag_top_k": rag_top_k,
-        "rag_alpha": rag_alpha,
-        "rag_beta": rag_beta,
-        "rag_gamma": rag_gamma,
-    }
+    # 基础模式/意图模式：使用统一的 DerivationEngine 进行推导
+    # 避免重复实现推导逻辑
+    try:
+        from backend.config import DerivationEngine, GenerationConfig
+        from backend.config.adapter import adapt_request_to_config
+        
+        # 使用适配器构建配置，自动执行推导
+        config = adapt_request_to_config(request)
+        
+        return {
+            "max_iterations": config.workflow.max_iterations,
+            "rag_top_k": config.rag.top_k,
+            "rag_alpha": config.rag.semantic_weight,
+            "rag_beta": config.rag.time_decay_weight,
+            "rag_gamma": config.rag.foreshadowing_weight,
+        }
+    except Exception as e:
+        logger.warning(f"[resolve_high_level_params] 使用 DerivationEngine 失败，回退到默认值: {e}")
+        # 回退到默认值
+        return {
+            "max_iterations": AGENTIC_DEFAULT_MAX_ITERATIONS,
+            "rag_top_k": AGENTIC_DEFAULT_RAG_TOP_K,
+            "rag_alpha": AGENTIC_DEFAULT_RAG_ALPHA,
+            "rag_beta": 0.2,
+            "rag_gamma": 0.2,
+        }
 
 
 def _calculate_beat_word_counts(beats: list[dict], total_chapter_words: int) -> dict[str, int]:
@@ -279,7 +257,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     """
     预览生成的故事节拍
     
-    V3.8 更新：支持使用新 RAG 系统加载上下文
+    V3.8 更新：使用 RuntimeContextBuilder 统一加载上下文，简化代码结构
     
     Args:
         request: 生成请求
@@ -288,6 +266,9 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     Returns:
         dict: 包含 beats 和 debug_prompt 的字典
     """
+    from backend.config.adapter import RuntimeContextBuilder, adapt_request_to_config
+    
+    # 加载章节
     chapter_result = await db.execute(
         select(Chapter)
         .options(selectinload(Chapter.story_beats))
@@ -307,172 +288,23 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
     book = book_result.scalar_one_or_none()
     
-    # === 使用新 RAG 系统加载上下文 ===
-    entities = []
-    relationships = []
-    open_hooks = []
-    locations = []
-    previous_summary = None
+    # === 使用统一配置和上下文构建器加载上下文 ===
+    # 构建配置（自动执行参数推导）
+    config = adapt_request_to_config(request, chapter, book)
+    
+    # 使用 RuntimeContextBuilder 加载上下文
+    context = await RuntimeContextBuilder.build(db, config)
+    
+    # 提取上下文数据
+    entities = context.get("characters", [])
+    relationships = context.get("relationships", [])
+    open_hooks = context.get("open_hooks", [])
+    locations = context.get("locations", [])
+    previous_summary = context.get("previous_summary")
+    
+    # 获取世界状态快照（跨章物理连续性约束）
     previous_chapter_snapshot = None
-    
-    # 尝试使用新 RAG 系统
-    if ENHANCED_RAG_AVAILABLE and hasattr(request, 'api_key'):
-        try:
-            # 获取规划阶段上下文
-            context_package, rag_result = await get_context_for_stage(
-                chapter_id=request.chapter_id,
-                db=db,
-                stage="planning",
-                api_key=request.api_key,
-                base_url=request.base_url,
-            )
-            
-            if rag_result:
-                # 从 RAG 结果提取角色
-                character_items = rag_result.get_items_by_type(MemoryType.CHARACTER_STATE)
-                if character_items:
-                    # 加载实体
-                    entities_result = await db.execute(
-                        select(ChapterEntity)
-                        .options(selectinload(ChapterEntity.character))
-                        .where(ChapterEntity.chapter_id == request.chapter_id)
-                    )
-                    entities = list(entities_result.scalars().all())
-                    
-                    # 加载关系
-                    character_ids = [e.entity_id for e in entities]
-                    if character_ids:
-                        relationships_result = await db.execute(
-                            select(CharacterRelationship)
-                            .options(
-                                selectinload(CharacterRelationship.source_character), 
-                                selectinload(CharacterRelationship.target_character)
-                            )
-                            .where(
-                                CharacterRelationship.source_char_id.in_(character_ids),
-                                CharacterRelationship.target_char_id.in_(character_ids),
-                            )
-                        )
-                        relationships = list(relationships_result.scalars().all())
-                
-                
-                # 从 RAG 结果提取开放伏笔
-                hook_items = rag_result.get_items_by_type(MemoryType.OPEN_HOOK)
-                open_hooks = [
-                    {
-                        "hook_id": item.source_id,
-                        "ledger_key": item.source_id,
-                        "content": item.content,
-                    }
-                    for item in hook_items
-                ]
-                
-                # 从 RAG 结果提取上一章摘要
-                prev_items = rag_result.get_items_by_type(MemoryType.PREVIOUS_SUMMARY)
-                previous_summary = prev_items[0].content if prev_items else None
-                
-                logger.info(
-                    f"[PreviewBeats] 使用新 RAG 系统: {rag_result.total_items} 项, "
-                    f"耗时 {rag_result.retrieval_time_ms:.1f}ms"
-                )
-                
-        except Exception as e:
-            logger.warning(f"[PreviewBeats] 新 RAG 系统失败，使用传统加载: {e}")
-            # 降级到传统加载
-            ENHANCED_RAG_AVAILABLE_FALLBACK = True
-    else:
-        ENHANCED_RAG_AVAILABLE_FALLBACK = True
-    
-    # 传统加载方式（降级或不支持新 RAG 时使用）
-    if not ENHANCED_RAG_AVAILABLE or (ENHANCED_RAG_AVAILABLE and not entities):
-        entities_result = await db.execute(
-            select(ChapterEntity).options(selectinload(ChapterEntity.character)).where(ChapterEntity.chapter_id == request.chapter_id)
-        )
-        entities = list(entities_result.scalars().all())
-        character_ids = [e.entity_id for e in entities]
-        relationships_result = await db.execute(
-            select(CharacterRelationship)
-            .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
-            .where(
-                CharacterRelationship.source_char_id.in_(character_ids),
-                CharacterRelationship.target_char_id.in_(character_ids),
-            )
-        )
-        relationships = list(relationships_result.scalars().all())
-
-        # 加载章节地图位置
-        locations_result = await db.execute(
-            select(ChapterMapLocation)
-            .options(selectinload(ChapterMapLocation.location))
-            .where(ChapterMapLocation.chapter_id == request.chapter_id)
-        )
-        locations = list(locations_result.scalars().all())
-
-        hook_max_chapter_number = chapter.chapter_number - 1
-        historical_chapter_exists = (
-            select(Chapter.id)
-            .where(
-                Chapter.id == PlotLedger.chapter_id,
-                Chapter.chapter_number <= hook_max_chapter_number,
-            )
-            .exists()
-        )
-        open_hook_result = await db.execute(
-            select(PlotLedger).where(
-                PlotLedger.book_id == chapter.book_id,
-                PlotLedger.status == "open",
-                or_(
-                    PlotLedger.created_at_chapter <= hook_max_chapter_number,
-                    and_(
-                        PlotLedger.created_at_chapter.is_(None),
-                        or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
-                    ),
-                ),
-            )
-        )
-        open_hook_rows = open_hook_result.scalars().all()
-        open_hooks = []
-        for row in open_hook_rows:
-            content = str(getattr(row, "content", "") or "").strip()
-            if not content:
-                continue
-            hook_id = str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip()
-            open_hooks.append(
-                {
-                    "hook_id": hook_id,
-                    "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
-                    "content": content,
-                }
-            )
-
-        # 获取上一章摘要 + 世界状态快照
-        prev_chapter_result = await db.execute(
-            select(Chapter)
-            .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
-        )
-        prev_chapter = prev_chapter_result.scalar_one_or_none()
-        previous_summary = None
-        previous_chapter_snapshot = None
-        if prev_chapter:
-            if prev_chapter.summary:
-                previous_summary = prev_chapter.summary
-            elif prev_chapter.draft_text:
-                previous_summary = f"（上一章末尾原文）...{prev_chapter.draft_text[-1000:]}"
-            # 世界状态快照：跨章物理连续性约束（P0 级 - 不可跳过）
-            if prev_chapter.world_snapshot:
-                previous_chapter_snapshot = prev_chapter.world_snapshot
-    
-    # 加载地点（如果新 RAG 没有加载）
-    if not locations:
-        locations_result = await db.execute(
-            select(ChapterMapLocation)
-            .options(selectinload(ChapterMapLocation.location))
-            .where(ChapterMapLocation.chapter_id == request.chapter_id)
-        )
-        locations = list(locations_result.scalars().all())
-    
-    # 获取世界状态快照（如果新 RAG 没有加载）
-    if not previous_chapter_snapshot and chapter.chapter_number > 1:
+    if chapter.chapter_number > 1:
         prev_chapter_result = await db.execute(
             select(Chapter)
             .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)

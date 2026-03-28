@@ -1119,13 +1119,13 @@ class GenerateChapterAgenticRequest(BaseModel):
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
     
-    # === V3.8 编辑模式 ===
+    # === V3.8+ 编辑模式（简化）===
     editor_mode: str = Field(
-        default="basic", 
-        description="编辑模式：basic（基础模式）或 expert（专家模式）"
+        default="intent", 
+        description="编辑模式：仅支持 intent（意图驱动模式）"
     )
     
-    # === V3.8 高层语义参数（基础模式推荐）===
+    # === V3.8+ 高层语义参数 ===
     memory_strategy: Optional[str] = Field(
         default=None, 
         description="记忆检索策略：recent_only（最近章节）/balanced_reference（平衡参考）/deep_dive（深度挖掘）"
@@ -1151,7 +1151,7 @@ class GenerateChapterAgenticRequest(BaseModel):
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)，Level 1-2: 疾速流, Level 3: 均衡流, Level 4-5: 堡垒流")
     pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
     
-    # === 专家模式参数（基础模式自动隐藏）===
+    # === 技术参数（由意图模式自动推导或直接使用）===
     max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")
     rag_top_k: int = Field(default=AGENTIC_DEFAULT_RAG_TOP_K, ge=1, le=20, description="RAG 返回记忆数量")
     rag_alpha: float = Field(default=AGENTIC_DEFAULT_RAG_ALPHA, ge=0.0, le=1.0, description="语义相似度权重")
@@ -1189,18 +1189,14 @@ class GenerateChapterAgenticRequest(BaseModel):
                 return None
         return v
 
-    @model_validator(mode="after")
-    def validate_rag_weight_sum(self):
-        # 仅在专家模式下校验 RAG 权重
-        if self.editor_mode == "expert":
-            total = round(self.rag_alpha + self.rag_beta + self.rag_gamma, 6)
-            if abs(total - 1.0) > 1e-6:
-                raise ValueError("rag_alpha + rag_beta + rag_gamma 必须等于 1")
-        return self
-    
     def is_basic_mode(self) -> bool:
-        """判断是否为基础模式"""
-        return self.editor_mode != "expert"
+        """
+        判断是否为基础模式
+        
+        V3.8+ 简化：仅支持意图驱动模式，始终返回 True
+        保留此方法用于向后兼容
+        """
+        return True
 
 
 class ConfirmedStoryBeat(BaseModel):
