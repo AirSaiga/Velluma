@@ -141,12 +141,17 @@ async def generate_chapter_dual_track(
         )
 
     async def generate_stream():
+        import asyncio
+        
         # 初始化 Prompt 日志记录器
         prompt_logger = create_logger(chapter_id=chapter_id, book_id=None)
         prompt_logger._finalized = False
         prompt_logger._final_text_length = 0
         prompt_logger._total_iterations = 1
         prompt_logger._review_passed = False
+        
+        # 创建事件队列，用于在 workflow 执行过程中接收进度事件
+        progress_queue = asyncio.Queue()
         
         try:
             # 加载上下文
@@ -354,21 +359,58 @@ async def generate_chapter_dual_track(
             if hasattr(request, 'reasoning_config') and request.reasoning_config and request.reasoning_config.enabled:
                 reasoning_config = request.reasoning_config.to_api_params()
             
-            # 执行双轨生成
-            result: DualTrackResult = await workflow.execute(
-                chapter=chapter,
-                book=book,
-                beats=beats,
-                entities=entities,
-                relationships=relationships,
-                word_count=request.word_count,
-                previous_summary=previous_summary,  # P0: 跨章衔接
-                relevant_memories=relevant_memories,  # P1: RAG 记忆
-                locations=locations,  # P1: 地图位置
-                physical_state_lock=physical_state_lock,  # P1: 物理状态锁
-                chapter_assets_schema=chapter.chapter_assets_schema or "",  # P1: 章节资产模式
-                anchor_pov=anchor_pov,
-            )
+            # 定义进度回调函数，用于在 workflow 执行过程中发送进度事件
+            async def progress_callback(event: str, message: str, **kwargs):
+                await progress_queue.put({'event': event, 'message': message, **kwargs})
+            
+            # 执行双轨生成的任务
+            async def run_workflow():
+                try:
+                    result = await workflow.execute(
+                        chapter=chapter,
+                        book=book,
+                        beats=beats,
+                        entities=entities,
+                        relationships=relationships,
+                        word_count=request.word_count,
+                        previous_summary=previous_summary,  # P0: 跨章衔接
+                        relevant_memories=relevant_memories,  # P1: RAG 记忆
+                        locations=locations,  # P1: 地图位置
+                        physical_state_lock=physical_state_lock,  # P1: 物理状态锁
+                        chapter_assets_schema=chapter.chapter_assets_schema or "",  # P1: 章节资产模式
+                        anchor_pov=anchor_pov,
+                        progress_callback=progress_callback,
+                    )
+                    return result
+                finally:
+                    await progress_queue.put(None)  # 标记 workflow 完成
+            
+            # 并发执行 workflow 和进度事件处理
+            workflow_task = asyncio.create_task(run_workflow())
+            
+            # 处理进度事件，直到 workflow 完成
+            while True:
+                try:
+                    # 等待队列中的事件，设置超时以便检查 workflow 是否完成
+                    event_data = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                    if event_data is None:  # workflow 完成信号
+                        break
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    # 检查 workflow 是否已完成
+                    if workflow_task.done():
+                        # 处理队列中剩余的事件（使用非阻塞方式）
+                        while not progress_queue.empty():
+                            try:
+                                event_data = progress_queue.get_nowait()
+                                if event_data is not None:
+                                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                            except asyncio.QueueEmpty:
+                                break
+                        break
+            
+            # 获取 workflow 结果
+            result: DualTrackResult = await workflow_task
             
             # 更新最终状态
             prompt_logger._final_text_length = len(result.final_text) if result.final_text else 0
@@ -381,8 +423,8 @@ async def generate_chapter_dual_track(
             if result.sketch_result:
                 yield f"data: {json.dumps({'event': 'TRACK_B_DONE', 'message': f'速写生成完成，{result.sketch_result.word_count} 字'}, ensure_ascii=False)}\n\n"
             
-            # 发送统稿事件（使用前端期望的 STITCHING 而非 STITCHING_DONE）
-            yield f"data: {json.dumps({'event': 'STITCHING', 'message': f'统稿完成，{len(result.stitched_draft)} 字'}, ensure_ascii=False)}\n\n"
+            # 发送统稿开始事件（STITCHING 表示进行中状态）
+            yield f"data: {json.dumps({'event': 'STITCHING', 'message': '正在统稿拼接各节拍内容...'}, ensure_ascii=False)}\n\n"
             
             # 计算是否需要调整（提前定义以便后续使用）
             needs_adjustment = result.adjustment_plan.needs_adjustment if result.adjustment_plan else False

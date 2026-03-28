@@ -161,6 +161,7 @@ class DualTrackWorkflow:
         chapter_assets_schema: str = "",
         workflow_tier: Optional[WorkflowTier] = None,
         anchor_pov: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
     ) -> DualTrackResult:
         """
         执行双轨生成工作流
@@ -188,6 +189,11 @@ class DualTrackWorkflow:
         total_start = time.perf_counter()
         
         logger.info(f"[DualTrack] 启动双轨生成工作流，节拍数: {len(beats)}, 目标字数: {word_count}")
+        
+        # 辅助函数：发送进度事件
+        async def _emit_progress(event: str, message: str, **kwargs):
+            if progress_callback:
+                await progress_callback(event=event, message=message, **kwargs)
         
         # ===================================================================
         # Phase 2: 双轨并行生成
@@ -252,6 +258,9 @@ class DualTrackWorkflow:
         track_time = time.perf_counter() - parallel_start_perf
         logger.info(f"[DualTrack] 双轨生成完成，耗时: {track_time:.2f}s")
         
+        # 发送双轨生成完成进度事件
+        await _emit_progress("TRACK_GENERATION_DONE", f"双轨生成完成，耗时 {track_time:.1f}s")
+        
         # ── DRAFTING 阶段日志（post-hoc 补录，主协程串行写入，无竞态风险）──
         # Track A 与 Track B 并行执行，SKETCH_GENERATION 日志已由 _execute_track_b 内部写入
         # DRAFTING 在此处补录，并将 start_time 回写为并行阶段的真实起始时间
@@ -290,6 +299,7 @@ class DualTrackWorkflow:
         # ===================================================================
         
         logger.info("[DualTrack] 开始统稿 (Stitching)")
+        await _emit_progress("STITCHING", "正在统稿拼接各节拍内容...")
         stitch_start = time.perf_counter()
         
         # 提取 chunks
