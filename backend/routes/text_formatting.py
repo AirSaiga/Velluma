@@ -1,4 +1,22 @@
 """
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
 文本格式整理路由模块 - V3.0
 
 职责：提供文本格式整理 API，用于优化 AI 生成内容的段落结构、标点符号、空行等。

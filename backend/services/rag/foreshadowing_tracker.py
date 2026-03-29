@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+伏笔追踪器 - 管理伏笔的生命周期和闭合检测。
+
+职责：
+- 管理伏笔的创建、开放、闭合和归档
+- 检测伏笔闭合模式
+- 评估伏笔与当前章节的相关性
+
+业务场景：
+- 章节生成时加载相关伏笔
+- 伏笔闭合检测
+- 伏笔遗漏提醒
+
+主要功能：
+- 伏笔状态管理
+- 闭合模式匹配
+- 相关性评分
+
+依赖项：
+- backend.models: PlotLedger 模型
+- backend.services.rag.foreshadowing_types: 伏笔类型定义
+
+使用方式：
+    tracker = EnhancedForeshadowingTracker(db)
+    hooks = await tracker.get_open_hooks(book_id)
+"""
+
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple

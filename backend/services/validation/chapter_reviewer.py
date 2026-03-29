@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+章节审阅器 - 检测章节草稿中的问题。
+
+职责：
+- 审阅章节草稿的质量问题
+- 检测角色 OOC、剧情违规、逻辑错误
+- 生成结构化审阅报告
+
+业务场景：
+- 章节生成后的质量检查
+- 审阅-修复循环的审阅阶段
+- 为修复阶段提供问题列表
+
+主要功能：
+- 多维度问题检测
+- 问题分类和严重程度评估
+- 修复策略建议
+
+依赖项：
+- backend.services.validation.review_repair_types: 问题类型定义
+- LLM Client: 用于复杂问题检测
+
+使用方式：
+    reviewer = ChapterReviewer(llm_client)
+    report = await reviewer.review(chapter_text, outline, characters, ...)
+"""
+
 import logging
 from typing import Any, Callable, Dict, List, Optional
 

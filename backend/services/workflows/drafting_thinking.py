@@ -1,4 +1,22 @@
 """
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
 思考层生成模块 - Scene Intent + Subconscious 批量并行生成。
 
 职责：提供起草阶段的思考层（Scene Intent / Subconscious）批量生成功能。

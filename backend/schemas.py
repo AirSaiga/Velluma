@@ -1,6 +1,47 @@
 """
-Pydantic 验证模型
-定义 API 请求和响应的数据结构
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+Pydantic 验证模型 - API 请求/响应数据结构定义。
+
+职责：
+- 定义所有 API 的请求体（Request）和响应体（Response）数据结构
+- 提供 Pydantic 字段验证器和模型验证器
+- 统一前后端数据交互格式
+
+业务场景：
+- FastAPI 路由参数验证（自动序列化/反序列化）
+- 前端表单数据校验（与前端共享类型定义）
+- 服务层与路由层之间的数据传输
+
+主要功能：
+- 书籍、章节、角色、关系等 CRUD 数据模型
+- 章节生成请求/响应模型（含 Agentic 工作流配置）
+- 状态验证模型（角色状态、叙事光圈等）
+- 统一错误响应格式
+
+依赖项：
+- Pydantic: 数据验证框架
+- UUID/DateTime: 标准库类型
+
+使用方式：
+- 在路由函数参数中使用 response_model=xxxResponse
+- 在请求体中使用 xxxRequest Pydantic 模型
 """
 
 from datetime import datetime

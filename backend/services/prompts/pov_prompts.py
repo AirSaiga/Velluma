@@ -1,3 +1,43 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+POV 视角分配提示词模块 - POV 角色分配提示词构建。
+
+职责：
+- 提供 POV 视角角色分配的提示词构建
+- 定义 POV 分配的原则和策略
+
+业务场景：
+- 规划阶段的 POV 分配
+- 多角色视角协调
+
+主要功能：
+- POV 分配提示构建
+- 角色声音评估
+
+依赖项：
+- typing: 类型定义
+
+使用方式：
+    system_prompt, user_prompt = build_pov_assignment_prompt(premise, characters, beats)
+"""
+
 import json
 import logging
 from typing import List, Dict, Any

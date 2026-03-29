@@ -1,3 +1,43 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+RAG 工作流类型定义模块 - 工作流集成相关类型定义。
+
+职责：
+- 定义工作流阶段枚举
+- 定义检索失败模式
+- 定义工作流集成配置
+
+业务场景：
+- RAG 与章节生成工作流的集成
+- 各阶段检索策略配置
+- 失败降级模式定义
+
+主要功能：
+- 工作流阶段定义
+- 失败模式配置
+- 集成配置结构
+
+依赖项：
+- backend.services.rag.retrieval_types: 基础类型定义
+"""
+
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple, List

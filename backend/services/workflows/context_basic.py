@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+基础上下文组装模块 - V1/V2 版本上下文加载。
+
+职责：
+- 加载章节相关的基础上下文数据
+- 包括角色、关系、伏笔、前文摘要等
+- 为 Planning/Drafting 阶段提供输入
+
+业务场景：
+- 基础上下文加载（无 RAG 增强）
+- 快速原型开发
+- RAG 不可用时的降级方案
+
+主要功能：
+- 章节和书籍信息加载
+- 角色和关系加载
+- 伏笔加载
+- 前文摘要加载
+
+依赖项：
+- backend.services.context: 基础 loader
+- backend.models: 数据模型
+
+使用方式：
+    context = await load_chapter_context(chapter_id, db)
+"""
+
 import logging
 from typing import Any, Optional
 

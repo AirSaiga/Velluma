@@ -1,3 +1,56 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+LLM 调用客户端 - 统一封装 OpenAI 兼容 API 调用。
+
+职责：
+- 提供流式和非流式聊天补全接口
+- 封装重试逻辑、超时处理、代理配置
+- 支持多种 LLM 提供商（OpenAI/DashScope/本地模型）
+
+业务场景：
+- Agentic 工作流各阶段的文本生成
+- 章节起草、审阅、精修等核心生成任务
+- RAG 摘要生成、上下文组装
+
+主要功能：
+- 流式响应（SSE）用于实时输出
+- 重试机制（指数退避）保证可靠性
+- 代理配置支持（解决网络访问问题）
+
+依赖项：
+- OpenAI Python SDK: API 调用封装
+- Tenacity: 重试策略
+- httpx: HTTP 客户端
+
+使用方式：
+    response = await generate_stream_response(
+        system_prompt="...",
+        user_prompt="...",
+        api_key="sk-...",
+        base_url="https://api.openai.com/v1",
+        model="gpt-4"
+    )
+    async for chunk in response:
+        print(chunk)
+"""
+
 import json
 import os
 import asyncio

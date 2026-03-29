@@ -1,18 +1,52 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+Agentic 工作流编排模块 - 章节生成的核心编排器。
+
+职责：
+- 编排多轮迭代的 Agentic 工作流（规划→起草→统稿→审阅→精修）
+- 管理 RAG 上下文组装和记忆检索
+- 控制迭代收敛和错误处理
+
+业务场景：
+- 章节生成请求的完整流程编排
+- 多 Agent 协作的结果汇总和质量控制
+- 章节发布前的最终确认
+
+主要功能：
+- 工作流阶段状态机管理
+- RAG 检索策略集成（V3.8 增强）
+- 并发控制和资源管理
+- 异常恢复和降级策略
+
+依赖项：
+- backend.services.workflows: 各阶段工作流实现
+- backend.services.rag: RAG 检索系统
+- backend.services.prompts: Prompt 模板
+
+使用方式：
+    result = await execute_agentic_workflow(
+        chapter=chapter,
+        book=book,
+        request=request
+    )
+"""
 
 import logging
 from typing import Union, Optional

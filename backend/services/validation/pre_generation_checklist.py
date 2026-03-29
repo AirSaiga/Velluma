@@ -1,6 +1,29 @@
 # Velluma - AI Novel Writing Assistant
 # 生成前检查清单模块
 
+"""
+生成前检查清单 - 章节生成前的预检查。
+
+职责：
+- 在章节生成前检查必要条件
+- 验证世界观、角色、关系等设置
+- 确保生成环境就绪
+
+业务场景：
+- 章节生成前的基本检查
+- 发现可能导致生成失败的问题
+- 提供明确的错误提示
+
+主要功能：
+- 设定完整性检查
+- 角色有效性检查
+- 上下文准备检查
+- 伏笔状态检查
+
+依赖项：
+- backend.models: 数据模型
+"""
+
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field

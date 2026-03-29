@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+检索阶段模块 - 各检索阶段的异步函数实现。
+
+职责：
+- 实现不同检索阶段的具体逻辑
+- 管理检索流程的各个阶段
+- 提供阶段结果的后处理
+
+业务场景：
+- 检索协调器的各阶段执行
+- 分层检索策略的实现
+- 检索结果的后处理
+
+主要功能：
+- 基础检索阶段
+- 增强检索阶段
+- 结果后处理
+
+依赖项：
+- backend.models: 数据模型
+- backend.repositories: 仓储层
+- backend.services.rag.enhanced_scoring: 评分器
+
+使用方式：
+    results = await phase_enhanced_retrieval(context, db, ...)
+"""
+
 import logging
 from typing import Any, Callable, Dict, List, Optional
 

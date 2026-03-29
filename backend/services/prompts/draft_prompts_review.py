@@ -1,3 +1,42 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+起草微审阅提示词模块 - 起草阶段的微审阅提示。
+
+职责：
+- 构建起草阶段的微审阅提示
+- 提供物理状态锁验证
+- 提供 OOC 检测指导
+
+业务场景：
+- 起草完成后的微审阅
+- 状态一致性检查
+
+主要功能：
+- 微审阅提示构建
+- 物理状态验证
+- OOC 检测
+
+依赖项：
+- backend.services.prompts.draft_prompts_utils: 工具函数
+"""
+
 from typing import Optional
 
 from backend.services.prompts.draft_prompts_utils import _normalize_text

@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+双轨辅助函数模块 - 支持双轨工作流的工具函数。
+
+职责：
+- 文本分段（按 Beat 比例）
+- 修复指导构建
+- Sketch 参考提取
+- 差异聚合
+
+业务场景：
+- 双轨工作流的数据处理
+- Draft A 文本分析
+- 修复方案格式化
+
+主要功能：
+- 按 Beat 数量比例分段
+- 聚合差异生成修复指导
+- 提取 Sketch 中的参考片段
+
+依赖项：
+- backend.services.workflows.adversarial_aligner: 差异类型定义
+- backend.services.workflows.sketch_generator: Sketch 结果
+
+使用方式：
+    segments = segment_draft_by_beats(draft_text, beats)
+"""
+
 import logging
 from typing import Any, List
 

@@ -1,18 +1,46 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+精修阶段工作流 - 基于审阅意见重写章节。
+
+职责：
+- 根据审阅报告中的 revision_plan 重写章节
+- 修复审阅中发现的问题
+- 保持章节整体结构和风格一致
+
+业务场景：
+- 章节生成的精修阶段（可选）
+- 审阅发现质量问题后的修复
+- 迭代优化的最后一轮
+
+主要功能：
+- 精准修改（基于 revision_plan）
+- 保持风格一致性
+- 字数控制
+
+依赖项：
+- backend.services.prompts: Refine Prompt 模板
+- backend.services.llm: LLM 调用接口
+
+使用方式：
+    refined_text = await refine_draft(chapter, book, current_draft, revision_plan, ...)
+"""
 
 from typing import Any, Optional
 

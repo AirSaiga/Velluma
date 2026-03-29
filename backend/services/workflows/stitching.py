@@ -1,18 +1,46 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+统稿阶段工作流 - 将并行生成的文本片段缝合为连贯章节。
+
+职责：
+- 合并多个 Beat 生成的文本片段
+- 处理片段间的过渡和衔接
+- 确保叙事连贯性和风格一致
+
+业务场景：
+- Drafting 阶段之后的统稿步骤
+- 并行生成多个 Beat 后整合为完整章节
+- 支持反蒙太奇剪辑规则
+
+主要功能：
+- Beat 文本缝合
+- 过渡词/场景转换处理
+- 叙事连贯性保证
+
+依赖项：
+- backend.services.prompts: Stitch Prompt 模板
+- backend.services.llm: LLM 调用接口
+
+使用方式：
+    final_text = await stitch_chunks(chapter, beats, chunks, word_count, ...)
+"""
 
 from typing import Any, List, Optional
 

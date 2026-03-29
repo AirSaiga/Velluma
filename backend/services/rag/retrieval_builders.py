@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+检索数据构建器 - RAG 检索的数据构建和后处理工具。
+
+职责：
+- 构建各类检索请求的数据结构
+- 后处理检索结果
+- 数据格式转换
+
+业务场景：
+- 检索器调用前的数据准备
+- 检索结果的后处理
+- 上下文组装的数据格式化
+
+主要功能：
+- 书籍设置构建
+- 角色数据构建
+- 关系数据构建
+- 世界快照构建
+
+依赖项：
+- backend.models: 数据模型
+- backend.services.rag.retrieval_types: 类型定义
+
+使用方式：
+    item = build_character_item(character)
+"""
+
 import logging
 from typing import Any, Dict, List, Set
 

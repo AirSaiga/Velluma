@@ -1,3 +1,43 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+正文起草提示词模块 - V2.5 版本正文起草提示。
+
+职责：
+- 构建 V2.5 版本的正文起草提示
+- 提供增强的节奏和风格控制
+- 整合潜意识层和正文层提示
+
+业务场景：
+- V2.5 版本正文起草
+- 增强节奏控制的起草
+
+主要功能：
+- 正文起草提示构建
+- 节奏类型指导
+- 风格控制整合
+
+依赖项：
+- backend.models: 数据模型
+- backend.services.prompts.draft_prompts_utils: 工具函数
+"""
+
 from typing import Optional
 
 from backend.models import Chapter, Book

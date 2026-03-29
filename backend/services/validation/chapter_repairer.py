@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+章节修复器 - 修复章节草稿中的问题。
+
+职责：
+- 根据审阅报告修复章节问题
+- 执行指定的修复策略
+- 返回修复后的章节文本
+
+业务场景：
+- 审阅-修复循环的修复阶段
+- 迭代优化章节质量
+- 支持多种修复策略
+
+主要功能：
+- 问题定位和修复
+- 修复策略执行
+- 修复验证
+
+依赖项：
+- backend.services.validation.review_repair_types: 问题类型定义
+- LLM Client: 用于复杂修复
+
+使用方式：
+    repairer = ChapterRepairer(llm_client)
+    fixed_text = await repairer.repair(chapter_text, report)
+"""
+
 import logging
 from typing import Any, Callable, Dict, Optional
 

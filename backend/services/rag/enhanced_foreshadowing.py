@@ -1,3 +1,49 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+增强伏笔系统 - 伏笔检索和遗漏检测增强模块。
+
+职责：
+- 增强伏笔的检索评分
+- 伏笔遗漏检测增强
+- 伏笔记忆注入
+
+业务场景：
+- RAG 检索中的伏笔优先召回
+- 章节审阅时的伏笔遗漏检测
+- 伏笔相关记忆增强
+
+主要功能：
+- 伏笔关联度评分
+- 伏笔遗漏检测
+- 伏笔记忆注入
+
+依赖项：
+- backend.services.rag.foreshadowing_tracker: 基础伏笔追踪
+- backend.services.rag.foreshadowing_detector: 基础伏笔检测
+- backend.services.rag.foreshadowing_types: 伏笔类型定义
+
+使用方式：
+    injector = EnhancedHookMemoryInjector(tracker, detector)
+    items = await injector.inject_hook_memories(context, db)
+"""
+
 import logging
 import re
 from typing import Any, Dict, List, Optional

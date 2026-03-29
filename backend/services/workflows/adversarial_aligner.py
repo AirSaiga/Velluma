@@ -1,23 +1,45 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 """
-对抗校对器 (Adversarial Aligner) - 双轨架构核心组件
+对抗校对器 (Adversarial Aligner) - 双轨架构核心组件。
 
-职责：对比节拍统稿 (Draft A) 和连贯速写 (Sketch)，检测差异并生成修复方案。
+职责：
+- 对比节拍统稿 (Draft A) 和连贯速写 (Sketch)
+- 检测结构差异、情绪差异和信息差异
+- 生成修复方案指导精修
+
+业务场景：
+- 双轨工作流的 Phase 4
+- 并行生成后检测一致性问题
+- 为融合精修提供方向
+
+主要功能：
+- 差异类型分类（结构/情绪/信息）
+- 差异位置定位
+- 修复指导生成
+
+依赖项：
+- backend.services.llm: LLM 调用接口
+- backend.services.workflows.sketch_generator: Sketch 生成结果
+
+使用方式：
+    align_result = await align_draft_to_sketch(draft_a, sketch, ...)
 """
 
 import json

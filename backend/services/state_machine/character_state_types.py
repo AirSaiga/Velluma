@@ -1,3 +1,46 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+角色状态类型定义模块 - 角色状态机相关类型定义。
+
+职责：
+- 定义角色状态枚举（存活/受伤/死亡等）
+- 定义角色位置枚举
+- 定义情绪状态枚举
+- 定义物理状态枚举
+- 定义状态转换规则
+- 定义角色静态/动态状态数据结构
+
+业务场景：
+- 角色状态机管理
+- 章节生成时的状态约束
+- 状态历史记录
+
+主要功能：
+- 状态枚举定义
+- 转换规则定义
+- 状态数据结构
+
+依赖项：
+- pydantic: 数据验证
+"""
+
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field, model_validator

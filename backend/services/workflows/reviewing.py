@@ -1,18 +1,47 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+审阅阶段工作流 - 章节草稿质量检查。
+
+职责：
+- 调用 Review Agent 检查草稿质量
+- 检测角色 OOC（Out of Character）
+- 验证剧情合规性和逻辑完整性
+- 输出结构化审阅报告
+
+业务场景：
+- 章节生成的审阅阶段
+- 起草完成后进行质量把关
+- 为精修阶段提供改进建议
+
+主要功能：
+- 多维度质量评估
+- 结构化审阅报告生成
+- 问题定位和修复建议
+
+依赖项：
+- backend.services.prompts: Review Prompt 模板
+- backend.services.llm: LLM 调用接口
+
+使用方式：
+    feedback = await review_draft(chapter, book, draft_text, ...)
+"""
 
 import logging
 from typing import Any, Tuple, Optional

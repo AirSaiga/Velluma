@@ -1,3 +1,49 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+泛型仓储基类 - 统一数据访问层抽象。
+
+职责：
+- 提供通用的 CRUD 操作模板方法
+- 封装 SQLAlchemy 异步查询构建逻辑
+- 实现事务管理和会话生命周期控制
+
+业务场景：
+- 所有具体 Repository（如 BookRepository）都继承此类
+- 消除业务代码与 ORM 的直接耦合
+- 统一错误处理和事务边界
+
+设计原则：
+- 泛型确保类型安全，IDE 自动补全
+- 异步优先，利用 SQLAlchemy async 支持
+- 声明式查询构建，简化复杂查询编写
+
+依赖项：
+- SQLAlchemy 2.0: ORM 和查询构建器
+- Pydantic: 数据模型类型定义
+
+使用方式：
+    class BookRepository(BaseRepository[Book]):
+        model = Book
+        ...
+"""
+
 from dataclasses import dataclass
 from typing import Any, Generic, Optional, Sequence, TypeVar
 
@@ -9,6 +55,7 @@ ModelType = TypeVar("ModelType")
 
 @dataclass
 class JoinSpec:
+    """JOIN 规范定义 - 描述表关联配置"""
     target: Any
     onclause: Optional[Any] = None
     isouter: bool = False
@@ -17,6 +64,7 @@ class JoinSpec:
 
 @dataclass
 class QuerySpec:
+    """查询规范定义 - 声明式查询配置"""
     model: Optional[type[Any]] = None
     conditions: Optional[Sequence[Any]] = None
     order_by: Optional[Any] = None

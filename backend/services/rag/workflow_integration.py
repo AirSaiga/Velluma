@@ -1,3 +1,48 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+RAG 工作流集成模块 - RAG 与章节生成工作流的集成。
+
+职责：
+- 协调 RAG 检索与章节生成流程
+- 提供各阶段的检索接口
+- 管理检索结果缓存
+- 处理检索失败降级
+
+业务场景：
+- 章节生成前的上下文准备
+- 各工作流阶段的检索调用
+- 检索结果的后处理
+
+主要功能：
+- 上下文组装集成
+- 阶段策略适配
+- 失败降级处理
+
+依赖项：
+- backend.services.rag.retrieval_orchestrator: 检索协调器
+- backend.services.rag.enhanced_scoring: 增强评分器
+
+使用方式：
+    result = await integrate_retrieval_for_stage(chapter, stage, config)
+"""
+
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Callable, Tuple

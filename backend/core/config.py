@@ -1,3 +1,47 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+核心配置模块 - 应用级配置和常量定义。
+
+职责：
+- 管理运行时端口配置（持久化到文件系统）
+- 定义推理模型支持列表和检查逻辑
+- 提供全局配置查询接口
+
+业务场景：
+- 开发环境端口动态分配（解决端口冲突）
+- 推理模式模型支持检查（用于配置验证）
+- 前端后端端口协商
+
+主要功能：
+- 端口持久化（data/port.txt）
+- 推理模型支持检测
+- 全局配置查询
+
+依赖项：
+- os: 文件系统操作
+- typing: 类型定义
+
+使用方式：
+    from backend.core.config import save_port, load_port, check_reasoning_support
+"""
+
 import os
 from typing import Optional, Set, List
 

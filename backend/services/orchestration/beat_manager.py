@@ -1,3 +1,47 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+节拍管理器 - StoryBeat 实体持久化和状态管理。
+
+职责：
+- 管理 StoryBeat 的创建、更新、删除操作
+- 提供节拍数据的序列化和反序列化
+- 封装节拍与章节的关联逻辑
+
+业务场景：
+- 章节生成时保存 Planner 输出的节拍计划
+- 章节详情页加载节拍列表
+- 物理状态锁的构建和验证
+
+主要功能：
+- 节拍批量保存（先删后插保证幂等性）
+- 节拍到物理状态锁的转换
+- 节拍数据验证
+
+依赖项：
+- backend.models: StoryBeat ORM 模型
+- SQLAlchemy: 数据库会话管理
+
+使用方式：
+    beats = await save_story_beats(db, chapter, beat_list)
+"""
+
 from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession

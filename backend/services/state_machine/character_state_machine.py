@@ -1,3 +1,49 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+角色状态机 - 管理角色状态的流转和约束。
+
+职责：
+- 管理角色物理状态的变化规则
+- 管理角色情绪状态的流转约束
+- 验证状态变更的合法性
+- 记录状态变更历史
+
+业务场景：
+- 章节生成时约束角色状态变化
+- 检测角色状态不合法跳转
+- 状态连续性验证
+
+主要功能：
+- 物理状态机（健康→疲劳→受伤→失去意识等）
+- 情绪状态机（情绪流转规则）
+- 状态变更验证
+- 状态历史记录
+
+依赖项：
+- backend.services.state_machine.character_state_types: 状态类型定义
+
+使用方式：
+    machine = CharacterStateMachine(static_portrait, dynamic_state, current_state)
+    machine.can_transition(from_state, to_state)
+"""
+
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime

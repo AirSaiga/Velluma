@@ -1,3 +1,45 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+场景意图提示词模块 - Scene Intent 生成提示词。
+
+职责：
+- 提供场景意图（Scene Intent）分析的提示词构建
+- 定义不同节奏类型的微指令
+- 构建场景意图分析的用户提示
+
+业务场景：
+- 起草阶段的场景意图分析
+- 为每个 Beat 生成场景意图指导
+
+主要功能：
+- 节奏类型微指令定义
+- 场景意图提示构建
+- 上下文渲染
+
+依赖项：
+- backend.models: 数据模型
+
+使用方式：
+    prompt = build_scene_intent_prompt(chapter, beat, ...)
+"""
+
 import re
 import json
 

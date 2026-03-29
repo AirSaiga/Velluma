@@ -1,3 +1,49 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+上下文组装模块 - RAG 检索结果组装为可用上下文。
+
+职责：
+- 协调多个 RAG 组件完成上下文组装
+- 调用检索器获取记忆
+- 调用打包器构建上下文包
+- 集成伏笔检测
+
+业务场景：
+- 章节生成前的上下文准备
+- 规划阶段的记忆加载
+- 起草阶段的上下文注入
+
+主要功能：
+- 检索策略执行
+- 上下文打包
+- 伏笔遗漏检测
+
+依赖项：
+- backend.services.rag.retriever: 记忆检索器
+- backend.services.rag.context_packager: 上下文打包器
+- backend.services.rag.foreshadowing: 伏笔追踪
+
+使用方式：
+    context = await assemble_chapter_context(chapter_id, db, api_key, strategy=...)
+"""
+
 import logging
 
 from backend.services.rag.retrieval_types import (

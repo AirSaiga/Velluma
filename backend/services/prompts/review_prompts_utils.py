@@ -1,3 +1,43 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+审阅提示词工具模块 - 审阅相关的工具函数。
+
+职责：
+- 提供审阅提示词的辅助函数
+- 边界信息渲染
+- 问题类型标准化
+- 审阅结果解析
+
+业务场景：
+- 审阅提示词构建的辅助函数
+- 审阅结果后处理
+
+主要功能：
+- 边界信息渲染
+- 问题类型标准化
+- 审阅结果解析
+
+依赖项：
+- backend.models: 数据模型
+"""
+
 import json
 import re
 

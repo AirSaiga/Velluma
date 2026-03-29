@@ -1,23 +1,28 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 """
-双轨生成工作流 (Dual Track Workflow) - V3.5 双轨对抗架构
+双轨生成工作流 (Dual Track Workflow) - V3.5 双轨对抗架构。
 
-职责：整合 Track A (节拍扩写) 和 Track B (短文生成)，实现并行生成 + 对抗校对。
+职责：
+- 整合 Track A (节拍扩写) 和 Track B (短文生成)
+- 实现并行生成 + 对抗校对的架构
+- 解决并行生成连贯性差的问题
 
 核心流程：
 1. Phase 1: 节拍生成 (复用原有 planning)
@@ -30,6 +35,14 @@
 
 子模块：
 - dual_track_helpers: 文本分段、修复指导构建、Sketch 参考提取
+
+依赖项：
+- backend.services.workflows.drafting: 节拍扩写
+- backend.services.workflows.sketch_generator: 短文生成
+- backend.services.workflows.adversarial_aligner: 对抗校对
+
+使用方式：
+    result = await execute_dual_track_generation(chapter, book, beats, ...)
 """
 
 import asyncio

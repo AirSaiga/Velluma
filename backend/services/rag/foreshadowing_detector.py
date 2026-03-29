@@ -1,3 +1,47 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+伏笔遗漏检测器 - 检测章节中未闭合的伏笔。
+
+职责：
+- 检测章节中是否存在已创建但未闭合的伏笔
+- 分析伏笔遗漏的风险
+- 为审阅阶段提供伏笔检查建议
+
+业务场景：
+- 章节审阅时的伏笔检查
+- 生成前检查伏笔遗漏风险
+- 提醒作者注意伏笔管理
+
+主要功能：
+- 遗漏伏笔识别
+- 遗漏风险评估
+- 闭合建议生成
+
+依赖项：
+- backend.services.rag.foreshadowing_tracker: 伏笔追踪器
+- backend.models: PlotLedger 模型
+
+使用方式：
+    omissions = await detector.detect_omissions(text, book_id, chapter_number)
+"""
+
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID

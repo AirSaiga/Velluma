@@ -1,23 +1,28 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 """
-短文生成器 (Sketch Generator) - 双轨架构 Track B
+短文生成器 (Sketch Generator) - 双轨架构 Track B。
 
-职责：基于节拍框架生成连贯的速写短文，作为连贯性锚点。
+职责：
+- 基于节拍框架生成连贯的速写短文
+- 作为连贯性锚点供 Track A 对比
+- 提供情绪和节奏的自然流动参考
 
 核心特性：
 - 连续叙述流：不标记节拍边界，自然流淌
@@ -25,9 +30,15 @@
 - 转折点映射：记录关键转折点在文中的实际位置
 - 首尾呼应：确保开头和结尾的情感闭环
 
-使用场景：
+业务场景：
 - 与 Track A (节拍扩写) 并行生成
 - 为后续对抗校对提供连贯性参考
+
+依赖项：
+- backend.services.llm: LLM 调用接口
+
+使用方式：
+    sketch = await generate_sketch(chapter, beats, context, ...)
 """
 
 import asyncio

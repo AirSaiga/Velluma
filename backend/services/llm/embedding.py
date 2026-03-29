@@ -1,3 +1,47 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+文本向量化模块 - 文本嵌入生成服务。
+
+职责：
+- 提供文本到向量 embedding 的转换能力
+- 支持 DashScope Embedding API
+- 为 RAG 检索系统提供向量表示
+
+业务场景：
+- RAG 记忆存储前的向量化
+- 相似度检索时的查询向量生成
+- 语义搜索的向量编码
+
+主要功能：
+- 单文本/批量文本向量化
+- 1536 维向量输出（适配 pgvector）
+- 异常处理和降级策略
+
+依赖项：
+- dashscope: 阿里云 DashScope SDK
+- 需设置 DASHSCOPE_API_KEY 环境变量
+
+使用方式：
+    embedding = await get_embedding("需要向量化的文本")
+"""
+
 import logging
 import os
 from typing import Optional

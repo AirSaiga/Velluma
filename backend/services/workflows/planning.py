@@ -1,18 +1,48 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+规划阶段工作流 - 章节结构规划和大纲生成。
+
+职责：
+- 调用 Planner Agent 生成章节大纲
+- 将大纲拆分为 StoryBeat 列表
+- 分配 POV 视角和叙事光圈
+- 计算字数分配策略
+
+业务场景：
+- 章节生成的第一阶段
+- 基于前文摘要和伏笔约束生成章节规划
+- 为 Drafting 阶段提供输入
+
+主要功能：
+- POV 视角分配
+- 叙事光圈（POV Aperture）智能推断
+- Beat 结构化输出
+
+依赖项：
+- backend.services.prompts: Planner Prompt 模板
+- backend.services.llm: LLM 调用接口
+- backend.models: 数据模型
+
+使用方式：
+    beats = await execute_planning_stage(chapter, book, ...)
+"""
 
 from typing import Any, Optional
 

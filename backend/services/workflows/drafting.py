@@ -1,28 +1,45 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 """
 起草模块 - 统一导出入口。
 
-职责：作为起草模块的 Facade 层，从子模块重新导出所有公开 API，确保外部调用方无需修改导入路径。
+职责：
+- 作为起草模块的 Facade 层，从子模块重新导出所有公开 API
+- 确保外部调用方无需修改导入路径
+
+业务场景：
+- Agentic 工作流的 Drafting 阶段
+- Beat 粒度的并行文本生成
+- 三档工作流路径选择（Fast/Standard/Fortress）
 
 子模块分工：
 - drafting_router.py: V3.0 智能路由（三档执行路径）+ BeatDraftResult 数据结构
 - drafting_thinking.py: 思考层生成（Scene Intent + Subconscious + 轻量级 Subconscious）
 - drafting_prose.py: 正文生成（三种并发策略 + 状态管理 + QC）
+
+依赖项：
+- backend.services.prompts: Draft Prompt 模板
+- backend.services.llm: LLM 调用接口
+
+使用方式：
+    from backend.services.workflows.drafting import execute_draft_stage
+    result = await execute_draft_stage(...)
 """
 
 import asyncio

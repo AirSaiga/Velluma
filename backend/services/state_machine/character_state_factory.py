@@ -1,3 +1,46 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+角色状态机工厂 - 从实体创建状态机实例。
+
+职责：
+- 从数据库角色实体创建状态机
+- 解析静态设定和动态状态
+- 提供便捷的工厂方法
+
+业务场景：
+- 章节生成时加载角色状态机
+- 从实体创建完整的状态机实例
+
+主要功能：
+- 实体到状态机转换
+- 静态设定解析
+- 动态状态解析
+
+依赖项：
+- backend.services.state_machine.character_state_machine: 状态机
+- backend.services.state_machine.character_state_types: 类型定义
+
+使用方式：
+    machine = create_character_state_machine_from_entity(character_entity)
+"""
+
 import re
 from typing import Any, List
 

@@ -1,3 +1,44 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+伏笔类型定义模块 - 伏笔系统相关类型定义。
+
+职责：
+- 定义伏笔状态枚举
+- 定义伏笔优先级枚举
+- 定义伏笔闭合类型
+- 定义伏笔元数据结构
+
+业务场景：
+- 伏笔生命周期管理
+- 伏笔检索和追踪
+- 伏笔遗漏检测
+
+主要功能：
+- 伏笔状态定义（创建/开放/闭合/归档）
+- 伏笔优先级定义（主线/支线/氛围等）
+- 闭合类型定义（显式/隐式/部分/放弃）
+
+依赖项：
+- pydantic: 数据验证
+"""
+
 import logging
 from typing import List, Optional, Tuple, Dict, Any
 from enum import Enum

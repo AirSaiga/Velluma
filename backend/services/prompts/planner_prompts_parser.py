@@ -1,3 +1,46 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+规划提示词解析器 - 解析 Planner Agent 的输出。
+
+职责：
+- 解析 LLM 返回的规划结果
+- 处理 JSON 和 Markdown 代码块格式
+- 提取结构化数据
+
+业务场景：
+- 解析章节规划输出
+- 提取节拍列表和元数据
+
+主要功能：
+- JSON 解析（处理各种格式）
+- 提取节拍列表
+- 提取工作流层级
+
+依赖项：
+- json: JSON 解析
+- re: 正则表达式处理
+
+使用方式：
+    beats, tier = parse_planner_full_result(raw_result, outline, word_count)
+"""
+
 import json
 import re
 

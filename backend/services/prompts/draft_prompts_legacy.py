@@ -1,3 +1,40 @@
+"""
+Velluma - AI Novel Writing Assistant
+Copyright (C) 2026 Velluma Project Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+"""
+遗留起草提示词模块 - 早期版本的起草提示。
+
+职责：
+- 提供早期版本的起草提示构建
+- 保持向后兼容性
+- 支持遗留系统
+
+业务场景：
+- 遗留起草流程
+- 向后兼容
+
+主要功能：
+- 遗留版本起草提示构建
+
+依赖项：
+- backend.models: 数据模型
+"""
+
 import json
 
 from backend.models import Chapter, Book
