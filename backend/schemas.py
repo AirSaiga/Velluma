@@ -1118,6 +1118,8 @@ class GenerateChapterAgenticRequest(BaseModel):
     # === 必填参数 ===
     chapter_id: UUID
     api_key: str = Field(..., min_length=1)
+    generation_run_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
+    resume_from_checkpoint: bool = Field(default=False)
     
     # === V3.8+ 编辑模式（简化）===
     editor_mode: str = Field(

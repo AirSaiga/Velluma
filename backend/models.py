@@ -108,6 +108,9 @@ class Chapter(Base):
     pacing_style = Column(String(50), default="balanced", nullable=False)
     revision_count = Column(Integer, default=0)
     status = Column(String(50), default="draft")
+    generation_run_id = Column(String(64), nullable=True)
+    generation_status = Column(JSONB, default=dict)
+    generation_checkpoints = Column(JSONB, default=list)
     # V3.0 资产字典：存储当前场景出现的专有名词的物理定义（如机甲体积、武器形态）
     chapter_assets_schema = Column(Text, nullable=True, default="")
     # 世界状态快照：章节发布时提取，作为下一章的初始约束

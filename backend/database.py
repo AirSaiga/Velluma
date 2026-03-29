@@ -99,6 +99,24 @@ MIGRATIONS: list[dict[str, Any]] = [
     },
     {
         "table": "chapters",
+        "column": "generation_run_id",
+        "definition": "VARCHAR(64)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "chapters",
+        "column": "generation_status",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "generation_checkpoints",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
         "column": "summary",
         "definition": "TEXT",
         "expected_udt_names": {"text"},

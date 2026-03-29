@@ -37,6 +37,8 @@ API 端点：
 
 import json
 import logging
+from datetime import datetime
+from uuid import uuid4
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
-from backend.services.agentic_workflow import resolve_high_level_params
+from backend.services.agentic_workflow import resolve_high_level_params, _normalize_confirmed_beats
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackConfig,
@@ -68,6 +70,42 @@ logger = logging.getLogger(__name__)
 svc_logger = ServiceLogger(logger, LOG_PREFIX_DUAL_TRACK)
 
 router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-dual-track"])
+
+
+async def _persist_checkpoint(
+    db: AsyncSession,
+    chapter: Any,
+    run_id: str,
+    stage: str,
+    status: str,
+    payload: Optional[dict] = None,
+) -> None:
+    checkpoints = list(chapter.generation_checkpoints or [])
+    checkpoint = {
+        "stage": stage,
+        "status": status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "payload": payload or {},
+    }
+    checkpoints.append(checkpoint)
+    chapter.generation_run_id = run_id
+    chapter.generation_checkpoints = checkpoints[-20:]
+    chapter.generation_status = {
+        **(chapter.generation_status or {}),
+        "run_id": run_id,
+        "stage": stage,
+        "status": status,
+        "updated_at": checkpoint["timestamp"],
+    }
+    await db.commit()
+
+
+def _resolve_run_id(request: "DualTrackGenerationRequest", chapter: Any) -> str:
+    if request.generation_run_id:
+        return request.generation_run_id
+    if request.resume_from_checkpoint and chapter.generation_run_id:
+        return str(chapter.generation_run_id)
+    return f"run_{uuid4().hex}"
 
 
 class DualTrackGenerationRequest(GenerateChapterAgenticRequest):
@@ -109,8 +147,10 @@ async def generate_chapter_dual_track(
     Returns:
         流式 SSE 响应，包含生成进度和最终结果
     """
-    # 职责校验：beats 必须由调用方提供，本接口不兜底规划
-    if not request.beats:
+    if str(request.chapter_id) != chapter_id:
+        raise HTTPException(status_code=422, detail="path chapter_id 与请求体 chapter_id 不一致")
+
+    if not request.beats and not request.resume_from_checkpoint:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -160,6 +200,36 @@ async def generate_chapter_dual_track(
             
             chapter = context.chapter
             book = context.book
+            run_id = _resolve_run_id(request, chapter)
+            effective_word_count = request.word_count or 2000
+            effective_reasoning_model = request.reasoning_model or request.model
+            effective_creative_model = request.creative_model or effective_reasoning_model
+            effective_sketch_model = request.sketch_model or effective_creative_model
+            effective_config = {
+                "run_id": run_id,
+                "chapter_id": chapter_id,
+                "max_iterations": resolved_params["max_iterations"],
+                "rag_top_k": resolved_params["rag_top_k"],
+                "rag_alpha": resolved_params["rag_alpha"],
+                "rag_beta": resolved_params["rag_beta"],
+                "rag_gamma": resolved_params["rag_gamma"],
+                "model": request.model,
+                "reasoning_model": effective_reasoning_model,
+                "creative_model": effective_creative_model,
+                "sketch_model": effective_sketch_model,
+                "word_count": effective_word_count,
+            }
+            chapter.generation_run_id = run_id
+            chapter.generation_status = {
+                **(chapter.generation_status or {}),
+                "run_id": run_id,
+                "status": "running",
+                "stage": "ASSEMBLING_CONTEXT",
+                "effective_config": effective_config,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            await db.commit()
+            yield build_sse_event("GENERATION_RUN", "生成任务已初始化", generation_run_id=run_id)
             
             # 更新日志记录器的 book_id
             prompt_logger.book_id = str(chapter.book_id) if chapter.book_id else None
@@ -169,6 +239,7 @@ async def generate_chapter_dual_track(
                 chapter.tension_level = request.tension_level
             if request.pacing_style:
                 chapter.pacing_style = request.pacing_style
+            await db.commit()
             
             yield build_sse_event("ASSEMBLING_CONTEXT", "正在回顾前文与检索相关伏笔...")
             
@@ -176,6 +247,19 @@ async def generate_chapter_dual_track(
             
             # 发送上下文加载完成统计帧
             yield build_sse_metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra=context.to_dict())
+            await _persist_checkpoint(
+                db=db,
+                chapter=chapter,
+                run_id=run_id,
+                stage="ASSEMBLING_CONTEXT_DONE",
+                status="running",
+                payload={
+                    "entities": len(context.entities),
+                    "relationships": len(context.relationships),
+                    "memories": len(context.relevant_memories),
+                    "locations": len(context.locations),
+                },
+            )
             
             # 设置日志记录器的上下文信息
             prompt_logger.set_context(
@@ -194,10 +278,7 @@ async def generate_chapter_dual_track(
                 entities=list(context.entities),
                 relationships=list(context.relationships),
                 request_params={
-                    "model": request.model,
-                    "reasoning_model": request.reasoning_model,
-                    "creative_model": request.creative_model,
-                    "word_count": request.word_count,
+                    **effective_config,
                 }
             )
             
@@ -218,17 +299,36 @@ async def generate_chapter_dual_track(
                 world_snapshot_constraints = format_snapshot_for_planner(context.previous_world_snapshot)
                 svc_logger.info("World snapshot constraints injected", enabled=bool(world_snapshot_constraints))
 
-            beats = []
-            for b in request.beats:
-                beat_dict = b.model_dump()
-                if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
-                    beat_dict["target_words"] = (
-                        beat_dict.get("word_count_target")
-                        or max(200, request.word_count // len(request.beats))
+            latest_status = chapter.generation_status or {}
+            if request.resume_from_checkpoint and latest_status.get("run_id") == run_id and latest_status.get("status") == "completed":
+                cached_text = latest_status.get("final_text") or chapter.draft_text or ""
+                if cached_text:
+                    yield build_sse_done(
+                        text=cached_text,
+                        stats=latest_status.get("stats") or {},
+                        passed=bool(latest_status.get("passed", True)),
+                        iterations=1,
+                        revision_count=int(latest_status.get("revision_count", 0) or 0),
+                        generation_run_id=run_id,
+                        resumed=True,
                     )
+                    return
+
+            beats = []
+            if request.beats:
+                beats = _normalize_confirmed_beats(request.beats, effective_word_count)
+            elif request.resume_from_checkpoint and latest_status.get("run_id") == run_id:
+                for checkpoint in reversed(chapter.generation_checkpoints or []):
+                    if checkpoint.get("stage") == "BEATS_CONFIRMED":
+                        beats = checkpoint.get("payload", {}).get("beats", [])
+                        if beats:
+                            break
+            if not beats:
+                raise HTTPException(status_code=422, detail="恢复失败：缺少可用 beats，请重新预览并确认节拍")
+
+            for beat_dict in beats:
                 if world_snapshot_constraints:
                     beat_dict["_world_snapshot_constraints"] = world_snapshot_constraints
-                beats.append(beat_dict)
 
             chapter_narrative_anchor = next(
                 (b.get("pov_character") or "" for b in beats if b.get("pov_character")), ""
@@ -243,7 +343,7 @@ async def generate_chapter_dual_track(
             # 记录已确认的 beats（无 LLM 调用，仅记录最终执行的节拍列表）
             prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
             prompt_logger.log_inputs(
-                word_count=request.word_count,
+                word_count=effective_word_count,
                 has_previous_summary=bool(context.previous_summary),
                 source="user_confirmed_beats",
             )
@@ -253,6 +353,17 @@ async def generate_chapter_dual_track(
                 chapter_narrative_anchor=chapter_narrative_anchor or None,
             )
             prompt_logger.end_stage(success=True)
+            await _persist_checkpoint(
+                db=db,
+                chapter=chapter,
+                run_id=run_id,
+                stage="BEATS_CONFIRMED",
+                status="running",
+                payload={
+                    "beats": beats,
+                    "chapter_narrative_anchor": chapter_narrative_anchor or "",
+                },
+            )
 
             yield build_sse_metric_frame(
                 "PLANNING_DONE",
@@ -290,7 +401,7 @@ async def generate_chapter_dual_track(
                     story_premise=story_premise,
                     api_key=request.api_key,
                     base_url=request.base_url,
-                    model=request.reasoning_model or request.model,
+                    model=effective_reasoning_model,
                     previous_chapter_summary=context.previous_summary,
                     prompt_logger=prompt_logger,
                     chapter_narrative_anchor=chapter_narrative_anchor,
@@ -311,6 +422,14 @@ async def generate_chapter_dual_track(
             # P2: 保存 StoryBeat 到数据库
             story_beats = await save_story_beats(db, chapter, beats)
             svc_logger.debug("StoryBeats saved", count=len(story_beats))
+            await _persist_checkpoint(
+                db=db,
+                chapter=chapter,
+                run_id=run_id,
+                stage="STATE_PERSISTENCE",
+                status="running",
+                payload={"saved_story_beats": len(story_beats)},
+            )
             
             # 构建双轨配置
             config = DualTrackConfig(
@@ -330,8 +449,9 @@ async def generate_chapter_dual_track(
             workflow = DualTrackWorkflow(
                 api_key=request.api_key,
                 base_url=request.base_url,
-                reasoning_model=request.reasoning_model or request.model,
-                creative_model=request.creative_model or request.model,
+                reasoning_model=effective_reasoning_model,
+                creative_model=effective_creative_model,
+                sketch_model=effective_sketch_model,
                 config=config,
                 prompt_logger=prompt_logger,
             )
@@ -340,11 +460,6 @@ async def generate_chapter_dual_track(
             
             # 发送 DRAFTING 事件，表示 Track A (节拍扩写) 开始
             yield build_sse_event("DRAFTING", "主笔 Agent 正在并行扩写节拍...", iteration=1)
-            
-            # P1: 获取 reasoning_config（如果启用）
-            reasoning_config = None
-            if hasattr(request, 'reasoning_config') and request.reasoning_config and request.reasoning_config.enabled:
-                reasoning_config = request.reasoning_config.to_api_params()
             
             # 定义进度回调函数，用于在 workflow 执行过程中发送进度事件
             async def progress_callback(event: str, message: str, **kwargs):
@@ -359,7 +474,7 @@ async def generate_chapter_dual_track(
                         beats=beats,
                         entities=context.entities,
                         relationships=context.relationships,
-                        word_count=request.word_count,
+                        word_count=effective_word_count,
                         previous_summary=context.previous_summary,  # P0: 跨章衔接
                         relevant_memories=context.relevant_memories,  # P1: RAG 记忆
                         locations=context.locations,  # P1: 地图位置
@@ -448,6 +563,39 @@ async def generate_chapter_dual_track(
                 yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
             
             # 发送最终结果（使用前端期望的 DONE 而非 COMPLETE）
+            chapter.draft_text = result.final_text
+            chapter.review_feedback = {
+                **(chapter.review_feedback or {}),
+                "generation_run_id": run_id,
+                "alignment_score": result.adjustment_plan.alignment_score if result.adjustment_plan else None,
+                "needs_adjustment": needs_adjustment,
+                "stats": result.stats,
+            }
+            chapter.revision_count = 1 if needs_adjustment else 0
+            chapter.generation_status = {
+                **(chapter.generation_status or {}),
+                "run_id": run_id,
+                "status": "completed",
+                "stage": "DONE",
+                "passed": not needs_adjustment,
+                "revision_count": chapter.revision_count,
+                "stats": result.stats,
+                "final_text": result.final_text,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            await _persist_checkpoint(
+                db=db,
+                chapter=chapter,
+                run_id=run_id,
+                stage="DONE",
+                status="completed",
+                payload={
+                    "alignment_score": result.adjustment_plan.alignment_score if result.adjustment_plan else None,
+                    "final_length": len(result.final_text or ""),
+                    "stats": result.stats,
+                },
+            )
+
             yield build_sse_done(
                 text=result.final_text,
                 stats=result.stats,
@@ -455,6 +603,8 @@ async def generate_chapter_dual_track(
                 passed=not needs_adjustment,
                 iterations=1,
                 revision_count=1 if needs_adjustment else 0,
+                generation_run_id=run_id,
+                resumed=request.resume_from_checkpoint,
             )
             
             # 完成日志记录
@@ -464,6 +614,17 @@ async def generate_chapter_dual_track(
                 review_passed=prompt_logger._review_passed
             )
             prompt_logger._finalized = True
+        except Exception as e:
+            if "chapter" in locals() and "run_id" in locals():
+                await _persist_checkpoint(
+                    db=db,
+                    chapter=chapter,
+                    run_id=run_id,
+                    stage="FAILED",
+                    status="failed",
+                    payload={"error": str(e)},
+                )
+            yield build_sse_event("ERROR", f"生成失败: {str(e)}")
             
         finally:
             # 确保异常时也能保存日志
@@ -491,6 +652,15 @@ async def generate_chapter_dual_track_simple(
     
     返回完整的生成结果，不包含中间进度。
     """
+    if str(request.chapter_id) != chapter_id:
+        raise HTTPException(status_code=422, detail="path chapter_id 与请求体 chapter_id 不一致")
+
+    resolved_params = resolve_high_level_params(request)
+    effective_word_count = request.word_count or 2000
+    effective_reasoning_model = request.reasoning_model or request.model
+    effective_creative_model = request.creative_model or effective_reasoning_model
+    effective_sketch_model = request.sketch_model or effective_creative_model
+
     # 使用统一的上下文加载服务
     context = await load_full_chapter_context(db, chapter_id)
     if not context:
@@ -498,6 +668,28 @@ async def generate_chapter_dual_track_simple(
     
     chapter = context.chapter
     book = context.book
+    run_id = _resolve_run_id(request, chapter)
+    chapter.generation_run_id = run_id
+    chapter.generation_status = {
+        **(chapter.generation_status or {}),
+        "run_id": run_id,
+        "status": "running",
+        "stage": "ASSEMBLING_CONTEXT",
+        "effective_config": {
+            "run_id": run_id,
+            "max_iterations": resolved_params["max_iterations"],
+            "rag_top_k": resolved_params["rag_top_k"],
+            "rag_alpha": resolved_params["rag_alpha"],
+            "rag_beta": resolved_params["rag_beta"],
+            "rag_gamma": resolved_params["rag_gamma"],
+            "reasoning_model": effective_reasoning_model,
+            "creative_model": effective_creative_model,
+            "sketch_model": effective_sketch_model,
+            "word_count": effective_word_count,
+        },
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    await db.commit()
     
     # P2: 更新章节设置
     if request.tension_level is not None:
@@ -509,19 +701,14 @@ async def generate_chapter_dual_track_simple(
     from backend.services.workflows.planning import generate_beats, assign_pov_to_beats
     
     if request.beats and len(request.beats) > 0:
-        beats = []
-        for b in request.beats:
-            beat_dict = b.model_dump()
-            if not beat_dict.get("target_words") or beat_dict["target_words"] <= 0:
-                beat_dict["target_words"] = beat_dict.get("word_count_target") or max(200, request.word_count // len(request.beats))
-            beats.append(beat_dict)
+        beats = _normalize_confirmed_beats(request.beats, effective_word_count)
     else:
         beats, _ = await generate_beats(
             chapter=chapter,
             book=book,
             entities=context.entities,
             relationships=context.relationships,
-            word_count=request.word_count,
+            word_count=effective_word_count,
             open_hooks=context.open_hooks,
             api_key=request.api_key,
             base_url=request.base_url,
@@ -547,7 +734,7 @@ async def generate_chapter_dual_track_simple(
         story_premise=book.title if book else "",
         api_key=request.api_key,
         base_url=request.base_url,
-        model=request.model,
+        model=effective_reasoning_model,
         previous_chapter_summary=context.previous_summary,
     )
     
@@ -568,8 +755,9 @@ async def generate_chapter_dual_track_simple(
     workflow = DualTrackWorkflow(
         api_key=request.api_key,
         base_url=request.base_url,
-        reasoning_model=request.reasoning_model or request.model,
-        creative_model=request.creative_model or request.model,
+        reasoning_model=effective_reasoning_model,
+        creative_model=effective_creative_model,
+        sketch_model=effective_sketch_model,
         config=config,
     )
     
@@ -579,7 +767,7 @@ async def generate_chapter_dual_track_simple(
         beats=beats,
         entities=context.entities,
         relationships=context.relationships,
-        word_count=request.word_count,
+        word_count=effective_word_count,
         previous_summary=context.previous_summary,
         relevant_memories=context.relevant_memories,
         locations=context.locations,
@@ -587,9 +775,44 @@ async def generate_chapter_dual_track_simple(
         chapter_assets_schema=chapter.chapter_assets_schema or "",
         anchor_pov=anchor_pov,
     )
+
+    needs_adjustment = result.adjustment_plan.needs_adjustment if result.adjustment_plan else False
+    chapter.draft_text = result.final_text
+    chapter.review_feedback = {
+        **(chapter.review_feedback or {}),
+        "generation_run_id": run_id,
+        "alignment_score": result.adjustment_plan.alignment_score if result.adjustment_plan else None,
+        "needs_adjustment": needs_adjustment,
+        "stats": result.stats,
+    }
+    chapter.revision_count = 1 if needs_adjustment else 0
+    chapter.generation_status = {
+        **(chapter.generation_status or {}),
+        "run_id": run_id,
+        "status": "completed",
+        "stage": "DONE",
+        "passed": not needs_adjustment,
+        "revision_count": chapter.revision_count,
+        "stats": result.stats,
+        "final_text": result.final_text,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    await _persist_checkpoint(
+        db=db,
+        chapter=chapter,
+        run_id=run_id,
+        stage="DONE",
+        status="completed",
+        payload={
+            "alignment_score": result.adjustment_plan.alignment_score if result.adjustment_plan else None,
+            "final_length": len(result.final_text or ""),
+            "stats": result.stats,
+        },
+    )
     
     return {
         "success": True,
+        "generation_run_id": run_id,
         "text": result.final_text,
         "word_count": len(result.final_text),
         "stats": result.stats,

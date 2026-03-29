@@ -62,6 +62,30 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _clamp_int(value: int, low: int, high: int, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (ValueError, TypeError):
+        return default
+    return max(low, min(high, parsed))
+
+
+def _normalize_rag_weights(alpha: float, beta: float, gamma: float) -> tuple[float, float, float]:
+    def _safe(v: float) -> float:
+        try:
+            return max(0.0, min(1.0, float(v)))
+        except (ValueError, TypeError):
+            return 0.0
+
+    a = _safe(alpha)
+    b = _safe(beta)
+    g = _safe(gamma)
+    total = a + b + g
+    if total <= 0:
+        return AGENTIC_DEFAULT_RAG_ALPHA, 0.2, 0.2
+    return a / total, b / total, g / total
+
+
 # ============================================================
 # V3.8 高层语义参数推导适配器
 # ============================================================
@@ -85,12 +109,15 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     """
     # 如果是专家模式，直接使用传入的技术参数
     if not request.is_basic_mode():
+        rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
+            request.rag_alpha, request.rag_beta, request.rag_gamma
+        )
         return {
-            "max_iterations": request.max_iterations,
-            "rag_top_k": request.rag_top_k,
-            "rag_alpha": request.rag_alpha,
-            "rag_beta": request.rag_beta,
-            "rag_gamma": request.rag_gamma,
+            "max_iterations": _clamp_int(request.max_iterations, 1, 5, AGENTIC_DEFAULT_MAX_ITERATIONS),
+            "rag_top_k": _clamp_int(request.rag_top_k, 1, 20, AGENTIC_DEFAULT_RAG_TOP_K),
+            "rag_alpha": rag_alpha,
+            "rag_beta": rag_beta,
+            "rag_gamma": rag_gamma,
         }
     
     # 基础模式/意图模式：使用统一的 DerivationEngine 进行推导
@@ -102,22 +129,30 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
         # 使用适配器构建配置，自动执行推导
         config = adapt_request_to_config(request)
         
+        rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
+            config.rag.semantic_weight,
+            config.rag.time_decay_weight,
+            config.rag.foreshadowing_weight,
+        )
         return {
-            "max_iterations": config.workflow.max_iterations,
-            "rag_top_k": config.rag.top_k,
-            "rag_alpha": config.rag.semantic_weight,
-            "rag_beta": config.rag.time_decay_weight,
-            "rag_gamma": config.rag.foreshadowing_weight,
+            "max_iterations": _clamp_int(config.workflow.max_iterations, 1, 5, AGENTIC_DEFAULT_MAX_ITERATIONS),
+            "rag_top_k": _clamp_int(config.rag.top_k, 1, 20, AGENTIC_DEFAULT_RAG_TOP_K),
+            "rag_alpha": rag_alpha,
+            "rag_beta": rag_beta,
+            "rag_gamma": rag_gamma,
         }
     except Exception as e:
         logger.warning(f"[resolve_high_level_params] 使用 DerivationEngine 失败，回退到默认值: {e}")
         # 回退到默认值
+        rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
+            AGENTIC_DEFAULT_RAG_ALPHA, 0.2, 0.2
+        )
         return {
             "max_iterations": AGENTIC_DEFAULT_MAX_ITERATIONS,
             "rag_top_k": AGENTIC_DEFAULT_RAG_TOP_K,
-            "rag_alpha": AGENTIC_DEFAULT_RAG_ALPHA,
-            "rag_beta": 0.2,
-            "rag_gamma": 0.2,
+            "rag_alpha": rag_alpha,
+            "rag_beta": rag_beta,
+            "rag_gamma": rag_gamma,
         }
 
 

@@ -133,6 +133,7 @@ class DualTrackWorkflow:
         base_url: str,
         reasoning_model: str,
         creative_model: str,
+        sketch_model: Optional[str] = None,
         config: Optional[DualTrackConfig] = None,
         feature_flags: Optional[DraftingFeatureFlags] = None,
         prompt_logger: Optional[PromptLogger] = None,
@@ -141,6 +142,7 @@ class DualTrackWorkflow:
         self.base_url = base_url
         self.reasoning_model = reasoning_model
         self.creative_model = creative_model
+        self.sketch_model = sketch_model or creative_model
         self.config = config or DualTrackConfig()
         self.feature_flags = feature_flags or DraftingFeatureFlags()
         self.prompt_logger = prompt_logger
@@ -537,7 +539,7 @@ class DualTrackWorkflow:
         generator = SketchGenerator(
             api_key=self.api_key,
             base_url=self.base_url,
-            model=self.creative_model,
+            model=self.sketch_model,
             config=config,
         )
         
@@ -568,7 +570,7 @@ class DualTrackWorkflow:
             self.prompt_logger.log_prompts(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=self.creative_model,
+                model=self.sketch_model,
                 temperature=config.temperature,
                 max_tokens=int(target_words * 2.5),
                 prompt_label="SKETCH",
