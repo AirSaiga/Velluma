@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.context_loader import (
+from backend.services.context import (
     load_chapter as _load_chapter,
     load_book as _load_book,
     load_chapter_entities as _load_chapter_entities,

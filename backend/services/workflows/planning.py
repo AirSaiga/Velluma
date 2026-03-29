@@ -25,7 +25,7 @@ from backend.services.prompts import (
     parse_anchor_pov_result,
 )
 import json
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.models import Chapter, Book, Character, CharacterRelationship, StoryBeat
 from backend.schemas import PovAperture
 

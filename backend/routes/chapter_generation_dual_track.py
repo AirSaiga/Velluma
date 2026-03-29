@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
-from backend.services.agentic_workflow import resolve_high_level_params, _normalize_confirmed_beats
+from backend.services.orchestration.agentic import resolve_high_level_params, _normalize_confirmed_beats
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackConfig,
@@ -54,12 +54,12 @@ from backend.services.workflows.dual_track import (
 )
 from backend.services.workflows.sketch_generator import SketchGeneratorConfig
 from backend.services.workflows.adversarial_aligner import AdversarialAlignerConfig
-from backend.services.prompt_logger import create_logger
-from backend.services.logging_utils import (
+from backend.services.utils.prompt_logger import create_logger
+from backend.services.utils.logging import (
     ServiceLogger, LOG_PREFIX_DUAL_TRACK,
     build_sse_event, build_sse_metric_frame, build_sse_done
 )
-from backend.services.context_loader import (
+from backend.services.context import (
     load_full_chapter_context,
     save_story_beats,
     build_physical_state_lock,

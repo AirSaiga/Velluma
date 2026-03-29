@@ -56,7 +56,7 @@ from backend.services.workflows.dual_track_helpers import (
     build_revision_guide,
     extract_sketch_reference,
 )
-from backend.services.prompt_logger import PromptLogger
+from backend.services.utils.prompt_logger import PromptLogger
 from backend.schemas import DraftingFeatureFlags, WorkflowTier
 
 logger = logging.getLogger(__name__)

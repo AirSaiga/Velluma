@@ -27,8 +27,8 @@ from backend.world_state_schemas import (
     CharacterTerminalStatus,
     SceneTerminalStatus,
 )
-from backend.services.llm_client import call_llm
-from backend.services.prompt_logger import create_logger, PromptLogger
+from backend.services.llm import call_llm
+from backend.services.utils.prompt_logger import create_logger, PromptLogger
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
-from backend.services.agentic_workflow import resolve_high_level_params
+from backend.services.orchestration import resolve_high_level_params
 
 
 async def persist_checkpoint(

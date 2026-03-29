@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 import logging
 import json
 from backend.schemas import CritiqueRequest, CritiqueResponse
-from backend.services.chapter_generation import call_llm
+from backend.services.generation.chapter import call_llm
 from backend.services.prompts.critique_prompts import build_critique_system_prompt, build_critique_user_prompt
 
 logger = logging.getLogger(__name__)

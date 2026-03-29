@@ -29,7 +29,7 @@ from backend.schemas import (
     AGENTIC_DEFAULT_RAG_TOP_K,
     AGENTIC_DEFAULT_RAG_ALPHA,
 )
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.prompts import (
     build_planner_agent_prompt,
     parse_planner_result,

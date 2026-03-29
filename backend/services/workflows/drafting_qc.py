@@ -29,7 +29,7 @@ from backend.services.prompts import (
     build_chunk_review_prompt,
     build_chunk_refine_prompt,
 )
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 
 

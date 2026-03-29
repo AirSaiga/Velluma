@@ -54,7 +54,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         exclude_chapter_id: Optional[UUID] = None,
         max_chapter_number: Optional[int] = None,
     ):
-        from backend.services.memory_scorer import compute_memory_score
+        from backend.services.generation.memory_scorer import compute_memory_score
 
         candidate_limit = max(limit * 3, limit)
         distance_expr = MemoryChunk.embedding.cosine_distance(embedding)

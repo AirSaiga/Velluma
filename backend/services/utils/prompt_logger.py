@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Optional
 from pathlib import Path
 
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_PROMPT_LOGGER
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_PROMPT_LOGGER
 
 # 配置模块级日志记录器
 logger = logging.getLogger(__name__)

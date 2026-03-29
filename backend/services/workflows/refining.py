@@ -17,10 +17,10 @@
 from typing import Any, Optional
 
 from backend.services.prompts import build_refine_agent_prompt
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.models import Chapter, Book, Character, CharacterRelationship
-from backend.services.prompt_logger import PromptLogger
+from backend.services.utils.prompt_logger import PromptLogger
 
 
 async def refine_draft(

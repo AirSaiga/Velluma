@@ -460,7 +460,7 @@ class WorkflowRetrievalIntegrator:
                     chapter.outline_text, api_key, base_url
                 )
             else:
-                from backend.services.llm_client import get_embedding
+                from backend.services.llm import get_embedding
                 embedding = await get_embedding(
                     chapter.outline_text, api_key, base_url
                 )

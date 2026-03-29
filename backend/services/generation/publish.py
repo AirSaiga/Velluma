@@ -16,7 +16,8 @@ import asyncio
 import logging
 from typing import List, Optional, Any
 
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW, TimeoutManager
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
+from backend.services.utils.timeout import TimeoutManager
 
 _timeout_manager = TimeoutManager()
 
@@ -73,7 +74,7 @@ async def generate_chapter_summary(
     Returns:
         摘要文本或 None
     """
-    from backend.services.llm_client import generate_summary as llm_generate_summary
+    from backend.services.llm import generate_summary as llm_generate_summary
 
     try:
         svc_logger.debug("Generating chapter summary", text_length=len(text))
@@ -115,7 +116,7 @@ async def generate_summary_embedding(
     Returns:
         embedding 向量或 None
     """
-    from backend.services.llm_client import get_embedding
+    from backend.services.llm import get_embedding
 
     try:
         svc_logger.debug("Generating summary embedding")
@@ -162,7 +163,7 @@ async def update_character_states(
     Returns:
         角色更新结果列表
     """
-    from backend.services.chapter_generation import update_character_dynamic_state
+    from backend.services.generation.chapter import update_character_dynamic_state
 
     results = []
 

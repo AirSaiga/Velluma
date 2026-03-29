@@ -1457,5 +1457,5 @@ class GenerateEmbeddingRequest(BaseModel):
 
 def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
     """向后兼容导出：实际实现在 backend.services.workflow_tier_mapper"""
-    from backend.services.workflow_tier_mapper import map_tension_to_workflow_tier as _mapper
+    from backend.services.orchestration.tier_mapper import map_tension_to_workflow_tier as _mapper
     return _mapper(tension_level)

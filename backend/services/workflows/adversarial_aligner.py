@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pydantic import BaseModel
 
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.services.workflows.sketch_generator import SketchResult
 

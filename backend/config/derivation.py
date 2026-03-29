@@ -34,6 +34,8 @@
     derived_config = engine.derive(raw_config)
 """
 
+from typing import Any, Optional
+
 from backend.config.rules import (
     DerivationRule,
     TENSION_TO_TIER_RULE,
@@ -46,12 +48,38 @@ from backend.config.rules import (
 
 from backend.config.engine import DerivationEngine
 from backend.config.mapper import ParameterMapper, ConfigValidator
+from backend.config.schemas import GenerationConfig
+
+
+def derive_config(
+    request: Any,
+    chapter: Optional[Any] = None,
+    book: Optional[Any] = None,
+) -> GenerationConfig:
+    """
+    从请求数据构建并推导配置。
+
+    这是一个便捷函数，组合了配置构建和推导两个步骤。
+
+    Args:
+        request: 前端请求对象（Pydantic 模型或字典）
+        chapter: Chapter 实体（可选）
+        book: Book 实体（可选）
+
+    Returns:
+        GenerationConfig: 已推导的配置对象
+    """
+    config = GenerationConfig.from_request(request, chapter, book)
+    config.derive_all()
+    return config
+
 
 __all__ = [
     "DerivationEngine",
     "DerivationRule",
     "ParameterMapper",
     "ConfigValidator",
+    "derive_config",
     "TENSION_TO_TIER_RULE",
     "TIER_TO_ITERATIONS_RULE",
     "TIER_TO_DUAL_TRACK_RULE",

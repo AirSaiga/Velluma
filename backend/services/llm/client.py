@@ -1,11 +1,3 @@
-# Velluma - AI Novel Writing Assistant
-# Copyright (C) 2026 Velluma Project Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
 import json
 import os
 import asyncio
@@ -22,13 +14,13 @@ from tenacity import (
     retry_if_exception,
 )
 
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_RAG, LOG_PREFIX_SUMMARY
-from backend.services.llm_proxy import (
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_RAG, LOG_PREFIX_SUMMARY
+from backend.services.llm.proxy import (
     get_proxy_config,
     set_proxy_config,
     get_active_proxy as _get_active_proxy,
 )
-from backend.services.llm_embedding import get_embedding
+from backend.services.llm.embedding import get_embedding
 
 
 logger = logging.getLogger(__name__)

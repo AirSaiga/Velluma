@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pydantic import BaseModel
 
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 
 logger = logging.getLogger(__name__)

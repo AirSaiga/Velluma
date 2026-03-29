@@ -66,7 +66,7 @@ from backend.services.workflows.drafting_prose import (
 
 LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]
 
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.prompts import (
     build_scene_intent_prompt,
     parse_scene_intent_result,

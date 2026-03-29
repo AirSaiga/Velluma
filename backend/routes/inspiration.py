@@ -4,7 +4,7 @@ from backend.core.dependencies import get_chapter_repository
 from backend.core.exceptions import not_found, generation_error
 from backend.repositories import ChapterRepository
 from backend.schemas import InspirationRequest, InspirationResponse
-from backend.services.inspiration_service import load_inspiration_context, generate_inspirations
+from backend.services.generation.inspiration import load_inspiration_context, generate_inspirations
 
 logger = logging.getLogger(__name__)
 

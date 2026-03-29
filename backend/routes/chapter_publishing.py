@@ -29,12 +29,14 @@ from backend.core.dependencies import get_chapter_repository, get_character_repo
 from backend.core.exceptions import not_found, bad_request
 from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository
 from backend.schemas import ChapterPublishRequest, ChapterPublishResponse, CharacterStateChange
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW
-from backend.services.world_state_service import (
-    extract_world_state_snapshot,
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
+from backend.services.generation.publish import (
     generate_chapter_summary,
     generate_summary_embedding,
     update_character_states,
+)
+from backend.services.world.state_service import (
+    extract_world_state_snapshot,
 )
 from backend.services.workflows.snapshot_extractor import extract_world_terminal_state
 from backend.world_state_schemas import WorldTerminalState

@@ -24,7 +24,7 @@ from backend.schemas import (
     DraftingFeatureFlags,
     WorkflowTier,
 )
-from backend.services.workflow_tier_mapper import map_tension_to_workflow_tier
+from backend.services.orchestration.tier_mapper import map_tension_to_workflow_tier
 from backend.services.workflows.utils import clean_llm_output
 from backend.services.workflows.drafting_thinking import (
     _call_llm_with_stats,

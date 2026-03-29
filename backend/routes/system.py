@@ -23,8 +23,8 @@ from typing import Optional
 from fastapi import APIRouter
 
 from backend.core.config import get_actual_port, check_reasoning_support
-from backend.services.llm_client import get_proxy_config, set_proxy_config, call_llm
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_SYSTEM
+from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse
 
 router = APIRouter(prefix="/api", tags=["system"])

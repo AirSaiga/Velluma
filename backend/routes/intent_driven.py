@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
 
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
 from backend.schemas import RecommendRequest, IntentDrivenGenerateRequest
 
 logger = logging.getLogger(__name__)
@@ -281,7 +281,7 @@ async def generate_with_intent(request: IntentDrivenGenerateRequest):
     
     接收意图和目标，应用推荐方案，执行生成
     """
-    from backend.services.agentic_workflow import generate_agentic_chapter_stream
+    from backend.services.orchestration.agentic import generate_agentic_chapter_stream
     from backend.config.adapter import adapt_request_to_config
     
     # 1. 构建意图对象

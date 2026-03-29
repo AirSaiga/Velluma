@@ -7,7 +7,7 @@ from backend.schemas import (
     GenerateChapterAgenticRequest,
     GenerateChapterAgenticPreviewResponse,
 )
-from backend.services.chapter_generation import (
+from backend.services.generation.chapter import (
     build_chapter_prompt,
     generate_stream_response,
     call_llm,

@@ -22,7 +22,7 @@ from backend.services.prompts import (
     parse_scene_intent_result,
     build_subconscious_prompt,
 )
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 
 LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]

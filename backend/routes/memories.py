@@ -149,7 +149,7 @@ async def generate_chapter_embedding(
     if not chapter.summary:
         raise HTTPException(status_code=400, detail="章节暂无摘要，请先发布章节生成摘要")
 
-    from backend.services.llm_client import get_embedding
+    from backend.services.llm import get_embedding
 
     embedding = await get_embedding(
         text=chapter.summary,

@@ -1,3 +1,16 @@
+"""
+章节生成服务模块 (Facade)。
+
+职责：统一导出所有章节生成相关的服务函数，供上层 (API 路由) 消费。
+内部实现分布在：
+- llm/: LLM 调用封装
+- prompts/: 提示词构建（按Agent类型拆分）
+- orchestration/: 代理工作流
+- state_machine/: 角色状态管理
+
+设计模式：Facade Pattern，隐藏底层复杂度，提供统一入口。
+"""
+
 import logging
 import re
 from datetime import datetime, timezone
@@ -6,7 +19,16 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Character, Chapter
-from backend.services.llm_client import call_llm
+from backend.services.orchestration import preview_agentic_beats
+from backend.services.workflows.refining import refine_draft
+from backend.services.llm import call_llm, generate_stream_response
+from backend.services.prompts import (
+    build_chapter_prompt,
+    build_draft_agent_prompt,
+    build_review_agent_prompt,
+    build_refine_agent_prompt,
+    parse_review_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +114,6 @@ async def update_character_dynamic_state(
         model=model,
         temperature=0.7,
         max_tokens=1000,
-        proxy_enabled=proxy_enabled,
-        proxy_url=proxy_url,
     )
 
     if new_state:
@@ -120,3 +140,17 @@ async def update_character_dynamic_state(
         return {"old_dynamic_state": old_dynamic_state, "new_dynamic_state": new_dynamic_state}
 
     return {}
+
+
+__all__ = [
+    "build_chapter_prompt",
+    "generate_stream_response",
+    "build_draft_agent_prompt",
+    "build_review_agent_prompt",
+    "build_refine_agent_prompt",
+    "parse_review_result",
+    "call_llm",
+    "preview_agentic_beats",
+    "update_character_dynamic_state",
+    "refine_draft",
+]

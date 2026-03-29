@@ -6,15 +6,16 @@
 设计模式：Facade Pattern，封装底层复杂实现。
 
 模块组织：
-- chapter_generation.py: 章节生成服务（统一导出各类生成函数）
-- agentic_workflow.py: Agentic 工作流（多轮迭代生成）
-- llm_client.py: LLM 调用封装（支持多模型、重试机制）
-- character_state.py: 角色状态管理
-- prompt_builder.py: 提示词构建（已拆分为 prompts/ 目录）
+- generation/: 章节生成服务（统一导出各类生成函数）
+- orchestration/: Agentic 工作流（多轮迭代生成）
+- llm/: LLM 调用封装（支持多模型、重试机制）
+- state_machine/: 角色状态管理
 - prompts/: 按 Agent 类型拆分的提示词模块
 - workflows/: 工作流阶段模块
-- context_loader.py: 上下文数据加载服务
-- logging_utils.py: 日志工具模块
+- context/: 上下文数据加载服务
+- utils/: 通用工具模块
+- world/: 世界状态服务
+- rag/: RAG 检索服务
 
 使用场景：
 - routes/: 业务路由层，通过此模块调用底层服务
@@ -23,44 +24,80 @@
 业务规则：
 - 所有导出函数均为 async 函数或返回异步生成器
 - API Key 由调用方传入，服务层不存储敏感信息
+
+向后兼容：
+- 为避免破坏现有代码，保留旧路径的别名导入
 """
 
-from backend.services.chapter_generation import (
+from backend.services.generation import (
     build_chapter_prompt,
     generate_stream_response,
     update_character_dynamic_state,
+    preview_agentic_beats,
+    generate_chapter_summary,
+    generate_summary_embedding,
+    expand_inspiration,
+    expand_outline,
+    persist_checkpoint,
+    resolve_run_id,
 )
 
-# V3.8: 新增服务层模块导出
-from backend.services.context_loader import (
+from backend.services.context import (
     load_full_chapter_context,
     load_chapter,
     load_book,
     load_chapter_entities,
     load_character_relationships,
     ChapterContext,
+)
+
+from backend.services.orchestration import (
+    resolve_high_level_params,
+    preview_agentic_beats,
+    map_tension_to_workflow_tier,
     save_story_beats,
     build_physical_state_lock,
 )
-from backend.services.logging_utils import (
+
+from backend.services.utils import (
     ServiceLogger,
     build_sse_event,
     build_sse_metric_frame,
     build_sse_done,
+    build_sse_error,
+    build_sse_text_chunk,
     LOG_PREFIX_DUAL_TRACK,
     LOG_PREFIX_RAG,
     LOG_PREFIX_WORKFLOW,
+    LOG_PREFIX_SUMMARY,
+    LOG_PREFIX_PROMPT_LOGGER,
+    LOG_PREFIX_SYSTEM,
+    TimeoutManager,
+    timed,
+    sanitize_user_content,
+    PromptLogger,
 )
-from backend.services.inspiration_service import (
-    load_inspiration_context,
-    generate_inspirations,
-    InspirationContext,
-    InspirationItem,
-)
-from backend.services.world_state_service import (
+
+from backend.services.world import (
     extract_world_state_snapshot,
-    generate_chapter_summary,
-    generate_summary_embedding,
-    update_character_states,
-    CharacterUpdateResult,
+    update_character_physical_state,
+    CharacterInfo,
 )
+
+# 向后兼容别名
+# 这些别名指向新的模块位置，避免破坏现有代码
+LegacyServiceClass = type("LegacyServiceClass", (), {
+    "build_chapter_prompt": build_chapter_prompt,
+    "generate_stream_response": generate_stream_response,
+    "update_character_dynamic_state": update_character_dynamic_state,
+    "load_full_chapter_context": load_full_chapter_context,
+    "load_chapter": load_chapter,
+    "load_book": load_book,
+    "load_chapter_entities": load_chapter_entities,
+    "load_character_relationships": load_character_relationships,
+    "extract_world_state_snapshot": extract_world_state_snapshot,
+    "generate_chapter_summary": generate_chapter_summary,
+    "generate_summary_embedding": generate_summary_embedding,
+    "expand_inspiration": expand_inspiration,
+    "expand_outline": expand_outline,
+})

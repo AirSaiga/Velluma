@@ -18,7 +18,7 @@ import logging
 from typing import Any, Tuple, Optional
 
 from backend.services.prompts import build_review_agent_prompt, parse_review_result, build_chunk_refine_prompt
-from backend.services.llm_client import call_llm
+from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.models import Chapter, Book, Character, CharacterRelationship
 

@@ -5,8 +5,8 @@ from backend.core.dependencies import get_chapter_repository
 from backend.repositories import ChapterRepository
 from backend.models import Chapter, ChapterEntity, CharacterRelationship
 from backend.schemas import OptimizeChapterRequest, OptimizeSelectionRequest
-from backend.services.chapter_generation import refine_draft
-from backend.services.llm_client import optimize_selection_with_llm
+from backend.services.generation.chapter import refine_draft
+from backend.services.llm import optimize_selection_with_llm
 
 router = APIRouter(prefix="/api", tags=["chapter_optimization"])
 

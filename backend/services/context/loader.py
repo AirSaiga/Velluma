@@ -41,8 +41,8 @@ from backend.models import (
     ChapterMapLocation, PlotLedger, StoryBeat
 )
 from backend.repositories import MemoryRepository
-from backend.services.llm_client import get_embedding
-from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_RAG
+from backend.services.llm import get_embedding
+from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_RAG
 
 import logging
 
@@ -700,6 +700,3 @@ async def load_full_chapter_context(
         locations=locations,
         relevant_memories=relevant_memories,
     )
-
-
-from backend.services.beat_manager import save_story_beats, build_physical_state_lock

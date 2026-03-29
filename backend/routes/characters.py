@@ -30,7 +30,7 @@ from backend.schemas import (
     CharacterDynamicStateUpdateRequest,
     CharacterDynamicStateUpdateResponse,
 )
-from backend.services.chapter_generation import update_character_dynamic_state
+from backend.services.generation.chapter import update_character_dynamic_state
 
 router = APIRouter(prefix="/api", tags=["characters"])
 

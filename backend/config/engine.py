@@ -13,11 +13,8 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from backend.schemas import (
-    GenerationConfig,
-    MemoryStrategy,
-    WorkflowTier,
-)
+from backend.schemas import WorkflowTier
+from backend.config.schemas import GenerationConfig, MemoryStrategy
 
 from backend.config.rules import (
     TENSION_TO_TIER_RULE,

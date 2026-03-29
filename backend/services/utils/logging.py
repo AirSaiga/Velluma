@@ -14,14 +14,14 @@
 import logging
 from typing import Union
 
-from backend.services.sse_utils import (
+from backend.services.utils.sse import (
     build_sse_event,
     build_sse_metric_frame,
     build_sse_text_chunk,
     build_sse_done,
     build_sse_error,
 )
-from backend.services.timeout_utils import (
+from backend.services.utils.timeout import (
     timed,
     with_timeout,
     TimeoutManager,

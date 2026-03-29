@@ -14,7 +14,7 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.schemas import GenerationConfig
+from backend.config.schemas import GenerationConfig
 
 
 class ParameterMapper:
