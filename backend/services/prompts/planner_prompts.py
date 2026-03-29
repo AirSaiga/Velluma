@@ -3,22 +3,11 @@
 
 职责：提供章节规划（Planner）阶段的提示词构建和结果解析功能。
 
-业务场景：
-- 将章节大纲拆分为可执行的 story beats（剧情节拍）
-- 每个 beat 包含位置、视角角色、动作摘要、进入/退出状态、红线约束等
-- 支持低张力模式、伏笔绑定、POV 分配等高级功能
-
-工作流位置：
-- 位于 Agentic 工作流的起始阶段
-- 输入：章节信息、角色列表、关系约束、开放伏笔、目标字数
-- 输出：结构化的 beats 列表，用于后续的并行生成
-
-常量说明：
-- LOW_TENSION_RED_LINES: 低张力章节的默认红线约束
+子模块：
+- planner_prompts_parser: 结果解析函数和常量
 """
 
 import json
-import re
 from typing import Optional
 
 from backend.models import Chapter, Book
@@ -27,11 +16,11 @@ from backend.services.prompts.world_state_prompts import (
     build_world_state_constraint_prompt,
     format_snapshot_for_planner,
 )
-
-
-# 低张力章节的默认红线约束
-# V3.0: 用于 tension_level <= 2 时的自动注入
-LOW_TENSION_RED_LINES = ["禁止发生任何武力冲突或战斗升级", "避免正面冲突"]
+from backend.services.prompts.planner_prompts_parser import (
+    LOW_TENSION_RED_LINES,
+    parse_planner_full_result,
+    parse_planner_result,
+)
 
 
 def build_planner_agent_prompt(
@@ -341,206 +330,5 @@ def build_planner_agent_prompt(
     return system_prompt, user_prompt
 
 
-def parse_planner_full_result(
-    planner_result_raw: str,
-    chapter_outline: str,
-    word_count: int,
-) -> tuple[list[dict], str]:
-    """解析规划结果，返回 beats 列表和章节叙事核心角色。
-
-    在 parse_planner_result 的基础上，额外返回 chapter_narrative_anchor 字段，
-    供 POV_ASSIGNMENT 阶段优先使用，避免仅凭 beat 出现频次错误判断叙事核心。
-
-    Args:
-        planner_result_raw: LLM 返回的原始文本
-        chapter_outline: 章节大纲（用于 fallback）
-        word_count: 目标字数（用于 fallback 计算）
-
-    Returns:
-        tuple[list[dict], str]: (beats 列表, chapter_narrative_anchor 角色名或空字符串)
-    """
-    text = (planner_result_raw or "").strip()
-    candidates = [text] if text else []
-    fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
-    candidates.extend(block.strip() for block in fenced_blocks if block and block.strip())
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        candidates.append(text[first_brace : last_brace + 1].strip())
-    parsed_obj = None
-    for candidate in candidates:
-        try:
-            parsed_obj = json.loads(candidate)
-            break
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-
-    # V3.0: 解析 workflow_tier，默认为 TIER_2_STANDARD
-    workflow_tier = "TIER_2_STANDARD"
-    if isinstance(parsed_obj, dict):
-        tier = parsed_obj.get("workflow_tier")
-        if tier in ["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]:
-            workflow_tier = tier
-
-    # 解析叙事核心角色（Planner 主动声明，优先于 beat 频次统计）
-    chapter_narrative_anchor = ""
-    if isinstance(parsed_obj, dict):
-        chapter_narrative_anchor = str(parsed_obj.get("chapter_narrative_anchor", "")).strip()
-
-    beats = []
-    if isinstance(parsed_obj, dict) and isinstance(parsed_obj.get("beats"), list):
-        for idx, beat in enumerate(parsed_obj["beats"], start=1):
-            if not isinstance(beat, dict):
-                continue
-            summary = str(beat.get("summary") or "").strip()
-            if not summary:
-                continue
-            position = beat.get("position")
-            if not isinstance(position, int) or position <= 0:
-                position = idx
-            target_words = beat.get("target_words")
-            if not isinstance(target_words, int) or target_words <= 0:
-                target_words = max(200, word_count // max(1, len(parsed_obj["beats"])))
-            word_count_target = beat.get("word_count_target")
-            if not isinstance(word_count_target, int) or word_count_target <= 0:
-                word_count_target = target_words
-            beat_id = str(beat.get("beat_id") or f"beat-{position}").strip() or f"beat-{position}"
-            location = str(beat.get("location") or "").strip() or None
-            pov_character = str(beat.get("pov_character") or "").strip() or None
-            # V3.6: 解析叙事视角模式，默认为 single
-            pov_mode = str(beat.get("pov_mode") or "single").strip()
-            if pov_mode not in ["single", "ensemble", "omniscient"]:
-                pov_mode = "single"
-            # V3.6: 解析多视角角色列表（ensemble/omniscient 模式下有效）
-            pov_characters_raw = beat.get("pov_characters")
-            if isinstance(pov_characters_raw, list):
-                pov_characters = [str(c).strip() for c in pov_characters_raw if str(c).strip()]
-            else:
-                pov_characters = []
-            # 若 ensemble 模式且 pov_character 为空，自动取列表第一个
-            if pov_mode == "ensemble" and not pov_character and pov_characters:
-                pov_character = pov_characters[0]
-            # POV 角色知觉状态：由 Planner 显式输出
-            pov_perception_state = str(beat.get("pov_perception_state") or "正常").strip() or "正常"
-            # V3.5: 解析叙事光圈，默认为 subjective_observation
-            pov_aperture = str(beat.get("pov_aperture") or "subjective_observation").strip()
-            if pov_aperture not in ["internal_only", "subjective_observation", "systemic_sense"]:
-                pov_aperture = "subjective_observation"
-            # V3.5: 解析持久状态锚点
-            persistent_state_anchors = []
-            raw_anchors = beat.get("persistent_state_anchors")
-            if isinstance(raw_anchors, list):
-                for anchor in raw_anchors:
-                    if isinstance(anchor, dict):
-                        anchor_type = str(anchor.get("anchor_type") or "").strip()
-                        description = str(anchor.get("description") or "").strip()
-                        involved_chars = anchor.get("involved_characters", [])
-                        if isinstance(involved_chars, list):
-                            involved_characters = [str(c).strip() for c in involved_chars if str(c).strip()]
-                        else:
-                            involved_characters = []
-                        if anchor_type and description:
-                            persistent_state_anchors.append({
-                                "anchor_type": anchor_type,
-                                "description": description,
-                                "involved_characters": involved_characters
-                            })
-            action_summary = str(beat.get("action_summary") or "").strip() or summary
-            worldbuilding_instruction = str(beat.get("worldbuilding_instruction") or "").strip() or None
-            entry_state = str(beat.get("entry_state") or "").strip()
-            if not entry_state:
-                entry_state = f"承接上文并切入：{summary[:40]}"
-            exit_state = str(beat.get("exit_state") or "").strip()
-            if not exit_state:
-                exit_state = f"停在本节拍收束点：{action_summary[:40]}"
-            raw_hook_ids = beat.get("hook_ids")
-            raw_red_lines = beat.get("red_lines")
-            hook_ids = [str(item).strip() for item in raw_hook_ids if str(item).strip()] if isinstance(raw_hook_ids, list) else []
-            red_lines = [str(item).strip() for item in raw_red_lines if str(item).strip()] if isinstance(raw_red_lines, list) else []
-            if not red_lines:
-                red_lines = ["不得越过本节拍 exit_state 指向的剧情停点"]
-
-            pacing_type = str(beat.get("pacing_type") or "Medium").strip()
-            if pacing_type not in ["Fast", "Medium", "Slow"]:
-                pacing_type = "Medium"
-
-            weight = beat.get("weight")
-            if not isinstance(weight, int):
-                weight = 3
-            else:
-                weight = max(1, min(5, weight))
-
-            beats.append(
-                {
-                    "position": position,
-                    "beat_id": beat_id,
-                    "summary": summary,
-                    "location": location,
-                    "pov_character": pov_character,
-                    "pov_mode": pov_mode,       # V3.6: 叙事视角模式
-                    "pov_characters": pov_characters,  # V3.6: ensemble 多视角角色列表
-                    "pov_perception_state": pov_perception_state,
-                    "pov_aperture": pov_aperture,  # V3.5: 叙事光圈
-                    "persistent_state_anchors": persistent_state_anchors,  # V3.5: 持久状态锚点
-                    "action_summary": action_summary,
-                    "worldbuilding_instruction": worldbuilding_instruction,
-                    "entry_state": entry_state or None,
-                    "exit_state": exit_state or None,
-                    "red_lines": red_lines,
-                    "word_count_target": word_count_target,
-                    "target_words": word_count_target,
-                    "hook_ids": hook_ids,
-                    "pacing_type": pacing_type,
-                    "weight": weight,
-                    "workflow_tier": workflow_tier,  # V3.0: 注入工作流层级
-                }
-            )
-    if not beats:
-        fallback_summary = (chapter_outline or "").strip() or "按章节大纲推进剧情并完成关键冲突。"
-        beats = [
-            {
-                "position": 1,
-                "beat_id": "beat-1",
-                "summary": fallback_summary,
-                "location": None,
-                "pov_character": None,
-                "pov_perception_state": "正常",
-                "pov_aperture": "subjective_observation",  # V3.5: 默认叙事光圈
-                "persistent_state_anchors": [],  # V3.5: 默认空锚点列表
-                "action_summary": fallback_summary,
-                "worldbuilding_instruction": None,
-                "entry_state": "承接上文并切入本节拍",
-                "exit_state": "停在本节拍收束点，不推进后续事件",
-                "red_lines": ["不得越过本节拍 exit_state 指向的剧情停点"],
-                "word_count_target": word_count,
-                "target_words": word_count,
-                "hook_ids": [],
-                "pacing_type": "Medium",
-                "weight": 3,
-                "workflow_tier": workflow_tier,  # V3.0: fallback 也注入工作流层级
-            }
-        ]
-    beats.sort(key=lambda item: item["position"])
-    return beats, chapter_narrative_anchor
 
 
-def parse_planner_result(
-    planner_result_raw: str,
-    chapter_outline: str,
-    word_count: int,
-) -> list[dict]:
-    """解析规划结果的 JSON 输出（向后兼容包装器）。
-
-    仅返回 beats 列表，忽略 chapter_narrative_anchor。
-    新代码应使用 parse_planner_full_result 以获取叙事核心角色信息。
-
-    Args:
-        planner_result_raw: LLM 返回的原始文本
-        chapter_outline: 章节大纲（用于 fallback）
-        word_count: 目标字数（用于 fallback 计算）
-
-    Returns:
-        list[dict]: 结构化的 beats 列表
-    """
-    beats, _ = parse_planner_full_result(planner_result_raw, chapter_outline, word_count)
-    return beats

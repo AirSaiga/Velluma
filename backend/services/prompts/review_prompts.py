@@ -3,129 +3,20 @@
 
 职责：提供章节审阅（Review）和精修（Refine）阶段的提示词构建和结果解析功能。
 
-业务场景：
-- Review Agent: 对章节初稿进行质量检查，包括 OOC、剧情合规性、逻辑完整性
-- Refine Agent: 根据审阅意见重写初稿
-- Chunk Review/Refine: 对单个片段进行快速质检和修正
-
-工作流位置：
-- 位于 Agentic 工作流的 DRAFTING 阶段之后
-- 输入：章节信息、初稿文本、审查意见
-- 输出：审阅结果或修改后的正文
-
-主要函数：
-- build_review_agent_prompt: 构建审阅提示词
-- build_refine_agent_prompt: 构建精修提示词
-- parse_review_result: 解析审阅结果
-- build_chunk_review_prompt: 构建分段审阅提示词
-- build_chunk_refine_prompt: 构建分段精修提示词
+子模块：
+- review_prompts_utils: 边界渲染、问题类型标准化、结果解析
 """
 
 import json
-import re
 
 from backend.models import Chapter, Book
-
-
-def _render_boundary_brief(chapter: Chapter) -> str:
-    beats = getattr(chapter, "story_beats", None)
-    if not isinstance(beats, list) or not beats:
-        return "暂无节拍边界数据，请结合章节大纲谨慎判定越界与配速风险。"
-    ordered_beats = sorted(beats, key=lambda beat: getattr(beat, "position", 0) or 0)
-    lines = []
-    for idx, beat in enumerate(ordered_beats, start=1):
-        summary = str(getattr(beat, "summary", "") or "").strip() or f"Beat {idx}"
-        entry_state = str(getattr(beat, "entry_state", "") or "").strip() or "未提供"
-        exit_state = str(getattr(beat, "exit_state", "") or "").strip() or "未提供"
-        red_lines = getattr(beat, "red_lines", None)
-        if isinstance(red_lines, list):
-            red_line_items = [str(item).strip() for item in red_lines if str(item).strip()]
-        else:
-            red_line_items = []
-        red_line_text = "；".join(red_line_items) if red_line_items else "无"
-        lines.append(
-            f"{idx}. {summary}\n"
-            f"   - entry_state: {entry_state}\n"
-            f"   - exit_state: {exit_state}\n"
-            f"   - red_lines: {red_line_text}"
-        )
-    return "\n".join(lines)
-
-
-def _normalize_issue_type(raw_type, description: str) -> str:
-    issue_type = str(raw_type or "").strip()
-    normalized = issue_type.upper()
-    description_text = str(description or "")
-    lowered_issue_type = issue_type.lower()
-    lowered_description = description_text.lower()
-    if (
-        normalized == "PACING_OVERFLOW"
-        or "PACING_OVERFLOW" in normalized
-        or "越界" in issue_type
-        or "越过" in issue_type
-        or "超速" in issue_type
-        or "收束" in issue_type
-        or "exit_state" in issue_type.lower()
-        or "red_line" in issue_type.lower()
-        or "越界" in description_text
-        or "越过" in description_text
-        or "超速" in description_text
-        or "收束" in description_text
-        or "exit_state" in description_text.lower()
-        or "red_line" in description_text.lower()
-    ):
-        return "PACING_OVERFLOW"
-    if (
-        "完整性" in issue_type
-        or "段落" in issue_type
-        or "删段" in issue_type
-        or "删减" in issue_type
-        or "压缩" in issue_type
-        or "integrity" in lowered_issue_type
-        or "paragraph" in lowered_issue_type
-        or "完整性" in description_text
-        or "段落" in description_text
-        or "删段" in description_text
-        or "删减" in description_text
-        or "压缩" in description_text
-        or "integrity" in lowered_description
-        or "paragraph" in lowered_description
-    ):
-        return "完整性缺失"
-    if "OOC" in normalized:
-        return "OOC"
-    if "剧情遗漏" in issue_type or "PLOT MISSING" in normalized or "MISSING" in normalized:
-        return "剧情遗漏"
-    if "逻辑" in issue_type or "LOGIC" in normalized or "FLAW" in normalized:
-        return "逻辑硬伤"
-    return "逻辑硬伤"
-
-
-def _build_default_revision_plan(has_pacing_overflow: bool) -> str:
-    if has_pacing_overflow:
-        return "请先回退到越界前的收束节点，删除触发 red_lines 的情节，放慢叙事节奏并悬停在对应 exit_state，再补齐必要动机后输出完整正文。"
-    return "请按章节大纲与角色设定修复逻辑问题，保留原文关键段落结构，避免大幅删段，并返回完整正文。"
+from backend.services.prompts.review_prompts_utils import (
+    render_boundary_brief as _render_boundary_brief,
+    parse_review_result,
+)
 
 
 def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str, beats: list = None):
-    """
-    构建审阅 Agent (Review Agent) 的提示词，负责质量检查。
-
-    核心任务：
-    1. OOC 检测 (Out Of Character) - 角色行为是否符合性格设定
-    2. 剧情合规性 - 是否遵循章节大纲
-    3. 逻辑完整性 - 是否有情节漏洞
-
-    特殊设计：
-    - 只传入静态设定，不传动态状态 (避免审阅时受到当前状态的过度影响)
-    - 强制 JSON 输出格式 (便于程序化解析)
-    - temperature=0.1 (低温度保证判断一致性)
-
-    数据流：draft_text (待审内容) → LLM 审查 → JSON 格式审查结果
-
-    新增参数：
-    - beats: 剧情节拍列表，用于构建 Reference_Beats 地图，帮助定位问题所属的 Beat
-    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
@@ -246,19 +137,6 @@ def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 
 def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, draft_text: str, revision_plan: str, word_count: int):
-    """
-    构建精修 Agent (Refine Agent) 的提示词，根据审查意见重写初稿。
-
-    核心任务：
-    - 基于 revision_plan 针对性修改
-    - 保持原有优秀部分不被破坏
-    - 强约束正文完整性，禁止通过大幅删段完成修改
-
-    数据流：
-    - revision_plan (来自 Review Agent) + draft_text → LLM 重写 → 修改后的正文
-
-    关键设计：将审查意见作为显式约束注入 prompt，而非让 LLM 自行理解上下文。
-    """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
@@ -376,128 +254,9 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
     return system_prompt, user_prompt
 
 
-def parse_review_result(review_result_raw: str):
-    """
-    解析审阅 Agent 返回的 JSON 结果。
-
-    容错设计：LLM 可能输出各种格式的"伪 JSON" (如带 markdown 包裹、前后有文本等)，
-    因此需要多策略尝试解析：
-    1. 原始文本
-    2. markdown 代码块中的 JSON
-    3. 首尾大括号包围的内容
-
-    副作用：正则匹配可能误捕获嵌套代码块，但嵌套情况罕见可忽略。
-
-    错误处理：
-    - 空响应 → 返回默认失败结果 (pass=false)
-    - JSON 解析失败 → 返回默认失败结果 + 解析错误信息
-    - 字段缺失 → 使用默认值填充 (如 issues=[])
-    """
-    text = (review_result_raw or "").strip()
-    if not text:
-        return {
-            "pass": False,
-            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回为空，无法完成质检。", "target_beat_ids": []}],
-            "revision_plan": "请基于章节大纲重新审查，并仅输出合法 JSON。",
-            "target_beat_ids": [],
-        }, "Empty response from Review Agent"
-    candidates = [text]
-    fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
-    candidates.extend(block.strip() for block in fenced_blocks if block and block.strip())
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        candidates.append(text[first_brace : last_brace + 1].strip())
-    parsed_obj = None
-    parse_error = None
-    for candidate in candidates:
-        try:
-            parsed_obj = json.loads(candidate)
-            break
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            parse_error = str(e)
-    if not isinstance(parsed_obj, dict):
-        return {
-            "pass": False,
-            "issues": [{"type": "审查异常", "severity": "high", "description": "Review Agent 返回内容无法解析为合法 JSON。", "target_beat_ids": []}],
-            "revision_plan": "请严格按约定 JSON 结构输出审查结论，不要附加解释文本。",
-            "target_beat_ids": [],
-        }, parse_error or "Review JSON parse failed"
-    raw_issues = parsed_obj.get("issues")
-    normalized_issues = []
-    all_target_beat_ids = set()
-    if isinstance(raw_issues, list):
-        for issue in raw_issues:
-            if isinstance(issue, dict):
-                description = str(issue.get("description") or "").strip()
-                issue_type = _normalize_issue_type(issue.get("type"), description)
-                severity = str(issue.get("severity") or "").strip().lower()
-                if severity not in {"high", "medium", "low"}:
-                    severity = "medium"
-                target_beat_ids = issue.get("target_beat_ids")
-                if isinstance(target_beat_ids, list):
-                    for bid in target_beat_ids:
-                        if isinstance(bid, str) and bid.strip():
-                            all_target_beat_ids.add(bid.strip())
-                normalized_issues.append(
-                    {
-                        "type": issue_type,
-                        "severity": severity,
-                        "description": description or "未提供问题描述",
-                        "target_beat_ids": target_beat_ids if isinstance(target_beat_ids, list) else [],
-                    }
-                )
-            elif isinstance(issue, str) and issue.strip():
-                description = issue.strip()
-                normalized_issues.append(
-                    {
-                        "type": _normalize_issue_type("", description),
-                        "severity": "medium",
-                        "description": description,
-                        "target_beat_ids": [],
-                    }
-                )
-    revision_plan = parsed_obj.get("revision_plan")
-    has_pacing_overflow = any(issue.get("type") == "PACING_OVERFLOW" for issue in normalized_issues)
-    if not isinstance(revision_plan, str) or not revision_plan.strip():
-        revision_plan = _build_default_revision_plan(has_pacing_overflow)
-    elif has_pacing_overflow:
-        lowered_revision_plan = revision_plan.lower()
-        if (
-            "回退" not in revision_plan
-            and "exit_state" not in lowered_revision_plan
-            and "悬停" not in revision_plan
-            and "收束" not in revision_plan
-        ):
-            revision_plan = (
-                f"{revision_plan.rstrip()}\n"
-                "补充要求：请先回退越界剧情，放慢推进并悬停在对应 exit_state，确保不触发 red_lines。"
-            )
-    result = {
-        "pass": bool(parsed_obj.get("pass", False)),
-        "issues": normalized_issues,
-        "revision_plan": revision_plan,
-        "target_beat_ids": list(all_target_beat_ids)
-    }
-    return result, None
-
-
 def build_chunk_review_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str):
-    """
-    构建分段审阅 Agent (Chunk Review Agent) 的提示词。
-    
-    相比全章审阅，分段审阅更关注：
-    1. 局部 OOC (Out Of Character)
-    2. 是否完成了 Beat 的指令 (summary)
-    3. 基础文笔流畅度
-    
-    忽略：
-    1. 前后文连贯性 (因为是分段并行生成，缺乏上下文)
-    2. 全局伏笔
-    """
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-    
-    # 简化版角色设定 (只取名字和静态设定，减少 Token)
+
     static_states = []
     seen_character_ids = set()
     for entity in entities:
@@ -506,7 +265,7 @@ def build_chunk_review_prompt(chapter: Chapter, book: Book, entities: list, rela
             seen_character_ids.add(character.id)
             if character.static_prompt:
                 static_states.append(f"【{character.name}】{character.static_prompt}")
-    
+
     system_prompt = f"""{global_sys_prompt}
 
 你是一个严格的小说片段质检员。
@@ -542,12 +301,8 @@ def build_chunk_review_prompt(chapter: Chapter, book: Book, entities: list, rela
 
 
 def build_chunk_refine_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str, revision_instruction: str):
-    """
-    构建分段精修 Agent (Chunk Refine Agent) 的提示词。
-    """
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-    
-    # 简化版角色设定
+
     static_states = []
     seen_character_ids = set()
     for entity in entities:
