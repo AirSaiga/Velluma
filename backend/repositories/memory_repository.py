@@ -9,22 +9,6 @@ from backend.models import Chapter, MemoryChunk, PlotLedger
 from backend.repositories.base import BaseRepository, QuerySpec
 
 
-def compute_memory_score(
-    cosine_similarity: float,
-    delta_days: float,
-    plot_weight: float,
-    alpha: float = 0.6,
-    beta: float = 0.2,
-    gamma: float = 0.2,
-    lambda_decay: float = 0.1,
-) -> float:
-    safe_cosine = max(0.0, min(1.0, cosine_similarity))
-    safe_delta_days = max(0.0, delta_days)
-    safe_plot_weight = max(0.0, min(1.0, plot_weight))
-    time_score = math.exp(-lambda_decay * safe_delta_days)
-    return alpha * safe_cosine + beta * time_score + gamma * safe_plot_weight
-
-
 class MemoryRepository(BaseRepository[MemoryChunk]):
     """
     记忆块仓储：管理 AI 上下文记忆数据。
@@ -70,6 +54,8 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         exclude_chapter_id: Optional[UUID] = None,
         max_chapter_number: Optional[int] = None,
     ):
+        from backend.services.memory_scorer import compute_memory_score
+
         candidate_limit = max(limit * 3, limit)
         distance_expr = MemoryChunk.embedding.cosine_distance(embedding)
         

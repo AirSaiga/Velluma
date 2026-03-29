@@ -1,18 +1,28 @@
-# Velluma - AI Novel Writing Assistant
-# 工作流模块导出
+"""
+工作流子模块。
 
-from backend.services.workflow.chapter_orchestrator import (
-    ChapterGenerationOrchestrator,
+职责：提供章节生成工作流的类型定义和状态管理。
+
+子模块：
+- workflow_types.py: 工作流类型定义
+
+使用方式：
+    from backend.services.workflow import (
+        WorkflowStage,
+        WorkflowState,
+        WorkflowResult,
+        ChapterGenerationOrchestrator,
+    )
+"""
+
+from backend.services.workflow.workflow_types import (
     WorkflowStage,
     WorkflowState,
     WorkflowResult,
-    generate_chapter_with_workflow,
 )
 
 __all__ = [
-    "ChapterGenerationOrchestrator",
     "WorkflowStage",
     "WorkflowState",
     "WorkflowResult",
-    "generate_chapter_with_workflow",
 ]

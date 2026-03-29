@@ -28,7 +28,7 @@ async def optimize_chapter(
 
     注意：此操作不会直接修改数据库，需要用户确认后保存
     """
-    db = chapter_repo.db
+    db = chapter_repo.get_session()
     chapter_id = request.chapter_id
 
     result = await db.execute(

@@ -29,7 +29,7 @@ from backend.core.dependencies import get_book_repository, get_memory_repository
 from backend.models import MemoryChunk
 from backend.repositories import BookRepository, ChapterRepository, MemoryRepository
 from backend.repositories.base import QuerySpec
-from backend.schemas import MemoryChunkCreate, MemoryChunkResponse
+from backend.schemas import MemoryChunkCreate, MemoryChunkResponse, GenerateEmbeddingRequest
 
 router = APIRouter(prefix="/api", tags=["memories"])
 
@@ -122,13 +122,6 @@ async def delete_memory(memory_id: UUID, repo: MemoryRepository = Depends(get_me
 # =============================================================================
 # 章节向量生成 - 用于测试 RAG 功能
 # =============================================================================
-
-from pydantic import BaseModel
-
-class GenerateEmbeddingRequest(BaseModel):
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    model: Optional[str] = None
 
 @router.post("/chapters/{chapter_id}/generate-embedding")
 async def generate_chapter_embedding(

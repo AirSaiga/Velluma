@@ -46,14 +46,14 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 from backend.schemas import (
-    DynamicContext, 
-    DraftingFeatureFlags, 
+    DynamicContext,
+    DraftingFeatureFlags,
     MicroReviewResult,
-    DynamicStateUpdateResult,  # V2.5+ NEW
-    CharacterPhysicalState,  # V2.5+ NEW: 用于 entity_spatial_ledger
-    WorkflowTier,  # V3.0 NEW
-    map_tension_to_workflow_tier,  # V3.0 NEW
+    DynamicStateUpdateResult,
+    CharacterPhysicalState,
+    WorkflowTier,
 )
+from backend.services.workflow_tier_mapper import map_tension_to_workflow_tier
 from backend.services.prompts import (
     build_scene_intent_prompt,
     parse_scene_intent_result,
@@ -69,6 +69,11 @@ from backend.services.prompts import (
 )
 from backend.services.llm_client import call_llm
 from backend.services.workflows.utils import clean_llm_output
+from backend.services.workflows.drafting_qc import (
+    _micro_review_assertion as _micro_review_assertion_qc,
+    _infer_fail_categories as _infer_fail_categories_qc,
+    _quick_qc as _quick_qc_func,
+)
 
 # =============================================================================
 # LLM 调用统计回调类型定义

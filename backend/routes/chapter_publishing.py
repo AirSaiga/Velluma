@@ -110,7 +110,9 @@ async def publish_chapter(
                     chunk_text=f"【第{chapter.chapter_number}章摘要】{summary}",
                     embedding=summary_embedding
                 )
-                chapter_repo.db.add(new_memory)
+                session = chapter_repo.get_session()
+                session.add(new_memory)
+                await session.commit()
 
     character_updates = []
     if request and request.api_key:
@@ -138,7 +140,7 @@ async def publish_chapter(
         update_results = await update_character_states(
             character_list=character_list,
             chapter=chapter,
-            db=chapter_repo.db,
+            db=chapter_repo.get_session(),
             api_key=request.api_key,
             base_url=request.base_url,
             model=request.model,

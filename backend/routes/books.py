@@ -22,16 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.dependencies import get_book_repository
 from backend.repositories import BookRepository
-from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate
-from pydantic import BaseModel
+from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate, GoldenSnippetsUpdate, StyleBlacklistUpdate
 
-
-class GoldenSnippetsUpdate(BaseModel):
-    golden_snippets: List[str]
-
-
-class StyleBlacklistUpdate(BaseModel):
-    style_blacklist: List[str]
 
 router = APIRouter(prefix="/api", tags=["books"])
 

@@ -155,7 +155,7 @@ class SnapshotExtractorAgent:
             if extracted_state:
                 # 设置元数据
                 extracted_state.source_chapter_id = str(chapter_id) if chapter_id else None
-                extracted_state.extracted_at = __import__('datetime').datetime.utcnow()
+                extracted_state.extracted_at = __import__('datetime').datetime.now(__import__('datetime').timezone.utc)
                 
                 logger.info(f"[SnapshotExtractor] State extracted successfully: {len(extracted_state.characters)} characters")
                 

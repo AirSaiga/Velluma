@@ -13,25 +13,36 @@ V3.8 重构：
 - 统一使用 WorkflowStage 定义检索阶段
 - 提供阶段化检索接口（规划/起草/审阅/精修）
 - 保持旧接口向后兼容
+
+依赖：
+- backend.services.context_loader: 底层细粒度加载器（被复用）
 """
 
 import logging
 from typing import Any, Optional, Dict, List, Tuple
 from uuid import UUID
 
-# 配置模块级日志记录器
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, PlotLedger
+from backend.world_state_schemas import WorldTerminalState
+from backend.models import Chapter
 from backend.repositories import MemoryRepository
 from backend.services.llm_client import get_embedding
 from backend.world_state_schemas import WorldTerminalState
 
-# V3.8: 导入新 RAG 系统
+from backend.services.context_loader import (
+    load_chapter as _load_chapter,
+    load_book as _load_book,
+    load_chapter_entities as _load_chapter_entities,
+    load_character_relationships as _load_char_relationships,
+    load_previous_chapter_summary as _load_prev_summary,
+    load_open_hooks as _load_open_hooks,
+    load_relevant_memories as _load_relevant_memories,
+    load_previous_world_snapshot as _load_prev_world_snapshot_context_loader,
+)
+
 try:
     from backend.services.rag import (
         WorkflowRetrievalIntegrator,
@@ -141,6 +152,8 @@ async def load_chapter_context(
 async def _load_basic_context(chapter_id: Any, db: AsyncSession) -> Optional[dict[str, Any]]:
     """加载章节和书籍基本信息。
 
+    使用 context_loader 中的函数，消除重复代码。
+
     Args:
         chapter_id: 章节 UUID
         db: 数据库会话
@@ -148,19 +161,18 @@ async def _load_basic_context(chapter_id: Any, db: AsyncSession) -> Optional[dic
     Returns:
         Optional[dict]: 包含 chapter 和 book 的字典
     """
-    chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
-    chapter = chapter_result.scalar_one_or_none()
+    chapter = await _load_chapter(db, str(chapter_id))
     if not chapter:
         return None
 
-    book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
-    book = book_result.scalar_one_or_none()
-
+    book = await _load_book(db, str(chapter.book_id))
     return {"chapter": chapter, "book": book}
 
 
 async def _load_entities(chapter_id: Any, db: AsyncSession) -> list[Any]:
     """加载章节关联的角色实体列表。
+
+    使用 context_loader 中的函数，消除重复代码。
 
     Args:
         chapter_id: 章节 UUID
@@ -169,16 +181,13 @@ async def _load_entities(chapter_id: Any, db: AsyncSession) -> list[Any]:
     Returns:
         list: 章节关联的角色实体列表
     """
-    entities_result = await db.execute(
-        select(ChapterEntity)
-        .options(selectinload(ChapterEntity.character))
-        .where(ChapterEntity.chapter_id == chapter_id)
-    )
-    return list(entities_result.scalars().all())
+    return await _load_chapter_entities(db, str(chapter_id))
 
 
 async def _load_relationships(entities: list[Any], db: AsyncSession) -> list[Any]:
     """加载角色之间的关系列表。
+
+    使用 context_loader 中的函数，消除重复代码。
 
     Args:
         entities: 章节关联的角色实体列表
@@ -189,24 +198,13 @@ async def _load_relationships(entities: list[Any], db: AsyncSession) -> list[Any
     """
     if not entities:
         return []
-
-    character_ids = [e.entity_id for e in entities]
-    relationships_result = await db.execute(
-        select(CharacterRelationship)
-        .options(
-            selectinload(CharacterRelationship.source_character),
-            selectinload(CharacterRelationship.target_character),
-        )
-        .where(
-            CharacterRelationship.source_char_id.in_(character_ids),
-            CharacterRelationship.target_char_id.in_(character_ids),
-        )
-    )
-    return list(relationships_result.scalars().all())
+    return await _load_char_relationships(db, entities)
 
 
 async def _load_previous_summary(chapter: Chapter, db: AsyncSession) -> Optional[str]:
     """加载上一章的摘要。
+
+    使用 context_loader 中的函数，消除重复代码。
 
     Args:
         chapter: 当前章节实体
@@ -215,21 +213,13 @@ async def _load_previous_summary(chapter: Chapter, db: AsyncSession) -> Optional
     Returns:
         Optional[str]: 上一章摘要，不存在则返回 None
     """
-    if chapter.chapter_number <= 1:
-        return None
-
-    prev_chapter_result = await db.execute(
-        select(Chapter).where(
-            Chapter.book_id == chapter.book_id,
-            Chapter.chapter_number == chapter.chapter_number - 1
-        )
-    )
-    prev_chapter = prev_chapter_result.scalar_one_or_none()
-    return prev_chapter.summary if prev_chapter else None
+    return await _load_prev_summary(db, chapter)
 
 
 async def _load_open_hooks(chapter: Chapter, db: AsyncSession) -> list[dict[str, str]]:
     """加载当前章节之前的所有开放伏笔。
+
+    使用 context_loader 中的函数，消除重复代码。
 
     Args:
         chapter: 当前章节实体
@@ -238,43 +228,7 @@ async def _load_open_hooks(chapter: Chapter, db: AsyncSession) -> list[dict[str,
     Returns:
         list[dict]: 开放伏笔列表，每项包含 hook_id, ledger_key, content
     """
-    hook_max_chapter_number = chapter.chapter_number - 1
-    historical_chapter_exists = (
-        select(Chapter.id)
-        .where(
-            Chapter.id == PlotLedger.chapter_id,
-            Chapter.chapter_number <= hook_max_chapter_number,
-        )
-        .exists()
-    )
-
-    open_hook_result = await db.execute(
-        select(PlotLedger).where(
-            PlotLedger.book_id == chapter.book_id,
-            PlotLedger.status == "open",
-            or_(
-                PlotLedger.created_at_chapter <= hook_max_chapter_number,
-                and_(
-                    PlotLedger.created_at_chapter.is_(None),
-                    or_(PlotLedger.chapter_id.is_(None), historical_chapter_exists),
-                ),
-            ),
-        )
-    )
-
-    open_hooks = []
-    for row in open_hook_result.scalars().all():
-        content = str(getattr(row, "content", "") or "").strip()
-        if not content:
-            continue
-        hook_id = str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip()
-        open_hooks.append({
-            "hook_id": hook_id,
-            "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
-            "content": content,
-        })
-
-    return open_hooks
+    return await _load_open_hooks(db, chapter)
 
 
 async def _load_relevant_memories(
@@ -290,6 +244,8 @@ async def _load_relevant_memories(
 ) -> list[Any]:
     """使用 RAG 检索与章节大纲相关的记忆。
 
+    使用 context_loader 中的函数，消除重复代码。
+
     Args:
         chapter: 当前章节实体
         api_key: LLM API Key
@@ -304,29 +260,20 @@ async def _load_relevant_memories(
     Returns:
         list: 相关记忆列表
     """
-    if not chapter.outline_text or not api_key:
-        return []
-
-    try:
-        embedding = await get_embedding(chapter.outline_text, api_key, base_url)
-        if not embedding:
-            return []
-
-        memory_repo = MemoryRepository(db)
-        return await memory_repo.search_similar(
-            embedding,
-            chapter.book_id,
-            limit=rag_top_k,
-            alpha=rag_alpha,
-            beta=rag_beta,
-            gamma=rag_gamma,
-            lambda_decay=rag_lambda,
-            exclude_chapter_id=chapter.id,
-            max_chapter_number=chapter.chapter_number - 1,
-        )
-    except Exception as e:
-        logger.error(f"[RAG] {e}")
-        return []
+    return await _load_relevant_memories(
+        db=db,
+        book_id=str(chapter.book_id),
+        query_text=chapter.outline_text or "",
+        api_key=api_key,
+        base_url=base_url,
+        top_k=rag_top_k,
+        alpha=rag_alpha,
+        beta=rag_beta,
+        gamma=rag_gamma,
+        lambda_decay=rag_lambda,
+        exclude_chapter_id=str(chapter.id),
+        max_chapter_number=chapter.chapter_number - 1,
+    )
 
 
 # =============================================================================
@@ -339,8 +286,7 @@ async def _load_previous_world_terminal_state(
 ) -> Optional[WorldTerminalState]:
     """加载前一章的世界终端状态。
 
-    在 ASSEMBLING_CONTEXT 阶段调用，用于获取前一章末尾的物理状态约束。
-    如果是第一章（chapter_number <= 1），返回 None。
+    使用 context_loader 中的函数，消除直接 SQLAlchemy 访问。
 
     Args:
         chapter: 当前章节实体
@@ -349,40 +295,27 @@ async def _load_previous_world_terminal_state(
     Returns:
         Optional[WorldTerminalState]: 前一章的世界终端状态，不存在或第一章返回 None
     """
-    # 第一章没有前一章状态
     if chapter.chapter_number <= 1:
         logger.debug(f"[WorldState] Chapter {chapter.chapter_number} is first chapter, no previous state")
         return None
 
     try:
-        # 查询前一章
-        prev_chapter_result = await db.execute(
-            select(Chapter).where(
-                Chapter.book_id == chapter.book_id,
-                Chapter.chapter_number == chapter.chapter_number - 1
-            )
-        )
-        prev_chapter = prev_chapter_result.scalar_one_or_none()
+        world_snapshot = await _load_prev_world_snapshot_context_loader(db, chapter)
 
-        if not prev_chapter:
-            logger.debug(f"[WorldState] Previous chapter not found for chapter {chapter.chapter_number}")
+        if not world_snapshot:
+            logger.debug(f"[WorldState] Chapter {chapter.chapter_number} has no world_snapshot")
             return None
 
-        # 从 world_snapshot 解析 WorldTerminalState
-        if prev_chapter.world_snapshot:
-            world_state = WorldTerminalState.from_chapter_snapshot(prev_chapter.world_snapshot)
-            if world_state:
-                logger.info(
-                    f"[WorldState] Loaded state from chapter {prev_chapter.chapter_number}: "
-                    f"{len(world_state.characters)} characters, "
-                    f"location: {world_state.scene.location_summary[:30]}..."
-                )
-                return world_state
-            else:
-                logger.warning(f"[WorldState] Failed to parse world_snapshot from chapter {prev_chapter.chapter_number}")
-                return None
+        world_state = WorldTerminalState.from_chapter_snapshot(world_snapshot)
+        if world_state:
+            logger.info(
+                f"[WorldState] Loaded state from chapter {chapter.chapter_number - 1}: "
+                f"{len(world_state.characters)} characters, "
+                f"location: {world_state.scene.location_summary[:30]}..."
+            )
+            return world_state
         else:
-            logger.debug(f"[WorldState] Chapter {prev_chapter.chapter_number} has no world_snapshot")
+            logger.warning(f"[WorldState] Failed to parse world_snapshot")
             return None
 
     except Exception as e:
@@ -623,32 +556,19 @@ async def load_chapter_context_v3(
         )
         
         integrator = WorkflowRetrievalIntegrator(db, config)
-        
-        # 执行检索
+
         context_package, rag_result = await integrator.retrieve_chapter_context(
             chapter_id=chapter_id,
             api_key=api_key,
             base_url=base_url,
             stage=workflow_stage,
         )
-        
-        # 获取章节和书籍信息
-        chapter = None
-        book = None
-        chapter_result = await db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        chapter = chapter_result.scalar_one_or_none()
-        
-        if chapter:
-            book_result = await db.execute(
-                select(Book).where(Book.id == chapter.book_id)
-            )
-            book = book_result.scalar_one_or_none()
-        
-        
+
+        chapter = await _load_chapter(db, str(chapter_id))
         if not chapter:
             return None
+
+        book = await _load_book(db, str(chapter.book_id))
         
         # 从 RAG 结果提取各类型数据
         entities = []
@@ -663,14 +583,8 @@ async def load_chapter_context_v3(
         
         
         if character_ids:
-            entities_result = await db.execute(
-                select(ChapterEntity)
-                .options(selectinload(ChapterEntity.character))
-                .where(ChapterEntity.chapter_id == chapter_id)
-            )
-            entities = list(entities_result.scalars().all())
+            entities = await _load_chapter_entities(db, str(chapter_id))
         else:
-            # 如果 RAG 没有返回角色，手动加载
             entities = await _load_entities(chapter_id, db)
         
         

@@ -97,15 +97,40 @@ class BaseRepository(Generic[ModelType]):
     事务策略：
     - 每个 CRUD 方法独立管理事务（自动 commit），这是最简单的模式
     - 副作用：如果业务需要"查询-修改-再提交"的原子操作，需在调用方手动控制事务
+
+    架构约束：
+    - 请通过公共方法访问数据，避免直接操作 self.db
+    - 直接访问 self.db 会绕过仓储层的封装，应逐步淘汰
     """
     model: type[ModelType]
+    _db: AsyncSession
 
     def __init__(self, db: AsyncSession):
         """
         依赖注入点：db session 由外层框架（如 FastAPI Depends）管理，
         确保同一请求生命周期内复用同一会话，避免连接泄漏。
         """
-        self.db = db
+        self._db = db
+
+    @property
+    def db(self) -> AsyncSession:
+        """
+        兼容性别名 - 逐步废弃中。
+
+        警告：直接访问 self.db 会绕过仓储层的封装。
+        建议使用 get_session() 方法或公共 CRUD 方法。
+        """
+        import warnings
+        warnings.warn(
+            "直接访问 repo.db 已废弃，请使用公共方法或 get_session()。",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._db
+
+    def get_session(self) -> AsyncSession:
+        """获取数据库会话（无警告，推荐在 service 层使用）。"""
+        return self._db
 
     async def list(self, skip: int = 0, limit: int = 100):
         """
@@ -130,9 +155,9 @@ class BaseRepository(Generic[ModelType]):
         权衡：如果不需要返回最新状态，可省略 refresh 提升性能。
         """
         item = self.model(**payload)
-        self.db.add(item)
-        await self.db.commit()
-        await self.db.refresh(item)
+        self._db.add(item)
+        await self._db.commit()
+        await self._db.refresh(item)
         return item
 
     async def update(self, item: ModelType, payload: dict[str, Any]) -> ModelType:
@@ -144,8 +169,8 @@ class BaseRepository(Generic[ModelType]):
         """
         for key, value in payload.items():
             setattr(item, key, value)
-        await self.db.commit()
-        await self.db.refresh(item)
+        await self._db.commit()
+        await self._db.refresh(item)
         return item
 
     async def delete(self, item: ModelType):
@@ -153,15 +178,15 @@ class BaseRepository(Generic[ModelType]):
         物理删除：直接执行 DELETE 语句（非软删除）。
         警示：级联删除由模型关系定义决定，需确认外键约束避免数据库报错。
         """
-        await self.db.delete(item)
-        await self.db.commit()
+        await self._db.delete(item)
+        await self._db.commit()
 
     async def execute_scalar_all(self, query: Select):
         """
         底层执行接口：返回标量列表，用于自定义复杂查询。
         数据流：Select 对象 → DB → scalar 列表
         """
-        result = await self.db.execute(query)
+        result = await self._db.execute(query)
         return result.scalars().all()
 
     async def execute_scalar_one_or_none(self, query: Select):
@@ -169,7 +194,7 @@ class BaseRepository(Generic[ModelType]):
         返回单条或空：用于 "查询一条记录" 场景。
         与 execute_scalar_all 的区别：多用于唯一性查询（by ID, by unique constraint）。
         """
-        result = await self.db.execute(query)
+        result = await self._db.execute(query)
         return result.scalar_one_or_none()
 
     async def commit(self):
@@ -177,14 +202,14 @@ class BaseRepository(Generic[ModelType]):
         手动提交点：用于跨多个操作的显式事务控制。
         使用场景：批量操作需要全部成功或全部回滚时。
         """
-        await self.db.commit()
+        await self._db.commit()
 
     async def refresh(self, item: ModelType):
         """
         刷新对象状态：从数据库重新加载最新值。
         典型用途：确认其他进程/触发器对同一行的修改。
         """
-        await self.db.refresh(item)
+        await self._db.refresh(item)
 
     def build_query(
         self,

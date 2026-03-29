@@ -204,7 +204,7 @@ async def update_character_dynamic_state_endpoint(
     result = await update_character_dynamic_state(
         character=character,
         chapter=chapter,
-        db=chapter_repo.db,
+        db=chapter_repo.get_session(),
         api_key=request.api_key,
         base_url=request.base_url,
         model=request.model,

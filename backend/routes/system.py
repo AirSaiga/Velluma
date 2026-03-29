@@ -21,40 +21,15 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
 
 from backend.core.config import get_actual_port, check_reasoning_support
 from backend.services.llm_client import get_proxy_config, set_proxy_config, call_llm
 from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_SYSTEM
+from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse
 
 router = APIRouter(prefix="/api", tags=["system"])
 logger = logging.getLogger(__name__)
 svc_logger = ServiceLogger(logger, LOG_PREFIX_SYSTEM)
-
-
-class ProxyConfig(BaseModel):
-    enabled: bool
-    url: str
-
-
-class ModelTestRequest(BaseModel):
-    """模型连接测试请求"""
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
-    # 推理模式配置
-    reasoning_enabled: bool = Field(default=False)
-    reasoning_effort: str = Field(default="medium")
-
-
-class ModelTestResponse(BaseModel):
-    """模型连接测试响应"""
-    success: bool
-    message: str
-    model_info: Optional[dict] = None
-    reasoning_supported: Optional[bool] = None
-    reasoning_message: Optional[str] = None
-    response_time_ms: Optional[float] = None
 
 
 # =============================================================================

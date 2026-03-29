@@ -24,9 +24,9 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
-from pydantic import BaseModel, Field
 
 from backend.services.logging_utils import ServiceLogger, LOG_PREFIX_WORKFLOW
+from backend.schemas import RecommendRequest, IntentDrivenGenerateRequest
 
 logger = logging.getLogger(__name__)
 svc_logger = ServiceLogger(logger, LOG_PREFIX_WORKFLOW)
@@ -197,43 +197,6 @@ GOAL_TEMPLATES_DATA = [
         "success_criteria": ["地点形象清晰", "读者产生代入感", "地点服务于剧情"]
     }
 ]
-
-
-# =============================================================================
-# 请求/响应模型
-# =============================================================================
-
-class RecommendRequest(BaseModel):
-    """推荐方案请求"""
-    creative_intents: List[str] = Field(..., max_length=2, description="创作意图列表")
-    chapter_goals: Optional[List[str]] = Field(None, description="章节目标列表")
-
-
-class IntentDrivenGenerateRequest(BaseModel):
-    """意图驱动生成请求"""
-    chapter_id: str
-    api_key: str
-    base_url: Optional[str] = None
-    model: Optional[str] = None
-    
-    # 意图参数
-    creative_intents: Optional[List[str]] = Field(None, max_length=2)
-    intent_priorities: Optional[List[int]] = None
-    custom_intent_description: Optional[str] = None
-    
-    # 章节目标
-    chapter_goals: Optional[List[str]] = None
-    target_entity_ids: Optional[List[str]] = None
-    
-    # 方案选择
-    selected_plan_type: str = Field(default="balanced")
-    
-    # 用户覆盖
-    user_overrides: Optional[dict] = None
-    
-    # 基础参数
-    word_count: int = Field(default=3000, ge=500, le=20000)
-    author_intent: Optional[str] = None
 
 
 # =============================================================================

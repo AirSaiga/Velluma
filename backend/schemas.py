@@ -111,31 +111,8 @@ class ReasoningConfig(BaseModel):
             params["max_tokens"] = self.max_tokens
         if self.exclude:
             params["exclude"] = True
-            
+
         return {"reasoning": params}
-
-
-def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
-    """
-    将 tension_level 映射为工作流层级。
-    
-    V3.0 智能路由映射规则：
-    - Level 1, 2 -> TIER_1_FAST (疾速流)
-    - Level 3 -> TIER_2_STANDARD (均衡流)  
-    - Level 4, 5 -> TIER_3_FORTRESS (堡垒流)
-    
-    Args:
-        tension_level: 剧情张力等级 (1-5)
-    
-    Returns:
-        WorkflowTier: 对应的工作流层级
-    """
-    if tension_level <= 2:
-        return "TIER_1_FAST"
-    elif tension_level == 3:
-        return "TIER_2_STANDARD"
-    else:  # 4-5
-        return "TIER_3_FORTRESS"
 
 
 # ============================================================
@@ -1403,3 +1380,82 @@ class CritiqueResponse(BaseModel):
     """章节审阅响应模型"""
     comments: List[CritiqueItem]
     overall_praise: str
+
+
+# ============================================================
+# 路由层迁移 Schema - 从 routes/ 模块迁移的共享模型
+# ============================================================
+
+class GoldenSnippetsUpdate(BaseModel):
+    """金句片段更新模型"""
+    golden_snippets: List[str]
+
+
+class StyleBlacklistUpdate(BaseModel):
+    """文风黑名单更新模型"""
+    style_blacklist: List[str]
+
+
+class ProxyConfig(BaseModel):
+    """代理配置模型"""
+    enabled: bool
+    url: str
+
+
+class ModelTestRequest(BaseModel):
+    """模型连接测试请求"""
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini")
+    reasoning_enabled: bool = Field(default=False)
+    reasoning_effort: str = Field(default="medium")
+
+
+class ModelTestResponse(BaseModel):
+    """模型连接测试响应"""
+    success: bool
+    message: str
+    model_info: Optional[dict] = None
+    reasoning_supported: Optional[bool] = None
+    reasoning_message: Optional[str] = None
+    response_time_ms: Optional[float] = None
+
+
+class RecommendRequest(BaseModel):
+    """推荐方案请求"""
+    creative_intents: List[str] = Field(..., max_length=2, description="创作意图列表")
+    chapter_goals: Optional[List[str]] = Field(None, description="章节目标列表")
+
+
+class IntentDrivenGenerateRequest(BaseModel):
+    """意图驱动生成请求"""
+    chapter_id: str
+    api_key: str
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    creative_intents: Optional[List[str]] = Field(None, max_length=2)
+    intent_priorities: Optional[List[int]] = None
+    custom_intent_description: Optional[str] = None
+    chapter_goals: Optional[List[str]] = None
+    target_entity_ids: Optional[List[str]] = None
+    selected_plan_type: str = Field(default="balanced")
+    user_overrides: Optional[dict] = None
+    word_count: int = Field(default=3000, ge=500, le=20000)
+    author_intent: Optional[str] = None
+
+
+class GenerateEmbeddingRequest(BaseModel):
+    """向量嵌入生成请求"""
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+
+# ============================================================
+# Service 层函数重新导出（向后兼容）
+# ============================================================
+
+def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
+    """向后兼容导出：实际实现在 backend.services.workflow_tier_mapper"""
+    from backend.services.workflow_tier_mapper import map_tension_to_workflow_tier as _mapper
+    return _mapper(tension_level)

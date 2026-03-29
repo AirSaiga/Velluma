@@ -101,7 +101,6 @@ from backend.routes import (
     characters_router,
     relationships_router,
     memories_router,
-    generate_router,
     text_formatting_router,
     chapter_generation_router,
     chapter_optimization_router,
@@ -209,7 +208,6 @@ app.include_router(chapter_publishing_router)
 app.include_router(characters_router)
 app.include_router(relationships_router)
 app.include_router(memories_router)
-app.include_router(generate_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
 

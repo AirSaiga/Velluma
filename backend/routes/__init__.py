@@ -13,7 +13,6 @@
 - characters.py: 角色管理 API
 - relationships.py: 角色关系 API
 - memories.py: 记忆/RAG API
-- generate.py: 基础生成 API（向后兼容）
 - text_formatting.py: 文本格式整理 API
 - chapter_generation.py: 章节生成 API
 - chapter_optimization.py: 章节优化 API
@@ -37,7 +36,6 @@ from backend.routes.chapter_publishing import router as chapter_publishing_route
 from backend.routes.characters import router as characters_router
 from backend.routes.relationships import router as relationships_router
 from backend.routes.memories import router as memories_router
-from backend.routes.generate import router as generate_router
 from backend.routes.text_formatting import router as text_formatting_router
 from backend.routes.chapter_generation import router as chapter_generation_router
 from backend.routes.chapter_optimization import router as chapter_optimization_router

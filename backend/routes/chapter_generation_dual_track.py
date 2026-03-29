@@ -37,7 +37,7 @@ API 端点：
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Optional, List, Any, Dict
 
@@ -84,7 +84,7 @@ async def _persist_checkpoint(
     checkpoint = {
         "stage": stage,
         "status": status,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": payload or {},
     }
     checkpoints.append(checkpoint)
@@ -226,7 +226,7 @@ async def generate_chapter_dual_track(
                 "status": "running",
                 "stage": "ASSEMBLING_CONTEXT",
                 "effective_config": effective_config,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.commit()
             yield build_sse_event("GENERATION_RUN", "生成任务已初始化", generation_run_id=run_id)
@@ -581,7 +581,7 @@ async def generate_chapter_dual_track(
                 "revision_count": chapter.revision_count,
                 "stats": result.stats,
                 "final_text": result.final_text,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             await _persist_checkpoint(
                 db=db,
@@ -687,7 +687,7 @@ async def generate_chapter_dual_track_simple(
             "sketch_model": effective_sketch_model,
             "word_count": effective_word_count,
         },
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.commit()
     
@@ -795,7 +795,7 @@ async def generate_chapter_dual_track_simple(
         "revision_count": chapter.revision_count,
         "stats": result.stats,
         "final_text": result.final_text,
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await _persist_checkpoint(
         db=db,

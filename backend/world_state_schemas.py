@@ -13,7 +13,7 @@ WorldTerminalState Schema 定义 - V3.6 状态驱动持久化
 - 下一章生成 → ASSEMBLING_CONTEXT 加载 → 注入到 Planning/Drafting
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -137,7 +137,7 @@ class WorldTerminalState(BaseModel):
         description="叙事惯性：剧情趋势和情感状态的延续描述"
     )
     extracted_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="状态提取时间戳"
     )
     source_chapter_id: Optional[str] = Field(

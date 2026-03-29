@@ -4,7 +4,7 @@ SQLAlchemy ORM 模型定义
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -55,7 +55,7 @@ class Book(Base):
     worldview_settings = Column(JSONB, default=dict)
     golden_snippets = Column(JSONB, default=list)
     style_blacklist = Column(JSONB, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
@@ -115,7 +115,7 @@ class Chapter(Base):
     chapter_assets_schema = Column(Text, nullable=True, default="")
     # 世界状态快照：章节发布时提取，作为下一章的初始约束
     world_snapshot = Column(JSONB, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="chapters")
     entities = relationship("ChapterEntity", back_populates="chapter", cascade="all, delete-orphan")
@@ -184,7 +184,7 @@ class MapLocation(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     current_state = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="locations")
     chapter_locations = relationship("ChapterMapLocation", back_populates="location", cascade="all, delete-orphan")
@@ -247,7 +247,7 @@ class Character(Base):
     current_state = Column(Text, nullable=True)
     dynamic_state_history = Column(JSONB, default=list)
     importance_level = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="characters")
     chapter_entities = relationship("ChapterEntity", back_populates="character", cascade="all, delete-orphan")
@@ -309,7 +309,7 @@ class CharacterRelationship(Base):
     affinity_score = Column(Integer, default=0)
     interaction_prompt = Column(Text, nullable=True)
     is_public = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     source_character = relationship(
         "Character",
@@ -367,7 +367,7 @@ class MemoryChunk(Base):
     chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True)
     chunk_text = Column(Text, nullable=False)
     embedding = Column(Vector(1536), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="memories")
     chapter = relationship("Chapter", back_populates="memories")
@@ -425,7 +425,7 @@ class StoryBeat(Base):
     status = Column(String(50), default="planned")
     pacing_type = Column(String(50), nullable=True)
     weight = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="story_beats")
     chapter = relationship("Chapter", back_populates="story_beats")
@@ -471,7 +471,7 @@ class SceneIntent(Base):
     stakes = Column(Text, nullable=True)
     constraints = Column(JSONB, default=list)
     priority = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="scene_intents")
     chapter = relationship("Chapter", back_populates="scene_intents")
@@ -526,7 +526,7 @@ class PlotLedger(Base):
         nullable=True,
     )
     meta = Column("metadata", JSONB, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="plot_ledgers")
     chapter = relationship("Chapter", foreign_keys=[chapter_id], back_populates="plot_ledgers")

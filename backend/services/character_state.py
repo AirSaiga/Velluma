@@ -1,15 +1,14 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from openai import AsyncOpenAI
-
-# 配置模块级日志记录器
-logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Character, Chapter
+from backend.services.llm_client import call_llm
+
+logger = logging.getLogger(__name__)
 
 
 async def update_character_dynamic_state(
@@ -44,10 +43,7 @@ async def update_character_dynamic_state(
     权衡：使用 gpt-4o-mini 而非更强模型降低成本，但可能影响分析质量。
     警示：若章节内容为空，LLM 可能产生不准确的推理。
     """
-    import httpx
-    import asyncio
 
-    # 步骤1：准备历史状态上下文 (最近3条)，帮助 LLM 理解状态演变
     old_dynamic_state = manual_current_state if manual_current_state is not None else (character.dynamic_state or "暂无动态状态")
     history_states = []
     if character.dynamic_state_history:
@@ -58,8 +54,8 @@ async def update_character_dynamic_state(
                 history_states.append(f"- {updated_at}: {state}")
     history_str = "\n".join(history_states) if history_states else "暂无历史状态"
 
-    # 步骤2：构建分析 prompt，强制输出简洁的动态状态描述
-    prompt = f"""角色动态状态更新提示词：
+    system_prompt = "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"
+    user_prompt = f"""角色动态状态更新提示词：
 
 【角色信息】
 角色名：{character.name}
@@ -88,75 +84,33 @@ async def update_character_dynamic_state(
 6. 直接输出更新后的段落，不要包含"更新后："等前缀。
 """
 
-    from backend.services.llm_client import _get_active_proxy
+    new_state = await call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        temperature=0.7,
+        max_tokens=1000,
+        proxy_enabled=proxy_enabled,
+        proxy_url=proxy_url,
+    )
 
-    effective_proxy = None
-    if proxy_url:
-        effective_proxy = proxy_url
-    elif proxy_enabled:
-        effective_proxy = _get_active_proxy()
-
-    # 步骤3：调用 LLM 分析并更新状态 (增加重试机制)
-    client_kwargs = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
-    
-    max_retries = 3
-    new_state = None
-    http_client = None
-    
-    try:
-        # 在循环外创建 HTTP 客户端，避免重复创建/销毁
-        http_client = httpx.AsyncClient(trust_env=False, proxy=effective_proxy, timeout=600.0)
-        client_kwargs["http_client"] = http_client
-        client = AsyncOpenAI(**client_kwargs)
-        
-        for attempt in range(max_retries):
-            try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "你是一个专业的小说写作助手，擅长分析角色心理和情感变化。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.7,
-                    max_tokens=1000,
-                )
-                
-                if response.choices and response.choices[0].message.content:
-                    new_state = response.choices[0].message.content.strip()
-                    break
-                    
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    logger.error(f"[Character State] Final attempt failed for {character.name}: {e}")
-                    raise
-                
-                wait_time = (2 ** attempt) * 1
-                logger.warning(f"[Character State] Attempt {attempt + 1} failed for {character.name}, retrying in {wait_time}s: {e}")
-                await asyncio.sleep(wait_time)
-    finally:
-        if http_client is not None:
-            await http_client.aclose()
-    
     if new_state:
-        # 步骤4：后处理 LLM 输出，去除常见的前缀干扰
         llm_content = new_state
         if not llm_content:
             return {}
 
         new_dynamic_state = llm_content.strip()
-        
+
         new_dynamic_state = re.sub(r"^[【\[].*?[】\]]\s*", "", new_dynamic_state.strip())
         new_dynamic_state = re.sub(r"^角色动态状态[：:]\s*", "", new_dynamic_state)
         new_dynamic_state = re.sub(r"^更新后的动态状态[：:]\s*", "", new_dynamic_state)
         new_dynamic_state = new_dynamic_state.strip()
 
-        # 步骤5：更新角色状态并记录历史
         character.dynamic_state = new_dynamic_state
         history = character.dynamic_state_history or []
-        history.append({"state": new_dynamic_state, "updated_at": datetime.utcnow().isoformat()})
-        # 裁剪历史记录，保持最近10条 (防止无限增长)
+        history.append({"state": new_dynamic_state, "updated_at": datetime.now(timezone.utc).isoformat()})
         if len(history) > 10:
             history = history[-10:]
         character.dynamic_state_history = history

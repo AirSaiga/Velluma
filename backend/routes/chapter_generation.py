@@ -48,7 +48,7 @@ async def generate_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     word_count = request.word_count or 2000
-    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.db, word_count)
+    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.get_session(), word_count)
     return StreamingResponse(
         generate_stream_response(
             system_prompt=prompt_data["system_prompt"],
@@ -89,7 +89,7 @@ async def generate_chapter_sync(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     word_count = request.word_count or 2000
-    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.db, word_count)
+    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.get_session(), word_count)
     content = await call_llm(
         system_prompt=prompt_data["system_prompt"],
         user_prompt=prompt_data["user_prompt"],
@@ -109,6 +109,6 @@ async def generate_chapter_agentic_preview_beats(
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-    return await preview_agentic_beats(request, chapter_repo.db)
+    return await preview_agentic_beats(request, chapter_repo.get_session())
 
 

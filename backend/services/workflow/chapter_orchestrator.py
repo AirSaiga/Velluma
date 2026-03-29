@@ -1,12 +1,17 @@
 # Velluma - AI Novel Writing Assistant
 # 章节生成工作流编排器
 
-from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Callable, AsyncGenerator
 from pydantic import BaseModel, Field
 from datetime import datetime
 import asyncio
 import logging
+
+from backend.services.workflow.workflow_types import (
+    WorkflowStage,
+    WorkflowState,
+    WorkflowResult,
+)
 
 from backend.config import GenerationConfig, DerivationEngine, ConfigValidator
 from backend.services.validation.pre_generation_checklist import (
@@ -33,60 +38,8 @@ from backend.services.state_machine.relationship_state import (
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
-# 工作流阶段定义
-# =============================================================================
-
-class WorkflowStage(str, Enum):
-    """工作流阶段"""
-    IDLE = "IDLE"
-    ASSEMBLING_CONTEXT = "ASSEMBLING_CONTEXT"
-    PRE_CHECK = "PRE_CHECK"
-    PLANNING = "PLANNING"
-    POV_ASSIGNMENT = "POV_ASSIGNMENT"
-    DRAFTING = "DRAFTING"
-    SKETCH_GENERATION = "SKETCH_GENERATION"
-    STITCHING = "STITCHING"
-    ADVERSARIAL_ALIGNMENT = "ADVERSARIAL_ALIGNMENT"
-    REVIEWING = "REVIEWING"
-    REFINING = "REFINING"
-    STITCHING_AFTER_REFINE = "STITCHING_AFTER_REFINE"
-    POST_CHECK = "POST_CHECK"
-    STATE_PERSISTENCE = "STATE_PERSISTENCE"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-
-
-class WorkflowState(BaseModel):
-    """工作流状态"""
-    current_stage: WorkflowStage = WorkflowStage.IDLE
-    iteration: int = 0
-    max_iterations: int = 2
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    
-    # 各阶段结果
-    pre_check_passed: bool = False
-    beats: List[Dict] = Field(default_factory=list)
-    beat_drafts: List[Dict] = Field(default_factory=list)
-    sketch_result: Optional[Dict] = None
-    stitched_text: str = ""
-    alignment_score: float = 0.0
-    review_report: Optional[Dict] = None
-    final_text: str = ""
-    
-    # 错误信息
-    error_message: str = ""
-    error_stage: Optional[str] = None
-    
-    # 统计信息
-    llm_calls: int = 0
-    total_tokens: int = 0
-
-
-# =============================================================================
-# 工作流结果
+# 工作流结果（续）
 # =============================================================================
 
 class WorkflowResult(BaseModel):
@@ -94,19 +47,19 @@ class WorkflowResult(BaseModel):
     success: bool
     final_text: str = ""
     word_count: int = 0
-    
+
     # 状态变化
     character_state_changes: List[Dict] = Field(default_factory=list)
     relationship_state_changes: List[Dict] = Field(default_factory=list)
-    
+
     # 报告
     pre_check_report: Optional[Dict] = None
     review_report: Optional[Dict] = None
-    
+
     # 统计
     iterations: int = 0
     llm_calls: int = 0
-    
+
     # 错误
     error: str = ""
 
