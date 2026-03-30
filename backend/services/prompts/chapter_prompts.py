@@ -19,16 +19,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 
 from fastapi import HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from typing import Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.repositories import (
+        ChapterRepository, BookRepository, RelationshipRepository, MapLocationRepository
+    )
 
 from backend.models import Book, Chapter, CharacterRelationship, ChapterEntity, ChapterMapLocation
 
 
-async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2000) -> dict:
+async def build_chapter_prompt(
+    chapter_id: str,
+    repositories: Dict[str, Any],
+    word_count: int = 2000
+) -> dict:
     """
     构建简单章节生成的提示词 (单轮 LLM 调用)。
+
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 repositories 参数
+    - 所有数据库操作通过 Repository 执行
 
     提示词结构设计 (按优先级排列)：
     1. 全局角色定义 (global_sys_prompt) - LLM 行为基线
@@ -36,41 +47,50 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     3. 角色静态设定 - 不变的人设
     4. 角色动态状态 - 当前心理/情感 (随章节变化)
     5. 角色互动约束 - 关系规则
-    6. 字数要求 - 最高优先级约束 (LLM 容易忽略，需强调)
+    6. 字数要求 - 最高优先级约束
 
-    数据流：
-    - chapter_id → 查询 Chapter → 获取章节大纲
-    - chapter_id → 查询 ChapterEntity → 获取涉及的角色
-    - 角色ID集合 → 查询 CharacterRelationship → 获取角色关系
-
-    权衡：使用 selectinload 避免 N+1 查询，但一次性加载所有关系可能影响大规模章节性能。
+    Args:
+        chapter_id: 章节 ID
+        repositories: Repository 字典
+        word_count: 目标字数
     """
-    chapter_result = await db.execute(select(Chapter).options(selectinload(Chapter.book)).where(Chapter.id == chapter_id))
-    chapter = chapter_result.scalar_one_or_none()
+    chapter_repo: "ChapterRepository" = repositories.get("chapter")
+    book_repo: "BookRepository" = repositories.get("book")
+    relationship_repo: "RelationshipRepository" = repositories.get("relationship")
+    map_repo: "MapLocationRepository" = repositories.get("map_location")
+    
+    chapter = await chapter_repo.get_by_id(chapter_id) if chapter_repo else None
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
 
-    book = chapter.book
+    book = await book_repo.get_by_id(chapter.book_id) if book_repo else None
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
-    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-    worldview_settings = book.worldview_settings
+    global_sys_prompt = book.global_sys_prompt if book else "你是一个专业的小说写作助手。"
+    worldview_settings = book.worldview_settings if book else {}
     worldview_prompt = f"【世界观设定】\n{worldview_settings}" if worldview_settings else None
 
     map_activity_range = getattr(chapter, "map_activity_range", None)
     map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
 
-    entities_result = await db.execute(
-        select(ChapterEntity).options(selectinload(ChapterEntity.character)).where(ChapterEntity.chapter_id == chapter_id)
-    )
-    entities = entities_result.scalars().all()
+    entities = []
+    if chapter_repo:
+        spec = chapter_repo.build_query(
+            model=ChapterEntity,
+            conditions=[ChapterEntity.chapter_id == chapter_id],
+        )
+        entities = await chapter_repo.find_all(spec=spec)
 
-    locations_result = await db.execute(
-        select(ChapterMapLocation).options(selectinload(ChapterMapLocation.location)).where(ChapterMapLocation.chapter_id == chapter_id)
-    )
-    locations = locations_result.scalars().all()
+    locations = []
+    if map_repo:
+        spec = map_repo.build_query(
+            model=ChapterMapLocation,
+            conditions=[ChapterMapLocation.chapter_id == chapter_id],
+        )
+        locations = await map_repo.find_all(spec=spec)
+    
     location_prompts = []
     for loc_rel in locations:
-        if loc_rel.location:
+        if hasattr(loc_rel, 'location') and loc_rel.location:
             desc = f"【{loc_rel.location.name}】{loc_rel.location.description or ''}"
             location_prompts.append(desc)
     
@@ -84,7 +104,7 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
     character_ids = []
     seen_character_ids = set()
     for entity in entities:
-        character = entity.character
+        character = entity.character if hasattr(entity, 'character') else None
         if character and character.id not in seen_character_ids:
             seen_character_ids.add(character.id)
             character_ids.append(character.id)
@@ -93,15 +113,16 @@ async def build_chapter_prompt(chapter_id, db: AsyncSession, word_count: int = 2
             if character.dynamic_state:
                 dynamic_states.append(f"【{character.name}】{character.dynamic_state}")
 
-    relationships_result = await db.execute(
-        select(CharacterRelationship)
-        .options(selectinload(CharacterRelationship.source_character), selectinload(CharacterRelationship.target_character))
-        .where(
-            CharacterRelationship.source_char_id.in_(character_ids),
-            CharacterRelationship.target_char_id.in_(character_ids),
+    relationships = []
+    if relationship_repo and character_ids:
+        spec = relationship_repo.build_query(
+            model=CharacterRelationship,
+            conditions=[
+                CharacterRelationship.source_char_id.in_(character_ids),
+                CharacterRelationship.target_char_id.in_(character_ids),
+            ]
         )
-    )
-    relationships = relationships_result.scalars().all()
+        relationships = await relationship_repo.find_all(spec=spec)
 
     relationship_prompts = []
     for rel in relationships:

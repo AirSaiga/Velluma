@@ -37,19 +37,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 依赖项：
 - backend.models: PlotLedger 模型
 - backend.services.rag.foreshadowing_types: 伏笔类型定义
+- backend.repositories.plot_ledger_repository: PlotLedgerRepository
 
 使用方式：
-    tracker = EnhancedForeshadowingTracker(db)
+    from backend.repositories import PlotLedgerRepository
+    plot_repo = PlotLedgerRepository(db)
+    tracker = EnhancedForeshadowingTracker(plot_repo)
     hooks = await tracker.get_open_hooks(book_id)
+
+迁移说明 (2026-03-30)：
+- 已移除废弃的 db 参数，强制使用 plot_repository
+- 所有数据库操作通过 Repository 执行
 """
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from uuid import UUID
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import PlotLedger
 from backend.services.rag.foreshadowing_types import (
@@ -60,6 +64,9 @@ from backend.services.rag.foreshadowing_types import (
     HookClosureCheckResult,
     HookScoringConfig,
 )
+
+if TYPE_CHECKING:
+    from backend.repositories.plot_ledger_repository import PlotLedgerRepository
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +100,10 @@ class EnhancedForeshadowingTracker:
 
     def __init__(
         self,
-        db: AsyncSession,
+        plot_repository: "PlotLedgerRepository",
         scoring_config: Optional[HookScoringConfig] = None,
     ):
-        self.db = db
+        self._plot_repo = plot_repository
         self.config = scoring_config or HookScoringConfig()
 
     async def get_open_hooks(
@@ -105,18 +112,11 @@ class EnhancedForeshadowingTracker:
         before_chapter: int,
         include_addressed: bool = True,
     ) -> List[Dict[str, Any]]:
-        statuses = [HookStatus.OPEN.value]
-        if include_addressed:
-            statuses.append(HookStatus.ADDRESSED.value)
-
-        stmt = select(PlotLedger).where(
-            PlotLedger.book_id == book_id,
-            PlotLedger.status.in_(statuses),
-            PlotLedger.created_at_chapter < before_chapter,
-        ).order_by(PlotLedger.created_at_chapter.desc())
-
-        result = await self.db.execute(stmt)
-        hooks = result.scalars().all()
+        hooks = await self._plot_repo.get_open_hooks(
+            book_id=book_id,
+            before_chapter=before_chapter,
+            include_addressed=include_addressed,
+        )
 
         hook_list = []
         for hook in hooks:
@@ -273,9 +273,7 @@ class EnhancedForeshadowingTracker:
         closure_note: str = "",
     ) -> bool:
         try:
-            stmt = select(PlotLedger).where(PlotLedger.id == hook_id)
-            result = await self.db.execute(stmt)
-            hook = result.scalar_one_or_none()
+            hook = await self._plot_repo.get_by_id(hook_id)
 
             if not hook:
                 return False
@@ -285,7 +283,7 @@ class EnhancedForeshadowingTracker:
             if new_status == HookStatus.CLOSED and chapter_number:
                 hook.resolved_in_chapter_id = None
 
-            await self.db.commit()
+            await self._plot_repo.commit()
             return True
 
         except Exception as e:

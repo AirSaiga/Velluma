@@ -43,11 +43,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from uuid import UUID
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import PlotLedger, MemoryChunk
 from backend.services.rag.foreshadowing_types import (
@@ -57,6 +54,9 @@ from backend.services.rag.foreshadowing_types import (
     HookClosureCheckResult,
 )
 from backend.services.rag.foreshadowing_tracker import EnhancedForeshadowingTracker
+
+if TYPE_CHECKING:
+    from backend.repositories.memory_repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +173,18 @@ class EnhancedHookOmissionDetector:
 
 
 class EnhancedHookMemoryInjector:
+    """伏笔记忆注入器 - 将伏笔内容注入到记忆系统。
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    迁移说明 (2026-03-30)：
+    - 已移除废弃的 db 参数，强制使用 memory_repository
+    - 所有数据库操作通过 Repository 执行
+    """
+
+    def __init__(
+        self,
+        memory_repository: "MemoryRepository",
+    ):
+        self._memory_repo = memory_repository
 
     async def inject_hook_to_memory(
         self,
@@ -185,12 +194,12 @@ class EnhancedHookMemoryInjector:
         base_url: Optional[str] = None,
     ) -> bool:
         try:
-            stmt = select(MemoryChunk).where(
-                MemoryChunk.book_id == hook.book_id,
-                MemoryChunk.chunk_text == hook.content,
+            existing = await self._memory_repo.find_one(
+                conditions=[
+                    MemoryChunk.book_id == hook.book_id,
+                    MemoryChunk.chunk_text == hook.content,
+                ]
             )
-            result = await self.db.execute(stmt)
-            existing = result.scalar_one_or_none()
 
             if existing:
                 logger.debug(f"[HookMemoryInjector] 伏笔记忆已存在: {hook.id}")
@@ -212,8 +221,7 @@ class EnhancedHookMemoryInjector:
                 except Exception as e:
                     logger.warning(f"[HookMemoryInjector] 获取向量失败: {e}")
 
-            self.db.add(memory)
-            await self.db.commit()
+            await self._memory_repo.add_refresh_and_commit(memory)
 
             logger.info(f"[HookMemoryInjector] 伏笔已注入记忆系统: {hook.id}")
             return True

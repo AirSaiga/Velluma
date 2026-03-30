@@ -19,46 +19,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 基础上下文组装模块 - V1/V2 版本上下文加载。
 
-职责：
-- 加载章节相关的基础上下文数据
-- 包括角色、关系、伏笔、前文摘要等
-- 为 Planning/Drafting 阶段提供输入
-
-业务场景：
-- 基础上下文加载（无 RAG 增强）
-- 快速原型开发
-- RAG 不可用时的降级方案
-
-主要功能：
-- 章节和书籍信息加载
-- 角色和关系加载
-- 伏笔加载
-- 前文摘要加载
-
-依赖项：
-- backend.services.context: 基础 loader
-- backend.models: 数据模型
+迁移说明 (2026-03-30)：
+- 已迁移到使用 Repository 模式
+- 所有函数现在接受 repositories 字典参数
 
 使用方式：
-    context = await load_chapter_context(chapter_id, db)
+    repos = {
+        "chapter": ChapterRepository(db),
+        "book": BookRepository(db),
+        ...
+    }
+    context = await load_chapter_context(chapter_id, repos)
 """
 
 import logging
-from typing import Any, Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Optional, Dict
 
 from backend.models import Chapter
 from backend.world_state_schemas import WorldTerminalState
 from backend.services.context import (
-    load_chapter as _load_chapter,
-    load_book as _load_book,
-    load_chapter_entities as _load_chapter_entities,
-    load_character_relationships as _load_char_relationships,
-    load_previous_chapter_summary as _load_prev_summary,
-    load_open_hooks as _load_open_hooks,
-    load_relevant_memories as _load_relevant_memories,
-    load_previous_world_snapshot as _load_prev_world_snapshot_context_loader,
+    load_chapter,
+    load_book,
+    load_chapter_entities,
+    load_character_relationships,
+    load_previous_chapter_summary,
+    load_open_hooks,
+    load_relevant_memories,
+    load_previous_world_snapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 async def load_chapter_context(
     chapter_id: Any,
-    db: AsyncSession,
+    repositories: Dict[str, Any],
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     rag_top_k: int = 3,
@@ -75,19 +62,25 @@ async def load_chapter_context(
     rag_gamma: float = 0.2,
     rag_lambda: float = 0.1,
 ) -> Optional[dict[str, Any]]:
-    basic = await _load_basic_context(chapter_id, db)
+    basic = await _load_basic_context(chapter_id, repositories)
     if not basic:
         return None
 
     chapter, book = basic["chapter"], basic["book"]
 
-    entities = await _load_entities(chapter_id, db)
-    relationships = await _load_relationships(entities, db)
-    previous_summary = await _load_previous_summary(chapter, db)
-    open_hooks = await _load_open_hooks(chapter, db)
-    relevant_memories = await _load_relevant_memories(
-        chapter, api_key, base_url, db,
-        rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda
+    entities = await load_chapter_entities(repositories, str(chapter_id))
+    relationships = await load_character_relationships(repositories, entities)
+    previous_summary = await load_previous_chapter_summary(repositories, chapter)
+    open_hooks = await load_open_hooks(repositories, chapter)
+    relevant_memories = await load_relevant_memories(
+        repositories,
+        chapter,
+        chapter.outline_text or "",
+        str(chapter.book_id),
+        chapter.chapter_number,
+        api_key or "",
+        base_url,
+        {"top_k": rag_top_k, "alpha": rag_alpha, "beta": rag_beta, "gamma": rag_gamma, "lambda": rag_lambda}
     )
 
     entity_spatial_ledger = {}
@@ -101,7 +94,7 @@ async def load_chapter_context(
                 "movement_constraints": ""
             }
 
-    previous_world_state = await _load_previous_world_terminal_state(chapter, db)
+    previous_world_state = await _load_previous_world_terminal_state(chapter, repositories)
     if previous_world_state:
         logger.debug(f"[Context] Loaded previous world state: {previous_world_state.scene.location_summary}")
     else:
@@ -121,69 +114,65 @@ async def load_chapter_context(
     }
 
 
-async def _load_basic_context(chapter_id: Any, db: AsyncSession) -> Optional[dict[str, Any]]:
-    chapter = await _load_chapter(db, str(chapter_id))
+async def _load_basic_context(chapter_id: Any, repositories: Dict[str, Any]) -> Optional[dict[str, Any]]:
+    chapter = await load_chapter(repositories, str(chapter_id))
     if not chapter:
         return None
-    book = await _load_book(db, str(chapter.book_id))
+    book = await load_book(repositories, str(chapter.book_id))
     return {"chapter": chapter, "book": book}
 
 
-async def _load_entities(chapter_id: Any, db: AsyncSession) -> list[Any]:
-    return await _load_chapter_entities(db, str(chapter_id))
+async def _load_entities(chapter_id: Any, repositories: Dict[str, Any]) -> list[Any]:
+    return await load_chapter_entities(repositories, str(chapter_id))
 
 
-async def _load_relationships(entities: list[Any], db: AsyncSession) -> list[Any]:
+async def _load_relationships(entities: list[Any], repositories: Dict[str, Any]) -> list[Any]:
     if not entities:
         return []
-    return await _load_char_relationships(db, entities)
+    return await load_character_relationships(repositories, entities)
 
 
-async def _load_previous_summary(chapter: Chapter, db: AsyncSession) -> Optional[str]:
-    return await _load_prev_summary(db, chapter)
+async def _load_previous_summary(chapter: Chapter, repositories: Dict[str, Any]) -> Optional[str]:
+    return await load_previous_chapter_summary(repositories, chapter)
 
 
-async def _load_open_hooks(chapter: Chapter, db: AsyncSession) -> list[dict[str, str]]:
-    return await _load_open_hooks(db, chapter)
+async def _load_open_hooks(chapter: Chapter, repositories: Dict[str, Any]) -> list[dict[str, str]]:
+    return await load_open_hooks(repositories, chapter)
 
 
 async def _load_relevant_memories(
     chapter: Chapter,
     api_key: Optional[str],
     base_url: Optional[str],
-    db: AsyncSession,
+    repositories: Dict[str, Any],
     rag_top_k: int,
     rag_alpha: float,
     rag_beta: float,
     rag_gamma: float,
     rag_lambda: float,
 ) -> list[Any]:
-    return await _load_relevant_memories(
-        db=db,
-        book_id=str(chapter.book_id),
-        query_text=chapter.outline_text or "",
-        api_key=api_key,
-        base_url=base_url,
-        top_k=rag_top_k,
-        alpha=rag_alpha,
-        beta=rag_beta,
-        gamma=rag_gamma,
-        lambda_decay=rag_lambda,
-        exclude_chapter_id=str(chapter.id),
-        max_chapter_number=chapter.chapter_number - 1,
+    return await load_relevant_memories(
+        repositories,
+        chapter,
+        chapter.outline_text or "",
+        str(chapter.book_id),
+        chapter.chapter_number,
+        api_key or "",
+        base_url,
+        {"top_k": rag_top_k, "alpha": rag_alpha, "beta": rag_beta, "gamma": rag_gamma, "lambda": rag_lambda}
     )
 
 
 async def _load_previous_world_terminal_state(
     chapter: Chapter,
-    db: AsyncSession
+    repositories: Dict[str, Any]
 ) -> Optional[WorldTerminalState]:
     if chapter.chapter_number <= 1:
         logger.debug(f"[WorldState] Chapter {chapter.chapter_number} is first chapter, no previous state")
         return None
 
     try:
-        world_snapshot = await _load_prev_world_snapshot_context_loader(db, chapter)
+        world_snapshot = await load_previous_world_snapshot(repositories, chapter)
 
         if not world_snapshot:
             logger.debug(f"[WorldState] Chapter {chapter.chapter_number} has no world_snapshot")

@@ -46,6 +46,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
+from backend.repositories import (
+    ChapterRepository, BookRepository, MemoryRepository,
+    PlotLedgerRepository, MapLocationRepository, RelationshipRepository,
+)
 from backend.services.orchestration import resolve_high_level_params, normalize_confirmed_beats
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
@@ -186,9 +190,19 @@ async def generate_chapter_dual_track(
             # 加载上下文
             yield build_sse_event("ASSEMBLING_CONTEXT", "加载章节上下文...")
             
+            # 构建 Repository 字典
+            repos = {
+                "chapter": ChapterRepository(db),
+                "book": BookRepository(db),
+                "memory": MemoryRepository(db),
+                "plot_ledger": PlotLedgerRepository(db),
+                "map_location": MapLocationRepository(db),
+                "relationship": RelationshipRepository(db),
+            }
+            
             # 使用统一的上下文加载服务
             context = await load_full_chapter_context(
-                db, chapter_id,
+                chapter_id, repos,
                 rag_params=resolved_params if request.is_basic_mode() else None,
                 api_key=request.api_key,
                 base_url=request.base_url,
@@ -661,8 +675,18 @@ async def generate_chapter_dual_track_simple(
     effective_creative_model = request.creative_model or effective_reasoning_model
     effective_sketch_model = request.sketch_model or effective_creative_model
 
+    # 构建 Repository 字典
+    repos = {
+        "chapter": ChapterRepository(db),
+        "book": BookRepository(db),
+        "memory": MemoryRepository(db),
+        "plot_ledger": PlotLedgerRepository(db),
+        "map_location": MapLocationRepository(db),
+        "relationship": RelationshipRepository(db),
+    }
+    
     # 使用统一的上下文加载服务
-    context = await load_full_chapter_context(db, chapter_id)
+    context = await load_full_chapter_context(chapter_id, repos)
     if not context:
         raise HTTPException(status_code=404, detail="章节不存在")
     

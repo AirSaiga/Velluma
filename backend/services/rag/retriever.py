@@ -20,16 +20,22 @@
 2. 优先加载必须包含的内容
 3. 按需加载可选内容
 4. 支持检索失败降级
+
+迁移说明 (2026-03-30)：
+- 已移除废弃的 db 参数，强制使用 repositories
+- 所有数据库操作通过 Repository 执行
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Callable
+from typing import Any, Dict, List, Optional, Set, Callable, TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import select, or_, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+if TYPE_CHECKING:
+    from backend.repositories.memory_repository import MemoryRepository
 
 from backend.services.rag.retrieval_types import (
     MemoryType,
@@ -62,7 +68,6 @@ from backend.models import (
     SceneIntent,
     ChapterMapLocation,
 )
-from backend.repositories import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -139,14 +144,20 @@ class MultiTypeMemoryRetriever:
     - 统一评分和排序
     - 去重和过滤
     - 组装完整结果
+    
+    迁移说明 (2026-03-30)：
+    - 已移除废弃的 db 参数，强制使用 repositories
+    - 所有数据库操作通过 Repository 执行
     """
     
     def __init__(
         self,
-        db: AsyncSession,
+        memory_repository: "MemoryRepository",
+        chapter_repository: Optional["Any"] = None,
         get_embedding_func: Optional[Callable] = None,
     ):
-        self.db = db
+        self._memory_repo = memory_repository
+        self._chapter_repo = chapter_repository
         self.get_embedding = get_embedding_func
         self.scorer = MultiDimensionScorer()
         self.deduplicator = MemoryDeduplicator()
@@ -413,8 +424,11 @@ class MultiTypeMemoryRetriever:
     ) -> None:
         """检索相关故事节拍"""
         
+        if not self._chapter_repo:
+            logger.warning("[MultiTypeRetriever] ChapterRepository 未配置，跳过节拍检索")
+            return
+        
         try:
-            # 查询前几章的节拍
             stmt = (
                 select(StoryBeat)
                 .join(Chapter, StoryBeat.chapter_id == Chapter.id)
@@ -427,11 +441,10 @@ class MultiTypeMemoryRetriever:
                 .limit(20)
             )
             
-            beats_result = await self.db.execute(stmt)
+            beats_result = await self._chapter_repo.execute(stmt)
             beats = beats_result.scalars().all()
             
             for beat in beats:
-                # 简化：检查是否涉及当前章节的角色
                 beat_summary = beat.summary or ""
                 involves_current_chars = any(
                     name.lower() in beat_summary.lower()
@@ -465,15 +478,18 @@ class MultiTypeMemoryRetriever:
     ) -> None:
         """检索相关地点"""
         
+        if not self._chapter_repo:
+            logger.warning("[MultiTypeRetriever] ChapterRepository 未配置，跳过地点检索")
+            return
+        
         try:
-            # 查询章节关联的地点
             stmt = (
                 select(ChapterMapLocation)
                 .options(selectinload(ChapterMapLocation.location))
                 .where(ChapterMapLocation.chapter_id == context.chapter.id)
             )
             
-            locations_result = await self.db.execute(stmt)
+            locations_result = await self._chapter_repo.execute(stmt)
             locations = locations_result.scalars().all()
             
             for loc in locations:

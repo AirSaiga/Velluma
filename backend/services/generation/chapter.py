@@ -32,14 +32,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, TYPE_CHECKING
 
 from backend.models import Character, Chapter
 from backend.services.orchestration import preview_agentic_beats
 from backend.services.workflows.refining import refine_draft
 from backend.services.llm import call_llm, generate_stream_response
+
+if TYPE_CHECKING:
+    from backend.repositories.character_repository import CharacterRepository
 from backend.services.prompts import (
     build_chapter_prompt,
     build_draft_agent_prompt,
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 async def update_character_dynamic_state(
     character: Character,
     chapter: Chapter,
-    db: AsyncSession,
+    character_repository: "CharacterRepository",
     api_key: str,
     base_url: Optional[str] = None,
     model: str = "gpt-4o-mini",
@@ -65,23 +66,15 @@ async def update_character_dynamic_state(
     """
     更新角色动态状态 (角色在特定章节中的心理/情感变化)。
 
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 character_repository 参数
+    - 所有数据库操作通过 Repository 执行
+
     业务规则：
     1. 动态状态 = 角色当前的心理状态、情感、与其他角色的关系变化
     2. 每次更新记录到 history (最多保留10条)，支持追溯
     3. 仅分析涉及该角色的章节，未出场则不更新
-    4. manual_current_state: 若提供，则以此作为"当前状态"进行更新，而非数据库中的值（用于用户手动干预/重试）
-
-    触发条件：
-    - 章节生成完成后自动触发 (章节内容已写入 DB)
-    - 需要章节的 outline_text 和 content_text 作为分析依据
-
-    数据流：
-    - character (ORM对象) + chapter (ORM对象) → LLM 分析 → new_dynamic_state
-    - 更新 character.dynamic_state (当前状态)
-    - 追加到 character.dynamic_state_history (历史记录)
-
-    权衡：使用 gpt-4o-mini 而非更强模型降低成本，但可能影响分析质量。
-    警示：若章节内容为空，LLM 可能产生不准确的推理。
+    4. manual_current_state: 若提供，则以此作为"当前状态"进行更新，而非数据库中的值
     """
 
     old_dynamic_state = manual_current_state if manual_current_state is not None else (character.dynamic_state or "暂无动态状态")
@@ -153,8 +146,7 @@ async def update_character_dynamic_state(
             history = history[-10:]
         character.dynamic_state_history = history
 
-        await db.commit()
-        await db.refresh(character)
+        await character_repository.commit_and_refresh(character)
         return {"old_dynamic_state": old_dynamic_state, "new_dynamic_state": new_dynamic_state}
 
     return {}

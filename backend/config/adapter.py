@@ -36,13 +36,14 @@
         ...
     
     # 方式3：使用新 RAG 系统加载上下文
-    context = await build_runtime_context_with_rag(db, config, api_key)
+    context = await build_runtime_context_with_rag(repositories, config, api_key)
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession
+if TYPE_CHECKING:
+    from backend.repositories.base import BaseRepository
 
 from backend.config import (
     GenerationConfig,
@@ -63,6 +64,8 @@ from backend.config import (
 from backend.schemas import GenerateChapterAgenticRequest
 
 logger = logging.getLogger(__name__)
+
+RepositoriesDict = Dict[str, Optional["BaseRepository"]]
 
 
 def adapt_request_to_config(
@@ -350,29 +353,37 @@ class RuntimeContextBuilder:
     职责：
     - 从数据库加载上下文数据
     - 构建 RuntimeContext 对象
+    
+    迁移说明 (2026-03-30)：
+    - build() 方法现在接受 repositories 字典参数
+    - 所有数据库操作通过 Repository 执行
     """
     
     @staticmethod
     async def build(
-        db: AsyncSession,
+        repositories: RepositoriesDict,
         config: GenerationConfig,
     ) -> Dict[str, Any]:
         """
         构建运行时上下文
         
         Args:
-            db: 数据库会话
+            repositories: Repository 字典，包含 chapter、book、relationship 等
             config: 统一配置
         
         Returns:
             Dict: 运行时上下文
         """
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-        from backend.models import (
-            Chapter, Book, Character, CharacterRelationship,
-            ChapterEntity, PlotLedger, ChapterMapLocation,
+        from backend.repositories import (
+            ChapterRepository, BookRepository, RelationshipRepository,
+            MapLocationRepository, PlotLedgerRepository,
         )
+        
+        chapter_repo = repositories.get("chapter")
+        book_repo = repositories.get("book")
+        relationship_repo = repositories.get("relationship")
+        map_repo = repositories.get("map_location")
+        plot_repo = repositories.get("plot_ledger")
         
         context = {
             "chapter": None,
@@ -388,88 +399,70 @@ class RuntimeContextBuilder:
         if not config.chapter_id:
             return context
         
-        # 加载章节
-        chapter_result = await db.execute(
-            select(Chapter)
-            .options(selectinload(Chapter.story_beats))
-            .where(Chapter.id == config.chapter_id)
-        )
-        chapter = chapter_result.scalar_one_or_none()
+        chapter = await chapter_repo.get_by_id(config.chapter_id) if chapter_repo else None
         context["chapter"] = chapter
         
         if not chapter:
             return context
         
-        # 加载书籍
-        book_result = await db.execute(
-            select(Book).where(Book.id == chapter.book_id)
-        )
-        context["book"] = book_result.scalar_one_or_none()
+        context["book"] = await book_repo.get_by_id(chapter.book_id) if book_repo else None
         
-        # 加载角色
-        entities_result = await db.execute(
-            select(ChapterEntity)
-            .options(selectinload(ChapterEntity.character))
-            .where(ChapterEntity.chapter_id == config.chapter_id)
-        )
-        entities = entities_result.scalars().all()
-        context["characters"] = [e.character for e in entities if e.character]
+        if chapter_repo:
+            from backend.models import ChapterEntity
+            spec = chapter_repo.build_query(
+                model=ChapterEntity,
+                conditions=[ChapterEntity.chapter_id == config.chapter_id],
+            )
+            entities = await chapter_repo.find_all(spec=spec)
+            context["characters"] = [e.character for e in entities if hasattr(e, 'character') and e.character]
         
-        # 加载关系
-        character_ids = [e.entity_id for e in entities]
-        if character_ids:
-            from sqlalchemy import or_, and_
-            rel_result = await db.execute(
-                select(CharacterRelationship)
-                .options(
-                    selectinload(CharacterRelationship.source_character),
-                    selectinload(CharacterRelationship.target_character),
+        if relationship_repo and entities:
+            from backend.models import CharacterRelationship
+            character_ids = [e.entity_id for e in entities if e.entity_id]
+            if character_ids:
+                spec = relationship_repo.build_query(
+                    model=CharacterRelationship,
+                    conditions=[
+                        CharacterRelationship.source_char_id.in_(character_ids),
+                        CharacterRelationship.target_char_id.in_(character_ids),
+                    ]
                 )
-                .where(
-                    CharacterRelationship.source_char_id.in_(character_ids),
-                    CharacterRelationship.target_char_id.in_(character_ids),
+                context["relationships"] = await relationship_repo.find_all(spec=spec)
+        
+        if map_repo:
+            from backend.models import ChapterMapLocation
+            spec = map_repo.build_query(
+                model=ChapterMapLocation,
+                conditions=[ChapterMapLocation.chapter_id == config.chapter_id],
+            )
+            context["locations"] = await map_repo.find_all(spec=spec)
+        
+        if plot_repo and chapter.book_id:
+            hooks = await plot_repo.get_open_hooks(
+                book_id=chapter.book_id,
+                before_chapter=chapter.chapter_number,
+            )
+            context["open_hooks"] = [
+                {
+                    "hook_id": getattr(row, "hook_id", ""),
+                    "ledger_key": getattr(row, "ledger_key", ""),
+                    "content": getattr(row, "content", ""),
+                }
+                for row in hooks
+            ]
+        
+        if chapter_repo and chapter.book_id and chapter.chapter_number > 1:
+            from backend.models import Chapter
+            prev_chapter = await chapter_repo.find_one(
+                conditions=[
+                    Chapter.book_id == chapter.book_id,
+                    Chapter.chapter_number == chapter.chapter_number - 1,
+                ]
+            )
+            if prev_chapter:
+                context["previous_summary"] = prev_chapter.summary or (
+                    prev_chapter.draft_text[-1000:] if prev_chapter.draft_text else None
                 )
-            )
-            context["relationships"] = rel_result.scalars().all()
-        
-        # 加载地点
-        locations_result = await db.execute(
-            select(ChapterMapLocation)
-            .options(selectinload(ChapterMapLocation.location))
-            .where(ChapterMapLocation.chapter_id == config.chapter_id)
-        )
-        context["locations"] = locations_result.scalars().all()
-        
-        # 加载开放伏笔
-        from sqlalchemy import or_, and_
-        hook_result = await db.execute(
-            select(PlotLedger).where(
-                PlotLedger.book_id == chapter.book_id,
-                PlotLedger.status == "open",
-                PlotLedger.created_at_chapter <= chapter.chapter_number,
-            )
-        )
-        context["open_hooks"] = [
-            {
-                "hook_id": getattr(row, "hook_id", ""),
-                "ledger_key": getattr(row, "ledger_key", ""),
-                "content": getattr(row, "content", ""),
-            }
-            for row in hook_result.scalars().all()
-        ]
-        
-        # 加载上一章摘要
-        prev_result = await db.execute(
-            select(Chapter).where(
-                Chapter.book_id == chapter.book_id,
-                Chapter.chapter_number == chapter.chapter_number - 1,
-            )
-        )
-        prev_chapter = prev_result.scalar_one_or_none()
-        if prev_chapter:
-            context["previous_summary"] = prev_chapter.summary or (
-                prev_chapter.draft_text[-1000:] if prev_chapter.draft_text else None
-            )
 
         return context
 
@@ -479,7 +472,7 @@ class RuntimeContextBuilder:
 # =============================================================================
 
 async def build_runtime_context_with_rag(
-    db: AsyncSession,
+    repositories: RepositoriesDict,
     config: GenerationConfig,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -487,37 +480,29 @@ async def build_runtime_context_with_rag(
     """
     使用新 RAG 系统构建运行时上下文
     
-    这是迁移到新 RAG 架构的主要入口，替代旧的 load_chapter_context。
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 repositories 参数
+    - 所有数据库操作通过 Repository 执行
     
     Args:
-        db: 数据库会话
+        repositories: Repository 字典
         config: 统一配置
         api_key: API Key
         base_url: Base URL
         
     Returns:
-        Dict: 运行时上下文，包含：
-        - chapter: 章节实体
-        - book: 书籍实体
-        - characters: 角色列表
-        - relationships: 关系列表
-        - locations: 地点列表
-        - open_hooks: 开放伏笔
-        - previous_summary: 上一章摘要
-        - rag_result: RAG 检索结果
-        - context_package: 打包后的上下文
+        Dict: 运行时上下文
     """
-    from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
-    from backend.models import (
-        Chapter, Book, Character, CharacterRelationship,
-        ChapterEntity, PlotLedger, ChapterMapLocation,
-    )
     from backend.services.rag import (
         WorkflowRetrievalIntegrator,
         WorkflowStage,
         WorkflowIntegrationConfig,
     )
+    
+    chapter_repo = repositories.get("chapter")
+    book_repo = repositories.get("book")
+    relationship_repo = repositories.get("relationship")
+    map_repo = repositories.get("map_location")
     
     context = {
         "chapter": None,
@@ -535,80 +520,65 @@ async def build_runtime_context_with_rag(
     if not config.chapter_id:
         return context
     
-    # 加载基础数据（保持与旧接口兼容）
-    chapter_result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.story_beats))
-        .where(Chapter.id == config.chapter_id)
-    )
-    chapter = chapter_result.scalar_one_or_none()
+    chapter = await chapter_repo.get_by_id(config.chapter_id) if chapter_repo else None
     context["chapter"] = chapter
     
     if not chapter:
         return context
     
-    # 加载书籍
-    book_result = await db.execute(
-        select(Book).where(Book.id == chapter.book_id)
-    )
-    context["book"] = book_result.scalar_one_or_none()
+    context["book"] = await book_repo.get_by_id(chapter.book_id) if book_repo else None
     
-    # 加载角色
-    entities_result = await db.execute(
-        select(ChapterEntity)
-        .options(selectinload(ChapterEntity.character))
-        .where(ChapterEntity.chapter_id == config.chapter_id)
-    )
-    entities = entities_result.scalars().all()
-    context["characters"] = [e.character for e in entities if e.character]
+    entities = []
+    if chapter_repo:
+        from backend.models import ChapterEntity
+        spec = chapter_repo.build_query(
+            model=ChapterEntity,
+            conditions=[ChapterEntity.chapter_id == config.chapter_id],
+        )
+        entities = await chapter_repo.find_all(spec=spec)
+        context["characters"] = [e.character for e in entities if hasattr(e, 'character') and e.character]
     
-    # 加载关系
-    character_ids = [e.entity_id for e in entities]
-    if character_ids:
-        from sqlalchemy import or_, and_
-        rel_result = await db.execute(
-            select(CharacterRelationship)
-            .options(
-                selectinload(CharacterRelationship.source_character),
-                selectinload(CharacterRelationship.target_character),
+    if relationship_repo and entities:
+        from backend.models import CharacterRelationship
+        character_ids = [e.entity_id for e in entities if e.entity_id]
+        if character_ids:
+            spec = relationship_repo.build_query(
+                model=CharacterRelationship,
+                conditions=[
+                    CharacterRelationship.source_char_id.in_(character_ids),
+                    CharacterRelationship.target_char_id.in_(character_ids),
+                ]
             )
-            .where(
-                CharacterRelationship.source_char_id.in_(character_ids),
-                CharacterRelationship.target_char_id.in_(character_ids),
+            context["relationships"] = await relationship_repo.find_all(spec=spec)
+    
+    if map_repo:
+        from backend.models import ChapterMapLocation
+        spec = map_repo.build_query(
+            model=ChapterMapLocation,
+            conditions=[ChapterMapLocation.chapter_id == config.chapter_id],
+        )
+        context["locations"] = await map_repo.find_all(spec=spec)
+    
+    if chapter_repo and chapter.book_id and chapter.chapter_number > 1:
+        from backend.models import Chapter
+        prev_chapter = await chapter_repo.find_one(
+            conditions=[
+                Chapter.book_id == chapter.book_id,
+                Chapter.chapter_number == chapter.chapter_number - 1,
+            ]
+        )
+        if prev_chapter:
+            context["previous_summary"] = prev_chapter.summary or (
+                prev_chapter.draft_text[-1000:] if prev_chapter.draft_text else None
             )
-        )
-        context["relationships"] = rel_result.scalars().all()
     
-    # 加载地点
-    locations_result = await db.execute(
-        select(ChapterMapLocation)
-        .options(selectinload(ChapterMapLocation.location))
-        .where(ChapterMapLocation.chapter_id == config.chapter_id)
-    )
-    context["locations"] = locations_result.scalars().all()
-    
-    # 加载上一章摘要
-    prev_result = await db.execute(
-        select(Chapter).where(
-            Chapter.book_id == chapter.book_id,
-            Chapter.chapter_number == chapter.chapter_number - 1,
-        )
-    )
-    prev_chapter = prev_result.scalar_one_or_none()
-    if prev_chapter:
-        context["previous_summary"] = prev_chapter.summary or (
-            prev_chapter.draft_text[-1000:] if prev_chapter.draft_text else None
-        )
-    
-    # === 使用新 RAG 系统执行检索 ===
     try:
-        # 构建工作流集成配置
         rag_config = WorkflowIntegrationConfig(
             default_strategy=_map_rag_policy_to_strategy(config.rag),
             enable_vector_search=config.rag.top_k > 0,
         )
         
-        integrator = WorkflowRetrievalIntegrator(db, rag_config)
+        integrator = WorkflowRetrievalIntegrator(repositories, rag_config)
         
         # 执行检索
         package, result = await integrator.retrieve_chapter_context(
@@ -647,8 +617,7 @@ async def build_runtime_context_with_rag(
         
     except Exception as e:
         logger.warning(f"[build_runtime_context_with_rag] RAG 检索失败，使用降级: {e}")
-        # 降级：使用旧的伏笔加载方式
-        context["open_hooks"] = await _load_open_hooks_fallback(chapter, db)
+        context["open_hooks"] = await _load_open_hooks_fallback(chapter, repositories)
     
     return context
 
@@ -674,17 +643,17 @@ def _map_rag_policy_to_strategy(rag_policy) -> "RetrievalStrategy":
         return RetrievalStrategy.BALANCED_REFERENCE
 
 
-async def _load_open_hooks_fallback(chapter, db) -> list:
+async def _load_open_hooks_fallback(chapter, repositories: RepositoriesDict) -> list:
     """
     降级：使用旧方式加载开放伏笔
     """
-    from sqlalchemy import or_, and_
-    hook_result = await db.execute(
-        select(PlotLedger).where(
-            PlotLedger.book_id == chapter.book_id,
-            PlotLedger.status == "open",
-            PlotLedger.created_at_chapter <= chapter.chapter_number,
-        )
+    plot_repo = repositories.get("plot_ledger")
+    if not plot_repo or not chapter.book_id:
+        return []
+    
+    hooks = await plot_repo.get_open_hooks(
+        book_id=chapter.book_id,
+        before_chapter=chapter.chapter_number,
     )
     return [
         {
@@ -692,5 +661,5 @@ async def _load_open_hooks_fallback(chapter, db) -> list:
             "ledger_key": getattr(row, "ledger_key", ""),
             "content": getattr(row, "content", ""),
         }
-        for row in hook_result.scalars().all()
+        for row in hooks
     ]

@@ -72,8 +72,7 @@ class ChapterRepository(BaseRepository[Chapter]):
         警示：若需"添加前检查是否存在"，应先调用 list_entities 验证。
         """
         chapter_entity = ChapterEntity(chapter_id=chapter_id, entity_id=entity_id, entity_type=entity_type)
-        self.db.add(chapter_entity)
-        await self.db.commit()
+        await self.add_and_commit(chapter_entity)
 
     async def delete_entity(self, entity: ChapterEntity):
         """
@@ -82,8 +81,7 @@ class ChapterRepository(BaseRepository[Chapter]):
         事务边界：单条删除 + 提交。
         警示：这是物理删除，关联移除后无法直接恢复（需重新调用 add_entity）。
         """
-        await self.db.delete(entity)
-        await self.db.commit()
+        await self.delete(entity)
 
     async def list_locations(self, chapter_id: UUID):
         """
@@ -111,15 +109,13 @@ class ChapterRepository(BaseRepository[Chapter]):
         """
         from backend.models import ChapterMapLocation
         chapter_location = ChapterMapLocation(chapter_id=chapter_id, location_id=location_id)
-        self.db.add(chapter_location)
-        await self.db.commit()
+        await self.add_and_commit(chapter_location)
 
     async def delete_location(self, location: "ChapterMapLocation"):
         """
         删除章节地点关联
         """
-        await self.db.delete(location)
-        await self.db.commit()
+        await self.delete(location)
 
     async def remove_location_by_ids(self, chapter_id: UUID, location_id: UUID):
         """
@@ -132,8 +128,8 @@ class ChapterRepository(BaseRepository[Chapter]):
             ChapterMapLocation.chapter_id == chapter_id,
             ChapterMapLocation.location_id == location_id
         )
-        result = await self.db.execute(stmt)
-        await self.db.commit()
+        result = await self.execute(stmt)
+        await self.commit()
         return result.rowcount > 0
 
     async def get_previous_chapter(self, chapter: Chapter) -> Optional[Chapter]:
@@ -159,5 +155,4 @@ class ChapterRepository(BaseRepository[Chapter]):
             .order_by(Chapter.chapter_number.desc())
             .limit(1)
         )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        return await self.execute_scalar_one_or_none(stmt)

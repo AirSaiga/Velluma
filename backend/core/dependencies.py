@@ -27,6 +27,7 @@ from backend.repositories import (
     RelationshipRepository,
     MemoryRepository,
     MapLocationRepository,
+    PlotLedgerRepository,
 )
 
 
@@ -42,30 +43,32 @@ from backend.repositories import (
 
 
 def get_book_repository(db: AsyncSession = Depends(get_db)) -> BookRepository:
-    # 用途：书籍管理的数据访问层，绑定到同一个数据库会话
     return BookRepository(db)
 
 
 def get_chapter_repository(db: AsyncSession = Depends(get_db)) -> ChapterRepository:
-    # 用途：章节管理的数据访问层，绑定到同一个数据库会话
     return ChapterRepository(db)
 
 
 def get_character_repository(db: AsyncSession = Depends(get_db)) -> CharacterRepository:
-    # 用途：角色管理的数据访问层，绑定到同一个数据库会话
     return CharacterRepository(db)
 
 
 def get_relationship_repository(db: AsyncSession = Depends(get_db)) -> RelationshipRepository:
-    # 用途：关系管理的数据访问层，绑定到同一个数据库会话
     return RelationshipRepository(db)
 
 
 def get_memory_repository(db: AsyncSession = Depends(get_db)) -> MemoryRepository:
-    # 用途：记忆管理的数据访问层，绑定到同一个数据库会话
     return MemoryRepository(db)
 
 
 def get_map_repository(db: AsyncSession = Depends(get_db)) -> MapLocationRepository:
-    # 用途：地图管理的数据访问层
     return MapLocationRepository(db)
+
+
+def get_plot_ledger_repository(db: AsyncSession = Depends(get_db)) -> PlotLedgerRepository:
+    """伏笔账本仓储依赖注入函数。
+    
+    用于 RAG 服务层获取伏笔数据。
+    """
+    return PlotLedgerRepository(db)

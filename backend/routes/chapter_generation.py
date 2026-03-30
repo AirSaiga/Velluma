@@ -18,8 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from backend.core.dependencies import get_chapter_repository
-from backend.repositories import ChapterRepository
+from backend.core.dependencies import get_chapter_repository, get_book_repository, get_relationship_repository, get_map_repository
+from backend.repositories import ChapterRepository, BookRepository, RelationshipRepository, MapLocationRepository
 from backend.schemas import (
     GenerateChapterRequest,
     GenerateChapterAgenticRequest,
@@ -39,6 +39,9 @@ router = APIRouter(prefix="/api", tags=["chapter_generation"])
 async def generate_chapter(
     request: GenerateChapterRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+    book_repo: BookRepository = Depends(get_book_repository),
+    relationship_repo: RelationshipRepository = Depends(get_relationship_repository),
+    map_repo: MapLocationRepository = Depends(get_map_repository),
 ):
     """业务目的：流式生成章节内容，用于实时展示 AI 写作过程。
 
@@ -66,7 +69,14 @@ async def generate_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     word_count = request.word_count or 2000
-    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.get_session(), word_count)
+    
+    repositories = {
+        "chapter": chapter_repo,
+        "book": book_repo,
+        "relationship": relationship_repo,
+        "map_location": map_repo,
+    }
+    prompt_data = await build_chapter_prompt(request.chapter_id, repositories, word_count)
     return StreamingResponse(
         generate_stream_response(
             system_prompt=prompt_data["system_prompt"],
@@ -84,6 +94,9 @@ async def generate_chapter(
 async def generate_chapter_sync(
     request: GenerateChapterRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+    book_repo: BookRepository = Depends(get_book_repository),
+    relationship_repo: RelationshipRepository = Depends(get_relationship_repository),
+    map_repo: MapLocationRepository = Depends(get_map_repository),
 ):
     """业务目的：同步生成章节内容，适用于不需要实时预览的场景。
 
@@ -107,7 +120,14 @@ async def generate_chapter_sync(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     word_count = request.word_count or 2000
-    prompt_data = await build_chapter_prompt(request.chapter_id, chapter_repo.get_session(), word_count)
+    
+    repositories = {
+        "chapter": chapter_repo,
+        "book": book_repo,
+        "relationship": relationship_repo,
+        "map_location": map_repo,
+    }
+    prompt_data = await build_chapter_prompt(request.chapter_id, repositories, word_count)
     content = await call_llm(
         system_prompt=prompt_data["system_prompt"],
         user_prompt=prompt_data["user_prompt"],
@@ -123,10 +143,16 @@ async def generate_chapter_sync(
 async def generate_chapter_agentic_preview_beats(
     request: GenerateChapterAgenticRequest,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+    book_repo: BookRepository = Depends(get_book_repository),
 ):
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-    return await preview_agentic_beats(request, chapter_repo.get_session())
+    
+    repositories = {
+        "chapter": chapter_repo,
+        "book": book_repo,
+    }
+    return await preview_agentic_beats(request, repositories)
 
 

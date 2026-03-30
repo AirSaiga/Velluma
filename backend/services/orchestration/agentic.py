@@ -322,63 +322,56 @@ def normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]]
     return normalized
 
 
-async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: AsyncSession) -> dict:
+async def preview_agentic_beats(request: GenerateChapterAgenticRequest, repositories: Dict[str, Any]) -> dict:
     """
     预览生成的故事节拍
     
-    V3.8 更新：使用 RuntimeContextBuilder 统一加载上下文，简化代码结构
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 repositories 参数
+    - 所有数据库操作通过 Repository 执行
     
     Args:
         request: 生成请求
-        db: 数据库会话
+        repositories: Repository 字典
         
     Returns:
         dict: 包含 beats 和 debug_prompt 的字典
     """
     from backend.config.adapter import RuntimeContextBuilder, adapt_request_to_config
     
-    # 加载章节
-    chapter_result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.story_beats))
-        .where(Chapter.id == request.chapter_id)
-    )
-    chapter = chapter_result.scalar_one_or_none()
+    chapter_repo = repositories.get("chapter")
+    book_repo = repositories.get("book")
+    
+    chapter = await chapter_repo.get_by_id(request.chapter_id) if chapter_repo else None
     if not chapter:
         return {"beats": [], "debug_prompt": None}
 
-    # Update chapter settings from request for preview
     if request.tension_level is not None:
         chapter.tension_level = request.tension_level
     if request.pacing_style:
         chapter.pacing_style = request.pacing_style
 
     word_count = request.word_count or 2000
-    book_result = await db.execute(select(Book).where(Book.id == chapter.book_id))
-    book = book_result.scalar_one_or_none()
+    book = await book_repo.get_by_id(chapter.book_id) if book_repo else None
     
-    # === 使用统一配置和上下文构建器加载上下文 ===
-    # 构建配置（自动执行参数推导）
     config = adapt_request_to_config(request, chapter, book)
+    context = await RuntimeContextBuilder.build(repositories, config)
     
-    # 使用 RuntimeContextBuilder 加载上下文
-    context = await RuntimeContextBuilder.build(db, config)
-    
-    # 提取上下文数据
     entities = context.get("characters", [])
     relationships = context.get("relationships", [])
     open_hooks = context.get("open_hooks", [])
     locations = context.get("locations", [])
     previous_summary = context.get("previous_summary")
     
-    # 获取世界状态快照（跨章物理连续性约束）
     previous_chapter_snapshot = None
-    if chapter.chapter_number > 1:
-        prev_chapter_result = await db.execute(
-            select(Chapter)
-            .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number == chapter.chapter_number - 1)
+    if chapter.chapter_number > 1 and chapter_repo:
+        from backend.models import Chapter
+        prev_chapter = await chapter_repo.find_one(
+            conditions=[
+                Chapter.book_id == chapter.book_id,
+                Chapter.chapter_number == chapter.chapter_number - 1,
+            ]
         )
-        prev_chapter = prev_chapter_result.scalar_one_or_none()
         if prev_chapter and prev_chapter.world_snapshot:
             previous_chapter_snapshot = prev_chapter.world_snapshot
 

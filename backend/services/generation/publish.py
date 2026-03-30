@@ -156,7 +156,7 @@ async def generate_summary_embedding(
 async def update_character_states(
     character_list: List[Any],
     chapter: Any,
-    db: Any,
+    character_repository: Any,
     api_key: str,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -167,10 +167,13 @@ async def update_character_states(
     """
     批量更新角色动态状态
 
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 character_repository 参数
+
     Args:
         character_list: 角色列表
         chapter: 章节对象
-        db: 数据库会话
+        character_repository: CharacterRepository 实例
         api_key: API Key
         base_url: Base URL
         model: 模型名称
@@ -192,7 +195,7 @@ async def update_character_states(
         result = await _update_single_character(
             character=character,
             chapter=chapter,
-            db=db,
+            character_repository=character_repository,
             api_key=api_key,
             base_url=base_url,
             model=model,
@@ -209,7 +212,7 @@ async def update_character_states(
 async def _update_single_character(
     character: Any,
     chapter: Any,
-    db: Any,
+    character_repository: Any,
     api_key: str,
     base_url: Optional[str],
     model: Optional[str],
@@ -228,7 +231,7 @@ async def _update_single_character(
             update_func(
                 character=character,
                 chapter=chapter,
-                db=db,
+                character_repository=character_repository,
                 api_key=api_key,
                 base_url=base_url,
                 model=model,

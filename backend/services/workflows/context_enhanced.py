@@ -19,41 +19,34 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 增强上下文组装模块 - V3 版本上下文加载（含 RAG 检索）。
 
-职责：
-- 在基础上下文基础上集成 RAG 检索
-- 提供更丰富的语义记忆上下文
-- 支持按工作流阶段调整检索策略
-
-业务场景：
-- V3 增强上下文加载
-- RAG 增强的章节生成
-- 语义相似度检索
-
-主要功能：
-- 基础上下文加载
-- RAG 记忆检索集成
-- 上下文组装和打包
-
-依赖项：
-- backend.services.rag: RAG 检索系统
-- backend.services.workflows.context_basic: 基础上下文
+迁移说明 (2026-03-30)：
+- 已迁移到使用 Repository 模式
+- 所有函数现在接受 repositories 字典参数
 
 使用方式：
-    context = await load_chapter_context_v3(chapter_id, db, ...)
+    repos = {
+        "chapter": ChapterRepository(db),
+        "book": BookRepository(db),
+        ...
+    }
+    context = await load_chapter_context_v3(chapter_id, repos)
 """
 
 import logging
-from typing import Any, Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Optional, Dict
 
 from backend.services.context import (
-    load_chapter as _load_chapter,
-    load_book as _load_book,
-    load_chapter_entities as _load_chapter_entities,
+    load_chapter,
+    load_book,
+    load_chapter_entities,
+    load_character_relationships,
+    load_previous_chapter_summary,
+    load_open_hooks,
+    load_relevant_memories,
+    load_previous_world_snapshot,
 )
 from backend.services.workflows.context_basic import (
-    load_chapter_context,
+    load_chapter_context as _load_chapter_context_basic,
     _load_basic_context,
     _load_entities,
     _load_relationships,
@@ -84,7 +77,7 @@ except ImportError:
 
 async def load_chapter_context_v2(
     chapter_id: Any,
-    db: AsyncSession,
+    repositories: Dict[str, Any],
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     rag_top_k: int = 5,
@@ -96,36 +89,31 @@ async def load_chapter_context_v2(
 ) -> Optional[dict[str, Any]]:
     if not enable_enhanced_rag:
         logger.info("[ContextV2] 增强型 RAG 未启用，使用旧版接口")
-        return await load_chapter_context(
-            chapter_id, db, api_key, base_url,
+        return await _load_chapter_context_basic(
+            chapter_id, repositories, api_key, base_url,
             rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda
         )
 
-    basic = await _load_basic_context(chapter_id, db)
+    basic = await _load_basic_context(chapter_id, repositories)
     if not basic:
         return None
 
     chapter, book = basic["chapter"], basic["book"]
 
-    entities = await _load_entities(chapter_id, db)
-    relationships = await _load_relationships(entities, db)
-    previous_summary = await _load_previous_summary(chapter, db)
-    previous_world_state = await _load_previous_world_terminal_state(chapter, db)
+    entities = await load_chapter_entities(repositories, str(chapter_id))
+    relationships = await load_character_relationships(repositories, entities)
+    previous_summary = await load_previous_chapter_summary(repositories, chapter)
+    previous_world_state = await _load_previous_world_terminal_state(chapter, repositories)
 
-    open_hooks = await _load_open_hooks(chapter, db)
+    open_hooks = await load_open_hooks(repositories, chapter)
 
     rag_result = None
     context_package = None
     rag_explanation = ""
 
     try:
-        from backend.services.rag import (
-            WorkflowRetrievalIntegrator,
-            WorkflowStage,
-            WorkflowIntegrationConfig,
-            RetrievalStrategy,
-            generate_retrieval_report,
-        )
+        if not NEW_RAG_AVAILABLE:
+            raise ImportError("NEW_RAG_AVAILABLE is False")
 
         if rag_top_k <= 3:
             strategy = RetrievalStrategy.FAST_TRACK
@@ -139,7 +127,7 @@ async def load_chapter_context_v2(
             enable_vector_search=api_key is not None,
         )
 
-        integrator = WorkflowRetrievalIntegrator(db, config)
+        integrator = WorkflowRetrievalIntegrator(repositories, config)
 
         context_package, rag_result = await integrator.retrieve_chapter_context(
             chapter_id=chapter_id,
@@ -159,9 +147,11 @@ async def load_chapter_context_v2(
 
     except Exception as e:
         logger.warning(f"[ContextV2] 增强 RAG 失败，降级到基础检索: {e}")
-        relevant_memories = await _load_relevant_memories(
-            chapter, api_key, base_url, db,
-            rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda
+        relevant_memories = await load_relevant_memories(
+            repositories, chapter, chapter.outline_text or "",
+            str(chapter.book_id), chapter.chapter_number,
+            api_key or "", base_url,
+            {"top_k": rag_top_k, "alpha": rag_alpha, "beta": rag_beta, "gamma": rag_gamma, "lambda": rag_lambda}
         )
 
     entity_spatial_ledger = {}
@@ -203,7 +193,7 @@ async def load_chapter_context_v2(
 
 async def load_chapter_context_v3(
     chapter_id: Any,
-    db: AsyncSession,
+    repositories: Dict[str, Any],
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     stage: str = "assembling",
@@ -216,7 +206,7 @@ async def load_chapter_context_v3(
     if not NEW_RAG_AVAILABLE:
         logger.info("[ContextV3] 新 RAG 系统不可用，降级到 V2")
         return await load_chapter_context_v2(
-            chapter_id, db, api_key, base_url,
+            chapter_id, repositories, api_key, base_url,
             rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda,
             enable_enhanced_rag=False
         )
@@ -243,7 +233,7 @@ async def load_chapter_context_v3(
             enable_vector_search=api_key is not None,
         )
 
-        integrator = WorkflowRetrievalIntegrator(db, config)
+        integrator = WorkflowRetrievalIntegrator(repositories, config)
 
         context_package, rag_result = await integrator.retrieve_chapter_context(
             chapter_id=chapter_id,
@@ -252,11 +242,11 @@ async def load_chapter_context_v3(
             stage=workflow_stage,
         )
 
-        chapter = await _load_chapter(db, str(chapter_id))
+        chapter = await load_chapter(repositories, str(chapter_id))
         if not chapter:
             return None
 
-        book = await _load_book(db, str(chapter.book_id))
+        book = await load_book(repositories, str(chapter.book_id))
 
         entities = []
         relationships = []
@@ -268,11 +258,11 @@ async def load_chapter_context_v3(
                 character_ids.add(item.source_id)
 
         if character_ids:
-            entities = await _load_chapter_entities(db, str(chapter_id))
+            entities = await load_chapter_entities(repositories, str(chapter_id))
         else:
-            entities = await _load_entities(chapter_id, db)
+            entities = await load_chapter_entities(repositories, str(chapter_id))
 
-        relationships = await _load_relationships(entities, db)
+        relationships = await load_character_relationships(repositories, entities)
 
         hook_items = rag_result.get_items_by_type(MemoryType.OPEN_HOOK)
         open_hooks = [
@@ -293,7 +283,7 @@ async def load_chapter_context_v3(
         prev_items = rag_result.get_items_by_type(MemoryType.PREVIOUS_SUMMARY)
         previous_summary = prev_items[0].content if prev_items else None
 
-        previous_world_state = await _load_previous_world_terminal_state(chapter, db)
+        previous_world_state = await load_previous_world_snapshot(repositories, chapter)
 
         entity_spatial_ledger = {}
         for entity in entities:
@@ -336,7 +326,7 @@ async def load_chapter_context_v3(
     except Exception as e:
         logger.error(f"[ContextV3] 加载失败: {e}")
         return await load_chapter_context_v2(
-            chapter_id, db, api_key, base_url,
+            chapter_id, repositories, api_key, base_url,
             rag_top_k, rag_alpha, rag_beta, rag_gamma, rag_lambda,
             enable_enhanced_rag=False
         )

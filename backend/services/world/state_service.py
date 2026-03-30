@@ -142,7 +142,7 @@ async def extract_world_state_snapshot(
 
 
 async def update_character_physical_state(
-    db: AsyncSession,
+    character_repository: "CharacterRepository",
     chapter_id: str,
     character_id: str,
     new_location: str,
@@ -150,8 +150,11 @@ async def update_character_physical_state(
     """
     更新角色的物理状态（位置）。
 
+    迁移说明 (2026-03-30)：
+    - 已迁移到使用 character_repository 参数
+
     Args:
-        db: 数据库会话
+        character_repository: CharacterRepository 实例
         chapter_id: 章节 ID
         character_id: 角色 ID
         new_location: 新位置
@@ -160,16 +163,13 @@ async def update_character_physical_state(
         是否更新成功
     """
     try:
-        character_result = await db.execute(
-            select(Character).where(Character.id == character_id)
-        )
-        character = character_result.scalar_one_or_none()
+        character = await character_repository.get_by_id(character_id)
 
         if character:
             current_snapshot = json.loads(character.world_snapshot or "{}")
             current_snapshot["current_location"] = new_location
             character.world_snapshot = json.dumps(current_snapshot)
-            await db.commit()
+            await character_repository.commit()
             return True
         return False
     except Exception as e:

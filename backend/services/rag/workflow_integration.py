@@ -38,19 +38,28 @@ RAG 工作流集成模块 - RAG 与章节生成工作流的集成。
 依赖项：
 - backend.services.rag.retrieval_orchestrator: 检索协调器
 - backend.services.rag.enhanced_scoring: 增强评分器
+- backend.repositories: 数据访问层
 
 使用方式：
-    result = await integrate_retrieval_for_stage(chapter, stage, config)
+    from backend.repositories import (
+        ChapterRepository, BookRepository, MemoryRepository, PlotLedgerRepository
+    )
+    repos = {
+        "chapter": chapter_repo,
+        "book": book_repo,
+        "memory": memory_repo,
+        "plot_ledger": plot_repo,
+    }
+    integrator = WorkflowRetrievalIntegrator(repos, config)
+
+迁移说明 (2026-03-30)：
+- 已移除废弃的 db 参数，强制使用 repositories
+- 所有数据库操作通过 Repository 执行
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from uuid import UUID
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from typing import Any, Dict, List, Optional, Callable, Tuple, TYPE_CHECKING
 
 from backend.models import (
     Book,
@@ -63,6 +72,17 @@ from backend.models import (
     StoryBeat,
     ChapterMapLocation,
 )
+
+if TYPE_CHECKING:
+    from backend.repositories import (
+        BookRepository,
+        ChapterRepository,
+        CharacterRepository,
+        RelationshipRepository,
+        MemoryRepository,
+        PlotLedgerRepository,
+        MapLocationRepository,
+    )
 
 from backend.services.rag.retrieval_types import (
     MemoryType,
@@ -108,11 +128,17 @@ class WorkflowRetrievalIntegrator:
 
     def __init__(
         self,
-        db: AsyncSession,
+        repositories: Dict[str, Any],
         config: Optional[WorkflowIntegrationConfig] = None,
         get_embedding_func: Optional[Callable] = None,
     ):
-        self.db = db
+        self._repos = repositories
+        self._chapter_repo = repositories.get("chapter")
+        self._book_repo = repositories.get("book")
+        self._memory_repo = repositories.get("memory")
+        self._plot_repo = repositories.get("plot_ledger")
+        self._relationship_repo = repositories.get("relationship")
+        
         self.config = config or WorkflowIntegrationConfig()
         self.get_embedding = get_embedding_func
 
@@ -222,14 +248,11 @@ class WorkflowRetrievalIntegrator:
         )
 
         omissions = []
-        if self.config.enable_hook_detection:
-            chapter_result = await self.db.execute(
-                select(Chapter).where(Chapter.id == chapter_id)
-            )
-            chapter = chapter_result.scalar_one_or_none()
+        if self.config.enable_hook_detection and self._chapter_repo and self._plot_repo:
+            chapter = await self._chapter_repo.get_by_id(chapter_id)
 
             if chapter:
-                tracker = EnhancedForeshadowingTracker(self.db)
+                tracker = EnhancedForeshadowingTracker(self._plot_repo)
                 detector = EnhancedHookOmissionDetector(tracker)
                 omissions = await detector.detect_omissions(
                     chapter_text,
@@ -272,70 +295,71 @@ class WorkflowRetrievalIntegrator:
         Optional[str],
         Optional[Any],
     ]:
-        chapter_result = await self.db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        chapter = chapter_result.scalar_one_or_none()
+        chapter = await self._chapter_repo.get_by_id(chapter_id) if self._chapter_repo else None
 
         if not chapter:
             return None, None, [], [], [], None, None
 
-        book_result = await self.db.execute(
-            select(Book).where(Book.id == chapter.book_id)
-        )
-        book = book_result.scalar_one_or_none()
+        book = await self._book_repo.get_by_id(chapter.book_id) if self._book_repo else None
 
-        entities_result = await self.db.execute(
-            select(ChapterEntity)
-            .options(selectinload(ChapterEntity.character))
-            .where(ChapterEntity.chapter_id == chapter_id)
-        )
-        entities = list(entities_result.scalars().all())
+        entities = []
+        if self._chapter_repo:
+            from backend.models import ChapterEntity
+            spec = self._chapter_repo.build_query(
+                model=ChapterEntity,
+                conditions=[ChapterEntity.chapter_id == chapter_id],
+                options=[],
+            )
+            from sqlalchemy.orm import selectinload
+            spec = self._chapter_repo.build_query(
+                model=ChapterEntity,
+                conditions=[ChapterEntity.chapter_id == chapter_id],
+            )
+            entities = await self._chapter_repo.find_all(spec=spec)
 
         character_ids = [e.entity_id for e in entities]
-        if character_ids:
-            relationships_result = await self.db.execute(
-                select(CharacterRelationship)
-                .options(
-                    selectinload(CharacterRelationship.source_character),
-                    selectinload(CharacterRelationship.target_character),
-                )
-                .where(
+        relationships = []
+        if character_ids and self._relationship_repo:
+            from sqlalchemy import and_, or_
+            conditions = [
+                or_(
                     CharacterRelationship.source_char_id.in_(character_ids),
                     CharacterRelationship.target_char_id.in_(character_ids),
                 )
+            ]
+            spec = self._relationship_repo.build_query(
+                model=CharacterRelationship,
+                conditions=conditions,
             )
-            relationships = list(relationships_result.scalars().all())
-        else:
-            relationships = []
+            relationships = await self._relationship_repo.find_all(spec=spec)
 
-        hook_result = await self.db.execute(
-            select(PlotLedger).where(
-                PlotLedger.book_id == chapter.book_id,
-                PlotLedger.status.in_([HookStatus.OPEN.value, HookStatus.ADDRESSED.value]),
-                PlotLedger.created_at_chapter < chapter.chapter_number,
+        open_hooks = []
+        if self._plot_repo:
+            hooks = await self._plot_repo.get_open_hooks(
+                book_id=chapter.book_id,
+                before_chapter=chapter.chapter_number,
             )
-        )
-        open_hooks = [
-            {
-                "hook_id": str(h.id),
-                "ledger_key": h.ledger_key or "",
-                "content": h.content or "",
-                "chapter_number": h.created_at_chapter or 0,
-                "priority": (h.meta or {}).get("priority", HookPriority.SUB_PLOT.value),
-            }
-            for h in hook_result.scalars().all()
-        ]
+            open_hooks = [
+                {
+                    "hook_id": str(h.id),
+                    "ledger_key": h.ledger_key or "",
+                    "content": h.content or "",
+                    "chapter_number": h.created_at_chapter or 0,
+                    "priority": (h.meta or {}).get("priority", HookPriority.SUB_PLOT.value),
+                }
+                for h in hooks
+            ]
 
         previous_summary = None
-        if chapter.chapter_number > 1:
-            prev_result = await self.db.execute(
-                select(Chapter).where(
+        if chapter.chapter_number > 1 and self._chapter_repo:
+            from backend.models import Chapter
+            from sqlalchemy import and_
+            prev_chapter = await self._chapter_repo.find_one(
+                conditions=[
                     Chapter.book_id == chapter.book_id,
                     Chapter.chapter_number == chapter.chapter_number - 1,
-                )
+                ]
             )
-            prev_chapter = prev_result.scalar_one_or_none()
             if prev_chapter:
                 previous_summary = prev_chapter.summary
 
@@ -513,10 +537,11 @@ class WorkflowRetrievalIntegrator:
             if not embedding:
                 return
 
-            from backend.repositories import MemoryRepository
-            memory_repo = MemoryRepository(self.db)
+            if not self._memory_repo:
+                logger.warning("[WorkflowIntegrator] MemoryRepository 未配置，跳过向量检索")
+                return
 
-            chunks = await memory_repo.search_similar(
+            chunks = await self._memory_repo.search_similar(
                 embedding,
                 book.id,
                 limit=strategy_config.top_k * 2,
@@ -557,9 +582,13 @@ class WorkflowRetrievalIntegrator:
         try:
             character_names = set()
             for entity in entities:
-                if entity.character and entity.character.name:
+                if hasattr(entity, 'character') and entity.character and entity.character.name:
                     character_names.add(entity.character.name)
 
+            if not self._chapter_repo:
+                return
+
+            from sqlalchemy import select, and_
             stmt = (
                 select(StoryBeat)
                 .join(Chapter, StoryBeat.chapter_id == Chapter.id)
@@ -571,7 +600,7 @@ class WorkflowRetrievalIntegrator:
                 .limit(20)
             )
 
-            beats_result = await self.db.execute(stmt)
+            beats_result = await self._chapter_repo.execute(stmt)
             beats = beats_result.scalars().all()
 
             for beat in beats:

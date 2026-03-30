@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, Optional, Sequence, TypeVar
 
 from sqlalchemy import Select, select
+from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import AsyncSession
 
 ModelType = TypeVar("ModelType")
@@ -245,6 +246,45 @@ class BaseRepository(Generic[ModelType]):
         result = await self._db.execute(query)
         return result.scalar_one_or_none()
 
+    async def execute(self, statement) -> Result:
+        """
+        执行任意 SQL 语句或 Select 对象，返回 Result 对象。
+        
+        用途：用于无法使用标准 CRUD 方法的复杂查询场景。
+        与 execute_scalar_all/execute_scalar_one_or_none 的区别：
+        - 后两者专用于 SELECT 并返回标量
+        - 此方法返回完整 Result，可访问行数据、lastrowid 等
+        
+        迁移提示：优先使用 find_all / find_one 等高级方法，
+        仅在需要执行 UPDATE/DELETE 或复杂查询时使用此方法。
+        """
+        return await self._db.execute(statement)
+
+    async def add_and_commit(self, item: ModelType) -> ModelType:
+        """
+        快捷方法：添加实体并提交。
+        
+        用途：替代直接调用 self._db.add() + commit() + refresh()
+        注意：此方法不执行 refresh，如需返回数据库生成的值，请使用 create() 方法
+        
+        迁移提示：创建新记录请使用 create() 方法，此方法适用于已有实体的快速保存
+        """
+        self._db.add(item)
+        await self._db.commit()
+        return item
+
+    async def add_refresh_and_commit(self, item: ModelType) -> ModelType:
+        """
+        快捷方法：添加实体、刷新、提交。
+        
+        用途：添加实体后需要获取数据库生成的值（如自增ID、默认时间戳）
+        迁移提示：等同于 self._db.add() + await self._db.commit() + await self._db.refresh()
+        """
+        self._db.add(item)
+        await self._db.commit()
+        await self._db.refresh(item)
+        return item
+
     async def commit(self):
         """
         手动提交点：用于跨多个操作的显式事务控制。
@@ -257,6 +297,18 @@ class BaseRepository(Generic[ModelType]):
         刷新对象状态：从数据库重新加载最新值。
         典型用途：确认其他进程/触发器对同一行的修改。
         """
+        await self._db.refresh(item)
+
+    async def commit_and_refresh(self, item: ModelType):
+        """
+        提交更改并刷新对象状态。
+
+        快捷方法：等同于 commit() + refresh()
+        典型用途：更新实体后需要获取数据库生成的值
+
+        迁移提示：替代 self._db.commit(); await self._db.refresh(item)
+        """
+        await self._db.commit()
         await self._db.refresh(item)
 
     def build_query(

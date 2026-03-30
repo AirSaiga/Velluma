@@ -95,7 +95,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             
         stmt = query.order_by(distance_expr).limit(candidate_limit)
         
-        result = await self.db.execute(stmt)
+        result = await self.execute(stmt)
         rows = result.all()
         if not rows:
             return []
@@ -108,7 +108,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
                 PlotLedger.chapter_id.in_(chapter_ids),
                 PlotLedger.status == "open",
             )
-            plot_result = await self.db.execute(plot_stmt)
+            plot_result = await self.execute(plot_stmt)
             unresolved_ledger_chapter_ids = set(plot_result.scalars().all())
 
         now = datetime.now(timezone.utc)

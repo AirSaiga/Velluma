@@ -160,7 +160,7 @@ async def publish_chapter(
         update_results = await update_character_states(
             character_list=character_list,
             chapter=chapter,
-            db=chapter_repo.get_session(),
+            character_repository=character_repo,
             api_key=request.api_key,
             base_url=request.base_url,
             model=request.model,
