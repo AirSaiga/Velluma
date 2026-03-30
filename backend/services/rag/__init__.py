@@ -18,7 +18,10 @@ RAG 记忆检索系统模块导出
 - scoring / enhanced_scoring: 评分系统
 - retriever: 检索器
 - context_packager: 上下文构建
-- foreshadowing / enhanced_foreshadowing: 伏笔管理
+- foreshadowing_types: 伏笔类型定义
+- foreshadowing_tracker: 伏笔追踪（增强版）
+- foreshadowing_detector: 伏笔检测器（增强版）
+- enhanced_foreshadowing: 伏笔便捷函数
 - explainability: 可解释性
 - context_assembly: 章节上下文组装接口
 - retrieval_orchestrator: 检索编排
@@ -63,15 +66,28 @@ from backend.services.rag.context_packager import (
     build_context_package,
 )
 
-from backend.services.rag.foreshadowing import (
+from backend.services.rag.foreshadowing_types import (
     HookStatus,
     HookPriority,
+    HookClosureType,
+    HookMetadata,
     HookDetectionResult,
     HookClosureCheckResult,
-    ForeshadowingTracker,
-    HookMemoryInjector,
-    HookOmissionDetector,
+    HookScoringConfig,
+)
+
+from backend.services.rag.foreshadowing_tracker import (
+    EnhancedForeshadowingTracker,
+)
+
+from backend.services.rag.foreshadowing_detector import (
+    EnhancedHookOmissionDetector,
+    EnhancedHookMemoryInjector,
+)
+
+from backend.services.rag.enhanced_foreshadowing import (
     create_and_track_hook,
+    get_hooks_for_chapter_context,
 )
 
 from backend.services.rag.explainability import (
@@ -113,18 +129,6 @@ from backend.services.rag.smart_context_packager import (
     SmartMerger,
     PackagerConfig,
     build_smart_context,
-)
-
-from backend.services.rag.enhanced_foreshadowing import (
-    EnhancedForeshadowingTracker,
-    EnhancedHookOmissionDetector,
-    EnhancedHookMemoryInjector,
-    HookMetadata,
-    HookDetectionResult,
-    HookClosureCheckResult,
-    HookScoringConfig,
-    create_and_track_hook,
-    get_hooks_for_chapter_context,
 )
 
 from backend.services.rag.workflow_integration import (
@@ -172,12 +176,17 @@ __all__ = [
 
     "HookStatus",
     "HookPriority",
+    "HookClosureType",
+    "HookMetadata",
     "HookDetectionResult",
     "HookClosureCheckResult",
-    "ForeshadowingTracker",
-    "HookMemoryInjector",
-    "HookOmissionDetector",
+    "HookScoringConfig",
+
+    "EnhancedForeshadowingTracker",
+    "EnhancedHookOmissionDetector",
+    "EnhancedHookMemoryInjector",
     "create_and_track_hook",
+    "get_hooks_for_chapter_context",
 
     "ExplanationLevel",
     "RetrievalExplanation",
@@ -207,16 +216,6 @@ __all__ = [
     "SmartMerger",
     "PackagerConfig",
     "build_smart_context",
-
-    "EnhancedForeshadowingTracker",
-    "EnhancedHookOmissionDetector",
-    "EnhancedHookMemoryInjector",
-    "HookMetadata",
-    "HookDetectionResult",
-    "HookClosureCheckResult",
-    "HookScoringConfig",
-    "create_and_track_hook",
-    "get_hooks_for_chapter_context",
 
     "WorkflowRetrievalIntegrator",
     "WorkflowIntegrationConfig",

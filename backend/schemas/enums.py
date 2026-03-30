@@ -16,30 +16,23 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-"""
-工作流子模块。
+from enum import Enum
+from typing import Literal
 
-职责：提供章节生成工作流的类型定义和状态管理。
+PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
 
-子模块：
-- workflow_types.py: 工作流类型定义
+WorkflowTier = Literal["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]
 
-使用方式：
-    from backend.services.workflow import (
-        WorkflowStage,
-        WorkflowState,
-        WorkflowResult,
-    )
-"""
+ReasoningEffortLevel = Literal["xhigh", "high", "medium", "low", "minimal", "none"]
 
-from backend.services.workflow.workflow_types import (
-    WorkflowStage,
-    WorkflowState,
-    WorkflowResult,
-)
 
-__all__ = [
-    "WorkflowStage",
-    "WorkflowState",
-    "WorkflowResult",
-]
+class PovAperture(str, Enum):
+    INTERNAL_ONLY = "internal_only"
+    SUBJECTIVE_OBSERVATION = "subjective_observation"
+    SYSTEMIC_SENSE = "systemic_sense"
+
+
+class PovMode(str, Enum):
+    SINGLE = "single"
+    ENSEMBLE = "ensemble"
+    OMNISCIENT = "omniscient"

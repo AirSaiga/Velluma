@@ -25,10 +25,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - WorkflowStage: 工作流阶段枚举
 - WorkflowState: 工作流状态
 - WorkflowResult: 工作流执行结果
-
-使用场景：
-- workflow/chapter_orchestrator.py: 编排器使用
-- workflow/workflow_runner.py: 工作流运行器使用
 """
 
 from enum import Enum
@@ -37,7 +33,6 @@ from pydantic import BaseModel, Field
 
 
 class WorkflowStage(str, Enum):
-    """工作流阶段"""
     IDLE = "IDLE"
     ASSEMBLING_CONTEXT = "ASSEMBLING_CONTEXT"
     PRE_CHECK = "PRE_CHECK"
@@ -57,7 +52,6 @@ class WorkflowStage(str, Enum):
 
 
 class WorkflowState(BaseModel):
-    """工作流状态"""
     current_stage: WorkflowStage = WorkflowStage.IDLE
     iteration: int = 0
     max_iterations: int = 2
@@ -81,7 +75,6 @@ class WorkflowState(BaseModel):
 
 
 class WorkflowResult(BaseModel):
-    """工作流执行结果"""
     success: bool
     final_text: str = ""
     word_count: int = 0

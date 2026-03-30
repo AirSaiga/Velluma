@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
-from backend.services.orchestration.agentic import resolve_high_level_params, _normalize_confirmed_beats
+from backend.services.orchestration import resolve_high_level_params, normalize_confirmed_beats
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackConfig,
@@ -316,7 +316,7 @@ async def generate_chapter_dual_track(
 
             beats = []
             if request.beats:
-                beats = _normalize_confirmed_beats(request.beats, effective_word_count)
+                beats = normalize_confirmed_beats(request.beats, effective_word_count)
             elif request.resume_from_checkpoint and latest_status.get("run_id") == run_id:
                 for checkpoint in reversed(chapter.generation_checkpoints or []):
                     if checkpoint.get("stage") == "BEATS_CONFIRMED":
@@ -701,7 +701,7 @@ async def generate_chapter_dual_track_simple(
     from backend.services.workflows.planning import generate_beats, assign_pov_to_beats
     
     if request.beats and len(request.beats) > 0:
-        beats = _normalize_confirmed_beats(request.beats, effective_word_count)
+        beats = normalize_confirmed_beats(request.beats, effective_word_count)
     else:
         beats, _ = await generate_beats(
             chapter=chapter,

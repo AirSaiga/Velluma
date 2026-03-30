@@ -253,7 +253,7 @@ def _calculate_beat_word_counts(beats: list[dict], total_chapter_words: int) -> 
     return result
 
 
-def _normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]], word_count: int) -> list[dict]:
+def normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]], word_count: int) -> list[dict]:
     raw_beats: list[dict] = []
     for idx, beat in enumerate(beats, start=1):
         if isinstance(beat, ConfirmedStoryBeat):
@@ -408,7 +408,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, db: Asyn
     )
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
     return {
-        "beats": _normalize_confirmed_beats(beats, word_count),
+        "beats": normalize_confirmed_beats(beats, word_count),
         "debug_prompt": {
             "system_prompt": planner_system_prompt,
             "user_prompt": planner_user_prompt

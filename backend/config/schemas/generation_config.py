@@ -37,18 +37,16 @@
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Set, Callable
+from typing import Any, Dict, List, Optional, Set, Callable
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
+
+from backend.schemas.enums import PacingStyle, WorkflowTier, ReasoningEffortLevel as ReasoningEffort
 
 
 # =============================================================================
 # 类型别名与枚举
 # =============================================================================
-
-PacingStyle = Literal["slow_burn", "balanced", "fast_paced"]
-WorkflowTier = Literal["TIER_1_FAST", "TIER_2_STANDARD", "TIER_3_FORTRESS"]
-ReasoningEffort = Literal["xhigh", "high", "medium", "low", "minimal", "none"]
 
 class MemoryStrategy(str, Enum):
     """记忆检索策略预设"""

@@ -38,7 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 依赖项：
 - backend.services.rag.retriever: 记忆检索器
 - backend.services.rag.context_packager: 上下文打包器
-- backend.services.rag.foreshadowing: 伏笔追踪
+- backend.services.rag.foreshadowing_tracker: 伏笔追踪（增强版）
 
 使用方式：
     context = await assemble_chapter_context(chapter_id, db, api_key, strategy=...)
@@ -57,9 +57,11 @@ from backend.services.rag.retriever import (
 from backend.services.rag.context_packager import (
     build_context_package,
 )
-from backend.services.rag.foreshadowing import (
-    ForeshadowingTracker,
-    HookOmissionDetector,
+from backend.services.rag.foreshadowing_tracker import (
+    EnhancedForeshadowingTracker,
+)
+from backend.services.rag.foreshadowing_detector import (
+    EnhancedHookOmissionDetector,
 )
 
 
@@ -239,8 +241,8 @@ async def check_foreshadowing_omissions(
     if not chapter:
         return []
 
-    tracker = ForeshadowingTracker(db)
-    detector = HookOmissionDetector(tracker)
+    tracker = EnhancedForeshadowingTracker(db)
+    detector = EnhancedHookOmissionDetector(tracker)
 
     return await detector.detect_omissions(
         text=chapter_text,
