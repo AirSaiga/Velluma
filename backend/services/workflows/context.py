@@ -37,6 +37,7 @@ from typing import Any, Optional, Dict, List, Tuple, Union
 
 from backend.services.workflows.context_basic import (
     load_chapter_context as _load_chapter_context_basic,
+    load_chapter_context as load_chapter_context,
 )
 from backend.services.workflows.context_enhanced import (
     load_chapter_context_v2,

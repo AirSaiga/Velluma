@@ -83,6 +83,7 @@ if TYPE_CHECKING:
         PlotLedgerRepository,
         MapLocationRepository,
     )
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.rag.retrieval_types import (
     MemoryType,
@@ -735,7 +736,7 @@ class WorkflowRetrievalIntegrator:
 
 
 async def integrate_retrieval_with_workflow(
-    db: AsyncSession,
+    db: "AsyncSession",
     chapter_id,
     stage: WorkflowStage = WorkflowStage.ASSEMBLING,
     api_key: Optional[str] = None,
@@ -749,7 +750,7 @@ async def integrate_retrieval_with_workflow(
 
 
 async def prepare_planning_context(
-    db: AsyncSession,
+    db: "AsyncSession",
     chapter_id,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -759,7 +760,7 @@ async def prepare_planning_context(
 
 
 async def prepare_drafting_context(
-    db: AsyncSession,
+    db: "AsyncSession",
     chapter_id,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -769,7 +770,7 @@ async def prepare_drafting_context(
 
 
 async def prepare_reviewing_context(
-    db: AsyncSession,
+    db: "AsyncSession",
     chapter_id,
     chapter_text: str,
     api_key: Optional[str] = None,

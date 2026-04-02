@@ -517,6 +517,37 @@ async function updateChapter(id, data) {
   }
 }
 
+async function handleIntentSave(payload: any) {
+  if (!selectedChapter.value) {
+    showToast('请先选择章节', 'warning')
+    return
+  }
+
+  try {
+    // 保存意图驱动设置到章节
+    const updates = {
+      creative_intents: payload.creative_intents || [],
+      chapter_goals: payload.chapter_goals || [],
+      selected_plan_type: payload.selected_plan_type,
+      user_overrides: payload.user_overrides || {},
+      word_count: payload.word_count,
+      author_intent: payload.author_intent
+    }
+
+    await chapterApi.update(selectedChapter.value.id, updates)
+
+    // 更新本地状态
+    const index = chapters.value.findIndex(c => c.id === selectedChapter.value?.id)
+    if (index !== -1) {
+      chapters.value[index] = { ...chapters.value[index], ...updates }
+    }
+
+    showToast('设置已保存', 'success')
+  } catch (error: any) {
+    showToast('保存设置失败: ' + error.message, 'error')
+  }
+}
+
 async function deleteChapter(id) {
   const target = chapters.value.find((c) => c.id === id)
   const ok = await showConfirm({ title: '确认删除', message: `确定要删除"${target?.title || '该章节'}"吗？` })
@@ -817,6 +848,7 @@ onBeforeUnmount(() => {
             @refresh-characters="loadCharacters"
             @editor-entity-focus="handleEditorEntityFocus"
             @request-critique="handleRequestCritique"
+            @intent-save="handleIntentSave"
           />
           </div>
         </main>

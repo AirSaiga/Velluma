@@ -49,7 +49,7 @@ Agentic 工作流编排模块 - 章节生成的核心编排器。
 """
 
 import logging
-from typing import Union, Optional
+from typing import Union, Optional, Dict, Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession

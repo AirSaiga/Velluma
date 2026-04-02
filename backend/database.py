@@ -388,6 +388,37 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT",
         "expected_udt_names": {"text"},
     },
+    # 意图驱动设置：保存用户的创作意图和生成配置
+    {
+        "table": "chapters",
+        "column": "creative_intents",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "chapter_goals",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "selected_plan_type",
+        "definition": "VARCHAR(50)",
+        "expected_udt_names": {"varchar"},
+    },
+    {
+        "table": "chapters",
+        "column": "user_overrides",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "chapters",
+        "column": "author_intent",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
 ]
 
 

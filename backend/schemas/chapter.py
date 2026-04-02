@@ -69,6 +69,12 @@ class ChapterUpdate(BaseModel):
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[PacingStyle] = None
     chapter_assets_schema: Optional[str] = None
+    # 意图驱动设置
+    creative_intents: Optional[list] = None
+    chapter_goals: Optional[list] = None
+    selected_plan_type: Optional[str] = None
+    user_overrides: Optional[dict] = None
+    author_intent: Optional[str] = None
 
     @field_validator('tension_level', mode='before')
     @classmethod

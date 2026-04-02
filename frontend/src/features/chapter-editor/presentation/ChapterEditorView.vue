@@ -139,6 +139,7 @@ function handlePovModeChange(beat: BeatPreviewItem) {
 const emit = defineEmits<{
   (e: 'request-critique', content: string): void
   (e: 'intent-generate', payload: any): void
+  (e: 'intent-save', payload: any): void
 }>()
 
 const editorRef = ref<any>(null)
@@ -382,6 +383,7 @@ watch(() => props.critiqueResult, (newVal) => {
         <IntentDrivenPanel
           :chapter-id="selectedChapter?.id || ''"
           :api-config="apiConfig"
+          @save="(payload) => { closeAgenticSettingsModal(); emit('intent-save', payload); }"
           @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"
         />
       </div>

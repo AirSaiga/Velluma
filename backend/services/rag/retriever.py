@@ -36,6 +36,7 @@ from sqlalchemy.orm import selectinload
 
 if TYPE_CHECKING:
     from backend.repositories.memory_repository import MemoryRepository
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.rag.retrieval_types import (
     MemoryType,
@@ -630,7 +631,7 @@ class MultiTypeMemoryRetriever:
 async def retrieve_chapter_memories(
     chapter: Chapter,
     book: Book,
-    db: AsyncSession,
+    db: "AsyncSession",
     entities: List[ChapterEntity],
     relationships: List[CharacterRelationship],
     open_hooks: List[Dict],

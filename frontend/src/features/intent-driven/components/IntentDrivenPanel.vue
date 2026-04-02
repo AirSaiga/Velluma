@@ -68,12 +68,12 @@
     
     <!-- 生成按钮 -->
     <div class="generate-actions">
-      <button 
+      <button
         class="generate-btn primary"
         :disabled="!canGenerate"
-        @click="handleGenerate"
+        @click="handleSave"
       >
-        开始生成
+        保存设置
       </button>
       <div class="generation-summary" v-if="hasSelection">
         <span class="summary-item">
@@ -105,6 +105,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  save: [payload: any]
   generate: [payload: any]
 }>()
 
@@ -130,15 +131,15 @@ const canGenerate = computed(() => {
   return hasSelection.value && wordCount.value >= 500
 })
 
-function handleGenerate() {
+function handleSave() {
   const payload = buildPayload({
     chapterId: props.chapterId,
     apiConfig: props.apiConfig,
     wordCount: wordCount.value,
     authorIntent: authorIntent.value
   })
-  
-  emit('generate', payload)
+
+  emit('save', payload)
 }
 </script>
 

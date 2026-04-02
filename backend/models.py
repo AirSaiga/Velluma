@@ -133,6 +133,12 @@ class Chapter(Base):
     chapter_assets_schema = Column(Text, nullable=True, default="")
     # 世界状态快照：章节发布时提取，作为下一章的初始约束
     world_snapshot = Column(JSONB, default=dict)
+    # 意图驱动设置：保存用户的创作意图和生成配置
+    creative_intents = Column(JSONB, default=list)
+    chapter_goals = Column(JSONB, default=list)
+    selected_plan_type = Column(String(50), nullable=True)
+    user_overrides = Column(JSONB, default=dict)
+    author_intent = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     book = relationship("Book", back_populates="chapters")

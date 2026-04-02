@@ -45,32 +45,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 向后兼容：
 - 为避免破坏现有代码，保留旧路径的别名导入
-"""
-服务层统一出口模块。
-
-职责：聚合后端业务逻辑服务，提供统一的导入入口。
-
-设计模式：Facade Pattern，封装底层复杂实现。
-
-模块组织：
-- generation/: 章节生成服务（统一导出各类生成函数）
-- orchestration/: Agentic 工作流（多轮迭代生成）
-- llm/: LLM 调用封装（支持多模型、重试机制）
-- state_machine/: 角色状态管理
-- prompts/: 按 Agent 类型拆分的提示词模块
-- workflows/: 工作流阶段模块
-- context/: 上下文数据加载服务
-- utils/: 通用工具模块
-- world/: 世界状态服务
-- rag/: RAG 检索服务
-
-使用场景：
-- routes/: 业务路由层，通过此模块调用底层服务
-- main.py: 应用入口，注册路由
-
-业务规则：
-- 所有导出函数均为 async 函数或返回异步生成器
-- API Key 由调用方传入，服务层不存储敏感信息
 
 迁移说明 (2026-03-30)：
 - 已移除 LegacyServiceClass 别名机制
