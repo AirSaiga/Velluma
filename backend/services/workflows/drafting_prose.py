@@ -113,6 +113,9 @@ async def _micro_review_assertion(
     entity_spatial_ledger: Optional[dict] = None,
     beat_index: Optional[int] = None,
     stats_callback: LLMStatsCallback = None,
+    book: Optional[Any] = None,
+    chapter: Optional[Any] = None,
+    entities: Optional[List[Any]] = None,
 ) -> tuple[bool, str, List[str]]:
     try:
         char_prompts = _extract_character_prompts_for_beat(beat, dynamic_context) if beat else None
@@ -123,6 +126,38 @@ async def _micro_review_assertion(
             spatial_info = _format_entity_spatial_ledger(entity_spatial_ledger)
             if spatial_info:
                 effective_physical_lock = f"{effective_physical_lock}\n\n【角色空间绑定】:\n{spatial_info}"
+
+        # ====== 引入代码级强校验 (ValidatorPipeline) ======
+        from backend.services.workflows.validators import DraftValidatorPipeline
+        validator = DraftValidatorPipeline()
+        
+        # 动态组装环境参数和特征数据
+        val_context = {
+            "pacing_type": beat.get("pacing_type", "medium") if beat else "medium",
+            "red_lines": beat.get("red_lines", []) if beat else [],
+            "required_entities": beat.get("required_entities", []) if beat else [],
+            "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
+            "entities": [e.model_dump() if hasattr(e, "model_dump") else e for e in (entities or [])],
+        }
+        
+        # 如果书籍有全局设定（如禁忌词、文风黑名单），注入验证器
+        if book:
+            if hasattr(book, "style_blacklist") and book.style_blacklist:
+                val_context["style_blacklist"] = book.style_blacklist
+            if hasattr(book, "core_motifs_taboos") and book.core_motifs_taboos:
+                val_context["taboos"] = book.core_motifs_taboos
+
+        validation_result = validator.validate_draft(chunk_text, val_context)
+        if not validation_result.is_valid:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Beat {beat_index} 代码级强校验未通过: {validation_result.errors}")
+            # 如果存在严重代码级错误，直接阻断，不消耗 Token 进行 LLM 审阅
+            # 格式化失败类别，供上层重试逻辑使用
+            from backend.services.workflows.drafting_qc import _infer_fail_categories
+            fail_reason = "\n".join(validation_result.errors)
+            return False, fail_reason, _infer_fail_categories(validation_result.errors[0], ["code_validation"])
+        # =================================================
 
         system_prompt, user_prompt = build_micro_review_prompt(
             chunk_text=chunk_text,
@@ -629,6 +664,9 @@ async def _generate_prose_serial_v25(
                         entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
                         beat_index=beat_number,
                         stats_callback=stats_callback,
+                        book=book,
+                        chapter=chapter,
+                        entities=entities,
                     )
                     if not is_valid:
                         logger.warning(f"[Prose V25-Serial] Beat {beat_number} 第{attempt}次断言失败: {fail_reason}")
@@ -848,6 +886,9 @@ async def _generate_prose_parallel_v25(
                         entity_spatial_ledger=entity_spatial_ledger,
                         beat_index=beat_index,
                         stats_callback=stats_callback,
+                        book=book,
+                        chapter=chapter,
+                        entities=entities,
                     )
 
                     if not is_valid:
@@ -1085,6 +1126,9 @@ async def _generate_prose_semi_parallel_v25(
                         entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
                         beat_index=beat_number,
                         stats_callback=stats_callback,
+                        book=book,
+                        chapter=chapter,
+                        entities=entities,
                     )
                     if not is_ok:
                         logger.warning(f"[Prose Serial-Cascade] Beat {beat_number} 第{att}次断言失败: {fail_r}")
