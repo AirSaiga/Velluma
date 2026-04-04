@@ -84,6 +84,26 @@ async def _micro_review_assertion(
         scene_intent=scene_intent,
     )
 
+    # 1. 引入代码级强校验 (ValidatorPipeline)
+    from backend.services.workflows.validators import DraftValidatorPipeline
+    validator = DraftValidatorPipeline()
+    context = {
+        "required_entities": beat.get("required_entities", []),
+        "forbidden_locations": beat.get("forbidden_locations", []),
+        "entities": beat.get("involved_characters", []) # 示例: [{"name": "张三", "traits": ["怯懦"]}]
+    }
+    
+    validation_result = validator.validate_draft(chunk_text, context)
+    if not validation_result.is_valid:
+        logger.warning(f"代码级强校验未通过: {validation_result.errors}")
+        # 如果存在严重代码级错误，直接阻断，不消耗 Token 进行 LLM 审阅
+        return MicroReviewResult(
+            passed=False,
+            reason="\n".join(validation_result.errors),
+            failed_checks=_infer_fail_categories(validation_result.errors[0], ["code_validation"]),
+        )
+
+    # 2. 如果代码级校验通过，再调用 LLM 进行语义微审
     try:
         response = await call_llm(
             system_prompt=system_prompt,
