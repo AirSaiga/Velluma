@@ -138,6 +138,8 @@ async def _micro_review_assertion(
             "required_entities": beat.get("required_entities", []) if beat else [],
             "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
             "entities": [e.model_dump() if hasattr(e, "model_dump") else e for e in (entities or [])],
+            "api_key": api_key,
+            "base_url": base_url,
         }
         
         # 如果书籍有全局设定（如禁忌词、文风黑名单），注入验证器
@@ -147,7 +149,7 @@ async def _micro_review_assertion(
             if hasattr(book, "core_motifs_taboos") and book.core_motifs_taboos:
                 val_context["taboos"] = book.core_motifs_taboos
 
-        validation_result = validator.validate_draft(chunk_text, val_context)
+        validation_result = await validator.validate_draft(chunk_text, val_context)
         if not validation_result.is_valid:
             import logging
             logger = logging.getLogger(__name__)

@@ -1,7 +1,11 @@
 import re
 import logging
+import math
+import asyncio
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+
+from backend.services.llm.embedding import get_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -10,9 +14,17 @@ class ValidationResult(BaseModel):
     errors: List[str]
     warnings: List[str]
 
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    if not v1 or not v2: return 0.0
+    dot_product = sum(a * b for a, b in zip(v1, v2))
+    mag1 = math.sqrt(sum(a * a for a in v1))
+    mag2 = math.sqrt(sum(b * b for b in v2))
+    if mag1 == 0 or mag2 == 0: return 0.0
+    return dot_product / (mag1 * mag2)
+
 class BaseValidator:
     """验证器基类"""
-    def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         raise NotImplementedError("Subclasses must implement validate()")
 
 class StyleClicheValidator(BaseValidator):
@@ -34,7 +46,7 @@ class StyleClicheValidator(BaseValidator):
         ]
         self.threshold = threshold
 
-    def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
         warnings = []
         
@@ -76,18 +88,13 @@ class StyleClicheValidator(BaseValidator):
 class CharacterOOCValidator(BaseValidator):
     """
     人物性格防偏离验证 (Character OOC Validator)
-    结合实体数据进行检查
+    使用嵌入词向量模型(Embedding)动态计算动作文本与角色设定的语义偏离度。
     """
-    def __init__(self):
-        # 静态的常见映射字典。
-        # 更好的方案是引入一个轻量级的词向量比对，这里用硬匹配作为纯代码示例
-        self.forbidden_action_map = {
-            "怯懦": ["咆哮", "猛击", "冷笑", "一脚踹开", "怒吼", "大声斥责", "毫不畏惧"],
-            "冷静": ["气急败坏", "歇斯底里", "手足无措", "慌乱", "失去理智"],
-            "高傲": ["卑躬屈膝", "连声求饶", "唯唯诺诺", "跪地"]
-        }
+    def __init__(self, similarity_threshold: float = 0.15):
+        # 设定语义相似度下限阈值，如果行为与设定的余弦相似度极低，视为 OOC 嫌疑
+        self.similarity_threshold = similarity_threshold
 
-    def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
         warnings = []
         
@@ -96,33 +103,56 @@ class CharacterOOCValidator(BaseValidator):
         if not entities:
             return ValidationResult(is_valid=True, errors=errors, warnings=warnings)
             
+        api_key = context.get("api_key", None)
+        base_url = context.get("base_url", None)
+            
+        # 拆分句子，用于提取包含角色名的句子
+        sentences = [s.strip() for s in re.split(r'[。！？!?\n]', text) if len(s.strip()) > 2]
+            
         for entity in entities:
             name = entity.get("name", "")
-            if not name:
+            if not name or name not in text:
                 continue
                 
-            # 我们假设 entity.get("static_prompt") 包含一些性格描述词
-            # 或者有独立的 traits 字段
-            traits = entity.get("traits", [])
             static_prompt = entity.get("static_prompt", "")
+            traits = entity.get("traits", [])
             
-            # 如果没有 traits，尝试从 static_prompt 简单提取（启发式）
-            if not traits and isinstance(static_prompt, str):
-                for trait in self.forbidden_action_map.keys():
-                    if trait in static_prompt:
-                        traits.append(trait)
+            if not static_prompt and not traits:
+                continue
+                
+            # 组合角色核心设定文本
+            character_core_desc = f"角色名称：{name}。"
+            if static_prompt:
+                character_core_desc += f" 核心设定：{static_prompt}。"
+            if traits:
+                character_core_desc += f" 性格特征：{'、'.join(traits)}。"
+                
+            # 提取与该角色相关的句子作为动作文本
+            character_sentences = [s for s in sentences if name in s]
+            if not character_sentences:
+                continue
+                
+            character_action_text = "。".join(character_sentences) + "。"
             
-            # 如果文中出现了该角色
-            if name in text:
-                for trait in traits:
-                    forbidden_words = self.forbidden_action_map.get(trait, [])
-                    found_words = [word for word in forbidden_words if word in text]
+            try:
+                # 并发请求词向量
+                desc_emb_task = get_embedding(character_core_desc, api_key=api_key, base_url=base_url)
+                action_emb_task = get_embedding(character_action_text, api_key=api_key, base_url=base_url)
+                
+                desc_emb, action_emb = await asyncio.gather(desc_emb_task, action_emb_task)
+                
+                if desc_emb and action_emb:
+                    sim = cosine_similarity(desc_emb, action_emb)
+                    logger.debug(f"[OOC Validator] {name} 设定与行为相似度: {sim:.3f}")
                     
-                    if found_words:
-                        errors.append(
-                            f"角色 '{name}' 具有 '{trait}' 的特征设定，但检测到了不符合性格的动作描写："
-                            f"{', '.join(found_words)}。请修正以避免OOC。"
+                    if sim < self.similarity_threshold:
+                        # 相似度过低，抛出警告要求修改
+                        warnings.append(
+                            f"角色 '{name}' 在本段中的行为/对白与角色设定的语义偏离度过高 "
+                            f"(相似度: {sim:.2f})，可能发生了 OOC 行为，请根据角色设定进行修正。"
                         )
+            except Exception as e:
+                logger.error(f"[OOC Validator] 词向量计算失败，跳过 OOC 验证: {e}")
                         
         return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
 
@@ -130,7 +160,7 @@ class PlotLogicValidator(BaseValidator):
     """
     剧情逻辑与伏笔闭合强制校验 (Plot Logic Validator)
     """
-    def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
         warnings = []
         
@@ -168,7 +198,7 @@ class PacingValidator(BaseValidator):
     """
     基于环境参数（节奏类型 pacing_type）验证句法结构
     """
-    def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
         warnings = []
         
@@ -200,15 +230,18 @@ class DraftValidatorPipeline:
             PacingValidator()
         ]
 
-    def validate_draft(self, text: str, context: Dict[str, Any]) -> ValidationResult:
+    async def validate_draft(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         """
         运行所有验证器，收集错误和警告。
         """
         all_errors = []
         all_warnings = []
         
-        for validator in self.validators:
-            result = validator.validate(text, context)
+        # 并发执行所有验证器
+        tasks = [validator.validate(text, context) for validator in self.validators]
+        results = await asyncio.gather(*tasks)
+        
+        for result in results:
             all_errors.extend(result.errors)
             all_warnings.extend(result.warnings)
             

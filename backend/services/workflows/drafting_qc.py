@@ -90,10 +90,12 @@ async def _micro_review_assertion(
     context = {
         "required_entities": beat.get("required_entities", []),
         "forbidden_locations": beat.get("forbidden_locations", []),
-        "entities": beat.get("involved_characters", []) # 示例: [{"name": "张三", "traits": ["怯懦"]}]
+        "entities": beat.get("involved_characters", []), # 示例: [{"name": "张三", "traits": ["怯懦"]}]
+        "api_key": api_key,
+        "base_url": base_url,
     }
     
-    validation_result = validator.validate_draft(chunk_text, context)
+    validation_result = await validator.validate_draft(chunk_text, context)
     if not validation_result.is_valid:
         logger.warning(f"代码级强校验未通过: {validation_result.errors}")
         # 如果存在严重代码级错误，直接阻断，不消耗 Token 进行 LLM 审阅
