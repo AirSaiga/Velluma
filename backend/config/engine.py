@@ -76,70 +76,70 @@ class DerivationEngine:
         Returns:
             GenerationConfig: 推导后的配置
         """
+        logger.info("[DerivationEngine.derive] 开始执行推导")
         self._derivation_log = []
 
+        logger.info("[DerivationEngine.derive] 开始 _derive_workflow_tier")
         self._derive_workflow_tier(config)
+        logger.info("[DerivationEngine.derive] _derive_workflow_tier 完成")
 
+        logger.info("[DerivationEngine.derive] 开始 _derive_iteration_params")
         self._derive_iteration_params(config)
+        logger.info("[DerivationEngine.derive] _derive_iteration_params 完成")
 
+        logger.info("[DerivationEngine.derive] 开始 _derive_dual_track_config")
         self._derive_dual_track_config(config)
+        logger.info("[DerivationEngine.derive] _derive_dual_track_config 完成")
 
+        logger.info("[DerivationEngine.derive] 开始 _derive_rag_params")
         self._derive_rag_params(config)
+        logger.info("[DerivationEngine.derive] _derive_rag_params 完成")
 
+        logger.info("[DerivationEngine.derive] 推导完成，返回 config")
         return config
 
     def _derive_workflow_tier(self, config: GenerationConfig) -> None:
         """推导工作流层级"""
-        if config.workflow_tier:
+        if config.chapter.workflow_tier:
             return
 
-        if config.tension_level:
-            config.workflow_tier = self._apply_rule(
-                TENSION_TO_TIER_RULE, config.tension_level, config
+        if config.chapter.tension_level:
+            config.chapter.workflow_tier = self._apply_rule(
+                TENSION_TO_TIER_RULE, config.chapter.tension_level, config
             )
 
-        if not config.workflow_tier:
-            config.workflow_tier = "TIER_2_STANDARD"
+        if not config.chapter.workflow_tier:
+            config.chapter.workflow_tier = "TIER_2_STANDARD"
 
     def _derive_iteration_params(self, config: GenerationConfig) -> None:
         """推导迭代相关参数"""
-        if config.workflow_tier and not config.max_iterations:
-            config.max_iterations = self._apply_rule(
-                TIER_TO_ITERATIONS_RULE, config.workflow_tier, config
-            )
-
-        if config.creativity_level and not config.parallel_beats:
-            config.parallel_beats = self._apply_rule(
-                CREATIVITY_TO_PARALLEL_RULE, config.creativity_level, config
-            )
-
-        if config.refinement_level and not config.qc_threshold:
-            config.qc_threshold = self._apply_rule(
-                REFINEMENT_TO_THRESHOLD_RULE, config.refinement_level, config
+        if config.chapter.workflow_tier and not config.workflow.max_iterations:
+            config.workflow.max_iterations = self._apply_rule(
+                TIER_TO_ITERATIONS_RULE, config.chapter.workflow_tier, config
             )
 
     def _derive_dual_track_config(self, config: GenerationConfig) -> None:
         """推导双轨配置"""
-        if config.workflow_tier and config.enable_dual_track is None:
-            config.enable_dual_track = self._apply_rule(
-                TIER_TO_DUAL_TRACK_RULE, config.workflow_tier, config
+        if config.chapter.workflow_tier and config.workflow.dual_track.enable_sketch_track is None:
+            config.workflow.dual_track.enable_sketch_track = self._apply_rule(
+                TIER_TO_DUAL_TRACK_RULE, config.chapter.workflow_tier, config
             )
 
     def _derive_rag_params(self, config: GenerationConfig) -> None:
         """推导 RAG 参数"""
-        if config.memory_strategy:
-            preset = MEMORY_STRATEGY_PRESETS.get(config.memory_strategy)
+        if config.rag.memory_strategy:
+            preset = MEMORY_STRATEGY_PRESETS.get(config.rag.memory_strategy)
             if preset:
-                if config.rag_top_k is None:
-                    config.rag_top_k = preset.get("top_k")
-                if config.rag_alpha is None:
-                    config.rag_alpha = preset.get("semantic_weight")
-                if config.rag_beta is None:
-                    config.rag_beta = preset.get("time_decay_weight")
-                if config.rag_gamma is None:
-                    config.rag_gamma = preset.get("foreshadowing_weight")
-                if config.rag_lambda_decay is None:
-                    config.rag_lambda_decay = preset.get("decay_factor")
+                if config.rag.top_k is None:
+                    config.rag.top_k = preset.get("top_k")
+                if config.rag.semantic_weight is None:
+                    config.rag.semantic_weight = preset.get("semantic_weight")
+                if config.rag.time_decay_weight is None:
+                    config.rag.time_decay_weight = preset.get("time_decay_weight")
+                if config.rag.foreshadowing_weight is None:
+                    config.rag.foreshadowing_weight = preset.get("foreshadowing_weight")
+                if config.rag.decay_factor is None:
+                    config.rag.decay_factor = preset.get("decay_factor")
 
     def _apply_rule(
         self,

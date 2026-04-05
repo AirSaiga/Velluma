@@ -60,7 +60,8 @@ if TYPE_CHECKING:
         ChapterRepository, BookRepository, MemoryRepository,
         PlotLedgerRepository, MapLocationRepository, RelationshipRepository
     )
-    from backend.repositories.base import QuerySpec
+
+from backend.repositories.base import QuerySpec
 
 import logging
 
@@ -101,10 +102,13 @@ async def load_chapter_entities(
     chapter_repo: "ChapterRepository" = repositories.get("chapter")
     if not chapter_repo:
         raise ValueError("ChapterRepository 未配置")
-    
-    spec = chapter_repo.build_query(
-        model=ChapterEntity,
-        conditions=[ChapterEntity.chapter_id == chapter_id],
+
+    from backend.models import ChapterEntity
+    from sqlalchemy.orm import selectinload
+    spec = QuerySpec.create(ChapterEntity).where(
+        ChapterEntity.chapter_id == chapter_id
+    ).with_options(
+        selectinload(ChapterEntity.character)
     )
     return await chapter_repo.find_all(spec=spec)
 
@@ -117,17 +121,15 @@ async def load_character_relationships(
     relationship_repo: "RelationshipRepository" = repositories.get("relationship")
     if not relationship_repo:
         return []
-    
+
     character_ids = [e.entity_id for e in entities if e.entity_id]
     if not character_ids:
         return []
-    
-    spec = relationship_repo.build_query(
-        model=CharacterRelationship,
-        conditions=[
-            CharacterRelationship.source_char_id.in_(character_ids),
-            CharacterRelationship.target_char_id.in_(character_ids),
-        ]
+
+    from backend.models import CharacterRelationship
+    spec = QuerySpec.create(CharacterRelationship).where(
+        CharacterRelationship.source_char_id.in_(character_ids),
+        CharacterRelationship.target_char_id.in_(character_ids),
     )
     return await relationship_repo.find_all(spec=spec)
 
@@ -223,11 +225,9 @@ async def load_chapter_locations(
     map_repo: "MapLocationRepository" = repositories.get("map_location")
     if not map_repo:
         raise ValueError("MapLocationRepository 未配置")
-    
-    spec = map_repo.build_query(
-        model=ChapterMapLocation,
-        conditions=[ChapterMapLocation.chapter_id == chapter_id],
-    )
+
+    from backend.models import ChapterMapLocation
+    spec = QuerySpec.create(ChapterMapLocation).where(ChapterMapLocation.chapter_id == chapter_id)
     return await map_repo.find_all(spec=spec)
 
 
@@ -327,33 +327,31 @@ async def load_full_chapter_context(
     base_url: Optional[str] = None,
 ) -> Optional[ChapterContext]:
     """加载完整的章节上下文（一站式加载所有数据）
-    
+
     新接口：使用 repositories 参数
-    
+
     Args:
         chapter_id: 章节 ID
         repositories: Repository 字典
         rag_params: 可选的 RAG 参数
         api_key: 可选的 API Key
         base_url: 可选的 Base URL
-        
+
     Returns:
         ChapterContext 数据容器，或 None
     """
     chapter = await load_chapter(repositories, chapter_id)
     if not chapter:
         return None
-    
+
     book = await load_book(repositories, chapter.book_id) if chapter.book_id else None
     entities = await load_chapter_entities(repositories, chapter_id)
     relationships = await load_character_relationships(repositories, entities)
-    
     previous_summary = await load_previous_chapter_summary(repositories, chapter)
     previous_world_snapshot = await load_previous_world_snapshot(repositories, chapter)
-    
     open_hooks = await load_open_hooks(repositories, chapter)
     locations = await load_chapter_locations(repositories, chapter_id)
-    
+
     relevant_memories = []
     if rag_params and api_key and chapter.outline_text:
         relevant_memories = await load_relevant_memories(
@@ -361,7 +359,7 @@ async def load_full_chapter_context(
             chapter.book_id, chapter.chapter_number,
             api_key, base_url, rag_params
         )
-    
+
     return ChapterContext(
         chapter=chapter,
         book=book,

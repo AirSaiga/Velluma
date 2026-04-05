@@ -604,12 +604,16 @@ async def _generate_prose_serial_v25(
         while attempt < max_attempts and not is_valid:
             attempt += 1
             try:
+                # 安全检查数组索引
+                scene_intent = scene_intent_results[beat_idx_0] if beat_idx_0 < len(scene_intent_results) else {"intent_label": "默认", "goal": beat.get("summary", "")}
+                subconscious = subconscious_results[beat_idx_0] if beat_idx_0 < len(subconscious_results) else ""
+                
                 sys_p, usr_p = build_prose_draft_prompt_v25(
                     chapter=chapter,
                     book=book,
                     beat=beat,
-                    scene_intent=scene_intent_results[beat_idx_0],
-                    subconscious_thought=subconscious_results[beat_idx_0],
+                    scene_intent=scene_intent,
+                    subconscious_thought=subconscious,
                     previous_tail=dynamic_context.previous_tail,
                     target_words=target_words,
                     physical_state_lock=dynamic_context.physical_state_lock,
@@ -932,12 +936,19 @@ async def _generate_prose_parallel_v25(
                 "prompts": [],
             }
 
+    # 验证输入数组长度
+    if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
+        logger.error(f"[Prose V25-Parallel] 输入数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
+        # 补齐数组
+        scene_intent_results = scene_intent_results + [{"intent_label": "默认", "goal": ""} for _ in range(len(beats) - len(scene_intent_results))]
+        subconscious_results = subconscious_results + ["" for _ in range(len(beats) - len(subconscious_results))]
+
     tasks = [
         _single_prose_task(
             beat_index=i + 1,
             beat=beat,
-            scene_intent=scene_intent_results[i],
-            subconscious=subconscious_results[i],
+            scene_intent=scene_intent_results[i] if i < len(scene_intent_results) else {"intent_label": "默认", "goal": beat.get("summary", "")},
+            subconscious=subconscious_results[i] if i < len(subconscious_results) else "",
         )
         for i, beat in enumerate(beats)
     ]

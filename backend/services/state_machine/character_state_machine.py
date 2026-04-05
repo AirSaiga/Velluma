@@ -46,7 +46,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.services.state_machine.character_state_types import (
     PhysicalCondition,
@@ -243,7 +243,7 @@ class CharacterStateMachine:
     ) -> CharacterStateHistory:
         history = CharacterStateHistory(
             chapter_number=chapter_number,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             previous_state=self.dynamic_state.model_copy(deep=True),
             new_state=new_state,
             change_reason=reason,

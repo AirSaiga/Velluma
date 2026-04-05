@@ -388,9 +388,9 @@ class DualTrackWorkflow:
         }
 
         debug_info = {
-            "track_a_prompts": [p for draft in beat_drafts for p in draft.prompts],
-            "track_b_prompts": sketch_result.prompts if sketch_result else [],
-            "adjustment_analysis": adjustment_plan.analysis_prompts if adjustment_plan else [],
+            "track_a_prompts": [p for draft in beat_drafts for p in (draft.prompts or [])],
+            "track_b_prompts": getattr(sketch_result, 'prompts', []) if sketch_result else [],
+            "adjustment_analysis": getattr(adjustment_plan, 'analysis_prompts', []) if adjustment_plan else [],
         }
 
         logger.info(f"[DualTrack] 双轨工作流完成，总耗时: {total_time:.2f}s，最终字数: {len(final_text)}")

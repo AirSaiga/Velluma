@@ -292,17 +292,35 @@ async def _execute_standard_path(
     logger.info("[Standard Path] 启动均衡流生成...")
     flags = feature_flags or DraftingFeatureFlags()
 
-    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
-        beats=beats, chapter=chapter, open_hooks=open_hooks,
-        api_key=api_key, base_url=base_url, model=reasoning_model,
-        stats_callback=stats_callback, reasoning_config=reasoning_config,
-    )
+    try:
+        scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
+            beats=beats, chapter=chapter, open_hooks=open_hooks,
+            api_key=api_key, base_url=base_url, model=reasoning_model,
+            stats_callback=stats_callback, reasoning_config=reasoning_config,
+        )
+    except Exception as e:
+        logger.error(f"[Standard Path] Scene Intent 生成失败: {e}")
+        # 降级为使用默认 Scene Intent
+        scene_intent_results = [{"intent_label": "默认", "goal": beat.get("summary", "")} for beat in beats]
+        scene_intent_prompts_list = [[] for _ in beats]
 
-    subconscious_results = await _generate_lightweight_subconscious(
-        beats=beats, scene_intent_results=scene_intent_results,
-        chapter=chapter, api_key=api_key, base_url=base_url,
-        model=reasoning_model, stats_callback=stats_callback,
-    )
+    try:
+        subconscious_results = await _generate_lightweight_subconscious(
+            beats=beats, scene_intent_results=scene_intent_results,
+            chapter=chapter, api_key=api_key, base_url=base_url,
+            model=reasoning_model, stats_callback=stats_callback,
+        )
+    except Exception as e:
+        logger.error(f"[Standard Path] Subconscious 生成失败: {e}")
+        # 降级为空潜意识
+        subconscious_results = ["" for _ in beats]
+
+    # 验证数组长度一致性
+    if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
+        logger.error(f"[Standard Path] 结果数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
+        # 补齐或截断数组
+        scene_intent_results = scene_intent_results[:len(beats)] + [{"intent_label": "默认", "goal": beats[i].get("summary", "")} for i in range(len(scene_intent_results), len(beats))]
+        subconscious_results = subconscious_results[:len(beats)] + ["" for _ in range(len(subconscious_results), len(beats))]
 
     results: List[BeatDraftResult] = []
     previous_tail = ""
@@ -312,10 +330,14 @@ async def _execute_standard_path(
         beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
         target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
 
+        # 安全检查数组索引
+        scene_intent = scene_intent_results[i] if i < len(scene_intent_results) else {"intent_label": "默认", "goal": beat.get("summary", "")}
+        subconscious = subconscious_results[i] if i < len(subconscious_results) else ""
+
         system_prompt, user_prompt = build_standard_path_prompt(
             chapter=chapter, book=book, beat=beat,
-            scene_intent=scene_intent_results[i],
-            subconscious=subconscious_results[i],
+            scene_intent=scene_intent,
+            subconscious=subconscious,
             previous_tail=previous_tail,
             physical_state_lock=current_physical_lock,
             target_words=target_words,
@@ -349,8 +371,8 @@ async def _execute_standard_path(
 
         results.append(BeatDraftResult(
             beat_id=beat_id, beat_index=i + 1,
-            scene_intent=scene_intent_results[i],
-            subconscious_thought=subconscious_results[i],
+            scene_intent=scene_intent,
+            subconscious_thought=subconscious,
             draft_chunk=chunk_text, prompts=prompts_history, mcts_rollout=None,
         ))
 
@@ -394,18 +416,38 @@ async def _execute_fortress_path(
     logger.info("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
     step_a_start = time.perf_counter()
 
-    scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
-        beats=beats, chapter=chapter, open_hooks=open_hooks,
-        api_key=api_key, base_url=base_url, model=reasoning_model,
-        stats_callback=stats_callback, reasoning_config=reasoning_config,
-    )
+    try:
+        scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
+            beats=beats, chapter=chapter, open_hooks=open_hooks,
+            api_key=api_key, base_url=base_url, model=reasoning_model,
+            stats_callback=stats_callback, reasoning_config=reasoning_config,
+        )
+    except Exception as e:
+        logger.error(f"[Fortress Path] Scene Intent 生成失败: {e}")
+        scene_intent_results = [{"intent_label": "默认", "goal": beat.get("summary", "")} for beat in beats]
+        scene_intent_prompts_list = [[] for _ in beats]
 
-    subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
-        beats=beats, scene_intent_results=scene_intent_results,
-        chapter=chapter, entities=entities,
-        api_key=api_key, base_url=base_url, model=reasoning_model,
-        stats_callback=stats_callback, reasoning_config=reasoning_config,
-    )
+    try:
+        subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
+            beats=beats, scene_intent_results=scene_intent_results,
+            chapter=chapter, entities=entities,
+            api_key=api_key, base_url=base_url, model=reasoning_model,
+            stats_callback=stats_callback, reasoning_config=reasoning_config,
+        )
+    except Exception as e:
+        logger.error(f"[Fortress Path] Subconscious 生成失败: {e}")
+        subconscious_results = ["" for _ in beats]
+        mcts_rollout_results = [None for _ in beats]
+        subconscious_prompts_list = [[] for _ in beats]
+
+    # 验证数组长度一致性
+    if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
+        logger.error(f"[Fortress Path] 结果数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
+        scene_intent_results = scene_intent_results[:len(beats)] + [{"intent_label": "默认", "goal": beats[i].get("summary", "")} for i in range(len(scene_intent_results), len(beats))]
+        subconscious_results = subconscious_results[:len(beats)] + ["" for _ in range(len(subconscious_results), len(beats))]
+        mcts_rollout_results = mcts_rollout_results[:len(beats)] + [None for _ in range(len(mcts_rollout_results), len(beats))]
+        scene_intent_prompts_list = scene_intent_prompts_list[:len(beats)] + [[] for _ in range(len(scene_intent_prompts_list), len(beats))]
+        subconscious_prompts_list = subconscious_prompts_list[:len(beats)] + [[] for _ in range(len(subconscious_prompts_list), len(beats))]
 
     logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
 

@@ -177,20 +177,15 @@ async def generate_chapter_dual_track(
         # 创建事件队列，用于在 workflow 执行过程中接收进度事件
         progress_queue = asyncio.Queue()
         
+        # 初始化关键变量，确保在异常处理时可用
+        chapter = None
+        run_id = None
+
         try:
-            # V3.8: 解析高层参数（基础模式自动推导 RAG 参数）
             resolved_params = resolve_high_level_params(request)
-            svc_logger.info(
-                "Editor mode resolved",
-                mode=request.editor_mode,
-                top_k=resolved_params['rag_top_k'],
-                alpha=resolved_params['rag_alpha']
-            )
-            
-            # 加载上下文
+
             yield build_sse_event("ASSEMBLING_CONTEXT", "加载章节上下文...")
-            
-            # 构建 Repository 字典
+
             repos = {
                 "chapter": ChapterRepository(db),
                 "book": BookRepository(db),
@@ -199,19 +194,18 @@ async def generate_chapter_dual_track(
                 "map_location": MapLocationRepository(db),
                 "relationship": RelationshipRepository(db),
             }
-            
-            # 使用统一的上下文加载服务
+
             context = await load_full_chapter_context(
                 chapter_id, repos,
                 rag_params=resolved_params if request.is_basic_mode() else None,
                 api_key=request.api_key,
                 base_url=request.base_url,
             )
-            
+
             if not context:
                 yield build_sse_event("ERROR", "章节不存在")
                 return
-            
+
             chapter = context.chapter
             book = context.book
             run_id = _resolve_run_id(request, chapter)
@@ -244,23 +238,27 @@ async def generate_chapter_dual_track(
             }
             await db.commit()
             yield build_sse_event("GENERATION_RUN", "生成任务已初始化", generation_run_id=run_id)
-            
-            # 更新日志记录器的 book_id
+
             prompt_logger.book_id = str(chapter.book_id) if chapter.book_id else None
-            
-            # P2: 更新章节设置（tension_level / pacing_style）
+
             if request.tension_level is not None:
                 chapter.tension_level = request.tension_level
             if request.pacing_style:
                 chapter.pacing_style = request.pacing_style
             await db.commit()
-            
+
             yield build_sse_event("ASSEMBLING_CONTEXT", "正在回顾前文与检索相关伏笔...")
-            
-            svc_logger.debug("Context loaded", **context.to_dict())
-            
-            # 发送上下文加载完成统计帧
-            yield build_sse_metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra=context.to_dict())
+
+            entities_list = list(context.entities)
+            relationships_list = list(context.relationships)
+
+            context_dict = {
+                "entities_count": len(entities_list),
+                "relationships_count": len(relationships_list),
+            }
+
+            yield build_sse_metric_frame("ASSEMBLING_CONTEXT_DONE", iteration=0, extra=context_dict)
+
             await _persist_checkpoint(
                 db=db,
                 chapter=chapter,
@@ -268,14 +266,13 @@ async def generate_chapter_dual_track(
                 stage="ASSEMBLING_CONTEXT_DONE",
                 status="running",
                 payload={
-                    "entities": len(context.entities),
-                    "relationships": len(context.relationships),
+                    "entities": len(entities_list),
+                    "relationships": len(relationships_list),
                     "memories": len(context.relevant_memories),
                     "locations": len(context.locations),
                 },
             )
-            
-            # 设置日志记录器的上下文信息
+
             prompt_logger.set_context(
                 chapter_info={
                     "id": str(chapter.id),
@@ -289,16 +286,16 @@ async def generate_chapter_dual_track(
                     "title": book.title if book else None,
                     "genre": book.genre if book else None,
                 },
-                entities=list(context.entities),
-                relationships=list(context.relationships),
+                entities=entities_list,
+                relationships=relationships_list,
                 request_params={
                     **effective_config,
                 }
             )
-            
+
             yield build_sse_event(
                 "CONTEXT_LOADED",
-                f"加载 {len(context.entities)} 个角色, {len(context.relationships)} 组关系"
+                f"加载 {len(entities_list)} 个角色, {len(relationships_list)} 组关系"
             )
             
             # ========================================================================
@@ -628,22 +625,33 @@ async def generate_chapter_dual_track(
                 review_passed=prompt_logger._review_passed
             )
             prompt_logger._finalized = True
-        except Exception as e:
-            if "chapter" in locals() and "run_id" in locals():
-                await _persist_checkpoint(
-                    db=db,
-                    chapter=chapter,
-                    run_id=run_id,
-                    stage="FAILED",
-                    status="failed",
-                    payload={"error": str(e)},
-                )
-            yield build_sse_event("ERROR", f"生成失败: {str(e)}")
-            
+        except BaseException as e:
+            exc_type = type(e).__name__
+            svc_logger.error(f"Generator exception: {exc_type}: {str(e)}")
+            if chapter is not None and run_id is not None:
+                try:
+                    await _persist_checkpoint(
+                        db=db,
+                        chapter=chapter,
+                        run_id=run_id,
+                        stage="FAILED",
+                        status="failed",
+                        payload={"error": str(e), "exception_type": exc_type},
+                    )
+                except Exception:
+                    pass
+
+            if not isinstance(e, (GeneratorExit, asyncio.CancelledError)):
+                try:
+                    yield build_sse_event("ERROR", f"生成失败: {str(e)}")
+                except Exception:
+                    pass
+
+            if isinstance(e, GeneratorExit):
+                return
+
         finally:
-            # 确保异常时也能保存日志
             if not prompt_logger._finalized:
-                svc_logger.warning("Generator exited abnormally, forcing log save")
                 prompt_logger.finalize(
                     final_text_length=prompt_logger._final_text_length,
                     total_iterations=prompt_logger._total_iterations,

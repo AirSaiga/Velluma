@@ -42,6 +42,8 @@
 from typing import Any, Dict, Optional, TYPE_CHECKING
 import logging
 
+from sqlalchemy.orm import selectinload
+
 if TYPE_CHECKING:
     from backend.repositories.base import BaseRepository
 
@@ -219,8 +221,11 @@ def adapt_request_to_config(
     )
     
     # 执行参数推导
+    logger.info("[adapt_request_to_config] 开始创建 DerivationEngine")
     engine = DerivationEngine()
+    logger.info("[adapt_request_to_config] 开始调用 engine.derive")
     config = engine.derive(config)
+    logger.info("[adapt_request_to_config] engine.derive 完成")
     
     # 验证
     valid, errors = ConfigValidator.validate(config)
@@ -409,33 +414,31 @@ class RuntimeContextBuilder:
         
         if chapter_repo:
             from backend.models import ChapterEntity
-            spec = chapter_repo.build_query(
+            entities = await chapter_repo.find_all(
                 model=ChapterEntity,
                 conditions=[ChapterEntity.chapter_id == config.chapter_id],
+                options=[selectinload(ChapterEntity.character)],
             )
-            entities = await chapter_repo.find_all(spec=spec)
             context["characters"] = [e.character for e in entities if hasattr(e, 'character') and e.character]
         
         if relationship_repo and entities:
             from backend.models import CharacterRelationship
             character_ids = [e.entity_id for e in entities if e.entity_id]
             if character_ids:
-                spec = relationship_repo.build_query(
+                context["relationships"] = await relationship_repo.find_all(
                     model=CharacterRelationship,
                     conditions=[
                         CharacterRelationship.source_char_id.in_(character_ids),
                         CharacterRelationship.target_char_id.in_(character_ids),
                     ]
                 )
-                context["relationships"] = await relationship_repo.find_all(spec=spec)
         
         if map_repo:
             from backend.models import ChapterMapLocation
-            spec = map_repo.build_query(
+            context["locations"] = await map_repo.find_all(
                 model=ChapterMapLocation,
                 conditions=[ChapterMapLocation.chapter_id == config.chapter_id],
             )
-            context["locations"] = await map_repo.find_all(spec=spec)
         
         if plot_repo and chapter.book_id:
             hooks = await plot_repo.get_open_hooks(
@@ -531,33 +534,30 @@ async def build_runtime_context_with_rag(
     entities = []
     if chapter_repo:
         from backend.models import ChapterEntity
-        spec = chapter_repo.build_query(
+        entities = await chapter_repo.find_all(
             model=ChapterEntity,
             conditions=[ChapterEntity.chapter_id == config.chapter_id],
         )
-        entities = await chapter_repo.find_all(spec=spec)
         context["characters"] = [e.character for e in entities if hasattr(e, 'character') and e.character]
-    
+
     if relationship_repo and entities:
         from backend.models import CharacterRelationship
         character_ids = [e.entity_id for e in entities if e.entity_id]
         if character_ids:
-            spec = relationship_repo.build_query(
+            context["relationships"] = await relationship_repo.find_all(
                 model=CharacterRelationship,
                 conditions=[
                     CharacterRelationship.source_char_id.in_(character_ids),
                     CharacterRelationship.target_char_id.in_(character_ids),
                 ]
             )
-            context["relationships"] = await relationship_repo.find_all(spec=spec)
-    
+
     if map_repo:
         from backend.models import ChapterMapLocation
-        spec = map_repo.build_query(
+        context["locations"] = await map_repo.find_all(
             model=ChapterMapLocation,
             conditions=[ChapterMapLocation.chapter_id == config.chapter_id],
         )
-        context["locations"] = await map_repo.find_all(spec=spec)
     
     if chapter_repo and chapter.book_id and chapter.chapter_number > 1:
         from backend.models import Chapter

@@ -159,9 +159,11 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     try:
         from backend.config import DerivationEngine, GenerationConfig
         from backend.config.adapter import adapt_request_to_config
-        
+
+        logger.info("[resolve_high_level_params] 开始调用 adapt_request_to_config")
         # 使用适配器构建配置，自动执行推导
         config = adapt_request_to_config(request)
+        logger.info("[resolve_high_level_params] adapt_request_to_config 完成")
         
         rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
             config.rag.semantic_weight,
@@ -176,7 +178,7 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
             "rag_gamma": rag_gamma,
         }
     except Exception as e:
-        logger.warning(f"[resolve_high_level_params] 使用 DerivationEngine 失败，回退到默认值: {e}")
+        logger.error(f"[resolve_high_level_params] 使用 DerivationEngine 失败: {type(e).__name__}: {e}", exc_info=True)
         # 回退到默认值
         rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
             AGENTIC_DEFAULT_RAG_ALPHA, 0.2, 0.2

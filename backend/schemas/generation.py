@@ -27,6 +27,7 @@ from .enums import (
     ReasoningEffortLevel,
     WorkflowTier,
 )
+from .beat import PersistentStateAnchor
 
 
 class ReasoningConfig(BaseModel):
