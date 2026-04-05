@@ -100,6 +100,9 @@ class DerivationEngine:
 
     def _derive_workflow_tier(self, config: GenerationConfig) -> None:
         """推导工作流层级"""
+        if not config.chapter:
+            return
+
         if config.chapter.workflow_tier:
             return
 
@@ -113,6 +116,9 @@ class DerivationEngine:
 
     def _derive_iteration_params(self, config: GenerationConfig) -> None:
         """推导迭代相关参数"""
+        if not config.chapter:
+            return
+
         if config.chapter.workflow_tier and not config.workflow.max_iterations:
             config.workflow.max_iterations = self._apply_rule(
                 TIER_TO_ITERATIONS_RULE, config.chapter.workflow_tier, config
@@ -120,6 +126,9 @@ class DerivationEngine:
 
     def _derive_dual_track_config(self, config: GenerationConfig) -> None:
         """推导双轨配置"""
+        if not config.chapter:
+            return
+
         if config.chapter.workflow_tier and config.workflow.dual_track.enable_sketch_track is None:
             config.workflow.dual_track.enable_sketch_track = self._apply_rule(
                 TIER_TO_DUAL_TRACK_RULE, config.chapter.workflow_tier, config
