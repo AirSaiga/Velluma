@@ -52,27 +52,27 @@ $Global:CleanupDone = $false
 # =============================================================================
 function Write-Step {
     param([string]$Message)
-    Write-Host "`n[▶] $Message" -ForegroundColor Cyan
+    Write-Host "`n[>] $Message" -ForegroundColor Cyan
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "[✓] $Message" -ForegroundColor Green
+    Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
-function Write-Error {
+function Write-Err {
     param([string]$Message)
-    Write-Host "[✗] $Message" -ForegroundColor Red
+    Write-Host "[ERR] $Message" -ForegroundColor Red
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "[ℹ] $Message" -ForegroundColor Gray
+    Write-Host "[*] $Message" -ForegroundColor Gray
 }
 
 function Write-Wait {
     param([string]$Message)
-    Write-Host "[⏳] $Message" -ForegroundColor Yellow -NoNewline
+    Write-Host "[...] $Message" -ForegroundColor Yellow -NoNewline
 }
 
 # =============================================================================
@@ -120,7 +120,7 @@ function Stop-ProcessOnPort {
             Write-Success "$Name 已停止"
             return $true
         } catch {
-            Write-Error "无法停止进程: $_"
+            Write-Err "无法停止进程: $_"
             return $false
         }
     }
@@ -163,7 +163,7 @@ function Invoke-Cleanup {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
-    Write-Host "`n" -NoNewline
+    Write-Host ""
     Write-Step "正在清理进程..."
     
     # 停止记录的子进程
@@ -187,9 +187,10 @@ function Invoke-Cleanup {
     Write-Success "清理完成"
 }
 
-# 注册清理处理器
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Invoke-Cleanup }
-[Console]::TreatControlCAsInput = $true
+# 注册 Ctrl+C 处理器
+try {
+    [Console]::TreatControlCAsInput = $false
+} catch {}
 
 # =============================================================================
 # 服务启动函数
@@ -300,7 +301,7 @@ function Start-ElectronApp {
     $env:VELLUMA_FRONTEND_PORT = $Config.FrontendPort.ToString()
     $env:VELLUMA_SERVICES_READY = "1"
     
-    # 启动 Electron
+    # 启动 Electron - 使用 -Wait 参数让 PowerShell 等待进程退出
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "electron:dev" `
         -WorkingDirectory $frontendDir `
@@ -323,22 +324,17 @@ function Show-Banner {
     Write-Host ""
 }
 
-function Show-Usage {
-    Write-Host ""
-    Write-Host "使用方法:" -ForegroundColor White
-    Write-Host "  .\start.ps1              # 正常启动" -ForegroundColor Gray
-    Write-Host "  .\start.ps1 -Force       # 强制清理端口后启动" -ForegroundColor Gray
-    Write-Host "  .\start.ps1 -SkipBackend # 跳过后端启动" -ForegroundColor Gray
-    Write-Host "  .\start.ps1 -ElectronOnly # 只启动 Electron" -ForegroundColor Gray
-    Write-Host ""
-}
-
 function Main {
     Show-Banner
     
     # 检查参数
     if ($Force) {
         Write-Info "强制模式: 将清理端口占用"
+    }
+    
+    # 设置清理钩子
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+        Invoke-Cleanup
     }
     
     try {
@@ -359,27 +355,18 @@ function Main {
         Write-Host "  前端 Dev:   http://127.0.0.1:$($Config.FrontendPort)" -ForegroundColor Gray
         Write-Host "  API 文档:   http://127.0.0.1:$($Config.BackendPort)/docs" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "  按 Ctrl+C 停止所有服务" -ForegroundColor Yellow
+        Write-Host "  Electron 正在运行，关闭窗口将停止所有服务" -ForegroundColor Yellow
         Write-Host "============================================================" -ForegroundColor Green
         
-        # 等待 Electron 退出
-        while (!$electronProc.HasExited) {
-            # 检查 Ctrl+C
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if ($key.Key -eq "C" -and $key.Modifiers -eq "Control") {
-                    throw "用户取消"
-                }
-            }
-            Start-Sleep -Milliseconds 100
-        }
+        # 等待 Electron 退出（使用同步等待）
+        $null = $electronProc.WaitForExit()
         
-        Write-Host "`n"
+        Write-Host ""
         Write-Info "Electron 已退出"
         
     } catch {
-        Write-Host "`n"
-        Write-Error "启动失败: $_"
+        Write-Host ""
+        Write-Err "启动失败: $_"
         exit 1
     } finally {
         Invoke-Cleanup

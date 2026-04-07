@@ -15,9 +15,6 @@ const FIXED_BACKEND_PORT = parseInt(process.env.VELLUMA_BACKEND_PORT) || 8002
 // 工具函数
 // =============================================================================
 
-/**
- * 等待端口就绪 - 带重试机制
- */
 function waitForPort(port, options = {}) {
   const { 
     timeout = 30000, 
@@ -27,7 +24,6 @@ function waitForPort(port, options = {}) {
   
   return new Promise((resolve, reject) => {
     const startTime = Date.now()
-    const attempts = Math.ceil(timeout / interval)
     let currentAttempt = 0
     
     const check = () => {
@@ -35,13 +31,13 @@ function waitForPort(port, options = {}) {
       const client = new net.Socket()
       client.setTimeout(2000)
       
-      client.connect(port, '127.0.0.1', () => {
+      client.once('connect', () => {
         client.destroy()
-        console.log(`[${serviceName}] Port ${port} is ready after ${currentAttempt} attempts`)
+        console.log(`[${serviceName}] Port ${port} ready (${currentAttempt} attempts)`)
         resolve({ port, attempts: currentAttempt, elapsed: Date.now() - startTime })
       })
       
-      client.on('error', (err) => {
+      client.once('error', () => {
         client.destroy()
         if (Date.now() - startTime > timeout) {
           reject(new Error(`${serviceName} timeout after ${timeout}ms`))
@@ -50,23 +46,22 @@ function waitForPort(port, options = {}) {
         }
       })
       
-      client.on('timeout', () => {
+      client.once('timeout', () => {
         client.destroy()
         setTimeout(check, interval)
       })
+      
+      client.connect(port, '127.0.0.1')
     }
     
     check()
   })
 }
 
-/**
- * 检查 HTTP 服务健康状态
- */
 function checkHealth(url, options = {}) {
   const { timeout = 5000, retries = 3 } = options
   
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let attempts = 0
     
     const tryCheck = () => {
@@ -74,20 +69,18 @@ function checkHealth(url, options = {}) {
       const req = http.get(url, { timeout }, (res) => {
         if (res.statusCode < 500) {
           resolve({ healthy: true, statusCode: res.statusCode, attempts })
+        } else if (attempts < retries) {
+          setTimeout(tryCheck, 1000)
         } else {
-          if (attempts < retries) {
-            setTimeout(tryCheck, 1000)
-          } else {
-            resolve({ healthy: false, statusCode: res.statusCode, attempts })
-          }
+          resolve({ healthy: false, statusCode: res.statusCode, attempts })
         }
       })
       
-      req.on('error', (err) => {
+      req.on('error', () => {
         if (attempts < retries) {
           setTimeout(tryCheck, 1000)
         } else {
-          resolve({ healthy: false, error: err.message, attempts })
+          resolve({ healthy: false, error: 'Request failed', attempts })
         }
       })
       
@@ -105,16 +98,12 @@ function checkHealth(url, options = {}) {
   })
 }
 
-/**
- * 启动后端服务
- */
 async function startBackend() {
   const port = FIXED_BACKEND_PORT
   console.log(`[Backend] Checking port ${port}...`)
 
-  // 检查是否已在运行
   try {
-    await waitForPort(port, { timeout: 500, serviceName: 'Backend Check' })
+    await waitForPort(port, { timeout: 500, serviceName: 'Backend' })
     console.log(`[Backend] Already running on port ${port}`)
     return { port, started: false }
   } catch {
@@ -125,8 +114,6 @@ async function startBackend() {
   const venvPaths = [
     join(projectRoot, '.venv', 'Scripts', 'python.exe'),
     join(projectRoot, 'venv', 'Scripts', 'python.exe'),
-    join(projectRoot, '.venv', 'bin', 'python'),
-    join(projectRoot, 'venv', 'bin', 'python'),
   ]
   
   let pythonPath = venvPaths.find(p => require('fs').existsSync(p))
@@ -134,7 +121,7 @@ async function startBackend() {
     throw new Error('Python venv not found')
   }
   
-  console.log(`[Backend] Starting with Python: ${pythonPath}`)
+  console.log(`[Backend] Starting: ${pythonPath}`)
 
   backendProcess = spawn(pythonPath, ['-m', 'backend.main'], {
     cwd: projectRoot,
@@ -151,45 +138,28 @@ async function startBackend() {
   })
 
   backendProcess.stderr.on('data', (data) => {
-    console.error(`[Backend Error] ${data.toString().trim()}`)
+    console.error(`[Backend] ${data.toString().trim()}`)
   })
 
   backendProcess.on('close', (code) => {
-    console.log(`[Backend] Process exited with code ${code}`)
+    console.log(`[Backend] Exited with code ${code}`)
     backendProcess = null
   })
 
-  // 等待后端就绪
-  await waitForPort(port, { 
-    timeout: 60000, 
-    serviceName: 'Backend',
-    interval: 500 
-  })
+  await waitForPort(port, { timeout: 60000, serviceName: 'Backend' })
   
-  // 健康检查
-  const health = await checkHealth(`http://127.0.0.1:${port}/health`, { retries: 5 })
-  if (!health.healthy) {
-    console.warn('[Backend] Health check warning:', health)
-  }
+  const health = await checkHealth(`http://127.0.0.1:${port}/api/health`, { retries: 5 })
+  console.log(`[Backend] Health check:`, health.healthy ? 'OK' : 'Warning')
   
-  console.log(`[Backend] Ready on port ${port}`)
   return { port, started: true }
 }
 
-/**
- * 等待前端服务就绪
- */
 async function waitForFrontend() {
   const port = FIXED_VITE_PORT
-  console.log(`[Frontend] Waiting for Vite on port ${port}...`)
+  console.log(`[Frontend] Waiting for port ${port}...`)
   
-  const result = await waitForPort(port, { 
-    timeout: 60000, 
-    serviceName: 'Frontend',
-    interval: 500 
-  })
-  
-  console.log(`[Frontend] Vite ready on port ${port}`)
+  await waitForPort(port, { timeout: 60000, serviceName: 'Frontend' })
+  console.log(`[Frontend] Ready on port ${port}`)
   return { port }
 }
 
@@ -197,11 +167,8 @@ async function waitForFrontend() {
 // 窗口管理
 // =============================================================================
 
-/**
- * 创建加载窗口
- */
 function createLoadingWindow() {
-  const loadingWin = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 400,
     height: 300,
     frame: false,
@@ -213,68 +180,47 @@ function createLoadingWindow() {
     }
   })
   
-  loadingWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body {
-          margin: 0;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-          color: #fff;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .spinner {
-          width: 40px;
-          height: 40px;
-          border: 3px solid rgba(255,255,255,0.1);
-          border-top-color: #00d4aa;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 20px;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        h2 { margin: 0 0 10px; font-size: 18px; font-weight: 500; }
-        p { margin: 0; font-size: 13px; opacity: 0.7; }
-        .status { margin-top: 15px; font-size: 12px; color: #00d4aa; }
-      </style>
-    </head>
-    <body>
-      <div class="spinner"></div>
-      <h2>Velluma AI</h2>
-      <p>正在启动服务...</p>
-      <p class="status" id="status">检查后端服务</p>
-      <script>
-        const statuses = [
-          '检查后端服务',
-          '连接前端开发服务器',
-          '加载应用资源',
-          '即将完成...'
-        ];
-        let i = 0;
-        setInterval(() => {
-          document.getElementById('status').textContent = statuses[i % statuses.length];
-          i++;
-        }, 2000);
-      </script>
-    </body>
-    </html>
-  `)}`)
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #00d4aa;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { margin: 0 0 10px; font-size: 18px; font-weight: 500; }
+    p { margin: 0; font-size: 13px; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h2>Velluma AI</h2>
+  <p>正在启动服务...</p>
+</body>
+</html>`
   
-  return loadingWin
+  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  return win
 }
 
-/**
- * 创建主窗口
- */
 async function createMainWindow() {
   let loadingWin = null
   
@@ -286,26 +232,21 @@ async function createMainWindow() {
   let vitePort = FIXED_VITE_PORT
   
   try {
-    // 开发模式下确保服务就绪
     if (isDev) {
-      // 1. 检查/启动后端
       if (process.env.VELLUMA_SERVICES_READY !== '1') {
         backendResult = await startBackend()
       } else {
-        console.log('[Main] Services marked as ready by launcher')
+        console.log('[Main] Services ready flag set')
         await waitForPort(FIXED_BACKEND_PORT, { timeout: 10000, serviceName: 'Backend' })
       }
       
-      // 2. 等待前端就绪
       await waitForFrontend()
       
-      // 关闭加载窗口
       if (loadingWin && !loadingWin.isDestroyed()) {
         loadingWin.close()
       }
     }
     
-    // 创建主窗口
     const win = new BrowserWindow({
       width: 1400,
       height: 900,
@@ -315,58 +256,42 @@ async function createMainWindow() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: join(__dirname, 'preload.cjs'),
-        // 添加重连相关的安全设置
-        webSecurity: true,
-        allowRunningInsecureContent: false
+        preload: join(__dirname, 'preload.cjs')
       }
     })
     
-    // 开发模式 CSP 设置
     if (isDev) {
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-        const csp = "default-src 'self'; " +
-          "script-src 'self' 'unsafe-eval' 'unsafe-inline'; " +
-          "style-src 'self' 'unsafe-inline'; " +
-          "img-src 'self' data: blob:; " +
-          "font-src 'self' data:; " +
-          "connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"
         callback({
           responseHeaders: {
             ...details.responseHeaders,
-            'Content-Security-Policy': [csp]
+            'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
           }
         })
       })
     }
     
-    // 加载 URL
     if (isDev) {
       const url = `http://localhost:${vitePort}?backendPort=${backendResult.port}`
-      console.log(`[Main] Loading URL: ${url}`)
+      console.log(`[Main] Loading: ${url}`)
       
-      // 使用 retry 机制加载
-      let loadAttempts = 0
+      // Retry loading
+      let attempts = 0
       const maxAttempts = 10
       
-      const tryLoad = async () => {
-        loadAttempts++
+      while (attempts < maxAttempts) {
+        attempts++
         try {
           await win.loadURL(url)
-          console.log(`[Main] Loaded successfully after ${loadAttempts} attempts`)
+          console.log(`[Main] Loaded after ${attempts} attempts`)
           win.webContents.openDevTools()
+          break
         } catch (err) {
-          if (loadAttempts < maxAttempts) {
-            console.log(`[Main] Load attempt ${loadAttempts} failed, retrying in 1s...`)
-            setTimeout(tryLoad, 1000)
-          } else {
-            console.error('[Main] Failed to load after max attempts')
-            throw err
-          }
+          if (attempts >= maxAttempts) throw err
+          console.log(`[Main] Load attempt ${attempts} failed, retrying...`)
+          await new Promise(r => setTimeout(r, 1000))
         }
       }
-      
-      await tryLoad()
     } else {
       win.loadFile(join(__dirname, '../dist/index.html'))
     }
@@ -381,11 +306,8 @@ async function createMainWindow() {
   }
 }
 
-/**
- * 创建调试窗口
- */
 function createDebugWindow(backendPort, vitePort) {
-  const debugWindow = new BrowserWindow({
+  const debugWin = new BrowserWindow({
     width: 800,
     height: 600,
     title: 'Prompt Debug',
@@ -397,12 +319,12 @@ function createDebugWindow(backendPort, vitePort) {
   })
 
   if (isDev) {
-    debugWindow.loadURL(`http://localhost:${vitePort}?backendPort=${backendPort}&debug=true`)
+    debugWin.loadURL(`http://localhost:${vitePort}?backendPort=${backendPort}&debug=true`)
   } else {
-    debugWindow.loadFile(join(__dirname, '../dist/index.html'), { query: { debug: 'true' } })
+    debugWin.loadFile(join(__dirname, '../dist/index.html'), { query: { debug: 'true' } })
   }
 
-  return debugWindow
+  return debugWin
 }
 
 // =============================================================================
@@ -413,11 +335,9 @@ app.whenReady().then(async () => {
   try {
     const { win, backendPort, vitePort } = await createMainWindow()
     
-    let debugWin = createDebugWindow(backendPort, vitePort)
+    const debugWin = createDebugWindow(backendPort, vitePort)
     
-    debugWin.on('closed', () => {
-      debugWin = null
-    })
+    debugWin.on('closed', () => {})
     
     ipcMain.on('prompt-data', (event, data) => {
       if (debugWin && !debugWin.isDestroyed()) {
@@ -425,11 +345,8 @@ app.whenReady().then(async () => {
       }
     })
     
-    // 窗口关闭处理
     win.on('closed', () => {
-      if (debugWin && !debugWin.isDestroyed()) {
-        debugWin.close()
-      }
+      if (!debugWin.isDestroyed()) debugWin.close()
     })
 
     app.on('activate', () => {
@@ -439,31 +356,23 @@ app.whenReady().then(async () => {
     })
     
   } catch (err) {
-    console.error('[App] Failed to start:', err)
-    
-    // 显示错误对话框
+    console.error('[App] Failed:', err)
     const { dialog } = require('electron')
-    dialog.showErrorBox('启动失败', `无法启动 Velluma: ${err.message}`)
+    dialog.showErrorBox('启动失败', err.message)
     app.quit()
   }
 })
 
 app.on('window-all-closed', () => {
   if (backendProcess) {
-    console.log('[App] Stopping backend process...')
+    console.log('[App] Stopping backend...')
     backendProcess.kill()
-    backendProcess = null
   }
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
-// 处理未捕获的错误
 process.on('uncaughtException', (err) => {
-  console.error('[App] Uncaught exception:', err)
-})
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[App] Unhandled rejection at:', promise, 'reason:', reason)
+  console.error('[App] Uncaught:', err)
 })
