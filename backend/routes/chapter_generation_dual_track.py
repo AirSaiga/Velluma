@@ -166,9 +166,29 @@ async def generate_chapter_dual_track(
         )
 
     async def generate_stream():
+        """
+        双轨生成流式处理主函数。
+        
+        流程阶段：
+        1. ASSEMBLING_CONTEXT: 加载章节上下文
+        2. GENERATION_RUN: 初始化生成任务
+        3. CONTEXT_LOADED: 加载角色/关系数据
+        4. BEATS_CONFIRMED: 确认节拍数据
+        5. GENERATING_BEATS: 生成节拍正文
+        6. STITCHING: 统稿拼接
+        7. ALIGNING: 对抗校对
+        8. REFINING: 精修（可选）
+        9. COMPLETED: 完成
+        
+        错误处理：
+        - 所有异常都会被捕获并转化为 ERROR 事件
+        - 确保即使失败也能返回部分结果
+        """
         import asyncio
         
-        # 初始化 Prompt 日志记录器
+        # ===================================================================
+        # Phase 0: 初始化
+        # ===================================================================
         prompt_logger = create_logger(chapter_id=chapter_id, book_id=None)
         prompt_logger._finalized = False
         prompt_logger._final_text_length = 0
@@ -196,6 +216,9 @@ async def generate_chapter_dual_track(
                 "relationship": RelationshipRepository(db),
             }
 
+            # ===================================================================
+            # Phase 1: 加载上下文
+            # ===================================================================
             context = await load_full_chapter_context(
                 chapter_id, repos,
                 rag_params=resolved_params if request.is_basic_mode() else None,
@@ -249,6 +272,9 @@ async def generate_chapter_dual_track(
                 chapter.pacing_style = request.pacing_style
             await db.commit()
 
+            # ===================================================================
+            # Phase 2: 加载实体和关系数据
+            # ===================================================================
             yield build_sse_event("ASSEMBLING_CONTEXT", "正在回顾前文与检索相关伏笔...")
 
             entities_list = list(context.entities)
