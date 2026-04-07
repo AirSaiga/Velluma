@@ -48,6 +48,15 @@ class PlotLedgerStatus(str, Enum):
     DROPPED = "dropped"
 
 
+class TaskStatus(str, Enum):
+    """生成任务状态"""
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 # ============================================================
 # 叙事主体层 - Book 是整个系统的根节点
 # ============================================================
@@ -570,12 +579,6 @@ class PlotLedger(Base):
             name="ck_plot_ledgers_status_valid",
         ),
     )
-    PENDING = "pending"      # 等待执行
-    RUNNING = "running"      # 执行�?
-    SUCCESS = "success"      # 成功完成
-    FAILED = "failed"        # 执行失败
-    REVOKED = "revoked"      # 被取�?
-    RETRYING = "retrying"    # 重试�?
 
 
 class GenerationTask(Base):

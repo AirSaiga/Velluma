@@ -1,41 +1,21 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-    Velluma 完整启动脚本 - 依次启动后端、前端、Electron
-.DESCRIPTION
-    1. 启动后端 (port 8002)
-    2. 等待后端就绪
-    3. 启动前端 Vite (port 5175)
-    4. 等待前端就绪
-    5. 启动 Electron
-    
-    特性：
-    - 健康检查与超时等待
-    - 端口冲突自动清理
-    - 优雅的错误处理和日志
-    - Ctrl+C 优雅关闭所有服务
-#>
-
-[CmdletBinding()]
 param(
-    [switch]$Force,           # 强制清理端口占用
-    [switch]$SkipBackend,     # 跳过后端启动
-    [switch]$SkipFrontend,    # 跳过前端启动
-    [switch]$ElectronOnly     # 只启动 Electron（假设前后端已在运行）
+    [switch]$Force,
+    [switch]$SkipBackend,
+    [switch]$SkipFrontend,
+    [switch]$ElectronOnly
 )
 
 $ErrorActionPreference = "Stop"
 
-# =============================================================================
-# 配置
-# =============================================================================
+# Config
 $Config = @{
     BackendPort   = 8002
     FrontendPort  = 5175
-    ProjectRoot   = Split-Path -Parent $PSScriptRoot
-    BackendTimeout = 60        # 后端启动超时（秒）
-    FrontendTimeout = 30       # 前端启动超时（秒）
-    HealthCheckInterval = 500  # 健康检查间隔（毫秒）
+    ProjectRoot   = $PSScriptRoot
+    BackendTimeout = 60
+    FrontendTimeout = 30
+    HealthCheckInterval = 500
     PythonModule  = "backend.main"
     VenvPaths     = @(
         ".venv\Scripts\python.exe"
@@ -43,43 +23,36 @@ $Config = @{
     )
 }
 
-# 全局进程列表（用于清理）
 $Global:ChildProcesses = @()
 $Global:CleanupDone = $false
 
 # =============================================================================
-# 日志函数
+# Utility Functions
 # =============================================================================
-function Write-Step {
-    param([string]$Message)
+function Log-Step($Message) {
     Write-Host "`n[>] $Message" -ForegroundColor Cyan
 }
 
-function Write-Success {
-    param([string]$Message)
+function Log-Success($Message) {
     Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
-function Write-Err {
-    param([string]$Message)
+function Log-Error($Message) {
     Write-Host "[ERR] $Message" -ForegroundColor Red
 }
 
-function Write-Info {
-    param([string]$Message)
+function Log-Info($Message) {
     Write-Host "[*] $Message" -ForegroundColor Gray
 }
 
-function Write-Wait {
-    param([string]$Message)
+function Log-Wait($Message) {
     Write-Host "[...] $Message" -ForegroundColor Yellow -NoNewline
 }
 
 # =============================================================================
-# 端口和进程管理
+# Port and Process Management
 # =============================================================================
-function Test-PortOpen {
-    param([int]$Port)
+function Test-PortOpen($Port) {
     try {
         $client = New-Object System.Net.Sockets.TcpClient
         $result = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
@@ -96,8 +69,7 @@ function Test-PortOpen {
     }
 }
 
-function Get-ProcessUsingPort {
-    param([int]$Port)
+function Get-ProcessOnPort($Port) {
     try {
         $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | 
                 Where-Object { $_.State -eq "Listen" } | 
@@ -109,37 +81,30 @@ function Get-ProcessUsingPort {
     return $null
 }
 
-function Stop-ProcessOnPort {
-    param([int]$Port, [string]$Name)
-    $proc = Get-ProcessUsingPort -Port $Port
+function Kill-ProcessOnPort($Port, $Name) {
+    $proc = Get-ProcessOnPort -Port $Port
     if ($proc) {
-        Write-Info "正在停止占用端口 $Port 的 $Name (PID: $($proc.Id))..."
+        Log-Info "Stopping $Name on port $Port (PID: $($proc.Id))..."
         try {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 2
-            Write-Success "$Name 已停止"
+            Log-Success "$Name stopped"
             return $true
         } catch {
-            Write-Err "无法停止进程: $_"
+            Log-Error "Failed to stop process: $_"
             return $false
         }
     }
     return $false
 }
 
-function Wait-ForService {
-    param(
-        [int]$Port,
-        [string]$Name,
-        [int]$TimeoutSeconds = 30
-    )
-    
+function Wait-ForService($Port, $Name, $TimeoutSeconds = 30) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $dots = 0
     
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if (Test-PortOpen -Port $Port) {
-            Write-Host " 就绪!" -ForegroundColor Green
+            Write-Host " Ready!" -ForegroundColor Green
             return $true
         }
         
@@ -148,92 +113,81 @@ function Wait-ForService {
         $dots++
         
         if ($dots % 10 -eq 0) {
-            Write-Host " ($([math]::Round($sw.Elapsed.TotalSeconds))s)" -ForegroundColor DarkGray -NoNewline
+            $elapsed = [math]::Round($sw.Elapsed.TotalSeconds)
+            Write-Host " (${elapsed}s)" -ForegroundColor DarkGray -NoNewline
         }
     }
     
-    Write-Host ""  # New line
-    throw "$Name 在端口 $Port 启动超时 (${TimeoutSeconds}秒)"
+    Write-Host ""
+    throw "$Name timeout on port $Port (${TimeoutSeconds}s)"
 }
 
 # =============================================================================
-# 清理函数
+# Cleanup
 # =============================================================================
-function Invoke-Cleanup {
+function Invoke-Cleanup() {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
     Write-Host ""
-    Write-Step "正在清理进程..."
+    Log-Step "Cleaning up..."
     
-    # 停止记录的子进程
     foreach ($proc in $Global:ChildProcesses) {
         if ($proc -and !$proc.HasExited) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-                Write-Info "已停止 PID $($proc.Id)"
-            } catch {
-                # Ignore errors during cleanup
-            }
+                Log-Info "Stopped PID $($proc.Id)"
+            } catch {}
         }
     }
     
-    # 清理可能残留的 Python 和 Node 进程
     $ports = @($Config.BackendPort, $Config.FrontendPort)
     foreach ($port in $ports) {
-        Stop-ProcessOnPort -Port $port -Name "服务" | Out-Null
+        Kill-ProcessOnPort -Port $port -Name "service" | Out-Null
     }
     
-    Write-Success "清理完成"
+    Log-Success "Cleanup done"
 }
 
-# 注册 Ctrl+C 处理器
-try {
-    [Console]::TreatControlCAsInput = $false
-} catch {}
-
 # =============================================================================
-# 服务启动函数
+# Service Startup
 # =============================================================================
-function Find-PythonPath {
+function Find-Python() {
     foreach ($path in $Config.VenvPaths) {
         $fullPath = Join-Path $Config.ProjectRoot $path
         if (Test-Path $fullPath) {
             return $fullPath
         }
     }
-    throw "找不到 Python 虚拟环境。请确保 .venv 或 venv 存在。"
+    throw "Python venv not found. Please ensure .venv or venv exists."
 }
 
-function Start-BackendService {
+function Start-Backend() {
     if ($SkipBackend -or $ElectronOnly) {
         if (Test-PortOpen -Port $Config.BackendPort) {
-            Write-Success "后端已在端口 $($Config.BackendPort) 运行"
+            Log-Success "Backend already running on port $($Config.BackendPort)"
             return
         }
-        throw "后端未运行且指定了跳过参数"
+        throw "Backend not running but skip flag set"
     }
     
-    Write-Step "启动后端服务..."
+    Log-Step "Starting Backend..."
     
-    # 检查是否已在运行
     if (Test-PortOpen -Port $Config.BackendPort) {
         if ($Force) {
-            Stop-ProcessOnPort -Port $Config.BackendPort -Name "后端服务" | Out-Null
+            Kill-ProcessOnPort -Port $Config.BackendPort -Name "backend" | Out-Null
         } else {
-            Write-Success "后端已在端口 $($Config.BackendPort) 运行"
+            Log-Success "Backend already running on port $($Config.BackendPort)"
             return
         }
     }
     
-    $pythonPath = Find-PythonPath
-    Write-Info "使用 Python: $pythonPath"
+    $pythonPath = Find-Python
+    Log-Info "Using Python: $pythonPath"
     
-    # 设置环境变量
     $env:VELLUMA_PORT = $Config.BackendPort.ToString()
     $env:PYTHONUNBUFFERED = "1"
     
-    # 启动后端进程
     $proc = Start-Process -FilePath $pythonPath `
         -ArgumentList "-m", $Config.PythonModule `
         -WorkingDirectory $Config.ProjectRoot `
@@ -242,42 +196,39 @@ function Start-BackendService {
     
     $Global:ChildProcesses += $proc
     
-    Write-Wait "等待后端就绪 (端口 $($Config.BackendPort))..."
-    Wait-ForService -Port $Config.BackendPort -Name "后端服务" -TimeoutSeconds $Config.BackendTimeout
-    Write-Success "后端服务已就绪 http://127.0.0.1:$($Config.BackendPort)"
+    Log-Wait "Waiting for backend (port $($Config.BackendPort))..."
+    Wait-ForService -Port $Config.BackendPort -Name "Backend" -TimeoutSeconds $Config.BackendTimeout
+    Log-Success "Backend ready at http://127.0.0.1:$($Config.BackendPort)"
 }
 
-function Start-FrontendService {
+function Start-Frontend() {
     if ($SkipFrontend -or $ElectronOnly) {
         if (Test-PortOpen -Port $Config.FrontendPort) {
-            Write-Success "前端已在端口 $($Config.FrontendPort) 运行"
+            Log-Success "Frontend already running on port $($Config.FrontendPort)"
             return
         }
-        throw "前端未运行且指定了跳过参数"
+        throw "Frontend not running but skip flag set"
     }
     
-    Write-Step "启动前端服务..."
+    Log-Step "Starting Frontend..."
     
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
     
-    # 检查 node_modules
     if (!(Test-Path (Join-Path $frontendDir "node_modules"))) {
-        throw "找不到 node_modules。请先运行: cd frontend && npm install"
+        throw "node_modules not found. Please run: cd frontend && npm install"
     }
     
-    # 检查是否已在运行
     if (Test-PortOpen -Port $Config.FrontendPort) {
         if ($Force) {
-            Stop-ProcessOnPort -Port $Config.FrontendPort -Name "前端服务" | Out-Null
+            Kill-ProcessOnPort -Port $Config.FrontendPort -Name "frontend" | Out-Null
         } else {
-            Write-Success "前端已在端口 $($Config.FrontendPort) 运行"
+            Log-Success "Frontend already running on port $($Config.FrontendPort)"
             return
         }
     }
     
-    Write-Info "启动 Vite 开发服务器..."
+    Log-Info "Starting Vite dev server..."
     
-    # 启动前端进程（使用 cmd 来正确执行 npm）
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "dev" `
         -WorkingDirectory $frontendDir `
@@ -286,22 +237,20 @@ function Start-FrontendService {
     
     $Global:ChildProcesses += $proc
     
-    Write-Wait "等待前端就绪 (端口 $($Config.FrontendPort))..."
-    Wait-ForService -Port $Config.FrontendPort -Name "前端服务" -TimeoutSeconds $Config.FrontendTimeout
-    Write-Success "前端服务已就绪 http://127.0.0.1:$($Config.FrontendPort)"
+    Log-Wait "Waiting for frontend (port $($Config.FrontendPort))..."
+    Wait-ForService -Port $Config.FrontendPort -Name "Frontend" -TimeoutSeconds $Config.FrontendTimeout
+    Log-Success "Frontend ready at http://127.0.0.1:$($Config.FrontendPort)"
 }
 
-function Start-ElectronApp {
-    Write-Step "启动 Electron..."
+function Start-Electron() {
+    Log-Step "Starting Electron..."
     
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
     
-    # 设置环境变量让 Electron 知道服务已就绪
     $env:VELLUMA_BACKEND_PORT = $Config.BackendPort.ToString()
     $env:VELLUMA_FRONTEND_PORT = $Config.FrontendPort.ToString()
     $env:VELLUMA_SERVICES_READY = "1"
     
-    # 启动 Electron - 使用 -Wait 参数让 PowerShell 等待进程退出
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "electron:dev" `
         -WorkingDirectory $frontendDir `
@@ -309,69 +258,57 @@ function Start-ElectronApp {
     
     $Global:ChildProcesses += $proc
     
-    Write-Success "Electron 已启动 (PID: $($proc.Id))"
+    Log-Success "Electron started (PID: $($proc.Id))"
     
     return $proc
 }
 
 # =============================================================================
-# 主程序
+# Main
 # =============================================================================
-function Show-Banner {
+function Show-Banner() {
     Write-Host "`n============================================================" -ForegroundColor Cyan
     Write-Host "     Velluma AI Novel Writing Assistant" -ForegroundColor Cyan
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
 }
 
-function Main {
+function Main() {
     Show-Banner
     
-    # 检查参数
     if ($Force) {
-        Write-Info "强制模式: 将清理端口占用"
-    }
-    
-    # 设置清理钩子
-    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-        Invoke-Cleanup
+        Log-Info "Force mode: will clean port conflicts"
     }
     
     try {
-        # 1. 启动后端
-        Start-BackendService
+        Start-Backend
+        Start-Frontend
+        $electronProc = Start-Electron
         
-        # 2. 启动前端
-        Start-FrontendService
-        
-        # 3. 启动 Electron
-        $electronProc = Start-ElectronApp
-        
-        # 显示状态
         Write-Host "`n============================================================" -ForegroundColor Green
-        Write-Success "所有服务已启动!"
+        Log-Success "All services started!"
         Write-Host ""
-        Write-Host "  后端 API:   http://127.0.0.1:$($Config.BackendPort)" -ForegroundColor Gray
-        Write-Host "  前端 Dev:   http://127.0.0.1:$($Config.FrontendPort)" -ForegroundColor Gray
-        Write-Host "  API 文档:   http://127.0.0.1:$($Config.BackendPort)/docs" -ForegroundColor Gray
+        Write-Host "  Backend:  http://127.0.0.1:$($Config.BackendPort)" -ForegroundColor Gray
+        Write-Host "  Frontend: http://127.0.0.1:$($Config.FrontendPort)" -ForegroundColor Gray
+        Write-Host "  API Docs: http://127.0.0.1:$($Config.BackendPort)/docs" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "  Electron 正在运行，关闭窗口将停止所有服务" -ForegroundColor Yellow
+        Write-Host "  Electron is running. Close window to stop all services." -ForegroundColor Yellow
         Write-Host "============================================================" -ForegroundColor Green
         
-        # 等待 Electron 退出（使用同步等待）
+        # Wait for Electron to exit
         $null = $electronProc.WaitForExit()
         
         Write-Host ""
-        Write-Info "Electron 已退出"
+        Log-Info "Electron exited"
         
     } catch {
         Write-Host ""
-        Write-Err "启动失败: $_"
+        Log-Error "Startup failed: $_"
         exit 1
     } finally {
         Invoke-Cleanup
     }
 }
 
-# 运行主程序
+# Run
 Main
