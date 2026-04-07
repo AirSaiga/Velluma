@@ -913,6 +913,195 @@ async def _generate_prose_serial_v25(
     return all_results
 
 
+async def _generate_single_beat_parallel(
+    beat_index: int,
+    beat: dict,
+    scene_intent: dict,
+    subconscious: str,
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    flags: DraftingFeatureFlags,
+    creative_model: str,
+    reasoning_model: str,
+    api_key: str,
+    base_url: str,
+    word_count: int,
+    total_beats: int,
+    physical_state_lock: Optional[str],
+    entity_spatial_ledger: Optional[Dict[str, Any]],
+    chapter_assets_schema: str,
+    initial_emotional_state: str,
+    initial_relational_state: str,
+    enable_qc: bool,
+    stats_callback: LLMStatsCallback,
+) -> dict:
+    """
+    生成单个 Beat 的正文（并行策略）。
+    
+    与串行策略的区别：
+    - 不使用 Rolling Prefix（previous_tail 为空）
+    - 使用固定的初始情感状态
+    - 独立生成，不依赖其他 Beat
+    
+    Args:
+        beat_index: Beat 索引（从1开始）
+        beat: Beat 数据
+        scene_intent: Scene Intent
+        subconscious: Subconscious
+        chapter: 章节对象
+        book: 书籍对象
+        entities: 实体列表
+        relationships: 关系列表
+        flags: 功能标志
+        creative_model: 创作模型
+        reasoning_model: 推理模型
+        api_key: API Key
+        base_url: Base URL
+        word_count: 字数
+        total_beats: Beat 总数
+        physical_state_lock: 物理状态锁
+        entity_spatial_ledger: 实体空间台账
+        chapter_assets_schema: 章节资产模式
+        initial_emotional_state: 初始情感状态
+        initial_relational_state: 初始关系状态
+        enable_qc: 是否启用 QC
+        stats_callback: 统计回调
+        
+    Returns:
+        dict: {"text": ..., "prompts": [...]}
+    """
+    pov_character = beat.get("pov_character", "主角")
+    pov_profile = get_pov_profile(pov_character, entities)
+    pov_perception_state = beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
+    target_words = get_target_words(beat, word_count, total_beats)
+    
+    max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+    chunk_text = ""
+    is_valid = False
+    attempt = 0
+    current_temp = 0.75
+    prompts_history = []
+    
+    while attempt < max_attempts and not is_valid:
+        attempt += 1
+        
+        try:
+            # 构建 Prompt
+            system_prompt, user_prompt = build_prose_draft_prompt_v25(
+                chapter=chapter,
+                book=book,
+                beat=beat,
+                scene_intent=scene_intent,
+                subconscious_thought=subconscious,
+                previous_tail="",
+                target_words=target_words,
+                physical_state_lock=physical_state_lock or "",
+                current_emotional_state=initial_emotional_state,
+                accumulated_summary="",
+                relational_state_lock=initial_relational_state,
+                red_lines=beat.get("red_lines"),
+                entity_spatial_ledger=entity_spatial_ledger or None,
+                chapter_assets_schema=chapter_assets_schema or '',
+                pov_perception_state=pov_perception_state,
+                pov_character_profile=pov_profile,
+                is_first_beat=(beat_index == 1),
+            )
+            
+            prompts_history.append({
+                "stage": f"PROSE_PARALLEL_ATTEMPT_{attempt}",
+                "beat_index": beat_index,
+                "temperature": current_temp,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            })
+            
+            logger.info(f"[Prose V25-Parallel] Beat {beat_index}/{total_beats} 尝试 {attempt}/{max_attempts}...")
+            
+            # 调用 LLM
+            response = await _call_llm_with_stats(
+                stage="prose_draft_parallel",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                api_key=api_key,
+                base_url=base_url,
+                model=creative_model,
+                temperature=current_temp,
+                max_tokens=_clamp_tokens(target_words),
+                beat_index=beat_index,
+                stats_callback=stats_callback,
+            )
+            
+            chunk_text = clean_llm_output(response).strip()
+            
+            # Fail-Fast 检查
+            if flags.enable_fail_fast and attempt < max_attempts:
+                temp_context = DynamicContext(
+                    previous_tail="",
+                    current_emotional_state=initial_emotional_state,
+                    physical_state_lock=physical_state_lock or "",
+                    accumulated_summary="",
+                    relational_state_lock=initial_relational_state,
+                    entity_spatial_ledger=entity_spatial_ledger or {},
+                )
+                
+                is_valid, fail_reason, fail_categories = await _micro_review_assertion(
+                    chunk_text=chunk_text,
+                    dynamic_context=temp_context,
+                    pov_character=pov_character,
+                    beat=beat,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=reasoning_model,
+                    entity_spatial_ledger=entity_spatial_ledger,
+                    beat_index=beat_index,
+                    stats_callback=stats_callback,
+                    book=book,
+                    chapter=chapter,
+                    entities=entities,
+                )
+                
+                if not is_valid:
+                    logger.warning(f"[Fail-Fast Parallel] Beat {beat_index} 断言失败: {fail_reason}")
+                    if "文风" in fail_categories:
+                        current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
+                    else:
+                        current_temp = max(0.3, current_temp - 0.1)
+                else:
+                    logger.info(f"[Fail-Fast Parallel] Beat {beat_index} 断言通过")
+            else:
+                is_valid = True
+                
+        except Exception as e:
+            logger.error(f"[Prose V25-Parallel] Beat {beat_index} 第{attempt}次异常: {e}")
+            if attempt >= max_attempts:
+                break
+            await asyncio.sleep(0.5)
+    
+    # QC 检查
+    if enable_qc and chunk_text:
+        try:
+            chunk_text, qc_prompts = await _quick_qc(
+                prose_text=chunk_text,
+                beat=beat,
+                beat_index=beat_index,
+                chapter=chapter,
+                book=book,
+                entities=entities,
+                relationships=relationships,
+                api_key=api_key,
+                base_url=base_url,
+                model=creative_model,
+                target_words=target_words,
+            )
+            prompts_history.extend(qc_prompts)
+        except Exception as e:
+            logger.warning(f"[Prose V25-Parallel] Beat {beat_index} QC 失败: {e}")
+    
+    return {"text": chunk_text, "prompts": prompts_history}
+
+
 async def _generate_prose_parallel_v25(
     beats: List[dict],
     scene_intent_results: List[dict],
@@ -938,183 +1127,68 @@ async def _generate_prose_parallel_v25(
 ) -> List[dict]:
     """
     V3.0 并行模式正文生成 - 极速但可能损失连贯性。
+    
+    策略：
+    - 所有 Beat 同时生成，互不依赖
+    - 不使用 Rolling Prefix
+    - 适合对连贯性要求不高的场景
+    
+    架构：
+    - 主函数：初始化上下文，创建并行任务
+    - _generate_single_beat_parallel: 生成单个 Beat
     """
     flags = feature_flags or DraftingFeatureFlags()
-
+    n = len(beats)
+    
+    # 初始化上下文（并行模式下使用固定初始状态）
     initial_emotional_state = "初始状态：未知"
     if beats and beats[0].get("entry_state"):
         initial_emotional_state = f"初始状态：{beats[0].get('entry_state')}"
-
     initial_relational_state = _build_initial_relational_state(relationships, entities)
-
-    logger.info(f"[Prose V25-Parallel] 启动并行生成，共 {len(beats)} 个 Beats")
-
-    async def _single_prose_task(
-        beat_index: int,
-        beat: dict,
-        scene_intent: dict,
-        subconscious: str,
-    ) -> dict:
-        beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
-        pov_character = beat.get("pov_character", "主角")
-
-        pov_profile = ""
-        if pov_character and entities:
-            for entity in entities:
-                char = getattr(entity, 'character', None) or entity
-                char_name = getattr(char, 'name', '') or ''
-                if char_name and pov_character in char_name:
-                    raw_profile = getattr(char, 'static_prompt', '') or ''
-                    pov_profile = raw_profile[:150] if raw_profile else ''
-                    break
-
-        try:
-            target_words = beat.get("word_count_target")
-            if not isinstance(target_words, int) or target_words <= 0:
-                target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
-
-            max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
-            chunk_text = ""
-            is_valid = False
-            attempt = 0
-            current_temp = 0.75
-
-            prompts_history = []
-
-            pov_perception_state = beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
-
-            while attempt < max_attempts and not is_valid:
-                attempt += 1
-
-                system_prompt, user_prompt = build_prose_draft_prompt_v25(
-                    chapter=chapter,
-                    book=book,
-                    beat=beat,
-                    scene_intent=scene_intent,
-                    subconscious_thought=subconscious,
-                    previous_tail="",
-                    target_words=target_words,
-                    physical_state_lock=physical_state_lock or "",
-                    current_emotional_state=initial_emotional_state,
-                    accumulated_summary="",
-                    relational_state_lock=initial_relational_state,
-                    red_lines=beat.get("red_lines"),
-                    entity_spatial_ledger=entity_spatial_ledger or None,
-                    chapter_assets_schema=chapter_assets_schema or '',
-                    pov_perception_state=pov_perception_state,
-                    pov_character_profile=pov_profile,
-                    is_first_beat=(beat_index == 1),
-                )
-
-                prompts_history.append({
-                    "stage": f"PROSE_PARALLEL_ATTEMPT_{attempt}",
-                    "beat_index": beat_index,
-                    "temperature": current_temp,
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                })
-
-                logger.info(f"[Prose V25-Parallel] Beat {beat_index}/{len(beats)} 尝试 {attempt}/{max_attempts}...")
-
-                response = await _call_llm_with_stats(
-                    stage="prose_draft_parallel",
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=creative_model,
-                    temperature=current_temp,
-                    max_tokens=_clamp_tokens(target_words),
-                    beat_index=beat_index,
-                    stats_callback=stats_callback,
-                )
-
-                chunk_text = clean_llm_output(response).strip()
-
-                if flags.enable_fail_fast and attempt < max_attempts:
-                    temp_context = DynamicContext(
-                        previous_tail="",
-                        current_emotional_state=initial_emotional_state,
-                        physical_state_lock=physical_state_lock or "",
-                        accumulated_summary="",
-                        relational_state_lock=initial_relational_state,
-                        entity_spatial_ledger=entity_spatial_ledger or {},
-                    )
-
-                    is_valid, fail_reason, fail_categories = await _micro_review_assertion(
-                        chunk_text=chunk_text,
-                        dynamic_context=temp_context,
-                        pov_character=pov_character,
-                        beat=beat,
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=reasoning_model,
-                        entity_spatial_ledger=entity_spatial_ledger,
-                        beat_index=beat_index,
-                        stats_callback=stats_callback,
-                        book=book,
-                        chapter=chapter,
-                        entities=entities,
-                    )
-
-                    if not is_valid:
-                        logger.warning(f"[Fail-Fast Parallel] Beat {beat_index} 断言失败: {fail_reason}")
-                        if "文风" in fail_categories:
-                            current_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
-                        else:
-                            current_temp = max(0.3, current_temp - 0.1)
-                    else:
-                        logger.info(f"[Fail-Fast Parallel] Beat {beat_index} 断言通过")
-                else:
-                    is_valid = True
-
-            if enable_qc:
-                chunk_text, qc_prompts = await _quick_qc(
-                    prose_text=chunk_text,
-                    beat=beat,
-                    beat_index=beat_index,
-                    chapter=chapter,
-                    book=book,
-                    entities=entities,
-                    relationships=relationships,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=creative_model,
-                    target_words=target_words,
-                )
-                prompts_history.extend(qc_prompts)
-
-            return {
-                "text": chunk_text,
-                "prompts": prompts_history,
-            }
-
-        except Exception as e:
-            logger.error(f"[Prose V25-Parallel] Beat {beat_index}: {e}")
-            return {
-                "text": "",
-                "prompts": [],
-            }
-
-    # 验证输入数组长度
-    if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
-        logger.error(f"[Prose V25-Parallel] 输入数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
-        # 补齐数组
-        scene_intent_results = scene_intent_results + [{"intent_label": "默认", "goal": ""} for _ in range(len(beats) - len(scene_intent_results))]
-        subconscious_results = subconscious_results + ["" for _ in range(len(beats) - len(subconscious_results))]
-
+    
+    logger.info(f"[Prose V25-Parallel] 启动并行生成，共 {n} 个 Beats")
+    
+    # 验证并补齐输入数组
+    scene_intent_results = list(scene_intent_results)
+    subconscious_results = list(subconscious_results)
+    if len(scene_intent_results) != n or len(subconscious_results) != n:
+        logger.error(f"[Prose V25-Parallel] 输入数组长度不匹配，自动补齐")
+        scene_intent_results += [{"intent_label": "默认", "goal": ""} for _ in range(n - len(scene_intent_results))]
+        subconscious_results += ["" for _ in range(n - len(subconscious_results))]
+    
+    # 创建并行任务
     tasks = [
-        _single_prose_task(
+        _generate_single_beat_parallel(
             beat_index=i + 1,
             beat=beat,
-            scene_intent=scene_intent_results[i] if i < len(scene_intent_results) else {"intent_label": "默认", "goal": beat.get("summary", "")},
-            subconscious=subconscious_results[i] if i < len(subconscious_results) else "",
+            scene_intent=scene_intent_results[i],
+            subconscious=subconscious_results[i],
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            flags=flags,
+            creative_model=creative_model,
+            reasoning_model=reasoning_model,
+            api_key=api_key,
+            base_url=base_url,
+            word_count=word_count,
+            total_beats=n,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+            initial_emotional_state=initial_emotional_state,
+            initial_relational_state=initial_relational_state,
+            enable_qc=enable_qc,
+            stats_callback=stats_callback,
         )
         for i, beat in enumerate(beats)
     ]
-
+    
+    # 并行执行
     results = await asyncio.gather(*tasks, return_exceptions=True)
-
+    
+    # 处理结果
     processed_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
@@ -1122,7 +1196,7 @@ async def _generate_prose_parallel_v25(
             processed_results.append({"text": "", "prompts": []})
         else:
             processed_results.append(result)
-
+    
     logger.info(f"[Prose V25-Parallel] 并行生成完成，共 {len(processed_results)} 个 Beats")
     return processed_results
 
