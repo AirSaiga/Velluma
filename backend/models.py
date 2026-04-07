@@ -619,9 +619,9 @@ class GenerationTask(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     
-    # 关联关系
-    chapter = relationship("Chapter", back_populates="generation_tasks")
-    book = relationship("Book", back_populates="generation_tasks")
+    # 关联关系 - 明确指定 foreign_keys 避免歧义
+    chapter = relationship("Chapter", back_populates="generation_tasks", foreign_keys=[chapter_id])
+    book = relationship("Book", back_populates="generation_tasks", foreign_keys=[book_id])
 
     def to_dict(self) -> dict:
         """转换为字典（用于API响应）"""
@@ -642,7 +642,17 @@ class GenerationTask(Base):
         }
 
 
-# 更新关联关系
-Book.generation_tasks = relationship('GenerationTask', back_populates='book', cascade='all, delete-orphan')
-Chapter.generation_tasks = relationship('GenerationTask', back_populates='chapter', cascade='all, delete-orphan')
+# 更新关联关系 - 明确指定 foreign_keys 避免歧义
+Book.generation_tasks = relationship(
+    'GenerationTask', 
+    back_populates='book', 
+    cascade='all, delete-orphan',
+    foreign_keys='GenerationTask.book_id'
+)
+Chapter.generation_tasks = relationship(
+    'GenerationTask', 
+    back_populates='chapter', 
+    cascade='all, delete-orphan',
+    foreign_keys='GenerationTask.chapter_id'
+)
 Chapter.active_task_id = Column(UUID(as_uuid=True), ForeignKey('generation_tasks.id', ondelete='SET NULL'), nullable=True)
