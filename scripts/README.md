@@ -1,101 +1,107 @@
-# Velluma Launch Scripts
+# Velluma 启动脚本
 
-Windows startup scripts for Velluma AI Novel Writing Assistant.
+Velluma AI Novel Writing Assistant 的启动脚本。
 
-## Quick Start
+## 快速开始
 
-### Normal Start
-```
-D:\qoder\Velluma\start.bat
-```
-
-### Force Mode (Kill existing processes)
-```
-D:\qoder\Velluma\start.bat --force
-```
-
-Use `--force` when ports are already in use by previous crashed sessions.
-
-### Debug Mode (See all windows)
-```
-D:\qoder\Velluma\scripts\start-dev-debug.bat
-```
-
-## Files
-
-| File | Description |
-|------|-------------|
-| `start.bat` | Main entry (project root) |
-| `start-dev.ps1` | PowerShell script with port management |
-| `start-dev.bat` | Batch wrapper with --force support |
-| `start-dev-debug.ps1` | Debug mode (visible windows) |
-
-## Parameters
-
-### PowerShell Parameters
-```powershell
-.\scripts\start-dev.ps1 -Force          # Kill existing processes
-.\scripts\start-dev.ps1 -SkipBackend    # Skip starting backend
-.\scripts\start-dev.ps1 -SkipFrontend   # Skip starting frontend
-.\scripts\start-dev.ps1 -ElectronOnly   # Only start Electron
-```
-
-### Batch Parameters
 ```batch
-start.bat --force     # Kill processes on ports 8002/5175
+start.bat
 ```
 
-## Service URLs
+## 使用方法
 
-| Service | URL |
-|---------|-----|
-| Backend API | http://localhost:8002 |
-| Frontend Dev | http://localhost:5175 |
-| API Docs | http://localhost:8002/docs |
-
-## Troubleshooting
-
-### Port already in use
-
-**Error**: `Port 5175 is in use, trying another one...`
-
-**Solution**: Use force mode
-```
-start.bat --force
+### 正常启动
+```batch
+.\start.bat
 ```
 
-Or manually check:
+### 强制模式（清理端口占用）
+```batch
+.\start.bat -Force
+```
+
+### 跳过部分服务
 ```powershell
-# Check what's using port 5175
-netstat -ano | findstr :5175
+# 跳过后端（假设后端已在运行）
+.\start.ps1 -SkipBackend
 
-# Kill the process
-taskkill /PID <PID> /F
+# 跳过前端（假设前端已在运行）
+.\start.ps1 -SkipFrontend
+
+# 只启动 Electron（假设前后端都已在运行）
+.\start.ps1 -ElectronOnly
 ```
 
-### Frontend timeout
+## 启动流程
 
-If Frontend takes too long to start:
-1. Use debug mode: `scripts\start-dev-debug.bat`
-2. Check npm: `npm --version`
-3. Try manually: `cd frontend && npm run dev`
+1. **启动后端** (端口 8002)
+   - 检查虚拟环境 (.venv 或 venv)
+   - 等待健康检查通过
 
-### Strict Port Mode
+2. **启动前端** (端口 5175)
+   - 启动 Vite 开发服务器
+   - 等待服务就绪
 
-Vite is now configured with `strictPort: true`, which means:
-- ✅ It will fail fast if port 5175 is in use
-- ✅ No more automatic port switching (5176, 5177...)
-- ✅ Electron knows exactly which port to connect to
+3. **启动 Electron**
+   - 显示加载窗口
+   - 重试机制确保连接成功
+   - 加载主窗口
 
-If you need the old behavior, edit `frontend/vite.config.js` and remove `strictPort: true`.
+## 特性
 
-## Process Management
+### 1. 依次启动
+- 后端就绪后才启动前端
+- 前端就绪后才启动 Electron
+- 避免连接失败问题
 
-Scripts automatically manage:
-- Python backend processes
-- Node.js (Vite dev server)
-- Node.js (Electron)
+### 2. 重连机制
 
-All processes are stopped when you:
-- Press Ctrl+C
-- Close the launcher window
+**Vite 代理层：**
+- 后端不可用时返回 503 + 可重试标记
+- 30秒请求超时
+- 连接错误优雅降级
+
+**Electron 层：**
+- 启动时等待后端和前端端口就绪
+- HTTP 健康检查重试（最多5次）
+- 加载 URL 失败时自动重试（最多10次）
+- 显示加载状态窗口
+
+### 3. 优雅关闭
+- Ctrl+C 停止所有服务
+- 自动清理端口占用
+- 进程树完整退出
+
+## 服务地址
+
+| 服务 | URL |
+|------|-----|
+| 后端 API | http://127.0.0.1:8002 |
+| 前端 Dev | http://127.0.0.1:5175 |
+| API 文档 | http://127.0.0.1:8002/docs |
+| 健康检查 | http://127.0.0.1:8002/api/health |
+
+## 故障排除
+
+### 端口被占用
+
+```powershell
+# 查看端口占用
+Get-NetTCPConnection -LocalPort 8002
+Get-NetTCPConnection -LocalPort 5175
+
+# 强制清理后启动
+.\start.bat -Force
+```
+
+### 前端连接失败
+
+Electron 会自动重试连接（最多10次，每次间隔1秒）。如果仍失败：
+1. 检查后端是否运行：`curl http://127.0.0.1:8002/api/health`
+2. 检查前端是否运行：`curl http://127.0.0.1:5175`
+
+### 虚拟环境找不到
+
+确保项目根目录有以下之一：
+- `.venv\Scripts\python.exe`
+- `venv\Scripts\python.exe`

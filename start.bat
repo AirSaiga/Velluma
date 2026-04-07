@@ -1,4 +1,4 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-scripts\start-dev.bat %*
+powershell -ExecutionPolicy Bypass -NoProfile -File "%~dp0start.ps1" %*
