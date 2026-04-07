@@ -68,6 +68,11 @@ const topPanelExpanded = ref(false)
 const rightPanelExpanded = ref(false)
 const activeFloatingTab = ref<string | null>(null)
 
+// ========== 书籍栏状态 ==========
+const showBookDropdown = ref(false)
+const bookDropdownRef = ref<HTMLElement | null>(null)
+let topTriggerTimer: ReturnType<typeof setTimeout> | null = null
+
 const sortedChapters = computed(() => {
   return [...chapters.value].sort((a, b) => a.chapter_number - b.chapter_number)
 })
@@ -136,6 +141,10 @@ function collapseLeftPanel() {
 
 // 展开顶部面板
 function expandTopPanel() {
+  if (topTriggerTimer) {
+    clearTimeout(topTriggerTimer)
+    topTriggerTimer = null
+  }
   topPanelExpanded.value = true
   showTopTrigger.value = false
 }
@@ -143,6 +152,41 @@ function expandTopPanel() {
 // 收起顶部面板
 function collapseTopPanel() {
   topPanelExpanded.value = false
+}
+
+// 处理顶部触发条鼠标离开（添加延迟避免闪烁）
+function handleTopTriggerLeave() {
+  if (topTriggerTimer) clearTimeout(topTriggerTimer)
+  topTriggerTimer = setTimeout(() => {
+    showTopTrigger.value = false
+  }, 300)
+}
+
+// 处理顶部触发条鼠标进入
+function handleTopTriggerEnter() {
+  if (topTriggerTimer) {
+    clearTimeout(topTriggerTimer)
+    topTriggerTimer = null
+  }
+  showTopTrigger.value = true
+}
+
+// 切换书籍下拉
+function toggleBookDropdown() {
+  showBookDropdown.value = !showBookDropdown.value
+}
+
+// 选择书籍
+function selectBook(bookId: string) {
+  currentBookId.value = bookId
+  showBookDropdown.value = false
+}
+
+// 点击外部关闭书籍下拉
+function handleClickOutside(e: MouseEvent) {
+  if (bookDropdownRef.value && !bookDropdownRef.value.contains(e.target as Node)) {
+    showBookDropdown.value = false
+  }
 }
 
 // 切换右侧面板
@@ -684,6 +728,8 @@ onMounted(async () => {
   
   // 绑定键盘事件
   window.addEventListener('keydown', handleKeyDown)
+  // 绑定点击外部事件
+  document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
@@ -691,7 +737,12 @@ onBeforeUnmount(() => {
     clearTimeout(editorEntityDecayTimer)
     editorEntityDecayTimer = null
   }
+  if (topTriggerTimer) {
+    clearTimeout(topTriggerTimer)
+    topTriggerTimer = null
+  }
   window.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -712,14 +763,14 @@ onBeforeUnmount(() => {
     <div 
       v-if="isZenMode"
       class="top-trigger-zone"
-      @mouseenter="showTopTrigger = true"
-      @mouseleave="showTopTrigger = false"
+      @mouseenter="handleTopTriggerEnter"
+      @mouseleave="handleTopTriggerLeave"
     >
       <div class="top-trigger-bar" :class="{ 'visible': showTopTrigger && !topPanelExpanded }">
-        <span>📖 {{ currentBook?.title || '无书籍' }}</span>
+        <span class="trigger-book">📖 {{ currentBook?.title || '无书籍' }}</span>
         <span class="divider">|</span>
         <span>第 {{ selectedChapter?.chapter_number || '-' }} 章</span>
-        <button class="expand-btn" @click="expandTopPanel">▼</button>
+        <button class="expand-btn" @click.stop="expandTopPanel" title="展开工具栏">▼</button>
       </div>
     </div>
     
@@ -727,12 +778,46 @@ onBeforeUnmount(() => {
     <Transition name="slide-down">
       <div v-if="!isZenMode || topPanelExpanded" class="top-panel">
         <div class="top-panel-content">
-          <div class="book-selector">
-            <select :value="currentBookId" @change="handleBookChange">
-              <option v-for="book in books" :key="book.id" :value="book.id">
-                {{ book.title }}
-              </option>
-            </select>
+          <div class="book-selector" ref="bookDropdownRef">
+            <!-- 自定义书籍下拉 -->
+            <div class="custom-book-dropdown" :class="{ 'open': showBookDropdown }">
+              <button 
+                class="book-dropdown-trigger" 
+                @click.stop="toggleBookDropdown"
+                :disabled="books.length === 0"
+                :title="currentBook?.title || '选择书籍'"
+              >
+                <span class="book-icon">📖</span>
+                <span class="book-name">{{ currentBook?.title || '选择书籍' }}</span>
+                <span class="dropdown-arrow" :class="{ 'open': showBookDropdown }">▼</span>
+              </button>
+              
+              <Transition name="dropdown">
+                <div v-if="showBookDropdown" class="book-dropdown-menu">
+                  <div class="dropdown-header">
+                    <span>我的书籍</span>
+                    <span class="book-count">{{ books.length }}本</span>
+                  </div>
+                  <div class="book-list">
+                    <button
+                      v-for="book in books"
+                      :key="book.id"
+                      class="book-option"
+                      :class="{ 'active': book.id === currentBookId }"
+                      @click.stop="selectBook(book.id)"
+                    >
+                      <span class="book-option-title">{{ book.title }}</span>
+                      <span v-if="book.genre" class="book-option-genre">{{ book.genre }}</span>
+                      <span v-if="book.id === currentBookId" class="active-indicator">✓</span>
+                    </button>
+                    <div v-if="books.length === 0" class="empty-books">
+                      暂无书籍，点击 + 创建
+                    </div>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+            
             <button @click="showBookModal = true" class="btn-icon" title="新建书籍">+</button>
             <button @click="openManageBookModal" class="btn-icon" title="管理书籍" :disabled="!currentBookId">⚙</button>
           </div>
@@ -984,8 +1069,9 @@ onBeforeUnmount(() => {
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 20px;
   z-index: 100;
+  cursor: default;
 }
 
 .top-trigger-bar {
@@ -996,18 +1082,27 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 10px 20px;
   background: var(--panel-bg);
   backdrop-filter: blur(12px);
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 16px 16px;
   box-shadow: var(--panel-shadow);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary, #666);
-  transition: transform 0.3s ease;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  max-width: 80vw;
 }
 
 .top-trigger-bar.visible {
   transform: translateX(-50%) translateY(0);
+}
+
+.top-trigger-bar .trigger-book {
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .top-trigger-bar .divider {
@@ -1018,13 +1113,16 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px 8px;
+  margin-left: 4px;
   opacity: 0.5;
-  transition: opacity 0.2s;
+  transition: all 0.2s;
+  border-radius: 4px;
 }
 
 .expand-btn:hover {
   opacity: 1;
+  background: rgba(0,0,0,0.05);
 }
 
 /* ========== 顶部面板 ========== */
@@ -1048,15 +1146,183 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
 }
 
-.book-selector select {
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+/* 自定义书籍下拉 */
+.custom-book-dropdown {
+  position: relative;
+}
+
+.book-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
   background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
   font-size: 14px;
-  min-width: 160px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.book-dropdown-trigger:hover:not(:disabled) {
+  border-color: var(--accent-500);
+  background: var(--bg-canvas);
+}
+
+.book-dropdown-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.custom-book-dropdown.open .book-dropdown-trigger {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.15);
+}
+
+.book-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.book-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: 500;
+}
+
+.dropdown-arrow {
+  font-size: 10px;
+  transition: transform 0.2s;
+  opacity: 0.6;
+}
+
+.dropdown-arrow.open {
+  transform: rotate(180deg);
+}
+
+.book-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 260px;
+  max-width: 320px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.book-count {
+  font-size: 11px;
+  background: var(--bg-canvas);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.book-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.book-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+  font-size: 14px;
+}
+
+.book-option:hover {
+  background: var(--bg-canvas);
+}
+
+.book-option.active {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.book-option-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-option-genre {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.book-option.active .book-option-genre {
+  background: rgba(255,255,255,0.5);
+}
+
+.active-indicator {
+  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-500);
+  color: white;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.empty-books {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 下拉动画 */
+.dropdown-enter-active,
+.dropdown-leave-active {
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.96);
 }
 
 .chapter-info {
