@@ -62,7 +62,11 @@ from backend.services.workflows.context import (
     get_refining_context,
 )
 from backend.services.workflows.planning import generate_beats
-from backend.services.workflows.drafting import generate_chunks_parallel
+from backend.services.workflows.drafting import (
+    generate_chunks_parallel,
+    execute_draft_stage,
+    BeatDraftResult,
+)
 from backend.services.workflows.stitching import stitch_chunks
 from backend.services.workflows.reviewing import review_draft
 from backend.services.workflows.refining import refine_draft
@@ -102,6 +106,8 @@ __all__ = [
     "get_refining_context",
     "generate_beats",
     "generate_chunks_parallel",
+    "execute_draft_stage",
+    "BeatDraftResult",
     "stitch_chunks",
     "review_draft",
     "refine_draft",
