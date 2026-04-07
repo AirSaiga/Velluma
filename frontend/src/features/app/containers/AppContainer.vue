@@ -36,8 +36,8 @@ const apiConfig = ref({
   api_key: '',
   base_url: '',
   model: 'google/gemini-2.0-flash-001',
-  reasoning_model: '',  // 高逻辑模型（用于 Scene Intent / Subconscious / Review）
-  creative_model: '',   // 高创意模型（用于 Prose Draft）
+  reasoning_model: '',
+  creative_model: '',
   proxy_enabled: true,
   proxy_url: ''
 })
@@ -57,6 +57,16 @@ const chapterEditorRef = ref<any>(null)
 const bookForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' })
 const manageBookForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
+
+// ========== 沉浸式模式状态 ==========
+const isZenMode = ref(uiPrefs.value.zenMode ?? true) // 默认开启沉浸模式
+const showLeftTrigger = ref(false)
+const showTopTrigger = ref(false)
+const showRightTrigger = ref(false)
+const leftPanelExpanded = ref(false)
+const topPanelExpanded = ref(false)
+const rightPanelExpanded = ref(false)
+const activeFloatingTab = ref<string | null>(null)
 
 const sortedChapters = computed(() => {
   return [...chapters.value].sort((a, b) => a.chapter_number - b.chapter_number)
@@ -97,57 +107,68 @@ const rightTab = computed({
   set: (val) => handleRightTabChange(val),
 })
 
-// 侧边栏折叠状态
-const sidebarCollapsed = computed({
-  get: () => uiPrefs.value.sidebarCollapsed ?? false,
-  set: (val) => {
-    uiPrefs.value = { ...uiPrefs.value, sidebarCollapsed: val }
-    saveUiPrefs(uiPrefs.value)
-  }
-})
-
-// 右侧抽屉状态
-const rightDrawerOpen = computed({
-  get: () => uiPrefs.value.rightDrawerOpen ?? false,
-  set: (val) => {
-    uiPrefs.value = { ...uiPrefs.value, rightDrawerOpen: val }
-    saveUiPrefs(uiPrefs.value)
-  }
-})
-
-// 抽屉标签配置
-const drawerTabs = [
-  { key: 'characters', label: '角色', icon: '👤' },
-  { key: 'worldview', label: '规则', icon: '📜' },
-  { key: 'style', label: '风格', icon: '✨' },
-  { key: 'map', label: '地图', icon: '📍' },
-  { key: 'critique', label: '指导', icon: '📝' },
-  { key: 'notes', label: '笔记', icon: '📒' },
+const floatingTabs = [
+  { key: 'characters', label: '角色', icon: '👤', shortcut: '1' },
+  { key: 'worldview', label: '规则', icon: '📜', shortcut: '2' },
+  { key: 'style', label: '风格', icon: '✨', shortcut: '3' },
+  { key: 'map', label: '地图', icon: '📍', shortcut: '4' },
+  { key: 'critique', label: '指导', icon: '📝', shortcut: '5' },
+  { key: 'notes', label: '笔记', icon: '📒', shortcut: '6' },
 ]
 
-// 切换侧边栏
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
+// 切换沉浸模式
+function toggleZenMode() {
+  isZenMode.value = !isZenMode.value
+  uiPrefs.value = { ...uiPrefs.value, zenMode: isZenMode.value }
+  saveUiPrefs(uiPrefs.value)
 }
 
-// 切换右侧抽屉
-function toggleDrawer(tab: string) {
-  if (!rightDrawerOpen.value) {
-    // 抽屉关闭 → 打开并设置标签
-    rightDrawerOpen.value = true
-    rightTab.value = tab
-  } else if (rightTab.value === tab) {
-    // 点击同一标签 → 关闭抽屉
-    rightDrawerOpen.value = false
+// 展开左侧面板
+function expandLeftPanel() {
+  leftPanelExpanded.value = true
+  showLeftTrigger.value = false
+}
+
+// 收起左侧面板
+function collapseLeftPanel() {
+  leftPanelExpanded.value = false
+}
+
+// 展开顶部面板
+function expandTopPanel() {
+  topPanelExpanded.value = true
+  showTopTrigger.value = false
+}
+
+// 收起顶部面板
+function collapseTopPanel() {
+  topPanelExpanded.value = false
+}
+
+// 切换右侧面板
+function toggleRightPanel(tab: string) {
+  if (activeFloatingTab.value === tab) {
+    activeFloatingTab.value = null
+    rightPanelExpanded.value = false
   } else {
-    // 点击不同标签 → 切换
-    rightTab.value = tab
+    activeFloatingTab.value = tab
+    rightPanelExpanded.value = true
   }
 }
 
-// 关闭抽屉
-function closeDrawer() {
-  rightDrawerOpen.value = false
+// 关闭右侧面板
+function closeRightPanel() {
+  activeFloatingTab.value = null
+  rightPanelExpanded.value = false
+}
+
+// 选择章节
+function selectChapter(chapterId: string) {
+  selectedChapterId.value = chapterId
+  // 选择后自动收起左侧面板
+  if (isZenMode.value) {
+    leftPanelExpanded.value = false
+  }
 }
 
 watch(currentBook, (book) => {
@@ -312,10 +333,6 @@ function handleBookChange(event: Event) {
   currentBookId.value = target.value || null
 }
 
-function selectChapter(chapterId: string) {
-  selectedChapterId.value = chapterId
-}
-
 async function handleRequestCritique(content: string) {
   if (!content) return
   if (content.length < 10) {
@@ -323,8 +340,8 @@ async function handleRequestCritique(content: string) {
     return
   }
   
-  rightTab.value = 'critique'
-  rightDrawerOpen.value = true
+  activeFloatingTab.value = 'critique'
+  rightPanelExpanded.value = true
   critiqueLoading.value = true
   critiqueResult.value = null
   
@@ -524,7 +541,6 @@ async function handleIntentSave(payload: any) {
   }
 
   try {
-    // 保存意图驱动设置到章节
     const updates = {
       creative_intents: payload.creative_intents || [],
       chapter_goals: payload.chapter_goals || [],
@@ -536,7 +552,6 @@ async function handleIntentSave(payload: any) {
 
     await chapterApi.update(selectedChapter.value.id, updates)
 
-    // 更新本地状态
     const index = chapters.value.findIndex(c => c.id === selectedChapter.value?.id)
     if (index !== -1) {
       chapters.value[index] = { ...chapters.value[index], ...updates }
@@ -631,6 +646,34 @@ async function loadCharacters() {
   }
 }
 
+// 键盘快捷键
+function handleKeyDown(e: KeyboardEvent) {
+  // Ctrl/Cmd + Shift + Z: 切换沉浸模式
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Z') {
+    e.preventDefault()
+    toggleZenMode()
+    return
+  }
+  
+  // Ctrl/Cmd + 1-6: 切换右侧面板
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key >= '1' && e.key <= '6') {
+    e.preventDefault()
+    const index = parseInt(e.key) - 1
+    if (index < floatingTabs.length) {
+      toggleRightPanel(floatingTabs[index].key)
+    }
+    return
+  }
+  
+  // Esc: 关闭所有面板
+  if (e.key === 'Escape') {
+    leftPanelExpanded.value = false
+    topPanelExpanded.value = false
+    closeRightPanel()
+    return
+  }
+}
+
 onMounted(async () => {
   const savedConfig = localStorage.getItem('velluma_api_config')
   if (savedConfig) {
@@ -638,6 +681,9 @@ onMounted(async () => {
   }
   await loadBooks()
   initTheme()
+  
+  // 绑定键盘事件
+  window.addEventListener('keydown', handleKeyDown)
 })
 
 onBeforeUnmount(() => {
@@ -645,6 +691,7 @@ onBeforeUnmount(() => {
     clearTimeout(editorEntityDecayTimer)
     editorEntityDecayTimer = null
   }
+  window.removeEventListener('keydown', handleKeyDown)
 })
 </script>
 
@@ -657,435 +704,886 @@ onBeforeUnmount(() => {
     @cancel="handleCancelDialog"
   />
   <DebugPromptWindow v-if="isDebugMode" />
-  <div v-else class="h-full w-full bg-[var(--bg-primary)] p-3">
-    <div class="h-full min-h-0 rounded-2xl bg-[var(--bg-canvas)]/90 shadow-[0_20px_60px_rgba(120,100,70,0.06)] border border-[var(--border-color)]/50 overflow-hidden">
-      <div class="h-full min-h-0 flex">
-        <!-- 左侧栏 -->
-        <aside
-          :class="sidebarCollapsed ? 'w-[60px]' : 'w-[240px]'"
-          class="h-full flex-shrink-0 transition-all duration-300 ease-in-out flex flex-col bg-transparent overflow-hidden"
-        >
-          <!-- 折叠态内容 -->
-          <div v-if="sidebarCollapsed" class="h-full flex flex-col items-center py-4 gap-3">
-            <!-- 展开按钮 -->
-            <button @click="toggleSidebar" class="p-2 rounded-lg hover:bg-parchment-300/50 text-ink-500" title="展开侧边栏">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-            </button>
-
-            <!-- 书籍首字 avatar -->
-            <div v-if="currentBook" class="w-9 h-9 rounded-full bg-accent-500/10 text-accent-700 flex items-center justify-center text-sm font-heading cursor-default" :title="currentBook.title">
-              {{ currentBook.title?.charAt(0) || '书' }}
-            </div>
-
-            <!-- 章节数字列表 -->
-            <div class="flex-1 min-h-0 overflow-y-auto w-full flex flex-col items-center gap-1 mt-2">
-              <button
-                v-for="chapter in sortedChapters"
-                :key="chapter.id"
-                @click="selectChapter(chapter.id)"
-                :title="chapter.title || `第${chapter.chapter_number}章`"
-                :class="selectedChapterId === chapter.id
-                  ? 'bg-accent-500/15 text-accent-700 font-medium'
-                  : 'text-ink-400 hover:text-ink-600 hover:bg-parchment-300/50'"
-                class="w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-colors"
-              >
-                {{ chapter.chapter_number }}
-              </button>
-            </div>
-
-            <!-- 新建章节 + 按钮 -->
-            <button v-if="currentBookId" @click="createChapterFromOutlinePanel" class="p-2 rounded-lg hover:bg-accent-500/10 text-ink-400 hover:text-accent-600" title="新建章节">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-            </button>
-
-            <!-- 设置按钮 -->
-            <button @click="showSettingsModal = true" class="p-2 rounded-lg hover:bg-parchment-300/50 text-ink-400 hover:text-ink-600" title="设置">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- 展开态内容 -->
-          <div v-else class="h-full flex flex-col px-4 py-4">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <button @click="toggleSidebar" class="p-1.5 rounded-lg hover:bg-parchment-300/50 text-ink-400" title="折叠侧边栏">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-                  </svg>
-                </button>
-                <h1 class="text-xs font-semibold tracking-wide text-[var(--text-secondary)]">写作大纲</h1>
-              </div>
-              <button
-                @click="showSettingsModal = true"
-                class="p-1.5 rounded-full text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/80 transition-colors"
-                title="设置"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              </button>
-            </div>
-
-            <div class="space-y-1.5">
-              <select
-                :value="currentBookId"
-                @change="handleBookChange"
-                class="w-full px-2 py-2 bg-white/90 rounded-xl text-xs focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-              >
-                <option v-for="book in books" :key="book.id" :value="book.id">
-                  {{ book.title }}
-                </option>
-              </select>
-              <div class="flex items-center gap-1.5">
-                <button
-                  @click="showBookModal = true"
-                  class="flex-1 px-2 py-2 rounded-xl bg-accent-600 text-white text-xs font-medium shadow-sm ring-1 ring-accent-600/40 hover:bg-accent-500 transition-colors"
-                >
-                  新建
-                </button>
-                <button
-                  @click="openManageBookModal"
-                  :disabled="!currentBookId"
-                  class="px-2 py-2 rounded-xl bg-white/90 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors"
-                >
-                  管理
-                </button>
-              </div>
-              <button
-                @click="createChapterFromOutlinePanel"
-                class="w-full px-2 py-2 rounded-xl bg-accent-600 text-white text-xs font-medium shadow-sm ring-1 ring-accent-600/40 hover:bg-accent-500 transition-colors"
-              >
-                新建章节
-              </button>
-            </div>
-
-            <div class="mt-2 flex-1 min-h-0 overflow-y-auto pr-1 space-y-2">
-              <div v-if="loading" class="text-center py-3 text-xs text-[var(--text-muted)]">加载中...</div>
-              <button
-                v-for="chapter in sortedChapters"
-                :key="chapter.id"
-                @click="selectChapter(chapter.id)"
-                class="relative w-full text-left px-2 py-1.5 rounded-xl transition-all group"
-                :class="selectedChapterId === chapter.id
-                  ? 'bg-white text-[var(--text-primary)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:bg-white/70'"
-              >
-                <span
-                  class="absolute left-0 top-1 bottom-1 w-0.5 rounded-r-full bg-[var(--accent-500)] transition-opacity"
-                  :class="selectedChapterId === chapter.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'"
-                />
-                <div class="flex items-center justify-between pl-1.5">
-                  <div class="min-w-0">
-                    <p class="text-sm font-medium truncate" :class="!chapter.title ? 'text-[var(--text-muted)] italic' : ''">
-                      {{ chapter.title || `(无标题)` }}
-                    </p>
-                    <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Ch.{{ chapter.chapter_number }}</p>
-                  </div>
-                  <div class="flex items-center gap-1">
-                    <button
-                      @click.stop="generateChapterEmbedding(chapter.id)"
-                      class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-accent-500 transition"
-                      title="生成向量"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                      </svg>
-                    </button>
-                    <button
-                      @click.stop="deleteChapter(chapter.id)"
-                      class="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-rose-400 transition"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </button>
-              <div v-if="sortedChapters.length === 0" class="text-center py-4 text-xs text-[var(--text-muted)]">
-                暂无章节
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <!-- 主内容区 -->
-        <main class="h-full flex-1 min-w-0 overflow-hidden border-l border-[var(--border-color)]/30 flex flex-col">
-          <!-- 右侧面板触发按钮（顶部工具栏） -->
-          <div class="flex-shrink-0 flex justify-end px-3 pt-3">
-            <div class="flex items-center gap-1 bg-[var(--bg-canvas)]/80 backdrop-blur-sm rounded-xl px-2 py-1.5 shadow-sm ring-1 ring-[var(--border-color)]/30">
-              <button
-                v-for="tab in drawerTabs"
-                :key="tab.key"
-                @click="toggleDrawer(tab.key)"
-                :title="tab.label"
-                :class="rightDrawerOpen && rightTab === tab.key
-                  ? 'bg-accent-500/15 text-accent-700'
-                  : 'text-ink-400 hover:text-ink-600 hover:bg-parchment-300/50'"
-                class="p-1.5 rounded-lg transition-colors"
-              >
-                <span class="text-xs">{{ tab.icon }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="flex-1 min-h-0 overflow-hidden">
-            <ChapterEditor
-            ref="chapterEditorRef"
-            :selected-chapter="selectedChapter"
-            :characters="characters"
-            :api-config="apiConfig"
-            :book-id="currentBookId"
-            :meta-collapsed="uiPrefs.chapterMetaCollapsed"
-            :critique-result="critiqueResult"
-            @update-chapter="updateChapter"
-            @update-meta-collapsed="handleMetaCollapsedChange"
-            @refresh-characters="loadCharacters"
-            @editor-entity-focus="handleEditorEntityFocus"
-            @request-critique="handleRequestCritique"
-            @intent-save="handleIntentSave"
-          />
-          </div>
-        </main>
-
-        <!-- 右侧抽屉 -->
-        <aside
-          v-show="rightDrawerOpen"
-          :class="rightDrawerOpen ? 'w-[320px]' : 'w-0'"
-          class="h-full flex-shrink-0 overflow-hidden border-l border-[var(--border-color)]/30 transition-all duration-300 ease-in-out"
-        >
-          <div class="h-full flex flex-col bg-transparent px-4 py-4 min-w-[320px]">
-            <!-- 抽屉头部：标签页 + 关闭按钮 -->
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-1 flex-wrap">
-                <button
-                  v-for="tab in drawerTabs"
-                  :key="tab.key"
-                  class="px-3 py-1.5 rounded-lg text-xs transition-colors ring-1"
-                  :class="rightTab === tab.key ? 'bg-accent-500/10 text-accent-700 ring-accent-500/40' : 'text-ink-500 ring-transparent hover:text-ink-700 hover:bg-parchment-300/50'"
-                  @click="rightTab = tab.key"
-                >
-                  {{ tab.label }}
-                </button>
-              </div>
-              <div class="flex items-center gap-1">
-                <button
-                  v-if="rightTab === 'notes'"
-                  @click="saveBookNotes"
-                  :disabled="!currentBookId || notesStatus === 'saving'"
-                  class="px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-500)] disabled:opacity-40 transition-colors"
-                >
-                  {{ notesStatus === 'saved' ? '已保存' : '保存' }}
-                </button>
-                <button @click="closeDrawer" class="p-1.5 rounded-lg hover:bg-parchment-300/50 text-ink-400 hover:text-ink-600" title="关闭面板">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <!-- 内容区 -->
-            <div class="flex-1 min-h-0 overflow-hidden rounded-xl bg-[var(--bg-secondary)]/70">
-              <Transition name="fade" mode="out-in">
-                <CharacterPanel
-                  v-if="rightTab === 'characters'"
-                  key="characters"
-                  :characters="characters"
-                  :relationships="relationships"
-                  :selected-chapter-id="selectedChapterId"
-                  :prioritized-character-ids="autoHighlightedCharacterIds"
-                  :focused-entity="editorFocusedEntity"
-                  :api-config="apiConfig"
-                  @create-character="createCharacter"
-                  @update-character="updateCharacter"
-                  @delete-character="deleteCharacter"
-                  @create-relationship="createRelationship"
-                  @update-relationship="updateRelationship"
-                  @delete-relationship="deleteRelationship"
-                />
-
-                <div v-else-if="rightTab === 'worldview'" key="worldview" class="h-full overflow-y-auto p-3">
-                  <WorldviewSettings v-if="currentBookId" :book-id="currentBookId" />
-                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
-                </div>
-
-                <div v-else-if="rightTab === 'style'" key="style" class="h-full overflow-y-auto p-3">
-                  <GoldenSnippetsManager v-if="currentBookId" :book-id="currentBookId" />
-                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择书籍</div>
-                </div>
-
-                <div v-else-if="rightTab === 'map'" key="map" class="h-full overflow-y-auto">
-                  <MapSettings
-                    v-if="selectedChapter"
-                    :chapter="selectedChapter"
-                    :focused-entity="editorFocusedEntity"
-                    :active-character-names="autoHighlightedCharacterNames"
-                    @update-chapter="updateChapter"
-                  />
-                  <div v-else class="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">请先选择章节</div>
-                </div>
-
-                <div v-else-if="rightTab === 'critique'" key="critique" class="h-full overflow-hidden p-3">
-                  <CritiquePanel
-                    :result="critiqueResult"
-                    :loading="critiqueLoading"
-                    @jump-to-critique="handleJumpToCritique"
-                    @close-critique="handleCloseCritique"
-                  />
-                </div>
-
-                <div v-else key="notes" class="h-full overflow-y-auto p-3">
-                  <h3 class="text-xs font-medium text-[var(--text-primary)]">创作笔记</h3>
-                  <textarea
-                    v-model="localBookNotes"
-                    rows="12"
-                    class="mt-2 w-full px-2 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] text-xs resize-none focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-                    placeholder="记录风格、基调、伏笔或暂存思路..."
-                  />
-                  <div v-if="notesStatus === 'dirty'" class="text-[10px] text-[var(--text-muted)] mt-1">未保存</div>
-                </div>
-              </Transition>
-            </div>
-          </div>
-        </aside>
+  
+  <!-- ========== 沉浸式主界面 ========== -->
+  <div v-else class="immersive-app" :class="{ 'zen-mode': isZenMode }">
+    
+    <!-- 顶部触发条 (Zen Mode 下悬停显示) -->
+    <div 
+      v-if="isZenMode"
+      class="top-trigger-zone"
+      @mouseenter="showTopTrigger = true"
+      @mouseleave="showTopTrigger = false"
+    >
+      <div class="top-trigger-bar" :class="{ 'visible': showTopTrigger && !topPanelExpanded }">
+        <span>📖 {{ currentBook?.title || '无书籍' }}</span>
+        <span class="divider">|</span>
+        <span>第 {{ selectedChapter?.chapter_number || '-' }} 章</span>
+        <button class="expand-btn" @click="expandTopPanel">▼</button>
       </div>
     </div>
-
+    
+    <!-- 顶部展开面板 -->
+    <Transition name="slide-down">
+      <div v-if="!isZenMode || topPanelExpanded" class="top-panel">
+        <div class="top-panel-content">
+          <div class="book-selector">
+            <select :value="currentBookId" @change="handleBookChange">
+              <option v-for="book in books" :key="book.id" :value="book.id">
+                {{ book.title }}
+              </option>
+            </select>
+            <button @click="showBookModal = true" class="btn-icon" title="新建书籍">+</button>
+            <button @click="openManageBookModal" class="btn-icon" title="管理书籍" :disabled="!currentBookId">⚙</button>
+          </div>
+          
+          <div class="chapter-info">
+            <span class="chapter-label">
+              {{ selectedChapter?.chapter_name || `第${selectedChapter?.chapter_number}章` }}
+            </span>
+            <input 
+              :value="selectedChapter?.title" 
+              @input="(e) => updateChapter(selectedChapter?.id, { title: e.target.value })"
+              placeholder="章节标题..."
+              class="chapter-title-input"
+            />
+          </div>
+          
+          <div class="top-actions">
+            <button @click="showSettingsModal = true" class="btn-icon" title="设置">⚙️</button>
+            <button @click="toggleZenMode" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
+              {{ isZenMode ? '⛶' : '⛶' }}
+            </button>
+          </div>
+        </div>
+        
+        <button v-if="isZenMode" class="collapse-btn" @click="collapseTopPanel">▲</button>
+      </div>
+    </Transition>
+    
+    <!-- 主内容区 -->
+    <div class="main-area">
+      <!-- 左侧触发条 (Zen Mode) -->
+      <div 
+        v-if="isZenMode && !leftPanelExpanded"
+        class="left-trigger"
+        @mouseenter="showLeftTrigger = true"
+        @mouseleave="showLeftTrigger = false"
+        @click="expandLeftPanel"
+      >
+        <div class="left-trigger-content" :class="{ 'visible': showLeftTrigger }">
+          <div class="chapter-dots">
+            <div 
+              v-for="ch in sortedChapters" 
+              :key="ch.id"
+              class="chapter-dot"
+              :class="{ 'active': ch.id === selectedChapterId }"
+              :title="ch.title || `第${ch.chapter_number}章`"
+            />
+          </div>
+          <span class="trigger-label">章节</span>
+        </div>
+      </div>
+      
+      <!-- 左侧面板 -->
+      <Transition name="slide-left">
+        <div v-if="!isZenMode || leftPanelExpanded" class="left-panel">
+          <div class="left-panel-header">
+            <h3>📚 章节</h3>
+            <button v-if="isZenMode" class="btn-icon" @click="collapseLeftPanel">←</button>
+          </div>
+          
+          <div class="chapters-list">
+            <div 
+              v-for="chapter in sortedChapters"
+              :key="chapter.id"
+              class="chapter-item"
+              :class="{ 'active': chapter.id === selectedChapterId }"
+              @click="selectChapter(chapter.id)"
+            >
+              <span class="ch-number">{{ chapter.chapter_number }}</span>
+              <span class="ch-title">{{ chapter.title || '(无标题)' }}</span>
+            </div>
+          </div>
+          
+          <button @click="createChapterFromOutlinePanel" class="btn-primary">
+            + 新建章节
+          </button>
+        </div>
+      </Transition>
+      
+      <!-- 编辑器区域 -->
+      <div class="editor-container">
+        <ChapterEditor
+          ref="chapterEditorRef"
+          :selected-chapter="selectedChapter"
+          :characters="characters"
+          :api-config="apiConfig"
+          :book-id="currentBookId"
+          :meta-collapsed="uiPrefs.chapterMetaCollapsed"
+          :critique-result="critiqueResult"
+          @update-chapter="updateChapter"
+          @update-meta-collapsed="handleMetaCollapsedChange"
+          @refresh-characters="loadCharacters"
+          @editor-entity-focus="handleEditorEntityFocus"
+          @request-critique="handleRequestCritique"
+          @intent-save="handleIntentSave"
+        />
+      </div>
+      
+      <!-- 右侧悬浮工具栏 -->
+      <div class="right-floating-bar" :class="{ 'panel-open': rightPanelExpanded }">
+        <div class="floating-tabs">
+          <button
+            v-for="tab in floatingTabs"
+            :key="tab.key"
+            class="floating-tab"
+            :class="{ 'active': activeFloatingTab === tab.key }"
+            @click="toggleRightPanel(tab.key)"
+            :title="`${tab.label} (Ctrl+${tab.shortcut})`"
+          >
+            <span class="tab-icon">{{ tab.icon }}</span>
+            <span class="tab-shortcut">{{ tab.shortcut }}</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- 右侧面板内容 -->
+      <Transition name="slide-right">
+        <div v-if="rightPanelExpanded" class="right-panel">
+          <div class="right-panel-header">
+            <span>{{ floatingTabs.find(t => t.key === activeFloatingTab)?.label }}</span>
+            <button class="btn-icon" @click="closeRightPanel">×</button>
+          </div>
+          
+          <div class="right-panel-content">
+            <CharacterPanel
+              v-if="activeFloatingTab === 'characters'"
+              :characters="characters"
+              :relationships="relationships"
+              :selected-chapter-id="selectedChapterId"
+              :prioritized-character-ids="autoHighlightedCharacterIds"
+              :focused-entity="editorFocusedEntity"
+              :api-config="apiConfig"
+              @create-character="createCharacter"
+              @update-character="updateCharacter"
+              @delete-character="deleteCharacter"
+              @create-relationship="createRelationship"
+              @update-relationship="updateRelationship"
+              @delete-relationship="deleteRelationship"
+            />
+            
+            <WorldviewSettings
+              v-else-if="activeFloatingTab === 'worldview'"
+              :book-id="currentBookId"
+            />
+            
+            <GoldenSnippetsManager
+              v-else-if="activeFloatingTab === 'style'"
+              :book-id="currentBookId"
+            />
+            
+            <MapSettings
+              v-else-if="activeFloatingTab === 'map'"
+              :chapter="selectedChapter"
+              :focused-entity="editorFocusedEntity"
+              :active-character-names="autoHighlightedCharacterNames"
+              @update-chapter="updateChapter"
+            />
+            
+            <CritiquePanel
+              v-else-if="activeFloatingTab === 'critique'"
+              :result="critiqueResult"
+              :loading="critiqueLoading"
+              @jump-to-critique="handleJumpToCritique"
+              @close-critique="handleCloseCritique"
+            />
+            
+            <div v-else-if="activeFloatingTab === 'notes'" class="notes-panel">
+              <textarea
+                v-model="localBookNotes"
+                placeholder="记录创作笔记..."
+              />
+              <button @click="saveBookNotes" :disabled="notesStatus === 'saving'">
+                {{ notesStatus === 'saved' ? '已保存' : '保存' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </div>
+    
+    <!-- 底部状态栏 (Zen Mode 下极简) -->
+    <div class="status-bar" :class="{ 'minimal': isZenMode }">
+      <span v-if="!isZenMode">{{ currentBook?.title }} | 第 {{ selectedChapter?.chapter_number || '-' }} 章</span>
+      <span v-else>{{ selectedChapter?.chapter_number || '-' }} / {{ sortedChapters.length }}</span>
+      <span v-if="isZenMode" class="zen-hint">Ctrl+Shift+Z 退出沉浸</span>
+    </div>
+    
+    <!-- ========== 模态框 ========== -->
+    
+    <!-- 新建书籍 -->
+    <div v-if="showBookModal" class="modal-overlay" @click.self="showBookModal = false">
+      <div class="modal">
+        <h3>新建书籍</h3>
+        <input v-model="bookForm.title" placeholder="书名" />
+        <input v-model="bookForm.genre" placeholder="类型 (如：科幻、奇幻)" />
+        <textarea v-model="bookForm.global_sys_prompt" placeholder="全局提示词 (可选)" rows="3" />
+        <div class="modal-actions">
+          <button @click="showBookModal = false">取消</button>
+          <button @click="createBook" class="btn-primary">创建</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 管理书籍 -->
+    <div v-if="showManageBookModal" class="modal-overlay" @click.self="showManageBookModal = false">
+      <div class="modal">
+        <h3>管理书籍</h3>
+        <input v-model="manageBookForm.title" placeholder="书名" />
+        <input v-model="manageBookForm.genre" placeholder="类型" />
+        <textarea v-model="manageBookForm.core_motifs_taboos" placeholder="核心设定与禁忌" rows="3" />
+        <div class="modal-actions">
+          <button @click="deleteCurrentBook" class="btn-danger">删除书籍</button>
+          <button @click="showManageBookModal = false">取消</button>
+          <button @click="saveManageBook" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 设置 -->
     <SettingsModal
       :is-open="showSettingsModal"
       :config="apiConfig"
       @close="showSettingsModal = false"
       @save="updateApiConfig"
     />
-
-    <div v-if="showBookModal" class="fixed inset-0 bg-black/35 flex items-center justify-center z-50" @click.self="showBookModal = false">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-md mx-4">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">新建书籍</h3>
-
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">书名</label>
-            <input
-              v-model="bookForm.title"
-              type="text"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-              placeholder="输入书籍名称"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">类型</label>
-            <input
-              v-model="bookForm.genre"
-              type="text"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-              placeholder="如：科幻、奇幻、都市"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">全局提示词 (可选)</label>
-            <textarea
-              v-model="bookForm.global_sys_prompt"
-              rows="3"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
-              placeholder="书籍的整体风格和基调..."
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">核心母题与禁忌 (可选)</label>
-            <textarea
-              v-model="bookForm.core_motifs_taboos"
-              rows="3"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
-              placeholder="列出本书的核心主题、反复出现的意象，以及绝对不能出现的情节或风格..."
-            />
-          </div>
-        </div>
-
-        <div class="flex justify-end gap-3 mt-6">
-          <button
-            @click="showBookModal = false"
-            class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            取消
-          </button>
-          <button
-            @click="createBook"
-            class="px-4 py-2 rounded-full bg-[var(--accent-500)] text-white transition-colors"
-          >
-            创建
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="showManageBookModal" class="fixed inset-0 bg-black/35 flex items-center justify-center z-50" @click.self="showManageBookModal = false">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl p-6 w-full max-w-md mx-4">
-        <h3 class="text-lg font-semibold text-[var(--text-primary)] mb-4">管理书籍</h3>
-
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">书名</label>
-            <input
-              v-model="manageBookForm.title"
-              type="text"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-              placeholder="输入书籍名称"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">类型</label>
-            <input
-              v-model="manageBookForm.genre"
-              type="text"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)]"
-              placeholder="如：科幻、奇幻、都市"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm text-[var(--text-muted)] mb-1">核心母题与禁忌 (可选)</label>
-            <textarea
-              v-model="manageBookForm.core_motifs_taboos"
-              rows="3"
-              class="w-full px-3 py-2 rounded-xl bg-[var(--bg-panel)] text-[var(--text-primary)] focus:outline-none ring-1 ring-transparent focus:ring-[var(--accent-500)] resize-none"
-              placeholder="列出本书的核心主题、反复出现的意象，以及绝对不能出现的情节或风格..."
-            />
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between gap-3 mt-6">
-          <button
-            @click="deleteCurrentBook"
-            class="px-4 py-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"
-          >
-            删除书籍
-          </button>
-          <div class="flex gap-3">
-            <button
-              @click="showManageBookModal = false"
-              class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              取消
-            </button>
-            <button
-              @click="saveManageBook"
-              class="px-4 py-2 rounded-full bg-[var(--accent-500)] text-white transition-colors"
-            >
-              保存
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
+
+<style scoped>
+/* ========== 基础布局 ========== */
+.immersive-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-canvas, #faf8f5);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* ========== Zen Mode ========== */
+.zen-mode {
+  --panel-bg: rgba(255, 255, 255, 0.95);
+  --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+/* ========== 顶部触发条 ========== */
+.top-trigger-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  z-index: 100;
+}
+
+.top-trigger-bar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border-radius: 0 0 12px 12px;
+  box-shadow: var(--panel-shadow);
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+  transition: transform 0.3s ease;
+}
+
+.top-trigger-bar.visible {
+  transform: translateX(-50%) translateY(0);
+}
+
+.top-trigger-bar .divider {
+  opacity: 0.3;
+}
+
+.expand-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.expand-btn:hover {
+  opacity: 1;
+}
+
+/* ========== 顶部面板 ========== */
+.top-panel {
+  position: relative;
+  flex-shrink: 0;
+  background: var(--bg-primary, #fff);
+  border-bottom: 1px solid var(--border-color, #e8e4df);
+  padding: 12px 20px;
+}
+
+.top-panel-content {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.book-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-selector select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  font-size: 14px;
+  min-width: 160px;
+}
+
+.chapter-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chapter-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chapter-title-input {
+  flex: 1;
+  max-width: 400px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.chapter-title-input:hover,
+.chapter-title-input:focus {
+  border-color: var(--border-color);
+  background: var(--bg-panel);
+  outline: none;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapse-btn {
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.collapse-btn:hover {
+  opacity: 1;
+}
+
+/* ========== 主内容区 ========== */
+.main-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ========== 左侧触发条 ========== */
+.left-trigger {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 40px;
+  width: 8px;
+  z-index: 50;
+  cursor: pointer;
+}
+
+.left-trigger-content {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) translateX(-100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border-radius: 0 12px 12px 0;
+  box-shadow: var(--panel-shadow);
+  transition: transform 0.3s ease;
+}
+
+.left-trigger-content.visible {
+  transform: translateY(-50%) translateX(0);
+}
+
+.chapter-dots {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chapter-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted, #999);
+  opacity: 0.4;
+  transition: all 0.2s;
+}
+
+.chapter-dot.active {
+  background: var(--accent-500, #d4a574);
+  opacity: 1;
+  transform: scale(1.3);
+}
+
+.trigger-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 4px;
+}
+
+/* ========== 左侧面板 ========== */
+.left-panel {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.left-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.left-panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chapters-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.chapter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px;
+}
+
+.chapter-item:hover {
+  background: var(--bg-panel, #f5f3f0);
+}
+
+.chapter-item.active {
+  background: var(--accent-100, #f0e6d9);
+  color: var(--accent-700, #8b6914);
+}
+
+.ch-number {
+  font-weight: 600;
+  font-size: 12px;
+  opacity: 0.6;
+  min-width: 24px;
+}
+
+.ch-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========== 编辑器容器 ========== */
+.editor-container {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.zen-mode .editor-container {
+  padding: 40px 60px;
+}
+
+/* ========== 右侧悬浮工具栏 ========== */
+.right-floating-bar {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  transition: right 0.3s ease;
+}
+
+.right-floating-bar.panel-open {
+  right: 336px;
+}
+
+.floating-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  box-shadow: var(--panel-shadow);
+}
+
+.floating-tab {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.floating-tab:hover {
+  background: var(--bg-panel);
+}
+
+.floating-tab.active {
+  background: var(--accent-500);
+  color: white;
+}
+
+.tab-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tab-shortcut {
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+/* ========== 右侧面板 ========== */
+.right-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  z-index: 35;
+}
+
+.right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.right-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* ========== 状态栏 ========== */
+.status-bar {
+  flex-shrink: 0;
+  padding: 8px 20px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-bar.minimal {
+  padding: 6px 20px;
+  background: transparent;
+  border-top: none;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.status-bar.minimal .zen-hint {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.status-bar.minimal:hover .zen-hint {
+  opacity: 0.6;
+}
+
+/* ========== 通用按钮样式 ========== */
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg-panel);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-icon.zen-toggle.active {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.btn-primary {
+  padding: 10px 16px;
+  background: var(--accent-500);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: var(--accent-600);
+}
+
+.btn-danger {
+  padding: 10px 16px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ========== 模态框 ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--bg-primary);
+  padding: 24px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+}
+
+.modal input,
+.modal textarea {
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  font-size: 14px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.modal-actions button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ========== 笔记面板 ========== */
+.notes-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notes-panel textarea {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  resize: none;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ========== 过渡动画 ========== */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-20px);
+}
+
+.slide-left-enter-active,
+.slide-left-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-left-enter-from,
+.slide-left-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-right-enter-from,
+.slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+/* ========== 滚动条样式 ========== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted, #999);
+  border-radius: 3px;
+  opacity: 0.3;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  opacity: 0.6;
+}
+
+/* ========== 响应式 ========== */
+@media (max-width: 768px) {
+  .right-floating-bar {
+    right: 8px;
+  }
+  
+  .floating-tabs {
+    padding: 6px;
+  }
+  
+  .floating-tab {
+    width: 38px;
+    height: 38px;
+  }
+  
+  .editor-container {
+    padding: 16px;
+  }
+}
+</style>
