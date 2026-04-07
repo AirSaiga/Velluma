@@ -655,4 +655,3 @@ Chapter.generation_tasks = relationship(
     cascade='all, delete-orphan',
     foreign_keys='GenerationTask.chapter_id'
 )
-Chapter.active_task_id = Column(UUID(as_uuid=True), ForeignKey('generation_tasks.id', ondelete='SET NULL'), nullable=True)
