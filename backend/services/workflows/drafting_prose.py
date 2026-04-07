@@ -54,52 +54,23 @@ from backend.services.prompts import (
 from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.services.workflows.drafting_thinking import _call_llm_with_stats
+from backend.services.workflows.beat_utils import (
+    get_target_words,
+    safe_get_beat_id,
+    safe_get_from_list,
+    clamp_tokens,
+    extract_tail,
+    get_pov_profile,
+    build_context_summaries,
+    BeatDefaults,
+)
 
 LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]
 
 
-def _extract_tail(text: str, max_chars: int = 300) -> str:
-    if not text:
-        return ""
-
-    if len(text) <= max_chars:
-        return text
-
-    paragraphs = text.split("\n\n")
-    tail_parts = []
-    current_length = 0
-
-    for para in reversed(paragraphs):
-        if current_length + len(para) + 2 > max_chars:
-            remaining = max_chars - current_length
-            if remaining > 50:
-                sentences = para.split("。")
-                partial = ""
-                for sent in reversed(sentences):
-                    if len(partial) + len(sent) + 1 <= remaining:
-                        partial = sent + "。" + partial if partial else sent + "。"
-                    else:
-                        break
-                if partial:
-                    tail_parts.insert(0, partial)
-            break
-        tail_parts.insert(0, para)
-        current_length += len(para) + 2
-
-    result = "\n\n".join(tail_parts)
-
-    if len(result) > max_chars:
-        result = result[-max_chars:]
-        first_period = result.find("。")
-        if first_period > 0 and first_period < 50:
-            result = result[first_period + 1:]
-
-    return result.strip()
-
-
-def _clamp_tokens(target_words: int) -> int:
-    estimated_tokens = int(target_words * 2)
-    return max(1200, min(estimated_tokens, 5200))
+# 保持向后兼容的别名
+_extract_tail = extract_tail
+_clamp_tokens = clamp_tokens
 
 
 async def _micro_review_assertion(
