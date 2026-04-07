@@ -54,6 +54,14 @@ from backend.services.prompts import (
 from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
 from backend.services.workflows.drafting_thinking import _call_llm_with_stats
+from backend.services.workflows.drafting_types import (
+    DraftingModels,
+    DraftingContext,
+    DraftingOptions,
+    DraftingCallbacks,
+    ProseGenerationState,
+    BeatDraftResult as ProseBeatResult,
+)
 from backend.services.workflows.beat_utils import (
     get_target_words,
     safe_get_beat_id,
