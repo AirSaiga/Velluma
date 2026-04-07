@@ -61,6 +61,7 @@ from backend.services.workflows.drafting_types import (
     DraftingCallbacks,
     ProseGenerationState,
     BeatDraftResult as ProseBeatResult,
+    BeatContext,
 )
 from backend.services.workflows.beat_utils import (
     get_target_words,
@@ -564,192 +565,217 @@ def _adjust_after_failure(
     return new_temp, pending_hint
 
 
-async def _generate_single_beat_serial(
-    beat: dict,
-    beat_idx: int,
-    beats: List[dict],
-    scene_intent_results: List[dict],
-    subconscious_results: List[str],
-    dynamic_context: DynamicContext,
-    chapter: Any,
-    book: Any,
-    entities: List[Any],
-    relationships: List[Any],
+@dataclass
+class _RetryState:
+    """内部重试状态（简化版）"""
+    attempt: int = 0
+    chunk: str = ""
+    is_valid: bool = False
+    current_temp: float = BeatDefaults.DEFAULT_TEMPERATURE
+    pending_hint: str = ""
+    prompts_history: List[dict] = None
+    
+    def __post_init__(self):
+        if self.prompts_history is None:
+            self.prompts_history = []
+
+
+async def _execute_generation_with_retry(
+    beat_context: "BeatContext",
+    generate_once: Callable[[float, str], Awaitable[tuple[str, dict, dict]]],
+    validate: Optional[Callable[[str], Awaitable[tuple[bool, str, List[str]]]]],
     flags: DraftingFeatureFlags,
-    creative_model: str,
-    reasoning_model: str,
-    api_key: str,
-    base_url: str,
-    chapter_assets_schema: str,
-    enable_qc: bool,
+    beat_number: int,
+    strategy_name: str = "Generation",
+) -> tuple[str, List[dict]]:
+    """
+    带重试机制的生成执行器。
+    
+    统一处理三个策略共有的重试逻辑：
+    - 初始化重试状态
+    - 执行生成（支持 pending_hint 追加）
+    - Fail-Fast 验证
+    - 参数调整（温度、提示词）
+    - 异常处理
+    
+    Args:
+        beat_context: Beat 上下文（用于计算 max_attempts）
+        generate_once: 单次生成函数，接收 (temperature, pending_hint)，返回 (chunk, sys_p, usr_p)
+        validate: 可选的验证函数，接收 chunk，返回 (is_valid, fail_reason, fail_categories)
+        flags: 功能标志
+        beat_number: Beat 编号（用于日志）
+        strategy_name: 策略名称（用于日志）
+        
+    Returns:
+        tuple[str, List[dict]]: (生成的文本, prompts_history)
+    """
+    max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
+    state = _RetryState()
+    
+    logger.info(f"[{strategy_name}] Beat {beat_number} 开始生成（最多 {max_attempts} 次尝试）...")
+    
+    while state.attempt < max_attempts and not state.is_valid:
+        state.attempt += 1
+        try:
+            # 执行单次生成
+            chunk, sys_p, usr_p = await generate_once(state.current_temp, state.pending_hint)
+            state.chunk = chunk
+            
+            # 记录 prompt
+            state.prompts_history.append({
+                "stage": f"PROSE_DRAFT_ATTEMPT_{state.attempt}",
+                "beat_index": beat_number,
+                "temperature": state.current_temp,
+                "system_prompt": sys_p,
+                "user_prompt": usr_p,
+            })
+            
+            # 处理空响应
+            if not chunk:
+                logger.warning(f"[{strategy_name}] Beat {beat_number} 第{state.attempt}次返回空文本")
+                if state.attempt < max_attempts:
+                    state.current_temp = min(1.0, state.current_temp + 0.1)
+                    continue
+            
+            # Fail-Fast 验证
+            if validate and flags.enable_fail_fast and state.attempt < max_attempts:
+                is_valid, fail_reason, fail_categories = await validate(chunk)
+                if not is_valid:
+                    logger.warning(f"[{strategy_name}] Beat {beat_number} 第{state.attempt}次断言失败: {fail_reason}")
+                    state.current_temp, state.pending_hint = _adjust_after_failure(
+                        state.current_temp, fail_categories, flags, fail_reason
+                    )
+                else:
+                    state.is_valid = True
+            else:
+                state.is_valid = True
+                
+        except Exception as e:
+            logger.error(f"[{strategy_name}] Beat {beat_number} 第{state.attempt}次异常: {type(e).__name__}: {e}")
+            if state.attempt >= max_attempts:
+                break
+            await asyncio.sleep(1)
+    
+    logger.info(f"[{strategy_name}] Beat {beat_number} 完成，字数={len(state.chunk)}")
+    return state.chunk, state.prompts_history
+
+
+async def _generate_single_beat_serial(
+    beat_context: BeatContext,
+    dynamic_context: DynamicContext,
+    drafting_context: DraftingContext,
+    models: DraftingModels,
+    options: DraftingOptions,
     stats_callback: LLMStatsCallback,
 ) -> dict:
     """
     生成单个 Beat 的正文（串行策略）。
     
     Args:
-        beat: 当前 Beat
-        beat_idx: Beat 索引（从0开始）
-        beats: 所有 Beats
-        scene_intent_results: Scene Intent 结果
-        subconscious_results: Subconscious 结果
+        beat_context: Beat 上下文（使用 BeatContext 封装）
         dynamic_context: 动态上下文
-        chapter: 章节对象
-        book: 书籍对象
-        entities: 实体列表
-        relationships: 关系列表
-        flags: 功能标志
-        creative_model: 创作模型
-        reasoning_model: 推理模型
-        api_key: API Key
-        base_url: Base URL
-        chapter_assets_schema: 章节资产模式
-        enable_qc: 是否启用 QC
+        drafting_context: 起草上下文
+        models: 模型配置
+        options: 选项配置
         stats_callback: 统计回调
         
     Returns:
         dict: {"text": ..., "prompts": [...]}
     """
-    beat_number = beat_idx + 1
-    n = len(beats)
-    is_first = (beat_idx == 0)
+    beat = beat_context.beat
+    beat_number = beat_context.beat_number
+    flags = options.feature_flags or DraftingFeatureFlags()
     
-    # 准备 Beat 上下文
-    pov_ch = beat.get("pov_character", "主角")
-    pov_profile = get_pov_profile(pov_ch, entities)
-    pov_perception_state = beat.get("pov_perception_state") or beat.get("entry_state") or "正常"
-    target_words = get_target_words(beat, 0, n)  # word_count 从 beat 获取
+    # 准备 POV 信息
+    pov_profile = get_pov_profile(beat_context.pov_character, drafting_context.entities)
+    target_words = beat_context.target_words
     
-    # 初始化状态
-    max_attempts = flags.fail_fast_max_attempts if flags.enable_fail_fast else 1
-    chunk = ""
-    is_valid = False
-    attempt = 0
-    current_temp = 0.75
-    prompts_history = []
-    pending_hint = ""
+    # 定义单次生成函数
+    async def generate_once(current_temp: float, pending_hint: str) -> tuple[str, str, str]:
+        sys_p, usr_p = build_prose_draft_prompt_v25(
+            chapter=drafting_context.chapter,
+            book=drafting_context.book,
+            beat=beat,
+            scene_intent=beat_context.scene_intent,
+            subconscious_thought=beat_context.subconscious,
+            previous_tail=dynamic_context.previous_tail,
+            target_words=target_words,
+            physical_state_lock=dynamic_context.physical_state_lock,
+            current_emotional_state=dynamic_context.current_emotional_state,
+            accumulated_summary=dynamic_context.accumulated_summary,
+            relational_state_lock=dynamic_context.relational_state_lock,
+            red_lines=beat.get("red_lines"),
+            entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
+            chapter_assets_schema=options.chapter_assets_schema or '',
+            pov_perception_state=beat_context.pov_perception_state,
+            pov_character_profile=pov_profile,
+            is_first_beat=beat_context.is_first,
+        )
+        if pending_hint:
+            usr_p = usr_p + pending_hint
+        
+        response = await _call_llm_with_stats(
+            stage="prose_draft",
+            system_prompt=sys_p,
+            user_prompt=usr_p,
+            api_key=models.api_key,
+            base_url=models.base_url,
+            model=models.creative_model,
+            temperature=current_temp,
+            max_tokens=_clamp_tokens(target_words),
+            beat_index=beat_number,
+            stats_callback=stats_callback,
+        )
+        chunk = clean_llm_output(response).strip()
+        return chunk, sys_p, usr_p
     
-    logger.info(f"[Prose V25-Serial] Beat {beat_number}/{n} 开始生成...")
+    # 定义验证函数（仅当启用 fail-fast 时）
+    async def validate(chunk: str) -> tuple[bool, str, List[str]]:
+        return await _micro_review_assertion(
+            chunk_text=chunk,
+            dynamic_context=dynamic_context,
+            pov_character=beat_context.pov_character,
+            beat=beat,
+            api_key=models.api_key,
+            base_url=models.base_url,
+            model=models.reasoning_model,
+            entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
+            beat_index=beat_number,
+            stats_callback=stats_callback,
+            book=drafting_context.book,
+            chapter=drafting_context.chapter,
+            entities=drafting_context.entities,
+        )
     
-    # 重试循环
-    while attempt < max_attempts and not is_valid:
-        attempt += 1
-        try:
-            # 获取输入数据
-            scene_intent = safe_get_from_list(
-                scene_intent_results, beat_idx,
-                {"intent_label": "默认", "goal": beat.get("summary", "")}
-            )
-            subconscious = safe_get_from_list(subconscious_results, beat_idx, "")
-            
-            # 构建 Prompt
-            sys_p, usr_p = build_prose_draft_prompt_v25(
-                chapter=chapter,
-                book=book,
-                beat=beat,
-                scene_intent=scene_intent,
-                subconscious_thought=subconscious,
-                previous_tail=dynamic_context.previous_tail,
-                target_words=target_words,
-                physical_state_lock=dynamic_context.physical_state_lock,
-                current_emotional_state=dynamic_context.current_emotional_state,
-                accumulated_summary=dynamic_context.accumulated_summary,
-                relational_state_lock=dynamic_context.relational_state_lock,
-                red_lines=beat.get("red_lines"),
-                entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
-                chapter_assets_schema=chapter_assets_schema or '',
-                pov_perception_state=pov_perception_state,
-                pov_character_profile=pov_profile,
-                is_first_beat=is_first,
-            )
-            
-            if pending_hint:
-                usr_p = usr_p + pending_hint
-            
-            prompts_history.append({
-                "stage": f"PROSE_DRAFT_ATTEMPT_{attempt}",
-                "beat_index": beat_number,
-                "temperature": current_temp,
-                "system_prompt": sys_p,
-                "user_prompt": usr_p,
-            })
-            
-            # 调用 LLM
-            response = await _call_llm_with_stats(
-                stage="prose_draft",
-                system_prompt=sys_p,
-                user_prompt=usr_p,
-                api_key=api_key,
-                base_url=base_url,
-                model=creative_model,
-                temperature=current_temp,
-                max_tokens=_clamp_tokens(target_words),
-                beat_index=beat_number,
-                stats_callback=stats_callback,
-            )
-            chunk = clean_llm_output(response).strip()
-            
-            # 处理空响应
-            if not chunk:
-                logger.warning(f"[Prose V25-Serial] Beat {beat_number} 第{attempt}次返回空文本")
-                if attempt < max_attempts:
-                    current_temp = min(1.0, current_temp + 0.1)
-                    continue
-            
-            # Fail-Fast 断言检查
-            if flags.enable_fail_fast and attempt < max_attempts:
-                is_valid, fail_reason, fail_categories = await _micro_review_assertion(
-                    chunk_text=chunk,
-                    dynamic_context=dynamic_context,
-                    pov_character=pov_ch,
-                    beat=beat,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=reasoning_model,
-                    entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
-                    beat_index=beat_number,
-                    stats_callback=stats_callback,
-                    book=book,
-                    chapter=chapter,
-                    entities=entities,
-                )
-                if not is_valid:
-                    logger.warning(f"[Prose V25-Serial] Beat {beat_number} 第{attempt}次断言失败: {fail_reason}")
-                    current_temp, pending_hint = _adjust_after_failure(
-                        current_temp, fail_categories, flags, fail_reason
-                    )
-                else:
-                    is_valid = True
-            else:
-                is_valid = True
-                
-        except Exception as e:
-            logger.error(f"[Prose V25-Serial] Beat {beat_number} 第{attempt}次异常: {type(e).__name__}: {e}")
-            if attempt >= max_attempts:
-                break
-            await asyncio.sleep(1)
+    # 使用统一重试执行器
+    chunk, prompts_history = await _execute_generation_with_retry(
+        beat_context=beat_context,
+        generate_once=generate_once,
+        validate=validate if flags.enable_fail_fast else None,
+        flags=flags,
+        beat_number=beat_number,
+        strategy_name="Prose V25-Serial",
+    )
     
     # QC 检查
-    if enable_qc and chunk:
+    if options.enable_qc and chunk:
         try:
             chunk, qc_prompts = await _quick_qc(
                 prose_text=chunk,
                 beat=beat,
                 beat_index=beat_number,
-                chapter=chapter,
-                book=book,
-                entities=entities,
-                relationships=relationships,
-                api_key=api_key,
-                base_url=base_url,
-                model=creative_model,
+                chapter=drafting_context.chapter,
+                book=drafting_context.book,
+                entities=drafting_context.entities,
+                relationships=drafting_context.relationships,
+                api_key=models.api_key,
+                base_url=models.base_url,
+                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
         except Exception as e:
             logger.warning(f"[Prose V25-Serial] Beat {beat_number} QC 失败: {e}")
-    
-    logger.info(f"[Prose V25-Serial] Beat {beat_number} 完成，字数={len(chunk)}")
     
     return {"text": chunk, "prompts": prompts_history}
 
@@ -865,6 +891,31 @@ async def _generate_prose_serial_v25(
     flags = feature_flags or DraftingFeatureFlags()
     n = len(beats)
     
+    # 构建统一的上下文对象（减少参数传递）
+    drafting_context = DraftingContext(
+        chapter=chapter,
+        book=book,
+        entities=entities,
+        relationships=relationships,
+        word_count=word_count,
+        previous_summary=previous_summary,
+        relevant_memories=relevant_memories,
+        locations=locations,
+    )
+    models = DraftingModels(
+        creative_model=creative_model,
+        reasoning_model=reasoning_model,
+        api_key=api_key,
+        base_url=base_url,
+    )
+    options = DraftingOptions(
+        enable_qc=enable_qc,
+        feature_flags=flags,
+        physical_state_lock=physical_state_lock,
+        entity_spatial_ledger=entity_spatial_ledger,
+        chapter_assets_schema=chapter_assets_schema,
+    )
+    
     # 初始化上下文
     dynamic_context = _init_serial_context(
         beats, relationships, entities, physical_state_lock, entity_spatial_ledger
@@ -873,24 +924,24 @@ async def _generate_prose_serial_v25(
     # 逐个 Beat 生成
     all_results = []
     for beat_idx, beat in enumerate(beats):
-        result = await _generate_single_beat_serial(
+        # 创建 BeatContext 封装单个 Beat 的所有信息
+        beat_context = BeatContext(
             beat=beat,
             beat_idx=beat_idx,
-            beats=beats,
-            scene_intent_results=scene_intent_results,
-            subconscious_results=subconscious_results,
+            total_beats=n,
+            scene_intent=safe_get_from_list(
+                scene_intent_results, beat_idx,
+                {"intent_label": "默认", "goal": beat.get("summary", "")}
+            ),
+            subconscious=safe_get_from_list(subconscious_results, beat_idx, ""),
+        )
+        
+        result = await _generate_single_beat_serial(
+            beat_context=beat_context,
             dynamic_context=dynamic_context,
-            chapter=chapter,
-            book=book,
-            entities=entities,
-            relationships=relationships,
-            flags=flags,
-            creative_model=creative_model,
-            reasoning_model=reasoning_model,
-            api_key=api_key,
-            base_url=base_url,
-            chapter_assets_schema=chapter_assets_schema,
-            enable_qc=enable_qc,
+            drafting_context=drafting_context,
+            models=models,
+            options=options,
             stats_callback=stats_callback,
         )
         
