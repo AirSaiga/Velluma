@@ -570,3 +570,76 @@ class PlotLedger(Base):
             name="ck_plot_ledgers_status_valid",
         ),
     )
+    PENDING = "pending"      # 等待执行
+    RUNNING = "running"      # 执行�?
+    SUCCESS = "success"      # 成功完成
+    FAILED = "failed"        # 执行失败
+    REVOKED = "revoked"      # 被取�?
+    RETRYING = "retrying"    # 重试�?
+
+
+class GenerationTask(Base):
+    """
+    章节生成任务�?- 异步任务队列
+
+    业务含义�?
+    - 支持将章节生成任务提交到队列，异步执�?
+    - 用户可立即获得任务ID，通过轮询或WebSocket获取进度
+    - 支持任务取消、重试、查看历�?
+    """
+    __tablename__ = "generation_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    
+    # 任务状�?
+    status = Column(String(20), default=TaskStatus.PENDING, nullable=False)
+    current_stage = Column(String(50), nullable=True)
+    progress_percent = Column(Integer, default=0)
+    
+    # 任务配置
+    config = Column(JSONB, default=dict)
+    beats = Column(JSONB, default=list)
+    
+    # 结果数据
+    partial_result = Column(Text, nullable=True)
+    final_text = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Celery 相关
+    celery_task_id = Column(String(100), nullable=True)
+    retry_count = Column(Integer, default=0)
+    
+    # 时间�?
+    submitted_at = Column(DateTime, default=utc_now)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # 关联关系
+    chapter = relationship("Chapter", back_populates="generation_tasks")
+    book = relationship("Book", back_populates="generation_tasks")
+
+    def to_dict(self) -> dict:
+        """转换为字典（用于API响应）"""
+        return {
+            "id": str(self.id),
+            "chapter_id": str(self.chapter_id),
+            "book_id": str(self.book_id),
+            "status": self.status,
+            "current_stage": self.current_stage,
+            "progress": self.progress_percent,
+            "config": self.config,
+            "partial_result": self.partial_result,
+            "final_text": self.final_text if self.status == TaskStatus.SUCCESS else None,
+            "error": self.error_message if self.status == TaskStatus.FAILED else None,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+# 更新关联关系
+Book.generation_tasks = relationship('GenerationTask', back_populates='book', cascade='all, delete-orphan')
+Chapter.generation_tasks = relationship('GenerationTask', back_populates='chapter', cascade='all, delete-orphan')
+Chapter.active_task_id = Column(UUID(as_uuid=True), ForeignKey('generation_tasks.id', ondelete='SET NULL'), nullable=True)

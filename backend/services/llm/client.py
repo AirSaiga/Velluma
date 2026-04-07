@@ -161,8 +161,23 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         if response_text:
             parts.append(response_text)
         error_msg = " | ".join(parts)
-        yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        
+        # 统一错误格式：使用 event 格式与其他模块保持一致
+        error_payload = {
+            "event": "ERROR",
+            "message": f"LLM调用失败: {error_msg}",
+            "error_type": error_type,
+            "status_code": status_code,
+        }
+        yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+        
+        # 发送 DONE 事件标记结束
+        done_payload = {
+            "event": "DONE",
+            "error": error_msg,
+            "success": False,
+        }
+        yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
     finally:
         if http_client is not None:
             await http_client.aclose()

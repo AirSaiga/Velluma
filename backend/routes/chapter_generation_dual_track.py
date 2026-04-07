@@ -56,6 +56,7 @@ from backend.services.workflows.dual_track import (
     DualTrackConfig,
     DualTrackResult,
 )
+
 from backend.services.workflows.sketch_generator import SketchGeneratorConfig
 from backend.services.workflows.adversarial_aligner import AdversarialAlignerConfig
 from backend.services.utils.prompt_logger import create_logger
@@ -209,6 +210,7 @@ async def generate_chapter_dual_track(
             chapter = context.chapter
             book = context.book
             run_id = _resolve_run_id(request, chapter)
+            
             effective_word_count = request.word_count or 2000
             effective_reasoning_model = request.reasoning_model or request.model
             effective_creative_model = request.creative_model or effective_reasoning_model
@@ -500,30 +502,110 @@ async def generate_chapter_dual_track(
             
             # 并发执行 workflow 和进度事件处理
             workflow_task = asyncio.create_task(run_workflow())
+            partial_result = None  # 用于保存部分结果
+            last_heartbeat_time = datetime.now(timezone.utc).timestamp()
+            HEARTBEAT_INTERVAL = 30  # 每30秒发送一次心跳
             
-            # 处理进度事件，直到 workflow 完成
-            while True:
-                try:
-                    # 等待队列中的事件，设置超时以便检查 workflow 是否完成
-                    event_data = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
-                    if event_data is None:  # workflow 完成信号
-                        break
-                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
-                    # 检查 workflow 是否已完成
-                    if workflow_task.done():
-                        # 处理队列中剩余的事件（使用非阻塞方式）
-                        while not progress_queue.empty():
+            try:
+                # 处理进度事件，直到 workflow 完成
+                while True:
+                    try:
+                        # 等待队列中的事件，设置超时以便检查 workflow 是否完成和发送心跳
+                        event_data = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                        if event_data is None:  # workflow 完成信号
+                            break
+                        yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                        
+                        # 重置心跳计时器（有实际数据发送时）
+                        last_heartbeat_time = datetime.now(timezone.utc).timestamp()
+                        
+                    except asyncio.TimeoutError:
+                        current_time = datetime.now(timezone.utc).timestamp()
+                        
+                        # 检查是否需要发送心跳（防止代理断开连接）
+                        if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                             try:
-                                event_data = progress_queue.get_nowait()
-                                if event_data is not None:
-                                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                            except asyncio.QueueEmpty:
-                                break
-                        break
-            
-            # 获取 workflow 结果
-            result: DualTrackResult = await workflow_task
+                                yield build_sse_event(
+                                    "HEARTBEAT",
+                                    "",
+                                    timestamp=current_time,
+                                    run_id=run_id,
+                                )
+                                last_heartbeat_time = current_time
+                            except Exception as heartbeat_e:
+                                # 如果心跳发送失败，可能是连接已断开
+                                svc_logger.warning("Heartbeat failed, client may have disconnected", 
+                                                 run_id=run_id, error=str(heartbeat_e))
+                                # 尝试取消 workflow
+                                if not workflow_task.done():
+                                    workflow_task.cancel()
+                                raise GeneratorExit("Client disconnected (heartbeat failed)")
+                        
+                        # 检查 workflow 是否已完成或失败
+                        if workflow_task.done():
+                            # 处理队列中剩余的事件（使用非阻塞方式）
+                            while not progress_queue.empty():
+                                try:
+                                    event_data = progress_queue.get_nowait()
+                                    if event_data is not None:
+                                        yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                                except asyncio.QueueEmpty:
+                                    break
+                            break
+                
+                # 获取 workflow 结果
+                result: DualTrackResult = await workflow_task
+                
+            except (GeneratorExit, asyncio.CancelledError) as cancel_e:
+                # P0: 客户端断开或任务被取消 - 传播取消信号
+                svc_logger.warning("Generation cancelled by client, propagating cancellation", 
+                                  run_id=run_id, exc_type=type(cancel_e).__name__)
+                
+                # 取消后台 workflow 任务
+                if not workflow_task.done():
+                    workflow_task.cancel()
+                    try:
+                        # 等待任务实际取消，获取可能的部分结果
+                        partial_result = await workflow_task
+                    except asyncio.CancelledError:
+                        svc_logger.info("Workflow task cancelled successfully", run_id=run_id)
+                    except Exception as workflow_e:
+                        # workflow 在取消前可能已完成部分工作
+                        svc_logger.warning("Workflow raised exception during cancellation", 
+                                         run_id=run_id, error=str(workflow_e))
+                
+                # 尝试保存部分结果（如果有）
+                if partial_result and hasattr(partial_result, 'final_text') and partial_result.final_text:
+                    try:
+                        chapter.draft_text = partial_result.final_text
+                        chapter.generation_status = {
+                            **(chapter.generation_status or {}),
+                            "run_id": run_id,
+                            "status": "cancelled",
+                            "stage": "CANCELLED",
+                            "partial_text_length": len(partial_result.final_text),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await _persist_checkpoint(
+                            db=db, chapter=chapter, run_id=run_id, 
+                            stage="CANCELLED", status="cancelled",
+                            payload={
+                                "reason": "client_disconnected",
+                                "partial_text_length": len(partial_result.final_text),
+                            }
+                        )
+                        svc_logger.info("Partial result saved after cancellation", 
+                                      run_id=run_id, text_length=len(partial_result.final_text))
+                    except Exception as save_e:
+                        svc_logger.error("Failed to save partial result", run_id=run_id, error=str(save_e))
+                
+                # 向前端发送取消确认（如果连接还可用）
+                try:
+                    yield build_sse_event("CANCELLED", "生成任务已取消", run_id=run_id)
+                except Exception:
+                    pass
+                
+                raise  # 重新抛出，让上层处理
             
             # 更新最终状态
             prompt_logger._final_text_length = len(result.final_text) if result.final_text else 0
@@ -534,6 +616,46 @@ async def generate_chapter_dual_track(
                 "TRACK_A_DONE",
                 f"节拍扩写完成，{len(result.beat_drafts)} 个片段"
             )
+            
+            # P0: 渐进保存 - 在统稿前保存 beat_drafts 的原始拼接结果
+            # 这样即使统稿或后续步骤失败，用户也能拿到已完成的内容
+            if result.beat_drafts:
+                try:
+                    partial_text = "\n\n".join([d.draft_chunk for d in result.beat_drafts if d.draft_chunk])
+                    if partial_text:
+                        chapter.draft_text = partial_text
+                        
+                        chapter.generation_status = {
+                            **(chapter.generation_status or {}),
+                            "run_id": run_id,
+                            "status": "running",
+                            "stage": "PARTIAL_SAVE",
+                            "partial_beats_count": len(result.beat_drafts),
+                            "partial_text_length": len(partial_text),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await _persist_checkpoint(
+                            db=db, chapter=chapter, run_id=run_id, 
+                            stage="BEATS_COMPLETE", status="running",
+                            payload={
+                                "beat_count": len(result.beat_drafts),
+                                "partial_text_length": len(partial_text),
+                            }
+                        )
+                        svc_logger.info("Partial result saved after beats completion", 
+                                      run_id=run_id, beat_count=len(result.beat_drafts), text_length=len(partial_text))
+                        
+                        # 通知前端部分结果已保存
+                        yield build_sse_event(
+                            "PARTIAL_SAVE",
+                            f"已保存 {len(result.beat_drafts)} 个节拍的草稿（{len(partial_text)} 字）",
+                            partial_text_length=len(partial_text),
+                            beat_count=len(result.beat_drafts),
+                        )
+                except Exception as partial_save_e:
+                    svc_logger.warning("Failed to save partial result after beats", 
+                                     run_id=run_id, error=str(partial_save_e))
+                    # 不阻塞主流程，继续统稿
             
             # 发送 Track B 完成事件（如果有，内部事件）
             if result.sketch_result:
@@ -571,7 +693,12 @@ async def generate_chapter_dual_track(
             chunk_size = 100  # 每块约100字符
             for i in range(0, len(final_text), chunk_size):
                 chunk = final_text[i:i + chunk_size]
-                yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
+                try:
+                    yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
+                except Exception:
+                    # 客户端断开连接，停止发送剩余内容
+                    svc_logger.warning("Client disconnected during TEXT_CHUNK streaming")
+                    raise GeneratorExit("Client disconnected")
             
             # 发送最终结果（使用前端期望的 DONE 而非 COMPLETE）
             chapter.draft_text = result.final_text
@@ -583,6 +710,8 @@ async def generate_chapter_dual_track(
                 "stats": result.stats,
             }
             chapter.revision_count = 1 if needs_adjustment else 0
+            
+            # 状态机：转换到 DONE 状态
             chapter.generation_status = {
                 **(chapter.generation_status or {}),
                 "run_id": run_id,
@@ -627,53 +756,80 @@ async def generate_chapter_dual_track(
             prompt_logger._finalized = True
         except BaseException as e:
             exc_type = type(e).__name__
+            error_msg = f"生成失败 ({exc_type}): {str(e)}"
             svc_logger.error(f"Generator exception: {exc_type}: {str(e)}")
+            
+            # 确定状态：取消 vs 失败
+            is_cancelled = isinstance(e, (GeneratorExit, asyncio.CancelledError))
+            target_status = "cancelled" if is_cancelled else "failed"
+            
+            # 持久化失败状态到数据库
             if chapter is not None and run_id is not None:
                 try:
                     await _persist_checkpoint(
                         db=db,
                         chapter=chapter,
                         run_id=run_id,
-                        stage="FAILED",
-                        status="failed",
+                        stage=target_status.upper(),
+                        status=target_status,
                         payload={"error": str(e), "exception_type": exc_type},
                     )
-                except Exception:
-                    pass
+                except Exception as checkpoint_e:
+                    # 记录checkpoint失败但不覆盖原始错误
+                    svc_logger.error(f"Failed to persist error checkpoint", error=str(checkpoint_e))
 
-            if not isinstance(e, (GeneratorExit, asyncio.CancelledError)):
-                try:
-                    yield build_sse_event("ERROR", f"生成失败: {str(e)}")
-                except Exception:
-                    pass
+            # 尽最大努力通知前端错误 - 适用于所有异常类型包括 GeneratorExit/CancelledError
+            try:
+                # 发送结构化错误事件
+                error_payload = {
+                    "event": "ERROR",
+                    "message": error_msg,
+                    "error_type": exc_type,
+                    "stage": chapter.generation_status.get("stage") if chapter else None,
+                    "run_id": run_id,
+                }
+                yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+                
+                # 确保发送 done 标记，让前端知道流已结束
+                done_payload = {
+                    "event": "DONE",
+                    "error": error_msg,
+                    "success": False,
+                    "generation_run_id": run_id,
+                }
+                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            except Exception:
+                # 连接可能已断开，但至少尝试过
+                pass
 
-            if isinstance(e, GeneratorExit):
+            # 如果是生成器退出，不需要重新抛出，已经处理了
+            if isinstance(e, (GeneratorExit, asyncio.CancelledError)):
                 return
 
         finally:
-            if not prompt_logger._finalized:
-                prompt_logger.finalize(
-                    final_text_length=prompt_logger._final_text_length,
-                    total_iterations=prompt_logger._total_iterations,
-                    review_passed=prompt_logger._review_passed
-                )
-                prompt_logger._finalized = True
+            # 安全地finalize日志记录器
+            if prompt_logger is not None and not getattr(prompt_logger, '_finalized', False):
+                try:
+                    prompt_logger.finalize(
+                        final_text_length=getattr(prompt_logger, '_final_text_length', 0),
+                        total_iterations=getattr(prompt_logger, '_total_iterations', 1),
+                        review_passed=getattr(prompt_logger, '_review_passed', False)
+                    )
+                    prompt_logger._finalized = True
+                except Exception as finalize_e:
+                    # 日志finalize失败不应影响主流程
+                    svc_logger.error(f"Prompt logger finalize failed", error=str(finalize_e))
     
     from fastapi.responses import StreamingResponse
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 
-@router.post("/{chapter_id}/generate-dual-track-simple")
-async def generate_chapter_dual_track_simple(
+async def _generate_chapter_dual_track_simple_inner(
     chapter_id: str,
     request: DualTrackGenerationRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession,
 ):
-    """
-    简化的双轨生成 API（非流式）
-    
-    返回完整的生成结果，不包含中间进度。
-    """
+    """内部函数：执行实际的双轨生成逻辑"""
     if str(request.chapter_id) != chapter_id:
         raise HTTPException(status_code=422, detail="path chapter_id 与请求体 chapter_id 不一致")
 
@@ -854,6 +1010,32 @@ async def generate_chapter_dual_track_simple(
             "gaps_count": len(result.adjustment_plan.gaps) if result.adjustment_plan else 0,
         } if result.adjustment_plan else None,
     }
+
+
+@router.post("/{chapter_id}/generate-dual-track-simple")
+async def generate_chapter_dual_track_simple(
+    chapter_id: str,
+    request: DualTrackGenerationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    简化的双轨生成 API（非流式）
+    
+    返回完整的生成结果，不包含中间进度。
+    包含全局异常处理，确保错误信息正确返回给前端。
+    """
+    run_id = None
+    chapter = None
+    
+    try:
+        return await _generate_chapter_dual_track_simple_inner(chapter_id, request, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        exc_type = type(e).__name__
+        error_msg = f"双轨生成失败 ({exc_type}): {str(e)}"
+        svc_logger.error(f"Dual-track simple generation failed", chapter_id=chapter_id, run_id=run_id, error=error_msg)
+        raise HTTPException(status_code=500, detail={"error": error_msg, "error_type": exc_type, "run_id": run_id})
 
 
 # =============================================================================

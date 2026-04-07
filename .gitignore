@@ -71,3 +71,7 @@ coverage/
 # IDE
 .trae/specs
 .trae/documents
+
+# Archive
+backend/_archive/
+backend/models_generation_task.py

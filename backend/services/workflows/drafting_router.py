@@ -114,6 +114,7 @@ async def execute_draft_stage(
     workflow_tier: Optional[WorkflowTier] = None,
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> List[BeatDraftResult]:
     """
     V3.0 智能路由起草阶段主入口。

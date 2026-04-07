@@ -11,3 +11,8 @@ dashscope==1.14.1
 tenacity==8.2.3
 pywebview==4.4.1
 python-multipart==0.0.6
+
+# 如果需要分布式任务队列，取消下面注释（默认不需要）
+# celery>=5.3.0
+# redis>=4.5.0
+# flower>=2.0.0

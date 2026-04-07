@@ -116,27 +116,34 @@ async def generate_chapter_sync(
     - 默认 temperature=0.7，兼顾创造性与稳定性
     - 返回完整 prompt 便于调试和追溯
     """
-    chapter = await chapter_repo.get_by_id(request.chapter_id)
-    if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
-    word_count = request.word_count or 2000
-    
-    repositories = {
-        "chapter": chapter_repo,
-        "book": book_repo,
-        "relationship": relationship_repo,
-        "map_location": map_repo,
-    }
-    prompt_data = await build_chapter_prompt(request.chapter_id, repositories, word_count)
-    content = await call_llm(
-        system_prompt=prompt_data["system_prompt"],
-        user_prompt=prompt_data["user_prompt"],
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
-        temperature=0.7,
-    )
-    return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}
+    try:
+        chapter = await chapter_repo.get_by_id(request.chapter_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        word_count = request.word_count or 2000
+        
+        repositories = {
+            "chapter": chapter_repo,
+            "book": book_repo,
+            "relationship": relationship_repo,
+            "map_location": map_repo,
+        }
+        prompt_data = await build_chapter_prompt(request.chapter_id, repositories, word_count)
+        content = await call_llm(
+            system_prompt=prompt_data["system_prompt"],
+            user_prompt=prompt_data["user_prompt"],
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            temperature=0.7,
+        )
+        return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        exc_type = type(e).__name__
+        error_msg = f"章节生成失败 ({exc_type}): {str(e)}"
+        raise HTTPException(status_code=500, detail={"error": error_msg, "error_type": exc_type})
 
 
 @router.post("/generate_chapter_agentic_preview_beats", response_model=GenerateChapterAgenticPreviewResponse)
