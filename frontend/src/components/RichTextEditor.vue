@@ -17,6 +17,7 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { bookApi } from '../services/api/domain'
+import Icon from './Icon.vue'
 
 // Extension to fake selection highlighting when editor loses focus
 const SelectionHighlighter = Extension.create({
@@ -1231,7 +1232,7 @@ defineExpose({
         class="p-1.5 rounded hover:bg-[var(--hover-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-[10px]"
         title="引用"
       >
-        ❝
+        <Icon name="document" :size="14" />
       </button>
       <div class="w-px h-3 bg-[var(--border-color)] mx-1"></div>
       <button 
@@ -1311,7 +1312,7 @@ defineExpose({
           @click="openAiRewrite"
           class="px-2.5 py-1 text-[11px] rounded-md bg-accent-600 text-white font-medium hover:bg-accent-500 transition-colors"
         >
-          ✨ AI 润色/改写
+          <Icon name="sparkles" :size="12" /> AI 润色/改写
         </button>
         <div class="w-px h-4 bg-[var(--border-color)]"></div>
         <button
@@ -1320,7 +1321,7 @@ defineExpose({
           class="px-2 py-1 text-[10px] rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="将选中片段添加到黄金锚点"
         >
-          ⭐ 黄金片段
+          <Icon name="star" :size="12" /> 黄金片段
         </button>
         <button
           @click="addToBlacklist"
@@ -1328,7 +1329,7 @@ defineExpose({
           class="px-2 py-1 text-[10px] rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="将选中片段添加到黑名单"
         >
-          🚫 黑名单
+          <Icon name="x-mark" :size="12" /> 黑名单
         </button>
       </template>
 

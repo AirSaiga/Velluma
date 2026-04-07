@@ -2,7 +2,7 @@
   <div class="h-full flex flex-col p-4 bg-parchment-50/50 backdrop-blur-sm rounded-xl overflow-hidden ring-1 ring-[var(--border-color)]/60">
     <div class="flex items-center justify-between mb-4 flex-shrink-0">
       <h3 class="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-        <span>📝</span>
+        <Icon name="chat" :size="16" />
         主编指导意见
       </h3>
       <div class="flex items-center gap-2">
@@ -40,7 +40,7 @@
         <!-- 总体评价 -->
         <div v-if="result.overall_praise" class="bg-accent-50/50 rounded-xl p-4 border border-accent-100">
           <h4 class="text-xs font-semibold text-accent-900 mb-2 flex items-center gap-1.5">
-            <span>🌟</span>
+            <Icon name="star" :size="14" />
             总体亮点
           </h4>
           <p class="text-xs text-accent-800/80 leading-relaxed whitespace-pre-line">
@@ -89,7 +89,7 @@
       
       <div v-else class="h-full flex flex-col items-center justify-center text-[var(--text-muted)] text-xs p-8 text-center">
         <div class="w-12 h-12 rounded-full bg-ink-50 flex items-center justify-center mb-3">
-          <span class="text-2xl">🧐</span>
+          <Icon name="magnifying-glass" :size="24" />
         </div>
         <p>暂无指导意见</p>
         <p class="mt-1 opacity-70">点击编辑器上方的"获取主编指导"按钮开始分析</p>
@@ -99,6 +99,7 @@
 </template>
 
 <script setup lang="ts">
+import Icon from './Icon.vue'
 defineProps<{
   result: any
   loading: boolean

@@ -14,6 +14,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import Toast from '../../../components/Toast.vue'
 import ConfirmDialog from '../../../components/ConfirmDialog.vue'
+import Icon from '../../../components/Icon.vue'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 
 const { initTheme } = useTheme()
@@ -113,12 +114,12 @@ const rightTab = computed({
 })
 
 const floatingTabs = [
-  { key: 'characters', label: '角色', icon: '👤', shortcut: '1' },
-  { key: 'worldview', label: '规则', icon: '📜', shortcut: '2' },
-  { key: 'style', label: '风格', icon: '✨', shortcut: '3' },
-  { key: 'map', label: '地图', icon: '📍', shortcut: '4' },
-  { key: 'critique', label: '指导', icon: '📝', shortcut: '5' },
-  { key: 'notes', label: '笔记', icon: '📒', shortcut: '6' },
+  { key: 'characters', label: '角色', icon: 'users', shortcut: '1' },
+  { key: 'worldview', label: '规则', icon: 'book-open', shortcut: '2' },
+  { key: 'style', label: '风格', icon: 'sparkles', shortcut: '3' },
+  { key: 'map', label: '地图', icon: 'map-pin', shortcut: '4' },
+  { key: 'critique', label: '指导', icon: 'light-bulb', shortcut: '5' },
+  { key: 'notes', label: '笔记', icon: 'pencil-square', shortcut: '6' },
 ]
 
 // 切换沉浸模式
@@ -767,15 +768,14 @@ onBeforeUnmount(() => {
       @mouseleave="handleTopTriggerLeave"
     >
       <div class="top-trigger-bar" :class="{ 'visible': showTopTrigger && !topPanelExpanded }">
+        <Icon name="book" :size="14" class="trigger-icon" />
         <span class="trigger-book">{{ currentBook?.title || '选择书籍开始创作' }}</span>
         <template v-if="currentBook && selectedChapter">
           <span class="divider"></span>
           <span>第 {{ selectedChapter.chapter_number }} 章</span>
         </template>
         <button class="expand-btn" @click.stop="expandTopPanel" title="展开工具栏">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
+          <Icon name="chevron-down" :size="12" />
         </button>
       </div>
     </div>
@@ -793,9 +793,9 @@ onBeforeUnmount(() => {
                 :disabled="books.length === 0"
                 :title="currentBook?.title || '选择书籍'"
               >
-                <span class="book-icon">📖</span>
+                <Icon name="book" :size="16" class="book-icon" />
                 <span class="book-name">{{ currentBook?.title || '选择书籍' }}</span>
-                <span class="dropdown-arrow" :class="{ 'open': showBookDropdown }">▼</span>
+                <Icon name="chevron-down" :size="12" class="dropdown-arrow" :class="{ 'open': showBookDropdown }" />
               </button>
               
               <Transition name="dropdown">
@@ -814,7 +814,7 @@ onBeforeUnmount(() => {
                     >
                       <span class="book-option-title">{{ book.title }}</span>
                       <span v-if="book.genre" class="book-option-genre">{{ book.genre }}</span>
-                      <span v-if="book.id === currentBookId" class="active-indicator">✓</span>
+                      <Icon v-if="book.id === currentBookId" name="check" :size="14" class="active-indicator" />
                     </button>
                     <div v-if="books.length === 0" class="empty-books">
                       暂无书籍，点击 + 创建
@@ -824,8 +824,12 @@ onBeforeUnmount(() => {
               </Transition>
             </div>
             
-            <button @click="showBookModal = true" class="btn-icon" title="新建书籍">+</button>
-            <button @click="openManageBookModal" class="btn-icon" title="管理书籍" :disabled="!currentBookId">⚙</button>
+            <button @click="showBookModal = true" class="btn-icon" title="新建书籍">
+              <Icon name="plus" :size="18" />
+            </button>
+            <button @click="openManageBookModal" class="btn-icon" title="管理书籍" :disabled="!currentBookId">
+              <Icon name="pencil" :size="16" />
+            </button>
           </div>
           
           <div class="chapter-info">
@@ -841,9 +845,11 @@ onBeforeUnmount(() => {
           </div>
           
           <div class="top-actions">
-            <button @click="showSettingsModal = true" class="btn-icon" title="设置">⚙️</button>
+            <button @click="showSettingsModal = true" class="btn-icon" title="设置">
+              <Icon name="settings" :size="16" />
+            </button>
             <button @click="toggleZenMode" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
-              {{ isZenMode ? '⛶' : '⛶' }}
+              <Icon name="maximize" :size="16" />
             </button>
           </div>
         </div>
@@ -880,8 +886,10 @@ onBeforeUnmount(() => {
       <Transition name="slide-left">
         <div v-if="!isZenMode || leftPanelExpanded" class="left-panel">
           <div class="left-panel-header">
-            <h3>📚 章节</h3>
-            <button v-if="isZenMode" class="btn-icon" @click="collapseLeftPanel">←</button>
+            <h3><Icon name="document" :size="12" /> 章节</h3>
+            <button v-if="isZenMode" class="btn-icon" @click="collapseLeftPanel">
+              <Icon name="chevron-left" :size="16" />
+            </button>
           </div>
           
           <div class="chapters-list">
@@ -933,7 +941,7 @@ onBeforeUnmount(() => {
             @click="toggleRightPanel(tab.key)"
             :title="`${tab.label} (Ctrl+${tab.shortcut})`"
           >
-            <span class="tab-icon">{{ tab.icon }}</span>
+            <Icon :name="tab.icon" :size="18" class="tab-icon-svg" />
             <span class="tab-shortcut">{{ tab.shortcut }}</span>
           </button>
         </div>
@@ -944,7 +952,9 @@ onBeforeUnmount(() => {
         <div v-if="rightPanelExpanded" class="right-panel">
           <div class="right-panel-header">
             <span>{{ floatingTabs.find(t => t.key === activeFloatingTab)?.label }}</span>
-            <button class="btn-icon" @click="closeRightPanel">×</button>
+            <button class="btn-icon" @click="closeRightPanel">
+              <Icon name="close" :size="18" />
+            </button>
           </div>
           
           <div class="right-panel-content">
