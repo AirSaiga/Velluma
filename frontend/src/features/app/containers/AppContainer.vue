@@ -767,10 +767,16 @@ onBeforeUnmount(() => {
       @mouseleave="handleTopTriggerLeave"
     >
       <div class="top-trigger-bar" :class="{ 'visible': showTopTrigger && !topPanelExpanded }">
-        <span class="trigger-book">📖 {{ currentBook?.title || '无书籍' }}</span>
-        <span class="divider">|</span>
-        <span>第 {{ selectedChapter?.chapter_number || '-' }} 章</span>
-        <button class="expand-btn" @click.stop="expandTopPanel" title="展开工具栏">▼</button>
+        <span class="trigger-book">{{ currentBook?.title || '选择书籍开始创作' }}</span>
+        <template v-if="currentBook && selectedChapter">
+          <span class="divider"></span>
+          <span>第 {{ selectedChapter.chapter_number }} 章</span>
+        </template>
+        <button class="expand-btn" @click.stop="expandTopPanel" title="展开工具栏">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
       </div>
     </div>
     
@@ -1000,9 +1006,14 @@ onBeforeUnmount(() => {
     
     <!-- 底部状态栏 (Zen Mode 下极简) -->
     <div class="status-bar" :class="{ 'minimal': isZenMode }">
-      <span v-if="!isZenMode">{{ currentBook?.title }} | 第 {{ selectedChapter?.chapter_number || '-' }} 章</span>
-      <span v-else>{{ selectedChapter?.chapter_number || '-' }} / {{ sortedChapters.length }}</span>
-      <span v-if="isZenMode" class="zen-hint">Ctrl+Shift+Z 退出沉浸</span>
+      <span v-if="!isZenMode">
+        <template v-if="currentBook">
+          {{ currentBook.title }} · 第 {{ selectedChapter?.chapter_number || '-' }} 章
+        </template>
+        <template v-else>未选择书籍</template>
+      </span>
+      <span v-else>第 {{ selectedChapter?.chapter_number || '-' }} 章，共 {{ sortedChapters.length }} 章</span>
+      <span v-if="isZenMode" class="zen-hint">按 Ctrl+Shift+Z 退出沉浸模式</span>
     </div>
     
     <!-- ========== 模态框 ========== -->
@@ -1047,31 +1058,112 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ========== 基础布局 ========== */
+/* ========================================
+   Design System - 极简优雅风格
+   ======================================== */
+
+/* ---------- CSS 变量 ---------- */
 .immersive-app {
+  /* 颜色系统 - 柔和的暖灰色调 */
+  --color-bg-canvas: #faf9f7;
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f5f4f2;
+  --color-bg-tertiary: #edebe8;
+  
+  /* 文字颜色 */
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #5c5c5c;
+  --color-text-tertiary: #8a8a8a;
+  --color-text-muted: #a8a8a8;
+  
+  /* 强调色 - 柔和的茶色 */
+  --color-accent: #c4a77d;
+  --color-accent-light: #e8dcc8;
+  --color-accent-dark: #9a7d5a;
+  
+  /* 边框 */
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-hover: rgba(0, 0, 0, 0.12);
+  
+  /* 阴影层级 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.12);
+  
+  /* 字体大小 - 4px网格 */
+  --text-xs: 11px;    /* 辅助文字 */
+  --text-sm: 13px;    /* 次要文字 */
+  --text-base: 14px;  /* 正文 */
+  --text-md: 15px;    /* 强调正文 */
+  --text-lg: 17px;    /* 小标题 */
+  --text-xl: 20px;    /* 章节标题 */
+  
+  /* 行高 */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+  
+  /* 间距 - 4px网格 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  
+  /* 过渡 */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* 应用变量 */
+  --bg-canvas: var(--color-bg-canvas);
+  --bg-primary: var(--color-bg-primary);
+  --bg-panel: var(--color-bg-secondary);
+  --text-primary: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-muted: var(--color-text-tertiary);
+  --border-color: var(--color-border);
+  --accent-500: var(--color-accent);
+  --accent-100: var(--color-accent-light);
+  --accent-700: var(--color-accent-dark);
+  
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-canvas, #faf8f5);
-  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--color-bg-canvas);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ========== Zen Mode ========== */
+/* Zen Mode - 更沉浸 */
 .zen-mode {
-  --panel-bg: rgba(255, 255, 255, 0.95);
-  --panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --panel-shadow: var(--shadow-lg);
 }
 
-/* ========== 顶部触发条 ========== */
+/* ========================================
+   顶部触发条
+   ======================================== */
 .top-trigger-zone {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 20px;
+  height: 24px;
   z-index: 100;
-  cursor: default;
 }
 
 .top-trigger-bar {
@@ -1081,15 +1173,16 @@ onBeforeUnmount(() => {
   transform: translateX(-50%) translateY(-100%);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border-radius: 0 0 16px 16px;
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   box-shadow: var(--panel-shadow);
-  font-size: 14px;
-  color: var(--text-secondary, #666);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.01em;
+  transition: transform var(--transition-slow);
   max-width: 80vw;
 }
 
@@ -1099,57 +1192,66 @@ onBeforeUnmount(() => {
 
 .top-trigger-bar .trigger-book {
   font-weight: 500;
-  max-width: 200px;
+  color: var(--color-text-primary);
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .top-trigger-bar .divider {
-  opacity: 0.3;
+  width: 1px;
+  height: 12px;
+  background: var(--color-border-hover);
 }
 
 .expand-btn {
-  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: var(--space-1);
+  background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
   cursor: pointer;
-  padding: 4px 8px;
-  margin-left: 4px;
-  opacity: 0.5;
-  transition: all 0.2s;
-  border-radius: 4px;
+  transition: all var(--transition-fast);
 }
 
 .expand-btn:hover {
-  opacity: 1;
-  background: rgba(0,0,0,0.05);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
-/* ========== 顶部面板 ========== */
+/* ========================================
+   顶部面板
+   ======================================== */
 .top-panel {
-  position: relative;
   flex-shrink: 0;
-  background: var(--bg-primary, #fff);
-  border-bottom: 1px solid var(--border-color, #e8e4df);
-  padding: 12px 20px;
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-5);
 }
 
 .top-panel-content {
   display: flex;
   align-items: center;
-  gap: 20px;
-  max-width: 1600px;
+  gap: var(--space-6);
+  max-width: 1400px;
   margin: 0 auto;
 }
 
+/* ---------- 书籍选择器 ---------- */
 .book-selector {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   position: relative;
 }
 
-/* 自定义书籍下拉 */
 .custom-book-dropdown {
   position: relative;
 }
@@ -1157,21 +1259,23 @@ onBeforeUnmount(() => {
 .book-dropdown-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  font-size: 14px;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
   cursor: pointer;
-  transition: all 0.2s;
-  min-width: 180px;
-  max-width: 260px;
+  transition: all var(--transition-fast);
+  min-width: 160px;
+  max-width: 220px;
 }
 
 .book-dropdown-trigger:hover:not(:disabled) {
-  border-color: var(--accent-500);
-  background: var(--bg-canvas);
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-hover);
 }
 
 .book-dropdown-trigger:disabled {
@@ -1180,13 +1284,14 @@ onBeforeUnmount(() => {
 }
 
 .custom-book-dropdown.open .book-dropdown-trigger {
-  border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.15);
+  background: var(--color-bg-primary);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(196, 167, 125, 0.12);
 }
 
 .book-icon {
-  font-size: 16px;
-  flex-shrink: 0;
+  font-size: 15px;
+  opacity: 0.8;
 }
 
 .book-name {
@@ -1196,12 +1301,13 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   text-align: left;
   font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .dropdown-arrow {
-  font-size: 10px;
-  transition: transform 0.2s;
-  opacity: 0.6;
+  font-size: 9px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
 }
 
 .dropdown-arrow.open {
@@ -1210,15 +1316,15 @@ onBeforeUnmount(() => {
 
 .book-dropdown-menu {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--space-2));
   left: 0;
-  min-width: 260px;
-  max-width: 320px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  min-width: 240px;
+  max-width: 300px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
   z-index: 200;
   overflow: hidden;
 }
@@ -1227,161 +1333,171 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dropdown-header span:first-child {
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 
 .book-count {
-  font-size: 11px;
-  background: var(--bg-canvas);
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
 }
 
 .book-list {
-  max-height: 280px;
+  max-height: 260px;
   overflow-y: auto;
-  padding: 6px;
+  padding: var(--space-2);
 }
 
 .book-option {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s;
-  font-size: 14px;
+  transition: all var(--transition-fast);
 }
 
 .book-option:hover {
-  background: var(--bg-canvas);
+  background: var(--color-bg-secondary);
 }
 
 .book-option.active {
-  background: var(--accent-100);
-  color: var(--accent-700);
+  background: var(--color-accent-light);
 }
 
 .book-option-title {
   flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.book-option-genre {
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-panel);
-  padding: 2px 8px;
-  border-radius: 10px;
-  flex-shrink: 0;
+.book-option.active .book-option-title {
+  color: var(--color-accent-dark);
+  font-weight: 500;
 }
 
-.book-option.active .book-option-genre {
-  background: rgba(255,255,255,0.5);
+.book-option-genre {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
 }
 
 .active-indicator {
-  font-size: 12px;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-500);
+  background: var(--color-accent);
   color: white;
-  border-radius: 50%;
+  font-size: 10px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
 .empty-books {
-  padding: 24px 16px;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
-  color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
 }
 
-/* 下拉动画 */
-.dropdown-enter-active,
-.dropdown-leave-active {
-  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.dropdown-enter-from,
-.dropdown-leave-to {
-  opacity: 0;
-  transform: translateY(-8px) scale(0.96);
-}
-
+/* ---------- 章节信息 ---------- */
 .chapter-info {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .chapter-label {
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .chapter-title-input {
   flex: 1;
-  max-width: 400px;
-  padding: 6px 12px;
+  max-width: 360px;
+  height: 36px;
+  padding: 0 var(--space-3);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+  transition: all var(--transition-fast);
 }
 
-.chapter-title-input:hover,
+.chapter-title-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.chapter-title-input:hover {
+  background: var(--color-bg-secondary);
+}
+
 .chapter-title-input:focus {
-  border-color: var(--border-color);
-  background: var(--bg-panel);
+  background: var(--color-bg-primary);
+  border-color: var(--color-border-hover);
   outline: none;
 }
 
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .collapse-btn {
   position: absolute;
-  bottom: -20px;
+  bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 4px 16px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  height: 18px;
+  padding: 0 var(--space-4);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
   border-top: none;
-  border-radius: 0 0 8px 8px;
-  font-size: 10px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  font-size: 9px;
+  color: var(--color-text-muted);
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.2s;
+  transition: all var(--transition-fast);
 }
 
 .collapse-btn:hover {
-  opacity: 1;
+  color: var(--color-text-secondary);
+  height: 22px;
 }
 
-/* ========== 主内容区 ========== */
+/* ========================================
+   主内容区
+   ======================================== */
 .main-area {
   flex: 1;
   display: flex;
@@ -1389,13 +1505,13 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* ========== 左侧触发条 ========== */
+/* ---------- 左侧触发条 ---------- */
 .left-trigger {
   position: absolute;
   left: 0;
   top: 0;
-  bottom: 40px;
-  width: 8px;
+  bottom: 32px;
+  width: 12px;
   z-index: 50;
   cursor: pointer;
 }
@@ -1408,13 +1524,13 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 16px 8px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-2);
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border-radius: 0 12px 12px 0;
+  backdrop-filter: blur(20px);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   box-shadow: var(--panel-shadow);
-  transition: transform 0.3s ease;
+  transition: transform var(--transition-normal);
 }
 
 .left-trigger-content.visible {
@@ -1424,54 +1540,58 @@ onBeforeUnmount(() => {
 .chapter-dots {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .chapter-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted, #999);
-  opacity: 0.4;
-  transition: all 0.2s;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+  opacity: 0.35;
+  transition: all var(--transition-fast);
 }
 
 .chapter-dot.active {
-  background: var(--accent-500, #d4a574);
+  background: var(--color-accent);
   opacity: 1;
-  transform: scale(1.3);
+  transform: scale(1.4);
 }
 
 .trigger-label {
-  font-size: 10px;
-  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-tertiary);
   writing-mode: vertical-rl;
   text-orientation: mixed;
-  letter-spacing: 4px;
+  letter-spacing: 0.15em;
 }
 
-/* ========== 左侧面板 ========== */
+/* ---------- 左侧面板 ---------- */
 .left-panel {
-  width: 240px;
+  width: 220px;
   flex-shrink: 0;
-  background: var(--bg-primary);
-  border-right: 1px solid var(--border-color);
+  background: var(--color-bg-primary);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .left-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .left-panel-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-xs);
   font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .chapters-list {
@@ -1479,117 +1599,128 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 12px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
 }
 
 .chapter-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s;
-  font-size: 13px;
+  transition: all var(--transition-fast);
 }
 
 .chapter-item:hover {
-  background: var(--bg-panel, #f5f3f0);
+  background: var(--color-bg-secondary);
 }
 
 .chapter-item.active {
-  background: var(--accent-100, #f0e6d9);
-  color: var(--accent-700, #8b6914);
+  background: var(--color-accent-light);
 }
 
 .ch-number {
+  font-size: var(--text-xs);
   font-weight: 600;
-  font-size: 12px;
-  opacity: 0.6;
-  min-width: 24px;
+  color: var(--color-text-muted);
+  min-width: 20px;
+}
+
+.chapter-item.active .ch-number {
+  color: var(--color-accent-dark);
 }
 
 .ch-title {
   flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ========== 编辑器容器 ========== */
+.chapter-item.active .ch-title {
+  color: var(--color-accent-dark);
+  font-weight: 500;
+}
+
+/* ---------- 编辑器容器 ---------- */
 .editor-container {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  padding: 20px;
+  padding: var(--space-5);
 }
 
 .zen-mode .editor-container {
-  padding: 40px 60px;
+  padding: var(--space-8) var(--space-6);
 }
 
-/* ========== 右侧悬浮工具栏 ========== */
+/* ---------- 右侧悬浮工具栏 ---------- */
 .right-floating-bar {
   position: absolute;
-  right: 16px;
+  right: var(--space-4);
   top: 50%;
   transform: translateY(-50%);
   z-index: 40;
-  transition: right 0.3s ease;
+  transition: right var(--transition-normal);
 }
 
 .right-floating-bar.panel-open {
-  right: 336px;
+  right: 344px;
 }
 
 .floating-tabs {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  gap: var(--space-1);
+  padding: var(--space-2);
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  border-radius: 16px;
-  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(20px);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 
 .floating-tab {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: transparent;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
 }
 
 .floating-tab:hover {
-  background: var(--bg-panel);
+  background: var(--color-bg-secondary);
 }
 
 .floating-tab.active {
-  background: var(--accent-500);
+  background: var(--color-accent);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .tab-icon {
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1;
 }
 
 .tab-shortcut {
-  font-size: 9px;
-  opacity: 0.6;
+  font-size: 8px;
+  opacity: 0.5;
+  font-weight: 600;
 }
 
-/* ========== 右侧面板 ========== */
+/* ---------- 右侧面板 ---------- */
 .right-panel {
   position: absolute;
   right: 0;
@@ -1597,8 +1728,8 @@ onBeforeUnmount(() => {
   bottom: 0;
   width: 320px;
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(20px);
+  box-shadow: -2px 0 32px rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   z-index: 35;
@@ -1608,33 +1739,38 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.right-panel-header span {
+  font-size: var(--text-sm);
   font-weight: 600;
-  font-size: 14px;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
 }
 
 .right-panel-content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--space-4);
 }
 
-/* ========== 状态栏 ========== */
+/* ---------- 状态栏 ---------- */
 .status-bar {
   flex-shrink: 0;
-  padding: 8px 20px;
-  background: var(--bg-primary);
-  border-top: 1px solid var(--border-color);
-  font-size: 12px;
-  color: var(--text-muted);
+  height: 28px;
+  padding: 0 var(--space-5);
+  background: var(--color-bg-primary);
+  border-top: 1px solid var(--color-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 .status-bar.minimal {
-  padding: 6px 20px;
   background: transparent;
   border-top: none;
   position: absolute;
@@ -1646,14 +1782,16 @@ onBeforeUnmount(() => {
 
 .status-bar.minimal .zen-hint {
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity var(--transition-normal);
 }
 
 .status-bar.minimal:hover .zen-hint {
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
-/* ========== 通用按钮样式 ========== */
+/* ========================================
+   通用按钮样式
+   ======================================== */
 .btn-icon {
   width: 32px;
   height: 32px;
@@ -1661,58 +1799,74 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 15px;
   cursor: pointer;
-  font-size: 16px;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
 }
 
 .btn-icon:hover:not(:disabled) {
-  background: var(--bg-panel);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
 }
 
 .btn-icon:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 .btn-icon.zen-toggle.active {
-  background: var(--accent-100);
-  color: var(--accent-700);
+  background: var(--color-accent-light);
+  color: var(--color-accent-dark);
 }
 
 .btn-primary {
-  padding: 10px 16px;
-  background: var(--accent-500);
-  color: white;
+  height: 32px;
+  padding: 0 var(--space-4);
+  background: var(--color-accent);
   border: none;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
   font-weight: 500;
+  color: white;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
+  letter-spacing: 0.01em;
 }
 
 .btn-primary:hover {
-  background: var(--accent-600);
+  background: var(--color-accent-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-danger {
-  padding: 10px 16px;
-  background: #dc2626;
-  color: white;
+  height: 32px;
+  padding: 0 var(--space-4);
+  background: #dc4446;
   border: none;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: white;
   cursor: pointer;
+  transition: all var(--transition-fast);
 }
 
-/* ========== 模态框 ========== */
+.btn-danger:hover {
+  background: #c53030;
+}
+
+/* ========================================
+   模态框
+   ======================================== */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1720,103 +1874,170 @@ onBeforeUnmount(() => {
 }
 
 .modal {
-  background: var(--bg-primary);
-  padding: 24px;
-  border-radius: 16px;
+  background: var(--color-bg-primary);
+  padding: var(--space-6);
+  border-radius: var(--radius-xl);
   width: 90%;
-  max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  max-width: 420px;
+  box-shadow: var(--shadow-xl);
 }
 
 .modal h3 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
+  margin: 0 0 var(--space-4) 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
 }
 
 .modal input,
 .modal textarea {
   width: 100%;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  font-size: 14px;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+}
+
+.modal input:focus,
+.modal textarea:focus {
+  background: var(--color-bg-primary);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(196, 167, 125, 0.1);
+  outline: none;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .modal-actions button {
-  padding: 8px 16px;
+  height: 36px;
+  padding: 0 var(--space-4);
   border: none;
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  transition: all var(--transition-fast);
 }
 
-/* ========== 笔记面板 ========== */
+.modal-actions button:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.modal-actions .btn-primary,
+.modal-actions .btn-danger {
+  height: 36px;
+}
+
+/* ========================================
+   笔记面板
+   ======================================== */
 .notes-panel {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .notes-panel textarea {
   flex: 1;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
   resize: none;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
 }
 
-/* ========== 过渡动画 ========== */
+.notes-panel textarea:focus {
+  background: var(--color-bg-primary);
+  border-color: var(--color-border-hover);
+  outline: none;
+}
+
+.notes-panel button {
+  height: 36px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.notes-panel button:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* ========================================
+   过渡动画
+   ======================================== */
 .slide-down-enter-active,
 .slide-down-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--transition-normal);
 }
 
 .slide-down-enter-from,
 .slide-down-leave-to {
   opacity: 0;
-  transform: translateY(-20px);
+  transform: translateY(-12px);
 }
 
 .slide-left-enter-active,
 .slide-left-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--transition-normal);
 }
 
 .slide-left-enter-from,
 .slide-left-leave-to {
   opacity: 0;
-  transform: translateX(-20px);
+  transform: translateX(-12px);
 }
 
 .slide-right-enter-active,
 .slide-right-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--transition-normal);
 }
 
 .slide-right-enter-from,
 .slide-right-leave-to {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(12px);
 }
 
-/* ========== 滚动条样式 ========== */
+.dropdown-enter-active,
+.dropdown-leave-active {
+  transition: all var(--transition-fast);
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+}
+
+/* ========================================
+   滚动条样式
+   ======================================== */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1824,32 +2045,42 @@ onBeforeUnmount(() => {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--text-muted, #999);
-  border-radius: 3px;
-  opacity: 0.3;
+  background: var(--color-text-muted);
+  border-radius: var(--radius-full);
+  opacity: 0.25;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  opacity: 0.6;
+  opacity: 0.4;
 }
 
-/* ========== 响应式 ========== */
+/* ========================================
+   响应式
+   ======================================== */
 @media (max-width: 768px) {
   .right-floating-bar {
-    right: 8px;
+    right: var(--space-2);
   }
   
   .floating-tabs {
-    padding: 6px;
+    padding: var(--space-1);
   }
   
   .floating-tab {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
   }
   
   .editor-container {
-    padding: 16px;
+    padding: var(--space-4);
+  }
+  
+  .top-panel-content {
+    gap: var(--space-3);
+  }
+  
+  .chapter-title-input {
+    max-width: 200px;
   }
 }
 </style>
