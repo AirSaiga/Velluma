@@ -246,6 +246,7 @@ export function useIntentDrivenConfig() {
     }
     wordCount: number
     authorIntent?: string
+    generate?: boolean
   }): IntentDrivenGeneratePayload {
     const overrides = Object.fromEntries(
       Object.entries(state.value.userOverrides).map(([k, v]) => [k, v.current])

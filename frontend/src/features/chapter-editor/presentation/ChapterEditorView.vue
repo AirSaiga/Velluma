@@ -559,7 +559,7 @@ const characterImportanceColor = (level: number) => {
             </button>
             
             <!-- 内容 -->
-            <div class="flex-1 overflow-hidden">
+            <div class="flex-1 overflow-auto">
               <IntentDrivenPanel
                 :chapter-id="selectedChapter?.id || ''"
                 :api-config="apiConfig"

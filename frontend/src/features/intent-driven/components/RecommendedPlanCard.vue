@@ -103,8 +103,8 @@ const typeIcon = computed(() => {
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.875rem;
+  border: 2px solid var(--border-color, #e2e8f0);
+  border-radius: 1rem;
   overflow: hidden;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -114,14 +114,14 @@ const typeIcon = computed(() => {
 .plan-card:hover {
   background: var(--bg-primary, white);
   border-color: var(--accent-300, #a5b4fc);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(99, 102, 241, 0.15);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 32px rgba(99, 102, 241, 0.12);
 }
 
 .plan-card.selected {
   background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
   border-color: var(--accent-500, #6366f1);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3), 0 12px 28px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 16px 32px rgba(99, 102, 241, 0.2);
 }
 
 /* 选中指示条 */
@@ -145,19 +145,19 @@ const typeIcon = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.875rem 1rem 0.625rem;
+  padding: 1rem 1.25rem 0.75rem;
 }
 
 .plan-type-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 0.6875rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   border-radius: 9999px;
-  text-transform: uppercase;
   letter-spacing: 0.025em;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .badge-icon {
@@ -195,14 +195,14 @@ const typeIcon = computed(() => {
 /* 主体 */
 .plan-body {
   flex: 1;
-  padding: 0 1rem 0.875rem;
+  padding: 0 1.25rem 1rem;
 }
 
 .plan-name {
-  font-size: 0.9375rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   color: var(--text-primary, #1e293b);
-  margin-bottom: 0.375rem;
+  margin-bottom: 0.5rem;
   transition: color 0.2s ease;
 }
 
@@ -211,64 +211,74 @@ const typeIcon = computed(() => {
 }
 
 .plan-desc {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: var(--text-secondary, #64748b);
-  line-height: 1.5;
-  margin-bottom: 0.75rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
 }
 
 /* 推荐理由 */
 .plan-reasoning {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.625rem 0.75rem;
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
   color: #1e40af;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .reasoning-icon {
   flex-shrink: 0;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255,255,255,0.5);
-  border-radius: 0.375rem;
+  background: rgba(255,255,255,0.7);
+  border-radius: 0.5rem;
+  color: #3b82f6;
 }
 
 /* 风险提示 */
 .plan-risks {
-  margin-top: 0.625rem;
-  padding: 0.5rem 0.625rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border-radius: 0.5rem;
+  margin-top: 0.875rem;
+  padding: 0.875rem 1rem;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1px solid #fde68a;
+  border-radius: 0.75rem;
 }
 
 .risk-header {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.6875rem;
+  gap: 0.5rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #b45309;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
 }
 
 .risk-list {
   list-style: none;
-  font-size: 0.6875rem;
+  padding: 0;
+  margin: 0;
+  font-size: 0.75rem;
   color: #92400e;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .risk-list li {
   position: relative;
-  padding-left: 0.75rem;
+  padding-left: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.risk-list li:last-child {
+  margin-bottom: 0;
 }
 
 .risk-list li::before {
@@ -276,33 +286,36 @@ const typeIcon = computed(() => {
   position: absolute;
   left: 0.25rem;
   color: #f59e0b;
+  font-weight: bold;
+  font-size: 1rem;
+  line-height: 1.4;
 }
 
 /* 底部 */
 .plan-footer {
-  padding: 0.75rem 1rem;
+  padding: 0.875rem 1.25rem;
   border-top: 1px solid var(--border-color, #e2e8f0);
-  background: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.6);
 }
 
 .plan-card.selected .plan-footer {
-  background: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.8);
   border-color: var(--accent-300, #a5b4fc);
 }
 
 .select-indicator {
   width: 100%;
-  padding: 0.5rem;
+  padding: 0.625rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-muted, #94a3b8);
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
   background: var(--bg-canvas, #f1f5f9);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.5rem;
+  border: 2px solid var(--border-color, #e2e8f0);
+  border-radius: 0.625rem;
   transition: all 0.2s ease;
 }
 
@@ -315,8 +328,8 @@ const typeIcon = computed(() => {
 
 .plan-card:hover .select-indicator:not(.is-selected) {
   background: var(--accent-50, #eef2ff);
-  border-color: var(--accent-300, #a5b4fc);
-  color: var(--accent-600, #4f46e5);
+  border-color: var(--accent-400, #818cf8);
+  color: var(--accent-700, #4338ca);
 }
 
 /* 深色模式 */

@@ -6,37 +6,66 @@
     </div>
     
     <div class="intent-grid">
-      <button
+      <div
         v-for="intent in intentTemplates"
         :key="intent.id"
-        type="button"
-        class="intent-card"
-        :class="{
-          'selected': selectedIntents.includes(intent.id),
-          'disabled': !canSelectMore && !selectedIntents.includes(intent.id)
-        }"
-        :disabled="!canSelectMore && !selectedIntents.includes(intent.id)"
-        @click="toggleIntent(intent.id)"
-        :title="intent.detailed_desc"
+        class="intent-card-wrapper"
       >
-        <!-- 选中指示器 -->
-        <div class="selection-indicator">
-          <svg v-if="selectedIntents.includes(intent.id)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
+        <button
+          type="button"
+          class="intent-card"
+          :class="{
+            'selected': selectedIntents.includes(intent.id),
+            'disabled': !canSelectMore && !selectedIntents.includes(intent.id)
+          }"
+          :disabled="!canSelectMore && !selectedIntents.includes(intent.id)"
+          @click="toggleIntent(intent.id)"
+          @mouseenter="showTooltip(intent.id, $event)"
+          @mouseleave="hideTooltip"
+        >
+          <!-- 选中指示器 -->
+          <div class="selection-indicator">
+            <svg v-if="selectedIntents.includes(intent.id)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          
+          <!-- SVG 图标 -->
+          <div class="intent-icon">
+            <Component :is="getIntentIcon(intent.id)" class="w-6 h-6" />
+          </div>
+          
+          <!-- 文字内容 -->
+          <div class="intent-content">
+            <div class="intent-name">{{ intent.display_name }}</div>
+            <div class="intent-desc">{{ intent.short_desc }}</div>
+          </div>
+        </button>
         
-        <!-- SVG 图标 -->
-        <div class="intent-icon">
-          <Component :is="getIntentIcon(intent.id)" class="w-6 h-6" />
-        </div>
-        
-        <!-- 文字内容 -->
-        <div class="intent-content">
-          <div class="intent-name">{{ intent.display_name }}</div>
-          <div class="intent-desc">{{ intent.short_desc }}</div>
-        </div>
-      </button>
+        <!-- 自定义 Tooltip -->
+        <Transition name="tooltip-fade">
+          <div 
+            v-if="tooltipVisible && tooltipIntentId === intent.id"
+            class="intent-tooltip"
+            :style="tooltipStyle"
+          >
+            <div class="tooltip-title">{{ intent.display_name }}</div>
+            <div class="tooltip-desc">{{ intent.detailed_desc }}</div>
+            <div class="tooltip-section">
+              <div class="tooltip-section-title">适用场景：</div>
+              <ul class="tooltip-list">
+                <li v-for="(scenario, idx) in intent.applicable_scenarios" :key="idx">
+                  {{ scenario }}
+                </li>
+              </ul>
+            </div>
+            <div class="tooltip-section">
+              <div class="tooltip-section-title">风格建议：</div>
+              <div class="tooltip-style">{{ intent.style_recommendation }}</div>
+            </div>
+          </div>
+        </Transition>
+      </div>
     </div>
     
     <!-- 已选意图展示 -->
@@ -90,8 +119,43 @@
 </template>
 
 <script setup lang="ts">
-import { h } from 'vue'
+import { h, ref, reactive } from 'vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
+
+// Tooltip 状态
+const tooltipVisible = ref(false)
+const tooltipIntentId = ref<string>('')
+const tooltipStyle = reactive({
+  position: 'fixed' as const,
+  top: '0px',
+  left: '0px'
+})
+
+function showTooltip(intentId: string, event: MouseEvent) {
+  tooltipIntentId.value = intentId
+  tooltipVisible.value = true
+  
+  // 计算 tooltip 位置
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  
+  // 默认显示在卡片上方
+  let top = rect.top - 8
+  let left = rect.left + rect.width / 2
+  
+  // 如果上方空间不足，显示在下方
+  if (rect.top < 300) {
+    top = rect.bottom + 8
+  }
+  
+  tooltipStyle.top = `${top}px`
+  tooltipStyle.left = `${left}px`
+}
+
+function hideTooltip() {
+  tooltipVisible.value = false
+  tooltipIntentId.value = ''
+}
 
 // 引入 SVG 图标组件
 const icons: Record<string, any> = {}
@@ -239,10 +303,23 @@ function clearAll() {
 .intent-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
+  gap: 1rem;
+  position: relative;
 }
 
-@media (min-width: 640px) {
+/* 意图卡片包裹器 */
+.intent-card-wrapper {
+  position: relative;
+  display: flex;
+}
+
+@media (min-width: 480px) {
+  .intent-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 768px) {
   .intent-grid {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -260,13 +337,16 @@ function clearAll() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1rem 0.75rem;
+  padding: 1.25rem 0.875rem;
   background: var(--bg-canvas, #f8fafc);
   border: 1px solid var(--border-color, #e2e8f0);
   border-radius: 0.875rem;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: center;
+  width: 100%;
+  min-height: 140px;
+  height: 100%;
 }
 
 .intent-card:hover:not(:disabled) {
@@ -363,6 +443,7 @@ function clearAll() {
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   max-width: 100%;
@@ -488,7 +569,99 @@ function clearAll() {
   flex-shrink: 0;
 }
 
-/* 动画 */
+/* Tooltip 样式 */
+.intent-tooltip {
+  position: fixed;
+  z-index: 9999;
+  width: 280px;
+  padding: 0.875rem;
+  background: white;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  transform: translateX(-50%);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.intent-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-right: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.tooltip-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+  margin-bottom: 0.5rem;
+}
+
+.tooltip-desc {
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+
+.tooltip-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.tooltip-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-600, #4f46e5);
+  margin-bottom: 0.375rem;
+}
+
+.tooltip-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tooltip-list li {
+  position: relative;
+  padding-left: 0.875rem;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.25rem;
+}
+
+.tooltip-list li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--accent-500, #6366f1);
+  font-weight: bold;
+}
+
+.tooltip-style {
+  color: var(--text-secondary, #64748b);
+  font-style: italic;
+}
+
+/* Tooltip 动画 */
+.tooltip-fade-enter-active {
+  transition: all 0.2s ease;
+}
+
+.tooltip-fade-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(4px);
+}
+
+/* 深色模式 */
 .slide-down-enter-active {
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -553,6 +726,40 @@ function clearAll() {
   .combo-hint {
     border-color: #4f46e5;
     color: #818cf8;
+  }
+  
+  /* Tooltip 深色模式 */
+  .intent-tooltip {
+    background: #1e293b;
+    border-color: #475569;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4), 0 4px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  .intent-tooltip::before {
+    background: #1e293b;
+    border-color: #475569;
+  }
+  
+  .tooltip-title {
+    color: #f1f5f9;
+  }
+  
+  .tooltip-desc,
+  .tooltip-list li,
+  .tooltip-style {
+    color: #94a3b8;
+  }
+  
+  .tooltip-section {
+    border-color: #475569;
+  }
+  
+  .tooltip-section-title {
+    color: #818cf8;
+  }
+  
+  .tooltip-list li::before {
+    color: #6366f1;
   }
 }
 </style>
