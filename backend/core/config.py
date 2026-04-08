@@ -43,6 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import os
+import socket
 from typing import Optional, Set, List
 
 # =============================================================================
@@ -96,6 +97,56 @@ def load_port() -> Optional[int]:
 # 副作用：进程启动后若未调用 save_port，则返回 None
 def get_actual_port() -> Optional[int]:
     return ACTUAL_PORT
+
+
+# =============================================================================
+# 动态端口查找
+# =============================================================================
+# 用途：启动时检测端口占用，自动寻找可用端口
+# 策略：优先使用环境变量 VELLUMA_PORT → 默认端口 8002 → 递增扫描
+# 范围：8002 ~ 8100，避免扫描过多端口拖慢启动
+# 副作用：会短暂占用端口进行检测（立即释放）
+DEFAULT_PORT = 8002
+MAX_PORT = 8100
+
+
+def find_available_port(preferred_port: Optional[int] = None) -> int:
+    """
+    查找可用端口，从首选端口开始递增扫描。
+
+    Args:
+        preferred_port: 首选端口（若为 None，依次尝试环境变量、默认端口）
+
+    Returns:
+        int: 可用的端口号
+
+    Raises:
+        OSError: 在 8002~8100 范围内无可用端口
+    """
+    # 1. 确定首选端口：参数 > 环境变量 > 默认值
+    if preferred_port is None:
+        env_port = os.environ.get("VELLUMA_PORT")
+        if env_port:
+            try:
+                preferred_port = int(env_port)
+            except ValueError:
+                preferred_port = DEFAULT_PORT
+        else:
+            preferred_port = DEFAULT_PORT
+
+    # 2. 从首选端口开始递增扫描
+    for port in range(preferred_port, MAX_PORT + 1):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", port))
+                # bind 成功说明端口可用，立即释放
+                return port
+        except OSError:
+            # 端口被占用，尝试下一个
+            continue
+
+    raise OSError(f"在 {DEFAULT_PORT}~{MAX_PORT} 范围内无可用端口")
 
 
 # =============================================================================

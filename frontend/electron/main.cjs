@@ -3,13 +3,31 @@ const { join, dirname } = require('path')
 const { spawn } = require('child_process')
 const net = require('net')
 const http = require('http')
+const fs = require('fs')
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 let backendProcess = null
 
 const FIXED_VITE_PORT = 5175
-const FIXED_BACKEND_PORT = parseInt(process.env.VELLUMA_BACKEND_PORT) || 8002
+const DEFAULT_BACKEND_PORT = parseInt(process.env.VELLUMA_BACKEND_PORT) || 8002
+
+// =============================================================================
+// 端口文件路径（与后端 core/config.py 中 PORT_FILE 对应）
+// =============================================================================
+const PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'port.txt')
+
+function readPortFromFile() {
+  try {
+    if (fs.existsSync(PORT_FILE)) {
+      const port = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim(), 10)
+      if (!isNaN(port) && port > 0) return port
+    }
+  } catch (e) {
+    console.warn('[PortFile] 读取端口文件失败:', e.message)
+  }
+  return null
+}
 
 // =============================================================================
 // 工具函数
@@ -99,9 +117,20 @@ function checkHealth(url, options = {}) {
 }
 
 async function startBackend() {
-  const port = FIXED_BACKEND_PORT
-  console.log(`[Backend] Checking port ${port}...`)
+  // 尝试从端口文件读取（后端可能已在运行）
+  const filePort = readPortFromFile()
+  if (filePort) {
+    try {
+      await waitForPort(filePort, { timeout: 500, serviceName: 'Backend' })
+      console.log(`[Backend] Already running on port ${filePort} (from port file)`)
+      return { port: filePort, started: false }
+    } catch {
+      // 端口文件记录的端口不可用，继续启动流程
+    }
+  }
 
+  // 尝试默认端口
+  const port = DEFAULT_BACKEND_PORT
   try {
     await waitForPort(port, { timeout: 500, serviceName: 'Backend' })
     console.log(`[Backend] Already running on port ${port}`)
@@ -110,6 +139,7 @@ async function startBackend() {
     // Not running, need to start
   }
   
+  // 启动后端（后端会自动寻找可用端口并写入 data/port.txt）
   const projectRoot = dirname(dirname(__dirname))
   const venvPaths = [
     join(projectRoot, '.venv', 'Scripts', 'python.exe'),
@@ -125,7 +155,7 @@ async function startBackend() {
 
   backendProcess = spawn(pythonPath, ['-m', 'backend.main'], {
     cwd: projectRoot,
-    env: { ...process.env, VELLUMA_PORT: port.toString(), PYTHONUNBUFFERED: "1" },
+    env: { ...process.env, PYTHONUNBUFFERED: "1" },
     stdio: ['ignore', 'pipe', 'pipe']
   })
 
@@ -146,12 +176,34 @@ async function startBackend() {
     backendProcess = null
   })
 
-  await waitForPort(port, { timeout: 60000, serviceName: 'Backend' })
+  // 等待后端启动，轮询端口文件获取实际端口
+  let actualPort = null
+  const startTime = Date.now()
+  const pollTimeout = 60000
   
-  const health = await checkHealth(`http://127.0.0.1:${port}/api/health`, { retries: 5 })
+  while (Date.now() - startTime < pollTimeout) {
+    await new Promise(r => setTimeout(r, 500))
+    actualPort = readPortFromFile()
+    if (actualPort) {
+      try {
+        await waitForPort(actualPort, { timeout: 2000, serviceName: 'Backend' })
+        break
+      } catch {
+        actualPort = null
+      }
+    }
+  }
+  
+  if (!actualPort) {
+    throw new Error('Backend failed to start: could not detect port')
+  }
+  
+  console.log(`[Backend] Detected on port ${actualPort}`)
+  
+  const health = await checkHealth(`http://127.0.0.1:${actualPort}/api/health`, { retries: 5 })
   console.log(`[Backend] Health check:`, health.healthy ? 'OK' : 'Warning')
   
-  return { port, started: true }
+  return { port: actualPort, started: true }
 }
 
 async function waitForFrontend() {
@@ -228,7 +280,7 @@ async function createMainWindow() {
     loadingWin = createLoadingWindow()
   }
   
-  let backendResult = { port: FIXED_BACKEND_PORT }
+  let backendResult = { port: DEFAULT_BACKEND_PORT }
   let vitePort = FIXED_VITE_PORT
   
   try {
@@ -237,7 +289,7 @@ async function createMainWindow() {
         backendResult = await startBackend()
       } else {
         console.log('[Main] Services ready flag set')
-        await waitForPort(FIXED_BACKEND_PORT, { timeout: 10000, serviceName: 'Backend' })
+        await waitForPort(backendResult.port, { timeout: 10000, serviceName: 'Backend' })
       }
       
       await waitForFrontend()

@@ -109,7 +109,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.core.config import save_port as _save_port
+from backend.core.config import save_port as _save_port, find_available_port
 from backend.database import init_db
 from backend.routes import (
     books_router,
@@ -292,12 +292,14 @@ async def serve_static(path: str):
 # 服务启动入口
 # =============================================================================
 # 用途：直接运行 python main.py 启动服务（开发模式）
-# 配置：监听 127.0.0.1:8002（仅本地访问，不暴露到公网）
+# 配置：动态检测可用端口（8002~8100），持久化到 data/port.txt
 # 警示：生产环境应使用 uvicorn 命令行启动，以便配置 workers 数量
 if __name__ == "__main__":
     import uvicorn
 
-    port = 8002
+    port = find_available_port()
+    save_port(port)
+    logger.info(f"[Main] 后端启动于 http://127.0.0.1:{port}")
     config = uvicorn.Config(app, host="127.0.0.1", port=port)
     server = uvicorn.Server(config)
     server.run()

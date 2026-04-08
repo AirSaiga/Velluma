@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 
 # Config
 $Config = @{
-    BackendPort   = 8002
+    DefaultBackendPort = 8002
     FrontendPort  = 5175
     ProjectRoot   = $PSScriptRoot
     BackendTimeout = 60
@@ -21,10 +21,26 @@ $Config = @{
         ".venv\Scripts\python.exe"
         "venv\Scripts\python.exe"
     )
+    PortFile      = Join-Path $PSScriptRoot "data\port.txt"
 }
 
 $Global:ChildProcesses = @()
 $Global:CleanupDone = $false
+
+function Get-ActualBackendPort {
+    # 优先从端口文件读取实际端口
+    if (Test-Path $Config.PortFile) {
+        try {
+            $portStr = Get-Content $Config.PortFile -Raw
+            $port = [int]$portStr.Trim()
+            if ($port -gt 0) {
+                return $port
+            }
+        } catch {}
+    }
+    # 回退到默认端口
+    return $Config.DefaultBackendPort
+}
 
 # =============================================================================
 # Utility Functions
@@ -141,7 +157,8 @@ function Invoke-Cleanup() {
         }
     }
     
-    $ports = @($Config.BackendPort, $Config.FrontendPort)
+    $backendPort = Get-ActualBackendPort
+    $ports = @($backendPort, $Config.FrontendPort)
     foreach ($port in $ports) {
         Kill-ProcessOnPort -Port $port -Name "service" | Out-Null
     }
@@ -163,9 +180,10 @@ function Find-Python() {
 }
 
 function Start-Backend() {
+    $backendPort = Get-ActualBackendPort
     if ($SkipBackend -or $ElectronOnly) {
-        if (Test-PortOpen -Port $Config.BackendPort) {
-            Log-Success "Backend already running on port $($Config.BackendPort)"
+        if (Test-PortOpen -Port $backendPort) {
+            Log-Success "Backend already running on port $backendPort"
             return
         }
         throw "Backend not running but skip flag set"
@@ -173,11 +191,11 @@ function Start-Backend() {
     
     Log-Step "Starting Backend..."
     
-    if (Test-PortOpen -Port $Config.BackendPort) {
+    if (Test-PortOpen -Port $backendPort) {
         if ($Force) {
-            Kill-ProcessOnPort -Port $Config.BackendPort -Name "backend" | Out-Null
+            Kill-ProcessOnPort -Port $backendPort -Name "backend" | Out-Null
         } else {
-            Log-Success "Backend already running on port $($Config.BackendPort)"
+            Log-Success "Backend already running on port $backendPort"
             return
         }
     }
@@ -185,7 +203,7 @@ function Start-Backend() {
     $pythonPath = Find-Python
     Log-Info "Using Python: $pythonPath"
     
-    $env:VELLUMA_PORT = $Config.BackendPort.ToString()
+    # 不再设置 VELLUMA_PORT，让后端自动寻找可用端口
     $env:PYTHONUNBUFFERED = "1"
     
     $proc = Start-Process -FilePath $pythonPath `
@@ -196,9 +214,24 @@ function Start-Backend() {
     
     $Global:ChildProcesses += $proc
     
-    Log-Wait "Waiting for backend (port $($Config.BackendPort))..."
-    Wait-ForService -Port $Config.BackendPort -Name "Backend" -TimeoutSeconds $Config.BackendTimeout
-    Log-Success "Backend ready at http://127.0.0.1:$($Config.BackendPort)"
+    # 轮询端口文件等待后端启动
+    Log-Wait "Waiting for backend..."
+    $waitStart = Get-Date
+    $actualPort = $null
+    while (((Get-Date) - $waitStart).TotalSeconds -lt $Config.BackendTimeout) {
+        Start-Sleep -Milliseconds $Config.HealthCheckInterval
+        $actualPort = Get-ActualBackendPort
+        if ($actualPort -and (Test-PortOpen -Port $actualPort)) {
+            break
+        }
+        $actualPort = $null
+    }
+    
+    if (-not $actualPort) {
+        throw "Backend failed to start within $($Config.BackendTimeout)s"
+    }
+    
+    Log-Success "Backend ready at http://127.0.0.1:$actualPort"
 }
 
 function Start-Frontend() {
@@ -246,8 +279,9 @@ function Start-Electron() {
     Log-Step "Starting Electron..."
     
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
+    $backendPort = Get-ActualBackendPort
     
-    $env:VELLUMA_BACKEND_PORT = $Config.BackendPort.ToString()
+    $env:VELLUMA_BACKEND_PORT = $backendPort.ToString()
     $env:VELLUMA_FRONTEND_PORT = $Config.FrontendPort.ToString()
     $env:VELLUMA_SERVICES_READY = "1"
     
@@ -288,9 +322,10 @@ function Main() {
         Write-Host "`n============================================================" -ForegroundColor Green
         Log-Success "All services started!"
         Write-Host ""
-        Write-Host "  Backend:  http://127.0.0.1:$($Config.BackendPort)" -ForegroundColor Gray
+        $backendPort = Get-ActualBackendPort
+        Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Gray
         Write-Host "  Frontend: http://127.0.0.1:$($Config.FrontendPort)" -ForegroundColor Gray
-        Write-Host "  API Docs: http://127.0.0.1:$($Config.BackendPort)/docs" -ForegroundColor Gray
+        Write-Host "  API Docs: http://127.0.0.1:$backendPort/docs" -ForegroundColor Gray
         Write-Host ""
         Write-Host "  Electron is running. Close window to stop all services." -ForegroundColor Yellow
         Write-Host "============================================================" -ForegroundColor Green

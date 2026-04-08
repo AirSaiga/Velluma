@@ -1,7 +1,25 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import fs from 'fs'
+import path from 'path'
 
-const BACKEND_PORT = process.env.VELLUMA_BACKEND_PORT || 8002
+// 动态读取后端端口：优先环境变量 → 端口文件 → 默认值 8002
+const PORT_FILE = path.resolve(__dirname, '..', 'data', 'port.txt')
+function resolveBackendPort() {
+  const envPort = process.env.VELLUMA_BACKEND_PORT
+  if (envPort) return parseInt(envPort) || 8002
+  try {
+    if (fs.existsSync(PORT_FILE)) {
+      const port = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim(), 10)
+      if (!isNaN(port) && port > 0) return port
+    }
+  } catch (e) {
+    // 读取失败，使用默认值
+  }
+  return 8002
+}
+
+const BACKEND_PORT = resolveBackendPort()
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
 export default defineConfig({
