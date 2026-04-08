@@ -7,6 +7,7 @@ const DEFAULT_PREFS = {
   chapterMetaCollapsed: false,
   sidebarCollapsed: false,
   rightDrawerOpen: false,
+  zenMode: true,
 }
 
 export type UiPrefs = typeof DEFAULT_PREFS

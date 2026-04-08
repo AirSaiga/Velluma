@@ -1,134 +1,357 @@
-<template>
-  <div class="h-full flex flex-col p-4 bg-parchment-50/50 backdrop-blur-sm rounded-xl overflow-hidden ring-1 ring-[var(--border-color)]/60">
-    <div class="flex items-center justify-between mb-4 flex-shrink-0">
-      <h3 class="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-        <Icon name="chat" :size="16" />
-        主编指导意见
-      </h3>
-      <div class="flex items-center gap-2">
-        <div v-if="loading" class="flex items-center gap-2 text-xs text-accent-600">
-          <div class="w-3 h-3 rounded-full border-2 border-accent-500 border-t-transparent animate-spin"></div>
-          分析中...
-        </div>
-        <button
-          v-if="result"
-          @click="emit('close-critique')"
-          class="p-1 rounded hover:bg-ink-100 text-ink-400 hover:text-ink-600 transition-colors"
-          title="关闭指导"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-    
-    <div class="flex-1 overflow-y-auto min-h-0 pr-2 custom-scrollbar">
-      <div v-if="loading && !result" class="h-full flex flex-col items-center justify-center text-center space-y-3 p-8">
-        <div class="w-12 h-12 rounded-full bg-accent-50 flex items-center justify-center">
-          <svg class="w-6 h-6 text-accent-500 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        <div class="space-y-1">
-          <p class="text-sm font-medium text-accent-900">正在深度阅读您的章节...</p>
-          <p class="text-xs text-accent-600/70">AI主编正在分析剧情逻辑、节奏与人物表现</p>
-        </div>
-      </div>
-      
-      <div v-else-if="result" class="space-y-6">
-        <!-- 总体评价 -->
-        <div v-if="result.overall_praise" class="bg-accent-50/50 rounded-xl p-4 border border-accent-100">
-          <h4 class="text-xs font-semibold text-accent-900 mb-2 flex items-center gap-1.5">
-            <Icon name="star" :size="14" />
-            总体亮点
-          </h4>
-          <p class="text-xs text-accent-800/80 leading-relaxed whitespace-pre-line">
-            {{ result.overall_praise }}
-          </p>
-        </div>
-
-        <!-- 详细评论 -->
-        <div v-if="result.comments && result.comments.length > 0" class="space-y-3">
-          <div
-            v-for="(comment, index) in result.comments"
-            :key="index"
-            :class="[
-              'bg-parchment-50 rounded-xl ring-1 ring-[var(--border-color)]/60 p-3 shadow-sm transition-all duration-200 hover:shadow-md',
-              comment.exact_quote
-                ? 'cursor-pointer hover:ring-accent-400 hover:bg-accent-50/30'
-                : ''
-            ]"
-            @click="handleCommentClick(comment)"
-          >
-            <div class="flex items-center justify-between mb-2">
-              <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-ink-100 text-ink-600">
-                {{ comment.type || '一般建议' }}
-              </span>
-              <span v-if="comment.reader_feeling" class="text-[10px] text-ink-400">
-                {{ comment.reader_feeling }}
-              </span>
-            </div>
-            
-            <div v-if="comment.exact_quote" class="text-xs text-[var(--text-primary)] leading-relaxed mb-2">
-              <span class="font-medium text-[var(--text-secondary)]">原句：</span>
-              <span class="bg-yellow-50 px-1 rounded border-l-2 border-accent-400 pl-3 italic">"{{ comment.exact_quote }}"</span>
-            </div>
-            
-            <div class="text-xs text-[var(--text-secondary)] leading-relaxed">
-              <span class="font-medium text-accent-600">建议：</span>
-              {{ comment.suggestion }}
-            </div>
-          </div>
-        </div>
-        
-        <div v-if="(!result.comments || result.comments.length === 0) && !result.overall_praise" class="text-center text-[var(--text-muted)] text-xs py-4">
-          虽然分析已完成，但似乎没有具体的修改建议。
-        </div>
-      </div>
-      
-      <div v-else class="h-full flex flex-col items-center justify-center text-[var(--text-muted)] text-xs p-8 text-center">
-        <div class="w-12 h-12 rounded-full bg-ink-50 flex items-center justify-center mb-3">
-          <Icon name="magnifying-glass" :size="24" />
-        </div>
-        <p>暂无指导意见</p>
-        <p class="mt-1 opacity-70">点击编辑器上方的"获取主编指导"按钮开始分析</p>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
+import { computed } from 'vue'
+import { PanelContainer, PanelCard, PanelEmpty } from './panels'
 import Icon from './Icon.vue'
-defineProps<{
-  result: any
+
+interface Comment {
+  type?: string
+  exact_quote?: string
+  suggestion: string
+  reader_feeling?: string
+}
+
+interface CritiqueResult {
+  overall_praise?: string
+  comments?: Comment[]
+}
+
+const props = defineProps<{
+  result: CritiqueResult | null
   loading: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: 'jump-to-critique', comment: any): void
+  (e: 'jump-to-critique', comment: Comment): void
   (e: 'close-critique'): void
+  (e: 'close'): void
 }>()
 
-const handleCommentClick = (comment: any) => {
+const hasContent = computed(() => {
+  if (!props.result) return false
+  return !!(props.result.overall_praise || (props.result.comments && props.result.comments.length > 0))
+})
+
+const typeColors: Record<string, string> = {
+  '结构': 'bg-blue-50 text-blue-600',
+  '节奏': 'bg-green-50 text-green-600',
+  '人物': 'bg-purple-50 text-purple-600',
+  '对话': 'bg-orange-50 text-orange-600',
+  '描写': 'bg-pink-50 text-pink-600',
+  '情节': 'bg-indigo-50 text-indigo-600',
+  '逻辑': 'bg-red-50 text-red-600',
+  '文笔': 'bg-teal-50 text-teal-600'
+}
+
+function getTypeClass(type?: string): string {
+  if (!type) return 'bg-gray-50 text-gray-600'
+  return typeColors[type] || 'bg-gray-50 text-gray-600'
+}
+
+function handleCommentClick(comment: Comment) {
   if (comment.exact_quote) {
     emit('jump-to-critique', comment)
   }
 }
+
+function handleClose() {
+  emit('close')
+}
+
+function handleCloseCritique() {
+  emit('close-critique')
+}
 </script>
 
+<template>
+  <PanelContainer
+    title="主编指导"
+    icon="light-bulb"
+    description="AI 深度阅读后给出的专业建议"
+    :closable="true"
+    @close="handleClose"
+  >
+    <div class="critique-content">
+      <!-- 加载中 -->
+      <div v-if="loading && !result" class="loading-state">
+        <div class="loading-illustration">
+          <div class="loading-pulse">
+            <Icon name="light-bulb" :size="32" />
+          </div>
+        </div>
+        <h4>正在深度阅读您的章节...</h4>
+        <p>AI 主编正在分析剧情逻辑、节奏与人物表现</p>
+      </div>
+
+      <!-- 有结果展示 -->
+      <div v-else-if="hasContent" class="critique-results">
+        <!-- 总体评价 -->
+        <div v-if="result?.overall_praise" class="praise-section">
+          <div class="section-header">
+            <Icon name="star" :size="14" />
+            <span>总体亮点</span>
+          </div>
+          <div class="praise-content">
+            {{ result.overall_praise }}
+          </div>
+        </div>
+
+        <!-- 详细评论列表 -->
+        <div v-if="result?.comments && result.comments.length > 0" class="comments-section">
+          <div class="section-header">
+            <Icon name="chat-bubble-left-right" :size="14" />
+            <span>详细建议 ({{ result.comments.length }})</span>
+          </div>
+
+          <div class="comments-list">
+            <PanelCard
+              v-for="(comment, index) in result.comments"
+              :key="index"
+              :clickable="!!comment.exact_quote"
+              @click="handleCommentClick(comment)"
+            >
+              <template #default>
+                <div class="comment-card">
+                  <div class="comment-header">
+                    <span class="comment-type" :class="getTypeClass(comment.type)">
+                      {{ comment.type || '建议' }}
+                    </span>
+                    <span v-if="comment.reader_feeling" class="reader-feeling">
+                      {{ comment.reader_feeling }}
+                    </span>
+                  </div>
+
+                  <div v-if="comment.exact_quote" class="quote-section">
+                    <span class="quote-label">原句</span>
+                    <blockquote class="quote-text">"{{ comment.exact_quote }}"</blockquote>
+                  </div>
+
+                  <div class="suggestion-section">
+                    <span class="suggestion-label">建议</span>
+                    <p class="suggestion-text">{{ comment.suggestion }}</p>
+                  </div>
+                </div>
+              </template>
+            </PanelCard>
+          </div>
+        </div>
+      </div>
+
+      <!-- 空状态 -->
+      <PanelEmpty
+        v-else
+        icon="magnifying-glass"
+        title="暂无指导意见"
+        description="点击编辑器上方的「获取主编指导」按钮开始分析"
+      />
+    </div>
+
+    <!-- 关闭指导按钮（当结果存在时显示） -->
+    <template v-if="result" #footer>
+      <button class="close-critique-btn" @click="handleCloseCritique">
+        <Icon name="x-mark" :size="14" />
+        关闭指导
+      </button>
+    </template>
+  </PanelContainer>
+</template>
+
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+.critique-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
 }
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+
+/* 加载状态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(120, 113, 108, 0.3);
+
+.loading-illustration {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(124, 106, 173, 0.1), rgba(124, 106, 173, 0.05));
   border-radius: 20px;
+  margin-bottom: 20px;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(120, 113, 108, 0.5);
+
+.loading-pulse {
+  color: var(--accent-500);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.loading-state h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.loading-state p {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+/* 结果展示 */
+.critique-results {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* 总体评价 */
+.praise-section {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(124, 106, 173, 0.08), rgba(124, 106, 173, 0.03));
+  border: 1px solid rgba(124, 106, 173, 0.15);
+  border-radius: 12px;
+}
+
+.praise-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-line;
+}
+
+/* 评论列表 */
+.comments-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comment-type {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.reader-feeling {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.quote-section {
+  padding: 10px 12px;
+  background: #fef3c7;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 8px 8px 0;
+}
+
+.quote-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #d97706;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.quote-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #92400e;
+  font-style: italic;
+  margin: 0;
+}
+
+.suggestion-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestion-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-500);
+  text-transform: uppercase;
+}
+
+.suggestion-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* 关闭按钮 */
+.close-critique-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.close-critique-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
 }
 </style>

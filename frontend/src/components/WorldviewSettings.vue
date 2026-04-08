@@ -3,6 +3,8 @@ import { ref, watch, onUnmounted } from 'vue'
 import { bookApi } from '../services/api'
 import { useToast } from '../composables/useToast'
 import { useConfirmDialog } from '../composables/useConfirmDialog'
+import { PanelContainer, PanelCard, PanelEmpty } from './panels'
+import Icon from './Icon.vue'
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
@@ -10,11 +12,11 @@ const { show: showConfirm } = useConfirmDialog()
 const props = defineProps({
   bookId: {
     type: String,
-    required: true
+    default: null
   }
 })
 
-const emit = defineEmits(['update-worldview'])
+const emit = defineEmits(['update-worldview', 'close'])
 
 const isLoading = ref(false)
 const isSaving = ref(false)
@@ -28,7 +30,10 @@ let autosaveTimer
 const AUTOSAVE_DELAY_MS = 2000
 
 async function loadWorldview() {
-  if (!props.bookId) return
+  if (!props.bookId) {
+    items.value = []
+    return
+  }
   isLoading.value = true
   try {
     const data = await bookApi.getWorldview(props.bookId)
@@ -57,7 +62,7 @@ function normalizeToItems(worldviewSettings) {
       const parsed = JSON.parse(worldviewSettings)
       return normalizeToItems(parsed)
     } catch {
-      return [{ id: makeId(), title: '未结构化内容', content: worldviewSettings, collapsed: false }]
+      return [{ id: makeId(), title: '未结构化内容', content: worldviewSettings }]
     }
   }
 
@@ -66,8 +71,7 @@ function normalizeToItems(worldviewSettings) {
       return worldviewSettings.items.map((it) => ({
         id: it.id || makeId(),
         title: it.title || '',
-        content: it.content || '',
-        collapsed: !!it.collapsed
+        content: it.content || ''
       }))
     }
 
@@ -75,8 +79,7 @@ function normalizeToItems(worldviewSettings) {
     return entries.map(([k, v]) => ({
       id: makeId(),
       title: k,
-      content: typeof v === 'string' ? v : JSON.stringify(v ?? '', null, 2),
-      collapsed: false
+      content: typeof v === 'string' ? v : JSON.stringify(v ?? '', null, 2)
     }))
   }
 
@@ -89,8 +92,7 @@ function toPayload() {
     items: items.value.map((it) => ({
       id: it.id,
       title: it.title,
-      content: it.content,
-      collapsed: !!it.collapsed
+      content: it.content
     }))
   }
 }
@@ -130,7 +132,7 @@ function markDirty() {
 }
 
 function addItem() {
-  items.value.unshift({ id: makeId(), title: '', content: '', collapsed: false })
+  items.value.unshift({ id: makeId(), title: '', content: '' })
   markDirty()
 }
 
@@ -141,13 +143,6 @@ async function removeItem(id) {
   })
   if (!ok) return
   items.value = items.value.filter((it) => it.id !== id)
-  markDirty()
-}
-
-function toggleItemCollapse(id) {
-  const idx = items.value.findIndex((it) => it.id === id)
-  if (idx === -1) return
-  items.value[idx].collapsed = !items.value[idx].collapsed
   markDirty()
 }
 
@@ -162,14 +157,21 @@ function applyImport() {
     items.value = normalizeToItems(parsed)
     showImportExport.value = false
     markDirty()
+    showToast('导入成功', 'success')
   } catch {
     showToast('导入内容不是合法 JSON', 'error')
   }
 }
 
+function handleClose() {
+  emit('close')
+}
+
 watch(() => props.bookId, (newId) => {
   if (newId) {
     loadWorldview()
+  } else {
+    items.value = []
   }
 }, { immediate: true })
 
@@ -182,118 +184,408 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="worldview-editor">
-    <div class="flex items-center justify-between mb-2">
-      <label class="block text-xs font-medium text-[var(--text-primary)]">
-        世界观设定
-      </label>
-      <div class="flex items-center gap-1">
-        <button
-          @click="openImportExport"
-          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
-          :disabled="isLoading"
-        >
-          导入/导出
-        </button>
-        <button
-          @click="addItem"
-          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
-          :disabled="isLoading"
-        >
-          +新增
-        </button>
-        <button
-          @click="saveWorldview"
-          :disabled="isSaving"
-          class="px-2 py-0.5 text-[10px] bg-[var(--accent-500)] disabled:bg-[var(--bg-panel)] text-white rounded-lg transition-colors"
-        >
-          保存
-        </button>
-      </div>
+  <PanelContainer
+    title="世界观设定"
+    icon="book-open"
+    description="定义世界背景、规则、历史等设定"
+    :loading="isLoading"
+    :header-actions="[
+      { icon: 'arrow-up-tray', label: '导入/导出', onClick: openImportExport },
+      { icon: 'plus', label: '新增', onClick: addItem, variant: 'primary' }
+    ]"
+    @close="handleClose"
+  >
+    <!-- 状态提示 -->
+    <div v-if="status !== 'idle'" class="status-bar" :class="status">
+      <Icon 
+        :name="status === 'saving' ? 'arrow-path' : status === 'saved' ? 'check' : status === 'error' ? 'exclamation-circle' : 'information-circle'" 
+        :size="14" 
+      />
+      <span>{{ status === 'dirty' ? '有未保存的更改' : status === 'saving' ? '保存中...' : status === 'saved' ? '已保存' : errorText }}</span>
     </div>
-    <p class="text-[10px] text-[var(--text-muted)] mb-2">
-      定义世界背景、规则、历史等设定
-    </p>
-    <div v-if="isLoading" class="text-[10px] text-[var(--text-muted)] mt-1">加载中...</div>
 
-    <div v-else class="space-y-2">
-      <div v-if="items.length === 0" class="p-2 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
-        暂无条目，点击"+新增"开始添加
-      </div>
+    <!-- 空状态 -->
+    <PanelEmpty
+      v-if="items.length === 0 && !isLoading"
+      icon="book-open"
+      :title="bookId ? '暂无设定条目' : '请先选择书籍'"
+      :description="bookId ? '点击「新增」按钮开始添加世界观设定' : '选择书籍后即可编辑世界观设定'"
+      :action-label="bookId ? '新增条目' : undefined"
+      @action="addItem"
+    />
 
+    <!-- 设定列表 -->
+    <div v-else class="items-list">
       <div
-        v-for="it in items"
-        :key="it.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
+        v-for="item in items"
+        :key="item.id"
+        class="item-card"
       >
-        <div class="flex items-center gap-1.5">
-          <button
-            class="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-bg)] rounded transition-colors"
-            @click="toggleItemCollapse(it.id)"
-            :title="it.collapsed ? '展开' : '收起'"
-          >
-            <svg v-if="it.collapsed" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-            <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          <input
-            v-model="it.title"
-            @input="markDirty"
-            type="text"
-            class="flex-1 px-2 py-1 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-            placeholder="条目标题"
-          />
-
-          <button
-            class="p-0.5 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
-            @click="removeItem(it.id)"
-            title="删除"
-          >
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
-        </div>
-
-        <div v-show="!it.collapsed" class="mt-1.5">
-          <textarea
-            v-model="it.content"
-            @input="markDirty"
-            rows="4"
-            class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
-            placeholder="填写详细设定..."
-          />
-        </div>
-      </div>
-    </div>
-
-    <div v-if="showImportExport" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" @click.self="showImportExport = false">
-      <div class="bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-lg font-heading font-semibold text-[var(--text-primary)] mb-4">世界观导入 / 导出</h3>
-        <textarea
-          v-model="importExportText"
-          rows="14"
-          class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none font-mono"
+        <input
+          v-model="item.title"
+          type="text"
+          class="item-title-input"
+          placeholder="输入条目标题..."
+          @input="markDirty"
         />
-        <div class="flex justify-end gap-3 mt-4">
-          <button
-            @click="showImportExport = false"
-            class="px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            关闭
-          </button>
-          <button
-            @click="applyImport"
-            class="px-4 py-2 bg-[var(--accent-500)] text-white rounded-full transition-colors"
-          >
-            导入并应用
+        <textarea
+          v-model="item.content"
+          rows="3"
+          class="item-content-textarea"
+          placeholder="填写详细设定内容..."
+          @input="markDirty"
+        />
+        <div class="item-actions">
+          <button class="action-btn danger" @click="removeItem(item.id)">
+            <Icon name="trash" :size="12" />
+            删除
           </button>
         </div>
       </div>
     </div>
-  </div>
+
+    <template #footer>
+      <button 
+        class="save-btn" 
+        :class="{ 'has-changes': status === 'dirty' }"
+        :disabled="isSaving || status === 'idle' || !bookId"
+        @click="saveWorldview"
+      >
+        <Icon :name="isSaving ? 'arrow-path' : 'check'" :size="14" />
+        {{ isSaving ? '保存中...' : status === 'dirty' ? '保存更改' : '已保存' }}
+      </button>
+    </template>
+  </PanelContainer>
+
+  <!-- 导入/导出模态框 -->
+  <Transition name="modal">
+    <div v-if="showImportExport" class="modal-overlay" @click.self="showImportExport = false">
+      <div class="modal-content">
+        <div class="drawer-header">
+          <h3>世界观导入 / 导出</h3>
+          <button class="close-btn" @click="showImportExport = false">
+            <Icon name="close" :size="18" />
+          </button>
+        </div>
+        
+        <div class="modal-body">
+          <textarea
+            v-model="importExportText"
+            rows="14"
+            class="import-export-textarea"
+            placeholder="在此粘贴 JSON 数据进行导入..."
+          />
+        </div>
+        
+        <div class="drawer-footer">
+          <button class="btn-secondary" @click="showImportExport = false">关闭</button>
+          <button class="btn-primary" @click="applyImport">导入并应用</button>
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
+
+<style scoped>
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.status-bar.dirty {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-bar.saving {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.status-bar.saved {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.status-bar.error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.item-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.item-title-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.item-title-input:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.item-content-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 80px;
+  transition: all 0.2s ease;
+}
+
+.item-content-textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.action-btn.danger:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.save-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.save-btn.has-changes {
+  background: var(--accent-500);
+  color: white;
+  border-color: var(--accent-500);
+}
+
+.save-btn.has-changes:hover {
+  background: var(--accent-600);
+}
+
+.save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 模态框样式 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.drawer-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.import-export-textarea {
+  width: 100%;
+  padding: 12px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 300px;
+}
+
+.import-export-textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background: var(--accent-500);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: var(--accent-600);
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* 过渡动画 */
+.modal-enter-active,
+.modal-leave-active {
+  transition: all 0.25s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from .modal-content,
+.modal-leave-to .modal-content {
+  transform: scale(0.95) translateY(10px);
+  opacity: 0;
+}
+
+.modal-content {
+  transition: all 0.25s ease;
+}
+</style>

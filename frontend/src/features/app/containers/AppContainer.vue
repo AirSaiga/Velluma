@@ -7,6 +7,7 @@ import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
 import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
 import SettingsModal from '../../../components/SettingsModal.vue'
+import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import { bookApi, characterApi, chapterApi, relationshipApi, generateApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
@@ -356,6 +357,11 @@ async function saveBookNotes() {
     notesStatus.value = 'error'
     notesError.value = error?.message || '保存失败'
   }
+}
+
+async function saveBookNotesFn(notes: string) {
+  if (!currentBook.value) return
+  await updateBook({ global_sys_prompt: notes })
 }
 
 async function updateApiConfig(data) {
@@ -838,7 +844,7 @@ onBeforeUnmount(() => {
             </span>
             <input 
               :value="selectedChapter?.title" 
-              @input="(e) => updateChapter(selectedChapter?.id, { title: e.target.value })"
+              @input="(e) => updateChapter(selectedChapter?.id, { title: (e.target as HTMLInputElement).value })"
               placeholder="章节标题..."
               class="chapter-title-input"
             />
@@ -950,14 +956,7 @@ onBeforeUnmount(() => {
       <!-- 右侧面板内容 -->
       <Transition name="slide-right">
         <div v-if="rightPanelExpanded" class="right-panel">
-          <div class="right-panel-header">
-            <span>{{ floatingTabs.find(t => t.key === activeFloatingTab)?.label }}</span>
-            <button class="btn-icon" @click="closeRightPanel">
-              <Icon name="close" :size="18" />
-            </button>
-          </div>
-          
-          <div class="right-panel-content">
+          <div class="right-panel-content-modern">
             <CharacterPanel
               v-if="activeFloatingTab === 'characters'"
               :characters="characters"
@@ -972,16 +971,19 @@ onBeforeUnmount(() => {
               @create-relationship="createRelationship"
               @update-relationship="updateRelationship"
               @delete-relationship="deleteRelationship"
+              @close="closeRightPanel"
             />
             
             <WorldviewSettings
               v-else-if="activeFloatingTab === 'worldview'"
               :book-id="currentBookId"
+              @close="closeRightPanel"
             />
             
             <GoldenSnippetsManager
               v-else-if="activeFloatingTab === 'style'"
               :book-id="currentBookId"
+              @close="closeRightPanel"
             />
             
             <MapSettings
@@ -990,6 +992,7 @@ onBeforeUnmount(() => {
               :focused-entity="editorFocusedEntity"
               :active-character-names="autoHighlightedCharacterNames"
               @update-chapter="updateChapter"
+              @close="closeRightPanel"
             />
             
             <CritiquePanel
@@ -998,17 +1001,15 @@ onBeforeUnmount(() => {
               :loading="critiqueLoading"
               @jump-to-critique="handleJumpToCritique"
               @close-critique="handleCloseCritique"
+              @close="closeRightPanel"
             />
             
-            <div v-else-if="activeFloatingTab === 'notes'" class="notes-panel">
-              <textarea
-                v-model="localBookNotes"
-                placeholder="记录创作笔记..."
-              />
-              <button @click="saveBookNotes" :disabled="notesStatus === 'saving'">
-                {{ notesStatus === 'saved' ? '已保存' : '保存' }}
-              </button>
-            </div>
+            <NotesPanel
+              v-else-if="activeFloatingTab === 'notes'"
+              :book="currentBook"
+              :save-notes="saveBookNotesFn"
+              @close="closeRightPanel"
+            />
           </div>
         </div>
       </Transition>
@@ -1679,7 +1680,7 @@ onBeforeUnmount(() => {
 }
 
 .right-floating-bar.panel-open {
-  right: 344px;
+  right: 384px;
 }
 
 .floating-tabs {
@@ -1736,34 +1737,21 @@ onBeforeUnmount(() => {
   right: 0;
   top: 0;
   bottom: 0;
-  width: 320px;
-  background: var(--panel-bg);
+  width: 360px;
+  background: var(--bg-primary);
   backdrop-filter: blur(20px);
-  box-shadow: -2px 0 32px rgba(0, 0, 0, 0.06);
+  box-shadow: -4px 0 40px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
   z-index: 35;
+  overflow: hidden;
 }
 
-.right-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.right-panel-header span {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: 0.01em;
-}
-
-.right-panel-content {
+.right-panel-content-modern {
   flex: 1;
-  overflow-y: auto;
-  padding: var(--space-4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- 状态栏 ---------- */
@@ -1948,51 +1936,6 @@ onBeforeUnmount(() => {
 .modal-actions .btn-primary,
 .modal-actions .btn-danger {
   height: 36px;
-}
-
-/* ========================================
-   笔记面板
-   ======================================== */
-.notes-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.notes-panel textarea {
-  flex: 1;
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  resize: none;
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-  color: var(--color-text-primary);
-  transition: all var(--transition-fast);
-}
-
-.notes-panel textarea:focus {
-  background: var(--color-bg-primary);
-  border-color: var(--color-border-hover);
-  outline: none;
-}
-
-.notes-panel button {
-  height: 36px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.notes-panel button:hover:not(:disabled) {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
 }
 
 /* ========================================

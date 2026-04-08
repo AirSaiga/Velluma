@@ -3,6 +3,8 @@ import { ref, watch, computed } from 'vue'
 import { mapApi } from '../services/api'
 import { useToast } from '../composables/useToast'
 import { useConfirmDialog } from '../composables/useConfirmDialog'
+import { PanelContainer, PanelSection, PanelCard, PanelEmpty, PanelSearch } from './panels'
+import Icon from './Icon.vue'
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
@@ -22,23 +24,34 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update-chapter'])
+const emit = defineEmits(['update-chapter', 'close'])
 
+const searchQuery = ref('')
 const mapActivityRange = ref('')
 const isDirty = ref(false)
-const locations = ref([]) // All available locations for the book
-const chapterLocations = ref([]) // Locations associated with this chapter
+const locations = ref([])
+const chapterLocations = ref([])
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editingLocation = ref(null)
 const locationForm = ref({ name: '', description: '', current_state: '' })
 const isLoading = ref(false)
+
 const normalizedFocusedEntity = computed(() => (props.focusedEntity || '').trim().toLowerCase())
 const normalizedActiveNames = computed(() =>
   (props.activeCharacterNames || [])
     .map((name) => String(name || '').trim().toLowerCase())
     .filter(Boolean)
 )
+
+const filteredLocations = computed(() => {
+  if (!searchQuery.value) return sortedLocations.value
+  const query = searchQuery.value.toLowerCase()
+  return sortedLocations.value.filter(loc => 
+    loc.name.toLowerCase().includes(query) || 
+    (loc.description && loc.description.toLowerCase().includes(query))
+  )
+})
 
 const locationHighlightLevelMap = computed(() => {
   const focused = normalizedFocusedEntity.value
@@ -74,14 +87,11 @@ const sortedLocations = computed(() => {
 
 function getLocationHighlightClass(locId) {
   const level = locationHighlightLevelMap.value.get(locId)
-  if (level === 'strong') return 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 animate-pulse'
-  if (level === 'weak') return 'bg-accent-50 border-accent-200 ring-1 ring-accent-100'
-  return isSelected(locId)
-    ? 'bg-accent-50 border-accent-200 hover:border-accent-300'
-    : 'bg-[var(--bg-panel)] border-transparent hover:border-ink-200'
+  if (level === 'strong') return 'strong-match'
+  if (level === 'weak') return 'weak-match'
+  return isSelected(locId) ? 'selected' : 'default'
 }
 
-// Initialize
 watch(() => props.chapter?.id, async (newId, oldId) => {
   if (newId && newId !== oldId) {
     mapActivityRange.value = props.chapter.map_activity_range || ''
@@ -90,7 +100,6 @@ watch(() => props.chapter?.id, async (newId, oldId) => {
   }
 }, { immediate: true })
 
-// Keep mapActivityRange in sync if it changes externally (e.g. save) but avoid overwriting user input
 watch(() => props.chapter?.map_activity_range, (newVal) => {
   if (!isDirty.value && newVal !== mapActivityRange.value) {
     mapActivityRange.value = newVal || ''
@@ -114,7 +123,6 @@ async function loadData() {
   }
 }
 
-// Activity Range Logic
 function handleChange() {
   isDirty.value = true
 }
@@ -125,7 +133,6 @@ function saveRange() {
   isDirty.value = false
 }
 
-// Location Management Logic
 function openCreateModal() {
   locationForm.value = { name: '', description: '', current_state: '' }
   showCreateModal.value = true
@@ -143,6 +150,7 @@ async function createLocation() {
     const newLoc = await mapApi.createLocation(props.chapter.book_id, locationForm.value)
     locations.value.push(newLoc)
     showCreateModal.value = false
+    showToast('地点创建成功', 'success')
   } catch (e) {
     showToast('创建失败: ' + e.message, 'error')
   }
@@ -154,13 +162,12 @@ async function updateLocation() {
     const updated = await mapApi.updateLocation(editingLocation.value.id, locationForm.value)
     const idx = locations.value.findIndex(l => l.id === updated.id)
     if (idx !== -1) locations.value[idx] = updated
-    // Also update in chapter locations if present
     const chapIdx = chapterLocations.value.findIndex(cl => cl.location_id === updated.id)
     if (chapIdx !== -1) {
-       // Ideally re-fetch or manually update structure, but simplistic update:
-       chapterLocations.value[chapIdx].location = updated
+      chapterLocations.value[chapIdx].location = updated
     }
     showEditModal.value = false
+    showToast('地点更新成功', 'success')
   } catch (e) {
     showToast('更新失败: ' + e.message, 'error')
   }
@@ -176,12 +183,12 @@ async function deleteLocation(id) {
     await mapApi.deleteLocation(id)
     locations.value = locations.value.filter(l => l.id !== id)
     chapterLocations.value = chapterLocations.value.filter(cl => cl.location_id !== id)
+    showToast('地点已删除', 'success')
   } catch (e) {
     showToast('删除失败: ' + e.message, 'error')
   }
 }
 
-// Association Logic
 function isSelected(locId) {
   return chapterLocations.value.some(cl => cl.location_id === locId)
 }
@@ -190,12 +197,10 @@ async function toggleLocation(loc) {
   const existing = chapterLocations.value.find(cl => cl.location_id === loc.id)
   try {
     if (existing) {
-      // API call expects location_id, not relation_id
       await mapApi.removeLocationFromChapter(props.chapter.id, loc.id)
       chapterLocations.value = chapterLocations.value.filter(cl => cl.location_id !== loc.id)
     } else {
       const newRel = await mapApi.addLocationToChapter(props.chapter.id, loc.id)
-      // If the backend doesn't return the full location object, populate it manually
       if (!newRel.location && loc) {
         newRel.location = loc
       }
@@ -203,164 +208,426 @@ async function toggleLocation(loc) {
     }
   } catch (e) {
     console.error('切换关联失败', e)
-    // Refresh data if state is desynced
     if (e.message.includes('404') || e.message.includes('400')) {
       await loadData()
     }
   }
 }
+
+function handleClose() {
+  emit('close')
+}
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-3 gap-4">
-    <!-- Map Selection Area -->
-    <div class="flex-1 min-h-0 flex flex-col">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-xs font-medium text-[var(--text-primary)]">场景地图库</h3>
-        <button 
-          @click="openCreateModal"
-          class="p-1 rounded hover:bg-ink-100 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          title="新建地点"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-          </svg>
-        </button>
-      </div>
-      
-      <div class="flex-1 overflow-y-auto space-y-2 pr-1">
-        <div v-if="isLoading && sortedLocations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
-          加载中...
-        </div>
-        <div v-else-if="sortedLocations.length === 0" class="text-center text-[10px] text-[var(--text-muted)] py-4">
-          暂无地点，点击上方 + 号创建
-        </div>
-        
-        <div 
-          v-for="loc in sortedLocations" 
-          :key="loc.id"
-          class="group relative p-2 rounded-xl ring-1 ring-[var(--border-color)]/60 transition-all cursor-pointer hover:shadow-md"
-          :class="getLocationHighlightClass(loc.id)"
-          @click="toggleLocation(loc)"
-        >
-          <div class="flex items-start justify-between">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1.5">
-                <div 
-                  class="w-3 h-3 rounded-full border flex items-center justify-center transition-colors"
-                  :class="isSelected(loc.id) ? 'bg-accent-500 border-accent-500' : 'border-ink-300'"
-                >
-                  <svg v-if="isSelected(loc.id)" class="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-                  </svg>
-                </div>
-                <span class="text-xs font-medium text-[var(--text-primary)] truncate">{{ loc.name }}</span>
-                <span
-                  v-if="locationHighlightLevelMap.get(loc.id)"
-                  class="px-1 py-0.5 text-[9px] rounded-full"
-                  :class="locationHighlightLevelMap.get(loc.id) === 'strong' ? 'bg-amber-100 text-amber-700' : 'bg-accent-100 text-accent-700'"
-                >
-                  {{ locationHighlightLevelMap.get(loc.id) === 'strong' ? '强匹配' : '弱匹配' }}
+  <PanelContainer
+    title="场景地图"
+    icon="map-pin"
+    description="管理章节关联的地点和场景"
+    :loading="isLoading"
+    :header-actions="[
+      { icon: 'plus', label: '新建地点', onClick: openCreateModal, variant: 'primary' }
+    ]"
+    @close="handleClose"
+  >
+    <div class="map-content">
+      <!-- 地点库 -->
+      <PanelSection title="地点库" :badge="filteredLocations.length" collapsible>
+        <PanelSearch
+          v-model="searchQuery"
+          placeholder="搜索地点..."
+          :debounce="200"
+        />
+
+        <div class="locations-list">
+          <PanelCard
+            v-for="loc in filteredLocations"
+            :key="loc.id"
+            :title="loc.name"
+            :description="loc.description || '暂无描述'"
+            :highlight="getLocationHighlightClass(loc.id) === 'strong-match' ? 'strong' : getLocationHighlightClass(loc.id) === 'weak-match' ? 'weak' : 'none'"
+            :active="isSelected(loc.id)"
+            clickable
+            :actions="[
+              { icon: 'pencil', label: '编辑', onClick: () => openEditModal(loc) },
+              { icon: 'trash', label: '删除', onClick: () => deleteLocation(loc.id), variant: 'danger' }
+            ]"
+            @click="toggleLocation(loc)"
+          >
+            <template #default>
+              <div class="location-meta">
+                <span v-if="loc.current_state" class="current-state">
+                  <Icon name="clock" :size="10" />
+                  {{ loc.current_state }}
+                </span>
+                <span v-if="isSelected(loc.id)" class="selected-badge">
+                  <Icon name="check" :size="10" />
+                  已关联
                 </span>
               </div>
-              <p class="mt-1 text-[10px] text-[var(--text-secondary)] line-clamp-2 pl-4.5">{{ loc.description || '暂无描述' }}</p>
-              <p v-if="loc.current_state" class="mt-0.5 text-[10px] text-amber-600 line-clamp-1 pl-4.5">
-                <span class="font-medium">此刻:</span> {{ loc.current_state }}
-              </p>
-            </div>
-            
-            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
-              <button 
-                @click.stop="openEditModal(loc)"
-                class="p-1 text-ink-400 hover:text-accent-600 transition-colors"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-                </svg>
-              </button>
-              <button 
-                @click.stop="deleteLocation(loc.id)"
-                class="p-1 text-ink-400 hover:text-rose-500 transition-colors"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                </svg>
-              </button>
-            </div>
+            </template>
+          </PanelCard>
+
+          <PanelEmpty
+            v-if="filteredLocations.length === 0"
+            icon="map-pin"
+            :title="searchQuery ? '未找到匹配地点' : '暂无地点'"
+            :description="searchQuery ? '尝试其他关键词搜索' : '点击「新建地点」创建第一个地点'"
+            :action-label="searchQuery ? '清除搜索' : undefined"
+            @action="searchQuery = ''"
+          />
+        </div>
+      </PanelSection>
+
+      <!-- 本章活动范围 -->
+      <PanelSection title="本章活动范围限制" collapsible :collapsed="false">
+        <div class="activity-range">
+          <textarea
+            v-model="mapActivityRange"
+            @input="handleChange"
+            rows="4"
+            class="range-textarea"
+            placeholder="在此输入针对本章的具体路线或活动范围限制..."
+          />
+          <div class="range-actions">
+            <span v-if="!isDirty" class="saved-hint">
+              <Icon name="check" :size="12" />
+              已自动保存
+            </span>
+            <button 
+              v-else
+              class="save-btn"
+              @click="saveRange"
+            >
+              <Icon name="check" :size="12" />
+              保存更改
+            </button>
           </div>
         </div>
-      </div>
+      </PanelSection>
     </div>
+  </PanelContainer>
 
-    <!-- Specific Constraints -->
-    <div class="h-1/3 flex flex-col border-t border-ink-100 pt-3">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-xs font-medium text-[var(--text-primary)]">本章活动范围限制</h3>
-        <button 
-          v-if="isDirty"
-          @click="saveRange"
-          class="px-2 py-1 text-xs bg-accent-600 text-white rounded-xl hover:bg-accent-500 transition-colors"
-        >
-          保存
-        </button>
-        <span v-else class="text-[10px] text-[var(--text-muted)]">已保存</span>
-      </div>
-      <textarea
-        v-model="mapActivityRange"
-        @input="handleChange"
-        class="flex-1 w-full p-2 text-xs bg-[var(--bg-panel)] text-[var(--text-primary)] rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)]/40 ring-1 ring-[var(--border-color)] transition-all"
-        placeholder="在此输入针对本章的具体路线或活动范围限制..."
-      ></textarea>
-    </div>
-
-    <!-- Modals -->
-    <div v-if="showCreateModal || showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" @click.self="showCreateModal = false; showEditModal = false">
-      <div class="bg-parchment-50 rounded-2xl shadow-xl w-full max-w-sm p-4 mx-4">
-        <h3 class="text-sm font-heading font-semibold text-ink-800 mb-3">{{ showEditModal ? '编辑地点' : '新建地点' }}</h3>
-        <div class="space-y-3">
-          <div>
-            <label class="block text-xs text-ink-500 mb-1">名称</label>
-            <input 
-              v-model="locationForm.name"
-              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-              placeholder="例如：暴风城、幽暗密林"
-            />
-          </div>
-          <div>
-            <label class="block text-xs text-ink-500 mb-1">描述 (Prompt上下文)</label>
-            <textarea 
-              v-model="locationForm.description"
-              rows="3"
-              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
-              placeholder="详细描述该地点的环境、氛围、规则等..."
-            ></textarea>
-          </div>
-          <div>
-            <label class="block text-xs text-ink-500 mb-1">此刻状态 (实时快照)</label>
-            <textarea 
-              v-model="locationForm.current_state"
-              rows="2"
-              class="w-full px-2 py-1.5 text-xs bg-parchment-50 rounded-xl focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
-              placeholder="从世界快照中提取的此刻场景状态..."
-            ></textarea>
-            <p class="text-[10px] text-ink-400 mt-0.5">此字段通常在章节发布时自动更新</p>
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 mt-4">
-          <button 
-            @click="showCreateModal = false; showEditModal = false"
-            class="px-3 py-1.5 text-xs text-ink-600 hover:bg-ink-100 rounded-xl transition-colors"
-          >
-            取消
+  <!-- 新建/编辑地点模态框 -->
+  <Transition name="modal">
+    <div v-if="showCreateModal || showEditModal" class="modal-overlay" @click.self="showCreateModal = false; showEditModal = false">
+      <div class="modal-content">
+        <div class="drawer-header">
+          <h3>{{ showEditModal ? '编辑地点' : '新建地点' }}</h3>
+          <button class="close-btn" @click="showCreateModal = false; showEditModal = false">
+            <Icon name="close" :size="18" />
           </button>
-          <button 
-            @click="showEditModal ? updateLocation() : createLocation()"
-            class="px-3 py-1.5 text-xs bg-accent-600 text-white rounded-xl hover:bg-accent-500 transition-colors"
-          >
-            确定
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label>名称 <span class="required">*</span></label>
+            <input v-model="locationForm.name" type="text" placeholder="例如：暴风城、幽暗密林" />
+          </div>
+
+          <div class="form-group">
+            <label>描述（Prompt上下文）</label>
+            <textarea v-model="locationForm.description" rows="3" placeholder="详细描述该地点的环境、氛围、规则等..." />
+          </div>
+
+          <div class="form-group">
+            <label>此刻状态（实时快照）</label>
+            <textarea v-model="locationForm.current_state" rows="2" placeholder="从世界快照中提取的此刻场景状态..." />
+            <p class="form-hint">此字段通常在章节发布时自动更新</p>
+          </div>
+        </div>
+
+        <div class="drawer-footer">
+          <button class="btn-secondary" @click="showCreateModal = false; showEditModal = false">取消</button>
+          <button class="btn-primary" @click="showEditModal ? updateLocation() : createLocation()">
+            {{ showEditModal ? '保存' : '创建' }}
           </button>
         </div>
       </div>
     </div>
-  </div>
+  </Transition>
 </template>
+
+<style scoped>
+.map-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  min-height: 0;
+}
+
+.locations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.location-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.current-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  color: #d97706;
+  background: #fef3c7;
+  border-radius: 4px;
+}
+
+.selected-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  color: white;
+  background: var(--accent-500);
+  border-radius: 4px;
+}
+
+.activity-range {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.range-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 100px;
+  transition: all 0.2s ease;
+}
+
+.range-textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.range-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.saved-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.save-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  background: var(--accent-500);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-btn:hover {
+  background: var(--accent-600);
+}
+
+/* 模态框样式 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.drawer-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-group label .required {
+  color: #dc2626;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background: var(--accent-500);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: var(--accent-600);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.25);
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* 过渡动画 */
+.modal-enter-active,
+.modal-leave-active {
+  transition: all 0.25s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from .modal-content,
+.modal-leave-to .modal-content {
+  transform: scale(0.95) translateY(10px);
+  opacity: 0;
+}
+
+.modal-content {
+  transition: all 0.25s ease;
+}
+</style>

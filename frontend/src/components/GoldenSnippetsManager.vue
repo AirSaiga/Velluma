@@ -1,8 +1,10 @@
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted, computed } from 'vue'
 import { bookApi } from '../services/api'
 import { useToast } from '../composables/useToast'
 import { useConfirmDialog } from '../composables/useConfirmDialog'
+import { PanelContainer, PanelSection, PanelCard, PanelEmpty, PanelFormField } from './panels'
+import Icon from './Icon.vue'
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
@@ -14,9 +16,9 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update-snippets', 'update-blacklist'])
+const emit = defineEmits(['update-snippets', 'update-blacklist', 'close'])
 
-const activeTab = ref('golden') // 'golden' | 'blacklist'
+const activeTab = ref('golden')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const status = ref('idle')
@@ -99,58 +101,50 @@ function markDirty() {
   }, AUTOSAVE_DELAY_MS)
 }
 
-function addGoldenSnippet() {
-  goldenSnippets.value.unshift({ id: makeId('golden'), text: '' })
+function addItem() {
+  if (activeTab.value === 'golden') {
+    goldenSnippets.value.unshift({ id: makeId('golden'), text: '' })
+  } else {
+    styleBlacklist.value.unshift({ id: makeId('blacklist'), text: '' })
+  }
   markDirty()
 }
 
-function addBlacklistItem() {
-  styleBlacklist.value.unshift({ id: makeId('blacklist'), text: '' })
-  markDirty()
-}
-
-async function removeGoldenSnippet(id) {
+async function removeItem(id) {
   const ok = await showConfirm({
     title: '确认删除',
-    message: '确定要删除这个黄金锚点片段吗？'
+    message: activeTab.value === 'golden' 
+      ? '确定要删除这个黄金锚点片段吗？'
+      : '确定要删除这个黑名单条目吗？'
   })
   if (!ok) return
-  goldenSnippets.value = goldenSnippets.value.filter(item => item.id !== id)
+  
+  if (activeTab.value === 'golden') {
+    goldenSnippets.value = goldenSnippets.value.filter(item => item.id !== id)
+  } else {
+    styleBlacklist.value = styleBlacklist.value.filter(item => item.id !== id)
+  }
   markDirty()
 }
 
-async function removeBlacklistItem(id) {
-  const ok = await showConfirm({
-    title: '确认删除',
-    message: '确定要删除这个黑名单条目吗？'
-  })
-  if (!ok) return
-  styleBlacklist.value = styleBlacklist.value.filter(item => item.id !== id)
-  markDirty()
-}
-
-function updateGoldenText(id, newText) {
-  const item = goldenSnippets.value.find(item => item.id === id)
-  if (item) {
-    item.text = newText
-    markDirty()
+function updateItemText(id, newText) {
+  if (activeTab.value === 'golden') {
+    const item = goldenSnippets.value.find(item => item.id === id)
+    if (item) {
+      item.text = newText
+      markDirty()
+    }
+  } else {
+    const item = styleBlacklist.value.find(item => item.id === id)
+    if (item) {
+      item.text = newText
+      markDirty()
+    }
   }
 }
 
-function updateBlacklistText(id, newText) {
-  const item = styleBlacklist.value.find(item => item.id === id)
-  if (item) {
-    item.text = newText
-    markDirty()
-  }
-}
-
-const statusText = {
-  idle: '',
-  dirty: '有未保存的更改',
-  saving: '保存中...',
-  saved: '已保存',
-  error: ''
+function handleClose() {
+  emit('close')
 }
 
 watch(() => props.bookId, (newId) => {
@@ -165,154 +159,247 @@ onUnmounted(() => {
     saveData()
   }
 })
+
+const tabs = [
+  { key: 'golden', label: '黄金锚点', icon: 'star', description: '添加文本片段作为AI生成的风格参考' },
+  { key: 'blacklist', label: '风格黑名单', icon: 'no-symbol', description: '添加需要避免的表达方式或禁用词' }
+]
+
+const currentTab = computed(() => tabs.find(t => t.key === activeTab.value))
+const currentItems = computed(() => activeTab.value === 'golden' ? goldenSnippets.value : styleBlacklist.value)
+
+const statusConfig = {
+  idle: { text: '', type: 'default' },
+  dirty: { text: '有未保存的更改', type: 'warning' },
+  saving: { text: '保存中...', type: 'info' },
+  saved: { text: '已保存', type: 'success' },
+  error: { text: errorText, type: 'error' }
+}
 </script>
 
 <template>
-  <div class="snippets-manager">
-    <!-- Tab Switcher -->
-    <div class="flex items-center gap-1 mb-3 bg-[var(--bg-panel)] p-1 rounded-lg">
-      <button
-        @click="activeTab = 'golden'"
-        :class="[
-          'flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-          activeTab === 'golden'
-            ? 'bg-[var(--accent-500)] text-white'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-        ]"
-      >
-        黄金锚点
-      </button>
-      <button
-        @click="activeTab = 'blacklist'"
-        :class="[
-          'flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-          activeTab === 'blacklist'
-            ? 'bg-[var(--accent-500)] text-white'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-        ]"
-      >
-        风格黑名单
-      </button>
-    </div>
+  <PanelContainer
+    :title="currentTab.label"
+    :icon="currentTab.icon"
+    :description="currentTab.description"
+    :loading="isLoading"
+    :header-actions="[
+      { icon: 'plus', label: '新增条目', onClick: addItem, variant: 'primary' }
+    ]"
+    @close="handleClose"
+  >
+    <div class="snippets-content">
+      <!-- Tab 切换 -->
+      <div class="tab-switcher">
+        <button
+          v-for="tab in tabs"
+          :key="tab.key"
+          class="tab-btn"
+          :class="{ active: activeTab === tab.key }"
+          @click="activeTab = tab.key"
+        >
+          <Icon :name="tab.icon" :size="14" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
 
-    <!-- Header -->
-    <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center gap-2">
-        <label class="block text-xs font-medium text-[var(--text-primary)]">
-          {{ activeTab === 'golden' ? '黄金锚点' : '风格黑名单' }}
-        </label>
-        <span
-          v-if="status !== 'idle' && status !== 'error'"
-          :class="[
-            'text-[10px] px-1.5 py-0.5 rounded-full',
-            status === 'dirty' ? 'bg-amber-500/10 text-amber-500' : '',
-            status === 'saving' ? 'bg-blue-500/10 text-blue-500' : '',
-            status === 'saved' ? 'bg-green-500/10 text-green-500' : ''
+      <!-- 状态提示 -->
+      <div v-if="statusConfig[status].type !== 'default'" class="status-bar" :class="statusConfig[status].type">
+        <Icon 
+          :name="status === 'saving' ? 'arrow-path' : status === 'saved' ? 'check' : status === 'error' ? 'exclamation-circle' : 'information-circle'" 
+          :size="14" 
+        />
+        <span>{{ statusConfig[status].text }}</span>
+      </div>
+
+      <!-- 内容列表 -->
+      <div class="items-list">
+        <PanelCard
+          v-for="(item, index) in currentItems"
+          :key="item.id"
+          :title="`条目 ${currentItems.length - index}`"
+          :highlight="item.text ? 'none' : 'weak'"
+          :actions="[
+            { icon: 'trash', label: '删除', onClick: () => removeItem(item.id), variant: 'danger' }
           ]"
         >
-          {{ statusText[status] }}
-        </span>
-        <span
-          v-if="status === 'error'"
-          class="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-500"
-        >
-          {{ errorText }}
-        </span>
-      </div>
-      <div class="flex items-center gap-1">
-        <button
-          @click="activeTab === 'golden' ? addGoldenSnippet() : addBlacklistItem()"
-          class="px-2 py-0.5 text-[10px] bg-parchment-50 hover:bg-[var(--bg-panel)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl ring-1 ring-[var(--border-color)]/60 hover:shadow-md transition-all duration-200"
-          :disabled="isLoading"
-        >
-          +新增
-        </button>
-        <button
-          @click="saveData"
-          :disabled="isSaving"
-          class="px-2 py-0.5 text-[10px] bg-[var(--accent-500)] disabled:bg-[var(--bg-panel)] text-white rounded-lg transition-colors"
-        >
-          保存
-        </button>
-      </div>
-    </div>
-
-    <!-- Description -->
-    <p class="text-[10px] text-[var(--text-muted)] mb-2">
-      {{ activeTab === 'golden' 
-        ? '添加文本片段作为AI生成的风格参考，AI会学习这些片段的写作风格' 
-        : '添加需要避免的表达方式或禁用词，AI生成时会主动规避' }}
-    </p>
-
-    <!-- Loading -->
-    <div v-if="isLoading" class="text-[10px] text-[var(--text-muted)] mt-1">加载中...</div>
-
-    <!-- Golden Snippets List -->
-    <div v-else-if="activeTab === 'golden'" class="space-y-2">
-      <div v-if="goldenSnippets.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
-        暂无黄金锚点，点击"+新增"添加参考文本片段
-      </div>
-
-      <div
-        v-for="item in goldenSnippets"
-        :key="item.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 group hover:shadow-md transition-all duration-200"
-      >
-        <div class="flex items-start gap-2">
-          <div class="flex-1">
+          <template #default>
             <textarea
               :value="item.text"
-              @input="updateGoldenText(item.id, $event.target.value)"
-              rows="3"
-              class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
-              placeholder="输入文本片段..."
+              @input="updateItemText(item.id, $event.target.value)"
+              :rows="activeTab === 'golden' ? 4 : 2"
+              class="item-textarea"
+              :placeholder="activeTab === 'golden' ? '输入文本片段，AI会学习这些片段的写作风格...' : '输入需要避免的表达方式或禁用词...'"
             />
-          </div>
-          <button
-            class="p-1 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-            @click="removeGoldenSnippet(item.id)"
-            title="删除"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
-        </div>
+          </template>
+        </PanelCard>
+
+        <PanelEmpty
+          v-if="currentItems.length === 0"
+          :icon="currentTab.icon"
+          :title="`暂无${currentTab.label}`"
+          :description="`点击「新增条目」按钮添加第一个${currentTab.label}`"
+          action-label="新增条目"
+          @action="addItem"
+        />
       </div>
     </div>
 
-    <!-- Blacklist List -->
-    <div v-else class="space-y-2">
-      <div v-if="styleBlacklist.length === 0" class="p-3 bg-[var(--bg-panel)] rounded-xl text-[10px] text-[var(--text-muted)] ring-1 ring-[var(--border-color)]/60">
-        暂无黑名单条目，点击"+新增"添加需要避免的表达方式
-      </div>
-
-      <div
-        v-for="item in styleBlacklist"
-        :key="item.id"
-        class="p-2 bg-[var(--bg-panel)] rounded-xl ring-1 ring-[var(--border-color)]/60 group hover:shadow-md transition-all duration-200"
+    <template #footer>
+      <button 
+        class="save-btn" 
+        :class="{ 'has-changes': status === 'dirty' }"
+        :disabled="isSaving || status === 'idle'"
+        @click="saveData"
       >
-        <div class="flex items-center gap-2">
-          <div class="flex-1">
-            <input
-              :value="item.text"
-              @input="updateBlacklistText(item.id, $event.target.value)"
-              type="text"
-              class="w-full px-2 py-1.5 bg-parchment-50 rounded-xl text-xs text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-              placeholder="输入需要避免的表达方式..."
-            />
-          </div>
-          <button
-            class="p-1 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-            @click="removeBlacklistItem(item.id)"
-            title="删除"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+        <Icon :name="isSaving ? 'arrow-path' : 'check'" :size="14" />
+        {{ isSaving ? '保存中...' : status === 'dirty' ? '保存更改' : '已保存' }}
+      </button>
+    </template>
+  </PanelContainer>
 </template>
+
+<style scoped>
+.snippets-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.tab-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border-radius: 10px;
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.tab-btn.active {
+  color: white;
+  background: var(--accent-500);
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-bar.warning {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-bar.info {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.status-bar.success {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.status-bar.error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.item-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 80px;
+  transition: all 0.2s ease;
+}
+
+.item-textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+}
+
+.item-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.save-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.save-btn.has-changes {
+  background: var(--accent-500);
+  color: white;
+  border-color: var(--accent-500);
+}
+
+.save-btn.has-changes:hover {
+  background: var(--accent-600);
+}
+
+.save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+</style>
