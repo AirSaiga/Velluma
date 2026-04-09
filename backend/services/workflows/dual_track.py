@@ -140,6 +140,12 @@ class DualTrackWorkflow:
         import time
         total_start = time.perf_counter()
 
+        # 【临时调试】强制输出到终端，绕过 logging 配置
+        print(f"\n\n========== [DualTrack] 工作流开始执行 ==========")
+        print(f"[DualTrack] 节拍数: {len(beats)}, 目标字数: {word_count}")
+        print(f"[DualTrack] 当前时间: {time.strftime('%H:%M:%S')}")
+        print(f"==================================================\n\n", flush=True)
+        
         logger.info(f"[DualTrack] 启动双轨生成工作流，节拍数: {len(beats)}, 目标字数: {word_count}")
 
         async def _emit_progress(event: str, message: str, **kwargs):

@@ -18,6 +18,10 @@ interface BeatPreviewItem {
   anchor_pov?: string
   original_actor?: string
   action_summary?: string
+  worldbuilding_instruction?: string
+  entry_state?: string
+  exit_state?: string
+  red_lines?: string[]
   openingState: string
   stoppingState: string
   forbiddenEventsText: string
@@ -180,6 +184,35 @@ const characterImportanceColor = (level: number) => {
     4: 'bg-amber-50 text-amber-600 ring-amber-200'
   }
   return colors[level] || colors[1]
+}
+
+// Beat 详情展开/收起状态
+const expandedBeats = ref<Set<string>>(new Set())
+
+function toggleBeatDetail(beatId: string) {
+  if (expandedBeats.value.has(beatId)) {
+    expandedBeats.value.delete(beatId)
+  } else {
+    expandedBeats.value.add(beatId)
+  }
+}
+
+function getPovModeLabel(mode: string): string {
+  const labels: Record<string, string> = {
+    single: '单视角',
+    ensemble: '多视角',
+    omniscient: '全知'
+  }
+  return labels[mode] || mode
+}
+
+function getPovApertureLabel(aperture: string): string {
+  const labels: Record<string, string> = {
+    internal_only: '内心独白',
+    subjective_observation: '主观观察',
+    systemic_sense: '全景感知'
+  }
+  return labels[aperture] || aperture
 }
 </script>
 
@@ -594,16 +627,90 @@ const characterImportanceColor = (level: number) => {
         <div
           v-for="beat in previewBeats"
           :key="beat.beat_id || beat.position"
-          class="p-3 bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)]"
+          class="p-4 bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)] space-y-3"
         >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-medium text-[var(--accent-500)]">Beat {{ beat.position }}</span>
-            <span class="text-[10px] text-[var(--text-muted)]">{{ beat.word_count_target }}字</span>
+          <!-- Beat 头部：序号 + 字数 -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-[var(--accent-500)]">Beat {{ beat.position }}</span>
+              <span v-if="beat.pov_mode" class="px-1.5 py-0.5 text-[10px] rounded bg-blue-100 text-blue-700">
+                {{ getPovModeLabel(beat.pov_mode) }}
+              </span>
+            </div>
+            <span class="text-[10px] text-[var(--text-muted)]">{{ beat.word_count_target || beat.target_words }}字</span>
           </div>
-          <p class="text-sm text-[var(--text-primary)] mb-2">{{ beat.summary }}</p>
-          <div class="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
-            <span v-if="beat.location">📍 {{ beat.location }}</span>
-            <span v-if="beat.pov_character">👤 {{ beat.pov_character }}</span>
+
+          <!-- 剧情摘要 -->
+          <p class="text-sm text-[var(--text-primary)] leading-relaxed">{{ beat.summary }}</p>
+
+          <!-- 基础信息行 -->
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-muted)]">
+            <span v-if="beat.location" class="flex items-center gap-1">
+              <span>📍</span>
+              <span>{{ beat.location }}</span>
+            </span>
+            <span v-if="beat.pov_character" class="flex items-center gap-1">
+              <span>👤</span>
+              <span>{{ beat.pov_character }}</span>
+            </span>
+            <span v-if="beat.pov_aperture" class="flex items-center gap-1">
+              <span>🔍</span>
+              <span>{{ getPovApertureLabel(beat.pov_aperture) }}</span>
+            </span>
+            <span v-if="beat.hook_ids && beat.hook_ids.length > 0" class="flex items-center gap-1">
+              <span></span>
+              <span>{{ beat.hook_ids.join(' / ') }}</span>
+            </span>
+          </div>
+
+          <!-- 展开/收起按钮 -->
+          <button
+            @click="toggleBeatDetail(beat.beat_id || String(beat.position))"
+            class="text-xs text-[var(--accent-500)] hover:text-[var(--accent-600)] transition-colors"
+          >
+            {{ expandedBeats.has(beat.beat_id || String(beat.position)) ? '收起详情' : '展开详情 ↓' }}
+          </button>
+
+          <!-- 详细信息（可展开） -->
+          <div
+            v-if="expandedBeats.has(beat.beat_id || String(beat.position))"
+            class="space-y-2 pt-2 border-t border-[var(--border-color)]"
+          >
+            <!-- 动作摘要 -->
+            <div v-if="beat.action_summary" class="text-xs">
+              <span class="text-[var(--text-secondary)] font-medium">动作摘要：</span>
+              <span class="text-[var(--text-primary)]">{{ beat.action_summary }}</span>
+            </div>
+
+            <!-- 状态转换 -->
+            <div v-if="beat.openingState || beat.stoppingState" class="text-xs space-y-1">
+              <div>
+                <span class="text-[var(--text-secondary)] font-medium">进入状态：</span>
+                <span class="text-[var(--text-primary)]">{{ beat.openingState || '—' }}</span>
+              </div>
+              <div>
+                <span class="text-[var(--text-secondary)] font-medium">离开状态：</span>
+                <span class="text-[var(--text-primary)]">{{ beat.stoppingState || '—' }}</span>
+              </div>
+            </div>
+
+            <!-- 世界观指令 -->
+            <div v-if="beat.worldbuilding_instruction" class="text-xs">
+              <span class="text-[var(--text-secondary)] font-medium">世界观指令：</span>
+              <span class="text-[var(--text-primary)]">{{ beat.worldbuilding_instruction }}</span>
+            </div>
+
+            <!-- 红线约束 -->
+            <div v-if="beat.forbiddenEventsText" class="text-xs">
+              <span class="text-[var(--text-secondary)] font-medium">红线约束：</span>
+              <span class="text-red-600">{{ beat.forbiddenEventsText }}</span>
+            </div>
+
+            <!-- POV 多角色列表 -->
+            <div v-if="beat.pov_characters && beat.pov_characters.length > 0" class="text-xs">
+              <span class="text-[var(--text-secondary)] font-medium">多视角角色：</span>
+              <span class="text-[var(--text-primary)]">{{ beat.pov_characters.join('、') }}</span>
+            </div>
           </div>
         </div>
         <div class="flex justify-end gap-2 pt-2">

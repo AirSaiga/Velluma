@@ -45,9 +45,12 @@ interface BeatEditorState {
   original_actor?: string
   action_summary?: string
   worldbuilding_instruction?: string
-  openingState: string
-  stoppingState: string
-  forbiddenEventsText: string
+  entry_state?: string                             // 后端原始字段
+  exit_state?: string                              // 后端原始字段
+  red_lines?: string[]                             // 后端原始字段
+  openingState: string                             // 映射自 entry_state
+  stoppingState: string                            // 映射自 exit_state
+  forbiddenEventsText: string                      // 映射自 red_lines
   word_count_target: number
   target_words: number
   hook_ids: string[]
@@ -367,6 +370,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         pov_aperture: beat.pov_aperture || undefined,
         action_summary: beat.action_summary,
         worldbuilding_instruction: beat.worldbuilding_instruction,
+        entry_state: beat.entry_state,
+        exit_state: beat.exit_state,
+        red_lines: Array.isArray(beat.red_lines) ? beat.red_lines : [],
         openingState: String(beat[beatFieldMap.openingState] || '').trim(),
         stoppingState: String(beat[beatFieldMap.stoppingState] || '').trim(),
         forbiddenEventsText: Array.isArray(beat[beatFieldMap.forbiddenEventsText])
@@ -518,11 +524,38 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         } as ConfirmedStoryBeat
       })
     }
+    
+    // 在 reset() 之前保存数据
+    const savedPayload = { ...payload }
+    
     closeBeatReviewModal()
     reset()
     formError.value = ''
     generateStartTime = Date.now()
-    startAgenticGeneration(payload, {
+    
+    // 确保 chapter_id 存在
+    const chapterId = savedPayload.chapter_id || selectedChapter.value?.id
+    if (!chapterId) {
+      showToast('章节 ID 缺失，请重试', 'error')
+      return
+    }
+    
+    // V3.5+ 直接调用双轨生成 API
+    const dualTrackPayload = {
+      ...savedPayload,
+      chapter_id: chapterId,  // 确保 chapter_id 存在
+      beats: savedPayload.beats || []  // 使用保存的 beats
+    }
+    
+    // 调用双轨生成 API
+    console.log('[Debug] 双轨生成请求数据:', {
+      chapterId: chapterId,
+      payloadChapterId: dualTrackPayload.chapter_id,
+      beatsCount: dualTrackPayload.beats?.length,
+      hasApiKey: !!dualTrackPayload.api_key,
+    })
+    
+    startAgenticGeneration(dualTrackPayload, {
       onEvent: (event, data) => {
         console.log('[Workflow Event]', event, data)
         if (event === 'DONE' && data.debug_history && (window as any).electronAPI) {
@@ -565,7 +598,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           : `本章正文生成完成！已达成最大迭代次数，共重写 ${revisionCount} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
         openCompletionModal('生成完成', statusMsg)
       }
-    }, '/generate_chapter_agentic_with_beats')
+    }, `/chapters/${chapterId}/generate-dual-track`)
   }
 
   function toggleCharacter(charId: string) {

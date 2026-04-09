@@ -49,12 +49,42 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-
 from dotenv import load_dotenv
 
-# 配置基础日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# =============================================================================
+# 日志配置（必须在所有导入之前）
+# =============================================================================
+# 关键：logging.basicConfig() 只在第一次调用时生效
+# 如果在其他模块导入后才配置，那些模块的 logger 会使用默认的 WARNING 级别
+# 这会导致 INFO 日志不输出
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True  # 强制重新配置，覆盖已有的配置
+)
 logger = logging.getLogger(__name__)
+
+# 强制设置根 logger 级别为 INFO（这会影响到所有子 logger）
+logging.getLogger().setLevel(logging.INFO)
+
+# 强制设置所有已知 logger 的级别为 INFO
+for logger_name in [
+    "uvicorn", "uvicorn.error", "uvicorn.access",
+    "backend", "backend.services", "backend.routes",
+    "backend.services.workflows", "backend.services.workflows.dual_track",
+    "backend.services.workflows.drafting_prose", "backend.services.workflows.planning",
+]:
+    logging.getLogger(logger_name).setLevel(logging.INFO)
+
+# 添加全局过滤器，确保所有 INFO 日志都能输出
+class InfoLogFilter(logging.Filter):
+    def filter(self, record):
+        # 只过滤 DEBUG 级别，允许 INFO 及以上级别输出
+        return record.levelno >= logging.INFO
+
+# 为根 logger 添加过滤器
+root_logger = logging.getLogger()
+root_logger.addFilter(InfoLogFilter())
 
 
 # =============================================================================
@@ -300,6 +330,16 @@ if __name__ == "__main__":
     port = find_available_port()
     save_port(port)
     logger.info(f"[Main] 后端启动于 http://127.0.0.1:{port}")
-    config = uvicorn.Config(app, host="127.0.0.1", port=port)
+    
+    # Uvicorn 配置：禁用 Uvicorn 自己的日志配置，使用我们已配置的 basicConfig
+    # log_config=None 是关键，这会阻止 Uvicorn 覆盖我们的日志设置
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        log_config=None,  # 禁用 Uvicorn 的日志配置，使用根 logger 配置
+        access_log=False,  # 关闭访问日志，减少噪音
+    )
     server = uvicorn.Server(config)
     server.run()
