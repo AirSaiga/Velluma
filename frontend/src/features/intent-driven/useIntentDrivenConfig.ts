@@ -1,13 +1,16 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import type { 
   CreativeIntentType, 
   ChapterGoalType, 
   PlanType,
+  CreativeIntentTemplate,
+  ChapterGoalTemplate,
   RecommendedPlan,
   IntentDrivenState,
   IntentDrivenGeneratePayload,
   RecommendResponse
 } from '@/types/intentDriven'
+import { intentDrivenApi } from '../../services/api/domain'
 import { CREATIVE_INTENT_TEMPLATES, CHAPTER_GOAL_TEMPLATES } from './intentTemplates'
 
 // 默认状态
@@ -20,23 +23,48 @@ const defaultState: IntentDrivenState = {
   isExpertModeExpanded: false
 }
 
-// 全局状态
 const state = ref<IntentDrivenState>({ ...defaultState })
+const intentTemplatesSource = ref<CreativeIntentTemplate[]>([...CREATIVE_INTENT_TEMPLATES])
+const goalTemplatesSource = ref<ChapterGoalTemplate[]>([...CHAPTER_GOAL_TEMPLATES])
+let templatesLoaded = false
+
+async function ensureTemplatesLoaded() {
+  if (templatesLoaded) {
+    return
+  }
+  templatesLoaded = true
+  try {
+    const data = await intentDrivenApi.getTemplates()
+    if (Array.isArray(data?.creative_intents) && data.creative_intents.length > 0) {
+      intentTemplatesSource.value = data.creative_intents
+    }
+    if (Array.isArray(data?.chapter_goals) && data.chapter_goals.length > 0) {
+      goalTemplatesSource.value = data.chapter_goals
+    }
+  } catch {
+    intentTemplatesSource.value = [...CREATIVE_INTENT_TEMPLATES]
+    goalTemplatesSource.value = [...CHAPTER_GOAL_TEMPLATES]
+  }
+}
 
 export function useIntentDrivenConfig() {
+  void ensureTemplatesLoaded()
+
   // 计算属性
   const selectedIntents = computed(() => state.value.selectedIntents)
   const selectedGoals = computed(() => state.value.selectedGoals)
+  const intentTemplates = computed(() => intentTemplatesSource.value)
+  const goalTemplates = computed(() => goalTemplatesSource.value)
   
   const selectedIntentTemplates = computed(() => {
     return state.value.selectedIntents
-      .map(id => CREATIVE_INTENT_TEMPLATES.find(t => t.id === id))
+      .map(id => intentTemplates.value.find(t => t.id === id))
       .filter(Boolean)
   })
   
   const selectedGoalTemplates = computed(() => {
     return state.value.selectedGoals
-      .map(id => CHAPTER_GOAL_TEMPLATES.find(t => t.id === id))
+      .map(id => goalTemplates.value.find(t => t.id === id))
       .filter(Boolean)
   })
   
@@ -133,16 +161,10 @@ export function useIntentDrivenConfig() {
     }
     
     try {
-      const response = await fetch('/api/intent-driven/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creative_intents: state.value.selectedIntents,
-          chapter_goals: state.value.selectedGoals.length > 0 ? state.value.selectedGoals : null
-        })
+      const data: RecommendResponse = await intentDrivenApi.recommend({
+        creative_intents: state.value.selectedIntents,
+        chapter_goals: state.value.selectedGoals.length > 0 ? state.value.selectedGoals : null
       })
-      
-      const data: RecommendResponse = await response.json()
       state.value.recommendedPlans = data.plans
     } catch (error) {
       console.error('获取推荐方案失败:', error)
@@ -274,7 +296,7 @@ export function useIntentDrivenConfig() {
   }
   
   function getIntentDisplayName(intentType: CreativeIntentType): string {
-    const template = CREATIVE_INTENT_TEMPLATES.find(t => t.id === intentType)
+    const template = intentTemplates.value.find(t => t.id === intentType)
     return template?.display_name || intentType
   }
   
@@ -299,8 +321,8 @@ export function useIntentDrivenConfig() {
     overrideCount,
     
     // 模板数据
-    intentTemplates: CREATIVE_INTENT_TEMPLATES,
-    goalTemplates: CHAPTER_GOAL_TEMPLATES,
+    intentTemplates,
+    goalTemplates,
     
     // 方法
     toggleIntent,

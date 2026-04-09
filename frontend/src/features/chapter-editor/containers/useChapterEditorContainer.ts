@@ -22,6 +22,7 @@ import {
 } from '../../../composables/useAgenticConfig'
 import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
 import type { AgenticFormState, ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
+import { useIntentDrivenConfig } from '../../intent-driven'
 
 export interface ChapterEditorContainerProps {
   selectedChapter: Chapter | null
@@ -82,6 +83,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const publishError = ref<string | null>(null)
   const showPublishModal = ref(false)
   const showAgenticSettingsModal = ref(false)
+  const { reset: resetIntentDrivenConfig } = useIntentDrivenConfig()
   const showBeatReviewModal = ref(false)
   const characterUpdates = ref<Array<{
     character_id: string
@@ -326,6 +328,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function closeAgenticSettingsModal() {
     showAgenticSettingsModal.value = false
+    resetIntentDrivenConfig()
   }
 
   function closeBeatReviewModal() {

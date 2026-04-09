@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain } = require('electron')
+const { app, BrowserWindow, session } = require('electron')
 const { join, dirname } = require('path')
 const { spawn } = require('child_process')
 const net = require('net')
@@ -358,48 +358,13 @@ async function createMainWindow() {
   }
 }
 
-function createDebugWindow(backendPort, vitePort) {
-  const debugWin = new BrowserWindow({
-    width: 800,
-    height: 600,
-    title: 'Prompt Debug',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: join(__dirname, 'preload.cjs')
-    }
-  })
-
-  if (isDev) {
-    debugWin.loadURL(`http://localhost:${vitePort}?backendPort=${backendPort}&debug=true`)
-  } else {
-    debugWin.loadFile(join(__dirname, '../dist/index.html'), { query: { debug: 'true' } })
-  }
-
-  return debugWin
-}
-
 // =============================================================================
 // 应用生命周期
 // =============================================================================
 
 app.whenReady().then(async () => {
   try {
-    const { win, backendPort, vitePort } = await createMainWindow()
-    
-    const debugWin = createDebugWindow(backendPort, vitePort)
-    
-    debugWin.on('closed', () => {})
-    
-    ipcMain.on('prompt-data', (event, data) => {
-      if (debugWin && !debugWin.isDestroyed()) {
-        debugWin.webContents.send('prompt-data', data)
-      }
-    })
-    
-    win.on('closed', () => {
-      if (!debugWin.isDestroyed()) debugWin.close()
-    })
+    await createMainWindow()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

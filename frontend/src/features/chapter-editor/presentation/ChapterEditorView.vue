@@ -579,7 +579,8 @@ function getPovApertureLabel(aperture: string): string {
         <Transition name="modal-content">
           <div 
             v-if="showAgenticSettingsModal"
-            class="relative w-full max-w-5xl max-h-[90vh] bg-[var(--bg-canvas)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            class="relative w-full max-w-5xl bg-[var(--bg-canvas)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            :style="{ height: '90vh' }"
           >
             <!-- 关闭按钮 -->
             <button 
@@ -592,10 +593,10 @@ function getPovApertureLabel(aperture: string): string {
             </button>
             
             <!-- 内容 -->
-            <div class="flex-1 overflow-auto">
-              <IntentDrivenPanel
-                :chapter-id="selectedChapter?.id || ''"
-                :api-config="apiConfig"
+          <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
+            <IntentDrivenPanel
+              :chapter-id="selectedChapter?.id || ''"
+              :api-config="apiConfig"
                 @save="(payload) => { closeAgenticSettingsModal(); emit('intent-save', payload); }"
                 @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"
               />

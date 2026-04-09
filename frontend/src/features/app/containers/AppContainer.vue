@@ -614,6 +614,64 @@ async function handleIntentSave(payload: any) {
   }
 }
 
+async function handleIntentGenerate(payload: any) {
+  if (!selectedChapter.value) {
+    showToast('请先选择章节', 'warning')
+    return
+  }
+  if (!apiConfig.value?.api_key) {
+    showToast('请先配置 API Key', 'warning')
+    return
+  }
+
+  try {
+    await handleIntentSave(payload)
+    const requestPayload = {
+      ...payload,
+      chapter_id: selectedChapter.value.id,
+      api_key: apiConfig.value.api_key,
+      base_url: apiConfig.value.base_url || undefined,
+      model: apiConfig.value.reasoning_model || apiConfig.value.model,
+      word_count: payload.word_count || 3000
+    }
+
+    const generatedContent = await new Promise<string>((resolve, reject) => {
+      let buffer = ''
+      generateApi.streamAgentic(
+        requestPayload,
+        {
+          onChunk: (chunk) => {
+            buffer += chunk
+          },
+          onDone: () => {
+            resolve(buffer.trim())
+          },
+          onError: (error) => {
+            reject(new Error(error))
+          }
+        },
+        '/intent-driven/generate',
+        true
+      )
+    })
+
+    const contentText = generatedContent
+    if (!contentText) {
+      throw new Error('未生成有效正文内容')
+    }
+    await chapterApi.update(selectedChapter.value.id, {
+      content_text: contentText
+    })
+    const index = chapters.value.findIndex(c => c.id === selectedChapter.value?.id)
+    if (index !== -1) {
+      chapters.value[index] = { ...chapters.value[index], content_text: contentText }
+    }
+    showToast('已完成生成并写入章节内容', 'success')
+  } catch (error: any) {
+    showToast('生成失败: ' + error.message, 'error')
+  }
+}
+
 async function deleteChapter(id) {
   const target = chapters.value.find((c) => c.id === id)
   const ok = await showConfirm({ title: '确认删除', message: `确定要删除"${target?.title || '该章节'}"吗？` })
@@ -933,6 +991,7 @@ onBeforeUnmount(() => {
           @editor-entity-focus="handleEditorEntityFocus"
           @request-critique="handleRequestCritique"
           @intent-save="handleIntentSave"
+          @intent-generate="handleIntentGenerate"
         />
       </div>
       

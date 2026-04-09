@@ -114,6 +114,23 @@ export const chapterApi = {
     requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify(apiConfig || {}) })
 }
 
+export const intentDrivenApi = {
+  getTemplates: () => requestJson('/intent-driven/templates'),
+  recommend: (data: { creative_intents: string[]; chapter_goals?: string[] | null }) =>
+    requestJson('/intent-driven/recommend', { method: 'POST', body: JSON.stringify(data) }),
+  generateSync: async (data: any) => {
+    const response = await requestRaw('/intent-driven/generate', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      throw new Error(`意图生成请求失败: ${response.status} ${response.statusText}`)
+    }
+    const text = await response.text()
+    return text
+  }
+}
+
 export const relationshipApi = {
   getAll: (bookId: string) => {
     const url = bookId ? `/relationships?book_id=${bookId}` : '/relationships'

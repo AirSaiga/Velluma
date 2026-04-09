@@ -1,15 +1,7 @@
 <template>
   <div class="goal-selector">
     <div class="selector-header">
-      <div class="header-icon">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-        </svg>
-      </div>
-      <div class="header-content">
-        <h4 class="header-title">这一章要完成什么？</h4>
-        <p class="header-desc">设定具体目标，让 AI 更精准地把控剧情走向</p>
-      </div>
+      <h3 class="selector-title">具体目标</h3>
       <span class="optional-badge">可选</span>
     </div>
     
@@ -22,41 +14,20 @@
         :class="{ 'selected': selectedGoals.includes(goal.id) }"
         @click="toggleGoal(goal.id)"
       >
+        <!-- 复选框 -->
         <div class="goal-checkbox">
-          <Transition name="check">
-            <svg v-if="selectedGoals.includes(goal.id)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-            </svg>
-          </Transition>
+          <svg class="w-3.5 h-3.5 check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+          </svg>
         </div>
+        
+        <!-- 内容 -->
         <div class="goal-content">
           <div class="goal-name">{{ goal.display_name }}</div>
           <div class="goal-desc">{{ goal.description }}</div>
         </div>
-        <div class="goal-indicator" :class="{ 'is-selected': selectedGoals.includes(goal.id) }">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
       </button>
     </div>
-    
-    <!-- 已选摘要 -->
-    <Transition name="fade-up">
-      <div v-if="selectedGoals.length > 0" class="selection-summary">
-        <div class="summary-header">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <span>已选择 {{ selectedGoals.length }} 项目标</span>
-        </div>
-        <div class="summary-tags">
-          <span v-for="goalId in selectedGoals" :key="goalId" class="summary-tag">
-            {{ getGoalName(goalId) }}
-          </span>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -68,286 +39,178 @@ const {
   selectedGoals,
   toggleGoal
 } = useIntentDrivenConfig()
-
-function getGoalName(goalId: string): string {
-  const goal = goalTemplates.value.find(g => g.id === goalId)
-  return goal?.display_name || goalId
-}
 </script>
 
 <style scoped>
 .goal-selector {
-  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
+/* 标题区 */
 .selector-header {
   display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
-  margin-bottom: 1rem;
-  padding: 0 0.25rem;
-}
-
-.header-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-  display: flex;
   align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  color: #2563eb;
-  border-radius: 0.625rem;
-  flex-shrink: 0;
+  gap: 0.75rem;
 }
 
-.header-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.header-title {
-  font-size: 0.9375rem;
+.selector-title {
+  font-size: 1.125rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
-  margin-bottom: 0.25rem;
-}
-
-.header-desc {
-  font-size: 0.8125rem;
-  color: var(--text-secondary, #64748b);
-  line-height: 1.4;
+  color: var(--text-primary, #0f172a);
+  letter-spacing: -0.01em;
+  margin: 0;
 }
 
 .optional-badge {
-  padding: 0.25rem 0.625rem;
-  background: var(--bg-canvas, #f1f5f9);
-  color: var(--text-muted, #94a3b8);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 0.25rem 0.625rem;
   border-radius: 9999px;
-  flex-shrink: 0;
 }
 
 /* 目标网格 */
 .goals-grid {
   display: grid;
   grid-template-columns: repeat(1, 1fr);
-  gap: 0.625rem;
+  gap: 0.75rem;
 }
 
-@media (min-width: 640px) {
+@media (min-width: 768px) {
   .goals-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-/* 目标卡片 */
+/* 目标卡片：无边框轻量级 */
 .goal-card {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.875rem 1rem;
-  background: var(--bg-canvas, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.75rem;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 0.875rem;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: left;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .goal-card:hover {
-  background: var(--bg-primary, white);
-  border-color: var(--accent-300, #a5b4fc);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(148, 163, 184, 0.3);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 
 .goal-card.selected {
-  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-  border-color: var(--accent-500, #6366f1);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  background: rgba(99, 102, 241, 0.03);
+  border-color: rgba(99, 102, 241, 0.3);
 }
 
-/* 复选框 */
+/* 复选框 (圆形微发光) */
 .goal-checkbox {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.25rem;
+  height: 1.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-primary, white);
-  border: 2px solid var(--border-color, #cbd5e1);
   border-radius: 0.375rem;
-  color: white;
+  border: 1.5px solid #cbd5e1;
+  background: transparent;
   flex-shrink: 0;
   margin-top: 0.125rem;
   transition: all 0.2s ease;
 }
 
+.check-icon {
+  color: white;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 .goal-card:hover .goal-checkbox {
-  border-color: var(--accent-300, #a5b4fc);
+  border-color: #94a3b8;
 }
 
 .goal-card.selected .goal-checkbox {
-  background: var(--accent-500, #6366f1);
-  border-color: var(--accent-500, #6366f1);
+  background: #6366f1;
+  border-color: #6366f1;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+}
+
+.goal-card.selected .check-icon {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* 内容区 */
 .goal-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .goal-name {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
-  margin-bottom: 0.25rem;
+  color: #1e293b;
   transition: color 0.2s ease;
 }
 
 .goal-card.selected .goal-name {
-  color: var(--accent-700, #4338ca);
+  color: #4338ca;
 }
 
 .goal-desc {
   font-size: 0.75rem;
-  color: var(--text-muted, #94a3b8);
+  color: #64748b;
   line-height: 1.4;
-}
-
-.goal-card.selected .goal-desc {
-  color: var(--accent-600, #4f46e5);
-}
-
-/* 指示器 */
-.goal-indicator {
-  width: 1.75rem;
-  height: 1.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted, #cbd5e1);
-  opacity: 0;
-  transform: scale(0.8);
-  transition: all 0.2s ease;
-}
-
-.goal-card:hover .goal-indicator:not(.is-selected) {
-  opacity: 0.5;
-  transform: scale(1);
-}
-
-.goal-indicator.is-selected {
-  opacity: 1;
-  transform: scale(1);
-  color: var(--accent-500, #6366f1);
-}
-
-/* 选中摘要 */
-.selection-summary {
-  margin-top: 1rem;
-  padding: 0.875rem 1rem;
-  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-  border: 1px solid var(--accent-200, #c7d2fe);
-  border-radius: 0.75rem;
-  animation: slide-up 0.3s ease;
-}
-
-@keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--accent-700, #4338ca);
-  margin-bottom: 0.625rem;
-}
-
-.summary-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-}
-
-.summary-tag {
-  padding: 0.25rem 0.625rem;
-  background: white;
-  border: 1px solid var(--accent-300, #a5b4fc);
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--accent-700, #4338ca);
-}
-
-/* 动画 */
-.check-enter-active,
-.check-leave-active {
-  transition: all 0.2s ease;
-}
-
-.check-enter-from,
-.check-leave-to {
-  opacity: 0;
-  transform: scale(0.5);
-}
-
-.fade-up-enter-active {
-  transition: all 0.3s ease;
-}
-
-.fade-up-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
 }
 
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
-  .header-icon {
-    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-    color: #60a5fa;
+  .selector-title {
+    color: #f1f5f9;
   }
   
   .optional-badge {
-    background: #334155;
-    color: #64748b;
+    background: #1e293b;
+    color: #94a3b8;
   }
   
   .goal-card {
-    background: #0f172a;
-    border-color: #334155;
+    background: rgba(30, 41, 59, 0.4);
+    border-color: rgba(51, 65, 85, 0.6);
   }
   
   .goal-card:hover {
-    background: #1e293b;
-    border-color: #4f46e5;
+    background: rgba(30, 41, 59, 0.8);
+    border-color: rgba(71, 85, 105, 0.8);
   }
   
   .goal-card.selected {
-    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
-    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.4);
   }
   
   .goal-checkbox {
-    background: #1e293b;
     border-color: #475569;
   }
   
+  .goal-card:hover .goal-checkbox {
+    border-color: #64748b;
+  }
+  
   .goal-card.selected .goal-checkbox {
-    background: #4f46e5;
-    border-color: #4f46e5;
+    background: #6366f1;
+    border-color: #6366f1;
   }
   
   .goal-name {
@@ -355,38 +218,11 @@ function getGoalName(goalId: string): string {
   }
   
   .goal-card.selected .goal-name {
-    color: #a5b4fc;
+    color: #c7d2fe;
   }
   
   .goal-desc {
-    color: #64748b;
-  }
-  
-  .goal-card.selected .goal-desc {
-    color: #818cf8;
-  }
-  
-  .goal-indicator {
-    color: #475569;
-  }
-  
-  .goal-indicator.is-selected {
-    color: #6366f1;
-  }
-  
-  .selection-summary {
-    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
-    border-color: #4f46e5;
-  }
-  
-  .summary-header {
-    color: #a5b4fc;
-  }
-  
-  .summary-tag {
-    background: #0f172a;
-    border-color: #4f46e5;
-    color: #a5b4fc;
+    color: #94a3b8;
   }
 }
 </style>

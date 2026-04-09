@@ -3,22 +3,30 @@
     <!-- 面板头部 -->
     <div class="panel-header">
       <div class="header-info">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-        </svg>
-        <span>参数覆盖</span>
+        <div class="header-icon">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+        </div>
+        <div class="header-text">
+          <span class="header-title">参数覆盖</span>
+          <span class="header-desc">按需接管系统推荐参数</span>
+        </div>
       </div>
-      <button 
-        v-if="hasOverrides"
-        type="button"
-        class="reset-btn" 
-        @click="clearAllOverrides"
-      >
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        重置所有
-      </button>
+      <div class="header-actions">
+        <span v-if="hasOverrides" class="override-count">{{ overrideCount }} 项覆盖</span>
+        <button 
+          v-if="hasOverrides"
+          type="button"
+          class="reset-btn" 
+          @click="clearAllOverrides"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          重置所有
+        </button>
+      </div>
     </div>
     
     <!-- 参数列表 -->
@@ -236,8 +244,10 @@ function adjustNumber(field: any, delta: number) {
 
 <style scoped>
 .expert-panel {
-  padding: 1.25rem;
-  background: var(--bg-primary, white);
+  padding: 1rem 1.1rem 1.15rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0) 42%),
+    var(--bg-primary, white);
   border-top: 1px solid var(--border-color, #e2e8f0);
 }
 
@@ -247,19 +257,57 @@ function adjustNumber(field: any, delta: number) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1rem;
+  padding: 0.25rem 0.2rem 0.8rem;
+  border-bottom: 1px dashed var(--border-color, #e2e8f0);
 }
 
 .header-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
+}
+
+.header-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--idp-radius-subcard, 0.78rem);
+  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+  color: #6d28d9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.header-title {
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--text-primary, #1e293b);
+}
+
+.header-desc {
+  font-size: 0.75rem;
   color: var(--text-secondary, #64748b);
 }
 
-.header-info svg {
-  color: var(--accent-500, #6366f1);
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.override-count {
+  font-size: 0.75rem;
+  color: var(--accent-700, #4338ca);
+  background: var(--accent-50, #eef2ff);
+  border: 1px solid var(--accent-200, #c7d2fe);
+  border-radius: var(--idp-radius-pill, 9999px);
+  padding: 0.2rem 0.55rem;
 }
 
 .reset-btn {
@@ -272,7 +320,7 @@ function adjustNumber(field: any, delta: number) {
   color: var(--text-muted, #94a3b8);
   background: var(--bg-canvas, #f1f5f9);
   border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.375rem;
+  border-radius: var(--idp-radius-subcard, 0.78rem);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -285,31 +333,41 @@ function adjustNumber(field: any, delta: number) {
 
 /* 参数列表 */
 .params-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem 0.75rem;
+}
+
+@media (max-width: 860px) {
+  .params-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .param-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.875rem 1rem;
-  background: var(--bg-canvas, #f8fafc);
+  padding: 0.9rem 1rem;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.94) 0%, rgba(255, 255, 255, 0.97) 100%);
   border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.625rem;
+  border-radius: var(--idp-radius-subcard, 0.78rem);
   transition: all 0.2s ease;
+  box-shadow: var(--idp-shadow-soft, 0 8px 20px rgba(15, 23, 42, 0.06));
 }
 
 .param-item:hover {
   background: var(--bg-primary, white);
   border-color: var(--accent-200, #c7d2fe);
+  box-shadow: var(--idp-shadow-hover, 0 16px 30px rgba(99, 102, 241, 0.14));
+  transform: translateY(-1px);
 }
 
 .param-item.is-overridden {
   background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
   border-color: #fbbf24;
+  box-shadow: 0 10px 20px rgba(245, 158, 11, 0.14);
 }
 
 /* 参数信息 */
@@ -349,7 +407,7 @@ function adjustNumber(field: any, delta: number) {
   font-weight: 600;
   color: #b45309;
   background: #fef3c7;
-  border-radius: 9999px;
+  border-radius: var(--idp-radius-pill, 9999px);
 }
 
 .revert-btn {
@@ -549,7 +607,8 @@ function adjustNumber(field: any, delta: number) {
   padding: 0.875rem 1rem;
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
   border: 1px solid #fbbf24;
-  border-radius: 0.625rem;
+  border-radius: 0.78rem;
+  box-shadow: 0 10px 20px rgba(245, 158, 11, 0.14);
 }
 
 .warning-icon {
@@ -597,12 +656,33 @@ function adjustNumber(field: any, delta: number) {
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .expert-panel {
-    background: #1e293b;
+    background:
+      radial-gradient(circle at 100% 0%, rgba(79, 70, 229, 0.2) 0%, rgba(79, 70, 229, 0) 42%),
+      #1e293b;
     border-color: #334155;
   }
-  
-  .header-info {
+
+  .panel-header {
+    border-color: #334155;
+  }
+
+  .header-icon {
+    background: linear-gradient(135deg, #312e81 0%, #4338ca 100%);
+    color: #c7d2fe;
+  }
+
+  .header-title {
+    color: #f1f5f9;
+  }
+
+  .header-desc {
     color: #94a3b8;
+  }
+
+  .override-count {
+    background: rgba(67, 56, 202, 0.3);
+    border-color: rgba(99, 102, 241, 0.5);
+    color: #c7d2fe;
   }
   
   .reset-btn {
@@ -618,7 +698,7 @@ function adjustNumber(field: any, delta: number) {
   }
   
   .param-item {
-    background: #0f172a;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
     border-color: #334155;
   }
   

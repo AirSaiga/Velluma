@@ -1,8 +1,8 @@
 <template>
   <div class="intent-selector">
     <div class="selector-header">
-      <h3 class="selector-title">这一章要什么效果？</h3>
-      <p class="selector-subtitle">选择 1-2 个创作意图，系统将智能匹配最佳生成策略</p>
+      <h3 class="selector-title">核心意图</h3>
+      <span class="required-badge">必选 1-2 项</span>
     </div>
     
     <div class="intent-grid">
@@ -23,36 +23,39 @@
           @mouseenter="showTooltip(intent.id, $event)"
           @mouseleave="hideTooltip"
         >
-          <!-- 选中指示器 -->
-          <div class="selection-indicator">
-            <svg v-if="selectedIntents.includes(intent.id)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-            </svg>
+          <!-- 左侧图标 -->
+          <div class="intent-icon-box">
+            <Component :is="getIntentIcon(intent.id)" class="w-5 h-5" />
           </div>
           
-          <!-- SVG 图标 -->
-          <div class="intent-icon">
-            <Component :is="getIntentIcon(intent.id)" class="w-6 h-6" />
-          </div>
-          
-          <!-- 文字内容 -->
+          <!-- 中间文字 -->
           <div class="intent-content">
             <div class="intent-name">{{ intent.display_name }}</div>
             <div class="intent-desc">{{ intent.short_desc }}</div>
           </div>
+
+          <!-- 右侧勾选圈 -->
+          <div class="intent-check-ring">
+            <svg class="w-3.5 h-3.5 check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
         </button>
         
-        <!-- 自定义 Tooltip -->
+        <!-- 精美 Tooltip -->
         <Transition name="tooltip-fade">
           <div 
             v-if="tooltipVisible && tooltipIntentId === intent.id"
             class="intent-tooltip"
+            :class="{ 'is-bottom': tooltipPlacement === 'bottom' }"
             :style="tooltipStyle"
           >
-            <div class="tooltip-title">{{ intent.display_name }}</div>
+            <div class="tooltip-header">
+              <div class="tooltip-title">{{ intent.display_name }}</div>
+            </div>
             <div class="tooltip-desc">{{ intent.detailed_desc }}</div>
             <div class="tooltip-section">
-              <div class="tooltip-section-title">适用场景：</div>
+              <div class="tooltip-section-title">适用场景</div>
               <ul class="tooltip-list">
                 <li v-for="(scenario, idx) in intent.applicable_scenarios" :key="idx">
                   {{ scenario }}
@@ -60,96 +63,70 @@
               </ul>
             </div>
             <div class="tooltip-section">
-              <div class="tooltip-section-title">风格建议：</div>
+              <div class="tooltip-section-title">风格建议</div>
               <div class="tooltip-style">{{ intent.style_recommendation }}</div>
             </div>
           </div>
         </Transition>
       </div>
     </div>
-    
-    <!-- 已选意图展示 -->
-    <Transition name="slide-down">
-      <div v-if="selectedIntents.length > 0" class="selection-bar">
-        <div class="bar-content">
-          <span class="bar-label">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            已选择 {{ selectedIntents.length }}/2
-          </span>
-          <div class="selected-chips">
-            <span 
-              v-for="intent in selectedIntentTemplates" 
-              :key="intent.id"
-              class="intent-chip"
-            >
-              <Component :is="getIntentIcon(intent.id)" class="w-3.5 h-3.5" />
-              <span class="chip-name">{{ intent.display_name }}</span>
-              <button 
-                type="button"
-                class="chip-remove"
-                @click.stop="toggleIntent(intent.id)"
-                title="移除"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </span>
-          </div>
-          <button 
-            v-if="selectedIntents.length > 0"
-            type="button"
-            class="clear-btn"
-            @click="clearAll"
-          >
-            清空
-          </button>
-        </div>
-        <div v-if="selectedIntents.length === 2" class="combo-hint">
+
+    <!-- 组合意图提示 (优雅 Inline Alert) -->
+    <Transition name="fade-up">
+      <div v-if="selectedIntents.length === 2" class="combo-alert">
+        <div class="combo-icon">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          组合意图：系统将智能融合两个意图的生成策略
         </div>
+        <div class="combo-text">已开启组合意图，系统将智能融合这两种生成策略。</div>
       </div>
     </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { h, ref, reactive } from 'vue'
+import { h, ref, reactive, nextTick } from 'vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
 
 // Tooltip 状态
 const tooltipVisible = ref(false)
 const tooltipIntentId = ref<string>('')
+const tooltipPlacement = ref<'top' | 'bottom'>('top')
 const tooltipStyle = reactive({
   position: 'fixed' as const,
   top: '0px',
   left: '0px'
 })
 
-function showTooltip(intentId: string, event: MouseEvent) {
+async function showTooltip(intentId: string, event: MouseEvent) {
   tooltipIntentId.value = intentId
   tooltipVisible.value = true
   
-  // 计算 tooltip 位置
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
-  
-  // 默认显示在卡片上方
-  let top = rect.top - 8
-  let left = rect.left + rect.width / 2
-  
-  // 如果上方空间不足，显示在下方
-  if (rect.top < 300) {
-    top = rect.bottom + 8
-  }
-  
-  tooltipStyle.top = `${top}px`
-  tooltipStyle.left = `${left}px`
+
+  await nextTick()
+
+  const tooltipEl = document.querySelector('.intent-tooltip') as HTMLElement | null
+  const tooltipWidth = tooltipEl?.offsetWidth ?? 300
+  const tooltipHeight = tooltipEl?.offsetHeight ?? 240
+  const gap = 16
+  const viewportPadding = 16
+  const viewportWidth = window.innerWidth
+
+  const centerX = rect.left + rect.width / 2
+  const minCenter = viewportPadding + tooltipWidth / 2
+  const maxCenter = viewportWidth - viewportPadding - tooltipWidth / 2
+  const left = Math.min(Math.max(centerX, minCenter), maxCenter)
+
+  const topWhenAbove = rect.top - tooltipHeight - gap
+  const canShowAbove = topWhenAbove >= viewportPadding
+  const top = canShowAbove ? topWhenAbove : rect.bottom + gap
+
+  tooltipPlacement.value = canShowAbove ? 'top' : 'bottom'
+  tooltipStyle.top = `${Math.round(top)}px`
+  tooltipStyle.left = `${Math.round(left)}px`
 }
 
 function hideTooltip() {
@@ -160,101 +137,91 @@ function hideTooltip() {
 // 引入 SVG 图标组件
 const icons: Record<string, any> = {}
 
-// 推进主线 - 向上火箭/箭头
+// 推进主线
 icons.advance_mainline = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
     ])
   }
 }
-
-// 塑造人物 - 用户轮廓
+// 塑造人物
 icons.character_development = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' })
     ])
   }
 }
-
-// 营造氛围 - 云雾
+// 营造氛围
 icons.atmosphere_building = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z' })
     ])
   }
 }
-
-// 制造冲突 - 闪电/交锋
+// 制造冲突
 icons.build_conflict = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
     ])
   }
 }
-
-// 回收伏笔 - 链接/链条
+// 回收伏笔
 icons.close_hooks = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' })
     ])
   }
 }
-
-// 展开世界观 - 地球/网格
+// 展开世界观
 icons.worldbuilding = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' })
     ])
   }
 }
-
-// 情感升温 - 心形
+// 情感升温
 icons.emotional_warming = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z' })
     ])
   }
 }
-
-// 对话戏 - 对话框
+// 对话戏
 icons.dialogue_scene = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' })
     ])
   }
 }
-
-// 大场面 - 聚光灯/舞台
+// 大场面
 icons.big_scene = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' })
     ])
   }
 }
-
-// 过渡章节 - 桥梁/连接
+// 过渡章节
 icons.transition_chapter = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' })
     ])
   }
 }
-
-// 悬念结尾 - 问号/悬念
+// 悬念结尾
 icons.suspense_ending = {
   render() {
-    return h('svg', { class: 'w-6 h-6', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '1.5', d: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' })
+    return h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' })
     ])
   }
 }
@@ -262,7 +229,6 @@ icons.suspense_ending = {
 const {
   intentTemplates,
   selectedIntents,
-  selectedIntentTemplates,
   canSelectMore,
   toggleIntent
 } = useIntentDrivenConfig()
@@ -270,496 +236,419 @@ const {
 function getIntentIcon(intentId: string) {
   return icons[intentId] || icons.advance_mainline
 }
-
-function clearAll() {
-  selectedIntents.value.forEach(id => toggleIntent(id))
-}
 </script>
 
 <style scoped>
 .intent-selector {
-  padding: 1.25rem;
-  padding-bottom: 2rem; /* 给底部栏留出足够空间 */
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
+/* 标题区 */
 .selector-header {
-  text-align: center;
-  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .selector-title {
   font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-primary, #1e293b);
-  margin-bottom: 0.375rem;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+  letter-spacing: -0.01em;
+  margin: 0;
 }
 
-.selector-subtitle {
-  font-size: 0.8125rem;
-  color: var(--text-secondary, #64748b);
+.required-badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
-/* 意图网格 */
+/* 网格布局 */
 .intent-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  position: relative;
+  grid-template-columns: repeat(1, 1fr);
+  gap: 0.875rem;
 }
 
-/* 意图卡片包裹器 */
+@media (min-width: 640px) {
+  .intent-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 卡片样式：无边框微发光风格 */
 .intent-card-wrapper {
   position: relative;
-  display: flex;
 }
 
-@media (min-width: 480px) {
-  .intent-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 768px) {
-  .intent-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 1024px) {
-  .intent-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* 意图卡片 */
 .intent-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 1.25rem 0.875rem;
-  background: var(--bg-canvas, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.875rem;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  text-align: center;
   width: 100%;
-  min-height: 140px;
-  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 1rem;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.02);
 }
 
 .intent-card:hover:not(:disabled) {
-  background: var(--bg-primary, white);
-  border-color: var(--accent-300, #a5b4fc);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(165, 180, 252, 0.6);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.08), 0 2px 8px rgba(99, 102, 241, 0.04);
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.12);
 }
 
 .intent-card.selected {
-  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-  border-color: var(--accent-500, #6366f1);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2), 0 8px 20px rgba(99, 102, 241, 0.15);
+  background: rgba(99, 102, 241, 0.04);
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1, 0 8px 24px rgba(99, 102, 241, 0.12);
 }
 
 .intent-card.disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
-  filter: grayscale(0.5);
+  filter: grayscale(0.8);
 }
 
-/* 选中指示器 */
-.selection-indicator {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 1.25rem;
-  height: 1.25rem;
+/* 图标区 */
+.intent-icon-box {
+  width: 2.5rem;
+  height: 2.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-500, #6366f1);
-  color: white;
-  border-radius: 50%;
-  opacity: 0;
-  transform: scale(0.5);
-  transition: all 0.2s ease;
+  border-radius: 0.625rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  color: #64748b;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 2px 4px rgba(15, 23, 42, 0.04);
 }
 
-.intent-card.selected .selection-indicator {
-  opacity: 1;
-  transform: scale(1);
+.intent-card:hover:not(:disabled) .intent-icon-box {
+  color: #6366f1;
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.8), 0 4px 8px rgba(99, 102, 241, 0.15);
 }
 
-/* SVG 图标 */
-.intent-icon {
-  width: 3rem;
-  height: 3rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-500, #6366f1);
-  background: var(--bg-primary, white);
-  border-radius: 0.75rem;
-  border: 1px solid var(--border-color, #e2e8f0);
-  transition: all 0.2s ease;
-  margin-bottom: 0.625rem;
+.intent-card.selected .intent-icon-box {
+  color: #ffffff;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.2), 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
-.intent-card:hover:not(:disabled) .intent-icon {
-  background: var(--accent-50, #eef2ff);
-  border-color: var(--accent-200, #c7d2fe);
-  transform: scale(1.05);
-}
-
-.intent-card.selected .intent-icon {
-  background: white;
-  border-color: var(--accent-400, #818cf8);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
-}
-
-/* 文字内容 */
+/* 内容区 */
 .intent-content {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 0.25rem;
 }
 
 .intent-name {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
+  color: #1e293b;
   transition: color 0.2s ease;
 }
 
 .intent-card.selected .intent-name {
-  color: var(--accent-700, #4338ca);
+  color: #4338ca;
 }
 
 .intent-desc {
-  font-size: 0.6875rem;
-  color: var(--text-muted, #94a3b8);
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
+  font-size: 0.75rem;
+  color: #64748b;
+  white-space: nowrap;
   overflow: hidden;
-  max-width: 100%;
+  text-overflow: ellipsis;
 }
 
-/* 选中栏 - 修复边界问题 */
-.selection-bar {
-  margin-top: 1.5rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-  border: 1px solid var(--accent-200, #c7d2fe);
-  border-radius: 0.75rem;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
-}
-
-.bar-content {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.bar-label {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--accent-700, #4338ca);
-  flex-shrink: 0;
-}
-
-.selected-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  flex: 1;
-}
-
-.intent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  background: white;
-  border: 1px solid var(--accent-300, #a5b4fc);
-  border-radius: 9999px;
-  font-size: 0.8125rem;
-  color: var(--accent-700, #4338ca);
-  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.1);
-  animation: chip-in 0.3s ease;
-}
-
-@keyframes chip-in {
-  from {
-    opacity: 0;
-    transform: scale(0.9) translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.chip-icon {
-  color: var(--accent-500, #6366f1);
-}
-
-.chip-name {
-  font-weight: 500;
-}
-
-.chip-remove {
+/* 勾选圈 */
+.intent-check-ring {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: 1.5px solid #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  margin-left: 0.125rem;
-  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   background: transparent;
-  border: none;
-  border-radius: 50%;
-  color: var(--accent-400, #818cf8);
-  cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.chip-remove:hover {
-  background: var(--accent-100, #e0e7ff);
-  color: var(--accent-600, #4f46e5);
+.check-icon {
+  color: white;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.clear-btn {
-  margin-left: auto;
-  padding: 0.25rem 0.625rem;
-  font-size: 0.75rem;
-  color: var(--accent-600, #4f46e5);
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
+.intent-card.selected .intent-check-ring {
+  border-color: #6366f1;
+  background: #6366f1;
 }
 
-.clear-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
+.intent-card.selected .check-icon {
+  opacity: 1;
+  transform: scale(1);
 }
 
-.combo-hint {
+/* 组合提示 */
+.combo-alert {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--accent-300, #a5b4fc);
-  font-size: 0.75rem;
-  color: var(--accent-600, #4f46e5);
+  gap: 0.625rem;
+  padding: 0.875rem 1.25rem;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 0.75rem;
+  color: #4f46e5;
+  font-size: 0.8125rem;
+  font-weight: 500;
 }
 
-.combo-hint svg {
-  flex-shrink: 0;
+.combo-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: white;
+  border-radius: 0.375rem;
+  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.1);
 }
 
-/* Tooltip 样式 */
+/* Tooltip - 优雅气泡 */
 .intent-tooltip {
   position: fixed;
   z-index: 9999;
-  width: 280px;
-  padding: 0.875rem;
-  background: white;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.75rem;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08);
+  width: 320px;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 1.25rem;
+  box-shadow: 0 20px 40px -8px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.05);
   pointer-events: none;
   transform: translateX(-50%);
-  font-size: 0.8125rem;
-  line-height: 1.5;
 }
 
-.intent-tooltip::before {
+.intent-tooltip::after {
   content: '';
   position: absolute;
   bottom: -6px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) rotate(45deg);
   width: 12px;
   height: 12px;
-  background: white;
-  border-right: 1px solid var(--border-color, #e2e8f0);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-  transform: translateX(-50%) rotate(45deg);
+  background: rgba(255, 255, 255, 0.95);
+  border-right: 1px solid rgba(15, 23, 42, 0.05);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
 }
 
-.tooltip-title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--text-primary, #1e293b);
+.intent-tooltip.is-bottom::after {
+  top: -6px;
+  bottom: auto;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(15, 23, 42, 0.05);
+  border-top: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.tooltip-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
 
+.tooltip-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
 .tooltip-desc {
-  color: var(--text-secondary, #64748b);
-  margin-bottom: 0.75rem;
-  line-height: 1.6;
+  font-size: 0.8125rem;
+  color: #475569;
+  line-height: 1.5;
 }
 
 .tooltip-section {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 .tooltip-section-title {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--accent-600, #4f46e5);
-  margin-bottom: 0.375rem;
+  color: #6366f1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
 }
 
 .tooltip-list {
   list-style: none;
   padding: 0;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
 }
 
 .tooltip-list li {
   position: relative;
-  padding-left: 0.875rem;
-  color: var(--text-secondary, #64748b);
-  margin-bottom: 0.25rem;
+  padding-left: 1rem;
+  font-size: 0.8125rem;
+  color: #475569;
 }
 
 .tooltip-list li::before {
-  content: '•';
+  content: '';
   position: absolute;
   left: 0;
-  color: var(--accent-500, #6366f1);
-  font-weight: bold;
+  top: 0.4rem;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #818cf8;
 }
 
 .tooltip-style {
-  color: var(--text-secondary, #64748b);
+  font-size: 0.8125rem;
+  color: #475569;
   font-style: italic;
+  background: #f8fafc;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  margin-top: 0.5rem;
 }
 
-/* Tooltip 动画 */
-.tooltip-fade-enter-active {
-  transition: all 0.2s ease;
+/* 动画 */
+.tooltip-fade-enter-active,
+.tooltip-fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.tooltip-fade-enter-from {
+.tooltip-fade-enter-from,
+.tooltip-fade-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(4px);
+  transform: translateX(-50%) translateY(8px) scale(0.95);
 }
 
-/* 深色模式 */
-.slide-down-enter-active {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+.fade-up-enter-active,
+.fade-up-leave-active {
+  transition: all 0.3s ease;
 }
 
-.slide-down-enter-from {
+.fade-up-enter-from,
+.fade-up-leave-to {
   opacity: 0;
-  transform: translateY(-12px);
+  transform: translateY(10px);
 }
 
-/* 深色模式 */
+/* 深色模式适配 */
 @media (prefers-color-scheme: dark) {
-  .intent-card {
-    background: #0f172a;
-    border-color: #334155;
+  .selector-title {
+    color: #f1f5f9;
   }
-  
-  .intent-card:hover:not(:disabled) {
-    background: #1e293b;
-    border-color: #4f46e5;
-  }
-  
-  .intent-card.selected {
-    background: linear-gradient(135deg, #312e81 0%, #1e1b4b 100%);
-    border-color: #6366f1;
-  }
-  
-  .intent-icon {
-    background: #1e293b;
-    border-color: #334155;
-    color: #818cf8;
-  }
-  
-  .intent-card.selected .intent-icon {
-    background: #0f172a;
-    border-color: #4f46e5;
+  .required-badge {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.3);
     color: #a5b4fc;
   }
-  
+  .intent-card {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(51, 65, 85, 0.8);
+  }
+  .intent-card:hover:not(:disabled) {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(99, 102, 241, 0.5);
+  }
+  .intent-card.selected {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: #6366f1;
+    box-shadow: 0 0 0 1px #6366f1, 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+  .intent-icon-box {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    color: #94a3b8;
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  }
+  .intent-card:hover:not(:disabled) .intent-icon-box {
+    background: linear-gradient(135deg, #312e81 0%, #1e1b4b 100%);
+    color: #a5b4fc;
+  }
+  .intent-card.selected .intent-icon-box {
+    background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+    color: #ffffff;
+  }
   .intent-name {
     color: #f1f5f9;
   }
-  
   .intent-card.selected .intent-name {
+    color: #c7d2fe;
+  }
+  .intent-desc {
+    color: #94a3b8;
+  }
+  .intent-check-ring {
+    border-color: #475569;
+  }
+  .combo-alert {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
     color: #a5b4fc;
   }
-  
-  .selection-bar {
-    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
-    border-color: #4f46e5;
+  .combo-icon {
+    background: #1e293b;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
-  
-  .bar-label {
-    color: #a5b4fc;
-  }
-  
-  .intent-chip {
-    background: #0f172a;
-    border-color: #4f46e5;
-    color: #a5b4fc;
-  }
-  
-  .combo-hint {
-    border-color: #4f46e5;
-    color: #818cf8;
-  }
-  
-  /* Tooltip 深色模式 */
   .intent-tooltip {
-    background: #1e293b;
-    border-color: #475569;
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4), 0 4px 8px rgba(0, 0, 0, 0.3);
+    background: rgba(30, 41, 59, 0.95);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
-  
-  .intent-tooltip::before {
-    background: #1e293b;
-    border-color: #475569;
+  .intent-tooltip::after {
+    background: rgba(30, 41, 59, 0.95);
+    border-color: rgba(255, 255, 255, 0.1);
   }
-  
   .tooltip-title {
     color: #f1f5f9;
   }
-  
-  .tooltip-desc,
-  .tooltip-list li,
-  .tooltip-style {
-    color: #94a3b8;
+  .tooltip-desc {
+    color: #cbd5e1;
   }
-  
   .tooltip-section {
-    border-color: #475569;
+    border-color: rgba(71, 85, 105, 0.8);
   }
-  
   .tooltip-section-title {
     color: #818cf8;
   }
-  
-  .tooltip-list li::before {
-    color: #6366f1;
+  .tooltip-list li {
+    color: #cbd5e1;
+  }
+  .tooltip-style {
+    background: #0f172a;
+    color: #cbd5e1;
   }
 }
 </style>

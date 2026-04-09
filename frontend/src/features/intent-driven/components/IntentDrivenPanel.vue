@@ -1,242 +1,188 @@
 <template>
-  <div class="intent-driven-panel">
-    <!-- 头部沉浸区 -->
-    <div class="panel-hero">
-      <div class="hero-badge">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <span>AI 智能创作</span>
+  <div class="intent-panel-layout">
+    <!-- 左侧导航栏 -->
+    <aside class="panel-sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <h2 class="brand-title">AI 智能创作</h2>
       </div>
-      <h2 class="hero-title">让 AI 理解你的创作意图</h2>
-      <p class="hero-subtitle">选择创作方向，系统将自动优化生成策略</p>
-    </div>
 
-    <!-- 主内容区 -->
-    <div class="panel-content">
-      <!-- 意图选择区 -->
-      <section class="content-section">
-        <IntentSelector />
-      </section>
-      
-      <!-- 章节目标区（可折叠） -->
-      <section class="content-section">
-        <button 
-          class="section-toggle" 
-          :class="{ 'is-open': showGoals }"
-          @click="showGoals = !showGoals"
+      <nav class="sidebar-nav">
+        <button
+          v-for="(page, idx) in workflowPages"
+          :key="page.key"
+          type="button"
+          class="nav-node"
+          :class="{
+            'is-active': currentWorkflowPage === page.key,
+            'is-complete': isWorkflowPageComplete(page.key),
+            'is-disabled': !canSwitchWorkflowPage(page.key)
+          }"
+          :disabled="!canSwitchWorkflowPage(page.key)"
+          @click="setWorkflowPage(page.key)"
         >
-          <div class="toggle-icon">
-            <svg class="w-4 h-4" :class="{ 'rotate-180': showGoals }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <span class="toggle-label">章节目标</span>
-          <span class="toggle-badge">可选</span>
-          <div class="toggle-hint">设定本章要达成的具体目标</div>
-        </button>
-        <Transition name="expand">
-          <div v-show="showGoals" class="section-body">
-            <GoalSelector />
-          </div>
-        </Transition>
-      </section>
-      
-      <!-- 推荐方案区 -->
-      <Transition name="fade-up">
-        <section v-if="hasSelection" class="content-section">
-          <div class="section-header">
-            <div class="section-icon recommended">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          <div class="node-indicator">
+            <div class="node-dot">
+              <svg v-if="isWorkflowPageComplete(page.key) && currentWorkflowPage !== page.key" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
               </svg>
+              <span v-else>{{ idx + 1 }}</span>
             </div>
-            <div class="section-info">
-              <h4 class="section-title">推荐方案</h4>
-              <p class="section-desc">基于您的意图匹配的最佳生成策略</p>
-            </div>
-          </div>
-          <div class="plans-grid">
-            <RecommendedPlanCard
-              v-for="plan in recommendedPlans"
-              :key="plan.plan_id"
-              :plan="plan"
-              :is-selected="selectedPlanType === plan.plan_type"
-              @select="selectPlanType"
-            />
-          </div>
-        </section>
-      </Transition>
-      
-      <!-- 基础可调项 -->
-      <Transition name="fade-up">
-        <section v-if="hasSelection" class="content-section">
-          <div class="section-header">
-            <div class="section-icon adjustments">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-              </svg>
-            </div>
-            <div class="section-info">
-              <h4 class="section-title">基础调整</h4>
-              <p class="section-desc">微调生成参数以获得理想效果</p>
-            </div>
+            <div class="node-line" v-if="idx < workflowPages.length - 1"></div>
           </div>
           
-          <div class="adjustments-grid">
-            <div class="adjustment-card">
-              <label class="adjustment-label">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                本章篇幅
-              </label>
-              <div class="word-count-control">
-                <button 
-                  class="count-btn" 
-                  @click="wordCount = Math.max(500, wordCount - 500)"
-                  :disabled="wordCount <= 500"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
-                  </svg>
-                </button>
-                <div class="count-display">
-                  <span class="count-value">{{ wordCount.toLocaleString() }}</span>
-                  <span class="count-unit">字</span>
-                </div>
-                <button 
-                  class="count-btn" 
-                  @click="wordCount = Math.min(10000, wordCount + 500)"
-                  :disabled="wordCount >= 10000"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                </button>
-              </div>
+          <div class="node-content">
+            <div class="node-header">
+              <div class="node-title">{{ page.label }}</div>
+              <div class="node-badge" v-if="page.required">必选</div>
             </div>
             
-            <div class="adjustment-card full-width">
-              <label class="adjustment-label">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                附加说明
-              </label>
-              <textarea 
-                v-model="authorIntent"
-                class="intent-textarea"
-                placeholder="补充个性化要求，如：增加悬疑感、重点描写环境、强化人物对话..."
-                rows="3"
+            <!-- 动态摘要展示 -->
+            <div class="node-summary-wrapper">
+              <Transition name="fade-slide" mode="out-in">
+                <div v-if="page.key === 'setup' && hasSelection" class="node-summary">
+                  已选 {{ selectedIntents.length }} 意图, {{ selectedGoals.length }} 目标
+                </div>
+                <div v-else-if="page.key === 'plan' && selectedPlanType" class="node-summary">
+                  {{ getPlanName(selectedPlanType) }}
+                </div>
+                <div v-else-if="page.key === 'expert' && overrideCount > 0" class="node-summary">
+                  {{ overrideCount }} 项参数已覆盖
+                </div>
+                <div v-else class="node-desc">{{ page.desc }}</div>
+              </Transition>
+            </div>
+          </div>
+        </button>
+      </nav>
+
+      <!-- 左侧底部操作栏 -->
+      <div class="sidebar-footer">
+        <button
+          class="sidebar-action-btn ghost"
+          :disabled="!canGenerate"
+          @click="handleSave"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+          </svg>
+          保存设置
+        </button>
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <main class="panel-main">
+      <div class="main-scroll-area">
+        <Transition name="fade-slide-up" mode="out-in">
+          
+          <!-- 1. 意图与目标 -->
+          <section v-if="currentWorkflowPage === 'setup'" key="setup" class="workflow-section">
+            <div class="section-header">
+              <h1 class="section-title">设定创作基调</h1>
+              <p class="section-desc">选择您的核心意图与具体目标，AI 将据此规划最合适的生成策略。</p>
+            </div>
+            
+            <div class="setup-content-stack">
+              <IntentSelector />
+              <div class="content-divider"></div>
+              <GoalSelector />
+            </div>
+          </section>
+
+          <!-- 2. 推荐方案 -->
+          <section v-else-if="currentWorkflowPage === 'plan'" key="plan" class="workflow-section">
+            <div class="section-header">
+              <h1 class="section-title">推荐生成方案</h1>
+              <p class="section-desc">基于您的设定，我们为您准备了以下生成策略。</p>
+            </div>
+            
+            <div v-if="!hasSelection" class="empty-state">
+              <div class="empty-icon">⚠️</div>
+              <p>请先返回上一步，至少选择 1 个创作意图。</p>
+            </div>
+            <div v-else class="plans-grid">
+              <RecommendedPlanCard
+                v-for="plan in recommendedPlans"
+                :key="plan.plan_id"
+                :plan="plan"
+                :is-selected="selectedPlanType === plan.plan_type"
+                @select="selectPlanType"
               />
             </div>
-          </div>
-        </section>
-      </Transition>
-      
-      <!-- 专家模式折叠区 -->
-      <Transition name="fade-up">
-        <section v-if="hasSelection" class="content-section expert-section">
-          <button 
-            class="expert-toggle" 
-            :class="{ 'is-open': isExpertModeExpanded, 'has-overrides': hasOverrides }"
-            @click="toggleExpertMode"
-          >
-            <div class="toggle-main">
-              <div class="toggle-icon expert">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                </svg>
+          </section>
+
+          <!-- 3. 基础调整 -->
+          <section v-else-if="currentWorkflowPage === 'adjust'" key="adjust" class="workflow-section">
+            <div class="section-header">
+              <h1 class="section-title">基础调整</h1>
+              <p class="section-desc">微调篇幅与补充说明，确保内容完全符合您的要求。</p>
+            </div>
+            
+            <div class="adjustments-stack">
+              <div class="control-card">
+                <div class="control-header">
+                  <div class="control-icon-box">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  </div>
+                  <span class="control-title">本章篇幅</span>
+                </div>
+                <div class="word-count-control">
+                  <button class="count-btn" @click="wordCount = Math.max(500, wordCount - 500)" :disabled="wordCount <= 500">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" /></svg>
+                  </button>
+                  <div class="count-display">
+                    <span class="count-value">{{ wordCount.toLocaleString() }}</span>
+                    <span class="count-unit">字</span>
+                  </div>
+                  <button class="count-btn" @click="wordCount = Math.min(10000, wordCount + 500)" :disabled="wordCount >= 10000">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                  </button>
+                </div>
               </div>
-              <div class="toggle-info">
-                <span class="toggle-label">专家模式</span>
-                <span class="toggle-desc">高级参数手动调整</span>
+
+              <div class="control-card">
+                <div class="control-header">
+                  <div class="control-icon-box">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  </div>
+                  <span class="control-title">附加说明</span>
+                </div>
+                <textarea 
+                  v-model="authorIntent"
+                  class="sleek-textarea"
+                  placeholder="在此输入任何额外的提示，例如：增加悬疑感、强化反派气场..."
+                  rows="4"
+                ></textarea>
               </div>
             </div>
-            <div class="toggle-badges">
-              <span v-if="hasOverrides" class="override-badge">
-                {{ overrideCount }} 项已修改
-              </span>
-              <svg class="w-5 h-5 toggle-arrow" :class="{ 'rotate-180': isExpertModeExpanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
+          </section>
+
+          <!-- 4. 专家模式 -->
+          <section v-else-if="currentWorkflowPage === 'expert'" key="expert" class="workflow-section">
+            <div class="section-header">
+              <h1 class="section-title">专家控制中心</h1>
+              <p class="section-desc">深度介入 AI 的生成逻辑。仅建议有经验的创作者使用。</p>
             </div>
-          </button>
-          
-          <ExpertOverridePanel
-            :is-expanded="isExpertModeExpanded"
-            :recommended-policy="recommendedPlan?.policy || null"
-          />
-        </section>
-      </Transition>
-    </div>
-    
-    <!-- 底部操作栏 -->
-    <Transition name="slide-up">
-      <div v-if="hasSelection" class="panel-footer">
-        <div class="generation-preview">
-          <div class="preview-item">
-            <div class="preview-icon">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-              </svg>
+            
+            <div class="expert-panel-wrapper">
+              <ExpertOverridePanel
+                :is-expanded="true"
+                :recommended-policy="recommendedPlan?.policy || null"
+              />
             </div>
-            <div class="preview-info">
-              <span class="preview-label">{{ selectedIntents.length }} 个创作意图</span>
-              <span class="preview-value">已选择</span>
-            </div>
-          </div>
-          <div class="preview-divider"></div>
-          <div class="preview-item">
-            <div class="preview-icon time">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div class="preview-info">
-              <span class="preview-label">预计时间</span>
-              <span class="preview-value">{{ recommendedPlan?.estimated_time || '2-3 分钟' }}</span>
-            </div>
-          </div>
-          <div class="preview-divider"></div>
-          <div class="preview-item">
-            <div class="preview-icon words">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div class="preview-info">
-              <span class="preview-label">生成长度</span>
-              <span class="preview-value">{{ wordCount.toLocaleString() }} 字</span>
-            </div>
-          </div>
-        </div>
+          </section>
+        </Transition>
         
-        <div class="footer-actions">
-          <button
-            class="action-btn secondary"
-            :disabled="!canGenerate"
-            @click="handleSave"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-            </svg>
-            保存设置
-          </button>
-          <button
-            class="action-btn primary"
-            :disabled="!canGenerate"
-            @click="handleGenerate"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            开始生成
-          </button>
-        </div>
+        <!-- 底部留白 -->
+        <div class="bottom-spacer"></div>
+
       </div>
-    </Transition>
+    </main>
   </div>
 </template>
 
@@ -264,25 +210,79 @@ const emit = defineEmits<{
 
 const {
   selectedIntents,
+  selectedGoals,
   hasSelection,
   recommendedPlans,
   recommendedPlan,
   selectedPlanType,
-  hasOverrides,
   overrideCount,
-  isExpertModeExpanded,
   selectPlanType,
-  toggleExpertMode,
   buildPayload
 } = useIntentDrivenConfig()
 
-const showGoals = ref(false)
+type WorkflowPageKey = 'setup' | 'plan' | 'adjust' | 'expert'
+const workflowPages: Array<{ key: WorkflowPageKey; label: string; required: boolean; desc: string }> = [
+  { key: 'setup', label: '意图与目标', required: true, desc: '设定基调与方向' },
+  { key: 'plan', label: '推荐方案', required: true, desc: '选择最佳策略' },
+  { key: 'adjust', label: '基础调整', required: false, desc: '篇幅与细节补充' },
+  { key: 'expert', label: '专家模式', required: false, desc: '高级参数控制' }
+]
+
+const currentWorkflowPage = ref<WorkflowPageKey>('setup')
 const wordCount = ref(3000)
 const authorIntent = ref('')
 
 const canGenerate = computed(() => {
   return hasSelection.value && wordCount.value >= 500
 })
+
+const currentWorkflowIndex = computed(() => {
+  return workflowPages.findIndex(page => page.key === currentWorkflowPage.value)
+})
+
+const canGoWorkflowPrev = computed(() => currentWorkflowIndex.value > 0)
+
+const canProceedCurrentPage = computed(() => {
+  if (currentWorkflowPage.value === 'setup') {
+    return selectedIntents.value.length > 0
+  }
+  if (currentWorkflowPage.value === 'plan') {
+    return hasSelection.value && recommendedPlans.value.length > 0 && Boolean(selectedPlanType.value)
+  }
+  return true
+})
+
+const currentPageBlockReason = computed(() => {
+  if (currentWorkflowPage.value === 'setup' && selectedIntents.value.length === 0) {
+    return '请至少选择 1 个创作意图后再进入下一步'
+  }
+  if (currentWorkflowPage.value === 'plan') {
+    if (!hasSelection.value) {
+      return '请先完成意图与目标设置'
+    }
+    if (recommendedPlans.value.length === 0) {
+      return '暂无可用推荐方案，请先调整意图与目标'
+    }
+    if (!selectedPlanType.value) {
+      return '请选择一个推荐方案'
+    }
+  }
+  return ''
+})
+
+const canGoWorkflowNext = computed(() => {
+  return currentWorkflowIndex.value < workflowPages.length - 1
+})
+
+function getPlanName(type: string) {
+  const map: Record<string, string> = {
+    balanced: '均衡推荐',
+    fast: '快速生成',
+    quality: '高质量',
+    creative: '创意优先'
+  }
+  return map[type] || type
+}
 
 function handleSave() {
   const payload = buildPayload({
@@ -306,529 +306,263 @@ function handleGenerate() {
 
   emit('generate', payload)
 }
+
+function isWorkflowPageComplete(page: WorkflowPageKey): boolean {
+  if (page === 'setup') {
+    return selectedIntents.value.length > 0
+  }
+  if (page === 'plan') {
+    return hasSelection.value && recommendedPlans.value.length > 0 && Boolean(selectedPlanType.value)
+  }
+  return true
+}
+
+function canSwitchWorkflowPage(page: WorkflowPageKey): boolean {
+  const targetIndex = workflowPages.findIndex(item => item.key === page)
+  if (targetIndex <= currentWorkflowIndex.value) {
+    return true
+  }
+  for (let i = currentWorkflowIndex.value; i < targetIndex; i++) {
+    const pageKey = workflowPages[i].key
+    if (pageKey === 'setup' && selectedIntents.value.length === 0) {
+      return false
+    }
+    if (pageKey === 'plan') {
+      if (!hasSelection.value || recommendedPlans.value.length === 0 || !selectedPlanType.value) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
+function setWorkflowPage(page: WorkflowPageKey) {
+  if (canSwitchWorkflowPage(page)) {
+    currentWorkflowPage.value = page
+  }
+}
+
+function goWorkflowPrev() {
+  if (!canGoWorkflowPrev.value) return
+  const prev = workflowPages[currentWorkflowIndex.value - 1]
+  currentWorkflowPage.value = prev.key
+}
+
+function goWorkflowNext() {
+  if (!canGoWorkflowNext.value || !canProceedCurrentPage.value) return
+  const next = workflowPages[currentWorkflowIndex.value + 1]
+  currentWorkflowPage.value = next.key
+}
 </script>
 
 <style scoped>
-/* 面板容器 */
-.intent-driven-panel {
+/* 核心布局: 左右分屏 */
+.intent-panel-layout {
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 100%;
-  background: var(--bg-canvas, #f8fafc);
-}
-
-/* 头部沉浸区 */
-.panel-hero {
-  padding: 1.5rem 1.5rem 1.25rem;
-  background: linear-gradient(135deg, var(--accent-500, #6366f1) 0%, var(--accent-600, #4f46e5) 100%);
-  color: white;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.panel-hero::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: 
-    radial-gradient(circle at 20% 80%, rgba(255,255,255,0.1) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(255,255,255,0.1) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.875rem;
-  background: rgba(255,255,255,0.15);
-  backdrop-filter: blur(8px);
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  margin-bottom: 0.75rem;
-  position: relative;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-
-.hero-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 0.375rem;
-  position: relative;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.hero-subtitle {
-  font-size: 0.875rem;
-  opacity: 0.9;
-  position: relative;
-}
-
-/* 主内容区 */
-.panel-content {
-  flex: 1;
-  padding: 1.25rem;
-  padding-bottom: 6rem; /* 为底部栏留出足够空间 */
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.content-section {
-  background: var(--bg-primary, white);
-  border-radius: 1rem;
-  border: 1px solid var(--border-color, #e2e8f0);
-  overflow: visible;
-  transition: box-shadow 0.2s ease;
-  flex-shrink: 0;
-}
-
-.content-section:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-}
-
-/* 区域折叠按钮 */
-.section-toggle {
+  flex-direction: row;
   width: 100%;
-  padding: 1rem 1.25rem;
+  height: 100%;
+  min-height: 0; /* 取消 600px 最小高度，允许完全自适应 */
+  background: var(--bg-canvas, #f8fafc);
+  overflow: hidden;
+}
+
+/* 左侧导航栏 */
+.panel-sidebar {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(255,255,255,0.6) 100%);
+  border-right: 1px solid rgba(226, 232, 240, 0.8);
+  backdrop-filter: blur(20px);
+  z-index: 10;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.sidebar-header {
+  padding: 2rem 1.5rem;
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.brand-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.brand-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+/* 垂直节点导航 */
+.sidebar-nav {
+  flex: 1;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
+}
+
+.nav-node {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0;
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
   text-align: left;
+  transition: opacity 0.3s ease;
 }
 
-.section-toggle:hover {
-  background: var(--bg-hover, #f8fafc);
+.nav-node.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-.section-toggle.is-open {
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+.node-indicator {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+  align-self: stretch; /* 占满整个节点高度 */
 }
 
-.toggle-icon {
+.node-dot {
   width: 2rem;
   height: 2rem;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-canvas, #f1f5f9);
-  border-radius: 0.5rem;
-  color: var(--text-secondary, #64748b);
-  transition: all 0.2s ease;
-}
-
-.section-toggle:hover .toggle-icon {
-  background: var(--accent-50, #eef2ff);
-  color: var(--accent-500, #6366f1);
-}
-
-.toggle-icon svg {
-  transition: transform 0.3s ease;
-}
-
-.toggle-label {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
-}
-
-.toggle-badge {
-  padding: 0.125rem 0.5rem;
-  background: var(--bg-canvas, #f1f5f9);
-  color: var(--text-muted, #94a3b8);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  border-radius: 9999px;
-}
-
-.toggle-hint {
-  margin-left: auto;
-  font-size: 0.8125rem;
-  color: var(--text-muted, #94a3b8);
-}
-
-.section-body {
-  padding: 1rem 1.25rem 1.25rem;
-}
-
-/* 区域头部 */
-.section-header {
-  padding: 1.25rem;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-}
-
-.section-icon {
-  width: 2.25rem;
-  height: 2.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.625rem;
+  color: #94a3b8;
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
   flex-shrink: 0;
+  position: relative; /* 为线定位 */
+  z-index: 2;
 }
 
-.section-icon.recommended {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #d97706;
+.nav-node.is-active .node-dot {
+  border-color: #6366f1;
+  background: #6366f1;
+  color: white;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+  transform: scale(1.1);
 }
 
-.section-icon.adjustments {
-  background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
-  color: #2563eb;
+.nav-node.is-complete:not(.is-active) .node-dot {
+  border-color: #6366f1;
+  background: white;
+  color: #6366f1;
 }
 
-.section-info {
+.node-line {
+  position: absolute;
+  top: 2rem; /* 从圆点底部开始 */
+  bottom: -1rem; /* 延伸穿过 gap (gap 是 1rem) */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  background: #e2e8f0;
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.nav-node.is-complete .node-line {
+  background: #c7d2fe;
+}
+
+.node-content {
   flex: 1;
-  min-width: 0;
+  padding-top: 0.25rem;
+  padding-bottom: 2rem;
 }
 
-.section-title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--text-primary, #1e293b);
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-bottom: 0.25rem;
 }
 
-.section-desc {
-  font-size: 0.8125rem;
-  color: var(--text-secondary, #64748b);
-}
-
-/* 方案网格 */
-.plans-grid {
-  padding: 1.25rem;
-  display: grid;
-  grid-template-columns: repeat(1, 1fr);
-  gap: 0.875rem;
-}
-
-@media (min-width: 768px) {
-  .plans-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-/* 调整区网格 */
-.adjustments-grid {
-  padding: 1.25rem;
-  display: grid;
-  grid-template-columns: repeat(1, 1fr);
-  gap: 1.25rem;
-}
-
-@media (min-width: 640px) {
-  .adjustments-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.adjustment-card {
-  padding: 1.25rem;
-  background: var(--bg-canvas, #f8fafc);
-  border-radius: 0.875rem;
-  border: 1px solid var(--border-color, #e2e8f0);
-  transition: all 0.2s ease;
-}
-
-.adjustment-card:hover {
-  border-color: var(--accent-200, #c7d2fe);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.06);
-}
-
-.adjustment-card.full-width {
-  grid-column: 1 / -1;
-}
-
-.adjustment-label {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  font-size: 0.875rem;
+.node-title {
+  font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
-  margin-bottom: 1rem;
+  color: #475569;
+  transition: color 0.3s ease;
 }
 
-/* 字数控制 */
-.word-count-control {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 0.75rem;
-  background: white;
-  border-radius: 0.75rem;
-  border: 1px solid var(--border-color, #e2e8f0);
+.nav-node.is-active .node-title {
+  color: #0f172a;
 }
 
-.count-btn {
-  width: 2.5rem;
-  height: 2.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-canvas, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.625rem;
-  color: var(--text-secondary, #64748b);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-weight: 600;
+.nav-node.is-complete:not(.is-active) .node-title {
+  color: #1e293b;
 }
 
-.count-btn:hover:not(:disabled) {
-  background: var(--accent-50, #eef2ff);
-  border-color: var(--accent-300, #a5b4fc);
-  color: var(--accent-600, #4f46e5);
-  transform: scale(1.05);
-}
-
-.count-btn:active:not(:disabled) {
-  transform: scale(0.95);
-}
-
-.count-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.count-display {
-  display: flex;
-  align-items: baseline;
-  gap: 0.375rem;
-  min-width: 7rem;
-  justify-content: center;
-  padding: 0.5rem 1rem;
-  background: var(--bg-canvas, #f8fafc);
-  border-radius: 0.625rem;
-}
-
-.count-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--accent-600, #4f46e5);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.count-unit {
-  font-size: 0.875rem;
-  color: var(--text-muted, #94a3b8);
+.node-badge {
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
   font-weight: 500;
 }
 
-/* 意图输入框 */
-.intent-textarea {
-  width: 100%;
-  padding: 1rem 1.125rem;
-  background: white;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.75rem;
-  font-size: 0.875rem;
-  color: var(--text-primary, #1e293b);
-  resize: vertical;
-  min-height: 6rem;
-  transition: all 0.2s ease;
-  line-height: 1.6;
+.node-summary-wrapper {
+  position: relative;
+  min-height: 1.5rem;
 }
 
-.intent-textarea:focus {
-  outline: none;
-  border-color: var(--accent-400, #818cf8);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-.intent-textarea::placeholder {
-  color: var(--text-muted, #94a3b8);
-}
-
-/* 专家模式区 */
-.expert-section {
-  background: var(--bg-canvas, #f8fafc);
-}
-
-.expert-toggle {
-  width: 100%;
-  padding: 1rem 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.expert-toggle:hover {
-  background: var(--bg-hover, #f1f5f9);
-}
-
-.toggle-main {
-  display: flex;
-  align-items: center;
-  gap: 0.875rem;
-}
-
-.toggle-icon.expert {
-  width: 2.25rem;
-  height: 2.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #ede9fe 0%, #c4b5fd 100%);
-  color: #7c3aed;
-  border-radius: 0.625rem;
-}
-
-.expert-toggle.has-overrides .toggle-icon.expert {
-  background: linear-gradient(135deg, #fef3c7 0%, #fcd34d 100%);
-  color: #d97706;
-}
-
-.toggle-info {
-  text-align: left;
-}
-
-.toggle-label {
-  display: block;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--text-primary, #1e293b);
-  margin-bottom: 0.125rem;
-}
-
-.toggle-desc {
+.node-desc, .node-summary {
   font-size: 0.8125rem;
-  color: var(--text-secondary, #64748b);
+  line-height: 1.5;
 }
 
-.toggle-badges {
+.node-desc {
+  color: #94a3b8;
+}
+
+.node-summary {
+  color: #6366f1;
+  font-weight: 500;
+}
+
+/* 左侧底部操作栏 */
+.sidebar-footer {
+  padding: 1.5rem;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  background: rgba(255, 255, 255, 0.6);
+  margin-top: auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
-.override-badge {
-  padding: 0.25rem 0.625rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #b45309;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border-radius: 9999px;
-}
-
-.toggle-arrow {
-  color: var(--text-muted, #94a3b8);
-  transition: transform 0.3s ease;
-}
-
-/* 底部操作栏 */
-.panel-footer {
-  padding: 1.25rem;
-  background: var(--bg-primary, white);
-  border-top: 1px solid var(--border-color, #e2e8f0);
+.sidebar-action-btn {
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  flex-shrink: 0;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
-}
-
-@media (min-width: 640px) {
-  .panel-footer {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-}
-
-.generation-preview {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.75rem 1rem;
-  background: var(--bg-canvas, #f8fafc);
-  border-radius: 0.75rem;
-  border: 1px solid var(--border-color, #e2e8f0);
-}
-
-.preview-item {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.preview-icon {
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 0.5rem;
-  color: var(--text-secondary, #64748b);
-}
-
-.preview-icon.time {
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border-color: #bfdbfe;
-  color: #3b82f6;
-}
-
-.preview-icon.words {
-  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
-  border-color: #a7f3d0;
-  color: #10b981;
-}
-
-.preview-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.preview-label {
-  font-size: 0.75rem;
-  color: var(--text-muted, #94a3b8);
-  font-weight: 500;
-}
-
-.preview-value {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-primary, #1e293b);
-}
-
-.preview-divider {
-  width: 1px;
-  height: 2.5rem;
-  background: var(--border-color, #e2e8f0);
-}
-
-.footer-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.action-btn {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
@@ -836,124 +570,519 @@ function handleGenerate() {
   font-size: 0.875rem;
   font-weight: 600;
   border-radius: 0.75rem;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.action-btn.secondary {
-  background: var(--bg-canvas, #f1f5f9);
+.sidebar-action-btn.ghost {
+  background: rgba(241, 245, 249, 0.86);
   color: var(--text-secondary, #64748b);
-  border: 2px solid var(--border-color, #e2e8f0);
+  border-color: var(--border-color, #e2e8f0);
 }
 
-.action-btn.secondary:hover:not(:disabled) {
+.sidebar-action-btn.ghost:hover:not(:disabled) {
   background: white;
   border-color: var(--accent-300, #a5b4fc);
   color: var(--text-primary, #1e293b);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-.action-btn.primary {
-  background: linear-gradient(135deg, var(--accent-500, #6366f1) 0%, var(--accent-600, #4f46e5) 100%);
+.sidebar-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 右侧主内容区 */
+.panel-main {
+  flex: 1;
+  position: relative;
+  background: var(--bg-canvas, #f8fafc);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.main-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2.5rem 3rem;
+  scroll-behavior: smooth;
+}
+
+.workflow-section {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.section-header {
+  margin-bottom: 2rem;
+}
+
+.section-title {
+  font-size: 1.875rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem 0;
+}
+
+.section-desc {
+  font-size: 1rem;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* 意图与目标堆叠 */
+.setup-content-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.content-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(226, 232, 240, 0.8) 50%, transparent 100%);
+}
+
+/* 推荐方案空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px dashed #cbd5e1;
+  border-radius: 1rem;
+  text-align: center;
+  color: #64748b;
+}
+
+.empty-icon {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+/* 方案网格 */
+.plans-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* 基础调整卡片 */
+.adjustments-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.control-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.02);
+}
+
+.control-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.control-icon-box {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.625rem;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6366f1;
+}
+
+.control-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.word-count-control {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: #f8fafc;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  width: fit-content;
+}
+
+.count-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: white;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.count-btn:hover:not(:disabled) {
+  color: #6366f1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(99, 102, 241, 0.1);
+}
+
+.count-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.count-display {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 6rem;
+  justify-content: center;
+}
+
+.count-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #6366f1;
+  font-variant-numeric: tabular-nums;
+}
+
+.count-unit {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.sleek-textarea {
+  width: 100%;
+  padding: 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  resize: vertical;
+  min-height: 100px;
+  transition: all 0.2s ease;
+}
+
+.sleek-textarea:focus {
+  outline: none;
+  background: white;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.expert-panel-wrapper {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.bottom-spacer {
+  height: 120px; /* 悬浮底栏的高度缓冲 */
+}
+
+/* 悬浮底栏 */
+.floating-action-bar-wrapper {
+  position: absolute;
+  bottom: 2rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.block-reason-toast {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+  pointer-events: auto;
+}
+
+.floating-pill {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 9999px;
+  padding: 0.5rem 0.5rem 0.5rem 1.5rem;
+  box-shadow: 0 20px 40px -8px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  pointer-events: auto;
+}
+
+.pill-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-right: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.info-label {
+  font-size: 0.6875rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.info-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.info-divider {
+  width: 1px;
+  height: 2rem;
+  background: #e2e8f0;
+}
+
+.pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pill-btn.ghost {
+  background: transparent;
+  color: #64748b;
+}
+
+.pill-btn.ghost:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.pill-btn.primary {
+  background: #0f172a;
   color: white;
-  border: 2px solid transparent;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+.pill-btn.primary:hover:not(:disabled) {
+  background: #1e293b;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.3);
+}
+
+.pill-btn.secondary {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.pill-btn.secondary:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.pill-btn.generate {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
-.action-btn.primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+.pill-btn.generate:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
 }
 
-.action-btn.primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.action-btn:disabled {
-  opacity: 0.4;
+.pill-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
 }
 
-/* 过渡动画 */
-.expand-enter-active,
-.expand-leave-active {
-  transition: all 0.3s ease;
-  max-height: 500px;
-  overflow: hidden;
+/* 动画 */
+.fade-slide-up-enter-active,
+.fade-slide-up-leave-active {
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-
-.expand-enter-from,
-.expand-leave-to {
-  max-height: 0;
-  opacity: 0;
-}
-
-.fade-up-enter-active {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.fade-up-enter-from {
-  opacity: 0;
-  transform: translateY(12px);
-}
-
-.slide-up-enter-active {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.slide-up-enter-from {
+.fade-slide-up-enter-from {
   opacity: 0;
   transform: translateY(20px);
 }
+.fade-slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(-20px);
+}
 
-/* 深色模式适配 */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s ease;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.fade-up-enter-active,
+.fade-up-leave-active {
+  transition: all 0.3s ease;
+}
+.fade-up-enter-from,
+.fade-up-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* 深色模式 */
 @media (prefers-color-scheme: dark) {
-  .panel-hero {
-    background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
-  }
-  
-  .content-section {
-    background: #1e293b;
-    border-color: #334155;
-  }
-  
-  .section-toggle:hover,
-  .expert-toggle:hover {
+  .intent-panel-layout {
     background: #0f172a;
   }
-  
-  .adjustment-card {
-    background: #0f172a;
+  .panel-sidebar {
+    background: linear-gradient(180deg, #1e293b 0%, rgba(30, 41, 59, 0.8) 100%);
     border-color: #334155;
   }
-  
-  .count-btn {
+  .brand-title {
+    color: #f8fafc;
+  }
+  .node-dot {
     background: #1e293b;
-    border-color: #334155;
-  }
-  
-  .intent-textarea {
-    background: #1e293b;
-    border-color: #334155;
-    color: #f1f5f9;
-  }
-  
-  .expert-section {
-    background: #0f172a;
-  }
-  
-  .panel-footer {
-    background: #1e293b;
-    border-color: #334155;
-  }
-  
-  .action-btn.secondary {
-    background: #334155;
     border-color: #475569;
     color: #94a3b8;
+  }
+  .nav-node.is-active .node-dot {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: white;
+  }
+  .nav-node.is-complete:not(.is-active) .node-dot {
+    background: #1e293b;
+    border-color: #4f46e5;
+    color: #818cf8;
+  }
+  .node-line {
+    background: #334155;
+  }
+  .nav-node.is-complete .node-line {
+    background: #4f46e5;
+  }
+  .node-title {
+    color: #94a3b8;
+  }
+  .nav-node.is-active .node-title {
+    color: #f8fafc;
+  }
+  .nav-node.is-complete:not(.is-active) .node-title {
+    color: #cbd5e1;
+  }
+  .sidebar-footer {
+    border-color: #334155;
+    background: rgba(30, 41, 59, 0.6);
+  }
+  .sidebar-action-btn.ghost {
+    background: #334155;
+    border-color: #475569;
+    color: #cbd5e1;
+  }
+  .sidebar-action-btn.ghost:hover:not(:disabled) {
+    background: #475569;
+    border-color: #64748b;
+    color: #f8fafc;
+  }
+  .sidebar-action-btn.primary {
+    background: #f8fafc;
+    color: #0f172a;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  }
+  .sidebar-action-btn.primary:hover:not(:disabled) {
+    background: #e2e8f0;
+  }
+  .panel-main {
+    background: #0f172a;
+  }
+  .section-title {
+    color: #f8fafc;
+  }
+  .section-desc {
+    color: #94a3b8;
+  }
+  .content-divider {
+    background: linear-gradient(90deg, transparent 0%, rgba(51, 65, 85, 0.8) 50%, transparent 100%);
+  }
+  .control-card {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(71, 85, 105, 0.6);
+  }
+  .control-icon-box {
+    background: #1e293b;
+  }
+  .control-title {
+    color: #f8fafc;
+  }
+  .word-count-control {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  .count-btn {
+    background: #334155;
+    color: #94a3b8;
+  }
+  .count-btn:hover:not(:disabled) {
+    color: #818cf8;
+  }
+  .count-value {
+    color: #818cf8;
+  }
+  .sleek-textarea {
+    background: #1e293b;
+    border-color: #334155;
+    color: #f8fafc;
+  }
+  .sleek-textarea:focus {
+    background: #0f172a;
+    border-color: #6366f1;
   }
 }
 </style>
