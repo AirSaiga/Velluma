@@ -70,10 +70,11 @@ from backend.services.workflows.dual_track_helpers import (
     extract_sketch_reference,
 )
 from backend.services.utils.prompt_logger import PromptLogger
+from backend.services.utils.logging import get_runtime_logger
 
 from backend.schemas import DraftingFeatureFlags, WorkflowTier
 
-logger = logging.getLogger(__name__)
+logger = get_runtime_logger(__name__)
 
 
 @dataclass
@@ -140,13 +141,7 @@ class DualTrackWorkflow:
         import time
         total_start = time.perf_counter()
 
-        # 【临时调试】强制输出到终端，绕过 logging 配置
-        print(f"\n\n========== [DualTrack] 工作流开始执行 ==========")
-        print(f"[DualTrack] 节拍数: {len(beats)}, 目标字数: {word_count}")
-        print(f"[DualTrack] 当前时间: {time.strftime('%H:%M:%S')}")
-        print(f"==================================================\n\n", flush=True)
-        
-        logger.info(f"[DualTrack] 启动双轨生成工作流，节拍数: {len(beats)}, 目标字数: {word_count}")
+        logger.info(f"[DualTrack] 阶段=START 状态=RUNNING beats={len(beats)} word_count={word_count}")
 
         async def _emit_progress(event: str, message: str, **kwargs):
             if progress_callback:
@@ -188,7 +183,6 @@ class DualTrackWorkflow:
                 chapter_assets_schema=chapter_assets_schema,
             )
 
-            logger.info("[DualTrack] 并行执行 Track A (节拍扩写) 和 Track B (短文生成)")
             beat_drafts, sketch_result = await asyncio.gather(
                 track_a_task,
                 track_b_task,
@@ -202,12 +196,11 @@ class DualTrackWorkflow:
                 logger.warning(f"[DualTrack] Track B 失败: {sketch_result}，将继续使用 Track A 结果")
                 sketch_result = None
         else:
-            logger.info("[DualTrack] 仅执行 Track A (节拍扩写)")
             beat_drafts = await track_a_task
             sketch_result = None
 
         track_time = time.perf_counter() - parallel_start_perf
-        logger.info(f"[DualTrack] 双轨生成完成，耗时: {track_time:.2f}s")
+        logger.info(f"[DualTrack] 阶段=DRAFTING 状态=SUCCESS duration={track_time:.2f}s")
 
         await _emit_progress("TRACK_GENERATION_DONE", f"双轨生成完成，耗时 {track_time:.1f}s")
 
@@ -243,7 +236,6 @@ class DualTrackWorkflow:
         # Phase 3: 节拍统稿
         # ===================================================================
 
-        logger.info("[DualTrack] 开始统稿 (Stitching)")
         await _emit_progress("STITCHING", "正在统稿拼接各节拍内容...")
         stitch_start = time.perf_counter()
 
@@ -282,7 +274,7 @@ class DualTrackWorkflow:
         )
 
         stitch_time = time.perf_counter() - stitch_start
-        logger.info(f"[DualTrack] 统稿完成，耗时: {stitch_time:.2f}s，字数: {len(stitched_draft)}")
+        logger.info(f"[DualTrack] 阶段=STITCHING 状态=SUCCESS duration={stitch_time:.2f}s words={len(stitched_draft)}")
 
         if self.prompt_logger:
             self.prompt_logger.log_outputs(
@@ -299,7 +291,6 @@ class DualTrackWorkflow:
         final_text = stitched_draft
 
         if self.config.enable_adversarial_alignment and sketch_result and sketch_result.sketch_text:
-            logger.info("[DualTrack] 开始对抗校对")
             align_start = time.perf_counter()
 
             if self.prompt_logger:
@@ -320,7 +311,7 @@ class DualTrackWorkflow:
                 )
 
                 align_time = time.perf_counter() - align_start
-                logger.info(f"[DualTrack] 对抗校对完成，耗时: {align_time:.2f}s，对齐度得分: {adjustment_plan.alignment_score:.1f}")
+                logger.info(f"[DualTrack] 阶段=REVIEWING 状态=SUCCESS duration={align_time:.2f}s score={adjustment_plan.alignment_score:.1f}")
 
                 if self.prompt_logger:
                     for ap in (adjustment_plan.analysis_prompts or []):
@@ -340,7 +331,10 @@ class DualTrackWorkflow:
                     self.prompt_logger.end_stage(success=True)
 
                 if adjustment_plan.needs_adjustment and self.config.use_sketch_for_refinement:
-                    logger.info(f"[DualTrack] 对齐度 {adjustment_plan.alignment_score:.1f} 低于阈值 {self.config.alignment_threshold}，执行融合精修")
+                    logger.info(
+                        f"[DualTrack] 阶段=REFINING 状态=RUNNING reason=low_score "
+                        f"score={adjustment_plan.alignment_score:.1f} threshold={self.config.alignment_threshold}"
+                    )
                     if self.prompt_logger:
                         self.prompt_logger.start_stage("FUSION_REFINEMENT", iteration=1)
                         self.prompt_logger.log_inputs(
@@ -366,22 +360,22 @@ class DualTrackWorkflow:
                             )
                             self.prompt_logger.end_stage(success=True)
                     except Exception as refine_e:
-                        logger.error(f"[DualTrack] 融合精修失败: {refine_e}，使用统稿结果")
+                        logger.error(f"[DualTrack] 阶段=REFINING 状态=FAILED error={refine_e}")
                         if self.prompt_logger:
                             self.prompt_logger.log_outputs(error=str(refine_e))
                             self.prompt_logger.end_stage(success=False)
                         final_text = stitched_draft
                 else:
-                    logger.info("[DualTrack] 对齐度良好或禁用自动修复，跳过融合精修")
+                    logger.info("[DualTrack] 阶段=REFINING 状态=SKIPPED reason=not_needed_or_disabled")
 
             except Exception as e:
-                logger.error(f"[DualTrack] 对抗校对失败: {e}，使用统稿结果")
+                logger.error(f"[DualTrack] 阶段=REVIEWING 状态=FAILED error={e}")
                 if self.prompt_logger:
                     self.prompt_logger.log_outputs(error=str(e))
                     self.prompt_logger.end_stage(success=False)
                 final_text = stitched_draft
         else:
-            logger.info("[DualTrack] 跳过对抗校对")
+            logger.info("[DualTrack] 阶段=REVIEWING 状态=SKIPPED reason=disabled_or_no_sketch")
 
         total_time = time.perf_counter() - total_start
 
@@ -400,7 +394,7 @@ class DualTrackWorkflow:
             "adjustment_analysis": getattr(adjustment_plan, 'analysis_prompts', []) if adjustment_plan else [],
         }
 
-        logger.info(f"[DualTrack] 双轨工作流完成，总耗时: {total_time:.2f}s，最终字数: {len(final_text)}")
+        logger.info(f"[DualTrack] 阶段=DONE 状态=SUCCESS total={total_time:.2f}s words={len(final_text)}")
 
         return DualTrackResult(
             final_text=final_text,
@@ -565,14 +559,14 @@ class DualTrackWorkflow:
         refine_start = time.perf_counter()
 
         if not adjustment_plan.gaps:
-            logger.info("[DualTrack] 无需修复的问题，跳过融合精修")
+            logger.info("[DualTrack] 阶段=REFINING 状态=SKIPPED reason=no_gaps")
             return stitched_draft
 
         beats_to_refine = set(adjustment_plan.beat_adjustments.keys())
 
         if not beats_to_refine:
             if adjustment_plan.global_adjustments:
-                logger.info("[DualTrack] 检测到全局问题，执行全局精修")
+                logger.info("[DualTrack] 阶段=REFINING 状态=RUNNING mode=global")
                 return await self._execute_global_refinement(
                     stitched_draft=stitched_draft,
                     sketch_result=sketch_result,
@@ -580,10 +574,10 @@ class DualTrackWorkflow:
                     chapter=chapter,
                     book=book,
                 )
-            logger.warning("[DualTrack] 无可执行的精修任务，返回原文")
+            logger.warning("[DualTrack] 阶段=REFINING 状态=SKIPPED reason=no_actionable_items")
             return stitched_draft
 
-        logger.info(f"[DualTrack] 执行融合精修，需修复 {len(beats_to_refine)} 个 Beat")
+        logger.info(f"[DualTrack] 阶段=REFINING 状态=RUNNING mode=beat_count count={len(beats_to_refine)}")
 
         draft_segments = segment_draft_by_beats(stitched_draft, beats)
 
@@ -603,8 +597,6 @@ class DualTrackWorkflow:
 
                 previous_tail = refined_segments[-1][-300:] if refined_segments else ""
 
-                logger.debug(f"[DualTrack] 精修 Beat {beat_index}，问题数: {len(issues)}")
-
                 try:
                     refined_segment = await refine_single_beat(
                         beat=beat,
@@ -622,7 +614,7 @@ class DualTrackWorkflow:
                     )
                     refined_segments.append(refined_segment)
                 except Exception as e:
-                    logger.error(f"[DualTrack] Beat {beat_index} 精修失败: {e}，使用原文")
+                    logger.error(f"[DualTrack] 阶段=REFINING 状态=FAILED beat={beat_index} error={e}")
                     refined_segments.append(segment)
             else:
                 refined_segments.append(segment)
@@ -630,7 +622,7 @@ class DualTrackWorkflow:
         final_text = "\n\n".join(refined_segments)
 
         refine_time = time.perf_counter() - refine_start
-        logger.info(f"[DualTrack] 融合精修完成，耗时: {refine_time:.2f}s，修复 {len(beats_to_refine)} 个 Beat")
+        logger.info(f"[DualTrack] 阶段=REFINING 状态=SUCCESS duration={refine_time:.2f}s fixed={len(beats_to_refine)}")
 
         return final_text
 
