@@ -44,7 +44,6 @@ StoryWeaver-Core 后端入口模块。
 """
 
 import asyncio
-import io
 import logging
 import os
 import sys
@@ -58,15 +57,8 @@ from dotenv import load_dotenv
 # 这会导致中文日志输出时抛出 UnicodeEncodeError
 # 方式：使用 reconfigure(encoding="utf-8") 确保流级别支持 UTF-8，
 # 这比重新包装 io.TextIOWrapper 更安全，因为它保留了原始流对象。
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8')
-else:
-    # 备用方案：兼容旧版本 Python (虽然 AGENTS.md 要求 3.12+)
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 # =============================================================================
 # 日志配置（必须在所有导入之前）

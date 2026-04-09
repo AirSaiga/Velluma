@@ -204,7 +204,10 @@ async def generate_chapter_dual_track(
 
         try:
             resolved_params = resolve_high_level_params(request)
-            svc_logger.info(f"[Generation] 阶段=START 状态=RUNNING chapter_id={chapter_id} run_id={_resolve_run_id(request, None)}")
+            svc_logger.info(
+                f"[Generation] 阶段=START 状态=RUNNING chapter_id={chapter_id}",
+                run_id=_resolve_run_id(request, None),
+            )
 
             yield build_sse_event("ASSEMBLING_CONTEXT", "加载章节上下文...")
 

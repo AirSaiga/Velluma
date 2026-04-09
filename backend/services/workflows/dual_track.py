@@ -47,7 +47,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
@@ -136,20 +136,104 @@ class DualTrackWorkflow:
         chapter_assets_schema: str = "",
         workflow_tier: Optional[WorkflowTier] = None,
         anchor_pov: Optional[str] = None,
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable[..., Any]] = None,
     ) -> DualTrackResult:
         import time
         total_start = time.perf_counter()
 
         logger.info(f"[DualTrack] 阶段=START 状态=RUNNING beats={len(beats)} word_count={word_count}")
+        beat_drafts, sketch_result, track_time = await self._run_parallel_tracks(
+            chapter=chapter,
+            book=book,
+            beats=beats,
+            entities=entities,
+            relationships=relationships,
+            word_count=word_count,
+            previous_summary=previous_summary,
+            relevant_memories=relevant_memories,
+            locations=locations,
+            physical_state_lock=physical_state_lock,
+            entity_spatial_ledger=entity_spatial_ledger,
+            chapter_assets_schema=chapter_assets_schema,
+            workflow_tier=workflow_tier,
+            anchor_pov=anchor_pov,
+        )
+        await self._emit_progress(progress_callback, "TRACK_GENERATION_DONE", f"双轨生成完成，耗时 {track_time:.1f}s")
+        stitched_draft, stitch_time = await self._run_stitching_stage(
+            chapter=chapter,
+            book=book,
+            beats=beats,
+            beat_drafts=beat_drafts,
+            sketch_result=sketch_result,
+            word_count=word_count,
+            anchor_pov=anchor_pov,
+            progress_callback=progress_callback,
+        )
+        final_text, adjustment_plan = await self._run_alignment_and_refinement(
+            chapter=chapter,
+            book=book,
+            beats=beats,
+            stitched_draft=stitched_draft,
+            sketch_result=sketch_result,
+        )
+        total_time = time.perf_counter() - total_start
 
-        async def _emit_progress(event: str, message: str, **kwargs):
-            if progress_callback:
-                await progress_callback(event=event, message=message, **kwargs)
+        stats = self._build_stats(
+            total_time=total_time,
+            track_time=track_time,
+            stitch_time=stitch_time,
+            final_text=final_text,
+            beats=beats,
+            adjustment_plan=adjustment_plan,
+        )
+        debug_info = self._build_debug_info(
+            beat_drafts=beat_drafts,
+            sketch_result=sketch_result,
+            adjustment_plan=adjustment_plan,
+        )
 
-        # ===================================================================
-        # Phase 2: 双轨并行生成
-        # ===================================================================
+        logger.info(f"[DualTrack] 阶段=DONE 状态=SUCCESS total={total_time:.2f}s words={len(final_text)}")
+
+        return DualTrackResult(
+            final_text=final_text,
+            beat_drafts=beat_drafts,
+            stitched_draft=stitched_draft,
+            sketch_result=sketch_result,
+            adjustment_plan=adjustment_plan,
+            stats=stats,
+            debug_info=debug_info,
+        )
+
+    async def _emit_progress(
+        self,
+        progress_callback: Optional[Callable[..., Any]],
+        event: str,
+        message: str,
+        **kwargs: Any,
+    ) -> None:
+        if progress_callback:
+            await progress_callback(event=event, message=message, **kwargs)
+
+    async def _run_parallel_tracks(
+        self,
+        chapter: Any,
+        book: Any,
+        beats: List[dict],
+        entities: List[Any],
+        relationships: List[Any],
+        word_count: int,
+        previous_summary: Optional[str],
+        relevant_memories: Optional[List[Any]],
+        locations: Optional[List[Any]],
+        physical_state_lock: Optional[str],
+        entity_spatial_ledger: Optional[Dict[str, Any]],
+        chapter_assets_schema: str,
+        workflow_tier: Optional[WorkflowTier],
+        anchor_pov: Optional[str],
+    ) -> Tuple[List[BeatDraftResult], Optional[SketchResult], float]:
+        import time
+        parallel_start_wall = time.time()
+        parallel_start_perf = time.perf_counter()
 
         track_a_task = self._execute_track_a(
             chapter=chapter,
@@ -166,10 +250,6 @@ class DualTrackWorkflow:
             chapter_assets_schema=chapter_assets_schema,
             workflow_tier=workflow_tier,
         )
-
-        parallel_start_wall = time.time()
-        parallel_start_perf = time.perf_counter()
-
         if self.config.enable_sketch_track:
             track_b_task = self._execute_track_b(
                 chapter=chapter,
@@ -182,13 +262,11 @@ class DualTrackWorkflow:
                 anchor_pov=anchor_pov,
                 chapter_assets_schema=chapter_assets_schema,
             )
-
             beat_drafts, sketch_result = await asyncio.gather(
                 track_a_task,
                 track_b_task,
-                return_exceptions=True
+                return_exceptions=True,
             )
-
             if isinstance(beat_drafts, Exception):
                 logger.error(f"[DualTrack] Track A 失败: {beat_drafts}")
                 raise beat_drafts
@@ -201,55 +279,66 @@ class DualTrackWorkflow:
 
         track_time = time.perf_counter() - parallel_start_perf
         logger.info(f"[DualTrack] 阶段=DRAFTING 状态=SUCCESS duration={track_time:.2f}s")
+        self._log_drafting_stage(
+            beat_drafts=beat_drafts,
+            beats=beats,
+            word_count=word_count,
+            parallel_start_wall=parallel_start_wall,
+        )
+        return beat_drafts, sketch_result, track_time
 
-        await _emit_progress("TRACK_GENERATION_DONE", f"双轨生成完成，耗时 {track_time:.1f}s")
+    def _log_drafting_stage(
+        self,
+        beat_drafts: List[BeatDraftResult],
+        beats: List[dict],
+        word_count: int,
+        parallel_start_wall: float,
+    ) -> None:
+        if not self.prompt_logger:
+            return
+        self.prompt_logger.start_stage("DRAFTING", iteration=1)
+        self.prompt_logger.log_data["stages"][-1]["start_time"] = parallel_start_wall
+        self.prompt_logger.log_inputs(
+            beat_count=len(beats),
+            word_count=word_count,
+            note="与SKETCH_GENERATION并行执行，elapsed为Track A真实耗时",
+        )
+        for draft in beat_drafts:
+            for p in (draft.prompts or []):
+                self.prompt_logger.log_prompts(
+                    system_prompt=p.get("system_prompt", ""),
+                    user_prompt=p.get("user_prompt", ""),
+                    model=self.reasoning_model if p.get("stage") in ["SCENE_INTENT", "SUBCONSCIOUS"] else self.creative_model,
+                    temperature=p.get("temperature", 0.7),
+                    prompt_label=f"{p.get('stage', 'UNKNOWN')}_BEAT_{draft.beat_index}",
+                )
+        total_draft_words = sum(len(d.draft_chunk) for d in beat_drafts)
+        self.prompt_logger.log_outputs(
+            beat_count=len(beat_drafts),
+            total_draft_words=total_draft_words,
+            beat_previews=[
+                {"id": d.beat_id, "words": len(d.draft_chunk), "preview": d.draft_chunk[:300]}
+                for d in beat_drafts
+            ],
+        )
+        self.prompt_logger.end_stage(success=True)
 
-        if self.prompt_logger and isinstance(beat_drafts, list):
-            self.prompt_logger.start_stage("DRAFTING", iteration=1)
-            self.prompt_logger.log_data["stages"][-1]["start_time"] = parallel_start_wall
-            self.prompt_logger.log_inputs(
-                beat_count=len(beats),
-                word_count=word_count,
-                note="与SKETCH_GENERATION并行执行，elapsed为Track A真实耗时",
-            )
-            for draft in beat_drafts:
-                for p in (draft.prompts or []):
-                    self.prompt_logger.log_prompts(
-                        system_prompt=p.get("system_prompt", ""),
-                        user_prompt=p.get("user_prompt", ""),
-                        model=self.reasoning_model if p.get("stage") in ["SCENE_INTENT", "SUBCONSCIOUS"] else self.creative_model,
-                        temperature=p.get("temperature", 0.7),
-                        prompt_label=f"{p.get('stage', 'UNKNOWN')}_BEAT_{draft.beat_index}",
-                    )
-            total_draft_words = sum(len(d.draft_chunk) for d in beat_drafts)
-            self.prompt_logger.log_outputs(
-                beat_count=len(beat_drafts),
-                total_draft_words=total_draft_words,
-                beat_previews=[
-                    {"id": d.beat_id, "words": len(d.draft_chunk), "preview": d.draft_chunk[:300]}
-                    for d in beat_drafts
-                ],
-            )
-            self.prompt_logger.end_stage(success=True)
-
-        # ===================================================================
-        # Phase 3: 节拍统稿
-        # ===================================================================
-
-        await _emit_progress("STITCHING", "正在统稿拼接各节拍内容...")
+    async def _run_stitching_stage(
+        self,
+        chapter: Any,
+        book: Any,
+        beats: List[dict],
+        beat_drafts: List[BeatDraftResult],
+        sketch_result: Optional[SketchResult],
+        word_count: int,
+        anchor_pov: Optional[str],
+        progress_callback: Optional[Callable[..., Any]],
+    ) -> Tuple[str, float]:
+        import time
+        await self._emit_progress(progress_callback, "STITCHING", "正在统稿拼接各节拍内容...")
         stitch_start = time.perf_counter()
-
         chunks = [draft.draft_chunk for draft in beat_drafts]
-
-        persistent_state_anchors = []
-        for i, beat in enumerate(beats):
-            exit_state = beat.get("exit_state", "")
-            if exit_state:
-                persistent_state_anchors.append({
-                    "anchor_type": f"beat_{i + 1}_exit",
-                    "description": f"Beat {i + 1} 退出状态: {exit_state}",
-                })
-
+        persistent_state_anchors = self._build_persistent_state_anchors(beats)
         if self.prompt_logger:
             self.prompt_logger.start_stage("STITCHING", iteration=1)
             self.prompt_logger.log_inputs(
@@ -257,7 +346,6 @@ class DualTrackWorkflow:
                 chunks_count=len(chunks),
                 word_count=word_count,
             )
-
         stitched_draft = await stitch_chunks(
             chapter=chapter,
             beats=beats,
@@ -272,139 +360,170 @@ class DualTrackWorkflow:
             book=book,
             persistent_state_anchors=persistent_state_anchors or None,
         )
-
         stitch_time = time.perf_counter() - stitch_start
         logger.info(f"[DualTrack] 阶段=STITCHING 状态=SUCCESS duration={stitch_time:.2f}s words={len(stitched_draft)}")
-
         if self.prompt_logger:
             self.prompt_logger.log_outputs(
                 stitched_word_count=len(stitched_draft),
                 stitched_text=stitched_draft,
             )
             self.prompt_logger.end_stage(success=bool(stitched_draft))
+        return stitched_draft, stitch_time
 
-        # ===================================================================
-        # Phase 4: 对抗校对（如果启用且有 Sketch）
-        # ===================================================================
+    def _build_persistent_state_anchors(self, beats: List[dict]) -> List[Dict[str, str]]:
+        persistent_state_anchors: List[Dict[str, str]] = []
+        for i, beat in enumerate(beats):
+            exit_state = beat.get("exit_state", "")
+            if exit_state:
+                persistent_state_anchors.append(
+                    {
+                        "anchor_type": f"beat_{i + 1}_exit",
+                        "description": f"Beat {i + 1} 退出状态: {exit_state}",
+                    }
+                )
+        return persistent_state_anchors
 
+    async def _run_alignment_and_refinement(
+        self,
+        chapter: Any,
+        book: Any,
+        beats: List[dict],
+        stitched_draft: str,
+        sketch_result: Optional[SketchResult],
+    ) -> Tuple[str, Optional[AdjustmentPlan]]:
+        import time
         adjustment_plan = None
         final_text = stitched_draft
-
-        if self.config.enable_adversarial_alignment and sketch_result and sketch_result.sketch_text:
-            align_start = time.perf_counter()
-
+        if not (self.config.enable_adversarial_alignment and sketch_result and sketch_result.sketch_text):
+            logger.info("[DualTrack] 阶段=REVIEWING 状态=SKIPPED reason=disabled_or_no_sketch")
+            return final_text, adjustment_plan
+        align_start = time.perf_counter()
+        if self.prompt_logger:
+            self.prompt_logger.start_stage("ADVERSARIAL_ALIGNMENT", iteration=1)
+            self.prompt_logger.log_inputs(
+                draft_word_count=len(stitched_draft),
+                sketch_word_count=sketch_result.word_count,
+                alignment_threshold=self.config.alignment_threshold,
+            )
+        try:
+            adjustment_plan = await self._execute_adversarial_alignment(
+                draft_text=stitched_draft,
+                sketch_result=sketch_result,
+                beats=beats,
+                chapter=chapter,
+                book=book,
+            )
+            align_time = time.perf_counter() - align_start
+            logger.info(f"[DualTrack] 阶段=REVIEWING 状态=SUCCESS duration={align_time:.2f}s score={adjustment_plan.alignment_score:.1f}")
             if self.prompt_logger:
-                self.prompt_logger.start_stage("ADVERSARIAL_ALIGNMENT", iteration=1)
-                self.prompt_logger.log_inputs(
-                    draft_word_count=len(stitched_draft),
-                    sketch_word_count=sketch_result.word_count if sketch_result else 0,
-                    alignment_threshold=self.config.alignment_threshold,
+                for ap in (adjustment_plan.analysis_prompts or []):
+                    self.prompt_logger.log_prompts(
+                        system_prompt=ap.get("system_prompt", ""),
+                        user_prompt=ap.get("user_prompt", ""),
+                        model=self.reasoning_model,
+                        temperature=self.config.aligner_config.temperature if self.config.aligner_config else 0.1,
+                        max_tokens=self.config.aligner_config.max_analysis_tokens if self.config.aligner_config else 2000,
+                        prompt_label=ap.get("stage", "INFO_ALIGNMENT_ANALYSIS"),
+                    )
+                self.prompt_logger.log_outputs(
+                    alignment_score=adjustment_plan.alignment_score,
+                    needs_adjustment=adjustment_plan.needs_adjustment,
+                    gaps_count=len(adjustment_plan.gaps) if adjustment_plan.gaps else 0,
                 )
-
-            try:
-                adjustment_plan = await self._execute_adversarial_alignment(
-                    draft_text=stitched_draft,
-                    sketch_result=sketch_result,
-                    beats=beats,
+                self.prompt_logger.end_stage(success=True)
+            if adjustment_plan.needs_adjustment and self.config.use_sketch_for_refinement:
+                final_text = await self._run_fusion_refinement(
                     chapter=chapter,
                     book=book,
+                    beats=beats,
+                    stitched_draft=stitched_draft,
+                    sketch_result=sketch_result,
+                    adjustment_plan=adjustment_plan,
                 )
+            else:
+                logger.info("[DualTrack] 阶段=REFINING 状态=SKIPPED reason=not_needed_or_disabled")
+        except Exception as e:
+            logger.error(f"[DualTrack] 阶段=REVIEWING 状态=FAILED error={e}")
+            if self.prompt_logger:
+                self.prompt_logger.log_outputs(error=str(e))
+                self.prompt_logger.end_stage(success=False)
+            final_text = stitched_draft
+        return final_text, adjustment_plan
 
-                align_time = time.perf_counter() - align_start
-                logger.info(f"[DualTrack] 阶段=REVIEWING 状态=SUCCESS duration={align_time:.2f}s score={adjustment_plan.alignment_score:.1f}")
+    async def _run_fusion_refinement(
+        self,
+        chapter: Any,
+        book: Any,
+        beats: List[dict],
+        stitched_draft: str,
+        sketch_result: SketchResult,
+        adjustment_plan: AdjustmentPlan,
+    ) -> str:
+        logger.info(
+            f"[DualTrack] 阶段=REFINING 状态=RUNNING reason=low_score "
+            f"score={adjustment_plan.alignment_score:.1f} threshold={self.config.alignment_threshold}"
+        )
+        if self.prompt_logger:
+            self.prompt_logger.start_stage("FUSION_REFINEMENT", iteration=1)
+            self.prompt_logger.log_inputs(
+                alignment_score=adjustment_plan.alignment_score,
+                gaps_count=len(adjustment_plan.gaps) if adjustment_plan.gaps else 0,
+                beats_to_refine=list(adjustment_plan.beat_adjustments.keys()) if adjustment_plan.beat_adjustments else [],
+                has_global_adjustments=bool(adjustment_plan.global_adjustments),
+            )
+        try:
+            final_text = await self._execute_fusion_refinement(
+                stitched_draft=stitched_draft,
+                sketch_result=sketch_result,
+                adjustment_plan=adjustment_plan,
+                beats=beats,
+                chapter=chapter,
+                book=book,
+            )
+            if self.prompt_logger:
+                self.prompt_logger.log_outputs(
+                    final_word_count=len(final_text),
+                    stitched_word_count=len(stitched_draft),
+                    word_diff=len(final_text) - len(stitched_draft),
+                )
+                self.prompt_logger.end_stage(success=True)
+            return final_text
+        except Exception as refine_e:
+            logger.error(f"[DualTrack] 阶段=REFINING 状态=FAILED error={refine_e}")
+            if self.prompt_logger:
+                self.prompt_logger.log_outputs(error=str(refine_e))
+                self.prompt_logger.end_stage(success=False)
+            return stitched_draft
 
-                if self.prompt_logger:
-                    for ap in (adjustment_plan.analysis_prompts or []):
-                        self.prompt_logger.log_prompts(
-                            system_prompt=ap.get("system_prompt", ""),
-                            user_prompt=ap.get("user_prompt", ""),
-                            model=self.reasoning_model,
-                            temperature=self.config.aligner_config.temperature if self.config.aligner_config else 0.1,
-                            max_tokens=self.config.aligner_config.max_analysis_tokens if self.config.aligner_config else 2000,
-                            prompt_label=ap.get("stage", "INFO_ALIGNMENT_ANALYSIS"),
-                        )
-                    self.prompt_logger.log_outputs(
-                        alignment_score=adjustment_plan.alignment_score,
-                        needs_adjustment=adjustment_plan.needs_adjustment,
-                        gaps_count=len(adjustment_plan.gaps) if adjustment_plan.gaps else 0,
-                    )
-                    self.prompt_logger.end_stage(success=True)
-
-                if adjustment_plan.needs_adjustment and self.config.use_sketch_for_refinement:
-                    logger.info(
-                        f"[DualTrack] 阶段=REFINING 状态=RUNNING reason=low_score "
-                        f"score={adjustment_plan.alignment_score:.1f} threshold={self.config.alignment_threshold}"
-                    )
-                    if self.prompt_logger:
-                        self.prompt_logger.start_stage("FUSION_REFINEMENT", iteration=1)
-                        self.prompt_logger.log_inputs(
-                            alignment_score=adjustment_plan.alignment_score,
-                            gaps_count=len(adjustment_plan.gaps) if adjustment_plan.gaps else 0,
-                            beats_to_refine=list(adjustment_plan.beat_adjustments.keys()) if adjustment_plan.beat_adjustments else [],
-                            has_global_adjustments=bool(adjustment_plan.global_adjustments),
-                        )
-                    try:
-                        final_text = await self._execute_fusion_refinement(
-                            stitched_draft=stitched_draft,
-                            sketch_result=sketch_result,
-                            adjustment_plan=adjustment_plan,
-                            beats=beats,
-                            chapter=chapter,
-                            book=book,
-                        )
-                        if self.prompt_logger:
-                            self.prompt_logger.log_outputs(
-                                final_word_count=len(final_text),
-                                stitched_word_count=len(stitched_draft),
-                                word_diff=len(final_text) - len(stitched_draft),
-                            )
-                            self.prompt_logger.end_stage(success=True)
-                    except Exception as refine_e:
-                        logger.error(f"[DualTrack] 阶段=REFINING 状态=FAILED error={refine_e}")
-                        if self.prompt_logger:
-                            self.prompt_logger.log_outputs(error=str(refine_e))
-                            self.prompt_logger.end_stage(success=False)
-                        final_text = stitched_draft
-                else:
-                    logger.info("[DualTrack] 阶段=REFINING 状态=SKIPPED reason=not_needed_or_disabled")
-
-            except Exception as e:
-                logger.error(f"[DualTrack] 阶段=REVIEWING 状态=FAILED error={e}")
-                if self.prompt_logger:
-                    self.prompt_logger.log_outputs(error=str(e))
-                    self.prompt_logger.end_stage(success=False)
-                final_text = stitched_draft
-        else:
-            logger.info("[DualTrack] 阶段=REVIEWING 状态=SKIPPED reason=disabled_or_no_sketch")
-
-        total_time = time.perf_counter() - total_start
-
-        stats = {
+    def _build_stats(
+        self,
+        total_time: float,
+        track_time: float,
+        stitch_time: float,
+        final_text: str,
+        beats: List[dict],
+        adjustment_plan: Optional[AdjustmentPlan],
+    ) -> Dict[str, Any]:
+        return {
             "total_time": total_time,
             "track_time": track_time,
-            "stitch_time": stitch_time if 'stitch_time' in dir() else 0,
+            "stitch_time": stitch_time,
             "final_word_count": len(final_text),
             "beat_count": len(beats),
             "alignment_score": adjustment_plan.alignment_score if adjustment_plan else None,
         }
 
-        debug_info = {
+    def _build_debug_info(
+        self,
+        beat_drafts: List[BeatDraftResult],
+        sketch_result: Optional[SketchResult],
+        adjustment_plan: Optional[AdjustmentPlan],
+    ) -> Dict[str, Any]:
+        return {
             "track_a_prompts": [p for draft in beat_drafts for p in (draft.prompts or [])],
-            "track_b_prompts": getattr(sketch_result, 'prompts', []) if sketch_result else [],
-            "adjustment_analysis": getattr(adjustment_plan, 'analysis_prompts', []) if adjustment_plan else [],
+            "track_b_prompts": getattr(sketch_result, "prompts", []) if sketch_result else [],
+            "adjustment_analysis": getattr(adjustment_plan, "analysis_prompts", []) if adjustment_plan else [],
         }
-
-        logger.info(f"[DualTrack] 阶段=DONE 状态=SUCCESS total={total_time:.2f}s words={len(final_text)}")
-
-        return DualTrackResult(
-            final_text=final_text,
-            beat_drafts=beat_drafts,
-            stitched_draft=stitched_draft,
-            sketch_result=sketch_result,
-            adjustment_plan=adjustment_plan,
-            stats=stats,
-            debug_info=debug_info,
-        )
 
     async def _execute_track_a(
         self,
