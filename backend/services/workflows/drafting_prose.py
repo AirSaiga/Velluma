@@ -36,14 +36,13 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
-
 from backend.schemas import (
     DynamicContext,
     DraftingFeatureFlags,
     MicroReviewResult,
     DynamicStateUpdateResult,
 )
+from backend.services.utils.logging import get_runtime_logger
 from backend.services.prompts import (
     build_prose_draft_prompt_v25,
     build_micro_review_prompt,
@@ -74,6 +73,8 @@ from backend.services.workflows.beat_utils import (
     build_context_summaries,
     BeatDefaults,
 )
+
+logger = get_runtime_logger(__name__)
 
 LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]
 

@@ -68,6 +68,7 @@ from backend.services.prompts import (
     build_planner_agent_prompt,
     parse_planner_result,
 )
+from backend.services.utils.logging import get_runtime_logger
 
 # V3.8: 增强型 RAG 系统集成
 try:
@@ -93,7 +94,7 @@ except ImportError:
     ENHANCED_RAG_AVAILABLE = False
 
 # 配置模块级日志记录器
-logger = logging.getLogger(__name__)
+logger = get_runtime_logger(__name__)
 
 
 def _clamp_int(value: int, low: int, high: int, default: int) -> int:
@@ -356,6 +357,7 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, reposito
     word_count = request.word_count or 2000
     book = await book_repo.get_by_id(chapter.book_id) if book_repo else None
     
+    logger.info(f"[Agentic] 正在预览生成节拍: chapter_id={request.chapter_id}")
     config = adapt_request_to_config(request, chapter, book)
     context = await RuntimeContextBuilder.build(repositories, config)
     

@@ -57,6 +57,13 @@ LOG_PREFIX_WORKFLOW = "[Workflow]"
 LOG_PREFIX_SYSTEM = "[System]"
 
 
+def get_runtime_logger(name: str | None = None) -> logging.Logger:
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    if uvicorn_logger.handlers or uvicorn_logger.getEffectiveLevel() <= logging.INFO:
+        return uvicorn_logger
+    return logging.getLogger(name or __name__)
+
+
 def log_info(logger: logging.Logger, prefix: str, message: str, **kwargs: LogValue) -> None:
     """输出标准化 info 日志"""
     extra_info = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None) if kwargs else ""

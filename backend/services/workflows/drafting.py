@@ -51,15 +51,16 @@ from typing import Any, Dict, List, Optional, Callable
 
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
-
 from backend.schemas import (
     DynamicContext,
     DraftingFeatureFlags,
     WorkflowTier,
 )
+from backend.services.utils.logging import get_runtime_logger
 from backend.services.orchestration.tier_mapper import map_tension_to_workflow_tier
 from backend.services.workflows.utils import clean_llm_output
+
+logger = get_runtime_logger(__name__)
 
 # 从子模块导入具体实现
 from backend.services.workflows.drafting_thinking import (

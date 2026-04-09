@@ -16,6 +16,8 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from backend.core.dependencies import get_chapter_repository, get_book_repository, get_relationship_repository, get_map_repository
@@ -31,8 +33,10 @@ from backend.services.generation.chapter import (
     call_llm,
     preview_agentic_beats,
 )
+from backend.services.utils.logging import get_runtime_logger
 
 router = APIRouter(prefix="/api", tags=["chapter_generation"])
+logger = get_runtime_logger(__name__)
 
 
 @router.post("/generate_chapter")
@@ -152,6 +156,7 @@ async def generate_chapter_agentic_preview_beats(
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
     book_repo: BookRepository = Depends(get_book_repository),
 ):
+    logger.info(f"[PreviewBeats] 收到节拍预览请求: chapter_id={request.chapter_id}")
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
@@ -160,6 +165,8 @@ async def generate_chapter_agentic_preview_beats(
         "chapter": chapter_repo,
         "book": book_repo,
     }
-    return await preview_agentic_beats(request, repositories)
+    result = await preview_agentic_beats(request, repositories)
+    logger.info(f"[PreviewBeats] 节拍预览完成: chapter_id={request.chapter_id}, beat_count={len(result.get('beats', []))}")
+    return result
 
 

@@ -61,7 +61,7 @@ from backend.services.workflows.sketch_generator import SketchGeneratorConfig
 from backend.services.workflows.adversarial_aligner import AdversarialAlignerConfig
 from backend.services.utils.prompt_logger import create_logger
 from backend.services.utils.logging import (
-    ServiceLogger, LOG_PREFIX_DUAL_TRACK,
+    ServiceLogger, LOG_PREFIX_DUAL_TRACK, get_runtime_logger,
     build_sse_event, build_sse_metric_frame, build_sse_done
 )
 from backend.services.context import (
@@ -71,7 +71,7 @@ from backend.services.context import (
     ChapterContext,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_runtime_logger(__name__)
 svc_logger = ServiceLogger(logger, LOG_PREFIX_DUAL_TRACK)
 
 router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-dual-track"])
@@ -204,6 +204,7 @@ async def generate_chapter_dual_track(
 
         try:
             resolved_params = resolve_high_level_params(request)
+            svc_logger.info(f"[Generation] 阶段=START 状态=RUNNING chapter_id={chapter_id} run_id={_resolve_run_id(request, None)}")
 
             yield build_sse_event("ASSEMBLING_CONTEXT", "加载章节上下文...")
 
@@ -321,9 +322,10 @@ async def generate_chapter_dual_track(
                 }
             )
 
-            yield build_sse_event(
-                "CONTEXT_LOADED",
-                f"加载 {len(entities_list)} 个角色, {len(relationships_list)} 组关系"
+            yield build_sse_event("CONTEXT_LOADED", f"加载 {len(entities_list)} 个角色, {len(relationships_list)} 组关系")
+            svc_logger.info(
+                f"[Generation] 阶段=ASSEMBLING_CONTEXT 状态=SUCCESS "
+                f"entities={len(entities_list)} relationships={len(relationships_list)} memories={len(context.relevant_memories)}"
             )
             
             # ========================================================================
@@ -336,7 +338,7 @@ async def generate_chapter_dual_track(
             world_snapshot_constraints = ""
             if context.previous_world_snapshot:
                 world_snapshot_constraints = format_snapshot_for_planner(context.previous_world_snapshot)
-                svc_logger.info("World snapshot constraints injected", enabled=bool(world_snapshot_constraints))
+                svc_logger.info("[Generation] 阶段=WORLD_SNAPSHOT 状态=ENABLED")
 
             latest_status = chapter.generation_status or {}
             if request.resume_from_checkpoint and latest_status.get("run_id") == run_id and latest_status.get("status") == "completed":
@@ -378,6 +380,7 @@ async def generate_chapter_dual_track(
                 f"已接收 {len(beats)} 个节拍，开始生成正文...",
                 iteration=1
             )
+            svc_logger.info(f"[Generation] 阶段=BEATS_CONFIRMED 状态=SUCCESS beat_count={len(beats)}")
 
             # 记录已确认的 beats（无 LLM 调用，仅记录最终执行的节拍列表）
             prompt_logger.start_stage("BEATS_CONFIRMED", iteration=1)
@@ -448,6 +451,7 @@ async def generate_chapter_dual_track(
                 
                 # 发送 POV prompt 到前端
                 yield f"data: {json.dumps({'prompt': pov_prompt_data}, ensure_ascii=False)}\n\n"
+                svc_logger.info("[Generation] 阶段=POV_ASSIGNMENT 状态=SUCCESS")
                 
             except Exception as e:
                 svc_logger.error("POV Assignment failed", error=str(e))
@@ -460,7 +464,7 @@ async def generate_chapter_dual_track(
             
             # P2: 保存 StoryBeat 到数据库
             story_beats = await save_story_beats(db, chapter, beats)
-            svc_logger.debug("StoryBeats saved", count=len(story_beats))
+            svc_logger.info(f"[Generation] 阶段=STATE_PERSISTENCE 状态=SUCCESS story_beats={len(story_beats)}")
             await _persist_checkpoint(
                 db=db,
                 chapter=chapter,
@@ -594,7 +598,7 @@ async def generate_chapter_dual_track(
                         # 等待任务实际取消，获取可能的部分结果
                         partial_result = await workflow_task
                     except asyncio.CancelledError:
-                        svc_logger.info("Workflow task cancelled successfully", run_id=run_id)
+                        svc_logger.info("[Generation] 阶段=CANCELLED 状态=SUCCESS task=workflow_cancelled", run_id=run_id)
                     except Exception as workflow_e:
                         # workflow 在取消前可能已完成部分工作
                         svc_logger.warning("Workflow raised exception during cancellation", 
@@ -620,8 +624,11 @@ async def generate_chapter_dual_track(
                                 "partial_text_length": len(partial_result.final_text),
                             }
                         )
-                        svc_logger.info("Partial result saved after cancellation", 
-                                      run_id=run_id, text_length=len(partial_result.final_text))
+                        svc_logger.info(
+                            "[Generation] 阶段=CANCELLED 状态=PARTIAL_SAVED",
+                            run_id=run_id,
+                            text_length=len(partial_result.final_text),
+                        )
                     except Exception as save_e:
                         svc_logger.error("Failed to save partial result", run_id=run_id, error=str(save_e))
                 
@@ -668,8 +675,12 @@ async def generate_chapter_dual_track(
                                 "partial_text_length": len(partial_text),
                             }
                         )
-                        svc_logger.info("Partial result saved after beats completion", 
-                                      run_id=run_id, beat_count=len(result.beat_drafts), text_length=len(partial_text))
+                        svc_logger.info(
+                            "[Generation] 阶段=DRAFTING 状态=PARTIAL_SAVED",
+                            run_id=run_id,
+                            beat_count=len(result.beat_drafts),
+                            text_length=len(partial_text),
+                        )
                         
                         # 通知前端部分结果已保存
                         yield build_sse_event(

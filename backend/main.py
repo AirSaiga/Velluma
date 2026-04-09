@@ -52,6 +52,23 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 # =============================================================================
+# 启动阶段：解决终端编码问题（必须在所有日志配置之前）
+# =============================================================================
+# 原因：某些部署环境（Docker、WSL、Windows）的 stdout/stderr 默认编码可能不是 UTF-8，
+# 这会导致中文日志输出时抛出 UnicodeEncodeError
+# 方式：使用 reconfigure(encoding="utf-8") 确保流级别支持 UTF-8，
+# 这比重新包装 io.TextIOWrapper 更安全，因为它保留了原始流对象。
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+else:
+    # 备用方案：兼容旧版本 Python (虽然 AGENTS.md 要求 3.12+)
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
+# =============================================================================
 # 日志配置（必须在所有导入之前）
 # =============================================================================
 # 关键：logging.basicConfig() 只在第一次调用时生效
@@ -68,11 +85,11 @@ logger = logging.getLogger(__name__)
 logging.getLogger().setLevel(logging.INFO)
 
 # 强制设置所有已知 logger 的级别为 INFO
+# 包含 backend 根命名空间，确保所有子模块继承 INFO 级别
 for logger_name in [
     "uvicorn", "uvicorn.error", "uvicorn.access",
-    "backend", "backend.services", "backend.routes",
-    "backend.services.workflows", "backend.services.workflows.dual_track",
-    "backend.services.workflows.drafting_prose", "backend.services.workflows.planning",
+    "backend", "backend.services", "backend.routes", "backend.core",
+    "backend.repositories", "backend.config",
 ]:
     logging.getLogger(logger_name).setLevel(logging.INFO)
 
@@ -184,16 +201,6 @@ try:
 except Exception as e:
     GENERATION_BG_ROUTER_AVAILABLE = False
     logger.warning(f"[Main] 后台生成路由加载失败: {e}")
-
-# =============================================================================
-# 启动阶段：解决终端编码问题
-# =============================================================================
-# 原因：某些部署环境（Docker、WSL、Windows）的 stdout/stderr 默认编码可能不是 UTF-8，
-# 这会导致中文日志输出时抛出 UnicodeEncodeError
-# 副作用：将所有输出流强制重定向为 UTF-8 编码
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-
 
 # =============================================================================
 # 端口持久化机制

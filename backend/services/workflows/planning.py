@@ -45,6 +45,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from typing import Any, Optional
+import logging
 
 from backend.services.prompts import (
     build_planner_agent_prompt,
@@ -58,6 +59,9 @@ import json
 from backend.services.llm import call_llm
 from backend.models import Chapter, Book, Character, CharacterRelationship, StoryBeat
 from backend.schemas import PovAperture
+from backend.services.utils.logging import get_runtime_logger
+
+logger = get_runtime_logger(__name__)
 
 
 def infer_pov_aperture(beat: dict, tension_level: int) -> str:
@@ -128,6 +132,7 @@ async def generate_beats(
     Returns:
         tuple[list[dict], list[StoryBeat]]: (beats 字典列表, StoryBeat 实体列表)
     """
+    logger.info(f"[Planning] 开始生成章节节拍, 目标字数: {word_count}")
     planner_system_prompt, planner_user_prompt = build_planner_agent_prompt(
         chapter=chapter,
         book=book,
@@ -189,6 +194,7 @@ async def generate_beats(
         )
         story_beats.append(story_beat)
     
+    logger.info(f"[Planning] 节拍生成完成: 共 {len(story_beats)} 个节拍")
     return beats, story_beats
 
 
@@ -359,14 +365,11 @@ async def determine_chapter_anchor_pov(
     Returns:
         str: 核心主角的名字，如果无法确定返回空字符串
     """
-    import logging as _logging
-    _logger = _logging.getLogger(__name__)
-
     # ── 快速路径：Planner 已声明且合法，直接使用，跳过 LLM ──────────────
     if chapter_narrative_anchor_hint:
         valid_names = {c.get("name", "") for c in characters}
         if chapter_narrative_anchor_hint in valid_names:
-            _logger.info(
+            logger.info(
                 f"[AnchorPOV] 使用 Planner 声明的叙事核心: {chapter_narrative_anchor_hint}（跳过 LLM）"
             )
             if prompt_logger:
