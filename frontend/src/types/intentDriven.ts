@@ -112,6 +112,9 @@ export interface IntentDrivenState {
   recommendedPlans: RecommendedPlan[]
   userOverrides: Record<string, { original: any; current: any }>
   isExpertModeExpanded: boolean
+  // 篇幅与创作意图：从 IntentDrivenPanel 组件本地 ref 提升到单例状态
+  wordCount: number        // 默认 3000
+  authorIntent: string     // 默认 ''
 }
 
 // 推荐方案响应

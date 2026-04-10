@@ -134,8 +134,8 @@ async def _micro_review_assertion(
         validation_result = await validator.validate_draft(chunk_text, val_context)
         if not validation_result.is_valid:
             import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Beat {beat_index} 代码级强校验未通过: {validation_result.errors}")
+            local_logger = logging.getLogger(__name__)
+            local_logger.warning(f"Beat {beat_index} 代码级强校验未通过: {validation_result.errors}")
             # 如果存在严重代码级错误，直接阻断，不消耗 Token 进行 LLM 审阅
             # 格式化失败类别，供上层重试逻辑使用
             from backend.services.workflows.drafting_qc import _infer_fail_categories

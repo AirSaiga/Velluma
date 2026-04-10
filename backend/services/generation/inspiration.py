@@ -63,22 +63,22 @@ class InspirationItem:
 
     def __init__(
         self,
-        idea: str,
-        character: Optional[str] = None,
-        type: str = "plot",
-        trigger: Optional[str] = None,
+        idea_type: str,
+        title: str,
+        description: str,
+        impact: str,
     ):
-        self.idea = idea
-        self.character = character
-        self.type = type
-        self.trigger = trigger
+        self.idea_type = idea_type
+        self.title = title
+        self.description = description
+        self.impact = impact
 
     def to_dict(self) -> dict:
         return {
-            "idea": self.idea,
-            "character": self.character,
-            "type": self.type,
-            "trigger": self.trigger,
+            "idea_type": self.idea_type,
+            "title": self.title,
+            "description": self.description,
+            "impact": self.impact,
         }
 
 
@@ -195,15 +195,22 @@ async def generate_inspirations(
         if len(summary_text) > 500:
             summary_text = summary_text[:500] + "..."
 
-    system_prompt = """你是一个专业的小说创作灵感助手。你的任务是基于给定的上下文，生成3-5个创意性的后续剧情灵感。
+    system_prompt = """你是一个专业的小说创作灵感助手。你的任务是基于给定的上下文，生成4个创意性的后续剧情灵感。
 
-每个灵感应该包含：
-1. idea: 灵感描述（100-200字）
-2. character: 涉及的主要角色
-3. type: 灵感类型（plot/character/setting/twist）
-4. trigger: 触发条件（可选）
+请严格以 JSON 格式返回，格式如下：
+{
+  "inspirations": [
+    {
+      "idea_type": "plot_twist",  // 点子类型：剧情转折(plot_twist) / 关键冲突(key_conflict) / 新设伏笔(new_hook) / 平稳叙事(smooth_narrative)
+      "title": "简短标题",
+      "description": "百字左右的具体事件描述",
+      "impact": "这步棋对后续格局的影响/好处"
+    }
+  ]
+}
 
 请确保灵感：
+- 必须正好生成4个灵感
 - 具有创意性和戏剧性
 - 与前文逻辑连贯
 - 不违反全局禁忌
@@ -233,7 +240,7 @@ async def generate_inspirations(
 【当前章节】
 {chapter_title or '未命名'}
 
-请生成3-5个创意性的后续剧情灵感：
+请生成4个创意性的后续剧情灵感：
 """
 
     try:
@@ -254,17 +261,30 @@ async def generate_inspirations(
         data = json.loads(response)
         inspirations = data.get("inspirations", [])
 
-        return [
-            InspirationItem(
-                idea=item.get("idea", ""),
-                character=item.get("character"),
-                type=item.get("type", "plot"),
-                trigger=item.get("trigger"),
+        VALID_TYPES = {"plot_twist", "key_conflict", "new_hook", "smooth_narrative"}
+        
+        valid_inspirations = []
+        for item in inspirations:
+            if not item.get("description"):
+                continue
+                
+            idea_type = item.get("idea_type", "plot_twist")
+            if idea_type not in VALID_TYPES:
+                idea_type = "plot_twist"
+                
+            valid_inspirations.append(
+                InspirationItem(
+                    idea_type=idea_type,
+                    title=item.get("title", "无标题"),
+                    description=item.get("description", ""),
+                    impact=item.get("impact", ""),
+                )
             )
-            for item in inspirations
-            if item.get("idea")
-        ]
+            
+        return valid_inspirations
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to generate inspirations: {e}")
         return []
 
 

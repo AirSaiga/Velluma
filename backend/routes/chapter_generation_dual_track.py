@@ -45,6 +45,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
+from backend.models import Chapter
 from backend.schemas import GenerateChapterAgenticRequest, ConfirmedStoryBeat
 from backend.repositories import (
     ChapterRepository, BookRepository, MemoryRepository,
@@ -79,11 +80,11 @@ router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-dual-track"
 
 async def _persist_checkpoint(
     db: AsyncSession,
-    chapter: Any,
+    chapter: Chapter,
     run_id: str,
     stage: str,
     status: str,
-    payload: Optional[dict] = None,
+    payload: Optional[Dict[str, Any]] = None,
 ) -> None:
     checkpoints = list(chapter.generation_checkpoints or [])
     checkpoint = {
@@ -105,7 +106,10 @@ async def _persist_checkpoint(
     await db.commit()
 
 
-def _resolve_run_id(request: "DualTrackGenerationRequest", chapter: Any) -> str:
+def _resolve_run_id(
+    request: "DualTrackGenerationRequest",
+    chapter: Optional[Chapter] = None
+) -> str:
     if request.generation_run_id:
         return request.generation_run_id
     if request.resume_from_checkpoint and chapter.generation_run_id:
@@ -328,7 +332,9 @@ async def generate_chapter_dual_track(
             yield build_sse_event("CONTEXT_LOADED", f"加载 {len(entities_list)} 个角色, {len(relationships_list)} 组关系")
             svc_logger.info(
                 f"[Generation] 阶段=ASSEMBLING_CONTEXT 状态=SUCCESS "
-                f"entities={len(entities_list)} relationships={len(relationships_list)} memories={len(context.relevant_memories)}"
+                f"entities={len(entities_list)} "
+                f"relationships={len(relationships_list)} "
+                f"memories={len(context.relevant_memories)}"
             )
             
             # ========================================================================
@@ -340,11 +346,15 @@ async def generate_chapter_dual_track(
             # 强制注入世界状态快照约束（P0 级 - 不可跳过）
             world_snapshot_constraints = ""
             if context.previous_world_snapshot:
-                world_snapshot_constraints = format_snapshot_for_planner(context.previous_world_snapshot)
+                world_snapshot_constraints = format_snapshot_for_planner(
+                    context.previous_world_snapshot
+                )
                 svc_logger.info("[Generation] 阶段=WORLD_SNAPSHOT 状态=ENABLED")
 
             latest_status = chapter.generation_status or {}
-            if request.resume_from_checkpoint and latest_status.get("run_id") == run_id and latest_status.get("status") == "completed":
+            if (request.resume_from_checkpoint and
+                latest_status.get("run_id") == run_id and
+                latest_status.get("status") == "completed"):
                 cached_text = latest_status.get("final_text") or chapter.draft_text or ""
                 if cached_text:
                     yield build_sse_done(
@@ -567,8 +577,11 @@ async def generate_chapter_dual_track(
                                 last_heartbeat_time = current_time
                             except Exception as heartbeat_e:
                                 # 如果心跳发送失败，可能是连接已断开
-                                svc_logger.warning("Heartbeat failed, client may have disconnected", 
-                                                 run_id=run_id, error=str(heartbeat_e))
+                                svc_logger.warning(
+                                    "[Generation] 阶段=HEARTBEAT 状态=FAILED 原因=客户端可能已断开",
+                                    run_id=run_id,
+                                    error=str(heartbeat_e)
+                                )
                                 # 尝试取消 workflow
                                 if not workflow_task.done():
                                     workflow_task.cancel()
@@ -591,8 +604,11 @@ async def generate_chapter_dual_track(
                 
             except (GeneratorExit, asyncio.CancelledError) as cancel_e:
                 # P0: 客户端断开或任务被取消 - 传播取消信号
-                svc_logger.warning("Generation cancelled by client, propagating cancellation", 
-                                  run_id=run_id, exc_type=type(cancel_e).__name__)
+                svc_logger.warning(
+                    "[Generation] 阶段=CANCELLED 状态=RUNNING 原因=客户端取消",
+                    run_id=run_id,
+                    exc_type=type(cancel_e).__name__
+                )
                 
                 # 取消后台 workflow 任务
                 if not workflow_task.done():
@@ -604,8 +620,11 @@ async def generate_chapter_dual_track(
                         svc_logger.info("[Generation] 阶段=CANCELLED 状态=SUCCESS task=workflow_cancelled", run_id=run_id)
                     except Exception as workflow_e:
                         # workflow 在取消前可能已完成部分工作
-                        svc_logger.warning("Workflow raised exception during cancellation", 
-                                         run_id=run_id, error=str(workflow_e))
+                        svc_logger.warning(
+                            "[Generation] 阶段=CANCELLED 状态=WARNING 原因=工作流取消时异常",
+                            run_id=run_id,
+                            error=str(workflow_e)
+                        )
                 
                 # 尝试保存部分结果（如果有）
                 if partial_result and hasattr(partial_result, 'final_text') and partial_result.final_text:
@@ -633,7 +652,11 @@ async def generate_chapter_dual_track(
                             text_length=len(partial_result.final_text),
                         )
                     except Exception as save_e:
-                        svc_logger.error("Failed to save partial result", run_id=run_id, error=str(save_e))
+                        svc_logger.error(
+                            "[Generation] 阶段=CANCELLED 状态=ERROR 原因=保存部分结果失败",
+                            run_id=run_id,
+                            error=str(save_e)
+                        )
                 
                 # 向前端发送取消确认（如果连接还可用）
                 try:
@@ -644,8 +667,12 @@ async def generate_chapter_dual_track(
                 raise  # 重新抛出，让上层处理
             
             # 更新最终状态
-            prompt_logger._final_text_length = len(result.final_text) if result.final_text else 0
-            prompt_logger._review_passed = not (result.adjustment_plan and result.adjustment_plan.needs_adjustment)
+            prompt_logger._final_text_length = (
+                len(result.final_text) if result.final_text else 0
+            )
+            prompt_logger._review_passed = not (
+                result.adjustment_plan and result.adjustment_plan.needs_adjustment
+            )
             
             # 发送 Track A 完成事件（内部事件，前端主要关注 DRAFTING 状态）
             yield build_sse_event(
@@ -693,8 +720,11 @@ async def generate_chapter_dual_track(
                             beat_count=len(result.beat_drafts),
                         )
                 except Exception as partial_save_e:
-                    svc_logger.warning("Failed to save partial result after beats", 
-                                     run_id=run_id, error=str(partial_save_e))
+                    svc_logger.warning(
+                        "[Generation] 阶段=DRAFTING 状态=WARNING 原因=保存节拍草稿失败",
+                        run_id=run_id,
+                        error=str(partial_save_e)
+                    )
                     # 不阻塞主流程，继续统稿
             
             # 发送 Track B 完成事件（如果有，内部事件）
@@ -737,7 +767,9 @@ async def generate_chapter_dual_track(
                     yield f"data: {json.dumps({'event': 'TEXT_CHUNK', 'content': chunk}, ensure_ascii=False)}\n\n"
                 except Exception:
                     # 客户端断开连接，停止发送剩余内容
-                    svc_logger.warning("Client disconnected during TEXT_CHUNK streaming")
+                    svc_logger.warning(
+                        "[Generation] 阶段=TEXT_CHUNK 状态=DISCONNECTED 原因=客户端断开"
+                    )
                     raise GeneratorExit("Client disconnected")
             
             # 发送最终结果（使用前端期望的 DONE 而非 COMPLETE）
@@ -794,10 +826,13 @@ async def generate_chapter_dual_track(
                 review_passed=prompt_logger._review_passed
             )
             prompt_logger._finalized = True
-        except BaseException as e:
+        except Exception as e:
             exc_type = type(e).__name__
             error_msg = f"生成失败 ({exc_type}): {str(e)}"
-            svc_logger.error(f"Generator exception: {exc_type}: {str(e)}")
+            svc_logger.error(
+                f"[Generation] 阶段=ERROR 状态=FAILED 异常类型={exc_type}",
+                error=str(e)
+            )
             
             # 确定状态：取消 vs 失败
             is_cancelled = isinstance(e, (GeneratorExit, asyncio.CancelledError))
@@ -816,7 +851,10 @@ async def generate_chapter_dual_track(
                     )
                 except Exception as checkpoint_e:
                     # 记录checkpoint失败但不覆盖原始错误
-                    svc_logger.error(f"Failed to persist error checkpoint", error=str(checkpoint_e))
+                    svc_logger.error(
+                        "[Generation] 阶段=ERROR 状态=CHECKPOINT_FAILED 原因=持久化错误检查点失败",
+                        error=str(checkpoint_e)
+                    )
 
             # 尽最大努力通知前端错误 - 适用于所有异常类型包括 GeneratorExit/CancelledError
             try:
@@ -858,7 +896,10 @@ async def generate_chapter_dual_track(
                     prompt_logger._finalized = True
                 except Exception as finalize_e:
                     # 日志finalize失败不应影响主流程
-                    svc_logger.error(f"Prompt logger finalize failed", error=str(finalize_e))
+                    svc_logger.error(
+                        "[Generation] 阶段=FINALIZE 状态=ERROR 原因=日志终结失败",
+                        error=str(finalize_e)
+                    )
     
     from fastapi.responses import StreamingResponse
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
@@ -1074,7 +1115,12 @@ async def generate_chapter_dual_track_simple(
     except Exception as e:
         exc_type = type(e).__name__
         error_msg = f"双轨生成失败 ({exc_type}): {str(e)}"
-        svc_logger.error(f"Dual-track simple generation failed", chapter_id=chapter_id, run_id=run_id, error=error_msg)
+        svc_logger.error(
+            "[Generation] 阶段=SIMPLE_GENERATION 状态=FAILED",
+            chapter_id=chapter_id,
+            run_id=run_id,
+            error=error_msg
+        )
         raise HTTPException(status_code=500, detail={"error": error_msg, "error_type": exc_type, "run_id": run_id})
 
 

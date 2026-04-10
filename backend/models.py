@@ -31,6 +31,28 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from backend.database import Base
 
+__all__ = [
+    # Enums
+    "PlotLedgerStatus",
+    "TaskStatus",
+    # Models
+    "Book",
+    "Chapter",
+    "ChapterEntity",
+    "MapLocation",
+    "ChapterMapLocation",
+    "Character",
+    "CharacterRelationship",
+    "MemoryChunk",
+    "StoryBeat",
+    "SceneIntent",
+    "PlotLedger",
+    "GenerationTask",
+    # Utilities
+    "generate_uuid",
+    "utc_now",
+]
+
 
 def generate_uuid() -> uuid.UUID:
     """生成 UUID 主键"""

@@ -28,6 +28,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - backend/services/workflow/: 工作流模块使用推导引擎
 """
 
+__all__ = ["DerivationEngine"]
+
 import logging
 from typing import Any, Dict, List, Optional
 

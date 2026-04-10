@@ -69,6 +69,9 @@ async def generate_inspiration(
             author_intent=request.author_intent,
         )
 
+        if not inspiration_items:
+            raise ValueError("生成结果为空，可能是大模型返回格式不符合要求或内容被过滤")
+
         inspirations = [item.to_dict() for item in inspiration_items]
         return InspirationResponse(inspirations=inspirations)
 

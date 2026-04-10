@@ -1,6 +1,6 @@
 // 创作意图驱动层导出
 
-export { useIntentDrivenConfig } from './useIntentDrivenConfig'
+export { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from './useIntentDrivenConfig'
 export { CREATIVE_INTENT_TEMPLATES, CHAPTER_GOAL_TEMPLATES } from './intentTemplates'
 
 // 组件导出

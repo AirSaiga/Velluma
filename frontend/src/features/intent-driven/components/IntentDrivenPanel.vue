@@ -105,6 +105,10 @@
               <div class="empty-icon">⚠️</div>
               <p>请先返回上一步，至少选择 1 个创作意图。</p>
             </div>
+            <div v-else-if="recommendedPlans.length === 0" class="empty-state">
+              <div class="empty-icon">⏳</div>
+              <p>正在生成推荐方案...</p>
+            </div>
             <div v-else class="plans-grid">
               <RecommendedPlanCard
                 v-for="plan in recommendedPlans"
@@ -152,8 +156,9 @@
                   </div>
                   <span class="control-title">附加说明</span>
                 </div>
-                <textarea 
-                  v-model="authorIntent"
+                <textarea
+                  :value="authorIntent"
+                  @input="setAuthorIntent(($event.target as HTMLTextAreaElement).value)"
                   class="sleek-textarea"
                   placeholder="在此输入任何额外的提示，例如：增加悬疑感、强化反派气场..."
                   rows="4"
@@ -187,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
 import IntentSelector from './IntentSelector.vue'
 import GoalSelector from './GoalSelector.vue'
@@ -217,7 +222,12 @@ const {
   selectedPlanType,
   overrideCount,
   selectPlanType,
-  buildPayload
+  buildPayload,
+  wordCount,
+  authorIntent,
+  setWordCount,
+  setAuthorIntent,
+  refreshRecommendations
 } = useIntentDrivenConfig()
 
 type WorkflowPageKey = 'setup' | 'plan' | 'adjust' | 'expert'
@@ -229,8 +239,13 @@ const workflowPages: Array<{ key: WorkflowPageKey; label: string; required: bool
 ]
 
 const currentWorkflowPage = ref<WorkflowPageKey>('setup')
-const wordCount = ref(3000)
-const authorIntent = ref('')
+
+// 切换到推荐方案页面时，确保刷新推荐数据
+watch(currentWorkflowPage, (newPage) => {
+  if (newPage === 'plan' && hasSelection.value) {
+    refreshRecommendations()
+  }
+})
 
 const canGenerate = computed(() => {
   return hasSelection.value && wordCount.value >= 500

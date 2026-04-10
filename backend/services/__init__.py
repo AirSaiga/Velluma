@@ -61,8 +61,6 @@ from backend.services.generation import (
     generate_summary_embedding,
     expand_inspiration,
     expand_outline,
-    persist_checkpoint,
-    resolve_run_id,
 )
 
 from backend.services.context import (

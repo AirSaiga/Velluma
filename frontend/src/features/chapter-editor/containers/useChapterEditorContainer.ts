@@ -1,28 +1,11 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi, publishPromptData } from '../../../services/api'
-import {
-  AGENTIC_DEFAULTS,
-  AGENTIC_FIELD_CONFIG,
-  AGENTIC_FIELD_OPTIONS,
-  AGENTIC_GROUPS,
-  BASIC_MODE_FIELDS,
-  EXPERT_MODE_EXTRA_FIELDS,
-  EDITOR_MODE_CONFIG,
-  type EditorMode,
-  buildLegacyAgenticFields,
-  buildAgenticPayload,
-  deserializeAgenticForm,
-  getAgenticFieldFeedback,
-  normalizeAgenticForm,
-  serializeAgenticForm,
-  validateAgenticForm
-} from '../../../composables/useAgenticConfig'
-import type { AgenticFieldOption } from '../../../composables/useAgenticConfig'
-import type { AgenticFormState, ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, PacingStyle } from '../../../types'
-import { useIntentDrivenConfig } from '../../intent-driven'
+import { buildAgenticPayload } from '../../../composables/useAgenticConfig'
+import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload } from '../../../types'
+import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 
 export interface ChapterEditorContainerProps {
   selectedChapter: Chapter | null
@@ -57,22 +40,11 @@ interface BeatEditorState {
   hook_ids: string[]
 }
 
-const TENSION_LEVEL_MIN = 1
-const TENSION_LEVEL_MAX = 5
-const DEFAULT_TENSION_LEVEL = 3
-const DEFAULT_PACING_STYLE: PacingStyle = 'balanced'
-const pacingStyleOptions: Array<{ value: PacingStyle; label: string }> = [
-  { value: 'slow_burn', label: '慢热推进' },
-  { value: 'balanced', label: '平衡节奏' },
-  { value: 'fast_paced', label: '快节奏推进' }
-]
 const beatFieldMap = {
   openingState: 'entry_state',
   stoppingState: 'exit_state',
   forbiddenEventsText: 'red_lines'
 } as const
-const AGENTIC_STORAGE_KEY = 'velluma_agentic_settings'
-const EDITOR_MODE_STORAGE_KEY = 'velluma_editor_mode'
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
   const { isGenerating, generatedText, error, workflowState, startGeneration, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
@@ -83,7 +55,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const publishError = ref<string | null>(null)
   const showPublishModal = ref(false)
   const showAgenticSettingsModal = ref(false)
-  const { reset: resetIntentDrivenConfig } = useIntentDrivenConfig()
+  const { reset: resetIntentDrivenConfig, wordCount: intentWordCount } = useIntentDrivenConfig()
   const showBeatReviewModal = ref(false)
   const characterUpdates = ref<Array<{
     character_id: string
@@ -104,47 +76,13 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const completionMessage = ref('')
   const completionTitle = ref('')
 
-  const agenticForm = ref<AgenticFormState>(readStoredAgenticForm())
-  const wordCountMin = ref(500)
-  const wordCountMax = ref(10000)
   const isStreamMode = ref(true)
   const isAgenticMode = ref(true)
   const formError = ref('')
-  
-  // V3.8 编辑模式状态
-  const editorMode = ref<EditorMode>(readStoredEditorMode())
-  
-  function readStoredEditorMode(): EditorMode {
-    // 编辑模式已统一为意图驱动
-    return 'intent'
-  }
-  
-  function persistEditorMode(mode: EditorMode) {
-    // 已废弃，保留以兼容
-  }
-  
-  // 编辑模式固定为 intent
-  const visibleAgenticFields = computed(() => [...BASIC_MODE_FIELDS, ...EXPERT_MODE_EXTRA_FIELDS])
-  
-  const editorModeConfig = computed(() => EDITOR_MODE_CONFIG['intent'])
 
   const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value)
   const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value)
   const selectedChapter = computed(() => props.selectedChapter)
-  const agenticValidation = computed(() => validateAgenticForm(agenticForm.value))
-  const agenticFieldFeedback = computed(() => getAgenticFieldFeedback(agenticForm.value))
-  const agenticGroupFields = computed(() => {
-    // 明确指定分组和字段顺序
-    return {
-      steering: ['author_intent'],
-      style: ['tension_level', 'pacing_style'],
-      generation: ['word_count'],
-      memory: ['memory_span', 'creativity_level', 'progression_preference', 'rag_lambda'],
-      workflow: ['refinement_depth', 'force_parallel_prose']
-    } as any
-  })
-  const hasFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).some(Boolean))
-  const firstFieldFeedback = computed(() => Object.values(agenticFieldFeedback.value).find(Boolean) || '')
 
   function openCompletionModal(title: string, message: string) {
     completionTitle.value = title
@@ -157,42 +95,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     completionMessage.value = ''
     completionTitle.value = ''
   }
-  const canSubmitAgentic = computed(() => agenticValidation.value.errors.length === 0 && !hasFieldFeedback.value)
-  const ragWeightTotal = computed(() => {
-    const legacyFields = buildLegacyAgenticFields(agenticForm.value)
-    const sum = legacyFields.rag_alpha + legacyFields.rag_beta + legacyFields.rag_gamma
-    return Math.round(sum * 1000) / 1000
-  })
-
-  function readStoredAgenticForm() {
-    if (typeof window === 'undefined') {
-      return { ...AGENTIC_DEFAULTS }
-    }
-    try {
-      const raw = localStorage.getItem(AGENTIC_STORAGE_KEY)
-      if (!raw) return { ...AGENTIC_DEFAULTS }
-      return deserializeAgenticForm(JSON.parse(raw))
-    } catch {
-      return { ...AGENTIC_DEFAULTS }
-    }
-  }
 
   function handleEditorEntityFocus(keyword: string) {
     emit('editor-entity-focus', keyword)
   }
-
-  function persistAgenticForm(value: AgenticFormState) {
-    if (typeof window === 'undefined') {
-      return
-    }
-    try {
-      localStorage.setItem(AGENTIC_STORAGE_KEY, JSON.stringify(serializeAgenticForm(value)))
-    } catch {}
-  }
-
-  watch(agenticForm, (value) => {
-    persistAgenticForm(value)
-  }, { deep: true })
 
   function updateChapter(updates: Record<string, any>) {
     if (!selectedChapter.value) return
@@ -212,38 +118,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function handleAssetsSchemaInput(e: Event) {
     const target = e.target as HTMLTextAreaElement
     scheduleMetaUpdate({ chapter_assets_schema: target.value })
-  }
-
-  function normalizeTensionLevel(value: unknown, fallback = DEFAULT_TENSION_LEVEL) {
-    const numeric = Number(value)
-    if (!Number.isFinite(numeric)) return fallback
-    const rounded = Math.round(numeric)
-    return Math.max(TENSION_LEVEL_MIN, Math.min(TENSION_LEVEL_MAX, rounded))
-  }
-
-  function normalizePacingStyle(value: unknown, fallback: PacingStyle = DEFAULT_PACING_STYLE): PacingStyle {
-    if (value === 'slow_burn' || value === 'balanced' || value === 'fast_paced') {
-      return value
-    }
-    return fallback
-  }
-
-  function getTensionLevelValue() {
-    return normalizeTensionLevel(selectedChapter.value?.tension_level, DEFAULT_TENSION_LEVEL)
-  }
-
-  function getPacingStyleValue() {
-    return normalizePacingStyle(selectedChapter.value?.pacing_style, DEFAULT_PACING_STYLE)
-  }
-
-  function handleTensionLevelInput(event: Event) {
-    const target = event.target as HTMLInputElement
-    updateChapter({ tension_level: normalizeTensionLevel(target.value, getTensionLevelValue()) })
-  }
-
-  function handlePacingStyleInput(event: Event) {
-    const target = event.target as HTMLSelectElement
-    updateChapter({ pacing_style: normalizePacingStyle(target.value, getPacingStyleValue()) })
   }
 
   let metaUpdateTimeout: ReturnType<typeof setTimeout> | undefined
@@ -621,7 +495,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       showToast('请先选择章节', 'warning')
       return
     }
-    if (!isAgenticMode.value && !props.apiConfig.api_key) {
+    if (!props.apiConfig.api_key) {
       showToast('请先配置 API Key', 'warning')
       return
     }
@@ -638,173 +512,29 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       if (!ok) return
     }
 
-    const requestData = {
-      chapter_id: selectedChapter.value.id,
-      api_key: props.apiConfig.api_key,
-      base_url: props.apiConfig.base_url || undefined,
-      model: props.apiConfig.reasoning_model || props.apiConfig.model,
-      word_count: agenticForm.value.word_count
-    }
+    // === 意图驱动路径（唯一生成路径）===
+    // 传入章节数据，优先使用已保存的配置
+    const chapter = selectedChapter.value as any
+    const { payload, errors } = buildAgenticPayloadFromIntent({
+      chapterId: chapter.id,
+      apiConfig: props.apiConfig,
+      chapterData: chapter ? {
+        creative_intents: chapter.creative_intents,
+        chapter_goals: chapter.chapter_goals,
+        selected_plan_type: chapter.selected_plan_type,
+        user_overrides: chapter.user_overrides,
+        word_count: chapter.word_count,
+        author_intent: chapter.author_intent
+      } : undefined
+    })
 
-    if (isAgenticMode.value) {
-      const rawFeedback = getAgenticFieldFeedback(agenticForm.value)
-      const firstFeedback = Object.values(rawFeedback).find(Boolean)
-      if (firstFeedback) {
-        formError.value = firstFeedback
-        showToast(formError.value, 'warning')
-        return
-      }
-      const { payload, errors } = buildAgenticPayload({
-        chapterId: selectedChapter.value.id,
-        apiConfig: props.apiConfig,
-        form: agenticForm.value,
-        editorMode: editorMode.value
-      })
-      agenticForm.value = normalizeAgenticForm(agenticForm.value)
-      if (!payload) {
-        formError.value = errors[0] || '表单参数不合法'
-        showToast(formError.value, 'warning')
-        return
-      }
-      await previewBeatsForReview(payload, hasEditorContent)
+    if (!payload) {
+      formError.value = errors[0] || '请先配置智能生成设置'
+      showToast(formError.value, 'warning')
       return
     }
 
-    if (isStreamMode.value) {
-      reset()
-      formError.value = ''
-      generateStartTime = Date.now()
-      if (hasEditorContent && editorRef.value) {
-        editorRef.value.clearContent()
-      }
-      startGeneration(requestData, (chunk) => {
-        if (editorRef.value) {
-          editorRef.value.insertContent(chunk)
-        }
-      }, () => {
-        if (editorRef.value) {
-          editorRef.value.flushBuffer()
-        }
-        syncGeneratedContentToChapter()
-        openCompletionModal('生成完成', `本章正文生成完成！(${getDurationText()})`)
-      })
-      return
-    }
-
-    reset()
-    formError.value = ''
-    generateStartTime = Date.now()
-    if (hasEditorContent && editorRef.value) {
-      editorRef.value.clearContent()
-    }
-    isGenerating.value = true
-    try {
-      const result = await generateApi.generateSync(requestData)
-      publishPromptData(result.prompt)
-      if (editorRef.value && result.content) {
-        editorRef.value.clearContent()
-        editorRef.value.insertContent(result.content)
-      }
-      openCompletionModal('生成完成', `本章正文生成完成！(${getDurationText()})`)
-    } catch (err) {
-      showToast('生成失败: ' + (err as Error).message, 'error')
-    } finally {
-      isGenerating.value = false
-    }
-  }
-
-  function normalizeAgenticField() {
-    const before = getAgenticFieldFeedback(agenticForm.value)
-    agenticForm.value = normalizeAgenticForm(agenticForm.value)
-    if (Object.keys(before).length > 0) {
-      formError.value = '检测到无效输入，已自动恢复为有效值'
-    } else if (!hasFieldFeedback.value) {
-      formError.value = ''
-    }
-  }
-
-  function restoreAgenticDefaults() {
-    agenticForm.value = { ...AGENTIC_DEFAULTS }
-    formError.value = ''
-  }
-
-  function restoreAgenticField(field: keyof AgenticFormState) {
-    agenticForm.value = {
-      ...agenticForm.value,
-      [field]: AGENTIC_DEFAULTS[field]
-    }
-    formError.value = ''
-  }
-
-  function getAgenticFieldValue(field: keyof AgenticFormState) {
-    return agenticForm.value[field]
-  }
-
-  function setAgenticFieldValue(field: keyof AgenticFormState, event: Event) {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    // 处理 checkbox 类型的布尔值
-    if (field === 'force_parallel_prose') {
-      const checkboxTarget = event.target as HTMLInputElement
-      agenticForm.value = {
-        ...agenticForm.value,
-        [field]: checkboxTarget.checked
-      }
-      return
-    }
-    const nextValue = field === 'word_count' || field === 'rag_lambda' || field === 'tension_level' ? Number(target.value) : target.value
-    agenticForm.value = {
-      ...agenticForm.value,
-      [field]: nextValue as AgenticFormState[keyof AgenticFormState]
-    }
-  }
-
-  function isAgenticFieldSelect(field: keyof AgenticFormState) {
-    return Boolean(AGENTIC_FIELD_OPTIONS[field])
-  }
-
-  function getAgenticFieldOptions(field: keyof AgenticFormState): AgenticFieldOption[] {
-    return AGENTIC_FIELD_OPTIONS[field] || []
-  }
-
-  function getAgenticFieldInputType(field: keyof AgenticFormState) {
-    if (field === 'force_parallel_prose') {
-      return 'checkbox'
-    }
-    if (isAgenticFieldSelect(field)) {
-      return 'select'
-    }
-    if (field === 'word_count') {
-      return 'number'
-    }
-    if (field === 'author_intent') {
-      return 'textarea'
-    }
-    return 'number'
-  }
-
-  function getAgenticFieldStep(field: keyof AgenticFormState) {
-    if (field === 'word_count') return 100
-    if (field === 'rag_lambda') return 0.1
-    if (field === 'tension_level') return 1
-    return 0.01
-  }
-
-  function getAgenticFieldMin(field: keyof AgenticFormState) {
-    if (field === 'word_count') return 500
-    if (field === 'rag_lambda') return 0
-    if (field === 'tension_level') return 1
-    return 0
-  }
-
-  function getAgenticFieldMax(field: keyof AgenticFormState) {
-    if (field === 'word_count') return 10000
-    if (field === 'rag_lambda') return undefined
-    if (field === 'tension_level') return 5
-    return undefined
-  }
-
-  function getAgenticFieldFeedbackText(field: keyof AgenticFormState) {
-    return agenticFieldFeedback.value[field] || ''
+    await previewBeatsForReview(payload, hasEditorContent)
   }
 
   let updateTimeout: ReturnType<typeof setTimeout> | undefined
@@ -895,20 +625,13 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     isStreamMode.value = !isStreamMode.value
   }
 
-  function setWordCount(value: number) {
-    agenticForm.value = {
-      ...agenticForm.value,
-      word_count: value
-    }
-  }
-
   async function handleOptimize() {
     if (!selectedChapter.value || !optimizationFeedback.value.trim() || isGenerating.value) return
     try {
       const optimizedContent = await optimizeChapter({
         chapter_id: selectedChapter.value.id,
         optimization_feedback: optimizationFeedback.value,
-        word_count: agenticForm.value.word_count,
+        word_count: intentWordCount.value,
         api_key: props.apiConfig.api_key,
         base_url: props.apiConfig.base_url,
         model: props.apiConfig.reasoning_model || props.apiConfig.model
@@ -967,19 +690,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   return {
-    AGENTIC_FIELD_CONFIG,
-    AGENTIC_GROUPS,
     showCompletionModal: showCompletionModal,
     completionMessage: completionMessage,
     completionTitle: completionTitle,
     closeCompletionModal,
-    agenticForm,
-    agenticGroupFields,
-    agenticValidation,
-    agenticFieldFeedback,
     beatPreviewError,
     beatPreviewLoading,
-    canSubmitAgentic,
     chapterSummary,
     characterUpdates,
     closeAgenticSettingsModal,
@@ -987,22 +703,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     closePublishModal,
     confirmBeatsAndGenerate,
     error,
-    firstFieldFeedback,
     formError,
     generatedText,
-    getAgenticFieldFeedbackText,
-    getAgenticFieldInputType,
-    getAgenticFieldOptions,
-    getAgenticFieldMax,
-    getAgenticFieldMin,
-    getAgenticFieldStep,
-    getAgenticFieldValue,
     getBeatHookLabel,
     getMetaCollapsedLabel,
-    getPacingStyleValue,
-    getTensionLevelValue,
     getWorkflowStageLabel,
-    handlePacingStyleInput,
     handleContentUpdate,
     handleEditorEntityFocus,
     handleFormatText,
@@ -1010,7 +715,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     handlePartialOptimize,
     handleOutlineInput,
     handleAssetsSchemaInput,
-    handleTensionLevelInput,
     handleTitleInput,
     inspirationActiveCharacterIds,
     isAgenticMode,
@@ -1022,25 +726,17 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     isPublishing,
     isStreamMode,
     localMetaCollapsed,
-    normalizeAgenticField,
     openAgenticSettingsModal,
     openInspirationModal,
-    isAgenticFieldSelect,
     optimizationFeedback,
-    pacingStyleOptions,
     previewBeats,
     anchorPov,
     // anchorPov kept for backward-compat but no longer displayed
     publishChapter,
-    ragWeightTotal,
-    restoreAgenticDefaults,
-    restoreAgenticField,
     selectedChapter,
-    setAgenticFieldValue,
     setEditorRef,
     scrollToCritique,
     setOptimizationFeedback,
-    setWordCount,
     showAgenticSettingsModal,
     showBeatReviewModal,
     showInspirationModal,
@@ -1050,14 +746,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     toggleCharacter,
     toggleMetaCollapsed,
     toggleStreamMode,
-    wordCountMax,
-    wordCountMin,
     workflowState,
     handleApplyInspirationToOutline,
-    closeInspirationModal,
-    // 编辑模式（已固定为 intent）
-    editorMode,
-    editorModeConfig,
-    visibleAgenticFields
+    closeInspirationModal
   }
 }

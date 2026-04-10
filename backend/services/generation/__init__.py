@@ -25,10 +25,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 子模块：
 - chapter.py: 章节生成主服务
-- dual_track.py: 双轨生成辅助
 - publish.py: 章节发布服务
 - inspiration.py: 灵感生成
 - memory_scorer.py: 记忆评分
+- background_manager.py: 后台生成管理
 
 主要功能：
 - 章节提示词构建
@@ -41,6 +41,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - backend.services.llm: LLM 调用接口
 - backend.services.prompts: 提示词模板
 - backend.models: 数据模型
+
+注意：双轨生成相关功能已迁移到 services/workflows/dual_track.py
 """
 
 from .chapter import (
@@ -54,13 +56,6 @@ from .chapter import (
     preview_agentic_beats,
     update_character_dynamic_state,
     refine_draft,
-)
-from .dual_track import (
-    persist_checkpoint,
-    resolve_run_id,
-    build_generation_run_info,
-    build_sketch_config,
-    extract_effective_models,
 )
 from .publish import (
     generate_chapter_summary,
@@ -89,12 +84,6 @@ __all__ = [
     "preview_agentic_beats",
     "update_character_dynamic_state",
     "refine_draft",
-    # Dual track
-    "persist_checkpoint",
-    "resolve_run_id",
-    "build_generation_run_info",
-    "build_sketch_config",
-    "extract_effective_models",
     # Publish
     "generate_chapter_summary",
     "generate_summary_embedding",

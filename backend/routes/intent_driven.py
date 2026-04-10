@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
-from backend.schemas import RecommendRequest, IntentDrivenGenerateRequest
+from backend.schemas import RecommendRequest
 
 logger = logging.getLogger(__name__)
 svc_logger = ServiceLogger(logger, LOG_PREFIX_WORKFLOW)
@@ -271,116 +271,4 @@ async def generate_recommendations(request: RecommendRequest):
             "merged_strategy": engine.explain_derivation(plans[0].policy) if plans else {}
         },
         "derivation_explanation": engine.get_derivation_log()
-    }
-
-
-@router.post("/generate")
-async def generate_with_intent(request: IntentDrivenGenerateRequest):
-    """
-    意图驱动生成
-    
-    接收意图和目标，应用推荐方案，执行生成
-    """
-    from backend.services.orchestration.agentic import generate_agentic_chapter_stream
-    from backend.config.adapter import adapt_request_to_config
-    
-    # 1. 构建意图对象
-    intents = []
-    if request.creative_intents:
-        for i, intent_type in enumerate(request.creative_intents[:2]):
-            try:
-                # 安全获取优先级，防止数组越界
-                priority = (
-                    request.intent_priorities[i]
-                    if request.intent_priorities and i < len(request.intent_priorities)
-                    else 2 - i
-                )
-                intents.append(CreativeIntent(
-                    intent_type=CreativeIntentType(intent_type),
-                    priority=priority,
-                    custom_description=request.custom_intent_description
-                ))
-            except ValueError:
-                # 记录警告日志，不静默忽略无效意图
-                svc_logger.warning("Invalid intent type ignored", intent_type=intent_type)
-    
-    # 2. 构建目标对象
-    goals = None
-    if request.chapter_goals:
-        goals = [ChapterGoal(
-            goal_type=ChapterGoalType(gt),
-            target_entity_ids=request.target_entity_ids or []
-        ) for gt in request.chapter_goals[:3] if gt in [e.value for e in ChapterGoalType]]
-    
-    # 3. 推导策略
-    engine = IntentDerivationEngine()
-    plan_type = PlanType(request.selected_plan_type or "balanced")
-    policy = engine.derive_policy(intents, goals, plan_type)
-    
-    # 4. 应用用户覆盖
-    if request.user_overrides:
-        for field, value in request.user_overrides.items():
-            if hasattr(policy, field):
-                setattr(policy, field, value)
-    
-    # 5. 构建兼容请求
-    legacy_request = _build_legacy_request(request, policy)
-    
-    # 6. 执行生成（返回 SSE 流）
-    return StreamingResponse(
-        generate_agentic_chapter_stream(legacy_request),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
-
-def _build_legacy_request(
-    request: IntentDrivenGenerateRequest,
-    policy
-) -> dict:
-    """将意图驱动请求转换为兼容格式"""
-    # 根据精修深度推导迭代次数
-    refinement_iterations = {"light": 1, "standard": 2, "deep": 4}
-    
-    return {
-        "chapter_id": request.chapter_id,
-        "api_key": request.api_key,
-        "base_url": request.base_url,
-        "model": request.model,
-        
-        # 从策略填充参数
-        "word_count": request.word_count,
-        "tension_level": policy.tension_level,
-        "pacing_style": policy.pacing_style,
-        "memory_strategy": policy.memory_span,
-        "creativity_level": policy.creativity_level,
-        "refinement_depth": policy.refinement_depth,
-        "progression_preference": policy.progression_preference,
-        
-        # RAG 参数
-        "rag_top_k": policy.rag_top_k,
-        "rag_alpha": policy.rag_alpha,
-        "rag_beta": policy.rag_beta,
-        "rag_gamma": policy.rag_gamma,
-        "rag_lambda": policy.rag_lambda,
-        
-        # 工作流参数
-        "max_iterations": refinement_iterations.get(policy.refinement_depth, 2),
-        "fast_mode": policy.workflow_tier == "TIER_1_FAST",
-        
-        # 意图信息
-        "author_intent": request.author_intent,
-        
-        # 编辑模式 - 统一使用 'intent' 与前端的 editor_mode 保持一致
-        "editor_mode": "intent",
-        
-        # 功能开关
-        "feature_flags": {
-            "enable_fail_fast": policy.enable_fail_fast,
-            "force_parallel_prose": policy.creativity_level == "wild_imagination",
-        }
     }

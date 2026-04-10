@@ -61,3 +61,20 @@ from backend.routes.inspiration import router as inspiration_router
 from backend.routes.critique import router as critique_router
 from backend.routes.system import router as system_router
 from backend.routes.maps import router as maps_router
+
+__all__ = [
+    "books_router",
+    "chapters_router",
+    "chapter_entities_router",
+    "chapter_publishing_router",
+    "characters_router",
+    "relationships_router",
+    "memories_router",
+    "text_formatting_router",
+    "chapter_generation_router",
+    "chapter_optimization_router",
+    "inspiration_router",
+    "critique_router",
+    "system_router",
+    "maps_router",
+]

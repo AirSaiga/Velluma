@@ -113,7 +113,7 @@ class InspirationIdea(BaseModel):
 
 
 class InspirationResponse(BaseModel):
-    inspirations: List[InspirationIdea] = Field(..., min_items=4, max_items=4)
+    inspirations: List[InspirationIdea] = Field(..., min_length=1)
 
 
 class CritiqueRequest(BaseModel):
@@ -170,22 +170,6 @@ class ModelTestResponse(BaseModel):
 class RecommendRequest(BaseModel):
     creative_intents: List[str] = Field(..., max_length=2, description="创作意图列表")
     chapter_goals: Optional[List[str]] = Field(None, description="章节目标列表")
-
-
-class IntentDrivenGenerateRequest(BaseModel):
-    chapter_id: str
-    api_key: str
-    base_url: Optional[str] = None
-    model: Optional[str] = None
-    creative_intents: Optional[List[str]] = Field(None, max_length=2)
-    intent_priorities: Optional[List[int]] = None
-    custom_intent_description: Optional[str] = None
-    chapter_goals: Optional[List[str]] = None
-    target_entity_ids: Optional[List[str]] = None
-    selected_plan_type: str = Field(default="balanced")
-    user_overrides: Optional[dict] = None
-    word_count: int = Field(default=3000, ge=500, le=20000)
-    author_intent: Optional[str] = None
 
 
 class GenerateEmbeddingRequest(BaseModel):

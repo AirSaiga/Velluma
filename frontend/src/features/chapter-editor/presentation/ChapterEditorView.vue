@@ -3,8 +3,7 @@ import { ref, watch, computed } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
 import { IntentDrivenPanel } from '../../intent-driven'
-import type { AgenticFormState, ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
-import type { AgenticFieldOption, EditorMode } from '../../../composables/useAgenticConfig'
+import type { ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
 
 interface BeatPreviewItem {
   position: number
@@ -31,17 +30,8 @@ interface BeatPreviewItem {
 }
 
 const props = defineProps<{
-  AGENTIC_FIELD_CONFIG: Record<string, any>
-  AGENTIC_GROUPS: Record<string, any>
-  agenticForm: AgenticFormState
-  agenticGroupFields: Record<string, Array<keyof AgenticFormState>>
-  editorMode: EditorMode
-  editorModeConfig: { title: string; description: string; icon: string }
-  visibleAgenticFields: string[]
-  agenticValidation: { errors: string[] }
   beatPreviewError: string
   beatPreviewLoading: boolean
-  canSubmitAgentic: boolean
   chapterSummary: string | null
   characterUpdates: Array<{
     character_id: string
@@ -57,21 +47,10 @@ const props = defineProps<{
   confirmBeatsAndGenerate: () => void
   completionMessage: string
   completionTitle: string
-  firstFieldFeedback: string
   formError: string
-  getAgenticFieldFeedbackText: (field: keyof AgenticFormState) => string
-  getAgenticFieldInputType: (field: keyof AgenticFormState) => string
-  getAgenticFieldOptions: (field: keyof AgenticFormState) => AgenticFieldOption[]
-  getAgenticFieldMax: (field: keyof AgenticFormState) => number | undefined
-  getAgenticFieldMin: (field: keyof AgenticFormState) => number
-  getAgenticFieldStep: (field: keyof AgenticFormState) => number
-  getAgenticFieldValue: (field: keyof AgenticFormState) => string | number | boolean
   getBeatHookLabel: (beat: BeatPreviewItem) => string
   getMetaCollapsedLabel: () => string
-  getPacingStyleValue: () => PacingStyle
-  getTensionLevelValue: () => number
   getWorkflowStageLabel: () => string
-  handlePacingStyleInput: (event: Event) => void
   handleContentUpdate: (content: string) => void
   handleEditorEntityFocus: (keyword: string) => void
   handleFormatText: (text: string) => void
@@ -79,7 +58,6 @@ const props = defineProps<{
   handlePartialOptimize: (payload: { selection: any, instruction: string }) => void
   handleOutlineInput: (event: Event) => void
   handleAssetsSchemaInput: (event: Event) => void
-  handleTensionLevelInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
   inspirationActiveCharacterIds: string[]
   isAgenticMode: boolean
@@ -91,23 +69,15 @@ const props = defineProps<{
   isPublishing: boolean
   isStreamMode: boolean
   localMetaCollapsed: boolean
-  normalizeAgenticField: () => void
   openAgenticSettingsModal: () => void
   openInspirationModal: () => void
-  isAgenticFieldSelect: (field: keyof AgenticFormState) => boolean
-  pacingStyleOptions: Array<{ value: PacingStyle; label: string }>
   optimizationFeedback: string
   previewBeats: BeatPreviewItem[]
   publishChapter: () => void
-  ragWeightTotal: number
-  restoreAgenticDefaults: () => void
-  restoreAgenticField: (field: keyof AgenticFormState) => void
   selectedChapter: Chapter | null
-  setAgenticFieldValue: (field: keyof AgenticFormState, event: Event) => void
   setEditorRef: (editor: any) => void
   scrollToCritique: (comment: any) => void
   setOptimizationFeedback: (value: string) => void
-  setWordCount: (value: number) => void
   showAgenticSettingsModal: boolean
   showBeatReviewModal: boolean
   showCompletionModal: boolean
@@ -118,8 +88,6 @@ const props = defineProps<{
   toggleCharacter: (charId: string) => void
   toggleMetaCollapsed: () => void
   toggleStreamMode: () => void
-  wordCountMax: number
-  wordCountMin: number
   workflowState: any
   apiConfig: ApiConfig
   bookId?: string
@@ -276,7 +244,7 @@ function getPovApertureLabel(aperture: string): string {
           <div class="flex flex-col gap-2 flex-shrink-0">
             <button
               @click="startGenerate"
-              :disabled="isGenerating || beatPreviewLoading || !selectedChapter.outline_text.trim() || (isAgenticMode && !canSubmitAgentic)"
+              :disabled="isGenerating || beatPreviewLoading || !selectedChapter.outline_text.trim()"
               class="h-9 px-4 rounded-lg bg-[var(--accent-500)] text-white text-xs font-semibold shadow-sm shadow-accent-400/30 disabled:opacity-40 transition-all hover:bg-accent-600 hover:shadow-md flex items-center gap-1.5"
             >
               <svg v-if="beatPreviewLoading || isGenerating" class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">

@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
-import type { 
-  CreativeIntentType, 
-  ChapterGoalType, 
+import type {
+  CreativeIntentType,
+  ChapterGoalType,
   PlanType,
   CreativeIntentTemplate,
   ChapterGoalTemplate,
@@ -10,6 +10,7 @@ import type {
   IntentDrivenGeneratePayload,
   RecommendResponse
 } from '@/types/intentDriven'
+import type { GenerateChapterAgenticPayload, ReasoningConfig } from '@/types'
 import { intentDrivenApi } from '../../services/api/domain'
 import { CREATIVE_INTENT_TEMPLATES, CHAPTER_GOAL_TEMPLATES } from './intentTemplates'
 
@@ -20,7 +21,9 @@ const defaultState: IntentDrivenState = {
   selectedPlanType: 'balanced',
   recommendedPlans: [],
   userOverrides: {},
-  isExpertModeExpanded: false
+  isExpertModeExpanded: false,
+  wordCount: 3000,
+  authorIntent: ''
 }
 
 const state = ref<IntentDrivenState>({ ...defaultState })
@@ -101,7 +104,19 @@ export function useIntentDrivenConfig() {
   })
   
   const userOverrides = computed(() => state.value.userOverrides)
-  
+
+  // 篇幅与创作意图（从组件本地 ref 提升到单例状态）
+  const wordCount = computed(() => state.value.wordCount)
+  const authorIntent = computed(() => state.value.authorIntent)
+
+  function setWordCount(value: number) {
+    state.value.wordCount = Math.max(500, Math.min(10000, value))
+  }
+
+  function setAuthorIntent(value: string) {
+    state.value.authorIntent = value
+  }
+
   // 方法
   function toggleIntent(intentId: CreativeIntentType) {
     const index = state.value.selectedIntents.indexOf(intentId)
@@ -323,7 +338,13 @@ export function useIntentDrivenConfig() {
     // 模板数据
     intentTemplates,
     goalTemplates,
-    
+
+    // 篇幅与创作意图
+    wordCount,
+    authorIntent,
+    setWordCount,
+    setAuthorIntent,
+
     // 方法
     toggleIntent,
     toggleGoal,
@@ -337,4 +358,189 @@ export function useIntentDrivenConfig() {
     buildPayload,
     getIntentDisplayName
   }
+}
+
+// =============================================================================
+// 意图驱动 → 双轨生成载荷桥接函数
+// 将 GenerationPolicy 映射为 GenerateChapterAgenticPayload，供生成按钮调用
+// =============================================================================
+
+export interface BuildAgenticPayloadParams {
+  chapterId: string
+  apiConfig: {
+    api_key: string
+    base_url?: string
+    model?: string
+    reasoning_model?: string
+    creative_model?: string
+    reasoning_enabled?: boolean
+    reasoning_effort?: ReasoningConfig['effort']
+    reasoning_exclude?: boolean
+    reasoning_model_reasoning_enabled?: boolean
+    reasoning_model_reasoning_effort?: ReasoningConfig['effort']
+    reasoning_model_reasoning_exclude?: boolean
+    creative_model_reasoning_enabled?: boolean
+    creative_model_reasoning_effort?: ReasoningConfig['effort']
+    creative_model_reasoning_exclude?: boolean
+  }
+  /**
+   * 可选的章节数据，用于从中读取已保存的智能生成配置
+   * 如果提供，将优先使用章节中保存的配置而非全局状态
+   */
+  chapterData?: {
+    creative_intents?: string[]
+    chapter_goals?: string[]
+    selected_plan_type?: string
+    user_overrides?: Record<string, any>
+    word_count?: number
+    author_intent?: string
+  }
+}
+
+export function buildAgenticPayloadFromIntent(params: BuildAgenticPayloadParams): {
+  payload: GenerateChapterAgenticPayload | null
+  errors: string[]
+} {
+  const errors: string[] = []
+  const apiKey = (params.apiConfig.api_key || '').trim()
+  if (!apiKey) {
+    errors.push('请先配置 API Key')
+  }
+
+  // 优先使用传入的章节数据，否则使用全局状态
+  const chapterData = params.chapterData
+  const currentState = state.value
+
+  // 从章节数据或全局状态获取配置
+  const selectedIntents = chapterData?.creative_intents ?? currentState.selectedIntents
+  const selectedGoals = chapterData?.chapter_goals ?? currentState.selectedGoals
+  const selectedPlanType = (chapterData?.selected_plan_type as PlanType) ?? currentState.selectedPlanType
+  const userOverrides = chapterData?.user_overrides ?? currentState.userOverrides
+  const wordCount = chapterData?.word_count ?? currentState.wordCount
+  const authorIntent = chapterData?.author_intent ?? currentState.authorIntent
+
+  if (selectedIntents.length === 0) {
+    errors.push('请先在智能设置中选择创作意图')
+  }
+
+  // 根据 plan_type 获取对应的 policy
+  // 如果没有推荐方案，使用默认配置
+  let policy = currentState.recommendedPlans.find(p => p.plan_type === selectedPlanType)?.policy
+  if (!policy) {
+    // 使用默认配置
+    policy = {
+      tension_level: 3,
+      pacing_style: 'balanced',
+      memory_span: 'balanced_reference',
+      creativity_level: 'balanced_creation',
+      refinement_depth: 'standard',
+      progression_preference: 'focus_scene_action',
+      workflow_tier: 'TIER_2_STANDARD',
+      enable_dual_track: true,
+      enable_fail_fast: true,
+      rag_top_k: 5,
+      rag_alpha: 0.6,
+      rag_beta: 0.2,
+      rag_gamma: 0.2,
+      rag_lambda: 0.1
+    } as any
+  }
+
+  if (errors.length > 0) {
+    return { payload: null, errors }
+  }
+
+  // 处理 user_overrides 的两种可能格式：
+  // 1. 来自全局状态: { [field]: { original, current } }
+  // 2. 来自数据库: { [field]: value }
+  const overrides = Object.fromEntries(
+    Object.entries(userOverrides).map(([k, v]) => {
+      // 如果是 { original, current } 格式，取 current
+      if (v && typeof v === 'object' && 'current' in v) {
+        return [k, v.current]
+      }
+      // 否则直接取值（来自数据库的格式）
+      return [k, v]
+    })
+  )
+
+  const baseModel = params.apiConfig.model || 'gpt-4o-mini'
+  const hasDualModel = !!(
+    params.apiConfig.reasoning_model || params.apiConfig.creative_model
+  )
+
+  let reasoningConfig: ReasoningConfig | undefined
+  let reasoningModelReasoningConfig: ReasoningConfig | undefined
+  let creativeModelReasoningConfig: ReasoningConfig | undefined
+
+  if (!hasDualModel && params.apiConfig.reasoning_enabled) {
+    reasoningConfig = {
+      enabled: true,
+      effort: params.apiConfig.reasoning_effort || 'medium',
+      exclude: params.apiConfig.reasoning_exclude || false
+    }
+  }
+
+  if (hasDualModel) {
+    if (params.apiConfig.reasoning_model_reasoning_enabled) {
+      reasoningModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.reasoning_model_reasoning_effort || 'high',
+        exclude: params.apiConfig.reasoning_model_reasoning_exclude || false
+      }
+    }
+    if (params.apiConfig.creative_model_reasoning_enabled) {
+      creativeModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.creative_model_reasoning_effort || 'low',
+        exclude: params.apiConfig.creative_model_reasoning_exclude || false
+      }
+    }
+  }
+
+  const refinementToIterations = (depth: string) => {
+    if (depth === 'light') return 1
+    if (depth === 'deep') return 4
+    return 2
+  }
+
+  const payload: GenerateChapterAgenticPayload = {
+    chapter_id: params.chapterId,
+    api_key: apiKey,
+    base_url: params.apiConfig.base_url || undefined,
+    model: baseModel,
+    reasoning_model: hasDualModel
+      ? params.apiConfig.reasoning_model || baseModel
+      : undefined,
+    creative_model: hasDualModel
+      ? params.apiConfig.creative_model || baseModel
+      : undefined,
+
+    editor_mode: 'intent',
+    memory_strategy: policy.memory_span,
+    creativity_level: policy.creativity_level,
+    refinement_depth: policy.refinement_depth,
+
+    word_count: overrides.word_count ?? wordCount,
+    tension_level: overrides.tension_level ?? policy.tension_level,
+    pacing_style: (overrides.pacing_style ?? policy.pacing_style) as any,
+    author_intent: authorIntent || undefined,
+
+    max_iterations: refinementToIterations(policy.refinement_depth),
+    rag_top_k: overrides.rag_top_k ?? policy.rag_top_k,
+    rag_alpha: overrides.rag_alpha ?? policy.rag_alpha,
+    rag_beta: overrides.rag_beta ?? policy.rag_beta,
+    rag_gamma: overrides.rag_gamma ?? policy.rag_gamma,
+    rag_lambda: overrides.rag_lambda ?? policy.rag_lambda,
+
+    fast_mode: policy.workflow_tier === 'TIER_1_FAST',
+    skip_minor_refine: true,
+    force_parallel_prose: false,
+
+    reasoning_config: reasoningConfig,
+    reasoning_model_reasoning_config: reasoningModelReasoningConfig,
+    creative_model_reasoning_config: creativeModelReasoningConfig
+  }
+
+  return { payload, errors: [] }
 }

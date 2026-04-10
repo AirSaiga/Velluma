@@ -47,8 +47,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from backend.models import Chapter, Book
 
 from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
 from backend.services.workflows.stitching import stitch_chunks
@@ -75,6 +79,13 @@ from backend.services.utils.logging import get_runtime_logger
 from backend.schemas import DraftingFeatureFlags, WorkflowTier
 
 logger = get_runtime_logger(__name__)
+
+__all__ = [
+    "DualTrackConfig",
+    "DualTrackResult",
+    "DualTrackWorkflow",
+    "execute_dual_track_generation",
+]
 
 
 @dataclass
@@ -138,7 +149,36 @@ class DualTrackWorkflow:
         anchor_pov: Optional[str] = None,
         progress_callback: Optional[Callable[..., Any]] = None,
     ) -> DualTrackResult:
-        import time
+        """
+        执行双轨工作流。
+
+        职责：协调 Track A (节拍扩写) 和 Track B (短文生成) 的并行执行，
+        然后进行统稿拼接和对抗校对。
+
+        Args:
+            chapter: 章节对象
+            book: 书籍对象
+            beats: 剧情节拍列表
+            entities: 角色实体列表
+            relationships: 角色关系列表
+            word_count: 目标字数
+            previous_summary: 前情摘要
+            relevant_memories: 相关记忆列表
+            locations: 地点列表
+            physical_state_lock: 物理状态锁
+            entity_spatial_ledger: 实体空间台账
+            chapter_assets_schema: 章节资产模式
+            workflow_tier: 工作流层级
+            anchor_pov: 锚点视角角色
+            progress_callback: 进度回调函数
+
+        Returns:
+            DualTrackResult: 包含最终文本和统计信息的结果对象
+
+        Raises:
+            ValueError: 如果 beats 为空
+            asyncio.CancelledError: 如果任务被取消
+        """
         total_start = time.perf_counter()
 
         logger.info(f"[DualTrack] 阶段=START 状态=RUNNING beats={len(beats)} word_count={word_count}")
