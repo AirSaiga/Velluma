@@ -24,28 +24,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 作为连贯性锚点供 Track A 对比
 - 提供情绪和节奏的自然流动参考
 
-核心特性：
-- 连续叙述流：不标记节拍边界，自然流淌
-- 强连贯性：情绪、节奏、信息传递一气呵成
-- 转折点映射：记录关键转折点在文中的实际位置
-- 首尾呼应：确保开头和结尾的情感闭环
-
-业务场景：
-- 与 Track A (节拍扩写) 并行生成
-- 为后续对抗校对提供连贯性参考
-
-依赖项：
-- backend.services.llm: LLM 调用接口
-
 使用方式：
-    sketch = await generate_sketch(chapter, beats, context, ...)
+    from backend.services.workflows.sketch_generator import SketchGenerator
+
+    generator = SketchGenerator(api_key, base_url, model, config)
+    result = await generator.generate(chapter, book, beats, ...)
+
+迁移说明 (2026-04-11)：
+- 类型定义已内联到本文件
 """
 
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 from pydantic import BaseModel
 
 from backend.services.llm import call_llm
@@ -69,7 +63,7 @@ class SketchResult(BaseModel):
     turn_markers: List[TurnMarker]  # 转折点位置映射
     emotion_arc: List[Dict[str, Any]]  # 情绪曲线
     word_count: int  # 实际字数
-    
+
     # 调试信息
     prompts: List[dict] = []
     generation_time: float = 0.0
@@ -81,18 +75,27 @@ class SketchGeneratorConfig:
     # 字数比例：Sketch 字数 / 正文字数
     # 默认 40-50%，既保证连贯性又节省成本
     sketch_ratio: float = 0.45
-    
+
     # 最小字数（防止过短）
     min_words: int = 500
-    
+
     # 最大字数（防止过长）
     max_words: int = 5000
-    
+
     # 温度：比正文稍高，鼓励流畅
     temperature: float = 0.8
-    
+
     # 生成超时（秒）
     timeout: float = 120.0
+
+
+__all__ = [
+    "TurnMarker",
+    "SketchResult",
+    "SketchGeneratorConfig",
+    "SketchGenerator",
+    "generate_sketch_for_alignment",
+]
 
 
 class SketchGenerator:

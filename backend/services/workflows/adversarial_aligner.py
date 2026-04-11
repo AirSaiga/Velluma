@@ -24,30 +24,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 检测结构差异、情绪差异和信息差异
 - 生成修复方案指导精修
 
-业务场景：
-- 双轨工作流的 Phase 4
-- 并行生成后检测一致性问题
-- 为融合精修提供方向
-
-主要功能：
-- 差异类型分类（结构/情绪/信息）
-- 差异位置定位
-- 修复指导生成
-
-依赖项：
-- backend.services.llm: LLM 调用接口
-- backend.services.workflows.sketch_generator: Sketch 生成结果
-
 使用方式：
-    align_result = await align_draft_to_sketch(draft_a, sketch, ...)
+    from backend.services.workflows.adversarial_aligner import AdversarialAligner
+
+    aligner = AdversarialAligner(api_key, base_url, model)
+    plan = await aligner.align(draft_text, sketch_result, beats, ...)
+
+迁移说明 (2026-04-11)：
+- 类型定义已内联到本文件
 """
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from pydantic import BaseModel
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.services.llm import call_llm
 from backend.services.workflows.utils import clean_llm_output
@@ -116,6 +107,18 @@ class AdversarialAlignerConfig:
     min_acceptable_score: float = 70.0
     temperature: float = 0.1
     max_analysis_tokens: int = 2000
+
+
+__all__ = [
+    "GapType",
+    "GapSource",
+    "GapSeverity",
+    "AlignmentGap",
+    "AdjustmentPlan",
+    "AdversarialAlignerConfig",
+    "AdversarialAligner",
+    "perform_adversarial_alignment",
+]
 
 
 class AdversarialAligner:

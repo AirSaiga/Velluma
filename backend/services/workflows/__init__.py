@@ -62,20 +62,30 @@ from backend.services.workflows.context import (
     get_refining_context,
 )
 from backend.services.workflows.planning import generate_beats
-from backend.services.workflows.drafting import (
-    generate_chunks_parallel,
+from backend.services.workflows.drafting_core import (
+    ProseGenerationService,
+    GenerationStrategy,
+    ContextManager,
+    QualityChecker,
     execute_draft_stage,
     BeatDraftResult,
+)
+from backend.services.workflows.drafting_prose_modules import (
+    micro_review_assertion,
+    quick_qc,
 )
 from backend.services.workflows.stitching import stitch_chunks
 from backend.services.workflows.reviewing import review_draft
 from backend.services.workflows.refining import refine_draft
+# 从 dual_track 包导入（工作流类、子模块）
 from backend.services.workflows.dual_track import (
     DualTrackWorkflow,
     DualTrackResult,
     DualTrackConfig,
-    execute_dual_track_generation,
+    fusion_refine,
 )
+# execute_dual_track_generation 定义在 dual_track.py 文件中，不是包中
+from backend.services.workflows.dual_track import execute_dual_track_generation
 from backend.services.workflows.sketch_generator import (
     SketchGenerator,
     SketchResult,
@@ -105,9 +115,10 @@ __all__ = [
     "get_reviewing_context",
     "get_refining_context",
     "generate_beats",
-    "generate_chunks_parallel",
     "execute_draft_stage",
     "BeatDraftResult",
+    "micro_review_assertion",
+    "quick_qc",
     "stitch_chunks",
     "review_draft",
     "refine_draft",
