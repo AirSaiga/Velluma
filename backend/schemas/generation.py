@@ -294,3 +294,28 @@ class GenerateChapterAgenticPreviewResponse(BaseModel):
 
 class GenerateChapterAgenticWithBeatsRequest(GenerateChapterAgenticRequest):
     beats: List[ConfirmedStoryBeat] = Field(..., min_length=1, max_length=6)
+
+class ClarificationRequest(BaseModel):
+    """
+    Agent 澄清请求模型结构
+    用于在生成或规划过程中，当 Agent 遇到歧义或缺失必要输入时向用户发起询问。
+    """
+    question: str = Field(..., description="向用户提出的澄清问题")
+    options: Optional[List[str]] = Field(default=None, description="提供给用户的可选回答列表（如有）")
+    context: Optional[str] = Field(default=None, description="提出该问题的背景上下文（向用户解释为什么需要澄清）")
+
+class ClarificationResponse(BaseModel):
+    """
+    用户澄清响应模型结构
+    用于接收并验证用户对 Agent 澄清请求的最终回答。
+    """
+    answer: str = Field(..., description="用户回答的具体内容")
+    selected_option: Optional[str] = Field(default=None, description="用户选择的预设选项（如果请求中提供了 options）")
+
+class ClarifyOutlineRequest(BaseModel):
+    chapter_id: UUID
+    ambiguous_text: str = Field(..., description="需要澄清的模糊文本或大纲")
+    api_key: str = Field(..., min_length=1)
+    base_url: Optional[str] = None
+    model: str = Field(default="gpt-4o-mini", description="默认模型")
+    author_intent: Optional[str] = Field(None, description="作者意图")

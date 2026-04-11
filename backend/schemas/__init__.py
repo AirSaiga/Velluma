@@ -94,6 +94,9 @@ from .generation import (
     ConfirmedStoryBeat,
     GenerateChapterAgenticPreviewResponse,
     GenerateChapterAgenticWithBeatsRequest,
+    ClarificationRequest,
+    ClarificationResponse,
+    ClarifyOutlineRequest,
 )
 from .misc import (
     FormatTextRequest,
@@ -200,6 +203,9 @@ __all__ = [
     "ConfirmedStoryBeat",
     "GenerateChapterAgenticPreviewResponse",
     "GenerateChapterAgenticWithBeatsRequest",
+    "ClarificationRequest",
+    "ClarificationResponse",
+    "ClarifyOutlineRequest",
     # Misc schemas
     "FormatTextRequest",
     "GenerateChapterRequest",

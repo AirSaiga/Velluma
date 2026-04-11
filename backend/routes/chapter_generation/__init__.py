@@ -24,9 +24,11 @@ from backend.repositories import ChapterRepository, BookRepository
 from backend.schemas import (
     GenerateChapterAgenticRequest,
     GenerateChapterAgenticPreviewResponse,
+    ClarifyOutlineRequest,
 )
 from backend.services.generation.chapter import preview_agentic_beats
 from backend.services.utils.logging import get_runtime_logger
+from backend.services.workflows.clarification_agent import execute_clarification_stage
 
 # 主路由（来自 dual_track.py）
 from backend.routes.chapter_generation.dual_track import router as dual_track_router
@@ -56,6 +58,35 @@ async def generate_chapter_agentic_preview_beats(
     logger.info(f"[PreviewBeats] 节拍预览完成: chapter_id={request.chapter_id}, beat_count={len(result.get('beats', []))}")
     return result
 
+@extra_router.post("/clarify-outline")
+async def clarify_chapter_outline(
+    request: ClarifyOutlineRequest,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+    book_repo: BookRepository = Depends(get_book_repository),
+):
+    """大纲澄清端点 - 用于在生成节拍前澄清和完善章节大纲"""
+    logger.info(f"[ClarifyOutline] 收到大纲澄清请求: chapter_id={request.chapter_id}")
+    
+    chapter = await chapter_repo.get_by_id(request.chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+        
+    book = await book_repo.get_by_id(chapter.book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+        
+    result = await execute_clarification_stage(
+        ambiguous_text=request.ambiguous_text,
+        book=book,
+        chapter=chapter,
+        author_intent=request.author_intent,
+        global_taboos=book.core_motifs_taboos,
+        api_key=request.api_key,
+        base_url=request.base_url,
+        model=request.model,
+    )
+    
+    return result
 
 # 合并路由
 router = APIRouter()
