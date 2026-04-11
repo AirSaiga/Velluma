@@ -295,13 +295,13 @@ class AdversarialAligner:
         user_prompt = f"""分析以下两段文本的结构差异：
 
 【Draft A】(约 {len(draft_text)} 字):
-{draft_text[:3000]}...
+{draft_text}
 
 【Sketch】(约 {sketch_result.word_count} 字):
-{sketch_result.sketch_text[:3000]}...
+{sketch_result.sketch_text}
 
 【节拍信息】:
-{json.dumps(beats[:5], ensure_ascii=False)}"""
+{json.dumps(beats, ensure_ascii=False)}"""
 
         prompts_history.append({
             "system_prompt": system_prompt,

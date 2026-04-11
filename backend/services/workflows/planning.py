@@ -60,6 +60,8 @@ from backend.services.llm import call_llm
 from backend.models import Chapter, Book, Character, CharacterRelationship, StoryBeat
 from backend.schemas import PovAperture
 from backend.services.utils.logging import get_runtime_logger
+from backend.services.workflows.state_validator import validate_beats_world_state_consistency
+from backend.world_state_schemas import WorldTerminalState
 
 logger = get_runtime_logger(__name__)
 
@@ -114,6 +116,7 @@ async def generate_beats(
     base_url: str,
     model: str,
     previous_chapter_summary: Optional[str] = None,
+    previous_world_state: Optional[WorldTerminalState] = None,
 ) -> tuple[list[dict], list[StoryBeat]]:
     """生成章节故事节拍 (Story Beats)。
 
@@ -128,6 +131,7 @@ async def generate_beats(
         base_url: LLM Base URL
         model: LLM Model Name
         previous_chapter_summary: 上一章摘要
+        previous_world_state: 上一章世界终端状态
 
     Returns:
         tuple[list[dict], list[StoryBeat]]: (beats 字典列表, StoryBeat 实体列表)
@@ -154,6 +158,24 @@ async def generate_beats(
     )
     
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+
+    # 引入状态校验 (V3.6)
+    if previous_world_state:
+        validation_result = validate_beats_world_state_consistency(
+            beats=beats, 
+            world_state=previous_world_state,
+            strict_mode=False
+        )
+        
+        if not validation_result.passed:
+            for violation in validation_result.violations:
+                logger.error(f"Beat生成违反物理约束: {violation.message}")
+            
+            # 如果存在 Error 级别的冲突，可以考虑抛出异常或记录严重警告
+            logger.warning("生成的节拍与世界状态存在严重冲突，请注意人工核查。")
+            
+        for warning in validation_result.warnings:
+            logger.warning(f"Beat生成逻辑警告: {warning.message}")
     
     story_beats = []
     tension_level = getattr(chapter, "tension_level", 3) or 3
