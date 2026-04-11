@@ -177,6 +177,15 @@ async def generate_chapter_dual_track_simple(
         beats = normalize_confirmed_beats(request.beats, effective_word_count)
     else:
         from backend.services.workflows.planning import generate_beats
+        from backend.world_state_schemas import WorldTerminalState
+        
+        previous_world_state = None
+        if context.previous_world_snapshot:
+            try:
+                previous_world_state = WorldTerminalState.from_chapter_snapshot(context.previous_world_snapshot)
+            except Exception as e:
+                logger.warning(f"Failed to parse previous world snapshot: {e}")
+
         beats, _ = await generate_beats(
             chapter=chapter,
             book=book,
@@ -188,6 +197,7 @@ async def generate_chapter_dual_track_simple(
             base_url=request.base_url,
             model=request.model,
             previous_chapter_summary=context.previous_summary,
+            previous_world_state=previous_world_state,
         )
 
     # POV 分配

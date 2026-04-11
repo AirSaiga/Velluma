@@ -398,6 +398,30 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, reposito
         max_tokens=6000,  # V3.6: 扩大上限，支持3-6个完整beat输出（原1800导致JSON截断→fallback）
     )
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
+    
+    # 引入状态校验 (V3.6)
+    if previous_chapter_snapshot:
+        from backend.services.workflows.state_validator import validate_beats_world_state_consistency
+        from backend.world_state_schemas import WorldTerminalState
+        
+        try:
+            previous_world_state = WorldTerminalState.from_chapter_snapshot(previous_chapter_snapshot)
+            validation_result = validate_beats_world_state_consistency(
+                beats=beats, 
+                world_state=previous_world_state,
+                strict_mode=False
+            )
+            
+            if not validation_result.passed:
+                for violation in validation_result.violations:
+                    logger.error(f"Preview Beat生成违反物理约束: {violation.message}")
+                
+            for warning in validation_result.warnings:
+                logger.warning(f"Preview Beat生成逻辑警告: {warning.message}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to parse previous world snapshot for validation: {e}")
+
     return {
         "beats": normalize_confirmed_beats(beats, word_count),
         "debug_prompt": {
