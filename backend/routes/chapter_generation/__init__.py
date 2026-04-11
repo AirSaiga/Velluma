@@ -81,6 +81,8 @@ async def clarify_chapter_outline(
         chapter=chapter,
         author_intent=request.author_intent,
         global_taboos=book.core_motifs_taboos,
+        user_instruction=request.user_instruction,
+        previous_issues=request.previous_issues,
         api_key=request.api_key,
         base_url=request.base_url,
         model=request.model,

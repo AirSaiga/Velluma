@@ -177,7 +177,20 @@ export interface InspirationRequest {
   model?: string
 }
 
-// === 大纲澄清相关类型 (Clarification Agent) ===
+// === 大纲澄清相关相关类型 (Clarification Agent) ===
+
+// 新增：澄清问题选项接口
+export interface ClarificationOption {
+  label: string
+  value: string
+}
+
+// 新增：结构化澄清问题接口
+export interface ClarifyingQuestion {
+  id: string
+  question: string
+  options: ClarificationOption[]
+}
 
 export interface ClarifyOutlineRequest {
   chapter_id: string
@@ -186,11 +199,14 @@ export interface ClarifyOutlineRequest {
   base_url?: string
   model?: string
   author_intent?: string
+  user_instruction?: string  // 新增：用户针对系统澄清问题的补充说明或回答
+  previous_issues?: string[] // 新增：上一轮识别出的问题列表
 }
 
 export interface ClarifyOutlineResponse {
   is_ambiguous: boolean              // 是否存在歧义或信息缺失
   identified_issues?: string[]       // 识别到的具体问题列表
+  clarifying_questions?: ClarifyingQuestion[] // 新增：需要用户回答的结构化澄清问题
   clarification_suggestions?: string[] // 提供给用户的澄清建议/问题
   refined_text?: string              // AI修正后的大纲文本
   error?: string                     // 解析异常时的错误信息

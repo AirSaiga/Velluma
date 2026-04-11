@@ -312,6 +312,25 @@ class ClarificationResponse(BaseModel):
     answer: str = Field(..., description="用户回答的具体内容")
     selected_option: Optional[str] = Field(default=None, description="用户选择的预设选项（如果请求中提供了 options）")
 
+class ClarificationOption(BaseModel):
+    label: str = Field(..., description="选项显示的文本")
+    value: str = Field(..., description="选项的实际值，通常是具体的情节设定")
+
+class ClarifyingQuestion(BaseModel):
+    id: str = Field(..., description="问题的唯一标识符")
+    question: str = Field(..., description="向用户提出的问题")
+    options: List[ClarificationOption] = Field(default_factory=list, description="提供给用户的选项列表")
+
+class ClarifyOutlineResponse(BaseModel):
+    """
+    大纲澄清响应模型结构
+    """
+    is_ambiguous: bool = Field(..., description="原文是否存在逻辑漏洞或模糊不清之处")
+    identified_issues: List[str] = Field(default_factory=list, description="识别到的具体问题列表")
+    clarifying_questions: List[ClarifyingQuestion] = Field(default_factory=list, description="需要用户回答的澄清问题")
+    refined_text: str = Field(..., description="AI修正后的大纲文本默认推荐")
+    error: Optional[str] = Field(None, description="解析异常时的错误信息")
+
 class ClarifyOutlineRequest(BaseModel):
     chapter_id: UUID
     ambiguous_text: str = Field(..., description="需要澄清的模糊文本或大纲")
@@ -319,3 +338,5 @@ class ClarifyOutlineRequest(BaseModel):
     base_url: Optional[str] = None
     model: str = Field(default="gpt-4o-mini", description="默认模型")
     author_intent: Optional[str] = Field(None, description="作者意图")
+    user_instruction: Optional[str] = Field(None, description="用户针对系统澄清问题的补充说明或回答")
+    previous_issues: Optional[List[str]] = Field(default_factory=list, description="上一轮识别出的问题列表")

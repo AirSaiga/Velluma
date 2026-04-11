@@ -4,7 +4,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi, publishPromptData } from '../../../services/api'
 import { buildAgenticPayload } from '../../../composables/useAgenticConfig'
-import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload } from '../../../types'
+import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 
 export interface ChapterEditorContainerProps {
@@ -76,6 +76,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const clarificationResult = ref<{
     is_ambiguous: boolean
     identified_issues?: string[]
+    clarifying_questions?: ClarifyingQuestion[]
     clarification_suggestions?: string[]
     refined_text?: string
   } | null>(null)
@@ -579,7 +580,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           author_intent: chapter.author_intent
         })
         
-        if (clarifyRes.is_ambiguous && clarifyRes.clarification_suggestions && clarifyRes.clarification_suggestions.length > 0) {
+        if (clarifyRes.is_ambiguous && (
+          (clarifyRes.clarifying_questions && clarifyRes.clarifying_questions.length > 0) ||
+          (clarifyRes.clarification_suggestions && clarifyRes.clarification_suggestions.length > 0)
+        )) {
           // 拦截生成，弹出澄清框让用户补充
           clarificationResult.value = clarifyRes
           showClarificationModal.value = true

@@ -38,6 +38,8 @@ def build_clarification_agent_prompt(
     entities: Optional[list] = None,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
+    user_instruction: Optional[str] = None,
+    previous_issues: Optional[list] = None,
 ) -> tuple[str, str]:
     """构建意图澄清阶段的提示词。
 
@@ -50,6 +52,8 @@ def build_clarification_agent_prompt(
         entities: 相关的角色实体列表（可选），包含角色快照状态
         global_taboos: 全局禁忌/核心母题（可选）
         author_intent: 作者的补充意图（可选）
+        user_instruction: 用户的补充回答（交互式流程用）
+        previous_issues: 之前识别出的问题（交互式流程用）
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -81,7 +85,7 @@ def build_clarification_agent_prompt(
 
     system_prompt = f"""{global_sys_prompt}
 
-你现在是一个剧情分析与澄清专家。你的任务是分析模糊、矛盾或不完整的剧情指令，结合现有世界观与角色设定，提供清晰、结构化的澄清建议，并仅输出 JSON。
+你现在是一个剧情分析与澄清专家。你的任务是分析模糊、矛盾或不完整的剧情指令，结合现有世界观与角色设定，找出信息空白，并通过提问引导作者补充细节，最后仅输出 JSON。
 
 {worldview_prompt if worldview_prompt else ''}
 
@@ -92,21 +96,28 @@ def build_clarification_agent_prompt(
     "未说明角色A为何突然出现在此地",
     "指令中对反派动机的描述与世界观设定存在冲突"
   ],
-  "clarification_suggestions": [
-    "建议增加角色A收到紧急求救信号的铺垫",
-    "建议将反派动机修改为为了保护其族人免受能量反噬"
+  "clarifying_questions": [
+    {{
+      "id": "q1_motivation",
+      "question": "关于角色A的出现，您倾向于哪种解释？",
+      "options": [
+        {{ "label": "收到紧急求救信号", "value": "角色A收到了紧急求救信号才赶来" }},
+        {{ "label": "追踪线索而来", "value": "角色A一路追踪反派留下的线索来到这里" }}
+      ]
+    }}
   ],
-  "refined_text": "此处输出结合澄清建议后，逻辑自洽、细节清晰的完整指令或大纲文本。"
+  "refined_text": "此处输出结合已有信息或默认推测后，逻辑自洽、细节清晰的完整指令或大纲文本（即使有疑问也请提供一个兜底版本的扩展大纲）。"
 }}
 
 ⚠️ **严禁照抄示例**：上方 JSON 中的所有字符串值均为示例，**必须全部替换为基于实际文本的分析内容**。
 
 约束：
-1. is_ambiguous 必须为布尔值，指示原文是否存在逻辑漏洞或模糊不清之处。
-2. identified_issues 列表应具体指出问题所在，若无问题可为空列表。
-3. clarification_suggestions 列表需给出可执行的补救或澄清建议。
-4. refined_text 是必须提供的最终修正文本，确保逻辑连贯并符合所有设定约束。
-5. 只输出 JSON，不要额外解释。
+1. is_ambiguous 必须为布尔值，指示原文是否存在逻辑漏洞或模糊不清之处。如果用户已经通过 user_instruction 回答了所有问题，或者原文已足够清晰，请设为 false。
+2. identified_issues 列表应具体指出目前仍然存在的问题所在，若无问题可为空列表。
+3. clarifying_questions 是为交互式流程准备的，针对每个核心问题提供带有 2-4 个具体选项的问题，以便向用户提问。如果没有未解决的歧义可为空列表。
+4. options 里的 value 必须是完整的情节设定句子，而不是简单的词语。
+5. refined_text 是必须提供的最终修正文本，必须融合用户的回答（如果有），确保逻辑连贯并符合所有设定约束。
+6. 只输出 JSON，不要额外解释。
 """
 
     user_prompt_parts = []
@@ -122,7 +133,13 @@ def build_clarification_agent_prompt(
         user_prompt_parts.append("")
 
     user_prompt_parts.append("请分析并澄清以下文本：")
-    user_prompt_parts.append(f"【待澄清文本】\n{ambiguous_text}\n")
+    user_prompt_parts.append(f"【初始待澄清文本】\n{ambiguous_text}\n")
+    
+    if previous_issues:
+        user_prompt_parts.append(f"【之前识别出的问题】\n{chr(10).join(previous_issues)}\n")
+        
+    if user_instruction:
+        user_prompt_parts.append(f"【用户的补充回答与指令】\n{user_instruction}\n请根据上述回答修正大纲，并检查是否还有其他未澄清的重大问题。")
 
     # 附加当前章节参考
     if chapter:

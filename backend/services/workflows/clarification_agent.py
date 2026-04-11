@@ -59,6 +59,8 @@ async def execute_clarification_stage(
     entities: Optional[list] = None,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
+    user_instruction: Optional[str] = None,
+    previous_issues: Optional[List[str]] = None,
     api_key: str = "",
     base_url: str = "",
     model: str = "",
@@ -72,14 +74,16 @@ async def execute_clarification_stage(
         entities: 相关的角色实体列表（可选）
         global_taboos: 全局禁忌（可选）
         author_intent: 作者意图（可选）
+        user_instruction: 用户的补充回答（交互式流程用）
+        previous_issues: 之前识别出的问题（交互式流程用）
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
 
     Returns:
-        Dict[str, Any]: 包含 is_ambiguous, identified_issues, clarification_suggestions, refined_text
+        Dict[str, Any]: 包含 is_ambiguous, identified_issues, clarifying_questions, refined_text
     """
-    logger.info(f"[Clarification] 开始分析大纲意图，输入长度: {len(ambiguous_text)}")
+    logger.info(f"[Clarification] 开始分析大纲意图，输入长度: {len(ambiguous_text)}, 是否带有补充回答: {bool(user_instruction)}")
     
     system_prompt, user_prompt = build_clarification_agent_prompt(
         book=book,
@@ -88,6 +92,8 @@ async def execute_clarification_stage(
         entities=entities,
         global_taboos=global_taboos,
         author_intent=author_intent,
+        user_instruction=user_instruction,
+        previous_issues=previous_issues,
     )
     
     try:

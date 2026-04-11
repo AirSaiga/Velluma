@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
+export interface ClarifyingQuestion {
+  id: string
+  question: string
+  options: {
+    label: string
+    value: string
+  }[]
+}
+
 const props = defineProps<{
   show: boolean
   clarificationResult: {
     is_ambiguous: boolean
     identified_issues?: string[]
+    clarifying_questions?: ClarifyingQuestion[]
     clarification_suggestions?: string[]
     refined_text?: string
   } | null
@@ -17,10 +27,19 @@ const emit = defineEmits<{
 }>()
 
 const editableOutline = ref('')
+const selectedOptions = ref<Record<string, string>>({})
+const customAnswers = ref<Record<string, string>>({})
 
 watch(() => props.show, (newVal) => {
-  if (newVal && props.clarificationResult?.refined_text) {
-    editableOutline.value = props.clarificationResult.refined_text
+  if (newVal) {
+    if (props.clarificationResult?.refined_text) {
+      editableOutline.value = props.clarificationResult.refined_text
+    } else {
+      editableOutline.value = ''
+    }
+    // 每次打开弹窗重置选择状态
+    selectedOptions.value = {}
+    customAnswers.value = {}
   }
 })
 
@@ -28,8 +47,41 @@ function handleClose() {
   emit('close')
 }
 
+function handleOptionSelect(qId: string, value: string) {
+  if (selectedOptions.value[qId] === value) {
+    // 再次点击取消选中
+    selectedOptions.value[qId] = ''
+  } else {
+    selectedOptions.value[qId] = value
+    // 选中预设选项时，清空当前问题的自定义回答
+    customAnswers.value[qId] = ''
+  }
+}
+
 function handleApply() {
-  emit('apply', editableOutline.value)
+  let finalOutline = editableOutline.value
+  const answers: string[] = []
+  
+  // 收集用户的回答
+  if (props.clarificationResult?.clarifying_questions) {
+    for (const q of props.clarificationResult.clarifying_questions) {
+      const selected = selectedOptions.value[q.id]
+      const custom = customAnswers.value[q.id]?.trim()
+      
+      if (selected) {
+        answers.push(`- ${q.question}: ${selected}`)
+      } else if (custom) {
+        answers.push(`- ${q.question}: ${custom}`)
+      }
+    }
+  }
+
+  // 如果有回答内容，自动拼接到大纲底部
+  if (answers.length > 0) {
+    finalOutline += '\n\n【补充设定】\n' + answers.join('\n')
+  }
+
+  emit('apply', finalOutline)
 }
 </script>
 
@@ -60,19 +112,65 @@ function handleApply() {
         <!-- Body -->
         <div class="p-6 overflow-y-auto custom-scrollbar flex flex-col gap-6">
           
-          <div class="bg-amber-50/50 border border-amber-100 rounded-lg p-4">
+          <div v-if="clarificationResult?.identified_issues?.length" class="bg-amber-50/50 border border-amber-100 rounded-lg p-4">
             <h4 class="text-sm font-semibold text-amber-800 mb-2">发现信息空白：</h4>
             <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 ml-2">
-              <li v-for="(issue, i) in clarificationResult?.identified_issues" :key="i">
+              <li v-for="(issue, i) in clarificationResult.identified_issues" :key="i">
                 {{ issue }}
               </li>
             </ul>
           </div>
 
-          <div class="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
+          <!-- 交互式问题区域 -->
+          <div v-if="clarificationResult?.clarifying_questions?.length" class="flex flex-col gap-4">
+            <h4 class="text-sm font-semibold text-blue-800">请补充以下细节：</h4>
+            <div 
+              v-for="q in clarificationResult.clarifying_questions" 
+              :key="q.id"
+              class="bg-blue-50/30 border border-blue-100 rounded-lg p-4 flex flex-col gap-3"
+            >
+              <p class="text-sm font-medium text-gray-800">{{ q.question }}</p>
+              
+              <!-- 选项列表 -->
+              <div v-if="q.options?.length" class="flex flex-col gap-2">
+                <button
+                  v-for="(opt, i) in q.options"
+                  :key="i"
+                  @click="handleOptionSelect(q.id, opt.value)"
+                  class="text-left px-3 py-2 rounded-md border text-sm transition-colors duration-200"
+                  :class="[
+                    selectedOptions[q.id] === opt.value 
+                      ? 'bg-blue-100 border-blue-300 text-blue-800' 
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  ]"
+                >
+                  <span class="font-medium mr-2">{{ opt.label }}:</span>
+                  <span>{{ opt.value }}</span>
+                </button>
+              </div>
+
+              <!-- 自定义回答 -->
+              <div class="mt-1">
+                <input
+                  v-model="customAnswers[q.id]"
+                  type="text"
+                  placeholder="或者输入您的自定义设定..."
+                  class="w-full px-3 py-2 text-sm bg-white border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+                  :class="[
+                    customAnswers[q.id] ? 'border-blue-300' : 'border-gray-200',
+                    selectedOptions[q.id] ? 'opacity-50' : 'opacity-100'
+                  ]"
+                  @focus="selectedOptions[q.id] = ''"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 保留原有的补充建议展示 -->
+          <div v-else-if="clarificationResult?.clarification_suggestions?.length" class="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
             <h4 class="text-sm font-semibold text-blue-800 mb-2">AI 的补充建议：</h4>
             <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 ml-2">
-              <li v-for="(sugg, i) in clarificationResult?.clarification_suggestions" :key="i">
+              <li v-for="(sugg, i) in clarificationResult.clarification_suggestions" :key="i">
                 {{ sugg }}
               </li>
             </ul>
