@@ -29,6 +29,10 @@ import json
 from typing import Optional
 
 from backend.models import Chapter, Book
+from backend.world_state_schemas import WorldTerminalState
+from backend.services.prompts.world_state_prompts import (
+    format_snapshot_for_planner,
+)
 
 
 def build_clarification_agent_prompt(
@@ -36,10 +40,16 @@ def build_clarification_agent_prompt(
     ambiguous_text: str,
     chapter: Optional[Chapter] = None,
     entities: Optional[list] = None,
+    relationships: Optional[list] = None,
+    open_hooks: Optional[list] = None,
+    previous_chapter_summary: Optional[str] = None,
+    locations: Optional[list] = None,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
     user_instruction: Optional[str] = None,
     previous_issues: Optional[list] = None,
+    previous_chapter_snapshot: Optional[dict] = None,
+    previous_world_terminal_state: Optional[WorldTerminalState] = None,
 ) -> tuple[str, str]:
     """构建意图澄清阶段的提示词。
 
@@ -50,10 +60,16 @@ def build_clarification_agent_prompt(
         ambiguous_text: 需要澄清的模糊文本或用户指令
         chapter: 当前章节实体（可选），提供章节标题与大纲参考
         entities: 相关的角色实体列表（可选），包含角色快照状态
+        relationships: 角色关系列表（可选）
+        open_hooks: 开放伏笔列表（可选）
+        previous_chapter_summary: 上一章摘要（可选）
+        locations: 章节关联的地点列表（可选）
         global_taboos: 全局禁忌/核心母题（可选）
         author_intent: 作者的补充意图（可选）
         user_instruction: 用户的补充回答（交互式流程用）
         previous_issues: 之前识别出的问题（交互式流程用）
+        previous_chapter_snapshot: 上一章的世界状态快照（可选）
+        previous_world_terminal_state: V3.6 结构化世界终端状态（可选）
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -67,6 +83,23 @@ def build_clarification_agent_prompt(
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
+
+    # 构建地图与地点上下文
+    map_activity_range = getattr(chapter, "map_activity_range", None) if chapter else None
+    map_prompt = f"【地图活动范围】\n{map_activity_range}" if map_activity_range else None
+    
+    location_prompts = []
+    if locations:
+        for loc_rel in locations:
+            location = getattr(loc_rel, "location", None)
+            if location:
+                desc = f"【{location.name}】{location.description or ''}"
+                location_prompts.append(desc)
+    
+    if map_prompt:
+        location_prompts.append(map_prompt)
+    
+    final_map_prompt = "\n".join(location_prompts) if location_prompts else None
 
     # 构建角色上下文参考
     character_prompts = []
@@ -83,11 +116,50 @@ def build_clarification_agent_prompt(
                     char_desc += f"\n当前动态状态：{character.dynamic_state}"
                 character_prompts.append(char_desc)
 
+    # 构建角色关系上下文
+    relationship_prompts = []
+    if relationships:
+        for rel in relationships:
+            if hasattr(rel, "interaction_prompt") and rel.interaction_prompt:
+                source_name = rel.source_character.name if hasattr(rel, "source_character") and rel.source_character else "角色"
+                target_name = rel.target_character.name if hasattr(rel, "target_character") and rel.target_character else "角色"
+                relationship_prompts.append(f"{source_name}↔{target_name}: {rel.interaction_prompt}")
+
+    # 构建开放伏笔上下文
+    normalized_hooks = []
+    if isinstance(open_hooks, list):
+        for item in open_hooks:
+            if not isinstance(item, dict):
+                continue
+            hook_id = str(item.get("hook_id") or item.get("ledger_key") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if content:
+                normalized_hooks.append({"hook_id": hook_id, "content": content})
+    open_hooks_text = (
+        chr(10).join(
+            [
+                f"- {hook['hook_id']}: {hook['content']}" if hook["hook_id"] else f"- {hook['content']}"
+                for hook in normalized_hooks[:6]
+            ]
+        )
+        if normalized_hooks
+        else None
+    )
+
+    # 构建世界状态快照约束
+    world_snapshot_section = ""
+    if previous_world_terminal_state:
+        world_snapshot_section = previous_world_terminal_state.to_prompt_format()
+    elif previous_chapter_snapshot:
+        world_snapshot_section = format_snapshot_for_planner(previous_chapter_snapshot)
+
     system_prompt = f"""{global_sys_prompt}
 
 你现在是一个剧情分析与澄清专家。你的任务是分析模糊、矛盾或不完整的剧情指令，结合现有世界观与角色设定，找出信息空白，并通过提问引导作者补充细节，最后仅输出 JSON。
 
 {worldview_prompt if worldview_prompt else ''}
+
+{final_map_prompt if final_map_prompt else ''}
 
 ## 输出 JSON 结构（示例值仅供格式参考，必须替换为本章实际内容）
 {{
@@ -132,6 +204,12 @@ def build_clarification_agent_prompt(
             user_prompt_parts.append("重要提示：若【作者创作意图】与【待澄清文本】的逻辑存在冲突，请优先满足【作者创作意图】，并在此基础上提供澄清与修正建议。")
         user_prompt_parts.append("")
 
+    # 1. 前情与世界状态参考
+    if previous_chapter_summary:
+        user_prompt_parts.append(f"【上一章情节概要】\n{previous_chapter_summary}\n")
+    if world_snapshot_section:
+        user_prompt_parts.append(f"【上一章结尾世界状态】\n{world_snapshot_section}\n")
+
     user_prompt_parts.append("请分析并澄清以下文本：")
     user_prompt_parts.append(f"【初始待澄清文本】\n{ambiguous_text}\n")
     
@@ -151,6 +229,14 @@ def build_clarification_agent_prompt(
     # 附加角色设定参考
     if character_prompts:
         user_prompt_parts.append(f"【相关角色设定】\n{chr(10).join(character_prompts)}\n")
+
+    # 附加关系约束参考
+    if relationship_prompts:
+        user_prompt_parts.append(f"【关系约束】\n{chr(10).join(relationship_prompts)}\n")
+        
+    # 附加开放伏笔参考
+    if open_hooks_text:
+        user_prompt_parts.append(f"【开放伏笔】\n{open_hooks_text}\n")
 
     user_prompt = "\n".join(user_prompt_parts)
     return system_prompt, user_prompt

@@ -45,6 +45,7 @@ from typing import Any, Optional, Dict, List
 import json
 
 from backend.models import Chapter, Book
+from backend.world_state_schemas import WorldTerminalState
 from backend.services.llm import call_llm
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.prompts.clarification_prompts import build_clarification_agent_prompt
@@ -57,10 +58,16 @@ async def execute_clarification_stage(
     book: Book,
     chapter: Optional[Chapter] = None,
     entities: Optional[list] = None,
+    relationships: Optional[list] = None,
+    open_hooks: Optional[list] = None,
+    previous_chapter_summary: Optional[str] = None,
+    locations: Optional[list] = None,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
     user_instruction: Optional[str] = None,
     previous_issues: Optional[List[str]] = None,
+    previous_chapter_snapshot: Optional[dict] = None,
+    previous_world_terminal_state: Optional[WorldTerminalState] = None,
     api_key: str = "",
     base_url: str = "",
     model: str = "",
@@ -72,10 +79,16 @@ async def execute_clarification_stage(
         book: 当前书籍实体
         chapter: 当前章节实体（可选，用于提供上下文）
         entities: 相关的角色实体列表（可选）
+        relationships: 角色关系列表（可选）
+        open_hooks: 开放伏笔列表（可选）
+        previous_chapter_summary: 上一章摘要（可选）
+        locations: 章节关联的地点列表（可选）
         global_taboos: 全局禁忌（可选）
         author_intent: 作者意图（可选）
         user_instruction: 用户的补充回答（交互式流程用）
         previous_issues: 之前识别出的问题（交互式流程用）
+        previous_chapter_snapshot: 上一章的世界状态快照（可选）
+        previous_world_terminal_state: V3.6 结构化世界终端状态（可选）
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name
@@ -90,10 +103,16 @@ async def execute_clarification_stage(
         ambiguous_text=ambiguous_text,
         chapter=chapter,
         entities=entities,
+        relationships=relationships,
+        open_hooks=open_hooks,
+        previous_chapter_summary=previous_chapter_summary,
+        locations=locations,
         global_taboos=global_taboos,
         author_intent=author_intent,
         user_instruction=user_instruction,
         previous_issues=previous_issues,
+        previous_chapter_snapshot=previous_chapter_snapshot,
+        previous_world_terminal_state=previous_world_terminal_state,
     )
     
     try:

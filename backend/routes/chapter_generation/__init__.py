@@ -19,8 +19,12 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from backend.core.dependencies import get_chapter_repository, get_book_repository
-from backend.repositories import ChapterRepository, BookRepository
+from backend.core.dependencies import get_chapter_repository, get_book_repository, get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from backend.repositories import (
+    ChapterRepository, BookRepository, MemoryRepository,
+    PlotLedgerRepository, MapLocationRepository, RelationshipRepository
+)
 from backend.schemas import (
     GenerateChapterAgenticRequest,
     GenerateChapterAgenticPreviewResponse,
@@ -29,6 +33,8 @@ from backend.schemas import (
 from backend.services.generation.chapter import preview_agentic_beats
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.workflows.clarification_agent import execute_clarification_stage
+from backend.services.context.loader import load_full_chapter_context
+from backend.world_state_schemas import WorldTerminalState
 
 # 主路由（来自 dual_track.py）
 from backend.routes.chapter_generation.dual_track import router as dual_track_router
@@ -61,28 +67,50 @@ async def generate_chapter_agentic_preview_beats(
 @extra_router.post("/clarify-outline")
 async def clarify_chapter_outline(
     request: ClarifyOutlineRequest,
-    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
-    book_repo: BookRepository = Depends(get_book_repository),
+    db: AsyncSession = Depends(get_db),
 ):
     """大纲澄清端点 - 用于在生成节拍前澄清和完善章节大纲"""
     logger.info(f"[ClarifyOutline] 收到大纲澄清请求: chapter_id={request.chapter_id}")
     
-    chapter = await chapter_repo.get_by_id(request.chapter_id)
-    if not chapter:
-        raise HTTPException(status_code=404, detail="章节不存在")
+    repos = {
+        "chapter": ChapterRepository(db),
+        "book": BookRepository(db),
+        "memory": MemoryRepository(db),
+        "plot_ledger": PlotLedgerRepository(db),
+        "map_location": MapLocationRepository(db),
+        "relationship": RelationshipRepository(db),
+    }
+    
+    context = await load_full_chapter_context(str(request.chapter_id), repos)
+    
+    if not context or not context.chapter:
+        raise HTTPException(status_code=404, detail="章节或上下文加载失败")
         
-    book = await book_repo.get_by_id(chapter.book_id)
-    if not book:
-        raise HTTPException(status_code=404, detail="书籍不存在")
-        
+    chapter = context.chapter
+    book = context.book
+    
+    previous_world_state = None
+    if context.previous_world_snapshot:
+        try:
+            previous_world_state = WorldTerminalState.from_chapter_snapshot(context.previous_world_snapshot)
+        except Exception as e:
+            logger.warning(f"Failed to parse previous world snapshot: {e}")
+            
     result = await execute_clarification_stage(
         ambiguous_text=request.ambiguous_text,
         book=book,
         chapter=chapter,
+        entities=context.entities,
+        relationships=context.relationships,
+        open_hooks=context.open_hooks,
+        previous_chapter_summary=context.previous_summary,
+        locations=context.locations,
         author_intent=request.author_intent,
-        global_taboos=book.core_motifs_taboos,
+        global_taboos=book.core_motifs_taboos if book else None,
         user_instruction=request.user_instruction,
         previous_issues=request.previous_issues,
+        previous_chapter_snapshot=context.previous_world_snapshot,
+        previous_world_terminal_state=previous_world_state,
         api_key=request.api_key,
         base_url=request.base_url,
         model=request.model,
