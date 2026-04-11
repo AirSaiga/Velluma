@@ -334,6 +334,25 @@ export const generateApi = {
     return response.json()
   },
 
+  clarifyOutline: async (data: any, abortSignal?: AbortSignal) => {
+    // 大纲澄清需要调用 LLM，设置 5 分钟超时
+    const response = await requestRaw(
+      '/clarify-outline',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+        signal: abortSignal
+      },
+      300000
+    )
+
+    if (!response.ok) {
+      throw new Error(`大纲澄清请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  },
+
   /**
    * Agentic 章节生成（V3.5 默认使用双轨对抗架构）
    * @param useLegacyMode - 是否使用传统单轨模式（默认 false，使用双轨）

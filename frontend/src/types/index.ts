@@ -176,3 +176,66 @@ export interface InspirationRequest {
   base_url?: string
   model?: string
 }
+
+// === 大纲澄清相关类型 (Clarification Agent) ===
+
+export interface ClarifyOutlineRequest {
+  chapter_id: string
+  ambiguous_text: string
+  api_key: string
+  base_url?: string
+  model?: string
+  author_intent?: string
+}
+
+export interface ClarifyOutlineResponse {
+  is_ambiguous: boolean              // 是否存在歧义或信息缺失
+  identified_issues?: string[]       // 识别到的具体问题列表
+  clarification_suggestions?: string[] // 提供给用户的澄清建议/问题
+  refined_text?: string              // AI修正后的大纲文本
+  error?: string                     // 解析异常时的错误信息
+}
+
+// === 双轨生成架构相关类型 (Dual Track Architecture V3.5) ===
+
+export interface DualTrackGenerationRequest extends GenerateChapterAgenticPayload {
+  beats?: ConfirmedStoryBeat[]
+  enable_sketch_track?: boolean
+  enable_adversarial_alignment?: boolean
+  use_sketch_for_refinement?: boolean
+  alignment_threshold?: number
+  sketch_ratio?: number
+  sketch_model?: string
+}
+
+export interface BeatDraftResult {
+  beat_id: string
+  beat_index: number
+  scene_intent: Record<string, any>
+  subconscious_thought: string
+  draft_chunk: string
+  prompts?: any[]
+  mcts_rollout?: any[]
+}
+
+export interface SketchResult {
+  sketch_text: string
+  word_count: number
+  prompts?: any[]
+}
+
+export interface AdjustmentPlan {
+  alignment_score: number
+  analysis_prompts?: any[]
+  [key: string]: any
+}
+
+export interface DualTrackResult {
+  final_text: string
+  beat_drafts: BeatDraftResult[]
+  stitched_draft: string
+  sketch_result?: SketchResult
+  adjustment_plan?: AdjustmentPlan
+  stats: Record<string, any>
+  debug_info: Record<string, any>
+}

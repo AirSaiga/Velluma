@@ -71,6 +71,16 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const pendingAgenticPayload = ref<GenerateChapterAgenticPayload | null>(null)
   const pendingClearEditorOnConfirm = ref(false)
   
+  // 新增大纲澄清相关状态
+  const isClarifyingOutline = ref(false)
+  const clarificationResult = ref<{
+    is_ambiguous: boolean
+    identified_issues?: string[]
+    clarification_suggestions?: string[]
+    refined_text?: string
+  } | null>(null)
+  const showClarificationModal = ref(false)
+  
   // 生成完成提示弹窗状态
   const showCompletionModal = ref(false)
   const completionMessage = ref('')
@@ -80,8 +90,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const isAgenticMode = ref(true)
   const formError = ref('')
 
-  const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value)
-  const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value)
+  const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value || isClarifyingOutline.value)
+  const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value || isClarifyingOutline.value)
   const selectedChapter = computed(() => props.selectedChapter)
 
   function openCompletionModal(title: string, message: string) {
@@ -215,6 +225,23 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (previewAbortController) {
       previewAbortController.abort()
       previewAbortController = null
+    }
+  }
+
+  function closeClarificationModal() {
+    showClarificationModal.value = false
+    clarificationResult.value = null
+  }
+
+  async function handleApplyClarification(newOutlineText: string) {
+    updateChapter({ outline_text: newOutlineText })
+    closeClarificationModal()
+    
+    // 如果还有等待生成的 Payload，则在更新大纲后直接触发生成
+    if (pendingAgenticPayload.value) {
+      // 从最新大纲构建新的 Payload (可选: 如果依赖最新状态，可重构生成 Payload 的逻辑)
+      // 在这里直接拿着原本的 pendingAgenticPayload 继续走下去
+      await previewBeatsForReview(pendingAgenticPayload.value, pendingClearEditorOnConfirm.value)
     }
   }
 
@@ -534,6 +561,38 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       return
     }
 
+    // 将即将生成的参数存入 pending 状态，用于被中断后恢复
+    pendingAgenticPayload.value = payload
+    pendingClearEditorOnConfirm.value = hasEditorContent
+
+    // === 插入意图澄清流程 (Clarification Workflow) ===
+    const currentOutline = chapter.outline_text?.trim() || ''
+    if (currentOutline.length > 0 && currentOutline.length < 200) { // 如果大纲存在且字数偏少，启动澄清检查
+      isClarifyingOutline.value = true
+      try {
+        const clarifyRes = await generateApi.clarifyOutline({
+          chapter_id: chapter.id,
+          ambiguous_text: currentOutline,
+          api_key: props.apiConfig.api_key,
+          base_url: props.apiConfig.base_url,
+          model: props.apiConfig.reasoning_model || props.apiConfig.model || 'gpt-4o-mini',
+          author_intent: chapter.author_intent
+        })
+        
+        if (clarifyRes.is_ambiguous && clarifyRes.clarification_suggestions && clarifyRes.clarification_suggestions.length > 0) {
+          // 拦截生成，弹出澄清框让用户补充
+          clarificationResult.value = clarifyRes
+          showClarificationModal.value = true
+          return // 中断后续的 previewBeatsForReview，等待用户完成澄清
+        }
+      } catch (err: any) {
+        console.warn('大纲澄清失败，退回直接生成模式', err)
+      } finally {
+        isClarifyingOutline.value = false
+      }
+    }
+
+    // 如果不需要澄清或澄清失败，直接继续执行预览
     await previewBeatsForReview(payload, hasEditorContent)
   }
 
@@ -741,6 +800,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     showBeatReviewModal,
     showInspirationModal,
     showPublishModal,
+    showClarificationModal,
+    clarificationResult,
+    isClarifyingOutline,
+    closeClarificationModal,
+    handleApplyClarification,
     startGenerate,
     toggleAgenticMode,
     toggleCharacter,
