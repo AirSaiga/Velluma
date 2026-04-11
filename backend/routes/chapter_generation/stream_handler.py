@@ -166,7 +166,8 @@ class DualTrackStreamHandler:
 
         try:
             # 执行生成流程
-            await self._execute_generation()
+            async for event in self._execute_generation():
+                yield event
 
         except Exception as e:
             async for msg in self._handle_error(e):
@@ -176,7 +177,7 @@ class DualTrackStreamHandler:
             # 确保清理资源
             await self._cleanup()
 
-    async def _execute_generation(self) -> None:
+    async def _execute_generation(self) -> AsyncGenerator[str, None]:
         """执行完整的生成流程"""
         # ===================================================================
         # Phase 0: 初始化
@@ -306,7 +307,7 @@ class DualTrackStreamHandler:
         # ===================================================================
         # Phase 4: 执行双轨工作流
         # ===================================================================
-        await self._execute_workflow(
+        async for event in self._execute_workflow(
             beats=beats,
             anchor_pov=anchor_pov,
             context=context,
@@ -314,14 +315,54 @@ class DualTrackStreamHandler:
             effective_reasoning_model=effective_reasoning_model,
             effective_creative_model=effective_creative_model,
             effective_sketch_model=effective_sketch_model,
-        )
+        ):
+            yield event
+
+    async def _process_beats_stream(
+        self,
+        context: Any,
+        effective_word_count: int,
+    ) -> AsyncGenerator[str, None]:
+        """
+        处理节拍数据并生成 SSE 事件的异步生成器。
+
+        这是 _process_beats 的包装方法，确保正确处理异步生成器。
+
+        Args:
+            context: 章节上下文
+            effective_word_count: 目标字数
+
+        Yields:
+            SSE 格式的事件字符串
+        """
+        async for event in self._process_beats(context, effective_word_count):
+            yield event
 
     async def _process_beats(
         self,
         context: Any,
         effective_word_count: int,
-    ) -> Tuple[List[dict], Optional[str]]:
-        """处理节拍数据，返回 (beats, anchor_pov) 元组"""
+    ) -> AsyncGenerator[str, None]:
+        """
+        处理节拍数据并生成 SSE 事件。
+
+        职责：
+        - 检查缓存的生成结果
+        - 获取或生成节拍数据
+        - 注入世界状态约束
+        - 分配 POV 角色
+        - 保存节拍到数据库
+
+        Args:
+            context: 章节上下文
+            effective_word_count: 目标字数
+
+        Yields:
+            SSE 格式的事件字符串
+
+        注意:
+            结果存储在 self.beats_result 属性中，供调用方使用
+        """
         from backend.services.workflows.planning import assign_pov_to_beats
         from backend.services.prompts.world_state_prompts import format_snapshot_for_planner
 
@@ -475,7 +516,7 @@ class DualTrackStreamHandler:
         effective_reasoning_model: str,
         effective_creative_model: str,
         effective_sketch_model: str,
-    ) -> None:
+    ) -> AsyncGenerator[str, None]:
         """执行双轨工作流"""
         physical_state_lock = build_physical_state_lock(beats)
 
@@ -568,13 +609,15 @@ class DualTrackStreamHandler:
             self.result = await self.workflow_task
 
         except (GeneratorExit, asyncio.CancelledError) as cancel_e:
-            await self._handle_cancellation(cancel_e)
+            async for event in self._handle_cancellation(cancel_e):
+                yield event
             raise
 
         # 处理结果
-        await self._process_result()
+        async for event in self._process_result():
+            yield event
 
-    async def _process_result(self) -> None:
+    async def _process_result(self) -> AsyncGenerator[str, None]:
         """处理工作流结果"""
         if not self.result or not hasattr(self.result, 'final_text'):
             return
@@ -705,7 +748,7 @@ class DualTrackStreamHandler:
         )
         self.prompt_logger._finalized = True
 
-    async def _handle_cancellation(self, cancel_e: Exception) -> None:
+    async def _handle_cancellation(self, cancel_e: Exception) -> AsyncGenerator[str, None]:
         """处理取消/断开连接"""
         svc_logger.warning(
             "[Generation] 阶段=CANCELLED 状态=RUNNING 原因=客户端取消",
@@ -772,7 +815,7 @@ class DualTrackStreamHandler:
         except Exception:
             pass
 
-    def _handle_error(self, e: Exception) -> AsyncGenerator[str, None]:
+    async def _handle_error(self, e: Exception) -> AsyncGenerator[str, None]:
         """处理错误"""
         exc_type = type(e).__name__
         error_msg = f"生成失败 ({exc_type}): {str(e)}"
@@ -788,7 +831,6 @@ class DualTrackStreamHandler:
         # 保存失败状态
         if self.chapter is not None and self.run_id is not None:
             try:
-                import asyncio
                 asyncio.create_task(
                     self.checkpoint_manager.persist(
                         chapter=self.chapter,
@@ -820,7 +862,7 @@ class DualTrackStreamHandler:
             pass
 
         if is_cancelled:
-            return
+            return  # 异步生成器可使用 return 提前终止
 
     async def _cleanup(self) -> None:
         """清理资源"""

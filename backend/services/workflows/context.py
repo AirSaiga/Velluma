@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 迁移说明 (2026-03-30)：
 - 所有函数已迁移到使用 Repository 模式
 - 新接口使用 repositories 参数
-- 旧的 db 参数版本已移除
+- V3 版本现已稳定，移除旧版本降级逻辑
 
 使用方式：
     repos = {
@@ -33,17 +33,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
-from typing import Any, Optional, Dict, List, Tuple, Union
+from typing import Any, Optional, Dict, List, Tuple
 
-from backend.services.workflows.context_basic import (
-    load_chapter_context as _load_chapter_context_basic,
-    load_chapter_context as load_chapter_context,
-)
-from backend.services.workflows.context_enhanced import (
-    load_chapter_context_v2,
-    load_chapter_context_v3,
-    NEW_RAG_AVAILABLE,
-)
+from backend.services.workflows.context_enhanced import load_chapter_context_v3
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +47,11 @@ async def get_context_for_stage(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> Tuple[Optional[Any], Optional[Any]]:
-    if not NEW_RAG_AVAILABLE:
-        logger.warning("[Context] 新 RAG 系统不可用")
-        return None, None
-
     stage_map = {
         "assembling": 1,  # WorkflowStage.ASSEMBLING
         "planning": 2,    # WorkflowStage.PLANNING
-        "drafting": 3,    # WorkflowStage.DRAFTING
-        "reviewing": 4,   # WorkflowStage.REVIEWING
+        "drafting": 3,   # WorkflowStage.DRAFTING
+        "reviewing": 4,  # WorkflowStage.REVIEWING
         "refining": 5,    # WorkflowStage.REFINING
     }
 
@@ -112,7 +100,7 @@ async def get_reviewing_context(
         return None, []
 
     omissions = []
-    if NEW_RAG_AVAILABLE and context.get("chapter"):
+    if context.get("chapter"):
         try:
             from backend.services.rag import EnhancedForeshadowingTracker, EnhancedHookOmissionDetector
 

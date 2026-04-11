@@ -80,7 +80,16 @@ async def load_chapter(
     chapter_repo: "ChapterRepository" = repositories.get("chapter")
     if not chapter_repo:
         raise ValueError("ChapterRepository 未配置")
-    return await chapter_repo.get_by_id(chapter_id)
+    
+    # 使用 selectinload 预加载 story_beats，避免在异步上下文中触发懒加载
+    from backend.models import StoryBeat
+    from sqlalchemy.orm import selectinload
+    spec = QuerySpec.create(Chapter).where(
+        Chapter.id == chapter_id
+    ).with_options(
+        selectinload(Chapter.story_beats)
+    )
+    return await chapter_repo.find_one(spec=spec)
 
 
 async def load_book(

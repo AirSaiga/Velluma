@@ -55,6 +55,7 @@ from backend.routes.characters import router as characters_router
 from backend.routes.relationships import router as relationships_router
 from backend.routes.memories import router as memories_router
 from backend.routes.text_formatting import router as text_formatting_router
+# chapter_generation 包提供双轨生成路由
 from backend.routes.chapter_generation import router as chapter_generation_router
 from backend.routes.chapter_optimization import router as chapter_optimization_router
 from backend.routes.inspiration import router as inspiration_router

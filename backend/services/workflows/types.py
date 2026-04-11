@@ -22,37 +22,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 职责：定义工作流相关的类型、状态和结果。
 
 包含：
-- WorkflowStage: 工作流阶段枚举
+- WorkflowStage: 工作流阶段枚举（从 rag 模块统一导入）
 - WorkflowState: 工作流状态
 - WorkflowResult: 工作流执行结果
 """
 
-from enum import Enum
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
-
-class WorkflowStage(str, Enum):
-    IDLE = "IDLE"
-    ASSEMBLING_CONTEXT = "ASSEMBLING_CONTEXT"
-    PRE_CHECK = "PRE_CHECK"
-    PLANNING = "PLANNING"
-    POV_ASSIGNMENT = "POV_ASSIGNMENT"
-    DRAFTING = "DRAFTING"
-    SKETCH_GENERATION = "SKETCH_GENERATION"
-    STITCHING = "STITCHING"
-    ADVERSARIAL_ALIGNMENT = "ADVERSARIAL_ALIGNMENT"
-    REVIEWING = "REVIEWING"
-    REFINING = "REFINING"
-    STITCHING_AFTER_REFINE = "STITCHING_AFTER_REFINE"
-    POST_CHECK = "POST_CHECK"
-    STATE_PERSISTENCE = "STATE_PERSISTENCE"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
+# 从 rag 模块统一导入 WorkflowStage，避免重复定义
+from backend.services.rag import WorkflowStage
 
 
 class WorkflowState(BaseModel):
-    current_stage: WorkflowStage = WorkflowStage.IDLE
+    current_stage: WorkflowStage = WorkflowStage.ASSEMBLING
     iteration: int = 0
     max_iterations: int = 2
     start_time: Optional[str] = None

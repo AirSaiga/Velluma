@@ -78,7 +78,6 @@ from backend.config.derivation import (
 
 from backend.config.adapter import (
     adapt_request_to_config,
-    config_to_legacy_dict,
     get_generation_config,
     HighLevelParameterProcessor,
     RuntimeContextBuilder,
@@ -124,7 +123,6 @@ __all__ = [
     
     # 适配器
     "adapt_request_to_config",
-    "config_to_legacy_dict",
     "get_generation_config",
     "HighLevelParameterProcessor",
     "RuntimeContextBuilder",

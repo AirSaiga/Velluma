@@ -167,23 +167,8 @@ from backend.routes import (
     maps_router,
 )
 
-# V3.8 意图驱动层路由
-try:
-    from backend.routes.intent_driven import router as intent_driven_router
-    INTENT_DRIVEN_ROUTER_AVAILABLE = True
-    logger.info("[Main] 意图驱动路由已加载")
-except Exception as e:
-    INTENT_DRIVEN_ROUTER_AVAILABLE = False
-    logger.warning(f"[Main] 意图驱动路由加载失败: {e}")
-
-# V3.5 双轨架构路由（可选导入）
-try:
-    from backend.routes.chapter_generation_dual_track import router as chapter_generation_dual_track_router
-    DUAL_TRACK_ROUTER_AVAILABLE = True
-    logger.info("[Main] 双轨生成路由已加载")
-except Exception as e:
-    DUAL_TRACK_ROUTER_AVAILABLE = False
-    logger.warning(f"[Main] 双轨生成路由加载失败: {e}")
+from backend.routes.intent_driven import router as intent_driven_router
+logger.info("[Main] 意图驱动路由已加载")
 
 # =============================================================================
 # 端口持久化机制
@@ -257,21 +242,17 @@ app.include_router(relationships_router)
 app.include_router(memories_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
-
-# V3.5 双轨生成路由（如果可用）
-if DUAL_TRACK_ROUTER_AVAILABLE:
-    app.include_router(chapter_generation_dual_track_router)
-    logger.info("[Main] 双轨生成路由已注册: /api/chapters/{id}/generate-dual-track")
+# 注意：双轨生成路由已集成到 chapter_generation_router 中
+# 端点：/api/chapters/{id}/generate-dual-track
 
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
 app.include_router(critique_router)
 app.include_router(maps_router)
 
-# V3.8 意图驱动层路由（如果可用）
-if INTENT_DRIVEN_ROUTER_AVAILABLE:
-    app.include_router(intent_driven_router)
-    logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
+# V3.8 意图驱动层路由
+app.include_router(intent_driven_router)
+logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
 
 # =============================================================================
 # 前端静态文件服务（SPA 路由处理）

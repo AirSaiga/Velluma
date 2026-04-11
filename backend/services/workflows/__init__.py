@@ -37,7 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - utils.py: 工具函数
 
 业务流程：
-1. load_chapter_context: 加载上下文数据
+1. load_chapter_context_v3: 加载上下文数据 (V3)
 2. generate_beats: 生成故事节拍
 3. generate_chunks_parallel: 并行生成片段（单轨模式）
 4. execute_dual_track_generation: 双轨生成（推荐）
@@ -52,8 +52,6 @@ from backend.services.workflows.types import (
     WorkflowResult,
 )
 from backend.services.workflows.context import (
-    load_chapter_context,
-    load_chapter_context_v2,
     load_chapter_context_v3,
     get_context_for_stage,
     get_planning_context,
@@ -106,8 +104,6 @@ __all__ = [
     "WorkflowStage",
     "WorkflowState",
     "WorkflowResult",
-    "load_chapter_context",
-    "load_chapter_context_v2",
     "load_chapter_context_v3",
     "get_context_for_stage",
     "get_planning_context",

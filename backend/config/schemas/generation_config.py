@@ -712,64 +712,6 @@ class GenerationConfig(BaseModel):
         """执行所有校验"""
         # 权重和校验在 RAGPolicy 中已自动处理
         return self
-    
-    def to_legacy_format(self) -> dict:
-        """
-        转换为旧版请求格式（向后兼容）
-        
-        用于平滑迁移期间，将统一配置转换回原有的散乱参数格式
-        """
-        return {
-            # 基础参数
-            "chapter_id": str(self.chapter_id) if self.chapter_id else None,
-            "api_key": self.llm.api_key if self.llm else None,
-            "base_url": self.llm.base_url if self.llm else None,
-            "model": self.llm.default_model if self.llm else "gpt-4o-mini",
-            "reasoning_model": self.llm.reasoning_model if self.llm else None,
-            "creative_model": self.llm.creative_model if self.llm else None,
-            
-            # 章节参数
-            "word_count": self.chapter.target_word_count,
-            "author_intent": self.chapter.author_intent,
-            "tension_level": self.chapter.tension_level,
-            "pacing_style": self.chapter.pacing_style,
-            
-            # RAG 参数
-            "rag_top_k": self.rag.top_k,
-            "rag_alpha": self.rag.semantic_weight,
-            "rag_beta": self.rag.time_decay_weight,
-            "rag_gamma": self.rag.foreshadowing_weight,
-            "rag_lambda": self.rag.decay_factor,
-            
-            # 工作流参数
-            "max_iterations": self.workflow.max_iterations,
-            "fast_mode": self.workflow.fast_mode,
-            "skip_minor_refine": self.workflow.skip_minor_refine,
-            
-            # 双轨参数
-            "enable_sketch_track": self.workflow.dual_track.enable_sketch_track,
-            "enable_adversarial_alignment": self.workflow.dual_track.enable_adversarial_alignment,
-            "use_sketch_for_refinement": self.workflow.dual_track.use_sketch_for_refinement,
-            "alignment_threshold": self.workflow.dual_track.alignment_threshold,
-            "sketch_ratio": self.workflow.dual_track.sketch_ratio,
-            
-            # 功能开关
-            "feature_flags": {
-                "enable_fail_fast": self.validation.enable_fail_fast,
-                "enable_emotional_scratchpad": self.validation.enable_emotional_scratchpad,
-                "enable_whisper_memory": self.features.enable_whisper_memory,
-                "fail_fast_max_attempts": self.validation.fail_fast_max_attempts,
-                "fail_fast_temperature_step": self.validation.fail_fast_temperature_step,
-                "workflow_tier": self.chapter.workflow_tier,
-                "force_parallel_prose": self.workflow.force_parallel_prose,
-                "semi_parallel_prose": self.workflow.semi_parallel_prose,
-            },
-            
-            # 推理配置
-            "reasoning_config": self.llm.default_reasoning_config.to_api_params() if self.llm else {},
-            "reasoning_model_reasoning_config": self.llm.reasoning_model_config.to_api_params() if self.llm else {},
-            "creative_model_reasoning_config": self.llm.creative_model_config.to_api_params() if self.llm else {},
-        }
 
 
 def _parse_reasoning_config(data: Optional[dict]) -> ReasoningSettings:

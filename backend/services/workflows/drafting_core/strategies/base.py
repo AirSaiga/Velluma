@@ -24,46 +24,8 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 
 from backend.schemas import DraftingFeatureFlags
 
-
-@dataclass
-class BeatContext:
-    """
-    单个 Beat 的执行上下文。
-
-    业务含义：
-    - 封装单个 Beat 生成所需的所有信息
-    - 减少策略实现中的参数传递
-    - 便于添加 Beat 级别的状态
-
-    字段说明：
-    - beat: 故事节拍数据
-    - beat_index: 节拍索引 (从 0 开始)
-    - total_beats: 总节拍数
-    - scene_intent: 场景意图
-    - subconscious: 潜意识思考
-    - target_words: 目标字数
-    """
-    beat: dict
-    beat_index: int
-    total_beats: int
-    scene_intent: dict = field(default_factory=dict)
-    subconscious: str = ""
-    target_words: int = 500
-
-    @property
-    def beat_number(self) -> int:
-        """1-based 节拍编号"""
-        return self.beat_index + 1
-
-    @property
-    def is_first(self) -> bool:
-        """是否第一个节拍"""
-        return self.beat_index == 0
-
-    @property
-    def is_last(self) -> bool:
-        """是否最后一个节拍"""
-        return self.beat_index == self.total_beats - 1
+# 从 drafting_types 统一导入 BeatContext，避免重复定义
+from backend.services.workflows.drafting_types import BeatContext
 
 
 @dataclass

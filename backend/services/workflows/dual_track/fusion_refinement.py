@@ -33,8 +33,8 @@ from backend.services.workflows.dual_track_helpers import (
 )
 
 if TYPE_CHECKING:
-    from backend.services.workflows.adversarial_aligner.types import AdjustmentPlan
-    from backend.services.workflows.sketch_generator.types import SketchResult
+    from backend.services.workflows.adversarial_aligner import AdjustmentPlan
+    from backend.services.workflows.sketch_generator import SketchResult
 
 logger = logging.getLogger(__name__)
 

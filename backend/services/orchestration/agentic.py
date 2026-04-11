@@ -70,28 +70,22 @@ from backend.services.prompts import (
 )
 from backend.services.utils.logging import get_runtime_logger
 
-# V3.8: 增强型 RAG 系统集成
-try:
-    from backend.services.rag import (
-        WorkflowRetrievalIntegrator,
-        WorkflowStage,
-        WorkflowIntegrationConfig,
-        RetrievalStrategy,
-        MemoryType,
-    )
-    from backend.services.workflows import (
-        load_chapter_context_v3,
-        get_context_for_stage,
-    )
-    # 统一从 config 模块导入参数映射，避免重复定义
-    from backend.config import (
-        MEMORY_STRATEGY_PRESETS,
-        CREATIVITY_TO_PARALLEL_RULE,
-        REFINEMENT_TO_THRESHOLD_RULE,
-    )
-    ENHANCED_RAG_AVAILABLE = True
-except ImportError:
-    ENHANCED_RAG_AVAILABLE = False
+from backend.services.rag import (
+    WorkflowRetrievalIntegrator,
+    WorkflowStage,
+    WorkflowIntegrationConfig,
+    RetrievalStrategy,
+    MemoryType,
+)
+from backend.services.workflows import (
+    load_chapter_context_v3,
+    get_context_for_stage,
+)
+from backend.config import (
+    MEMORY_STRATEGY_PRESETS,
+    CREATIVITY_TO_PARALLEL_RULE,
+    REFINEMENT_TO_THRESHOLD_RULE,
+)
 
 # 配置模块级日志记录器
 logger = get_runtime_logger(__name__)

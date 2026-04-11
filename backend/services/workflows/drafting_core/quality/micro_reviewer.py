@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from backend.services.prompts import build_micro_review_prompt
 from backend.services.workflows.drafting_thinking import _call_llm_with_stats
 from backend.services.workflows.utils import clean_llm_output
+from backend.services.workflows.validators import DraftValidatorPipeline
 from backend.schemas import MicroReviewResult
 
 if TYPE_CHECKING:
@@ -121,20 +122,17 @@ class MicroReviewer:
         Returns:
             ValidationResult: 校验结果
         """
-        # 导入校验管道
+        validator = DraftValidatorPipeline()
+
+        val_context = {
+            "pacing_type": beat.get("pacing_type", "medium") if beat else "medium",
+            "red_lines": beat.get("red_lines", []) if beat else [],
+            "required_entities": beat.get("required_entities", []) if beat else [],
+            "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
+            "entities": context.get("entities", []),
+        }
+
         try:
-            from backend.services.workflows.validators import DraftValidatorPipeline
-
-            validator = DraftValidatorPipeline()
-
-            val_context = {
-                "pacing_type": beat.get("pacing_type", "medium") if beat else "medium",
-                "red_lines": beat.get("red_lines", []) if beat else [],
-                "required_entities": beat.get("required_entities", []) if beat else [],
-                "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
-                "entities": context.get("entities", []),
-            }
-
             result = await validator.validate_draft(chunk_text, val_context)
 
             if not result.is_valid:
@@ -146,9 +144,6 @@ class MicroReviewer:
 
             return ValidationResult(is_valid=True, errors=[], categories=[])
 
-        except ImportError:
-            # 如果校验管道不存在，跳过代码级校验
-            return ValidationResult(is_valid=True, errors=[], categories=[])
         except Exception as e:
             logger.warning(f"[MicroReviewer] 代码级校验异常: {e}")
             return ValidationResult(is_valid=True, errors=[], categories=[])

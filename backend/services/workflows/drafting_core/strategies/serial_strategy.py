@@ -16,7 +16,8 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from backend.services.workflows.drafting_core.strategies.base import GenerationStrategy, GenerationResult, BeatContext
+from backend.services.workflows.drafting_core.strategies.base import GenerationStrategy, GenerationResult
+from backend.services.workflows.drafting_types import BeatContext
 from backend.services.workflows.drafting_core.context.context_manager import ContextManager
 from backend.services.workflows.drafting_core.context.state_updater import StateUpdater
 from backend.services.workflows.drafting_core.retry.retry_engine import RetryEngine

@@ -273,6 +273,12 @@ class AdversarialAligner:
         对比 Draft 和 Sketch 在各叙事节点的质量，判断哪个版本更优秀。
         只有当 Sketch 的处理明显优于 Draft 时才生成改进建议，
         而不是让 Draft 与 Sketch 对齐。
+        
+        【设计意图】
+        - 局部精修：针对特定节拍的问题精准重写
+        - 全局精修：处理跨节拍的全局性问题
+        
+        每个质量问题都应关联到具体的节拍索引，以便触发局部精修。
         """
         gaps = []
         prompts = []
@@ -299,13 +305,28 @@ class AdversarialAligner:
   "quality_comparisons": [
     {
       "narrative_point": "描述对比的叙事节点（简短）",
+      "beat_index": 2,
+      "is_global": false,
       "better_version": "sketch",
       "reason": "Sketch 更好的原因（具体指出 Draft 的弱点）",
       "draft_improvement": "Draft 应如何改进（借鉴 Sketch 哪个具体做法，不要说'参考Sketch'这种模糊指令）",
       "severity": "high 或 medium"
+    },
+    {
+      "narrative_point": "整体行文风格不够统一",
+      "beat_index": null,
+      "is_global": true,
+      "better_version": "sketch",
+      "reason": "整体叙事风格存在跳跃",
+      "draft_improvement": "统一全文章的叙述语气",
+      "severity": "high"
     }
   ]
 }
+
+字段说明：
+- beat_index: 问题所属的节拍序号（1-based），从节拍框架中对应。若能定位到具体节拍则填数字，否则填 null。
+- is_global: 是否是跨节拍的全局性问题。若为 true，则 beat_index 必须为 null，表示需要全局精修而非局部精修。
 
 注意：better_version 只能填 "sketch"，只输出 Draft 需要改进的条目。"""
 
@@ -318,8 +339,9 @@ class AdversarialAligner:
         if len(key_beats) == 0:
             return gaps, prompts
         
+        # 构建带节拍索引的摘要，方便 LLM 定位
         beats_summary = "\n".join([
-            f"节拍 {b.get('position', i)}: {b.get('summary', '')}"
+            f"节拍 {i}: {b.get('summary', '')}"
             for i, b in enumerate(key_beats, 1)
         ])
         
@@ -328,7 +350,7 @@ class AdversarialAligner:
         draft_sample = self._sample_text_segments(draft_text, max_total=3000)
         sketch_sample = self._sample_text_segments(sketch_text, max_total=3000)
         
-        user_prompt = f"""【节拍框架 - 叙事参考】
+        user_prompt = f"""【节拍框架 - 叙事参考（共 {len(key_beats)} 个节拍）】
 {beats_summary}
 
 【版本 A：节拍统稿（Draft）- 分段采样】
@@ -337,7 +359,12 @@ class AdversarialAligner:
 【版本 B：连贯速写（Sketch）- 分段采样】
 {sketch_sample}
 
-请对比以上两个版本，找出 Draft 在哪些叙事节点处不如 Sketch，并给出具体改进建议。若 Draft 整体质量较好，quality_comparisons 可以为空数组。"""
+请对比以上两个版本，找出 Draft 在哪些叙事节点处不如 Sketch，并给出具体改进建议。
+
+重要要求：
+1. 每个问题必须关联到具体的节拍序号（beat_index），以便进行【局部精修】
+2. 如果问题是跨节拍的全局性问题（如整体风格不一致），设置 is_global=true，beat_index=null，走【全局精修】
+3. 若 Draft 整体质量较好，quality_comparisons 可以为空数组。"""
 
         try:
             prompts.append({"stage": "QUALITY_COMPARISON_ANALYSIS", "system_prompt": system_prompt, "user_prompt": user_prompt})
@@ -355,6 +382,11 @@ class AdversarialAligner:
             result = json.loads(clean_llm_output(response))
             comparisons = result.get("quality_comparisons", [])
             
+            # 建立节拍索引到 beat_id 的映射
+            beat_id_map = {
+                i + 1: key_beats[i].get("beat_id") for i in range(len(key_beats))
+            }
+            
             for comp in comparisons:
                 # 只处理 Sketch 更好的情况
                 if comp.get("better_version") != "sketch":
@@ -363,11 +395,24 @@ class AdversarialAligner:
                 severity_str = comp.get("severity", "medium")
                 severity = GapSeverity(severity_str) if severity_str in ["high", "medium", "low"] else GapSeverity.MEDIUM
                 
+                # 提取节拍索引
+                beat_index = comp.get("beat_index")
+                is_global = comp.get("is_global", False)
+                
+                # 全局问题不设置节拍索引
+                if is_global:
+                    beat_index = None
+                elif beat_index is not None:
+                    # 验证节拍索引有效性
+                    beat_index = int(beat_index) if beat_index else None
+                    if beat_index and (beat_index < 1 or beat_index > len(key_beats)):
+                        beat_index = None
+                
                 gaps.append(AlignmentGap(
                     gap_type=GapType.INFORMATION,
                     severity=severity,
-                    beat_index=None,
-                    beat_id=None,
+                    beat_index=beat_index,
+                    beat_id=beat_id_map.get(beat_index) if beat_index else None,
                     description=f"{comp.get('narrative_point', '')}: {comp.get('reason', '')}",
                     draft_value="Draft 此处处理较弱",
                     sketch_value="Sketch 此处处理更优",

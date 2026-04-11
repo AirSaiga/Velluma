@@ -18,10 +18,9 @@
 统一配置适配层 (Unified Configuration Adapter)
 
 职责：
-- 为现有代码提供渐进式迁移路径
 - 将 GenerateChapterAgenticRequest 转换为 GenerationConfig
-- 集成新 RAG 检索系统
-- 保持向后兼容性
+- 提供配置推导引擎和验证器
+- 提供运行时上下文构建器
 
 使用方式：
     # 方式1：从请求构建配置
@@ -35,8 +34,8 @@
     ):
         ...
     
-    # 方式3：使用新 RAG 系统加载上下文
-    context = await build_runtime_context_with_rag(repositories, config, api_key)
+    # 方式3：使用上下文构建器
+    context = await RuntimeContextBuilder.build(repositories, config)
 """
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -233,21 +232,6 @@ def adapt_request_to_config(
         logger.warning(f"[adapt_request_to_config] 配置验证警告: {errors}")
     
     return config
-
-
-def config_to_legacy_dict(config: GenerationConfig) -> Dict[str, Any]:
-    """
-    将统一配置转换为旧版字典格式（向后兼容）
-    
-    用于平滑迁移期间，与现有代码兼容
-    
-    Args:
-        config: GenerationConfig 实例
-    
-    Returns:
-        Dict: 旧版参数字典
-    """
-    return config.to_legacy_format()
 
 
 def get_generation_config(
@@ -468,198 +452,3 @@ class RuntimeContextBuilder:
                 )
 
         return context
-
-
-# =============================================================================
-# 新 RAG 系统集成
-# =============================================================================
-
-async def build_runtime_context_with_rag(
-    repositories: RepositoriesDict,
-    config: GenerationConfig,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    使用新 RAG 系统构建运行时上下文
-    
-    迁移说明 (2026-03-30)：
-    - 已迁移到使用 repositories 参数
-    - 所有数据库操作通过 Repository 执行
-    
-    Args:
-        repositories: Repository 字典
-        config: 统一配置
-        api_key: API Key
-        base_url: Base URL
-        
-    Returns:
-        Dict: 运行时上下文
-    """
-    from backend.services.rag import (
-        WorkflowRetrievalIntegrator,
-        WorkflowStage,
-        WorkflowIntegrationConfig,
-    )
-    
-    chapter_repo = repositories.get("chapter")
-    book_repo = repositories.get("book")
-    relationship_repo = repositories.get("relationship")
-    map_repo = repositories.get("map_location")
-    
-    context = {
-        "chapter": None,
-        "book": None,
-        "characters": [],
-        "relationships": [],
-        "locations": [],
-        "open_hooks": [],
-        "previous_summary": None,
-        "relevant_memories": [],
-        "rag_result": None,
-        "context_package": None,
-    }
-    
-    if not config.chapter_id:
-        return context
-    
-    chapter = await chapter_repo.get_by_id(config.chapter_id) if chapter_repo else None
-    context["chapter"] = chapter
-    
-    if not chapter:
-        return context
-    
-    context["book"] = await book_repo.get_by_id(chapter.book_id) if book_repo else None
-    
-    entities = []
-    if chapter_repo:
-        from backend.models import ChapterEntity
-        entities = await chapter_repo.find_all(
-            model=ChapterEntity,
-            conditions=[ChapterEntity.chapter_id == config.chapter_id],
-        )
-        context["characters"] = [e.character for e in entities if hasattr(e, 'character') and e.character]
-
-    if relationship_repo and entities:
-        from backend.models import CharacterRelationship
-        character_ids = [e.entity_id for e in entities if e.entity_id]
-        if character_ids:
-            context["relationships"] = await relationship_repo.find_all(
-                model=CharacterRelationship,
-                conditions=[
-                    CharacterRelationship.source_char_id.in_(character_ids),
-                    CharacterRelationship.target_char_id.in_(character_ids),
-                ]
-            )
-
-    if map_repo:
-        from backend.models import ChapterMapLocation
-        context["locations"] = await map_repo.find_all(
-            model=ChapterMapLocation,
-            conditions=[ChapterMapLocation.chapter_id == config.chapter_id],
-        )
-    
-    if chapter_repo and chapter.book_id and chapter.chapter_number > 1:
-        from backend.models import Chapter
-        prev_chapter = await chapter_repo.find_one(
-            conditions=[
-                Chapter.book_id == chapter.book_id,
-                Chapter.chapter_number == chapter.chapter_number - 1,
-            ]
-        )
-        if prev_chapter:
-            context["previous_summary"] = prev_chapter.summary or (
-                prev_chapter.draft_text[-1000:] if prev_chapter.draft_text else None
-            )
-    
-    try:
-        rag_config = WorkflowIntegrationConfig(
-            default_strategy=_map_rag_policy_to_strategy(config.rag),
-            enable_vector_search=config.rag.top_k > 0,
-        )
-        
-        integrator = WorkflowRetrievalIntegrator(repositories, rag_config)
-        
-        # 执行检索
-        package, result = await integrator.retrieve_chapter_context(
-            chapter_id=config.chapter_id,
-            api_key=api_key,
-            base_url=base_url,
-            stage=WorkflowStage.ASSEMBLING,
-        )
-        
-        context["context_package"] = package
-        context["rag_result"] = result
-        
-        # 从 RAG 结果提取开放伏笔
-        from backend.services.rag import MemoryType
-        hook_items = result.get_items_by_type(MemoryType.OPEN_HOOK)
-        context["open_hooks"] = [
-            {
-                "hook_id": item.source_id,
-                "ledger_key": item.source_id,
-                "content": item.content,
-            }
-            for item in hook_items
-        ]
-        
-        # 从 RAG 结果提取相关记忆
-        memory_items = result.get_items_by_type(MemoryType.MEMORY_CHUNK)
-        context["relevant_memories"] = [
-            {"content": item.content, "chapter_number": item.chapter_number}
-            for item in memory_items
-        ]
-        
-        logger.info(
-            f"[build_runtime_context_with_rag] RAG 检索完成: "
-            f"{result.total_items} 项, 上下文 {package.total_length} 字"
-        )
-        
-    except Exception as e:
-        logger.warning(f"[build_runtime_context_with_rag] RAG 检索失败，使用降级: {e}")
-        context["open_hooks"] = await _load_open_hooks_fallback(chapter, repositories)
-    
-    return context
-
-
-def _map_rag_policy_to_strategy(rag_policy) -> "RetrievalStrategy":
-    """
-    将 RAGPolicy 映射到检索策略
-    
-    Args:
-        rag_policy: RAGPolicy 实例
-        
-    Returns:
-        RetrievalStrategy: 检索策略枚举
-    """
-    from backend.services.rag import RetrievalStrategy
-    
-    # 根据 top_k 判断
-    if rag_policy.top_k <= 3:
-        return RetrievalStrategy.FAST_TRACK
-    elif rag_policy.top_k >= 8:
-        return RetrievalStrategy.DEEP_DIVE
-    else:
-        return RetrievalStrategy.BALANCED_REFERENCE
-
-
-async def _load_open_hooks_fallback(chapter, repositories: RepositoriesDict) -> list:
-    """
-    降级：使用旧方式加载开放伏笔
-    """
-    plot_repo = repositories.get("plot_ledger")
-    if not plot_repo or not chapter.book_id:
-        return []
-    
-    hooks = await plot_repo.get_open_hooks(
-        book_id=chapter.book_id,
-        before_chapter=chapter.chapter_number,
-    )
-    return [
-        {
-            "hook_id": getattr(row, "hook_id", "") or getattr(row, "ledger_key", ""),
-            "ledger_key": getattr(row, "ledger_key", ""),
-            "content": getattr(row, "content", ""),
-        }
-        for row in hooks
-    ]

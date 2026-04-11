@@ -7,15 +7,16 @@
 - 解决并行生成连贯性差的问题
 
 模块结构：
-- dual_track_workflow.py: 主工作流类
 - stitching.py: 统稿器
 - fusion_refinement.py: 融合精修
+- alignment/: 对抗校对
 - tracks/: 双轨实现
 - config/: 配置类
 
 重要说明：
-- execute_dual_track_generation 函数定义在 backend/services/workflows/dual_track.py
-- 由于包名与文件名的命名冲突，使用 __getattr__ + importlib 直接加载文件
+- DualTrackWorkflow 类定义在 backend/services/workflows/dual_track.py
+- 由于包名与文件名的命名冲突，使用 __getattr__ + importlib 直接从文件导入
+- 这确保使用完整实现而非占位代码
 
 使用方式：
     from backend.services.workflows.dual_track import execute_dual_track_generation
@@ -25,22 +26,22 @@
 import importlib.util
 import os
 
-from backend.services.workflows.dual_track.dual_track_workflow import (
-    DualTrackWorkflow,
-    DualTrackResult,
-)
+# 直接导入子模块中的类和函数（这些是独立模块，不依赖 dual_track.py）
 from backend.services.workflows.dual_track.config.dual_track_config import (
     DualTrackConfig,
     SketchConfig,
     AlignerConfig,
 )
-from backend.services.workflows.stitching import stitch_chunks
 from backend.services.workflows.dual_track.stitching import (
     stitch_beats,
     build_persistent_state_anchors,
 )
 from backend.services.workflows.dual_track.fusion_refinement import fusion_refine
-from backend.services.workflows.sketch_generator import SketchGenerator, SketchResult, SketchGeneratorConfig
+from backend.services.workflows.sketch_generator import (
+    SketchGenerator,
+    SketchResult,
+    SketchGeneratorConfig,
+)
 from backend.services.workflows.adversarial_aligner import (
     AdversarialAligner,
     AdversarialAlignerConfig,
@@ -50,9 +51,45 @@ from backend.services.workflows.adversarial_aligner import (
     GapSource,
     GapSeverity,
 )
+# stitch_chunks 在外部模块
+from backend.services.workflows.stitching import stitch_chunks
 
+# 延迟导入主模块中的类和函数
+_dummy_module = None
+
+
+def __getattr__(name: str):
+    """从 dual_track.py 文件延迟导入类和函数，避免与包名冲突。"""
+    global _dummy_module
+
+    # 加载主文件模块（只加载一次）
+    if _dummy_module is None:
+        module_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "workflows",
+            "dual_track.py"
+        )
+        spec = importlib.util.spec_from_file_location("_dual_track_module", module_path)
+        if spec and spec.loader:
+            _dummy_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_dummy_module)
+
+    # 处理 DualTrackWorkflow 和 DualTrackResult
+    if name in ("DualTrackWorkflow", "DualTrackResult"):
+        if hasattr(_dummy_module, name):
+            return getattr(_dummy_module, name)
+
+    # 处理 execute_dual_track_generation
+    if name == "execute_dual_track_generation":
+        if hasattr(_dummy_module, name):
+            return getattr(_dummy_module, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# __all__ 必须在模块级别定义
 __all__ = [
-    # 主工作流
+    # 主工作流（延迟导入）
     "DualTrackWorkflow",
     "DualTrackResult",
     # 配置
@@ -80,21 +117,3 @@ __all__ = [
     # 延迟导入的函数
     "execute_dual_track_generation",
 ]
-
-
-def __getattr__(name: str):
-    """延迟导入 execute_dual_track_generation 以避免循环导入。"""
-    if name == "execute_dual_track_generation":
-        # 直接加载 backend/services/workflows/dual_track.py 文件
-        # 避免与 dual_track/ 包名冲突
-        module_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "workflows",
-            "dual_track.py"
-        )
-        spec = importlib.util.spec_from_file_location("dual_track_module", module_path)
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module.execute_dual_track_generation
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
