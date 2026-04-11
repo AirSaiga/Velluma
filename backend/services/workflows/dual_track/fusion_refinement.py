@@ -219,9 +219,9 @@ async def refine_globally(
     min_word_count = int(original_word_count * 0.9)
 
     revision_plan = (
-        f"【字数约束 - 最高优先级】\n"
-        f"原文字数约 {original_word_count} 字，精修后**不得低于 {min_word_count} 字**。\n"
-        f"严禁通过删段、合并段落或省略细节来缩减字数。如需改动，只能用等量或更多文字替换，不能净减少内容。\n\n"
+        f"【字数与扩写指导 - 最高优先级】\n"
+        f"原文字数约 {original_word_count} 字，精修后**请保持相近篇幅，不得低于 {min_word_count} 字**。\n"
+        f"如果为了连贯性需要修改或重写冲突段落，请通过**增加角色的内心独白、强化感官细节描写、补充环境氛围互动**来替换原有字数，确保总篇幅不缩水。\n\n"
         f"【全局修复建议】\n" + "\n".join(f"- {adj}" for adj in global_adjustments)
     )
 
