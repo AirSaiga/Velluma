@@ -17,11 +17,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-文本格式整理路由模块 - V3.0
+文本格式整理路由模块 - V4.1
 
-职责：提供文本格式整理 API，用于优化 AI 生成内容的段落结构、标点符号、空行等。
+职责：提供文本格式整理 API，支持 LLM 智能格式化和规则引擎两种模式。
 
-V3.0 变更：废弃 LLM 格式化，改用规则引擎，显著降低成本和延迟。
+V4.1 更新：
+- 长文本采用分段处理，避免 LLM Token 限制
+- 短文本（<3000字）使用 LLM 智能格式化
+- 长文本使用增强规则引擎
 
 业务场景：
 - AI 生成内容格式混乱时的自动整理
@@ -29,53 +32,237 @@ V3.0 变更：废弃 LLM 格式化，改用规则引擎，显著降低成本和�
 - 导出前的最终排版
 """
 
-from fastapi import APIRouter, HTTPException
+import re
+from fastapi import APIRouter
 from backend.schemas import FormatTextRequest
 from backend.services.workflows.formatting_utils import rule_based_formatting
 
 router = APIRouter(prefix="/api", tags=["text_formatting"])
 
+# 字符数阈值：约 5000 汉字 ≈ 7500 tokens，接近模型 8192 上限
+# 警告：接近 5000 字的文本可能导致输出被截断，建议分批处理
+LLM_FORMATTING_MAX_CHARS = 5000
+
+
+def enhanced_rule_formatting(text: str) -> str:
+    """
+    增强规则引擎 - 比基础规则更智能的小说格式化。
+    
+    针对长文本设计，无需 LLM 即可完成较好的格式化效果：
+    - 识别对话并独立成段
+    - 检测场景切换（时间/地点标记）
+    - 长段落按句号拆分
+    """
+    if not text or not text.strip():
+        return ""
+    
+    # 步骤 1: 基础标点规范化
+    text = _normalize_punctuation(text)
+    
+    # 步骤 2: 识别并处理对话
+    text = _format_dialogues(text)
+    
+    # 步骤 3: 检测场景切换并分段
+    text = _detect_scene_changes(text)
+    
+    # 步骤 4: 长段落拆分
+    text = _split_long_paragraphs(text, max_length=200)
+    
+    # 步骤 5: 清理多余空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
+
+
+def _normalize_punctuation(text: str) -> str:
+    """标点规范化（中英文标点统一）。"""
+    # 保护数字中的小数点
+    text = re.sub(r'(?<=\d)\.(?=\d)', '\x00', text)
+    
+    # 基础标点替换（排除 URL 中的冒号）
+    text = re.sub(r'(?<!http)(?<!https)(?<!\w):\s*', '：', text)
+    text = text.replace(',', '，')
+    text = text.replace('.', '。')
+    text = text.replace('!', '！')
+    text = text.replace('?', '？')
+    text = text.replace('(', '（')
+    text = text.replace(')', '）')
+    
+    # 恢复数字小数点
+    text = text.replace('\x00', '.')
+    
+    # 合并连续标点
+    text = re.sub(r'，+', '，', text)
+    text = re.sub(r'。+', '。', text)
+    
+    return text
+
+
+def _format_dialogues(text: str) -> str:
+    """
+    识别对话并格式化。
+    
+    规则：
+    - "..." 他说。 -> 对话独立成段
+    - 他说："..." -> 对话独立成段
+    """
+    # 模式1: "内容" 动作。 -> 拆分为两段
+    text = re.sub(
+        r'([^。\n"]*?)"([^"]{2,50}?)"\s*([^"\n]{1,30}?)([。！？])',
+        r'\1\n\n"\2"\3\4\n\n',
+        text
+    )
+    
+    # 模式2: 动作："内容" -> 拆分为两段
+    text = re.sub(
+        r'([^"\n]{1,20}?)[：:]\s*"([^"]{2,50}?)"',
+        r'\1：\n\n"\2"\n\n',
+        text
+    )
+    
+    # 清理多余空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text
+
+
+def _detect_scene_changes(text: str) -> str:
+    """
+    检测场景切换标记并分段。
+    
+    切换标记：时间词、地点词、视角切换词
+    """
+    # 时间切换词
+    time_markers = r'(第二天|次日|清晨|黄昏|夜晚|片刻后|与此同时|不久|随后|突然)'
+    text = re.sub(rf'({time_markers})', r'\n\n\1', text)
+    
+    # 地点切换词
+    location_markers = r'(在.*?[上内里]|回到|来到|走进|离开)'
+    text = re.sub(rf'({location_markers})', r'\n\n\1', text)
+    
+    # 清理多余空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text
+
+
+def _split_long_paragraphs(text: str, max_length: int = 200) -> str:
+    """
+    将超过 max_length 的段落按句号拆分。
+    """
+    paragraphs = text.split('\n\n')
+    result = []
+    
+    for para in paragraphs:
+        if len(para) <= max_length:
+            result.append(para)
+            continue
+        
+        # 按句号拆分，但保留句号
+        sentences = re.split(r'([。！？])', para)
+        current_chunk = ""
+        
+        for i in range(0, len(sentences), 2):
+            sentence = sentences[i]
+            # 加上标点
+            if i + 1 < len(sentences):
+                sentence += sentences[i + 1]
+            
+            if not sentence.strip():
+                continue
+            
+            # 如果当前块加上这句会超限，先保存当前块
+            if len(current_chunk) + len(sentence) > max_length and current_chunk:
+                result.append(current_chunk)
+                current_chunk = sentence
+            else:
+                current_chunk += sentence
+        
+        if current_chunk:
+            result.append(current_chunk)
+    
+    return '\n\n'.join(result)
+
 
 @router.post("/format_text")
 async def format_text(request: FormatTextRequest):
-    """整理文本格式（分段、标点、空格等）- V3.0 规则引擎版。
+    """整理文本格式（分段、标点、对话排版等）- V4.1 智能版。
 
-    V3.0 更新：改用基于正则的规则引擎替代 LLM，降低成本。
+    V4.1 更新：
+    - 短文本（<3000字）使用 LLM 智能格式化
+    - 长文本使用增强规则引擎（避免 Token 限制）
 
-    业务目的：将原始文本整理为符合阅读习惯的格式，包括：
-    - 标点规范化（中英文标点统一为中文全角）
-    - 空行合并（3个以上连续换行合并为2个）
-    - 清除段首多余空格
+    业务目的：将原始文本整理为符合阅读习惯的格式
 
-    处理规则：
-    1. 冒号: -> 中文冒号：
-    2. 引号 "xxx" -> "xxx"（中文双引号）
-    3. 逗号 , -> 中文逗号 ，
-    4. 句号 . -> 中文句号 。
-    5. 括号 () -> （）
-    6. 方括号 [] -> 【】
-    7. 3个及以上换行 -> 2个换行
-    8. 清除每行开头的空格
+    处理逻辑：
+    1. 文本 < 3000 字且有 API Key：使用 LLM 智能格式化
+    2. 文本 >= 3000 字或无 API Key：使用增强规则引擎
 
     参数来源：
     - request.text: 待整理的原始文本
-
-    数据流：
-    1. 接收原始文本
-    2. 应用规则引擎进行格式整理
-    3. 返回整理后的文本
-
-    副作用：
-    - 不修改数据库，仅返回处理结果
-    - 无需 LLM 调用，无额外费用
+    - request.api_key: 可选，用于 LLM 智能格式化
+    - request.base_url: 可选，自定义 API 地址
+    - request.model: 可选，模型名称
 
     边界处理：
     - 空文本直接返回空字符串
+    - 文本少于 50 字直接返回原文
     """
     if not request.text.strip():
         return {"formatted_text": ""}
     
-    # V3.0: 使用规则化格式化替代 LLM
-    formatted_text = rule_based_formatting(request.text)
+    text = request.text.strip()
     
+    # 如果文本较短，直接返回（无需格式化）
+    if len(text) < 50:
+        return {"formatted_text": text}
+    
+    # 长文本使用增强规则引擎（避免 LLM Token 限制）
+    if len(text) > LLM_FORMATTING_MAX_CHARS:
+        print(f"[format_text] Text too long ({len(text)} chars), using enhanced rule-based formatting")
+        formatted_text = enhanced_rule_formatting(text)
+        return {"formatted_text": formatted_text}
+    
+    # 短文本优先使用 LLM 智能格式化
+    if request.api_key:
+        try:
+            from backend.services.llm.formatting import llm_based_formatting
+            
+            formatted_text = await llm_based_formatting(
+                text=text,
+                api_key=request.api_key,
+                base_url=request.base_url,
+                model=request.model or "google/gemini-2.0-flash-001"
+            )
+            
+            # 简化验证：只要结果不为空且长度合理（±50%）就接受
+            original_len = len(text)
+            result_len = len(formatted_text)
+            
+            if formatted_text and (original_len * 0.5 <= result_len <= original_len * 1.5):
+                return {"formatted_text": formatted_text}
+            
+            print(f"[format_text] LLM result abnormal (len: {result_len} vs {original_len}), using enhanced rule-based")
+            
+        except Exception as e:
+            print(f"[format_text] LLM error: {e}, using enhanced rule-based")
+    
+    # 回退到增强规则引擎
+    formatted_text = enhanced_rule_formatting(text)
+    return {"formatted_text": formatted_text}
+
+
+@router.post("/format_text/rule_based")
+async def format_text_rule_based(request: FormatTextRequest):
+    """规则引擎格式整理（无 LLM 调用）。
+    
+    适用于：
+    - 不想产生 API 费用
+    - 只需要简单的标点规范化
+    - 网络不稳定无法调用 LLM
+    """
+    if not request.text.strip():
+        return {"formatted_text": ""}
+    
+    formatted_text = rule_based_formatting(request.text)
     return {"formatted_text": formatted_text}

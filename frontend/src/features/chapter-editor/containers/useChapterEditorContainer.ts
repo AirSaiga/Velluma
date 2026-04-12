@@ -387,26 +387,31 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       })
       
       if (formatted_text && editorRef.value) {
+        // LLM 智能格式化返回的文本使用 \n\n 分段
+        // 按双换行分割段落，保留段落结构
         const paragraphs = formatted_text
-          .split(/\r?\n/)
-          .filter((line: string) => line.trim().length > 0)
+          .split(/\n\n+/)
+          .map((p: string) => p.replace(/\r?\n/g, '').trim())
+          .filter((p: string) => p.length > 0)
         
-        const jsonContent = {
-          type: 'doc',
-          content: paragraphs.map((text: string) => ({
-            type: 'paragraph',
-            content: [{ type: 'text', text: text.trim() }]
-          }))
-        }
+        const htmlContent = paragraphs
+          .map((text: string) => `<p>${text}</p>`)
+          .join('')
 
         if (selection) {
           // 选中文本部分替换
           editorRef.value.editor.commands.setTextSelection(selection)
-          editorRef.value.editor.commands.insertContent(jsonContent)
+          editorRef.value.editor.commands.insertContent(htmlContent)
         } else {
           // 全文替换
-          editorRef.value.editor.commands.setContent(jsonContent)
+          editorRef.value.editor.commands.setContent(htmlContent)
         }
+        
+        // 同步更新章节内容
+        const html = editorRef.value.editor.getHTML()
+        updateChapter({ content_text: html, draft_text: html })
+        
+        showToast('格式整理完成', 'success')
       }
     } catch (e: any) {
       console.error('Format text failed', e)
