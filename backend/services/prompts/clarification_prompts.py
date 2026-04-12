@@ -178,7 +178,7 @@ def build_clarification_agent_prompt(
       ]
     }}
   ],
-  "refined_text": "此处输出结合已有信息或默认推测后，逻辑自洽、细节清晰的完整指令或大纲文本（即使有疑问也请提供一个兜底版本的扩展大纲）。"
+  "refined_text": "如果 user_instruction 为空（第一轮），此处返回空字符串或原始大纲；如果 user_instruction 有值（第二轮），则基于用户回答生成完整的修正大纲。"
 }}
 
 ⚠️ **严禁照抄示例**：上方 JSON 中的所有字符串值均为示例，**必须全部替换为基于实际文本的分析内容**。
@@ -188,8 +188,10 @@ def build_clarification_agent_prompt(
 2. identified_issues 列表应具体指出目前仍然存在的问题所在，若无问题可为空列表。
 3. clarifying_questions 是为交互式流程准备的，针对每个核心问题提供带有 2-4 个具体选项的问题，以便向用户提问。如果没有未解决的歧义可为空列表。
 4. options 里的 value 必须是完整的情节设定句子，而不是简单的词语。
-5. refined_text 是必须提供的最终修正文本，必须融合用户的回答（如果有），确保逻辑连贯并符合所有设定约束。
-6. 只输出 JSON，不要额外解释。
+5. refined_text 规则：
+   - 如果 user_instruction 为空（第一轮询问）：返回空字符串 ""，不要生成任何修正大纲
+   - 如果 user_instruction 有值（第二轮，用户已回答）：基于用户的选择生成完整、详细的修正大纲，融合所有回答
+6. 只输出 JSON，绝对不要输出任何 Markdown 代码块（如 ```json ... ```），直接输出 JSON 对象本身。
 """
 
     user_prompt_parts = []

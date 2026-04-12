@@ -9,7 +9,7 @@ from backend.models import Asset, ChapterAsset
 from backend.repositories.asset_repository import AssetRepository, ChapterAssetRepository
 from backend.schemas.assets import AssetCreate, AssetResponse, AssetUpdate, ChapterAssetResponse
 
-router = APIRouter(tags=["Assets"])
+router = APIRouter(prefix="/api", tags=["Assets"])
 
 @router.get("/books/{book_id}/assets", response_model=List[AssetResponse])
 async def list_assets(

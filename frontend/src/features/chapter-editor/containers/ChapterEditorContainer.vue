@@ -78,6 +78,7 @@ defineExpose({
     :clarification-result="viewModel.clarificationResult.value"
     :close-clarification-modal="viewModel.closeClarificationModal"
     :handle-apply-clarification="viewModel.handleApplyClarification"
+    :handle-submit-clarification-answers="viewModel.handleSubmitClarificationAnswers"
     :start-generate="viewModel.startGenerate"
     :toggle-agentic-mode="viewModel.toggleAgenticMode"
     :toggle-character="viewModel.toggleCharacter"

@@ -97,6 +97,7 @@ const props = defineProps<{
   } | null
   closeClarificationModal: () => void
   handleApplyClarification: (newOutlineText: string) => void
+  handleSubmitClarificationAnswers: (answers: { questionId: string, answer: string }[], originalOutline: string) => void
   startGenerate: () => void
   toggleAgenticMode: () => void
   toggleCharacter: (charId: string) => void
@@ -862,9 +863,11 @@ function getPovApertureLabel(aperture: string): string {
   <!-- 意图澄清模态框 -->
   <ClarificationModal
     :show="showClarificationModal"
+    :is-clarifying="isClarifyingOutline"
     :clarification-result="clarificationResult"
     @close="closeClarificationModal"
     @apply="handleApplyClarification"
+    @submit-answers="handleSubmitClarificationAnswers"
   />
 
   <!-- 完成模态框 -->

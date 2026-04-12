@@ -64,6 +64,29 @@ export interface Chapter {
   status: string
   character_ids?: string[]
   chapter_assets_schema?: string
+  creative_intents?: string[]
+  chapter_goals?: string[]
+  selected_plan_type?: string
+  user_overrides?: Record<string, any>
+  word_count?: number
+  author_intent?: string
+}
+
+export interface Asset {
+  id: string
+  name: string
+  category: string
+  description: string
+  visual_features?: string
+  functional_features?: string
+  origin_story?: string
+  current_owner_id?: string
+  status?: string
+}
+
+export interface ChapterAsset {
+  chapter_id: string
+  asset_id: string
 }
 
 export interface Relationship {

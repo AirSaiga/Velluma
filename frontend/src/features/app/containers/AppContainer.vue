@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
-import { CharacterPanel } from '../../character-panel'
+import CharacterPanel from '../../../components/CharacterPanel.vue'
 import { AssetPanel } from '../../asset-panel'
 import { useAssetContainer } from '../../asset-panel'
 import { ChapterEditor } from '../../chapter-editor'

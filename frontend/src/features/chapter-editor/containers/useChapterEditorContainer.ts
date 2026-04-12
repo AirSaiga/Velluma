@@ -236,7 +236,18 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   async function handleApplyClarification(newOutlineText: string) {
-    updateChapter({ outline_text: newOutlineText })
+    if (selectedChapter.value && newOutlineText !== selectedChapter.value.outline_text) {
+      try {
+        await chapterApi.update(selectedChapter.value.id, { outline_text: newOutlineText })
+        updateChapter({ outline_text: newOutlineText })
+      } catch (err) {
+        console.error('更新大纲失败:', err)
+        showToast('大纲保存失败，生成可能使用旧版本大纲', 'warning')
+      }
+    } else {
+      updateChapter({ outline_text: newOutlineText })
+    }
+    
     closeClarificationModal()
     
     // 如果还有等待生成的 Payload，则在更新大纲后直接触发生成
@@ -244,6 +255,54 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       // 从最新大纲构建新的 Payload (可选: 如果依赖最新状态，可重构生成 Payload 的逻辑)
       // 在这里直接拿着原本的 pendingAgenticPayload 继续走下去
       await previewBeatsForReview(pendingAgenticPayload.value, pendingClearEditorOnConfirm.value)
+    }
+  }
+
+  // 新增：处理用户提交澄清答案（第二轮）
+  async function handleSubmitClarificationAnswers(
+    answers: { questionId: string, answer: string }[],
+    originalOutline: string
+  ) {
+    const chapter = selectedChapter.value
+    if (!chapter) return
+
+    isClarifyingOutline.value = true
+    try {
+      // 构建 user_instruction：将用户的回答格式化为文本
+      const userInstruction = answers.map(a => a.answer).join('\n')
+      
+      // 构建 previous_issues：从当前澄清结果中获取
+      const previousIssues = clarificationResult.value?.identified_issues || []
+      
+      // 发送第二轮澄清请求
+      const clarifyRes = await generateApi.clarifyOutline({
+        chapter_id: chapter.id,
+        ambiguous_text: chapter.outline_text?.trim() || '',
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
+        model: props.apiConfig.reasoning_model || props.apiConfig.model || 'gpt-4o-mini',
+        author_intent: chapter.author_intent,
+        user_instruction: userInstruction,  // 用户的回答
+        previous_issues: previousIssues     // 之前识别的问题
+      })
+
+      // 更新澄清结果（此时应该包含 refined_text）
+      clarificationResult.value = clarifyRes
+      
+      // 如果后端返回了修正后的大纲，更新文本框
+      if (clarifyRes.refined_text?.trim()) {
+        // 保持弹窗打开，但更新 refined_text，让用户看到修正后的大纲
+        // 用户可以选择继续修改或直接应用
+      } else {
+        // 如果没有返回 refined_text，直接应用原始大纲
+        handleApplyClarification(chapter.outline_text || '')
+      }
+    } catch (err: any) {
+      console.warn('第二轮澄清请求失败，使用原始大纲', err)
+      // 失败时直接应用原始大纲
+      handleApplyClarification(chapter.outline_text || '')
+    } finally {
+      isClarifyingOutline.value = false
     }
   }
 
@@ -319,16 +378,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (isFormatting.value || !text) return
     
     try {
-      if (!props.apiConfig.api_key) {
-        showToast('请先在设置中配置 API Key 以使用智能格式整理功能', 'warning')
-        return
-      }
-
       isFormatting.value = true
       const { formatted_text } = await generateApi.formatText({
         text,
-        api_key: props.apiConfig.api_key,
-        base_url: props.apiConfig.base_url,
+        api_key: props.apiConfig.api_key || '',
+        base_url: props.apiConfig.base_url || '',
         model: props.apiConfig.reasoning_model || props.apiConfig.model || 'google/gemini-2.0-flash-001'
       })
       
@@ -876,6 +930,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     isClarifyingOutline,
     closeClarificationModal,
     handleApplyClarification,
+    handleSubmitClarificationAnswers,
     startGenerate,
     toggleAgenticMode,
     toggleCharacter,

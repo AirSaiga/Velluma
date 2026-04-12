@@ -86,31 +86,31 @@ async def clarify_chapter_outline(
         "chapter_asset": ChapterAssetRepository(db),
     }
     
-    context = await load_full_chapter_context(request.chapter_id)
+    context = await load_full_chapter_context(request.chapter_id, repos)
     
-    if not context or not context["chapter"]:
+    if not context or not context.chapter:
         raise HTTPException(status_code=404, detail="章节或上下文加载失败")
         
-    chapter = context["chapter"]
-    book = context["book"]
+    chapter = context.chapter
+    book = context.book
     
-    previous_world_state = context["previous_world_terminal_state"]
+    # previous_world_terminal_state 需要从 previous_world_snapshot 获取
+    previous_world_state = None
             
     result = await execute_clarification_stage(
         ambiguous_text=request.ambiguous_text,
         book=book,
         chapter=chapter,
-        entities=context["characters"],
-        relationships=context["relationships"],
-        open_hooks=context["open_hooks"],
-        previous_chapter_summary=None, # will be populated in execute if needed
-        locations=context["locations"],
-        assets=context["assets"],
+        entities=context.entities,
+        relationships=context.relationships,
+        open_hooks=context.open_hooks,
+        previous_chapter_summary=context.previous_summary,
+        locations=context.locations,
         author_intent=request.author_intent,
         global_taboos=book.core_motifs_taboos if book else None,
         user_instruction=request.user_instruction,
         previous_issues=request.previous_issues,
-        previous_chapter_snapshot=None,
+        previous_chapter_snapshot=context.previous_world_snapshot,
         previous_world_terminal_state=previous_world_state,
         api_key=request.api_key,
         base_url=request.base_url,

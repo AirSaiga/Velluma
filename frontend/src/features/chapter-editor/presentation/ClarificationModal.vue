@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 
 export interface ClarifyingQuestion {
   id: string
@@ -12,6 +12,7 @@ export interface ClarifyingQuestion {
 
 const props = defineProps<{
   show: boolean
+  isClarifying?: boolean
   clarificationResult: {
     is_ambiguous: boolean
     identified_issues?: string[]
@@ -24,22 +25,38 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'apply', newOutlineText: string): void
+  (e: 'submit-answers', answers: { questionId: string, answer: string }[], originalOutline: string): void
 }>()
 
 const editableOutline = ref('')
 const selectedOptions = ref<Record<string, string>>({})
 const customAnswers = ref<Record<string, string>>({})
 
+// 是否有修正后的大纲（第二轮返回）
+const hasRefinedText = computed(() => {
+  return !!props.clarificationResult?.refined_text?.trim()
+})
+
 watch(() => props.show, (newVal) => {
   if (newVal) {
-    if (props.clarificationResult?.refined_text) {
+    // 如果有修正后的大纲（第二轮），则显示；否则显示原始大纲或空
+    if (props.clarificationResult?.refined_text?.trim()) {
       editableOutline.value = props.clarificationResult.refined_text
     } else {
+      // 第一轮：显示原始大纲或空
       editableOutline.value = ''
     }
-    // 每次打开弹窗重置选择状态
-    selectedOptions.value = {}
-    customAnswers.value = {}
+    // 每次打开弹窗重置选择状态（仅在第一轮时）
+    if (!props.clarificationResult?.refined_text?.trim()) {
+      selectedOptions.value = {}
+      customAnswers.value = {}
+    }
+  }
+})
+
+watch(() => props.clarificationResult?.refined_text, (newVal) => {
+  if (props.show && newVal?.trim()) {
+    editableOutline.value = newVal
   }
 })
 
@@ -58,30 +75,43 @@ function handleOptionSelect(qId: string, value: string) {
   }
 }
 
+// 是否已选择答案
+const hasSelectedAnswers = computed(() => {
+  if (!props.clarificationResult?.clarifying_questions?.length) return false
+  for (const q of props.clarificationResult.clarifying_questions) {
+    if (selectedOptions.value[q.id] || customAnswers.value[q.id]?.trim()) {
+      return true
+    }
+  }
+  return false
+})
+
 function handleApply() {
-  let finalOutline = editableOutline.value
-  const answers: string[] = []
-  
   // 收集用户的回答
+  const answers: { questionId: string, answer: string }[] = []
+  
   if (props.clarificationResult?.clarifying_questions) {
     for (const q of props.clarificationResult.clarifying_questions) {
       const selected = selectedOptions.value[q.id]
       const custom = customAnswers.value[q.id]?.trim()
       
       if (selected) {
-        answers.push(`- ${q.question}: ${selected}`)
+        answers.push({ questionId: q.id, answer: selected })
       } else if (custom) {
-        answers.push(`- ${q.question}: ${custom}`)
+        answers.push({ questionId: q.id, answer: custom })
       }
     }
   }
 
-  // 如果有回答内容，自动拼接到大纲底部
+  // 发送第二轮请求生成修正大纲
   if (answers.length > 0) {
-    finalOutline += '\n\n【补充设定】\n' + answers.join('\n')
+    emit('submit-answers', answers, editableOutline.value)
   }
+}
 
-  emit('apply', finalOutline)
+function handleConfirm() {
+  // 第二轮：确认修正后的大纲并继续生成
+  emit('apply', editableOutline.value)
 }
 </script>
 
@@ -92,10 +122,10 @@ function handleApply() {
       class="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4"
       @click.self="handleClose"
     >
-      <div class="bg-[var(--bg-color)] rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         <!-- Header -->
-        <div class="px-6 py-4 border-b border-[var(--border-color)] flex justify-between items-center bg-parchment-100">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-amber-50/50">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,28 +207,62 @@ function handleApply() {
           </div>
 
           <div class="flex flex-col gap-2">
-            <label class="text-sm font-semibold text-gray-800">修正后的大纲 (您可以继续修改)：</label>
+            <label class="text-sm font-semibold text-gray-800">
+              {{ hasRefinedText ? '修正后的大纲 (您可以继续修改)：' : '当前大纲 (选择选项后将生成修正版本)：' }}
+            </label>
             <textarea
               v-model="editableOutline"
-              class="w-full h-40 p-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent custom-scrollbar resize-none"
-              placeholder="在此处补充细节..."
+              :disabled="!hasRefinedText"
+              :class="[
+                'w-full h-40 p-3 border rounded-lg text-sm custom-scrollbar resize-none',
+                hasRefinedText 
+                  ? 'bg-white border-gray-200 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent' 
+                  : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
+              ]"
+              :placeholder="hasRefinedText ? '在此处补充细节...' : '请先选择上方的选项，系统将基于您的选择生成修正大纲'"
             ></textarea>
+            <p v-if="!hasRefinedText" class="text-xs text-amber-600">
+              第 1 步：选择上方的选项，然后点击"生成修正大纲"
+            </p>
+            <p v-else class="text-xs text-green-600">
+              第 2 步：您可以继续编辑修正后的大纲，然后点击"确认并生成节拍"
+            </p>
           </div>
         </div>
 
         <!-- Footer -->
-        <div class="px-6 py-4 border-t border-[var(--border-color)] bg-gray-50 flex justify-end gap-3">
+        <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
           <button 
             @click="handleClose" 
-            class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            :disabled="isClarifying"
+            class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            忽略建议并继续
+            {{ hasRefinedText ? '取消' : '忽略建议并继续' }}
           </button>
           <button 
+            v-if="!hasRefinedText"
             @click="handleApply" 
-            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
+            :disabled="!hasSelectedAnswers || isClarifying"
+            :class="[
+              'px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2',
+              (hasSelectedAnswers && !isClarifying)
+                ? 'text-white bg-blue-600 hover:bg-blue-700' 
+                : 'text-gray-400 bg-gray-300 cursor-not-allowed'
+            ]"
           >
-            应用并生成节拍
+            <svg v-if="isClarifying" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {{ isClarifying ? '生成中...' : '生成修正大纲' }}
+          </button>
+          <button 
+            v-else
+            @click="handleConfirm" 
+            :disabled="isClarifying"
+            class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            确认并生成节拍
           </button>
         </div>
 

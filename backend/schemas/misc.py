@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 class FormatTextRequest(BaseModel):
     text: str
-    api_key: str
+    api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: str = "google/gemini-2.0-flash-001"
 

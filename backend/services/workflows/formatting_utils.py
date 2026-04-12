@@ -59,6 +59,9 @@ def rule_based_formatting(text: str) -> str:
     
     # 步骤 3: 清除段首多余空格/缩进
     text = _remove_leading_spaces(text)
+
+    # 步骤 4: 智能分段
+    text = format_paragraphs(text)
     
     return text.strip()
 
@@ -88,7 +91,15 @@ def _normalize_punctuation(text: str) -> str:
     # 处理成对的英文单引号
     text = re.sub(r"'([^']*)'", r'\'\1\'', text)
     
+    # 处理省略号标准化 (需要在替换点之前进行)
+    text = re.sub(r'\.{3,}', '……', text)
+    text = re.sub(r'…+', '……', text)
+    
     # 其他常用标点替换
+    # 保护数字中的小数点和逗号（例如 3.14, 1,000）
+    text = re.sub(r'(?<=\d),(?=\d)', '\x00', text)
+    text = re.sub(r'(?<=\d)\.(?=\d)', '\x01', text)
+    
     text = text.replace(',', '，')
     text = text.replace('.', '。')
     text = text.replace('!', '！')
@@ -98,15 +109,14 @@ def _normalize_punctuation(text: str) -> str:
     text = text.replace('[', '【')
     text = text.replace(']', '】')
     
+    text = text.replace('\x00', ',')
+    text = text.replace('\x01', '.')
+    
     # 处理连续标点：多个相同标点合并为一个
     text = re.sub(r'，+', '，', text)
     text = re.sub(r'。+', '。', text)
     text = re.sub(r'！+', '！', text)
     text = re.sub(r'？+', '？', text)
-    text = re.sub(r'…+', '……', text)
-    
-    # 处理省略号标准化
-    text = re.sub(r'\.{3,}', '……', text)
     
     return text
 
@@ -186,8 +196,16 @@ def format_paragraphs(text: str, max_length: int = 500) -> str:
             current_chunk = ""
             chunks = []
             
-            for i in range(0, len(sentences) - 1, 2):
-                sentence = sentences[i] + (sentences[i + 1] if i + 1 < len(sentences) else "")
+            for i in range(0, len(sentences), 2):
+                if i == len(sentences) - 1:
+                    # 最后一个片段，没有标点符号
+                    sentence = sentences[i]
+                else:
+                    sentence = sentences[i] + sentences[i + 1]
+                
+                if not sentence:
+                    continue
+                    
                 if len(current_chunk) + len(sentence) > max_length and current_chunk:
                     chunks.append(current_chunk)
                     current_chunk = sentence

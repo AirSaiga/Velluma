@@ -126,7 +126,17 @@ async def execute_clarification_stage(
             response_format={"type": "json_object"},
         )
         
-        response_json = json.loads(response_raw)
+        # 移除可能存在的 Markdown 代码块标记
+        cleaned_response = response_raw.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        elif cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+        
+        response_json = json.loads(cleaned_response)
         
         is_ambiguous = response_json.get("is_ambiguous", False)
         

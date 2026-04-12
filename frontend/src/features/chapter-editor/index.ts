@@ -1,1 +1,1 @@
-export { ChapterEditorContainer } from './containers'
+export { ChapterEditorContainer as ChapterEditor, ChapterEditorContainer } from './containers'
