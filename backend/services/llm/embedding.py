@@ -54,7 +54,7 @@ async def get_embedding(
     text: str,
     api_key: str = None,
     base_url: Optional[str] = None,
-    model: str = "text-embedding-v3",
+    model: str = "text-embedding-v2",
     timeout: int = 60,
 ) -> list:
     import dashscope
@@ -71,10 +71,10 @@ async def get_embedding(
     dashscope.api_key = dashscope_api_key
 
     try:
+        # text-embedding-v2 默认输出 1536 维，适配数据库的 Vector(1536)
         resp = TextEmbedding.call(
             model=model,
             input=text,
-            dimension=1536,
         )
 
         if resp.status_code == 200:
