@@ -4,7 +4,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi, publishPromptData, assetApi } from '../../../services/api'
 import { buildAgenticPayload } from '../../../composables/useAgenticConfig'
-import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion, Asset, ChapterAsset } from '../../../types'
+import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion, Asset, ChapterAsset, CharacterExtractionSummary } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 
 export interface ChapterEditorContainerProps {
@@ -64,6 +64,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     new_state: string
   }>>([])
   const chapterSummary = ref<string | null>(null)
+  const characterExtraction = ref<CharacterExtractionSummary | null>(null)
   const beatPreviewLoading = ref(false)
   const beatPreviewError = ref('')
   const previewBeats = ref<BeatEditorState[]>([])
@@ -192,6 +193,16 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         chapterSummary.value = result.summary
         emit('update-chapter', selectedChapter.value.id, { summary: result.summary })
       }
+      // 人物提取结果
+      characterExtraction.value = result.character_extraction || null
+      
+      // 调试日志：记录提取的角色信息
+      if (result.character_extraction) {
+        console.log('[Character Extraction] Result:', result.character_extraction)
+        console.log('[Character Extraction] New characters:', result.character_extraction.extracted_characters?.filter((c: any) => c.is_new))
+        console.log('[Character Extraction] New char names:', result.character_extraction.extracted_characters?.filter((c: any) => c.is_new).map((c: any) => `${c.name}(level:${c.importance_level},type:${c.role_type})`))
+      }
+      
       showPublishModal.value = true
     } catch (err: any) {
       publishError.value = err.message
@@ -205,6 +216,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     showPublishModal.value = false
     characterUpdates.value = []
     chapterSummary.value = null
+    characterExtraction.value = null
   }
 
   function openAgenticSettingsModal() {
@@ -860,6 +872,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         
         characterUpdates.value = []
         chapterSummary.value = null
+        characterExtraction.value = null
         workflowState.value = null
         isGenerating.value = false
         beatPreviewError.value = ''
@@ -887,6 +900,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     beatPreviewLoading,
     chapterSummary,
     characterUpdates,
+    characterExtraction,
     closeAgenticSettingsModal,
     closeBeatReviewModal,
     closePublishModal,

@@ -279,3 +279,47 @@ export interface DualTrackResult {
   debug_info: Record<string, any>
 }
 
+// === 人物提取相关类型 (Character Extraction V3.7) ===
+
+export interface ExtractedCharacterInfo {
+  name: string
+  is_new: boolean
+  existing_id?: string
+  description: string
+  role_type: 'protagonist' | 'antagonist' | 'supporting' | 'minor'
+  aliases: string[]
+  first_appearance: boolean
+  importance_level: number
+}
+
+export interface InferredRelationshipInfo {
+  source_name: string
+  target_name: string
+  relation_type: string
+  description: string
+  affinity_score: number
+  is_new: boolean
+}
+
+export interface CharacterExtractionSummary {
+  extracted_characters: ExtractedCharacterInfo[]
+  new_characters_count: number
+  existing_characters_count: number
+  inferred_relationships: InferredRelationshipInfo[]
+  chapter_entity_links: string[]
+}
+
+export interface PublishChapterResponse {
+  chapter_id: string
+  status: string
+  summary?: string
+  character_updates: Array<{
+    character_id: string
+    character_name: string
+    old_state: string
+    new_state: string
+  }>
+  world_snapshot?: Record<string, any>
+  character_extraction?: CharacterExtractionSummary
+}
+

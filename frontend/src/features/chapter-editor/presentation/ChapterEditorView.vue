@@ -4,7 +4,7 @@ import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
 import { IntentDrivenPanel } from '../../intent-driven'
 import ClarificationModal from './ClarificationModal.vue'
-import type { ApiConfig, Chapter, Character, PacingStyle, Asset } from '../../../types'
+import type { ApiConfig, Chapter, Character, PacingStyle, Asset, CharacterExtractionSummary } from '../../../types'
 
 interface BeatPreviewItem {
   position: number
@@ -40,6 +40,7 @@ const props = defineProps<{
     old_state: string
     new_state: string
   }>
+  characterExtraction: CharacterExtractionSummary | null
   characters: Character[]
   assets?: Asset[]
   toggleAsset: (assetId: string) => void
@@ -209,6 +210,29 @@ function getPovApertureLabel(aperture: string): string {
     systemic_sense: '全景感知'
   }
   return labels[aperture] || aperture
+}
+
+// 重要性等级显示辅助函数
+function getImportanceDisplayLabel(level: number): string {
+  // 1-4 级对应：普通、重要、核心、主角
+  const labels: Record<number, string> = {
+    1: '普通',
+    2: '重要', 
+    3: '核心',
+    4: '主角'
+  }
+  return labels[level] || `等级${level}`
+}
+
+function getImportanceBadgeClass(level: number): string {
+  // 1-4 级对应不同的颜色
+  const classes: Record<number, string> = {
+    1: 'bg-gray-100 text-gray-600',      // 普通 - 灰色
+    2: 'bg-blue-100 text-blue-600',      // 重要 - 蓝色
+    3: 'bg-purple-100 text-purple-600',  // 核心 - 紫色
+    4: 'bg-amber-100 text-amber-600'     // 主角 - 琥珀色
+  }
+  return classes[level] || 'bg-gray-100 text-gray-600'
 }
 </script>
 
@@ -900,7 +924,7 @@ function getPovApertureLabel(aperture: string): string {
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
     @click.self="closePublishModal"
   >
-    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden">
+    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden">
       <div class="p-3 border-b border-[var(--border-color)] flex items-center justify-between">
         <h3 class="text-sm font-semibold text-[var(--text-primary)]">发布成功</h3>
         <button @click="closePublishModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
@@ -909,9 +933,127 @@ function getPovApertureLabel(aperture: string): string {
           </svg>
         </button>
       </div>
-      <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)]">
-        <div v-if="characterUpdates.length > 0" class="mb-4">
-          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">本次角色状态变更记录</h4>
+      <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)] space-y-4">
+        
+        <!-- 人物提取结果 -->
+        <div v-if="characterExtraction && characterExtraction.extracted_characters.length > 0" class="space-y-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-[var(--accent-500)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+            <h4 class="text-xs font-medium text-[var(--text-secondary)]">智能人物提取</h4>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
+              {{ characterExtraction.new_characters_count }} 新角色
+            </span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">
+              {{ characterExtraction.existing_characters_count }} 已有角色
+            </span>
+          </div>
+          
+          <!-- 新角色列表 -->
+          <div v-if="characterExtraction.new_characters_count > 0" class="space-y-2">
+            <h5 class="text-[10px] font-medium text-green-600 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              自动创建的新角色 ({{ characterExtraction.new_characters_count }})
+            </h5>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                v-for="char in characterExtraction.extracted_characters.filter(c => c.is_new)"
+                :key="char.name"
+                class="p-2 bg-green-50 border border-green-200 rounded-lg text-xs"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="font-medium text-green-800">{{ char.name }}</span>
+                  <!-- 使用 importance_level 显示等级 -->
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" :class="getImportanceBadgeClass(char.importance_level)">
+                    {{ getImportanceDisplayLabel(char.importance_level) }}
+                  </span>
+                </div>
+                <!-- 调试信息：显示原始值 -->
+                <div class="text-[9px] text-gray-500 mt-0.5">
+                  [DEBUG] level={{ char.importance_level }}, type={{ char.role_type }}
+                </div>
+                <p v-if="char.description" class="text-green-600 mt-1 text-[10px] line-clamp-2">{{ char.description }}</p>
+                <div v-if="char.aliases && char.aliases.length > 0" class="flex flex-wrap gap-1 mt-1">
+                  <span v-for="alias in char.aliases" :key="alias" class="text-[10px] px-1 py-0.5 bg-green-100 rounded text-green-600">
+                    {{ alias }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已有角色列表 -->
+          <div v-if="characterExtraction.existing_characters_count > 0" class="space-y-2">
+            <h5 class="text-[10px] font-medium text-blue-600 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              关联的已有角色 ({{ characterExtraction.existing_characters_count }})
+            </h5>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                v-for="char in characterExtraction.extracted_characters.filter(c => !c.is_new)"
+                :key="char.name"
+                class="p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="font-medium text-blue-800">{{ char.name }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" :class="getImportanceBadgeClass(char.importance_level)">
+                    {{ getImportanceDisplayLabel(char.importance_level) }}
+                  </span>
+                </div>
+                <div class="text-[9px] text-gray-500 mt-0.5">
+                  [DEBUG] level={{ char.importance_level }}, type={{ char.role_type }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 推断的关系 -->
+          <div v-if="characterExtraction.inferred_relationships.length > 0" class="space-y-2">
+            <h5 class="text-[10px] font-medium text-violet-600 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+              </svg>
+              推断的人物关系
+            </h5>
+            <div class="space-y-1.5">
+              <div
+                v-for="rel in characterExtraction.inferred_relationships.slice(0, 5)"
+                :key="rel.source_name + '-' + rel.target_name"
+                class="flex items-center gap-2 text-xs p-1.5 bg-violet-50 rounded-lg"
+              >
+                <span class="font-medium text-violet-800">{{ rel.source_name }}</span>
+                <span class="text-[10px] text-violet-500">→</span>
+                <span class="px-1.5 py-0.5 rounded bg-violet-200 text-violet-700 text-[10px]">{{ rel.relation_type }}</span>
+                <span class="text-[10px] text-violet-500">→</span>
+                <span class="font-medium text-violet-800">{{ rel.target_name }}</span>
+                <span v-if="rel.affinity_score !== 0" class="ml-auto text-[10px]" :class="rel.affinity_score > 0 ? 'text-green-600' : 'text-red-600'">
+                  {{ rel.affinity_score > 0 ? '+' : '' }}{{ rel.affinity_score }}
+                </span>
+              </div>
+              <div v-if="characterExtraction.inferred_relationships.length > 5" class="text-[10px] text-[var(--text-muted)] text-center">
+                还有 {{ characterExtraction.inferred_relationships.length - 5 }} 个关系...
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!characterExtraction || characterExtraction.extracted_characters.length === 0" class="text-center text-sm text-[var(--text-muted)] py-4 bg-[var(--bg-panel)] rounded-lg">
+          本次发布未检测到新人物
+        </div>
+
+        <!-- 角色状态变更 -->
+        <div v-if="characterUpdates.length > 0" class="border-t border-[var(--border-color)] pt-4">
+          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            角色状态变更
+          </h4>
           <div class="space-y-2">
             <div
               v-for="update in characterUpdates"
@@ -927,8 +1069,9 @@ function getPovApertureLabel(aperture: string): string {
             </div>
           </div>
         </div>
-        <div v-else class="text-center text-sm text-[var(--text-muted)] py-4">
-          本次发布无角色状态变更记录
+        
+        <div v-if="characterUpdates.length === 0 && (!characterExtraction || characterExtraction.extracted_characters.length === 0)" class="text-center text-sm text-[var(--text-muted)] py-4">
+          本次发布无角色变更记录
         </div>
       </div>
       <div class="p-3 border-t border-[var(--border-color)] flex justify-end gap-2">

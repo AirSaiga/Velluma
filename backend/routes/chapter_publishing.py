@@ -38,21 +38,52 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
 import logging
+import os
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.core.dependencies import get_chapter_repository, get_character_repository, get_memory_repository
+# 简单的文件日志函数，用于调试
+def _log_to_file(message: str):
+    """将调试信息写入日志文件"""
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "character_extraction_debug.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass  # 如果日志写入失败，不要影响主流程
+
+from backend.core.dependencies import (
+    get_chapter_repository,
+    get_character_repository,
+    get_memory_repository,
+    get_relationship_repository,
+)
 from backend.core.exceptions import not_found, bad_request
-from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository
+from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository, RelationshipRepository
 from backend.repositories.asset_repository import ChapterAssetRepository
-from backend.schemas import ChapterPublishRequest, ChapterPublishResponse, CharacterStateChange
+from backend.schemas import (
+    ChapterPublishRequest,
+    ChapterPublishResponse,
+    CharacterStateChange,
+    CharacterExtractionSummary,
+)
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
 from backend.services.generation.publish import (
     generate_chapter_summary,
     generate_summary_embedding,
     update_character_states,
+)
+from backend.services.generation.character_extraction import (
+    execute_character_extraction_workflow,
+    CharacterExtractionResult,
 )
 from backend.services.world.state_service import (
     extract_world_state_snapshot,
@@ -75,6 +106,7 @@ async def publish_chapter(
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
     character_repo: CharacterRepository = Depends(get_character_repository),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
+    relationship_repo: RelationshipRepository = Depends(get_relationship_repository),
 ):
     """业务目的：将章节从草稿状态发布为正式内容，并触发角色动态状态更新和自动摘要生成。
 
@@ -143,7 +175,49 @@ async def publish_chapter(
                 await session.commit()
 
     character_updates = []
+    character_extraction_result = None
+    
     if request and request.api_key:
+        # ========================================================================
+        # V3.7: 智能人物提取与关系推断
+        # ========================================================================
+        text_to_extract = chapter.content_text or chapter.draft_text or ""
+        _log_to_file(f"[DEBUG] Starting character extraction for chapter {chapter_id}, content length: {len(text_to_extract)}")
+        if text_to_extract:
+            try:
+                extraction_result = await asyncio.wait_for(
+                    execute_character_extraction_workflow(
+                        chapter_content=text_to_extract,
+                        chapter_id=chapter.id,
+                        book_id=chapter.book_id,
+                        character_repo=character_repo,
+                        relationship_repo=relationship_repo,
+                        chapter_repo=chapter_repo,
+                        api_key=request.api_key,
+                        base_url=request.base_url,
+                        model=request.model,
+                        timeout=180,
+                    ),
+                    timeout=200,
+                )
+                character_extraction_result = extraction_result
+                _log_to_file(f"[DEBUG] Character extraction completed: {len(extraction_result.extracted_characters)} total, {len(extraction_result.new_characters)} new")
+                svc_logger.info(
+                    f"Character extraction completed for chapter {chapter_id}: "
+                    f"{len(extraction_result.extracted_characters)} total, "
+                    f"{len(extraction_result.new_characters)} new, "
+                    f"{len(extraction_result.existing_characters)} existing"
+                )
+            except asyncio.TimeoutError:
+                _log_to_file("[DEBUG] Character extraction timed out")
+                svc_logger.warning(f"Character extraction timed out for chapter {chapter_id}")
+            except Exception as e:
+                _log_to_file(f"[DEBUG] Character extraction error: {e}")
+                svc_logger.error(f"Character extraction error for chapter {chapter_id}: {e}", exc_info=True)
+        
+        # ========================================================================
+        # 原有角色状态更新流程
+        # ========================================================================
         character_list = []
         seen_char_ids = set()
 
@@ -273,10 +347,192 @@ async def publish_chapter(
     await chapter_repo.commit()
     await chapter_repo.refresh(chapter)
 
+    # 构建人物提取响应
+    extraction_summary = None
+    if character_extraction_result:
+        _log_to_file(f"Building response: {len(character_extraction_result.extracted_characters)} characters")
+        for c in character_extraction_result.extracted_characters:
+            _log_to_file(f"  Char '{c.name}': role_type={c.role_type}, importance_level={c.importance_level}")
+        
+        extraction_summary = CharacterExtractionSummary(
+            extracted_characters=[
+                {
+                    "name": c.name,
+                    "is_new": c.is_new,
+                    "existing_id": c.existing_id,
+                    "description": c.description,
+                    "role_type": c.role_type,
+                    "aliases": c.aliases,
+                    "first_appearance": c.first_appearance,
+                    "importance_level": c.importance_level,
+                }
+                for c in character_extraction_result.extracted_characters
+            ],
+            new_characters_count=len(character_extraction_result.new_characters),
+            existing_characters_count=len(character_extraction_result.existing_characters),
+            inferred_relationships=[
+                {
+                    "source_name": r.source_name,
+                    "target_name": r.target_name,
+                    "relation_type": r.relation_type,
+                    "description": r.description,
+                    "affinity_score": r.affinity_score,
+                    "is_new": r.is_new,
+                }
+                for r in character_extraction_result.inferred_relationships
+            ],
+            chapter_entity_links=character_extraction_result.chapter_entity_links,
+        )
+
     return ChapterPublishResponse(
         chapter_id=chapter.id,
         status=chapter.status,
         summary=chapter.summary,
         character_updates=character_updates,
         world_snapshot=chapter.world_snapshot if chapter.world_snapshot else None,
+        character_extraction=extraction_summary,
     )
+
+
+# =============================================================================
+# 调试接口：测试人物提取功能
+# =============================================================================
+
+class CharacterExtractionTestRequest(BaseModel):
+    """人物提取测试请求"""
+    chapter_content: str
+    api_key: str
+    base_url: Optional[str] = None
+    model: str = "gpt-4o-mini"
+
+
+class CharacterExtractionTestResponse(BaseModel):
+    """人物提取测试响应"""
+    success: bool
+    extracted_characters: List[Dict[str, Any]] = Field(default_factory=list)
+    new_characters: List[Dict[str, Any]] = Field(default_factory=list)
+    existing_characters: List[Dict[str, Any]] = Field(default_factory=list)
+    inferred_relationships: List[Dict[str, Any]] = Field(default_factory=list)
+    message: str = ""
+    raw_response: Optional[str] = None
+
+
+@router.post("/debug/character-extraction", response_model=CharacterExtractionTestResponse)
+async def test_character_extraction(
+    request: CharacterExtractionTestRequest,
+    character_repo: CharacterRepository = Depends(get_character_repository),
+):
+    """调试接口：测试人物提取功能（不保存任何数据）
+    
+    用于测试人物提取功能是否正常工作，返回提取结果但不创建角色。
+    
+    Args:
+        request: 包含章节内容和API配置
+        
+    Returns:
+        提取的人物列表和关系列表
+    """
+    import json
+    from backend.services.prompts.character_extraction import (
+        build_character_extraction_prompt,
+        build_character_extraction_system_prompt,
+    )
+    from backend.services.llm import call_llm
+    
+    try:
+        svc_logger.info(
+            "Testing character extraction",
+            content_length=len(request.chapter_content),
+        )
+        
+        user_prompt = build_character_extraction_prompt(
+            chapter_content=request.chapter_content[:8000],
+            existing_character_names=[],
+        )
+        system_prompt = build_character_extraction_system_prompt()
+        
+        # 记录 Prompt 长度用于调试
+        svc_logger.info("Prompt prepared", system_len=len(system_prompt), user_len=len(user_prompt))
+        
+        response = await call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            model=request.model,
+            temperature=0.3,
+        )
+        
+        svc_logger.info("LLM response received", response_length=len(response))
+        
+        # 解析JSON响应
+        text = response.strip()
+        original_text = text
+        
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        
+        extraction_data = json.loads(text)
+        
+        if not extraction_data:
+            return CharacterExtractionTestResponse(
+                success=False,
+                message="LLM 返回空结果",
+                raw_response=original_text[:1000],
+            )
+        
+        # 解析结果（简化版，不查数据库）
+        characters = extraction_data.get("characters", [])
+        relationships = extraction_data.get("relationships", [])
+        
+        svc_logger.info("Parsed extraction result", char_count=len(characters), rel_count=len(relationships))
+        
+        # 分类角色
+        new_chars = []
+        existing_chars_result = []
+        
+        for char_data in characters:
+            is_new = char_data.get("is_new", True)
+            # 处理字符串 "true"/"false"
+            if isinstance(is_new, str):
+                is_new = is_new.lower() == "true"
+            
+            char_info = {
+                "name": char_data.get("name", ""),
+                "is_new": is_new,
+                "description": char_data.get("description", ""),
+                "role_type": char_data.get("role_type", "supporting"),
+                "aliases": char_data.get("aliases", []),
+                "importance_level": char_data.get("importance_level", 3),
+            }
+            
+            if is_new:
+                new_chars.append(char_info)
+            else:
+                existing_chars_result.append(char_info)
+        
+        return CharacterExtractionTestResponse(
+            success=True,
+            extracted_characters=characters,
+            new_characters=new_chars,
+            existing_characters=existing_chars_result,
+            inferred_relationships=relationships,
+            message=f"成功提取 {len(characters)} 个角色，其中新角色 {len(new_chars)} 个",
+            raw_response=original_text[:500] if len(original_text) > 500 else original_text,
+        )
+        
+    except json.JSONDecodeError as e:
+        svc_logger.error("JSON parse error", error=str(e))
+        return CharacterExtractionTestResponse(
+            success=False,
+            message=f"JSON 解析错误: {str(e)}",
+            raw_response=text[:1000] if 'text' in locals() else None,
+        )
+    except Exception as e:
+        svc_logger.error("Character extraction test failed", error=str(e), exc_info=True)
+        return CharacterExtractionTestResponse(
+            success=False,
+            message=f"提取失败: {str(e)}",
+        )

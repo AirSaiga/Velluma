@@ -58,6 +58,19 @@ class RelationshipRepository(BaseRepository[CharacterRelationship]):
             return await self.find_all(spec=spec)
         return await self.find_all()
 
+    async def list_by_book(self, book_id: UUID) -> List[CharacterRelationship]:
+        """按书籍查询角色关系列表。
+        
+        这是 list 方法的别名，提供更明确的语义。
+        
+        Args:
+            book_id: 书籍 UUID
+            
+        Returns:
+            List[CharacterRelationship]: 角色关系列表
+        """
+        return await self.list(book_id=book_id)
+
     async def get_by_pair(self, source_char_id: UUID, target_char_id: UUID) -> Optional[CharacterRelationship]:
         """按角色对查询关系：用于检查两个角色之间是否已存在关系。
 

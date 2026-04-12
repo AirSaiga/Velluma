@@ -29,6 +29,7 @@ defineExpose({
     :beat-preview-loading="viewModel.beatPreviewLoading.value"
     :chapter-summary="viewModel.chapterSummary.value"
     :character-updates="viewModel.characterUpdates.value"
+    :character-extraction="viewModel.characterExtraction.value"
     :characters="props.characters"
     :close-agentic-settings-modal="viewModel.closeAgenticSettingsModal"
     :close-beat-review-modal="viewModel.closeBeatReviewModal"

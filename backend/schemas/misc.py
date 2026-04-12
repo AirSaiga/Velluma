@@ -82,12 +82,44 @@ class CharacterStateChange(BaseModel):
     new_state: str
 
 
+class ExtractedCharacterInfo(BaseModel):
+    """提取的人物信息"""
+    name: str
+    is_new: bool
+    existing_id: Optional[UUID] = None
+    description: str = ""
+    role_type: str = "supporting"
+    aliases: List[str] = Field(default_factory=list)
+    first_appearance: bool = False
+    importance_level: int = 3
+
+
+class InferredRelationshipInfo(BaseModel):
+    """推断的关系信息"""
+    source_name: str
+    target_name: str
+    relation_type: str
+    description: str = ""
+    affinity_score: int = 0
+    is_new: bool = True
+
+
+class CharacterExtractionSummary(BaseModel):
+    """人物提取摘要"""
+    extracted_characters: List[ExtractedCharacterInfo] = Field(default_factory=list)
+    new_characters_count: int = 0
+    existing_characters_count: int = 0
+    inferred_relationships: List[InferredRelationshipInfo] = Field(default_factory=list)
+    chapter_entity_links: List[str] = Field(default_factory=list)
+
+
 class ChapterPublishResponse(BaseModel):
     chapter_id: UUID
     status: str
     summary: Optional[str] = None
     character_updates: List[CharacterStateChange] = Field(default_factory=list)
     world_snapshot: Optional[dict] = Field(default=None, description="本次发布提取的世界状态快照")
+    character_extraction: Optional[CharacterExtractionSummary] = Field(default=None, description="人物提取结果")
 
 
 class InspirationRequest(BaseModel):
