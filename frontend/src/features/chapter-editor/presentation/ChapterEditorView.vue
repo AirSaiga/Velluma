@@ -127,6 +127,7 @@ const editorRef = ref<any>(null)
 const showAdvancedSettings = ref(false)
 const showCharacterSelector = ref(false)
 const characterSearchQuery = ref('')
+const isConfigExpanded = ref(true)
 
 watch(editorRef, (editor) => {
   props.setEditorRef(editor)
@@ -196,8 +197,8 @@ function getPovApertureLabel(aperture: string): string {
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden px-8 py-5">
-    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-4">
+  <div class="h-full flex flex-col overflow-hidden px-6 py-4">
+    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-3">
       <!-- 章节标题行 -->
       <div class="flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex-1 flex items-center gap-2">
@@ -232,9 +233,53 @@ function getPovApertureLabel(aperture: string): string {
       </div>
 
       <!-- 核心设置区 - 三层结构 -->
-      <div class="rounded-xl bg-[var(--bg-panel)] flex-shrink-0 overflow-hidden">
-        <!-- 第一层：核心输入 + 主要操作 -->
-        <div class="px-3 py-2.5 flex items-start gap-3">
+      <div class="rounded-xl bg-[var(--bg-panel)] flex-shrink-0 overflow-hidden border border-[var(--border-color)]/50 transition-all duration-300">
+        <!-- 折叠头部 -->
+        <div 
+          class="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-black/[0.02]"
+          @click="isConfigExpanded = !isConfigExpanded"
+        >
+          <div class="flex items-center gap-2 min-w-0">
+            <svg class="w-4 h-4 text-[var(--text-muted)] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            <span class="text-xs font-medium text-[var(--text-secondary)] shrink-0">生成配置</span>
+            <span v-if="!isConfigExpanded && selectedChapter.outline_text" class="text-[10px] text-[var(--text-muted)] truncate mx-2">
+              {{ selectedChapter.outline_text }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <!-- 快速生成按钮，在折叠时也可用 -->
+            <button
+              v-if="!isConfigExpanded"
+              @click.stop="startGenerate"
+              :disabled="isGenerating || beatPreviewLoading || isClarifyingOutline || !selectedChapter.outline_text.trim()"
+              class="h-6 px-2.5 rounded text-[10px] font-medium bg-[var(--accent-500)] text-white shadow-sm disabled:opacity-40 transition-all hover:bg-accent-600 flex items-center gap-1"
+            >
+              <svg v-if="beatPreviewLoading || isGenerating || isClarifyingOutline" class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <svg v-else class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              {{ isClarifyingOutline ? '澄清中' : (beatPreviewLoading ? '规划中' : (isGenerating ? '生成中' : '智能生成')) }}
+            </button>
+            <svg 
+              class="w-4 h-4 text-[var(--text-muted)] transition-transform" 
+              :class="isConfigExpanded ? 'rotate-180' : ''"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- 展开内容区 -->
+        <div v-show="isConfigExpanded" class="border-t border-[var(--border-color)]/50 bg-[var(--bg-panel)]">
+          <!-- 第一层：核心输入 + 主要操作 -->
+          <div class="px-3 py-2.5 flex items-start gap-3">
           <div class="flex-1 min-w-0">
             <label class="text-[10px] font-medium text-[var(--text-secondary)] mb-1 block flex items-center gap-1">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -459,6 +504,7 @@ function getPovApertureLabel(aperture: string): string {
               </p>
             </div>
           </div>
+        </div>
         </div>
       </div>
 
