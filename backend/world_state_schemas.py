@@ -5,6 +5,7 @@
 from backend.schemas.world_state import (  # noqa: F401
     CharacterTerminalStatus,
     SceneTerminalStatus,
+    AssetTerminalStatus,
     WorldTerminalState,
     StateValidationViolation,
     StateValidationResult,
