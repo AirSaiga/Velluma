@@ -152,6 +152,12 @@ MIGRATIONS: list[dict[str, Any]] = [
         "expected_udt_names": {"varchar"},
     },
     {
+        "table": "chapters",
+        "column": "status",
+        "definition": "VARCHAR(50) DEFAULT 'draft'",
+        "expected_udt_names": {"varchar"},
+    },
+    {
         "table": "story_beats",
         "column": "beat_id",
         "definition": "VARCHAR(120)",

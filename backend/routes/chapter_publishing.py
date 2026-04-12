@@ -96,7 +96,14 @@ async def publish_chapter(
     if not chapter:
         raise not_found("章节", str(chapter_id))
     if chapter.status == "published":
-        raise bad_request("章节已经是发布状态")
+        # 章节已经是发布状态，直接返回当前状态，以修复前端状态不同步的问题
+        return ChapterPublishResponse(
+            chapter_id=chapter.id,
+            status=chapter.status,
+            summary=chapter.summary,
+            character_updates=[],
+            world_snapshot=chapter.world_snapshot if getattr(chapter, "world_snapshot", None) else None,
+        )
     
     chapter.status = "published"
     
