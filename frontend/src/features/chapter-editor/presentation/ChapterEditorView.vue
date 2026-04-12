@@ -745,7 +745,7 @@ function getPovApertureLabel(aperture: string): string {
   >
     <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden">
       <div class="p-3 border-b border-[var(--border-color)] flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-[var(--text-primary)]">发布章节</h3>
+        <h3 class="text-sm font-semibold text-[var(--text-primary)]">发布成功</h3>
         <button @click="closePublishModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -754,7 +754,7 @@ function getPovApertureLabel(aperture: string): string {
       </div>
       <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)]">
         <div v-if="characterUpdates.length > 0" class="mb-4">
-          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">角色状态变更</h4>
+          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">本次角色状态变更记录</h4>
           <div class="space-y-2">
             <div
               v-for="update in characterUpdates"
@@ -771,15 +771,12 @@ function getPovApertureLabel(aperture: string): string {
           </div>
         </div>
         <div v-else class="text-center text-sm text-[var(--text-muted)] py-4">
-          暂无角色状态变更
+          本次发布无角色状态变更记录
         </div>
       </div>
       <div class="p-3 border-t border-[var(--border-color)] flex justify-end gap-2">
-        <button @click="closePublishModal" class="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:bg-parchment-100">
-          取消
-        </button>
-        <button @click="publishChapter" class="px-3 py-1.5 text-xs rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600">
-          确认发布
+        <button @click="closePublishModal" class="px-4 py-1.5 text-xs rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600">
+          完成
         </button>
       </div>
     </div>
