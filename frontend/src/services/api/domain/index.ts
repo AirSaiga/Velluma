@@ -111,7 +111,9 @@ export const chapterApi = {
   publish: (chapterId: string, data: any) =>
     requestJson(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
   generateEmbedding: (chapterId: string, apiConfig: any) =>
-    requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify(apiConfig || {}) })
+    requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify(apiConfig || {}) }),
+  testCharacterExtraction: (data: { chapter_content: string; api_key: string; base_url?: string; model?: string }) =>
+    requestJson('/debug/character-extraction', { method: 'POST', body: JSON.stringify(data) })
 }
 
 export const intentDrivenApi = {
