@@ -23,6 +23,13 @@ from .enums import (
     ReasoningEffortLevel,
     WorkflowTier,
 )
+from .assets import (
+    AssetBase,
+    AssetCreate,
+    AssetResponse,
+    AssetUpdate,
+    ChapterAssetResponse,
+)
 from .book import (
     BookBase,
     BookCreate,
@@ -138,6 +145,12 @@ __all__ = [
     "PovMode",
     "ReasoningEffortLevel",
     "WorkflowTier",
+    # Asset schemas
+    "AssetBase",
+    "AssetCreate",
+    "AssetResponse",
+    "AssetUpdate",
+    "ChapterAssetResponse",
     # Book schemas
     "BookBase",
     "BookCreate",

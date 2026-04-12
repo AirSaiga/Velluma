@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { Chapter, Character, ApiConfig } from '../../../types'
+import type { Chapter, Character, ApiConfig, Asset } from '../../../types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
+import { assetApi } from '../../../services/api'
 
 const props = defineProps<{
   selectedChapter: Chapter | null
@@ -11,6 +12,7 @@ const props = defineProps<{
   bookId?: string
   metaCollapsed?: boolean
   critiqueResult?: any
+  assets?: Asset[]
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique', 'intent-generate', 'intent-save'])
@@ -85,6 +87,9 @@ defineExpose({
     :api-config="props.apiConfig"
     :book-id="props.bookId"
     :critique-result="props.critiqueResult"
+    :assets="props.assets"
+    :toggle-asset="viewModel.toggleAsset"
+    :is-asset-selected="viewModel.isAssetSelected"
     @request-critique="(content) => emit('request-critique', content)"
     @intent-generate="(payload) => emit('intent-generate', payload)"
     @intent-save="(payload) => emit('intent-save', payload)"

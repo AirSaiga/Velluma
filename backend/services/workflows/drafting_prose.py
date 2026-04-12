@@ -871,6 +871,7 @@ async def _generate_prose_serial_v25(
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
     locations: Optional[List[Any]] = None,
+    assets: Optional[List[Any]] = None,
     enable_qc: bool = True,
     feature_flags: DraftingFeatureFlags = None,
     physical_state_lock: Optional[str] = None,
@@ -903,6 +904,7 @@ async def _generate_prose_serial_v25(
         previous_summary=previous_summary,
         relevant_memories=relevant_memories,
         locations=locations,
+        assets=assets,
     )
     models = DraftingModels(
         creative_model=creative_model,
@@ -982,6 +984,7 @@ async def _generate_prose_parallel_v25(
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
     locations: Optional[List[Any]] = None,
+    assets: Optional[List[Any]] = None,
     enable_qc: bool = True,
     feature_flags: DraftingFeatureFlags = None,
     physical_state_lock: Optional[str] = None,
@@ -1016,6 +1019,7 @@ async def _generate_prose_parallel_v25(
         previous_summary=previous_summary,
         relevant_memories=relevant_memories,
         locations=locations,
+        assets=assets,
     )
     models = DraftingModels(
         creative_model=creative_model,
@@ -1240,6 +1244,7 @@ async def _generate_prose_semi_parallel_v25(
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
     locations: Optional[List[Any]] = None,
+    assets: Optional[List[Any]] = None,
     enable_qc: bool = True,
     feature_flags: DraftingFeatureFlags = None,
     physical_state_lock: Optional[str] = None,
@@ -1281,6 +1286,7 @@ async def _generate_prose_semi_parallel_v25(
             previous_summary=previous_summary,
             relevant_memories=relevant_memories,
             locations=locations,
+            assets=assets,
             enable_qc=enable_qc,
             feature_flags=flags,
             physical_state_lock=physical_state_lock,
@@ -1299,6 +1305,7 @@ async def _generate_prose_semi_parallel_v25(
         previous_summary=previous_summary,
         relevant_memories=relevant_memories,
         locations=locations,
+        assets=assets,
     )
     models = DraftingModels(
         creative_model=creative_model,

@@ -1,10 +1,10 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
-import { chapterApi, generateApi, publishPromptData } from '../../../services/api'
+import { chapterApi, generateApi, publishPromptData, assetApi } from '../../../services/api'
 import { buildAgenticPayload } from '../../../composables/useAgenticConfig'
-import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion } from '../../../types'
+import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion, Asset, ChapterAsset } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 
 export interface ChapterEditorContainerProps {
@@ -94,6 +94,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const isEditorDisabled = computed(() => isGenerating.value || isPublishing.value || beatPreviewLoading.value || isClarifyingOutline.value)
   const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreviewLoading.value || isPublishing.value || isClarifyingOutline.value)
   const selectedChapter = computed(() => props.selectedChapter)
+  const selectedAssetIds = ref<string[]>([])
 
   function openCompletionModal(title: string, message: string) {
     completionTitle.value = title
@@ -752,7 +753,73 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
   }
 
+  async function toggleAsset(assetId: string) {
+    if (!selectedChapter.value) return
+    const ids = [...selectedAssetIds.value]
+    const index = ids.indexOf(assetId)
+    if (index === -1) {
+      ids.push(assetId)
+    } else {
+      ids.splice(index, 1)
+    }
+    selectedAssetIds.value = ids
+    
+    try {
+      await assetApi.updateChapterAssets(selectedChapter.value.id, ids)
+      showToast('章节关键道具更新成功', 'success')
+    } catch (err: any) {
+      showToast('章节关键道具更新失败: ' + err.message, 'error')
+      // 失败回滚
+      const oldIndex = selectedAssetIds.value.indexOf(assetId)
+      if (oldIndex === -1) {
+        selectedAssetIds.value.push(assetId)
+      } else {
+        selectedAssetIds.value.splice(oldIndex, 1)
+      }
+    }
+  }
+
+  function isAssetSelected(assetId: string) {
+    return selectedAssetIds.value.includes(assetId)
+  }
+
+  watch(
+    () => props.selectedChapter,
+    async (newChapter, oldChapter) => {
+      if (newChapter?.id !== oldChapter?.id) {
+        if (newChapter) {
+          try {
+            const assets = await assetApi.getChapterAssets(newChapter.id)
+            selectedAssetIds.value = assets.map(a => a.asset_id)
+          } catch (err) {
+            console.error('Failed to load chapter assets:', err)
+            selectedAssetIds.value = []
+          }
+        } else {
+          selectedAssetIds.value = []
+        }
+        
+        characterUpdates.value = []
+        chapterSummary.value = null
+        workflowState.value = null
+        isGenerating.value = false
+        beatPreviewError.value = ''
+        previewBeats.value = []
+        showBeatReviewModal.value = false
+        pendingAgenticPayload.value = null
+        pendingClearEditorOnConfirm.value = false
+        if (previewAbortController) {
+          previewAbortController.abort()
+          previewAbortController = null
+        }
+      }
+    },
+    { immediate: true }
+  )
+
   return {
+    toggleAsset,
+    isAssetSelected,
     showCompletionModal: showCompletionModal,
     completionMessage: completionMessage,
     completionTitle: completionTitle,

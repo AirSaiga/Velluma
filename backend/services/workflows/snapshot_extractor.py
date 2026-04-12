@@ -39,11 +39,12 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from backend.models import Chapter, Character
+from backend.models import Chapter, Character, Asset
 from backend.world_state_schemas import (
     WorldTerminalState,
     CharacterTerminalStatus,
     SceneTerminalStatus,
+    AssetTerminalStatus,
 )
 from backend.services.llm import call_llm
 from backend.services.utils.prompt_logger import create_logger, PromptLogger
@@ -87,6 +88,7 @@ class SnapshotExtractorAgent:
         book_id: Optional[UUID] = None,
         previous_state: Optional[WorldTerminalState] = None,
         enable_logging: bool = True,
+        assets: Optional[List[Asset]] = None,
     ) -> Optional[WorldTerminalState]:
         """
         提取章节末尾的世界终端状态
@@ -132,7 +134,8 @@ class SnapshotExtractorAgent:
             system_prompt, user_prompt = self._build_extraction_prompt(
                 chapter_content=chapter_content,
                 character_list=character_list,
-                previous_state=previous_state
+                previous_state=previous_state,
+                assets=assets
             )
             
             if self.prompt_logger:
@@ -224,7 +227,8 @@ class SnapshotExtractorAgent:
         self,
         chapter_content: str,
         character_list: List[Character],
-        previous_state: Optional[WorldTerminalState] = None
+        previous_state: Optional[WorldTerminalState] = None,
+        assets: Optional[List[Asset]] = None
     ) -> Tuple[str, str]:
         """
         构建状态提取 Prompt
@@ -244,6 +248,20 @@ class SnapshotExtractorAgent:
                 character_descriptions.append(desc)
         
         character_list_text = "\n\n".join(character_descriptions) if character_descriptions else "无"
+
+        # 格式化资产/道具列表
+        asset_descriptions = []
+        if assets:
+            for asset in assets:
+                if asset:
+                    desc = f"【{asset.name}】(ID: {asset.id})"
+                    if asset.current_state:
+                        desc += f"\n  当前状态参考：{asset.current_state}"
+                    asset_descriptions.append(desc)
+                    
+        asset_list_text = ""
+        if asset_descriptions:
+            asset_list_text = "\n## 本章关键资产/道具\n" + "\n\n".join(asset_descriptions) + "\n"
         
         # 上一章状态参考
         previous_state_text = ""
@@ -306,6 +324,10 @@ class SnapshotExtractorAgent:
 - characters.{id}.emotional_state: 情绪状态，简洁描述
 - characters.{id}.equipment_status: 当前装备/持有物品列表
 - narrative_inertia: 剧情惯性，描述当前的情感/关系/行动趋势
+- assets: (可选) 资产的终端状态列表
+  - asset_id: (必填) 资产 UUID
+  - name: 资产名称
+  - current_state: 最新状态（如耐久度、破损、易主等）
 
 规则：
 1. 如果某角色在文中已死亡，physical_condition 必须标记为 "dead"
@@ -318,7 +340,7 @@ class SnapshotExtractorAgent:
 
 ## 现有角色列表
 {character_list_text}
-
+{asset_list_text}
 {previous_state_text}
 
 ## 章节正文（末尾 3000 字）
@@ -450,6 +472,7 @@ async def extract_world_terminal_state(
     chapter_id: Optional[UUID] = None,
     book_id: Optional[UUID] = None,
     previous_state: Optional[WorldTerminalState] = None,
+    assets: Optional[List[Asset]] = None,
 ) -> Optional[WorldTerminalState]:
     """
     便捷函数：提取世界终端状态
@@ -472,5 +495,6 @@ async def extract_world_terminal_state(
         base_url=base_url,
         chapter_id=chapter_id,
         book_id=book_id,
-        previous_state=previous_state
+        previous_state=previous_state,
+        assets=assets
     )

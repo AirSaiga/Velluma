@@ -51,6 +51,7 @@ def build_planner_agent_prompt(
     previous_chapter_summary: Optional[str] = None,
     locations: Optional[list] = None,
     global_taboos: Optional[str] = None,
+    assets: Optional[list] = None,
     author_intent: Optional[str] = None,
     previous_chapter_snapshot: Optional[dict] = None,
     previous_world_terminal_state: Optional[WorldTerminalState] = None,  # V3.6: 新增参数
@@ -111,6 +112,21 @@ def build_planner_agent_prompt(
         location_prompts.append(map_prompt)
     
     final_map_prompt = "\n".join(location_prompts) if location_prompts else None
+    
+    if assets:
+        assets_prompt = "<chapter_assets>\n"
+        for asset in assets:
+            assets_prompt += f"  <asset name=\"{asset.name}\">\n"
+            if getattr(asset, 'aliases', None):
+                assets_prompt += f"    <aliases>{', '.join(asset.aliases)}</aliases>\n"
+            if getattr(asset, 'static_description', None):
+                assets_prompt += f"    <static_description>{asset.static_description}</static_description>\n"
+            if getattr(asset, 'current_state', None):
+                assets_prompt += f"    <current_state>{asset.current_state}</current_state>\n"
+            assets_prompt += "  </asset>\n"
+        assets_prompt += "</chapter_assets>\n\n"
+    else:
+        assets_prompt = ""
 
     character_prompts = []
     seen_character_ids = set()
@@ -181,6 +197,8 @@ def build_planner_agent_prompt(
 {worldview_prompt if worldview_prompt else ''}
 
 {final_map_prompt if final_map_prompt else ''}
+
+{assets_prompt if assets_prompt else ''}
 
 ## 输出 JSON 结构（示例值仅供格式参考，必须替换为本章实际内容）
 {{
@@ -260,7 +278,8 @@ def build_planner_agent_prompt(
     1. **物理连续性**: Beat 1 的 entry_state 必须严格匹配「前一章末尾世界状态快照」中的位置和状态
     2. **角色离场检查**: 如果 snapshot 中角色的 physical_condition 为 inactive/dead，严禁为其分配任何 Beat
     3. **意图延续**: 角色的 immediate_intention 必须作为 Beat 1 的行为驱动基础
-    4. **锚点处理**: physical_anchors 列表中的物品/状态必须在某个 Beat 中被处理或说明
+    4. **资产/道具处理**: 如果有本章关键道具(assets)，若情节涉及，必须严格遵循其基础设定和当前状态，不可凭空赋予设定外的新功能，并合理推演其状态变化。
+    5. **锚点处理**: physical_anchors 列表中的物品/状态必须在某个 Beat 中被处理或说明
     
     **示例（错误 vs 正确）**：
     - ❌ 错误：上一章结尾"楚言昏迷"，本章 Beat 1 entry_state 写"楚言意识清醒站立"

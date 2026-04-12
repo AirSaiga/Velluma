@@ -22,6 +22,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+__all__ = [
+    "CharacterTerminalStatus",
+    "SceneTerminalStatus",
+    "AssetTerminalStatus",
+    "WorldTerminalState",
+    "StateValidationViolation",
+    "StateValidationResult",
+    "merge_world_states",
+]
+
 
 class CharacterTerminalStatus(BaseModel):
     physical_condition: str = Field(
@@ -78,9 +88,17 @@ class SceneTerminalStatus(BaseModel):
         return list(v)
 
 
+class AssetTerminalStatus(BaseModel):
+    """单体资产的终端状态切片 (V3.6)"""
+    asset_id: str = Field(..., description="资产的 UUID")
+    name: str = Field(..., description="资产名称")
+    current_state: str = Field(..., description="资产在章节结束时的最新状态（如：耐久度、位置、所有权变更、损坏情况等）")
+
+
 class WorldTerminalState(BaseModel):
     scene: SceneTerminalStatus = Field(default_factory=SceneTerminalStatus)
     characters: Dict[str, CharacterTerminalStatus] = Field(default_factory=dict)
+    assets: List[AssetTerminalStatus] = Field(default_factory=list, description="本章涉及道具/资产的终端状态")
     narrative_inertia: str = Field(default="", description="叙事惯性")
     extracted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source_chapter_id: Optional[str] = Field(default=None)
@@ -137,6 +155,12 @@ class WorldTerminalState(BaseModel):
             "⚠️ **约束提醒**: Beat 1 的 entry_state 必须与上述状态保持 100% 连续性！",
             "⚠️ **角色离场检查**: 状态为 inactive/dead 的角色严禁在本章分配 Beat！"
         ])
+
+        if self.assets:
+            lines.append("")
+            lines.append("**关键道具/资产状态**: ")
+            for asset in self.assets:
+                lines.append(f"- [{asset.name}]: {asset.current_state}")
 
         return "\n".join(lines)
 

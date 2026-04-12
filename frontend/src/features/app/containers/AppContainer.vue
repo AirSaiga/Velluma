@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
-import CharacterPanel from '../../../components/CharacterPanel.vue'
-import ChapterEditor from '../../../components/ChapterEditor.vue'
+import { CharacterPanel } from '../../character-panel'
+import { AssetPanel } from '../../asset-panel'
+import { useAssetContainer } from '../../asset-panel'
+import { ChapterEditor } from '../../chapter-editor'
 import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
@@ -116,6 +118,7 @@ const rightTab = computed({
 
 const floatingTabs = [
   { key: 'characters', label: '角色', icon: 'users', shortcut: '1' },
+  { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
   { key: 'worldview', label: '规则', icon: 'book-open', shortcut: '2' },
   { key: 'style', label: '风格', icon: 'sparkles', shortcut: '3' },
   { key: 'map', label: '地图', icon: 'map-pin', shortcut: '4' },
@@ -300,6 +303,8 @@ async function loadCurrentBookData() {
   }
 }
 
+const { assets, loadAssets } = useAssetContainer({ bookId: currentBookId.value || undefined })
+
 watch(currentBookId, (newBookId) => {
   if (newBookId) {
     localStorage.setItem(CURRENT_BOOK_STORAGE_KEY, newBookId)
@@ -307,6 +312,11 @@ watch(currentBookId, (newBookId) => {
     localStorage.removeItem(CURRENT_BOOK_STORAGE_KEY)
   }
   loadCurrentBookData()
+  if (newBookId) {
+    loadAssets()
+  } else if (assets) {
+    assets.value = []
+  }
 })
 
 async function createBook() {
@@ -981,6 +991,7 @@ onBeforeUnmount(() => {
           ref="chapterEditorRef"
           :selected-chapter="selectedChapter"
           :characters="characters"
+          :assets="assets"
           :api-config="apiConfig"
           :book-id="currentBookId"
           :meta-collapsed="uiPrefs.chapterMetaCollapsed"
@@ -1033,7 +1044,12 @@ onBeforeUnmount(() => {
               @close="closeRightPanel"
             />
             
-            <WorldviewSettings
+            <AssetPanel
+                  v-else-if="activeFloatingTab === 'assets'"
+                  :book-id="currentBookId"
+                  @close="closeFloatingTab"
+                />
+                <WorldviewSettings
               v-else-if="activeFloatingTab === 'worldview'"
               :book-id="currentBookId"
               @close="closeRightPanel"

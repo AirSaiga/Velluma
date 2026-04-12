@@ -155,12 +155,13 @@ def build_prose_draft_prompt_v25(
     relational_state_lock: str = "",
     red_lines: Optional[list[str]] = None,
     entity_spatial_ledger: Optional[dict] = None,
-    chapter_assets_schema: str = "",
+    chapter_assets_schema: Optional[str] = None,
     pov_perception_state: str = "",
     pov_character_profile: str = "",
     pov_aperture: Optional[str] = None,
     persistent_state_anchors: Optional[list[dict]] = None,
     is_first_beat: bool = True,
+    assets: Optional[list] = None
 ) -> tuple[str, str]:
     beat_data = beat if isinstance(beat, dict) else {}
 
@@ -343,7 +344,31 @@ def build_prose_draft_prompt_v25(
 - 未解决冲突必须在当前 Beat 中维持其未解决状态（除非本 Beat 明确解决它）
 """
 
-    chapter_assets_schema_text = chapter_assets_schema if chapter_assets_schema else "（本章未定义特殊资产）"
+    chapter_assets_schema_text = chapter_assets_schema if chapter_assets_schema else ""
+    
+    global_assets_text = ""
+    if assets:
+        global_assets_text = "<chapter_assets>\n"
+        for asset in assets:
+            global_assets_text += f"  <asset name=\"{asset.name}\">\n"
+            if getattr(asset, 'aliases', None):
+                global_assets_text += f"    <aliases>{', '.join(asset.aliases)}</aliases>\n"
+            if getattr(asset, 'static_description', None):
+                global_assets_text += f"    <static_description>{asset.static_description}</static_description>\n"
+            if getattr(asset, 'current_state', None):
+                global_assets_text += f"    <current_state>{asset.current_state}</current_state>\n"
+            global_assets_text += "  </asset>\n"
+        global_assets_text += "</chapter_assets>\n"
+
+    if chapter_assets_schema_text or global_assets_text:
+        assets_section = f"""【锁1：核心资产体积锁 (Asset Schema Lock) - P0级特权】
+请死死记住以下资产的物理体型与设定，严禁自行魔改其物理形态，必须严格遵循其当前状态约束，不可凭空赋予其设定外的新功能：
+{chapter_assets_schema_text}
+{global_assets_text}
+> 警告：严禁把重型机甲写成"钻入体内的纳米神经"、"吸附在皮肤上的液体战甲"或"外骨骼"！机甲就是巨大的钢铁造物！
+"""
+    else:
+        assets_section = ""
 
     pov_perception_state_text = pov_perception_state if pov_perception_state else (physical_state_lock if physical_state_lock else "正常")
 
@@ -375,10 +400,7 @@ def build_prose_draft_prompt_v25(
 
     system_prompt = f"""你是专精长文本渲染的专业小说家。你的任务是根据提供的最优潜意识，极其克制地沉浸式续写正文。
 
-【锁1：核心资产体积锁 (Asset Schema Lock) - P0级特权】
-请死死记住以下资产的物理体型与设定，严禁自行魔改其物理形态！
-{chapter_assets_schema_text}
-> 警告：严禁把重型机甲写成"钻入体内的纳米神经"、"吸附在皮肤上的液体战甲"或"外骨骼"！机甲就是巨大的钢铁造物！
+{assets_section}
 
 【锁2：知觉与感官遮罩层 (Perception Masking)】
 当前POV角色的状态为：【{pov_perception_state_text}】。

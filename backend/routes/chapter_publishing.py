@@ -46,6 +46,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.core.dependencies import get_chapter_repository, get_character_repository, get_memory_repository
 from backend.core.exceptions import not_found, bad_request
 from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository
+from backend.repositories.asset_repository import ChapterAssetRepository
 from backend.schemas import ChapterPublishRequest, ChapterPublishResponse, CharacterStateChange
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_WORKFLOW
 from backend.services.generation.publish import (
@@ -199,6 +200,10 @@ async def publish_chapter(
                         prev_chapter.world_snapshot
                     )
 
+                # 获取关联资产
+                chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
+                assets = [ca.asset for ca in chapter_assets if ca.asset]
+
                 # 使用 V3.6 SnapshotExtractorAgent
                 world_state = await asyncio.wait_for(
                     extract_world_terminal_state(
@@ -210,6 +215,7 @@ async def publish_chapter(
                         chapter_id=chapter.id,
                         book_id=chapter.book_id,
                         previous_state=previous_state,
+                        assets=assets,
                     ),
                     timeout=150,
                 )
@@ -243,6 +249,18 @@ async def publish_chapter(
                             if ch_loc.location:
                                 ch_loc.location.current_state = world_state.scene.atmosphere
                                 svc_logger.debug("Updated location current_state", location=ch_loc.location.name)
+                                
+                    # ========================================================================
+                    # V3.6: 更新资产此刻状态
+                    # ========================================================================
+                    if world_state.assets:
+                        chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
+                        asset_map = {str(ca.asset.id): ca.asset for ca in chapter_assets if ca.asset}
+                        for asset_state in world_state.assets:
+                            asset_obj = asset_map.get(asset_state.asset_id)
+                            if asset_obj:
+                                asset_obj.current_state = asset_state.current_state
+                                svc_logger.debug("Updated asset current_state", asset=asset_obj.name)
                 
                 else:
                     svc_logger.warning("WorldTerminalState extraction returned None")

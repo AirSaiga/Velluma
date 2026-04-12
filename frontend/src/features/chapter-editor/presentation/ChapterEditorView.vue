@@ -4,7 +4,7 @@ import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
 import { IntentDrivenPanel } from '../../intent-driven'
 import ClarificationModal from './ClarificationModal.vue'
-import type { ApiConfig, Chapter, Character, PacingStyle } from '../../../types'
+import type { ApiConfig, Chapter, Character, PacingStyle, Asset } from '../../../types'
 
 interface BeatPreviewItem {
   position: number
@@ -41,6 +41,9 @@ const props = defineProps<{
     new_state: string
   }>
   characters: Character[]
+  assets?: Asset[]
+  toggleAsset: (assetId: string) => void
+  isAssetSelected: (assetId: string) => boolean
   closeAgenticSettingsModal: () => void
   closeBeatReviewModal: () => void
   closeCompletionModal: () => void
@@ -126,7 +129,9 @@ const emit = defineEmits<{
 const editorRef = ref<any>(null)
 const showAdvancedSettings = ref(false)
 const showCharacterSelector = ref(false)
+const showAssetSelector = ref(false)
 const characterSearchQuery = ref('')
+const assetSearchQuery = ref('')
 const isConfigExpanded = ref(true)
 
 watch(editorRef, (editor) => {
@@ -154,6 +159,16 @@ const filteredCharacters = computed(() => {
   if (!characterSearchQuery.value) return props.characters
   const query = characterSearchQuery.value.toLowerCase()
   return props.characters.filter(c => c.name.toLowerCase().includes(query))
+})
+
+const selectedAssets = computed(() => {
+  return props.assets?.filter(a => props.isAssetSelected(a.id)) || []
+})
+
+const filteredAssets = computed(() => {
+  if (!assetSearchQuery.value) return props.assets || []
+  const query = assetSearchQuery.value.toLowerCase()
+  return (props.assets || []).filter(a => a.name.toLowerCase().includes(query))
 })
 
 const characterImportanceColor = (level: number) => {
@@ -348,110 +363,203 @@ function getPovApertureLabel(aperture: string): string {
           </div>
         </div>
 
-        <!-- 第二层：人物选择（新版展开式） -->
+        <!-- 第二层：上下文关联（人物与道具） -->
         <div class="px-3 pb-2.5 border-t border-[var(--border-color)]/50">
-          <div class="mt-2">
-            <!-- 已选人物展示 + 添加按钮 -->
-            <div class="flex items-start gap-2">
-              <div class="flex-1 min-w-0">
-                <div v-if="selectedCharacters.length === 0" class="flex items-center gap-2">
-                  <span class="text-[11px] text-[var(--text-muted)] italic">尚未选择本章人物</span>
-                  <button
-                    @click="showCharacterSelector = !showCharacterSelector"
-                    class="text-[11px] text-[var(--accent-500)] hover:text-accent-600 font-medium flex items-center gap-0.5"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    添加人物
-                  </button>
-                </div>
-                <div v-else class="flex flex-wrap items-center gap-1.5">
-                  <span 
-                    v-for="char in selectedCharacters" 
-                    :key="char.id"
-                    class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-full ring-1 transition-all"
-                    :class="characterImportanceColor(char.importance_level)"
-                  >
-                    {{ char.name }}
+          <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- 左列：人物选择 -->
+            <div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <label class="text-[10px] font-medium text-[var(--text-secondary)] flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                  </svg>
+                  本章出场人物
+                </label>
+              </div>
+              
+              <div class="flex items-start gap-2">
+                <div class="flex-1 min-w-0">
+                  <div v-if="selectedCharacters.length === 0" class="flex items-center gap-2">
+                    <span class="text-[11px] text-[var(--text-muted)] italic">尚未选择本章人物</span>
                     <button
-                      @click="toggleCharacter(char.id)"
-                      class="hover:text-rose-500 hover:bg-rose-50 rounded-full p-0.5"
+                      @click="showCharacterSelector = !showCharacterSelector"
+                      class="text-[11px] text-[var(--accent-500)] hover:text-accent-600 font-medium flex items-center gap-0.5"
                     >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                       </svg>
+                      添加人物
                     </button>
-                  </span>
-                  <button
-                    @click="showCharacterSelector = !showCharacterSelector"
-                    class="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-full text-[var(--text-muted)] hover:text-[var(--accent-500)] hover:bg-accent-50 ring-1 ring-dashed ring-[var(--border-color)] hover:ring-accent-200 transition-all"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    添加
-                  </button>
+                  </div>
+                  <div v-else class="flex flex-wrap items-center gap-1.5">
+                    <span 
+                      v-for="char in selectedCharacters" 
+                      :key="char.id"
+                      class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-full ring-1 transition-all"
+                      :class="characterImportanceColor(char.importance_level)"
+                    >
+                      {{ char.name }}
+                      <button
+                        @click="toggleCharacter(char.id)"
+                        class="hover:text-rose-500 hover:bg-rose-50 rounded-full p-0.5"
+                      >
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    </span>
+                    <button
+                      @click="showCharacterSelector = !showCharacterSelector"
+                      class="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-full text-[var(--text-muted)] hover:text-[var(--accent-500)] hover:bg-accent-50 ring-1 ring-dashed ring-[var(--border-color)] hover:ring-accent-200 transition-all"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                      </svg>
+                      添加
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 人物选择展开面板 -->
+              <div 
+                v-if="showCharacterSelector" 
+                class="mt-2 p-3 bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-color)]"
+              >
+                <div class="relative mb-2">
+                  <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                  <input
+                    v-model="characterSearchQuery"
+                    type="text"
+                    placeholder="搜索人物..."
+                    class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] focus:outline-none focus:border-[var(--accent-500)]"
+                  />
+                </div>
+                <div class="max-h-40 overflow-y-auto">
+                  <div v-if="filteredCharacters.length === 0" class="text-center py-3 text-[11px] text-[var(--text-muted)]">
+                    未找到匹配的人物
+                  </div>
+                  <div v-else class="grid grid-cols-2 gap-1.5">
+                    <button
+                      v-for="char in filteredCharacters"
+                      :key="char.id"
+                      @click="toggleCharacter(char.id)"
+                      class="px-2 py-1.5 text-[11px] rounded-md text-left transition-all border truncate"
+                      :class="isCharacterSelected(char.id)
+                        ? 'bg-accent-50 text-accent-700 border-accent-300 shadow-sm'
+                        : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-accent-200 hover:bg-accent-50/30'"
+                    >
+                      <div class="flex items-center gap-1">
+                        <span v-if="isCharacterSelected(char.id)" class="text-accent-500 shrink-0">
+                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                          </svg>
+                        </span>
+                        <span class="truncate">{{ char.name }}</span>
+                      </div>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- 人物选择展开面板 -->
-            <div 
-              v-if="showCharacterSelector" 
-              class="mt-2 p-3 bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-color)]"
-            >
-              <!-- 搜索框 -->
-              <div class="relative mb-2">
-                <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                </svg>
-                <input
-                  v-model="characterSearchQuery"
-                  type="text"
-                  placeholder="搜索人物..."
-                  class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] focus:outline-none focus:border-[var(--accent-500)]"
-                />
+            <!-- 右列：道具资产选择 -->
+            <div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <label class="text-[10px] font-medium text-[var(--text-secondary)] flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                  </svg>
+                  本章关键道具
+                </label>
               </div>
 
-              <!-- 人物网格 -->
-              <div class="max-h-40 overflow-y-auto">
-                <div v-if="filteredCharacters.length === 0" class="text-center py-3 text-[11px] text-[var(--text-muted)]">
-                  未找到匹配的人物
-                </div>
-                <div v-else class="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                  <button
-                    v-for="char in filteredCharacters"
-                    :key="char.id"
-                    @click="toggleCharacter(char.id)"
-                    class="px-2 py-1.5 text-[11px] rounded-md text-left transition-all border"
-                    :class="isCharacterSelected(char.id)
-                      ? 'bg-accent-50 text-accent-700 border-accent-300 shadow-sm'
-                      : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-accent-200 hover:bg-accent-50/30'"
-                  >
-                    <div class="flex items-center gap-1">
-                      <span v-if="isCharacterSelected(char.id)" class="text-accent-500">
+              <div class="flex items-start gap-2">
+                <div class="flex-1 min-w-0">
+                  <div v-if="selectedAssets.length === 0" class="flex items-center gap-2">
+                    <span class="text-[11px] text-[var(--text-muted)] italic">尚未选择关键道具</span>
+                    <button
+                      @click="showAssetSelector = !showAssetSelector"
+                      class="text-[11px] text-[var(--accent-500)] hover:text-accent-600 font-medium flex items-center gap-0.5"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                      </svg>
+                      添加道具
+                    </button>
+                  </div>
+                  <div v-else class="flex flex-wrap items-center gap-1.5">
+                    <span 
+                      v-for="asset in selectedAssets" 
+                      :key="asset.id"
+                      class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-full ring-1 transition-all bg-emerald-50 text-emerald-600 ring-emerald-200"
+                    >
+                      {{ asset.name }}
+                      <button
+                        @click="toggleAsset(asset.id)"
+                        class="hover:text-rose-500 hover:bg-rose-50 rounded-full p-0.5"
+                      >
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
-                      </span>
-                      <span class="truncate">{{ char.name }}</span>
-                    </div>
-                  </button>
+                      </button>
+                    </span>
+                    <button
+                      @click="showAssetSelector = !showAssetSelector"
+                      class="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-full text-[var(--text-muted)] hover:text-[var(--accent-500)] hover:bg-accent-50 ring-1 ring-dashed ring-[var(--border-color)] hover:ring-accent-200 transition-all"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                      </svg>
+                      添加
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <!-- 底部操作 -->
-              <div class="mt-2 pt-2 border-t border-[var(--border-color)]/50 flex items-center justify-between">
-                <span class="text-[10px] text-[var(--text-muted)]">
-                  已选 {{ selectedCharacters.length }} 人
-                </span>
-                <button
-                  @click="showCharacterSelector = false"
-                  class="text-[11px] text-[var(--accent-500)] hover:text-accent-600 font-medium"
-                >
-                  完成
-                </button>
+              <!-- 道具选择展开面板 -->
+              <div 
+                v-if="showAssetSelector" 
+                class="mt-2 p-3 bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-color)]"
+              >
+                <div class="relative mb-2">
+                  <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                  <input
+                    v-model="assetSearchQuery"
+                    type="text"
+                    placeholder="搜索道具..."
+                    class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] focus:outline-none focus:border-[var(--accent-500)]"
+                  />
+                </div>
+                <div class="max-h-40 overflow-y-auto">
+                  <div v-if="filteredAssets.length === 0" class="text-center py-3 text-[11px] text-[var(--text-muted)]">
+                    未找到匹配的道具
+                  </div>
+                  <div v-else class="grid grid-cols-2 gap-1.5">
+                    <button
+                      v-for="asset in filteredAssets"
+                      :key="asset.id"
+                      @click="toggleAsset(asset.id)"
+                      class="px-2 py-1.5 text-[11px] rounded-md text-left transition-all border truncate"
+                      :class="isAssetSelected(asset.id)
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-sm'
+                        : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-accent-200 hover:bg-accent-50/30'"
+                    >
+                      <div class="flex items-center gap-1">
+                        <span v-if="isAssetSelected(asset.id)" class="text-emerald-500 shrink-0">
+                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                          </svg>
+                        </span>
+                        <span class="truncate">{{ asset.name }}</span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

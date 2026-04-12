@@ -47,6 +47,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 依赖注入获取仓储实例，确保数据库会话管理
 """
 
+from backend.routes.assets import router as assets_router
 from backend.routes.books import router as books_router
 from backend.routes.chapters import router as chapters_router
 from backend.routes.chapter_entities import router as chapter_entities_router
@@ -64,6 +65,7 @@ from backend.routes.system import router as system_router
 from backend.routes.maps import router as maps_router
 
 __all__ = [
+    "assets_router",
     "books_router",
     "chapters_router",
     "chapter_entities_router",

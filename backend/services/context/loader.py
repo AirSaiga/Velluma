@@ -57,9 +57,10 @@ from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_RAG
 
 if TYPE_CHECKING:
     from backend.repositories import (
-        ChapterRepository, BookRepository, MemoryRepository,
-        PlotLedgerRepository, MapLocationRepository, RelationshipRepository
-    )
+    ChapterRepository, BookRepository, CharacterRepository,
+    MemoryRepository, PlotLedgerRepository, MapLocationRepository,
+    RelationshipRepository, AssetRepository, ChapterAssetRepository
+)
 
 from backend.repositories.base import QuerySpec
 
@@ -302,6 +303,7 @@ class ChapterContext:
         previous_world_snapshot: Optional[dict] = None,
         open_hooks: Optional[List[Dict[str, str]]] = None,
         locations: Optional[List[Any]] = None,
+        assets: Optional[List[Any]] = None,
         relevant_memories: Optional[List[Any]] = None,
     ):
         self.chapter = chapter
@@ -312,6 +314,7 @@ class ChapterContext:
         self.previous_world_snapshot = previous_world_snapshot
         self.open_hooks = open_hooks or []
         self.locations = locations or []
+        self.assets = assets or []
         self.relevant_memories = relevant_memories or []
     
     def to_dict(self) -> Dict[str, Any]:
@@ -324,6 +327,7 @@ class ChapterContext:
             "has_world_snapshot": bool(self.previous_world_snapshot),
             "open_hooks_count": len(self.open_hooks),
             "locations_count": len(self.locations),
+            "assets_count": len(self.assets),
             "memories_count": len(self.relevant_memories),
         }
 
@@ -369,6 +373,13 @@ async def load_full_chapter_context(
             api_key, base_url, rag_params
         )
 
+    # 6. 获取关联资产
+    assets = []
+    if "chapter_asset" in repositories:
+        chapter_assets = await repositories["chapter_asset"].list_by_chapter(chapter_id)
+        assets = [ca.asset for ca in chapter_assets if ca.asset]
+
+    # 7. 构建并返回上下文
     return ChapterContext(
         chapter=chapter,
         book=book,
@@ -378,5 +389,6 @@ async def load_full_chapter_context(
         previous_world_snapshot=previous_world_snapshot,
         open_hooks=open_hooks,
         locations=locations,
+        assets=assets,
         relevant_memories=relevant_memories,
     )

@@ -20,6 +20,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.repositories.asset_repository import AssetRepository, ChapterAssetRepository
 from backend.repositories import (
     BookRepository,
     ChapterRepository,
@@ -72,3 +73,11 @@ def get_plot_ledger_repository(db: AsyncSession = Depends(get_db)) -> PlotLedger
     用于 RAG 服务层获取伏笔数据。
     """
     return PlotLedgerRepository(db)
+
+
+def get_asset_repository(db: AsyncSession = Depends(get_db)) -> AssetRepository:
+    return AssetRepository(db)
+
+
+def get_chapter_asset_repository(db: AsyncSession = Depends(get_db)) -> ChapterAssetRepository:
+    return ChapterAssetRepository(db)

@@ -41,6 +41,8 @@ __all__ = [
     "ChapterEntity",
     "MapLocation",
     "ChapterMapLocation",
+    "Asset",
+    "ChapterAsset",
     "Character",
     "CharacterRelationship",
     "MemoryChunk",
@@ -115,6 +117,7 @@ class Book(Base):
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     characters = relationship("Character", back_populates="book", cascade="all, delete-orphan")
     locations = relationship("MapLocation", back_populates="book", cascade="all, delete-orphan")
+    assets = relationship("Asset", back_populates="book", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="book", cascade="all, delete-orphan")
     story_beats = relationship("StoryBeat", back_populates="book", cascade="all, delete-orphan")
     scene_intents = relationship("SceneIntent", back_populates="book", cascade="all, delete-orphan")
@@ -181,6 +184,7 @@ class Chapter(Base):
     book = relationship("Book", back_populates="chapters")
     entities = relationship("ChapterEntity", back_populates="chapter", cascade="all, delete-orphan")
     locations = relationship("ChapterMapLocation", back_populates="chapter", cascade="all, delete-orphan")
+    assets = relationship("ChapterAsset", back_populates="chapter", cascade="all, delete-orphan")
     memories = relationship("MemoryChunk", back_populates="chapter", cascade="all, delete-orphan")
     story_beats = relationship("StoryBeat", back_populates="chapter", cascade="all, delete-orphan")
     scene_intents = relationship("SceneIntent", back_populates="chapter", cascade="all, delete-orphan")
@@ -267,6 +271,49 @@ class ChapterMapLocation(Base):
     chapter = relationship("Chapter", back_populates="locations")
     location = relationship("MapLocation", back_populates="chapter_locations")
 
+
+# ============================================================
+# 全局资产层 - Asset 是道具/物品的核心
+# ============================================================
+class Asset(Base):
+    """
+    全局资产表 - 管理世界观中的关键道具、装备、法宝等
+    
+    业务含义：
+    - static_description: 静态设定（外观、基础功能、历史渊源）
+    - current_state: 此刻状态（如"轻微破损"、"充能中"），可随章节演进更新
+    - importance_level: 控制上下文注入优先级
+    """
+    __tablename__ = "assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(200), nullable=False)
+    aliases = Column(JSONB, default=list)
+    static_description = Column(Text, nullable=True)
+    current_state = Column(Text, nullable=True)
+    importance_level = Column(Integer, default=1)
+    created_at = Column(DateTime, default=utc_now)
+
+    book = relationship("Book", back_populates="assets")
+    chapter_assets = relationship("ChapterAsset", back_populates="asset", cascade="all, delete-orphan")
+
+
+class ChapterAsset(Base):
+    """
+    章节-资产关联表 (多对多)
+    
+    业务含义：
+    - 标记特定章节涉及哪些关键道具
+    """
+    __tablename__ = "chapter_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+    asset_id = Column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    
+    chapter = relationship("Chapter", back_populates="assets")
+    asset = relationship("Asset", back_populates="chapter_assets")
 
 
 # ============================================================

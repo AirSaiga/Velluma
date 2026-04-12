@@ -464,6 +464,8 @@ async def init_db():
         Chapter,
         ChapterEntity,
         ChapterMapLocation,
+        Asset,
+        ChapterAsset,
         Character,
         CharacterRelationship,
         MapLocation,

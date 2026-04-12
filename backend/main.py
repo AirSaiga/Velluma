@@ -152,7 +152,8 @@ from backend.core.config import save_port as _save_port, find_available_port
 from backend.database import init_db
 from backend.routes import (
     books_router,
-    chapters_router,
+        assets_router,
+        chapters_router,
     chapter_entities_router,
     chapter_publishing_router,
     characters_router,
@@ -234,6 +235,7 @@ app.add_middleware(
 # 副作用：所有路由的依赖注入（如 get_db）会在请求进入时自动执行
 app.include_router(system_router)
 app.include_router(books_router)
+app.include_router(assets_router)
 app.include_router(chapters_router)
 app.include_router(chapter_entities_router)
 app.include_router(chapter_publishing_router)
