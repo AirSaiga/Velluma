@@ -208,7 +208,8 @@ async def publish_chapter(
                 )
                 
                 if world_state:
-                    chapter.world_snapshot = world_state.model_dump()
+                    # 使用 mode='json' 确保 datetime 等复杂类型被正确序列化为字符串
+                    chapter.world_snapshot = world_state.model_dump(mode='json')
                     svc_logger.info(
                         "WorldTerminalState saved",
                         chapter_id=str(chapter_id),
