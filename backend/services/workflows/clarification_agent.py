@@ -98,6 +98,11 @@ async def execute_clarification_stage(
     """
     logger.info(f"[Clarification] 开始分析大纲意图，输入长度: {len(ambiguous_text)}, 是否带有补充回答: {bool(user_instruction)}")
     
+    # 如果ambiguous_text为空，但用户有补充回答，使用用户的回答作为ambiguous_text
+    if not ambiguous_text and user_instruction:
+        logger.info("[Clarification] ambiguous_text为空，使用用户回答作为输入")
+        ambiguous_text = user_instruction
+    
     system_prompt, user_prompt = build_clarification_agent_prompt(
         book=book,
         ambiguous_text=ambiguous_text,
@@ -145,6 +150,17 @@ async def execute_clarification_stage(
         else:
             logger.info("[Clarification] 大纲意图清晰")
             
+        # 确保返回的JSON包含refined_text字段
+        if "refined_text" not in response_json:
+            # 如果是第二轮（用户已回答），但没有返回refined_text，使用原始文本作为默认值
+            if user_instruction:
+                response_json["refined_text"] = ambiguous_text
+            else:
+                response_json["refined_text"] = ""
+        
+        # 添加原始大纲字段，用于前端显示
+        response_json["original_outline"] = ambiguous_text
+        
         return response_json
         
     except json.JSONDecodeError as e:
@@ -154,6 +170,7 @@ async def execute_clarification_stage(
             "identified_issues": [],
             "clarification_suggestions": [],
             "refined_text": ambiguous_text,
+            "original_outline": ambiguous_text,
             "error": "JSON parse error"
         }
     except Exception as e:
@@ -163,5 +180,6 @@ async def execute_clarification_stage(
             "identified_issues": [],
             "clarification_suggestions": [],
             "refined_text": ambiguous_text,
+            "original_outline": ambiguous_text,
             "error": str(e)
         }

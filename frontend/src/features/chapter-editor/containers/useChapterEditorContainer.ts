@@ -4,7 +4,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi, publishPromptData, assetApi } from '../../../services/api'
 import { buildAgenticPayload } from '../../../composables/useAgenticConfig'
-import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion, Asset, ChapterAsset, CharacterExtractionSummary } from '../../../types'
+import type { ApiConfig, Chapter, Character, ConfirmedStoryBeat, GenerateChapterAgenticPayload, ClarifyingQuestion, Asset, ChapterAsset } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 
 export interface ChapterEditorContainerProps {
@@ -63,8 +63,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     old_state: string
     new_state: string
   }>>([])
+  const characterExtraction = ref<any>(null)
   const chapterSummary = ref<string | null>(null)
-  const characterExtraction = ref<CharacterExtractionSummary | null>(null)
   const beatPreviewLoading = ref(false)
   const beatPreviewError = ref('')
   const previewBeats = ref<BeatEditorState[]>([])
@@ -189,20 +189,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       emit('update-chapter', selectedChapter.value.id, { status: 'published' })
       emit('refresh-characters')
       characterUpdates.value = result.character_updates || []
+      characterExtraction.value = result.character_extraction || null
       if (result.summary) {
         chapterSummary.value = result.summary
         emit('update-chapter', selectedChapter.value.id, { summary: result.summary })
       }
-      // 人物提取结果
-      characterExtraction.value = result.character_extraction || null
-      
-      // 调试日志：记录提取的角色信息
-      if (result.character_extraction) {
-        console.log('[Character Extraction] Result:', result.character_extraction)
-        console.log('[Character Extraction] New characters:', result.character_extraction.extracted_characters?.filter((c: any) => c.is_new))
-        console.log('[Character Extraction] New char names:', result.character_extraction.extracted_characters?.filter((c: any) => c.is_new).map((c: any) => `${c.name}(level:${c.importance_level},type:${c.role_type})`))
-      }
-      
       showPublishModal.value = true
     } catch (err: any) {
       publishError.value = err.message
@@ -215,8 +206,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   function closePublishModal() {
     showPublishModal.value = false
     characterUpdates.value = []
-    chapterSummary.value = null
     characterExtraction.value = null
+    chapterSummary.value = null
   }
 
   function openAgenticSettingsModal() {
@@ -248,18 +239,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   async function handleApplyClarification(newOutlineText: string) {
-    if (selectedChapter.value && newOutlineText !== selectedChapter.value.outline_text) {
-      try {
-        await chapterApi.update(selectedChapter.value.id, { outline_text: newOutlineText })
-        updateChapter({ outline_text: newOutlineText })
-      } catch (err) {
-        console.error('更新大纲失败:', err)
-        showToast('大纲保存失败，生成可能使用旧版本大纲', 'warning')
-      }
-    } else {
-      updateChapter({ outline_text: newOutlineText })
-    }
-    
+    updateChapter({ outline_text: newOutlineText })
     closeClarificationModal()
     
     // 如果还有等待生成的 Payload，则在更新大纲后直接触发生成
@@ -307,12 +287,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         // 用户可以选择继续修改或直接应用
       } else {
         // 如果没有返回 refined_text，直接应用原始大纲
-        handleApplyClarification(chapter.outline_text || '')
+        handleApplyClarification(originalOutline)
       }
     } catch (err: any) {
       console.warn('第二轮澄清请求失败，使用原始大纲', err)
       // 失败时直接应用原始大纲
-      handleApplyClarification(chapter.outline_text || '')
+      handleApplyClarification(originalOutline)
     } finally {
       isClarifyingOutline.value = false
     }
@@ -390,40 +370,40 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (isFormatting.value || !text) return
     
     try {
+      if (!props.apiConfig.api_key) {
+        showToast('请先在设置中配置 API Key 以使用智能格式整理功能', 'warning')
+        return
+      }
+
       isFormatting.value = true
       const { formatted_text } = await generateApi.formatText({
         text,
-        api_key: props.apiConfig.api_key || '',
-        base_url: props.apiConfig.base_url || '',
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
         model: props.apiConfig.reasoning_model || props.apiConfig.model || 'google/gemini-2.0-flash-001'
       })
       
       if (formatted_text && editorRef.value) {
-        // LLM 智能格式化返回的文本使用 \n\n 分段
-        // 按双换行分割段落，保留段落结构
         const paragraphs = formatted_text
-          .split(/\n\n+/)
-          .map((p: string) => p.replace(/\r?\n/g, '').trim())
-          .filter((p: string) => p.length > 0)
+          .split(/\r?\n/)
+          .filter((line: string) => line.trim().length > 0)
         
-        const htmlContent = paragraphs
-          .map((text: string) => `<p>${text}</p>`)
-          .join('')
+        const jsonContent = {
+          type: 'doc',
+          content: paragraphs.map((text: string) => ({
+            type: 'paragraph',
+            content: [{ type: 'text', text: text.trim() }]
+          }))
+        }
 
         if (selection) {
           // 选中文本部分替换
           editorRef.value.editor.commands.setTextSelection(selection)
-          editorRef.value.editor.commands.insertContent(htmlContent)
+          editorRef.value.editor.commands.insertContent(jsonContent)
         } else {
           // 全文替换
-          editorRef.value.editor.commands.setContent(htmlContent)
+          editorRef.value.editor.commands.setContent(jsonContent)
         }
-        
-        // 同步更新章节内容
-        const html = editorRef.value.editor.getHTML()
-        updateChapter({ content_text: html, draft_text: html })
-        
-        showToast('格式整理完成', 'success')
       }
     } catch (e: any) {
       console.error('Format text failed', e)
@@ -871,8 +851,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         }
         
         characterUpdates.value = []
-        chapterSummary.value = null
         characterExtraction.value = null
+        chapterSummary.value = null
         workflowState.value = null
         isGenerating.value = false
         beatPreviewError.value = ''

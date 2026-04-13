@@ -191,7 +191,7 @@ def build_clarification_agent_prompt(
 5. refined_text 规则：
    - 如果 user_instruction 为空（第一轮询问）：返回空字符串 ""，不要生成任何修正大纲
    - 如果 user_instruction 有值（第二轮，用户已回答）：基于用户的选择生成完整、详细的修正大纲，融合所有回答
-6. 只输出 JSON，绝对不要输出任何 Markdown 代码块（如 ```json ... ```），直接输出 JSON 对象本身。
+6. 只输出 JSON，不要额外解释。
 """
 
     user_prompt_parts = []

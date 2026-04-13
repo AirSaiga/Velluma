@@ -95,7 +95,7 @@ function getCharacterHighlight(charId) {
 }
 
 function getImportanceLabel(level) {
-  const labels = { 1: '普通', 2: '重要', 3: '主角', 4: '核心' }
+  const labels = { 1: '普通', 2: '重要', 3: '核心', 4: '主角' }
   return labels[level] || '普通'
 }
 
@@ -350,8 +350,8 @@ function handleClose() {
             <select v-model="formData.importance_level">
               <option :value="1">普通</option>
               <option :value="2">重要</option>
-              <option :value="3">主角</option>
-              <option :value="4">核心</option>
+              <option :value="3">核心</option>
+              <option :value="4">主角</option>
             </select>
           </div>
 

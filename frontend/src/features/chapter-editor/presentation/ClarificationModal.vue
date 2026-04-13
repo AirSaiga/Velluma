@@ -12,13 +12,13 @@ export interface ClarifyingQuestion {
 
 const props = defineProps<{
   show: boolean
-  isClarifying?: boolean
   clarificationResult: {
     is_ambiguous: boolean
     identified_issues?: string[]
     clarifying_questions?: ClarifyingQuestion[]
     clarification_suggestions?: string[]
     refined_text?: string
+    original_outline?: string
   } | null
 }>()
 
@@ -37,15 +37,10 @@ const hasRefinedText = computed(() => {
   return !!props.clarificationResult?.refined_text?.trim()
 })
 
+// 监听弹窗显示状态变化
 watch(() => props.show, (newVal) => {
   if (newVal) {
-    // 如果有修正后的大纲（第二轮），则显示；否则显示原始大纲或空
-    if (props.clarificationResult?.refined_text?.trim()) {
-      editableOutline.value = props.clarificationResult.refined_text
-    } else {
-      // 第一轮：显示原始大纲或空
-      editableOutline.value = ''
-    }
+    updateEditableOutline()
     // 每次打开弹窗重置选择状态（仅在第一轮时）
     if (!props.clarificationResult?.refined_text?.trim()) {
       selectedOptions.value = {}
@@ -54,11 +49,24 @@ watch(() => props.show, (newVal) => {
   }
 })
 
-watch(() => props.clarificationResult?.refined_text, (newVal) => {
-  if (props.show && newVal?.trim()) {
-    editableOutline.value = newVal
+// 监听clarificationResult变化
+watch(() => props.clarificationResult, () => {
+  if (props.show) {
+    updateEditableOutline()
   }
-})
+}, { deep: true })
+
+// 更新可编辑大纲
+function updateEditableOutline() {
+  // 如果有修正后的大纲（第二轮），则显示；否则显示原始大纲或空
+  if (props.clarificationResult?.refined_text?.trim()) {
+    editableOutline.value = props.clarificationResult.refined_text
+  } else {
+    // 第一轮：显示原始大纲或空
+    // 尝试从clarificationResult中获取原始大纲，如果没有则显示空
+    editableOutline.value = props.clarificationResult?.original_outline || ''
+  }
+}
 
 function handleClose() {
   emit('close')
@@ -217,9 +225,9 @@ function handleConfirm() {
                 'w-full h-40 p-3 border rounded-lg text-sm custom-scrollbar resize-none',
                 hasRefinedText 
                   ? 'bg-white border-gray-200 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent' 
-                  : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
+                  : 'bg-gray-100 border-gray-200 text-gray-700 cursor-not-allowed'
               ]"
-              :placeholder="hasRefinedText ? '在此处补充细节...' : '请先选择上方的选项，系统将基于您的选择生成修正大纲'"
+              :placeholder="editableOutline ? '' : (hasRefinedText ? '在此处补充细节...' : '请先选择上方的选项，系统将基于您的选择生成修正大纲')"
             ></textarea>
             <p v-if="!hasRefinedText" class="text-xs text-amber-600">
               第 1 步：选择上方的选项，然后点击"生成修正大纲"
@@ -234,33 +242,27 @@ function handleConfirm() {
         <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
           <button 
             @click="handleClose" 
-            :disabled="isClarifying"
-            class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             {{ hasRefinedText ? '取消' : '忽略建议并继续' }}
           </button>
           <button 
             v-if="!hasRefinedText"
             @click="handleApply" 
-            :disabled="!hasSelectedAnswers || isClarifying"
+            :disabled="!hasSelectedAnswers"
             :class="[
               'px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2',
-              (hasSelectedAnswers && !isClarifying)
+              hasSelectedAnswers 
                 ? 'text-white bg-blue-600 hover:bg-blue-700' 
                 : 'text-gray-400 bg-gray-300 cursor-not-allowed'
             ]"
           >
-            <svg v-if="isClarifying" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            {{ isClarifying ? '生成中...' : '生成修正大纲' }}
+            生成修正大纲
           </button>
           <button 
             v-else
             @click="handleConfirm" 
-            :disabled="isClarifying"
-            class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 shadow-sm transition-colors flex items-center gap-2"
           >
             确认并生成节拍
           </button>

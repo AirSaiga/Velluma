@@ -118,12 +118,12 @@ const rightTab = computed({
 
 const floatingTabs = [
   { key: 'characters', label: '角色', icon: 'users', shortcut: '1' },
-  { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
   { key: 'worldview', label: '规则', icon: 'book-open', shortcut: '2' },
   { key: 'style', label: '风格', icon: 'sparkles', shortcut: '3' },
   { key: 'map', label: '地图', icon: 'map-pin', shortcut: '4' },
   { key: 'critique', label: '指导', icon: 'light-bulb', shortcut: '5' },
   { key: 'notes', label: '笔记', icon: 'pencil-square', shortcut: '6' },
+  { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
 ]
 
 // 切换沉浸模式
@@ -1047,7 +1047,7 @@ onBeforeUnmount(() => {
             <AssetPanel
                   v-else-if="activeFloatingTab === 'assets'"
                   :book-id="currentBookId"
-                  @close="closeFloatingTab"
+                  @close="closeRightPanel"
                 />
                 <WorldviewSettings
               v-else-if="activeFloatingTab === 'worldview'"
