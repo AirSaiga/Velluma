@@ -60,7 +60,8 @@ def _clamp_tokens(target_words: int) -> int:
     将目标字数转换为 Token 上限。
 
     经验公式：1 Token ≈ 1.5-2 中文字符 ≈ 0.75 英文单词
-    为安全起见，使用 2.0 比率保守估算。
+    对于 reasoning model（如 Gemini 2.5 Pro），thinking 过程会消耗大量 tokens，
+    因此需要使用 4.0 比率，并设置 4096 的最低保底，避免 visible output 被截断。
 
     Args:
         target_words: 目标字数
@@ -68,7 +69,7 @@ def _clamp_tokens(target_words: int) -> int:
     Returns:
         Token 上限
     """
-    return int(target_words * 2.0)
+    return max(4096, int(target_words * 4.0))
 
 
 def _extract_fallback_summary(text: str, max_len: int = 40) -> str:

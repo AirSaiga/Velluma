@@ -28,8 +28,8 @@ T = TypeVar("T")
 class BeatDefaults:
     """Beat 生成默认值常量"""
     MIN_WORDS_PER_BEAT = 200
-    MAX_LLM_TOKENS = 5200
-    MIN_LLM_TOKENS = 1200
+    MAX_LLM_TOKENS = 16000
+    MIN_LLM_TOKENS = 4096
     DEFAULT_TEMPERATURE = 0.75
     MAX_RETRY_ATTEMPTS = 3
     ROLLING_PREFIX_MAX_CHARS = 300
@@ -92,7 +92,9 @@ def clamp_tokens(target_words: int) -> int:
     """
     根据目标字数计算安全的 LLM token 数量。
     
-    计算方式：目标字数 * 2，限制在 [1200, 5200] 范围内
+    计算方式：目标字数 * 4，限制在 [4096, 16000] 范围内。
+    使用 4.0 倍率并提高上下限，是为了给 reasoning model（如 Gemini 2.5 Pro）
+    的 thinking 过程留出足够空间，避免正文输出被截断。
     
     Args:
         target_words: 目标字数
@@ -100,7 +102,7 @@ def clamp_tokens(target_words: int) -> int:
     Returns:
         int: 安全的 token 数量
     """
-    estimated = int(target_words * 2)
+    estimated = int(target_words * 4)
     return max(BeatDefaults.MIN_LLM_TOKENS, min(estimated, BeatDefaults.MAX_LLM_TOKENS))
 
 
