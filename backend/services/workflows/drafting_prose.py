@@ -558,9 +558,14 @@ def _adjust_after_failure(
     Returns:
         tuple[float, str]: (新温度, 待处理提示)
     """
+    # V4.1 人味增强：文风类失败时不再保守小步升温，而是直接跳到高创意区并给出正向修正指令
     if "文风" in fail_categories:
-        new_temp = min(1.0, current_temp + flags.fail_fast_temperature_step)
-        pending_hint = ""
+        new_temp = max(current_temp, 0.9)
+        pending_hint = (
+            f"\n\n【文风修正要求】上一版本被批评为：{fail_reason}。"
+            f"请保留原文中最有画面感的一句话，大胆重写其余部分。"
+            f"增加 POV 角色的私人偏见、思维的噪音和口语化的呼吸感。允许不完美。"
+        )
     else:
         new_temp = max(0.3, current_temp - 0.1)
         pending_hint = f"\n\n【修正要求】上一版本存在以下问题：{fail_reason}。请保持原语境，仅修复该冲突。"
