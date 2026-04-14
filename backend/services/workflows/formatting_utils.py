@@ -17,11 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-文本格式化工具模块 - V3.0
+文本格式化工具模块 - V4.0
 
 职责：基于正则表达式实现规则化的文本格式化，替代 LLM 格式化。
 
-V3.0 变更：废弃 LLM 格式化，改用纯代码规则处理，降低成本和延迟。
+V4.0 变更：废弃 LLM 格式化，改用纯代码规则处理，降低成本和延迟。
 
 规则:
 1. 统一中英文标点（冒号、引号替换为中文全角）
@@ -40,7 +40,7 @@ def rule_based_formatting(text: str) -> str:
     """
     基于规则的文本格式化函数。
     
-    V3.0 主入口函数，替代 LLM 格式化。
+    V4.0 主入口函数，替代 LLM 格式化。
     
     Args:
         text: 原始文本
@@ -174,7 +174,7 @@ def format_paragraphs(text: str, max_length: int = 500) -> str:
     """
     智能分段：将超长段落拆分为适当长度的段落。
     
-    V3.0 扩展功能（可选使用）。
+    V4.0 扩展功能（可选使用）。
     
     Args:
         text: 原始文本

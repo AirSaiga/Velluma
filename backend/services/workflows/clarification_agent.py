@@ -88,7 +88,7 @@ async def execute_clarification_stage(
         user_instruction: 用户的补充回答（交互式流程用）
         previous_issues: 之前识别出的问题（交互式流程用）
         previous_chapter_snapshot: 上一章的世界状态快照（可选）
-        previous_world_terminal_state: V3.6 结构化世界终端状态（可选）
+        previous_world_terminal_state: V4.0 结构化世界终端状态（可选）
         api_key: LLM API Key
         base_url: LLM Base URL
         model: LLM Model Name

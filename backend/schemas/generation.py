@@ -219,7 +219,7 @@ class GenerateChapterAgenticRequest(BaseModel):
     skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
     feature_flags: Optional[DraftingFeatureFlags] = Field(
         default_factory=DraftingFeatureFlags,
-        description="V2.5 认知流式生成功能开关配置"
+        description="V4.0 认知流式生成功能开关配置"
     )
 
     reasoning_config: Optional[ReasoningConfig] = Field(
@@ -257,11 +257,11 @@ class ConfirmedStoryBeat(BaseModel):
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
     pov_mode: Optional[PovMode] = Field(
         default=PovMode.SINGLE,
-        description="V3.6 叙事视角模式：single/ensemble/omniscient"
+        description="V4.0 叙事视角模式：single/ensemble/omniscient"
     )
     pov_characters: List[str] = Field(
         default_factory=list,
-        description="V3.6 ensemble/omniscient模式下的多视角角色列表"
+        description="V4.0 ensemble/omniscient模式下的多视角角色列表"
     )
     pov_aperture: Optional[PovAperture] = Field(
         default=None,

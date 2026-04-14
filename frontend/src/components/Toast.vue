@@ -18,17 +18,24 @@ const emit = defineEmits<{
 }>()
 
 const typeStyles: Record<ToastType, string> = {
-  success: 'bg-green-500 text-white',
-  error: 'bg-red-500 text-white',
+  success: 'bg-[var(--accent-500)] text-white',
+  error: 'bg-rose-500 text-white',
   warning: 'bg-amber-500 text-white',
   info: 'bg-blue-500 text-white'
 }
 
 const typeDurations: Record<ToastType, number> = {
-  success: 2000,
-  error: 3000,
-  warning: 3000,
-  info: 2000
+  success: 4000,
+  error: 6000,
+  warning: 5000,
+  info: 4000
+}
+
+const typeIcons: Record<ToastType, string> = {
+  success: 'M5 13l4 4L19 7',
+  error: 'M6 18L18 6M6 6l12 12',
+  warning: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+  info: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
 }
 
 function removeToast(id: number) {

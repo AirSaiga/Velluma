@@ -17,11 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-文本格式整理路由模块 - V4.1
+文本格式整理路由模块 - V4.0
 
 职责：提供文本格式整理 API，支持 LLM 智能格式化和规则引擎两种模式。
 
-V4.1 更新：
+V4.0 更新：
 - 长文本采用分段处理，避免 LLM Token 限制
 - 短文本（<3000字）使用 LLM 智能格式化
 - 长文本使用增强规则引擎
@@ -186,9 +186,9 @@ def _split_long_paragraphs(text: str, max_length: int = 200) -> str:
 
 @router.post("/format_text")
 async def format_text(request: FormatTextRequest):
-    """整理文本格式（分段、标点、对话排版等）- V4.1 智能版。
+    """整理文本格式（分段、标点、对话排版等）- V4.0 智能版。
 
-    V4.1 更新：
+    V4.0 更新：
     - 短文本（<3000字）使用 LLM 智能格式化
     - 长文本使用增强规则引擎（避免 Token 限制）
 

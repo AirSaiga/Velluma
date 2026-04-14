@@ -89,7 +89,7 @@ class SceneTerminalStatus(BaseModel):
 
 
 class AssetTerminalStatus(BaseModel):
-    """单体资产的终端状态切片 (V3.6)"""
+    """单体资产的终端状态切片 (V4.0)"""
     asset_id: str = Field(..., description="资产的 UUID")
     name: str = Field(..., description="资产名称")
     current_state: str = Field(..., description="资产在章节结束时的最新状态（如：耐久度、位置、所有权变更、损坏情况等）")

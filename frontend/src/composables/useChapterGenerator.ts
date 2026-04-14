@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { generateApi } from './useApi'
+import { generateApi } from '../services/api'
 
 export type WorkflowEvent = 
   | 'ASSEMBLING_CONTEXT' 

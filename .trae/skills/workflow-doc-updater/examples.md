@@ -48,12 +48,12 @@
 ```
 
 **Skill 执行操作**:
-1. 在整体架构概览中添加 V3.5 双轨架构说明
+1. 在整体架构概览中添加 V4.0 双轨架构说明
 2. 在 Phase 4 后插入 Phase 4.5: 双轨并行生成
 3. 在 Phase 5 后插入 Phase 5.5: 对抗校对
 4. 在 Prompt 汇总表添加 SKETCH_GEN 和 ADV_ALIGNMENT 行
-5. 添加 V3.5 双轨配置表格
-6. 更新版本号为 V3.5
+5. 添加 V4.0 双轨配置表格
+6. 更新版本号为 V4.0
 
 ---
 
@@ -110,7 +110,7 @@
 ```
 
 **Skill 执行操作**:
-1. 在 V3.0 功能开关配置表格中更新 fail_fast_max_attempts 的默认值
+1. 在 V4.0 功能开关配置表格中更新 fail_fast_max_attempts 的默认值
 2. 在 Phase 4: DRAFTING 的 Fail-Fast 部分更新说明
 
 ---

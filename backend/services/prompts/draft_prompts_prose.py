@@ -17,15 +17,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-正文起草提示词模块 - V2.5 版本正文起草提示。
+正文起草提示词模块 - V4.0 版本正文起草提示。
 
 职责：
-- 构建 V2.5 版本的正文起草提示
+- 构建 V4.0 版本的正文起草提示
 - 提供增强的节奏和风格控制
 - 整合潜意识层和正文层提示
 
 业务场景：
-- V2.5 版本正文起草
+- V4.0 版本正文起草
 - 增强节奏控制的起草
 
 主要功能：
@@ -278,7 +278,7 @@ def build_prose_draft_prompt_v25(
         chars_display = "、".join(pov_characters_list) if pov_characters_list else pov_character
         mode_label = "多角色共存(ensemble)" if is_ensemble else "全知(omniscient)"
         cognitive_aperture_section = f"""
-【多角色视角系统 (Multi-POV System) - V3.6】
+【多角色视角系统 (Multi-POV System) - V4.0】
 当前模式: {mode_label}
 视角角色: {chars_display}
 
@@ -302,7 +302,7 @@ def build_prose_draft_prompt_v25(
         aperture_mode_desc = aperture_mode_descriptions.get(effective_pov_aperture, aperture_mode_descriptions["subjective_observation"])
 
         cognitive_aperture_section = f"""
-【认知视角系统 (Cognitive Aperture System) - V3.5】
+【认知视角系统 (Cognitive Aperture System) - V4.0】
 当前光圈: {effective_pov_aperture}
 模式说明: {aperture_mode_desc}
 
@@ -334,7 +334,7 @@ def build_prose_draft_prompt_v25(
         if anchors_lines:
             anchors_text = "\n".join(anchors_lines)
             persistent_anchors_section = f"""
-【持久状态锚点 (Persistent State Anchors) - V3.5】
+【持久状态锚点 (Persistent State Anchors) - V4.0】
 以下状态必须在当前 Beat 中保持连贯，禁止突兀改变：
 {anchors_text}
 
@@ -383,7 +383,7 @@ def build_prose_draft_prompt_v25(
     world_snapshot_constraints = beat_data.get("_world_snapshot_constraints", "")
     if world_snapshot_constraints and is_first_beat:
         cross_chapter_lock_text = f"""
-【跨章物理连续性锁 (Cross-Chapter Continuity Lock) - V3.5 P0级】
+【跨章物理连续性锁 (Cross-Chapter Continuity Lock) - V4.0 P0级】
 以下是上一章末尾的世界状态快照，你必须严格遵守其中的物理约束：
 
 {world_snapshot_constraints}

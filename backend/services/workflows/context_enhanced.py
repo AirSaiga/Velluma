@@ -17,12 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-增强上下文组装模块 - V3 版本上下文加载（含 RAG 检索）。
+增强上下文组装模块 - V4.0 版本上下文加载（含 RAG 检索）。
 
 迁移说明 (2026-03-30)：
 - 已迁移到使用 Repository 模式
 - 所有函数现在接受 repositories 字典参数
-- V3 版本现已稳定，移除 V2 降级逻辑
+- V4.0 版本现已稳定，移除 V4.0 降级逻辑
 
 使用方式：
     repos = {

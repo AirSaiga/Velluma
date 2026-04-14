@@ -2,33 +2,14 @@
 import { ref, watch, computed } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import WorkflowProgressGraph from '../../../components/WorkflowProgressGraph.vue'
-import { IntentDrivenPanel } from '../../intent-driven'
 import ClarificationModal from './ClarificationModal.vue'
-import type { ApiConfig, Chapter, Character, PacingStyle, Asset } from '../../../types'
-
-interface BeatPreviewItem {
-  position: number
-  beat_id?: string
-  summary: string
-  location?: string
-  pov_character?: string
-  pov_mode: 'single' | 'ensemble' | 'omniscient'
-  pov_characters: string[]
-  pov_aperture?: string
-  anchor_pov?: string
-  original_actor?: string
-  action_summary?: string
-  worldbuilding_instruction?: string
-  entry_state?: string
-  exit_state?: string
-  red_lines?: string[]
-  openingState: string
-  stoppingState: string
-  forbiddenEventsText: string
-  word_count_target: number
-  target_words: number
-  hook_ids: string[]
-}
+import AgenticSettingsModal from './AgenticSettingsModal.vue'
+import BeatReviewModal from './BeatReviewModal.vue'
+import CompletionModal from './CompletionModal.vue'
+import PublishModal from './PublishModal.vue'
+import type { ApiConfig, Chapter, Character } from '../../../types'
+import type { Asset } from '../../../shared/types'
+import type { BeatEditorItem } from '../../../types'
 
 const props = defineProps<{
   beatPreviewError: string
@@ -53,7 +34,7 @@ const props = defineProps<{
   completionMessage: string
   completionTitle: string
   formError: string
-  getBeatHookLabel: (beat: BeatPreviewItem) => string
+  getBeatHookLabel: (beat: BeatEditorItem) => string
   getMetaCollapsedLabel: () => string
   getWorkflowStageLabel: () => string
   handleContentUpdate: (content: string) => void
@@ -77,7 +58,7 @@ const props = defineProps<{
   openAgenticSettingsModal: () => void
   openInspirationModal: () => void
   optimizationFeedback: string
-  previewBeats: BeatPreviewItem[]
+  previewBeats: BeatEditorItem[]
   publishChapter: () => void
   selectedChapter: Chapter | null
   setEditorRef: (editor: any) => void
@@ -109,18 +90,6 @@ const props = defineProps<{
   bookId?: string
   critiqueResult?: any
 }>()
-
-function handlePovModeChange(beat: BeatPreviewItem) {
-  if (beat.pov_mode === 'ensemble') {
-    if (!beat.pov_characters || beat.pov_characters.length === 0) {
-      beat.pov_characters = beat.pov_character ? [beat.pov_character] : []
-    }
-  } else {
-    if (beat.pov_characters && beat.pov_characters.length > 0) {
-      beat.pov_character = beat.pov_characters[0]
-    }
-  }
-}
 
 const emit = defineEmits<{
   (e: 'request-critique', content: string): void
@@ -183,39 +152,12 @@ const characterImportanceColor = (level: number) => {
   return colors[level] || colors[1]
 }
 
-// Beat 详情展开/收起状态
-const expandedBeats = ref<Set<string>>(new Set())
-
-function toggleBeatDetail(beatId: string) {
-  if (expandedBeats.value.has(beatId)) {
-    expandedBeats.value.delete(beatId)
-  } else {
-    expandedBeats.value.add(beatId)
-  }
-}
-
-function getPovModeLabel(mode: string): string {
-  const labels: Record<string, string> = {
-    single: '单视角',
-    ensemble: '多视角',
-    omniscient: '全知'
-  }
-  return labels[mode] || mode
-}
-
-function getPovApertureLabel(aperture: string): string {
-  const labels: Record<string, string> = {
-    internal_only: '内心独白',
-    subjective_observation: '主观观察',
-    systemic_sense: '全景感知'
-  }
-  return labels[aperture] || aperture
-}
 </script>
 
 <template>
   <div class="h-full flex flex-col overflow-hidden px-6 py-4">
     <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full space-y-3">
+      <!-- 章节标题行 -->
       <!-- 章节标题行 -->
       <div class="flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex-1 flex items-center gap-2">
@@ -687,287 +629,56 @@ function getPovApertureLabel(aperture: string): string {
       </div>
     </div>
 
-    <div v-else class="h-full flex items-center justify-center">
-      <div class="text-center">
-        <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-[var(--bg-panel)] flex items-center justify-center">
-          <svg class="w-6 h-6 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-        </div>
-        <p class="text-xs text-[var(--text-muted)]">选择一个章节或新建章节开始编辑</p>
+    <div v-else class="flex-1 flex flex-col items-center justify-center text-center">
+      <div class="w-16 h-16 rounded-2xl bg-[var(--accent-100)]/30 flex items-center justify-center mb-4">
+        <svg class="w-8 h-8 text-[var(--accent-700)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
       </div>
+      <h3 class="text-base font-semibold text-[var(--text-primary)] mb-1">选择一个章节开始创作</h3>
+      <p class="text-sm text-[var(--text-muted)] max-w-xs">在左侧章节列表中选择已有章节，或新建一章开始 AI 辅助写作</p>
     </div>
   </div>
 
-  <!-- 智能生成设置模态框 - 沉浸式全屏 -->
-  <Teleport to="body">
-    <Transition name="modal-backdrop">
-      <div
-        v-if="showAgenticSettingsModal && isAgenticMode"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
-        @click.self="closeAgenticSettingsModal"
-      >
-        <!-- 背景遮罩 -->
-        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
-        
-        <!-- 模态框 -->
-        <Transition name="modal-content">
-          <div 
-            v-if="showAgenticSettingsModal"
-            class="relative w-full max-w-5xl bg-[var(--bg-canvas)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-            :style="{ height: '90vh' }"
-          >
-            <!-- 关闭按钮 -->
-            <button 
-              @click="closeAgenticSettingsModal" 
-              class="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/5 hover:bg-black/10 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
-            
-            <!-- 内容 -->
-          <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
-            <IntentDrivenPanel
-              :chapter-id="selectedChapter?.id || ''"
-              :api-config="apiConfig"
-                @save="(payload) => { closeAgenticSettingsModal(); emit('intent-save', payload); }"
-                @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"
-              />
-            </div>
-          </div>
-        </Transition>
-      </div>
-    </Transition>
-  </Teleport>
+  <AgenticSettingsModal
+    :show="showAgenticSettingsModal && isAgenticMode"
+    :selected-chapter="selectedChapter"
+    :api-config="apiConfig"
+    @close="closeAgenticSettingsModal"
+    @save="(payload) => { closeAgenticSettingsModal(); emit('intent-save', payload); }"
+    @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"
+  />
 
-  <!-- 剧情节拍预览模态框 -->
-  <div
-    v-if="showBeatReviewModal && isAgenticMode"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
-  >
-    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
-      <div class="p-3 border-b border-white/60 flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-[var(--text-primary)]">剧情节拍预览</h3>
-        <button @click="closeBeatReviewModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="p-4 overflow-y-auto max-h-[calc(85vh-56px)] space-y-3">
-        <div v-if="previewBeats.length === 0" class="text-center text-[var(--text-muted)] text-sm py-8">
-          暂无预览数据
-        </div>
-        <div
-          v-for="beat in previewBeats"
-          :key="beat.beat_id || beat.position"
-          class="p-4 bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)] space-y-3"
-        >
-          <!-- Beat 头部：序号 + 字数 -->
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-medium text-[var(--accent-500)]">Beat {{ beat.position }}</span>
-              <span v-if="beat.pov_mode" class="px-1.5 py-0.5 text-[10px] rounded bg-blue-100 text-blue-700">
-                {{ getPovModeLabel(beat.pov_mode) }}
-              </span>
-            </div>
-            <span class="text-[10px] text-[var(--text-muted)]">{{ beat.word_count_target || beat.target_words }}字</span>
-          </div>
+  <BeatReviewModal
+    :show="showBeatReviewModal && isAgenticMode"
+    :preview-beats="previewBeats"
+    :beat-preview-error="beatPreviewError"
+    @close="closeBeatReviewModal"
+    @confirm="confirmBeatsAndGenerate"
+  />
 
-          <!-- 剧情摘要 -->
-          <p class="text-sm text-[var(--text-primary)] leading-relaxed">{{ beat.summary }}</p>
-
-          <!-- 基础信息行 -->
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-muted)]">
-            <span v-if="beat.location" class="flex items-center gap-1">
-              <span>📍</span>
-              <span>{{ beat.location }}</span>
-            </span>
-            <span v-if="beat.pov_character" class="flex items-center gap-1">
-              <span>👤</span>
-              <span>{{ beat.pov_character }}</span>
-            </span>
-            <span v-if="beat.pov_aperture" class="flex items-center gap-1">
-              <span>🔍</span>
-              <span>{{ getPovApertureLabel(beat.pov_aperture) }}</span>
-            </span>
-            <span v-if="beat.hook_ids && beat.hook_ids.length > 0" class="flex items-center gap-1">
-              <span></span>
-              <span>{{ beat.hook_ids.join(' / ') }}</span>
-            </span>
-          </div>
-
-          <!-- 展开/收起按钮 -->
-          <button
-            @click="toggleBeatDetail(beat.beat_id || String(beat.position))"
-            class="text-xs text-[var(--accent-500)] hover:text-[var(--accent-600)] transition-colors"
-          >
-            {{ expandedBeats.has(beat.beat_id || String(beat.position)) ? '收起详情' : '展开详情 ↓' }}
-          </button>
-
-          <!-- 详细信息（可展开） -->
-          <div
-            v-if="expandedBeats.has(beat.beat_id || String(beat.position))"
-            class="space-y-2 pt-2 border-t border-[var(--border-color)]"
-          >
-            <!-- 动作摘要 -->
-            <div v-if="beat.action_summary" class="text-xs">
-              <span class="text-[var(--text-secondary)] font-medium">动作摘要：</span>
-              <span class="text-[var(--text-primary)]">{{ beat.action_summary }}</span>
-            </div>
-
-            <!-- 状态转换 -->
-            <div v-if="beat.openingState || beat.stoppingState" class="text-xs space-y-1">
-              <div>
-                <span class="text-[var(--text-secondary)] font-medium">进入状态：</span>
-                <span class="text-[var(--text-primary)]">{{ beat.openingState || '—' }}</span>
-              </div>
-              <div>
-                <span class="text-[var(--text-secondary)] font-medium">离开状态：</span>
-                <span class="text-[var(--text-primary)]">{{ beat.stoppingState || '—' }}</span>
-              </div>
-            </div>
-
-            <!-- 世界观指令 -->
-            <div v-if="beat.worldbuilding_instruction" class="text-xs">
-              <span class="text-[var(--text-secondary)] font-medium">世界观指令：</span>
-              <span class="text-[var(--text-primary)]">{{ beat.worldbuilding_instruction }}</span>
-            </div>
-
-            <!-- 红线约束 -->
-            <div v-if="beat.forbiddenEventsText" class="text-xs">
-              <span class="text-[var(--text-secondary)] font-medium">红线约束：</span>
-              <span class="text-red-600">{{ beat.forbiddenEventsText }}</span>
-            </div>
-
-            <!-- POV 多角色列表 -->
-            <div v-if="beat.pov_characters && beat.pov_characters.length > 0" class="text-xs">
-              <span class="text-[var(--text-secondary)] font-medium">多视角角色：</span>
-              <span class="text-[var(--text-primary)]">{{ beat.pov_characters.join('、') }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 pt-2">
-          <button @click="closeBeatReviewModal" class="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:bg-parchment-100">
-            取消
-          </button>
-          <button @click="confirmBeatsAndGenerate" class="px-3 py-1.5 text-xs rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600">
-            确认并生成
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 意图澄清模态框 -->
   <ClarificationModal
     :show="showClarificationModal"
+    :is-processing="isClarifyingOutline"
     :clarification-result="clarificationResult"
     @close="closeClarificationModal"
     @apply="handleApplyClarification"
     @submit-answers="handleSubmitClarificationAnswers"
   />
 
-  <!-- 完成模态框 -->
-  <div
-    v-if="showCompletionModal"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
-    @click.self="closeCompletionModal"
-  >
-    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-      <div class="p-4 text-center">
-        <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-100 flex items-center justify-center">
-          <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-          </svg>
-        </div>
-        <h3 class="text-base font-semibold text-[var(--text-primary)] mb-1">{{ completionTitle }}</h3>
-        <p class="text-sm text-[var(--text-secondary)]">{{ completionMessage }}</p>
-      </div>
-      <div class="p-3 border-t border-[var(--border-color)] flex justify-center">
-        <button @click="closeCompletionModal" class="px-4 py-1.5 text-xs rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600">
-          确定
-        </button>
-      </div>
-    </div>
-  </div>
+  <CompletionModal
+    :show="showCompletionModal"
+    :title="completionTitle"
+    :message="completionMessage"
+    @close="closeCompletionModal"
+  />
 
-  <!-- 发布模态框 -->
-  <div
-    v-if="showPublishModal"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
-    @click.self="closePublishModal"
-  >
-    <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden">
-      <div class="p-3 border-b border-[var(--border-color)] flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-[var(--text-primary)]">发布成功</h3>
-        <button @click="closePublishModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)]">
-        <div v-if="characterUpdates.length > 0" class="mb-4">
-          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">本次角色状态变更记录</h4>
-          <div class="space-y-2">
-            <div
-              v-for="update in characterUpdates"
-              :key="update.character_id"
-              class="p-2 bg-[var(--bg-panel)] rounded-lg text-xs"
-            >
-              <div class="font-medium text-[var(--text-primary)]">{{ update.character_name }}</div>
-              <div class="text-[var(--text-muted)] mt-1">
-                <span class="line-through">{{ update.old_state }}</span>
-                <span class="mx-1">→</span>
-                <span class="text-green-600">{{ update.new_state }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div v-else class="text-center text-sm text-[var(--text-muted)] py-4">
-          本次发布无角色状态变更记录
-        </div>
-        
-        <div v-if="characterExtraction && characterExtraction.extracted_characters && characterExtraction.extracted_characters.length > 0" class="mt-6">
-          <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">新提取的角色信息</h4>
-          <div class="space-y-3">
-            <div
-              v-for="character in characterExtraction.extracted_characters"
-              :key="character.name"
-              class="p-3 bg-[var(--bg-panel)] rounded-lg text-xs"
-            >
-              <div class="flex items-center justify-between mb-1">
-                <div class="font-medium text-[var(--text-primary)]">{{ character.name }}</div>
-                <span v-if="character.is_new" class="px-2 py-0.5 text-[10px] rounded-full bg-green-100 text-green-700">新角色</span>
-                <span v-else class="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700">已有角色</span>
-              </div>
-              <div class="text-[var(--text-muted)] mt-1">
-                <div v-if="character.description" class="mb-1">{{ character.description }}</div>
-                <div class="flex items-center gap-2 mt-1">
-                  <span>角色类型: {{ character.role_type }}</span>
-                  <span>重要性: {{ character.importance_level }}</span>
-                </div>
-                <div v-if="character.aliases && character.aliases.length > 0" class="mt-1">
-                  别名: {{ character.aliases.join(', ') }}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="mt-3 text-xs text-[var(--text-muted)]">
-            共提取 {{ characterExtraction.extracted_characters.length }} 个角色，其中新角色 {{ characterExtraction.new_characters_count }} 个
-          </div>
-        </div>
-      </div>
-      <div class="p-3 border-t border-[var(--border-color)] flex justify-end gap-2">
-        <button @click="closePublishModal" class="px-4 py-1.5 text-xs rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600">
-          完成
-        </button>
-      </div>
-    </div>
-  </div>
+  <PublishModal
+    :show="showPublishModal"
+    :character-updates="characterUpdates"
+    :character-extraction="characterExtraction"
+    @close="closePublishModal"
+  />
 </template>
 
 <style scoped>

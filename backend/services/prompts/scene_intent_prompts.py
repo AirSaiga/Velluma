@@ -94,7 +94,7 @@ def build_scene_intent_prompt(
     pacing_micro_lines = PACING_MICRO_INSTRUCTIONS[pacing_style]
     exit_state = str(beat.get("exit_state") or "").strip() or "停在当前 beat 的收束状态，不越界推进"
 
-    # V3.6: 检测 ensemble 模式并构建多角色目标区块
+    # V4.0: 检测 ensemble 模式并构建多角色目标区块
     pov_mode = beat.get("pov_mode", "single") or "single"
     pov_characters_list = beat.get("pov_characters", []) or []
     is_ensemble = pov_mode in ("ensemble", "omniscient") and len(pov_characters_list) >= 2

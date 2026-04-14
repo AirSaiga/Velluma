@@ -205,7 +205,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
    - 基于 revision_plan 重写
    - 支持跳过仅轻微问题的章节
 
-### 双轨对抗架构 (V3.5)
+### 双轨对抗架构 (V4.0)
 
 为解决并行生成连贯性差的问题，引入双轨架构：
 

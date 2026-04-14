@@ -16,9 +16,9 @@
           class="intent-card"
           :class="{
             'selected': selectedIntents.includes(intent.id),
-            'disabled': !canSelectMore && !selectedIntents.includes(intent.id)
+            'disabled': !canSelectMoreIntents && !selectedIntents.includes(intent.id)
           }"
-          :disabled="!canSelectMore && !selectedIntents.includes(intent.id)"
+          :disabled="!canSelectMoreIntents && !selectedIntents.includes(intent.id)"
           @click="toggleIntent(intent.id)"
           @mouseenter="showTooltip(intent.id, $event)"
           @mouseleave="hideTooltip"
@@ -229,7 +229,7 @@ icons.suspense_ending = {
 const {
   intentTemplates,
   selectedIntents,
-  canSelectMore,
+  canSelectMoreIntents,
   toggleIntent
 } = useIntentDrivenConfig()
 

@@ -756,7 +756,7 @@ async def _generate_single_beat_serial(
         validate=validate if flags.enable_fail_fast else None,
         flags=flags,
         beat_number=beat_number,
-        strategy_name="Prose V25-Serial",
+        strategy_name="Prose V4.0-Serial",
     )
     
     # QC 检查
@@ -777,7 +777,7 @@ async def _generate_single_beat_serial(
             )
             prompts_history.extend(qc_prompts)
         except Exception as e:
-            logger.warning(f"[Prose V25-Serial] Beat {beat_number} QC 失败: {e}")
+            logger.warning(f"[Prose V4.0-Serial] Beat {beat_number} QC 失败: {e}")
     
     return {"text": chunk, "prompts": prompts_history}
 
@@ -831,7 +831,7 @@ async def _update_context_serial(
         dynamic_context.physical_state_lock = (
             f"{pov_ch}当前态势（{beat.get('beat_title', f'Beat {beat_number}')}结束）：{current_exit}"
         )
-        logger.debug(f"[Prose V25-Serial] Beat {beat_number} 更新 physical_state_lock: {current_exit[:50]}...")
+        logger.debug(f"[Prose V4.0-Serial] Beat {beat_number} 更新 physical_state_lock: {current_exit[:50]}...")
     
     # 更新情感状态
     if flags.enable_emotional_scratchpad:
@@ -880,7 +880,7 @@ async def _generate_prose_serial_v25(
     stats_callback: LLMStatsCallback = None,
 ) -> List[dict]:
     """
-    V2.5 串行滑动窗口正文生成（Rolling Prefix + DynamicContext）。
+    V4.0 串行滑动窗口正文生成（Rolling Prefix + DynamicContext）。
 
     策略：Beat 1 → Beat 2 → ... → Beat N，每个 Beat 使用上一 Beat 的真实正文尾部
     作为 previous_tail，确保全链路 Rolling Prefix 连贯性。
@@ -964,7 +964,7 @@ async def _generate_prose_serial_v25(
             base_url=base_url,
         )
     
-    logger.info(f"[Prose V25-Serial] 串行生成完成，共 {n} 个 Beats")
+    logger.info(f"[Prose V4.0-Serial] 串行生成完成，共 {n} 个 Beats")
     return all_results
 
 
@@ -993,7 +993,7 @@ async def _generate_prose_parallel_v25(
     stats_callback: LLMStatsCallback = None,
 ) -> List[dict]:
     """
-    V3.0 并行模式正文生成 - 极速但可能损失连贯性。
+    V4.0 并行模式正文生成 - 极速但可能损失连贯性。
     
     架构：
     - 主函数：创建并行任务并收集结果
@@ -1042,7 +1042,7 @@ async def _generate_prose_parallel_v25(
         "physical_state_lock": physical_state_lock,
     }
 
-    logger.info(f"[Prose V25-Parallel] 启动并行生成，共 {n} 个 Beats")
+    logger.info(f"[Prose V4.0-Parallel] 启动并行生成，共 {n} 个 Beats")
 
     # 创建并行任务
     tasks = [
@@ -1085,7 +1085,7 @@ def _finalize_parallel_result(result: Any, beat_index: int) -> dict:
         dict: 规范化的结果 {"text": ..., "prompts": [...]}
     """
     if isinstance(result, Exception):
-        logger.error(f"[Prose V25-Parallel] Beat {beat_index}: {result}")
+        logger.error(f"[Prose V4.0-Parallel] Beat {beat_index}: {result}")
         return {"text": "", "prompts": []}
     return result
 
@@ -1203,7 +1203,7 @@ async def _generate_single_beat_parallel(
         validate=validate if flags.enable_fail_fast else None,
         flags=flags,
         beat_number=beat_number,
-        strategy_name="Prose V25-Parallel",
+        strategy_name="Prose V4.0-Parallel",
     )
     
     # QC 检查
@@ -1224,7 +1224,7 @@ async def _generate_single_beat_parallel(
             )
             prompts_history.extend(qc_prompts)
         except Exception as e:
-            logger.warning(f"[Prose V25-Parallel] Beat {beat_number} QC 失败: {e}")
+            logger.warning(f"[Prose V4.0-Parallel] Beat {beat_number} QC 失败: {e}")
     
     return {"text": chunk, "prompts": prompts_history}
 

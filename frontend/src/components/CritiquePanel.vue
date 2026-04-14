@@ -32,11 +32,11 @@ const hasContent = computed(() => {
 })
 
 const typeColors: Record<string, string> = {
-  '结构': 'bg-blue-50 text-blue-600',
-  '节奏': 'bg-green-50 text-green-600',
-  '人物': 'bg-purple-50 text-purple-600',
-  '对话': 'bg-orange-50 text-orange-600',
-  '描写': 'bg-pink-50 text-pink-600',
+  '结构': 'bg-slate-100 text-slate-600',
+  '节奏': 'bg-emerald-50 text-emerald-600',
+  '人物': 'bg-violet-50 text-violet-600',
+  '对话': 'bg-amber-50 text-amber-600',
+  '描写': 'bg-rose-50 text-rose-600',
   '情节': 'bg-indigo-50 text-indigo-600',
   '逻辑': 'bg-red-50 text-red-600',
   '文笔': 'bg-teal-50 text-teal-600'

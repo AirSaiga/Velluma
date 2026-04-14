@@ -356,7 +356,7 @@ export const generateApi = {
   },
 
   /**
-   * Agentic 章节生成（V3.5 默认使用双轨对抗架构）
+   * Agentic 章节生成（V4.0 默认使用双轨对抗架构）
    * @param useLegacyMode - 是否使用传统单轨模式（默认 false，使用双轨）
    */
   streamAgentic: async (
@@ -370,7 +370,7 @@ export const generateApi = {
     endpoint = '/generate_chapter_agentic',
     useLegacyMode = false
   ) => {
-    // V3.5 默认使用双轨模式，除非显式指定使用传统模式
+    // V4.0 默认使用双轨模式，除非显式指定使用传统模式
     if (!useLegacyMode && data.chapter_id) {
       return streamDualTrackFn(data.chapter_id, data, callbacks)
     }
@@ -466,7 +466,7 @@ export const generateApi = {
   },
 
   /**
-   * V3.5 双轨生成 - 流式输出
+   * V4.0 双轨生成 - 流式输出
    * 使用双轨对抗架构生成章节，包含短文生成和对抗校对
    */
   streamDualTrack: async (
@@ -483,7 +483,7 @@ export const generateApi = {
   },
 
   /**
-   * V3.5 双轨生成 - 非流式（简化版）
+   * V4.0 双轨生成 - 非流式（简化版）
    */
   generateDualTrackSimple: async (chapterId: string, data: any) => {
     const response = await requestRaw(`/chapters/${chapterId}/generate-dual-track-simple`, {

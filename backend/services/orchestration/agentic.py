@@ -31,7 +31,7 @@ Agentic 工作流编排模块 - 章节生成的核心编排器。
 
 主要功能：
 - 工作流阶段状态机管理
-- RAG 检索策略集成（V3.8 增强）
+- RAG 检索策略集成（V4.0 增强）
 - 并发控制和资源管理
 - 异常恢复和降级策略
 
@@ -116,12 +116,12 @@ def _normalize_rag_weights(alpha: float, beta: float, gamma: float) -> tuple[flo
 
 
 # ============================================================
-# V3.8 高层语义参数推导适配器
+# V4.0 高层语义参数推导适配器
 # ============================================================
 
 def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     """
-    V3.8 高层语义参数推导适配器
+    V4.0 高层语义参数推导适配器
     
     根据编辑模式，将高层语义参数转换为底层技术参数。
     基础模式：使用高层参数推导 RAG 参数
@@ -286,7 +286,7 @@ def normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]]
         entry_state = str(beat_dict.get("entry_state") or "").strip()
         exit_state = str(beat_dict.get("exit_state") or "").strip()
 
-        # V3.6: POV 模式字段
+        # V4.0: POV 模式字段
         pov_mode = str(beat_dict.get("pov_mode") or "single").strip()
         if pov_mode not in ("single", "ensemble", "omniscient"):
             pov_mode = "single"
@@ -302,10 +302,10 @@ def normalize_confirmed_beats(beats: Union[list[dict], list[ConfirmedStoryBeat]]
                 "summary": summary,
                 "location": location if location else None,
                 "pov_character": pov_character if pov_character else None,
-                "pov_mode": pov_mode,                          # V3.6
-                "pov_characters": pov_characters,             # V3.6
-                "pov_aperture": pov_aperture,                 # V3.5
-                "pov_perception_state": pov_perception_state, # V3.5
+                "pov_mode": pov_mode,                          # V4.0
+                "pov_characters": pov_characters,             # V4.0
+                "pov_aperture": pov_aperture,                 # V4.0
+                "pov_perception_state": pov_perception_state, # V4.0
                 "action_summary": str(beat_dict.get("action_summary") or "").strip() or summary,
                 "worldbuilding_instruction": worldbuilding_instruction if worldbuilding_instruction else None,
                 "entry_state": entry_state if entry_state else None,
@@ -395,11 +395,11 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, reposito
         model=planning_model,
         temperature=0.2,
         response_format={"type": "json_object"},
-        max_tokens=6000,  # V3.6: 扩大上限，支持3-6个完整beat输出（原1800导致JSON截断→fallback）
+        max_tokens=6000,  # V4.0: 扩大上限，支持3-6个完整beat输出（原1800导致JSON截断→fallback）
     )
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
     
-    # 引入状态校验 (V3.6)
+    # 引入状态校验 (V4.0)
     if previous_chapter_snapshot:
         from backend.services.workflows.state_validator import validate_beats_world_state_consistency
         from backend.world_state_schemas import WorldTerminalState

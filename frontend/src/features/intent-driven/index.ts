@@ -3,12 +3,14 @@
 export { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from './useIntentDrivenConfig'
 export { CREATIVE_INTENT_TEMPLATES, CHAPTER_GOAL_TEMPLATES } from './intentTemplates'
 
-// 组件导出
-export { default as IntentSelector } from './components/IntentSelector.vue'
-export { default as GoalSelector } from './components/GoalSelector.vue'
-export { default as RecommendedPlanCard } from './components/RecommendedPlanCard.vue'
-export { default as ExpertOverridePanel } from './components/ExpertOverridePanel.vue'
-export { default as IntentDrivenPanel } from './components/IntentDrivenPanel.vue'
+// 容器组件导出
+export { default as IntentDrivenPanel } from './containers/IntentDrivenPanel.vue'
+
+// 展示组件导出
+export { default as IntentSelector } from './presentation/IntentSelector.vue'
+export { default as GoalSelector } from './presentation/GoalSelector.vue'
+export { default as RecommendedPlanCard } from './presentation/RecommendedPlanCard.vue'
+export { default as ExpertOverridePanel } from './presentation/ExpertOverridePanel.vue'
 
 // 类型重新导出
 export type {

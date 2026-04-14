@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import CharacterPanel from '../../../components/CharacterPanel.vue'
 import { AssetPanel } from '../../asset-panel'
 import { useAssetContainer } from '../../asset-panel'
@@ -11,14 +11,23 @@ import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue
 import SettingsModal from '../../../components/SettingsModal.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
-import { bookApi, characterApi, chapterApi, relationshipApi, generateApi } from '../../../services/api'
+import { generateApi, chapterApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import Toast from '../../../components/Toast.vue'
 import ConfirmDialog from '../../../components/ConfirmDialog.vue'
 import Icon from '../../../components/Icon.vue'
-import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
+import { saveUiPrefs } from '../../../composables/useUiPrefs'
+
+import { useAppState } from './useAppState'
+import { useZenMode } from './useZenMode'
+import { useBookManager } from './useBookManager'
+import { useChapterManager } from './useChapterManager'
+import { useCharacterManager } from './useCharacterManager'
+import { useBookNotes } from './useBookNotes'
+import { useCritique } from './useCritique'
+import { useEntityFocus } from './useEntityFocus'
 
 const { initTheme } = useTheme()
 const { toasts, showToast, removeToast } = useToast()
@@ -29,289 +38,192 @@ const isDebugMode = computed(() => {
   return urlParams.get('debug') === 'true'
 })
 
-const books = ref([])
-const currentBookId = ref(null)
-const selectedChapterId = ref<string | null>(null)
-const characters = ref([])
-const chapters = ref([])
-const relationships = ref([])
-const apiConfig = ref({
-  provider: 'openrouter',
-  api_key: '',
-  base_url: '',
-  model: 'google/gemini-2.0-flash-001',
-  reasoning_model: '',
-  creative_model: '',
-  proxy_enabled: true,
-  proxy_url: ''
-})
-const uiPrefs = ref(loadUiPrefs())
-const loading = ref(false)
-const critiqueResult = ref<any>(null)
-const critiqueLoading = ref(false)
-const editorFocusedEntity = ref('')
-let editorEntityDecayTimer: ReturnType<typeof setTimeout> | null = null
-const showBookModal = ref(false)
-const showManageBookModal = ref(false)
 const showSettingsModal = ref(false)
-const notesStatus = ref('idle')
-const notesError = ref('')
-const localBookNotes = ref('')
 const chapterEditorRef = ref<any>(null)
-const bookForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' })
-const manageBookForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
-const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
 
-// ========== 沉浸式模式状态 ==========
-const isZenMode = ref(uiPrefs.value.zenMode ?? true) // 默认开启沉浸模式
-const showLeftTrigger = ref(false)
-const showTopTrigger = ref(false)
-const showRightTrigger = ref(false)
-const leftPanelExpanded = ref(false)
-const topPanelExpanded = ref(false)
-const rightPanelExpanded = ref(false)
-const activeFloatingTab = ref<string | null>(null)
+// ========== 防抖标题输入 ==========
+function debounce<T extends (...args: any[]) => any>(fn: T, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), delay)
+  }
+}
 
-// ========== 书籍栏状态 ==========
-const showBookDropdown = ref(false)
-const bookDropdownRef = ref<HTMLElement | null>(null)
-let topTriggerTimer: ReturnType<typeof setTimeout> | null = null
+const debouncedUpdateChapterTitle = debounce((id: string, title: string) => {
+  updateChapter(id, { title })
+}, 600)
 
-const sortedChapters = computed(() => {
-  return [...chapters.value].sort((a, b) => a.chapter_number - b.chapter_number)
+function handleTopTitleInput(e: Event) {
+  if (!selectedChapter.value) return
+  debouncedUpdateChapterTitle(selectedChapter.value.id, (e.target as HTMLInputElement).value)
+}
+
+function handleTopTitleBlur(e: Event) {
+  if (!selectedChapter.value) return
+  debouncedUpdateChapterTitle(selectedChapter.value.id, (e.target as HTMLInputElement).value)
+}
+
+// ========== Zen Mode 首次引导 ==========
+const ZEN_HINT_KEY = 'velluma_zen_hint_shown'
+const showZenHint = ref(false)
+
+function toggleZenModeWithHint() {
+  toggleZenMode()
+  if (isZenMode.value && !localStorage.getItem(ZEN_HINT_KEY)) {
+    showZenHint.value = true
+    localStorage.setItem(ZEN_HINT_KEY, '1')
+    setTimeout(() => { showZenHint.value = false }, 3500)
+  }
+}
+
+// ========== 全局活动状态 ==========
+const globalActivity = computed(() => {
+  if (loading.value) return '加载书籍数据中...'
+  if (critiqueLoading.value) return '主编审阅中...'
+  return null
 })
 
-const currentBook = computed(() => {
-  return books.value.find((b) => b.id === currentBookId.value) || null
+const {
+  books,
+  currentBookId,
+  selectedChapterId,
+  characters,
+  chapters,
+  relationships,
+  apiConfig,
+  uiPrefs,
+  loading,
+  sortedChapters,
+  currentBook,
+  selectedChapter,
+  loadBooks,
+  loadCurrentBookData,
+  updateApiConfig
+} = useAppState()
+
+const {
+  isZenMode,
+  showLeftTrigger,
+  showTopTrigger,
+  leftPanelExpanded,
+  topPanelExpanded,
+  rightPanelExpanded,
+  activeFloatingTab,
+  floatingTabs,
+  showBookDropdown,
+  bookDropdownRef,
+  rightTab,
+  toggleZenMode,
+  selectBook,
+  expandLeftPanel,
+  collapseLeftPanel,
+  expandTopPanel,
+  collapseTopPanel,
+  handleTopTriggerLeave,
+  handleTopTriggerEnter,
+  toggleBookDropdown,
+  handleClickOutside,
+  toggleRightPanel,
+  closeRightPanel,
+  handleRightTabChange
+} = useZenMode({
+  uiPrefs,
+  onToggleZenMode: () => {},
+  saveUiPrefs,
+  onSelectBook: (bookId: string) => {
+    currentBookId.value = bookId
+  },
+  closeRightPanel: () => {}
 })
 
-const selectedChapter = computed(() => {
-  return chapters.value.find((c) => c.id === selectedChapterId.value) || null
+const {
+  showBookModal,
+  showManageBookModal,
+  bookForm,
+  manageBookForm,
+  createBook,
+  updateBook,
+  openManageBookModal,
+  saveManageBook,
+  deleteCurrentBook
+} = useBookManager({
+  books,
+  currentBookId,
+  currentBook,
+  showToast,
+  showConfirm
 })
 
-const autoHighlightedCharacterIds = computed(() => {
-  const focused = editorFocusedEntity.value.trim().toLowerCase()
-  const selectedIds = selectedChapter.value?.character_ids || []
-  const merged = new Set<string>(selectedIds)
-  if (focused) {
-    for (const char of characters.value) {
-      const name = (char?.name || '').toLowerCase()
-      if (name && (name.includes(focused) || focused.includes(name))) {
-        merged.add(char.id)
-      }
-    }
-  }
-  return Array.from(merged)
+const {
+  createChapter,
+  createChapterFromOutlinePanel,
+  updateChapter,
+  deleteChapter,
+  generateChapterEmbedding
+} = useChapterManager({
+  currentBookId,
+  chapters,
+  selectedChapterId,
+  sortedChapters,
+  showToast,
+  showConfirm
 })
 
-const autoHighlightedCharacterNames = computed(() => {
-  const idSet = new Set(autoHighlightedCharacterIds.value)
-  return characters.value
-    .filter((char) => idSet.has(char.id))
-    .map((char) => char.name)
+const {
+  editorFocusedEntity,
+  handleEditorEntityFocus
+} = useEntityFocus()
+
+const selectedChapterCharacterIds = computed(() => selectedChapter.value?.character_ids || [])
+
+const {
+  autoHighlightedCharacterIds,
+  autoHighlightedCharacterNames,
+  createCharacter,
+  updateCharacter,
+  deleteCharacter,
+  createRelationship,
+  updateRelationship,
+  deleteRelationship,
+  loadCharacters
+} = useCharacterManager({
+  currentBookId,
+  characters,
+  relationships,
+  editorFocusedEntity,
+  selectedChapterCharacterIds,
+  showToast
 })
 
-const rightTab = computed({
-  get: () => uiPrefs.value.rightTab || 'characters',
-  set: (val) => handleRightTabChange(val),
+const {
+  localBookNotes,
+  notesStatus,
+  notesError,
+  saveBookNotes,
+  saveBookNotesFn
+} = useBookNotes({
+  currentBook,
+  updateBook,
+  showToast
 })
 
-const floatingTabs = [
-  { key: 'characters', label: '角色', icon: 'users', shortcut: '1' },
-  { key: 'worldview', label: '规则', icon: 'book-open', shortcut: '2' },
-  { key: 'style', label: '风格', icon: 'sparkles', shortcut: '3' },
-  { key: 'map', label: '地图', icon: 'map-pin', shortcut: '4' },
-  { key: 'critique', label: '指导', icon: 'light-bulb', shortcut: '5' },
-  { key: 'notes', label: '笔记', icon: 'pencil-square', shortcut: '6' },
-  { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
-]
-
-// 切换沉浸模式
-function toggleZenMode() {
-  isZenMode.value = !isZenMode.value
-  uiPrefs.value = { ...uiPrefs.value, zenMode: isZenMode.value }
-  saveUiPrefs(uiPrefs.value)
-}
-
-// 展开左侧面板
-function expandLeftPanel() {
-  leftPanelExpanded.value = true
-  showLeftTrigger.value = false
-}
-
-// 收起左侧面板
-function collapseLeftPanel() {
-  leftPanelExpanded.value = false
-}
-
-// 展开顶部面板
-function expandTopPanel() {
-  if (topTriggerTimer) {
-    clearTimeout(topTriggerTimer)
-    topTriggerTimer = null
-  }
-  topPanelExpanded.value = true
-  showTopTrigger.value = false
-}
-
-// 收起顶部面板
-function collapseTopPanel() {
-  topPanelExpanded.value = false
-}
-
-// 处理顶部触发条鼠标离开（添加延迟避免闪烁）
-function handleTopTriggerLeave() {
-  if (topTriggerTimer) clearTimeout(topTriggerTimer)
-  topTriggerTimer = setTimeout(() => {
-    showTopTrigger.value = false
-  }, 300)
-}
-
-// 处理顶部触发条鼠标进入
-function handleTopTriggerEnter() {
-  if (topTriggerTimer) {
-    clearTimeout(topTriggerTimer)
-    topTriggerTimer = null
-  }
-  showTopTrigger.value = true
-}
-
-// 切换书籍下拉
-function toggleBookDropdown() {
-  showBookDropdown.value = !showBookDropdown.value
-}
-
-// 选择书籍
-function selectBook(bookId: string) {
-  currentBookId.value = bookId
-  showBookDropdown.value = false
-}
-
-// 点击外部关闭书籍下拉
-function handleClickOutside(e: MouseEvent) {
-  if (bookDropdownRef.value && !bookDropdownRef.value.contains(e.target as Node)) {
-    showBookDropdown.value = false
-  }
-}
-
-// 切换右侧面板
-function toggleRightPanel(tab: string) {
-  if (activeFloatingTab.value === tab) {
-    activeFloatingTab.value = null
-    rightPanelExpanded.value = false
-  } else {
-    activeFloatingTab.value = tab
-    rightPanelExpanded.value = true
-  }
-}
-
-// 关闭右侧面板
-function closeRightPanel() {
-  activeFloatingTab.value = null
-  rightPanelExpanded.value = false
-}
-
-// 选择章节
-function selectChapter(chapterId: string) {
-  selectedChapterId.value = chapterId
-  // 选择后自动收起左侧面板
-  if (isZenMode.value) {
-    leftPanelExpanded.value = false
-  }
-}
-
-watch(currentBook, (book) => {
-  localBookNotes.value = book?.global_sys_prompt || ''
-  notesStatus.value = 'idle'
-  notesError.value = ''
-}, { immediate: true })
-
-watch(localBookNotes, () => {
-  if (!currentBook.value) return
-  notesStatus.value = 'dirty'
-  notesError.value = ''
+const {
+  critiqueResult,
+  critiqueLoading,
+  handleRequestCritique,
+  handleCloseCritique
+} = useCritique({
+  selectedChapter,
+  apiConfig,
+  showToast,
+  setActiveFloatingTab: (tab: string | null) => { activeFloatingTab.value = tab },
+  setRightPanelExpanded: (expanded: boolean) => { rightPanelExpanded.value = expanded }
 })
-
-watch(chapters, (list) => {
-  if (list.length === 0) {
-    selectedChapterId.value = null
-    return
-  }
-  const hasSelected = !!selectedChapterId.value && list.some((c) => c.id === selectedChapterId.value)
-  if (!hasSelected) {
-    selectedChapterId.value = sortedChapters.value[0].id
-  }
-}, { deep: true })
-
-async function loadBooks() {
-  try {
-    books.value = await bookApi.getAll()
-    if (books.value.length === 0) {
-      currentBookId.value = null
-      return
-    }
-
-    const savedBookId = localStorage.getItem(CURRENT_BOOK_STORAGE_KEY)
-    const hasSavedBook = !!savedBookId && books.value.some(book => book.id === savedBookId)
-    const nextBookId = hasSavedBook ? savedBookId : books.value[0].id
-
-    if (currentBookId.value !== nextBookId) {
-      currentBookId.value = nextBookId
-    }
-  } catch (error) {
-    console.error('加载书籍失败:', error)
-  }
-}
-
-async function loadCurrentBookData() {
-  if (!currentBookId.value) {
-    characters.value = []
-    chapters.value = []
-    relationships.value = []
-    selectedChapterId.value = null
-    return
-  }
-
-  loading.value = true
-  try {
-    const [chars, chaps, rels] = await Promise.all([
-      characterApi.getAll(currentBookId.value),
-      chapterApi.getAll(currentBookId.value),
-      relationshipApi.getAll(currentBookId.value)
-    ])
-    characters.value = chars
-    relationships.value = rels
-
-    const chaptersWithEntities = await Promise.all(
-      chaps.map(async (chapter) => {
-        try {
-          const entityData = await chapterApi.getEntities(chapter.id)
-          return { ...chapter, character_ids: entityData.entity_ids || [] }
-        } catch {
-          return { ...chapter, character_ids: [] }
-        }
-      })
-    )
-    chapters.value = chaptersWithEntities
-    selectedChapterId.value = chaptersWithEntities.length > 0
-      ? [...chaptersWithEntities].sort((a, b) => a.chapter_number - b.chapter_number)[0].id
-      : null
-  } catch (error) {
-    console.error('加载数据失败:', error)
-  } finally {
-    loading.value = false
-  }
-}
 
 const { assets, loadAssets } = useAssetContainer({ bookId: currentBookId.value || undefined })
 
 watch(currentBookId, (newBookId) => {
-  if (newBookId) {
-    localStorage.setItem(CURRENT_BOOK_STORAGE_KEY, newBookId)
-  } else {
-    localStorage.removeItem(CURRENT_BOOK_STORAGE_KEY)
-  }
-  loadCurrentBookData()
   if (newBookId) {
     loadAssets()
   } else if (assets) {
@@ -319,72 +231,7 @@ watch(currentBookId, (newBookId) => {
   }
 })
 
-async function createBook() {
-  if (!bookForm.value.title.trim()) return
-  try {
-    const newBook = await bookApi.create({
-      ...bookForm.value,
-      global_sys_prompt: bookForm.value.global_sys_prompt || '',
-      core_motifs_taboos: bookForm.value.core_motifs_taboos || ''
-    })
-    books.value.push(newBook)
-    currentBookId.value = newBook.id
-    showBookModal.value = false
-    bookForm.value = { title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' }
-  } catch (error) {
-    showToast('创建失败: ' + error.message, 'error')
-  }
-}
-
-async function updateBook(data) {
-  if (!currentBookId.value) return
-  try {
-    const updated = await bookApi.update(currentBookId.value, data)
-    const index = books.value.findIndex(b => b.id === currentBookId.value)
-    if (index !== -1) {
-      books.value[index] = updated
-    }
-    return updated
-  } catch (error) {
-    console.error('更新失败:', error)
-    throw error
-  }
-}
-
-async function saveBookNotes() {
-  if (!currentBook.value) return
-  notesStatus.value = 'saving'
-  notesError.value = ''
-  try {
-    await updateBook({ global_sys_prompt: localBookNotes.value })
-    notesStatus.value = 'saved'
-    setTimeout(() => {
-      if (notesStatus.value === 'saved') {
-        notesStatus.value = 'idle'
-      }
-    }, 1400)
-  } catch (error) {
-    notesStatus.value = 'error'
-    notesError.value = error?.message || '保存失败'
-  }
-}
-
-async function saveBookNotesFn(notes: string) {
-  if (!currentBook.value) return
-  await updateBook({ global_sys_prompt: notes })
-}
-
-async function updateApiConfig(data) {
-  apiConfig.value = { ...apiConfig.value, ...data }
-  localStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
-}
-
-function handleRightTabChange(tab) {
-  uiPrefs.value = { ...uiPrefs.value, rightTab: tab }
-  saveUiPrefs(uiPrefs.value)
-}
-
-function handleMetaCollapsedChange(val) {
+function handleMetaCollapsedChange(val: boolean) {
   uiPrefs.value = { ...uiPrefs.value, chapterMetaCollapsed: !!val }
   saveUiPrefs(uiPrefs.value)
 }
@@ -394,204 +241,10 @@ function handleBookChange(event: Event) {
   currentBookId.value = target.value || null
 }
 
-async function handleRequestCritique(content: string) {
-  if (!content) return
-  if (content.length < 10) {
-    showToast('章节内容太短，无法进行审阅（至少10个字）', 'warning')
-    return
-  }
-  
-  activeFloatingTab.value = 'critique'
-  rightPanelExpanded.value = true
-  critiqueLoading.value = true
-  critiqueResult.value = null
-  
-  try {
-    const result = await generateApi.critiqueChapter({
-      chapter_content: content,
-      chapter_title: selectedChapter.value?.title || '',
-      api_key: apiConfig.value.api_key,
-      base_url: apiConfig.value.base_url,
-      model: apiConfig.value.reasoning_model || apiConfig.value.model
-    })
-    critiqueResult.value = result
-  } catch (error: any) {
-    showToast('获取指导失败: ' + (error.message || '未知错误'), 'error')
-  } finally {
-    critiqueLoading.value = false
-  }
-}
-
 function handleJumpToCritique(comment: any) {
   if (!comment) return
   if (chapterEditorRef.value?.scrollToCritique) {
     chapterEditorRef.value.scrollToCritique(comment)
-  }
-}
-
-function handleCloseCritique() {
-  critiqueResult.value = null
-}
-
-function handleEditorEntityFocus(keyword: string) {
-  const nextKeyword = (keyword || '').trim()
-  editorFocusedEntity.value = nextKeyword
-  if (editorEntityDecayTimer) {
-    clearTimeout(editorEntityDecayTimer)
-    editorEntityDecayTimer = null
-  }
-  if (!nextKeyword) return
-  editorEntityDecayTimer = setTimeout(() => {
-    editorFocusedEntity.value = ''
-    editorEntityDecayTimer = null
-  }, 2200)
-}
-
-async function createCharacter(data, onDone) {
-  if (!currentBookId.value) {
-    showToast('请先创建或选择一本书籍', 'warning')
-    onDone?.(false)
-    return
-  }
-  try {
-    const newChar = await characterApi.create({
-      ...data,
-      book_id: currentBookId.value
-    })
-    characters.value.push(newChar)
-    onDone?.(true)
-  } catch (error) {
-    showToast('创建失败: ' + error.message, 'error')
-    onDone?.(false)
-  }
-}
-
-async function updateCharacter(id, data, onDone) {
-  try {
-    const updated = await characterApi.update(id, data)
-    const index = characters.value.findIndex(c => c.id === id)
-    if (index !== -1) {
-      characters.value[index] = updated
-    }
-    onDone?.(true)
-  } catch (error) {
-    showToast('更新失败: ' + error.message, 'error')
-    onDone?.(false)
-  }
-}
-
-async function deleteCharacter(id) {
-  try {
-    await characterApi.delete(id)
-    characters.value = characters.value.filter(c => c.id !== id)
-  } catch (error) {
-    showToast('删除失败: ' + error.message, 'error')
-  }
-}
-
-async function createRelationship(data) {
-  if (!currentBookId.value) {
-    showToast('请先创建或选择一本书籍', 'warning')
-    return
-  }
-  try {
-    const newRel = await relationshipApi.create({
-      ...data,
-      book_id: currentBookId.value
-    })
-    relationships.value.push(newRel)
-  } catch (error) {
-    showToast('创建失败: ' + error.message, 'error')
-  }
-}
-
-async function updateRelationship(id, data) {
-  try {
-    const updated = await relationshipApi.update(id, data)
-    const index = relationships.value.findIndex(r => r.id === id)
-    if (index !== -1) {
-      relationships.value[index] = updated
-    }
-  } catch (error) {
-    showToast('更新失败: ' + error.message, 'error')
-  }
-}
-
-async function deleteRelationship(id) {
-  try {
-    await relationshipApi.delete(id)
-    relationships.value = relationships.value.filter(r => r.id !== id)
-  } catch (error) {
-    showToast('删除失败: ' + error.message, 'error')
-  }
-}
-
-async function createChapter(data) {
-  if (!currentBookId.value) {
-    showToast('请先创建或选择一本书籍', 'warning')
-    return
-  }
-  try {
-    const newChapter = await chapterApi.create({
-      ...data,
-      book_id: currentBookId.value
-    })
-    chapters.value.push(newChapter)
-    selectedChapterId.value = newChapter.id
-    return newChapter
-  } catch (error) {
-    showToast('创建失败: ' + error.message, 'error')
-  }
-}
-
-async function createChapterFromOutlinePanel() {
-  const maxNumber = chapters.value.length > 0
-    ? Math.max(...chapters.value.map(c => c.chapter_number))
-    : 0
-  await createChapter({
-    chapter_number: maxNumber + 1,
-    chapter_name: `第${maxNumber + 1}章`,
-    title: '',
-    outline_text: '',
-    content_text: '',
-    status: 'draft'
-  })
-}
-
-async function updateChapter(id, data) {
-  let retries = 3
-  while (retries >= 0) {
-    try {
-      const { character_ids, ...chapterData } = data
-
-      if (Object.keys(chapterData).length > 0) {
-        const updated = await chapterApi.update(id, chapterData)
-        const index = chapters.value.findIndex(c => c.id === id)
-        if (index !== -1) {
-          chapters.value[index] = { ...chapters.value[index], ...updated }
-        }
-      }
-
-      if (character_ids !== undefined) {
-        await chapterApi.updateEntities(id, character_ids)
-        const index = chapters.value.findIndex(c => c.id === id)
-        if (index !== -1) {
-          chapters.value[index].character_ids = character_ids
-        }
-      }
-      break
-    } catch (error) {
-      const isNetworkError = error.message.includes('Failed to fetch') || error.message.toLowerCase().includes('network error')
-      if (isNetworkError && retries > 0) {
-        console.warn(`更新失败，正在重试 (${retries}次剩余)...`, error)
-        retries--
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        continue
-      }
-
-      showToast('更新失败: ' + error.message, 'error')
-      break
-    }
   }
 }
 
@@ -650,13 +303,13 @@ async function handleIntentGenerate(payload: any) {
       generateApi.streamAgentic(
         requestPayload,
         {
-          onChunk: (chunk) => {
+          onChunk: (chunk: string) => {
             buffer += chunk
           },
           onDone: () => {
             resolve(buffer.trim())
           },
-          onError: (error) => {
+          onError: (error: string) => {
             reject(new Error(error))
           }
         },
@@ -682,114 +335,10 @@ async function handleIntentGenerate(payload: any) {
   }
 }
 
-async function deleteChapter(id) {
-  const target = chapters.value.find((c) => c.id === id)
-  const ok = await showConfirm({ title: '确认删除', message: `确定要删除"${target?.title || '该章节'}"吗？` })
-  if (!ok) return
-  try {
-    await chapterApi.delete(id)
-    chapters.value = chapters.value.filter(c => c.id !== id)
-    if (selectedChapterId.value === id) {
-      selectedChapterId.value = sortedChapters.value[0]?.id || null
-    }
-  } catch (error) {
-    showToast('删除失败: ' + error.message, 'error')
-  }
-}
-
-async function generateChapterEmbedding(id) {
-  const target = chapters.value.find((c) => c.id === id)
-  if (!target?.summary) {
-    showToast('该章节暂无摘要，请先发布章节生成摘要', 'warning')
-    return
-  }
-  try {
-    const result = await chapterApi.generateEmbedding(id, {})
-    showToast(`向量生成成功！维度: ${result.vector_dim}`, 'success')
-  } catch (error) {
-    showToast('生成失败: ' + error.message, 'error')
-  }
-}
-
-function openManageBookModal() {
-  if (!currentBook.value) return
-  manageBookForm.value = {
-    title: currentBook.value.title || '',
-    genre: currentBook.value.genre || '',
-    core_motifs_taboos: currentBook.value.core_motifs_taboos || ''
-  }
-  showManageBookModal.value = true
-}
-
-async function saveManageBook() {
-  if (!currentBookId.value) return
-  if (!manageBookForm.value.title.trim()) return
-  await updateBook({
-    title: manageBookForm.value.title,
-    genre: manageBookForm.value.genre,
-    core_motifs_taboos: manageBookForm.value.core_motifs_taboos
-  })
-  showManageBookModal.value = false
-}
-
-async function deleteCurrentBook() {
-  if (!currentBookId.value) return
-  const ok = await showConfirm({
-    title: '确认删除',
-    message: `确定要删除书籍 "${currentBook.value?.title || ''}" 吗？此操作会删除其下所有章节与角色。`,
-    warning: '此操作不可撤销'
-  })
-  if (!ok) return
-  try {
-    const deletingId = currentBookId.value
-    await bookApi.delete(deletingId)
-    books.value = books.value.filter(b => b.id !== deletingId)
-    if (books.value.length > 0) {
-      currentBookId.value = books.value[0].id
-    } else {
-      currentBookId.value = null
-    }
-    showManageBookModal.value = false
-  } catch (error) {
-    showToast('删除失败: ' + error.message, 'error')
-  }
-}
-
-async function loadCharacters() {
-  if (!currentBookId.value) return
-  try {
-    const chars = await characterApi.getAll(currentBookId.value)
-    characters.value = chars
-  } catch (error) {
-    console.error('加载角色失败:', error)
-  }
-}
-
-// 键盘快捷键
-function handleKeyDown(e: KeyboardEvent) {
-  // Ctrl/Cmd + Shift + Z: 切换沉浸模式
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Z') {
-    e.preventDefault()
-    toggleZenMode()
-    return
-  }
-  
-  // Ctrl/Cmd + 1-6: 切换右侧面板
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key >= '1' && e.key <= '6') {
-    e.preventDefault()
-    const index = parseInt(e.key) - 1
-    if (index < floatingTabs.length) {
-      toggleRightPanel(floatingTabs[index].key)
-    }
-    return
-  }
-  
-  // Esc: 关闭所有面板
-  if (e.key === 'Escape') {
+function selectChapter(chapterId: string) {
+  selectedChapterId.value = chapterId
+  if (isZenMode.value) {
     leftPanelExpanded.value = false
-    topPanelExpanded.value = false
-    closeRightPanel()
-    return
   }
 }
 
@@ -800,24 +349,6 @@ onMounted(async () => {
   }
   await loadBooks()
   initTheme()
-  
-  // 绑定键盘事件
-  window.addEventListener('keydown', handleKeyDown)
-  // 绑定点击外部事件
-  document.addEventListener('click', handleClickOutside)
-})
-
-onBeforeUnmount(() => {
-  if (editorEntityDecayTimer) {
-    clearTimeout(editorEntityDecayTimer)
-    editorEntityDecayTimer = null
-  }
-  if (topTriggerTimer) {
-    clearTimeout(topTriggerTimer)
-    topTriggerTimer = null
-  }
-  window.removeEventListener('keydown', handleKeyDown)
-  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -834,6 +365,26 @@ onBeforeUnmount(() => {
   <!-- ========== 沉浸式主界面 ========== -->
   <div v-else class="immersive-app" :class="{ 'zen-mode': isZenMode }">
     
+    <!-- Zen Mode 首次引导 -->
+    <Transition name="fade">
+      <div
+        v-if="showZenHint"
+        class="fixed top-16 left-1/2 -translate-x-1/2 z-[110] px-5 py-3 rounded-xl bg-[var(--bg-primary)] shadow-xl border border-[var(--border-color)] text-sm text-[var(--text-primary)]"
+      >
+        <div class="flex items-center gap-3">
+          <span class="text-[var(--accent-700)]">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </span>
+          <div>
+            <p class="font-medium">已进入沉浸模式</p>
+            <p class="text-xs text-[var(--text-muted)] mt-0.5">按 <kbd class="px-1.5 py-0.5 bg-[var(--bg-panel)] rounded text-[10px]">Ctrl+Shift+Z</kbd> 退出，或点击顶部展开工具栏</p>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 顶部触发条 (Zen Mode 下悬停显示) -->
     <div 
       v-if="isZenMode"
@@ -912,7 +463,8 @@ onBeforeUnmount(() => {
             </span>
             <input 
               :value="selectedChapter?.title" 
-              @input="(e) => updateChapter(selectedChapter?.id, { title: (e.target as HTMLInputElement).value })"
+              @input="handleTopTitleInput"
+              @blur="handleTopTitleBlur"
               placeholder="章节标题..."
               class="chapter-title-input"
             />
@@ -922,7 +474,7 @@ onBeforeUnmount(() => {
             <button @click="showSettingsModal = true" class="btn-icon" title="设置">
               <Icon name="settings" :size="16" />
             </button>
-            <button @click="toggleZenMode" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
+            <button @click="toggleZenModeWithHint" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
               <Icon name="maximize" :size="16" />
             </button>
           </div>
@@ -979,7 +531,16 @@ onBeforeUnmount(() => {
             </div>
           </div>
           
-          <button @click="createChapterFromOutlinePanel" class="btn-primary">
+          <div v-if="sortedChapters.length === 0" class="empty-chapters-state">
+            <div class="empty-illustration">📝</div>
+            <p class="empty-title">还没有章节</p>
+            <p class="empty-desc">创建第一章，开启 AI 辅助创作之旅</p>
+            <button @click="createChapterFromOutlinePanel" class="btn-primary mt-2">
+              + 新建章节
+            </button>
+          </div>
+          
+          <button v-else @click="createChapterFromOutlinePanel" class="btn-primary">
             + 新建章节
           </button>
         </div>
@@ -1092,13 +653,21 @@ onBeforeUnmount(() => {
     
     <!-- 底部状态栏 (Zen Mode 下极简) -->
     <div class="status-bar" :class="{ 'minimal': isZenMode }">
-      <span v-if="!isZenMode">
-        <template v-if="currentBook">
-          {{ currentBook.title }} · 第 {{ selectedChapter?.chapter_number || '-' }} 章
+      <span class="flex items-center gap-2">
+        <template v-if="globalActivity">
+          <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent-500)] animate-pulse"></span>
+          <span class="text-[var(--accent-700)]">{{ globalActivity }}</span>
         </template>
-        <template v-else>未选择书籍</template>
+        <template v-else-if="!isZenMode">
+          <template v-if="currentBook">
+            {{ currentBook.title }} · 第 {{ selectedChapter?.chapter_number || '-' }} 章
+          </template>
+          <template v-else>未选择书籍</template>
+        </template>
+        <template v-else>
+          第 {{ selectedChapter?.chapter_number || '-' }} 章，共 {{ sortedChapters.length }} 章
+        </template>
       </span>
-      <span v-else>第 {{ selectedChapter?.chapter_number || '-' }} 章，共 {{ sortedChapters.length }} 章</span>
       <span v-if="isZenMode" class="zen-hint">按 Ctrl+Shift+Z 退出沉浸模式</span>
     </div>
     
@@ -1107,10 +676,17 @@ onBeforeUnmount(() => {
     <!-- 新建书籍 -->
     <div v-if="showBookModal" class="modal-overlay" @click.self="showBookModal = false">
       <div class="modal">
-        <h3>新建书籍</h3>
-        <input v-model="bookForm.title" placeholder="书名" />
-        <input v-model="bookForm.genre" placeholder="类型 (如：科幻、奇幻)" />
-        <textarea v-model="bookForm.global_sys_prompt" placeholder="全局提示词 (可选)" rows="3" />
+        <div class="modal-header">
+          <h3>新建书籍</h3>
+          <button class="btn-icon" @click="showBookModal = false">
+            <Icon name="x-mark" :size="18" />
+          </button>
+        </div>
+        <div class="modal-body">
+          <input v-model="bookForm.title" placeholder="书名" />
+          <input v-model="bookForm.genre" placeholder="类型 (如：科幻、奇幻)" />
+          <textarea v-model="bookForm.global_sys_prompt" placeholder="全局提示词 (可选)" rows="3" />
+        </div>
         <div class="modal-actions">
           <button @click="showBookModal = false">取消</button>
           <button @click="createBook" class="btn-primary">创建</button>
@@ -1121,10 +697,17 @@ onBeforeUnmount(() => {
     <!-- 管理书籍 -->
     <div v-if="showManageBookModal" class="modal-overlay" @click.self="showManageBookModal = false">
       <div class="modal">
-        <h3>管理书籍</h3>
-        <input v-model="manageBookForm.title" placeholder="书名" />
-        <input v-model="manageBookForm.genre" placeholder="类型" />
-        <textarea v-model="manageBookForm.core_motifs_taboos" placeholder="核心设定与禁忌" rows="3" />
+        <div class="modal-header">
+          <h3>管理书籍</h3>
+          <button class="btn-icon" @click="showManageBookModal = false">
+            <Icon name="x-mark" :size="18" />
+          </button>
+        </div>
+        <div class="modal-body">
+          <input v-model="manageBookForm.title" placeholder="书名" />
+          <input v-model="manageBookForm.genre" placeholder="类型" />
+          <textarea v-model="manageBookForm.core_motifs_taboos" placeholder="核心设定与禁忌" rows="3" />
+        </div>
         <div class="modal-actions">
           <button @click="deleteCurrentBook" class="btn-danger">删除书籍</button>
           <button @click="showManageBookModal = false">取消</button>
@@ -1689,6 +1272,40 @@ onBeforeUnmount(() => {
   margin-bottom: var(--space-3);
 }
 
+.empty-chapters-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--color-border-hover);
+}
+
+.empty-illustration {
+  font-size: 28px;
+  margin-bottom: var(--space-2);
+  opacity: 0.8;
+}
+
+.empty-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-1) 0;
+}
+
+.empty-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2) 0;
+  line-height: 1.5;
+}
+
 .chapter-item {
   display: flex;
   align-items: center;
@@ -1741,7 +1358,7 @@ onBeforeUnmount(() => {
 }
 
 .zen-mode .editor-container {
-  padding: var(--space-8) var(--space-6);
+  padding: var(--space-8);
 }
 
 /* ---------- 右侧悬浮工具栏 ---------- */
@@ -1755,7 +1372,7 @@ onBeforeUnmount(() => {
 }
 
 .right-floating-bar.panel-open {
-  right: 384px;
+  right: 372px;
 }
 
 .floating-tabs {
@@ -1854,12 +1471,12 @@ onBeforeUnmount(() => {
 }
 
 .status-bar.minimal .zen-hint {
-  opacity: 0;
+  opacity: 0.35;
   transition: opacity var(--transition-normal);
 }
 
 .status-bar.minimal:hover .zen-hint {
-  opacity: 0.5;
+  opacity: 0.8;
 }
 
 /* ========================================
@@ -1948,23 +1565,39 @@ onBeforeUnmount(() => {
 
 .modal {
   background: var(--color-bg-primary);
-  padding: var(--space-6);
   border-radius: var(--radius-xl);
   width: 90%;
   max-width: 420px;
   box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.modal h3 {
-  margin: 0 0 var(--space-4) 0;
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-header h3 {
+  margin: 0;
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
 }
 
-.modal input,
-.modal textarea {
+.modal-body {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-body input,
+.modal-body textarea {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-3);
@@ -1976,8 +1609,13 @@ onBeforeUnmount(() => {
   transition: all var(--transition-fast);
 }
 
-.modal input:focus,
-.modal textarea:focus {
+.modal-body input:last-child,
+.modal-body textarea:last-child {
+  margin-bottom: 0;
+}
+
+.modal-body input:focus,
+.modal-body textarea:focus {
   background: var(--color-bg-primary);
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px rgba(196, 167, 125, 0.1);
@@ -1988,7 +1626,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
-  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-5) var(--space-5);
 }
 
 .modal-actions button {
@@ -2060,12 +1698,23 @@ onBeforeUnmount(() => {
   transform: translateY(-6px) scale(0.98);
 }
 
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
 /* ========================================
    滚动条样式
    ======================================== */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -2078,8 +1727,13 @@ onBeforeUnmount(() => {
   opacity: 0.25;
 }
 
+:hover::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
 ::-webkit-scrollbar-thumb:hover {
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 /* ========================================

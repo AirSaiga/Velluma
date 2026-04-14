@@ -77,7 +77,7 @@ def adapt_request_to_config(
     """
     将旧版请求对象适配为统一配置对象
     
-    V3.8 更新：支持基础模式和专家模式
+    V4.0 更新：支持基础模式和专家模式
     - 基础模式：只传递高层语义参数，后端自动推导底层技术参数
     - 专家模式：传递完整技术参数，后端不做推导
     
@@ -90,7 +90,7 @@ def adapt_request_to_config(
         GenerationConfig: 统一配置对象
     """
     # 确定编辑模式
-    # V3.8+ 简化：仅支持意图驱动模式
+    # V4.0+ 简化：仅支持意图驱动模式
     editor_mode = EditorMode.INTENT
     is_basic = True  # 始终使用参数推导逻辑
     
@@ -143,7 +143,7 @@ def adapt_request_to_config(
         except ValueError:
             logger.warning(f"[Adapter] 未知的记忆策略: {request.memory_strategy}")
     
-    # V3.8+ 简化：始终使用策略预设，自动推导 RAG 参数
+    # V4.0+ 简化：始终使用策略预设，自动推导 RAG 参数
     rag_policy = RAGPolicy(memory_strategy=memory_strategy)
     rag_policy.apply_strategy_preset()
     
@@ -173,7 +173,7 @@ def adapt_request_to_config(
         skip_minor_refine=request.skip_minor_refine,
     )
     
-    # V3.8+ 简化：始终根据 refinement_depth 推导 max_iterations
+    # V4.0+ 简化：始终根据 refinement_depth 推导 max_iterations
     workflow_policy.derive_from_refinement_depth()
     
     # 从 feature_flags 提取配置

@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-SnapshotExtractorAgent - 章节末尾状态萃取 Agent (V3.6)
+SnapshotExtractorAgent - 章节末尾状态萃取 Agent (V4.0)
 
 职责：
 - 在章节发布后调用 reasoning_model 分析章节结尾

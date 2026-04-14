@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 迁移说明 (2026-03-30)：
 - 所有函数已迁移到使用 Repository 模式
 - 新接口使用 repositories 参数
-- V3 版本现已稳定，移除旧版本降级逻辑
+- V4.0 版本现已稳定，移除旧版本降级逻辑
 
 使用方式：
     repos = {

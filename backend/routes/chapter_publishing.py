@@ -179,7 +179,7 @@ async def publish_chapter(
     
     if request and request.api_key:
         # ========================================================================
-        # V3.7: 智能人物提取与关系推断
+        # V4.0: 智能人物提取与关系推断
         # ========================================================================
         text_to_extract = chapter.content_text or chapter.draft_text or ""
         _log_to_file(f"[DEBUG] Starting character extraction for chapter {chapter_id}, content length: {len(text_to_extract)}")
@@ -262,7 +262,7 @@ async def publish_chapter(
             )
 
         # ========================================================================
-        # V3.6: 世界终端状态提取 (WorldTerminalState)
+        # V4.0: 世界终端状态提取 (WorldTerminalState)
         # ========================================================================
         if text_to_summarize and request and request.api_key:
             try:
@@ -278,7 +278,7 @@ async def publish_chapter(
                 chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
                 assets = [ca.asset for ca in chapter_assets if ca.asset]
 
-                # 使用 V3.6 SnapshotExtractorAgent
+                # 使用 V4.0 SnapshotExtractorAgent
                 world_state = await asyncio.wait_for(
                     extract_world_terminal_state(
                         chapter_content=text_to_summarize,
@@ -305,7 +305,7 @@ async def publish_chapter(
                     )
 
                     # ========================================================================
-                    # V3.6: 更新角色此刻状态 (current_state)
+                    # V4.0: 更新角色此刻状态 (current_state)
                     # ========================================================================
                     for character in character_list:
                         if character and str(character.id) in world_state.characters:
@@ -315,7 +315,7 @@ async def publish_chapter(
                                 svc_logger.debug("Updated character current_state", character=character.name)
 
                     # ========================================================================
-                    # V3.6: 更新场景此刻状态
+                    # V4.0: 更新场景此刻状态
                     # ========================================================================
                     if world_state.scene.atmosphere:
                         chapter_locations = await chapter_repo.list_locations_with_details(chapter_id)
@@ -325,7 +325,7 @@ async def publish_chapter(
                                 svc_logger.debug("Updated location current_state", location=ch_loc.location.name)
                                 
                     # ========================================================================
-                    # V3.6: 更新资产此刻状态
+                    # V4.0: 更新资产此刻状态
                     # ========================================================================
                     if world_state.assets:
                         chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)

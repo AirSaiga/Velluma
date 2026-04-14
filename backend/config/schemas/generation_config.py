@@ -73,7 +73,7 @@ class EditorMode(str, Enum):
     """
     编辑模式
     
-    V3.8+ 简化：仅保留意图驱动模式，前端统一使用创意模式
+    V4.0+ 简化：仅保留意图驱动模式，前端统一使用创意模式
     """
     INTENT = "intent"  # 意图驱动模式（唯一模式）
 
@@ -429,7 +429,7 @@ class WorkflowPolicy(BaseModel):
     
     def derive_from_refinement_depth(self) -> "WorkflowPolicy":
         """
-        V3.8: 根据精修深度推导迭代次数
+        V4.0: 根据精修深度推导迭代次数
         
         推导规则：
         - light: max_iterations = 1
@@ -660,7 +660,7 @@ class GenerationConfig(BaseModel):
             enable_cross_chapter_validation=req_dict.get("enable_cross_chapter_validation", True),
         )
         
-        # V3.8+: 编辑模式已简化为仅保留意图驱动模式
+        # V4.0+: 编辑模式已简化为仅保留意图驱动模式
         # 忽略 expert_mode 参数，统一使用 INTENT 模式
         editor_mode = EditorMode.INTENT
         

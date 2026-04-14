@@ -57,8 +57,8 @@ from backend.services.prompts import (
 
 ## 版本历史
 
-- **V1.x**: 基础章节生成
-- **V2.0**: 引入 Agentic 工作流
-- **V2.5**: 认知流式生成 (Cognitive Streaming)
-- **V3.0**: 三档工作流（疾速/均衡/堡垒）
-- **V3.5**: 双轨对抗架构
+- **V4.0**: 基础章节生成
+- **V4.0**: 引入 Agentic 工作流
+- **V4.0**: 认知流式生成 (Cognitive Streaming)
+- **V4.0**: 三档工作流（疾速/均衡/堡垒）
+- **V4.0**: 双轨对抗架构

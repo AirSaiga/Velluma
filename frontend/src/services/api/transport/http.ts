@@ -30,7 +30,7 @@ function createRequestInit(options: FetchOptions): RequestInit {
   return requestInit
 }
 
-export async function requestJson(path: string, options: FetchOptions = {}, timeoutMs = 300000) {
+export async function requestJson<T = any>(path: string, options: FetchOptions = {}, timeoutMs = 300000): Promise<T> {
   const baseUrl = await getApiBase()
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -54,10 +54,10 @@ export async function requestJson(path: string, options: FetchOptions = {}, time
     }
 
     if (response.status === 204) {
-      return null
+      return null as T
     }
 
-    return response.json()
+    return response.json() as Promise<T>
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`请求超时（${timeoutMs / 1000}秒），请检查网络或稍后重试`)

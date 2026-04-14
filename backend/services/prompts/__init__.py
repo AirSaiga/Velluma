@@ -48,11 +48,11 @@ from backend.services.prompts.draft_prompts import (
     build_chunk_draft_prompt,
     build_subconscious_prompt,
     build_prose_draft_prompt,
-    # V2.5 Cognitive Streaming (NEW)
+    # V4.0 Cognitive Streaming (NEW)
     build_prose_draft_prompt_v25,
     build_micro_review_prompt,
     build_emotional_update_prompt,
-    # V2.5+ Dynamic State Update (NEW)
+    # V4.0+ Dynamic State Update (NEW)
     build_dynamic_state_update_prompt,
 )
 from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result, parse_planner_full_result
@@ -76,11 +76,11 @@ __all__ = [
     # Iceberg Model (NEW)
     "build_subconscious_prompt",
     "build_prose_draft_prompt",
-    # V2.5 Cognitive Streaming (NEW)
+    # V4.0 Cognitive Streaming (NEW)
     "build_prose_draft_prompt_v25",
     "build_micro_review_prompt",
     "build_emotional_update_prompt",
-    # V2.5+ Dynamic State Update (NEW)
+    # V4.0+ Dynamic State Update (NEW)
     "build_dynamic_state_update_prompt",
     # Review & Refine
     "build_refine_agent_prompt",

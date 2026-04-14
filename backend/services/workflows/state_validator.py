@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-StateValidator - 世界状态与 Beats 一致性验证器 (V3.6)
+StateValidator - 世界状态与 Beats 一致性验证器 (V4.0)
 
 职责：
 - 在 Planning 阶段验证生成的 beats 是否偏离 world snapshot

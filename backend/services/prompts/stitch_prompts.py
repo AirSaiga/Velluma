@@ -59,8 +59,8 @@ def build_stitch_prompt(
         anchor_pov: 主导视角角色名，用于反蒙太奇剪辑规则
         book: 书籍实体，用于获取 style_blacklist 等文风控制数据
         sketch_text: 连贯速写文本，作为连贯性参考（双轨模式）
-        persistent_state_anchors: 持久状态锚点列表，用于跨 Beat 状态平滑 (V3.5)
-        previous_chapter_snapshot: 上一章的世界状态快照，用于跨章连续性约束 (V3.5)
+        persistent_state_anchors: 持久状态锚点列表，用于跨 Beat 状态平滑 (V4.0)
+        previous_chapter_snapshot: 上一章的世界状态快照，用于跨章连续性约束 (V4.0)
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -95,7 +95,7 @@ def build_stitch_prompt(
 
     # 字数约束提示（嵌入两种模式的 system_prompt）
     min_percent = int(min_ratio * 100)
-    # V3.5.4: 明确字数下限优先于目标字数，避免LLM困惑
+    # V4.0: 明确字数下限优先于目标字数，避免LLM困惑
     effective_target = max(word_count, min_chars)
     word_count_constraint = f"""
 ## 字数约束（硬性规定 - 优先级最高）
@@ -126,7 +126,7 @@ def build_stitch_prompt(
 - 你的统稿正文应比速写更详细、更丰富，但过渡方式可借鉴
 - 不要照搬速写内容，只借鉴其过渡技巧"""
 
-    # V3.5: 构建状态平滑过渡指令
+    # V4.0: 构建状态平滑过渡指令
     state_bridge_section = ""
     if persistent_state_anchors:
         anchors_lines = []
@@ -141,7 +141,7 @@ def build_stitch_prompt(
             anchors_text = "\n".join(anchors_lines)
             state_bridge_section = f"""
 
-## 状态平滑过渡 (State Bridging) - V3.5 最高优先级
+## 状态平滑过渡 (State Bridging) - V4.0 最高优先级
 在合并 Chunks 时，你必须处理状态锚点的平滑过渡：
 
 **当前持久状态锚点**：
@@ -188,7 +188,7 @@ def build_stitch_prompt(
 8. 优先保留并融合各 chunk 的有效剧情信息，确保章节结构完整、过渡自然。{blacklist_section}
 {word_count_constraint}{coherence_reference}{state_bridge_section}"""
 
-    # 🔒 V3.5: 注入跨章物理连续性约束（P0级 - 不可跳过）
+    # 🔒 V4.0: 注入跨章物理连续性约束（P0级 - 不可跳过）
     cross_chapter_section = ""
     if previous_chapter_snapshot:
         from backend.services.prompts.world_state_prompts import format_snapshot_for_planner

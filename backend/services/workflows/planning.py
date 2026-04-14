@@ -70,7 +70,7 @@ def infer_pov_aperture(beat: dict, tension_level: int) -> str:
     """
     基于 Scene Intent 和 Tension Level 推断 POV Aperture。
     
-    V3.5: 智能光圈推断算法
+    V4.0: 智能光圈推断算法
     - 优先使用 Planner 已提供的 pov_aperture
     - 基于 tension_level 和 pacing_type 进行推断
     
@@ -159,7 +159,7 @@ async def generate_beats(
     
     beats = parse_planner_result(planner_result_raw, chapter.outline_text or "", word_count)
 
-    # 引入状态校验 (V3.6)
+    # 引入状态校验 (V4.0)
     if previous_world_state:
         validation_result = validate_beats_world_state_consistency(
             beats=beats, 
@@ -181,10 +181,10 @@ async def generate_beats(
     tension_level = getattr(chapter, "tension_level", 3) or 3
     
     for beat_index, beat in enumerate(beats, start=1):
-        # V3.5: 推断或使用 pov_aperture
+        # V4.0: 推断或使用 pov_aperture
         pov_aperture = infer_pov_aperture(beat, tension_level)
         
-        # V3.5: 获取持久状态锚点
+        # V4.0: 获取持久状态锚点
         persistent_state_anchors = beat.get("persistent_state_anchors", [])
         
         story_beat = StoryBeat(
@@ -195,8 +195,8 @@ async def generate_beats(
             position=beat.get("position", beat_index),
             location=beat.get("location"),
             pov_character=beat.get("pov_character"),
-            pov_aperture=pov_aperture,  # V3.5: 叙事光圈
-            persistent_state_anchors=persistent_state_anchors,  # V3.5: 持久状态锚点
+            pov_aperture=pov_aperture,  # V4.0: 叙事光圈
+            persistent_state_anchors=persistent_state_anchors,  # V4.0: 持久状态锚点
             pov_perception_state=beat.get("pov_perception_state", "正常"),
             anchor_pov=None,
             original_actor=beat.get("pov_character"),
@@ -209,7 +209,7 @@ async def generate_beats(
             summary=beat.get("summary", ""),
             meta={
                 "target_words": beat.get("target_words", 0),
-                "pov_aperture": pov_aperture,  # V3.5: 也存入 meta 方便调试
+                "pov_aperture": pov_aperture,  # V4.0: 也存入 meta 方便调试
                 "persistent_state_anchors_count": len(persistent_state_anchors),
             },
             status="planned",
@@ -259,7 +259,7 @@ async def assign_pov_to_beats(
 
     for beat in beats:
         original_pov = None
-        # V3.6: ensemble/omniscient beats 保留 Planner 分配的多视角，不参与 anchor 覆盖
+        # V4.0: ensemble/omniscient beats 保留 Planner 分配的多视角，不参与 anchor 覆盖
         if isinstance(beat, dict):
             beat_pov_mode = beat.get("pov_mode", "single") or "single"
             if beat_pov_mode in ("ensemble", "omniscient"):

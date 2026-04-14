@@ -11,11 +11,11 @@
 import { computed, onMounted, provide } from 'vue'
 import { useNovelWizard } from '../composables/useNovelWizard'
 import { STORY_GENRE_PRESETS, type WizardStep } from '../types/wizard.types'
-import StoryBasicsPanel from './StoryBasicsPanel.vue'
-import WorldBuildingPanel from './WorldBuildingPanel.vue'
-import CharacterManagerPanel from './CharacterManagerPanel.vue'
-import ChapterConfigPanel from './ChapterConfigPanel.vue'
-import ExpertSettingsPanel from './ExpertSettingsPanel.vue'
+import StoryBasicsPanel from '../presentation/StoryBasicsPanel.vue'
+import WorldBuildingPanel from '../presentation/WorldBuildingPanel.vue'
+import CharacterManagerPanel from '../presentation/CharacterManagerPanel.vue'
+import ChapterConfigPanel from '../presentation/ChapterConfigPanel.vue'
+import ExpertSettingsPanel from '../presentation/ExpertSettingsPanel.vue'
 
 // =------------- Props & Emits -------------=
 

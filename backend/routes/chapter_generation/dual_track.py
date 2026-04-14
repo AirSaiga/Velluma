@@ -1,5 +1,5 @@
 """
-双轨生成路由 (Dual Track Routes) - V3.5。
+双轨生成路由 (Dual Track Routes) - V4.0。
 
 职责：提供基于双轨对抗架构的章节生成 API。
 

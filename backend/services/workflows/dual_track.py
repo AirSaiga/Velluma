@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-双轨生成工作流 (Dual Track Workflow) - V3.5 双轨对抗架构。
+双轨生成工作流 (Dual Track Workflow) - V4.0 双轨对抗架构。
 
 职责：
 - 整合 Track A (节拍扩写) 和 Track B (短文生成)

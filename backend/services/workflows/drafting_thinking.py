@@ -291,7 +291,7 @@ async def _generate_lightweight_subconscious(
     """
     轻量级 Subconscious（无 MCTS，单次生成 50 字内心定调）。
 
-    用于 V3.0 均衡流（Standard-Path），跳过 MCTS 三分支搜索。
+    用于 V4.0 均衡流（Standard-Path），跳过 MCTS 三分支搜索。
     """
     async def _single_lightweight(beat: dict, scene_intent: dict, beat_index: int) -> str:
         system_prompt = "你是一位擅长内心独白描写的作家。请用一句话（50字以内）概括角色此刻的内心状态。"

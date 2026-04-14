@@ -54,7 +54,7 @@ def build_planner_agent_prompt(
     assets: Optional[list] = None,
     author_intent: Optional[str] = None,
     previous_chapter_snapshot: Optional[dict] = None,
-    previous_world_terminal_state: Optional[WorldTerminalState] = None,  # V3.6: 新增参数
+    previous_world_terminal_state: Optional[WorldTerminalState] = None,  # V4.0: 新增参数
 ) -> tuple[str, str]:
     """构建规划阶段的提示词。
 
@@ -82,7 +82,7 @@ def build_planner_agent_prompt(
     - system_prompt: 定义 JSON 输出格式、beat 数量限制、pacing_type 约束等
     - user_prompt: 包含实际章节内容，global_taboos 和 author_intent 作为绝对最高优先级注入
     - previous_chapter_snapshot: 注入世界状态约束，确保跨章物理连续性
-    - previous_world_terminal_state: V3.6 结构化世界终端状态，强制物理约束
+    - previous_world_terminal_state: V4.0 结构化世界终端状态，强制物理约束
     """
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
     global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
@@ -166,7 +166,7 @@ def build_planner_agent_prompt(
         if normalized_hooks
         else "暂无开放伏笔"
     )
-    # V3.0: 低张力规则改为 tension_level <= 2
+    # V4.0: 低张力规则改为 tension_level <= 2
     low_tension_rule = ""
     if tension_level <= 2:
         low_tension_rule = (
@@ -175,7 +175,7 @@ def build_planner_agent_prompt(
             "9. 低张力章节禁止设计直接爆发式冲突，剧情推进以铺垫与悬停为主"
         )
     # =================================================================
-    # V3.6: 构建世界终端状态约束段落
+    # V4.0: 构建世界终端状态约束段落
     # =================================================================
     world_state_constraint = ""
     if previous_world_terminal_state:
@@ -184,7 +184,7 @@ def build_planner_agent_prompt(
         # 回退到旧版格式
         world_state_constraint = format_snapshot_for_planner(previous_chapter_snapshot)
 
-    # V3.6: 基于目标字数计算推荐 beats 数量
+    # V4.0: 基于目标字数计算推荐 beats 数量
     beats_min = max(2, word_count // 1000)           # 1000字→2, 2000字→2, 2001字→3
     beats_min = min(beats_min, 4)                    # 上限不超过4（避免强制过碎）
     beats_recommended = max(2, min(6, round(word_count / 600)))  # 每beat约600字
@@ -274,7 +274,7 @@ def build_planner_agent_prompt(
     - 如果需要切换视角（从角色 A 切换到角色 B），Beat 1 必须是一个明确的【摄像机过渡节拍】，清晰交代物理时间或空间的转移
     - 严禁让角色产生"瞬移"幻觉或状态突变
     
-    **【V3.6 强制规则 - 世界状态约束】**
+    **【V4.0 强制规则 - 世界状态约束】**
     1. **物理连续性**: Beat 1 的 entry_state 必须严格匹配「前一章末尾世界状态快照」中的位置和状态
     2. **角色离场检查**: 如果 snapshot 中角色的 physical_condition 为 inactive/dead，严禁为其分配任何 Beat
     3. **意图延续**: 角色的 immediate_intention 必须作为 Beat 1 的行为驱动基础
@@ -294,24 +294,24 @@ def build_planner_agent_prompt(
     - 叙事核心 ≠ 镜头时间最多：若某角色在大部分 beat 中处于昏迷/被动/幕后状态，但所有事件均因其命运而发生、所有行动方的目标均指向其时，仍应将其填为叙事核心
     - 必须从【角色设定】中的角色名中选择一个，若多人均等则填 "Ensemble"
     - 此字段由你作为规划师主动判断，优先级高于 beat 出现频次
-16. **》V3.5 新增「pov_aperture (叙事光圈)**: 控制 Drafting 阶段的视角景深，仅在 pov_mode="single" 时有效，必须从以下选项中选择：
+16. **》V4.0 新增「pov_aperture (叙事光圈)**: 控制 Drafting 阶段的视角景深，仅在 pov_mode="single" 时有效，必须从以下选项中选择：
     - "internal_only": 仅限 {anchor_pov or '视角角色'} 的内心与自我感知，强制屏蔽不可见环境细节。适用于深度心理描写、独处的内省场景。
     - "subjective_observation" (默认): 允许描写其他角色动作，但必须通过 {anchor_pov or '视角角色'} 的认知/判断包裹。适用于常规场景。
     - "systemic_sense": 允许全景感知，但在叙事上依然以 {anchor_pov or '视角角色'} 为锚点。适用于高张力动作场景、需要全局感知的战斗场面。
     选择依据：基于 scene_intent 和 tension_level 自动推断，高张力动作场景用 systemic_sense，深度心理描写用 internal_only。
-16b. **》V3.6 新增「pov_mode (叙事视角模式)**: 根据场景类型选择最合适的视角策略：
+16b. **》V4.0 新增「pov_mode (叙事视角模式)**: 根据场景类型选择最合适的视角策略：
     - "single"(默认)：单一视角，锁定在 pov_character 的感官范围内。适用：独处内省、单角色是核心的动作场景。
     - "ensemble"：多角色共存视角，摄像机在多个角色间自然游走，每个角色均有内心展现。
       适用：**多人对峙**、**密谋策划**、**多方博弈**等多角色同场且每人动机均重要的场景。
       → 选择 ensemble 时，必须同时填写 pov_characters 列表（2-4 个角色名，按内心权重由高到低排序）。pov_character 填列表中第一个角色名。
     - "omniscient"：全知视角，可自由展现所有角色内心。适用：宏观战场全景、世界性事件。
     ❗注意：pov_mode="ensemble"/"omniscient" 时，pov_aperture 字段可不填写。
-17. **【V3.5 新增】persistent_state_anchors (持久状态锚点)**: 每个 beat 必须输出状态锚点列表，用于跨 Beat 状态连贯。必须包含以下类型：
+17. **【V4.0 新增】persistent_state_anchors (持久状态锚点)**: 每个 beat 必须输出状态锚点列表，用于跨 Beat 状态连贯。必须包含以下类型：
     - unresolved_conflict: 当前未解决的冲突（如"角色A对角色B的怀疑尚未消除"）
     - emotional_tone: 角色情感基调（如"主角处于焦虑但克制的状态"）
     - spatial_attachment: 物理位置依附关系（如"角色C仍在机甲内部，未脱离"）
     这些锚点将在 Drafting 阶段作为结构化数据注入，禁止合并为纯文本。
-18. **【V3.6 新增】world_state_constraint (世界状态强制约束)**: 
+18. **【V4.0 新增】world_state_constraint (世界状态强制约束)**: 
     - 如果提供了「前一章末尾世界状态快照」，必须将其作为物理现实的金标准
     - Beats 规划严禁违反 snapshot 中的任何物理状态、位置或意图
     - Beat 1 的 entry_state 必须完全锚定 snapshot 中的状态，禁止任何偏离

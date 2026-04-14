@@ -169,7 +169,7 @@ class Chapter(Base):
     generation_run_id = Column(String(64), nullable=True)
     generation_status = Column(JSONB, default=dict)
     generation_checkpoints = Column(JSONB, default=list)
-    # V3.0 资产字典：存储当前场景出现的专有名词的物理定义（如机甲体积、武器形态）
+    # V4.0 资产字典：存储当前场景出现的专有名词的物理定义（如机甲体积、武器形态）
     chapter_assets_schema = Column(Text, nullable=True, default="")
     # 世界状态快照：章节发布时提取，作为下一章的初始约束
     world_snapshot = Column(JSONB, default=dict)
@@ -501,8 +501,8 @@ class StoryBeat(Base):
     - entry_state / exit_state: 进入/退出状态，确保剧情不越界
     - red_lines: 红线约束列表，防止生成违规内容
     - pacing_type: 节奏类型 (Fast/Medium/Slow)，影响字数分配权重
-    - pov_aperture: 叙事光圈，控制 Drafting 阶段的视角景深 (V3.5)
-    - persistent_state_anchors: 持久状态锚点列表 (V3.5)
+    - pov_aperture: 叙事光圈，控制 Drafting 阶段的视角景深 (V4.0)
+    - persistent_state_anchors: 持久状态锚点列表 (V4.0)
     """
     __tablename__ = "story_beats"
 
@@ -514,9 +514,9 @@ class StoryBeat(Base):
     position = Column(Integer, default=0)
     location = Column(Text, nullable=True)
     pov_character = Column(String(120), nullable=True)
-    # V3.5: 叙事光圈，控制 Drafting 阶段的视角景深
+    # V4.0: 叙事光圈，控制 Drafting 阶段的视角景深
     pov_aperture = Column(String(50), nullable=True, default="subjective_observation")
-    # V3.5: 持久状态锚点列表，用于跨 Beat 状态连贯
+    # V4.0: 持久状态锚点列表，用于跨 Beat 状态连贯
     persistent_state_anchors = Column(JSONB, default=list)
     # POV 角色的知觉状态（意识清醒程度与物理行动力），由 Planner 生成
     pov_perception_state = Column(Text, nullable=True, default="正常")

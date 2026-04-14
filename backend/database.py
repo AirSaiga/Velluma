@@ -361,7 +361,7 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT DEFAULT '正常'",
         "expected_udt_names": {"text"},
     },
-    # V3.5: 叙事光圈与持久状态锚点
+    # V4.0: 叙事光圈与持久状态锚点
     {
         "table": "story_beats",
         "column": "pov_aperture",

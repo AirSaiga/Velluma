@@ -71,10 +71,6 @@ export function useIntentDrivenConfig() {
       .filter(Boolean)
   })
   
-  const canSelectMore = computed(() => {
-    return state.value.selectedIntents.length < 2
-  })
-  
   const canSelectMoreIntents = computed(() => {
     return state.value.selectedIntents.length < 2
   })
@@ -325,7 +321,6 @@ export function useIntentDrivenConfig() {
     userOverrides,
     selectedIntentTemplates,
     selectedGoalTemplates,
-    canSelectMore,
     canSelectMoreIntents,
     hasSelection,
     recommendedPlans,

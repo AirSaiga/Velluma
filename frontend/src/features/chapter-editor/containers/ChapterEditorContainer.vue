@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { Chapter, Character, ApiConfig, Asset } from '../../../types'
+import type { Chapter, Character, ApiConfig } from '../../../types'
+import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
-import { assetApi } from '../../../services/api'
+
 
 const props = defineProps<{
   selectedChapter: Chapter | null

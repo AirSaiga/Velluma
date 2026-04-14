@@ -31,13 +31,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - stitching.py: 统稿阶段（片段拼接成完整章节）
 - reviewing.py: 审查阶段（质量检查、逻辑校验）
 - refining.py: 精修阶段（基于反馈重写）
-- dual_track.py: 双轨生成（V3.5：节拍扩写 + 短文生成 + 对抗校对）
+- dual_track.py: 双轨生成（V4.0：节拍扩写 + 短文生成 + 对抗校对）
 - sketch_generator.py: 短文生成器（Track B）
 - adversarial_aligner.py: 对抗校对器
 - utils.py: 工具函数
 
 业务流程：
-1. load_chapter_context_v3: 加载上下文数据 (V3)
+1. load_chapter_context_v3: 加载上下文数据 (V4.0)
 2. generate_beats: 生成故事节拍
 3. generate_chunks_parallel: 并行生成片段（单轨模式）
 4. execute_dual_track_generation: 双轨生成（推荐）

@@ -79,7 +79,7 @@ async def stitch_chunks(
         prompt_logger: 可选的日志记录器，用于记录统稿 prompt
         sketch_text: 连贯速写文本，作为连贯性参考（双轨模式）
         book: 书籍实体，用于获取文风控制数据
-        persistent_state_anchors: 持久状态锚点列表，用于跨 Beat 状态平滑 (V3.5)
+        persistent_state_anchors: 持久状态锚点列表，用于跨 Beat 状态平滑 (V4.0)
 
     Returns:
         str: 统稿后的正文

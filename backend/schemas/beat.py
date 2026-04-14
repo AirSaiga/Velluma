@@ -40,11 +40,11 @@ class StoryBeatBase(BaseModel):
     pov_character: Optional[str] = Field(None, max_length=120)
     pov_mode: Optional[PovMode] = Field(
         default=PovMode.SINGLE,
-        description="V3.6 叙事视角模式：single(单视角)/ensemble(多角色共存)/omniscient(全知)"
+        description="V4.0 叙事视角模式：single(单视角)/ensemble(多角色共存)/omniscient(全知)"
     )
     pov_characters: List[str] = Field(
         default_factory=list,
-        description="V3.6 ensemble/omniscient模式下的多视角角色列表"
+        description="V4.0 ensemble/omniscient模式下的多视角角色列表"
     )
     pov_aperture: Optional[PovAperture] = Field(default=PovAperture.SUBJECTIVE_OBSERVATION, description="叙事光圈，控制视角景深")
     persistent_state_anchors: List[PersistentStateAnchor] = Field(default_factory=list, description="持久状态锚点列表")
@@ -74,11 +74,11 @@ class StoryBeatUpdate(BaseModel):
     pov_character: Optional[str] = Field(None, min_length=1, max_length=120)
     pov_mode: Optional[PovMode] = Field(
         default=None,
-        description="V3.6 叙事视角模式：single/ensemble/omniscient"
+        description="V4.0 叙事视角模式：single/ensemble/omniscient"
     )
     pov_characters: Optional[List[str]] = Field(
         default=None,
-        description="V3.6 ensemble模式下的多视角角色列表"
+        description="V4.0 ensemble模式下的多视角角色列表"
     )
     pov_aperture: Optional[PovAperture] = Field(None, description="叙事光圈，控制视角景深")
     persistent_state_anchors: Optional[List[PersistentStateAnchor]] = Field(None, description="持久状态锚点列表")

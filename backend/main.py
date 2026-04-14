@@ -252,7 +252,7 @@ app.include_router(inspiration_router)
 app.include_router(critique_router)
 app.include_router(maps_router)
 
-# V3.8 意图驱动层路由
+# V4.0 意图驱动层路由
 app.include_router(intent_driven_router)
 logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
 

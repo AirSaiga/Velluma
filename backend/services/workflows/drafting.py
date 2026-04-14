@@ -129,12 +129,12 @@ async def execute_draft_stage(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> List[BeatDraftResult]:
     """
-    V3.0 智能路由起草阶段主入口。
+    V4.0 智能路由起草阶段主入口。
 
-    V3.0 路由策略：
+    V4.0 路由策略：
     - TIER_1_FAST (Level 1-2): 疾速流，跳过复杂思考层，直接生成
     - TIER_2_STANDARD (Level 3): 均衡流，轻量级思考 + 串行生成
-    - TIER_3_FORTRESS (Level 4-5): 堡垒流，算力全开，保持 V2.5 完整流程
+    - TIER_3_FORTRESS (Level 4-5): 堡垒流，算力全开，保持 V4.0 完整流程
 
     Args:
         chapter: 章节对象
@@ -184,7 +184,7 @@ async def execute_draft_stage(
     if not effective_tier:
         effective_tier = flags.workflow_tier
 
-    logger.info(f"[Draft Stage] V3.0 智能路由启动，工作流层级: {effective_tier}，共 {len(beats)} 个 Beats")
+    logger.info(f"[Draft Stage] V4.0 智能路由启动，工作流层级: {effective_tier}，共 {len(beats)} 个 Beats")
 
     # 路由到对应路径
     if effective_tier == "TIER_1_FAST":
@@ -243,7 +243,7 @@ async def _execute_fast_path(
     stats_callback: LLMStatsCallback = None,
 ) -> List[BeatDraftResult]:
     """
-    V3.0 Tier 1: 疾速流 (Fast-Path) - 完全并发版本。
+    V4.0 Tier 1: 疾速流 (Fast-Path) - 完全并发版本。
 
     特点: 跳过 Scene Intent/Subconscious，完全并发生成，单次调用 creative_model。
     适用场景: 低张力日常剧情 (tension_level 1-2)。
@@ -332,7 +332,7 @@ async def _execute_standard_path(
     reasoning_config: Optional[dict] = None,
 ) -> List[BeatDraftResult]:
     """
-    V3.0 Tier 2: 均衡流 (Standard-Path)。
+    V4.0 Tier 2: 均衡流 (Standard-Path)。
 
     特点: 轻量级 Subconscious（无 MCTS），串行调用 creative_model。
     适用场景: 中等张力剧情 (tension_level 3)。
@@ -453,12 +453,12 @@ async def _execute_fortress_path(
     reasoning_config: Optional[dict] = None,
 ) -> List[BeatDraftResult]:
     """
-    V3.0 Tier 3: 堡垒流 (Fortress-Path)。
+    V4.0 Tier 3: 堡垒流 (Fortress-Path)。
 
     特点: MCTS 三分支 Subconscious 搜索，全部 5 维 DynamicContext，Fail-Fast 断言检查。
     适用场景: 高张力关键剧情 (tension_level 4-5)。
     """
-    logger.info("[Fortress Path] 启动堡垒流生成（V2.5 完整管线）...")
+    logger.info("[Fortress Path] 启动堡垒流生成（V4.0 完整管线）...")
     flags = feature_flags or DraftingFeatureFlags()
     stage_start = time.perf_counter()
 
@@ -500,7 +500,7 @@ async def _execute_fortress_path(
 
     logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
 
-    logger.info("[Draft Stage] 步骤 B-V25: 串行生成正文（Rolling Prefix + 认知组件）...")
+    logger.info("[Draft Stage] 步骤 B-V4.0: 串行生成正文（Rolling Prefix + 认知组件）...")
     step_b_start = time.perf_counter()
 
     prose_results = await _generate_prose_serial_v25(
@@ -520,7 +520,7 @@ async def _execute_fortress_path(
         stats_callback=stats_callback,
     )
 
-    logger.info(f"[Draft Stage] 步骤 B-V25 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
+    logger.info(f"[Draft Stage] 步骤 B-V4.0 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
 
     results: List[BeatDraftResult] = []
     for i, beat in enumerate(beats):
@@ -556,7 +556,7 @@ def _build_fast_path_prompt(
     target_words: int,
     previous_summary: Optional[str] = None,
 ) -> tuple[str, str]:
-    """V3.0 Fast-Path: 构建疾速流的简化 Prompt"""
+    """V4.0 Fast-Path: 构建疾速流的简化 Prompt"""
     pov_character = beat.get("pov_character", "主角")
     location = beat.get("location", "未指定")
     summary = beat.get("summary", "")
@@ -603,7 +603,7 @@ def _build_standard_path_prompt(
     physical_state_lock: str,
     target_words: int,
 ) -> tuple[str, str]:
-    """V3.0 Standard-Path: 构建均衡流的 Prompt"""
+    """V4.0 Standard-Path: 构建均衡流的 Prompt"""
     pov_character = beat.get("pov_character", "主角")
     location = beat.get("location", "未指定")
     summary = beat.get("summary", "")

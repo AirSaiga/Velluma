@@ -18,19 +18,13 @@
           type="button"
           class="nav-node"
           :class="{
-            'is-active': currentWorkflowPage === page.key,
-            'is-complete': isWorkflowPageComplete(page.key),
-            'is-disabled': !canSwitchWorkflowPage(page.key)
+            'is-active': currentWorkflowPage === page.key
           }"
-          :disabled="!canSwitchWorkflowPage(page.key)"
           @click="setWorkflowPage(page.key)"
         >
           <div class="node-indicator">
             <div class="node-dot">
-              <svg v-if="isWorkflowPageComplete(page.key) && currentWorkflowPage !== page.key" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-              </svg>
-              <span v-else>{{ idx + 1 }}</span>
+              <span>{{ idx + 1 }}</span>
             </div>
             <div class="node-line" v-if="idx < workflowPages.length - 1"></div>
           </div>
@@ -194,10 +188,10 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
-import IntentSelector from './IntentSelector.vue'
-import GoalSelector from './GoalSelector.vue'
-import RecommendedPlanCard from './RecommendedPlanCard.vue'
-import ExpertOverridePanel from './ExpertOverridePanel.vue'
+import IntentSelector from '../presentation/IntentSelector.vue'
+import GoalSelector from '../presentation/GoalSelector.vue'
+import RecommendedPlanCard from '../presentation/RecommendedPlanCard.vue'
+import ExpertOverridePanel from '../presentation/ExpertOverridePanel.vue'
 
 const props = defineProps<{
   chapterId: string
@@ -255,8 +249,6 @@ const currentWorkflowIndex = computed(() => {
   return workflowPages.findIndex(page => page.key === currentWorkflowPage.value)
 })
 
-const canGoWorkflowPrev = computed(() => currentWorkflowIndex.value > 0)
-
 const canProceedCurrentPage = computed(() => {
   if (currentWorkflowPage.value === 'setup') {
     return selectedIntents.value.length > 0
@@ -265,28 +257,6 @@ const canProceedCurrentPage = computed(() => {
     return hasSelection.value && recommendedPlans.value.length > 0 && Boolean(selectedPlanType.value)
   }
   return true
-})
-
-const currentPageBlockReason = computed(() => {
-  if (currentWorkflowPage.value === 'setup' && selectedIntents.value.length === 0) {
-    return '请至少选择 1 个创作意图后再进入下一步'
-  }
-  if (currentWorkflowPage.value === 'plan') {
-    if (!hasSelection.value) {
-      return '请先完成意图与目标设置'
-    }
-    if (recommendedPlans.value.length === 0) {
-      return '暂无可用推荐方案，请先调整意图与目标'
-    }
-    if (!selectedPlanType.value) {
-      return '请选择一个推荐方案'
-    }
-  }
-  return ''
-})
-
-const canGoWorkflowNext = computed(() => {
-  return currentWorkflowIndex.value < workflowPages.length - 1
 })
 
 function getPlanName(type: string) {
@@ -310,63 +280,8 @@ function handleSave() {
   emit('save', payload)
 }
 
-function handleGenerate() {
-  const payload = buildPayload({
-    chapterId: props.chapterId,
-    apiConfig: props.apiConfig,
-    wordCount: wordCount.value,
-    authorIntent: authorIntent.value,
-    generate: true
-  })
-
-  emit('generate', payload)
-}
-
-function isWorkflowPageComplete(page: WorkflowPageKey): boolean {
-  if (page === 'setup') {
-    return selectedIntents.value.length > 0
-  }
-  if (page === 'plan') {
-    return hasSelection.value && recommendedPlans.value.length > 0 && Boolean(selectedPlanType.value)
-  }
-  return true
-}
-
-function canSwitchWorkflowPage(page: WorkflowPageKey): boolean {
-  const targetIndex = workflowPages.findIndex(item => item.key === page)
-  if (targetIndex <= currentWorkflowIndex.value) {
-    return true
-  }
-  for (let i = currentWorkflowIndex.value; i < targetIndex; i++) {
-    const pageKey = workflowPages[i].key
-    if (pageKey === 'setup' && selectedIntents.value.length === 0) {
-      return false
-    }
-    if (pageKey === 'plan') {
-      if (!hasSelection.value || recommendedPlans.value.length === 0 || !selectedPlanType.value) {
-        return false
-      }
-    }
-  }
-  return true
-}
-
 function setWorkflowPage(page: WorkflowPageKey) {
-  if (canSwitchWorkflowPage(page)) {
-    currentWorkflowPage.value = page
-  }
-}
-
-function goWorkflowPrev() {
-  if (!canGoWorkflowPrev.value) return
-  const prev = workflowPages[currentWorkflowIndex.value - 1]
-  currentWorkflowPage.value = prev.key
-}
-
-function goWorkflowNext() {
-  if (!canGoWorkflowNext.value || !canProceedCurrentPage.value) return
-  const next = workflowPages[currentWorkflowIndex.value + 1]
-  currentWorkflowPage.value = next.key
+  currentWorkflowPage.value = page
 }
 </script>
 
@@ -809,148 +724,6 @@ function goWorkflowNext() {
   background: rgba(255, 255, 255, 0.6);
   border-radius: 1rem;
   overflow: hidden;
-}
-
-.bottom-spacer {
-  height: 120px; /* 悬浮底栏的高度缓冲 */
-}
-
-/* 悬浮底栏 */
-.floating-action-bar-wrapper {
-  position: absolute;
-  bottom: 2rem;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  pointer-events: none;
-  z-index: 20;
-}
-
-.block-reason-toast {
-  background: #fffbeb;
-  color: #b45309;
-  border: 1px solid #fde68a;
-  padding: 0.5rem 1rem;
-  border-radius: 9999px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  margin-bottom: 0.75rem;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
-  pointer-events: auto;
-}
-
-.floating-pill {
-  display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 9999px;
-  padding: 0.5rem 0.5rem 0.5rem 1.5rem;
-  box-shadow: 0 20px 40px -8px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.05);
-  pointer-events: auto;
-}
-
-.pill-info {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-right: 1.5rem;
-}
-
-.info-item {
-  display: flex;
-  flex-direction: column;
-}
-
-.info-label {
-  font-size: 0.6875rem;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.info-value {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.info-divider {
-  width: 1px;
-  height: 2rem;
-  background: #e2e8f0;
-}
-
-.pill-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.pill-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.75rem 1.5rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.pill-btn.ghost {
-  background: transparent;
-  color: #64748b;
-}
-
-.pill-btn.ghost:hover {
-  background: #f1f5f9;
-  color: #0f172a;
-}
-
-.pill-btn.primary {
-  background: #0f172a;
-  color: white;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
-}
-
-.pill-btn.primary:hover:not(:disabled) {
-  background: #1e293b;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.3);
-}
-
-.pill-btn.secondary {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.pill-btn.secondary:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: #0f172a;
-}
-
-.pill-btn.generate {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-}
-
-.pill-btn.generate:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
-}
-
-.pill-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none !important;
-  box-shadow: none !important;
 }
 
 /* 动画 */
