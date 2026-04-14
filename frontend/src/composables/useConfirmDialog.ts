@@ -1,50 +1,72 @@
 import { getCurrentInstance, onUnmounted, ref } from 'vue'
 import type { ConfirmDialogOptions } from '../components/ConfirmDialog.vue'
 
+interface DialogRequest {
+  id: number
+  options: ConfirmDialogOptions
+  resolve: (value: boolean) => void
+}
+
 const visible = ref(false)
 const options = ref<ConfirmDialogOptions | null>(null)
-let resolvePromise: ((value: boolean) => void) | null = null
+const queue = ref<DialogRequest[]>([])
+let nextId = 0
+let currentRequest: DialogRequest | null = null
 
-function cleanupPromise() {
-  if (resolvePromise) {
-    resolvePromise(false)
-    resolvePromise = null
-    visible.value = false
-    options.value = null
+function processQueue() {
+  if (visible.value || queue.value.length === 0) return
+  currentRequest = queue.value.shift() || null
+  if (currentRequest) {
+    options.value = currentRequest.options
+    visible.value = true
   }
+}
+
+function cleanupAll() {
+  while (queue.value.length > 0) {
+    const req = queue.value.shift()
+    if (req) req.resolve(false)
+  }
+  if (currentRequest) {
+    currentRequest.resolve(false)
+    currentRequest = null
+  }
+  visible.value = false
+  options.value = null
 }
 
 export function useConfirmDialog() {
   const instance = getCurrentInstance()
   if (instance) {
-    onUnmounted(cleanupPromise)
+    onUnmounted(cleanupAll)
   }
 
   const show = (opts: ConfirmDialogOptions): Promise<boolean> => {
-    options.value = opts
-    visible.value = true
-    
     return new Promise((resolve) => {
-      resolvePromise = resolve
+      const id = nextId++
+      queue.value.push({ id, options: opts, resolve })
+      processQueue()
     })
   }
 
   const handleConfirm = () => {
     visible.value = false
-    if (resolvePromise) {
-      resolvePromise(true)
-      resolvePromise = null
+    if (currentRequest) {
+      currentRequest.resolve(true)
+      currentRequest = null
     }
     options.value = null
+    setTimeout(processQueue, 50)
   }
 
   const handleCancel = () => {
     visible.value = false
-    if (resolvePromise) {
-      resolvePromise(false)
-      resolvePromise = null
+    if (currentRequest) {
+      currentRequest.resolve(false)
+      currentRequest = null
     }
     options.value = null
+    setTimeout(processQueue, 50)
   }
 
   return {

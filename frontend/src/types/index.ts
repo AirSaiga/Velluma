@@ -111,7 +111,7 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   // === 编辑模式（已统一为意图驱动）===
   editor_mode?: 'intent'
   
-  // === V4.0 高层语义参数（基础模式推荐）===
+  // === V3.8 高层语义参数（基础模式推荐）===
   memory_strategy?: 'recent_only' | 'balanced_reference' | 'deep_dive'
   creativity_level?: 'strict_prompt' | 'balanced_creation' | 'wild_imagination'
   refinement_depth?: 'light' | 'standard' | 'deep'
@@ -146,9 +146,9 @@ export interface ConfirmedStoryBeat {
   summary: string
   location?: string
   pov_character?: string
-  pov_mode?: 'single' | 'ensemble' | 'omniscient'  // V4.0
-  pov_characters?: string[]                          // V4.0
-  pov_aperture?: string                              // V4.0
+  pov_mode?: 'single' | 'ensemble' | 'omniscient'  // V3.6
+  pov_characters?: string[]                          // V3.6
+  pov_aperture?: string                              // V3.5
   action_summary?: string
   worldbuilding_instruction?: string
   entry_state?: string
@@ -246,7 +246,7 @@ export interface ClarifyOutlineResponse {
   error?: string                     // 解析异常时的错误信息
 }
 
-// === 双轨生成架构相关类型 (Dual Track Architecture V4.0) ===
+// === 双轨生成架构相关类型 (Dual Track Architecture V3.5) ===
 
 export interface DualTrackGenerationRequest extends GenerateChapterAgenticPayload {
   beats?: ConfirmedStoryBeat[]
@@ -290,7 +290,7 @@ export interface DualTrackResult {
   debug_info: Record<string, any>
 }
 
-// === 人物提取相关类型 (Character Extraction V4.0) ===
+// === 人物提取相关类型 (Character Extraction V3.7) ===
 
 export interface ExtractedCharacterInfo {
   name: string

@@ -4,6 +4,7 @@ import CharacterPanel from '../../../components/CharacterPanel.vue'
 import { AssetPanel } from '../../asset-panel'
 import { useAssetContainer } from '../../asset-panel'
 import { ChapterEditor } from '../../chapter-editor'
+import ChapterConfigPanel from '../../chapter-editor/presentation/ChapterConfigPanel.vue'
 import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
@@ -41,29 +42,6 @@ const isDebugMode = computed(() => {
 const showSettingsModal = ref(false)
 const chapterEditorRef = ref<any>(null)
 
-// ========== 防抖标题输入 ==========
-function debounce<T extends (...args: any[]) => any>(fn: T, delay: number) {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  return (...args: Parameters<T>) => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), delay)
-  }
-}
-
-const debouncedUpdateChapterTitle = debounce((id: string, title: string) => {
-  updateChapter(id, { title })
-}, 600)
-
-function handleTopTitleInput(e: Event) {
-  if (!selectedChapter.value) return
-  debouncedUpdateChapterTitle(selectedChapter.value.id, (e.target as HTMLInputElement).value)
-}
-
-function handleTopTitleBlur(e: Event) {
-  if (!selectedChapter.value) return
-  debouncedUpdateChapterTitle(selectedChapter.value.id, (e.target as HTMLInputElement).value)
-}
-
 // ========== Zen Mode 首次引导 ==========
 const ZEN_HINT_KEY = 'velluma_zen_hint_shown'
 const showZenHint = ref(false)
@@ -73,14 +51,20 @@ function toggleZenModeWithHint() {
   if (isZenMode.value && !localStorage.getItem(ZEN_HINT_KEY)) {
     showZenHint.value = true
     localStorage.setItem(ZEN_HINT_KEY, '1')
-    setTimeout(() => { showZenHint.value = false }, 3500)
   }
 }
 
-// ========== 全局活动状态 ==========
+function dismissZenHint() {
+  showZenHint.value = false
+}
+
 const globalActivity = computed(() => {
   if (loading.value) return '加载书籍数据中...'
   if (critiqueLoading.value) return '主编审阅中...'
+  if (chapterEditorRef.value?.isGenerating?.value) return 'AI 正在生成本章正文...'
+  if (chapterEditorRef.value?.isPublishing?.value) return '正在发布并更新角色状态...'
+  if (chapterEditorRef.value?.beatPreviewLoading?.value) return 'Planner 正在规划情节节拍...'
+  if (chapterEditorRef.value?.isClarifyingOutline?.value) return '正在分析大纲意图...'
   return null
 })
 
@@ -134,7 +118,10 @@ const {
   onSelectBook: (bookId: string) => {
     currentBookId.value = bookId
   },
-  closeRightPanel: () => {}
+  closeRightPanel: () => {
+    activeFloatingTab.value = null
+    rightPanelExpanded.value = false
+  }
 })
 
 const {
@@ -224,6 +211,7 @@ const {
 const { assets, loadAssets } = useAssetContainer({ bookId: currentBookId.value || undefined })
 
 watch(currentBookId, (newBookId) => {
+  loadCurrentBookData()
   if (newBookId) {
     loadAssets()
   } else if (assets) {
@@ -364,7 +352,7 @@ onMounted(async () => {
   
   <!-- ========== 沉浸式主界面 ========== -->
   <div v-else class="immersive-app" :class="{ 'zen-mode': isZenMode }">
-    
+
     <!-- Zen Mode 首次引导 -->
     <Transition name="fade">
       <div
@@ -381,10 +369,16 @@ onMounted(async () => {
             <p class="font-medium">已进入沉浸模式</p>
             <p class="text-xs text-[var(--text-muted)] mt-0.5">按 <kbd class="px-1.5 py-0.5 bg-[var(--bg-panel)] rounded text-[10px]">Ctrl+Shift+Z</kbd> 退出，或点击顶部展开工具栏</p>
           </div>
+          <button
+            @click="dismissZenHint"
+            class="ml-2 px-2 py-1 text-xs rounded-md bg-[var(--accent-100)] text-[var(--accent-700)] hover:bg-[var(--accent-100)]/80 transition-colors"
+          >
+            知道了
+          </button>
         </div>
       </div>
     </Transition>
-
+    
     <!-- 顶部触发条 (Zen Mode 下悬停显示) -->
     <div 
       v-if="isZenMode"
@@ -457,19 +451,6 @@ onMounted(async () => {
             </button>
           </div>
           
-          <div class="chapter-info">
-            <span class="chapter-label">
-              {{ selectedChapter?.chapter_name || `第${selectedChapter?.chapter_number}章` }}
-            </span>
-            <input 
-              :value="selectedChapter?.title" 
-              @input="handleTopTitleInput"
-              @blur="handleTopTitleBlur"
-              placeholder="章节标题..."
-              class="chapter-title-input"
-            />
-          </div>
-          
           <div class="top-actions">
             <button @click="showSettingsModal = true" class="btn-icon" title="设置">
               <Icon name="settings" :size="16" />
@@ -531,16 +512,7 @@ onMounted(async () => {
             </div>
           </div>
           
-          <div v-if="sortedChapters.length === 0" class="empty-chapters-state">
-            <div class="empty-illustration">📝</div>
-            <p class="empty-title">还没有章节</p>
-            <p class="empty-desc">创建第一章，开启 AI 辅助创作之旅</p>
-            <button @click="createChapterFromOutlinePanel" class="btn-primary mt-2">
-              + 新建章节
-            </button>
-          </div>
-          
-          <button v-else @click="createChapterFromOutlinePanel" class="btn-primary">
+          <button @click="createChapterFromOutlinePanel" class="btn-primary">
             + 新建章节
           </button>
         </div>
@@ -646,6 +618,19 @@ onMounted(async () => {
               :save-notes="saveBookNotesFn"
               @close="closeRightPanel"
             />
+
+            <ChapterConfigPanel
+              v-else-if="activeFloatingTab === 'chapter-config'"
+              :selected-chapter="selectedChapter"
+              :characters="characters"
+              :assets="assets"
+              :is-character-selected="chapterEditorRef?.isCharacterSelected"
+              :is-asset-selected="chapterEditorRef?.isAssetSelected"
+              @toggle-character="chapterEditorRef?.toggleCharacter"
+              @toggle-asset="chapterEditorRef?.toggleAsset"
+              @update-chapter="updateChapter"
+              @close="closeRightPanel"
+            />
           </div>
         </div>
       </Transition>
@@ -676,17 +661,10 @@ onMounted(async () => {
     <!-- 新建书籍 -->
     <div v-if="showBookModal" class="modal-overlay" @click.self="showBookModal = false">
       <div class="modal">
-        <div class="modal-header">
-          <h3>新建书籍</h3>
-          <button class="btn-icon" @click="showBookModal = false">
-            <Icon name="x-mark" :size="18" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <input v-model="bookForm.title" placeholder="书名" />
-          <input v-model="bookForm.genre" placeholder="类型 (如：科幻、奇幻)" />
-          <textarea v-model="bookForm.global_sys_prompt" placeholder="全局提示词 (可选)" rows="3" />
-        </div>
+        <h3>新建书籍</h3>
+        <input v-model="bookForm.title" placeholder="书名" />
+        <input v-model="bookForm.genre" placeholder="类型 (如：科幻、奇幻)" />
+        <textarea v-model="bookForm.global_sys_prompt" placeholder="全局提示词 (可选)" rows="3" />
         <div class="modal-actions">
           <button @click="showBookModal = false">取消</button>
           <button @click="createBook" class="btn-primary">创建</button>
@@ -697,17 +675,10 @@ onMounted(async () => {
     <!-- 管理书籍 -->
     <div v-if="showManageBookModal" class="modal-overlay" @click.self="showManageBookModal = false">
       <div class="modal">
-        <div class="modal-header">
-          <h3>管理书籍</h3>
-          <button class="btn-icon" @click="showManageBookModal = false">
-            <Icon name="x-mark" :size="18" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <input v-model="manageBookForm.title" placeholder="书名" />
-          <input v-model="manageBookForm.genre" placeholder="类型" />
-          <textarea v-model="manageBookForm.core_motifs_taboos" placeholder="核心设定与禁忌" rows="3" />
-        </div>
+        <h3>管理书籍</h3>
+        <input v-model="manageBookForm.title" placeholder="书名" />
+        <input v-model="manageBookForm.genre" placeholder="类型" />
+        <textarea v-model="manageBookForm.core_motifs_taboos" placeholder="核心设定与禁忌" rows="3" />
         <div class="modal-actions">
           <button @click="deleteCurrentBook" class="btn-danger">删除书籍</button>
           <button @click="showManageBookModal = false">取消</button>
@@ -1272,40 +1243,6 @@ onMounted(async () => {
   margin-bottom: var(--space-3);
 }
 
-.empty-chapters-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: var(--space-4);
-  margin-bottom: var(--space-3);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-lg);
-  border: 1px dashed var(--color-border-hover);
-}
-
-.empty-illustration {
-  font-size: 28px;
-  margin-bottom: var(--space-2);
-  opacity: 0.8;
-}
-
-.empty-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0 0 var(--space-1) 0;
-}
-
-.empty-desc {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  margin: 0 0 var(--space-2) 0;
-  line-height: 1.5;
-}
-
 .chapter-item {
   display: flex;
   align-items: center;
@@ -1358,7 +1295,7 @@ onMounted(async () => {
 }
 
 .zen-mode .editor-container {
-  padding: var(--space-8);
+  padding: var(--space-8) var(--space-6);
 }
 
 /* ---------- 右侧悬浮工具栏 ---------- */
@@ -1372,7 +1309,7 @@ onMounted(async () => {
 }
 
 .right-floating-bar.panel-open {
-  right: 372px;
+  right: 384px;
 }
 
 .floating-tabs {
@@ -1471,12 +1408,12 @@ onMounted(async () => {
 }
 
 .status-bar.minimal .zen-hint {
-  opacity: 0.35;
+  opacity: 0;
   transition: opacity var(--transition-normal);
 }
 
 .status-bar.minimal:hover .zen-hint {
-  opacity: 0.8;
+  opacity: 0.5;
 }
 
 /* ========================================
@@ -1565,39 +1502,23 @@ onMounted(async () => {
 
 .modal {
   background: var(--color-bg-primary);
+  padding: var(--space-6);
   border-radius: var(--radius-xl);
   width: 90%;
   max-width: 420px;
   box-shadow: var(--shadow-xl);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.modal-header h3 {
-  margin: 0;
+.modal h3 {
+  margin: 0 0 var(--space-4) 0;
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
 }
 
-.modal-body {
-  padding: var(--space-5);
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-body input,
-.modal-body textarea {
+.modal input,
+.modal textarea {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-3);
@@ -1609,13 +1530,8 @@ onMounted(async () => {
   transition: all var(--transition-fast);
 }
 
-.modal-body input:last-child,
-.modal-body textarea:last-child {
-  margin-bottom: 0;
-}
-
-.modal-body input:focus,
-.modal-body textarea:focus {
+.modal input:focus,
+.modal textarea:focus {
   background: var(--color-bg-primary);
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px rgba(196, 167, 125, 0.1);
@@ -1626,7 +1542,7 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5) var(--space-5);
+  margin-top: var(--space-2);
 }
 
 .modal-actions button {
@@ -1698,23 +1614,12 @@ onMounted(async () => {
   transform: translateY(-6px) scale(0.98);
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.4s ease, transform 0.4s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
 /* ========================================
    滚动条样式
    ======================================== */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1727,13 +1632,8 @@ onMounted(async () => {
   opacity: 0.25;
 }
 
-:hover::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
 ::-webkit-scrollbar-thumb:hover {
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 /* ========================================

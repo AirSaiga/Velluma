@@ -188,7 +188,8 @@ async function streamDualTrackFn(
     onChunk?: (chunk: string) => void
     onDone?: (result: any) => void
     onError?: (error: string) => void
-  }
+  },
+  signal?: AbortSignal
 ) {
   let hasCompleted = false
 
@@ -368,11 +369,12 @@ export const generateApi = {
       onError?: (error: string) => void
     },
     endpoint = '/generate_chapter_agentic',
-    useLegacyMode = false
+    useLegacyMode = false,
+    signal?: AbortSignal
   ) => {
     // V4.0 默认使用双轨模式，除非显式指定使用传统模式
     if (!useLegacyMode && data.chapter_id) {
-      return streamDualTrackFn(data.chapter_id, data, callbacks)
+      return streamDualTrackFn(data.chapter_id, data, callbacks, signal)
     }
     let hasCompleted = false
 
@@ -408,7 +410,7 @@ export const generateApi = {
         hasCompleted = true
         callbacks.onError?.(message)
       }
-    }).catch(err => {
+    }, signal).catch(err => {
       if (!hasCompleted) {
         callbacks.onError?.(err.message)
       }
@@ -477,9 +479,10 @@ export const generateApi = {
       onChunk?: (chunk: string) => void
       onDone?: (result: any) => void
       onError?: (error: string) => void
-    }
+    },
+    signal?: AbortSignal
   ) => {
-    return streamDualTrackFn(chapterId, data, callbacks)
+    return streamDualTrackFn(chapterId, data, callbacks, signal)
   },
 
   /**

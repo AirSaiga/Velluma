@@ -34,6 +34,17 @@ const hasRefinedText = computed(() => {
   return !!props.clarificationResult?.refined_text?.trim()
 })
 
+const hasQuestions = computed(() => {
+  return (props.clarificationResult?.clarifying_questions?.length || 0) > 0
+})
+
+const currentStep = computed(() => {
+  if (props.isProcessing && !hasRefinedText.value) return 2
+  if (hasRefinedText.value) return 3
+  if (hasQuestions.value) return 1
+  return 3
+})
+
 watch(() => props.show, (newVal) => {
   if (newVal) {
     updateEditableOutline()
@@ -109,7 +120,7 @@ function handleConfirm() {
     <div
       v-if="show"
       ref="modalRef"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 backdrop-blur-sm p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/35 backdrop-blur-sm p-4"
       @click.self="handleClose"
     >
       <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -129,6 +140,35 @@ function handleConfirm() {
           </button>
         </div>
 
+        <!-- Stepper -->
+        <div class="px-6 pt-4">
+          <div class="flex items-center gap-2">
+            <div
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+              :class="currentStep >= 1 ? 'bg-[var(--accent-100)] text-[var(--accent-700)]' : 'bg-[var(--bg-canvas)] text-[var(--text-muted)]'"
+            >
+              <span class="w-4 h-4 rounded-full bg-current/20 flex items-center justify-center text-[10px]">1</span>
+              <span>补充信息</span>
+            </div>
+            <div class="flex-1 h-px bg-[var(--border-color)]"></div>
+            <div
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+              :class="currentStep >= 2 ? 'bg-[var(--accent-100)] text-[var(--accent-700)]' : 'bg-[var(--bg-canvas)] text-[var(--text-muted)]'"
+            >
+              <span class="w-4 h-4 rounded-full bg-current/20 flex items-center justify-center text-[10px]">2</span>
+              <span>AI 修正</span>
+            </div>
+            <div class="flex-1 h-px bg-[var(--border-color)]"></div>
+            <div
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+              :class="currentStep >= 3 ? 'bg-[var(--accent-100)] text-[var(--accent-700)]' : 'bg-[var(--bg-canvas)] text-[var(--text-muted)]'"
+            >
+              <span class="w-4 h-4 rounded-full bg-current/20 flex items-center justify-center text-[10px]">3</span>
+              <span>确认应用</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Body -->
         <div class="p-6 overflow-y-auto custom-scrollbar flex flex-col gap-6">
           
@@ -141,8 +181,8 @@ function handleConfirm() {
             </ul>
           </div>
 
-          <!-- 交互式问题区域 -->
-          <div v-if="clarificationResult?.clarifying_questions?.length" class="flex flex-col gap-4">
+          <!-- 步骤 1：交互式问题区域 -->
+          <div v-if="currentStep === 1 && clarificationResult?.clarifying_questions?.length" class="flex flex-col gap-4">
             <h4 class="text-sm font-semibold text-[var(--accent-700)]">请补充以下细节：</h4>
             <div 
               v-for="q in clarificationResult.clarifying_questions" 
@@ -184,81 +224,83 @@ function handleConfirm() {
                 />
               </div>
             </div>
+            <div class="flex justify-end gap-2 pt-2">
+              <button
+                @click="handleClose"
+                class="px-4 py-2 text-sm rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:bg-parchment-100"
+              >
+                跳过
+              </button>
+              <button
+                @click="handleApply"
+                :disabled="!hasSelectedAnswers || isProcessing"
+                class="px-4 py-2 text-sm rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                <svg v-if="isProcessing" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                提交回答
+              </button>
+            </div>
           </div>
 
-          <!-- 保留原有的补充建议展示 -->
-          <div v-else-if="clarificationResult?.clarification_suggestions?.length" class="bg-[var(--bg-panel)] border border-[var(--border-color)] rounded-xl p-4">
-            <h4 class="text-sm font-semibold text-[var(--accent-700)] mb-2">AI 的补充建议：</h4>
-            <ul class="list-disc list-inside text-sm text-[var(--text-secondary)] space-y-1 ml-2">
-              <li v-for="(sugg, i) in clarificationResult.clarification_suggestions" :key="i">
-                {{ sugg }}
-              </li>
-            </ul>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <label class="text-sm font-semibold text-[var(--text-primary)]">
-              {{ hasRefinedText ? '修正后的大纲 (您可以继续修改)：' : '当前大纲 (选择选项后将生成修正版本)：' }}
-            </label>
-            <textarea
-              v-model="editableOutline"
-              :disabled="!hasRefinedText || isProcessing"
-              :class="[
-                'w-full h-40 p-3 border rounded-xl text-sm custom-scrollbar resize-none',
-                hasRefinedText 
-                  ? 'bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)] focus:border-transparent' 
-                  : 'bg-[var(--bg-panel)] border-[var(--border-color)] text-[var(--text-primary)] cursor-not-allowed'
-              ]"
-              :placeholder="editableOutline ? '' : (hasRefinedText ? '在此处补充细节...' : '请先选择上方的选项，系统将基于您的选择生成修正大纲')"
-            ></textarea>
-            <p v-if="!hasRefinedText" class="text-xs text-[var(--accent-700)]">
-              第 1 步：选择上方的选项，然后点击"生成修正大纲"
-            </p>
-            <p v-else class="text-xs text-[var(--accent-700)]">
-              第 2 步：您可以继续编辑修正后的大纲，然后点击"确认并生成节拍"
-            </p>
-          </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="px-6 py-4 border-t border-[var(--border-color)] bg-[var(--bg-panel)] flex justify-end gap-3">
-          <button 
-            @click="handleClose" 
-            class="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg hover:bg-[var(--bg-canvas)] transition-colors"
-          >
-            {{ hasRefinedText ? '取消' : '忽略建议并继续' }}
-          </button>
-          <button 
-            v-if="!hasRefinedText"
-            @click="handleApply" 
-            :disabled="!hasSelectedAnswers || isProcessing"
-            :class="[
-              'px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2',
-              hasSelectedAnswers && !isProcessing
-                ? 'text-white bg-[var(--accent-500)] hover:bg-accent-600' 
-                : 'text-[var(--text-muted)] bg-[var(--bg-tertiary)] cursor-not-allowed'
-            ]"
-          >
-            <svg v-if="isProcessing" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+          <!-- 步骤 2：处理中提示 -->
+          <div v-else-if="currentStep === 2" class="flex flex-col items-center justify-center py-8 gap-3">
+            <svg class="animate-spin h-8 w-8 text-[var(--accent-500)]" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>{{ isProcessing ? '生成修正中...' : '生成修正大纲' }}</span>
-          </button>
-          <button 
-            v-else
-            @click="handleConfirm" 
-            :disabled="isProcessing"
-            class="px-4 py-2 text-sm font-medium text-white bg-[var(--accent-500)] rounded-lg hover:bg-accent-600 shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <svg v-if="isProcessing" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>{{ isProcessing ? '处理中...' : '确认并生成节拍' }}</span>
-          </button>
-        </div>
+            <p class="text-sm text-[var(--text-secondary)]">AI 正在根据您的回答修正大纲...</p>
+          </div>
 
+          <!-- 步骤 3：审阅修正后的大纲 -->
+          <div v-else-if="currentStep === 3" class="flex flex-col gap-4">
+            <div v-if="clarificationResult?.clarification_suggestions?.length" class="bg-[var(--bg-panel)] border border-[var(--border-color)] rounded-xl p-4">
+              <h4 class="text-sm font-semibold text-[var(--accent-700)] mb-2">AI 的补充建议：</h4>
+              <ul class="list-disc list-inside text-sm text-[var(--text-secondary)] space-y-1 ml-2">
+                <li v-for="(sugg, i) in clarificationResult.clarification_suggestions" :key="i">
+                  {{ sugg }}
+                </li>
+              </ul>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <label class="text-sm font-semibold text-[var(--text-primary)]">
+                修正后的大纲
+              </label>
+              <textarea
+                v-model="editableOutline"
+                rows="4"
+                class="w-full px-3 py-2.5 rounded-lg bg-[var(--bg-canvas)] text-[var(--text-primary)] text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--accent-500)] resize-none"
+                placeholder="修正后的大纲内容..."
+              />
+              <p class="text-xs text-[var(--text-muted)]">您可以继续编辑，确认后应用到大纲并继续生成。</p>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2">
+              <button
+                v-if="hasQuestions"
+                @click="selectedOptions = {}; customAnswers = {}; editableOutline = clarificationResult?.original_outline || ''"
+                class="px-4 py-2 text-sm rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:bg-parchment-100"
+              >
+                返回修改
+              </button>
+              <button
+                @click="handleClose"
+                class="px-4 py-2 text-sm rounded-lg bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:bg-parchment-100"
+              >
+                取消
+              </button>
+              <button
+                @click="handleConfirm"
+                class="px-4 py-2 text-sm rounded-lg bg-[var(--accent-500)] text-white hover:bg-accent-600"
+              >
+                确认应用并生成
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </Teleport>

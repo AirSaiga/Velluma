@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
@@ -24,13 +24,6 @@ const typeStyles: Record<ToastType, string> = {
   info: 'bg-blue-500 text-white'
 }
 
-const typeDurations: Record<ToastType, number> = {
-  success: 4000,
-  error: 6000,
-  warning: 5000,
-  info: 4000
-}
-
 const typeIcons: Record<ToastType, string> = {
   success: 'M5 13l4 4L19 7',
   error: 'M6 18L18 6M6 6l12 12',
@@ -41,15 +34,6 @@ const typeIcons: Record<ToastType, string> = {
 function removeToast(id: number) {
   emit('remove', id)
 }
-
-watch(() => props.toasts, (newToasts) => {
-  newToasts.forEach((toast) => {
-    const duration = typeDurations[toast.type]
-    setTimeout(() => {
-      removeToast(toast.id)
-    }, duration)
-  })
-}, { deep: true })
 </script>
 
 <template>

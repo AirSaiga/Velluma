@@ -3,7 +3,7 @@ import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi } from '../../../services/api'
-import type { ApiConfig, Chapter, Character, GenerateChapterAgenticPayloadWithBeats } from '../../../types'
+import type { ApiConfig, Chapter, Character, GenerateChapterAgenticPayloadWithBeats, BeatEditorItem } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 import { useBeatPreview } from './useBeatPreview'
 import { useOutlineClarification } from './useOutlineClarification'
@@ -20,7 +20,7 @@ export interface ChapterEditorContainerProps {
 type ChapterEditorEmit = (event: 'update-chapter' | 'update-meta-collapsed' | 'refresh-characters' | 'editor-entity-focus' | 'request-critique' | 'intent-generate' | 'intent-save', ...args: any[]) => void
 
 export function useChapterEditorContainer(props: ChapterEditorContainerProps, emit: ChapterEditorEmit) {
-  const { isGenerating, generatedText, error, workflowState, startAgenticGeneration, optimizeChapter, reset } = useChapterGenerator()
+  const { isGenerating, generatedText, error, workflowState, startAgenticGeneration, optimizeChapter, reset, cancelGeneration } = useChapterGenerator()
   const { showToast } = useToast()
   const { show: showConfirm } = useConfirmDialog()
   const { reset: resetIntentDrivenConfig, wordCount: intentWordCount } = useIntentDrivenConfig()
@@ -41,6 +41,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const isStreamMode = ref(true)
   const isAgenticMode = ref(true)
   const formError = ref('')
+
+  // 保存状态反馈
+  type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+  const saveStatus = ref<SaveStatus>('idle')
+  const lastSavedAt = ref<Date | null>(null)
+  let saveStatusTimer: ReturnType<typeof setTimeout> | undefined
 
   const isEditorDisabled = computed(() => isGenerating.value || publisher.isPublishing.value || beatPreview.beatPreviewLoading.value || outlineClarification.isClarifyingOutline.value)
   const isLoadingOverlay = computed(() => (isGenerating.value && isAgenticMode.value) || beatPreview.beatPreviewLoading.value || publisher.isPublishing.value || outlineClarification.isClarifyingOutline.value)
@@ -109,6 +115,9 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function closeAgenticSettingsModal() {
     showAgenticSettingsModal.value = false
+  }
+
+  function resetAgenticSettings() {
     resetIntentDrivenConfig()
   }
 
@@ -581,6 +590,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     toggleStreamMode,
     workflowState,
     handleApplyInspirationToOutline,
-    closeInspirationModal
+    closeInspirationModal,
+    cancelGeneration,
+    saveStatus,
+    lastSavedAt,
+    updatePreviewBeats: (beats: BeatEditorItem[]) => {
+      beatPreview.previewBeats.value = beats
+    }
   }
 }

@@ -40,6 +40,7 @@ class DraftingContext:
     previous_summary: Optional[str] = None
     relevant_memories: Optional[List[Any]] = None
     locations: Optional[List[Any]] = None
+    assets: Optional[List[Any]] = None
 
 
 @dataclass

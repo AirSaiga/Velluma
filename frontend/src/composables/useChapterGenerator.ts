@@ -34,6 +34,7 @@ export function useChapterGenerator() {
     passed: false,
     revisionCount: 0
   })
+  let abortController: AbortController | null = null
 
   function startGeneration(request: any, onChunk?: (chunk: string) => void, onComplete?: () => void) {
     if (isGenerating.value) {
@@ -74,6 +75,7 @@ export function useChapterGenerator() {
       onEvent?: (event: string, data: any) => void
       onChunk?: (chunk: string) => void
       onComplete?: (result: any) => void
+      onError?: (err: string) => void
     },
     endpoint = '/generate_chapter_agentic'
   ) {
@@ -81,6 +83,7 @@ export function useChapterGenerator() {
       return
     }
 
+    abortController = new AbortController()
     isGenerating.value = true
     generatedText.value = ''
     error.value = null
@@ -166,13 +169,26 @@ export function useChapterGenerator() {
         // 双轨模式返回 revision_count，普通模式可能返回 iterations
         workflowState.value.revisionCount = result.revision_count ?? result.iterations ?? 0
         isGenerating.value = false
+        abortController = null
         callbacks.onComplete?.(result)
       },
       onError: (err) => {
         error.value = err
         isGenerating.value = false
+        abortController = null
+        callbacks.onError?.(err)
       }
-    }, endpoint)
+    }, endpoint, false, abortController.signal)
+  }
+
+  function cancelGeneration() {
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
+    isGenerating.value = false
+    workflowState.value.currentEvent = null
+    workflowState.value.message = ''
   }
 
   async function optimizeChapter(request: any) {
@@ -207,6 +223,10 @@ export function useChapterGenerator() {
   }
 
   function reset() {
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
     isGenerating.value = false
     generatedText.value = ''
     error.value = null
@@ -226,6 +246,7 @@ export function useChapterGenerator() {
     workflowState,
     startGeneration,
     startAgenticGeneration,
+    cancelGeneration,
     optimizeChapter,
     reset
   }

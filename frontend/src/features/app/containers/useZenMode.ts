@@ -37,6 +37,7 @@ export function useZenMode(options: {
     { key: 'critique', label: '指导', icon: 'light-bulb', shortcut: '5' },
     { key: 'notes', label: '笔记', icon: 'pencil-square', shortcut: '6' },
     { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
+    { key: 'chapter-config', label: '章节', icon: 'document-text', shortcut: '8' },
   ]
 
   const rightTab = computed({

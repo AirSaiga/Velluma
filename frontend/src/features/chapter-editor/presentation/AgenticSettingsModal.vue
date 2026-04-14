@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
 import { IntentDrivenPanel } from '../../intent-driven'
-import { useFocusTrap } from '../../../composables/useFocusTrap'
 import type { ApiConfig, Chapter } from '../../../types'
 
-const props = defineProps<{
+defineProps<{
   show: boolean
   selectedChapter: Chapter | null
   apiConfig: ApiConfig
@@ -15,11 +13,6 @@ const emit = defineEmits<{
   (e: 'save', payload: any): void
   (e: 'generate', payload: any): void
 }>()
-
-const modalRef = ref<HTMLElement | null>(null)
-const showRef = computed(() => props.show)
-
-useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
 </script>
 
 <template>
@@ -27,7 +20,6 @@ useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
     <Transition name="modal-backdrop">
       <div
         v-if="show"
-        ref="modalRef"
         class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
         @click.self="emit('close')"
       >

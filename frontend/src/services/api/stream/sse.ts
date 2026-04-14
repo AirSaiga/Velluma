@@ -10,11 +10,13 @@ export interface StreamSseHandlers {
 export async function streamSse(
   endpoint: string,
   data: any,
-  handlers: StreamSseHandlers = {}
+  handlers: StreamSseHandlers = {},
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestRaw(endpoint, {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    signal
   })
 
   if (!response.ok) {

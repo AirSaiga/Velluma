@@ -4,7 +4,7 @@ import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
-
+import { assetApi } from '../../../services/api'
 
 const props = defineProps<{
   selectedChapter: Chapter | null
@@ -20,7 +20,18 @@ const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-ch
 const viewModel = useChapterEditorContainer(props, emit)
 
 defineExpose({
-  scrollToCritique: viewModel.scrollToCritique
+  scrollToCritique: viewModel.scrollToCritique,
+  isGenerating: viewModel.isGenerating,
+  isPublishing: viewModel.isPublishing,
+  beatPreviewLoading: viewModel.beatPreviewLoading,
+  isClarifyingOutline: viewModel.isClarifyingOutline,
+  saveStatus: viewModel.saveStatus,
+  lastSavedAt: viewModel.lastSavedAt,
+  toggleCharacter: viewModel.toggleCharacter,
+  toggleAsset: viewModel.toggleAsset,
+  isCharacterSelected: viewModel.isCharacterSelected,
+  isAssetSelected: viewModel.isAssetSelected,
+  handleAssetsSchemaInput: viewModel.handleAssetsSchemaInput
 })
 </script>
 
@@ -93,6 +104,10 @@ defineExpose({
     :assets="props.assets"
     :toggle-asset="viewModel.toggleAsset"
     :is-asset-selected="viewModel.isAssetSelected"
+    :save-status="viewModel.saveStatus.value"
+    :last-saved-at="viewModel.lastSavedAt.value"
+    :cancel-generation="viewModel.cancelGeneration"
+    :update-preview-beats="viewModel.updatePreviewBeats"
     @request-critique="(content) => emit('request-critique', content)"
     @intent-generate="(payload) => emit('intent-generate', payload)"
     @intent-save="(payload) => emit('intent-save', payload)"
