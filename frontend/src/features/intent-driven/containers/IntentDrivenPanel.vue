@@ -195,11 +195,6 @@ import ExpertOverridePanel from '../presentation/ExpertOverridePanel.vue'
 
 const props = defineProps<{
   chapterId: string
-  apiConfig: {
-    api_key: string
-    base_url?: string
-    model?: string
-  }
 }>()
 
 const emit = defineEmits<{
@@ -272,7 +267,6 @@ function getPlanName(type: string) {
 function handleSave() {
   const payload = buildPayload({
     chapterId: props.chapterId,
-    apiConfig: props.apiConfig,
     wordCount: wordCount.value,
     authorIntent: authorIntent.value
   })

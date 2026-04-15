@@ -70,9 +70,6 @@ async def _micro_review_assertion(
         chunk_text: 生成的正文片段
         beat: 节拍数据
         scene_intent: 场景意图
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
         stats_callback: 统计回调（可选）
 
     Returns:
@@ -91,8 +88,6 @@ async def _micro_review_assertion(
         "required_entities": beat.get("required_entities", []),
         "forbidden_locations": beat.get("forbidden_locations", []),
         "entities": beat.get("involved_characters", []), # 示例: [{"name": "张三", "traits": ["怯懦"]}]
-        "api_key": api_key,
-        "base_url": base_url,
     }
     
     validation_result = await validator.validate_draft(chunk_text, context)
@@ -110,8 +105,6 @@ async def _micro_review_assertion(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
             model=model,
             temperature=0.1,
         )
@@ -179,9 +172,6 @@ def _infer_fail_categories(
 
 async def _quick_qc(
     draft_chunks: List[dict],
-    api_key: str,
-    base_url: str,
-    model: str,
     stats_callback: Optional[Any] = None,
     reasoning_config: Optional[dict] = None,
 ) -> Dict[str, Any]:
@@ -195,9 +185,6 @@ async def _quick_qc(
 
     Args:
         draft_chunks: 起草片段列表
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
         stats_callback: 统计回调（可选）
         reasoning_config: 推理配置（可选）
 
@@ -223,9 +210,7 @@ async def _quick_qc(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="creative",
             temperature=0.2,
             reasoning_config=reasoning_config,
         )
@@ -251,9 +236,6 @@ async def refine_chunk_with_feedback(
     chunk_text: str,
     beat: dict,
     feedback: str,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     基于反馈精修片段。
@@ -262,9 +244,6 @@ async def refine_chunk_with_feedback(
         chunk_text: 原始片段
         beat: 节拍数据
         feedback: 反馈内容
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
 
     Returns:
         精修后的文本
@@ -279,9 +258,7 @@ async def refine_chunk_with_feedback(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="creative",
             temperature=0.3,
         )
 

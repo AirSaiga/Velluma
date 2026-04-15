@@ -136,9 +136,6 @@ class CharacterExtractionResult:
 async def extract_characters_from_chapter(
     chapter_content: str,
     existing_characters: List[Any],
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "gpt-4o-mini",
     timeout: int = 180,
 ) -> CharacterExtractionResult:
     """
@@ -149,9 +146,6 @@ async def extract_characters_from_chapter(
     Args:
         chapter_content: 章节正文内容
         existing_characters: 书籍中已有的角色列表
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
         timeout: 超时时间
         
     Returns:
@@ -179,9 +173,6 @@ async def extract_characters_from_chapter(
         extraction_data = await _call_llm_for_extraction(
             chapter_content=chapter_content,
             existing_character_names=list(existing_char_map.keys()),
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             timeout=timeout,
         )
         
@@ -293,9 +284,6 @@ def _simplify_name(name: str) -> str:
 async def _call_llm_for_extraction(
     chapter_content: str,
     existing_character_names: List[str],
-    api_key: str,
-    base_url: Optional[str],
-    model: str,
     timeout: int,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -316,14 +304,11 @@ async def _call_llm_for_extraction(
     
     try:
         _log_to_file(f"Calling LLM for extraction, model={model}")
-        svc_logger.info("Calling LLM for character extraction", model=model, content_length=len(chapter_content))
+        svc_logger.info("Calling LLM for character extraction", content_length=len(chapter_content))
         response = await _timeout_manager.call_with_timeout(
             call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
                 temperature=0.3,  # 低温度保证稳定性
             ),
             operation_type="character_extraction",
@@ -716,9 +701,6 @@ async def execute_character_extraction_workflow(
     character_repo: Any,
     relationship_repo: Any,
     chapter_repo: Any,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "gpt-4o-mini",
     timeout: int = 180,
 ) -> CharacterExtractionResult:
     """
@@ -737,9 +719,6 @@ async def execute_character_extraction_workflow(
         character_repo: 角色仓库
         relationship_repo: 关系仓库
         chapter_repo: 章节仓库
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
         timeout: 超时时间
         
     Returns:
@@ -754,9 +733,6 @@ async def execute_character_extraction_workflow(
     extraction_result = await extract_characters_from_chapter(
         chapter_content=chapter_content,
         existing_characters=existing_chars,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         timeout=timeout,
     )
     

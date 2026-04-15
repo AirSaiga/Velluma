@@ -36,36 +36,34 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 依赖项：
 - dashscope: 阿里云 DashScope SDK
-- 需设置 DASHSCOPE_API_KEY 环境变量
+- 需设置 DASHSCOPE_API_KEY 环境变量（或由 model_config.json 提供）
 
 使用方式：
     embedding = await get_embedding("需要向量化的文本")
 """
 
 import logging
-import os
 from typing import Optional
 
+from backend.core.model_config import get_embedding_config
 
 logger = logging.getLogger(__name__)
 
 
 async def get_embedding(
     text: str,
-    api_key: str = None,
-    base_url: Optional[str] = None,
-    model: str = "text-embedding-v2",
+    model: Optional[str] = None,
     timeout: int = 60,
 ) -> list:
     import dashscope
     from dashscope import TextEmbedding
-    from dotenv import load_dotenv
 
-    load_dotenv()
+    emb_config = get_embedding_config()
+    dashscope_api_key = emb_config.get("api_key", "")
+    emb_model = model or emb_config.get("model", "text-embedding-v2")
 
-    dashscope_api_key = os.environ.get("DASHSCOPE_API_KEY")
     if not dashscope_api_key:
-        logger.warning("[Embedding] DASHSCOPE_API_KEY 未设置")
+        logger.warning("[Embedding] API Key 未设置，请在 model_config.json 中配置 embedding.api_key")
         return []
 
     dashscope.api_key = dashscope_api_key
@@ -73,7 +71,7 @@ async def get_embedding(
     try:
         # text-embedding-v2 默认输出 1536 维，适配数据库的 Vector(1536)
         resp = TextEmbedding.call(
-            model=model,
+            model=emb_model,
             input=text,
         )
 

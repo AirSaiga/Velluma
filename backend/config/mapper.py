@@ -190,10 +190,7 @@ class ConfigValidator:
         """
         errors = []
 
-        if config.llm:
-            if not config.llm.api_key:
-                errors.append("api_key 不能为空")
-        else:
+        if not config.llm:
             errors.append("LLM 配置缺失")
 
         if config.chapter.target_word_count < 500:

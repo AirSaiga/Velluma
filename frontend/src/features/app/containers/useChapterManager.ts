@@ -102,7 +102,7 @@ export function useChapterManager(options: {
       return
     }
     try {
-      const result = await chapterApi.generateEmbedding(id, {})
+      const result = await chapterApi.generateEmbedding(id)
       showToast(`向量生成成功！维度: ${result.vector_dim}`, 'success')
     } catch (error: any) {
       showToast('生成失败: ' + error.message, 'error')

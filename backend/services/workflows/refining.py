@@ -59,9 +59,6 @@ async def refine_draft(
     current_draft: str,
     revision_plan: str,
     word_count: int,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """根据审阅意见精修章节初稿。
 
@@ -87,9 +84,6 @@ async def refine_draft(
     refined_text = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.7,
         max_tokens=10000,
     )
@@ -104,9 +98,6 @@ async def refine_single_beat(
     issue_descriptions: list[str],
     chapter: Chapter,
     book: Book,
-    api_key: str,
-    base_url: str,
-    model: str,
     previous_tail: str = "",
     beat_id: str = None,
     all_issues: list[dict] = None,
@@ -243,7 +234,6 @@ async def refine_single_beat(
         prompt_logger.log_prompts(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=model,
             temperature=0.7,
             max_tokens=6000,
             prompt_label=beat_label,
@@ -252,9 +242,6 @@ async def refine_single_beat(
     refined_text = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.7,
         max_tokens=6000,
     )

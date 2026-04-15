@@ -80,9 +80,6 @@ export interface GenerationPolicy {
 // 意图驱动请求
 export interface IntentDrivenGeneratePayload {
   chapter_id: string
-  api_key: string
-  base_url?: string
-  model?: string
   
   // 意图参数
   creative_intents?: CreativeIntentType[]

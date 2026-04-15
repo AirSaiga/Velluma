@@ -68,9 +68,6 @@ async def execute_clarification_stage(
     previous_issues: Optional[List[str]] = None,
     previous_chapter_snapshot: Optional[dict] = None,
     previous_world_terminal_state: Optional[WorldTerminalState] = None,
-    api_key: str = "",
-    base_url: str = "",
-    model: str = "",
 ) -> Dict[str, Any]:
     """执行意图澄清分析，生成澄清问题或修正后的大纲。
 
@@ -124,9 +121,6 @@ async def execute_clarification_stage(
         response_raw = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             temperature=0.3,  # 稍微给一点创造性，用于生成建议
             response_format={"type": "json_object"},
         )

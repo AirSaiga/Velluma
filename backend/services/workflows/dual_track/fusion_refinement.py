@@ -46,9 +46,6 @@ async def fusion_refine(
     beats: List[dict],
     chapter: Any,
     book: Any,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     融合精修主入口。
@@ -87,9 +84,6 @@ async def fusion_refine(
                 global_adjustments=adjustment_plan.global_adjustments,
                 chapter=chapter,
                 book=book,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
             )
         logger.info("[FusionRefine] 无可执行项，跳过精修")
         return stitched_draft
@@ -103,9 +97,6 @@ async def fusion_refine(
         beats=beats,
         chapter=chapter,
         book=book,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
     )
 
     refine_time = time.perf_counter() - refine_start
@@ -121,9 +112,6 @@ async def refine_by_beats(
     beats: List[dict],
     chapter: Any,
     book: Any,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     按节拍精修。
@@ -171,9 +159,6 @@ async def refine_by_beats(
                     issue_descriptions=issues,
                     chapter=chapter,
                     book=book,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
                     previous_tail=previous_tail,
                     beat_id=beat.get("beat_id"),
                 )
@@ -193,9 +178,6 @@ async def refine_globally(
     global_adjustments: List[str],
     chapter: Any,
     book: Any,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     全局精修。
@@ -241,9 +223,6 @@ async def refine_globally(
             current_draft=stitched_draft,
             revision_plan=revision_plan,
             word_count=original_word_count,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
         )
         return refined_text
     except Exception as e:

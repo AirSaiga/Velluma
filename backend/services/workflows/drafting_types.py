@@ -25,8 +25,6 @@ class DraftingModels:
     """LLM 模型配置"""
     creative_model: str
     reasoning_model: str
-    api_key: str
-    base_url: str
 
 
 @dataclass  

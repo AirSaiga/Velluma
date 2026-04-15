@@ -131,7 +131,7 @@ async function handleUpdateDynamicState() {
   if (!selectedCharacter.value || !props.selectedChapterId || !props.updateDynamicStateAction) return
 
   if (!props.canUpdateDynamicState) {
-    showToast('请先在设置中配置 API Key', 'warning')
+    showToast('请先选择章节', 'warning')
     return
   }
 

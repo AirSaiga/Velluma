@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { bookApi, characterApi, chapterApi, relationshipApi } from '../../../services/api'
 import { loadUiPrefs, type UiPrefs } from '../../../composables/useUiPrefs'
-import type { Book, Chapter, Character, Relationship, ApiConfig } from '../../../types'
+import type { Book, Chapter, Character, Relationship } from '../../../types'
 
 const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
 
@@ -12,15 +12,7 @@ export function useAppState() {
   const characters = ref<Character[]>([])
   const chapters = ref<Chapter[]>([])
   const relationships = ref<Relationship[]>([])
-  const apiConfig = ref<ApiConfig>({
-    api_key: '',
-    base_url: '',
-    model: 'google/gemini-2.0-flash-001',
-    reasoning_model: '',
-    creative_model: '',
-    proxy_enabled: true,
-    proxy_url: ''
-  })
+  // V4.1: 所有模型与代理配置已迁移至后端 model_config.json
   const uiPrefs = ref<UiPrefs>(loadUiPrefs())
   const loading = ref(false)
 
@@ -116,10 +108,7 @@ export function useAppState() {
     loadCurrentBookData()
   })
 
-  function updateApiConfig(data: Partial<ApiConfig>) {
-    apiConfig.value = { ...apiConfig.value, ...data }
-    localStorage.setItem('velluma_api_config', JSON.stringify(apiConfig.value))
-  }
+  // V4.1: 前端不再保存 API 配置到 localStorage
 
   return {
     books,
@@ -128,14 +117,12 @@ export function useAppState() {
     characters,
     chapters,
     relationships,
-    apiConfig,
     uiPrefs,
     loading,
     sortedChapters,
     currentBook,
     selectedChapter,
     loadBooks,
-    loadCurrentBookData,
-    updateApiConfig
+    loadCurrentBookData
   }
 }

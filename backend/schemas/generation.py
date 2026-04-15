@@ -177,7 +177,6 @@ AGENTIC_DEFAULT_RAG_LAMBDA = 0.1
 
 class GenerateChapterAgenticRequest(BaseModel):
     chapter_id: UUID
-    api_key: str = Field(..., min_length=1)
     generation_run_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
     resume_from_checkpoint: bool = Field(default=False)
 
@@ -199,10 +198,7 @@ class GenerateChapterAgenticRequest(BaseModel):
         description="精修深度：light/standard/deep"
     )
 
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini", description="默认模型（向后兼容）")
-    reasoning_model: Optional[str] = Field(None, description="高逻辑模型（用于 Scene Intent / Subconscious / Review）")
-    creative_model: Optional[str] = Field(None, description="高创意模型（用于 Prose Draft），默认使用 reasoning_model")
+    # 模型配置已迁移至根目录 model_config.json，前端不再传入
 
     word_count: Optional[int] = Field(default=AGENTIC_DEFAULT_WORD_COUNT, ge=1, description="期望生成的字数")
     author_intent: Optional[str] = Field(None, description="作者的创作意图")
@@ -222,18 +218,6 @@ class GenerateChapterAgenticRequest(BaseModel):
         description="V4.0 认知流式生成功能开关配置"
     )
 
-    reasoning_config: Optional[ReasoningConfig] = Field(
-        default_factory=lambda: ReasoningConfig(),
-        description="推理模式配置（单模型模式使用）"
-    )
-    reasoning_model_reasoning_config: Optional[ReasoningConfig] = Field(
-        default_factory=lambda: ReasoningConfig(),
-        description="逻辑推理模型的推理模式配置（双模型模式使用）"
-    )
-    creative_model_reasoning_config: Optional[ReasoningConfig] = Field(
-        default_factory=lambda: ReasoningConfig(),
-        description="创意生成模型的推理模式配置（双模型模式使用）"
-    )
 
     @field_validator('tension_level', mode='before')
     @classmethod
@@ -334,9 +318,6 @@ class ClarifyOutlineResponse(BaseModel):
 class ClarifyOutlineRequest(BaseModel):
     chapter_id: UUID
     ambiguous_text: str = Field(..., description="需要澄清的模糊文本或大纲")
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini", description="默认模型")
     author_intent: Optional[str] = Field(None, description="作者意图")
     user_instruction: Optional[str] = Field(None, description="用户针对系统澄清问题的补充说明或回答")
     previous_issues: Optional[List[str]] = Field(default_factory=list, description="上一轮识别出的问题列表")

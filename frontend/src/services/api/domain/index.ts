@@ -110,9 +110,9 @@ export const chapterApi = {
     requestJson(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
   publish: (chapterId: string, data: any) =>
     requestJson(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  generateEmbedding: (chapterId: string, apiConfig: any) =>
-    requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify(apiConfig || {}) }),
-  testCharacterExtraction: (data: { chapter_content: string; api_key: string; base_url?: string; model?: string }) =>
+  generateEmbedding: (chapterId: string) =>
+    requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify({}) }),
+  testCharacterExtraction: (data: { chapter_content: string }) =>
     requestJson('/debug/character-extraction', { method: 'POST', body: JSON.stringify(data) })
 }
 
@@ -417,7 +417,7 @@ export const generateApi = {
     })
   },
 
-  formatText: async (data: { text: string; api_key?: string; base_url?: string; model?: string }) => {
+  formatText: async (data: { text: string }) => {
     const response = await requestRaw('/format_text', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -436,10 +436,6 @@ export const generateApi = {
     chapter_title?: string
     current_context_snippet: string
     active_character_ids: string[]
-    temperature: number
-    api_key: string
-    base_url?: string
-    model?: string
     author_intent?: string
   }) => {
     const response = await requestRaw('/generate_inspiration', {
@@ -454,7 +450,7 @@ export const generateApi = {
     return await response.json()
   },
 
-  critiqueChapter: async (data: any) => {
+  critiqueChapter: async (data: { chapter_content: string; chapter_title?: string }) => {
     const response = await requestRaw('/critique_chapter', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -503,22 +499,11 @@ export const generateApi = {
 }
 
 export const systemApi = {
-  getProxyConfig: () => requestJson('/system/proxy'),
-  updateProxyConfig: (config: { enabled: boolean; url: string }) => 
-    requestJson('/system/proxy', { method: 'PUT', body: JSON.stringify(config) }),
-  
   /**
-   * 测试模型连接
-   * @param config 模型配置，包含 api_key, base_url, model, reasoning_enabled, reasoning_effort
-   * @returns 测试结果，包含连接状态和推理模式支持信息
+   * 测试模型连接（V4.1: 后端从 model_config.json 读取配置）
+   * @returns 测试结果
    */
-  testModel: async (config: {
-    api_key: string
-    base_url?: string
-    model: string
-    reasoning_enabled?: boolean
-    reasoning_effort?: string
-  }): Promise<{
+  testModel: async (): Promise<{
     success: boolean
     message: string
     model_info?: { model: string; base_url: string }
@@ -528,7 +513,7 @@ export const systemApi = {
   }> => {
     return requestJson('/system/test-model', {
       method: 'POST',
-      body: JSON.stringify(config)
+      body: JSON.stringify({})
     })
   }
 }

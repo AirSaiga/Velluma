@@ -21,51 +21,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 职责：
 - 管理 LLM API 调用的代理配置
-- 支持运行时启用/禁用代理
-- 提供代理 URL 查询接口
-
-业务场景：
-- 开发环境网络受限需通过代理访问外网
-- 生产环境可能需要代理进行流量控制
-- 测试环境需要切换不同代理
-
-主要功能：
-- 代理启用/禁用切换
-- 代理 URL 运行时修改
-- 环境变量同步
-
-依赖项：
-- os: 环境变量读写
-
-使用方式：
-    set_proxy_config(enabled=True, url="http://proxy.example.com:8080")
-    proxy = get_active_proxy()
+- 配置源统一为项目根目录 model_config.json
+- 支持运行时启用/禁用代理并同步环境变量
 """
 
 import os
 import logging
 from typing import Optional
 
+from backend.core.model_config import (
+    get_proxy_config as _get_proxy_config_from_file,
+    set_proxy_config as _set_proxy_config_in_file,
+)
 
 logger = logging.getLogger(__name__)
 
 
-_default_proxy = "http://127.0.0.1:4780"
-PROXY_URL = os.environ.get("PROXY_URL", _default_proxy)
-
-_proxy_config = {
-    "enabled": True,
-    "url": PROXY_URL,
-}
-
-
 def get_proxy_config() -> dict:
-    return _proxy_config.copy()
+    return _get_proxy_config_from_file()
 
 
 def set_proxy_config(enabled: bool, url: str):
-    _proxy_config["enabled"] = enabled
-    _proxy_config["url"] = url
+    _set_proxy_config_in_file(enabled, url)
     _clear_proxy_env()
     if enabled and url:
         os.environ["HTTP_PROXY"] = url
@@ -80,8 +57,9 @@ def set_proxy_config(enabled: bool, url: str):
 
 
 def get_active_proxy() -> Optional[str]:
-    if _proxy_config["enabled"] and _proxy_config["url"]:
-        return _proxy_config["url"]
+    cfg = get_proxy_config()
+    if cfg["enabled"] and cfg["url"]:
+        return cfg["url"]
     return None
 
 

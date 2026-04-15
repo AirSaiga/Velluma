@@ -41,6 +41,7 @@ from typing import Optional
 from fastapi import APIRouter
 
 from backend.core.config import get_actual_port, check_reasoning_support
+from backend.core.model_config import resolve_model_name, get_default_reasoning_config
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse
@@ -133,50 +134,55 @@ async def test_model_connection(request: ModelTestRequest):
     import time
     
     start_time = time.perf_counter()
+    model = resolve_model_name()
     
     try:
         # 构建推理配置（如果启用）
+        # V4.1: 若请求未指定，自动从 model_config.json 读取 reasoning 模型的默认配置
         reasoning_config = None
-        if request.reasoning_enabled:
+        reasoning_enabled = request.reasoning_enabled
+        reasoning_effort = request.reasoning_effort
+
+        if reasoning_enabled is None:
+            default_cfg = get_default_reasoning_config("reasoning")
+            if default_cfg:
+                reasoning_config = default_cfg
+                reasoning_enabled = True
+                reasoning_effort = default_cfg.get("reasoning", {}).get("effort", "medium")
+        elif reasoning_enabled:
             reasoning_config = {
                 "reasoning": {
                     "enabled": True,
-                    "effort": request.reasoning_effort
+                    "effort": reasoning_effort or "medium"
                 }
             }
-        
+
         # 发送测试请求
         test_prompt = "请回复'连接测试成功'这六个字，不要输出其他内容。"
         response = await call_llm(
             system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
             user_prompt=test_prompt,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
+            model=model,
             temperature=0.1,
             max_tokens=50,
             reasoning_config=reasoning_config,
         )
-        
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        
+
         # 检查推理模式支持
         reasoning_supported = None
         reasoning_message = None
-        
-        if request.reasoning_enabled:
-            # 检查模型名称
-            reasoning_supported, reasoning_message = check_reasoning_support(request.model)
-            
-            # 如果模型名称匹配，但实际请求可能失败（API 不支持）
-            # 这里我们基于模型名称判断，实际使用时如果 API 不支持会报错
-        
+
+        if reasoning_enabled:
+            reasoning_supported, reasoning_message = check_reasoning_support(model)
+
         return ModelTestResponse(
             success=True,
             message=f"模型连接成功，响应: {response[:50]}..." if len(response) > 50 else f"模型连接成功，响应: {response}",
             model_info={
-                "model": request.model,
-                "base_url": request.base_url or "默认"
+                "model": model,
+                "base_url": "默认"
             },
             reasoning_supported=reasoning_supported,
             reasoning_message=reasoning_message,
@@ -191,7 +197,7 @@ async def test_model_connection(request: ModelTestRequest):
         if "401" in error_msg or "Unauthorized" in error_msg or "invalid_api_key" in error_msg.lower():
             message = "API Key 无效或未授权，请检查 API Key 是否正确"
         elif "404" in error_msg or "not_found" in error_msg.lower() or "model" in error_msg.lower():
-            message = f"模型 {request.model} 不存在或不可用，请检查模型名称"
+            message = f"模型 {model} 不存在或不可用，请检查模型名称"
         elif "429" in error_msg or "rate_limit" in error_msg.lower():
             message = "请求过于频繁，请稍后重试"
         elif "timeout" in error_msg.lower():
@@ -203,7 +209,7 @@ async def test_model_connection(request: ModelTestRequest):
         else:
             message = f"连接测试失败: {error_msg[:200]}"
         
-        svc_logger.warning("Model test failed", model=request.model, error=error_msg)
+        svc_logger.warning("Model test failed", model=model, error=error_msg)
         
         return ModelTestResponse(
             success=False,

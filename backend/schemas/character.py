@@ -57,12 +57,7 @@ class CharacterResponse(CharacterBase):
 
 class CharacterDynamicStateUpdateRequest(BaseModel):
     chapter_id: UUID
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
     manual_current_state: Optional[str] = None
-    proxy_enabled: bool = Field(default=True)
-    proxy_url: Optional[str] = None
 
 
 class CharacterDynamicStateUpdateResponse(BaseModel):

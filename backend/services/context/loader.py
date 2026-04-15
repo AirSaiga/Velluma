@@ -247,8 +247,6 @@ async def load_relevant_memories(
     outline_text: str,
     book_id: str,
     chapter_number: int,
-    api_key: str,
-    base_url: Optional[str],
     rag_params: Dict[str, Any]
 ) -> List[Any]:
     """加载 RAG 相关记忆"""
@@ -261,7 +259,7 @@ async def load_relevant_memories(
         return []
     
     try:
-        embedding = await get_embedding(outline_text, api_key, base_url)
+        embedding = await get_embedding(outline_text)
         if not embedding:
             svc_logger.warning("Embedding generation returned empty")
             return []
@@ -336,8 +334,6 @@ async def load_full_chapter_context(
     chapter_id: str,
     repositories: RepositoriesDict,
     rag_params: Optional[Dict[str, Any]] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> Optional[ChapterContext]:
     """加载完整的章节上下文（一站式加载所有数据）
 
@@ -366,11 +362,11 @@ async def load_full_chapter_context(
     locations = await load_chapter_locations(repositories, chapter_id)
 
     relevant_memories = []
-    if rag_params and api_key and chapter.outline_text:
+    if rag_params and chapter.outline_text:
         relevant_memories = await load_relevant_memories(
             repositories, chapter, chapter.outline_text,
             chapter.book_id, chapter.chapter_number,
-            api_key, base_url, rag_params
+            rag_params
         )
 
     # 6. 获取关联资产

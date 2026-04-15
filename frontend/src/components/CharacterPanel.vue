@@ -16,10 +16,7 @@ const props = defineProps({
     type: String,
     default: null
   },
-  apiConfig: {
-    type: Object,
-    default: () => ({})
-  },
+
   prioritizedCharacterIds: {
     type: Array,
     default: () => []
@@ -33,7 +30,7 @@ const props = defineProps({
 const emit = defineEmits(['create-character', 'update-character', 'delete-character', 'create-relationship', 'update-relationship', 'delete-relationship'])
 
 const canUpdateDynamicState = computed(() => {
-  return !!props.apiConfig?.api_key
+  return !!props.selectedChapterId
 })
 
 function forwardCreateCharacter(data, onDone) {
@@ -65,12 +62,7 @@ async function handleUpdateDynamicState(characterId, currentState) {
 
   const result = await characterApi.updateDynamicState(characterId, {
     chapter_id: props.selectedChapterId,
-    api_key: props.apiConfig.api_key,
-    base_url: props.apiConfig.base_url,
-    model: props.apiConfig.reasoning_model || props.apiConfig.model,
-    manual_current_state: currentState,
-    proxy_enabled: props.apiConfig.proxy_enabled !== false,
-    proxy_url: props.apiConfig.proxy_url || undefined
+    manual_current_state: currentState
   })
 
   return result?.new_dynamic_state || ''

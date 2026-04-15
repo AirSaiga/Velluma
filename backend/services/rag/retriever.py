@@ -167,8 +167,6 @@ class MultiTypeMemoryRetriever:
     async def retrieve(
         self,
         context: RetrievalContext,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> RetrievalResult:
         """
         执行多类型检索
@@ -205,11 +203,9 @@ class MultiTypeMemoryRetriever:
         await self._retrieve_exact(context, result, scoring_context)
         
         # 3. 向量检索
-        if api_key:
-            await self._retrieve_vector(
-                context, result, scoring_context,
-                api_key, base_url
-            )
+        await self._retrieve_vector(
+            context, result, scoring_context
+        )
         
         # 4. 混合检索
         await self._retrieve_hybrid(context, result, scoring_context)
@@ -335,8 +331,6 @@ class MultiTypeMemoryRetriever:
         context: RetrievalContext,
         result: RetrievalResult,
         scoring_context: Dict[str, Any],
-        api_key: str,
-        base_url: Optional[str],
     ) -> None:
         """向量检索"""
         
@@ -346,18 +340,10 @@ class MultiTypeMemoryRetriever:
         try:
             # 获取查询向量
             if self.get_embedding:
-                embedding = await self.get_embedding(
-                    context.chapter.outline_text,
-                    api_key,
-                    base_url
-                )
+                embedding = await self.get_embedding(context.chapter.outline_text)
             else:
                 from backend.services.llm import get_embedding
-                embedding = await get_embedding(
-                    context.chapter.outline_text,
-                    api_key,
-                    base_url
-                )
+                embedding = await get_embedding(context.chapter.outline_text)
             
             if not embedding:
                 return
@@ -638,8 +624,6 @@ async def retrieve_chapter_memories(
     previous_summary: Optional[str],
     previous_world_state: Optional[Any],
     strategy: RetrievalStrategy = RetrievalStrategy.BALANCED_REFERENCE,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> RetrievalResult:
     """
     便捷函数：检索章节相关记忆
@@ -674,4 +658,4 @@ async def retrieve_chapter_memories(
     )
     
     retriever = MultiTypeMemoryRetriever(db)
-    return await retriever.retrieve(context, api_key, base_url)
+    return await retriever.retrieve(context)

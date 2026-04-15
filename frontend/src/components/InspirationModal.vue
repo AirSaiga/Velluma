@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { InspirationIdea, InspirationIdeaType, ApiConfig } from '../types'
+import type { InspirationIdea, InspirationIdeaType } from '../types'
 import { generateApi } from '../services/api'
 
 const props = defineProps<{
@@ -10,7 +10,6 @@ const props = defineProps<{
   chapterTitle?: string
   currentContext: string
   activeCharacterIds: string[]
-  apiConfig: ApiConfig
   initialAuthorIntent?: string
 }>()
 
@@ -62,11 +61,7 @@ async function fetchInspirations() {
       chapter_title: props.chapterTitle,
       current_context_snippet: props.currentContext,
       active_character_ids: props.activeCharacterIds,
-      author_intent: authorIntent.value,
-      temperature: 0.9,
-      api_key: props.apiConfig.api_key,
-      base_url: props.apiConfig.base_url,
-      model: props.apiConfig.reasoning_model || props.apiConfig.model || 'gpt-4o-mini'
+      author_intent: authorIntent.value
     })
 
     inspirations.value = response.inspirations || []

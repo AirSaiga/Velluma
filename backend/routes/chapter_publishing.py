@@ -112,12 +112,12 @@ async def publish_chapter(
 
     参数来源：
     - chapter_id: 路径参数
-    - request: 可选请求体，包含 api_key 等 AI 生成参数
+    - request: 可选请求体（V4.1: 模型配置已从 model_config.json 读取）
 
     核心副作用（三步执行）：
     1. 状态变更：chapter.status → "published"
     2. 自动摘要：生成摘要并存入 memory_chunks 表
-    3. 角色演进（可选）：若提供 api_key，调用 AI 更新角色 dynamic_state
+    3. 角色演进：调用 AI 更新角色 dynamic_state（配置从 model_config.json 读取）
 
     数据流详解：
     - 自动摘要：基于 content_text 生成 summary，并计算 embedding 存入 MemoryChunk
@@ -147,20 +147,15 @@ async def publish_chapter(
     svc_logger.debug("Summarizing text", length=len(text_to_summarize) if text_to_summarize else 0)
     
     # 生成摘要和 embedding
-    if request and request.api_key and text_to_summarize:
+    if text_to_summarize:
         summary = await generate_chapter_summary(
             text=text_to_summarize,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
         )
         
         if summary:
             chapter.summary = summary
             summary_embedding = await generate_summary_embedding(
                 summary=summary,
-                api_key=request.api_key,
-                base_url=request.base_url,
             )
             
             if summary_embedding:
@@ -176,95 +171,86 @@ async def publish_chapter(
 
     character_updates = []
     character_extraction_result = None
-    
-    if request and request.api_key:
-        # ========================================================================
-        # V4.0: 智能人物提取与关系推断
-        # ========================================================================
-        text_to_extract = chapter.content_text or chapter.draft_text or ""
-        _log_to_file(f"[DEBUG] Starting character extraction for chapter {chapter_id}, content length: {len(text_to_extract)}")
-        if text_to_extract:
-            try:
-                extraction_result = await asyncio.wait_for(
-                    execute_character_extraction_workflow(
-                        chapter_content=text_to_extract,
-                        chapter_id=chapter.id,
-                        book_id=chapter.book_id,
-                        character_repo=character_repo,
-                        relationship_repo=relationship_repo,
-                        chapter_repo=chapter_repo,
-                        api_key=request.api_key,
-                        base_url=request.base_url,
-                        model=request.model,
-                        timeout=180,
-                    ),
-                    timeout=200,
-                )
-                character_extraction_result = extraction_result
-                _log_to_file(f"[DEBUG] Character extraction completed: {len(extraction_result.extracted_characters)} total, {len(extraction_result.new_characters)} new")
-                svc_logger.info(
-                    f"Character extraction completed for chapter {chapter_id}: "
-                    f"{len(extraction_result.extracted_characters)} total, "
-                    f"{len(extraction_result.new_characters)} new, "
-                    f"{len(extraction_result.existing_characters)} existing"
-                )
-            except asyncio.TimeoutError:
-                _log_to_file("[DEBUG] Character extraction timed out")
-                svc_logger.warning(f"Character extraction timed out for chapter {chapter_id}")
-            except Exception as e:
-                _log_to_file(f"[DEBUG] Character extraction error: {e}")
-                svc_logger.error(f"Character extraction error for chapter {chapter_id}: {e}", exc_info=True)
-        
-        # ========================================================================
-        # 原有角色状态更新流程
-        # ========================================================================
-        character_list = []
-        seen_char_ids = set()
 
-        entities = await chapter_repo.list_entities_with_character(chapter_id)
-        if entities:
-            for entity in entities:
-                if entity.character and entity.character.id not in seen_char_ids:
-                    character_list.append(entity.character)
-                    seen_char_ids.add(entity.character.id)
-        
-        chapter_char_ids = getattr(chapter, "character_ids", None)
-        if chapter_char_ids:
-            missing_ids = [cid for cid in chapter_char_ids if cid not in seen_char_ids]
-            if missing_ids:
-                chars = await character_repo.list_by_ids(missing_ids)
-                for char in chars:
-                    if char.id not in seen_char_ids:
-                        character_list.append(char)
-                        seen_char_ids.add(char.id)
-
-        # 使用服务批量更新角色状态
-        update_results = await update_character_states(
-            character_list=character_list,
-            chapter=chapter,
-            character_repository=character_repo,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
-            proxy_enabled=request.proxy_enabled,
-            proxy_url=request.proxy_url,
-        )
-        
-        # 转换结果为 schema 格式
-        for result in update_results:
-            character_updates.append(
-                CharacterStateChange(
-                    character_id=result.character_id,
-                    character_name=result.character_name,
-                    old_state=result.old_state,
-                    new_state=result.new_state,
-                )
+    # ========================================================================
+    # V4.0: 智能人物提取与关系推断
+    # ========================================================================
+    text_to_extract = chapter.content_text or chapter.draft_text or ""
+    _log_to_file(f"[DEBUG] Starting character extraction for chapter {chapter_id}, content length: {len(text_to_extract)}")
+    if text_to_extract:
+        try:
+            extraction_result = await asyncio.wait_for(
+                execute_character_extraction_workflow(
+                    chapter_content=text_to_extract,
+                    chapter_id=chapter.id,
+                    book_id=chapter.book_id,
+                    character_repo=character_repo,
+                    relationship_repo=relationship_repo,
+                    chapter_repo=chapter_repo,
+                    timeout=180,
+                ),
+                timeout=200,
             )
+            character_extraction_result = extraction_result
+            _log_to_file(f"[DEBUG] Character extraction completed: {len(extraction_result.extracted_characters)} total, {len(extraction_result.new_characters)} new")
+            svc_logger.info(
+                f"Character extraction completed for chapter {chapter_id}: "
+                f"{len(extraction_result.extracted_characters)} total, "
+                f"{len(extraction_result.new_characters)} new, "
+                f"{len(extraction_result.existing_characters)} existing"
+            )
+        except asyncio.TimeoutError:
+            _log_to_file("[DEBUG] Character extraction timed out")
+            svc_logger.warning(f"Character extraction timed out for chapter {chapter_id}")
+        except Exception as e:
+            _log_to_file(f"[DEBUG] Character extraction error: {e}")
+            svc_logger.error(f"Character extraction error for chapter {chapter_id}: {e}", exc_info=True)
+
+    # ========================================================================
+    # 原有角色状态更新流程
+    # ========================================================================
+    character_list = []
+    seen_char_ids = set()
+
+    entities = await chapter_repo.list_entities_with_character(chapter_id)
+    if entities:
+        for entity in entities:
+            if entity.character and entity.character.id not in seen_char_ids:
+                character_list.append(entity.character)
+                seen_char_ids.add(entity.character.id)
+
+    chapter_char_ids = getattr(chapter, "character_ids", None)
+    if chapter_char_ids:
+        missing_ids = [cid for cid in chapter_char_ids if cid not in seen_char_ids]
+        if missing_ids:
+            chars = await character_repo.list_by_ids(missing_ids)
+            for char in chars:
+                if char.id not in seen_char_ids:
+                    character_list.append(char)
+                    seen_char_ids.add(char.id)
+
+    # 使用服务批量更新角色状态
+    update_results = await update_character_states(
+        character_list=character_list,
+        chapter=chapter,
+        character_repository=character_repo,
+    )
+
+    # 转换结果为 schema 格式
+    for result in update_results:
+        character_updates.append(
+            CharacterStateChange(
+                character_id=result.character_id,
+                character_name=result.character_name,
+                old_state=result.old_state,
+                new_state=result.new_state,
+            )
+        )
 
         # ========================================================================
         # V4.0: 世界终端状态提取 (WorldTerminalState)
         # ========================================================================
-        if text_to_summarize and request and request.api_key:
+        if text_to_summarize:
             try:
                 # 获取上一章的状态作为参考
                 prev_chapter = await chapter_repo.get_previous_chapter(chapter)
@@ -283,9 +269,6 @@ async def publish_chapter(
                     extract_world_terminal_state(
                         chapter_content=text_to_summarize,
                         character_list=character_list,
-                        reasoning_model=request.model,
-                        api_key=request.api_key,
-                        base_url=request.base_url,
                         chapter_id=chapter.id,
                         book_id=chapter.book_id,
                         previous_state=previous_state,
@@ -401,9 +384,6 @@ async def publish_chapter(
 class CharacterExtractionTestRequest(BaseModel):
     """人物提取测试请求"""
     chapter_content: str
-    api_key: str
-    base_url: Optional[str] = None
-    model: str = "gpt-4o-mini"
 
 
 class CharacterExtractionTestResponse(BaseModel):
@@ -457,9 +437,6 @@ async def test_character_extraction(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
             temperature=0.3,
         )
         

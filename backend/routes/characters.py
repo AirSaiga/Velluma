@@ -194,7 +194,7 @@ async def update_character_dynamic_state_endpoint(
 
     参数来源：
     - character_id: 路径参数
-    - request: 请求体，包含 chapter_id、api_key、base_url、model
+    - request: 请求体，包含 chapter_id（V4.1: 模型配置已从 model_config.json 读取）
 
     数据流：
     1. 验证角色存在
@@ -223,12 +223,7 @@ async def update_character_dynamic_state_endpoint(
         character=character,
         chapter=chapter,
         character_repository=character_repo,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
         manual_current_state=request.manual_current_state,
-        proxy_enabled=request.proxy_enabled,
-        proxy_url=request.proxy_url,
     )
     return CharacterDynamicStateUpdateResponse(
         character_id=character_id,

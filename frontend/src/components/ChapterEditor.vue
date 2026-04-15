@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import ChapterEditorContainer from '../features/chapter-editor/containers/ChapterEditorContainer.vue'
-import type { Chapter, Character, ApiConfig } from '../types'
+import type { Chapter, Character } from '../types'
 
 const props = defineProps<{
   selectedChapter: Chapter | null
   characters: Character[]
-  apiConfig: ApiConfig
   bookId?: string | null
   metaCollapsed?: boolean
   critiqueResult?: any
@@ -48,7 +47,6 @@ defineExpose({
     ref="containerRef"
     :selected-chapter="props.selectedChapter"
     :characters="props.characters"
-    :api-config="props.apiConfig"
     :book-id="props.bookId"
     :meta-collapsed="props.metaCollapsed"
     :critique-result="props.critiqueResult"

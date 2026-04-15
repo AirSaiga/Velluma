@@ -81,9 +81,6 @@ class SnapshotExtractorAgent:
         self,
         chapter_content: str,
         character_list: List[Character],
-        reasoning_model: str,
-        api_key: str,
-        base_url: Optional[str] = None,
         chapter_id: Optional[UUID] = None,
         book_id: Optional[UUID] = None,
         previous_state: Optional[WorldTerminalState] = None,
@@ -124,7 +121,6 @@ class SnapshotExtractorAgent:
                 chapter_content_length=len(chapter_content) if chapter_content else 0,
                 character_count=len(character_list),
                 has_previous_state=bool(previous_state),
-                reasoning_model=reasoning_model
             )
         
         try:
@@ -142,7 +138,6 @@ class SnapshotExtractorAgent:
                 self.prompt_logger.log_prompts(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt[:2000] + "..." if len(user_prompt) > 2000 else user_prompt,
-                    model=reasoning_model,
                     temperature=0.2,
                     max_tokens=3000,
                     prompt_label="SNAPSHOT_EXTRACTOR"
@@ -151,16 +146,13 @@ class SnapshotExtractorAgent:
             # =================================================================
             # 调用 LLM 进行提取
             # =================================================================
-            logger.debug(f"[SnapshotExtractor] Extracting state with model: {reasoning_model}")
+            logger.debug("[SnapshotExtractor] Extracting state")
             
             import asyncio
             response = await asyncio.wait_for(
                 call_llm(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=reasoning_model,
                     temperature=0.2,
                     max_tokens=3000,
                     response_format={"type": "json_object"}
@@ -466,9 +458,6 @@ class SnapshotExtractorAgent:
 async def extract_world_terminal_state(
     chapter_content: str,
     character_list: List[Character],
-    reasoning_model: str,
-    api_key: str,
-    base_url: Optional[str] = None,
     chapter_id: Optional[UUID] = None,
     book_id: Optional[UUID] = None,
     previous_state: Optional[WorldTerminalState] = None,
@@ -481,8 +470,6 @@ async def extract_world_terminal_state(
         state = await extract_world_terminal_state(
             chapter_content=chapter.content_text,
             character_list=characters,
-            reasoning_model="gpt-4o-mini",
-            api_key=api_key,
             chapter_id=chapter.id
         )
     """
@@ -490,9 +477,6 @@ async def extract_world_terminal_state(
     return await agent.extract(
         chapter_content=chapter_content,
         character_list=character_list,
-        reasoning_model=reasoning_model,
-        api_key=api_key,
-        base_url=base_url,
         chapter_id=chapter_id,
         book_id=book_id,
         previous_state=previous_state,

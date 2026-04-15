@@ -62,9 +62,6 @@ async def review_draft(
     relationships: list[CharacterRelationship],
     chapter_outline: str,
     draft_text: str,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> Tuple[dict, bool]:
     """
     【基础版】审阅章节初稿，检查 OOC、剧情合规性和逻辑完整性。
@@ -94,9 +91,6 @@ async def review_draft(
     review_result_json = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.1,
         response_format={"type": "json_object"},
     )
@@ -114,9 +108,6 @@ async def review_draft_with_beats(
     chapter_outline: str,
     draft_text: str,
     beats: list[dict],
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> Tuple[dict, bool]:
     """
     【增强版】审阅章节初稿，支持 Beat 级别的精准问题定位。
@@ -148,9 +139,6 @@ async def review_draft_with_beats(
     review_result_json = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.1,
         response_format={"type": "json_object"},
     )
@@ -167,9 +155,6 @@ async def surgical_refinement(
     relationships: list[CharacterRelationship],
     draft_text: str,
     target_exit_state: str,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     【精准裁剪】对越过 exit_state 的文本进行精准裁剪修复。
@@ -237,9 +222,6 @@ target_exit_state: "停在准备开门，但未看到门外"
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             temperature=0.4,  # 比正常写作低，保持稳定性
             max_tokens=len(draft_text) * 2,  # 确保足够长度
         )
@@ -262,9 +244,6 @@ async def quick_boundary_fix(
     chunk_text: str,
     beat_summary: str,
     target_exit_state: str,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     """
     【快速边界修复】对单个 Beat 的越界问题进行快速修复。
@@ -307,9 +286,6 @@ async def quick_boundary_fix(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             temperature=0.5,
             max_tokens=len(chunk_text) * 2,
         )

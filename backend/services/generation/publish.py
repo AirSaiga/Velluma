@@ -74,9 +74,6 @@ class CharacterUpdateResult:
 
 async def generate_chapter_summary(
     text: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
     timeout: int = 180,
 ) -> Optional[str]:
     """
@@ -99,9 +96,6 @@ async def generate_chapter_summary(
         summary = await _timeout_manager.call_with_timeout(
             llm_generate_summary(
                 text=text,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
             ),
             operation_type="summary",
             custom_timeout=timeout,
@@ -118,8 +112,6 @@ async def generate_chapter_summary(
 
 async def generate_summary_embedding(
     summary: str,
-    api_key: str,
-    base_url: Optional[str] = None,
     timeout: int = 120,
 ) -> Optional[List[float]]:
     """
@@ -139,7 +131,7 @@ async def generate_summary_embedding(
     try:
         svc_logger.debug("Generating summary embedding")
         embedding = await _timeout_manager.call_with_timeout(
-            get_embedding(summary, api_key, base_url),
+            get_embedding(summary),
             operation_type="embedding",
             custom_timeout=timeout,
         )
@@ -157,11 +149,6 @@ async def update_character_states(
     character_list: List[Any],
     chapter: Any,
     character_repository: Any,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
-    proxy_enabled: bool = True,
-    proxy_url: Optional[str] = None,
     timeout: int = 180,
 ) -> List[CharacterUpdateResult]:
     """
@@ -169,16 +156,12 @@ async def update_character_states(
 
     迁移说明 (2026-03-30)：
     - 已迁移到使用 character_repository 参数
+    - V4.1: 代理配置已从 model_config.json 读取
 
     Args:
         character_list: 角色列表
         chapter: 章节对象
         character_repository: CharacterRepository 实例
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
-        proxy_enabled: 是否启用代理
-        proxy_url: 代理 URL
         timeout: 超时时间
 
     Returns:
@@ -196,11 +179,6 @@ async def update_character_states(
             character=character,
             chapter=chapter,
             character_repository=character_repository,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            proxy_enabled=proxy_enabled,
-            proxy_url=proxy_url,
             timeout=timeout,
             update_func=update_character_dynamic_state,
         )
@@ -213,11 +191,6 @@ async def _update_single_character(
     character: Any,
     chapter: Any,
     character_repository: Any,
-    api_key: str,
-    base_url: Optional[str],
-    model: Optional[str],
-    proxy_enabled: bool,
-    proxy_url: Optional[str],
     timeout: int,
     update_func: Any,
 ) -> CharacterUpdateResult:
@@ -232,11 +205,6 @@ async def _update_single_character(
                 character=character,
                 chapter=chapter,
                 character_repository=character_repository,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                proxy_enabled=proxy_enabled,
-                proxy_url=proxy_url,
             ),
             operation_type="character_update",
             custom_timeout=timeout,

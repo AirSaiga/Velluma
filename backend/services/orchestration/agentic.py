@@ -386,12 +386,11 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, reposito
         author_intent=request.author_intent,
         previous_chapter_snapshot=previous_chapter_snapshot,
     )
-    planning_model = getattr(request, "reasoning_model", None) or request.model
+    from backend.core.model_config import resolve_model_name
+    planning_model = resolve_model_name(model_type="reasoning")
     planner_result_raw = await call_llm(
         system_prompt=planner_system_prompt,
         user_prompt=planner_user_prompt,
-        api_key=request.api_key,
-        base_url=request.base_url,
         model=planning_model,
         temperature=0.2,
         response_format={"type": "json_object"},

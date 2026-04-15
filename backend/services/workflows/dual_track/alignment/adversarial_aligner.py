@@ -154,23 +154,14 @@ class AdversarialAligner:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        model: str,
         config: Optional[AdversarialAlignerConfig] = None,
     ):
         """
         初始化对抗校对器。
 
         Args:
-            api_key: API 密钥
-            base_url: API 端点
-            model: 分析用模型
             config: 配置对象
         """
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
         self.config = config or AdversarialAlignerConfig()
 
     async def align(
@@ -311,9 +302,7 @@ class AdversarialAligner:
 
         try:
             response = await call_llm(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                model=self.model,
+                model_type="reasoning",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -392,9 +381,7 @@ class AdversarialAligner:
 
         try:
             response = await call_llm(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                model=self.model,
+                model_type="reasoning",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},

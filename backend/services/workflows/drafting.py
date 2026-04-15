@@ -109,10 +109,6 @@ async def execute_draft_stage(
     relationships: List[Any],
     beats: List[dict],
     open_hooks: List[dict],
-    api_key: str,
-    base_url: str,
-    reasoning_model: str,
-    creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -143,10 +139,6 @@ async def execute_draft_stage(
         relationships: 关系列表
         beats: Story beats 数据
         open_hooks: 开放的伏笔列表
-        api_key: LLM API Key
-        base_url: LLM Base URL
-        reasoning_model: 推理模型名称
-        creative_model: 创作模型名称
         word_count: 目标字数
         previous_summary: 前情摘要
         relevant_memories: 相关记忆列表
@@ -190,16 +182,14 @@ async def execute_draft_stage(
     if effective_tier == "TIER_1_FAST":
         return await _execute_fast_path(
             chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks, api_key=api_key, base_url=base_url,
-            reasoning_model=reasoning_model, creative_model=creative_model,
+            beats=beats, open_hooks=open_hooks,
             word_count=word_count, previous_summary=previous_summary,
             stats_callback=stats_callback,
         )
     elif effective_tier == "TIER_2_STANDARD":
         return await _execute_standard_path(
             chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks, api_key=api_key, base_url=base_url,
-            reasoning_model=reasoning_model, creative_model=creative_model,
+            beats=beats, open_hooks=open_hooks,
             word_count=word_count, previous_summary=previous_summary,
             relevant_memories=relevant_memories, locations=locations, assets=assets,
             enable_qc=enable_qc, feature_flags=flags,
@@ -211,8 +201,7 @@ async def execute_draft_stage(
     else:
         return await _execute_fortress_path(
             chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks, api_key=api_key, base_url=base_url,
-            reasoning_model=reasoning_model, creative_model=creative_model,
+            beats=beats, open_hooks=open_hooks,
             word_count=word_count, previous_summary=previous_summary,
             relevant_memories=relevant_memories, locations=locations, assets=assets,
             enable_qc=enable_qc, feature_flags=flags,
@@ -234,10 +223,6 @@ async def _execute_fast_path(
     relationships: List[Any],
     beats: List[dict],
     open_hooks: List[dict],
-    api_key: str,
-    base_url: str,
-    reasoning_model: str,
-    creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     stats_callback: LLMStatsCallback = None,
@@ -264,7 +249,6 @@ async def _execute_fast_path(
             response = await _call_llm_with_stats(
                 stage="fast_path_prose",
                 system_prompt=system_prompt, user_prompt=user_prompt,
-                api_key=api_key, base_url=base_url, model=creative_model,
                 temperature=0.75, max_tokens=_clamp_tokens(target_words),
                 beat_index=beat_index, stats_callback=stats_callback,
             )
@@ -314,10 +298,6 @@ async def _execute_standard_path(
     relationships: List[Any],
     beats: List[dict],
     open_hooks: List[dict],
-    api_key: str,
-    base_url: str,
-    reasoning_model: str,
-    creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -344,7 +324,6 @@ async def _execute_standard_path(
     try:
         scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
             beats=beats, chapter=chapter, open_hooks=open_hooks,
-            api_key=api_key, base_url=base_url, model=reasoning_model,
             stats_callback=stats_callback, reasoning_config=reasoning_config,
         )
     except Exception as e:
@@ -356,8 +335,7 @@ async def _execute_standard_path(
     try:
         subconscious_results = await _generate_lightweight_subconscious(
             beats=beats, scene_intent_results=scene_intent_results,
-            chapter=chapter, api_key=api_key, base_url=base_url,
-            model=reasoning_model, stats_callback=stats_callback,
+            chapter=chapter, stats_callback=stats_callback,
         )
     except Exception as e:
         logger.error(f"[Standard Path] Subconscious 生成失败: {e}")
@@ -393,7 +371,6 @@ async def _execute_standard_path(
         response = await _call_llm_with_stats(
             stage="standard_path_prose",
             system_prompt=system_prompt, user_prompt=user_prompt,
-            api_key=api_key, base_url=base_url, model=creative_model,
             temperature=0.75, max_tokens=_clamp_tokens(target_words),
             beat_index=i + 1, stats_callback=stats_callback,
         )
@@ -405,8 +382,7 @@ async def _execute_standard_path(
             chunk_text, _ = await _quick_qc(
                 prose_text=chunk_text, beat=beat, beat_index=i + 1,
                 chapter=chapter, book=book, entities=entities,
-                relationships=relationships, api_key=api_key,
-                base_url=base_url, model=creative_model,
+                relationships=relationships,
                 target_words=target_words,
             )
 
@@ -435,10 +411,6 @@ async def _execute_fortress_path(
     relationships: List[Any],
     beats: List[dict],
     open_hooks: List[dict],
-    api_key: str,
-    base_url: str,
-    reasoning_model: str,
-    creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -468,7 +440,6 @@ async def _execute_fortress_path(
     try:
         scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
             beats=beats, chapter=chapter, open_hooks=open_hooks,
-            api_key=api_key, base_url=base_url, model=reasoning_model,
             stats_callback=stats_callback, reasoning_config=reasoning_config,
         )
     except Exception as e:
@@ -480,7 +451,6 @@ async def _execute_fortress_path(
         subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
             beats=beats, scene_intent_results=scene_intent_results,
             chapter=chapter, entities=entities,
-            api_key=api_key, base_url=base_url, model=reasoning_model,
             stats_callback=stats_callback, reasoning_config=reasoning_config,
         )
     except Exception as e:
@@ -507,8 +477,7 @@ async def _execute_fortress_path(
         beats=beats, scene_intent_results=scene_intent_results,
         subconscious_results=subconscious_results,
         chapter=chapter, book=book, entities=entities,
-        relationships=relationships, api_key=api_key, base_url=base_url,
-        creative_model=creative_model, reasoning_model=reasoning_model,
+        relationships=relationships,
         word_count=word_count, previous_summary=previous_summary,
         relevant_memories=relevant_memories,
         locations=locations,
@@ -651,9 +620,6 @@ async def generate_chunks_parallel(
     open_hooks: List[dict],
     previous_summary: Optional[str],
     relevant_memories: List[Any],
-    api_key: str,
-    base_url: str,
-    model: str,
     word_count: int,
 ) -> List[str]:
     """
@@ -672,9 +638,6 @@ async def generate_chunks_parallel(
         open_hooks: 开放的伏笔列表
         previous_summary: 前情摘要
         relevant_memories: 相关记忆
-        api_key: LLM API Key
-        base_url: LLM Base URL
-        model: 模型名称
         word_count: 目标字数
 
     Returns:
@@ -696,7 +659,7 @@ async def generate_chunks_parallel(
             )
             scene_intent_raw = await call_llm(
                 system_prompt=scene_system_prompt, user_prompt=scene_user_prompt,
-                api_key=api_key, base_url=base_url, model=model,
+                model=model,
                 temperature=0.2, response_format={"type": "json_object"},
             )
             scene_intent_data = parse_scene_intent_result(scene_intent_raw, beat.get("summary", ""))
@@ -718,7 +681,7 @@ async def generate_chunks_parallel(
 
             chunk_text = await call_llm(
                 system_prompt=chunk_system_prompt, user_prompt=chunk_user_prompt,
-                api_key=api_key, base_url=base_url, model=model, temperature=0.7,
+                model=model, temperature=0.7,
             )
             return beat_index - 1, clean_llm_output(chunk_text)
         except Exception as e:

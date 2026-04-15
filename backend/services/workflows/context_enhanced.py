@@ -62,8 +62,6 @@ logger = logging.getLogger(__name__)
 async def load_chapter_context_v3(
     chapter_id: Any,
     repositories: Dict[str, Any],
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
     stage: str = "assembling",
     rag_top_k: int = 5,
     rag_alpha: float = 0.6,
@@ -89,15 +87,13 @@ async def load_chapter_context_v3(
 
     config = WorkflowIntegrationConfig(
         default_strategy=strategy,
-        enable_vector_search=api_key is not None,
+        enable_vector_search=True,
     )
 
     integrator = WorkflowRetrievalIntegrator(repositories, config)
 
     context_package, rag_result = await integrator.retrieve_chapter_context(
         chapter_id=chapter_id,
-        api_key=api_key,
-        base_url=base_url,
         stage=workflow_stage,
     )
 

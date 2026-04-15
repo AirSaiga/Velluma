@@ -165,45 +165,9 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               </p>
             </div>
             
-            <!-- 逻辑推理模型 -->
-            <div>
-              <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
-                <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                  逻辑推理模型
-                </span>
-              </label>
-              <input
-                :value="settings.reasoningModel"
-                @input="emit('update-expert-settings', { reasoningModel: ($event.target as HTMLInputElement).value })"
-                type="text"
-                placeholder="例如: openai/o3-mini, deepseek/deepseek-r1"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-              />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
-                内部字段：reasoning_model — 用于 Scene Intent 分析、审阅指导等
-              </p>
-            </div>
-            
-            <!-- 创意生成模型 -->
-            <div>
-              <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
-                <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 bg-amber-500 rounded-full"></span>
-                  创意生成模型
-                </span>
-              </label>
-              <input
-                :value="settings.creativeModel"
-                @input="emit('update-expert-settings', { creativeModel: ($event.target as HTMLInputElement).value })"
-                type="text"
-                placeholder="例如: claude-3-haiku, gemini-flash"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-              />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
-                内部字段：creative_model — 用于正文起草阶段
-              </p>
-            </div>
+            <p class="text-xs text-[var(--text-muted)]">
+              V4.1 起模型配置已迁移至后端 model_config.json，此处仅作备注。
+            </p>
           </div>
         </Transition>
       </section>
@@ -296,70 +260,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               </Transition>
             </div>
             
-            <!-- 逻辑推理模型推理配置 -->
-            <div class="p-4 bg-blue-500/5 rounded-xl border border-blue-500/20">
-              <div class="flex items-center justify-between mb-3">
-                <label class="text-sm font-medium text-[var(--text-primary)]">
-                  <span class="flex items-center gap-1.5">
-                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                    逻辑推理模型推理模式
-                  </span>
-                </label>
-                <button
-                  @click="emit('update-expert-settings', { 
-                    reasoningModelReasoningConfig: { 
-                      ...settings.reasoningModelReasoningConfig, 
-                      enabled: !settings.reasoningModelReasoningConfig.enabled 
-                    } 
-                  })"
-                  :class="[
-                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                    settings.reasoningModelReasoningConfig.enabled ? 'bg-blue-500' : 'bg-[var(--bg-tertiary)]'
-                  ]"
-                >
-                  <span
-                    :class="[
-                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                      settings.reasoningModelReasoningConfig.enabled ? 'translate-x-5' : 'translate-x-1'
-                    ]"
-                  />
-                </button>
-              </div>
-              <p class="text-xs text-[var(--text-muted)]">逻辑推理模型最推荐启用推理模式</p>
-            </div>
-            
-            <!-- 创意生成模型推理配置 -->
-            <div class="p-4 bg-amber-500/5 rounded-xl border border-amber-500/20">
-              <div class="flex items-center justify-between mb-3">
-                <label class="text-sm font-medium text-[var(--text-primary)]">
-                  <span class="flex items-center gap-1.5">
-                    <span class="w-2 h-2 bg-amber-500 rounded-full"></span>
-                    创意生成模型推理模式
-                  </span>
-                </label>
-                <button
-                  @click="emit('update-expert-settings', { 
-                    creativeModelReasoningConfig: { 
-                      ...settings.creativeModelReasoningConfig, 
-                      enabled: !settings.creativeModelReasoningConfig.enabled 
-                    } 
-                  })"
-                  :class="[
-                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                    settings.creativeModelReasoningConfig.enabled ? 'bg-amber-500' : 'bg-[var(--bg-tertiary)]'
-                  ]"
-                >
-                  <span
-                    :class="[
-                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                      settings.creativeModelReasoningConfig.enabled ? 'translate-x-5' : 'translate-x-1'
-                    ]"
-                  />
-                </button>
-              </div>
-              <p class="text-xs text-[var(--text-muted)]">创意写作通常不需要推理模式</p>
-            </div>
-            
+
           </div>
         </Transition>
       </section>

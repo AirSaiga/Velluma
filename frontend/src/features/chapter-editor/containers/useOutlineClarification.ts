@@ -21,10 +21,7 @@ export function useOutlineClarification() {
     clarificationResult.value = null
   }
 
-  async function checkOutlineClarification(
-    chapter: Chapter,
-    apiConfig: { api_key: string; base_url: string; reasoning_model?: string; model?: string }
-  ) {
+  async function checkOutlineClarification(chapter: Chapter) {
     const currentOutline = chapter.outline_text?.trim() || ''
     if (!currentOutline.length || currentOutline.length >= 200) {
       return { shouldIntercept: false as const }
@@ -35,9 +32,6 @@ export function useOutlineClarification() {
       const clarifyRes = await generateApi.clarifyOutline({
         chapter_id: chapter.id,
         ambiguous_text: currentOutline,
-        api_key: apiConfig.api_key,
-        base_url: apiConfig.base_url,
-        model: apiConfig.reasoning_model || apiConfig.model || 'gpt-4o-mini',
         author_intent: chapter.author_intent
       })
 
@@ -65,7 +59,6 @@ export function useOutlineClarification() {
     answers: { questionId: string; answer: string }[],
     originalOutline: string,
     chapter: Chapter | null,
-    apiConfig: { api_key: string; base_url: string; reasoning_model?: string; model?: string },
     onApply: (newOutlineText: string) => void | Promise<void>
   ) {
     if (!chapter) return
@@ -78,9 +71,6 @@ export function useOutlineClarification() {
       const clarifyRes = await generateApi.clarifyOutline({
         chapter_id: chapter.id,
         ambiguous_text: chapter.outline_text?.trim() || '',
-        api_key: apiConfig.api_key,
-        base_url: apiConfig.base_url,
-        model: apiConfig.reasoning_model || apiConfig.model || 'gpt-4o-mini',
         author_intent: chapter.author_intent,
         user_instruction: userInstruction,
         previous_issues: previousIssues

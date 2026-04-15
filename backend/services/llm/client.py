@@ -43,9 +43,7 @@ LLM 调用客户端 - 统一封装 OpenAI 兼容 API 调用。
     response = await generate_stream_response(
         system_prompt="...",
         user_prompt="...",
-        api_key="sk-...",
-        base_url="https://api.openai.com/v1",
-        model="gpt-4"
+        model_type="reasoning"  # 或 model="gpt-4"
     )
     async for chunk in response:
         print(chunk)
@@ -74,6 +72,7 @@ from backend.services.llm.proxy import (
     get_active_proxy as _get_active_proxy,
 )
 from backend.services.llm.embedding import get_embedding
+from backend.core.model_config import get_openrouter_config, resolve_model_name, get_default_reasoning_config
 
 
 logger = logging.getLogger(__name__)
@@ -108,8 +107,23 @@ async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
     return await client.chat.completions.create(**kwargs)
 
 
-async def generate_stream_response(system_prompt: str, user_prompt: str, api_key: str, base_url: Optional[str], model: str, max_tokens: int = 8192, reasoning_config: Optional[dict] = None):
+async def generate_stream_response(
+    system_prompt: str,
+    user_prompt: str,
+    model: Optional[str] = None,
+    model_type: str = "default",
+    max_tokens: int = 8192,
+    reasoning_config: Optional[dict] = None,
+):
     import httpx
+
+    or_config = get_openrouter_config()
+    api_key = or_config.get("api_key", "")
+    base_url = or_config.get("base_url", "https://openrouter.ai/api/v1")
+    resolved_model = resolve_model_name(model, model_type)
+
+    if reasoning_config is None:
+        reasoning_config = get_default_reasoning_config(model_type)
 
     yield f"data: {json.dumps({'prompt': {'system_prompt': system_prompt, 'user_prompt': user_prompt}}, ensure_ascii=False)}\n\n"
     http_client = None
@@ -122,7 +136,7 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
         client = AsyncOpenAI(**client_kwargs)
 
         create_kwargs = {
-            "model": model,
+            "model": resolved_model,
             "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             "stream": True,
             "temperature": 0.7,
@@ -185,9 +199,8 @@ async def generate_stream_response(system_prompt: str, user_prompt: str, api_key
 
 async def generate_summary(
     text: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "google/gemini-2.0-flash-001",
+    model: Optional[str] = None,
+    model_type: str = "default",
 ) -> str:
     system_prompt = "你是一个专业的小说编辑。请为以下章节生成 200 字以内的摘要，概括主要情节和关键伏笔。"
 
@@ -197,9 +210,8 @@ async def generate_summary(
             return await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=text,
-                api_key=api_key,
-                base_url=base_url,
                 model=model,
+                model_type=model_type,
             )
         except Exception as e:
             if attempt == max_retries - 1:
@@ -213,9 +225,8 @@ async def generate_summary(
 
 async def format_text_with_llm(
     text: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "google/gemini-2.0-flash-001",
+    model: Optional[str] = None,
+    model_type: str = "default",
 ) -> str:
     system_prompt = """你是一个专业的文本编辑助手。你的任务是整理用户提供的文本格式。
 具体要求：
@@ -228,9 +239,8 @@ async def format_text_with_llm(
     return await call_llm(
         system_prompt=system_prompt,
         user_prompt=text,
-        api_key=api_key,
-        base_url=base_url,
         model=model,
+        model_type=model_type,
         temperature=0.3,
     )
 
@@ -238,9 +248,8 @@ async def format_text_with_llm(
 async def call_llm(
     system_prompt: str,
     user_prompt: str,
-    api_key: str,
-    base_url: Optional[str],
-    model: str,
+    model: Optional[str] = None,
+    model_type: str = "default",
     temperature: float = 0.7,
     response_format: Optional[dict] = None,
     max_tokens: int = 8192,
@@ -248,6 +257,14 @@ async def call_llm(
     reasoning_config: Optional[dict] = None,
 ) -> str:
     import httpx
+
+    or_config = get_openrouter_config()
+    api_key = or_config.get("api_key", "")
+    base_url = or_config.get("base_url", "https://openrouter.ai/api/v1")
+    resolved_model = resolve_model_name(model, model_type)
+
+    if reasoning_config is None:
+        reasoning_config = get_default_reasoning_config(model_type)
 
     client_kwargs = {"api_key": api_key}
     if base_url:
@@ -259,7 +276,7 @@ async def call_llm(
     try:
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         create_kwargs = {
-            "model": model,
+            "model": resolved_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -291,9 +308,8 @@ async def optimize_selection_with_llm(
     context_after: str,
     outline: str,
     user_instruction: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "gpt-4o-mini",
+    model: Optional[str] = None,
+    model_type: str = "default",
 ) -> str:
     system_prompt = """你是一个专业的小说编辑和写作助手。
 你的任务是根据用户的指令，优化选中的文本片段。
@@ -331,8 +347,7 @@ async def optimize_selection_with_llm(
     return await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
         model=model,
+        model_type=model_type,
         temperature=0.7,
     )

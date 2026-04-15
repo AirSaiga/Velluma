@@ -53,28 +53,16 @@ class TrackBExecutor:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        model: str,
         config: Optional[SketchGeneratorConfig] = None,
     ):
         """
         初始化 Track B 执行器。
 
         Args:
-            api_key: API 密钥
-            base_url: API 端点
-            model: 生成模型
             config: 生成配置
         """
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
         self.config = config or SketchGeneratorConfig()
         self.generator = SketchGenerator(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             config=self.config,
         )
 

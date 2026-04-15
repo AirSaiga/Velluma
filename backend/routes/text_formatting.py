@@ -195,14 +195,12 @@ async def format_text(request: FormatTextRequest):
     业务目的：将原始文本整理为符合阅读习惯的格式
 
     处理逻辑：
-    1. 文本 < 3000 字且有 API Key：使用 LLM 智能格式化
-    2. 文本 >= 3000 字或无 API Key：使用增强规则引擎
+    1. 文本 < 3000 字：使用 LLM 智能格式化（配置从 model_config.json 读取）
+    2. 文本 >= 3000 字：使用增强规则引擎
 
     参数来源：
     - request.text: 待整理的原始文本
-    - request.api_key: 可选，用于 LLM 智能格式化
-    - request.base_url: 可选，自定义 API 地址
-    - request.model: 可选，模型名称
+    - request.text: 待整理的原始文本
 
     边界处理：
     - 空文本直接返回空字符串
@@ -224,28 +222,24 @@ async def format_text(request: FormatTextRequest):
         return {"formatted_text": formatted_text}
     
     # 短文本优先使用 LLM 智能格式化
-    if request.api_key:
-        try:
-            from backend.services.llm.formatting import llm_based_formatting
-            
-            formatted_text = await llm_based_formatting(
-                text=text,
-                api_key=request.api_key,
-                base_url=request.base_url,
-                model=request.model or "google/gemini-2.0-flash-001"
-            )
-            
-            # 简化验证：只要结果不为空且长度合理（±50%）就接受
-            original_len = len(text)
-            result_len = len(formatted_text)
-            
-            if formatted_text and (original_len * 0.5 <= result_len <= original_len * 1.5):
-                return {"formatted_text": formatted_text}
-            
-            print(f"[format_text] LLM result abnormal (len: {result_len} vs {original_len}), using enhanced rule-based")
-            
-        except Exception as e:
-            print(f"[format_text] LLM error: {e}, using enhanced rule-based")
+    try:
+        from backend.services.llm.formatting import llm_based_formatting
+        
+        formatted_text = await llm_based_formatting(
+            text=text,
+        )
+        
+        # 简化验证：只要结果不为空且长度合理（±50%）就接受
+        original_len = len(text)
+        result_len = len(formatted_text)
+        
+        if formatted_text and (original_len * 0.5 <= result_len <= original_len * 1.5):
+            return {"formatted_text": formatted_text}
+        
+        print(f"[format_text] LLM result abnormal (len: {result_len} vs {original_len}), using enhanced rule-based")
+        
+    except Exception as e:
+        print(f"[format_text] LLM error: {e}, using enhanced rule-based")
     
     # 回退到增强规则引擎
     formatted_text = enhanced_rule_formatting(text)

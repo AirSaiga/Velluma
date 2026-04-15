@@ -89,9 +89,6 @@ async def _micro_review_assertion(
     dynamic_context: DynamicContext,
     pov_character: str,
     beat: Optional[dict] = None,
-    api_key: str = "",
-    base_url: str = "",
-    model: str = "",
     entity_spatial_ledger: Optional[dict] = None,
     beat_index: Optional[int] = None,
     stats_callback: LLMStatsCallback = None,
@@ -158,9 +155,7 @@ async def _micro_review_assertion(
             stage="micro_review",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="reasoning",
             temperature=0.0,
             response_format={"type": "json_object"},
             max_tokens=200,
@@ -235,9 +230,6 @@ async def _quick_qc(
     book: Any,
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    model: str,
     target_words: int,
 ) -> tuple[str, List[dict]]:
     prompts = []
@@ -271,9 +263,7 @@ async def _quick_qc(
         review_response = await call_llm(
             system_prompt=review_system,
             user_prompt=review_user,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="creative",
             temperature=0.1,
             response_format={"type": "json_object"},
             max_tokens=800,
@@ -315,8 +305,6 @@ async def _quick_qc(
         refine_response = await call_llm(
             system_prompt=refine_system,
             user_prompt=refine_user,
-            api_key=api_key,
-            base_url=base_url,
             model=model,
             temperature=0.7,
             max_tokens=_clamp_tokens(target_words),
@@ -352,9 +340,6 @@ async def _update_dynamic_state(
     chunk_text: str,
     current_emotional_state: str,
     pov_character: str,
-    api_key: str,
-    base_url: str,
-    model: str,
     relational_state_lock: str = "",
     beat_context: Optional[Any] = None,
     book_genre: str = "通用小说",
@@ -372,9 +357,7 @@ async def _update_dynamic_state(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="reasoning",
             temperature=0.3,
             response_format={"type": "json_object"},
             max_tokens=300,
@@ -465,9 +448,6 @@ async def _update_emotional_state(
     chunk_text: str,
     current_emotional_state: str,
     pov_character: str,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> str:
     try:
         system_prompt, user_prompt = build_emotional_update_prompt(
@@ -479,9 +459,7 @@ async def _update_emotional_state(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="reasoning",
             temperature=0.3,
             max_tokens=100,
         )
@@ -725,9 +703,7 @@ async def _generate_single_beat_serial(
             stage="prose_draft",
             system_prompt=sys_p,
             user_prompt=usr_p,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.creative_model,
+                        model=models.creative_model,
             temperature=current_temp,
             max_tokens=_clamp_tokens(target_words),
             beat_index=beat_number,
@@ -743,9 +719,7 @@ async def _generate_single_beat_serial(
             dynamic_context=dynamic_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.reasoning_model,
+                        model=models.reasoning_model,
             entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -775,9 +749,7 @@ async def _generate_single_beat_serial(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                api_key=models.api_key,
-                base_url=models.base_url,
-                model=models.creative_model,
+                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
@@ -794,9 +766,6 @@ async def _update_context_serial(
     beats: List[dict],
     result: dict,
     flags: DraftingFeatureFlags,
-    reasoning_model: str,
-    api_key: str,
-    base_url: str,
 ) -> None:
     """
     更新动态上下文供下一个 Beat 使用。
@@ -808,9 +777,6 @@ async def _update_context_serial(
         beats: 所有 Beats
         result: 生成结果
         flags: 功能标志
-        reasoning_model: 推理模型
-        api_key: API Key
-        base_url: Base URL
     """
     n = len(beats)
     if beat_idx >= n - 1:
@@ -845,9 +811,6 @@ async def _update_context_serial(
                 chunk_text=chunk,
                 current_emotional_state=dynamic_context.current_emotional_state,
                 pov_character=pov_ch,
-                api_key=api_key,
-                base_url=base_url,
-                model=reasoning_model,
                 relational_state_lock=dynamic_context.relational_state_lock,
             )
             dynamic_context.current_emotional_state = state_update.new_emotional_state
@@ -868,10 +831,6 @@ async def _generate_prose_serial_v25(
     book: Any,
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    creative_model: str,
-    reasoning_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -912,10 +871,8 @@ async def _generate_prose_serial_v25(
         assets=assets,
     )
     models = DraftingModels(
-        creative_model=creative_model,
-        reasoning_model=reasoning_model,
-        api_key=api_key,
-        base_url=base_url,
+        creative_model="creative",
+        reasoning_model="reasoning",
     )
     options = DraftingOptions(
         enable_qc=enable_qc,
@@ -964,9 +921,6 @@ async def _generate_prose_serial_v25(
             beats=beats,
             result=result,
             flags=flags,
-            reasoning_model=reasoning_model,
-            api_key=api_key,
-            base_url=base_url,
         )
     
     logger.info(f"[Prose V4.0-Serial] 串行生成完成，共 {n} 个 Beats")
@@ -981,10 +935,6 @@ async def _generate_prose_parallel_v25(
     book: Any,
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    creative_model: str,
-    reasoning_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -1027,10 +977,8 @@ async def _generate_prose_parallel_v25(
         assets=assets,
     )
     models = DraftingModels(
-        creative_model=creative_model,
-        reasoning_model=reasoning_model,
-        api_key=api_key,
-        base_url=base_url,
+        creative_model="creative",
+        reasoning_model="reasoning",
     )
     options = DraftingOptions(
         enable_qc=enable_qc,
@@ -1164,9 +1112,7 @@ async def _generate_single_beat_parallel(
             stage="prose_draft_parallel",
             system_prompt=sys_p,
             user_prompt=usr_p,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.creative_model,
+                        model=models.creative_model,
             temperature=current_temp,
             max_tokens=clamp_tokens(target_words),
             beat_index=beat_number,
@@ -1190,9 +1136,7 @@ async def _generate_single_beat_parallel(
             dynamic_context=temp_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.reasoning_model,
+                        model=models.reasoning_model,
             entity_spatial_ledger=None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -1222,9 +1166,7 @@ async def _generate_single_beat_parallel(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                api_key=models.api_key,
-                base_url=models.base_url,
-                model=models.creative_model,
+                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
@@ -1241,10 +1183,6 @@ async def _generate_prose_semi_parallel_v25(
     book: Any,
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    creative_model: str,
-    reasoning_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -1283,10 +1221,6 @@ async def _generate_prose_semi_parallel_v25(
             book=book,
             entities=entities,
             relationships=relationships,
-            api_key=api_key,
-            base_url=base_url,
-            creative_model=creative_model,
-            reasoning_model=reasoning_model,
             word_count=word_count,
             previous_summary=previous_summary,
             relevant_memories=relevant_memories,
@@ -1313,10 +1247,8 @@ async def _generate_prose_semi_parallel_v25(
         assets=assets,
     )
     models = DraftingModels(
-        creative_model=creative_model,
-        reasoning_model=reasoning_model,
-        api_key=api_key,
-        base_url=base_url,
+        creative_model="creative",
+        reasoning_model="reasoning",
     )
     options = DraftingOptions(
         enable_qc=enable_qc,
@@ -1369,10 +1301,7 @@ async def _generate_prose_semi_parallel_v25(
             beats=beats,
             result=result,
             flags=flags,
-            reasoning_model=reasoning_model,
             book_genre=getattr(book, 'genre', '通用小说'),
-            api_key=api_key,
-            base_url=base_url,
         )
 
     logger.info(f"[Prose Serial-Cascade] 串行 Cascade 生成完成，共 {n} 个 Beats")
@@ -1473,9 +1402,7 @@ async def _generate_single_beat_cascade(
             stage="prose_draft",
             system_prompt=sys_p,
             user_prompt=usr_p,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.creative_model,
+                        model=models.creative_model,
             temperature=current_temp,
             max_tokens=_clamp_tokens(target_words),
             beat_index=beat_number,
@@ -1491,9 +1418,7 @@ async def _generate_single_beat_cascade(
             dynamic_context=dynamic_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-            api_key=models.api_key,
-            base_url=models.base_url,
-            model=models.reasoning_model,
+                        model=models.reasoning_model,
             entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -1523,9 +1448,7 @@ async def _generate_single_beat_cascade(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                api_key=models.api_key,
-                base_url=models.base_url,
-                model=models.creative_model,
+                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
@@ -1542,10 +1465,7 @@ async def _update_cascade_context(
     beats: List[dict],
     result: dict,
     flags: DraftingFeatureFlags,
-    reasoning_model: str,
     book_genre: str,
-    api_key: str,
-    base_url: str,
 ) -> None:
     """
     更新 Cascade 动态上下文供下一个 Beat 使用。
@@ -1557,10 +1477,7 @@ async def _update_cascade_context(
         beats: 所有 Beats
         result: 生成结果
         flags: 功能标志
-        reasoning_model: 推理模型
         book_genre: 书籍类型
-        api_key: API Key
-        base_url: Base URL
     """
     n = len(beats)
     if beat_idx >= n - 1:
@@ -1595,9 +1512,7 @@ async def _update_cascade_context(
                 chunk_text=chunk,
                 current_emotional_state=dynamic_context.current_emotional_state,
                 pov_character=pov_ch,
-                api_key=api_key,
-                base_url=base_url,
-                model=reasoning_model,
+                                model=reasoning_model,
                 relational_state_lock=dynamic_context.relational_state_lock,
                 beat_context=beat,
                 book_genre=book_genre,

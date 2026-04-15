@@ -43,26 +43,14 @@ class TrackAExecutor:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        reasoning_model: str,
-        creative_model: str,
         feature_flags: Optional["DraftingFeatureFlags"] = None,
     ):
         """
         初始化 Track A 执行器。
 
         Args:
-            api_key: API 密钥
-            base_url: API 端点
-            reasoning_model: 推理模型
-            creative_model: 创意模型
             feature_flags: 功能标志
         """
-        self.api_key = api_key
-        self.base_url = base_url
-        self.reasoning_model = reasoning_model
-        self.creative_model = creative_model
         self.feature_flags = feature_flags
 
     async def execute(
@@ -117,10 +105,6 @@ class TrackAExecutor:
                 relationships=relationships,
                 beats=beats,
                 open_hooks=[],
-                api_key=self.api_key,
-                base_url=self.base_url,
-                reasoning_model=self.reasoning_model,
-                creative_model=self.creative_model,
                 word_count=word_count,
                 previous_summary=previous_summary,
                 relevant_memories=relevant_memories,

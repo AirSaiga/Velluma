@@ -110,14 +110,8 @@ class SketchGenerator:
     
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        model: str,
         config: Optional[SketchGeneratorConfig] = None,
     ):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
         self.config = config or SketchGeneratorConfig()
     
     async def generate(
@@ -181,9 +175,6 @@ class SketchGenerator:
             # 调用 LLM 生成速写
             response = await asyncio.wait_for(
                 call_llm(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                    model=self.model,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=self.config.temperature,
@@ -530,9 +521,6 @@ async def generate_sketch_for_alignment(
     beats: List[dict],
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     anchor_pov: Optional[str] = None,
@@ -543,11 +531,7 @@ async def generate_sketch_for_alignment(
     
     这是双轨架构中 Track B 的入口函数。
     """
-    generator = SketchGenerator(
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-    )
+    generator = SketchGenerator()
     
     return await generator.generate(
         chapter=chapter,

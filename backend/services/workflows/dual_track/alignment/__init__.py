@@ -18,7 +18,7 @@
         GapSeverity,
     )
 
-    aligner = AdversarialAligner(api_key, base_url, model, config)
+    aligner = AdversarialAligner(config)
     plan = await aligner.align(draft_text, sketch_result, beats, ...)
 """
 

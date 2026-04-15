@@ -47,7 +47,7 @@ from backend.core.dependencies import get_book_repository, get_memory_repository
 from backend.models import MemoryChunk
 from backend.repositories import BookRepository, ChapterRepository, MemoryRepository
 from backend.repositories.base import QuerySpec
-from backend.schemas import MemoryChunkCreate, MemoryChunkResponse, GenerateEmbeddingRequest
+from backend.schemas import MemoryChunkCreate, MemoryChunkResponse
 
 router = APIRouter(prefix="/api", tags=["memories"])
 
@@ -144,7 +144,6 @@ async def delete_memory(memory_id: UUID, repo: MemoryRepository = Depends(get_me
 @router.post("/chapters/{chapter_id}/generate-embedding")
 async def generate_chapter_embedding(
     chapter_id: UUID,
-    request: GenerateEmbeddingRequest = None,
     chapter_repo: ChapterRepository = Depends(get_chapter_repository),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
     db: AsyncSession = Depends(get_db),
@@ -153,7 +152,7 @@ async def generate_chapter_embedding(
 
     参数来源：
     - chapter_id: 路径参数，章节 ID
-    - request: 请求体，包含 api_key, base_url, model
+    - request: 请求体（V4.1: embedding 配置已从 model_config.json 读取）
 
     业务逻辑：
     1. 获取章节的 summary 字段
@@ -170,9 +169,7 @@ async def generate_chapter_embedding(
     from backend.services.llm import get_embedding
 
     embedding = await get_embedding(
-        text=chapter.summary,
-        api_key=request.api_key,
-        base_url=request.base_url
+        text=chapter.summary
     )
 
     if not embedding:

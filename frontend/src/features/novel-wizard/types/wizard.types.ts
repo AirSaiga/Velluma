@@ -188,18 +188,10 @@ export interface GenerationSettings {
 
 /** 专家设置 */
 export interface ExpertSettings {
-  /** 生成模型 */
+  /** 生成模型（V4.1: 仅作为前端表单保留，实际从 model_config.json 读取） */
   model: string
-  /** 逻辑推理模型 */
-  reasoningModel: string
-  /** 创意生成模型 */
-  creativeModel: string
   /** 默认模型推理配置 */
   reasoningConfig: ReasoningSettings
-  /** 逻辑推理模型推理配置 */
-  reasoningModelReasoningConfig: ReasoningSettings
-  /** 创意生成模型推理配置 */
-  creativeModelReasoningConfig: ReasoningSettings
   /** RAG 配置 */
   ragConfig: RAGSettings
   /** 生成流程配置 */
@@ -325,21 +317,9 @@ export function createDefaultWizardData(): WizardFormData {
     },
     expertSettings: {
       model: '',
-      reasoningModel: '',
-      creativeModel: '',
       reasoningConfig: {
         enabled: false,
         effort: 'medium',
-        excludeProcess: false
-      },
-      reasoningModelReasoningConfig: {
-        enabled: false,
-        effort: 'high',
-        excludeProcess: false
-      },
-      creativeModelReasoningConfig: {
-        enabled: false,
-        effort: 'low',
         excludeProcess: false
       },
       ragConfig: {

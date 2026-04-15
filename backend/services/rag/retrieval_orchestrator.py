@@ -129,8 +129,6 @@ class RetrievalOrchestrator:
         open_hooks: List[Dict[str, Any]],
         previous_summary: Optional[str],
         previous_world_state: Optional[Any],
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> RetrievalResult:
         start_time = datetime.now(timezone.utc)
         self._retrieval_trace = []
@@ -168,12 +166,11 @@ class RetrievalOrchestrator:
         )
         self._trace_phase(RetrievalPhase.EXACT, result.total_items)
 
-        if self.config.enable_vector_search and api_key:
+        if self.config.enable_vector_search:
             await retrieve_vector(
                 chapter, book, result, self.scorer, scoring_context,
                 self.config.strategy_config, self.db,
                 get_embedding_func=self.get_embedding,
-                api_key=api_key, base_url=base_url,
             )
         self._trace_phase(RetrievalPhase.VECTOR, result.total_items)
 
@@ -241,8 +238,6 @@ async def orchestrate_retrieval(
     previous_summary: Optional[str],
     previous_world_state: Optional[Any],
     strategy: RetrievalStrategy = RetrievalStrategy.BALANCED_REFERENCE,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> RetrievalResult:
     config = RetrievalOrchestratorConfig(strategy=strategy)
     orchestrator = RetrievalOrchestrator(db, config)
@@ -255,6 +250,4 @@ async def orchestrate_retrieval(
         open_hooks=open_hooks,
         previous_summary=previous_summary,
         previous_world_state=previous_world_state,
-        api_key=api_key,
-        base_url=base_url,
     )

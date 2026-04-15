@@ -103,9 +103,6 @@ class CharacterOOCValidator(BaseValidator):
         if not entities:
             return ValidationResult(is_valid=True, errors=errors, warnings=warnings)
             
-        api_key = context.get("api_key", None)
-        base_url = context.get("base_url", None)
-            
         # 拆分句子，用于提取包含角色名的句子
         sentences = [s.strip() for s in re.split(r'[。！？!?\n]', text) if len(s.strip()) > 2]
             
@@ -136,8 +133,8 @@ class CharacterOOCValidator(BaseValidator):
             
             try:
                 # 并发请求词向量
-                desc_emb_task = get_embedding(character_core_desc, api_key=api_key, base_url=base_url)
-                action_emb_task = get_embedding(character_action_text, api_key=api_key, base_url=base_url)
+                desc_emb_task = get_embedding(character_core_desc)
+                action_emb_task = get_embedding(character_action_text)
                 
                 desc_emb, action_emb = await asyncio.gather(desc_emb_task, action_emb_task)
                 

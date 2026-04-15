@@ -37,9 +37,6 @@ async def stitch_beats(
     anchor_pov: Optional[str] = None,
     sketch_text: Optional[str] = None,
     persistent_state_anchors: Optional[List[Dict[str, str]]] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
     prompt_logger: Optional[Any] = None,
 ) -> Tuple[str, float]:
     """
@@ -72,9 +69,6 @@ async def stitch_beats(
         beats=beats,
         chunks=chunks,
         word_count=word_count,
-        api_key=api_key or "",
-        base_url=base_url or "",
-        model=model or "",
         anchor_pov=anchor_pov,
         prompt_logger=prompt_logger,
         sketch_text=sketch_text,

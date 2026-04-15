@@ -188,14 +188,11 @@ class MicroReviewer:
         )
 
         # 调用 LLM
-        model = self._config.get("reasoning_model", "")
         response = await _call_llm_with_stats(
             stage="micro_review",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=self._config.get("api_key", ""),
-            base_url=self._config.get("base_url", ""),
-            model=model,
+            model_type="reasoning",
             temperature=0.0,
             response_format={"type": "json_object"},
             max_tokens=200,

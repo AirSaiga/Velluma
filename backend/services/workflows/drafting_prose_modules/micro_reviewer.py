@@ -99,9 +99,6 @@ async def micro_review_assertion(
     dynamic_context: DynamicContext,
     pov_character: str,
     beat: Optional[dict] = None,
-    api_key: str = "",
-    base_url: str = "",
-    model: str = "",
     entity_spatial_ledger: Optional[dict] = None,
     beat_index: Optional[int] = None,
     stats_callback: LLMStatsCallback = None,
@@ -157,8 +154,7 @@ async def micro_review_assertion(
             "required_entities": beat.get("required_entities", []) if beat else [],
             "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
             "entities": [e.model_dump() if hasattr(e, "model_dump") else e for e in (entities or [])],
-            "api_key": api_key,
-            "base_url": base_url,
+            
         }
 
         if book:
@@ -189,9 +185,7 @@ async def micro_review_assertion(
             stage="micro_review",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
+            model_type="reasoning",
             temperature=0.0,
             response_format={"type": "json_object"},
             max_tokens=200,
@@ -228,9 +222,6 @@ async def quick_qc(
     beat: dict,
     beat_index: int,
     chapter: Any,
-    api_key: str,
-    base_url: str,
-    model: str,
     word_count: int,
     stats_callback: LLMStatsCallback = None,
 ) -> Tuple[str, List[dict]]:
@@ -277,9 +268,6 @@ async def quick_qc(
                 stage="quick_qc",
                 system_prompt=prompt_pair["system_prompt"],
                 user_prompt=prompt_pair["user_prompt"],
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
                 temperature=0.7,
                 max_tokens=int(target_words * 1.5),
                 beat_index=beat_index,

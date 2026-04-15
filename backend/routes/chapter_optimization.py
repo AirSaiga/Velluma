@@ -37,7 +37,7 @@ async def optimize_chapter(
     """业务目的：根据用户反馈优化章节内容。
 
     参数来源：
-    - request: 包含 chapter_id, optimization_feedback, api_key 等
+    - request: 包含 chapter_id, optimization_feedback（V4.1: 模型配置已从 model_config.json 读取）
 
     数据流：
     1. 获取章节、书籍、角色、关系上下文
@@ -101,9 +101,6 @@ async def optimize_chapter(
         current_draft=current_draft,
         revision_plan=request.optimization_feedback,
         word_count=request.word_count,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
     )
     
     return {"optimized_content": refined_text}
@@ -129,9 +126,6 @@ async def optimize_selection(
         context_after=request.context_after,
         outline=outline,
         user_instruction=request.user_instruction,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
     )
     
     return {"optimized_text": optimized_text}

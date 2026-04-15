@@ -24,16 +24,10 @@ from pydantic import BaseModel, Field
 
 class FormatTextRequest(BaseModel):
     text: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    model: str = "google/gemini-2.0-flash-001"
 
 
 class GenerateChapterRequest(BaseModel):
     chapter_id: UUID
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
     word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
 
 
@@ -41,9 +35,6 @@ class OptimizeChapterRequest(BaseModel):
     chapter_id: UUID
     optimization_feedback: str = Field(..., min_length=1, description="用户优化建议")
     word_count: Optional[int] = Field(default=2000, description="期望生成的字数")
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
 
 
 class OptimizeSelectionRequest(BaseModel):
@@ -52,9 +43,6 @@ class OptimizeSelectionRequest(BaseModel):
     context_before: str = Field(default="")
     context_after: str = Field(default="")
     user_instruction: str = Field(default="")
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
 
 
 class ChapterEntityLink(BaseModel):
@@ -68,11 +56,7 @@ class ChapterEntityCreate(BaseModel):
 
 
 class ChapterPublishRequest(BaseModel):
-    api_key: Optional[str] = Field(None, min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
-    proxy_enabled: bool = Field(default=True)
-    proxy_url: Optional[str] = None
+    pass
 
 
 class CharacterStateChange(BaseModel):
@@ -130,9 +114,6 @@ class InspirationRequest(BaseModel):
     active_character_ids: List[str] = Field(default=[], description="当前场景涉及的角色 ID")
     author_intent: Optional[str] = Field(None, description="作者的创作意图")
     temperature: float = Field(default=0.75, ge=0.0, le=2.0)
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
 
 
 class InspirationIdea(BaseModel):
@@ -151,9 +132,6 @@ class InspirationResponse(BaseModel):
 class CritiqueRequest(BaseModel):
     chapter_content: str = Field(..., min_length=10, description="待审阅的章节内容")
     chapter_title: Optional[str] = Field(None, description="章节标题")
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
 
@@ -183,11 +161,9 @@ class ProxyConfig(BaseModel):
 
 
 class ModelTestRequest(BaseModel):
-    api_key: str = Field(..., min_length=1)
-    base_url: Optional[str] = None
-    model: str = Field(default="gpt-4o-mini")
-    reasoning_enabled: bool = Field(default=False)
-    reasoning_effort: str = Field(default="medium")
+    # V4.1: 若留空则自动从 model_config.json 读取对应模型的推理配置
+    reasoning_enabled: Optional[bool] = Field(default=None)
+    reasoning_effort: Optional[str] = Field(default=None)
 
 
 class ModelTestResponse(BaseModel):
@@ -205,6 +181,4 @@ class RecommendRequest(BaseModel):
 
 
 class GenerateEmbeddingRequest(BaseModel):
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    model: Optional[str] = None
+    pass

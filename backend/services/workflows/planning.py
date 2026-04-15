@@ -112,9 +112,6 @@ async def generate_beats(
     relationships: list[CharacterRelationship],
     word_count: int,
     open_hooks: list[Any],
-    api_key: str,
-    base_url: str,
-    model: str,
     previous_chapter_summary: Optional[str] = None,
     previous_world_state: Optional[WorldTerminalState] = None,
 ) -> tuple[list[dict], list[StoryBeat]]:
@@ -150,9 +147,6 @@ async def generate_beats(
     planner_result_raw = await call_llm(
         system_prompt=planner_system_prompt,
         user_prompt=planner_user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.2,
         response_format={"type": "json_object"},
     )
@@ -224,9 +218,6 @@ async def assign_pov_to_beats(
     beats: list[dict],
     characters: list[dict],
     story_premise: str,
-    api_key: str,
-    base_url: str,
-    model: str,
     previous_chapter_summary: Optional[str] = None,
     prompt_logger = None,
     chapter_narrative_anchor: str = "",
@@ -250,9 +241,6 @@ async def assign_pov_to_beats(
         characters=characters,
         story_premise=story_premise,
         previous_chapter_summary=previous_chapter_summary,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         prompt_logger=prompt_logger,
         chapter_narrative_anchor_hint=chapter_narrative_anchor,
     )
@@ -363,9 +351,6 @@ async def determine_chapter_anchor_pov(
     characters: list[dict],
     story_premise: str,
     previous_chapter_summary: Optional[str] = None,
-    api_key: str = None,
-    base_url: str = None,
-    model: str = None,
     prompt_logger = None,
     chapter_narrative_anchor_hint: str = "",
 ) -> str:
@@ -456,15 +441,12 @@ async def determine_chapter_anchor_pov(
         prompt_logger.log_prompts(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=model,
             prompt_label="ANCHOR_POV",
         )
 
     llm_result_raw = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
         model=model,
         response_format={"type": "json_object"},
     )

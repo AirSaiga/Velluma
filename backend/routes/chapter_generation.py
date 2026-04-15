@@ -50,7 +50,7 @@ async def generate_chapter(
     """业务目的：流式生成章节内容，用于实时展示 AI 写作过程。
 
     参数来源：
-    - request: 请求体，包含 chapter_id（目标章节）、word_count、api_key、base_url、model
+    - request: 请求体，包含 chapter_id、word_count 等生成参数（V4.1: 模型配置已从 model_config.json 读取）
 
     数据流：
     1. 获取章节信息（用于上下文）
@@ -85,9 +85,6 @@ async def generate_chapter(
         generate_stream_response(
             system_prompt=prompt_data["system_prompt"],
             user_prompt=prompt_data["user_prompt"],
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
@@ -136,9 +133,6 @@ async def generate_chapter_sync(
         content = await call_llm(
             system_prompt=prompt_data["system_prompt"],
             user_prompt=prompt_data["user_prompt"],
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
             temperature=0.7,
         )
         return {"content": content, "prompt": {"system_prompt": prompt_data["system_prompt"], "user_prompt": prompt_data["user_prompt"]}}

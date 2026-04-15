@@ -72,8 +72,6 @@ class CharacterInfo:
 async def extract_world_state_snapshot(
     chapter_text: str,
     characters: List[Any],
-    api_key: str,
-    base_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> Optional[dict]:
     """
@@ -82,9 +80,7 @@ async def extract_world_state_snapshot(
     Args:
         chapter_text: 章节文本内容
         characters: 角色列表
-        api_key: API Key
-        base_url: Base URL
-        model: 模型名称
+        model: 模型名称（可选，默认从 model_config.json 读取）
 
     Returns:
         世界状态快照字典或 None
@@ -127,8 +123,6 @@ async def extract_world_state_snapshot(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
             model=model or "google/gemini-2.0-flash-001",
             response_format={"type": "json_object"},
         )

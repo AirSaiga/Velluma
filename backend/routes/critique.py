@@ -50,9 +50,6 @@ async def critique_chapter(request: CritiqueRequest):
             raw_content = await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                api_key=request.api_key,
-                base_url=request.base_url,
-                model=request.model,
                 temperature=request.temperature,
                 top_p=0.9,
                 max_tokens=4096,

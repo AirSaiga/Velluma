@@ -112,9 +112,6 @@ async def clarify_chapter_outline(
         previous_issues=request.previous_issues,
         previous_chapter_snapshot=context.previous_world_snapshot,
         previous_world_terminal_state=previous_world_state,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        model=request.model,
     )
     
     return result

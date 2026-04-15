@@ -56,12 +56,7 @@ async def update_character_dynamic_state(
     character: Character,
     chapter: Chapter,
     character_repository: "CharacterRepository",
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "gpt-4o-mini",
     manual_current_state: Optional[str] = None,
-    proxy_enabled: bool = True,
-    proxy_url: Optional[str] = None,
 ) -> dict:
     """
     更新角色动态状态 (角色在特定章节中的心理/情感变化)。
@@ -120,9 +115,6 @@ async def update_character_dynamic_state(
     new_state = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.7,
         max_tokens=1000,
     )

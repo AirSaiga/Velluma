@@ -182,8 +182,6 @@ async def update_dynamic_state(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
             model=model,
             temperature=0.3,
             response_format={"type": "json_object"},
@@ -246,8 +244,6 @@ async def update_emotional_state(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
             model=model,
             temperature=0.3,
             response_format={"type": "json_object"},

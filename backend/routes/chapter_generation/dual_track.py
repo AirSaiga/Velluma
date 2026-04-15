@@ -159,9 +159,6 @@ async def generate_chapter_dual_track_simple(
 
     resolved_params = resolve_high_level_params(request)
     effective_word_count = request.word_count or 2000
-    effective_reasoning_model = request.reasoning_model or request.model
-    effective_creative_model = request.creative_model or effective_reasoning_model
-    effective_sketch_model = request.sketch_model or effective_creative_model
 
     # 加载上下文
     context = await load_full_chapter_context(chapter_id, repos)
@@ -193,9 +190,6 @@ async def generate_chapter_dual_track_simple(
             relationships=context.relationships,
             word_count=effective_word_count,
             open_hooks=context.open_hooks,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
             previous_chapter_summary=context.previous_summary,
             previous_world_state=previous_world_state,
         )
@@ -221,9 +215,6 @@ async def generate_chapter_dual_track_simple(
             beats=beats,
             characters=pov_candidates,
             story_premise=story_premise,
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=effective_reasoning_model,
             previous_chapter_summary=context.previous_summary,
             chapter_narrative_anchor=anchor_pov,
         )
@@ -250,11 +241,6 @@ async def generate_chapter_dual_track_simple(
 
     # 创建工作流
     workflow = DualTrackWorkflow(
-        api_key=request.api_key,
-        base_url=request.base_url,
-        reasoning_model=effective_reasoning_model,
-        creative_model=effective_creative_model,
-        sketch_model=effective_sketch_model,
         config=config,
     )
 

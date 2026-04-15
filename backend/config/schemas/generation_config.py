@@ -231,43 +231,15 @@ class ReasoningSettings(BaseModel):
 
 class LLMConfig(BaseModel):
     """
-    LLM 模型配置 - API 连接与模型选择
+    LLM 模型配置 - 已由根目录 model_config.json 统一管理
     
     职责：
-    - 管理 LLM 调用的技术参数
-    - 支持双模型架构（逻辑模型 + 创意模型）
-    - 敏感字段不持久化
-    
-    字段来源：
-    - api_key: 请求传入（必填，不持久化）
-    - base_url: 请求传入（可选）
-    - reasoning_model/creative_model: 请求传入
+    - 保留此对象以兼容现有数据流，实际配置从 model_config.json 读取
+    - 推理模型、创意模型、embedding 模型均不再由前端传入
     """
-    # API 连接（敏感字段）
-    api_key: str = Field(..., min_length=1, description="LLM API Key")
-    base_url: Optional[str] = Field(default=None, description="自定义 API 端点")
-    
-    # 模型选择
-    default_model: str = Field(default="gpt-4o-mini", description="默认模型")
-    reasoning_model: Optional[str] = Field(default=None, description="逻辑推理模型")
-    creative_model: Optional[str] = Field(default=None, description="创意生成模型")
-    
-    # 推理配置（三个层级）
-    default_reasoning_config: ReasoningSettings = Field(default_factory=ReasoningSettings)
-    reasoning_model_config: ReasoningSettings = Field(default_factory=lambda: ReasoningSettings(effort="high"))
-    creative_model_config: ReasoningSettings = Field(default_factory=lambda: ReasoningSettings(effort="low"))
-    
-    def get_effective_reasoning_model(self) -> str:
-        """获取有效的逻辑模型"""
-        return self.reasoning_model or self.default_model
-    
-    def get_effective_creative_model(self) -> str:
-        """获取有效的创意模型"""
-        return self.creative_model or self.reasoning_model or self.default_model
-    
-    def is_dual_model_mode(self) -> bool:
-        """判断是否为双模型模式"""
-        return self.reasoning_model is not None and self.creative_model is not None
+    # V4.1: 模型配置迁移至根目录 model_config.json
+    # 保留空模型以避免大量下游类型检查报错
+    pass
 
 
 # =============================================================================
@@ -579,19 +551,8 @@ class GenerationConfig(BaseModel):
             pacing_style=req_dict.get("pacing_style", "balanced"),
         )
         
-        # 构建 LLMConfig
-        llm_config = None
-        if req_dict.get("api_key"):
-            llm_config = LLMConfig(
-                api_key=req_dict["api_key"],
-                base_url=req_dict.get("base_url"),
-                default_model=req_dict.get("model", "gpt-4o-mini"),
-                reasoning_model=req_dict.get("reasoning_model"),
-                creative_model=req_dict.get("creative_model"),
-                default_reasoning_config=_parse_reasoning_config(req_dict.get("reasoning_config")),
-                reasoning_model_config=_parse_reasoning_config(req_dict.get("reasoning_model_reasoning_config")),
-                creative_model_config=_parse_reasoning_config(req_dict.get("creative_model_reasoning_config")),
-            )
+        # 构建 LLMConfig（V4.1: 配置已从 model_config.json 读取，不再依赖请求体）
+        llm_config = LLMConfig()
         
         # 构建 RAGPolicy
         memory_strategy = req_dict.get("memory_strategy", "balanced_reference")

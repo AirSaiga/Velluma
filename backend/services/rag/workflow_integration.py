@@ -153,8 +153,6 @@ class WorkflowRetrievalIntegrator:
     async def retrieve_chapter_context(
         self,
         chapter_id,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
         stage: WorkflowStage = WorkflowStage.ASSEMBLING,
         force_refresh: bool = False,
     ) -> Tuple[ContextPackage, RetrievalResult]:
@@ -188,8 +186,6 @@ class WorkflowRetrievalIntegrator:
                 previous_summary=previous_summary,
                 previous_world_state=previous_world_state,
                 strategy_config=strategy_config,
-                api_key=api_key,
-                base_url=base_url,
             )
 
             max_length = self.config.max_context_lengths.get(stage.value, 8000)
@@ -215,11 +211,9 @@ class WorkflowRetrievalIntegrator:
     async def get_context_for_planning(
         self,
         chapter_id,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> ContextPackage:
         package, _ = await self.retrieve_chapter_context(
-            chapter_id, api_key, base_url,
+            chapter_id,
             stage=WorkflowStage.PLANNING,
         )
         return package
@@ -227,11 +221,9 @@ class WorkflowRetrievalIntegrator:
     async def get_context_for_drafting(
         self,
         chapter_id,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> ContextPackage:
         package, _ = await self.retrieve_chapter_context(
-            chapter_id, api_key, base_url,
+            chapter_id,
             stage=WorkflowStage.DRAFTING,
         )
         return package
@@ -240,11 +232,9 @@ class WorkflowRetrievalIntegrator:
         self,
         chapter_id,
         chapter_text: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> Tuple[ContextPackage, List[Dict[str, Any]]]:
         package, result = await self.retrieve_chapter_context(
-            chapter_id, api_key, base_url,
+            chapter_id,
             stage=WorkflowStage.REVIEWING,
         )
 
@@ -267,11 +257,9 @@ class WorkflowRetrievalIntegrator:
         self,
         chapter_id,
         review_issues: List[Dict[str, Any]],
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
     ) -> ContextPackage:
         package, result = await self.retrieve_chapter_context(
-            chapter_id, api_key, base_url,
+            chapter_id,
             stage=WorkflowStage.REFINING,
         )
 
@@ -381,8 +369,6 @@ class WorkflowRetrievalIntegrator:
         previous_summary: Optional[str],
         previous_world_state: Optional[Any],
         strategy_config: RetrievalStrategyConfig,
-        api_key: Optional[str],
-        base_url: Optional[str],
     ) -> RetrievalResult:
         start_time = datetime.now(timezone.utc)
 
@@ -414,9 +400,9 @@ class WorkflowRetrievalIntegrator:
             previous_world_state, result, scoring_context
         )
 
-        if self.config.enable_vector_search and api_key:
+        if self.config.enable_vector_search:
             await self._retrieve_vector(
-                chapter, book, result, scoring_context, api_key, base_url, strategy_config
+                chapter, book, result, scoring_context, strategy_config
             )
 
         await self._retrieve_hybrid(chapter, book, entities, result, scoring_context)
@@ -517,8 +503,6 @@ class WorkflowRetrievalIntegrator:
         book: Book,
         result: RetrievalResult,
         scoring_context: Dict[str, Any],
-        api_key: str,
-        base_url: Optional[str],
         strategy_config: RetrievalStrategyConfig,
     ) -> None:
         if not chapter.outline_text:
@@ -526,14 +510,10 @@ class WorkflowRetrievalIntegrator:
 
         try:
             if self.get_embedding:
-                embedding = await self.get_embedding(
-                    chapter.outline_text, api_key, base_url
-                )
+                embedding = await self.get_embedding(chapter.outline_text)
             else:
                 from backend.services.llm import get_embedding
-                embedding = await get_embedding(
-                    chapter.outline_text, api_key, base_url
-                )
+                embedding = await get_embedding(chapter.outline_text)
 
             if not embedding:
                 return

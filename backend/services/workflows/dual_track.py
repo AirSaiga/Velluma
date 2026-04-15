@@ -77,6 +77,7 @@ from backend.services.utils.prompt_logger import PromptLogger
 from backend.services.utils.logging import get_runtime_logger
 
 from backend.schemas import DraftingFeatureFlags, WorkflowTier
+from backend.core.model_config import resolve_model_name
 
 logger = get_runtime_logger(__name__)
 
@@ -113,20 +114,10 @@ class DualTrackWorkflow:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        reasoning_model: str,
-        creative_model: str,
-        sketch_model: Optional[str] = None,
         config: Optional[DualTrackConfig] = None,
         feature_flags: Optional[DraftingFeatureFlags] = None,
         prompt_logger: Optional[PromptLogger] = None,
     ):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.reasoning_model = reasoning_model
-        self.creative_model = creative_model
-        self.sketch_model = sketch_model or creative_model
         self.config = config or DualTrackConfig()
         self.feature_flags = feature_flags or DraftingFeatureFlags()
         self.prompt_logger = prompt_logger
@@ -348,7 +339,7 @@ class DualTrackWorkflow:
                 self.prompt_logger.log_prompts(
                     system_prompt=p.get("system_prompt", ""),
                     user_prompt=p.get("user_prompt", ""),
-                    model=self.reasoning_model if p.get("stage") in ["SCENE_INTENT", "SUBCONSCIOUS"] else self.creative_model,
+                    model=None,
                     temperature=p.get("temperature", 0.7),
                     prompt_label=f"{p.get('stage', 'UNKNOWN')}_BEAT_{draft.beat_index}",
                 )
@@ -391,9 +382,6 @@ class DualTrackWorkflow:
             beats=beats,
             chunks=chunks,
             word_count=word_count,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            model=self.creative_model,
             anchor_pov=anchor_pov,
             prompt_logger=self.prompt_logger,
             sketch_text=sketch_result.sketch_text if sketch_result else None,
@@ -460,7 +448,6 @@ class DualTrackWorkflow:
                     self.prompt_logger.log_prompts(
                         system_prompt=ap.get("system_prompt", ""),
                         user_prompt=ap.get("user_prompt", ""),
-                        model=self.reasoning_model,
                         temperature=self.config.aligner_config.temperature if self.config.aligner_config else 0.1,
                         max_tokens=self.config.aligner_config.max_analysis_tokens if self.config.aligner_config else 2000,
                         prompt_label=ap.get("stage", "INFO_ALIGNMENT_ANALYSIS"),
@@ -588,10 +575,6 @@ class DualTrackWorkflow:
             relationships=relationships,
             beats=beats,
             open_hooks=[],
-            api_key=self.api_key,
-            base_url=self.base_url,
-            reasoning_model=self.reasoning_model,
-            creative_model=self.creative_model,
             word_count=word_count,
             previous_summary=previous_summary,
             relevant_memories=relevant_memories,
@@ -621,9 +604,6 @@ class DualTrackWorkflow:
         target_words = max(config.min_words, min(target_words, config.max_words))
 
         generator = SketchGenerator(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            model=self.sketch_model,
             config=config,
         )
 
@@ -653,7 +633,6 @@ class DualTrackWorkflow:
             self.prompt_logger.log_prompts(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=self.sketch_model,
                 temperature=config.temperature,
                 max_tokens=int(target_words * 2.5),
                 prompt_label="SKETCH",
@@ -691,9 +670,6 @@ class DualTrackWorkflow:
         book: Any,
     ) -> AdjustmentPlan:
         aligner = AdversarialAligner(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            model=self.reasoning_model,
             config=self.config.aligner_config or AdversarialAlignerConfig(),
         )
 
@@ -764,9 +740,6 @@ class DualTrackWorkflow:
                         issue_descriptions=issues,
                         chapter=chapter,
                         book=book,
-                        api_key=self.api_key,
-                        base_url=self.base_url,
-                        model=self.reasoning_model,
                         previous_tail=previous_tail,
                         beat_id=beat.get("beat_id"),
                         prompt_logger=self.prompt_logger,
@@ -814,7 +787,7 @@ class DualTrackWorkflow:
             self.prompt_logger.log_prompts(
                 system_prompt="[global_refinement] 调用 refine_draft",
                 user_prompt=f"revision_plan_preview={revision_plan[:300]}...",
-                model=self.reasoning_model,
+                model=resolve_model_name(model_type="reasoning"),
                 temperature=0.7,
                 max_tokens=10000,
                 prompt_label="GLOBAL_REFINEMENT",
@@ -829,9 +802,6 @@ class DualTrackWorkflow:
                 current_draft=stitched_draft,
                 revision_plan=revision_plan,
                 word_count=original_word_count,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                model=self.reasoning_model,
             )
             return refined_text
         except Exception as e:
@@ -845,10 +815,6 @@ async def execute_dual_track_generation(
     beats: List[dict],
     entities: List[Any],
     relationships: List[Any],
-    api_key: str,
-    base_url: str,
-    reasoning_model: str,
-    creative_model: str,
     word_count: int,
     previous_summary: Optional[str] = None,
     relevant_memories: Optional[List[Any]] = None,
@@ -875,10 +841,6 @@ async def execute_dual_track_generation(
     )
 
     workflow = DualTrackWorkflow(
-        api_key=api_key,
-        base_url=base_url,
-        reasoning_model=reasoning_model,
-        creative_model=creative_model,
         config=config,
         feature_flags=feature_flags,
         prompt_logger=prompt_logger,

@@ -156,9 +156,6 @@ async def load_inspiration_context(
 async def generate_inspirations(
     context: InspirationContext,
     chapter_title: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
     temperature: float = 0.9,
     global_taboos: Optional[str] = None,
     author_intent: Optional[str] = None,
@@ -247,9 +244,6 @@ async def generate_inspirations(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model or "google/gemini-2.0-flash-001",
             temperature=temperature,
             max_tokens=3000,
             response_format={"type": "json_object"},
@@ -290,9 +284,6 @@ async def generate_inspirations(
 
 async def expand_inspiration(
     user_prompt: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
     max_tokens: int = 2048,
     temperature: float = 0.8,
 ) -> Optional[dict]:
@@ -330,9 +321,6 @@ async def expand_inspiration(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model or "google/gemini-2.0-flash-001",
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
@@ -347,9 +335,6 @@ async def expand_inspiration(
 
 async def expand_outline(
     user_prompt: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: Optional[str] = None,
     max_tokens: int = 2048,
     temperature: float = 0.7,
 ) -> Optional[str]:
@@ -382,9 +367,6 @@ async def expand_outline(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=model or "google/gemini-2.0-flash-001",
             temperature=temperature,
             max_tokens=max_tokens,
         )

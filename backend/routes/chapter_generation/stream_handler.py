@@ -199,8 +199,6 @@ class DualTrackStreamHandler:
             self.chapter_id,
             self.repos,
             rag_params=resolved_params if self.request.is_basic_mode() else None,
-            api_key=self.request.api_key,
-            base_url=self.request.base_url,
         )
 
         if not context:
@@ -212,9 +210,6 @@ class DualTrackStreamHandler:
         self.run_id = self._resolve_run_id(self.chapter)
 
         effective_word_count = self.request.word_count or 2000
-        effective_reasoning_model = self.request.reasoning_model or self.request.model
-        effective_creative_model = self.request.creative_model or effective_reasoning_model
-        effective_sketch_model = self.request.sketch_model or effective_creative_model
 
         # 更新章节状态
         self.chapter.generation_run_id = self.run_id
@@ -286,8 +281,6 @@ class DualTrackStreamHandler:
                 "run_id": self.run_id,
                 "max_iterations": resolved_params["max_iterations"],
                 "rag_top_k": resolved_params["rag_top_k"],
-                "reasoning_model": effective_reasoning_model,
-                "creative_model": effective_creative_model,
                 "word_count": effective_word_count,
             },
         )
@@ -312,9 +305,6 @@ class DualTrackStreamHandler:
             anchor_pov=anchor_pov,
             context=context,
             effective_word_count=effective_word_count,
-            effective_reasoning_model=effective_reasoning_model,
-            effective_creative_model=effective_creative_model,
-            effective_sketch_model=effective_sketch_model,
         ):
             yield event
 
@@ -474,9 +464,6 @@ class DualTrackStreamHandler:
                 beats=beats,
                 characters=pov_candidates,
                 story_premise=story_premise,
-                api_key=self.request.api_key,
-                base_url=self.request.base_url,
-                model=self.request.reasoning_model or self.request.model,
                 previous_chapter_summary=context.previous_summary,
                 prompt_logger=self.prompt_logger,
                 chapter_narrative_anchor=chapter_narrative_anchor,
@@ -513,9 +500,6 @@ class DualTrackStreamHandler:
         anchor_pov: Optional[str],
         context: Any,
         effective_word_count: int,
-        effective_reasoning_model: str,
-        effective_creative_model: str,
-        effective_sketch_model: str,
     ) -> AsyncGenerator[str, None]:
         """执行双轨工作流"""
         physical_state_lock = build_physical_state_lock(beats)
@@ -536,11 +520,6 @@ class DualTrackStreamHandler:
 
         # 创建工作流
         workflow = DualTrackWorkflow(
-            api_key=self.request.api_key,
-            base_url=self.request.base_url,
-            reasoning_model=effective_reasoning_model,
-            creative_model=effective_creative_model,
-            sketch_model=effective_sketch_model,
             config=config,
             prompt_logger=self.prompt_logger,
         )

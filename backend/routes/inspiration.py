@@ -61,9 +61,6 @@ async def generate_inspiration(
         inspiration_items = await generate_inspirations(
             context=context,
             chapter_title=request.chapter_title or "",
-            api_key=request.api_key,
-            base_url=request.base_url,
-            model=request.model,
             temperature=request.temperature,
             global_taboos=None,
             author_intent=request.author_intent,

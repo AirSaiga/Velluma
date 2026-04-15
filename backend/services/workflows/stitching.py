@@ -56,9 +56,6 @@ async def stitch_chunks(
     beats: List[dict],
     chunks: List[str],
     word_count: int,
-    api_key: str,
-    base_url: str,
-    model: str,
     anchor_pov: Optional[str] = None,
     prompt_logger: Optional[PromptLogger] = None,
     sketch_text: Optional[str] = None,
@@ -104,7 +101,6 @@ async def stitch_chunks(
         prompt_logger.log_prompts(
             system_prompt=stitch_system_prompt,
             user_prompt=stitch_user_prompt,
-            model=model,
             temperature=0.4,
             max_tokens=safe_max_tokens,
             prompt_label="STITCH",
@@ -113,9 +109,6 @@ async def stitch_chunks(
     stitched_text = await call_llm(
         system_prompt=stitch_system_prompt,
         user_prompt=stitch_user_prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
         temperature=0.4,
         max_tokens=safe_max_tokens,
     )

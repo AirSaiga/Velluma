@@ -71,8 +71,6 @@ logger = logging.getLogger(__name__)
 async def assemble_chapter_context(
     chapter_id: str,
     db,
-    api_key: str,
-    base_url: str = None,
     strategy: RetrievalStrategy = RetrievalStrategy.BALANCED_REFERENCE,
     stage: str = "drafting",
 ) -> tuple:
@@ -174,8 +172,6 @@ async def assemble_chapter_context(
         previous_summary=previous_summary,
         previous_world_state=previous_world_state,
         strategy=strategy,
-        api_key=api_key,
-        base_url=base_url,
     )
 
     package = build_context_package(result, stage=stage)
@@ -186,11 +182,9 @@ async def assemble_chapter_context(
 async def get_context_for_planning(
     chapter_id: str,
     db,
-    api_key: str,
-    base_url: str = None,
 ) -> ContextPackage:
     package, _ = await assemble_chapter_context(
-        chapter_id, db, api_key, base_url,
+        chapter_id, db,
         strategy=RetrievalStrategy.BALANCED_REFERENCE,
         stage="planning",
     )
@@ -200,11 +194,9 @@ async def get_context_for_planning(
 async def get_context_for_drafting(
     chapter_id: str,
     db,
-    api_key: str,
-    base_url: str = None,
 ) -> ContextPackage:
     package, _ = await assemble_chapter_context(
-        chapter_id, db, api_key, base_url,
+        chapter_id, db,
         strategy=RetrievalStrategy.BALANCED_REFERENCE,
         stage="drafting",
     )
@@ -214,11 +206,9 @@ async def get_context_for_drafting(
 async def get_context_for_reviewing(
     chapter_id: str,
     db,
-    api_key: str = None,
-    base_url: str = None,
 ) -> ContextPackage:
     package, _ = await assemble_chapter_context(
-        chapter_id, db, api_key, base_url,
+        chapter_id, db,
         strategy=RetrievalStrategy.CHARACTER_FOCUSED,
         stage="reviewing",
     )

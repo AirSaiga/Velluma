@@ -81,18 +81,12 @@ SYSTEM_PROMPT = """你是一位专业的小说编辑，擅长中文排版和叙�
 
 async def llm_based_formatting(
     text: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "google/gemini-2.0-flash-001"
 ) -> str:
     """
     使用 LLM 进行智能文本格式化。
     
     Args:
         text: 原始文本
-        api_key: API Key
-        base_url: 可选的自定义 API 地址
-        model: 模型名称
     
     Returns:
         str: 格式化后的文本
@@ -108,9 +102,6 @@ async def llm_based_formatting(
         formatted = await call_llm(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=f"请对以下小说文本进行智能格式整理：\n\n{text}",
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
             temperature=0.3,  # 低温度，保持稳定性
             max_tokens=8192
         )
@@ -143,9 +134,6 @@ def _clean_llm_output(text: str) -> str:
 
 async def hybrid_formatting(
     text: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    model: str = "google/gemini-2.0-flash-001",
     use_llm: bool = True
 ) -> str:
     """
@@ -153,9 +141,6 @@ async def hybrid_formatting(
     
     Args:
         text: 原始文本
-        api_key: API Key
-        base_url: 可选的自定义 API 地址
-        model: 模型名称
         use_llm: 是否使用 LLM（False 则只用规则引擎）
     
     Returns:
@@ -163,11 +148,11 @@ async def hybrid_formatting(
     """
     from backend.services.workflows.formatting_utils import rule_based_formatting
     
-    if not use_llm or not api_key:
+    if not use_llm:
         return rule_based_formatting(text)
     
     # 尝试 LLM 格式化
-    llm_result = await llm_based_formatting(text, api_key, base_url, model)
+    llm_result = await llm_based_formatting(text)
     
     # 如果 LLM 返回结果且长度合理（±30% 范围内），使用 LLM 结果
     original_len = len(text)

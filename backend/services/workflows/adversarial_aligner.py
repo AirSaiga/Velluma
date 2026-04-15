@@ -27,7 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 使用方式：
     from backend.services.workflows.adversarial_aligner import AdversarialAligner
 
-    aligner = AdversarialAligner(api_key, base_url, model)
+    aligner = AdversarialAligner(config)
     plan = await aligner.align(draft_text, sketch_result, beats, ...)
 
 迁移说明 (2026-04-11)：
@@ -126,14 +126,8 @@ class AdversarialAligner:
     
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        model: str,
         config: Optional[AdversarialAlignerConfig] = None,
     ):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
         self.config = config or AdversarialAlignerConfig()
     
     async def align(
@@ -370,9 +364,6 @@ class AdversarialAligner:
             prompts.append({"stage": "QUALITY_COMPARISON_ANALYSIS", "system_prompt": system_prompt, "user_prompt": user_prompt})
             
             response = await call_llm(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                model=self.model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=self.config.temperature,
@@ -636,10 +627,7 @@ async def perform_adversarial_alignment(
     beats: List[dict],
     chapter: Any,
     book: Any,
-    api_key: str,
-    base_url: str,
-    model: str,
 ) -> AdjustmentPlan:
     """便捷函数：执行对抗校对"""
-    aligner = AdversarialAligner(api_key=api_key, base_url=base_url, model=model)
+    aligner = AdversarialAligner()
     return await aligner.align(draft_text=draft_text, sketch_result=sketch_result, beats=beats, chapter=chapter, book=book)

@@ -1,15 +1,14 @@
 import { ref } from 'vue'
 import { generateApi } from '../../../services/api'
-import type { Chapter, ApiConfig } from '../../../types'
+import type { Chapter } from '../../../types'
 
 export function useCritique(options: {
   selectedChapter: { value: Chapter | null }
-  apiConfig: { value: ApiConfig }
   showToast: (message: string, type?: string) => void
   setActiveFloatingTab: (tab: string | null) => void
   setRightPanelExpanded: (expanded: boolean) => void
 }) {
-  const { selectedChapter, apiConfig, showToast, setActiveFloatingTab, setRightPanelExpanded } = options
+  const { selectedChapter, showToast, setActiveFloatingTab, setRightPanelExpanded } = options
 
   const critiqueResult = ref<any>(null)
   const critiqueLoading = ref(false)
@@ -29,10 +28,7 @@ export function useCritique(options: {
     try {
       const result = await generateApi.critiqueChapter({
         chapter_content: content,
-        chapter_title: selectedChapter.value?.title || '',
-        api_key: apiConfig.value.api_key,
-        base_url: apiConfig.value.base_url,
-        model: apiConfig.value.reasoning_model || apiConfig.value.model
+        chapter_title: selectedChapter.value?.title || ''
       })
       critiqueResult.value = result
     } catch (error: any) {

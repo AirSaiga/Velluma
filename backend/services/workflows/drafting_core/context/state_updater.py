@@ -92,8 +92,6 @@ class StateUpdater:
             response = await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                api_key=self._config.get("api_key", ""),
-                base_url=self._config.get("base_url", ""),
                 model=self._config.get("reasoning_model", ""),
                 temperature=0.3,
                 max_tokens=100,
@@ -154,8 +152,6 @@ class StateUpdater:
             response = await call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                api_key=self._config.get("api_key", ""),
-                base_url=self._config.get("base_url", ""),
                 model=self._config.get("reasoning_model", ""),
                 temperature=0.3,
                 response_format={"type": "json_object"},

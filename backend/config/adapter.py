@@ -110,30 +110,9 @@ def adapt_request_to_config(
         pacing_style=request.pacing_style or "balanced",
     )
     
-    # 构建 LLMConfig
-    llm_config = LLMConfig(
-        api_key=request.api_key,
-        base_url=request.base_url,
-        default_model=request.model,
-        reasoning_model=request.reasoning_model,
-        creative_model=request.creative_model,
-    )
-    
-    # 设置推理配置
-    if request.reasoning_config:
-        llm_config.default_reasoning_config.enabled = request.reasoning_config.enabled
-        llm_config.default_reasoning_config.effort = request.reasoning_config.effort or "medium"
-        if request.reasoning_config.max_tokens:
-            llm_config.default_reasoning_config.max_tokens = request.reasoning_config.max_tokens
-    
-    if request.reasoning_model_reasoning_config:
-        llm_config.reasoning_model_config.enabled = request.reasoning_model_reasoning_config.enabled
-        llm_config.reasoning_model_config.effort = request.reasoning_model_reasoning_config.effort or "high"
-    
-    if request.creative_model_reasoning_config:
-        llm_config.creative_model_config.enabled = request.creative_model_reasoning_config.enabled
-        llm_config.creative_model_config.effort = request.creative_model_reasoning_config.effort or "low"
-    
+    # 构建 LLMConfig（V4.1: 从根目录 model_config.json 读取，不再从请求传入）
+    llm_config = LLMConfig()
+
     # === 构建 RAGPolicy（自动推导）===
     # 解析记忆策略
     memory_strategy = MemoryStrategy.BALANCED_REFERENCE
