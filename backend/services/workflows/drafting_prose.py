@@ -117,8 +117,6 @@ async def _micro_review_assertion(
             "required_entities": beat.get("required_entities", []) if beat else [],
             "forbidden_locations": beat.get("forbidden_locations", []) if beat else [],
             "entities": [e.model_dump() if hasattr(e, "model_dump") else e for e in (entities or [])],
-            "api_key": api_key,
-            "base_url": base_url,
         }
         
         # 如果书籍有全局设定（如禁忌词、文风黑名单），注入验证器
@@ -305,7 +303,7 @@ async def _quick_qc(
         refine_response = await call_llm(
             system_prompt=refine_system,
             user_prompt=refine_user,
-            model=model,
+            model_type="creative",
             temperature=0.7,
             max_tokens=_clamp_tokens(target_words),
         )
@@ -703,7 +701,7 @@ async def _generate_single_beat_serial(
             stage="prose_draft",
             system_prompt=sys_p,
             user_prompt=usr_p,
-                        model=models.creative_model,
+            model_type="creative",
             temperature=current_temp,
             max_tokens=_clamp_tokens(target_words),
             beat_index=beat_number,
@@ -719,7 +717,6 @@ async def _generate_single_beat_serial(
             dynamic_context=dynamic_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-                        model=models.reasoning_model,
             entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -749,7 +746,6 @@ async def _generate_single_beat_serial(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
@@ -1112,7 +1108,7 @@ async def _generate_single_beat_parallel(
             stage="prose_draft_parallel",
             system_prompt=sys_p,
             user_prompt=usr_p,
-                        model=models.creative_model,
+            model_type="creative",
             temperature=current_temp,
             max_tokens=clamp_tokens(target_words),
             beat_index=beat_number,
@@ -1136,7 +1132,6 @@ async def _generate_single_beat_parallel(
             dynamic_context=temp_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-                        model=models.reasoning_model,
             entity_spatial_ledger=None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -1166,7 +1161,6 @@ async def _generate_single_beat_parallel(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)
@@ -1402,7 +1396,7 @@ async def _generate_single_beat_cascade(
             stage="prose_draft",
             system_prompt=sys_p,
             user_prompt=usr_p,
-                        model=models.creative_model,
+            model_type="creative",
             temperature=current_temp,
             max_tokens=_clamp_tokens(target_words),
             beat_index=beat_number,
@@ -1418,7 +1412,6 @@ async def _generate_single_beat_cascade(
             dynamic_context=dynamic_context,
             pov_character=beat_context.pov_character,
             beat=beat,
-                        model=models.reasoning_model,
             entity_spatial_ledger=dynamic_context.entity_spatial_ledger or None,
             beat_index=beat_number,
             stats_callback=stats_callback,
@@ -1448,7 +1441,6 @@ async def _generate_single_beat_cascade(
                 book=drafting_context.book,
                 entities=drafting_context.entities,
                 relationships=drafting_context.relationships,
-                                model=models.creative_model,
                 target_words=target_words,
             )
             prompts_history.extend(qc_prompts)

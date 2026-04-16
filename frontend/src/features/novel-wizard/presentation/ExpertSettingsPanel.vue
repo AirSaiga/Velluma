@@ -148,26 +148,24 @@ function toggleSection(section: keyof typeof expandedSections.value) {
         
         <Transition name="expand">
           <div v-if="expandedSections.models" class="mt-4 pl-4 space-y-4">
-            <!-- 默认模型 -->
-            <div>
-              <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
-                默认生成模型
-              </label>
-              <input
-                :value="settings.model"
-                @input="emit('update-expert-settings', { model: ($event.target as HTMLInputElement).value })"
-                type="text"
-                placeholder="例如: google/gemini-2.0-flash-001"
-                class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
-              />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
-                内部字段：model — 未配置专用模型时的默认选择
+            <div class="p-4 bg-[var(--bg-panel)]/50 rounded-xl border border-[var(--border-color)]/30">
+              <p class="text-sm text-[var(--text-secondary)] mb-2">
+                当前模型配置仅通过本地配置文件管理，不在此处修改。
+              </p>
+              <p class="text-xs text-[var(--text-muted)] leading-relaxed">
+                请手动编辑项目根目录下的 <code class="px-1.5 py-0.5 bg-[var(--bg-tertiary)] rounded text-[var(--text-primary)]">model_config.json</code> 来配置模型。
+              </p>
+              <div class="mt-3 text-xs text-[var(--text-muted)] space-y-1">
+                <p>V4.2 起支持为 <span class="text-[var(--text-secondary)]">reasoning</span>（推理）和 <span class="text-[var(--text-secondary)]">creative</span>（创意）分别指定不同的模型提供商：</p>
+                <ul class="list-disc list-inside ml-1 space-y-0.5">
+                  <li><span class="text-[var(--text-secondary)]">openrouter</span> — OpenRouter 聚合平台</li>
+                  <li><span class="text-[var(--text-secondary)]">volcengine</span> — 字节火山引擎（兼容 OpenAI 协议）</li>
+                </ul>
+              </div>
+              <p class="text-[10px] text-[var(--text-muted)] mt-3">
+                修改后请重启后端服务以生效。
               </p>
             </div>
-            
-            <p class="text-xs text-[var(--text-muted)]">
-              V4.1 起模型配置已迁移至后端 model_config.json，此处仅作备注。
-            </p>
           </div>
         </Transition>
       </section>

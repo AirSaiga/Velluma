@@ -506,7 +506,7 @@ export const systemApi = {
   testModel: async (): Promise<{
     success: boolean
     message: string
-    model_info?: { model: string; base_url: string }
+    model_info?: { model: string; base_url: string; provider?: string }
     reasoning_supported?: boolean
     reasoning_message?: string
     response_time_ms?: number

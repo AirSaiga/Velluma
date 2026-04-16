@@ -210,10 +210,64 @@ def parse_planner_full_result(
     return beats, chapter_narrative_anchor
 
 
+def _split_single_beat_fallback(beat: dict, chapter_outline: str, word_count: int) -> list:
+    """
+    当 Planner 只返回 1 个 beat 时的兜底拆分逻辑。
+
+    策略：
+    - 目标字数 >= 1500 时拆成 2-4 个 beats
+    - 优先尝试按大纲中的换行/段落拆分 summary
+    - 无法拆分时按字数平均分配
+    """
+    target_count = max(2, min(4, round(word_count / 600)))
+    base_summary = str(beat.get("summary") or chapter_outline or "").strip()
+    
+    # 尝试按大纲的自然段落拆分
+    outline_parts = [p.strip() for p in base_summary.split("\n") if p.strip()]
+    if len(outline_parts) >= target_count:
+        parts = outline_parts[:target_count]
+    else:
+        # 按字数平均拆分 summary（简单句末切分）
+        sentences = [s.strip() for s in base_summary.replace("。", ".").replace("！", "!").replace("？", "?").split(".") if s.strip()]
+        if len(sentences) >= target_count:
+            chunk_size = max(1, len(sentences) // target_count)
+            parts = []
+            for i in range(target_count):
+                start = i * chunk_size
+                end = len(sentences) if i == target_count - 1 else (i + 1) * chunk_size
+                parts.append("。".join(sentences[start:end]) + "。")
+        else:
+            parts = [base_summary] * target_count
+    
+    split_word = max(200, word_count // target_count)
+    result = []
+    for i, part in enumerate(parts, start=1):
+        b = dict(beat)
+        b["position"] = i
+        b["beat_id"] = f"beat-{i}"
+        b["summary"] = part.strip()
+        b["action_summary"] = part.strip()
+        b["word_count_target"] = split_word
+        b["target_words"] = split_word
+        # 第一个 beat 保持原 entry_state，后续用简化承接
+        if i > 1:
+            b["entry_state"] = f"承接上一节拍：{part.strip()[:40]}"
+        # 最后一个 beat 保持原 exit_state，中间用简化收束
+        if i < len(parts):
+            b["exit_state"] = f"停在本节拍收束点：{part.strip()[:40]}"
+        result.append(b)
+    return result
+
+
 def parse_planner_result(
     planner_result_raw: str,
     chapter_outline: str,
     word_count: int,
 ) -> list:
     beats, _ = parse_planner_full_result(planner_result_raw, chapter_outline, word_count)
+    
+    # 兜底：如果只有 1 个 beat 但字数/要求明显应该多 beat，自动拆分
+    if len(beats) == 1 and word_count >= 1200:
+        beats = _split_single_beat_fallback(beats[0], chapter_outline, word_count)
+    
     return beats

@@ -88,7 +88,6 @@ async def _generate_scene_intent_batch(
     beats: List[dict],
     chapter: Any,
     open_hooks: List[dict],
-    model: str,
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
 ) -> tuple[List[dict], List[List[dict]]]:
@@ -134,7 +133,7 @@ async def _generate_scene_intent_batch(
                 stage="scene_intent",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=model,
+                model_type="reasoning",
                 temperature=0.2,
                 response_format={"type": "json_object"},
                 beat_index=beat_index,
@@ -176,7 +175,6 @@ async def _generate_subconscious_batch(
     scene_intent_results: List[dict],
     chapter: Any,
     entities: List[Any],
-    model: str,
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
 ) -> tuple[List[str], List[Optional[list]], List[List[dict]]]:
@@ -205,7 +203,7 @@ async def _generate_subconscious_batch(
                 chapter=chapter,
                 beat=beat,
                 scene_intent=scene_intent,
-                pov_character=beat.get("pov_character", "主角"),
+                entities=entities,
             )
 
             prompts_history = [{
@@ -219,7 +217,7 @@ async def _generate_subconscious_batch(
                 stage="subconscious",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=model,
+                model_type="reasoning",
                 temperature=0.4,
                 max_tokens=500,
                 beat_index=beat_index,
@@ -273,7 +271,6 @@ async def _generate_lightweight_subconscious(
     beats: List[dict],
     scene_intent_results: List[dict],
     chapter: Any,
-    model: str,
     stats_callback: LLMStatsCallback = None,
 ) -> List[str]:
     """
@@ -297,7 +294,7 @@ async def _generate_lightweight_subconscious(
                 stage="lightweight_subconscious",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=model,
+                model_type="reasoning",
                 temperature=0.4,
                 max_tokens=100,
                 beat_index=beat_index,

@@ -23,24 +23,42 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 读取项目根目录下的 model_config.json
 - 提供统一的模型配置访问接口
 
-配置结构：
+配置结构（V4.2）：
 {
-  "openrouter": {
-    "api_key": "...",
-    "base_url": "https://openrouter.ai/api/v1",
-    "reasoning_model": "...",
-    "creative_model": "..."
+  "llm": {
+    "reasoning": {
+      "provider": "openrouter" | "volcengine",
+      "api_key": "...",
+      "base_url": "...",
+      "model": "...",
+      "enabled": true | false,
+      "effort": "medium",
+      "exclude": false
+    },
+    "creative": {
+      "provider": "openrouter" | "volcengine",
+      "api_key": "...",
+      "base_url": "...",
+      "model": "...",
+      "enabled": false,
+      "effort": "low",
+      "exclude": false
+    }
   },
   "embedding": {
     "api_key": "...",
     "model": "text-embedding-v2"
+  },
+  "proxy": {
+    "enabled": true,
+    "url": "http://127.0.0.1:4780"
   }
 }
 """
 
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -48,6 +66,13 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "model_config.json")
 
 # 内存缓存
 _config_cache: Optional[Dict] = None
+
+LLMProvider = Literal["openrouter", "volcengine"]
+
+DEFAULT_PROVIDER_URLS: Dict[LLMProvider, str] = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
+}
 
 
 def _load_config() -> Dict:
@@ -70,10 +95,39 @@ def get_model_config() -> Dict:
     return _load_config()
 
 
-def get_openrouter_config() -> Dict:
-    """获取 OpenRouter 配置"""
+def get_llm_config() -> Dict:
+    """获取完整 LLM 配置对象（含 reasoning / creative）"""
     config = _load_config()
-    return config.get("openrouter", {})
+    return config.get("llm", {})
+
+
+def get_model_profile(model_type: str = "default") -> Dict:
+    """
+    获取指定模型类型的独立配置（provider / api_key / base_url / model / enabled / effort / exclude）。
+
+    Args:
+        model_type: "reasoning" | "creative" | "default"
+
+    Returns:
+        该模型类型对应的完整配置字典
+
+    设计说明：
+    - "default" 映射到 "reasoning" 配置，与旧版行为一致
+      （旧版中 model_type="default" 默认使用 reasoning_model）
+    """
+    llm_cfg = get_llm_config()
+    key = "reasoning" if model_type in ("reasoning", "default") else "creative"
+    profile = llm_cfg.get(key, {})
+
+    return {
+        "provider": profile.get("provider", "openrouter"),
+        "api_key": profile.get("api_key", ""),
+        "base_url": profile.get("base_url", "") or DEFAULT_PROVIDER_URLS.get(profile.get("provider", "openrouter"), ""),
+        "model": profile.get("model", ""),
+        "enabled": profile.get("enabled", False),
+        "effort": profile.get("effort", "medium"),
+        "exclude": profile.get("exclude", False),
+    }
 
 
 def get_embedding_config() -> Dict:
@@ -112,20 +166,18 @@ def _invalidate_cache():
 
 def get_default_reasoning_config(model_type: str = "default") -> Optional[dict]:
     """
-    获取默认推理配置。
+    获取默认推理配置（extra_body 格式）。
 
-    根据 model_type 从 model_config.json 的 openrouter.{reasoning|creative} 读取。
+    根据 model_type 从对应 profile 的 enabled/effort/exclude 读取。
     如果 enabled 为 False，返回 None。
     """
-    or_config = get_openrouter_config()
-    key = "reasoning" if model_type == "reasoning" else "creative"
-    cfg = or_config.get(key, {})
-    if cfg.get("enabled"):
+    profile = get_model_profile(model_type)
+    if profile.get("enabled"):
         return {
             "reasoning": {
                 "enabled": True,
-                "effort": cfg.get("effort", "medium"),
-                "exclude": cfg.get("exclude", False),
+                "effort": profile.get("effort", "medium"),
+                "exclude": profile.get("exclude", False),
             }
         }
     return None
@@ -137,22 +189,14 @@ def resolve_model_name(model: Optional[str] = None, model_type: str = "default")
 
     规则：
     - 如果 model 显式传入且不是 'reasoning'/'creative'，直接使用
-    - 如果 model 为 None 或等于 'reasoning'/'creative'，从配置读取对应类型
+    - 如果 model 为 None 或等于 'reasoning'/'creative'，从对应 profile 读取 model 字段
     - model_type 作为后备：reasoning/creative/default
     """
-    or_config = get_openrouter_config()
+    profile = get_model_profile(model_type)
+    fallback_profile = get_model_profile("creative" if model_type == "reasoning" else "reasoning")
 
     explicit = model if model and model not in ("reasoning", "creative") else None
     if explicit:
         return explicit
 
-    if model in ("reasoning", None):
-        if model_type == "reasoning":
-            return or_config.get("reasoning_model") or or_config.get("creative_model") or "gpt-4o-mini"
-
-    if model in ("creative", None):
-        if model_type == "creative":
-            return or_config.get("creative_model") or or_config.get("reasoning_model") or "gpt-4o-mini"
-
-    # default fallback
-    return or_config.get("reasoning_model") or or_config.get("creative_model") or "gpt-4o-mini"
+    return profile.get("model") or fallback_profile.get("model") or "gpt-4o-mini"

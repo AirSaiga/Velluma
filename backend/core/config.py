@@ -181,6 +181,11 @@ REASONING_SUPPORTED_MODELS: Set[str] = {
     # DeepSeek R1
     "deepseek/deepseek-r1",
     "deepseek/deepseek-reasoner",
+    # 字节火山引擎 / 豆包推理模型
+    "doubao-seed-1-6-251015",
+    "doubao-seed-2-0-pro",
+    "doubao-seed-2-0-code",
+    "deepseek-r1",
     # 其他推理模型
     "z-ai/glm-4.5",
     "z-ai/glm-z1",
@@ -193,7 +198,8 @@ REASONING_KEYWORDS: List[str] = [
     "o1", "o3", "o4", "gpt-5",
     "thinking", "reasoner", "r1",
     "claude-3.7", "claude-sonnet-4",
-    "grok-3", "glm-z1", "kimi-k2-thinking"
+    "grok-3", "glm-z1", "kimi-k2-thinking",
+    "doubao-seed", "deepseek-r1",
 ]
 
 

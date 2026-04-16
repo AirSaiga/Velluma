@@ -447,7 +447,7 @@ async def determine_chapter_anchor_pov(
     llm_result_raw = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        model=model,
+        model_type="reasoning",
         response_format={"type": "json_object"},
     )
 

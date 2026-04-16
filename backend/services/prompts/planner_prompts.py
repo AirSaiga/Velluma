@@ -206,7 +206,28 @@ def build_planner_agent_prompt(
     {{
       "position": 1,
       "beat_id": "beat-1",
-      "summary": "白霆在实验室发现血嗤已觉醒，两人爆发正面冲突，血嗤以压倒性力量将白霆击退至走廊",
+      "summary": "白霆穿过地下走廊，发现0号实验室的门虚掩，内部传来培养舱破裂的声响",
+      "location": "0号计划核心实验室外走廊",
+      "pov_character": "白霆",
+      "pov_mode": "single",
+      "pov_characters": [],
+      "pov_perception_state": "正常",
+      "pov_aperture": "subjective_observation",
+      "persistent_state_anchors": [],
+      "action_summary": "白霆握紧配枪，压低脚步靠近门缝，观察室内动静",
+      "worldbuilding_instruction": "0号计划实验室设有电磁屏蔽层，外部信号无法进入",
+      "entry_state": "白霆独自一人在地下三层走廊，刚刚切断主电源，周围一片昏暗",
+      "exit_state": "白霆从门缝中看到血嗤已破舱而出，培养液洒满地面",
+      "red_lines": ["禁止白霆在此节拍中直接与血嗤交手", "禁止血嗤在此节拍中发现白霆"],
+      "word_count_target": 500,
+      "hook_ids": [],
+      "pacing_type": "Slow",
+      "weight": 2
+    }},
+    {{
+      "position": 2,
+      "beat_id": "beat-2",
+      "summary": "白霆进入实验室，血嗤已觉醒并主动发难，两人爆发正面冲突",
       "location": "0号计划核心实验室",
       "pov_character": "白霆",
       "pov_mode": "single",
@@ -221,14 +242,35 @@ def build_planner_agent_prompt(
         }}
       ],
       "action_summary": "白霆拔枪射击，血嗤徒手偏转弹道，反手将白霆摔出三米远",
-      "worldbuilding_instruction": "0号计划实验室设有电磁屏蔽层，外部信号无法进入",
-      "entry_state": "白霆持枪站在实验室入口，血嗤站在培养舱旁，双方对峙，空气凝滞",
+      "worldbuilding_instruction": null,
+      "entry_state": "白霆推门而入，血嗤背对门口站立，周身缠绕着未干的培养液",
       "exit_state": "白霆倒在走廊地板，血嗤仍在实验室内未追出，双方短暂脱离接触",
       "red_lines": ["禁止白霆在此节拍中获胜或压制血嗤", "禁止血嗤在此节拍中离开实验室"],
-      "word_count_target": 600,
+      "word_count_target": 700,
       "hook_ids": ["hk-1"],
+      "pacing_type": "Fast",
+      "weight": 4
+    }},
+    {{
+      "position": 3,
+      "beat_id": "beat-3",
+      "summary": "白霆拖着伤体撤退，通过加密频道向总部求援，意识到必须启动B计划",
+      "location": "地下三层走廊",
+      "pov_character": "白霆",
+      "pov_mode": "single",
+      "pov_characters": [],
+      "pov_perception_state": "轻伤但行动自如",
+      "pov_aperture": "internal_only",
+      "persistent_state_anchors": [],
+      "action_summary": "白霆按住肋骨踉跄后退，启动通讯器向林霜简短汇报战况",
+      "worldbuilding_instruction": null,
+      "entry_state": "白霆靠在走廊墙壁上，大口喘息，肋部传来剧痛",
+      "exit_state": "白霆切断通讯，目光锁定通往备用电梯的方向，下定决心",
+      "red_lines": ["禁止总部在此节拍中派人支援到达现场", "禁止白霆在此节拍中重新进入实验室"],
+      "word_count_target": 500,
+      "hook_ids": [],
       "pacing_type": "Medium",
-      "weight": 3
+      "weight": 2
     }}
   ],
   "workflow_tier": "TIER_2_STANDARD",
@@ -236,11 +278,12 @@ def build_planner_agent_prompt(
 }}
 
 ⚠️ **严禁照抄示例**：上方 JSON 中的所有字符串值（summary、location、pov_character、entry_state、exit_state、red_lines 等）均为示例，**必须全部替换为本章大纲的真实内容**。
+⚠️ **严禁只输出 1 个 beat**：上方示例包含 3 个 beats 是为了展示完整格式，你的输出必须根据本章大纲的实际复杂度生成 **至少 {beats_min} 个 beats**。
 
 约束：
-1. beats 数量：**至少 {beats_min} 个，最多 6 个**。
+1. beats 数量：**强制要求至少 {beats_min} 个，最多 6 个**。
    基于本章【目标字数 {word_count} 字】，推荐生成 **{beats_recommended} 个 beats**（每个 beat 约 400-800 字）。
-   - 严禁在大纲内容足够的情况下只规划 1 个 beat
+   - **绝对禁止只输出 1 个 beat**。如果输出 beats 数量少于 {beats_min} 个，视为严重错误，必须重新规划。
    - 若大纲包含多个明显的场景切换或视角转移，应按实际场景数拆分，不要强行合并
 2. position 从 1 开始递增
 3. summary 具体、可执行，不要空泛

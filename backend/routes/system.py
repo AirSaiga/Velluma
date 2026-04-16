@@ -41,7 +41,7 @@ from typing import Optional
 from fastapi import APIRouter
 
 from backend.core.config import get_actual_port, check_reasoning_support
-from backend.core.model_config import resolve_model_name, get_default_reasoning_config
+from backend.core.model_config import resolve_model_name, get_default_reasoning_config, get_model_profile
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse
@@ -163,6 +163,7 @@ async def test_model_connection(request: ModelTestRequest):
             system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
             user_prompt=test_prompt,
             model=model,
+            model_type="reasoning",
             temperature=0.1,
             max_tokens=50,
             reasoning_config=reasoning_config,
@@ -177,12 +178,18 @@ async def test_model_connection(request: ModelTestRequest):
         if reasoning_enabled:
             reasoning_supported, reasoning_message = check_reasoning_support(model)
 
+        reasoning_profile = get_model_profile("reasoning")
+        creative_profile = get_model_profile("creative")
+        
         return ModelTestResponse(
             success=True,
             message=f"模型连接成功，响应: {response[:50]}..." if len(response) > 50 else f"模型连接成功，响应: {response}",
             model_info={
                 "model": model,
-                "base_url": "默认"
+                "reasoning_provider": reasoning_profile["provider"],
+                "reasoning_base_url": reasoning_profile["base_url"],
+                "creative_provider": creative_profile["provider"],
+                "creative_base_url": creative_profile["base_url"],
             },
             reasoning_supported=reasoning_supported,
             reasoning_message=reasoning_message,

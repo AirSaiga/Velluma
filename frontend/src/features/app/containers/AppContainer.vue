@@ -342,7 +342,7 @@ onMounted(async () => {
     @cancel="handleCancelDialog"
   />
   <DebugPromptWindow v-if="isDebugMode" />
-  
+
   <!-- ========== 沉浸式主界面 ========== -->
   <div v-else class="immersive-app" :class="{ 'zen-mode': isZenMode }">
 

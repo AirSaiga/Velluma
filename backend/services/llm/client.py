@@ -72,7 +72,7 @@ from backend.services.llm.proxy import (
     get_active_proxy as _get_active_proxy,
 )
 from backend.services.llm.embedding import get_embedding
-from backend.core.model_config import get_openrouter_config, resolve_model_name, get_default_reasoning_config
+from backend.core.model_config import get_model_profile, resolve_model_name, get_default_reasoning_config, DEFAULT_PROVIDER_URLS
 
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,10 @@ async def generate_stream_response(
 ):
     import httpx
 
-    or_config = get_openrouter_config()
-    api_key = or_config.get("api_key", "")
-    base_url = or_config.get("base_url", "https://openrouter.ai/api/v1")
+    profile = get_model_profile(model_type)
+    api_key = profile["api_key"]
+    provider = profile["provider"]
+    base_url = profile["base_url"] or DEFAULT_PROVIDER_URLS.get(provider, "https://openrouter.ai/api/v1")
     resolved_model = resolve_model_name(model, model_type)
 
     if reasoning_config is None:
@@ -258,9 +259,10 @@ async def call_llm(
 ) -> str:
     import httpx
 
-    or_config = get_openrouter_config()
-    api_key = or_config.get("api_key", "")
-    base_url = or_config.get("base_url", "https://openrouter.ai/api/v1")
+    profile = get_model_profile(model_type)
+    api_key = profile["api_key"]
+    provider = profile["provider"]
+    base_url = profile["base_url"] or DEFAULT_PROVIDER_URLS.get(provider, "https://openrouter.ai/api/v1")
     resolved_model = resolve_model_name(model, model_type)
 
     if reasoning_config is None:
