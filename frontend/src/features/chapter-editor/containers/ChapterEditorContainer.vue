@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Chapter, Character } from '../../../types'
+import type { Chapter, Character, ApiConfig } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
@@ -9,6 +9,7 @@ import { assetApi } from '../../../services/api'
 const props = defineProps<{
   selectedChapter: Chapter | null
   characters: Character[]
+  apiConfig: ApiConfig
   bookId?: string
   metaCollapsed?: boolean
   critiqueResult?: any
@@ -97,6 +98,7 @@ defineExpose({
     :toggle-meta-collapsed="viewModel.toggleMetaCollapsed"
     :toggle-stream-mode="viewModel.toggleStreamMode"
     :workflow-state="viewModel.workflowState.value"
+    :api-config="props.apiConfig"
     :book-id="props.bookId"
     :critique-result="props.critiqueResult"
     :assets="props.assets"
@@ -118,6 +120,7 @@ defineExpose({
     :chapter-title="viewModel.selectedChapter.value?.title || ''"
     :current-context="viewModel.selectedChapter.value?.outline_text || viewModel.selectedChapter.value?.summary || ''"
     :active-character-ids="viewModel.inspirationActiveCharacterIds.value"
+    :api-config="props.apiConfig"
     @update:show="viewModel.closeInspirationModal"
     @apply-to-outline="viewModel.handleApplyInspirationToOutline"
   />

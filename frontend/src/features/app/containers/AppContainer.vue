@@ -9,9 +9,10 @@ import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
 import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
+import SettingsModal from '../../../components/SettingsModal.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
-import { generateApi, chapterApi, systemApi } from '../../../services/api'
+import { generateApi, chapterApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -38,20 +39,12 @@ const isDebugMode = computed(() => {
   return urlParams.get('debug') === 'true'
 })
 
+const showSettingsModal = ref(false)
 const chapterEditorRef = ref<any>(null)
 
 // ========== Zen Mode 首次引导 ==========
 const ZEN_HINT_KEY = 'velluma_zen_hint_shown'
 const showZenHint = ref(false)
-
-async function handleTestConnection() {
-  try {
-    const result = await systemApi.testModel()
-    showToast(result.message, result.success ? 'success' : 'error')
-  } catch (e: any) {
-    showToast('测试失败: ' + (e.message || '未知错误'), 'error')
-  }
-}
 
 function toggleZenModeWithHint() {
   toggleZenMode()
@@ -82,13 +75,15 @@ const {
   characters,
   chapters,
   relationships,
+  apiConfig,
   uiPrefs,
   loading,
   sortedChapters,
   currentBook,
   selectedChapter,
   loadBooks,
-  loadCurrentBookData
+  loadCurrentBookData,
+  updateApiConfig
 } = useAppState()
 
 const {
@@ -207,6 +202,7 @@ const {
   handleCloseCritique
 } = useCritique({
   selectedChapter,
+  apiConfig,
   showToast,
   setActiveFloatingTab: (tab: string | null) => { activeFloatingTab.value = tab },
   setRightPanelExpanded: (expanded: boolean) => { rightPanelExpanded.value = expanded }
@@ -274,12 +270,19 @@ async function handleIntentGenerate(payload: any) {
     showToast('请先选择章节', 'warning')
     return
   }
+  if (!apiConfig.value?.api_key) {
+    showToast('请先配置 API Key', 'warning')
+    return
+  }
 
   try {
     await handleIntentSave(payload)
     const requestPayload = {
       ...payload,
       chapter_id: selectedChapter.value.id,
+      api_key: apiConfig.value.api_key,
+      base_url: apiConfig.value.base_url || undefined,
+      model: apiConfig.value.reasoning_model || apiConfig.value.model,
       word_count: payload.word_count || 3000
     }
 
@@ -328,6 +331,10 @@ function selectChapter(chapterId: string) {
 }
 
 onMounted(async () => {
+  const savedConfig = localStorage.getItem('velluma_api_config')
+  if (savedConfig) {
+    apiConfig.value = JSON.parse(savedConfig)
+  }
   await loadBooks()
   initTheme()
 })
@@ -342,7 +349,7 @@ onMounted(async () => {
     @cancel="handleCancelDialog"
   />
   <DebugPromptWindow v-if="isDebugMode" />
-
+  
   <!-- ========== 沉浸式主界面 ========== -->
   <div v-else class="immersive-app" :class="{ 'zen-mode': isZenMode }">
 
@@ -445,8 +452,8 @@ onMounted(async () => {
           </div>
           
           <div class="top-actions">
-            <button @click="handleTestConnection" class="btn-icon" title="测试模型连接">
-              <Icon name="zap" :size="16" />
+            <button @click="showSettingsModal = true" class="btn-icon" title="设置">
+              <Icon name="settings" :size="16" />
             </button>
             <button @click="toggleZenModeWithHint" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
               <Icon name="maximize" :size="16" />
@@ -518,6 +525,7 @@ onMounted(async () => {
           :selected-chapter="selectedChapter"
           :characters="characters"
           :assets="assets"
+          :api-config="apiConfig"
           :book-id="currentBookId"
           :meta-collapsed="uiPrefs.chapterMetaCollapsed"
           :critique-result="critiqueResult"
@@ -559,6 +567,7 @@ onMounted(async () => {
               :selected-chapter-id="selectedChapterId"
               :prioritized-character-ids="autoHighlightedCharacterIds"
               :focused-entity="editorFocusedEntity"
+              :api-config="apiConfig"
               @create-character="createCharacter"
               @update-character="updateCharacter"
               @delete-character="deleteCharacter"
@@ -678,7 +687,13 @@ onMounted(async () => {
       </div>
     </div>
     
-
+    <!-- 设置 -->
+    <SettingsModal
+      :is-open="showSettingsModal"
+      :config="apiConfig"
+      @close="showSettingsModal = false"
+      @save="updateApiConfig"
+    />
   </div>
 </template>
 

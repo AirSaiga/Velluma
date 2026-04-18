@@ -6,6 +6,28 @@ export interface Book {
   core_motifs_taboos?: string
 }
 
+export interface ApiConfig {
+  api_key: string
+  base_url: string
+  model: string
+  reasoning_model?: string  // 高逻辑模型（用于 Scene Intent / Subconscious / Review）
+  creative_model?: string   // 高创意模型（用于 Prose Draft），如未设置则使用 model
+  proxy_enabled?: boolean
+  proxy_url?: string
+  // 默认模型的推理模式配置
+  reasoning_enabled?: boolean
+  reasoning_effort?: ReasoningEffortLevel
+  reasoning_exclude?: boolean
+  // 逻辑推理模型的推理模式配置
+  reasoning_model_reasoning_enabled?: boolean
+  reasoning_model_reasoning_effort?: ReasoningEffortLevel
+  reasoning_model_reasoning_exclude?: boolean
+  // 创意生成模型的推理模式配置
+  creative_model_reasoning_enabled?: boolean
+  creative_model_reasoning_effort?: ReasoningEffortLevel
+  creative_model_reasoning_exclude?: boolean
+}
+
 export type PacingStyle = 'slow_burn' | 'balanced' | 'fast_paced'
 
 // 推理模式努力程度类型
@@ -78,7 +100,11 @@ export interface Relationship {
 
 export interface GenerateChapterRequest {
   chapter_id: string
-  // V4.1: 模型配置已从 model_config.json 读取
+  api_key: string
+  base_url?: string
+  model?: string
+  reasoning_model?: string  // 高逻辑模型
+  creative_model?: string   // 高创意模型
 }
 
 export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
@@ -103,7 +129,11 @@ export interface GenerateChapterAgenticPayload extends GenerateChapterRequest {
   tension_level?: number
   pacing_style?: PacingStyle
   force_parallel_prose?: boolean
-  // V4.1: 推理模式配置已迁移至 model_config.json
+  // 单模型模式的推理模式配置
+  reasoning_config?: ReasoningConfig
+  // 双模型模式的推理模式配置
+  reasoning_model_reasoning_config?: ReasoningConfig
+  creative_model_reasoning_config?: ReasoningConfig
 }
 
 export interface GenerateChapterAgenticPayloadWithBeats extends GenerateChapterAgenticPayload {
@@ -176,7 +206,9 @@ export interface InspirationRequest {
   current_context_snippet: string
   active_character_ids: string[]
   temperature: number
-  // V4.1: 模型配置已从 model_config.json 读取
+  api_key: string
+  base_url?: string
+  model?: string
 }
 
 // === 大纲澄清相关相关类型 (Clarification Agent) ===
@@ -197,10 +229,12 @@ export interface ClarifyingQuestion {
 export interface ClarifyOutlineRequest {
   chapter_id: string
   ambiguous_text: string
+  api_key: string
+  base_url?: string
+  model?: string
   author_intent?: string
   user_instruction?: string  // 新增：用户针对系统澄清问题的补充说明或回答
   previous_issues?: string[] // 新增：上一轮识别出的问题列表
-  // V4.1: 模型配置已从 model_config.json 读取
 }
 
 export interface ClarifyOutlineResponse {
@@ -221,7 +255,7 @@ export interface DualTrackGenerationRequest extends GenerateChapterAgenticPayloa
   use_sketch_for_refinement?: boolean
   alignment_threshold?: number
   sketch_ratio?: number
-  // V4.1: sketch_model 已从 model_config.json 读取
+  sketch_model?: string
 }
 
 export interface BeatDraftResult {

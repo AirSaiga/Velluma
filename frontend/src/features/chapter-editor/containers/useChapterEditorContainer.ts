@@ -3,7 +3,7 @@ import { useChapterGenerator } from '../../../composables/useChapterGenerator'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi } from '../../../services/api'
-import type { Chapter, Character, GenerateChapterAgenticPayloadWithBeats, BeatEditorItem } from '../../../types'
+import type { ApiConfig, Chapter, Character, GenerateChapterAgenticPayloadWithBeats, BeatEditorItem } from '../../../types'
 import { useIntentDrivenConfig, buildAgenticPayloadFromIntent } from '../../intent-driven/useIntentDrivenConfig'
 import { useBeatPreview } from './useBeatPreview'
 import { useOutlineClarification } from './useOutlineClarification'
@@ -13,6 +13,7 @@ import { useChapterAssets } from './useChapterAssets'
 export interface ChapterEditorContainerProps {
   selectedChapter: Chapter | null
   characters: Character[]
+  apiConfig: ApiConfig
   metaCollapsed?: boolean
 }
 
@@ -245,7 +246,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       showToast('请先选择章节', 'warning')
       return
     }
-    // V4.1: 模型配置已从 model_config.json 读取，无需前端检查 API Key
+    if (!props.apiConfig.api_key) {
+      showToast('请先配置 API Key', 'warning')
+      return
+    }
 
     const editor = editorRef.value?.editor
     const editorContent = editor ? editor.getText().trim() : ''
@@ -262,6 +266,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     const chapter = selectedChapter.value as any
     const { payload, errors } = buildAgenticPayloadFromIntent({
       chapterId: chapter.id,
+      apiConfig: props.apiConfig,
       chapterData: chapter ? {
         creative_intents: chapter.creative_intents,
         chapter_goals: chapter.chapter_goals,
@@ -281,7 +286,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     beatPreview.pendingAgenticPayload.value = payload
     beatPreview.pendingClearEditorOnConfirm.value = hasEditorContent
 
-    const clarifyResult = await outlineClarification.checkOutlineClarification(chapter)
+    const clarifyResult = await outlineClarification.checkOutlineClarification(chapter, {
+      api_key: props.apiConfig.api_key,
+      base_url: props.apiConfig.base_url,
+      reasoning_model: props.apiConfig.reasoning_model,
+      model: props.apiConfig.model
+    })
 
     if (clarifyResult.shouldIntercept) {
       return
@@ -384,7 +394,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const optimizedContent = await optimizeChapter({
         chapter_id: selectedChapter.value.id,
         optimization_feedback: optimizationFeedback.value,
-        word_count: intentWordCount.value
+        word_count: intentWordCount.value,
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
+        model: props.apiConfig.reasoning_model || props.apiConfig.model
       })
       if (optimizedContent) {
         updateChapter({
@@ -399,8 +412,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   async function handlePartialOptimize(payload: { selection: any, instruction: string }) {
-    if (!selectedChapter.value) {
-      showToast('请先选择章节', 'warning')
+    if (!selectedChapter.value || !props.apiConfig.api_key) {
+      showToast('请先配置 API Key', 'warning')
       return
     }
 
@@ -412,7 +425,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         selected_text: payload.selection.text,
         context_before: payload.selection.contextBefore,
         context_after: payload.selection.contextAfter,
-        user_instruction: payload.instruction
+        user_instruction: payload.instruction,
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
+        model: props.apiConfig.reasoning_model || props.apiConfig.model
       })
 
       if (optimized_text && editorRef.value) {
@@ -440,8 +456,18 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (isFormatting.value || !text) return
 
     try {
+      if (!props.apiConfig.api_key) {
+        showToast('请先在设置中配置 API Key 以使用智能格式整理功能', 'warning')
+        return
+      }
+
       isFormatting.value = true
-      const { formatted_text } = await generateApi.formatText({ text })
+      const { formatted_text } = await generateApi.formatText({
+        text,
+        api_key: props.apiConfig.api_key,
+        base_url: props.apiConfig.base_url,
+        model: props.apiConfig.reasoning_model || props.apiConfig.model || 'google/gemini-2.0-flash-001'
+      })
 
       if (formatted_text && editorRef.value) {
         const paragraphs = formatted_text
@@ -530,7 +556,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     optimizationFeedback,
     previewBeats: beatPreview.previewBeats,
     anchorPov: ref<string | null>(null),
-    publishChapter: () => publisher.publishChapter(props.selectedChapter),
+    publishChapter: () => publisher.publishChapter(props.selectedChapter, props.apiConfig),
     selectedChapter,
     setEditorRef,
     scrollToCritique,
@@ -549,6 +575,12 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         answers,
         originalOutline,
         props.selectedChapter,
+        {
+          api_key: props.apiConfig.api_key,
+          base_url: props.apiConfig.base_url,
+          reasoning_model: props.apiConfig.reasoning_model,
+          model: props.apiConfig.model
+        },
         handleApplyClarification
       ),
     startGenerate,

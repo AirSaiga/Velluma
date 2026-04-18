@@ -272,6 +272,11 @@ export function useIntentDrivenConfig() {
   
   function buildPayload(baseParams: {
     chapterId: string
+    apiConfig: {
+      api_key: string
+      base_url?: string
+      model?: string
+    }
     wordCount: number
     authorIntent?: string
     generate?: boolean
@@ -282,6 +287,9 @@ export function useIntentDrivenConfig() {
     
     return {
       chapter_id: baseParams.chapterId,
+      api_key: baseParams.apiConfig.api_key,
+      base_url: baseParams.apiConfig.base_url,
+      model: baseParams.apiConfig.model,
       
       creative_intents: state.value.selectedIntents.length > 0 
         ? state.value.selectedIntents 
@@ -354,6 +362,22 @@ export function useIntentDrivenConfig() {
 
 export interface BuildAgenticPayloadParams {
   chapterId: string
+  apiConfig: {
+    api_key: string
+    base_url?: string
+    model?: string
+    reasoning_model?: string
+    creative_model?: string
+    reasoning_enabled?: boolean
+    reasoning_effort?: ReasoningConfig['effort']
+    reasoning_exclude?: boolean
+    reasoning_model_reasoning_enabled?: boolean
+    reasoning_model_reasoning_effort?: ReasoningConfig['effort']
+    reasoning_model_reasoning_exclude?: boolean
+    creative_model_reasoning_enabled?: boolean
+    creative_model_reasoning_effort?: ReasoningConfig['effort']
+    creative_model_reasoning_exclude?: boolean
+  }
   /**
    * 可选的章节数据，用于从中读取已保存的智能生成配置
    * 如果提供，将优先使用章节中保存的配置而非全局状态
@@ -373,6 +397,10 @@ export function buildAgenticPayloadFromIntent(params: BuildAgenticPayloadParams)
   errors: string[]
 } {
   const errors: string[] = []
+  const apiKey = (params.apiConfig.api_key || '').trim()
+  if (!apiKey) {
+    errors.push('请先配置 API Key')
+  }
 
   // 优先使用传入的章节数据，否则使用全局状态
   const chapterData = params.chapterData
@@ -431,6 +459,40 @@ export function buildAgenticPayloadFromIntent(params: BuildAgenticPayloadParams)
     })
   )
 
+  const baseModel = params.apiConfig.model || 'gpt-4o-mini'
+  const hasDualModel = !!(
+    params.apiConfig.reasoning_model || params.apiConfig.creative_model
+  )
+
+  let reasoningConfig: ReasoningConfig | undefined
+  let reasoningModelReasoningConfig: ReasoningConfig | undefined
+  let creativeModelReasoningConfig: ReasoningConfig | undefined
+
+  if (!hasDualModel && params.apiConfig.reasoning_enabled) {
+    reasoningConfig = {
+      enabled: true,
+      effort: params.apiConfig.reasoning_effort || 'medium',
+      exclude: params.apiConfig.reasoning_exclude || false
+    }
+  }
+
+  if (hasDualModel) {
+    if (params.apiConfig.reasoning_model_reasoning_enabled) {
+      reasoningModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.reasoning_model_reasoning_effort || 'high',
+        exclude: params.apiConfig.reasoning_model_reasoning_exclude || false
+      }
+    }
+    if (params.apiConfig.creative_model_reasoning_enabled) {
+      creativeModelReasoningConfig = {
+        enabled: true,
+        effort: params.apiConfig.creative_model_reasoning_effort || 'low',
+        exclude: params.apiConfig.creative_model_reasoning_exclude || false
+      }
+    }
+  }
+
   const refinementToIterations = (depth: string) => {
     if (depth === 'light') return 1
     if (depth === 'deep') return 4
@@ -439,6 +501,15 @@ export function buildAgenticPayloadFromIntent(params: BuildAgenticPayloadParams)
 
   const payload: GenerateChapterAgenticPayload = {
     chapter_id: params.chapterId,
+    api_key: apiKey,
+    base_url: params.apiConfig.base_url || undefined,
+    model: baseModel,
+    reasoning_model: hasDualModel
+      ? params.apiConfig.reasoning_model || baseModel
+      : undefined,
+    creative_model: hasDualModel
+      ? params.apiConfig.creative_model || baseModel
+      : undefined,
 
     editor_mode: 'intent',
     memory_strategy: policy.memory_span,
@@ -459,7 +530,11 @@ export function buildAgenticPayloadFromIntent(params: BuildAgenticPayloadParams)
 
     fast_mode: policy.workflow_tier === 'TIER_1_FAST',
     skip_minor_refine: true,
-    force_parallel_prose: false
+    force_parallel_prose: false,
+
+    reasoning_config: reasoningConfig,
+    reasoning_model_reasoning_config: reasoningModelReasoningConfig,
+    creative_model_reasoning_config: creativeModelReasoningConfig
   }
 
   return { payload, errors: [] }

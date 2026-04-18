@@ -7,7 +7,7 @@ import AgenticSettingsModal from './AgenticSettingsModal.vue'
 import BeatReviewModal from './BeatReviewModal.vue'
 import CompletionModal from './CompletionModal.vue'
 import PublishModal from './PublishModal.vue'
-import type { Chapter, Character } from '../../../types'
+import type { ApiConfig, Chapter, Character } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import type { BeatEditorItem } from '../../../types'
 
@@ -86,6 +86,7 @@ const props = defineProps<{
   toggleMetaCollapsed: () => void
   toggleStreamMode: () => void
   workflowState: any
+  apiConfig: ApiConfig
   bookId?: string
   critiqueResult?: any
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
@@ -355,6 +356,7 @@ watch(() => props.critiqueResult, (newVal) => {
   <AgenticSettingsModal
     :show="showAgenticSettingsModal && isAgenticMode"
     :selected-chapter="selectedChapter"
+    :api-config="apiConfig"
     @close="closeAgenticSettingsModal"
     @save="(payload) => { closeAgenticSettingsModal(); emit('intent-save', payload); }"
     @generate="(payload) => { closeAgenticSettingsModal(); emit('intent-generate', payload); }"

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { IntentDrivenPanel } from '../../intent-driven'
-import type { Chapter } from '../../../types'
+import type { ApiConfig, Chapter } from '../../../types'
 
 defineProps<{
   show: boolean
   selectedChapter: Chapter | null
+  apiConfig: ApiConfig
 }>()
 
 const emit = defineEmits<{
@@ -40,6 +41,7 @@ const emit = defineEmits<{
             <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
               <IntentDrivenPanel
                 :chapter-id="selectedChapter?.id || ''"
+                :api-config="apiConfig"
                 @save="(payload) => { emit('close'); emit('save', payload); }"
                 @generate="(payload) => { emit('close'); emit('generate', payload); }"
               />
