@@ -9,7 +9,6 @@ import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
 import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
-import SettingsModal from '../../../components/SettingsModal.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import { generateApi, chapterApi } from '../../../services/api'
@@ -39,7 +38,6 @@ const isDebugMode = computed(() => {
   return urlParams.get('debug') === 'true'
 })
 
-const showSettingsModal = ref(false)
 const chapterEditorRef = ref<any>(null)
 
 // ========== Zen Mode 首次引导 ==========
@@ -452,9 +450,6 @@ onMounted(async () => {
           </div>
           
           <div class="top-actions">
-            <button @click="showSettingsModal = true" class="btn-icon" title="设置">
-              <Icon name="settings" :size="16" />
-            </button>
             <button @click="toggleZenModeWithHint" class="btn-icon zen-toggle" :class="{ 'active': isZenMode }" title="沉浸模式 (Ctrl+Shift+Z)">
               <Icon name="maximize" :size="16" />
             </button>
@@ -687,13 +682,6 @@ onMounted(async () => {
       </div>
     </div>
     
-    <!-- 设置 -->
-    <SettingsModal
-      :is-open="showSettingsModal"
-      :config="apiConfig"
-      @close="showSettingsModal = false"
-      @save="updateApiConfig"
-    />
   </div>
 </template>
 
