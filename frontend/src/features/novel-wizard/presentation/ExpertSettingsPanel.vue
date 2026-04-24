@@ -160,6 +160,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                 <ul class="list-disc list-inside ml-1 space-y-0.5">
                   <li><span class="text-[var(--text-secondary)]">openrouter</span> — OpenRouter 聚合平台</li>
                   <li><span class="text-[var(--text-secondary)]">volcengine</span> — 字节火山引擎（兼容 OpenAI 协议）</li>
+                  <li><span class="text-[var(--text-secondary)]">deepseek</span> — Deepseek API（兼容 OpenAI 协议）</li>
                 </ul>
               </div>
               <p class="text-[10px] text-[var(--text-muted)] mt-3">

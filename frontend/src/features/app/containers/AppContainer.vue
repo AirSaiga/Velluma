@@ -11,6 +11,7 @@ import MapSettings from '../../../components/MapSettings.vue'
 import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
+import ApiTestPanel from '../../../components/ApiTestPanel.vue'
 import { generateApi, chapterApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
@@ -625,6 +626,10 @@ onMounted(async () => {
               @toggle-asset="chapterEditorRef?.toggleAsset"
               @update-chapter="updateChapter"
               @close="closeRightPanel"
+            />
+
+            <ApiTestPanel
+              v-else-if="activeFloatingTab === 'api-test'"
             />
           </div>
         </div>

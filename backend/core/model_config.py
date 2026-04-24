@@ -23,11 +23,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 读取项目根目录下的 model_config.json
 - 提供统一的模型配置访问接口
 
-配置结构（V4.2）：
+配置结构（V4.3）：
 {
   "llm": {
     "reasoning": {
-      "provider": "openrouter" | "volcengine",
+      "provider": "openrouter" | "volcengine" | "deepseek",
       "api_key": "...",
       "base_url": "...",
       "model": "...",
@@ -36,7 +36,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       "exclude": false
     },
     "creative": {
-      "provider": "openrouter" | "volcengine",
+      "provider": "openrouter" | "volcengine" | "deepseek",
       "api_key": "...",
       "base_url": "...",
       "model": "...",
@@ -47,11 +47,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   },
   "embedding": {
     "api_key": "...",
-    "model": "text-embedding-v2"
+    "model": "text-embedding-v2",
+    "dimensions": 1536  // 向量维度，必须与数据库 schema 一致
   },
   "proxy": {
     "enabled": true,
     "url": "http://127.0.0.1:4780"
+  }
+}
+
+Deepseek 配置示例：
+{
+  "llm": {
+    "reasoning": {
+      "provider": "deepseek",
+      "api_key": "sk-xxx",
+      "model": "deepseek-reasoner",
+      "enabled": true,
+      "effort": "medium",
+      "exclude": false
+    },
+    "creative": {
+      "provider": "deepseek",
+      "api_key": "sk-xxx",
+      "model": "deepseek-chat",
+      "enabled": true
+    }
   }
 }
 """
@@ -67,11 +88,12 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "model_config.json")
 # 内存缓存
 _config_cache: Optional[Dict] = None
 
-LLMProvider = Literal["openrouter", "volcengine"]
+LLMProvider = Literal["openrouter", "volcengine", "deepseek"]
 
 DEFAULT_PROVIDER_URLS: Dict[LLMProvider, str] = {
     "openrouter": "https://openrouter.ai/api/v1",
     "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
+    "deepseek": "https://api.deepseek.com/v1",
 }
 
 
@@ -134,6 +156,17 @@ def get_embedding_config() -> Dict:
     """获取 Embedding 配置"""
     config = _load_config()
     return config.get("embedding", {})
+
+
+def get_embedding_dimensions() -> int:
+    """
+    获取 Embedding 向量维度配置。
+    
+    Returns:
+        向量维度，默认 1536（兼容 text-embedding-v2）
+    """
+    emb_config = get_embedding_config()
+    return emb_config.get("dimensions", 1536)
 
 
 def get_proxy_config() -> dict:

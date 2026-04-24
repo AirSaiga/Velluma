@@ -120,11 +120,11 @@ async def test_model_connection(request: ModelTestRequest):
     
     业务目的：
     - 验证 API Key 和 Base URL 是否正确配置
-    - 检测模型是否可用
+    - 检测 reasoning 和 creative 两个模型是否可用
     - 如果启用推理模式，检测模型是否支持推理功能
     
     测试流程：
-    1. 发送简单的测试请求验证连接
+    1. 分别测试 reasoning 和 creative 模型
     2. 检查模型名称是否在已知支持推理的列表中
     3. 如果启用推理，尝试带推理参数的请求
     
@@ -134,92 +134,102 @@ async def test_model_connection(request: ModelTestRequest):
     import time
     
     start_time = time.perf_counter()
-    model = resolve_model_name()
+    reasoning_model = resolve_model_name(model_type="reasoning")
+    creative_model = resolve_model_name(model_type="creative")
     
-    try:
-        # 构建推理配置（如果启用）
-        # V4.1: 若请求未指定，自动从 model_config.json 读取 reasoning 模型的默认配置
-        reasoning_config = None
-        reasoning_enabled = request.reasoning_enabled
-        reasoning_effort = request.reasoning_effort
+    reasoning_profile = get_model_profile("reasoning")
+    creative_profile = get_model_profile("creative")
+    
+    # 构建推理配置（如果启用）
+    reasoning_config = None
+    reasoning_enabled = request.reasoning_enabled
+    reasoning_effort = request.reasoning_effort
 
-        if reasoning_enabled is None:
-            default_cfg = get_default_reasoning_config("reasoning")
-            if default_cfg:
-                reasoning_config = default_cfg
-                reasoning_enabled = True
-                reasoning_effort = default_cfg.get("reasoning", {}).get("effort", "medium")
-        elif reasoning_enabled:
-            reasoning_config = {
-                "reasoning": {
-                    "enabled": True,
-                    "effort": reasoning_effort or "medium"
-                }
+    if reasoning_enabled is None:
+        default_cfg = get_default_reasoning_config("reasoning")
+        if default_cfg:
+            reasoning_config = default_cfg
+            reasoning_enabled = True
+            reasoning_effort = default_cfg.get("reasoning", {}).get("effort", "medium")
+    elif reasoning_enabled:
+        reasoning_config = {
+            "reasoning": {
+                "enabled": True,
+                "effort": reasoning_effort or "medium"
             }
+        }
 
-        # 发送测试请求
-        test_prompt = "请回复'连接测试成功'这六个字，不要输出其他内容。"
-        response = await call_llm(
+    test_prompt = "请回复'连接测试成功'这六个字，不要输出其他内容。"
+    
+    # 测试 reasoning 模型
+    reasoning_success = False
+    reasoning_response = ""
+    reasoning_error = ""
+    try:
+        reasoning_response = await call_llm(
             system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
             user_prompt=test_prompt,
-            model=model,
+            model=reasoning_model,
             model_type="reasoning",
             temperature=0.1,
             max_tokens=50,
             reasoning_config=reasoning_config,
         )
-
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-
-        # 检查推理模式支持
-        reasoning_supported = None
-        reasoning_message = None
-
-        if reasoning_enabled:
-            reasoning_supported, reasoning_message = check_reasoning_support(model)
-
-        reasoning_profile = get_model_profile("reasoning")
-        creative_profile = get_model_profile("creative")
-        
-        return ModelTestResponse(
-            success=True,
-            message=f"模型连接成功，响应: {response[:50]}..." if len(response) > 50 else f"模型连接成功，响应: {response}",
-            model_info={
-                "model": model,
-                "reasoning_provider": reasoning_profile["provider"],
-                "reasoning_base_url": reasoning_profile["base_url"],
-                "creative_provider": creative_profile["provider"],
-                "creative_base_url": creative_profile["base_url"],
-            },
-            reasoning_supported=reasoning_supported,
-            reasoning_message=reasoning_message,
-            response_time_ms=round(elapsed_ms, 2)
-        )
-        
+        reasoning_success = True
     except Exception as e:
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        error_msg = str(e)
-        
-        # 解析常见错误类型
-        if "401" in error_msg or "Unauthorized" in error_msg or "invalid_api_key" in error_msg.lower():
-            message = "API Key 无效或未授权，请检查 API Key 是否正确"
-        elif "404" in error_msg or "not_found" in error_msg.lower() or "model" in error_msg.lower():
-            message = f"模型 {model} 不存在或不可用，请检查模型名称"
-        elif "429" in error_msg or "rate_limit" in error_msg.lower():
-            message = "请求过于频繁，请稍后重试"
-        elif "timeout" in error_msg.lower():
-            message = "连接超时，请检查网络或代理设置"
-        elif "connection" in error_msg.lower():
-            message = "无法连接到 API 服务器，请检查 Base URL 或网络设置"
-        elif "reasoning" in error_msg.lower():
-            message = f"推理模式不支持：该模型可能不支持推理功能。错误: {error_msg[:100]}"
-        else:
-            message = f"连接测试失败: {error_msg[:200]}"
-        
-        svc_logger.warning("Model test failed", model=model, error=error_msg)
-        
-        return ModelTestResponse(
-            success=False,
-            message=message,
-            response_time_ms=round(elapsed_ms, 2)
+        reasoning_error = str(e)
+    
+    # 测试 creative 模型
+    creative_success = False
+    creative_response = ""
+    creative_error = ""
+    try:
+        creative_response = await call_llm(
+            system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
+            user_prompt=test_prompt,
+            model=creative_model,
+            model_type="creative",
+            temperature=0.7,
+            max_tokens=50,
         )
+        creative_success = True
+    except Exception as e:
+        creative_error = str(e)
+
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+    # 检查推理模式支持
+    reasoning_supported, reasoning_message = check_reasoning_support(reasoning_model)
+    creative_supported, creative_message = check_reasoning_support(creative_model)
+
+    # 构建返回消息
+    messages = []
+    if reasoning_success:
+        messages.append(f"推理模型 ({reasoning_model}): 连接成功")
+    else:
+        messages.append(f"推理模型 ({reasoning_model}): 连接失败 - {reasoning_error[:100]}")
+    
+    if creative_success:
+        messages.append(f"创意模型 ({creative_model}): 连接成功")
+    else:
+        messages.append(f"创意模型 ({creative_model}): 连接失败 - {creative_error[:100]}")
+
+    overall_success = reasoning_success or creative_success
+    
+    return ModelTestResponse(
+        success=overall_success,
+        message="; ".join(messages),
+        model_info={
+            "reasoning_model": reasoning_model,
+            "creative_model": creative_model,
+            "reasoning_provider": reasoning_profile["provider"],
+            "reasoning_base_url": reasoning_profile["base_url"],
+            "creative_provider": creative_profile["provider"],
+            "creative_base_url": creative_profile["base_url"],
+            "reasoning_success": reasoning_success,
+            "creative_success": creative_success,
+        },
+        reasoning_supported=reasoning_supported,
+        reasoning_message=reasoning_message,
+        response_time_ms=round(elapsed_ms, 2)
+    )

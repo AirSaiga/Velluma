@@ -428,6 +428,92 @@ MIGRATIONS: list[dict[str, Any]] = [
 ]
 
 
+async def _get_vector_dimension(conn, table_name: str, column_name: str) -> Optional[int]:
+    """
+    获取向量列的维度。
+    
+    pgvector 的 vector 类型在 udt_name 中会显示维度信息，如 'vector(1536)'
+    """
+    result = await conn.execute(
+        text(
+            """
+            SELECT udt_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND column_name = :column_name
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    )
+    row = result.mappings().first()
+    if row:
+        udt_name = str(row.get("udt_name", ""))
+        # 解析 vector(1536) 格式
+        if "(" in udt_name and ")" in udt_name:
+            try:
+                return int(udt_name.split("(")[1].split(")")[0])
+            except (ValueError, IndexError):
+                pass
+    return None
+
+
+async def migrate_vector_dimension(
+    conn,
+    target_dimension: int,
+    table_name: str = "memory_chunks",
+    column_name: str = "embedding",
+):
+    """
+    迁移向量列的维度。
+    
+    警告：这是一个破坏性操作，会删除并重建列，导致所有向量数据丢失！
+    生产环境应先备份数据，迁移后再重新生成向量。
+    
+    Args:
+        conn: 数据库连接
+        target_dimension: 目标维度
+        table_name: 表名
+        column_name: 列名
+    """
+    current_dimension = await _get_vector_dimension(conn, table_name, column_name)
+    
+    if current_dimension is None:
+        logger.warning(f"[MIGRATION] 向量列 {table_name}.{column_name} 不存在")
+        return
+    
+    if current_dimension == target_dimension:
+        logger.info(f"[MIGRATION] 向量维度已是 {target_dimension}，无需迁移")
+        return
+    
+    logger.warning(
+        f"[MIGRATION] 向量维度将从 {current_dimension} 迁移到 {target_dimension}。"
+        f"这将删除所有现有向量数据！"
+    )
+    
+    try:
+        # 删除旧列
+        await conn.execute(
+            text(
+                f'ALTER TABLE "{table_name}" DROP COLUMN IF EXISTS "{column_name}";'
+            )
+        )
+        logger.info(f"[MIGRATION] 已删除旧向量列 {table_name}.{column_name}")
+        
+        # 添加新列（使用目标维度）
+        await conn.execute(
+            text(
+                f'ALTER TABLE "{table_name}" '
+                f'ADD COLUMN "{column_name}" vector({target_dimension});'
+            )
+        )
+        logger.info(f"[MIGRATION] 已创建新向量列 {table_name}.{column_name} ({target_dimension} 维)")
+        
+    except Exception as e:
+        logger.error(f"[MIGRATION] 向量维度迁移失败: {e}")
+        raise
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     依赖注入函数：获取数据库会话。
@@ -455,6 +541,7 @@ async def init_db():
     1. 创建 pgvector 扩展 (向量搜索依赖)
     2. 创建所有 ORM 模型对应的表
     3. 执行列迁移 (添加缺失字段)
+    4. 检查并迁移向量维度（如配置变更）
 
     警告：run_migrations 使用朴素的条件判断，不支持回滚。
     生产环境应使用 Alembic 或 Flyway 等专业迁移工具。
@@ -474,6 +561,7 @@ async def init_db():
         SceneIntent,
         StoryBeat,
     )
+    from backend.core.model_config import get_embedding_dimensions
 
     async with engine.begin() as conn:
         # 关键：pgvector 必须在使用向量类型前创建，且需超级用户权限
@@ -481,6 +569,10 @@ async def init_db():
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
         await run_migrations(conn)
+        
+        # 检查并迁移向量维度
+        target_dimension = get_embedding_dimensions()
+        await migrate_vector_dimension(conn, target_dimension)
 
 
 async def _get_column_info(conn, table_name: str, column_name: str) -> Optional[dict[str, Any]]:

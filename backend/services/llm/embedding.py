@@ -31,7 +31,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 主要功能：
 - 单文本/批量文本向量化
-- 1536 维向量输出（适配 pgvector）
+- 可配置维度向量输出（通过 model_config.json 配置）
+- 维度验证，确保与数据库 schema 一致
 - 异常处理和降级策略
 
 依赖项：
@@ -45,7 +46,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import logging
 from typing import Optional
 
-from backend.core.model_config import get_embedding_config
+from backend.core.model_config import get_embedding_config, get_embedding_dimensions
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ async def get_embedding(
     emb_config = get_embedding_config()
     dashscope_api_key = emb_config.get("api_key", "")
     emb_model = model or emb_config.get("model", "text-embedding-v2")
+    expected_dimensions = get_embedding_dimensions()
 
     if not dashscope_api_key:
         logger.warning("[Embedding] API Key 未设置，请在 model_config.json 中配置 embedding.api_key")
@@ -69,15 +71,32 @@ async def get_embedding(
     dashscope.api_key = dashscope_api_key
 
     try:
-        # text-embedding-v2 默认输出 1536 维，适配数据库的 Vector(1536)
-        resp = TextEmbedding.call(
-            model=emb_model,
-            input=text,
-        )
+        # 构建调用参数
+        call_params = {
+            "model": emb_model,
+            "input": text,
+        }
+        
+        # text-embedding-v3/v4 支持 dimensions 参数，v2 不支持
+        if emb_model in ("text-embedding-v3", "text-embedding-v4"):
+            call_params["dimensions"] = expected_dimensions
+
+        resp = TextEmbedding.call(**call_params)
 
         if resp.status_code == 200:
             embedding = resp.output["embeddings"][0]["embedding"]
-            logger.info(f"[Embedding] 向量维度: {len(embedding)}")
+            actual_dimensions = len(embedding)
+            
+            # 验证维度是否匹配数据库配置
+            if actual_dimensions != expected_dimensions:
+                logger.error(
+                    f"[Embedding] 维度不匹配: 模型输出 {actual_dimensions} 维, "
+                    f"数据库配置 {expected_dimensions} 维。"
+                    f"请检查 model_config.json 中的 embedding.dimensions 配置"
+                )
+                return []
+            
+            logger.info(f"[Embedding] 向量维度: {actual_dimensions}, 模型: {emb_model}")
             return embedding
         else:
             logger.error(
