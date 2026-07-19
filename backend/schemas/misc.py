@@ -170,6 +170,34 @@ class ProxyConfig(BaseModel):
     url: str
 
 
+class LLMProfileUpdate(BaseModel):
+    """LLM profile 更新（reasoning / creative）；None 字段保持原值。
+
+    api_key 传空字符串或 None 表示保持不变（GET 端点只返回掩码，不回传明文）。
+    """
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    enabled: Optional[bool] = None
+    effort: Optional[str] = None
+
+
+class EmbeddingConfigUpdate(BaseModel):
+    """Embedding 配置更新；None 字段保持原值。dimensions 变更需重启后端且会重建向量列。"""
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    dimensions: Optional[int] = None
+
+
+class ModelConfigUpdate(BaseModel):
+    """模型配置整体更新（设置面板保存），各节均为可选。"""
+    reasoning: Optional[LLMProfileUpdate] = None
+    creative: Optional[LLMProfileUpdate] = None
+    embedding: Optional[EmbeddingConfigUpdate] = None
+    proxy: Optional[ProxyConfig] = None
+
+
 class ModelTestRequest(BaseModel):
     # V4.1: 若留空则自动从 model_config.json 读取对应模型的推理配置
     reasoning_enabled: Optional[bool] = Field(default=None)

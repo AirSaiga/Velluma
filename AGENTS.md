@@ -540,6 +540,8 @@ LLM、Embedding、代理的实际配置来源是项目根目录的 `model_config
 - `embedding`：api_key、model、dimensions（默认 1536）
 - `proxy`：enabled、url
 
+该文件除手动编辑外，也可通过前端**设置面板**修改：编辑器右侧悬浮工具栏「设置」标签（`frontend/src/components/SettingsPanel.vue`），经 `GET/PUT /api/system/model-config`（`backend/routes/system.py`）读写；GET 对 API Key 只返回掩码，PUT 中 api_key 留空表示保持不变。LLM/代理保存后立即生效（每次调用实时读取），embedding 维度变更需重启后端（触发删列重建）。
+
 ⚠ 该文件已 gitignore，但**当前工作区副本含有真实 API Key**，请勿提交或外发工作区快照。
 
 ### 环境变量（.env，可选）

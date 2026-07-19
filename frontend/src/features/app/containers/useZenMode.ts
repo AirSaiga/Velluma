@@ -38,7 +38,7 @@ export function useZenMode(options: {
     { key: 'notes', label: '笔记', icon: 'pencil-square', shortcut: '6' },
     { key: 'assets', label: '资产', icon: 'archive', shortcut: '7' },
     { key: 'chapter-config', label: '章节', icon: 'document-text', shortcut: '8' },
-    { key: 'api-test', label: 'API测试', icon: 'zap', shortcut: '9' },
+    { key: 'settings', label: '设置', icon: 'settings', shortcut: '9' },
   ]
 
   const rightTab = computed({

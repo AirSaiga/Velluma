@@ -1,159 +1,71 @@
-# Python
+# ============================================================================
+# Velluma .gitignore
+# ============================================================================
+
+# ---- Python ----
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
-# Virtual environments
-.env
-.env.example
-.venv
-env/
+# ---- 虚拟环境 ----
+.venv/
 venv/
+env/
 ENV/
+
+# ---- 环境变量与密钥(切勿提交) ----
+.env
+.env.*
+!.env.example
 model_config.json
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.qoder
-
-# Database
-*.db
-*.sqlite3
-
-# Logs
-logs/
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Data
-data/
-docs/
-
-# Node.js
+# ---- Node.js ----
 node_modules/
 frontend/node_modules/
 
-# Testing
-.test-dist/
-coverage/
-
-# Temporary files
-*.tmp
-*.bak
-
-# IDE
-.trae/specs
-.trae/documents
-
-# Archive
-backend/_archive/
-backend/models_generation_task.py
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-.env
-.env.example
-.venv
-env/
-venv/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.qoder
-
-# Database
-*.db
-*.sqlite3
-
-# Logs
-logs/
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Data
-data/
-docs/
-
-# Node.js
-node_modules/
-frontend/node_modules/
-
-# Testing
-.test-dist/
-coverage/
-
-# Temporary files
-*.tmp
-*.bak
-
-# IDE
-.trae/specs
-.trae/documents
-
-# Archive
-backend/_archive/
-backend/models_generation_task.py
-
-# Windows special device files
-nul
+# ---- 前端构建产物 ----
+frontend/dist/
 frontend/nul
+
+# ---- 通用构建产物 ----
+build/
+dist/
+*.tmp
+*.bak
+
+# ---- 运行时数据与日志 ----
+data/
+logs/
+backend/logs/
+*.log
+
+# ---- 数据库 ----
+*.db
+*.sqlite3
+
+# ---- IDE / 工具配置(个人配置,不入库) ----
+.vscode/
+.idea/
+.trae/
+.qoder/
+.zcode/
+*.swp
+*.swo
+*~
+
+# ---- 归档与死代码 ----
+backend/_archive/
+backend/models_generation_task.py
+
+# ---- 测试产物 ----
+.test-dist/
+coverage/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+nul

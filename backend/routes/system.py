@@ -41,10 +41,18 @@ from typing import Optional
 from fastapi import APIRouter
 
 from backend.core.config import get_actual_port, check_reasoning_support
-from backend.core.model_config import resolve_model_name, get_default_reasoning_config, get_model_profile
+from backend.core.model_config import (
+    resolve_model_name,
+    get_default_reasoning_config,
+    get_model_profile,
+    get_model_config,
+    update_llm_profile,
+    update_embedding_config,
+    DEFAULT_PROVIDER_URLS,
+)
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
-from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse
+from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate
 
 router = APIRouter(prefix="/api", tags=["system"])
 logger = logging.getLogger(__name__)
@@ -107,6 +115,90 @@ async def update_proxy_config_endpoint(config: ProxyConfig):
     """更新代理配置"""
     set_proxy_config(config.enabled, config.url)
     return get_proxy_config()
+
+
+# =============================================================================
+# 模型配置（设置面板）
+# =============================================================================
+
+def _mask_api_key(key: str) -> str:
+    """API Key 掩码：仅保留首尾各 4 位，避免明文经 HTTP 传输。"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:4]}****{key[-4:]}"
+
+
+def _serialize_profile(role: str) -> dict:
+    profile = get_model_profile(role)
+    return {
+        "provider": profile["provider"],
+        "api_key_masked": _mask_api_key(profile["api_key"]),
+        "has_api_key": bool(profile["api_key"]),
+        "base_url": profile["base_url"],
+        "default_base_url": DEFAULT_PROVIDER_URLS.get(profile["provider"], ""),
+        "model": profile["model"],
+        "enabled": profile["enabled"],
+        "effort": profile["effort"],
+    }
+
+
+def _serialize_model_config() -> dict:
+    """序列化完整模型配置（API Key 掩码后返回）"""
+    config = get_model_config()
+    embedding = config.get("embedding", {})
+    return {
+        "llm": {
+            "reasoning": _serialize_profile("reasoning"),
+            "creative": _serialize_profile("creative"),
+        },
+        "embedding": {
+            "api_key_masked": _mask_api_key(embedding.get("api_key", "")),
+            "has_api_key": bool(embedding.get("api_key")),
+            "model": embedding.get("model", "text-embedding-v2"),
+            "dimensions": embedding.get("dimensions", 1536),
+        },
+        "proxy": get_proxy_config(),
+    }
+
+
+@router.get("/system/model-config")
+async def get_model_config_endpoint():
+    """获取模型配置（LLM / Embedding / 代理），API Key 以掩码返回"""
+    return _serialize_model_config()
+
+
+@router.put("/system/model-config")
+async def update_model_config_endpoint(update: ModelConfigUpdate):
+    """更新模型配置并持久化到 model_config.json。
+
+    副作用：
+    - 未提供的字段保持原值；api_key 传空字符串/None 表示不修改
+    - LLM 与代理配置保存后立即生效（每次调用实时读取）
+    - embedding.dimensions 变更需重启后端，启动迁移会删列重建向量数据（破坏性）
+    """
+    for role, profile in (("reasoning", update.reasoning), ("creative", update.creative)):
+        if profile is None:
+            continue
+        fields = profile.model_dump(exclude_none=True)
+        if not fields.get("api_key"):
+            fields.pop("api_key", None)  # 空 Key 视为保持不变
+        if fields:
+            update_llm_profile(role, fields)
+
+    if update.embedding is not None:
+        fields = update.embedding.model_dump(exclude_none=True)
+        if not fields.get("api_key"):
+            fields.pop("api_key", None)
+        if fields:
+            update_embedding_config(fields)
+
+    if update.proxy is not None:
+        set_proxy_config(update.proxy.enabled, update.proxy.url)
+
+    svc_logger.info("模型配置已更新")
+    return _serialize_model_config()
 
 
 # =============================================================================

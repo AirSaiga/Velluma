@@ -467,7 +467,67 @@ export const generateApi = {
   // CP4.5：generateDualTrackSimple 已下线（后端端点已删除，无前端调用方）
 }
 
+// ============================================================
+// 模型设置（设置面板）
+// ============================================================
+
+/** LLM profile（reasoning / creative），api_key 永远为掩码形式 */
+export interface LLMProfileConfig {
+  provider: string
+  api_key_masked: string
+  has_api_key: boolean
+  base_url: string
+  default_base_url: string
+  model: string
+  enabled: boolean
+  effort: string
+}
+
+export interface ModelConfig {
+  llm: {
+    reasoning: LLMProfileConfig
+    creative: LLMProfileConfig
+  }
+  embedding: {
+    api_key_masked: string
+    has_api_key: boolean
+    model: string
+    dimensions: number
+  }
+  proxy: {
+    enabled: boolean
+    url: string
+  }
+}
+
+/** 更新载荷：api_key 留空表示保持不变 */
+export interface ModelConfigUpdatePayload {
+  reasoning?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  creative?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  embedding?: { api_key?: string; model?: string; dimensions?: number }
+  proxy?: { enabled: boolean; url: string }
+}
+
 export const systemApi = {
+  /**
+   * 获取模型配置（LLM / Embedding / 代理）
+   * 后端从 model_config.json 读取，API Key 以掩码返回
+   */
+  getModelConfig: async (): Promise<ModelConfig> => {
+    return requestJson('/system/model-config')
+  },
+
+  /**
+   * 保存模型配置（写回 model_config.json）
+   * LLM/代理保存后立即生效；embedding 维度变更需重启后端且会重建向量列
+   */
+  updateModelConfig: async (payload: ModelConfigUpdatePayload): Promise<ModelConfig> => {
+    return requestJson('/system/model-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    })
+  },
+
   /**
    * 测试模型连接（V4.1: 后端从 model_config.json 读取配置）
    * @returns 测试结果

@@ -191,6 +191,39 @@ def set_proxy_config(enabled: bool, url: str):
     _invalidate_cache()
 
 
+def _write_config(config: Dict):
+    """写回配置文件并清除缓存"""
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    _invalidate_cache()
+
+
+def update_llm_profile(role: str, updates: Dict):
+    """
+    合并更新指定 LLM profile（reasoning / creative）并持久化。
+
+    副作用：仅更新 updates 中出现的字段，未提供的字段（如 exclude）保持原值。
+    """
+    if role not in ("reasoning", "creative"):
+        raise ValueError(f"未知的 LLM 角色: {role}")
+    config = _load_config()
+    profile = config.setdefault("llm", {}).setdefault(role, {})
+    profile.update(updates)
+    _write_config(config)
+
+
+def update_embedding_config(updates: Dict):
+    """
+    合并更新 Embedding 配置并持久化。
+
+    警示：dimensions 变更后需重启后端，启动迁移会删列重建向量数据（破坏性）。
+    """
+    config = _load_config()
+    embedding = config.setdefault("embedding", {})
+    embedding.update(updates)
+    _write_config(config)
+
+
 def _invalidate_cache():
     """清除配置缓存，强制下次重新加载"""
     global _config_cache

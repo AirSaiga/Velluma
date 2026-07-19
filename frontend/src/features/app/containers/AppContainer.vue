@@ -12,7 +12,7 @@ import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue
 import StyleCardManager from '../../../components/StyleCardManager.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
-import ApiTestPanel from '../../../components/ApiTestPanel.vue'
+import SettingsPanel from '../../../components/SettingsPanel.vue'
 import { generateApi, chapterApi } from '../../../services/api'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
@@ -630,8 +630,8 @@ onMounted(async () => {
               @close="closeRightPanel"
             />
 
-            <ApiTestPanel
-              v-else-if="activeFloatingTab === 'api-test'"
+            <SettingsPanel
+              v-else-if="activeFloatingTab === 'settings'"
             />
           </div>
         </div>
