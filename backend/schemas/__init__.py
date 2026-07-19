@@ -101,6 +101,10 @@ from .generation import (
     ConfirmedStoryBeat,
     GenerateChapterAgenticPreviewResponse,
     GenerateChapterAgenticWithBeatsRequest,
+    # CP2.3d 合并闸门 schemas
+    PlanPreviewRequest,
+    PlanPreviewResponse,
+    PlanConfirmRequest,
     ClarificationRequest,
     ClarificationResponse,
     ClarifyOutlineRequest,
@@ -139,6 +143,38 @@ from .world_state import (
     StateValidationViolation,
     StateValidationResult,
     merge_world_states,
+)
+
+# CP2.1b 新增：文风体系 schemas
+from .style import (
+    StyleCardBase,
+    StyleCardCreate,
+    StyleCardUpdate,
+    StyleCardResponse,
+    AuthorSampleBase,
+    AuthorSampleCreate,
+    AuthorSampleResponse,
+    AuthorSampleSearchRequest,
+    AuthorSampleSearchHit,
+    SystemClicheBase,
+    SystemClicheCreate,
+    SystemClicheUpdate,
+    SystemClicheResponse,
+    StyleExtractRequest,
+    StyleExtractResponse,
+    MustHitEvent,
+    ChapterCardBase,
+    ChapterCardCreate,
+    ChapterCardUpdate,
+    ChapterCardResponse,
+)
+
+# CP3.1a 新增：质量报告 schemas
+from .quality import (
+    FindingItem,
+    MetricsBlock,
+    DegradedInfo,
+    QualityReportResponse,
 )
 
 __all__ = [
@@ -219,6 +255,9 @@ __all__ = [
     "ConfirmedStoryBeat",
     "GenerateChapterAgenticPreviewResponse",
     "GenerateChapterAgenticWithBeatsRequest",
+    "PlanPreviewRequest",
+    "PlanPreviewResponse",
+    "PlanConfirmRequest",
     "ClarificationRequest",
     "ClarificationResponse",
     "ClarifyOutlineRequest",
@@ -257,6 +296,32 @@ __all__ = [
     "merge_world_states",
     # Functions
     "map_tension_to_workflow_tier",
+    # CP2.1b 文风体系 schemas
+    "StyleCardBase",
+    "StyleCardCreate",
+    "StyleCardUpdate",
+    "StyleCardResponse",
+    "AuthorSampleBase",
+    "AuthorSampleCreate",
+    "AuthorSampleResponse",
+    "AuthorSampleSearchRequest",
+    "AuthorSampleSearchHit",
+    "SystemClicheBase",
+    "SystemClicheCreate",
+    "SystemClicheUpdate",
+    "SystemClicheResponse",
+    "StyleExtractRequest",
+    "StyleExtractResponse",
+    "MustHitEvent",
+    "ChapterCardBase",
+    "ChapterCardCreate",
+    "ChapterCardUpdate",
+    "ChapterCardResponse",
+    # CP3.1a 质量报告 schemas
+    "FindingItem",
+    "MetricsBlock",
+    "DegradedInfo",
+    "QualityReportResponse",
 ]
 
 

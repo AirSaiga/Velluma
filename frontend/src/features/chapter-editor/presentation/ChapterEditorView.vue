@@ -7,7 +7,7 @@ import AgenticSettingsModal from './AgenticSettingsModal.vue'
 import BeatReviewModal from './BeatReviewModal.vue'
 import CompletionModal from './CompletionModal.vue'
 import PublishModal from './PublishModal.vue'
-import type { ApiConfig, Chapter, Character } from '../../../types'
+import type { ApiConfig, Chapter, Character, ChapterCard } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import type { BeatEditorItem } from '../../../types'
 
@@ -41,7 +41,7 @@ const props = defineProps<{
   handleEditorEntityFocus: (keyword: string) => void
   handleFormatText: (text: string) => void
   handleOptimize: () => void
-  handlePartialOptimize: (payload: { selection: any, instruction: string }) => void
+  handlePartialOptimize: (payload: { selection: any, instruction: string, mode?: string, tone?: string | null }) => void
   handleOutlineInput: (event: Event) => void
   handleAssetsSchemaInput: (event: Event) => void
   handleTitleInput: (event: Event) => void
@@ -93,6 +93,11 @@ const props = defineProps<{
   lastSavedAt?: Date | null
   cancelGeneration?: () => void
   updatePreviewBeats?: (beats: BeatEditorItem[]) => void
+  // CP2.5b：合并闸门——章节卡 + 重规划
+  chapterCard?: ChapterCard | null
+  planDegraded?: { reason: string; action: string; detail?: string } | null
+  regenerateBeats?: (editedCardFields: Record<string, any>) => Promise<boolean>
+  // CP4.5：skip_plan_gate 兼容开关已移除
 }>()
 
 const emit = defineEmits<{
@@ -100,11 +105,21 @@ const emit = defineEmits<{
   (e: 'intent-generate', payload: any): void
   (e: 'intent-save', payload: any): void
   (e: 'update:previewBeats', beats: BeatEditorItem[]): void
+  (e: 'regenerate-beats', editedCardFields: Record<string, any>): void
 }>()
 
 function handleUpdatePreviewBeats(beats: BeatEditorItem[]) {
   props.updatePreviewBeats?.(beats)
   emit('update:previewBeats', beats)
+}
+
+// CP2.5b：用户编辑章节卡后触发节拍重规划
+async function handleRegenerateBeats(editedCardFields: Record<string, any>) {
+  if (props.regenerateBeats) {
+    await props.regenerateBeats(editedCardFields)
+  } else {
+    emit('regenerate-beats', editedCardFields)
+  }
 }
 
 const saveStatusLabel = computed(() => {
@@ -223,7 +238,9 @@ watch(() => props.critiqueResult, (newVal) => {
               </svg>
               {{ isClarifyingOutline ? '澄清中' : (beatPreviewLoading ? '规划中' : (isGenerating ? '生成中' : '智能生成')) }}
             </button>
-            
+
+            <!-- CP4.5：skip_plan_gate 兼容开关已移除（合并闸门为唯一路径）-->
+
             <div class="flex items-center justify-center gap-1">
               <button
                 @click="openInspirationModal"
@@ -366,9 +383,13 @@ watch(() => props.critiqueResult, (newVal) => {
     :show="showBeatReviewModal && isAgenticMode"
     :preview-beats="previewBeats"
     :beat-preview-error="beatPreviewError"
+    :chapter-card="chapterCard"
+    :plan-degraded="planDegraded"
+    :beat-preview-loading="beatPreviewLoading"
     @close="closeBeatReviewModal"
     @confirm="confirmBeatsAndGenerate"
     @update:previewBeats="handleUpdatePreviewBeats"
+    @regenerate="handleRegenerateBeats"
   />
 
   <ClarificationModal

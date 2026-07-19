@@ -1,19 +1,27 @@
 import { ref } from 'vue'
 import { generateApi } from '../services/api'
+import type { SketchSegment, SketchEmotionPoint } from '../types'
 
-export type WorkflowEvent = 
-  | 'ASSEMBLING_CONTEXT' 
+export type WorkflowEvent =
+  | 'ASSEMBLING_CONTEXT'
   | 'PLANNING'
-  | 'DRAFTING' 
+  | 'DRAFTING'
   | 'SCENE_INTENT'
   | 'STITCHING'
-  | 'REVIEWING' 
-  | 'REFINING' 
+  | 'REVIEWING'
+  | 'REFINING'
   | 'FORMATTING'
   | 'METRICS'
-  | 'FINAL_TEXT_STREAM' 
-  | 'TEXT_CHUNK' 
+  | 'FINAL_TEXT_STREAM'
+  | 'TEXT_CHUNK'
   | 'DONE'
+  // CP2.5f：CP2.4 sketch 先行模式事件
+  | 'SKETCH_GENERATION'
+  | 'SKETCH_DONE'
+  // CP3.4：双层审计实时事件（蓝图 §4.8 + 病灶 9）
+  | 'AUDIT_START'
+  | 'AUDIT_DONE'
+  | 'DEGRADED'
 
 export interface WorkflowState {
   currentEvent: WorkflowEvent | null
@@ -21,6 +29,9 @@ export interface WorkflowState {
   iteration: number
   passed: boolean
   revisionCount: number
+  // CP4.2：速写骨架分段（SKETCH_DONE 捕获，供 SketchEditorPanel 展示）
+  sketchSegments?: SketchSegment[]
+  sketchEmotionArc?: SketchEmotionPoint[]
 }
 
 export function useChapterGenerator() {
@@ -119,6 +130,21 @@ export function useChapterGenerator() {
             state.message = data.message || '正在计算 SceneIntent...'
             state.iteration = data.iteration || state.iteration
             break
+          // CP4.2：sketch 先行事件 + segments 捕获（蓝图 §4.5）
+          case 'SKETCH_GENERATION':
+            state.currentEvent = 'SKETCH_GENERATION'
+            state.message = data.message || '生成速写骨架...'
+            break
+          case 'SKETCH_DONE':
+            state.message = data.message || '速写骨架完成'
+            // 捕获 segments + emotion_arc（CP4.2 新增 payload）
+            if (Array.isArray(data.segments)) {
+              state.sketchSegments = data.segments
+            }
+            if (Array.isArray(data.emotion_arc)) {
+              state.sketchEmotionArc = data.emotion_arc
+            }
+            break
           case 'STITCHING':
             state.currentEvent = 'STITCHING'
             state.message = data.message || '统稿 Agent 正在拼接 chunks...'
@@ -128,6 +154,18 @@ export function useChapterGenerator() {
             state.currentEvent = 'REVIEWING'
             state.message = data.message || '审阅 Agent 正在进行逻辑校验和 OOC 排查...'
             state.iteration = data.iteration || state.iteration
+            break
+          // CP3.4：双层审计实时事件
+          case 'AUDIT_START':
+            state.currentEvent = 'REVIEWING'  // 复用 REVIEWING 阶段显示（审计是 REVIEWING 的子步骤）
+            state.message = data.message || '双层审计中（代码级 + LLM 级）...'
+            break
+          case 'AUDIT_DONE':
+            state.message = data.message || '审计完成'
+            // verdict/findings_count 在 data 中，UI 可按需展示
+            break
+          case 'DEGRADED':
+            state.message = data.message || '阶段降级（已兜底）'
             break
           case 'REFINING':
             state.currentEvent = 'REFINING'

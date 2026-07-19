@@ -193,7 +193,7 @@ async function streamDualTrackFn(
 ) {
   let hasCompleted = false
 
-  streamSse(`/chapters/${chapterId}/generate-dual-track`, data, {
+  streamSse(`/chapters/${chapterId}/generate-chapter`, data, {
     onPayload: payload => {
       if (payload.prompt) {
         publishPromptData(payload.prompt)
@@ -318,24 +318,7 @@ export const generateApi = {
     return response.json()
   },
 
-  previewAgenticBeats: async (data: any, abortSignal?: AbortSignal) => {
-    // 节拍预览需要调用 LLM，设置 5 分钟超时
-    const response = await requestRaw(
-      '/generate_chapter_agentic_preview_beats',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-        signal: abortSignal
-      },
-      300000
-    )
-
-    if (!response.ok) {
-      throw new Error(`节拍预览请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
-  },
+  // CP4.5：previewAgenticBeats 已下线（合并闸门 planApi.preview 取代）
 
   clarifyOutline: async (data: any, abortSignal?: AbortSignal) => {
     // 大纲澄清需要调用 LLM，设置 5 分钟超时
@@ -479,23 +462,9 @@ export const generateApi = {
     signal?: AbortSignal
   ) => {
     return streamDualTrackFn(chapterId, data, callbacks, signal)
-  },
-
-  /**
-   * V4.0 双轨生成 - 非流式（简化版）
-   */
-  generateDualTrackSimple: async (chapterId: string, data: any) => {
-    const response = await requestRaw(`/chapters/${chapterId}/generate-dual-track-simple`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-
-    if (!response.ok) {
-      throw new Error(`双轨生成请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
   }
+
+  // CP4.5：generateDualTrackSimple 已下线（后端端点已删除，无前端调用方）
 }
 
 export const systemApi = {
@@ -523,4 +492,161 @@ export const systemApi = {
       body: JSON.stringify({})
     })
   }
+}
+
+// ============================================================
+// CP2.5a 新增：合并闸门 / 文风体系 / 成本报告 API
+// ============================================================
+
+import type {
+  PlanPreviewResponse,
+  PlanConfirmRequest,
+  StyleCard,
+  StyleExtractResponse,
+  AuthorSample,
+  AuthorSampleSearchHit,
+  CostReport,
+  QualityReport,
+} from '../../../types'
+
+/**
+ * 章节规划 API（合并闸门，蓝图 §4.4.2 + decisions U3c）。
+ *
+ * 业务流程：
+ *   preview() → 用户编辑章节卡+节拍 → confirm() → 触发 /generate-chapter（CP4.5 重命名）
+ */
+export const planApi = {
+  /** 联合预览：生成/复用章节卡 + 节拍。
+   *  首次调用 editedCardFields 留空 → AI 生成（2 次 LLM，5-15s）
+   *  重规划 editedCardFields 非空 → 用用户版本生成新节拍（1 次 LLM）
+   */
+  preview: async (
+    chapterId: string,
+    editedCardFields?: Record<string, any> | null,
+  ): Promise<PlanPreviewResponse> => {
+    return requestJson(
+      `/chapters/${chapterId}/plan`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ edited_card_fields: editedCardFields || null }),
+      },
+      600000,  // 10 分钟超时（联合预览耗时长）
+    )
+  },
+
+  /** 单次确认：写 chapter_card + beats 到 DB，status=confirmed。 */
+  confirm: async (
+    chapterId: string,
+    payload: PlanConfirmRequest,
+  ): Promise<any> => {
+    return requestJson(
+      `/chapters/${chapterId}/plan/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    )
+  },
+}
+
+/**
+ * 文风体系 API（蓝图 §4.4 + §5.1 + §6.2）。
+ */
+export const styleApi = {
+  /** 获取生效的文风卡（章级覆盖优先，回退书级）。 */
+  get: async (bookId: string, chapterId?: string): Promise<StyleCard | null> => {
+    const query = chapterId ? `?chapter_id=${chapterId}` : ''
+    return requestJson(`/books/${bookId}/style-card${query}`)
+  },
+
+  /** 创建/更新书级或章级文风卡。 */
+  upsert: async (bookId: string, payload: Partial<StyleCard>): Promise<StyleCard> => {
+    return requestJson(`/books/${bookId}/style-card`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  /** 从作者样本提炼文风画像（Match My Style）。 */
+  extract: async (
+    bookId: string,
+    samples: string[],
+    genre?: string,
+  ): Promise<StyleExtractResponse> => {
+    return requestJson(
+      `/books/${bookId}/style-card/extract`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ samples, genre }),
+      },
+      300000,  // 5 分钟超时
+    )
+  },
+
+  /** 列出书籍的作者样本。 */
+  listSamples: async (
+    bookId: string,
+    sceneType?: string,
+  ): Promise<AuthorSample[]> => {
+    const query = sceneType ? `?scene_type=${sceneType}` : ''
+    return requestJson(`/books/${bookId}/samples${query}`)
+  },
+
+  /** 创建作者样本（保存时自动向量化）。 */
+  createSample: async (
+    bookId: string,
+    payload: { content: string; scene_type?: string; chapter_id?: string; source?: string },
+  ): Promise<AuthorSample> => {
+    return requestJson(`/books/${bookId}/samples`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  /** 删除作者样本。 */
+  deleteSample: async (bookId: string, sampleId: string): Promise<void> => {
+    await requestRaw(`/books/${bookId}/samples/${sampleId}`, { method: 'DELETE' })
+  },
+
+  /** 向量检索相似样本。 */
+  searchSamples: async (
+    bookId: string,
+    queryText: string,
+    sceneType?: string,
+  ): Promise<AuthorSampleSearchHit[]> => {
+    return requestJson(`/books/${bookId}/samples/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query_text: queryText, scene_type: sceneType || null, limit: 3 }),
+    })
+  },
+}
+
+/**
+ * 成本报告 API（Phase 0 观测层，T1.6）。
+ */
+export const costReportApi = {
+  /** 获取章级成本报告（分阶段 token 计量）。 */
+  get: async (chapterId: string, runId?: string): Promise<CostReport> => {
+    const query = runId ? `?run_id=${runId}` : ''
+    return requestJson(`/chapters/${chapterId}/cost-report${query}`)
+  },
+}
+
+/**
+ * 质量报告 API（Phase 2 CP3.1c 双层审计）。
+ */
+export const qualityReportApi = {
+  /** 获取本章最新质量报告（含 metrics / findings / verdict / degraded）。 */
+  get: async (chapterId: string, runId?: string): Promise<QualityReport> => {
+    const query = runId ? `?run_id=${runId}` : ''
+    return requestJson(`/chapters/${chapterId}/quality-report${query}`)
+  },
+
+  /** 重新触发本章双层审计（代码级 + LLM 级），返回新报告。 */
+  rerun: async (chapterId: string, runId?: string): Promise<QualityReport> => {
+    const query = runId ? `?run_id=${runId}` : ''
+    return requestJson(`/chapters/${chapterId}/quality-report/rerun${query}`, {
+      method: 'POST',
+    })
+  },
 }

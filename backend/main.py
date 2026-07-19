@@ -166,6 +166,7 @@ from backend.routes import (
     critique_router,
     system_router,
     maps_router,
+    style_router,  # CP2.2b 文风体系
 )
 
 from backend.routes.intent_driven import router as intent_driven_router
@@ -244,8 +245,8 @@ app.include_router(relationships_router)
 app.include_router(memories_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
-# 注意：双轨生成路由已集成到 chapter_generation_router 中
-# 端点：/api/chapters/{id}/generate-dual-track
+# CP4.5：章节生成路由（原 generate-dual-track 已重命名为 generate-chapter）
+# 端点：/api/chapters/{id}/generate-chapter（流式 SSE 主入口）+ /plan + /plan/confirm
 
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
@@ -255,6 +256,10 @@ app.include_router(maps_router)
 # V4.0 意图驱动层路由
 app.include_router(intent_driven_router)
 logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
+
+# CP2.2b 文风体系路由
+app.include_router(style_router)
+logger.info("[Main] 文风体系路由已注册: /api/books/{id}/style-card, /samples, /system/cliches")
 
 # =============================================================================
 # 前端静态文件服务（SPA 路由处理）

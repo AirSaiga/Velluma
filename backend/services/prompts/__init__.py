@@ -57,7 +57,7 @@ from backend.services.prompts.draft_prompts import (
 )
 from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result, parse_planner_full_result
 from backend.services.prompts.scene_intent_prompts import build_scene_intent_prompt, parse_scene_intent_result
-from backend.services.prompts.stitch_prompts import build_stitch_prompt
+from backend.services.prompts.stitch_prompts import build_stitch_prompt, build_local_seam_prompt
 from backend.services.prompts.review_prompts import (
     build_review_agent_prompt,
     build_refine_agent_prompt,
@@ -98,6 +98,7 @@ __all__ = [
     # Others
     "build_formatting_prompt",
     "build_stitch_prompt",
+    "build_local_seam_prompt",
     "build_pov_assignment_prompt",
     "parse_pov_assignment_result",
     "build_anchor_pov_prompt",

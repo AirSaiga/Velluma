@@ -50,6 +50,7 @@ Agentic 工作流编排模块 - 章节生成的核心编排器。
 
 import logging
 from typing import Union, Optional, Dict, Any
+from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +63,7 @@ from backend.schemas import (
     AGENTIC_DEFAULT_MAX_ITERATIONS,
     AGENTIC_DEFAULT_RAG_TOP_K,
     AGENTIC_DEFAULT_RAG_ALPHA,
+    AGENTIC_DEFAULT_RAG_LAMBDA,
 )
 from backend.services.llm import call_llm
 from backend.services.prompts import (
@@ -77,10 +79,8 @@ from backend.services.rag import (
     RetrievalStrategy,
     MemoryType,
 )
-from backend.services.workflows import (
-    load_chapter_context_v3,
-    get_context_for_stage,
-)
+# CP1.0 死代码清理：load_chapter_context_v3 / get_context_for_stage 来自已删除的
+# workflows/context.py，且 agentic.py 内部从未实际调用（仅 import）。
 from backend.config import (
     MEMORY_STRATEGY_PRESETS,
     CREATIVITY_TO_PARALLEL_RULE,
@@ -136,19 +136,9 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
     Returns:
         dict: 推导后的技术参数字典
     """
-    # 如果是专家模式，直接使用传入的技术参数
-    if not request.is_basic_mode():
-        rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
-            request.rag_alpha, request.rag_beta, request.rag_gamma
-        )
-        return {
-            "max_iterations": _clamp_int(request.max_iterations, 1, 5, AGENTIC_DEFAULT_MAX_ITERATIONS),
-            "rag_top_k": _clamp_int(request.rag_top_k, 1, 20, AGENTIC_DEFAULT_RAG_TOP_K),
-            "rag_alpha": rag_alpha,
-            "rag_beta": rag_beta,
-            "rag_gamma": rag_gamma,
-        }
-    
+    # Phase 0 T6 清理：删除 is_basic_mode 死分支（editor_mode 已删，模式恒为 intent）
+    # Phase 0 T8 修复：补 lambda 键修复与下游 loader.py 的键名不匹配
+
     # 基础模式/意图模式：使用统一的 DerivationEngine 进行推导
     # 避免重复实现推导逻辑
     try:
@@ -159,7 +149,7 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
         # 使用适配器构建配置，自动执行推导
         config = adapt_request_to_config(request)
         logger.info("[resolve_high_level_params] adapt_request_to_config 完成")
-        
+
         rag_alpha, rag_beta, rag_gamma = _normalize_rag_weights(
             config.rag.semantic_weight,
             config.rag.time_decay_weight,
@@ -171,6 +161,8 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
             "rag_alpha": rag_alpha,
             "rag_beta": rag_beta,
             "rag_gamma": rag_gamma,
+            # T8 修复：补 lambda 键，让 loader.py 的 lambda_decay 用上 request.rag_lambda
+            "lambda": float(getattr(request, "rag_lambda", AGENTIC_DEFAULT_RAG_LAMBDA) or AGENTIC_DEFAULT_RAG_LAMBDA),
         }
     except Exception as e:
         logger.error(f"[resolve_high_level_params] 使用 DerivationEngine 失败: {type(e).__name__}: {e}", exc_info=True)
@@ -184,6 +176,7 @@ def resolve_high_level_params(request: GenerateChapterAgenticRequest) -> dict:
             "rag_alpha": rag_alpha,
             "rag_beta": rag_beta,
             "rag_gamma": rag_gamma,
+            "lambda": AGENTIC_DEFAULT_RAG_LAMBDA,
         }
 
 
@@ -427,4 +420,157 @@ async def preview_agentic_beats(request: GenerateChapterAgenticRequest, reposito
             "system_prompt": planner_system_prompt,
             "user_prompt": planner_user_prompt
         }
+    }
+
+
+# ============================================================
+# CP2.3c：联合预览（章节卡 + 节拍，合并闸门的核心）
+# ============================================================
+
+async def preview_plan(
+    chapter_id: UUID,
+    repositories: Dict[str, Any],
+    edited_card_fields: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """联合预览：生成章节卡 + 节拍（蓝图 §4.4.2 + decisions §2.3）。
+
+    业务流程：
+    1. 加载 chapter / book / previous_card / rolling_summary / open_hooks / entities
+    2. 章节卡生成（1 次 reasoning）：
+       - 若 edited_card_fields 传入（用户编辑后重规划），跳过 LLM 直接用用户版本
+       - 否则调 generate_chapter_card
+    3. 节拍规划（1 次 reasoning）：用章节卡调 generate_beats
+    4. 返回 {chapter_card: {...}, beats: [...], degraded: ..., debug_prompt: ...}
+
+    Args:
+        chapter_id: 章节 ID
+        repositories: Repository 字典（需含 chapter/book/plot_ledger/chapter_entity）
+        edited_card_fields: 可选，用户编辑后的章节卡字段（重规划场景）
+
+    Returns:
+        Dict: {
+            chapter_card: {purpose, must_hit_events, ...},
+            beats: List[dict],
+            degraded: Optional[Dict],
+            debug_prompt: Optional[Dict],
+        }
+    """
+    from backend.services.generation.chapter_card import generate_chapter_card
+
+    chapter_repo = repositories.get("chapter")
+    book_repo = repositories.get("book")
+    plot_ledger_repo = repositories.get("plot_ledger")
+    chapter_entity_repo = repositories.get("chapter_entity")
+
+    chapter = await chapter_repo.get_by_id(chapter_id) if chapter_repo else None
+    if not chapter:
+        return {"chapter_card": None, "beats": [], "degraded": None, "debug_prompt": None}
+
+    book = await book_repo.get_by_id(chapter.book_id) if book_repo else None
+    if not book:
+        return {"chapter_card": None, "beats": [], "degraded": None, "debug_prompt": None}
+
+    # 加载上下文
+    from backend.config.adapter import RuntimeContextBuilder, adapt_request_to_config
+    # 构造最小 request 用于 RuntimeContextBuilder（绕过 schema 要求）
+    class _MinimalRequest:
+        def __init__(self, chapter_id, book):
+            self.chapter_id = chapter_id
+            self.word_count = 3000
+            self.memory_strategy = None
+            self.creativity_level = None
+            self.refinement_depth = None
+            self.author_intent = None
+            self.tension_level = None
+            self.pacing_style = None
+            self.rag_top_k = 5
+            self.rag_alpha = 0.6
+            self.rag_beta = 0.2
+            self.rag_gamma = 0.2
+            self.rag_lambda = 0.1
+            self.feature_flags = None
+    config = adapt_request_to_config(_MinimalRequest(chapter_id, book), chapter, book)
+    context = await RuntimeContextBuilder.build(repositories, config)
+
+    entities = context.get("characters", [])
+    relationships = context.get("relationships", [])
+    open_hooks = context.get("open_hooks", [])
+    previous_summary = context.get("previous_summary")
+
+    # 加载前一章卡（章节卡链）+ 滚动摘要
+    from backend.repositories import ChapterCardRepository
+    # ChapterCardRepository 需要独立 session，从 chapter_repo 借
+    cc_repo = ChapterCardRepository(chapter_repo._db)
+    previous_card = await cc_repo.get_previous_card(book.id, chapter.chapter_number) if chapter.chapter_number > 1 else None
+
+    rolling_summary = getattr(book, "rolling_summary", None)
+    if not rolling_summary and previous_summary:
+        rolling_summary = previous_summary
+
+    # 步骤 1：章节卡生成或复用
+    card_prompts = []
+    if edited_card_fields is not None:
+        # 重规划：用户编辑后直接用，不调 LLM
+        chapter_card_fields = edited_card_fields
+        card_degraded = None
+        logger.info("[Plan] 用户传入 edited_card_fields，跳过章节卡 LLM 生成")
+    else:
+        # 首次规划：AI 生成章节卡
+        card_result = await generate_chapter_card(
+            chapter=chapter,
+            book=book,
+            previous_card=previous_card,
+            rolling_summary=rolling_summary,
+            open_hooks=open_hooks,
+            entities=entities,
+        )
+        chapter_card_fields = card_result["fields"]
+        card_degraded = card_result["degraded"]
+        card_prompts = card_result.get("prompts", [])
+
+    # 构造 ChapterCard 兼容对象（用于 generate_beats 的 prompt 注入）
+    class _CardDTO:
+        pass
+    card_dto = _CardDTO()
+    for k, v in chapter_card_fields.items():
+        setattr(card_dto, k, v)
+    # 补 chapter_number（generate_beats 不需要，但兜底）
+    if not hasattr(card_dto, "chapter_number"):
+        card_dto.chapter_number = chapter.chapter_number
+
+    # 步骤 2：节拍规划
+    word_count = chapter_card_fields.get("word_target", 3000)
+    from backend.services.workflows.planning import generate_beats
+    try:
+        beats_dict, _story_beats = await generate_beats(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            word_count=word_count,
+            open_hooks=open_hooks,
+            previous_chapter_summary=previous_summary,
+            chapter_card=card_dto,
+        )
+        beats = normalize_confirmed_beats(beats_dict, word_count)
+        beats_degraded = None
+    except Exception as e:
+        logger.error(f"[Plan] 节拍生成失败: {e}")
+        beats = []
+        beats_degraded = {
+            "reason": "beats_generation_exception",
+            "action": "empty_beats",
+            "detail": str(e)[:200],
+        }
+
+    # 合并降级标记
+    final_degraded = card_degraded or beats_degraded
+
+    return {
+        "chapter_card": chapter_card_fields,
+        "beats": beats,
+        "degraded": final_degraded,
+        "debug_prompt": {
+            "chapter_card_prompts": card_prompts,
+        },
     }

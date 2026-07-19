@@ -59,6 +59,14 @@ from backend.schemas import (
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.orchestration.tier_mapper import map_tension_to_workflow_tier
 from backend.services.workflows.utils import clean_llm_output
+from backend.services.workflows.context_blocks import (
+    render_character_cards_block,
+    render_open_hooks_block,
+    render_world_snapshot_block,
+    render_golden_snippets_block,
+    render_style_blacklist_block,
+    render_author_intent_block,
+)
 
 logger = get_runtime_logger(__name__)
 
@@ -68,11 +76,13 @@ from backend.services.workflows.drafting_thinking import (
     _generate_scene_intent_batch,
     _generate_subconscious_batch,
     _generate_lightweight_subconscious,
+    _generate_intent_and_sketch_batch,
     _build_beat_hooks,
 )
-from backend.services.workflows.drafting_prose import (
-    _generate_prose_serial_v25,
-    _quick_qc,
+# CP1.0 死代码清理：drafting_prose.py 已删除，
+# 活路径函数 quick_qc / extract_tail / clamp_tokens 迁入 drafting_utils.py
+from backend.services.workflows.drafting_utils import (
+    quick_qc as _quick_qc,
     _extract_tail,
     _clamp_tokens,
 )
@@ -123,14 +133,25 @@ async def execute_draft_stage(
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    recorder: Optional[Any] = None,
+    previous_world_snapshot: Optional[Any] = None,
+    author_intent: Optional[str] = None,
+    sketch_segments: Optional[List[str]] = None,
+    use_context_engine: bool = True,
+    style_card: Optional[Any] = None,
+    chapter_card: Optional[Any] = None,
 ) -> List[BeatDraftResult]:
     """
-    V4.0 智能路由起草阶段主入口。
+    V4.1 智能路由起草阶段主入口。
 
-    V4.0 路由策略：
-    - TIER_1_FAST (Level 1-2): 疾速流，跳过复杂思考层，直接生成
-    - TIER_2_STANDARD (Level 3): 均衡流，轻量级思考 + 串行生成
-    - TIER_3_FORTRESS (Level 4-5): 堡垒流，算力全开，保持 V4.0 完整流程
+    V4.1 路由策略（Per-Beat 自动分配）：
+    - 不再整章统一走一条路径，而是根据每个 Beat 的 pacing_type 和 weight
+      自动推断最适合的 tier（Fast/Standard/Fortress）
+    - Fast Beat (pacing=Fast / weight<=2): 极简 prompt，跳过 QC，灵气优先
+    - Standard Beat (默认): 轻量思考 + 标准 QC
+    - Fortress Beat (pacing=Slow / weight>=4): 更严格的质量控制
+
+    所有 Beat 共享同一个串行 Rolling Prefix 链，确保跨 tier 的连贯性。
 
     Args:
         chapter: 章节对象
@@ -161,14 +182,14 @@ async def execute_draft_stage(
 
     flags = feature_flags or DraftingFeatureFlags()
 
-    # 确定工作流层级
+    # 确定章节默认工作流层级（作为 per-beat 推断的 fallback）
     effective_tier = workflow_tier
 
     if not effective_tier and chapter:
         tension_level = getattr(chapter, 'tension_level', None)
         if tension_level and isinstance(tension_level, int) and 1 <= tension_level <= 5:
             effective_tier = map_tension_to_workflow_tier(tension_level)
-            logger.info(f"[Draft Stage] 从 chapter.tension_level={tension_level} 映射到 {effective_tier}")
+            logger.info(f"[Draft Stage] 从 chapter.tension_level={tension_level} 映射到默认 tier {effective_tier}")
 
     if not effective_tier and beats:
         effective_tier = beats[0].get("workflow_tier")
@@ -176,122 +197,184 @@ async def execute_draft_stage(
     if not effective_tier:
         effective_tier = flags.workflow_tier
 
-    logger.info(f"[Draft Stage] V4.0 智能路由启动，工作流层级: {effective_tier}，共 {len(beats)} 个 Beats")
+    logger.info(f"[Draft Stage] V4.1 Per-Beat 智能路由启动，默认 tier: {effective_tier}，共 {len(beats)} 个 Beats")
 
-    # 路由到对应路径
-    if effective_tier == "TIER_1_FAST":
-        return await _execute_fast_path(
-            chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks,
-            word_count=word_count, previous_summary=previous_summary,
-            stats_callback=stats_callback,
-        )
-    elif effective_tier == "TIER_2_STANDARD":
-        return await _execute_standard_path(
-            chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks,
-            word_count=word_count, previous_summary=previous_summary,
-            relevant_memories=relevant_memories, locations=locations, assets=assets,
-            enable_qc=enable_qc, feature_flags=flags,
-            physical_state_lock=physical_state_lock,
-            entity_spatial_ledger=entity_spatial_ledger,
-            chapter_assets_schema=chapter_assets_schema,
-            stats_callback=stats_callback, reasoning_config=reasoning_config,
-        )
-    else:
-        return await _execute_fortress_path(
-            chapter=chapter, book=book, entities=entities, relationships=relationships,
-            beats=beats, open_hooks=open_hooks,
-            word_count=word_count, previous_summary=previous_summary,
-            relevant_memories=relevant_memories, locations=locations, assets=assets,
-            enable_qc=enable_qc, feature_flags=flags,
-            physical_state_lock=physical_state_lock,
-            entity_spatial_ledger=entity_spatial_ledger,
-            chapter_assets_schema=chapter_assets_schema,
-            stats_callback=stats_callback, reasoning_config=reasoning_config,
-        )
+    # V4.1: 统一路径，per-beat 自动分配 tier
+    return await _execute_unified_path(
+        chapter=chapter, book=book, entities=entities, relationships=relationships,
+        beats=beats, open_hooks=open_hooks,
+        word_count=word_count, previous_summary=previous_summary,
+        relevant_memories=relevant_memories, locations=locations, assets=assets,
+        enable_qc=enable_qc, feature_flags=flags,
+        physical_state_lock=physical_state_lock,
+        entity_spatial_ledger=entity_spatial_ledger,
+        chapter_assets_schema=chapter_assets_schema,
+        workflow_tier=effective_tier,
+        stats_callback=stats_callback, reasoning_config=reasoning_config,
+        progress_callback=progress_callback,
+        recorder=recorder,
+        previous_world_snapshot=previous_world_snapshot,
+        author_intent=author_intent,
+        sketch_segments=sketch_segments,
+        use_context_engine=use_context_engine,
+        style_card=style_card,
+        chapter_card=chapter_card,
+    )
 
 
 # =============================================================================
-# 三档执行路径
+# V4.1 Per-Beat Tier 推断
 # =============================================================================
 
-async def _execute_fast_path(
-    chapter: Any,
+def infer_beat_tier(beat: dict, chapter_tier: str) -> str:
+    """
+    基于 Beat 元数据推断最适合的工作流层级。
+
+    规则（从强到弱）：
+    - pacing_type="Slow" 或 weight >= 4 → TIER_3_FORTRESS（需要精细打磨）
+    - pacing_type="Fast" 或 weight <= 2 → TIER_1_FAST（轻快处理，灵气优先）
+    - 其他 → 使用章节默认 tier
+
+    Args:
+        beat: StoryBeat 字典，包含 pacing_type、weight 等字段
+        chapter_tier: 章节默认 tier（fallback）
+
+    Returns:
+        str: "TIER_1_FAST" | "TIER_2_STANDARD" | "TIER_3_FORTRESS"
+    """
+    pacing = beat.get("pacing_type", "Medium")
+    weight = beat.get("weight", 3)
+
+    if pacing == "Slow" or weight >= 4:
+        return "TIER_3_FORTRESS"
+    if pacing == "Fast" or weight <= 2:
+        return "TIER_1_FAST"
+    return chapter_tier
+
+
+# =============================================================================
+# V4.1 统一执行路径（Per-Beat 自动分配）
+# =============================================================================
+
+async def _generate_beat_with_failfast(
+    engine: Any,
+    beat: dict,
+    beat_index: int,
+    previous_tail: str,
+    sketch_segment: Optional[str],
+    physical_state_lock: str,
+    tier: str,
+    target_words: int,
+    base_temperature: float,
+    stage_name: str,
+    enable_fail_fast: bool,
+    style_cliche_threshold: int,
     book: Any,
-    entities: List[Any],
-    relationships: List[Any],
-    beats: List[dict],
-    open_hooks: List[dict],
-    word_count: int,
-    previous_summary: Optional[str] = None,
-    stats_callback: LLMStatsCallback = None,
-) -> List[BeatDraftResult]:
+    pov_character: str,
+    stats_callback: Optional[Callable] = None,
+    recorder: Optional[Any] = None,
+    fail_fast_max_attempts: int = 2,
+    enable_fortress_dual_candidate: bool = False,
+) -> str:
+    """CP1.4：用 ContextEngine + fail-fast 包装生成单拍正文。
+
+    业务流程：
+    1. 用 engine.build_draft_prompt 组装 prompt（P0/P1/P1'/P2 四级布局）
+    2. enable_fail_fast=False → 单次生成（Fast tier 灵气优先）
+    3. enable_fail_fast=True → execute_generation_with_retry 包装：
+       - 每轮重新组装 prompt（pending_hint 作为 extra_instruction 注入 P2 末尾）
+       - 命中阻断级问题（红线/AI 腔超阈值）按类别调温重试
+       - 默认 ≤2 轮
+    4. CP4.4：tier=TIER_3_FORTRESS 且 enable_fortress_dual_candidate=True →
+       走双候选并行生成 + 代码级优选（蓝图 §4.6.2），成本 ×2，默认关闭
     """
-    V4.0 Tier 1: 疾速流 (Fast-Path) - 完全并发版本。
+    from backend.services.workflows.fail_fast import (
+        execute_generation_with_retry, build_draft_validator,
+    )
 
-    特点: 跳过 Scene Intent/Subconscious，完全并发生成，单次调用 creative_model。
-    适用场景: 低张力日常剧情 (tension_level 1-2)。
-    """
-    logger.info("[Fast Path] 启动疾速流生成（完全并发）...")
-
-    async def _single_fast_beat(beat_index: int, beat: dict) -> BeatDraftResult:
-        beat_id = str(beat.get("beat_id", f"beat-{beat_index}"))
-        target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
-
+    # 构造 validate 闭包（仅 enable_fail_fast=True 时用）
+    validate = None
+    if enable_fail_fast:
         try:
-            system_prompt, user_prompt = _build_fast_path_prompt(
-                chapter=chapter, book=book, beat=beat,
-                previous_tail="", target_words=target_words,
-                previous_summary=previous_summary,
-            )
-
-            response = await _call_llm_with_stats(
-                stage="fast_path_prose",
-                system_prompt=system_prompt, user_prompt=user_prompt,
-                temperature=0.75, max_tokens=_clamp_tokens(target_words),
-                beat_index=beat_index, stats_callback=stats_callback,
-            )
-
-            chunk_text = clean_llm_output(response).strip()
-
-            return BeatDraftResult(
-                beat_id=beat_id, beat_index=beat_index,
-                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
-                subconscious_thought="", draft_chunk=chunk_text,
-                prompts=[{"stage": "FAST_PATH", "system_prompt": system_prompt, "user_prompt": user_prompt}],
-                mcts_rollout=None,
+            validate = build_draft_validator(
+                beat=beat, book=book, pov_character=pov_character,
+                style_cliche_threshold=style_cliche_threshold,
             )
         except Exception as e:
-            logger.error(f"[Fast Path] Beat {beat_index} 生成失败: {e}")
-            return BeatDraftResult(
-                beat_id=beat_id, beat_index=beat_index,
-                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
-                subconscious_thought="", draft_chunk="", prompts=[], mcts_rollout=None,
+            logger.warning(f"[Unified Path] build_draft_validator 失败，跳过 fail-fast: {e}")
+            validate = None
+
+    max_attempts = fail_fast_max_attempts if (enable_fail_fast and validate) else 1
+
+    # 构造 generate_once 闭包：每次调用都用 engine 重组 prompt
+    async def generate_once(temp: float, hint: str) -> str:
+        system_prompt, user_prompt = engine.build_draft_prompt(
+            beat=beat,
+            beat_index=beat_index,
+            previous_tail=previous_tail,
+            sketch_segment=sketch_segment,
+            physical_state_lock=physical_state_lock,
+            extra_instruction=hint,
+            tier=tier,
+            target_words=target_words,
+        )
+        return await _call_llm_with_stats(
+            stage=stage_name,
+            system_prompt=system_prompt, user_prompt=user_prompt,
+            temperature=temp, max_tokens=_clamp_tokens(target_words),
+            beat_index=beat_index, stats_callback=stats_callback,
+            model_type="creative",
+            recorder=recorder,
+        )
+
+    # CP4.4：Fortress 双候选路径（蓝图 §4.6.2，默认关闭）
+    if (
+        tier == "TIER_3_FORTRESS"
+        and enable_fortress_dual_candidate
+        and engine is not None
+    ):
+        from backend.services.workflows.fortress_candidate import (
+            generate_and_pick_dual_candidates,
+        )
+        try:
+            result = await generate_and_pick_dual_candidates(
+                generate_once=generate_once,
+                validate=validate,
+                beat_index=beat_index,
+                fail_fast_max_attempts=max_attempts,
+                initial_temperature=base_temperature,
+                stage_name=stage_name,
+                recorder=recorder,
             )
+            return result.winner_text
+        except Exception as e:
+            logger.warning(
+                f"[Fortress] Beat {beat_index} 双候选路径异常，降级单候选 fail-fast: {e}"
+            )
+            if recorder is not None:
+                recorder.record_degraded(
+                    stage=f"fortress.beat_{beat_index}",
+                    reason="dual_path_exception",
+                    action="fallback_single_fail_fast",
+                    model_slot="creative",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
+            # 异常降级到下方单候选路径
 
-    tasks = [_single_fast_beat(beat_index=i + 1, beat=beat) for i, beat in enumerate(beats)]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    processed_results: List[BeatDraftResult] = []
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(f"[Fast Path] Beat {i+1} 发生异常: {result}")
-            beat = beats[i]
-            beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
-            processed_results.append(BeatDraftResult(
-                beat_id=beat_id, beat_index=i + 1,
-                scene_intent={"intent_label": "疾速流", "goal": beat.get("summary", "")},
-                subconscious_thought="", draft_chunk="", prompts=[], mcts_rollout=None,
-            ))
-        else:
-            processed_results.append(result)
-
-    logger.info(f"[Fast Path] 疾速流生成完成，共 {len(processed_results)} 个 Beats")
-    return processed_results
+    # 单候选 fail-fast 路径（默认）
+    chunk, _ = await execute_generation_with_retry(
+        generate_once=generate_once,
+        validate=validate,
+        max_attempts=max_attempts,
+        beat_number=beat_index,
+        initial_temperature=base_temperature,
+        strategy_name=stage_name,
+        recorder=recorder,
+    )
+    return chunk
 
 
-async def _execute_standard_path(
+async def _execute_unified_path(
     chapter: Any,
     book: Any,
     entities: List[Any],
@@ -308,77 +391,194 @@ async def _execute_standard_path(
     physical_state_lock: Optional[str] = None,
     entity_spatial_ledger: Optional[Dict[str, Any]] = None,
     chapter_assets_schema: str = "",
+    workflow_tier: Optional[str] = None,
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    recorder: Optional[Any] = None,
+    previous_world_snapshot: Optional[Any] = None,
+    author_intent: Optional[str] = None,
+    sketch_segments: Optional[List[str]] = None,
+    use_context_engine: bool = True,
+    style_card: Optional[Any] = None,
+    chapter_card: Optional[Any] = None,
 ) -> List[BeatDraftResult]:
     """
-    V4.0 Tier 2: 均衡流 (Standard-Path)。
+    V4.1 统一起草路径：所有 Beat 串行生成，per-beat 自动选择 prompt 和 QC 策略。
 
-    特点: 轻量级 Subconscious（无 MCTS），串行调用 creative_model。
-    适用场景: 中等张力剧情 (tension_level 3)。
+    CP1.4 升级：
+    - use_context_engine=True（默认）：用 ContextEngine 组装 P0/P1/P1'/P2 四级布局
+      （跨拍前缀字节级稳定，吃 DeepSeek prompt 缓存）
+    - use_context_engine=False：回退到 Phase 0 T4 的 _build_fast/standard_path_prompt
+    - Standard/Fortress tier 启用 fail-fast 重试（CP1.1 设施）
+    - sketch_segments 注入 P2（CP1.2 segments 输出）
+
+    特点：
+    - 共享统一的 Rolling Prefix 链，跨 tier 连贯性最佳
+    - 统一生成 Scene Intent + Subconscious（所有 beats），Fast beats 在 prose 阶段忽略
+    - Fast Beat: 极简 prompt，跳过 QC 与 fail-fast，temp=0.75
+    - Standard Beat: 标准 prompt + 轻量 QC + fail-fast（默认 2 轮），temp=0.75
+    - Fortress Beat: 标准 prompt + 增强 QC + fail-fast（加严阈值），temp=0.7
     """
-    logger.info("[Standard Path] 启动均衡流生成...")
+    logger.info("[Unified Path] 启动 V4.1 Per-Beat 统一起草路径...")
     flags = feature_flags or DraftingFeatureFlags()
 
-    # 步骤 A: 并行生成 Scene Intent
+    # CP1.4：ContextEngine 初始化（本章一次，P0+P1 在 __init__ 冻结）
+    # CP2.3e：透传 style_card + chapter_card（由 stream_handler 加载后传入）
+    engine = None
+    if use_context_engine:
+        try:
+            from backend.services.context.engine import ContextEngine
+            engine = ContextEngine(
+                book=book, chapter=chapter, entities=entities,
+                relationships=relationships, open_hooks=open_hooks,
+                previous_world_snapshot=previous_world_snapshot,
+                author_intent=author_intent,
+                relevant_memories=relevant_memories,
+                style_card=style_card,
+                chapter_card=chapter_card,
+            )
+            logger.info(
+                f"[Unified Path] ContextEngine 已启用 "
+                f"(P0={len(engine._p0_block)}字, P1={len(engine._p1_chapter_block)}字, "
+                f"style_card={'有' if style_card else '无'}, chapter_card={'有' if chapter_card else '无'})"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Unified Path] ContextEngine 初始化失败，回退到 Phase 0 prompt builder: {e}"
+            )
+            engine = None
+
+    # 1. Per-Beat 推断 tier
+    beat_tiers = [infer_beat_tier(beat, workflow_tier or "TIER_2_STANDARD") for beat in beats]
+    tier_summary = {}
+    for t in beat_tiers:
+        tier_summary[t] = tier_summary.get(t, 0) + 1
+    logger.info(f"[Unified Path] Per-beat tier 分配: {tier_summary}")
+
+    # 2. 统一生成 Scene Intent + Subconscious（所有 beats，使用合并 batch）
+    logger.info("[Unified Path] 统一生成 Scene Intent + Emotional Sketch...")
     try:
-        scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
+        scene_intent_results, subconscious_results, intent_sketch_prompts = await _generate_intent_and_sketch_batch(
             beats=beats, chapter=chapter, open_hooks=open_hooks,
             stats_callback=stats_callback, reasoning_config=reasoning_config,
+            recorder=recorder,
         )
     except Exception as e:
-        logger.error(f"[Standard Path] Scene Intent 生成失败: {e}")
+        logger.error(f"[Unified Path] 合并生成失败: {e}")
         scene_intent_results = [{"intent_label": "默认", "goal": beat.get("summary", "")} for beat in beats]
-        scene_intent_prompts_list = [[] for _ in beats]
-
-    # 步骤 B: 并行生成轻量级 Subconscious
-    try:
-        subconscious_results = await _generate_lightweight_subconscious(
-            beats=beats, scene_intent_results=scene_intent_results,
-            chapter=chapter, stats_callback=stats_callback,
-        )
-    except Exception as e:
-        logger.error(f"[Standard Path] Subconscious 生成失败: {e}")
         subconscious_results = ["" for _ in beats]
+        intent_sketch_prompts = [[] for _ in beats]
 
     # 验证数组长度一致性
     if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
-        logger.error(f"[Standard Path] 结果数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
+        logger.error(f"[Unified Path] 结果数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
         scene_intent_results = scene_intent_results[:len(beats)] + [{"intent_label": "默认", "goal": beats[i].get("summary", "")} for i in range(len(scene_intent_results), len(beats))]
         subconscious_results = subconscious_results[:len(beats)] + ["" for _ in range(len(subconscious_results), len(beats))]
 
-    # 步骤 C: 串行生成正文（带 Rolling Prefix）
+    # 3. 串行生成正文（带 Rolling Prefix，per-beat 选择 prompt）
     results: List[BeatDraftResult] = []
     previous_tail = ""
     current_physical_lock = physical_state_lock or ""
 
     for i, beat in enumerate(beats):
+        beat_tier = beat_tiers[i]
         beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
         target_words = beat.get("word_count_target") or beat.get("target_words", max(200, word_count // max(1, len(beats))))
 
         scene_intent = scene_intent_results[i] if i < len(scene_intent_results) else {"intent_label": "默认", "goal": beat.get("summary", "")}
         subconscious = subconscious_results[i] if i < len(subconscious_results) else ""
 
-        system_prompt, user_prompt = _build_standard_path_prompt(
-            chapter=chapter, book=book, beat=beat,
-            scene_intent=scene_intent,
-            subconscious=subconscious,
-            previous_tail=previous_tail,
-            physical_state_lock=current_physical_lock,
-            target_words=target_words,
-        )
+        # CP1.2：取本拍对应的 sketch_segment（按 beat_index 对齐）
+        sketch_seg = None
+        if sketch_segments and i < len(sketch_segments):
+            sketch_seg = sketch_segments[i]
 
-        response = await _call_llm_with_stats(
-            stage="standard_path_prose",
-            system_prompt=system_prompt, user_prompt=user_prompt,
-            temperature=0.75, max_tokens=_clamp_tokens(target_words),
-            beat_index=i + 1, stats_callback=stats_callback,
-        )
+        # 根据 tier 选择温度、QC 策略、fail-fast 阈值
+        if beat_tier == "TIER_1_FAST":
+            temperature = 0.75
+            do_qc = False
+            enable_fail_fast = False
+            style_cliche_threshold = 2
+            stage_name = "unified_fast_prose"
+        elif beat_tier == "TIER_3_FORTRESS":
+            temperature = 0.7
+            do_qc = enable_qc
+            enable_fail_fast = True
+            style_cliche_threshold = 1  # Fortress 加严：AI 腔阈值降到 1
+            stage_name = "unified_fortress_prose"
+        else:
+            temperature = 0.75
+            do_qc = enable_qc
+            enable_fail_fast = True
+            style_cliche_threshold = 2
+            stage_name = "unified_standard_prose"
+
+        # ============ CP1.4：生成正文（ContextEngine + fail-fast 包装） ============
+        pov_character = beat.get("pov_character", "") or ""
+
+        if engine is not None:
+            # 主路径：ContextEngine 组装 prompt + fail-fast 包装
+            response = await _generate_beat_with_failfast(
+                engine=engine,
+                beat=beat,
+                beat_index=i + 1,
+                previous_tail=previous_tail,
+                sketch_segment=sketch_seg,
+                physical_state_lock=current_physical_lock,
+                tier=beat_tier,
+                target_words=target_words,
+                base_temperature=temperature,
+                stage_name=stage_name,
+                enable_fail_fast=enable_fail_fast,
+                style_cliche_threshold=style_cliche_threshold,
+                book=book,
+                pov_character=pov_character,
+                stats_callback=stats_callback,
+                recorder=recorder,
+                fail_fast_max_attempts=getattr(flags, "fail_fast_max_attempts", 2),
+                # CP4.4：透传 Fortress 双候选开关（蓝图 §4.6.2，默认关闭）
+                enable_fortress_dual_candidate=getattr(flags, "enable_fortress_dual_candidate", False),
+            )
+            # engine 路径不单独记录 prompt 历史（由 stats_callback/recorder 记）
+            system_prompt, user_prompt = "", ""  # 占位，下方 prompts_history 简化
+        else:
+            # 回退路径：Phase 0 T4 的内联 prompt builder
+            if beat_tier == "TIER_1_FAST":
+                system_prompt, user_prompt = _build_fast_path_prompt(
+                    chapter=chapter, book=book, beat=beat,
+                    previous_tail=previous_tail, target_words=target_words,
+                    previous_summary=previous_summary if i == 0 else None,
+                    physical_state_lock=current_physical_lock,
+                    entities=entities, open_hooks=open_hooks,
+                    previous_world_snapshot=previous_world_snapshot if i == 0 else None,
+                    author_intent=author_intent,
+                )
+            else:
+                system_prompt, user_prompt = _build_standard_path_prompt(
+                    chapter=chapter, book=book, beat=beat,
+                    scene_intent=scene_intent,
+                    subconscious=subconscious,
+                    previous_tail=previous_tail,
+                    physical_state_lock=current_physical_lock,
+                    target_words=target_words,
+                    entities=entities, open_hooks=open_hooks,
+                    previous_world_snapshot=previous_world_snapshot if i == 0 else None,
+                    author_intent=author_intent,
+                )
+            response = await _call_llm_with_stats(
+                stage=stage_name,
+                system_prompt=system_prompt, user_prompt=user_prompt,
+                temperature=temperature, max_tokens=_clamp_tokens(target_words),
+                beat_index=i + 1, stats_callback=stats_callback,
+                model_type="creative",
+                recorder=recorder,
+            )
 
         chunk_text = clean_llm_output(response).strip()
 
-        # QC 检查
-        if enable_qc:
+        # QC 检查（长度/结构异常修复，与 fail-fast 互补）
+        if do_qc:
             chunk_text, _ = await _quick_qc(
                 prose_text=chunk_text, beat=beat, beat_index=i + 1,
                 chapter=chapter, book=book, entities=entities,
@@ -386,12 +586,20 @@ async def _execute_standard_path(
                 target_words=target_words,
             )
 
+        # 更新 Rolling Prefix
         previous_tail = _extract_tail(chunk_text, max_chars=300)
 
+        # 更新物理状态锁
+        current_exit = beat.get("exit_state", "")
+        if current_exit and current_exit != "未指定":
+            current_physical_lock = f"{beat.get('pov_character', '主角')}当前态势（Beat {i+1} 结束）：{current_exit}"
+
         prompts_history = [{
-            "stage": "STANDARD_PATH", "beat_index": i + 1,
+            "stage": stage_name, "beat_index": i + 1,
             "system_prompt": system_prompt, "user_prompt": user_prompt,
         }]
+        if i < len(intent_sketch_prompts) and intent_sketch_prompts[i]:
+            prompts_history.extend(intent_sketch_prompts[i])
 
         results.append(BeatDraftResult(
             beat_id=beat_id, beat_index=i + 1,
@@ -400,117 +608,13 @@ async def _execute_standard_path(
             draft_chunk=chunk_text, prompts=prompts_history, mcts_rollout=None,
         ))
 
-    logger.info(f"[Standard Path] 均衡流生成完成，共 {len(results)} 个 Beats")
+        if progress_callback:
+            progress_callback(i + 1, len(beats), f"Beat {i+1} ({beat_tier}) 完成")
+
+    logger.info(f"[Unified Path] 统一路径生成完成，共 {len(results)} 个 Beats")
     return results
 
 
-async def _execute_fortress_path(
-    chapter: Any,
-    book: Any,
-    entities: List[Any],
-    relationships: List[Any],
-    beats: List[dict],
-    open_hooks: List[dict],
-    word_count: int,
-    previous_summary: Optional[str] = None,
-    relevant_memories: Optional[List[Any]] = None,
-    locations: Optional[List[Any]] = None,
-    assets: Optional[List[Any]] = None,
-    enable_qc: bool = True,
-    feature_flags: Optional[DraftingFeatureFlags] = None,
-    physical_state_lock: Optional[str] = None,
-    entity_spatial_ledger: Optional[Dict[str, Any]] = None,
-    chapter_assets_schema: str = "",
-    stats_callback: LLMStatsCallback = None,
-    reasoning_config: Optional[dict] = None,
-) -> List[BeatDraftResult]:
-    """
-    V4.0 Tier 3: 堡垒流 (Fortress-Path)。
-
-    特点: MCTS 三分支 Subconscious 搜索，全部 5 维 DynamicContext，Fail-Fast 断言检查。
-    适用场景: 高张力关键剧情 (tension_level 4-5)。
-    """
-    logger.info("[Fortress Path] 启动堡垒流生成（V4.0 完整管线）...")
-    flags = feature_flags or DraftingFeatureFlags()
-    stage_start = time.perf_counter()
-
-    logger.info("[Draft Stage] 步骤 A: 并行生成 Scene Intent + Subconscious...")
-    step_a_start = time.perf_counter()
-
-    try:
-        scene_intent_results, scene_intent_prompts_list = await _generate_scene_intent_batch(
-            beats=beats, chapter=chapter, open_hooks=open_hooks,
-            stats_callback=stats_callback, reasoning_config=reasoning_config,
-        )
-    except Exception as e:
-        logger.error(f"[Fortress Path] Scene Intent 生成失败: {e}")
-        scene_intent_results = [{"intent_label": "默认", "goal": beat.get("summary", "")} for beat in beats]
-        scene_intent_prompts_list = [[] for _ in beats]
-
-    try:
-        subconscious_results, mcts_rollout_results, subconscious_prompts_list = await _generate_subconscious_batch(
-            beats=beats, scene_intent_results=scene_intent_results,
-            chapter=chapter, entities=entities,
-            stats_callback=stats_callback, reasoning_config=reasoning_config,
-        )
-    except Exception as e:
-        logger.error(f"[Fortress Path] Subconscious 生成失败: {e}")
-        subconscious_results = ["" for _ in beats]
-        mcts_rollout_results = [None for _ in beats]
-        subconscious_prompts_list = [[] for _ in beats]
-
-    # 验证数组长度一致性
-    if len(scene_intent_results) != len(beats) or len(subconscious_results) != len(beats):
-        logger.error(f"[Fortress Path] 结果数组长度不匹配: beats={len(beats)}, scene_intent={len(scene_intent_results)}, subconscious={len(subconscious_results)}")
-        scene_intent_results = scene_intent_results[:len(beats)] + [{"intent_label": "默认", "goal": beats[i].get("summary", "")} for i in range(len(scene_intent_results), len(beats))]
-        subconscious_results = subconscious_results[:len(beats)] + ["" for _ in range(len(subconscious_results), len(beats))]
-        mcts_rollout_results = mcts_rollout_results[:len(beats)] + [None for _ in range(len(mcts_rollout_results), len(beats))]
-        scene_intent_prompts_list = scene_intent_prompts_list[:len(beats)] + [[] for _ in range(len(scene_intent_prompts_list), len(beats))]
-        subconscious_prompts_list = subconscious_prompts_list[:len(beats)] + [[] for _ in range(len(subconscious_prompts_list), len(beats))]
-
-    logger.info(f"[Draft Stage] 步骤 A 完成，耗时 {time.perf_counter() - step_a_start:.2f}s")
-
-    logger.info("[Draft Stage] 步骤 B-V4.0: 串行生成正文（Rolling Prefix + 认知组件）...")
-    step_b_start = time.perf_counter()
-
-    prose_results = await _generate_prose_serial_v25(
-        beats=beats, scene_intent_results=scene_intent_results,
-        subconscious_results=subconscious_results,
-        chapter=chapter, book=book, entities=entities,
-        relationships=relationships,
-        word_count=word_count, previous_summary=previous_summary,
-        relevant_memories=relevant_memories,
-        locations=locations,
-        assets=assets,
-        enable_qc=enable_qc, feature_flags=flags,
-        physical_state_lock=physical_state_lock,
-        entity_spatial_ledger=entity_spatial_ledger,
-        chapter_assets_schema=chapter_assets_schema,
-        stats_callback=stats_callback,
-    )
-
-    logger.info(f"[Draft Stage] 步骤 B-V4.0 完成，耗时 {time.perf_counter() - step_b_start:.2f}s")
-
-    results: List[BeatDraftResult] = []
-    for i, beat in enumerate(beats):
-        beat_id = str(beat.get("beat_id", f"beat-{i+1}"))
-
-        all_prompts = []
-        all_prompts.extend(scene_intent_prompts_list[i])
-        all_prompts.extend(subconscious_prompts_list[i])
-        all_prompts.extend(prose_results[i]["prompts"])
-
-        result = BeatDraftResult(
-            beat_id=beat_id, beat_index=i + 1,
-            scene_intent=scene_intent_results[i],
-            subconscious_thought=subconscious_results[i],
-            draft_chunk=prose_results[i]["text"],
-            prompts=all_prompts, mcts_rollout=mcts_rollout_results[i],
-        )
-        results.append(result)
-
-    logger.info(f"[Fortress Path] 堡垒流完成，总耗时 {time.perf_counter() - stage_start:.2f}s")
-    return results
 
 
 # =============================================================================
@@ -524,40 +628,70 @@ def _build_fast_path_prompt(
     previous_tail: str,
     target_words: int,
     previous_summary: Optional[str] = None,
+    physical_state_lock: str = "",
+    entities: Optional[List[Any]] = None,
+    open_hooks: Optional[List[dict]] = None,
+    previous_world_snapshot: Optional[Any] = None,
+    author_intent: Optional[str] = None,
 ) -> tuple[str, str]:
-    """V4.0 Fast-Path: 构建疾速流的简化 Prompt"""
+    """V4.1 Fast-Path: 自由创作版 Prompt。
+
+    保留极简约束（只防世界观污染和硬红线），给 LLM 最大的创作自由。
+    相比旧版，增加了 Rolling Prefix 支持和基本情境信息。
+
+    Phase 0 T4：新增 entities/open_hooks/previous_world_snapshot/author_intent
+    修复调研报告病灶 4（角色卡/伏笔/快照/作者意图未注入）。
+    """
     pov_character = beat.get("pov_character", "主角")
     location = beat.get("location", "未指定")
     summary = beat.get("summary", "")
     red_lines = beat.get("red_lines", [])
+    book_genre = getattr(book, 'genre', None) or "通用小说"
 
+    red_lines_text = "；".join(red_lines) if red_lines else "无"
+
+    # 极简 system prompt：只保留身份 + 3 条 P0 底线
+    system_prompt = f"""你是小说家。请根据下文情境续写正文。
+
+底线（不可违反）：
+① 本书是【{book_genre}】，严禁题材污染。
+② 红线：{red_lines_text}
+③ 只写【{pov_character}】能感知到的内容。
+
+直接输出正文，不要解释，不要 Markdown。目标约 {target_words} 字。"""
+
+    # user prompt：提供必要情境 + 前文衔接 + 自由创作引导
     continuity = ""
     if previous_tail:
-        continuity = f"\n【前文衔接】必须无缝衔接：{previous_tail}\n"
+        continuity = f"【前文衔接】\n{previous_tail}\n"
 
     previous_context = ""
     if previous_summary:
-        previous_context = f"\n【前情回顾】{previous_summary}\n"
+        prev_tail = previous_summary[-300:] if len(previous_summary) > 300 else previous_summary
+        previous_context = f"【前情回顾】\n{prev_tail}\n"
 
-    red_lines_text = ""
-    if red_lines:
-        red_lines_text = f"\n【红线约束】{', '.join(red_lines)}"
+    physical_context = ""
+    if physical_state_lock:
+        physical_context = f"【角色状态】\n{physical_state_lock}\n"
 
-    system_prompt = f"""你是专业小说写手。请根据以下信息直接生成小说正文。
+    # Phase 0 T4：上下文增强段（角色卡/伏笔/快照/作者意图/金句/黑名单）
+    context_blocks = []
+    context_blocks.append(render_author_intent_block(author_intent))
+    context_blocks.append(render_character_cards_block(entities))
+    context_blocks.append(render_open_hooks_block(open_hooks))
+    context_blocks.append(render_world_snapshot_block(previous_world_snapshot))
+    if book is not None:
+        context_blocks.append(render_golden_snippets_block(getattr(book, 'golden_snippets', None) or []))
+        context_blocks.append(render_style_blacklist_block(getattr(book, 'style_blacklist', None) or []))
+    context_section = "".join(b for b in context_blocks if b)
 
-【章节背景】{getattr(chapter, 'chapter_name', f'第{getattr(chapter, "chapter_number", 1)}章')}
-【角色视角】{pov_character}
-【场景地点】{location}{previous_context}{continuity}{red_lines_text}
+    user_prompt = f"""{continuity}{previous_context}{physical_context}{context_section}
+【情境】
+角色：{pov_character}
+场景：{location}
+剧情：{summary}
 
-要求：
-1. 直接输出小说正文，不要解释、不要总结
-2. 紧扣剧情目标，不偏离红线约束
-3. 字数约 {target_words} 字，允许适度超出
-4. 保持叙事连贯性，与前文无缝衔接
-5. 使用自然流畅的文学语言，避免AI腔
-"""
-
-    user_prompt = f"【剧情目标】{summary}\n\n请生成以上内容的小说正文："
+请续写正文。自由地写，不要拘泥于格式，让故事自己流动。"""
 
     return system_prompt, user_prompt
 
@@ -571,8 +705,15 @@ def _build_standard_path_prompt(
     previous_tail: str,
     physical_state_lock: str,
     target_words: int,
+    entities: Optional[List[Any]] = None,
+    open_hooks: Optional[List[dict]] = None,
+    previous_world_snapshot: Optional[Any] = None,
+    author_intent: Optional[str] = None,
 ) -> tuple[str, str]:
-    """V4.0 Standard-Path: 构建均衡流的 Prompt"""
+    """V4.0 Standard-Path: 构建均衡流的 Prompt。
+
+    Phase 0 T4：新增 entities/open_hooks/previous_world_snapshot/author_intent。
+    """
     pov_character = beat.get("pov_character", "主角")
     location = beat.get("location", "未指定")
     summary = beat.get("summary", "")
@@ -584,6 +725,17 @@ def _build_standard_path_prompt(
     physical_context = ""
     if physical_state_lock:
         physical_context = f"\n【物理状态锁】{physical_state_lock}\n"
+
+    # Phase 0 T4：上下文增强段
+    context_blocks = []
+    context_blocks.append(render_author_intent_block(author_intent))
+    context_blocks.append(render_character_cards_block(entities))
+    context_blocks.append(render_open_hooks_block(open_hooks))
+    context_blocks.append(render_world_snapshot_block(previous_world_snapshot))
+    if book is not None:
+        context_blocks.append(render_golden_snippets_block(getattr(book, 'golden_snippets', None) or []))
+        context_blocks.append(render_style_blacklist_block(getattr(book, 'style_blacklist', None) or []))
+    context_section = "".join(b for b in context_blocks if b)
 
     system_prompt = f"""你是专业小说写手。请根据以下信息生成小说正文。
 
@@ -599,118 +751,10 @@ def _build_standard_path_prompt(
 2. 直接输出小说正文，不要解释
 3. 字数约 {target_words} 字
 4. 保持叙事连贯性
-"""
+{context_section}"""
 
     user_prompt = f"【剧情目标】{summary}\n\n请生成以上内容的小说正文："
 
     return system_prompt, user_prompt
 
 
-# =============================================================================
-# 兼容性保留函数
-# =============================================================================
-
-async def generate_chunks_parallel(
-    chapter: Any,
-    book: Any,
-    entities: List[Any],
-    relationships: List[Any],
-    beats: List[dict],
-    story_beats: List[Any],
-    open_hooks: List[dict],
-    previous_summary: Optional[str],
-    relevant_memories: List[Any],
-    word_count: int,
-) -> List[str]:
-    """
-    【兼容性保留】并行生成多个故事节拍的正文片段。
-
-    警告：此函数为旧版实现，使用完全并行的方式生成，可能导致 Beat 间语气不连贯。
-    新项目请使用 execute_draft_stage。
-
-    Args:
-        chapter: 章节对象
-        book: 书籍对象
-        entities: 角色实体列表
-        relationships: 关系列表
-        beats: Beats 数据列表
-        story_beats: StoryBeat 对象列表
-        open_hooks: 开放的伏笔列表
-        previous_summary: 前情摘要
-        relevant_memories: 相关记忆
-        word_count: 目标字数
-
-    Returns:
-        List[str]: 生成的正文片段列表
-    """
-    from backend.services.prompts import (
-        build_scene_intent_prompt,
-        parse_scene_intent_result,
-        build_chunk_draft_prompt,
-    )
-    from backend.services.llm import call_llm
-
-    async def process_single_beat(beat_index: int, beat: dict, story_beat: Any) -> tuple[int, str]:
-        try:
-            beat_hooks = _build_beat_hooks(beat, open_hooks, beat_index)
-
-            scene_system_prompt, scene_user_prompt = build_scene_intent_prompt(
-                chapter=chapter, beat=beat, open_hooks=beat_hooks,
-            )
-            scene_intent_raw = await call_llm(
-                system_prompt=scene_system_prompt, user_prompt=scene_user_prompt,
-                model=model,
-                temperature=0.2, response_format={"type": "json_object"},
-            )
-            scene_intent_data = parse_scene_intent_result(scene_intent_raw, beat.get("summary", ""))
-
-            target_words = beat.get("word_count_target")
-            if not isinstance(target_words, int) or target_words <= 0:
-                target_words = beat.get("target_words", max(200, word_count // max(1, len(beats))))
-
-            context_summaries = _build_context_summaries(beat_index, beats, len(beats))
-
-            chunk_system_prompt, chunk_user_prompt = build_chunk_draft_prompt(
-                chapter=chapter, book=book, entities=entities,
-                relationships=relationships, beat=beat,
-                scene_intent=scene_intent_data, target_words=target_words,
-                previous_chunks=[], previous_summary=previous_summary,
-                relevant_memories=relevant_memories, hook_contexts=beat_hooks,
-                context_beat_summaries=context_summaries,
-            )
-
-            chunk_text = await call_llm(
-                system_prompt=chunk_system_prompt, user_prompt=chunk_user_prompt,
-                model=model, temperature=0.7,
-            )
-            return beat_index - 1, clean_llm_output(chunk_text)
-        except Exception as e:
-            logger.error(f"[Beat] Beat {beat_index} failed: {e}")
-            return beat_index - 1, ""
-
-    def _build_context_summaries(beat_index: int, beats: List[dict], total_beats: int) -> dict:
-        summaries = {}
-        if beat_index > 1:
-            summaries["prev"] = beats[beat_index - 2].get("summary", "")
-        if beat_index < total_beats:
-            summaries["next"] = beats[beat_index].get("summary", "")
-        return summaries
-
-    sem = asyncio.Semaphore(5)
-
-    async def sem_task(task):
-        async with sem:
-            return await task
-
-    tasks = [
-        sem_task(process_single_beat(i, b, sb))
-        for i, b, sb in zip(range(1, len(beats) + 1), beats, story_beats)
-    ]
-
-    results = await asyncio.gather(*tasks)
-
-    generated_chunks = [""] * len(beats)
-    for idx, text in results:
-        generated_chunks[idx] = text
-
-    return generated_chunks

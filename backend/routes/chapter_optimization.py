@@ -126,6 +126,8 @@ async def optimize_selection(
         context_after=request.context_after,
         outline=outline,
         user_instruction=request.user_instruction,
+        mode=request.mode,
+        tone=request.tone,
     )
     
     return {"optimized_text": optimized_text}

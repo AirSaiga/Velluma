@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { Chapter, Character, ApiConfig } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
@@ -17,7 +18,10 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique', 'intent-generate', 'intent-save'])
-const viewModel = useChapterEditorContainer(props, emit)
+// CP4.5：skip_plan_gate 兼容开关已移除（旧 preview-beats 端点已删除，合并闸门为唯一路径）
+const viewModel = useChapterEditorContainer({
+  ...props,
+}, emit)
 
 defineExpose({
   scrollToCritique: viewModel.scrollToCritique,
@@ -76,6 +80,9 @@ defineExpose({
     :open-inspiration-modal="viewModel.openInspirationModal"
     :optimization-feedback="viewModel.optimizationFeedback.value"
     :preview-beats="viewModel.previewBeats.value"
+    :chapter-card="viewModel.chapterCard?.value || null"
+    :plan-degraded="viewModel.planDegraded?.value || null"
+    :regenerate-beats="viewModel.regenerateBeatsWithEditedCard"
     :publish-chapter="viewModel.publishChapter"
     :selected-chapter="viewModel.selectedChapter.value"
     :set-editor-ref="viewModel.setEditorRef"

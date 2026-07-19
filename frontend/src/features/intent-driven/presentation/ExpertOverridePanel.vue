@@ -1,278 +1,153 @@
 <template>
-  <div v-if="isExpanded" class="expert-panel">
+  <div class="expert-panel">
     <!-- 面板头部 -->
     <div class="panel-header">
       <div class="header-info">
         <div class="header-icon">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-          </svg>
+          <Icon name="settings" :size="16" />
         </div>
         <div class="header-text">
-          <span class="header-title">参数覆盖</span>
-          <span class="header-desc">按需接管系统推荐参数</span>
+          <span class="header-title">高级微调</span>
+          <span class="header-desc">覆盖基础调整中的默认值</span>
         </div>
-      </div>
-      <div class="header-actions">
-        <span v-if="hasOverrides" class="override-count">{{ overrideCount }} 项覆盖</span>
-        <button 
-          v-if="hasOverrides"
-          type="button"
-          class="reset-btn" 
-          @click="clearAllOverrides"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          重置所有
-        </button>
       </div>
     </div>
-    
+
     <!-- 参数列表 -->
     <div class="params-list">
-      <div 
-        v-for="field in overridableFields" 
-        :key="field.key" 
-        class="param-item"
-        :class="{ 'is-overridden': isOverridden(field.key) }"
-      >
+      <!-- 字数覆盖 -->
+      <div class="param-item">
         <div class="param-info">
           <div class="param-label">
-            <span class="label-text">{{ field.label }}</span>
-            <span v-if="field.hint" class="label-hint">{{ field.hint }}</span>
-          </div>
-          <div v-if="isOverridden(field.key)" class="param-status">
-            <span class="status-badge">已修改</span>
-            <button 
-              type="button"
-              class="revert-btn" 
-              @click="clearOverride(field.key)"
-              title="恢复默认值"
-            >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-              </svg>
-              恢复
-            </button>
+            <span class="label-text">本章篇幅</span>
+            <span class="label-hint">字</span>
           </div>
         </div>
-        
         <div class="param-control">
-          <!-- 下拉选择 -->
-          <div v-if="field.type === 'select'" class="select-wrapper">
-            <select 
-              :value="getOverrideValue(field.key)"
-              @change="handleOverride(field.key, ($event.target as HTMLSelectElement).value)"
-            >
-              <option 
-                v-for="opt in field.options" 
-                :key="opt.value" 
-                :value="opt.value"
-              >
-                {{ opt.label }}
-              </option>
-            </select>
-            <svg class="select-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          
-          <!-- 数字输入 -->
-          <div v-else-if="field.type === 'number'" class="number-control">
-            <button 
+          <div class="number-control">
+            <button
               type="button"
               class="number-btn"
-              @click="adjustNumber(field, -1)"
-              :disabled="(getOverrideValue(field.key) as number) <= (field.min || 1)"
+              @click="adjustWordCount(-500)"
+              :disabled="overrideWordCount <= 500"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20 12H4" />
               </svg>
             </button>
             <input
               type="number"
-              :min="field.min"
-              :max="field.max"
-              :value="getOverrideValue(field.key)"
-              @input="handleOverride(field.key, Number(($event.target as HTMLInputElement).value))"
+              :min="500"
+              :max="10000"
+              :value="overrideWordCount"
+              @input="setOverrideWordCount(Number(($event.target as HTMLInputElement).value))"
               class="number-input"
             />
-            <button 
+            <button
               type="button"
               class="number-btn"
-              @click="adjustNumber(field, 1)"
-              :disabled="(getOverrideValue(field.key) as number) >= (field.max || 5)"
+              @click="adjustWordCount(500)"
+              :disabled="overrideWordCount >= 10000"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
               </svg>
             </button>
           </div>
-          
-          <!-- 开关 -->
-          <label v-else-if="field.type === 'boolean'" class="toggle-switch">
-            <input
-              type="checkbox"
-              :checked="getOverrideValue(field.key)"
-              @change="handleOverride(field.key, ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="toggle-slider">
-              <span class="toggle-thumb">
-                <svg v-if="getOverrideValue(field.key)" class="w-3 h-3 check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-                </svg>
-              </span>
-            </span>
-          </label>
+        </div>
+      </div>
+
+      <!-- 作者意图覆盖 -->
+      <div class="param-item full-width">
+        <div class="param-info">
+          <div class="param-label">
+            <span class="label-text">附加说明</span>
+            <span class="label-hint">对生成内容的额外要求</span>
+          </div>
+        </div>
+        <div class="param-control">
+          <textarea
+            :value="overrideAuthorIntent"
+            @input="setOverrideAuthorIntent(($event.target as HTMLTextAreaElement).value)"
+            class="sleek-textarea"
+            placeholder="例如：增加悬疑感、强化反派气场、减少环境描写..."
+            rows="3"
+          ></textarea>
         </div>
       </div>
     </div>
-    
-    <!-- 警告提示 -->
-    <Transition name="slide-down">
-      <div v-if="hasOverrides" class="warning-banner">
-        <div class="warning-icon">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <div class="warning-content">
-          <span class="warning-title">参数已覆盖</span>
-          <span class="warning-desc">您已手动修改 {{ overrideCount }} 个参数，这可能会影响系统推荐的意图效果。</span>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, watch } from 'vue'
+import Icon from '@/components/Icon.vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
-import type { GenerationPolicy } from '@/types/intentDriven'
 
 const props = defineProps<{
-  isExpanded: boolean
-  recommendedPolicy: GenerationPolicy | null
+  defaultWordCount: number
+  defaultAuthorIntent: string
 }>()
 
-const { userOverrides, hasOverrides, overrideCount, setOverride, clearOverride, clearAllOverrides } = useIntentDrivenConfig()
+const emit = defineEmits<{
+  updateWordCount: [value: number]
+  updateAuthorIntent: [value: string]
+}>()
 
-const overridableFields = computed(() => [
-  {
-    key: 'tension_level',
-    label: '张力等级',
-    hint: '1-5',
-    type: 'number',
-    min: 1,
-    max: 5
-  },
-  {
-    key: 'pacing_style',
-    label: '节奏偏好',
-    hint: '',
-    type: 'select',
-    options: [
-      { value: 'slow_burn', label: '慢热铺垫' },
-      { value: 'balanced', label: '均衡发展' },
-      { value: 'fast_paced', label: '快节奏' }
-    ]
-  },
-  {
-    key: 'memory_span',
-    label: '记忆跨度',
-    hint: '',
-    type: 'select',
-    options: [
-      { value: 'recent_only', label: '仅看近期' },
-      { value: 'balanced_reference', label: '正常参考' },
-      { value: 'deep_dive', label: '深挖伏笔' }
-    ]
-  },
-  {
-    key: 'creativity_level',
-    label: '创作自由度',
-    hint: '',
-    type: 'select',
-    options: [
-      { value: 'strict_prompt', label: '紧扣提示词' },
-      { value: 'balanced_creation', label: '均衡发展' },
-      { value: 'wild_imagination', label: '天马行空' }
-    ]
-  },
-  {
-    key: 'refinement_depth',
-    label: '精修深度',
-    hint: '',
-    type: 'select',
-    options: [
-      { value: 'light', label: '轻度润色' },
-      { value: 'standard', label: '标准精修' },
-      { value: 'deep', label: '深度打磨' }
-    ]
-  },
-  {
-    key: 'enable_dual_track',
-    label: '启用双轨生成',
-    hint: '提高连贯性',
-    type: 'boolean'
-  }
-])
+const { wordCount, authorIntent } = useIntentDrivenConfig()
 
-function getOverrideValue(key: string): any {
-  if (userOverrides.value[key]) {
-    return userOverrides.value[key].current
-  }
-  return props.recommendedPolicy?.[key as keyof GenerationPolicy] ?? null
+const overrideWordCount = ref(props.defaultWordCount)
+const overrideAuthorIntent = ref(props.defaultAuthorIntent)
+
+watch(() => props.defaultWordCount, (v) => { overrideWordCount.value = v })
+watch(() => props.defaultAuthorIntent, (v) => { overrideAuthorIntent.value = v })
+
+function adjustWordCount(delta: number) {
+  const newVal = Math.max(500, Math.min(10000, overrideWordCount.value + delta))
+  overrideWordCount.value = newVal
+  emit('updateWordCount', newVal)
 }
 
-function handleOverride(key: string, value: any): void {
-  const original = props.recommendedPolicy?.[key as keyof GenerationPolicy]
-  setOverride(key, value, original)
+function setOverrideWordCount(val: number) {
+  const newVal = Math.max(500, Math.min(10000, val))
+  overrideWordCount.value = newVal
+  emit('updateWordCount', newVal)
 }
 
-function isOverridden(key: string): boolean {
-  return !!userOverrides.value[key]
-}
-
-function adjustNumber(field: any, delta: number) {
-  const current = getOverrideValue(field.key) as number
-  const newValue = Math.max(field.min || 1, Math.min(field.max || 5, current + delta))
-  handleOverride(field.key, newValue)
+function setOverrideAuthorIntent(val: string) {
+  overrideAuthorIntent.value = val
+  emit('updateAuthorIntent', val)
 }
 </script>
 
 <style scoped>
 .expert-panel {
-  padding: 1rem 1.1rem 1.15rem;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0) 42%),
-    var(--bg-primary, white);
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  padding: 1rem;
+  background: var(--bg-secondary, #faf8f4);
+  border-top: 1px solid var(--border-color, #e0dbd3);
 }
 
-/* 面板头部 */
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1rem;
-  padding: 0.25rem 0.2rem 0.8rem;
-  border-bottom: 1px dashed var(--border-color, #e2e8f0);
+  margin-bottom: 0.875rem;
+  padding: 0.25rem 0 0.625rem;
+  border-bottom: 1px dashed var(--border-color, #e0dbd3);
 }
 
 .header-info {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.5rem;
 }
 
 .header-icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: var(--idp-radius-subcard, 0.78rem);
-  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
-  color: #6d28d9;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+  background: rgba(124, 106, 173, 0.1);
+  color: var(--accent-500, #7c6aad);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -281,67 +156,24 @@ function adjustNumber(field: any, delta: number) {
 .header-text {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0;
 }
 
 .header-title {
-  font-size: 0.875rem;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary, #2c2c2c);
 }
 
 .header-desc {
-  font-size: 0.75rem;
-  color: var(--text-secondary, #64748b);
+  font-size: 11px;
+  color: var(--text-muted, #a89e90);
 }
 
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.override-count {
-  font-size: 0.75rem;
-  color: var(--accent-700, #4338ca);
-  background: var(--accent-50, #eef2ff);
-  border: 1px solid var(--accent-200, #c7d2fe);
-  border-radius: var(--idp-radius-pill, 9999px);
-  padding: 0.2rem 0.55rem;
-}
-
-.reset-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-muted, #94a3b8);
-  background: var(--bg-canvas, #f1f5f9);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: var(--idp-radius-subcard, 0.78rem);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.reset-btn:hover {
-  color: var(--accent-600, #4f46e5);
-  background: var(--accent-50, #eef2ff);
-  border-color: var(--accent-300, #a5b4fc);
-}
-
-/* 参数列表 */
 .params-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.625rem 0.75rem;
-}
-
-@media (max-width: 860px) {
-  .params-list {
-    grid-template-columns: 1fr;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .param-item {
@@ -349,28 +181,22 @@ function adjustNumber(field: any, delta: number) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.9rem 1rem;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.94) 0%, rgba(255, 255, 255, 0.97) 100%);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: var(--idp-radius-subcard, 0.78rem);
+  padding: 0.75rem 1rem;
+  background: var(--bg-panel, #f0ece3);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 10px;
   transition: all 0.2s ease;
-  box-shadow: var(--idp-shadow-soft, 0 8px 20px rgba(15, 23, 42, 0.06));
 }
 
 .param-item:hover {
-  background: var(--bg-primary, white);
-  border-color: var(--accent-200, #c7d2fe);
-  box-shadow: var(--idp-shadow-hover, 0 16px 30px rgba(99, 102, 241, 0.14));
-  transform: translateY(-1px);
+  border-color: var(--hover-bg, #eee9df);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
 }
 
-.param-item.is-overridden {
-  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
-  border-color: #fbbf24;
-  box-shadow: 0 10px 20px rgba(245, 158, 11, 0.14);
+.param-item.full-width {
+  flex-direction: column;
 }
 
-/* 参数信息 */
 .param-info {
   flex: 1;
   min-width: 0;
@@ -379,107 +205,31 @@ function adjustNumber(field: any, delta: number) {
 .param-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem;
   flex-wrap: wrap;
 }
 
 .label-text {
-  font-size: 0.875rem;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary, #2c2c2c);
 }
 
 .label-hint {
-  font-size: 0.75rem;
-  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  color: var(--text-muted, #a89e90);
 }
 
-.param-status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.375rem;
-}
-
-.status-badge {
-  padding: 0.125rem 0.5rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: #b45309;
-  background: #fef3c7;
-  border-radius: var(--idp-radius-pill, 9999px);
-}
-
-.revert-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.125rem 0.375rem;
-  font-size: 0.6875rem;
-  color: var(--text-muted, #94a3b8);
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.revert-btn:hover {
-  color: var(--accent-600, #4f46e5);
-  background: rgba(99, 102, 241, 0.1);
-}
-
-/* 参数控制 */
 .param-control {
   flex-shrink: 0;
 }
 
-/* 下拉选择 */
-.select-wrapper {
-  position: relative;
-}
-
-.select-wrapper select {
-  appearance: none;
-  padding: 0.5rem 2rem 0.5rem 0.875rem;
-  font-size: 0.8125rem;
-  color: var(--text-primary, #1e293b);
-  background: var(--bg-primary, white);
-  border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: 0.5rem;
-  cursor: pointer;
-  min-width: 7rem;
-  transition: all 0.2s ease;
-}
-
-.select-wrapper select:hover {
-  border-color: var(--accent-300, #a5b4fc);
-}
-
-.select-wrapper select:focus {
-  outline: none;
-  border-color: var(--accent-400, #818cf8);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-.select-arrow {
-  position: absolute;
-  right: 0.625rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1rem;
-  height: 1rem;
-  color: var(--text-muted, #94a3b8);
-  pointer-events: none;
-}
-
-/* 数字控制 */
 .number-control {
   display: flex;
   align-items: center;
-  background: var(--bg-primary, white);
-  border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: 0.5rem;
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -487,10 +237,10 @@ function adjustNumber(field: any, delta: number) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   padding: 0;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #6b6560);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -498,21 +248,22 @@ function adjustNumber(field: any, delta: number) {
 }
 
 .number-btn:hover:not(:disabled) {
-  background: var(--accent-50, #eef2ff);
-  color: var(--accent-600, #4f46e5);
+  background: var(--accent-500, #7c6aad);
+  color: white;
 }
 
 .number-btn:disabled {
-  color: var(--text-muted, #cbd5e1);
+  color: var(--text-muted, #a89e90);
   cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .number-input {
-  width: 2.5rem;
+  width: 3.5rem;
   padding: 0;
-  font-size: 0.9375rem;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary, #2c2c2c);
   text-align: center;
   background: transparent;
   border: none;
@@ -529,264 +280,100 @@ function adjustNumber(field: any, delta: number) {
   outline: none;
 }
 
-/* 开关 */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 3rem;
-  height: 1.75rem;
-  cursor: pointer;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-slider {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--border-color, #cbd5e1);
-  border-radius: 9999px;
-  transition: all 0.3s ease;
-}
-
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  top: 0.25rem;
-  left: 0.25rem;
-  width: 1.25rem;
-  height: 1.25rem;
-  background: white;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--accent-500, #6366f1);
-}
-
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(1.25rem);
-}
-
-.toggle-thumb {
-  position: absolute;
-  top: 0.25rem;
-  left: 0.25rem;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-}
-
-.toggle-switch input:checked + .toggle-slider .toggle-thumb {
-  transform: translateX(1.25rem);
-}
-
-.check-icon {
-  color: var(--accent-500, #6366f1);
-}
-
-/* 警告横幅 */
-.warning-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-top: 1rem;
-  padding: 0.875rem 1rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border: 1px solid #fbbf24;
-  border-radius: 0.78rem;
-  box-shadow: 0 10px 20px rgba(245, 158, 11, 0.14);
-}
-
-.warning-icon {
-  flex-shrink: 0;
-  width: 1.75rem;
-  height: 1.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  color: #d97706;
-  border-radius: 50%;
-}
-
-.warning-content {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.warning-title {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: #92400e;
-}
-
-.warning-desc {
-  font-size: 0.75rem;
-  color: #b45309;
+.sleek-textarea {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary, #2c2c2c);
+  resize: vertical;
+  min-height: 64px;
+  transition: all 0.2s ease;
   line-height: 1.5;
 }
 
-/* 动画 */
-.slide-down-enter-active,
-.slide-down-leave-active {
-  transition: all 0.3s ease;
+.sleek-textarea:focus {
+  outline: none;
+  background: white;
+  border-color: var(--accent-500, #7c6aad);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
 }
 
-.slide-down-enter-from,
-.slide-down-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
+.sleek-textarea::placeholder {
+  color: var(--text-muted, #a89e90);
 }
 
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .expert-panel {
-    background:
-      radial-gradient(circle at 100% 0%, rgba(79, 70, 229, 0.2) 0%, rgba(79, 70, 229, 0) 42%),
-      #1e293b;
-    border-color: #334155;
+    background: var(--bg-secondary, #211f1b);
+    border-color: var(--border-color, #3a3530);
   }
 
   .panel-header {
-    border-color: #334155;
+    border-color: var(--border-color, #3a3530);
   }
 
   .header-icon {
-    background: linear-gradient(135deg, #312e81 0%, #4338ca 100%);
-    color: #c7d2fe;
+    background: rgba(167, 139, 250, 0.15);
+    color: var(--accent-500, #a78bfa);
   }
 
   .header-title {
-    color: #f1f5f9;
+    color: var(--text-primary, #ede8df);
   }
 
   .header-desc {
-    color: #94a3b8;
+    color: var(--text-muted, #8a8275);
   }
 
-  .override-count {
-    background: rgba(67, 56, 202, 0.3);
-    border-color: rgba(99, 102, 241, 0.5);
-    color: #c7d2fe;
-  }
-  
-  .reset-btn {
-    background: #334155;
-    border-color: #475569;
-    color: #64748b;
-  }
-  
-  .reset-btn:hover {
-    background: #312e81;
-    border-color: #4f46e5;
-    color: #a5b4fc;
-  }
-  
   .param-item {
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
-    border-color: #334155;
+    background: var(--bg-panel, #2c2923);
+    border-color: var(--border-color, #3a3530);
   }
-  
+
   .param-item:hover {
-    background: #1e293b;
-    border-color: #4f46e5;
+    border-color: var(--hover-bg, #33302a);
   }
-  
-  .param-item.is-overridden {
-    background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
-    border-color: #fbbf24;
-  }
-  
+
   .label-text {
-    color: #f1f5f9;
+    color: var(--text-primary, #ede8df);
   }
-  
-  .status-badge {
-    background: #fcd34d;
-    color: #92400e;
-  }
-  
-  .revert-btn {
-    color: #64748b;
-  }
-  
-  .revert-btn:hover {
-    color: #a5b4fc;
-    background: rgba(99, 102, 241, 0.2);
-  }
-  
-  .select-wrapper select,
+
   .number-control {
-    background: #1e293b;
-    border-color: #475569;
-    color: #f1f5f9;
+    background: var(--bg-canvas, #1e1c18);
+    border-color: var(--border-color, #3a3530);
   }
-  
-  .select-wrapper select:hover {
-    border-color: #4f46e5;
-  }
-  
-  .select-wrapper select:focus {
-    border-color: #6366f1;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-  }
-  
+
   .number-btn {
-    color: #94a3b8;
+    color: var(--text-muted, #8a8275);
   }
-  
+
   .number-btn:hover:not(:disabled) {
-    background: #312e81;
-    color: #a5b4fc;
+    background: var(--accent-500, #a78bfa);
+    color: white;
   }
-  
+
   .number-btn:disabled {
-    color: #475569;
+    color: var(--text-muted, #8a8275);
   }
-  
+
   .number-input {
-    color: #f1f5f9;
+    color: var(--text-primary, #ede8df);
   }
-  
-  .toggle-slider {
-    background: #475569;
+
+  .sleek-textarea {
+    background: var(--bg-canvas, #1e1c18);
+    border-color: var(--border-color, #3a3530);
+    color: var(--text-primary, #ede8df);
   }
-  
-  .toggle-switch input:checked + .toggle-slider {
-    background: #4f46e5;
-  }
-  
-  .warning-banner {
-    background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
-    border-color: #fbbf24;
-  }
-  
-  .warning-icon {
-    background: #1e293b;
-    color: #fbbf24;
-  }
-  
-  .warning-title {
-    color: #fcd34d;
-  }
-  
-  .warning-desc {
-    color: #fde68a;
+
+  .sleek-textarea:focus {
+    background: #0f0e0c;
+    border-color: var(--accent-500, #a78bfa);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
   }
 }
 </style>

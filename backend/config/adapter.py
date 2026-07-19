@@ -147,9 +147,11 @@ def adapt_request_to_config(
     workflow_policy = WorkflowPolicy(
         creativity_level=creativity_level,
         refinement_depth=refinement_depth,
-        max_iterations=request.max_iterations,
-        fast_mode=request.fast_mode,
-        skip_minor_refine=request.skip_minor_refine,
+        # Phase 0 T6：request 字段 max_iterations/fast_mode/skip_minor_refine 已删
+        # WorkflowPolicy 内部字段保留（推导层使用），用 getattr 兜底默认值
+        max_iterations=getattr(request, "max_iterations", 2),
+        fast_mode=getattr(request, "fast_mode", False),
+        skip_minor_refine=getattr(request, "skip_minor_refine", True),
     )
     
     # V4.0+ 简化：始终根据 refinement_depth 推导 max_iterations

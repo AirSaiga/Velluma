@@ -1,197 +1,58 @@
 <template>
-  <div class="intent-panel-layout">
-    <!-- 左侧导航栏 -->
-    <aside class="panel-sidebar">
-      <div class="sidebar-header">
-        <div class="brand-icon">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        </div>
-        <h2 class="brand-title">AI 智能创作</h2>
-      </div>
-
-      <nav class="sidebar-nav">
+  <div class="intent-panel">
+    <PanelSection title="本章类型" icon="sparkles">
+      <div class="type-grid">
         <button
-          v-for="(page, idx) in workflowPages"
-          :key="page.key"
+          v-for="t in types"
+          :key="t.id"
           type="button"
-          class="nav-node"
-          :class="{
-            'is-active': currentWorkflowPage === page.key
-          }"
-          @click="setWorkflowPage(page.key)"
+          class="type-btn"
+          :class="{ active: chapterType === t.id }"
+          @click="setChapterType(t.id)"
         >
-          <div class="node-indicator">
-            <div class="node-dot">
-              <span>{{ idx + 1 }}</span>
-            </div>
-            <div class="node-line" v-if="idx < workflowPages.length - 1"></div>
-          </div>
-          
-          <div class="node-content">
-            <div class="node-header">
-              <div class="node-title">{{ page.label }}</div>
-              <div class="node-badge" v-if="page.required">必选</div>
-            </div>
-            
-            <!-- 动态摘要展示 -->
-            <div class="node-summary-wrapper">
-              <Transition name="fade-slide" mode="out-in">
-                <div v-if="page.key === 'setup' && hasSelection" class="node-summary">
-                  已选 {{ selectedIntents.length }} 意图, {{ selectedGoals.length }} 目标
-                </div>
-                <div v-else-if="page.key === 'plan' && selectedPlanType" class="node-summary">
-                  {{ getPlanName(selectedPlanType) }}
-                </div>
-                <div v-else-if="page.key === 'expert' && overrideCount > 0" class="node-summary">
-                  {{ overrideCount }} 项参数已覆盖
-                </div>
-                <div v-else class="node-desc">{{ page.desc }}</div>
-              </Transition>
-            </div>
-          </div>
-        </button>
-      </nav>
-
-      <!-- 左侧底部操作栏 -->
-      <div class="sidebar-footer">
-        <button
-          class="sidebar-action-btn ghost"
-          :disabled="!canGenerate"
-          @click="handleSave"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-          </svg>
-          保存设置
+          <Icon :name="t.icon" :size="16" />
+          <span>{{ t.label }}</span>
         </button>
       </div>
-    </aside>
+    </PanelSection>
 
-    <!-- 右侧内容区 -->
-    <main class="panel-main">
-      <div class="main-scroll-area">
-        <Transition name="fade-slide-up" mode="out-in">
-          
-          <!-- 1. 意图与目标 -->
-          <section v-if="currentWorkflowPage === 'setup'" key="setup" class="workflow-section">
-            <div class="section-header">
-              <h1 class="section-title">设定创作基调</h1>
-              <p class="section-desc">选择您的核心意图与具体目标，AI 将据此规划最合适的生成策略。</p>
-            </div>
-            
-            <div class="setup-content-stack">
-              <IntentSelector />
-              <div class="content-divider"></div>
-              <GoalSelector />
-            </div>
-          </section>
-
-          <!-- 2. 推荐方案 -->
-          <section v-else-if="currentWorkflowPage === 'plan'" key="plan" class="workflow-section">
-            <div class="section-header">
-              <h1 class="section-title">推荐生成方案</h1>
-              <p class="section-desc">基于您的设定，我们为您准备了以下生成策略。</p>
-            </div>
-            
-            <div v-if="!hasSelection" class="empty-state">
-              <div class="empty-icon">⚠️</div>
-              <p>请先返回上一步，至少选择 1 个创作意图。</p>
-            </div>
-            <div v-else-if="recommendedPlans.length === 0" class="empty-state">
-              <div class="empty-icon">⏳</div>
-              <p>正在生成推荐方案...</p>
-            </div>
-            <div v-else class="plans-grid">
-              <RecommendedPlanCard
-                v-for="plan in recommendedPlans"
-                :key="plan.plan_id"
-                :plan="plan"
-                :is-selected="selectedPlanType === plan.plan_type"
-                @select="selectPlanType"
-              />
-            </div>
-          </section>
-
-          <!-- 3. 基础调整 -->
-          <section v-else-if="currentWorkflowPage === 'adjust'" key="adjust" class="workflow-section">
-            <div class="section-header">
-              <h1 class="section-title">基础调整</h1>
-              <p class="section-desc">微调篇幅与补充说明，确保内容完全符合您的要求。</p>
-            </div>
-            
-            <div class="adjustments-stack">
-              <div class="control-card">
-                <div class="control-header">
-                  <div class="control-icon-box">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                  </div>
-                  <span class="control-title">本章篇幅</span>
-                </div>
-                <div class="word-count-control">
-                  <button class="count-btn" @click="wordCount = Math.max(500, wordCount - 500)" :disabled="wordCount <= 500">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" /></svg>
-                  </button>
-                  <div class="count-display">
-                    <span class="count-value">{{ wordCount.toLocaleString() }}</span>
-                    <span class="count-unit">字</span>
-                  </div>
-                  <button class="count-btn" @click="wordCount = Math.min(10000, wordCount + 500)" :disabled="wordCount >= 10000">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-                  </button>
-                </div>
-              </div>
-
-              <div class="control-card">
-                <div class="control-header">
-                  <div class="control-icon-box">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  </div>
-                  <span class="control-title">附加说明</span>
-                </div>
-                <textarea
-                  :value="authorIntent"
-                  @input="setAuthorIntent(($event.target as HTMLTextAreaElement).value)"
-                  class="sleek-textarea"
-                  placeholder="在此输入任何额外的提示，例如：增加悬疑感、强化反派气场..."
-                  rows="4"
-                ></textarea>
-              </div>
-            </div>
-          </section>
-
-          <!-- 4. 专家模式 -->
-          <section v-else-if="currentWorkflowPage === 'expert'" key="expert" class="workflow-section">
-            <div class="section-header">
-              <h1 class="section-title">专家控制中心</h1>
-              <p class="section-desc">深度介入 AI 的生成逻辑。仅建议有经验的创作者使用。</p>
-            </div>
-            
-            <div class="expert-panel-wrapper">
-              <ExpertOverridePanel
-                :is-expanded="true"
-                :recommended-policy="recommendedPlan?.policy || null"
-              />
-            </div>
-          </section>
-        </Transition>
-        
-        <!-- 底部留白 -->
-        <div class="bottom-spacer"></div>
-
+    <PanelSection title="本章篇幅">
+      <div class="word-control">
+        <button class="word-step" @click="setWordCount(Math.max(500, wordCount - 500))">
+          <Icon name="minus" :size="14" />
+        </button>
+        <span class="word-display">{{ wordCount.toLocaleString() }}<i>字</i></span>
+        <button class="word-step" @click="setWordCount(Math.min(10000, wordCount + 500))">
+          <Icon name="plus" :size="14" />
+        </button>
       </div>
-    </main>
+    </PanelSection>
+
+    <PanelSection title="补充说明">
+      <textarea
+        :value="authorIntent"
+        @input="setAuthorIntent(($event.target as HTMLTextAreaElement).value)"
+        class="intent-textarea"
+        placeholder="例如：增加悬疑感、强化反派气场..."
+        rows="3"
+      />
+    </PanelSection>
+
+    <div class="panel-actions">
+      <button class="action-primary" :disabled="!canSave" @click="handleSave">
+        <Icon name="document" :size="14" />
+        保存设置
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed } from 'vue'
+import Icon from '@/components/Icon.vue'
+import PanelSection from '@/components/panels/PanelSection.vue'
 import { useIntentDrivenConfig } from '../useIntentDrivenConfig'
-import IntentSelector from '../presentation/IntentSelector.vue'
-import GoalSelector from '../presentation/GoalSelector.vue'
-import RecommendedPlanCard from '../presentation/RecommendedPlanCard.vue'
-import ExpertOverridePanel from '../presentation/ExpertOverridePanel.vue'
+import type { ChapterType } from '@/types/intentDriven'
 
 const props = defineProps<{
   chapterId: string
@@ -202,675 +63,184 @@ const props = defineProps<{
   }
 }>()
 
-const emit = defineEmits<{
-  save: [payload: any]
-  generate: [payload: any]
-}>()
+const emit = defineEmits<{ save: [payload: any]; generate: [payload: any] }>()
 
 const {
-  selectedIntents,
-  selectedGoals,
-  hasSelection,
-  recommendedPlans,
-  recommendedPlan,
-  selectedPlanType,
-  overrideCount,
-  selectPlanType,
-  buildPayload,
-  wordCount,
-  authorIntent,
-  setWordCount,
-  setAuthorIntent,
-  refreshRecommendations
+  chapterType, setChapterType,
+  wordCount, setWordCount,
+  authorIntent, setAuthorIntent,
+  buildPayload
 } = useIntentDrivenConfig()
 
-type WorkflowPageKey = 'setup' | 'plan' | 'adjust' | 'expert'
-const workflowPages: Array<{ key: WorkflowPageKey; label: string; required: boolean; desc: string }> = [
-  { key: 'setup', label: '意图与目标', required: true, desc: '设定基调与方向' },
-  { key: 'plan', label: '推荐方案', required: true, desc: '选择最佳策略' },
-  { key: 'adjust', label: '基础调整', required: false, desc: '篇幅与细节补充' },
-  { key: 'expert', label: '专家模式', required: false, desc: '高级参数控制' }
+const canSave = computed(() => wordCount.value >= 500)
+
+const types: { id: ChapterType; icon: string; label: string }[] = [
+  { id: 'emotional', icon: 'heart', label: '情感内心' },
+  { id: 'action', icon: 'bolt', label: '动作冲突' },
+  { id: 'daily', icon: 'sun', label: '日常过渡' },
+  { id: 'suspense', icon: 'magnifying-glass', label: '悬疑推理' },
+  { id: 'worldbuilding', icon: 'map', label: '世界观展开' },
 ]
 
-const currentWorkflowPage = ref<WorkflowPageKey>('setup')
-
-// 切换到推荐方案页面时，确保刷新推荐数据
-watch(currentWorkflowPage, (newPage) => {
-  if (newPage === 'plan' && hasSelection.value) {
-    refreshRecommendations()
-  }
-})
-
-const canGenerate = computed(() => {
-  return hasSelection.value && wordCount.value >= 500
-})
-
-const currentWorkflowIndex = computed(() => {
-  return workflowPages.findIndex(page => page.key === currentWorkflowPage.value)
-})
-
-const canProceedCurrentPage = computed(() => {
-  if (currentWorkflowPage.value === 'setup') {
-    return selectedIntents.value.length > 0
-  }
-  if (currentWorkflowPage.value === 'plan') {
-    return hasSelection.value && recommendedPlans.value.length > 0 && Boolean(selectedPlanType.value)
-  }
-  return true
-})
-
-function getPlanName(type: string) {
-  const map: Record<string, string> = {
-    balanced: '均衡推荐',
-    fast: '快速生成',
-    quality: '高质量',
-    creative: '创意优先'
-  }
-  return map[type] || type
-}
-
 function handleSave() {
-  const payload = buildPayload({
+  emit('save', buildPayload({
     chapterId: props.chapterId,
     apiConfig: props.apiConfig,
     wordCount: wordCount.value,
     authorIntent: authorIntent.value
-  })
-
-  emit('save', payload)
-}
-
-function setWorkflowPage(page: WorkflowPageKey) {
-  currentWorkflowPage.value = page
+  }))
 }
 </script>
 
 <style scoped>
-/* 核心布局: 左右分屏 */
-.intent-panel-layout {
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  height: 100%;
-  min-height: 0; /* 取消 600px 最小高度，允许完全自适应 */
-  background: var(--bg-canvas, #f8fafc);
-  overflow: hidden;
-}
-
-/* 左侧导航栏 */
-.panel-sidebar {
-  flex: 0 0 280px;
+.intent-panel {
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #ffffff 0%, rgba(255,255,255,0.6) 100%);
-  border-right: 1px solid rgba(226, 232, 240, 0.8);
-  backdrop-filter: blur(20px);
-  z-index: 10;
+  gap: 16px;
+  padding: 12px 16px;
   height: 100%;
   overflow-y: auto;
 }
 
-.sidebar-header {
-  padding: 2rem 1.5rem;
+/* 类型选择 */
+.type-grid {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.brand-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.75rem;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+.type-btn {
+  flex: 1 1 0;
+  min-width: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.type-btn:hover {
+  background: var(--hover-bg);
+}
+
+.type-btn.active {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
   color: white;
+}
+
+/* 字数控制 */
+.word-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.word-step {
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-}
-
-.brand-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.01em;
-  margin: 0;
-}
-
-/* 垂直节点导航 */
-.sidebar-nav {
-  flex: 1;
-  padding: 0 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  position: relative;
-}
-
-.nav-node {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 0;
   background: transparent;
   border: none;
+  color: var(--text-secondary);
   cursor: pointer;
-  text-align: left;
-  transition: opacity 0.3s ease;
+  transition: all 0.15s ease;
 }
 
-.nav-node.is-disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.node-indicator {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  z-index: 2;
-  align-self: stretch; /* 占满整个节点高度 */
-}
-
-.node-dot {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: white;
-  border: 2px solid #cbd5e1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #94a3b8;
-  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-  flex-shrink: 0;
-  position: relative; /* 为线定位 */
-  z-index: 2;
-}
-
-.nav-node.is-active .node-dot {
-  border-color: #6366f1;
-  background: #6366f1;
+.word-step:hover {
+  background: var(--accent-500);
   color: white;
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
-  transform: scale(1.1);
 }
 
-.nav-node.is-complete:not(.is-active) .node-dot {
-  border-color: #6366f1;
-  background: white;
-  color: #6366f1;
-}
-
-.node-line {
-  position: absolute;
-  top: 2rem; /* 从圆点底部开始 */
-  bottom: -1rem; /* 延伸穿过 gap (gap 是 1rem) */
-  left: 50%;
-  transform: translateX(-50%);
-  width: 2px;
-  background: #e2e8f0;
-  z-index: 1;
-  transition: all 0.3s ease;
-}
-
-.nav-node.is-complete .node-line {
-  background: #c7d2fe;
-}
-
-.node-content {
-  flex: 1;
-  padding-top: 0.25rem;
-  padding-bottom: 2rem;
-}
-
-.node-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.node-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #475569;
-  transition: color 0.3s ease;
-}
-
-.nav-node.is-active .node-title {
-  color: #0f172a;
-}
-
-.nav-node.is-complete:not(.is-active) .node-title {
-  color: #1e293b;
-}
-
-.node-badge {
-  font-size: 0.6875rem;
-  padding: 0.125rem 0.375rem;
-  border-radius: 4px;
-  background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
-  font-weight: 500;
-}
-
-.node-summary-wrapper {
-  position: relative;
-  min-height: 1.5rem;
-}
-
-.node-desc, .node-summary {
-  font-size: 0.8125rem;
-  line-height: 1.5;
-}
-
-.node-desc {
-  color: #94a3b8;
-}
-
-.node-summary {
-  color: #6366f1;
-  font-weight: 500;
-}
-
-/* 左侧底部操作栏 */
-.sidebar-footer {
-  padding: 1.5rem;
-  border-top: 1px solid rgba(226, 232, 240, 0.8);
-  background: rgba(255, 255, 255, 0.6);
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.sidebar-action-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.5rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  border-radius: 0.75rem;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.sidebar-action-btn.ghost {
-  background: rgba(241, 245, 249, 0.86);
-  color: var(--text-secondary, #64748b);
-  border-color: var(--border-color, #e2e8f0);
-}
-
-.sidebar-action-btn.ghost:hover:not(:disabled) {
-  background: white;
-  border-color: var(--accent-300, #a5b4fc);
-  color: var(--text-primary, #1e293b);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.sidebar-action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 右侧主内容区 */
-.panel-main {
-  flex: 1;
-  position: relative;
-  background: var(--bg-canvas, #f8fafc);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  height: 100%;
-}
-
-.main-scroll-area {
-  flex: 1;
-  overflow-y: auto;
-  padding: 2.5rem 3rem;
-  scroll-behavior: smooth;
-}
-
-.workflow-section {
-  max-width: 860px;
-  margin: 0 auto;
-}
-
-.section-header {
-  margin-bottom: 2rem;
-}
-
-.section-title {
-  font-size: 1.875rem;
-  font-weight: 800;
-  color: #0f172a;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.5rem 0;
-}
-
-.section-desc {
-  font-size: 1rem;
-  color: #64748b;
-  margin: 0;
-  line-height: 1.6;
-}
-
-/* 意图与目标堆叠 */
-.setup-content-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-.content-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(226, 232, 240, 0.8) 50%, transparent 100%);
-}
-
-/* 推荐方案空状态 */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px dashed #cbd5e1;
-  border-radius: 1rem;
+.word-display {
+  min-width: 72px;
   text-align: center;
-  color: #64748b;
-}
-
-.empty-icon {
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
-}
-
-/* 方案网格 */
-.plans-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-/* 基础调整卡片 */
-.adjustments-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.control-card {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  border-radius: 1rem;
-  padding: 1.5rem;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.02);
-}
-
-.control-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-}
-
-.control-icon-box {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.625rem;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #6366f1;
-}
-
-.control-title {
-  font-size: 1rem;
+  font-size: 14px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--accent-500);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  padding: 0 8px;
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
 }
 
-.word-count-control {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  background: #f8fafc;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
-  width: fit-content;
+.word-display i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 2px;
 }
 
-.count-btn {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.5rem;
-  border: none;
-  background: white;
-  color: #475569;
+/* 文本框 */
+.intent-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  resize: vertical;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.intent-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.intent-textarea:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  background: var(--bg-primary);
+}
+
+/* 保存按钮 */
+.panel-actions {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.action-primary {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: none;
   cursor: pointer;
+  background: var(--accent-500);
+  color: white;
   transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
-.count-btn:hover:not(:disabled) {
-  color: #6366f1;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(99, 102, 241, 0.1);
+.action-primary:hover:not(:disabled) {
+  background: var(--accent-600);
 }
 
-.count-btn:disabled {
+.action-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.count-display {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  min-width: 6rem;
-  justify-content: center;
-}
-
-.count-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #6366f1;
-  font-variant-numeric: tabular-nums;
-}
-
-.count-unit {
-  font-size: 0.875rem;
-  color: #64748b;
-}
-
-.sleek-textarea {
-  width: 100%;
-  padding: 1rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  font-size: 0.875rem;
-  color: #1e293b;
-  resize: vertical;
-  min-height: 100px;
-  transition: all 0.2s ease;
-}
-
-.sleek-textarea:focus {
-  outline: none;
-  background: white;
-  border-color: #818cf8;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-.expert-panel-wrapper {
-  background: rgba(255, 255, 255, 0.6);
-  border-radius: 1rem;
-  overflow: hidden;
-}
-
-/* 动画 */
-.fade-slide-up-enter-active,
-.fade-slide-up-leave-active {
-  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.fade-slide-up-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-.fade-slide-up-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateX(-10px);
-}
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateX(10px);
-}
-
-.fade-up-enter-active,
-.fade-up-leave-active {
-  transition: all 0.3s ease;
-}
-.fade-up-enter-from,
-.fade-up-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-/* 深色模式 */
-@media (prefers-color-scheme: dark) {
-  .intent-panel-layout {
-    background: #0f172a;
-  }
-  .panel-sidebar {
-    background: linear-gradient(180deg, #1e293b 0%, rgba(30, 41, 59, 0.8) 100%);
-    border-color: #334155;
-  }
-  .brand-title {
-    color: #f8fafc;
-  }
-  .node-dot {
-    background: #1e293b;
-    border-color: #475569;
-    color: #94a3b8;
-  }
-  .nav-node.is-active .node-dot {
-    background: #4f46e5;
-    border-color: #4f46e5;
-    color: white;
-  }
-  .nav-node.is-complete:not(.is-active) .node-dot {
-    background: #1e293b;
-    border-color: #4f46e5;
-    color: #818cf8;
-  }
-  .node-line {
-    background: #334155;
-  }
-  .nav-node.is-complete .node-line {
-    background: #4f46e5;
-  }
-  .node-title {
-    color: #94a3b8;
-  }
-  .nav-node.is-active .node-title {
-    color: #f8fafc;
-  }
-  .nav-node.is-complete:not(.is-active) .node-title {
-    color: #cbd5e1;
-  }
-  .sidebar-footer {
-    border-color: #334155;
-    background: rgba(30, 41, 59, 0.6);
-  }
-  .sidebar-action-btn.ghost {
-    background: #334155;
-    border-color: #475569;
-    color: #cbd5e1;
-  }
-  .sidebar-action-btn.ghost:hover:not(:disabled) {
-    background: #475569;
-    border-color: #64748b;
-    color: #f8fafc;
-  }
-  .sidebar-action-btn.primary {
-    background: #f8fafc;
-    color: #0f172a;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
-  }
-  .sidebar-action-btn.primary:hover:not(:disabled) {
-    background: #e2e8f0;
-  }
-  .panel-main {
-    background: #0f172a;
-  }
-  .section-title {
-    color: #f8fafc;
-  }
-  .section-desc {
-    color: #94a3b8;
-  }
-  .content-divider {
-    background: linear-gradient(90deg, transparent 0%, rgba(51, 65, 85, 0.8) 50%, transparent 100%);
-  }
-  .control-card {
-    background: rgba(30, 41, 59, 0.6);
-    border-color: rgba(71, 85, 105, 0.6);
-  }
-  .control-icon-box {
-    background: #1e293b;
-  }
-  .control-title {
-    color: #f8fafc;
-  }
-  .word-count-control {
-    background: #1e293b;
-    border-color: #334155;
-  }
-  .count-btn {
-    background: #334155;
-    color: #94a3b8;
-  }
-  .count-btn:hover:not(:disabled) {
-    color: #818cf8;
-  }
-  .count-value {
-    color: #818cf8;
-  }
-  .sleek-textarea {
-    background: #1e293b;
-    border-color: #334155;
-    color: #f8fafc;
-  }
-  .sleek-textarea:focus {
-    background: #0f172a;
-    border-color: #6366f1;
-  }
 }
 </style>

@@ -13,6 +13,9 @@ class ValidationResult(BaseModel):
     is_valid: bool
     errors: List[str]
     warnings: List[str]
+    # CP1.1 修复：补 categories 字段（原 MicroReviewer 引用 result.categories 但 schema 缺失）
+    # 携带失败类别（红线/物理幻觉/OOC/关系/文风/其他）供 _adjust_after_failure 调温使用
+    categories: List[str] = []
 
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     if not v1 or not v2: return 0.0
@@ -28,57 +31,155 @@ class BaseValidator:
         raise NotImplementedError("Subclasses must implement validate()")
 
 class StyleClicheValidator(BaseValidator):
-    """
-    “AI味”陈词滥调及黑名单拦截 (Cliché & Blacklist Regex Filter)
+    """AI 腔陈词滥调及黑名单拦截（Cliché & Blacklist Regex Filter）。
+
+    CP2.2c 改造：禁词数据源从硬编码改为三层合并：
+    1. SystemCliche 表（通过 cliche_provider，带缓存）
+    2. book.style_blacklist（书级，向后兼容）
+    3. style_card.negative_list（书级 StyleCard，CP2.2d 接入）
+
+    设计：
+    - 首次 validate 时异步加载 cliches（缓存到实例）
+    - 后续 validate 直接用缓存
+    - 可手动 reload() 刷新（SystemCliche CRUD 后）
     """
     def __init__(self, threshold: int = 2):
-        self.default_cliches = [
-            r"眼底闪过一丝",
-            r"嘴角勾起一抹",
-            r"不禁倒吸一口凉气",
-            r"总而言之",
-            r"不可名状的",
-            r"深邃的眼眸",
-            r"宛如实质般的",
-            r"难以言喻的",
-            r"勾起一抹冷笑",
-            r"倒吸一口凉气",
-        ]
+        # CP2.2c：硬编码 default_cliches 已外迁到 services/style/default_cliches.py
+        # 通过 cliche_provider 在首次 validate 时异步加载（带缓存）
         self.threshold = threshold
+        # 实例缓存：编译后的正则列表 + 原始 cliches 描述（用于命中后给 LLM 看替代建议）
+        self._compiled_patterns: List[tuple] = []  # [(compiled_re, alternative, severity), ...]
+        self._loaded: bool = False
+
+    async def _ensure_loaded(self, context: Optional[Dict[str, Any]] = None) -> None:
+        """首次访问时加载禁词（含 SystemCliche DB 数据 + book 级 blacklist + style_card.negative_list）。
+
+        幂等：已加载则跳过。reload() 可强制刷新。
+        """
+        if self._loaded:
+            return
+
+        cliches: List[tuple] = []  # [(pattern_str, is_regex, alternative, severity), ...]
+
+        # 层 1：SystemCliche（通过 cliche_provider，DB 优先、降级到种子）
+        try:
+            from backend.services.style.cliche_provider import get_active_cliches
+            system_cliches = await get_active_cliches(db=None)  # 走缓存或种子降级
+            for item in system_cliches:
+                cliches.append((
+                    item.get("pattern", ""),
+                    bool(item.get("is_regex", False)),
+                    item.get("alternative"),
+                    item.get("severity", "warning"),
+                ))
+        except Exception as e:
+            logger.warning(f"[StyleClicheValidator] 加载 SystemCliche 失败，降级: {e}")
+            # 兜底：直接用 default_cliches 种子
+            from backend.services.style.default_cliches import get_all_seed_cliches
+            for item in get_all_seed_cliches():
+                cliches.append((
+                    item.get("pattern", ""),
+                    bool(item.get("is_regex", False)),
+                    item.get("alternative"),
+                    item.get("severity", "warning"),
+                ))
+
+        # 层 2：book.style_blacklist（向后兼容，CP0 字段）
+        if context:
+            book_blacklist = context.get("style_blacklist")
+            if book_blacklist:
+                items = []
+                if isinstance(book_blacklist, str):
+                    items = [c.strip() for c in re.split(r'[,，\n]', book_blacklist) if c.strip()]
+                elif isinstance(book_blacklist, list):
+                    items = book_blacklist
+                for item in items:
+                    if isinstance(item, str):
+                        cliches.append((item, False, None, "warning"))
+                    elif isinstance(item, dict):
+                        word = item.get("word") or item.get("phrase") or ""
+                        if word:
+                            cliches.append((
+                                word, False,
+                                item.get("alternative"),
+                                item.get("severity", "warning"),
+                            ))
+
+        # 层 3：style_card.negative_list（CP2.2d 接入，CP2.2c 预留）
+        if context:
+            style_negative = context.get("style_negative_list")
+            if style_negative and isinstance(style_negative, list):
+                for item in style_negative:
+                    if isinstance(item, dict):
+                        word = item.get("word") or item.get("phrase") or ""
+                        if word:
+                            cliches.append((
+                                word, False,
+                                item.get("alternative"),
+                                "warning",
+                            ))
+
+        # 编译正则
+        self._compiled_patterns = []
+        for pattern_str, is_regex, alt, sev in cliches:
+            if not pattern_str:
+                continue
+            try:
+                flags = 0 if is_regex else 0
+                # 非 regex 模式按字面匹配（转义特殊字符）
+                actual_pattern = pattern_str if is_regex else re.escape(pattern_str)
+                compiled = re.compile(actual_pattern, flags)
+                self._compiled_patterns.append((compiled, alt or "", sev or "warning"))
+            except re.error:
+                continue
+
+        self._loaded = True
+        logger.info(f"[StyleClicheValidator] 已加载 {len(self._compiled_patterns)} 条禁词")
+
+    def reload(self) -> None:
+        """强制下次 validate 时重新加载（SystemCliche CRUD 后调用）。"""
+        self._loaded = False
+        self._compiled_patterns = []
 
     async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
         warnings = []
-        
-        # 融合默认陈词滥调与数据库中书籍的 style_blacklist
-        cliches = list(self.default_cliches)
-        book_blacklist = context.get("style_blacklist")
-        if book_blacklist:
-            # 假设 book_blacklist 是以逗号、换行分隔的字符串，或者是一个列表
-            if isinstance(book_blacklist, str):
-                cliches.extend([c.strip() for c in re.split(r'[,，\n]', book_blacklist) if c.strip()])
-            elif isinstance(book_blacklist, list):
-                cliches.extend(book_blacklist)
-                
-        compiled_patterns = []
-        for pattern in cliches:
-            try:
-                compiled_patterns.append(re.compile(pattern))
-            except re.error:
-                continue
-        
+
+        # CP2.2c：首次访问加载禁词
+        await self._ensure_loaded(context)
+
         match_count = 0
         matched_cliches = []
-        for pattern in compiled_patterns:
-            matches = pattern.findall(text)
+        blocker_matches = []
+
+        for compiled, alternative, severity in self._compiled_patterns:
+            matches = compiled.findall(text)
             if matches:
                 match_count += len(matches)
                 matched_cliches.extend(matches)
-        
+                if severity == "blocker":
+                    blocker_matches.extend(matches)
+
+        # blocker 命中即硬失败（不受 threshold 调节）
+        if blocker_matches:
+            errors.append(
+                f"触发硬阻断禁词（共 {len(blocker_matches)} 次）。"
+                f"命中的词汇包含：{', '.join(set(blocker_matches))}。"
+                f"请重写以根除这些 AI 默认腔调。"
+            )
+            return ValidationResult(
+                is_valid=False, errors=errors, warnings=warnings, categories=["文风"]
+            )
+
+        # warning 类按 threshold 软失败
         if match_count > self.threshold:
             errors.append(
                 f"检测到过多AI陈词滥调或文风黑名单词汇（共 {match_count} 次，超过阈值 {self.threshold}）。"
                 f"命中的词汇包含：{', '.join(set(matched_cliches))}。请重写以降低AI味并遵循书籍文风设定。"
+            )
+            # CP1.1：文风类失败，供 _adjust_after_failure 升温
+            return ValidationResult(
+                is_valid=False, errors=errors, warnings=warnings, categories=["文风"]
             )
         elif match_count > 0:
             warnings.append(f"包含轻微AI陈词滥调或不建议词汇：{', '.join(set(matched_cliches))}")
@@ -189,7 +290,20 @@ class PlotLogicValidator(BaseValidator):
                 if phrase and phrase in text:
                     errors.append(f"触发红线/禁忌约束！文本中出现了被绝对禁止的内容：'{phrase}' (源自设定: {constraint})")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
+        # CP1.1：根据 errors 来源填充 categories
+        # - 红线/禁忌触发 → "红线"
+        # - 物理地点矛盾 → "物理幻觉"
+        # - 必须实体缺失 → "逻辑"
+        cats = []
+        if any("红线" in e or "禁忌" in e for e in errors):
+            cats.append("红线")
+        if any("时空逻辑" in e or "地点" in e for e in errors):
+            cats.append("物理幻觉")
+        if any("必须提及" in e or "剧情逻辑错误" in e for e in errors):
+            cats.append("逻辑")
+        return ValidationResult(
+            is_valid=len(errors) == 0, errors=errors, warnings=warnings, categories=cats
+        )
 
 class PacingValidator(BaseValidator):
     """
@@ -210,9 +324,13 @@ class PacingValidator(BaseValidator):
         
         if pacing == "fast" and avg_length > 35:
             errors.append(f"当前环境参数要求 'Fast' (快节奏)，但平均句长达到 {avg_length:.1f} 字，行文显得拖沓。请多用短句和连续动作描写。")
+            # CP1.1：句长问题归入"文风"类（影响阅读节奏，升温重写）
+            return ValidationResult(
+                is_valid=False, errors=errors, warnings=warnings, categories=["文风"]
+            )
         elif pacing == "slow" and avg_length < 10:
             warnings.append(f"当前环境参数要求 'Slow' (慢节奏)，但平均句长只有 {avg_length:.1f} 字，建议增加细节与感官描写以渲染氛围。")
-            
+
         return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
 
 class DraftValidatorPipeline:
@@ -233,14 +351,24 @@ class DraftValidatorPipeline:
         """
         all_errors = []
         all_warnings = []
-        
+        all_categories = []  # CP1.1：合并各校验器的 categories
+
         # 并发执行所有验证器
         tasks = [validator.validate(text, context) for validator in self.validators]
         results = await asyncio.gather(*tasks)
-        
+
         for result in results:
             all_errors.extend(result.errors)
             all_warnings.extend(result.warnings)
-            
+            if result.categories:
+                all_categories.extend(result.categories)
+
         is_valid = len(all_errors) == 0
-        return ValidationResult(is_valid=is_valid, errors=all_errors, warnings=all_warnings)
+        # 去重 categories，保留顺序
+        unique_categories = list(dict.fromkeys(all_categories))
+        return ValidationResult(
+            is_valid=is_valid,
+            errors=all_errors,
+            warnings=all_warnings,
+            categories=unique_categories,
+        )

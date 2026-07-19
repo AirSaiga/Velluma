@@ -33,6 +33,9 @@ class BookBase(BaseModel):
     worldview_settings: Optional[dict] = Field(default_factory=dict)
     golden_snippets: Optional[list] = Field(default_factory=list)
     style_blacklist: Optional[list] = Field(default_factory=list)
+    # CP2.3a：书级大纲 + 滚动摘要
+    outline: Optional[str] = None
+    rolling_summary: Optional[str] = None
 
 
 class BookCreate(BookBase):
@@ -47,6 +50,8 @@ class BookUpdate(BaseModel):
     worldview_settings: Optional[dict] = None
     golden_snippets: Optional[list] = None
     style_blacklist: Optional[list] = None
+    outline: Optional[str] = None
+    rolling_summary: Optional[str] = None
 
 
 class BookResponse(BookBase):

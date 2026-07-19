@@ -43,6 +43,16 @@ class OptimizeSelectionRequest(BaseModel):
     context_before: str = Field(default="")
     context_after: str = Field(default="")
     user_instruction: str = Field(default="")
+    # CP4.1 选区级改写（蓝图 §4.9）：结构化模式 + 可选语气
+    # mode 可选，默认 rewrite（向后兼容旧调用）
+    mode: Literal["rewrite", "describe", "expand", "compress", "tone_shift"] = Field(
+        default="rewrite",
+        description="改写模式：rewrite 改写 / describe 描写 / expand 扩写 / compress 缩写 / tone_shift 换语气",
+    )
+    tone: Optional[str] = Field(
+        default=None,
+        description="换语气时的目标语气（如 冷峻 / 诙谐 / 抒情），仅 mode=tone_shift 时生效",
+    )
 
 
 class ChapterEntityLink(BaseModel):

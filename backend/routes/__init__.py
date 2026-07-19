@@ -63,6 +63,7 @@ from backend.routes.inspiration import router as inspiration_router
 from backend.routes.critique import router as critique_router
 from backend.routes.system import router as system_router
 from backend.routes.maps import router as maps_router
+from backend.routes.style import router as style_router  # CP2.2b 新增
 
 __all__ = [
     "assets_router",
@@ -80,4 +81,5 @@ __all__ = [
     "critique_router",
     "system_router",
     "maps_router",
+    "style_router",  # CP2.2b
 ]

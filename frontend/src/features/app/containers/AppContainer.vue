@@ -9,6 +9,7 @@ import CritiquePanel from '../../../components/CritiquePanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import MapSettings from '../../../components/MapSettings.vue'
 import GoldenSnippetsManager from '../../../components/GoldenSnippetsManager.vue'
+import StyleCardManager from '../../../components/StyleCardManager.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import DebugPromptWindow from '../../../components/DebugPromptWindow.vue'
 import ApiTestPanel from '../../../components/ApiTestPanel.vue'
@@ -584,9 +585,10 @@ onMounted(async () => {
               @close="closeRightPanel"
             />
             
-            <GoldenSnippetsManager
+            <StyleCardManager
               v-else-if="activeFloatingTab === 'style'"
               :book-id="currentBookId"
+              :genre="currentBook?.genre"
               @close="closeRightPanel"
             />
             

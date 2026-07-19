@@ -114,6 +114,7 @@ async def generate_beats(
     open_hooks: list[Any],
     previous_chapter_summary: Optional[str] = None,
     previous_world_state: Optional[WorldTerminalState] = None,
+    chapter_card: Optional[Any] = None,  # CP2.3c：章节卡注入（合并闸门依赖）
 ) -> tuple[list[dict], list[StoryBeat]]:
     """生成章节故事节拍 (Story Beats)。
 
@@ -142,6 +143,7 @@ async def generate_beats(
         word_count=word_count,
         open_hooks=open_hooks,
         previous_chapter_summary=previous_chapter_summary,
+        chapter_card=chapter_card,
     )
     
     planner_result_raw = await call_llm(

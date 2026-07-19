@@ -17,165 +17,157 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-起草模块辅助工具函数。
+起草阶段公共工具函数。
 
-职责：提供起草阶段常用的辅助函数，与核心逻辑解耦。
+职责：
+- 提供起草阶段被活路径 _execute_unified_path 复用的工具函数
+- CP1.0 死代码清理时，从 drafting_prose.py（已删除）抽取的唯一活函数 quick_qc 迁入此处
+- 提供 _extract_tail / _clamp_tokens 的便捷别名（底层来自 beat_utils）
 
-主要功能：
-- 文本截取和尾部提取
-- Token 数量限制
-- 关系状态管理
-- Prompt 构建辅助
+业务场景：
+- drafting._execute_unified_path 在每拍生成后调用 quick_qc 做长度/结构异常修复
+- 滚动前缀计算（extract_tail）与字数 token 上限（clamp_tokens）的统一入口
 
-使用场景：
-- workflows/drafting.py: 主起草逻辑调用
+依赖项：
+- backend.services.llm: LLM 调用（quick_qc 内部 review + refine 两步）
+- backend.services.prompts: chunk_review / chunk_refine prompt 模板
+- backend.services.workflows.beat_utils: extract_tail / clamp_tokens 底层实现
 """
 
+import json
+import logging
 from typing import Any, List
 
+from backend.services.utils.logging import get_runtime_logger
+from backend.services.llm import call_llm
+from backend.services.prompts import build_chunk_review_prompt, build_chunk_refine_prompt
+from backend.services.workflows.utils import clean_llm_output
+from backend.services.workflows.beat_utils import clamp_tokens, extract_tail
 
-def _extract_tail(text: str, max_chars: int = 300) -> str:
-    """
-    提取文本尾部。
+logger = get_runtime_logger(__name__)
 
-    用于生成 Rolling Prefix（滚动前缀），
-    将前一个 Beat 的末尾部分作为下一个 Beat 的上下文。
+
+# 向后兼容别名（drafting_prose.py 删除后，drafting.py 内部仍用这些短名）
+_extract_tail = extract_tail
+_clamp_tokens = clamp_tokens
+
+
+async def quick_qc(
+    prose_text: str,
+    beat: dict,
+    beat_index: int,
+    chapter: Any,
+    book: Any,
+    entities: List[Any],
+    relationships: List[Any],
+    target_words: int,
+) -> tuple[str, List[dict]]:
+    """生成后轻量质检：仅对长度/结构异常触发，做 review+refine 两步 LLM 修复。
+
+    职责：
+    - 检测过短（< 目标 50% 或 <120 字）或无段落分隔（>500 字单段）
+    - 异常时调用 LLM review（creative, temp=0.1）→ 若不通过则 refine（creative, temp=0.7）
+    - 正常时直接放行，零 LLM 调用
 
     Args:
-        text: 原始文本
-        max_chars: 最大字符数
-
-    Returns:
-        尾部文本（不超过 max_chars）
-    """
-    if not text:
-        return ""
-    if len(text) <= max_chars:
-        return text
-    return text[-max_chars:]
-
-
-def _clamp_tokens(target_words: int) -> int:
-    """
-    将目标字数转换为 Token 上限。
-
-    经验公式：1 Token ≈ 1.5-2 中文字符 ≈ 0.75 英文单词
-    对于 reasoning model（如 Gemini 2.5 Pro），thinking 过程会消耗大量 tokens，
-    因此需要使用 4.0 比率，并设置 4096 的最低保底，避免 visible output 被截断。
-
-    Args:
+        prose_text: 待检文本
+        beat: Beat 字典
+        beat_index: Beat 序号（1-based）
+        chapter: 章节对象
+        book: 书籍对象
+        entities: 章节关联角色列表
+        relationships: 角色关系列表
         target_words: 目标字数
 
     Returns:
-        Token 上限
+        tuple: (修复后文本, prompts 历史)
     """
-    return max(4096, int(target_words * 4.0))
+    prompts: List[dict] = []
 
+    compact_text = prose_text.replace("\n", "").replace(" ", "")
+    has_abnormal_length = len(compact_text) < max(120, int(target_words * 0.5))
+    has_abnormal_structure = ("\n\n" not in prose_text) and len(prose_text) > 500
 
-def _extract_fallback_summary(text: str, max_len: int = 40) -> str:
-    """
-    从文本中提取降级摘要。
+    if not has_abnormal_length and not has_abnormal_structure:
+        return prose_text, prompts
 
-    当 LLM 未能提供有效摘要时使用，
-    通过简单的首尾截取生成近似摘要。
+    logger.info(f"[QC] Beat {beat_index} 检测到异常，开始修复...")
 
-    Args:
-        text: 原始文本
-        max_len: 最大长度
-
-    Returns:
-        摘要文本
-    """
-    if not text:
-        return ""
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "..."
-
-
-def _build_initial_relational_state(
-    relationships: List[Any],
-    entities: List[Any]
-) -> str:
-    """
-    构建初始关系状态描述。
-
-    用于为第一个 Beat 提供角色关系上下文，
-    包含关系类型和亲密度信息。
-
-    Args:
-        relationships: 角色关系列表
-        entities: 角色实体列表
-
-    Returns:
-        关系状态描述文本
-    """
-    if not relationships:
-        return ""
-
-    entity_map = {e.id: e for e in entities} if entities else {}
-
-    lines = []
-    for rel in relationships:
-        if not rel.is_public:
-            continue
-
-        source = entity_map.get(rel.source_char_id, None)
-        target = entity_map.get(rel.target_char_id, None)
-        source_name = getattr(source, 'name', 'Unknown') if source else 'Unknown'
-        target_name = getattr(target, 'name', 'Unknown') if target else 'Unknown'
-
-        lines.append(
-            f"{source_name} 与 {target_name}: {rel.relation_type}"
-            + (f" (亲密度: {rel.affinity_score})" if rel.affinity_score else "")
+    try:
+        review_system, review_user = build_chunk_review_prompt(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            beat_summary=beat.get("summary", ""),
+            chunk_text=prose_text,
         )
 
-    return "\n".join(lines) if lines else ""
+        prompts.append({
+            "stage": "CHUNK_REVIEW",
+            "beat_index": beat_index,
+            "system_prompt": review_system,
+            "user_prompt": review_user,
+        })
+
+        review_response = await call_llm(
+            system_prompt=review_system,
+            user_prompt=review_user,
+            model_type="creative",
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            max_tokens=800,
+        )
+
+        try:
+            review_result = json.loads(clean_llm_output(review_response))
+        except json.JSONDecodeError:
+            return prose_text, prompts
+
+        if review_result.get("pass", True):
+            return prose_text, prompts
+
+        instruction = review_result.get("revision_instruction", "")
+        if not instruction:
+            issues = review_result.get("issues", [])
+            instruction = "; ".join(issues) if issues else "修正文本质量问题"
+
+        logger.info(f"[QC] Beat {beat_index} 修复指令: {instruction[:50]}...")
+
+        refine_system, refine_user = build_chunk_refine_prompt(
+            chapter=chapter,
+            book=book,
+            entities=entities,
+            relationships=relationships,
+            beat_summary=beat.get("summary", ""),
+            chunk_text=prose_text,
+            revision_instruction=instruction,
+        )
+
+        prompts.append({
+            "stage": "CHUNK_REFINE",
+            "beat_index": beat_index,
+            "system_prompt": refine_system,
+            "user_prompt": refine_user,
+        })
+
+        refine_response = await call_llm(
+            system_prompt=refine_system,
+            user_prompt=refine_user,
+            model_type="creative",
+            temperature=0.7,
+            max_tokens=_clamp_tokens(target_words),
+        )
+
+        refined_text = clean_llm_output(refine_response).strip()
+        logger.info(f"[QC] Beat {beat_index} 修复完成，新字数 {len(refined_text)}")
+
+        return refined_text, prompts
+
+    except Exception as e:
+        logger.error(f"[QC] Beat {beat_index}: {e}")
+        return prose_text, prompts
 
 
-def _merge_relational_delta(current_state: str, delta: str) -> str:
-    """
-    合并关系状态增量。
-
-    将新生成的关系变化合并到现有状态中，
-    用于跨 Beat 的关系演变追踪。
-
-    Args:
-        current_state: 当前状态文本
-        delta: 增量文本（新变化）
-
-    Returns:
-        合并后的状态文本
-    """
-    if not delta:
-        return current_state
-    if not current_state:
-        return delta
-    return f"{current_state}\n{delta}"
-
-
-def _extract_character_prompts_for_beat(
-    beat: dict,
-    entities: List[Any],
-) -> dict:
-    """
-    提取 Beat 对应的角色 Prompt 列表。
-
-    Args:
-        beat: 节拍数据
-        entities: 角色实体列表
-
-    Returns:
-        角色名到 Prompt 的映射
-    """
-    entity_prompts = {}
-    entity_map = {e.id: e for e in entities} if entities else {}
-
-    pov_id = beat.get("pov_character_id")
-    if pov_id and pov_id in entity_map:
-        entity = entity_map[pov_id]
-        prompt = getattr(entity, 'dynamic_state', '') or getattr(entity, 'description', '')
-        if prompt:
-            entity_prompts[pov_id] = prompt
-
-    return entity_prompts
+# 向后兼容别名（旧名 _quick_qc 仍被 drafting.py 引用）
+_quick_qc = quick_qc

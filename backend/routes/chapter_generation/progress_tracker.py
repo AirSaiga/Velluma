@@ -287,3 +287,61 @@ class StreamEventBuilder:
         if extra:
             data.update(extra)
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    # ============================================================
+    # CP3.4 双层审计事件（蓝图 §4.8 + 病灶 9 SSE 实时化）
+    # ============================================================
+
+    @staticmethod
+    def build_audit_start() -> str:
+        """构建 AUDIT_START 事件（LLM 审计开始时推送）"""
+        return f"data: {json.dumps({'event': 'AUDIT_START', 'message': '正在执行双层审计（代码级 + LLM 级）...'}, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def build_audit_done(
+        verdict: str,
+        findings_count: int,
+        degraded: Optional[bool] = None,
+    ) -> str:
+        """构建 AUDIT_DONE 事件（审计完成时推送）
+
+        Args:
+            verdict: pass / pass_with_fixes / fail / unaudited
+            findings_count: findings 总数
+            degraded: 是否降级（None 时不包含该字段）
+        """
+        data: Dict[str, Any] = {
+            'event': 'AUDIT_DONE',
+            'message': f'审计完成，结论：{verdict}（{findings_count} 条发现）',
+            'verdict': verdict,
+            'findings_count': findings_count,
+        }
+        if degraded is not None:
+            data['degraded'] = degraded
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def build_degraded(
+        stage: str,
+        reason: str,
+        action: str,
+        detail: Optional[str] = None,
+    ) -> str:
+        """构建 DEGRADED 事件（任何降级时推送，蓝图 P5 失败不静默）
+
+        Args:
+            stage: 降级发生的阶段（如 stitching / reviewing / audit）
+            reason: 降级原因
+            action: 兜底动作
+            detail: 可选补充
+        """
+        data: Dict[str, Any] = {
+            'event': 'DEGRADED',
+            'message': f'阶段 {stage} 降级：{reason}（兜底：{action}）',
+            'stage': stage,
+            'reason': reason,
+            'action': action,
+        }
+        if detail:
+            data['detail'] = detail[:200]
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"

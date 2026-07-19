@@ -42,6 +42,8 @@ LLM 调用模块 - 统一导出入口。
 
 from .client import (
     call_llm,
+    call_llm_with_usage,
+    LLMResult,
     generate_stream_response,
     generate_summary,
     format_text_with_llm,
@@ -56,6 +58,8 @@ from .proxy import (
 
 __all__ = [
     "call_llm",
+    "call_llm_with_usage",
+    "LLMResult",
     "generate_stream_response",
     "generate_summary",
     "format_text_with_llm",

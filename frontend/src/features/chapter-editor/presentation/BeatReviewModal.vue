@@ -1,23 +1,38 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useFocusTrap } from '../../../composables/useFocusTrap'
-import type { BeatEditorItem } from '../../../types'
+import type { BeatEditorItem, ChapterCard } from '../../../types'
 
 const props = defineProps<{
   show: boolean
   previewBeats: BeatEditorItem[]
   beatPreviewError: string
+  // CP2.5b：合并闸门——章节卡
+  chapterCard?: ChapterCard | null
+  planDegraded?: { reason: string; action: string; detail?: string } | null
+  beatPreviewLoading?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:previewBeats', beats: BeatEditorItem[]): void
+  (e: 'update:chapterCard', card: ChapterCard): void
   (e: 'close'): void
   (e: 'confirm'): void
+  (e: 'regenerate', editedCardFields: Record<string, any>): void
 }>()
 
 const modalRef = ref<HTMLElement | null>(null)
 const showRef = computed(() => props.show)
 useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
+
+// CP2.5b：本地章节卡编辑副本（深拷贝，避免直接改 prop）
+const localCard = ref<ChapterCard | null>(null)
+watch(() => props.chapterCard, (newCard) => {
+  localCard.value = newCard ? JSON.parse(JSON.stringify(newCard)) : null
+}, { immediate: true })
+
+const cardCollapsed = ref(false)
+const hasCard = computed(() => !!localCard.value)
 
 const expandedBeats = ref<Set<string>>(new Set())
 const editingBeats = ref<Record<string, Partial<BeatEditorItem>>>({})
@@ -115,6 +130,110 @@ function setEditValue(beat: BeatEditorItem, key: keyof BeatEditorItem, value: an
           </button>
         </div>
         <div class="p-4 overflow-y-auto max-h-[calc(85vh-56px)] space-y-3">
+          <!-- CP2.5b：合并闸门——章节卡编辑区（在节拍列表上方）-->
+          <div v-if="hasCard && localCard" class="p-4 bg-amber-50 rounded-xl border border-amber-200 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <span class="text-xs font-semibold text-amber-800">章节卡（Chapter Card）</span>
+                <span v-if="planDegraded" class="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700" :title="planDegraded.detail">
+                  降级：{{ planDegraded.reason }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="emit('regenerate', localCard as any)"
+                  :disabled="beatPreviewLoading"
+                  class="px-2 py-1 text-[11px] rounded bg-amber-200 text-amber-900 hover:bg-amber-300 disabled:opacity-50"
+                  title="编辑后重新生成节拍（重规划）"
+                >
+                  {{ beatPreviewLoading ? '生成中...' : '重新生成节拍' }}
+                </button>
+                <button @click="cardCollapsed = !cardCollapsed" class="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                  <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': cardCollapsed }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div v-show="!cardCollapsed" class="space-y-2">
+              <!-- 主旨 -->
+              <div>
+                <label class="text-[11px] text-[var(--text-muted)]">本章主旨（场景化语言）</label>
+                <textarea
+                  v-model="localCard.purpose"
+                  rows="2"
+                  class="w-full mt-0.5 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                  placeholder="例：她第一次对他说谎，手在抖但语气平稳"
+                ></textarea>
+              </div>
+              <!-- 必达事件 -->
+              <div>
+                <label class="text-[11px] text-[var(--text-muted)]">必达事件（每项含情绪目标）</label>
+                <div class="space-y-1 mt-0.5">
+                  <div
+                    v-for="(ev, idx) in localCard.must_hit_events"
+                    :key="idx"
+                    class="flex items-center gap-1"
+                  >
+                    <input
+                      v-model="ev.event"
+                      class="flex-1 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                      placeholder="事件描述"
+                    />
+                    <input
+                      v-model="ev.emotion"
+                      class="w-24 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                      placeholder="情绪目标"
+                    />
+                    <button @click="localCard.must_hit_events.splice(idx, 1)" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+                  </div>
+                  <button
+                    @click="localCard.must_hit_events.push({ event: '', emotion: '', must: true })"
+                    class="text-[11px] text-amber-700 hover:text-amber-900"
+                  >+ 添加事件</button>
+                </div>
+              </div>
+              <!-- 量化字段 -->
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="text-[11px] text-[var(--text-muted)]">目标字数</label>
+                  <input
+                    v-model.number="localCard.word_target"
+                    type="number"
+                    min="500"
+                    step="500"
+                    class="w-full mt-0.5 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label class="text-[11px] text-[var(--text-muted)]">节奏</label>
+                  <select
+                    v-model="localCard.pacing"
+                    class="w-full mt-0.5 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                  >
+                    <option value="fast">快</option>
+                    <option value="medium">中</option>
+                    <option value="slow">慢</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-[11px] text-[var(--text-muted)]">张力 (1-10)</label>
+                  <input
+                    v-model.number="localCard.tension"
+                    type="number"
+                    min="1"
+                    max="10"
+                    class="w-full mt-0.5 px-2 py-1 text-xs bg-white rounded border border-amber-200 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 节拍列表 -->
           <div v-if="previewBeats.length === 0" class="text-center text-[var(--text-muted)] text-sm py-8">
             暂无预览数据
           </div>

@@ -598,12 +598,22 @@ class AdversarialAligner:
         return base_instruction
     
     def _calculate_alignment_score(self, gaps: List[AlignmentGap]) -> float:
-        """计算整体对齐度得分"""
+        """计算整体对齐度得分。
+
+        Phase 0 T5 修复：调研报告病灶 8（对抗校对失败=高分通过）。
+        当 gaps 为空时，可能是真正无 gap，也可能是 LLM 分析失败/采样覆盖率不足
+        导致 gap 未被检测。改为返回中性分 50（既不静默放行也不强制精修），
+        配合 upstream 的 degraded 标记，让用户可见"未审计"状态。
+        """
         if not gaps:
-            return 100.0
-        
+            # 中性分：50 分，处于"既不通过也不触发强制精修"的临界位置
+            # 上层（dual_track._run_alignment_and_refinement）通过 needs_adjustment
+            # 判断是否进入精修；这里返回 50 不改变 needs_adjustment 状态，
+            # 但调用方应在 gaps 来源可疑（如 LLM 失败）时显式标 degraded。
+            return 50.0
+
         base_score = 100.0
-        
+
         for gap in gaps:
             if gap.severity == GapSeverity.HIGH:
                 base_score -= 15
@@ -611,7 +621,7 @@ class AdversarialAligner:
                 base_score -= 8
             elif gap.severity == GapSeverity.LOW:
                 base_score -= 3
-        
+
         return max(0.0, base_score)
     
     def _is_key_beat(self, beat: dict) -> bool:

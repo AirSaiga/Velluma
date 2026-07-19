@@ -80,6 +80,12 @@ async def save_story_beats(
             summary=beat.get("summary", ""),
             meta={"target_words": beat.get("target_words", 0)},
             status="planned",
+            # CP2.3d 补齐字段（与 planning.generate_beats 输出对齐，confirm 端点复用）
+            pov_aperture=beat.get("pov_aperture", "subjective_observation"),
+            persistent_state_anchors=beat.get("persistent_state_anchors", []),
+            pacing_type=beat.get("pacing_type"),
+            weight=beat.get("weight", 1),
+            participants=beat.get("participants", []),
         )
         db.add(story_beat)
         story_beats.append(story_beat)

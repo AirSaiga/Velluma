@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from backend.models import Chapter, Book
 from backend.world_state_schemas import WorldTerminalState
@@ -55,6 +55,7 @@ def build_planner_agent_prompt(
     author_intent: Optional[str] = None,
     previous_chapter_snapshot: Optional[dict] = None,
     previous_world_terminal_state: Optional[WorldTerminalState] = None,  # V4.0: 新增参数
+    chapter_card: Optional[Any] = None,  # CP2.3c：章节卡（合并闸门依赖）
 ) -> tuple[str, str]:
     """构建规划阶段的提示词。
 
@@ -294,7 +295,10 @@ def build_planner_agent_prompt(
 8. pacing_type 必须是 Fast, Medium, Slow 之一
 9. weight 必须是 1-5 之间的整数
 {low_tension_rule if low_tension_rule else ''}
-10. exit_state 是本 beat 的硬停点，不能把后续 beat 事件提前写进当前 beat
+10. exit_state 是本 beat 的**目标收束状态**（软着陆区），正文应尽量朝这个状态靠拢，但允许 ±15% 的叙事弹性：
+    - 如果情绪或动作的自然流动稍微越过了 exit_state（如角色在崩溃边缘多走了一步），这是可以接受的
+    - red_lines 仍然是绝对硬约束，不可触碰
+    - 不能把下一个 beat 的核心事件提前写进当前 beat（这是唯一不可弹性的边界）
 11. workflow_tier 必须基于 tension_level 自动计算：
     - tension_level 为 1 或 2 时 → "TIER_1_FAST" (疾速流)
     - tension_level 为 3 时 → "TIER_2_STANDARD" (均衡流)
@@ -361,7 +365,7 @@ def build_planner_agent_prompt(
     - 角色离场检查：physical_condition 为 inactive/dead 的角色严禁分配 Beat"""
     
     user_prompt_parts = []
-    
+
     # 0. 绝对最高优先级指令 (Absolute Highest Priority)
     if global_taboos or author_intent:
         user_prompt_parts.append("## 0. 绝对最高优先级指令 (Absolute Highest Priority)")
@@ -371,6 +375,43 @@ def build_planner_agent_prompt(
             user_prompt_parts.append(f"【作者创作意图】\n{author_intent}")
             user_prompt_parts.append("重要提示：若【作者创作意图】与【章节大纲】的内容顺序或逻辑存在冲突，请优先满足【作者创作意图】。你可以调整大纲事件的顺序、改写开头或重新设计情节结构（例如采用倒叙、直接切入冲突等），以确保创作意图得到完美执行。")
         user_prompt_parts.append("")
+
+    # CP2.3c：章节卡注入（合并闸门的核心约束，最高优先级）
+    # 蓝图 §4.4.2 要求：节拍规划消费章节卡 purpose/must_hit_events/foreshadow_ops
+    if chapter_card is not None:
+        card_parts = ["## 0.5 章节卡约束（Chapter Card，最高优先级，节拍必须覆盖）"]
+        purpose = getattr(chapter_card, "purpose", None) or ""
+        if purpose:
+            card_parts.append(f"【本章主旨】\n{purpose}")
+        must_hit_events = getattr(chapter_card, "must_hit_events", None) or []
+        if must_hit_events:
+            card_parts.append("【必达事件】（节拍必须覆盖以下事件，含情绪目标）")
+            for ev in must_hit_events:
+                if isinstance(ev, dict):
+                    event_text = ev.get("event", "")
+                    emotion = ev.get("emotion", "")
+                    must_flag = "✓" if ev.get("must", True) else "○"
+                    line = f"- {must_flag} {event_text}"
+                    if emotion:
+                        line += f"（情绪：{emotion}）"
+                    card_parts.append(line)
+        foreshadow_ops = getattr(chapter_card, "foreshadow_ops", None) or []
+        if foreshadow_ops:
+            card_parts.append("【伏笔操作】")
+            for op in foreshadow_ops:
+                if isinstance(op, dict):
+                    action = op.get("action", "advance")
+                    note = op.get("note", "")
+                    card_parts.append(f"- [{action}] {note}")
+        continuity = getattr(chapter_card, "continuity", None) or {}
+        if isinstance(continuity, dict) and continuity:
+            card_parts.append(f"【衔接要求】来自第 {continuity.get('from_chapter', '?')} 章，"
+                              f"时间间隔：{continuity.get('time_gap', '未指定')}，"
+                              f"主场景：{continuity.get('location', '未指定')}")
+        card_parts.append("重要提示：节拍必须100%覆盖【必达事件】，且情绪曲线符合各事件的【情绪】目标。"
+                          "若【章节卡】与【章节大纲】冲突，以章节卡为准。")
+        card_parts.append("")
+        user_prompt_parts.extend(card_parts)
 
     # 添加世界状态快照约束（如果存在）
     world_snapshot_section = ""

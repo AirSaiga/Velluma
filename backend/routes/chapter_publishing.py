@@ -63,9 +63,11 @@ from backend.core.dependencies import (
     get_character_repository,
     get_memory_repository,
     get_relationship_repository,
+    get_book_repository,
+    get_plot_ledger_repository,
 )
 from backend.core.exceptions import not_found, bad_request
-from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository, RelationshipRepository
+from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository, RelationshipRepository, BookRepository, PlotLedgerRepository, ChapterCardRepository
 from backend.repositories.asset_repository import ChapterAssetRepository
 from backend.schemas import (
     ChapterPublishRequest,
@@ -80,6 +82,12 @@ from backend.services.generation.publish import (
     generate_chapter_summary,
     generate_summary_embedding,
     update_character_states,
+)
+# CP3.3 状态回写强化（蓝图 §4.10 + decisions §3.5）
+from backend.services.generation.publish_v2 import (
+    update_character_states_incremental,
+    activate_plot_ledgers,
+    update_rolling_summary,
 )
 from backend.services.generation.character_extraction import (
     execute_character_extraction_workflow,
@@ -107,6 +115,8 @@ async def publish_chapter(
     character_repo: CharacterRepository = Depends(get_character_repository),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
     relationship_repo: RelationshipRepository = Depends(get_relationship_repository),
+    book_repo: BookRepository = Depends(get_book_repository),
+    plot_ledger_repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
 ):
     """业务目的：将章节从草稿状态发布为正式内容，并触发角色动态状态更新和自动摘要生成。
 
@@ -230,14 +240,19 @@ async def publish_chapter(
                     seen_char_ids.add(char.id)
 
     # 使用服务批量更新角色状态
-    update_results = await update_character_states(
+    # CP3.3 改造（蓝图 §4.10 第 3 步，修 P0-5）：
+    # 改用增量版 update_character_states_incremental：
+    # - 不再逐角色重发全文（只发涉及该角色的片段）
+    # - 输出含 evidence_quote（SCORE 原则），无证据的状态变更不入库
+    cp33_update_results = await update_character_states_incremental(
         character_list=character_list,
         chapter=chapter,
         character_repository=character_repo,
+        chapter_text=text_to_summarize,
     )
 
-    # 转换结果为 schema 格式
-    for result in update_results:
+    # 转换结果为 schema 格式（保持 ChapterStateChange 契约不变）
+    for result in cp33_update_results:
         character_updates.append(
             CharacterStateChange(
                 character_id=result.character_id,
@@ -326,6 +341,58 @@ async def publish_chapter(
                 svc_logger.warning("WorldTerminalState extraction timed out")
             except Exception as e:
                 svc_logger.error("WorldTerminalState extraction error", error=str(e))
+
+    # ========================================================================
+    # CP3.3 PlotLedger 激活（decisions §3.5）
+    # ========================================================================
+    # 1 次 light LLM：输入 chapter_card.foreshadow_ops + 章节文本裁剪版
+    # 输出每个 op 的 status（executed/skipped/modified）+ evidence_quote
+    # 无 evidence 的 op 不更新 PlotLedger（SCORE 原则）
+    try:
+        from backend.models import ChapterCard
+        session = chapter_repo.get_session()
+        # 查本章的 chapter_card
+        from sqlalchemy import select
+        card_result = await session.execute(
+            select(ChapterCard).where(ChapterCard.chapter_id == chapter.id).limit(1)
+        )
+        chapter_card = card_result.scalars().first()
+        foreshadow_ops = []
+        if chapter_card and chapter_card.foreshadow_ops:
+            foreshadow_ops = chapter_card.foreshadow_ops
+
+        if foreshadow_ops and text_to_summarize:
+            plotledger_statuses = await activate_plot_ledgers(
+                foreshadow_ops=foreshadow_ops,
+                chapter_text=text_to_summarize,
+                plot_ledger_repository=plot_ledger_repo,
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+            )
+            svc_logger.info(
+                f"PlotLedger activated for chapter {chapter_id}: "
+                f"{sum(1 for s in plotledger_statuses if s.status == 'executed')} executed, "
+                f"{sum(1 for s in plotledger_statuses if s.status == 'modified')} modified, "
+                f"{sum(1 for s in plotledger_statuses if s.status == 'skipped')} skipped"
+            )
+    except Exception as e:
+        svc_logger.warning(f"CP3.3 PlotLedger activation failed (non-blocking): {e}")
+
+    # ========================================================================
+    # CP3.3 滚动摘要更新（蓝图 §4.10 第 2 步）
+    # ========================================================================
+    # 1 次 light LLM：合并 Book.rolling_summary（旧）+ 本章 summary → 新滚动摘要
+    # 滚动摘要供下一章 ContextEngine P1 使用（CP2.3a 已加字段）
+    try:
+        if chapter.summary:
+            await update_rolling_summary(
+                book_repository=book_repo,
+                book_id=chapter.book_id,
+                chapter_summary=chapter.summary,
+                chapter_number=chapter.chapter_number,
+            )
+    except Exception as e:
+        svc_logger.warning(f"CP3.3 rolling summary update failed (non-blocking): {e}")
 
     await chapter_repo.commit()
     await chapter_repo.refresh(chapter)

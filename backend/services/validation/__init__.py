@@ -43,6 +43,27 @@ from backend.services.validation.review_repair import (
     RepairStrategy,
 )
 
+# CP3.1b 新增：代码级审计层
+from backend.services.validation.code_auditors import (
+    CodeAuditResult,
+    CodeAuditPipeline,
+    BaseAuditor,
+    ClichéAuditor,
+    RhythmAuditor,
+    DialogueAuditor,
+    EntityAuditor,
+    RedLineAuditor,
+    ContinuityAuditor,
+    WordCountAuditor,
+)
+
+# CP3.1c 新增：LLM 级审计层
+from backend.services.validation.llm_auditor import (
+    LLMAuditResult,
+    LLMAuditor,
+    merge_audit_results,
+)
+
 __all__ = [
     # 生成前检查
     "PreGenerationChecklist",
@@ -51,7 +72,7 @@ __all__ = [
     "CheckSeverity",
     "CheckCategory",
     "run_pre_generation_checks",
-    
+
     # 审阅修复
     "ChapterReviewer",
     "ChapterRepairer",
@@ -61,4 +82,21 @@ __all__ = [
     "IssueSeverity",
     "IssueCategory",
     "RepairStrategy",
+
+    # CP3.1b 代码级审计层
+    "CodeAuditResult",
+    "CodeAuditPipeline",
+    "BaseAuditor",
+    "ClichéAuditor",
+    "RhythmAuditor",
+    "DialogueAuditor",
+    "EntityAuditor",
+    "RedLineAuditor",
+    "ContinuityAuditor",
+    "WordCountAuditor",
+
+    # CP3.1c LLM 级审计层
+    "LLMAuditResult",
+    "LLMAuditor",
+    "merge_audit_results",
 ]

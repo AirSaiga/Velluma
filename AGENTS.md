@@ -3,13 +3,13 @@
 
 ## 项目概述
 
-Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手桌面应用。它采用 Agentic Workflow（智能体工作流）架构，通过多轮迭代生成高质量小说章节内容。
+Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手桌面应用。它采用 Agentic Workflow（智能体工作流）架构生成小说章节内容，当前实际生效的生成主流程为 V4.0 双轨架构（见下文"核心架构"）。
 
 **核心价值主张：**
 - 专为长篇小说创作设计的 AI 辅助工具
 - 支持角色状态追踪、关系图谱、伏笔管理
 - 基于 RAG（检索增强生成）的记忆系统
-- 多 Agent 协作：规划 → 起草 → 审阅 → 精修
+- 多 Agent 协作：规划 → 起草 → 统稿 → 对抗校对 → 精修
 
 **许可证：** AGPL-3.0
 
@@ -22,11 +22,13 @@ Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手�
 |------|------|------|
 | 框架 | FastAPI | 0.109.0 |
 | ORM | SQLAlchemy | 2.0.25 (异步) |
-| 数据库 | PostgreSQL + pgvector | 14+ |
+| 数据库 | PostgreSQL + pgvector | 14+（Python 侧 pgvector 0.2.4） |
 | 驱动 | asyncpg | 0.29.0 |
-| LLM | OpenAI SDK / DashScope | - |
+| LLM | OpenAI SDK 1.10.0 / DashScope 1.14.1 | Embedding 仅使用 DashScope |
 | 服务器 | Uvicorn | 0.27.0 |
-| 其他 | pydantic, tenacity, python-dotenv, python-multipart | - |
+| 其他 | pydantic 2.5.3, pydantic-settings 2.1.0, tenacity 8.2.3, python-dotenv, python-multipart | - |
+
+> 注意：根目录 `requirements.txt` 仍残留 `pywebview==4.4.1`（桌面入口已删除，依赖未清理）；`backend/requirements.txt` 是第二份与根目录不一致的依赖清单（缺 python-multipart 等），以根目录为准。
 
 ### 前端 (`frontend/`)
 | 组件 | 技术 | 版本 |
@@ -46,17 +48,21 @@ Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手�
 Velluma/
 ├── start.bat                 # Windows 启动入口（调用 start.ps1）
 ├── start.ps1                 # PowerShell 启动脚本：依次启动后端 → Vite → Electron
-├── requirements.txt          # Python 依赖
+├── requirements.txt          # Python 依赖（含残留的 pywebview）
+├── model_config.json         # LLM/Embedding/代理配置（含 API Key，已 gitignore，勿提交）
 │
 ├── backend/                  # FastAPI 后端
 │   ├── main.py              # 应用入口、路由注册、静态文件服务、CORS
-│   ├── models.py            # SQLAlchemy ORM 模型（Book/Chapter/Character/MemoryChunk 等）
+│   ├── models.py            # SQLAlchemy ORM 模型（全部 14 个模型，含 GenerationTask）
 │   ├── database.py          # 异步引擎、会话、启动时自动迁移（MIGRATIONS 列表）
 │   ├── world_state_schemas.py
-│   ├── models_generation_task.py
+│   ├── models_generation_task.py  # ⚠ 死文件：GenerationTask 已并入 models.py，本文件零引用
+│   ├── requirements.txt     # ⚠ 第二份依赖清单，与根目录不一致（以根目录为准）
+│   ├── _archive/            # 归档代码（celery_version/：已被 services/generation/background_manager.py 取代）
 │   │
 │   ├── core/                # 核心基础设施
-│   │   ├── config.py        # 端口持久化、推理模型支持列表
+│   │   ├── config.py        # 端口持久化与扫描（8002~8100）、推理模型支持列表
+│   │   ├── model_config.py  # 读取 model_config.json（LLM/Embedding/代理配置的实际来源）
 │   │   ├── dependencies.py  # 仓储层依赖注入
 │   │   └── exceptions.py
 │   │
@@ -66,13 +72,21 @@ Velluma/
 │   │   ├── engine.py
 │   │   ├── mapper.py
 │   │   ├── rules.py
-│   │   └── PARAMETER_MAPPING.md  # 参数映射文档（必读）
+│   │   ├── adapter.py
+│   │   ├── intent_engine.py
+│   │   ├── schemas/         # generation_config.py 等配置模型
+│   │   └── PARAMETER_MAPPING.md  # 参数映射文档（注意：其中 AGENTIC_* 环境变量的描述已过时）
 │   │
-│   ├── routes/              # API 路由层（17 个模块）
+│   ├── routes/              # API 路由层（16 个模块，均在 main.py 注册）
 │   │   ├── books.py
 │   │   ├── chapters.py
 │   │   ├── chapter_entities.py
-│   │   ├── chapter_generation.py      # 章节生成 API（含 SSE 流式）
+│   │   ├── chapter_generation/        # ⚠ 包（非单文件）：章节生成 API（含 SSE 流式）
+│   │   │   ├── __init__.py            #   路由合并入口；chapter_generation.py 旧单文件被本包遮蔽，已成死代码
+│   │   │   ├── dual_track.py          #   双轨生成端点
+│   │   │   ├── stream_handler.py      #   ★ 当前生成主流程的 SSE 编排器
+│   │   │   ├── progress_tracker.py
+│   │   │   └── checkpoint_manager.py
 │   │   ├── chapter_optimization.py
 │   │   ├── chapter_publishing.py
 │   │   ├── characters.py
@@ -105,9 +119,11 @@ Velluma/
 │   └── services/            # 业务逻辑层
 │       ├── llm/             # LLM 调用封装、Embedding、代理
 │       │   ├── client.py
-│       │   ├── embedding.py
+│       │   ├── embedding.py    # 仅 DashScope SDK，Key 来自 model_config.json
 │       │   ├── proxy.py
 │       │   └── formatting.py
+│       │
+│       ├── context/         # 上下文加载服务（loader.py）
 │       │
 │       ├── generation/      # 生成服务入口
 │       │   ├── chapter.py
@@ -116,12 +132,12 @@ Velluma/
 │       │   ├── memory_scorer.py
 │       │   └── publish.py
 │       │
-│       ├── orchestration/   # 工作流编排
-│       │   ├── agentic.py   # 核心 Agentic 工作流编排器
+│       ├── orchestration/   # 工作流编排辅助
+│       │   ├── agentic.py   # ⚠ 已非编排器：现仅存参数解析与节拍预览辅助函数
 │       │   ├── beat_manager.py
 │       │   └── tier_mapper.py
 │       │
-│       ├── prompts/         # Prompt 模板库（20+ 文件）
+│       ├── prompts/         # Prompt 模板库（21 个文件，含 1 个测试）
 │       │   ├── planner_prompts.py
 │       │   ├── draft_prompts.py
 │       │   ├── review_prompts.py
@@ -130,91 +146,103 @@ Velluma/
 │       │   ├── world_state_prompts.py
 │       │   └── ...
 │       │
-│       ├── rag/             # RAG 检索系统
+│       ├── rag/             # RAG 检索系统（顶层约 17 个模块，下为主要的）
 │       │   ├── retriever.py
 │       │   ├── scoring.py
 │       │   ├── context_assembly.py
 │       │   ├── retrieval_orchestrator.py
 │       │   ├── workflow_integration.py
+│       │   ├── foreshadowing_*.py     # 伏笔检测/追踪
+│       │   ├── retrieval_*.py         # 检索构建/分阶段/类型
 │       │   ├── enhanced/
-│       │   └── tests/
+│       │   └── tests/        # ⚠ 仅剩 __pycache__，无 .py 源码
 │       │
 │       ├── state_machine/   # 角色状态机
 │       │   ├── character_state.py
 │       │   ├── character_state_machine.py
+│       │   ├── character_state_factory.py
+│       │   ├── character_state_types.py
 │       │   └── relationship_state.py
 │       │
-│       ├── validation/      # 质检与修复
+│       ├── validation/      # 质检与修复（⚠ 当前无路由调用方，疑似遗留）
 │       │   ├── chapter_reviewer.py
 │       │   ├── chapter_repairer.py
 │       │   ├── review_repair.py
+│       │   ├── review_repair_types.py
 │       │   └── pre_generation_checklist.py
 │       │
-│       ├── workflows/       # 工作流子阶段实现
+│       ├── workflows/       # 工作流子阶段实现（顶层约 25 个文件，下为主要的）
 │       │   ├── planning.py
-│       │   ├── drafting.py
+│       │   ├── drafting.py            # Beat 起草（并发为硬编码 Semaphore(5)）
 │       │   ├── drafting_prose.py
+│       │   ├── drafting_prose_modules/
 │       │   ├── stitching.py
-│       │   ├── reviewing.py
+│       │   ├── reviewing.py           # ⚠ 经典 review_draft/revision_plan，当前无路由调用方
 │       │   ├── refining.py
-│       │   ├── dual_track.py          # 双轨生成入口
-│       │   ├── sketch_generator.py
-│       │   ├── adversarial_aligner.py
+│       │   ├── dual_track.py          # ★ 双轨主类 DualTrackWorkflow（顶层文件）
+│       │   ├── sketch_generator.py    # SketchGenerator
+│       │   ├── adversarial_aligner.py # AdversarialAligner（活跃流程使用本文件）
+│       │   ├── clarification_agent.py
 │       │   ├── drafting_core/         # 起草核心子模块
 │       │   │   ├── prose_generation.py
+│       │   │   ├── context/           # context_manager.py, state_updater.py
 │       │   │   ├── quality/
 │       │   │   ├── retry/
 │       │   │   └── strategies/
-│       │   └── dual_track/            # 双轨子模块
-│       │       ├── tracks/
-│       │       ├── alignment/
-│       │       └── config/
+│       │   └── dual_track/            # 双轨子模块包（经 importlib 从顶层 dual_track.py 导入主类）
+│       │       ├── tracks/            # track_a.py, track_b.py
+│       │       ├── alignment/         # 含一份重复的 adversarial_aligner.py（非活跃路径）
+│       │       ├── config/
+│       │       ├── fusion_refinement.py
+│       │       └── stitching.py
 │       │
 │       ├── world/           # 世界状态服务
 │       │   └── state_service.py
 │       │
 │       └── utils/           # 工具函数
 │           ├── sse.py
-│           ├── prompt_logger.py
+│           ├── prompt_logger.py  # 生成 logs/prompt_log_*.json
 │           ├── sanitizer.py
 │           ├── timeout.py
 │           └── logging.py
 │
 ├── frontend/                 # Vue 3 前端
 │   ├── package.json
-│   ├── vite.config.js       # Vite 配置（含后端代理 /api）
+│   ├── vite.config.js       # Vite 配置（/api 代理目标动态解析：VELLUMA_BACKEND_PORT → data/port.txt → 8002）
 │   ├── tailwind.config.js
 │   ├── postcss.config.js
 │   ├── tsconfig.json
 │   ├── electron/
-│   │   ├── main.cjs         # Electron 主进程（启动后端、Vite、窗口管理）
+│   │   ├── main.cjs         # Electron 主进程（启动后端、等待 Vite 端口就绪、窗口管理；不启动 Vite）
 │   │   └── preload.cjs
 │   └── src/
 │       ├── main.ts
 │       ├── App.vue
 │       ├── style.css
-│       ├── components/      # 通用组件
+│       ├── vite-env.d.ts
+│       ├── components/      # 通用组件（⚠ 该层不受分层约束限制，部分组件直接 import services）
 │       ├── composables/     # Vue 组合式函数
 │       ├── extensions/      # TipTap 扩展
 │       ├── features/        # 功能模块（分层架构）
-│       │   ├── app/                   # 应用级容器（AppContainer.vue）
+│       │   ├── app/                   # 应用级容器（仅 containers/，无 presentation/）
 │       │   ├── chapter-editor/        # 章节编辑器
 │       │   ├── character-panel/       # 角色面板
-│       │   ├── asset-panel/           # 资产面板
+│       │   ├── asset-panel/           # 资产面板（⚠ 无 index.ts）
 │       │   ├── intent-driven/         # 意图驱动（V4.0）
-│       │   └── novel-wizard/          # 小说创建向导
+│       │   └── novel-wizard/          # 小说创建向导（另有 composables/、types/）
 │       ├── services/        # 服务层
-│       │   ├── api/domain/  # 业务语义 API 适配
+│       │   ├── api/domain/  # 业务语义 API 适配（单个约 470 行的 index.ts 聚合全部域 API + asset.api.ts）
 │       │   ├── api/stream/  # SSE 流处理
-│       │   └── api/transport/ # 底层 HTTP 请求
+│       │   ├── api/transport/ # 底层 HTTP 请求
+│       │   └── domain/, stream/, transport/  # ⚠ 空壳残留目录（仅 export {}，重构遗留）
 │       ├── shared/          # 共享资源
 │       │   ├── types/
 │       │   └── utils/
 │       └── types/
 │
 ├── data/                    # 运行时数据（端口持久化等，gitignore）
-├── logs/                    # Prompt 日志（gitignore）
-├── scripts/                 # 启动脚本副本
+├── logs/                    # Prompt 日志（gitignore；backend/logs/ 下另有调试日志）
+├── scripts/                 # 启动脚本副本（与根目录逐字节相同，但因 $PSScriptRoot 相对路径只能在根目录运行）
 └── .venv/                   # Python 虚拟环境
 ```
 
@@ -223,7 +251,7 @@ Velluma/
 ## 运行与构建
 
 ### 环境要求
-- Python 3.12+
+- Python 3.12+（开发机使用 3.13.5，见 `.python-version`）
 - Node.js 18+
 - PostgreSQL 14+（需启用 pgvector 扩展）
 
@@ -236,12 +264,13 @@ Velluma/
 # 2. 安装依赖
 pip install -r requirements.txt
 
-# 3. 配置环境变量（项目根目录创建 .env）
-# 见下文"环境变量"章节
+# 3. 配置
+# - LLM/Embedding/代理：编辑项目根目录 model_config.json（主要配置入口）
+# - 数据库连接等少数变量：项目根目录创建 .env（见下文"环境变量"章节）
 
 # 4. 启动开发服务器
 python backend/main.py
-# 默认端口: 8002，若被占用则自动扫描 8002~8100
+# 默认端口: 8002，若被占用则自动扫描 8002~8100，实际端口写入 data/port.txt
 ```
 
 ### 前端开发
@@ -261,11 +290,14 @@ npm run typecheck
 
 # 构建生产版本
 npm run build
+
+# 预览构建产物
+npm run preview
 ```
 
 ### 桌面应用运行（推荐开发方式）
 
-项目使用 **Electron** 作为桌面容器。主启动脚本 `start.ps1` 会依次启动后端、Vite 开发服务器、Electron，并在退出时自动清理所有进程。
+项目使用 **Electron** 作为桌面容器。主启动脚本 `start.ps1` 会依次启动后端、Vite 开发服务器、Electron，并在退出时自动清理所有进程。启动 Electron 前脚本会设置 `VELLUMA_BACKEND_PORT`、`VELLUMA_FRONTEND_PORT`、`VELLUMA_SERVICES_READY` 环境变量供 `electron/main.cjs` 消费。
 
 ```powershell
 # 完整启动（后端 + 前端 Vite + Electron）
@@ -281,50 +313,62 @@ npm run build
 
 # 跳过后端启动
 .\start.ps1 -SkipBackend
+
+# 跳过前端 Vite 启动
+.\start.ps1 -SkipFrontend
 ```
 
 **Electron 独立命令（在 frontend 目录下）：**
 ```bash
 cd frontend
-npm run electron:dev      # 开发模式
-npm run electron:preview  # 预览模式
+npm run electron:dev      # 构建前端后启动 Electron（⚠ 与 electron:preview 内容完全相同）
+npm run electron:preview  # 同上：均为 npm run build && electron .，不启动 Vite，需 5175 已有服务
 npm run electron:build    # 打包安装包（electron-builder）
 ```
 
-> 注意：`app.py`（pywebview 入口）在代码库中已不存在，README 中的相关描述已过时。当前请以 `start.ps1` + Electron 为默认运行方式。
+> 注意：`app.py`（pywebview 入口）在代码库中已不存在，README 中的相关描述已过时（README 仍有大量过时内容，如推荐 pywebview 启动、`AGENTIC_*` 环境变量等，请以本文档为准）。当前请以 `start.ps1` + Electron 为默认运行方式。
 
 ---
 
 ## 核心架构
 
-### Agentic Workflow 工作流
+### 章节生成主流程（现状）
 
-章节生成的核心流程，最多支持 5 轮迭代：
+**当前实际生效的生成主流程是双轨流**，编排代码位于：
+- `backend/routes/chapter_generation/stream_handler.py` — SSE 流式编排（DualTrackStreamHandler）
+- `backend/services/workflows/dual_track.py` — 双轨工作流主类（DualTrackWorkflow）
+
+SSE 阶段序列：**ASSEMBLING_CONTEXT → POV_ASSIGNMENT → DRAFTING → STITCHING → REVIEWING → REFINING**
+
+各阶段说明：
 
 1. **ASSEMBLING_CONTEXT** - 组装上下文
    - 加载角色卡、关系网
    - RAG 检索相关记忆
    - 提取前文摘要和开放伏笔
 
-2. **PLANNING** - 规划节拍
-   - Planner Agent 将大纲拆分为 StoryBeat
-   - 自动分配 POV 角色、字数分配
-
-3. **DRAFTING** - 并行起草
-   - 每个 Beat 独立生成（并发控制：`AGENTIC_BEAT_CONCURRENCY`）
-   - 包含 Scene Intent 构建和自动质检
+2. **PLANNING** - 规划节拍（⚠ 不在生成主流程内）
+   - 节拍规划已拆分为独立预览端点 `POST /api/chapters/{id}/generate_chapter_agentic_preview_beats`
+   - 主流程中只有 POV_ASSIGNMENT（分配 POV 角色、字数）
    - 支持 Fast/Medium/Slow 节奏类型
 
-4. **STITCHING** - 统稿
-   - 合并所有 Beat 内容为完整章节草稿
+3. **DRAFTING** - 并行起草
+   - 每个 Beat 独立生成，并发度为 `drafting.py` 中**硬编码的 `asyncio.Semaphore(5)`**
+   - ⚠ 文档与 README 中提到的 `AGENTIC_BEAT_CONCURRENCY` 环境变量**在代码中不存在**；`beat_concurrency` 配置字段（默认 6）定义于 `config/schemas/generation_config.py` 但无任何消费方
+   - 包含 Scene Intent 构建和自动质检
 
-5. **REVIEWING** - 审阅
-   - Review Agent 检查结构、角色一致性、伏笔闭合
-   - 输出结构化质检报告（`revision_plan`）
+4. **STITCHING** - 统稿
+   - 合并所有 Beat 内容为完整章节草稿（Draft_A）
+
+5. **REVIEWING** - 对抗校对
+   - 双轨流程中由 `AdversarialAligner` 对比 Draft_A 与 Sketch，输出 `adjustment_plan`
+   - ⚠ 经典实现 `workflows/reviewing.py`（`review_draft` + `revision_plan`）目前**无路由调用方**
 
 6. **REFINING** - 精修（可选）
-   - 基于 revision_plan 重写
-   - 支持跳过仅轻微问题的章节
+   - 基于对抗校对结果重写/融合
+   - 支持跳过（`not_needed_or_disabled` / `no_gaps`）
+
+> **关于多轮迭代**：schema 中 `max_iterations` 允许 1~5（默认 2），但当前双轨实现中迭代次数**硬编码为 1**，`max_iterations` 解析后仅写入元数据、无实际消费方。"最多 5 轮迭代"是设计上限而非现状。
 
 ### 双轨对抗架构 (V4.0)
 
@@ -335,7 +379,7 @@ npm run electron:build    # 打包安装包（electron-builder）
 ```
 Track A: 节拍扩写              Track B: 短文生成
 ├─ Beat[1] → Text[1]           ├─ 基于 Beats 生成连贯速写
-├─ Beat[2] → Text[2]           │   (40-50% 字数，连续叙述)
+├─ Beat[2] → Text[2]           │   (默认约 45% 字数，连续叙述)
 └─ Beat[N] → Text[N]           └─ 输出: Sketch + 转折点映射
          ↓                              ↓
          └──────────┬────────────────────┘
@@ -343,18 +387,18 @@ Track A: 节拍扩写              Track B: 短文生成
             统稿 → Draft_A
                     ↓
             对抗校对 (Adversarial Alignment)
-            Draft_A vs Sketch → 差异检测
+            Draft_A vs Sketch → 差异检测 (adjustment_plan)
                     ↓
             融合精修 (可选)
 ```
 
 **关键组件**：
-- `SketchGenerator`: 生成连贯速写，提供连贯性锚点
-- `AdversarialAligner`: 对比 Draft 和 Sketch，检测结构/情绪/信息差异
-- 实现代码主要位于 `backend/services/workflows/dual_track/`
+- `DualTrackWorkflow`：双轨主类，位于 `backend/services/workflows/dual_track.py`（顶层文件）；同名包 `workflows/dual_track/` 通过 importlib 从该文件延迟导入，子模块包括 `tracks/`（track_a/track_b）、`alignment/`、`config/`、`fusion_refinement.py`、`stitching.py`
+- `SketchGenerator`：`backend/services/workflows/sketch_generator.py`，生成连贯速写（`sketch_ratio` 默认 0.45），提供连贯性锚点
+- `AdversarialAligner`：`backend/services/workflows/adversarial_aligner.py`（活跃路径；包内 `dual_track/alignment/adversarial_aligner.py` 有一份重复副本，非活跃）
 
-**API 端点**：
-- `POST /api/chapters/{id}/generate-dual-track` - 流式双轨生成
+**API 端点**（位于 `backend/routes/chapter_generation/dual_track.py`）：
+- `POST /api/chapters/{id}/generate-dual-track` - 流式双轨生成（SSE）
 - `POST /api/chapters/{id}/generate-dual-track-simple` - 非流式
 
 ### 数据模型层级
@@ -365,7 +409,7 @@ Book (书籍)
 │   ├── StoryBeat (剧情节拍) - 最小剧情单元
 │   ├── SceneIntent (场景意图) - Beat 内的生成指令
 │   ├── ChapterEntity (章节-角色关联)
-│   └── ChapterMapLocation (章节-地点关联)
+│   ├── ChapterMapLocation (章节-地点关联)
 │   └── ChapterAsset (章节-资产关联)
 ├── Character (角色)
 │   ├── static_prompt - 永恒设定
@@ -376,24 +420,30 @@ Book (书籍)
 ├── Asset (全局资产/道具)
 ├── MemoryChunk (向量记忆)
 ├── PlotLedger (情节账本/伏笔)
-└── GenerationTask (异步生成任务)
+└── GenerationTask (异步生成任务，定义于 models.py)
 ```
+
+以上 14 个模型均定义于 `backend/models.py`。⚠ `backend/models_generation_task.py` 中有一份同名同表的 `GenerationTask` 重复定义，但该文件全代码库零引用，是死文件。
 
 ### RAG 记忆检索
 
-使用 Embedding API 生成 1536 维向量（OpenAI text-embedding-3-small 或 DashScope）：
+Embedding 当前**仅使用 DashScope SDK**（默认模型 `text-embedding-v2`；v3/v4 支持自定义维度），默认生成 **1536 维**向量（维度可在 `model_config.json` 的 `embedding.dimensions` 配置）。API Key 来自 `model_config.json` 的 `embedding.api_key`，**不读环境变量**。代码已不使用 OpenAI embedding（仅在历史注释中出现）。
+
+检索权重参数（`backend/services/rag/scoring.py`）：
 - **alpha**: 语义相似度权重 (默认 0.6)
 - **beta**: 时间衰减权重 (默认 0.2)
 - **gamma**: 剧情伏笔权重 (默认 0.2)
-- **lambda_decay**: 时间衰减系数
+- **lambda_decay**: 时间衰减系数 (默认 0.1)
 
-检索范围限制在当前章节之前，避免未来信息泄露。
+检索范围限制在当前章节之前（`exclude_chapter_id=当前章`、`max_chapter_number=当前-1`），避免未来信息泄露。
 
 ---
 
 ## 数据库与迁移
 
-项目使用**启动时自动迁移**（非 Alembic）。`backend/database.py` 中的 `MIGRATIONS` 列表定义了所有增量列变更，启动时会通过 `init_db()` 自动检查并添加缺失列。
+项目使用**启动时自动迁移**（非 Alembic）。`backend/database.py` 中的 `MIGRATIONS` 列表（约 50 条）定义了所有增量列变更，启动时会通过 `init_db()` 自动检查并添加缺失列。
+
+⚠ **向量维度迁移**：启动时还会执行 `migrate_vector_dimension`——若 `model_config.json` 中的 embedding 维度与数据库现有向量列维度不匹配，会**删列重建**（破坏性操作，清空全部向量数据）。切换 embedding 模型/维度前请注意。
 
 **手动执行 SQL 迁移：**
 ```sql
@@ -412,7 +462,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 ### Python 后端
 
-**文件头**：所有 `.py` 文件必须包含 AGPL-3.0 许可证头。
+**文件头**：所有 `.py` 文件应包含 AGPL-3.0 许可证头（新文件必须添加）。⚠ 现状：backend 下约 1/5 文件（44/207）缺失，主要集中在较新模块 `routes/chapter_generation/`、`workflows/drafting_core/`、`workflows/dual_track/` 及 assets 相关文件。
 
 **文档字符串规范**：
 ```python
@@ -453,56 +503,79 @@ Raises:
 ```
 features/*/containers   → 状态整合、事件编排
 features/*/presentation → 渲染、交互事件抛出
-services/domain         → 业务语义 API 适配
-services/stream         → SSE 流处理
-services/transport      → 底层 HTTP 请求
+services/api/domain     → 业务语义 API 适配
+services/api/stream     → SSE 流处理
+services/api/transport  → 底层 HTTP 请求
 shared/types            → 跨模块类型
 shared/utils            → 纯函数工具
 ```
 
 **依赖方向**：
 - ✅ `presentation -> 容器 props/emits`
-- ✅ `containers -> services/domain`
-- ❌ `presentation -> services/transport` (禁止)
+- ✅ `containers -> services/api/domain`
+- ❌ `presentation -> services/api/transport` (禁止)
+- ❌ `presentation -> services/api/stream` (禁止，见 `features/README.md`)
 
-**命名规范**：
+该约束在 features/ 内执行良好；⚠ 通用组件层 `components/` 不受此约束，现状有部分组件直接 import services。
+
+**命名规范**（现状存在少量偏差，新代码请遵守）：
 - Feature 目录: `kebab-case`
-- 容器组件: `*Container.vue`
-- 展示组件: `*View.vue` 或 `*Panel.vue`
+- 容器组件: `*Container.vue`（偏差示例：`intent-driven/containers/IntentDrivenPanel.vue`）
+- 展示组件: `*View.vue` 或 `*Panel.vue`（弹窗组件实际大量采用 `*Modal.vue`）
+
+**现状备注**：
+- `features/app/` 只有 containers/ 没有 presentation/；`novel-wizard/` 另有 composables/、types/ 子目录
+- `index.ts` 导出公共接口的约定执行不一致（如 `asset-panel/` 无 index.ts；`features/index.ts` 仅导出 app 与 chapter-editor）
+- `services/` 顶层残留 `domain/`、`stream/`、`transport/` 三个空壳目录（仅 `export {}`，重构遗留），实际代码均在 `services/api/` 下
 
 ---
 
-## 环境变量
+## 配置与环境变量
 
-在项目根目录创建 `.env` 文件：
+### model_config.json（主要配置入口）
+
+LLM、Embedding、代理的实际配置来源是项目根目录的 `model_config.json`（schema 见 `backend/core/model_config.py` 的 docstring）：
+
+- `llm.reasoning` / `llm.creative`：provider、api_key、base_url、model、enabled、effort 等
+- `embedding`：api_key、model、dimensions（默认 1536）
+- `proxy`：enabled、url
+
+⚠ 该文件已 gitignore，但**当前工作区副本含有真实 API Key**，请勿提交或外发工作区快照。
+
+### 环境变量（.env，可选）
+
+后端代码实际读取的环境变量仅有以下几个（项目无 `.env.example` 模板）：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DATABASE_URL` | PostgreSQL 连接字符串 | `postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver` |
-| `DASHSCOPE_API_KEY` | 阿里云 Embedding / LLM API Key | - |
-| `OPENAI_API_KEY` | OpenAI API Key | - |
-| `PROXY_URL` | HTTP 代理地址 | `http://127.0.0.1:4780` |
-| `AGENTIC_BEAT_CONCURRENCY` | Beat 并行度 | 6 |
-| `AGENTIC_FORCE_FAST_MODE` | 强制快速模式 | False |
-| `DB_POOL_PRE_PING` | 连接池预检（Windows 默认 false） | 平台相关 |
+| `DB_POOL_PRE_PING` | 连接池预检 | Windows=false / 其他平台=true |
+| `VELLUMA_PORT` | 指定后端端口（跳过自动扫描） | 无（默认 8002 起扫描） |
+| `PROXY_URL` / `DISABLE_PROXY` | ⚠ 半死代码：模块级常量定义后未被使用，实际代理由 `model_config.json` 的 `proxy` 节决定 | `http://127.0.0.1:4780` |
+
+⚠ **以下变量在代码中不存在，文档/README 中的相关描述均已过时**：
+- ~~`AGENTIC_BEAT_CONCURRENCY`~~（Beat 并行度实为 `drafting.py` 硬编码 `Semaphore(5)`）
+- ~~`AGENTIC_FORCE_FAST_MODE`~~（快速模式是请求级参数 `fast_mode`）
+- ~~`DASHSCOPE_API_KEY`~~ / ~~`OPENAI_API_KEY`~~（API Key 全部来自 `model_config.json`，不读环境变量）
+
+另：`start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。
 
 ---
 
 ## 测试策略
 
 ### 当前状态
-项目处于快速迭代期，**测试覆盖非常有限**。主要测试方式以手动验证和脚本测试为主。
+项目处于快速迭代期，**测试覆盖非常有限**。主要测试方式以手动验证为主。
 
-**已有测试**：
-- 前端组合式函数测试：`npm run test:agentic-config`
-  - 编译 TS 测试文件并调用 Node.js test runner
-- 后端 RAG 集成测试：`backend/services/rag/tests/`
-- Prompt 边界测试：`backend/services/prompts/test_boundary_pacing_prompts.py`
+**已有测试（现状）**：
+- ⚠ ~~前端组合式函数测试 `npm run test:agentic-config`~~ — **已失效**：其引用的源码与测试文件在重构（commit fbdd5e1）中被删除，`frontend/scripts/` 现为空目录，frontend 全仓无任何 `*.test.*` / `*.spec.*` 文件，该命令运行必然失败
+- ⚠ ~~后端 RAG 集成测试 `backend/services/rag/tests/`~~ — 目录仅剩 `__pycache__`，无 .py 源码
+- Prompt 边界测试：`backend/services/prompts/test_boundary_pacing_prompts.py`（现存唯一的测试源文件）
 
 **开发时验证**：
 - 后端：使用 `/api/health` 健康检查
 - 前端：浏览器开发者工具 + Vue DevTools
-- LLM: Debug Prompt 窗口显示所有发送的 Prompt（`logs/` 目录保留历史）
+- LLM: Debug Prompt 窗口显示所有发送的 Prompt（`logs/` 目录保留历史，由 `services/utils/prompt_logger.py` 生成）
 
 **添加新测试的建议位置**：
 - 后端：在对应模块的 `tests/` 子目录中创建
@@ -550,24 +623,23 @@ FastAPI 在 `backend/main.py` 中已配置 SPA fallback：
 ### 注意事项
 - 项目**无 Docker 配置**
 - 项目**无 CI/CD 流水线配置**
-- 端口协商机制（`data/port.txt`）仅适用于本地开发，生产环境应使用固定端口
+- 端口协商机制（`data/port.txt`）仅适用于本地开发，生产环境应使用固定端口（可用 `VELLUMA_PORT` 指定）
 
 ---
 
 ## 安全注意事项
 
 1. **API Key 处理**
-   - 前端传入的 API Key **不存储到数据库**
+   - LLM / Embedding 的 API Key 全部来自项目根目录 `model_config.json`（已 gitignore），**不读环境变量、不存数据库**
    - 日志中不应打印完整的 API Key
-   - Embedding API Key 只从环境变量 `DASHSCOPE_API_KEY` 读取
+   - ⚠ 当前工作区的 `model_config.json` 含有真实可用的 Key，请勿提交或外发
 
 2. **代理配置**
-   - 默认使用本地代理 (`http://127.0.0.1:4780`)
-   - 可通过环境变量 `PROXY_URL` 覆盖
+   - 默认本地代理 `http://127.0.0.1:4780`，实际由 `model_config.json` 的 `proxy` 节控制
+   - `PROXY_URL` / `DISABLE_PROXY` 环境变量为半死代码（定义后未被使用）
 
 3. **CORS 策略**
-   - 开发环境允许所有来源 (`allow_origins=["*"]`)
-   - 生产环境应指定具体域名列表
+   - ⚠ 当前**无条件** `allow_origins=["*"]` 且 `allow_credentials=True`（代码中无环境区分），生产部署必须收紧为具体域名列表
 
 ---
 
@@ -576,7 +648,7 @@ FastAPI 在 `backend/main.py` 中已配置 SPA fallback：
 ### 添加新的 API 端点
 
 1. 在 `backend/schemas/` 定义 Request/Response 模型
-2. 在 `backend/routes/` 创建/修改路由文件
+2. 在 `backend/routes/` 创建/修改路由文件（注意 `chapter_generation` 是包结构，在包内添加模块并在 `__init__.py` 合并）
 3. 在 `backend/main.py` 注册路由（如尚未注册）
 4. 前端在 `frontend/src/services/api/domain/` 添加对应调用
 
@@ -597,8 +669,8 @@ FastAPI 在 `backend/main.py` 中已配置 SPA fallback：
 1. 在 `frontend/src/features/` 创建目录结构
 2. 按 `containers/` + `presentation/` 分层
 3. 在 `index.ts` 导出公共接口
-4. 通过 `services/domain` 层与后端通信
+4. 通过 `services/api/domain` 层与后端通信
 
 ---
 
-*最后更新: 2026-04-15*
+*最后更新: 2026-07-19（全面校准：修正路由结构、双轨工作流现状、环境变量、配置来源、测试现状等过时内容）*

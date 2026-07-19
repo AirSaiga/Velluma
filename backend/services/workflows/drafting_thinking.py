@@ -40,7 +40,7 @@ from backend.services.prompts import (
     parse_scene_intent_result,
     build_subconscious_prompt,
 )
-from backend.services.llm import call_llm
+from backend.services.llm import call_llm, call_llm_with_usage
 from backend.services.workflows.utils import clean_llm_output
 
 LLMStatsCallback = Optional[Callable[[str, float, bool, Optional[int]], None]]
@@ -60,21 +60,50 @@ async def _call_llm_with_stats(
     beat_index: Optional[int] = None,
     stats_callback: LLMStatsCallback = None,
     reasoning_config: Optional[dict] = None,
+    recorder: Optional[Any] = None,
 ) -> str:
+    """带 stats 回调与观测层记录的 LLM 调用封装。
+
+    职责：在原 call_llm 基础上采集耗时/成功状态（stats_callback），
+         若传入 recorder（RunRecorder），额外记录 usage/degraded 到观测层。
+
+    Args:
+        recorder: 可选的 RunRecorder 实例。传入时自动包装 record_call。
+                  None 时仅采集 stats，不落库 generation_runs。
+    """
     start_time = time.perf_counter()
     success = True
     try:
-        return await call_llm(
-            model=model,
-            model_type=model_type or "default",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            top_p=top_p,
-            reasoning_config=reasoning_config,
-        )
+        if recorder is not None:
+            # 观测层路径：包装 record_call 采集 usage（含 thinking 拆分）
+            slot = model_type or "default"
+            async with recorder.record_call(stage=stage, model_slot=slot) as ctx:
+                result = await call_llm_with_usage(
+                    model=model,
+                    model_type=model_type or "default",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    top_p=top_p,
+                    reasoning_config=reasoning_config,
+                )
+                ctx.set_result(result)
+            return result.content
+        else:
+            # 无 recorder：走旧路径（内部仍走 call_llm_with_usage，但不落库）
+            return await call_llm(
+                model=model,
+                model_type=model_type or "default",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                top_p=top_p,
+                reasoning_config=reasoning_config,
+            )
     except Exception:
         success = False
         raise
@@ -218,7 +247,7 @@ async def _generate_subconscious_batch(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 model_type="reasoning",
-                temperature=0.4,
+                temperature=0.55,
                 max_tokens=500,
                 beat_index=beat_index,
                 stats_callback=stats_callback,
@@ -227,13 +256,15 @@ async def _generate_subconscious_batch(
 
             thought = clean_llm_output(response).strip()
 
+            # 新 subconscious 输出纯文本，不再解析 JSON
+            # 若模型仍输出 JSON（兼容旧行为），尝试提取文本内容
             mcts_rollout = None
-            if len(thought) > 100:
+            if thought.startswith("{"):
                 try:
                     parsed = json.loads(thought)
-                    if isinstance(parsed, dict) and "branches" in parsed:
-                        mcts_rollout = parsed.get("branches", [])
-                        thought = parsed.get("selected", thought[:100])
+                    if isinstance(parsed, dict):
+                        mcts_rollout = parsed.get("mcts_rollout") or parsed.get("branches")
+                        thought = parsed.get("best_subconscious") or parsed.get("selected") or thought
                 except json.JSONDecodeError:
                     pass
 
@@ -267,6 +298,136 @@ async def _generate_subconscious_batch(
     return thoughts, rollouts, all_prompts
 
 
+async def _generate_intent_and_sketch_batch(
+    beats: List[dict],
+    chapter: Any,
+    open_hooks: List[dict],
+    stats_callback: LLMStatsCallback = None,
+    reasoning_config: Optional[dict] = None,
+    recorder: Optional[Any] = None,
+) -> tuple[List[dict], List[str], List[List[dict]]]:
+    """
+    合并批量生成 Scene Intent + Emotional Sketch。
+
+    将原先两次独立的 LLM 调用（Scene Intent + Subconscious）合并为一次调用，
+    输出 JSON 包含 scene_intent 和 subconscious 两个字段。
+
+    Returns:
+        tuple: (Scene Intent 列表, Subconscious 列表, Prompt 历史列表)
+    """
+    logger.info(f"[Intent+Sketch] 启动合并批量生成，共 {len(beats)} 个 Beats")
+
+    async def _single(beat_index: int, beat: dict) -> tuple[int, dict, str, list]:
+        try:
+            beat_hooks = _build_beat_hooks(beat, open_hooks, beat_index)
+
+            pov_character = beat.get("pov_character", "主角")
+            summary = beat.get("summary", "")
+            goal = beat.get("action_summary", summary)
+            entry_state = beat.get("entry_state", "")
+            red_lines = beat.get("red_lines", [])
+            red_lines_text = "；".join(red_lines) if red_lines else "无"
+
+            # 合并的 system prompt：同时承担场景分析和内心描写指导
+            system_prompt = """你是场景分析师兼内心描写作家。
+
+请分析给定的剧情节拍，输出 JSON 包含两部分：
+1. scene_intent：场景意图分析（goal/stakes/constraints）
+2. subconscious：角色此刻的内心状态速写（100-150字自由文本）
+
+输出格式：
+{
+  "scene_intent": {
+    "intent_label": "场景标签",
+    "goal": "本场景目标",
+    "stakes": "失败代价",
+    "constraints": ["约束1", "约束2"]
+  },
+  "subconscious": "角色内心流动的纯文本..."
+}"""
+
+            # 合并的 user prompt：同时包含场景信息和角色状态
+            hooks_text = ""
+            if beat_hooks:
+                hooks_text = "【相关伏笔】\n" + "\n".join([h.get("content", "") for h in beat_hooks[:3]])
+
+            user_prompt = f"""【剧情节拍】
+角色：{pov_character}
+剧情：{summary}
+场景目标：{goal}
+切入状态：{entry_state}
+红线：{red_lines_text}
+{hooks_text}
+
+请输出 JSON。"""
+
+            prompts_history = [{
+                "stage": "INTENT_AND_SKETCH",
+                "beat_index": beat_index,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }]
+
+            response = await _call_llm_with_stats(
+                stage=f"intent_and_sketch.beat_{beat_index}",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_type="reasoning",
+                temperature=0.35,
+                response_format={"type": "json_object"},
+                max_tokens=800,
+                beat_index=beat_index,
+                stats_callback=stats_callback,
+                reasoning_config=reasoning_config,
+                recorder=recorder,
+            )
+
+            raw = clean_llm_output(response).strip()
+            parsed = json.loads(raw)
+
+            scene_intent = parsed.get("scene_intent", {})
+            if not isinstance(scene_intent, dict):
+                scene_intent = {}
+            scene_intent.setdefault("intent_label", "合并生成")
+            scene_intent.setdefault("goal", summary)
+
+            subconscious = str(parsed.get("subconscious", "")).strip()
+            if not subconscious:
+                subconscious = f"{pov_character}深吸一口气，准备面对接下来的挑战。"
+
+            return beat_index - 1, scene_intent, subconscious, prompts_history
+
+        except Exception as e:
+            logger.error(f"[Intent+Sketch] Beat {beat_index} 生成失败: {e}")
+            pov = beat.get("pov_character", "主角")
+            fallback_intent = {"intent_label": "fallback", "goal": beat.get("summary", "")}
+            fallback_sub = f"{pov}深吸一口气，准备面对接下来的挑战。"
+            return beat_index - 1, fallback_intent, fallback_sub, []
+
+    tasks = [_single(i + 1, beat) for i, beat in enumerate(beats)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    scene_intents = [None] * len(beats)
+    subconsciouses = [""] * len(beats)
+    all_prompts = [[] for _ in range(len(beats))]
+
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"[Intent+Sketch] 任务异常: {result}")
+            continue
+        idx, intent, sub, prompts = result
+        scene_intents[idx] = intent
+        subconsciouses[idx] = sub
+        all_prompts[idx] = prompts
+
+    for i, intent in enumerate(scene_intents):
+        if intent is None:
+            scene_intents[i] = {"intent_label": "fallback", "goal": beats[i].get("summary", "")}
+
+    logger.info(f"[Intent+Sketch] 合并批量生成完成")
+    return scene_intents, subconsciouses, all_prompts
+
+
 async def _generate_lightweight_subconscious(
     beats: List[dict],
     scene_intent_results: List[dict],
@@ -274,42 +435,59 @@ async def _generate_lightweight_subconscious(
     stats_callback: LLMStatsCallback = None,
 ) -> List[str]:
     """
-    轻量级 Subconscious（无 MCTS，单次生成 50 字内心定调）。
+    情绪锚点速写（无 MCTS，自由流动的内心描写）。
 
-    用于 V4.0 均衡流（Standard-Path），跳过 MCTS 三分支搜索。
+    用于 V4.0 均衡流（Standard-Path），用 100-150 字的自由内心流动替代机械化的 MCTS 决策树。
+    目的是给正文生成提供"情感温度"和"心理质感"，而非理性推演。
     """
-    async def _single_lightweight(beat: dict, scene_intent: dict, beat_index: int) -> str:
-        system_prompt = "你是一位擅长内心独白描写的作家。请用一句话（50字以内）概括角色此刻的内心状态。"
-
+    async def _single_emotional_sketch(beat: dict, scene_intent: dict, beat_index: int) -> str:
         pov_character = beat.get("pov_character", "主角")
         goal = scene_intent.get("goal", beat.get("summary", ""))
+        entry_state = beat.get("entry_state", "")
+        red_lines = beat.get("red_lines", [])
+        physical_state = beat.get("pov_perception_state", "")
+
+        red_lines_text = "；".join(red_lines) if red_lines else "无"
+
+        system_prompt = "你是擅长捕捉人物内心状态的作家。请描写角色此刻的心理流动，不要分析、不要打分、不要结构化。"
 
         user_prompt = f"""角色：{pov_character}
+切入状态：{entry_state}
 场景目标：{goal}
+物理知觉：{physical_state if physical_state else "未指定"}
+不可触碰的底线：{red_lines_text}
 
-请输出角色此刻的内心独白（一句话，50字以内）："""
+请写一段角色此刻的内心状态（100-150字）：
+• 可以是混乱的、矛盾的、不连贯的
+• 允许有身体的细微反应（口干、心跳、耳鸣）
+• 允许有与当前主线无关的记忆闪回
+• 不要解释"为什么"，只呈现"是什么"
+• 不要输出 JSON、不要分点、不要编号
+
+直接输出内心描写的纯文本。"""
 
         try:
             response = await _call_llm_with_stats(
-                stage="lightweight_subconscious",
+                stage="emotional_sketch",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 model_type="reasoning",
-                temperature=0.4,
-                max_tokens=100,
+                temperature=0.6,
+                max_tokens=300,
                 beat_index=beat_index,
                 stats_callback=stats_callback,
             )
             thought = clean_llm_output(response).strip()
-            if len(thought) > 60:
-                thought = thought[:57] + "..."
+            # 兜底：如果过长截断，过短保留
+            if len(thought) > 200:
+                thought = thought[:197] + "..."
             return thought
         except Exception as e:
-            logger.warning(f"[Lightweight Subconscious] 生成失败: {e}")
-            return f"{pov_character}深吸一口气，准备面对接下来的挑战。"
+            logger.warning(f"[Emotional Sketch] 生成失败: {e}")
+            return f"{pov_character}的呼吸有些不稳，指尖微微发凉。"
 
     tasks = [
-        _single_lightweight(beat, scene_intent_results[i], i + 1)
+        _single_emotional_sketch(beat, scene_intent_results[i], i + 1)
         for i, beat in enumerate(beats)
     ]
     return await asyncio.gather(*tasks)

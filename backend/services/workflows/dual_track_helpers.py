@@ -135,23 +135,44 @@ def extract_sketch_reference(
     beat_index: int,
     total_beats: int,
 ) -> str:
-    if not sketch_result or not sketch_result.sketch_text or total_beats == 0:
+    """从 SketchResult 提取对应 beat 的连贯性参考片段。
+
+    CP1.2 改造（decisions U3a）：
+    - 优先用 sketch_result.segments（按 beat_index 精确匹配，编辑天然对齐）
+    - segments 为空时 fallback 到旧的 turn_markers position_percent 切片
+    - 全部失败时按字符比例均分
+    """
+    if not sketch_result:
         return ""
 
-    sketch_text = sketch_result.sketch_text
-    sketch_length = len(sketch_text)
+    # 主路径：segments 精确匹配
+    segments = getattr(sketch_result, "segments", None) or []
+    if segments:
+        match = next((s for s in segments if s.beat_index == beat_index), None)
+        if match and match.text:
+            text = match.text.strip()
+            if len(text) > 800:
+                text = text[:800] + "..."
+            return text
 
+    # Fallback：旧的 turn_markers position_percent 方式
+    sketch_text = sketch_result.sketch_text
+    if not sketch_text or total_beats == 0:
+        return ""
+
+    sketch_length = len(sketch_text)
     start_ratio = max(0, (beat_index - 1) / total_beats - 0.05)
     end_ratio = min(1, beat_index / total_beats + 0.05)
 
-    if hasattr(sketch_result, "turn_markers") and sketch_result.turn_markers:
-        markers = sorted(sketch_result.turn_markers, key=lambda m: m.beat_index)
+    turn_markers = getattr(sketch_result, "turn_markers", None) or []
+    if turn_markers:
+        markers = sorted(turn_markers, key=lambda m: m.beat_index)
         start_marker = next((m for m in reversed(markers) if m.beat_index < beat_index), None)
         if start_marker:
             start_ratio = max(0, start_marker.position_percent / 100.0 - 0.05)
         else:
             start_ratio = 0.0
-            
+
         end_marker = next((m for m in markers if m.beat_index >= beat_index), None)
         if end_marker:
             end_ratio = min(1.0, end_marker.position_percent / 100.0 + 0.05)

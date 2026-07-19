@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // 动态读取后端端口：优先环境变量 → 端口文件 → 默认值 8002
 const PORT_FILE = path.resolve(__dirname, '..', 'data', 'port.txt')
@@ -30,6 +33,11 @@ export default defineConfig({
       }
     })
   ],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src')
+    }
+  },
   server: {
     host: "127.0.0.1",
     port: 5175,

@@ -72,6 +72,8 @@ class DraftingFeatureFlags(BaseModel):
     workflow_tier: WorkflowTier = Field(default="TIER_2_STANDARD", description="智能路由工作流层级: TIER_1_FAST/均衡流/堡垒流")
     force_parallel_prose: bool = Field(default=False, description="强制正文并发生成（无视连贯性）")
     semi_parallel_prose: bool = Field(default=True, description="半并行生成：Beat 1 串行 → 中间 Beats 并行 → Beat N 串行（平衡连贯性与速度）")
+    # CP4.4 Fortress 双候选（蓝图 §4.6.2）：默认关闭，仅 TIER_3_FORTRESS 拍启用
+    enable_fortress_dual_candidate: bool = Field(default=False, description="启用 Fortress 双候选：同拍生成 2 份优选（成本 ×2，默认关闭）")
 
 
 class CharacterPhysicalState(BaseModel):
@@ -180,11 +182,6 @@ class GenerateChapterAgenticRequest(BaseModel):
     generation_run_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
     resume_from_checkpoint: bool = Field(default=False)
 
-    editor_mode: str = Field(
-        default="intent",
-        description="编辑模式：仅支持 intent（意图驱动模式）"
-    )
-
     memory_strategy: Optional[str] = Field(
         default=None,
         description="记忆检索策略：recent_only/balanced_reference/deep_dive"
@@ -205,14 +202,11 @@ class GenerateChapterAgenticRequest(BaseModel):
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[str] = Field(None, description="叙事节奏偏好")
 
-    max_iterations: int = Field(default=AGENTIC_DEFAULT_MAX_ITERATIONS, ge=1, le=5, description="最大重写次数")
     rag_top_k: int = Field(default=AGENTIC_DEFAULT_RAG_TOP_K, ge=1, le=20, description="RAG 返回记忆数量")
     rag_alpha: float = Field(default=AGENTIC_DEFAULT_RAG_ALPHA, ge=0.0, le=1.0, description="语义相似度权重")
     rag_beta: float = Field(default=AGENTIC_DEFAULT_RAG_BETA, ge=0.0, le=1.0, description="时间衰减权重")
     rag_gamma: float = Field(default=AGENTIC_DEFAULT_RAG_GAMMA, ge=0.0, le=1.0, description="剧情伏笔权重")
     rag_lambda: float = Field(default=AGENTIC_DEFAULT_RAG_LAMBDA, ge=0.0, description="时间衰减系数")
-    fast_mode: bool = Field(default=False, description="快速模式：仅生成首轮结果，不进入二轮重写")
-    skip_minor_refine: bool = Field(default=True, description="仅轻微问题时跳过整章重写")
     feature_flags: Optional[DraftingFeatureFlags] = Field(
         default_factory=DraftingFeatureFlags,
         description="V4.0 认知流式生成功能开关配置"
@@ -228,9 +222,6 @@ class GenerateChapterAgenticRequest(BaseModel):
             except (ValueError, TypeError):
                 return None
         return v
-
-    def is_basic_mode(self) -> bool:
-        return True
 
 
 class ConfirmedStoryBeat(BaseModel):
@@ -274,6 +265,34 @@ class ConfirmedStoryBeat(BaseModel):
 class GenerateChapterAgenticPreviewResponse(BaseModel):
     beats: List[ConfirmedStoryBeat] = Field(default_factory=list)
     debug_prompt: Optional[dict] = None
+
+
+# ============================================================
+# CP2.3d：合并闸门 Plan schemas（章节卡 + 节拍联合预览/确认）
+# ============================================================
+
+class PlanPreviewRequest(BaseModel):
+    """联合预览请求（含可选的用户编辑后 chapter_card 字段，触发重规划）。"""
+    edited_card_fields: Optional[dict] = Field(
+        None,
+        description="用户编辑后的章节卡字段（含 purpose/must_hit_events 等）。"
+                    "非空时跳过 AI 章节卡生成，直接用用户版本生成新 beats（重规划）",
+    )
+
+
+class PlanPreviewResponse(BaseModel):
+    """联合预览响应：章节卡 + 节拍 + 降级标记。"""
+    chapter_card: Optional[dict] = Field(None, description="章节卡字段（ChapterCard 兼容）")
+    beats: List[ConfirmedStoryBeat] = Field(default_factory=list)
+    degraded: Optional[dict] = Field(None, description="降级标记（None 表示成功路径）")
+    debug_prompt: Optional[dict] = None
+
+
+class PlanConfirmRequest(BaseModel):
+    """单次确认请求：写入 chapter_card + beats。"""
+    chapter_card_fields: dict = Field(..., description="章节卡字段（含用户编辑后的最终版本）")
+    beats: List[ConfirmedStoryBeat] = Field(..., min_length=1, max_length=10)
+    word_count: Optional[int] = Field(None, ge=100)
 
 
 class GenerateChapterAgenticWithBeatsRequest(GenerateChapterAgenticRequest):

@@ -425,6 +425,27 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT",
         "expected_udt_names": {"text"},
     },
+    # CP1.4：BeatSpec participants 字段（在场角色列表，供上下文引擎确定性通道与
+    # 后续 EntityAuditor 使用；蓝图 §4.4.1）
+    {
+        "table": "story_beats",
+        "column": "participants",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    # CP2.3a：书级大纲（章节卡生成输入）+ 滚动摘要（发布时更新，蓝图 §5.2）
+    {
+        "table": "books",
+        "column": "outline",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "books",
+        "column": "rolling_summary",
+        "definition": "TEXT",
+        "expected_udt_names": {"text"},
+    },
 ]
 
 
@@ -560,6 +581,14 @@ async def init_db():
         PlotLedger,
         SceneIntent,
         StoryBeat,
+        GenerationRun,
+        # CP2.1 新增模型
+        ChapterCard,
+        StyleCard,
+        AuthorSample,
+        SystemCliche,
+        # CP3.1a 新增模型
+        QualityReport,
     )
     from backend.core.model_config import get_embedding_dimensions
 
@@ -569,10 +598,34 @@ async def init_db():
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
         await run_migrations(conn)
-        
+
         # 检查并迁移向量维度
         target_dimension = get_embedding_dimensions()
         await migrate_vector_dimension(conn, target_dimension)
+
+    # CP2.1c：SystemCliche 表种子化（首次启动检测空表则插入默认禁词）
+    # 注意：种子化需要 AsyncSession（不是 engine.begin 的 conn），用独立会话
+    await _seed_system_cliches_if_empty()
+
+
+async def _seed_system_cliches_if_empty() -> None:
+    """首次启动时若 SystemCliche 表为空，从 default_cliches 种子化。
+
+    幂等：表非空则跳过。
+    """
+    try:
+        from backend.repositories import SystemClicheRepository
+        from backend.services.style.default_cliches import get_all_seed_cliches
+
+        async with AsyncSessionLocal() as session:
+            repo = SystemClicheRepository(session)
+            seeds = get_all_seed_cliches()
+            inserted = await repo.seed_if_empty(seeds)
+            if inserted > 0:
+                logger.info(f"[INIT] SystemCliche 表已种子化 {inserted} 条默认禁词")
+    except Exception as e:
+        # 种子化失败不应阻断启动
+        logger.warning(f"[INIT] SystemCliche 种子化失败（不阻断启动）: {e}")
 
 
 async def _get_column_info(conn, table_name: str, column_name: str) -> Optional[dict[str, Any]]:

@@ -42,14 +42,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
-from backend.services.llm import call_llm
+from backend.services.llm import call_llm, call_llm_with_usage
 from backend.services.workflows.utils import clean_llm_output
 
 logger = logging.getLogger(__name__)
 
 
 class TurnMarker(BaseModel):
-    """转折点标记 - 记录 Sketch 中关键转折点的位置"""
+    """转折点标记 - 记录 Sketch 中关键转折点的位置。
+
+    CP1.2 起标记为 deprecated：作者编辑 skeleton_text 后 position_percent 失效。
+    新代码应使用 SketchSegment（按 beat_id 索引，编辑天然对齐）。
+    本字段保留供 stitching/alignment 等历史消费方过渡使用。
+    """
     beat_index: int  # 对应的节拍索引（1-based）
     beat_id: str
     position_percent: float  # 在全文中的位置占比 (0-100)
@@ -57,11 +62,29 @@ class TurnMarker(BaseModel):
     description: str  # 转折点描述
 
 
+class SketchSegment(BaseModel):
+    """速写骨架分段 - 对应一个 beat 的骨架叙述（CP1.2 新增，完成 decisions U3a）。
+
+    设计动机：替代 turn_markers 的 position_percent 方案。
+    作者编辑 segments[i].text 后，segment 与 beat_id 仍天然对齐，
+    不存在字符偏移失效问题。
+
+    消费方：
+    - ContextEngine.build_draft_prompt：取 segment.text 注入对应拍的 P2 动态块
+    - dual_track_helpers.extract_sketch_reference：按 segment.beat_id 切片（替代 position_percent）
+    """
+    beat_id: str  # 对应 beat 的 ID
+    beat_index: int  # 对应 beat 的序号（1-based，便于排序）
+    text: str  # 本拍骨架叙述（主干动作与转折）
+    transition_to_next: str = ""  # 到下一拍的衔接句原文（注入下一拍 P2 的"滚动尾巴"位置）
+
+
 class SketchResult(BaseModel):
     """短文生成结果"""
-    sketch_text: str  # 完整的速写文本
-    turn_markers: List[TurnMarker]  # 转折点位置映射
-    emotion_arc: List[Dict[str, Any]]  # 情绪曲线
+    sketch_text: str  # 完整的速写文本（全文，供 stitching/alignment 用）
+    segments: List[SketchSegment] = []  # CP1.2：按 beat 切片的骨架段（主消费方）
+    turn_markers: List[TurnMarker] = []  # deprecated，保留过渡（CP2 可删）
+    emotion_arc: List[Dict[str, Any]] = []  # 情绪曲线
     word_count: int  # 实际字数
 
     # 调试信息
@@ -91,6 +114,7 @@ class SketchGeneratorConfig:
 
 __all__ = [
     "TurnMarker",
+    "SketchSegment",  # CP1.2 新增
     "SketchResult",
     "SketchGeneratorConfig",
     "SketchGenerator",
@@ -125,10 +149,11 @@ class SketchGenerator:
         previous_summary: Optional[str] = None,
         anchor_pov: Optional[str] = None,
         chapter_assets_schema: str = "",
+        recorder: Optional[Any] = None,
     ) -> SketchResult:
         """
         生成连贯速写短文
-        
+
         Args:
             chapter: 章节实体
             book: 书籍实体
@@ -138,7 +163,8 @@ class SketchGenerator:
             word_count: 目标总字数（正文）
             previous_summary: 上一章摘要
             anchor_pov: 锚定视角角色
-            
+            recorder: 可选的 RunRecorder 实例（Phase 0 观测层）
+
         Returns:
             SketchResult: 生成结果
         """
@@ -172,29 +198,48 @@ class SketchGenerator:
         }]
         
         try:
-            # 调用 LLM 生成速写
-            response = await asyncio.wait_for(
-                call_llm(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=self.config.temperature,
-                    max_tokens=int(target_words * 2.5),  # 安全系数
-                ),
-                timeout=self.config.timeout,
-            )
-            
+            # 调用 LLM 生成速写（T1 观测层 + T2 creative 槽）
+            if recorder is not None:
+                async with recorder.record_call(stage="sketch", model_slot="creative") as ctx:
+                    llm_result = await asyncio.wait_for(
+                        call_llm_with_usage(
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=self.config.temperature,
+                            max_tokens=int(target_words * 2.5),
+                            model_type="creative",
+                        ),
+                        timeout=self.config.timeout,
+                    )
+                    ctx.set_result(llm_result)
+                response = llm_result.content
+            else:
+                response = await asyncio.wait_for(
+                    call_llm(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        temperature=self.config.temperature,
+                        max_tokens=int(target_words * 2.5),  # 安全系数
+                        model_type="creative",
+                    ),
+                    timeout=self.config.timeout,
+                )
+
             sketch_text = clean_llm_output(response).strip()
             actual_words = len(sketch_text)
-            
+
             logger.info(f"[SketchGenerator] 速写生成完成，实际字数: {actual_words}")
-            
-            # 解析转折点标记（如果模型输出了结构化数据）
-            turn_markers, emotion_arc = self._parse_sketch_structure(sketch_text, beats)
-            
+
+            # CP1.2：解析为 segments（按 beat 切片）+ 保留 turn_markers 作 legacy
+            segments, turn_markers, emotion_arc = self._parse_sketch_structure(
+                sketch_text, beats, recorder=recorder,
+            )
+
             generation_time = time.perf_counter() - start_time
-            
+
             return SketchResult(
                 sketch_text=sketch_text,
+                segments=segments,
                 turn_markers=turn_markers,
                 emotion_arc=emotion_arc,
                 word_count=actual_words,
@@ -204,9 +249,19 @@ class SketchGenerator:
             
         except asyncio.TimeoutError:
             logger.error(f"[SketchGenerator] 生成超时 ({self.config.timeout}s)")
+            # Phase 0 T5：超时不再静默返回空结果，标记 degraded
+            if recorder is not None:
+                recorder.record_degraded(
+                    stage="sketch.generation",
+                    reason="timeout",
+                    action="empty_sketch_result",
+                    model_slot="creative",
+                    detail=f"timeout={self.config.timeout}s",
+                )
             # 返回空结果，不影响主流程
             return SketchResult(
                 sketch_text="",
+                segments=[],
                 turn_markers=[],
                 emotion_arc=[],
                 word_count=0,
@@ -215,8 +270,18 @@ class SketchGenerator:
             )
         except Exception as e:
             logger.error(f"[SketchGenerator] 生成失败: {e}")
+            # Phase 0 T5：异常不再静默返回空结果，标记 degraded
+            if recorder is not None:
+                recorder.record_degraded(
+                    stage="sketch.generation",
+                    reason="exception",
+                    action="empty_sketch_result",
+                    model_slot="creative",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
             return SketchResult(
                 sketch_text="",
+                segments=[],
                 turn_markers=[],
                 emotion_arc=[],
                 word_count=0,
@@ -316,23 +381,23 @@ class SketchGenerator:
 - 结尾要形成情感闭环，让读者有满足感
 - 开头和结尾的情绪基调要有呼应关系
 
-### 4. 转折点映射（关键输出）
-在生成完正文后，你必须输出一个 JSON 块，标记每个关键转折点的位置：
+### 4. 骨架分段映射（关键输出）
+在生成完正文后，你必须输出一个 JSON 块，把全文按节拍切成 segments：
 
 ```json
 {{
-  "turn_markers": [
+  "segments": [
     {{
       "beat_index": 1,
-      "position_percent": 15.0,
-      "transition_type": "情绪",
-      "description": "从紧张转为警觉"
+      "beat_id": "beat-1",
+      "text": "本段对应第1个节拍的骨架叙述（主干动作、关键转折、情绪变化）",
+      "transition_to_next": "到下一拍的衔接句原文"
     }},
     {{
-      "beat_index": 2, 
-      "position_percent": 40.0,
-      "transition_type": "信息",
-      "description": "发现关键线索"
+      "beat_index": 2,
+      "beat_id": "beat-2",
+      "text": "本段对应第2个节拍的骨架叙述...",
+      "transition_to_next": "..."
     }}
   ],
   "emotion_arc": [
@@ -342,6 +407,9 @@ class SketchGenerator:
   ]
 }}
 ```
+
+⚠️ segments.text 之和应大致等于全文主体；transition_to_next 是显式衔接句，
+  会在下游被注入到下一拍生成的"滚动尾巴"位置（替代旧版 position_percent 方案）。
 
 ### 5. 字数控制
 目标字数：{target_words} 字左右（允许 ±20% 误差）
@@ -387,7 +455,7 @@ class SketchGenerator:
 1. 连续叙述，**绝对禁止**标记节拍边界
 2. 重点关注情绪流动和自然过渡
 3. 确保开头承接上文，结尾形成闭环
-4. 在正文后输出 JSON 格式的转折点映射
+4. 在正文后输出 JSON 格式的骨架分段映射（segments）
 5. 字数控制在 {target_words} 字左右
 
 请直接输出正文，然后是 JSON 块。"""
@@ -465,44 +533,80 @@ class SketchGenerator:
         self,
         sketch_text: str,
         beats: List[dict],
-    ) -> Tuple[List[TurnMarker], List[Dict[str, Any]]]:
-        """解析 Sketch 中的结构化数据（转折点映射）"""
-        turn_markers = []
-        emotion_arc = []
-        
+        recorder: Optional[Any] = None,
+    ) -> Tuple[List[SketchSegment], List[TurnMarker], List[Dict[str, Any]]]:
+        """解析 Sketch 中的结构化数据。
+
+        CP1.2 改造（decisions U3a）：
+        - 优先解析为 segments（按 beat_id 索引，作者编辑后天然对齐）
+        - 兼容输出 turn_markers（legacy 字段，供 stitching/alignment 过渡）
+        - 解析失败：用 sketch_text 按段落均匀切分兜底 segments + 显式标 degraded
+
+        Returns:
+            tuple: (segments, turn_markers[legacy], emotion_arc)
+        """
+        segments: List[SketchSegment] = []
+        turn_markers: List[TurnMarker] = []
+        emotion_arc: List[Dict[str, Any]] = []
+
+        parsed_data: Optional[Dict[str, Any]] = None
         try:
             # 尝试从文本末尾提取 JSON
-            # 查找最后一个 ```json 块
             json_start = sketch_text.rfind("```json")
             if json_start == -1:
                 json_start = sketch_text.rfind("```")
-            
+
             if json_start != -1:
                 json_text = sketch_text[json_start:]
-                # 清理 markdown 标记
                 json_text = json_text.replace("```json", "").replace("```", "").strip()
-                
-                data = json.loads(json_text)
-                
-                # 解析 turn_markers
-                raw_markers = data.get("turn_markers", [])
-                for marker in raw_markers:
-                    beat_index = marker.get("beat_index", 0)
-                    if 1 <= beat_index <= len(beats):
-                        turn_markers.append(TurnMarker(
-                            beat_index=beat_index,
-                            beat_id=beats[beat_index - 1].get("beat_id", f"beat-{beat_index}"),
-                            position_percent=marker.get("position_percent", 0.0),
-                            transition_type=marker.get("transition_type", "未知"),
-                            description=marker.get("description", ""),
-                        ))
-                
-                # 解析 emotion_arc
-                emotion_arc = data.get("emotion_arc", [])
-            
+                parsed_data = json.loads(json_text)
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"[SketchGenerator] 解析结构化数据失败: {e}")
-            # 如果解析失败，根据节拍数生成默认的均匀分布
+            if recorder is not None:
+                recorder.record_degraded(
+                    stage="sketch.markers_parse",
+                    reason="json_decode_failed",
+                    action="uniform_text_split_fallback",
+                    model_slot="creative",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
+
+        # 路径 A：JSON 解析成功 → 用 LLM 输出的 segments / turn_markers
+        if parsed_data is not None:
+            emotion_arc = parsed_data.get("emotion_arc", []) or []
+
+            # 解析 segments（CP1.2 主路径）
+            raw_segments = parsed_data.get("segments", []) or []
+            for seg in raw_segments:
+                beat_index = seg.get("beat_index", 0)
+                if 1 <= beat_index <= len(beats):
+                    segments.append(SketchSegment(
+                        beat_id=seg.get("beat_id") or beats[beat_index - 1].get("beat_id", f"beat-{beat_index}"),
+                        beat_index=beat_index,
+                        text=seg.get("text", "") or "",
+                        transition_to_next=seg.get("transition_to_next", "") or "",
+                    ))
+
+            # 解析 turn_markers（legacy，仍输出供过渡消费方）
+            raw_markers = parsed_data.get("turn_markers", []) or []
+            for marker in raw_markers:
+                beat_index = marker.get("beat_index", 0)
+                if 1 <= beat_index <= len(beats):
+                    turn_markers.append(TurnMarker(
+                        beat_index=beat_index,
+                        beat_id=beats[beat_index - 1].get("beat_id", f"beat-{beat_index}"),
+                        position_percent=marker.get("position_percent", 0.0),
+                        transition_type=marker.get("transition_type", "未知"),
+                        description=marker.get("description", ""),
+                    ))
+
+        # 路径 B：segments 为空（JSON 解析失败 或 LLM 未输出 segments）
+        # → 用 sketch_text 按段落均匀切分兜底
+        if not segments and beats and sketch_text:
+            segments = self._fallback_split_segments(sketch_text, beats)
+
+        # 路径 B 的 turn_markers 兜底（保持与 Phase 0 行为一致）
+        if not turn_markers and beats:
             for i, beat in enumerate(beats, 1):
                 turn_markers.append(TurnMarker(
                     beat_index=i,
@@ -511,8 +615,48 @@ class SketchGenerator:
                     transition_type="默认",
                     description=beat.get("summary", "")[:50],
                 ))
-        
-        return turn_markers, emotion_arc
+
+        return segments, turn_markers, emotion_arc
+
+    def _fallback_split_segments(
+        self, sketch_text: str, beats: List[dict],
+    ) -> List[SketchSegment]:
+        """解析失败兜底：按段落把 sketch_text 均匀切分到各 beat。
+
+        CP1.2 新增：替代 Phase 0 的"伪造均匀分布 turn_markers"，
+        因为 segments 需要 text 内容（不只是位置标记）。
+        """
+        # 去掉末尾可能的 JSON 块，只保留正文
+        text = sketch_text
+        json_fence = text.rfind("```")
+        if json_fence != -1:
+            text = text[:json_fence].rstrip()
+
+        # 按空行分段，过滤空段
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        if not paragraphs:
+            # 连段落都没有 → 按句号分
+            paragraphs = [s.strip() for s in text.split("。") if s.strip()]
+        if not paragraphs:
+            return []
+
+        beat_count = len(beats)
+        # 简单均分：把 paragraphs 按 beat 数切成连续块
+        segments: List[SketchSegment] = []
+        paragraphs_per_beat = max(1, len(paragraphs) // beat_count)
+        for i, beat in enumerate(beats, 1):
+            start = (i - 1) * paragraphs_per_beat
+            end = start + paragraphs_per_beat if i < beat_count else len(paragraphs)
+            seg_text = "\n\n".join(paragraphs[start:end])
+            if not seg_text:
+                seg_text = beat.get("summary", "")[:100]
+            segments.append(SketchSegment(
+                beat_id=beat.get("beat_id", f"beat-{i}"),
+                beat_index=i,
+                text=seg_text,
+                transition_to_next="",  # 兜底不输出衔接句
+            ))
+        return segments
 
 
 async def generate_sketch_for_alignment(

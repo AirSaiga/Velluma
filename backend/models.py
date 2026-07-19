@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint, Boolean, CheckConstraint
+from sqlalchemy import Column, String, Text, Integer, DateTime, Float, ForeignKey, UniqueConstraint, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -50,6 +50,14 @@ __all__ = [
     "SceneIntent",
     "PlotLedger",
     "GenerationTask",
+    "GenerationRun",
+    # CP2.1 新增
+    "ChapterCard",
+    "StyleCard",
+    "AuthorSample",
+    "SystemCliche",
+    # CP3.1a 新增
+    "QualityReport",
     # Utilities
     "generate_uuid",
     "utc_now",
@@ -112,6 +120,9 @@ class Book(Base):
     worldview_settings = Column(JSONB, default=dict)
     golden_snippets = Column(JSONB, default=list)
     style_blacklist = Column(JSONB, default=list)
+    # CP2.3a：书级大纲（章节卡生成输入）+ 滚动摘要（发布时更新，蓝图 §5.2）
+    outline = Column(Text, nullable=True)
+    rolling_summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
@@ -522,6 +533,8 @@ class StoryBeat(Base):
     pov_perception_state = Column(Text, nullable=True, default="正常")
     anchor_pov = Column(String(120), nullable=True)
     original_actor = Column(String(120), nullable=True)
+    # CP1.4：本拍在场角色列表（EntityAuditor / 上下文引擎确定性通道依赖此字段）
+    participants = Column(JSONB, default=list)
     action_summary = Column(Text, nullable=True)
     worldbuilding_instruction = Column(Text, nullable=True)
     entry_state = Column(Text, nullable=True)
@@ -724,3 +737,222 @@ Chapter.generation_tasks = relationship(
     cascade='all, delete-orphan',
     foreign_keys='GenerationTask.chapter_id'
 )
+
+
+# ============================================================
+# 观测层 - GenerationRun 记录单次 LLM 调用（Phase 0 观测基础设施）
+# ============================================================
+# 设计意图（2.0 Phase 0）：
+#   - 调研报告 §2.2-13 指出全链路零 token 计量，call_llm 丢弃 response.usage。
+#   - 本表是观测层的物理载体，每章生成产出 ~15-20 行（6 拍计）。
+#   - 字段 model_slot 与 2.0 三槽位（reasoning/creative/light）对齐；
+#     thinking_tokens 拆分用于验证 creative 槽位 thinking 确实关闭（T3 验收）。
+#   - degraded 字段承接 T5 降级显式化：所有 fallback 写入 {reason, action}。
+#
+# 与 Chapter.generation_run_id 的关系：
+#   - chapter.generation_run_id 存的是本次生成的 run_id（字符串）
+#   - 本表 run_id 列与之对齐，便于按 run 聚合查询
+class GenerationRun(Base):
+    """
+    生成调用计量表 - 记录单次 LLM 调用的 token/耗时/模型/降级。
+
+    业务含义：
+    - 观测层核心：每章可按 stage 聚合 token 成本，产出章级成本报告
+    - degraded 字段承接"失败不静默"原则（2.0 设计原则 P5）
+    - thinking_tokens 拆分用于验证 creative 槽位 thinking 关闭效果
+
+    数据流：
+    - 由 services/observability/run_recorder.py 在 call_llm_with_usage 包装层写入
+    - chapter_id 与 Chapter 关联，run_id 与 Chapter.generation_run_id 对齐
+    """
+    __tablename__ = "generation_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    run_id = Column(String(64), nullable=True, index=True)
+    stage = Column(String(64), nullable=False)  # planning.beats / drafting.beat_3 / stitching / reviewing / refining / publish.*
+    model_slot = Column(String(32), nullable=True)  # reasoning / creative / light
+    model_name = Column(String(128), nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    thinking_tokens = Column(Integer, nullable=True)  # 解析 response.usage.completion_tokens_details.reasoning_tokens
+    latency_ms = Column(Integer, nullable=True)
+    degraded = Column(JSONB, nullable=True)  # {reason, action, detail?}
+    created_at = Column(DateTime, default=utc_now)
+
+
+created_at = Column(DateTime, default=utc_now)
+
+
+# ============================================================
+# Phase 1 CP2.1 新增模型 - 文风体系 / 章节卡 / 作者样本 / 系统禁词
+# ============================================================
+# 设计依据：蓝图 §4.1.3（ChapterCard）、§4.4（StyleCard）、§5.1（AuthorSample）、
+# §4.4 禁词表（SystemCliche 替代 validators.py 硬编码）
+
+
+class ChapterCard(Base):
+    """章节卡 - 章节间胶水（蓝图 §4.1.3）。
+
+    业务含义：
+    - 填补 Sudowrite 缺失的 chapter glue：每章一张，记录本章 purpose + 必达事件
+    - CP2.3 合并闸门的核心数据载体（卡 + 节拍联合预览）
+    - 形成章节卡链：任意时刻可回答"第 N 章时剧情进展到哪"
+
+    状态流转：
+    - draft: AI 生成或人工创建后待确认
+    - confirmed: 用户确认（CP2.3 合并闸门）
+    - generating: 进入生成主流程
+    - done: 章节定稿
+    """
+    __tablename__ = "chapter_cards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    chapter_number = Column(Integer, nullable=False)
+    purpose = Column(Text, nullable=True)                       # 一句话主旨（场景化语言）
+    must_hit_events = Column(JSONB, default=list)               # [{"event","emotion","must"}]
+    involved_characters = Column(JSONB, default=list)           # [{"id","entry","exit"}]
+    foreshadow_ops = Column(JSONB, default=list)                # [{"action","ledger_id","note"}]
+    continuity = Column(JSONB, default=dict)                    # {"from_chapter","time_gap","location"}
+    word_target = Column(Integer, default=3000)
+    pacing = Column(String(50), default="medium")
+    tension = Column(Integer, default=5)
+    style_override_id = Column(UUID(as_uuid=True), ForeignKey("style_cards.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(50), default="draft")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class StyleCard(Base):
+    """文风卡 - 书级一张 + 章级可覆盖（蓝图 §4.4）。
+
+    业务含义：
+    - 正面画像（positive_profile）：句长节奏 / 词汇层级 / 语域 / 开头结尾习惯
+    - 负面清单（negative_list）：禁词 / 禁句式 + 每条替代规则
+    - chapter_id=null → 书级（默认）；非 null → 章级覆盖
+    """
+    __tablename__ = "style_cards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    positive_profile = Column(JSONB, default=dict)
+    negative_list = Column(JSONB, default=list)                 # [{word/phrase, alternative}]
+    dialogue_ratio_target = Column(Float, nullable=True)        # 对话占比目标（0-1）
+    paragraph_rhythm = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class AuthorSample(Base):
+    """作者样本库 - few-shot 文风锚定（蓝图 §5.1）。
+
+    业务含义：
+    - 用户上传的作者已写文本（或从已发布章节提取）
+    - 向量化后供 ContextEngine P0 检索做 few-shot（蓝图 §4.3.2）
+    - 与 MemoryChunk 区分：本表是"写作风格检索"，无时间衰减，无 PlotLedger 权重
+
+    数据流：
+    - 写入：POST /api/books/{id}/samples 或自动从已发布章节提取
+    - 向量化：保存时调 embedding 入库
+    - 检索：ContextEngine 用本章 outline 做 embedding → cosine 检索 top-k
+    """
+    __tablename__ = "author_samples"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True)
+    scene_type = Column(String(50), default="general")          # dialogue/action/lyrical/suspense/general
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(1536), nullable=True)
+    word_count = Column(Integer, default=0)
+    source = Column(String(50), default="manual")               # manual/golden_snippet/published_chapter
+    created_at = Column(DateTime, default=utc_now)
+
+
+class SystemCliche(Base):
+    """系统级禁词表 - 替代 validators.py 硬编码（蓝图 §4.4）。
+
+    业务含义：
+    - 内置默认禁词表（CP2.1c 种子化），含中英双语
+    - 与 book.style_blacklist（书级）+ style_card.negative_list（书级 StyleCard）三层合并
+    - severity=blocker 的硬阻断 fail-fast；warning 的仅记日志
+
+    数据流：
+    - 启动时若表为空，从 services/style/default_cliches.py 种子化
+    - 用户可全局 CRUD 覆盖（POST/PUT/DELETE /api/system/cliches）
+    - validators.StyleClicheValidator 通过 cliche_provider 读此表（带内存缓存）
+    """
+    __tablename__ = "system_cliches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    pattern = Column(String(200), nullable=False)               # 字面词或正则
+    is_regex = Column(Boolean, default=False)
+    language = Column(String(10), default="zh")                 # zh/en
+    category = Column(String(50), default="cliche")             # cliche/house_voice/transition
+    severity = Column(String(20), default="warning")            # warning/blocker
+    alternative = Column(Text, nullable=True)                   # 替代建议
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utc_now)
+
+
+# ============================================================
+# Phase 2 CP3.1a 新增模型 - QualityReport 双层审计报告
+# ============================================================
+# 设计依据：蓝图 §4.8.3（校验引擎 QualityReport 数据载体）
+#
+# 业务含义：
+# - 承载双层审计（CP3.1b 代码级 + CP3.1c LLM 级）的结构化结果
+# - metrics 列存代码级量化指标（禁词命中率/句长 CV/对话占比/字数达标率/红线违反）
+# - findings 列存 LLM 级证据链问题（severity/category/quote/offset/beat_id/detail/suggestion）
+# - degraded 列承接"失败不静默"原则：审计降级时填 {reason, action}
+# - verdict 三态：pass / pass_with_fixes / fail / unaudited（降级时）
+#
+# 数据流：
+# - 由 services/validation/code_auditors.py（CP3.1b）+ llm_auditor.py（CP3.1c）写入
+# - 由 routes/chapter_generation/__init__.py 的 GET /quality-report 读取（CP3.1c 加）
+# - chapter_id + run_id 组合定位一次生成 run 的审计结果
+
+
+class QualityReport(Base):
+    """质量报告表 - 章节双层审计结构化结果（蓝图 §4.8.3）。
+
+    业务含义：
+    - 每章生成后由代码级审计（7 个 Auditor）+ LLM 级审计（证据链）产出一份报告
+    - metrics 承载量化指标，供前端 QualityReportPanel 展示指标卡片
+    - findings 承载证据链问题，供精修阶段（CP3.2）作为证据驱动输入
+    - verdict 是最终闸门结论，影响是否进入精修/重写
+
+    数据流：
+    - 写入：CP3.1b/CP3.1c 审计流程通过 QualityReportRepository.create() 写入
+    - 读取：GET /api/chapters/{id}/quality-report（CP3.1c）+ 精修阶段（CP3.2）
+    - 关联：chapter_id 指向被审计章节；run_id 与 Chapter.generation_run_id 对齐，
+      便于按生成 run 聚合查询
+    """
+    __tablename__ = "quality_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id = Column(String(64), nullable=True, index=True)
+    # 量化指标（代码级审计产出，蓝图 §4.8.1）
+    # 示例：{"cliche_hits_per_1k": 0.4, "sentence_len_cv": 0.62,
+    #        "dialogue_ratio": 0.31, "word_achieve_rate": 0.97, "red_line_violations": 0}
+    metrics = Column(JSONB, default=dict)
+    # 发现的问题（LLM 审计产出，带证据链）
+    # 每项：{"severity": "blocker|warning|info", "category": "timeline|characterization|
+    #        worldview|fact|style", "quote": "原文引用", "offset": [start, end],
+    #        "beat_id": int|null, "detail": "...", "suggestion": "..."}
+    findings = Column(JSONB, default=list)
+    # 降级标记（CP3.1c 审计降级时填充）：{reason, action, detail?}
+    degraded = Column(JSONB, nullable=True)
+    # 审计结论：pass / pass_with_fixes / fail / unaudited（降级时）
+    verdict = Column(String(50))
+    created_at = Column(DateTime, default=utc_now)

@@ -1,15 +1,15 @@
 <template>
-  <button 
+  <button
     type="button"
-    class="plan-card" 
-    :class="{ 'is-selected': isSelected, [plan.plan_type]: true }" 
+    class="plan-card"
+    :class="{ 'is-selected': isSelected, [plan.plan_type]: true }"
     @click="$emit('select', plan.plan_type)"
   >
     <div class="plan-card-inner">
       <!-- 左侧：徽标与标题 -->
       <div class="plan-header">
         <div class="plan-badge">
-          <span class="badge-icon">{{ typeIcon }}</span>
+          <span class="badge-icon"><Icon :name="typeIcon" :size="14" /></span>
           <span class="badge-text">{{ planTypeName }}</span>
         </div>
         <div class="plan-info">
@@ -17,41 +17,38 @@
           <p class="plan-desc">{{ plan.description }}</p>
         </div>
       </div>
-      
+
       <!-- 右侧：详情与操作 -->
       <div class="plan-details">
         <div class="details-content">
-          <!-- 推荐理由 (Why it fits) -->
+          <!-- 推荐理由 -->
           <div class="plan-reasoning">
             <div class="reasoning-title">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+              <Icon name="light-bulb" :size="14" />
               推荐理由
             </div>
             <p class="reasoning-text">{{ plan.reasoning }}</p>
           </div>
-          
-          <!-- 注意事项 (Trade-offs) -->
-          <div v-if="plan.risk_hints.length > 0" class="plan-risks">
-            <div class="risks-title">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              注意事项
+
+          <!-- 技术摘要 -->
+          <div class="plan-tech">
+            <div class="tech-title">
+              <Icon name="settings" :size="14" />
+              技术摘要
             </div>
-            <ul class="risks-list">
-              <li v-for="(risk, idx) in plan.risk_hints" :key="idx">{{ risk }}</li>
-            </ul>
+            <div class="tech-tags">
+              <span class="tech-tag">{{ tierLabel }}</span>
+              <span class="tech-tag">张力 {{ plan.policy.tension_level }}/5</span>
+              <span class="tech-tag">{{ paceLabel }}</span>
+              <span class="tech-tag">{{ refinementLabel }}</span>
+            </div>
           </div>
         </div>
 
         <!-- 选择指示器 -->
         <div class="plan-action">
           <div class="select-ring">
-            <svg class="w-4 h-4 check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-            </svg>
+            <Icon name="check" :size="14" class="check-icon" />
           </div>
         </div>
       </div>
@@ -61,6 +58,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import Icon from '@/components/Icon.vue'
 import type { RecommendedPlan, PlanType } from '@/types/intentDriven'
 
 const props = defineProps<{
@@ -84,27 +82,47 @@ const planTypeName = computed(() => {
 
 const typeIcon = computed(() => {
   const icons: Record<PlanType, string> = {
-    balanced: '⚖️',
-    fast: '⚡',
-    quality: '✨',
-    creative: '🎨'
+    balanced: 'check-badge',
+    fast: 'rocket',
+    quality: 'star',
+    creative: 'paint-brush'
   }
   return icons[props.plan.plan_type]
 })
+
+const tierNames: Record<string, string> = {
+  TIER_1_FAST: '自由创作',
+  TIER_2_STANDARD: '标准编排',
+  TIER_3_FORTRESS: '严选打磨'
+}
+const tierLabel = computed(() => tierNames[props.plan.policy.workflow_tier] || props.plan.policy.workflow_tier)
+
+const paceNames: Record<string, string> = {
+  slow_burn: '舒缓',
+  balanced: '均衡',
+  fast_paced: '紧凑'
+}
+const paceLabel = computed(() => paceNames[props.plan.policy.pacing_style] || props.plan.policy.pacing_style)
+
+const refinementNames: Record<string, string> = {
+  light: '轻度润色',
+  standard: '标准精修',
+  deep: '深度打磨'
+}
+const refinementLabel = computed(() => refinementNames[props.plan.policy.refinement_depth] || props.plan.policy.refinement_depth)
 </script>
 
 <style scoped>
 .plan-card {
   width: 100%;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  border-radius: 1rem;
+  background: var(--bg-panel, #f0ece3);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 12px;
   padding: 1.25rem;
   text-align: left;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   position: relative;
   overflow: hidden;
 }
@@ -115,32 +133,32 @@ const typeIcon = computed(() => {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
+  width: 3px;
   background: transparent;
-  transition: background 0.3s ease;
+  transition: background 0.25s ease;
 }
 
 .plan-card:hover {
-  background: rgba(255, 255, 255, 0.95);
-  transform: translateX(4px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
-  border-color: rgba(203, 213, 225, 0.8);
+  background: var(--bg-canvas, #fefdfb);
+  border-color: var(--hover-bg, #eee9df);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  transform: translateX(2px);
 }
 
 .plan-card.is-selected {
-  background: rgba(255, 255, 255, 1);
-  border-color: #6366f1;
-  box-shadow: 0 0 0 1px #6366f1, 0 10px 15px -3px rgba(99, 102, 241, 0.1);
+  background: rgba(124, 106, 173, 0.04);
+  border-color: var(--accent-500, #7c6aad);
+  box-shadow: 0 0 0 1px var(--accent-500, #7c6aad), 0 4px 16px rgba(124, 106, 173, 0.08);
 }
 
 .plan-card.is-selected::before {
-  background: linear-gradient(180deg, #6366f1, #818cf8);
+  background: var(--accent-500, #7c6aad);
 }
 
 .plan-card-inner {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
 @media (min-width: 768px) {
@@ -152,16 +170,16 @@ const typeIcon = computed(() => {
 
 /* 左侧：徽标与标题 */
 .plan-header {
-  flex: 0 0 240px;
+  flex: 0 0 200px;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding-right: 1.25rem;
+  gap: 0.625rem;
+  padding-right: 1rem;
 }
 
 @media (min-width: 768px) {
   .plan-header {
-    border-right: 1px dashed rgba(226, 232, 240, 0.8);
+    border-right: 1px dashed var(--border-color, #e0dbd3);
   }
 }
 
@@ -169,57 +187,57 @@ const typeIcon = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 0.625rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 9999px;
-  font-size: 0.6875rem;
+  font-size: 11px;
   font-weight: 600;
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-canvas, #fefdfb);
+  color: var(--text-secondary, #6b6560);
+  border: 1px solid var(--border-color, #e0dbd3);
   width: fit-content;
 }
 
 .plan-card.balanced .plan-badge {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-  border-color: rgba(16, 185, 129, 0.2);
+  background: rgba(124, 106, 173, 0.08);
+  color: var(--accent-500, #7c6aad);
+  border-color: rgba(124, 106, 173, 0.2);
 }
 
 .plan-card.fast .plan-badge {
-  background: rgba(245, 158, 11, 0.1);
-  color: #d97706;
-  border-color: rgba(245, 158, 11, 0.2);
+  background: rgba(201, 164, 92, 0.08);
+  color: #b08a3a;
+  border-color: rgba(201, 164, 92, 0.2);
 }
 
 .plan-card.quality .plan-badge {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
-  border-color: rgba(99, 102, 241, 0.2);
+  background: rgba(124, 106, 173, 0.08);
+  color: var(--accent-500, #7c6aad);
+  border-color: rgba(124, 106, 173, 0.2);
 }
 
 .plan-card.creative .plan-badge {
-  background: rgba(236, 72, 153, 0.1);
-  color: #db2777;
-  border-color: rgba(236, 72, 153, 0.2);
+  background: rgba(192, 132, 133, 0.08);
+  color: #a86869;
+  border-color: rgba(192, 132, 133, 0.2);
 }
 
 .plan-info {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .plan-name {
-  font-size: 1.125rem;
+  font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary, #2c2c2c);
   margin: 0;
   letter-spacing: -0.01em;
 }
 
 .plan-desc {
-  font-size: 0.8125rem;
-  color: #64748b;
+  font-size: 12px;
+  color: var(--text-muted, #a89e90);
   margin: 0;
   line-height: 1.5;
 }
@@ -229,14 +247,14 @@ const typeIcon = computed(() => {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .details-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.625rem;
 }
 
 @media (min-width: 1024px) {
@@ -246,68 +264,56 @@ const typeIcon = computed(() => {
   }
 }
 
-.plan-reasoning, .plan-risks {
+.plan-reasoning, .plan-tech {
   flex: 1;
-  border-radius: 0.625rem;
-  padding: 0.75rem 1rem;
-  font-size: 0.8125rem;
+  border-radius: 10px;
+  padding: 0.625rem 0.875rem;
+  font-size: 12px;
 }
 
 .plan-reasoning {
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 0.4) 100%);
-  border: 1px solid rgba(226, 232, 240, 0.6);
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
 }
 
-.plan-risks {
-  background: rgba(255, 251, 235, 0.5);
-  border: 1px solid rgba(253, 230, 138, 0.5);
+.plan-tech {
+  background: rgba(124, 106, 173, 0.04);
+  border: 1px solid rgba(124, 106, 173, 0.12);
 }
 
-.reasoning-title, .risks-title {
+.reasoning-title, .tech-title {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.6875rem;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 0.375rem;
 }
 
-.reasoning-title { color: #6366f1; }
-.risks-title { color: #d97706; }
+.reasoning-title { color: var(--accent-500, #7c6aad); }
+.tech-title { color: var(--accent-500, #7c6aad); }
 
 .reasoning-text {
-  color: #334155;
+  color: var(--text-secondary, #6b6560);
   line-height: 1.5;
   margin: 0;
 }
 
-.risks-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.tech-tags {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  flex-wrap: wrap;
+  gap: 0.375rem;
 }
 
-.risks-list li {
-  position: relative;
-  padding-left: 0.875rem;
-  color: #92400e;
-  line-height: 1.4;
-}
-
-.risks-list li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.45rem;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #f59e0b;
+.tech-tag {
+  font-size: 11px;
+  padding: 0.15rem 0.5rem;
+  background: rgba(124, 106, 173, 0.08);
+  color: var(--accent-500, #7c6aad);
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 /* 选择指示器 */
@@ -319,10 +325,10 @@ const typeIcon = computed(() => {
 }
 
 .select-ring {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.25rem;
+  height: 1.25rem;
   border-radius: 50%;
-  border: 2px solid #cbd5e1;
+  border: 1.5px solid var(--border-color, #e0dbd3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -338,13 +344,13 @@ const typeIcon = computed(() => {
 }
 
 .plan-card:hover .select-ring {
-  border-color: #94a3b8;
+  border-color: var(--text-muted, #a89e90);
 }
 
 .plan-card.is-selected .select-ring {
-  background: #6366f1;
-  border-color: #6366f1;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+  background: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500, #7c6aad);
+  box-shadow: 0 2px 6px rgba(124, 106, 173, 0.25);
 }
 
 .plan-card.is-selected .check-icon {
@@ -355,45 +361,48 @@ const typeIcon = computed(() => {
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .plan-card {
-    background: rgba(30, 41, 59, 0.6);
-    border-color: rgba(51, 65, 85, 0.8);
+    background: var(--bg-panel, #2c2923);
+    border-color: var(--border-color, #3a3530);
   }
 
   .plan-card:hover {
-    background: rgba(30, 41, 59, 0.95);
-    border-color: rgba(71, 85, 105, 0.8);
+    background: var(--bg-canvas, #1e1c18);
+    border-color: var(--hover-bg, #33302a);
   }
 
   .plan-card.is-selected {
-    background: rgba(15, 23, 42, 0.95);
-    border-color: #6366f1;
-    box-shadow: 0 0 0 1px #6366f1, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    background: rgba(167, 139, 250, 0.06);
+    border-color: var(--accent-500, #a78bfa);
+    box-shadow: 0 0 0 1px var(--accent-500, #a78bfa), 0 4px 16px rgba(167, 139, 250, 0.06);
   }
 
   .plan-header {
-    border-color: rgba(71, 85, 105, 0.8);
+    border-color: var(--border-color, #3a3530);
   }
 
-  .plan-name { color: #f8fafc; }
-  .plan-desc { color: #94a3b8; }
+  .plan-name { color: var(--text-primary, #ede8df); }
+  .plan-desc { color: var(--text-muted, #8a8275); }
 
   .plan-reasoning {
-    background: rgba(15, 23, 42, 0.4);
-    border-color: rgba(51, 65, 85, 0.6);
+    background: var(--bg-canvas, #1e1c18);
+    border-color: var(--border-color, #3a3530);
   }
 
-  .reasoning-title { color: #818cf8; }
-  .reasoning-text { color: #cbd5e1; }
+  .reasoning-title { color: var(--accent-500, #a78bfa); }
+  .reasoning-text { color: var(--text-secondary, #bfb8ab); }
 
-  .plan-risks {
-    background: rgba(120, 53, 15, 0.2);
-    border-color: rgba(180, 83, 9, 0.3);
+  .plan-tech {
+    background: rgba(167, 139, 250, 0.06);
+    border-color: rgba(167, 139, 250, 0.15);
   }
 
-  .risks-title { color: #fbbf24; }
-  .risks-list li { color: #fde68a; }
+  .tech-title { color: var(--accent-500, #a78bfa); }
+  .tech-tag {
+    background: rgba(167, 139, 250, 0.12);
+    color: var(--accent-500, #a78bfa);
+  }
 
-  .select-ring { border-color: #475569; }
-  .plan-card:hover .select-ring { border-color: #64748b; }
+  .select-ring { border-color: var(--border-color, #3a3530); }
+  .plan-card:hover .select-ring { border-color: var(--text-muted, #8a8275); }
 }
 </style>

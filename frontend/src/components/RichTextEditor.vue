@@ -110,10 +110,13 @@ const currentSelection = ref(null)
 const optimizationState = ref('idle') // 'idle' | 'toolbar' | 'input' | 'processing' | 'reviewing'
 const tempOptimizationData = ref(null)
 const aiInstructionInputRef = ref(null)
+// CP4.1 选区级改写（蓝图 §4.9）：5 种模式
+// FE 内部用 'polish'（向后兼容 localStorage），映射到 BE mode='rewrite'
+// 其他 4 种 FE/BE 一致：describe / expand / compress / tone_shift
 const readStoredAiIntentMode = () => {
   try {
     const raw = localStorage.getItem(AI_INTENT_MODE_STORAGE_KEY)
-    if (raw === 'polish' || raw === 'expand' || raw === 'compress') {
+    if (raw === 'polish' || raw === 'expand' || raw === 'compress' || raw === 'describe' || raw === 'tone_shift') {
       return { mode: raw, fromStorage: true }
     }
   } catch {}
@@ -123,6 +126,8 @@ const readStoredAiIntentMode = () => {
 const storedAiIntentMode = readStoredAiIntentMode()
 const aiIntentMode = ref(storedAiIntentMode.mode)
 const hasStoredAiIntentMode = ref(storedAiIntentMode.fromStorage)
+// CP4.1：tone_shift 模式的目标语气（如 冷峻 / 诙谐 / 抒情）
+const aiToneInput = ref('')
 const showUndoHint = ref(false)
 const lastAppliedOptimization = ref(null)
 let undoHintTimer = null
@@ -257,14 +262,22 @@ const inferAiIntentMode = () => {
   if (!selectedText) return 'polish'
   if (length < 36) return 'expand'
   if (length > 180) return 'compress'
-  if (/[“”"'「」『』]/.test(selectedText)) return 'polish'
+  if (/[“”'「」『』]/.test(selectedText)) return 'polish'
   return 'polish'
+}
+
+// CP4.1：FE 内部 mode → BE mode 映射（polish → rewrite，其余一致）
+const feToBeMode = (feMode) => {
+  if (feMode === 'polish') return 'rewrite'
+  return feMode  // describe / expand / compress / tone_shift 直传
 }
 
 const getAiIntentLabel = (mode = aiIntentMode.value) => {
   if (mode === 'expand') return '扩写'
   if (mode === 'compress') return '压缩'
-  return '润色'
+  if (mode === 'describe') return '描写'
+  if (mode === 'tone_shift') return '换语气'
+  return '润色'  // polish
 }
 
 const getDynamicInstructionPlaceholder = () => {
@@ -273,6 +286,12 @@ const getDynamicInstructionPlaceholder = () => {
   }
   if (aiIntentMode.value === 'compress') {
     return '压缩方向：保留关键信息并提升节奏（Enter 执行）'
+  }
+  if (aiIntentMode.value === 'describe') {
+    return '描写方向：扩充感官细节（视/听/嗅/触），不推进情节（Enter 执行）'
+  }
+  if (aiIntentMode.value === 'tone_shift') {
+    return '换语气：在上方输入目标语气（如 冷峻/诙谐/抒情），此处可补充细节（Enter 执行）'
   }
   return '润色方向：优化语气、描写和句式（Enter 执行）'
 }
@@ -565,18 +584,22 @@ const handleInputBlur = () => {
 
 const handleOptimizeSelection = () => {
   if (!currentSelection.value || !optimizationInstruction.value.trim()) return
-  
+
   optimizationState.value = 'processing'
   const intentLabel = getAiIntentLabel()
   const mergedInstruction = `[${intentLabel}] ${optimizationInstruction.value.trim()}`
-  
+
+  // CP4.1：携带结构化 mode + tone（蓝图 §4.9）
+  // mode 由 FE 内部枚举映射到 BE mode（polish → rewrite）
   emit('request-partial-optimize', {
     selection: currentSelection.value,
-    instruction: mergedInstruction
+    instruction: mergedInstruction,
+    mode: feToBeMode(aiIntentMode.value),
+    tone: aiIntentMode.value === 'tone_shift' ? (aiToneInput.value.trim() || null) : null,
   })
-  
+
   // 不要清空 instruction，也不要关闭菜单
-  // optimizationInstruction.value = '' 
+  // optimizationInstruction.value = ''
   // showSelectionMenu.value = false
 }
 
@@ -1343,6 +1366,13 @@ defineExpose({
             润色
           </button>
           <button
+            @click="setAiIntentMode('describe')"
+            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            :class="aiIntentMode === 'describe' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
+          >
+            描写
+          </button>
+          <button
             @click="setAiIntentMode('expand')"
             class="px-2 py-1 text-[10px] rounded-md border transition-colors"
             :class="aiIntentMode === 'expand' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
@@ -1356,7 +1386,21 @@ defineExpose({
           >
             压缩
           </button>
+          <button
+            @click="setAiIntentMode('tone_shift')"
+            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            :class="aiIntentMode === 'tone_shift' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
+          >
+            换语气
+          </button>
         </div>
+        <!-- CP4.1：tone_shift 模式的目标语气输入框 -->
+        <input
+          v-if="aiIntentMode === 'tone_shift'"
+          v-model="aiToneInput"
+          placeholder="目标语气：如 冷峻/诙谐/抒情"
+          class="text-xs border border-[var(--border-color)] rounded-lg px-2 py-1.5 outline-none focus:border-[var(--accent-600)] w-40 text-[var(--text-primary)] bg-[var(--bg-canvas)]"
+        />
         <input 
           ref="aiInstructionInputRef"
           v-model="optimizationInstruction"

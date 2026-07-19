@@ -117,10 +117,18 @@ class DualTrackWorkflow:
         config: Optional[DualTrackConfig] = None,
         feature_flags: Optional[DraftingFeatureFlags] = None,
         prompt_logger: Optional[PromptLogger] = None,
+        recorder: Optional[Any] = None,
     ):
         self.config = config or DualTrackConfig()
         self.feature_flags = feature_flags or DraftingFeatureFlags()
         self.prompt_logger = prompt_logger
+        # Phase 0 观测层：RunRecorder 实例，供各子阶段透传
+        # None 时不采集 usage，仅走 stats_callback/prompt_logger（向后兼容）
+        self.recorder = recorder
+
+    def set_recorder(self, recorder: Optional[Any]) -> None:
+        """运行时注入 RunRecorder（供 stream_handler 在创建 workflow 后设置）。"""
+        self.recorder = recorder
 
     async def execute(
         self,
@@ -139,6 +147,13 @@ class DualTrackWorkflow:
         workflow_tier: Optional[WorkflowTier] = None,
         anchor_pov: Optional[str] = None,
         progress_callback: Optional[Callable[..., Any]] = None,
+        open_hooks: Optional[List[dict]] = None,
+        previous_world_snapshot: Optional[Any] = None,
+        author_intent: Optional[str] = None,
+        sketch_segments: Optional[List[str]] = None,
+        style_card: Optional[Any] = None,
+        chapter_card: Optional[Any] = None,
+        pregenerated_sketch_result: Optional[Any] = None,
     ) -> DualTrackResult:
         """
         执行双轨工作流。
@@ -162,6 +177,22 @@ class DualTrackWorkflow:
             workflow_tier: 工作流层级
             anchor_pov: 锚点视角角色
             progress_callback: 进度回调函数
+            open_hooks: 开放伏笔列表（CP1 T4 修复断链）
+            previous_world_snapshot: 前章世界快照
+            author_intent: 作者意图（CP1 T7 接通正文路径）
+            sketch_segments: 速写骨架分段（CP1.2 输出 + CP1.4 注入 P2）
+
+        .. note:: CP1.4 sketch_segments 边界说明
+
+            Track A 与 Track B 并行执行（asyncio.gather），Track A 启动时 sketch
+            尚未生成，因此默认 sketch_segments=None（保持 Phase 0 行为）。
+
+            sketch_segments 仅在以下场景传入：
+            - 用户编辑 sketch 后单独触发 Track A 重跑（CP2 合并闸门）
+            - 测试 / 重生成场景
+
+            CP2 上下文引擎 + 合并闸门落地后，sketch 在 draft 之前完成，
+            segments 注入将成为常态。
 
         Returns:
             DualTrackResult: 包含最终文本和统计信息的结果对象
@@ -188,6 +219,13 @@ class DualTrackWorkflow:
             chapter_assets_schema=chapter_assets_schema,
             workflow_tier=workflow_tier,
             anchor_pov=anchor_pov,
+            open_hooks=open_hooks,
+            previous_world_snapshot=previous_world_snapshot,
+            author_intent=author_intent,
+            sketch_segments=sketch_segments,
+            style_card=style_card,
+            chapter_card=chapter_card,
+            pregenerated_sketch_result=pregenerated_sketch_result,
         )
         await self._emit_progress(progress_callback, "TRACK_GENERATION_DONE", f"双轨生成完成，耗时 {track_time:.1f}s")
         stitched_draft, stitch_time = await self._run_stitching_stage(
@@ -261,6 +299,13 @@ class DualTrackWorkflow:
         chapter_assets_schema: str,
         workflow_tier: Optional[WorkflowTier],
         anchor_pov: Optional[str],
+        open_hooks: Optional[List[dict]] = None,
+        previous_world_snapshot: Optional[Any] = None,
+        author_intent: Optional[str] = None,
+        sketch_segments: Optional[List[str]] = None,
+        style_card: Optional[Any] = None,
+        chapter_card: Optional[Any] = None,
+        pregenerated_sketch_result: Optional[Any] = None,
     ) -> Tuple[List[BeatDraftResult], Optional[SketchResult], float]:
         import time
         parallel_start_wall = time.time()
@@ -280,8 +325,19 @@ class DualTrackWorkflow:
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
             workflow_tier=workflow_tier,
+            open_hooks=open_hooks,
+            previous_world_snapshot=previous_world_snapshot,
+            author_intent=author_intent,
+            sketch_segments=sketch_segments,
+            style_card=style_card,
+            chapter_card=chapter_card,
         )
-        if self.config.enable_sketch_track:
+        # CP2.4：若 sketch 已由 stream_handler 预生成，直接复用（避免 Track B 重复跑）
+        if pregenerated_sketch_result is not None:
+            logger.info("[DualTrack] CP2.4：使用预生成 sketch，跳过 Track B")
+            beat_drafts = await track_a_task
+            sketch_result = pregenerated_sketch_result
+        elif self.config.enable_sketch_track:
             track_b_task = self._execute_track_b(
                 chapter=chapter,
                 book=book,
@@ -292,6 +348,7 @@ class DualTrackWorkflow:
                 previous_summary=previous_summary,
                 anchor_pov=anchor_pov,
                 chapter_assets_schema=chapter_assets_schema,
+                recorder=self.recorder,
             )
             beat_drafts, sketch_result = await asyncio.gather(
                 track_a_task,
@@ -303,6 +360,15 @@ class DualTrackWorkflow:
                 raise beat_drafts
             if isinstance(sketch_result, Exception):
                 logger.warning(f"[DualTrack] Track B 失败: {sketch_result}，将继续使用 Track A 结果")
+                # Phase 0 T5 修复病灶：Track B 异常静默吞掉 → 标记 degraded 让观测层可见
+                if self.recorder is not None:
+                    self.recorder.record_degraded(
+                        stage="sketch.track_b",
+                        reason="track_b_exception",
+                        action="track_a_only",
+                        model_slot="creative",
+                        detail=f"{type(sketch_result).__name__}: {str(sketch_result)[:200]}",
+                    )
                 sketch_result = None
         else:
             beat_drafts = await track_a_task
@@ -387,6 +453,7 @@ class DualTrackWorkflow:
             sketch_text=sketch_result.sketch_text if sketch_result else None,
             book=book,
             persistent_state_anchors=persistent_state_anchors or None,
+            recorder=self.recorder,
         )
         stitch_time = time.perf_counter() - stitch_start
         logger.info(f"[DualTrack] 阶段=STITCHING 状态=SUCCESS duration={stitch_time:.2f}s words={len(stitched_draft)}")
@@ -474,6 +541,16 @@ class DualTrackWorkflow:
             if self.prompt_logger:
                 self.prompt_logger.log_outputs(error=str(e))
                 self.prompt_logger.end_stage(success=False)
+            # Phase 0 T5 修复病灶 8：校对失败不再静默 = 高分通过
+            # 标记 degraded 让观测层可见，且 adjustment_plan 保持 None（不触发精修）
+            if self.recorder is not None:
+                self.recorder.record_degraded(
+                    stage="reviewing.alignment",
+                    reason="alignment_exception",
+                    action="skipped_refinement",
+                    model_slot="reasoning",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
             final_text = stitched_draft
         return final_text, adjustment_plan
 
@@ -520,6 +597,15 @@ class DualTrackWorkflow:
             if self.prompt_logger:
                 self.prompt_logger.log_outputs(error=str(refine_e))
                 self.prompt_logger.end_stage(success=False)
+            # Phase 0 T5：fusion 精修失败不再静默返回原文
+            if self.recorder is not None:
+                self.recorder.record_degraded(
+                    stage="refining.fusion",
+                    reason="fusion_refinement_exception",
+                    action="kept_stitched_draft",
+                    model_slot="creative",
+                    detail=f"{type(refine_e).__name__}: {str(refine_e)[:200]}",
+                )
             return stitched_draft
 
     def _build_stats(
@@ -567,6 +653,12 @@ class DualTrackWorkflow:
         entity_spatial_ledger: Optional[Dict[str, Any]] = None,
         chapter_assets_schema: str = "",
         workflow_tier: Optional[WorkflowTier] = None,
+        open_hooks: Optional[List[dict]] = None,
+        previous_world_snapshot: Optional[Any] = None,
+        author_intent: Optional[str] = None,
+        sketch_segments: Optional[List[str]] = None,
+        style_card: Optional[Any] = None,
+        chapter_card: Optional[Any] = None,
     ) -> List[BeatDraftResult]:
         return await execute_draft_stage(
             chapter=chapter,
@@ -574,7 +666,7 @@ class DualTrackWorkflow:
             entities=entities,
             relationships=relationships,
             beats=beats,
-            open_hooks=[],
+            open_hooks=open_hooks or [],
             word_count=word_count,
             previous_summary=previous_summary,
             relevant_memories=relevant_memories,
@@ -585,6 +677,12 @@ class DualTrackWorkflow:
             entity_spatial_ledger=entity_spatial_ledger,
             chapter_assets_schema=chapter_assets_schema,
             workflow_tier=workflow_tier,
+            recorder=self.recorder,
+            previous_world_snapshot=previous_world_snapshot,
+            author_intent=author_intent,
+            sketch_segments=sketch_segments,
+            style_card=style_card,
+            chapter_card=chapter_card,
         )
 
     async def _execute_track_b(
@@ -598,6 +696,7 @@ class DualTrackWorkflow:
         previous_summary: Optional[str] = None,
         anchor_pov: Optional[str] = None,
         chapter_assets_schema: str = "",
+        recorder: Optional[Any] = None,
     ) -> SketchResult:
         config = self.config.sketch_config or SketchGeneratorConfig()
         target_words = int(word_count * config.sketch_ratio)
@@ -648,6 +747,7 @@ class DualTrackWorkflow:
             previous_summary=previous_summary,
             anchor_pov=anchor_pov,
             chapter_assets_schema=chapter_assets_schema,
+            recorder=recorder,
         )
 
         if self.prompt_logger and result:
@@ -743,10 +843,20 @@ class DualTrackWorkflow:
                         previous_tail=previous_tail,
                         beat_id=beat.get("beat_id"),
                         prompt_logger=self.prompt_logger,
+                        recorder=self.recorder,
                     )
                     refined_segments.append(refined_segment)
                 except Exception as e:
                     logger.error(f"[DualTrack] 阶段=REFINING 状态=FAILED beat={beat_index} error={e}")
+                    # Phase 0 T5：单 beat 精修失败不再静默用原文
+                    if self.recorder is not None:
+                        self.recorder.record_degraded(
+                            stage=f"refining.beat.{beat_index}",
+                            reason="beat_refinement_exception",
+                            action="kept_original_segment",
+                            model_slot="creative",
+                            detail=f"{type(e).__name__}: {str(e)[:200]}",
+                        )
                     refined_segments.append(segment)
             else:
                 refined_segments.append(segment)
@@ -802,10 +912,20 @@ class DualTrackWorkflow:
                 current_draft=stitched_draft,
                 revision_plan=revision_plan,
                 word_count=original_word_count,
+                recorder=self.recorder,
             )
             return refined_text
         except Exception as e:
             logger.error(f"[DualTrack] 全局精修失败: {e}，返回原文")
+            # Phase 0 T5：全局精修失败不再静默返回原文
+            if self.recorder is not None:
+                self.recorder.record_degraded(
+                    stage="refining.global",
+                    reason="global_refinement_exception",
+                    action="kept_stitched_draft",
+                    model_slot="creative",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
             return stitched_draft
 
 

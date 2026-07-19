@@ -217,3 +217,121 @@ def build_stitch_prompt(
 {chr(10).join(chunk_lines) if chunk_lines else "暂无"}
 """
     return system_prompt, user_prompt
+
+
+# ============================================================
+# CP3.2 局部缝合 Prompt（蓝图 §4.7）
+# ============================================================
+
+def build_local_seam_prompt(
+    chapter: Chapter,
+    beats: list[dict],
+    seam_index: int,
+    total_seams: int,
+    left_chunk_index: int,
+    right_chunk_index: int,
+    left_window: str,
+    right_window: str,
+    anchor_pov: str = None,
+    sketch_text: str = None,
+    book: Book = None,
+) -> tuple[str, str]:
+    """构建局部缝合接缝重写 Prompt（CP3.2 蓝图 §4.7）。
+
+    职责：只重写两个相邻 chunk 之间的过渡段（接缝），保留各 chunk 主体。
+    输入只含接缝前后各约 200 字窗口，显著降低 max_tokens（预估 15000 → 3000）。
+
+    Args:
+        chapter: 章节实体
+        beats: 节拍列表（用于取接缝两侧的 beat summary 作为上下文）
+        seam_index: 当前接缝序号（0-based）
+        total_seams: 接缝总数
+        left_chunk_index: 左侧 chunk 索引
+        right_chunk_index: 右侧 chunk 索引
+        left_window: 左侧 chunk 末尾约 200 字窗口
+        right_window: 右侧 chunk 开头约 200 字窗口
+        anchor_pov: 主导视角角色名（双轨反蒙太奇模式）
+        sketch_text: 连贯速写（可截取作为过渡参考）
+        book: 书籍实体（取 style_blacklist）
+
+    Returns:
+        tuple[str, str]: (system_prompt, user_prompt)
+    """
+    # 取接缝两侧的 beat 摘要作为上下文（帮助 LLM 理解过渡语义）
+    left_beat_summary = ""
+    right_beat_summary = ""
+    if 0 <= left_chunk_index < len(beats):
+        left_beat_summary = beats[left_chunk_index].get("summary", "")
+    if 0 <= right_chunk_index < len(beats):
+        right_beat_summary = beats[right_chunk_index].get("summary", "")
+
+    # Sketch 参考（取前 600 字）
+    sketch_section = ""
+    if sketch_text:
+        sketch_preview = sketch_text[:600] if len(sketch_text) > 600 else sketch_text
+        sketch_section = f"""
+## 连贯速写参考（仅借鉴过渡技巧）
+{sketch_preview}
+"""
+
+    # 黑名单约束
+    blacklist_section = ""
+    if book:
+        bl = getattr(book, "style_blacklist", None) or []
+        if isinstance(bl, list) and bl:
+            blacklist_section = (
+                f"\n## 黑名单词库约束（最高优先级）\n"
+                f"过渡段绝对不能包含：{'、'.join(s for s in bl if s)}。"
+            )
+
+    # POV 约束（反蒙太奇模式）
+    pov_section = ""
+    if anchor_pov:
+        pov_section = (
+            f"\n## 视角收束约束\n"
+            f"主导视角为【{anchor_pov}】。过渡段应保持该视角的感知流，"
+            f"不得切换到他人内心。"
+        )
+
+    system_prompt = f"""你是小说统稿编辑，负责修复两个并行生成片段之间的接缝。
+
+## 你的任务（局部接缝重写）
+你只负责重写**接缝过渡段**，不是重写整章。给你的是：
+- 左侧片段的末尾约 200 字（上文）
+- 右侧片段的开头约 200 字（下文）
+
+你需要产出一个**过渡段**（约 100-300 字），把上文和下文自然连接起来。
+
+## 过渡段要求（最高优先级）
+1. **承接上文**：与左侧末尾的语气、节奏、情绪自然衔接
+2. **引出下文**：为右侧开头的场景/动作做铺垫，不突兀
+3. **消除胶水词**：禁用"与此同时"、"视角回到"、"在这关键时刻"等生硬转场词；
+   用具体动作、感官描写、视线偏移代替
+4. **收束去AI味**：不要在过渡段末尾升华/总结命运/拔高立意
+5. **字数控制**：100-300 字，不要冗长；不要重复上下文已有的内容
+6. **不输出上下文**：只输出过渡段本身，不要复述上文或下文
+{sketch_section}{blacklist_section}{pov_section}
+
+## 输出要求
+- 只输出过渡段正文（100-300 字）
+- 不要标题、不要解释、不要 Markdown 标记
+- 不要复述上文或下文，只写中间的过渡内容
+"""
+
+    user_prompt = f"""请重写接缝 {seam_index + 1}/{total_seams} 的过渡段：
+
+【左侧片段末尾（上接）】
+{left_window}
+
+---
+
+【右侧片段开头（下引）】
+{right_window}
+
+【上下文参考】
+- 左侧 Beat 摘要：{left_beat_summary or '无'}
+- 右侧 Beat 摘要：{right_beat_summary or '无'}
+
+请输出连接上文与下文的过渡段（100-300 字），不要包含上文或下文内容。"""
+
+    return system_prompt, user_prompt

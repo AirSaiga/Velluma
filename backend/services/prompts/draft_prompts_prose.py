@@ -399,93 +399,96 @@ def build_prose_draft_prompt_v25(
 
     previous_tail_text = previous_tail if previous_tail else "（章节开头，无前文）"
 
-    system_prompt = f"""你是专精长文本渲染的专业小说家。你的任务是根据提供的最优潜意识，极其克制地沉浸式续写正文。
+    # ========================================================================
+    # 约束分层：system prompt 只保留 P0 底线（3 条），其余全部移到 user prompt
+    # ========================================================================
 
-{assets_section}
+    # P0 底线 1：世界观防污染
+    p0_tonality = f"本书是【{book_genre}】，严禁题材污染（如科幻出现修仙/魔法）。"
 
-【锁2：知觉与感官遮罩层 (Perception Masking)】
-当前POV角色的状态为：【{pov_perception_state_text}】。
-> 警告：如果该状态包含"昏迷/重伤/失去控制"，你【绝对禁止】描写该角色做出清醒、精准的主动战术动作（主动挥拳、精准射击、躲避、开口大叫等）。
-该角色的一切动作只能是被动的：例如"被惯性抛飞"、"躯体不受控制地痉挛"、"在混沌中感知到震动"、"无意识的喘息"。必须写出命悬一线的巨物支配感！
+    # P0 底线 2：硬红线
+    p0_red_lines = red_lines_text if red_lines_text and red_lines_text != "（无特殊红线）" else "无特殊红线"
 
-【锁3：世界观基调锁 (Tonality Lock)】
-本书基调：【{book_genre}】。
-> 警告：绝不可发生题材污染。允许使用生动比喻（如"像野兽般咆哮"），但【严禁】把比喻当成物理现实写出来（如：机甲绝对不能长出真实的血肉、触手或骨齿；不能施展魔法光效）。
+    # P0 底线 3：POV 锁定（极简表述）
+    p0_pov = f"只写【{pov_character}】能感知到的内容，不写其他角色的内心想法。"
 
-【锁4：大纲红线 (Red Lines) - 撞线即判废】
-{red_lines_text}
+    # 情境信息（主指令区，非约束）
+    situation_section = f"""【前文衔接】
+{previous_tail_text}
 
-{cross_chapter_lock_text}
+【当前情境】
+POV 角色：{pov_character}
+场景：{location if location else "未指定"}
+剧情节点：{beat_summary if beat_summary else "推进剧情"}
+场景目标：{intent_goal}"""
 
-## 【物理边界锁定】
-你必须严格遵守主角当前的物理实体状态：{physical_state_lock if physical_state_lock else "未指定"}
+    # 角色状态（事实信息，非命令）
+    state_reference = f"""【角色状态】
+物理状态：{physical_state_lock if physical_state_lock else "未指定"}
+知觉状态：{pov_perception_state_text}
+心理状态：{current_emotional_state if current_emotional_state else "未指定"}
+在场关系：{relational_state_lock if relational_state_lock else "无特殊关系"}"""
 
-## 【当前心理状态 (Emotional Scratchpad)】
-紧接上一幕，主角当前的心境是：{current_emotional_state if current_emotional_state else "未指定"}
+    # 约束底线区（明确标为不可违反，但语气自然）
+    constraints_section = f"""【底线约束 — 不可违反】
+1. 世界观：{p0_tonality}
+2. 红线：{p0_red_lines}
+3. 视角：{p0_pov}"""
+    if cross_chapter_lock_text:
+        constraints_section += f"\n{cross_chapter_lock_text}"
+    if assets_section:
+        constraints_section += f"\n{assets_section}"
+    if spatial_ledger_section:
+        constraints_section += f"\n{spatial_ledger_section}"
 
-## 【在场角色与动态关系 (Relational State)】
-{relational_state_lock if relational_state_lock else "（无特殊关系约束）"}
+    # 风格参考区（标注"可选参考"，减轻心理压力）
+    style_reference = f"""【风格参考 — 按需取舍，不必逐条回应】
+• 节奏倾向：{pacing_instruction}
+• 倾向于：具体动作、感官细节、口语化呼吸感、思维噪音
+• 避免：设定倾倒、预告旁白、过度解释"""
 
-{cognitive_aperture_section}
+    if cognitive_aperture_section:
+        # 将认知视角的命令式"必须"改为参考式"建议"
+        cognitive_ref = cognitive_aperture_section.replace("必须遵循", "建议遵循").replace("严禁", "尽量避免").replace("绝对禁止", "建议避免")
+        style_reference += f"\n{cognitive_ref}"
 
-{persistent_anchors_section}
+    if persistent_anchors_section:
+        # 将锚点的"禁止突兀改变"改为"注意保持连贯"
+        anchors_ref = persistent_anchors_section.replace("禁止突兀改变", "注意保持连贯").replace("必须渐进演变", "建议渐进演变")
+        style_reference += f"\n{anchors_ref}"
 
-## 【叙事原则】
-1. 单一视角锁定：绝对锁定在【{pov_character}】的感官范围内
-2. 动作即性格：通过角色的动作选择展现性格
-3. 环境即情绪：让环境描写映射角色的心理状态
-4. 对话即冲突或关系：台词不必句句精炼，允许停顿、沉默、废话和言不由衷
+    if pov_character_profile:
+        style_reference += f"\n【角色设定参考】\n{pov_character_profile}"
 
-## 【POV角色核心设定】
-{pov_character_profile if pov_character_profile else f"（{pov_character} 无额外设定）"}
+    if accumulated_summary:
+        style_reference += f"\n{accumulated_section}"
 
-## 【反AI味协议】
-- 禁止设定倾倒（不要解释世界观设定）
-- 禁止预告旁白（不要暗示后续剧情）
-- 禁止形容词堆砌（用具体动作替代抽象描述）
-- 摒弃一切华丽虚词，用具体、短促的动作展现张力
+    # ========================================================================
+    # 精简 system prompt（~300 tokens）
+    # ========================================================================
+    system_prompt = f"""你是小说家。请根据下文提供的情境续写正文。
 
-## 【人味增强协议 - V4.1】
-1. **允许不完美**：角色可以有语无伦次的心理活动、重复的念头、无意义的观察；叙述声音可以带轻微的疲惫、偏执或幽默。
-2. **感官的私人偏见**：所有描写必须通过 POV 角色的个人滤镜。焦虑者注意门窗和退路，愤怒者注意对方的下颌线条和握姿，思乡者注意与故乡相似的气味。
-3. **思维的噪音**：在动作间隙，允许插入与当前主线无关的记忆碎片、一闪而过的联想或生理上的细微不适（口干、耳鸣、指尖发麻）。
-4. **拒绝过度解释**：不要替读者总结"这意味着什么"或"他意识到了"，让细节自己说话。
-5. **口语化呼吸感**：对话不必句句精炼，允许停顿、半截话、废话、反问和沉默；叙述句也可以偶尔带口语节奏。
-6. **句式的呼吸**：不要通篇都是短句。紧张时用短句，放松或沉思时用拖沓的长句，制造呼吸感。
+底线（不可违反）：
+① {p0_tonality}
+② {p0_red_lines}
+③ {p0_pov}
 
-## 【续写要求】
-- 目标字数：约 {target_words} 字（允许适度超出，完整性优先）
-- 只输出正文，不要解释
-- 段落之间用双换行符分隔
-- 禁止使用 Markdown 格式
-- 直接输出纯文本
+直接输出正文，不要解释，不要 Markdown，段落用空行分隔。目标约 {target_words} 字。"""
 
-【前文尾巴 - 必须无缝衔接】
-{previous_tail_text}"""
+    # ========================================================================
+    # 重构 user prompt（四层结构：情境 → 状态 → 底线 → 风格参考）
+    # ========================================================================
+    user_prompt = f"""{situation_section}
 
-    user_prompt = f"""请根据以下信息续写小说正文：
+{state_reference}
 
-【POV角色】
-{pov_character}
+{constraints_section}
 
-【当前场景】
-{location if location else "未指定具体地点"}
+{style_reference}
 
-【场景目标】
-{intent_goal}
+【情感锚点】
+{subconscious_thought if subconscious_thought else "（无特定情感锚点）"}
 
-【角色最优潜意识（情感锚点）】
-{subconscious_thought}
-
-【本段剧情目标（Beat）】
-{beat_summary if beat_summary else "推进剧情"}
-
-【约束条件】
-{chr(10).join(intent_constraints) if intent_constraints else "- 无特殊约束"}
-
-【前情累积摘要】
-{accumulated_summary if accumulated_summary else "（无前情摘要）"}
-
-请衔接前文尾巴，以极具质感的画面描写和物理碰撞感输出正文。直接输出纯文本，禁用 Markdown 格式。"""
+请续写正文。"""
 
     return system_prompt, user_prompt

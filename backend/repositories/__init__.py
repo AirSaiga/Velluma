@@ -59,3 +59,10 @@ from backend.repositories.memory_repository import MemoryRepository
 from backend.repositories.map_repository import MapLocationRepository
 from backend.repositories.plot_ledger_repository import PlotLedgerRepository
 from backend.repositories.asset_repository import AssetRepository, ChapterAssetRepository
+# CP2.1b 新增
+from backend.repositories.chapter_card_repository import ChapterCardRepository
+from backend.repositories.style_card_repository import StyleCardRepository
+from backend.repositories.author_sample_repository import AuthorSampleRepository
+from backend.repositories.system_cliche_repository import SystemClicheRepository
+# CP3.1a 新增
+from backend.repositories.quality_report_repository import QualityReportRepository

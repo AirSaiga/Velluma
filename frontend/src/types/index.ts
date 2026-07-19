@@ -268,10 +268,35 @@ export interface BeatDraftResult {
   mcts_rollout?: any[]
 }
 
+export interface SketchSegment {
+  beat_index: number
+  beat_id?: string
+  text: string
+  transition_to_next?: string
+}
+
+export interface SketchEmotionPoint {
+  beat_index?: number
+  emotion?: string
+  intensity?: number
+  [key: string]: any
+}
+
 export interface SketchResult {
   sketch_text: string
   word_count: number
   prompts?: any[]
+  // CP4.2：速写骨架分段（蓝图 §4.5），供 SketchEditorPanel 展示 + 编辑
+  segments?: SketchSegment[]
+  emotion_arc?: SketchEmotionPoint[]
+}
+
+// CP4.2：SKETCH_DONE SSE 事件的 segments payload（与 SketchSegment 对齐，但字段都可选）
+export interface SketchDonePayload {
+  segments_count: number
+  segments?: SketchSegment[]
+  emotion_arc?: SketchEmotionPoint[]
+  sketch_text_preview?: string
 }
 
 export interface AdjustmentPlan {
@@ -333,4 +358,182 @@ export interface PublishChapterResponse {
   world_snapshot?: Record<string, any>
   character_extraction?: CharacterExtractionSummary
 }
+
+// ============================================================
+// CP2.5 新增类型 - Phase 1 合并闸门 + 文风体系
+// ============================================================
+
+// ---- 章节卡（ChapterCard，合并闸门核心）----
+
+export interface MustHitEvent {
+  event: string
+  emotion?: string | null
+  must: boolean
+}
+
+export interface InvolvedCharacter {
+  name: string
+  entry?: string | null
+  exit?: string | null
+}
+
+export interface ForeshadowOp {
+  action: 'plant' | 'advance' | 'payoff' | 'drop'
+  ledger_id?: string | null
+  note: string
+}
+
+export interface ChapterCardContinuity {
+  from_chapter?: number | null
+  time_gap?: string | null
+  location?: string | null
+}
+
+export interface ChapterCard {
+  id?: string
+  book_id?: string
+  chapter_id?: string | null
+  chapter_number: number
+  purpose?: string | null
+  must_hit_events: MustHitEvent[]
+  involved_characters: InvolvedCharacter[]
+  foreshadow_ops: ForeshadowOp[]
+  continuity: ChapterCardContinuity
+  word_target: number
+  pacing: 'fast' | 'medium' | 'slow'
+  tension: number
+  style_override_id?: string | null
+  status?: 'draft' | 'confirmed' | 'generating' | 'done'
+}
+
+// ---- Plan 联合预览/确认 ----
+
+export interface PlanPreviewResponse {
+  chapter_card: ChapterCard
+  beats: ConfirmedStoryBeat[]
+  degraded?: { reason: string; action: string; detail?: string } | null
+  debug_prompt?: any
+}
+
+export interface PlanConfirmRequest {
+  chapter_card_fields: Partial<ChapterCard>
+  beats: ConfirmedStoryBeat[]
+  word_count?: number
+}
+
+// ---- 文风卡（StyleCard）----
+
+export interface NegativeItem {
+  word: string
+  alternative?: string | null
+}
+
+export interface StyleCard {
+  id?: string
+  book_id?: string
+  chapter_id?: string | null
+  positive_profile: Record<string, string>
+  negative_list: NegativeItem[]
+  dialogue_ratio_target?: number | null
+  paragraph_rhythm?: string | null
+  notes?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface StyleExtractResponse {
+  positive_profile: Record<string, string>
+  negative_list: NegativeItem[]
+  dialogue_ratio_target?: number | null
+  paragraph_rhythm?: string | null
+  degraded?: { reason: string; action: string; detail?: string } | null
+}
+
+// ---- 作者样本（AuthorSample）----
+
+export type AuthorSampleSceneType = 'dialogue' | 'action' | 'lyrical' | 'suspense' | 'general'
+
+export interface AuthorSample {
+  id: string
+  book_id: string
+  chapter_id?: string | null
+  scene_type: AuthorSampleSceneType
+  content: string
+  word_count: number
+  source: string
+  created_at: string
+}
+
+export interface AuthorSampleSearchHit {
+  sample: AuthorSample
+  distance: number
+}
+
+// ---- 成本报告（CostReport，Phase 0 观测层）----
+
+export interface CostReportStage {
+  stage: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  thinking_tokens: number
+  latency_ms_avg: number
+  degraded_count: number
+  model_slots: string[]
+}
+
+export interface CostReportTotals {
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  thinking_tokens: number
+  total_tokens: number
+  degraded_count: number
+}
+
+export interface CostReport {
+  chapter_id: string
+  run_id: string
+  stages: CostReportStage[]
+  totals: CostReportTotals
+}
+
+// ---- 质量报告（QualityReport，Phase 2 CP3.1a 双层审计）----
+
+export interface FindingItem {
+  severity: 'blocker' | 'warning' | 'info'
+  category: 'timeline' | 'characterization' | 'worldview' | 'fact' | 'style'
+  quote?: string | null
+  offset?: [number, number] | null
+  beat_id?: number | null
+  detail: string
+  suggestion?: string | null
+}
+
+export interface MetricsBlock {
+  cliche_hits_per_1k?: number
+  sentence_len_cv?: number
+  dialogue_ratio?: number
+  word_achieve_rate?: number
+  red_line_violations?: number
+  [key: string]: number | undefined
+}
+
+export interface DegradedInfo {
+  reason: string
+  action: string
+  detail?: string
+}
+
+export interface QualityReport {
+  id: string
+  chapter_id: string
+  run_id?: string | null
+  metrics: MetricsBlock
+  findings: FindingItem[]
+  degraded?: DegradedInfo | null
+  verdict?: 'pass' | 'pass_with_fixes' | 'fail' | 'unaudited' | null
+  created_at: string
+}
+
 

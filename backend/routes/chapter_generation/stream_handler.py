@@ -71,6 +71,35 @@ svc_logger = ServiceLogger(logger, LOG_PREFIX_DUAL_TRACK)
 HEARTBEAT_INTERVAL = 30
 
 
+def _story_beat_to_dict(sb: Any) -> dict:
+    """CP2.3e：StoryBeat ORM 转 beat dict（供 stream_handler DB 优先路径使用）。
+
+    与 save_story_beats 的写入字段对齐，确保 round-trip 一致。
+    """
+    return {
+        "beat_id": sb.beat_id or f"beat-{sb.position}",
+        "position": sb.position or 0,
+        "location": sb.location,
+        "pov_character": sb.pov_character,
+        "pov_aperture": sb.pov_aperture,
+        "pov_perception_state": sb.pov_perception_state,
+        "anchor_pov": sb.anchor_pov,
+        "original_actor": sb.original_actor,
+        "action_summary": sb.action_summary,
+        "worldbuilding_instruction": sb.worldbuilding_instruction,
+        "entry_state": sb.entry_state,
+        "exit_state": sb.exit_state,
+        "red_lines": sb.red_lines or [],
+        "word_count_target": sb.word_count_target or 0,
+        "target_words": (sb.meta or {}).get("target_words", sb.word_count_target or 0),
+        "summary": sb.summary or "",
+        "pacing_type": sb.pacing_type,
+        "weight": sb.weight or 1,
+        "persistent_state_anchors": sb.persistent_state_anchors or [],
+        "participants": getattr(sb, "participants", None) or [],
+    }
+
+
 class DualTrackGenerationRequest(GenerateChapterAgenticRequest):
     """双轨生成请求（扩展原有请求）"""
 
@@ -86,8 +115,7 @@ class DualTrackGenerationRequest(GenerateChapterAgenticRequest):
     # Sketch 配置
     sketch_ratio: float = 0.45  # Sketch 字数占比
 
-    # 模型选择
-    sketch_model: Optional[str] = None  # 默认使用 creative_model
+    # Phase 0 T6 清理：sketch_model 字段删除（全代码库零消费方，死字段）
 
 
 class DualTrackStreamHandler:
@@ -129,6 +157,15 @@ class DualTrackStreamHandler:
         # 初始化组件
         self.checkpoint_manager = CheckpointManager(db)
         self.progress_tracker = ProgressTracker()
+        # Phase 0 观测层：RunRecorder 实例，记录 LLM 调用计量
+        # 延迟到 run_id 解析后绑定（见 _execute_generation）
+        self.recorder: Optional[Any] = None
+        # CP2.4：sketch 先行模式产物
+        self.sketch_segments: Optional[List[str]] = None
+        self._pregenerated_sketch_result: Optional[Any] = None
+        # CP2.3e：章节卡与文风卡（Phase 1 后加载）
+        self.chapter_card: Optional[Any] = None
+        self.style_card: Optional[Any] = None
 
         # 状态变量
         self.chapter: Optional[Chapter] = None
@@ -198,7 +235,7 @@ class DualTrackStreamHandler:
         context = await load_full_chapter_context(
             self.chapter_id,
             self.repos,
-            rag_params=resolved_params if self.request.is_basic_mode() else None,
+            rag_params=resolved_params,  # T6：editor_mode 已删，无条件传 rag_params
         )
 
         if not context:
@@ -209,7 +246,37 @@ class DualTrackStreamHandler:
         self.book = context.book
         self.run_id = self._resolve_run_id(self.chapter)
 
+        # Phase 0 观测层：初始化 RunRecorder，绑定本次 run
+        # 警示：recorder 在工作流层收集、在 _cleanup 批量落库
+        from backend.services.observability.run_recorder import RunRecorder
+        self.recorder = RunRecorder(
+            chapter_id=str(self.chapter.id),
+            run_id=self.run_id,
+        )
+
+        # CP2.3e：加载章节卡（合并闸门依赖）+ 硬要求 status=confirmed
+        from backend.repositories import ChapterCardRepository, StyleCardRepository
+        cc_repo = ChapterCardRepository(self.db)
+        self.chapter_card = await cc_repo.get_by_chapter(self.chapter.id)
+        # 兼容开关：chapter.generation_status.skip_plan_gate=true 可跳过硬强制
+        gen_status = self.chapter.generation_status or {}
+        skip_gate = bool(gen_status.get("skip_plan_gate"))
+        if (not self.chapter_card or self.chapter_card.status != "confirmed") and not skip_gate:
+            yield build_sse_event(
+                "ERROR",
+                "本章未确认章节卡（chapter_card）。请先调 POST /api/chapters/{id}/plan + /plan/confirm。"
+                "如需绕过（过渡期/测试），在 chapter.generation_status 设 skip_plan_gate=true。",
+            )
+            return
+
+        # CP2.3e：加载 style_card（CP2.2d 接线，补 CP1.3 漏掉的 1 行）
+        sc_repo = StyleCardRepository(self.db)
+        self.style_card = await sc_repo.get_effective_card(self.book.id, self.chapter.id)
+
         effective_word_count = self.request.word_count or 2000
+        # CP2.3e：若 chapter_card 有 word_target，作为有效字数参考
+        if self.chapter_card and getattr(self.chapter_card, "word_target", None):
+            effective_word_count = self.chapter_card.word_target
 
         # 更新章节状态
         self.chapter.generation_run_id = self.run_id
@@ -298,6 +365,69 @@ class DualTrackStreamHandler:
         beats, anchor_pov = self.beats_result or ([], None)
 
         # ===================================================================
+        # Phase 3.5: CP2.4 sketch 预生成（在 draft 前完成，segments 注入 P2）
+        # ===================================================================
+        # 设计：原本 Track A/Track B 在 dual_track 内并行，sketch 无法在 draft 前可用。
+        # CP2.4 改为 stream_handler 显式两阶段：先 sketch → 提取 segments → 传给 draft。
+        # sketch 在 draft 前必然完成，segments 注入成为常态（完成 decisions U3a 收尾）。
+        self.sketch_segments: Optional[List[str]] = None
+        if beats and self._should_run_sketch_ahead():
+            try:
+                yield build_sse_event("SKETCH_GENERATION", "生成速写骨架（CP2.4 先行模式）...")
+                sketch_segments = await self._generate_sketch_ahead(
+                    beats=beats,
+                    context=context,
+                    anchor_pov=anchor_pov,
+                    effective_word_count=effective_word_count,
+                )
+                if sketch_segments:
+                    self.sketch_segments = sketch_segments
+                    svc_logger.info(
+                        f"[Generation] 阶段=SKETCH 状态=PREGENERATED segments={len(sketch_segments)}"
+                    )
+                    # CP4.2：SKETCH_DONE payload 含完整 segments + emotion_arc（蓝图 §4.5）
+                    # 供前端 SketchEditorPanel 展示 + 编辑
+                    sketch_payload = {
+                        "segments_count": len(sketch_segments),
+                    }
+                    if self._pregenerated_sketch_result:
+                        pr = self._pregenerated_sketch_result
+                        # segments 总长截断到 2000 字（sketch_ratio 默认 0.45，3000 字章节 sketch 约 1350 字）
+                        segments_out = []
+                        total_chars = 0
+                        for seg in sorted(pr.segments, key=lambda s: s.beat_index):
+                            seg_text = (seg.text or "")[:500]
+                            total_chars += len(seg_text)
+                            if total_chars > 2000:
+                                break
+                            segments_out.append({
+                                "beat_index": seg.beat_index,
+                                "beat_id": seg.beat_id,
+                                "text": seg_text,
+                                "transition_to_next": (seg.transition_to_next or "")[:200],
+                            })
+                        sketch_payload["segments"] = segments_out
+                        sketch_payload["emotion_arc"] = (pr.emotion_arc or [])[:20]
+                        sketch_payload["sketch_text_preview"] = (pr.sketch_text or "")[:600]
+                    yield build_sse_event(
+                        "SKETCH_DONE",
+                        f"速写骨架已生成（{len(sketch_segments)} 段）",
+                        **sketch_payload,
+                    )
+                else:
+                    svc_logger.info("[Generation] 阶段=SKETCH 状态=SKIPPED reason=empty_segments")
+            except Exception as e:
+                svc_logger.warning(f"[Generation] sketch 预生成失败（不阻断 draft）: {e}")
+                if self.recorder is not None:
+                    self.recorder.record_degraded(
+                        stage="sketch.pregeneration",
+                        reason="exception",
+                        action="skipped_injection",
+                        model_slot="creative",
+                        detail=f"{type(e).__name__}: {str(e)[:200]}",
+                    )
+
+        # ===================================================================
         # Phase 4: 执行双轨工作流
         # ===================================================================
         async for event in self._execute_workflow(
@@ -307,6 +437,81 @@ class DualTrackStreamHandler:
             effective_word_count=effective_word_count,
         ):
             yield event
+
+    # ===================================================================
+    # CP2.4：sketch 预生成（在 draft 前完成，segments 注入 P2）
+    # ===================================================================
+
+    def _should_run_sketch_ahead(self) -> bool:
+        """判断是否启用 sketch 先行模式（CP2.4）。
+
+        启用条件：
+        - DualTrackGenerationRequest.enable_sketch_track（用户未禁用 Track B）
+        - 未显式 skip（chapter.generation_status.skip_sketch_ahead）
+
+        默认：与 enable_sketch_track 一致。
+        """
+        if not getattr(self.request, "enable_sketch_track", True):
+            return False
+        gen_status = self.chapter.generation_status or {}
+        if gen_status.get("skip_sketch_ahead"):
+            return False
+        return True
+
+    async def _generate_sketch_ahead(
+        self,
+        beats: List[dict],
+        context: Any,
+        anchor_pov: Optional[str],
+        effective_word_count: int,
+    ) -> Optional[List[str]]:
+        """预生成 sketch 并提取 segments（按 beat_index 对齐）。
+
+        业务流程：
+        1. 调 SketchGenerator.generate 生成 SketchResult
+        2. 从 SketchResult.segments 提取每段 text，按 beat_index 排序
+        3. 失败返回 None（不阻断 draft）
+
+        Returns:
+            Optional[List[str]]: 按 beat_index 顺序的 segment 文本列表；失败 None
+        """
+        from backend.services.workflows.sketch_generator import (
+            SketchGenerator, SketchGeneratorConfig,
+        )
+
+        # 用 request 的 sketch_ratio 配置（CP0 Phase 0 字段）
+        sketch_ratio = getattr(self.request, "sketch_ratio", 0.45)
+        config = SketchGeneratorConfig(sketch_ratio=sketch_ratio)
+        generator = SketchGenerator(config=config)
+
+        try:
+            sketch_result = await generator.generate(
+                chapter=self.chapter,
+                book=self.book,
+                beats=beats,
+                entities=list(context.entities) if context.entities else [],
+                relationships=list(context.relationships) if context.relationships else [],
+                word_count=effective_word_count,
+                previous_summary=context.previous_summary,
+                anchor_pov=anchor_pov,
+                chapter_assets_schema=self.chapter.chapter_assets_schema or "",
+                recorder=self.recorder,
+            )
+        except Exception as e:
+            svc_logger.warning(f"[Generation] SketchGenerator.generate 失败: {e}")
+            return None
+
+        if not sketch_result or not sketch_result.segments:
+            return None
+
+        # 按 beat_index 排序，提取 text
+        sorted_segs = sorted(sketch_result.segments, key=lambda s: s.beat_index)
+        segments_text = [s.text or "" for s in sorted_segs]
+
+        # 缓存 sketch_result（供后续 stitching/alignment 复用，避免 dual_track 内重复生成）
+        self._pregenerated_sketch_result = sketch_result
+
+        return segments_text if any(segments_text) else None
 
     async def _process_beats_stream(
         self,
@@ -378,11 +583,34 @@ class DualTrackStreamHandler:
                 self.beats_result = [], None  # 存储结果
                 return  # async generator
 
-        # 获取节拍
+        # 获取节拍（CP2.3e：DB 优先 → request.beats → checkpoint fallback）
         beats = []
-        if self.request.beats:
+        # 路径 1：从 DB StoryBeat 表读（已 confirm 的，合并闸门标准路径）
+        if not beats:
+            try:
+                from backend.repositories import ChapterRepository
+                # 借用已有的 chapter 加载（带 story_beats 关系）
+                fresh_chapter = await self.repos["chapter"].get_by_id(self.chapter.id)
+                if fresh_chapter and getattr(fresh_chapter, "story_beats", None):
+                    sb_list = sorted(
+                        fresh_chapter.story_beats,
+                        key=lambda sb: sb.position if sb.position is not None else 0,
+                    )
+                    if sb_list:
+                        beats = [_story_beat_to_dict(sb) for sb in sb_list]
+                        svc_logger.info(
+                            f"[Generation] 阶段=BEATS 状态=LOADED_FROM_DB count={len(beats)}"
+                        )
+            except Exception as e:
+                svc_logger.warning(f"[Generation] 从 DB 加载 beats 失败，fallback: {e}")
+
+        # 路径 2：request.beats（向后兼容）
+        if not beats and self.request.beats:
             beats = normalize_confirmed_beats(self.request.beats, effective_word_count)
-        elif self.request.resume_from_checkpoint and latest_status.get("run_id") == self.run_id:
+            svc_logger.info(f"[Generation] 阶段=BEATS 状态=FROM_REQUEST count={len(beats)}")
+
+        # 路径 3：checkpoint 恢复（向后兼容）
+        elif not beats and self.request.resume_from_checkpoint and latest_status.get("run_id") == self.run_id:
             for checkpoint in reversed(self.chapter.generation_checkpoints or []):
                 if checkpoint.get("stage") == "BEATS_CONFIRMED":
                     beats = checkpoint.get("payload", {}).get("beats", [])
@@ -390,7 +618,7 @@ class DualTrackStreamHandler:
                         break
 
         if not beats:
-            raise ValueError("恢复失败：缺少可用 beats，请重新预览并确认节拍")
+            raise ValueError("恢复失败：缺少可用 beats，请先调 POST /api/chapters/{id}/plan/confirm")
 
         # 注入世界状态约束
         if context.previous_world_snapshot:
@@ -474,6 +702,15 @@ class DualTrackStreamHandler:
 
         except Exception as e:
             svc_logger.error("POV Assignment failed", error=str(e))
+            # Phase 0 T5 修复病灶：POV 失败返回空串静默 → 标记 degraded
+            if self.recorder is not None:
+                self.recorder.record_degraded(
+                    stage="planning.pov",
+                    reason="pov_assignment_exception",
+                    action="empty_pov_string",
+                    model_slot="reasoning",
+                    detail=f"{type(e).__name__}: {str(e)[:200]}",
+                )
 
         anchor_pov = beats[0].get("pov_character") if beats else None
 
@@ -522,6 +759,7 @@ class DualTrackStreamHandler:
         workflow = DualTrackWorkflow(
             config=config,
             prompt_logger=self.prompt_logger,
+            recorder=self.recorder,
         )
 
         yield build_sse_event("DUAL_TRACK_START", "启动双轨并行生成...")
@@ -531,7 +769,9 @@ class DualTrackStreamHandler:
         async def progress_callback(event: str, message: str, **kwargs):
             await self.progress_tracker.emit(event, message, **kwargs)
 
-        # 执行工作流
+        # 执行工作流（T4：透传 open_hooks/world_snapshot；T7：透传 author_intent；
+        #               CP2.3e：透传 style_card/chapter_card；
+        #               CP2.4：透传 sketch_segments（先行模式产出））
         async def run_workflow():
             try:
                 return await workflow.execute(
@@ -548,6 +788,13 @@ class DualTrackStreamHandler:
                     chapter_assets_schema=self.chapter.chapter_assets_schema or "",
                     anchor_pov=anchor_pov,
                     progress_callback=progress_callback,
+                    open_hooks=list(context.open_hooks) if context.open_hooks else None,
+                    previous_world_snapshot=context.previous_world_snapshot,
+                    author_intent=getattr(self.request, 'author_intent', None),
+                    style_card=self.style_card,
+                    chapter_card=self.chapter_card,
+                    sketch_segments=self.sketch_segments,
+                    pregenerated_sketch_result=self._pregenerated_sketch_result,
                 )
             finally:
                 self.progress_tracker.mark_done()
@@ -647,6 +894,47 @@ class DualTrackStreamHandler:
             yield StreamEventBuilder.build_reviewing(
                 score=result.adjustment_plan.alignment_score,
                 needs_fix=result.adjustment_plan.needs_adjustment,
+            )
+
+        # ====================================================================
+        # CP3.4 双层审计实时化（蓝图 §4.8 + 病灶 9 SSE 实时化）
+        # ====================================================================
+        # 在 REVIEWING 后、FINAL_TEXT_STREAM 前，触发双层审计（代码级 + LLM 级）。
+        # 实时推送 AUDIT_START → AUDIT_DONE（或降级时 DEGRADED）。
+        # 审计结果持久化到 QualityReport 表，供前端 QualityReportPanel 展示。
+        #
+        # 决策 §4.4 deprecation 期：本步骤失败不阻断主流程（仍发送 FINAL_TEXT_STREAM）。
+        audit_verdict: Optional[str] = None
+        try:
+            yield StreamEventBuilder.build_audit_start()
+            from backend.routes.chapter_generation import _execute_dual_layer_audit
+            audit_report = await _execute_dual_layer_audit(
+                db=self.db,
+                chapter_id=str(self.chapter.id),
+                run_id=self.run_id,
+            )
+            audit_verdict = audit_report.get("verdict")
+            findings_count = len(audit_report.get("findings") or [])
+            degraded_flag = bool(audit_report.get("degraded"))
+            yield StreamEventBuilder.build_audit_done(
+                verdict=audit_verdict or "unaudited",
+                findings_count=findings_count,
+                degraded=degraded_flag,
+            )
+            if degraded_flag:
+                degraded_info = audit_report.get("degraded") or {}
+                yield StreamEventBuilder.build_degraded(
+                    stage="audit",
+                    reason=str(degraded_info.get("reason", "unknown")),
+                    action=str(degraded_info.get("action", "mark_unaudited")),
+                )
+        except Exception as e:
+            svc_logger.warning(f"CP3.4 双层审计失败（不阻断主流程）: {type(e).__name__}: {e}")
+            yield StreamEventBuilder.build_degraded(
+                stage="audit",
+                reason=f"{type(e).__name__}",
+                action="skip_audit_continue",
+                detail=str(e)[:200],
             )
 
         # 发送最终文本流
@@ -845,6 +1133,26 @@ class DualTrackStreamHandler:
 
     async def _cleanup(self) -> None:
         """清理资源"""
+        # Phase 0 观测层：将 RunRecorder 收集的 LLM 调用计量批量落库
+        if self.recorder is not None:
+            try:
+                count = await self.recorder.flush_to_db(self.db)
+                if count > 0:
+                    await self.db.commit()
+                    svc_logger.info(
+                        f"[Generation] 阶段=OBSERVABILITY 状态=FLUSHED records={count}",
+                        run_id=self.run_id,
+                    )
+            except Exception as flush_e:
+                svc_logger.error(
+                    "[Generation] 阶段=OBSERVABILITY 状态=ERROR 原因=落库失败",
+                    error=str(flush_e),
+                )
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
         if self.prompt_logger and not getattr(self.prompt_logger, '_finalized', False):
             try:
                 self.prompt_logger.finalize(

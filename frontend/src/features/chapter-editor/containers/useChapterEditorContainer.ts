@@ -15,6 +15,7 @@ export interface ChapterEditorContainerProps {
   characters: Character[]
   apiConfig: ApiConfig
   metaCollapsed?: boolean
+  // CP4.5：skip_plan_gate 兼容开关已移除
 }
 
 type ChapterEditorEmit = (event: 'update-chapter' | 'update-meta-collapsed' | 'refresh-characters' | 'editor-entity-focus' | 'request-critique' | 'intent-generate' | 'intent-save', ...args: any[]) => void
@@ -151,7 +152,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     return `耗时 ${duration.toFixed(1)} 秒`
   }
 
-  function confirmBeatsAndGenerate() {
+  async function confirmBeatsAndGenerate() {
     const payloadBase = beatPreview.buildConfirmedBeatsPayload()
     if (!payloadBase) {
       showToast('当前没有可用节拍，请重新生成', 'warning')
@@ -166,6 +167,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
 
     const savedPayload: GenerateChapterAgenticPayloadWithBeats = { ...payload }
+
+    // CP2.5b：合并闸门——先调 plan/confirm 写入 DB（status=confirmed）
+    // CP4.5：skip_plan_gate 兼容开关已移除，confirm 为必经路径
+    // 后端 /generate-chapter 硬要求 chapter_card.status=confirmed
+    const confirmOk = await beatPreview.confirmPlan()
+    if (!confirmOk) {
+      showToast('章节卡确认失败，已中止生成', 'error')
+      return
+    }
 
     beatPreview.closeBeatReviewModal()
     reset()
@@ -226,7 +236,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           : `本章正文生成完成！已达成最大迭代次数，共重写 ${revisionCount} 次 (${durationText}${topStageText}${aggregateStageText}${llmText})`
         openCompletionModal('生成完成', statusMsg)
       }
-    }, `/chapters/${chapterId}/generate-dual-track`)
+    }, `/chapters/${chapterId}/generate-chapter`)
   }
 
   function toggleCharacter(charId: string) {
@@ -285,6 +295,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
     beatPreview.pendingAgenticPayload.value = payload
     beatPreview.pendingClearEditorOnConfirm.value = hasEditorContent
+    // CP4.5：skip_plan_gate 兼容开关已移除（不再透传到 payload）
 
     const clarifyResult = await outlineClarification.checkOutlineClarification(chapter, {
       api_key: props.apiConfig.api_key,
@@ -337,6 +348,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         return '审阅'
       case 'REFINING':
         return '重写优化'
+      case 'SKETCH_GENERATION':
+        return '生成速写骨架'
+      case 'SKETCH_DONE':
+        return '速写骨架完成'
       case 'FINAL_TEXT_STREAM':
         return '输出正文'
       case 'TEXT_CHUNK':
@@ -411,7 +426,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     }
   }
 
-  async function handlePartialOptimize(payload: { selection: any, instruction: string }) {
+  async function handlePartialOptimize(payload: { selection: any, instruction: string, mode?: string, tone?: string | null }) {
     if (!selectedChapter.value || !props.apiConfig.api_key) {
       showToast('请先配置 API Key', 'warning')
       return
@@ -420,7 +435,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     isFormatting.value = true
 
     try {
-      const { optimized_text } = await generateApi.optimizeSelection({
+      // CP4.1：透传 mode + tone 到后端（蓝图 §4.9）
+      const requestBody: Record<string, any> = {
         chapter_id: selectedChapter.value.id,
         selected_text: payload.selection.text,
         context_before: payload.selection.contextBefore,
@@ -428,8 +444,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
         user_instruction: payload.instruction,
         api_key: props.apiConfig.api_key,
         base_url: props.apiConfig.base_url,
-        model: props.apiConfig.reasoning_model || props.apiConfig.model
-      })
+        model: props.apiConfig.reasoning_model || props.apiConfig.model,
+      }
+      if (payload.mode) {
+        requestBody.mode = payload.mode
+      }
+      if (payload.tone) {
+        requestBody.tone = payload.tone
+      }
+      const { optimized_text } = await generateApi.optimizeSelection(requestBody)
 
       if (optimized_text && editorRef.value) {
         editorRef.value.applyOptimizationDiff(optimized_text)
@@ -520,6 +543,10 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     closeCompletionModal,
     beatPreviewError: beatPreview.beatPreviewError,
     beatPreviewLoading: beatPreview.beatPreviewLoading,
+    // CP2.5b：合并闸门——章节卡 + 重规划
+    chapterCard: beatPreview.chapterCard,
+    planDegraded: beatPreview.planDegraded,
+    regenerateBeatsWithEditedCard: beatPreview.regenerateBeatsWithEditedCard,
     chapterSummary,
     characterUpdates: publisher.characterUpdates,
     characterExtraction: publisher.characterExtraction,
