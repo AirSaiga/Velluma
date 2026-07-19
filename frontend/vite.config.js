@@ -22,8 +22,26 @@ function resolveBackendPort() {
   return 8002
 }
 
+// 动态读取前端端口：优先环境变量 → 端口文件 → 默认值 5175
+// 与后端端口协商机制对称（data/port.txt），避免与其它项目（如 world-atlas）的 Vite 冲突
+const FRONTEND_PORT_FILE = path.resolve(__dirname, '..', 'data', 'frontend_port.txt')
+function resolveFrontendPort() {
+  const envPort = process.env.VELLUMA_FRONTEND_PORT
+  if (envPort) return parseInt(envPort) || 5175
+  try {
+    if (fs.existsSync(FRONTEND_PORT_FILE)) {
+      const port = parseInt(fs.readFileSync(FRONTEND_PORT_FILE, 'utf-8').trim(), 10)
+      if (!isNaN(port) && port > 0) return port
+    }
+  } catch (e) {
+    // 读取失败，使用默认值
+  }
+  return 5175
+}
+
 const BACKEND_PORT = resolveBackendPort()
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
+const FRONTEND_PORT = resolveFrontendPort()
 
 export default defineConfig({
   plugins: [
@@ -40,7 +58,9 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5175,
+    port: FRONTEND_PORT,
+    // strictPort: true 保留 —— 端口已由 start.ps1 预先扫描为空闲，
+    // 若仍冲突则直接报错（不自动换端口，避免与 Electron 加载的 URL 不一致）
     strictPort: true,
     proxy: {
       '/api': {

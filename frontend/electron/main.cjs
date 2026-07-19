@@ -9,13 +9,33 @@ const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 let backendProcess = null
 
-const FIXED_VITE_PORT = 5175
+// CP-dynamic-port: 前端端口也动态协商（与后端 port.txt 对称）
+// 优先级：环境变量 VELLUMA_FRONTEND_PORT → data/frontend_port.txt → 默认 5175
+const DEFAULT_VITE_PORT = 5175
 const DEFAULT_BACKEND_PORT = parseInt(process.env.VELLUMA_BACKEND_PORT) || 8002
 
 // =============================================================================
 // 端口文件路径（与后端 core/config.py 中 PORT_FILE 对应）
 // =============================================================================
 const PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'port.txt')
+const FRONTEND_PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'frontend_port.txt')
+
+function readFrontendPortFromFile() {
+  // 优先环境变量（start.ps1 会设置 VELLUMA_FRONTEND_PORT）
+  if (process.env.VELLUMA_FRONTEND_PORT) {
+    const p = parseInt(process.env.VELLUMA_FRONTEND_PORT, 10)
+    if (!isNaN(p) && p > 0) return p
+  }
+  try {
+    if (fs.existsSync(FRONTEND_PORT_FILE)) {
+      const port = parseInt(fs.readFileSync(FRONTEND_PORT_FILE, 'utf-8').trim(), 10)
+      if (!isNaN(port) && port > 0) return port
+    }
+  } catch (e) {
+    console.warn('[FrontendPortFile] 读取前端端口文件失败:', e.message)
+  }
+  return DEFAULT_VITE_PORT
+}
 
 function readPortFromFile() {
   try {
@@ -207,7 +227,7 @@ async function startBackend() {
 }
 
 async function waitForFrontend() {
-  const port = FIXED_VITE_PORT
+  const port = readFrontendPortFromFile()
   console.log(`[Frontend] Waiting for port ${port}...`)
   
   await waitForPort(port, { timeout: 60000, serviceName: 'Frontend' })
@@ -281,7 +301,7 @@ async function createMainWindow() {
   }
   
   let backendResult = { port: DEFAULT_BACKEND_PORT }
-  let vitePort = FIXED_VITE_PORT
+  let vitePort = readFrontendPortFromFile()
   
   try {
     if (isDev) {

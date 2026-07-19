@@ -11,7 +11,9 @@ $ErrorActionPreference = "Stop"
 # Config
 $Config = @{
     DefaultBackendPort = 8002
-    FrontendPort  = 5175
+    DefaultFrontendPort = 5175   # 起始扫描端口（向后兼容）
+    FrontendPortRange = 100      # 从 5175 起最多扫描 100 个端口（5175~5275）
+    FrontendPort  = $null        # 实际端口（运行时由 Resolve-FrontendPort 填充）
     ProjectRoot   = $PSScriptRoot
     BackendTimeout = 60
     FrontendTimeout = 30
@@ -21,7 +23,8 @@ $Config = @{
         ".venv\Scripts\python.exe"
         "venv\Scripts\python.exe"
     )
-    PortFile      = Join-Path $PSScriptRoot "data\port.txt"
+    PortFile             = Join-Path $PSScriptRoot "data\port.txt"
+    FrontendPortFile     = Join-Path $PSScriptRoot "data\frontend_port.txt"
 }
 
 $Global:ChildProcesses = @()
@@ -40,6 +43,79 @@ function Get-ActualBackendPort {
     }
     # 回退到默认端口
     return $Config.DefaultBackendPort
+}
+
+function Get-ActualFrontendPort {
+    # 优先从端口文件读取实际端口（与后端对称）
+    if (Test-Path $Config.FrontendPortFile) {
+        try {
+            $portStr = Get-Content $Config.FrontendPortFile -Raw
+            $port = [int]$portStr.Trim()
+            if ($port -gt 0) {
+                return $port
+            }
+        } catch {}
+    }
+    return $null
+}
+
+function Find-FreeFrontendPort {
+    # 扫描 5175~(5175+Range) 找第一个空闲端口
+    # 用于避免与其它项目（如 world-atlas）的 Vite 冲突
+    $start = $Config.DefaultFrontendPort
+    $maxOffset = $Config.FrontendPortRange
+    for ($offset = 0; $offset -lt $maxOffset; $offset++) {
+        $candidate = $start + $offset
+        if (-not (Test-PortOpen -Port $candidate)) {
+            return $candidate
+        }
+    }
+    throw "No free frontend port in range $start..$($start + $maxOffset - 1)"
+}
+
+function Resolve-FrontendPort {
+    # 协商前端端口，优先级：
+    # 1. 环境变量 VELLUMA_FRONTEND_PORT（用户强制指定）
+    # 2. 已记录的端口（frontend_port.txt）且该端口空闲 → 复用
+    # 3. 扫描空闲端口（5175 起）
+    # 选中后写入 frontend_port.txt，供 vite.config.js 和 electron/main.cjs 读取
+    $envPort = $env:VELLUMA_FRONTEND_PORT
+    if ($envPort) {
+        $port = [int]$envPort
+        if ($port -gt 0) {
+            Set-FrontendPortFile $port
+            Log-Info "Frontend port from env: $port"
+            return $port
+        }
+    }
+
+    # 检查已记录端口是否仍空闲（可能是上次的残留记录）
+    $recorded = Get-ActualFrontendPort
+    if ($recorded -and -not (Test-PortOpen -Port $recorded)) {
+        Set-FrontendPortFile $recorded
+        return $recorded
+    }
+
+    # 扫描空闲端口
+    $freePort = Find-FreeFrontendPort
+    Set-FrontendPortFile $freePort
+    if ($freePort -ne $Config.DefaultFrontendPort) {
+        Log-Info "Default port $($Config.DefaultFrontendPort) busy, using $freePort"
+    }
+    return $freePort
+}
+
+function Set-FrontendPortFile($Port) {
+    # 写入前端端口文件（供 vite.config.js / electron/main.cjs 协调）
+    try {
+        $portDir = Split-Path $Config.FrontendPortFile -Parent
+        if (-not (Test-Path $portDir)) {
+            New-Item -ItemType Directory -Path $portDir -Force | Out-Null
+        }
+        [System.IO.File]::WriteAllText($Config.FrontendPortFile, $Port.ToString())
+    } catch {
+        Log-Error "Failed to write frontend port file: $_"
+    }
 }
 
 # =============================================================================
@@ -158,7 +234,9 @@ function Invoke-Cleanup() {
     }
     
     $backendPort = Get-ActualBackendPort
-    $ports = @($backendPort, $Config.FrontendPort)
+    # 前端端口：优先用已协商的 $Config.FrontendPort，否则读端口文件
+    $frontendPort = if ($Config.FrontendPort) { $Config.FrontendPort } else { Get-ActualFrontendPort }
+    $ports = @($backendPort, $frontendPort) | Where-Object { $_ -gt 0 }
     foreach ($port in $ports) {
         Kill-ProcessOnPort -Port $port -Name "service" | Out-Null
     }
@@ -235,44 +313,51 @@ function Start-Backend() {
 }
 
 function Start-Frontend() {
+    # 协商前端端口（动态扫描空闲端口，避免与其它项目冲突）
+    $frontendPort = Resolve-FrontendPort
+    $Config.FrontendPort = $frontendPort
+
     if ($SkipFrontend -or $ElectronOnly) {
-        if (Test-PortOpen -Port $Config.FrontendPort) {
-            Log-Success "Frontend already running on port $($Config.FrontendPort)"
+        if (Test-PortOpen -Port $frontendPort) {
+            Log-Success "Frontend already running on port $frontendPort"
             return
         }
         throw "Frontend not running but skip flag set"
     }
-    
-    Log-Step "Starting Frontend..."
-    
+
+    Log-Step "Starting Frontend (port $frontendPort)..."
+
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
-    
+
     if (!(Test-Path (Join-Path $frontendDir "node_modules"))) {
         throw "node_modules not found. Please run: cd frontend && npm install"
     }
-    
-    if (Test-PortOpen -Port $Config.FrontendPort) {
+
+    if (Test-PortOpen -Port $frontendPort) {
         if ($Force) {
-            Kill-ProcessOnPort -Port $Config.FrontendPort -Name "frontend" | Out-Null
+            Kill-ProcessOnPort -Port $frontendPort -Name "frontend" | Out-Null
         } else {
-            Log-Success "Frontend already running on port $($Config.FrontendPort)"
+            Log-Success "Frontend already running on port $frontendPort"
             return
         }
     }
-    
+
     Log-Info "Starting Vite dev server..."
-    
+
+    # 设置环境变量供 vite.config.js 读取（双保险：env + frontend_port.txt）
+    $env:VELLUMA_FRONTEND_PORT = $frontendPort.ToString()
+
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "dev" `
         -WorkingDirectory $frontendDir `
         -WindowStyle Hidden `
         -PassThru
-    
+
     $Global:ChildProcesses += $proc
-    
-    Log-Wait "Waiting for frontend (port $($Config.FrontendPort))..."
-    Wait-ForService -Port $Config.FrontendPort -Name "Frontend" -TimeoutSeconds $Config.FrontendTimeout
-    Log-Success "Frontend ready at http://127.0.0.1:$($Config.FrontendPort)"
+
+    Log-Wait "Waiting for frontend (port $frontendPort)..."
+    Wait-ForService -Port $frontendPort -Name "Frontend" -TimeoutSeconds $Config.FrontendTimeout
+    Log-Success "Frontend ready at http://127.0.0.1:$frontendPort"
 }
 
 function Start-Electron() {
