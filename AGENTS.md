@@ -46,8 +46,12 @@ Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手�
 
 ```
 Velluma/
-├── start.bat                 # Windows 启动入口（调用 start.ps1）
-├── start.ps1                 # PowerShell 启动脚本：依次启动后端 → Vite → Electron
+├── start.bat                 # 兼容入口（转发到 scripts/start.ps1 -Mode dev）
+├── scripts/                  # 启动脚本（生产/开发/调试三模式，详见 scripts/README.md）
+│   ├── start.ps1             # 核心脚本：-Mode prod/dev/debug
+│   ├── start-prod.bat        # 生产体验入口（npm run build + 载入 dist）
+│   ├── start-dev.bat         # 开发入口（Vite + 自动开 DevTools）
+│   └── start-debug.bat       # 调试入口（同 dev，预留扩展）
 ├── requirements.txt          # Python 依赖（含残留的 pywebview）
 ├── model_config.json         # LLM/Embedding/代理配置（含 API Key，已 gitignore，勿提交）
 │
@@ -297,25 +301,30 @@ npm run preview
 
 ### 桌面应用运行（推荐开发方式）
 
-项目使用 **Electron** 作为桌面容器。主启动脚本 `start.ps1` 会依次启动后端、Vite 开发服务器、Electron，并在退出时自动清理所有进程。启动 Electron 前脚本会设置 `VELLUMA_BACKEND_PORT`、`VELLUMA_FRONTEND_PORT`、`VELLUMA_SERVICES_READY` 环境变量供 `electron/main.cjs` 消费。
+项目使用 **Electron** 作为桌面容器。主启动脚本 `scripts/start.ps1` 通过 `-Mode` 参数区分三种运行方式，启动 Electron 前脚本会设置 `VELLUMA_BACKEND_PORT`、`VELLUMA_FRONTEND_PORT`、`VELLUMA_SERVICES_READY` 环境变量供 `electron/main.cjs` 消费（生产模式额外设 `NODE_ENV=production`，使 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server），并在退出时自动清理所有进程。
 
 ```powershell
-# 完整启动（后端 + 前端 Vite + Electron）
-.\start.bat
-# 或
-.\start.ps1
+# 开发模式（默认，根目录 start.bat 等价于此）
+.\scripts\start-dev.bat
+# 调试模式（当前等同 dev，预留扩展）
+.\scripts\start-debug.bat
+# 生产体验模式（npm run build + Electron 载入 dist）
+.\scripts\start-prod.bat
 
 # 强制模式（清理端口冲突后启动）
 .\start.bat -Force
 
 # 只启动 Electron（假设前后端已在运行）
-.\start.ps1 -ElectronOnly
+.\scripts\start.ps1 -Mode dev -ElectronOnly
 
 # 跳过后端启动
-.\start.ps1 -SkipBackend
+.\scripts\start.ps1 -Mode dev -SkipBackend
 
-# 跳过前端 Vite 启动
-.\start.ps1 -SkipFrontend
+# 跳过前端 Vite 启动（dev 模式）/ 跳过 build（prod 模式）
+.\scripts\start.ps1 -Mode dev -SkipFrontend
+
+# DryRun：仅打印将执行的命令与路径，不启动进程
+.\scripts\start.ps1 -Mode prod -DryRun
 ```
 
 **Electron 独立命令（在 frontend 目录下）：**
@@ -326,7 +335,7 @@ npm run electron:preview  # 同上：均为 npm run build && electron .，不启
 npm run electron:build    # 打包安装包（electron-builder）
 ```
 
-> 注意：`app.py`（pywebview 入口）在代码库中已不存在，README 中的相关描述已过时（README 仍有大量过时内容，如推荐 pywebview 启动、`AGENTIC_*` 环境变量等，请以本文档为准）。当前请以 `start.ps1` + Electron 为默认运行方式。
+> 注意：`app.py`（pywebview 入口）在代码库中已不存在，README 中的相关描述已过时（README 仍有大量过时内容，如推荐 pywebview 启动、`AGENTIC_*` 环境变量等，请以本文档为准）。当前请以 `scripts/start.ps1` + Electron 为默认运行方式。
 
 ---
 
@@ -560,7 +569,7 @@ LLM、Embedding、代理的实际配置来源是项目根目录的 `model_config
 - ~~`AGENTIC_FORCE_FAST_MODE`~~（快速模式是请求级参数 `fast_mode`）
 - ~~`DASHSCOPE_API_KEY`~~ / ~~`OPENAI_API_KEY`~~（API Key 全部来自 `model_config.json`，不读环境变量）
 
-另：`start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。
+另：`scripts/start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，生产模式额外设置 `NODE_ENV=production`，属进程内传递，无需用户配置。
 
 ---
 

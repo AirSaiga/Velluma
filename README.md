@@ -176,9 +176,11 @@ npm install
 **推荐：桌面应用完整启动（后端 + 前端 Vite + Electron）**
 
 ```powershell
-.\start.bat
-# 或
-.\start.ps1
+.\start.bat                          # 兼容入口，等价于开发模式
+# 或直接指定模式
+.\scripts\start-dev.bat              # 开发模式（后端 + Vite + Electron，自动开 DevTools）
+.\scripts\start-debug.bat            # 调试模式（当前等同 dev）
+.\scripts\start-prod.bat             # 生产体验（npm run build 后 Electron 载入 dist）
 ```
 
 **仅后端开发**
@@ -197,7 +199,7 @@ cd frontend
 npm run dev
 ```
 
-端口由 `start.ps1` 协商（起始 `5175`，最多扫描 100 个），实际端口写入 `data/frontend_port.txt`。
+端口由 `scripts/start.ps1` 协商（起始 `5175`，最多扫描 100 个），实际端口写入 `data/frontend_port.txt`。
 
 ---
 
@@ -205,7 +207,12 @@ npm run dev
 
 ```
 Velluma/
-├── start.bat / start.ps1     # Windows 启动入口（后端 → Vite → Electron）
+├── start.bat                 # 兼容入口（转发到 scripts/start.ps1 -Mode dev）
+├── scripts/                  # 启动脚本（生产/开发/调试三模式）
+│   ├── start.ps1             # 核心脚本：-Mode prod/dev/debug
+│   ├── start-prod.bat        # 生产体验入口（载入 dist）
+│   ├── start-dev.bat         # 开发入口（Vite + DevTools）
+│   └── start-debug.bat       # 调试入口（同 dev，预留扩展）
 ├── requirements.txt          # Python 依赖
 ├── model_config.json         # LLM/Embedding/代理配置（gitignore，勿提交）
 ├── AGENTS.md                 # 开发指南（架构与现状的权威说明）
@@ -357,7 +364,7 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 > - `AGENTIC_FORCE_FAST_MODE`（快速模式是请求级参数 `fast_mode`）
 > - `DASHSCOPE_API_KEY` / `OPENAI_API_KEY`（Key 全部来自 `model_config.json`）
 
-> `start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。
+> `scripts/start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。
 
 ---
 
@@ -366,11 +373,15 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 ### 桌面应用启动
 
 ```powershell
-.\start.bat              # 完整启动（后端 + Vite + Electron）
-.\start.bat -Force       # 强制模式（清理端口冲突后启动）
-.\start.ps1 -ElectronOnly   # 只启动 Electron（假设前后端已运行）
-.\start.ps1 -SkipBackend    # 跳过后端
-.\start.ps1 -SkipFrontend   # 跳过前端 Vite
+.\start.bat                       # 兼容入口（= 开发模式）
+.\scripts\start-dev.bat           # 开发模式（后端 + Vite + Electron）
+.\scripts\start-debug.bat         # 调试模式（当前等同 dev）
+.\scripts\start-prod.bat          # 生产体验（npm run build + 载入 dist）
+
+# 常用参数（透传给 start.ps1）
+.\start.bat -Force                # 强制清理端口冲突后启动
+.\scripts\start-dev.bat -SkipBackend   # 跳过后端（假设已运行）
+.\scripts\start.ps1 -Mode dev -DryRun  # 仅打印将执行的命令，不启动进程
 ```
 
 ### 后端
@@ -450,6 +461,8 @@ Get-NetTCPConnection -LocalPort 5175
 
 # 强制清理后启动
 .\start.bat -Force
+# 或
+.\scripts\start-dev.bat -Force
 ```
 
 ### 前端连接失败

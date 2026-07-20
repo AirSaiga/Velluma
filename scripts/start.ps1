@@ -1,35 +1,62 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Velluma 启动脚本（生产/开发/调试三模式）。
+.DESCRIPTION
+    本脚本位于 scripts/ 子目录，项目根 = $PSScriptRoot 的父目录。
+    通过 -Mode 参数区分三种运行方式：
+      - prod   : 生产体验模式。npm run build 预构建 dist，Electron 载入本地 dist 文件（NODE_ENV=production），
+                 不启动 Vite dev server，不开 DevTools。后端仍用本地 .venv 启动。
+      - dev    : 开发模式（默认）。后端 + Vite dev server + Electron（载入 http://localhost:vitePort，自动开 DevTools）。
+      - debug  : 调试模式。当前实现等同 dev（main.cjs 在 dev 分支已自动 openDevTools），保留为语义入口，
+                 便于未来挂接 debugpy / sourcemap 等增强。
+.NOTES
+    向后兼容：根目录 start.bat 透传 -Mode dev，保持原有行为。
+#>
 param(
+    [ValidateSet('prod', 'dev', 'debug')]
+    [string]$Mode = 'dev',
     [switch]$Force,
     [switch]$SkipBackend,
     [switch]$SkipFrontend,
-    [switch]$ElectronOnly
+    [switch]$ElectronOnly,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
 
+# =============================================================================
 # Config
+# =============================================================================
+# 脚本位于 scripts/ 下，项目根是 $PSScriptRoot 的父目录
+$ProjectRoot = Split-Path $PSScriptRoot -Parent
+
 $Config = @{
-    DefaultBackendPort = 8002
-    DefaultFrontendPort = 5175   # 起始扫描端口（向后兼容）
-    FrontendPortRange = 100      # 从 5175 起最多扫描 100 个端口（5175~5275）
-    FrontendPort  = $null        # 实际端口（运行时由 Resolve-FrontendPort 填充）
-    ProjectRoot   = $PSScriptRoot
-    BackendTimeout = 60
-    FrontendTimeout = 30
-    HealthCheckInterval = 500
-    PythonModule  = "backend.main"
-    VenvPaths     = @(
+    Mode                 = $Mode.ToLower()
+    DefaultBackendPort   = 8002
+    DefaultFrontendPort  = 5175   # 起始扫描端口（向后兼容）
+    FrontendPortRange    = 100    # 从 5175 起最多扫描 100 个端口（5175~5275）
+    FrontendPort         = $null  # 实际端口（运行时由 Resolve-FrontendPort 填充）
+    ProjectRoot          = $ProjectRoot
+    BackendTimeout       = 60
+    FrontendTimeout      = 30
+    BuildTimeout         = 600    # npm run build 超时（秒），生产模式专用
+    HealthCheckInterval  = 500
+    PythonModule         = "backend.main"
+    VenvPaths            = @(
         ".venv\Scripts\python.exe"
         "venv\Scripts\python.exe"
     )
-    PortFile             = Join-Path $PSScriptRoot "data\port.txt"
-    FrontendPortFile     = Join-Path $PSScriptRoot "data\frontend_port.txt"
+    PortFile             = Join-Path $ProjectRoot "data\port.txt"
+    FrontendPortFile     = Join-Path $ProjectRoot "data\frontend_port.txt"
 }
 
 $Global:ChildProcesses = @()
 $Global:CleanupDone = $false
 
+# =============================================================================
+# Port File Helpers
+# =============================================================================
 function Get-ActualBackendPort {
     # 优先从端口文件读取实际端口
     if (Test-Path $Config.PortFile) {
@@ -163,8 +190,8 @@ function Test-PortOpen($Port) {
 
 function Get-ProcessOnPort($Port) {
     try {
-        $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | 
-                Where-Object { $_.State -eq "Listen" } | 
+        $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+                Where-Object { $_.State -eq "Listen" } |
                 Select-Object -First 1
         if ($conn) {
             return Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
@@ -193,23 +220,23 @@ function Kill-ProcessOnPort($Port, $Name) {
 function Wait-ForService($Port, $Name, $TimeoutSeconds = 30) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $dots = 0
-    
+
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if (Test-PortOpen -Port $Port) {
             Write-Host " Ready!" -ForegroundColor Green
             return $true
         }
-        
+
         Start-Sleep -Milliseconds $Config.HealthCheckInterval
         Write-Host "." -ForegroundColor DarkGray -NoNewline
         $dots++
-        
+
         if ($dots % 10 -eq 0) {
             $elapsed = [math]::Round($sw.Elapsed.TotalSeconds)
             Write-Host " (${elapsed}s)" -ForegroundColor DarkGray -NoNewline
         }
     }
-    
+
     Write-Host ""
     throw "$Name timeout on port $Port (${TimeoutSeconds}s)"
 }
@@ -220,10 +247,10 @@ function Wait-ForService($Port, $Name, $TimeoutSeconds = 30) {
 function Invoke-Cleanup() {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
-    
+
     Write-Host ""
     Log-Step "Cleaning up..."
-    
+
     foreach ($proc in $Global:ChildProcesses) {
         if ($proc -and !$proc.HasExited) {
             try {
@@ -232,15 +259,21 @@ function Invoke-Cleanup() {
             } catch {}
         }
     }
-    
+
     $backendPort = Get-ActualBackendPort
     # 前端端口：优先用已协商的 $Config.FrontendPort，否则读端口文件
-    $frontendPort = if ($Config.FrontendPort) { $Config.FrontendPort } else { Get-ActualFrontendPort }
-    $ports = @($backendPort, $frontendPort) | Where-Object { $_ -gt 0 }
+    # 生产模式下没有 Vite 进程，不清理前端端口（避免误杀他人占用的端口）
+    $ports = @($backendPort)
+    if ($Config.Mode -ne 'prod') {
+        $frontendPort = if ($Config.FrontendPort) { $Config.FrontendPort } else { Get-ActualFrontendPort }
+        if ($frontendPort -and $frontendPort -gt 0) {
+            $ports += $frontendPort
+        }
+    }
     foreach ($port in $ports) {
         Kill-ProcessOnPort -Port $port -Name "service" | Out-Null
     }
-    
+
     Log-Success "Cleanup done"
 }
 
@@ -266,9 +299,9 @@ function Start-Backend() {
         }
         throw "Backend not running but skip flag set"
     }
-    
+
     Log-Step "Starting Backend..."
-    
+
     if (Test-PortOpen -Port $backendPort) {
         if ($Force) {
             Kill-ProcessOnPort -Port $backendPort -Name "backend" | Out-Null
@@ -277,21 +310,26 @@ function Start-Backend() {
             return
         }
     }
-    
+
     $pythonPath = Find-Python
     Log-Info "Using Python: $pythonPath"
-    
+
     # 不再设置 VELLUMA_PORT，让后端自动寻找可用端口
     $env:PYTHONUNBUFFERED = "1"
-    
+
+    if ($DryRun) {
+        Log-Info "[DryRun] Would start: $pythonPath -m $($Config.PythonModule)"
+        return
+    }
+
     $proc = Start-Process -FilePath $pythonPath `
         -ArgumentList "-m", $Config.PythonModule `
         -WorkingDirectory $Config.ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
-    
+
     $Global:ChildProcesses += $proc
-    
+
     # 轮询端口文件等待后端启动
     Log-Wait "Waiting for backend..."
     $waitStart = Get-Date
@@ -304,15 +342,55 @@ function Start-Backend() {
         }
         $actualPort = $null
     }
-    
+
     if (-not $actualPort) {
         throw "Backend failed to start within $($Config.BackendTimeout)s"
     }
-    
+
     Log-Success "Backend ready at http://127.0.0.1:$actualPort"
 }
 
+function Start-FrontendBuild() {
+    # 生产模式专用：npm run build 生成 dist/ 供 Electron loadFile 载入
+    # 不启动 Vite dev server
+    if ($SkipFrontend) {
+        Log-Info "SkipFrontend set, assuming dist/ already built"
+        return
+    }
+
+    Log-Step "Building frontend (npm run build)..."
+
+    $frontendDir = Join-Path $Config.ProjectRoot "frontend"
+
+    if (!(Test-Path (Join-Path $frontendDir "node_modules"))) {
+        throw "node_modules not found. Please run: cd frontend && npm install"
+    }
+
+    if ($DryRun) {
+        Log-Info "[DryRun] Would run: npm run build (cwd: $frontendDir)"
+        return
+    }
+
+    # 同步执行 npm run build，捕获退出码
+    $buildInfo = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "npm", "run", "build" `
+        -WorkingDirectory $frontendDir `
+        -Wait -PassThru -NoNewWindow
+
+    if ($buildInfo.ExitCode -ne 0) {
+        throw "npm run build failed with exit code $($buildInfo.ExitCode)"
+    }
+
+    $distIndex = Join-Path $frontendDir "dist\index.html"
+    if (!(Test-Path $distIndex)) {
+        throw "Build completed but dist/index.html not found at $distIndex"
+    }
+
+    Log-Success "Frontend built to dist/"
+}
+
 function Start-Frontend() {
+    # 开发/调试模式：启动 Vite dev server（端口动态协商）
     # 协商前端端口（动态扫描空闲端口，避免与其它项目冲突）
     $frontendPort = Resolve-FrontendPort
     $Config.FrontendPort = $frontendPort
@@ -347,6 +425,11 @@ function Start-Frontend() {
     # 设置环境变量供 vite.config.js 读取（双保险：env + frontend_port.txt）
     $env:VELLUMA_FRONTEND_PORT = $frontendPort.ToString()
 
+    if ($DryRun) {
+        Log-Info "[DryRun] Would start: npm run dev (cwd: $frontendDir, port $frontendPort)"
+        return
+    }
+
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "dev" `
         -WorkingDirectory $frontendDir `
@@ -362,23 +445,50 @@ function Start-Frontend() {
 
 function Start-Electron() {
     Log-Step "Starting Electron..."
-    
+
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
     $backendPort = Get-ActualBackendPort
-    
+
+    # 公共环境变量
     $env:VELLUMA_BACKEND_PORT = $backendPort.ToString()
-    $env:VELLUMA_FRONTEND_PORT = $Config.FrontendPort.ToString()
+    # 生产模式不启动 Vite，FrontendPort 可能为 null——读端口文件兜底，再不行留空
+    $fePort = if ($Config.FrontendPort) { $Config.FrontendPort } elseif ($Config.Mode -eq 'prod') { Get-ActualFrontendPort } else { $null }
+    if ($fePort) {
+        $env:VELLUMA_FRONTEND_PORT = $fePort.ToString()
+    } else {
+        Remove-Item Env:\VELLUMA_FRONTEND_PORT -ErrorAction SilentlyContinue
+    }
     $env:VELLUMA_SERVICES_READY = "1"
-    
+
+    # 模式差异：生产模式设 NODE_ENV=production，让 main.cjs 走 loadFile('../dist/index.html') 分支
+    # 开发/调试模式保持 NODE_ENV 不设（main.cjs 的 isDev = true，走 loadURL + openDevTools）
+    if ($Config.Mode -eq 'prod') {
+        $env:NODE_ENV = "production"
+        Log-Info "NODE_ENV=production (Electron will load dist/index.html)"
+    } else {
+        # 显式清掉，避免外部环境残留 NODE_ENV=production 导致 main.cjs 误判
+        Remove-Item Env:\NODE_ENV -ErrorAction SilentlyContinue
+        Log-Info "NODE_ENV unset (Electron will load Vite dev server, DevTools auto-open)"
+    }
+
+    if ($DryRun) {
+        Log-Info "[DryRun] Would run: npm run electron:dev (cwd: $frontendDir)"
+        return
+    }
+
+    # 注意：electron:dev = "npm run build && electron ."
+    #   - 生产模式：build 已由 Start-FrontendBuild 完成，这里再 build 一次是幂等的（vite build 增量）
+    #     之所以不直接 "electron ."，是为了复用现有 npm script，避免引入新 script 增加维护面
+    #   - 开发/调试模式：build 产物不会被 main.cjs 使用（走 loadURL），仅浪费数秒，可接受
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c", "npm", "run", "electron:dev" `
         -WorkingDirectory $frontendDir `
         -PassThru
-    
+
     $Global:ChildProcesses += $proc
-    
+
     Log-Success "Electron started (PID: $($proc.Id))"
-    
+
     return $proc
 }
 
@@ -388,39 +498,60 @@ function Start-Electron() {
 function Show-Banner() {
     Write-Host "`n============================================================" -ForegroundColor Cyan
     Write-Host "     Velluma AI Novel Writing Assistant" -ForegroundColor Cyan
+    Write-Host "     Mode: $($Config.Mode.ToUpper())" -ForegroundColor Cyan
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Main() {
     Show-Banner
-    
+
+    Log-Info "Project root: $($Config.ProjectRoot)"
+    if ($DryRun) {
+        Log-Info "DryRun mode: no processes will be started"
+    }
     if ($Force) {
         Log-Info "Force mode: will clean port conflicts"
     }
-    
+
     try {
         Start-Backend
-        Start-Frontend
+
+        # 按模式分流前端阶段
+        if ($Config.Mode -eq 'prod') {
+            Start-FrontendBuild
+        } else {
+            Start-Frontend
+        }
+
         $electronProc = Start-Electron
-        
+
         Write-Host "`n============================================================" -ForegroundColor Green
         Log-Success "All services started!"
         Write-Host ""
         $backendPort = Get-ActualBackendPort
         Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Gray
-        Write-Host "  Frontend: http://127.0.0.1:$($Config.FrontendPort)" -ForegroundColor Gray
         Write-Host "  API Docs: http://127.0.0.1:$backendPort/docs" -ForegroundColor Gray
+        if ($Config.Mode -eq 'prod') {
+            Write-Host "  Frontend: dist/index.html (built)" -ForegroundColor Gray
+        } else {
+            Write-Host "  Frontend: http://127.0.0.1:$($Config.FrontendPort) (Vite dev)" -ForegroundColor Gray
+        }
         Write-Host ""
         Write-Host "  Electron is running. Close window to stop all services." -ForegroundColor Yellow
         Write-Host "============================================================" -ForegroundColor Green
-        
+
+        if ($DryRun) {
+            Log-Info "DryRun complete, skipping wait"
+            return
+        }
+
         # Wait for Electron to exit
         $null = $electronProc.WaitForExit()
-        
+
         Write-Host ""
         Log-Info "Electron exited"
-        
+
     } catch {
         Write-Host ""
         Log-Error "Startup failed: $_"
