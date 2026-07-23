@@ -62,6 +62,9 @@ backend/logs/
 backend/_archive/
 backend/models_generation_task.py
 
+# ---- 文档(本地设计/规划文档,不入库) ----
+docs/
+
 # ---- 测试产物 ----
 .test-dist/
 coverage/
