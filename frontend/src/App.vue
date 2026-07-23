@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import AppContainer from './features/app/containers/AppContainer.vue'
+import AppShell from './features/app/containers/AppShell.vue'
 </script>
 
 <template>
-  <AppContainer />
+  <AppShell />
 </template>

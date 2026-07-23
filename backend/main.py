@@ -172,6 +172,14 @@ from backend.routes import (
 from backend.routes.intent_driven import router as intent_driven_router
 logger.info("[Main] 意图驱动路由已加载")
 
+# V4.0 Canon（作者脑中世界图谱）路由
+from backend.routes.canon import router as canon_router
+logger.info("[Main] Canon 路由已加载")
+
+# V4.2 Reader Mirror（读者状态镜像）路由
+from backend.routes.reader_mirror import router as reader_mirror_router
+logger.info("[Main] Reader Mirror 路由已加载")
+
 # =============================================================================
 # 端口持久化机制
 # =============================================================================
@@ -259,6 +267,14 @@ logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
 
 # CP2.2b 文风体系路由
 app.include_router(style_router)
+
+# V4.0 Canon 路由
+app.include_router(canon_router)
+logger.info("[Main] Canon 路由已注册: /api/books/{book_id}/canon")
+
+# V4.2 Reader Mirror 路由
+app.include_router(reader_mirror_router)
+logger.info("[Main] Reader Mirror 路由已注册: /api/books/{book_id}/reader-mirror")
 logger.info("[Main] 文风体系路由已注册: /api/books/{id}/style-card, /samples, /system/cliches")
 
 # =============================================================================

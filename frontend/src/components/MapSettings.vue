@@ -12,7 +12,7 @@ const { show: showConfirm } = useConfirmDialog()
 const props = defineProps({
   chapter: {
     type: Object,
-    required: true
+    default: null
   },
   focusedEntity: {
     type: String,
@@ -21,6 +21,10 @@ const props = defineProps({
   activeCharacterNames: {
     type: Array,
     default: () => []
+  },
+  closable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -38,6 +42,9 @@ const locationForm = ref({ name: '', description: '', current_state: '' })
 const isLoading = ref(false)
 
 const normalizedFocusedEntity = computed(() => (props.focusedEntity || '').trim().toLowerCase())
+
+// 是否已有选中章节：章节级功能（关联切换、活动范围）依赖它
+const hasChapter = computed(() => !!props.chapter?.id)
 const normalizedActiveNames = computed(() =>
   (props.activeCharacterNames || [])
     .map((name) => String(name || '').trim().toLowerCase())
@@ -146,6 +153,10 @@ function openEditModal(loc) {
 
 async function createLocation() {
   if (!locationForm.value.name.trim()) return
+  if (!props.chapter?.book_id) {
+    showToast('请先创建并选择一个章节后再管理地点', 'warning')
+    return
+  }
   try {
     const newLoc = await mapApi.createLocation(props.chapter.book_id, locationForm.value)
     locations.value.push(newLoc)
@@ -193,7 +204,26 @@ function isSelected(locId) {
   return chapterLocations.value.some(cl => cl.location_id === locId)
 }
 
+// 卡片操作按钮：有关联章节时才提供"关联/取消关联"，编辑与删除始终可用
+function locationActions(loc) {
+  const actions = []
+  if (hasChapter.value) {
+    actions.push({
+      icon: 'link',
+      label: isSelected(loc.id) ? '取消关联本章' : '关联到本章',
+      onClick: () => toggleLocation(loc)
+    })
+  }
+  actions.push({ icon: 'pencil', label: '编辑', onClick: () => openEditModal(loc) })
+  actions.push({ icon: 'trash', label: '删除', onClick: () => deleteLocation(loc.id), variant: 'danger' })
+  return actions
+}
+
 async function toggleLocation(loc) {
+  if (!props.chapter?.id) {
+    showToast('请先在写作台选择要关联的章节', 'warning')
+    return
+  }
   const existing = chapterLocations.value.find(cl => cl.location_id === loc.id)
   try {
     if (existing) {
@@ -225,6 +255,7 @@ function handleClose() {
     icon="map-pin"
     description="管理章节关联的地点和场景"
     :loading="isLoading"
+    :closable="closable"
     :header-actions="[
       { icon: 'plus', label: '新建地点', onClick: openCreateModal, variant: 'primary' }
     ]"
@@ -248,11 +279,8 @@ function handleClose() {
             :highlight="getLocationHighlightClass(loc.id) === 'strong-match' ? 'strong' : getLocationHighlightClass(loc.id) === 'weak-match' ? 'weak' : 'none'"
             :active="isSelected(loc.id)"
             clickable
-            :actions="[
-              { icon: 'pencil', label: '编辑', onClick: () => openEditModal(loc) },
-              { icon: 'trash', label: '删除', onClick: () => deleteLocation(loc.id), variant: 'danger' }
-            ]"
-            @click="toggleLocation(loc)"
+            :actions="locationActions(loc)"
+            @click="openEditModal(loc)"
           >
             <template #default>
               <div class="location-meta">
@@ -279,8 +307,8 @@ function handleClose() {
         </div>
       </PanelSection>
 
-      <!-- 本章活动范围 -->
-      <PanelSection title="本章活动范围限制" collapsible :collapsed="false">
+      <!-- 本章活动范围（依赖选中章节，无章节时隐藏） -->
+      <PanelSection v-if="hasChapter" title="本章活动范围限制" collapsible :collapsed="false">
         <div class="activity-range">
           <textarea
             v-model="mapActivityRange"

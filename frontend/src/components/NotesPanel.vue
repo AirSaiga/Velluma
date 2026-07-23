@@ -11,6 +11,10 @@ const props = defineProps({
   saveNotes: {
     type: Function,
     required: true
+  },
+  closable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -87,6 +91,7 @@ const statusConfig = {
     title="创作笔记"
     icon="pencil-square"
     description="记录创作灵感、想法和待办事项"
+    :closable="closable"
     @close="handleClose"
   >
     <div class="notes-content">

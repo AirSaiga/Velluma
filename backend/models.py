@@ -58,6 +58,32 @@ __all__ = [
     "SystemCliche",
     # CP3.1a 新增
     "QualityReport",
+    # V3.0 引爆链（Detonation Chain）
+    "DetonationChain",
+    # V3.1 统一引擎 tier 常量
+    "TIER_CLIMAX",
+    "TIER_TURN",
+    "TIER_PROGRESS",
+    "TIER_TRANSITION",
+    "TIER_AUTO",
+    "VALID_TIERS",
+    # V4.0 Canon（作者脑中世界图谱）
+    "CanonNode",
+    "CanonEdge",
+    "NODE_TYPE_CHARACTER",
+    "NODE_TYPE_EVENT",
+    "NODE_TYPE_OBJECT",
+    "NODE_TYPE_PLACE",
+    "NODE_TYPE_HOOK",
+    "EDGE_TYPE_CAUSES",
+    "EDGE_TYPE_BEFORE",
+    "EDGE_TYPE_HINTS",
+    "EDGE_TYPE_SETUPS",
+    "EDGE_TYPE_CALLBACKS",
+    "EDGE_TYPE_ECHOES",
+    "VISIBILITY_PUBLIC",
+    "VISIBILITY_PRIVATE",
+    "VISIBILITY_PARTIAL",
     # Utilities
     "generate_uuid",
     "utc_now",
@@ -87,6 +113,37 @@ class TaskStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+# ============================================================
+# V3.1 统一引擎：章节定档 tier（docs/generation-v3.1-unified.md §2.1）
+# ============================================================
+# 四档定义：高潮章 / 转折章 / 推进章 / 过渡章
+# auto 表示由定档器自主决策（规格 §2.2 决策函数，宁低勿高）
+TIER_CLIMAX = "climax"        # 高潮章：大高潮/揭盅/决裂/卷尾
+TIER_TURN = "turn"            # 转折章：中等转折、重要推进
+TIER_PROGRESS = "progress"    # 推进章：小转折、日常推进
+TIER_TRANSITION = "transition"  # 过渡章：纯过渡、衔接
+TIER_AUTO = "auto"            # 自动定档（默认）
+
+# 有效档位集合（auto 不在其中，auto 是请求参数表示"由定档器决策"）
+VALID_TIERS = {TIER_CLIMAX, TIER_TURN, TIER_PROGRESS, TIER_TRANSITION}
+
+# 档位 → 铺垫结构深度上限（规格 §2.1 表）
+TIER_MAX_DEPTH = {
+    TIER_CLIMAX: 6,
+    TIER_TURN: 4,
+    TIER_PROGRESS: 2,
+    TIER_TRANSITION: 1,
+}
+
+# 档位 → 铺陈段（development 区）占比目标（规格 §2.1 表，铺陈段占全章比例）
+TIER_DEVELOPMENT_RATIO = {
+    TIER_CLIMAX: 0.30,
+    TIER_TURN: 0.50,
+    TIER_PROGRESS: 0.70,
+    TIER_TRANSITION: 0.90,
+}
 
 
 # ============================================================
@@ -123,6 +180,8 @@ class Book(Base):
     # CP2.3a：书级大纲（章节卡生成输入）+ 滚动摘要（发布时更新，蓝图 §5.2）
     outline = Column(Text, nullable=True)
     rolling_summary = Column(Text, nullable=True)
+    # V4.2 Reader Mirror：期待账本 + 张力曲线 + 信息差（JSONB 整体存储，避免新建表）
+    reader_mirror = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
@@ -546,6 +605,19 @@ class StoryBeat(Base):
     status = Column(String(50), default="planned")
     pacing_type = Column(String(50), nullable=True)
     weight = Column(Integer, default=1)
+    # V3.0 引爆链：节拍作为铺垫树的阅读序分段视图（§4.4）
+    # chain_node_ids: 本拍承载的 SetupNode id 列表
+    chain_node_ids = Column(JSONB, default=list)
+    # sets_up: 本拍埋设的引爆点/未来章节铺垫（指向 PAYLOAD 或 future chapter）
+    sets_up = Column(JSONB, default=list)
+    # payoff_of: 本拍兑现的旧伏笔（指向 PlotLedger.ledger_key 或 SetupNode.id）
+    payoff_of = Column(JSONB, default=list)
+    # assignment: 写作情绪任务（suppress/tighten/release_partial/texture）
+    assignment = Column(String(50), nullable=True)
+    # question_open: 本拍向读者打开的问题
+    question_open = Column(Text, nullable=True)
+    # question_delays: 本拍让读者抱着走、不回答的问题
+    question_delays = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     book = relationship("Book", back_populates="story_beats")
@@ -821,6 +893,9 @@ class ChapterCard(Base):
     tension = Column(Integer, default=5)
     style_override_id = Column(UUID(as_uuid=True), ForeignKey("style_cards.id", ondelete="SET NULL"), nullable=True)
     status = Column(String(50), default="draft")
+    # V3.0 引爆链：章节卡生成时同步产出的引爆点候选列表（闸门 1 的输入）
+    # 结构：[{"description", "emotional_target", "answers_question", "opens_question", "why_now"}]
+    payload_moment = Column(JSONB, default=list)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
@@ -956,3 +1031,260 @@ class QualityReport(Base):
     # 审计结论：pass / pass_with_fixes / fail / unaudited（降级时）
     verdict = Column(String(50))
     created_at = Column(DateTime, default=utc_now)
+
+
+# ============================================================
+# V3.0 引爆链（Detonation Chain）— 3.0 主轴重构核心数据模型
+# ============================================================
+# 设计依据：docs/generation-v3-design.md §4.1
+#
+# 业务含义：
+# - 一章一份引爆链，承载"逆向设计 → 爆炸先写 → 引线朝爆炸写"的完整脊柱
+# - payload（PayloadMoment）：本章情绪势能的引爆瞬间（反转/揭盅/抉择/关系不可逆变化）
+# - nodes（List[SetupNode]）：逆向递归长出的铺垫树节点
+# - reading_order：阅读序（拓扑排序后按节奏合并的节点 id 序，末位是 "PAYLOAD"）
+#
+# 状态流转：
+# - draft: 刚创建，payload 候选已生成待用户选定
+# - growing: 用户已确认 payload，正在/已生成铺垫树
+# - confirmed: 用户已审树并确认（树闸门通过）
+# - writing: 进入引线写作 + 组装 + 审计 SSE 流
+# - done: 章节定稿回写完成
+#
+# 数据流：
+# - 由 services/workflows/detonation/ 包的各阶段写入
+# - 由 routes/chapter_generation/detonation.py 的闸门端点读写
+# - 通过 Base.metadata.create_all 自动建表（无需写 MIGRATION）
+
+
+class DetonationChain(Base):
+    """引爆链表 - 3.0 章节生成的因果脊柱（蓝图 §4.1）。
+
+    业务含义：
+    - 取代 StoryBeat 作为"顺序节拍容器"的正向规划，改为"铺垫树的阅读序视图"
+    - payload 承载本章最重要的一段（~800 字，双候选写作 + 人审冻结）
+    - nodes 承载逆向递归长出的铺垫节点（plant/development/diversion/texture）
+    - reading_order 是树→拓扑排序→按节奏合并后的阅读序
+
+    设计要点：
+    - 与 Chapter 一对一（一个章节至多一条活跃链；version 字段支持换引爆点局部重长）
+    - payload/nodes/reading_order 全部 JSONB，结构与 docs/generation-v3-design.md §4.2/4.3 对齐
+    - status 驱动闸门流转：draft → growing → confirmed → writing → done
+    """
+    __tablename__ = "detonation_chains"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    # 版本号：换引爆点局部重长时 +1（保留历史版本能力）
+    version = Column(Integer, default=1, nullable=False)
+    # PayloadMoment（蓝图 §4.2）：本章引爆瞬间
+    # 结构：{"id":"PAYLOAD","description","emotional_target","answers_question",
+    #        "opens_question","must_land","candidate_index","text","approved"}
+    payload = Column(JSONB, default=dict)
+    # List[SetupNode]（蓝图 §4.3）：逆向递归长出的铺垫节点
+    # 每项：{"id","type","content","sets_up","distance_to_payload","assignment",
+    #        "question_delays","restraint_note","subtext","satisfied_by_existing",
+    #        "planted_in_text","future_payoff","beat_id","trivial"}
+    nodes = Column(JSONB, default=list)
+    # 阅读序：节点 id 列表，末位是 "PAYLOAD"
+    reading_order = Column(JSONB, default=list)
+    # 状态：draft / growing / confirmed / writing / done
+    status = Column(String(50), default="draft", nullable=False)
+    # 确认方：user（人工闸门）/ auto（自动确认，如快路径）
+    confirmed_by = Column(String(50), nullable=True)
+    # V3.1 统一引擎：章节定档（climax/turn/progress/transition）
+    # 由 tier_classifier 决策，或用户在 generate 请求体中强制指定
+    tier = Column(String(20), nullable=True)
+    # V3.1：定档理由（透明化，规格 §2.3）：如"高潮强度 7 分 + 卷末第二章"
+    tier_reason = Column(Text, nullable=True)
+    # V3.1：三分区映射（规格 §6）
+    # 结构：{"climax": ["PAYLOAD"], "buildup": ["n4","n5"], "development": ["n1","n2","n3"]}
+    # 由 tier 与 distance_to_climax 自动分区，驱动铺陈段/蓄势段/高潮段的不同工艺
+    zones = Column(JSONB, default=dict)
+    # 元信息：审计结论、降级事件、调试信息等
+    meta = Column("metadata", JSONB, default=dict)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    book = relationship("Book")
+    chapter = relationship("Chapter")
+
+
+# ============================================================
+# V4.0 Canon — 作者脑中世界的叙事知识图谱
+# ============================================================
+# 设计依据：docs/generation-v4.0-canon.md §2
+#
+# 核心定位：
+# - Canon 是作者脑中真相的结构化存储（不依赖已发布文本推断）
+# - private 字段绝不许泄露到正文（由一致性引擎 + prompt 注入保障）
+# - 图谱结构（节点+边）天然支持可视化、连锁分析、路径检索
+#
+# 节点类型（NODE_TYPE_*）：
+#   CHARACTER  角色（metadata: identity/power/motivation/arc_position）
+#   EVENT      事件（metadata: when/where/who/consequence）
+#   OBJECT     物件（metadata: owner/ability/origin）
+#   PLACE      地点（metadata: description/inhabitants）
+#   HOOK       伏笔节点（metadata: strength/bury_style/payoff_style/status）
+#
+# 边类型（EDGE_TYPE_*）：
+#   CAUSES     因果（A 导致 B）
+#   BEFORE     时序（A 在 B 之前）
+#   HINTS      弱伏笔暗示
+#   SETUPS     强伏笔铺设
+#   CALLBACKS  回收
+#   ECHOES     呼应（已回收后的二次呼应）
+#
+# 可见性（VISIBILITY_*）：
+#   PUBLIC     已在正文写出（读者已知）
+#   PRIVATE    仅作者知道（绝不许泄露到正文）
+#   PARTIAL    部分揭示（读者知道一部分）
+#
+# 表设计决策：
+# - 用邻接表 + JSONB 属性（不引入 Neo4j）
+# - 图算法在前端 Cytoscape.js 做，后端只做 CRUD + 基础查询
+# - 两张表通过 book_id 隔离，不与现有 Character/PlotLedger 直接关联
+#   （独立层，避免迁移风险；可通过 metadata.ref_id 软关联现有实体）
+
+# ---- 节点类型常量 ----
+NODE_TYPE_CHARACTER = "character"
+NODE_TYPE_EVENT = "event"
+NODE_TYPE_OBJECT = "object"
+NODE_TYPE_PLACE = "place"
+NODE_TYPE_HOOK = "hook"
+NODE_TYPES = {
+    NODE_TYPE_CHARACTER, NODE_TYPE_EVENT, NODE_TYPE_OBJECT,
+    NODE_TYPE_PLACE, NODE_TYPE_HOOK,
+}
+
+# ---- 边类型常量 ----
+EDGE_TYPE_CAUSES = "causes"
+EDGE_TYPE_BEFORE = "before"
+EDGE_TYPE_HINTS = "hints"
+EDGE_TYPE_SETUPS = "setups"
+EDGE_TYPE_CALLBACKS = "callbacks"
+EDGE_TYPE_ECHOES = "echoes"
+EDGE_TYPES = {
+    EDGE_TYPE_CAUSES, EDGE_TYPE_BEFORE, EDGE_TYPE_HINTS,
+    EDGE_TYPE_SETUPS, EDGE_TYPE_CALLBACKS, EDGE_TYPE_ECHOES,
+}
+
+# ---- 可见性常量 ----
+VISIBILITY_PUBLIC = "public"
+VISIBILITY_PRIVATE = "private"
+VISIBILITY_PARTIAL = "partial"
+VISIBILITIES = {VISIBILITY_PUBLIC, VISIBILITY_PRIVATE, VISIBILITY_PARTIAL}
+
+
+class CanonNode(Base):
+    """Canon 节点 — 作者脑中世界的一个事实/设定/伏笔。
+
+    业务含义：
+    - canon_text 是作者脑中的完整真相
+    - public_text 是读者目前在正文里看到的（可能截断/伪装/完全不同）
+    - visibility 控制生成时是否允许在正文出现
+      · public：可直接出现
+      · private：绝不许直接出现，但可作为角色行为的隐藏动机
+      · partial：可出现 public_text 部分，canon_text 的其余部分仍 private
+
+    使用场景：
+    - 作者在 Canon 编辑器手动创建
+    - 自动提取器从已发布文本提取（source=auto_extracted，confidence=tentative）
+    - 生成流水线 Phase 0 加载，注入到 prompt 作为强约束
+    - 一致性引擎对照检查新文本是否泄露 private 字段
+
+    警示：metadata.ref_id 是软关联现有实体（Character.id 等），无外键约束。
+    软关联失败时（如原实体被删），通过 metadata.ref_type 仍可识别。
+    """
+
+    __tablename__ = "canon_nodes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(20), nullable=False, index=True)
+    label = Column(String(200), nullable=False)
+
+    # 内容双层
+    canon_text = Column(Text, default="")
+    public_text = Column(Text, default="")
+
+    # 可见性
+    visibility = Column(String(20), default=VISIBILITY_PUBLIC)
+
+    # 章节追溯
+    appeared_in = Column(JSONB, default=list)  # [chapter_number, ...]
+    revealed_in = Column(JSONB, default=list)  # [chapter_number, ...]
+
+    # 揭示计划
+    reveal_plan = Column(Text, default="")
+    expected_reveal_chapter = Column(Integer, nullable=True)
+
+    # 元数据
+    tags = Column(JSONB, default=list)
+    confidence = Column(String(20), default="confirmed")  # confirmed | tentative | draft
+    source = Column(String(20), default="author")  # author | auto_extracted | mixed
+    metadata_ = Column("metadata", JSONB, default=dict)  # 自由扩展（避开 SQL 保留字）
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    # 关系（双向）
+    out_edges = relationship(
+        "CanonEdge",
+        foreign_keys="CanonEdge.source_id",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+    in_edges = relationship(
+        "CanonEdge",
+        foreign_keys="CanonEdge.target_id",
+        back_populates="target",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self):
+        return f"<CanonNode {self.type}:{self.label}>"
+
+
+class CanonEdge(Base):
+    """Canon 边 — 两个节点之间的叙事关系。
+
+    业务含义：
+    - type 决定关系语义（因果/时序/伏笔链）
+    - visibility 决定该关系是否已在正文揭示
+    - strength 1-10，影响连锁分析的优先级
+    - established_in 记录该关系在哪些章节建立（用于追溯）
+
+    使用场景：
+    - 作者手动建立（如"兰星 → causes → 复仇动机"）
+    - 自动提取（如检测到"兰星父之死"和"复仇"共现，推断因果关系）
+    - 变更连锁分析的核心数据源（改一个节点，沿边追溯影响）
+    """
+
+    __tablename__ = "canon_edges"
+    __table_args__ = (
+        # 防止重复边（同源同目标同类型只能有一条）
+        UniqueConstraint("source_id", "target_id", "type", name="uq_canon_edge_triplet"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(UUID(as_uuid=True), ForeignKey("canon_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_id = Column(UUID(as_uuid=True), ForeignKey("canon_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    type = Column(String(20), nullable=False)
+    strength = Column(Integer, default=5)  # 1-10
+    visibility = Column(String(20), default=VISIBILITY_PUBLIC)
+    note = Column(Text, default="")
+    established_in = Column(JSONB, default=list)  # [chapter_number, ...]
+    metadata_ = Column("metadata", JSONB, default=dict)
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    source = relationship("CanonNode", foreign_keys=[source_id], back_populates="out_edges")
+    target = relationship("CanonNode", foreign_keys=[target_id], back_populates="in_edges")
+
+    def __repr__(self):
+        return f"<CanonEdge {self.type} strength={self.strength}>"

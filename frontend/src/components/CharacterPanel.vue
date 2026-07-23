@@ -24,6 +24,10 @@ const props = defineProps({
   focusedEntity: {
     type: String,
     default: ''
+  },
+  closable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -78,6 +82,7 @@ async function handleUpdateDynamicState(characterId, currentState) {
     :focused-entity="focusedEntity"
     :can-update-dynamic-state="canUpdateDynamicState"
     :update-dynamic-state-action="handleUpdateDynamicState"
+    :closable="closable"
     @create-character="forwardCreateCharacter"
     @update-character="forwardUpdateCharacter"
     @delete-character="forwardDeleteCharacter"

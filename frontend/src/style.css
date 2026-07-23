@@ -122,6 +122,20 @@ textarea,
   background: rgba(124, 106, 173, 0.25);
 }
 
+/* 审校问题临时高亮（点击定位时） */
+mark.audit-highlight {
+  background: rgba(217, 119, 6, 0.35);
+  border-radius: 2px;
+  padding: 0 1px;
+  transition: background 0.4s ease;
+  animation: audit-flash 0.6s ease-out;
+}
+
+@keyframes audit-flash {
+  0% { background: rgba(217, 119, 6, 0.65); }
+  100% { background: rgba(217, 119, 6, 0.35); }
+}
+
 /* ====== 全局交互动效 ====== */
 
 /* 主按钮微交互 */

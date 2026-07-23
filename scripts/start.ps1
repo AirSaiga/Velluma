@@ -322,10 +322,12 @@ function Start-Backend() {
         return
     }
 
+    # -NoNewWindow：后端继承当前控制台，uvicorn 访问日志 / print / traceback 实时输出到运行
+    # start.bat 的窗口，方便边用 Electron 边盯后端。PYTHONUNBUFFERED=1 已在上方设置，日志无缓冲延迟。
     $proc = Start-Process -FilePath $pythonPath `
         -ArgumentList "-m", $Config.PythonModule `
         -WorkingDirectory $Config.ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -PassThru
 
     $Global:ChildProcesses += $proc

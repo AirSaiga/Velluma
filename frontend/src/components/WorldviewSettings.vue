@@ -13,6 +13,10 @@ const props = defineProps({
   bookId: {
     type: String,
     default: null
+  },
+  closable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -193,6 +197,7 @@ onUnmounted(() => {
       { icon: 'arrow-up-tray', label: '导入/导出', onClick: openImportExport },
       { icon: 'plus', label: '新增', onClick: addItem, variant: 'primary' }
     ]"
+    :closable="closable"
     @close="handleClose"
   >
     <!-- 状态提示 -->

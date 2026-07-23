@@ -127,7 +127,7 @@ async def load_character_relationships(
     repositories: RepositoriesDict,
     entities: List[ChapterEntity]
 ) -> List[CharacterRelationship]:
-    """加载角色之间的关系网络"""
+    """加载角色之间的关系网络（预加载 source/target character，防 lazy load 触发 MissingGreenlet）"""
     relationship_repo: "RelationshipRepository" = repositories.get("relationship")
     if not relationship_repo:
         return []
@@ -137,9 +137,17 @@ async def load_character_relationships(
         return []
 
     from backend.models import CharacterRelationship
-    spec = QuerySpec.create(CharacterRelationship).where(
-        CharacterRelationship.source_char_id.in_(character_ids),
-        CharacterRelationship.target_char_id.in_(character_ids),
+    from sqlalchemy.orm import selectinload
+    spec = (
+        QuerySpec.create(CharacterRelationship)
+        .where(
+            CharacterRelationship.source_char_id.in_(character_ids),
+            CharacterRelationship.target_char_id.in_(character_ids),
+        )
+        .with_options(
+            selectinload(CharacterRelationship.source_character),
+            selectinload(CharacterRelationship.target_character),
+        )
     )
     return await relationship_repo.find_all(spec=spec)
 
@@ -231,13 +239,18 @@ async def load_chapter_locations(
     repositories: RepositoriesDict,
     chapter_id: str
 ) -> List[ChapterMapLocation]:
-    """加载章节关联的地图位置"""
+    """加载章节关联的地图位置（预加载 .location 关系，防 lazy load 触发 MissingGreenlet）"""
     map_repo: "MapLocationRepository" = repositories.get("map_location")
     if not map_repo:
         raise ValueError("MapLocationRepository 未配置")
 
     from backend.models import ChapterMapLocation
-    spec = QuerySpec.create(ChapterMapLocation).where(ChapterMapLocation.chapter_id == chapter_id)
+    from sqlalchemy.orm import selectinload
+    spec = (
+        QuerySpec.create(ChapterMapLocation)
+        .where(ChapterMapLocation.chapter_id == chapter_id)
+        .with_options(selectinload(ChapterMapLocation.location))
+    )
     return await map_repo.find_all(spec=spec)
 
 

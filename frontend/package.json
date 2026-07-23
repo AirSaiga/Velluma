@@ -28,13 +28,16 @@
     "@tiptap/starter-kit": "^2.24.0",
     "@tiptap/vue-3": "^2.24.0",
     "@types/markdown-it": "^14.1.2",
+    "cytoscape": "^3.34.0",
     "is-number": "^7.0.0",
     "markdown-it": "^14.1.1",
     "splitpanes": "^4.0.4",
-    "vue": "^3.4.15"
+    "vue": "^3.4.15",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
+    "@types/cytoscape": "^3.21.9",
     "@types/node": "^25.3.5",
     "@vitejs/plugin-vue": "^5.0.3",
     "autoprefixer": "^10.4.17",

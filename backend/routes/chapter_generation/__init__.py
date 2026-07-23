@@ -44,6 +44,18 @@ from backend.models import GenerationRun
 # 主路由（来自 dual_track.py）
 from backend.routes.chapter_generation.dual_track import router as dual_track_router
 
+# V3.0 引爆链路由（与双轨并存）
+from backend.routes.chapter_generation.detonation import router as detonation_router
+
+# V3.1 统一引擎路由（合并双轨与高潮倒推）
+from backend.routes.chapter_generation.unified import router as unified_router
+
+# V3.2 ADF（Anchor-Driven Flow）引擎路由（与 V3.1 并存）
+from backend.routes.chapter_generation.adf import router as adf_router
+
+# V4.1 Refinery 精修流水线路由
+from backend.routes.chapter_generation.refinery import router as refinery_router
+
 # 创建额外的路由（用于节拍预览等）
 extra_router = APIRouter(prefix="/api", tags=["chapter_generation"])
 
@@ -505,6 +517,10 @@ async def rerun_chapter_quality_report(
 router = APIRouter()
 router.include_router(dual_track_router)
 router.include_router(extra_router)
+router.include_router(detonation_router)
+router.include_router(unified_router)
+router.include_router(adf_router)
+router.include_router(refinery_router)
 
 # 导出子模块供其他模块使用
 from backend.routes.chapter_generation.checkpoint_manager import CheckpointManager

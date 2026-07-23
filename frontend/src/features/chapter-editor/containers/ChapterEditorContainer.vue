@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import type { Chapter, Character, ApiConfig } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
-import { assetApi } from '../../../services/api'
 
 const props = defineProps<{
   selectedChapter: Chapter | null
@@ -13,111 +11,49 @@ const props = defineProps<{
   apiConfig: ApiConfig
   bookId?: string
   metaCollapsed?: boolean
-  critiqueResult?: any
   assets?: Asset[]
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'request-critique', 'intent-generate', 'intent-save'])
-// CP4.5：skip_plan_gate 兼容开关已移除（旧 preview-beats 端点已删除，合并闸门为唯一路径）
-const viewModel = useChapterEditorContainer({
-  ...props,
-}, emit)
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
+// 警示：必须直接传入响应式 props 对象；展开 {...props} 会在 setup 时拍快照，
+// 导致 composable 内的 computed/watch 永远停留在初始值（编辑器不显示）。
+const viewModel = useChapterEditorContainer(props, emit)
 
 defineExpose({
-  scrollToCritique: viewModel.scrollToCritique,
-  isGenerating: viewModel.isGenerating,
+  scrollToOffset: viewModel.scrollToOffset,
   isPublishing: viewModel.isPublishing,
-  beatPreviewLoading: viewModel.beatPreviewLoading,
-  isClarifyingOutline: viewModel.isClarifyingOutline,
   saveStatus: viewModel.saveStatus,
   lastSavedAt: viewModel.lastSavedAt,
   toggleCharacter: viewModel.toggleCharacter,
   toggleAsset: viewModel.toggleAsset,
   isCharacterSelected: viewModel.isCharacterSelected,
   isAssetSelected: viewModel.isAssetSelected,
-  handleAssetsSchemaInput: viewModel.handleAssetsSchemaInput
+  handleAssetsSchemaInput: viewModel.handleAssetsSchemaInput,
+  viewModel,
 })
 </script>
 
 <template>
   <ChapterEditorView
-    :beat-preview-error="viewModel.beatPreviewError.value"
-    :beat-preview-loading="viewModel.beatPreviewLoading.value"
-    :chapter-summary="viewModel.chapterSummary.value"
     :character-updates="viewModel.characterUpdates.value"
     :character-extraction="viewModel.characterExtraction.value"
-    :characters="props.characters"
-    :close-agentic-settings-modal="viewModel.closeAgenticSettingsModal"
-    :close-beat-review-modal="viewModel.closeBeatReviewModal"
-    :close-completion-modal="viewModel.closeCompletionModal"
     :close-publish-modal="viewModel.closePublishModal"
-    :confirm-beats-and-generate="viewModel.confirmBeatsAndGenerate"
-    :completion-message="viewModel.completionMessage.value"
-    :completion-title="viewModel.completionTitle.value"
-    :form-error="viewModel.formError.value"
-    :get-beat-hook-label="viewModel.getBeatHookLabel"
-    :get-meta-collapsed-label="viewModel.getMetaCollapsedLabel"
-    :get-workflow-stage-label="viewModel.getWorkflowStageLabel"
     :handle-content-update="viewModel.handleContentUpdate"
     :handle-editor-entity-focus="viewModel.handleEditorEntityFocus"
     :handle-format-text="viewModel.handleFormatText"
-    :handle-optimize="viewModel.handleOptimize"
     :handle-partial-optimize="viewModel.handlePartialOptimize"
-    :handle-outline-input="viewModel.handleOutlineInput"
-    :handle-assets-schema-input="viewModel.handleAssetsSchemaInput"
     :handle-title-input="viewModel.handleTitleInput"
-    :inspiration-active-character-ids="viewModel.inspirationActiveCharacterIds.value"
-    :is-agentic-mode="viewModel.isAgenticMode.value"
-    :is-character-selected="viewModel.isCharacterSelected"
     :is-editor-disabled="viewModel.isEditorDisabled.value"
     :is-formatting="viewModel.isFormatting.value"
-    :is-generating="viewModel.isGenerating.value"
-    :is-loading-overlay="viewModel.isLoadingOverlay.value"
     :is-publishing="viewModel.isPublishing.value"
-    :is-stream-mode="viewModel.isStreamMode.value"
-    :local-meta-collapsed="viewModel.localMetaCollapsed.value"
-    :open-agentic-settings-modal="viewModel.openAgenticSettingsModal"
     :open-inspiration-modal="viewModel.openInspirationModal"
-    :optimization-feedback="viewModel.optimizationFeedback.value"
-    :preview-beats="viewModel.previewBeats.value"
-    :chapter-card="viewModel.chapterCard?.value || null"
-    :plan-degraded="viewModel.planDegraded?.value || null"
-    :regenerate-beats="viewModel.regenerateBeatsWithEditedCard"
     :publish-chapter="viewModel.publishChapter"
     :selected-chapter="viewModel.selectedChapter.value"
     :set-editor-ref="viewModel.setEditorRef"
-    :scroll-to-critique="viewModel.scrollToCritique"
-    :set-optimization-feedback="viewModel.setOptimizationFeedback"
-    :show-agentic-settings-modal="viewModel.showAgenticSettingsModal.value"
-    :show-beat-review-modal="viewModel.showBeatReviewModal.value"
-    :show-completion-modal="viewModel.showCompletionModal.value"
-    :show-inspiration-modal="viewModel.showInspirationModal.value"
     :show-publish-modal="viewModel.showPublishModal.value"
-    :show-clarification-modal="viewModel.showClarificationModal.value"
-    :is-clarifying-outline="viewModel.isClarifyingOutline.value"
-    :clarification-result="viewModel.clarificationResult.value"
-    :close-clarification-modal="viewModel.closeClarificationModal"
-    :handle-apply-clarification="viewModel.handleApplyClarification"
-    :handle-submit-clarification-answers="viewModel.handleSubmitClarificationAnswers"
-    :start-generate="viewModel.startGenerate"
-    :toggle-agentic-mode="viewModel.toggleAgenticMode"
-    :toggle-character="viewModel.toggleCharacter"
-    :toggle-meta-collapsed="viewModel.toggleMetaCollapsed"
-    :toggle-stream-mode="viewModel.toggleStreamMode"
-    :workflow-state="viewModel.workflowState.value"
-    :api-config="props.apiConfig"
     :book-id="props.bookId"
-    :critique-result="props.critiqueResult"
-    :assets="props.assets"
-    :toggle-asset="viewModel.toggleAsset"
-    :is-asset-selected="viewModel.isAssetSelected"
     :save-status="viewModel.saveStatus.value"
     :last-saved-at="viewModel.lastSavedAt.value"
-    :cancel-generation="viewModel.cancelGeneration"
-    :update-preview-beats="viewModel.updatePreviewBeats"
-    @request-critique="(content) => emit('request-critique', content)"
-    @intent-generate="(payload) => emit('intent-generate', payload)"
-    @intent-save="(payload) => emit('intent-save', payload)"
   />
 
   <InspirationModal

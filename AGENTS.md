@@ -3,7 +3,7 @@
 
 ## 项目概述
 
-Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手桌面应用。它采用 Agentic Workflow（智能体工作流）架构生成小说章节内容，当前实际生效的生成主流程为 V4.0 双轨架构（见下文"核心架构"）。
+Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手桌面应用。它采用 Agentic Workflow（智能体工作流）架构生成小说章节内容，当前实际生效的生成主流程为 V3.2 ADF 引擎 + V4.1 Refinery 精修（见下文"核心架构"）。
 
 **核心价值主张：**
 - 专为长篇小说创作设计的 AI 辅助工具
@@ -228,12 +228,17 @@ Velluma/
 │       ├── composables/     # Vue 组合式函数
 │       ├── extensions/      # TipTap 扩展
 │       ├── features/        # 功能模块（分层架构）
-│       │   ├── app/                   # 应用级容器（仅 containers/，无 presentation/）
+│       │   ├── app/                   # 应用级容器（AppShell/AppRail/useAppStore，仅 containers/ 无 presentation/）
 │       │   ├── chapter-editor/        # 章节编辑器
-│       │   ├── character-panel/       # 角色面板
-│       │   ├── asset-panel/           # 资产面板（⚠ 无 index.ts）
-│       │   ├── intent-driven/         # 意图驱动（V4.0）
-│       │   └── novel-wizard/          # 小说创建向导（另有 composables/、types/）
+│       │   ├── asset-panel/           # 资产面板
+│       │   ├── bible/                 # 圣经/设定集视图（StyleCardManager 等）
+│       │   ├── canon/                 # Canon 脑图（作者脑中世界：private 设定/伏笔/关系）
+│       │   ├── generation/            # 生成流程（useGenerationSession + GenerationFlowView/Stepper + Refinery UI）
+│       │   ├── insights/              # 洞察视图（成本/质量报告）
+│       │   ├── library/               # 书架
+│       │   ├── novel-wizard/          # 小说创建向导（另有 composables/、types/）
+│       │   ├── outline/               # 大纲视图
+│       │   └── workspace/             # 写作台（WorkspaceView + InspectorPanel 三栏）
 │       ├── services/        # 服务层
 │       │   ├── api/domain/  # 业务语义 API 适配（单个约 470 行的 index.ts 聚合全部域 API + asset.api.ts）
 │       │   ├── api/stream/  # SSE 流处理
@@ -342,6 +347,14 @@ npm run electron:build    # 打包安装包（electron-builder）
 ## 核心架构
 
 ### 章节生成主流程（现状）
+
+> ⚠⚠⚠ **本节以下的双轨（V4.0）描述已过时，仅作历史记录保留。** 经 2026-07-22 前端清理后确认，前端实际消费的生成主流程为三条活跃链路：
+> - **V3.2 ADF**（`POST /api/chapters/{id}/generate-adf`，默认引擎）：`ADFWorkflow`，阶段 SPINE_BUILDING → ANCHOR_DESIGN → TIER_DECIDE → FORWARD_FLOW → ANCHOR_AUDIT → (REFINE)，与双轨**零代码交叉**
+> - **V3.1 统一引擎**（`POST /api/chapters/{id}/generate`）
+> - **V4.1 Refinery 精修**（`/refinery/diagnose` + `/refinery/confirm`）
+>
+> 前端入口：`useGenerationSession.start()`（`engine` 默认 `'v3.2'`）→ `adfApi.streamGenerate`。V4.0 双轨（`/generate-chapter`）前端已无调用方。
+> 双轨的后端代码仍存在但已 deprecated；下方双轨阶段描述不再反映现状（后端全面校准超出本次清理范围）。
 
 **当前实际生效的生成主流程是双轨流**，编排代码位于：
 - `backend/routes/chapter_generation/stream_handler.py` — SSE 流式编排（DualTrackStreamHandler）
@@ -529,12 +542,12 @@ shared/utils            → 纯函数工具
 
 **命名规范**（现状存在少量偏差，新代码请遵守）：
 - Feature 目录: `kebab-case`
-- 容器组件: `*Container.vue`（偏差示例：`intent-driven/containers/IntentDrivenPanel.vue`）
+- 容器组件: `*Container.vue`
 - 展示组件: `*View.vue` 或 `*Panel.vue`（弹窗组件实际大量采用 `*Modal.vue`）
 
 **现状备注**：
 - `features/app/` 只有 containers/ 没有 presentation/；`novel-wizard/` 另有 composables/、types/ 子目录
-- `index.ts` 导出公共接口的约定执行不一致（如 `asset-panel/` 无 index.ts；`features/index.ts` 仅导出 app 与 chapter-editor）
+- `features/` 下已无聚合 `index.ts`（死桶已删）；各 feature 的公共接口导出约定执行不一致
 - `services/` 顶层残留 `domain/`、`stream/`、`transport/` 三个空壳目录（仅 `export {}`，重构遗留），实际代码均在 `services/api/` 下
 
 ---

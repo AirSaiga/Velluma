@@ -26,6 +26,7 @@ model_config.json
 # ---- Node.js ----
 node_modules/
 frontend/node_modules/
+.vite/
 
 # ---- 前端构建产物 ----
 frontend/dist/
@@ -64,6 +65,7 @@ backend/models_generation_task.py
 # ---- 测试产物 ----
 .test-dist/
 coverage/
+test_chapter_ids.json
 
 # ---- OS ----
 .DS_Store

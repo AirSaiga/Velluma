@@ -59,7 +59,7 @@ logger = get_runtime_logger(__name__)
 router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-dual-track"])
 
 
-@router.post("/{chapter_id}/generate-chapter")
+@router.post("/{chapter_id}/generate-chapter", deprecated=True)
 async def generate_chapter_stream(
     chapter_id: str,
     request: DualTrackGenerationRequest,
@@ -67,6 +67,12 @@ async def generate_chapter_stream(
 ):
     """
     章节生成主入口（流式 SSE）。
+
+    [V3.1 DEPRECATED] 本端点已标记废弃。请改用统一入口：
+        POST /api/chapters/{id}/generate  （tier=auto 默认，自主定档）
+
+    本端点在 deprecation 期内保留，行为不变（双轨架构在内部实现）。
+    统一引擎（V3.1）把双轨降级为"铺陈段工艺"，与高潮倒铺合并为一条管线。
 
     CP4.5 重命名：原 /generate-dual-track → /generate-chapter。
     该端点是当前活跃的章节流式生成入口（双轨架构在内部实现，

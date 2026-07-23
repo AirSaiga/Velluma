@@ -36,6 +36,10 @@ const props = defineProps({
   focusedEntity: {
     type: String,
     default: ''
+  },
+  closable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -276,6 +280,7 @@ function handleClose() {
       { icon: 'link', label: '关系', onClick: () => showRelationshipPanel = true },
       { icon: 'plus', label: '新建', onClick: openCreateDrawer, variant: 'primary' }
     ]"
+    :closable="closable"
     @close="handleClose"
   >
     <div class="character-panel-content">

@@ -345,3 +345,50 @@ class StreamEventBuilder:
         if detail:
             data['detail'] = detail[:200]
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    # ============================================================
+    # V3.0 引爆链事件构造器（detonation-gate / generate-v3 用）
+    # ============================================================
+
+    @staticmethod
+    def build_detonation_stage(stage: str, message: str = "") -> str:
+        """构建 DETONATION_STAGE 事件（阶段切换）。
+
+        Args:
+            stage: 阶段名（FUSE_WRITING / ASSEMBLING / GRAPH_AUDIT / ANCHORED_AUDIT / REFINING）
+            message: 可选消息
+        """
+        data: Dict[str, Any] = {
+            'event': 'DETONATION_STAGE',
+            'stage': stage,
+            'message': message or f'进入阶段：{stage}',
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def build_fuse_progress(
+        segment_index: int,
+        total_segments: int,
+        node_id: str = "",
+        word_count: int = 0,
+    ) -> str:
+        """构建 FUSE_PROGRESS 事件（引线段进度）。"""
+        data: Dict[str, Any] = {
+            'event': 'FUSE_PROGRESS',
+            'message': f'引线写作 {segment_index}/{total_segments}',
+            'segment_index': segment_index,
+            'total_segments': total_segments,
+            'node_id': node_id,
+            'word_count': word_count,
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def build_detonation_metric(metrics: Dict[str, Any]) -> str:
+        """构建 DETONATION_METRIC 事件（图校验/起爆分等指标）。"""
+        data: Dict[str, Any] = {
+            'event': 'DETONATION_METRIC',
+            'message': '引爆链审计指标',
+            'metrics': metrics,
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"

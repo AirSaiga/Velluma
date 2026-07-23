@@ -68,23 +68,39 @@ export async function requestJson<T = any>(path: string, options: FetchOptions =
   }
 }
 
+/**
+ * 发起原始 fetch 请求（用于 SSE 流式响应）。
+ *
+ * @param timeoutMs 总超时（毫秒）。设为 0 表示不设总超时——适用于 SSE 流，
+ *   因流的生命周期可能远超普通请求（章节生成可达数分钟）。
+ *   设为 0 时仅保留调用方传入的 signal（如用户主动 cancel），
+ *   连接保活由后端心跳 + 前端 cancel 共同负责。
+ *   默认 300000（300s）保持向后兼容。
+ */
 export async function requestRaw(path: string, options: FetchOptions = {}, timeoutMs = 300000): Promise<Response> {
   const baseUrl = await getApiBase()
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  // timeoutMs=0：流式响应不限总时长，不创建超时 controller（避免误杀长耗时流）
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
 
   try {
     const response = await fetch(`${baseUrl}${path}`, createRequestInit({
       ...options,
-      signal: options.signal || controller.signal
+      signal: options.signal || (controller?.signal)
     }))
     return response
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`请求超时（${timeoutMs / 1000}秒），请检查网络或稍后重试`)
+      // 仅当超时 controller 触发时给出超时文案；用户主动 cancel（options.signal）不应被当作"超时"
+      if (timeoutId && controller?.signal.aborted) {
+        throw new Error(`请求超时（${timeoutMs / 1000}秒），请检查网络或稍后重试`)
+      }
+      // 用户主动取消：原样抛出 AbortError，让上层（streamSse/cancel）处理
+      throw error
     }
     throw error
   } finally {
-    clearTimeout(timeoutId)
+    if (timeoutId) clearTimeout(timeoutId)
   }
 }

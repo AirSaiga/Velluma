@@ -8,10 +8,14 @@ import type { StyleCard, NegativeItem, AuthorSample, AuthorSampleSceneType } fro
 
 const { showToast } = useToast()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   bookId: string
   genre?: string | null
-}>()
+  closable?: boolean
+}>(), {
+  genre: null,
+  closable: true
+})
 
 const emit = defineEmits(['close'])
 
@@ -264,7 +268,7 @@ onUnmounted(() => {
   <PanelContainer
     title="文风卡 & 作者样本"
     icon="sparkles"
-    :closable="true"
+    :closable="closable"
     @close="emit('close')"
   >
     <div class="flex items-center justify-end mb-1">

@@ -13,11 +13,13 @@ export async function streamSse(
   handlers: StreamSseHandlers = {},
   signal?: AbortSignal
 ): Promise<void> {
+  // SSE 流不限总时长（timeoutMs=0）：章节生成可能数分钟，
+  // 由后端心跳（每 15s 注释帧）保活 + 用户主动 cancel 控制，避免前端误杀长流。
   const response = await requestRaw(endpoint, {
     method: 'POST',
     body: JSON.stringify(data),
     signal
-  })
+  }, 0)
 
   if (!response.ok) {
     throw new Error(`生成请求失败: ${response.status} ${response.statusText}`)

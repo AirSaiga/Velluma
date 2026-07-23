@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import AssetPanelView from '../presentation/AssetPanelView.vue'
 
-defineProps<{
+withDefaults(defineProps<{
   bookId?: string
-}>()
+  closable?: boolean
+}>(), {
+  bookId: undefined,
+  closable: true
+})
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -13,6 +17,7 @@ const emit = defineEmits<{
 <template>
   <AssetPanelView
     :book-id="bookId"
+    :closable="closable"
     @close="emit('close')"
   />
 </template>

@@ -1,5 +1,5 @@
 <script setup>
-import { useEditor, EditorContent, BubbleMenu } from '@tiptap/vue-3'
+import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -11,7 +11,7 @@ import Placeholder from '@tiptap/extension-placeholder'
   import Highlight from '@tiptap/extension-highlight'
   import Subscript from '@tiptap/extension-subscript'
   import Superscript from '@tiptap/extension-superscript'
-  import { CritiqueMark } from '../extensions/CritiqueMark'
+  import { AuditHighlightMark } from '../extensions/AuditHighlightMark'
   import { watch, onBeforeUnmount, onMounted, ref, nextTick, computed } from 'vue'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
@@ -296,8 +296,28 @@ const getDynamicInstructionPlaceholder = () => {
   return '润色方向：优化语气、描写和句式（Enter 执行）'
 }
 
+/**
+ * 纯文本 → 段落 HTML 归一化（V3.1 格式修复）。
+ *
+ * 生成管线产出的是带 \n\n 的纯文本；TipTap setContent 按 HTML 解析时换行会被
+ * 折叠为空格，导致全文粘连。注入编辑器前统一转换：
+ * - 已是 HTML（含块级标签）→ 原样返回（编辑器保存的 getHTML、历史章节）
+ * - 纯文本 → 按 \n\n 切段包 <p>（段内单 \n 去除，与 insertContent 既有逻辑一致）
+ */
+function normalizeToHtml(value) {
+  if (!value || typeof value !== 'string') return value
+  if (/<\s*(p|h[1-6]|div|ul|ol|li|blockquote|table|hr)\b/i.test(value)) return value
+  if (!value.includes('\n')) return value
+  return value
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${p.replace(/\n/g, '')}</p>`)
+    .join('')
+}
+
 const editor = useEditor({
-  content: props.modelValue,
+  content: normalizeToHtml(props.modelValue),
   editable: !props.disabled,
   extensions: [
     StarterKit.configure({
@@ -322,7 +342,7 @@ const editor = useEditor({
     Subscript,
     Superscript,
     SelectionHighlighter,
-    CritiqueMark,
+    AuditHighlightMark,
   ],
   editorProps: {
     attributes: {
@@ -414,15 +434,18 @@ watch(aiIntentMode, (mode) => {
 })
 
 watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId]) => {
+  // 统一先归一化：生成文本（纯文本 \n\n）→ 段落 HTML；已是 HTML 则原样
+  const normalizedValue = normalizeToHtml(newValue)
+
   // 1. 如果 ID 变了（切换章节），强制更新内容
   if (newId !== oldId) {
-    editor.value.commands.setContent(newValue, false)
+    editor.value.commands.setContent(normalizedValue, false)
     pendingExternalUpdate.value = null
     return
   }
 
   // 2. 如果内容完全一致，不需要更新
-  const isSame = editor.value.getHTML() === newValue
+  const isSame = editor.value.getHTML() === normalizedValue
   if (isSame) {
     pendingExternalUpdate.value = null
     return
@@ -433,17 +456,17 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
   //      此时不应该更新，否则会打断输入法并重置光标
   //    - 如果编辑器没焦点，说明是外部更新（如自动生成、协同编辑），应该更新
   if (editor.value.isFocused) {
-    pendingExternalUpdate.value = newValue
+    pendingExternalUpdate.value = normalizedValue
     return
   }
 
-  editor.value.commands.setContent(newValue, false)
+  editor.value.commands.setContent(normalizedValue, false)
   pendingExternalUpdate.value = null
 })
 
 const applyPendingExternalUpdate = () => {
   if (pendingExternalUpdate.value && !editor.value?.isFocused) {
-    editor.value?.commands.setContent(pendingExternalUpdate.value, false)
+    editor.value?.commands.setContent(normalizeToHtml(pendingExternalUpdate.value), false)
     pendingExternalUpdate.value = null
   }
 }
@@ -772,282 +795,83 @@ const undoLastOptimization = () => {
   clearUndoHint()
 }
 
-const currentCritique = ref(null)
+/**
+ * 滚动到指定字符偏移并临时高亮该区间（V3.1 F4 审校问题点击定位）。
+ *
+ * offset 是 [start, end] 字符偏移（基于纯文本，非 ProseMirror pos）。
+ * 因为 ProseMirror 的 pos 含块级节点边界开销，与纯文本字符偏移不一致，
+ * 这里先在 doc 文本上累计映射到 ProseMirror pos，再滚动+高亮。
+ *
+ * 高亮 2.5s 后自动清除（避免持久污染正文）。
+ */
+let auditHighlightTimer = null
 
-const shouldShowCritiqueMenu = ({ editor }) => {
-  const isCritique = editor.isActive('critiqueHighlight')
-  if (isCritique) {
-    currentCritique.value = editor.getAttributes('critiqueHighlight')
-  } else {
-    currentCritique.value = null
-  }
-  return isCritique
-}
+const scrollToOffsetAndHighlight = (offset) => {
+  if (!editor.value || !offset || offset.length < 2) return
+  const [startChar, endChar] = offset
+  if (typeof startChar !== 'number' || typeof endChar !== 'number') return
+  if (endChar <= startChar) return
 
-const CRITIQUE_LOOSE_IGNORE_RE = /[\s"'“”‘’「」『』`，。！？；：、,.!?;:()（）【】《》<>]/
+  // 先清除上次的高亮（若存在）
+  clearAuditHighlight()
 
-const normalizeCritiqueQuote = (quote) => {
-  const text = String(quote || '').trim()
-  if (!text) return ''
-  return text.replace(/^["“”‘’「」『』`]+|["“”‘’「」『』`]+$/g, '').trim()
-}
-
-const toLooseText = (text) => {
-  return String(text || '')
-    .split('')
-    .filter(ch => !CRITIQUE_LOOSE_IGNORE_RE.test(ch))
-    .join('')
-}
-
-const rangesOverlap = (a, b) => {
-  return a.from < b.to && b.from < a.to
-}
-
-const findRangeByMappedText = (text, map, query, usedRanges) => {
-  if (!query) return null
-  let cursor = 0
-  while (cursor < text.length) {
-    const index = text.indexOf(query, cursor)
-    if (index === -1) return null
-    const from = map[index]
-    const last = map[index + query.length - 1]
-    if (from !== undefined && last !== undefined) {
-      const candidate = { from, to: last + 1 }
-      const overlapped = usedRanges.some(item => rangesOverlap(item, candidate))
-      if (!overlapped) {
-        return candidate
-      }
-    }
-    cursor = index + 1
-  }
-  return null
-}
-
-const buildCritiqueSearchIndex = (doc) => {
-  let rawText = ''
-  const rawMap = []
-  const looseChars = []
-  const looseMap = []
+  const doc = editor.value.state.doc
+  // 构建"纯文本字符偏移 → ProseMirror pos"的映射
+  let charCount = 0
+  let startPs = null
+  let endPs = null
 
   doc.descendants((node, pos) => {
+    if (startPs !== null && endPs !== null) return false
     if (!node.isText) return true
     const text = node.text || ''
-    for (let i = 0; i < text.length; i += 1) {
-      const ch = text[i]
-      const absPos = pos + i
-      rawText += ch
-      rawMap.push(absPos)
-      if (!CRITIQUE_LOOSE_IGNORE_RE.test(ch)) {
-        looseChars.push(ch)
-        looseMap.push(absPos)
-      }
+    const len = text.length
+    // 检查 startChar 是否落在当前节点
+    if (startPs === null && charCount + len >= startChar) {
+      startPs = pos + (startChar - charCount)
     }
+    if (endPs === null && charCount + len >= endChar) {
+      endPs = pos + (endChar - charCount)
+    }
+    charCount += len
     return true
   })
 
-  return {
-    rawText,
-    rawMap,
-    looseText: looseChars.join(''),
-    looseMap
+  // 兜底：若 endChar 超出文本末尾，取文档末尾
+  if (startPs !== null && endPs === null) {
+    endPs = doc.content.size
   }
-}
+  if (startPs === null) return
 
-const setCritiqueData = (data) => {
-  if (!editor.value) return
+  const safeEnd = endPs ?? startPs + 1
 
-  if (!data) {
-    const tr = editor.value.state.tr
-    const doc = tr.doc
-    doc.descendants((node, pos) => {
-      if (node.isText) {
-        const marks = node.marks
-        const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
-        if (critiqueMark) {
-          tr.removeMark(pos, pos + node.nodeSize, critiqueMark.type)
-        }
-      }
-    })
-    if (tr.steps.length > 0) {
-      editor.value.view.dispatch(tr)
-    }
-    return
-  }
-
-  if (!data || !Array.isArray(data.comments)) return
-
-  const tr = editor.value.state.tr
-  const doc = tr.doc
-  doc.descendants((node, pos) => {
-    if (node.isText) {
-      const marks = node.marks
-      const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
-      if (critiqueMark) {
-        tr.removeMark(pos, pos + node.nodeSize, critiqueMark.type)
-      }
-    }
-  })
-
-  if (tr.steps.length > 0) {
+  // 应用 auditHighlight mark
+  const markType = editor.value.state.schema.marks.auditHighlight
+  if (markType) {
+    const tr = editor.value.state.tr.addMark(startPs, safeEnd, markType.create())
     editor.value.view.dispatch(tr)
   }
 
-  const searchIndex = buildCritiqueSearchIndex(editor.value.state.doc)
-  const usedRanges = []
-  const matchedRanges = []
-  const unmatched = []
+  // 滚动到该位置（选区设置 + scrollIntoView）
+  editor.value.commands.setTextSelection({ from: startPs, to: safeEnd })
+  editor.value.commands.scrollIntoView()
 
-  data.comments.forEach((comment, index) => {
-    const quote = normalizeCritiqueQuote(comment.exact_quote)
-    if (!quote) {
-      unmatched.push(comment)
-      return
-    }
-
-    let range = findRangeByMappedText(searchIndex.rawText, searchIndex.rawMap, quote, usedRanges)
-    if (!range) {
-      const looseQuote = toLooseText(quote)
-      if (looseQuote.length >= 4) {
-        range = findRangeByMappedText(searchIndex.looseText, searchIndex.looseMap, looseQuote, usedRanges)
-      }
-    }
-
-    if (!range) {
-      unmatched.push(comment)
-      return
-    }
-
-    usedRanges.push(range)
-    matchedRanges.push({
-      from: range.from,
-      to: range.to,
-      attrs: {
-        id: comment.id || `${Date.now()}-${index}`,
-        comment: comment.reader_feeling,
-        type: comment.type,
-        reader_feeling: comment.reader_feeling,
-        suggestion: comment.suggestion
-      }
-    })
-  })
-
-  if (matchedRanges.length > 0) {
-    const markType = editor.value.state.schema.marks.critiqueHighlight
-    if (markType) {
-      const applyTr = editor.value.state.tr
-      matchedRanges.forEach(item => {
-        applyTr.addMark(item.from, item.to, markType.create(item.attrs))
-      })
-      if (applyTr.steps.length > 0) {
-        editor.value.view.dispatch(applyTr)
-      }
-    }
-  }
-
-  if (unmatched.length > 0) {
-    console.warn('Unmatched critiques:', unmatched)
-  }
+  // 2.5s 后清除高亮
+  auditHighlightTimer = setTimeout(() => {
+    clearAuditHighlight()
+  }, 2500)
 }
 
-const scrollToCritiqueById = (commentId) => {
-  if (!editor.value || !commentId) return
-
-  const doc = editor.value.state.doc
-  let foundPos = null
-
-  doc.descendants((node, pos) => {
-    if (!node.isText) return true
-    const marks = node.marks
-    const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight' && m.attrs.id === commentId)
-    if (critiqueMark) {
-      foundPos = pos
-      return false
-    }
-    return true
-  })
-
-  if (foundPos !== null) {
-    console.log('[RichTextEditor] foundPos:', foundPos)
-    editor.value.commands.setTextSelection({ from: foundPos, to: foundPos })
-    editor.value.commands.scrollIntoView()
-    editor.value.view.dispatch(editor.value.state.tr)
-  } else {
-    console.log('[RichTextEditor] not found matching position')
+const clearAuditHighlight = () => {
+  if (auditHighlightTimer) {
+    clearTimeout(auditHighlightTimer)
+    auditHighlightTimer = null
   }
-}
-
-const scrollToCritiqueByQuote = (exactQuote) => {
-  if (!editor.value || !exactQuote) return
-
-  const doc = editor.value.state.doc
-  const quoteText = exactQuote.trim()
-  const normalizedQuote = quoteText.replace(/\s+/g, ' ')
-  let foundPos = null
-
-  doc.descendants((node, pos) => {
-    if (!node.isText) return true
-    const text = node.text || ''
-    const normalizedText = text.replace(/\s+/g, ' ')
-    
-    if (normalizedText.includes(normalizedQuote) || text.includes(quoteText)) {
-      const marks = node.marks
-      const critiqueMark = marks.find(m => m.type.name === 'critiqueHighlight')
-      if (critiqueMark) {
-        foundPos = pos
-        return false
-      }
-    }
-    return true
-  })
-
-  if (foundPos === null) {
-    // 降级：使用全文搜索逻辑 (buildCritiqueSearchIndex)
-    // 这能处理跨节点文本匹配，且支持模糊匹配 (looseText)
-    const searchIndex = buildCritiqueSearchIndex(doc)
-    const quote = normalizeCritiqueQuote(exactQuote)
-    
-    if (quote) {
-      // 尝试精确匹配
-      let range = findRangeByMappedText(searchIndex.rawText, searchIndex.rawMap, quote, [])
-      
-      // 如果失败，尝试模糊匹配 (忽略标点符号和空格)
-      if (!range) {
-        const looseQuote = toLooseText(quote)
-        if (looseQuote.length >= 4) {
-          range = findRangeByMappedText(searchIndex.looseText, searchIndex.looseMap, looseQuote, [])
-        }
-      }
-      
-      if (range) {
-        foundPos = range.from
-      }
-    }
-  }
-
-  if (foundPos !== null) {
-    const { view } = editor.value
-    const coords = view.coordsAtPos(foundPos)
-    
-    const editorContainer = editorContainerRef.value
-    if (editorContainer) {
-      const scrollElement = editorContainer.querySelector('.ProseMirror')
-      if (scrollElement) {
-        const domNode = view.domAtPos(foundPos)
-        if (domNode && domNode.node) {
-          const element = domNode.node.nodeType === Node.TEXT_NODE ? domNode.node.parentNode : domNode.node
-          if (element && typeof element.scrollIntoView === 'function') {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          } else {
-            scrollElement.scrollTop = coords.top - scrollElement.getBoundingClientRect().top - scrollElement.clientHeight / 2
-          }
-        }
-      }
-    }
-    
-    editor.value.commands.setTextSelection({ from: foundPos, to: foundPos })
-    editor.value.commands.scrollIntoView()
-    editor.value.view.dispatch(editor.value.state.tr)
-  }
+  if (!editor.value) return
+  const markType = editor.value.state.schema.marks.auditHighlight
+  if (!markType) return
+  const tr = editor.value.state.tr.removeMark(0, editor.value.state.doc.content.size, markType)
+  editor.value.view.dispatch(tr)
 }
 
 const handleGlobalKeydown = (event) => {
@@ -1065,9 +889,8 @@ defineExpose({
   editor,
   applyOptimizationDiff,
   resetOptimization,
-  setCritiqueData,
-  scrollToCritiqueById,
-  scrollToCritiqueByQuote,
+  scrollToOffsetAndHighlight,
+  clearAuditHighlight,
   getContent: () => editor.value?.getHTML() || ''
 })
 </script>
@@ -1278,23 +1101,6 @@ defineExpose({
     
     <editor-content :editor="editor" class="flex-1 overflow-y-auto custom-scrollbar" />
 
-    <bubble-menu
-      v-if="editor"
-      :editor="editor"
-      :tippy-options="{ duration: 100, placement: 'bottom' }"
-      :should-show="shouldShowCritiqueMenu"
-    >
-      <div v-if="currentCritique" class="bg-[var(--bg-primary)] border border-[var(--border-color)] shadow-lg rounded-lg p-3 max-w-sm flex flex-col gap-2 text-sm">
-        <div class="flex items-center gap-2">
-          <span class="font-bold text-ink-800">{{ currentCritique.type }}</span>
-        </div>
-        <div class="text-ink-600 leading-relaxed">{{ currentCritique.comment }}</div>
-        <div v-if="currentCritique.suggestion" class="text-ink-500 text-xs italic border-t pt-2 mt-1">
-          建议：{{ currentCritique.suggestion }}
-        </div>
-      </div>
-    </bubble-menu>
-
     <transition name="copilot-menu">
       <div 
         v-if="showSelectionMenu"
@@ -1500,15 +1306,6 @@ defineExpose({
   :deep(.ProseMirror p) {
     margin-bottom: 1.25em;
   }
-:deep(.critique-highlight) {
-  background-color: rgba(255, 215, 0, 0.2);
-  border-bottom: 2px solid #fbbf24;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-:deep(.critique-highlight:hover) {
-  background-color: rgba(255, 215, 0, 0.4);
-}
 :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-muted);
   /* ink-400 色调 */

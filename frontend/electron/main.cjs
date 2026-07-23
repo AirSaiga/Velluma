@@ -322,7 +322,8 @@ async function createMainWindow() {
     const win = new BrowserWindow({
       width: 1400,
       height: 900,
-      minWidth: 1000,
+      // V3.1 F2：三栏布局（binder + 编辑器 + inspector）需要更宽的最小窗口
+      minWidth: 1200,
       minHeight: 700,
       show: true,
       webPreferences: {

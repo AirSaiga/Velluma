@@ -1,70 +1,5 @@
 import { streamSse } from '../stream'
-import { getApiBase, requestJson, requestRaw } from '../transport'
-
-const PROMPT_STORAGE_KEY = 'velluma_last_prompt'
-const PROMPT_CHANNEL_KEY = 'velluma_prompt_debug'
-
-let promptChannel: BroadcastChannel | null = null
-
-function normalizePromptData(data: any): { system_prompt: string; user_prompt: string } | null {
-  if (!data || typeof data !== 'object') return null
-  const system_prompt = typeof data.system_prompt === 'string' ? data.system_prompt : ''
-  const user_prompt = typeof data.user_prompt === 'string' ? data.user_prompt : ''
-  if (!system_prompt && !user_prompt) return null
-  return { system_prompt, user_prompt }
-}
-
-function getPromptChannel() {
-  if (promptChannel) return promptChannel
-  if (typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return null
-  promptChannel = new BroadcastChannel(PROMPT_CHANNEL_KEY)
-  return promptChannel
-}
-
-export function publishPromptData(data: any) {
-  const prompt = normalizePromptData(data)
-  if (!prompt) return
-  try {
-    localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(prompt))
-  } catch (e) {
-    console.warn('保存 prompt 到 localStorage 失败', e)
-  }
-
-  const channel = getPromptChannel()
-  if (channel) {
-    channel.postMessage(prompt)
-  }
-
-  if (window.electronAPI) {
-    window.electronAPI.send('prompt-data', prompt)
-  }
-}
-
-export function readStoredPromptData() {
-  try {
-    const raw = localStorage.getItem(PROMPT_STORAGE_KEY)
-    if (!raw) return null
-    return normalizePromptData(JSON.parse(raw))
-  } catch (e) {
-    console.warn('读取 localStorage prompt 失败', e)
-    return null
-  }
-}
-
-export function subscribePromptData(handler: (data: { system_prompt: string; user_prompt: string }) => void) {
-  const channel = getPromptChannel()
-  if (!channel) return () => {}
-  const listener = (event: MessageEvent) => {
-    const prompt = normalizePromptData(event.data)
-    if (prompt) {
-      handler(prompt)
-    }
-  }
-  channel.addEventListener('message', listener)
-  return () => {
-    channel.removeEventListener('message', listener)
-  }
-}
+import { requestJson, requestRaw } from '../transport'
 
 export const bookApi = {
   getAll: () => requestJson('/books'),
@@ -80,7 +15,7 @@ export const bookApi = {
     requestJson(`/books/${id}/golden-snippets`, { method: 'PUT', body: JSON.stringify({ golden_snippets: data }) }),
   getStyleBlacklist: (id: string) => requestJson(`/books/${id}/style-blacklist`),
   updateStyleBlacklist: (id: string, data: string[]) =>
-    requestJson(`/books/${id}/style-blacklist`, { method: 'PUT', body: JSON.stringify({ style_blacklist: data }) })
+    requestJson(`/books/${id}/style-blacklist`, { method: 'PUT', body: JSON.stringify({ style_blacklist: data }) }),
 }
 
 export const characterApi = {
@@ -110,27 +45,6 @@ export const chapterApi = {
     requestJson(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
   publish: (chapterId: string, data: any) =>
     requestJson(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  generateEmbedding: (chapterId: string) =>
-    requestJson(`/chapters/${chapterId}/generate-embedding`, { method: 'POST', body: JSON.stringify({}) }),
-  testCharacterExtraction: (data: { chapter_content: string }) =>
-    requestJson('/debug/character-extraction', { method: 'POST', body: JSON.stringify(data) })
-}
-
-export const intentDrivenApi = {
-  getTemplates: () => requestJson('/intent-driven/templates'),
-  recommend: (data: { creative_intents: string[]; chapter_goals?: string[] | null }) =>
-    requestJson('/intent-driven/recommend', { method: 'POST', body: JSON.stringify(data) }),
-  generateSync: async (data: any) => {
-    const response = await requestRaw('/intent-driven/generate', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-    if (!response.ok) {
-      throw new Error(`意图生成请求失败: ${response.status} ${response.statusText}`)
-    }
-    const text = await response.text()
-    return text
-  }
 }
 
 export const relationshipApi = {
@@ -180,131 +94,7 @@ export const mapApi = {
   }
 }
 
-async function streamDualTrackFn(
-  chapterId: string,
-  data: any,
-  callbacks: {
-    onEvent?: (event: string, data: any) => void
-    onChunk?: (chunk: string) => void
-    onDone?: (result: any) => void
-    onError?: (error: string) => void
-  },
-  signal?: AbortSignal
-) {
-  let hasCompleted = false
-
-  streamSse(`/chapters/${chapterId}/generate-chapter`, data, {
-    onPayload: payload => {
-      if (payload.prompt) {
-        publishPromptData(payload.prompt)
-      }
-
-      if (payload.event) {
-        callbacks.onEvent?.(payload.event, payload)
-
-        if (payload.event === 'TEXT_CHUNK' && payload.content) {
-          callbacks.onChunk?.(payload.content)
-        } else if (payload.event === 'COMPLETE') {
-          hasCompleted = true
-          // 将双轨模式的 stats 适配为标准 metrics 格式，保持与普通模式兼容
-          const stats = payload.stats || {}
-          const metrics = {
-            total_seconds: stats.total_time,
-            fast_mode: false,
-            top_stage_seconds: [
-              { stage: 'TRACK_GENERATION', seconds: stats.track_time || 0 },
-              { stage: 'STITCHING', seconds: stats.stitch_time || 0 }
-            ].filter(s => s.seconds > 0),
-            aggregate_stage_seconds: [],
-            llm: {
-              calls: 0,
-              failures: 0,
-              seconds: stats.total_time || 0
-            },
-            // 保留原始 stats 数据
-            raw_stats: stats
-          }
-          callbacks.onDone?.({
-            text: payload.text,
-            stats: payload.stats,
-            metrics: metrics,
-            alignment_score: payload.alignment_score,
-            passed: payload.passed,
-            iterations: payload.iterations,
-            revision_count: payload.revision_count
-          })
-          return true
-        }
-      }
-    },
-    onDone: () => {
-      if (!hasCompleted) {
-        callbacks.onError?.('生成过程意外中断，未收到完成信号')
-      }
-    },
-    onError: message => {
-      hasCompleted = true
-      callbacks.onError?.(message)
-    }
-  }).catch(err => {
-    if (!hasCompleted) {
-      callbacks.onError?.(err.message)
-    }
-  })
-}
-
 export const generateApi = {
-  stream: async (data: any, onChunk?: (chunk: string) => void, onDone?: () => void, onError?: (error: string) => void) => {
-    const baseUrl = await getApiBase()
-
-    streamSse('/generate_chapter', data, {
-      tolerateIncompleteWhenHasContent: true,
-      onPayload: payload => {
-        if (payload.prompt) {
-          publishPromptData(payload.prompt)
-        } else if (payload.content) {
-          onChunk?.(payload.content)
-        } else if (payload.done) {
-          return true
-        }
-      },
-      onDone: () => {
-        onDone?.()
-      },
-      onError: message => {
-        onError?.(message)
-      }
-    }).catch(err => {
-      onError?.(err.message)
-    })
-  },
-
-  generateSync: async (data: any) => {
-    const response = await requestRaw('/generate_chapter_sync', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-
-    if (!response.ok) {
-      throw new Error(`生成请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
-  },
-
-  optimize: async (data: any) => {
-    const response = await requestRaw('/optimize_chapter', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-
-    if (!response.ok) {
-      throw new Error(`优化请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
-  },
-
   optimizeSelection: async (data: any) => {
     const response = await requestRaw('/optimize_selection', {
       method: 'POST',
@@ -316,88 +106,6 @@ export const generateApi = {
     }
 
     return response.json()
-  },
-
-  // CP4.5：previewAgenticBeats 已下线（合并闸门 planApi.preview 取代）
-
-  clarifyOutline: async (data: any, abortSignal?: AbortSignal) => {
-    // 大纲澄清需要调用 LLM，设置 5 分钟超时
-    const response = await requestRaw(
-      '/clarify-outline',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-        signal: abortSignal
-      },
-      300000
-    )
-
-    if (!response.ok) {
-      throw new Error(`大纲澄清请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return response.json()
-  },
-
-  /**
-   * Agentic 章节生成（V4.0 默认使用双轨对抗架构）
-   * @param useLegacyMode - 是否使用传统单轨模式（默认 false，使用双轨）
-   */
-  streamAgentic: async (
-    data: any,
-    callbacks: {
-      onEvent?: (event: string, data: any) => void
-      onChunk?: (chunk: string) => void
-      onDone?: (result: any) => void
-      onError?: (error: string) => void
-    },
-    endpoint = '/generate_chapter_agentic',
-    useLegacyMode = false,
-    signal?: AbortSignal
-  ) => {
-    // V4.0 默认使用双轨模式，除非显式指定使用传统模式
-    if (!useLegacyMode && data.chapter_id) {
-      return streamDualTrackFn(data.chapter_id, data, callbacks, signal)
-    }
-    let hasCompleted = false
-
-    streamSse(endpoint, data, {
-      onPayload: payload => {
-        if (payload.prompt) {
-          publishPromptData(payload.prompt)
-        }
-
-        if (payload.event) {
-          callbacks.onEvent?.(payload.event, payload)
-
-          if (payload.event === 'TEXT_CHUNK' && payload.content) {
-            callbacks.onChunk?.(payload.content)
-          } else if (payload.event === 'DONE') {
-            hasCompleted = true
-            callbacks.onDone?.({
-              passed: payload.passed,
-              iterations: payload.iterations,
-              revision_count: payload.revision_count,
-              metrics: payload.metrics
-            })
-            return true
-          }
-        }
-      },
-      onDone: () => {
-        if (!hasCompleted) {
-          callbacks.onError?.('生成过程意外中断，未收到完成信号')
-        }
-      },
-      onError: message => {
-        hasCompleted = true
-        callbacks.onError?.(message)
-      }
-    }, signal).catch(err => {
-      if (!hasCompleted) {
-        callbacks.onError?.(err.message)
-      }
-    })
   },
 
   formatText: async (data: { text: string }) => {
@@ -432,39 +140,6 @@ export const generateApi = {
 
     return await response.json()
   },
-
-  critiqueChapter: async (data: { chapter_content: string; chapter_title?: string }) => {
-    const response = await requestRaw('/critique_chapter', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-
-    if (!response.ok) {
-      throw new Error(`主编指导请求失败: ${response.status} ${response.statusText}`)
-    }
-
-    return await response.json()
-  },
-
-  /**
-   * V4.0 双轨生成 - 流式输出
-   * 使用双轨对抗架构生成章节，包含短文生成和对抗校对
-   */
-  streamDualTrack: async (
-    chapterId: string,
-    data: any,
-    callbacks: {
-      onEvent?: (event: string, data: any) => void
-      onChunk?: (chunk: string) => void
-      onDone?: (result: any) => void
-      onError?: (error: string) => void
-    },
-    signal?: AbortSignal
-  ) => {
-    return streamDualTrackFn(chapterId, data, callbacks, signal)
-  }
-
-  // CP4.5：generateDualTrackSimple 已下线（后端端点已删除，无前端调用方）
 }
 
 // ============================================================
@@ -559,8 +234,6 @@ export const systemApi = {
 // ============================================================
 
 import type {
-  PlanPreviewResponse,
-  PlanConfirmRequest,
   StyleCard,
   StyleExtractResponse,
   AuthorSample,
@@ -568,46 +241,6 @@ import type {
   CostReport,
   QualityReport,
 } from '../../../types'
-
-/**
- * 章节规划 API（合并闸门，蓝图 §4.4.2 + decisions U3c）。
- *
- * 业务流程：
- *   preview() → 用户编辑章节卡+节拍 → confirm() → 触发 /generate-chapter（CP4.5 重命名）
- */
-export const planApi = {
-  /** 联合预览：生成/复用章节卡 + 节拍。
-   *  首次调用 editedCardFields 留空 → AI 生成（2 次 LLM，5-15s）
-   *  重规划 editedCardFields 非空 → 用用户版本生成新节拍（1 次 LLM）
-   */
-  preview: async (
-    chapterId: string,
-    editedCardFields?: Record<string, any> | null,
-  ): Promise<PlanPreviewResponse> => {
-    return requestJson(
-      `/chapters/${chapterId}/plan`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ edited_card_fields: editedCardFields || null }),
-      },
-      600000,  // 10 分钟超时（联合预览耗时长）
-    )
-  },
-
-  /** 单次确认：写 chapter_card + beats 到 DB，status=confirmed。 */
-  confirm: async (
-    chapterId: string,
-    payload: PlanConfirmRequest,
-  ): Promise<any> => {
-    return requestJson(
-      `/chapters/${chapterId}/plan/confirm`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    )
-  },
-}
 
 /**
  * 文风体系 API（蓝图 §4.4 + §5.1 + §6.2）。
@@ -701,12 +334,660 @@ export const qualityReportApi = {
     const query = runId ? `?run_id=${runId}` : ''
     return requestJson(`/chapters/${chapterId}/quality-report${query}`)
   },
+}
 
-  /** 重新触发本章双层审计（代码级 + LLM 级），返回新报告。 */
-  rerun: async (chapterId: string, runId?: string): Promise<QualityReport> => {
-    const query = runId ? `?run_id=${runId}` : ''
-    return requestJson(`/chapters/${chapterId}/quality-report/rerun${query}`, {
-      method: 'POST',
+// ============================================================
+// 引爆链链读取（detonationApi）
+// ============================================================
+// V3.0 引爆链 UI 已移除；仅保留 GET /detonation-chain 读取，
+// 供 V3.1 useGenerationSession 在生成完成后补拉铺垫结构图节点。
+
+export const detonationApi = {
+  /** 读取活跃链（V3.1 useGenerationSession 完成后补拉铺垫结构图节点复用）。 */
+  getChain: (chapterId: string) =>
+    requestJson(`/chapters/${chapterId}/detonation-chain`),
+}
+
+// ============================================================
+// V3.1 统一引擎 API（unifiedApi）—— 合并双轨与高潮倒推
+// ============================================================
+// 端点（前缀 /api/chapters/{chapter_id}）：
+// - POST /generate  统一生成（参数 tier: auto|climax|turn|progress|transition，默认 auto）
+//
+// SSE v3 事件序列（规格 §9.1）：
+// - UNIFIED_STAGE / TIER_DECIDED / ZONE_ASSIGNED / ZONE_PROGRESS /
+//   SKETCH_BASELINE / INFLIGHT_REGULATION / MERGE_SUGGESTION /
+//   DEGRADED / TEXT_CHUNK / COMPLETE / ERROR
+
+export type Tier = 'auto' | 'climax' | 'turn' | 'progress' | 'transition'
+
+export interface TierDecision {
+  tier: 'climax' | 'turn' | 'progress' | 'transition'
+  reason: string
+  climax_score?: number | null
+  chapter_position_signal?: string | null
+  tension_level?: number | null
+  forced_by_user: boolean
+  max_depth: number
+  development_ratio: number
+}
+
+export interface UnifiedCompleteResult {
+  text: string
+  stats: Record<string, any>
+  generation_run_id: string
+  chain_id?: string | null
+  tier?: string | null
+  tier_reason?: string | null
+  zones?: Record<string, string[]>
+  climax_check_score?: number | null
+  graph_audit_verdict?: string | null
+  inflight_event_count?: number
+}
+
+export const unifiedApi = {
+  /**
+   * SSE 统一生成（V3.1）。
+   * tier=auto 时程序自主定档；其余值强制指定档位。
+   */
+  streamGenerate: async (
+    chapterId: string,
+    params: { tier?: Tier; payload_count?: number } | undefined,
+    callbacks: {
+      onEvent?: (event: string, data: any) => void
+      onChunk?: (chunk: string) => void
+      onStage?: (stage: string, data: any) => void
+      onTierDecided?: (decision: TierDecision) => void
+      onZoneProgress?: (index: number, total: number, data: any) => void
+      onSketchBaseline?: (result: any) => void
+      onInflightRegulation?: (event: any) => void
+      onMergeSuggestion?: (suggestion: any) => void
+      onMetric?: (metrics: any) => void
+      onDone?: (result: UnifiedCompleteResult) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal
+  ) => {
+    let hasCompleted = false
+
+    streamSse(`/chapters/${chapterId}/generate`, params || {}, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+        callbacks.onEvent?.(payload.event, payload)
+
+        if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'UNIFIED_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'TIER_DECIDED') {
+          callbacks.onTierDecided?.({
+            tier: payload.tier,
+            reason: payload.reason,
+            climax_score: payload.climax_score,
+            chapter_position_signal: payload.chapter_position_signal,
+            tension_level: payload.tension_level,
+            forced_by_user: payload.forced_by_user,
+            max_depth: payload.max_depth,
+            development_ratio: payload.development_ratio,
+          })
+        } else if (payload.event === 'ZONE_PROGRESS') {
+          callbacks.onZoneProgress?.(payload.segment_index, payload.total_segments, payload)
+        } else if (payload.event === 'SKETCH_BASELINE') {
+          callbacks.onSketchBaseline?.(payload)
+        } else if (payload.event === 'INFLIGHT_REGULATION') {
+          callbacks.onInflightRegulation?.(payload)
+        } else if (payload.event === 'MERGE_SUGGESTION') {
+          callbacks.onMergeSuggestion?.(payload)
+        } else if (payload.event === 'UNIFIED_METRIC') {
+          callbacks.onMetric?.(payload.metrics)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            text: payload.text,
+            stats: payload.stats,
+            generation_run_id: payload.generation_run_id,
+            chain_id: payload.chain_id,
+            tier: payload.tier,
+            tier_reason: payload.tier_reason,
+            zones: payload.zones,
+            climax_check_score: payload.climax_check_score,
+            graph_audit_verdict: payload.graph_audit_verdict,
+            inflight_event_count: payload.inflight_event_count,
+          })
+          return true
+        }
+      },
+      onDone: () => {
+        if (!hasCompleted) {
+          callbacks.onError?.('生成过程意外中断，未收到完成信号')
+        }
+      },
+      onError: message => {
+        hasCompleted = true
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      if (!hasCompleted) {
+        callbacks.onError?.(err.message)
+      }
     })
   },
+}
+
+// ============================================================
+// V3.2 ADF（Anchor-Driven Flow）引擎 API（adfApi）
+// ============================================================
+// 端点（前缀 /api/chapters/{chapter_id}）：
+// - POST /generate-adf  ADF 生成（参数 tier + target_word_count + max_segments）
+//
+// SSE v3.2 事件序列（设计文档 §7）：
+// - ADF_STAGE / ADF_SPINE_BUILT / ADF_ANCHOR_DESIGNED / TIER_DECIDED /
+//   ADF_PROGRESS / ADF_PRECONDITION_LANDED / ADF_AUDIT / ADF_METADATA /
+//   DEGRADED / UNIFIED_METRIC / TEXT_CHUNK / COMPLETE / ERROR
+
+export type AdfEngine = 'v3.1' | 'v3.2'
+
+export interface AdfPrecondition {
+  id: string
+  category: string
+  description: string
+  must_use_terms: string[]
+  min_landing_offset?: number
+  landed?: boolean
+  landed_segment?: number | null
+  landed_evidence?: string | null
+}
+
+export interface AdfEmotionSample {
+  progress: number
+  register: string
+  energy: number
+}
+
+export interface AdfAnchorDesigned {
+  climax_intensity: number
+  climax_description: string
+  setup_point_count: number
+  emotion_flow_samples: AdfEmotionSample[]
+}
+
+export interface AdfAuditResult {
+  verdict: 'pass' | 'needs_refinement' | 'fail' | 'unaudited'
+  missing_setup_points: string[]
+  emotion_mismatches: string[]
+  structure_issues: string[]
+  climax_score?: number | null
+  fix_targets: string[]
+}
+
+export interface AdfCompleteResult {
+  text: string
+  engine: 'adf'
+  generation_run_id: string
+  tier?: string | null
+  tier_reason?: string | null
+  target_word_count?: number | null
+  segment_count: number
+  setup_points_total: number
+  setup_points_landed: number
+  climax_score?: number | null
+  audit_verdict?: string | null
+  stats: Record<string, any>
+}
+
+// ============================================================
+// V4.2 对话式介入点 1：章节规划建议
+// ============================================================
+
+export interface PlanSuggestionQuestion {
+  id: string
+  type: 'confirm' | 'expectation_action' | 'hooks' | 'free_text'
+  question: string
+  default?: string
+  options?: string[]
+  option_labels?: Record<string, string>
+  expectation_id?: string
+  hook_ids?: string[]
+}
+
+export interface PlanSuggestionResponse {
+  chapter_id: string
+  chapter_number: number
+  outline: string
+  reader_mirror_plan: any | null
+  active_expectations: Array<{
+    id: string
+    type: string
+    description: string
+    current_tension: number
+    recommended_action: string
+  }>
+  open_hooks: Array<{
+    id: string
+    label: string
+    strength: number
+    expected_reveal_chapter: number | null
+  }>
+  canon_summary_excerpt: string
+  suggested_questions: PlanSuggestionQuestion[]
+}
+
+export const adfApi = {
+  /**
+   * V4.2 介入点 1：获取章节规划建议（生成前）。
+   */
+  getPlanSuggestion: async (chapterId: string): Promise<PlanSuggestionResponse> => {
+    return await requestJson<PlanSuggestionResponse>(`/chapters/${chapterId}/plan-suggestion`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
+  /**
+   * SSE ADF 生成（V3.2）。
+   * tier=auto 时程序自主定档；其余值强制指定档位。
+   * target_word_count=null 时由 tier 自动推导；max_segments 控制段数上限。
+   */
+  streamGenerate: async (
+    chapterId: string,
+    params: {
+      tier?: Tier
+      target_word_count?: number | null
+      max_segments?: number
+      enable_spine?: boolean
+      enable_anchor_audit?: boolean
+      enable_refinement?: boolean
+      user_tier_hint?: string | null
+      author_intent?: string | null
+      expectation_actions?: Record<string, string> | null
+    } | undefined,
+    callbacks: {
+      onEvent?: (event: string, data: any) => void
+      onChunk?: (chunk: string) => void
+      onStage?: (stage: string, data: any) => void
+      onSpineBuilt?: (data: any) => void
+      onAnchorDesigned?: (anchor: AdfAnchorDesigned) => void
+      onTierDecided?: (decision: { tier: string; reason: string; climax_score?: number; target_word_count?: number; max_segments?: number }) => void
+      onProgress?: (segmentIndex: number, total: number, data: any) => void
+      onPreconditionLanded?: (data: { precondition_id: string; segment: number; evidence: string; category: string }) => void
+      onAudit?: (audit: AdfAuditResult) => void
+      onMetric?: (metrics: any) => void
+      onDone?: (result: AdfCompleteResult) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal
+  ) => {
+    let hasCompleted = false
+
+    streamSse(`/chapters/${chapterId}/generate-adf`, params || {}, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+        callbacks.onEvent?.(payload.event, payload)
+
+        if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'ADF_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'ADF_SPINE_BUILT') {
+          callbacks.onSpineBuilt?.(payload)
+        } else if (payload.event === 'ADF_ANCHOR_DESIGNED') {
+          callbacks.onAnchorDesigned?.({
+            climax_intensity: payload.climax_intensity,
+            climax_description: payload.climax_description,
+            setup_point_count: payload.setup_point_count,
+            emotion_flow_samples: payload.emotion_flow_samples || [],
+          })
+        } else if (payload.event === 'TIER_DECIDED') {
+          callbacks.onTierDecided?.({
+            tier: payload.tier,
+            reason: payload.reason,
+            climax_score: payload.climax_score,
+            target_word_count: payload.target_word_count,
+            max_segments: payload.max_segments,
+          })
+        } else if (payload.event === 'ADF_PROGRESS') {
+          callbacks.onProgress?.(payload.segment_index, payload.total_segments, payload)
+        } else if (payload.event === 'ADF_PRECONDITION_LANDED') {
+          callbacks.onPreconditionLanded?.({
+            precondition_id: payload.precondition_id,
+            segment: payload.segment,
+            evidence: payload.evidence || '',
+            category: payload.category || '',
+          })
+        } else if (payload.event === 'ADF_AUDIT') {
+          callbacks.onAudit?.({
+            verdict: payload.verdict,
+            missing_setup_points: payload.missing_setup_points || [],
+            emotion_mismatches: payload.emotion_mismatches || [],
+            structure_issues: payload.structure_issues || [],
+            climax_score: payload.climax_score,
+            fix_targets: payload.fix_targets || [],
+          })
+        } else if (payload.event === 'UNIFIED_METRIC') {
+          callbacks.onMetric?.(payload.metrics)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            text: payload.text,
+            engine: payload.engine || 'adf',
+            generation_run_id: payload.generation_run_id,
+            tier: payload.tier,
+            tier_reason: payload.tier_reason,
+            target_word_count: payload.target_word_count,
+            segment_count: payload.segment_count || 0,
+            setup_points_total: payload.setup_points_total || 0,
+            setup_points_landed: payload.setup_points_landed || 0,
+            climax_score: payload.climax_score,
+            audit_verdict: payload.audit_verdict,
+            stats: payload.stats || {},
+          })
+          return true
+        }
+      },
+      onDone: () => {
+        if (!hasCompleted) {
+          callbacks.onError?.('生成过程意外中断，未收到完成信号')
+        }
+      },
+      onError: message => {
+        hasCompleted = true
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      if (!hasCompleted) {
+        callbacks.onError?.(err.message)
+      }
+    })
+  },
+}
+
+// ============================================================
+// V4.1 Refinery 精修流水线 API
+// ============================================================
+// 端点（前缀 /api/chapters/{chapter_id}/refinery）：
+// - POST /diagnose   SSE：第一阶段（诊断），返回 REFINERY_ISSUES + run_id
+// - POST /confirm    SSE：第二阶段（手术+回读+抛光），需要 run_id + 作者决策
+//
+// 两阶段 SSE 设计（对话式介入点 2）：
+// 1. diagnose 流：REFINERY_STAGE(DIAGNOSTIC) → REFINERY_ISSUES → REFINERY_STAGE(DIALOGUE) → 流结束
+// 2. 用户在前端审阅问题清单，做决策
+// 3. confirm 流：REFINERY_STAGE(SURGERY) → REFINERY_SURGERY×N → REFINERY_REREAD →
+//    REFINERY_POLISH → FINAL_TEXT_STREAM → COMPLETE
+
+export type IssueType =
+  | 'tell_not_show' | 'pacing_drag' | 'pacing_break' | 'scene_jump'
+  | 'info_leak' | 'character_off' | 'redundancy' | 'weak_hook'
+  | 'emotion_mismatch' | 'custom'
+
+export type IssueSeverity = 'high' | 'medium' | 'low'
+
+export interface RefineryIssue {
+  id: string
+  location: {
+    paragraph?: number | null
+    paragraph_range?: [number, number] | null
+    quote: string
+    char_offset?: [number, number] | null
+  }
+  type: IssueType
+  severity: IssueSeverity
+  diagnosis: string
+  suggestion: string
+  impact_radius: 'local' | 'multi_paragraph' | 'global'
+  status: 'pending' | 'confirmed' | 'ignored' | 'auto'
+}
+
+export interface RefinerySurgery {
+  operation_id: string
+  original_text?: string
+  revised_text?: string
+  diff_summary: string
+  applied: boolean
+  target_indices?: number[]
+}
+
+export interface RefineryHolisticVerdict {
+  verdict: 'pass' | 'needs_final_touch'
+  remaining_issues: string[]
+  final_touch_suggestion: string
+}
+
+export interface RefineryCompleteResult {
+  polished_text: string
+  stats: Record<string, any>
+  generation_run_id: string
+  issues_total: number
+  issues_confirmed: number
+  operations_executed: number
+  holistic_verdict: string | null
+}
+
+export interface IssueDecision {
+  issue_id: string
+  decision: 'confirmed' | 'ignored'
+  edited_suggestion?: string
+}
+
+export const refineryApi = {
+  /**
+   * 第一阶段：诊断（SSE）。
+   * 流结束后回调 onIssues，前端渲染问题清单 UI 等待作者确认。
+   */
+  diagnose: async (
+    chapterId: string,
+    params: {
+      raw_text?: string | null
+      mode?: 'deep' | 'light'
+      enable_polish?: boolean
+      canon_context?: string
+    } | undefined,
+    callbacks: {
+      onEvent?: (event: string, data: any) => void
+      onStage?: (stage: string, data: any) => void
+      onIssues?: (payload: { run_id: string; issues: RefineryIssue[]; stats: any }) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal,
+  ) => {
+    let receivedIssues = false
+
+    streamSse(`/chapters/${chapterId}/refinery/diagnose`, params || {}, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+        callbacks.onEvent?.(payload.event, payload)
+
+        if (payload.event === 'REFINERY_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'REFINERY_ISSUES') {
+          receivedIssues = true
+          callbacks.onIssues?.({
+            run_id: payload.run_id,
+            issues: payload.issues || [],
+            stats: payload.stats || {},
+          })
+        }
+      },
+      onDone: () => {
+        if (!receivedIssues) {
+          callbacks.onError?.('诊断未返回问题清单')
+        }
+      },
+      onError: message => {
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      callbacks.onError?.(err.message)
+    })
+  },
+
+  /**
+   * V4.3 介入点 3：读者反馈（POST，非 SSE，同步返回）。
+   * 1 次 LLM 扮演读者，写叙述性感受。
+   */
+  getReaderFeedback: async (chapterId: string, rawText?: string | null): Promise<{
+    chapter_id: string
+    feedback: string
+    word_count: number
+    generation_run_id: string
+  }> => {
+    return await requestJson(`/chapters/${chapterId}/reader-feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ raw_text: rawText || null }),
+    })
+  },
+
+  /**
+   * 第二阶段：作者确认后执行手术+回读+抛光（SSE）。
+   * 需要 run_id（从 diagnose 获得）+ decisions（作者对每个 issue 的决策）。
+   */
+  confirm: async (
+    chapterId: string,
+    params: {
+      run_id: string
+      decisions: IssueDecision[]
+      custom_issues?: RefineryIssue[]
+      mode?: 'deep' | 'light'
+    },
+    callbacks: {
+      onEvent?: (event: string, data: any) => void
+      onStage?: (stage: string, data: any) => void
+      onOperation?: (data: { operation_id: string; operation_index: number; total_operations: number; issue_ids: string[] }) => void
+      onSurgery?: (surgery: RefinerySurgery) => void
+      onReread?: (verdict: RefineryHolisticVerdict) => void
+      onPolish?: () => void
+      onChunk?: (chunk: string) => void
+      onDone?: (result: RefineryCompleteResult) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal,
+  ) => {
+    let hasCompleted = false
+
+    streamSse(`/chapters/${chapterId}/refinery/confirm`, params, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+        callbacks.onEvent?.(payload.event, payload)
+
+        if (payload.event === 'REFINERY_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'REFINERY_OPERATION') {
+          callbacks.onOperation?.({
+            operation_id: payload.operation_id,
+            operation_index: payload.operation_index,
+            total_operations: payload.total_operations,
+            issue_ids: payload.issue_ids || [],
+          })
+        } else if (payload.event === 'REFINERY_SURGERY') {
+          callbacks.onSurgery?.({
+            operation_id: payload.operation_id,
+            diff_summary: payload.diff_summary || '',
+            applied: payload.applied ?? false,
+            target_indices: payload.target_indices,
+          })
+        } else if (payload.event === 'REFINERY_REREAD') {
+          callbacks.onReread?.({
+            verdict: payload.verdict,
+            remaining_issues: payload.remaining_issues || [],
+            final_touch_suggestion: payload.final_touch_suggestion || '',
+          })
+        } else if (payload.event === 'REFINERY_POLISH') {
+          callbacks.onPolish?.()
+        } else if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            polished_text: payload.polished_text || '',
+            stats: payload.stats || {},
+            generation_run_id: payload.generation_run_id || '',
+            issues_total: payload.issues_total || 0,
+            issues_confirmed: payload.issues_confirmed || 0,
+            operations_executed: payload.operations_executed || 0,
+            holistic_verdict: payload.holistic_verdict || null,
+          })
+        }
+      },
+      onDone: () => {
+        if (!hasCompleted) {
+          callbacks.onError?.('精修过程意外中断')
+        }
+      },
+      onError: message => {
+        hasCompleted = true
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      if (!hasCompleted) {
+        callbacks.onError?.(err.message)
+      }
+    })
+  },
+}
+
+// ============================================================
+// 伏笔账本 API（V3.1 F4 新增）
+// ============================================================
+// 后端 PlotLedger 表的 REST 暴露：GET /api/books/{id}/ledgers（已实现）。
+// 保留 404 降级为空数组的容错，防御端点不可用场景。
+
+export interface PlotLedgerEntry {
+  id: string
+  book_id: string
+  chapter_id?: string | null
+  ledger_key: string
+  hook_id?: string | null
+  entry_type: string
+  content: string
+  status: 'open' | 'closed' | 'dropped'
+  created_at_chapter?: number | null
+  resolved_in_chapter_id?: string | null
+  meta?: Record<string, any>
+}
+
+export interface PlotLedgerCreateInput {
+  ledger_key: string
+  content: string
+  hook_id?: string | null
+  entry_type?: string
+  status?: 'open' | 'closed' | 'dropped'
+  created_at_chapter?: number | null
+  meta?: Record<string, any>
+}
+
+export interface PlotLedgerUpdateInput {
+  ledger_key?: string
+  content?: string
+  hook_id?: string | null
+  entry_type?: string
+  status?: 'open' | 'closed' | 'dropped'
+  created_at_chapter?: number | null
+  resolved_in_chapter_id?: string | null
+  meta?: Record<string, any>
+}
+
+export const plotLedgerApi = {
+  /** 列出书籍的全部伏笔。后端 404 时降级为空列表。 */
+  listByBook: async (bookId: string): Promise<PlotLedgerEntry[]> => {
+    try {
+      return await requestJson<PlotLedgerEntry[]>(`/books/${bookId}/ledgers`)
+    } catch {
+      // 后端 404 时降级为空列表
+      return []
+    }
+  },
+  /** 手动创建伏笔。后端要求 body 带 book_id（以路径为准覆盖）。 */
+  create: (bookId: string, data: PlotLedgerCreateInput): Promise<PlotLedgerEntry> =>
+    requestJson<PlotLedgerEntry>(`/books/${bookId}/ledgers`, {
+      method: 'POST',
+      body: JSON.stringify({ ...data, book_id: bookId }),
+    }),
+  /** 更新伏笔（仅传需要变更的字段）。 */
+  update: (ledgerId: string, data: PlotLedgerUpdateInput): Promise<PlotLedgerEntry> =>
+    requestJson<PlotLedgerEntry>(`/ledgers/${ledgerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  /** 删除伏笔（物理删除；不再需要建议改 status=dropped）。 */
+  remove: (ledgerId: string): Promise<{ ok: boolean }> =>
+    requestJson<{ ok: boolean }>(`/ledgers/${ledgerId}`, { method: 'DELETE' }),
 }

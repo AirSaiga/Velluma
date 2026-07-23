@@ -33,14 +33,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - WorldviewUpdate: 世界观/设定更新
 """
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.core.dependencies import get_book_repository
-from backend.repositories import BookRepository
-from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate, GoldenSnippetsUpdate, StyleBlacklistUpdate
+from backend.core.dependencies import get_book_repository, get_plot_ledger_repository
+from backend.repositories import BookRepository, PlotLedgerRepository
+from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate, GoldenSnippetsUpdate, StyleBlacklistUpdate, PlotLedgerResponse, PlotLedgerCreate, PlotLedgerUpdate
 
 
 router = APIRouter(prefix="/api", tags=["books"])
@@ -227,6 +227,106 @@ async def get_chapters(book_id: UUID, repo: BookRepository = Depends(get_book_re
     - 未来考虑拆分为 list（仅标题+摘要）和 detail（完整内容）两个接口
     """
     return await repo.list_chapters(book_id)
+
+
+# =============================================================================
+# 伏笔账本 - 书籍级伏笔查询（V3.1 F4 伏笔账本面板的后端支撑）
+# =============================================================================
+
+@router.get("/books/{book_id}/ledgers", response_model=List[PlotLedgerResponse])
+async def get_book_ledgers(
+    book_id: UUID,
+    status: Optional[str] = Query(None, pattern="^(open|closed|dropped)$"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=2000),
+    repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
+):
+    """业务目的：获取书籍的全部伏笔账本条目，支撑前端伏笔账本面板的列表展示。
+
+    参数来源：
+    - book_id: 路径参数，书籍 UUID
+    - status: Query 参数，可选状态过滤（open/closed/dropped），不传返回全部状态
+    - skip/limit: Query 参数，分页控制，默认返回最近 500 条
+
+    数据流：
+    - PlotLedgerRepository.get_by_book() 按创建时间倒序返回
+    - 响应字段与前端 plotLedgerApi.listByBook 的契约一一对应
+    - meta 字段承载伏笔的扩展信息（如登记来源、支持证据等）
+
+    副作用：
+    - 数据库读操作，无状态变更
+
+    性能考量：
+    - limit 上限 2000，单书伏笔量级通常在数百以内，无需游标分页
+    - 书籍不存在时返回空列表而非 404（与 get_chapters 行为保持一致）
+    """
+    return await repo.get_by_book(book_id, status=status, skip=skip, limit=limit)
+
+
+@router.post("/books/{book_id}/ledgers", response_model=PlotLedgerResponse, status_code=201)
+async def create_book_ledger(
+    book_id: UUID,
+    payload: PlotLedgerCreate,
+    repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
+):
+    """业务目的：手动创建伏笔条目（伏笔账本面板"手动添加"入口）。
+
+    参数来源：
+    - book_id: 路径参数，书籍 UUID（以此为准，覆盖请求体中的 book_id）
+    - payload: PlotLedgerCreate（ledger_key/content 必填，其余有默认值）
+
+    副作用：
+    - 数据库写操作：新增一行 plot_ledgers 记录
+    - 注意 book_id+ledger_key 有唯一约束（uq_plot_ledger_book_key），重复 key 会触发 500，
+      前端应保证 ledger_key 唯一（默认生成时间戳 key）
+    """
+    data = payload.model_dump()
+    data["book_id"] = book_id
+    return await repo.create(data)
+
+
+@router.put("/ledgers/{ledger_id}", response_model=PlotLedgerResponse)
+async def update_ledger(
+    ledger_id: UUID,
+    payload: PlotLedgerUpdate,
+    repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
+):
+    """业务目的：更新伏笔条目（编辑内容/类型，或变更状态：埋设中→已回收/已废弃）。
+
+    参数来源：
+    - ledger_id: 路径参数
+    - payload: PlotLedgerUpdate（全字段可选，仅更新显式传入的字段）
+
+    副作用：
+    - 数据库写操作：更新 plot_ledgers 对应行
+    """
+    ledger = await repo.get_by_id(ledger_id)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        return ledger
+    return await repo.update(ledger, updates)
+
+
+@router.delete("/ledgers/{ledger_id}")
+async def delete_ledger(
+    ledger_id: UUID,
+    repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
+):
+    """业务目的：删除伏笔条目（物理删除；若仅是不再需要建议改用 status=dropped）。
+
+    参数来源：
+    - ledger_id: 路径参数
+
+    副作用：
+    - 数据库写操作：删除 plot_ledgers 对应行
+    """
+    ledger = await repo.get_by_id(ledger_id)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    await repo.delete(ledger)
+    return {"ok": True}
 
 
 # =============================================================================
