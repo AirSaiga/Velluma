@@ -161,17 +161,7 @@ def adapt_request_to_config(
     if request.feature_flags:
         workflow_policy.force_parallel_prose = request.feature_flags.force_parallel_prose
         workflow_policy.semi_parallel_prose = request.feature_flags.semi_parallel_prose
-        
-        # 双轨配置（如果请求中有）
-        if hasattr(request, "enable_sketch_track"):
-            workflow_policy.dual_track.enable_sketch_track = request.enable_sketch_track
-        if hasattr(request, "enable_adversarial_alignment"):
-            workflow_policy.dual_track.enable_adversarial_alignment = request.enable_adversarial_alignment
-        if hasattr(request, "alignment_threshold"):
-            workflow_policy.dual_track.alignment_threshold = request.alignment_threshold
-        if hasattr(request, "sketch_ratio"):
-            workflow_policy.dual_track.sketch_ratio = request.sketch_ratio
-    
+
     # 构建 ValidationPolicy
     validation_policy = ValidationPolicy(
         refinement_depth=refinement_depth,  # 传递精修深度

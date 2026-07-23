@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 Phase 3: 定档决策器（Tier Decider，V3.2 §4.3）。
 
 职责：
-- 薄包装层，复用 V3.1 tier_classifier.classify_tier / classify_from_user_forced
+- 薄包装层，调用 adf/tier_classifier.classify_tier（原 detonation 包，已随引擎剥离迁入 adf/）
 - 依据 anchor.climax.intensity + chapter_position + user_tier_hint 决定 tier
 - 由 tier 推导 target_word_count 与 max_segments
 
@@ -38,10 +38,7 @@ from typing import Any, Dict, Tuple
 from backend.models import (
     TIER_AUTO, TIER_CLIMAX, TIER_TURN, TIER_PROGRESS, TIER_TRANSITION,
 )
-from backend.services.workflows.detonation.tier_classifier import (
-    classify_tier,
-    classify_from_user_forced,
-)
+from backend.services.workflows.adf.tier_classifier import classify_tier
 
 logger = logging.getLogger(__name__)
 

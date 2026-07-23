@@ -66,8 +66,6 @@ from backend.repositories.author_sample_repository import AuthorSampleRepository
 from backend.repositories.system_cliche_repository import SystemClicheRepository
 # CP3.1a 新增
 from backend.repositories.quality_report_repository import QualityReportRepository
-# V3.0 引爆链新增
-from backend.repositories.detonation_repository import DetonationChainRepository
 # V4.0 Canon（作者脑中世界图谱）新增
 from backend.repositories.canon_repository import (
     CanonNodeRepository,

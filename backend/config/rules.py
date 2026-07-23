@@ -76,19 +76,6 @@ TIER_TO_ITERATIONS_RULE = DerivationRule(
     description="根据工作流层级推导最大迭代次数",
 )
 
-TIER_TO_DUAL_TRACK_RULE = DerivationRule(
-    name="tier_to_dual_track",
-    source_field="workflow_tier",
-    target_field="enable_dual_track",
-    mapping={
-        "TIER_1_FAST": False,
-        "TIER_2_STANDARD": True,
-        "TIER_3_FORTRESS": True,
-    },
-    default=True,
-    description="根据工作流层级推导是否启用双轨",
-)
-
 MEMORY_STRATEGY_PRESETS = {
     MemoryStrategy.RECENT_ONLY: {
         "top_k": 3,

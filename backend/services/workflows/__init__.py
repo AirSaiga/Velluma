@@ -19,77 +19,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 工作流阶段模块（统一出口）。
 
-职责：聚合 V4.1 双轨工作流的各阶段处理函数，提供统一的导入入口。
+职责：聚合保留引擎（ADF / Refinery）及共享设施所需的阶段处理函数，提供统一导入入口。
 
-CP1.0 死代码清理：删除了对以下死模块的重导出（文件本身也一并删除）：
-- types.py（WorkflowState 从不实例化）
-- context.py（被 services/context/loader.py 取代）
-- reviewing.py（被 adversarial_aligner.py 取代）
-- drafting_core/、drafting_prose_modules/、drafting_qc.py（死代码带）
+引擎剥离（2026-07）：V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 三套引擎及其专属
+模块（drafting / stitching / sketch_generator / adversarial_aligner / fail_fast /
+fortress_candidate / dual_track 包 / detonation 包）已整体迁至 backend/_deprecated/。
+当前保留的活跃消费者见各文件 docstring。
 
-模块组织（CP1.0 后）：
-- planning.py: 规划阶段（节拍拆分 + POV 锚点分配）
-- drafting.py: 起草阶段（_execute_unified_path 唯一活路径）
-- drafting_utils.py: 起草公共工具（quick_qc 等）
-- drafting_thinking.py: 思考层（Scene Intent + Subconscious 批量）
-- stitching.py: 统稿阶段
-- refining.py: 精修阶段
-- dual_track.py: 双轨主类
-- sketch_generator.py: Track B 速写
-- adversarial_aligner.py: 对抗校对
-- validators.py: 代码级校验器（CP1.1 fail-fast 复活用）
-- utils.py: 工具函数（clean_llm_output 等）
+模块组织（引擎剥离后）：
+- planning.py: 规划阶段（节拍拆分 + POV 锚点分配，共享编排层）
+- refining.py: 精修阶段（refine_draft，服务于 chapter_optimization 路由）
+- snapshot_extractor.py / state_validator.py / clarification_agent.py / context_blocks.py
+  / formatting_utils.py / validators.py / utils.py: 各有活跃消费者，详见各自 import 图
 """
 
 from backend.services.workflows.planning import generate_beats
-from backend.services.workflows.drafting import execute_draft_stage, BeatDraftResult
-from backend.services.workflows.stitching import stitch_chunks
 from backend.services.workflows.refining import refine_draft, refine_single_beat
-# 从 dual_track 包导入（工作流类、子模块）
-from backend.services.workflows.dual_track import (
-    DualTrackWorkflow,
-    DualTrackResult,
-    DualTrackConfig,
-    fusion_refine,
-)
-# execute_dual_track_generation 定义在 dual_track.py 文件中，不是包中
-from backend.services.workflows.dual_track import execute_dual_track_generation
-from backend.services.workflows.sketch_generator import (
-    SketchGenerator,
-    SketchResult,
-    SketchGeneratorConfig,
-    TurnMarker,
-)
-from backend.services.workflows.adversarial_aligner import (
-    AdversarialAligner,
-    AdjustmentPlan,
-    AdversarialAlignerConfig,
-    AlignmentGap,
-    GapType,
-    GapSource,
-    GapSeverity,
-)
 
 __all__ = [
     "generate_beats",
-    "execute_draft_stage",
-    "BeatDraftResult",
-    "stitch_chunks",
     "refine_draft",
     "refine_single_beat",
-    "DualTrackWorkflow",
-    "DualTrackResult",
-    "DualTrackConfig",
-    "execute_dual_track_generation",
-    "SketchGenerator",
-    "SketchResult",
-    "SketchGeneratorConfig",
-    "TurnMarker",
-    "AdversarialAligner",
-    "AdjustmentPlan",
-    "AdversarialAlignerConfig",
-    "AlignmentGap",
-    "GapType",
-    "GapSource",
-    "GapSeverity",
 ]

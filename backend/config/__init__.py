@@ -48,7 +48,6 @@ from backend.config.schemas.generation_config import (
     FeatureFlags,
     
     # 子配置对象
-    DualTrackSettings,
     ReasoningSettings,
     
     # 枚举类型
@@ -70,7 +69,6 @@ from backend.config.derivation import (
     # 推导规则
     TENSION_TO_TIER_RULE,
     TIER_TO_ITERATIONS_RULE,
-    TIER_TO_DUAL_TRACK_RULE,
     MEMORY_STRATEGY_PRESETS,
     CREATIVITY_TO_PARALLEL_RULE,
     REFINEMENT_TO_THRESHOLD_RULE,
@@ -95,7 +93,6 @@ __all__ = [
     "FeatureFlags",
     
     # 子配置对象
-    "DualTrackSettings",
     "ReasoningSettings",
     
     # 枚举类型
@@ -116,7 +113,6 @@ __all__ = [
     # 推导规则
     "TENSION_TO_TIER_RULE",
     "TIER_TO_ITERATIONS_RULE",
-    "TIER_TO_DUAL_TRACK_RULE",
     "MEMORY_STRATEGY_PRESETS",
     "CREATIVITY_TO_PARALLEL_RULE",
     "REFINEMENT_TO_THRESHOLD_RULE",

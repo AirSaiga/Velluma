@@ -500,35 +500,6 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB DEFAULT '{}'",
         "expected_udt_names": {"jsonb"},
     },
-    # ============================================================
-    # V3.1 统一引擎：DetonationChain 演进为 SetupGraph
-    # ============================================================
-    # 设计依据：docs/generation-v3.1-unified.md §6
-    # - tier：章节定档（climax/turn/progress/transition），驱动投资参数
-    # - tier_reason：定档理由（透明化，供前端展示与可解释性）
-    # - zones：三分区映射 {climax:[PAYLOAD], buildup:[...], development:[...]}
-    #
-    # 偏离决策（差异清单 #1/#3）：
-    # - 表名 DetonationChain 保留（硬约束"不改变旧端点对外行为"），通过新增列演进为 SetupGraph 语义
-    # - distance_to_climax 字段在 nodes JSONB 内部，无需 ALTER TABLE（双键兼容旧 distance_to_payload）
-    {
-        "table": "detonation_chains",
-        "column": "tier",
-        "definition": "VARCHAR(20)",
-        "expected_udt_names": {"varchar", "character varying"},
-    },
-    {
-        "table": "detonation_chains",
-        "column": "tier_reason",
-        "definition": "TEXT",
-        "expected_udt_names": {"text"},
-    },
-    {
-        "table": "detonation_chains",
-        "column": "zones",
-        "definition": "JSONB DEFAULT '{}'",
-        "expected_udt_names": {"jsonb"},
-    },
 ]
 
 
@@ -672,8 +643,6 @@ async def init_db():
         SystemCliche,
         # CP3.1a 新增模型
         QualityReport,
-        # V3.0 引爆链
-        DetonationChain,
         # V4.0 Canon（作者脑中世界图谱）
         CanonNode,
         CanonEdge,

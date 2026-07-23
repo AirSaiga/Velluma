@@ -39,7 +39,6 @@ from backend.config.schemas import GenerationConfig, MemoryStrategy
 from backend.config.rules import (
     TENSION_TO_TIER_RULE,
     TIER_TO_ITERATIONS_RULE,
-    TIER_TO_DUAL_TRACK_RULE,
     MEMORY_STRATEGY_PRESETS,
     CREATIVITY_TO_PARALLEL_RULE,
     REFINEMENT_TO_THRESHOLD_RULE,
@@ -62,7 +61,6 @@ class DerivationEngine:
         self._rules = [
             TENSION_TO_TIER_RULE,
             TIER_TO_ITERATIONS_RULE,
-            TIER_TO_DUAL_TRACK_RULE,
             CREATIVITY_TO_PARALLEL_RULE,
             REFINEMENT_TO_THRESHOLD_RULE,
         ]
@@ -88,10 +86,6 @@ class DerivationEngine:
         logger.info("[DerivationEngine.derive] 开始 _derive_iteration_params")
         self._derive_iteration_params(config)
         logger.info("[DerivationEngine.derive] _derive_iteration_params 完成")
-
-        logger.info("[DerivationEngine.derive] 开始 _derive_dual_track_config")
-        self._derive_dual_track_config(config)
-        logger.info("[DerivationEngine.derive] _derive_dual_track_config 完成")
 
         logger.info("[DerivationEngine.derive] 开始 _derive_rag_params")
         self._derive_rag_params(config)
@@ -124,16 +118,6 @@ class DerivationEngine:
         if config.chapter.workflow_tier and not config.workflow.max_iterations:
             config.workflow.max_iterations = self._apply_rule(
                 TIER_TO_ITERATIONS_RULE, config.chapter.workflow_tier, config
-            )
-
-    def _derive_dual_track_config(self, config: GenerationConfig) -> None:
-        """推导双轨配置"""
-        if not config.chapter:
-            return
-
-        if config.chapter.workflow_tier and config.workflow.dual_track.enable_sketch_track is None:
-            config.workflow.dual_track.enable_sketch_track = self._apply_rule(
-                TIER_TO_DUAL_TRACK_RULE, config.chapter.workflow_tier, config
             )
 
     def _derive_rag_params(self, config: GenerationConfig) -> None:

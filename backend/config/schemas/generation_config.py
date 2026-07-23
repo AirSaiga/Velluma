@@ -322,15 +322,6 @@ class RAGPolicy(BaseModel):
 # WorkflowPolicy - 工作流策略层
 # =============================================================================
 
-class DualTrackSettings(BaseModel):
-    """双轨生成配置"""
-    enable_sketch_track: bool = Field(default=True, description="启用 Sketch 轨道")
-    enable_adversarial_alignment: bool = Field(default=True, description="启用对抗校对")
-    use_sketch_for_refinement: bool = Field(default=True, description="使用 Sketch 指导精修")
-    alignment_threshold: float = Field(default=70.0, ge=0.0, le=100.0, description="对齐阈值")
-    sketch_ratio: float = Field(default=0.45, ge=0.2, le=0.7, description="Sketch 字数占比")
-
-
 class WorkflowPolicy(BaseModel):
     """
     工作流策略配置
@@ -363,30 +354,20 @@ class WorkflowPolicy(BaseModel):
     force_parallel_prose: bool = Field(default=False, description="强制并行起草")
     semi_parallel_prose: bool = Field(default=True, description="半并行模式")
     beat_concurrency: int = Field(default=6, ge=1, le=12, description="Beat 并行度")
-    
-    # 双轨配置
-    dual_track: DualTrackSettings = Field(default_factory=DualTrackSettings)
-    
+
     def derive_from_tier(self, tier: WorkflowTier) -> "WorkflowPolicy":
         """根据工作流层级推导策略"""
         if tier == "TIER_1_FAST":
             self.max_iterations = 1
             self.fast_mode = True
             self.skip_minor_refine = True
-            self.dual_track.enable_sketch_track = False
-            self.dual_track.enable_adversarial_alignment = False
         elif tier == "TIER_2_STANDARD":
             self.max_iterations = 2
             self.fast_mode = False
-            self.dual_track.enable_sketch_track = True
-            self.dual_track.enable_adversarial_alignment = True
         else:  # TIER_3_FORTRESS
             self.max_iterations = 3
             self.fast_mode = False
             self.skip_minor_refine = False
-            self.dual_track.enable_sketch_track = True
-            self.dual_track.enable_adversarial_alignment = True
-            self.dual_track.alignment_threshold = 80.0
         return self
     
     def derive_from_creativity(self) -> "WorkflowPolicy":
@@ -586,7 +567,6 @@ class GenerationConfig(BaseModel):
             except ValueError:
                 refinement_depth = RefinementDepth.STANDARD
         
-        dual_track_data = req_dict.get("dual_track", {})
         workflow_policy = WorkflowPolicy(
             creativity_level=creativity_level,
             refinement_depth=refinement_depth,
@@ -596,13 +576,6 @@ class GenerationConfig(BaseModel):
             force_parallel_prose=req_dict.get("force_parallel_prose", False),
             semi_parallel_prose=req_dict.get("semi_parallel_prose", True),
             beat_concurrency=req_dict.get("beat_concurrency", 6),
-            dual_track=DualTrackSettings(
-                enable_sketch_track=req_dict.get("enable_sketch_track", True),
-                enable_adversarial_alignment=req_dict.get("enable_adversarial_alignment", True),
-                use_sketch_for_refinement=req_dict.get("use_sketch_for_refinement", True),
-                alignment_threshold=req_dict.get("alignment_threshold", 70.0),
-                sketch_ratio=req_dict.get("sketch_ratio", 0.45),
-            ),
         )
         
         # 构建 ValidationPolicy

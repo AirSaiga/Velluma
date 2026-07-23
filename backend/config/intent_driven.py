@@ -102,8 +102,6 @@ class GenerationPolicy(BaseModel):
     
     # 工作流策略
     workflow_tier: str = Field(default="TIER_2_STANDARD", description="工作流层级")
-    enable_dual_track: bool = Field(default=True, description="启用双轨")
-    enable_adversarial_alignment: bool = Field(default=True, description="启用对抗校对")
     enable_fail_fast: bool = Field(default=True, description="启用Fail-Fast")
     
     # RAG 策略
@@ -222,8 +220,6 @@ INTENT_DERIVATION_RULES = {
         "refinement_depth": "deep",
         "progression_preference": "push_mainline",
         "workflow_tier": "TIER_3_FORTRESS",
-        "enable_dual_track": True,
-        "enable_adversarial_alignment": True,
     },
     CreativeIntentType.TRANSITION_CHAPTER: {
         "tension_level": {"base": 2, "range": [1, 3]},
@@ -251,19 +247,14 @@ PLAN_TYPE_ADJUSTMENTS = {
     PlanType.FAST: {
         "workflow_tier": "TIER_1_FAST",
         "refinement_depth": "light",
-        "enable_dual_track": False,
-        "enable_adversarial_alignment": False,
         "enable_fail_fast": False,
     },
     PlanType.QUALITY: {
         "workflow_tier": "TIER_3_FORTRESS",
         "refinement_depth": "deep",
-        "enable_dual_track": True,
-        "enable_adversarial_alignment": True,
     },
     PlanType.CREATIVE: {
         "creativity_level": "wild_imagination",
-        "enable_dual_track": True,
     },
 }
 

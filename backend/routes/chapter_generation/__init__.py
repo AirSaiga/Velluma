@@ -1,16 +1,19 @@
 """
-章节生成路由模块 - 提供双轨章节生成的 API 路由。
+章节生成路由模块 - 提供章节生成的 API 路由。
 
 职责：
-- 定义双轨生成的 API 端点
+- 定义 ADF 生成引擎与 Refinery 精修的 API 端点
+- 提供大纲澄清、成本报告、质量报告等附属端点
 - 处理 SSE 流式响应
-- 管理生成进度和检查点
 
 模块结构：
-- dual_track.py: API 路由定义（主入口）
-- stream_handler.py: SSE 流处理器
-- progress_tracker.py: 进度跟踪器
-- checkpoint_manager.py: 检查点管理器
+- adf.py: V3.2 ADF 引擎路由（当前默认生成引擎）
+- refinery.py: V4.1 Refinery 精修流水线路由
+- 本文件: extra_router（clarify-outline / cost-report / quality-report）
+
+引擎剥离（2026-07）：V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 三套引擎路由
+及其专属的 stream_handler / progress_tracker / checkpoint_manager 已整体迁至
+backend/_deprecated/，本模块不再注册或导出它们。
 
 使用方式：
     from backend.routes.chapter_generation import router
@@ -41,16 +44,7 @@ from backend.services.context.loader import load_full_chapter_context
 from backend.world_state_schemas import WorldTerminalState
 from backend.models import GenerationRun
 
-# 主路由（来自 dual_track.py）
-from backend.routes.chapter_generation.dual_track import router as dual_track_router
-
-# V3.0 引爆链路由（与双轨并存）
-from backend.routes.chapter_generation.detonation import router as detonation_router
-
-# V3.1 统一引擎路由（合并双轨与高潮倒推）
-from backend.routes.chapter_generation.unified import router as unified_router
-
-# V3.2 ADF（Anchor-Driven Flow）引擎路由（与 V3.1 并存）
+# V3.2 ADF（Anchor-Driven Flow）引擎路由（当前默认引擎）
 from backend.routes.chapter_generation.adf import router as adf_router
 
 # V4.1 Refinery 精修流水线路由
@@ -515,20 +509,10 @@ async def rerun_chapter_quality_report(
 
 # 合并路由（必须在所有端点注册到 extra_router 之后）
 router = APIRouter()
-router.include_router(dual_track_router)
 router.include_router(extra_router)
-router.include_router(detonation_router)
-router.include_router(unified_router)
 router.include_router(adf_router)
 router.include_router(refinery_router)
 
-# 导出子模块供其他模块使用
-from backend.routes.chapter_generation.checkpoint_manager import CheckpointManager
-from backend.routes.chapter_generation.progress_tracker import ProgressTracker, StreamEventBuilder
-
 __all__ = [
     "router",
-    "CheckpointManager",
-    "ProgressTracker",
-    "StreamEventBuilder",
 ]

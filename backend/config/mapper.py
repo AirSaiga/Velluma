@@ -80,12 +80,6 @@ class ParameterMapper:
         "creativityLevel": "creativity_level",
         "refinementDepth": "refinement_depth",
 
-        "enableSketchTrack": "enable_sketch_track",
-        "enableAdversarialAlignment": "enable_adversarial_alignment",
-        "useSketchForRefinement": "use_sketch_for_refinement",
-        "alignmentThreshold": "alignment_threshold",
-        "sketchRatio": "sketch_ratio",
-
         "enableFailFast": "enable_fail_fast",
         "failFastMaxAttempts": "fail_fast_max_attempts",
         "failFastTemperatureStep": "fail_fast_temperature_step",
@@ -113,8 +107,6 @@ class ParameterMapper:
         "decay_factor": 0.1,
         "quality_threshold": 0.7,
         "beat_concurrency": 6,
-        "alignment_threshold": 70.0,
-        "sketch_ratio": 0.45,
     }
 
     @classmethod

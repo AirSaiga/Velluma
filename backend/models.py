@@ -58,8 +58,6 @@ __all__ = [
     "SystemCliche",
     # CP3.1a 新增
     "QualityReport",
-    # V3.0 引爆链（Detonation Chain）
-    "DetonationChain",
     # V3.1 统一引擎 tier 常量
     "TIER_CLIMAX",
     "TIER_TURN",
@@ -1031,84 +1029,6 @@ class QualityReport(Base):
     # 审计结论：pass / pass_with_fixes / fail / unaudited（降级时）
     verdict = Column(String(50))
     created_at = Column(DateTime, default=utc_now)
-
-
-# ============================================================
-# V3.0 引爆链（Detonation Chain）— 3.0 主轴重构核心数据模型
-# ============================================================
-# 设计依据：docs/generation-v3-design.md §4.1
-#
-# 业务含义：
-# - 一章一份引爆链，承载"逆向设计 → 爆炸先写 → 引线朝爆炸写"的完整脊柱
-# - payload（PayloadMoment）：本章情绪势能的引爆瞬间（反转/揭盅/抉择/关系不可逆变化）
-# - nodes（List[SetupNode]）：逆向递归长出的铺垫树节点
-# - reading_order：阅读序（拓扑排序后按节奏合并的节点 id 序，末位是 "PAYLOAD"）
-#
-# 状态流转：
-# - draft: 刚创建，payload 候选已生成待用户选定
-# - growing: 用户已确认 payload，正在/已生成铺垫树
-# - confirmed: 用户已审树并确认（树闸门通过）
-# - writing: 进入引线写作 + 组装 + 审计 SSE 流
-# - done: 章节定稿回写完成
-#
-# 数据流：
-# - 由 services/workflows/detonation/ 包的各阶段写入
-# - 由 routes/chapter_generation/detonation.py 的闸门端点读写
-# - 通过 Base.metadata.create_all 自动建表（无需写 MIGRATION）
-
-
-class DetonationChain(Base):
-    """引爆链表 - 3.0 章节生成的因果脊柱（蓝图 §4.1）。
-
-    业务含义：
-    - 取代 StoryBeat 作为"顺序节拍容器"的正向规划，改为"铺垫树的阅读序视图"
-    - payload 承载本章最重要的一段（~800 字，双候选写作 + 人审冻结）
-    - nodes 承载逆向递归长出的铺垫节点（plant/development/diversion/texture）
-    - reading_order 是树→拓扑排序→按节奏合并后的阅读序
-
-    设计要点：
-    - 与 Chapter 一对一（一个章节至多一条活跃链；version 字段支持换引爆点局部重长）
-    - payload/nodes/reading_order 全部 JSONB，结构与 docs/generation-v3-design.md §4.2/4.3 对齐
-    - status 驱动闸门流转：draft → growing → confirmed → writing → done
-    """
-    __tablename__ = "detonation_chains"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
-    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
-    # 版本号：换引爆点局部重长时 +1（保留历史版本能力）
-    version = Column(Integer, default=1, nullable=False)
-    # PayloadMoment（蓝图 §4.2）：本章引爆瞬间
-    # 结构：{"id":"PAYLOAD","description","emotional_target","answers_question",
-    #        "opens_question","must_land","candidate_index","text","approved"}
-    payload = Column(JSONB, default=dict)
-    # List[SetupNode]（蓝图 §4.3）：逆向递归长出的铺垫节点
-    # 每项：{"id","type","content","sets_up","distance_to_payload","assignment",
-    #        "question_delays","restraint_note","subtext","satisfied_by_existing",
-    #        "planted_in_text","future_payoff","beat_id","trivial"}
-    nodes = Column(JSONB, default=list)
-    # 阅读序：节点 id 列表，末位是 "PAYLOAD"
-    reading_order = Column(JSONB, default=list)
-    # 状态：draft / growing / confirmed / writing / done
-    status = Column(String(50), default="draft", nullable=False)
-    # 确认方：user（人工闸门）/ auto（自动确认，如快路径）
-    confirmed_by = Column(String(50), nullable=True)
-    # V3.1 统一引擎：章节定档（climax/turn/progress/transition）
-    # 由 tier_classifier 决策，或用户在 generate 请求体中强制指定
-    tier = Column(String(20), nullable=True)
-    # V3.1：定档理由（透明化，规格 §2.3）：如"高潮强度 7 分 + 卷末第二章"
-    tier_reason = Column(Text, nullable=True)
-    # V3.1：三分区映射（规格 §6）
-    # 结构：{"climax": ["PAYLOAD"], "buildup": ["n4","n5"], "development": ["n1","n2","n3"]}
-    # 由 tier 与 distance_to_climax 自动分区，驱动铺陈段/蓄势段/高潮段的不同工艺
-    zones = Column(JSONB, default=dict)
-    # 元信息：审计结论、降级事件、调试信息等
-    meta = Column("metadata", JSONB, default=dict)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-
-    book = relationship("Book")
-    chapter = relationship("Chapter")
 
 
 # ============================================================
