@@ -126,15 +126,7 @@
 | `balanced_creation` | semi_parallel | False | True |
 | `wild_imagination` | full_parallel | True | True |
 
-**DualTrackSettings 子配置：**
-
-| 前端参数名 | 后端字段名 | 来源 | 默认值 | 校验 |
-|------------|------------|------|--------|------|
-| `enableSketchTrack` | `enable_sketch_track` | 请求/层级推导 | True | - |
-| `enableAdversarialAlignment` | `enable_adversarial_alignment` | 请求/层级推导 | True | - |
-| `useSketchForRefinement` | `use_sketch_for_refinement` | 请求传入 | True | - |
-| `alignmentThreshold` | `alignment_threshold` | 请求/层级推导 | 70.0 | 0-100 |
-| `sketchRatio` | `sketch_ratio` | 请求传入 | 0.45 | 0.2-0.7 |
+> 注：原 `DualTrackSettings` 子配置（enableSketchTrack / alignmentThreshold / sketchRatio 等）已随 V4.0 双轨引擎一并废弃移除，不再生效。
 
 ---
 
@@ -184,8 +176,6 @@ tension_level (前端传入)
     │
     └──→ 影响:
             ├── max_iterations
-            ├── dual_track.enable_sketch_track
-            ├── dual_track.enable_adversarial_alignment
             ├── validation.enable_fail_fast
             └── validation.quality_threshold
 ```
@@ -247,7 +237,6 @@ top_k = config.rag.top_k
 
 # 工作流配置
 iterations = config.workflow.max_iterations
-enable_dual_track = config.workflow.dual_track.enable_sketch_track
 ```
 
 ### 4.3 向后兼容

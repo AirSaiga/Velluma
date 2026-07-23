@@ -10,7 +10,6 @@
 | `draft_prompts.py` | 起草阶段主入口 | `build_draft_agent_prompt`, `build_chunk_draft_prompt`, `build_prose_draft_prompt_v25` |
 | `planner_prompts.py` | 规划阶段（Story Beats） | `build_planner_agent_prompt`, `parse_planner_result` |
 | `scene_intent_prompts.py` | 场景意图分析 | `build_scene_intent_prompt`, `parse_scene_intent_result` |
-| `stitch_prompts.py` | 统稿阶段（片段拼接） | `build_stitch_prompt` |
 | `review_prompts.py` | 审阅/精修阶段 | `build_review_agent_prompt`, `build_refine_agent_prompt`, `parse_review_result` |
 
 ## 子模块文件
@@ -61,4 +60,4 @@ from backend.services.prompts import (
 - **V4.0**: 引入 Agentic 工作流
 - **V4.0**: 认知流式生成 (Cognitive Streaming)
 - **V4.0**: 三档工作流（疾速/均衡/堡垒）
-- **V4.0**: 双轨对抗架构
+- **V4.0**: 双轨对抗架构（已废弃，相关 stitch/sketch 等模板随引擎归档）

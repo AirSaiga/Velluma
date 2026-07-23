@@ -1,10 +1,10 @@
 # Velluma 生成引擎 V3.2 — ADF（Anchor-Driven Flow）设计文档
 
 > **版本**：V3.2（Anchor-Driven Flow，锚点驱动正向流）
-> **状态**：设计完成，进入实施
+> **状态**：当前默认（且唯一保留的）生成引擎；V3.0/V3.1/V4.0 已废弃归档
 > **日期**：2026-07-21
-> **前置**：V3.1 统一引擎（`docs/generation-v3.1-unified.md`）
-> **关系**：与 V3.1 并存，提供新端点 `POST /api/chapters/{id}/generate-adf`；旧端点保留不变
+> **前置**：V3.1 统一引擎（`docs/generation-v3.1-unified.md`，已废弃）
+> **关系**：原计划与 V3.1 并存；经 2026-07-24 引擎剥离后，V3.1/V3.0/V4.0 端点均已移除，V3.2 ADF（`POST /api/chapters/{id}/generate-adf`）成为唯一保留的生成引擎
 
 ---
 
@@ -443,12 +443,14 @@ COMPLETE / ERROR       完成/错误（复用）
 
 ---
 
-## 8. 与 V3.1 的兼容性
+## 8. 引擎剥离后的现状（2026-07-24 更新）
 
-- **旧端点不动**：`/generate`（V3.1）、`/generate-chapter`（V4.0 双轨）、`/generate-v3`（V3.0 闸门）全部保留
-- **新端点并存**：`POST /api/chapters/{id}/generate-adf` 是 V3.2 独立入口
-- **数据库无破坏性变更**：V3.2 不新增表，结果可存入现有 `DetonationChain`（meta 字段加 `engine: "adf"`）或 Chapter.draft_text
-- **前端可选**：`TierSelector` 增加引擎切换，默认仍 V3.1，用户可主动选 V3.2
+本文档原设想的"与 V3.1 并存"方案未长期保留。经引擎剥离后：
+
+- **旧端点已移除**：`/generate`（V3.1）、`/generate-chapter`（V4.0 双轨）、`/generate-v3`（V3.0）已随对应引擎一并归档至 `backend/_deprecated/`
+- **V3.2 成为唯一生成端点**：`POST /api/chapters/{id}/generate-adf`
+- **数据库**：`DetonationChain` ORM 已删除（表保留存量数据）；V3.2 结果写入 `Chapter.draft_text` + `GenerationRun` 计量表
+- **前端**：`useGenerationSession.start()` 的 `engine` 默认 `'v3.2'` → `adfApi.streamGenerate`
 
 ---
 

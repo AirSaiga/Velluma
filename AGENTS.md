@@ -9,7 +9,10 @@ Velluma（原 StoryWeaver-Core）是一个 AI 驱动的长篇小说写作助手�
 - 专为长篇小说创作设计的 AI 辅助工具
 - 支持角色状态追踪、关系图谱、伏笔管理
 - 基于 RAG（检索增强生成）的记忆系统
-- 多 Agent 协作：规划 → 起草 → 统稿 → 对抗校对 → 精修
+- ADF 引擎（锚驱动正向流）：脉络骨架 → 锚点设计 → 定档 → 正向逐段写作 → 重构剪枝 → 锚点审计 → 条件补埋
+- Refinery 独立精修：诊断 → 作者确认 → 外科手术 → 整体回读 → 抛光
+
+> **引擎现状（2026-07-24 剥离后）**：当前仅保留两套生成引擎 —— V3.2 **ADF**（默认，`/generate-adf`）与 V4.1 **Refinery**（独立精修，`/refinery/*`）。V3.0 Detonation、V3.1 Unified、V4.0 DualTrack 三套引擎已整体迁至 `backend/_deprecated/`（详见该目录 README），不再参与任何 import 链。本文档所有描述均以剥离后的现状为准。
 
 **许可证：** AGPL-3.0
 
@@ -85,12 +88,10 @@ Velluma/
 │   │   ├── books.py
 │   │   ├── chapters.py
 │   │   ├── chapter_entities.py
-│   │   ├── chapter_generation/        # ⚠ 包（非单文件）：章节生成 API（含 SSE 流式）
-│   │   │   ├── __init__.py            #   路由合并入口；chapter_generation.py 旧单文件被本包遮蔽，已成死代码
-│   │   │   ├── dual_track.py          #   双轨生成端点
-│   │   │   ├── stream_handler.py      #   ★ 当前生成主流程的 SSE 编排器
-│   │   │   ├── progress_tracker.py
-│   │   │   └── checkpoint_manager.py
+│   │   ├── chapter_generation/        # 章节生成 API 包（含 SSE 流式）；剥离后仅 ADF + Refinery
+│   │   │   ├── __init__.py            #   路由合并入口（注册 adf/refinery router + extra_router）
+│   │   │   ├── adf.py                 #   ★ V3.2 ADF 引擎端点（/generate-adf，默认引擎，含 SSE）
+│   │   │   └── refinery.py            #   V4.1 Refinery 精修端点（/refinery/diagnose + /confirm）
 │   │   ├── chapter_optimization.py
 │   │   ├── chapter_publishing.py
 │   │   ├── characters.py
@@ -175,30 +176,38 @@ Velluma/
 │       │   ├── review_repair_types.py
 │       │   └── pre_generation_checklist.py
 │       │
-│       ├── workflows/       # 工作流子阶段实现（顶层约 25 个文件，下为主要的）
-│       │   ├── planning.py
-│       │   ├── drafting.py            # Beat 起草（并发为硬编码 Semaphore(5)）
-│       │   ├── drafting_prose.py
-│       │   ├── drafting_prose_modules/
-│       │   ├── stitching.py
-│       │   ├── reviewing.py           # ⚠ 经典 review_draft/revision_plan，当前无路由调用方
-│       │   ├── refining.py
-│       │   ├── dual_track.py          # ★ 双轨主类 DualTrackWorkflow（顶层文件）
-│       │   ├── sketch_generator.py    # SketchGenerator
-│       │   ├── adversarial_aligner.py # AdversarialAligner（活跃流程使用本文件）
-│       │   ├── clarification_agent.py
-│       │   ├── drafting_core/         # 起草核心子模块
-│       │   │   ├── prose_generation.py
-│       │   │   ├── context/           # context_manager.py, state_updater.py
-│       │   │   ├── quality/
-│       │   │   ├── retry/
-│       │   │   └── strategies/
-│       │   └── dual_track/            # 双轨子模块包（经 importlib 从顶层 dual_track.py 导入主类）
-│       │       ├── tracks/            # track_a.py, track_b.py
-│       │       ├── alignment/         # 含一份重复的 adversarial_aligner.py（非活跃路径）
-│       │       ├── config/
-│       │       ├── fusion_refinement.py
-│       │       └── stitching.py
+│       ├── workflows/       # 工作流实现（剥离后：adf/ 包 + refinery/ 在 services/ 顶层 + 共享设施）
+│       │   ├── adf/                   # ★ V3.2 ADF 引擎（当前默认生成引擎，自包含）
+│       │   │   ├── adf_workflow.py    #   ADFWorkflow 主类（7 阶段编排，详见"核心架构"）
+│       │   │   ├── story_context_builder.py  # Phase 1 脉络骨架（纯算法）
+│       │   │   ├── climax_designer.py #   Phase 2 锚点设计（1×reasoning LLM）
+│       │   │   ├── tier_classifier.py #   Phase 3 定档算法（原 detonation 包，随剥离迁入）
+│       │   │   ├── tier_decider.py    #   Phase 3 定档薄包装（映射 tier→字数/段数）
+│       │   │   ├── segment_writer.py  #   Phase 4 正向逐段写作（N×creative LLM 串行）
+│       │   │   ├── storyboard.py      #   V4.3 分镜景别（纯算法）
+│       │   │   ├── setting_resolver.py#   V3.5 设定/世界观文本召回（纯算法）
+│       │   │   ├── pruner.py          #   Phase 4.5 重构剪枝（N+1×creative，去 AI 味）
+│       │   │   ├── structure_checker.py # Phase 5 锚点审计（1×reasoning LLM）
+│       │   │   ├── refiner.py         #   Phase 6 条件补埋（0~3×creative）
+│       │   │   └── types.py
+│       │   ├── planning.py            # 节拍拆分 + POV 锚点分配（共享编排层，被 agentic/beat_manager 用）
+│       │   ├── refining.py            # refine_draft/refine_single_beat（服务于 chapter_optimization 路由）
+│       │   ├── clarification_agent.py # 大纲澄清（extra_router 的 /clarify-outline 端点）
+│       │   ├── snapshot_extractor.py  # 世界终端状态抽取（chapter_publishing 用）
+│       │   ├── state_validator.py     # 节拍世界状态一致性校验（planning/agentic 用）
+│       │   ├── context_blocks.py      # 上下文区块构造（context/engine 用）
+│       │   ├── formatting_utils.py    # 规则化文本格式（text_formatting/llm 用）
+│       │   ├── validators.py          # 代码级校验器（validation/code_auditors 用）
+│       │   └── utils.py               # clean_llm_output 等（多模块共用）
+│       │
+│       ├── refinery/         # ★ V4.1 Refinery 独立精修流水线（对任意草稿，非内嵌生成）
+│       │   ├── refinery.py            # Refinery 主类（编排 diagnose/refine）
+│       │   ├── diagnostician.py       # 诊断（1×reasoning，输出问题清单 JSON）
+│       │   ├── planner.py             # 手术规划（纯算法）
+│       │   ├── surgeon.py             # 局部手术（N×creative，定点改段落）
+│       │   ├── holistic_reader.py     # 整体回读（1×reasoning）
+│       │   ├── polisher.py            # 全文抛光（1×creative）
+│       │   └── reader_feedback.py
 │       │
 │       ├── world/           # 世界状态服务
 │       │   └── state_service.py
@@ -248,6 +257,15 @@ Velluma/
 │       │   ├── types/
 │       │   └── utils/
 │       └── types/
+│
+├── _deprecated/             # ⚠ 废弃引擎归档（不参与 import 链，详见该目录 README）
+│   │                        #   含 V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 全部代码
+│   ├── services/workflows/  #   detonation/ 包、dual_track.py + dual_track/ 包、sketch/adversarial/
+│   │                        #   stitching/drafting/fortress_candidate/fail_fast 等
+│   ├── routes/chapter_generation/  # dual_track.py/detonation.py/unified.py/stream_handler 等
+│   ├── services/prompts/    #   detonation_prompts.py、stitch_prompts.py
+│   ├── schemas/detonation.py
+│   └── repositories/detonation_repository.py
 │
 ├── data/                    # 运行时数据（端口持久化等，gitignore）
 ├── logs/                    # Prompt 日志（gitignore；backend/logs/ 下另有调试日志）
@@ -346,82 +364,85 @@ npm run electron:build    # 打包安装包（electron-builder）
 
 ## 核心架构
 
-### 章节生成主流程（现状）
+### 章节生成引擎（剥离后现状）
 
-> ⚠⚠⚠ **本节以下的双轨（V4.0）描述已过时，仅作历史记录保留。** 经 2026-07-22 前端清理后确认，前端实际消费的生成主流程为三条活跃链路：
-> - **V3.2 ADF**（`POST /api/chapters/{id}/generate-adf`，默认引擎）：`ADFWorkflow`，阶段 SPINE_BUILDING → ANCHOR_DESIGN → TIER_DECIDE → FORWARD_FLOW → ANCHOR_AUDIT → (REFINE)，与双轨**零代码交叉**
-> - **V3.1 统一引擎**（`POST /api/chapters/{id}/generate`）
-> - **V4.1 Refinery 精修**（`/refinery/diagnose` + `/refinery/confirm`）
->
-> 前端入口：`useGenerationSession.start()`（`engine` 默认 `'v3.2'`）→ `adfApi.streamGenerate`。V4.0 双轨（`/generate-chapter`）前端已无调用方。
-> 双轨的后端代码仍存在但已 deprecated；下方双轨阶段描述不再反映现状（后端全面校准超出本次清理范围）。
+当前后端仅保留两套生成引擎，外加一套独立的章节优化功能。三套引擎各有独立的工作流类与精修实现，**互不共享编排代码**（底层 LLM/观测/RAG 设施共用）：
 
-**当前实际生效的生成主流程是双轨流**，编排代码位于：
-- `backend/routes/chapter_generation/stream_handler.py` — SSE 流式编排（DualTrackStreamHandler）
-- `backend/services/workflows/dual_track.py` — 双轨工作流主类（DualTrackWorkflow）
+| 引擎 | 版本 | 端点 | 工作流主类 | 用途 |
+|------|------|------|-----------|------|
+| **ADF** | V3.2 | `POST /generate-adf` | `ADFWorkflow`（`workflows/adf/`） | 默认生成引擎（从头写章节） |
+| **Refinery** | V4.1 | `/refinery/diagnose` + `/confirm` | `Refinery`（`services/refinery/`） | 独立精修工具（对任意草稿，需作者确认） |
+| 章节优化 | — | `/optimize_chapter` + `/optimize_selection` | `refine_draft`（`workflows/refining.py`） | 章节重写/局部优化（前端在用） |
 
-SSE 阶段序列：**ASSEMBLING_CONTEXT → POV_ASSIGNMENT → DRAFTING → STITCHING → REVIEWING → REFINING**
+> 已废弃并迁至 `backend/_deprecated/` 的引擎：V3.0 Detonation（`/generate-v3`）、V3.1 Unified（`/generate`）、V4.0 DualTrack（`/generate-chapter`）。它们的设计文档见 `docs/generation-v3-design.md`、`docs/generation-v3.1-unified.md`，均带废弃头注。
 
-各阶段说明：
+### ADF 引擎（V3.2，默认生成引擎）
 
-1. **ASSEMBLING_CONTEXT** - 组装上下文
-   - 加载角色卡、关系网
-   - RAG 检索相关记忆
-   - 提取前文摘要和开放伏笔
+**核心思想**：锚驱动正向流（Anchor-Driven Flow）。先设计"远端锚"（本章高潮 + 必埋/必收的钩子前置条件），再正向逐段写作逼近锚点，最后审计锚点是否达成、条件性补埋。全程**严格串行**（无并行段）。
 
-2. **PLANNING** - 规划节拍（⚠ 不在生成主流程内）
-   - 节拍规划已拆分为独立预览端点 `POST /api/chapters/{id}/generate_chapter_agentic_preview_beats`
-   - 主流程中只有 POV_ASSIGNMENT（分配 POV 角色、字数）
-   - 支持 Fast/Medium/Slow 节奏类型
+编排主类 `ADFWorkflow` 位于 `backend/services/workflows/adf/adf_workflow.py`，入口路由 `backend/routes/chapter_generation/adf.py`。
 
-3. **DRAFTING** - 并行起草
-   - 每个 Beat 独立生成，并发度为 `drafting.py` 中**硬编码的 `asyncio.Semaphore(5)`**
-   - ⚠ 文档与 README 中提到的 `AGENTIC_BEAT_CONCURRENCY` 环境变量**在代码中不存在**；`beat_concurrency` 配置字段（默认 6）定义于 `config/schemas/generation_config.py` 但无任何消费方
-   - 包含 Scene Intent 构建和自动质检
+**7 阶段序列**（含文档此前遗漏的 PRUNE 阶段）：
 
-4. **STITCHING** - 统稿
-   - 合并所有 Beat 内容为完整章节草稿（Draft_A）
+1. **CONTEXT_ASSEMBLING**（0 LLM，路由层 `_load_adf_context`）— 组装 chapter/entities/open_hooks/上一章摘要 + Canon 上下文 + 世界观文本。
+2. **SPINE_BUILDING**（0 LLM，`story_context_builder.py`）— 纯算法拆钩子为 must_plant/must_resolve，按"每 12 章一卷"推断卷位。受 `enable_spine` 开关控制。
+3. **ANCHOR_DESIGN**（1×reasoning LLM，`climax_designer.py`）— 设计高潮强度 + 每个钩子的前置条件（Precondition）。Canon/作者意图作为最高约束前置注入。
+4. **TIER_DECIDE**（0 LLM，`tier_decider.py` → `tier_classifier.py`）— 定档 climax/turn/progress/transition，映射到目标字数与段数（climax=5000字/7段，turn=3500/6，progress=2500/5，transition=1500/4）。
+5. **FORWARD_FLOW**（N×creative LLM **串行**，`segment_writer.py`）— 逐段正向写作，每段含情绪采样/条件扫描/镜头景别注入，写完做三道反 AI 味后处理（jieba 抽脂 → AI 味检测超阈值则 LLM 重洗 → 正则裁剪）。写到超目标×1.3 提前终止。
+6. **PRUNE**（N+1×creative LLM，`pruner.py`，⚠ 全章无条件触发，无开关）— 逐段重构剪枝（去 AI 味，"重构"而非"润色"路线）+ 整章 OOC 裁判（角色崩坏检测），判崩坏则整章回退未剪枝文本。**此前文档遗漏此阶段，它占 ADF 单章 LLM 调用量近一半。**
+7. **ANCHOR_AUDIT**（1×reasoning LLM，`structure_checker.py`）— 代码级扫必须出现的词 + LLM 5 维审计（铺垫落地/情绪/脉络/高潮验收/文风）取并集。受 `enable_anchor_audit` 开关控制。
+8. **REFINE**（0~3×creative LLM，`refiner.py`）— 条件补埋，仅当 `enable_refinement=True` 且审计判 `needs_refinement` 时触发，挑情绪平淡段内嵌补写漏掉的伏笔。
 
-5. **REVIEWING** - 对抗校对
-   - 双轨流程中由 `AdversarialAligner` 对比 Draft_A 与 Sketch，输出 `adjustment_plan`
-   - ⚠ 经典实现 `workflows/reviewing.py`（`review_draft` + `revision_plan`）目前**无路由调用方**
+**SSE 流式**：阶段进度事件实时流出；正文**非实时流**（工作流全部完成后才把 `final_text` 切成 200 字 chunk 输出）。
 
-6. **REFINING** - 精修（可选）
-   - 基于对抗校对结果重写/融合
-   - 支持跳过（`not_needed_or_disabled` / `no_gaps`）
+**阶段开关**（`schemas/adf.py` 的 `GenerateADFRequest`）：`enable_spine` / `enable_anchor_audit` / `enable_refinement`。**PRUNE 无开关，永远执行。**
 
-> **关于多轮迭代**：schema 中 `max_iterations` 允许 1~5（默认 2），但当前双轨实现中迭代次数**硬编码为 1**，`max_iterations` 解析后仅写入元数据、无实际消费方。"最多 5 轮迭代"是设计上限而非现状。
+### Refinery 精修（V4.1，独立工具）
 
-### 双轨对抗架构 (V4.0)
+**核心思想**：对**任意已有草稿**（无论哪个引擎生成或人写）的两阶段人工精修——医生看病式流程，先诊断开清单，等作者确认治哪些，再动手术。
 
-为解决并行生成连贯性差的问题，引入双轨架构：
+编排主类 `Refinery` 位于 `backend/services/refinery/refinery.py`，入口路由 `backend/routes/chapter_generation/refinery.py`。
 
-**核心思想**：并行生成 + 连贯性锚定
+**流程**：
+1. **diagnose**（1×reasoning LLM，`diagnostician.py`）— 输出问题清单 JSON，存入内存 dict `_PENDING_REFINERIES`（TTL 60 分钟），返回 `run_id`。
+2. **人在回路** — 作者在前端勾选确认要修复的问题。
+3. **confirm** — 凭 `run_id` 取回 → `planner`（纯算法规划手术）→ `surgeon`（N×creative 定点改段落）→ `holistic_reader`（1×reasoning 整体回读）→ `polisher`（1×creative 抛光）。
+
+**SSE**：confirm 阶段是**唯一真·实时流式**（用 `asyncio.Queue` 边改边推）。两阶段间用内存 dict + TTL 传递状态（单实例、非持久化、重启即丢）。
+
+> ⚠ 注意 Refinery 与 ADF/Detonation/DualTrack 内置的 REFINE/REFINING 是**完全不同的代码**（同名不同实）。`services/refinery/__init__.py` 注释称"ADF Phase 4.5 触发"是过时描述，代码中无此集成。
+
+### 章节优化（共享功能）
+
+独立的章节重写功能，与三套生成引擎正交，服务于前端 `chapter_optimization` 路由：
+- `POST /api/optimize_chapter` — 整章 refine 重写，调 `refine_draft`（`workflows/refining.py`，前端当前主要用 `/optimize_selection`）
+- `POST /api/optimize_selection` — 选中片段局部重写，调 `optimize_selection_with_llm`
+
+> `refining.py` 是共享文件（前端在用），**不属于任何废弃引擎**，剥离时予以保留。
+
+### 数据模型层级
 
 ```
-Track A: 节拍扩写              Track B: 短文生成
-├─ Beat[1] → Text[1]           ├─ 基于 Beats 生成连贯速写
-├─ Beat[2] → Text[2]           │   (默认约 45% 字数，连续叙述)
-└─ Beat[N] → Text[N]           └─ 输出: Sketch + 转折点映射
-         ↓                              ↓
-         └──────────┬────────────────────┘
-                    ↓
-            统稿 → Draft_A
-                    ↓
-            对抗校对 (Adversarial Alignment)
-            Draft_A vs Sketch → 差异检测 (adjustment_plan)
-                    ↓
-            融合精修 (可选)
+Book (书籍)
+├── Chapter (章节)
+│   ├── StoryBeat (剧情节拍) - 最小剧情单元
+│   ├── SceneIntent (场景意图) - Beat 内的生成指令
+│   ├── ChapterEntity (章节-角色关联)
+│   ├── ChapterMapLocation (章节-地点关联)
+│   └── ChapterAsset (章节-资产关联)
+├── Character (角色)
+│   ├── static_prompt - 永恒设定
+│   ├── dynamic_state - 瞬时状态
+│   ├── dynamic_state_history - 状态历史
+│   └── CharacterRelationship (角色关系)
+├── MapLocation (地图地点)
+├── Asset (全局资产/道具)
+├── MemoryChunk (向量记忆)
+├── PlotLedger (情节账本/伏笔)
+└── GenerationRun (单次生成运行的 token 计量，定义于 models.py)
 ```
 
-**关键组件**：
-- `DualTrackWorkflow`：双轨主类，位于 `backend/services/workflows/dual_track.py`（顶层文件）；同名包 `workflows/dual_track/` 通过 importlib 从该文件延迟导入，子模块包括 `tracks/`（track_a/track_b）、`alignment/`、`config/`、`fusion_refinement.py`、`stitching.py`
-- `SketchGenerator`：`backend/services/workflows/sketch_generator.py`，生成连贯速写（`sketch_ratio` 默认 0.45），提供连贯性锚点
-- `AdversarialAligner`：`backend/services/workflows/adversarial_aligner.py`（活跃路径；包内 `dual_track/alignment/adversarial_aligner.py` 有一份重复副本，非活跃）
-
-**API 端点**（位于 `backend/routes/chapter_generation/dual_track.py`）：
-- `POST /api/chapters/{id}/generate-dual-track` - 流式双轨生成（SSE）
-- `POST /api/chapters/{id}/generate-dual-track-simple` - 非流式
+以上模型均定义于 `backend/models.py`。⚠ `backend/models_generation_task.py` 中有一份 `GenerationTask` 重复定义，全代码库零引用，是死文件。已废弃的 `DetonationChain` ORM 已删除（数据库 `detonation_chains` 表保留存量数据，代码不再管理）。
 
 ### 数据模型层级
 
@@ -484,7 +505,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 ### Python 后端
 
-**文件头**：所有 `.py` 文件应包含 AGPL-3.0 许可证头（新文件必须添加）。⚠ 现状：backend 下约 1/5 文件（44/207）缺失，主要集中在较新模块 `routes/chapter_generation/`、`workflows/drafting_core/`、`workflows/dual_track/` 及 assets 相关文件。
+**文件头**：所有 `.py` 文件应包含 AGPL-3.0 许可证头（新文件必须添加）。⚠ 现状：backend 下部分文件缺失许可证头，主要集中在较新模块（`workflows/adf/`、`services/refinery/`、`routes/chapter_generation/`）及 assets 相关文件。
 
 **文档字符串规范**：
 ```python
@@ -578,8 +599,7 @@ LLM、Embedding、代理的实际配置来源是项目根目录的 `model_config
 | `PROXY_URL` / `DISABLE_PROXY` | ⚠ 半死代码：模块级常量定义后未被使用，实际代理由 `model_config.json` 的 `proxy` 节决定 | `http://127.0.0.1:4780` |
 
 ⚠ **以下变量在代码中不存在，文档/README 中的相关描述均已过时**：
-- ~~`AGENTIC_BEAT_CONCURRENCY`~~（Beat 并行度实为 `drafting.py` 硬编码 `Semaphore(5)`）
-- ~~`AGENTIC_FORCE_FAST_MODE`~~（快速模式是请求级参数 `fast_mode`）
+- ~~`AGENTIC_BEAT_CONCURRENCY`~~ / ~~`AGENTIC_FORCE_FAST_MODE`~~（原双轨引擎的概念，该引擎已废弃迁至 `_deprecated/`）
 - ~~`DASHSCOPE_API_KEY`~~ / ~~`OPENAI_API_KEY`~~（API Key 全部来自 `model_config.json`，不读环境变量）
 
 另：`scripts/start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，生产模式额外设置 `NODE_ENV=production`，属进程内传递，无需用户配置。
@@ -697,4 +717,4 @@ FastAPI 在 `backend/main.py` 中已配置 SPA fallback：
 
 ---
 
-*最后更新: 2026-07-19（全面校准：修正路由结构、双轨工作流现状、环境变量、配置来源、测试现状等过时内容）*
+*最后更新: 2026-07-24（引擎剥离后全面校准：废弃 DualTrack/Unified/Detonation 三套引擎，保留 ADF + Refinery；重写目录树、核心架构、生成主流程、引擎端点等段落以反映剥离后现状）*

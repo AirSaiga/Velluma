@@ -1,6 +1,6 @@
 # Velluma AI 小说写作助手
 
-**专为长篇小说创作设计的 AI 驱动写作助手，采用双轨对抗生成（Dual-Track）架构**
+**专为长篇小说创作设计的 AI 驱动写作助手，采用 ADF 锚驱动生成 + Refinery 精修架构**
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Vue.js](https://img.shields.io/badge/Vue-3.4-green.svg)](https://vuejs.org/)
@@ -16,7 +16,7 @@
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [项目结构](#项目结构)
-- [双轨生成工作流](#双轨生成工作流)
+- [生成引擎](#生成引擎)
 - [数据模型](#数据模型)
 - [RAG 记忆检索](#rag-记忆检索)
 - [配置与环境变量](#配置与环境变量)
@@ -29,7 +29,7 @@
 
 ## 项目简介
 
-Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器），通过双轨对抗生成架构产出高质量小说章节内容。它专为长篇叙事设计，支持：
+Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器），通过 ADF（锚驱动正向流）引擎生成、Refinery 精修流水线打磨，产出高质量小说章节内容。它专为长篇叙事设计，支持：
 
 - 角色状态追踪与关系图谱
 - 基于 RAG 的智能记忆系统
@@ -47,35 +47,37 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 ## 核心特性
 
-### 🤖 双轨对抗生成 (V4.0)
+### 🤖 ADF 锚驱动生成引擎 (V3.2)
 
-并行生成 + 连贯性锚定，解决并行起草连贯性差的问题：
+先定"终点锚"（本章高潮 + 必埋/必收的伏笔），再正向逐段写作逼近锚点，全程串行 + 双重自检：
 
 | 阶段 | 功能 | 说明 |
 |------|------|------|
-| Planning | 智能规划 | 将章节拆分为 StoryBeat，分配 POV 与字数（独立预览端点） |
-| Drafting | 双轨生成 | Track A 并行扩写 Beat；Track B 生成连贯速写（Sketch） |
-| Stitching | 智能统稿 | 合并 Beat 内容为完整草稿 Draft_A |
-| Reviewing | 对抗校对 | 对比 Draft_A 与 Sketch，检测结构/情绪/信息差异 |
-| Refining | 融合精修 | 基于差异报告重写融合，轻微问题可跳过 |
+| Spine Building | 脉络骨架 | 纯算法拆分必须埋下/必须回收的钩子，推断章节在全书的卷位 |
+| Anchor Design | 锚点设计 | LLM 设计高潮强度与每个钩子的前置条件 |
+| Tier Decide | 定档 | 判定本章类型（高潮/转折/推进/过渡），映射到字数与段数 |
+| Forward Flow | 正向写作 | 逐段串行写作，每段做"去 AI 味"三道后处理 |
+| Prune | 重构剪枝 | 逐段重构去 AI 味 + 整章角色崩坏检测（无条件触发） |
+| Anchor Audit | 锚点审计 | 代码级关键词扫描 + LLM 5 维审计取并集 |
+| Refine | 条件补埋 | 审计未通过时，在情绪平淡段落内嵌补写漏掉的伏笔 |
 
-**核心思想**：
+**核心思想**：边走边自检，没到终点就回头补。详细架构见 `docs/generation-v3.2-adf.md`。
 
-```
-Track A: 节拍扩写              Track B: 短文生成
-├─ Beat[1] → Text[1]           ├─ 基于 Beats 生成连贯速写
-├─ Beat[2] → Text[2]           │   (默认约 45% 字数，连续叙述)
-└─ Beat[N] → Text[N]           └─ 输出: Sketch + 转折点映射
-         ↓                              ↓
-         └──────────┬────────────────────┘
-                    ↓
-            统稿 → Draft_A
-                    ↓
-            对抗校对 (Adversarial Alignment)
-            Draft_A vs Sketch → 差异检测 (adjustment_plan)
-                    ↓
-            融合精修 (可选)
-```
+### ✨ Refinery 精修流水线 (V4.1)
+
+独立的"医生看病式"人工精修工具，可对任意已有草稿（无论哪个引擎生成）做诊断 → 作者确认 → 手术：
+
+| 工序 | 功能 | 说明 |
+|------|------|------|
+| Diagnose | 诊断 | LLM 列出问题清单，等待作者勾选确认 |
+| Planner | 规划 | 纯算法规划每个问题改哪一段 |
+| Surgeon | 手术 | 定点改段落（不动无关内容） |
+| Holistic Reader | 回读 | 检查改完是否前后矛盾 |
+| Polisher | 抛光 | 全文润色 |
+
+**核心思想**：把"AI 觉得有问题"和"作者认可的问题"分开，避免 AI 自作主张乱改。详细设计见 `docs/generation-v4.1-refinery.md`。
+
+> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack）的代码已归档至 `backend/_deprecated/`，不再参与运行；其设计文档见 `docs/generation-v3-design.md`、`docs/generation-v3.1-unified.md`。
 
 ### 🧠 长篇记忆与状态管理
 
@@ -233,7 +235,8 @@ Velluma/
 │   │   ├── prompts/          # Prompt 模板库
 │   │   ├── rag/              # RAG 检索系统
 │   │   ├── state_machine/    # 角色状态机
-│   │   ├── workflows/        # 工作流（含 dual_track.py 主类）
+│   │   ├── workflows/        # 工作流（adf/ 引擎包 + 共享设施）
+│   │   ├── refinery/         # Refinery 精修流水线
 │   │   ├── world/            # 世界状态服务
 │   │   └── utils/            # SSE、日志、超时等工具
 │   └── ...
@@ -256,44 +259,49 @@ Velluma/
 
 ---
 
-## 双轨生成工作流
+## 生成引擎
 
-### 主流程编排
+当前后端保留两套生成引擎 + 一套章节优化功能：
 
-当前生效的生成主流程是**双轨流**，SSE 阶段序列：
-
-```
-ASSEMBLING_CONTEXT → POV_ASSIGNMENT → DRAFTING → STITCHING → REVIEWING → REFINING
-```
+### ADF 引擎（V3.2，默认）
 
 **编排代码**：
-- `backend/routes/chapter_generation/stream_handler.py` — SSE 流式编排（`DualTrackStreamHandler`）
-- `backend/services/workflows/dual_track.py` — 双轨工作流主类（`DualTrackWorkflow`）
+- `backend/routes/chapter_generation/adf.py` — 入口路由（含 SSE）
+- `backend/services/workflows/adf/adf_workflow.py` — 工作流主类 `ADFWorkflow`
 
-### 各阶段说明
+**7 阶段序列**（SSE 阶段进度实时流出，正文为生成完成后切块输出）：
 
-1. **ASSEMBLING_CONTEXT** — 组装上下文：加载角色卡、关系网、RAG 检索记忆、前文摘要与开放伏笔
-2. **POV_ASSIGNMENT** — 分配 POV 角色与字数（支持 Fast/Medium/Slow 节奏）
-3. **DRAFTING** — 并行起草：每个 Beat 独立生成，并发度由 `drafting.py` 中硬编码的 `Semaphore(5)` 控制，包含 Scene Intent 构建与自动质检
-4. **STITCHING** — 统稿：合并所有 Beat 为完整章节草稿 Draft_A
-5. **REVIEWING** — 对抗校对：`AdversarialAligner` 对比 Draft_A 与 Sketch，输出 `adjustment_plan`
-6. **REFINING** — 精修（可选）：基于校对结果重写融合，支持跳过
+```
+CONTEXT_ASSEMBLING → SPINE_BUILDING → ANCHOR_DESIGN → TIER_DECIDE
+→ FORWARD_FLOW → PRUNE → ANCHOR_AUDIT → (REFINE)
+```
 
-### 关键组件
+1. **CONTEXT_ASSEMBLING** — 组装上下文：角色/关系/伏笔/上一章摘要 + Canon + 世界观
+2. **SPINE_BUILDING** — 脉络骨架：纯算法拆分必埋/必收钩子
+3. **ANCHOR_DESIGN** — 锚点设计：LLM 设计高潮强度与前置条件
+4. **TIER_DECIDE** — 定档：判定本章类型，映射字数/段数
+5. **FORWARD_FLOW** — 正向逐段写作（串行，每段含去 AI 味后处理）
+6. **PRUNE** — 重构剪枝（去 AI 味 + 角色崩坏检测，无条件触发）
+7. **ANCHOR_AUDIT** — 锚点审计（代码级 + LLM 双审计取并集）
+8. **REFINE** — 条件补埋（审计未通过时，补写漏掉的伏笔）
 
-| 组件 | 位置 | 职责 |
-|------|------|------|
-| `DualTrackWorkflow` | `services/workflows/dual_track.py` | 双轨主类 |
-| `SketchGenerator` | `services/workflows/sketch_generator.py` | 连贯速写（`sketch_ratio` 默认 0.45） |
-| `AdversarialAligner` | `services/workflows/adversarial_aligner.py` | 对抗校对（活跃路径） |
+### Refinery 精修（V4.1，独立工具）
+
+**编排代码**：
+- `backend/routes/chapter_generation/refinery.py` — 入口路由（diagnose + confirm）
+- `backend/services/refinery/refinery.py` — 主类 `Refinery`
+
+两阶段流程：`diagnose`（诊断出问题清单）→ 作者勾选确认 → `confirm`（手术 → 回读 → 抛光，真·实时 SSE）。
 
 ### API 端点
 
-- `POST /api/chapters/{id}/generate-dual-track` — 流式双轨生成（SSE）
-- `POST /api/chapters/{id}/generate-dual-track-simple` — 非流式
-- `POST /api/chapters/{id}/generate_chapter_agentic_preview_beats` — 节拍预览（独立端点）
+- `POST /api/chapters/{id}/generate-adf` — ADF 流式生成（SSE，默认引擎）
+- `POST /api/chapters/{id}/plan-suggestion` — 生成前章节规划建议
+- `POST /api/chapters/{id}/refinery/diagnose` — Refinery 诊断
+- `POST /api/chapters/{id}/refinery/confirm` — Refinery 精修（实时 SSE）
+- `POST /api/optimize_chapter` / `/optimize_selection` — 章节重写/局部优化（共享功能）
 
-> **关于多轮迭代**：schema 中 `max_iterations` 允许 1~5（默认 2），但当前双轨实现中迭代次数硬编码为 1。
+> 已废弃端点 `/generate`（V3.1）、`/generate-v3`（V3.0）、`/generate-chapter`（V4.0）已随引擎一并移除。
 
 ---
 
@@ -360,8 +368,7 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 | `PROXY_URL` / `DISABLE_PROXY` | 半死代码（实际代理由 `model_config.json` 控制） | `http://127.0.0.1:4780` |
 
 > ⚠ **以下变量在代码中不存在，任何文档提及均已过时**：
-> - `AGENTIC_BEAT_CONCURRENCY`（Beat 并行度实为 `drafting.py` 硬编码 `Semaphore(5)`）
-> - `AGENTIC_FORCE_FAST_MODE`（快速模式是请求级参数 `fast_mode`）
+> - `AGENTIC_BEAT_CONCURRENCY` / `AGENTIC_FORCE_FAST_MODE`（原双轨引擎的概念，该引擎已废弃归档）
 > - `DASHSCOPE_API_KEY` / `OPENAI_API_KEY`（Key 全部来自 `model_config.json`）
 
 > `scripts/start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。

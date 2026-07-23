@@ -1,5 +1,9 @@
 # Velluma 生成体系 3.1：统一引擎工程方案（高潮倒推 × 双轨）
 
+> ⚠️ **本文档描述的 V3.1 Unified（统一）引擎已于 2026-07-24 废弃，代码归档至 `backend/_deprecated/`。**
+> 当前生效的生成引擎为 **V3.2 ADF**（`/generate-adf`，设计见 `generation-v3.2-adf.md`）与 **V4.1 Refinery**（`/refinery/*`，设计见 `generation-v4.1-refinery.md`）。
+> 本文档作为 V3.1 的历史设计记录保留。V3.1 统一引擎复用了 V3.0 Detonation 的全套子模块（高潮倒推），二者已一并废弃归档。
+
 > 日期：2026-07-19
 > 前置文档：`generation-v3-design.md`（3.0 高潮倒推法蓝图）、`generation-v2-design.md`（2.0 蓝图）、`human-flavor-in-fiction.md`（原理）。
 > 本文档定位：**把 3.0（高潮倒推）与 2.0（双轨）合并为一条管线**，程序自主决策，不再由用户选择引擎。

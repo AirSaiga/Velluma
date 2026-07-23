@@ -1,5 +1,9 @@
 # Velluma 生成体系 3.0 工程重构方案
 
+> ⚠️ **本文档描述的 V3.0 Detonation（引爆链）引擎已于 2026-07-24 废弃，代码归档至 `backend/_deprecated/`。**
+> 当前生效的生成引擎为 **V3.2 ADF**（`/generate-adf`，设计见 `generation-v3.2-adf.md`）与 **V4.1 Refinery**（`/refinery/*`，设计见 `generation-v4.1-refinery.md`）。
+> 本文档作为 V3.0 的历史设计记录保留，其中的架构描述不再反映当前代码现状。V3.0 的核心思路（高潮倒推）曾被 V3.1 Unified 引擎复用，二者均已废弃。
+
 > 日期：2026-07-19
 > 前置文档：`generation-v2-research.md`（现状与调研）、`generation-v2-design.md`（2.0 蓝图）、`generation-v2.1-brainstorm.md`（发散）、`human-flavor-in-fiction.md`（人味原理）。
 > 本文档定位：**3.0 主轴重构**。2.0 解决"写得对"（上下文、成本、校验、回写），3.0 解决"写得勾人"（因果、情绪、嗓音）——方法是把整个 pipeline 的数据流向倒过来。
