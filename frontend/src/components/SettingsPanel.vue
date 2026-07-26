@@ -3,9 +3,11 @@ import { onMounted, reactive, ref } from 'vue'
 import { systemApi } from '../services/api'
 import type { ModelConfig, ModelConfigUpdatePayload } from '../services/api'
 import { useToast } from '../composables/useToast'
+import { useNotifyPrefs } from '../composables/useNotifyPrefs'
 import Icon from './Icon.vue'
 
 const { showToast } = useToast()
+const { prefs: notifyPrefs, setInApp, setSystem } = useNotifyPrefs()
 
 // ============================================================
 // 表单状态
@@ -279,6 +281,29 @@ onMounted(loadConfig)
           <label v-if="proxyForm.enabled" class="field">
             <span class="field-label">代理地址</span>
             <input v-model="proxyForm.url" class="field-input" placeholder="http://127.0.0.1:4780" />
+          </label>
+        </section>
+
+        <!-- 通知偏好 -->
+        <section class="config-section">
+          <div class="section-header">通知偏好</div>
+
+          <label class="field-inline">
+            <input
+              type="checkbox"
+              :checked="notifyPrefs.inApp"
+              @change="setInApp(($event.target as HTMLInputElement).checked)"
+            />
+            <span>生成完成时弹出提示框</span>
+          </label>
+
+          <label class="field-inline">
+            <input
+              type="checkbox"
+              :checked="notifyPrefs.system"
+              @change="setSystem(($event.target as HTMLInputElement).checked)"
+            />
+            <span>切走时使用 Windows 系统通知</span>
           </label>
         </section>
 
