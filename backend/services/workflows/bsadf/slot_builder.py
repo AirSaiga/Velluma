@@ -27,6 +27,7 @@ from backend.services.workflows.adf.types import (
 )
 from backend.services.workflows.adf.storyboard import plan_storyboard
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
+from backend.services.workflows.adf.climax_designer import _extract_json
 from backend.services.workflows.bsadf.types import BeatSlotCard
 
 logger = logging.getLogger(__name__)
@@ -276,7 +277,10 @@ async def enrich_slots(
                     response_format={"type": "json_object"},
                 )
 
-            data = json.loads(result.content)
+            data = _extract_json(result.content)
+            if not data:
+                logger.warning(f"[enrich_slots] {card.beat_id} JSON 解析失败（content 非法或为空），保留种子")
+                continue
             new_actions = data.get("anchor_actions", [])
             new_sensory = data.get("sensory_details", [])
 
@@ -291,8 +295,6 @@ async def enrich_slots(
             # 合并：扩写词 + 原种子（去重，保序）
             card.anchor_actions = list(dict.fromkeys(new_actions + card.anchor_actions))
             card.sensory_details = list(dict.fromkeys(new_sensory + card.sensory_details))
-        except json.JSONDecodeError as e:
-            logger.warning(f"[enrich_slots] {card.beat_id} JSON 解析失败：{e}，保留种子")
         except Exception as e:
             logger.warning(f"[enrich_slots] {card.beat_id} LLM 调用失败：{e}，保留种子")
 

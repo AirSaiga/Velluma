@@ -293,3 +293,34 @@ class TestEnrichSlots:
 
         # 扩写词在前，原种子在后，"扳手"只出现一次
         assert result[0].anchor_actions == ["砸下气动扳手", "扳手", "油污"]
+
+    def test_enrich_fenced_json_parsed(self):
+        """LLM 返回带 markdown 围栏的 JSON（DeepSeek 常见）也应正确解析。
+
+        回归测试：之前用 json.loads 直接解析，遇到 ```json 围栏会报
+        'Expecting value: line 1 column 1' 导致 enrichment 全部失败。
+        现在用 _extract_json 容错解析。
+        """
+        card = self._make_card()
+        mock_result = MagicMock()
+        # 模拟 DeepSeek 带围栏 + 解释文字的输出
+        mock_result.content = '好的，这是扩展结果：\n```json\n{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}\n```\n希望对你有帮助。'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert "砸下气动扳手" in result[0].anchor_actions
+        assert "刺鼻柴油味" in result[0].sensory_details
+
+    def test_enrich_garbage_content_keeps_seeds(self):
+        """LLM 返回完全非 JSON 内容（纯文本解释）时，保留种子。"""
+        card = self._make_card()
+        mock_result = MagicMock()
+        mock_result.content = '抱歉，我无法完成这个任务。'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert result[0].anchor_actions == ["扳手"]
