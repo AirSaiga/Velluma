@@ -24,7 +24,7 @@
  * - degraded：降级事件
  */
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
-import { adfApi, refineryApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision } from '../../../services/api/domain'
+import { adfApi, refineryApi, bsadfApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat } from '../../../services/api/domain'
 
 // ============================================================
 // localStorage 持久化层（按 chapterId 存快照，进入章节即恢复）
@@ -62,6 +62,10 @@ interface SessionSnapshot {
   refinerySurgeries: RefinerySurgery[]
   refineryHolisticVerdict: RefineryHolisticVerdict | null
   refineryStats: Record<string, any> | null
+  // BS-ADF 产物（beatRunId 是临时凭证，不持久化，故不在此）
+  beatSlots?: BeatSlot[]
+  renderProgress?: RenderProgress[]
+  degradedBeats?: DegradedBeat[]
   // 保存时间戳（供调试/未来做过期清理）
   savedAt: number
 }
@@ -116,6 +120,8 @@ export type SessionStage =
   | 'assembling' // 组装
   | 'auditing' // 审校
   | 'refining' // 精修
+  | 'beat_pending' // 槽位卡已生成，等作者编辑（Track B 暂停态）
+  | 'beat_rendering' // 作者确认后，后台顺序渲染各段
   | 'done' // 完成
   | 'error'
 
@@ -173,8 +179,8 @@ export interface GenerationSession {
   auditVerdict: Ref<string | null>
   degraded: Ref<any[]>
   finalStats: Ref<Record<string, any> | null>
-  /** 最近一次完成来自 ADF 还是 Refinery（弹窗标题用） */
-  lastDoneMode: Ref<'adf' | 'refinery' | null>
+  /** 最近一次完成来自 ADF 还是 Refinery 还是 BS-ADF（弹窗标题用） */
+  lastDoneMode: Ref<'adf' | 'refinery' | 'bsadf' | null>
   // V3.2 ADF 专用产物
   adfAnchor: Ref<any | null>
   adfPreconditions: Ref<any[]>
@@ -186,17 +192,27 @@ export interface GenerationSession {
   refinerySurgeries: Ref<RefinerySurgery[]>
   refineryHolisticVerdict: Ref<RefineryHolisticVerdict | null>
   refineryStats: Ref<Record<string, any> | null>
+  // BS-ADF 产物
+  beatSlots: Ref<BeatSlot[]>
+  beatRunId: Ref<string | null>
+  renderProgress: Ref<RenderProgress[]>
+  degradedBeats: Ref<DegradedBeat[]>
+  bsadfTrack: Ref<'A' | 'B'>
   // 派生
   isTerminal: ComputedRef<boolean>
   // 控制
   start: (chapterId: string, tier: string, opts?: { targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
   cancel: () => void
   reset: () => void
-  /** 失败重试：再次触发最近一次入口（生成 start / 精修诊断 startRefinery） */
+  /** 失败重试：再次触发最近一次入口（生成 start / 精修诊断 startRefinery / BS-ADF startBeat） */
   retry: () => void
   // V4.1 Refinery 控制
   startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
   confirmRefinery: (chapterId: string, decisions: IssueDecision[], customIssues?: RefineryIssue[]) => void
+  // BS-ADF 控制
+  startBeat: (chapterId: string, tier: string, opts?: { track?: 'A' | 'B'; targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
+  confirmBeats: (chapterId: string, editedSlots: BeatSlot[]) => void
+  cancelBeat: () => void
   // 持久化：进入章节时恢复上次会话产物（localStorage）
   loadForChapter: (chapterId: string) => void
   persist: () => void
@@ -218,7 +234,7 @@ export function useGenerationSession(): GenerationSession {
   const degraded = ref<any[]>([])
   const finalStats = ref<Record<string, any> | null>(null)
   /** 最近一次完成来自哪条流程（供完成弹窗区分标题） */
-  const lastDoneMode = ref<'adf' | 'refinery' | null>(null)
+  const lastDoneMode = ref<'adf' | 'refinery' | 'bsadf' | null>(null)
   /** 本次生成开始时间戳（ms），onDone 时计算耗时；不持久化（刷新后无法准确恢复） */
   let startedAt: number | null = null
 
@@ -234,6 +250,13 @@ export function useGenerationSession(): GenerationSession {
   const refinerySurgeries = ref<RefinerySurgery[]>([])
   const refineryHolisticVerdict = ref<RefineryHolisticVerdict | null>(null)
   const refineryStats = ref<Record<string, any> | null>(null)
+
+  // BS-ADF 产物
+  const beatSlots = ref<BeatSlot[]>([])
+  const beatRunId = ref<string | null>(null)
+  const renderProgress = ref<RenderProgress[]>([])
+  const degradedBeats = ref<DegradedBeat[]>([])
+  const bsadfTrack = ref<'A' | 'B'>('A')
 
   let abortController: AbortController | null = null
   let currentChapterId: string | null = null  // 当前 session 绑定的章节（用于持久化 key）
@@ -262,6 +285,10 @@ export function useGenerationSession(): GenerationSession {
       refinerySurgeries: refinerySurgeries.value,
       refineryHolisticVerdict: refineryHolisticVerdict.value,
       refineryStats: refineryStats.value,
+      // BS-ADF：beatRunId 是临时会话凭证（同 refineryRunId），不持久化
+      beatSlots: beatSlots.value,
+      renderProgress: renderProgress.value,
+      degradedBeats: degradedBeats.value,
     }
   }
 
@@ -311,6 +338,9 @@ export function useGenerationSession(): GenerationSession {
     refinerySurgeries.value = snap.refinerySurgeries
     refineryHolisticVerdict.value = snap.refineryHolisticVerdict
     refineryStats.value = snap.refineryStats
+    beatSlots.value = snap.beatSlots || []
+    renderProgress.value = snap.renderProgress || []
+    degradedBeats.value = snap.degradedBeats || []
     // 中断态归正：刷新后无法续 LLM，强制为已完成的静态展示
     if (snap.stage === 'done' || snap.stage === 'error') {
       stage.value = snap.stage
@@ -323,6 +353,7 @@ export function useGenerationSession(): GenerationSession {
     error.value = null
     inflightEvents.value = []  // 飞行中事件不持久化（瞬时态）
     refineryRunId.value = null  // runId 是临时会话凭证，刷新后失效
+    beatRunId.value = null  // beat runId 同样是临时凭证，刷新后失效
   }
 
   /** 内部 reset（不触碰 currentChapterId，不 persist） */
@@ -349,6 +380,11 @@ export function useGenerationSession(): GenerationSession {
     refinerySurgeries.value = []
     refineryHolisticVerdict.value = null
     refineryStats.value = null
+    beatSlots.value = []
+    beatRunId.value = null
+    renderProgress.value = []
+    degradedBeats.value = []
+    bsadfTrack.value = 'A'
     lastDoneMode.value = null
   }
 
@@ -698,6 +734,188 @@ export function useGenerationSession(): GenerationSession {
     )
   }
 
+  // ============================================================
+  // BS-ADF 控制：startBeat（Track A 全自动 / Track B 跑到槽位卡暂停）
+  // + confirmBeats（Track B 恢复渲染）+ cancelBeat
+  // ============================================================
+
+  /** BS-ADF：启动生成（Track A 全自动 / Track B 跑到槽位卡暂停） */
+  function startBeat(
+    chapterId: string,
+    tier: string,
+    opts: {
+      track?: 'A' | 'B'
+      targetWordCount?: number | null
+      maxSegments?: number
+      authorIntent?: string
+      expectationActions?: Record<string, string>
+    } = {},
+  ) {
+    if (generating.value) {
+      console.warn('[startBeat] 已有生成任务进行中，已忽略')
+      return
+    }
+    lastAction = () => startBeat(chapterId, tier, opts)
+    generating.value = true
+    error.value = null
+    stage.value = 'tier_classifying'
+    bsadfTrack.value = opts.track || 'A'
+    abortController = new AbortController()
+    startedAt = Date.now()
+    // 清空旧产物
+    streamText.value = ''
+    beatSlots.value = []
+    beatRunId.value = null
+    renderProgress.value = []
+    degradedBeats.value = []
+
+    bsadfApi.start(
+      chapterId,
+      {
+        tier,
+        track: opts.track || 'A',
+        target_word_count: opts.targetWordCount ?? null,
+        max_segments: opts.maxSegments ?? 6,
+        author_intent: opts.authorIntent,
+        expectation_actions: opts.expectationActions,
+      },
+      {
+        onStage: (stageName, _data) => {
+          // 映射后端 BSADF_STAGE/ADF_STAGE 到前端 stage
+          if (stageName === 'AUTHOR_DIALOGUE') {
+            // Track B 暂停点（不应在这里触发，onSlots 会先触发）
+            stepProgress.value = { label: '等待你编辑槽位卡' }
+          } else if (stageName === 'RENDER' || stageName === 'RENDER_RESUMED') {
+            stage.value = 'beat_rendering'
+            stepProgress.value = { label: '逐段渲染' }
+          } else {
+            stepProgress.value = { label: stageName }
+          }
+        },
+        onSlots: (payload) => {
+          // Track B 暂停触发：槽位卡就绪
+          beatSlots.value = payload.slots || []
+          beatRunId.value = payload.run_id
+          generating.value = false  // 解覆盖 editor
+          stage.value = 'beat_pending'
+          stepProgress.value = { label: `${(payload.slots || []).length} 张槽位卡待编辑` }
+        },
+        onRenderProgress: (data) => {
+          // 更新 renderProgress（替换或追加同 beat_id 的项）
+          const idx = renderProgress.value.findIndex(p => p.beat_id === data.beat_id)
+          if (idx >= 0) {
+            renderProgress.value[idx] = data
+          } else {
+            renderProgress.value.push(data)
+          }
+          stepProgress.value = {
+            label: `渲染 ${data.segment_index + 1}/${beatSlots.value.length}`,
+            index: data.segment_index + 1,
+            total: beatSlots.value.length,
+          }
+        },
+        onDowngraded: (data) => {
+          degradedBeats.value.push(data)
+        },
+        onChunk: (chunk) => {
+          streamText.value += chunk
+        },
+        onDone: (result) => {
+          generating.value = false
+          // 后端 PRUNE/audit 阶段在 COMPLETE 之前；COMPLETE 在 onDone，直接转 done
+          finalStats.value = startedAt != null
+            ? { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
+            : result.stats
+          lastDoneMode.value = 'bsadf'
+          stage.value = 'done'
+          beatRunId.value = null  // 幂等清空
+          abortController = null
+          persist()
+        },
+        onError: (err) => {
+          error.value = err
+          generating.value = false
+          stage.value = 'error'
+          abortController = null
+          persist()
+        },
+      },
+      abortController.signal,
+    )
+  }
+
+  /** BS-ADF Track B：作者编辑槽位卡后恢复渲染 */
+  function confirmBeats(chapterId: string, editedSlots: BeatSlot[]) {
+    const runId = beatRunId.value
+    if (!runId) {
+      error.value = '缺少 beat run_id'
+      return
+    }
+    // runId handoff（照搬 confirmRefinery 的技巧）：捕获 → 清空 → 调 API。
+    // 清空 beatSlots 让槽位卡面板消失，进度面板接管展示。
+    beatRunId.value = null
+    beatSlots.value = []
+    generating.value = true
+    stage.value = 'beat_rendering'
+    abortController = new AbortController()
+    streamText.value = ''
+    renderProgress.value = []
+    degradedBeats.value = []
+
+    bsadfApi.confirm(
+      chapterId,
+      { run_id: runId, edited_slots: editedSlots },
+      {
+        onStage: (stageName) => {
+          if (stageName === 'RENDER_RESUMED') stepProgress.value = { label: '逐段渲染' }
+        },
+        onRenderProgress: (data) => {
+          const idx = renderProgress.value.findIndex(p => p.beat_id === data.beat_id)
+          if (idx >= 0) renderProgress.value[idx] = data
+          else renderProgress.value.push(data)
+          stepProgress.value = {
+            label: `渲染 ${data.segment_index + 1}/${editedSlots.length}`,
+            index: data.segment_index + 1,
+            total: editedSlots.length,
+          }
+        },
+        onDowngraded: (data) => {
+          degradedBeats.value.push(data)
+        },
+        onChunk: (chunk) => {
+          streamText.value += chunk
+        },
+        onDone: (result) => {
+          generating.value = false
+          stage.value = 'done'
+          finalStats.value = result.stats
+          lastDoneMode.value = 'bsadf'
+          beatRunId.value = null
+          abortController = null
+          persist()
+        },
+        onError: (err) => {
+          error.value = err
+          generating.value = false
+          stage.value = 'error'
+          abortController = null
+          persist()
+        },
+      },
+      abortController.signal,
+    )
+  }
+
+  /** BS-ADF Track B 取消（回滚到 idle） */
+  function cancelBeat() {
+    beatSlots.value = []
+    beatRunId.value = null
+    renderProgress.value = []
+    degradedBeats.value = []
+    generating.value = false
+    stage.value = 'idle'
+  }
+
   return {
     stage,
     generating,
@@ -724,6 +942,12 @@ export function useGenerationSession(): GenerationSession {
     refinerySurgeries,
     refineryHolisticVerdict,
     refineryStats,
+    // BS-ADF
+    beatSlots,
+    beatRunId,
+    renderProgress,
+    degradedBeats,
+    bsadfTrack,
     isTerminal,
     start,
     cancel,
@@ -731,6 +955,9 @@ export function useGenerationSession(): GenerationSession {
     retry,
     startRefinery,
     confirmRefinery,
+    startBeat,
+    confirmBeats,
+    cancelBeat,
     // 持久化：进入章节时调 loadForChapter 恢复上次产物
     loadForChapter,
     persist,

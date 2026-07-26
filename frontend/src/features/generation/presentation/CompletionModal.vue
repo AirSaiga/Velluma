@@ -12,7 +12,7 @@ import { useFocusTrap } from '../../../composables/useFocusTrap'
 const props = defineProps<{
   show: boolean
   /** 完成来源，决定标题文案 */
-  mode: 'adf' | 'refinery' | null
+  mode: 'adf' | 'refinery' | 'bsadf' | null
   /** 章节标题（展示用） */
   chapterTitle?: string
   /** 后端 stats（word_count / audit_climax_score / final_word_count / operations_executed 等），
@@ -32,7 +32,11 @@ const showRef = computed(() => props.show)
 useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
 
 // ---- 派生展示数据（防御式：字段不存在则该项为 null，模板 v-if 跳过）----
-const title = computed(() => props.mode === 'refinery' ? '精修完成' : '章节生成完成')
+const title = computed(() => {
+  if (props.mode === 'refinery') return '精修完成'
+  if (props.mode === 'bsadf') return '章节生成完成'
+  return '章节生成完成'
+})
 
 /** 字数：ADF 用 word_count，Refinery 用 final_word_count */
 const wordCount = computed(() => {

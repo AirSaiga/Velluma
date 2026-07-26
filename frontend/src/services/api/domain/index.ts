@@ -642,6 +642,75 @@ export interface IssueDecision {
   edited_suggestion?: string
 }
 
+// ============================================================
+// BS-ADF 引擎（Beat-Slot Anchor-Driven Flow）
+// ============================================================
+// 端点（前缀 /api/chapters/{chapter_id}）：
+// - POST /generate-bsadf  Track A 全自动 / Track B 跑到槽位卡暂停
+// - POST /confirm-beats   Track B 作者编辑后恢复渲染
+// - POST /rerender-beat   降级单卡恢复（同步 JSON，非 SSE）
+//
+// SSE 事件序列（设计文档）：
+// - BSADF_STAGE / ADF_STAGE / BEAT_SLOTS_BUILT（Track B 暂停点）/
+//   BEAT_RENDER_PROGRESS / BEAT_DOWNGRADED / TEXT_CHUNK / COMPLETE / ERROR
+
+/** 槽位卡：每一段的写作契约（Track B 作者可编辑） */
+export interface BeatSlot {
+  beat_id: string
+  segment_index: number
+  beat_type: string
+  target_word_count: number
+  anchor_actions: string[]
+  sensory_details: string[]
+  text_carrier: string
+  conflict_trigger: string
+  psych_subtext: string
+  ban_words: string[]
+  sentence_rhythm: string
+  perspective: string
+  emotion_register: string
+  emotion_energy: number
+  landed_preconditions: string[]
+  shot_type: string
+  transition: string
+  status: string
+  edit_count: number
+  render_attempts: number
+  edited: boolean
+}
+
+/** 渲染进度事件：每个 beat 渲染完成时推送 */
+export interface RenderProgress {
+  beat_id: string
+  segment_index: number
+  status: string  // rendering | rendered | degraded
+  word_count: number
+  reason?: string
+}
+
+/** 降级事件：某 beat 多次失败后降级 */
+export interface DegradedBeat {
+  beat_id: string
+  segment_index: number
+  reason: string  // ai_smell | coverage_fail | gate_fail | llm_error
+  attempts: number
+}
+
+/** BS-ADF 生成完成结果 */
+export interface BSAdfCompleteResult {
+  text: string
+  engine: 'bsadf'
+  tier: string
+  reason?: string
+  target_word_count?: number
+  segment_count: number
+  climax_score: number | null
+  audit_verdict: string | null
+  generation_run_id: string
+  stats: Record<string, any>
+  degraded_count: number
+}
+
 export const refineryApi = {
   /**
    * 第一阶段：诊断（SSE）。
@@ -794,6 +863,185 @@ export const refineryApi = {
       if (!hasCompleted) {
         callbacks.onError?.(err.message)
       }
+    })
+  },
+}
+
+// ============================================================
+// BS-ADF 引擎 API（Beat-Slot Anchor-Driven Flow）
+// ============================================================
+// 端点（前缀 /api/chapters/{chapter_id}）：
+// - POST /generate-bsadf  Track A 全自动 / Track B 跑到槽位卡暂停（SSE）
+// - POST /confirm-beats   Track B 作者编辑后恢复渲染（SSE）
+// - POST /rerender-beat   降级单卡恢复（同步 JSON，非 SSE）
+
+export const bsadfApi = {
+  /**
+   * 启动 BS-ADF 生成（SSE）。
+   * - Track A：全自动，跑到底（COMPLETE）。
+   * - Track B：跑到 BEAT_SLOTS_BUILT 暂停，回调 onSlots，前端渲染槽位卡编辑界面。
+   */
+  start: async (
+    chapterId: string,
+    params: {
+      tier?: string
+      track?: 'A' | 'B'
+      target_word_count?: number | null
+      max_segments?: number
+      author_intent?: string
+      expectation_actions?: Record<string, string>
+    },
+    callbacks: {
+      onStage?: (stage: string, data: any) => void
+      onSlots?: (payload: { run_id: string; slots: BeatSlot[] }) => void
+      onRenderProgress?: (data: RenderProgress) => void
+      onDowngraded?: (data: DegradedBeat) => void
+      onChunk?: (chunk: string) => void
+      onDone?: (result: BSAdfCompleteResult) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal,
+  ) => {
+    let hasCompleted = false
+
+    streamSse(`/chapters/${chapterId}/generate-bsadf`, params, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+
+        if (payload.event === 'BSADF_STAGE' || payload.event === 'ADF_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'BEAT_SLOTS_BUILT') {
+          // Track B 暂停触发：槽位卡就绪
+          callbacks.onSlots?.({
+            run_id: payload.run_id,
+            slots: payload.slots || [],
+          })
+        } else if (payload.event === 'BEAT_RENDER_PROGRESS') {
+          callbacks.onRenderProgress?.({
+            beat_id: payload.beat_id,
+            segment_index: payload.segment_index,
+            status: payload.status,
+            word_count: payload.word_count || 0,
+            reason: payload.reason,
+          })
+        } else if (payload.event === 'BEAT_DOWNGRADED') {
+          callbacks.onDowngraded?.({
+            beat_id: payload.beat_id,
+            segment_index: payload.segment_index,
+            reason: payload.reason,
+            attempts: payload.attempts || 0,
+          })
+        } else if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            text: payload.text || '',
+            engine: 'bsadf',
+            tier: payload.tier || 'auto',
+            reason: payload.reason,
+            target_word_count: payload.target_word_count,
+            segment_count: payload.segment_count || 0,
+            climax_score: payload.climax_score ?? null,
+            audit_verdict: payload.audit_verdict ?? null,
+            generation_run_id: payload.generation_run_id || '',
+            stats: payload.stats || {},
+            degraded_count: payload.degraded_count || 0,
+          })
+        }
+      },
+      onDone: () => {
+        if (!hasCompleted) callbacks.onError?.('BS-ADF 生成意外中断')
+      },
+      onError: message => {
+        hasCompleted = true
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      if (!hasCompleted) callbacks.onError?.(err.message)
+    })
+  },
+
+  /**
+   * Track B：作者编辑槽位卡后恢复渲染（SSE）。
+   * 需要 run_id（来自 start 的 BEAT_SLOTS_BUILT）+ edited_slots（作者编辑后的槽位）。
+   */
+  confirm: async (
+    chapterId: string,
+    params: { run_id: string; edited_slots: BeatSlot[] },
+    callbacks: {
+      onStage?: (stage: string, data: any) => void
+      onRenderProgress?: (data: RenderProgress) => void
+      onDowngraded?: (data: DegradedBeat) => void
+      onChunk?: (chunk: string) => void
+      onDone?: (result: BSAdfCompleteResult) => void
+      onError?: (error: string) => void
+    },
+    signal?: AbortSignal,
+  ) => {
+    let hasCompleted = false
+
+    streamSse(`/chapters/${chapterId}/confirm-beats`, params, {
+      onPayload: payload => {
+        if (!payload || !payload.event) return
+
+        if (payload.event === 'BSADF_STAGE') {
+          callbacks.onStage?.(payload.stage, payload)
+        } else if (payload.event === 'BEAT_RENDER_PROGRESS') {
+          callbacks.onRenderProgress?.({
+            beat_id: payload.beat_id,
+            segment_index: payload.segment_index,
+            status: payload.status,
+            word_count: payload.word_count || 0,
+            reason: payload.reason,
+          })
+        } else if (payload.event === 'BEAT_DOWNGRADED') {
+          callbacks.onDowngraded?.({
+            beat_id: payload.beat_id,
+            segment_index: payload.segment_index,
+            reason: payload.reason,
+            attempts: payload.attempts || 0,
+          })
+        } else if (payload.event === 'TEXT_CHUNK' && payload.content) {
+          callbacks.onChunk?.(payload.content)
+        } else if (payload.event === 'COMPLETE') {
+          hasCompleted = true
+          callbacks.onDone?.({
+            text: payload.text || '',
+            engine: 'bsadf',
+            tier: payload.tier || 'auto',
+            segment_count: payload.segment_count || 0,
+            climax_score: payload.climax_score ?? null,
+            audit_verdict: payload.audit_verdict ?? null,
+            generation_run_id: payload.generation_run_id || '',
+            stats: payload.stats || {},
+            degraded_count: payload.degraded_count || 0,
+          })
+        }
+      },
+      onDone: () => {
+        if (!hasCompleted) callbacks.onError?.('BS-ADF 渲染意外中断')
+      },
+      onError: message => {
+        hasCompleted = true
+        callbacks.onError?.(message)
+      },
+    }, signal).catch(err => {
+      if (!hasCompleted) callbacks.onError?.(err.message)
+    })
+  },
+
+  /**
+   * 降级单卡恢复（同步 JSON，非 SSE）。
+   * 重新渲染某张降级 beat，返回新文本 + 状态。
+   */
+  rerenderBeat: async (
+    chapterId: string,
+    params: { beat_id: string; edited_slot: BeatSlot },
+  ): Promise<{ text: string; status: string }> => {
+    return requestJson(`/chapters/${chapterId}/rerender-beat`, {
+      method: 'POST',
+      body: JSON.stringify(params),
     })
   },
 }
