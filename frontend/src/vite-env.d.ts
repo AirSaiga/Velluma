@@ -7,10 +7,7 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
-  send: (channel: string, data: any) => void
-  on: (channel: string, func: (...args: any[]) => void) => void
-  removeListener: (channel: string, func: (...args: any[]) => void) => void
-  /** 触发生成完成的系统通知（Task 6 会收紧为白名单） */
+  /** 触发生成完成的 Windows 系统通知（主进程会判断窗口焦点兜底分层） */
   showCompletionNotification: (payload: { title?: string; body?: string }) => void
 }
 
