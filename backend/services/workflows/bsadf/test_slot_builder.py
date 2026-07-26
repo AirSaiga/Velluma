@@ -226,7 +226,7 @@ class TestEnrichSlots:
         card = self._make_card()
 
         mock_result = MagicMock()
-        mock_result.text = '{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}'
+        mock_result.content = '{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
@@ -258,7 +258,7 @@ class TestEnrichSlots:
         """LLM 返回空列表时，保留种子。"""
         card = self._make_card()
         mock_result = MagicMock()
-        mock_result.text = '{"anchor_actions": [], "sensory_details": []}'
+        mock_result.content = '{"anchor_actions": [], "sensory_details": []}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
@@ -271,7 +271,7 @@ class TestEnrichSlots:
         card = self._make_card()
         long_word = "这" * 21  # 21 字，超限
         mock_result = MagicMock()
-        mock_result.text = f'{{"anchor_actions": ["{long_word}"], "sensory_details": []}}'
+        mock_result.content = f'{{"anchor_actions": ["{long_word}"], "sensory_details": []}}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
@@ -284,7 +284,7 @@ class TestEnrichSlots:
         card = self._make_card()
         card.anchor_actions = ["扳手", "油污"]  # 原有两个
         mock_result = MagicMock()
-        mock_result.text = '{"anchor_actions": ["砸下气动扳手", "扳手"], "sensory_details": []}'
+        mock_result.content = '{"anchor_actions": ["砸下气动扳手", "扳手"], "sensory_details": []}'
         # 注意 LLM 返回里也有"扳手"——去重后应只出现一次
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",

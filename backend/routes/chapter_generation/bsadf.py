@@ -483,7 +483,6 @@ class _BSAdfStreamHandler:
                     "等待作者编辑（AUTHOR_DIALOGUE）",
                     stage="AUTHOR_DIALOGUE",
                     run_id=run_id,
-                    message="请编辑槽位卡后调 /confirm-beats 恢复",
                 )
 
                 logger.info(f"[BS-ADF] Track B 暂停完成 run_id={run_id}，{len(cards)} 张卡待编辑")

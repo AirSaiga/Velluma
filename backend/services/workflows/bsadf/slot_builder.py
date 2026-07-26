@@ -276,7 +276,7 @@ async def enrich_slots(
                     response_format={"type": "json_object"},
                 )
 
-            data = json.loads(result.text)
+            data = json.loads(result.content)
             new_actions = data.get("anchor_actions", [])
             new_sensory = data.get("sensory_details", [])
 
