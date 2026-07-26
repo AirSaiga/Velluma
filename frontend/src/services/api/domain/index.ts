@@ -903,6 +903,7 @@ export const bsadfApi = {
     signal?: AbortSignal,
   ) => {
     let hasCompleted = false
+    let receivedSlots = false  // Track B 暂停标志：收到 BEAT_SLOTS_BUILT 后流关闭是正常的
 
     streamSse(`/chapters/${chapterId}/generate-bsadf`, params, {
       onPayload: payload => {
@@ -912,6 +913,7 @@ export const bsadfApi = {
           callbacks.onStage?.(payload.stage, payload)
         } else if (payload.event === 'BEAT_SLOTS_BUILT') {
           // Track B 暂停触发：槽位卡就绪
+          receivedSlots = true
           callbacks.onSlots?.({
             run_id: payload.run_id,
             slots: payload.slots || [],
@@ -951,7 +953,9 @@ export const bsadfApi = {
         }
       },
       onDone: () => {
-        if (!hasCompleted) callbacks.onError?.('BS-ADF 生成意外中断')
+        // Track B 收到 BEAT_SLOTS_BUILT 后流关闭是正常的暂停，不是错误；
+        // Track A 必须收到 COMPLETE 才算成功
+        if (!hasCompleted && !receivedSlots) callbacks.onError?.('BS-ADF 生成意外中断')
       },
       onError: message => {
         hasCompleted = true
