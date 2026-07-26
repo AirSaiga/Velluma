@@ -500,6 +500,14 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB DEFAULT '{}'",
         "expected_udt_names": {"jsonb"},
     },
+    # BS-ADF：Track B 暂停时持久化全章槽位卡（List[BeatSlotCard] 序列化）
+    # 供刷新后 / /rerender-beat 兜底恢复（内存 _PENDING_BEAT_SLOTS TTL 仅 1 小时）
+    {
+        "table": "chapters",
+        "column": "bsadf_beat_slots",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
 ]
 
 

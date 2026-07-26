@@ -247,6 +247,8 @@ class Chapter(Base):
     selected_plan_type = Column(String(50), nullable=True)
     user_overrides = Column(JSONB, default=dict)
     author_intent = Column(Text, nullable=True)
+    # BS-ADF：Track B 暂停时持久化的全章槽位卡（JSONB），供刷新后 / /rerender-beat 兜底恢复
+    bsadf_beat_slots = Column(JSONB, default=list)
     created_at = Column(DateTime, default=utc_now)
 
     book = relationship("Book", back_populates="chapters")

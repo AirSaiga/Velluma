@@ -56,7 +56,11 @@ from backend.services.workflows.adf.state_tracker import (
     extract_state_card,
     SceneStateCard,
 )
-from backend.services.workflows.adf.types import GenerationResult
+from backend.services.workflows.adf.types import (
+    ChapterClimax,
+    GenerationResult,
+    StoryContext,
+)
 from backend.services.prompts.adf_prompts import (
     format_climax_anchor,
     format_emotion_curve,
@@ -68,6 +72,7 @@ from backend.services.workflows.bsadf.slot_builder import (
 from backend.services.workflows.bsadf.downgrade import render_with_downgrade
 from backend.services.workflows.bsadf.types import (
     beat_slot_to_dict,
+    BeatSlotCard,
     DegradedBeat,
 )
 
@@ -137,6 +142,7 @@ class BSAdfWorkflow:
     async def execute(
         self,
         progress_callback: Optional[Callable[[str, dict], Any]] = None,
+        pause_after_slot_build: bool = False,
     ) -> GenerationResult:
         """执行 BS-ADF 七个 Phase（Phase 4 用槽位化流水线）。
 
@@ -146,6 +152,11 @@ class BSAdfWorkflow:
                 TIER_DECIDED / BSADF_STAGE / BEAT_SLOTS_BUILT /
                 BEAT_RENDER_PROGRESS / BEAT_DOWNGRADED / ADF_PROGRESS /
                 ADF_PRECONDITION_LANDED / ADF_AUDIT / ADF_CONSISTENCY
+            pause_after_slot_build: True 时跑到 Phase 4a 之后、4c 之前返回（Track B
+                作者介入握手）。返回的 result.debug_info 含：
+                paused=True / beat_slots / paused_spine / paused_anchor /
+                paused_tier / paused_target_word_count / paused_max_segments。
+                route 层据此暂存 _PENDING_BEAT_SLOTS，等 /confirm-beats 恢复。
 
         Returns:
             GenerationResult（debug_info 内含 beat_slots / degraded_beats 供 Track B）
@@ -267,6 +278,9 @@ class BSAdfWorkflow:
         target_word_count = user_target_wc or auto_word_count
         max_segments = min(user_max_segments, auto_max_segments)
 
+        # 保存 tier_reason 供 Track B 暂停时重建 tier_decision（resume 不再算档）
+        tier_reason_for_resume = tier_reason
+
         result.tier_decision = {
             "tier": tier,
             "reason": tier_reason,
@@ -313,9 +327,149 @@ class BSAdfWorkflow:
                 "beat_ids": [c.beat_id for c in cards],
             })
 
-            # 4c+4d. 逐段渲染（串行，带降级回退）
-            await _emit("BSADF_STAGE", {"stage": "RENDER"})
+        except Exception as e:
+            logger.exception(f"[BSADF] Phase 4a/4b 槽位构建异常: {e}")
+            result.degraded.append({
+                "phase": "slot_pipeline",
+                "reason": "exception",
+                "detail": str(e)[:200],
+            })
 
+        # 保留槽位卡（无论是否暂停都写）
+        result.debug_info["beat_slots"] = [beat_slot_to_dict(c) for c in cards]
+
+        # ============================================================
+        # Track B 暂停点：Phase 4a 之后、4c 之前
+        # ============================================================
+        if pause_after_slot_build:
+            result.debug_info["paused"] = True
+            # 把 resume_from_slots 所需的上下文塞进 debug_info（route 层据此暂存）
+            result.debug_info["paused_spine"] = spine
+            result.debug_info["paused_anchor"] = anchor
+            result.debug_info["paused_tier"] = tier
+            result.debug_info["paused_target_word_count"] = target_word_count
+            result.debug_info["paused_max_segments"] = max_segments
+            result.distal_anchor = anchor
+            result.spine_track = spine
+            result.tier_decision = {
+                "tier": tier,
+                "reason": tier_reason_for_resume,
+                "climax_score": anchor.climax.intensity,
+                "target_word_count": target_word_count,
+                "max_segments": max_segments,
+            }
+            logger.info(
+                f"[BSADF] Track B 暂停：{len(cards)} 张槽位卡已构建，等待作者编辑后 /confirm-beats 恢复"
+            )
+            return result
+
+        # ============================================================
+        # Phase 4c-7：渲染与后处理（共享方法，resume_from_slots 复用）
+        # ============================================================
+        await self._run_render_and_postprocess(
+            result=result,
+            cards=cards,
+            spine=spine,
+            anchor=anchor,
+            tier=tier,
+            target_word_count=target_word_count,
+            max_segments=max_segments,
+            progress_callback=progress_callback,
+        )
+        return result
+
+    async def resume_from_slots(
+        self,
+        edited_cards: List[BeatSlotCard],
+        spine: "StoryContext",
+        anchor: "ChapterClimax",
+        tier: str,
+        target_word_count: int,
+        max_segments: int,
+        progress_callback: Optional[Callable[[str, dict], Any]] = None,
+    ) -> GenerationResult:
+        """Track B 恢复：从作者编辑后的槽位卡继续 Phase 4c-7。
+
+        与 execute 共享 4c-7 逻辑（_run_render_and_postprocess），跳过 Phase 1-3 + 4a/b
+        （已在前一请求完成，槽位卡由作者编辑后传入）。
+
+        Args:
+            edited_cards: 作者编辑后的全章槽位卡（覆盖服务端暂存的卡）
+            spine: 前一请求（Track B 暂停时）保留的脉络轨
+            anchor: 前一请求保留的远端锚
+            tier: 前一请求的定档
+            target_word_count: 前一请求的目标字数
+            max_segments: 前一请求的最大段数
+            progress_callback: 同 execute
+
+        Returns:
+            GenerationResult（与 execute 跑完全程等价，segments/final_text/audit/degraded 齐全）
+        """
+        result = GenerationResult()
+        result.distal_anchor = anchor
+        result.spine_track = spine
+        result.tier_decision = {
+            "tier": tier,
+            "climax_score": anchor.climax.intensity,
+            "target_word_count": target_word_count,
+            "max_segments": max_segments,
+        }
+        result.debug_info["beat_slots"] = [beat_slot_to_dict(c) for c in edited_cards]
+
+        async def _emit(event: str, data: dict) -> None:
+            if progress_callback:
+                try:
+                    await progress_callback(event, data)
+                except Exception as e:
+                    logger.warning(f"[BSADF] resume progress_callback {event} 失败: {e}")
+
+        await _emit("BSADF_STAGE", {"stage": "RENDER_RESUMED", "count": len(edited_cards)})
+
+        await self._run_render_and_postprocess(
+            result=result,
+            cards=edited_cards,
+            spine=spine,
+            anchor=anchor,
+            tier=tier,
+            target_word_count=target_word_count,
+            max_segments=max_segments,
+            progress_callback=progress_callback,
+        )
+        return result
+
+    async def _run_render_and_postprocess(
+        self,
+        result: GenerationResult,
+        cards: List,
+        spine: "StoryContext",
+        anchor: "ChapterClimax",
+        tier: str,
+        target_word_count: int,
+        max_segments: int,
+        progress_callback: Optional[Callable[[str, dict], Any]] = None,
+    ) -> None:
+        """Phase 4c-7：渲染 + 后处理（execute Track A 与 resume_from_slots Track B 共享）。
+
+        副作用：直接修改传入的 result（填充 segments/final_text/audit/degraded/stats 等）。
+        Phase 4c 异常会记入 result.degraded 但不抛出（与原 execute 一致）。
+        """
+        request = self.request
+        segments: List = []
+        degraded_beats: List[DegradedBeat] = []
+
+        async def _emit(event: str, data: dict) -> None:
+            if progress_callback:
+                try:
+                    await progress_callback(event, data)
+                except Exception as e:
+                    logger.warning(f"[BSADF] progress_callback {event} 失败: {e}")
+
+        # ============================================================
+        # Phase 4c+4d: 逐段渲染（串行，带降级回退）
+        # ============================================================
+        await _emit("BSADF_STAGE", {"stage": "RENDER"})
+
+        try:
             # 预构建渲染所需的共享上下文（每段都用，避免循环内重复构建）
             style_contract = _build_style_contract(self.style_card)
             emotion_curve_text = format_emotion_curve([
@@ -329,12 +483,6 @@ class BSAdfWorkflow:
                 self.entities, self.locations, self.assets, self.canon_context,
             )
             name_registry_block = registry_to_prompt_block(name_registry)
-            knowledge_constraints = _build_knowledge_constraints(
-                self.canon_context,
-                resolve_hidden_constraints(
-                    self.relationships, resolve_characters(self.entities),
-                ),
-            )
             genre = getattr(self.book, "genre", None)
             enable_state_tracker = getattr(request, "enable_state_tracker", True)
 
@@ -396,7 +544,7 @@ class BSAdfWorkflow:
                             f"[BSAdfWorkflow] 状态卡抽取失败（不阻塞）：{e}"
                         )
         except Exception as e:
-            logger.exception(f"[BSADF] Phase 4 槽位化流水线异常: {e}")
+            logger.exception(f"[BSADF] Phase 4c 渲染异常: {e}")
             result.degraded.append({
                 "phase": "slot_pipeline",
                 "reason": "exception",
@@ -414,10 +562,8 @@ class BSAdfWorkflow:
             }
             for db in degraded_beats
         ])
-        final_text = result.final_text
 
-        # 保留槽位卡与降级记录供 Track B（route 层暂停恢复）
-        result.debug_info["beat_slots"] = [beat_slot_to_dict(c) for c in cards]
+        # 降级记录（与槽位卡一同供 Track B / /rerender-beat）
         result.debug_info["degraded_beats"] = [
             {
                 "beat_id": db.beat_id,
@@ -427,6 +573,7 @@ class BSAdfWorkflow:
             for db in degraded_beats
         ]
 
+        final_text = result.final_text
         if not final_text.strip():
             logger.error("[BSADF] Phase 4 产出空正文，跳过审计与精修")
             result.audit.verdict = "fail"
@@ -436,8 +583,10 @@ class BSAdfWorkflow:
                 "word_count": 0,
                 "setup_point_total": len(anchor.preconditions),
                 "setup_point_landed": sum(1 for pc in anchor.preconditions if pc.landed),
+                "slot_count": len(cards),
+                "degraded_beat_count": len(degraded_beats),
             }
-            return result
+            return
 
         # ============================================================
         # Phase 4.5: 去 AI 味剪枝（PRUNE）—— 与 ADF 一致
@@ -651,7 +800,6 @@ class BSAdfWorkflow:
                     enable_edit_verify=getattr(request, "enable_edit_verify", True),
                 )
                 result.final_text = guard.new_text
-                final_text = guard.new_text  # 同步本地变量，统计读它
                 result.stats["consistency"] = {
                     "issues_found": guard.issues_found,
                     "issues_fixed": guard.issues_fixed,
@@ -694,10 +842,9 @@ class BSAdfWorkflow:
         })
 
         logger.info(
-            f"[BSADF] 工作流完成：{result.stats['segment_count']} 段，"
+            f"[BSADF] 渲染+后处理完成：{result.stats['segment_count']} 段，"
             f"{result.stats['word_count']} 字，"
             f"audit={audit.verdict}, "
             f"setup points {result.stats['setup_point_landed']}/{result.stats['setup_point_total']}, "
             f"degraded_beats={len(degraded_beats)}"
         )
-        return result
