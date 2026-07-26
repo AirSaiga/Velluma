@@ -50,6 +50,9 @@ from backend.routes.chapter_generation.adf import router as adf_router
 # V4.1 Refinery 精修流水线路由
 from backend.routes.chapter_generation.refinery import router as refinery_router
 
+# BS-ADF（Beat-Slot Anchor-Driven Flow）引擎路由（ADF 并行引擎，Phase 4 槽位化流水线）
+from backend.routes.chapter_generation.bsadf import router as bsadf_router
+
 # 创建额外的路由（用于节拍预览等）
 extra_router = APIRouter(prefix="/api", tags=["chapter_generation"])
 
@@ -512,6 +515,7 @@ router = APIRouter()
 router.include_router(extra_router)
 router.include_router(adf_router)
 router.include_router(refinery_router)
+router.include_router(bsadf_router)
 
 __all__ = [
     "router",
