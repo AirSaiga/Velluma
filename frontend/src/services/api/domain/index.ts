@@ -916,7 +916,7 @@ export const bsadfApi = {
           receivedSlots = true
           callbacks.onSlots?.({
             run_id: payload.run_id,
-            slots: payload.slots || [],
+            slots: payload.beat_slots || [],
           })
         } else if (payload.event === 'BEAT_RENDER_PROGRESS') {
           callbacks.onRenderProgress?.({
