@@ -90,13 +90,12 @@ const readerFeedback = ref('')
 const loadingFeedback = ref(false)
 
 // 生成完成后自动切到反馈 tab；精修诊断完成切到精修 tab
-// V5：BS-ADF 暂停态（beat_pending）/ 渲染中（beat_rendering）切到节拍 tab
+// V5：BS-ADF 渲染中（beat_rendering）切到节拍 tab 看进度；
+//    beat_pending 不切 tab（Track B 编辑走弹窗，覆盖在当前 tab 之上）
 watch(
   () => session.stage.value,
   (newStage) => {
-    if (newStage === 'beat_pending' && session.beatSlots.value.length > 0) {
-      activeTab.value = 'beats'
-    } else if (newStage === 'beat_rendering') {
+    if (newStage === 'beat_rendering') {
       activeTab.value = 'beats'
     } else if (newStage === 'done') {
       // BS-ADF 完成后停在节拍 tab 看槽位卡预览；ADF/Refinery 完成切到反馈
@@ -401,6 +400,14 @@ function handleDismissInflight(idx: number) {
         @skip="handlePlanSkip"
         @cancel="handlePlanCancel"
       />
+      <!-- V5 BS-ADF：Track B 槽位卡编辑弹窗（stage=beat_pending 时弹出） -->
+      <BeatSlotPanel
+        v-if="session.stage.value === 'beat_pending' && session.beatSlots.value.length > 0 && session.beatRunId.value"
+        :slots="session.beatSlots.value"
+        :run-id="session.beatRunId.value"
+        @confirm="handleBeatConfirm"
+        @cancel="handleBeatCancel"
+      />
       <!-- 本章 tab -->
       <!-- ====== 规划 tab：定档 + 生成 + 介入点 1 ====== -->
       <div v-if="activeTab === 'plan'" class="panel plan-panel">
@@ -669,21 +676,12 @@ function handleDismissInflight(idx: number) {
         </template>
       </div>
 
-      <!-- ====== 节拍 tab：BS-ADF Track B 编辑 / 渲染进度 / Track A 预览 ====== -->
+      <!-- ====== 节拍 tab：BS-ADF 渲染进度 / Track A 预览（Track B 编辑走弹窗，见 tab-content 顶层）====== -->
       <div v-else-if="activeTab === 'beats'" class="panel beats-panel">
         <div v-if="!selectedChapter" class="empty">
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- Track B 暂停态：槽位卡编辑面板 -->
-          <BeatSlotPanel
-            v-if="session.stage.value === 'beat_pending' && session.beatSlots.value.length > 0 && session.beatRunId.value"
-            :slots="session.beatSlots.value"
-            :run-id="session.beatRunId.value"
-            @confirm="handleBeatConfirm"
-            @cancel="handleBeatCancel"
-          />
-
           <!-- 渲染进度（Track A 全程 + Track B confirm 后） -->
           <BeatProgress
             v-else-if="(session.stage.value === 'beat_rendering' || session.stage.value === 'tier_classifying') && (session.renderProgress.value.length > 0 || session.generating.value) && session.bsadfTrack.value"

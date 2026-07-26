@@ -52,107 +52,101 @@ function handleConfirm() {
 </script>
 
 <template>
-  <div class="beat-slot-panel">
-    <header class="header">
-      <h3>槽位卡（Track B 介入）</h3>
-      <p class="stats">
-        共 {{ editedSlots.length }} 段 · 约 {{ totalWords }} 字 · 已编辑 {{ editedCount }} 段
-      </p>
-    </header>
+  <div class="modal-overlay" @click.self="emit('cancel')">
+    <div class="modal-card">
+      <header class="modal-header">
+        <div>
+          <h2>槽位卡（Track B 介入）</h2>
+          <p class="stats">
+            共 {{ editedSlots.length }} 段 · 约 {{ totalWords }} 字 · 已编辑 {{ editedCount }} 段
+          </p>
+        </div>
+        <button class="close-btn" @click="emit('cancel')" title="取消（回滚）">×</button>
+      </header>
 
-    <p class="intro">
-      系统已为每段生成写作契约（锚点动作 / 感官细节 / 文本载体 / 冲突触发 / 心理潜台词 / 禁用词）。
-      你可以直接修改，确认后按段顺序渲染。不改也可以直接确认。
-    </p>
+      <div class="modal-body">
+        <p class="intro">
+          系统已为每段生成写作契约（锚点动作 / 感官细节 / 文本载体 / 冲突触发 / 心理潜台词 / 禁用词）。
+          你可以直接修改，确认后按段顺序渲染。不改也可以直接确认。
+        </p>
 
-    <div class="slot-list">
-      <BeatSlotCardView
-        v-for="slot in editedSlots"
-        :key="slot.beat_id"
-        :slot="slot"
-        @edit="onSlotEdit"
-      />
+        <div class="slot-list">
+          <BeatSlotCardView
+            v-for="slot in editedSlots"
+            :key="slot.beat_id"
+            :slot="slot"
+            @edit="onSlotEdit"
+          />
+        </div>
+      </div>
+
+      <footer class="modal-footer">
+        <button class="btn-secondary" @click="emit('cancel')">取消（回滚）</button>
+        <button class="btn-primary" @click="handleConfirm">
+          确认并渲染（{{ editedSlots.length }} 段<span v-if="editedCount"> · {{ editedCount }} 处修改</span>）
+        </button>
+      </footer>
     </div>
-
-    <footer class="footer">
-      <button class="btn-secondary" @click="emit('cancel')">取消（回滚）</button>
-      <button class="btn-primary" @click="handleConfirm">
-        确认并渲染（{{ editedSlots.length }} 段<span v-if="editedCount"> · {{ editedCount }} 处修改</span>）
-      </button>
-    </footer>
   </div>
 </template>
 
 <style scoped>
-.beat-slot-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-primary);
-  padding: 1rem;
-  overflow: hidden;
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  backdrop-filter: blur(2px);
 }
-.header {
-  margin-bottom: 0.5rem;
+.modal-card {
+  background: var(--bg-primary); border-radius: 0.5rem;
+  width: 92%; max-width: 720px; max-height: 88vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
 }
-.header h3 {
-  font-size: 1rem;
-  margin: 0 0 0.25rem;
+.modal-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-color);
+}
+.modal-header h2 {
+  font-size: 1rem; margin: 0 0 0.25rem;
 }
 .stats {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin: 0;
+  font-size: 0.75rem; color: var(--text-muted); margin: 0;
+}
+.close-btn {
+  background: transparent; border: none; font-size: 1.5rem;
+  cursor: pointer; color: var(--text-muted); line-height: 1;
+  padding: 0; margin-left: 0.5rem;
+}
+.close-btn:hover { color: var(--text-primary); }
+
+.modal-body {
+  padding: 1rem 1.25rem; overflow-y: auto; flex: 1;
 }
 .intro {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.625rem;
-  background: var(--bg-secondary);
-  border-radius: 0.375rem;
+  font-size: 0.75rem; color: var(--text-secondary); line-height: 1.6;
+  margin: 0 0 0.75rem; padding: 0.5rem 0.625rem;
+  background: var(--bg-secondary); border-radius: 0.375rem;
   border-left: 3px solid var(--accent-500);
 }
-
 .slot-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-  padding-right: 0.25rem;
+  display: flex; flex-direction: column; gap: 0.625rem;
 }
 
-.footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-color);
-  margin-top: 0.75rem;
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 0.5rem;
+  padding: 0.75rem 1.25rem; border-top: 1px solid var(--border-color);
 }
 .btn-primary, .btn-secondary {
-  padding: 0.5rem 1rem;
-  border-radius: 0.375rem;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  border: 1px solid var(--border-color);
+  padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.8125rem;
+  cursor: pointer; border: 1px solid var(--border-color);
 }
 .btn-primary {
-  background: var(--accent-500);
-  color: white;
-  border-color: var(--accent-500);
+  background: var(--accent-500); color: white; border-color: var(--accent-500);
   box-shadow: 0 2px 8px rgba(124, 106, 173, 0.25);
 }
-.btn-primary:hover {
-  background: var(--accent-600);
-}
+.btn-primary:hover { background: var(--accent-600); }
 .btn-secondary {
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--bg-primary); color: var(--text-primary);
 }
-.btn-secondary:hover {
-  background: var(--hover-bg);
-}
+.btn-secondary:hover { background: var(--hover-bg); }
 </style>
