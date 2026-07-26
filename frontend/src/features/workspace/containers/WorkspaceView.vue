@@ -17,12 +17,16 @@ import 'splitpanes/dist/splitpanes.css'
 import Icon from '../../../components/Icon.vue'
 import ChapterEditor from '../../../components/ChapterEditor.vue'
 import ChapterBadges from '../presentation/ChapterBadges.vue'
+import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
+import ExtractionModal from '../../extraction/containers/ExtractionModal.vue'
 import InspectorPanel from './InspectorPanel.vue'
 import GenerationOverlay from '../../generation/presentation/GenerationOverlay.vue'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
+import CompletionModal from '../../generation/presentation/CompletionModal.vue'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 import type { Chapter } from '../../../types'
 
@@ -31,6 +35,7 @@ const router = useRouter()
 const store = useAppStore()
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
+const { prefs: notifyPrefs } = useNotifyPrefs()
 
 // 解构 ref 供模板使用
 const currentBook = store.currentBook
@@ -52,6 +57,21 @@ const session = useGenerationSession()
 const isGenerating = computed(() =>
   session.generating.value && session.stage.value !== 'idle',
 )
+
+// 保存状态（状态栏显示；实际写库在下方 handleUpdateChapter）
+const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+// 完成弹窗状态
+const completionVisible = ref(false)
+
+// 生成/精修失败：session.error 原先全前端无渲染点，SSE 失败后用户无感知。
+// 这里统一弹 error toast 并清空（stage 保持 'error'，由 Stepper/Overlay 展示失败态与重试入口）
+watch(() => session.error.value, (err) => {
+  if (err) {
+    showToast(err, 'error')
+    session.error.value = null
+  }
+})
 
 // 生成完成时自动把正文写入章节
 watch(() => session.stage.value, (newStage) => {
@@ -101,6 +121,7 @@ watch(selectedChapterId, (newId) => {
 // 章节切换/进入：恢复该章的上次生成产物（localStorage 持久化）
 // immediate=true 确保刷新后首屏即恢复；切章时 loadForChapter 内部会先 persist 旧章
 watch(selectedChapterId, (newId) => {
+  saveStatus.value = 'idle'
   if (newId) {
     session.loadForChapter(newId)
   }
@@ -148,14 +169,142 @@ async function createChapter() {
   }
 }
 
+// Markdown 批量导入章节（复用 import-markdown feature）
+const showImportModal = ref(false)
+function openImportModal() {
+  if (!currentBook.value?.id) {
+    showToast('请先选择书籍', 'warning')
+    return
+  }
+  showImportModal.value = true
+}
+
+// 正文逆向提取（复用 extraction feature）
+const showExtractionModal = ref(false)
+function openExtractionModal() {
+  if (!selectedChapter.value?.id) {
+    showToast('请先选择章节', 'warning')
+    return
+  }
+  showExtractionModal.value = true
+}
+function onExtractionCompleted() {
+  // 刷新章节列表（角色/关联可能已更新）
+  store.loadCurrentBookData()
+}
+
+// 多选删除章节
+const selectMode = ref(false) // 是否处于多选模式
+const checkedIds = ref<Set<string>>(new Set()) // 勾选中的章节 ID
+const batchDeleting = ref(false)
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  if (!selectMode.value) {
+    checkedIds.value.clear()
+    lastCheckedId.value = null
+  }
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  checkedIds.value.clear()
+  lastCheckedId.value = null
+}
+
+// 上次勾选的章节 ID（用于 Shift+点击范围选择）
+const lastCheckedId = ref<string | null>(null)
+
+/** 单击章节行的处理（随模式切换行为） */
+function handleChapterClick(ch: Chapter, event: MouseEvent | KeyboardEvent) {
+  if (selectMode.value) {
+    toggleCheck(ch.id, event.shiftKey)
+  } else {
+    store.selectChapter(ch.id)
+  }
+}
+
+/** 切换某章的勾选状态；Shift+点击时区间勾选 */
+function toggleCheck(id: string, shiftKey: boolean) {
+  const ids = sortedChapters.value.map((c) => c.id)
+  if (shiftKey && lastCheckedId.value && lastCheckedId.value !== id) {
+    // 范围选择：从上次到当前，全部置为「选中」
+    const from = ids.indexOf(lastCheckedId.value)
+    const to = ids.indexOf(id)
+    if (from !== -1 && to !== -1) {
+      const [lo, hi] = from < to ? [from, to] : [to, from]
+      for (let i = lo; i <= hi; i++) {
+        checkedIds.value.add(ids[i])
+      }
+      // 触发响应式更新（Set mutation 需重新赋值）
+      checkedIds.value = new Set(checkedIds.value)
+      return
+    }
+  }
+  // 普通切换
+  const next = new Set(checkedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  checkedIds.value = next
+  lastCheckedId.value = id
+}
+
+/** 全选 / 取消全选 */
+const allChecked = computed(
+  () => sortedChapters.value.length > 0 && checkedIds.value.size === sortedChapters.value.length,
+)
+function toggleCheckAll() {
+  if (allChecked.value) {
+    checkedIds.value = new Set()
+    lastCheckedId.value = null
+  } else {
+    checkedIds.value = new Set(sortedChapters.value.map((c) => c.id))
+    lastCheckedId.value = null
+  }
+}
+
+/** 批量删除已勾选章节 */
+async function batchDeleteChapters() {
+  const ids = [...checkedIds.value]
+  if (ids.length === 0) return
+  const ok = await showConfirm({
+    title: '批量删除章节',
+    message: `确定删除选中的 ${ids.length} 个章节吗？`,
+    warning: '章节正文、节拍与铺垫结构将一并删除，不可恢复。',
+  })
+  if (!ok) return
+  batchDeleting.value = true
+  let okCount = 0
+  let failCount = 0
+  // 串行删除，避免后端竞态
+  for (const id of ids) {
+    try {
+      await store.deleteChapter(id)
+      okCount++
+    } catch {
+      failCount++
+    }
+  }
+  batchDeleting.value = false
+  if (failCount === 0) {
+    showToast(`已删除 ${okCount} 章`, 'success')
+  } else {
+    showToast(`删除 ${okCount} 章成功，${failCount} 章失败`, 'warning')
+  }
+  exitSelectMode()
+}
+
 function backToLibrary() {
   router.push({ name: 'library' })
 }
 
 async function handleUpdateChapter(id: string, updates: Record<string, unknown>) {
+  saveStatus.value = 'saving'
   try {
     await store.updateChapter(id, updates as any)
+    saveStatus.value = 'saved'
   } catch (e: any) {
+    saveStatus.value = 'error'
     showToast('保存失败：' + e.message, 'error')
   }
 }
@@ -164,12 +313,24 @@ function handleRefreshCharacters() {
   store.refreshCharacters()
 }
 
-// 生成完成：把正文灌入编辑器（通过 chapterEditorRef）
+// 生成完成：把正文灌入编辑器（通过 chapterEditorRef）+ 弹完成弹窗
 async function handleGenerated(text: string) {
   if (selectedChapter.value && text) {
     try {
       await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
       showToast('已生成并写入章节', 'success')
+      // 应用内完成弹窗（受通知偏好开关控制）
+      if (notifyPrefs.value.inApp) {
+        completionVisible.value = true
+      }
+      // 系统通知（受开关控制；主进程会再次判断窗口焦点兜底分层）
+      if (notifyPrefs.value.system && window.electronAPI) {
+        const isRefinery = session.lastDoneMode.value === 'refinery'
+        window.electronAPI.showCompletionNotification({
+          title: isRefinery ? '精修完成' : '章节生成完成',
+          body: `《${selectedChapter.value.title || selectedChapter.value.chapter_name || '未命名'}》已就绪`,
+        })
+      }
     } catch (e: any) {
       showToast('写入失败：' + e.message, 'error')
     }
@@ -214,6 +375,22 @@ async function confirmDeleteChapter(ch: Chapter) {
             <span class="binder-title" :title="currentBook?.title">{{
               currentBook?.title || '未选择书籍'
             }}</span>
+            <button
+              class="icon-btn select-toggle"
+              :class="{ active: selectMode }"
+              :title="selectMode ? '退出多选' : '多选删除'"
+              @click="toggleSelectMode"
+            >
+              <Icon name="check-badge" :size="15" />
+            </button>
+          </div>
+
+          <!-- 多选模式：全选栏 -->
+          <div v-if="selectMode && !loading" class="select-all-bar" @click="toggleCheckAll">
+            <span class="select-checkbox" :class="{ checked: allChecked }">
+              <Icon v-if="allChecked" name="check" :size="12" />
+            </span>
+            <span class="select-all-label">全选（{{ checkedIds.size }}/{{ sortedChapters.length }}）</span>
           </div>
 
           <div v-if="loading" class="binder-loading">加载中…</div>
@@ -222,16 +399,21 @@ async function confirmDeleteChapter(ch: Chapter) {
               v-for="ch in sortedChapters"
               :key="ch.id"
               class="chapter-item"
-              :class="{ active: ch.id === selectedChapterId }"
+              :class="{ active: !selectMode && ch.id === selectedChapterId, checked: selectMode && checkedIds.has(ch.id) }"
               role="button"
               tabindex="0"
-              @click="store.selectChapter(ch.id)"
-              @keydown.enter="store.selectChapter(ch.id)"
+              @click="handleChapterClick(ch, $event)"
+              @keydown.enter="handleChapterClick(ch, $event)"
             >
+              <!-- 多选模式：复选框 -->
+              <span v-if="selectMode" class="select-checkbox" :class="{ checked: checkedIds.has(ch.id) }">
+                <Icon v-if="checkedIds.has(ch.id)" name="check" :size="12" />
+              </span>
               <span class="ch-num">{{ ch.chapter_number }}</span>
               <span class="ch-name">{{ ch.title || ch.chapter_name || '(未命名)' }}</span>
-              <ChapterBadges :chapter="ch" />
+              <ChapterBadges v-if="!selectMode" :chapter="ch" />
               <button
+                v-if="!selectMode"
                 class="ch-delete"
                 title="删除章节"
                 @click.stop="confirmDeleteChapter(ch)"
@@ -241,10 +423,43 @@ async function confirmDeleteChapter(ch: Chapter) {
             </div>
           </div>
 
-          <button class="new-chapter-btn" @click="createChapter">
-            <Icon name="plus" :size="14" />
-            <span>新建章节</span>
-          </button>
+          <!-- 多选模式：批量操作栏（替换底部按钮区） -->
+          <div v-if="selectMode" class="batch-actions">
+            <span class="batch-count">已选 {{ checkedIds.size }} 章</span>
+            <div class="batch-btns">
+              <button
+                class="batch-delete-btn"
+                :disabled="checkedIds.size === 0 || batchDeleting"
+                @click="batchDeleteChapters"
+              >
+                <Icon name="trash" :size="14" />
+                <span>{{ batchDeleting ? '删除中…' : '删除选中' }}</span>
+              </button>
+              <button class="batch-cancel-btn" @click="exitSelectMode">
+                <span>取消</span>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="!selectMode" class="binder-actions">
+            <button class="new-chapter-btn" @click="createChapter">
+              <Icon name="plus" :size="14" />
+              <span>新建章节</span>
+            </button>
+            <button class="import-btn" title="从 .md 文件批量导入章节" @click="openImportModal">
+              <Icon name="arrow-up-tray" :size="14" />
+              <span>导入 .md</span>
+            </button>
+            <button
+              class="analyze-btn"
+              title="从当前章节正文逆向提取角色/地点/伏笔等"
+              :disabled="!selectedChapter"
+              @click="openExtractionModal"
+            >
+              <Icon name="sparkles" :size="14" />
+              <span>分析</span>
+            </button>
+          </div>
         </aside>
       </Pane>
 
@@ -262,11 +477,12 @@ async function confirmDeleteChapter(ch: Chapter) {
               @update-chapter="handleUpdateChapter"
               @refresh-characters="handleRefreshCharacters"
             />
-            <!-- 生成覆盖面板：绝对定位遮挡编辑器，显示进度 -->
+            <!-- 生成覆盖面板：绝对定位遮挡编辑器，显示进度；失败态保持展示（含重试/关闭） -->
             <GenerationOverlay
-              v-if="isGenerating"
+              v-if="isGenerating || session.stage.value === 'error'"
               :session="session"
               @cancel="session.cancel"
+              @retry="session.retry"
             />
           </div>
 
@@ -284,8 +500,8 @@ async function confirmDeleteChapter(ch: Chapter) {
           <!-- 状态栏 -->
           <footer v-if="selectedChapter" class="status-bar">
             <span>{{ wordCount }} 字</span>
-            <span v-if="chapterEditorRef?.saveStatus?.value === 'saving'">保存中…</span>
-            <span v-else-if="chapterEditorRef?.saveStatus?.value === 'saved'" class="muted">已保存</span>
+            <span v-if="saveStatus === 'saving'">保存中…</span>
+            <span v-else-if="saveStatus === 'saved'" class="muted">已保存</span>
           </footer>
         </main>
       </Pane>
@@ -294,12 +510,30 @@ async function confirmDeleteChapter(ch: Chapter) {
       <Pane :size="splitSizes[2]" :min-size="16" :max-size="40" class="inspector-pane">
         <InspectorPanel
           :external-session="session"
-          @generate="() => {}"
-          @generated="handleGenerated"
           @jump-to-offset="handleJumpToOffset"
         />
       </Pane>
     </Splitpanes>
+
+    <!-- Markdown 批量导入 Modal -->
+    <MarkdownImportModal v-if="showImportModal" @close="showImportModal = false" />
+
+    <!-- 正文逆向提取 Modal -->
+    <ExtractionModal
+      v-if="showExtractionModal && selectedChapter"
+      :chapter-id="selectedChapter.id"
+      @close="showExtractionModal = false"
+      @completed="onExtractionCompleted"
+    />
+
+    <!-- 生成完成弹窗 -->
+    <CompletionModal
+      :show="completionVisible"
+      :mode="session.lastDoneMode.value"
+      :chapter-title="selectedChapter?.title || selectedChapter?.chapter_name"
+      :stats="session.finalStats.value"
+      @close="completionVisible = false"
+    />
   </div>
 </template>
 
@@ -418,6 +652,123 @@ async function confirmDeleteChapter(ch: Chapter) {
   background: var(--hover-bg);
 }
 
+.chapter-item.checked {
+  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.08);
+}
+
+.select-toggle.active {
+  color: var(--accent-500);
+  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.1);
+}
+
+/* 多选：全选栏 */
+.select-all-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.625rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.select-all-bar:hover {
+  background: var(--hover-bg);
+}
+
+.select-all-label {
+  user-select: none;
+}
+
+/* 复选框（全选栏和章节行共用） */
+.select-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--border-color);
+  border-radius: 0.1875rem;
+  background: var(--bg-canvas);
+  color: white;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.select-checkbox.checked {
+  border-color: var(--accent-500);
+  background: var(--accent-500);
+}
+
+/* 多选：批量操作栏 */
+.batch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.batch-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.batch-btns {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.batch-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  flex: 1;
+  padding: 0.4375rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.batch-delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.batch-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.batch-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4375rem 0.75rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.batch-cancel-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
 .ch-num {
   font-size: 0.6875rem;
   color: var(--text-muted);
@@ -471,12 +822,21 @@ async function confirmDeleteChapter(ch: Chapter) {
   font-weight: 500;
 }
 
-.new-chapter-btn {
+.binder-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.375rem;
+  flex-shrink: 0;
+}
+
+.new-chapter-btn,
+.import-btn,
+.analyze-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  margin: 0.375rem;
+  flex: 1;
   padding: 0.4375rem;
   background: transparent;
   border: 1px dashed var(--border-color);
@@ -485,12 +845,26 @@ async function confirmDeleteChapter(ch: Chapter) {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
-  flex-shrink: 0;
 }
 
 .new-chapter-btn:hover {
   border-color: var(--accent-500);
   color: var(--accent-500);
+}
+
+.import-btn:hover {
+  border-color: var(--accent-500);
+  color: var(--accent-500);
+}
+
+.analyze-btn:hover:not(:disabled) {
+  border-color: var(--accent-500);
+  color: var(--accent-500);
+}
+
+.analyze-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 中栏 */

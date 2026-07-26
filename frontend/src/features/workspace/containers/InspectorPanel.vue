@@ -74,11 +74,6 @@ const pendingAuthorIntent = ref('')
 const readerFeedback = ref('')
 const loadingFeedback = ref(false)
 
-// 切章节时重置会话
-watch(selectedChapterId, () => {
-  session.reset()
-})
-
 // 生成完成后自动切到反馈 tab；精修诊断完成切到精修 tab
 watch(
   () => session.stage.value,
@@ -254,15 +249,9 @@ function handleDismissInflight(idx: number) {
 
 // collapse 逻辑已移除（不再收起副驾）
 
-// 生成完成时把正文通知父级（编辑器灌入）
-watch(
-  () => session.streamText.value,
-  (text) => {
-    if (session.stage.value === 'done' && text) {
-      emit('generated', text)
-    }
-  }
-)
+// 注：原"生成完成时把正文通知父级"的 emit('generated') watcher 已删除。
+// WorkspaceView 的 watch(session.stage) 已独立覆盖完成检测（写章节 + 弹窗 + 系统通知），
+// 此处的 emit 路径与之语义重复，会在 done 瞬间双触发 handleGenerated，已移除。
 </script>
 
 <template>
@@ -330,12 +319,13 @@ watch(
             </span>
           </div>
 
-          <!-- 生成进度（生成中时显示） -->
+          <!-- 生成进度（生成中 / 失败时显示，失败含重试入口） -->
           <GenerationStepper
             v-if="session.generating.value || (session.stage.value !== 'idle' && session.stage.value !== 'done')"
             :session="session"
             @cancel="handleCancel"
             @dismiss-inflight="handleDismissInflight"
+            @retry="session.retry"
           />
 
           <!-- 生成主控（未生成 / 完成时显示） -->
@@ -359,7 +349,7 @@ watch(
               />
               <span class="wc-hint">{{ targetWordCount ? '已指定' : '按定档自动' }}</span>
             </div>
-            <button class="btn-generate" @click="startGenerate">
+            <button class="btn-generate" :disabled="session.generating.value" @click="startGenerate">
               <Icon name="sparkles" :size="15" />
               <span>{{ session.stage.value === 'done' ? '重新生成' : '生成本章' }}</span>
             </button>
@@ -459,7 +449,12 @@ watch(
         <template v-else>
           <!-- 介入点 3：读者反馈 -->
           <section class="feedback-section">
-            <button class="btn-refinery secondary" :disabled="loadingFeedback || session.stage.value === 'idle'" @click="handleReaderFeedback">
+            <button
+              class="btn-refinery secondary"
+              :disabled="loadingFeedback || session.stage.value === 'idle'"
+              :title="session.stage.value === 'idle' ? '需先生成或已有章节内容' : 'AI 扮演读者写叙述性感受'"
+              @click="handleReaderFeedback"
+            >
               <Icon name="chat" :size="14" />
               <span>{{ loadingFeedback ? '读者阅读中…' : '获取读者反馈' }}</span>
             </button>
