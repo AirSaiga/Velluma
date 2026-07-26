@@ -254,8 +254,10 @@ async def enrich_slots(
             )
             # 用 recorder.record_call 上下文管理器（与 climax_designer 一致）
             # 注意 max_tokens：creative 槽被禁用时会 fallback 到 reasoning 槽
-            # （如 deepseek-v4-pro），reasoning 模型的推理过程消耗大量 token，
-            # 512 远不够会导致 content 为空。2048 与 reasoning 模型实际需求匹配。
+            # （如 deepseek-v4-pro），reasoning 模型的推理过程消耗大量 token。
+            # 4096 与 climax_designer / de_ai_washer 等同类调用对齐，
+            # 实测 512/2048 在 effort=max 下会因推理耗尽预算导致 content 为空
+            # （finish_reason=length）。
             if recorder is not None:
                 async with recorder.record_call(
                     stage=f"bsadf.enrich.{card.beat_id}",
@@ -266,7 +268,7 @@ async def enrich_slots(
                         user_prompt=user_prompt,
                         model_type="creative",
                         temperature=0.7,
-                        max_tokens=2048,
+                        max_tokens=4096,
                         response_format={"type": "json_object"},
                     )
                     call_ctx.set_result(result)
@@ -276,7 +278,7 @@ async def enrich_slots(
                     user_prompt=user_prompt,
                     model_type="creative",
                     temperature=0.7,
-                    max_tokens=2048,
+                    max_tokens=4096,
                     response_format={"type": "json_object"},
                 )
 
