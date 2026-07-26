@@ -253,6 +253,9 @@ async def enrich_slots(
                 scene_entities=[],
             )
             # 用 recorder.record_call 上下文管理器（与 climax_designer 一致）
+            # 注意 max_tokens：creative 槽被禁用时会 fallback 到 reasoning 槽
+            # （如 deepseek-v4-pro），reasoning 模型的推理过程消耗大量 token，
+            # 512 远不够会导致 content 为空。2048 与 reasoning 模型实际需求匹配。
             if recorder is not None:
                 async with recorder.record_call(
                     stage=f"bsadf.enrich.{card.beat_id}",
@@ -263,7 +266,7 @@ async def enrich_slots(
                         user_prompt=user_prompt,
                         model_type="creative",
                         temperature=0.7,
-                        max_tokens=512,
+                        max_tokens=2048,
                         response_format={"type": "json_object"},
                     )
                     call_ctx.set_result(result)
@@ -273,13 +276,16 @@ async def enrich_slots(
                     user_prompt=user_prompt,
                     model_type="creative",
                     temperature=0.7,
-                    max_tokens=512,
+                    max_tokens=2048,
                     response_format={"type": "json_object"},
                 )
 
             data = _extract_json(result.content)
             if not data:
-                logger.warning(f"[enrich_slots] {card.beat_id} JSON 解析失败（content 非法或为空），保留种子")
+                logger.warning(
+                    f"[enrich_slots] {card.beat_id} JSON 解析失败（content 非法或为空），"
+                    f"finish_reason={getattr(result, 'finish_reason', '?')}，保留种子"
+                )
                 continue
             new_actions = data.get("anchor_actions", [])
             new_sensory = data.get("sensory_details", [])
