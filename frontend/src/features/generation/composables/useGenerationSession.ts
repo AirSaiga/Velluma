@@ -1,13 +1,12 @@
 /**
  * 统一生成会话（V3.1 F3 新建，规格 §11.2）。
  *
- * 职责：统一封装 V3.1（/generate）与 V3.2 ADF（/generate-adf）两条生成链路，
+ * 职责：封装 V3.2 ADF（/generate-adf）生成链路，
  * 外加 V4.1 Refinery 精修（/refinery/diagnose + /refinery/confirm）的两阶段 SSE，
  * 把原始事件流解析为会话状态机供 UI 订阅。
  *
- * 引擎分支（start 方法按 opts.engine 分流）：
- * - 'v3.1'：unifiedApi.streamGenerate，消费 UNIFIED_STAGE/TIER_DECIDED/... 事件
- * - 'v3.2'：adfApi.streamGenerate，消费 ADF_STAGE/ADF_ANCHOR_DESIGNED/... 事件（默认引擎）
+ * 引擎：固定 V3.2 ADF（adfApi.streamGenerate，消费 ADF_STAGE/ADF_ANCHOR_DESIGNED/... 事件）。
+ * V3.1 Unified 引擎后端已剥离（/generate 端点不存在），相关死代码（startUnified 等）已删除。
  *
  * V4.1 Refinery 两阶段（独立于 start，生成完成后调用）：
  * - startRefinery：诊断阶段，产出问题清单后停在 refining 等作者确认
@@ -24,8 +23,8 @@
  * - refineryIssues/surgeries/holisticVerdict：V4.1 精修产物
  * - degraded：降级事件
  */
-import { ref, computed, shallowRef, watch, type Ref, type ComputedRef } from 'vue'
-import { unifiedApi, detonationApi, adfApi, refineryApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision } from '../../../services/api/domain'
+import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { adfApi, refineryApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision } from '../../../services/api/domain'
 
 // ============================================================
 // localStorage 持久化层（按 chapterId 存快照，进入章节即恢复）
@@ -39,7 +38,7 @@ import { unifiedApi, detonationApi, adfApi, refineryApi, type AdfEngine, type Re
 const _STORAGE_PREFIX = 'velluma:gensess:'
 const _SNAPSHOT_VERSION = 1
 
-/** 可序列化的会话快照（ref 值的子集——排除不可序列化的，如 setupGraph 用 shallowRef） */
+/** 可序列化的会话快照（ref 值的子集——排除瞬时态，如 inflightEvents / refineryRunId） */
 interface SessionSnapshot {
   v: number
   chapterId: string
@@ -132,21 +131,6 @@ export interface StepProgress {
   zone?: string
 }
 
-/** 铺垫结构图节点（与后端 SetupNode 对齐） */
-export interface SetupGraphNode {
-  id: string
-  type: 'plant' | 'development' | 'diversion' | 'texture'
-  content: string
-  sets_up: string[]
-  distance_to_climax?: number
-  distance_to_payload?: number
-  assignment?: string
-  question_delays?: string | null
-  restraint_note?: string | null
-  subtext?: string | null
-  zone?: string | null
-}
-
 /** 定档决策 */
 export interface TierDecision {
   tier: 'climax' | 'turn' | 'progress' | 'transition'
@@ -182,18 +166,15 @@ export interface GenerationSession {
   engine: Ref<AdfEngine>
   // 产物
   tierDecision: Ref<TierDecision | null>
-  zones: Ref<Record<string, string[]>>
-  setupGraph: Ref<{ nodes: SetupGraphNode[]; reading_order: string[] }>
-  payloadCandidates: Ref<any[]>
-  payloadText: Ref<string>
   streamText: Ref<string>
   climaxScore: Ref<number | null>
-  sketchBaselines: Ref<any[]>
   inflightEvents: Ref<InflightEvent[]>
   auditFindings: Ref<AuditFinding[]>
   auditVerdict: Ref<string | null>
   degraded: Ref<any[]>
   finalStats: Ref<Record<string, any> | null>
+  /** 最近一次完成来自 ADF 还是 Refinery（弹窗标题用） */
+  lastDoneMode: Ref<'adf' | 'refinery' | null>
   // V3.2 ADF 专用产物
   adfAnchor: Ref<any | null>
   adfPreconditions: Ref<any[]>
@@ -211,6 +192,8 @@ export interface GenerationSession {
   start: (chapterId: string, tier: string, opts?: { targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
   cancel: () => void
   reset: () => void
+  /** 失败重试：再次触发最近一次入口（生成 start / 精修诊断 startRefinery） */
+  retry: () => void
   // V4.1 Refinery 控制
   startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
   confirmRefinery: (chapterId: string, decisions: IssueDecision[], customIssues?: RefineryIssue[]) => void
@@ -227,18 +210,17 @@ export function useGenerationSession(): GenerationSession {
   const engine = ref<AdfEngine>('v3.2')
 
   const tierDecision = ref<TierDecision | null>(null)
-  const zones = ref<Record<string, string[]>>({})
-  const setupGraph = shallowRef<{ nodes: SetupGraphNode[]; reading_order: string[] }>({ nodes: [], reading_order: [] })
-  const payloadCandidates = ref<any[]>([])
-  const payloadText = ref('')
   const streamText = ref('')
   const climaxScore = ref<number | null>(null)
-  const sketchBaselines = ref<any[]>([])
   const inflightEvents = ref<InflightEvent[]>([])
   const auditFindings = ref<AuditFinding[]>([])
   const auditVerdict = ref<string | null>(null)
   const degraded = ref<any[]>([])
   const finalStats = ref<Record<string, any> | null>(null)
+  /** 最近一次完成来自哪条流程（供完成弹窗区分标题） */
+  const lastDoneMode = ref<'adf' | 'refinery' | null>(null)
+  /** 本次生成开始时间戳（ms），onDone 时计算耗时；不持久化（刷新后无法准确恢复） */
+  let startedAt: number | null = null
 
   // V3.2 ADF 专用产物
   const adfAnchor = ref<any | null>(null)
@@ -351,13 +333,8 @@ export function useGenerationSession(): GenerationSession {
     stepProgress.value = null
     engine.value = 'v3.2'
     tierDecision.value = null
-    zones.value = {}
-    setupGraph.value = { nodes: [], reading_order: [] }
-    payloadCandidates.value = []
-    payloadText.value = ''
     streamText.value = ''
     climaxScore.value = null
-    sketchBaselines.value = []
     inflightEvents.value = []
     auditFindings.value = []
     auditVerdict.value = null
@@ -372,39 +349,11 @@ export function useGenerationSession(): GenerationSession {
     refinerySurgeries.value = []
     refineryHolisticVerdict.value = null
     refineryStats.value = null
+    lastDoneMode.value = null
   }
 
-  /** 把 UNIFIED_STAGE 事件映射为写作语言的步骤标签 */
-  function mapStageToLabel(unifiedStage: string): { label: string; sessionStage: SessionStage } {
-    switch (unifiedStage) {
-      case 'CONTEXT_ASSEMBLING':
-        return { label: '准备素材', sessionStage: 'tier_classifying' }
-      case 'PAYLOAD_CANDIDATES':
-        return { label: '构思高潮', sessionStage: 'tier_classifying' }
-      case 'TIER_CLASSIFY':
-        return { label: '确定篇幅', sessionStage: 'tier_classifying' }
-      case 'SETUP_GROW':
-        return { label: '规划铺垫', sessionStage: 'setup_growing' }
-      case 'CLIMAX_WRITE':
-        return { label: '写高潮段', sessionStage: 'climax_writing' }
-      case 'ZONE_WRITE':
-        return { label: '写正文', sessionStage: 'zone_writing' }
-      case 'SKETCH_BASELINE':
-        return { label: '速写对照', sessionStage: 'zone_writing' }
-      case 'ASSEMBLING':
-        return { label: '拼接全文', sessionStage: 'assembling' }
-      case 'GRAPH_AUDIT':
-        return { label: '结构检查', sessionStage: 'auditing' }
-      case 'ANCHORED_AUDIT':
-        return { label: '通读检查', sessionStage: 'auditing' }
-      case 'CLIMAX_REWRITE':
-        return { label: '重写高潮段', sessionStage: 'refining' }
-      case 'REFINING':
-        return { label: '润色', sessionStage: 'refining' }
-      default:
-        return { label: unifiedStage, sessionStage: stage.value }
-    }
-  }
+  /** 最近一次入口（供失败重试 retry 再次触发）；start / startRefinery 时记录 */
+  let lastAction: (() => void) | null = null
 
   function start(
     chapterId: string,
@@ -412,6 +361,8 @@ export function useGenerationSession(): GenerationSession {
     opts: { targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> } = {},
   ) {
     if (generating.value) return
+    // 记录入口供失败后 retry（重试即再次触发同入口）
+    lastAction = () => start(chapterId, tier, opts)
     // 绑定章节 + 清旧快照（这是全新生成，旧产物作废）
     currentChapterId = chapterId
     _clearSnapshot(chapterId)
@@ -419,6 +370,7 @@ export function useGenerationSession(): GenerationSession {
     generating.value = true
     stage.value = 'tier_classifying'
     abortController = new AbortController()
+    startedAt = Date.now()  // 记录开始时间供 onDone 计算耗时
 
     // 固定使用 V3.2 ADF 引擎（锚点驱动流）
     engine.value = 'v3.2'
@@ -426,94 +378,6 @@ export function useGenerationSession(): GenerationSession {
       chapterId, tier,
       opts.targetWordCount ?? null, opts.maxSegments ?? 6,
       opts.authorIntent, opts.expectationActions,
-    )
-  }
-
-  /** V3.1 引擎：调 unifiedApi.streamGenerate（已不在 UI 暴露，保留供调试/回退） */
-  function startUnified(chapterId: string, tier: string) {
-    unifiedApi.streamGenerate(
-      chapterId,
-      { tier: tier as any, payload_count: 3 },
-      {
-        onTierDecided: (decision) => {
-          tierDecision.value = decision
-          stage.value = 'tier_decided'
-          stepProgress.value = { label: `篇幅：${tierLabel(decision.tier)}` }
-        },
-        onStage: (unifiedStage) => {
-          const { label, sessionStage } = mapStageToLabel(unifiedStage)
-          stage.value = sessionStage
-          stepProgress.value = { label }
-        },
-        onZoneProgress: (index, total, data) => {
-          const zone = data.zone
-          const zoneLabel = zone === 'development' ? '展开段' : zone === 'buildup' ? '铺垫段' : '写作'
-          stepProgress.value = { label: zoneLabel, index, total, zone }
-        },
-        onSketchBaseline: (result) => {
-          sketchBaselines.value.push(result)
-        },
-        onInflightRegulation: (ev) => {
-          inflightEvents.value.push(ev)
-        },
-        onMergeSuggestion: (suggestion) => {
-          inflightEvents.value.push({ type: 'merge_suggestion', ...suggestion })
-        },
-        onEvent: (event, data) => {
-          // 兜底处理一些未单独映射的事件
-          if (event === 'PAYLOAD_CANDIDATES' && Array.isArray(data.candidates)) {
-            payloadCandidates.value = data.candidates
-          } else if (event === 'ZONE_ASSIGNED' && data.zones) {
-            zones.value = data.zones
-          } else if (event === 'UNIFIED_METRIC' && data.metrics) {
-            const m = data.metrics
-            if (m.stats?.setup_node_count != null) {
-              // 从 metric 提取 setupGraph（metric 里含 graph_audit 但不含完整 nodes）
-              // 实际 nodes 在 COMPLETE 的 stats 里也没有——需要从 chain 拉取，F3 简化：暂留空
-            }
-            if (m.anchored_audit?.detonation_score != null) {
-              climaxScore.value = m.anchored_audit.detonation_score
-            }
-            if (m.anchored_audit?.verdict) {
-              auditVerdict.value = m.anchored_audit.verdict
-            }
-            if (Array.isArray(m.anchored_audit?.findings)) {
-              auditFindings.value = m.anchored_audit.findings
-            }
-            if (Array.isArray(m.sketch_baselines)) {
-              // 已通过 onSketchBaseline 累积，这里不重复
-            }
-          } else if (event === 'DEGRADED') {
-            degraded.value.push({
-              reason: data.reason,
-              action: data.action,
-              detail: data.detail,
-            })
-          } else if (event === 'FINAL_TEXT_STREAM') {
-            stepProgress.value = { label: '输出正文' }
-          }
-        },
-        onChunk: (chunk) => {
-          streamText.value += chunk
-        },
-        onDone: (result) => {
-          generating.value = false
-          stage.value = 'done'
-          finalStats.value = result.stats || null
-          if (result.zones) zones.value = result.zones
-          if (result.climax_check_score != null) climaxScore.value = result.climax_check_score
-          abortController = null
-          // 生成完成后从 chain 补拉完整节点（SSE COMPLETE 不含 nodes，结构 tab 需要展示）
-          fetchSetupGraphFromChain(chapterId)
-        },
-        onError: (err) => {
-          error.value = err
-          generating.value = false
-          stage.value = 'error'
-          abortController = null
-        },
-      },
-      abortController.signal
     )
   }
 
@@ -573,12 +437,7 @@ export function useGenerationSession(): GenerationSession {
             zone: 'forward_flow',
           }
         },
-        onPreconditionLanded: (data) => {
-          inflightEvents.value.push({
-            type: 'precondition_landed',
-            ...data,
-          })
-        },
+        // ADF_PRECONDITION_LANDED 事件不再推入 inflightEvents（用户不需要该提示卡片）
         onAudit: (audit) => {
           adfAudit.value = audit
           auditVerdict.value = audit.verdict
@@ -626,7 +485,12 @@ export function useGenerationSession(): GenerationSession {
           generating.value = false
           stage.value = 'done'
           finalStats.value = result.stats || null
+          if (startedAt != null) {
+            // 把耗时塞进 stats 供弹窗读取（后端 stats 无此字段，纯前端计时）
+            finalStats.value = { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
+          }
           if (result.climax_score != null) climaxScore.value = result.climax_score
+          lastDoneMode.value = 'adf'
           abortController = null
           persist()  // 生成完成：持久化全部产物
         },
@@ -673,27 +537,14 @@ export function useGenerationSession(): GenerationSession {
     }
     generating.value = false
     stage.value = 'idle'
+    error.value = null // 清空残留错误（取消/关闭即用户主动放弃）
   }
 
-  /**
-   * 生成完成后从 detonation chain 补拉铺垫结构图节点（V3.1 F4/F3 修正）。
-   * SSE COMPLETE 事件不含完整 nodes，结构 tab 需要 → 调 detonationApi.getChain。
-   * 失败静默（结构 tab 显示空态，不影响主流程）。
-   */
-  async function fetchSetupGraphFromChain(chapterId: string) {
-    try {
-      const chain = await detonationApi.getChain(chapterId)
-      if (chain && Array.isArray(chain.nodes)) {
-        setupGraph.value = {
-          nodes: chain.nodes as SetupGraphNode[],
-          reading_order: chain.reading_order || [],
-        }
-        if (chain.zones) zones.value = chain.zones
-      }
-    } catch (e) {
-      // 静默：结构 tab 会显示空态引导
-      console.warn('[GenerationSession] fetchSetupGraphFromChain failed:', e)
-    }
+  /** 失败重试：再次触发最近一次入口（start / startRefinery 已记录 lastAction） */
+  function retry() {
+    if (generating.value) return
+    error.value = null
+    lastAction?.()
   }
 
   function reset() {
@@ -724,6 +575,8 @@ export function useGenerationSession(): GenerationSession {
       return
     }
     // 不 reset，保留已生成的正文（精修是在生成后做的）
+    // 记录入口供失败后 retry（重试即重新诊断）
+    lastAction = () => startRefinery(chapterId, opts)
     generating.value = true
     error.value = null
     stage.value = 'auditing' // 复用 auditing 阶段标识
@@ -768,13 +621,20 @@ export function useGenerationSession(): GenerationSession {
     decisions: IssueDecision[],
     customIssues: RefineryIssue[] = [],
   ) {
-    if (!refineryRunId.value) {
+    const runId = refineryRunId.value
+    if (!runId) {
       error.value = '缺少 refinery run_id'
       return
     }
+    // 立即释放 runId 并清空问题清单：问题清单面板（要求 runId 非空）随之关闭，
+    // 手术进度面板（RefineryProgress，要求 runId===null）接管展示。
+    // 警示：此前整个手术阶段保留 runId，两面板条件互斥导致进度 UI 永不出现。
+    refineryRunId.value = null
+    refineryIssues.value = []
     generating.value = true
     stage.value = 'refining'
     abortController = new AbortController()
+    startedAt = Date.now()  // 精修手术阶段重新计时（诊断等待不算）
     streamText.value = '' // 清空，准备接收抛光后的新正文
     refinerySurgeries.value = []
     refineryHolisticVerdict.value = null
@@ -782,7 +642,7 @@ export function useGenerationSession(): GenerationSession {
     refineryApi.confirm(
       chapterId,
       {
-        run_id: refineryRunId.value,
+        run_id: runId,
         decisions,
         custom_issues: customIssues,
         mode: 'deep',
@@ -816,9 +676,12 @@ export function useGenerationSession(): GenerationSession {
           generating.value = false
           stage.value = 'done'
           refineryStats.value = result.stats
-          finalStats.value = result.stats
-          // ★ 重置 refineryRunId，让"启动精修"按钮可以再次显示
-          // （保留 refinerySurgeries/verdict 供查看历史，只重置触发开关）
+          finalStats.value = startedAt != null
+            ? { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
+            : result.stats
+          lastDoneMode.value = 'refinery'
+          // runId 已在 confirm 开始时释放（进度面板接管），此处幂等确保为空，
+          // 让"启动精修"按钮（要求 stage='done' 且 runId 为空）可以再次显示
           refineryRunId.value = null
           abortController = null
           persist()  // 精修完成：持久化精修产物
@@ -842,18 +705,14 @@ export function useGenerationSession(): GenerationSession {
     stepProgress,
     engine,
     tierDecision,
-    zones,
-    setupGraph,
-    payloadCandidates,
-    payloadText,
     streamText,
     climaxScore,
-    sketchBaselines,
     inflightEvents,
     auditFindings,
     auditVerdict,
     degraded,
     finalStats,
+    lastDoneMode,
     // V3.2 ADF
     adfAnchor,
     adfPreconditions,
@@ -869,6 +728,7 @@ export function useGenerationSession(): GenerationSession {
     start,
     cancel,
     reset,
+    retry,
     startRefinery,
     confirmRefinery,
     // 持久化：进入章节时调 loadForChapter 恢复上次产物
