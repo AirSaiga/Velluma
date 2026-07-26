@@ -178,12 +178,8 @@ export interface RAGSettings {
 export interface GenerationSettings {
   /** 最大迭代次数 */
   maxIterations: number
-  /** 是否启用双轨生成 */
-  enableDualTrack: boolean
   /** 是否跳过轻微问题的精修 */
   skipMinorRefine: boolean
-  /** 是否强制并行起草 */
-  forceParallelProse: boolean
 }
 
 /** 专家设置 */
@@ -331,9 +327,7 @@ export function createDefaultWizardData(): WizardFormData {
       },
       generationConfig: {
         maxIterations: 3,
-        enableDualTrack: false,
-        skipMinorRefine: false,
-        forceParallelProse: false
+        skipMinorRefine: false
       }
     },
     draftStatus: 'idle'

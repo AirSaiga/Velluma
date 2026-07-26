@@ -178,7 +178,7 @@ Velluma/
 │       │
 │       ├── workflows/       # 工作流实现（剥离后：adf/ 包 + refinery/ 在 services/ 顶层 + 共享设施）
 │       │   ├── adf/                   # ★ V3.2 ADF 引擎（当前默认生成引擎，自包含）
-│       │   │   ├── adf_workflow.py    #   ADFWorkflow 主类（7 阶段编排，详见"核心架构"）
+│       │   │   ├── adf_workflow.py    #   ADFWorkflow 主类（Phase 1~7 编排，详见"核心架构"）
 │       │   │   ├── story_context_builder.py  # Phase 1 脉络骨架（纯算法）
 │       │   │   ├── climax_designer.py #   Phase 2 锚点设计（1×reasoning LLM）
 │       │   │   ├── tier_classifier.py #   Phase 3 定档算法（原 detonation 包，随剥离迁入）
@@ -189,6 +189,14 @@ Velluma/
 │       │   │   ├── pruner.py          #   Phase 4.5 重构剪枝（N+1×creative，去 AI 味）
 │       │   │   ├── structure_checker.py # Phase 5 锚点审计（1×reasoning LLM）
 │       │   │   ├── refiner.py         #   Phase 6 条件补埋（0~3×creative）
+│       │   │   ├── name_registry.py   #   Phase 7 专名注册表 + 零LLM漂移回扫（纯算法）
+│       │   │   ├── dedup_guard.py     #   剧情回路护栏（段级相似度 + 全文重复块清除）
+│       │   │   ├── state_tracker.py   #   Agent Loop 1 剧情状态卡（每段 1×小 creative 抽取 + 状态矛盾闸门）
+│       │   │   ├── beat_patcher.py    #   Phase 6.5 大纲节拍覆盖校验 + 定点补写
+│       │   │   ├── consistency_guard.py # Phase 7 一致性守卫（1×reasoning 审计 + 0~3×creative 手术 + 复验回滚）
+│       │   │   ├── test_consistency_guard.py # Phase 7 单测（42 用例）
+│       │   │   ├── test_beat_patcher.py #   Phase 6.5 单测（16 用例）
+│       │   │   ├── test_state_tracker.py #  Loop 1 单测（15 用例）
 │       │   │   └── types.py
 │       │   ├── planning.py            # 节拍拆分 + POV 锚点分配（共享编排层，被 agentic/beat_manager 用）
 │       │   ├── refining.py            # refine_draft/refine_single_beat（服务于 chapter_optimization 路由）
@@ -382,20 +390,22 @@ npm run electron:build    # 打包安装包（electron-builder）
 
 编排主类 `ADFWorkflow` 位于 `backend/services/workflows/adf/adf_workflow.py`，入口路由 `backend/routes/chapter_generation/adf.py`。
 
-**7 阶段序列**（含文档此前遗漏的 PRUNE 阶段）：
+**阶段序列**（Phase 1~7，含 PRUNE 与 CONSISTENCY_GUARD 两个后补阶段）：
 
 1. **CONTEXT_ASSEMBLING**（0 LLM，路由层 `_load_adf_context`）— 组装 chapter/entities/open_hooks/上一章摘要 + Canon 上下文 + 世界观文本。
 2. **SPINE_BUILDING**（0 LLM，`story_context_builder.py`）— 纯算法拆钩子为 must_plant/must_resolve，按"每 12 章一卷"推断卷位。受 `enable_spine` 开关控制。
 3. **ANCHOR_DESIGN**（1×reasoning LLM，`climax_designer.py`）— 设计高潮强度 + 每个钩子的前置条件（Precondition）。Canon/作者意图作为最高约束前置注入。
 4. **TIER_DECIDE**（0 LLM，`tier_decider.py` → `tier_classifier.py`）— 定档 climax/turn/progress/transition，映射到目标字数与段数（climax=5000字/7段，turn=3500/6，progress=2500/5，transition=1500/4）。
-5. **FORWARD_FLOW**（N×creative LLM **串行**，`segment_writer.py`）— 逐段正向写作，每段含情绪采样/条件扫描/镜头景别注入，写完做三道反 AI 味后处理（jieba 抽脂 → AI 味检测超阈值则 LLM 重洗 → 正则裁剪）。写到超目标×1.3 提前终止。
+5. **FORWARD_FLOW**（N×creative LLM **串行**，`segment_writer.py`）— 逐段正向写作，每段含情绪采样/条件扫描/镜头景别注入，写完做三道反 AI 味后处理（jieba 抽脂 → AI 味检测超阈值则 LLM 重洗 → 正则裁剪）。写到超目标×1.3 提前终止。**统一段级闸门（Agent Loop 1）**：每段定稿前跑零 LLM 闸门链（闸门 1 剧情回路=与前段相似度；闸门 2 状态矛盾=与剧情状态卡冲突，仅 `enable_state_tracker` 开启时），任一违规合并 note 重写一次，仍违规弃段记降级。段定稿后抽取剧情状态卡（`state_tracker.py`，每段 1×小 creative，输出在场/死亡离场/角色状态/物品/进展 JSON，注入下一段硬约束区块；末段不抽）。
 6. **PRUNE**（N+1×creative LLM，`pruner.py`，⚠ 全章无条件触发，无开关）— 逐段重构剪枝（去 AI 味，"重构"而非"润色"路线）+ 整章 OOC 裁判（角色崩坏检测），判崩坏则整章回退未剪枝文本。**此前文档遗漏此阶段，它占 ADF 单章 LLM 调用量近一半。**
 7. **ANCHOR_AUDIT**（1×reasoning LLM，`structure_checker.py`）— 代码级扫必须出现的词 + LLM 5 维审计（铺垫落地/情绪/脉络/高潮验收/文风）取并集。受 `enable_anchor_audit` 开关控制。
 8. **REFINE**（0~3×creative LLM，`refiner.py`）— 条件补埋，仅当 `enable_refinement=True` 且审计判 `needs_refinement` 时触发，挑情绪平淡段内嵌补写漏掉的伏笔。
+8.5. **BEAT_PATCH**（0~2×creative LLM，`beat_patcher.py`）— 大纲节拍补写。Phase 5 审计第 6 维逐节拍核对 `outline_text` 覆盖（代码级 jieba 预判仅作 suspect 提示），`status=missing` 且带锚引文的节拍做定点插入补写（150~400 字过渡段，引文锚定位置，伪锚/超长/抄邻段均降级为只上报）。受 `enable_beat_coverage` + `enable_refinement` 开关控制。
+9. **CONSISTENCY_GUARD**（1×reasoning + 0~3×creative LLM，`consistency_guard.py` + `name_registry.py`）— 设定一致性守卫。第 0 步先做全文重复块清除（`dedup_guard.py`，防剧情回路，写作循环内另有段级相似度护栏，重复则重写一次、仍重复降级空段）；再零 LLM 回扫专名漂移/未注册人名（`scan_name_anomalies`，等长替换+≥2 次阈值降误报）；再 1×reasoning 全文审计四类问题（name_drift/knowledge_breach/setting_conflict/state_contradiction，每条必须引 canon_evidence 否则代码侧丢弃）；最后复用 Refinery 手术通道定点修复（上限 3 个 operation，带 must_use_terms/长度/专名三重安全网）。**手术复验（Agent Loop 2，`enable_edit_verify` 开关）**：应用后先代码级查手术是否引入重复（命中直接回滚），再 1×reasoning 复验改动段±邻段（`adf.edit_verify`），判引入新问题的手术从原始段落重 apply 时剔除（回滚即终态不再修；无 problems 描述的 not-ok 视为 ok 防误杀）。受 `enable_consistency_guard` 开关控制（默认开）。写作期（Phase 4）配套零成本防线：每段 user prompt 尾部注入专名表硬约束 + 知识边界否定约束（private/隐藏关系）+ 在场角色提示；关系召回过滤 `is_public=False`（改走隐藏约束）；Canon 第 2 段起保留 public 事实完整行（`segment_writer.py`）。
 
 **SSE 流式**：阶段进度事件实时流出；正文**非实时流**（工作流全部完成后才把 `final_text` 切成 200 字 chunk 输出）。
 
-**阶段开关**（`schemas/adf.py` 的 `GenerateADFRequest`）：`enable_spine` / `enable_anchor_audit` / `enable_refinement`。**PRUNE 无开关，永远执行。**
+**阶段开关**（`schemas/adf.py` 的 `GenerateADFRequest`）：`enable_spine` / `enable_anchor_audit` / `enable_refinement` / `enable_consistency_guard` / `enable_beat_coverage` / `enable_state_tracker`（Loop 1 状态卡，+(N-1)×小 creative）/ `enable_edit_verify`（Loop 2 手术复验，+0~1×reasoning）。**PRUNE 无开关，永远执行。**
 
 ### Refinery 精修（V4.1，独立工具）
 
@@ -580,6 +590,7 @@ shared/utils            → 纯函数工具
 LLM、Embedding、代理的实际配置来源是项目根目录的 `model_config.json`（schema 见 `backend/core/model_config.py` 的 docstring）：
 
 - `llm.reasoning` / `llm.creative`：provider、api_key、base_url、model、enabled、effort 等
+- `llm.wash`（可选）：去 AI 味洗涤专用槽（`services/nlg/de_ai_washer.py`），结构同上；缺失或不完整时洗涤回退到 creative 槽
 - `embedding`：api_key、model、dimensions（默认 1536）
 - `proxy`：enabled、url
 

@@ -146,7 +146,7 @@ export const generateApi = {
 // 模型设置（设置面板）
 // ============================================================
 
-/** LLM profile（reasoning / creative），api_key 永远为掩码形式 */
+/** LLM profile（reasoning / creative / wash），api_key 永远为掩码形式 */
 export interface LLMProfileConfig {
   provider: string
   api_key_masked: string
@@ -156,12 +156,15 @@ export interface LLMProfileConfig {
   model: string
   enabled: boolean
   effort: string
+  /** 仅 wash 槽返回：是否已配置独立洗涤模型（false = 跟随创意模型） */
+  configured?: boolean
 }
 
 export interface ModelConfig {
   llm: {
     reasoning: LLMProfileConfig
     creative: LLMProfileConfig
+    wash: LLMProfileConfig
   }
   embedding: {
     api_key_masked: string
@@ -179,6 +182,7 @@ export interface ModelConfig {
 export interface ModelConfigUpdatePayload {
   reasoning?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   creative?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  wash?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   embedding?: { api_key?: string; model?: string; dimensions?: number }
   proxy?: { enabled: boolean; url: string }
 }
@@ -337,142 +341,12 @@ export const qualityReportApi = {
 }
 
 // ============================================================
-// 引爆链链读取（detonationApi）
+// 已剥离：detonationApi / unifiedApi
 // ============================================================
-// V3.0 引爆链 UI 已移除；仅保留 GET /detonation-chain 读取，
-// 供 V3.1 useGenerationSession 在生成完成后补拉铺垫结构图节点。
-
-export const detonationApi = {
-  /** 读取活跃链（V3.1 useGenerationSession 完成后补拉铺垫结构图节点复用）。 */
-  getChain: (chapterId: string) =>
-    requestJson(`/chapters/${chapterId}/detonation-chain`),
-}
-
-// ============================================================
-// V3.1 统一引擎 API（unifiedApi）—— 合并双轨与高潮倒推
-// ============================================================
-// 端点（前缀 /api/chapters/{chapter_id}）：
-// - POST /generate  统一生成（参数 tier: auto|climax|turn|progress|transition，默认 auto）
-//
-// SSE v3 事件序列（规格 §9.1）：
-// - UNIFIED_STAGE / TIER_DECIDED / ZONE_ASSIGNED / ZONE_PROGRESS /
-//   SKETCH_BASELINE / INFLIGHT_REGULATION / MERGE_SUGGESTION /
-//   DEGRADED / TEXT_CHUNK / COMPLETE / ERROR
+// V3.0 Detonation 与 V3.1 Unified 引擎后端已整体剥离，
+// 端点 GET /detonation-chain 与 POST /generate 均不存在，前端死代码一并删除。
 
 export type Tier = 'auto' | 'climax' | 'turn' | 'progress' | 'transition'
-
-export interface TierDecision {
-  tier: 'climax' | 'turn' | 'progress' | 'transition'
-  reason: string
-  climax_score?: number | null
-  chapter_position_signal?: string | null
-  tension_level?: number | null
-  forced_by_user: boolean
-  max_depth: number
-  development_ratio: number
-}
-
-export interface UnifiedCompleteResult {
-  text: string
-  stats: Record<string, any>
-  generation_run_id: string
-  chain_id?: string | null
-  tier?: string | null
-  tier_reason?: string | null
-  zones?: Record<string, string[]>
-  climax_check_score?: number | null
-  graph_audit_verdict?: string | null
-  inflight_event_count?: number
-}
-
-export const unifiedApi = {
-  /**
-   * SSE 统一生成（V3.1）。
-   * tier=auto 时程序自主定档；其余值强制指定档位。
-   */
-  streamGenerate: async (
-    chapterId: string,
-    params: { tier?: Tier; payload_count?: number } | undefined,
-    callbacks: {
-      onEvent?: (event: string, data: any) => void
-      onChunk?: (chunk: string) => void
-      onStage?: (stage: string, data: any) => void
-      onTierDecided?: (decision: TierDecision) => void
-      onZoneProgress?: (index: number, total: number, data: any) => void
-      onSketchBaseline?: (result: any) => void
-      onInflightRegulation?: (event: any) => void
-      onMergeSuggestion?: (suggestion: any) => void
-      onMetric?: (metrics: any) => void
-      onDone?: (result: UnifiedCompleteResult) => void
-      onError?: (error: string) => void
-    },
-    signal?: AbortSignal
-  ) => {
-    let hasCompleted = false
-
-    streamSse(`/chapters/${chapterId}/generate`, params || {}, {
-      onPayload: payload => {
-        if (!payload || !payload.event) return
-        callbacks.onEvent?.(payload.event, payload)
-
-        if (payload.event === 'TEXT_CHUNK' && payload.content) {
-          callbacks.onChunk?.(payload.content)
-        } else if (payload.event === 'UNIFIED_STAGE') {
-          callbacks.onStage?.(payload.stage, payload)
-        } else if (payload.event === 'TIER_DECIDED') {
-          callbacks.onTierDecided?.({
-            tier: payload.tier,
-            reason: payload.reason,
-            climax_score: payload.climax_score,
-            chapter_position_signal: payload.chapter_position_signal,
-            tension_level: payload.tension_level,
-            forced_by_user: payload.forced_by_user,
-            max_depth: payload.max_depth,
-            development_ratio: payload.development_ratio,
-          })
-        } else if (payload.event === 'ZONE_PROGRESS') {
-          callbacks.onZoneProgress?.(payload.segment_index, payload.total_segments, payload)
-        } else if (payload.event === 'SKETCH_BASELINE') {
-          callbacks.onSketchBaseline?.(payload)
-        } else if (payload.event === 'INFLIGHT_REGULATION') {
-          callbacks.onInflightRegulation?.(payload)
-        } else if (payload.event === 'MERGE_SUGGESTION') {
-          callbacks.onMergeSuggestion?.(payload)
-        } else if (payload.event === 'UNIFIED_METRIC') {
-          callbacks.onMetric?.(payload.metrics)
-        } else if (payload.event === 'COMPLETE') {
-          hasCompleted = true
-          callbacks.onDone?.({
-            text: payload.text,
-            stats: payload.stats,
-            generation_run_id: payload.generation_run_id,
-            chain_id: payload.chain_id,
-            tier: payload.tier,
-            tier_reason: payload.tier_reason,
-            zones: payload.zones,
-            climax_check_score: payload.climax_check_score,
-            graph_audit_verdict: payload.graph_audit_verdict,
-            inflight_event_count: payload.inflight_event_count,
-          })
-          return true
-        }
-      },
-      onDone: () => {
-        if (!hasCompleted) {
-          callbacks.onError?.('生成过程意外中断，未收到完成信号')
-        }
-      },
-      onError: message => {
-        hasCompleted = true
-        callbacks.onError?.(message)
-      },
-    }, signal).catch(err => {
-      if (!hasCompleted) {
-        callbacks.onError?.(err.message)
-      }
-    })
-  },
-}
 
 // ============================================================
 // V3.2 ADF（Anchor-Driven Flow）引擎 API（adfApi）

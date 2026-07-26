@@ -9,6 +9,7 @@
  */
 import { ref, computed } from 'vue'
 import type { WorldBuilding, WorldItem, Location, ValidationError } from '../types/wizard.types'
+import { useToast } from '../../../composables/useToast'
 
 // =------------- Props & Emits -------------=
 
@@ -35,6 +36,7 @@ const newRuleTitle = ref('')
 const newRuleContent = ref('')
 const showImportExport = ref(false)
 const importExportText = ref('')
+const { showToast } = useToast()
 
 // =------------- 计算属性 -------------=
 
@@ -101,12 +103,53 @@ function openImportExport() {
 }
 
 function applyImport() {
+  let parsed: any
   try {
-    const parsed = JSON.parse(importExportText.value || '{}')
-    // 这里需要批量更新，暂时简化处理
-    showImportExport.value = false
+    parsed = JSON.parse(importExportText.value || '{}')
   } catch {
-    console.error('导入内容不是合法 JSON')
+    showToast('导入内容不是合法 JSON，请检查后重试', 'error')
+    return
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    showToast('导入内容应为包含 background / locations / rules 的对象', 'warning')
+    return
+  }
+
+  let count = 0
+  const importWorldItems = (type: 'background' | 'rules', list: any) => {
+    if (!Array.isArray(list)) return
+    for (const item of list) {
+      if (!item?.title) continue
+      emit('add-world-item', type, {
+        id: typeof item.id === 'string' && item.id ? item.id : generateId(),
+        title: String(item.title),
+        content: typeof item.content === 'string' ? item.content : '',
+        collapsed: !!item.collapsed
+      })
+      count++
+    }
+  }
+  importWorldItems('background', parsed.background)
+  importWorldItems('rules', parsed.rules)
+
+  if (Array.isArray(parsed.locations)) {
+    for (const loc of parsed.locations) {
+      if (!loc?.name) continue
+      emit('add-location', {
+        id: typeof loc.id === 'string' && loc.id ? loc.id : generateId(),
+        name: String(loc.name),
+        description: typeof loc.description === 'string' ? loc.description : '',
+        tags: Array.isArray(loc.tags) ? loc.tags : []
+      })
+      count++
+    }
+  }
+
+  showImportExport.value = false
+  if (count > 0) {
+    showToast(`已导入 ${count} 条世界观设定`, 'success')
+  } else {
+    showToast('未识别到可导入的条目', 'warning')
   }
 }
 </script>

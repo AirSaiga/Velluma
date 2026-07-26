@@ -6,7 +6,7 @@
  * - 配置模型选择
  * - 配置推理模式
  * - 配置 RAG 记忆检索参数
- * - 配置双轨生成和迭代参数
+ * - 配置生成迭代参数
  */
 import { ref, computed } from 'vue'
 import type { 
@@ -426,27 +426,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               </p>
             </div>
             
-            <!-- 双轨生成 -->
-            <div class="flex items-center justify-between p-3 bg-[var(--bg-panel)]/50 rounded-xl">
-              <div>
-                <label class="text-sm font-medium text-[var(--text-primary)]">启用双轨生成</label>
-                <p class="text-xs text-[var(--text-muted)]">并行生成 + 连贯性校验</p>
-              </div>
-              <button
-                @click="updateGenerationConfig({ enableDualTrack: !settings.generationConfig.enableDualTrack })"
-                :class="[
-                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                  settings.generationConfig.enableDualTrack ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
-                ]"
-              >
-                <span
-                  :class="[
-                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                    settings.generationConfig.enableDualTrack ? 'translate-x-5' : 'translate-x-1'
-                  ]"
-                />
-              </button>
-            </div>
+            <!-- 双轨生成开关已删除：DualTrack 引擎已废弃并从后端剥离 -->
             
             <!-- 跳过轻微问题 -->
             <div class="flex items-center justify-between p-3 bg-[var(--bg-panel)]/50 rounded-xl">
@@ -470,27 +450,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               </button>
             </div>
             
-            <!-- 强制并行起草 -->
-            <div class="flex items-center justify-between p-3 bg-[var(--bg-panel)]/50 rounded-xl">
-              <div>
-                <label class="text-sm font-medium text-[var(--text-primary)]">强制并行起草</label>
-                <p class="text-xs text-[var(--text-muted)]">多个节拍同时起草（可能影响连贯性）</p>
-              </div>
-              <button
-                @click="updateGenerationConfig({ forceParallelProse: !settings.generationConfig.forceParallelProse })"
-                :class="[
-                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                  settings.generationConfig.forceParallelProse ? 'bg-accent-500' : 'bg-[var(--bg-tertiary)]'
-                ]"
-              >
-                <span
-                  :class="[
-                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                    settings.generationConfig.forceParallelProse ? 'translate-x-5' : 'translate-x-1'
-                  ]"
-                />
-              </button>
-            </div>
+            <!-- 强制并行起草开关已删除：对应已废弃的 DualTrack 引擎 -->
             
           </div>
         </Transition>

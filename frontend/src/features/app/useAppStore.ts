@@ -47,7 +47,8 @@ export interface AppStore {
   selectChapter: (chapterId: string | null) => void
   // 书籍管理
   createBook: (data: Partial<Book>) => Promise<Book | undefined>
-  updateBook: (data: Partial<Book>) => Promise<Book | undefined>
+  /** 按指定 id 更新书籍；若 id 为当前书则同步当前书状态 */
+  updateBook: (bookId: string, data: Partial<Book>) => Promise<Book | undefined>
   deleteBook: (bookId: string) => Promise<void>
   // 章节管理
   createChapter: (data: Partial<Chapter>) => Promise<Chapter | undefined>
@@ -189,11 +190,12 @@ function createAppStore(): AppStore {
     }
   }
 
-  async function updateBook(data: Partial<Book>) {
-    if (!currentBookId.value) return
+  async function updateBook(bookId: string, data: Partial<Book>) {
+    if (!bookId) return
     try {
-      const updated = await bookApi.update(currentBookId.value, data)
-      const idx = books.value.findIndex((b) => b.id === currentBookId.value)
+      const updated = await bookApi.update(bookId, data)
+      // currentBook 由 books 派生，更新列表项即同步当前书状态
+      const idx = books.value.findIndex((b) => b.id === bookId)
       if (idx !== -1) books.value[idx] = updated
       return updated
     } catch (error) {

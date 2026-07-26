@@ -82,8 +82,12 @@ export default defineConfig({
             }
           })
           proxy.on('proxyReq', (proxyReq, req, res) => {
-            // 添加请求超时处理
-            proxyReq.setTimeout(30000, () => {
+            // SSE 长连接端点（生成/精修流式输出）不设超时，避免长流被代理掐断
+            const url = req.url || ''
+            const isSse = url.includes('generate') || url.includes('refinery')
+            if (isSse) return
+            // 普通请求添加超时处理
+            proxyReq.setTimeout(120000, () => {
               console.log('[Vite Proxy] Request timeout')
               proxyReq.destroy()
             })

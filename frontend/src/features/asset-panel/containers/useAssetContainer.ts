@@ -1,9 +1,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { assetApi } from '../../../services/api'
 import type { Asset } from '../../../shared/types'
-import { showConfirm, showToast } from '../../../shared/utils/toast'
+import { useToast } from '../../../composables/useToast'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 
 export function useAssetContainer(props: { bookId?: string }) {
+  const { showToast } = useToast()
+  const { show: showConfirm } = useConfirmDialog()
   const assets = ref<Asset[]>([])
   const isLoading = ref(false)
   const searchQuery = ref('')

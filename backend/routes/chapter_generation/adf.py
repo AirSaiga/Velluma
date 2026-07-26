@@ -36,6 +36,7 @@ SSE v3.2 事件序列（设计文档 §7）：
 - ADF_PRUNE_PROGRESS       去 AI 味剪枝进度（Phase 4.5，每段重构）
 - ADF_PRECONDITION_LANDED  条件落地事件
 - ADF_AUDIT                锚点审计结论
+- ADF_CONSISTENCY          一致性守卫结论（Phase 7：发现/修复数）
 - DEGRADED                 降级事件（失败不静默）
 - TEXT_CHUNK               文本块（流式正文，复用）
 - COMPLETE / ERROR         完成/错误（复用）
@@ -265,7 +266,20 @@ def _format_adf_event(event: str, data: dict) -> str:
             **data,
         )
     elif event == "ADF_AUDIT":
-        return build_sse_event("ADF_AUDIT", f"检查结论：{data.get('verdict')}", **data)
+        msg = f"检查结论：{data.get('verdict')}"
+        missing_beats = data.get("missing_beats") or []
+        if missing_beats:
+            msg += f"；缺 {len(missing_beats)} 个大纲节拍"
+        return build_sse_event("ADF_AUDIT", msg, **data)
+    elif event == "ADF_CONSISTENCY":
+        msg = (
+            f"一致性守卫：发现 {data.get('issues_found', 0)} 处，"
+            f"修复 {data.get('issues_fixed', 0)} 处"
+        )
+        rolled_back = data.get("rolled_back", 0)
+        if rolled_back:
+            msg += f"；回滚 {rolled_back} 个手术"
+        return build_sse_event("ADF_CONSISTENCY", msg, **data)
     # 未知事件：安全忽略（不阻塞流）
     return ""
 
@@ -528,7 +542,7 @@ async def get_plan_suggestion(
             canon_ctx = ""
 
         # 3. 章节基础信息
-        outline = (getattr(chapter, "outline_text", "") or "")[:300]
+        outline = getattr(chapter, "outline_text", "") or ""
 
         # 4. 活跃期待（带描述，供作者判断）
         active_expectations = []

@@ -48,6 +48,7 @@ async def execute_surgery(
     active_hooks: str = "",
     forbidden_terms: str = "",
     recorder: Optional[RunRecorder] = None,
+    stage_prefix: str = "refinery.surgery",
 ) -> Dict[str, Any]:
     """工序 4.5.4：执行单个手术（1 次 creative LLM）。
 
@@ -57,6 +58,8 @@ async def execute_surgery(
         purpose/emotion_curve/character_states/canon_constraints/active_hooks: 上下文
         forbidden_terms: 禁止出现的词（如 private 字段名）
         recorder: RunRecorder
+        stage_prefix: recorder 计量 stage 前缀（默认 refinery.surgery；
+            ADF 一致性守卫复用时传 adf.consistency_surgery）
 
     Returns:
         SurgeryResult dict：含 operation_id/original_text/revised_text/diff_summary/applied
@@ -137,7 +140,7 @@ async def execute_surgery(
     try:
         if recorder is not None:
             async with recorder.record_call(
-                stage=f"refinery.surgery.{op_id}",
+                stage=f"{stage_prefix}.{op_id}",
                 model_slot="creative",
             ) as call_ctx:
                 result = await call_llm_with_usage(

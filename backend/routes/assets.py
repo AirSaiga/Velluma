@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.core.dependencies import get_asset_repository, get_chapter_asset_repository
-from backend.models import Asset, ChapterAsset
 from backend.repositories.asset_repository import AssetRepository, ChapterAssetRepository
 from backend.schemas.assets import AssetCreate, AssetResponse, AssetUpdate, ChapterAssetResponse
 
@@ -24,8 +23,8 @@ async def create_asset(
     data: AssetCreate,
     repo: AssetRepository = Depends(get_asset_repository),
 ):
-    asset = Asset(**data.model_dump(), book_id=book_id)
-    return await repo.create(asset)
+    payload = {**data.model_dump(), "book_id": book_id}
+    return await repo.create(payload)
 
 @router.get("/assets/{asset_id}", response_model=AssetResponse)
 async def get_asset(
@@ -72,7 +71,6 @@ async def update_chapter_assets(
     repo: ChapterAssetRepository = Depends(get_chapter_asset_repository),
 ):
     await repo.delete_by_chapter(chapter_id)
-    new_assets = [ChapterAsset(chapter_id=chapter_id, asset_id=aid) for aid in asset_ids]
-    for asset in new_assets:
-        await repo.create(asset)
+    for aid in asset_ids:
+        await repo.create({"chapter_id": chapter_id, "asset_id": aid})
     return await repo.list_by_chapter(chapter_id)

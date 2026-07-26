@@ -33,6 +33,7 @@ Phase 6: 条件补埋器（Refiner，V3.2 §4.6）。
 """
 
 import logging
+import re
 from typing import Any, List, Optional, Tuple
 
 from backend.services.llm import call_llm_with_usage
@@ -48,6 +49,76 @@ logger = logging.getLogger(__name__)
 
 CANDIDATE_PARAGRAPHS_PER_PC = 3  # 每个 Precondition 给 LLM 看几段候选
 MAX_REFINE_PARAGRAPHS_CHARS = 2000  # 候选段落总字数上限
+
+# ---- 越界防护（补写重叠 bug 修复，2026-07）----
+# 事故现象：LLM 补写时从章节开头重写并一路写进下一段，整段替换后
+# 下一段内容在成品中出现两遍（实测两章分别重复 ~1500 字 / ~829 字）。
+_MIN_ANCHOR_CHARS = 12  # 归一化后邻段锚点最小长度
+_MAX_REFINED_GROWTH = 1.8  # 补写后段长相对原段的上限倍数（超过视为越界重写，拒绝替换）
+
+# 归一化时剥离的字符（空白/标点/引号变体——LLM 常改写标点，原文锚点直接匹配会失效）
+_OVERLAP_STRIP = re.compile(r"[\s，。！？!?；;、…—：:\"'″“”‘’「』()（）<>《》-]")
+
+# 候选段元数据标签清洗（修【第 X 段】泄漏事故）：
+# _build_candidate_paragraphs 给 LLM 的格式是 "【第 N 段】（情绪：xxx）\n<正文>"，
+# LLM 偶尔把整段含标签原样回吐。_replace_segment_text 若不剥离，标签会进 final_text。
+# 匹配开头的【...】（段号）和（情绪：...）（可选），连同其后到正文前的换行/空白一起清掉。
+_SEGMENT_META_TAG = re.compile(
+    r"^\s*【[^】]*】\s*(?:[（(][^）)]*[）)])?\s*\n?"
+)
+
+
+def _norm_with_map(text: str) -> Tuple[str, List[int]]:
+    """归一化文本（去空白/标点），返回 (归一化串, 归一化下标→原文下标映射)。"""
+    chars: List[str] = []
+    idx_map: List[int] = []
+    for i, ch in enumerate(text):
+        if not _OVERLAP_STRIP.match(ch):
+            chars.append(ch)
+            idx_map.append(i)
+    return "".join(chars), idx_map
+
+
+def _find_anchor(haystack_norm: str, anchor_norm: str, search_from: int) -> int:
+    """在归一化串中从 search_from 起找锚点（从长到短尝试），返回命中下标或 -1。"""
+    for length in (48, 36, 24, _MIN_ANCHOR_CHARS):
+        if len(anchor_norm) < length:
+            continue
+        pos = haystack_norm.find(anchor_norm[:length], search_from)
+        if pos >= 0:
+            return pos
+    return -1
+
+
+def _trim_neighbor_overlap(refined: str, prev_text: str, next_text: str) -> str:
+    """裁掉 LLM 补写越界部分（尾部写下一段内容 / 头部重复上一段结尾）。
+
+    策略：
+    - 尾部：下一段的开头（归一化锚点）出现在 refined 的 25% 之后 → 从命中处截断
+    - 头部：上一段的结尾出现在 refined 的开头 30% 之内 → 裁掉重复前缀
+    """
+    norm, idx_map = _norm_with_map(refined)
+
+    if next_text:
+        next_norm, _ = _norm_with_map(next_text)
+        pos = _find_anchor(norm, next_norm, int(len(norm) * 0.25))
+        if pos > 0:
+            refined = refined[:idx_map[pos]]
+            norm, idx_map = _norm_with_map(refined)
+
+    if prev_text:
+        prev_norm, _ = _norm_with_map(prev_text)
+        for length in (36, 24, _MIN_ANCHOR_CHARS):
+            if len(prev_norm) < length:
+                continue
+            anchor = prev_norm[-length:]
+            end = norm.find(anchor)
+            if 0 <= end <= int(len(norm) * 0.3):
+                refined = refined[idx_map[end + length]:]
+                norm, idx_map = _norm_with_map(refined)
+                break  # 命中并裁剪后才退出；未命中继续试更短锚点
+
+    return refined.strip()
 
 
 def _select_candidate_segments(
@@ -86,6 +157,13 @@ def _replace_segment_text(
     if not refined_text.strip() or not segments:
         return False, -1
 
+    # 清洗候选段元数据标签（修【第 X 段】（情绪：…）泄漏进正文事故）：
+    # LLM 偶尔把 _build_candidate_paragraphs 给的整段格式原样回吐，标签不剥会进 final_text。
+    refined_text = _SEGMENT_META_TAG.sub("", refined_text, count=1)
+    if not refined_text.strip():
+        logger.warning("[ADF] 精修文本清洗元数据标签后为空（LLM 仅回吐了标签），放弃补埋")
+        return False, -1
+
     # 找包含最多关键词的段（说明 LLM 选择在那段补写）
     best_idx = -1
     best_hits = 0
@@ -112,10 +190,24 @@ def _replace_segment_text(
                 best_idx = segments[0].index
 
     if best_idx >= 0:
-        for s in segments:
-            if s.index == best_idx:
-                s.text = refined_text.strip()
-                return True, best_idx
+        target = next((s for s in segments if s.index == best_idx), None)
+        if target is None:
+            return False, -1
+        # 越界防护：裁掉 LLM 写进邻段的部分，再做长度护栏
+        prev_text = next((s.text for s in segments if s.index == best_idx - 1), "")
+        next_text = next((s.text for s in segments if s.index == best_idx + 1), "")
+        trimmed = _trim_neighbor_overlap(refined_text.strip(), prev_text, next_text)
+        if not trimmed:
+            logger.warning(f"[ADF] 第 {best_idx + 1} 段精修文本越界裁剪后为空，放弃补埋")
+            return False, -1
+        if target.text and len(trimmed) > len(target.text) * _MAX_REFINED_GROWTH:
+            logger.warning(
+                f"[ADF] 第 {best_idx + 1} 段精修文本超长"
+                f"（{len(trimmed)} vs 原段 {len(target.text)}，超 {_MAX_REFINED_GROWTH}x），放弃补埋"
+            )
+            return False, -1
+        target.text = trimmed
+        return True, best_idx
     return False, -1
 
 

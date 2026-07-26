@@ -189,6 +189,9 @@ class StructureCheck:
     # 维度5：文风质量（反 AI 腔）
     style_violations: List[str] = field(default_factory=list)
     style_score: Optional[int] = None  # 1-10，<6 表示需要润色
+    # 维度6：大纲节拍覆盖。每项 {beat, status, evidence, insert_position,
+    # insert_anchor_quote, patchable}；patchable=False 表示伪锚/无锚，只上报不补写
+    missing_beats: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ============================================================
@@ -278,4 +281,5 @@ def audit_to_dict(audit: StructureCheck) -> Dict[str, Any]:
         "fix_targets": audit.refinement_targets,
         "style_violations": audit.style_violations,
         "style_score": audit.style_score,
+        "missing_beats": audit.missing_beats,
     }

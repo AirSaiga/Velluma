@@ -18,6 +18,9 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { bookApi } from '../services/api/domain'
 import Icon from './Icon.vue'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 // Extension to fake selection highlighting when editor loses focus
 const SelectionHighlighter = Extension.create({
@@ -150,11 +153,11 @@ const getSelectedText = () => {
 async function addToGoldenSnippets() {
   const selectedText = getSelectedText()
   if (!selectedText) {
-    alert('请先选中要添加的文本')
+    showToast('请先选中要添加的文本', 'warning')
     return
   }
   if (!props.bookId) {
-    alert('需要先打开书籍')
+    showToast('需要先打开书籍', 'warning')
     return
   }
   try {
@@ -162,21 +165,21 @@ async function addToGoldenSnippets() {
     const currentSnippets = currentBook.golden_snippets || []
     currentSnippets.push(selectedText)
     await bookApi.update(props.bookId, { golden_snippets: currentSnippets })
-    alert('已添加到黄金锚点')
+    showToast('已添加到黄金锚点', 'success')
   } catch (e) {
     console.error('添加黄金片段失败:', e)
-    alert('添加失败: ' + (e.message || '未知错误'))
+    showToast('添加失败: ' + (e.message || '未知错误'), 'error')
   }
 }
 
 async function addToBlacklist() {
   const selectedText = getSelectedText()
   if (!selectedText) {
-    alert('请先选中要添加的文本')
+    showToast('请先选中要添加的文本', 'warning')
     return
   }
   if (!props.bookId) {
-    alert('需要先打开书籍')
+    showToast('需要先打开书籍', 'warning')
     return
   }
   try {
@@ -184,10 +187,10 @@ async function addToBlacklist() {
     const currentBlacklist = currentBook.style_blacklist || []
     currentBlacklist.push(selectedText)
     await bookApi.update(props.bookId, { style_blacklist: currentBlacklist })
-    alert('已添加到黑名单')
+    showToast('已添加到黑名单', 'success')
   } catch (e) {
     console.error('添加黑名单失败:', e)
-    alert('添加失败: ' + (e.message || '未知错误'))
+    showToast('添加失败: ' + (e.message || '未知错误'), 'error')
   }
 }
 

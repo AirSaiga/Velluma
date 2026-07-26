@@ -180,6 +180,10 @@ logger.info("[Main] Canon 路由已加载")
 from backend.routes.reader_mirror import router as reader_mirror_router
 logger.info("[Main] Reader Mirror 路由已加载")
 
+# 正文逆向提取路由（从已有章节正文提取角色/关系/地点/资产/伏笔/向量记忆）
+from backend.routes.extraction import router as extraction_router
+logger.info("[Main] Extraction 路由已加载")
+
 # =============================================================================
 # 端口持久化机制
 # =============================================================================
@@ -253,8 +257,8 @@ app.include_router(relationships_router)
 app.include_router(memories_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
-# CP4.5：章节生成路由（原 generate-dual-track 已重命名为 generate-chapter）
-# 端点：/api/chapters/{id}/generate-chapter（流式 SSE 主入口）+ /plan + /plan/confirm
+# 章节生成路由（引擎剥离后现状）：V3.2 ADF（/generate-adf，默认引擎，SSE）
+# + V4.1 Refinery（/refinery/diagnose + /confirm，SSE）+ clarify-outline / cost-report / quality-report
 
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
@@ -276,6 +280,10 @@ logger.info("[Main] Canon 路由已注册: /api/books/{book_id}/canon")
 app.include_router(reader_mirror_router)
 logger.info("[Main] Reader Mirror 路由已注册: /api/books/{book_id}/reader-mirror")
 logger.info("[Main] 文风体系路由已注册: /api/books/{id}/style-card, /samples, /system/cliches")
+
+# 正文逆向提取路由
+app.include_router(extraction_router)
+logger.info("[Main] Extraction 路由已注册: /api/chapters/{chapter_id}/extraction")
 
 # =============================================================================
 # 前端静态文件服务（SPA 路由处理）

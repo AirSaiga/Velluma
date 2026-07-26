@@ -28,7 +28,10 @@ Phase 4.5: 去 AI 味剪枝器（De-AI Pruner，V3.2 §4.5 新增）。
 
 设计意图（区别于现有 de_ai_washer 的"润色取向"）：
 - de_ai_washer 是"润色"——在原句上修补、字数浮动 ±15%，倾向保留原句结构，
-  导致真正的腔调问题洗不掉。本剪枝是"重构"——允许重写句式结构，制造陡峭顿挫感。
+  导致真正的腔调问题洗不掉。本剪枝是"重构"——允许重写句式结构。
+  警示：早期版本 prompt 要求"制造陡峭顿挫感"（长句切碎+极短句连发），
+  实测导致整章碎句化（≤5字句占比 41%）——现已纠偏为"以正常语流为主"，
+  并新增剪枝后碎句率护栏（碎句化超过原文则保留原文）。
 - 全章无条件触发（不依赖密度阈值），因为 AI 味往往是章节级整体腔调，
   单看每段不超标、连起来却浓浓 AI 味。
 - 对话可改（AI 对话本身就书面化），但 OOC 安全线兜底。
@@ -51,6 +54,8 @@ from backend.services.llm import call_llm_with_usage
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import build_ooc_check_prompt, build_prune_prompt
 from backend.services.workflows.adf.types import ChapterClimax, SegmentResult
+from backend.services.nlg.ai_taste_meter import short_sentence_ratio
+from backend.services.nlg.anti_ai_rules import DEFAULT_THRESHOLDS
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +331,19 @@ async def run_prune_pass(
                 failed_segments.append(i)
             pruned_text = seg.text
         else:
-            pruned_count += 1
+            # 碎句化护栏：剪枝后 ≤5 字碎句占比超阈值且高于原文 → 保留原文
+            # （早期 prune prompt 的"切碎制造顿挫"指令曾导致整章机枪句，2026-07 纠偏）
+            _, _, orig_frag = short_sentence_ratio(seg.text)
+            _, _, pruned_frag = short_sentence_ratio(pruned_text)
+            if pruned_frag > max(orig_frag, DEFAULT_THRESHOLDS.short_sentence_ratio_max):
+                logger.warning(
+                    f"[ADF-Pruner] 第 {i + 1} 段剪枝后碎句化"
+                    f"（{pruned_frag:.0%} vs 原文 {orig_frag:.0%}），保留原文"
+                )
+                failed_segments.append(i)
+                pruned_text = seg.text
+            else:
+                pruned_count += 1
 
         # 构造新 SegmentResult（保留元数据，只换 text）
         from dataclasses import replace

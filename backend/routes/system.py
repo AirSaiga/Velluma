@@ -46,6 +46,7 @@ from backend.core.model_config import (
     get_default_reasoning_config,
     get_model_profile,
     get_model_config,
+    has_dedicated_wash_profile,
     update_llm_profile,
     update_embedding_config,
     DEFAULT_PROVIDER_URLS,
@@ -144,6 +145,28 @@ def _serialize_profile(role: str) -> dict:
     }
 
 
+def _serialize_wash_profile() -> dict:
+    """洗涤槽序列化：返回原始配置（不做 creative 回退），未配置时字段为空。
+
+    与 _serialize_profile 的区别：get_model_profile("wash") 会在未配置时
+    回退到 creative，直接复用会让前端把 creative 的值显示成 wash 的配置，
+    保存时还会把这些值固化进 wash 槽。configured 标志供前端提示"跟随创意模型"。
+    """
+    raw = get_model_config().get("llm", {}).get("wash", {})
+    provider = raw.get("provider", "deepseek")
+    return {
+        "provider": provider,
+        "api_key_masked": _mask_api_key(raw.get("api_key", "")),
+        "has_api_key": bool(raw.get("api_key")),
+        "base_url": raw.get("base_url", ""),
+        "default_base_url": DEFAULT_PROVIDER_URLS.get(provider, ""),
+        "model": raw.get("model", ""),
+        "enabled": raw.get("enabled", False),
+        "effort": raw.get("effort", "low"),
+        "configured": bool(raw.get("model") and raw.get("api_key")),
+    }
+
+
 def _serialize_model_config() -> dict:
     """序列化完整模型配置（API Key 掩码后返回）"""
     config = get_model_config()
@@ -152,6 +175,7 @@ def _serialize_model_config() -> dict:
         "llm": {
             "reasoning": _serialize_profile("reasoning"),
             "creative": _serialize_profile("creative"),
+            "wash": _serialize_wash_profile(),
         },
         "embedding": {
             "api_key_masked": _mask_api_key(embedding.get("api_key", "")),
@@ -178,7 +202,11 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
     - LLM 与代理配置保存后立即生效（每次调用实时读取）
     - embedding.dimensions 变更需重启后端，启动迁移会删列重建向量数据（破坏性）
     """
-    for role, profile in (("reasoning", update.reasoning), ("creative", update.creative)):
+    for role, profile in (
+        ("reasoning", update.reasoning),
+        ("creative", update.creative),
+        ("wash", update.wash),
+    ):
         if profile is None:
             continue
         fields = profile.model_dump(exclude_none=True)
@@ -212,7 +240,8 @@ async def test_model_connection(request: ModelTestRequest):
     
     业务目的：
     - 验证 API Key 和 Base URL 是否正确配置
-    - 检测 reasoning 和 creative 两个模型是否可用
+    - 检测 reasoning 和 creative 两个模型是否可用；
+      配置了独立洗涤槽（llm.wash）时一并测试 wash 模型
     - 如果启用推理模式，检测模型是否支持推理功能
     
     测试流程：
@@ -288,6 +317,30 @@ async def test_model_connection(request: ModelTestRequest):
     except Exception as e:
         creative_error = str(e)
 
+    # 测试 wash 模型（仅在配置了独立洗涤槽时；未配置时洗涤跟随 creative，无需重复测）
+    wash_configured = has_dedicated_wash_profile()
+    wash_model = ""
+    wash_provider = ""
+    wash_success: Optional[bool] = None
+    wash_error = ""
+    if wash_configured:
+        wash_model = resolve_model_name(model_type="wash")
+        wash_provider = get_model_profile("wash")["provider"]
+        try:
+            await call_llm(
+                system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
+                user_prompt=test_prompt,
+                model=wash_model,
+                model_type="wash",
+                temperature=0.8,
+                max_tokens=50,
+                reasoning_config={},  # 洗涤默认不开 thinking，测试保持一致
+            )
+            wash_success = True
+        except Exception as e:
+            wash_success = False
+            wash_error = str(e)
+
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
     # 检查推理模式支持
@@ -300,11 +353,17 @@ async def test_model_connection(request: ModelTestRequest):
         messages.append(f"推理模型 ({reasoning_model}): 连接成功")
     else:
         messages.append(f"推理模型 ({reasoning_model}): 连接失败 - {reasoning_error[:100]}")
-    
+
     if creative_success:
         messages.append(f"创意模型 ({creative_model}): 连接成功")
     else:
         messages.append(f"创意模型 ({creative_model}): 连接失败 - {creative_error[:100]}")
+
+    if wash_configured:
+        if wash_success:
+            messages.append(f"洗涤模型 ({wash_model}): 连接成功")
+        else:
+            messages.append(f"洗涤模型 ({wash_model}): 连接失败 - {wash_error[:100]}")
 
     overall_success = reasoning_success or creative_success
     
@@ -320,6 +379,10 @@ async def test_model_connection(request: ModelTestRequest):
             "creative_base_url": creative_profile["base_url"],
             "reasoning_success": reasoning_success,
             "creative_success": creative_success,
+            "wash_configured": wash_configured,
+            "wash_model": wash_model or None,
+            "wash_provider": wash_provider or None,
+            "wash_success": wash_success,
         },
         reasoning_supported=reasoning_supported,
         reasoning_message=reasoning_message,

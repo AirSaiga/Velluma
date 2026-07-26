@@ -185,6 +185,36 @@ class GenerateADFRequest(BaseModel):
     enable_spine: bool = Field(True, description="是否启用脉络轨构建")
     enable_anchor_audit: bool = Field(True, description="是否启用锚点审计")
     enable_refinement: bool = Field(True, description="是否启用条件补埋")
+    enable_consistency_guard: bool = Field(
+        True,
+        description=(
+            "是否启用一致性守卫（Phase 7：设定幻觉审计 + 定点手术修复。"
+            "成本：+1 次 reasoning 审计 + 0~3 次 creative 手术）"
+        ),
+    )
+    enable_state_tracker: bool = Field(
+        True,
+        description=(
+            "是否启用段级状态卡（Agent Loop 1：每段抽取场景状态卡注入下一段，"
+            "并用代码闸门拦截离场角色行动等状态矛盾。"
+            "成本：每段 +1 次小 creative 抽取，约 (段数-1) 次）"
+        ),
+    )
+    enable_edit_verify: bool = Field(
+        True,
+        description=(
+            "是否启用手术复验回滚（Agent Loop 2：Phase 7 定点手术应用后，"
+            "复验改动是否引入新问题，不通过则回滚。"
+            "成本：有手术时 +1 次 reasoning 复验）"
+        ),
+    )
+    enable_beat_coverage: bool = Field(
+        True,
+        description=(
+            "是否启用大纲节拍覆盖校验与缺失补写（Phase 5 审计维度 6 + "
+            "Phase 6.5 定点补写。成本：审计 0 新增调用 + 0~2 次 creative 补写）"
+        ),
+    )
     user_tier_hint: Optional[str] = Field(
         None, description="用户预期档位提示（弱信号）"
     )

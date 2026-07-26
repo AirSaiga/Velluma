@@ -12,6 +12,9 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { readerMirrorApi, EXPECTATION_TYPE_LABELS, EXPECTATION_STATUS_LABELS, EXPECTATION_STATUS_COLORS, type Expectation, type ExpectationType, type ChapterPlanSuggestion } from '../../../services/api/domain/reader-mirror.api'
+import { useToast } from '../../../composables/useToast'
+
+const { showToast } = useToast()
 
 const props = defineProps<{
   bookId: string
@@ -86,29 +89,41 @@ async function handleCreate() {
 }
 
 async function handleAccumulate(exp: Expectation) {
-  await readerMirrorApi.updateExpectation(props.bookId, exp.id, {
-    tension_delta: 1,
-    tension_event: '手动累积',
-    chapter_number: props.chapterNumber || 0,
-  })
-  await loadData()
+  try {
+    await readerMirrorApi.updateExpectation(props.bookId, exp.id, {
+      tension_delta: 1,
+      tension_event: '手动累积',
+      chapter_number: props.chapterNumber || 0,
+    })
+    await loadData()
+  } catch (e: any) {
+    showToast('累积失败: ' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 async function handlePayoff(exp: Expectation) {
   if (!confirm(`确认释放期待 [${exp.description.slice(0, 30)}]？这是爽点。`)) return
-  await readerMirrorApi.updateExpectation(props.bookId, exp.id, {
-    tension_delta: -5,
-    new_status: 'payoff',
-    tension_event: '手动释放',
-    chapter_number: props.chapterNumber || 0,
-  })
-  await loadData()
+  try {
+    await readerMirrorApi.updateExpectation(props.bookId, exp.id, {
+      tension_delta: -5,
+      new_status: 'payoff',
+      tension_event: '手动释放',
+      chapter_number: props.chapterNumber || 0,
+    })
+    await loadData()
+  } catch (e: any) {
+    showToast('释放失败: ' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 async function handleDelete(exp: Expectation) {
   if (!confirm(`删除期待 [${exp.description.slice(0, 30)}]？`)) return
-  await readerMirrorApi.deleteExpectation(props.bookId, exp.id)
-  await loadData()
+  try {
+    await readerMirrorApi.deleteExpectation(props.bookId, exp.id)
+    await loadData()
+  } catch (e: any) {
+    showToast('删除失败: ' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 onMounted(loadData)
@@ -159,7 +174,7 @@ watch(() => props.bookId, loadData)
         <label>初始张力 <input v-model.number="newExp.tension" type="number" min="1" max="10" /></label>
         <label>预期释放章 <input v-model.number="newExp.payoffChapter" type="number" min="1" /></label>
       </div>
-      <button class="btn-mini primary" @click="handleCreate">添加</button>
+      <button class="btn-mini primary" :disabled="!newExp.id || !newExp.description" @click="handleCreate">添加</button>
     </div>
 
     <div v-if="loading" class="empty">加载中…</div>

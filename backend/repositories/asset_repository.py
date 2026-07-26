@@ -8,6 +8,8 @@ from backend.models import Asset, ChapterAsset
 from backend.repositories.base import BaseRepository
 
 class AssetRepository(BaseRepository[Asset]):
+    model = Asset
+
     def __init__(self, db: AsyncSession):
         super().__init__(db)
 
@@ -20,6 +22,8 @@ class AssetRepository(BaseRepository[Asset]):
         return list(result.scalars().all())
 
 class ChapterAssetRepository(BaseRepository[ChapterAsset]):
+    model = ChapterAsset
+
     def __init__(self, db: AsyncSession):
         super().__init__(db)
 

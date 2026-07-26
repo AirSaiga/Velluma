@@ -22,6 +22,8 @@ Phase 4: 正向流写作器（Forward Flow Writer，V3.2 §4.4，核心创新 #2
 职责：
 - 串行逐段写作，每段三方约束 + 运行时条件扫描
 - 每段后扫描未落地 Precondition，软提示 LLM 在下段自然融入
+- 设定一致性写作期防线（纯代码 0 LLM）：专名表 + 知识边界约束 + 在场提示，
+  组装为每段 user prompt 末尾的"# 本段硬约束"区块
 
 设计意图（ADF 灵魂）：
 - rolling_prefix 500 字保证呼吸连续（继承双轨优点）
@@ -44,9 +46,10 @@ Phase 4: 正向流写作器（Forward Flow Writer，V3.2 §4.4，核心创新 #2
 
 import asyncio
 import logging
+import re
 from typing import Any, Callable, List, Optional, Tuple
 
-from backend.services.llm import call_llm_with_usage
+from backend.services.llm import call_llm_with_usage, LLMResult
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import (
     build_forward_flow_prompt,
@@ -76,7 +79,23 @@ from backend.services.workflows.adf.storyboard import (
     get_shot_constraint,
     get_transition_hint,
 )
-from backend.services.workflows.adf.setting_resolver import build_scene_setting_text
+from backend.services.workflows.adf.setting_resolver import (
+    build_scene_setting_text,
+    resolve_characters,
+    resolve_hidden_constraints,
+)
+from backend.services.workflows.adf.name_registry import (
+    NameRegistry,
+    build_name_registry,
+    registry_to_prompt_block,
+)
+from backend.services.workflows.adf.dedup_guard import segment_too_similar
+from backend.services.workflows.adf.state_tracker import (
+    SceneStateCard,
+    card_to_prompt_block,
+    check_segment_against_card,
+    extract_state_card,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +112,31 @@ TARGET_WORDS_FALLBACK_PER_SEG = 700  # 单段目标字数兜底
 # 超过本阈值视为挂起，跳过该段（降级空段 + DEGRADED），保证整章能跑完而非死等。
 # 详见 adf.py 的实时 SSE 设计：超时会通过 progress_callback 上浮为 DEGRADED 事件。
 SEGMENT_TIMEOUT = 180
+
+
+# 句末标点：用于 length 截断后清残句（截到最后一个完整句子）
+_SENTENCE_END_CHARS = "。！？!?…"
+
+
+def _trim_to_last_sentence(text: str) -> str:
+    """length 截断兜底：把文本截到最后一个句末标点，避免半句话残留。
+
+    业务场景：creative LLM 撞 max_tokens 后输出常停在连词/助词中段（如"……都得考，虽"），
+    这种残句直接进 final_text 会卡住读者。本函数找到最后一个句末标点（。！？!?…），
+    保留到该标点为止的内容；若全文无句末标点（极短或纯标点），返回原文不动。
+    保留末尾的换行/空白以维持段落格式。
+    """
+    if not text:
+        return text
+    # 找最后一个句末标点的位置
+    last_end = -1
+    for ch in _SENTENCE_END_CHARS:
+        idx = text.rfind(ch)
+        if idx > last_end:
+            last_end = idx
+    if last_end < 0:
+        return text  # 无句末标点，原样返回（极短段或纯对话）
+    return text[: last_end + 1]
 
 
 # ============================================================
@@ -305,32 +349,157 @@ def _build_character_arc_text(spine: StoryContext) -> str:
     return "；".join(f"{k}→{v}" for k, v in spine.character_arc_advances.items())
 
 
+def _canon_section(canon_context: str, tag: str) -> str:
+    """从 canon_context 提取指定标记（[public] / [private]）所在段落的文本。"""
+    if not canon_context or tag not in canon_context:
+        return ""
+    start = canon_context.find(tag)
+    end = canon_context.find("\n## ", start)
+    if end < 0:
+        end = len(canon_context)
+    return canon_context[start:end]
+
+
 def _build_compact_canon_hint(canon_context: str) -> str:
     """为后续段构建精简 Canon 提示（节省 token）。
 
-    只保留 private 部分的"标签+不许说出"提示，不重复完整 canon_text。
+    - private 部分：保留"标签+不许说出"提示（现状行为，不重复完整 canon_text）
+    - public 部分：追加已建立事实的完整行（public 无泄露风险，直接保留原文行，
+      ≤10 条×120 字）——修复"第 2 段起 public 事实完全丢失"导致的设定漂移
     """
     if not canon_context or "（Canon 为空" in canon_context:
         return ""
-    import re
-    # 提取 private 区块里的节点标签（- XXX：...）
-    private_section = ""
-    if "[private]" in canon_context:
-        start = canon_context.find("[private]")
-        end = canon_context.find("\n## ", start)
-        if end < 0:
-            end = len(canon_context)
-        private_section = canon_context[start:end]
-    if not private_section:
+    parts = []
+
+    # private：提取节点 label（每行开头的 "- XXX："），只提示不许说出
+    private_section = _canon_section(canon_context, "[private]")
+    if private_section:
+        labels = re.findall(r"^-\s+([^：:]+)[：:]", private_section, re.MULTILINE)
+        if labels:
+            parts.append(
+                "[private 提醒] 以下节点是作者脑中真相，本段写作绝不许直接说出：\n"
+                + "\n".join(f"- {lbl.strip()}" for lbl in labels[:8])
+            )
+
+    # public：保留完整事实行（"- 标签：内容"），必须保持一致
+    public_section = _canon_section(canon_context, "[public]")
+    if public_section:
+        fact_lines = [
+            ln.strip() for ln in public_section.splitlines()
+            if ln.strip().startswith("- ")
+        ][:10]
+        if fact_lines:
+            fact_lines = [
+                ln if len(ln) <= 120 else ln[:120] + "…" for ln in fact_lines
+            ]
+            parts.append(
+                "[public 事实] 以下已建立事实必须与本段保持一致：\n"
+                + "\n".join(fact_lines)
+            )
+
+    return "\n\n".join(parts)
+
+
+# ============================================================
+# 设定一致性防线：知识边界约束 / 在场提示 / 每段硬约束区块
+# ============================================================
+
+MAX_KNOWLEDGE_CONSTRAINTS = 8  # 每段知识边界约束上限（防 prompt 膨胀）
+
+
+def _build_knowledge_constraints(
+    canon_context: str,
+    hidden_constraints: List[str],
+) -> List[str]:
+    """构建知识边界约束行（写作期防知识越界，纯代码 0 LLM）。
+
+    来源：
+    - Canon [private] 区块的节点 label → "任何角色都不得说出、暗示或提及「X」的内容"
+    - hidden_constraints（is_public=False 关系，resolve_hidden_constraints 输出）
+
+    上限 MAX_KNOWLEDGE_CONSTRAINTS 条（去重后截取）。
+    """
+    constraints: List[str] = []
+
+    private_section = _canon_section(canon_context, "[private]")
+    if private_section:
+        labels = re.findall(r"^-\s+([^：:]+)[：:]", private_section, re.MULTILINE)
+        for lbl in labels:
+            lbl = lbl.strip()
+            if lbl:
+                constraints.append(f"任何角色都不得说出、暗示或提及「{lbl}」的内容")
+
+    for h in (hidden_constraints or []):
+        h = (h or "").strip()
+        if h:
+            constraints.append(h)
+
+    # 去重保序 + 上限
+    seen = set()
+    unique: List[str] = []
+    for c in constraints:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique[:MAX_KNOWLEDGE_CONSTRAINTS]
+
+
+def _build_presence_hint(
+    segments_so_far: List[Any],
+    registry: Optional[NameRegistry],
+) -> str:
+    """在场角色提示：纯代码统计最近 2 段出现的注册角色名。
+
+    设计意图：段间连续性此前只靠 500 字 rolling_prefix，LLM 容易"忘记"
+    谁在场（写出不在场角色的反应）。纯代码统计零成本，只报角色
+    （不含地点/资产），首段返回空。
+
+    Returns:
+        "本段在场角色（按前文）：林尘、老赵"；首段或无匹配时返回空串
+    """
+    if not segments_so_far or registry is None or not registry.character_names:
         return ""
-    # 提取节点 label（每行开头的 "- XXX："）
-    labels = re.findall(r"^-\s+([^：：]+)[：:]", private_section, re.MULTILINE)
-    if not labels:
-        return ""
-    return (
-        f"[private 提醒] 以下节点是作者脑中真相，本段写作绝不许直接说出：\n"
-        + "\n".join(f"- {lbl.strip()}" for lbl in labels[:8])
+    recent = "".join(
+        getattr(s, "text", "") or "" for s in segments_so_far[-2:]
     )
+    if not recent:
+        return ""
+    present: List[str] = []
+    for form in registry.all_surface_forms:
+        canonical = registry.alias_to_canonical.get(form, form)
+        if canonical in registry.character_names and canonical not in present and form in recent:
+            present.append(canonical)
+    if not present:
+        return ""
+    return "本段在场角色（按前文）：" + "、".join(sorted(present)[:8])
+
+
+def _build_hard_constraints_block(
+    registry_block: str,
+    knowledge_constraints: List[str],
+    presence_hint: str,
+    state_card_block: str = "",
+) -> str:
+    """组装每段 user prompt 末尾的"# 本段硬约束"区块（放末尾吃近因效应）。
+
+    组成：专名表（compact）+ 知识边界约束（≤8 条）+ 在场提示 + 剧情状态卡。
+    全部为空时返回空串（prompt 里不出现该区块，行为与旧版一致）。
+    """
+    parts = []
+    if registry_block:
+        parts.append(registry_block)
+    if knowledge_constraints:
+        parts.append(
+            "# 知识边界（绝不许越界）\n\n"
+            + "\n".join(f"- {c}" for c in knowledge_constraints)
+        )
+    if presence_hint:
+        parts.append(presence_hint)
+    if state_card_block:
+        parts.append(state_card_block)
+    if not parts:
+        return ""
+    return "# 本段硬约束（违例即生成失败）\n\n" + "\n\n".join(parts)
 
 
 # ============================================================
@@ -359,6 +528,8 @@ async def write_chapter_segments(
     worldview_text: str = "",
     # 题材（用于本地预处理层白名单等，None=通用）
     genre: Optional[str] = None,
+    # Agent Loop 1：段级状态卡（每段 1 次小 creative 抽取 + 统一闸门校验）
+    enable_state_tracker: bool = True,
 ) -> Tuple[List[SegmentResult], ChapterClimax]:
     """Phase 4: 正向流写作（N 次 creative LLM，串行）。
 
@@ -377,6 +548,8 @@ async def write_chapter_segments(
         progress_callback: 进度回调（推 ADF_PROGRESS / ADF_PRECONDITION_LANDED 事件）
         canon_context: V4.0 作者脑中世界图谱（private 节点绝不许泄露到正文）
         author_intent: V4.2 介入点 1 作者意图（强约束）
+        enable_state_tracker: Agent Loop 1 段级状态卡开关（每段 1 次小 creative
+            抽取 + 下段注入 + 代码闸门校验；关闭时零额外调用、行为与旧版一致）
 
     Returns:
         tuple: (segments, anchor)  anchor 是更新了 landed 状态的引用（同一对象）
@@ -426,19 +599,43 @@ async def write_chapter_segments(
     # V3.5：场景设定文本（用户章级指定的角色/地点/资产/关系，全章复用）
     scene_setting_text = build_scene_setting_text(entities, locations, assets, relationships)
 
+    # ---- 设定一致性防线（纯代码 0 LLM，全章复用）----
+    # 专名注册表 + 知识边界约束：写作期防专名漂移/知识越界，
+    # 生成后由 Phase 7 一致性守卫用同一基准审计（基准一致才有意义）。
+    try:
+        name_registry = build_name_registry(entities, locations, assets, canon_context)
+        registry_block = registry_to_prompt_block(name_registry, max_entries=15)
+    except Exception as e:
+        logger.warning(f"[ADF] 专名注册表构建失败（降级无专名约束）: {e}")
+        name_registry = None
+        registry_block = ""
+    try:
+        hidden_constraints = resolve_hidden_constraints(
+            relationships, resolve_characters(entities),
+        )
+        knowledge_constraints = _build_knowledge_constraints(canon_context, hidden_constraints)
+    except Exception as e:
+        logger.warning(f"[ADF] 知识边界约束构建失败（降级无约束）: {e}")
+        knowledge_constraints = []
+
     # ---- 逐段写作 ----
     segments: List[SegmentResult] = []
     rolling_prefix = spine.entry_state.last_scene_image or "（本章开篇）"
     current_word_count = 0
     wash_count = 0  # 本章已洗涤段数（成本控制：超 wash_max_segments_per_chapter 不再洗）
+    # Agent Loop 1：剧情状态卡（空卡自举——首段写完后由 LLM 抽取第一张，
+    # 不预填 entry_state 角色，避免猜错在场阵容）
+    state_card = SceneStateCard()
 
     for i in range(total_segments):
-        # 字数提前终止：已写字数超过目标 130% 时跳过剩余段（防上下文爆掉）
-        # 留 30% 容差是因为最后一段通常是高潮段，不该因为前面略长就丢弃高潮
-        if current_word_count > target_word_count * 1.3 and i > 0:
+        # 字数提前终止：已写字数超过目标 130% 时跳过剩余段（防上下文爆掉）。
+        # 远端锚段保护（修 segment_writer 历史事故）：高潮段是 Phase 2 设计的远端锚，
+        # 正向写作逼近的目标就是它，绝不能因前面段写偏长而被无差别 break 掉。
+        # 故仅当当前段不是末段时才允许提前终止——末段（高潮锚段）强制写完。
+        if current_word_count > target_word_count * 1.3 and i < total_segments - 1:
             logger.info(
                 f"[ADF] 字数提前终止：已写 {current_word_count} 字 > 目标 {target_word_count}×1.3，"
-                f"跳过第 {i + 1}-{total_segments} 段"
+                f"保留末段（高潮锚段），跳过第 {i + 1}-{total_segments - 1} 段"
             )
             break
 
@@ -473,6 +670,14 @@ async def write_chapter_segments(
             soft_hints = f"{trans_hint}\n{shot_constraint}\n{anti_ai_hint}\n\n{soft_hints}"
 
         # 构造 prompt
+        # 设定一致性硬约束：专名表 + 知识边界 + 在场提示 + 剧情状态卡，
+        # 放 user 末尾吃近因效应（i=0 时空卡不渲染）
+        hard_constraints = _build_hard_constraints_block(
+            registry_block=registry_block,
+            knowledge_constraints=knowledge_constraints,
+            presence_hint=_build_presence_hint(segments, name_registry),
+            state_card_block=card_to_prompt_block(state_card) if enable_state_tracker else "",
+        )
         system_prompt, user_prompt = build_forward_flow_prompt(
             style_contract=style_contract,
             author_samples=author_samples_text,
@@ -492,6 +697,7 @@ async def write_chapter_segments(
             character_arc_advances=character_arc_text,
             soft_hints=soft_hints,
             target_words=dynamic_target_words,
+            hard_constraints=hard_constraints,
         )
 
         # V3.5：世界观设定注入（system 层最顶部，比 Canon 更基础——先有世界规则，再有 private 真相）
@@ -534,72 +740,121 @@ async def write_chapter_segments(
             system_prompt = f"# 场景设定（本章涉及的设定数据）\n\n{scene_setting_text}\n\n{system_prompt}"
 
         # 调用 LLM（带单段超时，防止重模型挂起导致整章死等）
-        try:
-            if recorder is not None:
-                async with recorder.record_call(
-                    stage=f"adf.forward_flow.segment_{i + 1}",
-                    model_slot="creative",
-                ) as call_ctx:
+        # 提取为闭包：段级回路护栏的重试复用同一调用与后处理逻辑，避免复制
+        #
+        # max_tokens 计算：中文一字 ≈ 1.5–2 token（BPE），×3 已含约 50% 裕量。
+        # 旧公式 ×4 表面裕量大，但当下限 dynamic_target_words 被压到 300 时（末段/
+        # 提前终止后），max_tokens 仅 1200，叠加 LLM 引导性废话极易撞顶触发
+        # finish_reason="length" 把句子切在半句上。故下限提到 3072。
+        seg_max_tokens = max(3072, min(8192, dynamic_target_words * 3))
+
+        async def _call_llm_once(max_tokens: int, extra_note: str = "") -> "Optional[LLMResult]":
+            """单次调 creative LLM 写本段，返回 LLMResult（含 finish_reason）；失败返 None。"""
+            call_user_prompt = f"{user_prompt}{extra_note}" if extra_note else user_prompt
+            try:
+                if recorder is not None:
+                    async with recorder.record_call(
+                        stage=f"adf.forward_flow.segment_{i + 1}",
+                        model_slot="creative",
+                    ) as call_ctx:
+                        result = await asyncio.wait_for(
+                            call_llm_with_usage(
+                                system_prompt=system_prompt,
+                                user_prompt=call_user_prompt,
+                                model_type="creative",
+                                temperature=0.75,
+                                max_tokens=max_tokens,
+                            ),
+                            timeout=SEGMENT_TIMEOUT,
+                        )
+                        call_ctx.set_result(result)
+                else:
                     result = await asyncio.wait_for(
                         call_llm_with_usage(
                             system_prompt=system_prompt,
-                            user_prompt=user_prompt,
+                            user_prompt=call_user_prompt,
                             model_type="creative",
                             temperature=0.75,
-                            max_tokens=max(2048, min(8192, dynamic_target_words * 4)),
+                            max_tokens=max_tokens,
                         ),
                         timeout=SEGMENT_TIMEOUT,
                     )
-                    call_ctx.set_result(result)
-            else:
-                result = await asyncio.wait_for(
-                    call_llm_with_usage(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        model_type="creative",
-                        temperature=0.75,
-                        max_tokens=max(2048, min(8192, dynamic_target_words * 4)),
-                    ),
-                    timeout=SEGMENT_TIMEOUT,
-                )
-            segment_text = (result.content or "").strip()
-        except asyncio.TimeoutError:
-            # 单段超时：降级空段（保持段序号连续），记 DEGRADED 供前端上浮
-            # 注：超时发生在 record_call 上下文内时，RunRecorder 会自动追加一条
-            # reason="exception_during_call" 的降级；此处再追加 reason="segment_timeout"
-            # 的精简记录，提供段号与超时阈值。两条都会经 adf.py 的 DEGRADED 上浮前端。
-            logger.warning(f"[ADF] 第 {i + 1} 段超时（>{SEGMENT_TIMEOUT}s），降级空段")
-            if recorder is not None:
+                return result
+            except asyncio.TimeoutError:
+                # 单段超时：降级空段（保持段序号连续），记 DEGRADED 供前端上浮
+                logger.warning(f"[ADF] 第 {i + 1} 段超时（>{SEGMENT_TIMEOUT}s），降级空段")
+                if recorder is not None:
+                    recorder.record_degraded(
+                        stage=f"adf.forward_flow.segment_{i + 1}",
+                        reason="segment_timeout",
+                        action="skipped_empty",
+                        model_slot="creative",
+                        detail=f"creative LLM 调用超过 {SEGMENT_TIMEOUT}s 未返回，该段留空",
+                    )
+                return None
+            except Exception as e:
+                logger.warning(f"[ADF] 第 {i + 1} 段写作失败，降级空段: {e}")
+                return None
+
+        async def _call_llm(extra_note: str = "") -> str:
+            """调 creative LLM 写本段，返回清洗后的字符串。
+
+            length 截断兜底（修"句子被切在半句上"事故）：旧链路对 finish_reason="length"
+            零检测，半句话原样进 final_text 且连带吃掉事件触发描述。现策略——
+              1) 首次返回若未撞 max_tokens，照常返回；
+              2) 若 length 截断，max_tokens 提到 8192 上限重试一次；
+              3) 重试仍截断，则清残句（截到最后一个句末标点），记 DEGRADED。
+            重试只触发一次，避免成本失控。
+            """
+            result = await _call_llm_once(seg_max_tokens, extra_note)
+            if result is None:
+                return ""
+            content = (result.content or "").strip()
+            if result.finish_reason != "length":
+                return content
+            logger.warning(f"[ADF] 第 {i + 1} 段首次撞 max_tokens 截断，提额度重试一次")
+            retry = await _call_llm_once(8192, extra_note)
+            if retry is not None:
+                retry_content = (retry.content or "").strip()
+                if retry.finish_reason != "length" and len(retry_content) > 50:
+                    return retry_content
+                content = retry_content or content
+            # 仍截断：清残句保留可读部分，记降级
+            cleaned = _trim_to_last_sentence(content)
+            if recorder is not None and len(cleaned) < len(content):
                 recorder.record_degraded(
                     stage=f"adf.forward_flow.segment_{i + 1}",
-                    reason="segment_timeout",
-                    action="skipped_empty",
+                    reason="length_truncated",
+                    action="trimmed_residual",
                     model_slot="creative",
-                    detail=f"creative LLM 调用超过 {SEGMENT_TIMEOUT}s 未返回，该段留空",
+                    detail=(
+                        f"creative LLM 撞 max_tokens 截断且重试仍截断，"
+                        f"原文 {len(content)} 字→清残句后 {len(cleaned)} 字"
+                    ),
                 )
-            segment_text = ""
-        except Exception as e:
-            logger.warning(f"[ADF] 第 {i + 1} 段写作失败，降级空段: {e}")
-            segment_text = ""
-
-        if not segment_text:
-            logger.warning(f"[ADF] 第 {i + 1} 段返回空文本")
-            segment_text = ""
+            return cleaned
 
         # ---- 反 AI 味后处理（触点3：本地抽脂 → 密度评估 → 正则裁剪 / LLM 洗涤）----
         # 三道防线：
         # 1. 本地预处理（0 Token）：jieba 词性抽脂 + 硬断句，删冗余修饰、制造顿挫
         # 2. 正则安全裁剪（确定性、零延迟）：删黑名单词/微操
         # 3. 超阈值时 LLM 洗涤（creative 槽单段）
-        if segment_text:
+        async def _postprocess(text: str) -> str:
+            """对单段产出跑反 AI 味后处理；洗涤配额与本章 wash_count 共用。"""
+            nonlocal wash_count
+            if not text:
+                return text
             # [Tier 2] 本地预处理：jieba 抽脂 + 硬断句（0 Token，微秒级）
             # 放在 measure_ai_taste 之前：让评估基于更干净的文本，且减轻下游洗涤负担
-            segment_text = preprocess_segment(segment_text, genre=genre)
-            density_report = measure_ai_taste(segment_text)
+            text = preprocess_segment(text, genre=genre)
+            density_report = measure_ai_taste(text)
             if density_report.triggered and wash_count < DEFAULT_THRESHOLDS.wash_max_segments_per_chapter:
                 # 超阈值且有洗涤配额 → LLM 重洗该段
-                wash_result = await wash_segment_if_too_ai(segment_text, density_report)
-                segment_text = wash_result.text
+                wash_result = await wash_segment_if_too_ai(
+                    text, density_report,
+                    recorder=recorder, stage=f"adf.wash.segment_{i + 1}",
+                )
+                text = wash_result.text
                 if wash_result.washed:
                     wash_count += 1
                     logger.info(
@@ -615,7 +870,80 @@ async def write_chapter_segments(
                         f"[ADF] 第 {i + 1} 段AI味{density_report.overall_score}超标但洗涤配额已尽"
                         f"({wash_count}/{DEFAULT_THRESHOLDS.wash_max_segments_per_chapter})，仅正则裁剪"
                     )
-                segment_text = sanitize_segment(segment_text)
+                text = sanitize_segment(text)
+            return text
+
+        segment_text = await _call_llm()
+        if not segment_text:
+            logger.warning(f"[ADF] 第 {i + 1} 段返回空文本")
+            segment_text = ""
+        segment_text = await _postprocess(segment_text)
+
+        # ---- 统一段级闸门（0 LLM 检测 + 最多 1 次重写）----
+        # 闸门链：任一闸门违规 → 合并所有 note 一次重写；重写后重跑全部闸门，
+        # 仍违规按第一个闸门类型记 reason 弃段。无违规时零额外调用。
+        # 闸门 1（剧情回路）：与任一前段高度重复（真实故障：块 A′ 逐字重写块 A）
+        # 闸门 2（状态矛盾）：与剧情状态卡冲突（真实故障：老周死后"喊了一嗓子"）
+        def _run_gates(text: str) -> List[Tuple[str, str]]:
+            """跑全部闸门，返回 (gate_name, note) 违规列表；空 = 全部通过。"""
+            found: List[Tuple[str, str]] = []
+            if not text:
+                return found
+            # 闸门 1：剧情回路
+            if any(segment_too_similar(text, prev.text) for prev in segments):
+                dup_seg = next(
+                    prev for prev in segments
+                    if segment_too_similar(text, prev.text)
+                )
+                found.append((
+                    "segment_loop_duplicate",
+                    f"你上一版输出与前面第{dup_seg.index + 1}段内容高度重复"
+                    f"（同一场景已经写过）。必须写全新的、推进剧情的内容："
+                    f"接着上一段结尾往后走，绝对不许重复任何已写过的场景、画面或事件。",
+                ))
+            # 闸门 2：状态卡矛盾（仅开启状态追踪且已有非空卡时）
+            if enable_state_tracker and not state_card.is_empty():
+                for violation in check_segment_against_card(text, state_card):
+                    found.append((
+                        "state_contradiction",
+                        f"你上一版输出违反了剧情状态卡：{violation}。"
+                        f"必须改写使其与状态卡一致（该角色可以出现在回忆、"
+                        f"遗体或他人的叙述中，但不能以活人身份行动或说话）。",
+                    ))
+            return found
+
+        violations = _run_gates(segment_text)
+        if violations:
+            logger.warning(
+                f"[ADF] 第 {i + 1} 段触发闸门 {[v[0] for v in violations]}，"
+                f"触发重写（最多 1 次）"
+            )
+            notes = "\n".join(f"- {note}" for _, note in violations)
+            retry_text = await _call_llm(
+                extra_note=f"\n\n# ⚠ 重写要求（最高优先级）\n{notes}"
+            )
+            retry_text = await _postprocess(retry_text)
+            remaining = _run_gates(retry_text) if retry_text else violations
+            if retry_text and not remaining:
+                segment_text = retry_text
+                logger.info(f"[ADF] 第 {i + 1} 段重写成功，闸门通过")
+            else:
+                # 重写仍违规（或重写失败）→ 弃段，按第一个闸门类型记 reason
+                final_violations = remaining or violations
+                gate_reason = final_violations[0][0]
+                logger.warning(f"[ADF] 第 {i + 1} 段重写后仍违规（{gate_reason}），弃段")
+                if recorder is not None:
+                    recorder.record_degraded(
+                        stage=f"adf.forward_flow.segment_{i + 1}",
+                        reason=gate_reason,
+                        action="skipped_empty",
+                        model_slot="creative",
+                        detail=(
+                            f"触发闸门 {[v[0] for v in final_violations]}，"
+                            f"重写 1 次后仍违规，该段留空"
+                        ),
+                    )
+                segment_text = ""
 
         # 更新 Precondition 落地状态（关键词检测）
         landed_ids = update_precondition_landed_state(anchor, segment_text, i)
@@ -632,6 +960,17 @@ async def write_chapter_segments(
             transition=storyboard[i][1] if i < len(storyboard) else "",
         )
         segments.append(seg)
+
+        # Agent Loop 1：段定稿后抽取新状态卡（末段不抽——没人用；
+        # 空段不抽；任何失败在 extract_state_card 内部降级保留旧卡）
+        if enable_state_tracker and segment_text and i < total_segments - 1:
+            state_card = await extract_state_card(
+                prev_card=state_card,
+                segment_text=segment_text,
+                registry=name_registry,
+                recorder=recorder,
+                segment_index=i,
+            )
 
         # 更新 rolling_prefix
         rolling_prefix = segment_text

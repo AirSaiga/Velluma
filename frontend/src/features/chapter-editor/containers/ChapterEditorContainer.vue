@@ -3,6 +3,7 @@ import type { Chapter, Character, ApiConfig } from '../../../types'
 import type { Asset } from '../../../shared/types'
 import ChapterEditorView from '../presentation/ChapterEditorView.vue'
 import InspirationModal from '../../../components/InspirationModal.vue'
+import CritiqueModal from '../presentation/CritiqueModal.vue'
 import { useChapterEditorContainer } from './useChapterEditorContainer'
 
 const props = defineProps<{
@@ -47,6 +48,7 @@ defineExpose({
     :is-formatting="viewModel.isFormatting.value"
     :is-publishing="viewModel.isPublishing.value"
     :open-inspiration-modal="viewModel.openInspirationModal"
+    :open-critique-modal="viewModel.openCritiqueModal"
     :publish-chapter="viewModel.publishChapter"
     :selected-chapter="viewModel.selectedChapter.value"
     :set-editor-ref="viewModel.setEditorRef"
@@ -66,5 +68,13 @@ defineExpose({
     :api-config="props.apiConfig"
     @update:show="viewModel.closeInspirationModal"
     @apply-to-outline="viewModel.handleApplyInspirationToOutline"
+  />
+
+  <CritiqueModal
+    :show="viewModel.showCritiqueModal.value"
+    :loading="viewModel.critiqueLoading.value"
+    :comments="viewModel.critiqueComments.value"
+    :overall-praise="viewModel.critiquePraise.value"
+    @close="viewModel.closeCritiqueModal"
   />
 </template>

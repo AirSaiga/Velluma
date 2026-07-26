@@ -194,6 +194,7 @@ class ModelConfigUpdate(BaseModel):
     """模型配置整体更新（设置面板保存），各节均为可选。"""
     reasoning: Optional[LLMProfileUpdate] = None
     creative: Optional[LLMProfileUpdate] = None
+    wash: Optional[LLMProfileUpdate] = None  # 洗涤槽（可选；不配则跟随 creative）
     embedding: Optional[EmbeddingConfigUpdate] = None
     proxy: Optional[ProxyConfig] = None
 

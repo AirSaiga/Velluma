@@ -13,23 +13,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
-import ConfirmDialog from '../../../components/ConfirmDialog.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { NovelCreationWizard } from '../../novel-wizard'
-import type { Book } from '../../../types'
+import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
+import { chapterApi } from '../../../services/api'
+import type { Book, Chapter } from '../../../types'
 
 const router = useRouter()
 const store = useAppStore()
 const { showToast } = useToast()
-const {
-  visible: confirmVisible,
-  options: confirmOptions,
-  show: showConfirm,
-  handleConfirm,
-  handleCancel,
-} = useConfirmDialog()
+const { show: showConfirm } = useConfirmDialog()
 
 // 解构出 ref 供模板自动解包使用（store.xxx 是 Ref，模板里 store.xxx 不会自动解包）
 const books = store.books
@@ -52,14 +47,21 @@ onMounted(async () => {
   }
 })
 
+// 书籍统计预取缓存（只读，hover 时填充；当前书直接用 store 数据）
+const statsMap = ref<Record<string, { chapterCount: number; totalWords: number }>>({})
+
 function bookStats(book: Book): { chapterCount: number; totalWords: number } {
-  // 若当前 store 的 chapters 属于本书，用之；否则只能显示占位
+  // 若当前 store 的 chapters 属于本书，用之；否则用 hover 预取的只读统计
   if (currentBookId.value === book.id) {
     const chaps = chapters.value
     const totalWords = chaps.reduce((sum, c) => sum + (c.content_text?.length || 0), 0)
     return { chapterCount: chaps.length, totalWords }
   }
-  return { chapterCount: 0, totalWords: 0 }
+  return statsMap.value[book.id] ?? { chapterCount: 0, totalWords: 0 }
+}
+
+function hasStats(book: Book): boolean {
+  return currentBookId.value === book.id || book.id in statsMap.value
 }
 
 function openBook(book: Book) {
@@ -67,9 +69,16 @@ function openBook(book: Book) {
 }
 
 async function loadBookStats(book: Book) {
-  // 切换 store 当前书为这本书以获取章节数（轻量：仅当未加载时）
-  if (currentBookId.value !== book.id) {
-    store.selectBook(book.id)
+  // 只读预取章节统计：不切换全局当前书（避免 hover 触发整书重载）
+  if (currentBookId.value === book.id || book.id in statsMap.value) return
+  try {
+    const chaps: Chapter[] = await chapterApi.getAll(book.id)
+    statsMap.value[book.id] = {
+      chapterCount: chaps.length,
+      totalWords: chaps.reduce((sum, c) => sum + (c.content_text?.length || 0), 0),
+    }
+  } catch {
+    // 预取失败静默忽略，卡片仍显示占位
   }
 }
 
@@ -115,7 +124,8 @@ function openEditModal(book: Book) {
 async function submitEdit() {
   if (!editingBook.value || !editForm.value.title.trim()) return
   try {
-    await store.updateBook({
+    // 显式传被编辑书的 id，避免误改全局当前书
+    await store.updateBook(editingBook.value.id, {
       title: editForm.value.title,
       genre: editForm.value.genre,
       core_motifs_taboos: editForm.value.core_motifs_taboos,
@@ -142,15 +152,21 @@ async function deleteBook(book: Book) {
   }
 }
 
-// novel-wizard 完成回调（向导内部组装好数据后 emit finish）
-async function onWizardFinish(wizardData: any) {
+// novel-wizard 完成回调（向导 emit start-generation，payload 为嵌套的 WizardFormData）
+async function onWizardFinish(formData: any) {
   try {
+    // 字段映射：向导的嵌套结构 → 后端 Book 模型支持的扁平字段
+    // （world/locations/rules 等后端无对应列的内容并入 worldview_settings dict）
     const newBook = await store.createBook({
-      title: wizardData.title || '未命名',
-      genre: wizardData.genre,
-      global_sys_prompt: wizardData.global_sys_prompt,
-      core_motifs_taboos: wizardData.core_motifs_taboos,
-      worldview_settings: wizardData.worldview_settings,
+      title: formData.story?.title?.trim() || '未命名',
+      genre: formData.story?.genre,
+      global_sys_prompt: formData.story?.styleGuide,
+      core_motifs_taboos: formData.story?.themesAndTaboos,
+      worldview_settings: {
+        background: formData.world?.background ?? [],
+        locations: formData.world?.locations ?? [],
+        rules: formData.world?.rules ?? [],
+      },
     } as Partial<Book>)
     showWizard.value = false
     showToast('书籍已创建', 'success')
@@ -165,7 +181,17 @@ function onWizardCancel() {
 }
 
 const isEmpty = computed(() => books.value.length === 0)
-</script>
+
+// Markdown 批量导入：从指定书籍卡片触发（需先选中该书）
+const showImportModal = ref(false)
+const importTargetBookId = ref<string | null>(null)
+
+function openImportModal(book: Book) {
+  // 选中目标书（store.currentBookId 决定导入去向）
+  store.selectBook(book.id)
+  importTargetBookId.value = book.id
+  showImportModal.value = true
+}</script>
 
 <template>
   <div class="library-view">
@@ -219,11 +245,14 @@ const isEmpty = computed(() => books.value.length === 0)
           <h3 class="book-title">{{ book.title }}</h3>
           <p v-if="book.genre" class="book-genre">{{ book.genre }}</p>
           <p class="book-stats">
-            <span v-if="currentBookId === book.id">{{ bookStats(book).chapterCount }} 章</span>
+            <span v-if="hasStats(book)">{{ bookStats(book).chapterCount }} 章</span>
             <span v-else class="muted">点击查看</span>
           </p>
         </div>
         <div class="book-actions" @click.stop>
+          <button class="icon-btn" title="导入 .md 章节" @click="openImportModal(book)">
+            <Icon name="arrow-up-tray" :size="14" />
+          </button>
           <button class="icon-btn" title="编辑" @click="openEditModal(book)">
             <Icon name="pencil" :size="14" />
           </button>
@@ -288,20 +317,15 @@ const isEmpty = computed(() => books.value.length === 0)
       </div>
     </Transition>
 
-    <!-- novel-wizard 向导 -->
+    <!-- novel-wizard 向导（事件名与 NovelCreationWizard 的 emit 对齐） -->
     <Transition name="modal">
       <div v-if="showWizard" class="wizard-overlay">
-        <NovelCreationWizard @finish="onWizardFinish" @cancel="onWizardCancel" />
+        <NovelCreationWizard @start-generation="onWizardFinish" @close="onWizardCancel" />
       </div>
     </Transition>
 
-    <!-- 全局 ConfirmDialog（由 useConfirmDialog 驱动） -->
-    <ConfirmDialog
-      :visible="confirmVisible"
-      :options="confirmOptions"
-      @confirm="handleConfirm"
-      @cancel="handleCancel"
-    />
+    <!-- Markdown 批量导入 Modal -->
+    <MarkdownImportModal v-if="showImportModal" @close="showImportModal = false" />
   </div>
 </template>
 

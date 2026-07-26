@@ -43,9 +43,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from backend.services.llm import call_llm_with_usage
+from backend.core.model_config import get_default_reasoning_config, has_dedicated_wash_profile
 from backend.services.nlg.ai_taste_meter import DensityReport, measure_ai_taste
 from backend.services.nlg.anti_ai_rules import DensityThresholds, DEFAULT_THRESHOLDS
 from backend.services.nlg.text_sanitizer import sanitize_segment
+from backend.services.observability.run_recorder import RunRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +71,24 @@ class WashResult:
     reason: str
 
 
-# 洗涤 system prompt（明确反 AI 腔指令，复用 creative 槽语感）
+# 洗涤模型槽位：独立的 "wash" 槽（llm.wash），未配置时回退 creative。
+# 设计意图：正文由 creative 槽生成，AI 腔模板（"不是X是Y"/鼓点短段/三连排比）
+# 是该模型采样分布的众数——让同一模型"去 AI 味"等于从同一分布再采样，
+# 结构模板会再生。洗涤应与写作分模型；reasoning 槽承担着锚点设计/审计等
+# 其他职责不能占用，故设独立 wash 槽（设置面板可配，可指向另一家 provider）。
+_WASH_MODEL_TYPE = "wash"
+
+# 洗涤温度：0.8（原 0.5）。
+# 设计意图：低温度会贴近采样分布众数 = 更"AI 腔"，方向是反的；
+# 编辑任务不需要高发散，0.8 在"推离高频句式"和"遵守情节零损失约束"之间折中。
+_WASH_TEMPERATURE = 0.8
+
+# 洗涤 system prompt（明确反 AI 腔指令 + 段落级修辞模板改法）
 _WASH_SYSTEM = """你是顶级的中文小说文字编辑，专精"去 AI 腔"润色。
 
 你收到一段 AI 生成的小说正文，它带有明显的机械感。你的任务：**在保留全部情节、人物、设定不变的前提下，重写这段文字，消除 AI 味**。
 
-# 必须消除的 4 类 AI 腔
+# 必须消除的 5 类 AI 腔
 
 1. **病态微操**：无意义的微小动作（指尖颤动、瞳孔收缩、喉结滚动、睫毛轻颤、下巴微抬）。
    ——删掉，或替换为一个有信息量的具体动作。
@@ -84,6 +98,13 @@ _WASH_SYSTEM = """你是顶级的中文小说文字编辑，专精"去 AI 腔"�
    ——主动制造长短句交错。短句制造冲击，长句铺陈细节。删掉无信息量的后置修饰。
 4. **解释性插嘴**："不是因为他想这样，而是因为...""仿佛在说..."
    ——删掉。让动作和细节自己说话。
+5. **段落级修辞模板**（若"命中问题"中出现以下条目，必须对应处理）：
+   - 单句段滥用：≤15字的独立短段过多（"警报响了。""迟了。"）。把它们合并进上下文，
+     整段只保留极少数真正需要重锤的位置。
+   - "不是X，是Y"否定反转句：删掉先否定再肯定的绕路，直接陈述事实。
+   - 三连排比（"穿透A。穿透B。穿透C。""是X。是Y。是Z。"）：至多保留一处，其余拆散改写。
+   - 喻体复用：同一意象在多个比喻中回收（巨兽/巨人/活物）。每个意象只用一次，
+     其余换成贴合本场景的新鲜意象，或直接删掉比喻。
 
 # 硬约束
 
@@ -111,6 +132,8 @@ async def wash_segment_if_too_ai(
     report: DensityReport,
     thresholds: DensityThresholds = DEFAULT_THRESHOLDS,
     max_tokens: int = 4096,
+    recorder: Optional[RunRecorder] = None,
+    stage: str = "adf.wash",
 ) -> WashResult:
     """对 AI 味超标的段落执行 LLM 洗涤。
 
@@ -122,6 +145,9 @@ async def wash_segment_if_too_ai(
         report: 该段落的密度报告（来自 measure_ai_taste）
         thresholds: 阈值（用于判断洗后是否仍超标）
         max_tokens: 洗涤 LLM max_tokens 上限
+        recorder: RunRecorder（可选）。提供时洗涤 LLM 调用计入 generation_runs
+            （stage 默认 adf.wash，model_slot=wash），供章级成本报告聚合
+        stage: 计量 stage 名（segment_writer 传入 adf.wash.segment_N）
 
     Returns:
         WashResult：含最终文本、是否洗涤、前后分数、处置说明
@@ -156,13 +182,32 @@ async def wash_segment_if_too_ai(
     )
 
     try:
-        llm_result = await call_llm_with_usage(
-            system_prompt=_WASH_SYSTEM,
-            user_prompt=user_prompt,
-            model_type="creative",
-            temperature=0.5,
-            max_tokens=max_tokens,
+        # thinking 配置：独立 wash 槽尊重其 enabled/effort（默认关）；
+        # 回退 creative 时显式传 {} 关闭 thinking——编辑任务不需要深度思考，
+        # 避免继承 creative 的 effort=max 拖慢每次洗涤。
+        wash_reasoning_config = (
+            get_default_reasoning_config("wash") if has_dedicated_wash_profile() else {}
         )
+        if recorder is not None:
+            async with recorder.record_call(stage=stage, model_slot="wash") as call_ctx:
+                llm_result = await call_llm_with_usage(
+                    system_prompt=_WASH_SYSTEM,
+                    user_prompt=user_prompt,
+                    model_type=_WASH_MODEL_TYPE,
+                    temperature=_WASH_TEMPERATURE,
+                    max_tokens=max_tokens,
+                    reasoning_config=wash_reasoning_config,
+                )
+                call_ctx.set_result(llm_result)
+        else:
+            llm_result = await call_llm_with_usage(
+                system_prompt=_WASH_SYSTEM,
+                user_prompt=user_prompt,
+                model_type=_WASH_MODEL_TYPE,
+                temperature=_WASH_TEMPERATURE,
+                max_tokens=max_tokens,
+                reasoning_config=wash_reasoning_config,
+            )
         washed_text = (llm_result.content or "").strip()
     except Exception as e:
         logger.warning(f"[DeAI] 洗涤 LLM 调用失败，退回正则裁剪: {e}")

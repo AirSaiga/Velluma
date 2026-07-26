@@ -87,7 +87,7 @@ def resolve_characters(entities: List[Any]) -> List[dict]:
     修复 V3.2 bug：Phase 4 正文写作丢失 static_prompt（只有 dynamic_state）。
 
     Returns:
-        角色设定列表，每项 {name, static_prompt, dynamic_state}
+        角色设定列表，每项 {name, static_prompt, dynamic_state, aliases}
     """
     result = []
     for ent in (entities or [])[:MAX_CHARACTERS]:
@@ -101,6 +101,7 @@ def resolve_characters(entities: List[Any]) -> List[dict]:
             "name": name,
             "static_prompt": static,
             "dynamic_state": dynamic,
+            "aliases": _get_field(char, "aliases") or [],
         })
     return result
 
@@ -112,7 +113,7 @@ def resolve_locations(chapter_locations: List[Any]) -> List[dict]:
     取 name + description + current_state。
 
     Returns:
-        地点设定列表，每项 {name, description, current_state}
+        地点设定列表，每项 {name, description, current_state, aliases}
     """
     result = []
     for cl in (chapter_locations or [])[:MAX_LOCATIONS]:
@@ -128,6 +129,7 @@ def resolve_locations(chapter_locations: List[Any]) -> List[dict]:
                 "name": name,
                 "description": desc,
                 "current_state": state,
+                "aliases": _get_field(loc, "aliases") or [],
             })
         except Exception:
             # 防御：lazy load 触发 MissingGreenlet 时跳过该项，不阻塞生成
@@ -142,7 +144,7 @@ def resolve_assets(chapter_assets: List[Any]) -> List[dict]:
     取 name + static_description + current_state。
 
     Returns:
-        资产设定列表，每项 {name, description, current_state}
+        资产设定列表，每项 {name, description, current_state, aliases}
     """
     result = []
     for ca in (chapter_assets or [])[:MAX_ASSETS]:
@@ -156,6 +158,7 @@ def resolve_assets(chapter_assets: List[Any]) -> List[dict]:
             "name": name,
             "description": desc,
             "current_state": state,
+            "aliases": _get_field(asset, "aliases") or [],
         })
     return result
 
@@ -168,6 +171,9 @@ def resolve_relationships(
 
     只召回 source/target 都在 characters 列表中的关系（在场角色之间的关系）。
     取 relation_type + affinity_score + interaction_prompt。
+
+    ⚠ is_public=False 的关系（隐藏关系）不进返回列表——直接喂给生成会把
+    秘密关系泄露到正文。隐藏关系走 resolve_hidden_constraints 的否定约束通道。
 
     Args:
         relationships: 全部角色关系（CharacterRelationship ORM 列表）
@@ -187,6 +193,9 @@ def resolve_relationships(
     result = []
     for rel in relationships[:MAX_RELATIONSHIPS * 2]:  # 多取一些再过滤
         try:
+            # 隐藏关系不召回进 prompt（泄露防护）；is_public 缺失（None）视为公开
+            if _get_field(rel, "is_public") is False:
+                continue
             source_char = _get_field(rel, "source_character")
             target_char = _get_field(rel, "target_character")
             source_name = _get_field(source_char, "name") if source_char else None
@@ -212,6 +221,51 @@ def resolve_relationships(
         if len(result) >= MAX_RELATIONSHIPS:
             break
     return result
+
+
+def resolve_hidden_constraints(
+    relationships: List[Any],
+    characters: List[dict],
+) -> List[str]:
+    """把 is_public=False 的隐藏关系转为否定约束行（知识边界通道）。
+
+    设计意图：
+    - 隐藏关系（如"白霆与林尘是兄弟，不为外人所知"）不能直接喂给生成——
+      LLM 看到"他们是兄弟"就会让角色表现出来，秘密关系就此泄露。
+    - 正确做法是只给否定约束："这段关系不为外人所知，其他角色不得表现出知情"。
+      LLM 不知道关系细节（除非该角色本人），但知道"不许点破"。
+
+    Args:
+        relationships: 全部角色关系（CharacterRelationship ORM 列表）
+        characters: resolve_characters 的返回值（本章在场角色）
+
+    Returns:
+        否定约束行列表；无隐藏关系时返回空列表
+    """
+    if not relationships or not characters:
+        return []
+
+    char_names = {c["name"] for c in characters}
+    constraints: List[str] = []
+    for rel in relationships[:MAX_RELATIONSHIPS * 2]:
+        try:
+            # 只处理明确标记为隐藏的关系（None 视为公开，跳过）
+            if _get_field(rel, "is_public") is not False:
+                continue
+            source_char = _get_field(rel, "source_character")
+            target_char = _get_field(rel, "target_character")
+            source_name = _get_field(source_char, "name") if source_char else None
+            target_name = _get_field(target_char, "name") if target_char else None
+            # 两端都在场才需要约束（不在场的关系本章不会被写出）
+            if source_name and target_name and source_name in char_names and target_name in char_names:
+                relation_type = _get_field(rel, "relation_type") or "未知关系"
+                constraints.append(
+                    f"{source_name}与{target_name}的关系（{relation_type}）不为外人所知："
+                    f"其他角色不得表现出知情，正文不得直接点破"
+                )
+        except Exception:
+            logger.warning(f"[SettingResolver] 隐藏关系约束解析失败，跳过: {type(rel).__name__}")
+    return constraints
 
 
 def build_scene_setting_text(
@@ -248,6 +302,7 @@ def build_scene_setting_text(
     locations = resolve_locations(chapter_locations)
     assets = resolve_assets(chapter_assets)
     rels = resolve_relationships(relationships, characters)
+    hidden_constraints = resolve_hidden_constraints(relationships, characters)
 
     if not characters and not locations and not assets:
         return ""
@@ -298,6 +353,12 @@ def build_scene_setting_text(
             if r["interaction"]:
                 line += f"｜{r['interaction']}"
             parts.append(line)
+
+    # 隐藏信息约束（is_public=False 关系的否定约束，防泄露）
+    if hidden_constraints:
+        parts.append("\n## 隐藏信息约束（绝不许泄露）")
+        for c in hidden_constraints:
+            parts.append(f"- {c}")
 
     # 设定堆砌防御指令（反 info-dump）
     parts.append(

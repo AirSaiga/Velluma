@@ -29,15 +29,23 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: Tier): void
 }>()
 
-// 从 localStorage 恢复定档
+// 从 localStorage 恢复定档：仅当父组件未显式指定（值为默认 'auto'）时才恢复，
+// 避免挂载时覆盖父组件传入的 modelValue（跨章节串味）。
+// 恢复后显式 emit 同步回父组件——赋值发生在下方 watch 注册之前，不会触发 watch，
+// 不同步会导致选择器显示与父组件实际值不一致。
 const tier = ref<Tier>(props.modelValue)
-try {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved === 'auto' || saved === 'climax' || saved === 'turn' || saved === 'progress' || saved === 'transition') {
-    tier.value = saved
+if (props.modelValue === 'auto') {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved === 'auto' || saved === 'climax' || saved === 'turn' || saved === 'progress' || saved === 'transition') {
+      tier.value = saved
+      if (saved !== 'auto') {
+        emit('update:modelValue', saved)
+      }
+    }
+  } catch {
+    // 忽略 localStorage 异常
   }
-} catch {
-  // 忽略 localStorage 异常
 }
 
 watch(tier, (val) => {

@@ -47,13 +47,16 @@ export interface UseCanon {
   extract: (bookId: string, chapterId: string, autoCommit?: boolean) => Promise<CanonExtractionResult>
 }
 
-export function useCanon(): UseCanon {
-  const nodes = ref<CanonNode[]>([])
-  const edges = ref<CanonEdge[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+// 模块级单例状态：CanonView 与 NodeEditModal/EdgeEditModal 各自调用 useCanon()，
+// 必须共享同一份状态，否则弹窗内的 CRUD 刷新不到视图持有的实例。
+const nodes = ref<CanonNode[]>([])
+const edges = ref<CanonEdge[]>([])
+const loading = ref(false)
+const error = ref<string | null>(null)
 
-  let currentBookId: string | null = null
+let currentBookId: string | null = null
+
+export function useCanon(): UseCanon {
 
   async function load(bookId: string) {
     currentBookId = bookId

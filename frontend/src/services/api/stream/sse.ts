@@ -35,6 +35,8 @@ export async function streamSse(
   let buffer = ''
   let ended = false
   let hasContent = false
+  // JSON 解析失败计数：偶发坏帧可跳过，连续失败说明协议被破坏，应显式报错而非静默吞掉
+  let parseErrors = 0
 
   const finalize = () => {
     if (ended) return
@@ -79,6 +81,13 @@ export async function streamSse(
             }
           } catch (e) {
             console.error('streamSse JSON 解析错误', e)
+            parseErrors += 1
+            if (parseErrors >= 5 && !ended) {
+              ended = true
+              reader.cancel().catch(() => {})
+              handlers.onError?.('数据流解析失败：收到连续无效帧，请重试')
+              return
+            }
           }
         }
 

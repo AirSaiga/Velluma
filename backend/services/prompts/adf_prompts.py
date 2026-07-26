@@ -24,17 +24,20 @@ ADF（Anchor-Driven Flow）引擎 prompt 模板（V3.2 §4 新建）。
 - Phase 4 正向流写作 prompt（build_forward_flow_prompt）
 - Phase 5 锚点审计 prompt（build_anchor_audit_prompt）
 - Phase 6 条件补埋 prompt（build_refine_prompt）
+- Phase 7 一致性审计 prompt（build_consistency_audit_prompt）
 
 设计意图：
 - 正向流写作的核心是"软提示"——告诉 LLM 建议下段埋什么，但不强制怎么写
 - 情绪曲线进度条作为连续约束（替代 V3.1 整数 distance_to_climax）
 - 远端锚作为"牵引"而非"路径"：高潮描述每段都注入，但不强制"现在必须写什么"
+- 一致性审计用"证据锚定"防 judge 幻觉：每条 issue 必须引用设定原文
 
 业务场景：
 - workflows/adf/climax_designer.py      → build_anchor_design_prompt
 - workflows/adf/segment_writer.py       → build_forward_flow_prompt
 - workflows/adf/structure_checker.py    → build_anchor_audit_prompt
 - workflows/adf/refiner.py              → build_refine_prompt
+- workflows/adf/consistency_guard.py    → build_consistency_audit_prompt
 
 使用方式：
     system, user = build_forward_flow_prompt(...)
@@ -44,6 +47,8 @@ ADF（Anchor-Driven Flow）引擎 prompt 模板（V3.2 §4 新建）。
 - 无（纯模板）
 """
 
+import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
@@ -263,7 +268,9 @@ FORWARD_FLOW_USER_TEMPLATE = """# 当前进度
 
 # 本段目标字数
 
-约 {target_words} 字（上限 {target_words} 字，不许超出——超出会被截断导致正文不完整）。
+约 {target_words} 字（可上下浮动 20%，自然写完即可，不必凑字数）。
+
+{hard_constraints}
 
 # 要求
 
@@ -290,6 +297,7 @@ def build_forward_flow_prompt(
     character_arc_advances: str,
     soft_hints: str,
     target_words: int,
+    hard_constraints: str = "",
 ) -> Tuple[str, str]:
     """构建正向流写作 prompt（Phase 4，每段一次）。
 
@@ -297,6 +305,8 @@ def build_forward_flow_prompt(
     - climax_anchor + emotion_curve 进 system 层（每段固定，吃 prompt 缓存）
     - rolling_prefix + 软提示进 user 层（每段变化）
     - 软提示是"建议"而非"必须"——让 LLM 自主决定如何自然融入
+    - hard_constraints（专名表/知识边界/在场提示）放 user 末尾吃近因效应；
+      默认空串，现有调用方不传时行为不变
 
     Args:
         见 FORWARD_FLOW_SYSTEM_TEMPLATE / FORWARD_FLOW_USER_TEMPLATE 中的占位符
@@ -326,6 +336,7 @@ def build_forward_flow_prompt(
         character_arc_advances=character_arc_advances or "（未指定）",
         soft_hints=soft_hints or "（无特别建议，让前文自然涌出）",
         target_words=target_words,
+        hard_constraints=hard_constraints or "",
     )
 
     return system_prompt, user_prompt
@@ -409,6 +420,19 @@ ANCHOR_AUDIT_SYSTEM = """你是严格的小说结构审校员。
 - 句式匀速（长短句过于均匀，后置修饰语"眼中带着一抹..."泛滥）
 违反的，加入 style_violations（描述具体问题段位置），并给 style_score 1-10（<6 表示需要润色）。
 
+## 维度 6：大纲节拍覆盖
+对照"大纲节拍清单"，逐个核对每个节拍在正文中是否被写到：
+- covered：该节拍已被正文完整写到
+- partial：写到了但被弱化/一笔带过（只上报，不影响 verdict）
+- missing：正文完全没有写到该节拍
+判 missing 的节拍必须同时给出三个字段：
+- evidence：为什么判缺（正文哪里本应出现却没有）
+- insert_anchor_quote：正文中一段原文引文（≤50 字，必须逐字摘自正文），补写内容将插在它前面或后面
+- insert_position：before | after（补写内容相对引文的位置）
+**引不出 insert_anchor_quote 的节拍不许判 missing**（防误报，伪锚会被代码侧丢弃）。
+节拍清单中括号里的代码预判仅供参考（可能误报），以你的语义判断为准。
+无节拍清单时本维度跳过。
+
 # 输出格式
 
 严格 JSON：
@@ -422,12 +446,22 @@ ANCHOR_AUDIT_SYSTEM = """你是严格的小说结构审校员。
   "climax_score": 7,
   "style_violations": ["第三段堆砌5处微操动作（指尖颤/瞳孔缩/喉结滚）"],
   "style_score": 5,
+  "missing_beats": [
+    {
+      "beat": "林尘在工棚借着灯光读书，被工头打断",
+      "status": "missing",
+      "evidence": "正文直接从仓库废墟开场，读书与工头打断均未出现",
+      "insert_position": "before",
+      "insert_anchor_quote": "灰尘还没散"
+    }
+  ],
   "refinement_targets": ["PC_REAL_POWER"]
 }
 ```
 
 判定规则：
 - 任何 missing_preconditions 非空 → needs_refinement
+- 任何 status=missing 的大纲节拍 → needs_refinement
 - climax_score < 7 → needs_refinement
 - spine_violations 含关键违反（钩子丢失/角色弧没推进）→ needs_refinement
 - style_score < 6 → needs_refinement（文风质量不达标）
@@ -455,6 +489,10 @@ ANCHOR_AUDIT_USER_TEMPLATE = """# 章节信息
 - 必须回收的伏笔：{must_resolve_hooks}
 - 角色弧推进要求：{character_arc_advances}
 
+# 大纲节拍清单（维度 6 逐个核对；括号为代码预判，仅供参考）
+
+{outline_beats}
+
 # 待审正文（全文）
 
 {full_text}
@@ -476,12 +514,17 @@ def build_anchor_audit_prompt(
     must_resolve_hooks: List[str],
     character_arc_advances: Dict[str, str],
     full_text: str,
+    outline_beats: Optional[List[str]] = None,
+    beat_suspects: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, str]:
     """构建锚点审计 prompt（Phase 5）。
 
     Args:
         见 ANCHOR_AUDIT_USER_TEMPLATE 占位符
         full_text: 完整正文（截断到 6000 字）
+        outline_beats: 大纲节拍清单（None/空 → 模板显示"无大纲，跳过节拍校验"）
+        beat_suspects: score_beat_coverage 的代码预判（按 beat 标注在清单上；
+            "未知"不标注）
 
     Returns:
         tuple: (system_prompt, user_prompt)
@@ -489,6 +532,20 @@ def build_anchor_audit_prompt(
     hooks_text = ", ".join(must_plant_hooks) if must_plant_hooks else "（无）"
     resolve_text = ", ".join(must_resolve_hooks) if must_resolve_hooks else "（无）"
     arc_text = "; ".join(f"{k}→{v}" for k, v in character_arc_advances.items()) if character_arc_advances else "（无）"
+
+    if outline_beats:
+        guess_map = {
+            s.get("beat"): s.get("guess")
+            for s in (beat_suspects or [])
+            if s.get("guess") and s.get("guess") != "未知"
+        }
+        beat_lines = []
+        for beat in outline_beats:
+            guess = guess_map.get(beat)
+            beat_lines.append(f"- {beat}（代码预判：{guess}）" if guess else f"- {beat}")
+        beats_text = "\n".join(beat_lines)
+    else:
+        beats_text = "（无大纲，跳过节拍校验）"
 
     user_prompt = ANCHOR_AUDIT_USER_TEMPLATE.format(
         purpose=purpose or "（未指定）",
@@ -501,6 +558,7 @@ def build_anchor_audit_prompt(
         must_plant_hooks=hooks_text,
         must_resolve_hooks=resolve_text,
         character_arc_advances=arc_text,
+        outline_beats=beats_text,
         # 头尾采样而非仅取前 6000 字：高潮段在文末，只取头部会漏审高潮验收。
         # 短文（<=12000字）全量；长文取首 6000 + 尾 4000（尾段覆盖高潮）。
         full_text=_sample_head_tail(full_text or ""),
@@ -534,6 +592,7 @@ REFINE_SYSTEM_TEMPLATE = """你是中文长篇小说的精修编辑。
 3. 必须包含设定的关键词：{must_use_terms}
 4. 保留原段落的所有其他内容，只做最小侵入式补充。
 5. 输出补写后的**完整段落**（不是只输出补充部分）。
+6. 只输出你选定的那**一段**——严禁包含其他任何段落的内容，严禁从章节开头重写。
 
 # 文风契约
 
@@ -656,11 +715,11 @@ PRUNE_SYSTEM_TEMPLATE = """你是顶级的中文网络小说文字剪辑师，�
 
 # 必须消除的 AI 腔（重构，不是删除）
 
-1. **匀速句式 → 长短交错**。
-   AI 生成的段落常像节拍器——每句长度接近、结构对称。你必须在段落里制造陡峭的顿挫感：
-   - 把超过 12-15 字的长句切断成短句，用句号收束。
-   - 允许连续出现 2-4 字的极短句（"他没动。""血。""冷。"），紧接着一个含多个动词的短连句。
-   - 长句铺陈细节，短句制造冲击与停顿。长短交错，不要匀速。
+1. **匀速句式 → 长短交错（以正常语流为主）**。
+   AI 生成的段落常像节拍器——每句长度接近、结构对称。你要打破这种匀速，但**方向是把模板化的中长句写活，不是把句子切碎**：
+   - 以正常语流的长句铺陈为主，短句只在真正需要重锤/停顿的位置偶尔使用（每段至多 1-2 处）。
+   - **严禁把整段切成 10 字以内的碎句连发**（"他没动。血。冷。"式机枪句）——那是另一种 AI 腔，比匀速更糟。
+   - 判断标准：普通叙述句保持自然完整的语法结构；只有情绪高点才允许短句冲击。
 
 2. **逻辑过渡词 → 硬切硬接**。
    AI 爱用"然而/但是/随后/与此同时/不仅……反而/随着/渐渐地"把动作硬拼成因果链。
@@ -705,7 +764,7 @@ PRUNE_USER_TEMPLATE = """# 待剪枝段落（AI 生成正文，需重构去 AI �
 
 # 要求
 
-重构这段，按上面的"去 AI 腔"规则制造长短交错的陡峭节奏、删逻辑过渡词、剥套路比喻、心理转物理。
+重构这段，按上面的"去 AI 腔"规则把匀速句式写活（以正常语流为主，不要把句子切碎）、删逻辑过渡词、剥套路比喻、心理转物理。
 保留全部情节和角色设定。只输出重构后的正文。"""
 
 
@@ -811,3 +870,474 @@ def build_ooc_check_prompt(
         pruned_text=pruned_text,
     )
     return system_prompt, user_prompt
+
+
+# ============================================================
+# Phase 7: 一致性审计 prompt（CONSISTENCY_GUARD，1 次 reasoning）
+# ============================================================
+#
+# 设计意图：
+# - 与 Phase 5 锚点审计分工不同：锚点审计只管结构/情绪/钩子（且头尾采样），
+#   一致性审计只管"设定幻觉"四类问题，必须看全文。
+# - judge 防幻觉的核心手段是"证据锚定"：每条 issue 必须引用设定原文
+#   （canon_evidence），引不出证据就不许报；代码侧再丢弃无证据 issue 双保险。
+# - 代码预扫 suspects（专名漂移/未注册人名）逐条交 LLM 确认或驳回，
+#   代码不直接自动改（滑窗/jieba 有误报）。
+
+# 一致性审计承认的问题类型（其余类型一律不管，交给已有环节）
+CONSISTENCY_ISSUE_TYPES = (
+    "name_drift",           # 专名漂移（老赵→老张）
+    "knowledge_breach",     # 知识越界（泄露 private 真相/隐藏关系、角色无铺垫知情）
+    "setting_conflict",     # 设定冲突（与 Canon public 事实/场景设定矛盾）
+    "state_contradiction",  # 状态矛盾（受伤却健步如飞、机甲在内却说在外）
+)
+
+CONSISTENCY_AUDIT_SYSTEM = """你是严格的小说设定一致性审校员。
+
+你的任务：对照设定基准（专名表 / Canon / 场景设定 / 知识边界约束），审查小说正文是否存在设定幻觉。你只管以下四类问题，其他问题（文风、节奏、结构）一律不报。
+
+# 四类问题判定标准
+
+1. **name_drift（专名漂移）**：同一角色/地点/物品被指称为专名表以外的名字。
+   例：专名表只有"老赵"，正文却写"老张"。注意区分：同一个人物的合法别名不算漂移（别名已在专名表列出）。
+2. **knowledge_breach（知识越界）**：正文直接说出、暗示或提及了知识边界约束中禁止的信息；或某角色在毫无铺垫的情况下知道了按设定他不可能知道的事（如初次见面就叫出对方全名）。
+3. **setting_conflict（设定冲突）**：正文的描写与 Canon public 已建立事实或场景设定直接矛盾。
+4. **state_contradiction（状态矛盾）**：角色/物品的状态前后矛盾。
+   例：前文受伤的角色健步如飞；人在机甲内却描写成在机甲外。
+
+# 铁律（违反即审计失败）
+
+- **每条 issue 必须给 canon_evidence**：从专名表 / Canon / 场景设定 / 知识边界约束中引用设定原文作为证据。**引不出证据的问题不许报**——你的判断也会幻觉，证据是唯一锚点。
+- 代码预扫 suspects 列表需**逐条确认或驳回**：确认的转为 issue，驳回的列入 rejected_suspects 并简述理由。
+- 只报 severity 为 high 或 medium 的问题；拿不准的、影响微小的不报。
+- location.paragraph 填正文段标 [Pn] 中的数字 n；location.quote 填问题所在的原文引句（≤50 字，必须逐字摘自正文）。
+
+# 输出格式（严格 JSON）
+
+```json
+{
+  "issues": [
+    {
+      "id": "C001",
+      "type": "name_drift",
+      "severity": "high",
+      "location": {"paragraph": 3, "quote": "老张把安全帽往头上一扣"},
+      "diagnosis": "工头在第3段被称为「老张」，与专名表冲突",
+      "suggestion": "把「老张」改为「老赵」",
+      "canon_evidence": "专名表：- 老赵",
+      "impact_radius": "local"
+    }
+  ],
+  "rejected_suspects": ["老张：已确认为 name_drift，转入 issues", "..."]
+}
+```
+
+无问题时返回 {"issues": [], "rejected_suspects": [...]}。只输出 JSON。"""
+
+CONSISTENCY_AUDIT_USER_TEMPLATE = """# 设定基准
+
+## 专名表（合法表记的唯一来源）
+{name_registry}
+
+## Canon（作者脑中世界，最高约束）
+{canon_context}
+
+## 场景设定（本章角色/地点/资产/关系）
+{scene_setting}
+
+## 知识边界约束（正文绝不许越界）
+{knowledge_constraints}
+
+# 代码预扫 suspects（需逐条确认或驳回）
+{suspects}
+
+# 待审正文（[Pn] 为段号，共 {paragraph_count} 段）
+
+{full_text}
+
+# 要求
+
+返回严格 JSON。每条 issue 必须带 canon_evidence 引用上方设定基准的原文，引不出证据不许报。"""
+
+
+def build_consistency_audit_prompt(
+    name_registry_block: str,
+    canon_context: str,
+    scene_setting_text: str,
+    knowledge_constraints: List[str],
+    suspects: List[Dict[str, Any]],
+    marked_text: str,
+    paragraph_count: int,
+) -> Tuple[str, str]:
+    """构建一致性审计 prompt（Phase 7，1 次 reasoning）。
+
+    Args:
+        name_registry_block: registry_to_prompt_block 的输出（专名表文本）
+        canon_context: Canon 全文上下文
+        scene_setting_text: 场景设定文本（build_scene_setting_text 输出）
+        knowledge_constraints: 知识边界约束行列表
+        suspects: scan_name_anomalies 的代码预扫结果
+        marked_text: 带 [Pn] 段标的正文（超长时已按头/中/尾采样）
+        paragraph_count: 正文总段数（采样时仍传真实总数）
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    if knowledge_constraints:
+        constraints_text = "\n".join(f"- {c}" for c in knowledge_constraints)
+    else:
+        constraints_text = "（无）"
+
+    if suspects:
+        suspect_lines = []
+        for s in suspects[:20]:  # 上限 20 条，防 prompt 爆炸
+            suspect_lines.append(
+                f"- [{s.get('type', '?')}] {s.get('detail', str(s))}"
+            )
+        suspects_text = "\n".join(suspect_lines)
+    else:
+        suspects_text = "（无代码预扫疑点）"
+
+    user_prompt = CONSISTENCY_AUDIT_USER_TEMPLATE.format(
+        name_registry=name_registry_block or "（无注册专名）",
+        canon_context=canon_context or "（Canon 为空）",
+        scene_setting=scene_setting_text or "（无场景设定）",
+        knowledge_constraints=constraints_text,
+        suspects=suspects_text,
+        full_text=marked_text or "（正文为空）",
+        paragraph_count=paragraph_count,
+    )
+    return CONSISTENCY_AUDIT_SYSTEM, user_prompt
+
+
+def _extract_audit_json(content: str) -> Optional[dict]:
+    """从 LLM 输出提取 JSON 对象（复用 structure_checker 的 _extract_json 模式）。
+
+    注意：不能 import structure_checker._extract_json——structure_checker
+    import 本模块，反向 import 会成环。此处是同模式的独立拷贝。
+    """
+    if not content:
+        return None
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+    brace_match = re.search(r"\{.*\}", content, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def parse_consistency_audit_response(content: str) -> List[Dict[str, Any]]:
+    """解析一致性审计响应，返回过滤后的 issue 列表。
+
+    过滤规则（judge 防幻觉的代码侧双保险）：
+    - 缺 canon_evidence 的 issue 直接丢弃（无证据不允许报）
+    - 缺 location.quote 的 issue 直接丢弃（无法定位原文，手术无从下刀）
+    - 只保留 type 属于 CONSISTENCY_ISSUE_TYPES 的 issue
+
+    Args:
+        content: LLM 原始输出（可带 markdown 围栏）
+
+    Returns:
+        issue dict 列表（每项保证含 id/type/severity/location/canon_evidence）；
+        解析失败时返回空列表（调用方按"无问题"降级处理）
+    """
+    data = _extract_audit_json(content)
+    if not data:
+        return []
+    raw_issues = data.get("issues")
+    if not isinstance(raw_issues, list):
+        return []
+
+    issues: List[Dict[str, Any]] = []
+    for i, raw in enumerate(raw_issues):
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("type") not in CONSISTENCY_ISSUE_TYPES:
+            continue
+        canon_evidence = (raw.get("canon_evidence") or "").strip()
+        if not canon_evidence:
+            continue
+        location = raw.get("location")
+        if not isinstance(location, dict) or not (location.get("quote") or "").strip():
+            continue
+        issues.append({
+            "id": raw.get("id") or f"C{i + 1:03d}",
+            "type": raw["type"],
+            "severity": raw.get("severity") or "medium",
+            "location": location,
+            "diagnosis": raw.get("diagnosis") or "",
+            "suggestion": raw.get("suggestion") or "",
+            "canon_evidence": canon_evidence,
+            "impact_radius": raw.get("impact_radius") or "local",
+        })
+    return issues
+
+
+# ============================================================
+# Phase 6.5: 缺失节拍补写 prompt（BEAT_PATCH，每个节拍 1 次 creative）
+# ============================================================
+#
+# 设计意图：
+# - 与 Phase 6 条件补埋（refiner，内嵌式补关键词）分工不同：
+#   补埋治"关键词级"缺失，本补写治"整场戏缺失"（大纲节拍被跳过）。
+# - 定点插入而非整章重写：缺口是局部的过渡段，重写引入新风险且贵。
+# - 锚点前后段原文都给 LLM，让补写内容无缝衔接（插入位置 before/after
+#   由审计 LLM 的 insert_position 决定）。
+
+BEAT_PATCH_SYSTEM = """你是顶级的中文长篇小说作家。
+
+你的任务：补写一段**缺失的剧情节拍**。编辑审计发现正文漏掉了大纲中的一个节拍，你负责只写这一段过渡内容，无缝衔接前后文。
+
+# 硬性要求
+
+1. 你只写缺失的这一段过渡内容（150~400 字），**不要重写前后已有内容**，不要从章节开头写起。
+2. 内容必须与给定的大纲节拍严格对应，写完即停，不要顺势写下文。
+3. 开头自然承接【锚点前段】的结尾，结尾自然引向【锚点后段】的开头（若标注"本章结尾"则自然收束）。
+4. 只输出小说正文：不要段标题、不要 markdown 标记、不要解释。
+
+# 文风契约
+
+{style_contract}"""
+
+BEAT_PATCH_USER_TEMPLATE = """# 缺失的大纲节拍（必须在补写中完整写到）
+
+{beat}
+
+# 章节主旨
+
+{purpose}
+
+# 锚点前段原文（你的补写接在它后面）
+
+{anchor_before}
+
+# 锚点后段原文（你的补写引向它）
+
+{anchor_after}
+
+{name_registry_block}
+
+# 要求
+
+只输出补写正文（150~400 字）。"""
+
+
+def build_beat_patch_prompt(
+    beat: str,
+    purpose: str,
+    anchor_before: str,
+    anchor_after: str,
+    insert_position: str,
+    style_contract: str,
+    name_registry_block: str,
+) -> Tuple[str, str]:
+    """构建缺失节拍补写 prompt（Phase 6.5，每个缺失节拍一次）。
+
+    Args:
+        beat: 缺失的大纲节拍原文
+        purpose: 章节主旨
+        anchor_before / anchor_after: 锚点前后段原文（供衔接）
+        insert_position: before | after（补写相对锚点的插入位置，
+            仅影响语义说明，文本由调用方已按位置选好前后段）
+        style_contract: 文风契约（注入 system 层）
+        name_registry_block: 专名表硬约束（可为空串，空则不出现该区块）
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    system_prompt = BEAT_PATCH_SYSTEM.format(
+        style_contract=style_contract or "（未指定，按通用中文文学小说风格）",
+    )
+    user_prompt = BEAT_PATCH_USER_TEMPLATE.format(
+        beat=beat or "（未指定）",
+        purpose=purpose or "（未指定）",
+        anchor_before=anchor_before or "（本章开头）",
+        anchor_after=anchor_after or "（本章结尾）",
+        name_registry_block=name_registry_block or "",
+    )
+    return system_prompt, user_prompt
+
+
+# ============================================================
+# Agent Loop 1: 段级状态卡抽取 prompt（每段 1 次小 creative）
+# ============================================================
+#
+# 设计意图：
+# - 只抽取"事实状态"，不评价文风、不创作——抽取器是记录员不是编辑
+# - 角色名强制从注册表清单选（防 LLM 发明新名字污染下游校验）
+# - 自纠正：每次输出"更新后的完整新卡"，不做增量合并（错误不沿链累积）
+# - 拿不准留空、严禁编造——空字段比错字段安全（空字段不参与校验）
+
+STATE_EXTRACTION_SYSTEM = """你是剧情状态记录员。你的唯一任务：根据"截至上一段的状态卡"和"刚写完的新一段正文"，输出更新后的完整剧情状态卡。
+
+# 铁律
+
+1. 只抽取事实状态（谁在场/谁死亡或离场/各角色一句话状态/关键物品归属/剧情进展/POV/地点），不评价文风，不创作任何内容。
+2. 角色名**只能**从给定清单中选择，绝不许使用清单外的名字。
+3. 拿不准的字段留空（空串或空列表），**严禁编造**——空比错安全。
+4. 输出是"更新后的完整新卡"（不是增量）：新段没改变的字段从旧卡原样保留。
+5. departed（死亡/离场）一旦加入，除非新段明确复活/回归，否则保留。
+6. 只输出严格 JSON，不要输出任何其他内容。
+
+# 输出 schema
+
+```json
+{
+  "pov": "视角角色名",
+  "location": "当前地点",
+  "present": ["在场角色名"],
+  "departed": ["已死亡或离场角色名"],
+  "states": {"角色名": "一句话状态（伤势/情绪/位置）"},
+  "items": {"关键物品": "持有者或位置"},
+  "progress": "剧情进展一句话"
+}
+```"""
+
+STATE_EXTRACTION_USER_TEMPLATE = """# 截至上一段的状态卡
+
+{prev_card_text}
+
+# 刚写完的新一段正文
+
+{segment_text}
+
+# 已知角色清单（角色名只能从这里选）
+
+{known_characters}
+
+# 要求
+
+输出更新后的完整状态卡（严格 JSON）。"""
+
+
+def build_state_extraction_prompt(
+    prev_card_text: str,
+    segment_text: str,
+    known_characters: str,
+) -> Tuple[str, str]:
+    """构建状态卡抽取 prompt（每段定稿后一次）。
+
+    Args:
+        prev_card_text: 上一张卡的渲染文本（card_to_prompt_block 输出）
+        segment_text: 刚写完的本段正文
+        known_characters: 已知角色名清单（顿号连接）
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    user_prompt = STATE_EXTRACTION_USER_TEMPLATE.format(
+        prev_card_text=prev_card_text or "（首张卡，无历史状态）",
+        segment_text=segment_text or "（空段）",
+        known_characters=known_characters or "（无角色清单）",
+    )
+    return STATE_EXTRACTION_SYSTEM, user_prompt
+
+
+# ============================================================
+# Agent Loop 2: 手术编辑复验 prompt（Phase 7 第 6 步，0~1 次 reasoning）
+# ============================================================
+#
+# 设计意图：
+# - "修完不复验"是既有缺口：定点手术可能修对目标却引入新问题
+#  （设定矛盾/剧情重复/逻辑断裂/文风崩坏）。
+# - 复验方向保守：只报"改动新引入"的问题；无 problems 描述的 not-ok
+#   在解析侧视为 ok（防复验 LLM 自己幻觉误杀好修复——回滚代价是少修
+#   一处，可接受；误杀代价是好修复被丢，不可接受）。
+
+EDIT_VERIFY_SYSTEM = """你是严格的小说编辑复验员。
+
+刚有一批"定点手术"修改了章节正文（每个手术给出改动前原文、改动后文本、前后邻段）。你的任务：逐个判断**改动是否引入了新问题**。
+
+# 只报改动新引入的问题（原文本来就有的问题不算）：
+
+1. 设定矛盾：改动后与邻段或上下文设定冲突
+2. 剧情重复：改动后与邻段内容高度重复（同一场景写两遍）
+3. 逻辑断裂：改动后与前后文衔接不上（话题突变、指代不明）
+4. 文风崩坏：改动后的文字明显不如原文（机械腔、语无伦次）
+
+# 判定原则
+
+- 改动解决问题且没引入新问题 → ok=true
+- 拿不准 → ok=true（保守方向：宁可放过，不误杀好修复）
+- ok=false **必须**在 problems 里写清引入了什么新问题
+
+# 输出格式（严格 JSON）
+
+```json
+{"verdicts": [{"operation_id": "OP001", "ok": true, "problems": ""}]}
+```
+
+只输出 JSON。"""
+
+EDIT_VERIFY_USER_TEMPLATE = """# 待复验的手术改动（共 {edit_count} 个）
+
+{edits_text}
+
+# 要求
+
+逐个给出 verdict（严格 JSON）。"""
+
+
+def build_edit_verify_prompt(
+    edits_with_neighbors: List[Dict[str, Any]],
+) -> Tuple[str, str]:
+    """构建编辑复验 prompt（Phase 7 第 6 步，全部手术一次复验）。
+
+    Args:
+        edits_with_neighbors: 每个手术 {
+            operation_id, original_text, revised_text,
+            prev_neighbor, next_neighbor,
+        }
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    blocks = []
+    for edit in edits_with_neighbors:
+        blocks.append(
+            f"## 手术 {edit.get('operation_id', 'OP?')}\n"
+            f"[改动前原文]\n{edit.get('original_text', '')}\n\n"
+            f"[改动后]\n{edit.get('revised_text', '')}\n\n"
+            f"[前邻段]\n{edit.get('prev_neighbor', '') or '（章首）'}\n\n"
+            f"[后邻段]\n{edit.get('next_neighbor', '') or '（章尾）'}"
+        )
+    user_prompt = EDIT_VERIFY_USER_TEMPLATE.format(
+        edit_count=len(edits_with_neighbors),
+        edits_text="\n\n".join(blocks) or "（无手术）",
+    )
+    return EDIT_VERIFY_SYSTEM, user_prompt
+
+
+def parse_edit_verify_response(content: str) -> Dict[str, bool]:
+    """解析编辑复验响应，返回 {operation_id: ok}。
+
+    防复验幻觉规则：verdicts 缺 problems 或 problems 为空的 not-ok → 视为 ok
+    （回滚方向保守：误杀好修复的代价 > 少回滚一处坏修复）。
+    解析失败返回空 dict（调用方视为全部 ok，不回滚）。
+    """
+    data = _extract_audit_json(content)
+    if not data:
+        return {}
+    raw_verdicts = data.get("verdicts")
+    if not isinstance(raw_verdicts, list):
+        return {}
+    verdicts: Dict[str, bool] = {}
+    for item in raw_verdicts:
+        if not isinstance(item, dict):
+            continue
+        op_id = item.get("operation_id")
+        if not op_id:
+            continue
+        ok = bool(item.get("ok", True))
+        problems = (item.get("problems") or "").strip()
+        if not ok and not problems:
+            ok = True  # 无问题描述的 not-ok 视为 ok（防幻觉误杀）
+        verdicts[str(op_id)] = ok
+    return verdicts

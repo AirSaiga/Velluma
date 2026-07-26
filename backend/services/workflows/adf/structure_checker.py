@@ -20,11 +20,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 Phase 5: 锚点审计器（Anchor Auditor，V3.2 §4.5）。
 
 职责：
-- 1 次 reasoning LLM，合并校验四个维度：
+- 1 次 reasoning LLM，合并校验六个维度：
   1. Precondition 落地（先代码级扫关键词，未落地的交 LLM 判断语义性）
   2. 情绪曲线符合度
   3. 脉络符合度（钩子/角色弧/前章衔接）
   4. 高潮验收（1-10 打分）
+  5. 文风质量（反 AI 腔）
+  6. 大纲节拍覆盖（outline_beats 逐个核对，missing 需引文锚定）
 - 失败不静默，降级 verdict="unaudited"
 
 业务场景：
@@ -34,10 +36,11 @@ Phase 5: 锚点审计器（Anchor Auditor，V3.2 §4.5）。
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.services.llm import call_llm_with_usage
 from backend.services.observability.run_recorder import RunRecorder
+from backend.services.workflows.adf.beat_patcher import anchor_in_text
 from backend.services.prompts.adf_prompts import (
     build_anchor_audit_prompt,
     format_emotion_curve,
@@ -85,6 +88,8 @@ async def run_structure_check(
     tier: str,
     full_text: str,
     recorder: Optional[RunRecorder] = None,
+    outline_beats: Optional[List[str]] = None,
+    beat_suspects: Optional[List[Dict[str, Any]]] = None,
 ) -> StructureCheck:
     """Phase 5: 锚点审计（1 次 reasoning）。
 
@@ -95,6 +100,8 @@ async def run_structure_check(
         tier: 定档
         full_text: 完整正文
         recorder: RunRecorder
+        outline_beats: 大纲节拍清单（维度 6；None/空则审计跳过节拍校验）
+        beat_suspects: score_beat_coverage 的代码预判（标注在节拍清单上）
 
     Returns:
         StructureCheck
@@ -137,6 +144,8 @@ async def run_structure_check(
         must_resolve_hooks=spine.must_resolve_hooks,
         character_arc_advances=spine.character_arc_advances,
         full_text=full_text,
+        outline_beats=outline_beats,
+        beat_suspects=beat_suspects,
     )
 
     try:
@@ -187,6 +196,28 @@ async def run_structure_check(
     llm_missing = data.get("missing_preconditions") or []
     missing_set = set(code_missing) | set(llm_missing)
 
+    # 维度 6：missing_beats 伪锚过滤（与一致性审计 canon_evidence 同一防幻觉哲学）
+    # insert_anchor_quote 为空或归一化后在正文中找不到 → 保留上报但 patchable=False
+    missing_beats: List[Dict[str, Any]] = []
+    for item in (data.get("missing_beats") or []):
+        if not isinstance(item, dict) or item.get("status") != "missing":
+            continue
+        beat = (item.get("beat") or "").strip()
+        if not beat:
+            continue
+        quote = (item.get("insert_anchor_quote") or "").strip()
+        patchable = bool(quote) and anchor_in_text(full_text, quote)
+        if quote and not patchable:
+            logger.info(f"[ADF] 节拍「{beat[:30]}」锚点引文为伪锚，降级只上报")
+        missing_beats.append({
+            "beat": beat,
+            "status": "missing",
+            "evidence": item.get("evidence") or "",
+            "insert_position": item.get("insert_position") or "after",
+            "insert_anchor_quote": quote,
+            "patchable": patchable,
+        })
+
     audit = StructureCheck(
         verdict=str(data.get("verdict", "pass")).strip(),
         missing_preconditions=list(missing_set),
@@ -196,6 +227,7 @@ async def run_structure_check(
         refinement_targets=data.get("refinement_targets") or list(missing_set),
         style_violations=data.get("style_violations") or [],
         style_score=data.get("style_score"),
+        missing_beats=missing_beats,
     )
 
     # 强制规则 1：任何 missing_preconditions 非空 → needs_refinement
@@ -208,10 +240,16 @@ async def run_structure_check(
     if audit.style_score is not None and audit.style_score < 6 and audit.verdict == "pass":
         audit.verdict = "needs_refinement"
 
+    # 强制规则 3：任何 status=missing 的大纲节拍 → needs_refinement
+    # （无论可否补写——补写失败的节拍也要让作者看到这章有缺口）
+    if audit.missing_beats and audit.verdict == "pass":
+        audit.verdict = "needs_refinement"
+
     logger.info(
         f"[ADF] 审计完成：verdict={audit.verdict}, "
         f"missing={len(audit.missing_preconditions)}, "
         f"climax_score={audit.climax_score}, "
-        f"style_score={audit.style_score}"
+        f"style_score={audit.style_score}, "
+        f"missing_beats={len(audit.missing_beats)}"
     )
     return audit

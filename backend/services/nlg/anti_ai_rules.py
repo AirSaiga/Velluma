@@ -156,6 +156,20 @@ class DensityThresholds:
             AI 堆砌修饰的典型：同一短句连续多个"……的……的"。
         sentence_length_cv_min: 句长变异系数下限。低于此值=句式过于匀速。
             CV = stddev/mean；中文小说正文 CV 通常 0.5~0.8，AI 腔常 <0.35。
+        short_paragraph_ratio_max: 单句段（≤15 字的独立短段）占比上限。
+            AI 腔典型：每百余字敲一个"警报响了。""迟了。"式重锤短段，
+            实测超标文本占比可达 36%；人声写作重锤段极少，通常 <15%。
+            段落数 <4 时不判（单段文本无段落节奏可言）。
+        negation_twist_per_500: 每 500 字"不是X，是Y"否定反转句上限。
+            AI 制造张力的头号模板：先否定读者预期再亮出"真相"，
+            高频使用张力递减（实测超标文本 11 次/5080 字）。
+        anaphora_per_500: 每 500 字三连排比上限。
+            AI 高潮模板：同前缀短句×3 连发（"穿透A。穿透B。穿透C。"
+            "是X。是Y。是Z。"）。按段内分句的同前缀分组检测。
+        vehicle_reuse_per_500: 每 500 字喻体复用上限。
+            AI"比喻义务化"的副产品：同一意象字（如"巨"）反复出现在
+            多个比喻的喻体中（巨兽/巨型生物/巨人）。按内容字在
+            ≥2 个不同喻体中复现计 1 次命中。
         overall_trigger: 综合分（0-100）触发阈值。超过则触发 LLM 洗涤 Pass。
             已从 55 放宽到 40：原阈值过死导致段内洗涤几乎从不触发，
             这是"去 AI 味效果差"的根因之一。
@@ -169,6 +183,11 @@ class DensityThresholds:
     transition_per_500: float = 1.5
     zhi_phrase_per_500: float = 1.5
     sentence_length_cv_min: float = 0.35
+    short_paragraph_ratio_max: float = 0.25
+    negation_twist_per_500: float = 1.0
+    anaphora_per_500: float = 0.5
+    vehicle_reuse_per_500: float = 1.0
+    short_sentence_ratio_max: float = 0.25  # ≤5字碎句占比上限（PRUNE 剪枝后护栏用）
     overall_trigger: float = 40.0
     wash_max_segments_per_chapter: int = 8
 

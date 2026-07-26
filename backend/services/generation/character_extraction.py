@@ -303,7 +303,7 @@ async def _call_llm_for_extraction(
     system_prompt = build_character_extraction_system_prompt()
     
     try:
-        _log_to_file(f"Calling LLM for extraction, model={model}")
+        _log_to_file("Calling LLM for extraction, model=(default)")
         svc_logger.info("Calling LLM for character extraction", content_length=len(chapter_content))
         response = await _timeout_manager.call_with_timeout(
             call_llm(

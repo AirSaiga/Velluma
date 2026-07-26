@@ -43,6 +43,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       "enabled": false,
       "effort": "low",
       "exclude": false
+    },
+    "wash": {   // 可选：去 AI 味洗涤专用槽（2026-07 新增）
+      ...       // 结构同上；缺失或不完整时洗涤回退到 creative 槽
     }
   },
   "embedding": {
@@ -128,7 +131,7 @@ def get_model_profile(model_type: str = "default") -> Dict:
     获取指定模型类型的独立配置（provider / api_key / base_url / model / enabled / effort / exclude）。
 
     Args:
-        model_type: "reasoning" | "creative" | "default"
+        model_type: "reasoning" | "creative" | "wash" | "default"
 
     Returns:
         该模型类型对应的完整配置字典
@@ -136,10 +139,22 @@ def get_model_profile(model_type: str = "default") -> Dict:
     设计说明：
     - "default" 映射到 "reasoning" 配置，与旧版行为一致
       （旧版中 model_type="default" 默认使用 reasoning_model）
+    - "wash"（洗涤槽，去 AI 味专用）：读取 llm.wash 配置；
+      槽位缺失或不完整（缺 model/api_key）时回退到 creative 配置，
+      保证未配置 wash 的用户行为与旧版完全一致
     """
     llm_cfg = get_llm_config()
-    key = "reasoning" if model_type in ("reasoning", "default") else "creative"
+    if model_type in ("reasoning", "default"):
+        key = "reasoning"
+    elif model_type == "wash":
+        key = "wash"
+    else:
+        key = "creative"
     profile = llm_cfg.get(key, {})
+
+    # wash 槽未配置/不完整 → 回退 creative（编辑任务与正文同源，行为同旧版）
+    if model_type == "wash" and not (profile.get("model") and profile.get("api_key")):
+        profile = llm_cfg.get("creative", {})
 
     return {
         "provider": profile.get("provider", "openrouter"),
@@ -150,6 +165,17 @@ def get_model_profile(model_type: str = "default") -> Dict:
         "effort": profile.get("effort", "medium"),
         "exclude": profile.get("exclude", False),
     }
+
+
+def has_dedicated_wash_profile() -> bool:
+    """是否配置了独立的洗涤模型槽（llm.wash 含 model + api_key）。
+
+    业务场景：de_ai_washer 据此决定洗涤调用的 thinking 配置——
+    独立槽尊重其 enabled/effort；回退 creative 时强制关闭 thinking
+    （编辑任务不需要深度思考，避免继承 creative 的 effort=max 拖慢洗涤）。
+    """
+    profile = get_llm_config().get("wash", {})
+    return bool(profile.get("model") and profile.get("api_key"))
 
 
 def get_embedding_config() -> Dict:
@@ -204,7 +230,7 @@ def update_llm_profile(role: str, updates: Dict):
 
     副作用：仅更新 updates 中出现的字段，未提供的字段（如 exclude）保持原值。
     """
-    if role not in ("reasoning", "creative"):
+    if role not in ("reasoning", "creative", "wash"):
         raise ValueError(f"未知的 LLM 角色: {role}")
     config = _load_config()
     profile = config.setdefault("llm", {}).setdefault(role, {})

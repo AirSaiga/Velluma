@@ -19,10 +19,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'cancel'): void
+  (e: 'retry'): void
 }>()
 
 const stage = computed(() => props.session.stage.value)
 const stepProgress = computed(() => props.session.stepProgress.value)
+const errorText = computed(() => props.session.error.value)
 const streamTextLen = computed(() => props.session.streamText.value.length)
 
 const progressPercent = computed(() => {
@@ -80,12 +82,21 @@ const stageDisplay = computed(() => {
       </div>
 
       <!-- 等待态文案 -->
-      <div v-else class="word-count muted">AI 正在思考…</div>
+      <div v-else-if="stage !== 'error'" class="word-count muted">AI 正在思考…</div>
 
-      <!-- 取消按钮 -->
+      <!-- 失败态：错误文案 + 重试（error 原文可能已被 toast watcher 消费，给兜底文案） -->
+      <div v-if="stage === 'error'" class="error-text">
+        {{ errorText || '生成或精修过程出错，请重试。' }}
+      </div>
+      <button v-if="stage === 'error'" class="btn-retry" @click="emit('retry')">
+        <Icon name="arrow-path" :size="13" />
+        <span>重试</span>
+      </button>
+
+      <!-- 取消按钮（失败态下作为关闭面板） -->
       <button class="btn-cancel" @click="emit('cancel')">
         <Icon name="x-mark" :size="13" />
-        <span>取消生成</span>
+        <span>{{ stage === 'error' ? '关闭' : '取消生成' }}</span>
       </button>
     </div>
   </div>
@@ -172,6 +183,33 @@ const stageDisplay = computed(() => {
 }
 .word-count.muted {
   color: var(--text-muted);
+}
+
+/* 失败态 */
+.error-text {
+  max-width: 320px;
+  font-size: 0.8125rem;
+  color: #dc2626;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.btn-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4375rem 1.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--accent-500);
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-retry:hover {
+  background: var(--accent-600);
 }
 
 /* 取消按钮 */

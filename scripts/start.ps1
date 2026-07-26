@@ -100,6 +100,63 @@ function Find-FreeFrontendPort {
     throw "No free frontend port in range $start..$($start + $maxOffset - 1)"
 }
 
+function Find-FreeBackendPort {
+    # 扫描后端端口范围（与 backend/core/config.py 的 DEFAULT_PORT..MAX_PORT 对齐）
+    # 用于 debug 热重载模式下抢占一个稳定端口，避免依赖 main.py 内部扫描
+    $start = $Config.DefaultBackendPort
+    $maxPort = 8100
+    for ($port = $start; $port -le $maxPort; $port++) {
+        if (-not (Test-PortOpen -Port $port)) {
+            return $port
+        }
+    }
+    throw "No free backend port in range $start..$maxPort"
+}
+
+function Resolve-BackendPort {
+    # debug 热重载模式下协商后端端口，优先级：
+    # 1. 环境变量 VELLUMA_PORT（用户强制指定，透传给后端）
+    # 2. 已记录端口（data/port.txt）且该端口空闲 → 复用
+    # 3. 扫描空闲端口（8002 起）
+    # 选中后写入 data/port.txt，并设置 VELLUMA_PORT，使 main.py 跳过自动扫描
+    # 固定端口是热重载的前提：reload 重启 worker 时端口不能漂移，否则前端断连
+    $envPort = $env:VELLUMA_PORT
+    if ($envPort) {
+        $port = [int]$envPort
+        if ($port -gt 0) {
+            Set-BackendPortFile $port
+            Log-Info "Backend port from env: $port"
+            return $port
+        }
+    }
+
+    $recorded = Get-ActualBackendPort
+    if ($recorded -and $recorded -gt 0 -and -not (Test-PortOpen -Port $recorded)) {
+        Set-BackendPortFile $recorded
+        return $recorded
+    }
+
+    $freePort = Find-FreeBackendPort
+    Set-BackendPortFile $freePort
+    if ($freePort -ne $Config.DefaultBackendPort) {
+        Log-Info "Default backend port $($Config.DefaultBackendPort) busy, using $freePort"
+    }
+    return $freePort
+}
+
+function Set-BackendPortFile($Port) {
+    # 写入 data/port.txt，供前端 vite.config.js 代理与 electron/main.cjs 读取后端地址
+    try {
+        $portDir = Split-Path $Config.PortFile -Parent
+        if (-not (Test-Path $portDir)) {
+            New-Item -ItemType Directory -Path $portDir -Force | Out-Null
+        }
+        [System.IO.File]::WriteAllText($Config.PortFile, $Port.ToString())
+    } catch {
+        Log-Error "Failed to write backend port file: $_"
+    }
+}
+
 function Resolve-FrontendPort {
     # 协商前端端口，优先级：
     # 1. 环境变量 VELLUMA_FRONTEND_PORT（用户强制指定）
@@ -217,6 +274,23 @@ function Kill-ProcessOnPort($Port, $Name) {
     return $false
 }
 
+function Stop-ProcessTree($ParentProcessId, $Name = "process") {
+    # 递归终止进程树：先杀子进程再杀父进程
+    # 用途：uvicorn --reload 的 reloader 父进程会 spawn 一个 worker 子进程，
+    #       仅杀父进程会留下 worker 孤儿进程继续占用端口，导致下次启动端口冲突
+    # 依赖：CIM_Process.ProcessId/ParentProcessId（Win32 内置，无需外部命令）
+    if (-not $ParentProcessId) { return }
+    try {
+        $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId=$ParentProcessId" -ErrorAction SilentlyContinue
+        foreach ($child in $children) {
+            Stop-ProcessTree -ParentProcessId $child.ProcessId -Name $Name
+        }
+        Stop-Process -Id $ParentProcessId -Force -ErrorAction SilentlyContinue
+    } catch {
+        # 父进程可能已自行退出，忽略
+    }
+}
+
 function Wait-ForService($Port, $Name, $TimeoutSeconds = 30) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $dots = 0
@@ -254,7 +328,9 @@ function Invoke-Cleanup() {
     foreach ($proc in $Global:ChildProcesses) {
         if ($proc -and !$proc.HasExited) {
             try {
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                # 用进程树清理：debug 模式下后端是 uvicorn --reload，
+                # reloader 父进程会 spawn worker 子进程，必须先杀子再杀父，否则留下孤儿占用端口
+                Stop-ProcessTree -ParentProcessId $proc.Id
                 Log-Info "Stopped PID $($proc.Id)"
             } catch {}
         }
@@ -300,13 +376,31 @@ function Start-Backend() {
         throw "Backend not running but skip flag set"
     }
 
+    # debug 模式启用 uvicorn --reload 后端热重载：保存 Python 文件即自动重启
+    # 热重载的关键约束：
+    #   1. --reload 必须传 import path（backend.main:app），不能传 app 对象（main.py 的 __main__ 不走）
+    #   2. reload 重启 worker 时端口必须固定，否则前端断连 → 由脚本侧协商端口并设 VELLUMA_PORT
+    #   3. main.py 的 __main__ 不会执行 → save_port 不会被调用 → port.txt 必须由脚本侧写好
+    $useReload = ($Config.Mode -eq 'debug')
+
+    if ($useReload) {
+        # 先抢占固定端口并写 data/port.txt + 设环境变量，让 main.py 跳过内部扫描
+        $backendPort = Resolve-BackendPort
+        $env:VELLUMA_PORT = $backendPort.ToString()
+        Log-Info "Debug mode: backend hot-reload enabled (VELLUMA_PORT=$backendPort)"
+    }
+
     Log-Step "Starting Backend..."
 
     if (Test-PortOpen -Port $backendPort) {
         if ($Force) {
             Kill-ProcessOnPort -Port $backendPort -Name "backend" | Out-Null
         } else {
-            Log-Success "Backend already running on port $backendPort"
+            if ($useReload) {
+                Log-Success "Backend already running on port $backendPort (reload disabled for existing process)"
+            } else {
+                Log-Success "Backend already running on port $backendPort"
+            }
             return
         }
     }
@@ -314,14 +408,56 @@ function Start-Backend() {
     $pythonPath = Find-Python
     Log-Info "Using Python: $pythonPath"
 
-    # 不再设置 VELLUMA_PORT，让后端自动寻找可用端口
     $env:PYTHONUNBUFFERED = "1"
 
     if ($DryRun) {
-        Log-Info "[DryRun] Would start: $pythonPath -m $($Config.PythonModule)"
+        if ($useReload) {
+            Log-Info "[DryRun] Would start (reload): $pythonPath -m uvicorn backend.main:app --host 127.0.0.1 --port $backendPort --reload --reload-dir backend --app-dir ."
+        } else {
+            Log-Info "[DryRun] Would start: $pythonPath -m $($Config.PythonModule)"
+        }
         return
     }
 
+    if ($useReload) {
+        # uvicorn --reload：reloader 父进程 + worker 子进程
+        # --app-dir .：让 backend.main 可作为顶层模块 import（cwd 已是项目根）
+        # --reload-dir backend：仅监听 backend/ 下的 .py 变更，避免 frontend/data/logs 触发误重启
+        # 不用 -NoNewWindow：reload 输出量大，独占窗口便于观察重启日志，Ctrl+C 也能直达 reloader
+        $backendDir = Join-Path $Config.ProjectRoot "backend"
+        $argList = @(
+            "-m", "uvicorn", "backend.main:app",
+            "--host", "127.0.0.1",
+            "--port", $backendPort.ToString(),
+            "--reload",
+            "--reload-dir", $backendDir,
+            "--app-dir", $Config.ProjectRoot
+        )
+        $proc = Start-Process -FilePath $pythonPath `
+            -ArgumentList $argList `
+            -WorkingDirectory $Config.ProjectRoot `
+            -PassThru
+
+        $Global:ChildProcesses += $proc
+
+        Log-Wait "Waiting for backend (reload)..."
+        $waitStart = Get-Date
+        $ready = $false
+        while (((Get-Date) - $waitStart).TotalSeconds -lt $Config.BackendTimeout) {
+            Start-Sleep -Milliseconds $Config.HealthCheckInterval
+            if (Test-PortOpen -Port $backendPort) {
+                $ready = $true
+                break
+            }
+        }
+        if (-not $ready) {
+            throw "Backend (reload) failed to start within $($Config.BackendTimeout)s"
+        }
+        Log-Success "Backend ready at http://127.0.0.1:$backendPort (hot-reload ON)"
+        return
+    }
+
+    # dev/prod 模式：走 main.py 的 __main__（内部 find_available_port + save_port）
     # -NoNewWindow：后端继承当前控制台，uvicorn 访问日志 / print / traceback 实时输出到运行
     # start.bat 的窗口，方便边用 Electron 边盯后端。PYTHONUNBUFFERED=1 已在上方设置，日志无缓冲延迟。
     $proc = Start-Process -FilePath $pythonPath `

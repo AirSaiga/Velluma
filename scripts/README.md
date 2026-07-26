@@ -7,11 +7,16 @@ Velluma 的启动入口。所有脚本通过 `start.ps1 -Mode <mode>` 区分运�
 | 入口                 | 模式   | 用途                                           | NODE_ENV       | 前端来源              | DevTools |
 | -------------------- | ------ | ---------------------------------------------- | -------------- | --------------------- | -------- |
 | `start-dev.bat`      | dev    | 日常开发（默认，根目录 `start.bat` 等价于此）  | 未设置         | Vite dev server       | 自动开   |
-| `start-debug.bat`    | debug  | 调试入口（当前等同 dev，预留扩展点）           | 未设置         | Vite dev server       | 自动开   |
+| `start-debug.bat`    | debug  | 调试入口：**后端热重载** + Vite + Electron     | 未设置         | Vite dev server       | 自动开   |
 | `start-prod.bat`     | prod   | 生产体验：Electron 载入预构建的 `dist/`        | `production`   | `frontend/dist/` 文件 | 不开     |
 
 ### dev / debug
-后端 + Vite dev server + Electron（连 `http://localhost:<port>`，自动 `openDevTools()`）。两者当前行为一致，`debug` 作为语义入口，便于未来挂接 debugpy / sourcemap 等增强。
+两者都启动后端 + Vite dev server + Electron（连 `http://localhost:<port>`，自动 `openDevTools()`）。区别在于**后端启动方式**：
+
+- **dev**：`python -m backend.main`（走 `main.py` 的 `__main__`，端口由后端内部扫描），改后端代码需手动重启。
+- **debug**：`python -m uvicorn backend.main:app --reload --reload-dir backend`（脚本侧固定端口并写 `data/port.txt`），保存 `backend/` 下任意 `.py` 即自动重启后端，前端 API 调用无缝衔接，适合频繁改后端代码的开发场景。
+
+> debug 模式端口固定：脚本会扫描 8002~8100 抢占一个空闲端口，写 `data/port.txt` 并设 `VELLUMA_PORT` 环境变量，让 `main.py` 跳过内部扫描——这是热重载期间端口不漂移、前端不断连的前提。退出时按进程树清理 reloader 的 worker 子进程，避免孤儿占用端口。
 
 ### prod
 先 `npm run build` 生成 `frontend/dist/`，再以 `NODE_ENV=production` 启动 Electron——`main.cjs` 走 `loadFile('../dist/index.html')` 分支，不启动 Vite、不开 DevTools，模拟打包后的运行体验。后端仍由本地 `.venv` 启动。

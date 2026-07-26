@@ -6,14 +6,16 @@
  * F1 阶段：占位，仅展示章节列表（平铺，无看板列）。
  * F5 阶段：实现完整的看板拖拽 + 弧管理 + 章节卡编辑。
  */
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
+import { useToast } from '../../../composables/useToast'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
+const { showToast } = useToast()
 
 // 解构 ref 供模板使用
 const currentBook = store.currentBook
@@ -44,8 +46,36 @@ function openChapter(chapterId: string) {
   }
 }
 
-function newChapter() {
-  router.push({ name: 'workspace', params: { bookId: bookIdFromRoute.value } })
+const creating = ref(false)
+
+async function newChapter() {
+  // 真正创建章节（store.createChapter 内部走 POST /api/books/{id}/chapters），
+  // 成功后跳转写作台并选中新章节
+  const bookId = bookIdFromRoute.value || store.currentBookId.value
+  if (!bookId) {
+    showToast('请先选择一本书', 'warning')
+    return
+  }
+  if (creating.value) return
+  creating.value = true
+  try {
+    const nextNumber =
+      chapters.value.reduce((max, c) => Math.max(max, c.chapter_number || 0), 0) + 1
+    const chapter = await store.createChapter({
+      chapter_number: nextNumber,
+      title: `第 ${nextNumber} 章`,
+    })
+    if (chapter) {
+      router.push({
+        name: 'workspace',
+        params: { bookId, chapterId: chapter.id },
+      })
+    }
+  } catch (e: any) {
+    showToast('创建章节失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    creating.value = false
+  }
 }
 </script>
 
@@ -64,9 +94,9 @@ function newChapter() {
           </p>
         </div>
       </div>
-      <button class="btn-primary" @click="newChapter">
+      <button class="btn-primary" :disabled="creating || !currentBook" @click="newChapter">
         <Icon name="plus" :size="16" />
-        <span>新建章节</span>
+        <span>{{ creating ? '创建中…' : '新建章节' }}</span>
       </button>
     </header>
 
@@ -75,9 +105,9 @@ function newChapter() {
         <div class="empty-icon"><Icon name="document" :size="48" /></div>
         <h2>暂无章节</h2>
         <p>新建第一个章节开始规划你的故事。</p>
-        <button class="btn-primary" @click="newChapter">
+        <button class="btn-primary" :disabled="creating || !currentBook" @click="newChapter">
           <Icon name="plus" :size="16" />
-          <span>新建章节</span>
+          <span>{{ creating ? '创建中…' : '新建章节' }}</span>
         </button>
       </div>
 
@@ -171,6 +201,10 @@ function newChapter() {
 }
 .btn-primary:hover {
   background: var(--accent-600);
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .outline-body {

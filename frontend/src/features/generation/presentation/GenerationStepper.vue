@@ -21,7 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'cancel'): void
-  (e: 'accept-tier-upgrade', event: any): void
+  (e: 'retry'): void
   (e: 'dismiss-inflight', index: number): void
 }>()
 
@@ -29,6 +29,7 @@ const stage = computed(() => props.session.stage.value)
 const tierDecision = computed(() => props.session.tierDecision.value)
 const stepProgress = computed(() => props.session.stepProgress.value)
 const generating = computed(() => props.session.generating.value)
+const errorText = computed(() => props.session.error.value)
 const inflightEvents = computed(() => props.session.inflightEvents.value)
 const degraded = computed(() => props.session.degraded.value)
 
@@ -94,6 +95,17 @@ function inflightLabel(type: string): string {
       </div>
     </div>
 
+    <!-- 失败态：错误文案 + 重试入口 -->
+    <!-- 注意：error 原文可能已被 WorkspaceView 的 toast watcher 消费清空，给兜底文案 -->
+    <div v-if="stage === 'error'" class="error-card">
+      <div class="error-header">
+        <Icon name="exclamation-circle" :size="14" />
+        <span>生成失败</span>
+      </div>
+      <p class="error-text">{{ errorText || '生成或精修过程出错，请重试。' }}</p>
+      <button class="inflight-btn primary" @click="emit('retry')">重试</button>
+    </div>
+
     <!-- 飞行中调节事件 -->
     <div v-for="(ev, idx) in inflightEvents" :key="idx" class="inflight-card">
       <div class="inflight-header">
@@ -105,11 +117,6 @@ function inflightLabel(type: string): string {
         {{ ev.detail || '' }}
       </div>
       <div class="inflight-actions">
-        <button
-          v-if="ev.type === 'tier_upgrade_suggest'"
-          class="inflight-btn primary"
-          @click="emit('accept-tier-upgrade', ev)"
-        >采纳升档</button>
         <button class="inflight-btn" @click="emit('dismiss-inflight', idx)">忽略</button>
       </div>
     </div>
@@ -235,6 +242,31 @@ function inflightLabel(type: string): string {
   height: 100%;
   background: var(--accent-500);
   transition: width 0.3s ease;
+}
+
+/* 失败态卡片 */
+.error-card {
+  background: var(--bg-canvas);
+  border: 1px solid #dc2626;
+  border-left-width: 3px;
+  border-radius: 0.375rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #dc2626;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.error-text {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0.375rem 0 0.5rem;
 }
 
 /* 飞行中调节 */

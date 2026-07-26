@@ -14,6 +14,8 @@ import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { costReportApi, qualityReportApi } from '../../../services/api/domain'
+import { reviewApi } from '../../../services/api/domain/review.api'
+import { useToast } from '../../../composables/useToast'
 import type { CostReport, QualityReport } from '../../../types'
 
 const route = useRoute()
@@ -118,6 +120,30 @@ function formatTokens(n: number): string {
   if (n > 1000) return (n / 1000).toFixed(1) + 'k'
   return String(n)
 }
+
+// 质量报告重跑（POST /quality-report/rerun，后端双层审计）
+const { showToast } = useToast()
+const rerunningIds = ref<Set<string>>(new Set())
+
+async function rerunQuality(chapterId: string) {
+  if (rerunningIds.value.has(chapterId)) return
+  rerunningIds.value.add(chapterId)
+  try {
+    const report = await reviewApi.rerunQualityReport(chapterId)
+    const item = qualityReports.value.find((r) => r.chapterId === chapterId)
+    if (item) {
+      item.report = report
+    } else {
+      const chap = sortedChapters.value.find((c) => c.id === chapterId)
+      qualityReports.value.push({ chapterId, chapterNumber: chap?.chapter_number ?? 0, report })
+    }
+    showToast('质量审计已完成', 'success')
+  } catch (e: any) {
+    showToast(`质量审计失败：${e?.message || '未知错误'}`, 'error')
+  } finally {
+    rerunningIds.value.delete(chapterId)
+  }
+}
 </script>
 
 <template>
@@ -200,24 +226,38 @@ function formatTokens(n: number): string {
 
     <!-- 质量面板 -->
     <section v-else-if="activePanel === 'quality'" class="data-panel">
-      <div v-if="qualityReports.every((r) => !r.report)" class="empty">
-        <p>暂无质量数据。生成并审校后，质量报告会在此展示。</p>
+      <div v-if="qualityReports.length === 0" class="empty">
+        <p>暂无章节数据。</p>
       </div>
       <div v-else class="chapter-quality-list">
-        <article v-for="qr in qualityReports.filter((r) => r.report)" :key="qr.chapterId" class="quality-item">
+        <article v-for="qr in qualityReports" :key="qr.chapterId" class="quality-item">
           <header class="quality-header">
             <span class="quality-chapter">第 {{ qr.chapterNumber }} 章</span>
-            <span class="quality-verdict" :class="qr.report?.verdict">{{ qr.report?.verdict }}</span>
-          </header>
-          <div v-if="qr.report?.metrics" class="quality-metrics">
-            <div v-for="(v, k) in (qr.report.metrics as Record<string, any>)" :key="k" class="metric-pair">
-              <span class="metric-key">{{ k }}</span>
-              <span class="metric-val">{{ typeof v === 'number' ? v.toFixed(2) : v }}</span>
+            <div class="quality-actions">
+              <span v-if="qr.report?.verdict" class="quality-verdict" :class="qr.report?.verdict">{{ qr.report?.verdict }}</span>
+              <button
+                class="rerun-btn"
+                :disabled="rerunningIds.has(qr.chapterId)"
+                :title="qr.report ? '基于当前正文重新执行双层质量审计' : '本章尚无质量报告，点击触发首次审计'"
+                @click="rerunQuality(qr.chapterId)"
+              >
+                <Icon name="arrow-path" :size="12" :class="{ spin: rerunningIds.has(qr.chapterId) }" />
+                <span>{{ rerunningIds.has(qr.chapterId) ? '审计中…' : qr.report ? '重新审计' : '立即审计' }}</span>
+              </button>
             </div>
-          </div>
-          <p v-if="qr.report?.findings?.length" class="findings-count">
-            {{ qr.report.findings.length }} 条审校发现
-          </p>
+          </header>
+          <template v-if="qr.report">
+            <div v-if="qr.report?.metrics" class="quality-metrics">
+              <div v-for="(v, k) in (qr.report.metrics as Record<string, any>)" :key="k" class="metric-pair">
+                <span class="metric-key">{{ k }}</span>
+                <span class="metric-val">{{ typeof v === 'number' ? v.toFixed(2) : v }}</span>
+              </div>
+            </div>
+            <p v-if="qr.report?.findings?.length" class="findings-count">
+              {{ qr.report.findings.length }} 条审校发现
+            </p>
+          </template>
+          <p v-else class="no-report">尚无质量报告。</p>
         </article>
       </div>
     </section>
@@ -486,6 +526,39 @@ function formatTokens(n: number): string {
   margin: 0.5rem 0 0;
   font-size: 0.6875rem;
   color: #d97706;
+}
+
+.quality-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rerun-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.625rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.1875rem;
+  cursor: pointer;
+}
+.rerun-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.rerun-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.no-report {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
 }
 
 .degraded-item {

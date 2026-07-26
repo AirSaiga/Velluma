@@ -51,6 +51,7 @@ LLM 调用客户端 - 统一封装 OpenAI 兼容 API 调用。
 
 import json
 import os
+import re
 import time
 import asyncio
 import logging
@@ -109,6 +110,44 @@ async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
     return await client.chat.completions.create(**kwargs)
 
 
+# 采样参数锁定报错："invalid temperature: only 1 is allowed for this model" 等
+_PARAM_LOCK_RE = re.compile(r"invalid (\w+): only ([\d.]+) is allowed", re.IGNORECASE)
+# 允许自适应改写的参数白名单（防错误消息注入任意参数）
+_ADAPTIVE_PARAMS = {"temperature", "top_p", "frequency_penalty", "presence_penalty"}
+
+
+async def _create_chat_completion_adaptive(client: AsyncOpenAI, **kwargs):
+    """带参数锁自适应的补全调用。
+
+    业务场景：部分模型把采样参数锁死（kimi-k3 锁 temperature=1、top_p=0.95；
+    OpenAI o 系列 / GPT-5 锁 temperature=1），显式传其他值直接报 400。
+    此处解析 "invalid X: only Y is allowed" 错误，按锁定值改写参数重试，
+    最多自适应 2 个参数（如同时锁 temperature + top_p）。
+    无法解析的旧式锁温报错兜底为去掉 temperature 重试一次。
+    400 不会触发 tenacity 重试（_should_retry_exception 只放行 5xx/429/连接错误），
+    所以自适应路径是即时的，不会拖慢正常失败。
+    """
+    adapted = 0
+    while True:
+        try:
+            return await _create_chat_completion(client=client, **kwargs)
+        except Exception as e:
+            msg = str(e)
+            m = _PARAM_LOCK_RE.search(msg)
+            if m and m.group(1).lower() in _ADAPTIVE_PARAMS and adapted < 2:
+                param, value = m.group(1).lower(), float(m.group(2))
+                kwargs[param] = value
+                adapted += 1
+                logger.warning(f"[LLM] 模型锁定 {param}={value}，已按锁定值重试: {msg[:120]}")
+                continue
+            lowered = msg.lower()
+            if "temperature" in lowered and "invalid" in lowered and "temperature" in kwargs:
+                kwargs.pop("temperature")
+                logger.warning(f"[LLM] 模型锁死 temperature，已改用服务端默认值重试: {msg[:120]}")
+                continue
+            raise
+
+
 async def generate_stream_response(
     system_prompt: str,
     user_prompt: str,
@@ -149,7 +188,7 @@ async def generate_stream_response(
         if reasoning_config:
             create_kwargs["extra_body"] = reasoning_config
 
-        stream = await _create_chat_completion(client=client, **create_kwargs)
+        stream = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
@@ -266,11 +305,15 @@ class LLMResult:
         usage: token 计量 {prompt_tokens, completion_tokens, reasoning_tokens}；无 usage 时为 None
         model_name: 实际调用的模型名
         latency_ms: 本次调用耗时（毫秒）
+        finish_reason: 模型停止原因（"stop"/"length"/"content_filter"/...）； None 表示未获取。
+            "length" 表示因撞 max_tokens 上限被截断——下游（如 ADF segment_writer）应据此
+            重试或清残句，避免把半句话当成功用。
     """
     content: str
     usage: Optional[dict]
     model_name: str
     latency_ms: int
+    finish_reason: Optional[str] = None
 
 
 def _parse_usage(response) -> Optional[dict]:
@@ -353,13 +396,21 @@ async def call_llm_with_usage(
         if reasoning_config:
             create_kwargs["extra_body"] = reasoning_config
 
-        response = await _create_chat_completion(client=client, **create_kwargs)
+        response = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         content = ""
         if response.choices and response.choices[0].message.content:
             content = response.choices[0].message.content
         usage = _parse_usage(response)
+        finish_reason = None
+        try:
+            finish_reason = response.choices[0].finish_reason if response.choices else None
+        except (AttributeError, IndexError):
+            finish_reason = None
         latency_ms = int((time.perf_counter() - start_ts) * 1000)
-        return LLMResult(content=content, usage=usage, model_name=resolved_model, latency_ms=latency_ms)
+        return LLMResult(
+            content=content, usage=usage, model_name=resolved_model,
+            latency_ms=latency_ms, finish_reason=finish_reason,
+        )
     except json.JSONDecodeError:
         # 兼容旧 call_llm 行为：JSON 解析异常返回空内容（不抛出）
         latency_ms = int((time.perf_counter() - start_ts) * 1000)

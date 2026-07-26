@@ -19,14 +19,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 ADF（Anchor-Driven Flow）工作流主类（V3.2 §4 新建）。
 
-职责（设计文档 §4 七个 Phase）：
+职责（设计文档 §4 七个 Phase + 后续扩展）：
 - Phase 0: 上下文组装（调用方负责，本类接收）
 - Phase 1: 脉络轨构建（spine_track_builder）
 - Phase 2: 远端锚设计（anchor_designer，1 次 reasoning）
 - Phase 3: 定档（tier_decider，0 LLM）
 - Phase 4: 正向流写作（forward_flow_writer，N 次 creative）★ 核心
+- Phase 4.5: 去 AI 味剪枝（pruner，N 次 creative + 1 次 OOC 裁判）
 - Phase 5: 锚点审计（anchor_auditor，1 次 reasoning）
 - Phase 6: 条件补埋（refiner，0-K 次 creative）
+- Phase 6.5: 缺失节拍补写（beat_patcher，0~2 次 creative，可开关）
+- Phase 7: 一致性守卫（consistency_guard，1 次 reasoning + 0~3 次 creative，可开关）
 
 设计要点：
 - 不持有 DB session（工作流层约定；持久化由调用方负责）
@@ -300,6 +303,7 @@ class ADFWorkflow:
                 relationships=self.relationships,
                 worldview_text=self.worldview_text,
                 genre=getattr(self.book, "genre", None),
+                enable_state_tracker=getattr(request, "enable_state_tracker", True),
             )
         except Exception as e:
             logger.exception(f"[ADF] Phase 4 正向流写作异常: {e}")
@@ -379,6 +383,27 @@ class ADFWorkflow:
             purpose = (getattr(self.chapter, "outline_text", "") or "")[:300]
 
         enable_audit = getattr(request, "enable_anchor_audit", True)
+
+        # 维度 6 输入：大纲节拍清单 + 代码级覆盖预判（0 LLM，suspect 模式）。
+        # 受 enable_beat_coverage 开关控制；解析失败降级空清单（审计跳过维度 6）。
+        enable_beats = getattr(request, "enable_beat_coverage", True)
+        outline_beats: List[str] = []
+        beat_suspects: List[Dict[str, Any]] = []
+        if enable_beats:
+            try:
+                from backend.services.workflows.adf.beat_patcher import (
+                    parse_outline_beats,
+                    score_beat_coverage,
+                )
+                outline_beats = parse_outline_beats(
+                    getattr(self.chapter, "outline_text", "") or ""
+                )
+                if outline_beats:
+                    beat_suspects = score_beat_coverage(outline_beats, final_text)
+            except Exception as e:
+                logger.warning(f"[ADF] 大纲节拍解析失败（跳过节拍校验）: {e}")
+                outline_beats, beat_suspects = [], []
+
         if enable_audit:
             try:
                 audit = await run_structure_check(
@@ -388,6 +413,8 @@ class ADFWorkflow:
                     tier=tier,
                     full_text=final_text,
                     recorder=self.recorder,
+                    outline_beats=outline_beats,
+                    beat_suspects=beat_suspects,
                 )
             except Exception as e:
                 logger.warning(f"[ADF] Phase 5 审计异常，降级 unaudited: {e}")
@@ -406,7 +433,17 @@ class ADFWorkflow:
             "structure_issues": audit.spine_violations,
             "climax_score": audit.climax_score,
             "fix_targets": audit.refinement_targets,
+            # 维度 6：全部 missing 节拍（含补写失败与 patchable=False 的，前端可见）
+            "missing_beats": audit.missing_beats,
         })
+
+        if outline_beats:
+            result.stats["beat_coverage"] = {
+                "total": len(outline_beats),
+                "covered": len(outline_beats) - len(audit.missing_beats),
+                "missing": len(audit.missing_beats),
+                "patched": 0,
+            }
 
         # ============================================================
         # Phase 6: 条件补埋（REFINE，0-K 次 creative）
@@ -430,6 +467,131 @@ class ADFWorkflow:
             except Exception as e:
                 logger.warning(f"[ADF] Phase 6 精修异常（不阻塞）: {e}")
                 result.degraded.append({"phase": "refine", "reason": "exception", "detail": str(e)[:200]})
+
+        # ============================================================
+        # Phase 6.5: 缺失节拍补写（BEAT_PATCH，0-2 次 creative）
+        # ============================================================
+        # 触发条件：enable_beat_coverage + enable_refinement + 有 patchable 的
+        # missing 节拍。定点插入补写（治"整场戏缺失"，与 Phase 6 关键词级补埋
+        # 分工）。补写引入的矛盾/重复由 Phase 7 一致性守卫兜底（防线顺序正确）。
+        patchable_beats = [b for b in audit.missing_beats if b.get("patchable")]
+        if enable_beats and enable_refine and patchable_beats:
+            await _emit("ADF_STAGE", {"stage": "BEAT_PATCH"})
+            try:
+                from backend.services.workflows.adf.beat_patcher import patch_missing_beats
+                try:
+                    from backend.services.workflows.adf.name_registry import (
+                        build_name_registry,
+                        registry_to_prompt_block,
+                    )
+                    registry_block = registry_to_prompt_block(
+                        build_name_registry(
+                            self.entities, self.locations, self.assets, self.canon_context,
+                        )
+                    )
+                except Exception as reg_err:
+                    logger.warning(f"[ADF] 节拍补写专名表构建失败（降级无专名约束）: {reg_err}")
+                    registry_block = ""
+                patch_result = await patch_missing_beats(
+                    final_text=result.final_text,
+                    missing_beats=audit.missing_beats,
+                    purpose=purpose,
+                    style_contract=_build_style_contract(self.style_card),
+                    name_registry_block=registry_block,
+                    recorder=self.recorder,
+                )
+                result.final_text = patch_result.new_text
+                final_text = patch_result.new_text  # 同步本地变量，Phase 7 读它
+                if "beat_coverage" in result.stats:
+                    result.stats["beat_coverage"]["patched"] = len(patch_result.patched)
+                if patch_result.patched:
+                    logger.info(
+                        f"[ADF] Phase 6.5 节拍补写完成：补写 {len(patch_result.patched)} 个节拍"
+                    )
+                if patch_result.failed:
+                    result.degraded.append({
+                        "phase": "beat_patch",
+                        "reason": "patch_incomplete",
+                        "detail": "; ".join(
+                            f"{f['beat'][:20]}({f['reason']})" for f in patch_result.failed
+                        )[:200],
+                    })
+            except Exception as e:
+                logger.warning(f"[ADF] Phase 6.5 节拍补写异常（不阻塞）: {e}")
+                result.degraded.append({"phase": "beat_patch", "reason": "exception", "detail": str(e)[:200]})
+
+        # ============================================================
+        # Phase 7: 一致性守卫（CONSISTENCY_GUARD，1 次 reasoning + 0~3 次 creative）
+        # ============================================================
+        # 设定一致性四层防线的"查得出 + 修得掉"：代码预扫专名 suspects →
+        # LLM 审计（证据锚定，只报 name_drift/knowledge_breach/setting_conflict/
+        # state_contradiction 四类）→ 复用 Refinery 手术定点修复（安全网兜底）。
+        # 构建数据与 Phase 4 同源（专名表/知识边界基准一致），异常降级保留原文。
+        enable_guard = getattr(request, "enable_consistency_guard", True)
+        if enable_guard:
+            await _emit("ADF_STAGE", {"stage": "CONSISTENCY_GUARD"})
+            try:
+                from backend.services.workflows.adf.name_registry import build_name_registry
+                from backend.services.workflows.adf.segment_writer import (
+                    _build_knowledge_constraints,
+                )
+                from backend.services.workflows.adf.setting_resolver import (
+                    build_scene_setting_text,
+                    resolve_characters,
+                    resolve_hidden_constraints,
+                )
+                from backend.services.workflows.adf.consistency_guard import (
+                    run_consistency_guard,
+                )
+
+                registry = build_name_registry(
+                    self.entities, self.locations, self.assets, self.canon_context,
+                )
+                scene_setting_text = build_scene_setting_text(
+                    self.entities, self.locations, self.assets, self.relationships,
+                )
+                knowledge_constraints = _build_knowledge_constraints(
+                    self.canon_context,
+                    resolve_hidden_constraints(
+                        self.relationships, resolve_characters(self.entities),
+                    ),
+                )
+                guard = await run_consistency_guard(
+                    final_text=result.final_text,
+                    registry=registry,
+                    canon_context=self.canon_context,
+                    scene_setting_text=scene_setting_text,
+                    knowledge_constraints=knowledge_constraints,
+                    anchor=anchor,
+                    purpose=purpose,
+                    recorder=self.recorder,
+                    progress_callback=progress_callback,
+                    enable_edit_verify=getattr(request, "enable_edit_verify", True),
+                )
+                result.final_text = guard.new_text
+                final_text = guard.new_text  # 同步本地变量，统计读它
+                result.stats["consistency"] = {
+                    "issues_found": guard.issues_found,
+                    "issues_fixed": guard.issues_fixed,
+                    "surgeries_applied": guard.surgeries_applied,
+                    "dedup_removed": [list(r) for r in guard.dedup_removed],
+                    "rolled_back": guard.rolled_back,
+                }
+                result.degraded.extend(guard.degraded)
+                await _emit("ADF_CONSISTENCY", {
+                    "issues_found": guard.issues_found,
+                    "issues_fixed": guard.issues_fixed,
+                    "surgeries_applied": guard.surgeries_applied,
+                    "dedup_removed": [list(r) for r in guard.dedup_removed],
+                    "rolled_back": len(guard.rolled_back),
+                })
+                logger.info(
+                    f"[ADF] Phase 7 一致性守卫完成：发现 {guard.issues_found} 处，"
+                    f"修复 {guard.issues_fixed} 处"
+                )
+            except Exception as e:
+                logger.warning(f"[ADF] Phase 7 一致性守卫异常（不阻塞，保留原文）: {e}")
+                result.degraded.append({"phase": "consistency_guard", "reason": "exception", "detail": str(e)[:200]})
 
         # ============================================================
         # 统计与结束

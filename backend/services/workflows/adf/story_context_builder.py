@@ -238,7 +238,12 @@ async def build_story_context(
 
 
 def format_entry_state_for_prompt(spine: StoryContext) -> str:
-    """把 EntryState 格式化为 prompt 可读文本。"""
+    """把 EntryState 格式化为 prompt 可读文本。
+
+    注意：character_positions 列出的是"本章涉及角色"（全章），不是"开场同场角色"——
+    若标注为"在场角色"会诱导模型从全员同场的场景开场（真实故障：开场段把所有
+    角色塞进同一场景，后续段被迫重演以修正站位，形成剧情回路）。
+    """
     e = spine.entry_state
     parts = []
     if e.emotional_register:
@@ -247,7 +252,7 @@ def format_entry_state_for_prompt(spine: StoryContext) -> str:
         parts.append(f"前章结尾画面：{e.last_scene_image[:200]}")
     if e.character_positions:
         chars_text = "、".join(e.character_positions.keys())
-        parts.append(f"在场角色：{chars_text}")
+        parts.append(f"本章涉及角色（未必同场）：{chars_text}")
     if e.open_hooks:
         parts.append("悬挂伏笔：" + "；".join(e.open_hooks[:3]))
     return "；".join(parts) if parts else "（本章是第一章或无前文）"

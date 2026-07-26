@@ -101,6 +101,11 @@ function addCustomIssue() {
   showCustomForm.value = false
 }
 
+function removeCustomIssue(id: string) {
+  customIssues.value = customIssues.value.filter(ci => ci.id !== id)
+  delete decisions[id]
+}
+
 function handleConfirm() {
   const decArr: IssueDecision[] = []
   for (const iss of props.issues) {
@@ -205,6 +210,7 @@ function handleConfirm() {
       >
         <div class="issue-head">
           <span class="type-tag custom">作者补充</span>
+          <button class="btn-mini danger custom-remove" title="删除该自定义问题" @click="removeCustomIssue(ci.id)">✗ 删除</button>
         </div>
         <div class="issue-diagnosis">{{ ci.diagnosis }}</div>
       </div>
@@ -212,7 +218,12 @@ function handleConfirm() {
 
     <footer class="footer">
       <button class="btn-secondary" @click="emit('cancel')">取消润色</button>
-      <button class="btn-primary" :disabled="stats.confirmed === 0" @click="handleConfirm">
+      <button
+        class="btn-primary"
+        :disabled="stats.confirmed === 0"
+        :title="stats.confirmed === 0 ? '请至少确认一个问题' : ''"
+        @click="handleConfirm"
+      >
         开始润色（{{ stats.confirmed }} 处修改）
       </button>
     </footer>
@@ -266,6 +277,8 @@ function handleConfirm() {
   border-color: var(--accent-500);
 }
 .btn-mini:hover { opacity: 0.85; }
+.btn-mini.danger { color: #dc2626; border-color: #dc2626; }
+.custom-remove { margin-left: auto; }
 
 .custom-form {
   display: flex;

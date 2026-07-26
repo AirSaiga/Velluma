@@ -45,7 +45,6 @@ const currentBook = store.currentBook
 const currentBookId = store.currentBookId
 const selectedChapter = store.selectedChapter
 const selectedChapterId = store.selectedChapterId
-const apiConfig = store.apiConfig
 
 type SectionKey = 'characters' | 'foreshadowing' | 'readerMirror' | 'worldview' | 'style' | 'assets' | 'map' | 'notes' | 'settings'
 
@@ -174,7 +173,7 @@ async function onUpdateChapter(id: string, data: any) {
 // 警示：失败必须向上抛出，否则 NotesPanel 会误显示"已保存"
 async function saveBookNotes(notes: string) {
   if (!currentBookId.value) return
-  await store.updateBook({ global_sys_prompt: notes } as any)
+  await store.updateBook(currentBookId.value, { global_sys_prompt: notes } as any)
 }
 </script>
 
@@ -213,7 +212,6 @@ async function saveBookNotes(notes: string) {
           :characters="characters"
           :relationships="relationships"
           :selected-chapter-id="selectedChapterId"
-          :api-config="apiConfig"
           :closable="false"
           @create-character="onCreateCharacter"
           @update-character="onUpdateCharacter"
@@ -221,7 +219,6 @@ async function saveBookNotes(notes: string) {
           @create-relationship="onCreateRelationship"
           @update-relationship="onUpdateRelationship"
           @delete-relationship="onDeleteRelationship"
-          @refresh="refreshCharacters"
         />
       </div>
 
