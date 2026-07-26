@@ -1033,12 +1033,30 @@ export const bsadfApi = {
 
   /**
    * 降级单卡恢复（同步 JSON，非 SSE）。
-   * 重新渲染某张降级 beat，返回新文本 + 状态。
+   * 重新渲染某张降级 beat，返回渲染段（含 text）+ 更新后的槽位卡 + 可能的新降级句柄。
+   *
+   * 后端响应结构（routes/chapter_generation/bsadf.py::rerender_beat）：
+   * - segment: { index, text, scene_summary, emotion_register, landed_preconditions }
+   * - card: 更新后的槽位卡（status=pending/rendered/degraded）
+   * - degraded: 再次降级时返回新 DegradedBeat；成功时为 null
+   * - generation_run_id: 本次重渲染的 run id（rerender_xxx）
    */
   rerenderBeat: async (
     chapterId: string,
     params: { beat_id: string; edited_slot: BeatSlot },
-  ): Promise<{ text: string; status: string }> => {
+  ): Promise<{
+    chapter_id: string
+    generation_run_id: string
+    segment: {
+      index: number
+      text: string
+      scene_summary?: string
+      emotion_register?: string
+      landed_preconditions?: string[]
+    }
+    card: BeatSlot
+    degraded: DegradedBeat | null
+  }> => {
     return requestJson(`/chapters/${chapterId}/rerender-beat`, {
       method: 'POST',
       body: JSON.stringify(params),

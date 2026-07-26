@@ -24,6 +24,7 @@ import RefineryProgress from '../../generation/presentation/RefineryProgress.vue
 import BeatSlotPanel from '../../generation/presentation/BeatSlotPanel.vue'
 import BeatProgress from '../../generation/presentation/BeatProgress.vue'
 import SlotPreview from '../../generation/presentation/SlotPreview.vue'
+import DegradedBeatPlaceholder from '../../generation/presentation/DegradedBeatPlaceholder.vue'
 import TrackSelector from '../../generation/presentation/TrackSelector.vue'
 import PlanConfirmModal from '../../generation/presentation/PlanConfirmModal.vue'
 import type { IssueDecision, RefineryIssue, PlanSuggestionResponse, BeatSlot } from '../../../services/api/domain'
@@ -282,6 +283,56 @@ function handleBeatConfirm(payload: { run_id: string; edited_slots: BeatSlot[] }
 /** V5 BS-ADF：作者取消（回滚到 idle） */
 function handleBeatCancel() {
   session.cancelBeat()
+}
+
+/**
+ * V5 BS-ADF Phase 4d：降级单卡恢复。
+ * - rerender：拿 slot 数据调 session.rerenderBeat（调 /rerender-beat 单卡重渲染）。
+ *   slot 来源：优先 session.beatSlots（done 态 SlotPreview 仍持有）；
+ *   找不到时（Track B confirm 后 beatSlots 已清空）从 degraded_beat 构造最小 slot
+ *   （仅 beat_id + segment_index 必填，其余字段后端补默认值）。
+ * - skip：直接从 degradedBeats 移除该 beat（保留正文中的占位，作者手动放弃）。
+ */
+async function handleRerenderBeat(slot: BeatSlot) {
+  if (!selectedChapterId.value) return
+  await session.rerenderBeat(selectedChapterId.value, slot.beat_id, slot)
+}
+
+function handleSkipBeat(beatId: string) {
+  session.degradedBeats.value = session.degradedBeats.value.filter(d => d.beat_id !== beatId)
+}
+
+/** 取降级 beat 对应的 slot：beatSlots 优先（done 态 SlotPreview 持有全量 slot），
+ *  找不到则从 degraded_beat 构造最小占位 slot（仅 id + segment_index，后端补默认值）。 */
+function getSlotForDegraded(beatId: string): BeatSlot | undefined {
+  const found = session.beatSlots.value.find(s => s.beat_id === beatId)
+  if (found) return found
+  const db = session.degradedBeats.value.find(d => d.beat_id === beatId)
+  if (!db) return undefined
+  // 最小占位 slot：后端 BeatSlotSchema 仅 beat_id/segment_index 必填，其余字段用默认值兜底
+  return {
+    beat_id: db.beat_id,
+    segment_index: db.segment_index,
+    beat_type: 'ESTABLISH',
+    target_word_count: 600,
+    anchor_actions: [],
+    sensory_details: [],
+    text_carrier: '',
+    conflict_trigger: '',
+    psych_subtext: '',
+    ban_words: [],
+    sentence_rhythm: 'VARIED',
+    perspective: 'THIRD_LIMITED',
+    emotion_register: '',
+    emotion_energy: 5,
+    landed_preconditions: [],
+    shot_type: '',
+    transition: '',
+    status: 'degraded',
+    edit_count: 0,
+    render_attempts: db.attempts,
+    edited: false,
+  } as BeatSlot
 }
 
 /** V4.3 介入点 3：获取读者反馈 */
@@ -653,6 +704,23 @@ function handleDismissInflight(idx: number) {
             <p>本章尚未用 BS-ADF 引擎生成。</p>
             <p class="hint">在「规划」标签选择引擎 BS-ADF 与轨道 A/B 后生成。</p>
           </div>
+
+          <!-- 降级段占位符列表（Phase 4d：独立于上方状态分支，有降级 beat 即显示） -->
+          <section
+            v-if="session.degradedBeats.value.length > 0"
+            class="degraded-section"
+          >
+            <div class="section-label">降级段（{{ session.degradedBeats.value.length }}）</div>
+            <DegradedBeatPlaceholder
+              v-for="db in session.degradedBeats.value"
+              :key="db.beat_id"
+              :degraded="db"
+              :slot="getSlotForDegraded(db.beat_id)"
+              @rerender="handleRerenderBeat"
+              @skip="handleSkipBeat(db.beat_id)"
+            />
+            <p class="hint">重新渲染调单卡重试；跳过则保留占位继续看其他段。</p>
+          </section>
         </template>
       </div>
 
@@ -1170,6 +1238,19 @@ function handleDismissInflight(idx: number) {
 }
 .beats-empty .hint {
   margin-top: 0.5rem;
+}
+
+/* V5 节拍 tab：降级段占位符列表（Phase 4d） */
+.degraded-section {
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.degraded-section .hint {
+  font-size: 0.6875rem;
 }
 
 /* 速查 tab */

@@ -213,6 +213,8 @@ export interface GenerationSession {
   startBeat: (chapterId: string, tier: string, opts?: { track?: 'A' | 'B'; targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
   confirmBeats: (chapterId: string, editedSlots: BeatSlot[]) => void
   cancelBeat: () => void
+  /** BS-ADF：降级单卡重渲染（调 /rerender-beat，同步 JSON） */
+  rerenderBeat: (chapterId: string, beatId: string, editedSlot: BeatSlot) => Promise<any>
   // 持久化：进入章节时恢复上次会话产物（localStorage）
   loadForChapter: (chapterId: string) => void
   persist: () => void
@@ -916,6 +918,56 @@ export function useGenerationSession(): GenerationSession {
     stage.value = 'idle'
   }
 
+  /**
+   * BS-ADF：降级单卡重渲染（调 /rerender-beat，同步 JSON）。
+   *
+   * Phase 4d 降级的某张 beat 由作者重新编辑后单卡重渲染（不重跑全章）。
+   * 后端返回 {segment:{text}, card, degraded}：
+   * - 成功（degraded=null）：从 degradedBeats 移除该 beat，把渲染结果记入 renderProgress（status='rendered'）。
+   * - 再次降级（degraded 非空）：把新的降级句柄替换 degradedBeats 中同 beat_id 的项（attempts 累加）。
+   * 任意一种分支都持久化（刷新后能看到最新降级态）。
+   */
+  async function rerenderBeat(chapterId: string, beatId: string, editedSlot: BeatSlot) {
+    try {
+      const result = await bsadfApi.rerenderBeat(chapterId, { beat_id: beatId, edited_slot: editedSlot })
+      // 后端响应字段：result.segment.text（正文）/ result.degraded（再次降级句柄，可空）
+      const text = result?.segment?.text ?? ''
+      const reDegraded = result && result.degraded
+      if (reDegraded) {
+        // 再次降级：替换同 beat_id 的旧降级项（保留最新 attempts/reason）
+        degradedBeats.value = degradedBeats.value.map(d =>
+          d.beat_id === beatId ? {
+            beat_id: reDegraded.beat_id,
+            segment_index: reDegraded.segment_index,
+            reason: reDegraded.reason,
+            attempts: reDegraded.attempts ?? d.attempts,
+          } : d,
+        )
+      } else {
+        // 渲染成功：移出降级清单，把结果记入 renderProgress（标记为 rendered）
+        degradedBeats.value = degradedBeats.value.filter(d => d.beat_id !== beatId)
+        const segIndex = (editedSlot && typeof editedSlot.segment_index === 'number')
+          ? editedSlot.segment_index
+          : (result && result.segment && result.segment.index) ?? 0
+        // 替换或追加同 beat_id 的进度项（与 onRenderProgress 的去重逻辑一致）
+        const idx = renderProgress.value.findIndex(p => p.beat_id === beatId)
+        const progressItem = {
+          beat_id: beatId,
+          segment_index: segIndex,
+          status: 'rendered',
+          word_count: (text || '').length,
+        }
+        if (idx >= 0) renderProgress.value[idx] = progressItem
+        else renderProgress.value.push(progressItem)
+      }
+      persist()  // 重渲染结果持久化（刷新后保留降级态/成功态）
+      return result
+    } catch (e: any) {
+      error.value = e.message || '重渲染失败'
+      return null
+    }
+  }
+
   return {
     stage,
     generating,
@@ -958,6 +1010,7 @@ export function useGenerationSession(): GenerationSession {
     startBeat,
     confirmBeats,
     cancelBeat,
+    rerenderBeat,
     // 持久化：进入章节时调 loadForChapter 恢复上次产物
     loadForChapter,
     persist,

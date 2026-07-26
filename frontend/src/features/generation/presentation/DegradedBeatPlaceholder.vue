@@ -14,7 +14,9 @@ import type { DegradedBeat, BeatSlot } from '../../../services/api/domain'
 
 const props = defineProps<{
   degraded: DegradedBeat
-  slot: BeatSlot
+  /** 槽位卡句柄：Track B confirm 后 beatSlots 已清空，DB slot 可能过期，
+   *  找不到时为 undefined——此时只显示「跳过」按钮（rerender 需要 slot 数据）。 */
+  slot?: BeatSlot
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +48,7 @@ const reasonLabel = computed(() => REASON_LABEL[props.degraded.reason] || props.
       <span class="dp-target">{{ slot.target_word_count }} 字目标</span>
     </div>
     <div class="dp-actions">
-      <button class="dp-btn primary" @click="emit('rerender', slot)">
+      <button class="dp-btn primary" :disabled="!slot" @click="slot && emit('rerender', slot)">
         重新渲染
       </button>
       <button class="dp-btn" @click="emit('skip')">跳过</button>
