@@ -202,3 +202,94 @@ class TestBuildBeatSlots:
         for c in cards:
             assert c.shot_type in ("wide", "full", "medium", "close", "macro")
             assert c.transition in ("cut", "push_in", "pull_out", "counter", "fade")
+
+
+# ============================================================================
+# P1.4：enrich_slots 测试（mock LLM）
+# ============================================================================
+
+import asyncio
+from unittest.mock import patch, MagicMock
+from backend.services.workflows.bsadf.slot_builder import enrich_slots
+
+
+class TestEnrichSlots:
+    def _make_card(self):
+        return BeatSlotCard(
+            beat_id="BS_TEST_00", segment_index=0, beat_type="ESTABLISH",
+            target_word_count=500, anchor_actions=["扳手"],
+            sensory_details=["油污"], shot_type="wide", emotion_register="入口",
+        )
+
+    def test_enrich_success_merges_words(self):
+        """LLM 返回有效 JSON 时，扩写词应合并进卡。"""
+        card = self._make_card()
+
+        mock_result = MagicMock()
+        mock_result.text = '{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert "砸下气动扳手" in result[0].anchor_actions
+        assert "刺鼻柴油味" in result[0].sensory_details
+        # 原种子保留
+        assert "扳手" in result[0].anchor_actions
+
+    def test_enrich_failure_keeps_seeds(self):
+        """LLM 抛异常时，保留原种子词。"""
+        card = self._make_card()
+        original_actions = list(card.anchor_actions)
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   side_effect=Exception("LLM 不可用")):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert result[0].anchor_actions == original_actions
+
+    def test_enrich_disabled_returns_unchanged(self):
+        """enable=False 时直接返回原卡。"""
+        card = self._make_card()
+        result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=False))
+        assert result[0].anchor_actions == ["扳手"]
+
+    def test_enrich_empty_result_keeps_seeds(self):
+        """LLM 返回空列表时，保留种子。"""
+        card = self._make_card()
+        mock_result = MagicMock()
+        mock_result.text = '{"anchor_actions": [], "sensory_details": []}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert result[0].anchor_actions == ["扳手"]
+
+    def test_enrich_overlong_word_keeps_seeds(self):
+        """LLM 返回超长词（>20字）时，保留种子。"""
+        card = self._make_card()
+        long_word = "这" * 21  # 21 字，超限
+        mock_result = MagicMock()
+        mock_result.text = f'{{"anchor_actions": ["{long_word}"], "sensory_details": []}}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert result[0].anchor_actions == ["扳手"]
+
+    def test_enrich_dedup_preserves_order(self):
+        """扩写词 + 原种子去重时，扩写词在前，原种子在后，保序。"""
+        card = self._make_card()
+        card.anchor_actions = ["扳手", "油污"]  # 原有两个
+        mock_result = MagicMock()
+        mock_result.text = '{"anchor_actions": ["砸下气动扳手", "扳手"], "sensory_details": []}'
+        # 注意 LLM 返回里也有"扳手"——去重后应只出现一次
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        # 扩写词在前，原种子在后，"扳手"只出现一次
+        assert result[0].anchor_actions == ["砸下气动扳手", "扳手", "油污"]

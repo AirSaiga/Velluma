@@ -15,14 +15,23 @@ BS-ADF Phase 4a：槽位卡生成（SLOT_BUILD）。
 # Velluma - BS-ADF slot_builder
 # Copyright (C) 2026 Velluma. Licensed under AGPL-3.0.
 
+import json
+import logging
 from typing import Any, List, Optional
 
+from backend.services.llm import call_llm_with_usage
+from backend.services.observability.run_recorder import RunRecorder
+from backend.services.prompts.bsadf_prompts import build_slot_enrich_prompt
 from backend.services.workflows.adf.types import (
     ChapterClimax, Precondition, StoryContext,
 )
 from backend.services.workflows.adf.storyboard import plan_storyboard
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
 from backend.services.workflows.bsadf.types import BeatSlotCard
+
+logger = logging.getLogger(__name__)
+
+_MAX_WORD_LEN = 20  # enrichment 单词长度上限
 
 
 # ============================================================================
@@ -203,3 +212,88 @@ def _pick_conflict_trigger(
         if pc.description:
             return pc.description
     return ""
+
+
+# ============================================================================
+# Phase 4a：Slot Enrichment（可选 1× creative LLM/卡）
+# ============================================================================
+
+async def enrich_slots(
+    cards: List[BeatSlotCard],
+    recorder: Optional[RunRecorder] = None,
+    enable: bool = True,
+) -> List[BeatSlotCard]:
+    """对全章槽位卡跑 1× LLM 扩写（每张卡独立扩写，串行）。
+
+    失败判定（任一即视为该卡失败，保留原种子）：
+    (a) LLM 抛异常/超时
+    (b) 返回无法 JSON 解析
+    (c) 解析出的动作词/感官词为空
+    (d) 任一词超过 _MAX_WORD_LEN 字
+
+    Args:
+        cards: 待扩写的槽位卡列表（in-place 修改 anchor_actions/sensory_details）
+        recorder: RunRecorder（记 token 用量，可选）
+        enable: 是否启用（False 则直接返回原卡）
+
+    Returns:
+        扩写后的 cards（同一引用，in-place 修改）
+    """
+    if not enable:
+        return cards
+
+    for card in cards:
+        try:
+            system_prompt, user_prompt = build_slot_enrich_prompt(
+                seed_actions=card.anchor_actions,
+                seed_sensory=card.sensory_details,
+                shot_type=card.shot_type,
+                emotion_register=card.emotion_register,
+                scene_entities=[],
+            )
+            # 用 recorder.record_call 上下文管理器（与 climax_designer 一致）
+            if recorder is not None:
+                async with recorder.record_call(
+                    stage=f"bsadf.enrich.{card.beat_id}",
+                    model_slot="creative",
+                ) as call_ctx:
+                    result = await call_llm_with_usage(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        model_type="creative",
+                        temperature=0.7,
+                        max_tokens=512,
+                        response_format={"type": "json_object"},
+                    )
+                    call_ctx.set_result(result)
+            else:
+                result = await call_llm_with_usage(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model_type="creative",
+                    temperature=0.7,
+                    max_tokens=512,
+                    response_format={"type": "json_object"},
+                )
+
+            data = json.loads(result.text)
+            new_actions = data.get("anchor_actions", [])
+            new_sensory = data.get("sensory_details", [])
+
+            # 失败判定
+            if not new_actions and not new_sensory:
+                logger.warning(f"[enrich_slots] {card.beat_id} 扩写结果为空，保留种子")
+                continue
+            if any(len(w) > _MAX_WORD_LEN for w in new_actions + new_sensory):
+                logger.warning(f"[enrich_slots] {card.beat_id} 扩写结果含超长词，保留种子")
+                continue
+
+            # 合并：扩写词 + 原种子（去重，保序）
+            card.anchor_actions = list(dict.fromkeys(new_actions + card.anchor_actions))
+            card.sensory_details = list(dict.fromkeys(new_sensory + card.sensory_details))
+        except json.JSONDecodeError as e:
+            logger.warning(f"[enrich_slots] {card.beat_id} JSON 解析失败：{e}，保留种子")
+        except Exception as e:
+            logger.warning(f"[enrich_slots] {card.beat_id} LLM 调用失败：{e}，保留种子")
+
+    return cards
