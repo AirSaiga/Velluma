@@ -684,7 +684,7 @@ function handleDismissInflight(idx: number) {
         <template v-else>
           <!-- 渲染进度（Track A 全程 + Track B confirm 后） -->
           <BeatProgress
-            v-else-if="(session.stage.value === 'beat_rendering' || session.stage.value === 'tier_classifying') && (session.renderProgress.value.length > 0 || session.generating.value) && session.bsadfTrack.value"
+            v-if="(session.stage.value === 'beat_rendering' || session.stage.value === 'tier_classifying') && (session.renderProgress.value.length > 0 || session.generating.value) && session.bsadfTrack.value"
             :progress="session.renderProgress.value"
             :degraded="session.degradedBeats.value"
             :stage-label="session.stepProgress.value?.label || ''"
