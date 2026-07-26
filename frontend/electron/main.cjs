@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session } = require('electron')
+const { app, BrowserWindow, session, Notification, ipcMain } = require('electron')
 const { join, dirname } = require('path')
 const { spawn } = require('child_process')
 const net = require('net')
@@ -8,6 +8,8 @@ const fs = require('fs')
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 let backendProcess = null
+// 主窗口引用缓存（供 IPC handler 引用，避免闭包丢失窗口实例）
+let mainWindow = null
 
 // CP-dynamic-port: 前端端口也动态协商（与后端 port.txt 对称）
 // 优先级：环境变量 VELLUMA_FRONTEND_PORT → data/frontend_port.txt → 默认 5175
@@ -332,6 +334,12 @@ async function createMainWindow() {
         preload: join(__dirname, 'preload.cjs')
       }
     })
+    mainWindow = win  // 缓存到模块级，供 IPC handler 引用
+
+    // 窗口关闭时清空引用，避免悬空指针
+    win.on('closed', () => {
+      mainWindow = null
+    })
     
     if (isDev) {
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -380,11 +388,46 @@ async function createMainWindow() {
 }
 
 // =============================================================================
+// IPC：系统通知（生成完成时由渲染进程触发，主进程判断焦点后弹原生通知）
+// =============================================================================
+
+ipcMain.on('show-notification', (_event, payload = {}) => {
+  const { title, body } = payload
+  // 分层兜底：仅当主窗口非聚焦或最小化/隐藏时才打扰用户（前台不打扰）
+  const shouldNotify = !mainWindow
+    || mainWindow.isMinimized()
+    || !mainWindow.isVisible()
+    || !mainWindow.isFocused()
+  if (!shouldNotify) return
+  if (!Notification.isSupported()) return
+
+  const notification = new Notification({
+    title: title || 'Velluma AI',
+    body: body || '',
+    silent: false,
+  })
+  notification.on('click', () => {
+    // 点击通知拉回窗口
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    notification.close()
+  })
+  notification.show()
+})
+
+// =============================================================================
 // 应用生命周期
 // =============================================================================
 
 app.whenReady().then(async () => {
   try {
+    // Windows：设置 AppUserModelId，让系统通知正确归属到 Velluma（开发模式下默认显示为 "Electron"）
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.velluma.app')
+    }
     await createMainWindow()
 
     app.on('activate', () => {
