@@ -74,8 +74,13 @@ watch(() => session.error.value, (err) => {
 })
 
 // 生成完成时自动把正文写入章节
-watch(() => session.stage.value, (newStage) => {
-  if (newStage === 'done' && session.streamText.value) {
+// 警示：必须用 oldStage 区分"真正的生成完成"vs"恢复/切章"——
+// loadForChapter 恢复快照时会把 stage 设为 'done'（中断态有正文也强制 done），
+// 若不过滤 oldStage，每次切回已完成章节/刷新首屏都会重触发 handleGenerated，
+// 导致重复写库 + 误弹完成弹窗 + 误发系统通知。
+// 真正完成：oldStage 是生成中的状态（非 idle/done）；恢复：oldStage 是 idle/done。
+watch(() => session.stage.value, (newStage, oldStage) => {
+  if (newStage === 'done' && oldStage !== 'idle' && oldStage !== 'done' && session.streamText.value) {
     handleGenerated(session.streamText.value)
   }
 })
