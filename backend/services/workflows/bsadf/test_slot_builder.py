@@ -112,14 +112,19 @@ class TestSoftAssignPreconditions:
         assigned = soft_assign_preconditions([], segment_index=0, progress=0.0, total_segments=5)
         assert assigned == []
 
-    def test_all_pcs_can_assign_to_late_segment(self):
-        """后段应能容纳所有 PC（min_landing_offset 已满足）。"""
+    def test_each_pc_lands_exactly_one_segment(self):
+        """定点分配：每个 PC 全章只落一个目标段（防词表累积膨胀）。"""
         anchor = _make_anchor()
-        assigned = soft_assign_preconditions(
-            anchor.preconditions, segment_index=4, progress=0.9, total_segments=5
-        )
-        # 后段（index=4）应包含两个 PC（min_landing_offset=300 // 600 = 0，都满足）
-        assert len(assigned) == 2
+        landed = {}
+        for seg in range(5):
+            for pc in soft_assign_preconditions(
+                anchor.preconditions, segment_index=seg, progress=0.5, total_segments=5
+            ):
+                landed.setdefault(pc.id, []).append(seg)
+        # 两个 PC 都被分配，且各自只落唯一一段
+        assert sorted(landed.keys()) == ["PC_01", "PC_02"]
+        for pc_id, segs in landed.items():
+            assert len(segs) == 1, f"{pc_id} 落到了 {len(segs)} 段：{segs}"
 
 
 class TestBuildBeatSlots:
@@ -162,34 +167,19 @@ class TestBuildBeatSlots:
         # 第 0 段应接近 energy=2，末段应接近 energy=8
         assert cards[0].emotion_energy <= cards[-1].emotion_energy
 
-    def test_anchor_actions_seeded_from_preconditions(self):
-        """至少有一张卡的 anchor_actions 含 must_use_terms。"""
+    def test_key_anchors_seeded_from_preconditions(self):
+        """至少有一张卡的 key_anchors 含 must_use_terms。"""
         anchor = _make_anchor()
         spine = _make_spine()
         cards = build_beat_slots(
             anchor=anchor, spine=spine, total_segments=5, target_word_count=3000,
             chapter_number=1, locations=[], assets=[], chapter=None,
         )
-        all_actions = []
+        all_anchors = []
         for c in cards:
-            all_actions.extend(c.anchor_actions)
+            all_anchors.extend(c.key_anchors)
         # 至少有一个 must_use_term 出现
-        assert any("气动扳手" in a or "破旧译本" in a for a in all_actions)
-
-    def test_locations_seed_sensory_details(self):
-        """locations 参数应填入 sensory_details。"""
-        anchor = _make_anchor()
-        spine = _make_spine()
-        loc_mock = MagicMock()
-        loc_mock.name = "废弃工厂"
-        cards = build_beat_slots(
-            anchor=anchor, spine=spine, total_segments=3, target_word_count=1800,
-            chapter_number=1, locations=[loc_mock], assets=[], chapter=None,
-        )
-        all_sensory = []
-        for c in cards:
-            all_sensory.extend(c.sensory_details)
-        assert "废弃工厂" in all_sensory
+        assert any("气动扳手" in a or "破旧译本" in a for a in all_anchors)
 
     def test_shot_type_and_transition_populated(self):
         """每张卡都应有 shot_type 和 transition（来自 storyboard）。"""
@@ -217,8 +207,8 @@ class TestEnrichSlots:
     def _make_card(self):
         return BeatSlotCard(
             beat_id="BS_TEST_00", segment_index=0, beat_type="ESTABLISH",
-            target_word_count=500, anchor_actions=["扳手"],
-            sensory_details=["油污"], shot_type="wide", emotion_register="入口",
+            target_word_count=500, key_anchors=["扳手"],
+            shot_type="wide", emotion_register="入口",
         )
 
     def test_enrich_success_merges_words(self):
@@ -226,65 +216,64 @@ class TestEnrichSlots:
         card = self._make_card()
 
         mock_result = MagicMock()
-        mock_result.content = '{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}'
+        mock_result.content = '{"key_anchors": ["砸下气动扳手", "抹开油污"]}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert "砸下气动扳手" in result[0].anchor_actions
-        assert "刺鼻柴油味" in result[0].sensory_details
+        assert "砸下气动扳手" in result[0].key_anchors
         # 原种子保留
-        assert "扳手" in result[0].anchor_actions
+        assert "扳手" in result[0].key_anchors
 
     def test_enrich_failure_keeps_seeds(self):
         """LLM 抛异常时，保留原种子词。"""
         card = self._make_card()
-        original_actions = list(card.anchor_actions)
+        original_anchors = list(card.key_anchors)
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    side_effect=Exception("LLM 不可用")):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert result[0].anchor_actions == original_actions
+        assert result[0].key_anchors == original_anchors
 
     def test_enrich_disabled_returns_unchanged(self):
         """enable=False 时直接返回原卡。"""
         card = self._make_card()
         result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=False))
-        assert result[0].anchor_actions == ["扳手"]
+        assert result[0].key_anchors == ["扳手"]
 
     def test_enrich_empty_result_keeps_seeds(self):
         """LLM 返回空列表时，保留种子。"""
         card = self._make_card()
         mock_result = MagicMock()
-        mock_result.content = '{"anchor_actions": [], "sensory_details": []}'
+        mock_result.content = '{"key_anchors": []}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert result[0].anchor_actions == ["扳手"]
+        assert result[0].key_anchors == ["扳手"]
 
     def test_enrich_overlong_word_keeps_seeds(self):
         """LLM 返回超长词（>20字）时，保留种子。"""
         card = self._make_card()
         long_word = "这" * 21  # 21 字，超限
         mock_result = MagicMock()
-        mock_result.content = f'{{"anchor_actions": ["{long_word}"], "sensory_details": []}}'
+        mock_result.content = f'{{"key_anchors": ["{long_word}"]}}'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert result[0].anchor_actions == ["扳手"]
+        assert result[0].key_anchors == ["扳手"]
 
     def test_enrich_dedup_preserves_order(self):
         """扩写词 + 原种子去重时，扩写词在前，原种子在后，保序。"""
         card = self._make_card()
-        card.anchor_actions = ["扳手", "油污"]  # 原有两个
+        card.key_anchors = ["扳手", "油污"]  # 原有两个
         mock_result = MagicMock()
-        mock_result.content = '{"anchor_actions": ["砸下气动扳手", "扳手"], "sensory_details": []}'
+        mock_result.content = '{"key_anchors": ["砸下气动扳手", "扳手"]}'
         # 注意 LLM 返回里也有"扳手"——去重后应只出现一次
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
@@ -292,7 +281,7 @@ class TestEnrichSlots:
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
         # 扩写词在前，原种子在后，"扳手"只出现一次
-        assert result[0].anchor_actions == ["砸下气动扳手", "扳手", "油污"]
+        assert result[0].key_anchors == ["砸下气动扳手", "扳手", "油污"]
 
     def test_enrich_fenced_json_parsed(self):
         """LLM 返回带 markdown 围栏的 JSON（DeepSeek 常见）也应正确解析。
@@ -304,14 +293,13 @@ class TestEnrichSlots:
         card = self._make_card()
         mock_result = MagicMock()
         # 模拟 DeepSeek 带围栏 + 解释文字的输出
-        mock_result.content = '好的，这是扩展结果：\n```json\n{"anchor_actions": ["砸下气动扳手", "抹开油污"], "sensory_details": ["刺鼻柴油味"]}\n```\n希望对你有帮助。'
+        mock_result.content = '好的，这是扩展结果：\n```json\n{"key_anchors": ["砸下气动扳手", "抹开油污"]}\n```\n希望对你有帮助。'
 
         with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
                    return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert "砸下气动扳手" in result[0].anchor_actions
-        assert "刺鼻柴油味" in result[0].sensory_details
+        assert "砸下气动扳手" in result[0].key_anchors
 
     def test_enrich_garbage_content_keeps_seeds(self):
         """LLM 返回完全非 JSON 内容（纯文本解释）时，保留种子。"""
@@ -323,4 +311,91 @@ class TestEnrichSlots:
                    return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
 
-        assert result[0].anchor_actions == ["扳手"]
+        assert result[0].key_anchors == ["扳手"]
+
+
+# ============================================================================
+# 幻觉闸门加固：空种子禁自由扩写 + 零接地过滤
+# ============================================================================
+
+class TestEnrichHallucinationGuards:
+    def _make_card(self, anchors=None):
+        return BeatSlotCard(
+            beat_id="BS_TEST_01", segment_index=1, beat_type="ESTABLISH",
+            target_word_count=500, key_anchors=list(anchors if anchors is not None else ["扳手"]),
+            shot_type="wide", emotion_register="入口",
+        )
+
+    def test_empty_seed_skips_llm(self):
+        """种子为空 → 跳过该卡的 LLM 扩写（防凭空发明"雷电劈裂古树"类幻觉）。"""
+        card = self._make_card(anchors=[])
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage") as mock_llm:
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        mock_llm.assert_not_called()
+        assert result[0].key_anchors == []
+
+    def test_ungrounded_term_stripped(self):
+        """零接地词（全部内容词都不在语料）被剥离；接地扩写保留。"""
+        card = self._make_card()  # 种子 ["扳手"]
+        mock_result = MagicMock()
+        # "雷电劈裂古树"：雷电/劈裂/古树均不在语料 → 剥离
+        # "砸下气动扳手"：含种子词"扳手" → 保留
+        mock_result.content = '{"key_anchors": ["雷电劈裂古树", "砸下气动扳手"]}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert "雷电劈裂古树" not in result[0].key_anchors
+        assert "砸下气动扳手" in result[0].key_anchors
+        assert "扳手" in result[0].key_anchors
+
+    def test_grounded_expansion_kept(self):
+        """合理扩写（至少一个内容词接地，如大纲"工头"→"工头摘下黄色安全帽"）保留。"""
+        card = self._make_card()
+        mock_result = MagicMock()
+        mock_result.content = '{"key_anchors": ["工头摘下黄色安全帽"]}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots(
+                [card], enable=True, guard_context="工头走进车间，宣布加急订单",
+            ))
+
+        assert "工头摘下黄色安全帽" in result[0].key_anchors
+
+    def test_plot_keyword_gate_not_regressed(self):
+        """第一道剧情关键词闸门不回归：含未授权剧情级关键词的词仍被剥离
+        （即使它有接地内容词，如"机甲变异融合"的"机甲"接地）。"""
+        card = self._make_card(anchors=["机甲"])
+        mock_result = MagicMock()
+        mock_result.content = '{"key_anchors": ["机甲变异融合"]}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert "机甲变异融合" not in result[0].key_anchors
+        assert result[0].key_anchors == ["机甲"]
+
+    def test_cross_genre_imagery_stripped(self):
+        """跨题材意象（中世纪"马蹄溅起泥水/火把点燃草垛"混入机甲场景）零接地被剥离。"""
+        card = self._make_card(anchors=["机甲"])
+        mock_result = MagicMock()
+        mock_result.content = '{"key_anchors": ["马蹄溅起泥水", "火把点燃草垛"]}'
+
+        with patch("backend.services.workflows.bsadf.slot_builder.call_llm_with_usage",
+                   return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(enrich_slots([card], enable=True))
+
+        assert result[0].key_anchors == ["机甲"]
+
+
+def test_dynamic_spread_min_500():
+    from backend.services.workflows.bsadf.slot_builder import dynamic_spread
+    assert dynamic_spread(1500, 0, 5) == 500
+    assert dynamic_spread(5000, 0, 5) == 1000
+    assert dynamic_spread(2500, 0, 5) == 500
+
