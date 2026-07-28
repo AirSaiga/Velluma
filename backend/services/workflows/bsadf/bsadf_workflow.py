@@ -1289,7 +1289,7 @@ class BSAdfWorkflow:
                 await _emit_event(run, "BEAT_TEXT_CHUNK", {
                     "beat_id": card.beat_id,
                     "segment_index": segment_index,
-                    "text": segment.text,
+                    "delta": segment.text,
                 })
             except Exception as e:
                 logger.warning(f"[BSADF] render_one BEAT_TEXT_CHUNK 推送失败（不阻塞）: {e}")

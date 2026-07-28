@@ -387,7 +387,7 @@ class _BSAdfStreamHandler:
                 )
                 stepping_run = SteppingRun(
                     run_id=run_id,
-                    chapter_id=int(self.chapter_id),
+                    chapter_id=str(self.chapter_id),
                     cards=cards,
                     workflow=workflow,
                     decision_set=stepping_result.debug_info.get("decision_set") or {},
@@ -400,6 +400,16 @@ class _BSAdfStreamHandler:
                 _STEPPING_RUNS.set(stepping_run)
                 enable_mem = getattr(self.request, "enable_memory_ingestion", False)
                 asyncio.ensure_future(stepping_loop(stepping_run, enable_memory_ingestion=enable_mem))
+
+                # 补发步进就绪事件：携带 run_id（前端 advanceBeat 需要）+
+                # 全部槽位卡快照（前端立即展示分镜监视器）。
+                # workflow 内部发的 BEAT_SLOTS_BUILT 不带 run_id，这里补关联。
+                _emit("STEPPING_INITIALIZED", {
+                    "run_id": run_id,
+                    "beat_slots": [beat_slot_to_dict(c) for c in cards],
+                    "beat_ids": [c.beat_id for c in cards],
+                    "decision_set": stepping_result.debug_info.get("decision_set") or {},
+                })
 
                 _set_run_status(run_id, "stepping")
                 return
@@ -1119,6 +1129,16 @@ async def advance_beat(
     if run.cards[run.current_beat_index].beat_id != request.beat_id:
         raise HTTPException(status_code=409, detail="BEAT_NOT_CURRENT")
 
+    # 等待当前段渲染完成（BEAT_RENDER_READY）再接受裁决。
+    # 防止段还在渲染中就 pass 导致事件错乱（pass 的 BEAT_LOCKED 会被
+    # 当前段的 BEAT_RENDER_READY 抢先，SSE 流提前终止）。
+    for _ in range(240):  # 最长等 120 秒（240 × 0.5s）
+        if run.current_segment_ready or run.status in ("done", "error", "post_processing"):
+            break
+        await asyncio.sleep(0.5)
+    if not run.current_segment_ready and run.status == "stepping":
+        raise HTTPException(status_code=409, detail="SEGMENT_NOT_READY")
+
     action_payload: Dict[str, Any] = {
         "action": request.action,
         "beat_id": request.beat_id,
@@ -1127,6 +1147,14 @@ async def advance_beat(
         action_payload["edited_slot"] = request.edited_slot.model_dump()
     elif request.action == "branch" and request.branch_choice:
         action_payload["branch_choice"] = request.branch_choice
+
+    # 清空 event_queue 里的遗留事件（当前段的 BEAT_RENDER_START/CHUNK/READY）。
+    # advance-beat 的 SSE 流只消费 pass 之后的新事件（BEAT_LOCKED + 下一段序列）。
+    while not run.event_queue.empty():
+        try:
+            run.event_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
 
     await run.action_queue.put(action_payload)
     _STEPPING_RUNS.touch(request.run_id)
@@ -1165,7 +1193,10 @@ async def get_stepping_run_state(run_id: str):
         "locked_count": len(run.locked_segments),
         "total_beats": len(run.cards),
         "status": run.status,
-        "cards": [getattr(c, "beat_id", c.get("beat_id", "")) for c in run.cards],
+        "cards": [
+            c.beat_id if hasattr(c, "beat_id") else (c.get("beat_id", "") if isinstance(c, dict) else "")
+            for c in run.cards
+        ],
     }
 
 

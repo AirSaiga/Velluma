@@ -20,7 +20,7 @@ class SteppingRun:
     """单个步进生成运行的可恢复状态。"""
 
     run_id: str
-    chapter_id: int
+    chapter_id: str  # UUID 字符串（与 Chapter.id 一致）
     cards: List[Any]
     workflow: Any
 
@@ -38,6 +38,10 @@ class SteppingRun:
     status: str = "stepping"
     final_result: Optional[Dict[str, Any]] = None
     _sse_seq_counter: int = 0
+    # 当前段是否已 BEAT_RENDER_READY（等作者裁决）。
+    # stepping_loop emit READY 时置 True；收到 action 时置 False。
+    # advance-beat 据此判断是否可推进（防止段未 ready 就 pass 的时序错乱）。
+    current_segment_ready: bool = False
 
 
 class SteppingRunStore:
@@ -147,8 +151,10 @@ async def stepping_loop(
             "degraded": _degraded_to_dict_safe(degraded),
             "card_snapshot": _card_to_dict_safe(card),
         })
+        run.current_segment_ready = True
 
         action = await run.action_queue.get()
+        run.current_segment_ready = False
         run.last_activity = time.time()
 
         act = action.get("action")

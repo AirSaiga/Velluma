@@ -1090,6 +1090,13 @@ function _dispatchEvent(
       slots: payload.beat_slots || [],
       decision_set: payload.decision_set,
     })
+  } else if (ev === 'STEPPING_INITIALIZED') {
+    // NLE-ADF 步进就绪：route 层补发，携带 run_id（workflow 内部的 BEAT_SLOTS_BUILT 不带 run_id）
+    callbacks.onSlots?.({
+      run_id: payload.run_id,
+      slots: payload.beat_slots || [],
+      decision_set: payload.decision_set,
+    })
   } else if (ev === 'BEAT_RENDER_PROGRESS') {
     callbacks.onRenderProgress?.({
       beat_id: payload.beat_id,

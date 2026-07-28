@@ -513,14 +513,14 @@ MIGRATIONS: list[dict[str, Any]] = [
         "table": "chapter_entities",
         "column": "emergent",
         "definition": "BOOLEAN DEFAULT FALSE",
-        "expected_udt_names": {"boolean"},
+        "expected_udt_names": {"boolean", "bool"},
     },
     # NLE-ADF Loop3：ChapterMapLocation 涌现地点标记
     {
         "table": "chapter_map_locations",
         "column": "emergent",
         "definition": "BOOLEAN DEFAULT FALSE",
-        "expected_udt_names": {"boolean"},
+        "expected_udt_names": {"boolean", "bool"},
     },
 ]
 
