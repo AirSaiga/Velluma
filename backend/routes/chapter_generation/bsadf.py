@@ -411,6 +411,24 @@ class _BSAdfStreamHandler:
                     "decision_set": stepping_result.debug_info.get("decision_set") or {},
                 })
 
+                # 等待首段 BEAT_RENDER_READY，期间把 stepping_loop 的
+                # BEAT_RENDER_START/BEAT_TEXT_CHUNK 事件转发到 _GENERATION_RUNS
+                # （generate-bsadf 的 SSE 流在 status=stepping 终止后，前端无法
+                #  收到首段渲染事件——死锁：前端等 BEAT_RENDER_READY 才显示 Space，
+                #  但该事件只在 event_queue 里没人消费）。
+                # 修复：这里桥接 event_queue → _emit，直到首段 ready 再终止 SSE 流。
+                while not stepping_run.current_segment_ready:
+                    if stepping_run.status in ("error", "done"):
+                        break
+                    try:
+                        ev_name, ev_data = await asyncio.wait_for(
+                            stepping_run.event_queue.get(), timeout=120.0
+                        )
+                        _emit(ev_name, ev_data)
+                    except asyncio.TimeoutError:
+                        _emit("ERROR", {"error": "首段渲染超时（120s）"})
+                        break
+
                 _set_run_status(run_id, "stepping")
                 return
 
