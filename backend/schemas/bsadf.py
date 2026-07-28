@@ -212,6 +212,9 @@ class GenerateBSAdfRequest(BaseModel):
             "无岔路（has_story_branch=false）自动放行，是常态。"
         ),
     )
+    enable_stepping: bool = Field(False, description="NLE-ADF 步进模式开关")
+    enable_outline_self_check: bool = Field(False, description="Loop 1 大纲自检")
+    enable_memory_ingestion: bool = Field(False, description="Loop 3 记忆倒灌")
     user_tier_hint: Optional[str] = Field(
         None, description="用户预期档位提示（弱信号）"
     )

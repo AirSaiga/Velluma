@@ -280,7 +280,7 @@ async def _sse_stream_from_run(run_id: str):
         since = len(events)
 
         status = run["status"]
-        if status in ("done", "paused_track_b", "error"):
+        if status in ("done", "paused_track_b", "error", "stepping"):
             if status == "error":
                 yield build_sse_error(run.get("error", "生成失败"))
             return
@@ -371,6 +371,38 @@ class _BSAdfStreamHandler:
 
             track = getattr(self.request, "track", "A")
             pause_after_slot_build = (track == "B")
+
+            # ============================================================
+            # NLE-ADF 步进模式：跑到 Phase 4b 暂停，起 stepping_loop 协程，
+            # run 状态置 "stepping"，本请求返回（前端改走 /advance-beat 推进）。
+            # ============================================================
+            if getattr(self.request, "enable_stepping", False):
+                stepping_result = await workflow.execute_stepping(progress_callback=_on_progress)
+                cards_dicts = stepping_result.debug_info.get("beat_slots", [])
+                # 从 dict 重建 BeatSlotCard（debug_info 存的是 dict）
+                cards = [beat_slot_from_dict(d) for d in cards_dicts] if cards_dicts else []
+
+                from backend.services.workflows.bsadf.stepping_runtime import (
+                    SteppingRun, _STEPPING_RUNS, stepping_loop,
+                )
+                stepping_run = SteppingRun(
+                    run_id=run_id,
+                    chapter_id=int(self.chapter_id),
+                    cards=cards,
+                    workflow=workflow,
+                    decision_set=stepping_result.debug_info.get("decision_set") or {},
+                )
+                workflow._paused_spine = stepping_result.spine_track
+                workflow._paused_anchor = stepping_result.distal_anchor
+                workflow._paused_cards = cards
+                workflow._emotion_curve_samples = stepping_result.debug_info.get("emotion_curve_samples", [])
+
+                _STEPPING_RUNS.set(stepping_run)
+                enable_mem = getattr(self.request, "enable_memory_ingestion", False)
+                asyncio.ensure_future(stepping_loop(stepping_run, enable_memory_ingestion=enable_mem))
+
+                _set_run_status(run_id, "stepping")
+                return
 
             result = await workflow.execute(
                 progress_callback=_on_progress,
