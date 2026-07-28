@@ -23,7 +23,7 @@
  * - refineryIssues/surgeries/holisticVerdict：V4.1 精修产物
  * - degraded：降级事件
  */
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
 import { adfApi, refineryApi, bsadfApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
 
 // ============================================================
@@ -1361,6 +1361,21 @@ export function useGenerationSession(): GenerationSession {
       abortController.signal,
     )
   }
+
+  // ===== NLE-ADF：Space 键步进锁死推进 =====
+  function _spaceKeyHandler(e: KeyboardEvent) {
+    if (e.code !== 'Space') return
+    const target = e.target as HTMLElement | null
+    const tag = target?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+    if (target?.isContentEditable) return
+    if (stage.value === 'beat_stepping' && readyBeatId.value && currentChapterId) {
+      e.preventDefault()
+      advanceBeat(currentChapterId, 'pass', { beatId: readyBeatId.value })
+    }
+  }
+  onMounted(() => window.addEventListener('keydown', _spaceKeyHandler))
+  onUnmounted(() => window.removeEventListener('keydown', _spaceKeyHandler))
 
   return {
     stage,
