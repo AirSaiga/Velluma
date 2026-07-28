@@ -451,6 +451,10 @@ class BSAdfWorkflow:
             # 时机保持在 Phase 4b 后——此时卡已 enrich，分支判断更准
             if enable_dde and cards:
                 await _emit("BSADF_STAGE", {"stage": "BRANCH_CHECK"})
+                # Loop 1 大纲自检产出的 macro 缺口→DDE 走向分支（消费后从 debug_info 弹出）
+                _loop1_gaps = []
+                if hasattr(result, "debug_info") and result.debug_info:
+                    _loop1_gaps = result.debug_info.pop("_loop1_macro_gaps", [])
                 try:
                     decision_set = await generate_chapter_decision_set(
                         chapter=self.chapter,
@@ -458,6 +462,7 @@ class BSAdfWorkflow:
                         spine=spine,
                         cards=cards,
                         recorder=self.recorder,
+                        force_branch_gaps=_loop1_gaps,
                     )
                 except Exception as e:
                     logger.warning(f"[BSADF] DDE 章节分叉判断异常（降级无岔路放行）: {e}")
