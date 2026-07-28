@@ -155,3 +155,105 @@ async def test_stepping_loop_skip_jumps_segment_without_render():
     await task
     assert len(run.locked_segments) == 1
 
+
+@pytest.mark.asyncio
+async def test_stepping_loop_edit_rerenders_same_segment():
+    """edit 动作重渲染当前段（不推进到下一段），且更新卡的硬契约字段。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["原文。", "第二段。"])
+    run = SteppingRun(run_id="r4", chapter_id=1, cards=cards, workflow=workflow)
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+    # 第一段就绪
+    await run.event_queue.get()  # BEAT_RENDER_START B00
+    await run.event_queue.get()  # BEAT_RENDER_READY B00
+    # edit：作者改了硬契约
+    await run.action_queue.put({
+        "action": "edit", "beat_id": "B00",
+        "edited_slot": {
+            "core_plot_event": "新事件",
+            "key_anchors": ["新锚点"],
+            "text_carrier": "新台词",
+        },
+    })
+    # 应该重新渲染 B00（不推进到 B01）
+    ev_name, ev_data = await run.event_queue.get()  # BEAT_RENDER_START
+    assert ev_name == "BEAT_RENDER_START"
+    assert ev_data["beat_id"] == "B00"
+    # card 的硬契约字段应被覆盖
+    assert cards[0].core_plot_event == "新事件"
+    assert cards[0].key_anchors == ["新锚点"]
+    assert cards[0].text_carrier == "新台词"
+    assert cards[0].edited is True
+    assert cards[0].edit_count == 1
+    # 清理：pass B00 → pass B01
+    await run.event_queue.get()  # BEAT_RENDER_READY B00（重渲染后）
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # BEAT_RENDER_START B01
+    await run.event_queue.get()  # BEAT_RENDER_READY B01
+    await run.action_queue.put({"action": "pass", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+    # edit 后只有 pass 才进 locked_segments，所以最终 2 段都锁死
+    assert len(run.locked_segments) == 2
+
+
+@pytest.mark.asyncio
+async def test_stepping_loop_branch_updates_directive():
+    """branch 动作更新 branch_directive 并重渲染当前段（不推进）。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["原文。", "第二段。"])
+    run = SteppingRun(run_id="r5", chapter_id=1, cards=cards, workflow=workflow)
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+    await run.event_queue.get()  # BEAT_RENDER_START B00
+    await run.event_queue.get()  # BEAT_RENDER_READY B00
+    # branch：作者切走向
+    await run.action_queue.put({
+        "action": "branch", "beat_id": "B00",
+        "branch_choice": {"option_id": "B", "label": "反抗", "plot_impact": "正面对抗"},
+    })
+    # 应该重渲染 B00
+    ev_name, ev_data = await run.event_queue.get()  # BEAT_RENDER_START
+    assert ev_name == "BEAT_RENDER_START"
+    assert ev_data["beat_id"] == "B00"
+    # branch_directive 应被更新（plot_impact 优先）
+    assert "正面对抗" in cards[0].branch_directive
+    # 清理
+    await run.event_queue.get()  # BEAT_RENDER_READY B00
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # BEAT_RENDER_START B01
+    await run.event_queue.get()  # BEAT_RENDER_READY B01
+    await run.action_queue.put({"action": "pass", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+@pytest.mark.asyncio
+async def test_stepping_loop_calls_ingest_memory_on_pass():
+    """pass 动作在 enable_memory_ingestion=True 时触发 ingest_memory。"""
+    from unittest.mock import AsyncMock
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["第一段。", "第二段。"])
+    workflow.ingest_memory = AsyncMock(return_value={"new_entities": [{"name": "血噬"}]})
+    run = SteppingRun(run_id="r3", chapter_id=1, cards=cards, workflow=workflow)
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=True))
+    await run.event_queue.get()  # BEAT_RENDER_START B00
+    await run.event_queue.get()  # BEAT_RENDER_READY B00
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED（含 extracted_facts）
+    # ingest_memory 应被调用一次
+    workflow.ingest_memory.assert_called_once()
+    # 清理
+    await run.event_queue.get()  # BEAT_RENDER_START B01
+    await run.event_queue.get()  # BEAT_RENDER_READY B01
+    await run.action_queue.put({"action": "pass", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
