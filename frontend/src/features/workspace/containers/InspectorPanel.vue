@@ -7,7 +7,7 @@
  * - 设定：场景设定（角色/地点/资产）
  * - 润色：V4.1 Refinery（诊断问题清单 → 作者确认 → 手术 + 回读 + 抛光）
  * - 反馈：V4.3 读者反馈 + 审校结论（ADF 锚点审计 / Refinery 整体回读）+ Precondition 落地
- * - 节拍：V5 BS-ADF（Track B 槽位卡编辑 / 渲染进度 / Track A 槽位卡预览）
+ * - 节拍：V5 BS-ADF（分镜工作台：Track B 暂停编辑 + 剧情走向选择 / 渲染进度 / 定点重渲染 / 救援内联卡）
  * - Canon：本章 Precondition / 情绪曲线 / 出场角色速查，并跳转 Canon 脑图
  *
  * Ctrl+1~6 切 tab。
@@ -15,28 +15,24 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
-import { useToast } from '../../../composables/useToast'
 import { useAppStore } from '../../app/useAppStore'
 import ChapterBadges from '../presentation/ChapterBadges.vue'
 import TierSelector from '../../../components/TierSelector.vue'
 import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPanel.vue'
 import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
-import BeatSlotPanel from '../../generation/presentation/BeatSlotPanel.vue'
 import BeatProgress from '../../generation/presentation/BeatProgress.vue'
-import SlotPreview from '../../generation/presentation/SlotPreview.vue'
-import DegradedBeatPlaceholder from '../../generation/presentation/DegradedBeatPlaceholder.vue'
-import TrackSelector from '../../generation/presentation/TrackSelector.vue'
-import PlanConfirmModal from '../../generation/presentation/PlanConfirmModal.vue'
-import type { IssueDecision, RefineryIssue, PlanSuggestionResponse, BeatSlot } from '../../../services/api/domain'
-import { adfApi, refineryApi } from '../../../services/api/domain'
+import StoryboardPanel from '../../generation/presentation/StoryboardPanel.vue'
+// TrackSelector 暂时下线（Track A 通道关闭）；恢复时重新 import 并挂到生成主控区
+import type { IssueDecision, RefineryIssue, BeatSlot } from '../../../services/api/domain'
+import { refineryApi } from '../../../services/api/domain'
 import GenerationStepper from '../../generation/presentation/GenerationStepper.vue'
 import SceneSettingsPanel from '../presentation/SceneSettingsPanel.vue'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 
 type InspectorTab = 'plan' | 'setting' | 'refine' | 'feedback' | 'canon' | 'beats'
 
-// BS-ADF 引擎选择（V5）：adf = 原 ADF 引擎（session.start）；bsadf = 新 BS-ADF（session.startBeat）
-type EngineChoice = 'adf' | 'bsadf'
+// 引擎固定 BS-ADF（原 ADF 直写入口已下线，底层 session.start/adfApi 保留供 Refinery/优化复用）
+type EngineChoice = 'bsadf'
 type TrackChoice = 'A' | 'B'
 
 interface TabDef {
@@ -76,14 +72,11 @@ const tierSelection = ref<'auto' | 'climax' | 'turn' | 'progress' | 'transition'
 // V3.5：字数指定（null = 自动按定档推导；用户填了就用用户的）
 const targetWordCount = ref<number | null>(null)
 
-// V5 BS-ADF：引擎选择 + 渲染轨道（仅 BS-ADF 引擎显示 TrackSelector）
-const selectedEngine = ref<EngineChoice>('adf')
-const selectedTrack = ref<TrackChoice>('A')
-
-// V4.2 介入点 1：章节规划确认
-const planSuggestion = ref<PlanSuggestionResponse | null>(null)
-const showPlanModal = ref(false)
-const pendingAuthorIntent = ref('')
+// V5 BS-ADF：引擎选择 + 渲染轨道
+// ⚠ Track A（自动直出）通道已暂时关闭：前端固定走 Track B 分镜微调，
+//    TrackSelector 不再渲染（组件文件保留，恢复时重新挂上并把默认值改回 'A'）
+const selectedEngine = ref<EngineChoice>('bsadf')
+const selectedTrack = ref<TrackChoice>('B')
 
 // V4.3 介入点 3：读者反馈
 const readerFeedback = ref('')
@@ -91,14 +84,15 @@ const loadingFeedback = ref(false)
 
 // 生成完成后自动切到反馈 tab；精修诊断完成切到精修 tab
 // V5：BS-ADF 渲染中（beat_rendering）切到节拍 tab 看进度；
-//    beat_pending 不切 tab（Track B 编辑走弹窗，覆盖在当前 tab 之上）
+//    beat_pending（Track B 暂停）也切到节拍 tab——分镜工作台已内联在该 tab
+// NLE-ADF：beat_stepping（逐段推进）与 assembling（拼接）也切到节拍 tab
 watch(
   () => session.stage.value,
   (newStage) => {
-    if (newStage === 'beat_rendering') {
+    if (['beat_rendering', 'beat_pending', 'beat_stepping', 'assembling'].includes(newStage)) {
       activeTab.value = 'beats'
     } else if (newStage === 'done') {
-      // BS-ADF 完成后停在节拍 tab 看槽位卡预览；ADF/Refinery 完成切到反馈
+      // BS-ADF 完成后停在节拍 tab 看分镜卡；ADF/Refinery 完成切到反馈
       if (session.lastDoneMode.value === 'bsadf' && session.beatSlots.value.length > 0) {
         activeTab.value = 'beats'
       } else {
@@ -155,8 +149,6 @@ function updateChapterField(field: 'title' | 'outline_text', value: string) {
 }
 
 const emit = defineEmits<{
-  (e: 'generate', payload: { tier: string; authorIntent?: string }): void
-  (e: 'generated', text: string): void
   (e: 'jump-to-offset', offset: [number, number] | undefined): void
 }>()
 
@@ -166,39 +158,11 @@ function startGenerate() {
     return
   }
   console.log('[Inspector] startGenerate:', { tier: tierSelection.value, chapterId: selectedChapterId.value })
-  // V4.2 介入点 1：先弹章节规划确认，再进入 V3.2 ADF 生成
-  fetchPlanAndShow()
+  // 引擎已固定 BS-ADF：用 BeatSlot 卡作为介入点，不再走 plan-suggestion 弹窗
+  startBeatGenerate()
 }
 
-async function fetchPlanAndShow() {
-  if (!selectedChapterId.value) {
-    console.warn('[Inspector] fetchPlanAndShow: 无选中章节')
-    return
-  }
-  // V5：BS-ADF 引擎不走 plan-suggestion 介入点（用 BeatSlot 卡作为介入点），直接启动
-  if (selectedEngine.value === 'bsadf') {
-    startBeatGenerate()
-    return
-  }
-  const toast = useToast()
-  try {
-    console.log('[Inspector] 请求 plan-suggestion...')
-    planSuggestion.value = await adfApi.getPlanSuggestion(selectedChapterId.value)
-    console.log('[Inspector] plan-suggestion 成功，弹窗', planSuggestion.value)
-    showPlanModal.value = true
-  } catch (e: any) {
-    // 失败则提示并跳过介入点，直接生成
-    console.error('[Inspector] plan-suggestion 失败:', e)
-    toast.showToast(`规划建议获取失败（${e.message || '网络错误'}），已跳过确认环节`, 'warning')
-    // 降级：跳过介入点 1，直接生成
-    session.start(selectedChapterId.value, tierSelection.value, {
-      targetWordCount: targetWordCount.value,
-    })
-    emit('generate', { tier: tierSelection.value })
-  }
-}
-
-/** V5 BS-ADF：启动生成（Track A 全自动 / Track B 跑到槽位卡暂停） */
+/** BS-ADF：启动生成（Track A 自动直出 / Track B 分镜微调，跑到分镜卡单次暂停） */
 function startBeatGenerate() {
   if (!selectedChapterId.value) {
     console.warn('[Inspector] startBeatGenerate: 无选中章节')
@@ -212,46 +176,10 @@ function startBeatGenerate() {
   session.startBeat(selectedChapterId.value, tierSelection.value, {
     track: selectedTrack.value,
     targetWordCount: targetWordCount.value,
-    authorIntent: pendingAuthorIntent.value || undefined,
+    steppingEnabled: true,
+    enableOutlineSelfCheck: true,
+    enableMemoryIngestion: true,
   })
-  emit('generate', { tier: tierSelection.value, authorIntent: pendingAuthorIntent.value })
-}
-
-function handlePlanConfirm(payload: { authorIntent: string; expectationActions: Record<string, string>; payoffDecision: string }) {
-  showPlanModal.value = false
-  pendingAuthorIntent.value = payload.authorIntent
-  if (!selectedChapterId.value) return
-  // V5：按引擎分流
-  if (selectedEngine.value === 'bsadf') {
-    startBeatGenerate()
-    return
-  }
-  // V4.2：把作者意图真正透传到 ADF 生成请求
-  session.start(selectedChapterId.value, tierSelection.value, {
-    authorIntent: payload.authorIntent,
-    expectationActions: payload.expectationActions,
-    targetWordCount: targetWordCount.value,
-  })
-  emit('generate', { tier: tierSelection.value, authorIntent: payload.authorIntent })
-}
-
-function handlePlanSkip() {
-  showPlanModal.value = false
-  if (!selectedChapterId.value) return
-  // V5：按引擎分流
-  if (selectedEngine.value === 'bsadf') {
-    startBeatGenerate()
-    return
-  }
-  session.start(selectedChapterId.value, tierSelection.value, {
-    targetWordCount: targetWordCount.value,
-  })
-}
-
-/** V4.2 介入点 1：作者取消生成（不进入生成了） */
-function handlePlanCancel() {
-  showPlanModal.value = false
-  planSuggestion.value = null
 }
 
 /** V4.1 启动精修（诊断阶段） */
@@ -273,10 +201,13 @@ function handleRefineryCancel() {
   session.stage.value = 'done'
 }
 
-/** V5 BS-ADF：作者确认槽位卡编辑，恢复渲染 */
-function handleBeatConfirm(payload: { run_id: string; edited_slots: BeatSlot[] }) {
+/** V5 BS-ADF：作者确认分镜卡编辑 + 剧情走向选择，恢复渲染 */
+function handleBeatConfirm(payload: { edited_slots: BeatSlot[]; branch_choices: Record<string, string>; skipped: boolean }) {
   if (!selectedChapterId.value) return
-  session.confirmBeats(selectedChapterId.value, payload.edited_slots)
+  session.confirmBeats(selectedChapterId.value, payload.edited_slots, {
+    branchChoices: payload.branch_choices,
+    skipped: payload.skipped,
+  })
 }
 
 /** V5 BS-ADF：作者取消（回滚到 idle） */
@@ -284,13 +215,24 @@ function handleBeatCancel() {
   session.cancelBeat()
 }
 
+/** NLE-ADF：Space 锁死推进（推进到下一段） */
+function onAdvancePass() {
+  if (!selectedChapterId.value || !session.readyBeatId.value) return
+  session.advanceBeat(selectedChapterId.value, 'pass', { beatId: session.readyBeatId.value })
+}
+
+/** NLE-ADF：跳过本段 */
+function onAdvanceSkip() {
+  if (!selectedChapterId.value || !session.readyBeatId.value) return
+  session.advanceBeat(selectedChapterId.value, 'skip', { beatId: session.readyBeatId.value })
+}
+
 /**
- * V5 BS-ADF Phase 4d：降级单卡恢复。
- * - rerender：拿 slot 数据调 session.rerenderBeat（调 /rerender-beat 单卡重渲染）。
- *   slot 来源：优先 session.beatSlots（done 态 SlotPreview 仍持有）；
- *   找不到时（Track B confirm 后 beatSlots 已清空）从 degraded_beat 构造最小 slot
- *   （仅 beat_id + segment_index 必填，其余字段后端补默认值）。
- * - skip：直接从 degradedBeats 移除该 beat（保留正文中的占位，作者手动放弃）。
+ * V5 BS-ADF：降级/救援单卡恢复。
+ * - rerender：拿编辑后的整卡调 session.rerenderBeat（/rerender-beat 携带 edited_slot）。
+ *   卡来源：session.beatSlots（confirm 后不再清空，始终持卡）。
+ * - skip-degraded：直接从 degradedBeats 移除该 beat（保留正文中的占位，作者手动放弃）。
+ * - dismiss-rescue：从 rescueNeeded 移除该条（作者确认不救）。
  */
 async function handleRerenderBeat(slot: BeatSlot) {
   if (!selectedChapterId.value) return
@@ -299,39 +241,12 @@ async function handleRerenderBeat(slot: BeatSlot) {
 
 function handleSkipBeat(beatId: string) {
   session.degradedBeats.value = session.degradedBeats.value.filter(d => d.beat_id !== beatId)
+  session.persist()  // 忽略降级需持久化（刷新后不再复活）
 }
 
-/** 取降级 beat 对应的 slot：beatSlots 优先（done 态 SlotPreview 持有全量 slot），
- *  找不到则从 degraded_beat 构造最小占位 slot（仅 id + segment_index，后端补默认值）。 */
-function getSlotForDegraded(beatId: string): BeatSlot | undefined {
-  const found = session.beatSlots.value.find(s => s.beat_id === beatId)
-  if (found) return found
-  const db = session.degradedBeats.value.find(d => d.beat_id === beatId)
-  if (!db) return undefined
-  // 最小占位 slot：后端 BeatSlotSchema 仅 beat_id/segment_index 必填，其余字段用默认值兜底
-  return {
-    beat_id: db.beat_id,
-    segment_index: db.segment_index,
-    beat_type: 'ESTABLISH',
-    target_word_count: 600,
-    anchor_actions: [],
-    sensory_details: [],
-    text_carrier: '',
-    conflict_trigger: '',
-    psych_subtext: '',
-    ban_words: [],
-    sentence_rhythm: 'VARIED',
-    perspective: 'THIRD_LIMITED',
-    emotion_register: '',
-    emotion_energy: 5,
-    landed_preconditions: [],
-    shot_type: '',
-    transition: '',
-    status: 'degraded',
-    edit_count: 0,
-    render_attempts: db.attempts,
-    edited: false,
-  } as BeatSlot
+function handleDismissRescue(beatId: string) {
+  session.rescueNeeded.value = session.rescueNeeded.value.filter(r => r.beat_id !== beatId)
+  session.persist()  // 忽略救援标记需持久化
 }
 
 /** V4.3 介入点 3：获取读者反馈 */
@@ -368,9 +283,8 @@ function handleDismissInflight(idx: number) {
 
 // collapse 逻辑已移除（不再收起副驾）
 
-// 注：原"生成完成时把正文通知父级"的 emit('generated') watcher 已删除。
-// WorkspaceView 的 watch(session.stage) 已独立覆盖完成检测（写章节 + 弹窗 + 系统通知），
-// 此处的 emit 路径与之语义重复，会在 done 瞬间双触发 handleGenerated，已移除。
+// 注：原 generate/generated 两个 emit 已删除——WorkspaceView 从未监听，
+// 其 watch(session.stage) 已独立覆盖完成检测（写章节 + 弹窗 + 系统通知）。
 </script>
 
 <template>
@@ -392,22 +306,6 @@ function handleDismissInflight(idx: number) {
 
     <!-- tab 内容 -->
     <div class="tab-content">
-      <!-- V4.2 介入点 1：章节规划确认弹窗（放在 tab-content 内部，作为 overlay） -->
-      <PlanConfirmModal
-        v-if="showPlanModal && planSuggestion"
-        :suggestion="planSuggestion"
-        @confirm="handlePlanConfirm"
-        @skip="handlePlanSkip"
-        @cancel="handlePlanCancel"
-      />
-      <!-- V5 BS-ADF：Track B 槽位卡编辑弹窗（stage=beat_pending 时弹出） -->
-      <BeatSlotPanel
-        v-if="session.stage.value === 'beat_pending' && session.beatSlots.value.length > 0 && session.beatRunId.value"
-        :slots="session.beatSlots.value"
-        :run-id="session.beatRunId.value"
-        @confirm="handleBeatConfirm"
-        @cancel="handleBeatCancel"
-      />
       <!-- 本章 tab -->
       <!-- ====== 规划 tab：定档 + 生成 + 介入点 1 ====== -->
       <div v-if="activeTab === 'plan'" class="panel plan-panel">
@@ -460,33 +358,8 @@ function handleDismissInflight(idx: number) {
             <div class="section-label">篇幅</div>
             <TierSelector v-model="tierSelection" />
 
-            <!-- V5 引擎切换：ADF / BS-ADF -->
-            <div class="engine-toggle">
-              <label class="wc-label">引擎</label>
-              <div class="engine-options">
-                <button
-                  class="engine-btn"
-                  :class="{ active: selectedEngine === 'adf' }"
-                  title="锚点驱动流（ADF）：直接生成全章正文"
-                  @click="selectedEngine = 'adf'"
-                >
-                  <span class="engine-name">ADF</span>
-                  <span class="engine-desc">整章直写</span>
-                </button>
-                <button
-                  class="engine-btn"
-                  :class="{ active: selectedEngine === 'bsadf' }"
-                  title="分段节拍流（BS-ADF）：先拆段再逐段渲染，可在轨道 B 编辑槽位"
-                  @click="selectedEngine = 'bsadf'"
-                >
-                  <span class="engine-name">BS-ADF</span>
-                  <span class="engine-desc">分段节拍</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- V5 BS-ADF 轨道选择（仅 BS-ADF 引擎显示） -->
-            <TrackSelector v-if="selectedEngine === 'bsadf'" v-model="selectedTrack" />
+            <!-- 引擎固定 BS-ADF；轨道固定 Track B 分镜微调（Track A 通道暂时关闭，
+                 TrackSelector 不再渲染，恢复时重新挂上） -->
 
             <div class="word-count-input">
               <label class="wc-label">目标字数</label>
@@ -496,11 +369,12 @@ function handleDismissInflight(idx: number) {
                 :value="targetWordCount ?? ''"
                 placeholder="自动"
                 min="500"
-                max="20000"
+                max="15000"
                 step="100"
                 @input="(e) => {
                   const v = parseInt((e.target as HTMLInputElement).value)
-                  targetWordCount = (isNaN(v) || v < 500) ? null : v
+                  // 与后端 GenerateBsadfRequest 的 le=15000 对齐（超出会 422）
+                  targetWordCount = (isNaN(v) || v < 500) ? null : Math.min(v, 15000)
                 }"
               />
               <span class="wc-hint">{{ targetWordCount ? '已指定' : '按定档自动' }}</span>
@@ -510,15 +384,7 @@ function handleDismissInflight(idx: number) {
               <span>{{ session.stage.value === 'done' ? '重新生成' : '生成本章' }}</span>
             </button>
             <p class="hint">
-              <template v-if="selectedEngine === 'bsadf' && selectedTrack === 'B'">
-                BS-ADF 轨道 B：先生成槽位卡，你编辑后再逐段渲染。
-              </template>
-              <template v-else-if="selectedEngine === 'bsadf'">
-                BS-ADF 轨道 A：全自动拆段 + 逐段渲染，无需介入。
-              </template>
-              <template v-else>
-                先确认篇幅与设定，再逐段写作。
-              </template>
+              分镜微调：先生成分镜卡，你改卡、选走向后再逐段渲染。
             </p>
           </section>
 
@@ -676,13 +542,15 @@ function handleDismissInflight(idx: number) {
         </template>
       </div>
 
-      <!-- ====== 节拍 tab：BS-ADF 渲染进度 / Track A 预览（Track B 编辑走弹窗，见 tab-content 顶层）====== -->
+      <!-- ====== 节拍 tab：BS-ADF 分镜工作台 + 渲染进度 ====== -->
       <div v-else-if="activeTab === 'beats'" class="panel beats-panel">
         <div v-if="!selectedChapter" class="empty">
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- 渲染进度（Track A 全程 + Track B confirm 后） -->
+          <!-- 渲染进度（Track A 全程 + Track B confirm 后；分镜卡未就绪前的等待态也在此）
+               bsadfTrack 非空 = 本次会话确由 startBeat 启动（ADF/Refinery 生成时为 null，
+               避免 ADF 的 tier_classifying 阶段误显示 BS-ADF 渲染进度） -->
           <BeatProgress
             v-if="(session.stage.value === 'beat_rendering' || session.stage.value === 'tier_classifying') && (session.renderProgress.value.length > 0 || session.generating.value) && session.bsadfTrack.value"
             :progress="session.renderProgress.value"
@@ -690,35 +558,53 @@ function handleDismissInflight(idx: number) {
             :stage-label="session.stepProgress.value?.label || ''"
           />
 
-          <!-- Track A 完成后的只读预览 -->
-          <SlotPreview
-            v-else-if="session.stage.value === 'done' && session.lastDoneMode.value === 'bsadf' && session.beatSlots.value.length > 0"
+          <!-- 分镜工作台：Track B 暂停态可编辑；Track A / 渲染后只读为主 + 极速微调/定点渲染；
+               救援/降级段内联高亮（路线 C） -->
+          <StoryboardPanel
+            v-if="session.beatSlots.value.length > 0"
             :slots="session.beatSlots.value"
+            :decision-set="session.decisionSet.value"
+            :rescue-needed="session.rescueNeeded.value"
+            :degraded="session.degradedBeats.value"
+            :render-progress="session.renderProgress.value"
+            :climax-summary="session.adfAnchor.value?.climax_description || ''"
+            :editable="session.stage.value === 'beat_pending'"
+            :busy="session.generating.value"
+            :rerendering-beat-id="session.rerenderingBeatId.value"
+            :stepping-locked-ids="session.lockedBeatIds.value"
+            :stepping-ready-id="session.readyBeatId.value"
+            :stepping-rendering-id="session.renderingBeatId.value"
+            @confirm="handleBeatConfirm"
+            @cancel="handleBeatCancel"
+            @rerender="handleRerenderBeat"
+            @skip-degraded="handleSkipBeat"
+            @dismiss-rescue="handleDismissRescue"
           />
 
+          <!-- NLE-ADF 步进控制条：段就绪等空格推进时显示 -->
+          <div v-if="session.stage.value === 'beat_stepping' && session.readyBeatId.value" class="stepping-bar">
+            <div class="stepping-info">
+              当前段 #{{
+                (session.beatSlots.value.find(s => s.beat_id === session.readyBeatId.value)?.segment_index ?? 0) + 1
+              }}
+              · 已锁 {{ session.lockedBeatIds.value.size }}/{{ session.beatSlots.value.length }} 段
+            </div>
+            <div class="stepping-actions">
+              <button class="step-btn primary" @click="onAdvancePass">
+                💡 Space 锁死推进
+              </button>
+              <button class="step-btn secondary" @click="onAdvanceSkip">
+                跳过本段
+              </button>
+            </div>
+          </div>
+
           <!-- 空态 -->
-          <div v-else class="beats-empty">
+          <div v-if="session.beatSlots.value.length === 0 && session.stage.value !== 'beat_rendering' && session.stage.value !== 'tier_classifying'" class="beats-empty">
             <div class="empty-icon"><Icon name="bolt" :size="40" /></div>
             <p>本章尚未用 BS-ADF 引擎生成。</p>
             <p class="hint">在「规划」标签选择引擎 BS-ADF 与轨道 A/B 后生成。</p>
           </div>
-
-          <!-- 降级段占位符列表（Phase 4d：独立于上方状态分支，有降级 beat 即显示） -->
-          <section
-            v-if="session.degradedBeats.value.length > 0"
-            class="degraded-section"
-          >
-            <div class="section-label">降级段（{{ session.degradedBeats.value.length }}）</div>
-            <DegradedBeatPlaceholder
-              v-for="db in session.degradedBeats.value"
-              :key="db.beat_id"
-              :degraded="db"
-              :slot="getSlotForDegraded(db.beat_id)"
-              @rerender="handleRerenderBeat"
-              @skip="handleSkipBeat(db.beat_id)"
-            />
-            <p class="hint">重新渲染调单卡重试；跳过则保留占位继续看其他段。</p>
-          </section>
         </template>
       </div>
 
@@ -981,47 +867,6 @@ function handleDismissInflight(idx: number) {
   flex-shrink: 0;
 }
 
-/* V5 引擎切换（ADF / BS-ADF） */
-.engine-toggle {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  margin: 0.5rem 0;
-}
-.engine-options {
-  display: flex;
-  gap: 0.5rem;
-}
-.engine-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.125rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.engine-btn:hover {
-  border-color: rgba(124, 106, 173, 0.45);
-}
-.engine-btn.active {
-  border-color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.12);
-}
-.engine-name {
-  font-size: 0.8125rem;
-  font-weight: 600;
-}
-.engine-desc {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-}
-
 /* 字数指定 */
 .word-count-input {
   display: flex;
@@ -1236,19 +1081,6 @@ function handleDismissInflight(idx: number) {
 }
 .beats-empty .hint {
   margin-top: 0.5rem;
-}
-
-/* V5 节拍 tab：降级段占位符列表（Phase 4d） */
-.degraded-section {
-  margin-top: 0.875rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.degraded-section .hint {
-  font-size: 0.6875rem;
 }
 
 /* 速查 tab */
@@ -1556,5 +1388,51 @@ function handleDismissInflight(idx: number) {
 .empty {
   padding: 2.5rem 1rem;
   line-height: 1.7;
+}
+
+/* NLE-ADF 步进控制条 */
+.stepping-bar {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+.stepping-info {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.stepping-actions {
+  display: flex;
+  gap: 0.375rem;
+}
+.step-btn {
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.step-btn.primary {
+  background: var(--accent-500, #4f46e5);
+  color: white;
+}
+.step-btn.primary:hover {
+  opacity: 0.9;
+}
+.step-btn.secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+.step-btn.secondary:hover {
+  background: var(--hover-bg);
 }
 </style>
