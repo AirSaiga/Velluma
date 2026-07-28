@@ -1,10 +1,18 @@
 """
-BS-ADF 引擎核心数据结构。
+BS-ADF 引擎核心数据结构（瘦身版，22 → 13+ 字段）。
 
 职责：定义 BeatSlotCard（槽位卡）及其运行时状态
 业务场景：Phase 4a 产出 → 4b 作者编辑 → 4c 渲染消费 → 4d 降级追踪
-主要功能：结构化中间层，把 anchor+spine 固化为可渲染的物理白描槽位
+主要功能：结构化中间层，把 anchor+spine 固化为可渲染、可机器验收的物理硬契约
 依赖项：dataclasses、typing
+
+设计要点（DDE-BS 重构后）：
+- 槽位卡是"渲染验收的物理硬契约"，不是 prompt 载体：core_plot_event /
+  key_anchors / text_carrier 三件事都能在正文里被代码客观核验。
+- 软性风格指令（禁词、心理描写限制、感官指导）已下沉为渲染器静态
+  system prompt（见 services/prompts/bsadf_prompts.py），不逐卡复制。
+- branch_directive 是 DDE 注入的剧情走向约束（注入渲染 prompt，
+  不做 coverage 校验）。
 
 注意：与 adf/types.py 平行，不 import ADF 的 dataclass（避免耦合），
      但字段名与 ADF 兼容（SegmentResult 输出形状一致）。
@@ -13,15 +21,15 @@ BS-ADF 引擎核心数据结构。
 # Copyright (C) 2026 Velluma. Licensed under AGPL-3.0.
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
 class BeatSlotCard:
-    """单段槽位卡：渲染器的结构化输入。
+    """单段槽位卡：渲染器的结构化输入 + 可机器验收的物理硬契约。
 
-    每张卡对应一个 segment，含物理动作/感官/载体/冲突槽位 +
-    渲染约束 + ADF 集成字段 + 运行时状态。
+    每张卡对应一个 segment，含物理硬契约槽位 + 剧情走向约束 +
+    内部渲染约束 + ADF 集成字段 + 运行时状态。
     """
 
     # === 标识 ===
@@ -30,17 +38,18 @@ class BeatSlotCard:
     beat_type: str                          # ESTABLISH | CONFRONT | CLIMACTIC | RESOLVE
     target_word_count: int                  # tier 派生，动态再分摊
 
-    # === 槽位（渲染器扩展的"填料"）===
-    anchor_actions: List[str] = field(default_factory=list)   # 必须出现的物理动词
-    sensory_details: List[str] = field(default_factory=list)  # 必须出现的感官名词
-    text_carrier: str = ""                                     # 锚定本段的一句对白/铭文
-    conflict_trigger: str = ""                                 # 本段冲突触发事件
-    psych_subtext: str = ""  # 只读指令（不渲染进正文）
+    # === 物理硬契约（UI 可见，coverage 可机器验收）===
+    core_plot_event: str = ""                                # 本段必须发生的剧情转折（原 conflict_trigger）
+    key_anchors: List[str] = field(default_factory=list)     # 画面必现硬焦点（原 anchor_actions）
+    text_carrier: str = ""                                   # 锚定本段的一句对白/铭文
+    outline_beat: str = ""                                   # 本段大纲节拍（UI 只读展示，防大纲偏移）
 
-    # === 渲染约束 ===
-    ban_words: List[str] = field(default_factory=list)        # 本章禁词
+    # === 叙事走向（DDE 注入；注入渲染 prompt，不做 coverage 校验）===
+    branch_directive: str = ""              # 作者选定的剧情分支走向（label + plot_impact）
+
+    # === 内部渲染约束 ===
+    negative_bounds: List[str] = field(default_factory=list)  # 排他禁忌（渲染期禁出现）
     sentence_rhythm: str = "VARIED"                            # SHORT_PUNCHY | VARIED | LAYERED
-    perspective: str = "THIRD_LIMITED"
 
     # === ADF 集成字段（复用 ADF prompt 脚手架必需）===
     emotion_register: str = ""
@@ -78,6 +87,32 @@ class DegradedBeat:
     card_snapshot: BeatSlotCard        # 降级时的槽位卡快照（可重新编辑）
 
 
+@dataclass
+class EmergentFacts:
+    """Loop 3 涌现实体抽取结果（单段）。"""
+
+    new_entities: List[dict] = field(default_factory=list)
+    relationship_changes: List[dict] = field(default_factory=list)
+    new_locations: List[dict] = field(default_factory=list)
+    outline_addenda: List[dict] = field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return (
+            not self.new_entities
+            and not self.relationship_changes
+            and not self.new_locations
+            and not self.outline_addenda
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "new_entities": self.new_entities,
+            "relationship_changes": self.relationship_changes,
+            "new_locations": self.new_locations,
+            "outline_addenda": self.outline_addenda,
+        }
+
+
 def beat_slot_to_dict(card: BeatSlotCard) -> dict:
     """BeatSlotCard → dict（用于 SSE 事件 / DB 持久化）。"""
     return {
@@ -85,14 +120,13 @@ def beat_slot_to_dict(card: BeatSlotCard) -> dict:
         "segment_index": card.segment_index,
         "beat_type": card.beat_type,
         "target_word_count": card.target_word_count,
-        "anchor_actions": card.anchor_actions,
-        "sensory_details": card.sensory_details,
+        "core_plot_event": card.core_plot_event,
+        "key_anchors": card.key_anchors,
         "text_carrier": card.text_carrier,
-        "conflict_trigger": card.conflict_trigger,
-        "psych_subtext": card.psych_subtext,
-        "ban_words": card.ban_words,
+        "outline_beat": card.outline_beat,
+        "branch_directive": card.branch_directive,
+        "negative_bounds": card.negative_bounds,
         "sentence_rhythm": card.sentence_rhythm,
-        "perspective": card.perspective,
         "emotion_register": card.emotion_register,
         "emotion_energy": card.emotion_energy,
         "landed_preconditions": card.landed_preconditions,
@@ -112,14 +146,13 @@ def beat_slot_from_dict(d: dict) -> BeatSlotCard:
         segment_index=d.get("segment_index", 0),
         beat_type=d.get("beat_type", ""),
         target_word_count=d.get("target_word_count", 600),
-        anchor_actions=d.get("anchor_actions", []),
-        sensory_details=d.get("sensory_details", []),
+        core_plot_event=d.get("core_plot_event", ""),
+        key_anchors=d.get("key_anchors", []),
         text_carrier=d.get("text_carrier", ""),
-        conflict_trigger=d.get("conflict_trigger", ""),
-        psych_subtext=d.get("psych_subtext", ""),
-        ban_words=d.get("ban_words", []),
+        outline_beat=d.get("outline_beat", ""),
+        branch_directive=d.get("branch_directive", ""),
+        negative_bounds=d.get("negative_bounds", []),
         sentence_rhythm=d.get("sentence_rhythm", "VARIED"),
-        perspective=d.get("perspective", "THIRD_LIMITED"),
         emotion_register=d.get("emotion_register", ""),
         emotion_energy=d.get("emotion_energy", 5),
         landed_preconditions=d.get("landed_preconditions", []),
