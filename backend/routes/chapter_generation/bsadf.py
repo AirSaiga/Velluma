@@ -1148,3 +1148,34 @@ async def advance_beat(
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
+
+@router.get("/stepping-run/{run_id}/state")
+async def get_stepping_run_state(run_id: str):
+    """查询步进运行状态（前端轮询/恢复展示用）。"""
+    from fastapi import HTTPException
+    from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+    run = _STEPPING_RUNS.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
+    return {
+        "run_id": run.run_id,
+        "chapter_id": run.chapter_id,
+        "current_beat_index": run.current_beat_index,
+        "current_beat_id": run.cards[run.current_beat_index].beat_id if run.cards else None,
+        "locked_count": len(run.locked_segments),
+        "total_beats": len(run.cards),
+        "status": run.status,
+        "cards": [getattr(c, "beat_id", c.get("beat_id", "")) for c in run.cards],
+    }
+
+
+@router.delete("/stepping-run/{run_id}")
+async def delete_stepping_run(run_id: str):
+    """销毁步进运行（前端取消/退出步进面板时调用，释放内存）。"""
+    from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+    run = _STEPPING_RUNS.pop(run_id)
+    if run is None:
+        return {"ok": False, "reason": "RUN_NOT_FOUND"}
+    return {"ok": True}
+
+
