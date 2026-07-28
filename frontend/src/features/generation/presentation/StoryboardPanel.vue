@@ -51,6 +51,8 @@ const props = withDefaults(defineProps<{
   steppingReadyId?: string | null
   /** 正在渲染的 beat_id（步进模式下逐段渲染） */
   steppingRenderingId?: string | null
+  /** NLE-ADF 步进岔路门：当前待作者选走向的 beat_id（null = 无待决策岔路） */
+  branchChoicePendingBeatId?: string | null
 }>(), {
   decisionSet: null,
   rescueNeeded: () => [],
@@ -63,6 +65,7 @@ const props = withDefaults(defineProps<{
   steppingLockedIds: null,
   steppingReadyId: null,
   steppingRenderingId: null,
+  branchChoicePendingBeatId: null,
 })
 
 const emit = defineEmits<{
@@ -146,20 +149,16 @@ function selectBranch(beatId: string, optionId: string) {
   branchChoices.value[beatId] = optionId
 }
 
-/** Track A 只读展示：取该卡实际注入的走向文本（branch_directive 优先，
- *  否则回退到默认选项 label） */
+/** 只读展示：取该卡实际注入的走向文本（branch_directive 真非空才显示，
+ *  否则返回空——步进模式下未选走向时不再回退默认选项）。 */
 function appliedBranchLabel(slot: BeatSlot): string {
-  if (slot.branch_directive) return slot.branch_directive
-  const node = branchNodeOf(slot.beat_id)
-  if (!node) return ''
-  const opt = node.options.find(o => o.option_id === node.default_option) || node.options[0]
-  return opt?.label || ''
+  return slot.branch_directive || ''
 }
 
 // ============================================================
 // 状态灯 / 救援与降级匹配
 // ============================================================
-type CardStatus = 'ready' | 'rendering' | 'rendered' | 'rescue' | 'degraded'
+type CardStatus = 'ready' | 'rendering' | 'rendered' | 'rescue' | 'degraded' | 'branch_choosing'
 
 const STATUS_META: Record<CardStatus, { label: string; icon: string }> = {
   ready: { label: '已就绪', icon: '○' },
@@ -167,6 +166,7 @@ const STATUS_META: Record<CardStatus, { label: string; icon: string }> = {
   rendered: { label: '已渲染', icon: '✓' },
   rescue: { label: '需救援', icon: '⚠' },
   degraded: { label: '渲染降级', icon: '⚠' },
+  branch_choosing: { label: '选走向中', icon: '⚡' },
 }
 
 function rescueItemOf(slot: BeatSlot): RescueNeededItem | null {
@@ -187,6 +187,7 @@ function statusOf(slot: BeatSlot): CardStatus {
   if (props.steppingLockedIds?.has(slot.beat_id)) return 'rendered'
   if (props.steppingReadyId === slot.beat_id) return 'ready'
   if (props.steppingRenderingId === slot.beat_id) return 'rendering'
+  if (props.branchChoicePendingBeatId === slot.beat_id) return 'branch_choosing'
   if (rescueItemOf(slot)) return 'rescue'
   if (degradedItemOf(slot)) return 'degraded'
   const p = props.renderProgress.find(x => x.beat_id === slot.beat_id)
@@ -272,7 +273,7 @@ function onSlotEdit(_slot: BeatSlot, _field: string) {
       ⚡ 已检查剧情走向：本章无真正岔路，AI 按大纲顺势推进。
     </p>
     <p v-else-if="decisionSet && decisionSet.has_story_branch && !editable" class="sb-intro muted">
-      ⚡ 本章有 {{ decisionSet.decision_nodes.length }} 处剧情岔路，AI 已按默认走向渲染（可在对应段落卡片上微调后定点重渲染）。
+      ⚡ 本章有 {{ decisionSet.decision_nodes.length }} 处剧情岔路，将在对应段落渲染前让你选择走向。
     </p>
 
     <div class="sb-list">
@@ -312,8 +313,8 @@ function onSlotEdit(_slot: BeatSlot, _field: string) {
         <!-- ⚡ 剧情走向分支 -->
         <div v-if="branchNodeOf(slot.beat_id)" class="branch-block">
           <div class="branch-title">⚡ 剧情走向：{{ branchNodeOf(slot.beat_id)!.node_title }}</div>
-          <!-- 暂停态：radio 点选 -->
-          <div v-if="editable" class="branch-options">
+          <!-- 暂停态 / 步进岔路门：radio 点选 -->
+          <div v-if="editable || statusOf(slot) === 'branch_choosing'" class="branch-options">
             <label
               v-for="opt in branchNodeOf(slot.beat_id)!.options"
               :key="opt.option_id"
@@ -360,7 +361,7 @@ function onSlotEdit(_slot: BeatSlot, _field: string) {
             <button
               v-else
               class="sb-btn"
-              :disabled="busy || rerenderingBeatId === slot.beat_id"
+              :disabled="busy || rerenderingBeatId === slot.beat_id || statusOf(slot) === 'branch_choosing' || statusOf(slot) === 'ready' || statusOf(slot) === 'rendering'"
               title="按当前分镜卡重新渲染这一段"
               @click="handleRerender(slot)"
             >🎲 定点渲染本段</button>

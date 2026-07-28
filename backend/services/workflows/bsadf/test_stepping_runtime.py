@@ -257,3 +257,105 @@ async def test_stepping_loop_calls_ingest_memory_on_pass():
     await run.event_queue.get()  # COMPLETE
     await task
 
+
+@pytest.mark.asyncio
+async def test_branch_gate_pauses_when_dde_branch_present():
+    """岔路门：段有 DDE 岔路时，渲染前暂停发 BEAT_BRANCH_CHOICE。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["第一段。", "第二段。"])
+    decision_set = {
+        "has_story_branch": True,
+        "decision_nodes": [{
+            "beat_id": "B00",
+            "node_title": "林尘的应对",
+            "options": [
+                {"option_id": "A", "label": "忍辱", "plot_impact": "默默承受"},
+                {"option_id": "B", "label": "反抗", "plot_impact": "正面对抗"},
+            ],
+            "default_option": "A",
+        }],
+    }
+    run = SteppingRun(run_id="r_gate", chapter_id=1, cards=cards, workflow=workflow, decision_set=decision_set)
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    # B00 有岔路 → 应先收到 BEAT_BRANCH_CHOICE（而非 BEAT_RENDER_START）
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_BRANCH_CHOICE"
+    assert ev_data["beat_id"] == "B00"
+    assert ev_data["node"]["node_title"] == "林尘的应对"
+
+    # 作者选了 B 走向
+    await run.action_queue.put({
+        "action": "branch", "beat_id": "B00",
+        "branch_choice": {"option_id": "B", "label": "反抗", "plot_impact": "正面对抗"},
+    })
+    await asyncio.sleep(0)  # 让 stepping_loop 协程处理
+    # 岔路门注入 directive 后继续渲染
+    assert "正面对抗" in cards[0].branch_directive
+    await run.event_queue.get()  # BEAT_RENDER_START B00
+    await run.event_queue.get()  # BEAT_RENDER_READY B00
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    # B01 无岔路 → 直接 BEAT_RENDER_START
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_RENDER_START"
+    await run.event_queue.get()  # BEAT_RENDER_READY B01
+    await run.action_queue.put({"action": "pass", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+@pytest.mark.asyncio
+async def test_branch_gate_pass_uses_default_directive():
+    """岔路门：作者 pass（接受默认）→ 用默认走向注入 directive。"""
+    cards = [_FakeCard("B00", 0)]
+    workflow = _FakeWorkflow(["第一段。"])
+    decision_set = {
+        "has_story_branch": True,
+        "decision_nodes": [{
+            "beat_id": "B00", "node_title": "test",
+            "options": [{"option_id": "A", "label": "忍辱", "plot_impact": "默默承受"}],
+            "default_option": "A",
+        }],
+    }
+    run = SteppingRun(run_id="r_default", chapter_id=1, cards=cards, workflow=workflow, decision_set=decision_set)
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    await run.event_queue.get()  # BEAT_BRANCH_CHOICE
+    # pass = 接受默认走向
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await asyncio.sleep(0)  # 让 stepping_loop 协程处理
+    # 应注入默认走向 directive
+    assert "忍辱" in cards[0].branch_directive
+    assert "默默承受" in cards[0].branch_directive
+    await run.event_queue.get()  # BEAT_RENDER_START
+    await run.event_queue.get()  # BEAT_RENDER_READY
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+@pytest.mark.asyncio
+async def test_branch_gate_no_branch_skips_gate():
+    """无 DDE 岔路时，岔路门不触发，直接渲染。"""
+    cards = [_FakeCard("B00", 0)]
+    workflow = _FakeWorkflow(["第一段。"])
+    run = SteppingRun(
+        run_id="r_nogate", chapter_id=1, cards=cards, workflow=workflow,
+        decision_set={"has_story_branch": False, "decision_nodes": []},
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+    # 无岔路 → 直接 BEAT_RENDER_START（无 BEAT_BRANCH_CHOICE）
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_RENDER_START"
+    await run.event_queue.get()  # BEAT_RENDER_READY
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+

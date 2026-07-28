@@ -377,6 +377,12 @@ class _BSAdfStreamHandler:
             # run 状态置 "stepping"，本请求返回（前端改走 /advance-beat 推进）。
             # ============================================================
             if getattr(self.request, "enable_stepping", False):
+                # 步进模式下 track 参数无意义（步进是"渲一段裁一段"，不经过 Track B 全章确认）
+                if getattr(self.request, "track", "A") == "B":
+                    logger.warning(
+                        "[BSADF] enable_stepping=true 且 track='B' 同时传入——"
+                        "步进模式将忽略 track 参数（Track B 全章确认语义被步进逐段裁决替代）"
+                    )
                 stepping_result = await workflow.execute_stepping(progress_callback=_on_progress)
                 cards_dicts = stepping_result.debug_info.get("beat_slots", [])
                 # 从 dict 重建 BeatSlotCard（debug_info 存的是 dict）

@@ -125,6 +125,7 @@ export type SessionStage =
   | 'beat_pending' // 槽位卡已生成，等作者编辑（Track B 单次暂停态，分支选择内嵌其中）
   | 'beat_rendering' // 作者确认后，后台顺序渲染各段
   | 'beat_stepping' // NLE-ADF：正在逐段步进（某段就绪等空格推进）
+  | 'beat_branch_choosing' // NLE-ADF：步进态遇 DDE 岔路门，等作者选走向
   | 'done' // 完成
   | 'error'
 
@@ -225,6 +226,13 @@ export interface GenerationSession {
   steppingRunId: Ref<string | null>
   /** 各段抽取的涌现事实（Loop3 记忆注入产物，按 beat_id 索引） */
   emergentFacts: Ref<Record<string, any>>
+  /** 步进态待作者选择的 DDE 岔路门（null = 无待决策岔路） */
+  branchChoicePending: Ref<{
+    beat_id: string
+    segment_index: number
+    node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string }
+    card: BeatSlot | null
+  } | null>
   // 派生
   isTerminal: ComputedRef<boolean>
   // 控制
@@ -252,6 +260,8 @@ export interface GenerationSession {
       branchChoice?: { option_id: string; label: string; plot_impact: string }
     },
   ) => void
+  /** NLE-ADF：提交步进岔路选择（optionId=null 表示接受默认走向） */
+  submitBranchChoice: (optionId: string | null) => void
   // 持久化：进入章节时恢复上次会话产物（localStorage）
   loadForChapter: (chapterId: string) => void
   persist: () => void
@@ -321,6 +331,13 @@ export function useGenerationSession(): GenerationSession {
   } | null>(null)
   const steppingRunId = ref<string | null>(null)
   const emergentFacts = ref<Record<string, any>>({})
+  // NLE-ADF 步进岔路门：当前待作者选择的 DDE 节点（null = 无待决策岔路）
+  const branchChoicePending = ref<{
+    beat_id: string
+    segment_index: number
+    node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string }
+    card: BeatSlot | null
+  } | null>(null)
 
   let abortController: AbortController | null = null
   let currentChapterId: string | null = null  // 当前 session 绑定的章节（用于持久化 key）
@@ -1082,6 +1099,18 @@ export function useGenerationSession(): GenerationSession {
           stage.value = 'beat_stepping'
           generating.value = false  // 解锁，等作者按 Space
         },
+        onBeatBranchChoice: (data) => {
+          branchChoicePending.value = {
+            beat_id: data.beat_id,
+            segment_index: data.segment_index,
+            node: data.node,
+            card: data.card_snapshot || null,
+          }
+          readyBeatId.value = null
+          renderingBeatId.value = null
+          stage.value = 'beat_branch_choosing'
+          generating.value = false
+        },
         onBeatLocked: (data) => {
           lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
           if (data.extracted_facts) {
@@ -1411,6 +1440,18 @@ export function useGenerationSession(): GenerationSession {
           stage.value = 'beat_stepping'
           generating.value = false
         },
+        onBeatBranchChoice: (data) => {
+          branchChoicePending.value = {
+            beat_id: data.beat_id,
+            segment_index: data.segment_index,
+            node: data.node,
+            card: data.card_snapshot || null,
+          }
+          readyBeatId.value = null
+          renderingBeatId.value = null
+          stage.value = 'beat_branch_choosing'
+          generating.value = false
+        },
         onBeatLocked: (data) => {
           lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
           if (data.extracted_facts) {
@@ -1450,6 +1491,25 @@ export function useGenerationSession(): GenerationSession {
     )
   }
 
+  /** NLE-ADF：提交步进岔路选择（optionId=null 表示接受默认走向，等价 Space） */
+  function submitBranchChoice(optionId: string | null) {
+    if (!branchChoicePending.value || !currentChapterId) return
+    const beatId = branchChoicePending.value.beat_id
+    if (optionId === null) {
+      advanceBeat(currentChapterId, 'pass', { beatId })
+    } else {
+      const node = branchChoicePending.value.node
+      const opt = node.options.find(o => o.option_id === optionId)
+      advanceBeat(currentChapterId, 'branch', {
+        beatId,
+        branchChoice: opt ? { option_id: opt.option_id, label: opt.label, plot_impact: opt.plot_impact } : undefined,
+      })
+    }
+    branchChoicePending.value = null
+    stage.value = 'beat_rendering'
+    generating.value = true
+  }
+
   // ===== NLE-ADF：Space 键步进锁死推进 =====
   function _spaceKeyHandler(e: KeyboardEvent) {
     if (e.code !== 'Space') return
@@ -1457,6 +1517,11 @@ export function useGenerationSession(): GenerationSession {
     const tag = target?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
     if (target?.isContentEditable) return
+    if (stage.value === 'beat_branch_choosing' && currentChapterId) {
+      e.preventDefault()
+      submitBranchChoice(null)
+      return
+    }
     if (stage.value === 'beat_stepping' && readyBeatId.value && currentChapterId) {
       e.preventDefault()
       advanceBeat(currentChapterId, 'pass', { beatId: readyBeatId.value })
@@ -1503,7 +1568,9 @@ export function useGenerationSession(): GenerationSession {
     // NLE-ADF 步进
     segmentTexts, readyBeatId, readyBeatCard, lockedBeatIds,
     renderingBeatId, loop1Result, steppingRunId, emergentFacts,
+    branchChoicePending,
     advanceBeat,
+    submitBranchChoice,
     isTerminal,
     start,
     cancel,

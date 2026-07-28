@@ -945,6 +945,8 @@ export interface BsadfStreamCallbacks {
   onTierDecided?: (decision: { tier: string; reason: string; climax_score?: number; target_word_count?: number; max_segments?: number }) => void
   // ===== NLE-ADF 步进事件回调 =====
   onBeatRenderStart?: (data: { beat_id: string; segment_index: number; target_word_count: number; card_snapshot: BeatSlot }) => void
+  /** NLE-ADF 步进岔路门：渲染某段前发现 DDE 岔路，暂停等作者选走向 */
+  onBeatBranchChoice?: (data: { beat_id: string; segment_index: number; node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string }; card_snapshot: BeatSlot }) => void
   onBeatChunk?: (data: { beat_id: string; segment_index: number; delta: string }) => void
   onBeatReady?: (data: { beat_id: string; segment_index: number; word_count: number; degraded?: any; card_snapshot: BeatSlot }) => void
   onBeatLocked?: (data: { beat_id: string; segment_index: number; extracted_facts?: any }) => void
@@ -1127,6 +1129,8 @@ function _dispatchEvent(
     })
   } else if (ev === 'BEAT_RENDER_START') {
     callbacks.onBeatRenderStart?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, target_word_count: payload.target_word_count, card_snapshot: payload.card_snapshot })
+  } else if (ev === 'BEAT_BRANCH_CHOICE') {
+    callbacks.onBeatBranchChoice?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, node: payload.node, card_snapshot: payload.card_snapshot })
   } else if (ev === 'BEAT_TEXT_CHUNK') {
     callbacks.onBeatChunk?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, delta: payload.delta || '' })
   } else if (ev === 'BEAT_RENDER_READY') {

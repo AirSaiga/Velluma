@@ -84,6 +84,30 @@ class SteppingRunStore:
 _STEPPING_RUNS = SteppingRunStore(ttl_seconds=3600)
 
 
+def _find_branch_for_beat(decision_set: Optional[dict], beat_id: str) -> Optional[dict]:
+    """从 DDE 决策集找挂在该 beat 上的岔路节点。无则 None。"""
+    if not decision_set or not decision_set.get("has_story_branch"):
+        return None
+    for node in decision_set.get("decision_nodes", []):
+        if node.get("beat_id") == beat_id:
+            return node
+    return None
+
+
+def _default_directive(branch_node: Optional[dict]) -> str:
+    """取默认走向的 directive 文本（label。plot_impact 格式）。"""
+    if not branch_node:
+        return ""
+    options = branch_node.get("options", [])
+    default_id = branch_node.get("default_option", "A")
+    opt = next((o for o in options if o.get("option_id") == default_id), options[0] if options else None)
+    if not opt:
+        return ""
+    label = opt.get("label", "")
+    impact = opt.get("plot_impact", "")
+    return f"{label}。{impact}" if impact else label
+
+
 async def _emit_event(run: "SteppingRun", event: str, data: dict) -> None:
     payload = {"event": event, **data}
     await run.event_queue.put((event, data))
@@ -130,6 +154,30 @@ async def stepping_loop(
     while i < len(run.cards):
         run.current_beat_index = i
         card = run.cards[i]
+
+        # ===== 岔路门：渲染前检查是否有 DDE 走向选择 =====
+        # 有岔路且尚未选定走向 → 暂停等作者选；作者选或接受默认后注入 branch_directive，保证渲染时走向真正生效
+        branch_node = _find_branch_for_beat(run.decision_set, card.beat_id)
+        if branch_node and not getattr(card, "branch_directive", ""):
+            await _emit_event(run, "BEAT_BRANCH_CHOICE", {
+                "beat_id": card.beat_id,
+                "segment_index": i,
+                "node": branch_node,
+                "card_snapshot": _card_to_dict_safe(card),
+            })
+            run.current_segment_ready = False
+            branch_action = await run.action_queue.get()
+            run.last_activity = time.time()
+            branch_act = branch_action.get("action")
+            if branch_act == "branch":
+                choice = branch_action.get("branch_choice", {})
+                directive = choice.get("plot_impact") or choice.get("label", "")
+                if directive:
+                    card.branch_directive = directive
+            elif branch_act in ("pass", "skip"):
+                # 接受默认走向 / 跳过选择 → 用默认走向注入
+                card.branch_directive = _default_directive(branch_node)
+            # 无论哪种，继续往下渲染（岔路门只在 not branch_directive 时触发，不会重复）
 
         await _emit_event(run, "BEAT_RENDER_START", {
             "beat_id": card.beat_id,

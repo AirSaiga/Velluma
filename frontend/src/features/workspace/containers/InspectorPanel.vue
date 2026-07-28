@@ -89,7 +89,7 @@ const loadingFeedback = ref(false)
 watch(
   () => session.stage.value,
   (newStage) => {
-    if (['beat_rendering', 'beat_pending', 'beat_stepping', 'assembling'].includes(newStage)) {
+    if (['beat_rendering', 'beat_pending', 'beat_stepping', 'beat_branch_choosing', 'assembling'].includes(newStage)) {
       activeTab.value = 'beats'
     } else if (newStage === 'done') {
       // BS-ADF 完成后停在节拍 tab 看分镜卡；ADF/Refinery 完成切到反馈
@@ -185,7 +185,6 @@ function startBeatGenerate() {
     chapterId: selectedChapterId.value,
   })
   session.startBeat(selectedChapterId.value, tierSelection.value, {
-    track: selectedTrack.value,
     targetWordCount: targetWordCount.value,
     steppingEnabled: true,
     enableOutlineSelfCheck: true,
@@ -236,6 +235,11 @@ function onAdvancePass() {
 function onAdvanceSkip() {
   if (!selectedChapterId.value || !session.readyBeatId.value) return
   session.advanceBeat(selectedChapterId.value, 'skip', { beatId: session.readyBeatId.value })
+}
+
+/** NLE-ADF：步进岔路选择（optionId=null 表示接受默认走向） */
+function handleChooseBranch(optionId: string | null) {
+  session.submitBranchChoice(optionId)
 }
 
 /**
@@ -585,12 +589,30 @@ function handleDismissInflight(idx: number) {
             :stepping-locked-ids="session.lockedBeatIds.value"
             :stepping-ready-id="session.readyBeatId.value"
             :stepping-rendering-id="session.renderingBeatId.value"
+            :branch-choice-pending-beat-id="session.stage.value === 'beat_branch_choosing' ? session.branchChoicePending.value?.beat_id : null"
             @confirm="handleBeatConfirm"
             @cancel="handleBeatCancel"
             @rerender="handleRerenderBeat"
             @skip-degraded="handleSkipBeat"
             @dismiss-rescue="handleDismissRescue"
           />
+
+          <!-- NLE-ADF 步进岔路选择条：遇 DDE 岔路门，暂停等作者选走向时显示 -->
+          <div v-if="session.stage.value === 'beat_branch_choosing' && session.branchChoicePending.value" class="branch-choice-bar">
+            <div class="branch-choice-title">⚡ {{ session.branchChoicePending.value.node.node_title }}</div>
+            <div class="branch-choice-options">
+              <button
+                v-for="opt in session.branchChoicePending.value.node.options"
+                :key="opt.option_id"
+                class="step-btn"
+                :class="{ primary: opt.option_id === session.branchChoicePending.value.node.default_option }"
+                @click="handleChooseBranch(opt.option_id)"
+              >{{ opt.label }}</button>
+            </div>
+            <button class="step-btn secondary" @click="handleChooseBranch(null)">
+              接受默认（Space）
+            </button>
+          </div>
 
           <!-- NLE-ADF 步进控制条：段就绪等空格推进时显示 -->
           <div v-if="session.stage.value === 'beat_stepping' && session.readyBeatId.value" class="stepping-bar">
@@ -1400,6 +1422,11 @@ function handleDismissInflight(idx: number) {
   padding: 2.5rem 1rem;
   line-height: 1.7;
 }
+
+/* NLE-ADF 步进岔路选择条 */
+.branch-choice-bar { padding: 8px 12px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px; }
+.branch-choice-title { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+.branch-choice-options { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* NLE-ADF 步进控制条 */
 .stepping-bar {
