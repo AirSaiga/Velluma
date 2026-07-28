@@ -508,6 +508,20 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB DEFAULT '[]'",
         "expected_udt_names": {"jsonb"},
     },
+    # NLE-ADF Loop3：ChapterEntity 涌现实体标记
+    {
+        "table": "chapter_entities",
+        "column": "emergent",
+        "definition": "BOOLEAN DEFAULT FALSE",
+        "expected_udt_names": {"boolean"},
+    },
+    # NLE-ADF Loop3：ChapterMapLocation 涌现地点标记
+    {
+        "table": "chapter_map_locations",
+        "column": "emergent",
+        "definition": "BOOLEAN DEFAULT FALSE",
+        "expected_udt_names": {"boolean"},
+    },
 ]
 
 

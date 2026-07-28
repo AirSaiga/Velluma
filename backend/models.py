@@ -298,6 +298,7 @@ class ChapterEntity(Base):
     chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
     entity_id = Column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
     entity_type = Column(String(50), default="character")
+    emergent = Column(Boolean, default=False)  # NLE-ADF Loop3 涌现实体标记
 
     chapter = relationship("Chapter", back_populates="entities")
     character = relationship("Character", back_populates="chapter_entities")
@@ -337,7 +338,8 @@ class ChapterMapLocation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
     chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
     location_id = Column(UUID(as_uuid=True), ForeignKey("map_locations.id", ondelete="CASCADE"), nullable=False)
-    
+    emergent = Column(Boolean, default=False)  # NLE-ADF Loop3 涌现地点标记
+
     chapter = relationship("Chapter", back_populates="locations")
     location = relationship("MapLocation", back_populates="chapter_locations")
 
