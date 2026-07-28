@@ -26,7 +26,6 @@ import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
-import CompletionModal from '../../generation/presentation/CompletionModal.vue'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 import type { Chapter } from '../../../types'
 
@@ -60,9 +59,6 @@ const isGenerating = computed(() =>
 
 // 保存状态（状态栏显示；实际写库在下方 handleUpdateChapter）
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-
-// 完成弹窗状态
-const completionVisible = ref(false)
 
 // 生成/精修失败：session.error 原先全前端无渲染点，SSE 失败后用户无感知。
 // 这里统一弹 error toast 并清空（stage 保持 'error'，由 Stepper/Overlay 展示失败态与重试入口）
@@ -324,10 +320,6 @@ async function handleGenerated(text: string) {
     try {
       await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
       showToast('已生成并写入章节', 'success')
-      // 应用内完成弹窗（受通知偏好开关控制）
-      if (notifyPrefs.value.inApp) {
-        completionVisible.value = true
-      }
       // 系统通知（受开关控制；主进程会再次判断窗口焦点兜底分层）
       if (notifyPrefs.value.system && window.electronAPI) {
         const isRefinery = session.lastDoneMode.value === 'refinery'
@@ -529,15 +521,6 @@ async function confirmDeleteChapter(ch: Chapter) {
       :chapter-id="selectedChapter.id"
       @close="showExtractionModal = false"
       @completed="onExtractionCompleted"
-    />
-
-    <!-- 生成完成弹窗 -->
-    <CompletionModal
-      :show="completionVisible"
-      :mode="session.lastDoneMode.value"
-      :chapter-title="selectedChapter?.title || selectedChapter?.chapter_name"
-      :stats="session.finalStats.value"
-      @close="completionVisible = false"
     />
   </div>
 </template>
