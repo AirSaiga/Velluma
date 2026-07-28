@@ -1208,6 +1208,11 @@ async def get_stepping_run_state(run_id: str):
         "chapter_id": run.chapter_id,
         "current_beat_index": run.current_beat_index,
         "current_beat_id": run.cards[run.current_beat_index].beat_id if run.cards else None,
+        "current_segment_ready": run.current_segment_ready,
+        "current_segment_text": (
+            run.locked_segments[-1].text if run.locked_segments else
+            (getattr(run, "_pending_segment_text", "") or "")
+        ),
         "locked_count": len(run.locked_segments),
         "total_beats": len(run.cards),
         "status": run.status,

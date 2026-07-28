@@ -144,6 +144,8 @@ async def stepping_loop(
             state_card_chain=run.state_card_chain,
             run=run,
         )
+        # 缓存当前段正文，供 state 端点轮询读取（IAB 等短 SSE 环境的备用通道）
+        run._pending_segment_text = getattr(segment, "text", "") or ""
         await _emit_event(run, "BEAT_RENDER_READY", {
             "beat_id": card.beat_id,
             "segment_index": i,

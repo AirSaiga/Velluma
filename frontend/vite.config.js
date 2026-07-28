@@ -82,9 +82,9 @@ export default defineConfig({
             }
           })
           proxy.on('proxyReq', (proxyReq, req, res) => {
-            // SSE 长连接端点（生成/精修流式输出）不设超时，避免长流被代理掐断
+            // SSE 长连接端点（生成/精修/步进推进流式输出）不设超时，避免长流被代理掐断
             const url = req.url || ''
-            const isSse = url.includes('generate') || url.includes('refinery')
+            const isSse = url.includes('generate') || url.includes('refinery') || url.includes('advance-beat')
             if (isSse) return
             // 普通请求添加超时处理
             proxyReq.setTimeout(120000, () => {

@@ -1020,6 +1020,10 @@ export function useGenerationSession(): GenerationSession {
                   ? `${payload.slots.length} 段逐段渲染中 · ${branchCount} 处剧情走向待选`
                   : `${payload.slots.length} 段逐段渲染中`,
               }
+              // 启动轮询：IAB 等短 SSE 环境下，generate 的 SSE 流可能在首段
+              // 渲染完成前断开。轮询 state 端点作为备用通道，等 current_segment_ready
+              // 后手动触发 onBeatReady 逻辑（切 beat_stepping + 设 readyBeatId）。
+              _pollSteppingReady(payload.run_id, currentChapterId || '')
             } else {
               generating.value = false  // 解覆盖 editor
               stage.value = 'beat_pending'
@@ -1315,6 +1319,48 @@ export function useGenerationSession(): GenerationSession {
     } finally {
       rerenderingBeatId.value = null
     }
+  }
+
+  /** NLE-ADF：轮询 stepping-run state，等首段 ready 后切 beat_stepping。
+   * IAB 等短 SSE 环境的备用通道——SSE 流断开后仍能拿到首段就绪状态。 */
+  let _steppingPollTimer: ReturnType<typeof setTimeout> | null = null
+  function _pollSteppingReady(runId: string, chapterId: string) {
+    if (_steppingPollTimer) clearTimeout(_steppingPollTimer)
+    const poll = async () => {
+      // 已切到 beat_stepping/done/error 则停止轮询
+      if (stage.value === 'beat_stepping' || stage.value === 'done' || stage.value === 'error') return
+      if (steppingRunId.value !== runId) return  // session 已变
+      try {
+        const resp = await fetch(`/api/chapters/stepping-run/${runId}/state`)
+        if (!resp.ok) { _steppingPollTimer = setTimeout(poll, 2000); return }
+        const st = await resp.json()
+        if (st.status === 'error' || st.status === 'done') {
+          // 生成结束/出错，停止轮询
+          return
+        }
+        if (st.current_segment_ready && st.current_beat_id) {
+          // 首段就绪：手动触发 onBeatReady 逻辑
+          if (st.current_segment_text) {
+            segmentTexts.value = {
+              ...segmentTexts.value,
+              [st.current_beat_id]: st.current_segment_text,
+            }
+            streamText.value = Object.values(segmentTexts.value).join('\n\n')
+          }
+          readyBeatId.value = st.current_beat_id
+          const cardIdx = beatSlots.value.findIndex(s => s.beat_id === st.current_beat_id)
+          readyBeatCard.value = cardIdx >= 0 ? beatSlots.value[cardIdx] : null
+          renderingBeatId.value = null
+          stage.value = 'beat_stepping'
+          generating.value = false  // 解锁，等作者按 Space
+          return  // 切态后停止轮询
+        }
+      } catch (e) {
+        // 网络错误，继续轮询
+      }
+      _steppingPollTimer = setTimeout(poll, 2000)
+    }
+    _steppingPollTimer = setTimeout(poll, 3000)  // 首次延迟 3 秒（给后端渲染时间）
   }
 
   /** NLE-ADF：步进锁死推进（每段就绪后作者按 Space 推进下一段） */
