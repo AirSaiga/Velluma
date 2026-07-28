@@ -378,6 +378,40 @@ class BSAdfWorkflow:
                 chapter=self.chapter,
             )
 
+            # ===== NLE-ADF Loop 1：大纲自检 =====
+            if getattr(self.request, "enable_outline_self_check", False):
+                from backend.services.workflows.bsadf.outline_self_check import (
+                    run_outline_self_check,
+                )
+                beat_slot_dicts_for_check = [beat_slot_to_dict(c) for c in cards]
+                loop1_result = await run_outline_self_check(
+                    outline_text=getattr(self.chapter, "outline_text", "") or "",
+                    chapter_title=getattr(self.chapter, "title", "") or "",
+                    beat_slots=beat_slot_dicts_for_check,
+                    recorder=self.recorder,
+                )
+                await _emit("LOOP1_OUTLINE_CHECKED", {
+                    "hard_facts": loop1_result.hard_facts,
+                    "gaps": loop1_result.gaps,
+                    "critique_pass": loop1_result.pass_,
+                    "violations": loop1_result.violations,
+                    "macro_gaps_for_dde": loop1_result.macro_gaps_for_dde,
+                })
+                if not hasattr(result, "debug_info") or result.debug_info is None:
+                    result.debug_info = {}
+                result.debug_info["loop1_result"] = {
+                    "pass": loop1_result.pass_,
+                    "violations": loop1_result.violations,
+                    "macro_gaps_for_dde": loop1_result.macro_gaps_for_dde,
+                    "degraded_reason": loop1_result.degraded_reason,
+                }
+                if loop1_result.macro_gaps_for_dde:
+                    if "_loop1_macro_gaps" not in result.debug_info:
+                        result.debug_info["_loop1_macro_gaps"] = []
+                    result.debug_info["_loop1_macro_gaps"].extend(
+                        loop1_result.macro_gaps_for_dde
+                    )
+
             # 4b. 可选 LLM 扩写（enrichment，失败保留种子）
             # guard_context：幻觉闸门的授权上下文（本章大纲全文 + 高潮设计），
             # 扩写词含剧情级关键词且不在此上下文里 → 剥离（防超前变异幻觉）
@@ -1730,28 +1764,32 @@ class BSAdfWorkflow:
         return result
 
     async def ingest_memory(self, segment: Any, card: Any, segment_index: int, **kw) -> Dict[str, Any]:
-        """Loop 3 记忆倒灌（步进模式 pass 后抽取段事实，写入 state_card_chain）。
+        """Loop 3 记忆倒灌（NLE-ADF）：从段正文抽取涌现实体/关系/地点/大纲补遗。
 
-        步进模式简化版：从段文本抽取新实体/事实（复用 state_tracker 的 extract_state_card），
-        返回 {new_entities: [...]}。失败返回空列表（不阻塞 pass）。
+        调用点：stepping_runtime 在 BEAT_LOCKED 前（enable_memory_ingestion=True 时）。
+        保守回写：仅累计 outline_addenda 到 _accumulated_addenda（不破坏性改写），
+        其余字段通过 BEAT_LOCKED.extracted_facts 透传给前端/后处理。
+        失败返回空 dict（不阻塞 pass）。
         """
+        if not getattr(self.request, "enable_memory_ingestion", False):
+            return {}
         try:
-            from backend.services.workflows.adf.state_tracker import extract_state_card
-            state_card_chain = kw.get("state_card_chain") or []
-            state_card = state_card_chain[-1] if state_card_chain else SceneStateCard()
-            new_card = await extract_state_card(
-                prev_card=state_card,
-                segment_text=getattr(segment, "text", "") or "",
-                registry=build_name_registry(
-                    self.entities, self.locations, self.assets, self.canon_context,
-                ),
-                recorder=self.recorder,
-                segment_index=segment_index,
+            from backend.services.workflows.bsadf.memory_ingestion import (
+                extract_emergent_facts,
             )
-            if new_card is not state_card and not new_card.is_empty():
-                state_card_chain.append(new_card)
-            return {"new_entities": getattr(new_card, "present_entities", []) or []}
+            prev_summary = getattr(self, "_last_state_card_text", "") or ""
+            facts = await extract_emergent_facts(
+                segment_text=getattr(segment, "text", ""),
+                beat_id=getattr(card, "beat_id", ""),
+                prev_state_summary=prev_summary,
+                recorder=self.recorder,
+            )
+            if not facts.is_empty():
+                addenda_list = getattr(self, "_accumulated_addenda", [])
+                addenda_list.extend(facts.outline_addenda)
+                self._accumulated_addenda = addenda_list
+            return facts.to_dict()
         except Exception as e:
             logger.warning(f"[BSADF] ingest_memory 异常（不阻塞）: {e}")
-            return {"new_entities": []}
+            return {}
 
