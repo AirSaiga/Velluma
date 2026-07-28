@@ -30,7 +30,8 @@ API 端点（前缀 /api/chapters/{chapter_id}）：
 SSE 事件序列（BS-ADF 专属 + 复用 ADF）：
 - GENERATION_RUN           生成已初始化（携带 run_id）
 - BSADF_STAGE              BS-ADF 阶段切换（SLOT_BUILD / RENDER）
-- BEAT_SLOTS_BUILT         槽位卡构建完成（count 张）
+- BEAT_SLOTS_BUILT         槽位卡构建完成（count 张；Track B 暂停时内嵌 decision_set）
+- DDE_AUTO_APPLIED         Track A 静默 DDE 结果（有分支=已按默认走向突变；无分支=has_story_branch=false）
 - BEAT_RENDER_PROGRESS     单段渲染进度（rendered）
 - BEAT_DOWNGRADED          单段降级（reason）
 - ADF_STAGE                复用 ADF 阶段切换（SPINE_BUILDING / ANCHOR_DESIGN / TIER_DECIDE / PRUNE / ANCHOR_AUDIT / REFINE / CONSISTENCY_GUARD）
@@ -52,8 +53,10 @@ SSE 事件序列（BS-ADF 专属 + 复用 ADF）：
 - 前端通过引擎切换选择；两者并存，互不影响
 
 Track A/B：
-- track='A'（默认）：全自动跑完全程
-- track='B'：跑到 Phase 4a 暂停（P3 实现；当前版本 Track B 也跑完全程，BEAT_SLOTS_BUILT 事件后理论上应暂停）
+- track='A'（默认）：全自动跑完全程（DDE 有分支时静默应用 default_option，
+  emit DDE_AUTO_APPLIED，不暂停）
+- track='B'：跑到 Phase 4b 单次暂停（BEAT_SLOTS_BUILT 内嵌 decision_set），
+  作者编辑槽位卡 + 选定分支后 /confirm-beats 一并提交恢复
 
 使用方式：
     POST /api/chapters/{chapter_id}/generate-bsadf
@@ -74,11 +77,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.dependencies import get_db
 from backend.routes.chapter_generation.adf import _load_adf_context
 from backend.schemas.bsadf import (
+    AdvanceBeatRequest,
     ConfirmBeatsRequest,
     GenerateBSAdfRequest,
     RerenderBeatRequest,
 )
 from backend.services.observability.run_recorder import RunRecorder
+from backend.services.observability.run_trace import (
+    clear_trace,
+    create_trace,
+    trace_event,
+)
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import (
     build_sse_event,
@@ -92,6 +101,8 @@ from backend.services.workflows.adf import (
 )
 from backend.services.workflows.adf.types import ChapterClimax, StoryContext
 from backend.services.workflows.bsadf.bsadf_workflow import BSAdfWorkflow
+from backend.services.workflows.bsadf.dde.slot_mutator import mutate_slot_cards
+from backend.services.workflows.bsadf.dde.types import chapter_decision_set_from_dict
 from backend.services.workflows.bsadf.types import (
     beat_slot_to_dict,
     beat_slot_from_dict,
@@ -105,10 +116,13 @@ router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-bsadf"])
 # ============================================================
 # 实时流常量
 # ============================================================
-# SSE 心跳间隔（秒）。长耗时阶段（如 Phase 4c 逐段渲染）期间若无业务事件，
-# 每 HEARTBEAT_INTERVAL 秒发一个 SSE 注释帧（": heartbeat\n\n"），防止代理/中间件
-# 因空闲掐断连接。前端 streamSse 因 line.startsWith('data: ') 检查会自动忽略注释帧。
-HEARTBEAT_INTERVAL = 15
+# SSE 心跳间隔（秒）。长耗时阶段（如 Phase 4c 逐段渲染、DDE 决策卡生成）期间
+# 若无业务事件，每 HEARTBEAT_INTERVAL 秒发一个 HEARTBEAT data 帧，防止代理/中间件/
+# 浏览器因空闲掐断连接。注意：必须是 data 帧（不是 SSE 注释帧 ": heartbeat\n\n"），
+# 因为很多浏览器/代理只把 data 帧视为"连接活跃"，注释帧会被忽略导致超时掐断。
+# 设为 5 秒（而非 15 秒）：DDE 单卡 LLM 调用 20-40 秒，15 秒间隔只发 1-2 次心跳，
+# 实测 Chromium 会在此期间掐断 fetch ReadableStream；5 秒间隔确保每卡期间至少 4-8 次心跳。
+HEARTBEAT_INTERVAL = 5
 
 
 # ============================================================
@@ -163,91 +177,116 @@ def _load_pending_beats(run_id: str) -> Optional[Dict[str, Any]]:
     return _PENDING_BEAT_SLOTS.get(run_id)
 
 
+def _find_pending_by_beat(beat_id: str) -> Optional[Dict[str, Any]]:
+    """按 beat_id 扫描全部 pending 条目（rerender 缺 run_id 时的兜底）。
+
+    _PENDING_BEAT_SLOTS 以 run_id 为 key，但 rerender 请求可能拿不到 run_id
+    （如刷新页面后），此时遍历各条目的 cards 匹配 beat_id。
+    """
+    _cleanup_expired_beats()
+    for entry in _PENDING_BEAT_SLOTS.values():
+        for card in entry.get("cards", []):
+            if getattr(card, "beat_id", None) == beat_id:
+                return entry
+    return None
+
+
 def _pop_pending_beats(run_id: str) -> Optional[Dict[str, Any]]:
     _cleanup_expired_beats()
     return _PENDING_BEAT_SLOTS.pop(run_id, None)
 
 
 # ============================================================
-# SSE 事件格式化
+# 轮询基础设施：替代 SSE 长连接的进度查询机制
 # ============================================================
+# 设计：workflow 跑在后台 asyncio.Task 里，progress_callback 把事件 append 到
+# _GENERATION_RUNS[run_id]["events"] 列表。前端用 GET /generation-status/{run_id}?since=N
+# 增量轮询（每次只取 events[N:]），彻底消除 SSE 长连接的传输层问题
+# （Vite proxy buffer / Starlette yield 阻塞 / asyncio.Queue 竞态）。
+#
+# 结构：{run_id: {
+#     "events": List[dict],       # 事件列表（每项 {event, ...payload}，前端按 event 分流）
+#     "status": str,              # "running" | "done" | "paused_track_b" | "error"
+#     "error": str,               # status=error 时的错误信息
+#     "result": dict | None,      # status=done/paused 时的最终产物（COMPLETE payload 等）
+#     "expires": datetime,        # TTL（同 _PENDING_BEAT_SLOTS）
+# }}
+_GENERATION_RUNS: Dict[str, Dict[str, Any]] = {}
 
-def _format_bsadf_event(event: str, data: dict) -> str:
-    """把单个 BS-ADF 进度事件（来自 progress_callback）格式化为 SSE 帧。
 
-    与 _format_adf_event 同构；新增 BS-ADF 专属事件（BSADF_STAGE /
-    BEAT_SLOTS_BUILT / BEAT_RENDER_PROGRESS / BEAT_DOWNGRADED），
-    ADF 共享事件（PRUNE/AUDIT/CONSISTENCY 等）按 ADF 名字透传。
+def _cleanup_expired_runs() -> None:
+    now = datetime.now()
+    expired = [k for k, v in _GENERATION_RUNS.items() if v.get("expires", now) < now]
+    for k in expired:
+        _GENERATION_RUNS.pop(k, None)
+
+
+def _get_run(run_id: str) -> Optional[Dict[str, Any]]:
+    _cleanup_expired_runs()
+    return _GENERATION_RUNS.get(run_id)
+
+
+def _init_run(run_id: str) -> Dict[str, Any]:
+    """初始化一个 run 的进度存储。"""
+    run_data = {
+        "events": [],
+        "status": "running",
+        "error": "",
+        "result": None,
+        "expires": datetime.now() + _PENDING_TTL,
+    }
+    _GENERATION_RUNS[run_id] = run_data
+    return run_data
+
+
+def _push_run_event(run_id: str, event_payload: dict) -> None:
+    """往 run 的事件列表追加一个事件（供前端轮询取走）。"""
+    run = _GENERATION_RUNS.get(run_id)
+    if run is not None:
+        run["events"].append(event_payload)
+
+
+def _set_run_status(run_id: str, status: str, error: str = "", result: Any = None) -> None:
+    run = _GENERATION_RUNS.get(run_id)
+    if run is not None:
+        run["status"] = status
+        if error:
+            run["error"] = error
+        if result is not None:
+            run["result"] = result
+        run["expires"] = datetime.now() + _PENDING_TTL  # 续期
+
+
+async def _sse_stream_from_run(run_id: str):
+    """通用 SSE generator：从 _GENERATION_RUNS[run_id] 读事件，yield SSE 帧。
+
+    后台 task 往 dict push 事件，本 generator 从 dict 读事件 yield。
+    两者通过 dict 解耦——后台 task 不依赖 SSE 连接，SSE 断了也不影响后台执行。
+    当 status 变为终止态（done/paused/error）时，yield 最后的事件后结束。
     """
-    # ---- BS-ADF 专属事件 ----
-    if event == "BSADF_STAGE":
-        return build_sse_event("BSADF_STAGE", f"进入阶段：{data.get('stage')}", **data)
-    elif event == "BEAT_SLOTS_BUILT":
-        count = data.get("count", 0)
-        return build_sse_event("BEAT_SLOTS_BUILT", f"槽位卡构建完成：{count} 张", **data)
-    elif event == "BEAT_RENDER_PROGRESS":
-        status = data.get("status", "")
-        idx = data.get("segment_index", 0)
-        wc = data.get("word_count", 0)
-        if status == "rendered":
-            return build_sse_event(
-                "BEAT_RENDER_PROGRESS",
-                f"第 {idx + 1} 段渲染完成（{wc} 字）",
-                **data,
-            )
-        return build_sse_event(
-            "BEAT_RENDER_PROGRESS",
-            f"第 {idx + 1} 段 {status}",
-            **data,
-        )
-    elif event == "BEAT_DOWNGRADED":
-        return build_sse_event(
-            "BEAT_DOWNGRADED",
-            f"第 {data.get('segment_index', 0) + 1} 段降级（{data.get('reason')}）",
-            **data,
-        )
+    since = 0
+    while True:
+        run = _get_run(run_id)
+        if not run:
+            yield build_sse_error("运行状态丢失")
+            return
+        # 增量取事件
+        events = run["events"]
+        new_events = events[since:] if since < len(events) else []
+        for payload in new_events:
+            ev = payload.get("event", "")
+            msg = payload.get("message", "")
+            yield build_sse_event(ev, msg, **{k: v for k, v in payload.items() if k not in ("event", "message")})
+        since = len(events)
 
-    # ---- ADF 共享事件（按 ADF 名字透传，复用 _format_adf_event 的文案逻辑）----
-    elif event == "ADF_STAGE":
-        return build_sse_event("ADF_STAGE", f"进入阶段：{data.get('stage')}", **data)
-    elif event == "ADF_SPINE_BUILT":
-        return build_sse_event("ADF_SPINE_BUILT", "脉络轨构建完成", **data)
-    elif event == "ADF_ANCHOR_DESIGNED":
-        # 去掉大字段（setup_points 列表），保留摘要
-        emit_data = {k: v for k, v in data.items() if k != "setup_points"}
-        return build_sse_event("ADF_ANCHOR_DESIGNED", "高潮设计完成", **emit_data)
-    elif event == "TIER_DECIDED":
-        return build_sse_event("TIER_DECIDED", f"定档：{data.get('tier')}", **data)
-    elif event == "ADF_PRECONDITION_LANDED":
-        return build_sse_event(
-            "ADF_PRECONDITION_LANDED",
-            f"铺垫到位：{data.get('precondition_id')}",
-            **data,
-        )
-    elif event == "ADF_PRUNE_PROGRESS":
-        return build_sse_event(
-            "ADF_PRUNE_PROGRESS",
-            f"剪枝 {data.get('segment_index')}/{data.get('total_segments')}",
-            **data,
-        )
-    elif event == "ADF_AUDIT":
-        msg = f"检查结论：{data.get('verdict')}"
-        missing_beats = data.get("missing_beats") or []
-        if missing_beats:
-            msg += f"；缺 {len(missing_beats)} 个大纲节拍"
-        return build_sse_event("ADF_AUDIT", msg, **data)
-    elif event == "ADF_CONSISTENCY":
-        msg = (
-            f"一致性守卫：发现 {data.get('issues_found', 0)} 处，"
-            f"修复 {data.get('issues_fixed', 0)} 处"
-        )
-        rolled_back = data.get("rolled_back", 0)
-        if rolled_back:
-            msg += f"；回滚 {rolled_back} 个手术"
-        return build_sse_event("ADF_CONSISTENCY", msg, **data)
+        status = run["status"]
+        if status in ("done", "paused_track_b", "error"):
+            if status == "error":
+                yield build_sse_error(run.get("error", "生成失败"))
+            return
 
-    # 未知事件：安全忽略（不阻塞流）
-    return ""
+        # 短暂等待新事件
+        await asyncio.sleep(0.3)
 
 
 # ============================================================
@@ -255,17 +294,17 @@ def _format_bsadf_event(event: str, data: dict) -> str:
 # ============================================================
 
 class _BSAdfStreamHandler:
-    """BS-ADF 引擎 SSE 流处理器。
+    """BS-ADF 引擎后台执行器（轮询模式）。
 
     职责：
     - 加载上下文（复用 ADF 的 _load_adf_context）
     - 初始化 RunRecorder
-    - 执行 BSAdfWorkflow
-    - 把阶段进度 + 事件通过 SSE 推给前端
+    - 执行 BSAdfWorkflow（直接 await，不走 SSE 桥接）
+    - 把阶段进度事件 push 到 _GENERATION_RUNS（前端轮询取走）
     - 持久化生成结果到 Chapter.draft_text + RunRecorder 落库
 
     Track A（默认）：跑完全程。
-    Track B（track='B'）：当前版本也跑完全程（P3 改为跑到 Phase 4a 暂停）。
+    Track B（track='B'）：跑到 Phase 4a/4a.5 暂停。
     """
 
     def __init__(
@@ -278,147 +317,89 @@ class _BSAdfStreamHandler:
         self.request = request
         self.db = db
 
-    async def stream(self):
-        """SSE 流生成器（BS-ADF 事件序列）。"""
-        run_id = f"bsadf_{uuid4().hex[:12]}"
+    async def _run_generate(self, run_id: str):
+        """后台执行 BS-ADF workflow（轮询模式，不再 yield SSE 帧）。"""
+        trace = create_trace(run_id, "bsadf", self.chapter_id)
+        trace_event(
+            "run_start",
+            request=self.request.model_dump() if self.request else {},
+        )
+
+        def _emit(event: str, data: dict) -> None:
+            """进度回调：把事件推到轮询队列（替代 SSE yield）。"""
+            payload = {"event": event, **data}
+            _push_run_event(run_id, payload)
 
         try:
-            # ---- Phase 0: 上下文组装（复用 ADF 的 _load_adf_context）----
-            yield build_sse_event(
-                "BSADF_STAGE",
-                "进入阶段：CONTEXT_ASSEMBLING",
-                stage="CONTEXT_ASSEMBLING",
-            )
+            # ---- Phase 0: 上下文组装 ----
+            _emit("BSADF_STAGE", {"stage": "CONTEXT_ASSEMBLING", "message": "进入阶段：CONTEXT_ASSEMBLING"})
             ctx = await _load_adf_context(self.db, self.chapter_id)
             chapter = ctx["chapter"]
 
             # ---- 初始化 RunRecorder ----
             recorder = RunRecorder(chapter_id=self.chapter_id, run_id=run_id)
-            yield build_sse_event(
-                "GENERATION_RUN",
-                "BS-ADF 引擎已初始化",
-                generation_run_id=run_id,
-            )
+            _emit("GENERATION_RUN", {"generation_run_id": run_id, "message": "BS-ADF 引擎已初始化"})
 
-            # ---- 初始化 BSAdfWorkflow（签名与 ADFWorkflow 完全一致）----
+            # ---- 初始化 BSAdfWorkflow ----
             workflow = BSAdfWorkflow(
                 chapter=chapter,
                 book=ctx["book"],
                 chapter_card=ctx["chapter_card"],
                 entities=ctx["entities"],
                 style_card=ctx["style_card"],
-                author_samples=None,  # v1 简化（与 ADF 对齐）
+                author_samples=None,
                 recorder=recorder,
                 request=self.request,
                 previous_summary=ctx["previous_summary"],
                 rolling_summary=ctx["rolling_summary"],
                 open_hooks=ctx["open_hooks"],
-                canon_context=ctx.get("canon_context", ""),  # V4.0 新增
-                author_intent=getattr(self.request, "author_intent", None),  # V4.2 介入点 1
+                canon_context=ctx.get("canon_context", ""),
+                author_intent=getattr(self.request, "author_intent", None),
                 expectation_actions=getattr(self.request, "expectation_actions", None),
-                # V3.5 设定感知层数据（用户章级显式指定的角色/地点/资产/关系）
                 locations=ctx.get("locations", []),
                 assets=ctx.get("assets", []),
                 relationships=ctx.get("relationships", []),
-                worldview_text=ctx.get("worldview_text", ""),  # V3.5 世界观设定
+                worldview_text=ctx.get("worldview_text", ""),
             )
 
-            # ---- progress_callback 转 SSE（asyncio.Queue 桥接，照搬 ADF）----
-            # 设计：workflow.execute 是普通 async 调用，本 stream() 是 async generator。
-            # 用 asyncio.Queue 做通道：callback 把事件 put 进 queue，本生成器边取边 yield。
-            progress_queue: "asyncio.Queue[Tuple[str, dict]]" = asyncio.Queue()
-
+            # ---- 直接执行 workflow（progress_callback 推事件到轮询队列）----
             async def _on_progress(event: str, data: dict) -> None:
-                await progress_queue.put((event, data))
+                if event in ("BSADF_STAGE", "ADF_STAGE"):
+                    trace.set_stage(str(data.get("stage", "")))
+                trace_event(event, **data)
+                _emit(event, data)
 
-            # Track A：跑完全程；Track B：跑到 Phase 4a 暂停
             track = getattr(self.request, "track", "A")
             pause_after_slot_build = (track == "B")
 
-            # 把 workflow 包成 task，与"取队列"任务并发，用 FIRST_COMPLETED 决定下一步：
-            # - execute 先完成：drain 队列剩余事件后跳出循环
-            # - 队列先有事件：yield 该事件，重建队列任务继续
-            # - 都没就绪超过 HEARTBEAT_INTERVAL：发心跳保活
-            execute_task = asyncio.ensure_future(
-                workflow.execute(
-                    progress_callback=_on_progress,
-                    pause_after_slot_build=pause_after_slot_build,
-                )
+            result = await workflow.execute(
+                progress_callback=_on_progress,
+                pause_after_slot_build=pause_after_slot_build,
             )
-            result = None
-
-            try:
-                while True:
-                    get_task = asyncio.ensure_future(progress_queue.get())
-                    done, _pending = await asyncio.wait(
-                        {execute_task, get_task},
-                        timeout=HEARTBEAT_INTERVAL,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-
-                    if not done:
-                        # 超时：两任务都未完成 → 发 SSE 注释帧保活（前端忽略，仅防空闲断流）
-                        get_task.cancel()
-                        yield ": heartbeat\n\n"
-                        continue
-
-                    if get_task in done:
-                        # 取到一个事件 → 实时 yield，循环继续（execute 可能还在跑）
-                        event, data = get_task.result()
-                        yield _format_bsadf_event(event, data)
-                        # 若 execute 也恰好完成，进入下方 drain；否则继续循环
-                        if execute_task.done():
-                            break
-                        continue
-
-                    # execute 先完成（且本次 get 未就绪）：取消挂起的 get，drain 剩余事件
-                    get_task.cancel()
-                    break
-
-                # execute 已结束，取最终结果（同时传播异常）
-                result = execute_task.result()
-
-                # drain：execute 可能已 put 但尚未被消费的事件（保证不丢事件）
-                while not progress_queue.empty():
-                    event, data = progress_queue.get_nowait()
-                    yield _format_bsadf_event(event, data)
-
-            except Exception as e:
-                logger.exception(f"[BS-ADF] workflow.execute 异常: {e}")
-                if not execute_task.done():
-                    execute_task.cancel()
-                yield build_sse_error(
-                    f"生成失败: {type(e).__name__}: {str(e)[:200]}"
-                )
-                return
 
             if result is None:
-                # 兜底：理论上不应到达
-                logger.error("[BS-ADF] workflow.execute 未返回结果，终止流")
-                yield build_sse_error("生成失败：工作流未返回结果")
+                _emit("ERROR", {"error": "生成失败：工作流未返回结果"})
+                _set_run_status(run_id, "error", error="工作流未返回结果")
                 return
 
             # ============================================================
-            # Track B 暂停分支：存 pending + 持久化 slots + emit AUTHOR_DIALOGUE，关流
+            # 暂停分支：Track B 单次暂停（decision_set 已随卡内嵌）
             # ============================================================
             if result.debug_info.get("paused"):
                 cards_dicts = result.debug_info.get("beat_slots", [])
                 cards: List[BeatSlotCard] = [beat_slot_from_dict(d) for d in cards_dicts]
 
-                # 1. 暂存内存上下文（resume_from_slots 所需 + 重建 workflow 所需）
                 paused_spine: StoryContext = result.debug_info.get("paused_spine") or result.spine_track
                 paused_anchor: ChapterClimax = result.debug_info.get("paused_anchor") or result.distal_anchor
                 workflow_ctx = {
                     "spine": paused_spine,
                     "anchor": paused_anchor,
                     "tier": result.debug_info.get("paused_tier") or result.tier_decision.get("tier"),
-                    "target_word_count": result.debug_info.get(
-                        "paused_target_word_count"
-                    ) or result.tier_decision.get("target_word_count"),
-                    "max_segments": result.debug_info.get(
-                        "paused_max_segments"
-                    ) or result.tier_decision.get("max_segments"),
-                    # 重建 BSAdfWorkflow 所需的上下文（来自 _load_adf_context）
+                    "target_word_count": result.debug_info.get("paused_target_word_count") or result.tier_decision.get("target_word_count"),
+                    "max_segments": result.debug_info.get("paused_max_segments") or result.tier_decision.get("max_segments"),
+                    # 定档理由一并暂存：resume 回填 tier_decision，供 Track B
+                    # COMPLETE 载荷的 tier_reason 与 Track A 对齐
+                    "tier_reason": result.tier_decision.get("reason"),
                     "chapter": chapter,
                     "book": ctx["book"],
                     "chapter_card": ctx["chapter_card"],
@@ -434,11 +415,10 @@ class _BSAdfStreamHandler:
                     "assets": ctx.get("assets", []),
                     "relationships": ctx.get("relationships", []),
                     "worldview_text": ctx.get("worldview_text", ""),
-                    "request": self.request,  # enable_* 开关（resume 也读它）
+                    "request": self.request,
                 }
-                _store_pending_beats(run_id, cards, workflow_ctx)
 
-                # 2. 持久化 slots 到 DB（供刷新后 / rerender-beat 兜底恢复）
+                # 持久化 slots
                 try:
                     chapter.bsadf_beat_slots = json.dumps(cards_dicts, ensure_ascii=False)
                     chapter.generation_run_id = run_id
@@ -446,57 +426,56 @@ class _BSAdfStreamHandler:
                 except Exception as e:
                     logger.warning(f"[BS-ADF] Track B 持久化 beat_slots 失败（不阻塞）: {e}")
 
-                # 3. RunRecorder 落库（暂停阶段也有诊断数据）
+                # RunRecorder 落库
                 try:
-                    count = await recorder.flush_to_db(self.db)
+                    await recorder.flush_to_db(self.db)
                     await self.db.commit()
-                    logger.info(f"[BS-ADF] Track B RunRecorder 落库 {count} 条")
                 except Exception as e:
                     logger.warning(f"[BS-ADF] RunRecorder 落库失败（不阻塞）: {e}")
 
-                # 4. 推送降级事件（即便暂停也可能有 Phase 1-3 降级）
+                # 推送降级事件
                 for deg in result.degraded:
-                    yield build_sse_event(
-                        "DEGRADED",
-                        f"阶段 {deg.get('phase', '?')} 降级",
-                        phase=deg.get("phase", ""),
-                        reason=deg.get("reason", ""),
-                        detail=str(deg.get("detail", ""))[:200],
-                    )
+                    _emit("DEGRADED", {
+                        "message": f"阶段 {deg.get('phase', '?')} 降级",
+                        "phase": deg.get("phase", ""),
+                        "reason": deg.get("reason", ""),
+                        "detail": str(deg.get("detail", ""))[:200],
+                    })
 
-                # 5. emit 槽位卡（带 run_id，前端据此调 /confirm-beats）
-                yield build_sse_event(
-                    "BEAT_SLOTS_BUILT",
-                    f"槽位卡构建完成：{len(cards)} 张（待作者编辑）",
-                    run_id=run_id,
-                    count=len(cards),
-                    beat_ids=[c.beat_id for c in cards],
-                    beat_slots=cards_dicts,
-                    climax_design=climax_to_dict(paused_anchor),
-                    story_context=story_context_to_dict(paused_spine),
-                    tier=result.tier_decision,
-                )
+                # ============================================================
+                # Track B 单次暂停分支（DDE decision_set 随卡一起给作者，
+                # 不再有独立的 DDE 弹窗轮次）
+                # ============================================================
+                workflow_ctx["decision_set"] = result.debug_info.get("decision_set") or {}
+                _store_pending_beats(run_id, cards, workflow_ctx)
 
-                # 6. 切阶段：作者对话（流关闭，前端拉作者决策后调 confirm-beats）
-                yield build_sse_event(
-                    "BSADF_STAGE",
-                    "等待作者编辑（AUTHOR_DIALOGUE）",
-                    stage="AUTHOR_DIALOGUE",
-                    run_id=run_id,
-                )
+                _emit("BEAT_SLOTS_BUILT", {
+                    "message": f"槽位卡构建完成：{len(cards)} 张（待作者编辑）",
+                    "run_id": run_id,
+                    "count": len(cards),
+                    "beat_ids": [c.beat_id for c in cards],
+                    "beat_slots": cards_dicts,
+                    "decision_set": result.debug_info.get("decision_set") or {},
+                    "climax_design": climax_to_dict(paused_anchor),
+                    "story_context": story_context_to_dict(paused_spine),
+                    "tier": result.tier_decision,
+                })
+                _emit("BSADF_STAGE", {"stage": "AUTHOR_DIALOGUE", "run_id": run_id, "message": "等待作者编辑"})
 
                 logger.info(f"[BS-ADF] Track B 暂停完成 run_id={run_id}，{len(cards)} 张卡待编辑")
-                return  # 流关闭，不进 4c
+                trace_event("track_b_pause", count=len(cards), beat_slots=cards_dicts)
+                _set_run_status(run_id, "paused_track_b")
+                return
 
-            # ---- 持久化 RunRecorder（flush 不 commit，调用方负责 commit）----
+            # ============================================================
+            # Track A 完成：持久化 + 推送结果
+            # ============================================================
             try:
-                count = await recorder.flush_to_db(self.db)
+                await recorder.flush_to_db(self.db)
                 await self.db.commit()
-                logger.info(f"[BS-ADF] RunRecorder 落库 {count} 条")
             except Exception as e:
                 logger.warning(f"[BS-ADF] RunRecorder 落库失败（不阻塞）: {e}")
 
-            # ---- 持久化正文到 Chapter.draft_text ----
             if result.final_text:
                 try:
                     chapter.draft_text = result.final_text
@@ -505,61 +484,72 @@ class _BSAdfStreamHandler:
                 except Exception as e:
                     logger.warning(f"[BS-ADF] 持久化 draft_text 失败: {e}")
 
-            # ---- 推送降级事件（失败不静默）----
-            # 来源 1：BSAdfWorkflow 各 Phase 异常记录的 result.degraded
-            #         （含 BS-ADF 专属的 render 降级 beat）
+            # 暂存 rerender 上下文 + 持久化 slots
+            try:
+                beat_slot_dicts = result.debug_info.get("beat_slots", [])
+                if beat_slot_dicts:
+                    rerender_cards: List[BeatSlotCard] = [beat_slot_from_dict(d) for d in beat_slot_dicts]
+                    rerender_ctx = {
+                        "spine": result.spine_track,
+                        "anchor": result.distal_anchor,
+                        "entities": ctx.get("entities", []),
+                        "locations": ctx.get("locations", []),
+                        "assets": ctx.get("assets", []),
+                        "relationships": ctx.get("relationships", []),
+                        "canon_context": ctx.get("canon_context", ""),
+                        "worldview_text": ctx.get("worldview_text", ""),
+                    }
+                    _store_pending_beats(run_id, rerender_cards, rerender_ctx)
+                    chapter.bsadf_beat_slots = json.dumps(beat_slot_dicts, ensure_ascii=False)
+                    chapter.generation_run_id = run_id
+                    await self.db.commit()
+            except Exception as e:
+                logger.warning(f"[BS-ADF] 暂存 rerender 上下文失败（不阻塞）: {e}")
+
+            # 推送降级事件
             for deg in result.degraded:
-                yield build_sse_event(
-                    "DEGRADED",
-                    f"阶段 {deg.get('phase', '?')} 降级",
-                    phase=deg.get("phase", ""),
-                    reason=deg.get("reason", ""),
-                    detail=str(deg.get("detail", ""))[:200],
-                    beat_id=deg.get("beat_id", ""),
-                    attempts=deg.get("attempts", 0),
-                )
-            # 来源 2：RunRecorder 收集的逐调用降级（如单段 LLM 超时）
+                _emit("DEGRADED", {
+                    "message": f"阶段 {deg.get('phase', '?')} 降级",
+                    "phase": deg.get("phase", ""),
+                    "reason": deg.get("reason", ""),
+                    "detail": str(deg.get("detail", ""))[:200],
+                    "beat_id": deg.get("beat_id", ""),
+                    "attempts": deg.get("attempts", 0),
+                })
             for deg in recorder.degraded_events():
-                stage = deg.get("stage", "?")
-                yield build_sse_event(
-                    "DEGRADED",
-                    f"{stage} 降级",
-                    phase=stage,
-                    reason=deg.get("reason", ""),
-                    detail=f"动作：{deg.get('action', '')}",
-                )
+                _emit("DEGRADED", {
+                    "message": f"{deg.get('stage', '?')} 降级",
+                    "phase": deg.get("stage", ""),
+                    "reason": deg.get("reason", ""),
+                    "detail": f"动作：{deg.get('action', '')}",
+                })
 
-            # ---- 推送元数据（高潮设计 + 前文脉络 + 结构检查，复用 ADF 序列化）----
-            yield build_sse_event(
-                "BSADF_METADATA",
-                "本章元数据",
-                climax_design=climax_to_dict(result.distal_anchor),
-                story_context=story_context_to_dict(result.spine_track),
-                audit=audit_to_dict(result.audit),
-                beat_slots=result.debug_info.get("beat_slots", []),
-                degraded_beats=result.debug_info.get("degraded_beats", []),
-            )
+            # 推送元数据
+            _emit("BSADF_METADATA", {
+                "message": "本章元数据",
+                "climax_design": climax_to_dict(result.distal_anchor),
+                "story_context": story_context_to_dict(result.spine_track),
+                "audit": audit_to_dict(result.audit),
+                "beat_slots": result.debug_info.get("beat_slots", []),
+                "degraded_beats": result.debug_info.get("degraded_beats", []),
+                "rescue_needed": result.debug_info.get("rescue_needed", []),
+            })
+            _emit("UNIFIED_METRIC", {
+                "message": "BS-ADF 引擎审计指标",
+                "metrics": {"audit": audit_to_dict(result.audit), "stats": result.stats},
+            })
 
-            # ---- 推送审计指标 ----
-            yield build_sse_event(
-                "UNIFIED_METRIC",
-                "BS-ADF 引擎审计指标",
-                metrics={
-                    "audit": audit_to_dict(result.audit),
-                    "stats": result.stats,
-                },
-            )
-
-            # ---- 流式推送正文（按 200 字切块，照搬 ADF）----
+            # 文本块
             if result.final_text:
-                yield build_sse_event("FINAL_TEXT_STREAM", "正在输出最终文本")
+                _emit("FINAL_TEXT_STREAM", {"message": "正在输出最终文本"})
                 text = result.final_text
                 chunk_size = 200
                 for i in range(0, len(text), chunk_size):
-                    chunk = text[i:i + chunk_size]
-                    yield build_sse_text_chunk(chunk)
+                    _emit("TEXT_CHUNK", {"content": text[i:i + chunk_size]})
 
-            # ---- COMPLETE ----
+            # COMPLETE
+            trace_event("final_text", text=result.final_text or "")
+            trace_event("run_complete", stats=result.stats, degraded_count=len(result.degraded), audit_verdict=result.audit.verdict)
             complete_payload = {
                 "event": "COMPLETE",
                 "text": result.final_text,
@@ -573,91 +563,108 @@ class _BSAdfStreamHandler:
                 "audit_verdict": result.audit.verdict,
                 "stats": result.stats,
                 "degraded_count": len(result.degraded),
-                # BS-ADF 专属：槽位卡与降级 beat（供前端 Track B 入口与 /rerender-beat）
                 "beat_slots": result.debug_info.get("beat_slots", []),
                 "degraded_beats": result.debug_info.get("degraded_beats", []),
+                "rescue_needed": result.debug_info.get("rescue_needed", []),
             }
-            yield f"data: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
+            _push_run_event(run_id, complete_payload)
+            _set_run_status(run_id, "done", result=complete_payload)
 
         except Exception as e:
-            logger.exception(f"[BS-ADF] SSE 流异常: {e}")
-            yield build_sse_error(
-                f"生成失败: {type(e).__name__}: {str(e)[:200]}"
-            )
+            logger.exception(f"[BS-ADF] 后台执行异常: {e}")
+            trace_event("run_error", phase="background_run", error=f"{type(e).__name__}: {str(e)[:300]}")
+            _emit("ERROR", {"error": f"生成失败: {type(e).__name__}: {str(e)[:200]}"})
+            _set_run_status(run_id, "error", error=str(e)[:300])
+        finally:
+            clear_trace()
 
 
 # ============================================================
-# POST /generate-bsadf —— BS-ADF 引擎入口
+# POST /generate-bsadf —— BS-ADF 引擎入口（轮询模式）
 # ============================================================
 
 @router.post("/{chapter_id}/generate-bsadf")
-async def generate_bsadf_stream(
+async def generate_bsadf(
     chapter_id: str,
     request: Optional[GenerateBSAdfRequest] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """BS-ADF 引擎生成入口。
+    """BS-ADF 引擎生成入口（SSE 流式 + 轮询）。
 
-    Track A（默认）：槽位化流水线跑完全程
-        SPINE → ANCHOR → TIER → SLOT_BUILD → RENDER → PRUNE → AUDIT → REFINE → CONSISTENCY
-    Track B（track='B'）：跑到 Phase 4a 暂停，emit BEAT_SLOTS_BUILT 后关流，
-        待作者编辑槽位卡后调 /confirm-beats 恢复（P3 实现）
+    Phase 1-4b + 4c-7 用 SSE 流式输出（事件通过 _GENERATION_RUNS dict 中转，
+    SSE generator 从 dict 读事件 yield）。
+
+    Track A：SSE 跑完全程（enable_dde 时 DDE 章节分叉判断在 4b 后静默执行，
+        有分支按 default_option 自动应用，emit DDE_AUTO_APPLIED，不暂停）。
+    Track B（track='B'）：SSE 跑到 Phase 4b 单次暂停（BEAT_SLOTS_BUILT 内嵌
+        decision_set），作者编辑槽位卡 + 选分支后 POST /confirm-beats 恢复。
+    """
+    from backend.database import AsyncSessionLocal
+
+    run_id = f"bsadf_{uuid4().hex[:12]}"
+    _init_run(run_id)
+    req = request or GenerateBSAdfRequest()
+
+    # 后台 task 跑 workflow（事件 push 到 _GENERATION_RUNS dict）
+    async def _background():
+        async with AsyncSessionLocal() as bg_db:
+            handler = _BSAdfStreamHandler(chapter_id=chapter_id, request=req, db=bg_db)
+            await handler._run_generate(run_id)
+
+    asyncio.ensure_future(_background())
+
+    return StreamingResponse(_sse_stream_from_run(run_id), media_type="text/event-stream")
+
+
+@router.get("/{chapter_id}/generation-status/{run_id}")
+async def generation_status(
+    chapter_id: str,
+    run_id: str,
+    since: int = 0,
+):
+    """轮询查询生成进度（增量）。
 
     Args:
-        chapter_id: 章节 ID
-        request: tier=auto(默认)|climax|turn|progress|transition +
-                 track=A(默认)|B +
-                 target_word_count + max_segments + 开关参数
+        run_id: 从 POST /generate-bsadf / /confirm-beats 获得
+        since: 上次取到的事件索引（增量轮询，只返回 events[since:]）
 
     Returns:
-        流式 SSE 响应（BS-ADF 事件序列）
-
-    前置：无（BS-ADF 管线自主完成全部流程，不依赖闸门）
+        {status, events: [...], total_events, error?}
+        - status: "running" | "done" | "paused_track_b" | "error"
+        - events: 事件列表（前端按 event 字段分流）
     """
-    handler = _BSAdfStreamHandler(
-        chapter_id=chapter_id,
-        request=request or GenerateBSAdfRequest(),
-        db=db,
-    )
-    return StreamingResponse(handler.stream(), media_type="text/event-stream")
+    run = _get_run(run_id)
+    if not run:
+        return {"status": "not_found", "events": [], "total_events": 0, "error": f"无效或已过期的 run_id: {run_id}"}
+
+    events = run["events"]
+    new_events = events[since:] if since < len(events) else []
+    return {
+        "status": run["status"],
+        "events": new_events,
+        "total_events": len(events),
+        "error": run.get("error", ""),
+    }
 
 
 # ============================================================
-# POST /confirm-beats —— Track B 恢复（照搬 refinery confirm 的 asyncio.Queue 模式）
+# confirm-beats 后台执行器（轮询模式）
 # ============================================================
 
-class _ConfirmBeatsHandler:
-    """Track B 恢复 SSE 流处理器。
+async def _run_confirm_beats(run_id: str, request: "ConfirmBeatsRequest"):
+    """后台执行 Track B 恢复（轮询模式）。"""
+    trace = create_trace(run_id, "bsadf_confirm", request.chapter_id or "")
+    trace.set_stage("CONFIRM_BEATS")
+    trace_event("confirm_start", edited_count=len(request.edited_slots or []))
 
-    流程：
-    1. 从 _PENDING_BEAT_SLOTS 取出（cards + ctx，含 spine/anchor/tier 等）
-    2. 用 request.edited_slots 覆盖 cards（标记 edited=True，edit_count+=1）
-    3. 重建 BSAdfWorkflow（用 ctx 里的 chapter/book 等构造参数）
-    4. 调 workflow.resume_from_slots(edited_cards, spine, anchor, ...) 跑 Phase 4c-7
-    5. asyncio.Queue 桥接把渲染/审计/守卫事件实时推 SSE（同 generate-bsadf）
-    6. 持久化正文 + slots + 流式输出 + COMPLETE
-    7. _pop_pending_beats(run_id) 清理
-    """
+    def _emit(event: str, data: dict) -> None:
+        _push_run_event(run_id, {"event": event, **data})
 
-    def __init__(
-        self,
-        chapter_id: str,
-        request: ConfirmBeatsRequest,
-        db: AsyncSession,
-    ):
-        self.chapter_id = chapter_id
-        self.request = request
-        self.db = db
-
-    async def stream(self):
-        run_id = self.request.run_id
-        if not run_id:
-            yield build_sse_error("缺少 run_id")
-            return
-
-        pending = _load_pending_beats(run_id)
+    try:
+        pending = _load_pending_beats(request.run_id)
         if not pending:
-            yield build_sse_error(f"无效或已过期的 run_id: {run_id}")
+            _emit("ERROR", {"error": f"无效或已过期的 run_id: {request.run_id}"})
+            _set_run_status(run_id, "error", error="无效或已过期的 run_id")
             return
 
         cards: List[BeatSlotCard] = pending["cards"]
@@ -669,15 +676,32 @@ class _ConfirmBeatsHandler:
         target_word_count: int = ctx["target_word_count"]
         max_segments: int = ctx["max_segments"]
 
-        # 用作者编辑后的 slots 覆盖服务端暂存卡
-        # 策略：以 edited_slots 的 (beat_id → slot) 为权威覆盖；未编辑的保留原卡
-        if self.request.edited_slots:
-            edited_map = {s.beat_id: s for s in self.request.edited_slots}
+        # SlotMutator：先按 branch_choices 突变剧情走向（写 branch_directive；
+        # skipped 或未作答的节点走 default_option——默认选项是主路径），
+        # 再应用 edited_slots 覆盖（作者面板里的整卡编辑优先）
+        decision_set_dict = ctx.get("decision_set") or {}
+        if decision_set_dict.get("decision_nodes"):
+            decision_set = chapter_decision_set_from_dict(decision_set_dict)
+            cards = mutate_slot_cards(
+                cards=cards,
+                decision_set=decision_set,
+                branch_choices=request.branch_choices or {},
+                skipped=request.skipped,
+            )
+            trace_event(
+                "dde_mutated",
+                skipped=request.skipped,
+                choice_count=len(request.branch_choices or {}),
+                mutated_count=sum(1 for c in cards if c.branch_directive),
+            )
+
+        # 用作者编辑后的 slots 覆盖
+        if request.edited_slots:
+            edited_map = {s.beat_id: s for s in request.edited_slots}
             new_cards: List[BeatSlotCard] = []
             for card in cards:
                 if card.beat_id in edited_map:
                     schema = edited_map[card.beat_id]
-                    # 从 schema 重建 BeatSlotCard，保留原 segment_index/status 基线
                     edited_card = beat_slot_from_dict(schema.model_dump())
                     edited_card.segment_index = card.segment_index
                     edited_card.status = "author_pending"
@@ -688,195 +712,140 @@ class _ConfirmBeatsHandler:
                     new_cards.append(card)
             cards = new_cards
 
-        # 重建 BSAdfWorkflow（构造参数与 generate-bsadf 一致）
+        # 重建 workflow
         workflow = BSAdfWorkflow(
-            chapter=chapter,
-            book=ctx["book"],
-            chapter_card=ctx["chapter_card"],
-            entities=ctx["entities"],
-            style_card=ctx["style_card"],
-            author_samples=None,
-            recorder=RunRecorder(chapter_id=self.chapter_id, run_id=run_id),
-            request=ctx.get("request") or self.request,
-            previous_summary=ctx.get("previous_summary"),
-            rolling_summary=ctx.get("rolling_summary"),
-            open_hooks=ctx.get("open_hooks"),
-            canon_context=ctx.get("canon_context", ""),
-            author_intent=ctx.get("author_intent"),
-            expectation_actions=ctx.get("expectation_actions"),
-            locations=ctx.get("locations", []),
-            assets=ctx.get("assets", []),
-            relationships=ctx.get("relationships", []),
-            worldview_text=ctx.get("worldview_text", ""),
+            chapter=chapter, book=ctx["book"], chapter_card=ctx["chapter_card"],
+            entities=ctx["entities"], style_card=ctx["style_card"], author_samples=None,
+            recorder=RunRecorder(chapter_id=request.chapter_id or "", run_id=run_id),
+            request=ctx.get("request") or request,
+            previous_summary=ctx.get("previous_summary"), rolling_summary=ctx.get("rolling_summary"),
+            open_hooks=ctx.get("open_hooks"), canon_context=ctx.get("canon_context", ""),
+            author_intent=ctx.get("author_intent"), expectation_actions=ctx.get("expectation_actions"),
+            locations=ctx.get("locations", []), assets=ctx.get("assets", []),
+            relationships=ctx.get("relationships", []), worldview_text=ctx.get("worldview_text", ""),
         )
         recorder = workflow.recorder
 
-        yield build_sse_event(
-            "GENERATION_RUN",
-            "BS-ADF Track B 恢复已初始化",
-            generation_run_id=run_id,
-        )
-
-        # asyncio.Queue 桥接（同 generate-bsadf / refinery confirm）
-        progress_queue: "asyncio.Queue[Tuple[str, dict]]" = asyncio.Queue()
+        _emit("GENERATION_RUN", {"generation_run_id": run_id, "message": "BS-ADF Track B 恢复已初始化"})
+        _emit("BSADF_STAGE", {"stage": "RENDER_RESUMED", "count": len(cards), "message": "逐段渲染"})
 
         async def _on_progress(event: str, data: dict) -> None:
-            await progress_queue.put((event, data))
+            if event in ("BSADF_STAGE", "ADF_STAGE"):
+                trace.set_stage(str(data.get("stage", "")))
+            trace_event(event, **data)
+            _emit(event, data)
 
-        resume_task = asyncio.ensure_future(
-            workflow.resume_from_slots(
-                edited_cards=cards,
-                spine=spine,
-                anchor=anchor,
-                tier=tier,
-                target_word_count=target_word_count,
-                max_segments=max_segments,
-                progress_callback=_on_progress,
-            )
+        result = await workflow.resume_from_slots(
+            edited_cards=cards, spine=spine, anchor=anchor, tier=tier,
+            target_word_count=target_word_count, max_segments=max_segments,
+            progress_callback=_on_progress,
+            tier_reason=ctx.get("tier_reason"),
         )
-        result = None
-        try:
-            while True:
-                get_task = asyncio.ensure_future(progress_queue.get())
-                done, _pending = await asyncio.wait(
-                    {resume_task, get_task},
-                    timeout=HEARTBEAT_INTERVAL,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if not done:
-                    get_task.cancel()
-                    yield ": heartbeat\n\n"
-                    continue
-                if get_task in done:
-                    event, data = get_task.result()
-                    yield _format_bsadf_event(event, data)
-                    if resume_task.done():
-                        break
-                    continue
-                get_task.cancel()
-                break
-
-            result = resume_task.result()
-            while not progress_queue.empty():
-                event, data = progress_queue.get_nowait()
-                yield _format_bsadf_event(event, data)
-
-        except Exception as e:
-            logger.exception(f"[BS-ADF] confirm-beats resume 异常: {e}")
-            if not resume_task.done():
-                resume_task.cancel()
-            yield build_sse_error(f"恢复失败: {type(e).__name__}: {str(e)[:200]}")
-            return
 
         if result is None:
-            yield build_sse_error("恢复失败：工作流未返回结果")
+            _emit("ERROR", {"error": "恢复失败：工作流未返回结果"})
+            _set_run_status(run_id, "error", error="工作流未返回结果")
             return
 
-        # ---- 持久化 RunRecorder ----
+        # 持久化
         try:
-            count = await recorder.flush_to_db(self.db)
-            await self.db.commit()
-            logger.info(f"[BS-ADF] confirm-beats RunRecorder 落库 {count} 条")
+            await recorder.flush_to_db(_get_db_for_run(run_id))
+            await _get_db_for_run(run_id).commit()
         except Exception as e:
-            logger.warning(f"[BS-ADF] RunRecorder 落库失败（不阻塞）: {e}")
+            logger.warning(f"[BS-ADF] confirm-beats RunRecorder 落库失败（不阻塞）: {e}")
 
-        # ---- 持久化正文 + 清空 slots（恢复完成）----
         if result.final_text:
             try:
                 chapter.draft_text = result.final_text
                 chapter.generation_run_id = run_id
-                # slots 落库（含渲染后状态，供后续 rerender / 审计）
-                chapter.bsadf_beat_slots = json.dumps(
-                    result.debug_info.get("beat_slots", []), ensure_ascii=False,
-                )
-                await self.db.commit()
+                chapter.bsadf_beat_slots = json.dumps(result.debug_info.get("beat_slots", []), ensure_ascii=False)
+                await _get_db_for_run(run_id).commit()
             except Exception as e:
                 logger.warning(f"[BS-ADF] confirm-beats 持久化失败: {e}")
 
-        # ---- 推送降级事件 ----
+        # 推送降级 + 元数据
         for deg in result.degraded:
-            yield build_sse_event(
-                "DEGRADED",
-                f"阶段 {deg.get('phase', '?')} 降级",
-                phase=deg.get("phase", ""),
-                reason=deg.get("reason", ""),
-                detail=str(deg.get("detail", ""))[:200],
-                beat_id=deg.get("beat_id", ""),
-                attempts=deg.get("attempts", 0),
-            )
-        for deg in recorder.degraded_events():
-            yield build_sse_event(
-                "DEGRADED",
-                f"{deg.get('stage', '?')} 降级",
-                phase=deg.get("stage", ""),
-                reason=deg.get("reason", ""),
-                detail=f"动作：{deg.get('action', '')}",
-            )
+            _emit("DEGRADED", {"message": f"阶段 {deg.get('phase', '?')} 降级", "phase": deg.get("phase", ""), "reason": deg.get("reason", ""), "detail": str(deg.get("detail", ""))[:200], "beat_id": deg.get("beat_id", ""), "attempts": deg.get("attempts", 0)})
 
-        # ---- 推送元数据 + 指标 ----
-        yield build_sse_event(
-            "BSADF_METADATA",
-            "本章元数据",
-            climax_design=climax_to_dict(result.distal_anchor),
-            story_context=story_context_to_dict(result.spine_track),
-            audit=audit_to_dict(result.audit),
-            beat_slots=result.debug_info.get("beat_slots", []),
-            degraded_beats=result.debug_info.get("degraded_beats", []),
-        )
-        yield build_sse_event(
-            "UNIFIED_METRIC",
-            "BS-ADF Track B 审计指标",
-            metrics={"audit": audit_to_dict(result.audit), "stats": result.stats},
-        )
+        _emit("BSADF_METADATA", {"message": "本章元数据", "climax_design": climax_to_dict(result.distal_anchor), "story_context": story_context_to_dict(result.spine_track), "audit": audit_to_dict(result.audit), "beat_slots": result.debug_info.get("beat_slots", []), "degraded_beats": result.debug_info.get("degraded_beats", []), "rescue_needed": result.debug_info.get("rescue_needed", [])})
+        # 与 Track A 同构的 UNIFIED_METRIC（此前只 Track A 发，Track B 前端指标恒空）
+        _emit("UNIFIED_METRIC", {
+            "message": "BS-ADF 引擎审计指标",
+            "metrics": {"audit": audit_to_dict(result.audit), "stats": result.stats},
+        })
 
-        # ---- 流式推送正文 ----
         if result.final_text:
-            yield build_sse_event("FINAL_TEXT_STREAM", "正在输出最终文本")
+            _emit("FINAL_TEXT_STREAM", {"message": "正在输出最终文本"})
             text = result.final_text
-            chunk_size = 200
-            for i in range(0, len(text), chunk_size):
-                chunk = text[i:i + chunk_size]
-                yield build_sse_text_chunk(chunk)
+            for i in range(0, len(text), 200):
+                _emit("TEXT_CHUNK", {"content": text[i:i+200]})
 
-        # ---- COMPLETE ----
+        trace_event("final_text", text=result.final_text or "")
+        trace_event("run_complete", stats=result.stats, degraded_count=len(result.degraded), audit_verdict=result.audit.verdict)
         complete_payload = {
-            "event": "COMPLETE",
-            "text": result.final_text,
-            "engine": "bsadf",
-            "track": "B",
-            "generation_run_id": run_id,
-            "tier": result.tier_decision.get("tier"),
-            "segment_count": len(result.segments),
-            "climax_score": result.audit.climax_score,
-            "audit_verdict": result.audit.verdict,
-            "stats": result.stats,
+            "event": "COMPLETE", "text": result.final_text, "engine": "bsadf", "track": "B",
+            "generation_run_id": run_id, "tier": result.tier_decision.get("tier"),
+            # 与 Track A complete_payload 字段契约对齐（tier_reason/target_word_count）
+            "tier_reason": result.tier_decision.get("reason"),
+            "target_word_count": result.tier_decision.get("target_word_count"),
+            "segment_count": len(result.segments), "climax_score": result.audit.climax_score,
+            "audit_verdict": result.audit.verdict, "stats": result.stats,
             "degraded_count": len(result.degraded),
             "beat_slots": result.debug_info.get("beat_slots", []),
             "degraded_beats": result.debug_info.get("degraded_beats", []),
+            "rescue_needed": result.debug_info.get("rescue_needed", []),
         }
-        yield f"data: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
+        _push_run_event(run_id, complete_payload)
+        # 与 Track A 对称：完成后保留 pending（刷新 TTL），供 /rerender-beat
+        # 取完整渲染上下文（场景设定/专名表/canon）。此前 pop 导致 Track B
+        # 完成后的重渲染只能走空上下文兜底，质量显著低于整章渲染。
+        _store_pending_beats(request.run_id, cards, ctx)
+        _set_run_status(run_id, "done", result=complete_payload)
 
-        # ---- 清理 pending ----
-        _pop_pending_beats(run_id)
+    except Exception as e:
+        logger.exception(f"[BS-ADF] confirm-beats 后台异常: {e}")
+        trace_event("run_error", phase="confirm_resume", error=f"{type(e).__name__}: {str(e)[:300]}")
+        _emit("ERROR", {"error": f"恢复失败: {type(e).__name__}: {str(e)[:200]}"})
+        _set_run_status(run_id, "error", error=str(e)[:300])
+    finally:
+        clear_trace()
 
+
+# DB session 存储：后台 task 需要独立 session（不依赖请求生命周期）
+_RUN_DBS: Dict[str, AsyncSession] = {}
+
+def _get_db_for_run(run_id: str) -> AsyncSession:
+    """获取后台 task 专属的 DB session（在 _run_confirm_beats 里通过闭包传入更佳，此处保留兼容）。"""
+    return _RUN_DBS.get(run_id)
+
+
+# ============================================================
+# POST /confirm-beats —— Track B 恢复（轮询模式）
+# ============================================================
 
 @router.post("/{chapter_id}/confirm-beats")
-async def confirm_beats_stream(
+async def confirm_beats(
     chapter_id: str,
     request: ConfirmBeatsRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Track B 恢复：作者编辑槽位卡后从 Phase 4c 继续渲染到完成。
+    """Track B 恢复（SSE 流式）。后台 task 跑 resume_from_slots，SSE 从 dict 读事件。"""
+    from backend.database import AsyncSessionLocal
 
-    需要 run_id（从 generate-bsadf track='B' 阶段获得的 GENERATION_RUN 事件取得）。
-    从内存 _PENDING_BEAT_SLOTS 取出槽位卡 + 上下文，用 edited_slots 覆盖后调
-    BSAdfWorkflow.resume_from_slots 跑 Phase 4c-7（渲染 + 后处理）。
+    run_id = f"bsadf_confirm_{uuid4().hex[:12]}"
+    _init_run(run_id)
+    request.chapter_id = chapter_id
 
-    Returns:
-        流式 SSE 响应（与 generate-bsadf Track A 的 4c-7 阶段事件序列等价）
-    """
-    handler = _ConfirmBeatsHandler(chapter_id=chapter_id, request=request, db=db)
-    return StreamingResponse(handler.stream(), media_type="text/event-stream")
+    async def _background():
+        async with AsyncSessionLocal() as bg_db:
+            _RUN_DBS[run_id] = bg_db
+            try:
+                await _run_confirm_beats(run_id, request)
+            finally:
+                _RUN_DBS.pop(run_id, None)
+
+    asyncio.ensure_future(_background())
+    return StreamingResponse(_sse_stream_from_run(run_id), media_type="text/event-stream")
 
 
 # ============================================================
@@ -895,6 +864,9 @@ async def rerender_beat(
     不重跑全章。优先从 _PENDING_BEAT_SLOTS 取上下文；若已过期则从 DB + chapter
     重建最小上下文（仅渲染必需）。
 
+    edited_slot 可选：提供时用它替代服务端暂存的卡快照重渲染（前端"编辑后再
+    重渲染"路径）；缺省时用 _PENDING_BEAT_SLOTS 里该 beat 的卡快照原样重渲。
+
     Returns:
         JSON: {segment: {...}, card: {...}, degraded: {...|null}, generation_run_id}
     """
@@ -906,14 +878,33 @@ async def rerender_beat(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
 
-    edited_card = beat_slot_from_dict(request.edited_slot.model_dump())
-    edited_card.edited = True
-    edited_card.edit_count += 1
-    edited_card.status = "pending"
-
-    # 优先从 pending 取（同一 run_id 的渲染上下文最完整）
-    pending = _load_pending_beats(request.beat_id)  # rerender 用 beat_id 作 key 尝试
+    # 优先从 pending 取（同一 run_id 的渲染上下文最完整）：
+    # 先按请求带的 run_id 精确查；缺失/miss 时按 beat_id 扫描兜底
+    pending = _load_pending_beats(request.run_id) if request.run_id else None
+    if pending is None:
+        pending = _find_pending_by_beat(request.beat_id)
     ctx_dict = pending.get("ctx") if pending else None
+
+    if request.edited_slot is not None:
+        edited_card = beat_slot_from_dict(request.edited_slot.model_dump())
+        edited_card.edited = True
+        edited_card.edit_count += 1
+        edited_card.status = "pending"
+    else:
+        snapshot = next(
+            (
+                c for c in (pending.get("cards", []) if pending else [])
+                if getattr(c, "beat_id", None) == request.beat_id
+            ),
+            None,
+        )
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404,
+                detail="未提供 edited_slot，且服务端无该槽位卡快照（pending 不存在或已过期）",
+            )
+        edited_card = snapshot
+        edited_card.status = "pending"
 
     # 从 DB slots 取该卡的历史快照（兜底：找 anchor/spine 不可能，只能渲染单段）
     db_slots_raw = []
@@ -956,21 +947,63 @@ async def rerender_beat(
         )
 
     from backend.services.prompts.adf_prompts import format_emotion_curve
-    from backend.services.workflows.adf.segment_writer import _build_style_contract
+    from backend.services.workflows.adf.segment_writer import (
+        _build_style_contract,
+        _build_compact_canon_hint,
+        _build_knowledge_constraints,
+    )
     from backend.services.workflows.adf.name_registry import build_name_registry, registry_to_prompt_block
-    from backend.services.workflows.adf.setting_resolver import build_scene_setting_text
+    from backend.services.workflows.adf.setting_resolver import (
+        build_scene_setting_text,
+        resolve_characters,
+        resolve_hidden_constraints,
+    )
     from backend.services.workflows.bsadf.downgrade import render_with_downgrade
 
     run_id = f"rerender_{uuid4().hex[:12]}"
     recorder = RunRecorder(chapter_id=chapter_id, run_id=run_id)
+    trace = create_trace(run_id, "bsadf_rerender", chapter_id)
+    trace.set_stage("RERENDER")
+    trace_event(
+        "rerender_start",
+        beat_id=request.beat_id,
+        edited_slot=request.edited_slot.model_dump() if request.edited_slot else None,
+        context_source="pending" if ctx_dict else "db_fallback",
+    )
 
     style_contract = _build_style_contract(getattr(chapter, "style_card", None))
     emotion_curve_text = format_emotion_curve([
         {"progress": s.progress, "register": s.register, "energy": s.energy}
         for s in anchor.emotion_curve.samples
     ])
-    scene_setting_text = build_scene_setting_text([], [], [], [])
-    name_registry_block = registry_to_prompt_block(build_name_registry([], [], [], ""))
+    # 有 pending 上下文时重建与整章渲染一致的场景设定/专名表/写作期防线；
+    # 否则空兜底
+    canon_hint = ""
+    knowledge_constraints: List[str] = []
+    if ctx_dict:
+        scene_setting_text = build_scene_setting_text(
+            ctx_dict.get("entities", []),
+            ctx_dict.get("locations", []),
+            ctx_dict.get("assets", []),
+            ctx_dict.get("relationships", []),
+        )
+        name_registry_block = registry_to_prompt_block(build_name_registry(
+            ctx_dict.get("entities", []),
+            ctx_dict.get("locations", []),
+            ctx_dict.get("assets", []),
+            ctx_dict.get("canon_context", ""),
+        ))
+        canon_hint = _build_compact_canon_hint(ctx_dict.get("canon_context", ""))
+        knowledge_constraints = _build_knowledge_constraints(
+            ctx_dict.get("canon_context", ""),
+            resolve_hidden_constraints(
+                ctx_dict.get("relationships", []),
+                resolve_characters(ctx_dict.get("entities", [])),
+            ),
+        )
+    else:
+        scene_setting_text = build_scene_setting_text([], [], [], [])
+        name_registry_block = registry_to_prompt_block(build_name_registry([], [], [], ""))
 
     try:
         segment, card, degraded = await render_with_downgrade(
@@ -984,9 +1017,13 @@ async def rerender_beat(
             genre=None,
             recorder=recorder,
             prev_card_state=None,
+            knowledge_constraints=knowledge_constraints,
+            canon_hint=canon_hint,
         )
     except Exception as e:
         logger.exception(f"[BS-ADF] rerender-beat 渲染失败: {e}")
+        trace_event("run_error", phase="rerender", error=f"{type(e).__name__}: {str(e)[:300]}")
+        clear_trace()
         raise HTTPException(status_code=500, detail=f"单卡渲染失败: {e}")
 
     # recorder 落库
@@ -995,6 +1032,15 @@ async def rerender_beat(
         await db.commit()
     except Exception as e:
         logger.warning(f"[BS-ADF] rerender-beat recorder 落库失败（不阻塞）: {e}")
+
+    trace_event(
+        "rerender_result",
+        beat_id=card.beat_id,
+        status=card.status,
+        degraded_reason=degraded.reason if degraded else None,
+        segment_text=segment.text,
+    )
+    clear_trace()
 
     return {
         "chapter_id": chapter_id,
@@ -1018,3 +1064,55 @@ async def rerender_beat(
             else None
         ),
     }
+
+
+@router.post("/{chapter_id}/advance-beat")
+async def advance_beat(
+    chapter_id: str,
+    request: AdvanceBeatRequest,
+):
+    """NLE-ADF 步进推进（SSE 流式）。
+
+    把作者对当前段的裁决（pass/edit/branch/skip）塞进 stepping_run 的 action_queue，
+    然后开 SSE 流把 stepping_loop 后续产出的事件（BEAT_RENDER_READY / BEAT_LOCKED /
+    BEAT_SKIPPED / COMPLETE 等）逐条 yield 出去，直到碰到终态事件（BEAT_RENDER_READY
+    表示新段已就绪待下次裁决；COMPLETE 表示全章完成）。
+    """
+    from fastapi import HTTPException
+    from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+
+    run = _STEPPING_RUNS.get(request.run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
+    if run.cards[run.current_beat_index].beat_id != request.beat_id:
+        raise HTTPException(status_code=409, detail="BEAT_NOT_CURRENT")
+
+    action_payload: Dict[str, Any] = {
+        "action": request.action,
+        "beat_id": request.beat_id,
+    }
+    if request.action == "edit" and request.edited_slot is not None:
+        action_payload["edited_slot"] = request.edited_slot.model_dump()
+    elif request.action == "branch" and request.branch_choice:
+        action_payload["branch_choice"] = request.branch_choice
+
+    await run.action_queue.put(action_payload)
+    _STEPPING_RUNS.touch(request.run_id)
+
+    async def _stream():
+        from backend.services.utils.sse import build_sse_event, build_sse_error
+        try:
+            while True:
+                try:
+                    ev_name, ev_data = await asyncio.wait_for(run.event_queue.get(), timeout=120.0)
+                except asyncio.TimeoutError:
+                    yield build_sse_error("步进推进超时（120s 无事件）")
+                    return
+                yield build_sse_event(ev_name, "", **ev_data)
+                if ev_name in ("BEAT_RENDER_READY", "COMPLETE", "BEAT_RERENDERED"):
+                    return
+        except Exception as e:
+            yield build_sse_error(f"步进流异常: {e}")
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
