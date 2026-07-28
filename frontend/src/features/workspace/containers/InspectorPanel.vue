@@ -114,7 +114,18 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', handleKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  // NLE-ADF 调试 hook：URL 含 ?autogen=1 时自动触发生成（绕过 IAB 点击限制）
+  if (new URLSearchParams(window.location.hash.split('?')[1] || '').get('autogen') === '1') {
+    setTimeout(() => {
+      if (selectedChapterId.value && !session.generating.value) {
+        console.log('[Inspector] autogen hook: 触发 startGenerate')
+        startGenerate()
+      }
+    }, 2000)
+  }
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
 const chapterCharacters = computed(() => {

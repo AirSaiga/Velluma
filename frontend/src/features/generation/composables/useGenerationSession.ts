@@ -1327,8 +1327,10 @@ export function useGenerationSession(): GenerationSession {
   function _pollSteppingReady(runId: string, chapterId: string) {
     if (_steppingPollTimer) clearTimeout(_steppingPollTimer)
     const poll = async () => {
-      // 已切到 beat_stepping/done/error 则停止轮询
-      if (stage.value === 'beat_stepping' || stage.value === 'done' || stage.value === 'error') return
+      // 已切到 beat_stepping/done 则停止轮询
+      // 注意：不因 stage='error' 停止——SSE 断开会触发 onError 设 error，
+      // 但后端 stepping_loop 可能仍在正常跑，轮询能恢复正确状态。
+      if (stage.value === 'beat_stepping' || stage.value === 'done') return
       if (steppingRunId.value !== runId) return  // session 已变
       try {
         const resp = await fetch(`/api/chapters/stepping-run/${runId}/state`)
