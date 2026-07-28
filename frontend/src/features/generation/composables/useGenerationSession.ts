@@ -1056,6 +1056,46 @@ export function useGenerationSession(): GenerationSession {
             total: beatSlots.value.length,
           }
         },
+        // NLE-ADF 步进事件（首段渲染由 generate-bsadf 的 SSE 桥接推来）。
+        // 与 advanceBeat 的回调共享同一套逻辑。
+        onBeatRenderStart: (data) => {
+          renderingBeatId.value = data.beat_id
+          readyBeatId.value = null
+          if (data.card_snapshot) {
+            const idx = beatSlots.value.findIndex(s => s.beat_id === data.beat_id)
+            if (idx >= 0) beatSlots.value[idx] = data.card_snapshot
+          }
+        },
+        onBeatChunk: (data) => {
+          const prev = segmentTexts.value[data.beat_id] || ''
+          segmentTexts.value = { ...segmentTexts.value, [data.beat_id]: prev + data.delta }
+          streamText.value = Object.values(segmentTexts.value).join('\n\n')
+        },
+        onBeatReady: (data) => {
+          renderingBeatId.value = null
+          readyBeatId.value = data.beat_id
+          readyBeatCard.value = data.card_snapshot || null
+          stage.value = 'beat_stepping'
+          generating.value = false  // 解锁，等作者按 Space
+        },
+        onBeatLocked: (data) => {
+          lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
+          if (data.extracted_facts) {
+            emergentFacts.value = { ...emergentFacts.value, [data.beat_id]: data.extracted_facts }
+          }
+        },
+        onBeatSkipped: (data) => {
+          lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
+        },
+        onAllBeatsLocked: () => {
+          stage.value = 'assembling'
+        },
+        onBeatRerendered: (data) => {
+          segmentTexts.value = { ...segmentTexts.value, [data.beat_id]: '' }
+        },
+        onLoop1Checked: (data) => {
+          loop1Result.value = data
+        },
         onDowngraded: (data) => {
           degradedBeats.value.push(data)
         },
