@@ -24,7 +24,7 @@
  * - degraded：降级事件
  */
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
-import { adfApi, refineryApi, bsadfApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat } from '../../../services/api/domain'
+import { adfApi, refineryApi, bsadfApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
 
 // ============================================================
 // localStorage 持久化层（按 chapterId 存快照，进入章节即恢复）
@@ -66,6 +66,8 @@ interface SessionSnapshot {
   beatSlots?: BeatSlot[]
   renderProgress?: RenderProgress[]
   degradedBeats?: DegradedBeat[]
+  decisionSet?: ChapterDecisionSet | null
+  rescueNeeded?: RescueNeededItem[]
   // 保存时间戳（供调试/未来做过期清理）
   savedAt: number
 }
@@ -120,8 +122,9 @@ export type SessionStage =
   | 'assembling' // 组装
   | 'auditing' // 审校
   | 'refining' // 精修
-  | 'beat_pending' // 槽位卡已生成，等作者编辑（Track B 暂停态）
+  | 'beat_pending' // 槽位卡已生成，等作者编辑（Track B 单次暂停态，分支选择内嵌其中）
   | 'beat_rendering' // 作者确认后，后台顺序渲染各段
+  | 'beat_stepping' // NLE-ADF：正在逐段步进（某段就绪等空格推进）
   | 'done' // 完成
   | 'error'
 
@@ -197,7 +200,31 @@ export interface GenerationSession {
   beatRunId: Ref<string | null>
   renderProgress: Ref<RenderProgress[]>
   degradedBeats: Ref<DegradedBeat[]>
-  bsadfTrack: Ref<'A' | 'B'>
+  /** 本次 BS-ADF 生成选择的轨道；null = 当前会话未跑过 BS-ADF（引擎守卫用） */
+  bsadfTrack: Ref<'A' | 'B' | null>
+  /** 正在单卡重渲染（/rerender-beat）的 beat_id；null = 无进行中重渲染 */
+  rerenderingBeatId: Ref<string | null>
+  /** DDE 章节级剧情分叉决策集（Track A 由 DDE_AUTO_APPLIED 给；Track B 随 BEAT_SLOTS_BUILT 内嵌） */
+  decisionSet: Ref<ChapterDecisionSet | null>
+  /** 救援标记：审计判核心转折未落地的节拍（RESCUE_NEEDED 事件 / COMPLETE 载荷） */
+  rescueNeeded: Ref<RescueNeededItem[]>
+  // NLE-ADF 步进产物
+  /** 各段已渲染文本（按 beat_id 索引） */
+  segmentTexts: Ref<Record<string, string>>
+  /** 当前已就绪等空格推进的 beat_id；null = 无段在等推进 */
+  readyBeatId: Ref<string | null>
+  /** 就绪段对应的卡片快照（advanceBeat 可带 editedSlot 编辑） */
+  readyBeatCard: Ref<BeatSlot | null>
+  /** 已锁死的 beat_id 集合 */
+  lockedBeatIds: Ref<Set<string>>
+  /** 正在渲染的 beat_id；null = 无段在渲染 */
+  renderingBeatId: Ref<string | null>
+  /** Loop1 大纲自检结果（hard_facts/gaps/critique_pass/violations） */
+  loop1Result: Ref<{ hard_facts: any[]; gaps: any[]; critique_pass: boolean; violations: any[] } | null>
+  /** 步进会话 run_id（advanceBeat 推进用，来自 BEAT_SLOTS_BUILT） */
+  steppingRunId: Ref<string | null>
+  /** 各段抽取的涌现事实（Loop3 记忆注入产物，按 beat_id 索引） */
+  emergentFacts: Ref<Record<string, any>>
   // 派生
   isTerminal: ComputedRef<boolean>
   // 控制
@@ -210,11 +237,21 @@ export interface GenerationSession {
   startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
   confirmRefinery: (chapterId: string, decisions: IssueDecision[], customIssues?: RefineryIssue[]) => void
   // BS-ADF 控制
-  startBeat: (chapterId: string, tier: string, opts?: { track?: 'A' | 'B'; targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
-  confirmBeats: (chapterId: string, editedSlots: BeatSlot[]) => void
+  startBeat: (chapterId: string, tier: string, opts?: { track?: 'A' | 'B'; targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string>; steppingEnabled?: boolean; enableOutlineSelfCheck?: boolean; enableMemoryIngestion?: boolean }) => void
+  confirmBeats: (chapterId: string, editedSlots: BeatSlot[], opts?: { branchChoices?: Record<string, string>; skipped?: boolean }) => void
   cancelBeat: () => void
-  /** BS-ADF：降级单卡重渲染（调 /rerender-beat，同步 JSON） */
+  /** BS-ADF：降级/救援单卡重渲染（调 /rerender-beat，同步 JSON；editedSlot 携带作者编辑后的整卡） */
   rerenderBeat: (chapterId: string, beatId: string, editedSlot: BeatSlot) => Promise<any>
+  /** NLE-ADF：步进锁死推进（每段就绪后作者按 Space 推进下一段） */
+  advanceBeat: (
+    chapterId: string,
+    action: 'pass' | 'edit' | 'branch' | 'skip',
+    opts: {
+      beatId: string
+      editedSlot?: BeatSlot
+      branchChoice?: { option_id: string; label: string; plot_impact: string }
+    },
+  ) => void
   // 持久化：进入章节时恢复上次会话产物（localStorage）
   loadForChapter: (chapterId: string) => void
   persist: () => void
@@ -256,9 +293,34 @@ export function useGenerationSession(): GenerationSession {
   // BS-ADF 产物
   const beatSlots = ref<BeatSlot[]>([])
   const beatRunId = ref<string | null>(null)
+  // rerender 上下文 run_id：完成态下 beatRunId 已清空，但 /rerender-beat 需要它
+  // 从 _PENDING_BEAT_SLOTS 取完整渲染上下文（专名表/场景设定/canon）。
+  // Track A：onDone 时存 COMPLETE 的 generation_run_id；
+  // Track B：confirmBeats 时存原始暂停 run_id（pending 的 key 是它，不是 confirm 的新 run_id）。
+  const rerenderRunId = ref<string | null>(null)
   const renderProgress = ref<RenderProgress[]>([])
   const degradedBeats = ref<DegradedBeat[]>([])
-  const bsadfTrack = ref<'A' | 'B'>('A')
+  const bsadfTrack = ref<'A' | 'B' | null>(null)
+  const rerenderingBeatId = ref<string | null>(null)
+  // DDE 章节级剧情分叉（Track A：DDE_AUTO_APPLIED；Track B：BEAT_SLOTS_BUILT 内嵌）
+  const decisionSet = ref<ChapterDecisionSet | null>(null)
+  // 救援标记：核心转折未落地的节拍（路线 C 内联救援卡数据源）
+  const rescueNeeded = ref<RescueNeededItem[]>([])
+
+  // ===== NLE-ADF 步进状态 =====
+  const segmentTexts = ref<Record<string, string>>({})
+  const readyBeatId = ref<string | null>(null)
+  const readyBeatCard = ref<BeatSlot | null>(null)
+  const lockedBeatIds = ref<Set<string>>(new Set())
+  const renderingBeatId = ref<string | null>(null)
+  const loop1Result = ref<{
+    hard_facts: any[]
+    gaps: any[]
+    critique_pass: boolean
+    violations: any[]
+  } | null>(null)
+  const steppingRunId = ref<string | null>(null)
+  const emergentFacts = ref<Record<string, any>>({})
 
   let abortController: AbortController | null = null
   let currentChapterId: string | null = null  // 当前 session 绑定的章节（用于持久化 key）
@@ -291,6 +353,8 @@ export function useGenerationSession(): GenerationSession {
       beatSlots: beatSlots.value,
       renderProgress: renderProgress.value,
       degradedBeats: degradedBeats.value,
+      decisionSet: decisionSet.value,
+      rescueNeeded: rescueNeeded.value,
     }
   }
 
@@ -340,15 +404,25 @@ export function useGenerationSession(): GenerationSession {
     refinerySurgeries.value = snap.refinerySurgeries
     refineryHolisticVerdict.value = snap.refineryHolisticVerdict
     refineryStats.value = snap.refineryStats
-    beatSlots.value = snap.beatSlots || []
+    // 防御：旧 schema 快照（anchor_actions/conflict_trigger 时代）与新字段不兼容，
+    // 逐卡校验 key_anchors 数组存在才恢复，否则丢弃（避免 UI 读 undefined 崩溃）
+    beatSlots.value = (snap.beatSlots || []).filter(
+      (s: any) => s && Array.isArray(s.key_anchors) && typeof s.core_plot_event === 'string',
+    )
     renderProgress.value = snap.renderProgress || []
     degradedBeats.value = snap.degradedBeats || []
+    decisionSet.value = snap.decisionSet || null
+    rescueNeeded.value = (snap.rescueNeeded || []).filter(
+      (r: any) => r && typeof r.segment_index === 'number',
+    )
     // 中断态归正：刷新后无法续 LLM，强制为已完成的静态展示
     if (snap.stage === 'done' || snap.stage === 'error') {
       stage.value = snap.stage
     } else {
-      // 上次处于生成中途（tier_classifying/zone_writing 等），刷新后已无法续上
-      // → 若已有正文则记为 done，否则记为 error
+      // 上次处于生成中途（tier_classifying/zone_writing/beat_pending 等），刷新后已无法续上
+      // → 若已有正文则记为 done，否则记为 idle（避免显示假的"生成中"进度）
+      // 同时清掉 stepProgress（中断态的进度是旧的，恢复会误导用户以为还在生成）
+      stepProgress.value = null
       stage.value = snap.streamText ? 'done' : 'idle'
     }
     generating.value = false
@@ -356,6 +430,7 @@ export function useGenerationSession(): GenerationSession {
     inflightEvents.value = []  // 飞行中事件不持久化（瞬时态）
     refineryRunId.value = null  // runId 是临时会话凭证，刷新后失效
     beatRunId.value = null  // beat runId 同样是临时凭证，刷新后失效
+    rerenderRunId.value = null  // 同上：pending 在后端内存，刷新后前端不再引用
   }
 
   /** 内部 reset（不触碰 currentChapterId，不 persist） */
@@ -384,14 +459,102 @@ export function useGenerationSession(): GenerationSession {
     refineryStats.value = null
     beatSlots.value = []
     beatRunId.value = null
+    rerenderRunId.value = null
     renderProgress.value = []
     degradedBeats.value = []
-    bsadfTrack.value = 'A'
+    bsadfTrack.value = null
+    rerenderingBeatId.value = null
+    decisionSet.value = null
+    rescueNeeded.value = []
     lastDoneMode.value = null
   }
 
   /** 最近一次入口（供失败重试 retry 再次触发）；start / startRefinery 时记录 */
   let lastAction: (() => void) | null = null
+
+  /** 定档事件填充（ADF 的 onTierDecided 与 BS-ADF 的 TIER_DECIDED 共用，载荷结构一致） */
+  function applyTierDecision(decision: { tier: string; reason: string; climax_score?: number | null }) {
+    tierDecision.value = {
+      tier: decision.tier as any,
+      reason: decision.reason,
+      climax_score: decision.climax_score ?? null,
+      forced_by_user: decision.tier !== 'auto',
+      max_depth: 0,
+      development_ratio: 0,
+    }
+    stage.value = 'tier_decided'
+    stepProgress.value = { label: `篇幅：${tierLabel(decision.tier)}` }
+  }
+
+  /** 审计结论填充（ADF 的 onAudit 与 BS-ADF 的 ADF_AUDIT / BSADF_METADATA.audit 兜底共用）。
+   *  BSADF_METADATA.audit 是后端 audit_to_dict 产物，比 ADF_AUDIT 事件多
+   *  style_violations/style_score/missing_beats 字段，结构兼容可直接传入。 */
+  function applyAdfAudit(audit: AdfAuditResult) {
+    adfAudit.value = audit
+    auditVerdict.value = audit.verdict
+    if (audit.climax_score != null) climaxScore.value = audit.climax_score
+    if (Array.isArray(audit.structure_issues)) {
+      auditFindings.value = audit.structure_issues.map((v: string) => ({
+        detail: v,
+        severity: 'warning',
+        category: 'structure',
+      }))
+    }
+    if (Array.isArray(audit.emotion_mismatches)) {
+      auditFindings.value.push(
+        ...audit.emotion_mismatches.map((v: string) => ({
+          detail: v,
+          severity: 'info',
+          category: 'emotion',
+        })),
+      )
+    }
+  }
+
+  /** BS-ADF 兜底事件（onEvent 通道）：审计 / 降级 / 元数据 / 正文输出提示，
+   *  对齐 ADF 路径的填充逻辑（此前这些事件被 _dispatchEvent 安全忽略，
+   *  导致 BS-ADF 生成后降级详情 / 审计结论 / 铺垫要点恒空）。 */
+  function handleBsadfEvent(event: string, data: any) {
+    // ADF_ANCHOR_DESIGNED：存锚点设计（climax_description 供脉络条摘要展示）
+    if (event === 'ADF_ANCHOR_DESIGNED') {
+      adfAnchor.value = {
+        climax_intensity: data.climax_intensity,
+        climax_description: data.climax_description,
+        setup_points: data.setup_points,
+        emotion_flow_samples: data.emotion_flow_samples,
+      }
+      return
+    }
+    if (event === 'ADF_AUDIT') {
+      applyAdfAudit({
+        verdict: data.verdict,
+        missing_setup_points: data.missing_setup_points || [],
+        emotion_mismatches: data.emotion_mismatches || [],
+        structure_issues: data.structure_issues || [],
+        climax_score: data.climax_score,
+        fix_targets: data.fix_targets || [],
+      })
+    } else if (event === 'DEGRADED') {
+      degraded.value.push({
+        reason: data.reason,
+        phase: data.phase,
+        detail: data.detail,
+      })
+    } else if (event === 'BSADF_METADATA') {
+      // 完整元数据：填充铺垫要点（同 ADF_METADATA 的处理）
+      if (Array.isArray(data.climax_design?.setup_points)) {
+        adfPreconditions.value = data.climax_design.setup_points
+      }
+      // audit 兜底：ADF_AUDIT 事件正常会先到；未到（异常路径）时用
+      // BSADF_METADATA.audit（audit_to_dict 产物）补，避免审计结论恒空
+      if (!adfAudit.value && data.audit && data.audit.verdict) {
+        applyAdfAudit(data.audit)
+      }
+    } else if (event === 'FINAL_TEXT_STREAM') {
+      stepProgress.value = { label: '输出正文' }
+    }
+    // UNIFIED_METRIC / GENERATION_RUN：audit 已通过 ADF_AUDIT 处理（同 ADF onMetric 语义）
+  }
 
   function start(
     chapterId: string,
@@ -454,16 +617,7 @@ export function useGenerationSession(): GenerationSession {
           }
         },
         onTierDecided: (decision) => {
-          tierDecision.value = {
-            tier: decision.tier as any,
-            reason: decision.reason,
-            climax_score: decision.climax_score ?? null,
-            forced_by_user: decision.tier !== 'auto',
-            max_depth: 0,
-            development_ratio: 0,
-          }
-          stage.value = 'tier_decided'
-          stepProgress.value = { label: `篇幅：${tierLabel(decision.tier)}` }
+          applyTierDecision(decision)
         },
         onProgress: (index, total, data) => {
           stage.value = 'zone_writing'
@@ -477,25 +631,7 @@ export function useGenerationSession(): GenerationSession {
         },
         // ADF_PRECONDITION_LANDED 事件不再推入 inflightEvents（用户不需要该提示卡片）
         onAudit: (audit) => {
-          adfAudit.value = audit
-          auditVerdict.value = audit.verdict
-          if (audit.climax_score != null) climaxScore.value = audit.climax_score
-          if (Array.isArray(audit.structure_issues)) {
-            auditFindings.value = audit.structure_issues.map((v: string) => ({
-              detail: v,
-              severity: 'warning',
-              category: 'structure',
-            }))
-          }
-          if (Array.isArray(audit.emotion_mismatches)) {
-            auditFindings.value.push(
-              ...audit.emotion_mismatches.map((v: string) => ({
-                detail: v,
-                severity: 'info',
-                category: 'emotion',
-              })),
-            )
-          }
+          applyAdfAudit(audit)
         },
         onMetric: (metrics) => {
           // UNIFIED_METRIC 在 ADF 中复用，metrics.audit 已通过 onAudit 处理
@@ -563,8 +699,49 @@ export function useGenerationSession(): GenerationSession {
         return { label: '结构检查', sessionStage: 'auditing' }
       case 'REFINE':
         return { label: '补充铺垫', sessionStage: 'refining' }
+      case 'BEAT_PATCH':
+        return { label: '补写遗漏节拍', sessionStage: 'refining' }
+      case 'CONSISTENCY_GUARD':
+        return { label: '一致性守卫', sessionStage: 'auditing' }
       default:
         return { label: adfStage, sessionStage: stage.value }
+    }
+  }
+
+  /** 把 BS-ADF 的 BSADF_STAGE/ADF_STAGE 事件映射为写作语言步骤标签。
+   *  sessionStage 为 null 时只换标签、不动 stage 状态机
+   *  （AUTHOR_DIALOGUE 的 beat_pending 由 onSlots 负责；未知事件保持现状）。 */
+  function mapBsadfStageToLabel(stageName: string): { label: string; sessionStage: SessionStage | null } {
+    switch (stageName) {
+      case 'CONTEXT_ASSEMBLING':
+        return { label: '组装上下文', sessionStage: 'tier_classifying' }
+      case 'SPINE_BUILDING':
+        return { label: '构建脉络骨架', sessionStage: 'tier_classifying' }
+      case 'ANCHOR_DESIGN':
+        return { label: '设计远端锚点', sessionStage: 'tier_classifying' }
+      case 'TIER_DECIDE':
+        return { label: '章节定档', sessionStage: 'tier_classifying' }
+      case 'SLOT_BUILD':
+        return { label: '构建分镜卡', sessionStage: 'setup_growing' }
+      case 'BRANCH_CHECK':
+        return { label: '检查剧情岔路', sessionStage: 'setup_growing' }
+      case 'RENDER':
+      case 'RENDER_RESUMED':
+        return { label: '逐段渲染', sessionStage: 'beat_rendering' }
+      case 'AUTHOR_DIALOGUE':
+        return { label: '等待你编辑分镜卡', sessionStage: null }
+      case 'PRUNE':
+        return { label: '重构剪枝', sessionStage: 'zone_writing' }
+      case 'ANCHOR_AUDIT':
+        return { label: '锚点审计', sessionStage: 'auditing' }
+      case 'REFINE':
+        return { label: '条件补埋', sessionStage: 'refining' }
+      case 'BEAT_PATCH':
+        return { label: '补写遗漏节拍', sessionStage: 'refining' }
+      case 'CONSISTENCY_GUARD':
+        return { label: '一致性守卫', sessionStage: 'auditing' }
+      default:
+        return { label: stageName, sessionStage: null }
     }
   }
 
@@ -741,7 +918,7 @@ export function useGenerationSession(): GenerationSession {
   // + confirmBeats（Track B 恢复渲染）+ cancelBeat
   // ============================================================
 
-  /** BS-ADF：启动生成（Track A 全自动 / Track B 跑到槽位卡暂停） */
+  /** BS-ADF：启动生成（Track A 全自动 / Track B 跑到槽位卡单次暂停） */
   function startBeat(
     chapterId: string,
     tier: string,
@@ -751,6 +928,9 @@ export function useGenerationSession(): GenerationSession {
       maxSegments?: number
       authorIntent?: string
       expectationActions?: Record<string, string>
+      steppingEnabled?: boolean
+      enableOutlineSelfCheck?: boolean
+      enableMemoryIngestion?: boolean
     } = {},
   ) {
     if (generating.value) {
@@ -764,12 +944,21 @@ export function useGenerationSession(): GenerationSession {
     bsadfTrack.value = opts.track || 'A'
     abortController = new AbortController()
     startedAt = Date.now()
-    // 清空旧产物
+    // 清空旧产物（含 stepProgress，避免上次进度残留误导）
     streamText.value = ''
+    stepProgress.value = null
     beatSlots.value = []
     beatRunId.value = null
+    rerenderRunId.value = null
     renderProgress.value = []
     degradedBeats.value = []
+    decisionSet.value = null
+    rescueNeeded.value = []
+    // 兜底事件填充的产物一并清空（定档/审计/降级/铺垫要点），防上章残留
+    tierDecision.value = null
+    adfAudit.value = null
+    adfPreconditions.value = []
+    degraded.value = []
 
     bsadfApi.start(
       chapterId,
@@ -780,27 +969,78 @@ export function useGenerationSession(): GenerationSession {
         max_segments: opts.maxSegments ?? 6,
         author_intent: opts.authorIntent,
         expectation_actions: opts.expectationActions,
+        enable_stepping: opts.steppingEnabled ?? false,
+        enable_outline_self_check: opts.enableOutlineSelfCheck ?? false,
+        enable_memory_ingestion: opts.enableMemoryIngestion ?? false,
+        // enable_dde 不再随 track 写死：后端默认 true，Track A 静默应用默认走向、
+        // Track B 把 decision_set 内嵌进 BEAT_SLOTS_BUILT，由后端按轨处理
       },
       {
         onStage: (stageName, _data) => {
-          // 映射后端 BSADF_STAGE/ADF_STAGE 到前端 stage
-          if (stageName === 'AUTHOR_DIALOGUE') {
-            // Track B 暂停点（不应在这里触发，onSlots 会先触发）
-            stepProgress.value = { label: '等待你编辑槽位卡' }
-          } else if (stageName === 'RENDER' || stageName === 'RENDER_RESUMED') {
-            stage.value = 'beat_rendering'
-            stepProgress.value = { label: '逐段渲染' }
-          } else {
-            stepProgress.value = { label: stageName }
+          // 映射后端 BSADF_STAGE/ADF_STAGE 到中文标签 + stage 状态机
+          const { label, sessionStage } = mapBsadfStageToLabel(stageName)
+          if (sessionStage) stage.value = sessionStage
+          stepProgress.value = { label }
+        },
+        onSlotEnrichProgress: (current, total, _beatId) => {
+          // 槽位扩写逐卡进度（SLOT_BUILD 阶段，避免 60s 沉默）
+          stepProgress.value = {
+            label: '分镜卡扩写',
+            index: current,
+            total,
           }
         },
+        onDdeAutoApplied: (payload) => {
+          // Track A 静默 DDE：有分支已按默认走向突变（卡片 branch_directive 已注入）；
+          // 无分支时 decision_set.has_story_branch=false，面板据此展示"本章无岔路"
+          decisionSet.value = payload.decision_set || null
+        },
         onSlots: (payload) => {
-          // Track B 暂停触发：槽位卡就绪
-          beatSlots.value = payload.slots || []
-          beatRunId.value = payload.run_id
-          generating.value = false  // 解覆盖 editor
-          stage.value = 'beat_pending'
-          stepProgress.value = { label: `${(payload.slots || []).length} 张槽位卡待编辑` }
+          // 轨道/载荷守卫：仅 Track B 暂停的完整版（route 层带 run_id + 全量卡）
+          // 才进 beat_pending 并解 generating；Track A 的 workflow 版（无 run_id，
+          // 载荷带 beat_slots/decision_set）只提前填卡，不动 stage/generating
+          // （否则 Track A 渲染中途被误判为"完成"，_editor 覆盖提前解锁）。
+          if (payload.run_id && payload.slots?.length) {
+            // Track B 暂停触发：槽位卡就绪（分支信息随卡内嵌，单次暂停）
+            beatSlots.value = payload.slots
+            beatRunId.value = payload.run_id
+            decisionSet.value = payload.decision_set || null
+            const branchCount = payload.decision_set?.decision_nodes?.length || 0
+            // NLE-ADF 步进模式
+            if (opts.steppingEnabled) {
+              steppingRunId.value = payload.run_id
+              // 清空步进态产物，等后端推第一段 BEAT_RENDER_READY
+              segmentTexts.value = {}
+              readyBeatId.value = null
+              lockedBeatIds.value = new Set()
+              generating.value = true
+              stage.value = 'beat_rendering'
+              stepProgress.value = {
+                label: branchCount > 0
+                  ? `${payload.slots.length} 段逐段渲染中 · ${branchCount} 处剧情走向待选`
+                  : `${payload.slots.length} 段逐段渲染中`,
+              }
+            } else {
+              generating.value = false  // 解覆盖 editor
+              stage.value = 'beat_pending'
+              stepProgress.value = {
+                label: branchCount > 0
+                  ? `${payload.slots.length} 张分镜卡待编辑 · ${branchCount} 处剧情走向待选`
+                  : `${payload.slots.length} 张分镜卡待编辑`,
+              }
+            }
+          } else {
+            // Track A（及 Track B 先于 route 完整版到达的 workflow 版）：
+            // 仅填充 beatSlots / decisionSet，让渲染期卡片可见
+            if (payload.slots?.length) beatSlots.value = payload.slots
+            if (payload.decision_set) decisionSet.value = payload.decision_set
+          }
+        },
+        onTierDecided: (decision) => {
+          applyTierDecision(decision)
+        },
+        onEvent: (event, data) => {
+          handleBsadfEvent(event, data)
         },
         onRenderProgress: (data) => {
           // 更新 renderProgress（替换或追加同 beat_id 的项）
@@ -819,6 +1059,10 @@ export function useGenerationSession(): GenerationSession {
         onDowngraded: (data) => {
           degradedBeats.value.push(data)
         },
+        onRescueNeeded: (items) => {
+          // 审计判核心转折未落地的节拍（路线 C 内联救援卡）
+          rescueNeeded.value = items
+        },
         onChunk: (chunk) => {
           streamText.value += chunk
         },
@@ -830,6 +1074,16 @@ export function useGenerationSession(): GenerationSession {
             : result.stats
           lastDoneMode.value = 'bsadf'
           stage.value = 'done'
+          // 完成后用后端下发的卡刷新（Track A 首次持卡；含渲染后 status 与
+          // 分支突变后的 branch_directive，分镜工作台据此只读展示）
+          if (result.beat_slots?.length) {
+            beatSlots.value = result.beat_slots
+          }
+          if (result.rescue_needed?.length) {
+            rescueNeeded.value = result.rescue_needed
+          }
+          // Track A：pending 以生成 run_id 为 key，存下来供完成后 rerender 取上下文
+          rerenderRunId.value = result.generation_run_id || null
           beatRunId.value = null  // 幂等清空
           abortController = null
           persist()
@@ -846,30 +1100,47 @@ export function useGenerationSession(): GenerationSession {
     )
   }
 
-  /** BS-ADF Track B：作者编辑槽位卡后恢复渲染 */
-  function confirmBeats(chapterId: string, editedSlots: BeatSlot[]) {
+  /** BS-ADF Track B：作者编辑分镜卡 + 选定剧情分支后恢复渲染 */
+  function confirmBeats(
+    chapterId: string,
+    editedSlots: BeatSlot[],
+    opts: { branchChoices?: Record<string, string>; skipped?: boolean } = {},
+  ) {
     const runId = beatRunId.value
     if (!runId) {
       error.value = '缺少 beat run_id'
       return
     }
     // runId handoff（照搬 confirmRefinery 的技巧）：捕获 → 清空 → 调 API。
-    // 清空 beatSlots 让槽位卡面板消失，进度面板接管展示。
+    // 注意：beatSlots 不再清空——分镜工作台在渲染态/完成态继续持卡展示，
+    // 供事后「极速微调」与定点重渲染复用（渲染进度另由 renderProgress 展示）。
+    // Track B：pending 以原始暂停 run_id 为 key（confirm 产生的是新 run_id），
+    // 存下它供完成后 rerender 取上下文。
+    rerenderRunId.value = runId
     beatRunId.value = null
-    beatSlots.value = []
     generating.value = true
     stage.value = 'beat_rendering'
+    stepProgress.value = null
     abortController = new AbortController()
     streamText.value = ''
     renderProgress.value = []
     degradedBeats.value = []
+    rescueNeeded.value = []
 
     bsadfApi.confirm(
       chapterId,
-      { run_id: runId, edited_slots: editedSlots },
+      {
+        run_id: runId,
+        edited_slots: editedSlots,
+        branch_choices: opts.branchChoices || {},
+        skipped: opts.skipped || false,
+      },
       {
         onStage: (stageName) => {
-          if (stageName === 'RENDER_RESUMED') stepProgress.value = { label: '逐段渲染' }
+          // confirm 流复用 BS-ADF 阶段映射（RENDER_RESUMED/PRUNE/ANCHOR_AUDIT 等）
+          const { label, sessionStage } = mapBsadfStageToLabel(stageName)
+          if (sessionStage) stage.value = sessionStage
+          stepProgress.value = { label }
         },
         onRenderProgress: (data) => {
           const idx = renderProgress.value.findIndex(p => p.beat_id === data.beat_id)
@@ -884,14 +1155,31 @@ export function useGenerationSession(): GenerationSession {
         onDowngraded: (data) => {
           degradedBeats.value.push(data)
         },
+        onRescueNeeded: (items) => {
+          rescueNeeded.value = items
+        },
+        onEvent: (event, data) => {
+          handleBsadfEvent(event, data)
+        },
         onChunk: (chunk) => {
           streamText.value += chunk
         },
         onDone: (result) => {
           generating.value = false
           stage.value = 'done'
-          finalStats.value = result.stats
+          // 补耗时（对齐 startBeat 的 onDone 写法；startedAt 自 startBeat 起算，
+          // 含作者在 beat_pending 的编辑等待——与 Track B 语义一致）
+          finalStats.value = startedAt != null
+            ? { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
+            : result.stats
           lastDoneMode.value = 'bsadf'
+          // 完成后用后端下发的卡刷新（含渲染后 status 与分支突变后的 branch_directive）
+          if (result.beat_slots?.length) {
+            beatSlots.value = result.beat_slots
+          }
+          if (result.rescue_needed?.length) {
+            rescueNeeded.value = result.rescue_needed
+          }
           beatRunId.value = null
           abortController = null
           persist()
@@ -912,24 +1200,37 @@ export function useGenerationSession(): GenerationSession {
   function cancelBeat() {
     beatSlots.value = []
     beatRunId.value = null
+    rerenderRunId.value = null
     renderProgress.value = []
     degradedBeats.value = []
+    decisionSet.value = null
+    rescueNeeded.value = []
     generating.value = false
     stage.value = 'idle'
   }
 
   /**
-   * BS-ADF：降级单卡重渲染（调 /rerender-beat，同步 JSON）。
+   * BS-ADF：降级/救援单卡重渲染（调 /rerender-beat，同步 JSON）。
    *
-   * Phase 4d 降级的某张 beat 由作者重新编辑后单卡重渲染（不重跑全章）。
+   * 降级或 rescue_needed 的某张 beat 由作者重新编辑后单卡重渲染（不重跑全章）。
+   * editedSlot 是作者编辑后的整卡，后端用它替代暂存快照重渲染。
    * 后端返回 {segment:{text}, card, degraded}：
-   * - 成功（degraded=null）：从 degradedBeats 移除该 beat，把渲染结果记入 renderProgress（status='rendered'）。
+   * - 成功（degraded=null）：从 degradedBeats / rescueNeeded 移除该 beat，把渲染结果记入 renderProgress（status='rendered'）。
    * - 再次降级（degraded 非空）：把新的降级句柄替换 degradedBeats 中同 beat_id 的项（attempts 累加）。
    * 任意一种分支都持久化（刷新后能看到最新降级态）。
    */
   async function rerenderBeat(chapterId: string, beatId: string, editedSlot: BeatSlot) {
+    // 进行中指示：分镜卡点亮「渲染中」灯 + 按钮禁用防连点（finally 确保复位）
+    rerenderingBeatId.value = beatId
     try {
-      const result = await bsadfApi.rerenderBeat(chapterId, { beat_id: beatId, edited_slot: editedSlot })
+      const result = await bsadfApi.rerenderBeat(chapterId, {
+        beat_id: beatId,
+        edited_slot: editedSlot,
+        // 带上生成 run_id（beatRunId 优先，完成态回退 rerenderRunId），后端据此
+        // 从 _PENDING_BEAT_SLOTS 取完整渲染上下文（专名表/场景设定/锚点），
+        // 不走空上下文兜底；两者都无时后端按 beat_id 扫描兜底
+        run_id: beatRunId.value || rerenderRunId.value,
+      })
       // 后端响应字段：result.segment.text（正文）/ result.degraded（再次降级句柄，可空）
       const text = result?.segment?.text ?? ''
       const reDegraded = result && result.degraded
@@ -944,8 +1245,14 @@ export function useGenerationSession(): GenerationSession {
           } : d,
         )
       } else {
-        // 渲染成功：移出降级清单，把结果记入 renderProgress（标记为 rendered）
+        // 渲染成功：移出降级清单与救援清单，把结果记入 renderProgress（标记为 rendered）
         degradedBeats.value = degradedBeats.value.filter(d => d.beat_id !== beatId)
+        rescueNeeded.value = rescueNeeded.value.filter(r => r.beat_id !== beatId)
+        // 用后端返回的卡刷新分镜工作台（status → rendered，内容为最终渲染用卡）
+        if (result?.card) {
+          const cardIdx = beatSlots.value.findIndex(s => s.beat_id === beatId)
+          if (cardIdx >= 0) beatSlots.value[cardIdx] = result.card
+        }
         const segIndex = (editedSlot && typeof editedSlot.segment_index === 'number')
           ? editedSlot.segment_index
           : (result && result.segment && result.segment.index) ?? 0
@@ -965,7 +1272,94 @@ export function useGenerationSession(): GenerationSession {
     } catch (e: any) {
       error.value = e.message || '重渲染失败'
       return null
+    } finally {
+      rerenderingBeatId.value = null
     }
+  }
+
+  /** NLE-ADF：步进锁死推进（每段就绪后作者按 Space 推进下一段） */
+  function advanceBeat(
+    chapterId: string,
+    action: 'pass' | 'edit' | 'branch' | 'skip',
+    opts: {
+      beatId: string
+      editedSlot?: BeatSlot
+      branchChoice?: { option_id: string; label: string; plot_impact: string }
+    },
+  ) {
+    if (!steppingRunId.value || !opts.beatId) return
+    abortController = new AbortController()
+    currentChapterId = chapterId
+    generating.value = true
+    stage.value = 'beat_rendering'
+
+    bsadfApi.advanceBeat(
+      chapterId,
+      {
+        run_id: steppingRunId.value,
+        beat_id: opts.beatId,
+        action,
+        edited_slot: opts.editedSlot,
+        branch_choice: opts.branchChoice,
+      },
+      {
+        onBeatRenderStart: (data) => {
+          renderingBeatId.value = data.beat_id
+          readyBeatId.value = null
+          if (data.card_snapshot) {
+            const idx = beatSlots.value.findIndex(s => s.beat_id === data.beat_id)
+            if (idx >= 0) beatSlots.value[idx] = data.card_snapshot
+          }
+        },
+        onBeatChunk: (data) => {
+          const prev = segmentTexts.value[data.beat_id] || ''
+          segmentTexts.value = { ...segmentTexts.value, [data.beat_id]: prev + data.delta }
+          streamText.value = Object.values(segmentTexts.value).join('\n\n')
+        },
+        onBeatReady: (data) => {
+          renderingBeatId.value = null
+          readyBeatId.value = data.beat_id
+          readyBeatCard.value = data.card_snapshot || null
+          stage.value = 'beat_stepping'
+          generating.value = false
+        },
+        onBeatLocked: (data) => {
+          lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
+          if (data.extracted_facts) {
+            emergentFacts.value = { ...emergentFacts.value, [data.beat_id]: data.extracted_facts }
+          }
+        },
+        onBeatSkipped: (data) => {
+          lockedBeatIds.value = new Set([...lockedBeatIds.value, data.beat_id])
+        },
+        onAllBeatsLocked: () => {
+          stage.value = 'assembling'
+        },
+        onBeatRerendered: (data) => {
+          segmentTexts.value = { ...segmentTexts.value, [data.beat_id]: '' }
+        },
+        onLoop1Checked: (data) => {
+          loop1Result.value = data
+        },
+        onStage: () => { /* 兼容 */ },
+        onEvent: () => { /* 兜底 */ },
+        onDone: (result) => {
+          stage.value = 'done'
+          lastDoneMode.value = 'bsadf'
+          streamText.value = result.text || Object.values(segmentTexts.value).join('\n\n')
+          finalStats.value = result.stats || null
+          generating.value = false
+          persist()
+        },
+        onError: (msg) => {
+          error.value = msg
+          stage.value = 'error'
+          generating.value = false
+          persist()
+        },
+      },
+      abortController.signal,
+    )
   }
 
   return {
@@ -1000,6 +1394,13 @@ export function useGenerationSession(): GenerationSession {
     renderProgress,
     degradedBeats,
     bsadfTrack,
+    rerenderingBeatId,
+    decisionSet,
+    rescueNeeded,
+    // NLE-ADF 步进
+    segmentTexts, readyBeatId, readyBeatCard, lockedBeatIds,
+    renderingBeatId, loop1Result, steppingRunId, emergentFacts,
+    advanceBeat,
     isTerminal,
     start,
     cancel,

@@ -978,6 +978,9 @@ export const bsadfApi = {
       max_segments?: number
       author_intent?: string
       expectation_actions?: Record<string, string>
+      enable_stepping?: boolean
+      enable_outline_self_check?: boolean
+      enable_memory_ingestion?: boolean
     },
     callbacks: BsadfStreamCallbacks,
     signal?: AbortSignal,
