@@ -82,11 +82,14 @@ async def extract_emergent_facts(
         )
         text = _unwrap_llm_response(resp)
         parsed = _parse_json_safe(text) or {}
+        # 风险10修复：类型校验——LLM 返回的列表字段可能是 str/dict/None
+        def _safe_list(v):
+            return v if isinstance(v, list) else []
         return EmergentFacts(
-            new_entities=parsed.get("new_entities", []),
-            relationship_changes=parsed.get("relationship_changes", []),
-            new_locations=parsed.get("new_locations", []),
-            outline_addenda=parsed.get("outline_addenda", []),
+            new_entities=_safe_list(parsed.get("new_entities")),
+            relationship_changes=_safe_list(parsed.get("relationship_changes")),
+            new_locations=_safe_list(parsed.get("new_locations")),
+            outline_addenda=_safe_list(parsed.get("outline_addenda")),
         )
     except Exception as e:
         logger.warning("Loop3 extract_emergent_facts 失败 (beat=%s): %s", beat_id, e)

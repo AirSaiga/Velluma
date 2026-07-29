@@ -43,10 +43,12 @@ _RELATION_KEYWORDS = ["关系", "背叛", "结盟", "冲突", "信任"]
 def diagnose_gaps(hard_facts: List[dict], total_segments: int) -> List[dict]:
     """Pass 2：缺口诊断（纯算法）。"""
     gaps: List[dict] = []
-    fact_contents = " ".join(f.get("content", "") for f in hard_facts)
+    # 风险9修复：类型校验——LLM 返回的 hard_facts 元素可能非 dict（str/None）
+    safe_facts = [f for f in (hard_facts or []) if isinstance(f, dict)]
+    fact_contents = " ".join(f.get("content", "") for f in safe_facts)
 
     has_motivation = any(kw in fact_contents for kw in _MOTIVATION_KEYWORDS)
-    if not has_motivation and hard_facts:
+    if not has_motivation and safe_facts:
         gaps.append({
             "type": "macro", "impact": "high",
             "description": "大纲未明确角色动机，可能影响剧情说服力",

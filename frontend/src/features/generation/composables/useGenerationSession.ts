@@ -330,6 +330,10 @@ export function useGenerationSession(): GenerationSession {
     violations: any[]
   } | null>(null)
   const steppingRunId = ref<string | null>(null)
+  // 风险3修复：轮询定时器变量提前声明（避免 TDZ：_resetInternal 调用 _stopSteppingPoll）
+  let _steppingPollTimer: ReturnType<typeof setTimeout> | null = null
+  let _steppingPollCount = 0
+  const _STEPPING_POLL_MAX = 90  // 最多 90 次（约 3 分钟）
   const emergentFacts = ref<Record<string, any>>({})
   // NLE-ADF 步进岔路门：当前待作者选择的 DDE 节点（null = 无待决策岔路）
   const branchChoicePending = ref<{
@@ -484,6 +488,14 @@ export function useGenerationSession(): GenerationSession {
     decisionSet.value = null
     rescueNeeded.value = []
     lastDoneMode.value = null
+    // 风险3修复：清理步进轮询定时器 + 清空 steppingRunId（防止拆卸后永久轮询）
+    _stopSteppingPoll()
+    steppingRunId.value = null
+    branchChoicePending.value = null
+    segmentTexts.value = {}
+    readyBeatId.value = null
+    lockedBeatIds.value = new Set()
+    renderingBeatId.value = null
   }
 
   /** 最近一次入口（供失败重试 retry 再次触发）；start / startRefinery 时记录 */
@@ -1352,25 +1364,32 @@ export function useGenerationSession(): GenerationSession {
 
   /** NLE-ADF：轮询 stepping-run state，等首段 ready 后切 beat_stepping。
    * IAB 等短 SSE 环境的备用通道——SSE 流断开后仍能拿到首段就绪状态。 */
-  let _steppingPollTimer: ReturnType<typeof setTimeout> | null = null
+  function _stopSteppingPoll() {
+    if (_steppingPollTimer) { clearTimeout(_steppingPollTimer); _steppingPollTimer = null }
+    _steppingPollCount = 0
+  }
   function _pollSteppingReady(runId: string, chapterId: string) {
-    if (_steppingPollTimer) clearTimeout(_steppingPollTimer)
+    _stopSteppingPoll()
     const poll = async () => {
-      // 已切到 beat_stepping/done 则停止轮询
-      // 注意：不因 stage='error' 停止——SSE 断开会触发 onError 设 error，
-      // 但后端 stepping_loop 可能仍在正常跑，轮询能恢复正确状态。
-      if (stage.value === 'beat_stepping' || stage.value === 'done') return
-      if (steppingRunId.value !== runId) return  // session 已变
+      // 风险3修复：停止条件检查（含 idle/error/done/beat_stepping + session 变更）
+      if (stage.value === 'beat_stepping' || stage.value === 'done' || stage.value === 'idle') return
+      if (steppingRunId.value !== runId) return
+      // 风险7修复：轮询次数上限 + 退避
+      _steppingPollCount++
+      if (_steppingPollCount > _STEPPING_POLL_MAX) {
+        error.value = '步进轮询超时（3 分钟无响应）'
+        stage.value = 'error'
+        generating.value = false
+        return
+      }
       try {
         const resp = await fetch(`/api/chapters/stepping-run/${runId}/state`)
         if (!resp.ok) { _steppingPollTimer = setTimeout(poll, 2000); return }
         const st = await resp.json()
         if (st.status === 'error' || st.status === 'done') {
-          // 生成结束/出错，停止轮询
           return
         }
         if (st.current_segment_ready && st.current_beat_id) {
-          // 首段就绪：手动触发 onBeatReady 逻辑
           if (st.current_segment_text) {
             segmentTexts.value = {
               ...segmentTexts.value,
@@ -1383,15 +1402,15 @@ export function useGenerationSession(): GenerationSession {
           readyBeatCard.value = cardIdx >= 0 ? beatSlots.value[cardIdx] : null
           renderingBeatId.value = null
           stage.value = 'beat_stepping'
-          generating.value = false  // 解锁，等作者按 Space
-          return  // 切态后停止轮询
+          generating.value = false
+          return
         }
       } catch (e) {
-        // 网络错误，继续轮询
+        // 网络错误，继续轮询（有次数上限兜底）
       }
       _steppingPollTimer = setTimeout(poll, 2000)
     }
-    _steppingPollTimer = setTimeout(poll, 3000)  // 首次延迟 3 秒（给后端渲染时间）
+    _steppingPollTimer = setTimeout(poll, 3000)
   }
 
   /** NLE-ADF：步进锁死推进（每段就绪后作者按 Space 推进下一段） */
@@ -1405,6 +1424,10 @@ export function useGenerationSession(): GenerationSession {
     },
   ) {
     if (!steppingRunId.value || !opts.beatId) return
+    // 风险4修复：防止重复提交——正在渲染时不接受新 advanceBeat
+    if (generating.value && stage.value === 'beat_rendering') return
+    // 风险4修复：中止旧的 AbortController（防止旧 SSE 流持续 mutate 状态）
+    if (abortController) abortController.abort()
     abortController = new AbortController()
     currentChapterId = chapterId
     generating.value = true

@@ -431,6 +431,12 @@ class _BSAdfStreamHandler:
                             stepping_run.event_queue.get(), timeout=120.0
                         )
                         _emit(ev_name, ev_data)
+                        if ev_name == "BEAT_BRANCH_CHOICE":
+                            # 岔路门：步进循环挂起等作者选走向（时长由作者决定，
+                            # 不受 120s 约束）。作者提交选择时 advance-beat 会
+                            # 新开 SSE 流交付后续渲染事件，本桥接直接退出——
+                            # 继续空等只会触发下方 120s 误报（真实事故）。
+                            break
                     except asyncio.TimeoutError:
                         _emit("ERROR", {"error": "首段渲染超时（120s）"})
                         break
@@ -738,6 +744,16 @@ async def _run_confirm_beats(run_id: str, request: "ConfirmBeatsRequest"):
         chapter = ctx["chapter"]
         spine: StoryContext = ctx["spine"]
         anchor: ChapterClimax = ctx["anchor"]
+
+        # 风险1修复：chapter 是 generate-bsadf 暂存的 detached ORM 对象（原 session 已关闭），
+        # confirm-beats 的新 bg_db 不认识它。重新查询绑定到当前 session。
+        db = _get_db_for_run(run_id)
+        if db is not None:
+            from backend.repositories import ChapterRepository
+            chapter_repo = ChapterRepository(db)
+            fresh_chapter = await chapter_repo.get_by_id(request.chapter_id or str(getattr(chapter, "id", "")))
+            if fresh_chapter is not None:
+                chapter = fresh_chapter
         tier: str = ctx["tier"]
         target_word_count: int = ctx["target_word_count"]
         max_segments: int = ctx["max_segments"]
@@ -827,7 +843,9 @@ async def _run_confirm_beats(run_id: str, request: "ConfirmBeatsRequest"):
                 chapter.bsadf_beat_slots = json.dumps(result.debug_info.get("beat_slots", []), ensure_ascii=False)
                 await _get_db_for_run(run_id).commit()
             except Exception as e:
-                logger.warning(f"[BS-ADF] confirm-beats 持久化失败: {e}")
+                # 风险1修复：不再静默吞掉——落库失败是严重问题（正文会丢失）
+                logger.error(f"[BS-ADF] confirm-beats 持久化失败（终稿可能未落库）: {e}", exc_info=True)
+                _emit("ERROR", {"error": f"终稿落库失败: {e}"})
 
         # 推送降级 + 元数据
         for deg in result.degraded:
@@ -1150,18 +1168,24 @@ async def advance_beat(
     run = _STEPPING_RUNS.get(request.run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
+    # 风险8修复：索引越界守卫（异常态：run 已完成/cards 空/current 越界）
+    if not run.cards or run.current_beat_index >= len(run.cards):
+        raise HTTPException(status_code=409, detail="RUN_FINISHED")
     if run.cards[run.current_beat_index].beat_id != request.beat_id:
         raise HTTPException(status_code=409, detail="BEAT_NOT_CURRENT")
 
     # 等待当前段渲染完成（BEAT_RENDER_READY）再接受裁决。
     # 防止段还在渲染中就 pass 导致事件错乱（pass 的 BEAT_LOCKED 会被
     # 当前段的 BEAT_RENDER_READY 抢先，SSE 流提前终止）。
-    for _ in range(240):  # 最长等 120 秒（240 × 0.5s）
-        if run.current_segment_ready or run.status in ("done", "error", "post_processing"):
-            break
-        await asyncio.sleep(0.5)
-    if not run.current_segment_ready and run.status == "stepping":
-        raise HTTPException(status_code=409, detail="SEGMENT_NOT_READY")
+    # 岔路门挂起（awaiting_branch_choice）时渲染尚未开始，本次裁决正是
+    # 来解除挂起的（branch/pass/skip），跳过 ready 等待直接放行。
+    if not run.awaiting_branch_choice:
+        for _ in range(240):  # 最长等 120 秒（240 × 0.5s）
+            if run.current_segment_ready or run.status in ("done", "error", "post_processing"):
+                break
+            await asyncio.sleep(0.5)
+        if not run.current_segment_ready and run.status == "stepping":
+            raise HTTPException(status_code=409, detail="SEGMENT_NOT_READY")
 
     action_payload: Dict[str, Any] = {
         "action": request.action,
@@ -1193,7 +1217,11 @@ async def advance_beat(
                     yield build_sse_error("步进推进超时（120s 无事件）")
                     return
                 yield build_sse_event(ev_name, "", **ev_data)
-                if ev_name in ("BEAT_RENDER_READY", "COMPLETE", "BEAT_RERENDERED"):
+                # BEAT_BRANCH_CHOICE 同属终态：下一段的岔路门挂起等作者选走向，
+                # 作者提交时会新开一条 advance-beat SSE。本流须优雅结束（不报错），
+                # 否则挂起期间 120s 无事件会误报"步进推进超时"，且继续挂着会与
+                # 下一条流争抢 event_queue 消费。
+                if ev_name in ("BEAT_RENDER_READY", "COMPLETE", "BEAT_RERENDERED", "BEAT_BRANCH_CHOICE"):
                     return
         except Exception as e:
             yield build_sse_error(f"步进流异常: {e}")

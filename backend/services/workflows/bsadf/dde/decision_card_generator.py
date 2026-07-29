@@ -233,6 +233,13 @@ async def generate_chapter_decision_set(
     # 追加进 decision_set，使缺口在 DDE 层暴露为可被作者/Track A 处置的走向节点。
     if force_branch_gaps:
         for gap in force_branch_gaps:
+            # 风险6修复：尊重 MAX_DECISION_NODES 硬上限（与 LLM 路径一致）
+            if len(decision_set.decision_nodes) >= MAX_DECISION_NODES:
+                logger.warning(
+                    f"[dde] force_branch_gaps 注入达到 MAX_DECISION_NODES={MAX_DECISION_NODES}，"
+                    f"剩余 {len(force_branch_gaps) - len(decision_set.decision_nodes)} 个缺口被截断"
+                )
+                break
             # 选目标卡（用第一张卡，简单策略）
             target_beat_id = cards[0].beat_id if cards else ""
             branch = StoryBranch(

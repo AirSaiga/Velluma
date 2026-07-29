@@ -77,6 +77,8 @@ const emit = defineEmits<{
   (e: 'skip-degraded', beatId: string): void
   /** 忽略某条救援标记 */
   (e: 'dismiss-rescue', beatId: string): void
+  /** 风险5修复：步进岔路门走向选择（branch_choosing 态，单段提交） */
+  (e: 'choose-branch', beatId: string, optionId: string): void
 }>()
 
 // ============================================================
@@ -147,6 +149,10 @@ function branchNodeOf(beatId: string): StoryBranch | null {
 
 function selectBranch(beatId: string, optionId: string) {
   branchChoices.value[beatId] = optionId
+  // 风险5修复：步进岔路门态下，选走向直接提交（而非等 confirm 批量提交）
+  if (props.branchChoicePendingBeatId === beatId) {
+    emit('choose-branch', beatId, optionId)
+  }
 }
 
 /** 只读展示：取该卡实际注入的走向文本（branch_directive 真非空才显示，

@@ -242,6 +242,11 @@ function handleChooseBranch(optionId: string | null) {
   session.submitBranchChoice(optionId)
 }
 
+/** 风险5修复：StoryboardPanel radio 在步进岔路门态选走向后直接提交 */
+function handleChooseBranchRadio(beatId: string, optionId: string) {
+  session.submitBranchChoice(optionId)
+}
+
 /**
  * V5 BS-ADF：降级/救援单卡恢复。
  * - rerender：拿编辑后的整卡调 session.rerenderBeat（/rerender-beat 携带 edited_slot）。
@@ -595,6 +600,7 @@ function handleDismissInflight(idx: number) {
             @rerender="handleRerenderBeat"
             @skip-degraded="handleSkipBeat"
             @dismiss-rescue="handleDismissRescue"
+            @choose-branch="handleChooseBranchRadio"
           />
 
           <!-- NLE-ADF 步进岔路选择条：遇 DDE 岔路门，暂停等作者选走向时显示 -->
