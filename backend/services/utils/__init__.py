@@ -18,7 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from .logging import (
     ServiceLogger,
-    LOG_PREFIX_DUAL_TRACK,
     LOG_PREFIX_RAG,
     LOG_PREFIX_PROMPT_LOGGER,
     LOG_PREFIX_EMBEDDING,
@@ -58,7 +57,6 @@ from .prompt_logger import (
 __all__ = [
     # Logging
     "ServiceLogger",
-    "LOG_PREFIX_DUAL_TRACK",
     "LOG_PREFIX_RAG",
     "LOG_PREFIX_PROMPT_LOGGER",
     "LOG_PREFIX_EMBEDDING",

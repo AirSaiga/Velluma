@@ -1,0 +1,40 @@
+{
+  "_comment": "Velluma LLM / Embedding / 代理配置示例。复制为 model_config.json 并填入真实 API Key。model_config.json 已 gitignore，勿提交。schema 详见 backend/core/model_config.py。",
+  "llm": {
+    "reasoning": {
+      "provider": "deepseek",
+      "api_key": "sk-your-reasoning-api-key",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "enabled": true,
+      "effort": "max",
+      "exclude": false
+    },
+    "creative": {
+      "provider": "deepseek",
+      "api_key": "sk-your-creative-api-key",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "enabled": false,
+      "effort": "max",
+      "exclude": true
+    },
+    "wash": {
+      "provider": "deepseek",
+      "api_key": "sk-your-wash-api-key",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-v4-flash",
+      "enabled": false,
+      "effort": "max"
+    }
+  },
+  "embedding": {
+    "api_key": "sk-your-dashscope-embedding-api-key",
+    "model": "text-embedding-v2",
+    "dimensions": 1536
+  },
+  "proxy": {
+    "enabled": false,
+    "url": "http://127.0.0.1:4780"
+  }
+}

@@ -41,7 +41,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from .agentic import (
     resolve_high_level_params,
-    preview_agentic_beats,
     normalize_confirmed_beats,
 )
 from .beat_manager import (
@@ -52,7 +51,6 @@ from .tier_mapper import map_tension_to_workflow_tier
 
 __all__ = [
     "resolve_high_level_params",
-    "preview_agentic_beats",
     "normalize_confirmed_beats",
     "save_story_beats",
     "build_physical_state_lock",

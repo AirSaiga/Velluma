@@ -50,7 +50,6 @@ LLM 调用客户端 - 统一封装 OpenAI 兼容 API 调用。
 """
 
 import json
-import os
 import re
 import time
 import asyncio
@@ -83,11 +82,6 @@ logger = logging.getLogger(__name__)
 svc_logger_rag = ServiceLogger(logger, LOG_PREFIX_RAG)
 svc_logger_summary = ServiceLogger(logger, LOG_PREFIX_SUMMARY)
 
-PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:4780")
-if os.getenv("DISABLE_PROXY") == "1":
-    PROXY_URL = None
-if not PROXY_URL:
-    PROXY_URL = None
 
 # 显式关闭 thinking 的 extra_body（OpenRouter reasoning 协议）。
 # ⚠ 绝不能传空 dict 代替：call_llm_with_usage 里 `if reasoning_config:` 对 {}

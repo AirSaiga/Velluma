@@ -60,15 +60,20 @@ backend/logs/
 
 # ---- 归档与死代码 ----
 backend/_archive/
-backend/models_generation_task.py
 
 # ---- 文档(本地设计/规划文档,不入库) ----
-docs/
+# docs/ 根目录的核心设计文档已入库；仅 superpowers/ 工作产物本地保留
+docs/superpowers/
 
 # ---- 测试产物 ----
 .test-dist/
 coverage/
 test_chapter_ids.json
+.pytest_cache/
+
+# ---- 临时/一次性脚本(切勿提交) ----
+tmp_*.py
+scratch_*.py
 
 # ---- OS ----
 .DS_Store

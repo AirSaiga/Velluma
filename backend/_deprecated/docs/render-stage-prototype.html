@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Velluma 渲染阶段原型 — 正文中心工作台</title>
+<style>
+/* ===== 直接复用 Velluma 的设计 token ===== */
+:root{
+  --bg-primary:#f7f4ed; --bg-secondary:#faf8f4; --bg-tertiary:#f0ece3;
+  --bg-canvas:#fefdfb; --bg-panel:#f0ece3;
+  --text-primary:#2c2c2c; --text-secondary:#6b6560; --text-muted:#a89e90;
+  --border-color:#e0dbd3; --hover-bg:#eee9df;
+  --accent-500:#7c6aad; --accent-600:#6d5dab; --accent-100:#ede9fe; --accent-50:#f5f3ff;
+  --warn-500:#d97706; --warn-100:#fef3c7; --warn-50:#fffbeb;
+  --ok-500:#059669; --ok-100:#d1fae5;
+  --danger-500:#dc2626; --danger-100:#fee2e2;
+  --font-body:'Inter','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-heading:'Noto Serif SC','Source Han Serif SC',STSong,SimSun,serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:var(--font-body);color:var(--text-primary);
+  background:var(--bg-primary);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::selection{background:rgba(124,106,173,.25)}
+
+/* ===== 三栏布局 ===== */
+.app{display:grid;grid-template-columns:1fr 400px;height:100vh}
+.col-editor{background:var(--bg-primary);border-right:1px solid var(--border-color);
+  display:flex;flex-direction:column;overflow:hidden}
+.col-inspector{background:var(--bg-panel);display:flex;flex-direction:column;overflow:hidden}
+
+/* 顶部栏 */
+.topbar{height:44px;flex:0 0 44px;display:flex;align-items:center;gap:10px;
+  padding:0 16px;border-bottom:1px solid var(--border-color);background:var(--bg-secondary);
+  font-size:13px;color:var(--text-secondary)}
+.topbar .crumb{display:flex;align-items:center;gap:6px}
+.topbar .dot{color:var(--text-muted)}
+.topbar .tab{margin-left:auto;display:flex;gap:4px}
+.topbar .tab button{padding:5px 10px;border-radius:6px;font-size:12px;color:var(--text-secondary)}
+.topbar .tab button.active{background:var(--accent-100);color:var(--accent-600);font-weight:600}
+
+/* 编辑器区 */
+.editor{flex:1;overflow-y:auto;padding:32px 48px}
+.editor-inner{max-width:680px;margin:0 auto}
+.chapter-title{font-family:var(--font-heading);font-size:22px;font-weight:600;
+  color:var(--text-primary);margin-bottom:4px}
+.chapter-meta{font-size:12px;color:var(--text-muted);margin-bottom:28px}
+.seg{margin-bottom:30px;transition:opacity .3s}
+.seg-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;
+  color:var(--text-muted)}
+.seg-head .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;
+  border-radius:10px;font-weight:500}
+.seg-head .badge-locked{background:var(--bg-tertiary);color:var(--text-secondary)}
+.seg-head .badge-focus{background:var(--accent-100);color:var(--accent-600);font-weight:600}
+.seg-head .badge-queue{color:var(--text-muted)}
+.seg-head .badge-render{background:var(--accent-50);color:var(--accent-500)}
+.seg-head .wc{margin-left:auto}
+.seg-body{font-family:var(--font-heading);font-size:17px;line-height:2.05;color:var(--text-primary);
+  letter-spacing:.01em}
+.seg.focus .seg-body{background:var(--bg-canvas);border-radius:6px;padding:18px 22px;
+  margin-left:-22px;margin-right:-22px;box-shadow:0 0 0 1px var(--accent-100),0 8px 25px rgba(120,100,70,.06)}
+.seg-body[contenteditable="true"]{outline:none;cursor:text;border-radius:6px}
+.seg-body[contenteditable="true"]:focus{box-shadow:inset 0 0 0 2px var(--accent-300, #c4b5fd)}
+.seg.queue{opacity:.35}
+.seg .placeholder{color:var(--text-muted);font-style:italic;font-size:15px}
+.seg .typing-cursor::after{content:'▌';color:var(--accent-500);animation:blink 1s infinite;font-size:14px}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+/* 编辑器底部 overlay */
+.overlay{flex:0 0 auto;padding:10px 24px;background:var(--bg-secondary);
+  border-top:1px solid var(--border-color);display:flex;align-items:center;gap:12px;font-size:13px}
+.overlay .spin{width:14px;height:14px;border:2px solid var(--accent-100);
+  border-top-color:var(--accent-500);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.overlay .bar{flex:1;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden}
+.overlay .bar i{display:block;height:100%;background:var(--accent-500);border-radius:2px;
+  transition:width .4s ease}
+.overlay .cancel{padding:4px 10px;border-radius:6px;font-size:12px;color:var(--text-secondary);
+  border:1px solid var(--border-color)}
+.overlay .cancel:hover{background:var(--hover-bg)}
+
+/* ===== 右栏：当前任务（唯一焦点） ===== */
+.inspector-head{padding:14px 18px 10px;border-bottom:1px solid var(--border-color)}
+.inspector-head h3{font-size:12px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+.inspector-body{flex:1;overflow-y:auto}
+
+/* 焦点条卡片 */
+.task{margin:16px;padding:18px;background:var(--bg-canvas);border:1px solid var(--border-color);
+  border-radius:14px;box-shadow:0 4px 14px rgba(120,100,70,.05)}
+.task .t-icon{font-size:18px;margin-bottom:6px}
+.task .t-title{font-size:15px;font-weight:600;color:var(--text-primary);line-height:1.5;margin-bottom:14px}
+.task .t-sub{font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6}
+
+/* 三选一按钮组 */
+.tri{display:flex;flex-direction:column;gap:8px}
+.btn{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;
+  font-size:13.5px;font-weight:500;text-align:left;transition:all .15s;border:1px solid transparent}
+.btn .b-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;flex:0 0 22px}
+.btn .b-label{flex:1}
+.btn .b-hint{font-size:11px;color:var(--text-muted);font-weight:400}
+.btn-primary{background:var(--accent-500);color:#fff}
+.btn-primary:hover{background:var(--accent-600);transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(124,106,173,.25)}
+.btn-primary .b-num{background:rgba(255,255,255,.25);color:#fff}
+.btn-primary .b-hint{color:rgba(255,255,255,.7)}
+.btn-secondary{background:var(--bg-canvas);color:var(--text-primary);border-color:var(--border-color)}
+.btn-secondary:hover{background:var(--hover-bg);border-color:var(--accent-100)}
+.btn-secondary .b-num{background:var(--accent-100);color:var(--accent-600)}
+.btn-ghost{background:transparent;color:var(--text-secondary)}
+.btn-ghost:hover{background:var(--hover-bg);color:var(--text-primary)}
+.btn-ghost .b-num{background:var(--bg-tertiary);color:var(--text-secondary)}
+
+/* 回退行 */
+.back-row{display:flex;justify-content:flex-start;margin-top:14px}
+.back-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);
+  padding:5px 8px;border-radius:6px}
+.back-btn:hover:not(:disabled){color:var(--accent-600);background:var(--accent-50)}
+.back-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* 重写展开面板 */
+.rewrite{margin-top:12px;padding:14px;background:var(--bg-secondary);
+  border:1px solid var(--border-color);border-radius:10px}
+.rewrite h4{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500}
+.field input,.field textarea{width:100%;padding:8px 10px;border:1px solid var(--border-color);
+  border-radius:7px;font-family:inherit;font-size:13px;background:var(--bg-canvas);
+  color:var(--text-primary);transition:border-color .15s}
+.field input:focus,.field textarea:focus{outline:none;border-color:var(--accent-500)}
+.field textarea{resize:vertical;min-height:48px;line-height:1.6}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:var(--accent-100);
+  color:var(--accent-600);border-radius:11px;font-size:12px}
+.chip .x{cursor:pointer;opacity:.6}
+.chip .x:hover{opacity:1}
+.chip-add{font-size:12px;color:var(--accent-600);padding:3px 6px;border-radius:8px}
+.chip-add:hover{background:var(--accent-50)}
+.rewrite-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+.rewrite-actions .btn{padding:8px 14px}
+
+/* 降级提示 */
+.warn-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--warn-50);
+  border:1px solid #fde68a;border-radius:10px;font-size:12.5px;color:#92400e;margin-bottom:12px}
+.task.warn{border-color:#fde68a}
+
+/* ===== 进度看板 ===== */
+.section{border-top:1px solid var(--border-color);padding:16px 18px}
+.section h4{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.08em;margin-bottom:12px}
+.progress-list{display:flex;flex-direction:column;gap:6px}
+.prog-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:12.5px}
+.prog-item .p-icon{width:18px;text-align:center;font-size:13px}
+.prog-item.done{color:var(--text-muted)}
+.prog-item.done .p-icon{color:var(--ok-500)}
+.prog-item.focus{background:var(--accent-50);color:var(--accent-600);font-weight:600}
+.prog-item.render{color:var(--accent-500)}
+.prog-item.warn{color:var(--warn-500)}
+.prog-item .p-idx{color:var(--text-muted);font-variant-numeric:tabular-nums}
+.prog-item .p-name{flex:1}
+.prog-item .p-wc{color:var(--text-muted);font-size:11px}
+
+/* 分镜卡列表（只读浏览） */
+.cards{display:flex;flex-direction:column;gap:8px}
+.mini-card{padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-color);
+  border-radius:9px;font-size:12px}
+.mini-card.focus{border-color:var(--accent-100);background:var(--accent-50)}
+.mini-card .mc-head{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.mini-card .mc-head .mc-st{font-size:11px}
+.mini-card .mc-plot{color:var(--text-secondary);line-height:1.5;font-size:11.5px}
+
+/* 渲染前的开始渲染态 */
+.pre-render .slot-grid{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.pre-render .pslot{padding:12px;background:var(--bg-secondary);border:1px solid var(--border-color);
+  border-radius:10px;font-size:12px}
+.pre-render .pslot .ps-head{font-size:11px;color:var(--text-muted);margin-bottom:6px}
+.pre-render .pslot .ps-plot{color:var(--text-primary);font-size:12.5px;line-height:1.6;margin-bottom:6px}
+.pre-render .pslot .ps-anchors{display:flex;flex-wrap:wrap;gap:4px}
+.pre-render .pslot .a-chip{font-size:10.5px;padding:2px 6px;background:var(--bg-tertiary);
+  border-radius:8px;color:var(--text-secondary)}
+.editable-inline{background:var(--bg-canvas);padding:2px 6px;border-radius:5px;
+  border:1px dashed var(--border-color);cursor:text}
+.editable-inline:hover{border-color:var(--accent-100)}
+
+/* 完成态 */
+.done-banner{text-align:center;padding:8px 0 4px}
+.done-banner .big{font-size:28px;margin-bottom:6px}
+.done-stats{display:flex;justify-content:center;gap:20px;margin:14px 0;padding:14px;
+  background:var(--bg-secondary);border-radius:10px;font-size:12px}
+.done-stats .ds-num{font-size:20px;font-weight:700;color:var(--accent-600);
+  font-family:var(--font-heading)}
+
+/* 提示 toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--text-primary);color:var(--bg-canvas);padding:10px 18px;border-radius:10px;
+  font-size:13px;opacity:0;transition:all .3s;pointer-events:none;z-index:100;
+  box-shadow:0 8px 25px rgba(0,0,0,.15)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.hint-foot{padding:10px 18px;border-top:1px solid var(--border-color);font-size:11px;
+  color:var(--text-muted);line-height:1.6;background:var(--bg-secondary)}
+.hint-foot kbd{background:var(--bg-tertiary);border:1px solid var(--border-color);
+  border-radius:4px;padding:1px 5px;font-size:10px;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ 中栏：编辑器 ============ -->
+  <div class="col-editor">
+    <div class="topbar">
+      <span class="crumb">⚙ 钢铁与锈迹 <span class="dot">/</span> 第 14 章</span>
+      <div class="tab">
+        <button>大纲</button><button>设定</button><button class="active">节拍</button>
+      </div>
+    </div>
+    <div class="editor" id="editor">
+      <div class="editor-inner">
+        <div class="chapter-title">第十四章 · 锈蚀的契约</div>
+        <div class="chapter-meta">冲突章节 · 目标 3500 字 · 6 段</div>
+        <div id="segments"></div>
+      </div>
+    </div>
+    <div class="overlay">
+      <div class="spin"></div>
+      <span id="ovLabel">正在渲染第 1/6 段</span>
+      <div class="bar"><i id="ovBar" style="width:8%"></i></div>
+      <button class="cancel">取消</button>
+    </div>
+  </div>
+
+  <!-- ============ 右栏：检查器（节拍 Tab） ============ -->
+  <div class="col-inspector">
+    <div class="inspector-head">
+      <h3>节拍</h3>
+    </div>
+    <div class="inspector-body" id="inspector"></div>
+    <div class="hint-foot" id="hintFoot">
+      <kbd>Space</kbd>/<kbd>Enter</kbd> 接受本段　<kbd>←</kbd> 回到上一段　点击正文可直接编辑
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// 模拟数据：6 段分镜卡 + 预生成正文（演示用）
+// ============================================================
+const TOTAL = 6;
+const SEGMENTS = [
+  { idx:1, type:'建立', plot:'林晚潜入旧机甲仓库', anchors:['气动扳手','锈蚀的机甲残骸','应急灯'],
+    text:'林晚从仓库阴影里走出来，气动扳手别在腰后，还滴着冷凝水。应急灯把她的影子拉成三道，投在那些锈死的机甲残骸上，像一排站立的尸骸。她屏住呼吸，听见二层平台传来金属摩擦的声响——有人在拧动什么。' },
+  { idx:2, type:'冲突', plot:'与守卫正面对峙', anchors:['警报','气动扳手挥下','对讲机'],
+    text:'守卫转过身的瞬间，她看清了对方防弹背心上的编号。来不及犹豫，气动扳手已经抡了出去。金属撞上护具发出沉闷的钝响，守卫踉跄着撞翻了身后的工具柜，警报就在这时炸响——刺耳，急促，像一根针扎进她的太阳穴。' },
+  { idx:3, type:'冲突', plot:'守卫的身份反转', anchors:['编号','对讲机里的声音','旧伤疤'],
+    text:'对讲机里滚出一句沙哑的指令，她听清了那个声音，手指猛地僵住。守卫捂着肋骨抬起头，防弹背心被气动扳手砸出一道凹痕，露出里面一截旧伤疤——那道伤疤她认得。' },
+  { idx:4, type:'高潮', plot:'真相揭露', anchors:['档案号','退场记录','名字'],
+    text:'“你……还记得编号 07 吗。”守卫的声音很轻，却像一记重锤砸在她胸口。她后退半步，握着扳手的手开始发抖。档案号，退场记录，那个在七年前的爆炸里被宣告死亡的名字——此刻正坐在她面前的工具柜上，喘着粗气看着她。' },
+  { idx:5, type:'收束', plot:'抉择时刻', anchors:['扳手垂下','警报远去','呼吸'],
+    text:'警报还在响，但似乎远了。她慢慢垂下扳手，金属碰到裤缝，发出一声轻响。她不知道该说什么，或者说，她不知道该用七年前的名字，还是眼前的编号来称呼面前这个人。只有两个人的呼吸，在空荡的仓库里此起彼伏。' },
+  { idx:6, type:'收束', plot:'离开与伏笔', anchors:['出口的光','对讲机','未发出的信号'],
+    text:'最终她什么都没说，转身走向出口。应急灯在身后一盏盏熄灭，像有人在替她关上过去的门。对讲机还亮着，那条没有发出的信号停在屏幕上，等着一个她暂时还给不出的回答。她跨出门槛，晨光刺眼。' },
+];
+
+// ============================================================
+// 状态机
+// ============================================================
+let state = {
+  phase: 'preRender',   // preRender | rendering | ready | done
+  curIdx: 0,            // 当前渲染/裁决的段（0-based）
+  // 每段状态：queue | rendering | ready | locked | downgraded
+  segStatus: SEGMENTS.map((s,i)=> i===0 ? 'rendering' : 'queue'),
+  segText: SEGMENTS.map(s=>s.text),   // 可被作者编辑/重写覆盖
+  segEdited: SEGMENTS.map(()=>false), // 是否被作者编辑过
+  showRewrite: false,
+  edited: false,        // 当前段是否被改正文过（影响"接受"按钮文案）
+};
+
+// ============================================================
+// 渲染：中栏段落
+// ============================================================
+function renderEditor(){
+  const box = document.getElementById('segments');
+  box.innerHTML = state.segStatus.map((st,i)=>{
+    const s = SEGMENTS[i];
+    let cls='seg', badge='', body='';
+    if(st==='locked'){
+      cls+=' locked'; badge=`<span class="badge badge-locked">✓ 已锁定</span>`;
+      body=`<div class="seg-body">${esc(state.segText[i])}</div>`;
+    } else if(st==='ready' && i===state.curIdx){
+      cls+=' focus'; badge=`<span class="badge badge-focus">● 当前 · 可编辑</span>`;
+      body=`<div class="seg-body" contenteditable="true" data-idx="${i}" id="editBody">${esc(state.segText[i])}</div>`;
+    } else if(st==='rendering' && i===state.curIdx){
+      cls+=' focus'; badge=`<span class="badge badge-render">⟳ 渲染中</span>`;
+      body=`<div class="seg-body typing-cursor">${esc(state.segText[i].slice(0,Math.floor(state.segText[i].length*0.4)))}</div>`;
+    } else if(st==='downgraded'){
+      cls+=' downgraded'; badge=`<span class="badge" style="background:var(--warn-50);color:var(--warn-500)">⚠ 渲染降级</span>`;
+      body=`<div class="seg-body placeholder">（本段渲染失败，可在右栏「重写本段」让它重新生成）</div>`;
+    } else {
+      cls+=' queue'; badge=`<span class="badge badge-queue">· 待渲染</span>`;
+      body=`<div class="seg-body placeholder">第 ${i+1} 段 · ${s.type} · ${s.plot}</div>`;
+    }
+    const wc = (st==='locked'||st==='ready') ? `<span class="wc">${state.segText[i].length} 字</span>` : '';
+    return `<div class="${cls}"><div class="seg-head">${badge}<span>${s.type}</span>${wc}</div>${body}</div>`;
+  }).join('');
+  // 正文编辑监听
+  const eb=document.getElementById('editBody');
+  if(eb){ eb.addEventListener('input',()=>{ state.segText[state.curIdx]=eb.innerText; state.segEdited[state.curIdx]=true; renderInspector(); }); }
+}
+
+// ============================================================
+// 渲染：右栏检查器（当前任务 = 唯一焦点）
+// ============================================================
+function renderInspector(){
+  const ins=document.getElementById('inspector');
+  if(state.phase==='preRender'){ ins.innerHTML=renderPreRender(); bindPreRender(); return; }
+  if(state.phase==='done'){ ins.innerHTML=renderDone(); return; }
+
+  const i=state.curIdx, s=SEGMENTS[i], st=state.segStatus[i];
+  // 渲染中态
+  if(st==='rendering'){
+    ins.innerHTML = `
+      <div class="task">
+        <div class="t-icon">⟳</div>
+        <div class="t-title">正在渲染第 ${i+1}/${TOTAL} 段</div>
+        <div class="t-sub">${s.type} · ${s.plot}。AI 正在写这段，完成后会自动停下等你。</div>
+      </div>${renderProgress()}${renderCards()}`;
+    return;
+  }
+  // 裁决态（ready）
+  const edited = state.segEdited[i];
+  const downgrade = st==='downgraded';
+  ins.innerHTML = `
+    <div class="task ${downgrade?'warn':''}">
+      ${downgrade
+        ? `<div class="warn-bar">⚠ 这段渲染失败了（模型调用错误）。你可以重写，或直接自己写。</div>
+           <div class="t-title">第 ${i+1}/${TOTAL} 段需要你处理</div>`
+        : `<div class="t-icon">✓</div>
+           <div class="t-title">第 ${i+1} 段已生成 · ${state.segText[i].length} 字</div>
+           <div class="t-sub">${edited?'你已经改过了。':'你可以直接在左边正文里点一下改字，或选下面任一种方式。'}</div>`}
+      <div class="tri">
+        <button class="btn btn-primary" id="bAccept">
+          <span class="b-num">1</span><span class="b-label">${downgrade?'跳过这段':edited?'采纳我的修改，进入下一段':'接受，进入下一段'}</span>
+          <span class="b-hint">Space</span>
+        </button>
+        ${!downgraded_only(i)}
+        <button class="btn btn-secondary" id="bEdit" ${edited||downgrade?'style="opacity:.5"':''}>
+          <span class="b-num">2</span><span class="b-label">${edited?'已在编辑中':'直接在正文上改'}</span>
+          <span class="b-hint">点击左边文字</span>
+        </button>
+        <button class="btn btn-ghost" id="bRewrite">
+          <span class="b-num">3</span><span class="b-label">重写本段</span>
+          <span class="b-hint">改分镜卡/走向，AI 重生成</span>
+        </button>
+      </div>
+      <div class="back-row">
+        <button class="back-btn" id="bBack" ${i===0?'disabled':''}>← 回到上一段</button>
+      </div>
+      <div id="rewritePanel"></div>
+    </div>${renderProgress()}${renderCards()}`;
+  bindActions();
+}
+
+function downgraded_only(i){ return state.segStatus[i]==='downgraded'; }
+
+function renderRewritePanel(){
+  if(!state.showRewrite) return '';
+  const s=SEGMENTS[state.curIdx];
+  return `
+  <div class="rewrite" id="rwPanel">
+    <h4>重写第 ${state.curIdx+1} 段（可选改哪些）</h4>
+    <div class="field">
+      <label>核心转折</label>
+      <textarea id="rwPlot">${s.plot}</textarea>
+    </div>
+    <div class="field">
+      <label>必现画面</label>
+      <div class="chips" id="rwChips">
+        ${s.anchors.map((a,idx)=>`<span class="chip">${a}<span class="x" data-del="${idx}">×</span></span>`).join('')}
+        <span class="chip-add" id="rwAdd">+ 添加</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>走向指示（可选，告诉 AI 换个方向）</label>
+      <textarea id="rwBranch" placeholder="例如：更克制、暗流涌动；或：把冲突升级"></textarea>
+    </div>
+    <div class="rewrite-actions">
+      <button class="btn btn-ghost" id="rwCancel" style="padding:8px 14px">取消</button>
+      <button class="btn btn-primary" id="rwGo" style="padding:8px 16px">重写本段</button>
+    </div>
+  </div>`;
+}
+
+function renderProgress(){
+  const items = state.segStatus.map((st,i)=>{
+    let cls='prog-item', icon='·', name=SEGMENTS[i].type+' · '+SEGMENTS[i].plot;
+    if(st==='locked'){cls+=' done';icon='✓';}
+    else if(i===state.curIdx && st==='ready'){cls+=' focus';icon='●';}
+    else if(i===state.curIdx && st==='rendering'){cls+=' render';icon='⟳';}
+    else if(st==='downgraded'){cls+=' warn';icon='⚠';}
+    const wc=(st==='locked'||st==='ready')?`<span class="p-wc">${state.segText[i].length}字</span>`:'';
+    return `<div class="${cls}"><span class="p-icon">${icon}</span><span class="p-idx">${i+1}</span><span class="p-name">${name}</span>${wc}</div>`;
+  }).join('');
+  return `<div class="section"><h4>进度</h4><div class="progress-list">${items}</div></div>`;
+}
+
+function renderCards(){
+  const cards = SEGMENTS.map((s,i)=>{
+    let cls='mini-card', stIcon='·';
+    if(state.segStatus[i]==='locked'){stIcon='✓ 已锁定';}
+    else if(i===state.curIdx && state.segStatus[i]==='ready'){cls+=' focus';stIcon='● 当前';}
+    else if(i===state.curIdx && state.segStatus[i]==='rendering'){stIcon='⟳ 渲染中';}
+    else if(state.segStatus[i]==='downgraded'){stIcon='⚠ 降级';}
+    else stIcon='待渲染';
+    return `<div class="${cls}"><div class="mc-head"><span class="mc-st">${stIcon}</span></div><div class="mc-plot">${s.plot} · ${s.anchors.join('、')}</div></div>`;
+  }).join('');
+  return `<div class="section"><h4>分镜卡（只读）</h4><div class="cards">${cards}</div></div>`;
+}
+
+function renderPreRender(){
+  const cards = SEGMENTS.map((s,i)=>`
+    <div class="pslot">
+      <div class="ps-head">段 ${i+1} · ${s.type}</div>
+      <div class="ps-plot">${s.plot}</div>
+      <div class="ps-anchors">${s.anchors.map(a=>`<span class="a-chip">${a}</span>`).join('')}</div>
+    </div>`).join('');
+  return `
+    <div class="task">
+      <div class="t-icon">✎</div>
+      <div class="t-title">分镜卡已就绪，请检查后开始渲染</div>
+      <div class="t-sub">这是渲染前唯一的检查点。下面 6 张卡决定了每段写什么。结构（段数、段序）一旦开始渲染即锁定——渲染中你只能改每段的<strong>内容</strong>，不能改结构。</div>
+      <div class="pre-render"><div class="slot-grid">${cards}</div></div>
+      <div style="margin-top:14px">
+        <button class="btn btn-primary" id="bStart" style="width:100%;justify-content:center">
+          <span class="b-label">开始渲染</span>
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderDone(){
+  const total = state.segText.reduce((a,t)=>a+t.length,0);
+  return `
+    <div class="task">
+      <div class="done-banner">
+        <div class="big">✓</div>
+        <div class="t-title">全章渲染完成</div>
+        <div class="done-stats">
+          <div><div class="ds-num">${TOTAL}/${TOTAL}</div>段</div>
+          <div><div class="ds-num">${total}</div>字</div>
+          <div><div class="ds-num">${state.segEdited.filter(Boolean).length}</div>段你改过</div>
+        </div>
+        <div class="t-sub" style="text-align:center">你随时可以对任意一段「重写本段」。结构已锁定。</div>
+      </div>
+    </div>${renderProgress()}${renderCards()}`;
+}
+
+// ============================================================
+// 交互绑定
+// ============================================================
+function bindPreRender(){
+  document.getElementById('bStart').onclick=()=>{
+    state.phase='rendering';
+    state.segStatus[0]='rendering';
+    updateOverlay();
+    renderAll();
+    // 模拟渲染完成
+    setTimeout(()=>{ state.segStatus[0]='ready'; renderAll(); }, 1800);
+  };
+}
+
+function bindActions(){
+  const i=state.curIdx;
+  const ba=document.getElementById('bAccept'); if(ba) ba.onclick=accept;
+  const be=document.getElementById('bEdit'); if(be) be.onclick=()=>{
+    const eb=document.getElementById('editBody'); if(eb){eb.focus(); toast('直接在左边正文里改字即可，改完点「接受」');}
+  };
+  const br=document.getElementById('bRewrite'); if(br) br.onclick=()=>{
+    state.showRewrite=!state.showRewrite;
+    document.getElementById('rewritePanel').innerHTML=renderRewritePanel();
+    bindRewrite();
+  };
+  const bb=document.getElementById('bBack'); if(bb) bb.onclick=back;
+  if(state.showRewrite) bindRewrite();
+}
+
+function bindRewrite(){
+  const c=document.getElementById('rwCancel'); if(c) c.onclick=()=>{state.showRewrite=false;document.getElementById('rewritePanel').innerHTML='';};
+  const g=document.getElementById('rwGo'); if(g) g.onclick=()=>{
+    // 模拟重写：换一段不同的文本
+    state.showRewrite=false;
+    state.segStatus[state.curIdx]='rendering';
+    renderAll();
+    setTimeout(()=>{
+      const alt=[
+        '她没有立刻动手。应急灯的频闪里，守卫的轮廓忽明忽暗，像一张没对准焦的照片。她把气动扳手攥得更紧，指节发白——这是她唯一能控制的事。',
+        '仓库里的空气是凝固的。她能听见自己的心跳，也能听见二层平台上那个人的呼吸。气动扳手的重量坠在腰间，提醒她：接下来的一步，没有回头路。',
+      ];
+      state.segText[state.curIdx]=alt[Math.floor(Math.random()*alt.length)];
+      state.segEdited[state.curIdx]=false;
+      state.segStatus[state.curIdx]='ready';
+      renderAll();
+      toast('已重写，看看这版怎么样');
+    },1500);
+  };
+  // chip 删除
+  document.querySelectorAll('#rwChips .x').forEach(x=>x.onclick=()=>toast('（原型演示）分镜卡画面词可增删'));
+  const a=document.getElementById('rwAdd'); if(a) a.onclick=()=>toast('（原型演示）可添加画面词');
+}
+
+function accept(){
+  state.segStatus[state.curIdx]='locked';
+  if(state.curIdx < TOTAL-1){
+    state.curIdx++;
+    state.segStatus[state.curIdx]='rendering';
+    state.showRewrite=false;
+    updateOverlay();
+    renderAll();
+    const idx=state.curIdx;
+    setTimeout(()=>{ state.segStatus[idx]='ready'; renderAll(); }, 1800);
+  } else {
+    state.phase='done';
+    document.getElementById('ovLabel').textContent='已完成';
+    document.getElementById('ovBar').style.width='100%';
+    renderAll();
+  }
+}
+
+function back(){
+  if(state.curIdx===0) return;
+  state.segStatus[state.curIdx]='queue';
+  state.curIdx--;
+  state.segStatus[state.curIdx]='ready';
+  state.showRewrite=false;
+  renderAll();
+  toast('已回到第 '+(state.curIdx+1)+' 段，可重新编辑或重写');
+}
+
+// ============================================================
+// 辅助
+// ============================================================
+function renderAll(){ renderEditor(); renderInspector(); }
+function updateOverlay(){
+  if(state.phase==='done') return;
+  const pct=Math.round((state.curIdx)/TOTAL*100+ (state.segStatus[state.curIdx]==='ready'?100/TOTAL/2:0));
+  document.getElementById('ovLabel').textContent = state.segStatus[state.curIdx]==='rendering'
+    ? `正在渲染第 ${state.curIdx+1}/${TOTAL} 段` : `第 ${state.curIdx+1}/${TOTAL} 段 · 等你裁决`;
+  document.getElementById('ovBar').style.width=Math.max(8,pct)+'%';
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200);
+}
+// 全局键盘
+document.addEventListener('keydown',(e)=>{
+  if(state.phase!=='rendering' && state.phase!=='ready') return;
+  if(e.target.isContentEditable || ['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+  if(state.segStatus[state.curIdx]!=='ready') return;
+  if(e.key===' '||e.key==='Enter'){ e.preventDefault(); accept(); }
+  if(e.key==='ArrowLeft' && state.curIdx>0){ back(); }
+});
+
+// 初始
+renderAll();
+updateOverlay();
+</script>
+</body>
+</html>

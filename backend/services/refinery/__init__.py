@@ -15,8 +15,7 @@ Copyright (C) 2026 Velluma Project Contributors (AGPL-3.0)
 - refinery.py:       主类 Refinery（编排四工序）
 
 业务场景：
-- routes/chapter_generation/refinery.py 调用
-- ADF 生成完成后触发（Phase 4.5）
+- routes/chapter_generation/refinery.py 调用（/refinery/diagnose + /refinery/confirm）
 
 使用示例：
     from backend.services.refinery import Refinery

@@ -48,7 +48,6 @@ from backend.services.utils.timeout import (
 LogValue = Union[str, int, float, bool, None]
 
 
-LOG_PREFIX_DUAL_TRACK = "[DualTrack]"
 LOG_PREFIX_RAG = "[RAG]"
 LOG_PREFIX_PROMPT_LOGGER = "[PromptLogger]"
 LOG_PREFIX_EMBEDDING = "[Embedding]"
@@ -105,9 +104,9 @@ class ServiceLogger:
     服务日志助手 - 为特定服务提供预配置前缀的日志方法
 
     用法：
-        logger = ServiceLogger(logging.getLogger(__name__), "[DualTrack]")
+        logger = ServiceLogger(logging.getLogger(__name__), "[Workflow]")
         logger.info("Starting workflow")
-        # 输出: [DualTrack] Starting workflow
+        # 输出: [Workflow] Starting workflow
     """
 
     def __init__(self, logger: logging.Logger, prefix: str):

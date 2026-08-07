@@ -11,8 +11,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 ## 技术栈
 
-**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· PostgreSQL 14+pgvector · asyncpg 0.29 · OpenAI SDK 1.10 / DashScope 1.14（Embedding 仅 DashScope）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。
-> ⚠ 根目录 `requirements.txt` 为准（残留 `pywebview==4.4.1`，桌面入口已删）；`backend/requirements.txt` 是第二份不一致的清单。
+**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· PostgreSQL 14+pgvector · asyncpg 0.29 · OpenAI SDK 1.10 / DashScope 1.14（Embedding 仅 DashScope）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。根目录 `requirements.txt` 与 `backend/requirements.txt` 内容一致（两份均可，均含 `jieba`/`python-multipart`；旧版根目录清单曾误列 `pywebview==4.4.1`，已随 pywebview 桌面入口删除）。
 
 **前端** (`frontend/`)：Vue 3 ^3.4.15（Composition API）· TypeScript ^5.9.3 · Vite ^5.0.12 · Tailwind ^3.4.1 · TipTap ^2.24 · Electron ^28.3.3。
 
@@ -38,7 +37,6 @@ npm run dev          # 固定 5175（vite.config.js strictPort: true）
 npm run typecheck    # 类型检查
 npm run build        # 生产构建
 ```
-⚠ `npm run test:agentic-config` 已失效（源码删除，命令必败，勿用）。
 
 ### 桌面应用（推荐开发方式）
 ```powershell
@@ -50,8 +48,6 @@ npm run build        # 生产构建
 ```
 `start.ps1` 为 Electron 设 `VELLUMA_BACKEND_PORT`/`VELLUMA_FRONTEND_PORT`/`VELLUMA_SERVICES_READY`（prod 另设 `NODE_ENV=production`）。Electron 独立命令（`frontend/` 下）：`npm run electron:dev`/`electron:preview`（均 `npm run build && electron .`，不启 Vite，需 5175 已有服务）/`electron:build`（打包）。
 
-> `app.py`（pywebview）代码库已不存在，README 相关描述过时；`AGENTIC_*` 环境变量不存在。
-
 ---
 
 ## 目录结构（仅关键标注）
@@ -61,9 +57,8 @@ backend/
 ├── main.py                 # 入口、路由注册、静态服务、CORS、asyncio 静默处理器
 ├── models.py               # ★ 22 个 ORM 模型（GenerationTask:740 / GenerationRun:829 均生效）
 ├── database.py             # 异步引擎 + 启动时自动迁移（MIGRATIONS 列表）+ 向量维度迁移
-├── models_generation_task.py  # ⚠ 死文件：重复定义 GenerationTask，全库零引用（生效定义在 models.py:740）
 ├── core/  (config 端口扫描 / model_config 读 model_config.json / dependencies / exceptions)
-├── config/ (V4.0 配置推导层；PARAMETER_MAPPING.md 中 AGENTIC_* 描述过时)
+├── config/ (V4.0 配置推导层；PARAMETER_MAPPING.md 的 WorkflowPolicy 段含已废弃双轨参数，仅供历史参考)
 ├── routes/                 # API 路由（均在 main.py 注册）
 │   └── chapter_generation/ # 包结构：__init__ 合并 adf/bsadf/refinery/adaptive router + extra_router
 │       ├── adf.py          #   /generate-adf（前端已无 UI 入口）
@@ -77,8 +72,8 @@ backend/
     ├── nlg/ (去 AI 味洗涤 de_ai_washer.py)
     ├── prompts/            # Prompt 模板（改后即时生效，无需重建）。含 bsadf/adf/dde/nle/adaptive_prompts 等 + 测试
     ├── context/            # ★ settings_bundle.py（NLE-ADF 3.0 设定数据共享加载器：章级绑定+Canon+世界观）+ loader.py
-    ├── rag/  (17+ 模块；scoring.py alpha/beta/gamma/lambda_decay 权重；tests/ 仅剩 __pycache__)
-    ├── state_machine/  validation/ (无路由调用方，疑似遗留)
+    ├── rag/  (17+ 模块；scoring.py alpha/beta/gamma/lambda_decay 权重；enhanced/ 子包为评分增强层，在用)
+    ├── validation/  (代码级 + LLM 级审计，服务 /chapters/{id}/quality-report 路由)
     ├── workflows/
     │   ├── adf/            # V3.2 ADF 引擎（自包含，前端无入口）：adf_workflow 主类 + 各 phase 模块 + 3 单测
     │   ├── bsadf/          # ★ 当前生成引擎（自包含）
@@ -102,10 +97,9 @@ frontend/
     ├── features/           # 分层架构：*/containers + */presentation
     │   ├── generation/     # useGenerationSession 步进会话 + Stepper/BeatSlotCardView/StoryboardPanel/BranchDecisionPanel + Refinery UI
     │   ├── workspace/ chapter-editor/ canon/ bible/ outline/ library/ insights/ novel-wizard/ app/ asset-panel/
-    └── services/api/  domain/（业务 API，index.ts 聚合）/ stream/（SSE）/ transport/（HTTP）
-       └── ⚠ services/ 顶层残留 domain/ stream/ transport/ 三个空壳目录（export {}，重构遗留）
+    └── services/api/  domain/（业务 API，index.ts 聚合，含 bookApi/chapterApi/bsadfApi/refineryApi 等）/ stream/（SSE）/ transport/（HTTP）
 
-_deprecated/  # 废弃引擎归档（不参与 import 链，详见该目录 README）
+backend/_deprecated/  # 废弃引擎归档（不参与 import 链，详见该目录 README）
 data/ logs/ .venv/
 ```
 
@@ -200,9 +194,8 @@ LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.p
 | `DATABASE_URL` | PG 连接串 | `postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver` |
 | `DB_POOL_PRE_PING` | 连接池预检 | Win=false / 其他=true |
 | `VELLUMA_PORT` | 固定后端端口 | 无（默认 8002 起扫描） |
-| `PROXY_URL`/`DISABLE_PROXY` | ⚠ 半死代码（模块级常量定义后未用），实际代理由 `model_config.json` 的 `proxy` 节决定 | `http://127.0.0.1:4780` |
 
-⚠ 代码中**不存在**：`AGENTIC_*` / `DASHSCOPE_API_KEY` / `OPENAI_API_KEY`（Key 全来自 model_config.json）。README/`PARAMETER_MAPPING.md` 相关描述过时。
+⚠ 实际代理配置由 `model_config.json` 的 `proxy` 节决定（`get_active_proxy()`），不读环境变量。代码中**不存在**以下环境变量：`PROXY_URL`/`DISABLE_PROXY`（已删除的死变量）、`AGENTIC_BEAT_CONCURRENCY`/`AGENTIC_FORCE_FAST_MODE`（历史误标，从未存在）、`DASHSCOPE_API_KEY`/`OPENAI_API_KEY`（Key 全来自 model_config.json）。注意区分：`AGENTIC_DEFAULT_*`（如 `AGENTIC_DEFAULT_WORD_COUNT`）是 `schemas/generation.py` 内**实际存在**的 Python 常量（非环境变量），供已废弃的 `orchestration/agentic.py` 引用。
 
 ---
 
@@ -238,7 +231,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 部署
 
-`electron-builder` 配置在 `frontend/package.json`（appId `com.velluma.app`，win=nsis/mac=dmg/linux=AppImage，`extraResources` 打包 `../backend`）。`cd frontend && npm run build && npm run electron:build`。FastAPI 已配 SPA fallback（`/`→`dist/index.html`，`/api/*`→404，其他→静态文件或 fallback）。**无 Docker、无 CI/CD**；端口协商（`data/port.txt`）仅本地开发用，生产用 `VELLUMA_PORT` 固定。
+`electron-builder` 配置在 `frontend/package.json`（appId `com.velluma.app`，win=nsis/mac=dmg/linux=AppImage，`extraResources` 打包 `../backend`）。`cd frontend && npm run build && npm run electron:build`。FastAPI 已配 SPA fallback（`/`→`dist/index.html`，`/api/*`→404，其他→静态文件或 fallback）。**无 Docker**；CI 为 GitHub Actions（`.github/workflows/ci.yml`：后端 `py_compile` 全量编译检查 + 前端 `vue-tsc` 类型检查非阻断）。端口协商（`data/port.txt`）仅本地开发用，生产用 `VELLUMA_PORT` 固定。
 
 ---
 
@@ -256,4 +249,4 @@ services/api/transport  ← 底层 HTTP
 - **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建），建议查 `logs/prompt_log_*.json` 验证。
 - **前端加 Feature**：`features/` 建目录，按 `containers/`+`presentation/` 分层，经 `services/api/domain` 通信。
 
-> 死代码/过时清单：`models_generation_task.py`（死文件）；`services/` 顶层空壳 `domain/stream/transport/`；`rag/tests/`（仅 __pycache__）；`_deprecated/`（整引擎）；README/pywebview/`AGENTIC_*` 描述。
+> 废弃/归档清单：`backend/_deprecated/`（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 整引擎归档，不参与 import 链，详见该目录 README）；`backend/_deprecated/docs/`（对应废弃引擎的设计文档归档）。其余历史误标（`models_generation_task.py`、`services/` 空壳目录、`rag/tests/`、`state_machine/`、`PROXY_URL`/`DISABLE_PROXY`、pywebview/`app.py` 等）均已随代码清理删除，不再存在。

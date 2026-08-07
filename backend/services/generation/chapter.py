@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - llm/: LLM 调用封装
 - prompts/: 提示词构建（按Agent类型拆分）
 - orchestration/: 代理工作流
-- state_machine/: 角色状态管理
 
 设计模式：Facade Pattern，隐藏底层复杂度，提供统一入口。
 """
@@ -35,7 +34,6 @@ from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
 from backend.models import Character, Chapter
-from backend.services.orchestration import preview_agentic_beats
 from backend.services.workflows.refining import refine_draft
 from backend.services.llm import call_llm, generate_stream_response
 
@@ -152,7 +150,6 @@ __all__ = [
     "build_refine_agent_prompt",
     "parse_review_result",
     "call_llm",
-    "preview_agentic_beats",
     "update_character_dynamic_state",
     "refine_draft",
 ]

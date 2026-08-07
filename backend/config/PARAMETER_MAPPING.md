@@ -107,6 +107,8 @@
 
 ### 2.5 WorkflowPolicy - 工作流策略层
 
+> ⚠ 本节源自 V4.0 DualTrack 时代，`forceParallelProse` / `semiParallelProse` / `beatConcurrency` 等「并行散文」策略依赖的双轨引擎已整体归档至 `backend/_deprecated/`，不再参与运行。现役 BS-ADF / ADF / Refinery 引擎不使用这些并行参数；表列保留仅作历史参考。
+
 | 前端参数名 | 后端字段名 | 来源 | 自动推导 | 默认值 | 校验 |
 |------------|------------|------|----------|--------|------|
 | `creativityLevel` | `creativity_level` | 请求传入 | ❌ | "balanced_creation" | 枚举 |
@@ -116,7 +118,7 @@
 | `skipMinorRefine` | `skip_minor_refine` | 请求/层级推导 | 可覆盖 | True | - |
 | `forceParallelProse` | `force_parallel_prose` | 请求/自由度推导 | 可覆盖 | False | - |
 | `semiParallelProse` | `semi_parallel_prose` | 请求/自由度推导 | 可覆盖 | True | - |
-| `beatConcurrency` | `beat_concurrency` | 环境变量 | ❌ | 6 | 1-12 |
+| `beatConcurrency` | `beat_concurrency` | 请求/层级推导 | 可覆盖 | 6 | 1-12 |
 
 **创作自由度 → 并行策略映射：**
 
@@ -260,8 +262,9 @@ legacy_dict = config.to_legacy_format()
 | 前端直接传入 | ~25 | 用户在表单中设置的参数 |
 | 数据库加载 | ~10 | 从 Book/Chapter 实体加载 |
 | 自动推导 | ~15 | 根据推导规则自动计算 |
-| 环境变量 | 2 | AGENTIC_BEAT_CONCURRENCY, AGENTIC_FORCE_FAST_MODE |
+
+> ⚠ 历史上本节曾列出「环境变量 `AGENTIC_BEAT_CONCURRENCY` / `AGENTIC_FORCE_FAST_MODE`」，二者在代码中均不存在，相关描述已废弃。
 
 ---
 
-*最后更新: 2026-03-28*
+*最后更新: 2026-08-08*

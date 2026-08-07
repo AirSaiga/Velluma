@@ -41,8 +41,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - backend.services.llm: LLM 调用接口
 - backend.services.prompts: 提示词模板
 - backend.models: 数据模型
-
-注意：双轨生成相关功能已迁移到 services/workflows/dual_track.py
 """
 
 from .chapter import (
@@ -53,7 +51,6 @@ from .chapter import (
     build_refine_agent_prompt,
     parse_review_result,
     call_llm,
-    preview_agentic_beats,
     update_character_dynamic_state,
     refine_draft,
 )
@@ -81,7 +78,6 @@ __all__ = [
     "build_refine_agent_prompt",
     "parse_review_result",
     "call_llm",
-    "preview_agentic_beats",
     "update_character_dynamic_state",
     "refine_draft",
     # Publish

@@ -5,8 +5,9 @@
  * 外加 V4.1 Refinery 精修（/refinery/diagnose + /refinery/confirm）的两阶段 SSE，
  * 把原始事件流解析为会话状态机供 UI 订阅。
  *
- * 引擎：固定 V3.2 ADF（adfApi.streamGenerate，消费 ADF_STAGE/ADF_ANCHOR_DESIGNED/... 事件）。
+ * 引擎：BS-ADF 步进模式（bsadfApi.start，消费 BSADF_STAGE/ADF_ANCHOR_DESIGNED/... 事件）。
  * V3.1 Unified 引擎后端已剥离（/generate 端点不存在），相关死代码（startUnified 等）已删除。
+ * V3.2 ADF 整章生成入口（start/startAdf/adfApi.streamGenerate）已移除，前端不再有 ADF UI 入口。
  *
  * BS-ADF 引擎（/generate-bsadf）当前只以「步进模式」运行：
  * startBeat(enable_stepping=true) → 槽位卡就绪 → 逐段渲染/裁决 → COMPLETE。
@@ -28,7 +29,7 @@
  * - degraded：降级事件
  */
 import { ref, computed, watch, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import { adfApi, refineryApi, bsadfApi, chapterApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
+import { refineryApi, bsadfApi, chapterApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
 import { formatDegradedReason } from '../../../shared/constants/degradation'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import {
@@ -354,10 +355,9 @@ export interface GenerationSession {
   /** 渲染阶段「当前任务」焦点（驱动右栏焦点条；纯派生，不持久化） */
   currentTask: ComputedRef<CurrentTask>
   // 控制
-  start: (chapterId: string, tier: string, opts?: { targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> }) => void
   cancel: () => void
   reset: () => void
-  /** 失败重试：再次触发最近一次入口（生成 start / 精修诊断 startRefinery / BS-ADF startBeat） */
+  /** 失败重试：再次触发最近一次入口（精修诊断 startRefinery / BS-ADF startBeat） */
   retry: () => void
   // V4.1 Refinery 控制
   startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
@@ -1555,158 +1555,6 @@ export function useGenerationSession(): GenerationSession {
     // UNIFIED_METRIC / GENERATION_RUN：audit 已通过 ADF_AUDIT 处理（同 ADF onMetric 语义）
   }
 
-  function start(
-    chapterId: string,
-    tier: string,
-    opts: { targetWordCount?: number | null; maxSegments?: number; authorIntent?: string; expectationActions?: Record<string, string> } = {},
-  ) {
-    if (generating.value) return
-    // 记录入口供失败后 retry（重试即再次触发同入口）
-    lastAction = () => start(chapterId, tier, opts)
-    // 绑定章节 + 清旧快照（这是全新生成，旧产物作废）
-    currentChapterId = chapterId
-    _clearSnapshot(chapterId)
-    _resetInternal()
-    generating.value = true
-    stage.value = 'tier_classifying'
-    abortController = new AbortController()
-    startedAt = Date.now()  // 记录开始时间供 onDone 计算耗时
-
-    // 固定使用 V3.2 ADF 引擎（锚点驱动流）
-    engine.value = 'v3.2'
-    startAdf(
-      chapterId, tier,
-      opts.targetWordCount ?? null, opts.maxSegments ?? 6,
-      opts.authorIntent, opts.expectationActions,
-    )
-  }
-
-  /** V3.2 ADF 引擎：调 adfApi.streamGenerate */
-  function startAdf(
-    chapterId: string,
-    tier: string,
-    targetWordCount: number | null,
-    maxSegments: number,
-    authorIntent?: string,
-    expectationActions?: Record<string, string>,
-  ) {
-    adfApi.streamGenerate(
-      chapterId,
-      {
-        tier: tier as any,
-        target_word_count: targetWordCount,
-        max_segments: maxSegments,
-        author_intent: authorIntent || null,
-        expectation_actions: expectationActions || null,
-      },
-      {
-        onStage: (adfStage) => {
-          const { label, sessionStage } = mapAdfStageToLabel(adfStage)
-          stage.value = sessionStage
-          stepProgress.value = { label }
-        },
-        onSpineBuilt: (data) => {
-          stepProgress.value = { label: '前文脉络已梳理' }
-        },
-        onAnchorDesigned: (anchor) => {
-          adfAnchor.value = anchor
-          adfEmotionCurve.value = anchor.emotion_flow_samples || []
-          stepProgress.value = {
-            label: `高潮设计完成（强度 ${anchor.climax_intensity}/10）`,
-          }
-        },
-        onTierDecided: (decision) => {
-          applyTierDecision(decision)
-        },
-        onProgress: (index, total, data) => {
-          stage.value = 'zone_writing'
-          const register = data.register ? `（${data.register}）` : ''
-          stepProgress.value = {
-            label: `写正文${register}`,
-            index,
-            total,
-            zone: 'forward_flow',
-          }
-        },
-        // ADF_PRECONDITION_LANDED 事件不再推入 inflightEvents（用户不需要该提示卡片）
-        onAudit: (audit) => {
-          applyAdfAudit(audit)
-        },
-        onMetric: (metrics) => {
-          // UNIFIED_METRIC 在 ADF 中复用，metrics.audit 已通过 onAudit 处理
-        },
-        onEvent: (event, data) => {
-          if (event === 'ADF_METADATA' && data.climax_design) {
-            // 完整元数据：填充 ADF 专用字段
-            if (Array.isArray(data.climax_design.setup_points)) {
-              adfPreconditions.value = data.climax_design.setup_points
-            }
-          } else if (event === 'DEGRADED') {
-            degraded.value.push({
-              reason: data.reason,
-              phase: data.phase,
-              detail: data.detail,
-            })
-          } else if (event === 'FINAL_TEXT_STREAM') {
-            stepProgress.value = { label: '输出正文' }
-          }
-        },
-        onChunk: (chunk) => {
-          streamText.value += chunk
-        },
-        onDone: (result) => {
-          generating.value = false
-          stage.value = 'done'
-          finalStats.value = result.stats || null
-          if (startedAt != null) {
-            // 把耗时塞进 stats 供弹窗读取（后端 stats 无此字段，纯前端计时）
-            finalStats.value = { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
-          }
-          if (result.climax_score != null) climaxScore.value = result.climax_score
-          lastDoneMode.value = 'adf'
-          abortController = null
-          persist()  // 生成完成：持久化全部产物
-        },
-        onError: (err) => {
-          error.value = err
-          generating.value = false
-          stage.value = 'error'
-          abortController = null
-          persist()  // 出错也存（保留已产出的部分产物供查看）
-        },
-      },
-      abortController?.signal,
-    )
-  }
-
-  /** 把 ADF_STAGE 事件映射为写作语言的步骤标签（V3.2） */
-  function mapAdfStageToLabel(adfStage: string): { label: string; sessionStage: SessionStage } {
-    switch (adfStage) {
-      case 'CONTEXT_ASSEMBLING':
-        return { label: '准备素材', sessionStage: 'tier_classifying' }
-      case 'SPINE_BUILDING':
-        return { label: '梳理前文脉络', sessionStage: 'tier_classifying' }
-      case 'ANCHOR_DESIGN':
-        return { label: '设计本章高潮', sessionStage: 'tier_classifying' }
-      case 'TIER_DECIDE':
-        return { label: '确定篇幅', sessionStage: 'tier_classifying' }
-      case 'FORWARD_FLOW':
-        return { label: '正文写作', sessionStage: 'zone_writing' }
-      case 'PRUNE':
-        return { label: '去 AI 味剪枝', sessionStage: 'zone_writing' }
-      case 'ANCHOR_AUDIT':
-        return { label: '结构检查', sessionStage: 'auditing' }
-      case 'REFINE':
-        return { label: '补充铺垫', sessionStage: 'refining' }
-      case 'BEAT_PATCH':
-        return { label: '补写遗漏节拍', sessionStage: 'refining' }
-      case 'CONSISTENCY_GUARD':
-        return { label: '一致性守卫', sessionStage: 'auditing' }
-      default:
-        return { label: adfStage, sessionStage: stage.value }
-    }
-  }
-
   /** 把 BS-ADF 的 BSADF_STAGE/ADF_STAGE 事件映射为写作语言步骤标签。
    *  sessionStage 为 null 时只换标签、不动 stage 状态机
    *  （AUTHOR_DIALOGUE 的 beat_pending 由 onSlots 负责；未知事件保持现状）。 */
@@ -1821,7 +1669,7 @@ export function useGenerationSession(): GenerationSession {
     _adaptiveFinishFn?.()
   }
 
-  /** 失败重试：再次触发最近一次入口（start / startRefinery 已记录 lastAction） */
+  /** 失败重试：再次触发最近一次入口（startBeat / startRefinery 已记录 lastAction） */
   function retry() {
     if (generating.value) return
     error.value = null
@@ -3406,7 +3254,6 @@ export function useGenerationSession(): GenerationSession {
     acceptReadySegment,
     isTerminal,
     currentTask,
-    start,
     cancel,
     reset,
     retry,

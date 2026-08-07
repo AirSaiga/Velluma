@@ -364,17 +364,6 @@ export type Tier = 'auto' | 'climax' | 'turn' | 'progress' | 'transition'
 
 export type AdfEngine = 'v3.1' | 'v3.2'
 
-export interface AdfPrecondition {
-  id: string
-  category: string
-  description: string
-  must_use_terms: string[]
-  min_landing_offset?: number
-  landed?: boolean
-  landed_segment?: number | null
-  landed_evidence?: string | null
-}
-
 export interface AdfEmotionSample {
   progress: number
   register: string
@@ -395,21 +384,6 @@ export interface AdfAuditResult {
   structure_issues: string[]
   climax_score?: number | null
   fix_targets: string[]
-}
-
-export interface AdfCompleteResult {
-  text: string
-  engine: 'adf'
-  generation_run_id: string
-  tier?: string | null
-  tier_reason?: string | null
-  target_word_count?: number | null
-  segment_count: number
-  setup_points_total: number
-  setup_points_landed: number
-  climax_score?: number | null
-  audit_verdict?: string | null
-  stats: Record<string, any>
 }
 
 // ============================================================
@@ -457,123 +431,6 @@ export const adfApi = {
     return await requestJson<PlanSuggestionResponse>(`/chapters/${chapterId}/plan-suggestion`, {
       method: 'POST',
       body: JSON.stringify({}),
-    })
-  },
-
-  /**
-   * SSE ADF 生成（V3.2）。
-   * tier=auto 时程序自主定档；其余值强制指定档位。
-   * target_word_count=null 时由 tier 自动推导；max_segments 控制段数上限。
-   */
-  streamGenerate: async (
-    chapterId: string,
-    params: {
-      tier?: Tier
-      target_word_count?: number | null
-      max_segments?: number
-      enable_spine?: boolean
-      enable_anchor_audit?: boolean
-      enable_refinement?: boolean
-      user_tier_hint?: string | null
-      author_intent?: string | null
-      expectation_actions?: Record<string, string> | null
-    } | undefined,
-    callbacks: {
-      onEvent?: (event: string, data: any) => void
-      onChunk?: (chunk: string) => void
-      onStage?: (stage: string, data: any) => void
-      onSpineBuilt?: (data: any) => void
-      onAnchorDesigned?: (anchor: AdfAnchorDesigned) => void
-      onTierDecided?: (decision: { tier: string; reason: string; climax_score?: number; target_word_count?: number; max_segments?: number }) => void
-      onProgress?: (segmentIndex: number, total: number, data: any) => void
-      onPreconditionLanded?: (data: { precondition_id: string; segment: number; evidence: string; category: string }) => void
-      onAudit?: (audit: AdfAuditResult) => void
-      onMetric?: (metrics: any) => void
-      onDone?: (result: AdfCompleteResult) => void
-      onError?: (error: string) => void
-    },
-    signal?: AbortSignal
-  ) => {
-    let hasCompleted = false
-
-    streamSse(`/chapters/${chapterId}/generate-adf`, params || {}, {
-      onPayload: payload => {
-        if (!payload || !payload.event) return
-        callbacks.onEvent?.(payload.event, payload)
-
-        if (payload.event === 'TEXT_CHUNK' && payload.content) {
-          callbacks.onChunk?.(payload.content)
-        } else if (payload.event === 'ADF_STAGE') {
-          callbacks.onStage?.(payload.stage, payload)
-        } else if (payload.event === 'ADF_SPINE_BUILT') {
-          callbacks.onSpineBuilt?.(payload)
-        } else if (payload.event === 'ADF_ANCHOR_DESIGNED') {
-          callbacks.onAnchorDesigned?.({
-            climax_intensity: payload.climax_intensity,
-            climax_description: payload.climax_description,
-            setup_point_count: payload.setup_point_count,
-            emotion_flow_samples: payload.emotion_flow_samples || [],
-          })
-        } else if (payload.event === 'TIER_DECIDED') {
-          callbacks.onTierDecided?.({
-            tier: payload.tier,
-            reason: payload.reason,
-            climax_score: payload.climax_score,
-            target_word_count: payload.target_word_count,
-            max_segments: payload.max_segments,
-          })
-        } else if (payload.event === 'ADF_PROGRESS') {
-          callbacks.onProgress?.(payload.segment_index, payload.total_segments, payload)
-        } else if (payload.event === 'ADF_PRECONDITION_LANDED') {
-          callbacks.onPreconditionLanded?.({
-            precondition_id: payload.precondition_id,
-            segment: payload.segment,
-            evidence: payload.evidence || '',
-            category: payload.category || '',
-          })
-        } else if (payload.event === 'ADF_AUDIT') {
-          callbacks.onAudit?.({
-            verdict: payload.verdict,
-            missing_setup_points: payload.missing_setup_points || [],
-            emotion_mismatches: payload.emotion_mismatches || [],
-            structure_issues: payload.structure_issues || [],
-            climax_score: payload.climax_score,
-            fix_targets: payload.fix_targets || [],
-          })
-        } else if (payload.event === 'UNIFIED_METRIC') {
-          callbacks.onMetric?.(payload.metrics)
-        } else if (payload.event === 'COMPLETE') {
-          hasCompleted = true
-          callbacks.onDone?.({
-            text: payload.text,
-            engine: payload.engine || 'adf',
-            generation_run_id: payload.generation_run_id,
-            tier: payload.tier,
-            tier_reason: payload.tier_reason,
-            target_word_count: payload.target_word_count,
-            segment_count: payload.segment_count || 0,
-            setup_points_total: payload.setup_points_total || 0,
-            setup_points_landed: payload.setup_points_landed || 0,
-            climax_score: payload.climax_score,
-            audit_verdict: payload.audit_verdict,
-            stats: payload.stats || {},
-          })
-          return true
-        }
-      },
-      onDone: () => {
-        if (!hasCompleted) {
-          callbacks.onError?.('生成过程意外中断，未收到完成信号')
-        }
-      },
-      onError: message => {
-        hasCompleted = true
-        callbacks.onError?.(message)
-      },
-    }, signal).catch(err => {
-      if (!hasCompleted) {
-        callbacks.onError?.(err.message)
-      }
     })
   },
 }

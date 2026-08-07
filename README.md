@@ -77,7 +77,7 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 **核心思想**：把"AI 觉得有问题"和"作者认可的问题"分开，避免 AI 自作主张乱改。详细设计见 `docs/generation-v4.1-refinery.md`。
 
-> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack）的代码已归档至 `backend/_deprecated/`，不再参与运行；其设计文档见 `docs/generation-v3-design.md`、`docs/generation-v3.1-unified.md`。
+> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack）的代码与设计文档已归档至 `backend/_deprecated/`（代码）与 `backend/_deprecated/docs/`（设计文档），不再参与运行。
 
 ### 🧠 长篇记忆与状态管理
 
@@ -134,10 +134,10 @@ cd Velluma
 
 ### 2. 配置
 
-**数据库**：在项目根目录创建 `.env`（可选，仅数据库连接等少数变量）：
+**数据库**：复制 `.env.example` 为 `.env`（可选，仅数据库连接等少数变量，均有默认值）：
 
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver
+```bash
+cp .env.example .env
 ```
 
 > 数据库需先启用 pgvector：
@@ -145,7 +145,11 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver
 > CREATE EXTENSION IF NOT EXISTS vector;
 > ```
 
-**LLM / Embedding / 代理**：编辑项目根目录 `model_config.json`（主配置入口，包含 API Key，已 gitignore）：
+**LLM / Embedding / 代理**：复制 `model_config.example.json` 为 `model_config.json`（主配置入口，包含 API Key，已 gitignore），填入真实 API Key：
+
+```bash
+cp model_config.example.json model_config.json
+```
 
 ```json
 {
@@ -216,7 +220,8 @@ Velluma/
 │   ├── start-dev.bat         # 开发入口（Vite + DevTools）
 │   └── start-debug.bat       # 调试入口（同 dev，预留扩展）
 ├── requirements.txt          # Python 依赖
-├── model_config.json         # LLM/Embedding/代理配置（gitignore，勿提交）
+├── model_config.example.json # LLM/Embedding/代理配置模板（复制为 model_config.json）
+├── .env.example              # 环境变量模板（复制为 .env，均可留空）
 ├── AGENTS.md                 # 开发指南（架构与现状的权威说明）
 │
 ├── backend/                  # FastAPI 后端
@@ -358,14 +363,15 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 
 ### 环境变量（.env，可选）
 
-后端代码实际读取的环境变量仅有以下 4 个：
+后端代码实际读取的环境变量仅有以下 3 个（均有默认值，可全留空）：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver` |
 | `DB_POOL_PRE_PING` | 连接池预检 | Windows=false / 其他=true |
 | `VELLUMA_PORT` | 指定后端端口（跳过扫描） | 无（默认 8002 起扫描） |
-| `PROXY_URL` / `DISABLE_PROXY` | 半死代码（实际代理由 `model_config.json` 控制） | `http://127.0.0.1:4780` |
+
+> 实际代理配置由 `model_config.json` 的 `proxy` 节决定，不读环境变量。
 
 > ⚠ **以下变量在代码中不存在，任何文档提及均已过时**：
 > - `AGENTIC_BEAT_CONCURRENCY` / `AGENTIC_FORCE_FAST_MODE`（原双轨引擎的概念，该引擎已废弃归档）
