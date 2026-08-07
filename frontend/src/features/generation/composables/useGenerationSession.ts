@@ -3293,9 +3293,10 @@ export function useGenerationSession(): GenerationSession {
           e.preventDefault()
           e.stopPropagation()
           _adaptiveContinueFn?.('stitch', attachedParts.value.map((p) => ({ text: p.text, direction: p.direction })))
-          // 清已缝合的吸附意图，但保留卡片舱（sticky 态）——作者可继续吸附新件连缝
+          // 缝合触发：清吸附意图 + 隐藏卡片舱（让位给脉冲点/幽灵草稿，避免视觉混乱）
+          // 下次停顿心跳会重新弹出卡片舱（如果段落变了）
           clearAttachedParts()
-          setSparkSticky()
+          hideSparkDock()
           return
         }
         const $fromAd = editor.state.selection.$from

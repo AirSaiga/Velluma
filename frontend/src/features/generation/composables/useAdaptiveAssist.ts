@@ -169,7 +169,18 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const editor = chapterEditorHandle.value
     if (!editor || ghostActive.value) return
     const paraText = editor.state.selection.$from.parent.textContent
-    const fragment = paraText.trim().slice(-200)
+    let fragment = paraText.trim().slice(-200)
+    // 光标在空段落（如正文末尾的空行）时，回退取编辑器最后一个非空段落作为 fragment
+    if (!fragment) {
+      const doc = editor.state.doc
+      doc.descendants((node) => {
+        if (node.isTextblock) {
+          const t = node.textContent.trim()
+          if (t) { fragment = t.slice(-200); return false }
+        }
+        return true
+      })
+    }
     if (!fragment) return
     const paraStart = editor.state.selection.$from.start()
     const rollingPrefix = editor.state.doc.textBetween(Math.max(0, paraStart - 200), paraStart, '\n\n')
@@ -177,6 +188,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (_continueAbort) _continueAbort.abort()
     _continueAbort = new AbortController()
     opts.aiLaneRef.value = 'assisting'
+    // 立即显示"AI 正在生成"——不等 GHOST_START（后端 LLM 调用 2-5s，期间作者需要反馈）
+    setThinkingPhase('perceiving')
 
     // 采纳方向回报：取首个有 direction 的 part，通知后端降权（负反馈）
     const adoptedDir = pickedParts.find((p) => p.direction)?.direction
@@ -187,7 +200,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       target_chars: mode === 'stitch' ? 120 : 200,
       adopted_direction: adoptedDir,
     }, {
-      onStart: () => { beginGhost('stitch'); setThinkingPhase('perceiving') },
+      onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
       onDone: () => {
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null

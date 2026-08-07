@@ -22,7 +22,7 @@ from backend.services.utils.json_safe import parse_json_safe
 logger = logging.getLogger(__name__)
 
 
-async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 600, **kw) -> Dict:
+async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 1500, **kw) -> Dict:
     """挂件生发。由 orchestrator 调度，产出写回世界模型缓存。
 
     kw 可带 direction_weights（5 叙事方向权重），碎片按此分布生成并自标 direction。

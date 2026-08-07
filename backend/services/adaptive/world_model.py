@@ -92,23 +92,36 @@ class WorldModelRepository:
         self.db = db
 
     async def get_or_create(self, chapter_id: str) -> WorldModelORM:
-        """获取或创建章节的世界模型（每章唯一）。"""
+        """获取或创建章节的世界模型（每章唯一）。
+
+        并发安全：心跳主 session 和后台 task 的独立 session 可能同时调本方法，
+        两个都查到"不存在"并 INSERT → 第二个撞唯一约束。捕获 IntegrityError
+        后回滚并重新 SELECT（另一个并发请求已创建好）。
+        """
         result = await self.db.execute(
             select(WorldModelORM).where(WorldModelORM.chapter_id == chapter_id)
         )
         model = result.scalar_one_or_none()
         if model is None:
-            model = WorldModelORM(
-                chapter_id=chapter_id,
-                layer1_facts=[],
-                layer2_intent={},
-                layer3_projections=[],
-                intent_version=0,
-                last_inference_ts=0.0,
-                last_dock_sig="",
-            )
-            self.db.add(model)
-            await self.db.flush()
+            try:
+                model = WorldModelORM(
+                    chapter_id=chapter_id,
+                    layer1_facts=[],
+                    layer2_intent={},
+                    layer3_projections=[],
+                    intent_version=0,
+                    last_inference_ts=0.0,
+                    last_dock_sig="",
+                )
+                self.db.add(model)
+                await self.db.flush()
+            except Exception:
+                # 并发竞态：另一个 session 已插入（唯一约束冲突）→ 回滚待写，重新查
+                await self.db.rollback()
+                result = await self.db.execute(
+                    select(WorldModelORM).where(WorldModelORM.chapter_id == chapter_id)
+                )
+                model = result.scalar_one()
         return model
 
     # ---- 层 1：已写事实（追加式，不可变）----

@@ -113,12 +113,12 @@ function onPick(index: number) {
 
 .spark-dock__chip {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
-  max-width: 200px;
-  padding: 3px 8px;
+  max-width: 240px;
+  padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-primary, #2c2c2c);
   font-size: 12.5px;
@@ -173,9 +173,9 @@ function onPick(index: number) {
 }
 
 .spark-dock__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 碎片文字允许换行，完整显示 8-16 字内容（不截断） */
+  word-break: break-word;
+  white-space: normal;
 }
 
 .spark-dock__intent {

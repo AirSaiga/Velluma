@@ -104,11 +104,52 @@ function insertMarkedText(delta: string): void {
 /**
  * 追加一个 SSE chunk 到幽灵区（打字机式生长的数据源）。
  * 首 chunk 在当前光标处落文档；后续 chunk 追加到幽灵区末尾。
+ *
+ * 实现：累积全部 delta 到 ghostOriginal，每次 chunk 到达时用完整文本
+ * 替换整个幽灵区（而非逐 chunk 插入独立文本节点）。这样 ProseMirror 里
+ * 始终保持最少的文本节点，避免"切得很碎"（每 6 字一个节点的碎片化）。
  */
 export function appendGhost(delta: string): void {
   if (!ghostActive.value || !delta) return
   ghostOriginal.value += delta
-  insertMarkedText(delta)
+  _replaceGhostText(ghostOriginal.value)
+}
+
+/**
+ * 用完整文本替换整个幽灵区（删除旧幽灵 + 插入新完整文本，单次事务）。
+ * 保持打字机视觉效果（文本逐渐变长），但内部只有最少的文本节点。
+ */
+function _replaceGhostText(fullText: string): void {
+  const editor = chapterEditorHandle.value
+  if (!editor) return
+  const variant = ghostDegraded.value ? 'amber' : 'mint'
+  const mark = { type: 'ghostDraft', attrs: { variant } }
+  const range = findGhostRange()
+
+  // 多段落：拆成 paragraph 块
+  if (fullText.includes('\n\n')) {
+    const paras = fullText.split(/\n\n+/).filter((p) => p.length > 0)
+    const blocks = paras.map((p) => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text: p, marks: [mark] }],
+    }))
+    if (range) {
+      // 删除旧幽灵区，插入新完整内容
+      editor.chain().deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, blocks).run()
+    } else {
+      const pos = editor.state.selection.from
+      editor.chain().insertContentAt(pos, blocks).run()
+    }
+    return
+  }
+
+  // 单段：删除旧幽灵区，插入新完整文本（单个文本节点）
+  if (range) {
+    editor.chain().deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, { type: 'text', text: fullText, marks: [mark] }).run()
+  } else {
+    const pos = editor.state.selection.from
+    editor.chain().insertContentAt(pos, { type: 'text', text: fullText, marks: [mark] }).run()
+  }
 }
 
 /** 当前幽灵区文本（块间以 \n\n 连接，与纯文本正文格式一致）。 */

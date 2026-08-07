@@ -21,7 +21,7 @@ from backend.services.utils.json_safe import parse_json_safe
 logger = logging.getLogger(__name__)
 
 
-async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 600, **kw) -> Dict:
+async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 1500, **kw) -> Dict:
     """未来推测。由 orchestrator 调度。"""
     bundle = await load_chapter_settings_bundle(chapter_id, db)
     repo = WorldModelRepository(db)

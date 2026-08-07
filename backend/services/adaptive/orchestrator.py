@@ -185,7 +185,7 @@ class AdaptiveOrchestrator:
                 activations.append(Activation(
                     component="future_projection",
                     priority="low",
-                    budget_tokens=600,
+                    budget_tokens=1500,
                 ))
             # dock 缓存命中判断：段落文本签名 + projection 签名都没变 → 复用上次碎片
             # 省 ~90% dock 调用（作者没沉淀新段落时，碎片本来就不该变）
@@ -207,7 +207,7 @@ class AdaptiveOrchestrator:
                 activations.append(Activation(
                     component="dock_generator",
                     priority="low",
-                    budget_tokens=600,
+                    budget_tokens=1500,
                 ))
                 self._last_dock_text_sig = cur_text_sig
                 self._last_dock_proj_sig = cur_proj_sig
@@ -262,7 +262,9 @@ class AdaptiveOrchestrator:
         runner = self._components.get(act.component)
         if not runner:
             return
-        # 若已有异步 task 在跑，等它完成（不重复启动）
+        # 若已有异步 task 在跑，等它完成（避免并发写冲突），但不 return——
+        # 同步调用仍需自己执行一遍（异步 task 可能用的旧 budget/旧参数，
+        # 产出可能无效；同步调用方持有 db session 能拿到最新结果）
         existing = self._active_tasks.get(act.component)
         if existing and not existing.done():
             try:
@@ -271,7 +273,6 @@ class AdaptiveOrchestrator:
                 pass
             finally:
                 self._active_tasks.pop(act.component, None)
-            return
         try:
             from backend.services.adaptive.world_model import WorldModelRepository
             repo = WorldModelRepository(db)

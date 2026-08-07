@@ -218,7 +218,9 @@ async def stitch_ghost(
                 user_prompt=user_prompt,
                 model_type="creative",
                 temperature=0.7,
-                max_tokens=min(800, request.target_chars * 2),
+                # 推理模型（deepseek-v4-pro）即使 REASONING_DISABLED 仍消耗 reasoning tokens（~800-1000），
+                # max_tokens 必须给 reasoning 留够空间，否则产出为空
+                max_tokens=max(1200, request.target_chars * 2 + 1000),
                 reasoning_config=REASONING_DISABLED,
             )
             text = (result.content or "").strip().strip('"').strip('"').strip()
