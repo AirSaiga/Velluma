@@ -66,15 +66,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     editorRef.value = editor
   }
 
-  /**
-   * 滚动到指定字符偏移并临时高亮（V3.1 F4 审校问题点击定位）。
-   * offset 来自审校 finding 的 [start, end] 字符偏移。
-   */
-  function scrollToOffset(offset: [number, number]) {
-    if (!editorRef.value?.scrollToOffsetAndHighlight) return
-    editorRef.value.scrollToOffsetAndHighlight(offset)
-  }
-
   function toggleCharacter(charId: string) {
     if (!selectedChapter.value) return
     const chapterId = selectedChapter.value.id
@@ -94,10 +85,20 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   }
 
   let updateTimeout: ReturnType<typeof setTimeout> | undefined
+  // NLE-ADF 2.0：落库前剥除幽灵草稿节点——幽灵是"未确认 AI 草稿"（Esc 可蒸发），
+  // 1s 防抖落库撞上幽灵在屏时，未确认文本不能进库（刷新后绿字复活=事故）。
+  // 只改 outgoing 副本，绝不动编辑器文档（幽灵在画布上正常存活）。
+  function stripGhostDraftHtml(html: string): string {
+    if (!html.includes('data-ghost-draft')) return html
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    doc.querySelectorAll('[data-ghost-draft]').forEach((el) => el.remove())
+    return doc.body.innerHTML
+  }
   function handleContentUpdate(content: string) {
     clearTimeout(updateTimeout)
     updateTimeout = setTimeout(() => {
-      updateChapter({ content_text: content, draft_text: content })
+      const cleaned = stripGhostDraftHtml(content)
+      updateChapter({ content_text: cleaned, draft_text: cleaned })
     }, 1000)
   }
 
@@ -305,7 +306,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     publishChapter: () => publisher.publishChapter(props.selectedChapter, props.apiConfig),
     selectedChapter,
     setEditorRef,
-    scrollToOffset,
     showInspirationModal,
     showPublishModal: publisher.showPublishModal,
     toggleCharacter,

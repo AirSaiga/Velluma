@@ -5,15 +5,16 @@ import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import Placeholder from '@tiptap/extension-placeholder'
   import TextAlign from '@tiptap/extension-text-align'
   import Underline from '@tiptap/extension-underline'
-  import Strike from '@tiptap/extension-strike'
   import TextStyle from '@tiptap/extension-text-style'
   import Color from '@tiptap/extension-color'
   import Highlight from '@tiptap/extension-highlight'
   import Subscript from '@tiptap/extension-subscript'
   import Superscript from '@tiptap/extension-superscript'
-  import { AuditHighlightMark } from '../extensions/AuditHighlightMark'
   import { watch, onBeforeUnmount, onMounted, ref, nextTick, computed } from 'vue'
 import { Extension } from '@tiptap/core'
+import GhostDraftMark from '../extensions/GhostDraftMark'
+import { buildEntityMentionExtensions } from '../extensions/entityMention'
+import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { bookApi } from '../services/api/domain'
@@ -96,6 +97,12 @@ const props = defineProps({
   bookId: {
     type: String,
     default: null,
+  },
+  /** 隐藏工具栏（主编辑器直改预览态用：格式化/AI 优化按钮作用于章节正文，
+   *  生成预览期出现会误操作；且管线是纯文本，行内样式 rebuild 即丢，不提供） */
+  hideToolbar: {
+    type: Boolean,
+    default: false,
   }
 })
 
@@ -336,7 +343,6 @@ const editor = useEditor({
       types: ['heading', 'paragraph'],
     }),
     Underline,
-    Strike,
     TextStyle,
     Color,
     Highlight.configure({
@@ -344,8 +350,13 @@ const editor = useEditor({
     }),
     Subscript,
     Superscript,
+    GhostDraftMark,
+    // NLE-ADF 2.0 行内极速 Hook：@ 角色 / # 资产 提及 + 静默绑定本章
+    ...buildEntityMentionExtensions({
+      getBookId: () => props.bookId,
+      getChapterId: () => props.id,
+    }),
     SelectionHighlighter,
-    AuditHighlightMark,
   ],
   editorProps: {
     attributes: {
@@ -361,6 +372,13 @@ const editor = useEditor({
   onSelectionUpdate: ({ editor }) => {
     // 如果正在处理或审核优化，不要更新选区菜单状态
     if (['processing', 'reviewing'].includes(optimizationState.value)) {
+      return
+    }
+
+    // 生成预览/隐藏工具栏场景（hideToolbar）不出选区浮层：
+    // 步进裁决期正文是段预览，「AI 润色选区」浮层会对预览文操作，与生成流程冲突
+    if (props.hideToolbar) {
+      if (showSelectionMenu.value) showSelectionMenu.value = false
       return
     }
 
@@ -429,6 +447,12 @@ watch(() => props.disabled, (val) => {
   editor.value?.setEditable(!val)
 })
 
+// NLE-ADF 2.0：注册全局编辑器句柄（生成会话层的幽灵草稿/Spark Dock
+// 控制器经此直接操作文档；卸载时清空，见 onBeforeUnmount）。
+watch(editor, (instance) => {
+  registerChapterEditor(instance ?? null)
+}, { immediate: true })
+
 watch(aiIntentMode, (mode) => {
   hasStoredAiIntentMode.value = true
   try {
@@ -465,6 +489,14 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
 
   editor.value.commands.setContent(normalizedValue, false)
   pendingExternalUpdate.value = null
+  // 生成预览态（disabled 只读）：外部内容更新后自动滚到底，
+  // 让最新渲染段/当前段进度始终可见（正常编辑态不干预滚动位置）
+  if (props.disabled) {
+    nextTick(() => {
+      const scrollEl = editorContainerRef.value?.querySelector('.overflow-y-auto')
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
+    })
+  }
 })
 
 const applyPendingExternalUpdate = () => {
@@ -476,6 +508,7 @@ const applyPendingExternalUpdate = () => {
 
 onBeforeUnmount(() => {
   clearUndoHint()
+  registerChapterEditor(null)
   document.removeEventListener('mousedown', handleSelectionMenuOutsidePress)
   document.removeEventListener('keydown', handleGlobalKeydown)
   editor.value.destroy()
@@ -798,85 +831,6 @@ const undoLastOptimization = () => {
   clearUndoHint()
 }
 
-/**
- * 滚动到指定字符偏移并临时高亮该区间（V3.1 F4 审校问题点击定位）。
- *
- * offset 是 [start, end] 字符偏移（基于纯文本，非 ProseMirror pos）。
- * 因为 ProseMirror 的 pos 含块级节点边界开销，与纯文本字符偏移不一致，
- * 这里先在 doc 文本上累计映射到 ProseMirror pos，再滚动+高亮。
- *
- * 高亮 2.5s 后自动清除（避免持久污染正文）。
- */
-let auditHighlightTimer = null
-
-const scrollToOffsetAndHighlight = (offset) => {
-  if (!editor.value || !offset || offset.length < 2) return
-  const [startChar, endChar] = offset
-  if (typeof startChar !== 'number' || typeof endChar !== 'number') return
-  if (endChar <= startChar) return
-
-  // 先清除上次的高亮（若存在）
-  clearAuditHighlight()
-
-  const doc = editor.value.state.doc
-  // 构建"纯文本字符偏移 → ProseMirror pos"的映射
-  let charCount = 0
-  let startPs = null
-  let endPs = null
-
-  doc.descendants((node, pos) => {
-    if (startPs !== null && endPs !== null) return false
-    if (!node.isText) return true
-    const text = node.text || ''
-    const len = text.length
-    // 检查 startChar 是否落在当前节点
-    if (startPs === null && charCount + len >= startChar) {
-      startPs = pos + (startChar - charCount)
-    }
-    if (endPs === null && charCount + len >= endChar) {
-      endPs = pos + (endChar - charCount)
-    }
-    charCount += len
-    return true
-  })
-
-  // 兜底：若 endChar 超出文本末尾，取文档末尾
-  if (startPs !== null && endPs === null) {
-    endPs = doc.content.size
-  }
-  if (startPs === null) return
-
-  const safeEnd = endPs ?? startPs + 1
-
-  // 应用 auditHighlight mark
-  const markType = editor.value.state.schema.marks.auditHighlight
-  if (markType) {
-    const tr = editor.value.state.tr.addMark(startPs, safeEnd, markType.create())
-    editor.value.view.dispatch(tr)
-  }
-
-  // 滚动到该位置（选区设置 + scrollIntoView）
-  editor.value.commands.setTextSelection({ from: startPs, to: safeEnd })
-  editor.value.commands.scrollIntoView()
-
-  // 2.5s 后清除高亮
-  auditHighlightTimer = setTimeout(() => {
-    clearAuditHighlight()
-  }, 2500)
-}
-
-const clearAuditHighlight = () => {
-  if (auditHighlightTimer) {
-    clearTimeout(auditHighlightTimer)
-    auditHighlightTimer = null
-  }
-  if (!editor.value) return
-  const markType = editor.value.state.schema.marks.auditHighlight
-  if (!markType) return
-  const tr = editor.value.state.tr.removeMark(0, editor.value.state.doc.content.size, markType)
-  editor.value.view.dispatch(tr)
-}
-
 const handleGlobalKeydown = (event) => {
   if (!showUndoHint.value) return
   const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z'
@@ -892,15 +846,13 @@ defineExpose({
   editor,
   applyOptimizationDiff,
   resetOptimization,
-  scrollToOffsetAndHighlight,
-  clearAuditHighlight,
   getContent: () => editor.value?.getHTML() || ''
 })
 </script>
 
 <template>
   <div ref="editorContainerRef" class="rich-text-editor bg-parchment-50 overflow-hidden flex flex-col h-full relative" :class="{ 'opacity-60': disabled }">
-    <div v-if="editor && !disabled" class="toolbar flex items-center gap-1 px-3 py-1.5 bg-[var(--bg-secondary)]/80 backdrop-blur-sm border-b border-[var(--border-color)]/40 overflow-x-auto whitespace-nowrap flex-shrink-0">
+    <div v-if="editor && !disabled && !hideToolbar" class="toolbar flex items-center gap-1 px-3 py-1.5 bg-[var(--bg-secondary)]/80 backdrop-blur-sm border-b border-[var(--border-color)]/40 overflow-x-auto whitespace-nowrap flex-shrink-0">
       <button 
         @click="toggleBold" 
         :class="{ 'is-active': editor.isActive('bold') }"

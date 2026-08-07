@@ -242,15 +242,21 @@ async def generate_chapter_decision_set(
                 break
             # 选目标卡（用第一张卡，简单策略）
             target_beat_id = cards[0].beat_id if cards else ""
+            # ⚠ node_title / label 是给前端岔路门完整展示的文案（缺口描述 + 补充建议），
+            # 前端用 CSS clamp 处理溢出——勿再硬截短（曾因 [:20] 把补充建议
+            # 切成"（如白霆提"半句话活到 UI）。仅保留防御性上限防病态数据。
             branch = StoryBranch(
                 beat_id=target_beat_id,
-                node_title=str(gap.get("description", "Loop1 缺口"))[:40],
+                node_title=str(gap.get("description", "Loop1 缺口"))[:120],
                 options=[BranchOption(
                     option_id="A",
-                    label=str(gap.get("suggested_fill", "默认走向"))[:20],
+                    label=str(gap.get("suggested_fill", "默认走向"))[:120],
                     plot_impact=str(gap.get("suggested_fill", "")),
                 )],
                 default_option="A",
+                # 标记缺口提示节点：下游（mutator/步进岔路门/前端）据此只接受
+                # 作者 custom: 补充文本，提示语本身绝不写 branch_directive
+                source="loop1_gap",
             )
             decision_set.decision_nodes.append(branch)
         decision_set.has_story_branch = True

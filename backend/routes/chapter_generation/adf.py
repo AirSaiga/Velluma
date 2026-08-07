@@ -75,6 +75,7 @@ from backend.services.context.loader import load_full_chapter_context
 from backend.services.canon import build_canon_context_for_prompt
 from backend.services.reader_mirror import suggest_chapter_plan, load_mirror
 from backend.services.observability.run_recorder import RunRecorder
+from backend.services.observability.run_trace import clear_trace, create_trace, trace_event
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import (
     build_sse_event, build_sse_text_chunk, build_sse_error,
@@ -308,6 +309,11 @@ class _ADFStreamHandler:
     async def stream(self):
         """SSE 流生成器（v3.2 事件序列）。"""
         run_id = f"adf_{uuid4().hex[:12]}"
+        trace = create_trace(run_id, "adf", self.chapter_id)
+        trace_event(
+            "run_start",
+            request=self.request.model_dump() if self.request else {},
+        )
 
         try:
             # ---- Phase 0: 上下文组装 ----
@@ -349,6 +355,10 @@ class _ADFStreamHandler:
             progress_queue: "asyncio.Queue[Tuple[str, dict]]" = asyncio.Queue()
 
             async def _on_progress(event: str, data: dict) -> None:
+                # 桥接到运行级 trace：阶段切换更新 stage 字段，其余事件原样记录
+                if event == "ADF_STAGE":
+                    trace.set_stage(data.get("stage") or "")
+                trace_event(event, **data)
                 await progress_queue.put((event, data))
 
             # 把 workflow 包成 task，与"取队列"任务并发，用 FIRST_COMPLETED 决定下一步：
@@ -396,6 +406,7 @@ class _ADFStreamHandler:
 
             except Exception as e:
                 logger.exception(f"[ADF] workflow.execute 异常: {e}")
+                trace_event("run_error", phase="workflow_execute", error=f"{type(e).__name__}: {e}")
                 if not execute_task.done():
                     execute_task.cancel()
                 yield build_sse_error(f"生成失败: {type(e).__name__}: {str(e)[:200]}")
@@ -475,6 +486,14 @@ class _ADFStreamHandler:
                     yield build_sse_text_chunk(chunk)
 
             # ---- COMPLETE ----
+            trace_event("final_text", text=result.final_text or "")
+            trace_event(
+                "run_complete",
+                stats=result.stats,
+                degraded_count=len(result.degraded),
+                tier=result.tier_decision.get("tier"),
+                audit_verdict=result.audit.verdict if result.audit else None,
+            )
             complete_payload = {
                 "event": "COMPLETE",
                 "text": result.final_text,
@@ -494,7 +513,10 @@ class _ADFStreamHandler:
 
         except Exception as e:
             logger.exception(f"[ADF] SSE 流异常: {e}")
+            trace_event("run_error", phase="sse_stream", error=f"{type(e).__name__}: {e}")
             yield build_sse_error(f"生成失败: {type(e).__name__}: {str(e)[:200]}")
+        finally:
+            clear_trace()
 
 
 # ============================================================

@@ -122,20 +122,6 @@ textarea,
   background: rgba(124, 106, 173, 0.25);
 }
 
-/* 审校问题临时高亮（点击定位时） */
-mark.audit-highlight {
-  background: rgba(217, 119, 6, 0.35);
-  border-radius: 2px;
-  padding: 0 1px;
-  transition: background 0.4s ease;
-  animation: audit-flash 0.6s ease-out;
-}
-
-@keyframes audit-flash {
-  0% { background: rgba(217, 119, 6, 0.65); }
-  100% { background: rgba(217, 119, 6, 0.35); }
-}
-
 /* ====== 全局交互动效 ====== */
 
 /* 主按钮微交互 */
@@ -212,4 +198,197 @@ mark.audit-highlight {
 .slide-fade-leave-to {
   opacity: 0;
   transform: translateX(-8px);
+}
+
+/* ============================================================
+   NLE-ADF 2.0 幽灵草稿（Ghost Draft）
+   AI 微缝合/代笔的待确认文本：薄荷绿/琥珀底色 + 呼吸微光。
+   Enter 锁死摘 mark 变正文；Esc 连节点蒸发（样式随节点消失）。
+   ============================================================ */
+.ghost-draft {
+  border-radius: 2px;
+  padding: 0 1px;
+  /* 呼吸微光：2.6s 一个周期，低频不干扰阅读改稿 */
+  animation: ghost-draft-breathe 2.6s ease-in-out infinite;
+}
+
+.ghost-draft--mint {
+  background-color: rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.12);
+}
+
+.ghost-draft--amber {
+  /* 降级段代笔：琥珀警示（呼应 degraded 语义） */
+  background-color: rgba(251, 191, 36, 0.15);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
+}
+
+@keyframes ghost-draft-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}
+
+/* ============================================================
+   NLE-ADF 2.0 画布化布局：微观状态栏 / 隐形抽屉 / 沉浸降透明
+   ============================================================ */
+.nle-topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 6px 24px 2px;
+  font-size: 12px;
+  color: var(--text-muted, #8b8f98);
+  opacity: 0.6;
+  transition: opacity 0.4s ease;
+  user-select: none;
+}
+
+.nle-topbar--dim {
+  opacity: 0.1;
+}
+
+.nle-topbar__chapter {
+  color: var(--text-primary, #e0e2e8);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nle-topbar__state {
+  color: #34d399;
+}
+
+.nle-topbar__progress {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar--dim {
+  opacity: 0.1;
+}
+
+.status-bar {
+  transition: opacity 0.4s ease;
+}
+
+/* 右缘 2px 触发条：平时极淡微光线，hover 提亮 */
+.drawer-edge {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 80;
+  cursor: pointer;
+  background: linear-gradient(to left, rgba(52, 211, 153, 0.18), transparent 4px);
+  opacity: 0.4;
+  transition: opacity 0.2s ease;
+}
+
+.drawer-edge:hover,
+.drawer-edge--active {
+  opacity: 1;
+}
+
+/* 覆盖式抽屉（不推挤画布） */
+.inspector-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 44vw;
+  z-index: 85;
+  background: var(--bg-secondary, #faf8f4);
+  border-left: 1px solid var(--border-color, #e0dbd3);
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector-drawer-enter-active {
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+.inspector-drawer-leave-active {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.inspector-drawer-enter-from,
+.inspector-drawer-leave-to {
+  transform: translateX(24px);
+  opacity: 0;
+}
+
+/* ============================================================
+   NLE-ADF 2.0 Cyber-Parchment 画布排版
+   正文 18px / 行高 1.8 / 宋体系（霞鹜文楷优先，系统字体回退）；
+   离线字体打包（woff2）属部署项，此处先声明字体栈。
+   ============================================================ */
+.rich-text-editor .ProseMirror {
+  font-family: 'LXGW WenKai', '霞鹜文楷', 'Source Han Serif SC', '思源宋体',
+    'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+  font-size: 18px;
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+}
+
+.rich-text-editor .ProseMirror p {
+  margin: 0 0 0.6em;
+}
+
+/* ============================================================
+   NLE-ADF 2.0 行内极速 Hook（@ 角色 / # 资产 提及）
+   ============================================================ */
+.entity-mention {
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.92em;
+}
+
+.entity-mention--character {
+  background: rgba(96, 165, 250, 0.14);
+  color: #93c5fd;
+}
+
+.entity-mention--asset {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fcd34d;
+}
+
+.mention-popup {
+  position: fixed;
+  z-index: 95;
+  min-width: 180px;
+  max-width: 300px;
+  border-radius: 8px;
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+}
+
+.mention-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #2c2c2c);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mention-item--active,
+.mention-item:hover {
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.mention-item--empty {
+  color: var(--text-muted, #a89e90);
+  cursor: default;
 }

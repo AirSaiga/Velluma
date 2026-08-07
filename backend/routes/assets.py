@@ -1,7 +1,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.core.dependencies import get_asset_repository, get_chapter_asset_repository
@@ -67,7 +67,7 @@ async def list_chapter_assets(
 @router.put("/chapters/{chapter_id}/assets", response_model=List[ChapterAssetResponse])
 async def update_chapter_assets(
     chapter_id: UUID,
-    asset_ids: List[UUID],
+    asset_ids: List[UUID] = Query(default=[], description="本章要关联的资产 ID 列表（重复的 query 键；空列表表示清空全部关联）"),
     repo: ChapterAssetRepository = Depends(get_chapter_asset_repository),
 ):
     await repo.delete_by_chapter(chapter_id)

@@ -37,6 +37,7 @@ import re
 from typing import Any, List, Optional, Tuple
 
 from backend.services.llm import call_llm_with_usage
+from backend.services.llm.client import REASONING_DISABLED
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import build_refine_prompt
 from backend.services.workflows.adf.types import (
@@ -55,6 +56,43 @@ MAX_REFINE_PARAGRAPHS_CHARS = 2000  # 候选段落总字数上限
 # 下一段内容在成品中出现两遍（实测两章分别重复 ~1500 字 / ~829 字）。
 _MIN_ANCHOR_CHARS = 12  # 归一化后邻段锚点最小长度
 _MAX_REFINED_GROWTH = 1.8  # 补写后段长相对原段的上限倍数（超过视为越界重写，拒绝替换）
+
+# ---- 完整性闸门（半句截断事故修复，2026-07）----
+# 事故现象：LLM 输出在 token 预算耗尽处戛然而止（finish=length），refined_text
+# 以半句结尾（"…有一根灯"），未校验直接整段替换，正文留下半句残段。
+# 判定：结尾字符不是句末终止符 → 回退到最后一个句末标点切断；
+# 切断后丢失过半内容则整个放弃补埋（保留原段，宁缺勿残）。
+_SENTENCE_ENDS = ("。", "！", "？", "…", "”", "」", "』", "——")
+_MIN_KEEP_RATIO = 0.5  # 句界回退后保留长度低于此比例 → 放弃补埋
+
+
+def _ensure_sentence_complete(text: str) -> str:
+    """半句截断修复：结尾非句末终止符时回退到最后一个句末标点。
+
+    Returns:
+        修复后的文本；无法修复（无句界或丢失过半）返回空串（调用方放弃）。
+    """
+    text = text.strip()
+    if not text:
+        return ""
+    # ⚠ 用后缀判定而非 text[-1] in：_SENTENCE_ENDS 含多字符项 "——"，
+    # 单字符 text[-1] 与之逐项 == 永不命中（破折号结尾被误判为残句→放弃补埋）。
+    if any(text.endswith(end) for end in _SENTENCE_ENDS):
+        return text
+    # 句界回退：在文本中找最后一个句末终止符，截到其末尾。
+    # 搜索全集（含破折号/引号），否则无 "。！？…" 的文本会误判无法修复。
+    # 注意多字符项 "——"：rfind 返回起始位置，截断末尾需 + 其长度。
+    best_end = -1
+    for end in _SENTENCE_ENDS:
+        pos = text.rfind(end)
+        if pos >= 0:
+            best_end = max(best_end, pos + len(end))
+    if best_end <= 0 or best_end < len(text) * _MIN_KEEP_RATIO:
+        return ""
+    logger.warning(
+        f"[ADF] 精修文本半句截断，句界回退 {len(text)}→{best_end} 字"
+    )
+    return text[:best_end]
 
 # 归一化时剥离的字符（空白/标点/引号变体——LLM 常改写标点，原文锚点直接匹配会失效）
 _OVERLAP_STRIP = re.compile(r"[\s，。！？!?；;、…—：:\"'″“”‘’「』()（）<>《》-]")
@@ -200,6 +238,11 @@ def _replace_segment_text(
         if not trimmed:
             logger.warning(f"[ADF] 第 {best_idx + 1} 段精修文本越界裁剪后为空，放弃补埋")
             return False, -1
+        # 完整性闸门：半句截断（finish=length）的文本要么句界回退，要么放弃
+        trimmed = _ensure_sentence_complete(trimmed)
+        if not trimmed:
+            logger.warning(f"[ADF] 第 {best_idx + 1} 段精修文本半句截断且无法句界回退，放弃补埋")
+            return False, -1
         if target.text and len(trimmed) > len(target.text) * _MAX_REFINED_GROWTH:
             logger.warning(
                 f"[ADF] 第 {best_idx + 1} 段精修文本超长"
@@ -262,6 +305,9 @@ async def refine_missing_preconditions(
                         model_type="creative",
                         temperature=0.6,
                         max_tokens=3072,
+                        # 显式关闭 thinking（补埋是机械任务；思考曾吃光预算
+                        # 导致输出在半句截断——"有一根灯"事故）
+                        reasoning_config=REASONING_DISABLED,
                     )
                     call_ctx.set_result(result)
             else:
@@ -271,6 +317,7 @@ async def refine_missing_preconditions(
                     model_type="creative",
                     temperature=0.6,
                     max_tokens=3072,
+                    reasoning_config=REASONING_DISABLED,
                 )
             refined_text = (result.content or "").strip()
 

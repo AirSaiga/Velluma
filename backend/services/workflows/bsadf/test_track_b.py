@@ -67,7 +67,7 @@ def _make_cards(n=3):
             segment_index=i,
             beat_type="ESTABLISH" if i == 0 else "CONFRONT",
             target_word_count=500,
-            anchor_actions=[f"动作{i}"],
+            key_anchors=[f"动作{i}"],
         )
         for i in range(n)
     ]
@@ -92,6 +92,7 @@ def _make_workflow():
     request.enable_state_tracker = False
     request.enable_edit_verify = False
     request.enable_beat_coverage = False
+    request.enable_dde = False  # DDE 流程在 TestDdeFlow 单独测，这里关闭减少 mock 复杂度
     request.user_tier_hint = None
     request.author_intent = None
     request.expectation_actions = None
@@ -217,8 +218,15 @@ class TestPauseAfterSlotBuild:
         # 4c-7 未被调用
         mock_post.assert_not_called()
 
-    def test_pause_emits_beat_slots_built_event(self):
-        """暂停前应通过 progress_callback 推 BEAT_SLOTS_BUILT 事件。"""
+    def test_pause_does_not_emit_beat_slots_built_event(self):
+        """暂停模式（步进/Track B）工作流不再发 BEAT_SLOTS_BUILT。
+
+        契约变更：pause_after_slot_build=True 时由 route 层补发带 run_id 的
+        权威持卡事件（步进=STEPPING_INITIALIZED，Track B=route 版 BEAT_SLOTS_BUILT），
+        工作流内同名无 run_id 事件已门控关闭（bsadf_workflow.py Phase 4b），
+        避免前端收到两个同名语义事件。Track A（非暂停）仍发，见
+        test_no_pause_runs_full_pipeline 的事件断言。
+        """
         wf = _make_workflow()
         events = []
 
@@ -242,11 +250,8 @@ class TestPauseAfterSlotBuild:
                 wf.execute(progress_callback=cb, pause_after_slot_build=True)
             )
 
-        # BEAT_SLOTS_BUILT 必须在事件流里（Track B 的暂停信号）
         event_names = [e for e, _ in events]
-        assert "BEAT_SLOTS_BUILT" in event_names
-        bs_evt = next(d for e, d in events if e == "BEAT_SLOTS_BUILT")
-        assert bs_evt["count"] == 2
+        assert "BEAT_SLOTS_BUILT" not in event_names
 
     def test_no_pause_runs_full_pipeline(self):
         """pause=False（Track A）时 _run_render_and_postprocess 被调用（跑完全程）。"""
@@ -366,10 +371,10 @@ class TestBeatSlotSerialization:
             segment_index=1,
             beat_type="CONFRONT",
             target_word_count=600,
-            anchor_actions=["挥刀", "翻滚"],
-            sensory_details=["血腥味"],
+            key_anchors=["挥刀", "翻滚"],
             text_carrier="「去死」",
-            conflict_trigger="伏击",
+            core_plot_event="伏击",
+            branch_directive="忍辱负重。后续剧情会更压抑",
             emotion_register="愤怒",
             emotion_energy=8,
             landed_preconditions=["PC_01"],
@@ -380,7 +385,171 @@ class TestBeatSlotSerialization:
         restored = beat_slot_from_dict(d)
         assert restored.beat_id == card.beat_id
         assert restored.beat_type == card.beat_type
-        assert restored.anchor_actions == card.anchor_actions
+        assert restored.key_anchors == card.key_anchors
+        assert restored.core_plot_event == card.core_plot_event
+        assert restored.branch_directive == card.branch_directive
         assert restored.text_carrier == card.text_carrier
         assert restored.emotion_energy == card.emotion_energy
         assert restored.shot_type == card.shot_type
+
+
+# ============================================================
+# 测试组 5：DDE 流程穿透（Track A 静默应用 / Track B 单暂停内嵌）
+# ============================================================
+
+from backend.services.workflows.bsadf.dde.types import (
+    BranchOption,
+    ChapterDecisionSet,
+    StoryBranch,
+)
+
+
+def _make_decision_set(beat_id: str, has_branch: bool = True) -> ChapterDecisionSet:
+    """构造测试用 ChapterDecisionSet（一个分支节点，默认 B）。"""
+    if not has_branch:
+        return ChapterDecisionSet(has_story_branch=False, decision_nodes=[])
+    return ChapterDecisionSet(
+        has_story_branch=True,
+        decision_nodes=[
+            StoryBranch(
+                beat_id=beat_id,
+                node_title="面对挑衅的应对分支",
+                options=[
+                    BranchOption(option_id="A", label="当场反抗", plot_impact="被关禁闭"),
+                    BranchOption(option_id="B", label="忍辱负重", plot_impact="暗中收集证据"),
+                ],
+                default_option="B",
+            )
+        ],
+    )
+
+
+def _dde_patches(spine, anchor, cards, decision_set):
+    """统一的 patch 上下文：Phase 1-3 + 4a/b + DDE 全部 mock 掉。"""
+    return (
+        patch(
+            "backend.services.workflows.bsadf.bsadf_workflow.build_story_context",
+            new_callable=AsyncMock, return_value=spine,
+        ),
+        patch(
+            "backend.services.workflows.bsadf.bsadf_workflow.design_chapter_climax",
+            new_callable=AsyncMock, return_value=anchor,
+        ),
+        patch(
+            "backend.services.workflows.bsadf.bsadf_workflow.build_beat_slots",
+            return_value=cards,
+        ),
+        patch(
+            "backend.services.workflows.bsadf.bsadf_workflow.enrich_slots",
+            new_callable=AsyncMock, return_value=None,
+        ),
+        patch(
+            "backend.services.workflows.bsadf.bsadf_workflow.generate_chapter_decision_set",
+            new_callable=AsyncMock, return_value=decision_set,
+        ),
+    )
+
+
+class TestDdeFlow:
+    """验证 DDE 章节级分叉在 Track A/B 的穿透行为。"""
+
+    def _make_dde_workflow(self):
+        wf = _make_workflow()
+        wf.request.enable_dde = True
+        return wf
+
+    def test_track_a_silent_apply_default_branch(self):
+        """Track A：有分支时立即用 default_option 静默突变（写 branch_directive），
+        emit DDE_AUTO_APPLIED，全程不暂停（4c-7 照常执行）。"""
+        wf = self._make_dde_workflow()
+        cards = _make_cards(3)
+        decision_set = _make_decision_set(cards[0].beat_id)
+        events = []
+
+        async def cb(event, data):
+            events.append((event, data))
+
+        p1, p2, p3, p4, p5 = _dde_patches(_make_spine(), _make_anchor(), cards, decision_set)
+        with p1, p2, p3, p4, p5, patch.object(
+            BSAdfWorkflow, "_run_render_and_postprocess", new_callable=AsyncMock,
+        ) as mock_post:
+            result = asyncio.run(
+                wf.execute(progress_callback=cb, pause_after_slot_build=False)
+            )
+
+        # 静默突变：default_option=B 的 label + plot_impact 写入 branch_directive
+        assert cards[0].branch_directive == "忍辱负重。暗中收集证据"
+        # 其余卡不受影响
+        assert cards[1].branch_directive == ""
+        # DDE_AUTO_APPLIED 事件（含 decision_set 与 applied 映射）
+        event_names = [e for e, _ in events]
+        assert "DDE_AUTO_APPLIED" in event_names
+        dde_evt = next(d for e, d in events if e == "DDE_AUTO_APPLIED")
+        assert dde_evt["has_story_branch"] is True
+        assert dde_evt["applied"] == {cards[0].beat_id: "B"}
+        assert dde_evt["decision_set"]["decision_nodes"][0]["default_option"] == "B"
+        # 不暂停，4c-7 照常执行
+        assert result.debug_info.get("paused") is None
+        mock_post.assert_called_once()
+        # debug_info 快照含 branch_directive 与 decision_set
+        assert result.debug_info["beat_slots"][0]["branch_directive"] == "忍辱负重。暗中收集证据"
+        assert result.debug_info["decision_set"]["has_story_branch"] is True
+
+    def test_track_a_no_branch_emits_auto_applied_false(self):
+        """Track A：无岔路时 emit DDE_AUTO_APPLIED(has_story_branch=false)，不突变。"""
+        wf = self._make_dde_workflow()
+        cards = _make_cards(2)
+        decision_set = _make_decision_set(cards[0].beat_id, has_branch=False)
+        events = []
+
+        async def cb(event, data):
+            events.append((event, data))
+
+        p1, p2, p3, p4, p5 = _dde_patches(_make_spine(), _make_anchor(), cards, decision_set)
+        with p1, p2, p3, p4, p5, patch.object(
+            BSAdfWorkflow, "_run_render_and_postprocess", new_callable=AsyncMock,
+        ) as mock_post:
+            asyncio.run(wf.execute(progress_callback=cb, pause_after_slot_build=False))
+
+        dde_evt = next(d for e, d in events if e == "DDE_AUTO_APPLIED")
+        assert dde_evt["has_story_branch"] is False
+        assert dde_evt["applied"] == {}
+        assert all(c.branch_directive == "" for c in cards)
+        mock_post.assert_called_once()
+
+    def test_track_b_single_pause_embeds_decision_set(self):
+        """Track B：单次暂停——workflow 层不发 BEAT_SLOTS_BUILT（route 层补发
+        带 run_id 的权威事件，内嵌 decision_set），不静默突变、不 emit
+        DDE_AUTO_APPLIED（无独立 DDE 弹窗轮次）。"""
+        wf = self._make_dde_workflow()
+        cards = _make_cards(3)
+        decision_set = _make_decision_set(cards[0].beat_id)
+        events = []
+
+        async def cb(event, data):
+            events.append((event, data))
+
+        p1, p2, p3, p4, p5 = _dde_patches(_make_spine(), _make_anchor(), cards, decision_set)
+        with p1, p2, p3, p4, p5, patch.object(
+            BSAdfWorkflow, "_run_render_and_postprocess", new_callable=AsyncMock,
+        ) as mock_post:
+            result = asyncio.run(
+                wf.execute(progress_callback=cb, pause_after_slot_build=True)
+            )
+
+        # 单次暂停
+        assert result.debug_info.get("paused") is True
+        mock_post.assert_not_called()
+        # workflow 层不发 BEAT_SLOTS_BUILT：route 层补发带 run_id 的权威持卡事件
+        # （步进=STEPPING_INITIALIZED；Track B=route 版 BEAT_SLOTS_BUILT，bsadf.py），
+        # 若这里也发（无 run_id），前端会收到两个同名语义事件。
+        event_names = [e for e, _ in events]
+        assert "BEAT_SLOTS_BUILT" not in event_names
+        # debug_info 带 decision_set（route 层据此暂存并随权威事件下发，
+        # 供 confirm-beats 时按作者选择突变）
+        ds = result.debug_info["decision_set"]
+        assert ds["has_story_branch"] is True
+        assert ds["decision_nodes"][0]["beat_id"] == cards[0].beat_id
+        # 不做静默突变、不 emit DDE_AUTO_APPLIED
+        assert "DDE_AUTO_APPLIED" not in event_names
+        assert all(c.branch_directive == "" for c in cards)

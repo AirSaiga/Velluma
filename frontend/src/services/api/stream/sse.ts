@@ -54,48 +54,68 @@ export async function streamSse(
           return
         }
 
-        const chunk = decoder.decode(value, { stream: true })
-        buffer += chunk
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        // 包一层 try-catch：任何解析/回调异常都不能打断递归 read()，
+        // 否则流会静默死掉（后端还在跑但前端不再读，表现为"进度断掉"）
+        try {
+          const chunk = decoder.decode(value, { stream: true })
+          buffer += chunk
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
 
-          try {
-            const payload = JSON.parse(line.slice(6))
-            if (payload.content) {
-              hasContent = true
-            }
-            if (payload.error) {
-              ended = true
-              reader.cancel().catch(() => {})
-              handlers.onError?.(payload.error)
-              return
-            }
+            try {
+              const payload = JSON.parse(line.slice(6))
+              // 全量日志：追踪每个到达前端的 payload（诊断 SSE 事件丢失）
+              if (payload.event && payload.event !== 'HEARTBEAT') {
+                console.log('[streamSse] 收到', payload.event, payload.current ? (payload.current + '/' + payload.total) : '')
+              }
+              // HEARTBEAT 帧直接忽略（保活用，不触发任何业务回调）
+              if (payload.event === 'HEARTBEAT') {
+                continue
+              }
+              if (payload.content) {
+                hasContent = true
+              }
+              if (payload.error) {
+                ended = true
+                reader.cancel().catch(() => {})
+                handlers.onError?.(payload.error)
+                return
+              }
 
-            const shouldFinalize = handlers.onPayload?.(payload)
-            if (shouldFinalize) {
-              finalize()
-              return
-            }
-          } catch (e) {
-            console.error('streamSse JSON 解析错误', e)
-            parseErrors += 1
-            if (parseErrors >= 5 && !ended) {
-              ended = true
-              reader.cancel().catch(() => {})
-              handlers.onError?.('数据流解析失败：收到连续无效帧，请重试')
-              return
+              const shouldFinalize = handlers.onPayload?.(payload)
+              if (shouldFinalize) {
+                finalize()
+                return
+              }
+            } catch (e) {
+              console.error('streamSse JSON 解析错误', e)
+              parseErrors += 1
+              if (parseErrors >= 5 && !ended) {
+                ended = true
+                reader.cancel().catch(() => {})
+                handlers.onError?.('数据流解析失败：收到连续无效帧，请重试')
+                return
+              }
             }
           }
+        } catch (e) {
+          // 业务回调（onPayload）抛异常不应中断流读取
+          console.error('[streamSse] chunk 处理异常（不中断流）', e)
         }
 
+        // 递归继续读（关键：任何情况下都必须调 read()，否则流静默死亡）
         read()
       })
       .catch(err => {
         if (ended) return
+        // 主动 abort（如 advanceBeat 中止旧流）不是错误——静默结束，
+        // 否则 AbortError 会被当成生成失败把 stage 砸成 error（中止竞态）
+        if (signal?.aborted) return
         const message = err?.message || ''
+        console.error('[streamSse] read .catch 异常', message, err)
         if (
           handlers.tolerateIncompleteWhenHasContent &&
           hasContent &&
@@ -105,6 +125,7 @@ export async function streamSse(
           finalize()
           return
         }
+        console.error('[streamSse] read 异常', message)
         handlers.onError?.(message || '未知错误')
       })
   }

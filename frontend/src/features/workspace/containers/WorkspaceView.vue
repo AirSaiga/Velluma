@@ -5,12 +5,13 @@
  * 三栏布局：
  * - 左栏 Binder：章节导航（树/列表 + 状态徽标 + 新建章节）
  * - 中栏：TipTap 编辑器（复用 ChapterEditorContainer）+ 状态栏
- *   生成进行中时，编辑器上方叠加 GenerationOverlay 覆盖面板（显示进度，遮挡编辑器）
+ *   生成进行中时，渲染文直接灌入编辑器做只读预览（段级隔离），
+ *   编辑器下方显示 GenerationOverlay 一行状态条
  * - 右栏 Inspector：规划/精修/反馈/Canon 四 tab（大纲/标题编辑在「规划」tab）
  *
  * splitpanes 提供可拖拽分隔（依赖已装）。
  */
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -21,7 +22,17 @@ import MarkdownImportModal from '../../import-markdown/containers/MarkdownImport
 import ExtractionModal from '../../extraction/containers/ExtractionModal.vue'
 import InspectorPanel from './InspectorPanel.vue'
 import GenerationOverlay from '../../generation/presentation/GenerationOverlay.vue'
+import SparkDock from '../../generation/presentation/SparkDock.vue'
+import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
+import GhostTimeline from '../../generation/presentation/GhostTimeline.vue'
+import BranchBanner from '../../generation/presentation/BranchBanner.vue'
+import AutoCutHint from '../../generation/presentation/AutoCutHint.vue'
+import { useTimelineModel } from '../../generation/composables/ghostTimelineModel'
+import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
+import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
+import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
+import { buildGenerationPreviewHtml } from '../../generation/composables/buildGenerationPreview'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -52,9 +63,49 @@ const chapterIdFromRoute = computed(() => (route.params.chapterId as string) || 
 // V4.x 重构：共享 session（Inspector 和中栏覆盖面板都用同一个）
 const session = useGenerationSession()
 
+// NLE-ADF 3.0 自适应辅助层：挂载在 composing 态，驱动 perceive/续写/沉淀/岔路。
+// 注入续写函数到 session（键位状态机在 adaptive composing 态调它触发续写）。
+const adaptiveAssist = useAdaptiveAssist({
+  getChapterId: () => selectedChapterId.value,
+  getOutline: () => selectedChapter.value?.outline_text || '',
+  suggestionsRef: session.adaptiveSuggestions,
+  planSuggestionsRef: session.planSuggestions,
+  dynamicBeatsRef: session.dynamicBeats,
+  aiLaneRef: session.aiLane,
+  authorLaneRef: session.authorLane,
+  finishReportRef: session.finishReport,
+  settleResultRef: session.settleResult,
+})
+session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode, parts))
+session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
+session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
+onMounted(() => adaptiveAssist.mount())
+onBeforeUnmount(() => adaptiveAssist.unmount())
+
 // 生成进行中：stage 非 idle（覆盖面板叠加在编辑器上，物理遮挡使其不可操作）
 const isGenerating = computed(() =>
   session.generating.value && session.stage.value !== 'idle',
+)
+
+// 生成预览：渲染文并入正文编辑框（只读，段级隔离；完成/取消后自动回落章节正文）
+// NLE-ADF 2.0 作者模式：作者直接写在真实文档里（碎片/幽灵草稿即画布），
+// 预览投影必须关闭——否则预览会盖住画布、幽灵草稿无处安放。
+// NLE-ADF 3.0 自适应模式同理：画布即唯一事实源，预览投影必须关闭。
+const generationPreviewHtml = computed(() =>
+  (session.authoringEnabled.value || session.adaptiveMode.value) ? null : buildGenerationPreviewHtml(session),
+)
+
+// 主编辑器直改：步进裁决窗口期（就绪段等推进）预览可编辑——作者直接在
+// 正文编辑器里改当前段，改动经 preview-segment-edit 回写 session.segmentTexts，
+// 接受时自动走 lock_with_text 随本段定稿。渲染中/岔路门/其余阶段照旧只读。
+const previewEditable = computed(() =>
+  generationPreviewHtml.value != null &&
+  session.stage.value === 'beat_stepping' &&
+  !!session.readyBeatId.value &&
+  !session.generating.value,
+)
+const previewSegmentIndex = computed(() =>
+  previewEditable.value ? (session.readyBeatCard.value?.segment_index ?? null) : null,
 )
 
 // 保存状态（状态栏显示；实际写库在下方 handleUpdateChapter）
@@ -78,6 +129,25 @@ watch(() => session.error.value, (err) => {
 watch(() => session.stage.value, (newStage, oldStage) => {
   if (newStage === 'done' && oldStage !== 'idle' && oldStage !== 'done' && session.streamText.value) {
     handleGenerated(session.streamText.value)
+  }
+})
+
+// rerender-beat 单段重渲成功后落库（修复"重写本段"结果不进正文的 stub）。
+// stage 已是 done、上面的 watch 不会重触发，故由 session.pendingSaveText 信号驱动。
+// 非空 = 有新正文待落库；落库后清空信号。
+watch(() => session.pendingSaveText.value, async (text) => {
+  if (text && selectedChapter.value) {
+    try {
+      saveStatus.value = 'saving'
+      await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
+      saveStatus.value = 'saved'
+      showToast('已更新该段正文并保存', 'success')
+    } catch (e: any) {
+      saveStatus.value = 'error'
+      showToast('写入失败：' + e.message, 'error')
+    } finally {
+      session.pendingSaveText.value = null
+    }
   }
 })
 
@@ -128,7 +198,7 @@ watch(selectedChapterId, (newId) => {
   }
 }, { immediate: true })
 
-// 三栏分栏宽度（持久化）
+// 两栏分栏宽度（持久化数组保持 3 元结构兼容旧 prefs，第三元为历史右栏值不再使用）
 const splitSizes = ref<number[]>(loadUiPrefs().splitSizes || [20, 55, 25])
 // 警示：splitpanes v4 的 resized 载荷是对象 { event, index, panes: [{min,max,size}] }（v3 才是数组）。
 // 且 resized 在 document mouseup 监听器内同步 emit——这里一旦抛异常，库的 mousemove/mouseup
@@ -138,15 +208,125 @@ function onResize(payload: { panes?: { size: number }[] }) {
     const panes = payload?.panes
     if (!Array.isArray(panes)) return
     const next = panes.map((p) => p.size)
-    // 防御：splitpanes 偶发返回空数组
-    if (next.length === 3 && next.every((n) => typeof n === 'number' && n > 0)) {
-      splitSizes.value = next
-      saveUiPrefs({ ...loadUiPrefs(), splitSizes: next })
+    // 防御：splitpanes 偶发返回空数组（两栏布局：binder + 画布）
+    if (next.length === 2 && next.every((n) => typeof n === 'number' && n > 0)) {
+      splitSizes.value = [next[0], next[1], splitSizes.value[2] ?? 25]
+      saveUiPrefs({ ...loadUiPrefs(), splitSizes: splitSizes.value })
     }
   } catch (e) {
     console.error('[Workspace] 保存分栏宽度失败', e)
   }
 }
+
+// ============================================================
+// NLE-ADF 2.0 画布化：右缘隐形抽屉 + 打字沉浸 + 微观状态栏
+// ============================================================
+// 抽屉：右缘 2px 触发条 hover 滑出 / Ctrl+\ 固定；覆盖式（不推挤画布）。
+const drawerHover = ref(false)
+const drawerPinned = ref(false)
+const drawerOpen = computed(() => drawerHover.value || drawerPinned.value)
+
+function _drawerKeyHandler(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+    e.preventDefault()
+    drawerPinned.value = !drawerPinned.value
+    if (drawerPinned.value) drawerHover.value = false
+  }
+}
+onMounted(() => window.addEventListener('keydown', _drawerKeyHandler))
+onBeforeUnmount(() => window.removeEventListener('keydown', _drawerKeyHandler))
+
+// 打字沉浸：编辑活动期间顶栏/时间轴降到极低透明度（设计稿"打字时 10%"）。
+const isTyping = ref(false)
+let _typingTimer: ReturnType<typeof setTimeout> | null = null
+function _onTypingActivity() {
+  isTyping.value = true
+  if (_typingTimer) clearTimeout(_typingTimer)
+  _typingTimer = setTimeout(() => { isTyping.value = false }, 1200)
+}
+watch(chapterEditorHandle, (editor, prev) => {
+  prev?.off('update', _onTypingActivity)
+  editor?.on('update', _onTypingActivity)
+}, { immediate: true })
+
+// 微观状态栏：NLE 状态标签 + 锁死进度（与时间线共用数据模型）
+const timeline = useTimelineModel(session)
+const nleStateLabel = computed(() => {
+  switch (session.stage.value) {
+    case 'tier_classifying': return '规划本章'
+    case 'setup_growing': return '生长分镜'
+    case 'beat_authoring': return '自由涌现'
+    case 'beat_rendering':
+      // 作者模式下推进过渡期（已锁段在渲染位）= 无感沉淀进行中
+      return session.authoringEnabled.value &&
+        session.lockedBeatIds.value.has(session.renderingBeatId.value || '')
+        ? '沉淀本拍'
+        : 'AI 渲染中'
+    case 'beat_stepping': return '待你裁决'
+    case 'beat_branch_choosing': return '抉择岔路'
+    case 'assembling':
+    case 'refining':
+    case 'auditing': return '后处理'
+    case 'done': return '已完成'
+    case 'error': return '生成失败'
+    default: return ''
+  }
+})
+const nleProgress = computed(() =>
+  timeline.timelineVisible.value
+    ? `锁死 ${timeline.lockedCount.value}/${timeline.totalCount.value}`
+    : '',
+)
+
+// Spark Dock 兜底件已移除：原注入的是角色名（"林尘"），与卡片舱"镜头特写碎片"
+// 定位冲突（碎片应是 6-12 字画面，非角色名）。卡片舱现仅显示后端 dock_generator
+// 生发的 LLM 灵感碎片（生成时已参考角色/资产/设定 nutrients，不需要前端再注入）。
+// 切章时清空旧章残留的挂件缓存。
+watch(
+  () => selectedChapter.value?.id,
+  () => { setExtraSparkParts([]) },
+  { immediate: true },
+)
+
+// ============================================================
+// NLE-ADF 2.0 零门槛冷启动（隐形预生成）
+// ============================================================
+// 设计契约：作者在新章节直接开写，不需要点任何"生成"按钮——停顿 1.5s 后
+// 后台自动起生成管线（Phase 1-4b 与打字并行），拍打开时 Spark Dock 自然亮起。
+// 门禁（防误触/防烧调用）：
+//   1) 仅"新章开写"场景：载入时正文 < 50 字（既有章节的修订不触发）
+//   2) stage=idle 且无进行中任务（已有会话/已完成章节不触发）
+//   3) 确有一定量新输入（≥4 字，防载入即触发）
+//   4) 每章每次会话至多自动起一次
+// NLE-ADF 3.0：作者进章节打字即激活自适应写作模式（取代旧冷启动跑整章管线）。
+// 不跑定档/锚点/分镜——只把 authorLane 置 composing，辅助层（useAdaptiveAssist）
+// 据此挂载 perceive/续写/沉淀能力。旧 step 路径（startBeat）保留为「规划本章」入口。
+let _activatedChapterId: string | null = null
+
+watch(selectedChapter, (ch, prev) => {
+  if (ch && ch.id !== prev?.id) {
+    _activatedChapterId = null
+    // 切章时若在 adaptive 模式，退出（新章需重新激活）
+    if (session.adaptiveMode.value) session.exitAdaptive()
+  }
+}, { immediate: true })
+
+function _onAuthorActivity() {
+  const chapterId = selectedChapterId.value
+  if (!chapterId) return
+  if (_activatedChapterId === chapterId) return  // 已激活
+  // 旧管线在跑则不抢（作者主动选了规划模式）
+  if (session.generating.value && session.stage.value !== 'idle') return
+  const editor = chapterEditorHandle.value
+  const typed = editor ? editor.state.doc.textContent.trim().length : 0
+  if (typed < 4) return  // 作者刚开始打字，够 4 字才激活（防误触）
+  _activatedChapterId = chapterId
+  session.enterAdaptive(chapterId)
+}
+watch(chapterEditorHandle, (editor, prev) => {
+  prev?.off('update', _onAuthorActivity)
+  editor?.on('update', _onAuthorActivity)
+}, { immediate: true })
 
 const chapterEditorRef = ref<any>(null)
 
@@ -334,12 +514,6 @@ async function handleGenerated(text: string) {
   }
 }
 
-// 审校问题点击定位：滚动编辑器到 offset 并临时高亮（V3.1 F4）
-function handleJumpToOffset(offset: [number, number] | undefined) {
-  if (!offset) return
-  chapterEditorRef.value?.scrollToOffset?.(offset)
-}
-
 const wordCount = computed(() => (selectedChapter.value?.content_text || '').length)
 
 // 删除章节（悬停章节行出现入口，确认后调用 store.deleteChapter）
@@ -461,8 +635,22 @@ async function confirmDeleteChapter(ch: Chapter) {
       </Pane>
 
       <!-- 中栏：编辑器 + 状态栏 -->
-      <Pane :size="splitSizes[1]" :min-size="30" class="editor-pane">
+      <Pane :size="100 - splitSizes[0]" :min-size="30" class="editor-pane">
         <main class="editor-area">
+          <!-- NLE-ADF 2.0 顶部微观状态栏：章节名 + NLE 状态 + 锁死进度（打字时降到 10% 透明） -->
+          <div
+            v-if="selectedChapter"
+            class="nle-topbar"
+            :class="{ 'nle-topbar--dim': isTyping }"
+          >
+            <span class="nle-topbar__chapter">
+              {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}<template v-if="selectedChapter.title"> · {{ selectedChapter.title }}</template>
+            </span>
+            <span v-if="nleStateLabel" class="nle-topbar__state">{{ nleStateLabel }}</span>
+            <span v-if="nleProgress" class="nle-topbar__progress">{{ nleProgress }}</span>
+          </div>
+          <!-- NLE-ADF 2.0 岔路门画布横幅（有岔路时顶部滑入；唯一允许打断心流的组件） -->
+          <BranchBanner :session="session" />
           <!-- 编辑器（复用 ChapterEditorContainer 全套）；生成中叠加覆盖面板 -->
           <div v-if="selectedChapter" class="editor-host">
             <ChapterEditor
@@ -471,10 +659,14 @@ async function confirmDeleteChapter(ch: Chapter) {
               :characters="characters"
               :api-config="apiConfig"
               :book-id="currentBook?.id"
+              :preview-html="generationPreviewHtml"
+              :preview-editable="previewEditable"
+              :preview-segment-index="previewSegmentIndex"
+              @preview-segment-edit="session.setReadySegmentText"
               @update-chapter="handleUpdateChapter"
               @refresh-characters="handleRefreshCharacters"
             />
-            <!-- 生成覆盖面板：绝对定位遮挡编辑器，显示进度；失败态保持展示（含重试/关闭） -->
+            <!-- 生成状态条：编辑器下方一行进度（含取消）+ 实时正文流；失败态保持展示（含重试/关闭） -->
             <GenerationOverlay
               v-if="isGenerating || session.stage.value === 'error'"
               :session="session"
@@ -495,22 +687,40 @@ async function confirmDeleteChapter(ch: Chapter) {
           </div>
 
           <!-- 状态栏 -->
-          <footer v-if="selectedChapter" class="status-bar">
+          <footer v-if="selectedChapter" class="status-bar" :class="{ 'status-bar--dim': isTyping }">
             <span>{{ wordCount }} 字</span>
+            <!-- NLE-ADF 2.0 底栏幽灵时间线（碎片节点 ●◐○ + x/N；仅步进会话激活时出现） -->
+            <GhostTimeline :session="session" />
             <span v-if="saveStatus === 'saving'">保存中…</span>
             <span v-else-if="saveStatus === 'saved'" class="muted">已保存</span>
           </footer>
+          <!-- NLE-ADF 2.0 灵感悬浮舱（Teleport 到 body，跟随光标；键盘交互在 session） -->
+          <SparkDock />
+          <!-- NLE-ADF 3.0 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
+          <ThinkingIndicator />
+          <!-- 软切淡提示（写过头自动收束时浮现 8s，可撤回合并） -->
+          <AutoCutHint :session="session" />
         </main>
       </Pane>
 
-      <!-- 右栏：Inspector 智能副驾 -->
-      <Pane :size="splitSizes[2]" :min-size="16" :max-size="40" class="inspector-pane">
-        <InspectorPanel
-          :external-session="session"
-          @jump-to-offset="handleJumpToOffset"
-        />
-      </Pane>
     </Splitpanes>
+
+    <!-- NLE-ADF 2.0 右缘隐形抽屉：hover 触发条滑出 / Ctrl+\ 固定（覆盖式不推画布） -->
+    <div
+      class="drawer-edge"
+      :class="{ 'drawer-edge--active': drawerOpen }"
+      title="副驾抽屉（Ctrl+\ 固定）"
+      @mouseenter="drawerHover = true"
+    ></div>
+    <Transition name="inspector-drawer">
+      <aside
+        v-if="drawerOpen"
+        class="inspector-drawer"
+        @mouseleave="drawerHover = false"
+      >
+        <InspectorPanel :external-session="session" />
+      </aside>
+    </Transition>
 
     <!-- Markdown 批量导入 Modal -->
     <MarkdownImportModal v-if="showImportModal" @close="showImportModal = false" />

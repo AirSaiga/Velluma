@@ -26,8 +26,11 @@ export const assetApi = {
   getChapterAssets: (chapterId: string) =>
     requestJson<ChapterAsset[]>(`/chapters/${chapterId}/assets`),
 
-  updateChapterAssets: (chapterId: string, assetIds: string[]) =>
-    requestJson<ChapterAsset[]>(`/chapters/${chapterId}/assets?asset_ids=${assetIds.join('&asset_ids=')}`, {
+  updateChapterAssets: (chapterId: string, assetIds: string[]) => {
+    // 空列表时不带 query，避免后端把 ?asset_ids= 解析成 [''] 触发 UUID 校验失败
+    const qs = assetIds.length ? `?asset_ids=${assetIds.join('&asset_ids=')}` : ''
+    return requestJson<ChapterAsset[]>(`/chapters/${chapterId}/assets${qs}`, {
       method: 'PUT'
     })
+  }
 }

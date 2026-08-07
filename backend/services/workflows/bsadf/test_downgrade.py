@@ -14,7 +14,7 @@ from backend.services.workflows.adf.types import SegmentResult
 def _make_card():
     return BeatSlotCard(
         beat_id="BS_TEST_00", segment_index=0, beat_type="ESTABLISH",
-        target_word_count=500, anchor_actions=["气动扳手"], sensory_details=["柴油味"],
+        target_word_count=500, key_anchors=["气动扳手"],
         shot_type="wide", transition="cut", emotion_register="入口",
     )
 

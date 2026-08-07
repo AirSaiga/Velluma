@@ -17,6 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from backend.core.dependencies import get_chapter_repository
@@ -131,3 +133,38 @@ async def optimize_selection(
     )
     
     return {"optimized_text": optimized_text}
+
+
+# ============================================================
+# NLE-ADF 2.0：深度清脂（De-Fat Dial 深度档，Alt+Shift+↓）
+# ============================================================
+
+class DefatSelectionRequest(BaseModel):
+    """深度清脂请求：任意段落文本（不限于生成会话内）。"""
+    text: str = Field(..., min_length=1, max_length=5000)
+    must_keep: Optional[List[str]] = Field(
+        None, description="洗涤必须保留的锚点词（防洗掉情节硬元素）"
+    )
+
+
+@router.post("/defat_selection")
+async def defat_selection(request: DefatSelectionRequest):
+    """深度清脂：AI 味密度超阈值时调 LLM 重洗，未超标走正则轻裁。
+
+    与本地词级规则（前端 Alt+↓）的分工：本地规则即时/免费/可预测但只能删
+    套路词；本端点是"还嫌油"时的深度档——比喻句改写、心理升华句转白描
+    由 wash LLM 完成。未超阈值不烧 LLM（wash_segment_if_too_ai 内置闸门）。
+    """
+    from backend.services.nlg.ai_taste_meter import measure_ai_taste
+    from backend.services.nlg.de_ai_washer import wash_segment_if_too_ai
+
+    text = request.text.strip()
+    report = measure_ai_taste(text)
+    result = await wash_segment_if_too_ai(text, report, must_keep=request.must_keep)
+    return {
+        "text": result.text,
+        "washed": result.washed,
+        "original_score": result.original_score,
+        "final_score": result.final_score,
+        "reason": result.reason,
+    }

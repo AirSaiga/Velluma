@@ -1212,3 +1212,43 @@ class CanonEdge(Base):
 
     def __repr__(self):
         return f"<CanonEdge {self.type} strength={self.strength}>"
+
+
+# ============================================================
+# NLE-ADF 3.0 世界模型（自适应写作伙伴的系统状态核心）
+# ============================================================
+# 三层信度的章级状态容器：
+# - layer1_facts：已写事实（沉淀锁死的段落 + 涌现实体，不可变，追加式）
+# - layer2_intent：意图推断（大纲转化 or 正文反推，可变，信度标注）
+# - layer3_projections：未来推测（基于1+2的概率画面预测，可变）
+# 组件读快照、写时创建新版本；调度器据此决定激活哪些能力。
+class WorldModelORM(Base):
+    """世界模型表——每章一行，承载系统对该章的全部理解。"""
+
+    __tablename__ = "world_models"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    chapter_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,  # 每章只有一个世界模型
+        index=True,
+    )
+    # 层 1：已写事实。[{text, entities:[], state_changes:[], settled_at, word_count}]
+    layer1_facts = Column(JSONB, default=list)
+    # 层 2：意图推断。{source:"author"|"inferred"|"none", confidence:0-1, arc:"",
+    #   emotion_curve:[], setup_points:[], must_hits:[], foreshadows:[]}
+    layer2_intent = Column(JSONB, default=dict)
+    # 层 3：未来推测。[{possible_beats:[{event, anchors, emotion}], confidence:0-1}]
+    layer3_projections = Column(JSONB, default=list)
+    # 意图重算次数（调度器节流：变化触发反推时 +1，用于判断 intent 是否 stale）
+    intent_version = Column(Integer, default=0)
+    # 上次反推时间戳（节流用：30s 最小间隔）
+    last_inference_ts = Column(Float, default=0.0)
+    # 上次挂件生成用的 projection 签名（懒加载：projection 没变就不重算挂件）
+    last_dock_sig = Column(Text, default="")
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldModel chapter={self.chapter_id} v{self.intent_version}>"

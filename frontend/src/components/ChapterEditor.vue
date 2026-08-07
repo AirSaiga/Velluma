@@ -9,9 +9,15 @@ const props = defineProps<{
   apiConfig: ApiConfig
   bookId?: string | null
   metaCollapsed?: boolean
+  /** 生成预览 HTML（非 null 时编辑器默认只读显示预览，替代章节正文） */
+  previewHtml?: string | null
+  /** 主编辑器直改：步进裁决窗口期预览可编辑 */
+  previewEditable?: boolean
+  /** 主编辑器直改：当前可编辑段的 segment_index */
+  previewSegmentIndex?: number | null
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'preview-segment-edit'])
 
 const containerRef = ref<any>(null)
 
@@ -30,16 +36,6 @@ function handleRefreshCharacters() {
 function handleEditorEntityFocus(keyword: string) {
   emit('editor-entity-focus', keyword)
 }
-
-function scrollToOffset(offset: [number, number]) {
-  if (containerRef.value?.scrollToOffset) {
-    containerRef.value.scrollToOffset(offset)
-  }
-}
-
-defineExpose({
-  scrollToOffset
-})
 </script>
 
 <template>
@@ -50,9 +46,13 @@ defineExpose({
     :api-config="props.apiConfig"
     :book-id="props.bookId"
     :meta-collapsed="props.metaCollapsed"
+    :preview-html="props.previewHtml"
+    :preview-editable="props.previewEditable"
+    :preview-segment-index="props.previewSegmentIndex"
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"
     @refresh-characters="handleRefreshCharacters"
     @editor-entity-focus="handleEditorEntityFocus"
+    @preview-segment-edit="(text: string) => emit('preview-segment-edit', text)"
   />
 </template>

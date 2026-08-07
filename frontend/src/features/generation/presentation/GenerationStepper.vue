@@ -1,26 +1,27 @@
 <script setup lang="ts">
 /**
- * 生成步骤流（V3.1 F3 新建，规格 §5.1）。
+ * 生成步骤流（V3.1 F3 新建，规格 §5.1；后重构为右栏完整进度中心）。
  *
- * 嵌入右栏「本章」tab，非模态呈现生成流程的当前阶段。
- * 按档位自动开合三确认点（高潮点/铺垫结构/高潮段成稿）。
+ * 嵌入右栏「规划」tab，非模态呈现生成流程的当前阶段，是生成进度的
+ * 唯一完整展示处（底部 GenerationOverlay 仅保留一行极简状态条 + 实时正文流）。
  *
  * 显示：
  * - 定档通知卡（tier + 理由）
  * - 步骤条（当前阶段 + 进度）
+ * - 等待提示（长耗时阶段的具体动作 + 预估耗时）/ 已生成字数
  * - 飞行中调节事件通知卡（升档建议/压抑校准/并章建议）
- * - 流式正文进度
+ * - 降级事件、失败重试
  */
 import { computed } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import type { GenerationSession } from '../composables/useGenerationSession'
+import { formatDegradedReason } from '../../../shared/constants/degradation'
 
 const props = defineProps<{
   session: GenerationSession
 }>()
 
 const emit = defineEmits<{
-  (e: 'cancel'): void
   (e: 'retry'): void
   (e: 'dismiss-inflight', index: number): void
 }>()
@@ -32,11 +33,57 @@ const generating = computed(() => props.session.generating.value)
 const errorText = computed(() => props.session.error.value)
 const inflightEvents = computed(() => props.session.inflightEvents.value)
 const degraded = computed(() => props.session.degraded.value)
+const streamTextLen = computed(() => props.session.streamText.value.length)
+/** Loop1 大纲自检结论（enable_outline_self_check 固定开，2×reasoning LLM 必跑；
+ *  此前产出存 loop1Result 后无任何 UI 消费，作者不知大纲有结构性问题） */
+const loop1 = computed(() => props.session.loop1Result.value)
 
 const progressPercent = computed(() => {
   const p = stepProgress.value
   if (!p || !p.total || p.index == null) return null
-  return Math.round(((p.index - 1) / p.total) * 100)
+  return Math.round((p.index / p.total) * 100)
+})
+
+/** 友好的等待态文案：BS-ADF 长耗时阶段（分镜卡扩写 / 后处理）给出
+ *  "正在做什么 + 预估耗时"提示，避免用户以为卡死。
+ *  后处理阶段（PRUNE/ANCHOR_AUDIT/REFINE/BEAT_PATCH/CONSISTENCY_GUARD）在
+ *  末段锁死后逐个同步跑，慢模型下单阶段可达数分钟，是最容易让用户误判
+ *  "卡死"的空窗——这里用 mapBsadfStageToLabel 产出的中文 label 做匹配。 */
+const waitingHint = computed(() => {
+  const label = stepProgress.value?.label || ''
+  const p = stepProgress.value
+  // 分镜卡扩写阶段：每卡 ~12s
+  if (label.includes('分镜卡扩写') && p?.index != null && p?.total) {
+    const remaining = Math.max(0, p.total - p.index)
+    const eta = remaining * 12
+    return `正在为每段扩写画面焦点与细节（剩余约 ${remaining} 段，预计 ${eta} 秒）`
+  }
+  // 通用等待
+  if (stage.value === 'tier_classifying') {
+    return '正在梳理前文脉络、设计本章高潮与定档篇幅…'
+  }
+  // 后处理阶段：末段锁死后逐个跑，耗时较长，给出"正在做什么 + ETA"安抚
+  // label 来自 useGenerationSession.ts mapBsadfStageToLabel 的中文映射
+  if (label.includes('重构剪枝')) {
+    return '正在逐段去除 AI 腔、重构表达（通常 1-3 分钟，请勿关闭）'
+  }
+  if (label.includes('锚点审计')) {
+    return '正在核对必现画面与情绪是否到位…'
+  }
+  if (label.includes('条件补埋')) {
+    return '正在补写遗漏的铺垫…'
+  }
+  if (label.includes('补写遗漏节拍')) {
+    return '正在为缺失节拍补写过渡段…'
+  }
+  if (label.includes('一致性守卫')) {
+    return '正在全文校验设定 / 人名 / 状态一致性（最耗时，约 2-4 分钟，请耐心等待）'
+  }
+  // assembling 是 ALL_BEATS_LOCKED 后进入后处理的过渡态
+  if (stage.value === 'assembling') {
+    return '全部段落已锁定，正在进入精修与一致性校验…'
+  }
+  return ''
 })
 
 function tierChinese(tier?: string): string {
@@ -75,6 +122,36 @@ function inflightLabel(type: string): string {
       </div>
     </div>
 
+    <!-- Loop1 大纲自检结论（生成前/槽位卡阶段展示；violations/hard_facts 此前被静默吞掉） -->
+    <details v-if="loop1" class="loop1-card" :class="{ warn: !loop1.critique_pass }">
+      <summary>
+        <span v-if="loop1.critique_pass">✓ 大纲自检通过</span>
+        <span v-else>⚠ 大纲自检：发现 {{ loop1.violations.length }} 处需注意</span>
+      </summary>
+      <div class="loop1-body">
+        <!-- 违规项（critique_pass=false 时才有） -->
+        <div v-if="loop1.violations.length > 0" class="loop1-section">
+          <div class="loop1-section-title">需注意</div>
+          <ul class="loop1-list">
+            <li v-for="(v, i) in loop1.violations" :key="i">
+              <span class="loop1-content">{{ v.content || v.reason || JSON.stringify(v) }}</span>
+              <span v-if="v.reason && v.content" class="loop1-reason">（{{ v.reason }}）</span>
+            </li>
+          </ul>
+        </div>
+        <!-- 硬事实（提取自大纲，供作者核对 AI 理解是否正确） -->
+        <details v-if="loop1.hard_facts.length > 0" class="loop1-facts">
+          <summary>AI 从大纲提取的 {{ loop1.hard_facts.length }} 条硬事实（点开核对）</summary>
+          <ul class="loop1-list">
+            <li v-for="(f, i) in loop1.hard_facts" :key="i">
+              <span v-if="f.category" class="loop1-tag">{{ f.category }}</span>
+              <span class="loop1-content">{{ f.content }}</span>
+            </li>
+          </ul>
+        </details>
+      </div>
+    </details>
+
     <!-- 步骤条 -->
     <div v-if="generating || stage === 'done'" class="step-bar">
       <div class="step-header">
@@ -92,6 +169,13 @@ function inflightLabel(type: string): string {
       </div>
       <div v-if="progressPercent != null && generating" class="progress-track">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+      </div>
+      <!-- 等待提示（长耗时阶段的具体动作 + 预估耗时）/ 已生成字数 -->
+      <div v-if="generating && streamTextLen > 0" class="step-sub">
+        已生成 {{ streamTextLen }} 字
+      </div>
+      <div v-else-if="generating && waitingHint" class="step-sub">
+        {{ waitingHint }}
       </div>
     </div>
 
@@ -123,20 +207,15 @@ function inflightLabel(type: string): string {
 
     <!-- 降级事件 -->
     <details v-if="degraded.length > 0" class="degraded-details">
-      <summary>{{ degraded.length }} 个降级事件（已兜底）</summary>
+      <summary>{{ degraded.length }} 个降级事件（建议在分镜卡里「重写本段」修复）</summary>
       <ul class="degraded-list">
         <li v-for="(d, i) in degraded" :key="i">
-          <span class="deg-reason">{{ d.reason }}</span>
-          <span class="deg-action">兜底：{{ d.action }}</span>
+          <span class="deg-reason">{{ formatDegradedReason(d.reason) }}</span>
+          <span v-if="d.detail" class="deg-action">{{ d.phase }}：{{ d.detail }}</span>
+          <span v-else-if="d.phase" class="deg-action">阶段：{{ d.phase }}</span>
         </li>
       </ul>
     </details>
-
-    <!-- 取消按钮 -->
-    <button v-if="generating" class="btn-cancel" @click="emit('cancel')">
-      <Icon name="x-mark" :size="13" />
-      <span>取消生成</span>
-    </button>
   </div>
 </template>
 
@@ -244,6 +323,14 @@ function inflightLabel(type: string): string {
   transition: width 0.3s ease;
 }
 
+/* 等待提示 / 已生成字数 */
+.step-sub {
+  margin-top: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* 失败态卡片 */
 .error-card {
   background: var(--bg-canvas);
@@ -328,6 +415,75 @@ function inflightLabel(type: string): string {
   cursor: pointer;
   padding: 0.25rem 0;
 }
+
+/* Loop1 大纲自检结论 */
+.loop1-card {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  font-size: 0.75rem;
+}
+.loop1-card.warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.loop1-card summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.loop1-card.warn summary {
+  color: #b45309;
+}
+.loop1-body {
+  margin-top: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.loop1-section-title {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-bottom: 0.125rem;
+}
+.loop1-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+.loop1-list li {
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.loop1-content {
+  color: var(--text-primary);
+}
+.loop1-reason {
+  color: var(--text-muted);
+}
+.loop1-tag {
+  display: inline-block;
+  margin-right: 0.25rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  background: var(--bg-tertiary);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+.loop1-facts {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.loop1-facts summary {
+  cursor: pointer;
+  padding: 0.125rem 0;
+}
 .degraded-list {
   list-style: none;
   padding: 0;
@@ -343,23 +499,4 @@ function inflightLabel(type: string): string {
 }
 .deg-reason { color: #dc2626; }
 .deg-action { color: var(--text-muted); }
-
-/* 取消按钮 */
-.btn-cancel {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.3125rem 0.625rem;
-  font-size: 0.6875rem;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  align-self: flex-start;
-}
-.btn-cancel:hover {
-  color: #dc2626;
-  border-color: #dc2626;
-}
 </style>

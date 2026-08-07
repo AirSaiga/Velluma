@@ -1,7 +1,8 @@
 """slot_renderer 单测。
 
 覆盖：
-- verify_slot_coverage：纯函数校验槽位覆盖（动作/感官/载体）
+- verify_slot_coverage：纯函数校验槽位覆盖（硬焦点锚点词/文本载体；
+  感官词校验已随 sensory_details 字段一起删除，感官指导下沉为静态 system prompt）
 - render_slot_to_segment：mock LLM，验证返回 SegmentResult + 后处理链触发
 
 注意：mock LLMResult 时使用 .content 字段（call_llm_with_usage 返回类型实际字段名）。
@@ -22,8 +23,8 @@ from backend.services.workflows.bsadf.slot_renderer import (
 def _make_card(**kwargs):
     defaults = dict(
         beat_id="BS_TEST_00", segment_index=0, beat_type="ESTABLISH",
-        target_word_count=500, anchor_actions=["气动扳手"], sensory_details=["柴油味"],
-        text_carrier="世界庞大", conflict_trigger="门被踢开",
+        target_word_count=500, key_anchors=["气动扳手"],
+        text_carrier="世界庞大", core_plot_event="门被踢开",
         shot_type="wide", transition="cut", emotion_register="入口", emotion_energy=3,
     )
     defaults.update(kwargs)
@@ -38,19 +39,12 @@ class TestVerifySlotCoverage:
         assert passed is True
         assert missing == []
 
-    def test_missing_action_fails(self):
-        card = _make_card(anchor_actions=["气动扳手", "不存在词"])
+    def test_missing_anchor_fails(self):
+        card = _make_card(key_anchors=["气动扳手", "不存在词"])
         text = "他砸下气动扳手，柴油味弥漫，世界庞大。"
         passed, missing = verify_slot_coverage(text, card)
         assert passed is False
         assert any("不存在词" in m for m in missing)
-
-    def test_missing_sensory_fails(self):
-        card = _make_card(sensory_details=["柴油味", "不存在的味道"])
-        text = "柴油味弥漫，气动扳手响起，世界庞大。"
-        passed, missing = verify_slot_coverage(text, card)
-        assert passed is False
-        assert any("不存在的味道" in m for m in missing)
 
     def test_missing_carrier_fails(self):
         card = _make_card(text_carrier="特定台词XYZ")
@@ -65,10 +59,18 @@ class TestVerifySlotCoverage:
         passed, missing = verify_slot_coverage(text, card)
         assert passed is True
 
-    def test_empty_actions_not_checked(self):
+    def test_empty_anchors_not_checked(self):
         # 全部槽位为空时，任意文本都应通过（验证"空槽不检查"语义）
-        card = _make_card(anchor_actions=[], sensory_details=[], text_carrier="")
+        card = _make_card(key_anchors=[], text_carrier="")
         text = "任意文本"
+        passed, missing = verify_slot_coverage(text, card)
+        assert passed is True
+
+    def test_core_plot_event_not_coverage_checked(self):
+        """core_plot_event 是剧情转折描述，不做 coverage 逐词校验
+        （校验的是 key_anchors/text_carrier；转折落座由 Phase 5 审计负责）。"""
+        card = _make_card(core_plot_event="一段绝对不会出现的转折描述")
+        text = "他砸下气动扳手，低声说'世界庞大'。"
         passed, missing = verify_slot_coverage(text, card)
         assert passed is True
 
@@ -102,7 +104,7 @@ class TestRenderSlotToSegment:
         assert "气动扳手" in seg.text
         assert ret_card.render_attempts == 1
         # coverage 应通过（所有词都在）
-        assert not any("动作词" in i or "感官词" in i for i in issues)
+        assert not any("动作词" in i or "文本载体" in i for i in issues)
 
     def test_llm_failure_returns_empty(self):
         """LLM 抛异常时返回空文本 + llm_error issue。"""

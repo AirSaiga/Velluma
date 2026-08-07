@@ -21,7 +21,6 @@ def test_stepping_run_init_has_required_fields():
     assert run.current_beat_index == 0
     assert run.locked_segments == []
     assert run.state_card_chain == []
-    assert isinstance(run.advance_event, asyncio.Event)
     assert isinstance(run.action_queue, asyncio.Queue)
     assert isinstance(run.event_queue, asyncio.Queue)
     assert run.created_at > 0
@@ -89,11 +88,20 @@ class _FakeWorkflow:
         self._texts = texts
         self._call_idx = 0
         self.post_step_called = False
+        self.author_locked_texts: List[str] = []
+
+    @property
+    def render_call_count(self) -> int:
+        return self._call_idx
 
     async def render_one(self, card, segment_index, locked_segments, state_card_chain, **kw):
         text = self._texts[self._call_idx % len(self._texts)]
         self._call_idx += 1
         return _FakeSegment(segment_index, text), None
+
+    async def lock_segment_with_author_text(self, card, author_text, segment_index, locked_segments, state_card_chain, **kw):
+        self.author_locked_texts.append(author_text)
+        return _FakeSegment(segment_index, author_text), None
 
     async def ingest_memory(self, segment, card, segment_index, **kw):
         return {"new_entities": []}
@@ -355,6 +363,275 @@ async def test_branch_gate_no_branch_skips_gate():
     await run.event_queue.get()  # BEAT_RENDER_READY
     await run.action_queue.put({"action": "pass", "beat_id": "B00"})
     await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+# ============================================================
+# NLE-ADF 2.0 作者模式（authoring_mode=True）
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_authoring_mode_opens_and_waits_without_render():
+    """作者模式：到拍发 BEAT_AUTHORING_OPEN 挂起，不自动渲染；render 动作才代笔。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["代笔第一段。", "代笔第二段。"])
+    run = SteppingRun(
+        run_id="r_auth1", chapter_id=1, cards=cards, workflow=workflow,
+        authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    # 首事件必须是 AUTHORING_OPEN（不是 RENDER_START），且渲染未被调用
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"
+    assert ev_data["beat_id"] == "B00"
+    assert workflow.render_call_count == 0
+    assert run.awaiting_authoring is True
+    assert run.pending_authoring is not None
+
+    # 作者召唤代笔 → 正常渲染序列
+    await run.action_queue.put({"action": "render", "beat_id": "B00"})
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_RENDER_START"
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_RENDER_READY"
+    assert ev_data["beat_id"] == "B00"
+    assert run.awaiting_authoring is False
+    assert run.pending_authoring is None
+    assert workflow.render_call_count == 1
+
+    # pass 锁死代笔稿 → 下一拍再次 AUTHORING_OPEN（不自动渲染）
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_LOCKED"
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"
+    assert ev_data["beat_id"] == "B01"
+    assert workflow.render_call_count == 1
+
+    # 清理：render + pass B01
+    await run.action_queue.put({"action": "render", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_RENDER_START
+    await run.event_queue.get()  # BEAT_RENDER_READY
+    await run.action_queue.put({"action": "pass", "beat_id": "B01"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+    assert workflow.post_step_called
+
+
+@pytest.mark.asyncio
+async def test_authoring_lock_with_text_skips_render():
+    """作者模式：AUTHORING_OPEN 直接 lock_with_text → 整拍定稿，全程零渲染调用。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["永远不该被用到。"])
+    run = SteppingRun(
+        run_id="r_auth2", chapter_id=1, cards=cards, workflow=workflow,
+        authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B00
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B00",
+        "author_text": "雨砸在废铁车上，轴承卡死了。",
+    })
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_LOCKED"
+    assert ev_data["author_locked"] is True
+    assert workflow.render_call_count == 0
+    assert run.locked_segments[-1].text == "雨砸在废铁车上，轴承卡死了。"
+
+    # 下一拍仍开 AUTHORING_OPEN；末拍同样定稿 → COMPLETE
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"
+    assert ev_data["beat_id"] == "B01"
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B01",
+        "author_text": "林尘进屋，柴油灯闪了一下。",
+    })
+    await run.event_queue.get()  # BEAT_LOCKED
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "ALL_BEATS_LOCKED"
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "COMPLETE"
+    # 终稿 = 两段作者正文拼接
+    assert "雨砸在废铁车上" in ev_data["final_text"]
+    assert "林尘进屋" in ev_data["final_text"]
+    await task
+    assert workflow.render_call_count == 0
+    assert workflow.author_locked_texts == [
+        "雨砸在废铁车上，轴承卡死了。",
+        "林尘进屋，柴油灯闪了一下。",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_authoring_empty_lock_degrades_to_skip():
+    """作者模式：空 author_text 的 lock_with_text → skip 语义（无已渲染段可退化 pass）。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["第二段。"])
+    run = SteppingRun(
+        run_id="r_auth3", chapter_id=1, cards=cards, workflow=workflow,
+        authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B00
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B00", "author_text": "   ",
+    })
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_SKIPPED"
+    assert len(run.locked_segments) == 0
+    # skip 压了快照栈（可 back 救回）
+    assert len(run.snapshot_stack) == 1
+
+    # 清理：B01 定稿 → COMPLETE
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B01
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B01", "author_text": "结尾。",
+    })
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+@pytest.mark.asyncio
+async def test_authoring_back_reopens_authoring():
+    """作者模式：back 弹快照后，目标拍重新开 AUTHORING_OPEN（而非自动重渲）。"""
+    cards = [_FakeCard("B00", 0), _FakeCard("B01", 1)]
+    workflow = _FakeWorkflow(["不该被用到。"])
+    run = SteppingRun(
+        run_id="r_auth4", chapter_id=1, cards=cards, workflow=workflow,
+        authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    # B00 定稿 → B01 打开 → back 回 B00
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B00
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B00", "author_text": "第一拍定稿。",
+    })
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B01
+    assert len(run.locked_segments) == 1
+    await run.action_queue.put({"action": "back", "beat_id": "B01"})
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_BACKED"
+    assert ev_data["beat_id"] == "B00"
+    assert len(run.locked_segments) == 0
+    # 关键断言：back 后重开 AUTHORING_OPEN，不自动渲染
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"
+    assert ev_data["beat_id"] == "B00"
+    assert workflow.render_call_count == 0
+
+    # 清理：重新定稿 B00 → B01 定稿 → COMPLETE
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B00", "author_text": "第一拍重写。",
+    })
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # BEAT_AUTHORING_OPEN B01
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B01", "author_text": "第二拍。",
+    })
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "COMPLETE"
+    assert "第一拍重写。" in ev_data["final_text"]
+    await task
+
+
+@pytest.mark.asyncio
+async def test_authoring_branch_gate_deferred_to_render():
+    """岔路门 JIT 化：作者模式拍开始不问走向（直开 AUTHORING_OPEN），
+    仅当代笔动作（render）且岔路未决时才挂起问走向。"""
+    cards = [_FakeCard("B00", 0)]
+    workflow = _FakeWorkflow(["代笔段。"])
+    decision_set = {
+        "has_story_branch": True,
+        "decision_nodes": [{
+            "beat_id": "B00",
+            "node_title": "林尘的应对",
+            "options": [
+                {"option_id": "A", "label": "忍辱", "plot_impact": "默默承受"},
+                {"option_id": "B", "label": "反抗", "plot_impact": "正面对抗"},
+            ],
+            "default_option": "A",
+        }],
+    }
+    run = SteppingRun(
+        run_id="r_jit1", chapter_id=1, cards=cards, workflow=workflow,
+        decision_set=decision_set, authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    # 关键断言 1：首事件是 AUTHORING_OPEN，不是 BRANCH_CHOICE（拍前不问）
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"
+    assert ev_data["beat_id"] == "B00"
+    assert workflow.render_call_count == 0
+    assert cards[0].branch_directive == ""
+
+    # 召唤代笔 → 此刻才挂起问走向
+    await run.action_queue.put({"action": "render", "beat_id": "B00"})
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_BRANCH_CHOICE"
+    assert ev_data["node"]["node_title"] == "林尘的应对"
+    assert workflow.render_call_count == 0  # 问完才渲染
+
+    # 选 B → directive 注入 → 渲染
+    await run.action_queue.put({
+        "action": "branch", "beat_id": "B00",
+        "branch_choice": {"option_id": "B", "label": "反抗", "plot_impact": "正面对抗"},
+    })
+    await asyncio.sleep(0)
+    assert "正面对抗" in cards[0].branch_directive
+    await run.event_queue.get()  # BEAT_RENDER_START
+    await run.event_queue.get()  # BEAT_RENDER_READY
+    await run.action_queue.put({"action": "pass", "beat_id": "B00"})
+    await run.event_queue.get()  # BEAT_LOCKED
+    await run.event_queue.get()  # ALL_BEATS_LOCKED
+    await run.event_queue.get()  # COMPLETE
+    await task
+
+
+@pytest.mark.asyncio
+async def test_authoring_lock_with_text_never_asks_branch():
+    """岔路门 JIT 化：作者自己写完整拍（lock_with_text）时永不问走向。"""
+    cards = [_FakeCard("B00", 0)]
+    workflow = _FakeWorkflow(["不该被用到。"])
+    decision_set = {
+        "has_story_branch": True,
+        "decision_nodes": [{
+            "beat_id": "B00", "node_title": "岔路",
+            "options": [{"option_id": "A", "label": "忍辱", "plot_impact": "默默承受"}],
+            "default_option": "A",
+        }],
+    }
+    run = SteppingRun(
+        run_id="r_jit2", chapter_id=1, cards=cards, workflow=workflow,
+        decision_set=decision_set, authoring_mode=True,
+    )
+    task = asyncio.create_task(stepping_loop(run, enable_memory_ingestion=False))
+
+    ev_name, _ = await run.event_queue.get()
+    assert ev_name == "BEAT_AUTHORING_OPEN"  # 拍前不问
+    await run.action_queue.put({
+        "action": "lock_with_text", "beat_id": "B00",
+        "author_text": "林尘盯着工头，把扳手放下了。",
+    })
+    ev_name, ev_data = await run.event_queue.get()
+    assert ev_name == "BEAT_LOCKED"  # 直接锁死，全程无 BRANCH_CHOICE
+    assert ev_data["author_locked"] is True
+    assert cards[0].branch_directive == ""  # 未注入任何走向
+    assert workflow.render_call_count == 0
     await run.event_queue.get()  # ALL_BEATS_LOCKED
     await run.event_queue.get()  # COMPLETE
     await task

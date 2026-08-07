@@ -96,7 +96,14 @@ def load_port() -> Optional[int]:
 # 用途：进程内快速获取当前端口（无需读取文件）
 # 副作用：进程启动后若未调用 save_port，则返回 None
 def get_actual_port() -> Optional[int]:
-    return ACTUAL_PORT
+    """获取后端实际监听端口。
+
+    优先返回内存变量（save_port 写入）；若未设置（uvicorn 直接启 / IDE 启 /
+    --reload 重启等不经 __main__ 的场景），fallback 读 data/port.txt。
+    """
+    if ACTUAL_PORT is not None:
+        return ACTUAL_PORT
+    return load_port()
 
 
 # =============================================================================

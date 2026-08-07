@@ -52,6 +52,7 @@ from backend.core.model_config import (
     DEFAULT_PROVIDER_URLS,
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
+from backend.services.llm.client import REASONING_DISABLED
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate
 
@@ -334,7 +335,7 @@ async def test_model_connection(request: ModelTestRequest):
                 model_type="wash",
                 temperature=0.8,
                 max_tokens=50,
-                reasoning_config={},  # 洗涤默认不开 thinking，测试保持一致
+                reasoning_config=REASONING_DISABLED,  # 洗涤默认不开 thinking，测试保持一致
             )
             wash_success = True
         except Exception as e:

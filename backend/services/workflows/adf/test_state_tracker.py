@@ -24,15 +24,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     python -m unittest backend.services.workflows.adf.test_state_tracker -v
 """
 
+import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+from backend.services.llm.client import REASONING_DISABLED
 from backend.services.workflows.adf.name_registry import build_name_registry
 from backend.services.workflows.adf.state_tracker import (
     MAX_CARD_BLOCK_CHARS,
     SceneStateCard,
     card_to_prompt_block,
     check_segment_against_card,
+    extract_state_card,
     validate_card,
 )
 
@@ -172,6 +176,63 @@ class CheckSegmentAgainstCardTests(unittest.TestCase):
         text = "老周推开门。\n\n老周又喊了一嗓子。"
         violations = check_segment_against_card(text, card)
         self.assertEqual(len(violations), 1)
+
+
+def _run(coro):
+    """用独立 event loop 跑异步（不用 asyncio.run / IsolatedAsyncioTestCase——
+    它们会把事件循环策略的 _set_called 置位，导致同进程后续测试的
+    asyncio.get_event_loop() 抛 RuntimeError，典型症状是 bsadf/test_downgrade
+    在本文件之后运行时报错）。"""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+class ExtractStateCardTests(unittest.TestCase):
+    """extract_state_card 的失败降级与 LLM 调用参数（mock LLM）。
+
+    真实事故：deepseek-v4-pro 忽略 reasoning 关闭参数，400 token 预算全被
+    推理烧光，content=''，5 次抽取全灭且静默。
+    """
+
+    _LLM = "backend.services.workflows.adf.state_tracker.call_llm_with_usage"
+
+    def test_empty_content_keeps_prev_card(self):
+        """LLM 空输出 → 返回同一旧卡对象（调用方据此记 degraded）。"""
+        prev = SceneStateCard(pov="林尘", present=["林尘"])
+        mock_result = SimpleNamespace(content="", finish_reason="length")
+        with patch(self._LLM, new=AsyncMock(return_value=mock_result)):
+            card = _run(extract_state_card(prev, "他推开舱门。", None, None, 0))
+        self.assertIs(card, prev)
+
+    def test_junk_empty_card_treated_as_failure(self):
+        """LLM 返回 {} 之类的全空废卡 → 视为失败沿用旧卡（废卡替换旧卡
+        等于静默丢失全部剧情状态）。"""
+        prev = SceneStateCard(pov="林尘", present=["林尘"])
+        mock_result = SimpleNamespace(content="{}", finish_reason="stop")
+        with patch(self._LLM, new=AsyncMock(return_value=mock_result)):
+            card = _run(extract_state_card(prev, "他推开舱门。", None, None, 0))
+        self.assertIs(card, prev)
+
+    def test_token_budget_and_reasoning_disabled(self):
+        """max_tokens=1600（推理关不掉时给 content 留生路）且显式传
+        REASONING_DISABLED（空 dict 会被 client 吞掉等于没关）。"""
+        prev = SceneStateCard()
+        mock_result = SimpleNamespace(content='{"pov": "林尘"}', finish_reason="stop")
+        with patch(self._LLM, new=AsyncMock(return_value=mock_result)) as mock_llm:
+            card = _run(extract_state_card(prev, "他推开舱门。", None, None, 0))
+        kwargs = mock_llm.call_args.kwargs
+        self.assertEqual(kwargs["max_tokens"], 1600)
+        self.assertEqual(kwargs["reasoning_config"], REASONING_DISABLED)
+        self.assertEqual(card.pov, "林尘")
+
+    def test_llm_exception_keeps_prev_card(self):
+        prev = SceneStateCard(pov="林尘")
+        with patch(self._LLM, new=AsyncMock(side_effect=RuntimeError("boom"))):
+            card = _run(extract_state_card(prev, "他推开舱门。", None, None, 0))
+        self.assertIs(card, prev)
 
 
 if __name__ == "__main__":

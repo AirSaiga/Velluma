@@ -69,6 +69,7 @@ from tenacity import (
 )
 
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_RAG, LOG_PREFIX_SUMMARY
+from backend.services.observability.run_trace import trace_event
 from backend.services.llm.proxy import (
     get_proxy_config,
     set_proxy_config,
@@ -87,6 +88,13 @@ if os.getenv("DISABLE_PROXY") == "1":
     PROXY_URL = None
 if not PROXY_URL:
     PROXY_URL = None
+
+# 显式关闭 thinking 的 extra_body（OpenRouter reasoning 协议）。
+# ⚠ 绝不能传空 dict 代替：call_llm_with_usage 里 `if reasoning_config:` 对 {}
+# 为 falsy，extra_body 根本不会设置，推理模型（如 deepseek-v4-pro）回落到
+# 服务端默认 thinking 开启——小预算调用（状态卡 max_tokens=400）会被思考
+# 过程吃光 token 预算，finish=length 空输出（实测 5 次抽取 3 次失败）。
+REASONING_DISABLED: dict = {"reasoning": {"enabled": False}}
 
 
 def _should_retry_exception(exception: Exception) -> bool:
@@ -407,6 +415,20 @@ async def call_llm_with_usage(
         except (AttributeError, IndexError):
             finish_reason = None
         latency_ms = int((time.perf_counter() - start_ts) * 1000)
+        # 全流程 trace 埋点（无 trace 时 no-op；prompt/响应全文记录供 debug）
+        trace_event(
+            "llm_call",
+            model_type=model_type,
+            model_name=resolved_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            content=content,
+            usage=usage,
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+        )
         return LLMResult(
             content=content, usage=usage, model_name=resolved_model,
             latency_ms=latency_ms, finish_reason=finish_reason,
@@ -414,7 +436,28 @@ async def call_llm_with_usage(
     except json.JSONDecodeError:
         # 兼容旧 call_llm 行为：JSON 解析异常返回空内容（不抛出）
         latency_ms = int((time.perf_counter() - start_ts) * 1000)
+        trace_event(
+            "llm_error",
+            model_type=model_type,
+            model_name=resolved_model,
+            error="json_decode",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            latency_ms=latency_ms,
+        )
         return LLMResult(content="", usage=None, model_name=resolved_model, latency_ms=latency_ms)
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - start_ts) * 1000)
+        trace_event(
+            "llm_error",
+            model_type=model_type,
+            model_name=resolved_model,
+            error=f"{type(e).__name__}: {str(e)[:300]}",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            latency_ms=latency_ms,
+        )
+        raise
     finally:
         if http_client is not None:
             await http_client.aclose()

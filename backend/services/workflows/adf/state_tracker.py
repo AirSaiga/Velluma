@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from backend.services.llm import call_llm_with_usage
+from backend.services.llm.client import REASONING_DISABLED
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import build_state_extraction_prompt
 from backend.services.workflows.adf.name_registry import NameRegistry
@@ -301,8 +302,16 @@ async def extract_state_card(
                     user_prompt=user_prompt,
                     model_type="creative",
                     temperature=0.2,
-                    max_tokens=400,
+                    max_tokens=1600,
                     response_format={"type": "json_object"},
+                    # 显式关闭 thinking：creative 槽是推理模型时，token
+                    # 预算会被思考过程全部吃光（finish=length 空输出）。
+                    # 注意必须传 REASONING_DISABLED，空 dict 会被 client
+                    # 的 truthy 检查吞掉等于没关。
+                    # max_tokens=1600：实测 deepseek-v4-pro 会忽略 reasoning
+                    # 关闭参数照样思考，400 预算全被推理烧光 content=''
+                    # （5 次抽取全灭）。1600 给 content 留出生路。
+                    reasoning_config=REASONING_DISABLED,
                 )
                 call_ctx.set_result(result)
         else:
@@ -311,14 +320,19 @@ async def extract_state_card(
                 user_prompt=user_prompt,
                 model_type="creative",
                 temperature=0.2,
-                max_tokens=400,
+                max_tokens=1600,
                 response_format={"type": "json_object"},
+                reasoning_config=REASONING_DISABLED,
             )
         data = _parse_json_object(result.content or "")
         card = validate_card(data, registry)
-        if card is None:
+        # 失败判定：解析失败（None）或全空废卡（LLM 返回 {} 之类）。
+        # 废卡替换旧卡等于静默丢失全部剧情状态，比"没更新"更糟，
+        # 统一视为失败沿用旧卡（调用方据"返回同一旧卡对象"记 degraded）。
+        if card is None or card.is_empty():
             logger.warning(
-                f"[ADF] 第 {segment_index + 1} 段状态卡校验失败，保留旧卡"
+                f"[ADF] 第 {segment_index + 1} 段状态卡抽取失败"
+                f"（空输出/校验失败/废卡），保留旧卡"
             )
             return prev_card
         return card

@@ -9,6 +9,9 @@
 - LLM 异常 → 空集放行
 - SlotMutator：写 branch_directive 不碰硬契约（core_plot_event/key_anchors/
   text_carrier 保持不变）；skipped 走 default_option；custom: 自定义走向
+- Loop1 缺口提示节点（source="loop1_gap"）：force_branch_gaps 注入标记 source；
+  mutator 仅作者 custom: 补充文本才写 directive，默认/跳过/空补充一律不注入
+  （防提示语当走向污染渲染 prompt）；source 字段 to_dict/from_dict 往返
 """
 # Velluma - DDE decision_set tests
 # Copyright (C) 2026 Velluma. Licensed under AGPL-3.0.
@@ -22,6 +25,8 @@ from backend.services.workflows.bsadf.dde.types import (
     BranchOption,
     ChapterDecisionSet,
     StoryBranch,
+    story_branch_from_dict,
+    story_branch_to_dict,
 )
 from backend.services.workflows.bsadf.dde.decision_card_generator import (
     generate_chapter_decision_set,
@@ -221,6 +226,9 @@ class TestGenerateChapterDecisionSet:
         assert ds.decision_nodes[0].beat_id == cards[0].beat_id
         assert ds.decision_nodes[0].default_option == "A"
         assert ds.decision_nodes[0].options[0].option_id == "A"
+        # 缺口注入节点必须标记 source="loop1_gap"（下游 mutator/岔路门据此
+        # 区分"提示语节点"与真实走向岔路，只有作者 custom: 补充才写 directive）
+        assert all(n.source == "loop1_gap" for n in ds.decision_nodes)
 
     def test_force_branch_gaps_none_keeps_empty(self):
         """force_branch_gaps=None → 行为不变（无岔路放行）。"""
@@ -329,3 +337,152 @@ class TestMutateSlotCards:
         )
         assert result[0].branch_directive == ""
         assert result[0].edited is False
+
+
+# ============================================================
+# StoryBranch.source 序列化往返
+# ============================================================
+
+class TestStoryBranchSourceRoundTrip:
+    def test_source_round_trip_preserved(self):
+        """to_dict → from_dict：source 字段往返无损（loop1_gap 标记不丢）。"""
+        node = StoryBranch(
+            beat_id="BS_CH1_BEAT_00",
+            node_title="大纲缺口：角色动机不明",
+            options=[BranchOption(option_id="A", label="建议补充：主角动机")],
+            default_option="A",
+            source="loop1_gap",
+        )
+        restored = story_branch_from_dict(story_branch_to_dict(node))
+        assert restored.source == "loop1_gap"
+        assert restored.beat_id == node.beat_id
+        assert restored.options[0].label == "建议补充：主角动机"
+
+    def test_source_defaults_to_dde(self):
+        """缺省 source → "dde"；旧 pending 载荷（无 source 键）→ 按 "dde" 维持旧行为。"""
+        node = StoryBranch(beat_id="BS_CH1_BEAT_00", node_title="岔路")
+        assert node.source == "dde"
+        # 旧载荷无 source 字段
+        legacy = {
+            "beat_id": "BS_CH1_BEAT_00",
+            "node_title": "岔路",
+            "options": [],
+            "default_option": "",
+        }
+        assert story_branch_from_dict(legacy).source == "dde"
+        # 显式空串/None 也回落 "dde"（防脏数据击穿 mutator 的 == 判定）
+        assert story_branch_from_dict({**legacy, "source": ""}).source == "dde"
+
+
+# ============================================================
+# SlotMutator：Loop1 缺口提示节点（source="loop1_gap"）
+# ============================================================
+
+def _make_gap_decision_set(beat_id) -> ChapterDecisionSet:
+    """Loop1 大纲自检缺口注入的单选项提示节点。"""
+    return ChapterDecisionSet(
+        has_story_branch=True,
+        decision_nodes=[
+            StoryBranch(
+                beat_id=beat_id,
+                node_title="大纲缺口：大纲未明确角色动机，可能影响剧情说服力",
+                options=[
+                    BranchOption(
+                        option_id="A",
+                        label="建议补充：主角为何采取此行动",
+                    ),
+                ],
+                default_option="A",
+                source="loop1_gap",
+            )
+        ],
+    )
+
+
+class TestGapNodeMutator:
+    def test_gap_node_skipped_no_directive(self):
+        """skipped=True（Track A 静默应用）→ 缺口节点不注入提示语。"""
+        cards = _make_cards(1)
+        ds = _make_gap_decision_set(cards[0].beat_id)
+
+        result = mutate_slot_cards(cards=cards, decision_set=ds, skipped=True)
+
+        assert result[0].branch_directive == ""
+        assert result[0].edited is False
+
+    def test_gap_node_unanswered_no_directive(self):
+        """Track B 未作答/未覆盖 → 缺口节点不写 directive（提示语不是走向）。"""
+        cards = _make_cards(1)
+        ds = _make_gap_decision_set(cards[0].beat_id)
+
+        result = mutate_slot_cards(
+            cards=cards, decision_set=ds, branch_choices={}, skipped=False,
+        )
+
+        assert result[0].branch_directive == ""
+        assert result[0].edited is False
+
+    def test_gap_node_empty_custom_no_directive(self):
+        """custom: 但文本为空 → 不写 directive（空补充视为放弃补充，
+        严防 _resolve_option 回落默认把提示语注入）。"""
+        cards = _make_cards(1)
+        ds = _make_gap_decision_set(cards[0].beat_id)
+
+        result = mutate_slot_cards(
+            cards=cards,
+            decision_set=ds,
+            branch_choices={cards[0].beat_id: "custom:   "},
+        )
+
+        assert result[0].branch_directive == ""
+        assert result[0].edited is False
+
+    def test_gap_node_custom_text_writes_directive(self):
+        """作者 custom: 补充文本 → directive=作者文本，硬契约不碰。"""
+        cards = _make_cards(1)
+        ds = _make_gap_decision_set(cards[0].beat_id)
+
+        result = mutate_slot_cards(
+            cards=cards,
+            decision_set=ds,
+            branch_choices={cards[0].beat_id: "custom:林尘为凑妹妹医药费只能忍"},
+        )
+
+        assert result[0].branch_directive == "林尘为凑妹妹医药费只能忍"
+        assert result[0].edited is True
+        assert result[0].core_plot_event == "转折0"
+        assert result[0].key_anchors == ["锚点0"]
+        assert result[0].text_carrier == "台词0"
+
+    def test_normal_node_alongside_gap_node_unaffected(self):
+        """混合决策集：普通 DDE 节点行为不变（default 照走），缺口节点仍豁免。"""
+        cards = _make_cards(2)
+        ds = ChapterDecisionSet(
+            has_story_branch=True,
+            decision_nodes=[
+                StoryBranch(
+                    beat_id=cards[0].beat_id,
+                    node_title="面对挑衅的应对分支",
+                    options=[
+                        BranchOption(option_id="A", label="当场反抗", plot_impact="被关禁闭"),
+                        BranchOption(option_id="B", label="忍辱负重", plot_impact="暗中收集证据"),
+                    ],
+                    default_option="B",
+                ),
+                StoryBranch(
+                    beat_id=cards[1].beat_id,
+                    node_title="大纲缺口：关系转折不明",
+                    options=[BranchOption(option_id="A", label="建议补充：关系演变")],
+                    default_option="A",
+                    source="loop1_gap",
+                ),
+            ],
+        )
+
+        result = mutate_slot_cards(cards=cards, decision_set=ds, skipped=True)
+
+        # 普通节点：skipped → default_option 照常注入
+        assert result[0].branch_directive == "忍辱负重。暗中收集证据"
+        # 缺口节点：skipped → 不注入
+        assert result[1].branch_directive == ""
+        assert result[1].edited is False

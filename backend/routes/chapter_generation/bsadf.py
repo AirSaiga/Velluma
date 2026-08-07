@@ -24,10 +24,10 @@ BS-ADF（Beat-Slot Anchor-Driven Flow）引擎路由（P2.5 新建）。
 - 复用 ADF 的上下文加载（_load_adf_context）、asyncio.Queue 桥接、SSE 流式输出
 - 与 ADF 端点并存，前端通过引擎切换选择
 
-API 端点（前缀 /api/chapters/{chapter_id}）：
+API 端点（前缀 /api/chapters/{chapter_id}）:
 - POST /generate-bsadf   BS-ADF 引擎生成（SSE 事件序列）
 
-SSE 事件序列（BS-ADF 专属 + 复用 ADF）：
+SSE 事件序列（BS-ADF 专属 + 复用 ADF）:
 - GENERATION_RUN           生成已初始化（携带 run_id）
 - BSADF_STAGE              BS-ADF 阶段切换（SLOT_BUILD / RENDER）
 - BEAT_SLOTS_BUILT         槽位卡构建完成（count 张；Track B 暂停时内嵌 decision_set）
@@ -52,15 +52,16 @@ SSE 事件序列（BS-ADF 专属 + 复用 ADF）：
 - /generate-bsadf：本端点（BS-ADF 引擎，Phase 4 用槽位化流水线，其余复用 ADF）
 - 前端通过引擎切换选择；两者并存，互不影响
 
-Track A/B：
-- track='A'（默认）：全自动跑完全程（DDE 有分支时静默应用 default_option，
-  emit DDE_AUTO_APPLIED，不暂停）
-- track='B'：跑到 Phase 4b 单次暂停（BEAT_SLOTS_BUILT 内嵌 decision_set），
-  作者编辑槽位卡 + 选定分支后 /confirm-beats 一并提交恢复
+⚠ 前端交互模式（2026-07-31 现状）：
+当前 UI 只使用「步进模式（enable_stepping=true）」。Track A/B 是历史/兼容路径，
+保留在路由层，但前端不再调用 track='B' 的暂停编辑流程。/confirm-beats 仅作为
+历史端点保留，活跃路径为：
+  generate-bsadf(enable_stepping=true) → STEPPING_INITIALIZED → /advance-beat 循环 → COMPLETE
+Track A/B 注释仅说明兼容行为，未来若重新启用再维护。
 
 使用方式：
     POST /api/chapters/{chapter_id}/generate-bsadf
-    body: {"tier": "auto", "track": "A", "target_word_count": null, "max_segments": 6}
+    body: {"tier": "auto", "track": "A", "target_word_count": null, "max_segments": 6, "enable_stepping": true}
 """
 
 import asyncio
@@ -81,6 +82,7 @@ from backend.schemas.bsadf import (
     ConfirmBeatsRequest,
     GenerateBSAdfRequest,
     RerenderBeatRequest,
+    StitchFragmentRequest,
 )
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.observability.run_trace import (
@@ -91,7 +93,6 @@ from backend.services.observability.run_trace import (
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import (
     build_sse_event,
-    build_sse_text_chunk,
     build_sse_error,
 )
 from backend.services.workflows.adf import (
@@ -114,15 +115,37 @@ logger = get_runtime_logger(__name__)
 router = APIRouter(prefix="/api/chapters", tags=["chapter-generation-bsadf"])
 
 # ============================================================
-# 实时流常量
+# 实时流说明
 # ============================================================
-# SSE 心跳间隔（秒）。长耗时阶段（如 Phase 4c 逐段渲染、DDE 决策卡生成）期间
-# 若无业务事件，每 HEARTBEAT_INTERVAL 秒发一个 HEARTBEAT data 帧，防止代理/中间件/
-# 浏览器因空闲掐断连接。注意：必须是 data 帧（不是 SSE 注释帧 ": heartbeat\n\n"），
-# 因为很多浏览器/代理只把 data 帧视为"连接活跃"，注释帧会被忽略导致超时掐断。
-# 设为 5 秒（而非 15 秒）：DDE 单卡 LLM 调用 20-40 秒，15 秒间隔只发 1-2 次心跳，
-# 实测 Chromium 会在此期间掐断 fetch ReadableStream；5 秒间隔确保每卡期间至少 4-8 次心跳。
-HEARTBEAT_INTERVAL = 5
+# SSE 空闲保活：长耗时阶段（如 Phase 4c 逐段渲染、后处理守卫）期间若无业务事件，
+# 各 SSE 生成器按固定间隔发 HEARTBEAT data 帧（必须是 data 帧而非 SSE 注释帧
+# ": heartbeat\n\n"——很多浏览器/代理只把 data 帧视为"连接活跃"），防止空闲掐断。
+
+
+# ============================================================
+# 内存存储：生成运行后台 task + 步进循环 task（供取消/清理）
+# ============================================================
+# _RUN_TASKS: {run_id: asyncio.Task} — generate-bsadf / confirm-beats 的后台 task
+# _STEPPING_RUN_TASKS: {run_id: asyncio.Task} — 步进循环 stepping_loop task
+# 注意：当前前端只使用步进模式；生成 task 在步进初始化后很快退出，
+# 真正长时间运行的是 stepping_loop task。
+_RUN_TASKS: Dict[str, asyncio.Task] = {}
+_STEPPING_RUN_TASKS: Dict[str, asyncio.Task] = {}
+
+
+def _cleanup_run_tasks(run_id: str) -> None:
+    """取消并清理某 run_id 关联的后台 task + 步进循环 task + 暂存上下文。"""
+    task = _RUN_TASKS.pop(run_id, None)
+    if task and not task.done():
+        task.cancel()
+    stepping_task = _STEPPING_RUN_TASKS.pop(run_id, None)
+    if stepping_task and not stepping_task.done():
+        stepping_task.cancel()
+    _PENDING_BEAT_SLOTS.pop(run_id, None)
+    run_data = _GENERATION_RUNS.get(run_id)
+    if run_data is not None:
+        run_data["status"] = "error"
+        run_data["error"] = "已取消"
 
 
 # ============================================================
@@ -197,12 +220,12 @@ def _pop_pending_beats(run_id: str) -> Optional[Dict[str, Any]]:
 
 
 # ============================================================
-# 轮询基础设施：替代 SSE 长连接的进度查询机制
+# 运行事件中转：后台 task → SSE 生成器
 # ============================================================
 # 设计：workflow 跑在后台 asyncio.Task 里，progress_callback 把事件 append 到
-# _GENERATION_RUNS[run_id]["events"] 列表。前端用 GET /generation-status/{run_id}?since=N
-# 增量轮询（每次只取 events[N:]），彻底消除 SSE 长连接的传输层问题
-# （Vite proxy buffer / Starlette yield 阻塞 / asyncio.Queue 竞态）。
+# _GENERATION_RUNS[run_id]["events"] 列表；SSE 生成器（generate-bsadf /
+# confirm-beats / advance-beat 各自一条流）增量读取并 yield 给前端，
+# SSE 断连不影响后台执行。
 #
 # 结构：{run_id: {
 #     "events": List[dict],       # 事件列表（每项 {event, ...payload}，前端按 event 分流）
@@ -383,7 +406,12 @@ class _BSAdfStreamHandler:
                         "[BSADF] enable_stepping=true 且 track='B' 同时传入——"
                         "步进模式将忽略 track 参数（Track B 全章确认语义被步进逐段裁决替代）"
                     )
-                stepping_result = await workflow.execute_stepping(progress_callback=_on_progress)
+                stepping_result = await workflow.execute_stepping(
+                    progress_callback=_on_progress,
+                    # NLE-ADF 2.0 作者模式 = 轻卡快速通道：4a 种子卡即挂起，
+                    # Loop1/enrich/DDE 由下方后台 task 续跑（开门等待 ~1-3min → ~15-30s）
+                    lazy_enhancements=getattr(self.request, "enable_authoring", False),
+                )
                 cards_dicts = stepping_result.debug_info.get("beat_slots", [])
                 # 从 dict 重建 BeatSlotCard（debug_info 存的是 dict）
                 cards = [beat_slot_from_dict(d) for d in cards_dicts] if cards_dicts else []
@@ -397,15 +425,85 @@ class _BSAdfStreamHandler:
                     cards=cards,
                     workflow=workflow,
                     decision_set=stepping_result.debug_info.get("decision_set") or {},
+                    authoring_mode=getattr(self.request, "enable_authoring", False),
                 )
                 workflow._paused_spine = stepping_result.spine_track
                 workflow._paused_anchor = stepping_result.distal_anchor
-                workflow._paused_cards = cards
                 workflow._emotion_curve_samples = stepping_result.debug_info.get("emotion_curve_samples", [])
 
                 _STEPPING_RUNS.set(stepping_run)
                 enable_mem = getattr(self.request, "enable_memory_ingestion", False)
-                asyncio.ensure_future(stepping_loop(stepping_run, enable_memory_ingestion=enable_mem))
+                stepping_task = asyncio.ensure_future(stepping_loop(stepping_run, enable_memory_ingestion=enable_mem))
+                _STEPPING_RUN_TASKS[run_id] = stepping_task
+
+                def _stepping_done(t: asyncio.Task) -> None:
+                    _STEPPING_RUN_TASKS.pop(run_id, None)
+                    cancelled = False
+                    try:
+                        t.result()
+                    except asyncio.CancelledError:
+                        cancelled = True
+                    except Exception as e:
+                        logger.exception(f"[BS-ADF] stepping_loop task 异常结束 run={run_id}: {e}")
+                    if not cancelled:
+                        # 步进模式落库（此前缺失：recorder 从不 flush，generation_runs
+                        # 零记录，洞察视图成本/质量报告对步进生成章节恒空）。
+                        # 正文仍由前端 COMPLETE 后 PUT 落库，这里只落 token/用量统计；
+                        # 失败不阻塞（与 Track A/B 落库失败降级一致）。
+                        try:
+                            async def _flush_recorder() -> None:
+                                from backend.database import AsyncSessionLocal
+                                async with AsyncSessionLocal() as flush_db:
+                                    await recorder.flush_to_db(flush_db)
+                                    await flush_db.commit()
+                            asyncio.ensure_future(_flush_recorder())
+                        except Exception as e:
+                            logger.warning(f"[BS-ADF] stepping recorder 落库失败（不阻塞）: {e}")
+                        # 暂存 rerender 上下文（此前步进从不 _store_pending_beats →
+                        # 完成后「重写本段」必走空上下文兜底：无 canon/专名表/知识约束，
+                        # 渲染质量显著低于整章渲染）。卡取 stepping_run.cards 终态
+                        # （含渲染后 status 与 branch_directive）。
+                        if stepping_run.status == "done":
+                            try:
+                                rerender_ctx = {
+                                    "spine": stepping_result.spine_track,
+                                    "anchor": stepping_result.distal_anchor,
+                                    "entities": ctx.get("entities", []),
+                                    "locations": ctx.get("locations", []),
+                                    "assets": ctx.get("assets", []),
+                                    "relationships": ctx.get("relationships", []),
+                                    "canon_context": ctx.get("canon_context", ""),
+                                    "worldview_text": ctx.get("worldview_text", ""),
+                                }
+                                _store_pending_beats(run_id, stepping_run.cards, rerender_ctx)
+                            except Exception as e:
+                                logger.warning(f"[BS-ADF] stepping 暂存 rerender 上下文失败（不阻塞）: {e}")
+
+                stepping_task.add_done_callback(_stepping_done)
+
+                # NLE-ADF 2.0 懒增强后台续跑：Loop1 → enrich → DDE 完成时就地
+                # 更新 run.cards / decision_set，并置 cards_enhanced 标记。
+                # 增强失败绝不砸会话（种子卡已可创作，增强只是质量加成）。
+                if getattr(self.request, "enable_authoring", False):
+                    async def _lazy_enhance() -> None:
+                        try:
+                            out = await workflow.run_lazy_enhancements(
+                                cards=stepping_run.cards,
+                                progress_callback=_on_progress,
+                            )
+                            stepping_run.decision_set = out.get("decision_set") or {}
+                            stepping_run.loop1_result = out.get("loop1_result")
+                            stepping_run.cards_enhanced = True
+                            # 事件队列通知（下一条 advance-beat SSE 会交付；
+                            # 队列入口的选择性清场对本事件放行）
+                            await stepping_run.event_queue.put(("BEAT_CARDS_ENRICHED", {
+                                "beat_slots": [beat_slot_to_dict(c) for c in stepping_run.cards],
+                                "decision_set": stepping_run.decision_set,
+                                "loop1_result": stepping_run.loop1_result,
+                            }))
+                        except Exception as e:
+                            logger.warning(f"[BS-ADF] 懒增强后台 task 异常（保持种子卡）: {e}")
+                    asyncio.ensure_future(_lazy_enhance())
 
                 # 补发步进就绪事件：携带 run_id（前端 advanceBeat 需要）+
                 # 全部槽位卡快照（前端立即展示分镜监视器）。
@@ -428,17 +526,17 @@ class _BSAdfStreamHandler:
                         break
                     try:
                         ev_name, ev_data = await asyncio.wait_for(
-                            stepping_run.event_queue.get(), timeout=120.0
+                            stepping_run.event_queue.get(), timeout=300.0
                         )
                         _emit(ev_name, ev_data)
-                        if ev_name == "BEAT_BRANCH_CHOICE":
-                            # 岔路门：步进循环挂起等作者选走向（时长由作者决定，
-                            # 不受 120s 约束）。作者提交选择时 advance-beat 会
-                            # 新开 SSE 流交付后续渲染事件，本桥接直接退出——
-                            # 继续空等只会触发下方 120s 误报（真实事故）。
+                        if ev_name in ("BEAT_BRANCH_CHOICE", "BEAT_AUTHORING_OPEN"):
+                            # 岔路门/作者模式：步进循环挂起等作者（时长由作者决定，
+                            # 不受超时约束）。作者提交时 advance-beat 会新开 SSE
+                            # 流交付后续事件，本桥接直接退出——继续空等只会触发
+                            # 超时误报（岔路门已发生过的真实事故，作者模式同理）。
                             break
                     except asyncio.TimeoutError:
-                        _emit("ERROR", {"error": "首段渲染超时（120s）"})
+                        _emit("ERROR", {"error": "首段渲染超时（300s）"})
                         break
 
                 _set_run_status(run_id, "stepping")
@@ -663,6 +761,10 @@ async def generate_bsadf(
 ):
     """BS-ADF 引擎生成入口（SSE 流式 + 轮询）。
 
+    ⚠ 前端当前只使用步进模式（enable_stepping=true）。Track A/B 为历史兼容路径，
+    活跃流程：generate-bsadf → 跑到 Phase 4b 暂停 → 起 stepping_loop →
+    STEPPING_INITIALIZED → 前端用 /advance-beat 逐段推进 → COMPLETE。
+
     Phase 1-4b + 4c-7 用 SSE 流式输出（事件通过 _GENERATION_RUNS dict 中转，
     SSE generator 从 dict 读事件 yield）。
 
@@ -679,44 +781,28 @@ async def generate_bsadf(
 
     # 后台 task 跑 workflow（事件 push 到 _GENERATION_RUNS dict）
     async def _background():
-        async with AsyncSessionLocal() as bg_db:
-            handler = _BSAdfStreamHandler(chapter_id=chapter_id, request=req, db=bg_db)
-            await handler._run_generate(run_id)
+        try:
+            async with AsyncSessionLocal() as bg_db:
+                handler = _BSAdfStreamHandler(chapter_id=chapter_id, request=req, db=bg_db)
+                await handler._run_generate(run_id)
+        finally:
+            _RUN_TASKS.pop(run_id, None)
 
-    asyncio.ensure_future(_background())
+    task = asyncio.ensure_future(_background())
+    _RUN_TASKS[run_id] = task
+
+    def _gen_done(t: asyncio.Task) -> None:
+        _RUN_TASKS.pop(run_id, None)
+        try:
+            t.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception(f"[BS-ADF] generate-bsadf task 异常结束 run={run_id}: {e}")
+
+    task.add_done_callback(_gen_done)
 
     return StreamingResponse(_sse_stream_from_run(run_id), media_type="text/event-stream")
-
-
-@router.get("/{chapter_id}/generation-status/{run_id}")
-async def generation_status(
-    chapter_id: str,
-    run_id: str,
-    since: int = 0,
-):
-    """轮询查询生成进度（增量）。
-
-    Args:
-        run_id: 从 POST /generate-bsadf / /confirm-beats 获得
-        since: 上次取到的事件索引（增量轮询，只返回 events[since:]）
-
-    Returns:
-        {status, events: [...], total_events, error?}
-        - status: "running" | "done" | "paused_track_b" | "error"
-        - events: 事件列表（前端按 event 字段分流）
-    """
-    run = _get_run(run_id)
-    if not run:
-        return {"status": "not_found", "events": [], "total_events": 0, "error": f"无效或已过期的 run_id: {run_id}"}
-
-    events = run["events"]
-    new_events = events[since:] if since < len(events) else []
-    return {
-        "status": run["status"],
-        "events": new_events,
-        "total_events": len(events),
-        "error": run.get("error", ""),
-    }
 
 
 # ============================================================
@@ -913,7 +999,11 @@ async def confirm_beats(
     request: ConfirmBeatsRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Track B 恢复（SSE 流式）。后台 task 跑 resume_from_slots，SSE 从 dict 读事件。"""
+    """Track B 恢复（SSE 流式）。后台 task 跑 resume_from_slots，SSE 从 dict 读事件。
+
+    ⚠ 前端当前只使用步进模式，不再进入 Track B 暂停编辑流程。本端点保留为
+    历史兼容；活跃推进路径是 /advance-beat。
+    """
     from backend.database import AsyncSessionLocal
 
     run_id = f"bsadf_confirm_{uuid4().hex[:12]}"
@@ -927,9 +1017,49 @@ async def confirm_beats(
                 await _run_confirm_beats(run_id, request)
             finally:
                 _RUN_DBS.pop(run_id, None)
+                _RUN_TASKS.pop(run_id, None)
 
-    asyncio.ensure_future(_background())
+    task = asyncio.ensure_future(_background())
+    _RUN_TASKS[run_id] = task
+
+    def _confirm_done(t: asyncio.Task) -> None:
+        _RUN_TASKS.pop(run_id, None)
+        try:
+            t.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception(f"[BS-ADF] confirm-beats task 异常结束 run={run_id}: {e}")
+
+    task.add_done_callback(_confirm_done)
     return StreamingResponse(_sse_stream_from_run(run_id), media_type="text/event-stream")
+
+
+# ============================================================
+# POST /cancel-run/{run_id} —— 取消生成/步进运行（释放资源）
+# ============================================================
+
+@router.post("/{chapter_id}/cancel-run/{run_id}")
+async def cancel_run(chapter_id: str, run_id: str):
+    """取消指定 run_id 的后台生成/步进运行，并清理内存/暂存上下文。
+
+    前端在以下场景调用：
+    - 用户点击生成面板的"取消"按钮
+    - 关闭生成覆盖层 / 切换章节 / 组件卸载
+    - 刷新页面前（可选，防止后端僵尸 task）
+    """
+    from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+
+    _cleanup_run_tasks(run_id)
+    stepping_run = _STEPPING_RUNS.pop(run_id, None)
+    if stepping_run is not None:
+        try:
+            stepping_run.event_queue.put_nowait(("ERROR", {"error": "已取消"}))
+        except Exception:
+            pass
+
+    logger.info(f"[BS-ADF] 取消运行 run={run_id} chapter={chapter_id}")
+    return {"ok": True, "run_id": run_id}
 
 
 # ============================================================
@@ -1168,18 +1298,29 @@ async def advance_beat(
     run = _STEPPING_RUNS.get(request.run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
-    # 风险8修复：索引越界守卫（异常态：run 已完成/cards 空/current 越界）
+    # 终态守卫：循环已退出（post_processing/done/error）时动作入队无人消费，
+    # 此前靠 current_beat_index 越界判断（循环结束后索引停在 len-1，恒不触发）
+    # → 请求空挂到 SSE 超时误报。按 status 直接拒绝。
+    if run.status != "stepping":
+        raise HTTPException(status_code=409, detail="RUN_FINISHED")
+    # 风险8修复：索引越界守卫（异常态：cards 空/current 越界）
     if not run.cards or run.current_beat_index >= len(run.cards):
         raise HTTPException(status_code=409, detail="RUN_FINISHED")
     if run.cards[run.current_beat_index].beat_id != request.beat_id:
         raise HTTPException(status_code=409, detail="BEAT_NOT_CURRENT")
+    # edit 必须带 edited_slot（此前无校验，静默落到循环尾重渲染当前段，
+    # 作者的卡编辑被无声丢弃）
+    if request.action == "edit" and request.edited_slot is None:
+        raise HTTPException(status_code=422, detail="EDIT_REQUIRES_SLOT")
 
     # 等待当前段渲染完成（BEAT_RENDER_READY）再接受裁决。
     # 防止段还在渲染中就 pass 导致事件错乱（pass 的 BEAT_LOCKED 会被
     # 当前段的 BEAT_RENDER_READY 抢先，SSE 流提前终止）。
     # 岔路门挂起（awaiting_branch_choice）时渲染尚未开始，本次裁决正是
     # 来解除挂起的（branch/pass/skip），跳过 ready 等待直接放行。
-    if not run.awaiting_branch_choice:
+    # 岔路门挂起（awaiting_branch_choice）或作者模式挂起（awaiting_authoring）时
+    # 渲染尚未开始，本次裁决正是来解除挂起的，跳过 ready 等待直接放行。
+    if not run.awaiting_branch_choice and not getattr(run, "awaiting_authoring", False):
         for _ in range(240):  # 最长等 120 秒（240 × 0.5s）
             if run.current_segment_ready or run.status in ("done", "error", "post_processing"):
                 break
@@ -1195,14 +1336,24 @@ async def advance_beat(
         action_payload["edited_slot"] = request.edited_slot.model_dump()
     elif request.action == "branch" and request.branch_choice:
         action_payload["branch_choice"] = request.branch_choice
+    elif request.action == "lock_with_text" and request.author_text is not None:
+        # P2：作者直接定稿段正文（跳过 LLM，仍抽状态卡）。透传 author_text 给 stepping loop。
+        action_payload["author_text"] = request.author_text
 
     # 清空 event_queue 里的遗留事件（当前段的 BEAT_RENDER_START/CHUNK/READY）。
     # advance-beat 的 SSE 流只消费 pass 之后的新事件（BEAT_LOCKED + 下一段序列）。
+    # 例外：BEAT_CARDS_ENRICHED（懒增强完成通知）选择性保留——它是跨段有效的
+    # 卡增强载荷，随本条流交付给前端刷新零件/决策集。
+    _kept_events: list = []
     while not run.event_queue.empty():
         try:
-            run.event_queue.get_nowait()
+            _ev = run.event_queue.get_nowait()
+            if _ev[0] == "BEAT_CARDS_ENRICHED":
+                _kept_events.append(_ev)
         except asyncio.QueueEmpty:
             break
+    for _ev in _kept_events:
+        run.event_queue.put_nowait(_ev)
 
     await run.action_queue.put(action_payload)
     _STEPPING_RUNS.touch(request.run_id)
@@ -1212,21 +1363,183 @@ async def advance_beat(
         try:
             while True:
                 try:
-                    ev_name, ev_data = await asyncio.wait_for(run.event_queue.get(), timeout=120.0)
+                    ev_name, ev_data = await asyncio.wait_for(run.event_queue.get(), timeout=15.0)
                 except asyncio.TimeoutError:
-                    yield build_sse_error("步进推进超时（120s 无事件）")
-                    return
+                    # 心跳保活替代 120s 硬超时：单段渲染（2 次尝试+退避）或后处理
+                    # 单阶段（守卫 reasoning+手术+复验）均可超过 120s，硬超时会把
+                    # 健康会话误杀（前端双通道同时判死，只能从头重生成——真实事故）。
+                    # HEARTBEAT 帧前端 sse.ts 直接忽略，不触发任何业务回调。
+                    yield build_sse_event("HEARTBEAT", "")
+                    # run 已终态且队列排空 → 不会再有事件，防流空挂
+                    if run.status in ("done", "error") and run.event_queue.empty():
+                        return
+                    continue
                 yield build_sse_event(ev_name, "", **ev_data)
                 # BEAT_BRANCH_CHOICE 同属终态：下一段的岔路门挂起等作者选走向，
                 # 作者提交时会新开一条 advance-beat SSE。本流须优雅结束（不报错），
-                # 否则挂起期间 120s 无事件会误报"步进推进超时"，且继续挂着会与
-                # 下一条流争抢 event_queue 消费。
-                if ev_name in ("BEAT_RENDER_READY", "COMPLETE", "BEAT_RERENDERED", "BEAT_BRANCH_CHOICE"):
+                # 否则挂起期间无事件会让前端等空，且继续挂着会与下一条流争抢
+                # event_queue 消费。ERROR 同为终态（循环异常兜底），不再空挂。
+                # BEAT_AUTHORING_OPEN 亦属终态：作者模式下一段拍挂起等创作，
+                # 作者的下一个动作（render/lock_with_text/skip/back）会新开流。
+                if ev_name in ("BEAT_RENDER_READY", "COMPLETE", "BEAT_BRANCH_CHOICE", "BEAT_AUTHORING_OPEN", "ERROR"):
                     return
         except Exception as e:
             yield build_sse_error(f"步进流异常: {e}")
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+# ============================================================
+# NLE-ADF 2.0：微缝合（stitch）
+# ============================================================
+
+_STITCH_MAX_CHARS = 160   # 超出即触发句界截断（契约 80~120 字 ×1.3 容忍带）
+_STITCH_CUT_CHARS = 130   # 句界截断目标长度
+
+
+def _truncate_stitch_at_sentence(text: str) -> str:
+    """超长缝合文本的句界截断：在 _STITCH_CUT_CHARS 附近找最后一个句末标点切掉。
+
+    与整段渲染的字数硬闸门同思路（宁缺勿残），但尺度是碎片级。
+    找不到句界标点时硬切 _STITCH_CUT_CHARS（兜底，防无限长）。
+    """
+    text = text.strip()
+    if len(text) <= _STITCH_MAX_CHARS:
+        return text
+    window = text[:_STITCH_MAX_CHARS]
+    cut = -1
+    for mark in ("。", "！", "？", "…", "”"):
+        pos = window.rfind(mark, 0, _STITCH_CUT_CHARS + 1)
+        if pos > cut:
+            cut = pos
+    if cut >= 30:  # 至少保住一个像样的句子，否则不如硬切
+        return window[: cut + 1]
+    return text[:_STITCH_CUT_CHARS]
+
+
+@router.post("/{chapter_id}/stitch")
+async def stitch_fragment(
+    chapter_id: str,
+    request: StitchFragmentRequest,
+):
+    """NLE-ADF 2.0 微缝合（SSE 流式，打字机推流）。
+
+    作者按 Space 触发：把【作者原句碎片】+【点选的镜头零件】用白描契约缝合成
+    80~120 字片段。轻量路径：不调 render_one/降级状态机、不抽状态卡、不写库——
+    深护栏（去味剪枝/残句门禁/一致性守卫）在拍锁死与后处理时统一跑。
+
+    SSE 事件序列：STITCH_START → STITCH_CHUNK × N（~6 字/帧，90ms 间隔，打字机感）
+    → STITCH_DONE {text, word_count, fragment_preserved}；失败 STITCH_ERROR。
+    """
+    from fastapi import HTTPException
+    from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
+    from backend.services.prompts.bsadf_prompts import build_stitch_prompt
+    from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+
+    # 双路：有 run = 拍卡引导缝合（方向+专名表）；无 run = 自由缝合
+    # （零门槛开局期，管线未就绪——缝合不等卡，白描契约不变）。
+    card = None
+    proper_nouns: List[str] = []
+    if request.run_id:
+        run = _STEPPING_RUNS.get(request.run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="RUN_NOT_FOUND")
+        if run.status != "stepping":
+            raise HTTPException(status_code=409, detail="RUN_FINISHED")
+        if not run.cards or run.current_beat_index >= len(run.cards):
+            raise HTTPException(status_code=409, detail="RUN_FINISHED")
+        card = run.cards[run.current_beat_index]
+        if request.beat_id and card.beat_id != request.beat_id:
+            raise HTTPException(status_code=409, detail="BEAT_NOT_CURRENT")
+        # 专名表（角色+资产名，上限 20）：微缝合是小预算调用，无专名约束极易
+        # 称呼漂移造名（"老烟"变"老烟枪"）；从 workflow 持有上下文取，0 LLM。
+        workflow = getattr(run, "workflow", None)
+        for coll_name in ("entities", "assets"):
+            for item in getattr(workflow, coll_name, None) or []:
+                name = getattr(item, "name", "") or (item.get("name") if isinstance(item, dict) else "")
+                if name and name not in proper_nouns:
+                    proper_nouns.append(name)
+        proper_nouns = proper_nouns[:20]
+
+    fragment = request.fragment.strip()
+    rolling_prefix = (request.rolling_prefix or "")[-200:].strip()
+    system_prompt, user_prompt = build_stitch_prompt(
+        fragment=fragment,
+        picked_parts=request.picked_parts,
+        rolling_prefix=rolling_prefix,
+        core_plot_event=(getattr(card, "core_plot_event", "") or "") if card else "",
+        text_carrier=(getattr(card, "text_carrier", "") or "") if card else "",
+        proper_nouns=proper_nouns,
+    )
+
+    async def _stream():
+        try:
+            # 非流式拿全量再打字机式分块：LLM 首 token 延迟（1~3s）无法压缩，
+            # 但吐出节奏可控——100 字按 ~6 字/90ms 匀速浮现，体感"现场缝合"。
+            result = await call_llm_with_usage(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_type="creative",
+                temperature=0.7,
+                max_tokens=400,
+                reasoning_config=REASONING_DISABLED,
+            )
+            text = (result.content or "").strip().strip('"').strip('"').strip()
+            if not text:
+                yield build_sse_event("STITCH_ERROR", "", error="缝合产出为空，请重试")
+                return
+            text = _truncate_stitch_at_sentence(text)
+            # 硬契约自检：作者原句必须一字不改保留。违例时前置原句兜底
+            # （宁拙勿缺——原句是作者主权文本，丢失比生硬衔接更严重）。
+            fragment_preserved = fragment in text
+            if not fragment_preserved:
+                logger.warning(
+                    f"[stitch] 作者原句未被保留 run={request.run_id} beat={request.beat_id}，前置兜底"
+                )
+                text = f"{fragment}{text}"
+            yield build_sse_event("STITCH_START", "", beat_id=request.beat_id)
+            # 打字机式分块推流（~6 字/帧 × 90ms ≈ 100 字 1.5s 吐完）
+            chunk_size = 6
+            for pos in range(0, len(text), chunk_size):
+                yield build_sse_event(
+                    "STITCH_CHUNK", "",
+                    beat_id=request.beat_id,
+                    delta=text[pos: pos + chunk_size],
+                )
+                await asyncio.sleep(0.09)
+            yield build_sse_event(
+                "STITCH_DONE", "",
+                beat_id=request.beat_id,
+                text=text,
+                word_count=len(text),
+                fragment_preserved=fragment_preserved,
+            )
+        except Exception as e:
+            logger.warning(f"[stitch] 缝合失败 run={request.run_id} beat={request.beat_id}: {e}")
+            yield build_sse_event("STITCH_ERROR", "", error=f"缝合失败: {e}")
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def _degraded_hint_for_run(run: Any) -> Optional[Dict[str, Any]]:
+    """从步进 run 当前卡快照还原降级提示（reason 无法从卡还原，给通用值）。
+
+    stepping_loop 的 BEAT_RENDER_READY.degraded 是一次性事件，SSE 断流后
+    前端轮询无法拿到——卡的 status='degraded' 是持久态，据此重建提示。
+    """
+    cards = getattr(run, "cards", None) or []
+    idx = getattr(run, "current_beat_index", 0)
+    if not cards or idx < 0 or idx >= len(cards):
+        return None
+    card = cards[idx]
+    if getattr(card, "status", "") != "degraded":
+        return None
+    return {
+        "beat_id": getattr(card, "beat_id", ""),
+        "segment_index": getattr(card, "segment_index", idx),
+        "reason": "render_degraded",
+        "attempts": getattr(card, "render_attempts", 2),
+    }
 
 
 @router.get("/stepping-run/{run_id}/state")
@@ -1243,9 +1556,12 @@ async def get_stepping_run_state(run_id: str):
         "current_beat_index": run.current_beat_index,
         "current_beat_id": run.cards[run.current_beat_index].beat_id if run.cards else None,
         "current_segment_ready": run.current_segment_ready,
+        # 等裁决态（ready=True）时当前段正文在 _pending_segment_text（尚未入 locked）；
+        # 渲染中/非 ready 时 _pending 是上一段的残留，应回退到最后一条 locked 正文
         "current_segment_text": (
-            run.locked_segments[-1].text if run.locked_segments else
             (getattr(run, "_pending_segment_text", "") or "")
+            if run.current_segment_ready
+            else (run.locked_segments[-1].text if run.locked_segments else "")
         ),
         "locked_count": len(run.locked_segments),
         "total_beats": len(run.cards),
@@ -1254,13 +1570,45 @@ async def get_stepping_run_state(run_id: str):
             c.beat_id if hasattr(c, "beat_id") else (c.get("beat_id", "") if isinstance(c, dict) else "")
             for c in run.cards
         ],
+        # 步进循环终态产物（status=done 时非空）：SSE 断流丢失 COMPLETE 帧后，
+        # 前端轮询本端点凭 final_result 补齐 done 落地（终稿/统计/rescue_needed），
+        # 否则界面永久卡后处理态、正文永不落库
+        "final_result": run.final_result,
+        # 当前卡降级态（SSE 断流自愈恢复降级提示用；reason 无法从卡快照还原，
+        # 给通用值 render_degraded）
+        "current_segment_degraded": _degraded_hint_for_run(run),
+        # 岔路门挂起状态（前端轮询自愈用）：
+        # SSE 断流导致 BEAT_BRANCH_CHOICE 事件丢失时，前端靠轮询发现
+        # awaiting_branch_choice=true 重建 branchChoicePending，切 beat_branch_choosing。
+        "awaiting_branch_choice": run.awaiting_branch_choice,
+        "pending_branch": run.pending_branch,
+        # 作者模式挂起状态（NLE-ADF 2.0，前端轮询自愈用）：
+        # SSE 断流导致 BEAT_AUTHORING_OPEN 丢失时，前端靠轮询发现
+        # awaiting_authoring=true，凭 pending_authoring 的拍卡快照重建画布创作态。
+        "awaiting_authoring": getattr(run, "awaiting_authoring", False),
+        "pending_authoring": getattr(run, "pending_authoring", None),
+        # NLE-ADF 2.0 懒增强就绪标记：轻卡通道下增强（enrich/DDE/Loop1）后台
+        # 完成后置 True；前端创作期慢查本字段，True 时取增强卡与决策集刷新零件。
+        "cards_enhanced": getattr(run, "cards_enhanced", False),
+        "enhanced_beat_slots": (
+            [beat_slot_to_dict(c) for c in run.cards]
+            if getattr(run, "cards_enhanced", False) else None
+        ),
+        "enhanced_decision_set": (
+            run.decision_set if getattr(run, "cards_enhanced", False) else None
+        ),
+        "loop1_result": getattr(run, "loop1_result", None),
     }
 
 
 @router.delete("/stepping-run/{run_id}")
 async def delete_stepping_run(run_id: str):
-    """销毁步进运行（前端取消/退出步进面板时调用，释放内存）。"""
+    """销毁步进运行（前端取消/退出步进面板时调用，释放内存）。
+
+    同时取消关联的后台 task 与步进循环 task，清理 pending 上下文。
+    """
     from backend.services.workflows.bsadf.stepping_runtime import _STEPPING_RUNS
+    _cleanup_run_tasks(run_id)
     run = _STEPPING_RUNS.pop(run_id)
     if run is None:
         return {"ok": False, "reason": "RUN_NOT_FOUND"}

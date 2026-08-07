@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import PublishModal from './PublishModal.vue'
+import { extractSegmentTextFromPreviewHtml } from '../../generation/composables/buildGenerationPreview'
 import type { Chapter } from '../../../types'
 
 // V3.1 清理：旧双轨生成 UI（智能生成按钮/生成参数弹窗/节拍预览弹窗/澄清与完成弹窗/
@@ -27,11 +28,22 @@ const props = defineProps<{
   openCritiqueModal: () => void
   publishChapter: () => void
   selectedChapter: Chapter | null
+  /** 生成预览 HTML（非 null 时编辑器默认只读显示预览，替代章节正文） */
+  previewHtml?: string | null
+  /** 主编辑器直改：步进裁决窗口期预览可编辑（当前就绪段可改，其余段照旧滚动预览） */
+  previewEditable?: boolean
+  /** 主编辑器直改：当前可编辑段的 segment_index（段标头定位用） */
+  previewSegmentIndex?: number | null
   setEditorRef: (editor: any) => void
   showPublishModal: boolean
   bookId?: string
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   lastSavedAt?: Date | null
+}>()
+
+const emit = defineEmits<{
+  /** 主编辑器直改：作者在预览中编辑了当前段正文（已提取为 \n\n 纯文本） */
+  (e: 'preview-segment-edit', text: string): void
 }>()
 
 const saveStatusLabel = computed(() => {
@@ -56,11 +68,28 @@ const editorRef = ref<any>(null)
 watch(editorRef, (editor) => {
   props.setEditorRef(editor)
 })
+
+/**
+ * 内容更新路由：主编辑器直改（previewEditable）时，整篇预览 HTML 中只提取
+ * 当前就绪段的正文抛给上层（session.setReadySegmentText），绝不走
+ * handleContentUpdate 写章节正文——预览是 session 状态投影，写库会污染章节。
+ * 提取失败（作者误删段标头等）跳过本次同步，不阻断输入。
+ */
+function onContentUpdate(html: string) {
+  if (props.previewEditable && props.previewHtml != null) {
+    if (props.previewSegmentIndex != null) {
+      const text = extractSegmentTextFromPreviewHtml(html, props.previewSegmentIndex)
+      if (text != null) emit('preview-segment-edit', text)
+    }
+    return
+  }
+  props.handleContentUpdate(html)
+}
 </script>
 
 <template>
   <div class="h-full flex flex-col overflow-hidden px-6 py-4 flex-1 min-h-0">
-    <div v-if="selectedChapter" class="max-w-[920px] w-full mx-auto flex flex-col h-full flex-1 min-h-0 space-y-3">
+    <div v-if="selectedChapter" class="max-w-[720px] w-full mx-auto flex flex-col h-full flex-1 min-h-0 space-y-3">
       <!-- 章节标题行 -->
       <div class="flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex-1 flex items-center gap-2">
@@ -150,12 +179,13 @@ watch(editorRef, (editor) => {
           ref="editorRef"
           :id="selectedChapter.id"
           :book-id="bookId"
-          :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
-          @update:model-value="handleContentUpdate"
+          :model-value="previewHtml ?? (selectedChapter.content_text || selectedChapter.draft_text || '')"
+          @update:model-value="onContentUpdate"
           @entity-focus-change="handleEditorEntityFocus"
           @request-format="handleFormatText"
           @request-partial-optimize="handlePartialOptimize"
-          :disabled="isEditorDisabled"
+          :disabled="isEditorDisabled || (previewHtml != null && !previewEditable)"
+          :hide-toolbar="previewEditable"
           :is-formatting="isFormatting"
           placeholder="在此处开始写作或生成内容..."
         />

@@ -40,9 +40,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from backend.services.llm import call_llm_with_usage
+from backend.services.llm.client import REASONING_DISABLED
 from backend.core.model_config import get_default_reasoning_config, has_dedicated_wash_profile
 from backend.services.nlg.ai_taste_meter import DensityReport, measure_ai_taste
 from backend.services.nlg.anti_ai_rules import DensityThresholds, DEFAULT_THRESHOLDS
@@ -134,6 +135,7 @@ async def wash_segment_if_too_ai(
     max_tokens: int = 4096,
     recorder: Optional[RunRecorder] = None,
     stage: str = "adf.wash",
+    must_keep: Optional[List[str]] = None,
 ) -> WashResult:
     """对 AI 味超标的段落执行 LLM 洗涤。
 
@@ -148,6 +150,8 @@ async def wash_segment_if_too_ai(
         recorder: RunRecorder（可选）。提供时洗涤 LLM 调用计入 generation_runs
             （stage 默认 adf.wash，model_slot=wash），供章级成本报告聚合
         stage: 计量 stage 名（segment_writer 传入 adf.wash.segment_N）
+        must_keep: 洗涤必须保留的词/短语列表（BS-ADF 槽位强制元素）。
+            提供时注入洗涤 prompt，防止洗涤重写把锚点词洗掉导致 coverage 校验失败
 
     Returns:
         WashResult：含最终文本、是否洗涤、前后分数、处置说明
@@ -180,13 +184,24 @@ async def wash_segment_if_too_ai(
         reasons=reasons,
         text=text,
     )
+    # BS-ADF 槽位强制元素保护：洗涤重写不得删掉这些词（否则 coverage 校验必挂）
+    keep_words = [w for w in (must_keep or []) if w]
+    if keep_words:
+        user_prompt += (
+            "\n\n# 必须保留的词（硬约束）\n"
+            "以下词/短语是情节锚点，重写时可以调整其前后句式，"
+            "但每个词的实词核心（名词/动词）必须保留在正文中：\n"
+            + "\n".join(f"- {w}" for w in keep_words)
+        )
 
     try:
         # thinking 配置：独立 wash 槽尊重其 enabled/effort（默认关）；
-        # 回退 creative 时显式传 {} 关闭 thinking——编辑任务不需要深度思考，
-        # 避免继承 creative 的 effort=max 拖慢每次洗涤。
+        # 回退 creative 时显式传 REASONING_DISABLED 关闭 thinking——编辑任务
+        # 不需要深度思考，避免继承 creative 的 effort=max 拖慢每次洗涤。
+        # ⚠ 不能传空 dict：client 的 `if reasoning_config:` 对 {} 为 falsy，
+        # extra_body 不会设置，等于没关（推理模型照样吃 token 预算）。
         wash_reasoning_config = (
-            get_default_reasoning_config("wash") if has_dedicated_wash_profile() else {}
+            get_default_reasoning_config("wash") if has_dedicated_wash_profile() else REASONING_DISABLED
         )
         if recorder is not None:
             async with recorder.record_call(stage=stage, model_slot="wash") as call_ctx:

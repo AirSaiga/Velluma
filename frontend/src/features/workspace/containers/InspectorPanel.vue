@@ -20,20 +20,18 @@ import ChapterBadges from '../presentation/ChapterBadges.vue'
 import TierSelector from '../../../components/TierSelector.vue'
 import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPanel.vue'
 import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
-import BeatProgress from '../../generation/presentation/BeatProgress.vue'
 import StoryboardPanel from '../../generation/presentation/StoryboardPanel.vue'
-// TrackSelector 暂时下线（Track A 通道关闭）；恢复时重新 import 并挂到生成主控区
+import CurrentTaskBar from '../../generation/presentation/CurrentTaskBar.vue'
+import BranchDecisionPanel from '../../generation/presentation/BranchDecisionPanel.vue'
 import type { IssueDecision, RefineryIssue, BeatSlot } from '../../../services/api/domain'
 import { refineryApi } from '../../../services/api/domain'
 import GenerationStepper from '../../generation/presentation/GenerationStepper.vue'
+import BeatSlotCardView from '../../generation/presentation/BeatSlotCardView.vue'
+import FocusAssetsPanel from '../../generation/presentation/FocusAssetsPanel.vue'
 import SceneSettingsPanel from '../presentation/SceneSettingsPanel.vue'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 
-type InspectorTab = 'plan' | 'setting' | 'refine' | 'feedback' | 'canon' | 'beats'
-
-// 引擎固定 BS-ADF（原 ADF 直写入口已下线，底层 session.start/adfApi 保留供 Refinery/优化复用）
-type EngineChoice = 'bsadf'
-type TrackChoice = 'A' | 'B'
+type InspectorTab = 'plan' | 'setting' | 'refine' | 'feedback' | 'canon' | 'beats' | 'focus'
 
 interface TabDef {
   key: InspectorTab
@@ -62,21 +60,32 @@ const tabs: TabDef[] = [
   { key: 'feedback', label: '反馈', icon: 'chat', ready: true },
   { key: 'beats', label: '节拍', icon: 'bolt', ready: true },
   { key: 'canon', label: 'Canon', icon: 'link', ready: true },
+  { key: 'focus', label: '聚焦', icon: 'users', ready: true },
 ]
 
 const activeTab = ref<InspectorTab>('plan')
 
 // 生成会话（V4.x：优先用外部传入的，否则自建）
 const session = props.externalSession || useGenerationSession()
+// P1 焦点条「重写本段」面板展开态：当前展开的 beat_id（null=收起）。
+// P2/P3：正文直编/回退已接真实 session 调用（lock_with_text / back action）。
+const rewritePanelBeatId = ref<string | null>(null)
+/** 焦点条「重写本段」内联编辑草稿（深拷贝自 readyBeatCard，提交才生效） */
+const rewriteDraft = ref<BeatSlot | null>(null)
+
+/** 深拷贝分镜卡（编辑草稿隔离，不污染 session） */
+function deepClone<T>(v: T): T {
+  try {
+    return structuredClone(v)
+  } catch {
+    return JSON.parse(JSON.stringify(v))
+  }
+}
 const tierSelection = ref<'auto' | 'climax' | 'turn' | 'progress' | 'transition'>('auto')
 // V3.5：字数指定（null = 自动按定档推导；用户填了就用用户的）
 const targetWordCount = ref<number | null>(null)
 
-// V5 BS-ADF：引擎选择 + 渲染轨道
-// ⚠ Track A（自动直出）通道已暂时关闭：前端固定走 Track B 分镜微调，
-//    TrackSelector 不再渲染（组件文件保留，恢复时重新挂上并把默认值改回 'A'）
-const selectedEngine = ref<EngineChoice>('bsadf')
-const selectedTrack = ref<TrackChoice>('B')
+// V5 BS-ADF：引擎固定 BS-ADF + 步进模式（enable_stepping=true），Track A/B 暂停编辑流程已下线。
 
 // V4.3 介入点 3：读者反馈
 const readerFeedback = ref('')
@@ -159,10 +168,6 @@ function updateChapterField(field: 'title' | 'outline_text', value: string) {
   }, 500)
 }
 
-const emit = defineEmits<{
-  (e: 'jump-to-offset', offset: [number, number] | undefined): void
-}>()
-
 function startGenerate() {
   if (!selectedChapterId.value) {
     console.warn('[Inspector] startGenerate: 无选中章节')
@@ -173,7 +178,7 @@ function startGenerate() {
   startBeatGenerate()
 }
 
-/** BS-ADF：启动生成（Track A 自动直出 / Track B 分镜微调，跑到分镜卡单次暂停） */
+/** BS-ADF：启动步进生成（固定 enable_stepping=true）。Track 参数仅向后端兼容传递。 */
 function startBeatGenerate() {
   if (!selectedChapterId.value) {
     console.warn('[Inspector] startBeatGenerate: 无选中章节')
@@ -181,12 +186,13 @@ function startBeatGenerate() {
   }
   console.log('[Inspector] startBeatGenerate:', {
     tier: tierSelection.value,
-    track: selectedTrack.value,
     chapterId: selectedChapterId.value,
   })
   session.startBeat(selectedChapterId.value, tierSelection.value, {
     targetWordCount: targetWordCount.value,
     steppingEnabled: true,
+    // NLE-ADF 2.0 作者模式：拍不自动渲染，画布写碎片微缝合 / 空行 Space 召唤代笔
+    enableAuthoring: true,
     enableOutlineSelfCheck: true,
     enableMemoryIngestion: true,
   })
@@ -211,7 +217,7 @@ function handleRefineryCancel() {
   session.stage.value = 'done'
 }
 
-/** V5 BS-ADF：作者确认分镜卡编辑 + 剧情走向选择，恢复渲染 */
+/** V5 BS-ADF：作者确认分镜卡编辑 + 剧情走向选择，恢复渲染（历史 Track B 入口；当前步进模式不再调用）。 */
 function handleBeatConfirm(payload: { edited_slots: BeatSlot[]; branch_choices: Record<string, string>; skipped: boolean }) {
   if (!selectedChapterId.value) return
   session.confirmBeats(selectedChapterId.value, payload.edited_slots, {
@@ -225,10 +231,10 @@ function handleBeatCancel() {
   session.cancelBeat()
 }
 
-/** NLE-ADF：Space 锁死推进（推进到下一段） */
+/** NLE-ADF：接受本段并推进（作者改过正文时 session 自动改走 lock_with_text） */
 function onAdvancePass() {
   if (!selectedChapterId.value || !session.readyBeatId.value) return
-  session.advanceBeat(selectedChapterId.value, 'pass', { beatId: session.readyBeatId.value })
+  session.acceptReadySegment(selectedChapterId.value)
 }
 
 /** NLE-ADF：跳过本段 */
@@ -237,25 +243,82 @@ function onAdvanceSkip() {
   session.advanceBeat(selectedChapterId.value, 'skip', { beatId: session.readyBeatId.value })
 }
 
-/** NLE-ADF：步进岔路选择（optionId=null 表示接受默认走向） */
-function handleChooseBranch(optionId: string | null) {
-  session.submitBranchChoice(optionId)
+/** P1 焦点条：展开/收起当前段「重写本段」面板（切换 rewritePanelBeatId）。
+ *  展开时从 readyBeatCard 深拷贝草稿——编辑在焦点条内联卡上完成，
+ *  不污染 session（提交才走 handleRerenderBeat → 步进态 advanceBeat('edit')）。 */
+function toggleRewritePanel() {
+  const cur = session.readyBeatId.value
+  if (!cur) return
+  if (rewritePanelBeatId.value === cur) {
+    rewritePanelBeatId.value = null
+    rewriteDraft.value = null
+    return
+  }
+  const card = session.readyBeatCard.value
+  if (card) rewriteDraft.value = deepClone(card)
+  rewritePanelBeatId.value = cur
 }
 
-/** 风险5修复：StoryboardPanel radio 在步进岔路门态选走向后直接提交 */
-function handleChooseBranchRadio(beatId: string, optionId: string) {
-  session.submitBranchChoice(optionId)
+/** 段推进/回退/重渲后自动收起焦点条编辑面板（草稿只对当时的就绪段有效） */
+watch(() => session.readyBeatId.value, () => {
+  if (rewritePanelBeatId.value) {
+    rewritePanelBeatId.value = null
+    rewriteDraft.value = null
+  }
+})
+
+/** P1 焦点条：当前段「重写本段」面板是否展开 */
+const rewritePanelOpen = computed(() =>
+  !!rewritePanelBeatId.value && rewritePanelBeatId.value === session.readyBeatId.value,
+)
+
+/** P3：是否可回退（首段无快照时禁用；按 lockedBeatIds 数量推断已推进段数） */
+const canBack = computed(() => {
+  // 当前段是第 0 段时不可回退（无上一段）
+  const slot = session.readyBeatCard.value
+  return !!slot && slot.segment_index > 0
+})
+
+/** P3 焦点条：「回到上一段」——back action，后端弹快照栈恢复，循环重渲该段 */
+function onBackBeat() {
+  if (!selectedChapterId.value || !session.readyBeatId.value) return
+  rewritePanelBeatId.value = null
+  session.advanceBeat(selectedChapterId.value, 'back', {
+    beatId: session.readyBeatId.value,
+  })
+}
+
+/** P1 焦点条：「重写本段」提交——把焦点条内联编辑后的整卡重渲。
+ *  handleRerenderBeat 已正确处理步进分支：就绪段（readyBeatId 匹配）走
+ *  advanceBeat('edit')（/rerender-beat 与 SteppingRun 脱节，结果不进步进循环）；
+ *  其余态走 /rerender-beat。 */
+function submitRewriteFromDraft() {
+  const slot = rewriteDraft.value
+  if (!slot || !session.readyBeatId.value) return
+  rewritePanelBeatId.value = null
+  rewriteDraft.value = null
+  void handleRerenderBeat(slot)
 }
 
 /**
  * V5 BS-ADF：降级/救援单卡恢复。
  * - rerender：拿编辑后的整卡调 session.rerenderBeat（/rerender-beat 携带 edited_slot）。
  *   卡来源：session.beatSlots（confirm 后不再清空，始终持卡）。
+ * - NLE-ADF 步进态特例：当前待裁决段的「微调后重渲」必须走 advanceBeat('edit')
+ *   ——/rerender-beat 与 SteppingRun 完全脱节，渲染结果不进步进循环、不进正文
+ *   （此前步进态点「定点渲染本段」等于白点的根因）。
  * - skip-degraded：直接从 degradedBeats 移除该 beat（保留正文中的占位，作者手动放弃）。
  * - dismiss-rescue：从 rescueNeeded 移除该条（作者确认不救）。
  */
 async function handleRerenderBeat(slot: BeatSlot) {
   if (!selectedChapterId.value) return
+  if (
+    session.stage.value === 'beat_stepping' &&
+    session.readyBeatId.value === slot.beat_id
+  ) {
+    session.advanceBeat(selectedChapterId.value, 'edit', { beatId: slot.beat_id, editedSlot: slot })
+    return
+  }
   await session.rerenderBeat(selectedChapterId.value, slot.beat_id, slot)
 }
 
@@ -291,10 +354,6 @@ function handleEditCanon() {
   if (!bookId) return
   // 保留当前 refinery 状态，跳转到 Canon 页；作者编辑完手动回来继续
   router.push({ name: 'canon', params: { bookId } })
-}
-
-function handleCancel() {
-  session.cancel()
 }
 
 function handleDismissInflight(idx: number) {
@@ -368,7 +427,6 @@ function handleDismissInflight(idx: number) {
           <GenerationStepper
             v-if="session.generating.value || (session.stage.value !== 'idle' && session.stage.value !== 'done')"
             :session="session"
-            @cancel="handleCancel"
             @dismiss-inflight="handleDismissInflight"
             @retry="session.retry"
           />
@@ -378,8 +436,8 @@ function handleDismissInflight(idx: number) {
             <div class="section-label">篇幅</div>
             <TierSelector v-model="tierSelection" />
 
-            <!-- 引擎固定 BS-ADF；轨道固定 Track B 分镜微调（Track A 通道暂时关闭，
-                 TrackSelector 不再渲染，恢复时重新挂上） -->
+            <!-- 引擎固定 BS-ADF + 步进模式（Track 选择与 Track A 通道已随
+                 TrackSelector 一并删除） -->
 
             <div class="word-count-input">
               <label class="wc-label">目标字数</label>
@@ -404,7 +462,7 @@ function handleDismissInflight(idx: number) {
               <span>{{ session.stage.value === 'done' ? '重新生成' : '生成本章' }}</span>
             </button>
             <p class="hint">
-              分镜微调：先生成分镜卡，你改卡、选走向后再逐段渲染。
+              步进模式：AI 先为每一段建分镜卡，再逐段渲染；每段就绪后你按 Space 推进，也可回退或改写。
             </p>
           </section>
 
@@ -419,6 +477,94 @@ function handleDismissInflight(idx: number) {
               <span class="stat-label">出场角色</span>
             </div>
           </section>
+
+          <!-- ====== NLE-ADF 3.0 自适应写作：完稿 + 审计 + 沉淀结果 ====== -->
+          <template v-if="session.adaptiveMode?.value && session.authorLane?.value === 'composing'">
+            <!-- 沉淀抽取结果（涌现实体 + 冲突；作者主权：冲突不自动改） -->
+            <section v-if="session.settleResult?.value?.emergent_facts || session.settleResult?.value?.conflicts?.length" class="adaptive-settle">
+              <div class="section-label">沉淀抽取</div>
+              <!-- 涌现实体 -->
+              <div v-if="session.settleResult.value.emergent_facts?.new_entities?.length" class="settle-block">
+                <div class="settle-block-label">涌现实体</div>
+                <div
+                  v-for="(ent, i) in session.settleResult.value.emergent_facts.new_entities.slice(0, 5)"
+                  :key="'ent' + i"
+                  class="settle-item"
+                >{{ ent.name }}<span v-if="ent.description" class="muted"> · {{ ent.description }}</span></div>
+              </div>
+              <!-- 冲突（设定矛盾——浮给作者确认，不自动改） -->
+              <div v-if="session.settleResult.value.conflicts?.length" class="settle-block settle-block--warn">
+                <div class="settle-block-label">⚠️ 设定冲突（待你确认）</div>
+                <div
+                  v-for="(c, i) in session.settleResult.value.conflicts.slice(0, 5)"
+                  :key="'conf' + i"
+                  class="settle-item settle-item--conflict"
+                >
+                  <span class="conflict-entity">{{ c.entity }}</span>
+                  <span class="muted">已有：{{ c.existing }}</span>
+                  <span class="muted">正文：{{ c.new }}</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 完稿审计报告 -->
+            <section v-if="session.finishReport?.value?.report" class="adaptive-report">
+              <div class="section-label">完稿审计</div>
+              <!-- 残句 -->
+              <div v-if="session.finishReport.value.report.sentence_defects?.length" class="report-block report-block--warn">
+                <div class="report-block-label">残句（{{ session.finishReport.value.report.sentence_defects.length }}）</div>
+                <div
+                  v-for="(d, i) in session.finishReport.value.report.sentence_defects.slice(0, 5)"
+                  :key="'sd' + i"
+                  class="report-item"
+                >{{ typeof d === 'string' ? d : (d.text || d.fragment || JSON.stringify(d)) }}</div>
+              </div>
+              <!-- 必达覆盖率 -->
+              <div v-if="session.finishReport.value.report.coverage?.checked" class="report-block">
+                <div class="report-block-label">
+                  必达覆盖 {{ session.finishReport.value.report.coverage.hit_count }}/{{ session.finishReport.value.report.coverage.hit_count + session.finishReport.value.report.coverage.miss_count }}
+                </div>
+                <div v-if="session.finishReport.value.report.coverage.misses?.length" class="report-item report-item--miss">
+                  未达：{{ session.finishReport.value.report.coverage.misses.join('；') }}
+                </div>
+              </div>
+              <!-- Canon 泄露 -->
+              <div v-if="session.finishReport.value.report.canon_check?.private_breaches?.length" class="report-block report-block--warn">
+                <div class="report-block-label">⚠️ Canon 泄露</div>
+                <div
+                  v-for="(b, i) in session.finishReport.value.report.canon_check.private_breaches"
+                  :key="'cb' + i"
+                  class="report-item"
+                >{{ b }}</div>
+              </div>
+              <!-- LLM 审阅 -->
+              <div v-if="session.finishReport.value.report.critique?.issues?.length" class="report-block">
+                <div class="report-block-label">编辑审阅（{{ session.finishReport.value.report.critique.verdict === 'pass' ? '通过' : '需修改' }}）</div>
+                <div
+                  v-for="(iss, i) in session.finishReport.value.report.critique.issues.slice(0, 5)"
+                  :key="'iss' + i"
+                  class="report-item"
+                  :class="{ 'report-item--warn': iss.severity === 'warning' }"
+                >
+                  <span class="issue-cat">{{ iss.category }}</span>
+                  {{ iss.detail }}
+                </div>
+              </div>
+            </section>
+
+            <!-- 完稿按钮 -->
+            <section class="adaptive-finish">
+              <button
+                class="btn-finish"
+                :disabled="session.aiLane?.value === 'analyzing'"
+                @click="session.triggerAdaptiveFinish()"
+              >
+                <Icon :name="session.aiLane?.value === 'analyzing' ? 'loader' : 'check-circle'" :size="14" />
+                <span>{{ session.aiLane?.value === 'analyzing' ? '审计中…' : '完稿审计' }}</span>
+              </button>
+              <p class="hint">触发全章审计：残句 / 必达覆盖 / Canon 泄露 / 编辑审阅</p>
+            </section>
+          </template>
         </template>
       </div>
 
@@ -568,18 +714,59 @@ function handleDismissInflight(idx: number) {
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- 渲染进度（Track A 全程 + Track B confirm 后；分镜卡未就绪前的等待态也在此）
-               bsadfTrack 非空 = 本次会话确由 startBeat 启动（ADF/Refinery 生成时为 null，
-               避免 ADF 的 tier_classifying 阶段误显示 BS-ADF 渲染进度） -->
-          <BeatProgress
-            v-if="(session.stage.value === 'beat_rendering' || session.stage.value === 'tier_classifying') && (session.renderProgress.value.length > 0 || session.generating.value) && session.bsadfTrack.value"
-            :progress="session.renderProgress.value"
-            :degraded="session.degradedBeats.value"
-            :stage-label="session.stepProgress.value?.label || ''"
+          <!-- 步进岔路门顶部决策区：走向选择/大纲缺口补充的唯一交互入口（独占焦点位，
+               岔路态 currentTask 为 idle、焦点条不渲染，两者互斥同槽）。
+               接管态下分镜卡列表隐藏，卡上下文（核心转折/必现画面）已内嵌面板。 -->
+          <BranchDecisionPanel
+            v-if="session.stage.value === 'beat_branch_choosing' && session.branchChoicePending.value"
+            :pending="session.branchChoicePending.value"
+            :seg-total="session.beatSlots.value.length"
+            @submit="session.submitBranchChoice"
+            @cancel="session.cancel"
           />
 
-          <!-- 分镜工作台：Track B 暂停态可编辑；Track A / 渲染后只读为主 + 极速微调/定点渲染；
-               救援/降级段内联高亮（路线 C） -->
+          <!-- P1「当前任务」焦点条：渲染阶段唯一焦点。
+               把原散落的 branch-choice-bar / stepping-bar / 卡级动作引导收敛到此。
+               task 由 session.currentTask 派生（纯只读）；动作 emit 回本组件调 session。 -->
+          <CurrentTaskBar
+            :task="session.currentTask.value"
+            :busy="session.generating.value"
+            :rewrite-panel-open="rewritePanelOpen"
+            :author-dirty="session.readySegmentDirty.value"
+            :can-back="canBack"
+            @accept="onAdvancePass"
+            @open-rewrite="toggleRewritePanel"
+            @revert-edit="session.revertReadySegment"
+            @back="onBackBeat"
+            @skip="onAdvanceSkip"
+            @cancel="session.cancel"
+          >
+            <!-- ② 重写本段：内联卡编辑（草稿隔离，提交才生效）。
+                 步进态下卡级「重写本段」被隐藏（StoryboardPanel 注释：归焦点条②），
+                 这里补上真正可用的编辑入口。 -->
+            <template #rewrite>
+              <div v-if="rewriteDraft" class="rewrite-card-panel">
+                <div class="rw-head">
+                  <span class="rw-label">🎬 改这张分镜卡后重渲染本段</span>
+                  <span class="rw-tip">AI 按新卡重写当前段；改完点「重生成本段」。</span>
+                </div>
+                <BeatSlotCardView :slot="rewriteDraft" />
+                <div class="rw-actions">
+                  <button class="rw-btn ghost" @click="toggleRewritePanel">收起</button>
+                  <button class="rw-btn primary" @click="submitRewriteFromDraft">重生成本段</button>
+                </div>
+              </div>
+            </template>
+          </CurrentTaskBar>
+
+          <!-- 渲染进度定位由状态轨（含岔路标记）+ 焦点面承担
+               （原 BeatProgress 统计行已删除：步进逐段渲染下其批量口径失真，
+               且与 CurrentTaskBar / 底部 GenerationOverlay 三重重复）。 -->
+
+          <!-- 分镜工作台：Track B 暂停态可编辑；其余态（含接管态）= 状态轨 + 点击单卡展开；
+               救援/降级段内联高亮（路线 C）。
+               接管式单焦点：岔路决策/段裁决时交互只在焦点面（BranchDecisionPanel /
+               CurrentTaskBar），此处自然塌缩为一行状态轨供进度定位（非编辑入口）。 -->
           <StoryboardPanel
             v-if="session.beatSlots.value.length > 0"
             :slots="session.beatSlots.value"
@@ -593,6 +780,7 @@ function handleDismissInflight(idx: number) {
             :rerendering-beat-id="session.rerenderingBeatId.value"
             :stepping-locked-ids="session.lockedBeatIds.value"
             :stepping-ready-id="session.readyBeatId.value"
+            :stepping-ready-degraded="!!session.readyBeatDegraded.value"
             :stepping-rendering-id="session.renderingBeatId.value"
             :branch-choice-pending-beat-id="session.stage.value === 'beat_branch_choosing' ? session.branchChoicePending.value?.beat_id : null"
             @confirm="handleBeatConfirm"
@@ -600,51 +788,27 @@ function handleDismissInflight(idx: number) {
             @rerender="handleRerenderBeat"
             @skip-degraded="handleSkipBeat"
             @dismiss-rescue="handleDismissRescue"
-            @choose-branch="handleChooseBranchRadio"
           />
 
-          <!-- NLE-ADF 步进岔路选择条：遇 DDE 岔路门，暂停等作者选走向时显示 -->
-          <div v-if="session.stage.value === 'beat_branch_choosing' && session.branchChoicePending.value" class="branch-choice-bar">
-            <div class="branch-choice-title">⚡ {{ session.branchChoicePending.value.node.node_title }}</div>
-            <div class="branch-choice-options">
-              <button
-                v-for="opt in session.branchChoicePending.value.node.options"
-                :key="opt.option_id"
-                class="step-btn"
-                :class="{ primary: opt.option_id === session.branchChoicePending.value.node.default_option }"
-                @click="handleChooseBranch(opt.option_id)"
-              >{{ opt.label }}</button>
-            </div>
-            <button class="step-btn secondary" @click="handleChooseBranch(null)">
-              接受默认（Space）
-            </button>
-          </div>
-
-          <!-- NLE-ADF 步进控制条：段就绪等空格推进时显示 -->
-          <div v-if="session.stage.value === 'beat_stepping' && session.readyBeatId.value" class="stepping-bar">
-            <div class="stepping-info">
-              当前段 #{{
-                (session.beatSlots.value.find(s => s.beat_id === session.readyBeatId.value)?.segment_index ?? 0) + 1
-              }}
-              · 已锁 {{ session.lockedBeatIds.value.size }}/{{ session.beatSlots.value.length }} 段
-            </div>
-            <div class="stepping-actions">
-              <button class="step-btn primary" @click="onAdvancePass">
-                💡 Space 锁死推进
-              </button>
-              <button class="step-btn secondary" @click="onAdvanceSkip">
-                跳过本段
-              </button>
-            </div>
-          </div>
+          <!-- 岔路门决策已上移顶部 BranchDecisionPanel，步进推进引导在 CurrentTaskBar，
+               原 branch-choice-bar / stepping-bar / 卡内选择块均已移除，避免多入口困惑 -->
 
           <!-- 空态 -->
           <div v-if="session.beatSlots.value.length === 0 && session.stage.value !== 'beat_rendering' && session.stage.value !== 'tier_classifying'" class="beats-empty">
             <div class="empty-icon"><Icon name="bolt" :size="40" /></div>
             <p>本章尚未用 BS-ADF 引擎生成。</p>
-            <p class="hint">在「规划」标签选择引擎 BS-ADF 与轨道 A/B 后生成。</p>
+            <p class="hint">在「规划」标签点击「生成本章」开始创建。</p>
           </div>
         </template>
+      </div>
+
+      <!-- ====== 聚焦 tab：NLE-ADF 2.0 本章聚焦资产 + 涌现记录（记忆倒灌可视化） ====== -->
+      <div v-else-if="activeTab === 'focus'" class="panel">
+        <FocusAssetsPanel
+          :session="session"
+          :characters="characters"
+          :linked-ids="selectedChapter?.character_ids || []"
+        />
       </div>
 
       <!-- ====== Canon tab：本章涉及的 Canon 节点 ====== -->
@@ -1071,6 +1235,103 @@ function handleDismissInflight(idx: number) {
   margin-top: 0.125rem;
 }
 
+/* ====== NLE-ADF 3.0 自适应：完稿 / 审计 / 沉淀结果 ====== */
+.adaptive-settle,
+.adaptive-report,
+.adaptive-finish {
+  margin-top: 0.75rem;
+}
+
+.adaptive-settle .settle-block,
+.adaptive-report .report-block {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+}
+
+.settle-block--warn,
+.report-block--warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.settle-block-label,
+.report-block-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.settle-item,
+.report-item {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  padding: 0.125rem 0;
+}
+
+.settle-item .muted,
+.report-item .muted {
+  color: var(--text-muted);
+}
+
+.settle-item--conflict {
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+.settle-item--conflict:last-child {
+  border-bottom: none;
+}
+.conflict-entity {
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.report-item--miss {
+  color: #f59e0b;
+}
+.report-item--warn {
+  color: #ef4444;
+}
+.issue-cat {
+  display: inline-block;
+  font-size: 0.625rem;
+  padding: 0 0.25rem;
+  border-radius: 0.1875rem;
+  background: var(--border-color);
+  color: var(--text-muted);
+  margin-right: 0.25rem;
+}
+
+.btn-finish {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: var(--accent, #6366f1);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.btn-finish:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.btn-finish:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .empty .empty-icon {
   margin: 0 auto 0.75rem;
   opacity: 0.6;
@@ -1429,54 +1690,61 @@ function handleDismissInflight(idx: number) {
   line-height: 1.7;
 }
 
-/* NLE-ADF 步进岔路选择条 */
-.branch-choice-bar { padding: 8px 12px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px; }
-.branch-choice-title { font-size: 13px; color: var(--text-primary); font-weight: 500; }
-.branch-choice-options { display: flex; gap: 6px; flex-wrap: wrap; }
-
-/* NLE-ADF 步进控制条 */
-.stepping-bar {
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  background: var(--bg-canvas);
+/* P2 焦点条「重写本段」内联卡面板 */
+.rewrite-card-panel {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 0.5rem;
-}
-.stepping-info {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.stepping-actions {
   display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.rw-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.rw-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.rw-tip {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.rw-actions {
+  display: flex;
+  justify-content: flex-end;
   gap: 0.375rem;
 }
-.step-btn {
-  border: none;
+.rw-btn {
   padding: 0.375rem 0.75rem;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-.step-btn.primary {
-  background: var(--accent-500, #4f46e5);
-  color: white;
-}
-.step-btn.primary:hover {
-  opacity: 0.9;
-}
-.step-btn.secondary {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  font-size: 0.75rem;
   border: 1px solid var(--border-color);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.step-btn.secondary:hover {
+.rw-btn:hover:not(:disabled) { opacity: 0.85; }
+.rw-btn.primary {
+  background: var(--accent-500);
+  color: white;
+  border-color: var(--accent-500);
+}
+.rw-btn.primary:hover:not(:disabled) { background: var(--accent-600); }
+.rw-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+.rw-btn.ghost:hover:not(:disabled) {
   background: var(--hover-bg);
+  color: var(--text-primary);
 }
 </style>

@@ -134,6 +134,11 @@ class StoryBranchSchema(BaseModel):
     default_option: str = Field(
         "", description="默认 option_id（最顺大纲的主路径）"
     )
+    source: str = Field(
+        "dde",
+        description="节点来源：dde=LLM 判出的真实岔路；loop1_gap=大纲自检缺口提示"
+        "（仅作者 custom: 补充文本才写 directive，提示语不注入渲染）",
+    )
 
 
 class ChapterDecisionSetSchema(BaseModel):
@@ -213,6 +218,16 @@ class GenerateBSAdfRequest(BaseModel):
         ),
     )
     enable_stepping: bool = Field(False, description="NLE-ADF 步进模式开关")
+    enable_authoring: bool = Field(
+        False,
+        description=(
+            "NLE-ADF 2.0 作者模式开关（仅 enable_stepping=true 时生效）。"
+            "True 时 stepping_loop 到每个新拍不自动渲染，发 BEAT_AUTHORING_OPEN "
+            "挂起等作者：作者写碎片+微缝合填拍（/stitch 端点），或发 action=render "
+            "召唤 AI 整段代笔，或 action=lock_with_text 直接定稿整拍。"
+            "False 保持原行为（到拍自动 render_one）。"
+        ),
+    )
     enable_outline_self_check: bool = Field(False, description="Loop 1 大纲自检")
     enable_memory_ingestion: bool = Field(False, description="Loop 3 记忆倒灌")
     user_tier_hint: Optional[str] = Field(
@@ -294,8 +309,36 @@ class AdvanceBeatRequest(BaseModel):
 
     run_id: str = Field(..., description="步进运行 ID")
     beat_id: str = Field(..., description="当前裁决的段 ID")
-    action: str = Field(..., description="pass | edit | branch | skip")
+    action: str = Field(..., description="pass | edit | branch | skip | lock_with_text | back | render（作者模式召唤代笔）")
     edited_slot: Optional[BeatSlotSchema] = Field(None, description="action=edit 时必填")
     branch_choice: Optional[Dict[str, str]] = Field(None, description="action=branch 时必填，{option_id, label, plot_impact}")
+    author_text: Optional[str] = Field(None, description="action=lock_with_text 时必填：作者直接定稿的段正文（跳过 LLM 渲染，但仍抽状态卡保证链连续）")
     chapter_id: Optional[str] = Field(None, exclude=True)
+
+
+class StitchFragmentRequest(BaseModel):
+    """POST /api/chapters/{id}/stitch 请求（NLE-ADF 2.0 微缝合）。
+
+    作者在画布上写出粗糙碎片、从 Spark Dock 点选镜头零件后，按 Space 触发：
+    后端用白描契约把碎片+零件缝合成 80~120 字片段，SSE 打字机式推流
+    （STITCH_CHUNK × N → STITCH_DONE）。纯轻量调用：不挂降级状态机、
+    不抽状态卡、不写库——深护栏在拍锁死（lock_with_text）与后处理时统一跑。
+    """
+
+    run_id: Optional[str] = Field(
+        None,
+        description="步进运行 ID。缺省 = 自由缝合（零门槛开局期：分镜卡管线还在"
+        "后台跑，作者已开始写——缝合不等卡，仅无拍卡方向与专名表约束）",
+    )
+    beat_id: Optional[str] = Field(None, description="当前创作拍 ID（有 run 时校验防失步）")
+    fragment: str = Field(..., min_length=1, max_length=500, description="作者原句碎片（必须一字不改保留在产出中）")
+    picked_parts: List[str] = Field(
+        default_factory=list,
+        description="作者点选的镜头零件文本（来自拍卡 key_anchors/text_carrier 或章资产）",
+    )
+    rolling_prefix: str = Field(
+        "",
+        max_length=2000,
+        description="当前拍已写正文（衔接上文用，服务端只取尾部 ~200 字）",
+    )
 

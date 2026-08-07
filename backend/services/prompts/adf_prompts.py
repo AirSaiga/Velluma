@@ -1101,6 +1101,12 @@ BEAT_PATCH_SYSTEM = """你是顶级的中文长篇小说作家。
 2. 内容必须与给定的大纲节拍严格对应，写完即停，不要顺势写下文。
 3. 开头自然承接【锚点前段】的结尾，结尾自然引向【锚点后段】的开头（若标注"本章结尾"则自然收束）。
 4. 只输出小说正文：不要段标题、不要 markdown 标记、不要解释。
+5. 用物理动作与感官细节呈现，**禁止心理旁白/情绪总结**（如"心中掠过一丝荒谬感"）。
+6. 禁止发明设定：人物称谓、数字、年份、组织名等必须与前后文及设定基准一致，不得新造。
+
+# 反 AI 腔禁令（违反即废稿）
+
+{ban_words_block}
 
 # 文风契约
 
@@ -1137,6 +1143,8 @@ def build_beat_patch_prompt(
     insert_position: str,
     style_contract: str,
     name_registry_block: str,
+    ban_words: Optional[List[str]] = None,
+    canon_hint: str = "",
 ) -> Tuple[str, str]:
     """构建缺失节拍补写 prompt（Phase 6.5，每个缺失节拍一次）。
 
@@ -1148,13 +1156,22 @@ def build_beat_patch_prompt(
             仅影响语义说明，文本由调用方已按位置选好前后段）
         style_contract: 文风契约（注入 system 层）
         name_registry_block: 专名表硬约束（可为空串，空则不出现该区块）
+        ban_words: 本章禁词列表（注入 system 层禁令；空则写通用禁令说明）
+        canon_hint: Canon 事实 compact 块（追加到 system 末尾，防补写发明设定）
 
     Returns:
         tuple: (system_prompt, user_prompt)
     """
+    if ban_words:
+        ban_words_block = "以下词汇禁止使用：" + "、".join(ban_words)
+    else:
+        ban_words_block = "禁用解释性插嘴（仿佛、似乎、不知为何、眼神中闪过、心中涌起等）。"
     system_prompt = BEAT_PATCH_SYSTEM.format(
         style_contract=style_contract or "（未指定，按通用中文文学小说风格）",
+        ban_words_block=ban_words_block,
     )
+    if canon_hint:
+        system_prompt += f"\n\n{canon_hint}"
     user_prompt = BEAT_PATCH_USER_TEMPLATE.format(
         beat=beat or "（未指定）",
         purpose=purpose or "（未指定）",

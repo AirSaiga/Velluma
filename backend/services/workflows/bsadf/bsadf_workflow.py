@@ -199,27 +199,40 @@ class BSAdfWorkflow:
         self,
         progress_callback: Optional[Callable[[str, dict], Any]] = None,
         pause_after_slot_build: bool = False,
+        lazy_enhancements: bool = False,
     ) -> GenerationResult:
         """执行 BS-ADF 七个 Phase（Phase 4 用槽位化流水线）。
+
+        当前前端只使用步进模式（execute_stepping / pause_after_slot_build=True），
+        Track A（全自动）与 Track B（单次暂停后 /confirm-beats）为休眠路径，
+        保留以兼容旧 API 与调试，但日常不进入。
 
         Args:
             progress_callback: 进度回调，签名 (event: str, data: dict) -> Any
                 事件类型：ADF_STAGE / ADF_SPINE_BUILT / ADF_ANCHOR_DESIGNED /
-                TIER_DECIDED / BSADF_STAGE / BEAT_SLOTS_BUILT（载荷内嵌
-                decision_set）/ DDE_AUTO_APPLIED（仅 Track A）/
-                BEAT_RENDER_PROGRESS / BEAT_DOWNGRADED / ADF_PROGRESS /
-                ADF_PRECONDITION_LANDED / ADF_AUDIT / ADF_CONSISTENCY
-            pause_after_slot_build: True 时跑到 Phase 4a 之后、4c 之前返回（Track B
-                作者介入握手）。返回的 result.debug_info 含：
+                TIER_DECIDED / BSADF_STAGE / BEAT_SLOTS_BUILT（非步进模式）/
+                DDE_AUTO_APPLIED（非步进 Track A）/ BEAT_RENDER_PROGRESS /
+                BEAT_DOWNGRADED / ADF_PROGRESS / ADF_PRECONDITION_LANDED /
+                ADF_AUDIT / ADF_CONSISTENCY
+            pause_after_slot_build: True 时跑到 Phase 4a 之后、4c 之前返回（供
+                execute_stepping 启动步进循环）。返回的 result.debug_info 含：
                 paused=True / beat_slots / paused_spine / paused_anchor /
                 paused_tier / paused_target_word_count / paused_max_segments。
-                route 层据此暂存 _PENDING_BEAT_SLOTS，等 /confirm-beats 恢复。
+                route 层据此暂存 _PENDING_BEAT_SLOTS，等 /advance-beat 推进。
+            lazy_enhancements: NLE-ADF 2.0 轻卡快速通道（仅与 pause_after_slot_build
+                同用）。True 时 4a 种子卡产出后立即挂起——Loop1/enrich/DDE 全部跳过，
+                由 route 层随后台调 run_lazy_enhancements() 补齐。作者开门等待从
+                ~1-3 分钟压缩到仅 1 次 reasoning（锚点设计）。
 
         Returns:
-            GenerationResult（debug_info 内含 beat_slots / degraded_beats 供 Track B）
+            GenerationResult（debug_info 内含 beat_slots / degraded_beats 等）
         """
         result = GenerationResult()
         request = self.request
+        # 轻卡快速通道：4a 后挂起，增强阶段（Loop1/enrich/DDE）懒执行
+        _lazy = lazy_enhancements and pause_after_slot_build
+        if _lazy:
+            self._lazy_pending = True
 
         async def _emit(event: str, data: dict) -> None:
             if progress_callback:
@@ -378,8 +391,8 @@ class BSAdfWorkflow:
                 chapter=self.chapter,
             )
 
-            # ===== NLE-ADF Loop 1：大纲自检 =====
-            if getattr(self.request, "enable_outline_self_check", False):
+            # ===== NLE-ADF Loop 1：大纲自检（懒通道跳过，由 run_lazy_enhancements 补） =====
+            if not _lazy and getattr(self.request, "enable_outline_self_check", False):
                 from backend.services.workflows.bsadf.outline_self_check import (
                     run_outline_self_check,
                 )
@@ -412,10 +425,10 @@ class BSAdfWorkflow:
                         loop1_result.macro_gaps_for_dde
                     )
 
-            # 4b. 可选 LLM 扩写（enrichment，失败保留种子）
+            # 4b. 可选 LLM 扩写（enrichment，失败保留种子）——懒通道跳过（后台补）
             # guard_context：幻觉闸门的授权上下文（本章大纲全文 + 高潮设计），
             # 扩写词含剧情级关键词且不在此上下文里 → 剥离（防超前变异幻觉）
-            enable_slot_enrichment = getattr(request, "enable_slot_enrichment", True)
+            enable_slot_enrichment = getattr(request, "enable_slot_enrichment", True) and not _lazy
             guard_context = (
                 (getattr(self.chapter, "outline_text", "") or "")
                 + "\n"
@@ -449,7 +462,8 @@ class BSAdfWorkflow:
 
             # 4b 后 DDE：章节级剧情分叉判断（全章 1×creative LLM，无岔路放行）
             # 时机保持在 Phase 4b 后——此时卡已 enrich，分支判断更准
-            if enable_dde and cards:
+            # 懒通道：DDE 跳过（后台 run_lazy_enhancements 补；就绪前代笔免岔路门）
+            if not _lazy and enable_dde and cards:
                 await _emit("BSADF_STAGE", {"stage": "BRANCH_CHECK"})
                 # Loop 1 大纲自检产出的 macro 缺口→DDE 走向分支（消费后从 debug_info 弹出）
                 _loop1_gaps = []
@@ -473,14 +487,19 @@ class BSAdfWorkflow:
                         "detail": str(e)[:200],
                     })
 
-            await _emit("BEAT_SLOTS_BUILT", {
-                "count": len(cards),
-                "beat_ids": [c.beat_id for c in cards],
-                # Track A 渲染期卡片可见：带全量卡序列化（Track B 的 route 完整版
-                # 会带 run_id 再发一次，前端据 run_id 区分只填卡 vs 进 beat_pending）
-                "beat_slots": [beat_slot_to_dict(c) for c in cards],
-                "decision_set": chapter_decision_set_to_dict(decision_set),
-            })
+            # 暂停模式（pause_after_slot_build=True，步进与 Track B 都是）下不发
+            # BEAT_SLOTS_BUILT：route 层会补发带 run_id 的权威持卡事件（步进=
+            # STEPPING_INITIALIZED；Track B=route 版 BEAT_SLOTS_BUILT，bsadf.py）。
+            # 若这里也发（无 run_id），前端会收到两个同名语义事件，增加状态机
+            # 理解成本。仅 Track A（非暂停）保留本事件让渲染期卡片可见。
+            if not pause_after_slot_build:
+                await _emit("BEAT_SLOTS_BUILT", {
+                    "count": len(cards),
+                    "beat_ids": [c.beat_id for c in cards],
+                    # Track A 渲染期卡片可见：带全量卡序列化
+                    "beat_slots": [beat_slot_to_dict(c) for c in cards],
+                    "decision_set": chapter_decision_set_to_dict(decision_set),
+                })
 
         except Exception as e:
             logger.exception(f"[BSADF] Phase 4a/4b 槽位构建异常: {e}")
@@ -732,6 +751,17 @@ class BSAdfWorkflow:
                 segments.append(segment)
                 if degraded is not None:
                     degraded_beats.append(degraded)
+                # 段定稿即推正文（批量模式对齐步进模式 render_one 的
+                # BEAT_TEXT_CHUNK）：前端编辑器据此实时拼段预览。
+                # 注意这是"渲染原稿"，后续 PRUNE/审计/补埋可能改写，
+                # 终稿以 FINAL_TEXT_STREAM/COMPLETE 为准；降级段（空文本）
+                # 不推，前端据 BEAT_DOWNGRADED 显示降级占位
+                if segment.text.strip():
+                    await _emit("BEAT_TEXT_CHUNK", {
+                        "beat_id": card.beat_id,
+                        "segment_index": i,
+                        "delta": segment.text,
+                    })
 
                 # 段定稿后抽状态卡（非末段、启用 state_tracker、段非空）；
                 # 失败（空输出/废卡/异常）显式记 result.degraded，见 helper
@@ -1317,6 +1347,90 @@ class BSAdfWorkflow:
 
         return segment, degraded
 
+    async def lock_segment_with_author_text(
+        self,
+        card: BeatSlotCard,
+        author_text: str,
+        segment_index: int,
+        locked_segments: List,
+        state_card_chain: List,
+        run: Any = None,
+    ) -> Tuple[Any, Optional[Any]]:
+        """P2：用作者直接定稿的正文锁定本段（跳过 LLM 渲染）。
+
+        业务场景：作者在步进裁决态「自己改」——直接编辑段正文并定稿，不让 AI 重渲。
+        这是「正文中心创作工作台」的核心自由度：控制权重心在正文层，而非分镜卡层。
+
+        与 render_one 的关键差异：
+        - 不调 render_with_downgrade（不请求 LLM），段正文 = author_text 原样
+        - **仍调 extract_state_card**：作者改了正文，该段的在场角色/物品/进展状态可能变，
+          必须抽取以维持状态卡链连续，否则下一段 render_one 取 state_card_chain[-1]
+          会拿到陈旧状态导致状态漂移（复刻 render_one L1308-1327 的守护逻辑）
+        - 可选 ingest_memory：与 pass 行为对齐，段正文变了涌现事实也要重抽
+        - SegmentResult 用 author_text 构造（仅 index + text，其余默认），保证末段
+          全文拼接（stepping_runtime 的 "\n\n".join）和 run_post_step_phases 正常消费
+
+        Args:
+            card: 当前段槽位卡（不改卡字段，仅标记 author_locked）
+            author_text: 作者定稿的段正文（已 trim）
+            segment_index: 段序号
+            locked_segments: 已锁段列表（调用方 append 本段结果）
+            state_card_chain: 滚动状态卡链（本方法 append 新状态卡）
+            run: SteppingRun（非 None 时推 BEAT_TEXT_CHUNK）
+
+        Returns:
+            (SegmentResult, None) — 作者定稿永不降级
+        """
+        from backend.services.workflows.adf.types import SegmentResult
+        from backend.services.workflows.adf.state_tracker import (
+            card_to_prompt_block, extract_state_card,
+        )
+
+        ctx = self._build_render_context(getattr(self, "_paused_anchor", None) or self._last_anchor_for_stepping())
+        enable_state_tracker = getattr(self.request, "enable_state_tracker", True)
+
+        segment = SegmentResult(index=segment_index, text=author_text)
+        # 标记本段为作者定稿（供后处理识别；不影响 _apply_edited_slot 白名单）
+        try:
+            card.author_locked = True
+        except Exception:
+            pass
+
+        # 与 render_one 对齐：段正文定稿后推 BEAT_TEXT_CHUNK（让前端预览即时反映作者文本）
+        if run is not None and author_text:
+            try:
+                from backend.services.workflows.bsadf.stepping_runtime import _emit_event
+                await _emit_event(run, "BEAT_TEXT_CHUNK", {
+                    "beat_id": card.beat_id,
+                    "segment_index": segment_index,
+                    "delta": author_text,
+                })
+            except Exception as e:
+                logger.warning(f"[BSADF] lock_with_text BEAT_TEXT_CHUNK 推送失败（不阻塞）: {e}")
+
+        # 状态卡抽取：复刻 render_one L1308-1327 的守护逻辑（空输出/废卡沿用旧卡）
+        if enable_state_tracker and author_text.strip():
+            state_card = state_card_chain[-1] if state_card_chain else SceneStateCard()
+            try:
+                new_card = await extract_state_card(
+                    prev_card=state_card,
+                    segment_text=author_text,
+                    registry=ctx["name_registry"],
+                    recorder=self.recorder,
+                    segment_index=segment_index,
+                )
+                if new_card is not state_card and not new_card.is_empty():
+                    state_card_chain.append(new_card)
+                else:
+                    if not state_card_chain:
+                        state_card_chain.append(state_card)
+            except Exception as e:
+                logger.warning(f"[BSADF] lock_with_text 状态卡抽取异常（沿用旧卡，不阻塞）：{e}")
+                if not state_card_chain:
+                    state_card_chain.append(state_card)
+
+        return segment, None
+
     def _last_anchor_for_stepping(self) -> Optional["ChapterClimax"]:
         """execute_stepping 暂存的 anchor 兜底取值（_paused_anchor 已 set 时不会到这）。"""
         return getattr(self, "_paused_anchor", None)
@@ -1415,6 +1529,17 @@ class BSAdfWorkflow:
                 "audit": {"verdict": "fail"},
                 "rescue_needed": [],
                 "final_text": final_text,
+                # 与正常 COMPLETE 载荷对齐的契约字段（见下方主返回）
+                "generation_run_id": getattr(run, "run_id", "") if run is not None else "",
+                "beat_slots": [beat_slot_to_dict(c) for c in cards],
+                "tier": tier,
+                "tier_reason": result.tier_decision.get("reason", ""),
+                "target_word_count": target_word_count,
+                "segment_count": len(segments),
+                "climax_score": None,
+                "audit_verdict": "fail",
+                "degraded_count": len(result.degraded),
+                "degraded": result.degraded,
             }
 
         # ============================================================
@@ -1708,6 +1833,18 @@ class BSAdfWorkflow:
             "slot_count": len(cards),
             "degraded_beat_count": len(degraded_beats),
         })
+        # 用量统计：从 recorder 聚合 token + 调用次数，注入 stats 供前端完成弹窗展示
+        # （此前 token 只落 generation_runs 表，创作现场 CompletionModal 零成本感知）。
+        # recorder 可能为 None（测试/降级），防御式注入，缺失时不影响其他 stats。
+        if self.recorder is not None:
+            try:
+                tokens = self.recorder.total_tokens
+                result.stats["total_tokens"] = tokens["total"]
+                result.stats["prompt_tokens"] = tokens["prompt_tokens"]
+                result.stats["completion_tokens"] = tokens["completion_tokens"]
+                result.stats["llm_calls"] = len(self.recorder.snapshot())
+            except Exception as e:
+                logger.warning(f"[BSADF] stats 注入 token 用量失败（不影响生成）：{e}")
 
         logger.info(
             f"[BSADF] run_post_step_phases 完成：{result.stats['segment_count']} 段，"
@@ -1733,17 +1870,38 @@ class BSAdfWorkflow:
             },
             "rescue_needed": rescue_needed,
             "final_text": result.final_text,
+            # ===== 与 Track A COMPLETE 契约对齐的字段（bsadf.py:679 同款）=====
+            # 此前步进载荷缺这些 → 前端 rerenderRunId 恒 null（重写本段走空上下文）、
+            # 分镜卡永远停在渲染前快照、audit_verdict/climax_score 恒 null。
+            "generation_run_id": getattr(run, "run_id", "") if run is not None else "",
+            "beat_slots": [beat_slot_to_dict(c) for c in cards],
+            "tier": tier,
+            "tier_reason": result.tier_decision.get("reason", ""),
+            "target_word_count": target_word_count,
+            "segment_count": len(segments),
+            "climax_score": audit.climax_score,
+            "audit_verdict": audit.verdict,
+            "degraded_count": len(result.degraded),
+            # 阶段级降级清单（prune/audit/guard/残句修复降级；此前步进全静默，
+            # Track A 有 DEGRADED 事件，步进无——随 COMPLETE 下发供前端展示）
+            "degraded": result.degraded,
         }
 
     async def execute_stepping(
         self,
         progress_callback: Optional[Callable[[str, dict], Any]] = None,
+        lazy_enhancements: bool = False,
     ) -> GenerationResult:
         """发起步进运行：跑到 Phase 4b 暂停，返回含 beat_slots 的 GenerationResult。
 
         语义等同 execute(pause_after_slot_build=True)，但语义上明确表达"步进模式"，
         并把后处理所需的 anchor/spine/tier 暂存到 workflow 实例（供 render_one /
         run_post_step_phases 复用）。
+
+        Args:
+            lazy_enhancements: NLE-ADF 2.0 作者模式轻卡快速通道——True 时 4a 种子卡
+                产出即挂起（Loop1/enrich/DDE 跳过），调用方须随后台调
+                run_lazy_enhancements(cards) 补齐增强。
 
         Returns:
             GenerationResult（debug_info 内含 beat_slots / decision_set / emotion_curve_samples；
@@ -1752,6 +1910,7 @@ class BSAdfWorkflow:
         result = await self.execute(
             progress_callback=progress_callback,
             pause_after_slot_build=True,
+            lazy_enhancements=lazy_enhancements,
         )
         # 暂存后处理上下文（render_one / run_post_step_phases 复用）
         self._paused_spine = result.spine_track
@@ -1768,6 +1927,129 @@ class BSAdfWorkflow:
             result.debug_info["emotion_curve_samples"] = []
         return result
 
+    # ============================================================
+    # NLE-ADF 2.0 懒增强（轻卡快速通道的续跑半区）
+    # ============================================================
+
+    async def run_lazy_enhancements(
+        self,
+        cards: List[Any],
+        progress_callback: Optional[Callable[[str, dict], Any]] = None,
+    ) -> Dict[str, Any]:
+        """懒增强：轻卡通道挂起后，后台补齐 Loop1 → enrich → DDE。
+
+        就地 mutate 传入的 cards（SteppingRun 持有的同一份对象），
+        完成后返回 {"decision_set": dict, "loop1_result": dict|None}。
+        任何阶段异常都不抛出——增强失败 = 保持种子卡（作者已能创作，
+        增强只是质量加成，绝不能阻塞/砸掉进行中的会话）。
+        """
+        async def _emit(event: str, data: dict) -> None:
+            if progress_callback:
+                try:
+                    await progress_callback(event, data)
+                except Exception as e:
+                    logger.warning(f"[BSADF] lazy progress_callback {event} 失败: {e}")
+
+        anchor = getattr(self, "_paused_anchor", None)
+        spine = getattr(self, "_paused_spine", None)
+        loop1_result_payload: Optional[Dict[str, Any]] = None
+        decision_set = ChapterDecisionSet()
+        enable_dde = getattr(self.request, "enable_dde", True)
+
+        try:
+            # Loop 1 大纲自检（缺口 → 抽屉被动展示 + DDE 注入）
+            if getattr(self.request, "enable_outline_self_check", False):
+                from backend.services.workflows.bsadf.outline_self_check import (
+                    run_outline_self_check,
+                )
+                loop1_result = await run_outline_self_check(
+                    outline_text=getattr(self.chapter, "outline_text", "") or "",
+                    chapter_title=getattr(self.chapter, "title", "") or "",
+                    beat_slots=[beat_slot_to_dict(c) for c in cards],
+                    recorder=self.recorder,
+                )
+                loop1_result_payload = {
+                    "hard_facts": loop1_result.hard_facts,
+                    "gaps": loop1_result.gaps,
+                    "critique_pass": loop1_result.pass_,
+                    "violations": loop1_result.violations,
+                    "macro_gaps_for_dde": loop1_result.macro_gaps_for_dde,
+                }
+                await _emit("LOOP1_OUTLINE_CHECKED", loop1_result_payload)
+
+            # 逐卡扩写（含幻觉闸门；失败保留种子）
+            guard_context = (
+                (getattr(self.chapter, "outline_text", "") or "")
+                + "\n"
+                + (getattr(anchor.climax, "description", "") if anchor else "") or ""
+            )
+            await enrich_slots(
+                cards,
+                recorder=self.recorder,
+                enable=getattr(self.request, "enable_slot_enrichment", True),
+                guard_context=guard_context,
+            )
+            for c in cards:
+                c._lazy_enriched = True
+            # 4b 后置代码闸门：大纲关键实体强制映射进槽位
+            enforce_outline_entities(
+                cards,
+                known_names=[getattr(e, "name", "") for e in self.entities],
+            )
+
+            # DDE 章节级剧情分叉判断（无岔路放行是常态）
+            if enable_dde and cards:
+                await _emit("BSADF_STAGE", {"stage": "BRANCH_CHECK"})
+                try:
+                    decision_set = await generate_chapter_decision_set(
+                        chapter=self.chapter,
+                        anchor=anchor,
+                        spine=spine,
+                        cards=cards,
+                        recorder=self.recorder,
+                        force_branch_gaps=(
+                            (loop1_result_payload or {}).get("macro_gaps_for_dde") or []
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(f"[BSADF] 懒增强 DDE 异常（降级无岔路放行）: {e}")
+                    decision_set = ChapterDecisionSet()
+        except Exception as e:
+            logger.exception(f"[BSADF] 懒增强未捕获异常（保持种子卡，不阻塞会话）: {e}")
+        finally:
+            self._lazy_pending = False
+
+        return {
+            "decision_set": chapter_decision_set_to_dict(decision_set),
+            "loop1_result": loop1_result_payload,
+        }
+
+    async def ensure_card_enriched(self, card: Any) -> None:
+        """代笔时按需增强：懒增强还没跑到这张卡时，先单卡即时扩写再渲染。
+
+        由 stepping_loop 在 render_one 前调用（getattr 守卫，fake workflow 缺方法时跳过）。
+        非懒通道/已增强/已在后台增强完成的卡直接返回。
+        """
+        if not getattr(self, "_lazy_pending", False):
+            return
+        if getattr(card, "_lazy_enriched", False):
+            return
+        try:
+            guard_context = (
+                (getattr(self.chapter, "outline_text", "") or "")
+                + "\n"
+                + (getattr(self._paused_anchor.climax, "description", "") if getattr(self, "_paused_anchor", None) else "") or ""
+            )
+            await enrich_slots(
+                [card],
+                recorder=self.recorder,
+                enable=True,
+                guard_context=guard_context,
+            )
+            card._lazy_enriched = True
+        except Exception as e:
+            logger.warning(f"[BSADF] 单卡即时扩写失败（保留种子渲染）: {e}")
+
     async def ingest_memory(self, segment: Any, card: Any, segment_index: int, **kw) -> Dict[str, Any]:
         """Loop 3 记忆倒灌（NLE-ADF）：从段正文抽取涌现实体/关系/地点/大纲补遗。
 
@@ -1782,11 +2064,11 @@ class BSAdfWorkflow:
             from backend.services.workflows.bsadf.memory_ingestion import (
                 extract_emergent_facts,
             )
-            prev_summary = getattr(self, "_last_state_card_text", "") or ""
+            # prev_state_summary 暂无上游供给（原 _last_state_card_text 从未赋值，恒空串）
             facts = await extract_emergent_facts(
                 segment_text=getattr(segment, "text", ""),
                 beat_id=getattr(card, "beat_id", ""),
-                prev_state_summary=prev_summary,
+                prev_state_summary="",
                 recorder=self.recorder,
             )
             if not facts.is_empty():

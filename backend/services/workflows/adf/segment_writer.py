@@ -964,6 +964,7 @@ async def write_chapter_segments(
         # Agent Loop 1：段定稿后抽取新状态卡（末段不抽——没人用；
         # 空段不抽；任何失败在 extract_state_card 内部降级保留旧卡）
         if enable_state_tracker and segment_text and i < total_segments - 1:
+            prev_state_card = state_card
             state_card = await extract_state_card(
                 prev_card=state_card,
                 segment_text=segment_text,
@@ -971,6 +972,19 @@ async def write_chapter_segments(
                 recorder=recorder,
                 segment_index=i,
             )
+            # 失败可观测兜底（与 BS-ADF 对齐）：extract_state_card 失败时
+            # 返回同一旧卡对象（或全空废卡）。沿用旧卡 = 下一段拿到过期
+            # 状态、闸门 2 实质裸奔，必须显式记 degraded，不能只有一行日志。
+            if (
+                state_card is prev_state_card or state_card.is_empty()
+            ) and recorder is not None:
+                recorder.record_degraded(
+                    stage=f"adf.state_track.segment_{i + 1}",
+                    reason="extract_empty",
+                    action="kept_previous_card",
+                    model_slot="creative",
+                    detail=f"第 {i + 1} 段状态卡抽取失败（空输出/废卡），沿用旧卡",
+                )
 
         # 更新 rolling_prefix
         rolling_prefix = segment_text

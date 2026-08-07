@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.services.llm import call_llm_with_usage
+from backend.services.llm.client import REASONING_DISABLED
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import build_beat_patch_prompt
 from backend.services.workflows.adf.dedup_guard import segment_too_similar
@@ -235,11 +236,13 @@ async def patch_missing_beats(
     style_contract: str,
     name_registry_block: str,
     recorder: Optional[RunRecorder] = None,
+    ban_words: Optional[List[str]] = None,
+    canon_hint: str = "",
 ) -> BeatPatchResult:
     """Phase 6.5: 对缺失节拍做定点插入补写（0~2×creative）。
 
     流程：取 patchable 的 missing 节拍（最多 MAX_PATCH_BEATS 个）→ 锚点定位
-    → 1×creative 补写过渡段 → 护栏（长度/防抄邻段）→ 插入重拼。
+    → 1×creative 补写过渡段 → 护栏（长度/防抄邻段/禁词）→ 插入重拼。
     每个节拍的锚点定位都在当前段落列表上重新进行（前一次插入会移位段号）。
 
     Args:
@@ -249,6 +252,10 @@ async def patch_missing_beats(
         style_contract: 文风契约（_build_style_contract 输出）
         name_registry_block: 专名表硬约束文本（可为空串）
         recorder: RunRecorder（stage=adf.beat_patch.{序号}）
+        ban_words: 本章禁词列表（注入 prompt + 代码级禁词闸门；
+            None 时回退 DEFAULT_BAN_LIST）
+        canon_hint: Canon 事实 compact 块（注入 system，防补写发明设定
+            ——真实事故：补写段发明"二百年记录"与正文"三十年前"矛盾）
 
     Returns:
         BeatPatchResult（全部失败时 new_text == final_text）
@@ -256,6 +263,14 @@ async def patch_missing_beats(
     result = BeatPatchResult(new_text=final_text)
     if not final_text or not final_text.strip():
         return result
+
+    # 禁词闸门词表：调用方未给则回退全局默认禁词（与渲染期同源）
+    if ban_words is None:
+        try:
+            from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
+            ban_words = list(getattr(DEFAULT_BAN_LIST, "banned_words", []) or [])
+        except Exception:
+            ban_words = []
 
     patchable = [b for b in (missing_beats or []) if b.get("patchable")][:MAX_PATCH_BEATS]
     if not patchable:
@@ -292,6 +307,8 @@ async def patch_missing_beats(
             insert_position=position,
             style_contract=style_contract,
             name_registry_block=name_registry_block,
+            ban_words=ban_words,
+            canon_hint=canon_hint,
         )
         try:
             if recorder is not None:
@@ -305,6 +322,8 @@ async def patch_missing_beats(
                         model_type="creative",
                         temperature=0.7,
                         max_tokens=2048,
+                        # 显式关闭 thinking（防推理模型把 2048 预算吃光致空输出）
+                        reasoning_config=REASONING_DISABLED,
                     )
                     call_ctx.set_result(llm_result)
             else:
@@ -314,6 +333,7 @@ async def patch_missing_beats(
                     model_type="creative",
                     temperature=0.7,
                     max_tokens=2048,
+                    reasoning_config=REASONING_DISABLED,
                 )
             patch_text = (llm_result.content or "").strip()
         except Exception as e:
@@ -321,7 +341,7 @@ async def patch_missing_beats(
             result.failed.append({"beat": beat, "reason": "llm_exception"})
             continue
 
-        # 3. 护栏：长度 + 防抄邻段（任一违反则放弃该节拍，保留原文）
+        # 3. 护栏：长度 + 防抄邻段 + 禁词（任一违反则放弃该节拍，保留原文）
         if not (PATCH_MIN_CHARS <= len(patch_text) <= PATCH_MAX_CHARS):
             logger.warning(
                 f"[BeatPatcher] 节拍「{beat[:30]}」补写输出 {len(patch_text)} 字，"
@@ -334,6 +354,14 @@ async def patch_missing_beats(
         ):
             logger.warning(f"[BeatPatcher] 节拍「{beat[:30]}」补写与邻段高度重复，放弃")
             result.failed.append({"beat": beat, "reason": "duplicate_guard"})
+            continue
+        # 禁词闸门（0 LLM）：补写段与正文同一文风标准，禁词命中即放弃
+        hit_ban = [w for w in ban_words if w and w in patch_text]
+        if hit_ban:
+            logger.warning(
+                f"[BeatPatcher] 节拍「{beat[:30]}」补写命中禁词 {hit_ban[:5]}，放弃"
+            )
+            result.failed.append({"beat": beat, "reason": "ban_word_guard"})
             continue
 
         # 4. 插入重拼

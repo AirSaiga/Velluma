@@ -1,0 +1,188 @@
+# Velluma - NLE-ADF 3.0 世界模型 Repository
+# AGPL-3.0
+"""
+世界模型的持久化访问层。
+
+三层信度的章级状态容器（见 models.WorldModelORM）：
+- layer1_facts：已写事实（沉淀追加，不可变）
+- layer2_intent：意图推断（可变，version 递增）
+- layer3_projections：未来推测（可变，懒更新）
+
+所有组件经此读写世界模型，保证一致性与版本管理。
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.models import WorldModelORM
+
+
+# ============================================================
+# 数据容器（组件间传递的快照）
+# ============================================================
+
+@dataclass
+class SettledSegment:
+    """层 1 单元：一段已锁死的正文 + 涌现实体。"""
+    text: str
+    entities: List[Dict] = field(default_factory=list)      # [{name, type, description}]
+    state_changes: List[Dict] = field(default_factory=list) # [{entity, field, from, to}]
+    settled_at: float = 0.0
+    word_count: int = 0
+
+
+@dataclass
+class ChapterIntent:
+    """层 2：系统对本章意图的理解。"""
+    source: str = "none"  # author（大纲转化）| inferred（正文反推）| none
+    confidence: float = 0.0
+    arc: str = ""               # 章节弧线一句话（"林尘发现真相并决定反抗"）
+    emotion_curve: List[Dict] = field(default_factory=list)  # [{phase, emotion, energy}]
+    setup_points: List[str] = field(default_factory=list)    # 本章应铺陈的要点
+    must_hits: List[str] = field(default_factory=list)       # 必达事件（来自 ChapterCard）
+    foreshadows: List[str] = field(default_factory=list)     # 伏笔操作
+    deviations: List[str] = field(default_factory=list)      # 与 must_hits 的偏差（校对产出）
+
+    def to_dict(self) -> Dict:
+        return {
+            "source": self.source, "confidence": self.confidence,
+            "arc": self.arc, "emotion_curve": self.emotion_curve,
+            "setup_points": self.setup_points, "must_hits": self.must_hits,
+            "foreshadows": self.foreshadows, "deviations": self.deviations,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> "ChapterIntent":
+        return cls(
+            source=d.get("source", "none"),
+            confidence=d.get("confidence", 0.0),
+            arc=d.get("arc", ""),
+            emotion_curve=d.get("emotion_curve", []),
+            setup_points=d.get("setup_points", []),
+            must_hits=d.get("must_hits", []),
+            foreshadows=d.get("foreshadows", []),
+            deviations=d.get("deviations", []),
+        )
+
+
+@dataclass
+class SegmentProjection:
+    """层 3 单元：对接下来可能写什么的概率推测。"""
+    possible_beats: List[Dict] = field(default_factory=list)  # [{event, anchors, emotion}]
+    confidence: float = 0.0
+    signature: str = ""  # 内容签名（懒加载判断是否需重算）
+
+    def to_dict(self) -> Dict:
+        return {"possible_beats": self.possible_beats, "confidence": self.confidence, "signature": self.signature}
+
+
+# ============================================================
+# Repository
+# ============================================================
+
+class WorldModelRepository:
+    """世界模型 CRUD + 三层读写 + 版本管理。"""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_or_create(self, chapter_id: str) -> WorldModelORM:
+        """获取或创建章节的世界模型（每章唯一）。"""
+        result = await self.db.execute(
+            select(WorldModelORM).where(WorldModelORM.chapter_id == chapter_id)
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = WorldModelORM(
+                chapter_id=chapter_id,
+                layer1_facts=[],
+                layer2_intent={},
+                layer3_projections=[],
+                intent_version=0,
+                last_inference_ts=0.0,
+                last_dock_sig="",
+            )
+            self.db.add(model)
+            await self.db.flush()
+        return model
+
+    # ---- 层 1：已写事实（追加式，不可变）----
+
+    async def append_fact(self, chapter_id: str, segment: SettledSegment) -> None:
+        """追加一段已锁死的事实到层 1。"""
+        model = await self.get_or_create(chapter_id)
+        facts = list(model.layer1_facts or [])
+        facts.append({
+            "text": segment.text,
+            "entities": segment.entities,
+            "state_changes": segment.state_changes,
+            "settled_at": segment.settled_at or time.time(),
+            "word_count": segment.word_count or len(segment.text),
+        })
+        model.layer1_facts = facts
+
+    async def get_facts(self, chapter_id: str) -> List[Dict]:
+        model = await self.get_or_create(chapter_id)
+        return list(model.layer1_facts or [])
+
+    async def get_full_text(self, chapter_id: str) -> str:
+        """层 1 全文（已锁段落拼接，用于后处理）。"""
+        facts = await self.get_facts(chapter_id)
+        return "\n\n".join(f["text"] for f in facts if f.get("text"))
+
+    # ---- 层 2：意图推断（覆盖式，version 递增）----
+
+    async def set_intent(self, chapter_id: str, intent: ChapterIntent) -> None:
+        """覆盖层 2 意图，递增 version + 更新时间戳。"""
+        model = await self.get_or_create(chapter_id)
+        model.layer2_intent = intent.to_dict()
+        model.intent_version = (model.intent_version or 0) + 1
+        model.last_inference_ts = time.time()
+
+    async def get_intent(self, chapter_id: str) -> ChapterIntent:
+        model = await self.get_or_create(chapter_id)
+        return ChapterIntent.from_dict(model.layer2_intent or {})
+
+    async def intent_age_seconds(self, chapter_id: str) -> float:
+        """距上次意图重算的秒数（调度器节流用）。"""
+        model = await self.get_or_create(chapter_id)
+        return time.time() - (model.last_inference_ts or 0)
+
+    # ---- 层 3：未来推测（覆盖式）----
+
+    async def set_projections(self, chapter_id: str, projections: List[SegmentProjection]) -> None:
+        model = await self.get_or_create(chapter_id)
+        model.layer3_projections = [p.to_dict() for p in projections]
+
+    async def get_projections(self, chapter_id: str) -> List[Dict]:
+        model = await self.get_or_create(chapter_id)
+        return list(model.layer3_projections or [])
+
+    # ---- 挂件懒加载签名（projection 没变就不重算挂件）----
+
+    async def get_dock_sig(self, chapter_id: str) -> str:
+        model = await self.get_or_create(chapter_id)
+        return model.last_dock_sig or ""
+
+    async def set_dock_sig(self, chapter_id: str, sig: str) -> None:
+        model = await self.get_or_create(chapter_id)
+        model.last_dock_sig = sig
+
+    # ---- 快照（组件只读，不持锁）----
+
+    async def snapshot(self, chapter_id: str) -> Dict[str, Any]:
+        """返回完整世界模型快照（组件读输入用）。"""
+        model = await self.get_or_create(chapter_id)
+        return {
+            "facts": list(model.layer1_facts or []),
+            "intent": model.layer2_intent or {},
+            "projections": list(model.layer3_projections or []),
+            "intent_version": model.intent_version or 0,
+            "fact_count": len(model.layer1_facts or []),
+            "total_words": sum((f.get("word_count", 0) for f in (model.layer1_facts or [])), 0),
+        }
