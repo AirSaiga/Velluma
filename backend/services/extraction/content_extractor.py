@@ -202,7 +202,13 @@ async def commit_extraction(
     """
     根据用户确认的提取结果，串行写入数据库各表。
 
-    落库顺序：角色 → 关系 → 地点 → 资产 → 章节实体关联 → 伏笔 → 向量记忆。
+    M4（世界页为静态设定唯一写主）：角色/资产 → world_entities、关系 →
+    world_relations、地点 → world_locations；「章节实体关联」步骤已移除
+    （本章在场由世界页事件按叙事时刻推演）。伏笔（PlotLedger 共享表）与
+    向量记忆不变。
+
+    过渡兜底：未迁移书首次 AI 落库前自动执行 migrate_legacy_settings（幂等）
+    ——否则 bundle 切 world 优先后，旧表角色会从生成上下文中消失。
 
     Args:
         db: 异步数据库会话
@@ -217,20 +223,13 @@ async def commit_extraction(
         各表创建计数 dict，如 {"characters": 3, "relationships": 2, ...}
     """
     # 延迟导入仓储（避免循环依赖）
+    from backend.repositories.world_repository import WorldRepository
     from backend.repositories.character_repository import CharacterRepository
-    from backend.repositories.relationship_repository import RelationshipRepository
-    from backend.repositories.map_repository import MapLocationRepository
-    from backend.repositories.asset_repository import AssetRepository
-    from backend.repositories.chapter_repository import ChapterRepository
     from backend.repositories.plot_ledger_repository import PlotLedgerRepository
     from backend.repositories.memory_repository import MemoryRepository
     from backend.models import MemoryChunk
 
-    char_repo = CharacterRepository(db)
-    rel_repo = RelationshipRepository(db)
-    map_repo = MapLocationRepository(db)
-    asset_repo = AssetRepository(db)
-    chapter_repo = ChapterRepository(db)
+    world = WorldRepository(db)
     ledger_repo = PlotLedgerRepository(db)
     memory_repo = MemoryRepository(db)
 
@@ -243,135 +242,134 @@ async def commit_extraction(
         "memories": 0,
     }
 
-    # ---- 1. 角色：查重后新建 ----
-    existing_chars = await char_repo.list_by_book(book_id)
-    existing_char_names = {c.name for c in existing_chars}
-    name_to_id: Dict[str, UUID] = {c.name: c.id for c in existing_chars}
+    # ---- 0. 过渡兜底：世界页为空且旧表有角色 → 先幂等迁移 ----
+    existing_entities = await world.entities.list_by_book(book_id)
+    if not existing_entities:
+        legacy_chars = []
+        try:
+            legacy_chars = await CharacterRepository(db).list_by_book(book_id)
+        except Exception as e:
+            svc_logger.warning("Failed to list legacy characters", error=str(e))
+        if legacy_chars:
+            try:
+                await world.migrate_legacy_settings(str(book_id))
+                existing_entities = await world.entities.list_by_book(book_id)
+            except Exception as e:
+                svc_logger.warning("Auto migrate legacy settings failed", error=str(e))
 
+    existing_names = {e.name for e in existing_entities}
+    name_to_id: Dict[str, UUID] = {e.name: e.id for e in existing_entities}
+
+    # ---- 1. 角色 → world_entities(character)；旧档案全文进 legacy_profile ----
     for ch in confirmed.characters:
         name = ch.get("name", "").strip()
-        if not name or name in existing_char_names:
+        if not name or name in existing_names:
             continue
         try:
-            new_char = await char_repo.create({
-                "book_id": book_id,
-                "name": name,
-                "aliases": ch.get("aliases", []),
-                "static_prompt": ch.get("description", ""),
-                "dynamic_state": "首次登场，状态待观察",
-                "importance_level": ch.get("importance_level", 3),
-            })
-            name_to_id[name] = new_char.id
-            existing_char_names.add(name)
+            legacy_level = int(ch.get("importance_level", 3) or 3)
+            ent = await world.entities.create(
+                book_id=book_id,
+                entity_type="character",
+                name=name,
+                aliases=ch.get("aliases", []) or [],
+                importance=max(1, min(10, round(legacy_level * 2.5))),  # 旧 1-4 → 世界 1-10
+                intro="",
+                props={"legacy_profile": ch.get("description", "")},
+                metadata_={"origin": "extraction"},
+            )
+            name_to_id[name] = ent.id
+            existing_names.add(name)
             created["characters"] += 1
         except Exception as e:
-            svc_logger.warning("Failed to create character", name=name, error=str(e))
+            svc_logger.warning("Failed to create world character", name=name, error=str(e))
 
     if progress_callback:
         progress_callback("characters", created["characters"])
 
-    # ---- 2. 关系：用 name→id 映射，去重后创建 ----
-    existing_rels = await rel_repo.list_by_book(book_id)
-    existing_rel_pairs = {(r.source_char_id, r.target_char_id) for r in existing_rels}
+    # ---- 2. 关系 → world_relations（键名兼容 source_name/source 两种风格）----
+    existing_rels = await world.relations.list_by_book(book_id)
+    existing_rel_pairs = {(str(r.source_entity_id), str(r.target_entity_id)) for r in existing_rels}
 
     for rel in confirmed.relationships:
-        source_name = rel.get("source_name", "").strip()
-        target_name = rel.get("target_name", "").strip()
+        source_name = (rel.get("source_name") or rel.get("source") or "").strip()
+        target_name = (rel.get("target_name") or rel.get("target") or "").strip()
+        relation_type = (rel.get("relation_type") or rel.get("type") or "").strip() or "custom"
+        note = rel.get("description") or rel.get("change") or ""
         source_id = name_to_id.get(source_name)
         target_id = name_to_id.get(target_name)
-        # 两端角色必须存在且不能自环
+        # 两端实体必须存在且不能自环
         if not source_id or not target_id or source_id == target_id:
             continue
-        if (source_id, target_id) in existing_rel_pairs:
+        if (str(source_id), str(target_id)) in existing_rel_pairs:
             continue
         try:
-            await rel_repo.create({
-                "source_char_id": source_id,
-                "target_char_id": target_id,
-                "relation_type": rel.get("relation_type", "unknown"),
-                "affinity_score": rel.get("affinity_score", 0),
-                "interaction_prompt": rel.get("description", ""),
-            })
-            existing_rel_pairs.add((source_id, target_id))
+            await world.relations.create(
+                book_id=book_id,
+                source_entity_id=source_id,
+                target_entity_id=target_id,
+                relation_type=relation_type,
+                label=relation_type,
+                note=str(note),
+                static=True,
+            )
+            existing_rel_pairs.add((str(source_id), str(target_id)))
             created["relationships"] += 1
         except Exception as e:
-            svc_logger.warning("Failed to create relationship", error=str(e))
+            svc_logger.warning("Failed to create world relationship", error=str(e))
 
     if progress_callback:
         progress_callback("relationships", created["relationships"])
 
-    # ---- 3. 地点：查重后新建 ----
-    existing_locations = await map_repo.list_by_book(book_id)
+    # ---- 3. 地点 → world_locations（无坐标，作者在世界页地图上定位）----
+    existing_locations = await world.locations.list_by_book(book_id)
     existing_loc_names = {loc.name for loc in existing_locations}
-    loc_ids: List[UUID] = []
 
     for loc in confirmed.locations:
         name = loc.get("name", "").strip()
         if not name or name in existing_loc_names:
             continue
         try:
-            new_loc = await map_repo.create({
-                "book_id": book_id,
-                "name": name,
-                "description": loc.get("description", ""),
-            })
+            await world.locations.create(
+                book_id=book_id,
+                name=name,
+                kind="point",
+                intro=loc.get("description", ""),
+                coord_x=None,
+                coord_y=None,
+            )
             existing_loc_names.add(name)
-            loc_ids.append(new_loc.id)
             created["locations"] += 1
         except Exception as e:
-            svc_logger.warning("Failed to create location", name=name, error=str(e))
+            svc_logger.warning("Failed to create world location", name=name, error=str(e))
 
     if progress_callback:
         progress_callback("locations", created["locations"])
 
-    # ---- 4. 资产：查重后新建 ----
-    existing_assets = await asset_repo.list_by_book(book_id)
-    existing_asset_names = {a.name for a in existing_assets}
-
+    # ---- 4. 资产 → world_entities(asset) ----
     for asset in confirmed.assets:
         name = asset.get("name", "").strip()
-        if not name or name in existing_asset_names:
+        if not name or name in existing_names:
             continue
         try:
-            await asset_repo.create({
-                "book_id": book_id,
-                "name": name,
-                "static_description": asset.get("description", ""),
-                "importance_level": asset.get("importance_level", 1),
-            })
-            existing_asset_names.add(name)
+            await world.entities.create(
+                book_id=book_id,
+                entity_type="asset",
+                name=name,
+                intro=asset.get("description", ""),
+                importance=max(1, min(10, round(int(asset.get("importance_level", 1) or 1) * 2.5))),
+                metadata_={"origin": "extraction"},
+            )
+            existing_names.add(name)
             created["assets"] += 1
         except Exception as e:
-            svc_logger.warning("Failed to create asset", name=name, error=str(e))
+            svc_logger.warning("Failed to create world asset", name=name, error=str(e))
 
     if progress_callback:
         progress_callback("assets", created["assets"])
 
-    # ---- 5. 章节实体关联：把本章涉及的角色关联到章节 ----
-    # ChapterRepository 无 update_entities 批量方法，逐条 add_entity（add_entity 插入前
-    # 不查重，故先 list_entities 取已关联 id 去重，避免重复 ChapterEntity 记录）。
-    if name_to_id:
-        # 只关联本章提取到的角色（含已有+新建）
-        chapter_char_ids = [
-            name_to_id[ch["name"].strip()]
-            for ch in confirmed.characters
-            if ch.get("name", "").strip() in name_to_id
-        ]
-        if chapter_char_ids:
-            try:
-                existing_links = await chapter_repo.list_entities(chapter_id)
-                linked_ids = {
-                    ln.entity_id for ln in existing_links
-                    if ln.entity_type == "character"
-                }
-                for cid in chapter_char_ids:
-                    if cid not in linked_ids:
-                        await chapter_repo.add_entity(chapter_id, cid, "character")
-                        linked_ids.add(cid)
-            except Exception as e:
-                svc_logger.warning("Failed to update chapter entities", error=str(e))
+    # ---- 5.（已移除）章节实体关联：本章在场由世界页事件推演，不再写 chapter_entities ----
 
-    # ---- 6. 伏笔：去重 ledger_key 后创建 ----
+    # ---- 6. 伏笔：去重 ledger_key 后创建（PlotLedger 为世界页/设定页共享表）----
     existing_keys = set(
         await ledger_repo.get_unresolved_ledger_keys(book_id, [chapter_id])
     )

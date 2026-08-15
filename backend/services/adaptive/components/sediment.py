@@ -100,13 +100,23 @@ def _has_contradiction(existing: str, new: str) -> bool:
 
 
 async def _commit(db, bundle, raw_text: str, facts_dict: Dict) -> Dict:
-    """落库（复用 content_extractor.commit_extraction 轻量子集）。"""
+    """落库（复用 content_extractor.commit_extraction 轻量子集）。
+
+    关系键名与 commit_extraction 对齐（source_name/target_name/relation_type/
+    description）——历史上这里曾发 {source,target,type}，旧实现读不到键名，
+    沉淀路径的关系被静默丢弃（已修，两侧统一）。
+    """
     from backend.services.extraction.content_extractor import commit_extraction, ExtractionResult
     from uuid import UUID
     confirmed = ExtractionResult(
         characters=facts_dict.get("new_entities", []),
         relationships=[
-            {"source": r.get("from", ""), "target": r.get("to", ""), "type": r.get("change", "")}
+            {
+                "source_name": r.get("from", ""),
+                "target_name": r.get("to", ""),
+                "relation_type": "custom",
+                "description": r.get("change", ""),
+            }
             for r in (facts_dict.get("relationship_changes") or [])
         ],
         locations=facts_dict.get("new_locations", []),

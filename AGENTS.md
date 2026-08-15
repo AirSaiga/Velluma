@@ -131,9 +131,19 @@ data/ logs/ .venv/
   - **细纲胶囊**（Alt+O / 输入 `[[` / 选中文本转换，`extensions/OutlineNoteNode.ts` + `OutlineNoteChip.vue`）：作者亲笔剧情速记以胶囊嵌在正文任意位置 →「落笔扩写」走 stitch-ghost mode=outline（双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」clamp 100-800 缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门）。扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）；编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）
   - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长）
   - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引）；`GET /adaptive/model` 世界模型快照（前端无调用方）
-- **设定数据双向驱动**（`settings_bundle.py`）：章级绑定（角色/资产/地点/关系/伏笔）+ 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用。写作中感知 + 后台规划两个层面同时利用。
+- **设定数据双向驱动**（`settings_bundle.py`）：章级绑定 + 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用；**世界设定层优先**（见下节 world_bridge——世界页有实体时 bundle 的角色/资产/地点/关系切换为 world 数据 + 叙事时刻推演状态，无实体回退旧表）。写作中感知 + 后台方向权重规划两个层面同时利用。
 - **画布即事实源**：adaptive 模式预览关闭（`generationPreviewHtml` 返回 null），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
 - **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为心跳供给 + 章级兜底）。
+
+### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
+
+事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`（人物/势力/资产固有属性，档案在 `props` JSONB 表驱动）+ `world_locations` + `world_relations`（static 或事件锚定的时变关系）+ 地图底图表。任意时刻的世界状态（谁在哪/生死/疆域/关系）由 `compute_world_state_from_events` 纯函数折叠推演（前后端同构，前端 `features/world/engine/`）。UI 三透镜：地图（Leaflet）/ 脑图（Cytoscape）/ 时间轴（含章节叙事锚 `chapters.narrative_time`）。
+
+- **生成桥接（world_bridge，已接通）**：`services/context/world_bridge.py`——世界页有实体时 settings_bundle 走 **world 优先**：实体/关系经鸭子类型适配器包装成旧 Character/Asset 形状（下游 hard/soft/nutrients 零改动），`dynamic_state` 自动携带叙事时刻推演状态（「位于北岸要塞」「在途（进度 40%）」「已死亡」）；叙事时间四级降级（本章锚→前序最近锚→事件最大时刻→0）。`bundle.world_state/world_time/world_sourced` 携带切片快照。桥接失败/世界为空 → 旧表兜底（未迁移书行为不变）。
+- **编辑入口收敛（M4）**：设定页角色/资产/地图分区已退役为跳转卡（`WorldRedirectCard`，带 `?lens=&entity=` 深链）；保留分区：伏笔/期待/世界观/文风/笔记/设置。旧面板 CharacterPanel/MapSettings/asset-panel 已删除。
+- **章级在场改推演**：原角色/资产/地点勾选绑定（chapter_entities 等）退役——「本章在场」由事件按叙事时刻推演（`GET /world/state-for-chapter/{chapter_id}`，SceneSettingsPanel 只读展示）。entity-mention（@/#）建议与创建均走 world（无世界数据回退旧表），不再写章级绑定。
+- **AI 写路径（M4）**：`content_extractor.commit_extraction` 与 adaptive 沉淀落库改写 world_*（角色档案全文进 `props.legacy_profile`）；**未迁移书首次 AI 落库前自动执行幂等迁移**（防 world 优先切换后旧角色从生成上下文失踪）。伏笔（PlotLedger 共享表）与向量记忆不变。
+- **待办**：旧表彻底冻结（audit/publish/inspiration/chapter_optimization 仍读旧表）、期待账本/世界观文本迁入世界页、`docs/world-unified-settings.md` §5 的时间线事件→走向卡规划桥。
 
 ### BS-ADF 步进模式（⚠ 弃置中——迁移源，勿新增功能）
 
