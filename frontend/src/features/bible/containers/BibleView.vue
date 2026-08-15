@@ -20,31 +20,22 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
-import CharacterPanel from '../../../components/CharacterPanel.vue'
 import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import StyleCardManager from '../../../components/StyleCardManager.vue'
-import MapSettings from '../../../components/MapSettings.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import SettingsPanel from '../../../components/SettingsPanel.vue'
 import ForeshadowingPanel from './ForeshadowingPanel.vue'
 import ReaderMirrorPanel from './ReaderMirrorPanel.vue'
-import { AssetPanel } from '../../asset-panel'
+import WorldRedirectCard from '../presentation/WorldRedirectCard.vue'
 import { useAppStore } from '../../app/useAppStore'
-import { characterApi, relationshipApi } from '../../../services/api'
-import { useToast } from '../../../composables/useToast'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
-const { showToast } = useToast()
 
 // 解构出 ref 供模板自动解包
-const characters = store.characters
-const relationships = store.relationships
 const currentBook = store.currentBook
 const currentBookId = store.currentBookId
-const selectedChapter = store.selectedChapter
-const selectedChapterId = store.selectedChapterId
 
 type SectionKey = 'characters' | 'foreshadowing' | 'readerMirror' | 'worldview' | 'style' | 'assets' | 'map' | 'notes' | 'settings'
 
@@ -90,89 +81,6 @@ function goWorkspace() {
   }
 }
 
-async function refreshCharacters() {
-  try {
-    await store.refreshCharacters()
-  } catch (e: any) {
-    showToast('加载角色失败：' + (e?.message || '未知错误'), 'error')
-  }
-}
-
-// 角色管理回调：CharacterPanel 只负责收集表单并上抛事件，真实 API 调用在这里完成。
-// 副作用：成功后刷新列表；onDone 回调是 CharacterPanel 关闭抽屉的唯一触发点，必须调用。
-async function onCreateCharacter(data: any, onDone?: (ok: boolean) => void) {
-  if (!currentBookId.value) {
-    showToast('请先选择一本书籍', 'warning')
-    onDone?.(false)
-    return
-  }
-  try {
-    await characterApi.create({ ...data, book_id: currentBookId.value })
-    await refreshCharacters()
-    onDone?.(true)
-  } catch (e: any) {
-    showToast('创建角色失败: ' + (e?.message || '未知错误'), 'error')
-    onDone?.(false)
-  }
-}
-async function onUpdateCharacter(id: string, data: any, onDone?: (ok: boolean) => void) {
-  try {
-    await characterApi.update(id, data)
-    await refreshCharacters()
-    onDone?.(true)
-  } catch (e: any) {
-    showToast('更新角色失败: ' + (e?.message || '未知错误'), 'error')
-    onDone?.(false)
-  }
-}
-async function onDeleteCharacter(id: string) {
-  try {
-    await characterApi.delete(id)
-    await refreshCharacters()
-  } catch (e: any) {
-    showToast('删除角色失败: ' + (e?.message || '未知错误'), 'error')
-  }
-}
-// 注意：store.refreshCharacters 只刷新角色不刷新关系，这里直接本地更新 relationships 列表。
-async function onCreateRelationship(data: any) {
-  if (!currentBookId.value) {
-    showToast('请先选择一本书籍', 'warning')
-    return
-  }
-  try {
-    const newRel = await relationshipApi.create({ ...data, book_id: currentBookId.value })
-    relationships.value.push(newRel)
-  } catch (e: any) {
-    showToast('创建关系失败: ' + (e?.message || '未知错误'), 'error')
-  }
-}
-async function onUpdateRelationship(id: string, data: any) {
-  try {
-    const updated = await relationshipApi.update(id, data)
-    const index = relationships.value.findIndex((r: any) => r.id === id)
-    if (index !== -1) relationships.value[index] = updated
-  } catch (e: any) {
-    showToast('更新关系失败: ' + (e?.message || '未知错误'), 'error')
-  }
-}
-async function onDeleteRelationship(id: string) {
-  try {
-    await relationshipApi.delete(id)
-    relationships.value = relationships.value.filter((r: any) => r.id !== id)
-  } catch (e: any) {
-    showToast('删除关系失败: ' + (e?.message || '未知错误'), 'error')
-  }
-}
-
-// MapSettings 的活动范围保存（emit update-chapter）
-async function onUpdateChapter(id: string, data: any) {
-  try {
-    await store.updateChapter(id, data)
-  } catch (e) {
-    console.error('[Bible] 更新章节失败', e)
-  }
-}
-
 // NotesPanel 的 saveNotes 回调
 // 警示：失败必须向上抛出，否则 NotesPanel 会误显示"已保存"
 async function saveBookNotes(notes: string) {
@@ -210,19 +118,14 @@ async function saveBookNotes(notes: string) {
     </aside>
 
     <main class="bible-content">
-      <!-- 角色 -->
+      <!-- 角色（M4：编辑迁往世界页，分区保留为引导入口） -->
       <div v-if="activeSection === 'characters'" class="panel-host">
-        <CharacterPanel
-          :characters="characters"
-          :relationships="relationships"
-          :selected-chapter-id="selectedChapterId"
-          :closable="false"
-          @create-character="onCreateCharacter"
-          @update-character="onUpdateCharacter"
-          @delete-character="onDeleteCharacter"
-          @create-relationship="onCreateRelationship"
-          @update-relationship="onUpdateRelationship"
-          @delete-relationship="onDeleteRelationship"
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="users"
+          title="角色设定已迁往世界页"
+          description="角色档案、关系网络、位置与生死——在世界页的脑图与时间轴里编辑；位置与『此刻状态』由事件自动推演，写作辅助直接使用。"
+          lens="mindmap"
         />
       </div>
 
@@ -246,14 +149,26 @@ async function saveBookNotes(notes: string) {
         <StyleCardManager :book-id="bookIdFromRoute" :genre="currentBook?.genre" :closable="false" />
       </div>
 
-      <!-- 资产 -->
+      <!-- 资产（M4：编辑迁往世界页） -->
       <div v-else-if="activeSection === 'assets'" class="panel-host">
-        <AssetPanel :book-id="bookIdFromRoute || ''" :closable="false" />
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="star"
+          title="资产设定已迁往世界页"
+          description="资产的固有属性在世界页的实体档案里编辑；持有与转移由事件记录，写作辅助自动使用。"
+          lens="mindmap"
+        />
       </div>
 
-      <!-- 地图 -->
+      <!-- 地图（M4：编辑迁往世界页） -->
       <div v-else-if="activeSection === 'map'" class="panel-host">
-        <MapSettings :chapter="selectedChapter" :closable="false" @update-chapter="onUpdateChapter" />
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="map-pin"
+          title="地图已迁往世界页"
+          description="地点、疆域、移动路径与底图拼贴——在世界页的地图透镜里绘制；章节叙事时刻的世界状态自动推演。"
+          lens="map"
+        />
       </div>
 
       <!-- 笔记 -->

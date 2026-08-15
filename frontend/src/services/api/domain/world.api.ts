@@ -204,6 +204,10 @@ export const worldApi = {
   getState: (bookId: string, t: number) =>
     requestJson<WorldState>(`/books/${bookId}/world/state?t=${t}`),
 
+  /** 按章节解析叙事时间（本章锚→前序最近锚→事件最大时刻）后推演世界状态 */
+  getStateForChapter: (bookId: string, chapterId: string) =>
+    requestJson<WorldState>(`/books/${bookId}/world/state-for-chapter/${chapterId}`),
+
   // ===== 底图：图片拼贴层 =====
   listMapLayers: (bookId: string) =>
     requestJson<WorldMapLayer[]>(`/books/${bookId}/world/map/layers`),

@@ -1,116 +1,101 @@
 <script setup lang="ts">
 /**
- * V3.5 场景设定面板（独立二级 tab）。
+ * 场景设定面板（M4 世界页收敛后：只读「本章在场」展示）。
  *
- * 职责：章级显式指定本章的出场角色、场景地点、关键资产。
- * 生成时由后端 SettingResolver 召回注入 prompt。
+ * 原章级勾选绑定（角色 ChapterEntity / 地点 ChapterMapLocation / 资产 ChapterAsset）
+ * 已退役——「本章在场」改由世界页事件推演自动得出（docs/world-unified-settings.md §8）：
+ * 后端 world_bridge.resolve_narrative_time 解析章节叙事时间，compute_world_state
+ * 折叠出该时刻谁在场/在哪/生死，生成流（settings_bundle 世界优先）吃同一份数据。
  *
- * 数据通道：
- * - 角色：ChapterEntity 关联表（经 store.updateChapter character_ids）
- * - 地点：ChapterMapLocation 关联表（mapApi）
- * - 资产：ChapterAsset 关联表（assetApi）
+ * 本面板只做呈现与引导：想改变在场，去世界页录事件（move/birth/death…）或锚定章节时间。
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '../../app/useAppStore'
-import { mapApi, chapterApi } from '../../../services/api/domain'
-import { assetApi } from '../../../services/api/domain/asset.api'
+import { worldApi } from '../../../services/api/domain/world.api'
+import type { WorldEntity, WorldLocation } from '../../../features/world/engine/types'
 
 const props = defineProps<{
   chapterId: string | null
 }>()
 
 const store = useAppStore()
-const characters = store.characters
-const selectedChapter = store.selectedChapter
+const router = useRouter()
 const currentBookId = store.currentBookId
 
-const allLocations = ref<any[]>([])
-const allAssets = ref<any[]>([])
-const selectedLocationIds = ref<string[]>([])
-const selectedAssetIds = ref<string[]>([])
 const loading = ref(false)
+const entities = ref<WorldEntity[]>([])
+const locations = ref<WorldLocation[]>([])
+const charStates = ref<any[]>([])
 
-// 加载书级地点/资产库 + 本章已关联项
-async function loadSettings(chapterId: string) {
-  if (!chapterId) return
+async function loadPresence(chapterId: string) {
+  const bookId = currentBookId.value
+  if (!chapterId || !bookId) return
   loading.value = true
   try {
-    const bookId = currentBookId.value
-    if (bookId) {
-      const [locs, assets] = await Promise.all([
-        mapApi.getLocations(bookId),
-        assetApi.getAll(bookId),
-      ])
-      allLocations.value = locs || []
-      allAssets.value = assets || []
-    }
-    const [chapterLocs, chapterAssets] = await Promise.all([
-      mapApi.getChapterLocations(chapterId),
-      assetApi.getChapterAssets(chapterId),
+    const [ents, locs, state] = await Promise.all([
+      worldApi.listEntities(bookId),
+      worldApi.listLocations(bookId),
+      worldApi.getStateForChapter(bookId, chapterId),
     ])
-    selectedLocationIds.value = (chapterLocs || []).map((cl: any) => cl.location_id)
-    selectedAssetIds.value = (chapterAssets || []).map((ca: any) => ca.asset_id)
+    entities.value = ents || []
+    locations.value = locs || []
+    charStates.value = (state as any)?.character_states || []
   } catch (e) {
-    console.warn('[SceneSettings] 加载失败', e)
+    console.warn('[SceneSettings] 加载在场推演失败', e)
+    charStates.value = []
   } finally {
     loading.value = false
   }
 }
 
-// 角色勾选（经 store.updateChapter character_ids 通道）
-function toggleCharacter(charId: string) {
-  if (!selectedChapter.value) return
-  const ids = ((selectedChapter.value as any).character_ids || []).slice()
-  const idx = ids.indexOf(charId)
-  if (idx >= 0) {
-    ids.splice(idx, 1)
-  } else {
-    ids.push(charId)
-  }
-  store.updateChapter(selectedChapter.value.id, { character_ids: ids })
-}
-
-function isCharacterSelected(charId: string): boolean {
-  return ((selectedChapter.value as any)?.character_ids || []).includes(charId)
-}
-
-// 地点勾选
-async function toggleLocation(locId: string) {
-  if (!props.chapterId) return
-  const idx = selectedLocationIds.value.indexOf(locId)
-  if (idx >= 0) {
-    selectedLocationIds.value.splice(idx, 1)
-    await mapApi.removeLocationFromChapter(props.chapterId, locId)
-  } else {
-    selectedLocationIds.value.push(locId)
-    await mapApi.addLocationToChapter(props.chapterId, locId)
-  }
-}
-
-function isLocationSelected(locId: string): boolean {
-  return selectedLocationIds.value.includes(locId)
-}
-
-// 资产勾选（整体覆盖式 PUT）
-async function toggleAsset(assetId: string) {
-  if (!props.chapterId) return
-  const idx = selectedAssetIds.value.indexOf(assetId)
-  if (idx >= 0) {
-    selectedAssetIds.value.splice(idx, 1)
-  } else {
-    selectedAssetIds.value.push(assetId)
-  }
-  await assetApi.updateChapterAssets(props.chapterId, selectedAssetIds.value.slice())
-}
-
-function isAssetSelected(assetId: string): boolean {
-  return selectedAssetIds.value.includes(assetId)
-}
-
-// 切章时重新加载
 watch(() => props.chapterId, (newId) => {
-  if (newId) loadSettings(newId)
+  if (newId) loadPresence(newId)
 }, { immediate: true })
+
+const usingWorld = computed(() => entities.value.length > 0)
+const entityById = computed(() => {
+  const map: Record<string, WorldEntity> = {}
+  for (const e of entities.value) map[e.id] = e
+  return map
+})
+const locationById = computed(() => {
+  const map: Record<string, WorldLocation> = {}
+  for (const l of locations.value) map[l.id] = l
+  return map
+})
+
+interface PresenceRow {
+  id: string
+  name: string
+  alive: boolean
+  where: string
+  label: string
+}
+/** 本章时刻在场的角色（推演）：活着或有事态记录的排前，死亡排后灰显 */
+const presenceRows = computed<PresenceRow[]>(() => {
+  const rows: PresenceRow[] = []
+  for (const cs of charStates.value) {
+    const ent = entityById.value[String(cs.entity_id)]
+    if (!ent) continue
+    const loc = locationById.value[String(cs.location_id || '')]
+    rows.push({
+      id: ent.id,
+      name: ent.name,
+      alive: !!cs.alive,
+      where: loc?.name || '',
+      label: cs.label || '',
+    })
+  }
+  rows.sort((a, b) => Number(b.alive) - Number(a.alive) || a.name.localeCompare(b.name, 'zh'))
+  return rows
+})
+
+function goWorld() {
+  if (currentBookId.value) {
+    router.push({ path: `/world/${currentBookId.value}`, query: { lens: 'map' } })
+  }
+}
 </script>
 
 <template>
@@ -119,87 +104,44 @@ watch(() => props.chapterId, (newId) => {
       <p>从左侧选择一个章节。</p>
     </div>
     <template v-else>
-      <!-- 概要统计 -->
-      <div class="summary-bar">
-        <span class="summary-item">
-          <strong>{{ ((selectedChapter as any)?.character_ids || []).length }}</strong> 角色
-        </span>
-        <span class="summary-item">
-          <strong>{{ selectedLocationIds.length }}</strong> 地点
-        </span>
-        <span class="summary-item">
-          <strong>{{ selectedAssetIds.length }}</strong> 资产
-        </span>
-        <span v-if="loading" class="loading-hint">加载中…</span>
+      <!-- 未使用世界页：引导迁移 -->
+      <div v-if="!usingWorld && !loading" class="usage-hint">
+        <p>本书尚未在世界页建立设定。「本章在场」由世界页的事件推演自动得出。</p>
+        <button class="go-world-btn" @click="goWorld">前往世界页</button>
       </div>
 
-      <!-- 出场角色 -->
-      <section class="setting-group">
-        <div class="setting-group-label">
-          出场角色
-          <span class="muted">生成时注入角色的永恒设定与此刻状态</span>
+      <template v-else>
+        <div class="summary-bar">
+          <span class="summary-item"><strong>{{ presenceRows.length }}</strong> 在场角色（推演）</span>
+          <span v-if="loading" class="loading-hint">推演中…</span>
         </div>
-        <div v-if="characters.length === 0" class="empty-hint">暂无角色，请在圣经面板创建</div>
-        <div class="chip-list">
-          <button
-            v-for="char in characters"
-            :key="char.id"
-            class="chip"
-            :class="{ selected: isCharacterSelected(char.id) }"
-            @click="toggleCharacter(char.id)"
-          >
-            {{ char.name }}
-          </button>
-        </div>
-      </section>
 
-      <!-- 场景地点 -->
-      <section class="setting-group">
-        <div class="setting-group-label">
-          场景地点
-          <span class="muted">本章发生的地理空间，影响环境描写</span>
-        </div>
-        <div v-if="allLocations.length === 0" class="empty-hint">暂无地点，请在圣经面板创建</div>
-        <div class="chip-list">
-          <button
-            v-for="loc in allLocations"
-            :key="loc.id"
-            class="chip"
-            :class="{ selected: isLocationSelected(loc.id) }"
-            :disabled="loading"
-            @click="toggleLocation(loc.id)"
-          >
-            {{ loc.name }}
-          </button>
-        </div>
-      </section>
+        <section class="setting-group">
+          <div class="setting-group-label">
+            本章在场
+            <span class="muted">由世界页事件按章节叙事时刻自动推演，随事件录入实时变化</span>
+          </div>
+          <div v-if="!presenceRows.length" class="empty-hint">
+            世界页还没有本章时刻的事态记录——去世界页录入移动/出生等事件，或为章节锚定叙事时间。
+          </div>
+          <ul v-else class="presence-list">
+            <li v-for="row in presenceRows" :key="row.id" class="presence-row" :class="{ dead: !row.alive }">
+              <span class="presence-name">{{ row.name }}</span>
+              <span class="presence-where">
+                <template v-if="!row.alive">已死亡</template>
+                <template v-else-if="row.where">位于{{ row.where }}</template>
+                <template v-else>位置未知</template>
+                <template v-if="row.label && row.alive"> · {{ row.label }}</template>
+              </span>
+            </li>
+          </ul>
+        </section>
 
-      <!-- 关键资产 -->
-      <section class="setting-group">
-        <div class="setting-group-label">
-          关键资产
-          <span class="muted">本章可用的道具/装备，影响情节逻辑</span>
+        <div class="usage-hint">
+          <p>在场与位置由世界页事件推演（生成辅助使用同一份数据）；想改变在场，去世界页录事件或调整章节叙事锚。</p>
+          <button class="go-world-btn subtle" @click="goWorld">打开世界页</button>
         </div>
-        <div v-if="allAssets.length === 0" class="empty-hint">暂无资产，请在圣经面板创建</div>
-        <div class="chip-list">
-          <button
-            v-for="asset in allAssets"
-            :key="asset.id"
-            class="chip"
-            :class="{ selected: isAssetSelected(asset.id) }"
-            :disabled="loading"
-            @click="toggleAsset(asset.id)"
-          >
-            {{ asset.name }}
-          </button>
-        </div>
-      </section>
-
-      <!-- 使用说明 -->
-      <div class="usage-hint">
-        <p>勾选的设定会在生成时通过 SettingResolver 注入 prompt，作为角色行为选择与环境描写的背景知识。</p>
-        <p class="muted small">设定影响生成，但不会被直接复述进正文（设定倾倒防御）。</p>
-      </div>
+      </template>
     </template>
   </div>
 </template>
@@ -260,36 +202,36 @@ watch(() => props.chapterId, (newId) => {
   color: var(--text-muted);
   font-style: italic;
   padding: 0.25rem 0;
+  line-height: 1.6;
 }
 
-.chip-list {
+.presence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.25rem;
 }
-.chip {
-  padding: 0.25rem 0.7rem;
-  font-size: 0.78rem;
+.presence-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.3rem 0.5rem;
   border: 1px solid var(--border-color);
-  border-radius: 9999px;
-  background: var(--bg-canvas);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
 }
-.chip:hover:not(:disabled) {
-  border-color: var(--accent-500);
+.presence-row.dead {
+  opacity: 0.55;
+}
+.presence-name {
   color: var(--text-primary);
-}
-.chip.selected {
-  background: var(--accent-500);
-  border-color: var(--accent-600);
-  color: white;
   font-weight: 500;
 }
-.chip:disabled {
-  opacity: 0.5;
-  cursor: default;
+.presence-where {
+  color: var(--text-muted);
+  font-size: 0.72rem;
 }
 
 .usage-hint {
@@ -303,9 +245,20 @@ watch(() => props.chapterId, (newId) => {
   line-height: 1.5;
 }
 .usage-hint p {
-  margin: 0;
+  margin: 0 0 0.5rem;
 }
-.muted.small {
-  font-size: 0.68rem;
+.go-world-btn {
+  padding: 0.3rem 0.9rem;
+  background: var(--accent-500);
+  color: #fff;
+  border: none;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.go-world-btn.subtle {
+  background: transparent;
+  color: var(--accent-500);
+  border: 1px solid var(--accent-500);
 }
 </style>

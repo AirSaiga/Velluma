@@ -260,6 +260,27 @@ async def get_world_state(
     return await repo.compute_world_state(str(book_id), t)
 
 
+@router.get("/{book_id}/world/state-for-chapter/{chapter_id}", response_model=WorldStateResponse)
+async def get_world_state_for_chapter(
+    book_id: UUID,
+    chapter_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """按章节解析叙事时间（本章锚 → 前序最近锚 → 事件最大时刻 → 0）后推演世界状态。
+
+    供编辑器「本章在场」只读展示与生成桥接共用同一时间解析（world_bridge）。
+    """
+    from backend.models import Chapter
+    from backend.services.context.world_bridge import resolve_narrative_time
+
+    chapter = await db.get(Chapter, str(chapter_id))
+    if chapter is None or str(chapter.book_id) != str(book_id):
+        raise HTTPException(404, "章节不存在")
+    t = await resolve_narrative_time(db, chapter)
+    repo = WorldRepository(db)
+    return await repo.compute_world_state(str(book_id), t)
+
+
 @router.post("/{book_id}/world/migrate-legacy")
 async def migrate_legacy_settings(book_id: UUID, db: AsyncSession = Depends(get_db)):
     """设定中心旧表一次性迁入世界页（幂等，可重复执行；详见 repository 注释）。

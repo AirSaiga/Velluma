@@ -19,8 +19,60 @@
  */
 import { ref, computed, provide, inject, type InjectionKey, type Ref, type ComputedRef } from 'vue'
 import { bookApi, chapterApi, characterApi, relationshipApi } from '../../services/api'
+import { worldApi } from '../../services/api/domain/world.api'
 import { loadUiPrefs, saveUiPrefs, type UiPrefs } from '../../composables/useUiPrefs'
 import type { Book, Chapter, Character, Relationship, ApiConfig } from '../../types'
+
+// ============================================================
+// 世界页数据源适配（M4：world 优先 / 旧表兜底，读时映射）
+// 把 world 实体映射成旧 Character 形状塞进 store.characters——canon 高亮 /
+// InspectorPanel / 灵感弹窗等下游零改动。世界页无实体返回 null（走旧表）。
+// ============================================================
+const _WORLD_PROFILE_FIELDS: Array<[string, string]> = [
+  ['appearance', '外貌'],
+  ['personality', '性格'],
+  ['speech_style', '语言习惯'],
+  ['goal', '目标'],
+  ['background', '背景'],
+]
+
+function _worldStaticPrompt(entity: any): string {
+  const props = entity?.props || {}
+  const parts: string[] = []
+  for (const [key, label] of _WORLD_PROFILE_FIELDS) {
+    const v = String(props[key] || '').trim()
+    if (v) parts.push(`${label}：${v}`)
+  }
+  const legacy = String(props.legacy_profile || '').trim()
+  if (legacy) parts.push(legacy)
+  return parts.join('\n')
+}
+
+async function _loadWorldCast(bookId: string): Promise<{ chars: any[]; rels: any[] } | null> {
+  try {
+    const ents = await worldApi.listEntities(bookId)
+    if (!ents || ents.length === 0) return null
+    const chars = ents
+      .filter((e: any) => e.entity_type === 'character')
+      .map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        aliases: e.aliases || [],
+        importance_level: Math.max(1, Math.min(4, Math.ceil((e.importance || 1) / 2.5))),
+        static_prompt: _worldStaticPrompt(e),
+        dynamic_state: '',
+        current_state: '',
+        _world_sourced: true,
+      }))
+    const rels = await worldApi
+      .listRelations(bookId)
+      .then((list: any[]) => (list || []).map((r: any) => ({ ...r, _world_sourced: true })))
+      .catch(() => [])
+    return { chars, rels }
+  } catch {
+    return null // 世界页不可用/未迁移 → 旧表兜底
+  }
+}
 
 const CURRENT_BOOK_STORAGE_KEY = 'velluma_current_book_id'
 
@@ -134,10 +186,12 @@ function createAppStore(): AppStore {
     }
     loading.value = true
     try {
+      // 世界页优先（读时适配）；无世界数据 → 旧表（未迁移书行为不变）
+      const worldCast = await _loadWorldCast(currentBookId.value)
       const [chars, chaps, rels] = await Promise.all([
-        characterApi.getAll(currentBookId.value),
+        worldCast ? Promise.resolve(worldCast.chars) : characterApi.getAll(currentBookId.value),
         chapterApi.getAll(currentBookId.value),
-        relationshipApi.getAll(currentBookId.value),
+        worldCast ? Promise.resolve(worldCast.rels) : relationshipApi.getAll(currentBookId.value),
       ])
       characters.value = chars
       relationships.value = rels
@@ -259,7 +313,8 @@ function createAppStore(): AppStore {
   async function refreshCharacters() {
     if (!currentBookId.value) return
     try {
-      characters.value = await characterApi.getAll(currentBookId.value)
+      const worldCast = await _loadWorldCast(currentBookId.value)
+      characters.value = worldCast ? worldCast.chars : await characterApi.getAll(currentBookId.value)
     } catch (error) {
       console.error('[AppStore] 加载角色失败:', error)
       throw error  // 调用方（WorkspaceView）toast 提示

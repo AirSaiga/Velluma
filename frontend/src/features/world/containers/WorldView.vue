@@ -381,6 +381,7 @@ async function onDropMap(e: DragEvent) {
 
 onMounted(() => {
   if (bookId.value) load(bookId.value)
+  consumeRouteQuery()
   removeShortcut = useUndoShortcut(() => handleUndo(), () => handleRedo())
   window.addEventListener('keydown', onKeydown)
 })
@@ -389,8 +390,45 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 watch(bookId, (id) => {
-  if (id) load(id)
+  if (id) {
+    load(id)
+    consumeRouteQuery()
+  }
 })
+
+// ===== 深链支持：bible 跳转卡带 query（?lens=map|mindmap&entity=<id>）=====
+// 实体选中是纯本地 ref，抽屉按 id 从 useWorld 响应式取——数据晚到也能正确打开。
+function consumeRouteQuery() {
+  const q = route.query
+  if (q.lens === 'map' || q.lens === 'mindmap') lens.value = q.lens
+  const ent = q.entity
+  if (typeof ent === 'string' && ent) selectedEntityId.value = ent
+}
+
+// ===== 侧栏实体搜索 + 重要度排序（承接设定页迁移后的查找需求）=====
+const entityFilter = ref('')
+interface SidebarEntity {
+  name: string
+  aliases?: any[]
+  importance?: number
+}
+function filterAndSortEntities<T extends SidebarEntity>(list: T[]): T[] {
+  const q = entityFilter.value.trim().toLowerCase()
+  const filtered = q
+    ? list.filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          (e.aliases || []).some((a) => String(a).toLowerCase().includes(q)),
+      )
+    : [...list]
+  filtered.sort(
+    (a, b) => (b.importance || 1) - (a.importance || 1) || a.name.localeCompare(b.name, 'zh'),
+  )
+  return filtered
+}
+const visibleCharacters = computed(() => filterAndSortEntities(characters.value))
+const visibleFactions = computed(() => filterAndSortEntities(factions.value))
+const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 </script>
 
 <template>
@@ -596,11 +634,17 @@ watch(bookId, (id) => {
           </div>
         </div>
 
-        <!-- 实体（角色/势力/资产） -->
+        <!-- 实体（角色/势力/资产）：搜索 + 重要度排序 -->
+        <div class="side-section">
+          <div v-show="characters.length || factions.length || assets.length" class="evt-filter">
+            <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
+            <input v-model="entityFilter" class="evt-filter-input" placeholder="搜索实体（名字 / 别名）…" />
+          </div>
+        </div>
         <div v-for="group in [
-          { key: 'character', title: '角色', icon: 'user', list: characters },
-          { key: 'faction', title: '势力', icon: 'users', list: factions },
-          { key: 'asset', title: '资产', icon: 'star', list: assets },
+          { key: 'character', title: '角色', icon: 'user', list: visibleCharacters },
+          { key: 'faction', title: '势力', icon: 'users', list: visibleFactions },
+          { key: 'asset', title: '资产', icon: 'star', list: visibleAssets },
         ]" :key="group.key" class="side-section">
           <template v-if="group.list.length">
             <div
@@ -624,6 +668,12 @@ watch(bookId, (id) => {
               />
             </div>
           </template>
+          <div
+            v-else-if="entityFilter && (group.key === 'character' ? characters : group.key === 'faction' ? factions : assets).length"
+            class="side-empty"
+          >
+            没有匹配「{{ entityFilter }}」的{{ group.title }}
+          </div>
         </div>
         <div v-if="!characters.length && !factions.length && !assets.length" class="side-empty">
           还没有实体。点「实体」创建角色 / 势力 / 资产——它们只存固有属性，位置与生死由事件推演。

@@ -1,63 +1,35 @@
 import Mention from '@tiptap/extension-mention'
 import { PluginKey } from '@tiptap/pm/state'
 import type { Editor } from '@tiptap/vue-3'
-import { characterApi, chapterApi } from '../services/api/domain'
+import { characterApi } from '../services/api/domain'
 import { assetApi } from '../services/api/domain/asset.api'
+import { worldApi } from '../services/api/domain/world.api'
 
 /**
  * NLE-ADF 2.0 行内极速 Hook（三级输入体系第二级）。
  *
  * 画布打字时 `@` 唤起角色建议、`#` 唤起资产建议：
- *   - 选中已有实体 → 插入行内提及节点（带底色的小胶囊），并静默绑定到本章
- *     （chapter entities / chapter assets），设定库零打扰更新
- *   - 无匹配时 → 「创建并绑定」项：先建实体再绑定（设定的逆向生长入口之一）
+ *   - 选中已有实体 → 插入行内提及胶囊
+ *   - 无匹配时 → 「创建」项：直接在世界页建实体（M4 后世界页为设定唯一写主）
  *
- * 自包含在通用组件层（components/ 不受 features 分层约束，RichTextEditor
- * 已有 bookApi 直调先例）；bookId/chapterId 以 getter 注入（编辑器实例
- * 一次创建，章节切换不换扩展，闭包内必须读最新值）。
+ * M4 变更：建议列表与创建均 world 优先（世界页无实体时回退旧表）；
+ * 「静默绑定到本章」已退役——本章在场由世界页事件按叙事时刻推演
+ * （docs/world-unified-settings.md §8），不再写 chapter_entities/chapter_assets。
+ *
+ * 自包含在通用组件层（components/ 不受 features 分层约束）；
+ * bookId/chapterId 以 getter 注入（编辑器实例一次创建，章节切换不换扩展）。
  */
 
 interface MentionEntityItem {
   id: string
   name: string
-  /** true = 「创建并绑定」项（query 无精确匹配时追加） */
+  /** true = 「创建」项（query 无精确匹配时追加） */
   create?: boolean
 }
 
 interface EntityMentionContext {
   getBookId: () => string | null
   getChapterId: () => string | number | null
-}
-
-/** 把实体静默绑定到本章（已绑定则跳过；失败仅告警不打断写作） */
-async function _bindEntityToChapter(
-  ctx: EntityMentionContext,
-  kind: 'character' | 'asset',
-  entityId: string,
-): Promise<void> {
-  const chapterId = ctx.getChapterId()
-  if (!chapterId) return
-  try {
-    if (kind === 'character') {
-      const cur = await chapterApi.getEntities(String(chapterId))
-      const ids: string[] = Array.isArray(cur)
-        ? cur.map((x: any) => (typeof x === 'string' ? x : x?.id)).filter(Boolean)
-        : []
-      if (!ids.includes(entityId)) {
-        await chapterApi.updateEntities(String(chapterId), [...ids, entityId])
-      }
-    } else {
-      const cur = await assetApi.getChapterAssets(String(chapterId))
-      const ids: string[] = (cur || [])
-        .map((a: any) => a?.id ?? a?.asset_id)
-        .filter(Boolean)
-      if (!ids.includes(entityId)) {
-        await assetApi.updateChapterAssets(String(chapterId), [...ids, entityId])
-      }
-    }
-  } catch (e) {
-    console.warn(`[entity-mention] 绑定${kind === 'character' ? '角色' : '资产'}失败`, e)
-  }
 }
 
 /** 提及建议弹层：手写 DOM 渲染（不引 tippy，减少依赖）。
@@ -82,7 +54,7 @@ function _makePopupRenderer() {
       items.forEach((item, i) => {
         const btn = document.createElement('button')
         btn.className = 'mention-item' + (i === selected ? ' mention-item--active' : '')
-        btn.textContent = item.create ? `＋ 创建并绑定「${item.name}」` : item.name
+        btn.textContent = item.create ? `＋ 创建「${item.name}」` : item.name
         btn.onmousedown = (e) => {
           e.preventDefault()  // 防编辑器失焦吞掉点击
           command?.(item)
@@ -154,7 +126,7 @@ function _makePopupRenderer() {
   }
 }
 
-/** 构建 @ 角色 / # 资产两个提及扩展（RichTextEditor extensions 数组挂载） */
+/** 构建提及建议列表：世界页实体优先（含别名匹配），无世界数据回退旧表 */
 export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
   const makeItems =
     (kind: 'character' | 'asset') =>
@@ -163,16 +135,33 @@ export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
       if (!bookId) return []
       const q = (query || '').trim()
       try {
-        const list: any[] =
-          kind === 'character' ? await characterApi.getAll(bookId) : await assetApi.getAll(bookId)
-        const filtered: MentionEntityItem[] = (list || [])
-          .filter((c: any) => c?.name && (!q || String(c.name).includes(q)))
-          .slice(0, 5)
-          .map((c: any) => ({ id: String(c.id), name: String(c.name) }))
-        if (q && !filtered.some((c) => c.name === q)) {
-          filtered.push({ id: '__create__', name: q, create: true })
+        let list: MentionEntityItem[] = []
+        const worldEnts = await worldApi
+          .listEntities(bookId, kind)
+          .catch(() => null as any[] | null)
+        if (worldEnts && worldEnts.length) {
+          list = worldEnts
+            .filter(
+              (e: any) =>
+                e?.name &&
+                (!q ||
+                  String(e.name).includes(q) ||
+                  (e.aliases || []).some((a: any) => String(a).includes(q))),
+            )
+            .slice(0, 5)
+            .map((e: any) => ({ id: String(e.id), name: String(e.name) }))
+        } else {
+          const legacy: any[] =
+            kind === 'character' ? await characterApi.getAll(bookId) : await assetApi.getAll(bookId)
+          list = (legacy || [])
+            .filter((c: any) => c?.name && (!q || String(c.name).includes(q)))
+            .slice(0, 5)
+            .map((c: any) => ({ id: String(c.id), name: String(c.name) }))
         }
-        return filtered
+        if (q && !list.some((c) => c.name === q)) {
+          list.push({ id: '__create__', name: q, create: true })
+        }
+        return list
       } catch {
         return []
       }
@@ -192,19 +181,17 @@ export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
           .run()
       }
       if (item.create) {
-        // 先建实体再插入+绑定（异步；失败静默告警不打断写作）
+        // 世界页为设定唯一写主：@/# 创建的实体直接落 world_entities（失败静默告警）
         void (async () => {
           const bookId = ctx.getBookId()
           if (!bookId) return
           try {
-            const created: any =
-              kind === 'character'
-                ? await characterApi.create({ book_id: bookId, name: item.name })
-                : await assetApi.create(bookId, { name: item.name })
-            const newId = created?.id
-            if (newId) {
-              insertMention(String(newId), item.name)
-              await _bindEntityToChapter(ctx, kind, String(newId))
+            const created: any = await worldApi.createEntity(bookId, {
+              entity_type: kind,
+              name: item.name,
+            })
+            if (created?.id) {
+              insertMention(String(created.id), item.name)
             }
           } catch (e) {
             console.warn(`[entity-mention] 创建${kind === 'character' ? '角色' : '资产'}失败`, e)
@@ -213,7 +200,6 @@ export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
         return
       }
       insertMention(item.id, item.name)
-      void _bindEntityToChapter(ctx, kind, item.id)
     }
 
   const charMention = Mention.extend({ name: 'charMention' }).configure({
