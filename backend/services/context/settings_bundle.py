@@ -76,6 +76,11 @@ class SettingsBundle:
     chapter_number: Optional[int] = None
     outline_text: str = ""
     content_text: str = ""
+    # ---- 世界设定层桥接（world_bridge；docs/world-unified-settings.md §5）----
+    # world 优先时 entities/assets/locations/relationships 已换为适配器视图对象
+    world_sourced: bool = False
+    world_time: int = 0  # 时间切片时刻 t（叙事时间四级降级解析）
+    world_state: Dict[str, Any] = field(default_factory=dict)  # t 时刻推演快照
 
     def to_prompt_context(self) -> Dict[str, Any]:
         """生成供 prompt 拼接的扁平 dict（文本化版本）。
@@ -247,6 +252,25 @@ async def load_chapter_settings_bundle(
         bundle.relationships = ctx.relationships or []
         bundle.open_hooks = ctx.open_hooks or []
         bundle.previous_summary = ctx.previous_summary
+
+    # ---- 世界设定层桥接：world 优先 / 旧表兜底（读时映射，不动写路径）----
+    # 世界页有实体 → entities/assets/locations/relationships 覆盖为 world 适配器
+    # （旧形状视图对象，下游 hard/soft/nutrients 零改动），并携带 t 时刻推演快照。
+    # 世界页无实体 / 桥接失败 → 保持旧表数据（未迁移书行为与现状完全一致）。
+    if bundle.book_id:
+        try:
+            from backend.services.context.world_bridge import load_world_overlay
+            overlay = await load_world_overlay(bundle.book_id, db, chapter)
+            if overlay is not None:
+                bundle.entities = overlay["entities"]
+                bundle.assets = overlay["assets"]
+                bundle.locations = overlay["locations"]
+                bundle.relationships = overlay["relationships"]
+                bundle.world_state = overlay["world_state"]
+                bundle.world_time = overlay["world_time"]
+                bundle.world_sourced = True
+        except Exception:
+            pass  # 降级：world 桥失败走旧表（辅助不因桥接阻塞）
 
     # ---- 书级 Canon 图谱 ----
     if bundle.book_id:
