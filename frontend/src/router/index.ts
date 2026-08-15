@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '作者脑中世界（Canon）', rail: true, railKey: 'canon' },
   },
   {
+    path: '/world/:bookId',
+    name: 'world',
+    component: () => import('../features/world/containers/WorldView.vue'),
+    meta: { title: '世界设定', rail: true, railKey: 'world' },
+  },
+  {
     path: '/insights/:bookId',
     name: 'insights',
     component: () => import('../features/insights/containers/InsightsView.vue'),

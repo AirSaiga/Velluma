@@ -35,6 +35,8 @@ class ChapterBase(BaseModel):
     summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
     map_activity_range: Optional[str] = None
+    # 世界页章节叙事时间锚（连续日计数；docs/world-unified-settings.md §2.4）
+    narrative_time: Optional[int] = None
     tension_level: int = Field(default=3, ge=1, le=5, description="剧情张力等级 (1-5)，决定工作流层级")
     pacing_style: PacingStyle = Field(default="balanced")
     world_snapshot: Optional[dict] = Field(default=None, description="章节发布时提取的世界状态快照")
@@ -66,6 +68,7 @@ class ChapterUpdate(BaseModel):
     summary: Optional[str] = None
     status: Optional[str] = None
     map_activity_range: Optional[str] = None
+    narrative_time: Optional[int] = None
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[PacingStyle] = None
     chapter_assets_schema: Optional[str] = None

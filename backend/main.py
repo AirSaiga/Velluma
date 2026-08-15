@@ -176,6 +176,10 @@ logger.info("[Main] 意图驱动路由已加载")
 from backend.routes.canon import router as canon_router
 logger.info("[Main] Canon 路由已加载")
 
+# V5.0 World 设定层（地图 + 时间线 + 事件溯源，独立于 Canon）路由
+from backend.routes.world import router as world_router
+logger.info("[Main] World 路由已加载")
+
 # V4.2 Reader Mirror（读者状态镜像）路由
 from backend.routes.reader_mirror import router as reader_mirror_router
 logger.info("[Main] Reader Mirror 路由已加载")
@@ -276,6 +280,10 @@ app.include_router(style_router)
 app.include_router(canon_router)
 logger.info("[Main] Canon 路由已注册: /api/books/{book_id}/canon")
 
+# V5.0 World 设定层路由
+app.include_router(world_router)
+logger.info("[Main] World 路由已注册: /api/books/{book_id}/world")
+
 # V4.2 Reader Mirror 路由
 app.include_router(reader_mirror_router)
 logger.info("[Main] Reader Mirror 路由已注册: /api/books/{book_id}/reader-mirror")
@@ -284,6 +292,24 @@ logger.info("[Main] 文风体系路由已注册: /api/books/{id}/style-card, /sa
 # 正文逆向提取路由
 app.include_router(extraction_router)
 logger.info("[Main] Extraction 路由已注册: /api/chapters/{chapter_id}/extraction")
+
+# =============================================================================
+# V5.0 World 底图图片静态服务
+# =============================================================================
+# 用户上传的世界地图拼贴素材（data/world_images/）。
+# 警示：必须在下方「前端静态文件服务」的 catch-all 路由之前注册——
+# Starlette 按注册顺序匹配，后注册会被 /{path:path} 吞掉。
+from backend.core.config import WORLD_IMAGES_DIR
+
+os.makedirs(WORLD_IMAGES_DIR, exist_ok=True)
+
+
+@app.get("/world-images/{filename:path}")
+async def serve_world_image(filename: str):
+    file_path = os.path.join(WORLD_IMAGES_DIR, filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(file_path)
 
 # =============================================================================
 # 前端静态文件服务（SPA 路由处理）

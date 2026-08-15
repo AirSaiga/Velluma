@@ -82,6 +82,29 @@ __all__ = [
     "VISIBILITY_PUBLIC",
     "VISIBILITY_PRIVATE",
     "VISIBILITY_PARTIAL",
+    # V5.0 World 设定层（地图 + 时间线 + 事件溯源，独立于 Canon）
+    "WorldEvent",
+    "WorldLocation",
+    "WorldEntity",
+    "WorldMapLayer",
+    "WorldMapStroke",
+    "WORLD_EVENT_BIRTH",
+    "WORLD_EVENT_DEATH",
+    "WORLD_EVENT_MOVE",
+    "WORLD_EVENT_BATTLE",
+    "WORLD_EVENT_TERRITORY_CHANGE",
+    "WORLD_EVENT_FOUND",
+    "WORLD_EVENT_DESTROY",
+    "WORLD_EVENT_ALLIANCE",
+    "WORLD_EVENT_WAR_DECLARE",
+    "WORLD_EVENT_CORONATION",
+    "WORLD_EVENT_CUSTOM",
+    "WORLD_ENTITY_CHARACTER",
+    "WORLD_ENTITY_FACTION",
+    "WORLD_ENTITY_ASSET",
+    "WORLD_LOCATION_POINT",
+    "WORLD_LOCATION_REGION",
+    "WORLD_LOCATION_ROUTE",
     # Utilities
     "generate_uuid",
     "utc_now",
@@ -230,6 +253,8 @@ class Chapter(Base):
     summary = Column(Text, nullable=True)
     review_feedback = Column(JSONB, default=dict)
     map_activity_range = Column(Text, nullable=True)
+    # 世界页章节叙事时间锚（连续日计数，与历法解耦；设计见 docs/world-unified-settings.md §2.4）
+    narrative_time = Column(Integer, nullable=True)
     tension_level = Column(Integer, default=5, nullable=False)
     pacing_style = Column(String(50), default="balanced", nullable=False)
     revision_count = Column(Integer, default=0)
@@ -720,6 +745,9 @@ class PlotLedger(Base):
         ForeignKey("chapters.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # 世界页 M3：伏笔双时间锚（连续日计数；与章节锚换算，纯设定型伏笔可不关联章节）
+    world_time_planted = Column(Integer, nullable=True)
+    world_time_resolved = Column(Integer, nullable=True)
     meta = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=utc_now)
 
@@ -1212,6 +1240,211 @@ class CanonEdge(Base):
 
     def __repr__(self):
         return f"<CanonEdge {self.type} strength={self.strength}>"
+
+
+# ============================================================
+# V5.0 World 设定层（地图 + 时间线 + 事件溯源，独立于 Canon）
+# ============================================================
+# 与 Canon（关系图谱 + private 真相）并存的新设定层，通过 book_id 隔离。
+# - world_events：事件事实源（append-only），时变状态全靠 computeWorldState 推演
+# - world_locations：地点（带空间坐标 x/y，复杂几何放 geometry JSONB）
+# - world_entities：人物/势力/资产固有属性（极简身份证，无时变状态）
+# 三条决策（照搬世界绘卷）：
+# ① 出生/死亡由 birth/death 事件承载，character 不存 birth_time
+# ② move 事件 payload 含 path，沿弧长插值在途位置
+# ③ 势力疆域写在 territory_change 事件 payload（完整 polygon），无独立快照表
+
+# ---- 事件类型 ----
+WORLD_EVENT_BIRTH = "birth"
+WORLD_EVENT_DEATH = "death"
+WORLD_EVENT_MOVE = "move"
+WORLD_EVENT_BATTLE = "battle"
+WORLD_EVENT_TERRITORY_CHANGE = "territory_change"
+WORLD_EVENT_FOUND = "found"
+WORLD_EVENT_DESTROY = "destroy"
+WORLD_EVENT_ALLIANCE = "alliance"
+WORLD_EVENT_WAR_DECLARE = "war_declare"
+WORLD_EVENT_CORONATION = "coronation"
+WORLD_EVENT_CUSTOM = "custom"
+
+# ---- 实体类型 ----
+WORLD_ENTITY_CHARACTER = "character"
+WORLD_ENTITY_FACTION = "faction"
+WORLD_ENTITY_ASSET = "asset"
+
+# ---- 地点类型 ----
+WORLD_LOCATION_POINT = "point"
+WORLD_LOCATION_REGION = "region"
+WORLD_LOCATION_ROUTE = "route"
+
+
+class WorldEvent(Base):
+    """世界事件（事实源，append-only）。时变状态的唯一来源。
+
+    时变状态（人物位置、势力疆域、生死、归属）一律不存表，
+    由 computeWorldState(events, t) 从事件流推演（事件溯源铁律）。
+    """
+
+    __tablename__ = "world_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    sequence_num = Column(Integer, nullable=False, index=True)  # 全局自增序号（回放顺序）
+    event_type = Column(String(32), nullable=False, index=True)
+    time_start = Column(Integer, nullable=False)  # 数值时间戳（连续日计数，与历法解耦）
+    time_end = Column(Integer, nullable=False)    # 时点事件 time_end == time_start
+    location_id = Column(UUID(as_uuid=True), ForeignKey("world_locations.id", ondelete="SET NULL"), nullable=True, index=True)
+    participant_ids = Column(JSONB, default=list)   # [world_entity.id, ...] 角色
+    faction_ids = Column(JSONB, default=list)       # [world_entity.id, ...] 势力
+    payload = Column(JSONB, default=dict)           # 类型相关：birth.parent_ids / move.path / territory_change.polygon 等
+    causes = Column(JSONB, default=list)            # [world_event.id, ...] 因果链
+    chapter_ref = Column(String, nullable=True)     # 关联章节 id（只读，用于按章过滤世界状态）
+    tags = Column(JSONB, default=list)
+    note = Column(Text, default="")
+    metadata_ = Column("metadata", JSONB, default=dict)
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldEvent {self.event_type} seq={self.sequence_num}>"
+
+
+class WorldLocation(Base):
+    """世界地点（带空间坐标）。region/route 的复杂几何放 geometry JSONB。
+
+    空间坐标用 Float x/y（内部坐标，CRS.Simple 浮点，非像素非经纬度），
+    不引 PostGIS——与现有 MapLocation 风格一致，零迁移风险。
+    """
+
+    __tablename__ = "world_locations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    kind = Column(String(20), default=WORLD_LOCATION_POINT)  # point/region/route
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("world_locations.id", ondelete="SET NULL"), nullable=True)
+    coord_x = Column(Float, nullable=True)   # 内部坐标 x
+    coord_y = Column(Float, nullable=True)   # 内部坐标 y
+    geometry = Column(JSONB, default=dict)   # region: polygon 点[]；route: polyline 点[]
+    intro = Column(Text, default="")
+    tags = Column(JSONB, default=list)
+    metadata_ = Column("metadata", JSONB, default=dict)
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldLocation {self.name} kind={self.kind}>"
+
+
+class WorldEntity(Base):
+    """世界实体（人物/势力/资产固有属性）。极简身份证——无任何时变状态。
+
+    位置/疆域/生死/归属全靠事件推演，本表只存"不变的身份证信息"。
+    这是事件溯源成立的关键（与世界绘卷一致）。
+    """
+
+    __tablename__ = "world_entities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False, index=True)  # character/faction/asset
+    name = Column(String(200), nullable=False)
+    # M2 档案扩展（docs/world-unified-settings.md §2.1）：别名（RAG/POV 名闸门吃它）、
+    # 重要度（上下文注入优先级）、可见性（public=读者已知 / private=作者已知，防 AI 泄底）
+    aliases = Column(JSONB, default=list)
+    importance = Column(Integer, default=1)
+    visibility = Column(String(20), default="public")
+    intro = Column(Text, default="")
+    tags = Column(JSONB, default=list)
+    props = Column(JSONB, default=dict)  # 档案字段（appearance/speech_style 等，表驱动 schema）
+    metadata_ = Column("metadata", JSONB, default=dict)
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldEntity {self.entity_type}:{self.name}>"
+
+
+class WorldMapLayer(Base):
+    """世界地图底图·图片层（用户导入的图片拼贴）。
+
+    x/y 为中心点（CRS.Simple 内部坐标），w/h 为尺寸（内部坐标单位）；
+    z_index 控制图片间层序（小者在下）。opacity 预留（UI 后加）。
+    """
+
+    __tablename__ = "world_map_layers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_url = Column(String(500), nullable=False)  # /world-images/{book_id}/{uuid}{ext}
+    x = Column(Float, nullable=False)
+    y = Column(Float, nullable=False)
+    w = Column(Float, nullable=False)
+    h = Column(Float, nullable=False)
+    z_index = Column(Integer, default=0)
+    opacity = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldMapLayer {self.image_url} @{self.x},{self.y}>"
+
+
+class WorldMapStroke(Base):
+    """世界地图底图·手绘笔迹（矢量点序列）。
+
+    橡皮 = 前端命中检测后 DELETE 命中的 stroke，不存橡皮笔迹。
+    """
+
+    __tablename__ = "world_map_strokes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    color = Column(String(20), nullable=False, default="#475569")
+    width = Column(Float, nullable=False, default=3.0)
+    points = Column(JSONB, nullable=False, default=list)  # [[x, y], ...] 内部坐标
+    created_at = Column(DateTime, default=utc_now)
+
+    def __repr__(self):
+        return f"<WorldMapStroke {len(self.points or [])}pts {self.color}>"
+
+
+class WorldRelation(Base):
+    """世界设定层·实体关系边（脑图透镜的边）。
+
+    设计（docs/world-unified-settings.md §2.2）：
+    - 有向边：source 对 target 的认知/态度（不对称）
+    - 时间性二分：static=True 一直成立；static=False 且 event_ref 非空时
+      由事件回放推演激活（锚事件 time_start≤t 才生效）——"关系随事态演变"
+    - 时变不入库铁律：激活状态由 computeWorldState 推演，本表不存快照
+
+    警示：业务层校验自环（source == target）。
+    """
+
+    __tablename__ = "world_relations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_entity_id = Column(
+        UUID(as_uuid=True), ForeignKey("world_entities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_entity_id = Column(
+        UUID(as_uuid=True), ForeignKey("world_entities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    relation_type = Column(String(50), nullable=False, default="custom")  # ally/enemy/kin/.../custom
+    label = Column(String(100), default="")  # 显示名（"义兄弟""杀父仇人"）
+    affinity = Column(Integer, nullable=True)  # 可选 -100..100
+    note = Column(Text, default="")
+    static = Column(Boolean, default=True)  # True=一直成立；False=事件锚定
+    event_ref = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self):
+        return f"<WorldRelation {self.source_entity_id}->{self.target_entity_id} {self.relation_type}>"
 
 
 # ============================================================

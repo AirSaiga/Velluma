@@ -151,6 +151,9 @@ class PlotLedgerBase(BaseModel):
     status: Literal["open", "closed", "dropped"] = Field(default="open")
     created_at_chapter: Optional[int] = Field(None, ge=1)
     resolved_in_chapter_id: Optional[UUID] = None
+    # 世界页 M3：双时间锚（连续日计数；docs/world-unified-settings.md §2.3）
+    world_time_planted: Optional[int] = Field(None, description="埋设时刻（世界时间）")
+    world_time_resolved: Optional[int] = Field(None, description="回收时刻（世界时间）")
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -168,6 +171,8 @@ class PlotLedgerUpdate(BaseModel):
     status: Optional[Literal["open", "closed", "dropped"]] = None
     created_at_chapter: Optional[int] = Field(None, ge=1)
     resolved_in_chapter_id: Optional[UUID] = None
+    world_time_planted: Optional[int] = None
+    world_time_resolved: Optional[int] = None
     meta: Optional[dict[str, Any]] = None
 
 

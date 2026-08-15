@@ -522,6 +522,45 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "BOOLEAN DEFAULT FALSE",
         "expected_udt_names": {"boolean", "bool"},
     },
+    # 世界页 M1：章节叙事时间锚（docs/world-unified-settings.md §2.4，章节轴↔世界轴的桥）
+    {
+        "table": "chapters",
+        "column": "narrative_time",
+        "definition": "INTEGER",
+        "expected_udt_names": {"int4", "integer"},
+    },
+    # 世界页 M2：实体档案扩展（别名/重要度/可见性）
+    {
+        "table": "world_entities",
+        "column": "aliases",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "world_entities",
+        "column": "importance",
+        "definition": "INTEGER DEFAULT 1",
+        "expected_udt_names": {"int4", "integer"},
+    },
+    {
+        "table": "world_entities",
+        "column": "visibility",
+        "definition": "VARCHAR(20) DEFAULT 'public'",
+        "expected_udt_names": {"varchar"},
+    },
+    # 世界页 M3：伏笔双时间锚
+    {
+        "table": "plot_ledgers",
+        "column": "world_time_planted",
+        "definition": "INTEGER",
+        "expected_udt_names": {"int4", "integer"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "world_time_resolved",
+        "definition": "INTEGER",
+        "expected_udt_names": {"int4", "integer"},
+    },
 ]
 
 
@@ -668,6 +707,12 @@ async def init_db():
         # V4.0 Canon（作者脑中世界图谱）
         CanonNode,
         CanonEdge,
+        # V5.0 World 设定层（地图 + 时间线 + 事件溯源，独立于 Canon）
+        WorldEvent,
+        WorldLocation,
+        WorldEntity,
+        WorldMapLayer,
+        WorldMapStroke,
     )
     from backend.core.model_config import get_embedding_dimensions
 

@@ -54,6 +54,8 @@ from typing import Optional, Set, List
 # 警示：此文件仅用于本地开发，生产环境应使用环境变量或配置文件管理端口
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 PORT_FILE = os.path.join(DATA_DIR, "port.txt")
+# V5.0 World 底图图片目录（用户上传的世界地图素材；经 main.py 的 /world-images 静态路由对外）
+WORLD_IMAGES_DIR = os.path.join(DATA_DIR, "world_images")
 # 内存缓存：避免每次读取文件，提升查询性能（副作用：进程重启后丢失）
 ACTUAL_PORT: Optional[int] = None
 
