@@ -54,6 +54,8 @@ const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
 
 const embeddingForm = reactive({ model: '', api_key: '', dimensions: 1536 })
 const embeddingMeta = reactive({ has_api_key: false, api_key_masked: '' })
+/** 专业级折叠：向量记忆（默认收起——未配置时走结构化+词法默认记忆流） */
+const showAdvanced = ref(false)
 
 const proxyForm = reactive({ enabled: true, url: '' })
 
@@ -235,35 +237,44 @@ onMounted(loadConfig)
           </label>
         </section>
 
-        <!-- Embedding 配置 -->
+        <!-- Embedding 配置（专业级：默认折叠——未配置时走结构化+词法记忆流） -->
         <section class="config-section">
-          <div class="section-header">Embedding（向量记忆）</div>
+          <button type="button" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+            <span>专业级：向量记忆（Embedding）</span>
+            <span class="advanced-caret">{{ showAdvanced ? '▾' : '▸' }}</span>
+          </button>
 
-          <label class="field">
-            <span class="field-label">模型</span>
-            <input v-model="embeddingForm.model" class="field-input" placeholder="text-embedding-v2" />
-          </label>
+          <template v-if="showAdvanced">
+            <div class="field-hint">
+              未配置时使用结构化 + 词法记忆（默认，无需额外服务）；配置后启用向量召回增强（需 DashScope Key 与 pgvector）。
+            </div>
 
-          <label class="field">
-            <span class="field-label">API Key</span>
-            <input
-              v-model="embeddingForm.api_key"
-              type="password"
-              class="field-input"
-              :placeholder="embeddingMeta.has_api_key
-                ? `已保存 (${embeddingMeta.api_key_masked})，留空保持不变`
-                : '输入 DashScope API Key'"
-              autocomplete="new-password"
-            />
-          </label>
+            <label class="field">
+              <span class="field-label">模型</span>
+              <input v-model="embeddingForm.model" class="field-input" placeholder="text-embedding-v2" />
+            </label>
 
-          <label class="field">
-            <span class="field-label">向量维度</span>
-            <input v-model.number="embeddingForm.dimensions" type="number" min="1" class="field-input" />
-          </label>
-          <div class="field-warning">
-            修改维度需重启后端；重启迁移会删列重建，清空全部向量记忆数据。
-          </div>
+            <label class="field">
+              <span class="field-label">API Key</span>
+              <input
+                v-model="embeddingForm.api_key"
+                type="password"
+                class="field-input"
+                :placeholder="embeddingMeta.has_api_key
+                  ? `已保存 (${embeddingMeta.api_key_masked})，留空保持不变`
+                  : '输入 DashScope API Key'"
+                autocomplete="new-password"
+              />
+            </label>
+
+            <label class="field">
+              <span class="field-label">向量维度</span>
+              <input v-model.number="embeddingForm.dimensions" type="number" min="1" class="field-input" />
+            </label>
+            <div class="field-warning">
+              修改维度需重启后端；重启迁移会删列重建，清空全部向量记忆数据。
+            </div>
+          </template>
         </section>
 
         <!-- 代理配置 -->
@@ -498,6 +509,39 @@ onMounted(loadConfig)
   padding: 8px 10px;
   background: rgba(245, 158, 11, 0.08);
   border-radius: 6px;
+}
+
+/* ---------- 专业级折叠（向量记忆） ---------- */
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.advanced-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.advanced-caret {
+  font-size: 11px;
+}
+
+.field-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 6px 2px 2px;
 }
 
 /* ---------- 保存 ---------- */

@@ -51,6 +51,15 @@ from backend.core.model_config import get_embedding_config, get_embedding_dimens
 logger = logging.getLogger(__name__)
 
 
+def is_embedding_configured() -> bool:
+    """embedding 是否已配置（api_key 非空）。
+
+    记忆流路由开关：配置 → 向量召回增强（专业级）；未配置 → 结构化+词法默认流
+    （recall.py）。纯读 model_config.json，无副作用。
+    """
+    return bool(get_embedding_config().get("api_key"))
+
+
 async def get_embedding(
     text: str,
     model: Optional[str] = None,

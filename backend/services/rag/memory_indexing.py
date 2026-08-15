@@ -35,7 +35,7 @@ from uuid import UUID
 from sqlalchemy import delete
 
 from backend.models import MemoryChunk
-from backend.services.llm.embedding import get_embedding
+from backend.services.llm.embedding import get_embedding, is_embedding_configured
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +79,11 @@ async def index_chapter_memories(
     ]
     label = f"第{chapter_number}章" if chapter_number else "未名章"
     created = 0
+    # embedding 未配置 → 跳过向量化调用（块文本照存，喂词法默认流）
+    embedding_enabled = is_embedding_configured()
     for idx, chunk in enumerate(chunks):
         try:
-            embedding = await get_embedding(chunk[:2000])
+            embedding = await get_embedding(chunk[:2000]) if embedding_enabled else None
             db.add(MemoryChunk(
                 book_id=UUID(book_id),
                 chapter_id=UUID(chapter_id),

@@ -60,6 +60,69 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             spec=spec
         )
 
+    async def search_lexical(
+        self,
+        book_id: UUID,
+        keywords: List[str],
+        limit: int = 3,
+        exclude_chapter_id: Optional[UUID] = None,
+        max_chapter_number: Optional[int] = None,
+        candidate_limit: int = 60,
+    ):
+        """词法检索（默认记忆流，无需 embedding）。
+
+        SQL 预筛：任一关键词 ILIKE 命中 + 防剧透章节过滤（与 search_similar
+        同规则，含 chapter_id 为空的旧全局块）；Python 重排：关键词覆盖分
+        （lexical.keyword_coverage，单关键词命中封顶）+ 开放伏笔章 +1 加权
+        + 新近 tiebreak。embedding 为空的块照常参与（写路径未配置时块文本
+        仍落库）。
+        """
+        from backend.services.rag.lexical import keyword_coverage
+
+        like_conds = [
+            MemoryChunk.chunk_text.ilike(f"%{kw}%") for kw in keywords if kw
+        ]
+        if not like_conds:
+            return []
+
+        query = select(MemoryChunk).where(
+            MemoryChunk.book_id == book_id,
+            or_(*like_conds),
+        )
+        if max_chapter_number is not None:
+            query = query.outerjoin(Chapter, Chapter.id == MemoryChunk.chapter_id).where(
+                or_(
+                    MemoryChunk.chapter_id.is_(None),
+                    Chapter.chapter_number <= max_chapter_number,
+                )
+            )
+        if exclude_chapter_id:
+            query = query.where(MemoryChunk.chapter_id != exclude_chapter_id)
+
+        result = await self.execute(query.limit(candidate_limit))
+        chunks = list(result.scalars().all())
+        if not chunks:
+            return []
+
+        # 开放伏笔所在章加权（与向量路径同语义：读者在等的章优先唤醒）
+        chapter_ids = {c.chapter_id for c in chunks if c.chapter_id}
+        ledger_chapter_ids: set = set()
+        if chapter_ids:
+            plot_stmt = select(PlotLedger.chapter_id).where(
+                PlotLedger.book_id == book_id,
+                PlotLedger.chapter_id.in_(chapter_ids),
+                PlotLedger.status == "open",
+            )
+            ledger_chapter_ids = set((await self.execute(plot_stmt)).scalars().all())
+
+        def _rank_key(chunk: MemoryChunk):
+            score = keyword_coverage(chunk.chunk_text or "", keywords)
+            if chunk.chapter_id in ledger_chapter_ids:
+                score += 1.0
+            return (score, chunk.created_at or datetime.min)
+
+        return sorted(chunks, key=_rank_key, reverse=True)[:limit]
+
     async def search_similar(
         self,
         embedding: List[float],

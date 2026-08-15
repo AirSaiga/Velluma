@@ -15,7 +15,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 **前端** (`frontend/`)：Vue 3 ^3.4.15（Composition API）· TypeScript ^5.9.3 · Vite ^5.0.12 · Tailwind ^3.4.1 · TipTap ^2.24 · Electron ^28.3.3。
 
-**环境要求**：Python 3.12+（`.python-version`）· Node 18+ · PostgreSQL 14+（需 pgvector）。
+**环境要求**：Python 3.12+（`.python-version`）· Node 18+ · PostgreSQL 14+（pgvector 仅为**专业级向量记忆**所需；未配置 embedding 可不装）。
 
 ---
 
@@ -179,9 +179,13 @@ data/ logs/ .venv/
 - **Phase 7.5 残句门禁**（`sentence_integrity.py`，BS-ADF）：高精确度正则扫残句（宁漏勿误），命中定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，上限 5）。
 - **状态卡抽取失败**：沿用旧卡显式记 `result.degraded`（不静默）；max_tokens=1600 兜底。
 
-### RAG
+### RAG / 记忆流（`recall_memories` 按 embedding 配置双路由）
 
-Embedding **仅 DashScope**（默认 `text-embedding-v2`，1536 维可在 `model_config.json` 的 `embedding.dimensions` 配置），Key 来自 `model_config.json` 不读环境变量。权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。检索限当前章之前（防未来信息泄露）。
+唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定）：
+
+- **默认流（embedding 未配置，零外部依赖）**：A 结构化前情——查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）；B 词法检索——`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。A 前精确、B 补足，去重截 k。
+- **向量流（专业级，embedding 已配置）**：DashScope（默认 `text-embedding-v2`，1536 维可在 `model_config.json` 的 `embedding.dimensions` 配置），Key 来自 `model_config.json` 不读环境变量；`search_similar` 权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
+- **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过（摘要块是词法检索最佳素材）。检索限当前章之前（防未来信息泄露），两流同规则。
 
 ---
 
@@ -199,7 +203,7 @@ Embedding **仅 DashScope**（默认 `text-embedding-v2`，1536 维可在 `model
 
 ### model_config.json（主要配置入口，已 gitignore）
 
-LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`proxy`。除手动编辑外可通过前端设置面板（`SettingsPanel.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
+LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`proxy`。除手动编辑外可通过前端设置面板（`SettingsPanel.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
 
 ### 环境变量（.env 可选，仅以下几个实际生效）
 

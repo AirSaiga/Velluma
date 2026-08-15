@@ -164,20 +164,20 @@ async def publish_chapter(
         
         if summary:
             chapter.summary = summary
+            # 摘要块照写（词法默认记忆流的最佳素材）；embedding 可空——
+            # 未配置时不再整块跳过（M4 记忆流双路由）
             summary_embedding = await generate_summary_embedding(
                 summary=summary,
             )
-            
-            if summary_embedding:
-                new_memory = MemoryChunk(
-                    book_id=chapter.book_id,
-                    chapter_id=chapter.id,
-                    chunk_text=f"【第{chapter.chapter_number}章摘要】{summary}",
-                    embedding=summary_embedding
-                )
-                session = chapter_repo.get_session()
-                session.add(new_memory)
-                await session.commit()
+            new_memory = MemoryChunk(
+                book_id=chapter.book_id,
+                chapter_id=chapter.id,
+                chunk_text=f"【第{chapter.chapter_number}章摘要】{summary}",
+                embedding=summary_embedding if summary_embedding else None
+            )
+            session = chapter_repo.get_session()
+            session.add(new_memory)
+            await session.commit()
 
     character_updates = []
     character_extraction_result = None

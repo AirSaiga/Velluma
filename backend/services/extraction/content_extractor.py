@@ -407,8 +407,12 @@ async def commit_extraction(
     if progress_callback:
         progress_callback("foreshadows", created["foreshadows"])
 
-    # ---- 7. 向量记忆：正文切片 + embedding → MemoryChunk ----
+    # ---- 7. 向量记忆：正文切片 + 可选 embedding → MemoryChunk ----
+    # embedding 未配置 → 跳过向量化（块文本照存，喂词法默认记忆流）
     if raw_text and raw_text.strip():
+        from backend.services.llm.embedding import is_embedding_configured
+
+        embedding_enabled = is_embedding_configured()
         chunk_size = 1000
         chunks = [
             raw_text[i:i + chunk_size]
@@ -417,7 +421,7 @@ async def commit_extraction(
         ]
         for idx, chunk in enumerate(chunks):
             try:
-                embedding = await get_embedding(chunk[:2000])
+                embedding = await get_embedding(chunk[:2000]) if embedding_enabled else None
                 chunk_text = f"【第{chapter_number}章 片段{idx + 1}】{chunk}"
                 memory_item = MemoryChunk(
                     book_id=book_id,
