@@ -179,13 +179,14 @@ data/ logs/ .venv/
 - **Phase 7.5 残句门禁**（`sentence_integrity.py`，BS-ADF）：高精确度正则扫残句（宁漏勿误），命中定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，上限 5）。
 - **状态卡抽取失败**：沿用旧卡显式记 `result.degraded`（不静默）；max_tokens=1600 兜底。
 
-### RAG / 记忆流（`recall_memories` 按 embedding 配置双路由）
+### RAG / 记忆流（`recall_memories`：默认流始终打底 + 向量流增强叠加）
 
-唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定）：
+唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定），三层按质量序 `merge_echoes` 保序去重截 k：
 
-- **默认流（embedding 未配置，零外部依赖）**：A 结构化前情——查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）；B 词法检索——`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。A 前精确、B 补足，去重截 k。
-- **向量流（专业级，embedding 已配置）**：DashScope（默认 `text-embedding-v2`，1536 维可在 `model_config.json` 的 `embedding.dimensions` 配置），Key 来自 `model_config.json` 不读环境变量；`search_similar` 权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
-- **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过（摘要块是词法检索最佳素材）。检索限当前章之前（防未来信息泄露），两流同规则。
+- **A 结构化前情（始终）**：查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）。
+- **V 向量增强（专业级，embedding 已配置时叠加——不替换默认流，A/B 恒在）**：DashScope（默认 `text-embedding-v2`，1536 维可在 `model_config.json` 的 `embedding.dimensions` 配置，Key 来自 model_config 不读环境变量）；`search_similar` 权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
+- **B 词法检索（始终补足）**：`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。
+- **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过（摘要块是词法检索最佳素材）。检索限当前章之前（防未来信息泄露），三层同规则。
 
 ---
 

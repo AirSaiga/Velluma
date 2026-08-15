@@ -17,22 +17,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-前情召回（NLE-ADF 3.0 记忆倒灌·检索侧）——按 embedding 配置双路由。
+前情召回（NLE-ADF 3.0 记忆倒灌·检索侧）——默认流始终打底 + 向量流增强叠加。
 
 供续写/连写/点火/细纲扩写/零件生发注入"前情回响"。防剧透统一由
 chapter 过滤保证（max_chapter_number=本章-1 + 排除本章）。
 
-- 向量流（专业级，embedding 已配置）：query 向量化 → search_similar
-  （余弦 + PlotLedger 加权 + 新近度）。
-- 默认流（embedding 未配置）：A 结构化前情（世界事件 × 叙事时刻 × 查询中
-  在场实体，零依赖精确召回）+ B 词法检索（jieba 关键词 × memory_chunks
-  纯文本，块文本在未配置时也落库）。合并去重截 k。
+三层按质量序合并（merge_echoes 去重截 k）：
+- A 结构化前情（默认流·始终）：世界事件 × 叙事时刻 × 查询中在场实体，
+  零依赖精确召回，格式化为【前情事件】
+- V 向量增强（专业级，embedding 已配置时叠加）：DashScope 向量召回
+  （余弦 + PlotLedger 加权 + 新近度）
+- B 词法检索（默认流·始终补足）：jieba 关键词 × memory_chunks 纯文本
+  （块文本在未配置 embedding 时也落库）
 
+设计约束：配置 embedding **不替换**默认流——A/B 恒在，向量只是增强层
+（配置用户同样吃到结构化前情与词法兜底）。
 全部失败路径降级为空列表——记忆是增强，不是依赖，绝不阻塞生成。
 """
 
 import logging
-from typing import List
+from typing import List, Sequence
 from uuid import UUID
 
 from backend.repositories.memory_repository import MemoryRepository
@@ -45,6 +49,18 @@ logger = logging.getLogger(__name__)
 _WORLD_ECHO_LIMIT = 3
 # 查询中匹配的世界实体上限（防长文本全员命中）
 _MATCHED_ENTITY_LIMIT = 4
+
+
+def merge_echoes(groups: Sequence[List[str]], k: int) -> List[str]:
+    """按组序合并召回结果：保序去重（组间质量序 A→V→B），过滤空串，截 k。"""
+    seen: set = set()
+    out: List[str] = []
+    for group in groups:
+        for e in group:
+            if e and e not in seen:
+                seen.add(e)
+                out.append(e)
+    return out[:k]
 
 
 async def recall_memories(
@@ -65,26 +81,49 @@ async def recall_memories(
     query = (query_text or "").strip()
     if len(query) < 8 or not book_id:
         return []
+
+    # ---- A 结构化前情（默认流·始终）：世界页事件按叙事时刻精确召回 ----
+    a_echoes: List[str] = []
+    try:
+        a_echoes = await _world_echoes(
+            db, book_id=book_id, chapter_id=chapter_id,
+            query_text=query, limit=min(_WORLD_ECHO_LIMIT, k),
+        )
+    except Exception as e:
+        logger.warning(f"[recall] 世界事件前情失败（跳过）: {e}")
+
+    # ---- V 向量增强（专业级：embedding 已配置时叠加，不替换默认流）----
+    v_echoes: List[str] = []
     try:
         if is_embedding_configured():
-            return await _recall_vector(
+            v_echoes = await _vector_echoes(
                 db, query=query, book_id=book_id, chapter_id=chapter_id,
                 chapter_number=chapter_number, k=k,
             )
-        return await _recall_default(
-            db, query=query, book_id=book_id, chapter_id=chapter_id,
-            chapter_number=chapter_number, k=k,
-        )
     except Exception as e:
-        logger.warning(f"[recall] 前情召回失败（降级为空）: {e}")
-        return []
+        logger.warning(f"[recall] 向量召回失败（跳过）: {e}")
+
+    # ---- B 词法检索（默认流·始终补足）：关键词命中 memory_chunks 纯文本 ----
+    b_echoes: List[str] = []
+    keywords = extract_keywords(query, top_k=8)
+    if keywords:
+        try:
+            chunks = await MemoryRepository(db).search_lexical(
+                UUID(book_id),
+                keywords,
+                limit=k,
+                exclude_chapter_id=UUID(chapter_id) if chapter_id else None,
+                max_chapter_number=(chapter_number - 1) if chapter_number else None,
+            )
+            b_echoes = [(c.chunk_text or "")[:160] for c in chunks if c.chunk_text]
+        except Exception as e:
+            logger.warning(f"[recall] 词法召回失败（跳过）: {e}")
+
+    return merge_echoes([a_echoes, v_echoes, b_echoes], k)
 
 
-# ============================================================
-# 向量流（专业级：embedding 已配置）
-# ============================================================
-
-async def _recall_vector(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:
+async def _vector_echoes(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:
+    """向量召回（专业级增强层）：query 向量化 → search_similar 加权排序。"""
     embedding = await get_embedding(query[:500])
     if not embedding:
         return []
@@ -97,47 +136,6 @@ async def _recall_vector(db, *, query, book_id, chapter_id, chapter_number, k) -
         max_chapter_number=(chapter_number - 1) if chapter_number else None,
     )
     return [(c.chunk_text or "")[:160] for c in chunks if c.chunk_text]
-
-
-# ============================================================
-# 默认流（embedding 未配置）：A 结构化前情 + B 词法检索
-# ============================================================
-
-async def _recall_default(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:
-    echoes: List[str] = []
-
-    # A 结构化前情：世界页事件按叙事时刻精确召回（世界页无数据自动跳过）
-    try:
-        echoes.extend(await _world_echoes(
-            db, book_id=book_id, chapter_id=chapter_id,
-            query_text=query, limit=min(_WORLD_ECHO_LIMIT, k),
-        ))
-    except Exception as e:
-        logger.warning(f"[recall] 世界事件前情失败（跳过）: {e}")
-
-    # B 词法检索：关键词命中 memory_chunks 纯文本
-    keywords = extract_keywords(query, top_k=8)
-    if keywords:
-        try:
-            chunks = await MemoryRepository(db).search_lexical(
-                UUID(book_id),
-                keywords,
-                limit=k,
-                exclude_chapter_id=UUID(chapter_id) if chapter_id else None,
-                max_chapter_number=(chapter_number - 1) if chapter_number else None,
-            )
-            echoes.extend((c.chunk_text or "")[:160] for c in chunks if c.chunk_text)
-        except Exception as e:
-            logger.warning(f"[recall] 词法召回失败（跳过）: {e}")
-
-    # 去重截断（A 精确在前，B 补足）
-    seen: set = set()
-    out: List[str] = []
-    for e in echoes:
-        if e and e not in seen:
-            seen.add(e)
-            out.append(e)
-    return out[:k]
 
 
 async def _world_echoes(db, *, book_id, chapter_id, query_text, limit) -> List[str]:

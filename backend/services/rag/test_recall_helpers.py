@@ -85,6 +85,33 @@ class FormatEventEchoTests(unittest.TestCase):
         self.assertNotIn("丁", echo)
 
 
+class MergeEchoesTests(unittest.TestCase):
+    """三层合并语义：组间质量序 A→V→B 保序、去重、截 k、空串过滤。"""
+
+    def test_group_order_preserved(self):
+        from backend.services.rag.recall import merge_echoes
+
+        a = ["【前情事件·a】", "【前情事件·b】"]
+        v = ["向量片段1"]
+        b = ["词法片段1", "词法片段2"]
+        self.assertEqual(merge_echoes([a, v, b], 5), a + v + b)
+
+    def test_dedupe_across_groups(self):
+        from backend.services.rag.recall import merge_echoes
+
+        # 向量与词法命中同一块（chunk_text 相同）只保留先到者
+        self.assertEqual(
+            merge_echoes([["A1"], ["同一片段", "V2"], ["同一片段", "B1"]], 5),
+            ["A1", "同一片段", "V2", "B1"],
+        )
+
+    def test_cap_and_empty_filter(self):
+        from backend.services.rag.recall import merge_echoes
+
+        self.assertEqual(merge_echoes([["A1", "", "A2"], ["V1"]], 2), ["A1", "A2"])
+        self.assertEqual(merge_echoes([[], [], []], 3), [])
+
+
 class EmbeddingRoutingTests(unittest.TestCase):
     """路由开关是纯配置读取（不测具体值，只保证函数存在且返回 bool）。"""
 
