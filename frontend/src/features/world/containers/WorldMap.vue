@@ -17,10 +17,12 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useWorld } from '../composables/useWorld'
 import { useMapEdit, resolveImageUrl, editUndo, editRedo } from '../composables/useMapEdit'
-import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
+import { eventPoint, stripPointFromNote, centroid } from '../engine/eventPoint'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { formatTime } from '../engine/timeFormat'
-import type { DrawMode, WorldLocation, WorldMapLayer } from '../engine/types'
+import { relationTypeMeta } from '../engine/relationTypes'
+import RelationInlineForm from '../presentation/RelationInlineForm.vue'
+import type { DrawMode, WorldLocation, WorldMapLayer, WorldRelation } from '../engine/types'
 
 const props = defineProps<{
   bookId: string
@@ -43,7 +45,8 @@ let trackLayer: L.LayerGroup | null = null
 let territoryLayer: L.LayerGroup | null = null
 let eventLayer: L.LayerGroup | null = null
 let markerLayer: L.LayerGroup | null = null
-let characterLayer: L.LayerGroup | null = null
+let entityLayer: L.LayerGroup | null = null
+let relationLayer: L.LayerGroup | null = null
 let rippleLayer: L.LayerGroup | null = null
 let drawLayer: L.LayerGroup | null = null
 let editHitLayer: L.LayerGroup | null = null
@@ -65,7 +68,23 @@ const drawColor = computed(() => (props.drawMode === 'territory' ? '#a855f7' : '
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
 
-const { locations, events, worldState, entities, currentTime, locationsById, updateLocationCoords, renameLocation, deleteLocation, mapLayers, mapStrokes } =
+const {
+  locations,
+  events,
+  worldState,
+  entities,
+  relations,
+  currentTime,
+  locationsById,
+  updateLocationCoords,
+  renameLocation,
+  deleteLocation,
+  mapLayers,
+  mapStrokes,
+  createEvent,
+  createEntity,
+  updateEntityArchive,
+} =
   useWorld()
 
 const { mapEditMode, selectedLayerId, queueLayerPatch, removeLayer, reorderLayer, importImage, enterMapEdit, exitMapEdit, penColor, penWidth, eraserMode, canEditUndo, canEditRedo, addStroke, eraseStroke, clearAllStrokes } =
@@ -86,10 +105,12 @@ const layerVisible = ref({
   events: true,
   locations: true,
   characters: true,
+  relations: true,
 })
 
 const LAYER_TOGGLES: { key: keyof typeof layerVisible.value; icon: string; label: string }[] = [
-  { key: 'characters', icon: 'users', label: '人物' },
+  { key: 'characters', icon: 'users', label: '实体' },
+  { key: 'relations', icon: 'link', label: '关系' },
   { key: 'locations', icon: 'map-pin', label: '地点' },
   { key: 'events', icon: 'flag', label: '事件' },
   { key: 'territory', icon: 'globe', label: '疆域' },
@@ -571,34 +592,310 @@ function renderTracks() {
   }
 }
 
-function renderCharacterMarkers() {
-  if (!map || !characterLayer) return
-  characterLayer.clearLayers()
+// ===== 实体层（单一画布）：所有实体统一上地图 =====
+// 位置解析优先级：事件推演位置（人物 state）/ 疆域质心（势力）→ 画布锚位（作者摆位）。
+// 拖拽语义分流：有故事的角色受历史约束（拖=录 move 事件，可撤销）；
+// 没故事的（无事件角色/资产/无疆域势力）自由摆放（拖=移画布锚位）。
+
+const entityMarkers = new Map<string, L.Marker>()
+const highlightEntityId = ref<string | null>(null)
+
+interface EntityDisplay {
+  x: number
+  y: number
+  derived: boolean // true=事态推演位置；false=画布锚位
+}
+
+function entityDisplayPosition(entId: string): EntityDisplay | null {
+  const cs = worldState.value.character_states.find((c) => c.entity_id === entId)
+  if (cs && !cs.alive) return null // 死者不显示（史书只记生前轨迹；侧栏/抽屉仍可达）
+  if (cs?.position) return { x: cs.position[0], y: cs.position[1], derived: true }
+  const ts = worldState.value.territory_states.find((t) => t.faction_id === entId)
+  if (ts?.polygon?.length) {
+    const c = centroid(ts.polygon as [number, number][])
+    if (c) return { x: c[0], y: c[1], derived: true }
+  }
+  const ent = entities.value.find((e) => e.id === entId)
+  if (ent?.canvas_x != null && ent?.canvas_y != null) {
+    return { x: ent.canvas_x, y: ent.canvas_y, derived: false }
+  }
+  return null
+}
+
+const NODE_COLOR: Record<string, string> = {
+  character: '#f59e0b',
+  faction: '#10b981',
+  asset: '#c9a227',
+}
+
+function renderEntities() {
+  if (!map || !entityLayer) return
+  entityLayer.clearLayers()
+  entityMarkers.clear()
   if (!layerVisible.value.characters) return
-  // worldState.character_states：当前时刻谁在哪（事件溯源推演结果）
-  for (const cs of worldState.value.character_states) {
-    if (!cs.position || !cs.alive) continue
-    const [x, y] = cs.position
-    const ent = entitiesById.value[cs.entity_id]
-    const label = ent?.name || cs.entity_id
-    const color = ent?.entity_type === 'faction' ? '#a855f7' : '#f59e0b'
-    const moving = cs.label.includes('在途')
-    const star = (ent?.importance ?? 1) >= 7 // 核心角色星芒
-    const withLabel = showLabels()
+  const withLabel = showLabels()
+  const hl = highlightEntityId.value
+  const related = new Set<string>()
+  if (hl) {
+    for (const r of relations.value) {
+      if (r.source_entity_id === hl) related.add(r.target_entity_id)
+      if (r.target_entity_id === hl) related.add(r.source_entity_id)
+    }
+  }
+  for (const ent of entities.value) {
+    const pos = entityDisplayPosition(ent.id)
+    if (!pos) continue
+    const [x, y] = [pos.x, pos.y]
+    const t = ent.entity_type
+    const color = NODE_COLOR[t] || NODE_COLOR.character
+    const star = (ent.importance ?? 1) >= 7
+    const cs = worldState.value.character_states.find((c) => c.entity_id === ent.id)
+    const moving = !!cs?.label?.includes('在途')
+    const dimmed = !!hl && ent.id !== hl && !related.has(ent.id)
     const icon = L.divIcon({
       className: 'wm-char-icon',
-      html: `<div class="wm-char${moving ? ' wm-char--moving' : ''}${star ? ' wm-char--star' : ''}" style="--c:${color}"><span class="wm-char-head"></span>${
-        withLabel ? `<span class="wm-char-name">${esc(label)}</span>` : ''
+      html: `<div class="wm-node wm-node--${t}${moving ? ' wm-char--moving' : ''}${
+        star ? ' wm-char--star' : ''
+      }${dimmed ? ' wm-node--dim' : ''}" style="--c:${color}"><span class="wm-node-head"></span>${
+        withLabel ? `<span class="wm-char-name">${esc(ent.name)}</span>` : ''
       }</div>`,
       iconSize: [0, 0],
     })
-    const m = L.marker([y, x], { icon, zIndexOffset: 500, interactive: !inEditMode.value })
-    // 点击人物 → 打开实体抽屉（M2 详情/档案/编年史的家；替代旧 popup 信息层）
+    // 有疆域的势力节点不可拖（疆域几何是事实）；其余可拖
+    const draggable = !inEditMode.value && !(pos.derived && t === 'faction')
+    const m = L.marker([y, x], { icon, zIndexOffset: 500, draggable, interactive: !inEditMode.value })
+    entityMarkers.set(ent.id, m)
+
     m.on('click', () => {
-      if (!inEditMode.value) emit('entity-click', cs.entity_id)
+      if (inEditMode.value) return
+      highlightEntityId.value = ent.id
+      emit('entity-click', ent.id)
     })
-    characterLayer.addLayer(m)
+
+    // ⇧+按下 = 建关系手势起点（临时禁用拖拽，松手恢复）
+    m.on('mousedown', (e) => {
+      const oe = e.originalEvent as MouseEvent & { shiftKey?: boolean }
+      if (!oe.shiftKey || inEditMode.value) return
+      L.DomEvent.stopPropagation(e as unknown as Event)
+      e.target.dragging?.disable()
+      startLink(ent.id, e)
+    })
+
+    if (pos.derived && t === 'character') {
+      // 有故事的角色：拖拽松手 = 在游标时刻录 move 事件（直接创建，可撤销）
+      let from: L.LatLng | null = null
+      m.on('dragstart', (e) => {
+        from = (e.target as L.Marker).getLatLng()
+      })
+      m.on('dragend', async (e) => {
+        const to = (e.target as L.Marker).getLatLng()
+        if (!from || (Math.abs(to.lng - from.lng) < 2 && Math.abs(to.lat - from.lat) < 2)) return
+        await createEvent(props.bookId, {
+          event_type: 'move',
+          time_start: currentTime.value,
+          time_end: currentTime.value,
+          payload: {
+            character_ids: [ent.id],
+            path: [
+              [from.lng, from.lat],
+              [to.lng, to.lat],
+            ],
+          },
+        })
+        showToast(`已记录「${ent.name}」的移动（游标时刻）· Ctrl+Z 撤销`, 'success')
+        from = null
+      })
+    } else if (draggable) {
+      // 没故事的实体：拖拽 = 移画布锚位（轻量落库）
+      m.on('dragend', async (e) => {
+        const to = (e.target as L.Marker).getLatLng()
+        await updateEntityArchive(props.bookId, ent.id, { canvas_x: to.lng, canvas_y: to.lat })
+      })
+    }
+    entityLayer.addLayer(m)
   }
+}
+
+// ===== 关系层：活跃边画在两端实体当前位置之间，随游标演变 =====
+
+let prevActiveRelIds = new Set<string>()
+
+function renderRelations() {
+  if (!map || !relationLayer) return
+  relationLayer.clearLayers()
+  if (!layerVisible.value.relations) {
+    prevActiveRelIds = new Set()
+    return
+  }
+  const activeIds = new Set<string>()
+  for (const rs of worldState.value.relation_states) if (rs.active) activeIds.add(rs.relation_id)
+  const hl = highlightEntityId.value
+  for (const r of relations.value) {
+    if (!activeIds.has(r.id)) continue
+    const a = entityDisplayPosition(r.source_entity_id)
+    const b = entityDisplayPosition(r.target_entity_id)
+    if (!a || !b) continue
+    const meta = relationTypeMeta(r.relation_type)
+    const born = prevActiveRelIds.size > 0 && !prevActiveRelIds.has(r.id) // 激活瞬间生长
+    // 三点轻弧（中点垂直偏移），随端点移动伸缩
+    const mx = (a.x + b.x) / 2
+    const my = (a.y + b.y) / 2
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    const off = Math.min(60, len * 0.12)
+    const cx = mx - (dy / len) * off
+    const cy = my + (dx / len) * off
+    const dimmed = !!hl && r.source_entity_id !== hl && r.target_entity_id !== hl
+    const line = L.polyline(
+      [
+        [a.y, a.x],
+        [cy, cx],
+        [b.y, b.x],
+      ] as [number, number][],
+      {
+        color: meta.color,
+        weight: 2,
+        opacity: dimmed ? 0.1 : 0.72,
+        dashArray: r.static ? undefined : '6 5',
+        className: born ? 'wm-rel wm-rel-born' : 'wm-rel',
+        interactive: !inEditMode.value,
+      },
+    )
+    const label = r.label || meta.label
+    line.bindTooltip(`${esc(label)}${r.static ? '' : ' · 事件锚定'}`, { direction: 'top', sticky: true })
+    line.on('click', (e) => {
+      if (inEditMode.value) return
+      L.DomEvent.stopPropagation(e as unknown as Event)
+      openRelationForm(r, e.originalEvent as MouseEvent)
+    })
+    relationLayer.addLayer(line)
+  }
+  prevActiveRelIds = activeIds
+}
+
+// ===== ⇧+拖线建关系（脑图手势平移到地图）=====
+
+interface DraftRelationForm {
+  x: number
+  y: number
+  sourceId: string
+  targetId: string
+  existing: WorldRelation | null
+}
+const draftForm = ref<DraftRelationForm | null>(null)
+const linkRubber = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+let linking: { sourceId: string; marker: L.Marker } | null = null
+
+function startLink(sourceId: string, e: { target: L.Marker }) {
+  linking = { sourceId, marker: e.target }
+  const p = map?.latLngToContainerPoint(e.target.getLatLng())
+  if (p) linkRubber.value = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }
+}
+
+function onLinkPointerMove(e: PointerEvent) {
+  if (!linking || !linkRubber.value || !containerRef.value) return
+  const r = containerRef.value.getBoundingClientRect()
+  linkRubber.value.x2 = e.clientX - r.left
+  linkRubber.value.y2 = e.clientY - r.top
+}
+
+function onLinkPointerUp(e: PointerEvent) {
+  if (!linking) return
+  const { sourceId, marker } = linking
+  linking = null
+  linkRubber.value = null
+  marker.dragging?.enable()
+  if (!map || !containerRef.value) return
+  // 命中最近的其他实体节点（容器坐标 26px 内）
+  const r = containerRef.value.getBoundingClientRect()
+  const px = e.clientX - r.left
+  const py = e.clientY - r.top
+  let bestId: string | null = null
+  let bestD = 26 * 26
+  for (const [id, mk] of entityMarkers) {
+    if (id === sourceId) continue
+    const p = map.latLngToContainerPoint(mk.getLatLng())
+    const d = (p.x - px) ** 2 + (p.y - py) ** 2
+    if (d < bestD) {
+      bestD = d
+      bestId = id
+    }
+  }
+  if (bestId) {
+    const a = entityDisplayPosition(sourceId)
+    const b = entityDisplayPosition(bestId)
+    const ax = a ? (map.latLngToContainerPoint([a.y, a.x]).x) : px
+    const ay = a ? (map.latLngToContainerPoint([a.y, a.x]).y) : py
+    const bx = b ? (map.latLngToContainerPoint([b.y, b.x]).x) : px
+    const by = b ? (map.latLngToContainerPoint([b.y, b.x]).y) : py
+    openRelationFormAt((ax + bx) / 2, (ay + by) / 2, sourceId, bestId, null)
+  }
+}
+
+function clampFormPos(x: number, y: number): { x: number; y: number } {
+  const w = containerRef.value?.clientWidth || 800
+  const h = containerRef.value?.clientHeight || 600
+  return {
+    x: Math.min(Math.max(x - 150, 8), Math.max(8, w - 308)),
+    y: Math.min(Math.max(y + 10, 8), Math.max(8, h - 300)),
+  }
+}
+
+function openRelationForm(r: WorldRelation, oe: MouseEvent) {
+  if (!containerRef.value) return
+  const rect = containerRef.value.getBoundingClientRect()
+  openRelationFormAt(
+    oe.clientX - rect.left,
+    oe.clientY - rect.top,
+    r.source_entity_id,
+    r.target_entity_id,
+    r,
+  )
+}
+
+function openRelationFormAt(
+  x: number,
+  y: number,
+  sourceId: string,
+  targetId: string,
+  existing: WorldRelation | null,
+) {
+  const p = clampFormPos(x, y)
+  draftForm.value = { x: p.x, y: p.y, sourceId, targetId, existing }
+}
+
+// ===== 右键空白：在此建实体（地图成为唯一编辑画布）=====
+
+const ctxMenu = ref<{ x: number; y: number; ix: number; iy: number } | null>(null)
+const createForm = ref<{ x: number; y: number; ix: number; iy: number; name: string; type: 'character' | 'faction' | 'asset' } | null>(null)
+
+function onMapContextMenu(e: L.LeafletMouseEvent) {
+  if (inEditMode.value || props.pickingMode || props.drawMode) return
+  L.DomEvent.preventDefault(e as unknown as Event)
+  ctxMenu.value = { x: e.containerPoint.x, y: e.containerPoint.y, ix: e.latlng.lng, iy: e.latlng.lat }
+  createForm.value = null
+}
+
+function ctxCreateEntity() {
+  const c = ctxMenu.value
+  if (!c) return
+  ctxMenu.value = null
+  createForm.value = { x: c.x, y: c.y, ix: c.ix, iy: c.iy, name: '', type: 'character' }
+}
+
+async function submitCreateEntity() {
+  const f = createForm.value
+  if (!f || !f.name.trim()) return
+  await createEntity(props.bookId, {
+    entity_type: f.type,
+    name: f.name.trim(),
+    canvas_x: f.ix,
+    canvas_y: f.iy,
+  })
+  const t = f.type === 'character' ? '角色' : f.type === 'faction' ? '势力' : '资产'
+  showToast(`${t}「${f.name.trim()}」已建立`, 'success')
+  createForm.value = null
 }
 
 function renderTerritory() {
@@ -883,11 +1180,21 @@ onMounted(() => {
   rippleLayer = L.layerGroup().addTo(map)
   eventLayer = L.layerGroup().addTo(map)
   markerLayer = L.layerGroup().addTo(map)
-  characterLayer = L.layerGroup().addTo(map)
+  entityLayer = L.layerGroup().addTo(map)
+  relationLayer = L.layerGroup().addTo(map)
   drawLayer = L.layerGroup().addTo(map)
   editHitLayer = L.layerGroup().addTo(map)
   editSelLayer = L.layerGroup().addTo(map) // 底图编辑框最顶
   map.fitBounds(BOUNDS)
+  // 右键空白：在此建实体（单一画布入口）；地图点击关闭悬浮菜单/表单
+  map.on('contextmenu', onMapContextMenu)
+  map.on('click', () => {
+    ctxMenu.value = null
+    if (!linking) createForm.value = null
+  })
+  // ⇧拖线建关系：window 级指针跟踪（松手命中最近实体节点）
+  window.addEventListener('pointermove', onLinkPointerMove)
+  window.addEventListener('pointerup', onLinkPointerUp)
   map.on('click', (e: L.LeafletMouseEvent) => {
     if (props.drawMode) {
       // 绘制优先：点击收集顶点（[lng,lat] → 内部 [x,y]，带时间戳供双击识别）
@@ -945,7 +1252,8 @@ onMounted(() => {
   // 缩放结束：按 zoom 阈值重渲带名字标签的层（缩小藏名字，放大显示）
   map.on('zoomend', () => {
     renderMarkers()
-    renderCharacterMarkers()
+    renderEntities()
+  renderRelations()
     scheduleStrokeRedraw()
   })
   // 笔迹 canvas 与地图视图同步（拖动/缩放/窗口变化 → rAF 重绘）
@@ -991,7 +1299,8 @@ onMounted(() => {
   renderEditImages()
   renderMarkers()
   renderTracks()
-  renderCharacterMarkers()
+  renderEntities()
+  renderRelations()
   renderTerritory()
   renderEventMarkers()
 })
@@ -1000,23 +1309,34 @@ watch(locations, renderMarkers, { deep: true })
 watch([worldState, currentTime, events], () => {
   spawnRipples(currentTime.value)
   renderTracks()
-  renderCharacterMarkers()
+  renderEntities()
+  renderRelations()
   renderTerritory()
   renderEventMarkers()
 }, { deep: true })
 watch(layerVisible, () => {
   renderMarkers()
   renderTracks()
-  renderCharacterMarkers()
+  renderEntities()
+  renderRelations()
   renderTerritory()
   renderEventMarkers()
 }, { deep: true })
 // 进入/退出沉浸编辑（疆域绘制 / 底图编辑）：清草稿 + 重渲各层（数据层禁交互）
+watch([entities, relations], () => {
+  renderEntities()
+  renderRelations()
+}, { deep: true })
+watch(highlightEntityId, () => {
+  renderEntities()
+  renderRelations()
+})
 watch(inEditMode, () => {
   clearDraft()
   renderMarkers()
   renderTracks()
-  renderCharacterMarkers()
+  renderEntities()
+  renderRelations()
   renderTerritory()
   renderEventMarkers()
 })
@@ -1051,6 +1371,8 @@ defineExpose({ focusAt, finishDraw, undoVertex, importImageAtView })
 
 onBeforeUnmount(() => {
   if (strokeRafId !== null) cancelAnimationFrame(strokeRafId)
+  window.removeEventListener('pointermove', onLinkPointerMove)
+  window.removeEventListener('pointerup', onLinkPointerUp)
   map?.remove()
   map = null
   baseImageLayer = null
@@ -1059,7 +1381,8 @@ onBeforeUnmount(() => {
   rippleLayer = null
   eventLayer = null
   markerLayer = null
-  characterLayer = null
+  entityLayer = null
+  relationLayer = null
   drawLayer = null
   editHitLayer = null
   editSelLayer = null
@@ -1084,6 +1407,74 @@ onBeforeUnmount(() => {
 
     <!-- 烛光暗角（羊皮古卷氛围；不拦截交互） -->
     <div class="wm-vignette"></div>
+
+    <!-- 手势提示（单一画布的编辑入口可发现性） -->
+    <div v-if="!inEditMode && entities.length" class="wm-gesture-hint">
+      ⇧+拖节点到另一节点 = 建关系 · 右键空白 = 建实体 · 拖有故事的角色 = 录移动
+    </div>
+
+    <!-- ⇧拖线建关系的橡皮筋线 -->
+    <svg v-if="linkRubber" class="wm-link-rubber">
+      <line
+        :x1="linkRubber.x1"
+        :y1="linkRubber.y1"
+        :x2="linkRubber.x2"
+        :y2="linkRubber.y2"
+        stroke="#7c6aad"
+        stroke-width="2"
+        stroke-dasharray="6 4"
+      />
+    </svg>
+
+    <!-- 右键菜单：在此建实体 -->
+    <div v-if="ctxMenu" class="wm-ctx" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
+      <div class="wm-ctx-title">在此位置</div>
+      <button class="wm-ctx-item" @click="ctxCreateEntity">
+        <Icon name="plus" :size="13" />
+        建实体…
+      </button>
+    </div>
+
+    <!-- 就地建实体（名字 + 类型，落锚位） -->
+    <div v-if="createForm" class="wm-cform" :style="{ left: createForm.x + 'px', top: createForm.y + 'px' }" @mousedown.stop @contextmenu.prevent @keydown.esc="createForm = null">
+      <div class="wm-cform-title">新实体 · 落在锚位</div>
+      <div class="wm-cform-row">
+        <div class="wm-cform-seg">
+          <button
+            v-for="t in [
+              { v: 'character', label: '角色' },
+              { v: 'faction', label: '势力' },
+              { v: 'asset', label: '资产' },
+            ]"
+            :key="t.v"
+            class="wm-cform-seg-btn"
+            :class="{ active: createForm.type === t.v }"
+            @click="createForm.type = t.v as typeof createForm.type"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+      </div>
+      <input
+        v-model="createForm.name"
+        class="wm-cform-input"
+        placeholder="名字（Enter 建立）"
+        @keydown.enter.prevent="submitCreateEntity"
+      />
+      <div class="wm-cform-hint">无事件历史的实体自由摆放；拖动即可调整位置</div>
+    </div>
+
+    <!-- 建关系 / 编辑关系（点关系线或 ⇧拖线落点） -->
+    <div v-if="draftForm" class="wm-rform" :style="{ left: draftForm.x + 'px', top: draftForm.y + 'px' }" @mousedown.stop @contextmenu.prevent>
+      <RelationInlineForm
+        :book-id="bookId"
+        :source-id="draftForm.sourceId"
+        :target-id="draftForm.targetId"
+        :existing="draftForm.existing"
+        @saved="draftForm = null"
+        @cancel="draftForm = null"
+      />
+    </div>
 
     <!-- 手绘笔迹层（pointer-events 仅画笔态开启，其余穿透到地图） -->
     <canvas
@@ -1561,6 +1952,194 @@ onBeforeUnmount(() => {
   50% {
     box-shadow: 0 0 0 7px rgba(63, 111, 143, 0.28);
   }
+}
+
+/* 实体节点（单一画布）：角色圆 / 势力方 / 资产菱，锚位与推演位同体系 */
+.wm-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translate(-8px, -8px);
+}
+.wm-node-head {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  background: var(--c, #f59e0b);
+  border: 2.5px solid #f4ead4;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  animation: wm-breathe 3.2s ease-in-out infinite;
+}
+.wm-node--character .wm-node-head {
+  border-radius: 9999px;
+}
+.wm-node--faction .wm-node-head {
+  border-radius: 3px;
+  width: 17px;
+  height: 17px;
+}
+.wm-node--asset .wm-node-head {
+  width: 14px;
+  height: 14px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+.wm-node--dim {
+  opacity: 0.35;
+}
+.wm-node--dim .wm-node-head {
+  animation: none;
+}
+
+/* 关系连线：激活瞬间生长（淡入 + 辉光渐隐） */
+path.wm-rel {
+  cursor: pointer;
+}
+path.wm-rel-born {
+  animation: wm-rel-born 0.8s ease-out;
+}
+@keyframes wm-rel-born {
+  0% {
+    opacity: 0;
+    filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  }
+  35% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(124, 106, 173, 0.8));
+  }
+  100% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  }
+}
+
+/* 手势提示 */
+.wm-gesture-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  z-index: 700;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(249, 242, 226, 0.82);
+  border: 1px solid rgba(107, 90, 68, 0.3);
+  color: rgba(109, 90, 60, 0.85);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* ⇧拖线橡皮筋 */
+.wm-link-rubber {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 800;
+}
+
+/* 右键菜单 / 建实体表单 / 关系表单容器 */
+.wm-ctx {
+  position: absolute;
+  z-index: 850;
+  min-width: 150px;
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  transform: translate(-8px, -8px);
+}
+.wm-ctx-title {
+  padding: 3px 8px 6px;
+  font-size: 11px;
+  color: var(--text-muted, #a89e90);
+  border-bottom: 1px solid var(--border-color, #e0dbd3);
+  margin-bottom: 4px;
+}
+.wm-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wm-ctx-item:hover {
+  background: var(--hover-bg, #f0ebe2);
+  color: var(--accent-500);
+}
+.wm-cform,
+.wm-rform {
+  position: absolute;
+  z-index: 860;
+  background: var(--bg-canvas, #fefdfb);
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 12px;
+}
+.wm-cform {
+  width: 240px;
+}
+.wm-cform-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-500);
+  margin-bottom: 8px;
+}
+.wm-cform-row {
+  margin-bottom: 8px;
+}
+.wm-cform-seg {
+  display: flex;
+  gap: 5px;
+}
+.wm-cform-seg-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.wm-cform-seg-btn.active {
+  border-color: var(--accent-500);
+  color: var(--accent-500);
+  background: rgba(124, 106, 173, 0.08);
+  font-weight: 600;
+}
+.wm-cform-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color, #e0dbd3);
+  border-radius: 8px;
+  background: var(--bg-canvas, #fefdfb);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.wm-cform-input:focus {
+  border-color: var(--accent-500);
+}
+.wm-cform-hint {
+  margin-top: 7px;
+  font-size: 10px;
+  color: var(--text-muted, #a89e90);
+  line-height: 1.5;
 }
 
 /* 疆域：墨迹晕染（SVG 位移滤镜给边界毛边，纸面水彩感） */

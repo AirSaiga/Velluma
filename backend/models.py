@@ -1356,6 +1356,10 @@ class WorldEntity(Base):
     aliases = Column(JSONB, default=list)
     importance = Column(Integer, default=1)
     visibility = Column(String(20), default="public")
+    # 画布锚位（单一画布设计）：无推演位置（无事件历史/无疆域）时在地图上的作者摆位。
+    # 有故事的角色位置由事件推演（拖=录 move 事件），锚位仅服务"没故事"的实体。
+    canvas_x = Column(Float, nullable=True)
+    canvas_y = Column(Float, nullable=True)
     intro = Column(Text, default="")
     tags = Column(JSONB, default=list)
     props = Column(JSONB, default=dict)  # 档案字段（appearance/speech_style 等，表驱动 schema）

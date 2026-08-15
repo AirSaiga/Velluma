@@ -34,6 +34,8 @@ export interface WorldEntityCreate {
   intro?: string
   tags?: string[]
   props?: Record<string, unknown>
+  canvas_x?: number | null
+  canvas_y?: number | null
 }
 
 export interface WorldRelationCreate {

@@ -297,6 +297,8 @@ async function createEntity(
     name: string
     intro?: string
     props?: Record<string, unknown>
+    canvas_x?: number | null
+    canvas_y?: number | null
   },
 ) {
   const ent = await worldApi.createEntity(bookId, data)
@@ -468,6 +470,8 @@ async function updateEntityArchive(
     intro?: string
     tags?: string[]
     props?: Record<string, unknown>
+    canvas_x?: number | null
+    canvas_y?: number | null
   },
 ) {
   const updated = await worldApi.updateEntity(bookId, entityId, patch)

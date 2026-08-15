@@ -548,6 +548,19 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "VARCHAR(20) DEFAULT 'public'",
         "expected_udt_names": {"varchar"},
     },
+    # 单一画布：实体画布锚位（无推演位置时的作者摆位）
+    {
+        "table": "world_entities",
+        "column": "canvas_x",
+        "definition": "FLOAT",
+        "expected_udt_names": {"float8", "double precision", "real"},
+    },
+    {
+        "table": "world_entities",
+        "column": "canvas_y",
+        "definition": "FLOAT",
+        "expected_udt_names": {"float8", "double precision", "real"},
+    },
     # 世界页 M3：伏笔双时间锚
     {
         "table": "plot_ledgers",

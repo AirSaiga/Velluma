@@ -122,6 +122,8 @@ class WorldEntityBase(BaseModel):
     aliases: List[str] = Field(default_factory=list, description="别名（RAG 检索 / POV 名闸门用）")
     importance: int = Field(1, ge=1, le=10, description="重要度（上下文注入优先级）")
     visibility: str = Field("public", description="public=读者已知 / private=作者已知")
+    canvas_x: Optional[float] = Field(None, description="画布锚位 x（无推演位置时的摆位）")
+    canvas_y: Optional[float] = Field(None, description="画布锚位 y")
     intro: str = Field("")
     tags: List[str] = Field(default_factory=list)
     props: Dict[str, Any] = Field(default_factory=dict, description="档案字段（appearance/speech_style 等，表驱动 schema）")
@@ -138,6 +140,8 @@ class WorldEntityUpdate(BaseModel):
     aliases: Optional[List[str]] = None
     importance: Optional[int] = Field(None, ge=1, le=10)
     visibility: Optional[str] = None
+    canvas_x: Optional[float] = None
+    canvas_y: Optional[float] = None
     intro: Optional[str] = None
     tags: Optional[List[str]] = None
     props: Optional[Dict[str, Any]] = None

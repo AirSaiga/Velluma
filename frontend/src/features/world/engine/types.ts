@@ -41,6 +41,9 @@ export interface WorldEntity {
   aliases?: string[]
   importance?: number
   visibility?: string // public=读者已知 / private=作者已知
+  /** 画布锚位（单一画布）：无推演位置时的作者摆位 */
+  canvas_x?: number | null
+  canvas_y?: number | null
   intro: string
   tags: string[]
   props: Record<string, unknown>

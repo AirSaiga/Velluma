@@ -19,7 +19,6 @@ import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
 import type { WorldEvent, WorldLocation, EventType, DrawMode, Point } from '../engine/types'
 import WorldMap from './WorldMap.vue'
 import WorldTimeline from './WorldTimeline.vue'
-import WorldLensMindmap from './WorldLensMindmap.vue'
 import QuickCapturePanel from '../presentation/QuickCapturePanel.vue'
 import EntityDetailDrawer from '../presentation/EntityDetailDrawer.vue'
 import EntityCard from '../presentation/EntityCard.vue'
@@ -69,9 +68,6 @@ const {
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
-
-// ===== 透镜切换（地图=空间投影 / 脑图=语义投影；v-show 保持两实例存活）=====
-const lens = ref<'map' | 'mindmap'>('map')
 
 // ===== 事件 =====
 const showEventForm = ref(false)
@@ -415,12 +411,10 @@ watch(bookId, (id) => {
   }
 })
 
-// ===== 深链支持：bible 跳转卡带 query（?lens=map|mindmap&entity=<id>）=====
+// ===== 深链支持：bible 跳转卡带 query（?entity=<id>；单一画布后 lens 参数已废弃）=====
 // 实体选中是纯本地 ref，抽屉按 id 从 useWorld 响应式取——数据晚到也能正确打开。
 function consumeRouteQuery() {
-  const q = route.query
-  if (q.lens === 'map' || q.lens === 'mindmap') lens.value = q.lens
-  const ent = q.entity
+  const ent = route.query.entity
   if (typeof ent === 'string' && ent) selectedEntityId.value = ent
 }
 
@@ -514,30 +508,8 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 
     <div class="world-body">
       <div class="world-canvas">
-        <!-- 透镜切换：地图（空间投影）/ 脑图（语义投影） -->
-        <div class="lens-tabs">
-          <button
-            class="lens-tab"
-            :class="{ active: lens === 'map' }"
-            title="地理空间投影"
-            @click="lens = 'map'"
-          >
-            <Icon name="map" :size="13" />
-            地图
-          </button>
-          <button
-            class="lens-tab"
-            :class="{ active: lens === 'mindmap' }"
-            title="关系语义投影"
-            @click="lens = 'mindmap'"
-          >
-            <Icon name="link" :size="13" />
-            脑图
-          </button>
-        </div>
-
+        <!-- 单一画布：实体/关系/事件/疆域全部在地图（脑图已并入，M4 收敛） -->
         <div
-          v-show="lens === 'map'"
           class="world-map-wrap"
           :class="{ 'is-picking': pickingMode === 'location' }"
           @drop.prevent="onDropMap"
@@ -552,10 +524,6 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             @draw-complete="onDrawComplete"
             @entity-click="(id: string) => (selectedEntityId = id)"
           />
-        </div>
-
-        <div v-show="lens === 'mindmap'" class="world-mm-wrap">
-          <WorldLensMindmap :book-id="bookId" @entity-click="(id: string) => (selectedEntityId = id)" />
         </div>
 
         <!-- 实体详情抽屉（点地图人物/脑图节点/侧栏卡片打开） -->
@@ -940,52 +908,13 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   min-width: 0;
   display: flex;
 }
-.world-map-wrap,
-.world-mm-wrap {
+.world-map-wrap {
   flex: 1;
   position: relative;
   min-width: 0;
 }
 .world-map-wrap.is-picking :deep(.leaflet-container) {
   cursor: crosshair;
-}
-/* 透镜切换 pill（顶部居中：避开 Leaflet 左上缩放控件与地图右上工具条） */
-.lens-tabs {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 600;
-  display: flex;
-  gap: 3px;
-  padding: 3px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 9999px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-.lens-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
-  border: none;
-  border-radius: 9999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.15s ease-out;
-}
-.lens-tab.active {
-  background: var(--accent-500);
-  color: #fff;
-  font-weight: 500;
-}
-.lens-tab:not(.active):hover {
-  color: var(--text-primary);
-  background: var(--hover-bg);
 }
 
 /* ===== 侧栏 ===== */
