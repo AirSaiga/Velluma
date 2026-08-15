@@ -6,12 +6,13 @@
  * useConfirmDialog 删除确认 / useToast 操作反馈；深色模式随变量自适应。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useWorld } from '../composables/useWorld'
 import { worldApi } from '../../../services/api'
+import { useAppStore } from '../../app/useAppStore'
 import { formatTime } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
@@ -28,7 +29,25 @@ import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory
 import { useMapEdit, editUndo, editRedo } from '../composables/useMapEdit'
 
 const route = useRoute()
+const router = useRouter()
 const bookId = computed(() => route.params.bookId as string)
+
+// 书籍上下文：世界页跟随全局当前书（导航栏「世界」入口带 currentBookId 跳转）。
+// 深链/旧地址直达时按路由参数同步当前书（与 BibleView 同模式）——否则页面数据
+// 与导航栏高亮会指向两本不同的书。
+const store = useAppStore()
+const bookTitle = computed(() => store.currentBook.value?.title || '')
+watch(
+  bookId,
+  (id) => {
+    if (id && id !== store.currentBookId.value) store.selectBook(id)
+  },
+  { immediate: true }
+)
+
+function goLibrary() {
+  router.push({ name: 'library' })
+}
 
 const {
   load,
@@ -435,10 +454,16 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   <div class="world-view">
     <header class="world-header">
       <div class="wh-left">
-        <h1>世界设定</h1>
-        <div class="wh-sub">
-          {{ locations.length }} 地点 · {{ events.length }} 事件 ·
-          {{ characters.length + factions.length + assets.length }} 实体
+        <button class="wbtn wbtn--icon" title="返回书架（可在此切换书籍）" @click="goLibrary">
+          <Icon name="arrow-left" :size="15" />
+        </button>
+        <div class="wh-title-block">
+          <h1>世界设定</h1>
+          <div class="wh-sub">
+            <span v-if="bookTitle" class="wh-book">{{ bookTitle }}</span>
+            {{ locations.length }} 地点 · {{ events.length }} 事件 ·
+            {{ characters.length + factions.length + assets.length }} 实体
+          </div>
         </div>
       </div>
       <div class="header-actions">
@@ -808,8 +833,14 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 }
 .wh-left {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wh-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .world-header h1 {
@@ -822,6 +853,14 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+.wh-book {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.wh-book::after {
+  content: ' · ';
+  color: var(--text-muted);
 }
 .header-actions {
   display: flex;
