@@ -1,6 +1,7 @@
 export * from './domain'
 export * from './domain/asset.api'
 export * from './domain/canon.api'
+export * from './domain/world.api'
 export * from './domain/extraction.api'
 export * from './domain/reader-mirror.api'
 export * from './domain/review.api'

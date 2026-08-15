@@ -49,7 +49,6 @@ from backend.core.model_config import (
     has_dedicated_wash_profile,
     update_llm_profile,
     update_embedding_config,
-    DEFAULT_PROVIDER_URLS,
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.llm.client import REASONING_DISABLED
@@ -135,11 +134,9 @@ def _mask_api_key(key: str) -> str:
 def _serialize_profile(role: str) -> dict:
     profile = get_model_profile(role)
     return {
-        "provider": profile["provider"],
         "api_key_masked": _mask_api_key(profile["api_key"]),
         "has_api_key": bool(profile["api_key"]),
         "base_url": profile["base_url"],
-        "default_base_url": DEFAULT_PROVIDER_URLS.get(profile["provider"], ""),
         "model": profile["model"],
         "enabled": profile["enabled"],
         "effort": profile["effort"],
@@ -154,13 +151,10 @@ def _serialize_wash_profile() -> dict:
     保存时还会把这些值固化进 wash 槽。configured 标志供前端提示"跟随创意模型"。
     """
     raw = get_model_config().get("llm", {}).get("wash", {})
-    provider = raw.get("provider", "deepseek")
     return {
-        "provider": provider,
         "api_key_masked": _mask_api_key(raw.get("api_key", "")),
         "has_api_key": bool(raw.get("api_key")),
         "base_url": raw.get("base_url", ""),
-        "default_base_url": DEFAULT_PROVIDER_URLS.get(provider, ""),
         "model": raw.get("model", ""),
         "enabled": raw.get("enabled", False),
         "effort": raw.get("effort", "low"),
@@ -321,12 +315,10 @@ async def test_model_connection(request: ModelTestRequest):
     # 测试 wash 模型（仅在配置了独立洗涤槽时；未配置时洗涤跟随 creative，无需重复测）
     wash_configured = has_dedicated_wash_profile()
     wash_model = ""
-    wash_provider = ""
     wash_success: Optional[bool] = None
     wash_error = ""
     if wash_configured:
         wash_model = resolve_model_name(model_type="wash")
-        wash_provider = get_model_profile("wash")["provider"]
         try:
             await call_llm(
                 system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
@@ -374,15 +366,12 @@ async def test_model_connection(request: ModelTestRequest):
         model_info={
             "reasoning_model": reasoning_model,
             "creative_model": creative_model,
-            "reasoning_provider": reasoning_profile["provider"],
             "reasoning_base_url": reasoning_profile["base_url"],
-            "creative_provider": creative_profile["provider"],
             "creative_base_url": creative_profile["base_url"],
             "reasoning_success": reasoning_success,
             "creative_success": creative_success,
             "wash_configured": wash_configured,
             "wash_model": wash_model or None,
-            "wash_provider": wash_provider or None,
             "wash_success": wash_success,
         },
         reasoning_supported=reasoning_supported,

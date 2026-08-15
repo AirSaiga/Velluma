@@ -19,6 +19,9 @@ const props = defineProps<{
   previewEditable?: boolean
   /** 主编辑器直改：当前可编辑段的 segment_index */
   previewSegmentIndex?: number | null
+  /** 保存状态（真实落库在 WorkspaceView，经 props 下传显示在标题行） */
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
+  lastSavedAt?: Date | null
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'preview-segment-edit'])
@@ -28,8 +31,6 @@ const viewModel = useChapterEditorContainer(props, emit)
 
 defineExpose({
   isPublishing: viewModel.isPublishing,
-  saveStatus: viewModel.saveStatus,
-  lastSavedAt: viewModel.lastSavedAt,
   toggleCharacter: viewModel.toggleCharacter,
   toggleAsset: viewModel.toggleAsset,
   isCharacterSelected: viewModel.isCharacterSelected,
@@ -63,8 +64,8 @@ defineExpose({
     :set-editor-ref="viewModel.setEditorRef"
     :show-publish-modal="viewModel.showPublishModal.value"
     :book-id="props.bookId"
-    :save-status="viewModel.saveStatus.value"
-    :last-saved-at="viewModel.lastSavedAt.value"
+    :save-status="props.saveStatus"
+    :last-saved-at="props.lastSavedAt"
   />
 
   <InspirationModal

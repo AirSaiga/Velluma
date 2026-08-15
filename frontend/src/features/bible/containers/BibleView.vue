@@ -91,7 +91,11 @@ function goWorkspace() {
 }
 
 async function refreshCharacters() {
-  await store.refreshCharacters()
+  try {
+    await store.refreshCharacters()
+  } catch (e: any) {
+    showToast('加载角色失败：' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 // 角色管理回调：CharacterPanel 只负责收集表单并上抛事件，真实 API 调用在这里完成。

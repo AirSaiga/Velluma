@@ -32,6 +32,8 @@ export interface SparkPart {
   text: string
   /** NLE-ADF 3.0 叙事方向（主线/伏笔/刻画/环境/关系），碎片服务该方向 */
   direction?: '主线' | '伏笔' | '刻画' | '环境' | '关系'
+  /** 来源标记：'expectation' = 期待账本衍生件（Dock 显示「期待」tag） */
+  origin?: 'expectation'
 }
 
 export const sparkDockVisible = ref(false)
@@ -82,22 +84,31 @@ export function setSparkSticky(): void {
   _sticky.value = true
 }
 
-function _positionDockAtCursor(): boolean {
+/**
+ * 计算光标下方的浮舱定位（Spark Dock / Beat Dock 共用）。
+ * 光标下方 8px；left 对齐当前文本块起始（与正文同栏缩进）。失败返回 null。
+ */
+export function computeCursorDockPos(): { top: number; left: number } | null {
   const editor = chapterEditorHandle.value
-  if (!editor) return false
+  if (!editor) return null
   try {
     const { $from } = editor.state.selection
     const cursorCoords = editor.view.coordsAtPos($from.pos)
-    // 光标下方 8px；left 对齐当前文本块起始（与正文同栏缩进）
     const blockStartCoords = editor.view.coordsAtPos($from.start())
-    sparkDockPos.value = {
+    return {
       top: cursorCoords.bottom + 8,
       left: Math.max(16, blockStartCoords.left),
     }
-    return true
   } catch {
-    return false
+    return null
   }
+}
+
+function _positionDockAtCursor(): boolean {
+  const pos = computeCursorDockPos()
+  if (!pos) return false
+  sparkDockPos.value = pos
+  return true
 }
 
 /** 主动唤起（Tab）或停顿心跳驱动（useAdaptiveAssist 调用）共用的展示入口 */
@@ -105,12 +116,14 @@ export function showSparkDock(): void {
   if (!_canShow()) return
   if (!sparkParts.value.length) return
   if (!_positionDockAtCursor()) return
+  sparkSelectedIndex.value = -1  // 每次弹出重置浏览选中
   sparkDockVisible.value = true
 }
 
 export function hideSparkDock(): void {
   _sticky.value = false   // 显式隐藏同时取消 sticky
   sparkDockVisible.value = false
+  sparkSelectedIndex.value = -1
 }
 
 export function clearAttachedParts(): void {
@@ -126,6 +139,25 @@ export function attachSparkPart(index: number): boolean {
     attachedParts.value = [...attachedParts.value, part]
   }
   return true
+}
+
+/**
+ * ↑↓ 浏览选中索引（纯视觉高亮，不影响吸附——吸附仍数字键 1~4 / 鼠标点击）。
+ * 竖排带内：方向键浏览碎片，数字键/点击吸附。
+ */
+export const sparkSelectedIndex = ref(-1)
+
+/** ↑↓ 移动选中（循环）；Dock 未开 / 无碎片 / sticky 态返回 false（让作者用 ↑↓ 移光标）。 */
+export function moveSparkSelection(delta: number): boolean {
+  if (!sparkDockVisible.value || sparkParts.value.length === 0) return false
+  if (_sticky.value) return false  // sticky 态放行（连续缝合时作者要编辑移光标）
+  const n = sparkParts.value.length
+  sparkSelectedIndex.value = (sparkSelectedIndex.value + delta + n) % n
+  return true
+}
+
+export function resetSparkSelection(): void {
+  sparkSelectedIndex.value = -1
 }
 
 /**
@@ -162,6 +194,7 @@ export function useSparkDock() {
     sparkDockPos,
     sparkParts,
     attachedParts,
+    sparkSelectedIndex,
     setSparkDockGate,
     setSparkParts,
     setExtraSparkParts,
@@ -169,6 +202,8 @@ export function useSparkDock() {
     hideSparkDock,
     clearAttachedParts,
     attachSparkPart,
+    moveSparkSelection,
+    resetSparkSelection,
     setSparkSticky,
   }
 }

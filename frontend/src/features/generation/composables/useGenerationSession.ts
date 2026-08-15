@@ -32,6 +32,7 @@ import { ref, computed, watch, onMounted, onUnmounted, type Ref, type ComputedRe
 import { refineryApi, bsadfApi, chapterApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
 import { formatDegradedReason } from '../../../shared/constants/degradation'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { noHistory } from '../../chapter-editor/noHistory'
 import {
   ghostActive, ghostSource, ghostDirty,
   beginGhost, appendGhost, ghostText, commitGhost, evaporateGhost,
@@ -39,9 +40,11 @@ import {
 import {
   sparkDockVisible, attachedParts,
   setSparkDockGate, setSparkParts,
-  showSparkDock, hideSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky,
+  showSparkDock, hideSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky, moveSparkSelection,
   type SparkPart,
 } from './useSparkDock'
+import { beatDockVisible, beatCards, showBeatDock, hideBeatDock } from './useBeatDock'
+import { assistEnabled } from './useAssistEnabled'
 import { defatParagraphAtCursor } from '../../../shared/utils/defat'
 
 // ============================================================
@@ -416,6 +419,8 @@ export interface GenerationSession {
   setAdaptiveFinish: (fn: (() => void) | null) => void
   /** 触发 adaptive 完稿审计 */
   triggerAdaptiveFinish: () => void
+  /** 注入 adaptive 段落级连写函数（由 useAdaptiveAssist 注入，走向卡舱选定后触发） */
+  setAdaptiveBurst: (fn: ((card: { event: string; anchors?: string[] } | null) => void) | null) => void
 }
 
 export function useGenerationSession(): GenerationSession {
@@ -876,7 +881,7 @@ export function useGenerationSession(): GenerationSession {
       .filter(Boolean)
       .map((p) => `<p>${p}</p>`)
       .join('')
-    editor.commands.setContent(html || '<p></p>', true)
+    editor.chain().command(noHistory).setContent(html || '<p></p>', true).run()
     // 光标落到文档末尾（回拨后继续写的位置），碎片锚点同步复位
     editor.commands.setTextSelection(editor.state.doc.content.size)
     fragmentAnchorPos = editor.state.doc.content.size
@@ -935,7 +940,8 @@ export function useGenerationSession(): GenerationSession {
     if (editor && entryIdx >= 0) {
       const base = Math.min(beatBaseStack[entryIdx].basePos, editor.state.doc.content.size)
       if (base < editor.state.doc.content.size) {
-        editor.chain().deleteRange({ from: base, to: editor.state.doc.content.size }).run()
+        // 隔离撤销栈：回拨删文若入栈，Ctrl+Z 会复活已回滚的拍文本（与快照栈双时间线打架）
+        editor.chain().command(noHistory).deleteRange({ from: base, to: editor.state.doc.content.size }).run()
       }
       beatBaseStack.length = entryIdx
     }
@@ -1667,6 +1673,12 @@ export function useGenerationSession(): GenerationSession {
   /** 触发完稿审计（InspectorPanel 按钮调） */
   function triggerAdaptiveFinish() {
     _adaptiveFinishFn?.()
+  }
+
+  // adaptive 段落级连写（burst）注入器：由 useAdaptiveAssist 注入（走向卡舱选定后触发）
+  let _adaptiveBurstFn: ((card: { event: string; anchors?: string[] } | null) => void) | null = null
+  function setAdaptiveBurst(fn: ((card: { event: string; anchors?: string[] } | null) => void) | null) {
+    _adaptiveBurstFn = fn
   }
 
   /** 失败重试：再次触发最近一次入口（startBeat / startRefinery 已记录 lastAction） */
@@ -3038,24 +3050,47 @@ export function useGenerationSession(): GenerationSession {
       }
       return
     }
+    // Alt+O：插入/转换细纲胶囊。有选区 → 选中文本转为速记（先打字后转换）；
+    // 无选区 → 空胶囊并自动打开浮层。assistEnabled 即可用（不要求 composing 态，
+    // 也不依赖步进流设施）；仅编辑器聚焦时拦截。
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyO') {
+      const editor = chapterEditorHandle.value
+      const t = e.target as HTMLElement | null
+      if (editor && t?.isContentEditable && !ghostActive.value && assistEnabled.value) {
+        e.preventDefault()
+        e.stopPropagation()
+        editor.commands.insertOutlineNote()
+      }
+      return
+    }
+    // AI 辅助关闭（纯手写模式）：adaptive 分支全部不介入（Space 恢复普通空格、
+    // Tab/Ctrl+Space/数字键/Ctrl+Enter 不拦截）。旧步进/创作路径（作者显式起的
+    // 「规划本章」）不受影响。
+    const adaptiveComposing = assistEnabled.value && adaptiveMode.value && authorLane.value === 'composing'
     const inAuthoringContext = stage.value === 'beat_authoring'
       || (stage.value === 'beat_stepping' && authoringEnabled.value)
       || ghostActive.value
       // NLE-ADF 3.0：adaptive composing 态——作者在正文编辑器里写，
       // Space（缝合/续写）/ Enter（Ctrl+沉淀）/ 数字（吸附）必须在捕获阶段拦截，
       // 否则 ProMirror 在 bubble 阶段先把 Space/Enter 插进文档，拦截失效。
-      || (adaptiveMode.value && authorLane.value === 'composing')
+      || adaptiveComposing
     if (!inAuthoringContext) return
     const target = e.target as HTMLElement | null
     // 编辑器外的表单控件不拦（岔路面板自定义走向文本框等）
     if (target && !target.isContentEditable && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
 
-    // Esc：蒸发幽灵 > 关 Dock > 清空吸附（逐层退出 AI 临时元素）
+    // Esc：蒸发幽灵 > 关走向卡舱 > 关 Dock > 清空吸附（逐层退出 AI 临时元素）
     if (e.key === 'Escape') {
       if (ghostActive.value) {
         e.preventDefault()
         e.stopPropagation()
         evaporateGhost()
+        return
+      }
+      if (beatDockVisible.value) {
+        e.preventDefault()
+        e.stopPropagation()
+        hideBeatDock()
         return
       }
       if (sparkDockVisible.value) {
@@ -3076,11 +3111,24 @@ export function useGenerationSession(): GenerationSession {
     // 旧路径 beat_authoring + 新路径 adaptive composing 均生效。
     if (e.key === 'Tab' && !ghostActive.value && (
       stage.value === 'beat_authoring'
-      || (adaptiveMode.value && authorLane.value === 'composing')
+      || adaptiveComposing
     )) {
       e.preventDefault()
       e.stopPropagation()
       showSparkDock()
+      return
+    }
+    // 数字键 1~4：走向卡舱打开时选定走向卡 → 触发 burst 连写
+    // （超出卡数 = 末项「自由发挥」，card=null）
+    if (beatDockVisible.value && /^Digit[1-4]$/.test(e.code)) {
+      e.preventDefault()
+      e.stopPropagation()
+      const idx = Number(e.code.slice(5)) - 1
+      const card = idx < beatCards.value.length ? beatCards.value[idx] : null
+      hideBeatDock()
+      if (adaptiveComposing) {
+        _adaptiveBurstFn?.(card)
+      }
       return
     }
     // 数字键 1~4：Dock 打开时吸附对应挂件（拦默认防数字进正文）
@@ -3088,6 +3136,15 @@ export function useGenerationSession(): GenerationSession {
       e.preventDefault()
       e.stopPropagation()
       attachSparkPart(Number(e.code.slice(5)) - 1)
+      return
+    }
+    // ↑↓：Dock 打开时浏览高亮碎片（纯视觉；吸附仍数字键/鼠标）。
+    // sticky 态 moveSparkSelection 返回 false → 不拦默认，让 ↑↓ 移光标
+    if (sparkDockVisible.value && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+      if (moveSparkSelection(e.code === 'ArrowUp' ? -1 : 1)) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
       return
     }
     // Enter：幽灵在屏 = 锁死碎片（摘 mark 变正文；拦默认防多插一个换行）
@@ -3100,7 +3157,7 @@ export function useGenerationSession(): GenerationSession {
     // Ctrl+Enter：锁死本拍（创作态/代笔裁决态）或沉淀当前段（adaptive composing 态）
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       // adaptive composing 态：触发沉淀（走 useAdaptiveAssist.settleCurrent）
-      if (adaptiveMode.value && authorLane.value === 'composing') {
+      if (adaptiveComposing) {
         e.preventDefault()
         e.stopPropagation()
         _adaptiveSettleFn?.()
@@ -3119,6 +3176,16 @@ export function useGenerationSession(): GenerationSession {
       advanceBeat(currentChapterId, 'back', { beatId: authoringBeatId.value })
       return
     }
+    // Ctrl+Space：走向卡舱（adaptive composing 态的段落级连写入口）。
+    // 注意：旧版中文输入法可能占用 Ctrl+Space 切换——若用户反馈冲突，备选改 Alt+J。
+    if (e.code === 'Space' && (e.ctrlKey || e.metaKey)
+      && adaptiveComposing
+      && !ghostActive.value && !stitching.value) {
+      e.preventDefault()
+      e.stopPropagation()
+      showBeatDock()
+      return
+    }
     // Space 三分流（作者模式会话激活期才介入；普通编辑永不拦截）：
     //   吸附栏有零件 = 微缝合；创作态空段落 = 召唤代笔；有碎片 = 裸补全
     // NLE-ADF 3.0：adaptive composing 态也介入，走 adaptive 续写注入器。
@@ -3130,13 +3197,13 @@ export function useGenerationSession(): GenerationSession {
         || stage.value === 'setup_growing'
       ))
       // 新路径：adaptive composing 态
-      || (adaptiveMode.value && authorLane.value === 'composing')
+      || adaptiveComposing
     )
     if (e.code === 'Space' && spaceActive) {
       const editor = chapterEditorHandle.value
       if (!editor) return
       // adaptive 模式分支：零件吸附 → 缝合续写；否则顺句续写
-      if (adaptiveMode.value && authorLane.value === 'composing') {
+      if (adaptiveComposing) {
         if (attachedParts.value.length) {
           e.preventDefault()
           e.stopPropagation()
@@ -3282,6 +3349,7 @@ export function useGenerationSession(): GenerationSession {
     setAdaptiveSettle,
     setAdaptiveFinish,
     triggerAdaptiveFinish,
+    setAdaptiveBurst,
   }
 }
 

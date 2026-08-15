@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { noHistory } from '../../chapter-editor/noHistory'
 
 /**
  * NLE-ADF 2.0 幽灵草稿控制器（useGhostDraft）。
@@ -18,16 +19,23 @@ import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
  * - 多段落：代笔整段文本含 \n\n，拆成多个 paragraph 节点插入（每段文本挂 mark）。
  */
 
-export type GhostSource = 'stitch' | 'render' | null
+export type GhostSource = 'stitch' | 'render' | 'outline' | null
 
 /** 当前是否存在幽灵草稿（响应式） */
 export const ghostActive = ref(false)
-/** 幽灵来源：stitch=微缝合 / render=整段代笔 */
+/** 幽灵来源：stitch=微缝合 / render=整段代笔 / outline=细纲扩写 */
 export const ghostSource = ref<GhostSource>(null)
 /** 流式灌入的原文（dirty 检测基准） */
 export const ghostOriginal = ref('')
 /** 降级标记（代笔降级段 → 琥珀色幽灵） */
 export const ghostDegraded = ref(false)
+
+/**
+ * 幽灵插入锚点（细纲扩写用）：null=跟随当前光标（默认，兼容旧行为），
+ * 非 null=插到指定文档位置（细纲胶囊末尾）。仅在首 chunk 落文档前的
+ * 窗口内有效——首 chunk 后 findGhostRange 接管定位，作者编辑天然免疫。
+ */
+let ghostAnchorPos: number | null = null
 
 interface GhostRange {
   from: number
@@ -50,13 +58,21 @@ function findGhostRange(): GhostRange | null {
   return from === -1 ? null : { from, to }
 }
 
-/** 开始一段幽灵草稿（重置状态；首个 chunk 到达时才真正落文档）。 */
-export function beginGhost(source: Exclude<GhostSource, null>, degraded = false): void {
+/** 开始一段幽灵草稿（重置状态；首个 chunk 到达时才真正落文档）。
+ *
+ * anchorPos：可选插入锚点（细纲扩写传胶囊末尾位置）；不传则落当前光标。
+ */
+export function beginGhost(
+  source: Exclude<GhostSource, null>,
+  degraded = false,
+  anchorPos?: number | null,
+): void {
   // 防御：已有幽灵时先蒸发（正常流程不会叠加，异常重入不污染文档）
   if (ghostActive.value) evaporateGhost()
   ghostSource.value = source
   ghostOriginal.value = ''
   ghostDegraded.value = degraded
+  ghostAnchorPos = anchorPos ?? null
   ghostActive.value = true
 }
 
@@ -82,10 +98,10 @@ function insertMarkedText(delta: string): void {
     if (range) {
       // 既有幽灵区：块内容插到幽灵末尾段落之后
       const paraEnd = editor.state.doc.resolve(range.to).after()
-      editor.chain().insertContentAt(paraEnd, blocks).run()
+      editor.chain().command(noHistory).insertContentAt(paraEnd, blocks).run()
     } else {
-      const pos = editor.state.selection.from
-      editor.chain().insertContentAt(pos, blocks).run()
+      const pos = ghostAnchorPos ?? editor.state.selection.from
+      editor.chain().command(noHistory).insertContentAt(pos, blocks).run()
     }
     return
   }
@@ -94,10 +110,10 @@ function insertMarkedText(delta: string): void {
   const content = { type: 'text', text: delta, marks: [mark] }
   if (range) {
     // range.to 位于最后一个幽灵文本节点之后、仍在段落内 → 内联插入
-    editor.chain().insertContentAt(range.to, content).run()
+    editor.chain().command(noHistory).insertContentAt(range.to, content).run()
   } else {
-    const pos = editor.state.selection.from
-    editor.chain().insertContentAt(pos, content).run()
+    const pos = ghostAnchorPos ?? editor.state.selection.from
+    editor.chain().command(noHistory).insertContentAt(pos, content).run()
   }
 }
 
@@ -134,21 +150,22 @@ function _replaceGhostText(fullText: string): void {
       content: [{ type: 'text', text: p, marks: [mark] }],
     }))
     if (range) {
-      // 删除旧幽灵区，插入新完整内容
-      editor.chain().deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, blocks).run()
+      // 删除旧幽灵区，插入新完整内容（隔离撤销栈：流式逐 chunk 若入栈，
+      // Ctrl+Z 会逐帧倒放打字机并可能复活幽灵区）
+      editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, blocks).run()
     } else {
-      const pos = editor.state.selection.from
-      editor.chain().insertContentAt(pos, blocks).run()
+      const pos = ghostAnchorPos ?? editor.state.selection.from
+      editor.chain().command(noHistory).insertContentAt(pos, blocks).run()
     }
     return
   }
 
   // 单段：删除旧幽灵区，插入新完整文本（单个文本节点）
   if (range) {
-    editor.chain().deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, { type: 'text', text: fullText, marks: [mark] }).run()
+    editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).insertContentAt(range.from, { type: 'text', text: fullText, marks: [mark] }).run()
   } else {
-    const pos = editor.state.selection.from
-    editor.chain().insertContentAt(pos, { type: 'text', text: fullText, marks: [mark] }).run()
+    const pos = ghostAnchorPos ?? editor.state.selection.from
+    editor.chain().command(noHistory).insertContentAt(pos, { type: 'text', text: fullText, marks: [mark] }).run()
   }
 }
 
@@ -184,6 +201,7 @@ export function commitGhost(): string {
   const text = editor.state.doc.textBetween(range.from, range.to, '\n\n')
   editor
     .chain()
+    .command(noHistory)
     .command(({ tr, state }) => {
       tr.removeMark(range.from, range.to, state.schema.marks.ghostDraft)
       return true
@@ -196,6 +214,7 @@ export function commitGhost(): string {
   const flashTo = range.to
   editor
     .chain()
+    .command(noHistory)
     .setTextSelection({ from: flashFrom, to: flashTo })
     .setHighlight({ color: 'rgba(52, 211, 153, 0.28)' })
     .setTextSelection(flashTo)
@@ -205,6 +224,7 @@ export function commitGhost(): string {
     if (!ed) return
     const size = ed.state.doc.content.size
     ed.chain()
+      .command(noHistory)
       .setTextSelection({ from: Math.min(flashFrom, size), to: Math.min(flashTo, size) })
       .unsetHighlight()
       .setTextSelection(Math.min(flashTo, size))
@@ -212,6 +232,7 @@ export function commitGhost(): string {
   }, 350)
   ghostActive.value = false
   ghostSource.value = null
+  ghostAnchorPos = null
   return text
 }
 
@@ -220,12 +241,13 @@ export function evaporateGhost(): void {
   const editor = chapterEditorHandle.value
   const range = findGhostRange()
   if (editor && range) {
-    editor.chain().deleteRange({ from: range.from, to: range.to }).run()
+    editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).run()
   }
   ghostActive.value = false
   ghostSource.value = null
   ghostOriginal.value = ''
   ghostDegraded.value = false
+  ghostAnchorPos = null
 }
 
 export function useGhostDraft() {

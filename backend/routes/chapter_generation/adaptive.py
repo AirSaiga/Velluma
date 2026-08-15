@@ -34,13 +34,44 @@ from backend.services.adaptive.change_detector import AuthorState
 from backend.services.adaptive.world_model import WorldModelRepository
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
-from backend.services.prompts.adaptive_prompts import build_continue_prompt
+from backend.services.prompts.adaptive_prompts import (
+    build_burst_prompt,
+    build_continue_prompt,
+    build_opening_prompt,
+    build_outline_expand_prompt,
+)
+from backend.services.rag.recall import recall_memories
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import build_sse_event, build_sse_error
 
 logger = get_runtime_logger(__name__)
 
 router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
+
+
+# ============================================================
+# 细纲扩写字数硬闸门（对齐 bsadf/downgrade 的实测经验：软约束段均超写
+# 近 2 倍。细纲的产品承诺是「生成字数不多、改起来轻」，必须硬保证。
+# SSE 先生成后播放 → 压缩重试/截断对前端完全透明）
+# ============================================================
+
+OUTLINE_WC_HARD_RATIO = 1.6      # 超过 target×1.6 → 带压缩反馈重试一次
+OUTLINE_WC_TRUNCATE_RATIO = 1.5  # 仍超 → 句界硬截断（截断上限必须 ≤ HARD）
+
+
+def _truncate_at_sentence(text: str, limit: int) -> str:
+    """句界硬截断：在 limit 内找最后一个句末标点切断。
+
+    复制自 bsadf/downgrade._truncate_at_sentence（无依赖纯函数，刻意不
+    import bsadf——adaptive 链路不依赖步进流任何设施）。找不到句末标点
+    （极端长句）退化为按字截断：字数硬闸门优先级高于单句完整性。
+    """
+    if len(text) <= limit:
+        return text
+    cut = max(text.rfind(p, 0, limit) for p in ("。", "！", "？", "…"))
+    if cut > 0:
+        return text[: cut + 1]
+    return text[:limit]
 
 
 # ============================================================
@@ -59,6 +90,7 @@ class HeartbeatRequest(BaseModel):
 
 class HeartbeatResponse(BaseModel):
     dock_parts: List[Dict] = Field(default_factory=list)
+    direction_cards: List[Dict] = Field(default_factory=list)  # 走向卡（层3推测首 beat：event+anchors）
     intent_source: str = "none"
     intent_arc: str = ""
     intent_confidence: float = 0.0
@@ -66,6 +98,7 @@ class HeartbeatResponse(BaseModel):
     total_words: int = 0
     activated: List[str] = Field(default_factory=list)
     signals: List[str] = Field(default_factory=list)
+    canon_hints: List[Dict] = Field(default_factory=list)  # Canon 感知（角色出场/伏笔回收/private 泄露），canon_watch 写入
 
 
 class SettleRequest(BaseModel):
@@ -75,12 +108,14 @@ class SettleRequest(BaseModel):
 
 
 class StitchGhostRequest(BaseModel):
-    fragment: str = Field(..., description="作者原句碎片")
+    fragment: str = Field(..., description="作者原句碎片（outline 模式=细纲速记原文）")
     rolling_prefix: str = Field("")
-    mode: str = Field("stitch", description="stitch|continue")
+    mode: str = Field("stitch", description="stitch|continue|burst（段落级连写）|outline（细纲扩写）|open（点火）")
     picked_parts: List[str] = Field(default_factory=list)
     target_chars: int = Field(120)
     chapter_intent: str = Field("")
+    beat_guidance: str = Field("", description="burst 模式：选定走向卡的走向文本（空=自由发挥）")
+    after_text: str = Field("", description="outline 模式：细纲之后的已写正文开头（双端缝合用，可空）")
     adopted_direction: Optional[str] = Field(None, description="作者缝合采纳的叙事方向（主线/伏笔/刻画/环境/关系），用于负反馈降权")
 
 
@@ -114,10 +149,15 @@ async def heartbeat(
 
     # 从世界模型拉挂件缓存（dock_generator 写入的 __dock__ 项）
     dock_parts = _extract_dock_parts(snapshot)
+    # 走向卡（层 3 推测首 beat）——Ctrl+Space 走向卡舱的数据源
+    direction_cards = _extract_direction_cards(snapshot)
+    # Canon 感知（canon_watch 写入的 __canon_watch__ 项）
+    canon_hints = _extract_canon_hints(snapshot)
 
     intent = snapshot.get("intent", {})
     return HeartbeatResponse(
         dock_parts=dock_parts,
+        direction_cards=direction_cards,
         intent_source=intent.get("source", "none"),
         intent_arc=intent.get("arc", ""),
         intent_confidence=intent.get("confidence", 0.0),
@@ -125,6 +165,7 @@ async def heartbeat(
         total_words=snapshot.get("total_words", 0),
         activated=result.get("activated", []),
         signals=result.get("signals", []),
+        canon_hints=canon_hints,
     )
 
 
@@ -134,6 +175,33 @@ def _extract_dock_parts(snapshot: Dict) -> List[Dict]:
         if isinstance(proj, dict) and proj.get("__dock__"):
             return proj.get("parts", [])
     return []
+
+
+def _extract_canon_hints(snapshot: Dict) -> List[Dict]:
+    """从世界模型快照的 projections 里提取 canon_watch 缓存的 Canon 感知 hints。"""
+    for proj in (snapshot.get("projections") or []):
+        if isinstance(proj, dict) and proj.get("__canon_watch__"):
+            return proj.get("hints", [])
+    return []
+
+
+def _extract_direction_cards(snapshot: Dict) -> List[Dict]:
+    """从层 3 推测提取走向卡（跳过 __dock__ 缓存项；每个推测取首个 beat）。
+
+    走向卡 = {event, anchors}，一句话剧情走向，供 Ctrl+Space 走向卡舱选择。
+    """
+    cards: List[Dict] = []
+    for proj in (snapshot.get("projections") or []):
+        if not isinstance(proj, dict) or proj.get("__dock__"):
+            continue
+        for beat in (proj.get("possible_beats") or [])[:1]:
+            event = (beat.get("event") or "").strip() if isinstance(beat, dict) else ""
+            if event:
+                cards.append({
+                    "event": event[:60],
+                    "anchors": [str(a)[:20] for a in (beat.get("anchors") or [])][:3],
+                })
+    return cards[:3]
 
 
 # ============================================================
@@ -161,9 +229,30 @@ async def finish(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """作者完稿 → 异步触发后处理（审计/一致性/残句/章节卡覆盖）。"""
+    """作者完稿 → 异步触发后处理（审计/一致性/残句/章节卡覆盖）+ 章级记忆索引。"""
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
-    return await orch.on_finish()
+    result = await orch.on_finish()
+
+    # ---- 记忆倒灌（写入侧）：完稿 = 章级定稿时刻，整章重索引（章级替换，幂等）----
+    # 画布即事实源：索引正文取 chapters.content_text；失败绝不让完稿失败
+    memory_indexed = 0
+    try:
+        from backend.services.rag.memory_indexing import index_chapter_memories
+        bundle = await load_chapter_settings_bundle(chapter_id, db)
+        if bundle.book_id and bundle.content_text:
+            memory_indexed = await index_chapter_memories(
+                db,
+                book_id=bundle.book_id,
+                chapter_id=chapter_id,
+                chapter_number=bundle.chapter_number,
+                text=bundle.content_text,
+            )
+    except Exception as e:
+        logger.warning(f"[adaptive/finish] 记忆索引失败（不影响完稿结果）: {e}")
+
+    if isinstance(result, dict):
+        result["memory_indexed"] = memory_indexed
+    return result
 
 
 # ============================================================
@@ -200,16 +289,68 @@ async def stitch_ghost(
     proper_nouns = bundle.proper_nouns()
     chapter_intent = request.chapter_intent or bundle.outline_text[:200]
 
-    system_prompt, user_prompt = build_continue_prompt(
-        fragment=request.fragment.strip(),
-        rolling_prefix=(request.rolling_prefix or "")[-200:].strip(),
-        mode=request.mode,
-        picked_parts=request.picked_parts,
-        proper_nouns=proper_nouns,
-        canon_context=bundle.canon_context,
-        target_chars=request.target_chars,
-        chapter_intent=chapter_intent,
+    # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
+    # 降级为空列表时 prompt 零变化（不阻塞生成）
+    if request.mode == "open":
+        recall_query = bundle.outline_text[:200]
+    else:
+        recall_query = ((request.rolling_prefix or "")[-150:] + " " + request.fragment.strip()).strip()
+    memory_echoes = await recall_memories(
+        db,
+        book_id=bundle.book_id or "",
+        chapter_id=chapter_id,
+        chapter_number=bundle.chapter_number,
+        query_text=recall_query,
+        k=3,
     )
+
+    if request.mode == "open":
+        # 点火（冷启动）：空章 + 大纲 → 开篇引子。大纲是唯一燃料，无已写正文
+        system_prompt, user_prompt = build_opening_prompt(
+            outline_text=bundle.outline_text[:800],
+            previous_summary=bundle.previous_summary or "",
+            worldview_text=bundle.worldview_text[:200] if bundle.worldview_text else "",
+            proper_nouns=proper_nouns,
+            canon_context=bundle.canon_context,
+            target_chars=request.target_chars,
+            memory_echoes=memory_echoes,
+        )
+    elif request.mode == "outline":
+        # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
+        system_prompt, user_prompt = build_outline_expand_prompt(
+            outline_note=request.fragment.strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-500:].strip(),
+            after_text=(request.after_text or "")[:300].strip(),
+            proper_nouns=proper_nouns,
+            canon_context=bundle.canon_context,
+            target_chars=request.target_chars,
+            chapter_intent=chapter_intent,
+            memory_echoes=memory_echoes,
+        )
+    elif request.mode == "burst":
+        # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
+        system_prompt, user_prompt = build_burst_prompt(
+            fragment=request.fragment.strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-500:].strip(),
+            beat_guidance=request.beat_guidance.strip(),
+            proper_nouns=proper_nouns,
+            canon_context=bundle.canon_context,
+            target_chars=request.target_chars,
+            chapter_intent=chapter_intent,
+            memory_echoes=memory_echoes,
+        )
+    else:
+        system_prompt, user_prompt = build_continue_prompt(
+            fragment=request.fragment.strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-200:].strip(),
+            mode=request.mode,
+            picked_parts=request.picked_parts,
+            proper_nouns=proper_nouns,
+            canon_context=bundle.canon_context,
+            target_chars=request.target_chars,
+            chapter_intent=chapter_intent,
+            memory_echoes=memory_echoes,
+        )
 
     async def _stream():
         try:
@@ -227,14 +368,43 @@ async def stitch_ghost(
             if not text:
                 yield build_sse_error("续写产出为空，请重试")
                 return
+            # 字数硬闸门（outline 模式）：超 target×1.6 先带压缩反馈重试一次，
+            # 仍超则句界硬截断到 ×1.5。先生成后播放，对前端完全透明
+            if request.mode == "outline" and request.target_chars > 0:
+                hard_limit = int(request.target_chars * OUTLINE_WC_HARD_RATIO)
+                if len(text) > hard_limit:
+                    compressed = await call_llm_with_usage(
+                        system_prompt=system_prompt,
+                        user_prompt=(
+                            f"{user_prompt}\n\n# 上次输出被拒\n"
+                            f"上次输出 {len(text)} 字，超过 {hard_limit} 字硬上限。"
+                            f"请压缩到 {request.target_chars} 字以内：删减重复修饰与冗余动作，"
+                            f"细纲核心事件必须全部保留。只输出压缩后的正文。"
+                        ),
+                        model_type="creative",
+                        temperature=0.7,
+                        max_tokens=max(1200, request.target_chars * 2 + 1000),
+                        reasoning_config=REASONING_DISABLED,
+                    )
+                    cand = (compressed.content or "").strip()
+                    if cand:
+                        text = cand
+                if len(text) > hard_limit:
+                    text = _truncate_at_sentence(text, int(request.target_chars * OUTLINE_WC_TRUNCATE_RATIO))
+                    logger.info(
+                        f"[adaptive/stitch-ghost] 细纲扩写字数末次仍超上限，"
+                        f"句界截断到 {len(text)} 字（目标 {request.target_chars}）"
+                    )
             fragment = request.fragment.strip()
             if request.mode == "stitch" and fragment and fragment not in text:
                 text = f"{fragment}{text}"
             yield build_sse_event("GHOST_START", "", mode=request.mode)
-            chunk_size = 6
+            # burst/open/outline 文本长 → 更大步长更快节奏（700 字约 2.3s 播完），短档保持原速
+            chunk_size = 12 if request.mode in ("burst", "open", "outline") else 6
+            frame_delay = 0.04 if request.mode in ("burst", "open", "outline") else 0.09
             for pos in range(0, len(text), chunk_size):
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
-                await asyncio.sleep(0.09)
+                await asyncio.sleep(frame_delay)
             yield build_sse_event("GHOST_DONE", "", text=text, word_count=len(text))
         except Exception as e:
             logger.warning(f"[adaptive/stitch-ghost] 失败: {e}")

@@ -3,16 +3,18 @@ import { getApiBase } from './base'
 export interface FetchOptions {
   method?: string
   headers?: Record<string, string>
-  body?: string
+  /** FormData（文件上传）时不设默认 Content-Type，让浏览器带 multipart boundary */
+  body?: string | FormData
   signal?: AbortSignal
 }
 
 function createRequestInit(options: FetchOptions): RequestInit {
+  const isFormData = options.body instanceof FormData
   const requestInit: RequestInit = {
     headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    }
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(options.headers || {}),
+    },
   }
 
   if (options.method) {

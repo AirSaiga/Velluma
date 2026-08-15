@@ -75,7 +75,8 @@ from backend.services.llm.proxy import (
     get_active_proxy as _get_active_proxy,
 )
 from backend.services.llm.embedding import get_embedding
-from backend.core.model_config import get_model_profile, resolve_model_name, get_default_reasoning_config, DEFAULT_PROVIDER_URLS
+from backend.services.llm.reasoning_adapter import adapt_reasoning_config
+from backend.core.model_config import get_model_profile, resolve_model_name, get_default_reasoning_config, DEFAULT_BASE_URL
 
 
 logger = logging.getLogger(__name__)
@@ -162,8 +163,7 @@ async def generate_stream_response(
 
     profile = get_model_profile(model_type)
     api_key = profile["api_key"]
-    provider = profile["provider"]
-    base_url = profile["base_url"] or DEFAULT_PROVIDER_URLS.get(provider, "https://openrouter.ai/api/v1")
+    base_url = profile["base_url"] or DEFAULT_BASE_URL
     resolved_model = resolve_model_name(model, model_type)
 
     if reasoning_config is None:
@@ -188,7 +188,12 @@ async def generate_stream_response(
         }
 
         if reasoning_config:
-            create_kwargs["extra_body"] = reasoning_config
+            # Provider 适配：把统一中间表示 {reasoning:{enabled,effort}} 转成各厂商原生参数
+            # （DeepSeek→thinking.type+reasoning_effort、OpenAI→reasoning_effort、Qwen→enable_thinking
+            # +thinking_budget 等）。base_url 和 resolved_model 在作用域内，供 provider 识别。
+            adapted = adapt_reasoning_config(reasoning_config, base_url, resolved_model)
+            if adapted:
+                create_kwargs["extra_body"] = adapted
 
         stream = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         async for chunk in stream:
@@ -368,8 +373,7 @@ async def call_llm_with_usage(
 
     profile = get_model_profile(model_type)
     api_key = profile["api_key"]
-    provider = profile["provider"]
-    base_url = profile["base_url"] or DEFAULT_PROVIDER_URLS.get(provider, "https://openrouter.ai/api/v1")
+    base_url = profile["base_url"] or DEFAULT_BASE_URL
     resolved_model = resolve_model_name(model, model_type)
 
     if reasoning_config is None:
@@ -396,7 +400,12 @@ async def call_llm_with_usage(
             create_kwargs["response_format"] = response_format
 
         if reasoning_config:
-            create_kwargs["extra_body"] = reasoning_config
+            # Provider 适配：把统一中间表示 {reasoning:{enabled,effort}} 转成各厂商原生参数
+            # （DeepSeek→thinking.type+reasoning_effort、OpenAI→reasoning_effort、Qwen→enable_thinking
+            # +thinking_budget 等）。base_url 和 resolved_model 在作用域内，供 provider 识别。
+            adapted = adapt_reasoning_config(reasoning_config, base_url, resolved_model)
+            if adapted:
+                create_kwargs["extra_body"] = adapted
 
         response = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         content = ""

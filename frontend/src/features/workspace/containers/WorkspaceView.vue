@@ -18,19 +18,30 @@ import 'splitpanes/dist/splitpanes.css'
 import Icon from '../../../components/Icon.vue'
 import ChapterEditor from '../../../components/ChapterEditor.vue'
 import ChapterBadges from '../presentation/ChapterBadges.vue'
+import PerceptionBand from '../presentation/PerceptionBand.vue'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
 import ExtractionModal from '../../extraction/containers/ExtractionModal.vue'
 import InspectorPanel from './InspectorPanel.vue'
 import GenerationOverlay from '../../generation/presentation/GenerationOverlay.vue'
 import SparkDock from '../../generation/presentation/SparkDock.vue'
+import BeatCardDock from '../../generation/presentation/BeatCardDock.vue'
+import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import GhostTimeline from '../../generation/presentation/GhostTimeline.vue'
 import BranchBanner from '../../generation/presentation/BranchBanner.vue'
 import AutoCutHint from '../../generation/presentation/AutoCutHint.vue'
+import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
 import { useTimelineModel } from '../../generation/composables/ghostTimelineModel'
 import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
+import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
+import { ghostActive } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
+import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { setCanonTerms, type CanonTerm } from '../../../extensions/CanonHighlight'
+import { loadChapterDraft, clearChapterDraft } from '../../chapter-editor/useChapterDraft'
+import { countChapterWords, stripHtmlToText } from '../../../shared/utils/htmlText'
+import { formatGenerationError } from '../../../shared/utils/errorText'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { buildGenerationPreviewHtml } from '../../generation/composables/buildGenerationPreview'
 import { useAppStore } from '../../app/useAppStore'
@@ -75,12 +86,106 @@ const adaptiveAssist = useAdaptiveAssist({
   authorLaneRef: session.authorLane,
   finishReportRef: session.finishReport,
   settleResultRef: session.settleResult,
+  // adaptive 路径失败统一出口：toast 告知（此前全线静默失败，作者按 Space 无反应）
+  reportError: (msg: string) => showToast(msg, 'error'),
+  reportWarn: (msg: string) => showToast(msg, 'warning'),
 })
 session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode, parts))
 session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
 session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
+session.setAdaptiveBurst((card) => adaptiveAssist.requestBurst(card))
+
+// 走向卡舱点选（鼠标路径；数字键路径在 session 键位状态机里走 setAdaptiveBurst）
+function onBeatCardPick(card: { event: string; anchors?: string[] } | null) {
+  hideBeatDock()
+  adaptiveAssist.requestBurst(card)
+}
+// adaptive composing 态才显示「多写几段」入口（SparkDock props 注入）
+const adaptiveComposing = computed(() => session.adaptiveMode.value && session.authorLane.value === 'composing')
+
+// NLE-ADF 3.0 Canon 词高亮词表：本章绑定角色名 + 感知 hints 的角色/伏笔标签
+// 词表变化 → setCanonTerms dispatch 空 tr 触发 ProseMirror decorations 重算
+const canonMarkTerms = computed<CanonTerm[]>(() => {
+  const terms: CanonTerm[] = []
+  const seen = new Set<string>()
+  const ch = selectedChapter.value as any
+  // 本章绑定角色名（chapter.character_ids 过滤）
+  const ids: string[] = Array.isArray(ch?.character_ids) ? ch.character_ids : []
+  const charList = characters.value as any[] | undefined
+  if (ids.length && charList) {
+    for (const c of charList) {
+      const name = c?.name
+      if (name && name.length >= 2 && ids.includes(c?.id) && !seen.has(name)) {
+        seen.add(name)
+        terms.push({ text: name, kind: 'character' })
+      }
+    }
+  }
+  // 感知 hints 的角色/伏笔/矛盾 label（停顿心跳后才来，补充动态词）
+  for (const h of session.adaptiveSuggestions.value) {
+    if (!h.node_label || h.node_label.length < 2 || seen.has(h.node_label)) continue
+    if (h.kind === 'appearance') {
+      seen.add(h.node_label)
+      terms.push({ text: h.node_label, kind: 'character' })
+    } else if (h.kind === 'callback') {
+      seen.add(h.node_label)
+      terms.push({ text: h.node_label, kind: 'hook' })
+    } else if (h.kind === 'contradiction') {
+      seen.add(h.node_label)
+      terms.push({ text: h.node_label, kind: 'contradiction' })
+    }
+  }
+  return terms
+})
+// 词表或编辑器实例变化时注入（编辑器后挂载的情况也能补上）
+watch([canonMarkTerms, chapterEditorHandle], () => {
+  setCanonTerms(chapterEditorHandle.value, canonMarkTerms.value)
+})
+
+// ===== 点火路线（冷启动：空章 + 大纲 → AI 写开头）=====
+// 正文判空：content_text/draft_text 可能是空 HTML（<p></p>），strip 标签后再 trim
+const chapterTextEmpty = computed(() => {
+  const ch = selectedChapter.value
+  if (!ch) return false
+  const raw = (ch.content_text || ch.draft_text || '').replace(/<[^>]*>/g, '').trim()
+  return raw.length === 0
+})
+// 「我自己写」的本章内记忆（切章重置）
+const dismissedIgnitionChapterId = ref<string | null>(null)
+watch(selectedChapterId, () => { dismissedIgnitionChapterId.value = null })
+
+const showIgnition = computed(() =>
+  assistEnabled.value  // AI 辅助关闭（纯手写模式）时不弹点火卡
+  && !!selectedChapter.value
+  && chapterTextEmpty.value
+  && !session.generating.value
+  && !ghostActive.value
+  && session.aiLane.value === 'dormant'
+  && dismissedIgnitionChapterId.value !== selectedChapter.value.id
+)
+
+function onIgnite() {
+  adaptiveAssist.requestOpening()
+}
+function onIgnitionDismiss() {
+  dismissedIgnitionChapterId.value = selectedChapter.value?.id || null
+}
 onMounted(() => adaptiveAssist.mount())
 onBeforeUnmount(() => adaptiveAssist.unmount())
+
+// AI 辅助总开关（顶栏 sparkles 按钮）：关闭=纯手写模式（Space 恢复普通空格）
+function toggleAssist() {
+  setAssistEnabled(!assistEnabled.value)
+  // 关闭时若正处于 adaptive 态，退出辅助层（车道复位，键位拦截随之解除）
+  if (!assistEnabled.value && session.adaptiveMode.value) session.exitAdaptive()
+  showToast(
+    assistEnabled.value ? 'AI 辅助已开启' : 'AI 辅助已关闭：可安静手写，Space 恢复普通空格',
+    'info',
+  )
+}
+
+// 快捷键速查弹层
+const showShortcuts = ref(false)
 
 // 生成进行中：stage 非 idle（覆盖面板叠加在编辑器上，物理遮挡使其不可操作）
 const isGenerating = computed(() =>
@@ -108,15 +213,17 @@ const previewSegmentIndex = computed(() =>
   previewEditable.value ? (session.readyBeatCard.value?.segment_index ?? null) : null,
 )
 
-// 保存状态（状态栏显示；实际写库在下方 handleUpdateChapter）
+// 保存状态（底栏 + 编辑器标题行显示；实际写库在下方 handleUpdateChapter）
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+const lastSavedAt = ref<Date | null>(null)
 
-// 生成/精修失败：session.error 原先全前端无渲染点，SSE 失败后用户无感知。
-// 这里统一弹 error toast 并清空（stage 保持 'error'，由 Stepper/Overlay 展示失败态与重试入口）
+// 生成/精修失败：统一弹 error toast（技术原文经 formatGenerationError 归类为可读文案）。
+// 不再消费后即清空——error 原文需存活到 stage 离开 error（Overlay/Stepper 错误卡据此
+// 展示真实原因）；各入口（retry/cancel/startBeat/loadForChapter 等）已负责清空。
 watch(() => session.error.value, (err) => {
   if (err) {
-    showToast(err, 'error')
-    session.error.value = null
+    console.error('[生成错误]', err)
+    showToast(formatGenerationError(err), 'error')
   }
 })
 
@@ -141,6 +248,8 @@ watch(() => session.pendingSaveText.value, async (text) => {
       saveStatus.value = 'saving'
       await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
       saveStatus.value = 'saved'
+      lastSavedAt.value = new Date()
+      clearChapterDraft(selectedChapter.value.id)
       showToast('已更新该段正文并保存', 'success')
     } catch (e: any) {
       saveStatus.value = 'error'
@@ -160,6 +269,8 @@ watch(
     } else if (newBookId && store.books.value.length === 0) {
       store.loadBooks().then(() => {
         if (newBookId !== store.currentBookId.value) store.selectBook(newBookId)
+      }).catch((e: any) => {
+        showToast('加载书籍失败：' + (e?.message || '未知错误'), 'error')
       })
     }
   },
@@ -198,6 +309,36 @@ watch(selectedChapterId, (newId) => {
   }
 }, { immediate: true })
 
+// 本地草稿恢复：章节对象可用时检查未落库草稿（保存失败/断网/关窗残留）。
+// 与库内正文一致 = 已落库过的残留，静默清除；不一致才弹确认。
+watch(() => selectedChapter.value?.id, (newId) => {
+  if (newId) void _checkDraftRecovery(newId)
+})
+
+async function _checkDraftRecovery(chapterId: string) {
+  const draft = loadChapterDraft(chapterId)
+  if (!draft) return
+  const currentText = stripHtmlToText(selectedChapter.value?.content_text || '').trim()
+  if (stripHtmlToText(draft.content).trim() === currentText) {
+    clearChapterDraft(chapterId)
+    return
+  }
+  const time = new Date(draft.savedAt).toLocaleString('zh-CN', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+  const ok = await showConfirm({
+    title: '发现未保存的草稿',
+    message: `本章有一份 ${time} 的本地草稿（上次保存失败或窗口意外关闭时留下的）。`,
+    warning: '选择「恢复」将用草稿覆盖本章正文；选择「放弃」将丢弃草稿。',
+    confirmText: '恢复草稿',
+    cancelText: '放弃',
+  })
+  if (ok) {
+    await handleUpdateChapter(chapterId, { content_text: draft.content, draft_text: draft.content })
+  }
+  clearChapterDraft(chapterId)
+}
+
 // 两栏分栏宽度（持久化数组保持 3 元结构兼容旧 prefs，第三元为历史右栏值不再使用）
 const splitSizes = ref<number[]>(loadUiPrefs().splitSizes || [20, 55, 25])
 // 警示：splitpanes v4 的 resized 载荷是对象 { event, index, panes: [{min,max,size}] }（v3 才是数组）。
@@ -221,20 +362,46 @@ function onResize(payload: { panes?: { size: number }[] }) {
 // ============================================================
 // NLE-ADF 2.0 画布化：右缘隐形抽屉 + 打字沉浸 + 微观状态栏
 // ============================================================
-// 抽屉：右缘 2px 触发条 hover 滑出 / Ctrl+\ 固定；覆盖式（不推挤画布）。
+// 抽屉：顶栏按钮 / Ctrl+\ 固定切换；右缘触发条 hover 瞥看；覆盖式（不推挤画布）。
+// pinned 态持久化到 uiPrefs（rightDrawerOpen 字段）。
 const drawerHover = ref(false)
-const drawerPinned = ref(false)
+const drawerPinned = ref(loadUiPrefs().rightDrawerOpen ?? false)
 const drawerOpen = computed(() => drawerHover.value || drawerPinned.value)
+
+function toggleDrawerPinned() {
+  drawerPinned.value = !drawerPinned.value
+  if (drawerPinned.value) drawerHover.value = false
+  try {
+    saveUiPrefs({ ...loadUiPrefs(), rightDrawerOpen: drawerPinned.value })
+  } catch (e) {
+    console.error('[Workspace] 保存抽屉固定态失败', e)
+  }
+}
 
 function _drawerKeyHandler(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
     e.preventDefault()
-    drawerPinned.value = !drawerPinned.value
-    if (drawerPinned.value) drawerHover.value = false
+    toggleDrawerPinned()
   }
 }
 onMounted(() => window.addEventListener('keydown', _drawerKeyHandler))
 onBeforeUnmount(() => window.removeEventListener('keydown', _drawerKeyHandler))
+
+// 裁决态自动滑出抽屉（UX 修复：裁决控制面全在抽屉内，此前无可见入口=可发现性事故）。
+// 用 hover 态弹出（不 pin、不推挤画布）；一次裁决会话只自动弹一次
+// （作者手动关过就不在逐拍间反复弹）；到终态时若仍是自动弹出态则收回。
+const ADJUDICATION_STAGES = new Set(['beat_stepping', 'beat_branch_choosing', 'beat_pending', 'tier_decided'])
+let _drawerAutoOpened = false
+watch(() => session.stage.value, (s) => {
+  const adjudicating = ADJUDICATION_STAGES.has(s)
+  if (adjudicating && !_drawerAutoOpened && !drawerOpen.value) {
+    drawerHover.value = true
+    _drawerAutoOpened = true
+  } else if (!adjudicating && _drawerAutoOpened && (s === 'idle' || s === 'done' || s === 'error')) {
+    _drawerAutoOpened = false
+    if (!drawerPinned.value) drawerHover.value = false
+  }
+})
 
 // 打字沉浸：编辑活动期间顶栏/时间轴降到极低透明度（设计稿"打字时 10%"）。
 const isTyping = ref(false)
@@ -312,6 +479,7 @@ watch(selectedChapter, (ch, prev) => {
 }, { immediate: true })
 
 function _onAuthorActivity() {
+  if (!assistEnabled.value) return  // AI 辅助关闭：纯手写，不激活 adaptive 辅助层
   const chapterId = selectedChapterId.value
   if (!chapterId) return
   if (_activatedChapterId === chapterId) return  // 已激活
@@ -371,7 +539,9 @@ function openExtractionModal() {
 }
 function onExtractionCompleted() {
   // 刷新章节列表（角色/关联可能已更新）
-  store.loadCurrentBookData()
+  store.loadCurrentBookData().catch((e: any) => {
+    showToast('刷新书籍数据失败：' + (e?.message || '未知错误'), 'error')
+  })
 }
 
 // 多选删除章节
@@ -484,14 +654,19 @@ async function handleUpdateChapter(id: string, updates: Record<string, unknown>)
   try {
     await store.updateChapter(id, updates as any)
     saveStatus.value = 'saved'
+    lastSavedAt.value = new Date()
+    // 正文落库成功 → 清本地草稿兜底（失败则保留，下次输入自动重试/进章弹恢复）
+    if ('content_text' in updates) clearChapterDraft(id)
   } catch (e: any) {
     saveStatus.value = 'error'
-    showToast('保存失败：' + e.message, 'error')
+    showToast('保存失败：' + e.message + '（内容已存本地草稿，不会丢失）', 'error')
   }
 }
 
 function handleRefreshCharacters() {
-  store.refreshCharacters()
+  store.refreshCharacters().catch((e: any) => {
+    showToast('刷新角色失败：' + (e?.message || '未知错误'), 'error')
+  })
 }
 
 // 生成完成：把正文灌入编辑器（通过 chapterEditorRef）+ 弹完成弹窗
@@ -514,7 +689,8 @@ async function handleGenerated(text: string) {
   }
 }
 
-const wordCount = computed(() => (selectedChapter.value?.content_text || '').length)
+// 字数口径：content_text 是富文本 HTML，剥标签后计字符（此前直接 .length 把标签计入，虚高）
+const wordCount = computed(() => countChapterWords(selectedChapter.value?.content_text || ''))
 
 // 删除章节（悬停章节行出现入口，确认后调用 store.deleteChapter）
 async function confirmDeleteChapter(ch: Chapter) {
@@ -534,7 +710,7 @@ async function confirmDeleteChapter(ch: Chapter) {
 </script>
 
 <template>
-  <div class="workspace-view">
+  <div class="workspace-view" :class="{ 'workspace-view--drawer-pinned': drawerPinned }">
     <Splitpanes class="workspace-split" @resized="onResize">
       <!-- 左栏：章节导航 Binder -->
       <Pane :size="splitSizes[0]" :min-size="14" :max-size="32" class="binder-pane">
@@ -648,11 +824,37 @@ async function confirmDeleteChapter(ch: Chapter) {
             </span>
             <span v-if="nleStateLabel" class="nle-topbar__state">{{ nleStateLabel }}</span>
             <span v-if="nleProgress" class="nle-topbar__progress">{{ nleProgress }}</span>
+            <!-- 显性入口三件套：AI 辅助开关 / 快捷键速查 / 副驾抽屉
+                 （抽屉此前只有 8px 隐形触发条+Ctrl+\，核心功能无可见入口） -->
+            <button
+              class="nle-topbar__btn"
+              :class="{ 'nle-topbar__btn--active': assistEnabled }"
+              :title="assistEnabled ? 'AI 辅助已开启（点击关闭：Space 恢复普通空格，停顿感知/卡片舱停用）' : 'AI 辅助已关闭（纯手写模式，点击开启）'"
+              @click="toggleAssist"
+            >
+              <Icon name="sparkles" :size="13" />
+            </button>
+            <button
+              class="nle-topbar__btn"
+              title="快捷键一览"
+              @click="showShortcuts = true"
+            >
+              <Icon name="question-mark-circle" :size="13" />
+            </button>
+            <button
+              class="nle-topbar__btn"
+              :class="{ 'nle-topbar__btn--active': drawerOpen }"
+              title="副驾面板（Ctrl+\ 固定）"
+              @click="toggleDrawerPinned"
+            >
+              <Icon name="panel-right" :size="13" />
+            </button>
           </div>
           <!-- NLE-ADF 2.0 岔路门画布横幅（有岔路时顶部滑入；唯一允许打断心流的组件） -->
           <BranchBanner :session="session" />
           <!-- 编辑器（复用 ChapterEditorContainer 全套）；生成中叠加覆盖面板 -->
           <div v-if="selectedChapter" class="editor-host">
+            <div class="editor-main">
             <ChapterEditor
               ref="chapterEditorRef"
               :selected-chapter="selectedChapter"
@@ -662,6 +864,8 @@ async function confirmDeleteChapter(ch: Chapter) {
               :preview-html="generationPreviewHtml"
               :preview-editable="previewEditable"
               :preview-segment-index="previewSegmentIndex"
+              :save-status="saveStatus"
+              :last-saved-at="lastSavedAt"
               @preview-segment-edit="session.setReadySegmentText"
               @update-chapter="handleUpdateChapter"
               @refresh-characters="handleRefreshCharacters"
@@ -673,6 +877,16 @@ async function confirmDeleteChapter(ch: Chapter) {
               @cancel="session.cancel"
               @retry="session.retry"
             />
+            </div>
+            <!-- 左缘感知带：写中常驻，Canon 感知（角色/伏笔/矛盾）；放正文左侧避开右边抽屉 -->
+            <PerceptionBand
+              v-if="adaptiveComposing"
+              :suggestions="session.adaptiveSuggestions.value"
+            >
+              <template #dock>
+                <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />
+              </template>
+            </PerceptionBand>
           </div>
 
           <!-- 空状态 -->
@@ -693,13 +907,24 @@ async function confirmDeleteChapter(ch: Chapter) {
             <GhostTimeline :session="session" />
             <span v-if="saveStatus === 'saving'">保存中…</span>
             <span v-else-if="saveStatus === 'saved'" class="muted">已保存</span>
+            <span v-else-if="saveStatus === 'error'" class="status-error">保存失败（已存本地草稿）</span>
           </footer>
-          <!-- NLE-ADF 2.0 灵感悬浮舱（Teleport 到 body，跟随光标；键盘交互在 session） -->
-          <SparkDock />
+          <!-- NLE-ADF 灵感悬浮舱（镜头碎片竖排）已迁入右缘感知带 PerceptionBand #dock slot -->
+          <!-- NLE-ADF 走向卡舱（Ctrl+Space 唤起：选走向 → burst 段落级连写） -->
+          <BeatCardDock @pick="(card) => onBeatCardPick(card)" />
+          <!-- NLE-ADF 点火卡（空章冷启动：AI 写开头，幽灵草稿形态） -->
+          <IgnitionCard
+            v-if="showIgnition"
+            :has-outline="!!(selectedChapter?.outline_text || '').trim()"
+            @ignite="onIgnite"
+            @dismiss="onIgnitionDismiss"
+          />
           <!-- NLE-ADF 3.0 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
           <ThinkingIndicator />
           <!-- 软切淡提示（写过头自动收束时浮现 8s，可撤回合并） -->
           <AutoCutHint :session="session" />
+          <!-- 快捷键速查弹层（顶栏 ? 按钮触发） -->
+          <ShortcutsCheatsheet v-if="showShortcuts" @close="showShortcuts = false" />
         </main>
       </Pane>
 
@@ -741,6 +966,14 @@ async function confirmDeleteChapter(ch: Chapter) {
   height: 100%;
   overflow: hidden;
   background: var(--bg-primary);
+  /* 抽屉固定（Ctrl+\）时推挤内容区：编辑列在剩余空间重新居中，过渡与抽屉滑入同速 */
+  transition: padding-right 0.22s ease;
+}
+
+/* 推挤量与 .inspector-drawer 宽度同一公式（width:380px; max-width:44vw）。
+   仅 pinned 推挤——hover 瞥看仍是覆盖式，避免鼠标划过右缘时内容反复重排。 */
+.workspace-view--drawer-pinned {
+  padding-right: min(380px, 44vw);
 }
 
 .workspace-split {
@@ -1072,15 +1305,29 @@ async function confirmDeleteChapter(ch: Chapter) {
   height: 100%;
   background: var(--bg-primary);
   overflow: hidden;
+  /* 点火卡 absolute 居中的定位锚（teleport 到 body 的浮层不受影响） */
+  position: relative;
 }
 
 .editor-host {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row; /* 正文主区 + 右缘感知带并列 */
   overflow: hidden;
   min-height: 0;
   position: relative; /* 供 GenerationOverlay 绝对定位 */
+}
+
+/* 正文主区（ChapterEditor + GenerationOverlay）；感知带在其右侧并列 */
+.editor-main {
+  flex: 0 1 auto;
+  max-width: 60rem;
+  margin: 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
 }
 
 /* 空状态 */
@@ -1151,5 +1398,38 @@ async function confirmDeleteChapter(ch: Chapter) {
 
 .status-bar .muted {
   opacity: 0.7;
+}
+
+.status-bar .status-error {
+  color: #dc2626;
+}
+
+/* 顶栏显性入口按钮（AI 辅助开关 / 快捷键 / 副驾抽屉） */
+.nle-topbar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.nle-topbar__btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.nle-topbar__btn--active {
+  color: var(--accent-500);
+}
+/* 锁死进度隐藏时把按钮组推到右侧（进度在时由 __progress 的 margin-left:auto 推） */
+.nle-topbar__btn:first-of-type {
+  margin-left: auto;
+}
+.nle-topbar__progress ~ .nle-topbar__btn:first-of-type {
+  margin-left: 0;
 }
 </style>

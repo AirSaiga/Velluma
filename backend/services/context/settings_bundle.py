@@ -134,6 +134,9 @@ class SettingsBundle:
             "open_hooks": _hooks_text(self.open_hooks),
             "must_hit_events": _must_hit_events_text(self.chapter_card),
             "foreshadow_ops": _foreshadow_ops_text(self.chapter_card),
+            # 读者期待（书级 reader_mirror JSONB，随 book 对象零额外查询）：
+            # 活跃条目按张力降序前 3，供方向权重（读者力）与 dock 零件生发消费
+            "reader_expectations": _reader_expectations_view(self.book),
         }
 
     def nutrients(self) -> Dict[str, Any]:
@@ -161,6 +164,32 @@ class SettingsBundle:
             if name and name not in names:
                 names.append(name)
         return names[:limit]
+
+
+def _reader_expectations_view(book: Any) -> List[Dict[str, Any]]:
+    """从 Book.reader_mirror JSONB 提取活跃期待（方向权重读者力 / dock 零件生发用）。
+
+    只暴露 type / description(截40字) / tension 三字段——张力数字进权重算法，
+    描述文本进 dock prompt，均有界。账本缺失/损坏一律降级为空列表（不阻塞辅助层）。
+    """
+    raw = getattr(book, "reader_mirror", None) if book is not None else None
+    if not isinstance(raw, dict):
+        return []
+    items = raw.get("expectations") or []
+    active = [
+        e for e in items
+        if isinstance(e, dict) and e.get("status") in ("setup", "accumulating")
+    ]
+    active.sort(key=lambda e: -(e.get("current_tension") or 0))
+    return [
+        {
+            "type": e.get("type") or "",
+            "description": (e.get("description") or "")[:40],
+            "tension": e.get("current_tension") or 5,
+        }
+        for e in active[:3]
+        if e.get("description")
+    ]
 
 
 # ============================================================

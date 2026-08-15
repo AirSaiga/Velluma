@@ -30,6 +30,8 @@ import BeatSlotCardView from '../../generation/presentation/BeatSlotCardView.vue
 import FocusAssetsPanel from '../../generation/presentation/FocusAssetsPanel.vue'
 import SceneSettingsPanel from '../presentation/SceneSettingsPanel.vue'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { countChapterWords } from '../../../shared/utils/htmlText'
 
 type InspectorTab = 'plan' | 'setting' | 'refine' | 'feedback' | 'canon' | 'beats' | 'focus'
 
@@ -44,6 +46,7 @@ const store = useAppStore()
 const selectedChapter = store.selectedChapter
 const characters = store.characters
 const selectedChapterId = store.selectedChapterId
+const { show: showConfirm } = useConfirmDialog()
 
 // V4.x 重构：session 从外部传入（由 WorkspaceView 创建并共享给中栏覆盖面板）
 // 如果没传（独立使用 InspectorPanel），自己创建
@@ -143,7 +146,8 @@ const chapterCharacters = computed(() => {
   return characters.value.filter((c) => ids.includes(c.id))
 })
 
-const wordCount = computed(() => (selectedChapter.value?.content_text || '').length)
+// 字数口径：剥 HTML 标签后计字符（此前 .length 把 <p>/mark 标签计入，虚高）
+const wordCount = computed(() => countChapterWords(selectedChapter.value?.content_text || ''))
 
 /** 审校 verdict 中文标签（ADF 审计与 Refinery 回读共用） */
 const VERDICT_LABELS: Record<string, string> = {
@@ -168,10 +172,20 @@ function updateChapterField(field: 'title' | 'outline_text', value: string) {
   }, 500)
 }
 
-function startGenerate() {
+async function startGenerate() {
   if (!selectedChapterId.value) {
     console.warn('[Inspector] startGenerate: 无选中章节')
     return
+  }
+  // 完成态再点 = 重新生成：新管线完成后会覆盖本章正文，先确认（此前无提示直接覆盖）
+  if (session.stage.value === 'done' && (selectedChapter.value?.content_text || '').replace(/<[^>]*>/g, '').trim()) {
+    const ok = await showConfirm({
+      title: '重新生成本章',
+      message: '重新生成完成后将用新正文覆盖本章现有内容。',
+      warning: '建议在覆盖前确认当前正文已无需保留（生成过程可随时取消）。',
+      confirmText: '重新生成',
+    })
+    if (!ok) return
   }
   console.log('[Inspector] startGenerate:', { tier: tierSelection.value, chapterId: selectedChapterId.value })
   // 引擎已固定 BS-ADF：用 BeatSlot 卡作为介入点，不再走 plan-suggestion 弹窗
@@ -237,9 +251,16 @@ function onAdvancePass() {
   session.acceptReadySegment(selectedChapterId.value)
 }
 
-/** NLE-ADF：跳过本段 */
-function onAdvanceSkip() {
+/** NLE-ADF：跳过本段（确认后执行——段文本不进终稿，此前无确认误点即丢段） */
+async function onAdvanceSkip() {
   if (!selectedChapterId.value || !session.readyBeatId.value) return
+  const ok = await showConfirm({
+    title: '跳过本段',
+    message: '跳过后该段的已生成文本将被丢弃，不会进入终稿。',
+    warning: '如误点可在下一段就绪后用「回到上一段」挽回。',
+    confirmText: '跳过本段',
+  })
+  if (!ok) return
   session.advanceBeat(selectedChapterId.value, 'skip', { beatId: session.readyBeatId.value })
 }
 
@@ -480,6 +501,17 @@ function handleDismissInflight(idx: number) {
 
           <!-- ====== NLE-ADF 3.0 自适应写作：完稿 + 审计 + 沉淀结果 ====== -->
           <template v-if="session.adaptiveMode?.value && session.authorLane?.value === 'composing'">
+            <!-- 意图反推（后台规划的淡建议；此前后端算出的 intent_source/arc 无任何渲染点） -->
+            <section v-if="session.planSuggestions?.value" class="adaptive-settle">
+              <div class="section-label">意图反推</div>
+              <div class="settle-block">
+                <div class="settle-item">
+                  <span class="muted">{{ session.planSuggestions.value.source === 'author' ? '来自作者意图' : 'AI 推测' }}</span>
+                  <template v-if="session.planSuggestions.value.arc"> · 走向建议：{{ session.planSuggestions.value.arc }}</template>
+                </div>
+              </div>
+            </section>
+
             <!-- 沉淀抽取结果（涌现实体 + 冲突；作者主权：冲突不自动改） -->
             <section v-if="session.settleResult?.value?.emergent_facts || session.settleResult?.value?.conflicts?.length" class="adaptive-settle">
               <div class="section-label">沉淀抽取</div>
@@ -549,6 +581,10 @@ function handleDismissInflight(idx: number) {
                   <span class="issue-cat">{{ iss.category }}</span>
                   {{ iss.detail }}
                 </div>
+              </div>
+              <!-- 记忆倒灌：本章已入向量记忆（供后续章节前情召回） -->
+              <div v-if="session.finishReport.value.report.memory_indexed" class="report-block">
+                <div class="report-item">记忆索引 +{{ session.finishReport.value.report.memory_indexed }} 段（后续章节可呼应本章细节）</div>
               </div>
             </section>
 

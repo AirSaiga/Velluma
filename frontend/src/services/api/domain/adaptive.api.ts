@@ -24,10 +24,27 @@ export interface DockPart {
   icon: string
   text: string
   direction?: string
+  /** 来源标记：'expectation' = 期待账本衍生件 */
+  origin?: string
+}
+
+/** Canon 感知提示（canon_watch 组件产，写中停顿心跳返回） */
+export interface CanonHint {
+  /** 感知类型：appearance 角色出场 / callback 伏笔回收时机 / leak private 泄露 */
+  kind: 'appearance' | 'callback' | 'leak' | 'contradiction'
+  /** 实体名（角色名 / 伏笔标签 / Canon 节点 label） */
+  node_label: string
+  /** 实体类型：character / hook / canon */
+  node_type: string
+  /** 一句话说明（感知带卡片正文） */
+  detail: string
+  /** 严重度：error > warning > info（影响排序/着色） */
+  severity: string
 }
 
 export interface HeartbeatResult {
   dock_parts: DockPart[]
+  direction_cards: DirectionCard[]
   intent_source: string
   intent_arc: string
   intent_confidence: number
@@ -35,6 +52,14 @@ export interface HeartbeatResult {
   total_words: number
   activated: string[]
   signals: string[]
+  /** Canon 感知提示（canon_watch 产；写中右缘感知带数据源） */
+  canon_hints?: CanonHint[]
+}
+
+/** 走向卡（层 3 推测首 beat）：Ctrl+Space 走向卡舱的数据源 */
+export interface DirectionCard {
+  event: string
+  anchors: string[]
 }
 
 export interface SettleResult {
@@ -67,6 +92,8 @@ export interface FinishReport {
       issues?: Array<{ severity: string; category: string; detail: string }>
       verdict?: string
     }
+    /** 记忆倒灌：完稿时本章写入向量记忆的块数 */
+    memory_indexed?: number
   }
 }
 
@@ -126,17 +153,20 @@ export const adaptiveApi = {
     return requestJson(`/chapters/${chapterId}/adaptive/model`)
   },
 
-  /** 微缝合幽灵草稿（SSE 打字机推流） */
+  /** 微缝合幽灵草稿（SSE 打字机推流）；mode='burst' 为段落级连写、'outline' 为细纲扩写 */
   stitchGhost: async (
     chapterId: string,
     params: {
       fragment: string
       rolling_prefix?: string
-      mode?: 'stitch' | 'continue'
+      mode?: 'stitch' | 'continue' | 'burst' | 'open' | 'outline'
       picked_parts?: string[]
       target_chars?: number
       chapter_intent?: string
       adopted_direction?: string
+      beat_guidance?: string
+      /** outline 模式：细纲之后的已写正文开头（双端缝合用） */
+      after_text?: string
     },
     callbacks: {
       onStart?: (mode: string) => void

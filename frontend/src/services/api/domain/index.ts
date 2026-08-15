@@ -151,11 +151,9 @@ export const generateApi = {
 
 /** LLM profile（reasoning / creative / wash），api_key 永远为掩码形式 */
 export interface LLMProfileConfig {
-  provider: string
   api_key_masked: string
   has_api_key: boolean
   base_url: string
-  default_base_url: string
   model: string
   enabled: boolean
   effort: string
@@ -167,7 +165,8 @@ export interface ModelConfig {
   llm: {
     reasoning: LLMProfileConfig
     creative: LLMProfileConfig
-    wash: LLMProfileConfig
+    /** UI 已隐藏 wash 槽；GET 仍可能返回，类型层标记为非必需 */
+    wash?: LLMProfileConfig
   }
   embedding: {
     api_key_masked: string
@@ -183,9 +182,9 @@ export interface ModelConfig {
 
 /** 更新载荷：api_key 留空表示保持不变 */
 export interface ModelConfigUpdatePayload {
-  reasoning?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
-  creative?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
-  wash?: Partial<Pick<LLMProfileConfig, 'provider' | 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  reasoning?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  creative?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
+  wash?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   embedding?: { api_key?: string; model?: string; dimensions?: number }
   proxy?: { enabled: boolean; url: string }
 }
@@ -220,8 +219,6 @@ export const systemApi = {
     model_info?: {
       reasoning_model?: string
       creative_model?: string
-      reasoning_provider?: string
-      creative_provider?: string
       reasoning_success?: boolean
       creative_success?: boolean
     }
@@ -864,11 +861,21 @@ export const bsadfApi = {
     callbacks: BsadfStreamCallbacks,
     signal?: AbortSignal,
   ) => {
+    // 终态守卫（refinery hasCompleted 同款）：SSE 静默提前结束（后端重启/代理断流）
+    // 且未收到任何终态事件时合成 onError——此前无守卫，前端永久停在「梳理脉络」转圈
+    // （步进轮询看门狗只在收到槽位卡后才启动，Phase 1-4a 阶段完全无保护）。
+    let terminalReceived = false
     streamSse(`/chapters/${chapterId}/generate-bsadf`, params, {
-      onPayload: payload => _dispatchEvent(payload, callbacks),
-      onError: message => callbacks.onError?.(message),
+      onPayload: payload => {
+        if (payload?.event && BSADF_TERMINAL_EVENTS.has(payload.event)) terminalReceived = true
+        _dispatchEvent(payload, callbacks)
+      },
+      onDone: () => {
+        if (!terminalReceived) callbacks.onError?.('生成连接意外中断，请重试（后端可能已重启）')
+      },
+      onError: message => { terminalReceived = true; callbacks.onError?.(message) },
     }, signal).catch(err => {
-      if (!signal?.aborted) callbacks.onError?.(err.message)
+      if (!signal?.aborted && !terminalReceived) callbacks.onError?.(err.message)
     })
   },
 
@@ -889,11 +896,18 @@ export const bsadfApi = {
     callbacks: BsadfStreamCallbacks,
     signal?: AbortSignal,
   ) => {
+    let terminalReceived = false
     streamSse(`/chapters/${chapterId}/confirm-beats`, params, {
-      onPayload: payload => _dispatchEvent(payload, callbacks),
-      onError: message => callbacks.onError?.(message),
+      onPayload: payload => {
+        if (payload?.event && BSADF_TERMINAL_EVENTS.has(payload.event)) terminalReceived = true
+        _dispatchEvent(payload, callbacks)
+      },
+      onDone: () => {
+        if (!terminalReceived) callbacks.onError?.('生成连接意外中断，请重试（后端可能已重启）')
+      },
+      onError: message => { terminalReceived = true; callbacks.onError?.(message) },
     }, signal).catch(err => {
-      if (!signal?.aborted) callbacks.onError?.(err.message)
+      if (!signal?.aborted && !terminalReceived) callbacks.onError?.(err.message)
     })
   },
 
@@ -941,10 +955,17 @@ export const bsadfApi = {
     callbacks: BsadfStreamCallbacks,
     signal?: AbortSignal,
   ) => {
+    let terminalReceived = false
     streamSse(`/chapters/${chapterId}/advance-beat`, params, {
-      onPayload: payload => _dispatchEvent(payload, callbacks),
-      onError: message => callbacks.onError?.(message),
-    }, signal).catch(err => { if (!signal?.aborted) callbacks.onError?.(err.message) })
+      onPayload: payload => {
+        if (payload?.event && BSADF_TERMINAL_EVENTS.has(payload.event)) terminalReceived = true
+        _dispatchEvent(payload, callbacks)
+      },
+      onDone: () => {
+        if (!terminalReceived) callbacks.onError?.('生成连接意外中断，请重试（后端可能已重启）')
+      },
+      onError: message => { terminalReceived = true; callbacks.onError?.(message) },
+    }, signal).catch(err => { if (!signal?.aborted && !terminalReceived) callbacks.onError?.(err.message) })
   },
 
   /**
@@ -1005,6 +1026,18 @@ export const bsadfApi = {
 }
 
 /** 把 SSE 事件 payload 分流到对应回调（start / confirm 两条流共用） */
+/**
+ * BS-ADF 流的终态事件集：收到任一即视为正常收流（后端在这些事件后主动关流）。
+ * BEAT_BACKED/BEAT_SKIPPED 列入是保守选择：它们之后本应跟重渲事件，但即便流
+ * 恰在其后断开，步进轮询看门狗也能自愈——宁可漏报一次「中断」，不可误报刷屏。
+ */
+const BSADF_TERMINAL_EVENTS = new Set([
+  'COMPLETE', 'ERROR',
+  'BEAT_RENDER_READY', 'BEAT_BRANCH_CHOICE', 'BEAT_AUTHORING_OPEN',
+  'STEPPING_INITIALIZED', 'BEAT_SLOTS_BUILT',
+  'BEAT_BACKED', 'BEAT_SKIPPED',
+])
+
 function _dispatchEvent(
   payload: any,
   callbacks: BsadfStreamCallbacks,
@@ -1132,6 +1165,8 @@ export interface PlotLedgerEntry {
   status: 'open' | 'closed' | 'dropped'
   created_at_chapter?: number | null
   resolved_in_chapter_id?: string | null
+  world_time_planted?: number | null
+  world_time_resolved?: number | null
   meta?: Record<string, any>
 }
 
@@ -1142,6 +1177,8 @@ export interface PlotLedgerCreateInput {
   entry_type?: string
   status?: 'open' | 'closed' | 'dropped'
   created_at_chapter?: number | null
+  world_time_planted?: number | null
+  world_time_resolved?: number | null
   meta?: Record<string, any>
 }
 
@@ -1153,6 +1190,8 @@ export interface PlotLedgerUpdateInput {
   status?: 'open' | 'closed' | 'dropped'
   created_at_chapter?: number | null
   resolved_in_chapter_id?: string | null
+  world_time_planted?: number | null
+  world_time_resolved?: number | null
   meta?: Record<string, any>
 }
 

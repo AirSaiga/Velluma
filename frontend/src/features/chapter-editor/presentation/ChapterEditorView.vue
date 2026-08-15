@@ -89,7 +89,7 @@ function onContentUpdate(html: string) {
 
 <template>
   <div class="h-full flex flex-col overflow-hidden px-6 py-4 flex-1 min-h-0">
-    <div v-if="selectedChapter" class="max-w-[720px] w-full mx-auto flex flex-col h-full flex-1 min-h-0 space-y-3">
+    <div v-if="selectedChapter" class="max-w-[var(--editor-max-width)] w-full mx-auto flex flex-col h-full flex-1 min-h-0 space-y-3">
       <!-- 章节标题行 -->
       <div class="flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex-1 flex items-center gap-2">

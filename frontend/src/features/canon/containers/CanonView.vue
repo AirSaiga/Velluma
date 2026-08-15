@@ -12,6 +12,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCanon, NODE_TYPE_LABELS, VISIBILITY_LABELS } from '../composables/useCanon'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { useToast } from '../../../composables/useToast'
 import type { CanonNode, CanonEdge, CanonNodeType } from '../../../services/api/domain/canon.api'
 import CanonGraph from './CanonGraph.vue'
 import NodeEditModal from '../presentation/NodeEditModal.vue'
@@ -21,6 +23,8 @@ const route = useRoute()
 const bookId = computed(() => route.params.bookId as string)
 
 const canon = useCanon()
+const { show: showConfirm } = useConfirmDialog()
+const { showToast } = useToast()
 
 const activeTab = ref<'graph' | 'nodes' | 'hooks'>('graph')
 
@@ -80,13 +84,27 @@ function openEditEdge(edge: CanonEdge) {
 }
 
 async function handleDeleteNode(node: CanonNode) {
-  if (!confirm(`删除节点 [${node.label}]？相连的边会一并删除。`)) return
-  await canon.deleteNode(bookId.value, node.id)
+  const ok = await showConfirm({
+    title: '删除节点',
+    message: `删除节点 [${node.label}]？相连的边会一并删除。`,
+    warning: '删除后不可恢复。',
+  })
+  if (!ok) return
+  try {
+    await canon.deleteNode(bookId.value, node.id)
+  } catch (e: any) {
+    showToast('删除节点失败：' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 async function handleDeleteEdge(edge: CanonEdge) {
-  if (!confirm(`删除这条边？`)) return
-  await canon.deleteEdge(bookId.value, edge.id)
+  const ok = await showConfirm({ title: '删除边', message: '确定删除这条边吗？' })
+  if (!ok) return
+  try {
+    await canon.deleteEdge(bookId.value, edge.id)
+  } catch (e: any) {
+    showToast('删除边失败：' + (e?.message || '未知错误'), 'error')
+  }
 }
 
 onMounted(async () => {

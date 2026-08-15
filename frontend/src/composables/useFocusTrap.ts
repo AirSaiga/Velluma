@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref, watch, nextTick, type Ref } from 'vue'
 
 export function useFocusTrap(containerRef: Ref<HTMLElement | null>, activeRef: Ref<boolean>, options?: { onEscape?: () => void }) {
   let previouslyFocused: Element | null = null
@@ -47,9 +47,11 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>, activeRef: R
     }
   }
 
-  watch(activeRef, (active) => {
+  watch(activeRef, async (active) => {
     if (active) {
       previouslyFocused = document.activeElement
+      // 等 v-if/渲染完成再查询可焦点元素（watch 默认 pre-flush，此时 DOM 未更新）
+      await nextTick()
       const focusable = getFocusableElements()
       if (focusable.length) {
         focusable[0].focus()

@@ -118,6 +118,9 @@ function createAppStore(): AppStore {
       await loadCurrentBookData()
     } catch (error) {
       console.error('[AppStore] 加载书籍失败:', error)
+      // rethrow：调用方（AppShell/LibraryView 等）需感知失败弹提示——
+      // 此前静默吞掉，用户把「加载失败」误判为「数据丢失（空书架）」
+      throw error
     }
   }
 
@@ -157,6 +160,7 @@ function createAppStore(): AppStore {
       }
     } catch (error) {
       console.error('[AppStore] 加载数据失败:', error)
+      throw error  // 见 loadBooks：加载失败必须让调用方可感知
     } finally {
       loading.value = false
     }
@@ -258,6 +262,7 @@ function createAppStore(): AppStore {
       characters.value = await characterApi.getAll(currentBookId.value)
     } catch (error) {
       console.error('[AppStore] 加载角色失败:', error)
+      throw error  // 调用方（WorkspaceView）toast 提示
     }
   }
 

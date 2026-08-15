@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { useFocusTrap } from '../composables/useFocusTrap'
 
 export interface ConfirmDialogOptions {
   title: string
@@ -32,6 +33,13 @@ function handleConfirm() {
 function handleCancel() {
   emit('cancel')
 }
+
+// 键盘可用（UX 修复）：Esc=取消、Tab 焦点捕获、关闭后焦点还原。
+// 默认聚焦第一个可焦点元素 = 「取消」按钮（DOM 顺序在前）——危险确认场景
+// 防止焦点停留在背后页面的删除按钮上，Enter 误触发二次操作。
+const dialogRef = ref<HTMLElement | null>(null)
+const dialogActive = computed(() => props.visible && !!props.options)
+useFocusTrap(dialogRef, dialogActive, { onEscape: handleCancel })
 </script>
 
 <template>
@@ -39,12 +47,18 @@ function handleCancel() {
     <Transition name="modal">
       <div
         v-if="visible && options"
-        class="fixed inset-0 z-50 flex items-center justify-center"
+        class="fixed inset-0 z-[110] flex items-center justify-center"
       >
         <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" @click="handleCancel"></div>
-        <div class="modal-content relative bg-parchment-50 dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+        <div
+          ref="dialogRef"
+          class="modal-content relative bg-parchment-50 dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-dialog-title"
+        >
           <div class="p-6">
-            <h3 class="text-lg font-heading font-semibold text-gray-900 dark:text-gray-100 mb-3">
+            <h3 id="confirm-dialog-title" class="text-lg font-heading font-semibold text-gray-900 dark:text-gray-100 mb-3">
               {{ title }}
             </h3>
             <p class="text-gray-600 dark:text-gray-300 mb-4 whitespace-pre-wrap">

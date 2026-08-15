@@ -27,7 +27,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {
   "llm": {
     "reasoning": {
-      "provider": "openrouter" | "volcengine" | "deepseek",
       "api_key": "...",
       "base_url": "...",
       "model": "...",
@@ -36,7 +35,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       "exclude": false
     },
     "creative": {
-      "provider": "openrouter" | "volcengine" | "deepseek",
       "api_key": "...",
       "base_url": "...",
       "model": "...",
@@ -63,16 +61,16 @@ Deepseek 配置示例：
 {
   "llm": {
     "reasoning": {
-      "provider": "deepseek",
       "api_key": "sk-xxx",
+      "base_url": "https://api.deepseek.com",
       "model": "deepseek-reasoner",
       "enabled": true,
       "effort": "medium",
       "exclude": false
     },
     "creative": {
-      "provider": "deepseek",
       "api_key": "sk-xxx",
+      "base_url": "https://api.deepseek.com",
       "model": "deepseek-chat",
       "enabled": true
     }
@@ -82,7 +80,7 @@ Deepseek 配置示例：
 
 import json
 import os
-from typing import Dict, Optional, Literal
+from typing import Dict, Optional
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -91,13 +89,9 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "model_config.json")
 # 内存缓存
 _config_cache: Optional[Dict] = None
 
-LLMProvider = Literal["openrouter", "volcengine", "deepseek"]
-
-DEFAULT_PROVIDER_URLS: Dict[LLMProvider, str] = {
-    "openrouter": "https://openrouter.ai/api/v1",
-    "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
-    "deepseek": "https://api.deepseek.com/v1",
-}
+# base_url 为空时的硬编码兜底。provider 字段已删除，不再按厂商映射；
+# 兜底值与 example.json 默认（DeepSeek）一致，用户应显式填写 base_url。
+DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 
 
 def _load_config() -> Dict:
@@ -128,7 +122,7 @@ def get_llm_config() -> Dict:
 
 def get_model_profile(model_type: str = "default") -> Dict:
     """
-    获取指定模型类型的独立配置（provider / api_key / base_url / model / enabled / effort / exclude）。
+    获取指定模型类型的独立配置（api_key / base_url / model / enabled / effort / exclude）。
 
     Args:
         model_type: "reasoning" | "creative" | "wash" | "default"
@@ -139,9 +133,15 @@ def get_model_profile(model_type: str = "default") -> Dict:
     设计说明：
     - "default" 映射到 "reasoning" 配置，与旧版行为一致
       （旧版中 model_type="default" 默认使用 reasoning_model）
+    - "reasoning"（分析模型）：读取 llm.reasoning 配置；槽位不完整（缺
+      model/api_key）时，连接三件套（api_key/base_url/model）整体回退到
+      creative，使「分析模型留空→自动用写作模型」在连接层面成立。
+      enabled/effort/exclude 仍保留 reasoning 自己的语义（不随 creative 变），
+      避免「写作模型关 thinking 的配置意外影响分析任务」。
+      前端设置面板据此承诺「分析模型留空则自动使用与写作模型相同的配置」。
     - "wash"（洗涤槽，去 AI 味专用）：读取 llm.wash 配置；
-      槽位缺失或不完整（缺 model/api_key）时回退到 creative 配置，
-      保证未配置 wash 的用户行为与旧版完全一致
+      槽位缺失或不完整（缺 model/api_key）时整体回退到 creative 配置，
+      保证未配置 wash 的用户行为与旧版完全一致。
     """
     llm_cfg = get_llm_config()
     if model_type in ("reasoning", "default"):
@@ -152,14 +152,27 @@ def get_model_profile(model_type: str = "default") -> Dict:
         key = "creative"
     profile = llm_cfg.get(key, {})
 
-    # wash 槽未配置/不完整 → 回退 creative（编辑任务与正文同源，行为同旧版）
+    # wash 槽未配置/不完整 → 整体回退 creative（编辑任务与正文同源，行为同旧版）
     if model_type == "wash" and not (profile.get("model") and profile.get("api_key")):
         profile = llm_cfg.get("creative", {})
 
+    # reasoning 槽不完整 → 仅借用 creative 的连接三件套，保留自身 thinking 语义。
+    # 场景：前端设置面板允许「分析模型留空→自动用写作模型」；此时连接必须复用
+    # creative 的 api_key/base_url/model 才能发请求，但 reasoning 任务
+    # 的 thinking 开关（enabled/effort/exclude）不应被 creative 的配置污染。
+    if model_type in ("reasoning", "default") and not (profile.get("model") and profile.get("api_key")):
+        creative_profile = llm_cfg.get("creative", {})
+        if creative_profile.get("model") and creative_profile.get("api_key"):
+            profile = {
+                **profile,
+                "api_key": creative_profile.get("api_key", ""),
+                "base_url": creative_profile.get("base_url", ""),
+                "model": creative_profile.get("model", ""),
+            }
+
     return {
-        "provider": profile.get("provider", "openrouter"),
         "api_key": profile.get("api_key", ""),
-        "base_url": profile.get("base_url", "") or DEFAULT_PROVIDER_URLS.get(profile.get("provider", "openrouter"), ""),
+        "base_url": profile.get("base_url", "") or DEFAULT_BASE_URL,
         "model": profile.get("model", ""),
         "enabled": profile.get("enabled", False),
         "effort": profile.get("effort", "medium"),

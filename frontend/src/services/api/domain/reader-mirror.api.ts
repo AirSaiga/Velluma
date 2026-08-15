@@ -116,3 +116,55 @@ export const EXPECTATION_STATUS_COLORS: Record<ExpectationStatus, string> = {
   subverted: '#8b5cf6',
   dropped: '#6b7280',
 }
+
+// ============================================================
+// 人话层（UX 重构）：火候 / 时机 / 类型归类
+// 底层存储不变（数字张力、状态枚举），这里只负责语言映射
+// ============================================================
+
+/** 火候四档：录入时替代裸数字张力，tension 为落库映射值 */
+export const HEAT_LEVELS = [
+  { key: 'simmering', label: '刚埋下', tension: 2 },
+  { key: 'brewing', label: '在发酵', tension: 5 },
+  { key: 'urgent', label: '读者急了', tension: 8 },
+  { key: 'overdue', label: '快凉了', tension: 10 },
+] as const
+
+/** 数字张力 → 火候词（列表卡片展示用） */
+export function tensionToHeat(tension: number): string {
+  if (tension <= 3) return '刚埋下'
+  if (tension <= 6) return '在发酵'
+  if (tension <= 8) return '读者急了'
+  return '快凉了'
+}
+
+/**
+ * 释放时机五档：作者的时间感是模糊的，不强制具体章号。
+ * override 写入 author_override（作者处理意图），expected_payoff_chapter 一律存 null。
+ */
+export const TIMING_OPTIONS = [
+  { key: 'unknown', label: '没想好', override: null },
+  { key: 'soon', label: '尽快', override: '打算：尽快收' },
+  { key: 'few', label: '几章后', override: '打算：几章后收' },
+  { key: 'volume_end', label: '卷末', override: '打算：卷末收' },
+  { key: 'long', label: '长线捂着', override: '打算：长线捂着' },
+] as const
+
+/**
+ * 按描述关键词确定性归类（无 AI）：为类型 select 提供预填默认值，用户可改。
+ * 具体词（打脸/相认等）优先，泛化词（为什么/到底）殿后，默认悬念。
+ */
+export function guessTypeFromDescription(description: string): ExpectationType {
+  const d = description || ''
+  const rules: Array<[ExpectationType, string[]]> = [
+    ['revenge', ['打脸', '复仇', '报仇', '雪耻', '教训', '收拾']],
+    ['romance', ['感情', '相认', '告白', '在一起', '心动', '表白']],
+    ['power_reveal', ['展露', '实力', '底牌', '能力', '出手', '爆发']],
+    ['growth', ['升级', '成长', '突破', '变强', '觉醒', '蜕变']],
+    ['mystery', ['来历', '是谁', '真相', '身份', '秘密', '目的', '为什么', '到底']],
+  ]
+  for (const [type, keywords] of rules) {
+    if (keywords.some(k => d.includes(k))) return type
+  }
+  return 'mystery'
+}

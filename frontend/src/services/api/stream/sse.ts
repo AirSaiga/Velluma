@@ -22,7 +22,14 @@ export async function streamSse(
   }, 0)
 
   if (!response.ok) {
-    throw new Error(`生成请求失败: ${response.status} ${response.statusText}`)
+    // 提取 FastAPI 错误体的 detail（与 http.ts requestJson 的归一化对齐）——
+    // 此前只拼英文 statusText，后端在 body 里给的友好说明（配额/参数错误等）被整个丢弃
+    let detail = ''
+    try {
+      const body = await response.json()
+      detail = body?.detail || ''
+    } catch { /* 非 JSON 错误体忽略 */ }
+    throw new Error(detail || `生成请求失败: ${response.status} ${response.statusText}`)
   }
 
   const reader = response.body?.getReader()

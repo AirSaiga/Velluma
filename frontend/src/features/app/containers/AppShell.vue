@@ -40,7 +40,12 @@ const pageTitle = computed(() => (route.meta.title as string) || 'Velluma')
 
 onMounted(async () => {
   initTheme()
-  await store.loadBooks()
+  try {
+    await store.loadBooks()
+  } catch (e: any) {
+    // 首屏加载失败必须可见：此前静默吞掉，用户把「后端没起」误判为「数据丢失（空书架）」
+    showToast('加载书籍失败：' + (e?.message || '未知错误') + '（请确认后端服务已启动）', 'error')
+  }
 })
 
 // 暴露给需要 toast/confirm 的深层组件（通过 provide/inject 或 app.config.globalProperties）

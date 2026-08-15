@@ -2,11 +2,13 @@
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { styleApi, bookApi } from '../services/api'
 import { useToast } from '../composables/useToast'
+import { useConfirmDialog } from '../composables/useConfirmDialog'
 import { PanelContainer, PanelSection, PanelCard, PanelEmpty } from './panels'
 import Icon from './Icon.vue'
 import type { StyleCard, NegativeItem, AuthorSample, AuthorSampleSceneType } from '../types'
 
 const { showToast } = useToast()
+const { show: showConfirm } = useConfirmDialog()
 
 const props = withDefaults(defineProps<{
   bookId: string
@@ -237,6 +239,13 @@ async function createSample() {
 }
 
 async function deleteSample(sampleId: string) {
+  // 删除无确认曾是保护缺口（书籍/章节删除均有 ConfirmDialog + warning）
+  const ok = await showConfirm({
+    title: '删除文风样本',
+    message: '确定删除这条文风样本吗？',
+    warning: '样本及其向量将一并删除，不可恢复。',
+  })
+  if (!ok) return
   try {
     await styleApi.deleteSample(props.bookId, sampleId)
     samples.value = samples.value.filter(s => s.id !== sampleId)

@@ -15,6 +15,9 @@ const props = defineProps<{
   previewEditable?: boolean
   /** 主编辑器直改：当前可编辑段的 segment_index */
   previewSegmentIndex?: number | null
+  /** 保存状态（WorkspaceView 落库状态下传，标题行显示） */
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
+  lastSavedAt?: Date | null
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'preview-segment-edit'])
@@ -49,6 +52,8 @@ function handleEditorEntityFocus(keyword: string) {
     :preview-html="props.previewHtml"
     :preview-editable="props.previewEditable"
     :preview-segment-index="props.previewSegmentIndex"
+    :save-status="props.saveStatus"
+    :last-saved-at="props.lastSavedAt"
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"
     @refresh-characters="handleRefreshCharacters"

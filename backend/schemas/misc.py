@@ -175,7 +175,6 @@ class LLMProfileUpdate(BaseModel):
 
     api_key 传空字符串或 None 表示保持不变（GET 端点只返回掩码，不回传明文）。
     """
-    provider: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None

@@ -13,8 +13,11 @@ import Placeholder from '@tiptap/extension-placeholder'
   import { watch, onBeforeUnmount, onMounted, ref, nextTick, computed } from 'vue'
 import { Extension } from '@tiptap/core'
 import GhostDraftMark from '../extensions/GhostDraftMark'
+import CanonHighlight from '../extensions/CanonHighlight'
+import OutlineNoteNode from '../extensions/OutlineNoteNode'
 import { buildEntityMentionExtensions } from '../extensions/entityMention'
 import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
+import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHistory'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { bookApi } from '../services/api/domain'
@@ -330,8 +333,12 @@ const editor = useEditor({
   content: normalizeToHtml(props.modelValue),
   editable: !props.disabled,
   extensions: [
+    // 原生撤销/重做开启（Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y）。
+    // 警示：AI/系统的程序化变更（幽灵草稿流式灌入、切章 setContent、外部回流、
+    // 划轨回拨、选区优化 diff）必须经 noHistory/setContentNoHistory 打标隔离，
+    // 否则 Ctrl+Z 会倒放打字机或把上一章内容灌进新章。
     StarterKit.configure({
-      history: false,
+      history: { depth: 100, newGroupDelay: 500 },
     }),
     BubbleMenuExtension.configure({
       pluginKey: 'bubbleMenu',
@@ -351,12 +358,16 @@ const editor = useEditor({
     Subscript,
     Superscript,
     GhostDraftMark,
+    // NLE-ADF 3.0 细纲胶囊：行内速记 → 落笔扩写（存盘剥除，会话级）
+    OutlineNoteNode,
     // NLE-ADF 2.0 行内极速 Hook：@ 角色 / # 资产 提及 + 静默绑定本章
     ...buildEntityMentionExtensions({
       getBookId: () => props.bookId,
       getChapterId: () => props.id,
     }),
     SelectionHighlighter,
+    // NLE-ADF 3.0 Canon 词高亮（角色名/伏笔词虚线小标，Decoration 纯视图不入库）
+    CanonHighlight,
   ],
   editorProps: {
     attributes: {
@@ -466,7 +477,8 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
 
   // 1. 如果 ID 变了（切换章节），强制更新内容
   if (newId !== oldId) {
-    editor.value.commands.setContent(normalizedValue, false)
+    // 隔离撤销栈：切章覆盖若入栈，Ctrl+Z 会把上一章全文灌进新章（串章事故）
+    setContentNoHistory(editor.value, normalizedValue, false)
     pendingExternalUpdate.value = null
     return
   }
@@ -475,6 +487,18 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
   const isSame = editor.value.getHTML() === normalizedValue
   if (isSame) {
     pendingExternalUpdate.value = null
+    return
+  }
+
+  // 2.5 幽灵草稿/细纲胶囊在屏（未确认的 AI 中间态）：外部回流绝不能覆盖编辑器——
+  //    自动保存会在落库前剥除幽灵与细纲节点，回流的 modelValue 必然比编辑器"旧"；
+  //    此时 setContent = 幽灵/细纲被误清（点火/空章场景编辑器常无焦点，会走立即分支）。
+  //    暂存为 pending，等被采纳/蒸发后由后续回流自然收敛。
+  if (
+    editor.value.getHTML().includes('data-ghost-draft') ||
+    editor.value.getHTML().includes('data-outline-note')
+  ) {
+    pendingExternalUpdate.value = normalizedValue
     return
   }
 
@@ -487,7 +511,8 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
     return
   }
 
-  editor.value.commands.setContent(normalizedValue, false)
+  // 外部回流（服务器回声/生成预览流式）隔离撤销栈，防"幽灵撤销步"
+  setContentNoHistory(editor.value, normalizedValue, false)
   pendingExternalUpdate.value = null
   // 生成预览态（disabled 只读）：外部内容更新后自动滚到底，
   // 让最新渲染段/当前段进度始终可见（正常编辑态不干预滚动位置）
@@ -501,7 +526,10 @@ watch(() => [props.modelValue, props.id], ([newValue, newId], [oldValue, oldId])
 
 const applyPendingExternalUpdate = () => {
   if (pendingExternalUpdate.value && !editor.value?.isFocused) {
-    editor.value?.commands.setContent(normalizeToHtml(pendingExternalUpdate.value), false)
+    // 幽灵/细纲在屏时同样不应用（理由见 watch 的 2.5 条）
+    const html = editor.value?.getHTML() || ''
+    if (html.includes('data-ghost-draft') || html.includes('data-outline-note')) return
+    setContentNoHistory(editor.value, normalizeToHtml(pendingExternalUpdate.value), false)
     pendingExternalUpdate.value = null
   }
 }
@@ -510,13 +538,11 @@ onBeforeUnmount(() => {
   clearUndoHint()
   registerChapterEditor(null)
   document.removeEventListener('mousedown', handleSelectionMenuOutsidePress)
-  document.removeEventListener('keydown', handleGlobalKeydown)
   editor.value.destroy()
 })
 
 onMounted(() => {
   document.addEventListener('mousedown', handleSelectionMenuOutsidePress)
-  document.addEventListener('keydown', handleGlobalKeydown)
 })
 
 const toggleBold = () => editor.value.chain().focus().toggleBold().run()
@@ -724,7 +750,10 @@ const applyOptimizationDiff = (optimizedText) => {
   const { from, to } = currentSelection.value
   
   // 1. 标记原文 (Strike + Red Highlight)
+  // 整个 diff 预览/确认/拒绝流程均隔离撤销栈：中间态（删除线+双色高亮）不应成为撤销步，
+  // 撤销出口是确认后的「撤销」按钮（undoLastOptimization，入栈可再反悔）。
   editor.value.chain()
+    .command(noHistory)
     .setTextSelection({ from, to })
     .setStrike()
     .setHighlight({ color: '#ffcccc' })
@@ -734,6 +763,7 @@ const applyOptimizationDiff = (optimizedText) => {
   // 注意：插入后位置会变，需要计算
   const insertPos = to
   editor.value.chain()
+    .command(noHistory)
     .insertContentAt(insertPos, optimizedText)
     .setTextSelection({ from: insertPos, to: insertPos + optimizedText.length })
     .unsetStrike()
@@ -759,12 +789,14 @@ const confirmOptimization = () => {
 
   // 1. 清除新文的高亮
   editor.value.chain()
+    .command(noHistory)
     .setTextSelection({ from: newFrom, to: newTo })
     .unsetHighlight()
     .run()
 
   // 2. 删除原文
   editor.value.chain()
+    .command(noHistory)
     .deleteRange({ from: originalFrom, to: originalTo })
     .run()
 
@@ -792,11 +824,13 @@ const rejectOptimization = () => {
 
   // 1. 删除新文
   editor.value.chain()
+    .command(noHistory)
     .deleteRange({ from: newFrom, to: newTo })
     .run()
 
   // 2. 恢复原文样式 (移除 Strike 和 Highlight)
   editor.value.chain()
+    .command(noHistory)
     .setTextSelection({ from: originalFrom, to: originalTo })
     .unsetStrike()
     .unsetHighlight()
@@ -823,6 +857,7 @@ const undoLastOptimization = () => {
   const maxSize = editor.value.state.doc.content.size
   const from = Math.max(0, Math.min(snapshot.from, maxSize))
   const to = Math.max(from, Math.min(snapshot.to, maxSize))
+  // 此恢复操作入撤销栈：Ctrl+Z 可再反悔（等价于重做优化）
   editor.value.chain()
     .deleteRange({ from, to })
     .insertContentAt(from, snapshot.originalText)
@@ -831,13 +866,8 @@ const undoLastOptimization = () => {
   clearUndoHint()
 }
 
-const handleGlobalKeydown = (event) => {
-  if (!showUndoHint.value) return
-  const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z'
-  if (!isUndo) return
-  event.preventDefault()
-  undoLastOptimization()
-}
+// 原生 history 已开启：Ctrl+Z 全局撤销由 TipTap 接管，不再拦截
+//（旧实现仅在 showUndoHint 窗口期拦截 Ctrl+Z 做优化撤销，会与原生栈双撤销）。
 
 defineExpose({
   insertContent,
@@ -1271,6 +1301,27 @@ defineExpose({
 }
 :deep(.fake-selection-highlight) {
   background-color: #b4d5fe;
+}
+
+/* NLE-ADF 3.0 Canon 词高亮：正文角色名/伏笔词虚线小标（Decoration，不入库） */
+:deep(.canon-mark) {
+  border-bottom: 1.5px dotted currentColor;
+  padding-bottom: 1px;
+  cursor: help;
+}
+:deep(.canon-mark--character) {
+  border-bottom-color: #818cf8;
+}
+:deep(.canon-mark--hook) {
+  border-bottom-color: #fbbf24;
+}
+:deep(.canon-mark--contradiction) {
+  border-bottom-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.06);
+}
+/* 矛盾段左缘条（Decoration.node，整段标识） */
+:deep(.canon-para--contradiction) {
+  box-shadow: inset 3px 0 0 #f43f5e;
 }
 
 .copilot-menu-enter-active,

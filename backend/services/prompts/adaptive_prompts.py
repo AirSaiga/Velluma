@@ -76,6 +76,23 @@ def _canon_block(canon_context: str) -> str:
     return f"\n\n# 作者脑中世界图谱（Canon）\n{canon_context}"
 
 
+def _echoes_block(memory_echoes: Optional[List[str]]) -> str:
+    """前情回响块（向量召回的更早章节片段）。
+
+    定位：保持细节一致 + 自然呼应前情（物件、称呼、未回收的悬念），
+    禁止大段复述原文。空列表 → 空串（prompt 零变化）。
+    """
+    echoes = [e.strip() for e in (memory_echoes or []) if e and e.strip()]
+    if not echoes:
+        return ""
+    lines = "\n".join(f"- {e}" for e in echoes)
+    return (
+        "\n\n# 前情回响（作者更早章节写过的片段）\n"
+        "以下片段用于保持细节一致、自然呼应前情，禁止大段复述原文：\n"
+        f"{lines}"
+    )
+
+
 # ============================================================
 # 续写 prompt（缝合/代笔/顺写统一入口，mode 区分粒度）
 # ============================================================
@@ -89,6 +106,7 @@ def build_continue_prompt(
     canon_context: str = "",
     target_chars: int = 120,
     chapter_intent: str = "",
+    memory_echoes: Optional[List[str]] = None,
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -108,6 +126,7 @@ def build_continue_prompt(
     system_prompt = _base_system()
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
+    system_prompt += _echoes_block(memory_echoes)
 
     parts_str = "、".join(picked_parts) if picked_parts else "（无——仅按作者原句顺势续写）"
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
@@ -133,6 +152,180 @@ def build_continue_prompt(
 {fragment}
 
 请顺着作者正文往下续写，控制在 {target_chars} 字以内。只输出续写部分，不要重复作者原文，不要标题、不要解释。"""
+    return system_prompt, user_prompt
+
+
+# ============================================================
+# 段落级连写 prompt（走向卡驱动：一句话走向 → 2-4 段白描正文）
+# ============================================================
+
+def build_burst_prompt(
+    fragment: str,
+    rolling_prefix: str,
+    beat_guidance: str = "",
+    proper_nouns: Optional[List[str]] = None,
+    canon_context: str = "",
+    target_chars: int = 700,
+    chapter_intent: str = "",
+    memory_echoes: Optional[List[str]] = None,
+) -> tuple:
+    """构建段落级连写 prompt（Ctrl+Space 走向卡舱选定后触发）。
+
+    与 build_continue_prompt 的区别：粒度从句级升到段落级——
+    走向卡管方向（覆盖核心事件），AI 负责把走向铺开成 2-4 个具体场景段落。
+
+    Args:
+        fragment: 作者当前段落尾部（衔接点）
+        rolling_prefix: 已写正文尾部（≤500 字，比短档窗口更大）
+        beat_guidance: 选定走向卡的走向文本（空 = 自由发挥，顺语气自然推进）
+        proper_nouns: 在场角色/资产名专名表
+        canon_context: Canon 上下文（public/private 约束）
+        target_chars: 总字数软上限（默认 700）
+        chapter_intent: 章节意图/大纲片段（可选方向引导）
+
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    system_prompt = _base_system()
+    system_prompt += _nouns_block(proper_nouns)
+    system_prompt += _canon_block(canon_context)
+    system_prompt += _echoes_block(memory_echoes)
+
+    intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    if beat_guidance:
+        guidance_block = f"""# 本段走向（作者选定）
+{beat_guidance}
+要求：必须覆盖走向的核心事件，但要把它铺开成具体的场景与动作，绝不允许一句话带过。"""
+    else:
+        guidance_block = """# 本段走向
+（作者未指定——顺着上文的语气与悬念自然推进，写到一个小节拍收束处停笔）"""
+
+    user_prompt = f"""# 上文衔接（保持连续，不重复已写动作与意象）
+{rolling_prefix or "（开篇）"}
+{intent_line}
+
+{guidance_block}
+
+# 作者当前正文（顺着它的语气、人称、节奏往下写）
+{fragment}
+
+请顺着作者正文连写 2-4 个段落，总字数控制在 {target_chars} 字以内，写到走向覆盖、场景自然收束处停笔，不要为凑字数拖沓。
+段落之间用一个空行分隔。只输出续写部分，不要重复作者原文，不要标题、不要解释。"""
+    return system_prompt, user_prompt
+
+
+# ============================================================
+# 细纲扩写 prompt（作者亲笔速记 → 双端锚定的小段正文）
+# ============================================================
+
+def build_outline_expand_prompt(
+    outline_note: str,
+    rolling_prefix: str,
+    after_text: str = "",
+    proper_nouns: Optional[List[str]] = None,
+    canon_context: str = "",
+    target_chars: int = 400,
+    chapter_intent: str = "",
+    memory_echoes: Optional[List[str]] = None,
+) -> tuple:
+    """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
+
+    与 burst 的区别：意图来自作者亲笔速记（非 AI 菜单挑选），且速记可能处于
+    章节中间——扩写必须双端缝合：开头承接上文结尾，结尾引向下文开头。
+    after_text 为空（章末/回补段后无正文）时退化为单端锚定，写到自然收束处停笔。
+
+    双端锚定语义引自 adf_prompts.build_beat_patch_prompt（Phase 6.5 补写），
+    铺开指令引自 build_burst_prompt 的走向覆盖措辞。
+
+    Args:
+        outline_note: 作者的细纲速记（本段必须完整兑现的核心事件）
+        rolling_prefix: 细纲之前的已写正文尾部（≤500 字）
+        after_text: 细纲之后的已写正文开头（≤300 字，可空）
+        proper_nouns: 在场角色/资产名专名表
+        canon_context: Canon 上下文（public/private 约束）
+        target_chars: 目标字数上限（默认 400）
+        chapter_intent: 章节意图/大纲片段（可选方向引导）
+        memory_echoes: 向量召回的前情片段
+
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    system_prompt = _base_system()
+    system_prompt += _nouns_block(proper_nouns)
+    system_prompt += _canon_block(canon_context)
+    system_prompt += _echoes_block(memory_echoes)
+
+    intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    if after_text:
+        after_block = f"""# 下文正文（你的结尾要自然引向它的开头）
+{after_text}
+要求：结尾只做铺垫过渡，绝不重复、改写或提前写出下文的内容。"""
+        closing_line = "写完细纲覆盖的内容、衔接好上下文后立即停笔，不要顺势写下文。"
+    else:
+        after_block = ""
+        closing_line = "写到细纲内容自然收束处停笔，不要顺势往下写。"
+
+    user_prompt = f"""# 上文正文（你的开头要自然承接它的结尾，不重复已写动作与意象）
+{rolling_prefix or "（开篇）"}
+{intent_line}
+
+# 细纲速记（作者亲笔，本段必须完整兑现的核心事件）
+{outline_note}
+要求：把速记铺开成具体的场景与动作，绝不允许一句话带过；速记里的字数说明（如「约300字」）是给你的预算提示，不要写进正文。
+
+{after_block}
+# 任务
+请把细纲速记扩写成正文，总字数控制在 {target_chars} 字以内。只输出扩写的正文——不要复述细纲原文，不要标题、不要解释。{closing_line}"""
+    return system_prompt, user_prompt
+
+
+# ============================================================
+# 点火 prompt（冷启动：空章 + 大纲 → 开篇 2-5 段，破纸引子）
+# ============================================================
+
+def build_opening_prompt(
+    outline_text: str,
+    previous_summary: str = "",
+    worldview_text: str = "",
+    proper_nouns: Optional[List[str]] = None,
+    canon_context: str = "",
+    target_chars: int = 700,
+    memory_echoes: Optional[List[str]] = None,
+) -> tuple:
+    """构建开篇点火 prompt（空章冷启动：大纲是唯一燃料）。
+
+    定位"破纸引子"而非"成品章"：把作者从空白页捞出来，给出一个可改可续的起点。
+    与 burst 的区别：无任何已写正文，大纲从"方向参考"升级为主输入。
+
+    Args:
+        outline_text: 本章大纲（全文截 800，主燃料）
+        previous_summary: 上一章结尾/摘要（截 300，衔接用，可空）
+        worldview_text: 世界观（截 200，定基调，可空）
+        proper_nouns: 在场角色/资产名专名表
+        canon_context: Canon 上下文（public/private 约束）
+        target_chars: 总字数软上限（默认 700）
+
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    system_prompt = _base_system()
+    system_prompt += _nouns_block(proper_nouns)
+    system_prompt += _canon_block(canon_context)
+    system_prompt += _echoes_block(memory_echoes)
+
+    prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary[:300]}" if previous_summary else ""
+    worldview_line = f"\n# 世界观基调\n{worldview_text[:200]}" if worldview_text else ""
+
+    user_prompt = f"""# 本章大纲（这是唯一的创作依据，开头必须服务于它的第一段进展）
+{(outline_text or "")[:800] or "（无大纲）"}
+{prev_line}{worldview_line}
+
+# 任务
+作者面对空白页，请你为本章写开篇 2-5 个段落，总字数控制在 {target_chars} 字以内。
+- 从一个具体的场景、动作或对话切入，把读者直接扔进现场——禁止"多年以后/这是一个/话说"这类概述式开场
+- 只写"引子"：推进到大纲的第一个小进展、留出悬念就停笔，不要试图写完整章
+- 段落之间用一个空行分隔
+- 只输出正文，不要标题、不要章节号、不要解释。"""
     return system_prompt, user_prompt
 
 
@@ -384,6 +577,8 @@ def build_dock_generator_prompt(
     nutrients: dict,
     hard_constraints: dict,
     direction_weights: dict = None,
+    reader_expectations: list = None,
+    memory_echoes: list = None,
 ) -> tuple:
     """构建挂件生发 prompt。
 
@@ -393,6 +588,8 @@ def build_dock_generator_prompt(
         nutrients: 设定养料（角色物理特征/资产/地点）
         hard_constraints: 硬约束（banned_words / character_statics / canon_private_labels）
         direction_weights: 5 叙事方向权重（{"主线":0.4,...}），碎片按此分布生成并自标 direction
+        reader_expectations: 读者期待（[{type, description, tension}]，最多取前 2 条进块；
+            呼应期待的碎片须标 from_expectation，呼应=侧面暗示，绝不直接揭晓）
 
     Returns:
         (system_prompt, user_prompt)
@@ -428,12 +625,37 @@ def build_dock_generator_prompt(
     else:
         dw_block = ""
 
+    # 读者期待块（账本为空则整块省略——不用账本的作者 prompt 零变化）
+    exp_lines = []
+    for e in (reader_expectations or [])[:2]:
+        if not isinstance(e, dict):
+            continue
+        desc = (e.get("description") or "")[:40]
+        tension = e.get("tension") or 5
+        if desc:
+            exp_lines.append(f"- （张力{tension}/10）{desc}")
+    exp_block = ""
+    if exp_lines:
+        exp_block = f"""
+# 读者期待（读者正在等的事；最多用 1 个碎片【侧面】呼应——暗示/推进，绝不直接揭晓；呼应的碎片须加 "from_expectation": true）
+{chr(10).join(exp_lines)}
+"""
+
+    # 前情回响块（向量召回的更早章节片段——「伏笔呼应」类零件的素材源）
+    echo_lines = [e.strip() for e in (memory_echoes or []) if e and e.strip()]
+    echo_block = ""
+    if echo_lines:
+        echo_block = f"""
+# 前情回响（更早章节的片段——可用作呼应素材，让零件呼应前情细节/物件/悬念）
+{chr(10).join('- ' + e for e in echo_lines[:2])}
+"""
+
     user_prompt = f"""# 作者当前段落
 {recent_text[:300]}
 
 # 接下来的画面方向（参考，可偏离）
 {proj_text}
-{dw_block}
+{dw_block}{exp_block}{echo_block}
 # 设定养料（角色物理特征/资产/地点，自由用作画面素材）
 角色：{nutrients.get('characters', '（无）')}
 资产：{nutrients.get('assets', '（无）')}
@@ -445,6 +667,7 @@ def build_dock_generator_prompt(
 # Canon private 禁忌（以下内容绝不能在挂件里出现）
 {hard_constraints.get('canon_private_labels', [])[:5] or '（无）'}
 
-生成 3-4 个镜头特写挂件（每个 8-14 字，主语+具体动作/状态，作者能一眼想象出画面）。输出 JSON：
+生成 3-4 个镜头特写挂件（每个 8-14 字，主语+具体动作/状态，作者能一眼想象出画面）。
+若某个碎片呼应了"读者期待"，给它加 "from_expectation": true（至多 1 个）。输出 JSON：
 {{"parts": [{{"type": "action", "text": "林尘攥紧扳手摸向灯塔基座", "direction": "主线"}}, {{"type": "scene", "text": "礁石滩泛着暗红的金属锈光", "direction": "环境"}}, {{"type": "line", "text": "别在退潮时回头。阿晚的声音", "direction": "关系"}}]}}"""
     return system_prompt, user_prompt

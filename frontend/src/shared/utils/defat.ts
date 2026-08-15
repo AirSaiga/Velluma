@@ -61,6 +61,13 @@ export function defatText(text: string): { text: string; removed: string[] } {
 export function defatParagraphAtCursor(editor: Editor): number {
   const { $from } = editor.state.selection
   if ($from.depth < 1) return 0
+  // 细纲胶囊守卫：本段含细纲时不清脂——第二阶段整段纯文本重建会毁掉胶囊
+  let hasOutlineNote = false
+  $from.parent.descendants((n: any) => {
+    if (n.type?.name === 'outlineNote') { hasOutlineNote = true; return false }
+    return true
+  })
+  if (hasOutlineNote) return 0
   const start = $from.start()
   const end = $from.end()
   const original = $from.parent.textContent

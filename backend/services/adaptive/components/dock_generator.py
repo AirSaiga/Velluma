@@ -41,10 +41,24 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     projections = model_snapshot.get("projections", [])
     nutrients = bundle.nutrients()
     hard = bundle.hard_constraints()
+    soft = bundle.soft_constraints()
+
+    # 前情召回（记忆倒灌）：让「呼应前情细节」类零件有素材；失败降级为空不阻塞
+    from backend.services.rag.recall import recall_memories
+    memory_echoes = await recall_memories(
+        db,
+        book_id=bundle.book_id or "",
+        chapter_id=chapter_id,
+        chapter_number=bundle.chapter_number,
+        query_text=recent_text[-300:],
+        k=2,
+    )
 
     sys_p, usr_p = build_dock_generator_prompt(
         recent_text, projections, nutrients, hard,
         direction_weights=direction_weights,
+        reader_expectations=soft.get("reader_expectations") or None,
+        memory_echoes=memory_echoes or None,
     )
 
     try:
@@ -84,6 +98,9 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
                 "icon": icon_map.get(kind, "✨"),
                 "text": safe_text,
                 "direction": direction,
+                # 期待账本衍生件标记（前端 Dock 显示「期待」tag）；
+                # LLM 未标 from_expectation 则无此键——优雅降级为普通零件
+                **({"origin": "expectation"} if p.get("from_expectation") else {}),
             })
 
         # 挂件产出缓存到世界模型（前端 heartbeat 响应里取）

@@ -19,6 +19,7 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { NovelCreationWizard } from '../../novel-wizard'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
 import { chapterApi } from '../../../services/api'
+import { countChapterWords } from '../../../shared/utils/htmlText'
 import type { Book, Chapter } from '../../../types'
 
 const router = useRouter()
@@ -43,7 +44,11 @@ const quickForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs
 
 onMounted(async () => {
   if (books.value.length === 0) {
-    await store.loadBooks()
+    try {
+      await store.loadBooks()
+    } catch (e: any) {
+      showToast('加载书籍失败：' + (e?.message || '未知错误'), 'error')
+    }
   }
 })
 
@@ -54,7 +59,8 @@ function bookStats(book: Book): { chapterCount: number; totalWords: number } {
   // 若当前 store 的 chapters 属于本书，用之；否则用 hover 预取的只读统计
   if (currentBookId.value === book.id) {
     const chaps = chapters.value
-    const totalWords = chaps.reduce((sum, c) => sum + (c.content_text?.length || 0), 0)
+    // 字数口径：剥 HTML 标签后计字符（此前 content_text.length 把标签计入，虚高）
+    const totalWords = chaps.reduce((sum, c) => sum + countChapterWords(c.content_text || ''), 0)
     return { chapterCount: chaps.length, totalWords }
   }
   return statsMap.value[book.id] ?? { chapterCount: 0, totalWords: 0 }

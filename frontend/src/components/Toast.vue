@@ -37,7 +37,9 @@ function removeToast(id: number) {
 </script>
 
 <template>
-  <div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
+  <!-- z-index 分层：drawer(85) < modal/confirm(110) < toast(120)——toast 必须永远可见，
+       此前 z-50 会被副驾抽屉（z-85）整个挡住 -->
+  <div class="fixed top-4 right-4 z-[120] flex flex-col gap-2" role="status" aria-live="polite">
     <TransitionGroup name="toast">
       <div
         v-for="toast in toasts"

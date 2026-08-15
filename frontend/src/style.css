@@ -31,6 +31,9 @@
   /* 字体 */
   --font-body: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
   --font-heading: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', 'PingFang SC', serif;
+
+  /* 编辑器正文列宽（18px 字号下 880px ≈ 49 字/行；调宽度只改这里，顶栏/编辑列共用） */
+  --editor-max-width: 880px;
 }
 
 /* 主题 CSS 变量 - 深色主题 */
@@ -229,13 +232,128 @@ textarea,
 }
 
 /* ============================================================
+   NLE-ADF 3.0 细纲胶囊（Outline Note）
+   作者亲笔的剧情速记：灰底虚线胶囊（展开态）/ 小钉 ⚑（塌缩态，
+   扩写启动即塌缩）。会话级，存盘剥除（与幽灵草稿同契约）。
+   ============================================================ */
+.outline-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  border: 1px dashed var(--text-muted, #8b8f98);
+  border-radius: 9999px;
+  padding: 0 8px;
+  margin: 0 2px;
+  background-color: color-mix(in srgb, var(--text-muted, #8b8f98) 8%, transparent);
+  font-size: 0.82em;
+  color: var(--text-muted, #8b8f98);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.outline-note:hover {
+  border-color: var(--accent-500, #10b981);
+  color: var(--text-primary, inherit);
+}
+
+.outline-note__icon {
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.outline-note__text {
+  max-width: 22em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-note__text--empty {
+  opacity: 0.6;
+}
+
+/* 塌缩钉：扩写已启动，速记收起为可再生的把手 */
+.outline-note--collapsed {
+  padding: 0 4px;
+  background-color: transparent;
+}
+
+.outline-note--collapsed .outline-note__text {
+  display: none;
+}
+
+/* 细纲浮层（Teleport 到 body，fixed 定位） */
+.outline-note-pop {
+  position: fixed;
+  z-index: 90;
+  width: 320px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #2d2f36);
+  background-color: var(--bg-elevated, #1c1e24);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  padding: 10px;
+}
+
+.outline-note-pop__input {
+  width: 100%;
+  resize: vertical;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #2d2f36);
+  background-color: var(--bg-primary, #14161b);
+  color: var(--text-primary, #e6e6e6);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px;
+}
+
+.outline-note-pop__input:focus {
+  outline: none;
+  border-color: var(--accent-500, #10b981);
+}
+
+.outline-note-pop__hint {
+  margin: 6px 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted, #8b8f98);
+}
+
+.outline-note-pop__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.outline-note-pop__btn {
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #2d2f36);
+  background: transparent;
+  color: var(--text-muted, #8b8f98);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.outline-note-pop__btn--primary {
+  background-color: var(--accent-500, #10b981);
+  border-color: var(--accent-500, #10b981);
+  color: #fff;
+}
+
+.outline-note-pop__btn--danger:hover {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+/* ============================================================
    NLE-ADF 2.0 画布化布局：微观状态栏 / 隐形抽屉 / 沉浸降透明
    ============================================================ */
 .nle-topbar {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  max-width: 720px;
+  max-width: var(--editor-max-width, 880px);
   margin: 0 auto;
   padding: 6px 24px 2px;
   font-size: 12px;
@@ -273,6 +391,16 @@ textarea,
 .status-bar {
   transition: opacity 0.4s ease;
 }
+
+/* ============================================================
+   全局 z-index 分层表（勿打破；新浮层按此取值）：
+     编辑器内容/工具栏        : 0-10
+     Spark Dock / 卡舱        : 50-60
+     抽屉触发条 .drawer-edge  : 80
+     副驾抽屉 .inspector-drawer: 85
+     模态/确认弹窗/速查弹层    : 110（ConfirmDialog/ShortcutsCheatsheet）
+     Toast 通知               : 120（必须永远在最上——操作结果不可被遮挡）
+   ============================================================ */
 
 /* 右缘 2px 触发条：平时极淡微光线，hover 提亮 */
 .drawer-edge {

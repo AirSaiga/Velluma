@@ -4,9 +4,10 @@
 卡片舱的方向偏好引擎——纯算法，零 LLM，零 DB 写。
 
 5 个固定叙事方向，每个有 0-1 权重（和归一化为 1.0），代表"此刻最该递哪个方向的碎片"。
-权重由三种力驱动：
+权重由四种力驱动：
 
 - 推动力：未完成的叙事任务往上推（必达未达→主线+，伏笔未埋→伏笔+）
+- 读者力：高张力读者期待推对应方向（张力≥8 的"该收了"期待→类型映射方向+，封顶一票）
 - 惯性力：作者刚写了什么就抑制什么（环境写多了→环境-，对话正热→关系+）
 - 节拍力：沉淀段落=新节拍部分重置；久不推主线→主线+
 
@@ -30,6 +31,16 @@ _BASELINE: Dict[str, float] = {
     "刻画": 0.20,
     "环境": 0.18,
     "关系": 0.12,
+}
+
+# 读者力：期待类型 → 叙事方向映射（读者在等哪类兑现，就把对应方向往上推）
+# 注意纪律：只有 type/tension 数字进本算法，期待文本绝不进（防剧透，与意图数据同理）
+_EXPECTATION_DIRECTION_MAP: Dict[str, str] = {
+    "power_reveal": "主线",
+    "growth": "主线",
+    "revenge": "主线",
+    "mystery": "伏笔",
+    "romance": "关系",
 }
 
 # ============================================================
@@ -94,6 +105,18 @@ def compute(
     # 弧线存在但 must_hits 空 → 主线仍有方向感
     if intent.get("arc") and not must_hits:
         weights["主线"] += 0.10
+
+    # ---- 1.5 读者力：高张力期待（"该收了"区间）推对应方向 ----
+    # 每条张力 ≥8 的活跃期待给其映射方向 +0.15，总加成封顶 +0.30——
+    # 读者视角只是方向信号里的一票，永不主导（作者主权）
+    reader_boost = 0.0
+    for e in soft.get("reader_expectations") or []:
+        if not isinstance(e, dict):
+            continue
+        direction = _EXPECTATION_DIRECTION_MAP.get(e.get("type") or "")
+        if direction and (e.get("tension") or 0) >= 8 and reader_boost < 0.30:
+            weights[direction] += 0.15
+            reader_boost += 0.15
 
     # ---- 2. 惯性力：作者刚写了什么就抑制什么 ----
     if recent_text:

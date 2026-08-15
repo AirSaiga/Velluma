@@ -10,6 +10,8 @@
  */
 import { computed, onMounted, provide } from 'vue'
 import { useNovelWizard } from '../composables/useNovelWizard'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { useToast } from '../../../composables/useToast'
 import { STORY_GENRE_PRESETS, type WizardStep } from '../types/wizard.types'
 import StoryBasicsPanel from '../presentation/StoryBasicsPanel.vue'
 import WorldBuildingPanel from '../presentation/WorldBuildingPanel.vue'
@@ -27,6 +29,8 @@ const emit = defineEmits<{
 // =------------- 状态管理 -------------=
 
 const wizard = useNovelWizard()
+const { show: showConfirm } = useConfirmDialog()
+const { showToast } = useToast()
 
 // 向子组件提供向导状态
 provide('wizard', wizard)
@@ -55,7 +59,8 @@ onMounted(() => {
   // 尝试加载草稿
   const hasDraft = wizard.loadDraft()
   if (hasDraft) {
-    console.log('已恢复上次保存的草稿')
+    // 草稿恢复是用户关心的事，不能只在控制台吱一声
+    showToast('已恢复上次保存的草稿', 'info')
   }
 })
 
@@ -87,14 +92,28 @@ async function handleSaveDraft() {
 
 function handleSubmit() {
   const validationErrors = wizard.validate()
-  if (validationErrors.filter(e => e.severity === 'error').length > 0) {
+  const errors = validationErrors.filter(e => e.severity === 'error')
+  if (errors.length > 0) {
+    // 此前静默 return：用户点「开始生成」没反应且不知道原因
+    showToast(errors[0].message || '请完善必填项后再开始生成', 'warning')
     return
   }
-  
+
   emit('start-generation', wizard.formData.value)
 }
 
-function handleClose() {
+async function handleClose() {
+  // 未保存更改守卫：UI 显示了「• 有未保存的更改」却曾可直接关闭全丢
+  if (wizard.isDirty.value) {
+    const ok = await showConfirm({
+      title: '关闭向导',
+      message: '当前有未保存的更改，关闭后将丢失。',
+      warning: '可先点「保存草稿」保留进度，下次打开继续。',
+      confirmText: '仍要关闭',
+      cancelText: '继续编辑',
+    })
+    if (!ok) return
+  }
   emit('close')
 }
 </script>

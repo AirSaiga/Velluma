@@ -18,6 +18,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
+from backend.services.adaptive.components.canon_checks import (
+    check_canon_compliance,
+    check_must_hit_coverage,
+)
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 
 logger = logging.getLogger(__name__)
@@ -41,10 +45,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 80
         logger.warning(f"[post_process] 残句扫描失败: {e}")
 
     # ---- 2. 章节卡覆盖率（纯算法，0 LLM）----
-    report["coverage"] = _check_must_hit_coverage(full_text, bundle)
+    report["coverage"] = check_must_hit_coverage(full_text, bundle)
 
     # ---- 3. Canon 合规（纯算法）----
-    report["canon_check"] = _check_canon_compliance(full_text, bundle)
+    report["canon_check"] = check_canon_compliance(full_text, bundle)
 
     # ---- 4. 整章审阅（1 LLM，可选——budget 足够时）----
     if budget_tokens >= 4000:
@@ -65,42 +69,8 @@ async def _get_full_text(model_snapshot: Dict, bundle) -> str:
     return bundle.content_text or ""
 
 
-def _check_must_hit_coverage(text: str, bundle) -> Dict:
-    """章节卡必达事件覆盖率（纯算法）。"""
-    cc = bundle.chapter_card
-    if not cc or not cc.must_hit_events:
-        return {"checked": False, "reason": "无章节卡"}
-    hits = []
-    misses = []
-    for event in cc.must_hit_events:
-        event_str = event.get("event", "") if isinstance(event, dict) else str(event)
-        # 简单关键词匹配（取事件描述的核心词）
-        keywords = [w for w in event_str.replace("，", " ").split() if len(w) >= 2]
-        if keywords and any(kw in text for kw in keywords[:3]):
-            hits.append(event_str[:40])
-        else:
-            misses.append(event_str[:40])
-    return {
-        "checked": True,
-        "hit_count": len(hits),
-        "miss_count": len(misses),
-        "misses": misses[:5],
-    }
-
-
-def _check_canon_compliance(text: str, bundle) -> Dict:
-    """Canon public 一致性 / private 泄露（纯算法）。"""
-    hard = bundle.hard_constraints()
-    breaches: List[str] = []
-    # private 泄露
-    for label in hard.get("canon_private_labels", []):
-        if label and len(label) >= 3 and label in text:
-            breaches.append(f"⚠️ 可能泄露 private 设定：{label}")
-    # public 事实（简单检查——只标注，不做语义一致性判断）
-    return {
-        "private_breaches": breaches[:5],
-        "public_fact_count": len(hard.get("canon_public_facts", [])),
-    }
+# 注：check_must_hit_coverage / check_canon_compliance 已抽到
+# backend/services/adaptive/components/canon_checks.py（供 canon_watch 写中感知共用）
 
 
 async def _llm_critique(text: str, bundle) -> Dict:
@@ -124,7 +94,13 @@ async def _llm_critique(text: str, bundle) -> Dict:
 {{"issues": [{{"severity": "warning|info", "category": "consistency|plot|foreshadow|character", "detail": "..."}}], "verdict": "pass|needs_revision"}}"""
     result = await call_llm_with_usage(
         system_prompt=sys_p, user_prompt=usr_p,
-        model_type="creative", temperature=0.3, max_tokens=2000,
+        # 整章审阅是判断/审计任务（找设定矛盾、情节漏洞、伏笔遗漏），属分析型工作，
+        # 走 reasoning 槽并保留 thinking（不传 REASONING_DISABLED）。与 BS-ADF
+        # Phase 5 锚审计 / Phase 7 一致性守卫同类，本就该开思考。完稿后触发，
+        # 延迟不敏感。此前用 creative 且漏传 reasoning_config，致 thinking 被静默
+        # 关掉（creative.enabled=false → get_default_reasoning_config 返回 None），
+        # 审阅深度不足。
+        model_type="reasoning", temperature=0.3, max_tokens=2000,
     )
     from backend.services.utils.json_safe import parse_json_safe
     return parse_json_safe(result.content or "") or {"verdict": "unknown"}

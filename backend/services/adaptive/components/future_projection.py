@@ -29,6 +29,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     # 层 1 正文尾部（最近写的）
     facts = model_snapshot.get("facts", [])
     written_text = "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
+    # 画布即事实源：层 1 未沉淀时回退到画布正文（与 dock_generator 同一数据源）——
+    # 否则作者只打字不按 Ctrl+Enter 时推测永远饿死，走向卡恒为空
+    if not written_text:
+        written_text = (bundle.content_text or "")[-2000:]
     if not written_text:
         return {"skipped": True, "reason": "无已写正文"}
 

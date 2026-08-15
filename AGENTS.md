@@ -3,9 +3,9 @@
 
 AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许可证：AGPL-3.0。
 
-> **引擎现状**：后端保留三套生成设施 —— **BS-ADF**（`/generate-bsadf`，NLE-ADF 步进模式：渲一段裁一段）、**ADF**（V3.2，`/generate-adf`，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
+> **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：入口暂存但不再演进，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
 >
-> **NLE-ADF 3.0 自适应融合写作台**（`/adaptive/*`，最新）：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字即激活辅助层（`composing` 态），后端按条件抛感知建议（伏笔呼应/角色出场/Canon 合规/沉淀时机）、续写幽灵草稿、沉淀锁拍。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台规划。**前端默认进入此模式**；BS-ADF 步进模式保留为「规划本章」入口（legacy 可切换）。
+> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
 
 ---
 
@@ -63,7 +63,7 @@ backend/
 │   └── chapter_generation/ # 包结构：__init__ 合并 adf/bsadf/refinery/adaptive router + extra_router
 │       ├── adf.py          #   /generate-adf（前端已无 UI 入口）
 │       ├── bsadf.py        #   /generate-bsadf 步进 + /advance-beat + /stepping-run/{id}/state + /rerender-beat + /cancel-run（/confirm-beats 历史兼容）
-│       ├── adaptive.py     #   ★ NLE-ADF 3.0：/adaptive/perceive + /stitch-ghost + /settle + /detect-branch + /plan-suggest（作者主导写作，无预设拍）
+│       ├── adaptive.py     #   ★ NLE-ADF 3.0：/adaptive/heartbeat + /stitch-ghost + /settle + /finish + /model（作者主导写作，无预设拍）
 │       └── refinery.py     #   /refinery/diagnose + /confirm
 ├── schemas/  repositories/
 └── services/
@@ -76,7 +76,7 @@ backend/
     ├── validation/  (代码级 + LLM 级审计，服务 /chapters/{id}/quality-report 路由)
     ├── workflows/
     │   ├── adf/            # V3.2 ADF 引擎（自包含，前端无入口）：adf_workflow 主类 + 各 phase 模块 + 3 单测
-    │   ├── bsadf/          # ★ 当前生成引擎（自包含）
+    │   ├── bsadf/          # ⚠ 弃置中的步进引擎（自包含；思想迁移至 adaptive 后整体归档，勿新增功能）
     │   │   ├── bsadf_workflow.py   # BSAdfWorkflow 主类（execute_stepping/render_one/run_post_step_phases）
     │   │   ├── stepping_runtime.py # 步进运行时（SteppingRun 状态机 + stepping_loop + P3 回退快照栈）
     │   │   ├── slot_builder.py / slot_renderer.py / downgrade.py  # Phase 4a/4c/4d
@@ -113,8 +113,8 @@ data/ logs/ .venv/
 
 | 引擎 | 端点 | 主类/模块 | 用途 |
 |------|------|------|------|
-| ★ **NLE-ADF 3.0** | `/adaptive/perceive`+`/stitch-ghost`+`/settle`+`/detect-branch`+`/plan-suggest` | `adaptive.py` + `settings_bundle.py` + `adaptive_prompts.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
-| **BS-ADF** | `/generate-bsadf`（步进）+`/advance-beat`+`/stepping-run/{id}/state`+`/rerender-beat`+`/cancel-run` | `BSAdfWorkflow`（`workflows/bsadf/`） | 步进模式（legacy「规划本章」入口，可切换） |
+| ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`+`/model` | `adaptive.py` + `settings_bundle.py` + `adaptive_prompts.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
+| **BS-ADF** | `/generate-bsadf`（步进）+`/advance-beat`+`/stepping-run/{id}/state`+`/rerender-beat`+`/cancel-run` | `BSAdfWorkflow`（`workflows/bsadf/`） | **⚠ 弃置中**（legacy「规划本章」入口暂存；思想迁移至 adaptive 后归档） |
 | ADF | `/generate-adf` | `ADFWorkflow`（`workflows/adf/`） | 引擎本体，前端已无 UI 入口 |
 | Refinery | `/refinery/diagnose`+`/confirm` | `Refinery`（`services/refinery/`） | 独立精修（对任意草稿） |
 | 章节优化 | `/optimize_chapter`+`/optimize_selection` | `refine_draft`（`workflows/refining.py`） | 章节重写/局部优化（前端在用） |
@@ -125,17 +125,19 @@ data/ logs/ .venv/
 
 - **双轴状态机**（`useGenerationSession.ts`）：`authorLane`（idle→composing→ghostStitching→settling，前台主线）+ `aiLane`（dormant→perceiving/suggesting/assisting/digesting/analyzing，后台）。两轴并行不阻塞，与旧 `stage` 单轴（legacy step）共存。
 - **激活**：作者进章节打字 ≥4 字 → `enterAdaptive(chapterId)` 置 `authorLane=composing`（不跑 startBeat 管线）。辅助层（`useAdaptiveAssist.ts`）据此挂载。
-- **自适应辅助触发**（全部柔性可忽略）：
-  - 停顿 ≥3s + 段落 ≥80 字 → `/adaptive/perceive`（AI 味/RAG 伏笔呼应/角色出场/Canon 合规/沉淀时机，0-1 LLM）
-  - Space（有零件=缝合续写 / 无零件=顺句续写）→ `/adaptive/stitch-ghost`（SSE 打字机灌幽灵草稿，复用 `useGhostDraft`）
-  - 段落沉淀 → `/adaptive/settle`（抽涌现实体 + 可选落库，设定逆向生长）
-  - 岔路点 → `/adaptive/detect-branch`（段内实时探测，淡建议不阻断，区别于全书 DDE）
-  - 后台规划 → `/adaptive/plan-suggest`（复用 Phase 1-3：定档/锚点/脉络轨，侧栏淡建议层）
+- **自适应辅助触发**（全部柔性可忽略。⚠ 端点以代码为准：**不存在** perceive/detect-branch/plan-suggest——感知与规划建议均由心跳响应携带）：
+  - 心跳 → `/adaptive/heartbeat`（活跃防抖 3s / 停顿 4s+光标段尾，`useAdaptiveAssist.ts`）：后端 orchestrator 跑方向权重（纯算法 0 LLM）+ 组件（意图反推 0-1 LLM / 未来推测 / 挂件生发 / Canon 感知），响应带回 `dock_parts`（Spark Dock 零件）/`direction_cards`（走向卡）/`canon_hints`（左缘感知带）/意图信息
+  - Space（有零件=缝合续写 / 无零件=顺句续写）→ `/adaptive/stitch-ghost`（SSE 打字机灌幽灵草稿，复用 `useGhostDraft`；mode 五档：stitch/continue/burst/open/**outline**）
+  - **细纲胶囊**（Alt+O / 输入 `[[` / 选中文本转换，`extensions/OutlineNoteNode.ts` + `OutlineNoteChip.vue`）：作者亲笔剧情速记以胶囊嵌在正文任意位置 →「落笔扩写」走 stitch-ghost mode=outline（双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」clamp 100-800 缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门）。扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）；编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）
+  - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长）
+  - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引）；`GET /adaptive/model` 世界模型快照（前端无调用方）
 - **设定数据双向驱动**（`settings_bundle.py`）：章级绑定（角色/资产/地点/关系/伏笔）+ 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用。写作中感知 + 后台规划两个层面同时利用。
 - **画布即事实源**：adaptive 模式预览关闭（`generationPreviewHtml` 返回 null），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
-- **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为 perceive 供给 + 章级兜底）。
+- **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为心跳供给 + 章级兜底）。
 
-### BS-ADF 步进模式（legacy「规划本章」入口）
+### BS-ADF 步进模式（⚠ 弃置中——迁移源，勿新增功能）
+
+> **弃置策略**：前端入口（InspectorPanel「规划」tab「生成本章」）暂存但不再演进；验证过的思想按需迁移进 adaptive 流后，引擎整体归档至 `backend/_deprecated/`。**迁移候选**：DDE 真岔路判断（adaptive 现为柔性走向卡）、章级规划层（脉络轨/锚点/定档/槽位卡，adaptive 无对应物）、残句门禁与一致性手术等修复型护栏（adaptive finish 只审计不修复）、RAG 检索管线与观测落库（trace/RunRecorder——adaptive 端点现无成本核算）。**已知待补的洞**：Refinery 润色入口要求 `stage==='done'`（`InspectorPanel.vue`），adaptive 模式 stage 恒 idle，章节永远进不了润色/读者反馈。
 
 链路：`generate-bsadf` 跑到 Phase 4b 暂停 → 常驻 `stepping_loop`（`stepping_runtime.py`）→ `STEPPING_INITIALIZED`（run_id + 全量槽位卡）→ **逐段**「渲染 → `BEAT_RENDER_READY` 挂起等裁决 → `/advance-beat` → 下一段」→ 末段锁死 → Phase 4.5-7.5 后处理 → `COMPLETE`（全量收尾字段）。
 
@@ -157,6 +159,8 @@ data/ logs/ .venv/
 要关 thinking 必须传 `reasoning_config=REASONING_DISABLED`（`{"reasoning":{"enabled":False}}`）。**传空 dict `{}` 无效**——`call_llm_with_usage` 里 `if reasoning_config:` 对 `{}` 为 falsy，推理模型回落服务端默认 thinking 开启，小预算调用（状态卡/残句修复）必被吃光预算空输出。已接 REASONING_DISABLED：render/enrich/state_tracker/beat_patch/refine/wash/sentence_fix。
 
 ### 关键质量护栏（事故根因，勿回退）
+
+> ⚠ 以下闸门多数位于 **bsadf**（弃置中）与共享模块；adaptive 流目前只继承了**字数硬闸门**（stitch-ghost mode=outline 的 ×1.6/×1.5 双层闸）与 enrich 双幻觉过滤的思想（adaptive 走「作者裁决即闸门」路线，无渲染期拦截）。迁移改造时从这里取材，勿凭空重写。
 
 - **字数硬闸门**：超 target×1.6 带压缩反馈重试，末次仍超句界截断到 target×1.5（截断上限必须 ≤1.6）；末段（结局段）豁免截断。
 - **REFINE 完整性闸门**：补埋输出采纳前强制句末完整性校验，回退后丢失过半则整段放弃（宁缺勿残）。

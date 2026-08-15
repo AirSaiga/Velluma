@@ -6,6 +6,7 @@
  */
 import { ref, computed, watchEffect } from 'vue'
 import { useCanon, EDGE_TYPE_LABELS, VISIBILITY_LABELS } from '../composables/useCanon'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import type { CanonEdge, CanonNode, CanonEdgeType, CanonVisibility } from '../../../services/api/domain/canon.api'
 
 const props = defineProps<{
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const canon = useCanon()
+const { show: showConfirm } = useConfirmDialog()
 const isEditing = computed(() => !!props.edge)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -86,7 +88,8 @@ async function handleSave() {
 
 async function handleDelete() {
   if (!props.edge) return
-  if (!confirm('删除这条边？')) return
+  const ok = await showConfirm({ title: '删除边', message: '确定删除这条边吗？' })
+  if (!ok) return
   saving.value = true
   try {
     await canon.deleteEdge(props.bookId, props.edge.id)

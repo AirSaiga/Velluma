@@ -13,10 +13,9 @@ const { prefs: notifyPrefs, setInApp, setSystem } = useNotifyPrefs()
 // 表单状态
 // ============================================================
 
-type ProfileRole = 'reasoning' | 'creative' | 'wash'
+type ProfileRole = 'reasoning' | 'creative'
 
 interface ProfileForm {
-  provider: string
   model: string
   api_key: string // 留空表示保持不变（服务端仅返回掩码）
   base_url: string
@@ -24,50 +23,39 @@ interface ProfileForm {
   effort: string
 }
 
-const profileRoles: ProfileRole[] = ['reasoning', 'creative', 'wash']
+const profileRoles: ProfileRole[] = ['reasoning', 'creative']
 
 const profileForms = reactive<Record<ProfileRole, ProfileForm>>({
-  reasoning: { provider: 'openrouter', model: '', api_key: '', base_url: '', enabled: false, effort: 'medium' },
-  creative: { provider: 'openrouter', model: '', api_key: '', base_url: '', enabled: false, effort: 'medium' },
-  wash: { provider: 'deepseek', model: '', api_key: '', base_url: '', enabled: false, effort: 'low' },
+  reasoning: { model: '', api_key: '', base_url: '', enabled: false, effort: 'medium' },
+  creative: { model: '', api_key: '', base_url: '', enabled: false, effort: 'medium' },
 })
 
 /** 服务端返回的 Key 掩码信息（用于 placeholder 提示） */
 const profileMeta = reactive<Record<ProfileRole, { has_api_key: boolean; api_key_masked: string; configured?: boolean }>>({
   reasoning: { has_api_key: false, api_key_masked: '' },
   creative: { has_api_key: false, api_key_masked: '' },
-  wash: { has_api_key: false, api_key_masked: '', configured: false },
 })
 
 const ROLE_LABELS: Record<ProfileRole, string> = {
-  reasoning: '推理模型',
-  creative: '创意模型',
-  wash: '洗涤模型（去 AI 味·可选，留空跟随创意模型）',
+  reasoning: '分析模型（审阅·诊断）',
+  creative: '写作模型（正文生成）',
+}
+
+/** 每个槽位的职责说明（帮助用户理解该配什么模型） */
+const ROLE_HINTS: Record<ProfileRole, string> = {
+  reasoning: '审阅章节、推断写作意图、检查一致性等「判断」任务使用此模型',
+  creative: '续写正文、生成挂件、缝合碎片等所有「写作」任务使用此模型',
 }
 
 const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
   reasoning: '如 deepseek-reasoner',
   creative: '如 deepseek-chat',
-  wash: '如 deepseek-reasoner（建议与创意模型不同）',
 }
 
 const embeddingForm = reactive({ model: '', api_key: '', dimensions: 1536 })
 const embeddingMeta = reactive({ has_api_key: false, api_key_masked: '' })
 
 const proxyForm = reactive({ enabled: true, url: '' })
-
-/** 提供商默认 Base URL（placeholder 提示用，与后端 DEFAULT_PROVIDER_URLS 对应） */
-const PROVIDER_DEFAULT_URLS: Record<string, string> = {
-  openrouter: 'https://openrouter.ai/api/v1',
-  volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
-  deepseek: 'https://api.deepseek.com/v1',
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  openrouter: 'OpenRouter',
-  volcengine: '火山引擎 (Volcengine)',
-  deepseek: 'DeepSeek',
-}
 
 const loading = ref(false)
 const loadError = ref<string | null>(null)
@@ -76,7 +64,6 @@ const saving = ref(false)
 function applyConfig(config: ModelConfig) {
   for (const role of profileRoles) {
     const p = config.llm[role]
-    profileForms[role].provider = p.provider
     profileForms[role].model = p.model
     profileForms[role].base_url = p.base_url
     profileForms[role].enabled = p.enabled
@@ -121,12 +108,6 @@ async function save() {
       },
       proxy: { enabled: proxyForm.enabled, url: proxyForm.url },
     }
-    // wash 槽是可选的：只有填了模型或 Key 才提交，避免把空表单固化进配置；
-    // 已配置过的 wash 表单会回填（configured=true），此时正常提交
-    const washForm = profileForms.wash
-    if (profileMeta.wash.configured || washForm.model.trim() || washForm.api_key.trim()) {
-      payload.wash = { ...washForm, api_key: washForm.api_key || undefined }
-    }
     const config = await systemApi.updateModelConfig(payload)
     applyConfig(config)
     showToast('设置已保存', 'success')
@@ -148,14 +129,8 @@ const testResult = ref<{
   model_info?: {
     reasoning_model?: string
     creative_model?: string
-    reasoning_provider?: string
-    creative_provider?: string
     reasoning_success?: boolean
     creative_success?: boolean
-    wash_configured?: boolean
-    wash_model?: string
-    wash_provider?: string
-    wash_success?: boolean
   }
   reasoning_supported?: boolean
   response_time_ms?: number
@@ -208,13 +183,10 @@ onMounted(loadConfig)
         <!-- LLM 配置 -->
         <section v-for="role in profileRoles" :key="role" class="config-section">
           <div class="section-header">{{ ROLE_LABELS[role] }}</div>
-
-          <label class="field">
-            <span class="field-label">提供商</span>
-            <select v-model="profileForms[role].provider" class="field-input">
-              <option v-for="(label, value) in PROVIDER_LABELS" :key="value" :value="value">{{ label }}</option>
-            </select>
-          </label>
+          <div class="section-hint">{{ ROLE_HINTS[role] }}</div>
+          <div v-if="role === 'reasoning'" class="section-hint section-hint-sub">
+            留空（模型名与 Key 均不填）则自动使用与写作模型相同的配置。
+          </div>
 
           <label class="field">
             <span class="field-label">模型</span>
@@ -243,7 +215,7 @@ onMounted(loadConfig)
             <input
               v-model="profileForms[role].base_url"
               class="field-input"
-              :placeholder="PROVIDER_DEFAULT_URLS[profileForms[role].provider] || 'API 地址'"
+              placeholder="https://api.deepseek.com/v1"
             />
           </label>
 
@@ -369,10 +341,6 @@ onMounted(loadConfig)
                   <span class="value">{{ testResult.model_info.reasoning_model }}</span>
                 </div>
                 <div class="info-row">
-                  <span class="label">提供商:</span>
-                  <span class="value">{{ testResult.model_info.reasoning_provider }}</span>
-                </div>
-                <div class="info-row">
                   <span class="label">状态:</span>
                   <span class="value" :class="{ supported: testResult.model_info.reasoning_success }">
                     {{ testResult.model_info.reasoning_success ? '✓ 连接成功' : '✗ 连接失败' }}
@@ -387,31 +355,9 @@ onMounted(loadConfig)
                   <span class="value">{{ testResult.model_info.creative_model }}</span>
                 </div>
                 <div class="info-row">
-                  <span class="label">提供商:</span>
-                  <span class="value">{{ testResult.model_info.creative_provider }}</span>
-                </div>
-                <div class="info-row">
                   <span class="label">状态:</span>
                   <span class="value" :class="{ supported: testResult.model_info.creative_success }">
                     {{ testResult.model_info.creative_success ? '✓ 连接成功' : '✗ 连接失败' }}
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="testResult.model_info.wash_configured" class="model-section">
-                <div class="section-title">洗涤模型</div>
-                <div class="info-row">
-                  <span class="label">模型:</span>
-                  <span class="value">{{ testResult.model_info.wash_model }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="label">提供商:</span>
-                  <span class="value">{{ testResult.model_info.wash_provider }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="label">状态:</span>
-                  <span class="value" :class="{ supported: testResult.model_info.wash_success }">
-                    {{ testResult.model_info.wash_success ? '✓ 连接成功' : '✗ 连接失败' }}
                   </span>
                 </div>
               </div>
@@ -492,6 +438,19 @@ onMounted(loadConfig)
   margin-bottom: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.section-hint {
+  margin-top: -8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.section-hint-sub {
+  margin-top: -8px;
+  color: #f59e0b;
 }
 
 .field {

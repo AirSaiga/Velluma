@@ -65,6 +65,8 @@ class AdaptiveOrchestrator:
         self._direction_weights: Dict[str, float] = {}
         # 被采纳的方向（缝合降权用，compute 后清空）
         self._adopted_directions: List[str] = []
+        # canon 感知缓存：recent_text 签名未变则复用上次 hints（纯算法但省 DB 查询）
+        self._last_canon_text_sig: str = ""
         # 组件注册（延迟 import 避免循环）
         self._components: Dict[str, Callable] = {}
 
@@ -119,7 +121,7 @@ class AdaptiveOrchestrator:
             # 让本次心跳响应直接带回挂件（避免"首次心跳返回空、要等下次"的时序问题）。
             # 活跃心跳 → 全部异步（不阻塞，下次心跳拿产出）。
             is_pause_heartbeat = state.paused_ms >= 4000
-            sync_components = {"dock_generator", "future_projection"} if is_pause_heartbeat else set()
+            sync_components = {"dock_generator", "future_projection", "canon_watch"} if is_pause_heartbeat else set()
 
             for act in activations:
                 if act.component in sync_components:
@@ -212,6 +214,25 @@ class AdaptiveOrchestrator:
                 self._last_dock_text_sig = cur_text_sig
                 self._last_dock_proj_sig = cur_proj_sig
             # 缓存命中：__dock__ 项仍在 layer3_projections，前端 heartbeat 照常取到
+
+        # ---- 规则 4：Canon 感知（停顿 4s + 有正文；纯算法零 LLM，与 dock 同档同步返回）----
+        # 产 Canon 感知 hints（角色出场/伏笔回收/private 泄露），写 __canon_watch__ 缓存项
+        # 与 dock 区别：不要求 cursor_at_paragraph_end（写到相关词就该提醒，不限段尾）
+        if state.paused_ms >= 4000 and (state.recent_text or "").strip():
+            from backend.services.adaptive.change_detector import _text_sig
+            canon_text_sig = _text_sig(state.recent_text or "")
+            canon_cache_hit = (
+                canon_text_sig == self._last_canon_text_sig
+                and canon_text_sig != ""
+            )
+            if not canon_cache_hit:
+                activations.append(Activation(
+                    component="canon_watch",
+                    priority="low",
+                    budget_tokens=0,  # 纯算法零 LLM
+                ))
+                self._last_canon_text_sig = canon_text_sig
+            # 缓存命中：__canon_watch__ 项仍在 layer3_projections，前端 heartbeat 照常取到
 
         # ---- 规则 3：去重（同组件不重复激活）----
         seen = set()
@@ -396,13 +417,14 @@ def get_orchestrator(chapter_id: str, db_factory: Callable) -> AdaptiveOrchestra
         # 注册所有组件（延迟 import 避免循环依赖）
         from backend.services.adaptive.components import (
             intent_inference, future_projection, dock_generator,
-            sediment, post_process,
+            sediment, post_process, canon_watch,
         )
         orch.register_component("intent_inference", intent_inference.run)
         orch.register_component("future_projection", future_projection.run)
         orch.register_component("dock_generator", dock_generator.run)
         orch.register_component("sediment", sediment.run)
         orch.register_component("post_process", post_process.run)
+        orch.register_component("canon_watch", canon_watch.run)
         _ORCHESTRATORS[chapter_id] = orch
     return _ORCHESTRATORS[chapter_id]
 

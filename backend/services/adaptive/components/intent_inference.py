@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
-from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
+from backend.services.llm.client import call_llm_with_usage
 from backend.services.prompts.adaptive_prompts import build_intent_inference_prompt
 from backend.services.adaptive.world_model import WorldModelRepository, ChapterIntent
 from backend.services.utils.json_safe import parse_json_safe  # 复用容错解析
@@ -65,10 +65,13 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         result = await call_llm_with_usage(
             system_prompt=sys_p,
             user_prompt=usr_p,
-            model_type="creative",
-            temperature=0.4,
+            # 意图反推是归纳/判断任务（推断本章弧线、情绪曲线、标注偏差），
+            # 属分析型工作，走 reasoning 槽并保留 thinking（不传 REASONING_DISABLED）。
+            # 此前用 creative + 关 thinking，是「用生成配置干分析的活」。
+            # 此为后台异步任务（heartbeat 触发），延迟不敏感；只在大纲为空时才调。
+            model_type="reasoning",
+            temperature=0.2,
             max_tokens=budget_tokens,
-            reasoning_config=REASONING_DISABLED,
         )
         parsed = parse_json_safe(result.content or "") or {}
         intent = ChapterIntent(
