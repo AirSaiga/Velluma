@@ -54,6 +54,8 @@ export interface HeartbeatResult {
   signals: string[]
   /** Canon 感知提示（canon_watch 产；写中右缘感知带数据源） */
   canon_hints?: CanonHint[]
+  /** 世界数据版本（路由层附带；写作页切片保鲜比对，查询失败无此字段） */
+  world_version?: { events: number; updated_at: string | null } | null
 }
 
 /** 走向卡（层 3 推测首 beat）：Ctrl+Space 走向卡舱的数据源 */

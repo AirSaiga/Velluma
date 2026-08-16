@@ -162,6 +162,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // Canon 感知 → adaptiveSuggestions（写中右缘感知带数据源；canon_watch 产）
       opts.suggestionsRef.value = result.canon_hints || []
 
+      // 世界切片保鲜：版本搭心跳便车，经事件解耦给 useWorldSlice（静默重取，红点提示）
+      if (result.world_version) {
+        window.dispatchEvent(new CustomEvent('velluma:world-version', {
+          detail: { chapterId, version: result.world_version },
+        }))
+      }
+
       opts.aiLaneRef.value = 'dormant'
       // 心跳完成：有挂件→Dock 接管（指示器已在 visible 计算里被 sparkDockVisible 隐藏）；
       // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）
@@ -263,6 +270,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 涌现实体/冲突写入 ref（InspectorPanel 渲染——作者主权：冲突不自动改）
       opts.settleResultRef.value = result
       opts.aiLaneRef.value = 'dormant'
+      // W4 候选回流：settle 可能抽出候选事件 → 切片/收件箱静默刷新
+      window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
       return result
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'
@@ -427,6 +436,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 审计报告写入 ref（InspectorPanel 渲染）
       opts.finishReportRef.value = result
       opts.aiLaneRef.value = 'dormant'
+      // W4 候选回流：完稿整章抽取 → 切片/收件箱静默刷新
+      window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
       return result
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'

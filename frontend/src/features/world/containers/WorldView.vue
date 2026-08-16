@@ -64,6 +64,7 @@ const {
   deleteEntity,
   locationsById,
   currentTime,
+  setCurrentTime,
 } = useWorld()
 
 const { showToast } = useToast()
@@ -266,6 +267,43 @@ function focusLocation(loc: WorldLocation) {
   mapRef.value?.focusAt(loc.coord_x, loc.coord_y, loc.name)
 }
 
+// ===== W4 待确认候选（写作回流收件箱的跨章全貌）=====
+const pendingCandidates = ref<import('../../../services/api/domain/world.api').WorldEventCandidate[]>([])
+const busyCandidateId = ref<string | null>(null)
+
+async function loadCandidates() {
+  if (!bookId.value) return
+  try {
+    pendingCandidates.value = await worldApi.listCandidates(bookId.value, undefined, 'pending')
+  } catch {
+    pendingCandidates.value = []
+  }
+}
+async function acceptCand(c: { id: string; draft?: { summary?: string; event_type?: string } }) {
+  if (!bookId.value || busyCandidateId.value) return
+  busyCandidateId.value = c.id
+  try {
+    await worldApi.acceptCandidate(bookId.value, c.id)
+    await load(bookId.value) // 转正进入推演：事件/状态全量刷新
+    showToast(`已入账：${c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')}`, 'success')
+  } catch (e: any) {
+    showToast('入账失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    busyCandidateId.value = null
+    await loadCandidates()
+  }
+}
+async function rejectCand(c: { id: string }) {
+  if (!bookId.value || busyCandidateId.value) return
+  busyCandidateId.value = c.id
+  try {
+    await worldApi.rejectCandidate(bookId.value, c.id)
+  } finally {
+    busyCandidateId.value = null
+    await loadCandidates()
+  }
+}
+
 // ===== 地点双击改名 =====
 const editingLocId = ref<string | null>(null)
 const locEditName = ref('')
@@ -399,23 +437,58 @@ onMounted(() => {
   consumeRouteQuery()
   removeShortcut = useUndoShortcut(() => handleUndo(), () => handleRedo())
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('velluma:world-refresh', loadCandidates as EventListener)
+  void loadCandidates()
 })
 onBeforeUnmount(() => {
   removeShortcut?.()
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('velluma:world-refresh', loadCandidates as EventListener)
 })
 watch(bookId, (id) => {
   if (id) {
     load(id)
     consumeRouteQuery()
+    void loadCandidates()
   }
 })
 
-// ===== 深链支持：bible 跳转卡带 query（?entity=<id>；单一画布后 lens 参数已废弃）=====
+// ===== 深链支持：bible 跳转卡 + W2 写作页往返（?entity=&loc=&time=&from=chapter&chapter=）=====
 // 实体选中是纯本地 ref，抽屉按 id 从 useWorld 响应式取——数据晚到也能正确打开。
 function consumeRouteQuery() {
   const ent = route.query.entity
   if (typeof ent === 'string' && ent) selectedEntityId.value = ent
+  // 游标跳到指定时刻（写作页「在世界页打开」带本章叙事时刻——回放观察与录入同焦点）
+  const time = route.query.time
+  if (typeof time === 'string' && time !== '' && Number.isFinite(Number(time))) {
+    setCurrentTime(Math.max(0, Math.floor(Number(time))))
+  }
+  // 地点深链：数据可能仍在 load → 挂起，由下方 watch(locations) 兜底消费
+  const loc = route.query.loc
+  if (typeof loc === 'string' && loc) pendingLocId.value = loc
+}
+
+const pendingLocId = ref<string | null>(null)
+watch(locations, (list) => {
+  if (!pendingLocId.value || !list.length) return
+  const loc = list.find((l) => l.id === pendingLocId.value)
+  if (loc) {
+    pendingLocId.value = null
+    focusLocation(loc)
+  }
+})
+
+// W2 返程：from=chapter 深链携带来源章 → 页头「返回本章」一键回写作台
+const returnChapterId = computed(() => {
+  const ch = route.query.chapter
+  return route.query.from === 'chapter' && typeof ch === 'string' && ch ? ch : null
+})
+function returnToChapter() {
+  if (!returnChapterId.value) return
+  router.push({
+    name: 'workspace',
+    params: { bookId: String(bookId.value), chapterId: returnChapterId.value },
+  })
 }
 
 // ===== 侧栏实体搜索 + 重要度排序（承接设定页迁移后的查找需求）=====
@@ -450,6 +523,14 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       <div class="wh-left">
         <button class="wbtn wbtn--icon" title="返回书架（可在此切换书籍）" @click="goLibrary">
           <Icon name="arrow-left" :size="15" />
+        </button>
+        <button
+          v-if="returnChapterId"
+          class="wbtn"
+          title="返回刚才写作的章节（写作台）"
+          @click="returnToChapter"
+        >
+          ↩ 返回本章
         </button>
         <div class="wh-title-block">
           <h1>世界设定</h1>
@@ -538,6 +619,28 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       </div>
 
       <aside class="world-side">
+        <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌） -->
+        <div v-if="pendingCandidates.length" class="side-section">
+          <div class="side-title side-title--toggle" title="点击折叠/展开" @click="toggleSection('cand')">
+            <Icon name="clock" :size="13" />
+            <span>待确认</span>
+            <span class="side-count">{{ pendingCandidates.length }}</span>
+            <span class="side-chev" :class="{ closed: isCollapsed('cand') }">▾</span>
+          </div>
+          <ul v-show="!isCollapsed('cand')" class="side-list">
+            <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || ''">
+              <div class="sc-body">
+                <span class="sc-name">{{ c.draft?.summary || eventLabel(c.draft?.event_type || 'custom') }}</span>
+                <span class="sc-badge">{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ formatTime(c.draft?.time_start || 0) }}</span>
+              </div>
+              <div class="sc-actions">
+                <button class="sc-act" title="转正入账（进入事件推演）" :disabled="busyCandidateId === c.id" @click.stop="acceptCand(c)">✓</button>
+                <button class="sc-act sc-act--danger" title="丢弃" :disabled="busyCandidateId === c.id" @click.stop="rejectCand(c)">✗</button>
+              </div>
+            </li>
+          </ul>
+        </div>
+
         <!-- 地点 -->
         <div class="side-section">
           <div class="side-title side-title--toggle" title="点击折叠/展开" @click="toggleSection('loc')">

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import ChapterEditorContainer from '../features/chapter-editor/containers/ChapterEditorContainer.vue'
 import type { ApiConfig, Chapter, Character } from '../types'
+import type { EntityFocusPayload } from '../shared/types'
 
 const props = defineProps<{
   selectedChapter: Chapter | null
@@ -36,8 +37,8 @@ function handleRefreshCharacters() {
   emit('refresh-characters')
 }
 
-function handleEditorEntityFocus(keyword: string) {
-  emit('editor-entity-focus', keyword)
+function handleEditorEntityFocus(payload: EntityFocusPayload) {
+  emit('editor-entity-focus', payload)
 }
 </script>
 

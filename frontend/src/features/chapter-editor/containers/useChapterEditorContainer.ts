@@ -7,6 +7,7 @@ import type { ApiConfig, Chapter, Character } from '../../../types'
 import { useChapterPublisher } from './useChapterPublisher'
 import { useChapterAssets } from './useChapterAssets'
 import { saveChapterDraft } from '../useChapterDraft'
+import type { EntityFocusPayload } from '../../../shared/types'
 
 // V3.1 清理：旧双轨生成路径（startGenerate → 节拍预览弹窗 → 双轨 SSE）已移除。
 // 章节生成统一由 generation 特性的 useGenerationSession（Inspector「本章」tab）驱动。
@@ -31,8 +32,8 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   const isEditorDisabled = computed(() => publisher.isPublishing.value)
   const selectedChapter = computed(() => props.selectedChapter)
 
-  function handleEditorEntityFocus(keyword: string) {
-    emit('editor-entity-focus', keyword)
+  function handleEditorEntityFocus(payload: EntityFocusPayload) {
+    emit('editor-entity-focus', payload)
   }
 
   // 落库统一入口：chapterId 由调用方快照传入（不在触发时刻读 selectedChapter）——

@@ -4,6 +4,7 @@ import RichTextEditor from '../../../components/RichTextEditor.vue'
 import PublishModal from './PublishModal.vue'
 import { extractSegmentTextFromPreviewHtml } from '../../generation/composables/buildGenerationPreview'
 import type { Chapter } from '../../../types'
+import type { EntityFocusPayload } from '../../../shared/types'
 
 // V3.1 清理：旧双轨生成 UI（智能生成按钮/生成参数弹窗/节拍预览弹窗/澄清与完成弹窗/
 // 生成进度遮罩）已移除。生成统一由 Inspector「本章」tab 的 useGenerationSession 驱动。
@@ -17,7 +18,7 @@ const props = defineProps<{
   characterExtraction: any
   closePublishModal: () => void
   handleContentUpdate: (content: string) => void
-  handleEditorEntityFocus: (keyword: string) => void
+  handleEditorEntityFocus: (payload: EntityFocusPayload) => void
   handleFormatText: (text: string) => void
   handlePartialOptimize: (payload: { selection: any, instruction: string, mode?: string, tone?: string | null }) => void
   handleTitleInput: (event: Event) => void

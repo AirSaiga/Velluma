@@ -28,7 +28,7 @@ import { refineryApi } from '../../../services/api/domain'
 import GenerationStepper from '../../generation/presentation/GenerationStepper.vue'
 import BeatSlotCardView from '../../generation/presentation/BeatSlotCardView.vue'
 import FocusAssetsPanel from '../../generation/presentation/FocusAssetsPanel.vue'
-import SceneSettingsPanel from '../presentation/SceneSettingsPanel.vue'
+import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { countChapterWords } from '../../../shared/utils/htmlText'
@@ -604,9 +604,9 @@ function handleDismissInflight(idx: number) {
         </template>
       </div>
 
-      <!-- ====== 设定 tab：场景设定（角色/地点/资产） ====== -->
+      <!-- ====== 设定 tab：此刻此地世界切片（W1，在场由事件推演与生成同源） ====== -->
       <div v-else-if="activeTab === 'setting'" class="panel setting-panel">
-        <SceneSettingsPanel :chapter-id="selectedChapterId" />
+        <WorldSceneSlice :chapter-id="selectedChapterId" />
       </div>
 
       <!-- ====== 精修 tab：介入点 2 + 手术进度 ====== -->

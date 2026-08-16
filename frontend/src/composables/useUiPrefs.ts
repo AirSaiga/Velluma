@@ -8,6 +8,8 @@ const DEFAULT_PREFS = {
   sidebarCollapsed: false,
   rightDrawerOpen: false,
   zenMode: true,
+  worldSliceCollapsed: false,
+  worldReaderView: false,
 }
 
 export type UiPrefs = typeof DEFAULT_PREFS

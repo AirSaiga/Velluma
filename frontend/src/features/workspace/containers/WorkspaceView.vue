@@ -49,6 +49,9 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
+import WorldContextCard from '../presentation/WorldContextCard.vue'
+import QuickEventNote from '../presentation/QuickEventNote.vue'
+import type { EntityFocusPayload } from '../../../shared/types'
 import type { Chapter } from '../../../types'
 
 const route = useRoute()
@@ -70,6 +73,26 @@ const apiConfig = store.apiConfig
 
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
 const chapterIdFromRoute = computed(() => (route.params.chapterId as string) || null)
+
+// W2 情境浮卡：编辑器选中文本（1-12 字）/点击 @/# 提及 → 三秒查明底细。
+// cursor 事件（光标周边词）不触发浮卡，只用于关闭在屏卡（作者已移动注意力）。
+const contextCardState = ref<EntityFocusPayload | null>(null)
+function handleEntityFocus(payload: EntityFocusPayload) {
+  if (payload.source === 'cursor') {
+    contextCardState.value = null
+    return
+  }
+  const kw = payload.keyword || ''
+  if (payload.source === 'selection' && (!kw || kw.length > 12)) {
+    contextCardState.value = null
+    return
+  }
+  if (!kw && !payload.entityId) {
+    contextCardState.value = null
+    return
+  }
+  contextCardState.value = payload
+}
 
 // V4.x 重构：共享 session（Inspector 和中栏覆盖面板都用同一个）
 const session = useGenerationSession()
@@ -869,6 +892,7 @@ async function confirmDeleteChapter(ch: Chapter) {
               @preview-segment-edit="session.setReadySegmentText"
               @update-chapter="handleUpdateChapter"
               @refresh-characters="handleRefreshCharacters"
+              @editor-entity-focus="handleEntityFocus"
             />
             <!-- 生成状态条：编辑器下方一行进度（含取消）+ 实时正文流；失败态保持展示（含重试/关闭） -->
             <GenerationOverlay
@@ -887,6 +911,23 @@ async function confirmDeleteChapter(ch: Chapter) {
                 <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />
               </template>
             </PerceptionBand>
+
+            <!-- W2 情境浮卡（Teleport 到 body；未解析到时组件自行关闭） -->
+            <WorldContextCard
+              v-if="contextCardState && currentBook?.id && selectedChapterId"
+              :key="`${contextCardState.source}:${contextCardState.entityId || contextCardState.keyword}`"
+              :book-id="currentBook.id"
+              :chapter-id="selectedChapterId"
+              :x="contextCardState.x || 0"
+              :y="contextCardState.y || 0"
+              :keyword="contextCardState.keyword"
+              :entity-id="contextCardState.entityId || null"
+              :entity-kind="contextCardState.entityKind || null"
+              @close="contextCardState = null"
+            />
+
+            <!-- W3 速记框（Alt+N / 浮卡「记一笔」唤起；Teleport 模态 + 撤销胶囊） -->
+            <QuickEventNote :book-id="currentBook?.id || null" :chapter-id="selectedChapterId" />
           </div>
 
           <!-- 空状态 -->

@@ -232,9 +232,10 @@ const detectEntityAroundCursor = (editor, from) => {
   return picked
 }
 
-const emitEntityFocus = (keyword = '') => {
+const emitEntityFocus = (keyword = '', meta = {}) => {
   const normalized = (keyword || '').trim()
-  emit('entity-focus-change', normalized)
+  // W2 情境浮卡：载荷带 source（cursor/selection/mention）+ 视口坐标 + 提及实体 id
+  emit('entity-focus-change', { keyword: normalized, ...meta })
 }
 
 const handleSelectionMenuOutsidePress = (event) => {
@@ -373,6 +374,28 @@ const editor = useEditor({
     attributes: {
       class: 'prose prose-lg max-w-3xl mx-auto focus:outline-none min-h-[560px] px-12 py-10 text-[var(--text-primary)] leading-[2.0]',
     },
+    // W2 情境浮卡：点击 @/# 提及节点 → 按实体 id 直取浮卡（旁路通知，不拦截默认行为）
+    handleClick: (view, pos, event) => {
+      const isMention = (n) =>
+        n && (n.type.name === 'charMention' || n.type.name === 'assetMention')
+      const $pos = view.state.doc.resolve(pos)
+      const node = isMention($pos.nodeAfter)
+        ? $pos.nodeAfter
+        : isMention($pos.nodeBefore)
+          ? $pos.nodeBefore
+          : null
+      if (node) {
+        emit('entity-focus-change', {
+          keyword: node.attrs.label || node.attrs.id || '',
+          source: 'mention',
+          x: event.clientX,
+          y: event.clientY + 10,
+          entityId: node.attrs.id || null,
+          entityKind: node.type.name === 'charMention' ? 'character' : 'asset',
+        })
+      }
+      return false
+    },
   },
   onUpdate: ({ editor }) => {
     emit('update:modelValue', editor.getHTML())
@@ -405,7 +428,7 @@ const editor = useEditor({
     if (empty) {
       showSelectionMenu.value = false
       optimizationState.value = 'idle'
-      emitEntityFocus(detectEntityAroundCursor(editor, from))
+      emitEntityFocus(detectEntityAroundCursor(editor, from), { source: 'cursor' })
       return
     }
 
@@ -449,7 +472,13 @@ const editor = useEditor({
       
       showSelectionMenu.value = true
       optimizationState.value = 'toolbar'
-      emitEntityFocus(currentSelection.value.text)
+      // 浮卡锚点用视口坐标（卡体 Teleport 到 body，fixed 定位）
+      const cardCoords = editor.view.coordsAtPos(current.from)
+      emitEntityFocus(currentSelection.value.text, {
+        source: 'selection',
+        x: cardCoords.left,
+        y: cardCoords.bottom + 10,
+      })
     }, SELECTION_DEBOUNCE_MS) // 延迟以确保选区稳定
   }
 })

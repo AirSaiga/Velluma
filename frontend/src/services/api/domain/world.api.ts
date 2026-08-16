@@ -67,6 +67,119 @@ export interface WorldEventCreate {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
+// ===== 世界切片（写作页「此刻此地」，docs/world-writing-bridge.md W1）=====
+
+export interface WorldVersion {
+  /** 事件计数（兜底「删除不 bump updated_at」的盲区） */
+  events: number
+  /** 四表聚合 max(updated_at)（ISO 字符串；空世界为 null） */
+  updated_at: string | null
+}
+
+export interface ScenePresence {
+  entity_id: string
+  name: string
+  alive: boolean
+  location_name: string
+  label: string
+  importance: number
+  visibility: string
+}
+
+export interface SceneBlock {
+  location_id: string
+  name: string
+  controlling_faction: string | null
+  /** True=作者显式钉定（chapters.scene_location_id） */
+  pinned: boolean
+}
+
+export interface SceneEncounter {
+  /** t 时刻同地点的存活角色名（戏剧机会线索） */
+  names: string[]
+  location_name: string
+}
+
+export interface SceneForeshadow {
+  ledger_key: string
+  content: string
+  chapters_open: number | null
+}
+
+export interface SceneExpectation {
+  type: string
+  description: string
+  tension: number
+}
+
+export interface SceneSlice {
+  t: number
+  /** chapter_anchor | prev_anchor | max_event | zero（四级降级来源） */
+  t_source: string
+  presence: ScenePresence[]
+  scene: SceneBlock | null
+  encounters: SceneEncounter[]
+  foreshadows: SceneForeshadow[]
+  expectations: SceneExpectation[]
+  version: WorldVersion
+  /** 世界页无实体（旧表兜底书）→ 前端显示迁移引导 */
+  world_empty: boolean
+}
+
+// ===== 情境浮卡（W2 查询闭环）=====
+
+export interface ContextChronicleItem {
+  event_type: string
+  note: string
+  time_start: number
+}
+
+export interface ContextCard {
+  kind: 'entity' | 'location'
+  id: string
+  entity_type: string
+  name: string
+  intro: string
+  t: number
+  alive: boolean | null
+  location_name: string
+  label: string
+  chronicle: ContextChronicleItem[]
+  controlling_faction: string | null
+  recent_events: ContextChronicleItem[]
+}
+
+// ===== 速记解析（W3）+ 候选事件（W4）=====
+
+export interface EventDraft {
+  event_type: string
+  summary: string
+  time_start: number
+  time_end: number
+  participant_ids: string[]
+  participant_names: string[]
+  /** 名单没匹配上的名字（提示作者手选） */
+  unresolved_names: string[]
+  location_id: string | null
+  location_name: string
+  note: string
+}
+
+export interface ParseEventResult {
+  draft: EventDraft
+  confidence: 'high' | 'low' | 'none'
+}
+
+export interface WorldEventCandidate {
+  id: string
+  book_id: string
+  chapter_id: string | null
+  draft: EventDraft
+  source: 'settle' | 'finish' | string
+  status: 'pending' | 'accepted' | 'rejected' | string
+  created_at: string
+}
+
 export const worldApi = {
   // ===== 地点 =====
   listLocations: (bookId: string) =>
@@ -184,11 +297,19 @@ export const worldApi = {
     }))
   },
 
-  setChapterAnchor: (chapterId: string, narrativeTime: number) =>
+  setChapterAnchor: (chapterId: string, narrativeTime: number | null) =>
     requestJson<unknown>(`/chapters/${chapterId}`, {
       method: 'PUT',
       headers: JSON_HEADERS,
       body: JSON.stringify({ narrative_time: narrativeTime }),
+    }),
+
+  /** 本章场景钉（W5-lite）：显式钉定本章地点（null=取消钉，回落推演） */
+  setScenePin: (chapterId: string, locationId: string | null) =>
+    requestJson<unknown>(`/chapters/${chapterId}`, {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ scene_location_id: locationId }),
     }),
 
   // ===== 旧设定中心一次性迁移（幂等）=====
@@ -209,6 +330,54 @@ export const worldApi = {
   /** 按章节解析叙事时间（本章锚→前序最近锚→事件最大时刻）后推演世界状态 */
   getStateForChapter: (bookId: string, chapterId: string) =>
     requestJson<WorldState>(`/books/${bookId}/world/state-for-chapter/${chapterId}`),
+
+  /** 章节时刻的世界切片（在场/脚下/头顶的线 + 数据版本）——写作页切片条唯一数据源 */
+  getSceneSlice: (bookId: string, chapterId: string) =>
+    requestJson<SceneSlice>(`/books/${bookId}/world/scene-slice?chapter_id=${chapterId}`),
+
+  /** 情境浮卡：选中人名/地名或点击提及 → 实体卡/地点卡（404=未解析到，浮卡静默缺席） */
+  getContextCard: (
+    bookId: string,
+    chapterId: string,
+    params: { name?: string; entity_id?: string; location_id?: string },
+  ) => {
+    const qs = new URLSearchParams({ chapter_id: chapterId })
+    if (params.entity_id) qs.set('entity_id', params.entity_id)
+    if (params.location_id) qs.set('location_id', params.location_id)
+    if (params.name) qs.set('name', params.name)
+    return requestJson<ContextCard>(`/books/${bookId}/world/context-card?${qs.toString()}`)
+  },
+
+  // ===== W3 速记解析：一句话 → 事件草稿（只产草稿，绝不落库）=====
+  parseEvent: (bookId: string, chapterId: string, text: string) =>
+    requestJson<ParseEventResult>(`/books/${bookId}/world/parse-event`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ chapter_id: chapterId, text }),
+    }),
+
+  // ===== W4 候选事件：收件箱（✓ 转正 / ✗ 丢弃 / 重开=撤销入账路径）=====
+  listCandidates: (bookId: string, chapterId?: string, status = 'pending') => {
+    const qs = new URLSearchParams({ status })
+    if (chapterId) qs.set('chapter_id', chapterId)
+    return requestJson<WorldEventCandidate[]>(`/books/${bookId}/world/candidates?${qs.toString()}`)
+  },
+
+  acceptCandidate: (bookId: string, candidateId: string) =>
+    requestJson<{ event: WorldEvent; candidate_id: string }>(
+      `/books/${bookId}/world/candidates/${candidateId}/accept`,
+      { method: 'POST' },
+    ),
+
+  rejectCandidate: (bookId: string, candidateId: string) =>
+    requestJson<{ status: string }>(`/books/${bookId}/world/candidates/${candidateId}/reject`, {
+      method: 'POST',
+    }),
+
+  reopenCandidate: (bookId: string, candidateId: string) =>
+    requestJson<{ status: string }>(`/books/${bookId}/world/candidates/${candidateId}/reopen`, {
+      method: 'POST',
+    }),
 
   // ===== 底图：图片拼贴层 =====
   listMapLayers: (bookId: string) =>
