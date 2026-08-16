@@ -18,7 +18,7 @@ world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +31,22 @@ from backend.repositories.world_repository import WorldRepository
 # 叙事时间解析（时间切片的 t 从哪来）
 # ============================================================
 
-async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> int:
-    """四级降级解析本章的世界时间切片时刻 t。
+class NarrativeTime(NamedTuple):
+    """叙事时刻解析结果（docs/world-writing-bridge.md §4.1）。
+
+    source 四级降级来源：
+    - chapter_anchor：本章 narrative_time（世界页时间轴右键锚定）
+    - prev_anchor：前序最近已锚章
+    - max_event：事件流最大 time_start（"写到最远处"）
+    - zero：空世界兜底
+    """
+
+    t: int
+    source: str
+
+
+async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> NarrativeTime:
+    """四级降级解析本章的世界时间切片时刻 t（带来源）。
 
     ① 本章 narrative_time（世界页时间轴右键锚定）
     ② 前序最近已锚章（chapter_number 更小且 narrative_time 非空的最大者）
@@ -41,11 +55,11 @@ async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> int:
     """
     nt = getattr(chapter, "narrative_time", None)
     if nt is not None:
-        return int(nt)
+        return NarrativeTime(int(nt), "chapter_anchor")
 
     book_id = getattr(chapter, "book_id", None)
     if book_id is None:
-        return 0
+        return NarrativeTime(0, "zero")
     chapter_number = getattr(chapter, "chapter_number", None) or 0
 
     # ② 前序最近已锚章
@@ -62,16 +76,16 @@ async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> int:
     result = await db.execute(stmt)
     prev = result.scalar_one_or_none()
     if prev is not None:
-        return int(prev)
+        return NarrativeTime(int(prev), "prev_anchor")
 
     # ③ 事件最大时刻
     stmt2 = select(func.max(WorldEvent.time_start)).where(WorldEvent.book_id == book_id)
     r2 = await db.execute(stmt2)
     max_ev = r2.scalar_one_or_none()
     if max_ev is not None:
-        return int(max_ev)
+        return NarrativeTime(int(max_ev), "max_event")
 
-    return 0
+    return NarrativeTime(0, "zero")
 
 
 # ============================================================
@@ -214,7 +228,8 @@ async def load_world_overlay(
     if not entities_all:
         return None
 
-    t = await resolve_narrative_time(db, chapter)
+    nt = await resolve_narrative_time(db, chapter)
+    t = nt.t
     state = await repo.compute_world_state(book_id, t)
     locations = await repo.locations.list_by_book(book_id)
     relations = await repo.relations.list_by_book(book_id)
@@ -262,4 +277,5 @@ async def load_world_overlay(
         "relationships": relationships,
         "world_state": state,
         "world_time": t,
+        "world_time_source": nt.source,
     }

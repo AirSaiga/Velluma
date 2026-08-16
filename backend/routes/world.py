@@ -22,6 +22,11 @@ from backend.core.config import WORLD_IMAGES_DIR
 from backend.core.dependencies import get_db
 from backend.repositories.world_repository import WorldRepository
 from backend.schemas.world import (
+    AcceptCandidateResponse,
+    ContextCardResponse,
+    ParseEventRequest,
+    ParseEventResponse,
+    SceneSliceResponse,
     WorldEntityCreate,
     WorldEntityResponse,
     WorldEntityUpdate,
@@ -40,6 +45,7 @@ from backend.schemas.world import (
     WorldRelationResponse,
     WorldRelationUpdate,
     WorldStateResponse,
+    WorldEventCandidateResponse,
 )
 
 router = APIRouter(prefix="/api/books", tags=["world-v1"])
@@ -276,9 +282,170 @@ async def get_world_state_for_chapter(
     chapter = await db.get(Chapter, str(chapter_id))
     if chapter is None or str(chapter.book_id) != str(book_id):
         raise HTTPException(404, "章节不存在")
-    t = await resolve_narrative_time(db, chapter)
+    t = (await resolve_narrative_time(db, chapter)).t
     repo = WorldRepository(db)
     return await repo.compute_world_state(str(book_id), t)
+
+
+@router.get("/{book_id}/world/scene-slice", response_model=SceneSliceResponse)
+async def get_scene_slice(
+    book_id: UUID,
+    chapter_id: UUID = Query(..., description="章节 id（切片时刻按叙事锚四级降级解析）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """章节时刻的世界切片：在场 / 脚下 / 头顶的线（开放伏笔 + 活跃期待）+ 数据版本。
+
+    写作页「此刻此地」切片条的唯一数据源（docs/world-writing-bridge.md §4.1）；
+    与生成桥接共用 resolve_narrative_time + compute_world_state——作者所见 = AI 所见。
+    """
+    from backend.models import Chapter
+    from backend.services.world.scene_slice import build_scene_slice
+
+    chapter = await db.get(Chapter, str(chapter_id))
+    if chapter is None or str(chapter.book_id) != str(book_id):
+        raise HTTPException(404, "章节不存在")
+    return await build_scene_slice(db, str(book_id), chapter)
+
+
+@router.get("/{book_id}/world/context-card", response_model=ContextCardResponse)
+async def get_context_card(
+    book_id: UUID,
+    chapter_id: UUID = Query(..., description="章节 id（编年史/状态按叙事时刻截断防剧透）"),
+    entity_id: Optional[UUID] = Query(None, description="世界实体 id（提及点击直取）"),
+    location_id: Optional[UUID] = Query(None, description="地点 id"),
+    name: Optional[str] = Query(None, description="名字/别名（选中文本解析；实体优先，其次地点）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """情境浮卡（W2 查询闭环）：选中人名/地名或点击 @/# 提及 → 三秒查明底细。
+
+    解析不到（选中的不是已知实体/地点）返回 404，前端浮卡静默缺席。
+    """
+    from backend.models import Chapter
+    from backend.services.world.scene_slice import build_context_card
+
+    chapter = await db.get(Chapter, str(chapter_id))
+    if chapter is None or str(chapter.book_id) != str(book_id):
+        raise HTTPException(404, "章节不存在")
+    card = await build_context_card(
+        db,
+        str(book_id),
+        chapter,
+        entity_id=str(entity_id) if entity_id else None,
+        location_id=str(location_id) if location_id else None,
+        name=name,
+    )
+    if card is None:
+        raise HTTPException(404, "未在世界页找到对应实体/地点")
+    return card
+
+
+# ============================================================
+# 速记解析（W3 一句话记历史）+ 候选事件（W4 写作→世界回流）
+# ============================================================
+
+@router.post("/{book_id}/world/parse-event", response_model=ParseEventResponse)
+async def parse_event(
+    book_id: UUID,
+    payload: ParseEventRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """一句话速记 → 事件草稿（预填轻表单，作者过目确认）。
+
+    契约红线：只产草稿，绝不写库；解析失败返回空草稿 + confidence=none。
+    """
+    from backend.models import Chapter
+    from backend.services.world.event_parser import parse_event_text
+
+    chapter = await db.get(Chapter, str(payload.chapter_id))
+    if chapter is None or str(chapter.book_id) != str(book_id):
+        raise HTTPException(404, "章节不存在")
+    return await parse_event_text(db, str(book_id), chapter, payload.text)
+
+
+def _event_fields_from_draft(draft: dict) -> dict:
+    """候选 draft → world_events 创建字段（payload 按类型补齐，保证推演回放正确）。"""
+    etype = draft.get("event_type") or "custom"
+    participant_ids = [str(p) for p in (draft.get("participant_ids") or [])]
+    location_id = draft.get("location_id") or None
+    note = str(draft.get("note") or draft.get("summary") or "")
+    payload: dict = {}
+    if etype == "move":
+        payload = {"character_ids": participant_ids}
+        if location_id:
+            payload["to_location_id"] = str(location_id)
+    elif etype in ("birth", "death") and participant_ids:
+        payload = {"character_id": participant_ids[0]}
+        if etype == "birth" and location_id:
+            payload["location_id"] = str(location_id)
+    t0 = int(draft.get("time_start") or 0)
+    return {
+        "event_type": etype,
+        "time_start": t0,
+        "time_end": int(draft.get("time_end") or t0),
+        "location_id": location_id,
+        "participant_ids": participant_ids,
+        "payload": payload,
+        "note": note,
+    }
+
+
+@router.get("/{book_id}/world/candidates", response_model=List[WorldEventCandidateResponse])
+async def list_candidates(
+    book_id: UUID,
+    chapter_id: Optional[UUID] = Query(None, description="缺省=全书（世界页待确认分区）"),
+    status: str = Query("pending", description="pending | accepted | rejected"),
+    db: AsyncSession = Depends(get_db),
+):
+    """候选事件列表（写作页收件箱只管本章；世界页待确认分区看全书）。"""
+    repo = WorldRepository(db)
+    return await repo.candidates.list_by_book(
+        str(book_id), status=status, chapter_id=str(chapter_id) if chapter_id else None
+    )
+
+
+@router.post("/{book_id}/world/candidates/{candidate_id}/accept", response_model=AcceptCandidateResponse)
+async def accept_candidate(
+    book_id: UUID, candidate_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """✓ 转正：创建真事件（正常分配回放序号，进入推演）+ 候选 status→accepted。"""
+    repo = WorldRepository(db)
+    cand = await repo.candidates.get(str(candidate_id))
+    if cand is None or str(cand.book_id) != str(book_id):
+        raise HTTPException(404, "候选不存在")
+    if cand.status != "pending":
+        raise HTTPException(409, f"候选已处理（{cand.status}）")
+    ev = await repo.events.create(str(book_id), **_event_fields_from_draft(cand.draft or {}))
+    await repo.candidates.set_status(str(candidate_id), "accepted")
+    await db.commit()
+    return AcceptCandidateResponse(event=ev, candidate_id=cand.id)
+
+
+@router.post("/{book_id}/world/candidates/{candidate_id}/reject")
+async def reject_candidate(
+    book_id: UUID, candidate_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """✗ 丢弃：status→rejected（留痕供回溯，不进任何视图）。"""
+    repo = WorldRepository(db)
+    cand = await repo.candidates.get(str(candidate_id))
+    if cand is None or str(cand.book_id) != str(book_id):
+        raise HTTPException(404, "候选不存在")
+    await repo.candidates.set_status(str(candidate_id), "rejected")
+    await db.commit()
+    return {"status": "rejected"}
+
+
+@router.post("/{book_id}/world/candidates/{candidate_id}/reopen")
+async def reopen_candidate(
+    book_id: UUID, candidate_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """撤销入账路径：status→pending（配合删除已建事件使用）。"""
+    repo = WorldRepository(db)
+    cand = await repo.candidates.get(str(candidate_id))
+    if cand is None or str(cand.book_id) != str(book_id):
+        raise HTTPException(404, "候选不存在")
+    await repo.candidates.set_status(str(candidate_id), "pending")
+    await db.commit()
+    return {"status": "pending"}
 
 
 @router.post("/{book_id}/world/migrate-legacy")

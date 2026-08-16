@@ -29,6 +29,8 @@ from starlette.responses import StreamingResponse
 
 from backend.core.dependencies import get_db
 from backend.database import AsyncSessionLocal
+from backend.models import Chapter
+from backend.repositories.world_repository import WorldRepository
 from backend.services.adaptive.orchestrator import get_orchestrator
 from backend.services.adaptive.change_detector import AuthorState
 from backend.services.adaptive.world_model import WorldModelRepository
@@ -99,6 +101,8 @@ class HeartbeatResponse(BaseModel):
     activated: List[str] = Field(default_factory=list)
     signals: List[str] = Field(default_factory=list)
     canon_hints: List[Dict] = Field(default_factory=list)  # Canon 感知（角色出场/伏笔回收/private 泄露），canon_watch 写入
+    # 世界数据版本（写作页切片条保鲜比对；路由层附带，查询失败为 None）
+    world_version: Optional[Dict] = Field(None)
 
 
 class SettleRequest(BaseModel):
@@ -155,6 +159,16 @@ async def heartbeat(
     canon_hints = _extract_canon_hints(snapshot)
 
     intent = snapshot.get("intent", {})
+
+    # 世界数据版本（写作页切片保鲜比对搭心跳便车；失败静默 None 不阻塞心跳本体）
+    world_version = None
+    try:
+        chapter = await db.get(Chapter, str(chapter_id))
+        if chapter is not None:
+            world_version = await WorldRepository(db).world_version(str(chapter.book_id))
+    except Exception:
+        world_version = None
+
     return HeartbeatResponse(
         dock_parts=dock_parts,
         direction_cards=direction_cards,
@@ -166,6 +180,7 @@ async def heartbeat(
         activated=result.get("activated", []),
         signals=result.get("signals", []),
         canon_hints=canon_hints,
+        world_version=world_version,
     )
 
 

@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Column, String, Text, Integer, DateTime, Float, ForeignKey, UniqueConstraint, Boolean, CheckConstraint
+from sqlalchemy import Column, String, Text, Integer, DateTime, Float, ForeignKey, UniqueConstraint, Boolean, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -255,6 +255,9 @@ class Chapter(Base):
     map_activity_range = Column(Text, nullable=True)
     # 世界页章节叙事时间锚（连续日计数，与历法解耦；设计见 docs/world-unified-settings.md §2.4）
     narrative_time = Column(Integer, nullable=True)
+    # 本章场景钉（W5-lite）：作者显式钉定本章发生的地点——切片「脚下」的第一优先级，
+    # 缺省时回落到事件/在场推演（docs/world-writing-bridge.md §10.2）
+    scene_location_id = Column(UUID(as_uuid=True), ForeignKey("world_locations.id", ondelete="SET NULL"), nullable=True)
     tension_level = Column(Integer, default=5, nullable=False)
     pacing_style = Column(String(50), default="balanced", nullable=False)
     revision_count = Column(Integer, default=0)
@@ -1449,6 +1452,45 @@ class WorldRelation(Base):
 
     def __repr__(self):
         return f"<WorldRelation {self.source_entity_id}->{self.target_entity_id} {self.relation_type}>"
+
+
+class WorldEventCandidate(Base):
+    """
+    候选事件表——写作回流待确认池（docs/world-writing-bridge.md §4.4，W4）。
+
+    与 world_events 物理隔离：候选不参与推演、不进正常图层、不影响 version 主计数
+    （账本零污染风险）。作者 ✓ 转正 = 创建真事件（正常分配回放序号）+ status→accepted；
+    ✗ = rejected（留痕不进视图）；撤销入账 = 删事件 + reopen 回 pending。
+
+    draft 形状（与 parse-event 输出一致）：
+    {summary, event_type, time_start, time_end, participant_ids, participant_names,
+     location_id, location_name, note}
+    """
+    __tablename__ = "world_event_candidates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chapter_id = Column(
+        UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    draft = Column(JSONB, default=dict)
+    source = Column(String(20), default="settle")  # settle | finish
+    status = Column(String(20), default="pending", nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'rejected')",
+            name="ck_world_event_candidates_status_valid",
+        ),
+        Index("ix_world_candidates_book_status", "book_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<WorldEventCandidate {self.status} {(self.draft or {}).get('event_type', '?')}>"
 
 
 # ============================================================

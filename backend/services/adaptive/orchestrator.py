@@ -365,11 +365,26 @@ class AdaptiveOrchestrator:
             except Exception as e:
                 logger.warning(f"[orchestrator] sediment 失败: {e}", exc_info=True)
 
+        # ---- W4 候选事件抽取（本段 → 待确认池；失败不影响沉淀结果）----
+        candidates_created = 0
+        scout_runner = self._components.get("event_scout")
+        if scout_runner:
+            try:
+                async with self.db_factory() as db:
+                    scout_result = await scout_runner(
+                        self.chapter_id, db, {}, 1500, source="settle", text=segment_text
+                    )
+                    candidates_created = int(scout_result.get("created", 0))
+                    await db.commit()
+            except Exception as e:
+                logger.warning(f"[orchestrator] event_scout 失败: {e}", exc_info=True)
+
         return {
             "settled": True,
             "fact_count": (await self._fact_count()),
             "emergent_facts": sediment_result.get("emergent_facts") if sediment_result else None,
             "conflicts": sediment_result.get("conflicts") if sediment_result else None,
+            "candidates_created": candidates_created,
         }
 
     async def on_finish(self) -> Dict[str, Any]:
@@ -389,7 +404,23 @@ class AdaptiveOrchestrator:
                 snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)
                 report = await post_runner(self.chapter_id, db, snapshot, 8000)
                 await db.commit()
-            return {"finished": True, "report": report or {}}
+            # ---- W4 候选事件抽取（整章 → 待确认池；失败不影响审计结果）----
+            candidates_created = 0
+            scout_runner = self._components.get("event_scout")
+            if scout_runner:
+                try:
+                    async with self.db_factory() as db:
+                        scout_result = await scout_runner(
+                            self.chapter_id, db, {}, 2500, source="finish"
+                        )
+                        candidates_created = int(scout_result.get("created", 0))
+                        await db.commit()
+                except Exception as e:
+                    logger.warning(f"[orchestrator] event_scout(finish) 失败: {e}", exc_info=True)
+            result = {"finished": True, "report": report or {}}
+            if candidates_created:
+                result["candidates_created"] = candidates_created
+            return result
         except Exception as e:
             logger.warning(f"[orchestrator] post_process 失败: {e}", exc_info=True)
             return {"finished": False, "reason": str(e)}
@@ -419,12 +450,14 @@ def get_orchestrator(chapter_id: str, db_factory: Callable) -> AdaptiveOrchestra
             intent_inference, future_projection, dock_generator,
             sediment, post_process, canon_watch,
         )
+        from backend.services.world import event_scout
         orch.register_component("intent_inference", intent_inference.run)
         orch.register_component("future_projection", future_projection.run)
         orch.register_component("dock_generator", dock_generator.run)
         orch.register_component("sediment", sediment.run)
         orch.register_component("post_process", post_process.run)
         orch.register_component("canon_watch", canon_watch.run)
+        orch.register_component("event_scout", event_scout.run)
         _ORCHESTRATORS[chapter_id] = orch
     return _ORCHESTRATORS[chapter_id]
 

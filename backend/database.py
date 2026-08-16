@@ -574,6 +574,15 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "INTEGER",
         "expected_udt_names": {"int4", "integer"},
     },
+    # 写作桥 W5-lite：本章场景钉（切片「脚下」的第一优先级，缺省回落推演）
+    {
+        "table": "chapters",
+        "column": "scene_location_id",
+        "definition": (
+            "UUID REFERENCES world_locations(id) ON DELETE SET NULL"
+        ),
+        "expected_udt_names": {"uuid"},
+    },
 ]
 
 
@@ -724,6 +733,8 @@ async def init_db():
         WorldEvent,
         WorldLocation,
         WorldEntity,
+        WorldRelation,
+        WorldEventCandidate,
         WorldMapLayer,
         WorldMapStroke,
     )

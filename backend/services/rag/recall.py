@@ -165,7 +165,7 @@ async def _world_echoes(db, *, book_id, chapter_id, query_text, limit) -> List[s
     chapter = await db.get(Chapter, UUID(chapter_id))
     if chapter is None:
         return []
-    t = await resolve_narrative_time(db, chapter)
+    t = (await resolve_narrative_time(db, chapter)).t
 
     events = await repo.events.list_all_by_book(book_id)
     matched_ids = {str(e.id) for e in matched}

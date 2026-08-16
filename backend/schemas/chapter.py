@@ -37,6 +37,8 @@ class ChapterBase(BaseModel):
     map_activity_range: Optional[str] = None
     # 世界页章节叙事时间锚（连续日计数；docs/world-unified-settings.md §2.4）
     narrative_time: Optional[int] = None
+    # 本章场景钉（写作桥 W5-lite）：显式钉定本章地点，切片「脚下」第一优先级
+    scene_location_id: Optional[str] = None
     tension_level: int = Field(default=3, ge=1, le=5, description="剧情张力等级 (1-5)，决定工作流层级")
     pacing_style: PacingStyle = Field(default="balanced")
     world_snapshot: Optional[dict] = Field(default=None, description="章节发布时提取的世界状态快照")
@@ -69,6 +71,7 @@ class ChapterUpdate(BaseModel):
     status: Optional[str] = None
     map_activity_range: Optional[str] = None
     narrative_time: Optional[int] = None
+    scene_location_id: Optional[str] = None
     tension_level: Optional[int] = Field(None, ge=1, le=5, description="剧情张力等级 (1-5)")
     pacing_style: Optional[PacingStyle] = None
     chapter_assets_schema: Optional[str] = None

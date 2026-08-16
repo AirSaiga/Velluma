@@ -243,6 +243,148 @@ class WorldStateResponse(BaseModel):
 
 
 # ============================================================
+# SceneSlice（写作页「此刻此地」世界切片，docs/world-writing-bridge.md W1）
+# ============================================================
+
+class ScenePresenceItem(BaseModel):
+    """在场角色（t 时刻有事态记录；位置/生死由事件推演）。"""
+    entity_id: str
+    name: str
+    alive: bool = True
+    location_name: str = ""
+    label: str = ""  # "在途（进度 40%）" / "驻留" / "出生" / "已死亡"
+    importance: int = 1
+    visibility: str = "public"
+
+
+class SceneBlockResponse(BaseModel):
+    """脚下（场景地点）。controlling_faction 仅在地点有坐标且对疆域 polygon 唯一命中时有值。"""
+    location_id: str
+    name: str
+    controlling_faction: Optional[str] = None
+    pinned: bool = False  # True=作者显式钉定（chapters.scene_location_id）
+
+
+class SceneForeshadowItem(BaseModel):
+    """头顶的线·开放伏笔（在场实体名/别名命中提权排前）。"""
+    ledger_key: str
+    content: str
+    chapters_open: Optional[int] = None  # 当前章号 − created_at_chapter（章号缺失则空）
+
+
+class SceneExpectationItem(BaseModel):
+    """头顶的线·活跃期待（books.reader_mirror，与生成侧 reader_expectations 同源）。"""
+    type: str = ""
+    description: str = ""
+    tension: int = 5
+
+
+class SceneEncounterItem(BaseModel):
+    """同地相遇提示（W5-lite）：t 时刻同地点的存活角色组（戏剧机会线索）。"""
+    names: List[str] = Field(default_factory=list)
+    location_name: str = ""
+
+
+class WorldVersionResponse(BaseModel):
+    """世界数据版本：events 计数（兜底删除）+ 四表聚合 max(updated_at)。"""
+    events: int = 0
+    updated_at: Optional[datetime] = None
+
+
+class SceneSliceResponse(BaseModel):
+    """章节时刻的世界切片：写作页切片条唯一数据源，与生成桥接共用时间解析与推演。"""
+    t: int = 0
+    t_source: str = "zero"  # chapter_anchor | prev_anchor | max_event | zero
+    presence: List[ScenePresenceItem] = Field(default_factory=list)
+    scene: Optional[SceneBlockResponse] = None
+    encounters: List[SceneEncounterItem] = Field(default_factory=list)
+    foreshadows: List[SceneForeshadowItem] = Field(default_factory=list)
+    expectations: List[SceneExpectationItem] = Field(default_factory=list)
+    version: WorldVersionResponse = Field(default_factory=WorldVersionResponse)
+    world_empty: bool = False  # 世界页无实体 → 前端显示迁移引导
+
+
+# ============================================================
+# ContextCard（情境浮卡，docs/world-writing-bridge.md W2 查询闭环）
+# ============================================================
+
+class ContextChronicleItem(BaseModel):
+    """编年史条目：涉其/此地的事件 ≤ 叙事时刻，倒序取近（防剧透，与 RAG A 层同规则）。"""
+    event_type: str
+    note: str = ""
+    time_start: int = 0  # 连续日计数，前端按历法格式化
+
+
+class ContextCardResponse(BaseModel):
+    """情境浮卡（选中文本/点击提及 → 三秒查明底细）。
+
+    kind=entity：alive/location_name/label/chronicle（角色有事态才有状态块）；
+    kind=location：controlling_faction/recent_events。t 随卡返回（深链游标用）。
+    """
+    kind: str  # entity | location
+    id: str
+    entity_type: str = "character"  # character/faction/asset/location
+    name: str
+    intro: str = ""
+    t: int = 0
+    alive: Optional[bool] = None
+    location_name: str = ""
+    label: str = ""
+    chronicle: List[ContextChronicleItem] = Field(default_factory=list)
+    controlling_faction: Optional[str] = None
+    recent_events: List[ContextChronicleItem] = Field(default_factory=list)
+
+
+# ============================================================
+# 速记解析 / 候选事件（W3 速记入账 + W4 候选回流）
+# ============================================================
+
+class EventDraft(BaseModel):
+    """事件草稿（parse-event 输出 / 候选池 draft 的形状）。只产草稿，作者确认才入账。"""
+    event_type: str = "custom"
+    summary: str = ""
+    time_start: int = 0
+    time_end: int = 0
+    participant_ids: List[str] = Field(default_factory=list)
+    participant_names: List[str] = Field(default_factory=list)
+    unresolved_names: List[str] = Field(default_factory=list)
+    location_id: Optional[str] = None
+    location_name: str = ""
+    note: str = ""
+
+
+class ParseEventRequest(BaseModel):
+    chapter_id: UUID
+    text: str = Field(..., min_length=1, max_length=500, description="作者一句话速记")
+
+
+class ParseEventResponse(BaseModel):
+    """解析失败 → 空草稿 + confidence=none（前端降级为空白轻表单）。"""
+    draft: EventDraft = Field(default_factory=EventDraft)
+    confidence: str = "none"  # high | low | none
+
+
+class WorldEventCandidateResponse(BaseModel):
+    """候选事件（pending 池条目；draft 形状同 EventDraft）。"""
+    id: UUID
+    book_id: UUID
+    chapter_id: Optional[UUID] = None
+    draft: Dict[str, Any] = Field(default_factory=dict)
+    source: str = "settle"
+    status: str = "pending"
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AcceptCandidateResponse(BaseModel):
+    """✓ 转正：真事件（已分配回放序号，进入推演）+ 候选留痕。"""
+    event: WorldEventResponse
+    candidate_id: UUID
+
+
+# ============================================================
 # WorldMapLayer（底图·图片拼贴层）
 # ============================================================
 

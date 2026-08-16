@@ -29,6 +29,7 @@ from backend.models import (
     Chapter,
     PlotLedger,
     WorldEvent,
+    WorldEventCandidate,
     WorldLocation,
     WorldEntity,
     WorldMapLayer,
@@ -476,6 +477,61 @@ class WorldMapStrokeRepository:
 
 
 # ============================================================
+# 候选事件（写作回流待确认池，与事件账本物理隔离）
+# ============================================================
+
+class WorldCandidateRepository:
+    """候选事件草稿（settle/finish 抽取 → 作者确认转正）。"""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def list_by_book(
+        self,
+        book_id: str,
+        status: Optional[str] = None,
+        chapter_id: Optional[str] = None,
+    ) -> List[WorldEventCandidate]:
+        stmt = select(WorldEventCandidate).where(WorldEventCandidate.book_id == book_id)
+        if status:
+            stmt = stmt.where(WorldEventCandidate.status == status)
+        if chapter_id:
+            stmt = stmt.where(WorldEventCandidate.chapter_id == chapter_id)
+        stmt = stmt.order_by(WorldEventCandidate.created_at.desc())
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get(self, candidate_id: str) -> Optional[WorldEventCandidate]:
+        return await self.db.get(WorldEventCandidate, candidate_id)
+
+    async def create(
+        self,
+        book_id: str,
+        chapter_id: Optional[str],
+        draft: Dict[str, Any],
+        source: str = "settle",
+    ) -> WorldEventCandidate:
+        cand = WorldEventCandidate(
+            book_id=book_id,
+            chapter_id=chapter_id,
+            draft=draft,
+            source=source,
+            status="pending",
+        )
+        self.db.add(cand)
+        await self.db.flush()
+        return cand
+
+    async def set_status(self, candidate_id: str, status: str) -> Optional[WorldEventCandidate]:
+        cand = await self.get(candidate_id)
+        if cand is None:
+            return None
+        cand.status = status
+        await self.db.flush()
+        return cand
+
+
+# ============================================================
 # Facade
 # ============================================================
 
@@ -488,6 +544,7 @@ class WorldRepository:
         self.locations = WorldLocationRepository(db)
         self.entities = WorldEntityRepository(db)
         self.relations = WorldRelationRepository(db)
+        self.candidates = WorldCandidateRepository(db)
         self.map_layers = WorldMapLayerRepository(db)
         self.map_strokes = WorldMapStrokeRepository(db)
 
@@ -498,6 +555,40 @@ class WorldRepository:
         relations = await self.relations.list_by_book(book_id)
         locations_by_id = {str(loc.id): loc for loc in locations}
         return compute_world_state_from_events(events, locations_by_id, t, relations)
+
+    async def world_version(self, book_id: str) -> Dict[str, Any]:
+        """世界数据版本（写作页切片保鲜比对；docs/world-writing-bridge.md §4.2）。
+
+        events 计数 + events/entities/locations/relations 四表聚合 max(updated_at)。
+        计数兜底「删除不 bump updated_at」的盲区。单条聚合查询，心跳附带零负担。
+        """
+        def _max_updated(model):
+            return (
+                select(func.max(model.updated_at))
+                .where(model.book_id == book_id)
+                .scalar_subquery()
+            )
+
+        count_sq = (
+            select(func.count(WorldEvent.id))
+            .where(WorldEvent.book_id == book_id)
+            .scalar_subquery()
+        )
+        result = await self.db.execute(
+            select(
+                count_sq,
+                _max_updated(WorldEvent),
+                _max_updated(WorldEntity),
+                _max_updated(WorldLocation),
+                _max_updated(WorldRelation),
+            )
+        )
+        events_count, *maxes = result.one()
+        stamps = [m for m in maxes if m is not None]
+        return {
+            "events": int(events_count or 0),
+            "updated_at": max(stamps) if stamps else None,
+        }
 
     # ============================================================
     # 旧设定中心 → 世界页 一次性迁移（幂等）
