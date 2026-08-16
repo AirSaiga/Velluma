@@ -1,36 +1,43 @@
-<script setup>
+<script setup lang="ts">
+/**
+ * 世界观设定面板（M5 自 components/WorldviewSettings 迁入世界页，由 WorldviewModal 承载）。
+ *
+ * 保留原面板全部行为：三种历史格式归一化（纯字符串 / 旧 dict / {version:1, items}）、
+ * 2s 防抖自动保存、四态状态条、导入/导出 JSON、卸载兜底保存。
+ * 与原版的差异：去掉 PanelContainer 外壳（头部由 ModalShell 提供），保存成功后广播
+ * velluma:world-refresh（世界观文本进生成上下文，通知写作侧数据已变）。
+ */
 import { ref, watch, onUnmounted } from 'vue'
-import { bookApi } from '../services/api'
-import { useToast } from '../composables/useToast'
-import { useConfirmDialog } from '../composables/useConfirmDialog'
-import { PanelContainer, PanelCard, PanelEmpty } from './panels'
-import Icon from './Icon.vue'
+import { bookApi } from '../../../services/api'
+import { useToast } from '../../../composables/useToast'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { PanelEmpty } from '../../../components/panels'
+import Icon from '../../../components/Icon.vue'
+import ModalShell from './ModalShell.vue'
+import { WORLD_REFRESH_EVENT } from '../composables/useWorldSlice'
+
+const props = defineProps<{ bookId: string }>()
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
 
-const props = defineProps({
-  bookId: {
-    type: String,
-    default: null
-  },
-  closable: {
-    type: Boolean,
-    default: true
-  }
-})
+interface WorldviewItem {
+  id: string
+  title: string
+  content: string
+}
 
-const emit = defineEmits(['update-worldview', 'close'])
+type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 
 const isLoading = ref(false)
 const isSaving = ref(false)
-const status = ref('idle')
+const status = ref<SaveStatus>('idle')
 const errorText = ref('')
 const showImportExport = ref(false)
 const importExportText = ref('')
 
-const items = ref([])
-let autosaveTimer
+const items = ref<WorldviewItem[]>([])
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 const AUTOSAVE_DELAY_MS = 2000
 
 async function loadWorldview() {
@@ -58,7 +65,7 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
-function normalizeToItems(worldviewSettings) {
+function normalizeToItems(worldviewSettings: any): WorldviewItem[] {
   if (!worldviewSettings) return []
 
   if (typeof worldviewSettings === 'string') {
@@ -72,10 +79,10 @@ function normalizeToItems(worldviewSettings) {
 
   if (typeof worldviewSettings === 'object') {
     if (worldviewSettings.version === 1 && Array.isArray(worldviewSettings.items)) {
-      return worldviewSettings.items.map((it) => ({
+      return worldviewSettings.items.map((it: any) => ({
         id: it.id || makeId(),
         title: it.title || '',
-        content: it.content || ''
+        content: it.content || '',
       }))
     }
 
@@ -83,7 +90,7 @@ function normalizeToItems(worldviewSettings) {
     return entries.map(([k, v]) => ({
       id: makeId(),
       title: k,
-      content: typeof v === 'string' ? v : JSON.stringify(v ?? '', null, 2)
+      content: typeof v === 'string' ? v : JSON.stringify(v ?? '', null, 2),
     }))
   }
 
@@ -96,8 +103,8 @@ function toPayload() {
     items: items.value.map((it) => ({
       id: it.id,
       title: it.title,
-      content: it.content
-    }))
+      content: it.content,
+    })),
   }
 }
 
@@ -107,15 +114,15 @@ async function saveWorldview() {
   status.value = 'saving'
   errorText.value = ''
   try {
-    const data = await bookApi.updateWorldview(props.bookId, {
-      worldview_settings: toPayload()
+    await bookApi.updateWorldview(props.bookId, {
+      worldview_settings: toPayload(),
     })
-    emit('update-worldview', data)
     status.value = 'saved'
+    window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
     setTimeout(() => {
       if (status.value === 'saved') status.value = 'idle'
     }, 1500)
-  } catch (error) {
+  } catch (error: any) {
     console.error('保存世界观设定失败:', error)
     status.value = 'error'
     errorText.value = error?.message || '保存失败'
@@ -140,10 +147,10 @@ function addItem() {
   markDirty()
 }
 
-async function removeItem(id) {
+async function removeItem(id: string) {
   const ok = await showConfirm({
     title: '确认删除',
-    message: '确定要删除这一条设定吗？'
+    message: '确定要删除这一条设定吗？',
   })
   if (!ok) return
   items.value = items.value.filter((it) => it.id !== id)
@@ -167,17 +174,17 @@ function applyImport() {
   }
 }
 
-function handleClose() {
-  emit('close')
-}
-
-watch(() => props.bookId, (newId) => {
-  if (newId) {
-    loadWorldview()
-  } else {
-    items.value = []
-  }
-}, { immediate: true })
+watch(
+  () => props.bookId,
+  (newId) => {
+    if (newId) {
+      loadWorldview()
+    } else {
+      items.value = []
+    }
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
   clearTimeout(autosaveTimer)
@@ -188,56 +195,54 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PanelContainer
-    title="世界观设定"
-    icon="book-open"
-    description="定义世界背景、规则、历史等设定"
-    :loading="isLoading"
-    :header-actions="[
-      { icon: 'arrow-up-tray', label: '导入/导出', onClick: openImportExport },
-      { icon: 'plus', label: '新增', onClick: addItem, variant: 'primary' }
-    ]"
-    :closable="closable"
-    @close="handleClose"
-  >
-    <!-- 状态提示 -->
-    <div v-if="status !== 'idle'" class="status-bar" :class="status">
-      <Icon 
-        :name="status === 'saving' ? 'arrow-path' : status === 'saved' ? 'check' : status === 'error' ? 'exclamation-circle' : 'information-circle'" 
-        :size="14" 
-      />
-      <span>{{ status === 'dirty' ? '有未保存的更改' : status === 'saving' ? '保存中...' : status === 'saved' ? '已保存' : errorText }}</span>
+  <div class="wv-panel">
+    <!-- 工具行：状态条 + 动作 -->
+    <div class="wv-toolbar">
+      <div v-if="status !== 'idle'" class="status-bar" :class="status">
+        <Icon
+          :name="status === 'saving' ? 'arrow-path' : status === 'saved' ? 'check' : status === 'error' ? 'exclamation-circle' : 'information-circle'"
+          :size="14"
+        />
+        <span>{{ status === 'dirty' ? '有未保存的更改' : status === 'saving' ? '保存中…' : status === 'saved' ? '已保存' : errorText }}</span>
+      </div>
+      <div v-else class="wv-toolbar-hint">自动保存（停笔 2 秒）· 进 AI 生成上下文</div>
+      <div class="wv-actions">
+        <button class="wv-btn" @click="openImportExport">
+          <Icon name="arrow-up-tray" :size="13" />
+          导入/导出
+        </button>
+        <button class="wv-btn primary" @click="addItem">
+          <Icon name="plus" :size="13" />
+          新增条目
+        </button>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <PanelEmpty
       v-if="items.length === 0 && !isLoading"
       icon="book-open"
-      :title="bookId ? '暂无设定条目' : '请先选择书籍'"
-      :description="bookId ? '点击「新增」按钮开始添加世界观设定' : '选择书籍后即可编辑世界观设定'"
-      :action-label="bookId ? '新增条目' : undefined"
+      title="暂无设定条目"
+      description="世界背景、规则、历史——点击「新增条目」记下第一条"
+      action-label="新增条目"
       @action="addItem"
     />
 
     <!-- 设定列表 -->
     <div v-else class="items-list">
-      <div
-        v-for="item in items"
-        :key="item.id"
-        class="item-card"
-      >
+      <div v-for="item in items" :key="item.id" class="item-card">
         <input
           v-model="item.title"
           type="text"
           class="item-title-input"
-          placeholder="输入条目标题..."
+          placeholder="输入条目标题…"
           @input="markDirty"
         />
         <textarea
           v-model="item.content"
           rows="3"
           class="item-content-textarea"
-          placeholder="填写详细设定内容..."
+          placeholder="填写详细设定内容…"
           @input="markDirty"
         />
         <div class="item-actions">
@@ -249,58 +254,103 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <template #footer>
-      <button 
-        class="save-btn" 
+    <div class="wv-footer">
+      <button
+        class="save-btn"
         :class="{ 'has-changes': status === 'dirty' }"
         :disabled="isSaving || status === 'idle' || !bookId"
         @click="saveWorldview"
       >
         <Icon :name="isSaving ? 'arrow-path' : 'check'" :size="14" />
-        {{ isSaving ? '保存中...' : status === 'dirty' ? '保存更改' : '已保存' }}
+        {{ isSaving ? '保存中…' : status === 'dirty' ? '保存更改' : '已保存' }}
       </button>
-    </template>
-  </PanelContainer>
-
-  <!-- 导入/导出模态框 -->
-  <Transition name="modal">
-    <div v-if="showImportExport" class="modal-overlay" @click.self="showImportExport = false">
-      <div class="modal-content">
-        <div class="drawer-header">
-          <h3>世界观导入 / 导出</h3>
-          <button class="close-btn" @click="showImportExport = false">
-            <Icon name="close" :size="18" />
-          </button>
-        </div>
-        
-        <div class="modal-body">
-          <textarea
-            v-model="importExportText"
-            rows="14"
-            class="import-export-textarea"
-            placeholder="在此粘贴 JSON 数据进行导入..."
-          />
-        </div>
-        
-        <div class="drawer-footer">
-          <button class="btn-secondary" @click="showImportExport = false">关闭</button>
-          <button class="btn-primary" @click="applyImport">导入并应用</button>
-        </div>
-      </div>
     </div>
-  </Transition>
+
+    <!-- 导入/导出模态框 -->
+    <ModalShell
+      v-if="showImportExport"
+      title="世界观导入 / 导出"
+      width="640px"
+      @close="showImportExport = false"
+    >
+      <textarea
+        v-model="importExportText"
+        rows="14"
+        class="import-export-textarea"
+        placeholder="在此粘贴 JSON 数据进行导入…"
+      />
+      <template #footer>
+        <button class="wv-btn" @click="showImportExport = false">关闭</button>
+        <button class="wv-btn primary" @click="applyImport">导入并应用</button>
+      </template>
+    </ModalShell>
+  </div>
 </template>
 
 <style scoped>
+.wv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 240px;
+}
+
+.wv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wv-toolbar-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.wv-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.wv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wv-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-500);
+}
+
+.wv-btn.primary {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: #fff;
+}
+
+.wv-btn.primary:hover {
+  background: var(--accent-600);
+}
+
 .status-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 5px 10px;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
-  margin-bottom: 12px;
 }
 
 .status-bar.dirty {
@@ -327,57 +377,54 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
 }
 
 .item-card {
-  background: var(--bg-panel);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .item-title-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 7px 10px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
+  font-family: inherit;
   transition: all 0.2s ease;
 }
 
 .item-title-input:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
 }
 
 .item-content-textarea {
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
+  font-family: inherit;
   resize: vertical;
-  min-height: 80px;
+  min-height: 72px;
   transition: all 0.2s ease;
 }
 
 .item-content-textarea:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
 }
 
 .item-actions {
@@ -392,6 +439,7 @@ onUnmounted(() => {
   padding: 4px 8px;
   font-size: 11px;
   font-weight: 500;
+  font-family: inherit;
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -400,14 +448,13 @@ onUnmounted(() => {
   transition: all 0.2s ease;
 }
 
-.action-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
 .action-btn.danger:hover {
   background: #fee2e2;
   color: #dc2626;
+}
+
+.wv-footer {
+  padding-top: 4px;
 }
 
 .save-btn {
@@ -416,20 +463,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 10px;
+  padding: 9px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
   color: var(--text-muted);
-  background: var(--bg-panel);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-}
-
-.save-btn:hover:not(:disabled) {
-  background: var(--hover-bg);
-  color: var(--text-primary);
 }
 
 .save-btn.has-changes {
@@ -447,78 +490,14 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* 模态框样式 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  padding: 20px;
-}
-
-.modal-content {
-  background: var(--bg-primary);
-  border-radius: 16px;
-  width: 100%;
-  max-width: 640px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-}
-
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.drawer-header h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.close-btn:hover {
-  background: var(--bg-panel);
-  color: var(--text-primary);
-}
-
-.modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-}
-
 .import-export-textarea {
   width: 100%;
   padding: 12px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-family: ui-monospace, monospace;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--bg-panel);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   resize: vertical;
@@ -528,69 +507,5 @@ onUnmounted(() => {
 .import-export-textarea:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
-}
-
-.drawer-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-.btn-primary {
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 500;
-  color: white;
-  background: var(--accent-500);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-primary:hover {
-  background: var(--accent-600);
-}
-
-.btn-secondary {
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-secondary:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-/* 过渡动画 */
-.modal-enter-active,
-.modal-leave-active {
-  transition: all 0.25s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-from .modal-content,
-.modal-leave-to .modal-content {
-  transform: scale(0.95) translateY(10px);
-  opacity: 0;
-}
-
-.modal-content {
-  transition: all 0.25s ease;
 }
 </style>

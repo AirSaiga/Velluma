@@ -115,7 +115,8 @@ _STRUCTURED_FIELDS = (
 def static_prompt_from_world_entity(ent: Any) -> str:
     """WorldEntity → 旧 Character.static_prompt 等价文本。
 
-    结构化 props 字段（键：值）+ legacy_profile（迁移时整段塞入的旧档案原文）。
+    结构化 props 字段（键：值；M4 收尾后旧档案迁移并入 background，由
+    启动数据迁移兜底摘键，这里不再回退读 legacy_profile）。
     下游自带截断（_characters_text 截 200），这里不做长度控制。
     """
     props = getattr(ent, "props", None) or {}
@@ -126,9 +127,6 @@ def static_prompt_from_world_entity(ent: Any) -> str:
         v = str(props.get(key) or "").strip()
         if v:
             parts.append(f"{label}：{v}")
-    legacy = str(props.get("legacy_profile") or "").strip()
-    if legacy:
-        parts.append(legacy)
     return "\n".join(parts)
 
 

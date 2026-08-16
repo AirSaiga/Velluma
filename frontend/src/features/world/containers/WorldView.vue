@@ -24,6 +24,11 @@ import EntityDetailDrawer from '../presentation/EntityDetailDrawer.vue'
 import EntityCard from '../presentation/EntityCard.vue'
 import BulkImportDialog from '../presentation/BulkImportDialog.vue'
 import ModalShell from '../presentation/ModalShell.vue'
+import ForeshadowSection from '../presentation/ForeshadowSection.vue'
+import ForeshadowDetailDrawer from '../presentation/ForeshadowDetailDrawer.vue'
+import ReaderMirrorModal from '../presentation/ReaderMirrorModal.vue'
+import WorldviewModal from '../presentation/WorldviewModal.vue'
+import { readerMirrorApi } from '../../../services/api/domain/reader-mirror.api'
 import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory'
 import { useMapEdit, editUndo, editRedo } from '../composables/useMapEdit'
 
@@ -65,6 +70,7 @@ const {
   locationsById,
   currentTime,
   setCurrentTime,
+  foreshadows,
 } = useWorld()
 
 const { showToast } = useToast()
@@ -103,6 +109,61 @@ function onQuickEvent(type: EventType, entityId: string) {
 
 // ===== 实体详情抽屉（M2：档案/编年史/快捷事态的家，三透镜共享选中态）=====
 const selectedEntityId = ref<string | null>(null)
+
+// ===== M5：伏笔详情抽屉 / 期待账本 / 世界观模态 =====
+const selectedForeshadowId = ref<string | null>(null)
+const showExpectations = ref(false)
+const showWorldview = ref(false)
+
+/** 期待摘要（侧栏「期待」分组：活跃 N · 该收了 M；账本本体在 ReaderMirrorModal） */
+const mirrorSummary = ref<{ active: number; due: number } | null>(null)
+async function loadMirrorSummary() {
+  if (!bookId.value) return
+  try {
+    const data = await readerMirrorApi.get(bookId.value)
+    const exps: any[] = data.expectations || []
+    const active = exps.filter((e) => ['setup', 'accumulating'].includes(e.status))
+    mirrorSummary.value = {
+      active: active.length,
+      due: active.filter((e) => e.current_tension >= 8).length,
+    }
+  } catch {
+    mirrorSummary.value = null
+  }
+}
+
+// ===== M6 活舆图：图标栏当前抽屉 / ⋯ 菜单 =====
+type SidePanelKey = 'cand' | 'fs' | 'exp' | 'loc' | 'evt' | 'character' | 'faction' | 'asset'
+const activePanel = ref<SidePanelKey | null>(null)
+function togglePanel(key: SidePanelKey) {
+  activePanel.value = activePanel.value === key ? null : key
+}
+const moreOpen = ref(false)
+
+// 详情抽屉（实体/伏笔）与图标栏抽屉互斥——同一时刻画布右缘只存在一层浮层
+watch([selectedEntityId, selectedForeshadowId], ([e, f]) => {
+  if (e || f) activePanel.value = null
+})
+
+/** 实体抽屉的当前列表（与图标栏选中类型联动，复用实体搜索过滤） */
+const panelEntities = computed(() => {
+  if (activePanel.value === 'character') return visibleCharacters.value
+  if (activePanel.value === 'faction') return visibleFactions.value
+  if (activePanel.value === 'asset') return visibleAssets.value
+  return []
+})
+const entityEmptyText = computed(() => {
+  const label =
+    activePanel.value === 'character' ? '角色' : activePanel.value === 'faction' ? '势力' : '资产'
+  const pool =
+    activePanel.value === 'character'
+      ? characters.value
+      : activePanel.value === 'faction'
+        ? factions.value
+        : assets.value
+  if (entityFilter.value && pool.length) return `没有匹配「${entityFilter.value}」的${label}`
+  return `还没有${label}。点工具条上的「实体」创建——它们只存固有属性，位置与生死由事件推演。`
+})
 
 function openEditEvent(ev: WorldEvent) {
   editingEvent.value = ev
@@ -208,7 +269,7 @@ async function migrateLegacy() {
     message:
       '将设定中心的角色 / 关系 / 资产 / 地点迁入世界页，并给已有章节锚的旧伏笔补时间锚（出现在弧线带）。',
     warning:
-      '旧档案全文会存为「旧档案」字段（不自动拆分）；角色的动态状态不迁（时变状态由事件推演）。可重复执行，已导入的自动跳过；旧表数据不会被修改或删除。',
+      '角色档案全文会存为「背景」字段（不自动拆分，可随后在详情抽屉里整理）；角色的动态状态不迁（时变状态由事件推演）。可重复执行，已导入的自动跳过；旧表数据不会被修改或删除。',
     confirmText: '开始导入',
   })
   if (!ok) return
@@ -257,6 +318,21 @@ async function handleRedo() {
 
 // ===== 地图联动 =====
 const mapRef = ref<InstanceType<typeof WorldMap> | null>(null)
+
+// 罗盘针大摆归北动画的开关：class 摘下等一帧再挂回才能重播（连点重触发）
+const compassHome = ref(false)
+let compassHomeTimer: number | undefined
+
+async function onCompassClick() {
+  mapRef.value?.fitAll()
+  compassHome.value = false
+  await nextTick()
+  requestAnimationFrame(() => {
+    compassHome.value = true
+    window.clearTimeout(compassHomeTimer)
+    compassHomeTimer = window.setTimeout(() => (compassHome.value = false), 1500)
+  })
+}
 function focusEvent(ev: WorldEvent) {
   const pt = eventPoint(ev, locationsById.value)
   if (pt) mapRef.value?.focusAt(pt[0], pt[1], eventLabel(ev.event_type))
@@ -321,16 +397,6 @@ function saveLocName(loc: { id: string; name: string }) {
 }
 
 const LOC_KIND_LABEL: Record<string, string> = { point: '地点', region: '区域', route: '路径' }
-
-// ===== 侧栏折叠 =====
-const collapsedSections = ref(new Set<string>())
-function toggleSection(key: string) {
-  const s = collapsedSections.value
-  if (s.has(key)) s.delete(key)
-  else s.add(key)
-  collapsedSections.value = new Set(s)
-}
-const isCollapsed = (key: string) => collapsedSections.value.has(key)
 
 // ===== 事件过滤 =====
 const evtFilter = ref('')
@@ -432,24 +498,32 @@ async function onDropMap(e: DragEvent) {
   }
 }
 
+/** world-refresh：候选列表 + 期待摘要一并静默重取（伏笔/期待/世界观编辑后由 useWorld/账本广播） */
+function onWorldRefresh() {
+  void loadCandidates()
+  void loadMirrorSummary()
+}
+
 onMounted(() => {
   if (bookId.value) load(bookId.value)
   consumeRouteQuery()
   removeShortcut = useUndoShortcut(() => handleUndo(), () => handleRedo())
   window.addEventListener('keydown', onKeydown)
-  window.addEventListener('velluma:world-refresh', loadCandidates as EventListener)
+  window.addEventListener('velluma:world-refresh', onWorldRefresh)
   void loadCandidates()
+  void loadMirrorSummary()
 })
 onBeforeUnmount(() => {
   removeShortcut?.()
   window.removeEventListener('keydown', onKeydown)
-  window.removeEventListener('velluma:world-refresh', loadCandidates as EventListener)
+  window.removeEventListener('velluma:world-refresh', onWorldRefresh)
 })
 watch(bookId, (id) => {
   if (id) {
     load(id)
     consumeRouteQuery()
     void loadCandidates()
+    void loadMirrorSummary()
   }
 })
 
@@ -466,6 +540,13 @@ function consumeRouteQuery() {
   // 地点深链：数据可能仍在 load → 挂起，由下方 watch(locations) 兜底消费
   const loc = route.query.loc
   if (typeof loc === 'string' && loc) pendingLocId.value = loc
+  // M5 伏笔深链（写作页「头顶的线」点击）：?fs=ledger_key 或 id，watch(foreshadows) 兜底
+  const fs = route.query.fs
+  if (typeof fs === 'string' && fs) pendingFsKey.value = fs
+  // M5 面板深链：?panel=expectations|worldview → 直接开对应模态
+  const panel = route.query.panel
+  if (panel === 'expectations') showExpectations.value = true
+  else if (panel === 'worldview') showWorldview.value = true
 }
 
 const pendingLocId = ref<string | null>(null)
@@ -475,6 +556,17 @@ watch(locations, (list) => {
   if (loc) {
     pendingLocId.value = null
     focusLocation(loc)
+  }
+})
+
+// M5 伏笔深链兜底：数据晚到也能正确打开详情抽屉（按 id 或 ledger_key 双匹配）
+const pendingFsKey = ref<string | null>(null)
+watch(foreshadows, (list) => {
+  if (!pendingFsKey.value || !list.length) return
+  const hit = list.find((f) => f.id === pendingFsKey.value || f.ledger_key === pendingFsKey.value)
+  if (hit) {
+    pendingFsKey.value = null
+    selectedForeshadowId.value = hit.id
   }
 })
 
@@ -519,76 +611,37 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 
 <template>
   <div class="world-view">
-    <header class="world-header">
-      <div class="wh-left">
-        <button class="wbtn wbtn--icon" title="返回书架（可在此切换书籍）" @click="goLibrary">
-          <Icon name="arrow-left" :size="15" />
-        </button>
-        <button
-          v-if="returnChapterId"
-          class="wbtn"
-          title="返回刚才写作的章节（写作台）"
-          @click="returnToChapter"
-        >
-          ↩ 返回本章
-        </button>
-        <div class="wh-title-block">
-          <h1>世界设定</h1>
-          <div class="wh-sub">
-            <span v-if="bookTitle" class="wh-book">{{ bookTitle }}</span>
+    <div class="world-body">
+      <div class="world-canvas">
+        <!-- 水印题字（M6 活舆图：书名 + 世界统计，纸面水印质感） -->
+        <div class="atlas-watermark">
+          <div class="aw-title">{{ bookTitle ? `《${bookTitle}》` : '世界设定' }}</div>
+          <div class="aw-sub">
             {{ locations.length }} 地点 · {{ events.length }} 事件 ·
             {{ characters.length + factions.length + assets.length }} 实体
           </div>
         </div>
-      </div>
-      <div class="header-actions">
-        <button
-          class="wbtn wbtn--icon"
-          :disabled="!canUndo"
-          :title="lastDesc ? `撤销：${lastDesc}（Ctrl+Z）` : '撤销（Ctrl+Z）'"
-          @click="handleUndo"
-        >
-          <Icon name="arrow-uturn-left" :size="15" />
-        </button>
-        <button
-          class="wbtn wbtn--icon"
-          :disabled="!canRedo"
-          title="重做（Ctrl+Y）"
-          @click="handleRedo"
-        >
-          <Icon name="arrow-uturn-right" :size="15" />
-        </button>
-        <span class="hdr-sep"></span>
-        <button
-          class="wbtn"
-          :class="{ 'wbtn--picking': pickingMode === 'location' }"
-          :disabled="pickingMode === 'location'"
-          @click="startPickLocation"
-        >
-          <Icon name="map-pin" :size="14" />
-          {{ pickingMode === 'location' ? '点地图选位置…（Esc 取消）' : '地点' }}
-        </button>
-        <button class="wbtn wbtn--primary" @click="openEventForm()">
-          <Icon name="flag" :size="14" />
-          事件
-        </button>
-        <button class="wbtn" @click="showEntityForm = true">
-          <Icon name="plus" :size="14" />
-          实体
-        </button>
-        <button class="wbtn" title="TSV 批量导入事件" @click="showBulkImport = true">
-          <Icon name="arrow-up-tray" :size="14" />
-          批量
-        </button>
-        <button class="wbtn" title="从设定中心导入角色/关系/资产/地点，并给旧伏笔补时间锚" @click="migrateLegacy">
-          <Icon name="arrow-path" :size="14" />
-          导入旧设定
-        </button>
-      </div>
-    </header>
 
-    <div class="world-body">
-      <div class="world-canvas">
+        <!-- 罗盘（点击回到全图：视野收拢到底图+地点+实体；针平时轻摆、点击大摆归北） -->
+        <button
+          class="atlas-compass"
+          :class="{ 'is-home': compassHome }"
+          title="回到全图"
+          @click="onCompassClick"
+        >
+          <svg viewBox="0 0 80 92" aria-hidden="true">
+            <g transform="translate(40,46)" stroke="rgba(110,85,45,.42)" fill="none">
+              <circle r="30" stroke-width="1" />
+              <circle r="23" stroke-width=".6" stroke-dasharray="2 3" />
+              <g class="ac-needle">
+                <path d="M0,-30 L5,0 L0,30 L-5,0 Z" fill="rgba(110,85,45,.35)" stroke="none" />
+                <path d="M-30,0 L0,-5 L30,0 L0,5 Z" fill="rgba(110,85,45,.2)" stroke="none" />
+              </g>
+            </g>
+            <text x="40" y="10" text-anchor="middle" font-size="10" fill="rgba(110,85,45,.55)" font-family="serif">北</text>
+          </svg>
+        </button>
+
         <!-- 单一画布：实体/关系/事件/疆域全部在地图（脑图已并入，M4 收敛） -->
         <div
           class="world-map-wrap"
@@ -607,6 +660,64 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           />
         </div>
 
+        <!-- 悬浮胶囊工具条（M6：取代旧顶栏——主动作唯一，低频收进 ⋯） -->
+        <div class="atlas-pill">
+          <button class="ap-btn ap-btn--icon" title="返回书架（可在此切换书籍）" @click="goLibrary">
+            <Icon name="arrow-left" :size="14" />
+          </button>
+          <button
+            v-if="returnChapterId"
+            class="ap-btn"
+            title="返回刚才写作的章节（写作台）"
+            @click="returnToChapter"
+          >
+            ↩ 返回本章
+          </button>
+          <span class="ap-sep"></span>
+          <button class="ap-btn ap-btn--primary" @click="openEventForm()">
+            <Icon name="flag" :size="13" />
+            记一笔历史
+          </button>
+          <button
+            class="ap-btn"
+            :class="{ 'ap-btn--on': pickingMode === 'location' }"
+            :disabled="pickingMode === 'location'"
+            @click="startPickLocation"
+          >
+            <Icon name="map-pin" :size="13" />
+            {{ pickingMode === 'location' ? '点地图选位置…（Esc 取消）' : '地点' }}
+          </button>
+          <button class="ap-btn" @click="showEntityForm = true">
+            <Icon name="plus" :size="13" />
+            实体
+          </button>
+          <span class="ap-sep"></span>
+          <button class="ap-btn" title="世界观文本（背景/规则/历史——进 AI 生成上下文）" @click="showWorldview = true">
+            世界观
+          </button>
+          <div class="ap-more">
+            <button class="ap-btn ap-btn--icon" title="更多（批量 / 导入 / 撤销重做）" @click.stop="moreOpen = !moreOpen">
+              ⋯
+            </button>
+            <div v-if="moreOpen" class="ap-menu" @click.stop>
+              <button class="ap-menu-item" @click="(showBulkImport = true), (moreOpen = false)">
+                批量导入 TSV
+              </button>
+              <button class="ap-menu-item" @click="migrateLegacy(); moreOpen = false">
+                导入旧设定
+              </button>
+              <div class="ap-menu-sep"></div>
+              <button class="ap-menu-item" :disabled="!canUndo" @click="handleUndo(); moreOpen = false">
+                撤销{{ lastDesc ? `：${lastDesc}` : '' }}
+              </button>
+              <button class="ap-menu-item" :disabled="!canRedo" @click="handleRedo(); moreOpen = false">
+                重做
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-if="moreOpen" class="ap-backdrop" @click="moreOpen = false"></div>
+
         <!-- 实体详情抽屉（点地图人物/脑图节点/侧栏卡片打开） -->
         <EntityDetailDrawer
           v-if="selectedEntityId"
@@ -616,18 +727,71 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           @quick-event="onQuickEvent"
           @focus-event="focusEvent"
         />
+
+        <!-- 伏笔详情抽屉（M5：侧栏账本行/写作页 ?fs= 深链/弧线带「编辑详情」打开） -->
+        <ForeshadowDetailDrawer
+          v-if="selectedForeshadowId"
+          :book-id="bookId"
+          :foreshadow-id="selectedForeshadowId"
+          @close="selectedForeshadowId = null"
+        />
       </div>
 
-      <aside class="world-side">
+      <!-- M6 图标栏：原右侧栏收成右缘 46px 栏，点图标浮出抽屉（同一时间只开一格） -->
+      <div class="atlas-rail">
+        <button
+          v-if="pendingCandidates.length"
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'cand' }"
+          title="待确认 · 候选事件"
+          @click="togglePanel('cand')"
+        >
+          <Icon name="clock" :size="15" />
+          <span class="ar-n">{{ pendingCandidates.length }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'fs' }" title="伏笔" @click="togglePanel('fs')">
+          <Icon name="link" :size="15" />
+          <span class="ar-n">{{ foreshadows.length }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'exp' }" title="期待" @click="togglePanel('exp')">
+          <Icon name="sparkles" :size="15" />
+          <span class="ar-n">{{ mirrorSummary?.active ?? 0 }}</span>
+        </button>
+        <span class="ar-sep"></span>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'loc' }" title="地点" @click="togglePanel('loc')">
+          <Icon name="map-pin" :size="15" />
+          <span class="ar-n">{{ locations.length }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'evt' }" title="事件" @click="togglePanel('evt')">
+          <Icon name="flag" :size="15" />
+          <span class="ar-n">{{ events.length }}</span>
+        </button>
+        <span class="ar-sep"></span>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'character' }" title="角色" @click="togglePanel('character')">
+          <Icon name="user" :size="15" />
+          <span class="ar-n">{{ characters.length }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'faction' }" title="势力" @click="togglePanel('faction')">
+          <Icon name="users" :size="15" />
+          <span class="ar-n">{{ factions.length }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'asset' }" title="资产" @click="togglePanel('asset')">
+          <Icon name="star" :size="15" />
+          <span class="ar-n">{{ assets.length }}</span>
+        </button>
+      </div>
+
+      <!-- M6 浮出抽屉：图标栏当前选中分组的内容 -->
+      <aside v-if="activePanel" class="atlas-drawer">
         <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌） -->
-        <div v-if="pendingCandidates.length" class="side-section">
-          <div class="side-title side-title--toggle" title="点击折叠/展开" @click="toggleSection('cand')">
+        <template v-if="activePanel === 'cand'">
+        <div class="side-section">
+          <div class="side-title">
             <Icon name="clock" :size="13" />
             <span>待确认</span>
             <span class="side-count">{{ pendingCandidates.length }}</span>
-            <span class="side-chev" :class="{ closed: isCollapsed('cand') }">▾</span>
           </div>
-          <ul v-show="!isCollapsed('cand')" class="side-list">
+          <ul class="side-list">
             <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || ''">
               <div class="sc-body">
                 <span class="sc-name">{{ c.draft?.summary || eventLabel(c.draft?.event_type || 'custom') }}</span>
@@ -640,16 +804,42 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             </li>
           </ul>
         </div>
+        </template>
+
+        <!-- 伏笔账本（M5：全量列表——弧线带只渲染有锚的，未锚定的唯一可见处在此） -->
+        <template v-if="activePanel === 'fs'">
+        <ForeshadowSection :book-id="bookId" @select="(id: string) => (selectedForeshadowId = id)" />
+        </template>
+
+        <!-- 期待（M5：摘要 + 打开账本模态；与写作页「头顶的线」同源） -->
+        <template v-if="activePanel === 'exp'">
+        <div class="side-section">
+          <div class="side-title">
+            <Icon name="sparkles" :size="13" />
+            <span>期待</span>
+            <span class="side-count">{{ mirrorSummary?.active ?? 0 }}</span>
+          </div>
+          <div class="exp-summary">
+            <p v-if="mirrorSummary?.active" class="exp-summary-text">
+              活跃 {{ mirrorSummary.active }} 条<template v-if="mirrorSummary.due">
+                · <span class="exp-due">{{ mirrorSummary.due }} 条该收了</span>
+              </template>
+            </p>
+            <p v-else class="exp-summary-text">还没有期待。用一句话记下读者此刻最想知道的事。</p>
+            <button class="exp-open" @click="showExpectations = true">打开账本</button>
+          </div>
+        </div>
+        </template>
 
         <!-- 地点 -->
+        <template v-if="activePanel === 'loc'">
         <div class="side-section">
-          <div class="side-title side-title--toggle" title="点击折叠/展开" @click="toggleSection('loc')">
+          <div class="side-title">
             <Icon name="map-pin" :size="13" />
             <span>地点</span>
             <span class="side-count">{{ locations.length }}</span>
-            <span class="side-chev" :class="{ closed: isCollapsed('loc') }">▾</span>
           </div>
-          <ul v-show="!isCollapsed('loc') && locations.length" class="side-list">
+          <ul v-if="locations.length" class="side-list">
             <li
               v-for="loc in locations"
               :key="loc.id"
@@ -679,24 +869,25 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
               </div>
             </li>
           </ul>
-          <div v-show="!isCollapsed('loc') && !locations.length" class="side-empty">
-            还没有地点。点上方「地点」按钮，在地图上点选第一个落脚点。
+          <div v-else class="side-empty">
+            还没有地点。点工具条上的「地点」按钮，在地图上点选第一个落脚点。
           </div>
         </div>
+        </template>
 
         <!-- 事件 -->
+        <template v-if="activePanel === 'evt'">
         <div class="side-section">
-          <div class="side-title side-title--toggle" title="点击折叠/展开" @click="toggleSection('evt')">
+          <div class="side-title">
             <Icon name="flag" :size="13" />
             <span>事件</span>
             <span class="side-count">{{ filteredEvents.length }}</span>
-            <span class="side-chev" :class="{ closed: isCollapsed('evt') }">▾</span>
           </div>
-          <div v-show="!isCollapsed('evt')" class="evt-filter">
+          <div class="evt-filter">
             <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
             <input v-model="evtFilter" class="evt-filter-input" placeholder="筛选事件（类型 / 备注）…" />
           </div>
-          <ul v-if="filteredEvents.length" v-show="!isCollapsed('evt')" class="side-list">
+          <ul v-if="filteredEvents.length" class="side-list">
             <li
               v-for="ev in filteredEvents"
               :key="ev.id"
@@ -725,60 +916,46 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
               </div>
             </li>
           </ul>
-          <div v-show="!isCollapsed('evt') && !filteredEvents.length" class="side-empty">
-            {{ evtFilter ? '没有匹配的事件' : '还没有事件。事件是世界状态的唯一事实源——点「事件」记录第一条历史。' }}
+          <div v-else class="side-empty">
+            {{ evtFilter ? '没有匹配的事件' : '还没有事件。事件是世界状态的唯一事实源——点「记一笔历史」记录第一条。' }}
           </div>
         </div>
+        </template>
 
         <!-- 实体（角色/势力/资产）：搜索 + 重要度排序 -->
+        <template v-if="activePanel === 'character' || activePanel === 'faction' || activePanel === 'asset'">
         <div class="side-section">
-          <div v-show="characters.length || factions.length || assets.length" class="evt-filter">
+          <div class="side-title">
+            <Icon :name="activePanel === 'character' ? 'user' : activePanel === 'faction' ? 'users' : 'star'" :size="13" />
+            <span>{{ activePanel === 'character' ? '角色' : activePanel === 'faction' ? '势力' : '资产' }}</span>
+            <span class="side-count">{{ panelEntities.length }}</span>
+          </div>
+          <div class="evt-filter">
             <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
             <input v-model="entityFilter" class="evt-filter-input" placeholder="搜索实体（名字 / 别名）…" />
           </div>
-        </div>
-        <div v-for="group in [
-          { key: 'character', title: '角色', icon: 'user', list: visibleCharacters },
-          { key: 'faction', title: '势力', icon: 'users', list: visibleFactions },
-          { key: 'asset', title: '资产', icon: 'star', list: visibleAssets },
-        ]" :key="group.key" class="side-section">
-          <template v-if="group.list.length">
-            <div
-              class="side-title side-title--toggle"
-              title="点击折叠/展开"
-              @click="toggleSection(group.key)"
-            >
-              <Icon :name="group.icon" :size="13" />
-              <span>{{ group.title }}</span>
-              <span class="side-count">{{ group.list.length }}</span>
-              <span class="side-chev" :class="{ closed: isCollapsed(group.key) }">▾</span>
-            </div>
-            <div v-show="!isCollapsed(group.key)" class="side-list">
-              <EntityCard
-                v-for="ent in group.list"
-                :key="ent.id"
-                :entity="ent"
-                @click="selectedEntityId = ent.id"
-                @update:name="(n: string) => renameEntity(bookId, ent.id, n)"
-                @delete="removeEntity(ent)"
-              />
-            </div>
-          </template>
-          <div
-            v-else-if="entityFilter && (group.key === 'character' ? characters : group.key === 'faction' ? factions : assets).length"
-            class="side-empty"
-          >
-            没有匹配「{{ entityFilter }}」的{{ group.title }}
+          <div v-if="panelEntities.length" class="side-list">
+            <EntityCard
+              v-for="ent in panelEntities"
+              :key="ent.id"
+              :entity="ent"
+              @click="selectedEntityId = ent.id"
+              @update:name="(n: string) => renameEntity(bookId, ent.id, n)"
+              @delete="removeEntity(ent)"
+            />
           </div>
+          <div v-else class="side-empty">{{ entityEmptyText }}</div>
         </div>
-        <div v-if="!characters.length && !factions.length && !assets.length" class="side-empty">
-          还没有实体。点「实体」创建角色 / 势力 / 资产——它们只存固有属性，位置与生死由事件推演。
-        </div>
+        </template>
       </aside>
     </div>
 
     <!-- 时间轴（拖动改变 currentTime，地图人物位置/疆域随之回放；右键可记录事件/标记章节锚） -->
-    <WorldTimeline @focus-event="focusEvent" @new-event-at="onNewEventAt" />
+    <WorldTimeline
+      @focus-event="focusEvent"
+      @new-event-at="onNewEventAt"
+      @edit-foreshadow="(id: string) => (selectedForeshadowId = id)"
+    />
 
     <!-- 事件录入/编辑（绘制期间保持挂载、收起为悬浮条，表单状态不丢） -->
     <QuickCapturePanel
@@ -855,6 +1032,20 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       @cancel="showBulkImport = false"
     />
 
+    <!-- 期待账本（M5：侧栏「打开账本」/ ?panel=expectations 深链） -->
+    <ReaderMirrorModal
+      v-if="showExpectations"
+      :book-id="bookId"
+      @close="showExpectations = false"
+    />
+
+    <!-- 世界观文本（M5：顶栏「世界观」/ ?panel=worldview 深链） -->
+    <WorldviewModal
+      v-if="showWorldview"
+      :book-id="bookId"
+      @close="showWorldview = false"
+    />
+
     <!-- 新地点（点选坐标后） -->
     <ModalShell
       v-if="draftPoint"
@@ -893,59 +1084,282 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   background: var(--bg-primary);
 }
 
-/* ===== Header ===== */
-.world-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+/* ===== M6 活舆图：水印题字 / 装饰 / 罗盘 ===== */
+.atlas-watermark {
+  position: absolute;
+  left: 40px;
+  top: 64px;
+  z-index: 640; /* Leaflet pane 内 marker 600 之上、vignette 645 之下——做纸面水印 */
+  pointer-events: none;
+  user-select: none;
+  color: rgba(74, 68, 56, 0.28);
 }
-.wh-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.aw-title {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
 }
-.wh-title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.aw-sub {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.34em;
+  color: rgba(74, 68, 56, 0.48); /* 水印副行保持淡，但要读得出 */
 }
-.world-header h1 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text-primary);
+.atlas-compass {
+  position: absolute;
+  right: 64px;
+  bottom: 18px;
+  width: 64px;
+  height: 74px;
+  z-index: 660; /* 越过烛光暗角（645）——角落里的罗盘不该被压暗 */
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.75;
+  transition: opacity 0.15s, transform 0.15s;
 }
-.wh-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
+.atlas-compass:hover {
+  opacity: 1;
+  transform: scale(1.06);
 }
-.wh-book {
-  color: var(--text-secondary);
-  font-weight: 500;
+.atlas-compass:focus-visible {
+  outline: 2px solid rgba(124, 106, 173, 0.55);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
-.wh-book::after {
-  content: ' · ';
-  color: var(--text-muted);
+/* 罗盘针：transform-box 让 SVG 内 rotate 绕自身中心（针形对称，盒中心即盘心） */
+.ac-needle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: compass-sway 5.6s ease-in-out infinite;
 }
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.atlas-compass.is-home .ac-needle {
+  animation: compass-home 1.45s ease-out 1;
 }
-.hdr-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border-color);
-  margin: 0 4px;
+/* 平时轻摆：荡—收—歇（末段停 0° 作间歇，循环不显机械） */
+@keyframes compass-sway {
+  0% { transform: rotate(0deg); }
+  12% { transform: rotate(6deg); }
+  30% { transform: rotate(-4.5deg); }
+  48% { transform: rotate(3deg); }
+  64% { transform: rotate(-1.5deg); }
+  78%, 100% { transform: rotate(0deg); }
+}
+/* 点击「回到全图」：大摆过北再阻尼回稳（360°≡0°，恰好接回轻摆） */
+@keyframes compass-home {
+  0% { transform: rotate(0deg); }
+  28% { transform: rotate(372deg); }
+  48% { transform: rotate(342deg); }
+  66% { transform: rotate(368deg); }
+  82% { transform: rotate(355deg); }
+  100% { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ac-needle { animation: none; }
 }
 
-/* ===== 按钮体系（本模块统一） ===== */
+/* ===== M6 悬浮胶囊工具条 ===== */
+.atlas-pill {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 750;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: rgba(244, 238, 225, 0.92);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(107, 90, 68, 0.3);
+  border-radius: 9999px;
+  box-shadow: 0 6px 24px rgba(96, 72, 36, 0.18);
+}
+.ap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgba(74, 68, 56, 0.88);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease;
+}
+.ap-btn:hover:not(:disabled) {
+  background: rgba(120, 95, 50, 0.1);
+}
+.ap-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ap-btn--icon {
+  padding: 6px 9px;
+}
+.ap-btn--primary {
+  background: var(--accent-500);
+  color: #f8f5ee;
+  font-weight: 500;
+}
+.ap-btn--primary:hover:not(:disabled) {
+  background: var(--accent-600);
+}
+.ap-btn--on {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+.ap-sep {
+  width: 1px;
+  height: 16px;
+  background: rgba(107, 90, 68, 0.25);
+  margin: 0 3px;
+}
+.ap-more {
+  position: relative;
+}
+.ap-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  background: rgba(249, 242, 226, 0.98);
+  border: 1px solid rgba(107, 90, 68, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(96, 72, 36, 0.2);
+  padding: 5px;
+  z-index: 760;
+}
+.ap-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(74, 68, 56, 0.88);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ap-menu-item:hover:not(:disabled) {
+  background: rgba(120, 95, 50, 0.1);
+}
+.ap-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ap-menu-sep {
+  height: 1px;
+  background: rgba(107, 90, 68, 0.18);
+  margin: 4px 6px;
+}
+.ap-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 745;
+}
+
+/* ===== M6 图标栏 + 浮出抽屉 ===== */
+.atlas-rail {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 750;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px;
+  background: rgba(236, 228, 211, 0.92);
+  backdrop-filter: blur(3px);
+  border: 1px solid rgba(107, 90, 68, 0.28);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -4px 0 18px rgba(96, 72, 36, 0.12);
+}
+.ar-btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(109, 90, 60, 0.75);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ar-btn:hover {
+  background: rgba(120, 95, 50, 0.1);
+  color: rgba(74, 68, 56, 0.95);
+}
+.ar-btn:focus-visible,
+.ap-btn:focus-visible {
+  outline: 2px solid rgba(124, 106, 173, 0.55);
+  outline-offset: 1px;
+}
+.ar-btn--on {
+  background: rgba(124, 106, 173, 0.14);
+  color: var(--accent-500);
+}
+.ar-n {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #b08d3e;
+  font-variant-numeric: tabular-nums;
+}
+.ar-sep {
+  width: 18px;
+  height: 1px;
+  background: rgba(107, 90, 68, 0.22);
+  margin: 4px 0;
+}
+.atlas-drawer {
+  position: absolute;
+  right: 47px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 740;
+  width: 264px;
+  max-height: min(560px, calc(100% - 32px));
+  overflow-y: auto;
+  background: rgba(243, 237, 224, 0.97);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(107, 90, 68, 0.28);
+  border-radius: 12px;
+  box-shadow: -10px 0 30px rgba(96, 72, 36, 0.14);
+  padding: 12px;
+}
+/* 世界页滚动区统一：暖色细条（Chromium/WebKit） */
+.atlas-drawer::-webkit-scrollbar {
+  width: 8px;
+}
+.atlas-drawer::-webkit-scrollbar-thumb {
+  background: rgba(120, 95, 50, 0.22);
+  border-radius: 4px;
+}
+.atlas-drawer::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 95, 50, 0.38);
+}
+.atlas-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ===== 布局 ===== */
 .wbtn {
   display: inline-flex;
   align-items: center;
@@ -1004,6 +1418,8 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   flex: 1;
   display: flex;
   min-height: 0;
+  /* M6：图标栏/浮出抽屉是 body 的直接子级，绝对定位锚在此（漏了会锚到视口） */
+  position: relative;
 }
 .world-canvas {
   flex: 1;
@@ -1020,17 +1436,12 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   cursor: crosshair;
 }
 
-/* ===== 侧栏 ===== */
-.world-side {
-  width: 300px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  overflow-y: auto;
-  padding: 14px;
-}
+/* ===== 抽屉内分组（沿用原侧栏条目语言） ===== */
 .side-section {
   margin-bottom: 18px;
+}
+.side-section:last-child {
+  margin-bottom: 0;
 }
 .side-title {
   display: flex;
@@ -1049,25 +1460,6 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   background: var(--bg-tertiary);
   border-radius: 9999px;
   padding: 1px 8px;
-}
-.side-title--toggle {
-  cursor: pointer;
-  user-select: none;
-  border-radius: 6px;
-  padding: 2px 4px;
-  margin-left: -4px;
-  transition: background 0.12s;
-}
-.side-title--toggle:hover {
-  background: var(--hover-bg);
-}
-.side-chev {
-  font-size: 9px;
-  color: var(--text-muted);
-  transition: transform 0.15s ease-out;
-}
-.side-chev.closed {
-  transform: rotate(-90deg);
 }
 /* 事件过滤 */
 .evt-filter {
@@ -1096,6 +1488,39 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 }
 .evt-filter-input::placeholder {
   color: var(--text-muted);
+}
+/* M5 期待摘要分组 */
+.exp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 2px 8px;
+}
+.exp-summary-text {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.exp-due {
+  color: #dc2626;
+  font-weight: 500;
+}
+.exp-open {
+  align-self: flex-start;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-canvas);
+  border: 1px dashed var(--border-color);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.exp-open:hover {
+  border-color: var(--accent-500);
+  color: var(--accent-500);
 }
 .side-list {
   list-style: none;

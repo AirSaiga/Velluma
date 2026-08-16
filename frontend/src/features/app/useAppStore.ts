@@ -43,8 +43,6 @@ function _worldStaticPrompt(entity: any): string {
     const v = String(props[key] || '').trim()
     if (v) parts.push(`${label}：${v}`)
   }
-  const legacy = String(props.legacy_profile || '').trim()
-  if (legacy) parts.push(legacy)
   return parts.join('\n')
 }
 

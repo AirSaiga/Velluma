@@ -158,8 +158,9 @@ function ack() {
   acknowledgeUpdate()
 }
 
-/** 跳世界页（W2 深链：游标停本章时刻 + from=chapter 支持一键返回；带实体 id 时飞到该对象） */
-function goWorld(entityId?: string) {
+/** 跳世界页（W2 深链：游标停本章时刻 + from=chapter 支持一键返回；带实体 id 时飞到该对象；
+ *  M5：extra 支持 ?fs= 伏笔详情 / ?panel=expectations 期待账本） */
+function goWorld(entityId?: string, extra?: Record<string, string>) {
   if (!currentBookId.value) return
   const query: Record<string, string> = {}
   if (slice.value) {
@@ -168,6 +169,7 @@ function goWorld(entityId?: string) {
     if (props.chapterId) query.chapter = props.chapterId
   }
   if (entityId) query.entity = entityId
+  Object.assign(query, extra || {})
   router.push({ path: `/world/${currentBookId.value}`, query })
 }
 </script>
@@ -291,12 +293,24 @@ function goWorld(entityId?: string) {
           >
             <div class="setting-group-label">头顶的线</div>
             <ul class="thread-list">
-              <li v-for="f in foreshadowsShown" :key="f.ledger_key" class="thread-row foreshadow">
+              <li
+                v-for="f in foreshadowsShown"
+                :key="f.ledger_key"
+                class="thread-row foreshadow clickable"
+                title="在世界页打开这条伏笔（详情抽屉）"
+                @click="goWorld(undefined, { fs: f.ledger_key })"
+              >
                 <span class="thread-tag">伏笔</span>
                 <span class="thread-text">{{ f.content }}</span>
                 <span v-if="f.chapters_open != null" class="thread-meta">悬空 {{ f.chapters_open }} 章</span>
               </li>
-              <li v-for="(e, i) in expectationsShown" :key="i" class="thread-row expectation">
+              <li
+                v-for="(e, i) in expectationsShown"
+                :key="i"
+                class="thread-row expectation clickable"
+                title="在世界页打开期待账本"
+                @click="goWorld(undefined, { panel: 'expectations' })"
+              >
                 <span class="thread-tag">期待</span>
                 <span class="thread-text">{{ e.description }}</span>
                 <span class="thread-meta">张力 {{ e.tension }}</span>
@@ -647,6 +661,13 @@ function goWorld(entityId?: string) {
 }
 .thread-row.expectation {
   background: color-mix(in srgb, #d4a017 6%, transparent);
+}
+.thread-row.clickable {
+  cursor: pointer;
+}
+.thread-row.clickable:hover {
+  filter: brightness(0.96);
+  box-shadow: inset 0 0 0 1px var(--border-color);
 }
 .thread-tag {
   flex-shrink: 0;

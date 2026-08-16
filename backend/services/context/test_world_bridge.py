@@ -55,10 +55,11 @@ class StaticPromptTests(unittest.TestCase):
         self.assertIn("语言习惯：短句", text)
         self.assertNotIn("目标", text)  # 空字段跳过
 
-    def test_legacy_profile_appended(self):
-        ent = _world_entity(props={"legacy_profile": "旧档案整段"})
+    def test_background_field_rendered(self):
+        # M4 收尾：旧档案迁移并入 background（启动数据迁移摘 legacy_profile 键）
+        ent = _world_entity(props={"background": "出身寒门，少年流落"})
         text = static_prompt_from_world_entity(ent)
-        self.assertIn("旧档案整段", text)
+        self.assertIn("背景：出身寒门，少年流落", text)
 
     def test_empty_props(self):
         self.assertEqual(static_prompt_from_world_entity(_world_entity()), "")
@@ -90,14 +91,14 @@ class AdapterShapeTests(unittest.TestCase):
     def test_character_adapter_duck_shape(self):
         ent = _world_entity(
             importance=10,
-            props={"appearance": "瘦高", "legacy_profile": "旧档案"},
+            props={"appearance": "瘦高", "background": "旧档案"},
         )
         cs = {"alive": True, "location_id": "loc-北岸要塞", "label": ""}
         adapter = WorldEntityAdapter(ent, cs, {"loc-北岸要塞": _loc("北岸要塞")})
         # _entity_name / _characters_text 访问链
         self.assertEqual(adapter.character.name, "林尘")
         self.assertIn("外貌：瘦高", adapter.character.static_prompt)
-        self.assertIn("旧档案", adapter.character.static_prompt)
+        self.assertIn("背景：旧档案", adapter.character.static_prompt)
         self.assertEqual(adapter.character.dynamic_state, "位于北岸要塞")
         self.assertEqual(adapter.character.aliases, ["小尘"])
         # importance 1-10 → 旧 1-4 口径

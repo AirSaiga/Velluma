@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { worldApi, plotLedgerApi } from '../../../services/api'
 import { computeWorldState } from '../engine/computeWorldState'
 import { pushCommand, clearHistory } from './useWorldHistory'
+import { WORLD_REFRESH_EVENT } from './useWorldSlice'
 import type {
   WorldLocation,
   WorldEvent,
@@ -68,15 +69,7 @@ async function load(bookId: string) {
   entities.value = ents
   relations.value = rels
   chapterAnchors.value = chapters.sort((a, b) => a.chapter_number - b.chapter_number)
-  foreshadows.value = ledgers.map((l) => ({
-    id: l.id,
-    ledger_key: l.ledger_key,
-    entry_type: l.entry_type,
-    content: l.content,
-    status: l.status,
-    world_time_planted: l.world_time_planted ?? null,
-    world_time_resolved: l.world_time_resolved ?? null,
-  }))
+  foreshadows.value = ledgers.map((l) => toForeshadow(l))
   mapLayers.value = layers
   mapStrokes.value = strokes
 }
@@ -479,7 +472,12 @@ async function updateEntityArchive(
   return updated
 }
 
-// ===== 伏笔（M3：PlotLedger 的世界页投影，弧线带数据源）=====
+// ===== 伏笔（M3：PlotLedger 的世界页投影，弧线带数据源；M5：侧栏账本+详情抽屉）=====
+
+/** M5：伏笔/期待/世界观变更后广播——写作页「此刻此地」切片（头顶的线）静默重取 */
+function notifyWorldChanged() {
+  window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
+}
 
 const toForeshadow = (l: {
   id: string
@@ -489,6 +487,9 @@ const toForeshadow = (l: {
   status: 'open' | 'closed' | 'dropped'
   world_time_planted?: number | null
   world_time_resolved?: number | null
+  created_at_chapter?: number | null
+  hook_id?: string | null
+  meta?: Record<string, any> | null
 }): Foreshadow => ({
   id: l.id,
   ledger_key: l.ledger_key,
@@ -497,6 +498,9 @@ const toForeshadow = (l: {
   status: l.status,
   world_time_planted: l.world_time_planted ?? null,
   world_time_resolved: l.world_time_resolved ?? null,
+  created_at_chapter: l.created_at_chapter ?? null,
+  hook_id: l.hook_id ?? null,
+  meta: l.meta ?? null,
 })
 
 async function createForeshadow(
@@ -530,6 +534,7 @@ async function createForeshadow(
       foreshadows.value = [...foreshadows.value, toForeshadow(r)]
     },
   })
+  notifyWorldChanged()
   return f
 }
 
@@ -541,6 +546,27 @@ async function updateForeshadowTimes(
 ) {
   await plotLedgerApi.update(foreshadowId, patch)
   foreshadows.value = foreshadows.value.map((f) => (f.id === foreshadowId ? { ...f, ...patch } : f))
+  notifyWorldChanged()
+}
+
+/**
+ * M5：详情抽屉就地编辑（内容/类型/状态/章锚/hook_id）。
+ * 轻量编辑不进 undo（照 updateEntityArchive 先例）；时间锚走 updateForeshadowTimes。
+ */
+async function updateForeshadow(
+  bookId: string,
+  foreshadowId: string,
+  patch: {
+    content?: string
+    entry_type?: string
+    status?: 'open' | 'closed' | 'dropped'
+    created_at_chapter?: number | null
+    hook_id?: string | null
+  },
+) {
+  await plotLedgerApi.update(foreshadowId, patch)
+  foreshadows.value = foreshadows.value.map((f) => (f.id === foreshadowId ? { ...f, ...patch } : f))
+  notifyWorldChanged()
 }
 
 /** 在时刻 t 回收（闭合） */
@@ -557,6 +583,7 @@ async function dropForeshadow(bookId: string, foreshadowId: string) {
   foreshadows.value = foreshadows.value.map((f) =>
     f.id === foreshadowId ? { ...f, status: 'dropped' as const } : f,
   )
+  notifyWorldChanged()
 }
 
 async function deleteForeshadow(bookId: string, foreshadowId: string) {
@@ -583,6 +610,7 @@ async function deleteForeshadow(bookId: string, foreshadowId: string) {
       },
     })
   }
+  notifyWorldChanged()
 }
 
 // ===== 章节叙事时间锚（轻量，不进 undo——改锚是低风险高频微调）=====
@@ -672,6 +700,7 @@ export function useWorld() {
     updateEntityArchive,
     createForeshadow,
     updateForeshadowTimes,
+    updateForeshadow,
     resolveForeshadow,
     dropForeshadow,
     deleteForeshadow,

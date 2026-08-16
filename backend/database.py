@@ -691,6 +691,43 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def _migrate_legacy_profile_keys(conn) -> None:
+    """world_entities.props.legacy_profile → props.background 一次性数据迁移（幂等）。
+
+    M4 迁移期旧角色档案整段塞 legacy_profile 兼容位；策略定为「迁移而非兼容」后
+    统一并入正经字段 background（生成上下文 _STRUCTURED_FIELDS 已覆盖），键摘除。
+    跑过一次后 WHERE 不再命中，后续启动零开销；空串键只摘不并。
+    """
+    result = await conn.execute(
+        text(
+            """
+            UPDATE world_entities
+            SET props = jsonb_set(
+                    props, '{background}',
+                    to_jsonb(
+                        CASE WHEN btrim(COALESCE(props->>'background', '')) <> ''
+                             THEN props->>'background' || E'\\n\\n' || (props->>'legacy_profile')
+                             ELSE props->>'legacy_profile'
+                        END
+                    )
+                ) - 'legacy_profile'
+            WHERE btrim(COALESCE(props->>'legacy_profile', '')) <> ''
+            """
+        )
+    )
+    if result.rowcount:
+        logger.info(f"[MIGRATION] props.legacy_profile → background: {result.rowcount} entities")
+    await conn.execute(
+        text(
+            """
+            UPDATE world_entities SET props = props - 'legacy_profile'
+            WHERE props ? 'legacy_profile'
+              AND btrim(COALESCE(props->>'legacy_profile', '')) = ''
+            """
+        )
+    )
+
+
 async def init_db():
     """
     初始化数据库表结构。
@@ -746,6 +783,7 @@ async def init_db():
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
         await run_migrations(conn)
+        await _migrate_legacy_profile_keys(conn)
 
         # 检查并迁移向量维度
         target_dimension = get_embedding_dimensions()

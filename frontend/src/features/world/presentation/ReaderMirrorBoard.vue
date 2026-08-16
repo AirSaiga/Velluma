@@ -1,24 +1,25 @@
 <script setup lang="ts">
 /**
- * Reader Mirror 面板（V4.2 路径 B）。
+ * 期待账本看板（V4.2 路径 B；M5 自设定中心迁入世界页，由 ReaderMirrorModal 承载）。
  *
  * 职责：
  * - 显示期待账本（双层：作者声明 + 自动推断）
  * - 显示张力曲线（按章号）
  * - 添加/编辑/删除期待
- * - 显示本章规划建议（如果有 chapterNumber）
+ * - 显示本章规划建议（如果有 chapterNumber——世界页无章节上下文，现状不传）
  *
  * UX 说明（人话层重构）：
  * - 输入侧零数据库语言：ID 前端自动生成不可见；类型随描述关键词预填可改；
  *   张力以「火候」四档录入；释放时机以模糊档位录入（写入 author_override）
  * - 列表侧按「该收了 / 在憋着 / 已收官」分组，火候词替代裸数字
  *
- * 设计依据：第 7 轮修正——仪表盘不是方向盘，所有数据都是建议
+ * M5：变更后广播 velluma:world-refresh——写作页切片「头顶的线」与该账本同源，静默重取。
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { readerMirrorApi, EXPECTATION_TYPE_LABELS, EXPECTATION_STATUS_LABELS, EXPECTATION_STATUS_COLORS, HEAT_LEVELS, TIMING_OPTIONS, tensionToHeat, guessTypeFromDescription, type Expectation, type ExpectationType, type ChapterPlanSuggestion } from '../../../services/api/domain/reader-mirror.api'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { WORLD_REFRESH_EVENT } from '../composables/useWorldSlice'
 
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
@@ -76,6 +77,11 @@ function heldChaptersText(exp: Expectation): string {
   return span <= 0 ? '刚埋下' : `憋了 ${span} 章`
 }
 
+/** 变更后通知写作页切片静默重取（「头顶的线」与本账本同源） */
+function notifyWorldChanged() {
+  window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
+}
+
 async function loadData() {
   loading.value = true
   error.value = null
@@ -117,6 +123,7 @@ async function handleCreate() {
     showForm.value = false
     resetForm()
     await loadData()
+    notifyWorldChanged()
   } catch (e: any) {
     showToast('登记失败: ' + (e?.message || '未知错误'), 'error')
   }
@@ -130,6 +137,7 @@ async function handleAccumulate(exp: Expectation) {
       chapter_number: props.chapterNumber || 0,
     })
     await loadData()
+    notifyWorldChanged()
   } catch (e: any) {
     showToast('累积失败: ' + (e?.message || '未知错误'), 'error')
   }
@@ -150,6 +158,7 @@ async function handlePayoff(exp: Expectation) {
       chapter_number: props.chapterNumber || 0,
     })
     await loadData()
+    notifyWorldChanged()
   } catch (e: any) {
     showToast('释放失败: ' + (e?.message || '未知错误'), 'error')
   }
@@ -165,6 +174,7 @@ async function handleDelete(exp: Expectation) {
   try {
     await readerMirrorApi.deleteExpectation(props.bookId, exp.id)
     await loadData()
+    notifyWorldChanged()
   } catch (e: any) {
     showToast('删除失败: ' + (e?.message || '未知错误'), 'error')
   }
@@ -177,11 +187,10 @@ watch(() => props.bookId, loadData)
 <template>
   <div class="reader-mirror">
     <header class="rm-header">
-      <h3>期待账本（Reader Mirror）</h3>
       <p class="stats">{{ statsText }}</p>
     </header>
 
-    <!-- 本章规划建议（如果有 chapterNumber） -->
+    <!-- 本章规划建议（如果有 chapterNumber——世界页现状不传，此卡不显示） -->
     <div v-if="plan" class="plan-card" :class="{ 'payoff-recommended': plan.is_payoff_chapter_recommended }">
       <div class="plan-head">
         <span class="plan-title">第 {{ plan.chapter_number }} 章规划建议</span>
@@ -325,9 +334,9 @@ watch(() => props.bookId, loadData)
 </template>
 
 <style scoped>
-.reader-mirror { padding: 1rem; height: 100%; overflow-y: auto; }
+/* M5：模态承载——滚动由 ModalShell body 负责，根节点不再撑满高度 */
+.reader-mirror { padding: 0; }
 .rm-header { margin-bottom: 0.75rem; }
-.rm-header h3 { font-size: 1rem; margin: 0 0 0.25rem; }
 .stats { font-size: 0.75rem; color: var(--text-muted); margin: 0; }
 
 .plan-card {
@@ -370,6 +379,8 @@ watch(() => props.bookId, loadData)
   background: var(--bg-secondary);
   border-radius: 0.25rem;
   cursor: pointer;
+  color: var(--text-secondary);
+  font-family: inherit;
 }
 .btn-mini.primary { background: var(--accent-500); color: white; border-color: var(--accent-500); }
 .btn-mini.payoff { color: #dc2626; border-color: #dc2626; }
@@ -392,6 +403,7 @@ watch(() => props.bookId, loadData)
   border-radius: 0.25rem;
   font-size: 0.75rem;
   background: var(--bg-primary);
+  color: var(--text-primary);
   font-family: inherit;
 }
 .desc-input { resize: vertical; line-height: 1.5; }
@@ -437,7 +449,7 @@ watch(() => props.bookId, loadData)
 .status-tag { padding: 0.125rem 0.375rem; background: var(--hover-bg); border-radius: 0.25rem; color: var(--text-muted); }
 .source-tag { padding: 0.125rem 0.375rem; background: #dbeafe; color: #1e40af; border-radius: 0.25rem; }
 .source-tag.auto { background: #f1f5f9; color: #64748b; }
-.exp-desc { font-size: 0.8125rem; margin-bottom: 0.375rem; line-height: 1.4; }
+.exp-desc { font-size: 0.8125rem; margin-bottom: 0.375rem; line-height: 1.4; color: var(--text-primary); }
 .tension-bar {
   position: relative;
   height: 16px;
@@ -488,7 +500,7 @@ watch(() => props.bookId, loadData)
 .empty.error { color: #dc2626; }
 
 .curve-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); }
-.curve-section h4 { font-size: 0.75rem; margin: 0 0 0.5rem; }
+.curve-section h4 { font-size: 0.75rem; margin: 0 0 0.5rem; color: var(--text-secondary); }
 .curve { display: flex; gap: 2px; height: 60px; align-items: flex-end; }
 .curve-bar {
   flex: 1;

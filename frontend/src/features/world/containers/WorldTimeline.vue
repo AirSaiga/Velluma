@@ -19,7 +19,12 @@ import { yearOf, formatTime, fromYMD } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import type { WorldEvent, ChapterAnchor, Foreshadow } from '../engine/types'
 
-const emit = defineEmits<{ 'focus-event': [ev: WorldEvent]; 'new-event-at': [t: number] }>()
+const emit = defineEmits<{
+  'focus-event': [ev: WorldEvent]
+  'new-event-at': [t: number]
+  /** M5：弧线详情「编辑详情」→ WorldView 开伏笔详情抽屉 */
+  'edit-foreshadow': [foreshadowId: string]
+}>()
 
 const { currentTime, events, setCurrentTime, chapterAnchors, setChapterAnchor, foreshadows, createForeshadow, updateForeshadowTimes, resolveForeshadow, dropForeshadow, deleteForeshadow, loadedBookId } =
   useWorld()
@@ -479,6 +484,13 @@ onMounted(() => {
         >
           在此回收
         </button>
+        <button
+          class="wt-arc-act"
+          title="编辑内容 / 类型 / 锚（详情抽屉）"
+          @click="emit('edit-foreshadow', arcDetail.f.id); arcDetail = null"
+        >
+          编辑详情
+        </button>
         <button v-if="arcDetail.f.status === 'open'" class="wt-arc-act" @click="onArcDrop">
           废弃
         </button>
@@ -489,44 +501,46 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* M6 编年史带：纸面渐层 + 衬线日期 + 鎏金游标 */
 .wt {
   position: relative;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  padding: 10px 20px 6px;
+  border-top: 1px solid rgba(107, 90, 68, 0.3);
+  background: linear-gradient(to top, rgba(236, 228, 211, 0.98), rgba(244, 238, 225, 0.92));
+  padding: 10px 22px 8px;
   user-select: none;
 }
 .wt-head {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 6px;
 }
 .wt-play {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-canvas);
-  border-radius: 8px;
+  width: 29px;
+  height: 29px;
+  border: 1px solid rgba(74, 68, 56, 0.7);
+  background: rgba(74, 68, 56, 0.92);
+  border-radius: 9999px;
   cursor: pointer;
-  color: var(--accent-500);
+  color: #f4eee1;
   align-self: center;
   transition: all 0.15s;
 }
 .wt-play:hover {
-  border-color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.08);
+  background: rgba(74, 68, 56, 1);
   transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(96, 72, 36, 0.3);
 }
 .wt-now {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--accent-500);
-  font-family: ui-monospace, monospace;
-  min-width: 150px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: rgba(51, 48, 42, 0.92);
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  min-width: 170px;
   animation: wt-flip 0.38s ease-out;
   transform-origin: 50% 60%;
 }
@@ -543,14 +557,14 @@ onMounted(() => {
   }
 }
 .wt-meta {
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
   color: var(--text-muted);
-  font-family: ui-monospace, monospace;
   margin-left: auto;
 }
 .wt-track {
   position: relative;
-  height: 52px;
+  height: 56px;
   cursor: pointer;
   touch-action: none;
 }
@@ -588,27 +602,36 @@ onMounted(() => {
   transform: scale(1.5);
   z-index: 3;
 }
+/* 鎏金游标（M6：朱红 → 鎏金，压三角旗标） */
 .wt-cursor {
   position: absolute;
   top: 0;
   bottom: 12px;
   width: 2px;
   margin-left: -1px;
-  background: #b32424;
+  background: #b08d3e;
   box-shadow:
-    0 0 6px rgba(179, 36, 36, 0.55),
-    0 0 14px rgba(179, 36, 36, 0.25);
+    0 0 6px rgba(176, 141, 62, 0.55),
+    0 0 14px rgba(176, 141, 62, 0.25);
   pointer-events: none;
   z-index: 4;
+}
+.wt-cursor::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -3px;
+  border: 4px solid transparent;
+  border-top-color: #b08d3e;
 }
 .wt-ticks {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 10px;
-  font-size: 9px;
-  color: var(--text-muted);
+  height: 12px;
+  font-size: 9.5px;
+  color: rgba(109, 90, 60, 0.75);
   font-family: ui-monospace, monospace;
 }
 .wt-tick {

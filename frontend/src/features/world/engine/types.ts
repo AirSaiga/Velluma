@@ -49,7 +49,10 @@ export interface WorldEntity {
   props: Record<string, unknown>
 }
 
-/** 伏笔（PlotLedger 的世界页投影：弧线带只关心时间锚与内容） */
+/**
+ * 伏笔（PlotLedger 的世界页投影）。
+ * 弧线带只关心时间锚与内容；M5 侧栏账本/详情抽屉另需章锚与 meta（证据/来源徽标）。
+ */
 export interface Foreshadow {
   id: string
   ledger_key: string
@@ -58,6 +61,11 @@ export interface Foreshadow {
   status: 'open' | 'closed' | 'dropped'
   world_time_planted: number | null
   world_time_resolved: number | null
+  /** 埋设章号（章节锚，与 world_time 双轨并存） */
+  created_at_chapter?: number | null
+  hook_id?: string | null
+  /** 原样携带：meta.source（AI 登记徽标）/ meta.planted_in_text（埋设证据） */
+  meta?: Record<string, any> | null
 }
 
 export interface WorldLocation {

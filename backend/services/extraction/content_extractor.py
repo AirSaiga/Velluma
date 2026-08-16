@@ -260,13 +260,14 @@ async def commit_extraction(
     existing_names = {e.name for e in existing_entities}
     name_to_id: Dict[str, UUID] = {e.name: e.id for e in existing_entities}
 
-    # ---- 1. 角色 → world_entities(character)；旧档案全文进 legacy_profile ----
+    # ---- 1. 角色 → world_entities(character)；档案全文进 background ----
     for ch in confirmed.characters:
         name = ch.get("name", "").strip()
         if not name or name in existing_names:
             continue
         try:
             legacy_level = int(ch.get("importance_level", 3) or 3)
+            desc = (ch.get("description") or "").strip()
             ent = await world.entities.create(
                 book_id=book_id,
                 entity_type="character",
@@ -274,7 +275,7 @@ async def commit_extraction(
                 aliases=ch.get("aliases", []) or [],
                 importance=max(1, min(10, round(legacy_level * 2.5))),  # 旧 1-4 → 世界 1-10
                 intro="",
-                props={"legacy_profile": ch.get("description", "")},
+                props={"background": desc} if desc else {},
                 metadata_={"origin": "extraction"},
             )
             name_to_id[name] = ent.id

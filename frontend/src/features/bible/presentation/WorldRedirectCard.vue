@@ -6,10 +6,9 @@ import { worldApi } from '../../../services/api/domain/world.api'
 import { useToast } from '../../../composables/useToast'
 
 /**
- * 设定页收敛引导卡（M4）：角色/资产/地图分区退役为跳转入口。
+ * 设定页收敛引导卡（M4/M5）：角色/资产/地图/伏笔/期待/世界观分区退役为跳转入口。
  *
- * 主按钮 = 前往世界页对应透镜（带 query 深链）；
- * 次按钮 = 一键导入旧设定并前往（migrateLegacy 幂等，已导入的自动跳过）。
+ * 主按钮 = 前往世界页；次按钮 = 一键导入旧设定并前往（migrateLegacy 幂等，已导入的自动跳过）。
  * 迁移失败不阻断跳转（作者可能只是想先看看世界页）。
  */
 const props = defineProps<{
@@ -17,7 +16,8 @@ const props = defineProps<{
   icon: string
   title: string
   description: string
-  lens: 'map' | 'mindmap'
+  /** 可选深链 query（如 { panel: 'expectations' }），随跳转带给世界页 */
+  query?: Record<string, string>
 }>()
 
 const router = useRouter()
@@ -25,7 +25,7 @@ const { showToast } = useToast()
 const migrating = ref(false)
 
 function goWorld() {
-  router.push({ path: `/world/${props.bookId}`, query: { lens: props.lens } })
+  router.push({ path: `/world/${props.bookId}`, query: props.query || {} })
 }
 
 async function migrateAndGo() {
@@ -59,7 +59,7 @@ async function migrateAndGo() {
       </button>
     </div>
     <p class="wrc-hint">
-      静态设定的编辑已收敛至世界页（地图 · 脑图 · 时间轴）；写作辅助会自动使用世界页数据。
+      静态设定的编辑已收敛至世界页（地图 · 时间轴 · 侧栏账本）；写作辅助会自动使用世界页数据。
     </p>
   </div>
 </template>

@@ -599,7 +599,7 @@ class WorldRepository:
 
         映射：
         - characters → WorldEntity(character)：name/aliases/importance；
-          static_prompt 全文进 props.legacy_profile（不机器瞎拆——作者在抽屉里自行
+          static_prompt 全文进 props.background（不机器瞎拆——作者在抽屉里自行
           拆到具体字段）；dynamic_state/current_state **不迁**（时变状态由事件推演，
           只计数告知）
         - assets → WorldEntity(asset)：static_description → intro
@@ -645,7 +645,7 @@ class WorldRepository:
                 continue
             props: Dict[str, Any] = {}
             if c.static_prompt:
-                props["legacy_profile"] = c.static_prompt
+                props["background"] = c.static_prompt
             ent = WorldEntity(
                 book_id=book_id,
                 entity_type="character",

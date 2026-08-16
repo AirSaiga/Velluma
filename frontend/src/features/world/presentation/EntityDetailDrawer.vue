@@ -15,6 +15,7 @@ import { useToast } from '../../../composables/useToast'
 import { archiveFields } from '../engine/entitySchema'
 import { formatTime } from '../engine/timeFormat'
 import { getTemplate } from '../engine/eventTemplates'
+import { vAutogrow } from './autogrow'
 import type { WorldEntity, WorldEvent, EventType } from '../engine/types'
 
 const props = defineProps<{ bookId: string; entityId: string }>()
@@ -211,8 +212,10 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 
     <!-- 一句话 -->
     <div class="edd-intro-row">
+      <span class="edd-lbl edd-lbl--block">一句话</span>
       <textarea
         v-model="introDraft"
+        v-autogrow
         class="edd-intro"
         rows="2"
         placeholder="一句话介绍（可空）"
@@ -227,6 +230,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
         <label class="edd-field-label">{{ f.label }}</label>
         <textarea
           v-if="f.multiline"
+          v-autogrow
           class="edd-field-input"
           :data-key="f.key"
           rows="2"
@@ -305,9 +309,9 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 .edd {
   position: absolute;
   top: 48px;
-  right: 12px;
+  right: 58px; /* 避让 M6 图标栏（右缘 46px + 间隙） */
   bottom: 12px;
-  width: 320px;
+  width: 340px;
   z-index: 700;
   display: flex;
   flex-direction: column;
@@ -315,9 +319,22 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border: 1px solid var(--border-color);
   border-radius: 14px;
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
-  padding: 14px;
+  padding: 16px;
   overflow-y: auto;
   font-size: 13px;
+}
+.edd::-webkit-scrollbar {
+  width: 8px;
+}
+.edd::-webkit-scrollbar-thumb {
+  background: rgba(120, 95, 50, 0.22);
+  border-radius: 4px;
+}
+.edd::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 95, 50, 0.38);
+}
+.edd::-webkit-scrollbar-track {
+  background: transparent;
 }
 .edd-head {
   display: flex;
@@ -341,10 +358,10 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text-primary);
-  font-family: inherit;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
   padding: 3px 6px;
   outline: none;
   transition: border-color 0.12s;
@@ -394,7 +411,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 .edd-imp {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   margin: 10px 0 8px;
 }
 .edd-imp-label {
@@ -403,14 +420,18 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   margin-right: 2px;
 }
 .edd-imp-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 9999px;
   border: 1px solid var(--border-color);
   background: var(--bg-canvas);
   cursor: pointer;
   padding: 0;
   transition: all 0.12s;
+}
+.edd-imp-dot:hover {
+  transform: scale(1.25);
+  border-color: var(--accent-500);
 }
 .edd-imp-dot.on {
   background: var(--accent-500);
@@ -435,22 +456,26 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   font-size: 11px;
   color: var(--text-muted);
 }
+.edd-lbl--block {
+  display: block;
+  margin-bottom: 4px;
+}
 .edd-alias {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
+  gap: 4px;
+  padding: 3px 10px;
   border-radius: 9999px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 .edd-alias button {
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   padding: 0;
   line-height: 1;
 }
@@ -458,13 +483,14 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   color: #dc2626;
 }
 .edd-alias-in {
-  width: 110px;
-  padding: 2px 8px;
+  flex: 1;
+  min-width: 96px;
+  padding: 3px 10px;
   border: 1px dashed var(--border-color);
   border-radius: 9999px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
   outline: none;
 }
@@ -473,22 +499,28 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-style: solid;
 }
 
-/* 一句话 */
+/* 一句话（v-autogrow 随内容长高，超 max-height 才滚动） */
+.edd-intro-row {
+  margin-top: 2px;
+}
 .edd-intro {
   width: 100%;
   box-sizing: border-box;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.7;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
+  max-height: 180px;
   outline: none;
 }
 .edd-intro:focus {
   border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
 }
 
 /* 档案区 */
@@ -505,26 +537,29 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   letter-spacing: 0.05em;
 }
 .edd-field {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .edd-field-label {
   display: block;
   font-size: 11px;
   color: var(--text-secondary);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
+/* 单行/多行共用；多行走 v-autogrow，resize 交给自动高度（手动拖拽会与自动量高打架） */
 .edd-field-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 9px;
+  padding: 7px 10px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.7;
   font-family: inherit;
   outline: none;
-  resize: vertical;
+  resize: none;
+  max-height: 240px;
 }
 .edd-field-input:focus {
   border-color: var(--accent-500);

@@ -5,27 +5,17 @@
  * 职责：把旧 AppContainer 右栏的 9 个悬浮 tab 原样迁入此处的二级导航。
  * 左侧二级导航 + 右侧内容区。
  *
- * 二级分区（规格 §7）：
- * - 角色（CharacterPanel）
- * - 伏笔账本（F4 新建，F1 占位"开发中"）
- * - 世界观（WorldviewSettings）
- * - 文风（StyleCardManager）
- * - 资产（AssetPanel）
- * - 地图（MapSettings）
- * - 笔记（NotesPanel）
- * - 设置（SettingsPanel）
- *
- * F1 阶段：各面板原样复用旧组件（分层违规留待 F5 清零），保证功能不丢。
+ * 编辑入口收敛现状（M4/M5）：
+ * - 角色/资产/地图（M4）+ 伏笔账本/期待账本/世界观（M5）已迁往世界页，
+ *   对应分区退役为 WorldRedirectCard 跳转卡
+ * - 保留分区：文风（StyleCardManager）/ 笔记（NotesPanel）/ 设置（SettingsPanel）
  */
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
-import WorldviewSettings from '../../../components/WorldviewSettings.vue'
 import StyleCardManager from '../../../components/StyleCardManager.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
 import SettingsPanel from '../../../components/SettingsPanel.vue'
-import ForeshadowingPanel from './ForeshadowingPanel.vue'
-import ReaderMirrorPanel from './ReaderMirrorPanel.vue'
 import WorldRedirectCard from '../presentation/WorldRedirectCard.vue'
 import { useAppStore } from '../../app/useAppStore'
 
@@ -124,24 +114,40 @@ async function saveBookNotes(notes: string) {
           :book-id="bookIdFromRoute || ''"
           icon="users"
           title="角色设定已迁往世界页"
-          description="角色档案、关系网络、位置与生死——在世界页的脑图与时间轴里编辑；位置与『此刻状态』由事件自动推演，写作辅助直接使用。"
-          lens="mindmap"
+          description="角色档案、关系网络、位置与生死——在世界页的地图与时间轴里编辑；位置与『此刻状态』由事件自动推演，写作辅助直接使用。"
         />
       </div>
 
-      <!-- 伏笔账本 -->
+      <!-- 伏笔账本（M5：迁往世界页侧栏 + 时间轴弧线带） -->
       <div v-else-if="activeSection === 'foreshadowing'" class="panel-host">
-        <ForeshadowingPanel :book-id="bookIdFromRoute || ''" />
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="link"
+          title="伏笔账本已迁往世界页"
+          description="伏笔的埋设与回收在时间轴弧线带上可视化（拖端点改锚）；侧栏「伏笔」分组是全量账本，点击条目开详情编辑。写作页「头顶的线」与 AI 生成自动使用。"
+        />
       </div>
 
-      <!-- V4.2 期待账本（Reader Mirror） -->
+      <!-- 期待账本（M5：迁往世界页侧栏「期待」分组） -->
       <div v-else-if="activeSection === 'readerMirror'" class="panel-host">
-        <ReaderMirrorPanel :book-id="bookIdFromRoute || ''" />
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="star"
+          title="期待账本已迁往世界页"
+          description="读者期待与张力曲线在世界页侧栏「期待」分组里——火候看板/加一把火/收线功能原样保留；写作页「头顶的线」与其同源。"
+          :query="{ panel: 'expectations' }"
+        />
       </div>
 
-      <!-- 世界观 -->
+      <!-- 世界观（M5：迁往世界页顶栏「世界观」） -->
       <div v-else-if="activeSection === 'worldview'" class="panel-host">
-        <WorldviewSettings :book-id="bookIdFromRoute" :closable="false" />
+        <WorldRedirectCard
+          :book-id="bookIdFromRoute || ''"
+          icon="book-open"
+          title="世界观已迁往世界页"
+          description="世界背景、规则、历史——在世界页顶栏「世界观」里编辑（自动保存 + 导入导出），写作时自动注入 AI 生成上下文。"
+          :query="{ panel: 'worldview' }"
+        />
       </div>
 
       <!-- 文风 -->
@@ -156,7 +162,6 @@ async function saveBookNotes(notes: string) {
           icon="star"
           title="资产设定已迁往世界页"
           description="资产的固有属性在世界页的实体档案里编辑；持有与转移由事件记录，写作辅助自动使用。"
-          lens="mindmap"
         />
       </div>
 
@@ -166,8 +171,7 @@ async function saveBookNotes(notes: string) {
           :book-id="bookIdFromRoute || ''"
           icon="map-pin"
           title="地图已迁往世界页"
-          description="地点、疆域、移动路径与底图拼贴——在世界页的地图透镜里绘制；章节叙事时刻的世界状态自动推演。"
-          lens="map"
+          description="地点、疆域、移动路径与底图拼贴——在世界页的地图画布里绘制；章节叙事时刻的世界状态自动推演。"
         />
       </div>
 

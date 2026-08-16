@@ -25,7 +25,6 @@ export const ARCHIVE_FIELDS: Record<EntityType, ArchiveField[]> = {
     { key: 'speech_style', label: '说话风格', hint: '语气 / 口头禅 / 称谓习惯' },
     { key: 'habits', label: '习惯', hint: '小动作 / 癖好' },
     { key: 'skills', label: '能力', hint: '武功 / 法术 / 技术' },
-    { key: 'legacy_profile', label: '旧档案', hint: '自旧角色表迁入的完整设定（可拆分到上方字段）', multiline: true },
   ],
   faction: [
     { key: 'ideology', label: '理念', hint: '信条 / 目标' },

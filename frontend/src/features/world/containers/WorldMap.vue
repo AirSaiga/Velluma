@@ -54,7 +54,7 @@ let editSelLayer: L.LayerGroup | null = null
 /** 图片层 id → overlay 实例（编辑拖拽时直接 setBounds，避免整层重建闪烁） */
 const overlayMap = new Map<string, L.ImageOverlay>()
 /** 占位面板 marker（无底图时显示，有图自动隐藏） */
-let placeholderMarker: L.Marker | null = null
+let blankOverlay: L.SVGOverlay | null = null
 
 // ---- 绘制草稿状态 ----
 /** 草稿顶点（内部坐标 [x,y] + 时间戳；时间戳用于双击闭合时识别伴随产生的合成顶点） */
@@ -133,6 +133,130 @@ const showLabels = () => (map ? map.getZoom() >= LABEL_ZOOM : true)
 // 内部坐标范围 0..1000
 const BOUNDS = L.latLngBounds([[0, 0], [1000, 1000]])
 
+/**
+ * 空白舆图默认底图：手绘风世界平面（地球大陆轮廓，无标注——空白即未书写）。
+ * svgOverlay 绑在内部坐标上，随地图缩放/平移，像一张真实的古旧世界地图；
+ * 海岸线走 #wm-ink 位移滤镜出毛边，纬线/经线淡虚线，南缘一道未知的南方大陆虚影。
+ */
+const BLANK_ATLAS_INNER = `
+  <g stroke="rgba(110,85,45,.12)" stroke-width="1" fill="none" stroke-dasharray="4 6">
+    <path d="M0,86 H1000"/><path d="M0,190 H1000"/><path d="M0,293 H1000"/><path d="M0,397 H1000"/>
+    <path d="M167,0 V500"/><path d="M333,0 V500"/><path d="M500,0 V500"/><path d="M667,0 V500"/><path d="M833,0 V500"/>
+  </g>
+  <g filter="url(#wm-ink)" stroke="rgba(110,85,45,.55)" stroke-width="1.7" stroke-linejoin="round" fill="rgba(110,85,45,.06)">
+    <!-- 北美（阿拉斯加→哈德逊湾→中美地峡→墨西哥湾→佛罗里达→纽芬兰） -->
+    <path d="M33,67 L47,71 L42,79 L56,93 L69,97 L83,86 L97,90 L125,97 L139,107 L153,124 L156,131 L156,145 L160,163 L172,176 L175,180 L183,190 L194,214 L189,197 L183,184 L206,214 L222,234 L236,238 L244,245 L250,247 L258,250 L264,259 L269,262 L285,267 L286,264 L269,259 L262,254 L258,239 L255,233 L256,219 L249,219 L246,229 L233,228 L228,217 L231,203 L246,191 L252,192 L256,188 L266,190 L271,197 L272,201 L275,206 L277,204 L276,195 L274,188 L275,183 L278,180 L290,172 L289,166 L294,153 L303,147 L306,148 L309,141 L319,143 L324,138 L331,134 L322,128 L346,131 L354,129 L344,122 L333,114 L322,103 L314,93 L286,103 L272,114 L244,97 L236,90 L250,76 L264,66 L239,62 L194,62 L153,52 L111,53 Z"/>
+    <!-- 南美（巴西鼓包→拉普拉塔→巴塔哥尼亚→智利峡湾→秘鲁海岸） -->
+    <path d="M292,262 L303,250 L314,257 L331,262 L339,269 L356,276 L358,293 L367,293 L393,321 L381,345 L372,376 L356,403 L344,412 L337,424 L328,448 L319,466 L317,482 L306,470 L297,466 L296,455 L297,441 L297,421 L301,407 L302,390 L304,374 L305,357 L292,341 L286,334 L276,300 L285,279 L285,267 Z"/>
+    <path d="M310,483 L322,480 L326,486 L315,490 Z"/>
+    <!-- 格陵兰 + 冰岛 -->
+    <path d="M379,87 L368,80 L356,66 L342,45 L328,31 L352,21 L389,10 L417,17 L431,24 L439,45 L425,55 L394,69 Z"/>
+    <path d="M447,69 L453,66 L459,69 L456,73 L449,73 Z"/>
+    <!-- 非洲（突尼斯→锡德拉湾→红海→非洲之角→好望角→几内亚湾→塞内加尔） -->
+    <path d="M484,170 L508,166 L529,166 L531,165 L542,181 L553,188 L556,183 L583,185 L590,190 L597,210 L606,224 L610,241 L619,252 L643,252 L642,257 L633,279 L612,302 L609,315 L603,356 L599,376 L586,396 L578,408 L556,413 L551,410 L540,371 L533,355 L537,336 L534,314 L526,290 L515,277 L500,275 L486,275 L479,274 L463,264 L456,252 L451,242 L456,231 L457,211 L473,185 Z"/>
+    <path d="M631,345 L638,352 L640,365 L634,378 L628,368 L626,355 Z"/>
+    <!-- 欧亚（伊比利亚→斯堪的纳维亚→白令→堪察加→中国海岸→中南半岛→印度→阿拉伯→地中海） -->
+    <path d="M475,166 L474,152 L478,143 L492,143 L497,140 L487,127 L496,123 L505,117 L514,112 L528,108 L526,104 L529,94 L526,93 L529,87 L516,90 L515,85 L529,75 L539,59 L553,53 L571,48 L592,72 L597,69 L614,62 L639,59 L681,55 L694,45 L722,41 L764,31 L792,26 L806,38 L861,45 L917,48 L972,52 L994,71 L972,66 L972,72 L944,115 L936,90 L933,97 L919,88 L897,114 L881,131 L866,145 L846,156 L834,162 L840,164 L838,186 L828,209 L824,212 L817,216 L800,219 L796,221 L801,238 L803,251 L797,263 L791,257 L779,247 L787,278 L789,285 L788,289 L779,274 L774,259 L767,235 L761,235 L758,221 L747,218 L740,224 L731,232 L723,248 L722,258 L715,265 L712,259 L706,240 L702,228 L702,219 L686,208 L671,206 L635,190 L636,195 L643,206 L650,209 L661,205 L656,203 L663,212 L653,235 L625,250 L621,250 L608,221 L597,191 L596,185 L599,178 L596,167 L585,166 L575,166 L566,162 L559,163 L563,168 L554,151 L542,141 L538,136 L534,137 L538,143 L551,155 L544,159 L540,153 L534,149 L529,146 L525,140 L520,143 L508,144 L506,150 L499,157 L488,167 L484,169 Z"/>
+    <!-- 不列颠群岛 / 地中海岛屿 -->
+    <path d="M494,107 L498,95 L503,86 L509,79 L514,86 L511,95 L512,103 L506,110 L498,110 Z"/>
+    <path d="M483,107 L486,100 L492,97 L494,104 L490,110 L484,110 Z"/>
+    <path d="M533,159 L542,158 L545,162 L536,163 Z"/>
+    <ellipse cx="524" cy="152" rx="3" ry="5"/><ellipse cx="522" cy="146" rx="2.5" ry="4"/>
+    <path d="M556,171 L566,170" fill="none"/>
+    <!-- 内陆海（黑海/里海/咸海/贝加尔） -->
+    <path d="M575,148 L585,140 L600,135 L612,136 L620,132 L635,134 L645,140 L638,147 L620,151 L598,152 L582,151 Z" fill="none"/>
+    <path d="M642,166 L649,152 L651,138 L645,122 L637,131 L634,148 L637,160 Z" fill="none"/>
+    <ellipse cx="668" cy="138" rx="3" ry="2" fill="none"/>
+    <path d="M790,112 L810,106" fill="none"/>
+    <!-- 东亚岛弧（日本/台湾/海南/菲律宾） -->
+    <path d="M875,169 L884,158 L893,148 L900,141 L906,148 L900,158 L890,166 L881,172 Z"/>
+    <path d="M901,134 L908,130 L912,136 L905,140 Z"/>
+    <path d="M872,175 L876,172 L878,177 L873,179 Z"/>
+    <path d="M829,224 L832,218 L835,222 L831,228 Z"/>
+    <ellipse cx="807" cy="229" rx="4" ry="3"/>
+    <path d="M833,255 L838,245 L843,238 L846,244 L842,255 L838,262 Z"/>
+    <path d="M841,232 L845,226 L848,231 L844,236 Z"/>
+    <!-- 南亚岛屿 -->
+    <ellipse cx="719" cy="271" rx="2.5" ry="4"/>
+    <circle cx="710" cy="285" r="1.2"/><circle cx="713" cy="290" r="1.2"/>
+    <!-- 南洋群岛（苏门答腊/爪哇/婆罗洲/苏拉威西/新几内亚） -->
+    <path d="M770,270 L785,282 L800,295 L810,305 L805,308 L790,297 L775,283 L765,273 Z"/>
+    <path d="M810,312 L825,315 L840,318 L845,320 L830,320 L815,317 Z"/>
+    <path d="M820,275 L835,270 L850,278 L855,293 L845,303 L830,300 L818,288 Z"/>
+    <path d="M858,285 L866,280 L872,286 L865,295 L860,300 Z"/>
+    <path d="M880,303 L900,297 L925,293 L940,297 L930,305 L905,308 L885,307 Z"/>
+    <circle cx="850" cy="322" r="1.5"/>
+    <!-- 澳洲 + 塔斯马尼亚 + 新西兰 -->
+    <path d="M821,403 L828,414 L844,393 L861,396 L878,386 L903,424 L907,428 L920,410 L925,388 L905,352 L896,330 L894,338 L889,353 L878,341 L867,333 L863,335 L844,338 L816,370 L814,381 L819,402 Z"/>
+    <path d="M903,431 L910,428 L913,434 L906,438 Z"/>
+    <path d="M972,424 L978,417 L982,421 L976,430 Z"/>
+    <path d="M974,438 L981,434 L984,441 L977,447 Z"/>
+    <!-- 大湖 / 咸湖 -->
+    <ellipse cx="264" cy="135" rx="4" ry="2.5" fill="none"/>
+    <ellipse cx="272" cy="133" rx="3.5" ry="2" fill="none"/>
+    <ellipse cx="278" cy="138" rx="3" ry="2" fill="none"/>
+    <ellipse cx="191" cy="152" rx="2.5" ry="1.5" fill="none"/>
+    <!-- 大河（细流） -->
+    <g stroke="rgba(110,85,45,.38)" stroke-width="1" fill="none">
+      <path d="M310,283 C330,278 345,285 358,290"/>
+      <path d="M590,190 L587,215 L584,240"/>
+      <path d="M782,203 L810,196 L836,190"/>
+      <path d="M252,192 L254,170 L257,150"/>
+      <path d="M534,314 L548,302"/>
+    </g>
+    <!-- 山脉（小三角） -->
+    <g stroke="rgba(110,85,45,.4)" stroke-width="0.9" fill="none">
+      <path d="M180,145 l4,-6 l4,6 M196,165 l4,-6 l4,6 M212,185 l4,-6 l4,6"/>
+      <path d="M291,310 l4,-6 l4,6 M295,350 l4,-6 l4,6 M299,390 l4,-6 l4,6 M300,430 l4,-6 l4,6"/>
+      <path d="M528,133 l4,-5 l4,6 M540,132 l4,-5 l4,6"/>
+      <path d="M490,178 l4,-5 l4,6"/>
+      <path d="M705,203 l4,-6 l4,6 M720,199 l4,-6 l4,6 M735,196 l4,-6 l4,6"/>
+      <path d="M600,310 l4,-5 l4,6"/>
+      <path d="M672,90 l4,-5 l4,6 M675,105 l4,-5 l4,6"/>
+      <path d="M850,80 l4,-5 l4,6"/>
+    </g>
+    <!-- 国界（古图点状虚线） -->
+    <g stroke="rgba(110,85,45,.42)" stroke-width="0.9" fill="none" stroke-dasharray="1.2 3" stroke-linecap="round">
+      <path d="M150,125 L205,120 L255,124 L300,120"/>
+      <path d="M190,190 L225,186 L262,180"/>
+      <path d="M96,97 L108,75"/>
+      <path d="M300,252 L320,275 L340,290 L355,310"/>
+      <path d="M355,345 L365,368 L360,385"/>
+      <path d="M286,300 L292,340 L297,380"/>
+      <path d="M490,158 L505,155"/>
+      <path d="M530,140 L545,132"/>
+      <path d="M560,128 L575,125"/>
+      <path d="M572,85 L580,100"/>
+      <path d="M500,168 L498,185"/>
+      <path d="M566,180 L570,200"/>
+      <path d="M575,217 L605,214"/>
+      <path d="M480,200 L510,205 L530,210"/>
+      <path d="M505,260 L515,275"/>
+      <path d="M560,350 L585,360"/>
+      <path d="M750,120 L800,130 L850,140 L880,130"/>
+      <path d="M700,200 L740,190 L770,195"/>
+      <path d="M695,215 L700,225"/>
+      <path d="M640,120 L690,125"/>
+      <path d="M615,190 L630,200"/>
+      <path d="M850,340 L855,400"/>
+      <path d="M885,335 L890,415"/>
+    </g>
+  </g>
+  <path d="M60,470 C250,452 420,462 560,455 C700,448 840,460 940,452" stroke="rgba(110,85,45,.3)" stroke-width="1.2" fill="none" stroke-dasharray="6 5"/>
+  <g stroke="rgba(110,85,45,.28)" stroke-width="1" fill="none">
+    <path d="M195,318 q5,-5 10,0"/><path d="M425,255 q5,-5 10,0"/><path d="M695,335 q5,-5 10,0"/>
+    <path d="M495,445 q5,-5 10,0"/><path d="M115,145 q5,-5 10,0"/>
+  </g>`
+
+/** 空白舆图 SVG 元素（⚠ Leaflet SVGOverlay 只接受元素——传字符串不会被解析成 DOM，addLayer 直接抛错） */
+function makeBlankAtlasEl(): SVGElement {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  el.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  el.setAttribute('viewBox', '0 0 1000 500')
+  el.innerHTML = BLANK_ATLAS_INNER
+  return el
+}
+
 // 地点三类配色（空心环点，与实心人物点区分）
 const LOC_KIND_COLOR: Record<string, string> = {
   point: '#7c6aad',
@@ -169,23 +293,47 @@ async function renderBaseImages() {
     overlayMap.set(l.id, ov)
     baseImageLayer.addLayer(ov)
   }
-  renderPlaceholder()
+  renderBlankAtlas()
 }
 
-/** 占位面板：无底图（图片+笔迹皆空）时显示 */
-function renderPlaceholder() {
+/** 空白舆图：无底图（图片+笔迹皆空）时铺手绘世界平面，有内容即撤 */
+const blankAtlas = computed(() => mapLayers.value.length === 0 && mapStrokes.value.length === 0)
+/** 浮动提示卡只在真正一片空白时出现（有了第一个名字，提示就完成使命） */
+const showBlankCard = computed(
+  () => blankAtlas.value && entities.value.length === 0 && locations.value.length === 0,
+)
+/** 图例只在图上真有可交互节点时出现（实体可能全未落位——对着空图教拖拽是误导） */
+const hasVisibleNodes = computed(
+  () =>
+    entities.value.some((e) => !!entityDisplayPosition(e.id)) ||
+    locations.value.some((l) => l.coord_x != null && l.coord_y != null),
+)
+
+/** 空白舆图在内部坐标中的落位（2:1 平面几乎铺满画布，视野初始也框到这里） */
+const BLANK_ATLAS_BOUNDS = L.latLngBounds([
+  [200, 50],
+  [800, 950],
+])
+/** 用户接管过视野（手动拖/缩）后，初始取景不再插手 */
+let viewTouched = false
+let framing = false // 程序化 fitBounds 期间置位，防止自己的取景被记成用户操作
+
+function frameInitialView() {
+  if (!map || viewTouched) return
+  framing = true
+  map.fitBounds(blankAtlas.value ? BLANK_ATLAS_BOUNDS : BOUNDS, { animate: false })
+  framing = false
+}
+
+function renderBlankAtlas() {
   if (!map) return
-  const empty = mapLayers.value.length === 0 && mapStrokes.value.length === 0
-  if (empty && !placeholderMarker) {
-    placeholderMarker = L.marker([500, 500], {
-      icon: makePlaceholderIcon(),
-      interactive: false,
-      zIndexOffset: -1000,
-    }).addTo(map)
-  } else if (!empty && placeholderMarker) {
-    map.removeLayer(placeholderMarker)
-    placeholderMarker = null
+  if (blankAtlas.value && !blankOverlay) {
+    blankOverlay = L.svgOverlay(makeBlankAtlasEl(), BLANK_ATLAS_BOUNDS).addTo(map)
+  } else if (!blankAtlas.value && blankOverlay) {
+    map.removeLayer(blankOverlay)
+    blankOverlay = null
   }
+  frameInitialView()
 }
 
 /** images 编辑态：每图透明点击区（选中）+ 选中框/手柄 */
@@ -1143,19 +1291,6 @@ function clearDraft() {
   renderDraw()
 }
 
-/** 占位面板图标（无底图时显示；有图片/笔迹后自动隐藏） */
-function makePlaceholderIcon(): L.DivIcon {
-  return L.divIcon({
-    className: 'wm-placeholder-icon',
-    html: `<div class="wm-placeholder">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" width="34" height="34"><path d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z"/></svg>
-      <div class="wm-placeholder-title">世界地图占位</div>
-      <div class="wm-placeholder-sub">点右上角「图片 / 画笔」绘制你自己的底图</div>
-    </div>`,
-    iconSize: [0, 0],
-  })
-}
-
 function zoomIn() {
   map?.zoomIn()
 }
@@ -1186,6 +1321,10 @@ onMounted(() => {
   editHitLayer = L.layerGroup().addTo(map)
   editSelLayer = L.layerGroup().addTo(map) // 底图编辑框最顶
   map.fitBounds(BOUNDS)
+  // 用户一旦手动拖/缩，初始取景（空白舆图框世界平面）就不再插手
+  map.on('dragstart zoomstart', () => {
+    if (!framing) viewTouched = true
+  })
   // 右键空白：在此建实体（单一画布入口）；地图点击关闭悬浮菜单/表单
   map.on('contextmenu', onMapContextMenu)
   map.on('click', () => {
@@ -1347,7 +1486,10 @@ watch(mapLayers, () => {
 }, { deep: true })
 watch(mapEditMode, () => renderEditImages())
 watch(selectedLayerId, () => renderSelection())
-watch(mapStrokes, scheduleStrokeRedraw, { deep: true })
+watch(mapStrokes, () => {
+  scheduleStrokeRedraw()
+  renderBlankAtlas() // 笔迹是底图的一种：第一笔落下即撤下空白舆图
+}, { deep: true })
 watch(draftStroke, scheduleStrokeRedraw, { deep: true })
 // 进入/退出画笔：清草稿重绘
 watch(drawingMap, () => {
@@ -1367,7 +1509,29 @@ function focusAt(x: number, y: number, title?: string) {
       .openOn(map)
   }
 }
-defineExpose({ focusAt, finishDraw, undoVertex, importImageAtView })
+/**
+ * 回到全图：视野收拢到全部内容（底图 + 地点 + 实体），空图回初始全幅。
+ * 罗盘饰件的实功能——平移迷路后一键回家（maxZoom 防单点冲到最大倍率）。
+ */
+function fitAll() {
+  if (!map) return
+  const pts: L.LatLngExpression[] = []
+  for (const l of mapLayers.value) {
+    const lb = layerBounds(l)
+    pts.push(lb.getSouthWest(), lb.getNorthEast())
+  }
+  for (const loc of locations.value) {
+    if (loc.coord_x != null && loc.coord_y != null) pts.push([loc.coord_y, loc.coord_x])
+  }
+  for (const mk of entityMarkers.values()) pts.push(mk.getLatLng())
+  if (!pts.length) {
+    map.fitBounds(blankOverlay ? BLANK_ATLAS_BOUNDS : BOUNDS) // 空图回世界平面
+    return
+  }
+  map.fitBounds(L.latLngBounds(pts), { padding: [48, 48], maxZoom: 1, animate: true })
+}
+
+defineExpose({ focusAt, fitAll, finishDraw, undoVertex, importImageAtView })
 
 onBeforeUnmount(() => {
   if (strokeRafId !== null) cancelAnimationFrame(strokeRafId)
@@ -1386,7 +1550,7 @@ onBeforeUnmount(() => {
   drawLayer = null
   editHitLayer = null
   editSelLayer = null
-  placeholderMarker = null
+  blankOverlay = null
   rubberLine = null
 })
 </script>
@@ -1408,9 +1572,26 @@ onBeforeUnmount(() => {
     <!-- 烛光暗角（羊皮古卷氛围；不拦截交互） -->
     <div class="wm-vignette"></div>
 
-    <!-- 手势提示（单一画布的编辑入口可发现性） -->
-    <div v-if="!inEditMode && entities.length" class="wm-gesture-hint">
-      ⇧+拖节点到另一节点 = 建关系 · 右键空白 = 建实体 · 拖有故事的角色 = 录移动
+    <!-- 空白舆图浮动提示卡（真正一片空白时；点透不拦交互，有了第一个名字即退场） -->
+    <div v-if="showBlankCard" class="wm-blankcard">
+      <div class="wm-blankcard-over">BLANK ATLAS</div>
+      <div class="wm-blankcard-title">空白舆图</div>
+      <div class="wm-blankcard-orn">
+        <svg viewBox="0 0 120 12" width="110" height="11"><path d="M0,6 H48 M72,6 H120" stroke="currentColor" stroke-width="1"/><path d="M60,1 L65,6 L60,11 L55,6 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+      </div>
+      <div class="wm-blankcard-sub">
+        点右缘工具条的「图片 / 画笔」铺上你的第一张底图，<br/>或直接在账本上点第一个名字——世界会从第一个名字长出来。
+      </div>
+    </div>
+
+    <!-- 图例（单一画布的编辑入口可发现性；默认收起为一行，hover 展开手势明细） -->
+    <div v-if="!inEditMode && hasVisibleNodes" class="wm-legend">
+      <span class="wm-legend-tag">图例</span>
+      <div class="wm-legend-pop">
+        <div class="wm-legend-row"><kbd>⇧ 拖</kbd><span>甲节点 → 乙节点：结缘</span></div>
+        <div class="wm-legend-row"><kbd>右键</kbd><span>空白处：落一个新名字</span></div>
+        <div class="wm-legend-row"><kbd>拖</kbd><span>有故事的角色：记一次远行</span></div>
+      </div>
     </div>
 
     <!-- ⇧拖线建关系的橡皮筋线 -->
@@ -1685,17 +1866,19 @@ onBeforeUnmount(() => {
 }
 .wm-toolbar {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: 4px;
   z-index: 500;
   padding: 4px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  box-shadow: 0 4px 14px rgba(60, 48, 30, 0.12);
+  background: rgba(236, 228, 211, 0.92); /* 与右缘图标栏同族：暖纸底 + 暖墨边 */
+  backdrop-filter: blur(3px);
+  border: 1px solid rgba(107, 90, 68, 0.28);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(96, 72, 36, 0.14);
 }
 .wm-tool {
   display: flex;
@@ -1704,24 +1887,28 @@ onBeforeUnmount(() => {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
-  color: var(--text-muted);
+  color: rgba(109, 90, 60, 0.75);
   cursor: pointer;
   transition: all 0.12s;
 }
 .wm-tool:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  background: rgba(120, 95, 50, 0.1);
+  color: rgba(74, 68, 56, 0.95);
 }
 .wm-tool.on {
-  background: rgba(124, 106, 173, 0.12);
+  background: rgba(124, 106, 173, 0.14);
   color: var(--accent-500);
+}
+.wm-tool:focus-visible {
+  outline: 2px solid rgba(124, 106, 173, 0.55);
+  outline-offset: 1px;
 }
 .wm-tool-sep {
   height: 1px;
   margin: 1px 3px;
-  background: var(--border-color);
+  background: rgba(107, 90, 68, 0.22);
 }
 /* ===== 底图编辑面板（左上浮动） ===== */
 .wm-editbar {
@@ -1733,10 +1920,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  box-shadow: 0 4px 14px rgba(60, 48, 30, 0.14);
+  background: rgba(236, 228, 211, 0.92);
+  backdrop-filter: blur(3px);
+  border: 1px solid rgba(107, 90, 68, 0.28);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(96, 72, 36, 0.14);
   max-width: calc(100% - 90px);
   flex-wrap: wrap;
 }
@@ -1913,14 +2101,17 @@ onBeforeUnmount(() => {
   }
 }
 .wm-char-name {
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 700;
+  margin-top: 3px;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   color: var(--text-primary, #2c2c2c);
-  background: rgba(249, 242, 226, 0.92);
-  border: 1px solid rgba(107, 90, 68, 0.35);
-  padding: 0 5px;
-  border-radius: 5px;
+  background: rgba(249, 242, 226, 0.85);
+  border: none;
+  border-bottom: 1px solid rgba(107, 90, 68, 0.4);
+  padding: 1px 7px;
+  border-radius: 4px;
   white-space: nowrap;
 }
 .wm-char--moving .wm-char-head {
@@ -2013,19 +2204,58 @@ path.wm-rel-born {
   }
 }
 
-/* 手势提示 */
-.wm-gesture-hint {
+/* 图例卡：默认收起「图例」小签，hover 展开手势明细（kbd 键帽替代等号链） */
+.wm-legend {
   position: absolute;
   left: 12px;
   bottom: 10px;
   z-index: 700;
+}
+.wm-legend-tag {
+  display: inline-block;
   padding: 4px 12px;
   border-radius: 9999px;
-  background: rgba(249, 242, 226, 0.82);
+  background: rgba(249, 242, 226, 0.85);
   border: 1px solid rgba(107, 90, 68, 0.3);
   color: rgba(109, 90, 60, 0.85);
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  cursor: default;
+}
+.wm-legend-pop {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 30px;
+  width: 216px;
+  background: rgba(249, 242, 226, 0.96);
+  border: 1px solid rgba(107, 90, 68, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(96, 72, 36, 0.18);
+}
+.wm-legend:hover .wm-legend-pop {
+  display: block;
+}
+.wm-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0;
   font-size: 11px;
-  pointer-events: none;
+  color: rgba(74, 68, 56, 0.85);
+}
+.wm-legend-row kbd {
+  font-family: inherit;
+  font-size: 9.5px;
+  color: rgba(74, 68, 56, 0.9);
+  border: 1px solid rgba(107, 90, 68, 0.35);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  background: rgba(244, 238, 225, 0.9);
+  white-space: nowrap;
 }
 
 /* ⇧拖线橡皮筋 */
@@ -2237,6 +2467,35 @@ path.wm-track-flow {
   background: #7c6aad;
 }
 
+/* Leaflet 弹窗纸面化：默认白泡+灰箭头在羊皮纸上出戏——换纸面底/暖墨边/暖色关闭钮 */
+.world-map :deep(.leaflet-popup-content-wrapper) {
+  background: rgba(250, 245, 232, 0.97);
+  border: 1px solid rgba(107, 90, 68, 0.32);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(60, 48, 30, 0.2);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.world-map :deep(.leaflet-popup-content) {
+  margin: 10px 14px;
+  line-height: 1.55;
+  font-size: 12px;
+}
+.world-map :deep(.leaflet-popup-tip) {
+  background: rgba(250, 245, 232, 0.97);
+  border: 1px solid rgba(107, 90, 68, 0.32);
+  box-shadow: none;
+}
+.world-map :deep(.leaflet-popup-close-button) {
+  color: rgba(109, 90, 60, 0.6);
+  font-size: 15px;
+  padding: 5px 7px 0 0;
+}
+.world-map :deep(.leaflet-popup-close-button:hover) {
+  color: rgba(74, 68, 56, 0.95);
+  background: transparent;
+}
+
 /* popup 次要文字 */
 .wm-pop-sub {
   color: var(--text-muted, #a89e90);
@@ -2263,8 +2522,9 @@ path.wm-track-flow {
   margin-top: 8px;
 }
 .wm-pop-input {
-  width: 110px;
-  padding: 3px 7px;
+  flex: 1;
+  min-width: 140px;
+  padding: 4px 8px;
   border: 1px solid var(--border-color, #e0dbd3);
   border-radius: 6px;
   background: var(--bg-canvas, #fff);
@@ -2296,37 +2556,55 @@ path.wm-track-flow {
   color: #dc2626;
 }
 
-/* 占位面板（零图片方案） */
-.wm-placeholder-icon {
-  background: transparent;
-  border: none;
-}
-.wm-placeholder {
+/* 空白舆图浮动提示卡：纸面卡片浮在手绘世界平面上（插画本体是 svgOverlay，随图缩放平移） */
+.wm-blankcard {
+  position: absolute;
+  left: 50%;
+  top: 40%;
   transform: translate(-50%, -50%);
+  z-index: 660; /* 越过烛光暗角（645），浮卡不能被压暗 */
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 420px;
-  padding: 44px 32px;
-  border: 2.5px dashed rgba(107, 90, 68, 0.4);
-  border-radius: 20px;
-  background: rgba(249, 242, 226, 0.4);
-  box-shadow: inset 0 0 32px rgba(122, 92, 50, 0.08);
-  color: rgba(109, 90, 60, 0.8);
+  gap: 6px;
+  padding: 20px 28px 18px;
+  border: 1px solid rgba(110, 85, 45, 0.28);
+  border-radius: 14px;
+  background: rgba(250, 245, 232, 0.94);
+  box-shadow: 0 12px 32px rgba(60, 48, 30, 0.16);
+  color: rgba(109, 90, 60, 0.85);
   text-align: center;
   pointer-events: none;
+  animation: wm-blankcard-bob 6s ease-in-out infinite;
 }
-.wm-placeholder-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-muted, #a89e90);
+@keyframes wm-blankcard-bob {
+  0%, 100% { transform: translate(-50%, -50%); }
+  50% { transform: translate(-50%, calc(-50% - 4px)); }
 }
-.wm-placeholder-sub {
-  font-size: 12px;
+@media (prefers-reduced-motion: reduce) {
+  .wm-blankcard { animation: none; }
+}
+.wm-blankcard-over {
+  font-size: 9px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: #b08d3e;
+}
+.wm-blankcard-title {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: rgba(74, 68, 56, 0.78);
+}
+.wm-blankcard-orn {
+  color: rgba(110, 85, 45, 0.45);
+  line-height: 1;
+}
+.wm-blankcard-sub {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.9;
   color: var(--text-muted, #a89e90);
-  opacity: 0.8;
 }
 </style>
