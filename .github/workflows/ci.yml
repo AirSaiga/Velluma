@@ -1,0 +1,64 @@
+# ============================================================================
+# Velluma CI
+# ----------------------------------------------------------------------------
+# 后端: py_compile 语法检查(零额外依赖,稳定)
+# 前端: TypeScript 类型检查(vue-tsc,非阻断 —— 现有代码库存在既有类型问题,
+#       作为进度报告,待修复后可改为阻断)
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# 同一分支的并发运行取消旧批次,节省 CI 资源
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 后端:Python 语法检查
+  # --------------------------------------------------------------------------
+  backend-check:
+    name: Backend (py_compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile-check backend
+        run: python -m compileall -q backend/
+
+  # --------------------------------------------------------------------------
+  # 前端:TypeScript 类型检查(非阻断)
+  # --------------------------------------------------------------------------
+  frontend-typecheck:
+    name: Frontend (typecheck)
+    runs-on: ubuntu-latest
+    # 现有代码库存在既有类型错误,设为非阻断:作为进度报告,不阻断 PR
+    # 待类型问题修复后,移除 continue-on-error 即可转为阻断检查
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run typecheck
