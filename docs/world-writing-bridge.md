@@ -274,8 +274,8 @@ created_at
 
 ## 10. 待拍板事项
 
-1. **切片条形态**（验证后补充事实：Inspector 是默认收起的 hover 覆盖抽屉，`rightDrawerOpen` 默认 false）：(a) 落 Inspector「设定」tab 替换 SceneSettingsPanel——改动最小，但违背「常驻零点击」原则；(b) editor-host 右侧常驻列（PerceptionBand 的对称形态，抽屉打开时覆盖其上）——守原则但挤占编辑宽度。**推荐 W1 先 (a) 快速验证价值**（切片条展开率即实测数据），展开率不理想再上 (b)。
-2. **本章场景钉**（作者显式钉本章场景地点）进 W1 还是 W5——推荐 W5，先靠事件推演，`scene` 块缺数据时隐藏即可。
+1. ~~切片条形态~~ **已定案（W1 实施取 (a)）**：落 Inspector「设定」tab 替换 SceneSettingsPanel 已上线。已知取舍：页面重载/返回后 tab 复位为「规划」，切片暂不可见——待真实使用数据决定是否升级 (b) editor-host 常驻列。
+2. ~~本章场景钉~~ **已定案**：随 W5-lite 落地（`chapters.scene_location_id`，钉定优先于推演）。
 3. ~~候选抽取的 LLM 调用安排~~ **已定案（验证后）**：独立组件 + 独立小调用，复刻 `extract_emergent_facts` 的解析/落库分离——见 §4.5。
 
 ---
@@ -307,3 +307,23 @@ created_at
 
 - `plot_ledger_repository.py:87` 引用不存在的 status 值 `"addressed"`（死代码分支）。
 - database.py 显式导入列表漏 WorldRelation（表照建，纯文档性遗漏，建新表时顺手补）。
+
+---
+
+## 12. 测试与修复归档（2026-08-16，任务收官记录）
+
+**GUI 测试轮**（依据 `docs/world-writing-bridge-test.md`，真实键盘/鼠标黑盒）：执行 54 项 + 复跑 13 项受阻用例，发现缺陷 5 项（含 2 项存量）——全部修复并经 GUI 复测通过。
+
+| # | 缺陷 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | 场景钉点击无反馈 + 章节列表 500 | 响应模型 `scene_location_id` 声明 `Optional[str]`，ORM 返回 UUID → 序列化失败 | `schemas/chapter.py` 改 `Optional[UUID]`（两处） |
+| 2 | 浮卡两个动作按钮全部失效 | 点击卡内任意处塌缩编辑器选区 → cursor 事件关卡 → 按钮点击与卸载竞态 | 双修：卡片根节点 `@pointerdown.prevent`（选区菜单同款惯用法）+ WorkspaceView cursor 事件不再关闭浮卡 |
+| 3（存量） | 中文正文 @/# 提及永不触发 | tiptap suggestion 默认 `allowedPrefixes=[' ']`，要求触发符前是空格/行首；中文无词间空格 | `entityMention.ts` 两处 `allowedPrefixes: null` |
+| 4 | MiMo 小预算调用空输出（速记解析/候选抽取必走降级） | `api.xiaomimimo.com` 未被 reasoning 适配层识别，OpenRouter 协议被 MiMo 静默忽略，隐藏思考烧光预算（实测 reasoning_tokens 1499/1500） | `reasoning_adapter.py` 新增 MIMO provider（`thinking.type` 协议，实测禁思考后 reasoning_tokens=0），附单测 |
+| 5（存量） | 完稿审计 `/adaptive/finish` 一直 500 | `orchestrator.on_finish` 缺 `WorldModelRepository` 局部导入 → NameError（on_settle 有、on_finish 漏） | 补导入 |
+
+**修复后的实测表现**：速记 2 秒解析出预填草稿；沉淀 4 秒出真实候选（同段重沉淀去重有效）；对峙类无事实段落 0 候选（宁缺勿滥）；完稿 3 秒出审计报告且整章抽取追加候选；打字中心跳 4 秒内同步世界变更。
+
+**成本注记**（MiMo v2.5 国内价 输入 ¥1/M·输出 ¥2/M）：中度使用一章（3500 字）约 150K 输入 + 20K 输出 ≈ **¥0.1~0.2**；禁思考修复前每笔小预算调用暗烧 0.8~1.5K 输出 token，成本约 ×3~5。
+
+**遗留观察**（低优先级，产品定夺）：章节切换会点亮「世界有更新」红点（来源徽标计入内容签名）；读者视角同时隐藏「相遇」块（文档未明确口径）；T3.5 名单外提示依赖模型是否输出名单外名字，UI 分支未在真机复现。

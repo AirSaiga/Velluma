@@ -5,7 +5,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 > **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：入口暂存但不再演进，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
 >
-> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
+> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计、**世界速记 Alt+N**（一句话入账）、**情境浮卡**（选中/点击提及三秒查底细）、**候选回流收件箱**（写完确认世界变化）。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
 
 ---
 
@@ -129,21 +129,23 @@ data/ logs/ .venv/
   - 心跳 → `/adaptive/heartbeat`（活跃防抖 3s / 停顿 4s+光标段尾，`useAdaptiveAssist.ts`）：后端 orchestrator 跑方向权重（纯算法 0 LLM）+ 组件（意图反推 0-1 LLM / 未来推测 / 挂件生发 / Canon 感知），响应带回 `dock_parts`（Spark Dock 零件）/`direction_cards`（走向卡）/`canon_hints`（左缘感知带）/意图信息
   - Space（有零件=缝合续写 / 无零件=顺句续写）→ `/adaptive/stitch-ghost`（SSE 打字机灌幽灵草稿，复用 `useGhostDraft`；mode 五档：stitch/continue/burst/open/**outline**）
   - **细纲胶囊**（Alt+O / 输入 `[[` / 选中文本转换，`extensions/OutlineNoteNode.ts` + `OutlineNoteChip.vue`）：作者亲笔剧情速记以胶囊嵌在正文任意位置 →「落笔扩写」走 stitch-ghost mode=outline（双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」clamp 100-800 缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门）。扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）；编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）
-  - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长）
-  - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引）；`GET /adaptive/model` 世界模型快照（前端无调用方）
+  - **情境浮卡 + 世界速记（写作桥，见世界设定层）**：选中正文 1-12 字或点击 @/# 提及 → `GET /world/context-card` 浮情境卡（此刻状态/编年史/控制方，解析不到静默缺席）；Alt+N → `POST /world/parse-event` 一句话解析成事件草稿（只产草稿绝不落库，作者过目入账 + 6 秒撤销胶囊）
+  - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长；另触发 event_scout 抽候选事件进收件箱）
+  - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引 + 整章候选抽取）；`GET /adaptive/model` 世界模型快照（前端无调用方）
 - **设定数据双向驱动**（`settings_bundle.py`）：章级绑定 + 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用；**世界设定层优先**（见下节 world_bridge——世界页有实体时 bundle 的角色/资产/地点/关系切换为 world 数据 + 叙事时刻推演状态，无实体回退旧表）。写作中感知 + 后台方向权重规划两个层面同时利用。
 - **画布即事实源**：adaptive 模式预览关闭（`generationPreviewHtml` 返回 null），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
 - **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为心跳供给 + 章级兜底）。
 
 ### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
 
-事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`（人物/势力/资产固有属性，档案在 `props` JSONB 表驱动）+ `world_locations` + `world_relations`（static 或事件锚定的时变关系）+ 地图底图表。任意时刻的世界状态（谁在哪/生死/疆域/关系）由 `compute_world_state_from_events` 纯函数折叠推演（前后端同构，前端 `features/world/engine/`）。UI 三透镜：地图（Leaflet）/ 脑图（Cytoscape）/ 时间轴（含章节叙事锚 `chapters.narrative_time`）。
+事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`（人物/势力/资产固有属性，档案在 `props` JSONB 表驱动）+ `world_locations` + `world_relations`（static 或事件锚定的时变关系）+ 地图底图表 + 候选事件池 `world_event_candidates`。任意时刻的世界状态（谁在哪/生死/疆域/关系）由 `compute_world_state_from_events` 纯函数折叠推演（前后端同构，前端 `features/world/engine/`）。UI 单一画布：地图（Leaflet）承载全部实体/关系/事件（脑图透镜已退役，⇧拖建关系等手势平移至地图），底部时间轴含章节叙事锚 `chapters.narrative_time`。
 
 - **生成桥接（world_bridge，已接通）**：`services/context/world_bridge.py`——世界页有实体时 settings_bundle 走 **world 优先**：实体/关系经鸭子类型适配器包装成旧 Character/Asset 形状（下游 hard/soft/nutrients 零改动），`dynamic_state` 自动携带叙事时刻推演状态（「位于北岸要塞」「在途（进度 40%）」「已死亡」）；叙事时间四级降级（本章锚→前序最近锚→事件最大时刻→0）。`bundle.world_state/world_time/world_sourced` 携带切片快照。桥接失败/世界为空 → 旧表兜底（未迁移书行为不变）。
 - **编辑入口收敛（M4）**：设定页角色/资产/地图分区已退役为跳转卡（`WorldRedirectCard`，带 `?lens=&entity=` 深链）；保留分区：伏笔/期待/世界观/文风/笔记/设置。旧面板 CharacterPanel/MapSettings/asset-panel 已删除。
 - **章级在场改推演**：原角色/资产/地点勾选绑定（chapter_entities 等）退役——「本章在场」由事件按叙事时刻推演（`GET /world/state-for-chapter/{chapter_id}`，SceneSettingsPanel 只读展示）。entity-mention（@/#）建议与创建均走 world（无世界数据回退旧表），不再写章级绑定。
 - **AI 写路径（M4）**：`content_extractor.commit_extraction` 与 adaptive 沉淀落库改写 world_*（角色档案全文进 `props.legacy_profile`）；**未迁移书首次 AI 落库前自动执行幂等迁移**（防 world 优先切换后旧角色从生成上下文失踪）。伏笔（PlotLedger 共享表）与向量记忆不变。
-- **待办**：旧表彻底冻结（audit/publish/inspiration/chapter_optimization 仍读旧表）、期待账本/世界观文本迁入世界页、`docs/world-unified-settings.md` §5 的时间线事件→走向卡规划桥。
+- **写作桥（world-writing-bridge，W1-W5lite 已上线，`docs/world-writing-bridge.md`）**：沙盘价值送货到写作现场——①`GET /world/scene-slice`「此刻此地」切片条（Inspector 设定 tab，替换旧 SceneSettingsPanel；在场/脚下含疆域控制方/相遇/头顶的线，与生成上下文同源）；②`GET /world/context-card` 情境浮卡（选中文本/点击提及）；③`POST /world/parse-event` Alt+N 世界速记（解析/落库分离红线）；④候选回流：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销；⑤保鲜三时机（章节切换/心跳 `world_version`/窗口聚焦，`useWorldSlice` 单例）；⑥深链往返 `?entity|loc=&time=&from=chapter&chapter=`（世界页「返回本章」）；⑦本章场景钉 `chapters.scene_location_id`。事件解耦：`velluma:world-version` / `velluma:world-refresh` / `velluma:quick-note`。
+- **待办**：旧表彻底冻结（audit/publish/inspiration/chapter_optimization 仍读旧表）、期待账本/世界观文本迁入世界页、`docs/world-unified-settings.md` §5 的时间线事件→走向卡规划桥、写作桥 W5 缓行件（比例尺距离层/spatial_brief、相遇→走向卡桥、世界页全图读者滤镜——见桥接文档分期表）。
 
 ### BS-ADF 步进模式（⚠ 弃置中——迁移源，勿新增功能）
 
@@ -166,7 +168,7 @@ data/ logs/ .venv/
 
 ### ⚠ thinking 关闭的正确姿势（`services/llm/client.py`）
 
-要关 thinking 必须传 `reasoning_config=REASONING_DISABLED`（`{"reasoning":{"enabled":False}}`）。**传空 dict `{}` 无效**——`call_llm_with_usage` 里 `if reasoning_config:` 对 `{}` 为 falsy，推理模型回落服务端默认 thinking 开启，小预算调用（状态卡/残句修复）必被吃光预算空输出。已接 REASONING_DISABLED：render/enrich/state_tracker/beat_patch/refine/wash/sentence_fix。
+要关 thinking 必须传 `reasoning_config=REASONING_DISABLED`（`{"reasoning":{"enabled":False}}`）。**传空 dict `{}` 无效**——`call_llm_with_usage` 里 `if reasoning_config:` 对 `{}` 为 falsy，推理模型回落服务端默认 thinking 开启，小预算调用（状态卡/残句修复）必被吃光预算空输出。已接 REASONING_DISABLED：render/enrich/state_tracker/beat_patch/refine/wash/sentence_fix/parse_event/event_scout。**中间表示经 `reasoning_adapter.py` 按域名转厂商原生参数**（DeepSeek/OpenAI/OpenRouter/Qwen/豆包/MiMo/本地）；MiMo 实测只认 `thinking.type`，静默忽略 OpenRouter 的 `reasoning.enabled`（隐藏思考烧光预算，勿删该分支）。
 
 ### 关键质量护栏（事故根因，勿回退）
 
