@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>世界页视觉方向对比 · 暖纸书卷气</title>
+<style>
+  :root {
+    --paper: #f4eee1; --paper-2: #ece4d3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd; --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c;
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans); color: var(--ink); min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(120, 90, 40, .05), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .012) 2px 3px),
+      var(--paper);
+    padding: 56px 24px 64px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .over { font-size: 10px; letter-spacing: .42em; color: var(--gold); text-indent: .42em; text-align: center; }
+  h1 { font-family: var(--serif); font-size: 30px; letter-spacing: .1em; text-align: center; margin-top: 10px; }
+  .lede {
+    text-align: center; color: var(--ink-3); font-size: 13px; line-height: 1.9;
+    max-width: 640px; margin: 14px auto 0;
+  }
+  .orn { display: block; margin: 20px auto 36px; width: 120px; color: rgba(110, 85, 45, .5); }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: rgba(255, 252, 244, .6); border: 1px solid var(--rule);
+    border-radius: 12px; padding: 22px 20px 18px; display: flex; flex-direction: column;
+    transition: box-shadow .2s ease, transform .2s ease;
+  }
+  .card:hover { box-shadow: 0 10px 30px rgba(96, 72, 36, .14); transform: translateY(-2px); }
+  .card .tag { font-size: 10px; letter-spacing: .3em; margin-bottom: 8px; }
+  .card.a .tag { color: var(--gold); } .card.b .tag { color: var(--violet); } .card.c .tag { color: var(--blue); }
+  .card h2 { font-family: var(--serif); font-size: 19px; letter-spacing: .06em; }
+  .card .pitch { font-size: 12px; color: var(--ink-2); margin: 8px 0 12px; line-height: 1.7; }
+  .card ul { list-style: none; font-size: 11px; color: var(--ink-3); line-height: 1.9; flex: 1; }
+  .card ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+  .card .cost { margin-top: 12px; font-size: 10.5px; color: var(--ink-3); }
+  .card .cost b { color: var(--ink-2); font-weight: 600; }
+  .card a.open {
+    margin-top: 14px; display: block; text-align: center; text-decoration: none;
+    font-size: 12px; padding: 8px 0; border-radius: 7px;
+    border: 1px solid var(--rule); color: var(--ink-2);
+  }
+  .card a.open:hover { border-color: var(--violet); color: var(--violet); }
+
+  .reco {
+    margin-top: 36px; padding: 20px 24px; border-left: 3px solid var(--gold);
+    background: rgba(255, 252, 244, .55); border-radius: 0 10px 10px 0;
+    font-size: 12.5px; line-height: 2; color: var(--ink-2);
+  }
+  .reco b { font-family: var(--serif); }
+  .foot { margin-top: 28px; text-align: center; font-size: 10.5px; color: var(--ink-3); line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="over">WORLD CODEX · DIRECTION STUDIES</div>
+  <h1>世界页视觉方向对比</h1>
+  <p class="lede">
+    同一本书《最终武装》、同一份数据（1 地点 · 0 事件 · 6 实体）、同一气质（暖纸书卷气），
+    三个方向只改「页面如何对待作者的目光」。点开各稿对比（建议各自新开标签页）。
+  </p>
+  <svg class="orn" viewBox="0 0 120 12"><path d="M0,6 H48 M72,6 H120" stroke="currentColor" stroke-width="1"/><path d="M60,1 L65,6 L60,11 L55,6 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+
+  <div class="grid">
+    <div class="card a">
+      <div class="tag">方向 A</div>
+      <h2>空白舆图与世界扉页</h2>
+      <p class="pitch">把「什么都没有」变成产品本身：空态即扉页，三步引导像书的开篇。</p>
+      <ul>
+        <li>中央题签：书名 + 一句引言 + 壹/贰/叁第一步</li>
+        <li>顶栏收敛：一个主动作「记一笔历史」，其余安静</li>
+        <li>侧栏改账本条目：左色条语义 + 衬线名字，去掉卡片盒与冗余徽章</li>
+        <li>时间轴加厚为编年史带，空态文案承认「时间尚未流动」</li>
+      </ul>
+      <p class="cost">改动量：<b>中</b> —— 骨架不动，空态/侧栏/时间轴三个组件重写样式</p>
+      <a class="open" href="a-frontispiece.html">打开方向 A</a>
+    </div>
+
+    <div class="card b">
+      <div class="tag">方向 B</div>
+      <h2>活舆图（沉浸画布）</h2>
+      <p class="pitch">地图即主页：实体直接活在图上，侧栏收成图标栏，浮出式抽屉。</p>
+      <ul>
+        <li>全幅羊皮纸 + 卷边暗角 + 水印题字</li>
+        <li>实体 = 图上印章节点（衬线名签），地点 = 图钉</li>
+        <li>侧栏 → 46px 图标栏 + 浮出抽屉，画布面积最大化</li>
+        <li>手势提示产品化为「图例」卡（kbd 键帽，不再贴脸）</li>
+      </ul>
+      <p class="cost">改动量：<b>大</b> —— 布局结构重排（侧栏改栏+抽屉），世界页气质上限最高</p>
+      <a class="open" href="b-living-atlas.html">打开方向 B</a>
+    </div>
+
+    <div class="card c">
+      <div class="tag">方向 C</div>
+      <h2>案头工作台</h2>
+      <p class="pitch">现状骨架一格不动，纯补「视觉完成度」这一道工序。</p>
+      <ul>
+        <li>纸感肌理 + 卷边暗影，消灭「没刷完墙」的米色平地</li>
+        <li>侧栏卡片盒 → 账本条目（与 A 同款语义色条）</li>
+        <li>空态收小变雅，占位框从开发语言换成作者语言</li>
+        <li>时间轴加厚 + 鎏金游标 + 衬线大日期</li>
+      </ul>
+      <p class="cost">改动量：<b>小</b> —— 基本是 CSS 与文案层，风险最低，收益立竿见影</p>
+      <a class="open" href="c-warm-workbench.html">打开方向 C</a>
+    </div>
+  </div>
+
+  <div class="reco">
+    <b>建议：A + C 合并实施，B 留作远期方向。</b><br/>
+    A 与 C 不冲突——A 的价值在空态扉页与信息节奏，C 的价值在整体质感，两者合成「世界页该有的样子」，
+    且都不动布局骨架，一次可见。B 的沉浸舆图是更大的产品决策（实体节点直接上图涉及交互语义变化），
+    建议在 A+C 上线、作者真的把世界填起来之后再评估——空舆图沉浸得再美，也不如先让作者愿意铺第一个点。
+  </div>
+
+  <p class="foot">
+    设计稿为纯静态 HTML（零依赖、零素材，纹理全部由 CSS/SVG 生成），仅作方向对比，不代表最终实现细节。<br/>
+    字体使用系统衬线栈（Noto Serif SC / STSong / SimSun 回退），实现时可再议是否引入 Web 字体。
+  </p>
+</div>
+</body>
+</html>

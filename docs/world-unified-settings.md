@@ -307,6 +307,9 @@ features/world/
 | M2 ✅ 2026-08-14 | 实体档案 schema（entitySchema 表驱动）+ 详情抽屉（失焦即存/别名/可见性/重要度/编年史/快捷事态）+ 实体 aliases/importance/visibility 列 | 新角色是否都从世界页建 |
 | M3 ✅ 2026-08-14（期待弧线带暂缓） | 伏笔弧线带（ArcBand：plant→payoff 弧线/悬空渐隐/拖端点改锚）+ 时间轴右键埋伏笔 + 悬空徽标过滤 + 详情回收/废弃/删除。**期待（ReaderMirror）弧线带暂缓**：期待存于 books.reader_mirror JSONB（按章号），与时间轴模型差异大，待伏笔层验证价值后单独设计。settle 沉淀建议（档案字段/候选事件抽取）留待与 adaptive 引擎一起做。 | 悬空伏笔提示是否被采纳 |
 | M4 | 旧 MapSettings 退役；设定中心收敛为 文风/笔记/设置；characters/assets 表退役评估 | 设定中心打开率 |
+| M5 ✅ 2026-08-16 | 伏笔/期待/世界观迁入世界页（设定中心三分区换 WorldRedirectCard，顺手修死 lens 参数与过时脑图文案）：伏笔=侧栏「伏笔」分组（全量账本+状态筛选，未锚定的唯一可见处）+ 详情抽屉（内容/类型/章锚/hook_id 就地编辑、未锚定一键锚游标、回收/废弃/删除 undo）+ 弧线带「编辑详情」入口；期待=整面板迁入 ReaderMirrorModal（火候看板/张力曲线/关键词预填不丢）+ 侧栏摘要分组；世界观=顶栏按钮 + WorldviewModal（2s 防抖自动保存/导入导出不丢）。写作页「头顶的线」伏笔/期待行可点击深链（?fs=ledger_key / ?panel=expectations），编辑后统一广播 velluma:world-refresh 切片静默刷新。**后端零改动**。 | 设定中心跳转卡点击率 / 世界页账本打开率 |
+| M6 ✅ 2026-08-16 | 「活舆图」视觉改造（方向 B，设计稿 docs/design/world-page/）：顶栏撤销 → 画布悬浮胶囊工具条（主动作「记一笔历史」唯一高亮，批量/导入/撤销重做收 ⋯ 菜单）；右侧栏撤销 → 46px 图标栏 + 浮出抽屉（待确认/伏笔/期待/地点/事件/角色/势力/资产八格，与详情抽屉互斥）；书名水印题字 + 装饰海岸线/罗盘（无底图时）；占位框题签化（衬线「空白舆图」+ 双划线描边）；手势提示条 → 图例卡（kbd 键帽，hover 展开）；实体名签衬线化；时间轴 → 编年史带（衬线日期 + 鎏金游标 + 墨色播放钮）。 | 世界页停留时长 / 底图铺设率 |
+| M6+ ✅ 2026-08-17 | 活舆图收尾打磨：① 罗盘饰件转实功能——点击「回到全图」（视野收拢到底图+地点+实体包围盒，maxZoom 封顶），针平时轻摆（荡-收-歇带间歇）、点击大摆归北（360°≡0° 接回轻摆），reduced-motion 兜底；② 抽屉表单——新增共享指令 `v-autogrow`（`presentation/autogrow.ts`：textarea 随内容长高，rows 保底下限/max-height 封顶，存盘回流也重量高），实体/伏笔两抽屉 12→13px、行高 1.7、加宽 320→340、实体名衬线化、「一句话」补标签；③ legacy_profile 迁移收尾（**迁移而非兼容**）——启动数据迁移 `_migrate_legacy_profile_keys` 把 `props.legacy_profile` 幂等并入 `props.background` 并摘键；导入向导/AI 提取落库改写 background；world_bridge 与前端 store 适配删 legacy 回退；schema 摘「旧档案」字段；生成上下文零损失（background 本在拼接清单）；④ 空白舆图默认底图——手绘风地球世界平面（`BLANK_ATLAS_INNER` 81 路径：真实经纬参考海岸线/国界点状虚线/山脉大河/内陆海/经纬网，svgOverlay 随图缩放平移；⚠ Leaflet SVGOverlay 只接受元素，传字符串 appendChild 抛错——须 createElementNS 构建），提示收进浮动卡（首个实体/地点落地即退场），空白态初始视野框住世界平面（viewTouched：用户拖/缩后不再插手）；⑤ 细节统一——Leaflet 弹窗纸面化（wrapper/tip/关闭钮）、左缘底图工具条并入图标栏暖纸族、图例改为图上有可见节点才出现、罗盘/浮卡 z 序越过暗角（645→660）、世界页滚动条暖细条、focus-visible 黛紫焦点环。 | 空白书首底图转化 / 抽屉编辑完成率 |
 
 ---
 
@@ -328,5 +331,5 @@ features/world/
 - **Canon（CanonView）**：本设计不直接动它。实体底座统一后（M2+），CanonNode 的
   character/place/object/hook 与世界实体合并评估，另行设计。
 - **章级绑定（AssetPanel 勾选）**：M2 后由"时间切片快照 + 作者焦点标记"逐步替代。
-- **ReaderMirror 期待账本 / PlotLedger 伏笔账本**：表和 API 不动，只加时间锚列 +
-  世界页可视化消费；设定中心的两个面板保留为表格视图（高级用户），世界页弧线带为主视图。
+- **ReaderMirror 期待账本 / PlotLedger 伏笔账本**：表和 API 不动。M5 起设定中心的两个面板
+  已退役为跳转卡，世界页（侧栏伏笔账本 + 详情抽屉 / 期待账本模态）为唯一编辑源。

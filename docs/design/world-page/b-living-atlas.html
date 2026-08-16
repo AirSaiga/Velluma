@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方向 B · 活舆图（沉浸画布）</title>
+<style>
+  :root {
+    --paper: #f1e9d8;
+    --paper-2: #ece4d3;
+    --ink: #33302a;
+    --ink-2: #4a4438;
+    --ink-3: #8a8172;
+    --rule: #ddd2bd;
+    --violet: #6f5f9e;
+    --gold: #b08d3e;
+    --blue: #4a6b8a;
+    --ochre: #a05f3c;
+    --pine: #5f7d5a;
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); color: var(--ink); height: 100vh; overflow: hidden; position: relative; }
+
+  /* ========== 全幅舆图 ========== */
+  .atlas {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse at 25% 20%, rgba(120, 90, 40, .06), transparent 55%),
+      radial-gradient(ellipse at 78% 82%, rgba(120, 90, 40, .07), transparent 50%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .014) 2px 3px),
+      var(--paper);
+  }
+  /* 卷边暗角——让画布像一张摊开的旧图 */
+  .atlas::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 180px rgba(96, 72, 36, .28), inset 0 0 40px rgba(96, 72, 36, .12);
+  }
+  .atlas svg.decor { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* 舆图水印题字 */
+  .atlas-title {
+    position: absolute; left: 44px; top: 84px; pointer-events: none;
+    font-family: var(--serif); color: rgba(74, 68, 56, .28);
+  }
+  .atlas-title .zh { font-size: 44px; font-weight: 700; letter-spacing: .3em; }
+  .atlas-title .en { font-size: 10px; letter-spacing: .5em; margin-top: 6px; }
+
+  /* ========== 悬浮顶栏（胶囊） ========== */
+  .topbar {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 20;
+    background: rgba(244, 238, 225, .92); backdrop-filter: blur(4px);
+    border: 1px solid var(--rule); border-radius: 999px;
+    padding: 5px 8px; box-shadow: 0 6px 24px rgba(96, 72, 36, .16);
+  }
+  .topbar .tb {
+    font-size: 12px; font-family: var(--sans); color: var(--ink-2);
+    background: transparent; border: none; border-radius: 999px;
+    padding: 6px 14px; cursor: pointer;
+  }
+  .topbar .tb:hover { background: rgba(120, 95, 50, .08); }
+  .topbar .tb.primary { background: var(--violet); color: #f8f5ee; font-weight: 500; }
+  .topbar .tb.primary:hover { background: #5f5188; }
+  .topbar .sep { width: 1px; height: 16px; background: var(--rule); margin: 0 4px; }
+  .topbar .back { color: var(--ink-3); padding: 6px 10px; }
+
+  /* ========== 图上节点（实体直接活在图上） ========== */
+  .node { position: absolute; transform: translate(-50%, -50%); text-align: center; cursor: pointer; z-index: 5; }
+  .node .seal {
+    width: 13px; height: 13px; margin: 0 auto; border-radius: 50%;
+    border: 2px solid var(--paper); outline: 1.5px solid currentColor;
+    background: currentColor; box-shadow: 0 1px 5px rgba(51, 48, 42, .35);
+  }
+  .node .nl {
+    display: inline-block; margin-top: 5px; padding: 1px 8px;
+    font-family: var(--serif); font-size: 12.5px; color: var(--ink);
+    background: rgba(244, 238, 225, .78); border-radius: 4px;
+  }
+  .node.ochre { color: var(--ochre); } .node.pine { color: var(--pine); }
+  .node .sub { display: block; font-size: 9.5px; color: var(--ink-3); font-family: var(--sans); margin-top: 1px; }
+
+  /* 地点标记：图钉式样 */
+  .place { position: absolute; transform: translate(-50%, -100%); text-align: center; cursor: pointer; z-index: 6; }
+  .place .pin { width: 0; height: 0; margin: 0 auto; border: 7px solid transparent; border-top: 12px solid var(--gold); filter: drop-shadow(0 1px 2px rgba(51,48,42,.3)); }
+  .place .pl {
+    font-family: var(--serif); font-size: 13px; color: var(--ink);
+    background: rgba(244, 238, 225, .85); padding: 1px 9px; border-radius: 4px;
+    border-bottom: 1.5px solid var(--gold);
+  }
+
+  /* ========== 图例（手势提示的产品化） ========== */
+  .legend {
+    position: absolute; left: 16px; bottom: 92px; z-index: 15;
+    background: rgba(244, 238, 225, .9); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 8px 12px; font-size: 10.5px; color: var(--ink-3);
+    box-shadow: 0 4px 16px rgba(96, 72, 36, .12);
+  }
+  .legend .lt { font-size: 9px; letter-spacing: .3em; color: var(--ink-3); margin-bottom: 5px; }
+  .legend div.row { margin: 3px 0; display: flex; align-items: center; gap: 6px; }
+  .legend kbd {
+    font-family: var(--sans); font-size: 9.5px; color: var(--ink-2);
+    border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px;
+    padding: 0 5px; background: var(--paper);
+  }
+
+  /* ========== 右缘图标栏 + 浮出抽屉 ========== */
+  .rail {
+    position: absolute; right: 0; top: 64px; bottom: 76px; width: 46px; z-index: 18;
+    background: rgba(236, 228, 211, .94); border-left: 1px solid var(--rule);
+    display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 2px;
+  }
+  .rail button {
+    width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent;
+    color: var(--ink-3); font-size: 15px; cursor: pointer; position: relative;
+  }
+  .rail button:hover { background: rgba(120, 95, 50, .1); color: var(--ink); }
+  .rail button.on { background: rgba(111, 95, 158, .12); color: var(--violet); }
+  .rail button .n {
+    position: absolute; top: 2px; right: 2px; font-size: 8.5px; color: var(--gold);
+    font-family: var(--serif);
+  }
+  .rail .rsep { width: 20px; height: 1px; background: var(--rule); margin: 6px 0; }
+
+  .drawer {
+    position: absolute; right: 46px; top: 64px; bottom: 76px; width: 252px; z-index: 17;
+    background: var(--paper-2); border-left: 1px solid var(--rule);
+    box-shadow: -10px 0 30px rgba(96, 72, 36, .1);
+    padding: 14px 14px 18px; overflow-y: auto;
+  }
+  .drawer h3 { font-size: 10px; letter-spacing: .3em; color: var(--ink-3); padding-bottom: 7px; border-bottom: 1px solid var(--rule); margin-bottom: 9px; }
+  .drawer .search {
+    width: 100%; font-size: 11px; padding: 6px 9px; margin-bottom: 10px;
+    border: 1px solid var(--rule); border-radius: 6px; background: var(--paper);
+    color: var(--ink); font-family: var(--sans); outline: none;
+  }
+  .entry {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 7px 8px 7px 10px; border-left: 2px solid transparent;
+    cursor: pointer; border-radius: 0 6px 6px 0;
+  }
+  .entry:hover { background: rgba(120, 95, 50, .07); }
+  .entry.c-ochre { border-left-color: var(--ochre); }
+  .entry.c-pine { border-left-color: var(--pine); }
+  .entry .t { font-family: var(--serif); font-size: 13.5px; color: var(--ink); }
+  .entry .d { font-size: 10px; color: var(--ink-3); margin-left: auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawer .grp { font-size: 9px; letter-spacing: .2em; color: var(--ink-3); margin: 10px 0 4px; }
+
+  /* ========== 编年史带 ========== */
+  .chron {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 76px; z-index: 20;
+    background: linear-gradient(to top, var(--paper-2), rgba(236, 228, 211, .88));
+    border-top: 1px solid var(--rule);
+    display: flex; align-items: center; gap: 22px; padding: 0 24px;
+  }
+  .chron .play {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid var(--ink-2); background: var(--ink); color: var(--paper);
+    cursor: pointer; font-size: 11px;
+  }
+  .chron .now { font-family: var(--serif); font-size: 19px; letter-spacing: .06em; white-space: nowrap; }
+  .chron .track { flex: 1; position: relative; height: 40px; }
+  .chron .track .base { position: absolute; left: 0; right: 0; top: 20px; height: 1px; background: var(--rule); }
+  .chron .tick { position: absolute; top: 13px; height: 15px; width: 1px; background: var(--ink-3); }
+  .chron .tick i { position: absolute; top: 17px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 10px; color: var(--ink-3); }
+  .chron .cursor { position: absolute; left: 2px; top: 8px; bottom: 8px; width: 2px; background: var(--gold); }
+  .chron .cursor::before { content: ""; position: absolute; top: -4px; left: -3px; border: 4px solid transparent; border-top-color: var(--gold); }
+  .chron .chron-empty {
+    position: absolute; left: 50%; top: 2px; transform: translateX(-50%);
+    font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-3);
+    background: var(--paper-2); padding: 0 10px;
+  }
+  .chron .cnt { font-size: 10px; letter-spacing: .2em; color: var(--ink-3); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div class="atlas">
+  <svg class="decor" viewBox="0 0 1200 750" preserveAspectRatio="xMidYMid slice">
+    <!-- 想象中山脉与海岸的淡墨勾勒（示意肌理） -->
+    <g stroke="rgba(96,72,36,.16)" fill="none" stroke-width="1">
+      <path d="M80,640 l22,-26 l18,22 l24,-30 l20,26 l16,-18" stroke-linejoin="round"/>
+      <path d="M980,90 l22,-26 l18,22 l24,-30 l20,26 l16,-18" stroke-linejoin="round"/>
+      <path d="M-20,470 C180,440 300,520 520,485 S 880,400 1220,455" stroke-dasharray="5 7"/>
+    </g>
+    <g transform="translate(1080,600)" stroke="rgba(96,72,36,.35)" fill="none">
+      <circle r="30" stroke-width="1"/>
+      <path d="M0,-30 L5,0 L0,30 L-5,0 Z" fill="rgba(96,72,36,.3)" stroke="none"/>
+    </g>
+  </svg>
+  <div class="atlas-title">
+    <div class="zh">最终武装</div>
+    <div class="en">THE FINAL ARMAMENT · CODEX ATLAS</div>
+  </div>
+
+  <!-- 地点图钉 -->
+  <div class="place" style="left: 41%; top: 52%;">
+    <div class="pl">统合局</div>
+    <div class="pin"></div>
+  </div>
+
+  <!-- 实体节点（示意：按画布摆位呈现，位置随便摆的） -->
+  <div class="node ochre" style="left: 30%; top: 38%;"><div class="seal"></div><span class="nl">林尘</span></div>
+  <div class="node ochre" style="left: 55%; top: 34%;"><div class="seal"></div><span class="nl">白霆</span></div>
+  <div class="node ochre" style="left: 63%; top: 58%;"><div class="seal"></div><span class="nl">流光</span></div>
+  <div class="node pine" style="left: 36%; top: 66%;"><div class="seal"></div><span class="nl">红月<span class="sub">等身机甲</span></span></div>
+  <div class="node pine" style="left: 70%; top: 42%;"><div class="seal"></div><span class="nl">血噬<span class="sub">S 级</span></span></div>
+</div>
+
+<!-- 悬浮顶栏 -->
+<div class="topbar">
+  <button class="tb back">←</button>
+  <button class="tb primary">记一笔历史</button>
+  <button class="tb">地点</button>
+  <button class="tb">实体</button>
+  <span class="sep"></span>
+  <button class="tb">世界观</button>
+  <button class="tb">⋯</button>
+</div>
+
+<!-- 图例（手势提示不再贴脸） -->
+<div class="legend">
+  <div class="lt">图 例</div>
+  <div class="row"><kbd>⇧ 拖</kbd><span>甲节点 → 乙节点：结缘</span></div>
+  <div class="row"><kbd>右键</kbd><span>空白处：落一个新名字</span></div>
+  <div class="row"><kbd>拖</kbd><span>有故事的角色：记一次远行</span></div>
+</div>
+
+<!-- 右缘图标栏 -->
+<div class="rail">
+  <button title="伏笔">⌁<span class="n">〇</span></button>
+  <button title="期待">✦<span class="n">〇</span></button>
+  <button title="地点">⌖<span class="n">壹</span></button>
+  <button title="事件">⚑<span class="n">〇</span></button>
+  <div class="rsep"></div>
+  <button class="on" title="角色">♟<span class="n">叁</span></button>
+  <button title="资产">◈<span class="n">叁</span></button>
+</div>
+
+<!-- 浮出抽屉：角色 -->
+<div class="drawer">
+  <h3>角 色</h3>
+  <input class="search" placeholder="寻一个名字或别名…" />
+  <div class="entry c-ochre"><span class="t">林尘</span><span class="d">尚未落笔</span></div>
+  <div class="entry c-ochre"><span class="t">白霆</span><span class="d">尚未落笔</span></div>
+  <div class="entry c-ochre"><span class="t">流光</span><span class="d">尚未落笔</span></div>
+  <div class="grp">资 产</div>
+  <div class="entry c-pine"><span class="t">红月</span><span class="d">等身机甲，约 2.2 米</span></div>
+  <div class="entry c-pine"><span class="t">流光</span><span class="d">等身机甲，约 2 米</span></div>
+  <div class="entry c-pine"><span class="t">血噬</span><span class="d">神秘的 S 级</span></div>
+</div>
+
+<!-- 编年史带 -->
+<div class="chron">
+  <button class="play">▶</button>
+  <div class="now">第 1 年 · 1 月 1 日</div>
+  <div class="track">
+    <div class="base"></div>
+    <div class="tick" style="left:16%"><i>2</i></div>
+    <div class="tick" style="left:38%"><i>3</i></div>
+    <div class="tick" style="left:60%"><i>4</i></div>
+    <div class="tick" style="left:82%"><i>5</i></div>
+    <div class="cursor"></div>
+    <div class="chron-empty">尚无事件——记下第一条历史，时间才开始流动</div>
+  </div>
+  <div class="cnt">〇 事件</div>
+</div>
+
+<div style="position:fixed;left:12px;top:12px;z-index:30;background:var(--ink);color:var(--paper);font-size:10px;letter-spacing:.15em;padding:5px 10px;border-radius:4px;opacity:.85;">
+  方向 B · 活舆图——地图即主页（<a href="index.html" style="color:var(--gold);">返回对比</a>）
+</div>
+
+</body>
+</html>

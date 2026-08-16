@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方向 C · 案头工作台（骨架不变，完成度拉满）</title>
+<style>
+  :root {
+    --paper: #f4eee1;
+    --paper-2: #ece4d3;
+    --ink: #33302a;
+    --ink-2: #4a4438;
+    --ink-3: #8a8172;
+    --rule: #ddd2bd;
+    --violet: #6f5f9e;
+    --gold: #b08d3e;
+    --blue: #4a6b8a;
+    --ochre: #a05f3c;
+    --pine: #5f7d5a;
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans); color: var(--ink); background: var(--paper-3, #e6dcc7);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ===== 顶栏：与现状同构，只重做质感与层级 ===== */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 18px; background: var(--paper); border-bottom: 1px solid var(--rule);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .back {
+    width: 26px; height: 26px; border: 1px solid var(--rule); border-radius: 7px;
+    background: transparent; color: var(--ink-3); cursor: pointer;
+  }
+  .brand h1 { font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: .05em; }
+  .brand .sub { font-size: 11px; color: var(--ink-3); }
+  .actions { display: flex; gap: 7px; align-items: center; }
+  .ibtn {
+    width: 28px; height: 28px; border: 1px solid var(--rule); border-radius: 7px;
+    background: transparent; color: var(--ink-3); cursor: pointer; font-size: 13px;
+  }
+  .ibtn:disabled { opacity: .35; }
+  .btn {
+    font-family: var(--sans); font-size: 12px; padding: 6px 13px;
+    border-radius: 7px; border: 1px solid var(--rule);
+    background: transparent; color: var(--ink-2); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--ink-3); background: rgba(120,95,50,.05); }
+  .btn.primary { background: var(--violet); border-color: var(--violet); color: #f8f5ee; font-weight: 500; }
+  .btn.primary:hover { background: #5f5188; }
+  .hsep { width: 1px; height: 18px; background: var(--rule); margin: 0 3px; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* ===== 画布：纸感 + 空状态收小、变雅 ===== */
+  .atlas {
+    flex: 1; position: relative; overflow: hidden;
+    background:
+      radial-gradient(ellipse at 20% 15%, rgba(120, 90, 40, .05), transparent 55%),
+      radial-gradient(ellipse at 82% 85%, rgba(120, 90, 40, .06), transparent 50%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .012) 2px 3px),
+      var(--paper);
+    box-shadow: inset 0 0 120px rgba(110, 85, 45, .12);
+  }
+  .empty-atlas {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 400px; text-align: center; padding: 30px 34px 26px;
+    border: 1px dashed rgba(110, 85, 45, .4); border-radius: 10px;
+    background: rgba(244, 238, 225, .5);
+  }
+  .empty-atlas .ico { color: rgba(110, 85, 45, .55); margin-bottom: 10px; }
+  .empty-atlas h2 { font-family: var(--serif); font-size: 18px; letter-spacing: .1em; color: var(--ink-2); }
+  .empty-atlas p { margin-top: 8px; font-size: 11.5px; line-height: 1.8; color: var(--ink-3); }
+  .empty-atlas .links { margin-top: 14px; display: flex; justify-content: center; gap: 14px; }
+  .empty-atlas .links button {
+    font-size: 11px; font-family: var(--sans); background: transparent; border: none;
+    color: var(--violet); cursor: pointer; padding: 0;
+    border-bottom: 1px solid rgba(111, 95, 158, .4);
+  }
+
+  /* 图例：收进一颗钮，hover 展开 */
+  .legend-fab {
+    position: absolute; left: 14px; bottom: 14px; z-index: 8;
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 999px;
+    padding: 6px 12px; font-size: 11px; color: var(--ink-3); cursor: default;
+    box-shadow: 0 3px 12px rgba(96, 72, 36, .1);
+  }
+  .legend-fab:hover .legend-pop { display: block; }
+  .legend-pop {
+    display: none; position: absolute; left: 0; bottom: 34px; width: 210px;
+    background: var(--paper); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 10px 12px; box-shadow: 0 8px 24px rgba(96, 72, 36, .16);
+  }
+  .legend-pop div { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .legend-pop kbd {
+    font-size: 9.5px; color: var(--ink-2); border: 1px solid var(--rule);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--paper-2);
+    font-family: var(--sans);
+  }
+
+  /* 右缘工具条：保留但去神秘化（首枚展开文字） */
+  .tools {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 8;
+    display: flex; flex-direction: column; gap: 3px;
+    background: rgba(236, 228, 211, .92); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 5px;
+  }
+  .tools button {
+    width: 30px; height: 30px; border: none; border-radius: 7px; background: transparent;
+    color: var(--ink-3); cursor: pointer; font-size: 14px;
+  }
+  .tools button:hover { background: rgba(120, 95, 50, .1); color: var(--ink); }
+  .tools .tsep { height: 1px; background: var(--rule); margin: 3px 4px; }
+
+  /* ===== 侧栏：结构与现状一致，只做节奏与语义 ===== */
+  aside {
+    width: 292px; flex-shrink: 0; overflow-y: auto;
+    background: var(--paper-2); border-left: 1px solid var(--rule);
+    padding: 12px 14px 18px;
+  }
+  .ledger { margin-bottom: 16px; }
+  .ledger > .lh {
+    display: flex; align-items: baseline; gap: 8px;
+    padding-bottom: 5px; margin-bottom: 7px; border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+  }
+  .ledger .lh .name { font-size: 10px; letter-spacing: .28em; color: var(--ink-3); }
+  .ledger .lh .cnt { margin-left: auto; font-family: var(--serif); font-size: 13px; color: var(--ink-2); }
+  .ledger .lh .chev { font-size: 9px; color: var(--ink-3); }
+  .ledger .empty { font-family: var(--serif); font-style: italic; font-size: 11.5px; line-height: 1.8; color: var(--ink-3); }
+  .ledger .empty a { color: var(--violet); text-decoration: none; border-bottom: 1px solid rgba(111, 95, 158, .35); cursor: pointer; }
+  .ledger .open-link {
+    display: inline-block; margin-top: 6px; font-size: 11px; color: var(--violet);
+    border-bottom: 1px solid rgba(111, 95, 158, .4); cursor: pointer;
+  }
+
+  .search {
+    width: 100%; font-size: 11px; padding: 6px 10px; margin-bottom: 8px;
+    border: 1px solid var(--rule); border-radius: 6px; background: var(--paper);
+    color: var(--ink); font-family: var(--sans); outline: none;
+  }
+  .search:focus { border-color: var(--violet); }
+
+  .entry {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 6px 8px 6px 10px; border-left: 2px solid transparent;
+    cursor: pointer; border-radius: 0 6px 6px 0;
+  }
+  .entry:hover { background: rgba(120, 95, 50, .07); }
+  .entry.c-gold { border-left-color: var(--gold); }
+  .entry.c-ochre { border-left-color: var(--ochre); }
+  .entry.c-pine { border-left-color: var(--pine); }
+  .entry .t { font-family: var(--serif); font-size: 13.5px; color: var(--ink); }
+  .entry .d {
+    font-size: 10px; color: var(--ink-3); margin-left: auto;
+    max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ===== 时间轴：加厚成编年史带 ===== */
+  footer {
+    background: var(--paper); border-top: 1px solid var(--rule);
+    padding: 11px 22px 13px; display: flex; align-items: center; gap: 20px;
+  }
+  .play {
+    width: 29px; height: 29px; border-radius: 50%; border: 1px solid var(--ink-2);
+    background: var(--ink); color: var(--paper); cursor: pointer; font-size: 11px; flex-shrink: 0;
+  }
+  .now { font-family: var(--serif); font-size: 18px; letter-spacing: .06em; white-space: nowrap; }
+  .track { flex: 1; position: relative; height: 36px; }
+  .track .base { position: absolute; left: 0; right: 0; top: 17px; height: 1px; background: var(--rule); }
+  .tick { position: absolute; top: 11px; height: 14px; width: 1px; background: var(--ink-3); }
+  .tick i { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 10px; color: var(--ink-3); }
+  .cursor { position: absolute; left: 2px; top: 6px; bottom: 6px; width: 2px; background: var(--gold); }
+  .cursor::before { content: ""; position: absolute; top: -4px; left: -3px; border: 4px solid transparent; border-top-color: var(--gold); }
+  .track .hint {
+    position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--ink-3);
+    background: var(--paper); padding: 0 10px;
+  }
+  .cnt { font-size: 10px; letter-spacing: .2em; color: var(--ink-3); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <button class="back">←</button>
+    <h1>世界设定</h1>
+    <span class="sub">《最终武装》 · 1 地点 · 0 事件 · 6 实体</span>
+  </div>
+  <div class="actions">
+    <button class="ibtn" title="撤销">↩</button>
+    <button class="ibtn" title="重做">↪</button>
+    <span class="hsep"></span>
+    <button class="btn">地点</button>
+    <button class="btn primary">记一笔历史</button>
+    <button class="btn">实体</button>
+    <button class="btn">批量</button>
+    <button class="btn">世界观</button>
+    <button class="btn">导入旧设定</button>
+  </div>
+</header>
+
+<main>
+  <section class="atlas">
+    <div class="empty-atlas">
+      <div class="ico">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M9 20l-5.5-2.5v-13L9 7l6-2.5L20.5 7v13L15 17.5 9 20zM9 7v13M15 4.5v13"/>
+        </svg>
+      </div>
+      <h2>空白舆图</h2>
+      <p>铺一张自己的底图，或直接在右侧账本上点第一个名字——<br/>世界会从第一个名字长出来。</p>
+      <div class="links">
+        <button>铺底图</button>
+        <button>铺第一个地点</button>
+        <button>记第一笔历史</button>
+      </div>
+    </div>
+
+    <div class="legend-fab">
+      图例 · 手势
+      <div class="legend-pop">
+        <div><kbd>⇧ 拖</kbd><span>甲节点 → 乙节点：结缘</span></div>
+        <div><kbd>右键</kbd><span>空白处：落一个新名字</span></div>
+        <div><kbd>拖</kbd><span>有故事的角色：记一次远行</span></div>
+      </div>
+    </div>
+
+    <div class="tools">
+      <button title="底图图片">🖼</button>
+      <button title="画笔">✏</button>
+      <div class="tsep"></div>
+      <button title="放大">＋</button>
+      <button title="缩小">－</button>
+    </div>
+  </section>
+
+  <aside>
+    <div class="ledger">
+      <div class="lh"><span class="name">伏 笔</span><span class="cnt">〇</span><span class="chev">▾</span></div>
+      <p class="empty">尚无伏笔——在时间轴上右键，埋下第一条留给后文的线。</p>
+    </div>
+
+    <div class="ledger">
+      <div class="lh"><span class="name">期 待</span><span class="cnt">〇</span><span class="chev">▾</span></div>
+      <p class="empty">尚无期待。用一句话记下读者此刻最想知道的事。</p>
+      <span class="open-link">打开账本 →</span>
+    </div>
+
+    <div class="ledger">
+      <div class="lh"><span class="name">地 点</span><span class="cnt">壹</span><span class="chev">▾</span></div>
+      <div class="entry c-gold"><span class="t">统合局</span><span class="d">地点</span></div>
+    </div>
+
+    <div class="ledger">
+      <div class="lh"><span class="name">事 件</span><span class="cnt">〇</span><span class="chev">▾</span></div>
+      <input class="search" placeholder="筛选事件（类型 / 备注）…" />
+      <p class="empty">尚无事件。事件是世界状态的唯一事实源——<a>记下第一条历史</a>。</p>
+    </div>
+
+    <div class="ledger">
+      <div class="lh"><span class="name">角 色</span><span class="cnt">叁</span><span class="chev">▾</span></div>
+      <input class="search" placeholder="寻一个名字或别名…" />
+      <div class="entry c-ochre"><span class="t">林尘</span><span class="d">尚未落笔</span></div>
+      <div class="entry c-ochre"><span class="t">白霆</span><span class="d">尚未落笔</span></div>
+      <div class="entry c-ochre"><span class="t">流光</span><span class="d">尚未落笔</span></div>
+    </div>
+
+    <div class="ledger">
+      <div class="lh"><span class="name">资 产</span><span class="cnt">叁</span><span class="chev">▾</span></div>
+      <div class="entry c-pine"><span class="t">红月</span><span class="d">等身机甲，约 2.2 米</span></div>
+      <div class="entry c-pine"><span class="t">流光</span><span class="d">等身机甲，约 2 米</span></div>
+      <div class="entry c-pine"><span class="t">血噬</span><span class="d">神秘的 S 级</span></div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <button class="play">▶</button>
+  <div class="now">第 1 年 · 1 月 1 日</div>
+  <div class="track">
+    <div class="base"></div>
+    <div class="tick" style="left:16%"><i>2</i></div>
+    <div class="tick" style="left:38%"><i>3</i></div>
+    <div class="tick" style="left:60%"><i>4</i></div>
+    <div class="tick" style="left:82%"><i>5</i></div>
+    <div class="cursor"></div>
+    <div class="hint">尚无事件——记下第一条历史，时间才开始流动</div>
+  </div>
+  <div class="cnt">〇 事件 · 至第 6 年</div>
+</footer>
+
+<div style="position:fixed;left:12px;top:54px;z-index:9;background:var(--ink);color:var(--paper);font-size:10px;letter-spacing:.15em;padding:5px 10px;border-radius:4px;opacity:.85;">
+  方向 C · 案头工作台——骨架不变，纯视觉完成度（<a href="index.html" style="color:var(--gold);">返回对比</a>）
+</div>
+
+</body>
+</html>
