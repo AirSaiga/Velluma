@@ -75,13 +75,12 @@ const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
 const chapterIdFromRoute = computed(() => (route.params.chapterId as string) || null)
 
 // W2 情境浮卡：编辑器选中文本（1-12 字）/点击 @/# 提及 → 三秒查明底细。
-// cursor 事件（光标周边词）不触发浮卡，只用于关闭在屏卡（作者已移动注意力）。
+// cursor 事件（光标周边词/选区塌缩）既不触发也不关闭浮卡——任何点击都会塌缩选区
+// 并派发 cursor，若据此关闭会把「点击提及/点击卡内按钮」的浮卡一起误杀；
+// 关闭职责由浮卡自身的「外点关闭」与「新选区替换」承担。
 const contextCardState = ref<EntityFocusPayload | null>(null)
 function handleEntityFocus(payload: EntityFocusPayload) {
-  if (payload.source === 'cursor') {
-    contextCardState.value = null
-    return
-  }
+  if (payload.source === 'cursor') return
   const kw = payload.keyword || ''
   if (payload.source === 'selection' && (!kw || kw.length > 12)) {
     contextCardState.value = null

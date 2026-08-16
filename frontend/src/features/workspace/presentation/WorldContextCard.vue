@@ -114,7 +114,15 @@ function quickNote() {
 
 <template>
   <Teleport to="body">
-    <div ref="rootRef" class="wctx-card" :style="{ left: pos.left + 'px', top: pos.top + 'px' }">
+    <!-- @pointerdown.prevent：阻止点击卡片引发编辑器选区塌缩（否则选区事件会
+         在按钮 click 派发前把卡片关闭——「记一笔/在世界页打开」全部失效）；
+         与既有选区菜单的 @mousedown.prevent 同一惯用法 -->
+    <div
+      ref="rootRef"
+      class="wctx-card"
+      :style="{ left: pos.left + 'px', top: pos.top + 'px' }"
+      @pointerdown.prevent
+    >
       <template v-if="card">
         <div class="wctx-head">
           <span class="wctx-badge" :class="{ loc: card.kind === 'location' }">{{ kindBadge }}</span>

@@ -20,7 +20,7 @@ import pytest
 from backend.services.llm.reasoning_adapter import (
     detect_provider,
     adapt_reasoning_config,
-    DEEPSEEK, OPENAI, OPENROUTER, QWEN, DOUBAO, LOCAL, UNKNOWN,
+    DEEPSEEK, OPENAI, OPENROUTER, QWEN, DOUBAO, MIMO, LOCAL, UNKNOWN,
 )
 from backend.services.llm.client import REASONING_DISABLED
 
@@ -39,6 +39,7 @@ class TestDetectProvider:
         ("https://openrouter.ai/api/v1", OPENROUTER),
         ("https://dashscope.aliyuncs.com/compatible-mode/v1", QWEN),
         ("https://ark.cn-beijing.volces.com/api/v3", DOUBAO),
+        ("https://api.xiaomimimo.com/v1", MIMO),
         ("http://localhost:11434/v1", LOCAL),
         ("http://127.0.0.1:1234/v1", LOCAL),
         ("http://0.0.0.0:8080", LOCAL),
@@ -66,6 +67,25 @@ class TestDetectProvider:
 ENABLED_HIGH = {"reasoning": {"enabled": True, "effort": "high", "exclude": False}}
 ENABLED_LOW = {"reasoning": {"enabled": True, "effort": "low", "exclude": False}}
 ENABLED_MAX = {"reasoning": {"enabled": True, "effort": "max", "exclude": False}}
+
+
+class TestAdaptMimo:
+    """小米 MiMo（api.xiaomimimo.com）：thinking.type。
+
+    关键修复点（2026-08-16 实测）：MiMo 静默忽略 OpenRouter 的 reasoning.enabled
+    与 Qwen 的 enable_thinking——隐藏思考继续烧 token 预算，小预算调用
+    （速记解析 max_tokens=800）finish=length 空输出。thinking.type 才能真正关闭。
+    """
+
+    def test_disabled_produces_thinking_disabled(self):
+        """REASONING_DISABLED → thinking.type=disabled（实测 reasoning_tokens=0）。"""
+        result = adapt_reasoning_config(REASONING_DISABLED, "https://api.xiaomimimo.com/v1")
+        assert result == {"thinking": {"type": "disabled"}}
+
+    def test_enabled_produces_thinking_enabled_without_effort(self):
+        """开启 → thinking.type=enabled；effort 档位未验证支持，不发。"""
+        result = adapt_reasoning_config(ENABLED_HIGH, "https://api.xiaomimimo.com/v1")
+        assert result == {"thinking": {"type": "enabled"}}
 
 
 class TestAdaptDeepSeek:

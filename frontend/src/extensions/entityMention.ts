@@ -208,6 +208,9 @@ export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
     suggestion: {
       char: '@',
       pluginKey: new PluginKey('charMention'),
+      // 中文正文无词间空格：默认要求 @ 前是空格/行首会让建议在汉字后永不触发
+      // （测试实测 0 次激活）。null = 任意前缀均可（小说场景无邮箱类干扰，可接受）
+      allowedPrefixes: null,
       items: makeItems('character'),
       command: makeCommand('character', 'charMention'),
       render: _makePopupRenderer(),
@@ -220,6 +223,7 @@ export function buildEntityMentionExtensions(ctx: EntityMentionContext) {
     suggestion: {
       char: '#',
       pluginKey: new PluginKey('assetMention'),
+      allowedPrefixes: null,
       items: makeItems('asset'),
       command: makeCommand('asset', 'assetMention'),
       render: _makePopupRenderer(),

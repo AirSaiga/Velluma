@@ -399,6 +399,10 @@ class AdaptiveOrchestrator:
         if "post_process" in self._active_tasks:
             return {"finished": False, "reason": "后处理已在进行中"}
 
+        # 存量缺陷修复：on_finish 缺此导入 → NameError → /adaptive/finish 一直 500
+        # （本文件各方法惯用局部导入防循环依赖，on_settle 有、on_finish 漏了）
+        from backend.services.adaptive.world_model import WorldModelRepository
+
         try:
             async with self.db_factory() as db:
                 snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)

@@ -54,6 +54,7 @@ OPENAI = "openai"
 OPENROUTER = "openrouter"
 QWEN = "qwen"          # 阿里通义/Qwen（dashscope）
 DOUBAO = "doubao"      # 火山引擎豆包（volces）
+MIMO = "mimo"          # 小米 MiMo（api.xiaomimimo.com）
 LOCAL = "local"        # 本地 OpenAI 兼容端点（Ollama/vLLM/LM Studio）
 UNKNOWN = "unknown"
 
@@ -66,6 +67,7 @@ _PROVIDER_DOMAIN_RULES: list[tuple[str, str]] = [
     ("dashscope.aliyuncs.com", QWEN),
     ("ark.cn-beijing.volces.com", DOUBAO),
     ("volces.com", DOUBAO),
+    ("xiaomimimo.com", MIMO),
     # 本地端点
     ("localhost", LOCAL),
     ("127.0.0.1", LOCAL),
@@ -222,6 +224,13 @@ def adapt_reasoning_config(
     if provider == DOUBAO:
         # 火山豆包：thinking.type 控制开关，原生无 effort 控制。
         # （部分较新 Seed 2.0 模型在网关层认 reasoning_effort，但火山原生协议以 thinking.type 为准）
+        return {"thinking": {"type": "enabled" if enabled else "disabled"}}
+
+    if provider == MIMO:
+        # 小米 MiMo（api.xiaomimimo.com）：实测（2026-08-16）认 DeepSeek 风格 thinking.type；
+        # OpenRouter 的 reasoning.enabled 与 Qwen 的 enable_thinking 均被静默忽略——
+        # 推理继续烧 token 预算，小预算调用（速记解析 max_tokens=800）finish=length 空输出。
+        # effort 档位未验证支持，保守不发。
         return {"thinking": {"type": "enabled" if enabled else "disabled"}}
 
     if provider == LOCAL:
