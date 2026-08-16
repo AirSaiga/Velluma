@@ -23,7 +23,7 @@ const PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'port.txt')
 const FRONTEND_PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'frontend_port.txt')
 
 function readFrontendPortFromFile() {
-  // 优先环境变量（start.ps1 会设置 VELLUMA_FRONTEND_PORT）
+  // 优先环境变量（启动脚本 start.ps1 / start.sh 会设置 VELLUMA_FRONTEND_PORT）
   if (process.env.VELLUMA_FRONTEND_PORT) {
     const p = parseInt(process.env.VELLUMA_FRONTEND_PORT, 10)
     if (!isNaN(p) && p > 0) return p

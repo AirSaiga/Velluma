@@ -181,12 +181,20 @@ npm install
 
 **推荐：桌面应用完整启动（后端 + 前端 Vite + Electron）**
 
+Windows（PowerShell）：
+
 ```powershell
-.\start.bat                          # 兼容入口，等价于开发模式
-# 或直接指定模式
-.\scripts\start-dev.bat              # 开发模式（后端 + Vite + Electron，自动开 DevTools）
-.\scripts\start-debug.bat            # 调试模式（当前等同 dev）
-.\scripts\start-prod.bat             # 生产体验（npm run build 后 Electron 载入 dist）
+.\scripts\windows\start-dev.bat       # 开发模式（后端 + Vite + Electron，自动开 DevTools）
+.\scripts\windows\start-debug.bat     # 调试模式（后端 uvicorn --reload 热重载）
+.\scripts\windows\start-prod.bat      # 生产体验（npm run build 后 Electron 载入 dist）
+```
+
+macOS / Linux（bash）：
+
+```bash
+./scripts/macos/start-dev.sh          # 开发模式
+./scripts/macos/start-debug.sh        # 调试模式（后端热重载）
+./scripts/macos/start-prod.sh         # 生产体验
 ```
 
 **仅后端开发**
@@ -205,7 +213,7 @@ cd frontend
 npm run dev
 ```
 
-端口由 `scripts/start.ps1` 协商（起始 `5175`，最多扫描 100 个），实际端口写入 `data/frontend_port.txt`。
+端口由启动脚本协商（起始 `5175`，最多扫描 100 个），实际端口写入 `data/frontend_port.txt`。
 
 ---
 
@@ -213,12 +221,18 @@ npm run dev
 
 ```
 Velluma/
-├── start.bat                 # 兼容入口（转发到 scripts/start.ps1 -Mode dev）
-├── scripts/                  # 启动脚本（生产/开发/调试三模式）
-│   ├── start.ps1             # 核心脚本：-Mode prod/dev/debug
-│   ├── start-prod.bat        # 生产体验入口（载入 dist）
-│   ├── start-dev.bat         # 开发入口（Vite + DevTools）
-│   └── start-debug.bat       # 调试入口（同 dev，预留扩展）
+├── scripts/                  # 启动脚本（按平台分目录，每目录 dev/debug/prod 三模式）
+│   ├── windows/              # Windows 入口（.bat 薄包装 + start.ps1 编排核心）
+│   │   ├── start-dev.bat     # 开发入口（Vite + DevTools）
+│   │   ├── start-debug.bat   # 调试入口（后端热重载）
+│   │   ├── start-prod.bat    # 生产体验入口（载入 dist）
+│   │   └── start.ps1         # 核心脚本：-Mode prod/dev/debug
+│   ├── macos/                # macOS/Linux 入口（.sh 薄包装 + start.sh 编排核心）
+│   │   ├── start-dev.sh
+│   │   ├── start-debug.sh
+│   │   ├── start-prod.sh
+│   │   └── start.sh          # 核心脚本：dev/debug/prod
+│   └── make_blank_atlas.py   # 工具：世界页空白舆图 SVG 生成器（平台无关）
 ├── requirements.txt          # Python 依赖
 ├── model_config.example.json # LLM/Embedding/代理配置模板（复制为 model_config.json）
 ├── .env.example              # 环境变量模板（复制为 .env，均可留空）
@@ -377,7 +391,7 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 > - `AGENTIC_BEAT_CONCURRENCY` / `AGENTIC_FORCE_FAST_MODE`（原双轨引擎的概念，该引擎已废弃归档）
 > - `DASHSCOPE_API_KEY` / `OPENAI_API_KEY`（Key 全部来自 `model_config.json`）
 
-> `scripts/start.ps1` 会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。
+> 启动脚本（`scripts/windows/start.ps1` / `scripts/macos/start.sh`）会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。
 
 ---
 
@@ -386,15 +400,21 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 ### 桌面应用启动
 
 ```powershell
-.\start.bat                       # 兼容入口（= 开发模式）
-.\scripts\start-dev.bat           # 开发模式（后端 + Vite + Electron）
-.\scripts\start-debug.bat         # 调试模式（当前等同 dev）
-.\scripts\start-prod.bat          # 生产体验（npm run build + 载入 dist）
+# Windows
+.\scripts\windows\start-dev.bat    # 开发模式（后端 + Vite + Electron）
+.\scripts\windows\start-debug.bat  # 调试模式（后端热重载）
+.\scripts\windows\start-prod.bat   # 生产体验（npm run build + 载入 dist）
 
-# 常用参数（透传给 start.ps1）
-.\start.bat -Force                # 强制清理端口冲突后启动
-.\scripts\start-dev.bat -SkipBackend   # 跳过后端（假设已运行）
-.\scripts\start.ps1 -Mode dev -DryRun  # 仅打印将执行的命令，不启动进程
+# 常用参数（透传给编排核心 start.ps1 / start.sh）
+.\scripts\windows\start-dev.bat -Force             # 强制清理端口冲突后启动
+.\scripts\windows\start-dev.bat -SkipBackend       # 跳过后端（假设已运行）
+.\scripts\windows\start.ps1 -Mode dev -DryRun      # 仅打印将执行的命令，不启动进程
+
+# macOS / Linux
+./scripts/macos/start-dev.sh       # 开发模式
+./scripts/macos/start-debug.sh     # 调试模式（后端热重载）
+./scripts/macos/start-prod.sh      # 生产体验
+./scripts/macos/start.sh dev --force --skip-backend   # 参数用长选项风格
 ```
 
 ### 后端
@@ -468,14 +488,21 @@ npm run electron:build  # 打包 Electron 安装包
 ### 端口被占用
 
 ```powershell
-# 查看占用
+# Windows：查看占用
 Get-NetTCPConnection -LocalPort 8002
 Get-NetTCPConnection -LocalPort 5175
 
 # 强制清理后启动
-.\start.bat -Force
-# 或
-.\scripts\start-dev.bat -Force
+.\scripts\windows\start-dev.bat -Force
+```
+
+```bash
+# macOS / Linux：查看占用
+lsof -nP -iTCP:8002 -sTCP:LISTEN
+lsof -nP -iTCP:5175 -sTCP:LISTEN
+
+# 强制清理后启动
+./scripts/macos/start-dev.sh --force
 ```
 
 ### 前端连接失败

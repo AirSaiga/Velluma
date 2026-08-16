@@ -39,14 +39,28 @@ npm run build        # 生产构建
 ```
 
 ### 桌面应用（推荐开发方式）
+
+启动脚本收敛于 `scripts/`，按平台分目录，每平台 dev/debug/prod 三模式（根目录 start.bat 已移除）：
+
 ```powershell
-.\scripts\start-dev.bat           # = 根目录 start.bat（-Mode dev，启动前后端+Electron）
-.\scripts\start-prod.bat          # npm run build + Electron 载入 dist
-.\scripts\start.ps1 -Mode dev -ElectronOnly    # 仅 Electron（前后端已在运行）
-.\scripts\start.ps1 -Mode dev -SkipBackend     # 跳过后端
-.\start.bat -Force                # 清理端口冲突后启动
+# Windows
+.\scripts\windows\start-dev.bat    # 开发模式（启动前后端+Electron，自动开 DevTools）
+.\scripts\windows\start-debug.bat  # 调试模式（后端 uvicorn --reload 热重载）
+.\scripts\windows\start-prod.bat   # npm run build + Electron 载入 dist
+.\scripts\windows\start.ps1 -Mode dev -ElectronOnly   # 仅 Electron（前后端已在运行）
+.\scripts\windows\start.ps1 -Mode dev -SkipBackend    # 跳过后端
+.\scripts\windows\start-dev.bat -Force                # 清理端口冲突后启动
 ```
-`start.ps1` 为 Electron 设 `VELLUMA_BACKEND_PORT`/`VELLUMA_FRONTEND_PORT`/`VELLUMA_SERVICES_READY`（prod 另设 `NODE_ENV=production`）。Electron 独立命令（`frontend/` 下）：`npm run electron:dev`/`electron:preview`（均 `npm run build && electron .`，不启 Vite，需 5175 已有服务）/`electron:build`（打包）。
+
+```bash
+# macOS / Linux（bash，编排逻辑与 start.ps1 对称）
+./scripts/macos/start-dev.sh       # 开发模式
+./scripts/macos/start-debug.sh     # 调试模式（后端热重载）
+./scripts/macos/start-prod.sh      # 生产体验
+./scripts/macos/start.sh dev --dry-run               # 仅打印将执行的命令
+```
+
+编排核心（`windows/start.ps1` / `macos/start.sh`）为 Electron 设 `VELLUMA_BACKEND_PORT`/`VELLUMA_FRONTEND_PORT`/`VELLUMA_SERVICES_READY`（prod 另设 `NODE_ENV=production`），端口协商写 `data/port.txt`+`data/frontend_port.txt` 两平台同契约。Electron 独立命令（`frontend/` 下）：`npm run electron:dev`/`electron:preview`（均 `npm run build && electron .`，不启 Vite，需 5175 已有服务）/`electron:build`（打包）。
 
 ---
 

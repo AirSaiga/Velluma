@@ -1,0 +1,2 @@
+# Shell 脚本必须保持 LF：CRLF 会让 macOS/Linux 的 bash 直接报 bad interpreter
+*.sh text eol=lf
