@@ -228,11 +228,11 @@ created_at
 
 | 期 | 内容 | 价值验证点 |
 |----|------|-----------|
-| **W1 切片上桌** | scene-slice 端点 + 写作页切片条（在场/脚下/头顶的线/时刻可改）+ 心跳 version 保鲜 + 聚焦重取兜底；替换 SceneSettingsPanel（形态见 §10.1） | 切片条 7 日展开率；作者是否主动扫视 |
-| **W2 查询闭环** | 情境浮卡（角色/地点）+ 深链去程/返程 | 浮卡打开频率；跳链往返完成率 |
-| **W3 速记入账** | parse-event 端点 + 速记框 + toast 撤销 | 事件录入中速记占比；解析草稿采纳率 |
-| **W4 候选回流** | world_event_candidates + settle/finish 抽取扩展 + 双页收件箱 | 回流确认率（✓占✓+✗）；新书 7 日首事件率（核心激活指标） |
-| **W5 切片加厚**（可按需再拆） | 比例尺校准与距离/旅程常识（浮卡与切片条显示）→ spatial_brief；读者视角滤镜；相遇提醒→走向卡；本章场景钉 | 续写空间硬伤抽检下降；走向卡里地图来源建议的采纳率 |
+| **W1 切片上桌** ✅ 2026-08-16 | scene-slice 端点（`services/world/scene_slice.py`）+ 写作页切片条 `WorldSceneSlice.vue`（在场/脚下/头顶的线/时刻可改 + 清除锚）+ useWorldSlice 三时机保鲜（章节切换 / velluma:world-version 心跳事件 / 窗口聚焦）+ HeartbeatResponse.world_version（路由层闲置 db 计算）；`resolve_narrative_time` 扩为 `NarrativeTime(t, source)` 并同步 3 处调用方；SceneSettingsPanel 已删除。**形态落 §10.1 推荐 (a)**：Inspector「设定」tab 内替换 | 切片条 7 日展开率；作者是否主动扫视 |
+| **W2 查询闭环** ✅ 2026-08-16 | 情境浮卡 `WorldContextCard.vue`（角色卡：状态/编年史 ≤t 防剧透；地点卡：控制方/此地事件）+ `GET /world/context-card`（名字/别名/实体 id 解析，404 静默缺席）+ 提及点击接线（RichTextEditor `handleClick` 命中 charMention/assetMention，此前无 NodeView 无点击处理的证伪项落地）+ 选区浮卡（1-12 字经 `entity-focus-change` 载荷扩展贯通）+ 深链去程（`?entity/&loc/&time/&from=chapter&chapter=`）+ 世界页「返回本章」+ 切片条在场行点击跳转。「记一笔」入口留给 W3 | 浮卡打开频率；跳链往返完成率 |
+| **W3 速记入账** ✅ 2026-08-16 | `POST /world/parse-event`（`services/world/event_parser.py`，解析/落库分离红线）+ 速记框 `QuickEventNote.vue`（Alt+N 捕获阶段注册，Alt+O 同款门控；浮卡「记一笔」经 velluma:quick-note 预填实体名）→ 预填轻表单（类型/参与者 chips/地点/时刻历法预览/备注）→ 入账走既有 createEvent → 自管撤销胶囊 6s（Toast 无动作按钮的验证修正落地）；速查表补 Alt+N 条目 | 事件录入中速记占比；解析草稿采纳率 |
+| **W4 候选回流** ✅ 2026-08-16 | 新表 `world_event_candidates`（models + create_all；database.py 显式导入列表顺手补 WorldRelation 遗漏）+ 独立组件 `services/world/event_scout.py`（orchestrator 注册，settle 带段落/finish 整章各触发一次，幂等去重，REASONING_DISABLED）+ prompt `prompts/world_event_prompts.py` + 四端点（list/accept/reject/reopen；accept 按类型补 payload 保证推演回放正确）+ 写作页收件箱（切片条「本章变化」✓/✗ + 撤销胶囊=删事件+reopen）+ 世界页侧栏「待确认」跨章分区 + settle/finish 经 velluma:world-refresh 静默刷新 | 回流确认率（✓占✓+✗）；新书 7 日首事件率（核心激活指标） |
+| **W5 切片加厚** ◐ 2026-08-16（lite 落地，重件缓行） | ✅ 本章场景钉（`chapters.scene_location_id` + MIGRATIONS + 切片「脚下」钉住/取消，钉定优先于推演）；✅ 读者视角滤镜（切片条开关，隐藏 private 实体与作者层伏笔，UiPrefs 记忆）；✅ 同地相遇提示（切片 encounters：t 时刻同地点存活角色组，纯计算零 LLM）。⏸ 缓行项及理由：比例尺校准与距离/旅程常识→spatial_brief（需要标定交互与单位设计，且无标定时无法诚实给数）；相遇→走向卡/方向权重桥（等切片数据密度验证后与 §5 遗留方向合并设计）；世界页全图读者滤镜（先验证切片条档位的使用率再扩） | 续写空间硬伤抽检下降；走向卡里地图来源建议的采纳率 |
 
 排序逻辑（产品死穴是「录入先于价值」）：**先让价值可见（W1-W2）→ 再让录入变懒（W3-W4）→ 最后让启发生长（W5）**。
 
