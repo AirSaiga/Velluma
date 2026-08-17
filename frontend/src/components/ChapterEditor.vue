@@ -10,18 +10,12 @@ const props = defineProps<{
   apiConfig: ApiConfig
   bookId?: string | null
   metaCollapsed?: boolean
-  /** 生成预览 HTML（非 null 时编辑器默认只读显示预览，替代章节正文） */
-  previewHtml?: string | null
-  /** 主编辑器直改：步进裁决窗口期预览可编辑 */
-  previewEditable?: boolean
-  /** 主编辑器直改：当前可编辑段的 segment_index */
-  previewSegmentIndex?: number | null
-  /** 保存状态（WorkspaceView 落库状态下传，标题行显示） */
+  /** 保存状态（WorkspaceView 落库状态下传，页面头显示） */
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   lastSavedAt?: Date | null
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'preview-segment-edit'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
 
 const containerRef = ref<any>(null)
 
@@ -50,15 +44,11 @@ function handleEditorEntityFocus(payload: EntityFocusPayload) {
     :api-config="props.apiConfig"
     :book-id="props.bookId"
     :meta-collapsed="props.metaCollapsed"
-    :preview-html="props.previewHtml"
-    :preview-editable="props.previewEditable"
-    :preview-segment-index="props.previewSegmentIndex"
     :save-status="props.saveStatus"
     :last-saved-at="props.lastSavedAt"
     @update-chapter="handleUpdateChapter"
     @update-meta-collapsed="handleMetaCollapsed"
     @refresh-characters="handleRefreshCharacters"
     @editor-entity-focus="handleEditorEntityFocus"
-    @preview-segment-edit="(text: string) => emit('preview-segment-edit', text)"
   />
 </template>

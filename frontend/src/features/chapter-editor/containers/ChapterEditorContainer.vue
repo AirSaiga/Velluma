@@ -13,18 +13,12 @@ const props = defineProps<{
   bookId?: string
   metaCollapsed?: boolean
   assets?: Asset[]
-  /** 生成预览 HTML（非 null 时编辑器默认只读显示预览，替代章节正文） */
-  previewHtml?: string | null
-  /** 主编辑器直改：步进裁决窗口期预览可编辑 */
-  previewEditable?: boolean
-  /** 主编辑器直改：当前可编辑段的 segment_index */
-  previewSegmentIndex?: number | null
-  /** 保存状态（真实落库在 WorkspaceView，经 props 下传显示在标题行） */
+  /** 保存状态（真实落库在 WorkspaceView，经 props 下传显示在页面头） */
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   lastSavedAt?: Date | null
 }>()
 
-const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus', 'preview-segment-edit'])
+const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
 // 警示：必须直接传入响应式 props 对象；展开 {...props} 会在 setup 时拍快照，
 // 导致 composable 内的 computed/watch 永远停留在初始值（编辑器不显示）。
 const viewModel = useChapterEditorContainer(props, emit)
@@ -57,10 +51,6 @@ defineExpose({
     :open-critique-modal="viewModel.openCritiqueModal"
     :publish-chapter="viewModel.publishChapter"
     :selected-chapter="viewModel.selectedChapter.value"
-    :preview-html="props.previewHtml"
-    :preview-editable="props.previewEditable"
-    :preview-segment-index="props.previewSegmentIndex"
-    @preview-segment-edit="(text: string) => emit('preview-segment-edit', text)"
     :set-editor-ref="viewModel.setEditorRef"
     :show-publish-modal="viewModel.showPublishModal.value"
     :book-id="props.bookId"

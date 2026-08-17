@@ -3,7 +3,7 @@
 
 AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许可证：AGPL-3.0。
 
-> **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：入口暂存但不再演进，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
+> **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：前端 UI 入口已随 2026-08-17 写作台重构整体移除，引擎本体暂留后端，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
 >
 > **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计、**世界速记 Alt+N**（一句话入账）、**情境浮卡**（选中/点击提及三秒查底细）、**候选回流收件箱**（写完确认世界变化）。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
 
@@ -109,7 +109,7 @@ frontend/
     ├── components/         # 通用组件（⚠ 不受分层约束，部分直接 import services）
     ├── extensions/         # TipTap 扩展
     ├── features/           # 分层架构：*/containers + */presentation
-    │   ├── generation/     # useGenerationSession 步进会话 + Stepper/BeatSlotCardView/StoryboardPanel/BranchDecisionPanel + Refinery UI
+    │   ├── generation/     # useGenerationSession 会话状态机 + useAdaptiveAssist 辅助层 + SparkDock/BeatCardDock/IgnitionCard/Refinery UI（BS-ADF 步进面板已删除）
     │   ├── workspace/ chapter-editor/ canon/ bible/ outline/ library/ insights/ novel-wizard/ app/ asset-panel/
     └── services/api/  domain/（业务 API，index.ts 聚合，含 bookApi/chapterApi/bsadfApi/refineryApi 等）/ stream/（SSE）/ transport/（HTTP）
 
@@ -128,7 +128,7 @@ data/ logs/ .venv/
 | 引擎 | 端点 | 主类/模块 | 用途 |
 |------|------|------|------|
 | ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`+`/model` | `adaptive.py` + `settings_bundle.py` + `adaptive_prompts.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
-| **BS-ADF** | `/generate-bsadf`（步进）+`/advance-beat`+`/stepping-run/{id}/state`+`/rerender-beat`+`/cancel-run` | `BSAdfWorkflow`（`workflows/bsadf/`） | **⚠ 弃置中**（legacy「规划本章」入口暂存；思想迁移至 adaptive 后归档） |
+| **BS-ADF** | `/generate-bsadf`（步进）+`/advance-beat`+`/stepping-run/{id}/state`+`/rerender-beat`+`/cancel-run` | `BSAdfWorkflow`（`workflows/bsadf/`） | **⚠ 弃置中**（前端入口已随写作台重构移除；思想迁移至 adaptive 后归档） |
 | ADF | `/generate-adf` | `ADFWorkflow`（`workflows/adf/`） | 引擎本体，前端已无 UI 入口 |
 | Refinery | `/refinery/diagnose`+`/confirm` | `Refinery`（`services/refinery/`） | 独立精修（对任意草稿） |
 | 章节优化 | `/optimize_chapter`+`/optimize_selection` | `refine_draft`（`workflows/refining.py`） | 章节重写/局部优化（前端在用） |
@@ -147,7 +147,8 @@ data/ logs/ .venv/
   - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长；另触发 event_scout 抽候选事件进收件箱）
   - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引 + 整章候选抽取）；`GET /adaptive/model` 世界模型快照（前端无调用方）
 - **设定数据双向驱动**（`settings_bundle.py`）：章级绑定 + 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用；**世界设定层优先**（见下节 world_bridge——世界页有实体时 bundle 的角色/资产/地点/关系切换为 world 数据 + 叙事时刻推演状态，无实体回退旧表）。写作中感知 + 后台方向权重规划两个层面同时利用。
-- **画布即事实源**：adaptive 模式预览关闭（`generationPreviewHtml` 返回 null），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
+- **画布即事实源**：写作台无生成预览层（旧 preview 属性链已随写作台重构移除），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
+- **写作台「纸面优先」布局**（2026-08-17 重构）：880px 纸列是唯一主角——列内页面头（`第N章` label + 衬线大标题 input + ⋯ 章节动作菜单：发布/灵感/审阅/全文格式整理，经 `editorHandle.formatWholeDocument`），正文区**无常驻格式工具栏**（选中文字浮窗保留 B/I/U + AI 润色/改写 + 黄金片段/黑名单；TipTap 排版扩展仍加载，仅删工具栏 UI，避免旧章节格式在下次保存被剥除）。顶栏极薄化：状态文案（adaptive 跟 aiLane）+ AI 辅助开关/快捷键/抽屉三按钮。右缘副驾抽屉收敛为三 tab：**此刻**（世界场景切片+候选收件箱）/ **章节**（大纲编辑、意图反推、字数与出场角色统计、Canon 脑图跳转）/ **审校**（完稿审计按钮+报告、沉淀抽取结果、Refinery 润色、读者反馈、手术历史、审校结论），Ctrl+1/2/3 切换、Ctrl+\\ 固定；完稿审计报告到达时抽屉自动滑出一次。润色与读者反馈门槛由 `stage` 门控改为**本章有正文**（`chapterHasContent`），修活 adaptive 下（stage 恒 idle）永不可达的死入口。BS-ADF 步进 UI（GenerationStepper/StoryboardPanel/BranchDecisionPanel/CurrentTaskBar/BeatSlotCardView/FocusAssetsPanel/GhostTimeline/BranchBanner/AutoCutHint/GenerationOverlay/PlanConfirmModal/TierSelector）已整体删除，`useGenerationSession` 内步进逻辑休眠保留（无 UI 调用方）。
 - **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为心跳供给 + 章级兜底）。
 
 ### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
@@ -158,17 +159,17 @@ data/ logs/ .venv/
 - **编辑入口收敛（M4/M5）**：设定页角色/资产/地图（M4）+ 伏笔账本/期待账本/世界观（M5）分区已退役为跳转卡（`WorldRedirectCard`，带 `?entity=`/`?panel=` 深链）；保留分区：文风/笔记/设置。旧面板 CharacterPanel/MapSettings/asset-panel/ForeshadowingPanel/ReaderMirrorPanel/WorldviewSettings 已删除。M5 世界页新增承载（M6 起位于图标栏抽屉/胶囊条）：「伏笔」抽屉（`ForeshadowSection` 全量账本+状态筛选，未锚定伏笔的唯一可见处）+ `ForeshadowDetailDrawer`（就地编辑/未锚定一键锚游标/回收/废弃/删除 undo）、「期待」摘要 + `ReaderMirrorModal`（火候看板/张力曲线整面板迁入）、胶囊条「世界观」+ `WorldviewModal`（2s 防抖自动保存/导入导出）；伏笔/期待/世界观编辑后统一广播 `velluma:world-refresh` 刷新写作页切片。
 - **章级在场改推演**：原角色/资产/地点勾选绑定（chapter_entities 等）退役——「本章在场」由事件按叙事时刻推演（`GET /world/state-for-chapter/{chapter_id}`，SceneSettingsPanel 只读展示）。entity-mention（@/#）建议与创建均走 world（无世界数据回退旧表），不再写章级绑定。
 - **AI 写路径（M4）**：`content_extractor.commit_extraction` 与 adaptive 沉淀落库改写 world_*（角色档案全文进 `props.background`——**迁移而非兼容**：启动数据迁移已把历史 `props.legacy_profile` 并入 background 并摘键，读写两侧均无 legacy 回退）；**未迁移书首次 AI 落库前自动执行幂等迁移**（防 world 优先切换后旧角色从生成上下文失踪）。伏笔（PlotLedger 共享表）与向量记忆不变。
-- **写作桥（world-writing-bridge，W1-W5lite 已上线，`docs/world-writing-bridge.md`）**：沙盘价值送货到写作现场——①`GET /world/scene-slice`「此刻此地」切片条（Inspector 设定 tab，替换旧 SceneSettingsPanel；在场/脚下含疆域控制方/相遇/头顶的线，与生成上下文同源）；②`GET /world/context-card` 情境浮卡（选中文本/点击提及）；③`POST /world/parse-event` Alt+N 世界速记（解析/落库分离红线）；④候选回流：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销；⑤保鲜三时机（章节切换/心跳 `world_version`/窗口聚焦，`useWorldSlice` 单例）；⑥深链往返 `?entity|loc|fs=&time=&from=chapter&chapter=`（世界页「返回本章」；`?fs=` 开伏笔详情抽屉，`?panel=expectations|worldview` 开对应账本模态，写作页「头顶的线」伏笔/期待行可点击）；⑦本章场景钉 `chapters.scene_location_id`。事件解耦：`velluma:world-version` / `velluma:world-refresh` / `velluma:quick-note`。
+- **写作桥（world-writing-bridge，W1-W5lite 已上线，`docs/world-writing-bridge.md`）**：沙盘价值送货到写作现场——①`GET /world/scene-slice`「此刻此地」切片条（副驾抽屉「此刻」tab，替换旧 SceneSettingsPanel；在场/脚下含疆域控制方/相遇/头顶的线，与生成上下文同源）；②`GET /world/context-card` 情境浮卡（选中文本/点击提及）；③`POST /world/parse-event` Alt+N 世界速记（解析/落库分离红线）；④候选回流：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销；⑤保鲜三时机（章节切换/心跳 `world_version`/窗口聚焦，`useWorldSlice` 单例）；⑥深链往返 `?entity|loc|fs=&time=&from=chapter&chapter=`（世界页「返回本章」；`?fs=` 开伏笔详情抽屉，`?panel=expectations|worldview` 开对应账本模态，写作页「头顶的线」伏笔/期待行可点击）；⑦本章场景钉 `chapters.scene_location_id`。事件解耦：`velluma:world-version` / `velluma:world-refresh` / `velluma:quick-note`。
 - **待办**：旧表彻底冻结（audit/publish/inspiration/chapter_optimization 仍读旧表）、Canon 与世界页的归属关系（脑图页铁律设定是否并入）、`docs/world-unified-settings.md` §5 的时间线事件→走向卡规划桥、写作桥 W5 缓行件（比例尺距离层/spatial_brief、相遇→走向卡桥、世界页全图读者滤镜——见桥接文档分期表）。
 
 ### BS-ADF 步进模式（⚠ 弃置中——迁移源，勿新增功能）
 
-> **弃置策略**：前端入口（InspectorPanel「规划」tab「生成本章」）暂存但不再演进；验证过的思想按需迁移进 adaptive 流后，引擎整体归档至 `backend/_deprecated/`。**迁移候选**：DDE 真岔路判断（adaptive 现为柔性走向卡）、章级规划层（脉络轨/锚点/定档/槽位卡，adaptive 无对应物）、残句门禁与一致性手术等修复型护栏（adaptive finish 只审计不修复）、RAG 检索管线与观测落库（trace/RunRecorder——adaptive 端点现无成本核算）。**已知待补的洞**：Refinery 润色入口要求 `stage==='done'`（`InspectorPanel.vue`），adaptive 模式 stage 恒 idle，章节永远进不了润色/读者反馈。
+> **弃置策略**：前端 UI 入口（原 InspectorPanel「规划」tab「生成本章」及全部步进面板）已随 2026-08-17 写作台重构整体删除，后端引擎暂留供思想迁移取材；验证过的思想按需迁移进 adaptive 流后，引擎整体归档至 `backend/_deprecated/`。**迁移候选**：DDE 真岔路判断（adaptive 现为柔性走向卡）、章级规划层（脉络轨/锚点/定档/槽位卡，adaptive 无对应物）、残句门禁与一致性手术等修复型护栏（adaptive finish 只审计不修复）、RAG 检索管线与观测落库（trace/RunRecorder——adaptive 端点现无成本核算）。**已修复的洞**：Refinery 润色/读者反馈入口原要求 `stage==='done'`，adaptive 模式 stage 恒 idle 导致永不可达——写作台重构已改为「本章有正文」门槛（`InspectorPanel.vue` `chapterHasContent`）。
 
 链路：`generate-bsadf` 跑到 Phase 4b 暂停 → 常驻 `stepping_loop`（`stepping_runtime.py`）→ `STEPPING_INITIALIZED`（run_id + 全量槽位卡）→ **逐段**「渲染 → `BEAT_RENDER_READY` 挂起等裁决 → `/advance-beat` → 下一段」→ 末段锁死 → Phase 4.5-7.5 后处理 → `COMPLETE`（全量收尾字段）。
 
 - **裁决动作**（`AdvanceBeatRequest.action`）：`pass`/`edit`/`branch`/`skip`/`lock_with_text`/`back`，带 `beat_id` 校验（陈旧动作丢弃）。前端「接受」dirty 时自动改走 `lock_with_text`，删空文本路由 `skip`。
-- **岔路门**：渲染前卡挂 DDE 岔路且未选走向 → `BEAT_BRANCH_CHOICE` 暂停（`BranchDecisionPanel`），取代 Track A 静默/Track B 弹窗。Track A/B 现为休眠兼容路径（`enable_stepping=false` 才进入）。
+- **岔路门**：渲染前卡挂 DDE 岔路且未选走向 → `BEAT_BRANCH_CHOICE` 暂停（原 `BranchDecisionPanel`，UI 已随写作台重构删除），取代 Track A 静默/Track B 弹窗。Track A/B 现为休眠兼容路径（`enable_stepping=false` 才进入）。
 - **请求开关**（`schemas/bsadf.py`）：前端固定开 `enable_stepping`+`enable_outline_self_check`+`enable_memory_ingestion`（`useGenerationSession.ts:1193-1207`）；`track` 步进模式忽略，前端已不传。
 - **BeatSlotCard 硬契约**（`workflows/bsadf/types.py`，13 字段）：`core_plot_event`/`key_anchors`/`text_carrier` + `outline_beat` + `branch_directive` + 内部字段。禁词/心理/感官限制已下沉为渲染器静态 system prompt（`bsadf_prompts.py` `_SLOT_RENDER_SYSTEM`），不再逐卡携带。
 - **DDE**（`workflows/bsadf/dde/`，全章 1×creative）：判断本章是否有剧情走向级真实岔路；无则放行。`slot_mutator` 写走向入 `branch_directive`，**绝不碰**硬契约字段。

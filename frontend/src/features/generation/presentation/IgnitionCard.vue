@@ -35,7 +35,7 @@ const emit = defineEmits<{
     </template>
     <template v-else>
       <div class="ignition-card__title">本章还是白纸</div>
-      <div class="ignition-card__sub">先去「规划」写两句大纲，就能让 AI 帮你开个头</div>
+      <div class="ignition-card__sub">先在副驾「章节」页写两句大纲，就能让 AI 帮你开个头</div>
       <div class="ignition-card__actions">
         <button class="ignition-card__btn" @click="emit('dismiss')">我自己写</button>
       </div>

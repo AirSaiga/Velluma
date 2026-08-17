@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
- * 写作台（V3.1 F2 三栏重构，规格 §4）。
+ * 写作台（NLE-ADF 3.0「纸面优先」重构）。
  *
- * 三栏布局：
- * - 左栏 Binder：章节导航（树/列表 + 状态徽标 + 新建章节）
- * - 中栏：TipTap 编辑器（复用 ChapterEditorContainer）+ 状态栏
- *   生成进行中时，渲染文直接灌入编辑器做只读预览（段级隔离），
- *   编辑器下方显示 GenerationOverlay 一行状态条
- * - 右栏 Inspector：规划/精修/反馈/Canon 四 tab（大纲/标题编辑在「规划」tab）
+ * 布局：
+ * - 左栏 Binder：章节导航（列表 + 状态徽标 + 新建/导入/分析）
+ * - 中栏：纸面画布（ChapterEditorContainer）+ 超薄顶栏（状态文案 + AI 辅助/快捷键/抽屉）
+ *   + 底部状态栏（字数 + 保存状态）；作者写的即真实文档，无生成预览投影
+ * - 右缘副驾抽屉：此刻 / 章节 / 审校 三 tab（InspectorPanel）
  *
  * splitpanes 提供可拖拽分隔（依赖已装）。
  */
@@ -22,16 +21,11 @@ import PerceptionBand from '../presentation/PerceptionBand.vue'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
 import ExtractionModal from '../../extraction/containers/ExtractionModal.vue'
 import InspectorPanel from './InspectorPanel.vue'
-import GenerationOverlay from '../../generation/presentation/GenerationOverlay.vue'
 import SparkDock from '../../generation/presentation/SparkDock.vue'
 import BeatCardDock from '../../generation/presentation/BeatCardDock.vue'
 import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
-import GhostTimeline from '../../generation/presentation/GhostTimeline.vue'
-import BranchBanner from '../../generation/presentation/BranchBanner.vue'
-import AutoCutHint from '../../generation/presentation/AutoCutHint.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
-import { useTimelineModel } from '../../generation/composables/ghostTimelineModel'
 import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
 import { ghostActive } from '../../generation/composables/useGhostDraft'
@@ -43,7 +37,6 @@ import { loadChapterDraft, clearChapterDraft } from '../../chapter-editor/useCha
 import { countChapterWords, stripHtmlToText } from '../../../shared/utils/htmlText'
 import { formatGenerationError } from '../../../shared/utils/errorText'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
-import { buildGenerationPreviewHtml } from '../../generation/composables/buildGenerationPreview'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -209,31 +202,7 @@ function toggleAssist() {
 // 快捷键速查弹层
 const showShortcuts = ref(false)
 
-// 生成进行中：stage 非 idle（覆盖面板叠加在编辑器上，物理遮挡使其不可操作）
-const isGenerating = computed(() =>
-  session.generating.value && session.stage.value !== 'idle',
-)
-
-// 生成预览：渲染文并入正文编辑框（只读，段级隔离；完成/取消后自动回落章节正文）
-// NLE-ADF 2.0 作者模式：作者直接写在真实文档里（碎片/幽灵草稿即画布），
-// 预览投影必须关闭——否则预览会盖住画布、幽灵草稿无处安放。
-// NLE-ADF 3.0 自适应模式同理：画布即唯一事实源，预览投影必须关闭。
-const generationPreviewHtml = computed(() =>
-  (session.authoringEnabled.value || session.adaptiveMode.value) ? null : buildGenerationPreviewHtml(session),
-)
-
-// 主编辑器直改：步进裁决窗口期（就绪段等推进）预览可编辑——作者直接在
-// 正文编辑器里改当前段，改动经 preview-segment-edit 回写 session.segmentTexts，
-// 接受时自动走 lock_with_text 随本段定稿。渲染中/岔路门/其余阶段照旧只读。
-const previewEditable = computed(() =>
-  generationPreviewHtml.value != null &&
-  session.stage.value === 'beat_stepping' &&
-  !!session.readyBeatId.value &&
-  !session.generating.value,
-)
-const previewSegmentIndex = computed(() =>
-  previewEditable.value ? (session.readyBeatCard.value?.segment_index ?? null) : null,
-)
+// 画布即事实源：作者写的即真实文档，无生成预览投影（旧预览链已随步进 UI 移除）。
 
 // 保存状态（底栏 + 编辑器标题行显示；实际写库在下方 handleUpdateChapter）
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -409,19 +378,15 @@ function _drawerKeyHandler(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', _drawerKeyHandler))
 onBeforeUnmount(() => window.removeEventListener('keydown', _drawerKeyHandler))
 
-// 裁决态自动滑出抽屉（UX 修复：裁决控制面全在抽屉内，此前无可见入口=可发现性事故）。
-// 用 hover 态弹出（不 pin、不推挤画布）；一次裁决会话只自动弹一次
-// （作者手动关过就不在逐拍间反复弹）；到终态时若仍是自动弹出态则收回。
-const ADJUDICATION_STAGES = new Set(['beat_stepping', 'beat_branch_choosing', 'beat_pending', 'tier_decided'])
+// 完稿审计报告到达时自动滑出抽屉一次（报告在抽屉「审校」tab；作者手动关过则不反复弹）。
+// 用 hover 态弹出（不 pin、不推挤画布）。
 let _drawerAutoOpened = false
-watch(() => session.stage.value, (s) => {
-  const adjudicating = ADJUDICATION_STAGES.has(s)
-  if (adjudicating && !_drawerAutoOpened && !drawerOpen.value) {
+watch(() => session.finishReport.value, (report) => {
+  if (report && !_drawerAutoOpened && !drawerOpen.value) {
     drawerHover.value = true
     _drawerAutoOpened = true
-  } else if (!adjudicating && _drawerAutoOpened && (s === 'idle' || s === 'done' || s === 'error')) {
+  } else if (!report) {
     _drawerAutoOpened = false
-    if (!drawerPinned.value) drawerHover.value = false
   }
 })
 
@@ -438,34 +403,26 @@ watch(chapterEditorHandle, (editor, prev) => {
   editor?.on('update', _onTypingActivity)
 }, { immediate: true })
 
-// 微观状态栏：NLE 状态标签 + 锁死进度（与时间线共用数据模型）
-const timeline = useTimelineModel(session)
+// 顶栏状态文案：只保留与 adaptive / 精修相关的进行态（旧步进管线各阶段的标签已随其 UI 移除）。
+// adaptive 模式下跟随 aiLane；其余时间只在精修/出错时显字，平时留空不打扰。
 const nleStateLabel = computed(() => {
+  if (session.adaptiveMode.value) {
+    switch (session.aiLane.value) {
+      case 'perceiving': return '感知中'
+      case 'suggesting': return '走向已备好'
+      case 'assisting': return '续写中'
+      case 'digesting': return '沉淀中'
+      case 'analyzing': return '审计中'
+      default: return ''
+    }
+  }
   switch (session.stage.value) {
-    case 'tier_classifying': return '规划本章'
-    case 'setup_growing': return '生长分镜'
-    case 'beat_authoring': return '自由涌现'
-    case 'beat_rendering':
-      // 作者模式下推进过渡期（已锁段在渲染位）= 无感沉淀进行中
-      return session.authoringEnabled.value &&
-        session.lockedBeatIds.value.has(session.renderingBeatId.value || '')
-        ? '沉淀本拍'
-        : 'AI 渲染中'
-    case 'beat_stepping': return '待你裁决'
-    case 'beat_branch_choosing': return '抉择岔路'
-    case 'assembling':
-    case 'refining':
-    case 'auditing': return '后处理'
-    case 'done': return '已完成'
+    case 'refining': return '精修中'
+    case 'auditing': return '审校中'
     case 'error': return '生成失败'
     default: return ''
   }
 })
-const nleProgress = computed(() =>
-  timeline.timelineVisible.value
-    ? `锁死 ${timeline.lockedCount.value}/${timeline.totalCount.value}`
-    : '',
-)
 
 // Spark Dock 兜底件已移除：原注入的是角色名（"林尘"），与卡片舱"镜头特写碎片"
 // 定位冲突（碎片应是 6-12 字画面，非角色名）。卡片舱现仅显示后端 dock_generator
@@ -643,7 +600,7 @@ async function batchDeleteChapters() {
   const ok = await showConfirm({
     title: '批量删除章节',
     message: `确定删除选中的 ${ids.length} 个章节吗？`,
-    warning: '章节正文、节拍与铺垫结构将一并删除，不可恢复。',
+    warning: '章节正文将一并删除，不可恢复。',
   })
   if (!ok) return
   batchDeleting.value = true
@@ -719,7 +676,7 @@ async function confirmDeleteChapter(ch: Chapter) {
   const ok = await showConfirm({
     title: '删除章节',
     message: `确定删除第 ${ch.chapter_number} 章「${ch.title || ch.chapter_name || '未命名'}」吗？`,
-    warning: '章节正文、节拍与铺垫结构将一并删除，不可恢复。',
+    warning: '章节正文将一并删除，不可恢复。',
   })
   if (!ok) return
   try {
@@ -835,19 +792,14 @@ async function confirmDeleteChapter(ch: Chapter) {
       <!-- 中栏：编辑器 + 状态栏 -->
       <Pane :size="100 - splitSizes[0]" :min-size="30" class="editor-pane">
         <main class="editor-area">
-          <!-- NLE-ADF 2.0 顶部微观状态栏：章节名 + NLE 状态 + 锁死进度（打字时降到 10% 透明） -->
+          <!-- 超薄顶栏：进行态状态文案 + 显性入口三件套（AI 辅助 / 快捷键 / 副驾抽屉）。
+               打字时降到 10% 透明（沉浸）；章节名与标题在纸列页面头展示。 -->
           <div
             v-if="selectedChapter"
             class="nle-topbar"
             :class="{ 'nle-topbar--dim': isTyping }"
           >
-            <span class="nle-topbar__chapter">
-              {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}<template v-if="selectedChapter.title"> · {{ selectedChapter.title }}</template>
-            </span>
             <span v-if="nleStateLabel" class="nle-topbar__state">{{ nleStateLabel }}</span>
-            <span v-if="nleProgress" class="nle-topbar__progress">{{ nleProgress }}</span>
-            <!-- 显性入口三件套：AI 辅助开关 / 快捷键速查 / 副驾抽屉
-                 （抽屉此前只有 8px 隐形触发条+Ctrl+\，核心功能无可见入口） -->
             <button
               class="nle-topbar__btn"
               :class="{ 'nle-topbar__btn--active': assistEnabled }"
@@ -872,9 +824,7 @@ async function confirmDeleteChapter(ch: Chapter) {
               <Icon name="panel-right" :size="13" />
             </button>
           </div>
-          <!-- NLE-ADF 2.0 岔路门画布横幅（有岔路时顶部滑入；唯一允许打断心流的组件） -->
-          <BranchBanner :session="session" />
-          <!-- 编辑器（复用 ChapterEditorContainer 全套）；生成中叠加覆盖面板 -->
+          <!-- 编辑器（复用 ChapterEditorContainer 全套） -->
           <div v-if="selectedChapter" class="editor-host">
             <div class="editor-main">
             <ChapterEditor
@@ -883,22 +833,11 @@ async function confirmDeleteChapter(ch: Chapter) {
               :characters="characters"
               :api-config="apiConfig"
               :book-id="currentBook?.id"
-              :preview-html="generationPreviewHtml"
-              :preview-editable="previewEditable"
-              :preview-segment-index="previewSegmentIndex"
               :save-status="saveStatus"
               :last-saved-at="lastSavedAt"
-              @preview-segment-edit="session.setReadySegmentText"
               @update-chapter="handleUpdateChapter"
               @refresh-characters="handleRefreshCharacters"
               @editor-entity-focus="handleEntityFocus"
-            />
-            <!-- 生成状态条：编辑器下方一行进度（含取消）+ 实时正文流；失败态保持展示（含重试/关闭） -->
-            <GenerationOverlay
-              v-if="isGenerating || session.stage.value === 'error'"
-              :session="session"
-              @cancel="session.cancel"
-              @retry="session.retry"
             />
             </div>
             <!-- 左缘感知带：写中常驻，Canon 感知（角色/伏笔/矛盾）；放正文左侧避开右边抽屉 -->
@@ -943,8 +882,6 @@ async function confirmDeleteChapter(ch: Chapter) {
           <!-- 状态栏 -->
           <footer v-if="selectedChapter" class="status-bar" :class="{ 'status-bar--dim': isTyping }">
             <span>{{ wordCount }} 字</span>
-            <!-- NLE-ADF 2.0 底栏幽灵时间线（碎片节点 ●◐○ + x/N；仅步进会话激活时出现） -->
-            <GhostTimeline :session="session" />
             <span v-if="saveStatus === 'saving'">保存中…</span>
             <span v-else-if="saveStatus === 'saved'" class="muted">已保存</span>
             <span v-else-if="saveStatus === 'error'" class="status-error">保存失败（已存本地草稿）</span>
@@ -959,10 +896,8 @@ async function confirmDeleteChapter(ch: Chapter) {
             @ignite="onIgnite"
             @dismiss="onIgnitionDismiss"
           />
-          <!-- NLE-ADF 3.0 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
+          <!-- NLE-ADF 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
           <ThinkingIndicator />
-          <!-- 软切淡提示（写过头自动收束时浮现 8s，可撤回合并） -->
-          <AutoCutHint :session="session" />
           <!-- 快捷键速查弹层（顶栏 ? 按钮触发） -->
           <ShortcutsCheatsheet v-if="showShortcuts" @close="showShortcuts = false" />
         </main>
@@ -1355,10 +1290,10 @@ async function confirmDeleteChapter(ch: Chapter) {
   flex-direction: row; /* 正文主区 + 右缘感知带并列 */
   overflow: hidden;
   min-height: 0;
-  position: relative; /* 供 GenerationOverlay 绝对定位 */
+  position: relative;
 }
 
-/* 正文主区（ChapterEditor + GenerationOverlay）；感知带在其右侧并列 */
+/* 正文主区（ChapterEditor）；感知带在其右侧并列 */
 .editor-main {
   flex: 0 1 auto;
   max-width: 60rem;
@@ -1465,11 +1400,8 @@ async function confirmDeleteChapter(ch: Chapter) {
 .nle-topbar__btn--active {
   color: var(--accent-500);
 }
-/* 锁死进度隐藏时把按钮组推到右侧（进度在时由 __progress 的 margin-left:auto 推） */
+/* 状态文案缺席时把按钮组推到右侧 */
 .nle-topbar__btn:first-of-type {
   margin-left: auto;
-}
-.nle-topbar__progress ~ .nle-topbar__btn:first-of-type {
-  margin-left: 0;
 }
 </style>

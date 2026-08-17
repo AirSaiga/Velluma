@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import RichTextEditor from '../../../components/RichTextEditor.vue'
 import PublishModal from './PublishModal.vue'
-import { extractSegmentTextFromPreviewHtml } from '../../generation/composables/buildGenerationPreview'
+import Icon from '../../../components/Icon.vue'
 import type { Chapter } from '../../../types'
 import type { EntityFocusPayload } from '../../../shared/types'
 
-// V3.1 清理：旧双轨生成 UI（智能生成按钮/生成参数弹窗/节拍预览弹窗/澄清与完成弹窗/
-// 生成进度遮罩）已移除。生成统一由 Inspector「本章」tab 的 useGenerationSession 驱动。
+// 纸面优先：标题/动作收敛进纸列页面头（大标题 + ⋯ 菜单），编辑器本体无常驻工具栏。
 const props = defineProps<{
   characterUpdates: Array<{
     character_id: string
@@ -29,12 +28,6 @@ const props = defineProps<{
   openCritiqueModal: () => void
   publishChapter: () => void
   selectedChapter: Chapter | null
-  /** 生成预览 HTML（非 null 时编辑器默认只读显示预览，替代章节正文） */
-  previewHtml?: string | null
-  /** 主编辑器直改：步进裁决窗口期预览可编辑（当前就绪段可改，其余段照旧滚动预览） */
-  previewEditable?: boolean
-  /** 主编辑器直改：当前可编辑段的 segment_index（段标头定位用） */
-  previewSegmentIndex?: number | null
   setEditorRef: (editor: any) => void
   showPublishModal: boolean
   bookId?: string
@@ -42,14 +35,9 @@ const props = defineProps<{
   lastSavedAt?: Date | null
 }>()
 
-const emit = defineEmits<{
-  /** 主编辑器直改：作者在预览中编辑了当前段正文（已提取为 \n\n 纯文本） */
-  (e: 'preview-segment-edit', text: string): void
-}>()
-
 const saveStatusLabel = computed(() => {
   switch (props.saveStatus) {
-    case 'saving': return '保存中...'
+    case 'saving': return '保存中…'
     case 'saved': return props.lastSavedAt ? `已保存 ${formatTime(props.lastSavedAt)}` : '已保存'
     case 'error': return '保存失败'
     default: return ''
@@ -70,93 +58,46 @@ watch(editorRef, (editor) => {
   props.setEditorRef(editor)
 })
 
-/**
- * 内容更新路由：主编辑器直改（previewEditable）时，整篇预览 HTML 中只提取
- * 当前就绪段的正文抛给上层（session.setReadySegmentText），绝不走
- * handleContentUpdate 写章节正文——预览是 session 状态投影，写库会污染章节。
- * 提取失败（作者误删段标头等）跳过本次同步，不阻断输入。
- */
-function onContentUpdate(html: string) {
-  if (props.previewEditable && props.previewHtml != null) {
-    if (props.previewSegmentIndex != null) {
-      const text = extractSegmentTextFromPreviewHtml(html, props.previewSegmentIndex)
-      if (text != null) emit('preview-segment-edit', text)
-    }
-    return
-  }
-  props.handleContentUpdate(html)
+// ===== 页面头 ⋯ 菜单（章节动作：发布 / 灵感 / 审阅 / 格式整理）=====
+const actionMenuOpen = ref(false)
+const actionMenuRef = ref<HTMLElement | null>(null)
+
+function toggleActionMenu() {
+  actionMenuOpen.value = !actionMenuOpen.value
+}
+
+function onActionMenuOutsidePress(e: MouseEvent) {
+  if (!actionMenuOpen.value) return
+  const el = actionMenuRef.value
+  if (el && e.target instanceof Node && el.contains(e.target)) return
+  actionMenuOpen.value = false
+}
+onMounted(() => document.addEventListener('mousedown', onActionMenuOutsidePress))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onActionMenuOutsidePress))
+
+function menuPublish() {
+  actionMenuOpen.value = false
+  props.publishChapter()
+}
+function menuInspiration() {
+  actionMenuOpen.value = false
+  props.openInspirationModal()
+}
+function menuCritique() {
+  actionMenuOpen.value = false
+  props.openCritiqueModal()
+}
+function menuFormat() {
+  actionMenuOpen.value = false
+  editorRef.value?.formatWholeDocument?.()
 }
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden px-6 py-4 flex-1 min-h-0">
-    <div v-if="selectedChapter" class="max-w-[var(--editor-max-width)] w-full mx-auto flex flex-col h-full flex-1 min-h-0 space-y-3">
-      <!-- 章节标题行 -->
-      <div class="flex items-center justify-between gap-3 flex-shrink-0">
-        <div class="flex-1 flex items-center gap-2">
-          <span class="text-xl font-heading font-bold text-[var(--text-primary)] shrink-0">
-            {{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}
-          </span>
-          <input
-            :value="selectedChapter.title"
-            @input="handleTitleInput"
-            class="flex-1 text-xl font-heading font-semibold text-[var(--text-primary)] bg-transparent hover:bg-black/5 focus:bg-[var(--bg-canvas)] focus:ring-1 focus:ring-[var(--accent-500)] focus:outline-none px-3 py-1.5 rounded-lg transition-all placeholder:text-[var(--text-muted)] placeholder:font-normal"
-            placeholder="输入章节标题..."
-          />
-          <span
-            v-if="saveStatusLabel"
-            class="text-[11px] text-[var(--text-muted)] transition-opacity"
-            :class="saveStatus === 'saving' ? 'opacity-100' : 'opacity-80'"
-          >
-            {{ saveStatusLabel }}
-          </span>
-        </div>
-        <div class="flex items-center gap-1 flex-shrink-0">
-          <button
-            @click="openInspirationModal"
-            title="获取灵感"
-            class="h-7 w-8 flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--accent-500)] hover:bg-accent-50 transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-          </button>
-          <button
-            @click="openCritiqueModal"
-            title="编辑审阅：毒舌编辑视角点评本章"
-            class="h-7 w-8 flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--accent-500)] hover:bg-accent-50 transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </button>
-        </div>
-        <button
-          @click="publishChapter"
-          :disabled="isPublishing"
-          class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 shadow-sm"
-          :class="selectedChapter.status === 'published'
-            ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200 hover:bg-emerald-100'
-            : 'bg-[var(--bg-primary)] text-ink-600 ring-1 ring-[var(--border-color)] hover:bg-parchment-100'"
-        >
-          <svg v-if="isPublishing" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <template v-else>
-            <svg v-if="selectedChapter.status === 'published'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-          </template>
-          {{ selectedChapter.status === 'published' ? '已发布 · 点击撤回' : '发布' }}
-        </button>
-      </div>
-
-      <!-- 章节大纲（编辑入口在上方章节卡横条）+ 编辑器区域 -->
-      <div class="relative rounded-2xl bg-parchment-50 shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
+  <div class="h-full flex flex-col overflow-hidden px-5 pt-2 pb-4 flex-1 min-h-0">
+    <div v-if="selectedChapter" class="max-w-[var(--editor-max-width)] w-full mx-auto flex flex-col h-full flex-1 min-h-0">
+      <!-- 纸列：页面头（章节名 + 大标题 + ⋯ 菜单）+ 正文画布 -->
+      <div class="paper relative rounded-2xl bg-parchment-50 shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isPublishing"
           class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-parchment-50/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
@@ -176,19 +117,64 @@ function onContentUpdate(html: string) {
           </div>
         </div>
 
+        <!-- 页面头：与正文同列宽（px-12），衬线大标题写在纸面上 -->
+        <header class="page-head flex-shrink-0">
+          <div class="page-head__meta">
+            <span class="page-head__chapter">{{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}</span>
+            <span v-if="selectedChapter.status === 'published'" class="page-head__published">已发布</span>
+            <span v-if="saveStatusLabel" class="page-head__save">{{ saveStatusLabel }}</span>
+            <div ref="actionMenuRef" class="page-head__actions">
+              <button
+                class="page-head__menu-btn"
+                :class="{ 'page-head__menu-btn--open': actionMenuOpen }"
+                title="章节动作"
+                @click="toggleActionMenu"
+              >
+                <Icon name="ellipsis" :size="16" />
+              </button>
+              <transition name="action-menu">
+                <div v-if="actionMenuOpen" class="action-menu" @mousedown.stop>
+                  <button class="action-menu__item" @click="menuPublish">
+                    <Icon name="arrow-up-tray" :size="13" />
+                    <span>{{ selectedChapter.status === 'published' ? '撤回发布' : '发布本章' }}</span>
+                  </button>
+                  <button class="action-menu__item" @click="menuInspiration">
+                    <Icon name="light-bulb" :size="13" />
+                    <span>获取灵感</span>
+                  </button>
+                  <button class="action-menu__item" @click="menuCritique">
+                    <Icon name="pencil-square" :size="13" />
+                    <span>编辑审阅</span>
+                  </button>
+                  <div class="action-menu__divider"></div>
+                  <button class="action-menu__item" :disabled="isFormatting" @click="menuFormat">
+                    <Icon name="sparkles" :size="13" />
+                    <span>{{ isFormatting ? '格式整理中…' : '智能格式整理' }}</span>
+                  </button>
+                </div>
+              </transition>
+            </div>
+          </div>
+          <input
+            :value="selectedChapter.title"
+            @input="handleTitleInput"
+            class="page-head__title"
+            placeholder="未命名章节"
+          />
+        </header>
+
         <RichTextEditor
           ref="editorRef"
           :id="selectedChapter.id"
           :book-id="bookId"
-          :model-value="previewHtml ?? (selectedChapter.content_text || selectedChapter.draft_text || '')"
-          @update:model-value="onContentUpdate"
+          :model-value="selectedChapter.content_text || selectedChapter.draft_text || ''"
+          @update:model-value="handleContentUpdate"
           @entity-focus-change="handleEditorEntityFocus"
           @request-format="handleFormatText"
           @request-partial-optimize="handlePartialOptimize"
-          :disabled="isEditorDisabled || (previewHtml != null && !previewEditable)"
-          :hide-toolbar="previewEditable"
+          :disabled="isEditorDisabled"
           :is-formatting="isFormatting"
-          placeholder="在此处开始写作或生成内容..."
+          placeholder="从这里开始写——Space 续写 · Alt+O 细纲 · Alt+N 记世界"
         />
       </div>
     </div>
@@ -214,32 +200,154 @@ function onContentUpdate(html: string) {
 </template>
 
 <style scoped>
-/* 模态框动画 */
-.modal-backdrop-enter-active,
-.modal-backdrop-leave-active {
-  transition: opacity 0.3s ease;
+/* ===== 纸面页面头：与正文同列（编辑器内容 px-12），标题写在纸面上 ===== */
+.page-head {
+  padding: 1.75rem 3rem 0;
 }
 
-.modal-backdrop-enter-from,
-.modal-backdrop-leave-to {
+.page-head__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+}
+
+.page-head__chapter {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.page-head__published {
+  font-size: 0.625rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  line-height: 1.4;
+}
+
+.page-head__save {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.page-head__actions {
+  position: relative;
+  margin-left: auto;
+}
+
+.page-head__menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  color: var(--text-muted);
+  cursor: pointer;
   opacity: 0;
+  transition: all 0.15s ease;
+}
+/* 平时收起，悬停纸面/焦点时浮现（画布安静优先） */
+.paper:hover .page-head__menu-btn,
+.page-head__menu-btn--open,
+.page-head__menu-btn:focus-visible {
+  opacity: 1;
+}
+.page-head__menu-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
-.modal-content-enter-active {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+.action-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 10rem;
+  padding: 0.25rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.625rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
 }
 
-.modal-content-leave-active {
-  transition: all 0.2s ease;
+.action-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4375rem 0.625rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+.action-menu__item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.action-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.action-menu__item :deep(svg) {
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
-.modal-content-enter-from {
+.action-menu__divider {
+  height: 1px;
+  margin: 0.25rem 0.375rem;
+  background: var(--border-color);
+}
+
+.action-menu-enter-active,
+.action-menu-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.action-menu-enter-from,
+.action-menu-leave-to {
   opacity: 0;
-  transform: scale(0.95) translateY(20px);
+  transform: translateY(-4px) scale(0.98);
 }
 
-.modal-content-leave-to {
-  opacity: 0;
-  transform: scale(0.98);
+/* 衬线大标题：写在纸面上，无边框，hover/focus 才显可编辑轮廓 */
+.page-head__title {
+  width: 100%;
+  margin-top: 0.375rem;
+  padding: 0.125rem 0;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+.page-head__title::placeholder {
+  color: var(--text-muted);
+  opacity: 0.55;
+  font-weight: 400;
+}
+.page-head__title:hover {
+  border-bottom-color: var(--border-color);
+}
+.page-head__title:focus {
+  outline: none;
+  border-bottom-color: var(--accent-500);
 }
 </style>

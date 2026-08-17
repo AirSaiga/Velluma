@@ -367,21 +367,8 @@ textarea,
   opacity: 0.1;
 }
 
-.nle-topbar__chapter {
-  color: var(--text-primary, #e0e2e8);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .nle-topbar__state {
   color: #34d399;
-}
-
-.nle-topbar__progress {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .status-bar--dim {
