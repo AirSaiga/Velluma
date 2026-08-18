@@ -39,15 +39,52 @@ engine.build_sqlite_engine 会自动调用；直接使用本模块编译产物�
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.sqltypes import Uuid as _SaUuid
+
+import uuid as _uuid
 
 _registered = False
 
 
+def _patch_uuid_str_tolerance() -> None:
+    """UUID 绑定的字符串容忍（2026-08-19 真机事故修复）。
+
+    根因：代码库大量调用点向 UUID 列传 str（repo 签名惯约 `book_id: str`）。
+    PG+asyncpg 驱动层容忍 str；SQLite 方言下通用 Uuid 的绑定处理器执行
+    `value.hex` → AttributeError('str' object has no attribute 'hex') → 500
+    （受害端点：/world/entities 等全部 world 查询）。
+
+    修法：包装原绑定处理器——str 入参先解析为 uuid.UUID 再走原逻辑；
+    uuid.UUID 入参零变化，PG 路径处理器为 None 时原样返回。进程级一次性
+    补丁（幂等），对所有方言无害。
+    """
+    if getattr(_SaUuid, "_velluma_str_tolerant", False):
+        return
+    _orig_bind_processor = _SaUuid.bind_processor
+
+    def _tolerant_bind_processor(self, dialect):
+        proc = _orig_bind_processor(self, dialect)
+        if proc is None:
+            return None
+
+        def process(value):
+            if isinstance(value, str):
+                value = _uuid.UUID(value)
+            return proc(value)
+
+        return process
+
+    _SaUuid.bind_processor = _tolerant_bind_processor
+    _SaUuid._velluma_str_tolerant = True
+
+
 def register_sqlite_type_compat() -> None:
-    """幂等注册 JSONB/Vector 在 SQLite 方言下的 DDL 编译。"""
+    """幂等注册 JSONB/Vector 在 SQLite 方言下的 DDL 编译 + UUID 字符串容忍。"""
     global _registered
     if _registered:
         return
+
+    _patch_uuid_str_tolerance()
 
     @compiles(JSONB, "sqlite")
     def _compile_jsonb_sqlite(element, compiler, **kw):  # pragma: no cover - 编译回调
