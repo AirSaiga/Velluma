@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { NodeViewProps } from '@tiptap/vue-3'
+import { spine } from '../features/workspace/composables/useChapterSpine'
 
 /**
  * 「细纲」胶囊的 NodeView（仓库首个 NodeView）。
@@ -25,6 +26,19 @@ const popStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' })
 
 const noteText = computed(() => String(props.node.attrs.note || ''))
 const collapsed = computed(() => !!props.node.attrs.collapsed)
+const anchorId = computed(() => String(props.node.attrs.anchorId || ''))
+
+/** 可挂的谋篇锚点（P1.4 M3：pending/未划掉的；无脉络时空列表） */
+const pendingAnchors = computed(() =>
+  (spine.value?.anchors || []).filter((a) => a.status !== 'dropped'),
+)
+const anchorLabel = computed(
+  () => pendingAnchors.value.find((a) => a.id === anchorId.value)?.text || '',
+)
+
+function setAnchor(id: string) {
+  props.updateAttributes({ anchorId: id })
+}
 
 /** 从速记里解析目标字数提示（「约300字」→「300 字」），解析不出给默认 */
 const targetHint = computed(() => {
@@ -127,6 +141,8 @@ onBeforeUnmount(() => {
     <span class="outline-note__icon">⚑</span>
     <span v-if="!collapsed && noteText" class="outline-note__text">{{ noteText }}</span>
     <span v-else-if="!collapsed" class="outline-note__text outline-note__text--empty">写细纲…</span>
+    <!-- 挂的谋篇锚点小签（P1.4 M3：这段速记服务于哪个锚点） -->
+    <span v-if="anchorLabel" class="outline-note__anchor" title="服务于谋篇锚点">{{ anchorLabel }}</span>
     <Teleport to="body">
       <div v-if="open" ref="popEl" class="outline-note-pop" :style="popStyle" contenteditable="false">
         <textarea
@@ -138,6 +154,23 @@ onBeforeUnmount(() => {
           @keydown="onKeydown"
         ></textarea>
         <div class="outline-note-pop__hint">扩写目标 {{ targetHint }} · Enter 落笔扩写 · Esc 收起</div>
+        <!-- 锚点选择（P1.4 M3 三锚定：服务于谋篇锚点的胶囊，扩写时锚点文本注入意图） -->
+        <div v-if="pendingAnchors.length" class="outline-note-pop__anchors">
+          <span class="outline-note-pop__anchors-label">服务于锚点</span>
+          <button
+            class="outline-note-pop__anchor-opt"
+            :class="{ 'is-on': !anchorId }"
+            @click="setAnchor('')"
+          >—</button>
+          <button
+            v-for="a in pendingAnchors"
+            :key="a.id"
+            class="outline-note-pop__anchor-opt"
+            :class="{ 'is-on': a.id === anchorId }"
+            :title="a.text"
+            @click="setAnchor(a.id)"
+          >{{ a.text }}</button>
+        </div>
         <div class="outline-note-pop__actions">
           <button class="outline-note-pop__btn outline-note-pop__btn--danger" @click="props.deleteNode()">删除</button>
           <button class="outline-note-pop__btn outline-note-pop__btn--primary" @click="emitExpand()">落笔扩写</button>

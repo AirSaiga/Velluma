@@ -22,6 +22,8 @@ export interface OutlineNoteRef {
   id: string
   note: string
   collapsed: boolean
+  /** 挂的谋篇锚点 id（P1.4 M3 三锚定；空=未挂） */
+  anchorId: string
   pos: number
   nodeSize: number
 }
@@ -36,6 +38,7 @@ export function findOutlineNotes(editor: any): OutlineNoteRef[] {
         id: String(node.attrs.id || ''),
         note: String(node.attrs.note || ''),
         collapsed: !!node.attrs.collapsed,
+        anchorId: String(node.attrs.anchorId || ''),
         pos,
         nodeSize: node.nodeSize,
       })
@@ -82,6 +85,11 @@ export const OutlineNoteNode = Node.create({
         default: false,
         parseHTML: (element) => element.hasAttribute('data-collapsed'),
       },
+      // 挂的谋篇锚点 id（P1.4 M3：胶囊「服务于 ⚑N」；扩写时锚点文本注入意图块）
+      anchorId: {
+        default: '',
+        parseHTML: (element) => element.getAttribute('data-anchor-id') || '',
+      },
       // 瞬态：新建/插入时置 true，NodeView 据此自动打开浮层（不入 HTML）
       editing: {
         default: false,
@@ -100,6 +108,7 @@ export const OutlineNoteNode = Node.create({
         'data-outline-note': '',
         'data-id': node.attrs.id,
         'data-note': node.attrs.note,
+        ...(node.attrs.anchorId ? { 'data-anchor-id': node.attrs.anchorId } : {}),
         ...(node.attrs.collapsed ? { 'data-collapsed': '' } : {}),
         class: 'outline-note' + (node.attrs.collapsed ? ' outline-note--collapsed' : ''),
       }),

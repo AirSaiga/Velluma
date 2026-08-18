@@ -509,3 +509,38 @@ textarea,
   color: var(--text-muted, #a89e90);
   cursor: default;
 }
+
+/* 细纲胶囊·锚点挂接（P1.4 M3 三锚定）——芯片小签 + 浮层选择器 */
+.outline-note__anchor {
+  font-size: 0.625rem;
+  padding: 0 6px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border-color, #e0dbd3);
+  color: var(--accent-500, #7c6aad);
+  white-space: nowrap;
+}
+.outline-note-pop__anchors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.outline-note-pop__anchors-label {
+  font-size: 0.625rem;
+  color: var(--text-muted, #a89e90);
+}
+.outline-note-pop__anchor-opt {
+  border: 1px dashed var(--border-color, #e0dbd3);
+  border-radius: 999px;
+  background: none;
+  font-size: 0.625rem;
+  color: var(--text-secondary, #6b6560);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.outline-note-pop__anchor-opt.is-on {
+  border-style: solid;
+  border-color: var(--accent-500, #7c6aad);
+  color: var(--accent-500, #7c6aad);
+}

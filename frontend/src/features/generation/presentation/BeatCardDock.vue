@@ -49,11 +49,13 @@ function onPick(card: DirectionCard | null) {
           v-for="(card, i) in beatCards"
           :key="i"
           class="beat-dock__card"
+          :class="{ 'beat-dock__card--branch': card.is_branch }"
           @click="onPick(card)"
         >
           <span class="beat-dock__num">{{ i + 1 }}</span>
           <span class="beat-dock__body">
             <span class="beat-dock__event">
+              <span v-if="card.is_branch" class="beat-dock__branch-mark" title="作者声明的岔路——选一个走向，即决此岔">⚡</span>
               {{ card.event }}
               <!-- 谋篇锚点小签（P1.4 M2 §3.3）：这条建议服务于作者的哪个锚点——可追溯 -->
               <span
@@ -130,6 +132,33 @@ function onPick(card: DirectionCard | null) {
 .beat-dock__card:hover {
   background: rgba(124, 106, 173, 0.1);
   border-color: rgba(124, 106, 173, 0.3);
+}
+
+/* 作者声明岔路（P1.4 M3）：硬提示——朱色描边+浅底，视觉权重区别日常柔性建议 */
+.beat-dock__card--branch {
+  border-color: #c2725a;
+  background: rgba(194, 114, 90, 0.08);
+}
+.beat-dock__card--branch:hover {
+  background: rgba(194, 114, 90, 0.16);
+  border-color: #c2725a;
+}
+.beat-dock__branch-mark {
+  color: #c2725a;
+  font-size: 12px;
+  margin-right: 2px;
+}
+/* 谋篇锚点小签（P1.4 M2）：这条建议服务于哪个锚点 */
+.beat-dock__anchor-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--accent-400, #9685c2);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--accent-500, #7c6aad);
+  cursor: pointer;
+  vertical-align: middle;
 }
 
 .beat-dock__card--free {

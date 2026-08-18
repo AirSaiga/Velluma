@@ -275,6 +275,7 @@ def build_outline_expand_prompt(
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
+    serves_anchor: str = "",
 ) -> tuple:
     """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
 
@@ -296,6 +297,7 @@ def build_outline_expand_prompt(
         memory_echoes: 向量召回的前情片段
         style_positive: 作者文风画像文本（空=零变化）
         author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
+        serves_anchor: 胶囊挂的谋篇锚点文本（P1.4 M3 三锚定：双端缝合+锚点意图；空=零变化）
 
     Returns:
         (system_prompt, user_prompt)
@@ -308,6 +310,8 @@ def build_outline_expand_prompt(
     system_prompt += _echoes_block(memory_echoes)
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    if serves_anchor:
+        intent_line += f"\n# 本段服务的谋篇锚点（作者定的方向，扩写要朝它去）\n{serves_anchor}"
     if after_text:
         after_block = f"""# 下文正文（你的结尾要自然引向它的开头）
 {after_text}

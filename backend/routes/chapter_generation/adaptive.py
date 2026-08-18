@@ -129,11 +129,12 @@ class StitchGhostRequest(BaseModel):
     rolling_prefix: str = Field("")
     mode: str = Field("stitch", description="stitch|continue|burst（段落级连写）|outline（细纲扩写）|open（点火）")
     picked_parts: List[str] = Field(default_factory=list)
-    target_chars: int = Field(120)
+    target_chars: int = 120
     chapter_intent: str = Field("")
     beat_guidance: str = Field("", description="burst 模式：选定走向卡的走向文本（空=自由发挥）")
     after_text: str = Field("", description="outline 模式：细纲之后的已写正文开头（双端缝合用，可空）")
     adopted_direction: Optional[str] = Field(None, description="作者缝合采纳的叙事方向（主线/伏笔/刻画/环境/关系），用于负反馈降权")
+    serves_anchor: str = Field("", description="outline 模式：胶囊挂的谋篇锚点文本（M3 三锚定；空=双端锚定不变）")
 
 
 # ============================================================
@@ -272,6 +273,7 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
     growth = content[prev_len:] if len(content) > prev_len else content[-500:]
 
     changed = False
+    near_branches = []
     try:
         import jieba.analyse  # noqa: F401（与 RAG 词法检索同一分词器）
 
@@ -282,6 +284,18 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
             if keywords and all(k in growth for k in keywords):
                 a["status"] = "hit"
                 changed = True
+            # 临近岔路（M3 §5）：带岔路标记的 pending 锚点，任一关键词已现身
+            # （写到附近了但还没兑现）→ 走向卡舱硬提示置顶其走向选项
+            elif (
+                keywords and any(k in growth for k in keywords)
+                and isinstance(a.get("branch"), dict)
+                and a["branch"].get("options")
+            ):
+                near_branches.append({
+                    "id": a.get("id", ""),
+                    "text": a.get("text", ""),
+                    "options": a["branch"]["options"],
+                })
     except Exception as e:
         logger.debug(f"[adaptive/spine] 进度判定失败（不阻塞心跳）: {e}")
 
@@ -302,6 +316,8 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
         "pending_count": pending_count,
         "hint": f"还剩 {pending_count} 个锚点" if pending_count else "锚点都已写到",
     }
+    if near_branches:
+        progress["near_branches"] = near_branches
     _SPINE_PROG_CACHE[cid] = (len(content), progress)
     orch._last_content_len = len(content)
     return progress
@@ -537,6 +553,7 @@ async def stitch_ghost(
         )
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
+        # M3 三锚定：胶囊挂了锚点时，锚点文本一并注入意图块
         system_prompt, user_prompt = build_outline_expand_prompt(
             outline_note=request.fragment.strip(),
             rolling_prefix=(request.rolling_prefix or "")[-500:].strip(),
@@ -548,6 +565,7 @@ async def stitch_ghost(
             memory_echoes=memory_echoes,
             style_positive=style_positive,
             author_samples=author_samples,
+            serves_anchor=request.serves_anchor.strip(),
         )
     elif request.mode == "burst":
         # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
@@ -727,11 +745,27 @@ class SpineAnchor(BaseModel):
     text: str
     source: str = "author"    # author | ai
     status: str = "pending"   # pending | hit | dropped
+    # 作者声明岔路（M3 §5）：该锚点处有剧情分岔，2-3 个走向短语；临近时走向卡舱硬提示
+    branch: Optional[Dict] = None   # {options: ["...", "..."]}
 
 
 class SpineUpdateRequest(BaseModel):
     intent: Optional[Dict] = None            # {text, source}
     anchors: Optional[List[SpineAnchor]] = None
+
+
+def _normalize_branch(branch: Optional[Dict]) -> Optional[Dict]:
+    """岔路标记校验（M3）：2-3 个走向短语（2-12 字），非法整个丢弃（宁缺勿脏）。"""
+    if not isinstance(branch, dict):
+        return None
+    options = []
+    for o in (branch.get("options") or [])[:3]:
+        t = str(o or "").strip()[:SPINE_ANCHOR_TEXT_MAX]
+        if len(t) >= SPINE_ANCHOR_TEXT_MIN:
+            options.append(t)
+    if len(options) < 2:
+        return None
+    return {"options": options}
 
 
 def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
@@ -753,6 +787,7 @@ def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
                 "text": text,
                 "source": a.source if a.source in ("author", "ai") else "author",
                 "status": a.status if a.status in ("pending", "hit", "dropped") else "pending",
+                **({"branch": _normalize_branch(a.branch)} if a.branch else {}),
             })
         if len(anchors) > SPINE_MAX_ANCHORS:
             raise HTTPException(422, detail=f"锚点超过 {SPINE_MAX_ANCHORS} 个——说明在写大纲了。细节留给大纲，谋篇只记方向")

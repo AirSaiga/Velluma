@@ -74,6 +74,8 @@ export interface DirectionCard {
   anchors: string[]
   /** 服务于的谋篇锚点 id（P1.4 M2 走向卡挂脉络；命中本章非 dropped 锚点才透传） */
   serves_anchor?: string
+  /** 作者声明岔路（P1.4 M3：临近岔路锚点的走向选项——硬提示，朱色视觉权重） */
+  is_branch?: boolean
 }
 
 export interface SettleResult {
@@ -126,6 +128,8 @@ export interface SpineAnchor {
   text: string
   source: 'author' | 'ai'
   status: 'pending' | 'hit' | 'dropped'
+  /** 作者声明岔路（M3：该锚点处有剧情分岔，2-3 个走向短语） */
+  branch?: { options: string[] }
 }
 export interface ChapterSpine {
   intent?: { text: string; source: 'author' | 'ai' }
@@ -253,6 +257,8 @@ export const adaptiveApi = {
       beat_guidance?: string
       /** outline 模式：细纲之后的已写正文开头（双端缝合用） */
       after_text?: string
+      /** outline 模式：胶囊挂的谋篇锚点文本（M3 三锚定；空=双端锚定不变） */
+      serves_anchor?: string
     },
     callbacks: {
       onStart?: (mode: string) => void

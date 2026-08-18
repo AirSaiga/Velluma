@@ -114,8 +114,13 @@ session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
 session.setAdaptiveBurst((card) => adaptiveAssist.requestBurst(card))
 
 // 走向卡舱点选（鼠标路径；数字键路径在 session 键位状态机里走 setAdaptiveBurst）
-function onBeatCardPick(card: { event: string; anchors?: string[] } | null) {
+function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor?: string; is_branch?: boolean } | null) {
   hideBeatDock()
+  // M3 作者声明岔路：选向即决岔——清除该锚点的岔路标记（岔路是一次性抉择）
+  if (card?.is_branch && card.serves_anchor) {
+    chapterSpine.updateAnchor(card.serves_anchor, { branch: undefined })
+    dispatchCollabEvent('branch_resolved', { option: card.event })
+  }
   adaptiveAssist.requestBurst(card)
 }
 // adaptive composing 态才显示「多写几段」入口（SparkDock props 注入）

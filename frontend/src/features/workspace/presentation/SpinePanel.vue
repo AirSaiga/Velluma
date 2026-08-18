@@ -39,6 +39,35 @@ function submitAnchor() {
   emit('add-anchor', t)
   addingAnchor.value = ''
 }
+
+// ---- 岔路编辑（M3：作者声明岔路——2-3 个走向短语）----
+const branchEditor = ref<{ id: string; text: string; draft: string; hasExisting: boolean } | null>(null)
+
+function openBranchEditor(a: SpineAnchor) {
+  branchEditor.value = {
+    id: a.id,
+    text: a.text,
+    draft: (a.branch?.options || []).join('\n'),
+    hasExisting: !!a.branch,
+  }
+}
+
+function saveBranch() {
+  const be = branchEditor.value
+  if (!be) return
+  const options = be.draft.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 3)
+  if (options.length >= 2) {
+    emit('update-anchor', be.id, { branch: { options } })
+  }
+  branchEditor.value = null
+}
+
+function clearBranch() {
+  const be = branchEditor.value
+  if (!be) return
+  emit('update-anchor', be.id, { branch: undefined })
+  branchEditor.value = null
+}
 </script>
 
 <template>
@@ -63,16 +92,40 @@ function submitAnchor() {
         v-for="a in anchors"
         :key="a.id"
         class="spine-chip"
-        :class="{ 'spine-chip--dropped': a.status === 'dropped', 'spine-chip--hit': a.status === 'hit', 'spine-chip--flash': highlightAnchorId === a.id }"
-        :title="a.status === 'dropped' ? '已划掉（本章不写了）' : a.status === 'hit' ? '已写到' : a.text"
+        :class="{ 'spine-chip--dropped': a.status === 'dropped', 'spine-chip--hit': a.status === 'hit', 'spine-chip--flash': highlightAnchorId === a.id, 'spine-chip--branch': !!a.branch }"
+        :title="a.branch ? `岔路：${a.branch.options.join(' / ')}` : (a.status === 'dropped' ? '已划掉（本章不写了）' : a.status === 'hit' ? '已写到' : a.text)"
       >
+        <span v-if="a.branch" class="spine-chip__branch-mark" title="此处有作者声明的岔路">⚡</span>
         <span class="spine-chip__text">{{ a.text }}</span>
+        <button
+          class="spine-chip__btn"
+          :title="a.branch ? '编辑岔路走向' : '标记岔路：这里有几个可选走向'"
+          @click="openBranchEditor(a)"
+        >⚡</button>
         <button
           class="spine-chip__btn"
           :title="a.status === 'dropped' ? '恢复' : '划掉（写的过程中决定不写了）'"
           @click="emit('update-anchor', a.id, { status: a.status === 'dropped' ? 'pending' : 'dropped' })"
         >{{ a.status === 'dropped' ? '↺' : '✕' }}</button>
       </span>
+    </div>
+
+    <!-- 岔路编辑（M3 §5：2-3 个走向短语；临近时走向卡舱硬提示置顶，选向即决岔） -->
+    <div v-if="branchEditor" class="spine-branch-editor">
+      <div class="spine-branch-editor__head">
+        ⚡ 「{{ branchEditor.text }}」处的岔路走向（每行一个，2-3 个）
+        <button class="spine-chip__btn" @click="branchEditor = null">✕</button>
+      </div>
+      <textarea
+        v-model="branchEditor.draft"
+        class="spine-branch-editor__input"
+        rows="3"
+        placeholder="当面撕破&#10;隐忍试探"
+      ></textarea>
+      <div class="spine-branch-editor__actions">
+        <button class="spine-suggest__btn spine-suggest__btn--primary" @click="saveBranch">保存</button>
+        <button v-if="branchEditor.hasExisting" class="spine-suggest__btn" @click="clearBranch">清除岔路</button>
+      </div>
     </div>
     <div v-if="anchors.length" class="spine-anchor-count">{{ anchors.length }}/5</div>
 
@@ -174,6 +227,49 @@ function submitAnchor() {
 }
 .spine-chip--hit {
   border-color: var(--accent-400, #9685c2);
+}
+.spine-chip--branch {
+  border-color: #c2725a;
+}
+.spine-chip__branch-mark {
+  font-size: 0.625rem;
+  color: #c2725a;
+}
+.spine-branch-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.5rem;
+  border: 1px solid #c2725a;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+.spine-branch-editor__head {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem;
+}
+.spine-branch-editor__input {
+  width: 100%;
+  resize: none;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  padding: 0.375rem 0.5rem;
+  line-height: 1.6;
+}
+.spine-branch-editor__input:focus {
+  outline: none;
+  border-color: #c2725a;
+}
+.spine-branch-editor__actions {
+  display: flex;
+  gap: 0.375rem;
 }
 .spine-chip--flash {
   animation: spine-flash 0.5s ease 2;

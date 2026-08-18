@@ -18,7 +18,7 @@
 import { watch, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard } from '../../../services/api/domain/adaptive.api'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
-import { applySpineProgress } from '../../workspace/composables/useChapterSpine'
+import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost,
 } from './useGhostDraft'
@@ -153,7 +153,20 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       }
 
       // 走向卡缓存（Ctrl+Space 走向卡舱的数据源；层 3 推测首 beat）
-      setBeatCards(result.direction_cards || [])
+      // M3 作者声明岔路：临近的岔路锚点选项置顶为硬提示卡（朱色视觉权重，
+      // 区别日常柔性建议）——作者选向即决岔，选后 WorkspaceView 清标记
+      const nearBranches = (result.spine_progress as any)?.near_branches as
+        | { id: string; text: string; options: string[] }[]
+        | undefined
+      const branchCards: DirectionCard[] = (nearBranches || []).flatMap((nb) =>
+        nb.options.map((opt) => ({
+          event: opt,
+          anchors: [nb.text],
+          serves_anchor: nb.id,
+          is_branch: true,
+        })),
+      )
+      setBeatCards([...branchCards, ...(result.direction_cards || [])])
 
       // 谋篇进度（P1.4 M2）：回写 useChapterSpine 单例（感知带进度行 + 本地锚点状态同步）
       applySpineProgress(result.spine_progress)
@@ -432,6 +445,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // setNodeMarkup 只改 attrs 不改节点尺寸 → noteEnd 锚点位置保持有效。
     editor.commands.collapseOutlineNote(noteId)
 
+    // M3 三锚定：胶囊挂了锚点 → 锚点文本随扩写注入意图块（双端缝合+锚点意图）
+    const servesAnchor = target.anchorId
+      ? ((spine.value?.anchors || []).find((a) => a.id === target.anchorId && a.status !== 'dropped')?.text || '')
+      : ''
+
     if (_continueAbort) _continueAbort.abort()
     _continueAbort = new AbortController()
     opts.aiLaneRef.value = 'assisting'
@@ -443,6 +461,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       after_text: afterText,
       mode: 'outline',
       target_chars: targetChars,
+      serves_anchor: servesAnchor,
     }, {
       onStart: () => { beginGhost('outline', false, noteEnd); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
