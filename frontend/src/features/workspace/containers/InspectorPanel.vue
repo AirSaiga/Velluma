@@ -496,6 +496,11 @@ async function handleResetChapterStyle() {
                 未达：{{ session.finishReport.value.report.coverage.misses.join('；') }}
               </div>
             </div>
+            <!-- 谋篇附注（P1.4 §3.5：仅提示不阻塞） -->
+            <div v-if="session.finishReport.value.report.spine_note" class="report-block">
+              <div class="report-block-label">谋篇</div>
+              <div class="report-item">{{ session.finishReport.value.report.spine_note }}</div>
+            </div>
             <!-- Canon 泄露 -->
             <div v-if="session.finishReport.value.report.canon_check?.private_breaches?.length" class="report-block report-block--warn">
               <div class="report-block-label">⚠️ Canon 泄露</div>

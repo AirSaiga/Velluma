@@ -47,6 +47,20 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 80
     # ---- 2. 章节卡覆盖率（纯算法，0 LLM）----
     report["coverage"] = check_must_hit_coverage(full_text, bundle)
 
+    # ---- 1.5 谋篇附注（P1.4 §3.5）：未兑现锚点仅提示不阻塞；dropped 不计警示 ----
+    try:
+        from backend.models import Chapter as _Chapter
+        ch = await db.get(_Chapter, chapter_id)
+        if ch is not None and isinstance(ch.spine, dict):
+            pending = [
+                a.get("text", "") for a in ch.spine.get("anchors", [])
+                if isinstance(a, dict) and a.get("status") == "pending" and a.get("text")
+            ]
+            if pending:
+                report["spine_note"] = "未兑现锚点：" + "、".join(pending[:5])
+    except Exception as e:
+        logger.debug(f"[post_process] 谋篇附注失败: {e}")
+
     # ---- 3. Canon 合规（纯算法）----
     report["canon_check"] = check_canon_compliance(full_text, bundle)
 
