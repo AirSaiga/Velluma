@@ -181,7 +181,7 @@ async def upsert_book_style_card(
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)
-            card = await repo.update(existing)
+            card = existing
         else:
             card = StyleCardModel(book_id=book_id, chapter_id=chapter_id, **fields)
             repo._db.add(card)
@@ -818,7 +818,13 @@ async def patch_author_sample(
     db: AsyncSession = Depends(get_db),
     repo: AuthorSampleRepository = Depends(get_author_sample_repo),
 ):
-    """样本局部更新：时期标记（recent/early）与收藏（检索兜底优先级）。"""
+    """样本局部更新：时期标记 / 收藏 / 场景类型 / 正文。
+
+    正文变更时重算 word_count 并重新向量化。旧向量与新文本不再同义，
+    重向量化失败（含未配置 embedding，get_embedding 返回 []）时清空为
+    None——宁缺勿旧：无向量的样本仍走检索层的新近兜底，带旧向量的样本
+    会按改前的文本错配。
+    """
     sample = await repo.get_by_id(sample_id)
     if not sample or sample.book_id != book_id:
         raise HTTPException(status_code=404, detail="样本不存在")
@@ -826,7 +832,19 @@ async def patch_author_sample(
         sample.era = payload.era
     if payload.favorite is not None:
         sample.favorite = payload.favorite
-    await repo.update(sample)
+    if payload.scene_type is not None:
+        sample.scene_type = payload.scene_type
+    if payload.content is not None:
+        content = payload.content.strip()
+        if not content:
+            raise HTTPException(status_code=422, detail="样本正文不能为空")
+        sample.content = content
+        sample.word_count = len(content)
+        try:
+            sample.embedding = await get_embedding(content) or None
+        except Exception as e:
+            logger.warning(f"[AuthorSample] 重向量化失败（清空旧向量）: {e}")
+            sample.embedding = None
     await db.commit()
     await db.refresh(sample)
     return sample
@@ -1042,7 +1060,6 @@ async def update_system_cliche(
     update_data = payload.model_dump(exclude_none=True)
     for k, v in update_data.items():
         setattr(cliche, k, v)
-    await repo.update(cliche)
     await db.commit()
     await db.refresh(cliche)
     invalidate_cliche_cache()

@@ -315,16 +315,16 @@ async function uploadSample(content: string, sceneType: AuthorSampleSceneType, e
   }
 }
 
-/** 样本局部更新（时期/收藏，补全批） */
-async function patchSample(sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean }) {
+/** 样本局部更新（时期/收藏/场景类型/正文） */
+async function patchSample(sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string }) {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
   try {
     const updated = await styleApi.patchSample(bookId, sampleId, patch)
     const idx = samples.value.findIndex(s => s.id === sampleId)
     if (idx >= 0) samples.value[idx] = updated
-    // 时期变化影响语料聚合 → 重算指纹
-    if (patch.era) await reloadSamplesAndFingerprint()
+    // 时期/正文变化影响语料聚合与样本指纹 → 重算指纹
+    if (patch.era || patch.content) await reloadSamplesAndFingerprint()
   } catch (error: unknown) {
     showToast('更新失败: ' + ((error as Error)?.message || ''), 'error')
   }

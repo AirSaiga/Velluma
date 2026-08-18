@@ -2,7 +2,8 @@
 /**
  * 文风页 ①「你的字」——样本库分区（文风的事实源，一切从这里长出来）。
  *
- * 职责：上传新样本（粘贴作者原文）/ 展示样本列表（含轻量指纹速览）/ 收编入口。
+ * 职责：上传新样本（粘贴作者原文）/ 展示样本列表（含轻量指纹速览）/ 收编入口 /
+ * 样本就地编辑（正文 / 场景类型 / 时期 / 收藏）。
  * 纯展示：数据与操作全部经 props/emits 与容器交互（分层规范 presentation → 容器）。
  *
  * 零状态坡道（设计稿 §6.3）由容器切换：无样本时整页只显示本组件的 hero 邀请形态——
@@ -29,7 +30,7 @@ const emit = defineEmits<{
   (e: 'delete', sampleId: string): void
   (e: 'importChapters'): void
   (e: 'importGolden'): void
-  (e: 'update-sample', sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean }): void
+  (e: 'update-sample', sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string }): void
 }>()
 
 const newSampleContent = ref('')
@@ -55,6 +56,30 @@ function submit() {
   if (!content) return
   emit('upload', content, newSampleSceneType.value, newSampleEra.value)
   newSampleContent.value = ''
+}
+
+// ---- 样本就地编辑（正文） ----
+const editingId = ref<string | null>(null)
+const editingContent = ref('')
+
+function startEdit(sample: AuthorSample) {
+  editingId.value = sample.id
+  editingContent.value = sample.content
+}
+
+function cancelEdit() {
+  editingId.value = null
+  editingContent.value = ''
+}
+
+function saveEdit(sample: AuthorSample) {
+  const content = editingContent.value.trim()
+  if (!content || content === sample.content.trim()) {
+    cancelEdit()
+    return
+  }
+  emit('update-sample', sample.id, { content })
+  cancelEdit()
 }
 </script>
 
@@ -149,7 +174,14 @@ function submit() {
               :title="sample.favorite ? '取消收藏（检索兜底将不再优先）' : '收藏：检索兜底流优先取这条'"
               @click="emit('update-sample', sample.id, { favorite: !sample.favorite })"
             >{{ sample.favorite ? '★' : '☆' }}</button>
-            <span class="badge badge-scene">{{ sceneTypeLabels[sample.scene_type] || sample.scene_type }}</span>
+            <select
+              class="badge badge-scene scene-edit"
+              title="场景类型（语料聚合与检索按此分类）"
+              :value="sample.scene_type"
+              @change="emit('update-sample', sample.id, { scene_type: ($event.target as HTMLSelectElement).value as AuthorSampleSceneType })"
+            >
+              <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
+            </select>
             <span v-if="sample.source !== 'manual'" class="badge badge-source">{{ sourceLabels[sample.source] || sample.source }}</span>
             <span v-if="sample.era === 'early'" class="badge badge-early" title="早期样本只存档，不进语料聚合">早期</span>
             <span class="sample-chips">
@@ -160,12 +192,41 @@ function submit() {
               </template>
               <span class="chip chip-dim">{{ sample.word_count }} 字</span>
             </span>
+            <button
+              v-if="editingId !== sample.id"
+              class="icon-btn"
+              title="编辑样本正文"
+              @click="startEdit(sample)"
+            >
+              <Icon name="pencil-square" :size="12" />
+            </button>
             <button class="icon-danger" title="删除样本" @click="emit('delete', sample.id)">
               <Icon name="x-mark" :size="12" />
             </button>
           </div>
-          <p class="sample-content">{{ sample.content }}</p>
-          <div class="sample-foot">
+
+          <!-- 就地编辑态：正文可改，保存后后端重算字数并重向量化 -->
+          <template v-if="editingId === sample.id">
+            <textarea
+              v-model="editingContent"
+              class="sample-edit-textarea"
+              rows="6"
+              @keydown.ctrl.enter="saveEdit(sample)"
+              @keydown.esc="cancelEdit"
+            ></textarea>
+            <div class="sample-edit-actions">
+              <span class="edit-hint">保存后将重新测量指纹并重算向量 · Ctrl+Enter 保存 · Esc 取消</span>
+              <button class="era-toggle" @click="cancelEdit">取消</button>
+              <button
+                class="btn-primary btn-sm"
+                :disabled="busy || !editingContent.trim()"
+                @click="saveEdit(sample)"
+              >保存</button>
+            </div>
+          </template>
+          <p v-else class="sample-content">{{ sample.content }}</p>
+
+          <div v-if="editingId !== sample.id" class="sample-foot">
             <span v-if="sample.era === 'early'" class="muted-foot">早期样本不进语料聚合——若仍代表现在的你，可切回近期</span>
             <button
               class="era-toggle"
@@ -433,6 +494,63 @@ function submit() {
 .icon-danger:hover {
   color: #dc2626;
   background: #fee2e2;
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1875rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--accent-500);
+  background: var(--bg-tertiary);
+}
+.scene-edit {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.scene-edit:hover {
+  filter: brightness(0.96);
+}
+.scene-edit:focus {
+  outline: 1px solid var(--accent-400);
+}
+.sample-edit-textarea {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-400);
+  border-radius: 0.375rem;
+  resize: vertical;
+}
+.sample-edit-textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-500) 10%, transparent);
+}
+.sample-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+}
+.edit-hint {
+  flex: 1;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+.btn-sm {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
 }
 .sample-content {
   display: -webkit-box;

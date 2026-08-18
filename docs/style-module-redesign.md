@@ -338,7 +338,7 @@ StyleCardManager 拆解迁移，bible 页剩笔记（bible 改名/保留另行�
 | `POST /api/books/{id}/style/audition` | 试听：给定段落 + 当前/指定文风配置，走真实注入管线改写（SSE 流式）✅ S3 |
 | `POST /api/books/{id}/samples/from-golden` | 黄金片段汇入样本（✅ 补全批：按内容去重导入存量 golden_snippets） |
 | `POST /api/books/{id}/samples/from-chapters` | 已发布章节一键收编（零状态坡道兜底）✅ S1 |
-| `PATCH /api/books/{id}/samples/{sample_id}` | 样本局部更新：era / favorite（✅ 补全批） |
+| `PATCH /api/books/{id}/samples/{sample_id}` | 样本局部更新：era / favorite（✅ 补全批）/ scene_type / content（正文变更重算字数并重向量化，失败清 None 宁缺勿旧） |
 | `GET/PUT /api/books/{id}/cliche-exemptions` | 系统陈词库本书豁免（✅ 补全批：validator/auditor/scan 三处消费） |
 | `GET/POST /api/books/{id}/style/inbox` + `POST .../inbox/{item_id}/confirm|dismiss` | 文风收件箱 ✅ S3 |
 | `POST /api/books/{id}/style/events` + `GET .../events/summary` | 使用埋点（✅ 补全批：本地 JSONL 零外部上报，audition/golden/⚠/收件箱/预设/抓虫全打点，summary 含收件箱采纳率） |

@@ -277,9 +277,17 @@ class StyleScanNegativeRequest(BaseModel):
 # ============================================================
 
 class AuthorSamplePatchRequest(BaseModel):
-    """样本局部更新（时期标记 / 收藏）。"""
+    """样本局部更新（时期标记 / 收藏 / 场景类型 / 正文）。
+
+    content 变更时路由层会重算 word_count 并重新向量化（旧向量与新文本
+    不再同义，重向量化失败或未配置 embedding 时清空为 None——宁缺勿旧）。
+    """
     era: Optional[str] = Field(None, pattern="^(recent|early)$", description="recent/early")
     favorite: Optional[bool] = None
+    scene_type: Optional[str] = Field(
+        None, pattern="^(dialogue|action|lyrical|suspense|general)$", description="场景类型"
+    )
+    content: Optional[str] = Field(None, min_length=1, description="样本正文（变更时重算字数并重向量化）")
 
 
 class ClicheExemptionsUpdate(BaseModel):
