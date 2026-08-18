@@ -209,6 +209,12 @@ async def build_canon_context_for_prompt(
     2. public 已建立事实（必须遵守）
     3. 悬空伏笔（本章可回收/累积）
 
+    C2 换源（docs/canon-world-fusion.md §6，格式冻结 K3）：
+    - 段1/2 的 label：ref 挂接节点由世界对象推演（实体/地点改名后词表跟随，
+      根治名字漂移→泄密漏检）；无 ref 保持原 label。
+    - 段3 [hook]：装配源切到 plot_ledgers（open + 有真相面文本，取前 8）；
+      未迁移书的存量 canon hook 节点（无 ref_id）继续兜底，按 label 去重。
+
     Returns:
         格式化的文本块，可直接拼到 prompt
     """
@@ -222,10 +228,14 @@ async def build_canon_context_for_prompt(
         logger.warning(f"[Canon] 加载 private 失败: {e}")
         private_nodes = []
 
+    # C2：ref 节点 label 由世界对象推演（一次批量解析，失败静默回退原 label）
+    world_names = await _resolve_world_labels(db, book_id, private_nodes)
+
     if private_nodes:
         parts.append("## 作者脑中的真相 [private] ★ 绝不许在正文直接写出")
         for n in private_nodes[:10]:
-            line = f"- {n.label}：{n.canon_text[:150]}"
+            label = world_names.get(str(n.ref_id), n.label) if n.ref_id else n.label
+            line = f"- {label}：{n.canon_text[:150]}"
             if n.reveal_plan:
                 line += f"（揭示计划：{n.reveal_plan[:80]}）"
             parts.append(line)
@@ -241,22 +251,77 @@ async def build_canon_context_for_prompt(
 
     public_facts = [n for n in public_nodes if n.type != "hook" and n.public_text]
     if public_facts:
+        world_names_pub = await _resolve_world_labels(db, book_id, public_facts)
         parts.append("\n## 必须遵守的已建立事实 [public]")
         for n in public_facts[:10]:
-            parts.append(f"- {n.label}：{n.public_text[:120]}")
+            label = world_names_pub.get(str(n.ref_id), n.label) if n.ref_id else n.label
+            parts.append(f"- {label}：{n.public_text[:120]}")
 
-    # 3. 悬空伏笔
+    # 3. 悬空伏笔（C2 换源：plot_ledgers 优先；未迁移书的存量 canon hook 兜底）
+    hook_lines: List[str] = []
+    try:
+        from sqlalchemy import select as _select
+        from backend.models import PlotLedger as _PlotLedger
+
+        result = await db.execute(
+            _select(_PlotLedger)
+            .where(
+                _PlotLedger.book_id == book_id,
+                _PlotLedger.status == "open",
+            )
+            .limit(30)
+        )
+        ledgers = [
+            l for l in result.scalars().all()
+            if (l.canon_text or "").strip() or (l.public_text or "").strip()
+        ][:8]
+        for l in ledgers:
+            strength = (l.meta or {}).get("strength", "?")
+            hook_lines.append(f"- [{l.ledger_key}] 强度={strength}：{(l.canon_text or l.public_text or '')[:100]}")
+    except Exception as e:
+        logger.warning(f"[Canon] 加载伏笔账本失败: {e}")
+
+    covered_labels = {f"[{l.split(']')[0][1:]}]" for l in hook_lines if l.startswith("- [")}
     try:
         open_hooks = await repo.nodes.find_hooks(book_id, only_open=True)
     except Exception as e:
         logger.warning(f"[Canon] 加载 hooks 失败: {e}")
         open_hooks = []
+    for h in open_hooks[:8]:
+        if h.ref_id is not None:
+            continue  # 已迁移并入账本（ledger 线已在上面），不重复
+        if f"[{h.label}]" in covered_labels:
+            continue
+        meta = h.metadata_ or {}
+        strength = meta.get("strength", "?")
+        hook_lines.append(f"- [{h.label}] 强度={strength}：{h.canon_text[:100]}")
 
-    if open_hooks:
+    if hook_lines:
         parts.append("\n## 活跃伏笔 [hook]（本章可推进/回收）")
-        for h in open_hooks[:8]:
-            meta = h.metadata_ or {}
-            strength = meta.get("strength", "?")
-            parts.append(f"- [{h.label}] 强度={strength}：{h.canon_text[:100]}")
+        parts.extend(hook_lines[:8])
 
     return "\n".join(parts) if parts else "（Canon 为空，无强约束）"
+
+
+async def _resolve_world_labels(db: AsyncSession, book_id: UUID, nodes) -> dict:
+    """C2：批量解析 ref 节点的世界侧真名（entity/location → name）。
+
+    返回 {str(ref_id): name}；任何失败返回空 dict（调用方回退 node.label）。
+    """
+    ref_ids = {n.ref_id for n in nodes if getattr(n, "ref_id", None) is not None}
+    if not ref_ids:
+        return {}
+    out: dict = {}
+    try:
+        from backend.repositories.world_repository import WorldRepository
+
+        repo = WorldRepository(db)
+        for ent in await repo.entities.list_by_book(book_id):
+            if ent.id in ref_ids:
+                out[str(ent.id)] = ent.name
+        for loc in await repo.locations.list_by_book(book_id):
+            if loc.id in ref_ids:
+                out[str(loc.id)] = loc.name
+    except Exception as e:
+        logger.debug(f"[Canon] 世界名解析失败（回退 node.label）: {e}")
+    return out

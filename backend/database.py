@@ -590,6 +590,38 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB",
         "expected_udt_names": {"jsonb"},
     },
+    # C2 信息面挂接（docs/canon-world-fusion.md §4.1）：canon_nodes 挂世界对象
+    {
+        "table": "canon_nodes",
+        "column": "ref_type",
+        "definition": "VARCHAR(20)",
+        "expected_udt_names": {"varchar", "character varying"},
+    },
+    {
+        "table": "canon_nodes",
+        "column": "ref_id",
+        "definition": "UUID",
+        "expected_udt_names": {"uuid"},
+    },
+    # C2 伏笔真相面（§4.2）：canon hook 并入 plot_ledgers
+    {
+        "table": "plot_ledgers",
+        "column": "canon_text",
+        "definition": "TEXT DEFAULT ''",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "public_text",
+        "definition": "TEXT DEFAULT ''",
+        "expected_udt_names": {"text"},
+    },
+    {
+        "table": "plot_ledgers",
+        "column": "reveal_plan",
+        "definition": "TEXT DEFAULT ''",
+        "expected_udt_names": {"text"},
+    },
     # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
     {
         "table": "style_cards",

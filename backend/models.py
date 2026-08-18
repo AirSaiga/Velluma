@@ -759,6 +759,12 @@ class PlotLedger(Base):
     world_time_planted = Column(Integer, nullable=True)
     world_time_resolved = Column(Integer, nullable=True)
     meta = Column("metadata", JSONB, default=dict)
+    # C2 真相面（docs/canon-world-fusion.md §4.2）：伏笔天然是信息层对象——
+    # 埋设=建立「表象—真相」差集，回收=差集收敛。canon hook 并入本表后，
+    # [hook] prompt 段装配源切到此（open 取前 8，格式冻结 K3）。
+    canon_text = Column(Text, default="")    # 里：作者真相（空=无双层需求）
+    public_text = Column(Text, default="")   # 表：读者所见表象
+    reveal_plan = Column(Text, default="")   # 揭示计划文本
     created_at = Column(DateTime, default=utc_now)
 
     book = relationship("Book", back_populates="plot_ledgers")
@@ -1225,6 +1231,13 @@ class CanonNode(Base):
     confidence = Column(String(20), default="confirmed")  # confirmed | tentative | draft
     source = Column(String(20), default="author")  # author | auto_extracted | mixed
     metadata_ = Column("metadata", JSONB, default=dict)  # 自由扩展（避开 SQL 保留字）
+
+    # C2 信息面挂接（docs/canon-world-fusion.md §4.1）：ref 指向世界对象
+    # （entity | location | ledger），label/type 读取时由世界对象推演（根治名字漂移
+    # →泄密漏检）。无单一外键（三possible 目标），唯一性与级联清理在应用层：
+    # migrate-canon 建立 / world 对象删除时同步清 overlay（world_repository）。
+    ref_type = Column(String(20), nullable=True)  # entity | location | ledger | NULL=自由节点
+    ref_id = Column(UUID(as_uuid=True), nullable=True)
 
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
