@@ -65,6 +65,15 @@ const presenceView = computed(() =>
   readerView.value ? (slice.value?.presence || []).filter((p) => p.visibility === 'public') : slice.value?.presence || []
 )
 
+// 相遇口径（遗留修）：读者视角显示全公开参与者的相遇；作者视角全显示
+// （encounters 的 names 来自 presence.name——匹配用同名键）
+const visibleEncounters = computed(() => {
+  const encs = slice.value?.encounters || []
+  if (!readerView.value) return encs
+  const publicNames = new Set(presenceView.value.map((p) => p.name))
+  return encs.filter((e) => (e.names || []).every((n: string) => publicNames.has(n)))
+})
+
 // ---- 时刻来源徽标 ----
 const SOURCE_LABELS: Record<string, { label: string; hint: string }> = {
   chapter_anchor: { label: '本章锚', hint: '本章已锚定叙事时间（时间轴右键或此处「改」）' },
@@ -280,10 +289,11 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             </div>
           </section>
 
-          <!-- 相遇提示（W5-lite：同地角色的戏剧机会） -->
-          <section v-if="!readerView && slice.encounters?.length" class="setting-group">
+          <!-- 相遇提示（W5-lite：同地角色的戏剧机会；读者视角只显示全公开参与者的相遇——
+               口径定夺：含 private 参与者的相遇是作者层信息，读者不该看到谁在场） -->
+          <section v-if="visibleEncounters.length" class="setting-group">
             <div class="setting-group-label">相遇</div>
-            <div v-for="(enc, i) in slice.encounters" :key="i" class="encounter-row">
+            <div v-for="(enc, i) in visibleEncounters" :key="i" class="encounter-row">
               {{ enc.names.join(' × ') }}<span class="encounter-loc"> · {{ enc.location_name }}</span>
             </div>
           </section>

@@ -58,13 +58,16 @@ async function loadCandidates(bookId: string, chapterId: string) {
 
 async function load(bookId: string, chapterId: string, opts: { silent?: boolean } = {}) {
   if (!bookId || !chapterId) return
+  const prevKey = currentKey
   currentKey = { bookId, chapterId }
   if (!opts.silent) loading.value = true
   try {
     const next = await worldApi.getSceneSlice(bookId, chapterId)
     // 竞态守卫：请求期间已切章 → 丢弃过期响应
     if (currentKey.bookId !== bookId || currentKey.chapterId !== chapterId) return
-    const prevSig = slice.value ? signature(slice.value) : ''
+    // 签名只在同章内比较（遗留修：切章时 t_source/在场合法变化，不算「世界有更新」）
+    const sameChapter = prevKey?.bookId === bookId && prevKey?.chapterId === chapterId
+    const prevSig = slice.value && sameChapter ? signature(slice.value) : ''
     slice.value = next
     if (prevSig && signature(next) !== prevSig) updated.value = true
   } catch (e) {
