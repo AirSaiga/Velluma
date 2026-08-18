@@ -147,6 +147,18 @@ async def run(pg_url: str, sqlite_path: str, batch_size: int, truncate: bool, ke
             print(f"[ERROR] PG 连接失败: {e}")
             return 1
 
+        # ---- 源库结构补齐（2026-08-19 增补）：应用 ORM 新增列（spine/map_scale/
+        # ref_type 等）若源 PG 未跑过启动迁移，SELECT 反射会 UndefinedColumn。
+        # 只做加列（同应用启动迁移的 MIGRATIONS 清单），不改任何行——数据只读契约不变。
+        try:
+            from backend.database import MIGRATIONS, run_migrations
+            async with pg_engine.begin() as conn:
+                await run_migrations(conn)
+            print(f"[SCHEMA] 源 PG 结构已补齐（{len(MIGRATIONS)} 项列迁移检查，仅加缺失列）")
+        except Exception as e:
+            print(f"[ERROR] 源 PG 结构补齐失败: {e}")
+            return 1
+
         # 目标库有数据必须显式 --truncate
         async with lite_engine.begin() as conn:
             populated = False
