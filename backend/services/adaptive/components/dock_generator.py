@@ -23,6 +23,21 @@ from backend.services.utils.json_safe import parse_json_safe
 logger = logging.getLogger(__name__)
 
 
+async def _spine_intent(chapter_id: str, db) -> str:
+    """章级谋篇意图一行（P1.4 M2；chapters 主键单行取，开销可忽略）。
+
+    只在意图存在时返回；无脉络/查询失败返回空串（prompt 零变化）。
+    """
+    try:
+        from backend.models import Chapter as _Chapter
+        ch = await db.get(_Chapter, chapter_id)
+        if ch is not None and isinstance(ch.spine, dict):
+            return (ch.spine.get("intent") or {}).get("text", "") or ""
+    except Exception:
+        pass
+    return ""
+
+
 async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 1500, **kw) -> Dict:
     """挂件生发。由 orchestrator 调度，产出写回世界模型缓存。
 
@@ -60,6 +75,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         direction_weights=direction_weights,
         reader_expectations=soft.get("reader_expectations") or None,
         memory_echoes=memory_echoes or None,
+        spine_intent=await _spine_intent(chapter_id, db),
     )
 
     try:

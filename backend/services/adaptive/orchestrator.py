@@ -58,6 +58,8 @@ class AdaptiveOrchestrator:
         self._last_inference_ts: float = 0.0
         self._prev_outline_sig: str = ""
         self._active_tasks: Dict[str, asyncio.Task] = {}  # component → running task
+        # 谋篇进度判定的增量基准（P1.4 M2）：上次心跳时的正文长度，-1=首次（判全文）
+        self._last_content_len: int = -1
         # dock 缓存：段落文本 + projection 签名未变则复用上次碎片，省 ~90% dock 成本
         self._last_dock_text_sig: str = ""
         self._last_dock_proj_sig: str = ""

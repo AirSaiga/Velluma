@@ -10,6 +10,13 @@
  */
 import { computed } from 'vue'
 import { beatDockVisible, beatDockPos, beatCards } from '../composables/useBeatDock'
+import { spine, flashAnchor } from '../../workspace/composables/useChapterSpine'
+
+// 谋篇锚点小签（P1.4 M2）：由 serves_anchor id 查当前脉络的锚点文本（无脉络/已删=空）
+function anchorText(id: string): string {
+  const a = (spine.value?.anchors || []).find((x) => x.id === id && x.status !== 'dropped')
+  return a?.text || ''
+}
 import type { DirectionCard } from '../../../services/api/domain/adaptive.api'
 
 const emit = defineEmits<{
@@ -46,7 +53,16 @@ function onPick(card: DirectionCard | null) {
         >
           <span class="beat-dock__num">{{ i + 1 }}</span>
           <span class="beat-dock__body">
-            <span class="beat-dock__event">{{ card.event }}</span>
+            <span class="beat-dock__event">
+              {{ card.event }}
+              <!-- 谋篇锚点小签（P1.4 M2 §3.3）：这条建议服务于作者的哪个锚点——可追溯 -->
+              <span
+                v-if="card.serves_anchor && anchorText(card.serves_anchor)"
+                class="beat-dock__anchor-tag"
+                :title="'服务于谋篇锚点：' + anchorText(card.serves_anchor)"
+                @click.stop="flashAnchor(card.serves_anchor)"
+              >⚑ {{ anchorText(card.serves_anchor) }}</span>
+            </span>
             <span v-if="card.anchors?.length" class="beat-dock__anchors">
               焦点：{{ card.anchors.join('、') }}
             </span>

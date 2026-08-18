@@ -14,6 +14,7 @@ import {
   type ChapterSpine,
   type SpineAnchor,
   type SpineSuggestion,
+  type SpineProgress,
 } from '../../../services/api/domain/adaptive.api'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 
@@ -21,6 +22,26 @@ export const spine = ref<ChapterSpine | null>(null)
 export const spineSuggestions = ref<SpineSuggestion | null>(null)
 export const spineSuggesting = ref(false)
 export const spineLoaded = ref(false)
+/** 心跳带回的谋篇进度（P1.4 M2：感知带进度行数据源；无脉络为 null） */
+export const spineProgress = ref<SpineProgress | null>(null)
+/** 走向卡小签点击 → 高亮对应锚点（SpinePanel 闪烁；2s 自动清） */
+export const highlightAnchorId = ref<string | null>(null)
+
+export function flashAnchor(id: string) {
+  highlightAnchorId.value = id
+  setTimeout(() => { if (highlightAnchorId.value === id) highlightAnchorId.value = null }, 2000)
+}
+
+/** 心跳进度回写本地 spine（状态只前进；触发一次无害的防抖保存保持双端一致） */
+export function applySpineProgress(p: SpineProgress | null | undefined) {
+  spineProgress.value = p || null
+  if (!p || !spine.value?.anchors) return
+  const byId = new Map(p.anchors.map((a) => [a.id, a.status]))
+  spine.value.anchors = spine.value.anchors.map((a) => ({
+    ...a,
+    status: byId.get(a.id) === 'hit' && a.status === 'pending' ? 'hit' : a.status,
+  }))
+}
 
 let currentChapterId: string | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -31,6 +52,7 @@ export function useChapterSpine() {
     currentChapterId = chapterId
     spine.value = null
     spineSuggestions.value = null
+    spineProgress.value = null
     spineLoaded.value = false
     suppressAutosave = true
     try {
@@ -48,6 +70,7 @@ export function useChapterSpine() {
     currentChapterId = null
     spine.value = null
     spineSuggestions.value = null
+    spineProgress.value = null
     suppressAutosave = true
   }
 
@@ -161,7 +184,7 @@ export function useChapterSpine() {
   }, { deep: true })
 
   return {
-    spine, spineSuggestions, spineSuggesting, spineLoaded,
+    spine, spineSuggestions, spineSuggesting, spineLoaded, spineProgress, highlightAnchorId,
     load, unload, save, suggest, adoptSuggestion, discardSuggestions,
     setIntent, addAnchor, updateAnchor, removeAnchor,
   }

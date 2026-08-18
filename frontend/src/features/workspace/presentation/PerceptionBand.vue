@@ -14,7 +14,7 @@
  * 找不到的（orphan/leak，label 不在当前段落）落底部兜底区 + 折叠。
  */
 import { ref, computed } from 'vue'
-import type { CanonHint } from '../../../services/api/domain/adaptive.api'
+import type { CanonHint, SpineProgress } from '../../../services/api/domain/adaptive.api'
 import { usePerceptionAlignment } from '../composables/usePerceptionAlignment'
 
 /** 兜底区折叠阈值（空间有限） */
@@ -22,7 +22,12 @@ const COLLAPSE_AT = 4
 
 const props = defineProps<{
   suggestions: CanonHint[]
+  /** 章级谋篇进度（P1.4 M2；无脉络不传 → 进度行静默缺席） */
+  spineProgress?: SpineProgress | null
 }>()
+
+// 谋篇进度行折叠（默认展开锚点清单；点击行头收起只留旗标）
+const spineCollapsed = ref(false)
 
 function kindMeta(kind: string) {
   switch (kind) {
@@ -75,8 +80,31 @@ const floatingHidden = computed(() =>
 
 <template>
   <aside ref="bandEl" class="perception-band">
-    <!-- 顶部固定区：header + 镜头碎片舱（slot） -->
+    <!-- 顶部固定区：header + 谋篇进度行 + 镜头碎片舱（slot） -->
     <div class="band-header">Canon 感知</div>
+    <!-- 谋篇进度行（P1.4 M2 §3.2）：意图短语 + ⚑ 旗标；hit 判定后旗标实心（划 todo 的满足感） -->
+    <div v-if="spineProgress" class="spine-progress">
+      <button class="spine-progress__head" :title="spineProgress.hint" @click="spineCollapsed = !spineCollapsed">
+        <span class="spine-progress__intent">{{ spineProgress.intent || '谋篇' }}</span>
+        <span class="spine-progress__flags">
+          <span
+            v-for="a in spineProgress.anchors"
+            :key="a.id"
+            class="spine-flag"
+            :class="'spine-flag--' + a.status"
+          >{{ a.status === 'hit' ? '⚑' : a.status === 'dropped' ? '⊘' : '⚐' }}</span>
+        </span>
+      </button>
+      <div v-if="!spineCollapsed" class="spine-progress__list">
+        <div
+          v-for="a in spineProgress.anchors"
+          :key="a.id"
+          class="spine-progress__item"
+          :class="'is-' + a.status"
+        >{{ a.status === 'hit' ? '✓ ' : a.status === 'dropped' ? '⊘ ' : '○ ' }}{{ a.text }}</div>
+        <div class="spine-progress__hint">{{ spineProgress.hint }}</div>
+      </div>
+    </div>
     <slot name="dock" />
     <div v-if="suggestions.length === 0" class="band-empty">
       写到相关角色 / 伏笔时，<br />这里会浮现提醒
@@ -144,6 +172,72 @@ const floatingHidden = computed(() =>
   margin-bottom: 8px;
   padding: 8px 8px 0;
   font-family: ui-monospace, monospace;
+}
+
+/* 谋篇进度行（P1.4 M2）：意图短语 + 旗标，点击行头收起清单 */
+.spine-progress {
+  position: relative;
+  z-index: 2;
+  padding: 0 8px 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.35);
+}
+.spine-progress__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+  font-family: inherit;
+}
+.spine-progress__intent {
+  flex: 1;
+  font-size: 11px;
+  font-family: var(--font-heading, inherit);
+  color: var(--text-secondary, #6b6560);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spine-progress__flags {
+  display: inline-flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.spine-flag {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.spine-flag--hit {
+  color: var(--accent-500, #7c6aad);
+}
+.spine-flag--dropped {
+  opacity: 0.4;
+}
+.spine-progress__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+.spine-progress__item {
+  font-size: 11px;
+  color: var(--text-secondary, #6b6560);
+}
+.spine-progress__item.is-hit {
+  color: var(--accent-500, #7c6aad);
+}
+.spine-progress__item.is-dropped {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.spine-progress__hint {
+  font-size: 10px;
+  color: #94a3b8;
 }
 /* 顶部固定区 slot（SparkDock）置顶，盖在锚定层之上 */
 .perception-band > :slotted(*) {

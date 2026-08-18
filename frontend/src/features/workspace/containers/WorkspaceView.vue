@@ -862,6 +862,7 @@ async function confirmDeleteChapter(ch: Chapter) {
             <PerceptionBand
               v-if="adaptiveComposing"
               :suggestions="session.adaptiveSuggestions.value"
+              :spine-progress="chapterSpine.spineProgress.value"
             >
               <template #dock>
                 <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />

@@ -584,6 +584,7 @@ def build_future_projection_prompt(
     intent: dict,
     nutrients: dict,
     soft_constraints: dict,
+    spine_anchors: Optional[List[dict]] = None,
 ) -> tuple:
     """构建未来推测 prompt。
 
@@ -592,15 +593,30 @@ def build_future_projection_prompt(
         intent: 层 2 意图（ChapterIntent.to_dict()）
         nutrients: 设定养料
         soft_constraints: 软约束
+        spine_anchors: 章级软脉络的 pending 锚点（P1.4 M2：[{id,text}]，空=不注入零变化）
 
     Returns:
         (system_prompt, user_prompt)
     """
+    # 谋篇锚点块（P1.4 M2 走向卡挂脉络）：服务于某锚点的推测带 serves_anchor；
+    # 无脉络/无 pending 锚点时两个插入点全空 → prompt 与旧版逐字节一致
+    spine_block = ""
+    serve_note = ""
+    if spine_anchors:
+        anchor_lines = "\n".join(f"- {a['id']}: {a['text']}" for a in spine_anchors[:5])
+        spine_block = f"""
+# 本章谋篇锚点（作者定的方向，推测优先朝这些锚点去；没有合适的就别硬挂）
+{anchor_lines}
+"""
+        serve_note = (
+            '\n若某推测服务于上面某个谋篇锚点，给它加 "serves_anchor": "锚点id"'
+            "（不属于任何锚点则省略该字段）。"
+        )
     user_prompt = f"""# 本章意图
 弧线：{intent.get('arc', '（未推断）')}
 情绪走向：{intent.get('emotion_curve', [])}
 铺陈要点：{intent.get('setup_points', [])}
-
+{spine_block}
 # 作者最近写的正文（衔接此处继续）
 {written_text[-500:]}
 
@@ -614,7 +630,7 @@ def build_future_projection_prompt(
 {soft_constraints.get('open_hooks', '（无）')[:200]}
 
 推测接下来的 2-3 个画面方向。输出 JSON：
-{{"projections": [{{"event": "老烟用残手砸灭油灯", "anchors": ["渗血的绷带", "熄灭的灯"], "emotion": "压抑"}}]}}"""
+{{"projections": [{{"event": "老烟用残手砸灭油灯", "anchors": ["渗血的绷带", "熄灭的灯"], "emotion": "压抑"}}]}}{serve_note}"""
     return _FUTURE_PROJECTION_SYSTEM, user_prompt
 
 
@@ -676,6 +692,7 @@ def build_dock_generator_prompt(
     direction_weights: dict = None,
     reader_expectations: list = None,
     memory_echoes: list = None,
+    spine_intent: str = "",
 ) -> tuple:
     """构建挂件生发 prompt。
 
@@ -687,6 +704,8 @@ def build_dock_generator_prompt(
         direction_weights: 5 叙事方向权重（{"主线":0.4,...}），碎片按此分布生成并自标 direction
         reader_expectations: 读者期待（[{type, description, tension}]，最多取前 2 条进块；
             呼应期待的碎片须标 from_expectation，呼应=侧面暗示，绝不直接揭晓）
+        spine_intent: 章级谋篇意图一句话（P1.4 M2；空=不注入。8-14 字零件吃
+            画像的同款克制——只给方向不给展开）
 
     Returns:
         (system_prompt, user_prompt)
@@ -747,9 +766,12 @@ def build_dock_generator_prompt(
 {chr(10).join('- ' + e for e in echo_lines[:2])}
 """
 
+    # 章级谋篇意图一行（P1.4 M2；空=零变化。克制：只给方向不给展开）
+    spine_line = f"\n# 本章意图（方向参考）\n{spine_intent}" if spine_intent else ""
+
     user_prompt = f"""# 作者当前段落
 {recent_text[:300]}
-
+{spine_line}
 # 接下来的画面方向（参考，可偏离）
 {proj_text}
 {dw_block}{exp_block}{echo_block}

@@ -43,7 +43,25 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
     nutrients = bundle.nutrients()
     soft = bundle.soft_constraints()
-    sys_p, usr_p = build_future_projection_prompt(written_text, intent, nutrients, soft)
+
+    # 章级软脉络（P1.4 M2）：pending 锚点注入推测 prompt——走向卡挂脉络。
+    # 无脉络/无 pending 锚点 → spine_anchors=None，prompt 与旧版逐字节一致
+    spine_anchors = None
+    try:
+        from backend.models import Chapter as _Chapter
+        ch = await db.get(_Chapter, chapter_id)
+        if ch is not None and isinstance(ch.spine, dict):
+            pending = [
+                {"id": a.get("id", ""), "text": a.get("text", "")}
+                for a in ch.spine.get("anchors", [])
+                if isinstance(a, dict) and a.get("status") == "pending" and a.get("text")
+            ]
+            if pending:
+                spine_anchors = pending
+    except Exception as e:
+        logger.debug(f"[future_projection] 读 spine 失败（跳过注入）: {e}")
+
+    sys_p, usr_p = build_future_projection_prompt(written_text, intent, nutrients, soft, spine_anchors=spine_anchors)
 
     try:
         result = await call_llm_with_usage(
@@ -61,6 +79,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
         # ---- 校对：丢弃违规推测 ----
         hard = bundle.hard_constraints()
+        valid_ids = {a["id"] for a in (spine_anchors or [])}
         valid: List[SegmentProjection] = []
         for proj in raw_projections[:3]:
             if not isinstance(proj, dict):
@@ -69,6 +88,11 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             text_to_check = proj.get("event", "") + " " + " ".join(proj.get("anchors", []))
             if _violates_constraints(text_to_check, hard):
                 continue
+            # serves_anchor 代码闸门（不信任 prompt 约束，DDE 同思想）：
+            # 非命中本章 pending 锚点 id → 剥除（推测保留，挂载关系不保留）
+            sa = proj.get("serves_anchor")
+            if sa is not None and sa not in valid_ids:
+                proj = {k: v for k, v in proj.items() if k != "serves_anchor"}
             sig = _signature(proj)
             valid.append(SegmentProjection(
                 possible_beats=[proj],

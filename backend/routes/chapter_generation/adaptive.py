@@ -114,6 +114,8 @@ class HeartbeatResponse(BaseModel):
     canon_hints: List[Dict] = Field(default_factory=list)  # Canon 感知（角色出场/伏笔回收/private 泄露），canon_watch 写入
     # 世界数据版本（写作页切片条保鲜比对；路由层附带，查询失败为 None）
     world_version: Optional[Dict] = Field(None)
+    # 章级谋篇进度（P1.4 M2）：无脉络/无锚点为 None（感知带进度行静默缺席）
+    spine_progress: Optional[Dict] = Field(None)
 
 
 class SettleRequest(BaseModel):
@@ -163,10 +165,17 @@ async def heartbeat(
     result = await orch.on_heartbeat(state)
     snapshot = result.get("snapshot", {})
 
+    # 章节对象提前取（谋篇进度/世界版本/漂移提示共用；失败静默 None 不阻塞心跳本体）
+    chapter = None
+    try:
+        chapter = await db.get(Chapter, str(chapter_id))
+    except Exception:
+        chapter = None
+
     # 从世界模型拉挂件缓存（dock_generator 写入的 __dock__ 项）
     dock_parts = _extract_dock_parts(snapshot)
     # 走向卡（层 3 推测首 beat）——Ctrl+Space 走向卡舱的数据源
-    direction_cards = _extract_direction_cards(snapshot)
+    direction_cards = _extract_direction_cards(snapshot, spine=chapter.spine if chapter is not None else None)
     # Canon 感知（canon_watch 写入的 __canon_watch__ 项）
     canon_hints = _extract_canon_hints(snapshot)
 
@@ -174,9 +183,7 @@ async def heartbeat(
 
     # 世界数据版本（写作页切片保鲜比对搭心跳便车；失败静默 None 不阻塞心跳本体）
     world_version = None
-    chapter = None
     try:
-        chapter = await db.get(Chapter, str(chapter_id))
         if chapter is not None:
             world_version = await WorldRepository(db).world_version(str(chapter.book_id))
     except Exception:
@@ -187,6 +194,10 @@ async def heartbeat(
     drift_hint = await _style_drift_hint_for_heartbeat(chapter, db)
     if drift_hint:
         canon_hints = list(canon_hints) + [drift_hint]
+
+    # 章级谋篇进度（P1.4 M2 §4.3）：纯算法零 LLM，宁漏勿误（全词命中才判 hit，
+    # 误报破坏信任；漏报作者自己划掉即可）。按内容长度缓存；pending→hit 迁移才写库
+    spine_progress = await _spine_progress_for_heartbeat(chapter, orch, db)
 
     # 观测（P0-2）：心跳事件进 chapter 级 trace；顺路冲走累积的组件调用账
     # （含上一次心跳派生的后台组件——它们自开 session，只能靠后续请求落库）
@@ -213,6 +224,7 @@ async def heartbeat(
         signals=result.get("signals", []),
         canon_hints=canon_hints,
         world_version=world_version,
+        spine_progress=spine_progress,
     )
 
 
@@ -226,6 +238,73 @@ def _extract_dock_parts(snapshot: Dict) -> List[Dict]:
 
 # 文风漂移提示缓存（chapter_id → (content_len, hint|None)）——内容没变不重算
 _STYLE_HINT_CACHE: Dict[str, tuple] = {}
+
+
+# 谋篇进度缓存（chapter_id → (content_len, progress|None)）——同漂移提醒策略
+_SPINE_PROG_CACHE: Dict[str, tuple] = {}
+
+
+async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) -> Optional[Dict]:
+    """章级谋篇进度判定（P1.4 M2，设计稿 §4.3——纯算法零 LLM）。
+
+    对每个 pending 锚点：jieba 抽 3 关键词，**全部**出现在上次心跳以来的新增
+    正文 → hit（宁漏勿误：漏了作者手点，误了破坏信任）。增量区段由 orchestrator
+    记录的上次正文长度推（首次=全文；改写收缩退化为尾部 500 字）。结果按内容
+    长度缓存；pending→hit 迁移才写库（progress 只前进不回退）。
+    """
+    if chapter is None:
+        return None
+    cid = str(chapter.id)
+    spine = chapter.spine if isinstance(chapter.spine, dict) else None
+    anchors = list((spine or {}).get("anchors") or [])
+    content = chapter.content_text or ""
+    if not anchors:
+        orch._last_content_len = len(content)
+        _SPINE_PROG_CACHE.pop(cid, None)
+        return None
+
+    cached = _SPINE_PROG_CACHE.get(cid)
+    if cached is not None and cached[0] == len(content):
+        orch._last_content_len = len(content)
+        return cached[1]
+
+    prev_len = orch._last_content_len if getattr(orch, "_last_content_len", -1) >= 0 else 0
+    growth = content[prev_len:] if len(content) > prev_len else content[-500:]
+
+    changed = False
+    try:
+        import jieba.analyse  # noqa: F401（与 RAG 词法检索同一分词器）
+
+        for a in anchors:
+            if not isinstance(a, dict) or a.get("status") != "pending" or not a.get("text"):
+                continue
+            keywords = jieba.analyse.extract_tags(a["text"], topK=3)
+            if keywords and all(k in growth for k in keywords):
+                a["status"] = "hit"
+                changed = True
+    except Exception as e:
+        logger.debug(f"[adaptive/spine] 进度判定失败（不阻塞心跳）: {e}")
+
+    if changed:
+        chapter.spine = {**(spine or {}), "anchors": anchors}
+        try:
+            await db.commit()
+        except Exception as e:
+            logger.debug(f"[adaptive/spine] 进度写库失败（不阻塞心跳）: {e}")
+
+    pending_count = sum(1 for a in anchors if isinstance(a, dict) and a.get("status") == "pending")
+    progress = {
+        "intent": (spine or {}).get("intent", {}).get("text", ""),
+        "anchors": [
+            {"id": a.get("id", ""), "text": a.get("text", ""), "status": a.get("status", "pending")}
+            for a in anchors if isinstance(a, dict)
+        ],
+        "pending_count": pending_count,
+        "hint": f"还剩 {pending_count} 个锚点" if pending_count else "锚点都已写到",
+    }
+    _SPINE_PROG_CACHE[cid] = (len(content), progress)
+    orch._last_content_len = len(content)
+    return progress
 
 
 async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Optional[Dict]:
@@ -283,22 +362,33 @@ def _extract_canon_hints(snapshot: Dict) -> List[Dict]:
     return []
 
 
-def _extract_direction_cards(snapshot: Dict) -> List[Dict]:
+def _extract_direction_cards(snapshot: Dict, spine: Any = None) -> List[Dict]:
     """从层 3 推测提取走向卡（跳过 __dock__ 缓存项；每个推测取首个 beat）。
 
     走向卡 = {event, anchors}，一句话剧情走向，供 Ctrl+Space 走向卡舱选择。
+    P1.4 M2：推测带合法 serves_anchor（命中本章非 dropped 锚点 id）时随卡透传——
+    防御第二道（写入侧 future_projection 已闸过一道）。
     """
+    valid_ids = {
+        a.get("id") for a in ((spine or {}).get("anchors") or [])
+        if isinstance(a, dict) and a.get("status") != "dropped" and a.get("id")
+    }
     cards: List[Dict] = []
     for proj in (snapshot.get("projections") or []):
         if not isinstance(proj, dict) or proj.get("__dock__"):
             continue
         for beat in (proj.get("possible_beats") or [])[:1]:
             event = (beat.get("event") or "").strip() if isinstance(beat, dict) else ""
-            if event:
-                cards.append({
-                    "event": event[:60],
-                    "anchors": [str(a)[:20] for a in (beat.get("anchors") or [])][:3],
-                })
+            if not event:
+                continue
+            card = {
+                "event": event[:60],
+                "anchors": [str(a)[:20] for a in (beat.get("anchors") or [])][:3],
+            }
+            sa = beat.get("serves_anchor") if isinstance(beat, dict) else None
+            if sa and sa in valid_ids:
+                card["serves_anchor"] = sa
+            cards.append(card)
     return cards[:3]
 
 

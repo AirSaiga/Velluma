@@ -18,6 +18,7 @@
 import { watch, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard } from '../../../services/api/domain/adaptive.api'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
+import { applySpineProgress } from '../../workspace/composables/useChapterSpine'
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost,
 } from './useGhostDraft'
@@ -153,6 +154,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
       // 走向卡缓存（Ctrl+Space 走向卡舱的数据源；层 3 推测首 beat）
       setBeatCards(result.direction_cards || [])
+
+      // 谋篇进度（P1.4 M2）：回写 useChapterSpine 单例（感知带进度行 + 本地锚点状态同步）
+      applySpineProgress(result.spine_progress)
 
       // 埋点（P0-3 个人镜子）：亮出按卡集签名去重——「无视」= 亮出减采纳，离线可算
       const cardSig = (result.direction_cards || []).map((c) => c.event).join('|')

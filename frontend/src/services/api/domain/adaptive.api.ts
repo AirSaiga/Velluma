@@ -56,12 +56,24 @@ export interface HeartbeatResult {
   canon_hints?: CanonHint[]
   /** 世界数据版本（路由层附带；写作页切片保鲜比对，查询失败无此字段） */
   world_version?: { events: number; updated_at: string | null } | null
+  /** 章级谋篇进度（P1.4 M2；无脉络/无锚点无此字段——进度行静默缺席） */
+  spine_progress?: SpineProgress | null
+}
+
+/** 章级谋篇进度（纯算法判定：pending→hit 只前进；dropped 作者手点） */
+export interface SpineProgress {
+  intent: string
+  anchors: { id: string; text: string; status: 'pending' | 'hit' | 'dropped' }[]
+  pending_count: number
+  hint: string
 }
 
 /** 走向卡（层 3 推测首 beat）：Ctrl+Space 走向卡舱的数据源 */
 export interface DirectionCard {
   event: string
   anchors: string[]
+  /** 服务于的谋篇锚点 id（P1.4 M2 走向卡挂脉络；命中本章非 dropped 锚点才透传） */
+  serves_anchor?: string
 }
 
 export interface SettleResult {

@@ -8,6 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import type { ChapterSpine, SpineAnchor, SpineSuggestion } from '../../../services/api/domain/adaptive.api'
+import { highlightAnchorId } from '../composables/useChapterSpine'
 
 const props = defineProps<{
   spine: ChapterSpine | null
@@ -62,7 +63,7 @@ function submitAnchor() {
         v-for="a in anchors"
         :key="a.id"
         class="spine-chip"
-        :class="{ 'spine-chip--dropped': a.status === 'dropped', 'spine-chip--hit': a.status === 'hit' }"
+        :class="{ 'spine-chip--dropped': a.status === 'dropped', 'spine-chip--hit': a.status === 'hit', 'spine-chip--flash': highlightAnchorId === a.id }"
         :title="a.status === 'dropped' ? '已划掉（本章不写了）' : a.status === 'hit' ? '已写到' : a.text"
       >
         <span class="spine-chip__text">{{ a.text }}</span>
@@ -173,6 +174,14 @@ function submitAnchor() {
 }
 .spine-chip--hit {
   border-color: var(--accent-400, #9685c2);
+}
+.spine-chip--flash {
+  animation: spine-flash 0.5s ease 2;
+  border-color: var(--accent-500, #7c6aad);
+}
+@keyframes spine-flash {
+  0%, 100% { background: var(--bg-secondary); }
+  50% { background: var(--accent-400, #9685c2); color: #fff; }
 }
 .spine-chip--ghost {
   border-style: dashed;
