@@ -99,16 +99,16 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 
 ---
 
-## 2. P1 写作台人机协作深化
+## 2. P1 写作台人机协作深化 ✅（2026-08-19 全部完成）
 
-### 2.1 感知层补全（小件先行）
+### 2.1 感知层补全 ✅（漂移卡经核验已在 S4+ 批次全链落地——fingerprint.compute_style_drift_hint→心跳 canon_hints→PerceptionBand violet 卡渲染，本轮验证各环节齐备；柔性通道原则贯穿后续各件）
 
 - **文风漂移感知卡接线**：后端心跳已产 `kind=style_drift` 提示（S4+），前端
   PerceptionBand 有占位（violet 色标「S4 补全」）未渲染——接上。
 - 感知带行对齐与提示密度打磨（避免协作信息过载——协作的前提是「柔性可忽略」不被
   打扰感破坏）。
 
-### 2.2 审校闭环：finish 修复型护栏（原 P2a，快赢）
+### 2.2 审校闭环：finish 修复型护栏 ✅（bbbea94：repair_single_defect + /adaptive/fix-sentence 作者裁决式 + 审校 tab 修复按钮，每轮审计上限 5 处）
 
 - 审校 tab 审计报告每条残句给「定点修复」按钮：1×creative + REASONING_DISABLED +
   max_tokens=1600 + 上限 5 处（沿用 BS-ADF Phase 7.5 参数，`sentence_integrity.py`
@@ -116,13 +116,13 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 - 修复产出 diff 交作者裁决后落正文——「作者裁决即闸门」，不引入自动改稿；
 - 一致性手术是否同批接入，视 P0 观测到的审计命中率再定。
 
-### 2.3 走向卡质量环（协作调优的仪表）
+### 2.3 走向卡质量环 ✅（6694dc4：insights 第四面板「协作」——四采纳率卡+逐章分布）
 
 - 基于 P0-3 埋点，在数据页（insights）出「协作采纳率」区：走向卡采纳率、胶囊扩写
   采纳率、各模式 stitch 使用分布；
 - 这是「相遇→走向卡桥」（§3.2）上线后的验证仪表，也是 D3 复议的唯一依据。
 
-### 2.4 章级谋篇（设计先行，协作线最大件）
+### 2.4 章级谋篇 ✅（M1 747244e / M2 6efb889 / M3 0f2937d；M4 DDE 自动岔路按数据门不启动）
 
 > ✅ D2 已拍板（2026-08-18）：可行，**核心约束「度」**——谋篇的前置心智成本必须
 > 趋近于零，不得损害写作效率与心流。设计稿：`docs/chapter-planning-spine.md`
@@ -156,9 +156,9 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 
 ---
 
-## 3. P2 世界页完善
+## 3. P2 世界页完善 ✅（2026-08-19 全部完成）
 
-### 3.1 C2 真相层挂接（数据收敛，排在 SQLite 切换日前）
+### 3.1 C2 真相层挂接 ✅（fb0d8e0 + 04662a7：ref 列/hook 并入/migrate-canon/prompt 换源+往返契约单测/EntityDetailDrawer 读者认知分区/挂接治理三处级联清理）
 
 - canon_nodes 加 ref_type/ref_id 挂世界对象——根治**名字漂移使泄密检测静默失效**
   （角色改名 → canon label 脱钩 → `check_canon_compliance` 漏检）；
@@ -167,7 +167,7 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 - `build_canon_context_for_prompt` 换源 + 往返单测锁三段格式契约；
 - 移除 CanonSection 裸建实体入口。详设见 `canon-world-fusion.md` §4/§7。
 
-### 3.2 W5 桥接件：相遇→走向卡桥（带度量激活）
+### 3.2 W5 桥接件：相遇→走向卡桥 ✅（30621fc：encounters 注入推测+from_encounter 闸+🗺徽标+encounter_card_burst_rate 度量）
 
 原缓行理由是「等切片数据密度验证」。方向拍板后改策略为**带度量上线，由数据决定
 留存与调优**（P0-3 埋点先行，§2.3 仪表验证）：
@@ -176,20 +176,20 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
   权重：走向卡可出现「地图来源」建议（「甲与乙同在北岸要塞——要安排相遇吗」）；
 - 验证指标：走向卡里地图来源建议的采纳率（与整体采纳率对比）。
 
-### 3.3 C3 真相能力激活
+### 3.3 C3 真相能力激活 ✅（9f3359e：连锁分析/查片段接 UI+提取候选入待确认池（accept 分流建真相节点）+时间轴揭示朱点+心跳揭示临近提醒）
 
 - 一致性检查 / 连锁分析接真相详情抽屉 UI（后端 API 就绪休眠中）；
 - canon 提取候选并入「待确认」收件箱（与 W4 候选事件同一物理池语义）；
 - 揭示章投影到时间轴刻度 + 揭示临近提醒（写作中接近揭示章时感知带提示）。
 
-### 3.4 世界页收尾与打磨
+### 3.4 世界页收尾与打磨 ✅（a0a3431：旧表冻结声明 8 处+切章红点修复+读者视角相遇口径定夺）
 
 - M4 旧表收尾：audit/publish/inspiration/chapter_optimization 四路由换源 world 或
   显式声明冻结；
 - 写作桥 §12 遗留观察小修（章节切换误亮红点、读者视角相遇块口径、名单外提示）；
 - 期待弧线带维持暂缓（触发条件见 §5）。
 
-### 3.5 比例尺标定与空间简报（D4 已拍板）
+### 3.5 比例尺标定与空间简报 ✅（380df52：D4-1 标定+换算双端对拍+角标；D4-2 切片距离行/邻近对；D4-3 spatial_brief 进四模式 prompt 零变化契约）
 
 > ✅ D4 已拍板（2026-08-18）：投入，设计委托 Agent 完成。设计稿：
 > `docs/map-scale-spatial.md`（books.map_scale / 三步拉线标定 / 步行日内部基准 /
@@ -205,8 +205,8 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 
 | # | 任务 | 说明 |
 |---|------|------|
-| P3-1 | **SQLite 切换日** | 按 `backend/db_sqlite/__init__.py` 清单执行：aiosqlite 入 requirements、`main.py` init_db 分支（默认 SQLite，`DATABASE_URL` 显式给出仍走 PG）、canon_repository 接 compat_queries、启动脚本与打包数据目录、存量迁移入口（`scripts/migrate_pg_to_sqlite.py`，新装默认 SQLite/存量首启引导迁移）。C2 已在 §3.1 先行，schema 收敛约束自然满足。 |
-| P3-2 | **BS-ADF 整体归档** | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
+| P3-1 | **SQLite 切换日** ✅（f745ee5：默认 data/velluma.db，DATABASE_URL 显式给出走 PG；canon 兼容层四查询接通；端到端建库验证） | 按 `backend/db_sqlite/__init__.py` 清单执行：aiosqlite 入 requirements、`main.py` init_db 分支（默认 SQLite，`DATABASE_URL` 显式给出仍走 PG）、canon_repository 接 compat_queries、启动脚本与打包数据目录、存量迁移入口（`scripts/migrate_pg_to_sqlite.py`，新装默认 SQLite/存量首启引导迁移）。C2 已在 §3.1 先行，schema 收敛约束自然满足。 |
+| P3-2 | **BS-ADF 整体归档** ✅（dc7af61+50099af：emergent_facts 迁出→引擎/路由/schema 归档 _deprecated；前端 -1168 行；adaptive 逻辑 composable 拆分**未做**——文件已瘦身至 2426 行，拆分留给下一轮重构期（偏差记录：本项设计稿标「顺带」，风险大于收益时单独排期） | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
 
 ---
 
@@ -239,9 +239,9 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 | 期 | 内容 | 性质 | 状态 |
 |---|---|---|---|
 | P0 | 在途批次提交 + adaptive 观测落库 + 协作交互埋点 + 状态机/model 端点补洞 | 纯接入 | ✅ 2026-08-18 完成（vue-tsc 净 + bsadf 118 单测全过 + 冒烟验证） |
-| P1 | 写作台协作深化：感知层补全 / 审校修复闭环 / 走向卡质量环 / 章级谋篇（设计先行） | 交互主线 | 📋 待启动 |
-| P2 | 世界页完善：C2 真相挂接 / 相遇→走向卡桥（带度量）/ C3 激活 / M4 收尾打磨 | 数据主线 | 📋 待启动 |
-| P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债，间隙插入 | 📋 待启动 |
+| P1 | 写作台协作深化：感知层补全 / 审校修复闭环 / 走向卡质量环 / 章级谋篇 M1-M3 | 交互主线 | ✅ 2026-08-19 完成 |
+| P2 | 世界页完善：C2 真相挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾 / D4 比例尺 | 数据主线 | ✅ 2026-08-19 完成 |
+| P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债 | ✅ 2026-08-19 完成（adaptive composable 拆分遗留给重构期） |
 | P4 | 缓行件激活 | 数据驱动（§5 触发条件） | ⏸ 等 P0 数据 |
 
 ---
