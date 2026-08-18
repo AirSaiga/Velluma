@@ -15,6 +15,7 @@ import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { costReportApi, qualityReportApi, styleApi } from '../../../services/api/domain'
 import { reviewApi } from '../../../services/api/domain/review.api'
+import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { useToast } from '../../../composables/useToast'
 import type { CostReport, QualityReport, FindingItem } from '../../../types'
 
@@ -36,11 +37,12 @@ watch(
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-type PanelKey = 'cost' | 'quality' | 'degraded'
+type PanelKey = 'cost' | 'quality' | 'degraded' | 'collab'
 const activePanel = ref<PanelKey>('cost')
 
 const costReports = ref<{ chapterId: string; chapterNumber: number; report: CostReport | null }[]>([])
 const qualityReports = ref<{ chapterId: string; chapterNumber: number; report: QualityReport | null }[]>([])
+const collabReports = ref<{ chapterId: string; chapterNumber: number; report: Awaited<ReturnType<typeof adaptiveApi.collabEventsSummary>> | null }[]>([])
 
 async function loadAll() {
   if (!bookIdFromRoute.value) return
@@ -52,7 +54,7 @@ async function loadAll() {
       await store.loadCurrentBookData()
     }
     const chaps = sortedChapters.value.slice(-10) // 最近 10 章
-    const [costs, qualities] = await Promise.all([
+    const [costs, qualities, collabs] = await Promise.all([
       Promise.all(
         chaps.map(async (c) => {
           try {
@@ -73,9 +75,20 @@ async function loadAll() {
           }
         })
       ),
+      Promise.all(
+        chaps.map(async (c) => {
+          try {
+            const r = await adaptiveApi.collabEventsSummary(c.id)
+            return { chapterId: c.id, chapterNumber: c.chapter_number, report: r }
+          } catch {
+            return { chapterId: c.id, chapterNumber: c.chapter_number, report: null }
+          }
+        })
+      ),
     ])
     costReports.value = costs
     qualityReports.value = qualities
+    collabReports.value = collabs
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -115,6 +128,22 @@ const degradedEvents = computed(() => {
 function backToLibrary() {
   router.push({ name: 'library' })
 }
+
+// ===== 协作采纳率聚合（P1.3 走向卡质量环：个人镜子——roadmap §2.3）=====
+const collabTotals = computed(() => {
+  const by: Record<string, number> = {}
+  for (const cr of collabReports.value) {
+    if (!cr.report) continue
+    for (const [k, v] of Object.entries(cr.report.by_kind || {})) by[k] = (by[k] || 0) + v
+  }
+  return by
+})
+const collabRate = (num: string, den: string) => {
+  const n = collabTotals.value[num] || 0
+  const d = collabTotals.value[den] || 0
+  return d > 0 ? Math.round((n / d) * 100) + '%' : '—'
+}
+const collabHasData = computed(() => collabReports.value.some((r) => r.report?.total))
 
 function formatTokens(n: number): string {
   if (n > 1000) return (n / 1000).toFixed(1) + 'k'
@@ -218,11 +247,12 @@ async function rerunQuality(chapterId: string) {
 
     <!-- 面板切换 -->
     <div class="panel-tabs">
-      <button
+        <button
         v-for="p in [
           { k: 'cost', l: '成本' },
           { k: 'quality', l: '质量' },
           { k: 'degraded', l: '降级事件' },
+          { k: 'collab', l: '协作' },
         ]"
         :key="p.k"
         class="panel-tab"
@@ -316,6 +346,47 @@ async function rerunQuality(chapterId: string) {
           <span class="deg-reason">{{ ev.reason }}</span>
         </article>
       </div>
+    </section>
+
+    <!-- 协作面板（P1.3 走向卡质量环：本地埋点的个人镜子——采纳率决定协作件调优方向） -->
+    <section v-else-if="activePanel === 'collab'" class="data-panel">
+      <div v-if="!collabHasData" class="empty">
+        <p>暂无协作数据。在写作台用 AI 辅助写一章（走向卡 / Space 续写 / 细纲胶囊），这里会照出你的采纳习惯。</p>
+      </div>
+      <template v-else>
+        <div class="summary-cards">
+          <div class="summary-card">
+            <span class="summary-num">{{ collabRate('card_burst', 'cards_delivered') }}</span>
+            <span class="summary-label">走向卡连写率</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-num">{{ collabRate('ghost_adopt', 'ghost_request') }}</span>
+            <span class="summary-label">幽灵稿采纳率</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-num">{{ (collabTotals['capsule_expand'] || 0) + (collabTotals['capsule_create'] || 0) }}</span>
+            <span class="summary-label">细纲胶囊使用</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-num">{{ collabTotals['quick_note'] || 0 }}</span>
+            <span class="summary-label">世界速记入账</span>
+          </div>
+        </div>
+        <div class="chapter-cost-list">
+          <article v-for="cr in collabReports.filter((r) => r.report?.total)" :key="cr.chapterId" class="cost-item">
+            <header class="cost-header">
+              <span class="cost-chapter">第 {{ cr.chapterNumber }} 章</span>
+              <span class="cost-total">{{ cr.report?.total }} 次协作交互</span>
+            </header>
+            <div class="stage-bars">
+              <div v-for="(v, k) in cr.report?.by_kind || {}" :key="k" class="stage-bar" :title="`${k}: ${v} 次`">
+                <span class="stage-name">{{ k }}</span>
+                <span class="stage-calls">{{ v }}×</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </template>
     </section>
   </div>
 </template>
