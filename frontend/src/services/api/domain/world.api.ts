@@ -135,6 +135,11 @@ export interface SceneSlice {
   version: WorldVersion
   /** 世界页无实体（旧表兜底书）→ 前端显示迁移引导 */
   world_empty: boolean
+  /** D4-2 比例尺距离（docs/map-scale-spatial.md §5）：未标定整段缺席 */
+  proximities?: { a: string; b: string; text: string }[]
+  nearest_anchor?: { name: string; text: string } | null
+  /** D4-3 空间常识块（settings_bundle 消费；切片 API 顺带携带） */
+  spatial_brief?: string | null
 }
 
 // ===== 情境浮卡（W2 查询闭环）=====

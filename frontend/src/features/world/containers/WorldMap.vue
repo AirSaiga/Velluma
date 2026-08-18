@@ -31,6 +31,8 @@ const props = defineProps<{
   pickingMode?: 'location' | null
   /** 绘制模式：非 null 时地图点击收集顶点，双击/Enter/完成闭合后 emit draw-complete */
   drawMode?: DrawMode
+  /** D4 比例尺标定（books.map_scale；null=未标定角标显示引导） */
+  mapScale?: MapScale | null
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +40,56 @@ const emit = defineEmits<{
   'draw-complete': [points: [number, number][]]
   'entity-click': [entityId: string]
 }>()
+
+// ===== D4 比例尺标定：拉线捕获 + 左下角比例尺角标 =====
+import { pxPerDay, formatDistance, type MapScale } from '../engine/distance'
+
+const calibrating = ref(false)
+const calibPoints = ref<[number, number][]>([])
+let calibLine: L.Polyline | null = null
+const scaleBarText = ref('')
+
+function startCalibrating() {
+  calibrating.value = true
+  calibPoints.value = []
+  if (calibLine && map) { map.removeLayer(calibLine); calibLine = null }
+}
+function stopCalibrating() {
+  calibrating.value = false
+}
+function renderCalibLine() {
+  if (!map) return
+  if (calibLine) map.removeLayer(calibLine)
+  calibLine = null
+  if (calibPoints.value.length) {
+    calibLine = L.polyline(
+      calibPoints.value.map(([x, y]) => L.latLng(y, x)),
+      { color: '#c2725a', weight: 2, dashArray: '6 4' },
+    ).addTo(map)
+  }
+}
+
+/** 角标：按当前缩放选一个 60~140px 的整数天值画「—— ≈ N 天步程」（玩具感来源） */
+function updateScaleBar() {
+  const ppd = pxPerDay(props.mapScale)
+  if (!map || ppd == null) { scaleBarText.value = ''; return }
+  const zoom = map.getZoom()
+  const unitsPerScreenPx = 256 / (2 ** zoom)  // CRS.Simple：1 screen px = 256/2^z 内部单位
+  for (const days of [0.5, 1, 2, 5, 10, 20, 50]) {
+    const pxLen = (days * ppd) / unitsPerScreenPx
+    if (pxLen >= 60 && pxLen <= 160) {
+      scaleBarText.value = `≈ ${days < 1 ? '半日' : days + ' 天'}步程`
+      return
+    }
+  }
+  scaleBarText.value = '已标定'
+}
+
+function onCalibrateStart() { startCalibrating() }
+
+onMounted(() => window.addEventListener('velluma:map-calibrate-start', onCalibrateStart))
+onBeforeUnmount(() => window.removeEventListener('velluma:map-calibrate-start', onCalibrateStart))
+watch(() => props.mapScale, updateScaleBar, { immediate: false })
 
 const containerRef = ref<HTMLDivElement | null>(null)
 let map: L.Map | null = null
@@ -1233,6 +1285,18 @@ onMounted(() => {
   window.addEventListener('pointermove', onLinkPointerMove)
   window.addEventListener('pointerup', onLinkPointerUp)
   map.on('click', (e: L.LeafletMouseEvent) => {
+    // D4 比例尺标定：收两点（内部 [x,y]）→ 派发给 WorldView 选档落库
+    if (calibrating.value) {
+      calibPoints.value.push([e.latlng.lng, e.latlng.lat])
+      renderCalibLine()
+      if (calibPoints.value.length >= 2) {
+        window.dispatchEvent(new CustomEvent('velluma:map-calibrate-line', {
+          detail: { points: calibPoints.value.slice(0, 2) },
+        }))
+        stopCalibrating()
+      }
+      return
+    }
     if (props.drawMode) {
       // 绘制优先：点击收集顶点（[lng,lat] → 内部 [x,y]，带时间戳供双击识别）
       draftPoints.value.push({ p: [e.latlng.lng, e.latlng.lat], t: Date.now() })
@@ -1292,6 +1356,7 @@ onMounted(() => {
     renderEntities()
   renderRelations()
     scheduleStrokeRedraw()
+    updateScaleBar()
   })
   // 笔迹 canvas 与地图视图同步（拖动/缩放/窗口变化 → rAF 重绘）
   map.on('move zoom viewreset resize', scheduleStrokeRedraw)
@@ -1456,6 +1521,13 @@ onBeforeUnmount(() => {
 <template>
   <div class="world-map-wrap">
     <div ref="containerRef" class="world-map" :class="{ drawing: drawMode }"></div>
+
+    <!-- D4 比例尺角标（左下；随缩放重算长度——像真地图的图例，玩具感来源） -->
+    <div v-if="scaleBarText" class="wm-scalebar" title="比例尺标定（⋯ 菜单可重标）">
+      <span class="wm-scalebar-line"></span>{{ scaleBarText }}
+    </div>
+    <!-- D4 标定拉线提示 -->
+    <div v-if="calibrating" class="wm-calib-hint">在地图上点两个点——这段路你走多久？</div>
 
     <!-- 墨迹滤镜 defs：疆域 SVG 位移毛边（古卷水彩晕染）；-soft 为空白舆图细线版 -->
     <svg class="wm-svg-defs" width="0" height="0" aria-hidden="true">

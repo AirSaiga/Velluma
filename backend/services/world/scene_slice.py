@@ -155,6 +155,9 @@ async def build_scene_slice(
                 "importance": int(getattr(ent, "importance", 1) or 1),
                 "visibility": getattr(ent, "visibility", "public") or "public",
                 "_location_id": loc_id,
+                "_xy": (loc.coord_x, loc.coord_y)
+                if loc is not None and loc.coord_x is not None and loc.coord_y is not None
+                else None,
             }
         )
 
@@ -231,7 +234,49 @@ async def build_scene_slice(
     book = await db.get(Book, book_id)
     expectations = _reader_expectations_view(book)[:_EXPECTATION_LIMIT]
 
-    return {
+    # ---- D4-2：比例尺标定后的诚实距离（docs/map-scale-spatial.md §5；未标定整段缺席） ----
+    proximities: List[Dict[str, Any]] = []
+    nearest_anchor = None
+    scale = getattr(book, "map_scale", None) if book is not None else None
+    if scale:
+        from backend.services.world.spatial import distance_days, format_distance
+
+        def _loc_xy(lid: str):
+            l = locations_by_id.get(lid)
+            if l is not None and l.coord_x is not None and l.coord_y is not None:
+                return (l.coord_x, l.coord_y)
+            return None
+
+        alive = [p for p in presence if p["alive"] and _loc_xy(p["_location_id"])]
+        pairs: List[tuple] = []
+        for i in range(len(alive)):
+            for j in range(i + 1, len(alive)):
+                if alive[i]["_location_id"] == alive[j]["_location_id"]:
+                    continue  # 同地组已有 encounters
+                d = distance_days(_loc_xy(alive[i]["_location_id"]), _loc_xy(alive[j]["_location_id"]), scale)
+                if d is not None and d <= 3.0:  # 分档：半日内/1-3 天才值得提示
+                    pairs.append((d, alive[i]["name"], alive[j]["name"]))
+        for d, a, b in sorted(pairs)[:3]:
+            proximities.append({
+                "a": a, "b": b,
+                "text": f"{a}与{b}相距{format_distance(d)}，赶路可及",
+            })
+        # 脚下最近锚点地点（有场景坐标才算；同地排除）
+        if scene and scene.get("location_id"):
+            sxy = _loc_xy(str(scene["location_id"]))
+            if sxy is not None:
+                cands = []
+                for loc in locations:
+                    if str(loc.id) == str(scene["location_id"]) or loc.coord_x is None:
+                        continue
+                    d = distance_days(sxy, (loc.coord_x, loc.coord_y), scale)
+                    if d is not None and d > 0.05:
+                        cands.append((d, loc.name or ""))
+                if cands:
+                    d, name = min(cands)
+                    nearest_anchor = {"name": name, "text": format_distance(d)}
+
+    result = {
         "t": t,
         "t_source": nt.source,
         "presence": [{k: v for k, v in p.items() if not k.startswith("_")} for p in presence],
@@ -242,6 +287,25 @@ async def build_scene_slice(
         "version": await repo.world_version(book_id),
         "world_empty": False,
     }
+    if proximities:
+        result["proximities"] = proximities
+    if nearest_anchor:
+        result["nearest_anchor"] = nearest_anchor
+    # D4-3：生成上下文的空间常识块（settings_bundle 消费；未标定为空串零变化）
+    if scale:
+        from backend.services.world.spatial import build_spatial_brief
+
+        scene_xy = None
+        if scene and scene.get("location_id"):
+            scene_xy = _loc_xy(str(scene["location_id"]))
+        brief = build_spatial_brief(
+            [{"name": p["name"], "x": p["_xy"][0], "y": p["_xy"][1]} for p in presence if p.get("_xy")],
+            ({"name": scene.get("name") or "", "x": scene_xy[0], "y": scene_xy[1]} if scene_xy else None),
+            scale,
+        )
+        if brief:
+            result["spatial_brief"] = brief
+    return result
 
 
 # ============================================================

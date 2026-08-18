@@ -12,6 +12,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useWorld } from '../composables/useWorld'
 import { worldApi } from '../../../services/api'
+import { bookApi } from '../../../services/api/domain'
 import { useAppStore } from '../../app/useAppStore'
 import { formatTime } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
@@ -272,6 +273,48 @@ const showBulkImport = ref(false)
 let removeShortcut: (() => void) | null = null
 
 // ===== 旧设定中心迁移（幂等；详见后端 migrate_legacy_settings 注释）=====
+// ===== D4 比例尺标定（docs/map-scale-spatial.md §3：拉线→选档→完成，≤3 步）=====
+const calibDialog = ref<{ points: [number, number][] } | null>(null)
+const calibDays = ref('1')
+const calibMode = ref<'foot' | 'horse' | 'boat' | 'custom'>('foot')
+
+function startCalibrate() {
+  moreOpen.value = false
+  window.dispatchEvent(new CustomEvent('velluma:map-calibrate-start'))
+}
+
+function onCalibLine(e: Event) {
+  const d = (e as CustomEvent<{ points: [number, number][] }>).detail
+  if (d?.points?.length === 2) calibDialog.value = { points: d.points }
+}
+onMounted(() => window.addEventListener('velluma:map-calibrate-line', onCalibLine))
+onBeforeUnmount(() => window.removeEventListener('velluma:map-calibrate-line', onCalibLine))
+
+/** 选档保存：模式换算为步行日（骑马 1 天 = 2.5 步行日等），refs ≤5 先进先出 */
+async function saveCalibration() {
+  const cal = calibDialog.value
+  if (!cal || !bookId.value) return
+  const MODE_TO_DAYS: Record<string, number> = { foot: 1, horse: 2.5, boat: 2 }
+  let days = MODE_TO_DAYS[calibMode.value]
+  if (calibMode.value === 'custom') days = Math.max(0.1, Number(calibDays.value) || 1)
+  else days = Number(calibDays.value) > 0 ? Number(calibDays.value) * days : days
+  const [a, b] = cal.points
+  const book = store.currentBook.value as any
+  const refs = [...((book?.map_scale as any)?.refs || []), {
+    ax: a[0], ay: a[1], bx: b[0], by: b[1], days_foot: days,
+    label: calibMode.value === 'foot' ? '步行' : calibMode.value === 'horse' ? '骑马' : calibMode.value === 'boat' ? '乘船' : '自定义',
+  }].slice(-5)
+  try {
+    await bookApi.update(bookId.value, { map_scale: { refs, detour_factor: (book?.map_scale as any)?.detour_factor ?? 1.2, modes: (book?.map_scale as any)?.modes ?? { walk: 1, horse: 2.5, boat: 2, caravan: 0.7 } } })
+    await store.selectBook(bookId.value)
+    showToast('比例尺已标定——距离从此有了诚实的人话', 'success')
+  } catch (e: any) {
+    showToast('标定失败：' + (e?.message || ''), 'error')
+  } finally {
+    calibDialog.value = null
+  }
+}
+
 async function migrateLegacy() {
   const ok = await showConfirm({
     title: '导入旧设定',
@@ -673,6 +716,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             :book-id="bookId"
             :picking-mode="pickingMode"
             :draw-mode="drawMode"
+            :map-scale="(store.currentBook.value as any)?.map_scale ?? null"
             @pick="onPick"
             @draw-complete="onDrawComplete"
             @entity-click="(id: string) => (selectedEntityId = id)"
@@ -719,6 +763,9 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
               ⋯
             </button>
             <div v-if="moreOpen" class="ap-menu" @click.stop>
+              <button class="ap-menu-item" title="拉一条你有感觉的距离，从此地图上的距离有了人话" @click="startCalibrate()">
+                ⚖ 标定比例尺
+              </button>
               <button class="ap-menu-item" @click="(showBulkImport = true), (moreOpen = false)">
                 批量导入 TSV
               </button>
@@ -1131,6 +1178,29 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       </template>
     </ModalShell>
   </div>
+
+    <!-- D4 比例尺标定·选档卡（拉线完成弹出：这段路相当于？） -->
+    <Teleport to="body">
+      <div v-if="calibDialog" class="calib-backdrop" @click.self="calibDialog = null">
+        <div class="calib-card">
+          <div class="calib-title">这段路相当于？</div>
+          <div class="calib-modes">
+            <button v-for="m in [{k:'foot',l:'步行一天'},{k:'horse',l:'骑马一天'},{k:'boat',l:'乘船一天'},{k:'custom',l:'自定义'}]" :key="m.k"
+              class="calib-mode" :class="{ 'is-on': calibMode === m.k }" @click="calibMode = m.k as any">{{ m.l }}</button>
+          </div>
+          <div class="calib-custom">
+            <input v-model="calibDays" type="number" min="0.1" step="0.5" class="calib-input" />
+            <span>{{ calibMode === 'custom' ? '天（步行）' : '× 天数（默认 1）' }}</span>
+          </div>
+          <div class="calib-actions">
+            <button class="calib-btn" @click="calibDialog = null">取消</button>
+            <button class="calib-btn calib-btn--primary" @click="saveCalibration">标定</button>
+          </div>
+          <p class="calib-hint">可标多条取平均（≤5）；重标随时，全部距离即时重算。</p>
+        </div>
+      </div>
+    </Teleport>
+
 </template>
 
 <style scoped>
@@ -1777,4 +1847,19 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   color: var(--accent-500);
   font-weight: 600;
 }
+
+/* D4 标定选档卡 */
+
+.calib-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(20,18,16,.35); display: flex; align-items: center; justify-content: center; }
+.calib-card { width: 300px; background: var(--bg-canvas, #fefdfb); border: 1px solid var(--border-color, #e0dbd3); border-radius: 12px; padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
+.calib-title { font-family: var(--font-heading, inherit); font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
+.calib-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
+.calib-mode { border: 1px solid var(--border-color, #e0dbd3); border-radius: 999px; background: none; font-size: 12px; color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
+.calib-mode.is-on { border-color: #c2725a; color: #c2725a; }
+.calib-custom { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-muted); justify-content: center; }
+.calib-input { width: 70px; border: 1px solid var(--border-color, #e0dbd3); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-primary); padding: 4px 6px; text-align: center; }
+.calib-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
+.calib-btn { border: 1px solid var(--border-color, #e0dbd3); border-radius: 8px; background: var(--bg-secondary, #faf8f4); color: var(--text-secondary); font-size: 12.5px; padding: 6px 16px; cursor: pointer; }
+.calib-btn--primary { background: #c2725a; border-color: #c2725a; color: #fff; }
+.calib-hint { margin: 10px 0 0; font-size: 10.5px; color: var(--text-muted); text-align: center; }
 </style>

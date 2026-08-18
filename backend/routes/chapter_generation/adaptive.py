@@ -552,6 +552,7 @@ async def stitch_ghost(
             memory_echoes=memory_echoes,
             style_positive=style_positive,
             author_samples=author_samples,
+            spatial_brief=bundle.spatial_brief,
         )
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
@@ -567,6 +568,7 @@ async def stitch_ghost(
             memory_echoes=memory_echoes,
             style_positive=style_positive,
             author_samples=author_samples,
+            spatial_brief=bundle.spatial_brief,
             serves_anchor=request.serves_anchor.strip(),
         )
     elif request.mode == "burst":
@@ -582,6 +584,7 @@ async def stitch_ghost(
             memory_echoes=memory_echoes,
             style_positive=style_positive,
             author_samples=author_samples,
+            spatial_brief=bundle.spatial_brief,
         )
     else:
         system_prompt, user_prompt = build_continue_prompt(
@@ -596,6 +599,7 @@ async def stitch_ghost(
             memory_echoes=memory_echoes,
             style_positive=style_positive,
             author_samples=author_samples,
+            spatial_brief=bundle.spatial_brief,
         )
 
     async def _stream():

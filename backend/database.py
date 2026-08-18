@@ -652,6 +652,13 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT DEFAULT ''",
         "expected_udt_names": {"text"},
     },
+    # D4 比例尺标定（docs/map-scale-spatial.md §2.1）：书级地图尺度锚（NULL=未标定）
+    {
+        "table": "books",
+        "column": "map_scale",
+        "definition": "JSONB",
+        "expected_udt_names": {"jsonb"},
+    },
     # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
     {
         "table": "style_cards",

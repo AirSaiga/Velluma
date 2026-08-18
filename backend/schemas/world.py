@@ -302,6 +302,11 @@ class SceneSliceResponse(BaseModel):
     expectations: List[SceneExpectationItem] = Field(default_factory=list)
     version: WorldVersionResponse = Field(default_factory=WorldVersionResponse)
     world_empty: bool = False  # 世界页无实体 → 前端显示迁移引导
+    # D4-2 比例尺距离（docs/map-scale-spatial.md §5）：未标定整段缺席（零变化契约）
+    proximities: List[Dict] = Field(default_factory=list)  # [{a, b, text}] 异地近邻对
+    nearest_anchor: Optional[Dict] = None                 # {name, text} 脚下最近锚点
+    # D4-3 空间常识块（settings_bundle 消费；未标定缺席）
+    spatial_brief: Optional[str] = None
 
 
 # ============================================================

@@ -298,6 +298,17 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             </div>
           </section>
 
+          <!-- D4-2 比例尺距离（未标定整段缺席——零变化契约；作者视角信息，读者档隐藏） -->
+          <section v-if="!readerView && (slice.proximities?.length || slice.nearest_anchor)" class="setting-group">
+            <div class="setting-group-label">距离（比例尺粗估）</div>
+            <div v-if="slice.nearest_anchor" class="encounter-row">
+              最近锚点 {{ slice.nearest_anchor.name }}<span class="encounter-loc"> · {{ slice.nearest_anchor.text }}</span>
+            </div>
+            <div v-for="(p, i) in slice.proximities || []" :key="'px' + i" class="encounter-row">
+              {{ p.text }}
+            </div>
+          </section>
+
           <!-- 头顶的线（读者视角下伏笔=作者层，隐藏） -->
           <section
             v-if="!readerView && (slice.foreshadows.length || slice.expectations.length)"

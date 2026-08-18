@@ -206,6 +206,10 @@ class Book(Base):
     # 系统陈词库本书豁免（完整落地批，设计稿 §6.4）：被豁免的 SystemCliche pattern 列表——
     # 审计/扫描/三层合并时跳过（不删全局层，只本书不生效）
     style_cliche_exemptions = Column(JSONB, default=list)
+    # 地图比例尺标定（docs/map-scale-spatial.md §2.1，D4）：CRS.Simple 内部坐标 →
+    # 现实距离的换算锚。{refs:[{ax,ay,bx,by,days_foot,label}], detour_factor,
+    # modes:{...}}；NULL=未标定（距离功能静默降级，prompt 零变化）
+    map_scale = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")

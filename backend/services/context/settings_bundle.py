@@ -81,6 +81,9 @@ class SettingsBundle:
     world_sourced: bool = False
     world_time: int = 0  # 时间切片时刻 t（叙事时间四级降级解析）
     world_state: Dict[str, Any] = field(default_factory=dict)  # t 时刻推演快照
+    # D4-3 空间常识块（docs/map-scale-spatial.md §5）：双门槛（world_sourced 且
+    # 已标定）才有内容；未标定恒空串——四模式 prompt 逐字节零变化
+    spatial_brief: str = ""
 
     def to_prompt_context(self) -> Dict[str, Any]:
         """生成供 prompt 拼接的扁平 dict（文本化版本）。
@@ -276,6 +279,18 @@ async def load_chapter_settings_bundle(
                 bundle.world_sourced = True
         except Exception:
             pass  # 降级：world 桥失败走旧表（辅助不因桥接阻塞）
+
+    # ---- D4-3 空间常识块（双门槛：world_sourced 且已标定；失败静默空串零变化） ----
+    if bundle.world_sourced and bundle.book_id:
+        try:
+            from backend.models import Book as _Book
+            _book = await db.get(_Book, bundle.book_id)
+            if _book is not None and getattr(_book, "map_scale", None):
+                from backend.services.world.scene_slice import build_scene_slice
+                _slice = await build_scene_slice(db, bundle.book_id, bundle.chapter)
+                bundle.spatial_brief = _slice.get("spatial_brief") or ""
+        except Exception:
+            bundle.spatial_brief = ""
 
     # ---- 书级 Canon 图谱 ----
     if bundle.book_id:

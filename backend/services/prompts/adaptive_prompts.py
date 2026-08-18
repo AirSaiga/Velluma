@@ -53,6 +53,13 @@ _ADAPTIVE_SYSTEM = """你是顶级的中文长篇小说作家，此刻在辅助�
 """
 
 
+def _spatial_block(spatial_brief: str) -> str:
+    """D4-3 空间常识块（docs/map-scale-spatial.md §5）：≤3 行粗估；空=零变化。"""
+    if not spatial_brief.strip():
+        return ""
+    return "\n# 空间常识（比例尺粗估，数字天然带「约」）\n" + spatial_brief.strip()[:300]
+
+
 def _base_system() -> str:
     """返回填好禁词表的共享基座 system prompt。"""
     return _ADAPTIVE_SYSTEM.format(banned_words=_BANNED_WORDS_TEXT)
@@ -143,6 +150,7 @@ def build_continue_prompt(
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
+    spatial_brief: str = "",
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -167,6 +175,7 @@ def build_continue_prompt(
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
+    system_prompt += _spatial_block(spatial_brief)
 
     parts_str = "、".join(picked_parts) if picked_parts else "（无——仅按作者原句顺势续写）"
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
@@ -210,6 +219,7 @@ def build_burst_prompt(
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
+    spatial_brief: str = "",
 ) -> tuple:
     """构建段落级连写 prompt（Ctrl+Space 走向卡舱选定后触发）。
 
@@ -236,6 +246,7 @@ def build_burst_prompt(
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
+    system_prompt += _spatial_block(spatial_brief)
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
     if beat_guidance:
@@ -275,6 +286,7 @@ def build_outline_expand_prompt(
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
+    spatial_brief: str = "",
     serves_anchor: str = "",
 ) -> tuple:
     """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
@@ -308,6 +320,7 @@ def build_outline_expand_prompt(
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
+    system_prompt += _spatial_block(spatial_brief)
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
     if serves_anchor:
@@ -388,6 +401,7 @@ def build_opening_prompt(
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
+    spatial_brief: str = "",
 ) -> tuple:
     """构建开篇点火 prompt（空章冷启动：大纲是唯一燃料）。
 
@@ -413,6 +427,7 @@ def build_opening_prompt(
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
+    system_prompt += _spatial_block(spatial_brief)
 
     prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary[:300]}" if previous_summary else ""
     worldview_line = f"\n# 世界观基调\n{worldview_text[:200]}" if worldview_text else ""

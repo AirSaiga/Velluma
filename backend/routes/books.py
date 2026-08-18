@@ -130,7 +130,11 @@ async def update_book(book_id: UUID, book_data: BookUpdate, repo: BookRepository
     book = await repo.get_by_id(book_id)
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
-    return await repo.update(book, book_data.model_dump(exclude_unset=True))
+    data = book_data.model_dump(exclude_unset=True)
+    # D4 比例尺：显式空 dict = 清除标定（存 NULL，未标定语义统一）
+    if "map_scale" in data and not data["map_scale"]:
+        data["map_scale"] = None
+    return await repo.update(book, data)
 
 
 @router.delete("/books/{book_id}")
