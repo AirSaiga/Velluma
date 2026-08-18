@@ -72,3 +72,14 @@ export function encounterBand(days: number | null | undefined): string | null {
   if (days <= 3.0) return '1-3 天路程'
   return '更远'
 }
+
+// ---- 空白舆图隐含地球尺度（docs/map-scale-spatial.md §2.2，与后端 blank_atlas_suggested_scale 同构）----
+const KM_PER_DAY_FOOT = 30
+const EARTH_CIRCUMFERENCE_KM = 40075
+
+/** 空白舆图上画的一段线按地球尺度折算的步行日（atlasWidth=内部单位图宽） */
+export function blankAtlasSuggestedDays(lineLen: number, atlasWidth: number = 900): number {
+  if (atlasWidth <= 0 || lineLen <= 0) return 0
+  const fullWidthDays = EARTH_CIRCUMFERENCE_KM / KM_PER_DAY_FOOT // ≈1335.8
+  return (lineLen / atlasWidth) * fullWidthDays
+}

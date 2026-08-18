@@ -4,8 +4,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   pxPerDay, distanceDays, formatDistance, formatDistanceWithScale, encounterBand,
-} from './distance'
-import type { MapScale } from './distance'
+  blankAtlasSuggestedDays,
+} from '../distance'
+import type { MapScale } from '../distance'
 
 const SCALE: MapScale = {
   refs: [{ ax: 0, ay: 0, bx: 100, by: 0, days_foot: 1.0, label: '骑马一天' }],
@@ -49,5 +50,13 @@ describe('D4 空间换算', () => {
     expect(encounterBand(0.3)).toBe('半日内可达')
     expect(encounterBand(2.0)).toBe('1-3 天路程')
     expect(encounterBand(9.0)).toBe('更远')
+  })
+
+  it('空白舆图地球尺度预填（§2.2，与后端 blank_atlas_suggested_scale 同构）', () => {
+    // 图宽 900 内部单位 = 赤道一圈 ≈ 1335.8 步行日
+    expect(blankAtlasSuggestedDays(900)).toBeCloseTo(40075 / 30, 6)
+    expect(blankAtlasSuggestedDays(90)).toBeCloseTo((40075 / 30) / 10, 6)   // 十分之一图宽
+    expect(blankAtlasSuggestedDays(0)).toBe(0)
+    expect(blankAtlasSuggestedDays(100, 0)).toBe(0)
   })
 })

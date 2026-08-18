@@ -206,7 +206,7 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 | # | 任务 | 说明 |
 |---|------|------|
 | P3-1 | **SQLite 切换日** ✅（f745ee5：默认 data/velluma.db，DATABASE_URL 显式给出走 PG；canon 兼容层四查询接通；端到端建库验证） | 按 `backend/db_sqlite/__init__.py` 清单执行：aiosqlite 入 requirements、`main.py` init_db 分支（默认 SQLite，`DATABASE_URL` 显式给出仍走 PG）、canon_repository 接 compat_queries、启动脚本与打包数据目录、存量迁移入口（`scripts/migrate_pg_to_sqlite.py`，新装默认 SQLite/存量首启引导迁移）。C2 已在 §3.1 先行，schema 收敛约束自然满足。 |
-| P3-2 | **BS-ADF 整体归档** ✅（dc7af61+50099af：emergent_facts 迁出→引擎/路由/schema 归档 _deprecated；前端 -1168 行；adaptive 逻辑 composable 拆分**未做**——文件已瘦身至 2426 行，拆分留给下一轮重构期（偏差记录：本项设计稿标「顺带」，风险大于收益时单独排期） | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
+| P3-2 | **BS-ADF 整体归档** ✅（dc7af61+50099af：emergent_facts 迁出→引擎/路由/schema 归档 _deprecated；前端 -1168 行；原「顺带拆 composable」升格为独立后续任务 T1，见 §9） | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
 
 ---
 
@@ -241,16 +241,16 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 | P0 | 在途批次提交 + adaptive 观测落库 + 协作交互埋点 + 状态机/model 端点补洞 | 纯接入 | ✅ 2026-08-18 完成（vue-tsc 净 + bsadf 118 单测全过 + 冒烟验证） |
 | P1 | 写作台协作深化：感知层补全 / 审校修复闭环 / 走向卡质量环 / 章级谋篇 M1-M3 | 交互主线 | ✅ 2026-08-19 完成 |
 | P2 | 世界页完善：C2 真相挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾 / D4 比例尺 | 数据主线 | ✅ 2026-08-19 完成 |
-| P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债 | ✅ 2026-08-19 完成（adaptive composable 拆分遗留给重构期） |
+| P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债 | ✅ 2026-08-19 完成 |
 | P4 | 缓行件激活 | 数据驱动（§5 触发条件） | ⏸ 等 P0 数据 |
 
 ---
 
 ## 8. 风险登记
 
-- **useGenerationSession.ts（3371 行）**：休眠步进逻辑与在役 adaptive 逻辑同居一个
-  文件。P3-2 拆分前，改动此文件需格外谨慎；P1 各交互件优先落在 useAdaptiveAssist
-  与新 composable，避免继续加厚该文件。
+- **useGenerationSession.ts（2426 行，步进逻辑已删）**：仍是 adaptive 主逻辑的最大
+  单文件——拆分为独立任务 T1（§9），拆分前改动需谨慎；新交互件优先落在
+  useAdaptiveAssist / useChapterSpine 等独立 composable。
 - **协作信息过载**：P1 感知层与走向卡升级的共同风险是打扰作者心流——所有新提示
   一律走「柔性可忽略」通道（感知带/挂件，不弹窗、不抢焦点），上线后凭 P0-3 无视率
   数据回调密度。
@@ -260,3 +260,11 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
   响应（adf.py 已有先例）。
 - **双库并存期测试盲区**：切换日后 PG 路径保留，CI 目前只跑 py_compile——canon
   兼容层两个方言各需冒烟验证手段。
+
+---
+
+## 9. 后续任务（独立排期，不属于任何已完成期次）
+
+| # | 任务 | 说明 |
+|---|------|------|
+| T1 | **useGenerationSession adaptive 逻辑拆分** | P3-2 设计时标「顺带」的 composable 拆分，实施时评估风险大于收益（写作主线路径集中于此文件），升格为独立任务：把 adaptive 键位状态机/车道管理拆出独立 composable，主文件只留会话编排。前置：一次全量 GUI 回归。验收：vue-tsc 净 + 全部既有测试过 + 写作台键位行为逐项不变。 |

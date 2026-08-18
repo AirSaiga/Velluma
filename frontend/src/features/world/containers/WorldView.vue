@@ -277,6 +277,7 @@ let removeShortcut: (() => void) | null = null
 const calibDialog = ref<{ points: [number, number][] } | null>(null)
 const calibDays = ref('1')
 const calibMode = ref<'foot' | 'horse' | 'boat' | 'custom'>('foot')
+const calibPrefilled = ref(false)
 
 function startCalibrate() {
   moreOpen.value = false
@@ -284,8 +285,21 @@ function startCalibrate() {
 }
 
 function onCalibLine(e: Event) {
-  const d = (e as CustomEvent<{ points: [number, number][] }>).detail
-  if (d?.points?.length === 2) calibDialog.value = { points: d.points }
+  const d = (e as CustomEvent<{ points: [number, number][]; suggested_days?: number }>).detail
+  if (d?.points?.length !== 2) return
+  calibDialog.value = { points: d.points }
+  // §2.2 空白舆图预填：选档卡默认 custom + 地球尺度折算值——作者可改可推翻
+  if (d.suggested_days && d.suggested_days > 0) {
+    calibMode.value = 'custom'
+    calibDays.value = d.suggested_days < 10
+      ? String(Math.round(d.suggested_days * 10) / 10)
+      : String(Math.round(d.suggested_days))
+    calibPrefilled.value = true
+  } else {
+    calibMode.value = 'foot'
+    calibDays.value = '1'
+    calibPrefilled.value = false
+  }
 }
 onMounted(() => window.addEventListener('velluma:map-calibrate-line', onCalibLine))
 onBeforeUnmount(() => window.removeEventListener('velluma:map-calibrate-line', onCalibLine))
@@ -1196,7 +1210,9 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             <button class="calib-btn" @click="calibDialog = null">取消</button>
             <button class="calib-btn calib-btn--primary" @click="saveCalibration">标定</button>
           </div>
-          <p class="calib-hint">可标多条取平均（≤5）；重标随时，全部距离即时重算。</p>
+          <p class="calib-hint">{{ calibPrefilled
+            ? '已按空白舆图地球尺度预填（图宽≈赤道一圈 ≈1336 天步程）——可改可推翻。'
+            : '可标多条取平均（≤5）；重标随时，全部距离即时重算。' }}</p>
         </div>
       </div>
     </Teleport>

@@ -42,7 +42,7 @@ const emit = defineEmits<{
 }>()
 
 // ===== D4 比例尺标定：拉线捕获 + 左下角比例尺角标 =====
-import { pxPerDay, formatDistance, type MapScale } from '../engine/distance'
+import { pxPerDay, formatDistance, blankAtlasSuggestedDays, type MapScale } from '../engine/distance'
 
 const calibrating = ref(false)
 const calibPoints = ref<[number, number][]>([])
@@ -1290,8 +1290,17 @@ onMounted(() => {
       calibPoints.value.push([e.latlng.lng, e.latlng.lat])
       renderCalibLine()
       if (calibPoints.value.length >= 2) {
+        const pts = calibPoints.value.slice(0, 2)
+        // §2.2 空白舆图预填：无底图层且未标定时，画线按地球隐含尺度（图宽=赤道一圈）
+        // 折算步行日随事件带出——选档卡预填默认值，作者可改可推翻
+        let suggestedDays: number | undefined
+        if (blankAtlas.value && !(props.mapScale?.refs?.length)) {
+          const len = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+          const atlasWidth = BLANK_ATLAS_BOUNDS.getEast() - BLANK_ATLAS_BOUNDS.getWest()
+          suggestedDays = blankAtlasSuggestedDays(len, atlasWidth)
+        }
         window.dispatchEvent(new CustomEvent('velluma:map-calibrate-line', {
-          detail: { points: calibPoints.value.slice(0, 2) },
+          detail: { points: pts, ...(suggestedDays ? { suggested_days: suggestedDays } : {}) },
         }))
         stopCalibrating()
       }
