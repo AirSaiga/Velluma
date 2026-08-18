@@ -105,6 +105,8 @@ def _node_to_dict(node: CanonNode) -> dict:
         "confidence": node.confidence,
         "source": node.source,
         "metadata": node.metadata_ or {},
+        "ref_type": node.ref_type,
+        "ref_id": str(node.ref_id) if node.ref_id else None,
         "created_at": node.created_at.isoformat() if node.created_at else None,
         "updated_at": node.updated_at.isoformat() if node.updated_at else None,
     }
@@ -196,6 +198,22 @@ async def create_node(
         existing = await repo.nodes.find_by_label(book_id, payload.label)
         if existing:
             raise HTTPException(409, f"同名节点已存在：{payload.label}")
+        # C2 幂等护栏：同一世界对象至多一条信息面 overlay（应用层唯一性——
+        # EntityDetailDrawer「读者认知」分区重复点创建返回既有条目而非报错）
+        if payload.ref_type and payload.ref_id:
+            from sqlalchemy import select as sa_select
+            from backend.models import CanonNode as _CanonNode
+            hit = (
+                await db.execute(
+                    sa_select(_CanonNode).where(
+                        _CanonNode.book_id == book_id,
+                        _CanonNode.ref_type == payload.ref_type,
+                        _CanonNode.ref_id == payload.ref_id,
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if hit:
+                return _node_to_dict(hit)
         node = await repo.nodes.create(create_dict)
         return _node_to_dict(node)
     except HTTPException:

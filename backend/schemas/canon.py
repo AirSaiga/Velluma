@@ -62,6 +62,10 @@ class CanonNodeBase(BaseModel):
     metadata_: Dict[str, Any] = Field(default_factory=dict, alias="metadata", description="自由扩展字段")
     appeared_in: List[int] = Field(default_factory=list, description="出现在哪些章")
     revealed_in: List[int] = Field(default_factory=list, description="在哪些章被揭示")
+    # C2 信息面挂接（docs/canon-world-fusion.md §4.1）：ref 指向世界对象，label/type
+    # 读取时由世界对象推演；自由节点（event）两字段为空
+    ref_type: Optional[str] = Field(None, description="entity|location|ledger|空=自由节点")
+    ref_id: Optional[UUID] = Field(None, description="挂接的世界对象 id")
 
 
 class CanonNodeCreate(CanonNodeBase):
@@ -84,6 +88,8 @@ class CanonNodeUpdate(BaseModel):
     metadata_: Optional[Dict[str, Any]] = Field(None, alias="metadata")
     appeared_in: Optional[List[int]] = None
     revealed_in: Optional[List[int]] = None
+    ref_type: Optional[str] = None
+    ref_id: Optional[UUID] = None
 
 
 class CanonNodeResponse(CanonNodeBase):

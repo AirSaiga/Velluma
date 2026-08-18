@@ -11,6 +11,7 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
+import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
 import { archiveFields } from '../engine/entitySchema'
 import { formatTime } from '../engine/timeFormat'
@@ -32,6 +33,51 @@ const {
   updateEntityArchive,
 } = useWorld()
 const { showToast } = useToast()
+
+// ===== 读者认知（C2 §5.3：实体信息面 overlay——本实体的真相/读者所见）=====
+const { nodes: canonNodes, ensureLoaded: ensureCanon, createNode, updateNode } = useCanon()
+void ensureCanon(props.bookId)
+
+/** 本实体的信息面（应用层唯一：一对象一 overlay；后端 create 幂等兜底） */
+const overlay = computed(
+  () => (canonNodes.value || []).find((n) => n.ref_type === 'entity' && n.ref_id === props.entityId) || null,
+)
+
+async function createOverlay(visibility: 'private' | 'public') {
+  const e = entity.value
+  if (!e) return
+  try {
+    await createNode(props.bookId, {
+      book_id: props.bookId,
+      type: e.entity_type === 'asset' ? 'object' : 'character', // 迁移期快照；读取时由世界推演
+      label: e.name,
+      canon_text: '',
+      public_text: '',
+      visibility,
+      ref_type: 'entity',
+      ref_id: e.id,
+    })
+  } catch (err: any) {
+    showToast('创建信息面失败：' + (err?.message || ''), 'error')
+  }
+}
+
+function setOverlayVisibility(v: 'public' | 'private' | 'partial') {
+  if (overlay.value) void updateNode(props.bookId, overlay.value.id, { visibility: v })
+}
+
+function saveOverlayField(field: 'canon_text' | 'public_text' | 'reveal_plan', value: string) {
+  if (overlay.value) void updateNode(props.bookId, overlay.value.id, { [field]: value })
+}
+
+function saveOverlayChapter(value: string) {
+  const n = parseInt(value, 10)
+  if (overlay.value) void updateNode(props.bookId, overlay.value.id, {
+    expected_reveal_chapter: Number.isFinite(n) && n > 0 ? n : null,
+  })
+}
+
+const VIS_LABELS: Record<string, string> = { private: '秘密', partial: '半露', public: '公开' }
 
 const entity = computed(
   () => entities.value.find((e) => e.id === props.entityId) || null,
@@ -284,6 +330,56 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
       </div>
       <div v-else class="edd-nofields">还没有涉及其的事件。用下方快捷动作记录第一条。</div>
     </div>
+
+    <!-- 读者认知（C2 §5.3：实体信息面——表里两面就地编辑，折叠态默认） -->
+    <details class="edd-canon">
+      <summary class="edd-sec-title">读者认知{{ overlay ? ` · ${VIS_LABELS[overlay.visibility] || overlay.visibility}` : '' }}</summary>
+      <template v-if="overlay">
+        <div class="edd-canon-vis">
+          <button
+            v-for="(lbl, v) in VIS_LABELS"
+            :key="v"
+            class="edd-canon-vis-btn"
+            :class="{ 'is-on': overlay.visibility === v }"
+            @click="setOverlayVisibility(v as any)"
+          >{{ lbl }}</button>
+        </div>
+        <label class="edd-canon-field">
+          <span class="edd-canon-label">里 · 作者真相（绝不许在正文直接写出）</span>
+          <textarea v-autogrow rows="2" :value="overlay.canon_text" placeholder="此人此物的真相……" @change="(e) => saveOverlayField('canon_text', (e.target as HTMLTextAreaElement).value)"></textarea>
+        </label>
+        <label class="edd-canon-field">
+          <span class="edd-canon-label">表 · 读者所见</span>
+          <textarea v-autogrow rows="2" :value="overlay.public_text" placeholder="读者目前看到的描述（可空）" @change="(e) => saveOverlayField('public_text', (e.target as HTMLTextAreaElement).value)"></textarea>
+        </label>
+        <label class="edd-canon-field">
+          <span class="edd-canon-label">揭示计划</span>
+          <input
+            class="edd-canon-input"
+            :value="overlay.reveal_plan"
+            placeholder="何时、如何揭示真相"
+            @change="(e) => saveOverlayField('reveal_plan', (e.target as HTMLInputElement).value)"
+          />
+        </label>
+        <label class="edd-canon-field edd-canon-field--half">
+          <span class="edd-canon-label">预期揭示章</span>
+          <input
+            class="edd-canon-input"
+            type="number" min="1"
+            :value="overlay.expected_reveal_chapter ?? ''"
+            placeholder="—"
+            @change="(e) => saveOverlayChapter((e.target as HTMLInputElement).value)"
+          />
+        </label>
+      </template>
+      <div v-else class="edd-canon-empty">
+        <p>此人尚未入正史。</p>
+        <div class="edd-canon-empty-actions">
+          <button class="edd-act" @click="createOverlay('private')">设为秘密</button>
+          <button class="edd-act" @click="createOverlay('public')">公开设定</button>
+        </div>
+      </div>
+    </details>
 
     <!-- 快捷事态动作（全部 = 预填事件表单） -->
     <div class="edd-actions">
@@ -689,5 +785,76 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 .edd-act--danger:hover {
   border-color: #dc2626;
   color: #dc2626;
+}
+
+/* 读者认知（C2 §5.3：实体信息面 overlay 分区，折叠态默认） */
+.edd-canon {
+  padding: 0 14px 10px;
+}
+.edd-canon > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.edd-canon > summary::-webkit-details-marker {
+  display: none;
+}
+.edd-canon-vis {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+.edd-canon-vis-btn {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.edd-canon-vis-btn.is-on {
+  border-color: #c2725a;
+  color: #c2725a;
+}
+.edd-canon-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+}
+.edd-canon-field--half {
+  max-width: 180px;
+}
+.edd-canon-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.edd-canon-field textarea,
+.edd-canon-input {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 5px 8px;
+  line-height: 1.5;
+  resize: none;
+  overflow: hidden;
+  font-family: inherit;
+}
+.edd-canon-field textarea:focus,
+.edd-canon-input:focus {
+  outline: none;
+  border-color: var(--accent-400, #9685c2);
+}
+.edd-canon-empty p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0 6px;
+}
+.edd-canon-empty-actions {
+  display: flex;
+  gap: 6px;
 }
 </style>

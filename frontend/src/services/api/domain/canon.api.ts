@@ -46,6 +46,9 @@ export interface CanonNode {
   confidence: string
   source: string
   metadata: Record<string, any>
+  /** C2 信息面挂接：ref 指向世界对象（entity|location|ledger）；空=自由节点 */
+  ref_type?: string | null
+  ref_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -81,6 +84,8 @@ export interface CanonNodeCreate {
   expected_reveal_chapter?: number | null
   tags?: string[]
   metadata?: Record<string, any>
+  ref_type?: string | null
+  ref_id?: string | null
 }
 
 export interface CanonNodeUpdate {
@@ -95,6 +100,8 @@ export interface CanonNodeUpdate {
   metadata?: Record<string, any>
   appeared_in?: number[]
   revealed_in?: number[]
+  ref_type?: string | null
+  ref_id?: string | null
 }
 
 export interface CanonEdgeCreate {

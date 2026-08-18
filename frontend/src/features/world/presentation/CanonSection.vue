@@ -10,6 +10,9 @@
  */
 import { computed, nextTick, ref } from 'vue'
 import { useCanon, NODE_TYPE_LABELS, NODE_TYPE_COLORS } from '../composables/useCanon'
+import { useWorld } from '../composables/useWorld'
+import { worldApi, type CanonMigrateRow } from '../../../services/api/domain/world.api'
+import { useToast } from '../../../composables/useToast'
 import type { CanonNode, CanonVisibility } from '../../../services/api/domain/canon.api'
 
 const props = defineProps<{ bookId: string }>()
@@ -20,8 +23,72 @@ const emit = defineEmits<{
 }>()
 
 const { nodes, ensureLoaded, createNode, loading } = useCanon()
+const { entities, locations } = useWorld()
+const { showToast } = useToast()
 
 void ensureLoaded(props.bookId)
+
+/** C2：ref 节点显示世界侧真名（漂移根治的读者视角；查不到回退 label） */
+function displayName(n: CanonNode): string {
+  if (n.ref_type === 'entity' && n.ref_id) {
+    const hit = entities.value.find((e) => e.id === n.ref_id)
+    if (hit) return hit.name
+  }
+  if (n.ref_type === 'location' && n.ref_id) {
+    const hit = locations.value.find((l) => l.id === n.ref_id)
+    if (hit) return hit.name
+  }
+  return n.label
+}
+
+// ===== C2 迁移：canon 节点挂接世界对象（预览 → 作者 ✓/✗ → 幂等落库）=====
+const migrating = ref(false)
+const migrateRows = ref<(CanonMigrateRow & { checked: boolean })[]>([])
+const migrateApplying = ref(false)
+
+async function startMigrate() {
+  migrating.value = true
+  migrateApplying.value = true
+  try {
+    const r = await worldApi.migrateCanon(props.bookId, { confirm: false })
+    migrateRows.value = (r as { rows: CanonMigrateRow[] }).rows.map((row) => ({
+      ...row,
+      checked: row.action !== 'skip',
+    }))
+  } catch (e: any) {
+    showToast('迁移预览失败：' + (e?.message || ''), 'error')
+    migrating.value = false
+  } finally {
+    migrateApplying.value = false
+  }
+}
+
+async function applyMigrate() {
+  migrateApplying.value = true
+  try {
+    const r = await worldApi.migrateCanon(props.bookId, {
+      confirm: true,
+      decisions: migrateRows.value.map((row) => ({
+        node_id: row.node_id,
+        action: row.checked ? row.action : 'skip',
+        target_id: row.target_id,
+      })),
+    })
+    const done = r as { link: number; to_ledger: number; create_ledger: number }
+    showToast(
+      `已挂接 ${done.link} 条 · 伏笔并入账本 ${(done.to_ledger || 0) + (done.create_ledger || 0)} 条`,
+      'success',
+    )
+    migrating.value = false
+    migrateRows.value = []
+    await ensureLoaded(props.bookId)
+    window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+  } catch (e: any) {
+    showToast('迁移失败：' + (e?.message || ''), 'error')
+  } finally {
+    migrateApplying.value = false
+  }
+}
 
 const filter = ref<'all' | CanonVisibility>('all')
 
@@ -120,7 +187,7 @@ async function submitAdd() {
         <div class="sc-body">
           <div class="cs-head">
             <span class="cs-dot" :class="n.visibility"></span>
-            <span class="cs-name">{{ n.label }}</span>
+            <span class="cs-name">{{ displayName(n) }}</span>
             <span class="cs-type" :style="{ background: NODE_TYPE_COLORS[n.type] || '#6b7280' }">
               {{ typeBadge(n) }}
             </span>
@@ -148,7 +215,33 @@ async function submitAdd() {
         @keydown.esc="((adding = false), (addDraft = ''))"
         @blur="submitAdd"
       />
-      <button v-else class="cs-add-btn" @click="startAdd">＋ 记一条真相</button>
+      <template v-else>
+        <button class="cs-add-btn" @click="startAdd">＋ 记一条真相</button>
+        <button class="cs-add-btn cs-add-btn--migrate" title="把旧 canon 条目按名字挂到世界对象/伏笔账本——挂上后实体改名会跟随" @click="startMigrate">⇄ 迁入世界对象</button>
+      </template>
+    </div>
+
+    <!-- C2 迁移面板：canon 节点挂接世界对象（预览 → ✓/✗ → 落库） -->
+    <div v-if="migrating" class="cs-migrate">
+      <div class="cs-migrate-head">
+        按名字挂到世界对象（改名将跟随）
+        <button class="cs-migrate-x" @click="migrating = false">✕</button>
+      </div>
+      <div v-if="migrateApplying" class="side-empty">处理中…</div>
+      <template v-else-if="migrateRows.length">
+        <label v-for="row in migrateRows" :key="row.node_id" class="cs-migrate-row">
+          <input type="checkbox" v-model="row.checked" :disabled="row.action === 'skip' && !row.target_id" />
+          <span class="cs-migrate-label">{{ row.label }}</span>
+          <span class="cs-migrate-target">
+            <template v-if="row.action === 'link'">→ {{ row.target_name }}</template>
+            <template v-else-if="row.action === 'to_ledger'">并入伏笔「{{ row.target_name }}」</template>
+            <template v-else-if="row.action === 'create_ledger'">新建伏笔账本条目</template>
+            <template v-else>未匹配到世界对象（留作自由节点）</template>
+          </span>
+        </label>
+        <button class="cs-add-btn" @click="applyMigrate">确认迁移</button>
+      </template>
+      <div v-else class="side-empty">没有可迁移的条目——都挂好了。</div>
     </div>
 
     <button class="cs-graph" title="因果关系的只读透镜——只看不编" @click="emit('open-graph')">
@@ -343,4 +436,48 @@ async function submitAdd() {
   transition: color 0.12s ease;
 }
 .cs-graph:hover { color: var(--text-primary); }
+
+.cs-add-btn--migrate {
+  margin-left: 6px;
+  color: var(--text-muted);
+  border-color: var(--border-color);
+}
+
+/* C2 迁移面板 */
+.cs-migrate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+.cs-migrate-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.cs-migrate-x {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.cs-migrate-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cs-migrate-label {
+  color: var(--text-primary);
+}
+.cs-migrate-target {
+  color: var(--text-muted);
+}
 </style>

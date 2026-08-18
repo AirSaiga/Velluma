@@ -76,6 +76,17 @@ export interface WorldVersion {
   updated_at: string | null
 }
 
+/** C2 canon 迁移预览行（label 匹配世界对象的建议，作者逐条 ✓/✗） */
+export interface CanonMigrateRow {
+  node_id: string
+  label: string
+  type: string
+  action: 'link' | 'to_ledger' | 'create_ledger' | 'skip'
+  ref_type: 'entity' | 'location' | 'ledger' | null
+  target_id: string | null
+  target_name: string | null
+}
+
 export interface ScenePresence {
   entity_id: string
   name: string
@@ -322,6 +333,23 @@ export const worldApi = {
       foreshadows_anchored: number
       dynamic_states_skipped: number
     }>(`/books/${bookId}/world/migrate-legacy`, { method: 'POST' }),
+
+  // ===== C2：canon 信息面挂接迁移（预览→作者确认→幂等落库）=====
+  migrateCanon: (
+    bookId: string,
+    body: {
+      confirm: boolean
+      decisions?: { node_id: string; action: string; target_id?: string | null }[]
+    },
+  ) =>
+    requestJson<
+      | { confirmed: false; rows: CanonMigrateRow[]; counts: { linkable: number; ledger: number; unmatched: number } }
+      | { confirmed: true; link: number; to_ledger: number; create_ledger: number; skip: number }
+    >(`/books/${bookId}/world/migrate-canon`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    }),
 
   // ===== 推演 =====
   getState: (bookId: string, t: number) =>

@@ -12,10 +12,11 @@ World 设定层 REST API（独立于 Canon 路由，通过 book_id 隔离）。
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import WORLD_IMAGES_DIR
@@ -143,6 +144,10 @@ async def delete_location(book_id: UUID, location_id: UUID, db: AsyncSession = D
     repo = WorldRepository(db)
     if not await repo.locations.delete(str(location_id)):
         raise HTTPException(404, "地点不存在")
+    # C2：地点删除 → 挂接的信息面 overlay 同步清理（应用层级联，防悬空 ref）
+    from sqlalchemy import delete as sa_delete
+    from backend.models import CanonNode as _CanonNode
+    await db.execute(sa_delete(_CanonNode).where(_CanonNode.ref_id == location_id, _CanonNode.ref_type == "location"))
     await db.commit()
     return {"deleted": True}
 
@@ -188,6 +193,10 @@ async def delete_entity(book_id: UUID, entity_id: UUID, db: AsyncSession = Depen
     repo = WorldRepository(db)
     if not await repo.entities.delete(str(entity_id)):
         raise HTTPException(404, "实体不存在")
+    # C2：实体删除 → 挂接的信息面 overlay 同步清理（应用层级联，防悬空 ref）
+    from sqlalchemy import delete as sa_delete
+    from backend.models import CanonNode as _CanonNode
+    await db.execute(sa_delete(_CanonNode).where(_CanonNode.ref_id == entity_id, _CanonNode.ref_type == "entity"))
     await db.commit()
     return {"deleted": True}
 
@@ -459,6 +468,165 @@ async def migrate_legacy_settings(book_id: UUID, db: AsyncSession = Depends(get_
     report = await repo.migrate_legacy_settings(str(book_id))
     await db.commit()
     return report
+
+
+# ============================================================
+# C2：canon 信息面挂接迁移（docs/canon-world-fusion.md §4.4）
+# ============================================================
+
+class CanonMigrateDecision(BaseModel):
+    node_id: UUID
+    action: str = Field("auto", description="auto|link|to_ledger|create_ledger|skip")
+    target_id: Optional[UUID] = None
+
+
+class CanonMigrateRequest(BaseModel):
+    confirm: bool = Field(False, description="false=预览（作者逐条确认）；true=落库（幂等）")
+    decisions: Optional[List[CanonMigrateDecision]] = None
+
+
+_CANON_TYPE_TO_ENTITY = {"character": "character", "object": "asset"}
+
+
+def _match_entity(label: str, entities) -> Optional[Any]:
+    for e in entities:
+        if e.name == label or label in (e.aliases or []):
+            return e
+    return None
+
+
+def _match_location(label: str, locations) -> Optional[Any]:
+    for l in locations:
+        if l.name == label:
+            return l
+    return None
+
+
+@router.post("/{book_id}/world/migrate-canon")
+async def migrate_canon(book_id: UUID, request: CanonMigrateRequest, db: AsyncSession = Depends(get_db)):
+    """canon 信息面挂接迁移（C2）：label 匹配世界对象 → 预览 → 作者确认落库。
+
+    动作：
+    - link：character/object/place 节点 → 挂 entity/location（label/type 改由世界推演）
+    - to_ledger / create_ledger：hook 节点真相面并入 plot_ledgers（节点保留为图谱
+      连接器，canon/public 文本清空退场 prompt 段，ref 指向 ledger）
+    - skip：不动；已挂接节点不进预览（幂等）
+    """
+    from sqlalchemy import select as sa_select
+    from backend.models import CanonNode, PlotLedger
+
+    repo = WorldRepository(db)
+    entities = await repo.entities.list_by_book(book_id)
+    locations = await repo.locations.list_by_book(book_id)
+    ledgers = (
+        await db.execute(sa_select(PlotLedger).where(PlotLedger.book_id == book_id))
+    ).scalars().all()
+    ledger_by_key = {l.ledger_key: l for l in ledgers}
+    nodes = (
+        await db.execute(sa_select(CanonNode).where(CanonNode.book_id == book_id).order_by(CanonNode.created_at))
+    ).scalars().all()
+
+    decisions = {str(d.node_id): d for d in (request.decisions or [])}
+
+    def _suggest(node: CanonNode):
+        """默认建议：label 精确匹配名/别名 → (action, target, target_name)。"""
+        if node.type in _CANON_TYPE_TO_ENTITY:
+            hit = _match_entity(node.label, entities)
+            if hit:
+                return "link", hit.id, hit.name, "entity"
+            return "skip", None, None, "entity"
+        if node.type == "place":
+            hit = _match_location(node.label, locations)
+            if hit:
+                return "link", hit.id, hit.name, "location"
+            return "skip", None, None, "location"
+        if node.type == "hook":
+            hit = ledger_by_key.get(node.label)
+            if hit:
+                return "to_ledger", hit.id, hit.ledger_key, "ledger"
+            return "create_ledger", None, node.label, "ledger"
+        return None, None, None, None  # event 自由节点：不迁移不展示
+
+    rows = []
+    applied = {"link": 0, "to_ledger": 0, "create_ledger": 0, "skip": 0}
+    for node in nodes:
+        if node.ref_id is not None:
+            continue  # 已挂接（幂等）
+        action, target_id, target_name, ref_type = _suggest(node)
+        if action is None:
+            continue  # 自由叙事节点无需迁移
+        dec = decisions.get(str(node.id))
+        if dec:
+            action = dec.action if dec.action != "auto" else action
+            if dec.target_id:
+                target_id = dec.target_id
+
+        if not request.confirm:
+            rows.append({
+                "node_id": str(node.id),
+                "label": node.label,
+                "type": node.type,
+                "action": action,
+                "ref_type": ref_type,
+                "target_id": str(target_id) if target_id else None,
+                "target_name": target_name,
+            })
+            continue
+
+        # ---- 落库 ----
+        if action == "skip":
+            applied["skip"] += 1
+            continue
+        if action == "link" and target_id is not None:
+            node.ref_type = ref_type
+            node.ref_id = target_id
+            applied["link"] += 1
+        elif action in ("to_ledger", "create_ledger"):
+            if action == "create_ledger":
+                key = node.label
+                n = 2
+                while key in ledger_by_key:  # ledger_key 书内唯一
+                    key = f"{node.label}-{n}"
+                    n += 1
+                ledger = PlotLedger(
+                    book_id=book_id, ledger_key=key, content=node.label,
+                    status="open",
+                    canon_text=node.canon_text or "",
+                    public_text=node.public_text or "",
+                    reveal_plan=node.reveal_plan or "",
+                )
+                db.add(ledger)
+                await db.flush()
+                ledger_by_key[key] = ledger
+            else:
+                ledger = await db.get(PlotLedger, target_id)
+                if ledger is None:
+                    applied["skip"] += 1
+                    continue
+                # 合并守卫：账本已有真相面文本不覆盖（幂等重跑不回填）
+                if not (ledger.canon_text or "").strip():
+                    ledger.canon_text = node.canon_text or ""
+                if not (ledger.public_text or "").strip():
+                    ledger.public_text = node.public_text or ""
+                if not (ledger.reveal_plan or "").strip():
+                    ledger.reveal_plan = node.reveal_plan or ""
+            # 节点保留为图谱连接器：文本已并入账本，从 prompt 段退场
+            node.ref_type = "ledger"
+            node.ref_id = ledger.id
+            node.canon_text = ""
+            node.public_text = ""
+            node.reveal_plan = ""
+            node.visibility = "public"
+            applied[action] += 1
+
+    if request.confirm:
+        await db.commit()
+        return {"confirmed": True, **applied}
+    return {"confirmed": False, "rows": rows, "counts": {
+        "linkable": sum(1 for r in rows if r["action"] == "link"),
+        "ledger": sum(1 for r in rows if r["action"] in ("to_ledger", "create_ledger")),
+        "unmatched": sum(1 for r in rows if r["action"] == "skip"),
+    }}
 
 
 # ============================================================

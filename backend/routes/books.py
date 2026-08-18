@@ -38,7 +38,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.core.dependencies import get_book_repository, get_plot_ledger_repository
+from backend.core.dependencies import get_book_repository, get_plot_ledger_repository, get_db
 from backend.repositories import BookRepository, PlotLedgerRepository
 from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate, GoldenSnippetsUpdate, StyleBlacklistUpdate, PlotLedgerResponse, PlotLedgerCreate, PlotLedgerUpdate
 
@@ -312,6 +312,7 @@ async def update_ledger(
 @router.delete("/ledgers/{ledger_id}")
 async def delete_ledger(
     ledger_id: UUID,
+    db: AsyncSession = Depends(get_db),
     repo: PlotLedgerRepository = Depends(get_plot_ledger_repository),
 ):
     """业务目的：删除伏笔条目（物理删除；若仅是不再需要建议改用 status=dropped）。
@@ -321,11 +322,16 @@ async def delete_ledger(
 
     副作用：
     - 数据库写操作：删除 plot_ledgers 对应行
+    - C2：挂接的信息面 overlay 同步清理（应用层级联，防悬空 ref）
     """
     ledger = await repo.get_by_id(ledger_id)
     if not ledger:
         raise HTTPException(status_code=404, detail="伏笔不存在")
     await repo.delete(ledger)
+    from sqlalchemy import delete as sa_delete
+    from backend.models import CanonNode as _CanonNode
+    await db.execute(sa_delete(_CanonNode).where(_CanonNode.ref_id == ledger_id, _CanonNode.ref_type == "ledger"))
+    await db.commit()
     return {"ok": True}
 
 
