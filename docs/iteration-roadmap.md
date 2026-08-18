@@ -268,3 +268,13 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 | # | 任务 | 说明 |
 |---|------|------|
 | T1 | **useGenerationSession adaptive 逻辑拆分** | P3-2 设计时标「顺带」的 composable 拆分，实施时评估风险大于收益（写作主线路径集中于此文件），升格为独立任务：把 adaptive 键位状态机/车道管理拆出独立 composable，主文件只留会话编排。前置：一次全量 GUI 回归。验收：vue-tsc 净 + 全部既有测试过 + 写作台键位行为逐项不变。 |
+
+---
+
+## 10. 收尾记录（2026-08-19 归档）
+
+P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
+1. **存量数据未随切换迁移**（206efc7）：切换日只换默认引擎，旧 PG 数据需显式跑 `scripts/migrate_pg_to_sqlite.py`；脚本同批增补「源 PG 结构补齐」——源库未跑过启动迁移时（ORM 新列缺失）先过一遍 MIGRATIONS 清单再搬（只加列不动行）。实测 3 书 20 章 1266 行全过。
+2. **SQLite 方言 UUID 字符串不容忍**（53b2828）：repo 惯约 str 传参在 PG+asyncpg 被驱动容忍，SQLite 下 `value.hex` 崩 → world 查询全 500。修在 `db_sqlite/type_compat` 的类型级容忍（str 先解析为 UUID），一处覆盖所有调用点，PG 路径零变化。
+
+后续：真实写作使用数据（协作面板/埋点）驱动 P4 缓行件与 M4 数据门评估；T1（useGenerationSession 拆分）独立排期（§9）。归档时工作区干净、157 后端测试 + 21 前端测试全绿。

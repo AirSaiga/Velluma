@@ -275,7 +275,8 @@ services/api/transport  ← 底层 HTTP
 
 项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。
 
-- BS-ADF：`workflows/bsadf/` 下 8 单测 + `dde/test_decision_set.py`
+- 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过（distance.test.ts 曾中招，4be1568 修复）
+- BS-ADF：已随引擎归档至 `_deprecated/`（其 8 单测同迁，不再运行） + `dde/test_decision_set.py`
 - ADF：`workflows/adf/` 下 `test_consistency_guard`/`test_beat_patcher`/`test_state_tracker`
 - `workflows/sentence_integrity.py` + `test_sentence_integrity.py`；`prompts/test_boundary_pacing_prompts.py`
 
