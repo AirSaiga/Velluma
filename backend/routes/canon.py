@@ -476,3 +476,84 @@ async def extract_canon(
         committed=result["committed"],
         message=result["message"],
     )
+
+
+class CanonExtractInboxRequest(BaseModel):
+    """C3：提取候选入待确认池（与 event_scout 候选同池，source 区分）。"""
+    chapter_id: Optional[UUID] = None  # 缺省 = 最新有正文章节
+
+
+@router.post("/{book_id}/canon/extract-to-inbox")
+async def extract_canon_to_inbox(
+    book_id: UUID,
+    payload: CanonExtractInboxRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """从章节提取真相候选 → 世界页「待确认」收件箱（C3，绝不直接进 Canon）。
+
+    红线沿用 W4：候选不直接生效——作者 ✓ 才建 canon 节点（tentative）。
+    幂等：同章同 label 的 pending 候选跳过。
+    """
+    from sqlalchemy import select as sa_select
+    from backend.models import Chapter as _Chapter, WorldEventCandidate as _Cand
+
+    chapter = None
+    if payload.chapter_id is not None:
+        chapter = await db.get(_Chapter, payload.chapter_id)
+    else:
+        rows = (
+            await db.execute(
+                sa_select(_Chapter)
+                .where(_Chapter.book_id == book_id, _Chapter.content_text.isnot(None))
+                .order_by(_Chapter.chapter_number.desc())
+                .limit(10)
+            )
+        ).scalars().all()
+        chapter = next((c for c in rows if len((c.content_text or "").strip()) >= 200), None)
+    if chapter is None or str(chapter.book_id) != str(book_id):
+        raise HTTPException(404, detail="找不到有正文的章节")
+
+    result = await extract_from_chapter(db, chapter.id, auto_commit=False)
+    nodes = result.get("extracted_nodes") or []
+    if not nodes:
+        return {"created": 0, "skipped": 0, "message": result.get("message") or "本章没抽出真相候选"}
+
+    existing = (
+        await db.execute(
+            sa_select(_Cand).where(
+                _Cand.book_id == book_id,
+                _Cand.status == "pending",
+                _Cand.source == "canon_extract",
+            )
+        )
+    ).scalars().all()
+    existing_labels = {
+        (c.draft or {}).get("label") for c in existing if c.source == "canon_extract"
+    }
+
+    created = 0
+    skipped = 0
+    for n in nodes[:6]:
+        label = str(n.get("label") or "")[:200]
+        if not label or label in existing_labels:
+            skipped += 1
+            continue
+        db.add(_Cand(
+            book_id=book_id,
+            chapter_id=chapter.id,
+            source="canon_extract",
+            draft={
+                "label": label,
+                "type": str(n.get("type") or "event"),
+                "canon_text": str(n.get("canon_text") or "")[:2000],
+                "public_text": str(n.get("public_text") or "")[:1000],
+            },
+        ))
+        existing_labels.add(label)
+        created += 1
+    await db.commit()
+    return {
+        "created": created,
+        "skipped": skipped,
+        "message": f"第 {chapter.chapter_number} 章抽出 {created} 条真相候选（待确认池）",
+    }

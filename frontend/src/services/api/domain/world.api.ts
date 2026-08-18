@@ -185,8 +185,9 @@ export interface WorldEventCandidate {
   id: string
   book_id: string
   chapter_id: string | null
-  draft: EventDraft
-  source: 'settle' | 'finish' | string
+  /** C3 起 canon_extract 候选的 draft 是真相候选形状（label/type/canon_text/public_text） */
+  draft: EventDraft & { label?: string; type?: string; canon_text?: string; public_text?: string }
+  source: 'settle' | 'finish' | 'canon_extract' | string
   status: 'pending' | 'accepted' | 'rejected' | string
   created_at: string
 }

@@ -29,9 +29,42 @@ const emit = defineEmits<{
   'open-graph': []
 }>()
 
-const { nodes, edges, updateNode, deleteNode } = useCanon()
+const { nodes, edges, updateNode, deleteNode, analyzeImpact, checkConsistency } = useCanon()
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
+
+// ===== C3 激活：变更连锁分析 + 片段一致性检查（休眠 API 接 UI）=====
+const impactResult = ref<{ affected: any[]; total_affected: number } | null>(null)
+const impactRunning = ref(false)
+async function runImpact() {
+  if (impactRunning.value || !node.value) return
+  impactRunning.value = true
+  try {
+    const r = await analyzeImpact(props.bookId, props.nodeId)
+    impactResult.value = { affected: (r as any).affected || [], total_affected: (r as any).total_affected || 0 }
+  } catch (e: any) {
+    showToast('连锁分析失败：' + (e?.message || ''), 'error')
+  } finally {
+    impactRunning.value = false
+  }
+}
+
+const checkOpen = ref(false)
+const checkText = ref('')
+const checkRunning = ref(false)
+const checkIssues = ref<any[] | null>(null)
+async function runCheck() {
+  if (checkRunning.value || !checkText.value.trim()) return
+  checkRunning.value = true
+  try {
+    const r = await checkConsistency(props.bookId, checkText.value.trim())
+    checkIssues.value = (r as any).issues || []
+  } catch (e: any) {
+    showToast('检查失败：' + (e?.message || ''), 'error')
+  } finally {
+    checkRunning.value = false
+  }
+}
 
 const node = computed(() => nodes.value.find((n) => n.id === props.nodeId) || null)
 const neighborCount = computed(
@@ -321,11 +354,51 @@ async function remove() {
       />
     </section>
 
+    <!-- C3 变更连锁分析（休眠 API 激活：改这条真相会波及哪些关联条目） -->
+    <section v-if="impactResult" class="ctd-impact">
+      <div class="ctd-sec-title">变更连锁（{{ impactResult.total_affected }} 条受波及）</div>
+      <ul v-if="impactResult.affected?.length" class="ctd-impact-list">
+        <li v-for="(a, i) in impactResult.affected.slice(0, 8)" :key="i" class="ctd-impact-item">
+          <span class="ctd-impact-depth">×{{ a.depth ?? '?' }}</span>
+          {{ a.node?.label || a.label || '关联条目' }}
+          <span class="ctd-impact-via" v-if="a.via">（经 {{ a.via }}）</span>
+        </li>
+      </ul>
+      <p v-else class="ctd-impact-empty">没有连锁波及——这条真相相对独立。</p>
+      <button class="ctd-act" @click="impactResult = null">收起</button>
+    </section>
+
+    <!-- C3 片段一致性检查（贴一段正文，对照全部真相查泄露/矛盾） -->
+    <section v-if="checkOpen" class="ctd-check">
+      <div class="ctd-sec-title">片段一致性检查</div>
+      <textarea
+        v-model="checkText"
+        class="ctd-check-input"
+        rows="3"
+        v-autogrow
+        placeholder="粘贴一段正文（通常是要发布的段落），对照真相账本查泄露与矛盾…"
+      ></textarea>
+      <div v-if="checkIssues" class="ctd-check-result">
+        <p v-if="!checkIssues.length" class="ctd-impact-empty">✓ 无泄露、无矛盾。</p>
+        <ul v-else class="ctd-impact-list">
+          <li v-for="(iss, i) in checkIssues.slice(0, 6)" :key="i" class="ctd-impact-item ctd-impact-item--warn">
+            {{ iss.node_label ? `【${iss.node_label}】` : '' }}{{ iss.detail || iss.kind }}
+          </li>
+        </ul>
+      </div>
+      <div class="ctd-check-actions">
+        <button class="ctd-act" :disabled="checkRunning || !checkText.trim()" @click="runCheck">{{ checkRunning ? '检查中…' : '检查' }}</button>
+        <button class="ctd-act" @click="((checkOpen = false), (checkIssues = null))">收起</button>
+      </div>
+    </section>
+
     <!-- 关联与动作 -->
     <footer class="ctd-actions">
       <button class="ctd-act" title="在因果图谱中查看该条目的一度邻居" @click="emit('open-graph')">
         因果图谱 · 一度 {{ neighborCount }}
       </button>
+      <button class="ctd-act" :disabled="impactRunning" :title="'连锁分析：改这条真相会波及哪些关联条目（沿因果边扩散）'" @click="runImpact">{{ impactRunning ? '分析中…' : '连锁分析' }}</button>
+      <button class="ctd-act" title="贴一段正文对照真相账本查泄露与矛盾" @click="((checkOpen = true), (checkIssues = null))">查片段</button>
       <button class="ctd-act ctd-act--danger" @click="remove">删除</button>
     </footer>
   </aside>
@@ -649,5 +722,64 @@ async function remove() {
   border-color: #a63e2a;
   color: #a63e2a;
   background: rgba(166, 62, 42, 0.06);
+}
+
+/* C3 连锁分析 + 片段检查 */
+.ctd-impact, .ctd-check {
+  padding: 0 16px 10px;
+}
+.ctd-impact-list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ctd-impact-item {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ctd-impact-item--warn {
+  color: #b45309;
+}
+.ctd-impact-depth {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 4px;
+  font-family: ui-monospace, monospace;
+}
+.ctd-impact-via {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.ctd-impact-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0;
+}
+.ctd-check-input {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  line-height: 1.5;
+  resize: none;
+  font-family: inherit;
+}
+.ctd-check-input:focus {
+  outline: none;
+  border-color: var(--accent-400, #9685c2);
+}
+.ctd-check-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ctd-check-result {
+  margin-top: 6px;
 }
 </style>

@@ -268,4 +268,11 @@ export const canonApi = {
       method: 'POST',
       body: JSON.stringify({ chapter_id: chapterId, auto_commit: autoCommit }),
     }),
+
+  /** C3：提取真相候选 → 世界页「待确认」收件箱（绝不直接进 Canon；✓ 才建节点） */
+  extractToInbox: (bookId: string, chapterId?: string) =>
+    requestJson<{ created: number; skipped: number; message: string }>(
+      `/books/${bookId}/canon/extract-to-inbox`,
+      { method: 'POST', body: JSON.stringify(chapterId ? { chapter_id: chapterId } : {}) },
+    ),
 }

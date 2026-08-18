@@ -97,13 +97,15 @@ async function setScenePin(bookId: string, chapterId: string, locationId: string
   await load(bookId, chapterId, { silent: true })
 }
 
-/** W4 ✓ 转正：返回创建的事件（撤销胶囊用 event.id 删除 + reopen） */
+/** W4 ✓ 转正：返回创建的事件（撤销胶囊用 event.id 删除 + reopen）；
+ *  C3 canon 候选分流建真相节点不建事件（event=null → 返回 null，调用方静默） */
 async function acceptCandidate(
   bookId: string,
   candidateId: string,
 ): Promise<{ eventId: string; label: string } | null> {
   const r = await worldApi.acceptCandidate(bookId, candidateId)
   if (currentKey) await load(currentKey.bookId, currentKey.chapterId, { silent: true })
+  if (!r.event) return null
   return { eventId: r.event.id, label: r.event.note || r.event.event_type }
 }
 

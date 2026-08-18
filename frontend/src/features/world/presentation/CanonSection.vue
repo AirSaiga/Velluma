@@ -8,11 +8,12 @@
  * 主语匹配是 C2 能力；过渡期默认建「叙事」自由节点，类型可在详情里改）。
  * 本组件只读 + 创建——编辑集中在真相详情抽屉。
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useCanon, NODE_TYPE_LABELS, NODE_TYPE_COLORS } from '../composables/useCanon'
 import { useWorld } from '../composables/useWorld'
 import { worldApi, type CanonMigrateRow } from '../../../services/api/domain/world.api'
 import { useToast } from '../../../composables/useToast'
+import { canonApi } from '../../../services/api/domain/canon.api'
 import type { CanonNode, CanonVisibility } from '../../../services/api/domain/canon.api'
 
 const props = defineProps<{ bookId: string }>()
@@ -22,11 +23,34 @@ const emit = defineEmits<{
   'open-graph': []
 }>()
 
-const { nodes, ensureLoaded, createNode, loading } = useCanon()
+const { nodes, ensureLoaded, refresh: refreshCanon, createNode, loading } = useCanon()
 const { entities, locations } = useWorld()
 const { showToast } = useToast()
 
 void ensureLoaded(props.bookId)
+
+// 世界刷新 → 真相账本跟新（C3：待确认池的 canon 候选 ✓ 转正后广播）
+function _onWorldRefresh() {
+  void refreshCanon()
+}
+onMounted(() => window.addEventListener('velluma:world-refresh', _onWorldRefresh))
+onBeforeUnmount(() => window.removeEventListener('velluma:world-refresh', _onWorldRefresh))
+
+/** C3：从最新有正文的章节提取真相候选 → 待确认收件箱（绝不直接进真相账本） */
+const extracting = ref(false)
+async function extractToInbox() {
+  if (extracting.value) return
+  extracting.value = true
+  try {
+    const r = await canonApi.extractToInbox(props.bookId)
+    showToast(r.message, r.created ? 'success' : 'info')
+    if (r.created) window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+  } catch (e: any) {
+    showToast('提取失败：' + (e?.message || ''), 'error')
+  } finally {
+    extracting.value = false
+  }
+}
 
 /** C2：ref 节点显示世界侧真名（漂移根治的读者视角；查不到回退 label） */
 function displayName(n: CanonNode): string {
@@ -217,6 +241,7 @@ async function submitAdd() {
       />
       <template v-else>
         <button class="cs-add-btn" @click="startAdd">＋ 记一条真相</button>
+        <button class="cs-add-btn cs-add-btn--migrate" :disabled="extracting" title="从最新有正文的章节抽取真相候选——先进待确认池，✓ 才入账" @click="extractToInbox">{{ extracting ? '提取中…' : '⧉ 从章节提取候选' }}</button>
         <button class="cs-add-btn cs-add-btn--migrate" title="把旧 canon 条目按名字挂到世界对象/伏笔账本——挂上后实体改名会跟随" @click="startMigrate">⇄ 迁入世界对象</button>
       </template>
     </div>

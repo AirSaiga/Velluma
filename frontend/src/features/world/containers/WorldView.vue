@@ -364,13 +364,20 @@ async function loadCandidates() {
     pendingCandidates.value = []
   }
 }
-async function acceptCand(c: { id: string; draft?: { summary?: string; event_type?: string } }) {
+async function acceptCand(c: { id: string; source?: string; draft?: { summary?: string; event_type?: string; label?: string } }) {
   if (!bookId.value || busyCandidateId.value) return
   busyCandidateId.value = c.id
+  const isCanon = c.source === 'canon_extract'
   try {
     await worldApi.acceptCandidate(bookId.value, c.id)
-    await load(bookId.value) // 转正进入推演：事件/状态全量刷新
-    showToast(`已入账：${c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')}`, 'success')
+    if (isCanon) {
+      // C3 分流：canon 候选转正建真相节点——刷新真相账本与候选列表，不动事件推演
+      window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+      showToast(`已记入真相：${c.draft?.label || '新条目'}（草识——去真相抽屉核实）`, 'success')
+    } else {
+      await load(bookId.value) // 转正进入推演：事件/状态全量刷新
+      showToast(`已入账：${c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')}`, 'success')
+    }
   } catch (e: any) {
     showToast('入账失败：' + (e?.message || '未知错误'), 'error')
   } finally {
@@ -817,13 +824,16 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             <span class="side-count">{{ pendingCandidates.length }}</span>
           </div>
           <ul class="side-list">
-            <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || ''">
+            <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || c.draft?.canon_text || ''">
               <div class="sc-body">
-                <span class="sc-name">{{ c.draft?.summary || eventLabel(c.draft?.event_type || 'custom') }}</span>
-                <span class="sc-badge">{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ formatTime(c.draft?.time_start || 0) }}</span>
+                <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')) }}</span>
+                <span class="sc-badge">
+                  <template v-if="c.source === 'canon_extract'">◉ 正史候选 · 草识</template>
+                  <template v-else>{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ formatTime(c.draft?.time_start || 0) }}</template>
+                </span>
               </div>
               <div class="sc-actions">
-                <button class="sc-act" title="转正入账（进入事件推演）" :disabled="busyCandidateId === c.id" @click.stop="acceptCand(c)">✓</button>
+                <button class="sc-act" :title="c.source === 'canon_extract' ? '记入真相账本（草识，去核实）' : '转正入账（进入事件推演）'" :disabled="busyCandidateId === c.id" @click.stop="acceptCand(c)">✓</button>
                 <button class="sc-act sc-act--danger" title="丢弃" :disabled="busyCandidateId === c.id" @click.stop="rejectCand(c)">✗</button>
               </div>
             </li>

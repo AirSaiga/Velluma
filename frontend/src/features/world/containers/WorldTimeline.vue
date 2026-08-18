@@ -12,6 +12,7 @@
 import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
+import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import ArcBand from '../presentation/ArcBand.vue'
@@ -240,6 +241,24 @@ const anchoredChapters = computed(() =>
   ),
 )
 
+// ===== C3 揭示投影：真相条目的 expected_reveal_chapter 挂到章节锚刻度（朱点） =====
+const { nodes: canonNodes, ensureLoaded: ensureCanon } = useCanon()
+watch(
+  loadedBookId,
+  (id) => { if (id) void ensureCanon(id) },
+  { immediate: true },
+)
+const revealMarksByChapter = computed(() => {
+  const by: Record<number, { id: string; label: string; plan: string }[]> = {}
+  for (const n of canonNodes.value || []) {
+    const ch = n.expected_reveal_chapter
+    if (ch && ch > 0) {
+      ;(by[ch] ||= []).push({ id: n.id, label: n.label, plan: (n.reveal_plan || '').slice(0, 60) })
+    }
+  }
+  return by
+})
+
 function onChapterChipClick(c: ChapterAnchor) {
   if (c.narrative_time != null) setCurrentTime(c.narrative_time)
 }
@@ -462,6 +481,13 @@ onMounted(() => {
         @click="onChapterChipClick(c)"
       >
         {{ c.chapter_number }}章
+        <!-- C3 揭示投影：该章预期揭示的真相（朱点，悬停看条目与计划） -->
+        <span
+          v-for="r in revealMarksByChapter[c.chapter_number] || []"
+          :key="r.id"
+          class="wt-reveal"
+          :title="`◉ 揭示：${r.label}${r.plan ? ' · ' + r.plan : ''}`"
+        >◉</span>
       </button>
     </div>
     <div
@@ -1232,5 +1258,13 @@ onMounted(() => {
   font-size: 10px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+/* C3 揭示投影：章节锚刻度上的朱点（预期揭示的真相条目） */
+.wt-reveal {
+  color: #c25a4a;
+  font-size: 9px;
+  margin-left: 1px;
+  pointer-events: auto;
 }
 </style>

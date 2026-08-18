@@ -129,6 +129,44 @@ async def run(
         except Exception as e:
             logger.warning(f"[canon_watch] check_consistency 失败: {e}")
 
+    # ---- 3.5 揭示临近提醒（C3：expected_reveal_chapter 距本章 ≤2 章 → 感知带提示） ----
+    # 纯算法零 LLM；作者定的揭示计划自己长脚走到写作现场。
+    if bundle.book_id and bundle.chapter_number:
+        try:
+            from sqlalchemy import select as sa_select
+            from backend.models import CanonNode as _CanonNode
+
+            rows = (
+                await db.execute(
+                    sa_select(_CanonNode).where(
+                        _CanonNode.book_id == bundle.book_id,
+                        _CanonNode.expected_reveal_chapter.isnot(None),
+                    )
+                )
+            ).scalars().all()
+            for n in rows:
+                gap = (n.expected_reveal_chapter or 0) - bundle.chapter_number
+                if -1 <= gap <= 2 and (n.canon_text or "").strip():
+                    key = f"reveal_due:{n.id}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    hints.append({
+                        "kind": "callback",
+                        "node_label": n.label,
+                        "node_type": "canon",
+                        "detail": (
+                            f"揭示计划临近：预期第 {n.expected_reveal_chapter} 章（"
+                            + ("就是本章" if gap == 0 else f"还差 {gap} 章")
+                            + f"）——{n.reveal_plan[:60]}" if n.reveal_plan
+                            else f"揭示计划临近：预期第 {n.expected_reveal_chapter} 章（"
+                                + ("就是本章" if gap == 0 else f"还差 {gap} 章") + "）"
+                        ),
+                        "severity": "info",
+                    })
+        except Exception as e:
+            logger.debug(f"[canon_watch] 揭示临近检查失败: {e}")
+
     # ---- 4. 设定矛盾（contradiction；节流 LLM 抽实体，≥30s/章）----
     # 与前 3 类（纯算法）不同：contradiction 需抽涌现实体比对角色设定，耗 1× LLM。
     # 节流保证心跳频率下成本可控（最频繁每 30s 一次）。复用 sediment 的

@@ -412,17 +412,39 @@ async def list_candidates(
     )
 
 
-@router.post("/{book_id}/world/candidates/{candidate_id}/accept", response_model=AcceptCandidateResponse)
+@router.post("/{book_id}/world/candidates/{candidate_id}/accept")
 async def accept_candidate(
     book_id: UUID, candidate_id: UUID, db: AsyncSession = Depends(get_db)
 ):
-    """✓ 转正：创建真事件（正常分配回放序号，进入推演）+ 候选 status→accepted。"""
+    """✓ 转正。分流（C3）：event_scout/settle 候选 → 创建真事件（进入推演）；
+    canon_extract 候选 → 创建 canon 节点（tentative，不进推演）。
+    候选 status→accepted。"""
     repo = WorldRepository(db)
     cand = await repo.candidates.get(str(candidate_id))
     if cand is None or str(cand.book_id) != str(book_id):
         raise HTTPException(404, "候选不存在")
     if cand.status != "pending":
         raise HTTPException(409, f"候选已处理（{cand.status}）")
+
+    if cand.source == "canon_extract":
+        from backend.models import CanonNode as _CanonNode
+
+        d = cand.draft or {}
+        node = _CanonNode(
+            book_id=cand.book_id,
+            type=str(d.get("type") or "event"),
+            label=str(d.get("label") or "未命名真相")[:200],
+            canon_text=str(d.get("canon_text") or ""),
+            public_text=str(d.get("public_text") or ""),
+            visibility="private",
+            source="auto_extracted",
+            confidence="tentative",
+        )
+        db.add(node)
+        await repo.candidates.set_status(str(candidate_id), "accepted")
+        await db.commit()
+        return {"candidate_id": cand.id, "event": None, "canon_node_id": str(node.id)}
+
     ev = await repo.events.create(str(book_id), **_event_fields_from_draft(cand.draft or {}))
     await repo.candidates.set_status(str(candidate_id), "accepted")
     await db.commit()
