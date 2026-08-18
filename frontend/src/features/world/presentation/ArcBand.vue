@@ -9,12 +9,18 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import type { Foreshadow } from '../engine/types'
 
-const props = defineProps<{
-  foreshadows: Foreshadow[]
-  maxTime: number
-  /** 只看悬空（隐藏已回收） */
-  onlyOpen?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    foreshadows: Foreshadow[]
+    /** 视野窗口终点（时间戳） */
+    maxTime: number
+    /** 视野窗口起点（默认 0 = 创世；手动框定视野时与时间轴同窗） */
+    minTime?: number
+    /** 只看悬空（隐藏已回收） */
+    onlyOpen?: boolean
+  }>(),
+  { minTime: 0 },
+)
 
 const emit = defineEmits<{
   'arc-click': [f: Foreshadow, at: { x: number; y: number }]
@@ -46,7 +52,12 @@ interface PlacedArc {
 }
 
 const arcs = computed<PlacedArc[]>(() => {
-  const t2x = (t: number) => Math.min(width.value - 4, Math.max(4, (t / props.maxTime) * width.value))
+  const span = Math.max(1, props.maxTime - props.minTime)
+  const t2x = (t: number) =>
+    Math.min(
+      width.value - 4,
+      Math.max(4, ((t - props.minTime) / span) * width.value),
+    )
   const out: PlacedArc[] = []
   for (const f of props.foreshadows) {
     if (f.status === 'dropped') continue
@@ -84,9 +95,9 @@ function onArcClick(a: PlacedArc, e: MouseEvent) {
 let dragging: { id: string; kind: 'planted' | 'resolved' } | null = null
 
 function x2t(x: number): number {
-  return Math.round(
-    Math.min(props.maxTime, Math.max(0, (x / width.value) * props.maxTime)),
-  )
+  const min = props.minTime
+  const max = props.maxTime
+  return Math.round(Math.min(max, Math.max(min, min + (x / width.value) * (max - min))))
 }
 
 function onHandleDown(e: PointerEvent, f: Foreshadow, kind: 'planted' | 'resolved') {

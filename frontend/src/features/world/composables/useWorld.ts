@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { worldApi, plotLedgerApi } from '../../../services/api'
+import { worldApi, plotLedgerApi, type PlotLedgerCreateInput } from '../../../services/api'
 import { computeWorldState } from '../engine/computeWorldState'
 import { pushCommand, clearHistory } from './useWorldHistory'
 import { WORLD_REFRESH_EVENT } from './useWorldSlice'
@@ -503,6 +503,26 @@ const toForeshadow = (l: {
   meta: l.meta ?? null,
 })
 
+/**
+ * 快照 → create payload：undo/redo 重建伏笔用，全字段透传（漏字段=撤销静默丢数据）。
+ * 幂等恢复：沿用原 ledger_key（book 内唯一约束）。
+ * 后端校验约束：meta 非 Optional（缺省须省键，传 null 会 422）；hook_id min_length=1、
+ * created_at_chapter ge=1——旧数据里的空串/越值在此归一为 null，防重建被 422 打断。
+ */
+function foreshadowRestorePayload(f: Foreshadow): PlotLedgerCreateInput {
+  return {
+    ledger_key: f.ledger_key,
+    content: f.content,
+    entry_type: f.entry_type,
+    status: f.status,
+    hook_id: f.hook_id || null,
+    created_at_chapter: f.created_at_chapter != null && f.created_at_chapter > 0 ? f.created_at_chapter : null,
+    world_time_planted: f.world_time_planted,
+    world_time_resolved: f.world_time_resolved,
+    ...(f.meta ? { meta: f.meta } : {}),
+  }
+}
+
 async function createForeshadow(
   bookId: string,
   data: { content: string; entryType?: string; planted: number; resolved?: number | null },
@@ -523,14 +543,7 @@ async function createForeshadow(
       foreshadows.value = foreshadows.value.filter((x) => x.id !== f.id)
     },
     redo: async () => {
-      const r = await plotLedgerApi.create(bookId, {
-        ledger_key: f.ledger_key, // 幂等恢复：沿用原 key（book 内唯一约束）
-        content: f.content,
-        entry_type: f.entry_type,
-        status: f.status,
-        world_time_planted: f.world_time_planted,
-        world_time_resolved: f.world_time_resolved,
-      })
+      const r = await plotLedgerApi.create(bookId, foreshadowRestorePayload(f))
       foreshadows.value = [...foreshadows.value, toForeshadow(r)]
     },
   })
@@ -594,14 +607,7 @@ async function deleteForeshadow(bookId: string, foreshadowId: string) {
     pushCommand({
       description: `删除伏笔「${snap.content.slice(0, 12)}」`,
       undo: async () => {
-        const r = await plotLedgerApi.create(bookId, {
-          ledger_key: snap.ledger_key,
-          content: snap.content,
-          entry_type: snap.entry_type,
-          status: snap.status,
-          world_time_planted: snap.world_time_planted,
-          world_time_resolved: snap.world_time_resolved,
-        })
+        const r = await plotLedgerApi.create(bookId, foreshadowRestorePayload(snap))
         foreshadows.value = [...foreshadows.value, toForeshadow(r)]
       },
       redo: async () => {

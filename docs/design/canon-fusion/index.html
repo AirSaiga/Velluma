@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canon 融合 · UX 设计稿——真相层并入活舆图</title>
+<style>
+  :root {
+    --paper: #f4eee1; --paper-2: #ece4d3; --paper-3: #f7f1e3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd; --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c; --pine: #5f7d5a;
+    --zhu: #a63e2a; --zhu-soft: rgba(166,62,42,.08); --zhu-line: rgba(166,62,42,.5);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans); color: var(--ink); min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(120, 90, 40, .05), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .012) 2px 3px),
+      var(--paper);
+    padding: 56px 24px 64px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .over { font-size: 10px; letter-spacing: .42em; color: var(--gold); text-indent: .42em; text-align: center; }
+  h1 { font-family: var(--serif); font-size: 30px; letter-spacing: .1em; text-align: center; margin-top: 10px; }
+  .lede { text-align: center; color: var(--ink-3); font-size: 13px; line-height: 1.9; max-width: 680px; margin: 14px auto 0; }
+  .lede b { color: var(--ink-2); }
+  .orn { display: block; margin: 20px auto 34px; width: 120px; color: rgba(110, 85, 45, .5); }
+
+  h3.sec { font-family: var(--serif); font-size: 17px; letter-spacing: .12em; margin: 40px 0 6px; }
+  h3.sec small { font-size: 10px; letter-spacing: .32em; color: var(--gold); display: block; margin-bottom: 4px; font-family: var(--sans); }
+  .sec-p { font-size: 12.5px; color: var(--ink-2); line-height: 2; max-width: 860px; }
+  .sec-p b { font-family: var(--serif); }
+
+  /* 两层模型图 */
+  .layers { display: flex; gap: 14px; margin: 18px 0 4px; }
+  .layer { flex: 1; border-radius: 10px; border: 1px solid var(--rule); padding: 16px 18px; background: rgba(255,252,244,.6); }
+  .layer.info { border-top: 3px solid var(--zhu); }
+  .layer.state { border-top: 3px solid var(--pine); }
+  .layer .t { font-family: var(--serif); font-size: 15px; margin-bottom: 2px; }
+  .layer .q { font-size: 11px; color: var(--ink-3); margin-bottom: 10px; }
+  .layer ul { list-style: none; font-size: 11.5px; color: var(--ink-2); line-height: 2; }
+  .layer ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+
+  /* 表里对照卡 */
+  .bili { display: flex; gap: 0; margin-top: 16px; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .bili .face { flex: 1; padding: 16px 18px; }
+  .bili .face.biao { background: var(--paper-3); }
+  .bili .face.li { background: var(--zhu-soft); border-left: 3px solid var(--zhu); }
+  .bili .face .fh { font-family: var(--serif); font-size: 14px; margin-bottom: 4px; }
+  .bili .face.li .fh { color: var(--zhu); }
+  .bili .face .fq { font-size: 11px; color: var(--ink-3); line-height: 1.9; }
+  .bili .face .fs { font-family: var(--serif); font-size: 12px; color: var(--ink-2); margin-top: 8px; line-height: 1.9; }
+
+  /* 朱点贯穿 */
+  .zhu-row { display: flex; gap: 12px; margin-top: 16px; }
+  .zhu-item { flex: 1; text-align: center; border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,252,244,.6); padding: 14px 10px 12px; }
+  .zhu-item .demo { height: 34px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .zhu-item .d { font-size: 10.5px; color: var(--ink-3); line-height: 1.7; }
+  .zhu-item .d b { color: var(--ink-2); }
+  .zd { width: 9px; height: 9px; border-radius: 50%; background: var(--zhu); display: inline-block; }
+  .zd.big { width: 13px; height: 13px; }
+  .zd.ring { box-shadow: 0 0 0 3px var(--zhu-soft), 0 0 0 6px rgba(166,62,42,.14); }
+
+  /* 术语表 */
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; background: rgba(255,252,244,.55); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  th { font-size: 10.5px; letter-spacing: .18em; color: var(--ink-3); text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); background: rgba(236,228,211,.6); font-weight: 600; }
+  td { padding: 9px 14px; border-bottom: 1px solid rgba(221,210,189,.55); color: var(--ink-2); line-height: 1.8; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td code { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--blue); background: rgba(74,107,138,.08); border-radius: 4px; padding: 1px 5px; }
+
+  /* 场景卡 */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: rgba(255,252,244,.6); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 20px 18px; display: flex; flex-direction: column; transition: box-shadow .2s ease, transform .2s ease; }
+  .card:hover { box-shadow: 0 10px 30px rgba(96,72,36,.14); transform: translateY(-2px); }
+  .card .tag { font-size: 10px; letter-spacing: .3em; margin-bottom: 8px; }
+  .card.a .tag { color: var(--zhu); } .card.b .tag { color: var(--ochre); } .card.c .tag { color: var(--violet); }
+  .card h2 { font-family: var(--serif); font-size: 19px; letter-spacing: .06em; }
+  .card .pitch { font-size: 12px; color: var(--ink-2); margin: 8px 0 12px; line-height: 1.7; }
+  .card ul { list-style: none; font-size: 11px; color: var(--ink-3); line-height: 1.9; flex: 1; }
+  .card ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+  .card a.open { margin-top: 14px; display: block; text-align: center; text-decoration: none; font-size: 12px; padding: 8px 0; border-radius: 7px; border: 1px solid var(--rule); color: var(--ink-2); }
+  .card a.open:hover { border-color: var(--zhu); color: var(--zhu); }
+
+  /* 流程 */
+  .flow { border-left: 3px solid var(--gold); background: rgba(255,252,244,.55); border-radius: 0 10px 10px 0; padding: 14px 20px; margin-top: 12px; font-size: 12.5px; line-height: 2; color: var(--ink-2); }
+  .flow b { font-family: var(--serif); }
+  .flow .step { color: var(--gold); font-family: ui-monospace, monospace; font-size: 11px; margin-right: 6px; }
+
+  .open-q { margin-top: 14px; border: 1px dashed var(--rule); border-radius: 10px; padding: 16px 20px; font-size: 12px; color: var(--ink-2); line-height: 2.1; background: rgba(255,252,244,.4); }
+  .open-q li { margin-left: 18px; }
+  .open-q b { font-family: var(--serif); color: var(--zhu); }
+
+  .foot { margin-top: 34px; text-align: center; font-size: 10.5px; color: var(--ink-3); line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="over">CANON FUSION · UX STUDIES</div>
+  <h1>真相层并入活舆图</h1>
+  <p class="lede">
+    世界页已经回答「世界里发生了什么」；Canon 一直单独回答「读者该知道什么」。
+    本设计把后者并进前者：<b>同一个对象，事态面之上长出读者认知面</b>——旧「脑图」页退役，
+    作者从此只维护一本账。架构与数据设计见
+    <b>docs/canon-world-fusion.md</b>，本稿只管「作者看到什么、怎么动手」。
+  </p>
+  <svg class="orn" viewBox="0 0 120 12"><path d="M0,6 H48 M72,6 H120" stroke="currentColor" stroke-width="1"/><path d="M60,1 L65,6 L60,11 L55,6 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+
+  <!-- ============ 一、两层模型 ============ -->
+  <h3 class="sec"><small>01 · MODEL</small>两层模型，一句话立论</h3>
+  <p class="sec-p">
+    事态层是上帝视角的状态机，不关心读者；信息层是叙事视角的知识边界，不改变世界。
+    融合不是「把 Canon 搬进世界页」，是<b>给世界页的每个对象补上第二面</b>。
+  </p>
+  <div class="layers">
+    <div class="layer info">
+      <div class="t">信息层 · 真相（并入的对象）</div>
+      <div class="q">回答：读者该知道什么 / 什么绝不能写出来</div>
+      <ul>
+        <li>表（读者所见）↔ 里（作者真相），差集 = 秘密</li>
+        <li>揭示计划：差集预定在 第 N 章 收敛</li>
+        <li>泄密检测 / 感知带 / 审计，全在这一层</li>
+      </ul>
+    </div>
+    <div class="layer state">
+      <div class="t">事态层 · 活舆图（已有，不动）</div>
+      <div class="q">回答：发生了什么 / 此刻世界什么状态</div>
+      <ul>
+        <li>事件溯源推演：位置/生死/疆域/关系</li>
+        <li>地图管空间 · 时间轴管时序 · 抽屉管账本</li>
+        <li>与读者认知无关，全部保持现状</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="bili">
+    <div class="face biao">
+      <div class="fh">表 · 读者目前所见</div>
+      <div class="fq">普通纸面。读者从正文里读到的版本——可能是截断的、伪装的、错认的。空 = 读者一无所知。</div>
+      <div class="fs">「废墟区捡回来的机修工，手艺极好，沉默寡言。」</div>
+    </div>
+    <div class="face li">
+      <div class="fh">里 · 作者知道的真相</div>
+      <div class="fq">朱晕纸面 + 「密」印。生成时绝不许直接写出，只作隐藏动机；泄密会在完稿审计报警。</div>
+      <div class="fs">「统合局局长的私生子，生母因『素壤计划』被灭口。」</div>
+    </div>
+  </div>
+  <p class="sec-p" style="margin-top: 10px; color: var(--ink-3);">
+    术语落在「表里」二字上——<b>表里不一</b>正是秘密的本义，作者无需学习任何系统词汇。
+    三态徽标：<span style="color: var(--zhu);">● 秘密</span>（读者全然不知）·
+    <span style="color: var(--violet);">● 半露</span>（读者见过伪装版）·
+    <span style="color: var(--pine);">● 公开</span>（已建立事实，AI 必须遵守）。
+  </p>
+
+  <!-- ============ 二、朱点贯穿 ============ -->
+  <h3 class="sec"><small>02 · MOTIF</small>一枚朱点，四处现身</h3>
+  <p class="sec-p">
+    信息层在活舆图上的视觉签名是<b>朱砂点</b>（朱批意象：只有作者看得见的批注）。它足够小、足够安静，
+    但在四个界面上重复出现，作者三次之后就会形成「朱点 = 有事」的条件反射。
+  </p>
+  <div class="zhu-row">
+    <div class="zhu-item">
+      <div class="demo"><span class="zd big"></span></div>
+      <div class="d"><b>图标栏第四格</b><br/>「真相」账本入口，角标 = 总条数</div>
+    </div>
+    <div class="zhu-item">
+      <div class="demo"><span style="font-family: var(--serif); font-size: 13px; border: 1px solid var(--rule); border-radius: 4px; padding: 1px 8px; position: relative; background: var(--paper-3);">林尘<span class="zd" style="position: absolute; right: -4px; top: -4px;"></span></span></div>
+      <div class="d"><b>舆图名签右肩</b><br/>谁身上压着秘密，扫一眼便知</div>
+    </div>
+    <div class="zhu-item">
+      <div class="demo"><span class="zd"></span> 真相列表行首状态点</div>
+      <div class="d"><b>账本行左缘 + 行首点</b><br/>秘密朱 / 半露紫 / 公开墨绿</div>
+    </div>
+    <div class="zhu-item">
+      <div class="demo"><span class="zd ring"></span> 「里」面板左缘朱线</div>
+      <div class="d"><b>真相详情的朱晕面板</b><br/>编辑时也住在朱点的语义里</div>
+    </div>
+  </div>
+
+  <!-- ============ 三、信息架构 ============ -->
+  <h3 class="sec"><small>03 · IA</small>信息架构：入口、去处与退役</h3>
+  <table>
+    <tr><th style="width: 190px;">表面</th><th>设计</th></tr>
+    <tr><td><b>世界页 · 图标栏</b></td><td>第四格「真相 ◉」，排「期待」之后、实体分组之前——与伏笔/期待同属<b>账本族</b>（读者视角的账），与地点/事件/角色（世界结构的账）以分隔线相隔。</td></tr>
+    <tr><td><b>真相账本抽屉</b></td><td>主过滤轴 = 表里三态（不是类型——作者翻账时的问题是「读者还不知道什么」）。行 = 对象名（衬线）+ 类型徽标 + 真相首行 + 揭示章。底部「因果图谱 ↗」。</td></tr>
+    <tr><td><b>真相详情抽屉</b></td><td>点行滑入，与账本格互斥（同伏笔）。头部对象名（可跳实体）+ 三态切换；「两面」区就地编辑失焦即存；「揭示」区计划 + 章号；「关联」区图谱跳转。</td></tr>
+    <tr><td><b>实体详情抽屉 · 读者认知分区</b></td><td>C2：档案/编年史之后的第四分区，默认折叠。从这里记的秘密自动挂本实体——<b>名字永不漂移，泄密检测不失效</b>。空态一行虚线按钮，不逼填表。</td></tr>
+    <tr><td><b>伏笔详情 · 真相面</b></td><td>C2：伏笔天然是信息层对象（埋设=建差集，回收=收敛）。表/里两行可选字段，不填仍是普通伏笔。原 Canon 的 hook 节点由此并入。</td></tr>
+    <tr><td><b>因果图谱模态</b></td><td>透镜而非画布：从账本底部或详情「关联」唤起。形状=对象族，朱描边=有秘密。只看+聚焦+跳转编辑，<b>不在图上编辑</b>。</td></tr>
+    <tr><td><b>写作台</b></td><td>副驾「章节」tab 的「前往 Canon 脑图」改为「在世界页查看真相」→ 深链 <code>?panel=canon</code>。感知带 / 泄密审计 / 高亮零改动。</td></tr>
+    <tr><td><b>退役</b></td><td>AppRail「脑图」项移除；<code>/canon/:bookId</code> 重定向至世界页（旧深链不断）；CanonView 三 tab 由 真相账本 / 因果图谱 / 伏笔账本 分别接替。</td></tr>
+  </table>
+
+  <!-- ============ 四、场景稿 ============ -->
+  <h3 class="sec"><small>04 · SCENES</small>三张场景稿</h3>
+  <div class="grid">
+    <div class="card a">
+      <div class="tag">场景 A</div>
+      <h2>真相账本与表里两面</h2>
+      <p class="pitch">主入口。账本格的列表节奏，详情抽屉的一页两面；句子优先录入——写下这句话就行。</p>
+      <ul>
+        <li>过滤轴 = 秘密 / 半露 / 公开（表里三态）</li>
+        <li>行 = 对象名 + 真相首行 + 揭示章 →</li>
+        <li>「＋ 记一条真相」：句子即真相全文，主语自动挂对象</li>
+        <li>详情：表（纸面）/ 里（朱晕 + 密印 + 泄密警示）</li>
+        <li>就地编辑失焦即存，无保存按钮</li>
+      </ul>
+      <a class="open" href="a-truth-drawer.html">打开场景 A</a>
+    </div>
+    <div class="card b">
+      <div class="tag">场景 B</div>
+      <h2>实体的读者认知面</h2>
+      <p class="pitch">C2 终态：秘密跟着人走。实体档案长出第四分区，舆图名签点朱。</p>
+      <ul>
+        <li>实体抽屉「读者认知」分区，默认折叠一眼够</li>
+        <li>从这里记秘密 = 自动挂接，名字永不漂移</li>
+        <li>地图名签右肩朱点：秘密的分布即剧情的分布</li>
+        <li>实体级 visibility 开关退役，归位为每条真相的表里</li>
+        <li>伏笔条目的可选「真相面」（表/里两行）</li>
+      </ul>
+      <a class="open" href="b-entity-truth.html">打开场景 B</a>
+    </div>
+    <div class="card c">
+      <div class="tag">场景 C</div>
+      <h2>因果图谱透镜</h2>
+      <p class="pitch">旧脑图降格为查看器，住进模态：看结构的地方，不是改数据的地方。</p>
+      <ul>
+        <li>形状=对象族 ●◆▲◉▣，朱描边=有秘密</li>
+        <li>边六型换作者语言：因果/先后/暗示/铺垫/回收/呼应</li>
+        <li>点节点出信息条：真相摘要 + 跳回真相详情编辑</li>
+        <li>只看秘密 / 只看伏笔 / 一度邻居聚焦</li>
+        <li>无常驻入口——透镜是拿来用的，不是拿来供的</li>
+      </ul>
+      <a class="open" href="c-causality-graph.html">打开场景 C</a>
+    </div>
+  </div>
+
+  <!-- ============ 五、关键流程 ============ -->
+  <h3 class="sec"><small>05 · FLOWS</small>关键流程走查</h3>
+
+  <div class="flow">
+    <b>记一条秘密（句子优先，零翻译）</b><br/>
+    <span class="step">①</span>真相账本底部「＋ 记一条真相」→ 内联输入框，光标已在；
+    <span class="step">②</span>写「林尘其实是局长的私生子」，Enter——<b>句子本身就是「里」的全文</b>，没有先建节点再填字段；
+    <span class="step">③</span>系统按实体名/别名匹配主语（可改挂/可不挂，挂不上就是自由叙事条目）；
+    <span class="step">④</span>详情抽屉直接滑入、焦点落在「里」面板——顺手补「表」（读者目前所见）与揭示计划，不补也无妨。
+  </div>
+
+  <div class="flow">
+    <b>给这个人记秘密（C2，从实体来）</b><br/>
+    <span class="step">①</span>舆图点开实体（名签有朱点 = 已有秘密在身）；<span class="step">②</span>「读者认知」分区 →「＋ 记一条秘密」→
+    <span class="step">③</span>直接进「里」编辑，对象已挂好，不问主语是谁。反向亦可：真相详情头部点对象名，跳回实体档案。
+  </div>
+
+  <div class="flow">
+    <b>揭示临近（C3）</b><br/>
+    计划揭示章 − 当前写作章 ≤ 3 时：详情里「还有 N 章」转金；写作台感知带出现「针脚伏笔临近揭示计划（→12章）」——
+    揭示计划从「记了就忘的字段」变成会主动回来的提醒。已揭示的条目一键转「公开」，从秘密账里销账。
+  </div>
+
+  <div class="flow">
+    <b>旧账迁移（C2，作者确认制）</b><br/>
+    首次打开真相账本时若检测到旧 Canon 数据：顶部一条安静的黄条「检出旧脑图 23 条 · 核对挂接」→
+    迁移预览按名字匹配世界实体/伏笔（含别名），逐条 ✓/✗/改挂，不匹配的保留为自由叙事条目——<b>没有静默改库</b>。
+  </div>
+
+  <!-- ============ 六、拍板记录 ============ -->
+  <h3 class="sec"><small>06 · DECIDED</small>评审拍板记录（2026-08-17）</h3>
+  <table>
+    <tr><th style="width: 150px;">分歧点</th><th style="width: 165px;">拍板</th><th>说明</th></tr>
+    <tr>
+      <td><b>命名</b></td><td>「真相」</td>
+      <td>与 伏笔/期待 同属账本族；全套用户术语随此定稿——表 / 里、秘密 / 半露 / 公开、真相账本、因果图谱。</td>
+    </tr>
+    <tr>
+      <td><b>半露的门槛</b></td><td>三态 chips 直切</td>
+      <td>维持本稿方案（作者无倾向，从稿）：三态外显、一键即切；不采用「表非空自动推导半露」的隐式规则。</td>
+    </tr>
+    <tr>
+      <td><b>账本角标</b></td><td>总条数</td>
+      <td>与伏笔/期待格一致；秘密数退居抽屉头部「柒 条 · 秘密 叁」的次级信息位，朱字仍在。</td>
+    </tr>
+    <tr>
+      <td><b>因果图谱去留</b></td><td>保留，定位只读查看器</td>
+      <td>按场景 C 落地（只看不编、无常驻入口、从账本/详情唤起）；不预设「打开率趋零即退役」，使用观察照做。</td>
+    </tr>
+    <tr>
+      <td><b>「表」空态在写作现场的提示</b></td><td>暂不决策</td>
+      <td>「读者还不知道这件事」的浮卡提示属写作桥 W5 之后的增量，届时再议。</td>
+    </tr>
+  </table>
+
+  <p class="foot">
+    设计稿为纯静态 HTML（零依赖、零素材），沿用活舆图 M6 视觉令牌（暖纸/墨色/朱砂、衬线名签），仅作方向评审，不代表最终实现细节。<br/>
+    数据与架构设计见 docs/canon-world-fusion.md（C1/C2/C3 分期）；本稿各场景与分期的对应关系已标注在每张场景稿页脚。
+  </p>
+</div>
+</body>
+</html>

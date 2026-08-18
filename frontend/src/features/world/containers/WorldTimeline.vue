@@ -32,34 +32,129 @@ const { currentTime, events, setCurrentTime, chapterAnchors, setChapterAnchor, f
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
 
+/** 数据推导的时间轴终点（最远事件 +1 年，下限 5 年）——即「自动」视野 */
 const maxTime = computed(() =>
   Math.max(events.value.reduce((m, e) => Math.max(m, e.time_end), 0) + 365, 365 * 5),
 )
-const pct = computed(() =>
-  Math.min(100, Math.max(0, (currentTime.value / maxTime.value) * 100)),
+
+// ===== 视野窗口：可手动框定起止年份（默认自动跟随事件延展；按书持久化到 localStorage）=====
+const manualRange = ref<{ start: number; end: number } | null>(null)
+const viewStart = computed(() => (manualRange.value ? fromYMD(manualRange.value.start, 1, 1) : 0))
+const viewEnd = computed(() =>
+  manualRange.value ? fromYMD(manualRange.value.end + 1, 1, 1) : maxTime.value,
+)
+const span = computed(() => Math.max(1, viewEnd.value - viewStart.value))
+/** 时刻 → 轨道百分比（窗外夹到缘） */
+const pctOf = (t: number) =>
+  Math.min(100, Math.max(0, ((t - viewStart.value) / span.value) * 100))
+const pct = computed(() => pctOf(currentTime.value))
+
+const rangeStorageKey = () => `velluma:tl-range:${loadedBookId.value ?? 'unknown'}`
+
+watch(
+  loadedBookId,
+  () => {
+    manualRange.value = null
+    try {
+      const raw = localStorage.getItem(rangeStorageKey())
+      const v = raw ? JSON.parse(raw) : null
+      if (
+        v &&
+        Number.isInteger(v.start) &&
+        Number.isInteger(v.end) &&
+        v.start >= 1 &&
+        v.end > v.start
+      ) {
+        manualRange.value = v
+      }
+    } catch {
+      /* 隐私模式/坏数据静默回退自动 */
+    }
+  },
+  { immediate: true },
 )
 
-// 事件密度分桶
+function persistRange() {
+  try {
+    const k = rangeStorageKey()
+    if (manualRange.value) localStorage.setItem(k, JSON.stringify(manualRange.value))
+    else localStorage.removeItem(k)
+  } catch {
+    /* 同上：存不进就当会话级 */
+  }
+}
+
+const rangeForm = ref<{ x: number; y: number; start: string; end: string } | null>(null)
+
+function openRangeForm(e: MouseEvent) {
+  rangeForm.value = {
+    // 触发点在屏幕底缘的时间轴头，弹层一律向上开
+    x: Math.max(8, Math.min(e.clientX - 150, window.innerWidth - 260)),
+    y: Math.max(8, e.clientY - 172),
+    start: String(manualRange.value?.start ?? 1),
+    end: String(manualRange.value?.end ?? yearOf(maxTime.value)),
+  }
+}
+
+function applyRange() {
+  const f = rangeForm.value
+  if (!f) return
+  const s = parseInt(f.start, 10)
+  const e = parseInt(f.end, 10)
+  if (!Number.isFinite(s) || !Number.isFinite(e) || s < 1 || e <= s) {
+    showToast('需为整数年份，且终止年大于起始年', 'error')
+    return
+  }
+  manualRange.value = { start: s, end: e }
+  persistRange()
+  // 游标夹进新窗口，防失落到视野外
+  if (currentTime.value < viewStart.value || currentTime.value > viewEnd.value) {
+    setCurrentTime(Math.min(viewEnd.value, Math.max(viewStart.value, currentTime.value)))
+  }
+  rangeForm.value = null
+}
+
+function resetRange() {
+  manualRange.value = null
+  persistRange()
+  rangeForm.value = null
+}
+
+/** 手动窗口外的事件数（视野截断提醒，显示在头部） */
+const hiddenCount = computed(() =>
+  manualRange.value
+    ? events.value.filter(
+        (e) => e.time_start < viewStart.value || e.time_start >= viewEnd.value,
+      ).length
+    : 0,
+)
+
+// 事件密度分桶（只计窗内事件）
 const BUCKETS = 64
 const buckets = computed(() => {
   const arr = new Array(BUCKETS).fill(0)
-  const span = maxTime.value
   for (const e of events.value) {
-    const i = Math.min(BUCKETS - 1, Math.floor((e.time_start / span) * BUCKETS))
+    if (e.time_start < viewStart.value || e.time_start >= viewEnd.value) continue
+    const i = Math.min(
+      BUCKETS - 1,
+      Math.floor(((e.time_start - viewStart.value) / span.value) * BUCKETS),
+    )
     arr[i] += 1
   }
   const mx = Math.max(1, ...arr)
   return arr.map((n) => (n / mx) * 100)
 })
 
-// 事件标记点（含横向位置与类型色）
+// 事件标记点（含横向位置与类型色；窗外事件不渲染）
 const eventDots = computed(() =>
-  events.value.map((e) => ({
-    ev: e,
-    left: Math.min(100, Math.max(0, (e.time_start / maxTime.value) * 100)),
-    color: EVENT_TYPE_COLOR[e.event_type] || '#94a3b8',
-    label: getTemplate(e.event_type)?.label || e.event_type,
-  })),
+  events.value
+    .filter((e) => e.time_start >= viewStart.value && e.time_start < viewEnd.value)
+    .map((e) => ({
+      ev: e,
+      left: pctOf(e.time_start),
+      color: EVENT_TYPE_COLOR[e.event_type] || '#94a3b8',
+      label: getTemplate(e.event_type)?.label || e.event_type,
+    })),
 )
 
 function onDotClick(ev: WorldEvent) {
@@ -67,13 +162,15 @@ function onDotClick(ev: WorldEvent) {
   emit('focus-event', ev)
 }
 
-// 年份刻度（跨度自适应：≤20年→每年，≤200年→每10年，否则每50年）
+// 年份刻度（窗内跨度自适应：≤20年→每年，≤200年→每10年，否则每50年）
 const ticks = computed(() => {
-  const maxY = yearOf(maxTime.value)
-  const step = maxY <= 20 ? 1 : maxY <= 200 ? 10 : 50
+  const startY = yearOf(viewStart.value)
+  const endY = yearOf(viewEnd.value - 1) // 窗内最后一个占地整年
+  const spanY = endY - startY + 1
+  const step = spanY <= 20 ? 1 : spanY <= 200 ? 10 : 50
   const out: { pct: number; label: string }[] = []
-  for (let y = 1; y <= maxY; y += step) {
-    out.push({ pct: (fromYMD(y, 1, 1) / maxTime.value) * 100, label: `${y}` })
+  for (let y = startY; y <= endY; y += step) {
+    out.push({ pct: pctOf(fromYMD(y, 1, 1)), label: `${y}` })
   }
   return out
 })
@@ -88,7 +185,7 @@ function posToTime(clientX: number): number {
   if (!el) return 0
   const r = el.getBoundingClientRect()
   const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
-  return Math.round(p * maxTime.value)
+  return Math.round(viewStart.value + p * span.value)
 }
 function scheduleSet(t: number) {
   if (rafId !== null) return
@@ -109,16 +206,17 @@ function onUp() {
   dragging = false
 }
 
-// 播放（~6s 播完全程，到尾循环）
+// 播放（~6s 播完窗口全程，到尾循环回窗口起点）
 const playing = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 function togglePlay() {
   playing.value = !playing.value
   if (playing.value) {
-    const step = Math.max(1, Math.ceil(maxTime.value / 360))
+    const step = Math.max(1, Math.ceil(span.value / 360))
     timer = setInterval(() => {
-      if (currentTime.value >= maxTime.value) setCurrentTime(0)
-      else setCurrentTime(Math.min(maxTime.value, currentTime.value + step))
+      if (currentTime.value >= viewEnd.value || currentTime.value < viewStart.value)
+        setCurrentTime(viewStart.value)
+      else setCurrentTime(Math.min(viewEnd.value, currentTime.value + step))
     }, 16)
   } else if (timer) {
     clearInterval(timer)
@@ -134,7 +232,12 @@ onBeforeUnmount(() => {
 // ===== 章节锚刻度层（M1：章节轴↔世界轴的桥）=====
 
 const anchoredChapters = computed(() =>
-  chapterAnchors.value.filter((c) => c.narrative_time != null && c.narrative_time <= maxTime.value),
+  chapterAnchors.value.filter(
+    (c) =>
+      c.narrative_time != null &&
+      c.narrative_time >= viewStart.value &&
+      c.narrative_time < viewEnd.value,
+  ),
 )
 
 function onChapterChipClick(c: ChapterAnchor) {
@@ -192,12 +295,18 @@ function onTrackContext(e: MouseEvent) {
 
 function onGlobalMousedown(e: MouseEvent) {
   // 点击菜单外部关闭（菜单/弹层自身 stop mousedown）
-  if (!ctxMenu.value && !fsForm.value && !arcDetail.value) return
+  if (!ctxMenu.value && !fsForm.value && !arcDetail.value && !rangeForm.value) return
   const el = e.target as HTMLElement
-  if (!el.closest('.wt-ctx') && !el.closest('.wt-fs') && !el.closest('.wt-arc')) {
+  if (
+    !el.closest('.wt-ctx') &&
+    !el.closest('.wt-fs') &&
+    !el.closest('.wt-arc') &&
+    !el.closest('.wt-range')
+  ) {
     closeCtx()
     fsForm.value = null
     arcDetail.value = null
+    rangeForm.value = null
   }
 }
 
@@ -318,14 +427,26 @@ onMounted(() => {
       >
         悬空伏笔 {{ openCount }}
       </button>
-      <div class="wt-meta">{{ events.length }} 事件 · 至第 {{ yearOf(maxTime) }} 年</div>
+      <button
+        class="wt-meta"
+        :class="{ manual: manualRange }"
+        title="设置时间轴起止年份"
+        @click="openRangeForm"
+      >
+        {{ events.length }} 事件 ·
+        <template v-if="manualRange">
+          第 {{ manualRange.start }}–{{ manualRange.end }} 年<template v-if="hiddenCount"> · 窗外 {{ hiddenCount }}</template>
+        </template>
+        <template v-else>至第 {{ yearOf(maxTime) }} 年</template>
+      </button>
     </div>
 
     <!-- 伏笔弧线带（M3：plant→payoff 弧线，悬空渐隐；拖端点改锚） -->
     <ArcBand
       v-if="hasPlaced"
       :foreshadows="foreshadows"
-      :max-time="maxTime"
+      :min-time="viewStart"
+      :max-time="viewEnd"
       :only-open="onlyOpen"
       @arc-click="(f, at) => (arcDetail = { f, x: at.x, y: at.y })"
       @update-times="onUpdateTimes"
@@ -336,7 +457,7 @@ onMounted(() => {
         v-for="c in anchoredChapters"
         :key="c.id"
         class="wt-chap"
-        :style="{ left: ((c.narrative_time! / maxTime) * 100) + '%' }"
+        :style="{ left: pctOf(c.narrative_time!) + '%' }"
         :title="`${c.chapter_name || '第' + c.chapter_number + '章'} · ${formatTime(c.narrative_time!)}`"
         @click="onChapterChipClick(c)"
       >
@@ -497,6 +618,41 @@ onMounted(() => {
         <button class="wt-arc-act wt-arc-act--danger" @click="onArcDelete">删除</button>
       </div>
     </div>
+
+    <!-- 视野窗口设置：手动起止年份（头部「N 事件 · …」按钮唤起） -->
+    <div
+      v-if="rangeForm"
+      class="wt-range"
+      :style="{ left: rangeForm.x + 'px', top: rangeForm.y + 'px' }"
+      @mousedown.stop
+      @contextmenu.prevent
+      @keydown.esc="rangeForm = null"
+    >
+      <div class="wt-range-title">时间轴视野</div>
+      <div class="wt-range-row">
+        第
+        <input
+          v-model="rangeForm.start"
+          class="wt-range-input"
+          inputmode="numeric"
+          @keydown.enter.prevent="applyRange"
+        />
+        年 —
+        第
+        <input
+          v-model="rangeForm.end"
+          class="wt-range-input"
+          inputmode="numeric"
+          @keydown.enter.prevent="applyRange"
+        />
+        年
+      </div>
+      <div class="wt-range-actions">
+        <button v-if="manualRange" class="wt-range-reset" @click="resetRange">恢复自动</button>
+        <button class="wt-range-ok" @click="applyRange">框定视野</button>
+      </div>
+      <div class="wt-range-hint">窗口只收拢视野、不动史实；窗外事件数会标注在上方。</div>
+    </div>
   </div>
 </template>
 
@@ -556,11 +712,30 @@ onMounted(() => {
     filter: blur(0);
   }
 }
+/* 头部「N 事件 · …」兼作视野窗口入口（点击框定起止年份） */
 .wt-meta {
   font-size: 10px;
   letter-spacing: 0.18em;
   color: var(--text-muted);
   margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.wt-meta:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+  background: rgba(90, 70, 40, 0.07);
+}
+/* 手动态：鎏金点出「这不是全程」 */
+.wt-meta.manual {
+  color: #8a6d2f;
+  border-color: rgba(176, 141, 62, 0.4);
+  background: rgba(176, 141, 62, 0.08);
 }
 .wt-track {
   position: relative;
@@ -667,9 +842,10 @@ onMounted(() => {
 }
 
 /* ===== 右键菜单 ===== */
+/* 弹层层级：世界页浮层内部刻度到 760（罗盘 660/图标栏 750），瞬态菜单须压过全部 */
 .wt-ctx {
   position: fixed;
-  z-index: 60;
+  z-index: 800;
   min-width: 200px;
   max-height: 320px;
   overflow-y: auto;
@@ -821,7 +997,7 @@ onMounted(() => {
 /* ===== 埋伏笔内联表单 ===== */
 .wt-fs {
   position: fixed;
-  z-index: 62;
+  z-index: 800;
   width: 280px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
@@ -903,7 +1079,7 @@ onMounted(() => {
 /* ===== 弧线详情弹层 ===== */
 .wt-arc {
   position: fixed;
-  z-index: 62;
+  z-index: 800;
   width: 260px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
@@ -976,5 +1152,85 @@ onMounted(() => {
 .wt-arc-act--danger:hover {
   border-color: #dc2626;
   color: #dc2626;
+}
+
+/* ===== 视野窗口设置弹层（鎏金，与时间轴游标同色系） ===== */
+.wt-range {
+  position: fixed;
+  z-index: 800;
+  width: 236px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 12px;
+}
+.wt-range-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a6d2f;
+  margin-bottom: 8px;
+}
+.wt-range-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.wt-range-input {
+  width: 58px;
+  padding: 5px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+  text-align: center;
+  outline: none;
+}
+.wt-range-input:focus {
+  border-color: #b08d3e;
+  box-shadow: 0 0 0 3px rgba(176, 141, 62, 0.12);
+}
+.wt-range-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.wt-range-reset {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.wt-range-reset:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+.wt-range-ok {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 8px;
+  background: #b08d3e;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.wt-range-hint {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 </style>

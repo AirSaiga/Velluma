@@ -1,12 +1,13 @@
 /**
- * Canon 状态管理（V4.0 新建）。
+ * Canon（真相层）状态管理（C1 自 features/canon 迁入 world，随 CanonView 退役）。
  *
  * 职责：
- * - 加载/缓存整书图谱
- * - 节点/边 CRUD（自动刷新缓存）
- * - 一致性检查、连锁分析、自动提取
+ * - 加载/缓存整书图谱（模块级单例：真相账本 / 真相详情 / 因果图谱共享同一份状态）
+ * - 节点/边 CRUD（自动刷新缓存，落库后广播 velluma:world-refresh）
  *
- * 设计依据：docs/generation-v4.0-canon.md §5
+ * 设计依据：docs/canon-world-fusion.md（C1：UI 承载融合，后端零改动）
+ * 术语表里化（docs/design/canon-fusion）：canon_text→里 / public_text→表 /
+ * private→秘密 / partial→半露。
  */
 import { ref, type Ref } from 'vue'
 import {
@@ -24,6 +25,7 @@ import {
   type CanonNodeType,
   type CanonVisibility,
 } from '../../../services/api/domain/canon.api'
+import { WORLD_REFRESH_EVENT } from './useWorldSlice'
 
 export interface UseCanon {
   nodes: Ref<CanonNode[]>
@@ -32,6 +34,8 @@ export interface UseCanon {
   error: Ref<string | null>
   // 控制
   load: (bookId: string) => Promise<void>
+  /** 幂等加载：当前书已载过则跳过（WorldView 挂载与抽屉首开不重复请求） */
+  ensureLoaded: (bookId: string) => Promise<void>
   refresh: () => Promise<void>
   // 节点 CRUD
   createNode: (bookId: string, data: CanonNodeCreate) => Promise<CanonNode>
@@ -47,8 +51,6 @@ export interface UseCanon {
   extract: (bookId: string, chapterId: string, autoCommit?: boolean) => Promise<CanonExtractionResult>
 }
 
-// 模块级单例状态：CanonView 与 NodeEditModal/EdgeEditModal 各自调用 useCanon()，
-// 必须共享同一份状态，否则弹窗内的 CRUD 刷新不到视图持有的实例。
 const nodes = ref<CanonNode[]>([])
 const edges = ref<CanonEdge[]>([])
 const loading = ref(false)
@@ -56,11 +58,21 @@ const error = ref<string | null>(null)
 
 let currentBookId: string | null = null
 
+/** 副作用：canon 数据落库后广播世界刷新（与伏笔/期待/世界观同契约） */
+function broadcastRefresh() {
+  window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
+}
+
 export function useCanon(): UseCanon {
 
   async function load(bookId: string) {
     currentBookId = bookId
     await refresh()
+  }
+
+  async function ensureLoaded(bookId: string) {
+    if (currentBookId === bookId && nodes.value.length) return
+    await load(bookId)
   }
 
   async function refresh() {
@@ -82,35 +94,41 @@ export function useCanon(): UseCanon {
   async function createNode(bookId: string, data: CanonNodeCreate): Promise<CanonNode> {
     const node = await canonApi.createNode(bookId, data)
     await refresh()
+    broadcastRefresh()
     return node
   }
 
   async function updateNode(bookId: string, nodeId: string, data: CanonNodeUpdate): Promise<CanonNode> {
     const node = await canonApi.updateNode(bookId, nodeId, data)
     await refresh()
+    broadcastRefresh()
     return node
   }
 
   async function deleteNode(bookId: string, nodeId: string): Promise<void> {
     await canonApi.deleteNode(bookId, nodeId)
     await refresh()
+    broadcastRefresh()
   }
 
   async function createEdge(bookId: string, data: CanonEdgeCreate): Promise<CanonEdge> {
     const edge = await canonApi.createEdge(bookId, data)
     await refresh()
+    broadcastRefresh()
     return edge
   }
 
   async function updateEdge(bookId: string, edgeId: string, data: CanonEdgeUpdate): Promise<CanonEdge> {
     const edge = await canonApi.updateEdge(bookId, edgeId, data)
     await refresh()
+    broadcastRefresh()
     return edge
   }
 
   async function deleteEdge(bookId: string, edgeId: string): Promise<void> {
     await canonApi.deleteEdge(bookId, edgeId)
     await refresh()
+    broadcastRefresh()
   }
 
   async function checkConsistency(bookId: string, text: string): Promise<ConsistencyCheckResult> {
@@ -133,6 +151,7 @@ export function useCanon(): UseCanon {
     loading,
     error,
     load,
+    ensureLoaded,
     refresh,
     createNode,
     updateNode,
@@ -147,15 +166,16 @@ export function useCanon(): UseCanon {
 }
 
 // ============================================================
-// 常量（UI 显示用）
+// 常量（UI 显示用，术语随 C1 表里化）
 // ============================================================
 
 export const NODE_TYPE_LABELS: Record<CanonNodeType, string> = {
   character: '角色',
-  event: '事件',
+  event: '叙事',
   object: '物件',
   place: '地点',
-  hook: '伏笔',
+  // C1 过渡期称「钩子」避免与世界页伏笔账本撞名；C2 该类型并入伏笔账本后退役
+  hook: '钩子',
 }
 
 export const NODE_TYPE_COLORS: Record<CanonNodeType, string> = {
@@ -163,14 +183,14 @@ export const NODE_TYPE_COLORS: Record<CanonNodeType, string> = {
   event: '#0891b2',     // 青蓝
   object: '#ca8a04',    // 土黄
   place: '#16a34a',     // 绿
-  hook: '#dc2626',      // 红
+  hook: '#7c3aed',      // 紫（对齐伏笔账本语义色）
 }
 
 export const EDGE_TYPE_LABELS: Record<string, string> = {
   causes: '因果',
-  before: '时序',
+  before: '先后',
   hints: '暗示',
-  setups: '铺设',
+  setups: '铺垫',
   callbacks: '回收',
   echoes: '呼应',
 }
@@ -184,8 +204,12 @@ export const EDGE_TYPE_COLORS: Record<string, string> = {
   echoes: '#0d9488',
 }
 
+/** 表里三态的用户语言（拍板 2026-08-17：三态直切，不用推导制） */
 export const VISIBILITY_LABELS: Record<CanonVisibility, string> = {
   public: '公开',
-  private: '私有',
-  partial: '部分',
+  private: '秘密',
+  partial: '半露',
 }
+
+/** 秘密/半露的朱砂语义色（docs/design/canon-fusion 朱点贯穿令牌） */
+export const ZHU_COLOR = '#a63e2a'

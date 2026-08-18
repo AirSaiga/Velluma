@@ -125,8 +125,12 @@ async function saveField(key: string, value: string) {
 }
 
 async function addField(key: string) {
+  if (!entity.value) return
   showFieldMenu.value = false
-  await saveField(key, ' ')
+  // 占位须直接落库：saveField 会 trim 成空串再被「值未变」守卫拦下，走它新字段永远写不进去
+  await updateEntityArchive(props.bookId, entity.value.id, {
+    props: { ...entity.value.props, [key]: ' ' },
+  })
   await nextTick()
   const el = document.querySelector<HTMLInputElement>(`.edd-field-input[data-key="${key}"]`)
   el?.focus()

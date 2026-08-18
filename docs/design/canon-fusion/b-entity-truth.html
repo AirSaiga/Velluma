@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>场景 B · 实体档案的读者认知面</title>
+<style>
+  :root {
+    --paper: #f1e9d8; --paper-2: #ece4d3; --paper-3: #f7f1e3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd;
+    --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c; --pine: #5f7d5a;
+    --zhu: #a63e2a; --zhu-soft: rgba(166, 62, 42, .08); --zhu-line: rgba(166, 62, 42, .5);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); color: var(--ink); background: var(--paper); padding: 0 0 80px; }
+
+  .screen-wrap { padding: 40px 28px 8px; }
+  .cap { max-width: 1180px; margin: 0 auto 14px; }
+  .cap .k { font-size: 10px; letter-spacing: .35em; color: var(--gold); }
+  .cap h2 { font-family: var(--serif); font-size: 20px; letter-spacing: .06em; margin: 4px 0 6px; }
+  .cap p { font-size: 12px; color: var(--ink-3); line-height: 1.9; max-width: 780px; }
+  .cap p b { color: var(--ink-2); }
+
+  .stage { max-width: 1180px; margin: 0 auto; }
+  .frame {
+    position: relative; height: 700px; overflow: hidden; border-radius: 10px;
+    border: 1px solid var(--rule); box-shadow: 0 18px 50px rgba(96, 72, 36, .16);
+    background:
+      radial-gradient(ellipse at 25% 20%, rgba(120, 90, 40, .06), transparent 55%),
+      radial-gradient(ellipse at 78% 82%, rgba(120, 90, 40, .07), transparent 50%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .014) 2px 3px),
+      var(--paper);
+  }
+  .frame::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 150px rgba(96, 72, 36, .24), inset 0 0 36px rgba(96, 72, 36, .1); }
+
+  .atlas-title { position: absolute; left: 40px; top: 66px; pointer-events: none; font-family: var(--serif); color: rgba(74,68,56,.26); }
+  .atlas-title .zh { font-size: 34px; font-weight: 700; letter-spacing: .3em; }
+
+  /* 图上实体：名签右肩朱点 = 身上有秘密 */
+  .node { position: absolute; transform: translate(-50%, -50%); text-align: center; z-index: 5; }
+  .node .seal { width: 11px; height: 11px; margin: 0 auto; border-radius: 50%; border: 2px solid var(--paper); outline: 1.5px solid currentColor; background: currentColor; }
+  .node .nl { display: inline-block; margin-top: 4px; padding: 1px 7px; font-family: var(--serif); font-size: 11.5px; color: var(--ink); background: rgba(244,238,225,.78); border-radius: 4px; position: relative; }
+  .node .nl .zhu-dot { position: absolute; right: -3.5px; top: -3.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--zhu); border: 1.5px solid var(--paper); }
+  .node.sel .nl { outline: 1.5px solid var(--ochre); }
+  .node.ochre { color: var(--ochre); } .node.pine { color: var(--pine); }
+
+  .topbar {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 20;
+    background: rgba(244,238,225,.92); border: 1px solid var(--rule); border-radius: 999px;
+    padding: 5px 8px; box-shadow: 0 6px 24px rgba(96,72,36,.16); font-size: 12px; color: var(--ink-2);
+  }
+  .topbar .tb { padding: 6px 13px; border-radius: 999px; }
+  .topbar .tb.primary { background: var(--violet); color: #f8f5ee; }
+  .topbar .sep { width: 1px; height: 15px; background: var(--rule); margin: 0 3px; }
+
+  .rail {
+    position: absolute; right: 0; top: 56px; bottom: 70px; width: 46px; z-index: 18;
+    background: rgba(236,228,211,.94); border-left: 1px solid var(--rule);
+    display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 1px;
+  }
+  .rail button { width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 14px; position: relative; }
+  .rail button:hover { background: rgba(120,95,50,.1); color: var(--ink); }
+  .rail button .n { position: absolute; top: 1px; right: 3px; font-size: 8.5px; color: var(--gold); font-family: var(--serif); }
+  .rail .rsep { width: 20px; height: 1px; background: var(--rule); margin: 5px 0; }
+
+  /* ========== 实体详情抽屉（含新的「读者认知」分区） ========== */
+  .drawer {
+    position: absolute; right: 46px; top: 56px; bottom: 70px; width: 340px; z-index: 17;
+    background: var(--paper-2); border-left: 1px solid var(--rule);
+    box-shadow: -10px 0 30px rgba(96,72,36,.1);
+    padding: 12px 13px 16px; overflow-y: auto; font-size: 12px;
+  }
+  .edd-head { display: flex; align-items: center; gap: 7px; }
+  .edd-type { font-size: 9.5px; color: #fff; background: var(--ochre); border-radius: 3px; padding: 1px 5px; }
+  .edd-name { font-family: var(--serif); font-size: 17px; font-weight: 700; letter-spacing: .04em; }
+  .edd-vis { margin-left: auto; font-size: 10px; color: var(--zhu); border: 1px solid var(--zhu-line); border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+  .edd-x { color: var(--ink-3); padding: 0 3px; cursor: pointer; }
+
+  .edd-imp { display: flex; align-items: center; gap: 5px; margin-top: 8px; }
+  .edd-imp .lbl { font-size: 10px; color: var(--ink-3); }
+  .edd-imp .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rule); }
+  .edd-imp .dot.on { background: var(--gold); }
+  .edd-imp .num { font-size: 9.5px; color: var(--ink-3); font-family: ui-monospace, monospace; }
+
+  .edd-intro { margin-top: 8px; font-size: 11.5px; color: var(--ink-2); font-family: var(--serif); line-height: 1.7; }
+  .edd-intro .lbl { font-size: 9.5px; color: var(--ink-3); font-family: var(--sans); margin-right: 5px; }
+
+  .edd-sec { border-top: 1px solid var(--rule); margin-top: 11px; padding-top: 9px; }
+  .edd-sec-title { font-size: 10px; letter-spacing: .28em; color: var(--ink-3); margin-bottom: 8px; display: flex; align-items: baseline; gap: 6px; }
+  .edd-sec-title .c { font-family: ui-monospace, monospace; letter-spacing: 0; font-size: 9.5px; }
+
+  .field-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 11.5px; }
+  .field-row .fl { flex-shrink: 0; color: var(--ink-3); width: 52px; }
+  .field-row .fv { color: var(--ink-2); line-height: 1.6; }
+
+  .chron-item { display: flex; gap: 7px; font-size: 11px; margin-bottom: 5px; }
+  .chron-item .ct { color: var(--violet); flex-shrink: 0; }
+  .chron-item .cd { color: var(--ink-3); }
+
+  /* ===== 读者认知分区（本场景主角） ===== */
+  .cog { border-top: 1px solid var(--zhu-line); margin-top: 11px; padding-top: 9px; }
+  .cog-title { font-size: 10px; letter-spacing: .28em; color: var(--zhu); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .cog-title .zhu-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--zhu); }
+  .cog-title .c { font-family: ui-monospace, monospace; letter-spacing: 0; font-size: 9.5px; color: var(--ink-3); }
+  .cog-title .fold { margin-left: auto; color: var(--ink-3); letter-spacing: 0; cursor: pointer; }
+
+  .cog-entry {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    background: var(--zhu-soft); border: 1px solid var(--rule); border-left: 2.5px solid var(--zhu);
+    border-radius: 8px; cursor: pointer;
+  }
+  .cog-entry:hover { border-color: var(--zhu-line); }
+  .cog-entry .st { width: 7px; height: 7px; border-radius: 50%; background: var(--zhu); flex-shrink: 0; }
+  .cog-entry .st.half { background: var(--violet); }
+  .cog-entry .t { flex: 1; min-width: 0; }
+  .cog-entry .what { font-size: 11.5px; color: var(--ink); font-family: var(--serif);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cog-entry .meta { font-size: 9.5px; color: var(--ink-3); margin-top: 1px; }
+  .cog-entry .meta .gold { color: var(--gold); font-family: ui-monospace, monospace; }
+  .cog-entry .arr { color: var(--ink-3); }
+
+  .cog-add {
+    margin-top: 7px; display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+    padding: 5px 12px; color: var(--zhu); background: transparent;
+    border: 1px dashed var(--zhu-line); border-radius: 7px; cursor: pointer;
+  }
+  .cog-add:hover { background: var(--zhu-soft); }
+  .cog-note { font-size: 9.5px; color: var(--ink-3); margin-top: 7px; line-height: 1.7; }
+
+  .edd-actions { display: flex; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule); }
+  .edd-act { font-size: 10.5px; padding: 5px 11px; border: 1px solid var(--rule); border-radius: 7px; color: var(--ink-2); background: transparent; cursor: pointer; }
+  .edd-act.danger { color: var(--zhu); }
+
+  .note {
+    position: absolute; z-index: 30; max-width: 235px; background: rgba(51,48,42,.92); color: var(--paper-3);
+    font-size: 10.5px; line-height: 1.75; padding: 9px 12px; border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.25);
+  }
+  .note .no { font-family: var(--serif); color: var(--gold); margin-right: 5px; }
+  .note::before { content: ""; position: absolute; right: -26px; top: 50%; width: 26px; height: 1px; background: rgba(51,48,42,.55); }
+  .note.left::before { right: auto; left: -26px; }
+
+  .chron {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 70px; z-index: 20;
+    background: linear-gradient(to top, var(--paper-2), rgba(236,228,211,.88));
+    border-top: 1px solid var(--rule); display: flex; align-items: center; gap: 20px; padding: 0 22px;
+  }
+  .chron .play { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--ink-2); background: var(--ink); color: var(--paper); font-size: 10px; text-align: center; line-height: 26px; }
+  .chron .now { font-family: var(--serif); font-size: 17px; white-space: nowrap; }
+  .chron .track { flex: 1; position: relative; height: 36px; }
+  .chron .base { position: absolute; left: 0; right: 0; top: 18px; height: 1px; background: var(--rule); }
+  .chron .cursor { position: absolute; left: 30%; top: 7px; bottom: 7px; width: 2px; background: var(--gold); }
+
+  /* ===== 伏笔真相面：内嵌小线框 ===== */
+  .inset {
+    position: absolute; left: 26px; bottom: 96px; width: 300px; z-index: 25;
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 10px;
+    box-shadow: 0 12px 34px rgba(96,72,36,.2); padding: 11px 12px; font-size: 11.5px;
+  }
+  .inset .it { font-size: 9px; letter-spacing: .3em; color: var(--gold); margin-bottom: 2px; }
+  .inset h4 { font-family: var(--serif); font-size: 13px; margin-bottom: 8px; }
+  .inset .tworow { border-top: 1px solid var(--rule); padding-top: 8px; }
+  .inset .tworow .r { display: flex; gap: 8px; margin-bottom: 6px; }
+  .inset .tworow .lbl { flex-shrink: 0; font-size: 10px; color: var(--ink-3); width: 60px; }
+  .inset .tworow .val { font-family: var(--serif); line-height: 1.6; color: var(--ink-2); font-size: 11px; }
+  .inset .tworow .val.li { color: var(--ink); background: var(--zhu-soft); border-left: 2px solid var(--zhu); padding: 3px 7px; border-radius: 0 5px 5px 0; }
+  .inset .more { font-size: 9.5px; color: var(--ink-3); border-top: 1px dashed var(--rule); padding-top: 6px; margin-top: 2px; line-height: 1.7; }
+
+  .tag-corner { position: fixed; left: 12px; top: 12px; z-index: 60; background: var(--ink); color: var(--paper); font-size: 10px; letter-spacing: .15em; padding: 5px 10px; border-radius: 4px; opacity: .85; }
+  .tag-corner a { color: var(--gold); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="tag-corner">场景 B · 实体的读者认知面（<a href="index.html">返回总览</a>）</div>
+
+<div class="screen-wrap">
+  <div class="cap">
+    <div class="k">SCENE B · READER'S KNOWLEDGE FACET</div>
+    <h2>实体档案长出「读者认知」分区——秘密跟着人走</h2>
+    <p>
+      C2 之后，真相不再有独立的实体节点：作者在<b>实体详情抽屉</b>里直接给这个角色/资产/地点记秘密，
+      自动挂接、名字永不漂移。分区默认折叠（一眼够、深度可展开），有秘密的实体在<b>地图名签右肩
+      点一枚朱点</b>——不喊叫，但扫一眼就知道谁身上压着事。
+    </p>
+  </div>
+
+  <div class="stage">
+    <div class="frame">
+      <div class="atlas-title"><div class="zh">最终武装</div></div>
+
+      <!-- 名签朱点：林尘（选中）、红月 有；白霆 无 -->
+      <div class="node ochre sel" style="left: 24%; top: 36%;"><div class="seal"></div><span class="nl">林尘<span class="zhu-dot"></span></span></div>
+      <div class="node ochre" style="left: 47%; top: 29%;"><div class="seal"></div><span class="nl">白霆</span></div>
+      <div class="node pine" style="left: 33%; top: 58%;"><div class="seal"></div><span class="nl">红月<span class="zhu-dot"></span></span></div>
+
+      <div class="topbar">
+        <span class="tb">←</span><span class="tb primary">记一笔历史</span>
+        <span class="tb">地点</span><span class="tb">实体</span>
+        <span class="sep"></span><span class="tb">世界观</span><span class="tb">⋯</span>
+      </div>
+
+      <div class="rail">
+        <button title="待确认">◍<span class="n">贰</span></button>
+        <button title="伏笔">⌁<span class="n">叁</span></button>
+        <button title="期待">✦<span class="n">〇</span></button>
+        <button title="真相">◉<span class="n">柒</span></button>
+        <div class="rsep"></div>
+        <button title="地点">⌖<span class="n">壹</span></button>
+        <button title="事件">⚑<span class="n">贰</span></button>
+        <button class="on" title="角色">♟<span class="n">叁</span></button>
+        <button title="势力">⚑<span class="n">壹</span></button>
+        <button title="资产">◈<span class="n">叁</span></button>
+      </div>
+
+      <aside class="drawer">
+        <div class="edd-head">
+          <span class="edd-type">角色</span>
+          <span class="edd-name">林尘</span>
+          <span class="edd-vis" title="点击切换读者可见性">秘密 ×1</span>
+          <span class="edd-x">×</span>
+        </div>
+        <div class="edd-imp">
+          <span class="lbl">重要度</span>
+          <span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span>
+          <span class="num">9</span>
+        </div>
+        <div class="edd-intro"><span class="lbl">一句话</span>废墟区的机修工，统合局编外技术顾问。</div>
+
+        <div class="edd-sec">
+          <div class="edd-sec-title">档 案</div>
+          <div class="field-row"><span class="fl">外貌</span><span class="fv">清瘦，右手机油茧，眼神倦。</span></div>
+          <div class="field-row"><span class="fl">动机</span><span class="fv">查清生母的死因。</span></div>
+          <div class="field-row"><span class="fl" style="color: var(--ink-3);">＋ 添加字段</span></div>
+        </div>
+
+        <div class="edd-sec">
+          <div class="edd-sec-title">编 年 史 <span class="c">2</span></div>
+          <div class="chron-item"><span class="ct">move</span><span class="cd">第 7 年 · 入编统合局技术顾问</span></div>
+          <div class="chron-item"><span class="ct">found</span><span class="cd">第 8 年 · 寻获红月残骸</span></div>
+        </div>
+
+        <!-- ★ 读者认知分区（新） -->
+        <div class="cog">
+          <div class="cog-title"><span class="zhu-dot"></span>读 者 认 知 <span class="c">· 2</span><span class="fold">收起 ▾</span></div>
+
+          <div class="cog-entry" title="打开真相详情">
+            <span class="st"></span>
+            <div class="t">
+              <div class="what">局长私生子，生母因「素壤计划」被灭口</div>
+              <div class="meta">秘密 · <span class="gold">→30章</span>揭示</div>
+            </div>
+            <span class="arr">›</span>
+          </div>
+
+          <div class="cog-entry" title="打开真相详情" style="margin-top: 5px;">
+            <span class="st half"></span>
+            <div class="t">
+              <div class="what">机修手艺承自生母（读者只见「天赋异禀」）</div>
+              <div class="meta">半露 · 表里不一</div>
+            </div>
+            <span class="arr">›</span>
+          </div>
+
+          <button class="cog-add">＋ 给林尘记一条秘密</button>
+          <div class="cog-note">
+            从这里记下的秘密自动挂在林尘名下；点条目进「真相详情」两面编辑。
+          </div>
+        </div>
+
+        <div class="edd-actions">
+          <button class="edd-act">记录移动</button>
+          <button class="edd-act">记录事态…</button>
+          <button class="edd-act danger">记录死亡</button>
+        </div>
+      </aside>
+
+      <div class="note" style="right: 475px; top: 150px;">
+        <span class="no">①</span>名签右肩 7px 朱点 = 身上至少压着一条秘密/半露。朱点是安静的一等信息——扫一眼舆图，秘密的分布本身就是剧情的分布。
+      </div>
+      <div class="note left" style="left: 335px; top: 320px;">
+        <span class="no">②</span>头部「秘密 ×1」即旧 visibility 徽标的归位：可见性不再是实体级一枚开关，而是下方每条真相各自的表里态。
+      </div>
+      <div class="note left" style="left: 90px; top: 480px; max-width: 260px;">
+        <span class="no">③</span>空态时分区只剩一行虚线按钮「＋ 记一条秘密」——不逼作者填表，秘密是长出来的，不是录进去的。
+      </div>
+
+      <!-- 伏笔真相面内嵌线框 -->
+      <div class="inset">
+        <div class="it">FORESHADOW · TRUTH FACET</div>
+        <h4>伏笔「针脚」详情 · 真相面（C2）</h4>
+        <div class="tworow">
+          <div class="r"><span class="lbl">表 · 读者见</span><span class="val">袖口三毫米歪斜的针脚，一个反复出现的细节。</span></div>
+          <div class="r"><span class="lbl">里 · 真相</span><span class="val li">母亲遗物的修补标记，同款针脚将出现在生母遗物上。</span></div>
+          <div class="more">
+            伏笔条目天然就是信息层对象：埋设即建立表里差，回收即收敛。原 Canon 的 hook 节点并入伏笔账本后，
+            双层文本作为伏笔的可选「真相面」存在——不填就还是一条普通伏笔。
+          </div>
+        </div>
+      </div>
+
+      <div class="chron">
+        <div class="play">▶</div><div class="now">第 8 年 · 3 月 12 日</div>
+        <div class="track"><div class="base"></div><div class="cursor"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="max-width: 760px; margin: 26px auto 0; font-size: 11px; color: var(--ink-3); line-height: 2;">
+  对应分期：本场景为 C2 终态（读者认知分区依赖对象挂接）。C1 期间实体抽屉不加该分区，真相只从「真相」账本抽屉进出；
+  朱点在 C2 落地时与挂接数据同时上图。旧 CanonView 的「悬空伏笔」tab 由伏笔账本 + 真相面整体接替。
+</div>
+
+</body>
+</html>

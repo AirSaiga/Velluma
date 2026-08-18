@@ -28,6 +28,10 @@ import ForeshadowSection from '../presentation/ForeshadowSection.vue'
 import ForeshadowDetailDrawer from '../presentation/ForeshadowDetailDrawer.vue'
 import ReaderMirrorModal from '../presentation/ReaderMirrorModal.vue'
 import WorldviewModal from '../presentation/WorldviewModal.vue'
+import CanonSection from '../presentation/CanonSection.vue'
+import CanonTruthDetailDrawer from '../presentation/CanonTruthDetailDrawer.vue'
+import CausalityGraphModal from '../presentation/CausalityGraphModal.vue'
+import { useCanon } from '../composables/useCanon'
 import { readerMirrorApi } from '../../../services/api/domain/reader-mirror.api'
 import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory'
 import { useMapEdit, editUndo, editRedo } from '../composables/useMapEdit'
@@ -115,6 +119,11 @@ const selectedForeshadowId = ref<string | null>(null)
 const showExpectations = ref(false)
 const showWorldview = ref(false)
 
+// ===== C1 真相层（Canon 融入）：真相详情抽屉 / 因果图谱模态（docs/canon-world-fusion.md）=====
+const selectedTruthId = ref<string | null>(null)
+const showCanonGraph = ref(false)
+const { nodes: canonNodes, ensureLoaded: ensureCanonLoaded } = useCanon()
+
 /** 期待摘要（侧栏「期待」分组：活跃 N · 该收了 M；账本本体在 ReaderMirrorModal） */
 const mirrorSummary = ref<{ active: number; due: number } | null>(null)
 async function loadMirrorSummary() {
@@ -133,16 +142,16 @@ async function loadMirrorSummary() {
 }
 
 // ===== M6 活舆图：图标栏当前抽屉 / ⋯ 菜单 =====
-type SidePanelKey = 'cand' | 'fs' | 'exp' | 'loc' | 'evt' | 'character' | 'faction' | 'asset'
+type SidePanelKey = 'cand' | 'fs' | 'exp' | 'canon' | 'loc' | 'evt' | 'character' | 'faction' | 'asset'
 const activePanel = ref<SidePanelKey | null>(null)
 function togglePanel(key: SidePanelKey) {
   activePanel.value = activePanel.value === key ? null : key
 }
 const moreOpen = ref(false)
 
-// 详情抽屉（实体/伏笔）与图标栏抽屉互斥——同一时刻画布右缘只存在一层浮层
-watch([selectedEntityId, selectedForeshadowId], ([e, f]) => {
-  if (e || f) activePanel.value = null
+// 详情抽屉（实体/伏笔/真相）与图标栏抽屉互斥——同一时刻画布右缘只存在一层浮层
+watch([selectedEntityId, selectedForeshadowId, selectedTruthId], ([e, f, t]) => {
+  if (e || f || t) activePanel.value = null
 })
 
 /** 实体抽屉的当前列表（与图标栏选中类型联动，复用实体搜索过滤） */
@@ -512,6 +521,7 @@ onMounted(() => {
   window.addEventListener('velluma:world-refresh', onWorldRefresh)
   void loadCandidates()
   void loadMirrorSummary()
+  if (bookId.value) void ensureCanonLoaded(bookId.value)
 })
 onBeforeUnmount(() => {
   removeShortcut?.()
@@ -524,6 +534,7 @@ watch(bookId, (id) => {
     consumeRouteQuery()
     void loadCandidates()
     void loadMirrorSummary()
+    void ensureCanonLoaded(id)
   }
 })
 
@@ -543,10 +554,11 @@ function consumeRouteQuery() {
   // M5 伏笔深链（写作页「头顶的线」点击）：?fs=ledger_key 或 id，watch(foreshadows) 兜底
   const fs = route.query.fs
   if (typeof fs === 'string' && fs) pendingFsKey.value = fs
-  // M5 面板深链：?panel=expectations|worldview → 直接开对应模态
+  // M5 面板深链：?panel=expectations|worldview → 直接开对应模态；C1 起 ?panel=canon → 开真相账本格
   const panel = route.query.panel
   if (panel === 'expectations') showExpectations.value = true
   else if (panel === 'worldview') showWorldview.value = true
+  else if (panel === 'canon') activePanel.value = 'canon'
 }
 
 const pendingLocId = ref<string | null>(null)
@@ -735,6 +747,15 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           :foreshadow-id="selectedForeshadowId"
           @close="selectedForeshadowId = null"
         />
+
+        <!-- 真相详情抽屉（C1：账本行/因果图谱「打开真相条目」唤起——表里两面就地编辑） -->
+        <CanonTruthDetailDrawer
+          v-if="selectedTruthId"
+          :book-id="bookId"
+          :node-id="selectedTruthId"
+          @close="selectedTruthId = null"
+          @open-graph="showCanonGraph = true"
+        />
       </div>
 
       <!-- M6 图标栏：原右侧栏收成右缘 46px 栏，点图标浮出抽屉（同一时间只开一格） -->
@@ -756,6 +777,10 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'exp' }" title="期待" @click="togglePanel('exp')">
           <Icon name="sparkles" :size="15" />
           <span class="ar-n">{{ mirrorSummary?.active ?? 0 }}</span>
+        </button>
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'canon' }" title="真相——表（读者所见）与里（作者真相）的账本" @click="togglePanel('canon')">
+          <Icon name="truth" :size="15" />
+          <span class="ar-n">{{ canonNodes.length }}</span>
         </button>
         <span class="ar-sep"></span>
         <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'loc' }" title="地点" @click="togglePanel('loc')">
@@ -829,6 +854,15 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             <button class="exp-open" @click="showExpectations = true">打开账本</button>
           </div>
         </div>
+        </template>
+
+        <!-- 真相账本（C1：Canon 融入——表里三态过滤 + 句子优先录入；详情在真相详情抽屉） -->
+        <template v-if="activePanel === 'canon'">
+        <CanonSection
+          :book-id="bookId"
+          @select="(id: string) => (selectedTruthId = id)"
+          @open-graph="showCanonGraph = true"
+        />
         </template>
 
         <!-- 地点 -->
@@ -1046,6 +1080,19 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       @close="showWorldview = false"
     />
 
+    <!-- 因果图谱（C1：只读透镜——真相账本底部/详情「关联」唤起，随旧 CanonView 降格迁入） -->
+    <CausalityGraphModal
+      v-if="showCanonGraph"
+      :book-id="bookId"
+      @close="showCanonGraph = false"
+      @open-truth="
+        (id: string) => {
+          showCanonGraph = false
+          selectedTruthId = id
+        }
+      "
+    />
+
     <!-- 新地点（点选坐标后） -->
     <ModalShell
       v-if="draftPoint"
@@ -1162,11 +1209,15 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 }
 
 /* ===== M6 悬浮胶囊工具条 ===== */
+/* ⚠ 浮层禁用 transform 居中：translate(-50%) 落在半像素时整层位图化偏移，
+   文字与边框一起发虚（曾致「真相」账本整格模糊）。一律 margin auto 居中。 */
 .atlas-pill {
   position: absolute;
   top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
   z-index: 750;
   display: flex;
   align-items: center;
@@ -1271,8 +1322,10 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 .atlas-rail {
   position: absolute;
   right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
+  margin-block: auto;
+  height: fit-content;
   z-index: 750;
   display: flex;
   flex-direction: column;
@@ -1331,14 +1384,16 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 .atlas-drawer {
   position: absolute;
   right: 47px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 16px;
+  bottom: 16px;
+  margin-block: auto;
+  height: fit-content;
   z-index: 740;
   width: 264px;
-  max-height: min(560px, calc(100% - 32px));
+  max-height: min(560px, 100%);
   overflow-y: auto;
   background: rgba(243, 237, 224, 0.97);
-  backdrop-filter: blur(4px);
+  /* 0.97 不透明度下 backdrop 磨砂本不可见，却会把整层拉进合成层拖垮文字抗锯齿——移除 */
   border: 1px solid rgba(107, 90, 68, 0.28);
   border-radius: 12px;
   box-shadow: -10px 0 30px rgba(96, 72, 36, 0.14);
