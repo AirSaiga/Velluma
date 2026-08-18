@@ -57,6 +57,12 @@ function onPick(card: DirectionCard | null) {
             <span class="beat-dock__event">
               <span v-if="card.is_branch" class="beat-dock__branch-mark" title="作者声明的岔路——选一个走向，即决此岔">⚡</span>
               {{ card.event }}
+              <!-- 地图来源小签（W5 桥：世界沙盘喂的卡——让某组相遇发生/错开） -->
+              <span
+                v-if="card.from_encounter"
+                class="beat-dock__anchor-tag beat-dock__anchor-tag--map"
+                title="来自地图相遇机会——世界页同地角色的戏剧线索"
+              >🗺</span>
               <!-- 谋篇锚点小签（P1.4 M2 §3.3）：这条建议服务于作者的哪个锚点——可追溯 -->
               <span
                 v-if="card.serves_anchor && anchorText(card.serves_anchor)"
@@ -159,6 +165,11 @@ function onPick(card: DirectionCard | null) {
   color: var(--accent-500, #7c6aad);
   cursor: pointer;
   vertical-align: middle;
+}
+.beat-dock__anchor-tag--map {
+  border-color: #4a8f7d;
+  color: #4a8f7d;
+  cursor: default;
 }
 
 .beat-dock__card--free {

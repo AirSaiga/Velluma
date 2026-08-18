@@ -76,6 +76,8 @@ export interface DirectionCard {
   serves_anchor?: string
   /** 作者声明岔路（P1.4 M3：临近岔路锚点的走向选项——硬提示，朱色视觉权重） */
   is_branch?: boolean
+  /** 地图相遇来源（W5 桥：让某组相遇发生/错开的走向——世界沙盘喂的卡） */
+  from_encounter?: boolean
 }
 
 export interface SettleResult {

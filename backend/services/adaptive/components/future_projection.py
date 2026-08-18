@@ -61,7 +61,24 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     except Exception as e:
         logger.debug(f"[future_projection] 读 spine 失败（跳过注入）: {e}")
 
-    sys_p, usr_p = build_future_projection_prompt(written_text, intent, nutrients, soft, spine_anchors=spine_anchors)
+    # W5 桥：地图相遇机会（此刻同地角色组，纯推演零 LLM）注入推测——
+    # 世界沙盘开始喂养走向卡（roadmap §3.2，验证指标=from_encounter 卡的采纳率）
+    _encounter_lines: List[str] = []
+    try:
+        from backend.models import Chapter as _Chapter
+        from backend.services.world.scene_slice import build_scene_slice
+
+        ch = await db.get(_Chapter, chapter_id)
+        if ch is not None and bundle.book_id:
+            slice_data = await build_scene_slice(db, str(bundle.book_id), ch)
+            _encounter_lines = [
+                f"{'与'.join(e.get('names', [])[:3])}（{e.get('location_name') or '某处'}）"
+                for e in (slice_data.get("encounters") or [])
+            ]
+    except Exception as e:
+        logger.debug(f"[future_projection] 相遇机会读取失败（跳过注入）: {e}")
+
+    sys_p, usr_p = build_future_projection_prompt(written_text, intent, nutrients, soft, spine_anchors=spine_anchors, encounters=_encounter_lines)
 
     try:
         result = await call_llm_with_usage(
@@ -93,6 +110,9 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             sa = proj.get("serves_anchor")
             if sa is not None and sa not in valid_ids:
                 proj = {k: v for k, v in proj.items() if k != "serves_anchor"}
+            # W5 桥：from_encounter 闸（必须严格布尔 true，其余剥除——防 LLM 乱标字符串）
+            if proj.get("from_encounter") is not True:
+                proj = {k: v for k, v in proj.items() if k != "from_encounter"}
             sig = _signature(proj)
             valid.append(SegmentProjection(
                 possible_beats=[proj],

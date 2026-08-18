@@ -174,7 +174,10 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 埋点（P0-3 个人镜子）：亮出按卡集签名去重——「无视」= 亮出减采纳，离线可算
       const cardSig = (result.direction_cards || []).map((c) => c.event).join('|')
       if (cardSig && cardSig !== _lastCardSig) {
-        logCollabEvent(chapterId, 'cards_delivered', { count: (result.direction_cards || []).length })
+        logCollabEvent(chapterId, 'cards_delivered', {
+          count: (result.direction_cards || []).length,
+          encounter_count: (result.direction_cards || []).filter((c: any) => c.from_encounter).length,
+        })
       }
       _lastCardSig = cardSig
       const dockSig = parts.map((p) => p.text).join('|')
@@ -357,7 +360,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     opts.aiLaneRef.value = 'assisting'
     setThinkingPhase('perceiving')
 
-    logCollabEvent(chapterId, 'card_burst', { event: card?.event || '' })
+    logCollabEvent(chapterId, 'card_burst', { event: card?.event || '', from_encounter: !!(card as any)?.from_encounter })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode: 'burst',
       beat_guidance: guidance,

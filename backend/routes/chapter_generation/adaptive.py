@@ -404,6 +404,8 @@ def _extract_direction_cards(snapshot: Dict, spine: Any = None) -> List[Dict]:
             sa = beat.get("serves_anchor") if isinstance(beat, dict) else None
             if sa and sa in valid_ids:
                 card["serves_anchor"] = sa
+            if isinstance(beat, dict) and beat.get("from_encounter") is True:
+                card["from_encounter"] = True
             cards.append(card)
     return cards[:3]
 
@@ -966,6 +968,8 @@ async def collab_events_summary(
         pass
 
     counts: Dict = _Counter()
+    encounter_cards = 0
+    encounter_bursts = 0
     try:
         path = _Path(_COLLAB_EVENTS_FILE)
         if path.exists():
@@ -975,6 +979,12 @@ async def collab_events_summary(
                         ev = _json.loads(line)
                         if ev.get("chapter_id") == chapter_id:
                             counts[ev.get("kind", "?")] += 1
+                            detail = ev.get("detail") or {}
+                            # W5 桥验证指标：地图来源卡的亮出/连写（roadmap §3.2）
+                            if ev.get("kind") == "cards_delivered":
+                                encounter_cards += int(detail.get("encounter_count") or 0)
+                            elif ev.get("kind") == "card_burst" and detail.get("from_encounter"):
+                                encounter_bursts += 1
                     except Exception:
                         continue
     except Exception:
@@ -993,4 +1003,5 @@ async def collab_events_summary(
         "ghost_adopt_rate": _rate("ghost_adopt", "ghost_request"),
         "capsule_expand_count": counts.get("capsule_expand", 0),
         "quick_note_commit": counts.get("quick_note", 0),
+        "encounter_card_burst_rate": round(encounter_bursts / encounter_cards, 3) if encounter_cards > 0 else None,
     }

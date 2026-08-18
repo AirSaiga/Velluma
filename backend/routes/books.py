@@ -37,6 +37,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_book_repository, get_plot_ledger_repository, get_db
 from backend.repositories import BookRepository, PlotLedgerRepository

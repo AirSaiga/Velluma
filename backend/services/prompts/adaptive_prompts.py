@@ -589,6 +589,7 @@ def build_future_projection_prompt(
     nutrients: dict,
     soft_constraints: dict,
     spine_anchors: Optional[List[dict]] = None,
+    encounters: Optional[List[str]] = None,
 ) -> tuple:
     """构建未来推测 prompt。
 
@@ -598,6 +599,8 @@ def build_future_projection_prompt(
         nutrients: 设定养料
         soft_constraints: 软约束
         spine_anchors: 章级软脉络的 pending 锚点（P1.4 M2：[{id,text}]，空=不注入零变化）
+        encounters: 地图相遇机会行（W5 桥：此刻同地角色组，如「甲与乙（北岸要塞）」；
+            空=不注入零变化）
 
     Returns:
         (system_prompt, user_prompt)
@@ -616,11 +619,21 @@ def build_future_projection_prompt(
             '\n若某推测服务于上面某个谋篇锚点，给它加 "serves_anchor": "锚点id"'
             "（不属于任何锚点则省略该字段）。"
         )
+    # 相遇机会块（W5 桥：世界沙盘喂走向卡——地理事实作走向素材，不是指令）
+    encounter_block = ""
+    if encounters:
+        encounter_block = f"""
+# 地图上的相遇机会（此刻同地的角色组——地理事实，可自然用作走向素材）
+{chr(10).join('- ' + e for e in encounters[:3])}
+"""
+        serve_note += (
+            '\n若某推测正是让某组相遇发生/错开，给它加 "from_encounter": true。'
+        )
     user_prompt = f"""# 本章意图
 弧线：{intent.get('arc', '（未推断）')}
 情绪走向：{intent.get('emotion_curve', [])}
 铺陈要点：{intent.get('setup_points', [])}
-{spine_block}
+{spine_block}{encounter_block}
 # 作者最近写的正文（衔接此处继续）
 {written_text[-500:]}
 
