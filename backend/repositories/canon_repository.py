@@ -84,7 +84,13 @@ class CanonNodeRepository(BaseRepository[CanonNode]):
             conditions.append(CanonNode.visibility == visibility)
         if tag:
             # JSONB ? 操作符（检查 key 是否存在）。text 参数需显式 cast 避免类型推断错误
-            conditions.append(text("tags ? CAST(:tag AS text)").bindparams(tag=tag))
+            # 切换日接入：SQLite 走 compat_queries 的 json_each 等价构件
+            from backend.db_sqlite.compat_queries import is_sqlite, tags_has_tag
+
+            conditions.append(
+                tags_has_tag(tag) if is_sqlite(self._db)
+                else text("tags ? CAST(:tag AS text)").bindparams(tag=tag)
+            )
         spec = QuerySpec.create().where(and_(*conditions))
         spec.order(CanonNode.updated_at.desc())
         spec.paginate(skip=skip, limit=limit)
@@ -120,11 +126,20 @@ class CanonNodeRepository(BaseRepository[CanonNode]):
             CanonNode.type == NODE_TYPE_HOOK,
         ]
         spec = QuerySpec.create().where(and_(*conditions))
+        # 切换日接入：SQLite 走 compat_queries 的 json_extract 等价构件
+        from backend.db_sqlite.compat_queries import is_sqlite, metadata_status_equals
+
         if only_open or status == "open":
             # JSONB 字段查询：metadata->>'status' = 'open'
-            spec = spec.where(text("metadata->>'status' = 'open'"))
+            spec = spec.where(
+                metadata_status_equals("open") if is_sqlite(self._db)
+                else text("metadata->>'status' = 'open'")
+            )
         elif status:
-            spec = spec.where(text("metadata->>'status' = :status").bindparams(status=status))
+            spec = spec.where(
+                metadata_status_equals(status) if is_sqlite(self._db)
+                else text("metadata->>'status' = :status").bindparams(status=status)
+            )
         spec.order(CanonNode.updated_at.desc())
         return await self.find_all(spec=spec)
 
@@ -144,19 +159,21 @@ class CanonNodeRepository(BaseRepository[CanonNode]):
         chapter_number: int,
     ) -> List[CanonNode]:
         """查找与某章相关的节点（appeared_in 包含该章号）。"""
-        # JSONB 数组包含整数
-        # 警示：asyncpg 会把字符串参数推断为 VARCHAR，导致 `@>` 类型不匹配。
-        # 必须用 ::jsonb 显式转换。
+        # 切换日接入：SQLite 的 json_each 等价构件（注意参数是 int，非 PG 版的 dumps）
+        from backend.db_sqlite.compat_queries import appeared_in_contains_chapter, is_sqlite
+
+        if is_sqlite(self._db):
+            contain = appeared_in_contains_chapter(chapter_number)
+        else:
+            # JSONB 数组包含整数
+            # 警示：asyncpg 会把字符串参数推断为 VARCHAR，导致 `@>` 类型不匹配。
+            # 必须用 ::jsonb 显式转换。
+            contain = text("appeared_in @> CAST(:chap AS jsonb)").bindparams(
+                chap=json.dumps([chapter_number])
+            )
         stmt = (
             select(CanonNode)
-            .where(
-                and_(
-                    CanonNode.book_id == book_id,
-                    text("appeared_in @> CAST(:chap AS jsonb)").bindparams(
-                        chap=json.dumps([chapter_number])
-                    ),
-                )
-            )
+            .where(and_(CanonNode.book_id == book_id, contain))
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())

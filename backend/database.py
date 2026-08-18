@@ -33,6 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any, AsyncGenerator, Optional, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -44,10 +45,37 @@ load_dotenv()
 # 配置模块级日志记录器
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver"
-)
+# ============================================================
+# 切换日（roadmap P3.1，2026-08-19）：默认 SQLite，PG 显式保留
+# ------------------------------------------------------------
+# - 不设 DATABASE_URL → SQLite 文件库（data/velluma.db，单机桌面零外部依赖；
+#   WAL/外键/忙等 pragma 由 db_sqlite.engine 逐连接设置，NullPool 防锁竞争）
+# - DATABASE_URL 显式给出（postgresql+asyncpg://…）→ 走 PG（专业级/开发路径：
+#   pgvector 向量记忆、连接池、向量维度迁移——全部保留不变）
+# - 存量 PG → SQLite 数据搬迁：scripts/migrate_pg_to_sqlite.py（只读拓扑序+行数对照）
+# - 数据目录可用 VELLUMA_DATA_DIR 覆盖（打包/便携场景）
+# ============================================================
+_DATABASE_URL_ENV = os.getenv("DATABASE_URL", "").strip()
+USE_SQLITE = not _DATABASE_URL_ENV
+
+
+def _sqlite_db_path() -> str:
+    root = Path(__file__).resolve().parents[1]  # 项目根 = backend/ 的父
+    data_dir = Path(os.getenv("VELLUMA_DATA_DIR") or (root / "data"))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return str(data_dir / "velluma.db")
+
+
+if USE_SQLITE:
+    from backend.db_sqlite.engine import build_sqlite_engine, build_sqlite_sessionmaker
+    from backend.db_sqlite.type_compat import register_sqlite_type_compat
+
+    register_sqlite_type_compat()  # JSONB/Vector → SQLite 方言编译（幂等，import 即生效）
+    DATABASE_URL = f"sqlite+aiosqlite:///{_sqlite_db_path()}"
+    engine = build_sqlite_engine(_sqlite_db_path())
+    AsyncSessionLocal = build_sqlite_sessionmaker(engine)
+else:
+    DATABASE_URL = _DATABASE_URL_ENV
 
 # 连接池预检配置：
 # - 默认在 Windows 上禁用（asyncpg + greenlet 兼容性问题）
@@ -59,28 +87,30 @@ POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", str(_DEFAULT_POOL_PRE_PING)).lower
 # 连接池配置说明：
 # - pool_size=10: 常规连接数，支撑正常并发请求
 # - max_overflow=20: 峰值时可额外创建20个连接 (共30个)
-# - pool_pre_ping=True: 每次获取连接前先 ping DB，确认连接可用 (避免空闲连接失效错误)
+# - pool_pre_ping=True: 每次获取连接前先 ping DB，确认连接可用 (避免空闲连接失效)
 # 权衡：生产环境需根据 QPS 调整，当前配置适合中小规模部署
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_pre_ping=POOL_PRE_PING,
-    pool_size=10,
-    max_overflow=20,
-)
+# （SQLite 路径在上面分支用 db_sqlite.engine 构建，不经此处——NullPool 无池参数）
+if not USE_SQLITE:
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=False,
+        future=True,
+        pool_pre_ping=POOL_PRE_PING,
+        pool_size=10,
+        max_overflow=20,
+    )
 
-# 会话工厂配置：
-# - expire_on_commit=False: 提交后对象不过期，避免再次访问需刷新
-# - autocommit=False: 显式事务管理，需手动 commit/rollback
-# - autoflush=False: 延迟写入，需显式 flush 或 commit
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+    # 会话工厂配置：
+    # - expire_on_commit=False: 提交后对象不过期，避免再次访问需刷新
+    # - autocommit=False: 显式事务管理，需手动 commit/rollback
+    # - autoflush=False: 延迟写入，需显式 flush 或 commit
+    AsyncSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
 
 Base = declarative_base()
 
@@ -820,6 +850,14 @@ async def init_db():
     警告：run_migrations 使用朴素的条件判断，不支持回滚。
     生产环境应使用 Alembic 或 Flyway 等专业迁移工具。
     """
+    # 切换日分支：SQLite 走 db_sqlite.schema（建表+同源列迁移+legacy 数据迁移+
+    # SystemCliche 种子化，全在那一侧完成）；PG 路径原样保留（含 pgvector 维度迁移）
+    if USE_SQLITE:
+        from backend.db_sqlite.schema import init_db_sqlite
+
+        await init_db_sqlite(engine, AsyncSessionLocal)
+        return
+
     from backend.models import (
         Book,
         Chapter,
