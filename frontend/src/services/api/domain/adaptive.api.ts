@@ -95,6 +95,8 @@ export interface FinishReport {
     chapter_id?: string
     word_count?: number
     sentence_defects?: any[]
+    /** 谋篇附注（P1.4 §3.5：未兑现 pending 锚点，仅提示不阻塞） */
+    spine_note?: string
     coverage?: {
       checked: boolean
       hit_count?: number
