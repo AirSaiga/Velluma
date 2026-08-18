@@ -180,7 +180,7 @@ async def run(
         and bundle.entities  # 有角色设定才比对
     ):
         try:
-            from backend.services.workflows.bsadf.memory_ingestion import extract_emergent_facts
+            from backend.services.adaptive.emergent_facts import extract_emergent_facts
             from backend.services.adaptive.components.sediment import _detect_conflicts
 
             facts_data = await extract_emergent_facts(

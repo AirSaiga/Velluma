@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 from backend.services.adaptive.observing import get_adaptive_recorder
-from backend.services.workflows.bsadf.memory_ingestion import extract_emergent_facts
+from backend.services.adaptive.emergent_facts import extract_emergent_facts
 
 logger = logging.getLogger(__name__)
 

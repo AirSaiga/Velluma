@@ -16,12 +16,15 @@ import 路径已失效（原路径下的文件已被移走），但因无任何�
 | **Detonation（引爆链）** | V3.0 | `POST /generate-v3` | `detonation/workflow.py: DetonationWorkflow` | 高潮倒推架构，被 Unified 整体复用为底层；端点早已标 deprecated |
 | **Unified（统一引擎）** | V3.1 | `POST /generate` | `detonation/unified_workflow.py: UnifiedWorkflow` | 高潮倒推的"倒着写"链路；前端已切换到 ADF，仅作备选残留 |
 | **DualTrack（双轨）** | V4.0 | `POST /generate-chapter` | `dual_track.py: DualTrackWorkflow` | 双轨对抗架构；前端零调用，迭代硬编码=1，含大量死代码 |
+| **BS-ADF（步进）** | — | `POST /generate-bsadf` + `/advance-beat` + `/stepping-run/{id}/state` + `/rerender-beat` + `/cancel-run` | `bsadf/bsadf_workflow.py: BSAdfWorkflow` | 归档 2026-08-19（roadmap P3.2）：前端 UI 已随 2026-08-17 写作台重构移除；验证过的思想已迁入 adaptive（DDE 岔路→作者声明岔路 M3、章级规划→软脉络、字数闸门→outline 双层闸、Loop 3 涌现抽取→`services/adaptive/emergent_facts.py`、残句修复→`repair_single_defect`）。本目录含引擎包 `bsadf/`（含 8 单测与 dde/）+ `routes/bsadf_route.py` + `schemas/bsadf_schema.py` |
 
 ---
 
 ## 保留的活跃引擎（不在本目录）
 
-- **ADF（V3.2）**：`POST /generate-adf` —— 当前默认引擎，正向逐段写作 + 锚点约束
+- **NLE-ADF 3.0（adaptive）**：`/adaptive/*` —— **当前唯一主线**（作者主导写作 + AI 柔性共生）
+  - 代码：`backend/routes/chapter_generation/adaptive.py`、`backend/services/adaptive/`
+- **ADF（V3.2）**：`POST /generate-adf` —— 引擎本体保留，前端无 UI 入口
   - 代码：`backend/services/workflows/adf/`、`backend/routes/chapter_generation/adf.py`
 - **Refinery（V4.1）**：`POST /refinery/diagnose` + `/refinery/confirm` —— 独立精修工具
   - 代码：`backend/services/refinery/`、`backend/routes/chapter_generation/refinery.py`

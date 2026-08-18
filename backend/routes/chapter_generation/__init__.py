@@ -51,7 +51,6 @@ from backend.routes.chapter_generation.adf import router as adf_router
 from backend.routes.chapter_generation.refinery import router as refinery_router
 
 # BS-ADF（Beat-Slot Anchor-Driven Flow）引擎路由（ADF 并行引擎，Phase 4 槽位化流水线）
-from backend.routes.chapter_generation.bsadf import router as bsadf_router
 
 # NLE-ADF 3.0 自适应辅助路由（作者主导写作流程：perceive/stitch-ghost/settle/detect-branch/plan-suggest）
 from backend.routes.chapter_generation.adaptive import router as adaptive_router
@@ -518,7 +517,6 @@ router = APIRouter()
 router.include_router(extra_router)
 router.include_router(adf_router)
 router.include_router(refinery_router)
-router.include_router(bsadf_router)
 router.include_router(adaptive_router)
 
 __all__ = [
