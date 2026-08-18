@@ -3,15 +3,15 @@
 .SYNOPSIS
     Velluma 启动脚本（生产/开发/调试三模式）。
 .DESCRIPTION
-    本脚本位于 scripts/ 子目录，项目根 = $PSScriptRoot 的父目录。
-    通过 -Mode 参数区分三种运行方式：
+    Windows 启动编排（与 macos/start.sh 对称）。本脚本位于 scripts/windows/ 子目录，
+    项目根 = $PSScriptRoot 的祖父目录。通过 -Mode 参数区分三种运行方式：
       - prod   : 生产体验模式。npm run build 预构建 dist，Electron 载入本地 dist 文件（NODE_ENV=production），
                  不启动 Vite dev server，不开 DevTools。后端仍用本地 .venv 启动。
       - dev    : 开发模式（默认）。后端 + Vite dev server + Electron（载入 http://localhost:vitePort，自动开 DevTools）。
       - debug  : 调试模式。当前实现等同 dev（main.cjs 在 dev 分支已自动 openDevTools），保留为语义入口，
                  便于未来挂接 debugpy / sourcemap 等增强。
 .NOTES
-    向后兼容：根目录 start.bat 透传 -Mode dev，保持原有行为。
+    入口：scripts/windows/start-dev.bat / start-debug.bat / start-prod.bat（薄包装透传参数）。
 #>
 param(
     [ValidateSet('prod', 'dev', 'debug')]
@@ -28,8 +28,8 @@ $ErrorActionPreference = "Stop"
 # =============================================================================
 # Config
 # =============================================================================
-# 脚本位于 scripts/ 下，项目根是 $PSScriptRoot 的父目录
-$ProjectRoot = Split-Path $PSScriptRoot -Parent
+# 脚本位于 scripts/windows/ 下，项目根是 $PSScriptRoot 的祖父目录
+$ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
 $Config = @{
     Mode                 = $Mode.ToLower()
