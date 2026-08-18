@@ -93,6 +93,40 @@ def _echoes_block(memory_echoes: Optional[List[str]]) -> str:
     )
 
 
+def _style_positive_block(style_positive: str) -> str:
+    """作者文风画像块（S2 E2——正面画像进 adaptive 主线）。
+
+    输入是 settings_bundle.render_style_positive 的渲染结果（≤10 行）。
+    空串 → 空块（无文风卡的书 prompt 零变化）。
+    """
+    text = (style_positive or "").strip()
+    if not text:
+        return ""
+    return (
+        "\n\n# 作者文风画像（贴合其笔迹写作，软约束）\n"
+        "以下是这位作者的文风特征，续写的语感、句式与节奏都应向它靠拢：\n"
+        f"{text}"
+    )
+
+
+def _author_samples_block(author_samples: Optional[List[str]]) -> str:
+    """作者笔迹示范块（S2 E1——few-shot 范例注入，最大质量杠杆）。
+
+    「一段范例胜过十句形容」：样本经 retrieval 按当前上下文检索（k≤2，各 ≤1200 字，
+    调用方已截断）。示范只学语感与节奏，禁止复制内容。
+    空列表 → 空块（prompt 零变化）。
+    """
+    samples = [s.strip() for s in (author_samples or []) if s and s.strip()]
+    if not samples:
+        return ""
+    body = "\n\n".join(f"【示范 {i + 1}】\n{s}" for i, s in enumerate(samples))
+    return (
+        "\n\n# 作者笔迹示范（学其语感、节奏与用词习惯——只学写法，禁止复制内容或意象）\n"
+        f"{body}\n"
+        "（以上是这位作者亲笔写的字。你接下来写的每一句，都应该像同一个人写的。）"
+    )
+
+
 # ============================================================
 # 续写 prompt（缝合/代笔/顺写统一入口，mode 区分粒度）
 # ============================================================
@@ -107,6 +141,8 @@ def build_continue_prompt(
     target_chars: int = 120,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -119,11 +155,15 @@ def build_continue_prompt(
         canon_context: Canon 上下文（public/private 约束）
         target_chars: 目标字数上限
         chapter_intent: 章节意图/大纲片段（可选方向引导）
+        style_positive: 作者文风画像文本（settings_bundle.render_style_positive；空=零变化）
+        author_samples: 作者笔迹示范 few-shot 样本（retrieval 检索；空=零变化）
 
     Returns:
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
+    system_prompt += _style_positive_block(style_positive)
+    system_prompt += _author_samples_block(author_samples)
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
@@ -168,6 +208,8 @@ def build_burst_prompt(
     target_chars: int = 700,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
 ) -> tuple:
     """构建段落级连写 prompt（Ctrl+Space 走向卡舱选定后触发）。
 
@@ -182,11 +224,15 @@ def build_burst_prompt(
         canon_context: Canon 上下文（public/private 约束）
         target_chars: 总字数软上限（默认 700）
         chapter_intent: 章节意图/大纲片段（可选方向引导）
+        style_positive: 作者文风画像文本（空=零变化）
+        author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
 
     Returns:
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
+    system_prompt += _style_positive_block(style_positive)
+    system_prompt += _author_samples_block(author_samples)
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
@@ -227,6 +273,8 @@ def build_outline_expand_prompt(
     target_chars: int = 400,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
 ) -> tuple:
     """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
 
@@ -246,11 +294,15 @@ def build_outline_expand_prompt(
         target_chars: 目标字数上限（默认 400）
         chapter_intent: 章节意图/大纲片段（可选方向引导）
         memory_echoes: 向量召回的前情片段
+        style_positive: 作者文风画像文本（空=零变化）
+        author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
 
     Returns:
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
+    system_prompt += _style_positive_block(style_positive)
+    system_prompt += _author_samples_block(author_samples)
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)
@@ -280,6 +332,45 @@ def build_outline_expand_prompt(
 
 
 # ============================================================
+# 试听 prompt（文风页试衣间，S3——真实注入管线的可感知出口）
+# ============================================================
+
+def build_audition_prompt(
+    text: str,
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
+    target_chars: int = 400,
+) -> tuple:
+    """构建试听改写 prompt（与 stitch-ghost 同一套基座与文风块）。
+
+    试衣间的承诺是「所见即所得」：作者在文风页调的配置，改写效果与
+    写作台续写走完全相同的注入路径（_base_system + 文风画像块 + 笔迹示范块），
+    差异只在 user prompt 的任务描述（改写既有段落而非续写）。
+
+    Args:
+        text: 待改写的段落（作者粘贴或默认测试段）
+        style_positive: 文风画像文本（草稿配置或已存卡渲染）
+        author_samples: 笔迹示范样本（A/B 基线版传 None/[]）
+        target_chars: 目标字数（约等于原段长度，由调用方给）
+
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    system_prompt = _base_system()
+    system_prompt += _style_positive_block(style_positive)
+    system_prompt += _author_samples_block(author_samples)
+
+    user_prompt = f"""# 待改写的段落
+{text}
+
+# 任务
+请把上面这段文字**改写成这位作者的笔迹**：情节、信息、人物动作一个都不变，
+只换声音——句式节奏、用词习惯、语气按上文画像与示范对齐。
+长度与原文相近（{target_chars} 字左右）。只输出改写后的正文，不要解释。"""
+    return system_prompt, user_prompt
+
+
+# ============================================================
 # 点火 prompt（冷启动：空章 + 大纲 → 开篇 2-5 段，破纸引子）
 # ============================================================
 
@@ -291,6 +382,8 @@ def build_opening_prompt(
     canon_context: str = "",
     target_chars: int = 700,
     memory_echoes: Optional[List[str]] = None,
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
 ) -> tuple:
     """构建开篇点火 prompt（空章冷启动：大纲是唯一燃料）。
 
@@ -304,11 +397,15 @@ def build_opening_prompt(
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
         target_chars: 总字数软上限（默认 700）
+        style_positive: 作者文风画像文本（空=零变化）
+        author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
 
     Returns:
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
+    system_prompt += _style_positive_block(style_positive)
+    system_prompt += _author_samples_block(author_samples)
     system_prompt += _nouns_block(proper_nouns)
     system_prompt += _canon_block(canon_context)
     system_prompt += _echoes_block(memory_echoes)

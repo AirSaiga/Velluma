@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -34,7 +35,10 @@ from backend.repositories.world_repository import WorldRepository
 from backend.services.adaptive.orchestrator import get_orchestrator
 from backend.services.adaptive.change_detector import AuthorState
 from backend.services.adaptive.world_model import WorldModelRepository
-from backend.services.context.settings_bundle import load_chapter_settings_bundle
+from backend.services.context.settings_bundle import (
+    load_chapter_settings_bundle,
+    render_style_positive,
+)
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
 from backend.services.prompts.adaptive_prompts import (
     build_burst_prompt,
@@ -43,6 +47,7 @@ from backend.services.prompts.adaptive_prompts import (
     build_outline_expand_prompt,
 )
 from backend.services.rag.recall import recall_memories
+from backend.services.style.retrieval import retrieve_author_samples
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import build_sse_event, build_sse_error
 
@@ -162,12 +167,19 @@ async def heartbeat(
 
     # 世界数据版本（写作页切片保鲜比对搭心跳便车；失败静默 None 不阻塞心跳本体）
     world_version = None
+    chapter = None
     try:
         chapter = await db.get(Chapter, str(chapter_id))
         if chapter is not None:
             world_version = await WorldRepository(db).world_version(str(chapter.book_id))
     except Exception:
         world_version = None
+
+    # 文风漂移轻提示（完整落地批，设计稿 §5 心跳感知通道）：以 kind=style_drift
+    # 并入 canon_hints——前端感知带零新增管线直接渲染。纯 code + 按内容长度缓存
+    drift_hint = await _style_drift_hint_for_heartbeat(chapter, db)
+    if drift_hint:
+        canon_hints = list(canon_hints) + [drift_hint]
 
     return HeartbeatResponse(
         dock_parts=dock_parts,
@@ -190,6 +202,57 @@ def _extract_dock_parts(snapshot: Dict) -> List[Dict]:
         if isinstance(proj, dict) and proj.get("__dock__"):
             return proj.get("parts", [])
     return []
+
+
+# 文风漂移提示缓存（chapter_id → (content_len, hint|None)）——内容没变不重算
+_STYLE_HINT_CACHE: Dict[str, tuple] = {}
+
+
+async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Optional[Dict]:
+    """文风漂移心跳轻提示（设计稿 §5）：章尾 3000 字同尺测量 vs 目标/健康带。
+
+    纯 code 零 LLM；显著偏离才返回提示卡（kind=style_drift，走 canon_hints 管线）。
+    任何失败/文本过短 → None（绝不阻塞心跳）。
+    """
+    if chapter is None:
+        return None
+    content = getattr(chapter, "content_text", "") or ""
+    cache_key = str(chapter.id)
+    cached = _STYLE_HINT_CACHE.get(cache_key)
+    if cached is not None and cached[0] == len(content):
+        return cached[1]
+
+    hint: Optional[Dict] = None
+    if len(content) >= 400:
+        try:
+            from backend.models import StyleCard as StyleCardModel
+            from backend.services.style.fingerprint import compute_style_drift_hint
+            from backend.services.validation.thresholds import CV_THRESHOLD_LO, CV_THRESHOLD_HI
+
+            sc_result = await db.execute(
+                select(StyleCardModel).where(
+                    StyleCardModel.book_id == chapter.book_id,
+                    StyleCardModel.chapter_id.is_(None),
+                ).limit(1)
+            )
+            card = sc_result.scalar_one_or_none()
+            target = None
+            if card is not None and card.dialogue_ratio_target is not None:
+                target = float(card.dialogue_ratio_target)
+            message = compute_style_drift_hint(
+                content[-3000:], target, CV_THRESHOLD_LO, CV_THRESHOLD_HI,
+            )
+            if message:
+                hint = {
+                    "kind": "style_drift",
+                    "node_label": "文风",
+                    "node_type": "style",
+                    "detail": message,
+                }
+        except Exception:
+            hint = None
+    _STYLE_HINT_CACHE[cache_key] = (len(content), hint)
+    return hint
 
 
 def _extract_canon_hints(snapshot: Dict) -> List[Dict]:
@@ -319,6 +382,16 @@ async def stitch_ghost(
         k=3,
     )
 
+    # 文风执行层（S2 E1/E2）：正面画像 + few-shot 笔迹示范注入全部四模式。
+    # 检索锚 = 记忆召回同一 query（当前写作上下文）；无样本/无文风卡 → 空，
+    # prompt 零变化（不阻塞生成）
+    style_positive = render_style_positive(bundle.style_card)
+    author_samples: List[str] = []
+    if bundle.book_id:
+        author_samples = await retrieve_author_samples(
+            db, bundle.book_id, recall_query, k=2,
+        )
+
     if request.mode == "open":
         # 点火（冷启动）：空章 + 大纲 → 开篇引子。大纲是唯一燃料，无已写正文
         system_prompt, user_prompt = build_opening_prompt(
@@ -329,6 +402,8 @@ async def stitch_ghost(
             canon_context=bundle.canon_context,
             target_chars=request.target_chars,
             memory_echoes=memory_echoes,
+            style_positive=style_positive,
+            author_samples=author_samples,
         )
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
@@ -341,6 +416,8 @@ async def stitch_ghost(
             target_chars=request.target_chars,
             chapter_intent=chapter_intent,
             memory_echoes=memory_echoes,
+            style_positive=style_positive,
+            author_samples=author_samples,
         )
     elif request.mode == "burst":
         # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
@@ -353,6 +430,8 @@ async def stitch_ghost(
             target_chars=request.target_chars,
             chapter_intent=chapter_intent,
             memory_echoes=memory_echoes,
+            style_positive=style_positive,
+            author_samples=author_samples,
         )
     else:
         system_prompt, user_prompt = build_continue_prompt(
@@ -365,6 +444,8 @@ async def stitch_ghost(
             target_chars=request.target_chars,
             chapter_intent=chapter_intent,
             memory_echoes=memory_echoes,
+            style_positive=style_positive,
+            author_samples=author_samples,
         )
 
     async def _stream():

@@ -46,7 +46,6 @@ severity 设计（与 CP3.1a 契约一致）：
 """
 
 import logging
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -90,25 +89,17 @@ class CodeAuditResult:
 # ============================================================
 # 工具函数
 # ============================================================
+# 「同一把尺子」原则（文风模块重构 S1，docs/style-module-redesign.md §7.3）：
+# 句长切分/字数口径/变异系数/对话字符统计的规范实现已抽至
+# services/style/fingerprint.py（作者样本与生成文本共用同一套算法），
+# 此处按原名 alias 引入——审计指标口径不变，对拍单测（test_fingerprint.py）锁定同值。
 
-def _split_sentences(text: str) -> List[str]:
-    """按中英文句末标点切句（保留信息密度，过滤过短片段）。
-
-    切分依据：。！？!?\n
-    过滤：长度 ≤ 2 的碎片（标点连写或空白）。
-    """
-    if not text:
-        return []
-    parts = re.split(r"[。！？!?\n]", text)
-    return [s.strip() for s in parts if len(s.strip()) > 2]
-
-
-def _count_words(text: str) -> int:
-    """统计字数（中文按字符计，去空白；与 drafting 字数口径一致）。"""
-    if not text:
-        return 0
-    # 去除所有空白字符后计长（中文一字一字符；英文按字符近似）
-    return len(re.sub(r"\s+", "", text))
+from backend.services.style.fingerprint import (  # noqa: E402
+    split_sentences as _split_sentences,
+    count_words as _count_words,
+    coefficient_of_variation as _coefficient_of_variation,
+    count_dialogue_chars,
+)
 
 
 def _find_all_offsets(haystack: str, needle: str) -> List[Tuple[int, int]]:
@@ -124,17 +115,6 @@ def _find_all_offsets(haystack: str, needle: str) -> List[Tuple[int, int]]:
         offsets.append((idx, idx + len(needle)))
         start = idx + 1  # 允许重叠匹配（中文禁词通常不重叠，但保守取 +1）
     return offsets
-
-
-def _coefficient_of_variation(values: List[float]) -> float:
-    """计算变异系数 CV = stddev / mean。空列表或均值 0 返回 0。"""
-    if len(values) < 2:
-        return 0.0
-    mean = sum(values) / len(values)
-    if mean == 0:
-        return 0.0
-    variance = sum((v - mean) ** 2 for v in values) / len(values)
-    return math.sqrt(variance) / mean
 
 
 def _make_finding(
@@ -223,6 +203,8 @@ class ClichéAuditor(BaseAuditor):
         load_context = {
             "style_blacklist": _get_book_attr(context, "style_blacklist", []),
             "style_negative_list": _get_style_card_attr(context, "negative_list", []),
+            # 系统层本书豁免（完整落地批）：三层合并时剔除被豁免的系统陈词
+            "cliche_exemptions": _get_book_attr(context, "style_cliche_exemptions", []),
         }
         await validator._ensure_loaded(load_context)
 
@@ -393,10 +375,7 @@ class RhythmAuditor(BaseAuditor):
 # - 可被 StyleCard.dialogue_ratio_target 覆盖（CP2.2 已加字段）
 
 
-_DIALOGUE_PAIRS = [
-    ("“", "”"), ("「", "」"), ("『", "』"),
-    ("\"\"", "\"\""),  # 占位，实际用单独逻辑
-]
+# 对话识别：引号口径见 fingerprint.count_dialogue_chars（同一把尺子）
 
 
 class DialogueAuditor(BaseAuditor):
@@ -411,7 +390,7 @@ class DialogueAuditor(BaseAuditor):
             return result
 
         word_count = max(1, _count_words(text))
-        dialogue_chars = self._count_dialogue_chars(text)
+        dialogue_chars = count_dialogue_chars(text)
         ratio = round(dialogue_chars / word_count, 3)
         result.metrics["dialogue_ratio"] = ratio
 
@@ -441,27 +420,6 @@ class DialogueAuditor(BaseAuditor):
 
         # 对话占比是题材相关的软指标，不影响 passed
         return result
-
-    @staticmethod
-    def _count_dialogue_chars(text: str) -> int:
-        """统计被成对引号包裹的字符数（含引号本身）。"""
-        if not text:
-            return 0
-        # 用栈式扫描处理 「」『』" "（中文优先）
-        pairs = [("“", "”"), ("「", "」"), ("『", "』"), ("\"", "\"")]
-        total = 0
-        for open_q, close_q in pairs:
-            in_quote = False
-            for ch in text:
-                if not in_quote and ch == open_q:
-                    in_quote = True
-                    total += 1
-                elif in_quote and ch == close_q:
-                    in_quote = False
-                    total += 1
-                elif in_quote:
-                    total += 1
-        return total
 
 
 # ============================================================

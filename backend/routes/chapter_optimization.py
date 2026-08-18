@@ -115,13 +115,18 @@ async def optimize_selection(
 ):
     """
     对用户选中的文本进行优化。
+
+    S2 E5：注入文风约束（画像/避免用词/笔迹示范）——此前选区改写完全不读
+    文风卡，"AI 润色"默认把文字往通用腔上拉，与文风目标背道而驰。
+    无文风卡/样本 → style_context 为空，行为与原先一致。
     """
     chapter = await chapter_repo.get_by_id(request.chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-        
+
     outline = chapter.outline_text or "（暂无大纲）"
-    
+    style_context = await _build_selection_style_context(chapter_repo.get_session(), chapter)
+
     optimized_text = await optimize_selection_with_llm(
         selected_text=request.selected_text,
         context_before=request.context_before,
@@ -130,9 +135,57 @@ async def optimize_selection(
         user_instruction=request.user_instruction,
         mode=request.mode,
         tone=request.tone,
+        style_context=style_context,
     )
-    
+
     return {"optimized_text": optimized_text}
+
+
+async def _build_selection_style_context(db, chapter) -> str:
+    """拼装选区改写的文风约束块（书级文风卡画像+禁词 + 1 条笔迹示范）。
+
+    纯增量：任一部分缺失就跳过；全空返回 ""（调用方 prompt 零变化）。
+    """
+    parts = []
+    try:
+        from backend.models import StyleCard as StyleCardModel
+        from backend.services.context.settings_bundle import render_style_positive
+
+        result = await db.execute(
+            select(StyleCardModel).where(
+                StyleCardModel.book_id == chapter.book_id,
+                StyleCardModel.chapter_id.is_(None),
+            ).limit(1)
+        )
+        style_card = result.scalar_one_or_none()
+        if style_card:
+            positive = render_style_positive(style_card)
+            if positive:
+                parts.append(positive)
+            negatives = [
+                (item.get("word") or item.get("phrase") or "")
+                for item in (style_card.negative_list or [])
+                if isinstance(item, dict) and (item.get("word") or item.get("phrase"))
+            ]
+            if negatives:
+                parts.append("避免用词：" + "、".join(negatives[:30]))
+    except Exception:
+        pass  # 文风卡加载失败不阻塞改写
+
+    try:
+        from backend.services.style.retrieval import retrieve_author_samples
+
+        samples = await retrieve_author_samples(
+            db, str(chapter.book_id),
+            (chapter.outline_text or "")[:200],
+            k=1, max_chars=800,
+        )
+        if samples:
+            parts.append(f"笔迹示范（学其语感，禁止复制内容）：\n{samples[0]}")
+    except Exception:
+        pass  # 样本加载失败不阻塞改写
+
+    return "\n\n".join(parts)
 
 
 # ============================================================
@@ -145,10 +198,15 @@ class DefatSelectionRequest(BaseModel):
     must_keep: Optional[List[str]] = Field(
         None, description="洗涤必须保留的锚点词（防洗掉情节硬元素）"
     )
+    chapter_id: Optional[str] = Field(None, description="章节 ID（取书级负面清单喂洗涤）")
+    book_id: Optional[str] = Field(None, description="书籍 ID（无章节上下文时的兜底）")
 
 
 @router.post("/defat_selection")
-async def defat_selection(request: DefatSelectionRequest):
+async def defat_selection(
+    request: DefatSelectionRequest,
+    chapter_repo: ChapterRepository = Depends(get_chapter_repository),
+):
     """深度清脂：AI 味密度超阈值时调 LLM 重洗，未超标走正则轻裁。
 
     与本地词级规则（前端 Alt+↓）的分工：本地规则即时/免费/可预测但只能删
@@ -160,7 +218,34 @@ async def defat_selection(request: DefatSelectionRequest):
 
     text = request.text.strip()
     report = measure_ai_taste(text)
-    result = await wash_segment_if_too_ai(text, report, must_keep=request.must_keep)
+    # S3 E3：洗涤顺带处理本书负面清单禁词（defat 无 chapter 上下文，
+    # 从请求的 chapter_id 取书级文风卡；无卡/加载失败 → 空列表，行为不变）
+    extra_banned: list[str] = []
+    db = chapter_repo.get_session()
+    chapter = await chapter_repo.get_by_id(request.chapter_id) if request.chapter_id else None
+    book_id = str(chapter.book_id) if chapter else (request.book_id or "")
+    if book_id:
+        try:
+            from backend.models import StyleCard as StyleCardModel
+            sc_result = await db.execute(
+                select(StyleCardModel).where(
+                    StyleCardModel.book_id == book_id,
+                    StyleCardModel.chapter_id.is_(None),
+                ).limit(1)
+            )
+            card = sc_result.scalar_one_or_none()
+            if card and card.negative_list:
+                extra_banned = [
+                    (item.get("word") or item.get("phrase") or "")
+                    + (f"（→ {item['alternative']}）" if item.get("alternative") else "")
+                    for item in card.negative_list
+                    if isinstance(item, dict) and (item.get("word") or item.get("phrase"))
+                ]
+        except Exception:
+            pass
+    result = await wash_segment_if_too_ai(
+        text, report, must_keep=request.must_keep, extra_banned_words=extra_banned or None,
+    )
     return {
         "text": result.text,
         "washed": result.washed,

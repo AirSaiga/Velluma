@@ -20,7 +20,7 @@ import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
 import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHistory'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { bookApi } from '../services/api/domain'
+import { bookApi, styleApi } from '../services/api/domain'
 import Icon from './Icon.vue'
 import { useToast } from '../composables/useToast'
 
@@ -167,17 +167,42 @@ async function addToGoldenSnippets() {
     const currentSnippets = currentBook.golden_snippets || []
     currentSnippets.push(selectedText)
     await bookApi.update(props.bookId, { golden_snippets: currentSnippets })
-    showToast('已添加到黄金锚点', 'success')
+    // S3 文风喂养通路 + S4 撤销胶囊：黄金片段同时汇入文风样本库
+    // （source=golden_snippet），6 秒内可撤销（撤销只撤样本，黄金锚点保留）
+    const sample = await styleApi.createSample(props.bookId, {
+      content: selectedText,
+      scene_type: 'general',
+      source: 'golden_snippet',
+    }).catch((e) => {
+      console.warn('黄金片段汇入文风样本库失败（不影响黄金锚点）:', e)
+      return null
+    })
+    styleApi.logStyleEvent(props.bookId, 'golden_to_sample')
+    showToast(
+      sample ? '已添加到黄金锚点 · 已汇入文风样本库' : '已添加到黄金锚点（样本库汇入失败）',
+      sample ? 'success' : 'warning',
+      6000,
+      sample
+        ? {
+            label: '撤销',
+            onClick: () => {
+              styleApi.deleteSample(props.bookId, sample.id).catch(() => {})
+            },
+          }
+        : undefined,
+    )
   } catch (e) {
     console.error('添加黄金片段失败:', e)
-    showToast('添加失败: ' + (e.message || '未知错误'), 'error')
+    showToast('添加失败: ' + (e.message || ''), 'error')
   }
 }
 
-async function addToBlacklist() {
+async function notLikeMyStyle() {
+  // S3「这不像我」：选中不对味的文字 → 负面清单候选进文风收件箱（过目才生效）。
+  // 「把这段改得更像我」= 现有的「AI 润色/改写」按钮（S2 起带文风注入），不再另设入口
   const selectedText = getSelectedText()
   if (!selectedText) {
-    showToast('请先选中要添加的文本', 'warning')
+    showToast('请先选中不像你的文字', 'warning')
     return
   }
   if (!props.bookId) {
@@ -185,14 +210,21 @@ async function addToBlacklist() {
     return
   }
   try {
-    const currentBook = await bookApi.get(props.bookId)
-    const currentBlacklist = currentBook.style_blacklist || []
-    currentBlacklist.push(selectedText)
-    await bookApi.update(props.bookId, { style_blacklist: currentBlacklist })
-    showToast('已添加到黑名单', 'success')
+    await styleApi.addInboxItem(
+      props.bookId,
+      'negative_candidate',
+      {
+        // 短语整句进候选词太粗暴——截前 16 字作禁词候选，全文留 source_text 供过目
+        word: selectedText.trim().slice(0, 16),
+        source_text: selectedText.trim().slice(0, 120),
+      },
+      'writing_desk',
+    )
+    styleApi.logStyleEvent(props.bookId, 'not_like_me')
+    showToast('已记入文风收件箱——到文风页过目后生效', 'success')
   } catch (e) {
-    console.error('添加黑名单失败:', e)
-    showToast('添加失败: ' + (e.message || '未知错误'), 'error')
+    console.error('投递文风候选失败:', e)
+    showToast('投递失败: ' + (e.message || ''), 'error')
   }
 }
 
@@ -921,12 +953,12 @@ defineExpose({
           <Icon name="star" :size="12" /> 黄金片段
         </button>
         <button
-          @click="addToBlacklist"
+          @click="notLikeMyStyle"
           :disabled="!props.bookId || !hasSelection"
           class="px-2 py-1 text-[10px] rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="将选中片段添加到黑名单"
+          title="这段不像你写的——记为负面清单候选（进文风收件箱，过目后生效）"
         >
-          <Icon name="x-mark" :size="12" /> 黑名单
+          <Icon name="x-mark" :size="12" /> 这不像我
         </button>
       </template>
 

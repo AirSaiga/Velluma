@@ -2999,7 +2999,8 @@ export function useGenerationSession(): GenerationSession {
     if (!original.trim()) return
     _deepDefatting = true
     try {
-      const result: any = await chapterApi.defatSelection({ text: original })
+      // S3 E3：带章节上下文，洗涤顺带处理本书负面清单禁词
+      const result: any = await chapterApi.defatSelection({ text: original, chapter_id: currentChapterId || undefined })
       const washed = (result?.text || '').trim()
       if (washed && washed !== original) {
         // 整段替换（与本地清脂同款副作用：段内行内格式丢失，正文场景可接受）

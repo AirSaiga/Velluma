@@ -41,6 +41,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
@@ -105,7 +106,13 @@ async def _build_refinery_context(
     mode: str = "deep",
     enable_polish: bool = True,
 ) -> RefineryContext:
-    """构建精修上下文（从 chapter + Canon）。"""
+    """构建精修上下文（从 chapter + Canon + 文风卡/样本）。
+
+    S2 E5：抛光 prompt 的 author_samples 不再恒空（polisher 签名早就支持，
+    头注释承诺的"文风指纹"今日兑现）——按章大纲检索 2 条样本拼接成文本；
+    负面清单禁词进 forbidden_terms（手术 prompt 同步生效）。
+    无样本/无文风卡 → 空串，行为与原先一致。
+    """
     # Canon 上下文
     try:
         canon_context = await build_canon_context_for_prompt(
@@ -118,6 +125,38 @@ async def _build_refinery_context(
     # 章节主旨
     purpose = (getattr(chapter, "outline_text", "") or "")[:300]
 
+    # 文风卡（书级）+ 作者样本（S2 E5）
+    style_negative_terms = ""
+    try:
+        from backend.models import StyleCard as StyleCardModel
+        sc_result = await db.execute(
+            select(StyleCardModel).where(
+                StyleCardModel.book_id == chapter.book_id,
+                StyleCardModel.chapter_id.is_(None),
+            ).limit(1)
+        )
+        style_card = sc_result.scalar_one_or_none()
+        if style_card and style_card.negative_list:
+            style_negative_terms = "、".join(
+                (item.get("word") or item.get("phrase") or "")
+                for item in style_card.negative_list
+                if isinstance(item, dict) and (item.get("word") or item.get("phrase"))
+            )
+    except Exception as e:
+        logger.warning(f"[Refinery] 文风卡加载失败（降级为空）: {e}")
+
+    author_samples_text = ""
+    try:
+        from backend.services.style.retrieval import retrieve_author_samples
+        samples = await retrieve_author_samples(
+            db, str(chapter.book_id),
+            (getattr(chapter, "outline_text", "") or "")[:200],
+            k=2, max_chars=1200,
+        )
+        author_samples_text = "\n\n".join(samples)
+    except Exception as e:
+        logger.warning(f"[Refinery] 作者样本加载失败（降级为空）: {e}")
+
     ctx = RefineryContext(
         purpose=purpose,
         emotion_curve="",  # 第 2 期接入 Reader Mirror
@@ -125,8 +164,9 @@ async def _build_refinery_context(
         canon_summary=canon_context,
         character_states="",
         active_hooks="",
-        forbidden_terms="",
+        forbidden_terms=style_negative_terms,
         author_intent="",
+        author_samples=author_samples_text,
         enable_polish=enable_polish,
         mode=mode,
     )

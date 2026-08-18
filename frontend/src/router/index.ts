@@ -43,10 +43,22 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '设定中心', rail: true, railKey: 'bible' },
   },
   {
+    // 文风模块重构 S1：独立文风页（docs/style-module-redesign.md §6.2）——
+    // 旧入口 /bible 深链到文风分区的行为退役，此处为新家
+    path: '/style/:bookId',
+    name: 'style',
+    component: () => import('../features/style/containers/StyleView.vue'),
+    meta: { title: '文风', rail: true, railKey: 'style' },
+  },
+  {
+    // C1 Canon 融合：独立脑图页退役，旧深链一律重定向到世界页「真相」账本格
     path: '/canon/:bookId',
     name: 'canon',
-    component: () => import('../features/canon/containers/CanonView.vue'),
-    meta: { title: '作者脑中世界（Canon）', rail: true, railKey: 'canon' },
+    redirect: (to) => ({
+      name: 'world',
+      params: { bookId: to.params.bookId },
+      query: { panel: 'canon' },
+    }),
   },
   {
     path: '/world/:bookId',

@@ -1,0 +1,296 @@
+<script setup lang="ts">
+/**
+ * 禁词扫描审稿模态（S3 E3）——三层禁词命中清单 + 逐条裁决。
+ *
+ * 红线：绝不静默改正文——每条命中由作者选「替换（应用替代词到本章）/ 仅收入清单 / 忽略」。
+ * 替换动作由容器执行（chapterApi.update 后台改 content_text，作者回写作台即见）。
+ */
+import { ref, watch } from 'vue'
+import Icon from '../../../components/Icon.vue'
+import type { StyleScanResult, StyleScanHit } from '../../../types'
+
+const props = defineProps<{
+  open: boolean
+  chapters: Array<{ id: string; chapter_number: number; title: string | null }>
+  scanning: boolean
+  result: StyleScanResult | null
+  /** 已裁决的词（前端记状态，避免重复操作） */
+  resolvedWords: string[]
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'scan', chapterId: string): void
+  (e: 'apply', hit: StyleScanHit): void
+  (e: 'collect', hit: StyleScanHit): void
+  (e: 'ignore', hit: StyleScanHit): void
+}>()
+
+const selectedChapterId = ref('')
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open && !selectedChapterId.value && props.chapters.length > 0) {
+      selectedChapterId.value = props.chapters[props.chapters.length - 1].id
+    }
+  },
+)
+
+watch(
+  () => props.chapters,
+  (list) => {
+    if (list.length > 0 && !list.some(c => c.id === selectedChapterId.value)) {
+      selectedChapterId.value = list[list.length - 1].id
+    }
+  },
+)
+
+function isResolved(word: string): boolean {
+  return props.resolvedWords.includes(word)
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <div v-if="open" class="modal-mask" @click.self="emit('close')">
+      <div class="modal-card">
+        <header class="modal-head">
+          <h3 class="modal-title">禁词扫描（审稿模式）</h3>
+          <button class="modal-close" @click="emit('close')">✕</button>
+        </header>
+
+        <div class="modal-body">
+          <p class="modal-note">
+            用三层禁词（系统陈词库 + 本书黑名单 + 负面清单）扫描本章正文。
+            命中后由你逐条裁决——替换、收入清单或忽略，绝不静默改正文。
+          </p>
+
+          <div class="scan-toolbar">
+            <select v-model="selectedChapterId" class="chapter-select">
+              <option v-for="c in chapters" :key="c.id" :value="c.id">
+                第{{ c.chapter_number }}章 {{ c.title || '' }}
+              </option>
+            </select>
+            <button
+              class="btn-primary"
+              :disabled="scanning || !selectedChapterId"
+              @click="emit('scan', selectedChapterId)"
+            >{{ scanning ? '扫描中…' : '扫描本章' }}</button>
+          </div>
+
+          <div v-if="result && result.hits.length === 0 && !scanning" class="empty-note">
+            干净——本章没有命中任何禁词。
+          </div>
+          <div
+            v-for="hit in result?.hits || []"
+            :key="hit.word"
+            class="hit-card"
+            :class="{ resolved: isResolved(hit.word) }"
+          >
+            <div class="hit-head">
+              <span class="hit-word">「{{ hit.word }}」</span>
+              <span class="hit-count">× {{ hit.count }}</span>
+              <span v-if="hit.alternative" class="hit-alt">→ {{ hit.alternative }}</span>
+              <span v-else class="hit-alt dim">（无替代建议）</span>
+            </div>
+            <p class="hit-context">…{{ hit.occurrences[0]?.context }}…</p>
+            <div class="hit-actions">
+              <template v-if="!isResolved(hit.word)">
+                <button
+                  v-if="hit.alternative"
+                  class="btn-mini btn-apply"
+                  @click="emit('apply', hit)"
+                >替换为「{{ hit.alternative }}」（{{ hit.count }} 处）</button>
+                <button class="btn-mini btn-collect" @click="emit('collect', hit)">仅收入清单</button>
+                <button class="btn-mini btn-ignore" @click="emit('ignore', hit)">忽略</button>
+              </template>
+              <span v-else class="hit-done"><Icon name="check-circle" :size="12" /> 已处理</span>
+            </div>
+          </div>
+        </div>
+
+        <footer class="modal-foot">
+          <button class="btn-ghost" @click="emit('close')">关闭</button>
+        </footer>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<style scoped>
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  background: rgb(0 0 0 / 45%);
+}
+.modal-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 36rem;
+  max-height: 80vh;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border-radius: 1rem;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.modal-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.modal-close {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.modal-body {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+}
+.modal-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.6875rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+.scan-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.chapter-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+}
+.btn-primary {
+  padding: 0.375rem 0.875rem;
+  font-size: 0.75rem;
+  color: white;
+  background: var(--accent-500);
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+}
+.empty-note {
+  padding: 1.5rem 0;
+  font-size: 0.8125rem;
+  text-align: center;
+  color: #047857;
+}
+.hit-card {
+  padding: 0.625rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+.hit-card.resolved {
+  opacity: 0.55;
+}
+.hit-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.hit-word {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.hit-count {
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.625rem;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-radius: 0.25rem;
+}
+.hit-alt {
+  font-size: 0.6875rem;
+  color: #047857;
+}
+.hit-alt.dim {
+  color: var(--text-muted);
+}
+.hit-context {
+  margin: 0.375rem 0;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.hit-actions {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+.btn-mini {
+  padding: 0.25rem 0.5625rem;
+  font-size: 0.6875rem;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.btn-apply {
+  color: white;
+  background: var(--accent-500);
+}
+.btn-apply:hover {
+  background: var(--accent-600);
+}
+.btn-collect {
+  color: #b45309;
+  background: #fef3c7;
+}
+.btn-ignore {
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+}
+.hit-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: #047857;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border-color);
+}
+.btn-ghost {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+</style>

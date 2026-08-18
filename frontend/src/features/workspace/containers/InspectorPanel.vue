@@ -20,7 +20,7 @@ import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPan
 import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
-import { refineryApi } from '../../../services/api/domain'
+import { refineryApi, styleApi } from '../../../services/api/domain'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
@@ -153,12 +153,45 @@ async function handleReaderFeedback() {
   }
 }
 
-/** 跳转 Canon 脑图（RefineryIssuesPanel 改设定 / 章节 tab 入口共用） */
+/** 跳世界页真相账本（C1 Canon 融合；RefineryIssuesPanel 改设定 / 章节 tab 入口共用） */
 const router = useRouter()
 function handleEditCanon() {
   const bookId = store.currentBookId.value
   if (!bookId) return
-  router.push({ name: 'canon', params: { bookId } })
+  router.push({ name: 'world', params: { bookId }, query: { panel: 'canon' } })
+}
+
+// ===== 本章文风卡（S3：章级特例状态 + 跳文风页深链）=====
+const chapterStyleOverride = ref<any>(null)
+const chapterStyleLoading = ref(false)
+
+watch(selectedChapterId, async (chapterId) => {
+  chapterStyleOverride.value = null
+  const bookId = store.currentBookId.value
+  if (!chapterId || !bookId) return
+  chapterStyleLoading.value = true
+  try {
+    chapterStyleOverride.value = await styleApi.get(bookId, chapterId).catch(() => null)
+  } finally {
+    chapterStyleLoading.value = false
+  }
+}, { immediate: true })
+
+function handleEditChapterStyle() {
+  const bookId = store.currentBookId.value
+  if (!bookId || !selectedChapterId.value) return
+  router.push({ name: 'style', params: { bookId }, query: { chapter: selectedChapterId.value } })
+}
+
+async function handleResetChapterStyle() {
+  const bookId = store.currentBookId.value
+  if (!bookId || !selectedChapterId.value || !chapterStyleOverride.value) return
+  try {
+    await styleApi.deleteChapterOverride(bookId, selectedChapterId.value)
+    chapterStyleOverride.value = null
+  } catch (e: any) {
+    console.warn('恢复继承失败:', e)
+  }
 }
 </script>
 
@@ -244,13 +277,36 @@ function handleEditCanon() {
             </div>
           </section>
 
-          <!-- 跳转 Canon 脑图 -->
+          <!-- 本章文风（S3：章级特例状态一眼可见） -->
+          <section class="style-status-section">
+            <div class="section-label">本章文风</div>
+            <div class="style-status-row">
+              <span v-if="chapterStyleLoading" class="muted">读取中…</span>
+              <template v-else>
+                <span v-if="chapterStyleOverride" class="style-override-badge">章级特例</span>
+                <span v-else class="muted">继承书级文风</span>
+                <button
+                  v-if="chapterStyleOverride"
+                  class="btn-mini-reset"
+                  title="删除本章特例，恢复继承书级文风"
+                  @click="handleResetChapterStyle"
+                >恢复继承</button>
+              </template>
+            </div>
+            <button class="btn-refinery" @click="handleEditChapterStyle">
+              <Icon name="paint-brush" :size="14" />
+              <span>{{ chapterStyleOverride ? '编辑本章文风特例' : '为本章设文风特例' }}</span>
+            </button>
+            <p class="hint">回忆章换个腔调？章级特例只影响这一章的生成，其余章节仍用书级文风。</p>
+          </section>
+
+          <!-- 跳世界页真相账本（C1：Canon 融入世界页） -->
           <section>
             <button class="btn-refinery" @click="handleEditCanon">
-              <Icon name="link" :size="14" />
-              <span>前往 Canon 脑图</span>
+              <Icon name="truth" :size="14" />
+              <span>在世界页查看真相</span>
             </button>
-            <p class="hint">编辑作者脑中世界（private 设定 / 伏笔 / 关系图谱）</p>
+            <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划 / 因果图谱</p>
           </section>
         </template>
       </div>
@@ -701,6 +757,47 @@ function handleEditCanon() {
   color: var(--text-secondary);
   border-color: var(--border-color);
   background: var(--bg-secondary);
+}
+
+/* ===== 本章文风卡（S3）===== */
+.style-status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.style-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+}
+
+.style-override-badge {
+  padding: 0.0625rem 0.4375rem;
+  font-size: 0.625rem;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 0.25rem;
+}
+
+.btn-mini-reset {
+  padding: 0.1875rem 0.5rem;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.btn-mini-reset:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.style-status-section .btn-refinery {
+  margin-top: 0.125rem;
 }
 .btn-refinery.secondary:hover {
   background: var(--hover-bg);

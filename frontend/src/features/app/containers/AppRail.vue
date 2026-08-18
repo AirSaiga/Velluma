@@ -11,10 +11,12 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../useAppStore'
+import { useAppSettings } from '../../../composables/useAppSettings'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
+const { open: openSettings } = useAppSettings()
 
 interface RailItem {
   key: string
@@ -29,8 +31,8 @@ const railItems: RailItem[] = [
   { key: 'workspace', label: '写作台', icon: 'pencil-square', requiresBook: true },
   { key: 'outline', label: '大纲', icon: 'document', requiresBook: true },
   { key: 'bible', label: '设定', icon: 'book-open', requiresBook: true },
-  { key: 'canon', label: '脑图', icon: 'link', requiresBook: true },
   { key: 'world', label: '世界', icon: 'map', requiresBook: true },
+  { key: 'style', label: '文风', icon: 'paint-brush', requiresBook: true },
   { key: 'insights', label: '数据', icon: 'sparkles', requiresBook: true },
 ]
 
@@ -75,6 +77,14 @@ function navigate(item: RailItem) {
     >
       <Icon :name="item.icon" :size="20" class="rail-icon" />
       <span class="rail-label">{{ item.label }}</span>
+    </button>
+
+    <div class="rail-spacer"></div>
+
+    <!-- 全局设置（应用级配置，非导航目的地，无书亦可达） -->
+    <button class="rail-item" title="设置" @click="openSettings">
+      <Icon name="settings" :size="20" class="rail-icon" />
+      <span class="rail-label">设置</span>
     </button>
   </nav>
 </template>
@@ -135,6 +145,10 @@ function navigate(item: RailItem) {
 
 .rail-icon {
   flex-shrink: 0;
+}
+
+.rail-spacer {
+  flex: 1;
 }
 
 .rail-label {

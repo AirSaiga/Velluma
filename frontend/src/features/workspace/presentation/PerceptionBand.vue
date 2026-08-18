@@ -34,6 +34,9 @@ function kindMeta(kind: string) {
       return { label: '泄露', icon: '⚠', cls: 'hint-card--leak' }
     case 'contradiction':
       return { label: '矛盾', icon: '⚡', cls: 'hint-card--leak' }
+    case 'style_drift':
+      // 文风漂移（S4 补全）：心跳纯 code 测量章尾指标 vs 目标/健康带
+      return { label: '文风', icon: '✒', cls: 'hint-card--style' }
     default:
       return { label: 'Canon', icon: '·', cls: 'hint-card--canon' }
   }
@@ -277,5 +280,14 @@ const floatingHidden = computed(() =>
 .hint-card--leak .hint-card__tag {
   background: #fee2e2;
   color: #b91c1c;
+}
+/* 文风漂移 —— violet（S4 补全） */
+.hint-card--style {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+.hint-card--style .hint-card__tag {
+  background: #ede9fe;
+  color: #7c3aed;
 }
 </style>

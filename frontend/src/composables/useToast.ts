@@ -11,10 +11,21 @@ const typeDurations: Record<ToastType, number> = {
   info: 4000
 }
 
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 export function useToast() {
-  const showToast = (message: string, type: ToastType = 'info', duration?: number) => {
+  /** 显示 toast；action（可选）渲染为可点按钮——点击即执行并关掉 toast（S4 撤销胶囊基础） */
+  const showToast = (
+    message: string,
+    type: ToastType = 'info',
+    duration?: number,
+    action?: ToastAction,
+  ) => {
     const id = nextId++
-    toasts.value.push({ id, message, type })
+    toasts.value.push({ id, message, type, action })
     setTimeout(() => {
       removeToast(id)
     }, duration ?? typeDurations[type])

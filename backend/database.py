@@ -583,6 +583,46 @@ MIGRATIONS: list[dict[str, Any]] = [
         ),
         "expected_udt_names": {"uuid"},
     },
+    # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
+    {
+        "table": "style_cards",
+        "column": "style_knobs",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    # 文风模块重构补全（完整落地批）：画像字段锁 + 指纹写穿缓存
+    {
+        "table": "style_cards",
+        "column": "locked_keys",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
+    {
+        "table": "style_cards",
+        "column": "fingerprint",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
+    # 样本时期标记（语料聚合只用近期；文风会进化）+ 收藏（检索兜底优先）
+    {
+        "table": "author_samples",
+        "column": "era",
+        "definition": "VARCHAR(16) DEFAULT 'recent'",
+        "expected_udt_names": {"varchar", "character varying", "text"},
+    },
+    {
+        "table": "author_samples",
+        "column": "favorite",
+        "definition": "BOOLEAN DEFAULT FALSE",
+        "expected_udt_names": {"bool", "boolean"},
+    },
+    # 系统陈词库本书豁免（三层禁词的系统层可见性 + 豁免，设计稿 §6.4）
+    {
+        "table": "books",
+        "column": "style_cliche_exemptions",
+        "definition": "JSONB DEFAULT '[]'",
+        "expected_udt_names": {"jsonb"},
+    },
 ]
 
 

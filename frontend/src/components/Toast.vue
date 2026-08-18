@@ -3,10 +3,17 @@ import { ref } from 'vue'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 export interface Toast {
   id: number
   message: string
   type: ToastType
+  /** 可选动作按钮（S4：撤销胶囊等；点击即执行并关闭） */
+  action?: ToastAction
 }
 
 const props = defineProps<{
@@ -34,6 +41,11 @@ const typeIcons: Record<ToastType, string> = {
 function removeToast(id: number) {
   emit('remove', id)
 }
+
+function runAction(id: number, action: ToastAction) {
+  action.onClick()
+  removeToast(id)
+}
 </script>
 
 <template>
@@ -51,14 +63,21 @@ function removeToast(id: number) {
       >
         <div class="flex items-center justify-between gap-3">
           <span class="text-sm font-medium">{{ toast.message }}</span>
-          <button
-            @click="removeToast(toast.id)"
-            class="opacity-70 hover:opacity-100 transition-opacity"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-            </svg>
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="toast.action"
+              @click="runAction(toast.id, toast.action)"
+              class="text-sm font-semibold underline underline-offset-2 opacity-90 hover:opacity-100 transition-opacity"
+            >{{ toast.action.label }}</button>
+            <button
+              @click="removeToast(toast.id)"
+              class="opacity-70 hover:opacity-100 transition-opacity"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </TransitionGroup>

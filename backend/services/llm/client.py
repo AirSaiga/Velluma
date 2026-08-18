@@ -507,6 +507,7 @@ async def optimize_selection_with_llm(
     model_type: str = "default",
     mode: str = "rewrite",
     tone: Optional[str] = None,
+    style_context: Optional[str] = None,
 ) -> str:
     """选区级改写（CP4.1 蓝图 §4.9）。
 
@@ -516,6 +517,7 @@ async def optimize_selection_with_llm(
     Args:
         mode: rewrite / describe / expand / compress / tone_shift（默认 rewrite，向后兼容）
         tone: 仅 mode=tone_shift 时生效，目标语气
+        style_context: 文风约束块（S2 E5：画像/避免用词/笔迹示范；None/空 = 不注入）
     """
     from backend.services.llm.selection_rewrite import (
         build_selection_rewrite_system_prompt,
@@ -529,6 +531,7 @@ async def optimize_selection_with_llm(
         context_after=context_after,
         outline=outline,
         user_instruction=user_instruction,
+        style_context=style_context or "",
     )
 
     return await call_llm(

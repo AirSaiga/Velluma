@@ -30,8 +30,8 @@ export interface DockPart {
 
 /** Canon 感知提示（canon_watch 组件产，写中停顿心跳返回） */
 export interface CanonHint {
-  /** 感知类型：appearance 角色出场 / callback 伏笔回收时机 / leak private 泄露 */
-  kind: 'appearance' | 'callback' | 'leak' | 'contradiction'
+  /** 感知类型：appearance 角色出场 / callback 伏笔回收时机 / leak private 泄露 / style_drift 文风漂移（S4 补全） */
+  kind: 'appearance' | 'callback' | 'leak' | 'contradiction' | 'style_drift'
   /** 实体名（角色名 / 伏笔标签 / Canon 节点 label） */
   node_label: string
   /** 实体类型：character / hook / canon */

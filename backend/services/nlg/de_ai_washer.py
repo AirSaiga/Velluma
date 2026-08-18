@@ -136,6 +136,7 @@ async def wash_segment_if_too_ai(
     recorder: Optional[RunRecorder] = None,
     stage: str = "adf.wash",
     must_keep: Optional[List[str]] = None,
+    extra_banned_words: Optional[List[str]] = None,
 ) -> WashResult:
     """对 AI 味超标的段落执行 LLM 洗涤。
 
@@ -152,11 +153,14 @@ async def wash_segment_if_too_ai(
         stage: 计量 stage 名（segment_writer 传入 adf.wash.segment_N）
         must_keep: 洗涤必须保留的词/短语列表（BS-ADF 槽位强制元素）。
             提供时注入洗涤 prompt，防止洗涤重写把锚点词洗掉导致 coverage 校验失败
+        extra_banned_words: 本书负面清单禁词（S3 E3 接 StyleCard——洗涤时若正文
+            出现这些词，一并替换/删除；密度报告只认静态反 AI 词表，本书自定义
+            禁词经此参数补充）
 
     Returns:
         WashResult：含最终文本、是否洗涤、前后分数、处置说明
 
-    使用方式（segment_writer 段后处理）：
+    使用方式：
         report = measure_ai_taste(segment_text)
         if report.triggered and wash_count < thresholds.wash_max_segments_per_chapter:
             result = await wash_segment_if_too_ai(segment_text, report)
@@ -192,6 +196,14 @@ async def wash_segment_if_too_ai(
             "以下词/短语是情节锚点，重写时可以调整其前后句式，"
             "但每个词的实词核心（名词/动词）必须保留在正文中：\n"
             + "\n".join(f"- {w}" for w in keep_words)
+        )
+    # 本书负面清单（S3 E3）：洗涤时顺手替换作者明令禁止的词（有替代用替代，无替代删除）
+    banned_extra = [w for w in (extra_banned_words or []) if w]
+    if banned_extra:
+        user_prompt += (
+            "\n\n# 本书负面清单禁词（若原文出现，一并处理）\n"
+            "以下词/短语是作者明令避免的（有括号替代的用替代写法，没有的直接删掉或改写）：\n"
+            + "\n".join(f"- {w}" for w in banned_extra[:30])
         )
 
     try:

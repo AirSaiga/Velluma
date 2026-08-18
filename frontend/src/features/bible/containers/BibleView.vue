@@ -5,17 +5,17 @@
  * 职责：把旧 AppContainer 右栏的 9 个悬浮 tab 原样迁入此处的二级导航。
  * 左侧二级导航 + 右侧内容区。
  *
- * 编辑入口收敛现状（M4/M5）：
+ * 编辑入口收敛现状（M4/M5 + 设置迁出 + 文风独立成页 S1）：
  * - 角色/资产/地图（M4）+ 伏笔账本/期待账本/世界观（M5）已迁往世界页，
  *   对应分区退役为 WorldRedirectCard 跳转卡
- * - 保留分区：文风（StyleCardManager）/ 笔记（NotesPanel）/ 设置（SettingsPanel）
+ * - 文风已迁往独立文风页（/style/:bookId，docs/style-module-redesign.md）
+ * - 保留分区：笔记（NotesPanel）
+ * - 设置（模型/代理/通知，应用级配置）已迁出为 AppRail 底部齿轮的全局弹窗
  */
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
-import StyleCardManager from '../../../components/StyleCardManager.vue'
 import NotesPanel from '../../../components/NotesPanel.vue'
-import SettingsPanel from '../../../components/SettingsPanel.vue'
 import WorldRedirectCard from '../presentation/WorldRedirectCard.vue'
 import { useAppStore } from '../../app/useAppStore'
 
@@ -27,7 +27,7 @@ const store = useAppStore()
 const currentBook = store.currentBook
 const currentBookId = store.currentBookId
 
-type SectionKey = 'characters' | 'foreshadowing' | 'readerMirror' | 'worldview' | 'style' | 'assets' | 'map' | 'notes' | 'settings'
+type SectionKey = 'characters' | 'foreshadowing' | 'readerMirror' | 'worldview' | 'assets' | 'map' | 'notes'
 
 interface Section {
   key: SectionKey
@@ -37,18 +37,16 @@ interface Section {
 }
 
 const sections: Section[] = [
+  { key: 'notes', label: '笔记', icon: 'pencil-square', ready: true },
   { key: 'characters', label: '角色', icon: 'users', ready: true },
   { key: 'foreshadowing', label: '伏笔账本', icon: 'link', ready: true },
   { key: 'readerMirror', label: '期待账本', icon: 'star', ready: true },
   { key: 'worldview', label: '世界观', icon: 'book-open', ready: true },
-  { key: 'style', label: '文风', icon: 'sparkles', ready: true },
   { key: 'assets', label: '资产', icon: 'archive', ready: true },
   { key: 'map', label: '地图', icon: 'map-pin', ready: true },
-  { key: 'notes', label: '笔记', icon: 'pencil-square', ready: true },
-  { key: 'settings', label: '设置', icon: 'settings', ready: true },
 ]
 
-const activeSection = ref<SectionKey>('characters')
+const activeSection = ref<SectionKey>('notes')
 
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
 watch(
@@ -108,8 +106,13 @@ async function saveBookNotes(notes: string) {
     </aside>
 
     <main class="bible-content">
+      <!-- 笔记 -->
+      <div v-if="activeSection === 'notes'" class="panel-host">
+        <NotesPanel :book="currentBook" :save-notes="saveBookNotes" :closable="false" />
+      </div>
+
       <!-- 角色（M4：编辑迁往世界页，分区保留为引导入口） -->
-      <div v-if="activeSection === 'characters'" class="panel-host">
+      <div v-else-if="activeSection === 'characters'" class="panel-host">
         <WorldRedirectCard
           :book-id="bookIdFromRoute || ''"
           icon="users"
@@ -150,11 +153,6 @@ async function saveBookNotes(notes: string) {
         />
       </div>
 
-      <!-- 文风 -->
-      <div v-else-if="activeSection === 'style'" class="panel-host">
-        <StyleCardManager :book-id="bookIdFromRoute" :genre="currentBook?.genre" :closable="false" />
-      </div>
-
       <!-- 资产（M4：编辑迁往世界页） -->
       <div v-else-if="activeSection === 'assets'" class="panel-host">
         <WorldRedirectCard
@@ -173,16 +171,6 @@ async function saveBookNotes(notes: string) {
           title="地图已迁往世界页"
           description="地点、疆域、移动路径与底图拼贴——在世界页的地图画布里绘制；章节叙事时刻的世界状态自动推演。"
         />
-      </div>
-
-      <!-- 笔记 -->
-      <div v-else-if="activeSection === 'notes'" class="panel-host">
-        <NotesPanel :book="currentBook" :save-notes="saveBookNotes" :closable="false" />
-      </div>
-
-      <!-- 设置 -->
-      <div v-else-if="activeSection === 'settings'" class="panel-host">
-        <SettingsPanel />
       </div>
     </main>
   </div>

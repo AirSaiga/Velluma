@@ -203,6 +203,9 @@ class Book(Base):
     rolling_summary = Column(Text, nullable=True)
     # V4.2 Reader Mirror：期待账本 + 张力曲线 + 信息差（JSONB 整体存储，避免新建表）
     reader_mirror = Column(JSONB, default=dict)
+    # 系统陈词库本书豁免（完整落地批，设计稿 §6.4）：被豁免的 SystemCliche pattern 列表——
+    # 审计/扫描/三层合并时跳过（不删全局层，只本书不生效）
+    style_cliche_exemptions = Column(JSONB, default=list)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
@@ -951,6 +954,15 @@ class StyleCard(Base):
     dialogue_ratio_target = Column(Float, nullable=True)        # 对话占比目标（0-1）
     paragraph_rhythm = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # 意图旋钮档位（S4）：{knob_key: tier 1-5}——register/rhythm/density/warmth；
+    # 缺键 = 自动档（不注入该维度，交给画像与样本）。对话旋钮落 dialogue_ratio_target 不在此。
+    style_knobs = Column(JSONB, default=dict)
+    # 画像字段锁（完整落地批）：positive_profile 中被作者锁定的键名列表——
+    # 锁定字段不被「从样本提炼」结果覆盖（特殊文体/亲笔描述的保护，设计稿 §6.6）
+    locked_keys = Column(JSONB, default=list)
+    # 指纹写穿缓存：GET /style-fingerprint 计算后回写（读路径仍实时算保新鲜，
+    # 此列供未来消费方如漂移提醒直接取用，非读缓存）
+    fingerprint = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
@@ -978,6 +990,10 @@ class AuthorSample(Base):
     embedding = Column(Vector(1536), nullable=True)
     word_count = Column(Integer, default=0)
     source = Column(String(50), default="manual")               # manual/golden_snippet/published_chapter
+    # 时期标记（完整落地批）：recent=近期（语料聚合与检索兜底优先）/ early=早期（仅存档与逐条指纹）
+    era = Column(String(16), default="recent")
+    # 收藏（完整落地批）：检索兜底流优先取收藏样本（作者认证的最佳示范）
+    favorite = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utc_now)
 
 
@@ -1005,6 +1021,31 @@ class SystemCliche(Base):
     alternative = Column(Text, nullable=True)                   # 替代建议
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utc_now)
+
+
+class StyleInboxItem(Base):
+    """文风收件箱 - 候选池（文风模块重构 S3，docs/style-module-redesign.md §5/§7.1）。
+
+    业务含义：
+    - 写作台「这不像我」/ 负面清单抓虫等产生的**候选**，先进收件箱待作者过目，
+      绝不直接生效（红线：候选不落库生效，作者裁决即闸门）
+    - 与 world_event_candidates 同构的物理隔离候选池（✓/✗/撤销契约）
+    - confirm 负面候选 → 写入书级 StyleCard.negative_list + 同步 book.style_blacklist
+
+    kind 语义：
+    - negative_candidate  禁词候选 {word, alternative?, source_text?}
+    - sample_candidate    样本候选 {content, scene_type?}（预留，黄金片段自动汇入可走此）
+    """
+    __tablename__ = "style_inbox_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(50), default="negative_candidate")     # negative_candidate / sample_candidate
+    payload = Column(JSONB, default=dict)                       # kind 对应的结构化载荷
+    status = Column(String(20), default="pending")              # pending / confirmed / dismissed
+    source = Column(String(50), default="writing_desk")         # writing_desk / scan / audit
+    created_at = Column(DateTime, default=utc_now)
+    resolved_at = Column(DateTime, nullable=True)
 
 
 # ============================================================

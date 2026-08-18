@@ -99,6 +99,7 @@ class SettingsBundle:
             "previous_summary": self.previous_summary or "",
             "chapter_card": _chapter_card_text(self.chapter_card),
             "style_negative": _style_negative_text(self.style_card, self.style_blacklist),
+            "style_positive": render_style_positive(self.style_card),
             "rolling_summary": self.rolling_summary[:500] if self.rolling_summary else "",
             "core_motifs_taboos": self.core_motifs_taboos[:300] if self.core_motifs_taboos else "",
         }
@@ -142,6 +143,10 @@ class SettingsBundle:
             # 读者期待（书级 reader_mirror JSONB，随 book 对象零额外查询）：
             # 活跃条目按张力降序前 3，供方向权重（读者力）与 dock 零件生发消费
             "reader_expectations": _reader_expectations_view(self.book),
+            # 文风画像（S2 E2）：正面画像文本化（句长节奏/词汇层级等五维 + 段落节奏 +
+            # 对话占比目标），stitch-ghost 各模式 prompt 与心跳组件经此获得——
+            # 此前 adaptive 只消费负面清单，作者填得最认真的正面画像进不了主线
+            "style_positive": render_style_positive(self.style_card),
         }
 
     def nutrients(self) -> Dict[str, Any]:
@@ -530,6 +535,57 @@ def _style_negative_text(style_card: Any, style_blacklist: List[str]) -> str:
     """禁词/禁句式文本。"""
     words = _merge_banned_words(style_card, style_blacklist)
     return "、".join(words[:30]) if words else ""
+
+
+# ============================================================
+# 文风画像公共渲染器（S2 E2）
+# ============================================================
+
+# positive_profile 五维的展示名（与文风页高级面板/提炼 prompt 同一套词）
+_PROFILE_LABELS = {
+    "sentence_rhythm": "句长节奏",
+    "vocabulary": "词汇层级",
+    "register": "语域偏好",
+    "opening_habit": "开头习惯",
+    "ending_habit": "结尾习惯",
+}
+
+
+def render_style_positive(style_card: Any) -> str:
+    """把 StyleCard 的正面画像渲染为 prompt 用文本（画像 ≤10 行 + 旋钮意图行）。
+
+    包含：positive_profile 五维（键名翻译为中文标签）+ 段落节奏 + 对话占比目标
+    + 意图旋钮行（S4：style_knobs 手动档渲染为「意图」行，自动档不注入）。
+    空卡/无有效字段 → 空串（调用方 prompt 零变化）。
+    独立成公共函数供 adaptive 路由与 bundle 内部共用（单一渲染口径）。
+    """
+    if style_card is None:
+        return ""
+    lines: List[str] = []
+    positive = _get_attr(style_card, "positive_profile")
+    if isinstance(positive, dict):
+        for key, value in positive.items():
+            text = str(value or "").strip()
+            if not text:
+                continue
+            label = _PROFILE_LABELS.get(key, key)
+            lines.append(f"- {label}：{text[:120]}")
+    paragraph_rhythm = _get_attr(style_card, "paragraph_rhythm")
+    if paragraph_rhythm:
+        lines.append(f"- 段落节奏：{str(paragraph_rhythm)[:80]}")
+    dialogue_target = _get_attr(style_card, "dialogue_ratio_target")
+    if dialogue_target is not None:
+        try:
+            lines.append(f"- 对话占比目标：{float(dialogue_target) * 100:.0f}%")
+        except (TypeError, ValueError):
+            pass
+    # 意图旋钮行（S4）：手动档才渲染，自动档零注入
+    from backend.services.style.knobs import render_knob_lines
+
+    knobs = _get_attr(style_card, "style_knobs")
+    for knob_line in render_knob_lines(knobs if isinstance(knobs, dict) else {}):
+        lines.append(f"- {knob_line}")
+    return "\n".join(lines[:14])
 
 
 def _must_hit_events_text(card: Any) -> str:

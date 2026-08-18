@@ -40,6 +40,9 @@ from backend.services.llm import call_llm_with_usage
 from backend.services.llm.client import REASONING_DISABLED
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.prompts.adf_prompts import build_refine_prompt
+# S2 修复：此前读不存在的 positive_traits 字段（恒空串），refine 的文风契约从未生效；
+# 改用 segment_writer 的统一渲染器（正文生成与补埋同一份契约口径）
+from backend.services.workflows.adf.segment_writer import _build_style_contract
 from backend.services.workflows.adf.types import (
     StructureCheck,
     ChapterClimax,
@@ -286,7 +289,7 @@ async def refine_missing_preconditions(
             continue
 
         system_prompt, user_prompt = build_refine_prompt(
-            style_contract=getattr(style_card, "positive_traits", "") or "",
+            style_contract=_build_style_contract(style_card),
             precondition_id=pc.id,
             precondition_description=pc.description,
             must_use_terms=pc.must_use_terms,

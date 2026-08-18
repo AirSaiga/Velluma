@@ -437,9 +437,15 @@ export interface StyleCard {
   dialogue_ratio_target?: number | null
   paragraph_rhythm?: string | null
   notes?: string | null
+  /** 意图旋钮档位（S4）：{rhythm|register|density|warmth: 1-5}，缺键=自动档 */
+  style_knobs?: Record<string, number> | null
+  /** 画像字段锁：被锁字段不被「从样本提炼」覆盖 */
+  locked_keys?: string[] | null
   created_at?: string
   updated_at?: string
 }
+
+export type StyleKnobKey = 'rhythm' | 'register' | 'density' | 'warmth'
 
 export interface StyleExtractResponse {
   positive_profile: Record<string, string>
@@ -461,12 +467,124 @@ export interface AuthorSample {
   content: string
   word_count: number
   source: string
+  /** 时期标记：recent=近期（进语料聚合）/early=早期（仅存档） */
+  era?: 'recent' | 'early' | string
+  /** 收藏（检索兜底流优先） */
+  favorite?: boolean
   created_at: string
 }
 
 export interface AuthorSampleSearchHit {
   sample: AuthorSample
   distance: number
+}
+
+// ---- 文风指纹（S1 测量层，docs/style-module-redesign.md §7.2）----
+
+/** 单文本指纹（结构与 backend/services/style/fingerprint.py 对齐） */
+export interface TextFingerprint {
+  char_count: number
+  word_count: number
+  sentence_count: number
+  sentence_len_mean: number
+  sentence_len_median: number
+  /** 句长起伏（变异系数 CV，与审计 RhythmAuditor 同口径；< 0.35 偏单调） */
+  sentence_len_cv: number
+  /** ≤5 字碎句占比（句数 <10 时为 0） */
+  short_sentence_ratio: number
+  sentence_len_histogram: {
+    lte5: number
+    '6_10': number
+    '11_20': number
+    '21_30': number
+    gt30: number
+  }
+  /** 对话占比（与审计 DialogueAuditor 同口径） */
+  dialogue_ratio: number
+  paragraph_count: number
+  paragraph_len_mean: number
+  short_paragraph_ratio: number
+  punctuation: {
+    dash_per_1k: number
+    ellipsis_per_1k: number
+    exclaim_per_1k: number
+    question_per_1k: number
+  }
+  /** 修辞密度（light 模式 / 章指纹为 null） */
+  rhetoric: {
+    metaphor_per_500: number
+    micro_action_per_500: number
+    transition_per_500: number
+    ai_taste_score: number
+  } | null
+}
+
+export interface SampleFingerprint {
+  sample_id: string
+  fingerprint: TextFingerprint
+}
+
+export interface ChapterFingerprint {
+  chapter_id: string
+  chapter_number: number
+  title: string | null
+  fingerprint: TextFingerprint
+}
+
+export interface StyleFingerprint {
+  corpus: TextFingerprint
+  samples: SampleFingerprint[]
+  sample_count: number
+  /** 样本 <3 条，指纹仅供参考（诚实红线） */
+  low_confidence: boolean
+  chapters?: ChapterFingerprint[] | null
+  reference: {
+    cv_healthy: [number, number]
+    dialogue_target: number | null
+  }
+  /** 台账化：各负面清单词在近 10 章正文的命中次数（含 0） */
+  negative_hit_counts?: Record<string, number>
+}
+
+// ---- 文风收件箱 / 禁词扫描（S3 交互环）----
+
+export type StyleInboxKind = 'negative_candidate' | 'sample_candidate'
+
+export interface StyleInboxItem {
+  id: string
+  book_id: string
+  kind: StyleInboxKind
+  payload: {
+    word?: string
+    alternative?: string | null
+    source_text?: string
+    content?: string
+    scene_type?: string
+    [key: string]: unknown
+  }
+  status: 'pending' | 'confirmed' | 'dismissed'
+  source: string
+  created_at: string
+}
+
+export interface StyleScanOccurrence {
+  offset: number
+  context: string
+}
+
+export interface StyleScanHit {
+  word: string
+  alternative: string
+  severity: string
+  count: number
+  occurrences: StyleScanOccurrence[]
+}
+
+export interface StyleScanResult {
+  word_count: number
+  hit_words: number
+  total_hits: number
+  hits: StyleScanHit[]
 }
 
 // ---- 成本报告（CostReport，Phase 0 观测层）----

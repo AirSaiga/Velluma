@@ -188,11 +188,21 @@ def build_selection_rewrite_user_prompt(
     context_after: str,
     outline: str,
     user_instruction: str,
+    style_context: str = "",
 ) -> str:
     """构建 user prompt（所有 mode 共用同一结构）。
 
     user_instruction 作为"附加指令"附加在末尾（mode 是大方向，user_instruction 是细节）。
+    style_context（S2 E5）：文风约束块（画像/避免用词/笔迹示范，由路由层拼装）；
+    空串 → 不注入该块，prompt 与旧版逐字节一致。
     """
+    style_block = ""
+    if style_context and style_context.strip():
+        style_block = f"""
+【文风约束（改写后的文字要像同一个人写的）】
+{style_context.strip()}
+
+"""
     return f"""
 【章节大纲】
 {outline}
@@ -205,8 +215,7 @@ def build_selection_rewrite_user_prompt(
 
 【后文】
 {context_after}
-
-【用户附加指令】
+{style_block}【用户附加指令】
 {user_instruction or "（无附加指令，严格按 mode 规则执行）"}
 
 请提供【选中文本】的改写版本：

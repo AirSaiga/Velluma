@@ -44,7 +44,7 @@ export const chapterApi = {
   updateEntities: (chapterId: string, entityIds: any) =>
     requestJson(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
   /** NLE-ADF 2.0 深度清脂（Alt+Shift+↓）：LLM 重洗当前段落（AI 味密度超阈值才调 LLM） */
-  defatSelection: (data: { text: string; must_keep?: string[] }) =>
+  defatSelection: (data: { text: string; must_keep?: string[]; chapter_id?: string; book_id?: string }) =>
     requestJson('/defat_selection', { method: 'POST', body: JSON.stringify(data) }),
   publish: (chapterId: string, data: any) =>
     requestJson(`/chapters/${chapterId}/publish`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
@@ -242,6 +242,10 @@ import type {
   StyleExtractResponse,
   AuthorSample,
   AuthorSampleSearchHit,
+  StyleFingerprint,
+  StyleInboxItem,
+  StyleInboxKind,
+  StyleScanResult,
   CostReport,
   QualityReport,
 } from '../../../types'
@@ -292,7 +296,7 @@ export const styleApi = {
   /** 创建作者样本（保存时自动向量化）。 */
   createSample: async (
     bookId: string,
-    payload: { content: string; scene_type?: string; chapter_id?: string; source?: string },
+    payload: { content: string; scene_type?: string; chapter_id?: string; source?: string; era?: string },
   ): Promise<AuthorSample> => {
     return requestJson(`/books/${bookId}/samples`, {
       method: 'POST',
@@ -305,6 +309,50 @@ export const styleApi = {
     await requestRaw(`/books/${bookId}/samples/${sampleId}`, { method: 'DELETE' })
   },
 
+  /** 样本局部更新：时期标记（recent/early）与收藏。 */
+  patchSample: async (
+    bookId: string,
+    sampleId: string,
+    patch: { era?: 'recent' | 'early'; favorite?: boolean },
+  ): Promise<AuthorSample> => {
+    return requestRaw(`/books/${bookId}/samples/${sampleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }).then((r: any) => r.json())
+  },
+
+  /** 黄金片段（旧表）一键导入文风样本库（按内容去重）。 */
+  createSamplesFromGolden: async (bookId: string): Promise<AuthorSample[]> => {
+    return requestJson(`/books/${bookId}/samples/from-golden`, { method: 'POST' })
+  },
+
+  /** 系统陈词库列表（全局层，负面清单区折叠展示用）。 */
+  listSystemCliches: async (): Promise<Array<{ id: string; pattern: string; alternative?: string | null; severity: string }>> => {
+    return requestJson('/system/cliches?enabled_only=true')
+  },
+
+  /** 系统陈词库本书豁免列表。 */
+  getClicheExemptions: async (bookId: string): Promise<string[]> => {
+    const data = await requestJson(`/books/${bookId}/cliche-exemptions`)
+    return data?.patterns || []
+  },
+
+  /** 设置系统陈词库本书豁免（整体覆盖）。 */
+  putClicheExemptions: async (bookId: string, patterns: string[]): Promise<void> => {
+    await requestJson(`/books/${bookId}/cliche-exemptions`, {
+      method: 'PUT',
+      body: JSON.stringify({ patterns }),
+    })
+  },
+
+  /** 文风使用埋点（本地 JSONL，fire-and-forget，绝不阻塞业务）。 */
+  logStyleEvent: (bookId: string, kind: string, detail?: string): void => {
+    requestRaw(`/books/${bookId}/style/events`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, detail }),
+    }).catch(() => {})
+  },
+
   /** 向量检索相似样本。 */
   searchSamples: async (
     bookId: string,
@@ -315,6 +363,95 @@ export const styleApi = {
       method: 'POST',
       body: JSON.stringify({ query_text: queryText, scene_type: sceneType || null, limit: 3 }),
     })
+  },
+
+  /** 文风指纹：语料聚合 + 逐样本 + 可选章指纹（纯 code 测量，0 LLM）。 */
+  getFingerprint: async (
+    bookId: string,
+    withChapters = false,
+    chapterLimit = 50,
+  ): Promise<StyleFingerprint> => {
+    const query = `?with_chapters=${withChapters}&chapter_limit=${chapterLimit}`
+    return requestJson(`/books/${bookId}/style-fingerprint${query}`)
+  },
+
+  /** 从已发布章节一键收编作者样本（零状态坡道兜底）。 */
+  createSamplesFromChapters: async (
+    bookId: string,
+    opts?: { max_chapters?: number; excerpt_chars?: number },
+  ): Promise<AuthorSample[]> => {
+    return requestJson(`/books/${bookId}/samples/from-chapters`, {
+      method: 'POST',
+      body: JSON.stringify(opts || {}),
+    })
+  },
+
+  /** 删除章级文风覆盖（本章恢复继承书级）。 */
+  deleteChapterOverride: async (bookId: string, chapterId: string): Promise<void> => {
+    await requestRaw(`/books/${bookId}/style-card?chapter_id=${chapterId}`, { method: 'DELETE' })
+  },
+
+  // ---- 文风收件箱（S3）----
+
+  /** 收件箱待过目候选列表。 */
+  listInbox: async (bookId: string): Promise<StyleInboxItem[]> => {
+    return requestJson(`/books/${bookId}/style/inbox`)
+  },
+
+  /** 投递候选（写作台「这不像我」等入口；候选不直接生效）。 */
+  addInboxItem: async (
+    bookId: string,
+    kind: StyleInboxKind,
+    payload: Record<string, unknown>,
+    source = 'writing_desk',
+  ): Promise<StyleInboxItem> => {
+    return requestJson(`/books/${bookId}/style/inbox`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, payload, source }),
+    })
+  },
+
+  /** 确认候选（✓）：负面候选入负面清单，样本候选入库。 */
+  confirmInboxItem: async (bookId: string, itemId: string): Promise<StyleInboxItem> => {
+    return requestJson(`/books/${bookId}/style/inbox/${itemId}/confirm`, { method: 'POST' })
+  },
+
+  /** 忽略候选（✗）。 */
+  dismissInboxItem: async (bookId: string, itemId: string): Promise<StyleInboxItem> => {
+    return requestJson(`/books/${bookId}/style/inbox/${itemId}/dismiss`, { method: 'POST' })
+  },
+
+  /** 禁词扫描（三层合并 → 命中清单；替换由作者逐条确认后应用）。 */
+  scanNegative: async (
+    bookId: string,
+    target: { chapter_id?: string; text?: string },
+  ): Promise<StyleScanResult> => {
+    return requestJson(`/books/${bookId}/style/scan-negative`, {
+      method: 'POST',
+      body: JSON.stringify(target),
+    })
+  },
+
+  /** 试听（试衣间，SSE 打字机）：给定段落 + 文风配置 → 真实注入管线改写。 */
+  audition: (
+    bookId: string,
+    data: {
+      text: string
+      style_override?: Partial<StyleCard> | null
+      use_samples?: boolean
+      target_chars?: number
+    },
+    handlers: { onChunk?: (delta: string) => void; onDone?: (text: string) => void; onError?: (msg: string) => void },
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    return streamSse(`/books/${bookId}/style/audition`, data, {
+      onPayload: (payload: any) => {
+        if (payload.event === 'AUDITION_CHUNK' && payload.delta) handlers.onChunk?.(payload.delta)
+        else if (payload.event === 'AUDITION_DONE' && payload.text) handlers.onDone?.(payload.text)
+        return false
+      },
+      onError: (msg: string) => handlers.onError?.(msg),
+    }, signal)
   },
 }
 

@@ -25,6 +25,7 @@
   --scrollbar-thumb-hover: #a89e90;
 
   /* 强调色 - 暖靛紫 */
+  --accent-400: #9685c2;
   --accent-500: #7c6aad;
   --accent-600: #6d5dab;
 
@@ -59,6 +60,7 @@
   --scrollbar-thumb-hover: #5c5650;
 
   /* 强调色 - 深色模式稍亮 */
+  --accent-400: #8b6de8;
   --accent-500: #a78bfa;
   --accent-600: #c4b5fd;
 }

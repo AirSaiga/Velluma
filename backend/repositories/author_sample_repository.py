@@ -116,15 +116,20 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
         chapter_id: Optional[UUID] = None,
         source: str = "manual",
         embedding: Optional[List[float]] = None,
+        era: str = "recent",
     ) -> AuthorSample:
-        """创建作者样本（含可选 embedding）。"""
-        sample = AuthorSample(
-            book_id=book_id,
-            chapter_id=chapter_id,
-            scene_type=scene_type,
-            content=content,
-            embedding=embedding,
-            word_count=len(content),
-            source=source,
-        )
-        return await self.create(sample)
+        """创建作者样本（含可选 embedding）。
+
+        警示：BaseRepository.create 接受 dict payload（内部 commit + refresh），
+        直接传 ORM 实例会 TypeError（** 解包要求 mapping）。
+        """
+        return await self.create({
+            "book_id": book_id,
+            "chapter_id": chapter_id,
+            "scene_type": scene_type,
+            "content": content,
+            "embedding": embedding,
+            "word_count": len(content),
+            "source": source,
+            "era": era,
+        })

@@ -57,6 +57,14 @@ class StyleCardBase(BaseModel):
     )
     paragraph_rhythm: Optional[str] = Field(None, description="段落节奏说明")
     notes: Optional[str] = Field(None, description="备注")
+    style_knobs: Optional[dict] = Field(
+        None,
+        description="意图旋钮档位（S4）：{rhythm|register|density|warmth: tier 1-5}，缺键=自动档；None=不改，{}=清空",
+    )
+    locked_keys: Optional[List[str]] = Field(
+        None,
+        description="画像字段锁：被锁字段不被「从样本提炼」覆盖；None=不改，[]=清空",
+    )
 
 
 class StyleCardCreate(StyleCardBase):
@@ -94,6 +102,8 @@ class AuthorSampleBase(BaseModel):
     scene_type: str = Field("general", description="场景类型：dialogue/action/lyrical/suspense/general")
     content: str = Field(..., min_length=1, description="样本原文")
     source: str = Field("manual", description="来源：manual/golden_snippet/published_chapter")
+    era: str = Field("recent", description="时期：recent=近期（进语料聚合）/early=早期（仅存档）")
+    favorite: bool = Field(False, description="收藏（检索兜底流优先）")
 
 
 class AuthorSampleCreate(AuthorSampleBase):
@@ -183,6 +193,104 @@ class StyleExtractResponse(BaseModel):
     dialogue_ratio_target: Optional[float] = None
     paragraph_rhythm: Optional[str] = None
     degraded: Optional[dict] = Field(None, description="提炼降级标记（如有）")
+
+
+# ============================================================
+# 文风指纹（文风模块重构 S1 测量层，docs/style-module-redesign.md §7.2）
+# ============================================================
+
+class StyleFingerprintResponse(BaseModel):
+    """文风指纹响应：语料聚合指纹 + 逐样本指纹 + 可选章指纹（对账用）。
+
+    指纹 dict 结构见 services/style/fingerprint.py 模块头注释；
+    low_confidence：样本 <3 条，指纹仅供参考（设计稿 §6.6 诚实红线）。
+    """
+    corpus: dict = Field(..., description="语料聚合指纹（全量，含修辞密度；仅 era=recent 样本）")
+    samples: List[dict] = Field(..., description="逐样本轻量指纹 [{sample_id, fingerprint}]")
+    sample_count: int = Field(..., description="有效样本数")
+    low_confidence: bool = Field(..., description="样本尚少（<3），仅供参考")
+    chapters: Optional[List[dict]] = Field(
+        None,
+        description="章指纹（with_chapters=true 时返回，实时计算，light 模式）",
+    )
+    reference: dict = Field(
+        ...,
+        description="对账参考区间 {cv_healthy: [lo, hi], dialogue_target: float|null}",
+    )
+    negative_hit_counts: dict = Field(
+        default_factory=dict,
+        description="负面清单台账：各禁词在近 10 章正文的命中次数（with_chapters=true 时计算）",
+    )
+
+
+class SamplesFromChaptersRequest(BaseModel):
+    """从已发布章节收编作者样本（零状态坡道兜底通路，设计稿 §6.3）。"""
+    max_chapters: int = Field(3, ge=1, le=10, description="最多收编章数")
+    excerpt_chars: int = Field(2000, ge=200, le=8000, description="每章摘取字数上限")
+
+
+# ============================================================
+# 文风收件箱 / 试听 / 禁词扫描（S3 交互环）
+# ============================================================
+
+class StyleInboxAddRequest(BaseModel):
+    """投递文风候选进收件箱（写作台「这不像我」等入口）。"""
+    kind: str = Field("negative_candidate", description="候选类型：negative_candidate / sample_candidate")
+    payload: dict = Field(..., description="kind 对应载荷（negative_candidate: {word, alternative?, source_text?}）")
+    source: str = Field("writing_desk", description="来源标记：writing_desk / scan / audit")
+
+
+class StyleInboxItemResponse(BaseModel):
+    """收件箱条目。"""
+    id: UUID
+    book_id: UUID
+    kind: str
+    payload: dict
+    status: str
+    source: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StyleAuditionRequest(BaseModel):
+    """试听请求（文风页试衣间）：给定段落 + 文风配置 → 走真实注入管线改写。
+
+    style_override 非空时用其渲染画像/禁词（未保存的草稿配置可试听，
+    A/B 对照的机制基础）；为空用已存书级文风卡。
+    """
+    text: str = Field(..., min_length=10, max_length=4000, description="待试听段落")
+    style_override: Optional[StyleCardBase] = Field(None, description="草稿文风配置（不落库）")
+    use_samples: bool = Field(True, description="是否注入作者笔迹示范（A/B 基线版传 False）")
+    target_chars: int = Field(400, ge=80, le=2000, description="目标字数（约等于原段）")
+
+
+class StyleScanNegativeRequest(BaseModel):
+    """负面清单/三层禁词扫描（E3 审稿模式的数据源）。"""
+    chapter_id: Optional[UUID] = Field(None, description="扫描该章正文（content_text 优先）")
+    text: Optional[str] = Field(None, max_length=200000, description="直接给文本（与 chapter_id 二选一）")
+
+
+# ============================================================
+# 补全批次（完整落地）：样本时期/收藏、豁免、埋点
+# ============================================================
+
+class AuthorSamplePatchRequest(BaseModel):
+    """样本局部更新（时期标记 / 收藏）。"""
+    era: Optional[str] = Field(None, pattern="^(recent|early)$", description="recent/early")
+    favorite: Optional[bool] = None
+
+
+class ClicheExemptionsUpdate(BaseModel):
+    """系统陈词库本书豁免列表（整体覆盖写）。"""
+    patterns: List[str] = Field(default_factory=list, description="被豁免的 SystemCliche pattern 列表")
+
+
+class StyleEventRequest(BaseModel):
+    """文风使用埋点（本地 JSONL，无外部上报——桌面应用隐私边界内）。"""
+    kind: str = Field(..., max_length=50, description="事件：audition_run/golden_to_sample/not_like_me/inbox_confirm/inbox_dismiss/apply_preset")
+    detail: Optional[str] = Field(None, max_length=200)
 
 
 # ============================================================

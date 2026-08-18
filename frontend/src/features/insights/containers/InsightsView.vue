@@ -13,10 +13,10 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
-import { costReportApi, qualityReportApi } from '../../../services/api/domain'
+import { costReportApi, qualityReportApi, styleApi } from '../../../services/api/domain'
 import { reviewApi } from '../../../services/api/domain/review.api'
 import { useToast } from '../../../composables/useToast'
-import type { CostReport, QualityReport } from '../../../types'
+import type { CostReport, QualityReport, FindingItem } from '../../../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +123,42 @@ function formatTokens(n: number): string {
 
 // 质量报告重跑（POST /quality-report/rerun，后端双层审计）
 const { showToast } = useToast()
+
+/** 抓虫回流（补全批，设计稿 §6.4）：从审计报告的陈词命中提取高频短语 → 文风收件箱候选。
+ *  解析 ClichéAuditor 的「高频项：词×N、词×N」格式；候选过目才生效（红线）。 */
+async function collectClicheCandidates(qr: { chapterId: string; chapterNumber: number; report: QualityReport | null }) {
+  const bookId = bookIdFromRoute.value
+  if (!bookId || !qr.report?.findings?.length) return
+  const styleFindings = qr.report.findings.filter(
+    (f: FindingItem) => f.category === 'style' && f.detail?.includes('高频项：'),
+  )
+  const phrases: string[] = []
+  for (const f of styleFindings) {
+    const m = f.detail.match(/高频项：(.+)$/)
+    if (!m) continue
+    for (const part of m[1].split('、')) {
+      const word = part.replace(/×\d+$/, '').trim()
+      if (word && word.length >= 2 && !phrases.includes(word)) phrases.push(word)
+    }
+  }
+  if (phrases.length === 0) {
+    showToast('这章的审计报告里没有可提取的陈词命中', 'info')
+    return
+  }
+  try {
+    for (const word of phrases.slice(0, 5)) {
+      await styleApi.addInboxItem(
+        bookId, 'negative_candidate',
+        { word, source_text: `第${qr.chapterNumber}章审计命中` },
+        'audit',
+      )
+    }
+    styleApi.logStyleEvent(bookId, 'audit_collect')
+    showToast(`已把 ${Math.min(phrases.length, 5)} 个陈词投进文风收件箱——去文风页过目`, 'success')
+  } catch (e: any) {
+    showToast('投递失败: ' + (e?.message || ''), 'error')
+  }
+}
 const rerunningIds = ref<Set<string>>(new Set())
 
 async function rerunQuality(chapterId: string) {
@@ -256,6 +292,12 @@ async function rerunQuality(chapterId: string) {
             <p v-if="qr.report?.findings?.length" class="findings-count">
               {{ qr.report.findings.length }} 条审校发现
             </p>
+            <!-- 抓虫回流（补全批）：陈词命中 → 文风收件箱候选（过目才生效） -->
+            <button
+              v-if="qr.report?.findings?.some((f: FindingItem) => f.category === 'style' && f.detail?.includes('禁词/AI 腔命中'))"
+              class="collect-btn"
+              @click="collectClicheCandidates(qr)"
+            >＋ 收入负面清单（候选）</button>
           </template>
           <p v-else class="no-report">尚无质量报告。</p>
         </article>
@@ -526,6 +568,21 @@ async function rerunQuality(chapterId: string) {
   margin: 0.5rem 0 0;
   font-size: 0.6875rem;
   color: #d97706;
+}
+
+.collect-btn {
+  margin-top: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  color: #b45309;
+  background: #fef3c7;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.collect-btn:hover {
+  background: #fde68a;
 }
 
 .quality-actions {

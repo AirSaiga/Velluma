@@ -76,6 +76,7 @@ from backend.services.canon import build_canon_context_for_prompt
 from backend.services.reader_mirror import suggest_chapter_plan, load_mirror
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.observability.run_trace import clear_trace, create_trace, trace_event
+from backend.services.style.retrieval import retrieve_author_samples
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import (
     build_sse_event, build_sse_text_chunk, build_sse_error,
@@ -321,6 +322,17 @@ class _ADFStreamHandler:
             ctx = await _load_adf_context(self.db, self.chapter_id)
             chapter = ctx["chapter"]
 
+            # 文风执行层（S2 E1）：作者样本 few-shot 解封——原 `author_samples=None`
+            # （V3.2 v1 简化）。按章大纲检索 k=3（segment_writer 契约每条截 400 字，
+            # 传 List[str]——ORM 对象无 .text 字段会落进 str() 兜底）。
+            # 无样本 → 空 list，行为与原先完全一致
+            author_samples = await retrieve_author_samples(
+                self.db,
+                str(chapter.book_id),
+                (getattr(chapter, "outline_text", "") or "")[:200],
+                k=3,
+            )
+
             # ---- 初始化 RunRecorder ----
             recorder = RunRecorder(chapter_id=self.chapter_id, run_id=run_id)
             yield build_sse_event("GENERATION_RUN", "ADF 引擎已初始化", generation_run_id=run_id)
@@ -332,7 +344,7 @@ class _ADFStreamHandler:
                 chapter_card=ctx["chapter_card"],
                 entities=ctx["entities"],
                 style_card=ctx["style_card"],
-                author_samples=None,  # V3.2 v1 简化
+                author_samples=author_samples,  # S2 E1 解封：few-shot 文风锚定
                 recorder=recorder,
                 request=self.request,
                 previous_summary=ctx["previous_summary"],

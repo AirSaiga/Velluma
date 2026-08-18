@@ -62,10 +62,19 @@ class StyleClicheValidator(BaseValidator):
         cliches: List[tuple] = []  # [(pattern_str, is_regex, alternative, severity), ...]
 
         # 层 1：SystemCliche（通过 cliche_provider，DB 优先、降级到种子）
+        # 本书豁免（设计稿 §6.4 三层可见性）：books.style_cliche_exemptions 里的
+        # pattern 从系统层剔除（不删全局，仅本书不生效）
+        exemptions = set()
+        if context:
+            raw_exemptions = context.get("cliche_exemptions")
+            if isinstance(raw_exemptions, (list, tuple, set)):
+                exemptions = {str(p) for p in raw_exemptions if p}
         try:
             from backend.services.style.cliche_provider import get_active_cliches
             system_cliches = await get_active_cliches(db=None)  # 走缓存或种子降级
             for item in system_cliches:
+                if item.get("pattern", "") in exemptions:
+                    continue
                 cliches.append((
                     item.get("pattern", ""),
                     bool(item.get("is_regex", False)),
@@ -77,6 +86,8 @@ class StyleClicheValidator(BaseValidator):
             # 兜底：直接用 default_cliches 种子
             from backend.services.style.default_cliches import get_all_seed_cliches
             for item in get_all_seed_cliches():
+                if item.get("pattern", "") in exemptions:
+                    continue
                 cliches.append((
                     item.get("pattern", ""),
                     bool(item.get("is_regex", False)),

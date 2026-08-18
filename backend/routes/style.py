@@ -17,20 +17,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-文风体系 API 路由（Phase 1 CP2.2b 新建）。
+文风体系 API 路由（Phase 1 CP2.2b 新建；S1-S3 文风模块重构扩展，docs/style-module-redesign.md）。
 
-职责：提供 StyleCard / AuthorSample / SystemCliche 的 CRUD + StyleCard 提炼端点。
+职责：提供 StyleCard / AuthorSample / SystemCliche 的 CRUD + 文风指纹/收件箱/试听/扫描。
 
 端点清单：
 - StyleCard:
   - GET    /api/books/{id}/style-card           获取书级文风卡
-  - PUT    /api/books/{id}/style-card           创建/更新书级文风卡
+  - PUT    /api/books/{id}/style-card           创建/更新书级文风卡（章级覆盖优先）
+  - DELETE /api/books/{id}/style-card           删除章级覆盖（S3 恢复继承，须带 chapter_id）
   - POST   /api/books/{id}/style-card/extract   从样本提炼文风画像（Match My Style）
+- 文风指纹（S1）:
+  - GET    /api/books/{id}/style-fingerprint    语料聚合+逐样本+章指纹（纯 code 实时算）
 - AuthorSample:
   - GET    /api/books/{id}/samples              列出作者样本
   - POST   /api/books/{id}/samples              创建作者样本（含向量化）
   - DELETE /api/books/{id}/samples/{sample_id}  删除作者样本
   - POST   /api/books/{id}/samples/search       向量检索相似样本
+  - POST   /api/books/{id}/samples/from-chapters 已发布章节一键收编（零状态坡道兜底）
+- 文风收件箱（S3）:
+  - GET    /api/books/{id}/style/inbox          待过目候选列表
+  - POST   /api/books/{id}/style/inbox          投递候选（不直接生效）
+  - POST   /api/books/{id}/style/inbox/{item_id}/confirm   确认（负面候选入清单/样本入库）
+  - POST   /api/books/{id}/style/inbox/{item_id}/dismiss   忽略
+- 试听/扫描（S3）:
+  - POST   /api/books/{id}/style/audition       试听改写（SSE，真实注入管线，支持 A/B 基线）
+  - POST   /api/books/{id}/style/scan-negative  三层禁词扫描（纯 code，审稿模式数据源）
 - SystemCliche:
   - GET    /api/system/cliches                  列出系统禁词
   - POST   /api/system/cliches                  新增系统禁词
@@ -38,14 +50,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   - DELETE /api/system/cliches/{id}             删除系统禁词
 """
 
+import asyncio
 import logging
-from typing import List, Optional
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 from backend.core.dependencies import get_db
+from backend.models import Chapter, StyleInboxItem
 from backend.repositories import (
     BookRepository,
     StyleCardRepository,
@@ -65,11 +83,31 @@ from backend.schemas import (
     SystemClicheResponse,
     StyleExtractRequest,
     StyleExtractResponse,
+    StyleFingerprintResponse,
+    SamplesFromChaptersRequest,
+    StyleInboxAddRequest,
+    StyleInboxItemResponse,
+    StyleAuditionRequest,
+    StyleScanNegativeRequest,
+    AuthorSamplePatchRequest,
+    ClicheExemptionsUpdate,
+    StyleEventRequest,
 )
 from backend.services.style.extractor import extract_style_card
+from backend.services.style.fingerprint import (
+    aggregate_corpus,
+    compute_text_fingerprint,
+    count_negative_hits,
+)
+from backend.services.style.retrieval import retrieve_author_samples
 from backend.services.style.cliche_provider import invalidate_cache as invalidate_cliche_cache
+from backend.services.validation.thresholds import CV_THRESHOLD_LO, CV_THRESHOLD_HI
+from backend.services.context.settings_bundle import render_style_positive
+from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
 from backend.services.llm.embedding import get_embedding
+from backend.services.prompts.adaptive_prompts import build_audition_prompt
 from backend.services.utils.logging import get_runtime_logger
+from backend.services.utils.sse import build_sse_event, build_sse_error
 
 logger = get_runtime_logger(__name__)
 
@@ -223,6 +261,7 @@ async def create_author_sample(
         scene_type=payload.scene_type,
         chapter_id=payload.chapter_id,
         source=payload.source,
+        era=payload.era,
         embedding=embedding,
     )
     await db.commit()
@@ -280,6 +319,667 @@ async def search_author_samples(
         )
         for sample, distance in hits
     ]
+
+
+# ============================================================
+# 文风指纹（S1 测量层，docs/style-module-redesign.md §7.2）
+# ============================================================
+
+# 语料聚合上限：防极端大样本库拖慢请求（拼接后整体测量，见 aggregate_corpus）
+_CORPUS_MAX_CHARS = 200_000
+
+
+@router.get("/books/{book_id}/style-fingerprint", response_model=StyleFingerprintResponse)
+async def get_book_style_fingerprint(
+    book_id: UUID,
+    with_chapters: bool = Query(False, description="附带章指纹（对账区数据，纯 code 实时计算）"),
+    chapter_limit: int = Query(50, ge=1, le=200, description="章指纹取最近 N 章"),
+    db: AsyncSession = Depends(get_db),
+    repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+    style_repo: StyleCardRepository = Depends(get_style_card_repo),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """文风指纹：语料聚合指纹 + 逐样本指纹 + 可选章指纹（对账）。
+
+    纯 code 测量（0 LLM），作者样本与审计侧用同一把尺子
+    （services/style/fingerprint.py，对拍单测锁定同值）。
+    章指纹实时计算而非回填 QualityReport——永远与当前正文同步，
+    且不会用 metrics-only 报告行遮蔽真实审计报告。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    samples = await repo.list_by_book(book_id)
+    # 语料聚合只用近期样本（era != early）——文风会进化，早期的字只存档不掺语料
+    recent_samples = [s for s in samples if (getattr(s, "era", "recent") or "recent") != "early"]
+    corpus = aggregate_corpus(
+        [s.content for s in recent_samples], max_chars=_CORPUS_MAX_CHARS,
+    )
+    sample_fps = [
+        {"sample_id": str(s.id), "fingerprint": compute_text_fingerprint(s.content, light=True)}
+        for s in samples
+    ]
+
+    # 对账目标：书级文风卡的对话占比目标 + 审计侧 CV 健康区间（同一参考系）
+    card = await style_repo.get_effective_card(book_id, chapter_id=None)
+    dialogue_target = float(card.dialogue_ratio_target) if card and card.dialogue_ratio_target is not None else None
+
+    chapters_payload: Optional[List[dict]] = None
+    negative_hit_counts: Dict[str, int] = {}
+    if with_chapters:
+        query = (
+            select(Chapter)
+            .where(Chapter.book_id == book_id)
+            .order_by(Chapter.chapter_number.desc())
+            .limit(chapter_limit)
+        )
+        result = await db.execute(query)
+        rows = list(result.scalars().all())
+        rows.reverse()  # 章 1 → N 的时间序，前端直接画趋势
+        chapters_payload = [
+            {
+                "chapter_id": str(c.id),
+                "chapter_number": c.chapter_number,
+                "title": c.title or c.chapter_name,
+                "fingerprint": compute_text_fingerprint(c.content_text or "", light=True),
+            }
+            for c in rows
+            if (c.content_text or "").strip()
+        ]
+        # 台账化：负面清单各词在近 10 章正文的命中次数（含 0——反向提醒可能不需要该词）
+        negative_words = []
+        if card and card.negative_list:
+            for item in card.negative_list:
+                if isinstance(item, dict):
+                    w = item.get("word") or item.get("phrase") or ""
+                    if w:
+                        negative_words.append(w)
+        if negative_words:
+            recent_chapter_texts = [
+                c.content_text for c in rows[-10:] if (c.content_text or "").strip()
+            ]
+            negative_hit_counts = count_negative_hits(recent_chapter_texts, negative_words)
+
+    # 指纹写穿缓存：供未来消费方（漂移提醒等）直接取用；读路径仍实时算保新鲜
+    if card is not None:
+        try:
+            card.fingerprint = {"corpus": corpus, "sample_count": len(samples)}
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"[StyleFingerprint] 指纹写穿缓存失败（不阻塞）: {e}")
+            await db.rollback()
+
+    return StyleFingerprintResponse(
+        corpus=corpus,
+        samples=sample_fps,
+        sample_count=len(samples),
+        low_confidence=len(recent_samples) < 3,
+        chapters=chapters_payload,
+        reference={
+            "cv_healthy": [CV_THRESHOLD_LO, CV_THRESHOLD_HI],
+            "dialogue_target": dialogue_target,
+        },
+        negative_hit_counts=negative_hit_counts,
+    )
+
+
+@router.post("/books/{book_id}/samples/from-chapters", response_model=List[AuthorSampleResponse], status_code=201)
+async def create_samples_from_chapters(
+    book_id: UUID,
+    payload: SamplesFromChaptersRequest,
+    db: AsyncSession = Depends(get_db),
+    repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """从已发布章节一键收编作者样本（文风页零状态坡道兜底，设计稿 §6.3）。
+
+    已发布章节优先；一本从未发布的书回落到有正文的章节
+    （作者主导写作模式下正文即作者的字）。摘取章节开头至句界。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    def _plain_text(html: str) -> str:
+        """画布正文是 HTML（编辑器 getHTML 落库），收编前转纯文本（与 memory_indexing 同口径）。"""
+        plain = re.sub(r"<[^>]+>", "\n", html or "")
+        return re.sub(r"\n{3,}", "\n\n", plain).strip()
+
+    def _has_content(c: Chapter) -> bool:
+        # 必须按纯文本判空——空文档落库为 "<p></p>"，HTML 判空会误判为有正文
+        return bool(_plain_text(c.content_text or ""))
+
+    base = (
+        select(Chapter)
+        .where(Chapter.book_id == book_id)
+        .order_by(Chapter.chapter_number.desc())
+        .limit(50)
+    )
+    result = await db.execute(base)
+    recent = list(result.scalars().all())
+
+    published = [c for c in recent if c.status == "published" and _has_content(c)][: payload.max_chapters]
+    picked = published or [c for c in recent if _has_content(c)][: payload.max_chapters]
+    if not picked:
+        raise HTTPException(status_code=404, detail="本书尚无可收编的章节正文")
+
+    # 幂等：已收编过的章节跳过（防重复点击产生重复样本，与 from-golden 去重同原则）
+    existing = await repo.list_by_book(book_id)
+    collected_chapter_ids = {s.chapter_id for s in existing if s.source == "published_chapter" and s.chapter_id}
+    picked = [c for c in picked if c.id not in collected_chapter_ids]
+
+    picked.reverse()  # 按章号升序收编，样本列表时序自然
+
+    created = []
+    for chapter in picked:
+        excerpt = _excerpt_to_sentence_boundary(_plain_text(chapter.content_text or ""), payload.excerpt_chars)
+        if not excerpt:
+            continue
+        embedding = None
+        try:
+            embedding = await get_embedding(excerpt)
+        except Exception as e:
+            logger.warning(f"[AuthorSample] 章节收编向量化失败（不阻断）: {e}")
+        sample = await repo.create_with_embedding(
+            book_id=book_id,
+            content=excerpt,
+            scene_type="general",
+            chapter_id=chapter.id,
+            source="published_chapter",
+            embedding=embedding,
+        )
+        created.append(sample)
+
+    await db.commit()
+    for sample in created:
+        await db.refresh(sample)
+    return created
+
+
+def _excerpt_to_sentence_boundary(text: str, max_chars: int) -> str:
+    """摘取章节开头至句界（最后一个中文句末标点），防半截句入库。"""
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    matches = list(re.finditer(r"[。！？!?…]", window))
+    if not matches:
+        return window
+    cut = matches[-1].end()
+    # 句界截断后过短（章节开头长段无句读）则原样返回
+    return window[:cut] if cut >= 100 else window
+
+
+# ============================================================
+# 章级覆盖删除（S3「恢复继承」）+ 文风收件箱 + 试听 + 禁词扫描
+# ============================================================
+
+@router.delete("/books/{book_id}/style-card", status_code=204)
+async def delete_chapter_style_override(
+    book_id: UUID,
+    chapter_id: UUID = Query(..., description="要删除的章级覆盖（书级卡不可删，走 PUT 清空字段）"),
+    db: AsyncSession = Depends(get_db),
+    repo: StyleCardRepository = Depends(get_style_card_repo),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """删除章级文风覆盖（本章恢复继承书级文风）。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    card = await repo.get_chapter_override(chapter_id)
+    if not card or card.book_id != book_id:
+        raise HTTPException(status_code=404, detail="本章没有章级文风覆盖")
+    await repo.delete(card)
+    await db.commit()
+
+
+@router.get("/books/{book_id}/style/inbox", response_model=List[StyleInboxItemResponse])
+async def list_style_inbox(
+    book_id: UUID,
+    include_resolved: bool = Query(False, description="含已确认/已忽略条目"),
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """文风收件箱：待作者过目的候选（pending 优先，新→旧）。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    query = select(StyleInboxItem).where(StyleInboxItem.book_id == book_id)
+    if not include_resolved:
+        query = query.where(StyleInboxItem.status == "pending")
+    query = query.order_by(StyleInboxItem.created_at.desc()).limit(100)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+@router.post("/books/{book_id}/style/inbox", response_model=StyleInboxItemResponse, status_code=201)
+async def add_style_inbox_item(
+    book_id: UUID,
+    payload: StyleInboxAddRequest,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """投递文风候选（写作台「这不像我」等入口）。候选不直接生效——进收件箱待过目。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    if payload.kind == "negative_candidate":
+        word = str(payload.payload.get("word") or "").strip()
+        if not word:
+            raise HTTPException(status_code=422, detail="negative_candidate 需要 payload.word")
+    item = StyleInboxItem(
+        book_id=book_id,
+        kind=payload.kind,
+        payload=payload.payload,
+        source=payload.source,
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post("/books/{book_id}/style/inbox/{item_id}/confirm", response_model=StyleInboxItemResponse)
+async def confirm_style_inbox_item(
+    book_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+    style_repo: StyleCardRepository = Depends(get_style_card_repo),
+    sample_repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+):
+    """确认候选（✓）。negative_candidate → 写入书级文风卡负面清单并同步书级黑名单；
+    sample_candidate → 存入作者样本库（自动向量化）。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    item = (
+        await db.execute(
+            select(StyleInboxItem).where(
+                StyleInboxItem.id == item_id, StyleInboxItem.book_id == book_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="收件箱条目不存在")
+    if item.status != "pending":
+        raise HTTPException(status_code=409, detail=f"条目已处理（{item.status}）")
+
+    if item.kind == "negative_candidate":
+        word = str(item.payload.get("word") or "").strip()
+        alternative = str(item.payload.get("alternative") or "").strip() or None
+        card = await style_repo.get_effective_card(book_id, chapter_id=None)
+        if card is None:
+            from backend.models import StyleCard as StyleCardModel
+            card = StyleCardModel(book_id=book_id, negative_list=[])
+            db.add(card)
+        negative = list(card.negative_list or [])
+        if not any((e.get("word") if isinstance(e, dict) else "") == word for e in negative):
+            negative.append({"word": word, "alternative": alternative})
+            card.negative_list = negative
+        # 与书级黑名单保持一致（旧消费方仍读 book.style_blacklist）
+        blacklist = list(book.style_blacklist or [])
+        if word not in blacklist:
+            blacklist.append(word)
+            book.style_blacklist = blacklist
+        invalidate_cliche_cache()
+    elif item.kind == "sample_candidate":
+        content = str(item.payload.get("content") or "").strip()
+        if not content:
+            raise HTTPException(status_code=422, detail="sample_candidate 缺少 content")
+        embedding = None
+        try:
+            embedding = await get_embedding(content)
+        except Exception as e:
+            logger.warning(f"[StyleInbox] 样本候选向量化失败（不阻断）: {e}")
+        await sample_repo.create_with_embedding(
+            book_id=book_id,
+            content=content,
+            scene_type=str(item.payload.get("scene_type") or "general"),
+            source="golden_snippet",
+            embedding=embedding,
+        )
+    else:
+        raise HTTPException(status_code=422, detail=f"未知候选类型: {item.kind}")
+
+    item.status = "confirmed"
+    item.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post("/books/{book_id}/style/inbox/{item_id}/dismiss", response_model=StyleInboxItemResponse)
+async def dismiss_style_inbox_item(
+    book_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """忽略候选（✗）。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    item = (
+        await db.execute(
+            select(StyleInboxItem).where(
+                StyleInboxItem.id == item_id, StyleInboxItem.book_id == book_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="收件箱条目不存在")
+    if item.status != "pending":
+        raise HTTPException(status_code=409, detail=f"条目已处理（{item.status}）")
+    item.status = "dismissed"
+    item.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post("/books/{book_id}/style/audition")
+async def style_audition(
+    book_id: UUID,
+    request: StyleAuditionRequest,
+    book_repo: BookRepository = Depends(get_book_repo),
+    style_repo: StyleCardRepository = Depends(get_style_card_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """试听（试衣间）：给定段落 + 文风配置 → 真实注入管线改写，SSE 打字机推流。
+
+    与 stitch-ghost 同一套基座/画像块/示范块（build_audition_prompt）——
+    作者在文风页看到的改写效果，就是写作台续写会走的效果。
+    style_override 非空 = 试听未保存的草稿配置；use_samples=False = A/B 基线版。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    if request.style_override is not None:
+        style_positive = render_style_positive(request.style_override)
+    else:
+        card = await style_repo.get_effective_card(book_id, chapter_id=None)
+        style_positive = render_style_positive(card)
+
+    author_samples: List[str] = []
+    if request.use_samples:
+        author_samples = await retrieve_author_samples(
+            db, str(book_id), request.text[:200], k=2,
+        )
+
+    target_chars = request.target_chars or max(80, len(request.text))
+    system_prompt, user_prompt = build_audition_prompt(
+        text=request.text,
+        style_positive=style_positive,
+        author_samples=author_samples,
+        target_chars=target_chars,
+    )
+
+    async def _stream():
+        try:
+            result = await call_llm_with_usage(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_type="creative",
+                temperature=0.7,
+                max_tokens=max(1200, target_chars * 2 + 1000),
+                reasoning_config=REASONING_DISABLED,
+            )
+            text = (result.content or "").strip().strip("“").strip("”").strip()
+            if not text:
+                yield build_sse_error("试听产出为空，请重试")
+                return
+            yield build_sse_event("AUDITION_START", "")
+            for pos in range(0, len(text), 12):
+                yield build_sse_event("AUDITION_CHUNK", "", delta=text[pos: pos + 12])
+                await asyncio.sleep(0.03)
+            yield build_sse_event("AUDITION_DONE", "", text=text, word_count=len(text))
+        except Exception as e:
+            logger.warning(f"[style/audition] 失败: {e}")
+            yield build_sse_error(f"试听失败: {e}")
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@router.post("/books/{book_id}/style/scan-negative")
+async def scan_negative(
+    book_id: UUID,
+    request: StyleScanNegativeRequest,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+    style_repo: StyleCardRepository = Depends(get_style_card_repo),
+):
+    """禁词扫描（E3 审稿模式数据源，纯 code 0 LLM）。
+
+    三层禁词（系统陈词库 + 书级黑名单 + 文风卡负面清单）合并后扫描文本，
+    返回按词聚合的命中清单（替代建议 + 每处上下文）。
+    替换由作者逐条 ✓ 后前端应用——本端点绝不改正文。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    text = request.text or ""
+    if request.chapter_id:
+        chapter = (
+            await db.execute(select(Chapter).where(Chapter.id == request.chapter_id))
+        ).scalar_one_or_none()
+        if not chapter or chapter.book_id != book_id:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        text = chapter.content_text or chapter.draft_text or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="待扫描文本为空")
+
+    card = await style_repo.get_effective_card(book_id, chapter_id=None)
+    card_negative = list(card.negative_list or []) if card else []
+
+    from backend.services.workflows.validators import StyleClicheValidator
+
+    validator = StyleClicheValidator()
+    await validator._ensure_loaded({
+        "style_blacklist": book.style_blacklist or [],
+        "style_negative_list": card_negative,
+        # 系统层本书豁免（完整落地批）：扫描同样尊重豁免
+        "cliche_exemptions": getattr(book, "style_cliche_exemptions", None) or [],
+    })
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for compiled, alternative, severity in validator._compiled_patterns:
+        for m in compiled.finditer(text):
+            word = m.group(0)
+            entry = grouped.setdefault(word, {
+                "word": word,
+                "alternative": alternative or "",
+                "severity": severity or "warning",
+                "count": 0,
+                "occurrences": [],
+            })
+            offset = m.start()
+            context = text[max(0, offset - 15): offset + len(word) + 15]
+            entry["count"] += 1
+            if len(entry["occurrences"]) < 5:
+                entry["occurrences"].append({"offset": offset, "context": context})
+
+    hits = sorted(grouped.values(), key=lambda e: -e["count"])[:50]
+    return {"word_count": len(text), "hit_words": len(hits), "total_hits": sum(e["count"] for e in hits), "hits": hits}
+
+
+# ============================================================
+# 补全批次（完整落地）：样本时期/收藏 PATCH / 黄金片段导入 / 系统陈词豁免 / 埋点
+# ============================================================
+
+@router.patch("/books/{book_id}/samples/{sample_id}", response_model=AuthorSampleResponse)
+async def patch_author_sample(
+    book_id: UUID,
+    sample_id: UUID,
+    payload: AuthorSamplePatchRequest,
+    db: AsyncSession = Depends(get_db),
+    repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+):
+    """样本局部更新：时期标记（recent/early）与收藏（检索兜底优先级）。"""
+    sample = await repo.get_by_id(sample_id)
+    if not sample or sample.book_id != book_id:
+        raise HTTPException(status_code=404, detail="样本不存在")
+    if payload.era is not None:
+        sample.era = payload.era
+    if payload.favorite is not None:
+        sample.favorite = payload.favorite
+    await repo.update(sample)
+    await db.commit()
+    await db.refresh(sample)
+    return sample
+
+
+@router.post("/books/{book_id}/samples/from-golden", response_model=List[AuthorSampleResponse], status_code=201)
+async def create_samples_from_golden(
+    book_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """把书级 golden_snippets（旧黄金片段表）一键导入文风样本库。
+
+    设计稿 §7.2 端点补全：按内容精确去重（已导入过的跳过）；
+    导入后 source=golden_snippet、era=recent。存量书的黄金片段
+    由此一次性进入 few-shot 与指纹语料（评估结论：旧表维持双写，见 §11）。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    snippets = [s for s in (book.golden_snippets or []) if isinstance(s, str) and s.strip()]
+    if not snippets:
+        raise HTTPException(status_code=404, detail="本书没有黄金片段可导入")
+
+    existing = await repo.list_by_book(book_id)
+    seen_contents = {(s.content or "").strip() for s in existing}
+
+    created = []
+    for snippet in snippets:
+        if snippet.strip() in seen_contents:
+            continue
+        embedding = None
+        try:
+            embedding = await get_embedding(snippet)
+        except Exception as e:
+            logger.warning(f"[AuthorSample] 黄金片段导入向量化失败（不阻断）: {e}")
+        sample = await repo.create_with_embedding(
+            book_id=book_id,
+            content=snippet,
+            scene_type="general",
+            source="golden_snippet",
+            embedding=embedding,
+        )
+        created.append(sample)
+    await db.commit()
+    for sample in created:
+        await db.refresh(sample)
+    return created
+
+
+@router.get("/books/{book_id}/cliche-exemptions", response_model=ClicheExemptionsUpdate)
+async def get_cliche_exemptions(
+    book_id: UUID,
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """系统陈词库本书豁免列表。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return ClicheExemptionsUpdate(patterns=list(getattr(book, "style_cliche_exemptions", None) or []))
+
+
+@router.put("/books/{book_id}/cliche-exemptions", response_model=ClicheExemptionsUpdate)
+async def put_cliche_exemptions(
+    book_id: UUID,
+    payload: ClicheExemptionsUpdate,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """设置系统陈词库本书豁免（整体覆盖；不删全局层，仅本书审计/扫描/合并不生效）。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    book.style_cliche_exemptions = [p for p in payload.patterns if p]
+    db.add(book)
+    await db.commit()
+    invalidate_cliche_cache()
+    return ClicheExemptionsUpdate(patterns=book.style_cliche_exemptions)
+
+
+# ---- 埋点（本地 JSONL，零外部上报；桌面应用隐私边界内） ----
+_STYLE_EVENTS_FILE = "data/style_events.jsonl"
+
+
+def _append_style_event(book_id: str, kind: str, detail: Optional[str]) -> None:
+    """追加事件到本地 JSONL（失败静默——埋点绝不阻塞业务）。"""
+    import json as _json
+    from datetime import datetime, timezone as _tz
+    from pathlib import Path as _Path
+
+    try:
+        path = _Path(_STYLE_EVENTS_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps({
+                "ts": datetime.now(_tz.utc).isoformat(),
+                "book_id": book_id,
+                "kind": kind,
+                "detail": detail or "",
+            }, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"[StyleEvent] 写入失败（静默）: {e}")
+
+
+@router.post("/books/{book_id}/style/events", status_code=204)
+async def log_style_event(
+    book_id: UUID,
+    payload: StyleEventRequest,
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """记录文风使用事件（试听/喂养/收件箱裁决/预设——设计稿 §8 验证点的数据基础）。"""
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    _append_style_event(str(book_id), payload.kind, payload.detail)
+
+
+@router.get("/books/{book_id}/style/events/summary")
+async def style_events_summary(
+    book_id: UUID,
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """事件计数汇总（验证点：试听点击量 / 喂养率 / 收件箱采纳率）。"""
+    import json as _json
+    from collections import Counter as _Counter
+    from pathlib import Path as _Path
+
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    counts: Dict[str, int] = _Counter()
+    try:
+        path = _Path(_STYLE_EVENTS_FILE)
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        ev = _json.loads(line)
+                        if ev.get("book_id") == str(book_id):
+                            counts[ev.get("kind", "?")] += 1
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    total = sum(counts.values())
+    confirms = counts.get("inbox_confirm", 0)
+    return {
+        "total": total,
+        "by_kind": dict(counts),
+        "inbox_accept_rate": round(confirms / (confirms + counts.get("inbox_dismiss", 0)), 3)
+        if (confirms + counts.get("inbox_dismiss", 0)) > 0 else None,
+    }
 
 
 # ============================================================
