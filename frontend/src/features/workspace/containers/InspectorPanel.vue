@@ -23,6 +23,8 @@ import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
 import { refineryApi, styleApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
+import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
 type InspectorTab = 'now' | 'chapter' | 'review'
@@ -65,6 +67,7 @@ watch(
 )
 watch(() => session.finishReport?.value, (report) => {
   if (report) activeTab.value = 'review'
+  fixStates.value = {}  // 新一轮审计 → 残句修复裁决态复位
 })
 watch(() => session.settleResult?.value, (result) => {
   if (result) activeTab.value = 'review'
@@ -165,6 +168,7 @@ function handleEditCanon() {
 // ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次）=====
 const worldModelOpen = ref(false)
 const worldModelText = ref('')
+
 async function toggleWorldModelDebug() {
   worldModelOpen.value = !worldModelOpen.value
   if (!worldModelOpen.value) return
@@ -194,6 +198,64 @@ async function toggleWorldModelDebug() {
   } catch (e: any) {
     worldModelText.value = `读取失败：${e.message}`
   }
+}
+
+// ===== 残句定点修复（P1.2 作者裁决式：修复句过目 → 采纳才替换正文）=====
+interface SentenceFixState { loading?: boolean; fixed?: string; error?: string; reason?: string; adopted?: boolean }
+const fixStates = ref<Record<number, SentenceFixState>>({})
+
+async function handleFixSentence(i: number, d: any) {
+  const chapterId = selectedChapterId.value
+  const sentence = typeof d === 'string' ? d : d?.sentence
+  if (!chapterId || !sentence) return
+  fixStates.value = { ...fixStates.value, [i]: { loading: true } }
+  dispatchCollabEvent('sentence_fix', { action: 'propose' })
+  try {
+    const r = await adaptiveApi.fixSentence(chapterId, {
+      sentence,
+      defect_type: d?.type || '',
+      description: d?.description || '',
+    })
+    fixStates.value = {
+      ...fixStates.value,
+      [i]: r.fixed ? { fixed: r.fixed } : { reason: r.reason },
+    }
+  } catch (e: any) {
+    fixStates.value = { ...fixStates.value, [i]: { error: e?.message || '修复失败' } }
+  }
+}
+
+/** 在文档中定位原句并替换（逐 textblock 搜索；编辑器自身的 update-chapter 机制落库） */
+function replaceSentenceInDoc(editor: any, original: string, fixed: string): boolean {
+  let done = false
+  editor.state.doc.descendants((node: any, pos: number) => {
+    if (done || !node.isTextblock) return true
+    const idx = node.textContent.indexOf(original)
+    if (idx < 0) return true
+    const from = pos + 1 + idx
+    editor.chain().insertText(fixed, from, from + original.length).run()
+    done = true
+    return false
+  })
+  return done
+}
+
+function adoptFix(i: number, d: any) {
+  const original = typeof d === 'string' ? d : d?.sentence
+  const fixed = fixStates.value[i]?.fixed
+  const editor = chapterEditorHandle.value
+  if (!editor || !original || !fixed) return
+  if (!replaceSentenceInDoc(editor, original, fixed)) {
+    fixStates.value = { ...fixStates.value, [i]: { error: '未在正文中定位到该句（可能已改动）' } }
+    return
+  }
+  fixStates.value = { ...fixStates.value, [i]: { fixed, adopted: true } }
+  dispatchCollabEvent('sentence_fix', { action: 'adopt' })
+}
+
+function dismissFix(i: number) {
+  fixStates.value = { ...fixStates.value, [i]: {} }
+  dispatchCollabEvent('sentence_fix', { action: 'reject' })
 }
 
 // ===== 本章文风卡（S3：章级特例状态 + 跳文风页深链）=====
@@ -379,14 +441,33 @@ async function handleResetChapterStyle() {
           <!-- 完稿审计报告 -->
           <section v-if="session.finishReport?.value?.report" class="adaptive-report">
             <div class="section-label">审计报告</div>
-            <!-- 残句 -->
+            <!-- 残句（P1.2：每条可定点修复——修复句过目，采纳才落正文） -->
             <div v-if="session.finishReport.value.report.sentence_defects?.length" class="report-block report-block--warn">
               <div class="report-block-label">残句（{{ session.finishReport.value.report.sentence_defects.length }}）</div>
               <div
                 v-for="(d, i) in session.finishReport.value.report.sentence_defects.slice(0, 5)"
                 :key="'sd' + i"
-                class="report-item"
-              >{{ typeof d === 'string' ? d : (d.text || d.fragment || JSON.stringify(d)) }}</div>
+                class="report-item report-item--fixable"
+              >
+                <template v-if="typeof d === 'string'">{{ d }}</template>
+                <template v-else>
+                  <div class="fix-sent">{{ d.sentence }}</div>
+                  <div v-if="d.description" class="fix-desc">{{ d.description }}</div>
+                </template>
+                <!-- 修复流：修复中 → 失败原因 / 修复句+采纳·放弃 / 已采纳 -->
+                <button v-if="!fixStates[i]" class="btn-mini-reset" title="AI 补全这句，过目后决定采不采纳" @click="handleFixSentence(i, d)">修复</button>
+                <span v-else-if="fixStates[i].loading" class="fix-status">修复中…</span>
+                <span v-else-if="fixStates[i].error" class="fix-status fix-status--err">{{ fixStates[i].error }}</span>
+                <span v-else-if="fixStates[i].adopted" class="fix-status fix-status--ok">✓ 已采纳</span>
+                <template v-else-if="fixStates[i].fixed">
+                  <div class="fix-sent fix-sent--result">{{ fixStates[i].fixed }}</div>
+                  <div class="fix-actions">
+                    <button class="btn-mini-reset btn-mini-reset--primary" @click="adoptFix(i, d)">采纳</button>
+                    <button class="btn-mini-reset" @click="dismissFix(i)">放弃</button>
+                  </div>
+                </template>
+                <span v-else class="fix-status">未能修复（{{ fixStates[i].reason }}）</span>
+              </div>
             </div>
             <!-- 必达覆盖率 -->
             <div v-if="session.finishReport.value.report.coverage?.checked" class="report-block">
@@ -897,6 +978,43 @@ async function handleResetChapterStyle() {
   word-break: break-all;
   max-height: 16rem;
   overflow-y: auto;
+}
+
+/* 残句定点修复（P1.2）：句子 + 描述 + 修复裁决流 */
+.report-item--fixable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.fix-sent {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.fix-sent--result {
+  padding: 0.375rem 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-400, #9685c2);
+  border-radius: 6px;
+}
+.fix-desc {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.fix-status {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.fix-status--ok { color: var(--ok, #4a9); }
+.fix-status--err { color: var(--danger, #c66); }
+.fix-actions {
+  display: flex;
+  gap: 0.375rem;
+}
+.btn-mini-reset--primary {
+  color: #fff;
+  background: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500, #7c6aad);
 }
 
 /* ====== 完稿审计 / 沉淀抽取 ===== */

@@ -167,6 +167,17 @@ export const adaptiveApi = {
     })
   },
 
+  /** 残句定点修复（P1.2 作者裁决式：只产修复句，正文不动；每轮审计上限 5 处） */
+  fixSentence: async (
+    chapterId: string,
+    payload: { sentence: string; defect_type?: string; description?: string },
+  ): Promise<{ fixed: string | null; reason: string }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/fix-sentence`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
   /** 协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊采纳率） */
   collabEventsSummary: async (chapterId: string): Promise<{
     total: number

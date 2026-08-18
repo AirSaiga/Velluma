@@ -314,3 +314,35 @@ async def repair_sentence_defects(
         logger.info(f"[sentence_fix] 修复残句（{d['type']}）：{sent[:30]}… → {repaired[:30]}…")
 
     return new_text, fixed, failures
+
+
+async def repair_single_defect(
+    defect: dict,
+    context_text: str,
+    registered_names: Optional[List[str]] = None,
+    recorder: Optional[RunRecorder] = None,
+) -> Tuple[Optional[str], str]:
+    """作者裁决式单条修复（adaptive 审校闭环 P1.2）。
+
+    与 repair_sentence_defects（批处理、直接改文本）的根本区别：本函数
+    **只产修复句，不改正文**——采不采纳由作者在前端裁决（作者裁决即闸门）。
+    前后句上下文从 context_text 中按句定位自动取。
+
+    Args:
+        defect: scan_sentence_defects 输出的缺陷条目（sentence/type/description）
+        context_text: 缺陷句所在的正文（当前章节全文）
+    Returns:
+        (修复句或 None, ok / 失败原因)——安全网与 _repair_one 完全一致
+        （still_defective / length_out_of_bounds / name_dropped 等）。
+    """
+    target = defect.get("sentence", "")
+    sentences = list(_iter_sentences(context_text))
+    prev_s, next_s = "", ""
+    for idx, (sent, _s, _e) in enumerate(sentences):
+        if sent == target:
+            if idx > 0:
+                prev_s = sentences[idx - 1][0]
+            if idx < len(sentences) - 1:
+                next_s = sentences[idx + 1][0]
+            break
+    return await _repair_one(defect, prev_s, next_s, registered_names or [], recorder, 0)

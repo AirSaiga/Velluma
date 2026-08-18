@@ -338,6 +338,7 @@ async def finish(
 ):
     """作者完稿 → 异步触发后处理（审计/一致性/残句/章节卡覆盖）+ 章级记忆索引。"""
     bind_adaptive_trace(chapter_id)
+    _SENTENCE_FIX_COUNT.pop(chapter_id, None)  # 新一轮审计 → 残句修复上限重置
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     result = await orch.on_finish()
 
@@ -562,6 +563,62 @@ async def stitch_ghost(
 
 
 # ============================================================
+# 端点 5.5：fix-sentence — 残句定点修复（审校闭环 P1.2，作者裁决式）
+# ============================================================
+# 红线：只产修复句，**不改正文**——采纳与否由前端作者裁决（作者裁决即闸门，
+# 不引入自动改稿）。1×creative + REASONING_DISABLED + max_tokens=1600 +
+# 安全网（still_defective/length_out_of_bounds/name_dropped），与 BS-ADF
+# Phase 7.5 同参数同代码路径（services/workflows/sentence_integrity.py）。
+# 上限：每轮审计后每章最多修 5 处（沿 Phase 7.5 成本上限）；finish 重置计数。
+# ============================================================
+
+_SENTENCE_FIX_CAP = 5
+_SENTENCE_FIX_COUNT: Dict[str, int] = {}  # chapter_id → 本轮已修复数（finish 时重置）
+
+
+class FixSentenceRequest(BaseModel):
+    sentence: str = Field(..., description="缺陷句原文（scan_sentence_defects 的 sentence 字段）")
+    defect_type: str = ""
+    description: str = ""
+
+
+@router.post("/{chapter_id}/adaptive/fix-sentence")
+async def fix_sentence(
+    chapter_id: str,
+    request: FixSentenceRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """残句定点修复：返回修复句供作者过目，正文不动。"""
+    bind_adaptive_trace(chapter_id)
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    if _SENTENCE_FIX_COUNT.get(chapter_id, 0) >= _SENTENCE_FIX_CAP:
+        raise HTTPException(status_code=429, detail="本章修复已达上限（5 处），重新完稿审计后可继续")
+
+    sentence = request.sentence.strip()
+    content = chapter.content_text or ""
+    if not sentence or sentence not in content:
+        raise HTTPException(status_code=409, detail="未在当前正文找到该句（正文可能已改动，请重新审计）")
+
+    from backend.services.workflows.sentence_integrity import repair_single_defect
+    defect = {
+        "sentence": sentence,
+        "type": request.defect_type or "unknown",
+        "description": request.description or "",
+    }
+    fixed, reason = await repair_single_defect(
+        defect, content, recorder=get_adaptive_recorder(chapter_id),
+    )
+    trace_event("adaptive_fix_sentence", ok=fixed is not None, reason=reason, defect_type=defect["type"])
+    await flush_adaptive_records(chapter_id)
+    if fixed is None:
+        return {"fixed": None, "reason": reason}
+    _SENTENCE_FIX_COUNT[chapter_id] = _SENTENCE_FIX_COUNT.get(chapter_id, 0) + 1
+    return {"fixed": fixed, "reason": "ok"}
+
+
+# ============================================================
 # 端点 6：event — 协作交互埋点（P0-3，本地 JSONL 零上报）
 # ============================================================
 # 用途定位（roadmap §0.1/§1）：个人镜子——自我可见性（协作质量与 token 成本），
@@ -574,7 +631,7 @@ async def stitch_ghost(
 #   slice_mode {mode}            切片条读者视角档切换
 #   context_card                 情境浮卡打开
 #   quick_note {action}          世界速记 commit / undo
-#   ignition / settle {commit} / finish
+#   ignition / settle {commit} / finish / sentence_fix {action: propose|adopt|reject}
 # ============================================================
 
 _COLLAB_EVENTS_FILE = "data/collab_events.jsonl"
