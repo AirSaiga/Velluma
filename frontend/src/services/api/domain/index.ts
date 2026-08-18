@@ -171,8 +171,18 @@ export interface ModelConfig {
   embedding: {
     api_key_masked: string
     has_api_key: boolean
+    /** 自管连接的 Base URL（follow_llm=true 时被忽略，仅作保留值） */
+    base_url: string
     model: string
     dimensions: number
+    /** true=连接（Key/Base URL）跟随文本模型槽，与文本模型保持一致 */
+    follow_llm: boolean
+    /** 跟随模式下实际生效的连接预览（creative 优先、缺 Key 回退 reasoning） */
+    inherited: {
+      source: 'creative' | 'reasoning' | null
+      base_url: string
+      has_api_key: boolean
+    }
   }
   proxy: {
     enabled: boolean
@@ -185,7 +195,7 @@ export interface ModelConfigUpdatePayload {
   reasoning?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   creative?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   wash?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
-  embedding?: { api_key?: string; model?: string; dimensions?: number }
+  embedding?: { api_key?: string; base_url?: string; model?: string; dimensions?: number; follow_llm?: boolean }
   proxy?: { enabled: boolean; url: string }
 }
 
@@ -210,10 +220,17 @@ export const systemApi = {
   },
 
   /**
-   * 测试模型连接（V4.1: 后端从 model_config.json 读取配置）
+   * 测试模型连接（LLM 测已保存配置；embedding 用表单实时值探测，未保存也能测）
+   * @param embedding 向量模型表单的当前值（api_key 留空表示沿用已保存 Key）
    * @returns 测试结果
    */
-  testModel: async (): Promise<{
+  testModel: async (embedding?: {
+    model?: string
+    base_url?: string
+    dimensions?: number
+    follow_llm?: boolean
+    api_key?: string
+  }): Promise<{
     success: boolean
     message: string
     model_info?: {
@@ -221,6 +238,11 @@ export const systemApi = {
       creative_model?: string
       reasoning_success?: boolean
       creative_success?: boolean
+      embedding_configured?: boolean
+      embedding_model?: string
+      embedding_success?: boolean
+      embedding_dimensions_returned?: number | null
+      embedding_dimensions_expected?: number | null
     }
     reasoning_supported?: boolean
     reasoning_message?: string
@@ -228,7 +250,7 @@ export const systemApi = {
   }> => {
     return requestJson('/system/test-model', {
       method: 'POST',
-      body: JSON.stringify({})
+      body: JSON.stringify(embedding ? { embedding } : {})
     })
   }
 }
@@ -241,6 +263,7 @@ import type {
   StyleCard,
   StyleExtractResponse,
   AuthorSample,
+  AuthorSampleSceneType,
   AuthorSampleSearchHit,
   StyleFingerprint,
   StyleInboxItem,
@@ -309,11 +332,11 @@ export const styleApi = {
     await requestRaw(`/books/${bookId}/samples/${sampleId}`, { method: 'DELETE' })
   },
 
-  /** 样本局部更新：时期标记（recent/early）与收藏。 */
+  /** 样本局部更新：时期/收藏/场景类型/正文（正文变更时后端重算字数并重向量化）。 */
   patchSample: async (
     bookId: string,
     sampleId: string,
-    patch: { era?: 'recent' | 'early'; favorite?: boolean },
+    patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string },
   ): Promise<AuthorSample> => {
     return requestRaw(`/books/${bookId}/samples/${sampleId}`, {
       method: 'PATCH',

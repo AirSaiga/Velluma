@@ -15,6 +15,7 @@ import { onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Toast from '../../../components/Toast.vue'
 import ConfirmDialog from '../../../components/ConfirmDialog.vue'
+import AppSettingsModal from '../../../components/AppSettingsModal.vue'
 import AppRail from './AppRail.vue'
 import { useTheme } from '../../../composables/useTheme'
 import { useToast } from '../../../composables/useToast'
@@ -58,7 +59,7 @@ defineExpose({
 </script>
 
 <template>
-  <!-- 全局 Toast / ConfirmDialog -->
+  <!-- 全局 Toast / ConfirmDialog / 设置弹窗 -->
   <Toast :toasts="toasts" @remove="removeToast" />
   <ConfirmDialog
     :visible="confirmDialogVisible"
@@ -66,6 +67,7 @@ defineExpose({
     @confirm="handleConfirmDialog"
     @cancel="handleCancelDialog"
   />
+  <AppSettingsModal />
 
   <div class="app-shell">
     <AppRail />

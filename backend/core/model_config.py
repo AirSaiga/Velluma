@@ -48,8 +48,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   },
   "embedding": {
     "api_key": "...",
+    "base_url": "...",        // 可选；缺省回退 DashScope OpenAI 兼容端点
     "model": "text-embedding-v2",
-    "dimensions": 1536  // 向量维度，必须与数据库 schema 一致
+    "dimensions": 1536,       // 向量维度，必须与数据库 schema 一致
+    "follow_llm": false       // true=连接（api_key/base_url）跟随文本模型，忽略自管 Key/URL
   },
   "proxy": {
     "enabled": true,
@@ -92,6 +94,11 @@ _config_cache: Optional[Dict] = None
 # base_url 为空时的硬编码兜底。provider 字段已删除，不再按厂商映射；
 # 兜底值与 example.json 默认（DeepSeek）一致，用户应显式填写 base_url。
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+
+# embedding.base_url 缺省兜底：阿里云 DashScope 的 OpenAI 兼容端点。
+# 历史配置（只有 DashScope Key、无 base_url）经此零迁移切换到兼容协议，
+# 同一 Key 在该端点上可直接调 text-embedding-v2/v3/v4。
+DASHSCOPE_COMPAT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 def _load_config() -> Dict:
@@ -200,12 +207,66 @@ def get_embedding_config() -> Dict:
 def get_embedding_dimensions() -> int:
     """
     获取 Embedding 向量维度配置。
-    
+
     Returns:
         向量维度，默认 1536（兼容 text-embedding-v2）
     """
     emb_config = get_embedding_config()
     return emb_config.get("dimensions", 1536)
+
+
+def get_embedding_follow_source() -> Dict:
+    """follow_llm 模式下 embedding 将继承的文本模型连接。
+
+    creative 槽优先、缺 Key 回退 reasoning 槽（reasoning 自身不完整时会再借
+    creative 的连接三件套，见 get_model_profile）；两槽均未配置时 api_key 为空，
+    source 仍标 "creative" 便于 UI 提示该配哪个槽。
+    """
+    for role in ("creative", "reasoning"):
+        profile = get_model_profile(role)
+        if profile.get("api_key"):
+            return {
+                "api_key": profile["api_key"],
+                "base_url": profile["base_url"],
+                "source": role,
+            }
+    return {"api_key": "", "base_url": "", "source": "creative"}
+
+
+def get_embedding_connection() -> Dict:
+    """
+    解析 Embedding 的有效连接配置（调用侧唯一入口）。
+
+    Returns:
+        {api_key, base_url, model, dimensions, follow_llm, source}
+        source 标明连接来源："self"（embedding 自管 Key）/ "creative" /
+        "reasoning"（跟随文本模型时实际命中的槽位）。
+        api_key 为空 = 未配置（调用方据此走结构化+词法默认记忆流）。
+
+    follow_llm=true 时连接（api_key + base_url）跟随文本模型（解析规则见
+    get_embedding_follow_source）；embedding 自管的 api_key/base_url
+    被忽略，model/dimensions 仍取 embedding 自己的——向量模型名与文本模型
+    名无关，必须单独配。
+    """
+    emb = get_embedding_config()
+    follow = bool(emb.get("follow_llm", False))
+    connection = {
+        "api_key": "",
+        "base_url": "",
+        "model": emb.get("model", "text-embedding-v2"),
+        "dimensions": emb.get("dimensions", 1536),
+        "follow_llm": follow,
+        "source": "self",
+    }
+    if follow:
+        followed = get_embedding_follow_source()
+        connection["api_key"] = followed["api_key"]
+        connection["base_url"] = followed["base_url"]
+        connection["source"] = followed["source"]
+        return connection
+    connection["api_key"] = emb.get("api_key", "")
+    connection["base_url"] = emb.get("base_url", "") or DASHSCOPE_COMPAT_BASE_URL
+    return connection
 
 
 def get_proxy_config() -> dict:

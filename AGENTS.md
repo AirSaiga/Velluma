@@ -5,13 +5,15 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 > **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：前端 UI 入口已随 2026-08-17 写作台重构整体移除，引擎本体暂留后端，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
 >
+> **后续迭代路线图**：`docs/iteration-roadmap.md`（2026-08-18 归档，演进唯一权威载体；**方向已拍板：世界页完善 × 写作台人机协作优先**）——P0 观测打底（adaptive 五端点 RunRecorder/trace + 协作交互埋点）→ P1 写作台协作深化（感知层补全 / finish 修复护栏 / 走向卡质量环 / 章级谋篇设计先行）→ P2 世界页完善（C2 Canon 挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾）→ P3 SQLite 切换日 + BS-ADF 整体归档（基建轨，间隙插入）→ P4 缓行件数据驱动激活（触发条件制）。决策点 D2/D4 均已拍板——设计稿 `docs/chapter-planning-spine.md`（章级谋篇，度优先）/ `docs/map-scale-spatial.md`（比例尺标定，步行日基准+三步拉线）。
+>
 > **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计、**世界速记 Alt+N**（一句话入账）、**情境浮卡**（选中/点击提及三秒查底细）、**候选回流收件箱**（写完确认世界变化）。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
 
 ---
 
 ## 技术栈
 
-**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· PostgreSQL 14+pgvector · asyncpg 0.29 · OpenAI SDK 1.10 / DashScope 1.14（Embedding 仅 DashScope）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。根目录 `requirements.txt` 与 `backend/requirements.txt` 内容一致（两份均可，均含 `jieba`/`python-multipart`；旧版根目录清单曾误列 `pywebview==4.4.1`，已随 pywebview 桌面入口删除）。
+**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· PostgreSQL 14+pgvector · asyncpg 0.29 · OpenAI SDK 1.10（LLM 与 Embedding 同走 OpenAI 兼容协议）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。根目录 `requirements.txt` 与 `backend/requirements.txt` 内容一致（两份均可，均含 `jieba`/`python-multipart`；旧版根目录清单曾误列 `pywebview==4.4.1`，已随 pywebview 桌面入口删除）。
 
 **前端** (`frontend/`)：Vue 3 ^3.4.15（Composition API）· TypeScript ^5.9.3 · Vite ^5.0.12 · Tailwind ^3.4.1 · TipTap ^2.24 · Electron ^28.3.3。
 
@@ -81,7 +83,7 @@ backend/
 │       └── refinery.py     #   /refinery/diagnose + /confirm
 ├── schemas/  repositories/
 └── services/
-    ├── llm/ (client.py REASONING_DISABLED / embedding.py 仅 DashScope / proxy / formatting)
+    ├── llm/ (client.py REASONING_DISABLED / embedding.py OpenAI 兼容向量 / proxy / formatting)
     ├── observability/ (run_trace.py: logs/trace_*.jsonl / run_recorder.py: GenerationRun 落库)
     ├── nlg/ (去 AI 味洗涤 de_ai_washer.py)
     ├── prompts/            # Prompt 模板（改后即时生效，无需重建）。含 bsadf/adf/dde/nle/adaptive_prompts 等 + 测试
@@ -219,7 +221,7 @@ data/ logs/ .venv/
 唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定），三层按质量序 `merge_echoes` 保序去重截 k：
 
 - **A 结构化前情（始终）**：查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）。
-- **V 向量增强（专业级，embedding 已配置时叠加——不替换默认流，A/B 恒在）**：DashScope（默认 `text-embedding-v2`，1536 维可在 `model_config.json` 的 `embedding.dimensions` 配置，Key 来自 model_config 不读环境变量）；`search_similar` 权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
+- **V 向量增强（专业级，embedding 已配置时叠加——不替换默认流，A/B 恒在）**：任意 OpenAI 兼容 Embedding 服务（`model_config.json` 的 `embedding` 节：`api_key`/`base_url`/`model` 默认 `text-embedding-v2`/`dimensions` 1536；`follow_llm=true` 时连接跟随文本模型槽——creative 优先、缺 Key 回退 reasoning，自管 Key/URL 被忽略；`base_url` 留空回退 DashScope 兼容端点，历史 DashScope Key 零迁移。Key 来自 model_config 不读环境变量）；`search_similar` 权重（`rag/scoring.py`）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
 - **B 词法检索（始终补足）**：`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。
 - **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过（摘要块是词法检索最佳素材）。检索限当前章之前（防未来信息泄露），三层同规则。
 
@@ -239,7 +241,7 @@ data/ logs/ .venv/
 
 ### model_config.json（主要配置入口，已 gitignore）
 
-LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`proxy`。除手动编辑外可通过前端设置面板（`SettingsPanel.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
+LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`proxy`。除手动编辑外可通过前端设置弹窗（`AppSettingsModal.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
 
 ### 环境变量（.env 可选，仅以下几个实际生效）
 

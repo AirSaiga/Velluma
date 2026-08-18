@@ -1,5 +1,5 @@
 {
-  "_comment": "Velluma LLM / Embedding / 代理配置示例。复制为 model_config.json 并填入真实 API Key。model_config.json 已 gitignore，勿提交。schema 详见 backend/core/model_config.py。前端暴露两个槽：分析模型(reasoning，审阅/诊断/抽取等判断任务) + 写作模型(creative，正文/续写/挂件等生成任务)。建议配两个不同模型以发挥分流；分析模型留空会自动回退到写作模型。wash 槽为去 AI 味专用，UI 已隐藏，留空自动跟随写作模型。",
+  "_comment": "Velluma LLM / Embedding / 代理配置示例。复制为 model_config.json 并填入真实 API Key。model_config.json 已 gitignore，勿提交。schema 详见 backend/core/model_config.py。前端暴露两个槽：分析模型(reasoning，审阅/诊断/抽取等判断任务) + 写作模型(creative，正文/续写/挂件等生成任务)。建议配两个不同模型以发挥分流；分析模型留空会自动回退到写作模型。wash 槽为去 AI 味专用，UI 已隐藏，留空自动跟随写作模型。embedding 走任意 OpenAI 兼容服务：follow_llm=true 时连接跟随写作模型槽（换文本模型即同步，自管 Key/URL 被忽略但保留）；follow_llm=false 用自管 api_key/base_url，base_url 留空默认阿里云 DashScope 兼容端点。",
   "llm": {
     "reasoning": {
       "api_key": "sk-your-reasoning-api-key",
@@ -26,9 +26,11 @@
     }
   },
   "embedding": {
-    "api_key": "sk-your-dashscope-embedding-api-key",
+    "api_key": "sk-your-embedding-api-key",
+    "base_url": "",
     "model": "text-embedding-v2",
-    "dimensions": 1536
+    "dimensions": 1536,
+    "follow_llm": false
   },
   "proxy": {
     "enabled": false,

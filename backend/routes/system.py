@@ -36,7 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter
 
@@ -46,12 +45,12 @@ from backend.core.model_config import (
     get_default_reasoning_config,
     get_model_profile,
     get_model_config,
-    has_dedicated_wash_profile,
+    get_embedding_connection,
     update_llm_profile,
     update_embedding_config,
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
-from backend.services.llm.client import REASONING_DISABLED
+from backend.services.llm.embedding import probe_embedding
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate
 
@@ -162,22 +161,40 @@ def _serialize_wash_profile() -> dict:
     }
 
 
+def _serialize_embedding() -> dict:
+    """Embedding 配置序列化：自管字段原样回（Key 掩码）+ 跟随模式的实际连接预览。
+
+    follow_llm=true 时连接取自文本模型槽（creative 优先、缺 Key 回退 reasoning），
+    inherited 把这份「实际生效的连接」带回前端展示，避免用户以为跟随生效了
+    而文本模型槽其实没配 Key。
+    """
+    embedding = get_model_config().get("embedding", {})
+    connection = get_embedding_connection()
+    following = connection["follow_llm"]
+    return {
+        "api_key_masked": _mask_api_key(embedding.get("api_key", "")),
+        "has_api_key": bool(embedding.get("api_key")),
+        "base_url": embedding.get("base_url", ""),
+        "model": embedding.get("model", "text-embedding-v2"),
+        "dimensions": embedding.get("dimensions", 1536),
+        "follow_llm": following,
+        "inherited": {
+            "source": connection["source"] if following else None,
+            "base_url": connection["base_url"] if following else "",
+            "has_api_key": bool(connection["api_key"]) if following else False,
+        },
+    }
+
+
 def _serialize_model_config() -> dict:
     """序列化完整模型配置（API Key 掩码后返回）"""
-    config = get_model_config()
-    embedding = config.get("embedding", {})
     return {
         "llm": {
             "reasoning": _serialize_profile("reasoning"),
             "creative": _serialize_profile("creative"),
             "wash": _serialize_wash_profile(),
         },
-        "embedding": {
-            "api_key_masked": _mask_api_key(embedding.get("api_key", "")),
-            "has_api_key": bool(embedding.get("api_key")),
-            "model": embedding.get("model", "text-embedding-v2"),
-            "dimensions": embedding.get("dimensions", 1536),
-        },
+        "embedding": _serialize_embedding(),
         "proxy": get_proxy_config(),
     }
 
@@ -235,14 +252,16 @@ async def test_model_connection(request: ModelTestRequest):
     
     业务目的：
     - 验证 API Key 和 Base URL 是否正确配置
-    - 检测 reasoning 和 creative 两个模型是否可用；
-      配置了独立洗涤槽（llm.wash）时一并测试 wash 模型
+    - 检测 reasoning 和 creative 两个文本模型是否可用；
+      embedding 已配置（或表单填了值）时一并探测向量模型连接与维度匹配
+      （wash 洗涤槽 UI 已隐藏，不参与连接测试）
     - 如果启用推理模式，检测模型是否支持推理功能
-    
+
     测试流程：
     1. 分别测试 reasoning 和 creative 模型
-    2. 检查模型名称是否在已知支持推理的列表中
-    3. 如果启用推理，尝试带推理参数的请求
+    2. 探测向量模型（用表单实时值，未保存也能测；未配置则跳过不算失败）
+    3. 检查模型名称是否在已知支持推理的列表中
+    4. 如果启用推理，尝试带推理参数的请求
     
     Returns:
         ModelTestResponse: 包含连接状态、推理支持信息等
@@ -312,27 +331,9 @@ async def test_model_connection(request: ModelTestRequest):
     except Exception as e:
         creative_error = str(e)
 
-    # 测试 wash 模型（仅在配置了独立洗涤槽时；未配置时洗涤跟随 creative，无需重复测）
-    wash_configured = has_dedicated_wash_profile()
-    wash_model = ""
-    wash_success: Optional[bool] = None
-    wash_error = ""
-    if wash_configured:
-        wash_model = resolve_model_name(model_type="wash")
-        try:
-            await call_llm(
-                system_prompt="你是一个测试助手。请严格按照用户的要求回复。",
-                user_prompt=test_prompt,
-                model=wash_model,
-                model_type="wash",
-                temperature=0.8,
-                max_tokens=50,
-                reasoning_config=REASONING_DISABLED,  # 洗涤默认不开 thinking，测试保持一致
-            )
-            wash_success = True
-        except Exception as e:
-            wash_success = False
-            wash_error = str(e)
+    # 向量模型探测（表单实时值，未保存也能测；wash 槽 UI 已隐藏，不参与测试）
+    emb_overrides = request.embedding.model_dump(exclude_none=True) if request.embedding else None
+    emb_probe = await probe_embedding(emb_overrides)
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
@@ -352,14 +353,17 @@ async def test_model_connection(request: ModelTestRequest):
     else:
         messages.append(f"创意模型 ({creative_model}): 连接失败 - {creative_error[:100]}")
 
-    if wash_configured:
-        if wash_success:
-            messages.append(f"洗涤模型 ({wash_model}): 连接成功")
-        else:
-            messages.append(f"洗涤模型 ({wash_model}): 连接失败 - {wash_error[:100]}")
+    if not emb_probe["configured"]:
+        messages.append("向量模型: 未配置（跳过，记忆走结构化+词法默认流）")
+    else:
+        messages.append(f"向量模型 ({emb_probe['model']}): {emb_probe['message']}")
 
-    overall_success = reasoning_success or creative_success
-    
+    # 向量模型「已配置但不可用」= 静默退化风险（运行时只会记日志然后回退词法流），
+    # 必须在测试结果里显式反映为失败；未配置跳过则不影响整体结论
+    overall_success = (reasoning_success or creative_success) and (
+        not emb_probe["configured"] or emb_probe["success"]
+    )
+
     return ModelTestResponse(
         success=overall_success,
         message="; ".join(messages),
@@ -370,9 +374,12 @@ async def test_model_connection(request: ModelTestRequest):
             "creative_base_url": creative_profile["base_url"],
             "reasoning_success": reasoning_success,
             "creative_success": creative_success,
-            "wash_configured": wash_configured,
-            "wash_model": wash_model or None,
-            "wash_success": wash_success,
+            "embedding_configured": emb_probe["configured"],
+            "embedding_model": emb_probe["model"],
+            "embedding_success": emb_probe["success"],
+            "embedding_source": emb_probe["source"],
+            "embedding_dimensions_returned": emb_probe["dimensions_returned"],
+            "embedding_dimensions_expected": emb_probe["dimensions_expected"],
         },
         reasoning_supported=reasoning_supported,
         reasoning_message=reasoning_message,

@@ -183,10 +183,16 @@ class LLMProfileUpdate(BaseModel):
 
 
 class EmbeddingConfigUpdate(BaseModel):
-    """Embedding 配置更新；None 字段保持原值。dimensions 变更需重启后端且会重建向量列。"""
+    """Embedding 配置更新；None 字段保持原值。dimensions 变更需重启后端且会重建向量列。
+
+    follow_llm=true 时连接（api_key/base_url）跟随文本模型槽，自管 api_key/base_url
+    被忽略（保留原值，关掉跟随即可切回）。
+    """
     api_key: Optional[str] = None
+    base_url: Optional[str] = None
     model: Optional[str] = None
     dimensions: Optional[int] = None
+    follow_llm: Optional[bool] = None
 
 
 class ModelConfigUpdate(BaseModel):
@@ -198,10 +204,21 @@ class ModelConfigUpdate(BaseModel):
     proxy: Optional[ProxyConfig] = None
 
 
+class EmbeddingProbePayload(BaseModel):
+    """连接测试时的向量模型表单覆盖值（未保存也能测）；api_key 留空沿用已保存 Key。"""
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    dimensions: Optional[int] = None
+    follow_llm: Optional[bool] = None
+    api_key: Optional[str] = None
+
+
 class ModelTestRequest(BaseModel):
     # V4.1: 若留空则自动从 model_config.json 读取对应模型的推理配置
     reasoning_enabled: Optional[bool] = Field(default=None)
     reasoning_effort: Optional[str] = Field(default=None)
+    # 向量模型探测覆盖值（设置面板表单实时值）；None = 探测已保存配置
+    embedding: Optional[EmbeddingProbePayload] = None
 
 
 class ModelTestResponse(BaseModel):
