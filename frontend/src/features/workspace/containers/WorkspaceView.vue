@@ -32,6 +32,7 @@ import { ghostActive } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
+import { useChapterSpine } from '../composables/useChapterSpine'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { setCanonTerms, type CanonTerm } from '../../../extensions/CanonHighlight'
@@ -184,6 +185,9 @@ const showIgnition = computed(() =>
 function onIgnite() {
   adaptiveAssist.requestOpening()
 }
+
+// 章级谋篇·软脉络（P1.4 M1：复合谋篇卡与副驾谋篇区共享的单例状态）
+const chapterSpine = useChapterSpine()
 function onIgnitionDismiss() {
   dismissedIgnitionChapterId.value = selectedChapter.value?.id || null
   dispatchCollabEvent('ignition_dismiss')
@@ -308,6 +312,9 @@ watch(selectedChapterId, (newId) => {
   saveStatus.value = 'idle'
   if (newId) {
     session.loadForChapter(newId)
+    void chapterSpine.load(newId)  // 软脉络随章加载（无脉络=null，UI 静默缺席）
+  } else {
+    chapterSpine.unload()
   }
 }, { immediate: true })
 
@@ -900,10 +907,17 @@ async function confirmDeleteChapter(ch: Chapter) {
           <!-- NLE-ADF 灵感悬浮舱（镜头碎片竖排）已迁入右缘感知带 PerceptionBand #dock slot -->
           <!-- NLE-ADF 走向卡舱（Ctrl+Space 唤起：选走向 → burst 段落级连写） -->
           <BeatCardDock @pick="(card) => onBeatCardPick(card)" />
-          <!-- NLE-ADF 点火卡（空章冷启动：AI 写开头，幽灵草稿形态） -->
+          <!-- NLE-ADF 点火卡 → 复合谋篇卡（P1.4 M1：一句话意图 + AI 谋篇建议 + 点火） -->
           <IgnitionCard
             v-if="showIgnition"
             :has-outline="!!(selectedChapter?.outline_text || '').trim()"
+            :spine="chapterSpine.spine.value"
+            :suggestions="chapterSpine.spineSuggestions.value"
+            :suggesting="chapterSpine.spineSuggesting.value"
+            @update-intent="chapterSpine.setIntent"
+            @suggest="chapterSpine.suggest"
+            @adopt="(part) => chapterSpine.adoptSuggestion(part)"
+            @discard-suggestions="chapterSpine.discardSuggestions"
             @ignite="onIgnite"
             @dismiss="onIgnitionDismiss"
           />

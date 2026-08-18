@@ -108,6 +108,22 @@ export interface WorldModelSnapshot {
   total_words: number
 }
 
+// ===== 章级谋篇·软脉络（P1.4，docs/chapter-planning-spine.md）=====
+export interface SpineAnchor {
+  id: string
+  text: string
+  source: 'author' | 'ai'
+  status: 'pending' | 'hit' | 'dropped'
+}
+export interface ChapterSpine {
+  intent?: { text: string; source: 'author' | 'ai' }
+  anchors?: SpineAnchor[]
+}
+export interface SpineSuggestion {
+  intent: string
+  anchors: string[]
+}
+
 // ============================================================
 // adaptiveApi
 // ============================================================
@@ -176,6 +192,27 @@ export const adaptiveApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+
+  /** 软脉络读取（null = 本章无脉络，一切 UI 静默缺席） */
+  getSpine: async (chapterId: string): Promise<{ spine: ChapterSpine | null }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/spine`)
+  },
+
+  /** 软脉络部分合并保存（只改传了的字段；锚点硬上限 5） */
+  patchSpine: async (
+    chapterId: string,
+    patch: { intent?: { text: string; source: 'author' | 'ai' } | null; anchors?: SpineAnchor[] | null },
+  ): Promise<{ spine: ChapterSpine | null }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/spine`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  },
+
+  /** AI 谋篇建议（不落库——建议只在作者收下/编辑后才入库） */
+  spineSuggest: async (chapterId: string): Promise<SpineSuggestion> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/spine-suggest`, { method: 'POST' })
   },
 
   /** 协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊采纳率） */

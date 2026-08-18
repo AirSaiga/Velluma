@@ -619,6 +619,146 @@ async def fix_sentence(
 
 
 # ============================================================
+# 端点 5.6：spine — 章级谋篇软脉络（P1.4 M1，docs/chapter-planning-spine.md）
+# ============================================================
+# 度优先（设计稿第一原则）：意图一句话可空、锚点硬上限 5、AI 建议不落库（D-4
+# 预填红线）、无脉络的书一切 UI 静默缺席（D-3）。轻量存取——不进正文版本
+# 历史、不触发 world-refresh。
+# ============================================================
+
+SPINE_MAX_ANCHORS = 5
+SPINE_ANCHOR_TEXT_MIN = 2
+SPINE_ANCHOR_TEXT_MAX = 12   # 锚点是短语不是句子（D-5 防膨胀成第二大纲）
+SPINE_INTENT_TEXT_MAX = 60
+
+
+class SpineAnchor(BaseModel):
+    id: str = ""
+    text: str
+    source: str = "author"    # author | ai
+    status: str = "pending"   # pending | hit | dropped
+
+
+class SpineUpdateRequest(BaseModel):
+    intent: Optional[Dict] = None            # {text, source}
+    anchors: Optional[List[SpineAnchor]] = None
+
+
+def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
+    """合并校验：None 字段保持原值；锚点数/长度硬校验（422 带人话劝阻文案）。"""
+    spine = dict(current or {})
+    if req.intent is not None:
+        text = str(req.intent.get("text", "") or "").strip()[:SPINE_INTENT_TEXT_MAX]
+        spine["intent"] = {"text": text, "source": req.intent.get("source") or "author"}
+    if req.anchors is not None:
+        anchors = []
+        for i, a in enumerate(req.anchors):
+            text = a.text.strip()
+            if len(text) < SPINE_ANCHOR_TEXT_MIN:
+                raise HTTPException(422, detail=f"锚点「{text or '（空）'}」太短——锚点是 2-12 字的短语，细节请留给大纲")
+            if len(text) > SPINE_ANCHOR_TEXT_MAX:
+                raise HTTPException(422, detail=f"锚点「{text[:12]}…」超过 12 字——锚点只记方向，展开请写进大纲")
+            anchors.append({
+                "id": a.id or f"a{i + 1}",
+                "text": text,
+                "source": a.source if a.source in ("author", "ai") else "author",
+                "status": a.status if a.status in ("pending", "hit", "dropped") else "pending",
+            })
+        if len(anchors) > SPINE_MAX_ANCHORS:
+            raise HTTPException(422, detail=f"锚点超过 {SPINE_MAX_ANCHORS} 个——说明在写大纲了。细节留给大纲，谋篇只记方向")
+        spine["anchors"] = anchors
+    return spine
+
+
+@router.get("/{chapter_id}/adaptive/spine")
+async def get_spine(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    """读软脉络（NULL → {"spine": null}，前端据此静默缺席）。"""
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return {"spine": chapter.spine}
+
+
+@router.patch("/{chapter_id}/adaptive/spine")
+async def patch_spine(
+    chapter_id: str,
+    request: SpineUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """存软脉络（部分合并：只改传了的字段）。"""
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    spine = _normalize_spine(chapter.spine, request)
+    if not spine.get("intent", {}).get("text") and not spine.get("anchors"):
+        spine = None  # 全空 = 无脉络（静默缺席契约）
+    chapter.spine = spine
+    await db.commit()
+    trace_event(
+        "adaptive_spine_saved",
+        has_intent=bool(spine and spine.get("intent", {}).get("text")),
+        anchors=len((spine or {}).get("anchors", [])),
+    )
+    return {"spine": spine}
+
+
+@router.post("/{chapter_id}/adaptive/spine-suggest")
+async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    """AI 谋篇建议（1×creative）——**不落库**（D-4：建议只在作者收下/编辑后才入库）。"""
+    bind_adaptive_trace(chapter_id)
+    bundle = await load_chapter_settings_bundle(chapter_id, db)
+    soft = bundle.soft_constraints()
+
+    # 上一章未兑现锚点（作者上章想写没写到的，建议可顺延）
+    prev_pending: List[str] = []
+    try:
+        chapter = await db.get(Chapter, chapter_id)
+        if chapter is not None:
+            prev_result = await db.execute(
+                select(Chapter)
+                .where(Chapter.book_id == chapter.book_id, Chapter.chapter_number < chapter.chapter_number)
+                .order_by(Chapter.chapter_number.desc())
+                .limit(1)
+            )
+            prev = prev_result.scalar_one_or_none()
+            if prev is not None and isinstance(prev.spine, dict):
+                prev_pending = [
+                    a.get("text", "") for a in prev.spine.get("anchors", [])
+                    if isinstance(a, dict) and a.get("status") == "pending" and a.get("text")
+                ]
+    except Exception:
+        prev_pending = []
+
+    from backend.services.prompts.adaptive_prompts import build_spine_suggest_prompt
+    sys_p, usr_p = build_spine_suggest_prompt(
+        outline_text=bundle.outline_text or "",
+        open_hooks=str(soft.get("open_hooks") or ""),
+        canon_context=bundle.canon_context or "",
+        worldview_text=bundle.worldview_text or "",
+        prev_pending_anchors=prev_pending,
+        previous_summary=bundle.previous_summary or "",
+    )
+    result = await call_llm_with_usage(
+        system_prompt=sys_p, user_prompt=usr_p,
+        # 谋篇建议要质量：走 creative 槽、保留默认 thinking（设计稿 §4.1）
+        model_type="creative", temperature=0.4, max_tokens=800,
+    )
+    get_adaptive_recorder(chapter_id).record_result("adaptive.spine_suggest", result, model_slot="creative")
+
+    from backend.services.utils.json_safe import parse_json_safe
+    parsed = parse_json_safe(result.content or "") or {}
+    intent = str(parsed.get("intent", "") or "").strip()[:SPINE_INTENT_TEXT_MAX]
+    anchors = []
+    for a in (parsed.get("anchors") or [])[:SPINE_MAX_ANCHORS]:
+        text = str(a or "").strip()[:SPINE_ANCHOR_TEXT_MAX]
+        if len(text) >= SPINE_ANCHOR_TEXT_MIN:
+            anchors.append(text)
+    trace_event("adaptive_spine_suggest", intent=bool(intent), anchors=len(anchors))
+    await flush_adaptive_records(chapter_id)
+    return {"intent": intent, "anchors": anchors}
+
+
+# ============================================================
 # 端点 6：event — 协作交互埋点（P0-3，本地 JSONL 零上报）
 # ============================================================
 # 用途定位（roadmap §0.1/§1）：个人镜子——自我可见性（协作质量与 token 成本），
@@ -632,6 +772,8 @@ async def fix_sentence(
 #   context_card                 情境浮卡打开
 #   quick_note {action}          世界速记 commit / undo
 #   ignition / settle {commit} / finish / sentence_fix {action: propose|adopt|reject}
+#   spine_intent_set / spine_anchor_add|drop|remove / spine_suggest /
+#   spine_suggest_adopt {part} / spine_suggest_discard（P1.4 章级谋篇）
 # ============================================================
 
 _COLLAB_EVENTS_FILE = "data/collab_events.jsonl"

@@ -1,45 +1,80 @@
 <script setup lang="ts">
 /**
- * NLE-ADF 点火卡（Ignition Card）——空章冷启动入口。
+ * NLE-ADF 点火卡 → 复合谋篇卡（P1.4 M1，docs/chapter-planning-spine.md §3.1）。
  *
- * 显示时机（由 WorkspaceView 编排）：章内容为空白 + 无生成进行中 + 无幽灵草稿。
- * 定位是"破纸"：把作者从空白页捞出来，产出开篇引子（2-5 段幽灵草稿），
- * 不是整章生成。采纳语法沿用幽灵草稿全家桶（Enter 落地 / Esc 蒸发 / 可重 roll）。
- *
- * 有大纲 → 提供「写个开头」；无大纲 → 只给引导文案（大纲是点火的唯一燃料）。
+ * 显示时机（由 WorkspaceView 编排，不变）：章内容为空白 + 无生成进行中 + 无幽灵草稿。
+ * 度优先的谋篇时刻：一句话意图（可空）+ 可选 AI 建议（预填不过目不落库），
+ * 然后照旧「⚡ 写个开头 / 我自己写」——一个字不写直接开写也毫无亏欠（D-1/D-2）。
+ * 采纳语法沿用幽灵草稿全家桶。
  */
+import type { ChapterSpine, SpineSuggestion } from '../../../services/api/domain/adaptive.api'
+
 defineProps<{
   hasOutline: boolean
+  spine: ChapterSpine | null
+  suggestions: SpineSuggestion | null
+  suggesting: boolean
 }>()
 
 const emit = defineEmits<{
+  /** 意图输入失焦 → 存（PATCH spine） */
+  (e: 'update-intent', text: string): void
+  /** 拉取 AI 谋篇建议（不落库） */
+  (e: 'suggest'): void
+  /** 收下建议（此刻才落库） */
+  (e: 'adopt', part: 'intent' | 'anchors' | 'all'): void
+  (e: 'discard-suggestions'): void
   /** 点击「写个开头」→ 触发点火生成 */
-  ignite: []
+  (e: 'ignite'): void
   /** 点击「我自己写」→ 本章内关闭（切章重置） */
-  dismiss: []
+  (e: 'dismiss'): void
 }>()
 </script>
 
 <template>
   <div class="ignition-card" @mousedown.prevent>
-    <template v-if="hasOutline">
-      <div class="ignition-card__title">本章还是白纸</div>
-      <div class="ignition-card__sub">大纲已就绪，可以让 AI 帮你开个头</div>
-      <div class="ignition-card__actions">
+    <div class="ignition-card__title">本章还是白纸</div>
+    <!-- 谋篇时刻（D-1：唯一「要求」是一句可空的意图） -->
+    <textarea
+      class="ignition-card__intent"
+      rows="1"
+      :value="spine?.intent?.text || ''"
+      placeholder="一句话：本章要去哪？（可空）"
+      @change="(e) => emit('update-intent', (e.target as HTMLTextAreaElement).value)"
+    ></textarea>
+    <template v-if="suggestions">
+      <div class="ignition-card__suggest">
+        <div v-if="suggestions.intent" class="ignition-card__suggest-intent">{{ suggestions.intent }}</div>
+        <div v-if="suggestions.anchors?.length" class="ignition-card__suggest-anchors">
+          <span v-for="(a, i) in suggestions.anchors" :key="i">{{ a }}</span>
+        </div>
+        <div class="ignition-card__suggest-actions">
+          <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('adopt', 'all')">收下谋篇</button>
+          <button class="ignition-card__btn" @click="emit('discard-suggestions')">不用</button>
+        </div>
+      </div>
+    </template>
+    <div v-else class="ignition-card__actions">
+      <template v-if="hasOutline">
         <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('ignite')">
           ⚡ 写个开头
         </button>
         <button class="ignition-card__btn" @click="emit('dismiss')">我自己写</button>
-      </div>
-      <div class="ignition-card__hint">生成的是幽灵草稿：Enter 落地 · Esc 蒸发 · 落地后随时可改</div>
-    </template>
-    <template v-else>
-      <div class="ignition-card__title">本章还是白纸</div>
-      <div class="ignition-card__sub">先在副驾「章节」页写两句大纲，就能让 AI 帮你开个头</div>
-      <div class="ignition-card__actions">
+      </template>
+      <template v-else>
         <button class="ignition-card__btn" @click="emit('dismiss')">我自己写</button>
-      </div>
-    </template>
+      </template>
+    </div>
+    <div class="ignition-card__hint">
+      <template v-if="hasOutline">生成的是幽灵草稿：Enter 落地 · Esc 蒸发 · 落地后随时可改</template>
+      <template v-else>先在副驾「章节」页写两句大纲，就能让 AI 帮你开个头</template>
+    </div>
+    <button
+      v-if="!suggestions"
+      class="ignition-card__suggest-link"
+      :disabled="suggesting"
+      @click="emit('suggest')"
+    >{{ suggesting ? '建议生成中…' : '✨ 让 AI 提个谋篇' }}</button>
   </div>
 </template>
 
@@ -51,7 +86,7 @@ const emit = defineEmits<{
   top: 38%;
   transform: translate(-50%, -50%);
   z-index: 10;
-  width: min(360px, 80%);
+  width: min(380px, 80%);
   border-radius: 12px;
   background: var(--bg-canvas, #fefdfb);
   border: 1px solid var(--border-color, #e0dbd3);
@@ -74,10 +109,59 @@ const emit = defineEmits<{
   color: var(--text-primary, #2c2c2c);
 }
 
-.ignition-card__sub {
-  margin-top: 4px;
-  font-size: 12px;
+/* 谋篇意图（复合卡新增）：一行衬线输入，失焦即存 */
+.ignition-card__intent {
+  width: 100%;
+  margin-top: 10px;
+  resize: none;
+  text-align: left;
+  border: none;
+  border-bottom: 1px dashed var(--border-color, #e0dbd3);
+  background: transparent;
+  font-family: var(--font-heading, inherit);
+  font-size: 13px;
+  color: var(--text-primary, #2c2c2c);
+  padding: 4px 2px;
+  line-height: 1.5;
+}
+.ignition-card__intent:focus {
+  outline: none;
+  border-bottom-color: var(--accent-400, #9685c2);
+}
+.ignition-card__intent::placeholder {
   color: var(--text-muted, #a89e90);
+}
+
+.ignition-card__suggest {
+  margin-top: 10px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--accent-400, #9685c2);
+  border-radius: 8px;
+  background: var(--bg-secondary, #faf8f4);
+}
+.ignition-card__suggest-intent {
+  font-size: 12.5px;
+  color: var(--text-primary, #2c2c2c);
+  line-height: 1.5;
+}
+.ignition-card__suggest-anchors {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ignition-card__suggest-anchors span {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px dashed var(--border-color, #e0dbd3);
+  border-radius: 999px;
+  color: var(--text-secondary, #6b6560);
+}
+.ignition-card__suggest-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
 }
 
 .ignition-card__actions {
@@ -116,5 +200,18 @@ const emit = defineEmits<{
   margin-top: 10px;
   font-size: 10.5px;
   color: var(--text-muted, #a89e90);
+}
+
+.ignition-card__suggest-link {
+  margin-top: 6px;
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: var(--accent-500, #7c6aad);
+  cursor: pointer;
+}
+.ignition-card__suggest-link:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

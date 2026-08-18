@@ -768,3 +768,45 @@ def build_dock_generator_prompt(
 若某个碎片呼应了"读者期待"，给它加 "from_expectation": true（至多 1 个）。输出 JSON：
 {{"parts": [{{"type": "action", "text": "林尘攥紧扳手摸向灯塔基座", "direction": "主线"}}, {{"type": "scene", "text": "礁石滩泛着暗红的金属锈光", "direction": "环境"}}, {{"type": "line", "text": "别在退潮时回头。阿晚的声音", "direction": "关系"}}]}}"""
     return system_prompt, user_prompt
+
+
+# ============================================================
+# 章级谋篇建议 prompt（软脉络 suggest：一句话意图 + ≤5 锚点，docs/chapter-planning-spine.md §3.1）
+# ============================================================
+
+def build_spine_suggest_prompt(
+    outline_text: str = "",
+    open_hooks: str = "",
+    canon_context: str = "",
+    worldview_text: str = "",
+    prev_pending_anchors: Optional[List[str]] = None,
+    previous_summary: str = "",
+) -> tuple:
+    """构建章级谋篇建议 prompt（1×creative，产出**不落库**——D-4 预填红线）。
+
+    度优先（设计稿第一原则）：建议产出刻意轻——意图一句话 + 3-5 个锚点短语，
+    绝不是大纲。锚点是「本章不能少的那几步」，不是情节展开。
+    """
+    system_prompt = (
+        "你是长篇小说的谋篇助手。基于本章大纲与世界状态，提炼一句本章意图"
+        "（本章要去哪）和 3-5 个关键锚点（哪几步不能少）。极度克制：意图不超过"
+        "30 字；每个锚点是 2-12 字的短语（动宾结构，如「发现假信」「压住不表」），"
+        "不是句子。绝不产出情节展开或段落大纲。只输出 JSON。"
+    )
+    parts = []
+    if outline_text.strip():
+        parts.append(f"# 本章大纲（作者写的，最重要依据）\n{outline_text[:800]}")
+    if previous_summary.strip():
+        parts.append(f"# 上一章结尾态势\n{previous_summary[:300]}")
+    if open_hooks.strip():
+        parts.append(f"# 开放伏笔（可考虑兑现）\n{open_hooks[:300]}")
+    if prev_pending_anchors:
+        parts.append("# 上一章未兑现锚点（作者上章想写没写到的，可顺延）\n" + "、".join(prev_pending_anchors[:5]))
+    if worldview_text.strip():
+        parts.append(f"# 世界观基调\n{worldview_text[:300]}")
+    if canon_context.strip():
+        parts.append(f"# Canon 约束\n{canon_context[:400]}")
+    if not parts:
+        parts.append("（无大纲无前情——依据通用叙事常识给保守建议）")
+    user_prompt = "\n\n".join(parts) + '\n\n输出 JSON：\n{"intent": "甲发现那封信是伪造的", "anchors": ["发现假信", "压住不表", "乙的异常反应"]}'
+    return system_prompt, user_prompt

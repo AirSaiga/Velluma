@@ -280,6 +280,10 @@ class Chapter(Base):
     author_intent = Column(Text, nullable=True)
     # BS-ADF：Track B 暂停时持久化的全章槽位卡（JSONB），供刷新后 / /rerender-beat 兜底恢复
     bsadf_beat_slots = Column(JSONB, default=list)
+    # 章级谋篇·软脉络（docs/chapter-planning-spine.md §2.1）：{intent:{text,source},
+    # anchors:[{id,text,source,status}]}。NULL=本章无脉络（一切 UI 静默缺席，D-3 可完全忽略）。
+    # 章级一次性消耗品：不进正文版本历史、不触发 world-refresh（度优先）。
+    spine = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     book = relationship("Book", back_populates="chapters")

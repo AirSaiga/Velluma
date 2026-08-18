@@ -583,6 +583,13 @@ MIGRATIONS: list[dict[str, Any]] = [
         ),
         "expected_udt_names": {"uuid"},
     },
+    # 章级谋篇 M1（docs/chapter-planning-spine.md §2.1）：软脉络 JSONB（意图+≤5锚点，NULL=无脉络）
+    {
+        "table": "chapters",
+        "column": "spine",
+        "definition": "JSONB",
+        "expected_udt_names": {"jsonb"},
+    },
     # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
     {
         "table": "style_cards",

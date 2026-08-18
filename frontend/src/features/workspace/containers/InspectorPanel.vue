@@ -19,6 +19,8 @@ import ChapterBadges from '../presentation/ChapterBadges.vue'
 import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPanel.vue'
 import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
+import SpinePanel from '../presentation/SpinePanel.vue'
+import { useChapterSpine } from '../composables/useChapterSpine'
 import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
 import { refineryApi, styleApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
@@ -36,6 +38,8 @@ interface TabDef {
 }
 
 const store = useAppStore()
+// 章级谋篇（P1.4 M1：与 WorkspaceView 复合谋篇卡共享同一单例状态）
+const chapterSpine = useChapterSpine()
 const selectedChapter = store.selectedChapter
 const characters = store.characters
 const selectedChapterId = store.selectedChapterId
@@ -322,6 +326,20 @@ async function handleResetChapterStyle() {
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
+          <!-- 谋篇区（P1.4 M1：章级软脉络——方向先于情节，永远在最上） -->
+          <SpinePanel
+            :spine="chapterSpine.spine.value"
+            :suggestions="chapterSpine.spineSuggestions.value"
+            :suggesting="chapterSpine.spineSuggesting.value"
+            @update-intent="chapterSpine.setIntent"
+            @add-anchor="chapterSpine.addAnchor"
+            @update-anchor="(id, patch) => chapterSpine.updateAnchor(id, patch)"
+            @remove-anchor="chapterSpine.removeAnchor"
+            @suggest="chapterSpine.suggest"
+            @adopt="(part) => chapterSpine.adoptSuggestion(part)"
+            @discard-suggestions="chapterSpine.discardSuggestions"
+          />
+
           <!-- 章节卡（大纲编辑；标题编辑在纸面页面头） -->
           <section class="card-strip">
             <header class="strip-header">
