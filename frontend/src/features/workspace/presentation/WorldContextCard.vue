@@ -6,6 +6,7 @@ import type { ContextCard } from '../../../services/api/domain/world.api'
 import { formatTime } from '../../world/engine/timeFormat'
 import { getTemplate } from '../../world/engine/eventTemplates'
 import type { EventType } from '../../world/engine/types'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
  * 情境浮卡（docs/world-writing-bridge.md W2 查询闭环）。
@@ -33,6 +34,7 @@ const rootRef = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
   document.addEventListener('pointerdown', onOutsidePress, true)
+  dispatchCollabEvent('context_card', { keyword: props.keyword })
   try {
     card.value = await worldApi.getContextCard(props.bookId, props.chapterId, {
       name: props.keyword,

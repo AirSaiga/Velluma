@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { noHistory } from '../../chapter-editor/noHistory'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
  * NLE-ADF 2.0 幽灵草稿控制器（useGhostDraft）。
@@ -198,6 +199,7 @@ export function commitGhost(): string {
     ghostSource.value = null
     return ''
   }
+  dispatchCollabEvent('ghost_adopt', { source: ghostSource.value })
   const text = editor.state.doc.textBetween(range.from, range.to, '\n\n')
   editor
     .chain()
@@ -241,6 +243,7 @@ export function evaporateGhost(): void {
   const editor = chapterEditorHandle.value
   const range = findGhostRange()
   if (editor && range) {
+    dispatchCollabEvent('ghost_discard', { source: ghostSource.value })
     editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).run()
   }
   ghostActive.value = false

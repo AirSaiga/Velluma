@@ -212,6 +212,21 @@ class RunRecorder:
         """返回当前记录的浅拷贝（供 SSE 实时上浮查看）。"""
         return list(self._records)
 
+    def drain(self) -> List[CallRecord]:
+        """取出并清空当前记录（供入口层原子化 flush，防重复落库）。
+
+        与 flush_to_db 的组合模式：先 drain 拿走记录，构造临时 recorder 落库；
+        落库失败时用 restore 塞回，账不丢。adaptive 观测层（chapter 级常驻
+        recorder + 多端点分散 flush）依赖此语义。
+        """
+        records = self._records
+        self._records = []
+        return records
+
+    def restore(self, records: List[CallRecord]) -> None:
+        """把 drain 走的记录塞回队首（flush 失败防丢账）。"""
+        self._records[0:0] = records
+
     def degraded_events(self) -> List[Dict[str, Any]]:
         """返回累积的降级事件列表（供 SSE DEGRADED 事件批量上浮）。"""
         return list(self._degraded_events)

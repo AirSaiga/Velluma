@@ -21,6 +21,7 @@ import RefineryProgress from '../../generation/presentation/RefineryProgress.vue
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
 import { refineryApi, styleApi } from '../../../services/api/domain'
+import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
@@ -159,6 +160,40 @@ function handleEditCanon() {
   const bookId = store.currentBookId.value
   if (!bookId) return
   router.push({ name: 'world', params: { bookId }, query: { panel: 'canon' } })
+}
+
+// ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次）=====
+const worldModelOpen = ref(false)
+const worldModelText = ref('')
+async function toggleWorldModelDebug() {
+  worldModelOpen.value = !worldModelOpen.value
+  if (!worldModelOpen.value) return
+  const chapterId = selectedChapterId.value
+  if (!chapterId) return
+  worldModelText.value = '读取中…'
+  try {
+    const snap = await adaptiveApi.model(chapterId)
+    // 摘要视图：意图 + 事实条数 + 投影标题（原文太长，调试只看骨架）
+    const intent = snap.intent || {}
+    const facts = (snap.facts || []).slice(-5).map((f: any) => `· ${String(f.text || '').slice(0, 50)}`)
+    const projections = (snap.projections || [])
+      .filter((p: any) => !p.__dock__ && !p.__canon_watch__)
+      .map((p: any) => {
+        const beat = p.possible_beats?.[0]
+        return `· ${String(beat?.event || '').slice(0, 50)}`
+      })
+      .slice(0, 3)
+    worldModelText.value = [
+      `意图：${intent.source === 'none' ? '（无）' : `${intent.source} · ${(intent.arc || '').slice(0, 40)}`}`,
+      `事实：${snap.fact_count ?? 0} 条（最近 ${facts.length} 条）`,
+      ...facts,
+      `走向：${projections.length} 条`,
+      ...projections,
+      `字数（沉淀）：${snap.total_words ?? 0}`,
+    ].join('\n')
+  } catch (e: any) {
+    worldModelText.value = `读取失败：${e.message}`
+  }
 }
 
 // ===== 本章文风卡（S3：章级特例状态 + 跳文风页深链）=====
@@ -307,6 +342,15 @@ async function handleResetChapterStyle() {
               <span>在世界页查看真相</span>
             </button>
             <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划 / 因果图谱</p>
+          </section>
+
+          <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口，默认折叠） -->
+          <section>
+            <button class="btn-refinery" @click="toggleWorldModelDebug">
+              <Icon name="magnifying-glass" :size="14" />
+              <span>{{ worldModelOpen ? '收起世界模型' : '世界模型（调试）' }}</span>
+            </button>
+            <pre v-if="worldModelOpen" class="world-model-debug">{{ worldModelText }}</pre>
           </section>
         </template>
       </div>
@@ -836,6 +880,23 @@ async function handleResetChapterStyle() {
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0.375rem 0 0;
+}
+
+/* 世界模型调试快照（P0-5）：等宽小字摘要视图 */
+.world-model-debug {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.625rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 16rem;
+  overflow-y: auto;
 }
 
 /* ====== 完稿审计 / 沉淀抽取 ===== */

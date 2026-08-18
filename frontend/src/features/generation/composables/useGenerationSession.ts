@@ -45,6 +45,7 @@ import {
 } from './useSparkDock'
 import { beatDockVisible, beatCards, showBeatDock, hideBeatDock } from './useBeatDock'
 import { assistEnabled } from './useAssistEnabled'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { defatParagraphAtCursor } from '../../../shared/utils/defat'
 
 // ============================================================
@@ -1652,6 +1653,15 @@ export function useGenerationSession(): GenerationSession {
     // 动态拍记录与 planSuggestions 保留（切回后仍可查看）
   }
 
+  // P0-4 接线：幽灵生命周期 ↔ authorLane.ghostStitching（枚举此前从未赋值）。
+  // 单点 watch 覆盖全部进出路径（SSE onStart / Enter 落地 / Esc 蒸发 / 出错回滚）；
+  // 只在 composing↔ghostStitching 之间往返，不触碰 idle（会话未激活不介入）。
+  watch(ghostActive, (active) => {
+    if (!adaptiveMode.value) return
+    if (active && authorLane.value === 'composing') authorLane.value = 'ghostStitching'
+    else if (!active && authorLane.value === 'ghostStitching') authorLane.value = 'composing'
+  })
+
   // adaptive 续写注入器：由 useAdaptiveAssist 注入（解耦 session 与 API 层）。
   // session 的键位状态机在 adaptive composing 态调它触发续写，不直接 import adaptiveApi。
   let _adaptiveContinueFn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string }>) => void) | null = null
@@ -3060,6 +3070,7 @@ export function useGenerationSession(): GenerationSession {
       if (editor && t?.isContentEditable && !ghostActive.value && assistEnabled.value) {
         e.preventDefault()
         e.stopPropagation()
+        dispatchCollabEvent('capsule_create', { via: 'alt_o' })
         editor.commands.insertOutlineNote()
       }
       return
@@ -3157,8 +3168,11 @@ export function useGenerationSession(): GenerationSession {
     }
     // Ctrl+Enter：锁死本拍（创作态/代笔裁决态）或沉淀当前段（adaptive composing 态）
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      // adaptive composing 态：触发沉淀（走 useAdaptiveAssist.settleCurrent）
-      if (adaptiveComposing) {
+      // adaptive composing 态：触发沉淀（走 useAdaptiveAssist.settleCurrent）。
+      // ghostStitching 态也走沉淀（行为保持：此前幽灵在屏时 Ctrl+Enter 同样可沉淀）
+      const adaptiveSettleable = adaptiveComposing
+        || (adaptiveMode.value && assistEnabled.value && authorLane.value === 'ghostStitching')
+      if (adaptiveSettleable) {
         e.preventDefault()
         e.stopPropagation()
         _adaptiveSettleFn?.()

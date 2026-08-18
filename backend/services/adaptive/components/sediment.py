@@ -12,6 +12,7 @@ import logging
 from typing import Any, Dict, List
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
+from backend.services.adaptive.observing import get_adaptive_recorder
 from backend.services.workflows.bsadf.memory_ingestion import extract_emergent_facts
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,12 @@ async def run(
     if not text:
         return {"skipped": True}
 
-    # 抽涌现实体（复用既有 LLM 组件）
-    facts_data = await extract_emergent_facts(text, beat_id=f"settle_{chapter_id[:8]}")
+    # 抽涌现实体（复用既有 LLM 组件；chapter 级 recorder 记账）
+    facts_data = await extract_emergent_facts(
+        text,
+        beat_id=f"settle_{chapter_id[:8]}",
+        recorder=get_adaptive_recorder(str(chapter_id)),
+    )
     facts_dict = facts_data.to_dict()
 
     # ---- 冲突检测：抽取实体 vs 现有设定 ----

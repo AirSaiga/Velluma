@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
+from backend.services.adaptive.observing import get_adaptive_recorder
 from backend.services.prompts.adaptive_prompts import build_dock_generator_prompt
 from backend.services.utils.json_safe import parse_json_safe
 
@@ -70,6 +71,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             max_tokens=budget_tokens,
             reasoning_config=REASONING_DISABLED,
         )
+        get_adaptive_recorder(str(chapter_id)).record_result(
+            "adaptive.dock_generator", result, model_slot="creative")
         parsed = parse_json_safe(result.content or "") or {}
         raw_parts = parsed.get("parts", [])
 

@@ -102,5 +102,8 @@ async def _llm_critique(text: str, bundle) -> Dict:
         # 审阅深度不足。
         model_type="reasoning", temperature=0.3, max_tokens=2000,
     )
+    from backend.services.adaptive.observing import get_adaptive_recorder
+    get_adaptive_recorder(str(bundle.chapter_id or "")).record_result(
+        "adaptive.post_process.critique", result, model_slot="reasoning")
     from backend.services.utils.json_safe import parse_json_safe
     return parse_json_safe(result.content or "") or {"verdict": "unknown"}

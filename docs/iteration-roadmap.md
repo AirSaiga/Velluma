@@ -85,14 +85,17 @@ P0 度量先行 → P1 协作交互深化 → P2 世界页数据喂协作 → P3
 
 | # | 任务 | 说明 |
 |---|------|------|
-| P0-1 | 提交在途批次 | embedding 厂商无关化、AppSettingsModal、文风样本 PATCH。SQLite 保持「备好不接」。 |
-| P0-2 | **adaptive 观测落库** | 五端点接入 RunRecorder + trace_event（adf.py/bsadf.py 有现成范式）：heartbeat 按组件拆账（意图反推/未来推测/挂件/Canon 感知各记一笔）；stitch-ghost 记 mode+字数；settle/finish 记组件调用。 |
-| P0-3 | **协作交互埋点** | 仿 `data/style_events.jsonl`（S4+ 已有设施）立本地零上报埋点：走向卡采纳/无视/连写、细纲胶囊创建/扩写/再扩、切片条档位使用、情境浮卡打开、世界速记入账/撤销。这是后续一切「视数据再议」的数据源；用途为**个人镜子**（自我可见性），非增长分析。 |
-| P0-4 | 双轴状态机补洞 | `ghostStitching`/`settling`/`suggesting` 三枚举从未被赋值——接线或删除，二选一。 |
-| P0-5 | `/adaptive/model` 处置 | 给调试入口（副驾「章节」tab 世界模型快照折叠区）或删除端点，不留悬置。 |
+| P0-1 | 提交在途批次 | ✅ 2026-08-18：5 个逻辑提交（C1 融合+空白舆图 / embedding 解耦+设置弹窗 / 文风 PATCH+500 修复 / SQLite 备好零接线 / 启动脚本路径修正）；顺手修复记忆中三处单参 repo.update() 必 500 与表数断言 30→31。 |
+| P0-2 | **adaptive 观测落库** | ✅ 2026-08-18：新增 `services/adaptive/observing.py`（chapter 级常驻 RunRecorder + per-chapter 锁 drain/restore 原子冲账 + `trace_adaptive_{chapter_id}.jsonl` 单文件追加）；五端点 bind trace + 事件 + 冲账（stitch 在 SSE finally）；六组件 record_result（intent/future/dock/critique/event_scout/settle 涌现抽取——补全 memory_ingestion 预留未接线的 recorder 参数）。 |
+| P0-3 | **协作交互埋点** | ✅ 2026-08-18：`POST /adaptive/event` + `GET /adaptive/events/summary`（本地 `data/collab_events.jsonl` 零上报，book_id 服务端解析）；前端 15 处接线（亮出按签名去重防心跳重复计）——composables 直调 logCollabEvent，展示组件派发 `velluma:collab-event` DOM 事件由 WorkspaceView 桥接（分层合规）。 |
+| P0-4 | 双轴状态机补洞 | ✅ 2026-08-18：三枚举全部**接线**（顶栏「走向已备好」文案此前是死代码）——ghostStitching 由 ghostActive 单点 watch 驱动；settling 在 settleCurrent 首尾置位回落；suggesting=心跳带回挂件/走向卡时。Ctrl+Enter 在幽灵在屏时的沉淀行为保持不变（gate 显式覆盖 ghostStitching）。 |
+| P0-5 | `/adaptive/model` 处置 | ✅ 2026-08-18：副驾「章节」tab 尾部「世界模型（调试）」折叠按钮，展开拉快照渲染摘要视图（意图/最近事实/走向/沉淀字数）。 |
 
-**出口标准**：写完一章能回答——这章 AI 辅助花了多少 token；走向卡亮了几次、采纳几次；
-胶囊用了几次；切片条读者视角档开过没有。
+**出口标准**：✅ 已达成（2026-08-18）——token 成本看 `generation_runs` 表（run_id=
+`adaptive_{chapter_id}`，stage 按组件拆账）+ `logs/trace_adaptive_{chapter_id}.jsonl`
+（llm/client 自动埋点含 prompt/usage/延迟）；协作采纳看
+`GET /adaptive/{id}/events/summary`（card_burst_rate / ghost_adopt_rate /
+capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，离线可算。
 
 ---
 
@@ -235,7 +238,7 @@ P0 度量先行 → P1 协作交互深化 → P2 世界页数据喂协作 → P3
 
 | 期 | 内容 | 性质 | 状态 |
 |---|---|---|---|
-| P0 | 在途批次提交 + adaptive 观测落库 + 协作交互埋点 + 状态机/model 端点补洞 | 纯接入 | 📋 待启动 |
+| P0 | 在途批次提交 + adaptive 观测落库 + 协作交互埋点 + 状态机/model 端点补洞 | 纯接入 | ✅ 2026-08-18 完成（vue-tsc 净 + bsadf 118 单测全过 + 冒烟验证） |
 | P1 | 写作台协作深化：感知层补全 / 审校修复闭环 / 走向卡质量环 / 章级谋篇（设计先行） | 交互主线 | 📋 待启动 |
 | P2 | 世界页完善：C2 真相挂接 / 相遇→走向卡桥（带度量）/ C3 激活 / M4 收尾打磨 | 数据主线 | 📋 待启动 |
 | P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债，间隙插入 | 📋 待启动 |

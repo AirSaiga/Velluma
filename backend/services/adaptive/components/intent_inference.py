@@ -17,6 +17,7 @@ from typing import Any, Dict
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 from backend.services.llm.client import call_llm_with_usage
+from backend.services.adaptive.observing import get_adaptive_recorder
 from backend.services.prompts.adaptive_prompts import build_intent_inference_prompt
 from backend.services.adaptive.world_model import WorldModelRepository, ChapterIntent
 from backend.services.utils.json_safe import parse_json_safe  # 复用容错解析
@@ -73,6 +74,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             temperature=0.2,
             max_tokens=budget_tokens,
         )
+        get_adaptive_recorder(str(chapter_id)).record_result(
+            "adaptive.intent_inference", result, model_slot="reasoning")
         parsed = parse_json_safe(result.content or "") or {}
         intent = ChapterIntent(
             source="inferred",

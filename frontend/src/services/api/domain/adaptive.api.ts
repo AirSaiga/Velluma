@@ -155,6 +155,30 @@ export const adaptiveApi = {
     return requestJson(`/chapters/${chapterId}/adaptive/model`)
   },
 
+  /** 协作交互埋点（P0-3 本地 jsonl 零上报；词表见后端端点 6 注释） */
+  logCollabEvent: async (
+    chapterId: string,
+    kind: string,
+    detail?: Record<string, unknown>,
+  ): Promise<void> => {
+    await requestJson(`/chapters/${chapterId}/adaptive/event`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, detail: detail || {} }),
+    })
+  },
+
+  /** 协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊采纳率） */
+  collabEventsSummary: async (chapterId: string): Promise<{
+    total: number
+    by_kind: Record<string, number>
+    card_burst_rate: number | null
+    ghost_adopt_rate: number | null
+    capsule_expand_count: number
+    quick_note_commit: number
+  }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/events/summary`)
+  },
+
   /** 微缝合幽灵草稿（SSE 打字机推流）；mode='burst' 为段落级连写、'outline' 为细纲扩写 */
   stitchGhost: async (
     chapterId: string,

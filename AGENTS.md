@@ -5,7 +5,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 > **引擎现状与迁移方向**：后端生成设施 —— **NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）、**BS-ADF**（`/generate-bsadf` 步进模式，**⚠ 弃置中**：前端 UI 入口已随 2026-08-17 写作台重构整体移除，引擎本体暂留后端，其中验证过的思想与优势——DDE 岔路判断、章级规划层、字数硬闸门、残句门禁、双幻觉过滤、观测落库等——将**逐步迁移进 adaptive 流**后再整体归档；改造/新增一律面向 adaptive，勿往 bsadf 加功能）、**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）、**Refinery**（V4.1，`/refinery/*`，独立精修）。V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 已整体迁至 `backend/_deprecated/`，**不参与任何 import 链**。
 >
-> **后续迭代路线图**：`docs/iteration-roadmap.md`（2026-08-18 归档，演进唯一权威载体；**方向已拍板：世界页完善 × 写作台人机协作优先**）——P0 观测打底（adaptive 五端点 RunRecorder/trace + 协作交互埋点）→ P1 写作台协作深化（感知层补全 / finish 修复护栏 / 走向卡质量环 / 章级谋篇设计先行）→ P2 世界页完善（C2 Canon 挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾）→ P3 SQLite 切换日 + BS-ADF 整体归档（基建轨，间隙插入）→ P4 缓行件数据驱动激活（触发条件制）。决策点 D2/D4 均已拍板——设计稿 `docs/chapter-planning-spine.md`（章级谋篇，度优先）/ `docs/map-scale-spatial.md`（比例尺标定，步行日基准+三步拉线）。
+> **后续迭代路线图**：`docs/iteration-roadmap.md`（2026-08-18 归档，演进唯一权威载体；**方向已拍板：世界页完善 × 写作台人机协作优先**）——P0 观测打底 ✅（2026-08-18：adaptive 观测落库 `services/adaptive/observing.py` chapter 级 recorder/trace + 协作埋点 `data/collab_events.jsonl` + 双轴状态机三枚举接线 + model 端点调试入口）→ P1 写作台协作深化（感知层补全 / finish 修复护栏 / 走向卡质量环 / 章级谋篇设计先行）→ P2 世界页完善（C2 Canon 挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾）→ P3 SQLite 切换日 + BS-ADF 整体归档（基建轨，间隙插入）→ P4 缓行件数据驱动激活（触发条件制）。决策点 D2/D4 均已拍板——设计稿 `docs/chapter-planning-spine.md`（章级谋篇，度优先）/ `docs/map-scale-spatial.md`（比例尺标定，步行日基准+三步拉线）。
 >
 > **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、**细纲胶囊**（作者亲笔速记 → 双端锚定扩写）、Ctrl+Enter 手动沉淀、完稿审计、**世界速记 Alt+N**（一句话入账）、**情境浮卡**（选中/点击提及三秒查底细）、**候选回流收件箱**（写完确认世界变化）。设定数据（章级绑定 + 书级 Canon + RAG 记忆）双向驱动：写作中感知 + 后台方向权重规划。
 

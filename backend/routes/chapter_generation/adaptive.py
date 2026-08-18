@@ -34,6 +34,11 @@ from backend.models import Chapter
 from backend.repositories.world_repository import WorldRepository
 from backend.services.adaptive.orchestrator import get_orchestrator
 from backend.services.adaptive.change_detector import AuthorState
+from backend.services.adaptive.observing import (
+    bind_adaptive_trace,
+    flush_adaptive_records,
+    get_adaptive_recorder,
+)
 from backend.services.adaptive.world_model import WorldModelRepository
 from backend.services.context.settings_bundle import (
     load_chapter_settings_bundle,
@@ -48,6 +53,7 @@ from backend.services.prompts.adaptive_prompts import (
 )
 from backend.services.rag.recall import recall_memories
 from backend.services.style.retrieval import retrieve_author_samples
+from backend.services.observability.run_trace import trace_event
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import build_sse_event, build_sse_error
 
@@ -142,6 +148,7 @@ async def heartbeat(
 
     前端防抖 2-4s 发一次。后端不阻塞——组件异步跑，下次心跳拿到产出。
     """
+    bind_adaptive_trace(chapter_id)
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     state = AuthorState(
         chapter_id=chapter_id,
@@ -180,6 +187,19 @@ async def heartbeat(
     drift_hint = await _style_drift_hint_for_heartbeat(chapter, db)
     if drift_hint:
         canon_hints = list(canon_hints) + [drift_hint]
+
+    # 观测（P0-2）：心跳事件进 chapter 级 trace；顺路冲走累积的组件调用账
+    # （含上一次心跳派生的后台组件——它们自开 session，只能靠后续请求落库）
+    trace_event(
+        "adaptive_heartbeat",
+        word_count=request.word_count,
+        paused_ms=request.paused_ms,
+        activated=result.get("activated", []),
+        dock_parts=len(dock_parts),
+        direction_cards=len(direction_cards),
+        canon_hints=len(canon_hints),
+    )
+    await flush_adaptive_records(chapter_id)
 
     return HeartbeatResponse(
         dock_parts=dock_parts,
@@ -293,8 +313,17 @@ async def settle(
     db: AsyncSession = Depends(get_db),
 ):
     """段落锁死 → 层1追加 + 异步触发沉淀组件（抽涌现实体 + 冲突检测）。"""
+    bind_adaptive_trace(chapter_id)
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     result = await orch.on_settle(request.text, request.entities, commit=request.commit)
+    trace_event(
+        "adaptive_settle",
+        words=len(request.text),
+        commit=request.commit,
+        emergent_facts=len((result.get("emergent_facts") or {})),
+        candidates_created=result.get("candidates_created", 0),
+    )
+    await flush_adaptive_records(chapter_id)
     return result
 
 
@@ -308,6 +337,7 @@ async def finish(
     db: AsyncSession = Depends(get_db),
 ):
     """作者完稿 → 异步触发后处理（审计/一致性/残句/章节卡覆盖）+ 章级记忆索引。"""
+    bind_adaptive_trace(chapter_id)
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     result = await orch.on_finish()
 
@@ -330,6 +360,13 @@ async def finish(
 
     if isinstance(result, dict):
         result["memory_indexed"] = memory_indexed
+    trace_event(
+        "adaptive_finish",
+        finished=result.get("finished", False) if isinstance(result, dict) else False,
+        memory_indexed=memory_indexed,
+        candidates_created=result.get("candidates_created", 0) if isinstance(result, dict) else 0,
+    )
+    await flush_adaptive_records(chapter_id)
     return result
 
 
@@ -358,6 +395,8 @@ async def stitch_ghost(
     db: AsyncSession = Depends(get_db),
 ):
     """续写/缝合幽灵草稿，SSE 打字机推流。不依赖 run_id（自由路径）。"""
+    bind_adaptive_trace(chapter_id)
+    trace_event("adaptive_stitch_start", mode=request.mode, target_chars=request.target_chars)
     # 方向采纳回报：作者缝合了某方向的碎片 → 通知调度器降权（负反馈）
     if request.adopted_direction:
         orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
@@ -449,6 +488,7 @@ async def stitch_ghost(
         )
 
     async def _stream():
+        recorder = get_adaptive_recorder(chapter_id)
         try:
             result = await call_llm_with_usage(
                 system_prompt=system_prompt,
@@ -460,6 +500,7 @@ async def stitch_ghost(
                 max_tokens=max(1200, request.target_chars * 2 + 1000),
                 reasoning_config=REASONING_DISABLED,
             )
+            recorder.record_result(f"adaptive.stitch_ghost.{request.mode}", result, model_slot="creative")
             text = (result.content or "").strip().strip('"').strip('"').strip()
             if not text:
                 yield build_sse_error("续写产出为空，请重试")
@@ -482,6 +523,7 @@ async def stitch_ghost(
                         max_tokens=max(1200, request.target_chars * 2 + 1000),
                         reasoning_config=REASONING_DISABLED,
                     )
+                    recorder.record_result("adaptive.stitch_ghost.compress", compressed, model_slot="creative")
                     cand = (compressed.content or "").strip()
                     if cand:
                         text = cand
@@ -502,8 +544,129 @@ async def stitch_ghost(
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
                 await asyncio.sleep(frame_delay)
             yield build_sse_event("GHOST_DONE", "", text=text, word_count=len(text))
+            trace_event(
+                "adaptive_stitch_complete",
+                mode=request.mode,
+                target_chars=request.target_chars,
+                actual_chars=len(text),
+            )
         except Exception as e:
             logger.warning(f"[adaptive/stitch-ghost] 失败: {e}")
             yield build_sse_error(f"续写失败: {e}")
+        finally:
+            # SSE 流结束（正常/异常/客户端断连）统一冲账——stitch 是请求内直接调 LLM，
+            # 不冲就没人冲（下一个心跳也能兜底，但那要等作者继续打字）
+            await flush_adaptive_records(chapter_id)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+# ============================================================
+# 端点 6：event — 协作交互埋点（P0-3，本地 JSONL 零上报）
+# ============================================================
+# 用途定位（roadmap §0.1/§1）：个人镜子——自我可见性（协作质量与 token 成本），
+# 非增长分析。事件词表（前端 dispatchCollabEvent / logCollabEvent）：
+#   cards_delivered {count}      走向卡亮出（前端按卡集签名去重，防心跳重复计）
+#   card_burst {event}           走向卡连写（Ctrl+Space 选卡）
+#   ghost_request {mode}         Space 续写/缝合触发
+#   ghost_adopt / ghost_discard  Enter 落地 / Esc 蒸发
+#   capsule_create / capsule_expand {note_id}  细纲胶囊创建 / 落笔扩写
+#   slice_mode {mode}            切片条读者视角档切换
+#   context_card                 情境浮卡打开
+#   quick_note {action}          世界速记 commit / undo
+#   ignition / settle {commit} / finish
+# ============================================================
+
+_COLLAB_EVENTS_FILE = "data/collab_events.jsonl"
+
+
+class CollabEventRequest(BaseModel):
+    kind: str
+    detail: Dict = Field(default_factory=dict)
+
+
+def _append_collab_event(book_id: str, chapter_id: str, kind: str, detail: Dict) -> None:
+    """追加事件到本地 JSONL（失败静默——埋点绝不阻塞业务）。"""
+    import json as _json
+    from datetime import datetime, timezone as _tz
+    from pathlib import Path as _Path
+
+    try:
+        path = _Path(_COLLAB_EVENTS_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps({
+                "ts": datetime.now(_tz.utc).isoformat(),
+                "book_id": book_id,
+                "chapter_id": chapter_id,
+                "kind": kind,
+                "detail": detail or {},
+            }, ensure_ascii=False, default=str) + "\n")
+    except Exception as e:
+        logger.debug(f"[CollabEvent] 写入失败（静默）: {e}")
+
+
+@router.post("/{chapter_id}/adaptive/event", status_code=204)
+async def log_collab_event(
+    chapter_id: str,
+    payload: CollabEventRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """记录协作交互事件（book_id 服务端从章节解析，前端不传防伪）。"""
+    book_id = ""
+    try:
+        chapter = await db.get(Chapter, chapter_id)
+        if chapter is not None:
+            book_id = str(chapter.book_id)
+    except Exception:
+        pass
+    _append_collab_event(book_id, chapter_id, payload.kind, payload.detail)
+
+
+@router.get("/{chapter_id}/adaptive/events/summary")
+async def collab_events_summary(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊的采纳率——P0 出口标准）。"""
+    import json as _json
+    from collections import Counter as _Counter
+    from pathlib import Path as _Path
+
+    book_id = ""
+    try:
+        chapter = await db.get(Chapter, chapter_id)
+        if chapter is not None:
+            book_id = str(chapter.book_id)
+    except Exception:
+        pass
+
+    counts: Dict = _Counter()
+    try:
+        path = _Path(_COLLAB_EVENTS_FILE)
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        ev = _json.loads(line)
+                        if ev.get("chapter_id") == chapter_id:
+                            counts[ev.get("kind", "?")] += 1
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+    def _rate(num: str, den: str):
+        n, d = counts.get(num, 0), counts.get(den, 0)
+        return round(n / d, 3) if d > 0 else None
+
+    return {
+        "chapter_id": chapter_id,
+        "book_id": book_id,
+        "total": sum(counts.values()),
+        "by_kind": dict(counts),
+        "card_burst_rate": _rate("card_burst", "cards_delivered"),
+        "ghost_adopt_rate": _rate("ghost_adopt", "ghost_request"),
+        "capsule_expand_count": counts.get("capsule_expand", 0),
+        "quick_note_commit": counts.get("quick_note", 0),
+    }

@@ -30,6 +30,8 @@ import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
 import { ghostActive } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
+import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { setCanonTerms, type CanonTerm } from '../../../extensions/CanonHighlight'
@@ -184,9 +186,18 @@ function onIgnite() {
 }
 function onIgnitionDismiss() {
   dismissedIgnitionChapterId.value = selectedChapter.value?.id || null
+  dispatchCollabEvent('ignition_dismiss')
 }
 onMounted(() => adaptiveAssist.mount())
 onBeforeUnmount(() => adaptiveAssist.unmount())
+
+// 协作埋点桥（P0-3）：展示组件派发的 velluma:collab-event 统一转发后端本地 jsonl
+function _onCollabEvent(e: Event) {
+  const d = (e as CustomEvent<{ kind: string; detail?: Record<string, unknown> }>).detail
+  if (d?.kind) logCollabEvent(selectedChapterId.value, d.kind, d.detail || {})
+}
+onMounted(() => window.addEventListener('velluma:collab-event', _onCollabEvent as EventListener))
+onBeforeUnmount(() => window.removeEventListener('velluma:collab-event', _onCollabEvent as EventListener))
 
 // AI 辅助总开关（顶栏 sparkles 按钮）：关闭=纯手写模式（Space 恢复普通空格）
 function toggleAssist() {

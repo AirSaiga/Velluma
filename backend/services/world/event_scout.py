@@ -81,6 +81,10 @@ async def run(
             raw = str(resp[0]) if resp[0] is not None else ""
         else:
             raw = getattr(resp, "content", "") or ""
+        if not isinstance(resp, tuple):
+            from backend.services.adaptive.observing import get_adaptive_recorder
+            get_adaptive_recorder(str(chapter_id)).record_result(
+                f"adaptive.event_scout.{source}", resp, model_slot="creative")
         parsed = parse_json_safe(raw) or _safe_json(raw)
     except Exception as e:
         logger.warning(f"[event_scout] LLM 抽取失败（不阻塞主流程）: {e}")

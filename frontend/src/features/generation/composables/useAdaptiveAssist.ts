@@ -17,6 +17,7 @@
  */
 import { watch, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard } from '../../../services/api/domain/adaptive.api'
+import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost,
 } from './useGhostDraft'
@@ -59,6 +60,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   let _lastActiveTs = 0
   let _continueAbort: AbortController | null = null
   let _heartbeatFailedOnce = false
+  // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
+  let _lastCardSig = ''
+  let _lastDockSig = ''
 
   // ---- 编辑器活动：重置三个计时器 + 隐藏思考指示器 ----
   function _onEditorActivity() {
@@ -150,6 +154,18 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 走向卡缓存（Ctrl+Space 走向卡舱的数据源；层 3 推测首 beat）
       setBeatCards(result.direction_cards || [])
 
+      // 埋点（P0-3 个人镜子）：亮出按卡集签名去重——「无视」= 亮出减采纳，离线可算
+      const cardSig = (result.direction_cards || []).map((c) => c.event).join('|')
+      if (cardSig && cardSig !== _lastCardSig) {
+        logCollabEvent(chapterId, 'cards_delivered', { count: (result.direction_cards || []).length })
+      }
+      _lastCardSig = cardSig
+      const dockSig = parts.map((p) => p.text).join('|')
+      if (dockSig && dockSig !== _lastDockSig) {
+        logCollabEvent(chapterId, 'dock_delivered', { count: parts.length })
+      }
+      _lastDockSig = dockSig
+
       // 意图建议 → planSuggestions
       if (result.intent_source !== 'none') {
         opts.planSuggestionsRef.value = {
@@ -169,7 +185,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         }))
       }
 
-      opts.aiLaneRef.value = 'dormant'
+      // P0-4 接线：有建议在屏（挂件/走向卡）→ suggesting（顶栏「走向已备好」
+      // 此前枚举从未赋值，文案一直死代码）；无建议 → dormant
+      opts.aiLaneRef.value = (parts.length || (result.direction_cards || []).length)
+        ? 'suggesting'
+        : 'dormant'
       // 心跳完成：有挂件→Dock 接管（指示器已在 visible 计算里被 sparkDockVisible 隐藏）；
       // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）
       if (!parts.length) hideThinking()
@@ -220,6 +240,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // 采纳方向回报：取首个有 direction 的 part，通知后端降权（负反馈）
     const adoptedDir = pickedParts.find((p) => p.direction)?.direction
 
+    logCollabEvent(chapterId, 'ghost_request', { mode })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode,
       picked_parts: pickedParts.map((p) => p.text),
@@ -248,6 +269,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     hideThinking()  // 显式动作 → 隐藏指示器
     const editor = chapterEditorHandle.value
     if (!editor) return null
+    logCollabEvent(chapterId, 'settle', { commit })
     const $from = editor.state.selection.$from
     let text = $from.parent.textContent.trim()
     if (!text) {
@@ -259,6 +281,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (!text) return null
 
     opts.aiLaneRef.value = 'digesting'
+    // P0-4 接线：沉淀期间 authorLane=settling（此前枚举从未赋值）；结束回落 composing
+    opts.authorLaneRef.value = 'settling'
     try {
       const result = await adaptiveApi.settle(chapterId, { text, commit })
       opts.dynamicBeatsRef.value = [...opts.dynamicBeatsRef.value, {
@@ -270,11 +294,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 涌现实体/冲突写入 ref（InspectorPanel 渲染——作者主权：冲突不自动改）
       opts.settleResultRef.value = result
       opts.aiLaneRef.value = 'dormant'
+      if (opts.authorLaneRef.value === 'settling') opts.authorLaneRef.value = 'composing'
       // W4 候选回流：settle 可能抽出候选事件 → 切片/收件箱静默刷新
       window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
       return result
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'
+      if (opts.authorLaneRef.value === 'settling') opts.authorLaneRef.value = 'composing'
       // 此前静默 return null：沉淀失败作者完全无感知
       opts.reportError?.('沉淀失败：' + (e?.message || '未知错误'))
       return null
@@ -314,6 +340,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     opts.aiLaneRef.value = 'assisting'
     setThinkingPhase('perceiving')
 
+    logCollabEvent(chapterId, 'card_burst', { event: card?.event || '' })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode: 'burst',
       beat_guidance: guidance,
@@ -346,6 +373,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     opts.aiLaneRef.value = 'assisting'
     setThinkingPhase('perceiving')
 
+    logCollabEvent(chapterId, 'ignition')
     adaptiveApi.stitchGhost(chapterId, {
       fragment: '', rolling_prefix: '', mode: 'open',
       target_chars: 700,
@@ -378,6 +406,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const target = findOutlineNotes(editor).find((n) => n.id === noteId && n.note.trim())
     if (!target) return
     const note = target.note.trim()
+    logCollabEvent(chapterId, 'capsule_expand', { note_id: noteId })
 
     // 双端缝合上下文：胶囊前正文尾 500 字 + 胶囊后正文头 300 字
     // （章末/回补段后无正文时 after 为空 → 后端退化为单端锚定）
@@ -431,6 +460,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (!chapterId) return null
     hideThinking()  // 显式动作 → 隐藏指示器
     opts.aiLaneRef.value = 'analyzing'
+    logCollabEvent(chapterId, 'finish')
     try {
       const result = await adaptiveApi.finish(chapterId)
       // 审计报告写入 ref（InspectorPanel 渲染）

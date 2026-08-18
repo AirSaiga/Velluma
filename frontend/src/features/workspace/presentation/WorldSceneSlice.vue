@@ -8,6 +8,7 @@ import { getTemplate } from '../../world/engine/eventTemplates'
 import type { EventType } from '../../world/engine/types'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
+import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
  * 「此刻此地」世界切片条（docs/world-writing-bridge.md W1/W4/W5-lite，替换 SceneSettingsPanel）。
@@ -58,6 +59,7 @@ const readerView = ref(loadUiPrefs().worldReaderView)
 function toggleReaderView() {
   readerView.value = !readerView.value
   saveUiPrefs({ ...loadUiPrefs(), worldReaderView: readerView.value })
+  dispatchCollabEvent('slice_mode', { mode: readerView.value ? 'reader' : 'author' })
 }
 const presenceView = computed(() =>
   readerView.value ? (slice.value?.presence || []).filter((p) => p.visibility === 'public') : slice.value?.presence || []

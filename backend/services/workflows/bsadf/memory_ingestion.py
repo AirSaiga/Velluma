@@ -81,6 +81,10 @@ async def extract_emergent_facts(
             reasoning_config=REASONING_DISABLED,
         )
         text = _unwrap_llm_response(resp)
+        # 观测钩子（签名预留至今未接线）：调用方传 recorder 则记账（adaptive 的
+        # chapter 级 recorder / bsadf 的 run 级 recorder 均适用；纯观测非功能）
+        if recorder is not None:
+            recorder.record_result("loop3.emergent_facts", resp, model_slot="creative")
         parsed = _parse_json_safe(text) or {}
         # 风险10修复：类型校验——LLM 返回的列表字段可能是 str/dict/None
         def _safe_list(v):
