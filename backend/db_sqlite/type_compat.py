@@ -21,8 +21,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 SQLite 方言类型适配（PG 专有 ORM 类型 → SQLite DDL 渲染）。
 
 背景（PoC scripts/sqlite_poc_probe.py 验证结论）：
-- postgresql.UUID(as_uuid=True)：SQLite 方言天然可渲染（DDL 类型名 "UUID"，
-  实际按 TEXT 存储读写往返无损），零适配。
+- postgresql.UUID(as_uuid=True)：SQLite 方言可渲染，但裸类型名 "UUID" 不含
+  INT/CHAR/TEXT/BLOB 等关键词 → SQLite 判为 **NUMERIC 亲和性**——32 位全数字
+  hex（如 0000…001）会被转存 INTEGER，读回 Python int 后结果处理器
+  `uuid.UUID(int)` 直接 AttributeError（2026-08-19 实验复现；uuid4() 生产撞上
+  概率 ≈4.4e-7，测试/导入类确定性 ID 必中）。
+  修法两层：①治本——DDL 编译为 CHAR(32)（text 亲和性，hex 恒按字符串存）；
+  ②治存量——已有库按旧 "UUID" DDL 建表且 SQLite 无 ALTER COLUMN，结果侧
+  包装 `Uuid.result_processor` 把 int 还原为 uuid.UUID(int=…)（见
+  _patch_uuid_int_tolerance）。
 - postgresql.JSONB：SQLite 类型编译器无 visit_JSONB，直接炸——注册为 "JSON"
   （SQLite JSON1 即 TEXT 存储，无 B 树索引差异可言，等价）。
 - pgvector.sqlalchemy.Vector：同为方言专有类型——注册为 "TEXT"。
@@ -38,6 +45,7 @@ engine.build_sqlite_engine 会自动调用；直接使用本模块编译产物�
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as _PgUuid
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.sqltypes import Uuid as _SaUuid
 
@@ -78,13 +86,53 @@ def _patch_uuid_str_tolerance() -> None:
     _SaUuid._velluma_str_tolerant = True
 
 
+def _patch_uuid_int_tolerance() -> None:
+    """UUID 结果侧 int 容忍（存量库 NUMERIC 亲和性治理，2026-08-19）。
+
+    根因：存量 SQLite 库的 UUID 列按旧 DDL "UUID" 建表 → NUMERIC 亲和性 →
+    32 位全数字 hex 被转存 INTEGER → 读回 Python int → 原结果处理器
+    `uuid.UUID(value)` 内部走 `value.replace('-','')` →
+    AttributeError('int' object has no attribute 'replace')。
+    （SQLite 无 ALTER COLUMN，存量表无法改列类型，只能在结果侧包装。）
+
+    修法：包装原结果处理器——int 入参（NUMERIC 亲和性产物）直接按 128 位
+    整数还原 uuid.UUID(int=value) 返回（int 恰好是 uuid.UUID 的一等构造入参，
+    绕开只吃字符串的原逻辑，无损）；str 入参（带/不带连字符 hex）零变化走
+    原逻辑；PG 路径处理器为 None 时原样返回。进程级一次性补丁（幂等），
+    对所有方言无害。与 _patch_uuid_str_tolerance 同风格成对。
+    """
+    if getattr(_SaUuid, "_velluma_int_tolerant", False):
+        return
+    _orig_result_processor = _SaUuid.result_processor
+
+    def _tolerant_result_processor(self, dialect, coltype=None):
+        # 注意签名三参（self, dialect, coltype）——TypeEngine.result_processor
+        # 由 _cached_result_processor 以位置参数原样透传，缺 coltype 会 TypeError。
+        proc = _orig_result_processor(self, dialect, coltype)
+        if proc is None:
+            return None
+
+        def process(value):
+            if isinstance(value, int):
+                # 存量行被 NUMERIC 亲和性转存的 INTEGER：按整数值直接还原，
+                # 与原 hex 字符串解析等价（uuid.UUID(int=n) == uuid.UUID(32位hex(n))）
+                return _uuid.UUID(int=value)
+            return proc(value)
+
+        return process
+
+    _SaUuid.result_processor = _tolerant_result_processor
+    _SaUuid._velluma_int_tolerant = True
+
+
 def register_sqlite_type_compat() -> None:
-    """幂等注册 JSONB/Vector 在 SQLite 方言下的 DDL 编译 + UUID 字符串容忍。"""
+    """幂等注册 JSONB/Vector/UUID 在 SQLite 方言下的 DDL 编译 + UUID 双向容忍。"""
     global _registered
     if _registered:
         return
 
     _patch_uuid_str_tolerance()
+    _patch_uuid_int_tolerance()
 
     @compiles(JSONB, "sqlite")
     def _compile_jsonb_sqlite(element, compiler, **kw):  # pragma: no cover - 编译回调
@@ -93,5 +141,21 @@ def register_sqlite_type_compat() -> None:
     @compiles(Vector, "sqlite")
     def _compile_vector_sqlite(element, compiler, **kw):  # pragma: no cover - 编译回调
         return "TEXT"
+
+    # 治本：UUID 列 DDL 渲染为 CHAR(32)（含 "CHAR" → text 亲和性，hex 恒按
+    # 字符串存，杜绝 NUMERIC 亲和性转 INTEGER）。⚠ 必须对 postgresql.UUID
+    # 本类注册：@compiles 不被子类继承——Visitable 每个子类经
+    # _generate_compiler_dispatch 生成了自己的 _compiler_dispatch（只查本类
+    # __dict__ 的 _compiler_dispatcher），在通用 Uuid 上注册对 PG UUID 渲染
+    # 无效（实测 2.0.48）。通用 Uuid 一并注册作防御（如有直接使用者）。
+    # 均仅 sqlite 方言，PG 原生 UUID 渲染零影响。存量表仍是 "UUID" 列类型，
+    # 由 result 侧 int 容忍补丁兜底（见 _patch_uuid_int_tolerance）。
+    @compiles(_PgUuid, "sqlite")
+    def _compile_pg_uuid_sqlite(element, compiler, **kw):  # pragma: no cover - 编译回调
+        return "CHAR(32)"
+
+    @compiles(_SaUuid, "sqlite")
+    def _compile_uuid_sqlite(element, compiler, **kw):  # pragma: no cover - 编译回调
+        return "CHAR(32)"
 
     _registered = True
