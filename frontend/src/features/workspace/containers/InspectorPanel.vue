@@ -20,13 +20,16 @@ import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPan
 import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import SpinePanel from '../presentation/SpinePanel.vue'
+import ContextPreviewSection from '../presentation/ContextPreviewSection.vue'
 import { useChapterSpine } from '../composables/useChapterSpine'
 import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
 import { refineryApi, styleApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
+import type { ContextPreview } from '../../../services/api/domain/adaptive.api'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
+import { requestOpenInbox, OPEN_INBOX_EVENT, inboxAutoOpen } from '../../world/composables/batchAccept'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
 type InspectorTab = 'now' | 'chapter' | 'review'
@@ -87,8 +90,21 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
+// A5d 沉淀直达：toast「去确认」→ 切「此刻」tab（与 Ctrl+1 同一 activeTab 通路）。
+// 抽屉关闭时本面板是 v-if 卸载态，事件发出瞬间监听器未挂——挂载后消费旗标补位。
+if (inboxAutoOpen.value) activeTab.value = 'now'
+function _onOpenInbox() {
+  activeTab.value = 'now'
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener(OPEN_INBOX_EVENT, _onOpenInbox)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInbox)
+})
 
 const chapterCharacters = computed(() => {
   if (!selectedChapter.value) return []
@@ -172,6 +188,48 @@ function handleEditCanon() {
 // ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次）=====
 const worldModelOpen = ref(false)
 const worldModelText = ref('')
+
+// ===== AI 此刻所见预览（P5 B2：/adaptive/context-preview，展开即装配一次）=====
+type PreviewMode = 'stitch' | 'continue' | 'burst' | 'outline' | 'open'
+const contextPreviewOpen = ref(false)
+const contextPreviewMode = ref<PreviewMode>('continue')
+const contextPreviewData = ref<ContextPreview | null>(null)
+const contextPreviewLoading = ref(false)
+const contextPreviewError = ref('')
+
+async function loadContextPreview() {
+  const chapterId = selectedChapterId.value
+  if (!chapterId || contextPreviewLoading.value) return
+  contextPreviewLoading.value = true
+  contextPreviewError.value = ''
+  try {
+    contextPreviewData.value = await adaptiveApi.contextPreview(chapterId, contextPreviewMode.value)
+  } catch (e: any) {
+    contextPreviewError.value = e?.message || '装配失败'
+  } finally {
+    contextPreviewLoading.value = false
+  }
+}
+
+function toggleContextPreview() {
+  contextPreviewOpen.value = !contextPreviewOpen.value
+  if (contextPreviewOpen.value && !contextPreviewData.value) {
+    loadContextPreview()
+  }
+}
+
+function switchContextPreviewMode(mode: PreviewMode) {
+  if (mode === contextPreviewMode.value) return
+  contextPreviewMode.value = mode
+  if (contextPreviewOpen.value) loadContextPreview()
+}
+
+// 切章复位（旧章预览不再示人；重开重装配）
+watch(selectedChapterId, () => {
+  contextPreviewOpen.value = false
+  contextPreviewData.value = null
+  contextPreviewError.value = ''
+})
 
 async function toggleWorldModelDebug() {
   worldModelOpen.value = !worldModelOpen.value
@@ -427,6 +485,18 @@ async function handleResetChapterStyle() {
             <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划 / 因果图谱</p>
           </section>
 
+          <!-- AI 此刻所见（P5 B2：stitch-ghost 真实注入的上下文块预览，默认折叠） -->
+          <ContextPreviewSection
+            :open="contextPreviewOpen"
+            :loading="contextPreviewLoading"
+            :error="contextPreviewError"
+            :preview="contextPreviewData"
+            :mode="contextPreviewMode"
+            @toggle="toggleContextPreview"
+            @refresh="loadContextPreview"
+            @update:mode="switchContextPreviewMode"
+          />
+
           <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口，默认折叠） -->
           <section>
             <button class="btn-refinery" @click="toggleWorldModelDebug">
@@ -526,9 +596,17 @@ async function handleResetChapterStyle() {
                 {{ iss.detail }}
               </div>
             </div>
-            <!-- 记忆倒灌：本章已入向量记忆（供后续章节前情召回） -->
-            <div v-if="session.finishReport.value.report.memory_indexed" class="report-block">
-              <div class="report-item">记忆索引 +{{ session.finishReport.value.report.memory_indexed }} 段（后续章节可呼应本章细节）</div>
+            <!-- 记忆倒灌：本章已入向量记忆（供后续章节前情召回）；memory_indexed 在响应顶层，与 candidates_pending 同层 -->
+            <div v-if="session.finishReport.value.memory_indexed" class="report-block">
+              <div class="report-item">记忆索引 +{{ session.finishReport.value.memory_indexed }} 段（后续章节可呼应本章细节）</div>
+            </div>
+            <!-- A5c① 收件箱积压（book 级 pending 计数，>0 才显示）：一键直达「此刻」tab 裁决 -->
+            <div v-if="(session.finishReport.value.candidates_pending ?? 0) > 0" class="report-block report-block--inbox">
+              <div class="report-block-label">收件箱</div>
+              <div class="report-item report-item--inbox">
+                {{ session.finishReport.value.candidates_pending }} 条世界变化待确认
+                <button class="btn-mini-reset btn-mini-reset--primary" title="打开副驾「此刻」tab 的候选收件箱" @click="requestOpenInbox">去处理</button>
+              </div>
             </div>
           </section>
 
@@ -1105,6 +1183,13 @@ async function handleResetChapterStyle() {
 }
 .report-item--warn {
   color: #ef4444;
+}
+/* A5c① 收件箱积压行：文案 + 「去处理」同行 */
+.report-item--inbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 .issue-cat {
   display: inline-block;

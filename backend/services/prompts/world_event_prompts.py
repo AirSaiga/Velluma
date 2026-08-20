@@ -101,13 +101,51 @@ _EXTRACT_SYSTEM = f"""你是小说世界设定的事件抽取器。从正文段�
 没有可抽取的事实时返回空数组。只返回 JSON。"""
 
 
-def build_event_candidates_prompt(text: str, t: int, entities, locations, max_candidates: int = 6):
-    """构造 (system, user)：正文 → 候选事件草稿列表。"""
+def _recent_events_block(recent_events) -> str:
+    """已入账事件排除块（A5a 候选去重）。空/无 note → 空串（零变化契约：
+    无事件书的 user prompt 与旧版逐字节一致）。
+
+    行格式「- 第N日 类型：note截断」：类型用原始 key（与 LLM 输出 JSON 的
+    event_type 同词表，比对零翻译损耗）；note 截 40 字与速记链路同预算。
+    """
+    lines = []
+    for e in recent_events or []:
+        note = str(getattr(e, "note", None) or "").strip()
+        if not note:
+            continue  # 空 note 无文本比对价值，不占排除块行数
+        etype = str(getattr(e, "event_type", None) or "")
+        try:
+            day = int(getattr(e, "time_start", 0) or 0)
+        except (TypeError, ValueError):
+            day = 0
+        lines.append(f"- 第{day}日 {etype}：{note[:40]}")
+    if not lines:
+        return ""
+    return (
+        "\n已入账事件（以下事件已发生并记入账本，勿重复提取，同义换措辞也算重复）：\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
+def build_event_candidates_prompt(
+    text: str,
+    t: int,
+    entities,
+    locations,
+    max_candidates: int = 6,
+    recent_events=None,
+):
+    """构造 (system, user)：正文 → 候选事件草稿列表。
+
+    recent_events：t 时刻之前的已入账事件（WorldEvent 或鸭子同形对象），
+    注入排除块防 LLM 重复提取；None/空 → prompt 与旧版逐字节一致。
+    """
     user = f"""当前世界时刻（连续日计数）：t = {t}
 
 角色与地点名单：
 {_roster_text(entities, locations)}
-
+{_recent_events_block(recent_events)}
 正文：
 ---
 {text[:4000]}

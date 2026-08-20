@@ -3,16 +3,22 @@
 """
 作者主导写作流程的自适应辅助端点（NLE-ADF 3.0）。
 
-核心协议：心跳模式。前端防抖发 heartbeat（作者状态），后端调度器决定激活
-哪些组件（意图反推/未来推测/挂件生发/沉淀/后处理），异步跑、写回世界模型。
-前端下次心跳拿到组件产出（挂件/建议）。
+核心协议：心跳模式。前端双档防抖发 heartbeat（活跃 3s / 停顿 4s+光标段尾），
+后端调度器决定激活哪些组件（意图反推/未来推测/挂件生发/Canon 感知/沉淀/
+后处理/候选事件抽取），异步跑、写回世界模型。活跃档下次心跳拿到组件产出；
+停顿档同步等 dock/projection/canon 组件，本次响应直接带回挂件。
 
-端点：
-- POST /adaptive/heartbeat：作者状态心跳 → 触发调度器 → 返回快照 + 挂件
-- POST /adaptive/settle：段落锁死 → 层1追加 + 沉淀倒灌
-- POST /adaptive/finish：作者完稿 → 后处理审计
-- GET  /adaptive/model/{id}：拉取世界模型快照（恢复/调试用）
-- POST /adaptive/stitch-ghost：微缝合（SSE，按需触发，不变）
+端点（路径省略前缀 /api/chapters/{chapter_id}，以本文件 @router 装饰器为准）：
+- POST /adaptive/heartbeat：作者状态心跳 → 触发调度器 → 返回快照 + 挂件/走向卡/感知带
+- POST /adaptive/stitch-ghost：幽灵草稿缝合续写（SSE 五模式 stitch/continue/burst/open/outline）
+- POST /adaptive/settle：手动沉淀（Ctrl+Enter）→ 层1追加 + 涌现实体抽取 + 候选事件回流
+- POST /adaptive/finish：完稿审计（残句/覆盖率/Canon 合规/整章审阅）
+- POST /adaptive/fix-sentence：残句定点修复（作者裁决式，只产修复句不改正文）
+- GET/PATCH /adaptive/spine：章级谋篇软脉络（chapters.spine 部分合并）
+- POST /adaptive/spine-suggest：谋篇建议（1×creative，产出不落库）
+- GET  /adaptive/model：世界模型快照（副驾调试视图）
+- GET  /adaptive/context-preview：AI 此刻所见注入预览
+- POST /adaptive/event + GET /adaptive/events/summary：协作埋点（本地 jsonl，零上报）
 
 设定数据来源：services.context.settings_bundle（分级访问 hard/soft/nutrients）。
 副作用：settle 写设定库（可选）；heartbeat 触发异步组件（写世界模型）。
@@ -21,12 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -42,9 +49,18 @@ from backend.services.adaptive.observing import (
     get_adaptive_recorder,
 )
 from backend.services.adaptive.world_model import WorldModelRepository
-from backend.services.context.settings_bundle import (
-    load_chapter_settings_bundle,
-    render_style_positive,
+from backend.services.context.settings_bundle import load_chapter_settings_bundle
+from backend.services.context.stitch_context import (
+    assemble_stitch_context,
+    build_context_preview,
+)
+# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：stitch 注入剂量改引 budget 表
+from backend.services.context.budget import (
+    STITCH_AFTER_TEXT_MAX_CHARS,
+    STITCH_OUTLINE_MAX_CHARS,
+    STITCH_ROLLING_LONG_MAX_CHARS,
+    STITCH_ROLLING_SHORT_MAX_CHARS,
+    STITCH_WORLDVIEW_MAX_CHARS,
 )
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
 from backend.services.prompts.adaptive_prompts import (
@@ -53,8 +69,9 @@ from backend.services.prompts.adaptive_prompts import (
     build_opening_prompt,
     build_outline_expand_prompt,
 )
-from backend.services.rag.recall import recall_memories
-from backend.services.style.retrieval import retrieve_author_samples
+# C1 上屏前快检（P5 §5.1）：完整文本生成后纯算法三类疑点（死者开口/canon
+# 泄底/私有秘密外泄），随 GHOST_DONE 附 warnings——只提示不拦截（§9 红线）
+from backend.services.validation.ghost_guard import check_ghost_text
 from backend.services.observability.run_trace import trace_event
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import build_sse_event, build_sse_error
@@ -151,7 +168,9 @@ async def heartbeat(
 ):
     """作者状态心跳 → 触发调度器（异步激活组件）→ 返回当前快照 + 挂件。
 
-    前端防抖 2-4s 发一次。后端不阻塞——组件异步跑，下次心跳拿到产出。
+    前端双档防抖发（活跃 3s / 停顿 4s，见 useAdaptiveAssist.ts）。活跃档组件
+    异步跑、下次心跳拿到产出；停顿档（paused_ms ≥4000）同步等 dock/projection/
+    canon 组件，本次响应直接带回挂件。
     """
     bind_adaptive_trace(chapter_id)
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
@@ -197,6 +216,12 @@ async def heartbeat(
     drift_hint = await _style_drift_hint_for_heartbeat(chapter, db)
     if drift_hint:
         canon_hints = list(canon_hints) + [drift_hint]
+
+    # A5c 收件箱积压提醒（P5 §3.2）：全书 pending 候选 >5 条时以 kind=world_inbox
+    # 并入 canon_hints——同走感知带柔性通道，不弹窗不抢焦点。短 TTL 缓存防抖
+    inbox_hint = await _world_inbox_hint_for_heartbeat(chapter, db)
+    if inbox_hint:
+        canon_hints = list(canon_hints) + [inbox_hint]
 
     # 章级谋篇进度（P1.4 M2 §4.3）：纯算法零 LLM，宁漏勿误（全词命中才判 hit，
     # 误报破坏信任；漏报作者自己划掉即可）。按内容长度缓存；pending→hit 迁移才写库
@@ -415,6 +440,66 @@ async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Opt
     return hint
 
 
+# ============================================================
+# A5c 收件箱积压提醒（P5 §3.2）：全书 pending 候选计数 → 柔性感知带提示
+# ============================================================
+# 红线（P5 §9 提示不拦截）：只提示，永不阻断写作动作；查询失败静默缺席。
+# ============================================================
+
+WORLD_INBOX_HINT_THRESHOLD = 5
+WORLD_INBOX_CACHE_TTL_S = 10.0  # 心跳 3-4s 一次，10s TTL 砍掉约 2/3 计数查询
+
+# 积压计数缓存（book_id → (monotonic_ts, count)）——settle/finish 落新候选时主动失效
+_WORLD_INBOX_CACHE: Dict[str, tuple] = {}
+
+
+def build_world_inbox_hint(
+    pending_count: int, threshold: int = WORLD_INBOX_HINT_THRESHOLD,
+) -> Optional[Dict]:
+    """纯函数：pending 计数 → world_inbox 提示卡（≤阈值返回 None，宁静默勿刷屏）。"""
+    if pending_count <= threshold:
+        return None
+    return {
+        "kind": "world_inbox",
+        "node_label": "世界收件箱",
+        "node_type": "world",
+        "detail": f"收件箱积压 {pending_count} 条世界变化待确认",
+        "severity": "info",
+    }
+
+
+async def _pending_candidates_count(db: AsyncSession, book_id: str) -> int:
+    """全书 pending 候选计数（book 级；调用方各自兜异常——提醒是柔性信号，不阻塞）。"""
+    from backend.models import WorldEventCandidate
+
+    result = await db.execute(
+        select(func.count(WorldEventCandidate.id)).where(
+            WorldEventCandidate.book_id == book_id,
+            WorldEventCandidate.status == "pending",
+        )
+    )
+    return int(result.scalar() or 0)
+
+
+async def _world_inbox_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Optional[Dict]:
+    """心跳积压提醒：短 TTL 计数缓存（防抖 + 省查询），超阈值才产卡。"""
+    if chapter is None:
+        return None
+    book_id = str(chapter.book_id)
+    cached = _WORLD_INBOX_CACHE.get(book_id)
+    now = time.monotonic()
+    if cached is not None and now - cached[0] < WORLD_INBOX_CACHE_TTL_S:
+        count = cached[1]
+    else:
+        try:
+            count = await _pending_candidates_count(db, book_id)
+            _WORLD_INBOX_CACHE[book_id] = (now, count)
+        except Exception as e:
+            logger.debug(f"[adaptive/heartbeat] 收件箱计数失败（不阻塞心跳）: {e}")
+            return None
+    return build_world_inbox_hint(count)
+
+
 def _extract_canon_hints(snapshot: Dict) -> List[Dict]:
     """从世界模型快照的 projections 里提取 canon_watch 缓存的 Canon 感知 hints。"""
     for proj in (snapshot.get("projections") or []):
@@ -469,6 +554,13 @@ async def settle(
     bind_adaptive_trace(chapter_id)
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     result = await orch.on_settle(request.text, request.entities, commit=request.commit)
+    # settle 落新候选 → 失效心跳积压缓存（下轮心跳拿到新计数）
+    try:
+        chapter = await db.get(Chapter, str(chapter_id))
+        if chapter is not None:
+            _WORLD_INBOX_CACHE.pop(str(chapter.book_id), None)
+    except Exception:
+        pass
     trace_event(
         "adaptive_settle",
         words=len(request.text),
@@ -514,11 +606,27 @@ async def finish(
 
     if isinstance(result, dict):
         result["memory_indexed"] = memory_indexed
+
+    # ---- A5c①：完稿报告附收件箱积压计数（book 级 pending；失败 0 不阻塞完稿）----
+    # 与 candidates_created/memory_indexed 同层（响应顶层）——报告区「收件箱」块消费；
+    # 完稿整章抽取刚落过候选，顺路失效心跳积压缓存让下轮心跳拿到新计数
+    candidates_pending = 0
+    try:
+        chapter = await db.get(Chapter, str(chapter_id))
+        if chapter is not None:
+            candidates_pending = await _pending_candidates_count(db, str(chapter.book_id))
+            _WORLD_INBOX_CACHE.pop(str(chapter.book_id), None)
+    except Exception as e:
+        logger.debug(f"[adaptive/finish] 收件箱计数失败（不影响完稿结果）: {e}")
+    if isinstance(result, dict):
+        result["candidates_pending"] = candidates_pending
+
     trace_event(
         "adaptive_finish",
         finished=result.get("finished", False) if isinstance(result, dict) else False,
         memory_indexed=memory_indexed,
         candidates_created=result.get("candidates_created", 0) if isinstance(result, dict) else 0,
+        candidates_pending=candidates_pending,
     )
     await flush_adaptive_records(chapter_id)
     return result
@@ -556,41 +664,30 @@ async def stitch_ghost(
         orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
         orch.on_direction_adopted(request.adopted_direction)
 
-    bundle = await load_chapter_settings_bundle(chapter_id, db)
-    proper_nouns = bundle.proper_nouns()
-    chapter_intent = request.chapter_intent or bundle.outline_text[:200]
-
-    # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
-    # 降级为空列表时 prompt 零变化（不阻塞生成）
-    if request.mode == "open":
-        recall_query = bundle.outline_text[:200]
-    else:
-        recall_query = ((request.rolling_prefix or "")[-150:] + " " + request.fragment.strip()).strip()
-    memory_echoes = await recall_memories(
-        db,
-        book_id=bundle.book_id or "",
+    # 上下文装配（B2 单一装配源）：bundle/召回/文风检索统一下沉到
+    # services/context/stitch_context.py——本路由与 context-preview 端点共用
+    # 同一函数（预览与注入同源红线），行为与旧内联段逐字节一致。
+    ctx = await assemble_stitch_context(
         chapter_id=chapter_id,
-        chapter_number=bundle.chapter_number,
-        query_text=recall_query,
-        k=3,
+        mode=request.mode,
+        fragment=request.fragment,
+        rolling_prefix=request.rolling_prefix,
+        db=db,
+        chapter_intent=request.chapter_intent,
     )
-
-    # 文风执行层（S2 E1/E2）：正面画像 + few-shot 笔迹示范注入全部四模式。
-    # 检索锚 = 记忆召回同一 query（当前写作上下文）；无样本/无文风卡 → 空，
-    # prompt 零变化（不阻塞生成）
-    style_positive = render_style_positive(bundle.style_card)
-    author_samples: List[str] = []
-    if bundle.book_id:
-        author_samples = await retrieve_author_samples(
-            db, bundle.book_id, recall_query, k=2,
-        )
+    bundle = ctx.bundle
+    proper_nouns = ctx.proper_nouns
+    chapter_intent = ctx.chapter_intent
+    memory_echoes = ctx.memory_echoes
+    style_positive = ctx.style_positive
+    author_samples = ctx.author_samples
 
     if request.mode == "open":
         # 点火（冷启动）：空章 + 大纲 → 开篇引子。大纲是唯一燃料，无已写正文
         system_prompt, user_prompt = build_opening_prompt(
-            outline_text=bundle.outline_text[:800],
+            outline_text=bundle.outline_text[:STITCH_OUTLINE_MAX_CHARS],
             previous_summary=bundle.previous_summary or "",
-            worldview_text=bundle.worldview_text[:200] if bundle.worldview_text else "",
+            worldview_text=bundle.worldview_text[:STITCH_WORLDVIEW_MAX_CHARS] if bundle.worldview_text else "",
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
             target_chars=request.target_chars,
@@ -598,14 +695,18 @@ async def stitch_ghost(
             style_positive=style_positive,
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
+            character_secrets=bundle.character_secrets,
         )
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
         # M3 三锚定：胶囊挂了锚点时，锚点文本一并注入意图块
+        # C3（docs/foundation-hardening.md §5.3）：spine 全锚点行——全章谋篇
+        # 盘面（含兑现状态）随意图区注入；无 spine → 行缺席，prompt 逐字节不变
+        spine_anchor_rows = await _spine_anchor_rows_for_prompt(chapter_id, db)
         system_prompt, user_prompt = build_outline_expand_prompt(
             outline_note=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-500:].strip(),
-            after_text=(request.after_text or "")[:300].strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_LONG_MAX_CHARS:].strip(),
+            after_text=(request.after_text or "")[:STITCH_AFTER_TEXT_MAX_CHARS].strip(),
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
             target_chars=request.target_chars,
@@ -614,13 +715,15 @@ async def stitch_ghost(
             style_positive=style_positive,
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
+            character_secrets=bundle.character_secrets,
             serves_anchor=request.serves_anchor.strip(),
+            spine_anchors=spine_anchor_rows,
         )
     elif request.mode == "burst":
         # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
         system_prompt, user_prompt = build_burst_prompt(
             fragment=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-500:].strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_LONG_MAX_CHARS:].strip(),
             beat_guidance=request.beat_guidance.strip(),
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
@@ -630,11 +733,12 @@ async def stitch_ghost(
             style_positive=style_positive,
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
+            character_secrets=bundle.character_secrets,
         )
     else:
         system_prompt, user_prompt = build_continue_prompt(
             fragment=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-200:].strip(),
+            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_SHORT_MAX_CHARS:].strip(),
             mode=request.mode,
             picked_parts=request.picked_parts,
             proper_nouns=proper_nouns,
@@ -645,6 +749,7 @@ async def stitch_ghost(
             style_positive=style_positive,
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
+            character_secrets=bundle.character_secrets,
         )
 
     async def _stream():
@@ -696,6 +801,15 @@ async def stitch_ghost(
             fragment = request.fragment.strip()
             if request.mode == "stitch" and fragment and fragment not in text:
                 text = f"{fragment}{text}"
+            # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
+            # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
+            # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
+            # 防御——warnings 是柔性增量字段，绝不让它阻塞幽灵推送。
+            ghost_warnings: List[Dict] = []
+            try:
+                ghost_warnings = check_ghost_text(text, bundle)
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
             yield build_sse_event("GHOST_START", "", mode=request.mode)
             # burst/open/outline 文本长 → 更大步长更快节奏（700 字约 2.3s 播完），短档保持原速
             chunk_size = 12 if request.mode in ("burst", "open", "outline") else 6
@@ -703,12 +817,17 @@ async def stitch_ghost(
             for pos in range(0, len(text), chunk_size):
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
                 await asyncio.sleep(frame_delay)
-            yield build_sse_event("GHOST_DONE", "", text=text, word_count=len(text))
+            # warnings 为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
+            yield build_sse_event(
+                "GHOST_DONE", "", text=text, word_count=len(text),
+                warnings=ghost_warnings,
+            )
             trace_event(
                 "adaptive_stitch_complete",
                 mode=request.mode,
                 target_chars=request.target_chars,
                 actual_chars=len(text),
+                warnings=len(ghost_warnings),
             )
         except Exception as e:
             logger.warning(f"[adaptive/stitch-ghost] 失败: {e}")
@@ -719,6 +838,82 @@ async def stitch_ghost(
             await flush_adaptive_records(chapter_id)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+# ============================================================
+# 端点 5.1：context-preview — AI 此刻所见预览（P5 B2，docs/foundation-hardening.md §2.1）
+# ============================================================
+# 跑 stitch-ghost 全套上下文装配（与真实注入同源——共用 assemble_stitch_context
+# + adaptive_prompts.render_system_blocks，禁止平行实现），**不调 LLM 文本生成**
+# （retrieve_author_samples 向量流的一次 embedding 调用属可接受例外，未配置
+# embedding 自动走兜底流）。空块原样返回（前端「未配置」灰字——设定体检入口）。
+# ============================================================
+
+_PREVIEW_MODES = ("stitch", "continue", "burst", "outline", "open")
+
+
+class ContextPreviewBlock(BaseModel):
+    key: str          # style_positive|author_samples|proper_nouns|canon|secrets|echoes|spatial
+    title: str        # 展示标题（文风画像/笔迹示范/…）
+    content: str      # 块渲染文本（与真实 system prompt 对应段逐字节一致；空块=""）
+    chars: int
+    source: str       # 来源徽标（世界实体/章级绑定/真相层/文风卡/…）
+    # A3b 预算条数据（docs/foundation-hardening.md §4.2）：配额=块常量上限；
+    # 0=该次渲染未过预算器（mode 无档）。trimmed 只在被裁时出现（exclude_none）。
+    budget_chars: int = 0
+    trimmed: Optional[str] = None
+
+
+class ContextPreviewResponse(BaseModel):
+    mode: str
+    blocks: List[ContextPreviewBlock] = Field(default_factory=list)
+    total_chars: int = 0
+    world_time: int = 0
+    world_time_source: str = "zero"  # chapter_anchor|prev_anchor|max_event|zero
+    world_sourced: bool = False
+
+
+@router.get(
+    "/{chapter_id}/adaptive/context-preview",
+    response_model=ContextPreviewResponse,
+    response_model_exclude_none=True,  # A3b：trimmed 无裁剪时省略（其余字段均非 None）
+)
+async def context_preview(
+    chapter_id: str,
+    mode: str = "continue",
+    db: AsyncSession = Depends(get_db),
+):
+    """AI 此刻所见预览：stitch-ghost 将注入的全部上下文块，按注入序返回。
+
+    query 构造与 stitch 路由同口径——预览无作者碎片（fragment=""），
+    rolling_prefix 取章节正文纯文本尾部（stitch 由前端送纯文本；这里从落库
+    HTML 剥成纯文本，与 memory_indexing 同口径），assemble 内部仍按各模式
+    统一截 [-150:] 拼 query。open 模式 query 走大纲（同 stitch）。
+    """
+    if mode not in _PREVIEW_MODES:
+        raise HTTPException(422, detail=f"mode 仅支持 {'/'.join(_PREVIEW_MODES)}")
+
+    # rolling_prefix = 章节正文尾部（剥 HTML；失败/无章退化为空串，open 模式不消费）
+    rolling_prefix = ""
+    try:
+        chapter = await db.get(Chapter, chapter_id)
+        if chapter is not None:
+            from backend.services.rag.memory_indexing import _html_to_plain
+
+            rolling_prefix = _html_to_plain(chapter.content_text or "")[-STITCH_ROLLING_LONG_MAX_CHARS:]
+    except Exception:
+        rolling_prefix = ""
+
+    ctx = await assemble_stitch_context(
+        chapter_id=chapter_id,
+        mode=mode,
+        fragment="",
+        rolling_prefix=rolling_prefix,
+        db=db,
+    )
+    # 显式构造 response model：response_model 只在路由层做文档/序列化，直调
+    # （单测/内部复用）也拿到结构化对象而非裸 dict
+    return ContextPreviewResponse(**build_context_preview(ctx, mode))
 
 
 # ============================================================
@@ -861,6 +1056,34 @@ def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
     return spine
 
 
+async def _spine_anchor_rows_for_prompt(chapter_id: str, db: AsyncSession) -> List[dict]:
+    """outline 档 stitch-ghost 的 spine 锚点行数据源（C3 · docs/foundation-hardening.md §5.3）。
+
+    从 chapter.spine（JSONB，字段口径同 _normalize_spine：{intent, anchors}）
+    抽 [{text, status}] 供 build_outline_expand_prompt 渲染全锚点行——胶囊
+    扩写不只看到自己挂的单锚（serves_anchor），还有全章谋篇盘面（含兑现
+    状态）。builder 侧再滤 dropped、截 STITCH_OUTLINE_SPINE_ANCHORS_MAX；
+    无脉络/章节不存在/读取失败 → 空列表（锚点行缺席，prompt 逐字节零变化）。
+    纯读无写，不触发 world-refresh。
+    """
+    try:
+        chapter = await db.get(Chapter, str(chapter_id))
+        spine = chapter.spine if chapter is not None else None
+        if not isinstance(spine, dict):
+            return []
+        rows: List[dict] = []
+        for a in (spine.get("anchors") or []):
+            if isinstance(a, dict) and str(a.get("text") or "").strip():
+                rows.append({
+                    "text": str(a["text"]).strip(),
+                    "status": str(a.get("status") or "").strip() or "pending",
+                })
+        return rows
+    except Exception as e:
+        logger.debug(f"[adaptive/stitch-ghost] spine 锚点读取失败（行缺席）: {e}")
+        return []
+
+
 @router.get("/{chapter_id}/adaptive/spine")
 async def get_spine(chapter_id: str, db: AsyncSession = Depends(get_db)):
     """读软脉络（NULL → {"spine": null}，前端据此静默缺席）。"""
@@ -962,6 +1185,7 @@ async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
 #   slice_mode {mode}            切片条读者视角档切换
 #   context_card                 情境浮卡打开
 #   quick_note {action}          世界速记 commit / undo
+#   batch_accept {count, undone} 批量采纳候选（A5b；undone=1 表示整批已撤销）
 #   ignition / settle {commit} / finish / sentence_fix {action: propose|adopt|reject}
 #   spine_intent_set / spine_anchor_add|drop|remove / spine_suggest /
 #   spine_suggest_adopt {part} / spine_suggest_discard（P1.4 章级谋篇）
@@ -1064,6 +1288,8 @@ async def collab_events_summary(
     # total/by_kind 保持纯 kind 口径（insights「协作」面板消费 by_kind['quick_note']
     # 总数，并入会双计 total 且污染 by_kind）。
     quick_note_actions: Dict = _Counter()
+    # batch_accept 的 count 求和（独立于 counts）：A5b 批量裁决采纳条数总量
+    batch_accept_count = 0
     encounter_cards = 0
     encounter_bursts = 0
     try:
@@ -1081,6 +1307,8 @@ async def collab_events_summary(
                             detail = ev.get("detail") or {}
                             if kind == "quick_note":
                                 quick_note_actions[detail.get("action") or "commit"] += 1
+                            if kind == "batch_accept" and not detail.get("undone"):
+                                batch_accept_count += int(detail.get("count") or 0)
                             # W5 桥验证指标：地图来源卡的亮出/连写（roadmap §3.2）
                             if kind == "cards_delivered":
                                 encounter_cards += int(detail.get("encounter_count") or 0)
@@ -1105,5 +1333,7 @@ async def collab_events_summary(
         "capsule_expand_count": counts.get("capsule_expand", 0),
         # 只含 action=='commit'（世界速记落账）；undo 不计（防误计拉高采纳面貌）
         "quick_note_commit": quick_note_actions.get("commit", 0),
+        # A5b 批量裁决：累计采纳条数（by_kind['batch_accept'] 是操作次数，这是条数）
+        "batch_accept_count": batch_accept_count,
         "encounter_card_burst_rate": round(encounter_bursts / encounter_cards, 3) if encounter_cards > 0 else None,
     }

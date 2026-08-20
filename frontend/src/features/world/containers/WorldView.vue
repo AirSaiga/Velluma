@@ -32,6 +32,13 @@ import WorldviewModal from '../presentation/WorldviewModal.vue'
 import CanonSection from '../presentation/CanonSection.vue'
 import CanonTruthDetailDrawer from '../presentation/CanonTruthDetailDrawer.vue'
 import CausalityGraphModal from '../presentation/CausalityGraphModal.vue'
+import BatchAcceptModal from '../presentation/BatchAcceptModal.vue'
+import {
+  runBatchAccept,
+  undoBatchAccept,
+  summarizeBatch,
+  type BatchAcceptOutcome,
+} from '../composables/batchAccept'
 import { useCanon } from '../composables/useCanon'
 import { readerMirrorApi } from '../../../services/api/domain/reader-mirror.api'
 import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory'
@@ -451,6 +458,57 @@ async function rejectCand(c: { id: string }) {
     busyCandidateId.value = null
     await loadCandidates()
   }
+}
+
+// ===== A5b 批量裁决：全部采纳 → 预览剔除 → 串行 accept → toast 6 秒整批撤销 =====
+const batchOpen = ref(false)
+const batchBusy = ref(false)
+const batchProgress = ref<{ done: number; total: number } | null>(null)
+
+async function onBatchConfirm(ids: string[]) {
+  if (!bookId.value) return
+  const picked = pendingCandidates.value.filter((c) => ids.includes(c.id))
+  if (!picked.length) return
+  batchBusy.value = true
+  batchProgress.value = { done: 0, total: picked.length }
+  let outcomes: BatchAcceptOutcome[] = []
+  try {
+    outcomes = await runBatchAccept(
+      bookId.value,
+      picked,
+      (done, total) => { batchProgress.value = { done, total } },
+    )
+  } finally {
+    batchBusy.value = false
+    batchProgress.value = null
+    batchOpen.value = false
+    // 转正进入推演：事件/状态全量刷新 + 候选列表重取（canon 候选建节点亦经
+    // world-refresh 广播让真相账本刷新）——与单条 acceptCand 的刷新面一致
+    window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+    await load(bookId.value)
+    await loadCandidates()
+  }
+  const { ok, failed } = summarizeBatch(outcomes)
+  if (ok > 0) {
+    showToast(`已批量入账 ${ok} 条世界变化`, 'success', 6000, {
+      label: '撤销',
+      // 撤销闭包捕获本批 outcomes——连开两批时旧 toast 只撤旧批
+      onClick: () => { void undoBatch(outcomes) },
+    })
+  }
+  if (failed > 0) showToast(`${failed} 条采纳失败（可能已被处理），可稍后重试`, 'warning')
+}
+
+async function undoBatch(outcomes: BatchAcceptOutcome[]) {
+  if (!bookId.value) return
+  const undone = await undoBatchAccept(bookId.value, outcomes)
+  showToast(
+    undone > 0 ? `已撤销 ${undone} 条入账（候选回到待确认）` : '撤销未完全成功：可在待确认分区逐条处理',
+    undone > 0 ? 'info' : 'warning',
+  )
+  window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+  await load(bookId.value)
+  await loadCandidates()
 }
 
 // ===== 地点双击改名 =====
@@ -876,13 +934,19 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 
       <!-- M6 浮出抽屉：图标栏当前选中分组的内容 -->
       <aside v-if="activePanel" class="atlas-drawer">
-        <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌） -->
+        <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌；A5b 批量裁决） -->
         <template v-if="activePanel === 'cand'">
         <div class="side-section">
           <div class="side-title">
             <Icon name="clock" :size="13" />
             <span>待确认</span>
             <span class="side-count">{{ pendingCandidates.length }}</span>
+            <button
+              v-if="pendingCandidates.length"
+              class="side-batch-btn"
+              title="逐条预览后批量采纳（可剔除，确认后 6 秒内可整批撤销）"
+              @click="batchOpen = true"
+            >全部采纳</button>
           </div>
           <ul class="side-list">
             <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || c.draft?.canon_text || ''">
@@ -1162,6 +1226,16 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           selectedTruthId = id
         }
       "
+    />
+
+    <!-- A5b 批量裁决模态（待确认分区「全部采纳」唤起） -->
+    <BatchAcceptModal
+      v-if="batchOpen"
+      :candidates="pendingCandidates"
+      :busy="batchBusy"
+      :progress="batchProgress"
+      @confirm="onBatchConfirm"
+      @close="batchOpen = false"
     />
 
     <!-- 新地点（点选坐标后） -->
@@ -1611,6 +1685,20 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   background: var(--bg-tertiary);
   border-radius: 9999px;
   padding: 1px 8px;
+}
+/* A5b 待确认分区「全部采纳」——count 的 margin-left:auto 把右缘让给按钮组 */
+.side-batch-btn {
+  font-size: 11px;
+  color: var(--accent-500);
+  background: transparent;
+  border: 1px solid var(--accent-500);
+  border-radius: 9999px;
+  padding: 1px 9px;
+  cursor: pointer;
+}
+.side-batch-btn:hover {
+  background: var(--accent-500);
+  color: #fff;
 }
 /* 事件过滤 */
 .evt-filter {

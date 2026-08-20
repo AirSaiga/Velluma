@@ -42,6 +42,9 @@ function kindMeta(kind: string) {
     case 'style_drift':
       // 文风漂移（S4 补全）：心跳纯 code 测量章尾指标 vs 目标/健康带
       return { label: '文风', icon: '✒', cls: 'hint-card--style' }
+    case 'world_inbox':
+      // 收件箱积压（A5c）：全书 pending 候选 >5——柔性提醒去裁决，不弹窗不抢焦点
+      return { label: '收件箱', icon: '📥', cls: 'hint-card--inbox' }
     default:
       return { label: 'Canon', icon: '·', cls: 'hint-card--canon' }
   }
@@ -383,5 +386,14 @@ const floatingHidden = computed(() =>
 .hint-card--style .hint-card__tag {
   background: #ede9fe;
   color: #7c3aed;
+}
+/* 收件箱积压 —— teal（A5c，参照 style_drift 先例的柔性提醒色档） */
+.hint-card--inbox {
+  border-color: #5eead4;
+  background: #f0fdfa;
+}
+.hint-card--inbox .hint-card__tag {
+  background: #ccfbf1;
+  color: #0f766e;
 }
 </style>

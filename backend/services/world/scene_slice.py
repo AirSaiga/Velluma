@@ -132,6 +132,18 @@ async def build_scene_slice(
     locations_by_id = {str(loc.id): loc for loc in locations}
     state = compute_world_state_from_events(events, locations_by_id, t, relations)
 
+    # ---- A4 叙事时间来源可见（docs/foundation-hardening.md §2.2，零行为变化）----
+    # max_event：附 time_start 最大事件的摘要（note 优先、event_type 兜底，截 30 字）——
+    # 让「未锚定被远期事件拉走」从隐形变可见。找不到摘要则省略字段，不报错。
+    t_source_note: Optional[str] = None
+    if nt.source == "max_event":
+        timed = [e for e in events if e.time_start is not None]
+        if timed:
+            ev = max(timed, key=lambda e: (e.time_start or 0, e.sequence_num or 0))
+            summary = str(getattr(ev, "note", "") or "").strip() or str(getattr(ev, "event_type", "") or "").strip()
+            if summary:
+                t_source_note = summary[:30]
+
     entities_by_id = {str(e.id): e for e in entities}
 
     # ---- 在场：有事件推演事态的角色（活着在前、重要度降序）----
@@ -293,6 +305,11 @@ async def build_scene_slice(
         result["proximities"] = proximities
     if nearest_anchor:
         result["nearest_anchor"] = nearest_anchor
+    # A4 来源可见：新字段缺席省略（旧前端不读即忽略，向后兼容）
+    if t_source_note:
+        result["t_source_note"] = t_source_note
+    if nt.source == "prev_anchor" and nt.chapter_number is not None:
+        result["t_source_chapter"] = int(nt.chapter_number)
     # D4-3：生成上下文的空间常识块（settings_bundle 消费；未标定为空串零变化）
     if scale:
         from backend.services.world.spatial import build_spatial_brief

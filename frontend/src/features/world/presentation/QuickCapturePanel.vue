@@ -21,6 +21,7 @@ import { EVENT_TEMPLATES, getTemplate, EVENT_TYPE_COLOR } from '../engine/eventT
 import { parsePointFromNote, stripPointFromNote } from '../engine/eventPoint'
 import type { EventType, WorldEvent, Point, DrawMode } from '../engine/types'
 import { fromYMD, breakdownTime } from '../engine/timeFormat'
+import { futureEventWarning } from '../engine/narrativeTimeSource'
 import { useWorld } from '../composables/useWorld'
 
 /** 绘制回灌结果（WorldView 在 draw-complete 后传入，watch 应用到对应字段） */
@@ -50,9 +51,20 @@ const emit = defineEmits<{
   'draw-cancel': []
 }>()
 
-const { locations, characters, factions, createEvent, updateEvent } = useWorld()
+const { locations, characters, factions, createEvent, updateEvent, chapterAnchors, events } = useWorld()
 
 const isEdit = computed(() => !!props.existing)
+
+// ===== A4 录入侧警示（只提示不拦截）=====
+// 事件时刻晚于当前叙事基准（有锚书=最大章锚；无锚书=事件流最大时刻，即未锚章节
+// 当前所处的③级叙事时刻）→ 提示「未锚定章节的『此刻』将被拉到第 N 日」。
+// 章节锚定信息缺席（无章节数据）或全部章节已锚 → 静默不显示（警示语义为空）。
+// 编辑模式同样生效且自洽：编辑当前最大事件本身时不超出自身时刻，不误报。
+const futureWarn = computed(() => {
+  const t = fromYMD(year.value, month.value, day.value)
+  const maxEventTime = events.value.reduce((m, e) => Math.max(m, e.time_start || 0), 0)
+  return futureEventWarning({ timeStart: t, chapterAnchors: chapterAnchors.value, maxEventTime })
+})
 
 // ===== 表单状态（编辑模式预填）=====
 const ex = props.existing
@@ -294,6 +306,7 @@ async function submit() {
         <input v-model.number="month" type="number" min="1" max="12" class="qc-num" /> 月
         <input v-model.number="day" type="number" min="1" max="30" class="qc-num" /> 日
       </div>
+      <div v-if="futureWarn" class="qc-hint qc-hint--warn">⚠ {{ futureWarn }}</div>
     </div>
 
     <div v-if="requires('character_id')" class="qc-row">

@@ -52,6 +52,19 @@ from backend.models import (
 from backend.repositories import CanonRepository
 from backend.schemas.canon import ConsistencyIssue
 
+# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：canon 段剂量改引 budget 表
+from backend.services.context.budget import (
+    CANON_HOOK_LEDGER_FETCH_LIMIT,
+    CANON_HOOK_MAX_ENTRIES,
+    CANON_HOOK_TEXT_MAX_CHARS,
+    CANON_PRIVATE_MAX_ENTRIES,
+    CANON_PRIVATE_TEXT_MAX_CHARS,
+    CANON_PUBLIC_FETCH_LIMIT,
+    CANON_PUBLIC_MAX_ENTRIES,
+    CANON_PUBLIC_TEXT_MAX_CHARS,
+    CANON_REVEAL_PLAN_MAX_CHARS,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,18 +246,18 @@ async def build_canon_context_for_prompt(
 
     if private_nodes:
         parts.append("## 作者脑中的真相 [private] ★ 绝不许在正文直接写出")
-        for n in private_nodes[:10]:
+        for n in private_nodes[:CANON_PRIVATE_MAX_ENTRIES]:
             label = world_names.get(str(n.ref_id), n.label) if n.ref_id else n.label
-            line = f"- {label}：{n.canon_text[:150]}"
+            line = f"- {label}：{n.canon_text[:CANON_PRIVATE_TEXT_MAX_CHARS]}"
             if n.reveal_plan:
-                line += f"（揭示计划：{n.reveal_plan[:80]}）"
+                line += f"（揭示计划：{n.reveal_plan[:CANON_REVEAL_PLAN_MAX_CHARS]}）"
             parts.append(line)
             # 关键：明确告诉 LLM 这是 private
             parts.append(f"  → 写作时可作为角色隐藏动机，但绝不能用对话/叙述/心理独白直接说出")
 
     # 2. public 已建立事实
     try:
-        public_nodes = await repo.nodes.list_by_book(book_id, visibility="public", limit=15)
+        public_nodes = await repo.nodes.list_by_book(book_id, visibility="public", limit=CANON_PUBLIC_FETCH_LIMIT)
     except Exception as e:
         logger.warning(f"[Canon] 加载 public 失败: {e}")
         public_nodes = []
@@ -253,9 +266,9 @@ async def build_canon_context_for_prompt(
     if public_facts:
         world_names_pub = await _resolve_world_labels(db, book_id, public_facts)
         parts.append("\n## 必须遵守的已建立事实 [public]")
-        for n in public_facts[:10]:
+        for n in public_facts[:CANON_PUBLIC_MAX_ENTRIES]:
             label = world_names_pub.get(str(n.ref_id), n.label) if n.ref_id else n.label
-            parts.append(f"- {label}：{n.public_text[:120]}")
+            parts.append(f"- {label}：{n.public_text[:CANON_PUBLIC_TEXT_MAX_CHARS]}")
 
     # 3. 悬空伏笔（C2 换源：plot_ledgers 优先；未迁移书的存量 canon hook 兜底）
     hook_lines: List[str] = []
@@ -269,15 +282,15 @@ async def build_canon_context_for_prompt(
                 _PlotLedger.book_id == book_id,
                 _PlotLedger.status == "open",
             )
-            .limit(30)
+            .limit(CANON_HOOK_LEDGER_FETCH_LIMIT)
         )
         ledgers = [
             l for l in result.scalars().all()
             if (l.canon_text or "").strip() or (l.public_text or "").strip()
-        ][:8]
+        ][:CANON_HOOK_MAX_ENTRIES]
         for l in ledgers:
             strength = (l.meta or {}).get("strength", "?")
-            hook_lines.append(f"- [{l.ledger_key}] 强度={strength}：{(l.canon_text or l.public_text or '')[:100]}")
+            hook_lines.append(f"- [{l.ledger_key}] 强度={strength}：{(l.canon_text or l.public_text or '')[:CANON_HOOK_TEXT_MAX_CHARS]}")
     except Exception as e:
         logger.warning(f"[Canon] 加载伏笔账本失败: {e}")
 
@@ -287,18 +300,18 @@ async def build_canon_context_for_prompt(
     except Exception as e:
         logger.warning(f"[Canon] 加载 hooks 失败: {e}")
         open_hooks = []
-    for h in open_hooks[:8]:
+    for h in open_hooks[:CANON_HOOK_MAX_ENTRIES]:
         if h.ref_id is not None:
             continue  # 已迁移并入账本（ledger 线已在上面），不重复
         if f"[{h.label}]" in covered_labels:
             continue
         meta = h.metadata_ or {}
         strength = meta.get("strength", "?")
-        hook_lines.append(f"- [{h.label}] 强度={strength}：{h.canon_text[:100]}")
+        hook_lines.append(f"- [{h.label}] 强度={strength}：{h.canon_text[:CANON_HOOK_TEXT_MAX_CHARS]}")
 
     if hook_lines:
         parts.append("\n## 活跃伏笔 [hook]（本章可推进/回收）")
-        parts.extend(hook_lines[:8])
+        parts.extend(hook_lines[:CANON_HOOK_MAX_ENTRIES])
 
     return "\n".join(parts) if parts else "（Canon 为空，无强约束）"
 

@@ -11,8 +11,12 @@ world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.
   包装成旧 Character/Asset/Relationship 的视图形状——下游消费方
   （hard_constraints / soft_constraints / _characters_text / sediment 冲突检测
   的 `ent.character.static_prompt` 鸭子取值链）零改动吃到世界数据。
+  ⚠ 适配器永远携带全量档案（双轨纪律的「算法轨」）——private 过滤只发生在
+  settings_bundle 的 prompt 文本装配层（A1，docs/foundation-hardening.md §3.1）。
 - load_world_overlay：WorldRepository 一站式加载 + t 时刻切片，供
   settings_bundle 装配；世界页无实体时返回 None（旧表兜底，未迁移书零影响）。
+  另产 secrets 通道（A1）：visibility=private 实体（character/faction/asset
+  统一）的结构化文本经此暴露——「AI 知晓但绝不能直接写出」（D5 语义）。
 
 副作用：无（纯查询）。警示：本模块绝不写任何表。
 """
@@ -25,6 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
+
+# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：名单上限改引 budget 表
+from backend.services.context.budget import (
+    ASSETS_MAX_ENTRIES,
+    CHARACTERS_MAX_ENTRIES,
+    LOCATIONS_MAX_ENTRIES,
+    RELATIONS_MAX_ENTRIES,
+)
 
 
 # ============================================================
@@ -39,10 +51,14 @@ class NarrativeTime(NamedTuple):
     - prev_anchor：前序最近已锚章
     - max_event：事件流最大 time_start（"写到最远处"）
     - zero：空世界兜底
+
+    chapter_number 仅 prev_anchor 时有值（来源章号。A4 来源可见展示用，
+    docs/foundation-hardening.md §2.2——纯附加信息，t/source 解析语义零变化）。
     """
 
     t: int
     source: str
+    chapter_number: Optional[int] = None
 
 
 async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> NarrativeTime:
@@ -62,9 +78,9 @@ async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> NarrativeTim
         return NarrativeTime(0, "zero")
     chapter_number = getattr(chapter, "chapter_number", None) or 0
 
-    # ② 前序最近已锚章
+    # ② 前序最近已锚章（顺带取章号——A4「来自第N章锚」展示，不改取值语义）
     stmt = (
-        select(Chapter.narrative_time)
+        select(Chapter.narrative_time, Chapter.chapter_number)
         .where(
             Chapter.book_id == book_id,
             Chapter.narrative_time.isnot(None),
@@ -74,9 +90,13 @@ async def resolve_narrative_time(db: AsyncSession, chapter: Any) -> NarrativeTim
         .limit(1)
     )
     result = await db.execute(stmt)
-    prev = result.scalar_one_or_none()
-    if prev is not None:
-        return NarrativeTime(int(prev), "prev_anchor")
+    prev_row = result.first()
+    if prev_row is not None:
+        return NarrativeTime(
+            int(prev_row.narrative_time),
+            "prev_anchor",
+            int(prev_row.chapter_number) if prev_row.chapter_number is not None else None,
+        )
 
     # ③ 事件最大时刻
     stmt2 = select(func.max(WorldEvent.time_start)).where(WorldEvent.book_id == book_id)
@@ -209,6 +229,23 @@ class WorldRelationAdapter:
 # overlay 装配（settings_bundle 调用）
 # ============================================================
 
+def _entity_secret_text(ent: Any) -> str:
+    """私有实体的结构化拼接文本（A1 secrets 通道；与各适配器注入正文的口径一致）。
+
+    - character → static_prompt_from_world_entity（八字段结构化拼接，键序即拼接序）
+    - asset / faction → WorldAssetAdapter.static_description 同口径
+      （intro 优先，回退 props.description；faction 无专属适配器，与 asset 共口径）
+    空文本的私有实体不进通道（无秘密可保，占行反而浪费 prompt）。
+    上限截断不在本层——由 prompt 侧 _secrets_block 统一控制（A3a 收编点）。
+    """
+    etype = getattr(ent, "entity_type", "") or ""
+    if etype == "character":
+        return static_prompt_from_world_entity(ent)
+    props = getattr(ent, "props", None) or {}
+    desc = str(props.get("description") or "").strip() if isinstance(props, dict) else ""
+    return (getattr(ent, "intro", "") or "").strip() or desc
+
+
 async def load_world_overlay(
     book_id: str,
     db: AsyncSession,
@@ -217,9 +254,14 @@ async def load_world_overlay(
     """加载世界数据覆盖层；世界页无实体时返回 None（旧表兜底）。
 
     Returns:
-        {entities, assets, locations, relationships, world_state, world_time}
+        {entities, assets, locations, relationships, world_state, world_time, secrets}
         - entities/relationships 按时间切片排序/过滤：本章时刻有事态的实体优先，
-          关系只保留 t 时刻活跃边（static 或锚事件已回放）
+          关系只保留 t 时刻活跃边（static 或锚事件已回放）；本章钉了场景地点时
+          在场实体与任一端点在场的活跃边排最前（A2 在场提权，无钉排序与旧逻辑逐一致）
+        - secrets（A1 私有通道）：visibility=private 实体（character/faction/asset
+          统一，不受 16/8 截断影响——秘密宁全勿缺）的 [{name, text}]。适配器本体
+          不动（sediment 冲突检测等算法消费者继续吃全量），过滤发生在
+          settings_bundle 的 prompt 文本装配层。
     """
     repo = WorldRepository(db)
     entities_all = await repo.entities.list_by_book(book_id)
@@ -238,7 +280,21 @@ async def load_world_overlay(
         str(cs.get("entity_id")): cs for cs in state.get("character_states", [])
     }
 
-    # 角色适配：切片时刻有事态者优先，其次重要度；上限 16（prompt 预算护栏）
+    # A2 在场提权（docs/foundation-hardening.md §2.3）：本章钉了场景地点时，
+    # 切片时刻位于该地点的实体构成「在场集」作排序第一键——当前场景的次要角色
+    # 不再被高重要度远端角色挤出 16 名单。无场景钉时在场集恒空、第一键恒 0，
+    # 排序与旧逻辑逐一致（零变化契约）。chapter 走 getattr 防御（鸭子类型对象）。
+    # 死者不进在场集：death 不清 location_id，不拦截则尸体原位会一直占在场名额。
+    scene_loc_id = str(getattr(chapter, "scene_location_id", None) or "")
+    present_ids: set = set()
+    if scene_loc_id:
+        for eid, cs in char_states.items():
+            if not (cs or {}).get("alive", False):
+                continue
+            if str((cs or {}).get("location_id") or "") == scene_loc_id:
+                present_ids.add(eid)
+
+    # 角色适配：在场 → 切片时刻有事态 → 重要度降序；上限见 budget（prompt 预算护栏）
     characters = [
         WorldEntityAdapter(e, char_states.get(str(e.id)), loc_by_id)
         for e in entities_all
@@ -246,17 +302,18 @@ async def load_world_overlay(
     ]
     characters.sort(
         key=lambda a: (
+            0 if (not scene_loc_id or str(a.world_entity.id) in present_ids) else 1,
             0 if str(a.world_entity.id) in char_states else 1,
             -int(getattr(a.world_entity, "importance", 1) or 1),
         )
     )
-    characters = characters[:16]
+    characters = characters[:CHARACTERS_MAX_ENTRIES]
 
     assets_all = [e for e in entities_all if e.entity_type == "asset"]
     assets_all.sort(key=lambda e: -int(getattr(e, "importance", 1) or 1))
-    assets = [WorldAssetAdapter(e) for e in assets_all[:8]]
+    assets = [WorldAssetAdapter(e) for e in assets_all[:ASSETS_MAX_ENTRIES]]
 
-    # 关系：只保留 t 时刻活跃边
+    # 关系：只保留 t 时刻活跃边；有场景钉时任一端点在场的边提前（仍截 budget 上限）
     active_rel_ids = {
         str(rs.get("relation_id"))
         for rs in state.get("relation_states", [])
@@ -266,14 +323,39 @@ async def load_world_overlay(
         WorldRelationAdapter(r, entities_by_id)
         for r in relations
         if str(r.id) in active_rel_ids
-    ][:8]
+    ]
+    if scene_loc_id:
+        relationships.sort(
+            key=lambda ra: (
+                0
+                if (
+                    str(ra.world_relation.source_entity_id) in present_ids
+                    or str(ra.world_relation.target_entity_id) in present_ids
+                )
+                else 1
+            )
+        )
+    relationships = relationships[:RELATIONS_MAX_ENTRIES]
+
+    # A1 私有通道（docs/foundation-hardening.md §3.1，D5 拍板）：private 实体的
+    # 档案不进正文上下文（过滤在 settings_bundle 装配层），改走 secrets——
+    # AI 知晓这些秘密以协助铺垫与暗示，但 prompt 侧要求绝不直接写出。
+    # 无私有实体 → 空列表（下游块渲染零变化）。
+    secrets: List[Dict[str, Any]] = []
+    for e in entities_all:
+        if (getattr(e, "visibility", None) or "public") != "private":
+            continue
+        text = _entity_secret_text(e)
+        if (e.name or "").strip() and text:
+            secrets.append({"name": (e.name or "").strip(), "text": text})
 
     return {
         "entities": characters,
         "assets": assets,
-        "locations": locations[:12],  # WorldLocation 自带 name，_locations_text 直接吃
+        "locations": locations[:LOCATIONS_MAX_ENTRIES],  # WorldLocation 自带 name，_locations_text 直接吃
         "relationships": relationships,
         "world_state": state,
         "world_time": t,
         "world_time_source": nt.source,
+        "secrets": secrets,
     }

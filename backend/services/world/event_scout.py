@@ -9,7 +9,11 @@ LLM 只产草稿 → 落 pending 候选（与事件账本物理隔离）→ 作�
 
 - settle：text=锁死段落（短文本，便宜）
 - finish：text 缺省取 chapters.content_text（整章，截 4000 字）
-- 幂等去重：pending 池里同章同 (event_type, summary) 不重复建
+- 幂等去重三道闸（A5a 升级，防「同一事件换措辞重复提议」）：
+  ① prompt 排除块：t 之前最近 15 条已入账事件注入「勿重复提取」
+  ② 落池前纯算法预筛：draft.summary 与已入账 note 归一化（去空白/标点）
+    子串重合即跳过——宁漏勿误（短于 4 字的归一化文本不参与比对）
+  ③ pending 池同章同 (event_type, summary) 不重复建（原有行为不变）
 - 失败/无实体/正文过短 → 返回 0，绝不阻塞 settle/finish 主流程
 
 副作用：写 world_event_candidates（pending）。警示：绝不写 world_events。
@@ -17,11 +21,13 @@ LLM 只产草稿 → 落 pending 候选（与事件账本物理隔离）→ 作�
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import Chapter
+from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
 from backend.services.context.world_bridge import resolve_narrative_time
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
@@ -35,6 +41,37 @@ logger = logging.getLogger(__name__)
 
 _MIN_TEXT_LEN = 20      # 正文过短（如空段/一两字）不浪费 LLM
 _MAX_CANDIDATES = 6
+_MAX_RECENT_EVENTS = 15   # 排除块/预筛取 t 之前最近 N 条（prompt 预算与查全的折中）
+
+# 归一化：去全部空白 + 中西文标点（比较只认实词字形，措辞/标点差异归零）。
+# 标点集经 re.escape 逐字转义进字符类——防手写转义/引号拼接出错。
+_CJK_PUNCT = "，。！？；：、“”‘’（）《》〈〉【】〔〕…—～·"
+_ASCII_PUNCT = ".,!?;:'\"()[]{}<>-_/\\"
+_STRIP_RE = re.compile("[\\s" + re.escape(_CJK_PUNCT) + re.escape(_ASCII_PUNCT) + "]+")
+_MIN_NORM_LEN = 4  # 归一化后短于此不参与比对（防「死了」「搬家」类短词误杀新事件）
+
+
+def _normalize_for_dedup(s: str) -> str:
+    return _STRIP_RE.sub("", s or "")
+
+
+def _is_ledger_duplicate(summary: str, recent_notes: List[str]) -> bool:
+    """纯算法预筛：summary 与已入账 note 归一化后互为子串 → 判重。
+
+    双向 containment（summary ⊂ note 或 note ⊂ summary）：前者挡「账本详情
+    被缩写重提」，后者挡「候选把账本原话扩写重提」。宁漏勿误：任一侧
+    归一化后 <4 字直接放行（信息量不足，宁可让 LLM/作者多看一眼）。
+    """
+    a = _normalize_for_dedup(summary)
+    if len(a) < _MIN_NORM_LEN:
+        return False
+    for note in recent_notes:
+        b = _normalize_for_dedup(note)
+        if len(b) < _MIN_NORM_LEN:
+            continue
+        if a in b or b in a:
+            return True
+    return False
 
 
 async def run(
@@ -63,8 +100,24 @@ async def run(
     locations = await repo.locations.list_by_book(book_id)
     t = (await resolve_narrative_time(db, chapter)).t
 
+    # 已入账去重素材：t 之前最近 N 条（复用本函数已持有的 db 会话，不新建连接；
+    # repo 惯约向 UUID 列传 str book_id）。prompt 排除块 + 落池预筛共用一份数据。
+    recent_events = list(
+        (
+            await db.execute(
+                select(WorldEvent)
+                .where(WorldEvent.book_id == book_id, WorldEvent.time_start <= t)
+                .order_by(WorldEvent.time_start.desc(), WorldEvent.sequence_num.desc())
+                .limit(_MAX_RECENT_EVENTS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     system_prompt, user_prompt = build_event_candidates_prompt(
-        body, t, entities, locations, max_candidates=_MAX_CANDIDATES
+        body, t, entities, locations, max_candidates=_MAX_CANDIDATES,
+        recent_events=recent_events,
     )
     try:
         from backend.services.utils.json_safe import parse_json_safe
@@ -100,6 +153,8 @@ async def run(
         ((c.draft or {}).get("event_type"), (c.draft or {}).get("summary"))
         for c in existing
     }
+    # 账本预筛素材：已入账事件的 note（与 prompt 排除块同源）
+    ledger_notes = [str(getattr(e, "note", None) or "") for e in recent_events]
 
     created = 0
     for item in items:
@@ -112,6 +167,8 @@ async def run(
         key = (draft["event_type"], draft["summary"])
         if not draft["summary"] or key in seen:
             continue
+        if _is_ledger_duplicate(draft["summary"], ledger_notes):
+            continue  # 已入账事件的换皮重提，不入池省一次作者裁决
         seen.add(key)
         await repo.candidates.create(book_id, chapter_id, draft, source=source)
         created += 1

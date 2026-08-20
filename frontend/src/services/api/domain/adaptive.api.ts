@@ -30,8 +30,8 @@ export interface DockPart {
 
 /** Canon 感知提示（canon_watch 组件产，写中停顿心跳返回） */
 export interface CanonHint {
-  /** 感知类型：appearance 角色出场 / callback 伏笔回收时机 / leak private 泄露 / style_drift 文风漂移（S4 补全） */
-  kind: 'appearance' | 'callback' | 'leak' | 'contradiction' | 'style_drift'
+  /** 感知类型：appearance 角色出场 / callback 伏笔回收时机 / leak private 泄露 / style_drift 文风漂移（S4 补全）/ world_inbox 收件箱积压（A5c） */
+  kind: 'appearance' | 'callback' | 'leak' | 'contradiction' | 'style_drift' | 'world_inbox'
   /** 实体名（角色名 / 伏笔标签 / Canon 节点 label） */
   node_label: string
   /** 实体类型：character / hook / canon */
@@ -40,6 +40,18 @@ export interface CanonHint {
   detail: string
   /** 严重度：error > warning > info（影响排序/着色） */
   severity: string
+}
+
+/**
+ * 幽灵草稿上屏前快检疑点（P5 C1，后端 ghost_guard 纯算法产；只提示不拦截）。
+ * kind：dead_speak=死者开口 / canon_leak=canon 私有标签泄底 / secret_leak=私有设定片段外泄
+ */
+export interface GhostWarning {
+  kind: 'dead_speak' | 'canon_leak' | 'secret_leak'
+  /** 命中触发词（实体名/别名/私有标签/秘密关键短语） */
+  span_text: string
+  /** 人话说明（含「可忽略」口径——回忆/闪回属合法用法） */
+  message: string
 }
 
 export interface HeartbeatResult {
@@ -85,12 +97,18 @@ export interface SettleResult {
   fact_count: number
   emergent_facts?: any
   conflicts?: any[]
+  /** 本次沉淀抽取产生的候选事件条数（A5d toast 直达收件箱用；0/缺省=无候选） */
+  candidates_created?: number
 }
 
 /** 完稿后处理审计报告 */
 export interface FinishReport {
   finished: boolean
   reason?: string
+  /** 全书 pending 候选计数（A5c① book 级；0/缺省=无积压，报告区静默缺席） */
+  candidates_pending?: number
+  /** 记忆倒灌：完稿时本章写入向量记忆的块数（后端路由写在响应顶层，与 candidates_pending 同层；勿放回嵌套 report） */
+  memory_indexed?: number
   report?: {
     chapter_id?: string
     word_count?: number
@@ -112,8 +130,6 @@ export interface FinishReport {
       issues?: Array<{ severity: string; category: string; detail: string }>
       verdict?: string
     }
-    /** 记忆倒灌：完稿时本章写入向量记忆的块数 */
-    memory_indexed?: number
   }
 }
 
@@ -142,6 +158,34 @@ export interface ChapterSpine {
 export interface SpineSuggestion {
   intent: string
   anchors: string[]
+}
+
+// ===== AI 所见预览（P5 B2，docs/foundation-hardening.md §2.1）=====
+/** 预览块（与 stitch-ghost 真实注入同源——后端与 stitch 路由共用同一装配函数） */
+export interface ContextPreviewBlock {
+  /** style_positive|author_samples|proper_nouns|canon|secrets|echoes|spatial（注入序；secrets=A1 私有设定） */
+  key: 'style_positive' | 'author_samples' | 'proper_nouns' | 'canon' | 'secrets' | 'echoes' | 'spatial'
+  title: string
+  /** 块渲染文本；空串 = 该块未配置（「未配置」灰字提示） */
+  content: string
+  chars: number
+  /** 来源徽标（世界实体/章级绑定/真相层/私有设定/文风卡/文风样本库/记忆召回/世界比例尺） */
+  source: string
+  /** 该块配额（A3b 预算器 BLOCK_CHAR_BUDGETS 常量上限；0=该次渲染未过预算器） */
+  budget_chars: number
+  /** 被裁信息（预算超支时该块条目收缩的人话说明；未触发裁剪时无此字段） */
+  trimmed?: string | null
+}
+
+export interface ContextPreview {
+  mode: string
+  blocks: ContextPreviewBlock[]
+  total_chars: number
+  world_time: number
+  /** 叙事时间解析来源：本章锚/前序锚/事件最大时刻/空世界 */
+  world_time_source: 'chapter_anchor' | 'prev_anchor' | 'max_event' | 'zero'
+  /** 世界页桥接是否生效（实体/关系来自活舆图而非旧章级绑定表） */
+  world_sourced: boolean
 }
 
 // ============================================================
@@ -189,6 +233,17 @@ export const adaptiveApi = {
   /** 拉取世界模型快照（恢复/调试用） */
   model: async (chapterId: string): Promise<WorldModelSnapshot> => {
     return requestJson(`/chapters/${chapterId}/adaptive/model`)
+  },
+
+  /**
+   * AI 此刻所见预览（P5 B2）：stitch-ghost 将注入的全部上下文块，按注入序返回。
+   * 只跑装配不调 LLM 文本生成；mode 五档（stitch/continue/burst/outline/open）缺省 continue。
+   */
+  contextPreview: async (
+    chapterId: string,
+    mode: 'stitch' | 'continue' | 'burst' | 'outline' | 'open' = 'continue',
+  ): Promise<ContextPreview> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/context-preview?mode=${mode}`)
   },
 
   /** 协作交互埋点（P0-3 本地 jsonl 零上报；词表见后端端点 6 注释） */
@@ -243,6 +298,8 @@ export const adaptiveApi = {
     ghost_adopt_rate: number | null
     capsule_expand_count: number
     quick_note_commit: number
+    /** A5b 批量裁决累计采纳条数（undone 批不计入） */
+    batch_accept_count: number
   }> => {
     return requestJson(`/chapters/${chapterId}/adaptive/events/summary`)
   },
@@ -267,7 +324,7 @@ export const adaptiveApi = {
     callbacks: {
       onStart?: (mode: string) => void
       onChunk?: (delta: string) => void
-      onDone?: (result: { text: string; word_count: number }) => void
+      onDone?: (result: { text: string; word_count: number; warnings?: GhostWarning[] }) => void
       onError?: (error: string) => void
     },
     signal?: AbortSignal,
@@ -280,7 +337,9 @@ export const adaptiveApi = {
         } else if (payload.event === 'GHOST_CHUNK') {
           callbacks.onChunk?.(payload.delta || '')
         } else if (payload.event === 'GHOST_DONE') {
-          callbacks.onDone?.({ text: payload.text || '', word_count: payload.word_count || 0 })
+          // C1 快检疑点随 DONE 帧到达（向后兼容增量字段；旧后端/无命中为空数组）
+          const warnings: GhostWarning[] = Array.isArray(payload.warnings) ? payload.warnings : []
+          callbacks.onDone?.({ text: payload.text || '', word_count: payload.word_count || 0, warnings })
           return true
         } else if (payload.event === 'ERROR' || payload.event === 'GHOST_ERROR') {
           callbacks.onError?.(payload.error || '续写失败')

@@ -6,12 +6,14 @@
 与 dock_generator（镜头碎片生发）、post_process（完稿审计）的区别：
 - dock_generator 产「可缝合的画面碎片」（动作型，进 SparkDock）
 - post_process 是「完稿后」整章审计（低频、可跑 LLM）
-- canon_watch 是「写中」实时感知（高频、纯算法零 LLM），产「只读提醒」
+- canon_watch 是「写中」实时感知（高频；hint 主体纯算法零 LLM，
+  contradiction 分支低频 1×LLM），产「只读提醒」
   进独立的 adaptiveSuggestions 通道（感知带），绝不进 dock_parts
 
 四类感知（kind）：
 - appearance   ：本章绑定角色名出现在 recent_text（提示这是他的设定）
-- callback     ：开放伏笔标签出现 / orphan hook 该回收了
+- callback     ：开放伏笔标签出现 / orphan hook 该回收了 / Canon 揭示计划
+                 临近（C3，expected_reveal_chapter 距本章 ≤2 章）
 - leak         ：Canon private 节点关键短语泄露到正文
 - contradiction：涌现实体 vs 角色设定冲突（节流 LLM 抽实体，≥30s/章）
 

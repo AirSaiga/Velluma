@@ -26,9 +26,10 @@ import BeatCardDock from '../../generation/presentation/BeatCardDock.vue'
 import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
+import GhostWarningsBar from '../../generation/presentation/GhostWarningsBar.vue'
 import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
-import { ghostActive } from '../../generation/composables/useGhostDraft'
+import { ghostActive, ghostWarnings } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
@@ -47,6 +48,7 @@ import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 import WorldContextCard from '../presentation/WorldContextCard.vue'
 import QuickEventNote from '../presentation/QuickEventNote.vue'
+import { OPEN_INBOX_EVENT, requestOpenInbox } from '../../world/composables/batchAccept'
 import type { EntityFocusPayload } from '../../../shared/types'
 import type { Chapter } from '../../../types'
 
@@ -107,6 +109,13 @@ const adaptiveAssist = useAdaptiveAssist({
   // adaptive 路径失败统一出口：toast 告知（此前全线静默失败，作者按 Space 无反应）
   reportError: (msg: string) => showToast(msg, 'error'),
   reportWarn: (msg: string) => showToast(msg, 'warning'),
+  // A5d 沉淀直达：settle 抽出候选 → toast 带 action，一键滑出副驾收件箱
+  onCandidatesCreated: (n: number) => {
+    showToast(`沉淀抽取：${n} 条世界变化待确认`, 'info', 6000, {
+      label: '去确认',
+      onClick: () => requestOpenInbox(),
+    })
+  },
 })
 session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode, parts))
 session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
@@ -398,8 +407,14 @@ function _drawerKeyHandler(e: KeyboardEvent) {
     toggleDrawerPinned()
   }
 }
-onMounted(() => window.addEventListener('keydown', _drawerKeyHandler))
-onBeforeUnmount(() => window.removeEventListener('keydown', _drawerKeyHandler))
+onMounted(() => {
+  window.addEventListener('keydown', _drawerKeyHandler)
+  window.addEventListener(OPEN_INBOX_EVENT, _onOpenInboxDrawer)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', _drawerKeyHandler)
+  window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInboxDrawer)
+})
 
 // 完稿审计报告到达时自动滑出抽屉一次（报告在抽屉「审校」tab；作者手动关过则不反复弹）。
 // 用 hover 态弹出（不 pin、不推挤画布）。
@@ -412,6 +427,12 @@ watch(() => session.finishReport.value, (report) => {
     _drawerAutoOpened = false
   }
 })
+
+// A5d 收件箱直达（toast「去确认」）：滑出抽屉（与完稿报告同款 hover 瞥看，不 pin）；
+// tab 切换与收件箱展开由 InspectorPanel / WorldSceneSlice 各自监听同一事件。
+function _onOpenInboxDrawer() {
+  if (!drawerOpen.value) drawerHover.value = true
+}
 
 // 打字沉浸：编辑活动期间顶栏/时间轴降到极低透明度（设计稿"打字时 10%"）。
 const isTyping = ref(false)
@@ -871,6 +892,9 @@ async function confirmDeleteChapter(ch: Chapter) {
             >
               <template #dock>
                 <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />
+                <!-- C1 快检疑点条：幽灵在屏且有命中时接在挂件舱位（幽灵在屏时
+                     挂件舱自身隐藏，此位恰好空出；只提示不拦截） -->
+                <GhostWarningsBar v-if="ghostActive && ghostWarnings.length" :warnings="ghostWarnings" />
               </template>
             </PerceptionBand>
 

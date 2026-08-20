@@ -2,6 +2,8 @@ import { ref, computed } from 'vue'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { noHistory } from '../../chapter-editor/noHistory'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
+import { useToast } from '../../../composables/useToast'
+import type { GhostWarning } from '../../../services/api/domain/adaptive.api'
 
 /**
  * NLE-ADF 2.0 幽灵草稿控制器（useGhostDraft）。
@@ -18,6 +20,9 @@ import { dispatchCollabEvent } from '../../../composables/collabEventBus'
  * - dirty 检测：对比"流式灌入的原文"与"当前幽灵区文本"，判断作者是否微调过
  *   ——锁拍时 dirty 段走 lock_with_text，干净段走 pass（与既有裁决路由一致）。
  * - 多段落：代笔整段文本含 \n\n，拆成多个 paragraph 节点插入（每段文本挂 mark）。
+ * - C1 快检疑点（P5 §5.1）：GHOST_DONE 帧的 warnings 存 ghostWarnings，
+ *   在屏时感知带停靠区出「N 处疑点」行；采纳时 toast 一句提醒。
+ *   红线：只提示不拦截，采纳永远可用（§9「提示不拦截」）。
  */
 
 export type GhostSource = 'stitch' | 'render' | 'outline' | null
@@ -30,6 +35,36 @@ export const ghostSource = ref<GhostSource>(null)
 export const ghostOriginal = ref('')
 /** 降级标记（代笔降级段 → 琥珀色幽灵） */
 export const ghostDegraded = ref(false)
+/** C1 上屏前快检疑点（GHOST_DONE 到达时由 useAdaptiveAssist 灌入；随生命周期重置） */
+export const ghostWarnings = ref<GhostWarning[]>([])
+
+/** 快检 kind → 人话短标签（toast 汇总 + 停靠区明细共用一张词表） */
+const WARNING_KIND_LABELS: Record<GhostWarning['kind'], string> = {
+  dead_speak: '死者开口',
+  canon_leak: '疑似泄底',
+  secret_leak: '私有设定外泄',
+}
+
+/**
+ * 疑点汇总话术（纯函数，单测锁定）：
+ * 「已采纳，含 2 处疑点：死者开口、疑似泄底（×2 表示该类命中数）」；
+ * 空列表返回空串（调用方据此静默）。
+ */
+export function summarizeGhostWarnings(warnings: GhostWarning[]): string {
+  if (!warnings.length) return ''
+  const counts = new Map<string, number>()
+  for (const w of warnings) {
+    const label = WARNING_KIND_LABELS[w.kind] || w.kind
+    counts.set(label, (counts.get(label) || 0) + 1)
+  }
+  const parts = [...counts.entries()].map(([label, n]) => (n > 1 ? `${label}×${n}` : label))
+  return `已采纳，含 ${warnings.length} 处疑点：${parts.join('、')}（可忽略，仅供参照）`
+}
+
+/** GHOST_DONE 帧到达时灌入快检疑点（useAdaptiveAssist 调用；随 begin/evaporate/commit 重置）。 */
+export function setGhostWarnings(warnings: GhostWarning[]): void {
+  ghostWarnings.value = Array.isArray(warnings) ? warnings : []
+}
 
 /**
  * 幽灵插入锚点（细纲扩写用）：null=跟随当前光标（默认，兼容旧行为），
@@ -73,6 +108,7 @@ export function beginGhost(
   ghostSource.value = source
   ghostOriginal.value = ''
   ghostDegraded.value = degraded
+  ghostWarnings.value = []
   ghostAnchorPos = anchorPos ?? null
   ghostActive.value = true
 }
@@ -197,6 +233,7 @@ export function commitGhost(): string {
   if (!editor || !range) {
     ghostActive.value = false
     ghostSource.value = null
+    ghostWarnings.value = []
     return ''
   }
   dispatchCollabEvent('ghost_adopt', { source: ghostSource.value })
@@ -232,9 +269,18 @@ export function commitGhost(): string {
       .setTextSelection(Math.min(flashTo, size))
       .run()
   }, 350)
+  // C1 快检疑点：采纳落正文时一句 toast 提醒（只提示不拦截——采纳已完成）。
+  // 疑点随快检在 GHOST_DONE 灌入；作者可能已微调幽灵文本，话术按「参照」口径。
+  const adoptedWarnings = ghostWarnings.value
   ghostActive.value = false
   ghostSource.value = null
   ghostAnchorPos = null
+  ghostWarnings.value = []
+  const summary = summarizeGhostWarnings(adoptedWarnings)
+  if (summary) {
+    const { showToast } = useToast()
+    showToast(summary, 'warning')
+  }
   return text
 }
 
@@ -250,6 +296,7 @@ export function evaporateGhost(): void {
   ghostSource.value = null
   ghostOriginal.value = ''
   ghostDegraded.value = false
+  ghostWarnings.value = []
   ghostAnchorPos = null
 }
 
@@ -260,6 +307,9 @@ export function useGhostDraft() {
     ghostOriginal,
     ghostDegraded,
     ghostDirty,
+    ghostWarnings,
+    setGhostWarnings,
+    summarizeGhostWarnings,
     beginGhost,
     appendGhost,
     ghostText,

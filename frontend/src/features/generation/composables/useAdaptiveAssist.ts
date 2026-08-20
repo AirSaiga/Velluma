@@ -20,7 +20,7 @@ import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
-  ghostActive, beginGhost, appendGhost, evaporateGhost,
+  ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings,
 } from './useGhostDraft'
 import { setSparkParts, showSparkDock, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
@@ -52,6 +52,8 @@ interface AdaptiveAssistOptions {
   reportError?: (msg: string) => void
   /** 后台心跳中断上报（warning 级；只报一次防刷屏，恢复后重置） */
   reportWarn?: (msg: string) => void
+  /** A5d 沉淀产出候选事件（settle 抽出 N 条待确认）——宿主 toast 直达收件箱 */
+  onCandidatesCreated?: (count: number) => void
 }
 
 export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
@@ -269,7 +271,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
-      onDone: () => {
+      onDone: (result) => {
+        // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
+        setGhostWarnings(result.warnings || [])
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -317,6 +321,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       if (opts.authorLaneRef.value === 'settling') opts.authorLaneRef.value = 'composing'
       // W4 候选回流：settle 可能抽出候选事件 → 切片/收件箱静默刷新
       window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+      // A5d 沉淀直达：抽出候选时 toast 带「去确认」action 直达副驾收件箱
+      const createdCount = Number(result?.candidates_created) || 0
+      if (createdCount > 0) opts.onCandidatesCreated?.(createdCount)
       return result
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'
@@ -368,7 +375,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
-      onDone: () => {
+      onDone: (result) => {
+        setGhostWarnings(result.warnings || [])
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -400,7 +408,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
-      onDone: () => {
+      onDone: (result) => {
+        setGhostWarnings(result.warnings || [])
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -468,7 +477,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('outline', false, noteEnd); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
-      onDone: () => {
+      onDone: (result) => {
+        setGhostWarnings(result.warnings || [])
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },

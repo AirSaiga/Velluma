@@ -43,12 +43,18 @@ from backend.repositories.memory_repository import MemoryRepository
 from backend.services.llm.embedding import get_embedding, is_embedding_configured
 from backend.services.rag.lexical import extract_keywords, format_event_echo
 
-logger = logging.getLogger(__name__)
+# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：回响剂量改引 budget 表
+# （原模块内私有常量 _WORLD_ECHO_LIMIT / _MATCHED_ENTITY_LIMIT 收编为
+#  ECHOES_WORLD_MAX_ENTRIES / ECHOES_MATCHED_ENTITY_MAX，值不变）
+from backend.services.context.budget import (
+    ECHOES_EMBED_QUERY_MAX_CHARS,
+    ECHOES_K_STITCH,
+    ECHOES_MATCHED_ENTITY_MAX,
+    ECHOES_MAX_CHARS,
+    ECHOES_WORLD_MAX_ENTRIES,
+)
 
-# 结构化前情（世界事件）最多注入条数——精确但更"干"，少量即可
-_WORLD_ECHO_LIMIT = 3
-# 查询中匹配的世界实体上限（防长文本全员命中）
-_MATCHED_ENTITY_LIMIT = 4
+logger = logging.getLogger(__name__)
 
 
 def merge_echoes(groups: Sequence[List[str]], k: int) -> List[str]:
@@ -70,7 +76,7 @@ async def recall_memories(
     chapter_id: str,
     chapter_number: int | None,
     query_text: str,
-    k: int = 3,
+    k: int = ECHOES_K_STITCH,
 ) -> List[str]:
     """召回与当前写作上下文最相关的前情片段（每段截 160 字）。
 
@@ -87,7 +93,7 @@ async def recall_memories(
     try:
         a_echoes = await _world_echoes(
             db, book_id=book_id, chapter_id=chapter_id,
-            query_text=query, limit=min(_WORLD_ECHO_LIMIT, k),
+            query_text=query, limit=min(ECHOES_WORLD_MAX_ENTRIES, k),
         )
     except Exception as e:
         logger.warning(f"[recall] 世界事件前情失败（跳过）: {e}")
@@ -115,7 +121,7 @@ async def recall_memories(
                 exclude_chapter_id=UUID(chapter_id) if chapter_id else None,
                 max_chapter_number=(chapter_number - 1) if chapter_number else None,
             )
-            b_echoes = [(c.chunk_text or "")[:160] for c in chunks if c.chunk_text]
+            b_echoes = [(c.chunk_text or "")[:ECHOES_MAX_CHARS] for c in chunks if c.chunk_text]
         except Exception as e:
             logger.warning(f"[recall] 词法召回失败（跳过）: {e}")
 
@@ -124,7 +130,7 @@ async def recall_memories(
 
 async def _vector_echoes(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:
     """向量召回（专业级增强层）：query 向量化 → search_similar 加权排序。"""
-    embedding = await get_embedding(query[:500])
+    embedding = await get_embedding(query[:ECHOES_EMBED_QUERY_MAX_CHARS])
     if not embedding:
         return []
     repo = MemoryRepository(db)
@@ -135,7 +141,7 @@ async def _vector_echoes(db, *, query, book_id, chapter_id, chapter_number, k) -
         exclude_chapter_id=UUID(chapter_id) if chapter_id else None,
         max_chapter_number=(chapter_number - 1) if chapter_number else None,
     )
-    return [(c.chunk_text or "")[:160] for c in chunks if c.chunk_text]
+    return [(c.chunk_text or "")[:ECHOES_MAX_CHARS] for c in chunks if c.chunk_text]
 
 
 async def _world_echoes(db, *, book_id, chapter_id, query_text, limit) -> List[str]:
@@ -157,7 +163,7 @@ async def _world_echoes(db, *, book_id, chapter_id, query_text, limit) -> List[s
         names = [ent.name or ""] + [str(a) for a in (getattr(ent, "aliases", None) or [])]
         if any(n and n in query_text for n in names):
             matched.append(ent)
-            if len(matched) >= _MATCHED_ENTITY_LIMIT:
+            if len(matched) >= ECHOES_MATCHED_ENTITY_MAX:
                 break
     if not matched:
         return []

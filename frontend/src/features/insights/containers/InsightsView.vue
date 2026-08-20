@@ -16,6 +16,9 @@ import { useAppStore } from '../../app/useAppStore'
 import { costReportApi, qualityReportApi, styleApi } from '../../../services/api/domain'
 import { reviewApi } from '../../../services/api/domain/review.api'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
+import { usageApi } from '../../../services/api/domain/usage.api'
+import type { BookUsage, ChapterUsage } from '../../../services/api/domain/usage.api'
+import { buildTrendChart, stageBarPercent } from '../usageChart'
 import { useToast } from '../../../composables/useToast'
 import type { CostReport, QualityReport, FindingItem } from '../../../types'
 
@@ -44,6 +47,12 @@ const costReports = ref<{ chapterId: string; chapterNumber: number; report: Cost
 const qualityReports = ref<{ chapterId: string; chapterNumber: number; report: QualityReport | null }[]>([])
 const collabReports = ref<{ chapterId: string; chapterNumber: number; report: Awaited<ReturnType<typeof adaptiveApi.collabEventsSummary>> | null }[]>([])
 
+// ===== B3 · 用量可见（generation_runs 聚合，独立于协作埋点数据源）=====
+const chapterUsage = ref<ChapterUsage | null>(null)
+const bookUsage = ref<BookUsage | null>(null)
+/** 「最近一章」消耗对应的章节号（标签展示用） */
+const usageChapterNumber = ref<number | null>(null)
+
 async function loadAll() {
   if (!bookIdFromRoute.value) return
   loading.value = true
@@ -54,7 +63,8 @@ async function loadAll() {
       await store.loadCurrentBookData()
     }
     const chaps = sortedChapters.value.slice(-10) // 最近 10 章
-    const [costs, qualities, collabs] = await Promise.all([
+    const latestChap = chaps.length ? chaps[chaps.length - 1] : null
+    const [costs, qualities, collabs, chapUsage, bkUsage] = await Promise.all([
       Promise.all(
         chaps.map(async (c) => {
           try {
@@ -85,10 +95,18 @@ async function loadAll() {
           }
         })
       ),
+      // B3：最近一章 + 本书消耗（零值结构也是有效响应；失败降级 null 由模板空态兜底）
+      latestChap
+        ? usageApi.getChapterUsage(latestChap.id).catch(() => null)
+        : Promise.resolve(null),
+      usageApi.getBookUsage(bookIdFromRoute.value).catch(() => null),
     ])
     costReports.value = costs
     qualityReports.value = qualities
     collabReports.value = collabs
+    chapterUsage.value = chapUsage
+    bookUsage.value = bkUsage
+    usageChapterNumber.value = latestChap?.chapter_number ?? null
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -144,6 +162,14 @@ const collabRate = (num: string, den: string) => {
   return d > 0 ? Math.round((n / d) * 100) + '%' : '—'
 }
 const collabHasData = computed(() => collabReports.value.some((r) => r.report?.total))
+
+// ===== B3 · 用量可见 computed（本书汇总 + 按日趋势几何）=====
+const usageHasData = computed(() => (bookUsage.value?.totals?.calls || 0) > 0)
+/** 组件条形归一基准（by_stage 最大 total_tokens；后端已按其降序，首项即峰值） */
+const usageStageMax = computed(() =>
+  Math.max(0, ...(bookUsage.value?.by_stage || []).map((s) => s.total_tokens || 0))
+)
+const usageTrend = computed(() => buildTrendChart(bookUsage.value?.by_date || []))
 
 function formatTokens(n: number): string {
   if (n > 1000) return (n / 1000).toFixed(1) + 'k'
@@ -350,6 +376,74 @@ async function rerunQuality(chapterId: string) {
 
     <!-- 协作面板（P1.3 走向卡质量环：本地埋点的个人镜子——采纳率决定协作件调优方向） -->
     <section v-else-if="activePanel === 'collab'" class="data-panel">
+      <!-- B3 · 用量可见两卡（generation_runs 聚合；独立于协作埋点数据源，二者可独立有/无数据） -->
+      <div v-if="usageHasData" class="usage-cards">
+        <article class="cost-item">
+          <header class="cost-header">
+            <span class="cost-chapter">AI 消耗</span>
+            <span class="cost-total">{{ formatTokens(bookUsage?.totals?.total_tokens || 0) }} token · {{ bookUsage?.totals?.calls || 0 }} 次调用</span>
+          </header>
+          <div class="usage-cells">
+            <div class="usage-cell">
+              <span class="usage-num">{{ formatTokens(bookUsage?.totals?.total_tokens || 0) }}</span>
+              <span class="usage-cap">本书 token</span>
+            </div>
+            <div class="usage-cell">
+              <span class="usage-num">{{ chapterUsage?.totals?.calls ?? 0 }}</span>
+              <span class="usage-cap">{{ usageChapterNumber ? `第 ${usageChapterNumber} 章调用` : '最近一章调用' }}</span>
+            </div>
+            <div class="usage-cell">
+              <span class="usage-num">{{ formatTokens(chapterUsage?.totals?.total_tokens || 0) }}</span>
+              <span class="usage-cap">最近一章 token</span>
+            </div>
+          </div>
+          <div class="usage-stage-list">
+            <div
+              v-for="s in bookUsage?.by_stage || []"
+              :key="s.stage"
+              class="usage-stage-row"
+              :title="`${s.label}（${s.stage}）：${s.calls} 次 · ${formatTokens(s.total_tokens)} token`"
+            >
+              <span class="usage-stage-label">{{ s.label }}</span>
+              <span class="usage-bar-track"><span class="usage-bar" :style="{ width: stageBarPercent(s.total_tokens, usageStageMax) }" /></span>
+              <span class="usage-stage-val">{{ s.calls }}× · {{ formatTokens(s.total_tokens) }}</span>
+            </div>
+          </div>
+        </article>
+        <article class="cost-item">
+          <header class="cost-header">
+            <span class="cost-chapter">按日趋势</span>
+            <span class="cost-total">近 {{ usageTrend.bars.length }} 天 · 峰值 {{ formatTokens(usageTrend.maxTotal) }} token/日</span>
+          </header>
+          <svg
+            :viewBox="`0 0 ${usageTrend.width} ${usageTrend.height}`"
+            class="usage-trend-svg"
+            role="img"
+            aria-label="AI 消耗按日趋势"
+          >
+            <line
+              :x1="0" :y1="usageTrend.height - 14"
+              :x2="usageTrend.width" :y2="usageTrend.height - 14"
+              class="usage-trend-axis"
+            />
+            <rect
+              v-for="b in usageTrend.bars"
+              :key="b.date"
+              :x="b.x" :y="b.y" :width="b.w" :height="b.h"
+              class="usage-trend-bar"
+            >
+              <title>{{ b.date }}：{{ b.calls }} 次 · {{ b.totalTokens }} token</title>
+            </rect>
+          </svg>
+          <div class="usage-trend-labels">
+            <span>{{ usageTrend.firstLabel }}</span>
+            <span>{{ usageTrend.lastLabel }}</span>
+          </div>
+        </article>
+      </div>
+      <p v-else class="usage-empty">
+        AI 消耗：暂无记录。用 AI 辅助写作（心跳感知、Space 续写、沉淀、完稿审计）后，这里会照出每章与每日的 token 账单。
+      </p>
       <div v-if="!collabHasData" class="empty">
         <p>暂无协作数据。在写作台用 AI 辅助写一章（走向卡 / Space 续写 / 细纲胶囊），这里会照出你的采纳习惯。</p>
       </div>
@@ -596,6 +690,121 @@ async function rerunQuality(chapterId: string) {
 .stage-calls {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ===== B3 · 用量可见两卡（协作面板内） ===== */
+.usage-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin-bottom: 0.625rem;
+}
+
+.usage-cells {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.625rem;
+}
+
+.usage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--bg-secondary);
+  border-radius: 0.375rem;
+}
+
+.usage-num {
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--accent-500);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-cap {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+.usage-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.usage-stage-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.usage-stage-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-bar-track {
+  display: block;
+  height: 0.375rem;
+  background: var(--bg-secondary);
+  border-radius: 0.1875rem;
+  overflow: hidden;
+}
+
+.usage-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent-500);
+  border-radius: inherit;
+  opacity: 0.75;
+}
+
+.usage-stage-val {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-trend-svg {
+  display: block;
+  width: 100%;
+  height: 6rem;
+}
+
+.usage-trend-axis {
+  stroke: var(--border-color);
+  stroke-width: 1;
+}
+
+.usage-trend-bar {
+  fill: var(--accent-500);
+  opacity: 0.8;
+}
+
+.usage-trend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.usage-empty {
+  margin: 0 0 0.625rem;
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+  border: 1px dashed var(--border-color);
+  border-radius: 0.375rem;
 }
 
 .quality-verdict {

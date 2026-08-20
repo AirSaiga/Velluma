@@ -45,7 +45,7 @@ class BoundaryPacingPromptTests(unittest.TestCase):
         )
 
         self.assertIn("当前章节张力等级为 2（低张力）", system_prompt)
-        self.assertIn("每个 beat 的 red_lines 必须包含：避免正面冲突、避免战斗升级", system_prompt)
+        self.assertIn("每个 beat 的 red_lines 必须包含：禁止发生任何武力冲突或战斗升级、避免正面冲突", system_prompt)
 
     def test_draft_prompt_contains_exit_state_stop_and_red_lines(self):
         chapter = SimpleNamespace(
@@ -72,9 +72,9 @@ class BoundaryPacingPromptTests(unittest.TestCase):
             beat=beat
         )
 
-        self.assertIn("强制切出状态（exit_state）：谈话在试探阶段收束", system_prompt)
+        self.assertIn("目标收束状态（exit_state）：谈话在试探阶段收束", system_prompt)
         self.assertIn("绝对禁忌（red_lines）：不得主动挑衅；不得升级为肢体冲突", system_prompt)
-        self.assertIn("必须立即收束并停在 exit_state", system_prompt)
+        self.assertIn("自然收束于 exit_state", system_prompt)
 
     def test_parse_review_result_normalizes_pacing_overflow_issue(self):
         raw = json.dumps(

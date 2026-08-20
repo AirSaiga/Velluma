@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../../app/useAppStore'
-import { useWorldSlice } from '../../world/composables/useWorldSlice'
+import { useWorldSlice, WORLD_REFRESH_EVENT } from '../../world/composables/useWorldSlice'
 import { formatTime, breakdownTime, fromYMD } from '../../world/engine/timeFormat'
 import { getTemplate } from '../../world/engine/eventTemplates'
+import { narrativeSourceText } from '../../world/engine/narrativeTimeSource'
 import type { EventType } from '../../world/engine/types'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
+import BatchAcceptModal from '../../world/presentation/BatchAcceptModal.vue'
+import {
+  runBatchAccept,
+  undoBatchAccept,
+  summarizeBatch,
+  OPEN_INBOX_EVENT,
+  inboxAutoOpen,
+} from '../../world/composables/batchAccept'
+import type { BatchAcceptOutcome } from '../../world/composables/batchAccept'
+import { useToast } from '../../../composables/useToast'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
@@ -82,6 +93,24 @@ const SOURCE_LABELS: Record<string, { label: string; hint: string }> = {
   zero: { label: '世界起点', hint: '世界尚无事件记录，从起点推演' },
 }
 const sourceInfo = computed(() => SOURCE_LABELS[slice.value?.t_source || 'zero'] || SOURCE_LABELS.zero)
+
+// ---- A4 时刻来源小字：来自本章锚 / 来自第N章锚 / 来自事件『……』 / 未锚定 ----
+const sourceText = computed(() =>
+  slice.value
+    ? narrativeSourceText({
+        source: slice.value.t_source,
+        chapter: slice.value.t_source_chapter,
+        note: slice.value.t_source_note,
+      })
+    : '',
+)
+
+/** A4 一键锚定：把本章叙事锚钉在当前推演时刻（setNarrativeTime 与世界页时间轴
+ *  右键锚定共用 worldApi.setChapterAnchor 同一通路，不另造路径） */
+async function anchorHere() {
+  if (!props.chapterId || !currentBookId.value || slice.value == null) return
+  await setNarrativeTime(currentBookId.value, props.chapterId, slice.value.t)
+}
 
 // ---- 本章时刻编辑（叙事锚 = 切片内容的螺丝）----
 const editingTime = ref(false)
@@ -161,6 +190,71 @@ async function undoLastAccept() {
   await undoAccept(currentBookId.value, candidateId, eventId)
 }
 
+// ---- A5b 批量裁决：全部采纳 → 预览剔除 → 串行 accept → toast 6 秒整批撤销 ----
+const { showToast } = useToast()
+const batchOpen = ref(false)
+const batchBusy = ref(false)
+const batchProgress = ref<{ done: number; total: number } | null>(null)
+
+function openBatchAccept() {
+  if (!candidates.value.length) return
+  batchOpen.value = true
+}
+
+async function onBatchConfirm(ids: string[]) {
+  if (!currentBookId.value) return
+  const picked = candidates.value.filter((c) => ids.includes(c.id))
+  if (!picked.length) return
+  batchBusy.value = true
+  batchProgress.value = { done: 0, total: picked.length }
+  let outcomes: BatchAcceptOutcome[] = []
+  try {
+    outcomes = await runBatchAccept(
+      currentBookId.value,
+      picked,
+      (done, total) => { batchProgress.value = { done, total } },
+    )
+  } finally {
+    batchBusy.value = false
+    batchProgress.value = null
+    batchOpen.value = false
+    // 收件箱/切片随 useWorldSlice 的 world-refresh 监听静默重取
+    window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
+  }
+  const { ok, failed } = summarizeBatch(outcomes)
+  if (ok > 0) {
+    showToast(`已批量入账 ${ok} 条世界变化`, 'success', 6000, {
+      label: '撤销',
+      // 撤销闭包捕获本批 outcomes——连开两批时旧 toast 只撤旧批
+      onClick: () => { void undoBatch(outcomes) },
+    })
+  }
+  if (failed > 0) showToast(`${failed} 条采纳失败（可能已被处理），可稍后重试`, 'warning')
+}
+
+async function undoBatch(outcomes: BatchAcceptOutcome[]) {
+  if (!currentBookId.value) return
+  const undone = await undoBatchAccept(currentBookId.value, outcomes)
+  showToast(
+    undone > 0 ? `已撤销 ${undone} 条入账（候选回到待确认）` : '撤销未完全成功：可到收件箱逐条处理',
+    undone > 0 ? 'info' : 'warning',
+  )
+  window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
+}
+
+// ---- A5d 沉淀直达：toast「去确认」→ 抽屉滑出 + 「此刻」tab + 收件箱展开 ----
+// 抽屉关闭时本组件是卸载态（v-if），事件发出瞬间监听器未挂——挂载后消费旗标补位
+if (inboxAutoOpen.value) {
+  inboxOpen.value = true
+  inboxAutoOpen.value = false
+}
+function _onOpenInbox() {
+  inboxOpen.value = true
+  inboxAutoOpen.value = false
+}
+onMounted(() => window.addEventListener(OPEN_INBOX_EVENT, _onOpenInbox))
+onBeforeUnmount(() => window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInbox))
+
 function eventLabelOf(type: string) {
   return getTemplate(type as EventType)?.label || type
 }
@@ -237,9 +331,20 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           </div>
         </div>
         <div v-else class="time-edit-row">
-          <button class="link-btn" title="锚定本章发生的世界时刻（切片内容随之变化）" @click="openTimeEditor">
-            改
-          </button>
+          <span class="source-note" :title="sourceInfo.hint">{{ sourceText }}</span>
+          <span class="time-row-actions">
+            <button
+              v-if="slice.t_source !== 'chapter_anchor'"
+              class="link-btn"
+              title="把本章叙事锚钉在当前推演时刻——此后不再被后续事件拉走（与时间轴右键锚定同一通路）"
+              @click="anchorHere"
+            >
+              锚定本章
+            </button>
+            <button class="link-btn" title="锚定本章发生的世界时刻（切片内容随之变化）" @click="openTimeEditor">
+              改
+            </button>
+          </span>
         </div>
 
         <div v-show="!collapsed" class="slice-body">
@@ -348,11 +453,18 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             </div>
           </section>
 
-          <!-- W4 候选回流收件箱（本章变化） -->
+          <!-- W4 候选回流收件箱（本章变化）+ A5b 批量裁决 -->
           <section v-if="candidates.length" class="setting-group inbox">
             <div class="setting-group-label inbox-head" @click="inboxOpen = !inboxOpen">
               <span class="inbox-badge">{{ candidates.length }}</span>
               本章带来的世界变化
+              <button
+                class="mini-btn"
+                title="逐条预览后批量采纳（可剔除，确认后 6 秒内可整批撤销）"
+                @click.stop="openBatchAccept"
+              >
+                全部采纳
+              </button>
               <span class="chevron small" :class="{ open: inboxOpen }">▾</span>
             </div>
             <ul v-show="inboxOpen" class="inbox-list">
@@ -404,6 +516,16 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
         <button class="undo-btn" @click="undoLastAccept">撤销</button>
       </div>
     </Teleport>
+
+    <!-- A5b 批量裁决模态（全部采纳 → 逐条预览剔除 → 确认） -->
+    <BatchAcceptModal
+      v-if="batchOpen"
+      :candidates="candidates"
+      :busy="batchBusy"
+      :progress="batchProgress"
+      @confirm="onBatchConfirm"
+      @close="batchOpen = false"
+    />
   </div>
 </template>
 
@@ -493,8 +615,24 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 
 .time-edit-row {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-top: -0.4rem;
+}
+/* A4 来源小字：时刻行左缘（事件摘要可长，单行省略） */
+.source-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+.time-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.35rem;
 }
 .link-btn {
   background: none;
@@ -720,6 +858,11 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .inbox-head {
   cursor: pointer;
   user-select: none;
+}
+.inbox-head .mini-btn {
+  margin-left: auto;
+  font-size: 0.62rem;
+  padding: 0.08rem 0.5rem;
 }
 .inbox-badge {
   display: inline-flex;

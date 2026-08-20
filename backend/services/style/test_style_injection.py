@@ -173,18 +173,37 @@ class TestAuditionPrompt:
         assert "作者笔迹示范" in sys_prompt
 
     def test_same_blocks_as_continue_prompt(self):
-        """试听与续写共用同一套块——「所见即所得」的机制保证。"""
+        """试听与写作台共用同一套块——「所见即所得」的机制保证。
+
+        C3（docs/foundation-hardening.md §5.3）后 continue/stitch 档画像压缩
+        为关键行，与试听的完整画像**有意**不同（试听展示配置的画像全貌，
+        顺句档只注入关键行）——因此：①示范块与 continue 仍逐字一致；
+        ②完整画像块的对拍改挂 burst 档（段落级模式不压缩，见下测）。
+        """
         style = "- 语域偏好：冷峻"
         samples = ["样本一。"]
         cont_sys, _ = build_continue_prompt(fragment="他", rolling_prefix="", style_positive=style, author_samples=samples)
         audi_sys, _ = build_audition_prompt(self.TEXT, style_positive=style, author_samples=samples)
-        # 画像块与示范块在两侧逐字一致（基座相同 + 块拼接顺序相同）
+        # 示范块两侧逐字一致（继续生效）
+        marker = "# 作者笔迹示范"
+        c_start = cont_sys.index(marker)
+        a_start = audi_sys.index(marker)
+        c_end = cont_sys.index("\n\n#", c_start + 2) if "\n\n#" in cont_sys[c_start + 2:] else len(cont_sys)
+        a_end = audi_sys.index("\n\n#", a_start + 2) if "\n\n#" in audi_sys[a_start + 2:] else len(audi_sys)
+        assert cont_sys[c_start:c_end] == audi_sys[a_start:a_end]
+
+    def test_same_style_blocks_as_burst_prompt(self):
+        """试听的完整画像块与 burst 连写（不压缩档）逐字一致。"""
+        style = "- 语域偏好：冷峻"
+        samples = ["样本一。"]
+        burst_sys, _ = build_burst_prompt(fragment="他", rolling_prefix="", style_positive=style, author_samples=samples)
+        audi_sys, _ = build_audition_prompt(self.TEXT, style_positive=style, author_samples=samples)
         for marker in ("# 作者文风画像", "# 作者笔迹示范"):
-            c_start = cont_sys.index(marker)
+            b_start = burst_sys.index(marker)
             a_start = audi_sys.index(marker)
-            c_end = cont_sys.index("\n\n#", c_start + 2) if "\n\n#" in cont_sys[c_start + 2:] else len(cont_sys)
+            b_end = burst_sys.index("\n\n#", b_start + 2) if "\n\n#" in burst_sys[b_start + 2:] else len(burst_sys)
             a_end = audi_sys.index("\n\n#", a_start + 2) if "\n\n#" in audi_sys[a_start + 2:] else len(audi_sys)
-            assert cont_sys[c_start:c_end] == audi_sys[a_start:a_end], f"块不一致: {marker}"
+            assert burst_sys[b_start:b_end] == audi_sys[a_start:a_end], f"块不一致: {marker}"
 
 
 # ============================================================

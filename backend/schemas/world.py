@@ -295,6 +295,11 @@ class SceneSliceResponse(BaseModel):
     """章节时刻的世界切片：写作页切片条唯一数据源，与生成桥接共用时间解析与推演。"""
     t: int = 0
     t_source: str = "zero"  # chapter_anchor | prev_anchor | max_event | zero
+    # A4 叙事时间来源可见（docs/foundation-hardening.md §2.2）：max_event 时附
+    # time_start 最大事件摘要（note 优先、event_type 兜底，截 30 字；缺席省略）
+    t_source_note: Optional[str] = None
+    # A4：prev_anchor 时来源章号（「来自第N章锚」；缺席省略）
+    t_source_chapter: Optional[int] = None
     presence: List[ScenePresenceItem] = Field(default_factory=list)
     scene: Optional[SceneBlockResponse] = None
     encounters: List[SceneEncounterItem] = Field(default_factory=list)

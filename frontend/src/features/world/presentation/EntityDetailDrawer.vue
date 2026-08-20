@@ -230,6 +230,10 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
         <Icon name="x-mark" :size="14" />
       </button>
     </div>
+    <!-- 私有语义消歧（A1）：让作者知道「私有」挡什么、不挡什么 -->
+    <p class="edd-vis-note">
+      私有 = AI 知晓但不直接写出；防泄底强制力来自真相层，敏感秘密建议建真相节点
+    </p>
 
     <!-- 重要度 -->
     <div class="edd-imp">
@@ -488,6 +492,14 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-color: #f59e0b;
   color: #f59e0b;
   background: rgba(245, 158, 11, 0.08);
+}
+/* 私有语义消歧（A1）：切换旁的一行说明，两条底线——知晓不写出 / 强制力在真相层 */
+.edd-vis-note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  opacity: 0.9;
 }
 .edd-close {
   display: flex;

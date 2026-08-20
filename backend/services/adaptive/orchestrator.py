@@ -8,8 +8,10 @@
 所有组件异步激活（asyncio.create_task），心跳请求不阻塞——前端不等组件完成，
 下次心跳拿到的快照已含组件产出。
 
-Token 预算：全局软上限（单章单次心跳周期内 creative tokens ≤ 3000），
-各组件有独立预算，调度器汇总避免超支。
+Token 预算：心跳组件侧无全局汇总闸——每次激活带独立 budget_tokens（下发为
+该组件本次 LLM 调用的 max_tokens），调度器不做跨组件求和与超支拦截。
+真正的预算器在 services/context/budget.py（P5 批次 3）：管 stitch 注入侧
+的上下文剂量与跨块分配，不覆盖心跳组件。
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ INFERENCE_SEVERITY_THRESHOLD = 0.5
 @dataclass
 class Activation:
     """一次组件激活指令。"""
-    component: str   # intent_inference | future_projection | dock_generator | sediment | post_process
+    component: str   # intent_inference | future_projection | dock_generator | sediment | post_process | canon_watch | event_scout
     priority: str    # high | medium | low
     budget_tokens: int
 
@@ -217,8 +219,8 @@ class AdaptiveOrchestrator:
                 self._last_dock_proj_sig = cur_proj_sig
             # 缓存命中：__dock__ 项仍在 layer3_projections，前端 heartbeat 照常取到
 
-        # ---- 规则 4：Canon 感知（停顿 4s + 有正文；纯算法零 LLM，与 dock 同档同步返回）----
-        # 产 Canon 感知 hints（角色出场/伏笔回收/private 泄露），写 __canon_watch__ 缓存项
+        # ---- 规则 4：Canon 感知（停顿 4s + 有正文；hint 主体纯算法 + contradiction 低频 LLM，与 dock 同档同步返回）----
+        # 产 Canon 感知 hints（角色出场/伏笔回收/private 泄露/揭示临近），写 __canon_watch__ 缓存项
         # 与 dock 区别：不要求 cursor_at_paragraph_end（写到相关词就该提醒，不限段尾）
         if state.paused_ms >= 4000 and (state.recent_text or "").strip():
             from backend.services.adaptive.change_detector import _text_sig
@@ -231,7 +233,7 @@ class AdaptiveOrchestrator:
                 activations.append(Activation(
                     component="canon_watch",
                     priority="low",
-                    budget_tokens=0,  # 纯算法零 LLM
+                    budget_tokens=0,  # appearance/callback/leak 纯算法；contradiction 分支的 1×LLM 由组件内 ≥30s/章 节流自控，不走此预算
                 ))
                 self._last_canon_text_sig = canon_text_sig
             # 缓存命中：__canon_watch__ 项仍在 layer3_projections，前端 heartbeat 照常取到

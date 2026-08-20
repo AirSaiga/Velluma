@@ -4,7 +4,8 @@
 作者主导写作流程（自适应辅助）的 prompt 构建。
 
 设计意图：抽取 BS-ADF 渲染器与微缝合中已验证的「反 AI 腔契约 + 白描规则」
-为共享基座 _ADAPTIVE_SYSTEM，供续写 / 岔路探测 / 沉淀时机判断复用。
+为共享基座 _ADAPTIVE_SYSTEM，供续写（缝合/顺写/连写/细纲扩写/开篇点火）
+与文风试听复用。
 与拍划分完全解耦——输入是「作者正文片段 + 设定 bundle」，不依赖 BeatSlotCard。
 
 共享基座来源：
@@ -18,6 +19,26 @@ from __future__ import annotations
 from typing import List, Optional
 
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
+
+# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：注入剂量改引 budget 表。
+# SECRETS_* 在此 import 再导出——test_private_channel 等既有消费方仍从本模块
+# 取名，收编不改任何 import 面。
+# A3b（§4.2）：跨块预算分配器同源——块定义（头/条目格式）在本模块，分配策略
+# 与配额表在 budget（机制与数据分居，budget 保持零项目依赖）。
+from backend.services.context.budget import (
+    SECRETS_BLOCK_MAX_ENTRIES,
+    SECRETS_ENTRY_MAX_CHARS,
+    SPATIAL_BRIEF_MAX_CHARS,
+    STITCH_OUTLINE_MAX_CHARS,
+    STITCH_OUTLINE_SPINE_ANCHORS_MAX,
+    STITCH_PREV_SUMMARY_MAX_CHARS,
+    STITCH_WORLDVIEW_MAX_CHARS,
+    BudgetBlock,
+    BlockUsage,
+    MODE_BLOCK_BUDGET_OVERRIDES,
+    MODE_CONTEXT_BUDGETS,
+    allocate,
+)
 
 _BANNED_WORDS_TEXT = "、".join(DEFAULT_BAN_LIST.banned_words)
 
@@ -55,9 +76,7 @@ _ADAPTIVE_SYSTEM = """你是顶级的中文长篇小说作家，此刻在辅助�
 
 def _spatial_block(spatial_brief: str) -> str:
     """D4-3 空间常识块（docs/map-scale-spatial.md §5）：≤3 行粗估；空=零变化。"""
-    if not spatial_brief.strip():
-        return ""
-    return "\n# 空间常识（比例尺粗估，数字天然带「约」）\n" + spatial_brief.strip()[:300]
+    return _spatial_block_def(spatial_brief).render()
 
 
 def _base_system() -> str:
@@ -65,22 +84,149 @@ def _base_system() -> str:
     return _ADAPTIVE_SYSTEM.format(banned_words=_BANNED_WORDS_TEXT)
 
 
-def _nouns_block(proper_nouns: Optional[List[str]]) -> str:
-    """专名约束块（防缝合/续写时称呼漂移造名）。"""
-    if not proper_nouns:
-        return ""
-    nouns_str = "、".join(proper_nouns)
-    return (
-        "\n\n# 在场实体专名（硬约束）\n"
-        f"以下名称必须原样使用，禁止改名、缩写或生造昵称：{nouns_str}"
+# ============================================================
+# 七块定义（A3b：块=固定头+优先级序条目，裁剪统一走 budget.allocate）
+# ============================================================
+# 每块一个 _xxx_block_def 产 BudgetBlock（key/头/条目/硬度），render_system_
+# blocks 收集后按模式总预算过 allocate。默认预算（=各块 worst-case 总和）下
+# allocate 恒等，渲染结果与旧整块函数逐字节一致（test_budget_allocate 零变化锁）。
+# 旧 _xxx_block 函数保留为 def.render() 薄包装——build_audition_prompt（试听
+# 不走模式预算）与既有单测的取名面不变，块格式单一来源。
+
+def _style_block_def(style_positive: str) -> BudgetBlock:
+    """文风画像块定义：条目=画像行（render_style_positive 输出按行拆）。"""
+    text = (style_positive or "").strip()
+    return BudgetBlock(
+        key="style_positive",
+        header=(
+            "\n\n# 作者文风画像（贴合其笔迹写作，软约束）\n"
+            "以下是这位作者的文风特征，续写的语感、句式与节奏都应向它靠拢：\n"
+        ),
+        entries=text.split("\n") if text else [],
     )
 
 
-def _canon_block(canon_context: str) -> str:
-    """Canon 合规块（public 事实须一致，private 禁忌不许说出）。"""
-    if not canon_context or "（Canon 为空" in canon_context:
-        return ""
-    return f"\n\n# 作者脑中世界图谱（Canon）\n{canon_context}"
+# ---- C3 continue 轻档画像压缩（docs/foundation-hardening.md §5.3）----
+# 句级顺写（continue/stitch）怕束缚手感——画像只留关键行（句长节奏 +
+# 对话目标两行 + 旋钮意图行若有），段落级三模式（burst/outline/open）
+# 保持完整画像。压缩发生在 BudgetBlock 的 entries 侧（建 def 前滤行），
+# 预算器与预览（B2）走同一入口，看到的即注入的。无文风卡（空文本）
+# 与 mode 空/未知（旁路调用方）零变化。
+_LIGHT_STYLE_MODES = ("continue", "stitch")
+_LIGHT_STYLE_LINE_PREFIXES = ("- 句长节奏：", "- 对话占比目标：")
+
+
+def _light_mode_style_positive(style_positive: str, mode: str) -> str:
+    """continue/stitch 档的画像关键行筛选（C3 · §5.3）。
+
+    保留：句长节奏行、对话占比目标行、旋钮意图行（含「意图：」的行——
+    S4 手动档才渲染，口径见 settings_bundle.render_style_positive）；
+    其余（词汇层级/语域偏好/开头结尾习惯/段落节奏）缺席。
+    非 continue/stitch 档原样返回（burst/outline/open 完整画像）。
+    """
+    if mode not in _LIGHT_STYLE_MODES or not style_positive:
+        return style_positive
+    kept = [
+        ln for ln in style_positive.split("\n")
+        if ln.startswith(_LIGHT_STYLE_LINE_PREFIXES) or "意图：" in ln
+    ]
+    return "\n".join(kept)
+
+
+def _samples_block_def(author_samples: Optional[List[str]]) -> BudgetBlock:
+    """笔迹示范块定义：条目=样本（含「【示范 N】」编号，弃尾条不影响前条编号）。"""
+    samples = [s.strip() for s in (author_samples or []) if s and s.strip()]
+    return BudgetBlock(
+        key="author_samples",
+        header=("\n\n# 作者笔迹示范（学其语感、节奏与用词习惯——只学写法，禁止复制内容或意象）\n"),
+        entries=[f"【示范 {i + 1}】\n{s}" for i, s in enumerate(samples)],
+        footer=("\n（以上是这位作者亲笔写的字。你接下来写的每一句，都应该像同一个人写的。）"),
+        separator="\n\n",
+    )
+
+
+def _nouns_block_def(proper_nouns: Optional[List[str]]) -> BudgetBlock:
+    """专名约束块定义：硬块（防缝合/续写时称呼漂移造名）。"""
+    return BudgetBlock(
+        key="proper_nouns",
+        header=("\n\n# 在场实体专名（硬约束）\n以下名称必须原样使用，禁止改名、缩写或生造昵称："),
+        entries=["、".join(proper_nouns)] if proper_nouns else [],
+        hard=True,
+    )
+
+
+def _canon_block_def(canon_context: str) -> BudgetBlock:
+    """Canon 合规块定义：硬块（public 事实须一致，private 禁忌不许说出）。"""
+    empty = not canon_context or "（Canon 为空" in canon_context
+    return BudgetBlock(
+        key="canon",
+        header="\n\n# 作者脑中世界图谱（Canon）\n",
+        entries=[] if empty else [canon_context],
+        hard=True,
+    )
+
+
+def _spatial_block_def(spatial_brief: str) -> BudgetBlock:
+    """空间常识块定义：单条块（裁剪只可能整块缺席）；空/未标定=零变化。"""
+    text = (spatial_brief or "").strip()[:SPATIAL_BRIEF_MAX_CHARS]
+    return BudgetBlock(
+        key="spatial",
+        header="\n# 空间常识（比例尺粗估，数字天然带「约」）\n",
+        entries=[text] if text else [],
+    )
+
+
+# ---- A1 私有设定块（D5 拍板语义；截断常量已收编 services/context/budget.py ----
+# ---- ——A3a，docs/foundation-hardening.md §4.1；本模块 import 再导出， ----
+# ---- test_private_channel 等既有消费方取名不变）----
+# 原取舍（值随常量迁 budget 表，理由见彼处注释）：上限 8 条与 canon 表/里
+# （各 10 条）同量级取保守值；每条截 150 字与 canon 表条目同口径；私有序列
+# 不做条内换行处理（static_prompt 天然多行时按原样截断）。
+SECRETS_BLOCK_HEADER = "作者私有设定（你知晓以下秘密以协助铺垫与暗示，但绝不能直接写出）"
+
+
+def _secrets_block_def(character_secrets: Optional[List[dict]]) -> BudgetBlock:
+    """私有设定块定义：硬块；条目=「- 名：文」行（A1 · §3.1，D5 拍板语义）。"""
+    raw = [
+        s
+        for s in (character_secrets or [])
+        if isinstance(s, dict)
+        and str(s.get("name") or "").strip()
+        and str(s.get("text") or "").strip()
+    ]
+    return BudgetBlock(
+        key="secrets",
+        header=f"\n\n# {SECRETS_BLOCK_HEADER}\n",
+        entries=[
+            f"- {str(s['name']).strip()}：{str(s['text']).strip()[:SECRETS_ENTRY_MAX_CHARS]}"
+            for s in raw[:SECRETS_BLOCK_MAX_ENTRIES]
+        ],
+        hard=True,
+    )
+
+
+def _secrets_block(character_secrets: Optional[List[dict]]) -> str:
+    """作者私有设定块（A1 · docs/foundation-hardening.md §3.1，D5 拍板语义）。
+
+    私有 = AI 知晓但绝不能直接写出（对齐 canon [private]，而非从上下文删除
+    ——作者写暗示/铺垫时 AI 需知晓秘密才能协助）。输入是 bundle.character_secrets
+    （[{name, text}]，world_bridge 供给）。空列表/全空条目 → 空块
+    （无私有实体的书 prompt 逐字节零变化）。
+    """
+    return _secrets_block_def(character_secrets).render()
+
+
+def _echoes_block_def(memory_echoes: Optional[List[str]]) -> BudgetBlock:
+    """前情回响块定义：条目=召回片段行（recall 质量序，尾部最可让）。"""
+    echoes = [e.strip() for e in (memory_echoes or []) if e and e.strip()]
+    return BudgetBlock(
+        key="echoes",
+        header=(
+            "\n\n# 前情回响（作者更早章节写过的片段）\n"
+            "以下片段用于保持细节一致、自然呼应前情，禁止大段复述原文：\n"
+        ),
+        entries=[f"- {e}" for e in echoes],
+    )
 
 
 def _echoes_block(memory_echoes: Optional[List[str]]) -> str:
@@ -89,15 +235,7 @@ def _echoes_block(memory_echoes: Optional[List[str]]) -> str:
     定位：保持细节一致 + 自然呼应前情（物件、称呼、未回收的悬念），
     禁止大段复述原文。空列表 → 空串（prompt 零变化）。
     """
-    echoes = [e.strip() for e in (memory_echoes or []) if e and e.strip()]
-    if not echoes:
-        return ""
-    lines = "\n".join(f"- {e}" for e in echoes)
-    return (
-        "\n\n# 前情回响（作者更早章节写过的片段）\n"
-        "以下片段用于保持细节一致、自然呼应前情，禁止大段复述原文：\n"
-        f"{lines}"
-    )
+    return _echoes_block_def(memory_echoes).render()
 
 
 def _style_positive_block(style_positive: str) -> str:
@@ -106,14 +244,7 @@ def _style_positive_block(style_positive: str) -> str:
     输入是 settings_bundle.render_style_positive 的渲染结果（≤10 行）。
     空串 → 空块（无文风卡的书 prompt 零变化）。
     """
-    text = (style_positive or "").strip()
-    if not text:
-        return ""
-    return (
-        "\n\n# 作者文风画像（贴合其笔迹写作，软约束）\n"
-        "以下是这位作者的文风特征，续写的语感、句式与节奏都应向它靠拢：\n"
-        f"{text}"
-    )
+    return _style_block_def(style_positive).render()
 
 
 def _author_samples_block(author_samples: Optional[List[str]]) -> str:
@@ -123,15 +254,105 @@ def _author_samples_block(author_samples: Optional[List[str]]) -> str:
     调用方已截断）。示范只学语感与节奏，禁止复制内容。
     空列表 → 空块（prompt 零变化）。
     """
-    samples = [s.strip() for s in (author_samples or []) if s and s.strip()]
-    if not samples:
-        return ""
-    body = "\n\n".join(f"【示范 {i + 1}】\n{s}" for i, s in enumerate(samples))
-    return (
-        "\n\n# 作者笔迹示范（学其语感、节奏与用词习惯——只学写法，禁止复制内容或意象）\n"
-        f"{body}\n"
-        "（以上是这位作者亲笔写的字。你接下来写的每一句，都应该像同一个人写的。）"
+    return _samples_block_def(author_samples).render()
+
+
+# ============================================================
+# system 块渲染（注入序权威，P5 B2 · docs/foundation-hardening.md §2.1；
+# A3b 跨块预算接线点，§4.2）
+# ============================================================
+
+def render_system_blocks_with_usage(
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
+    proper_nouns: Optional[List[str]] = None,
+    canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
+    memory_echoes: Optional[List[str]] = None,
+    spatial_brief: str = "",
+    mode: str = "",
+) -> tuple:
+    """渲染七个 system 块并按模式总预算过 allocate（A3b 接线层）。
+
+    返回 ([(key, block_text)], usages)：
+    - blocks：注入序（画像→样本→专名→canon→私有→回响→空间）的渲染块，
+      空数据对应空串块；
+    - usages：List[BlockUsage] 或 None——mode 在 MODE_CONTEXT_BUDGETS 有档时
+      返回 allocate 的每块配额使用明细（供预览预算条），无档（mode="" 或
+      未知模式）不过 allocate、返回 None（恒等路径，任何调用方零变化）。
+
+    默认预算（初值=各块 worst-case 总和）下 allocate 恒等 → 输出与不接
+    预算器逐字节一致（test_budget_allocate 零变化锁）；只有实测期把
+    MODE_CONTEXT_BUDGETS 调小后才可能触发软块收缩。
+
+    C3（§5.3 分模式差异化注入首版）：①mode ∈ {continue, stitch} 时画像
+    先经 _light_mode_style_positive 压缩为关键行再建块（无文风卡零变化）；
+    ②burst 档 allocate 透传 MODE_BLOCK_BUDGET_OVERRIDES 的块配额覆盖
+    （仅 usages.budget_chars 展示口径，裁剪仍只看模式总预算）。
+    """
+    defs = [
+        _style_block_def(_light_mode_style_positive(style_positive, mode)),
+        _samples_block_def(author_samples),
+        _nouns_block_def(proper_nouns),
+        _canon_block_def(canon_context),
+        _secrets_block_def(character_secrets),
+        _echoes_block_def(memory_echoes),
+        _spatial_block_def(spatial_brief),
+    ]
+    usages: Optional[List[BlockUsage]] = None
+    budget = MODE_CONTEXT_BUDGETS.get(mode)
+    if budget is not None:
+        result = allocate(
+            defs, budget,
+            block_budgets=MODE_BLOCK_BUDGET_OVERRIDES.get(mode),
+        )
+        defs = result.blocks
+        usages = result.usages
+    return [(b.key, b.render()) for b in defs], usages
+
+
+def render_system_blocks(
+    style_positive: str = "",
+    author_samples: Optional[List[str]] = None,
+    proper_nouns: Optional[List[str]] = None,
+    canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
+    memory_echoes: Optional[List[str]] = None,
+    spatial_brief: str = "",
+    mode: str = "",
+) -> List[tuple]:
+    """按真实注入序渲染七个 system 块，返回 [(key, block_text)]。
+
+    四个 stitch builder（continue/burst/outline/open）的 system prompt 组装段
+    统一走此函数——注入序 = 返回序（画像→样本→专名→canon→私有→回响→空间，
+    私有块紧随 canon，对齐「真相类约束相邻」的排布），空数据对应空串块
+    （拼接后 prompt 逐字节零变化）。
+
+    mode（A3b）：stitch 五模式档名——有档则过 budget.allocate 跨块预算
+    （默认预算下恒等，见 render_system_blocks_with_usage）；空串/未知模式
+    不过预算器（build_audition_prompt 等旁路调用方零变化）。
+    C3（§5.3）：mode ∈ {continue, stitch} 时画像块压缩为关键行
+    （_light_mode_style_positive）——同源红线下预览与真实注入一同生效。
+
+    character_secrets 是 A1 私有通道（bundle.character_secrets，[{name, text}]）：
+    私有实体档案只经此块注入（「AI 知晓但绝不直接写出」），_characters_text 等
+    装配层已同步排除——两轨不渗漏。
+
+    这是「预览与注入同源」红线的落点：GET /adaptive/context-preview（AI 所见
+    预览，services/context/stitch_context.py）与 builder 消费同一份块渲染，
+    改注入必改这里，预览自动跟随——禁止在预览侧平行实现块拼接。
+    """
+    blocks, _usages = render_system_blocks_with_usage(
+        style_positive=style_positive,
+        author_samples=author_samples,
+        proper_nouns=proper_nouns,
+        canon_context=canon_context,
+        character_secrets=character_secrets,
+        memory_echoes=memory_echoes,
+        spatial_brief=spatial_brief,
+        mode=mode,
     )
+    return blocks
 
 
 # ============================================================
@@ -145,6 +366,7 @@ def build_continue_prompt(
     picked_parts: Optional[List[str]] = None,
     proper_nouns: Optional[List[str]] = None,
     canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
     target_chars: int = 120,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
@@ -161,6 +383,7 @@ def build_continue_prompt(
         picked_parts: 作者点选的零件（stitch 模式用）
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
+        character_secrets: 私有实体档案（A1；空=零变化）
         target_chars: 目标字数上限
         chapter_intent: 章节意图/大纲片段（可选方向引导）
         style_positive: 作者文风画像文本（settings_bundle.render_style_positive；空=零变化）
@@ -170,12 +393,17 @@ def build_continue_prompt(
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
-    system_prompt += _style_positive_block(style_positive)
-    system_prompt += _author_samples_block(author_samples)
-    system_prompt += _nouns_block(proper_nouns)
-    system_prompt += _canon_block(canon_context)
-    system_prompt += _echoes_block(memory_echoes)
-    system_prompt += _spatial_block(spatial_brief)
+    for _key, _block in render_system_blocks(
+        style_positive=style_positive,
+        author_samples=author_samples,
+        proper_nouns=proper_nouns,
+        canon_context=canon_context,
+        character_secrets=character_secrets,
+        memory_echoes=memory_echoes,
+        spatial_brief=spatial_brief,
+        mode=mode,  # A3b：stitch/continue 两档过模式预算
+    ):
+        system_prompt += _block
 
     parts_str = "、".join(picked_parts) if picked_parts else "（无——仅按作者原句顺势续写）"
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
@@ -214,6 +442,7 @@ def build_burst_prompt(
     beat_guidance: str = "",
     proper_nouns: Optional[List[str]] = None,
     canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
     target_chars: int = 700,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
@@ -232,6 +461,7 @@ def build_burst_prompt(
         beat_guidance: 选定走向卡的走向文本（空 = 自由发挥，顺语气自然推进）
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
+        character_secrets: 私有实体档案（A1；空=零变化）
         target_chars: 总字数软上限（默认 700）
         chapter_intent: 章节意图/大纲片段（可选方向引导）
         style_positive: 作者文风画像文本（空=零变化）
@@ -241,12 +471,17 @@ def build_burst_prompt(
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
-    system_prompt += _style_positive_block(style_positive)
-    system_prompt += _author_samples_block(author_samples)
-    system_prompt += _nouns_block(proper_nouns)
-    system_prompt += _canon_block(canon_context)
-    system_prompt += _echoes_block(memory_echoes)
-    system_prompt += _spatial_block(spatial_brief)
+    for _key, _block in render_system_blocks(
+        style_positive=style_positive,
+        author_samples=author_samples,
+        proper_nouns=proper_nouns,
+        canon_context=canon_context,
+        character_secrets=character_secrets,
+        memory_echoes=memory_echoes,
+        spatial_brief=spatial_brief,
+        mode="burst",  # A3b：burst 档过模式预算
+    ):
+        system_prompt += _block
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
     if beat_guidance:
@@ -275,12 +510,42 @@ def build_burst_prompt(
 # 细纲扩写 prompt（作者亲笔速记 → 双端锚定的小段正文）
 # ============================================================
 
+# ---- C3 outline 全锚点行（docs/foundation-hardening.md §5.3）----
+# 状态标签与 spine 端点口径对齐（pending|hit|dropped，_normalize_spine）；
+# dropped 不入行——作者已划掉的锚不应反过来引导扩写方向。
+_SPINE_ANCHOR_STATUS_LABELS = {"pending": "待兑现", "hit": "已兑现"}
+
+
+def _format_spine_anchor_line(spine_anchors: Optional[List[dict]]) -> str:
+    """spine 锚点列表 → user prompt 意图区的全锚点行（C3 · §5.3）。
+
+    格式「# 本章锚点：A（待兑现）；B（已兑现）…」（≤STITCH_OUTLINE_SPINE_
+    ANCHORS_MAX 个，分号分隔；dropped 与空文本不入行，未知 status 按
+    待兑现）。输入是路由侧从 chapter.spine 抽出的 [{text, status}]；
+    无有效锚点 → 空串（无 spine 书 prompt 逐字节零变化）。
+    """
+    parts: List[str] = []
+    for a in (spine_anchors or []):
+        if not isinstance(a, dict):
+            continue
+        text = str(a.get("text") or "").strip()
+        status = str(a.get("status") or "").strip()
+        if not text or status == "dropped":
+            continue
+        label = _SPINE_ANCHOR_STATUS_LABELS.get(status, "待兑现")
+        parts.append(f"{text}（{label}）")
+        if len(parts) >= STITCH_OUTLINE_SPINE_ANCHORS_MAX:
+            break
+    return f"# 本章锚点：{'；'.join(parts)}" if parts else ""
+
+
 def build_outline_expand_prompt(
     outline_note: str,
     rolling_prefix: str,
     after_text: str = "",
     proper_nouns: Optional[List[str]] = None,
     canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
     target_chars: int = 400,
     chapter_intent: str = "",
     memory_echoes: Optional[List[str]] = None,
@@ -288,6 +553,7 @@ def build_outline_expand_prompt(
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
     serves_anchor: str = "",
+    spine_anchors: Optional[List[dict]] = None,
 ) -> tuple:
     """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
 
@@ -304,25 +570,39 @@ def build_outline_expand_prompt(
         after_text: 细纲之后的已写正文开头（≤300 字，可空）
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
+        character_secrets: 私有实体档案（A1；空=零变化）
         target_chars: 目标字数上限（默认 400）
         chapter_intent: 章节意图/大纲片段（可选方向引导）
         memory_echoes: 向量召回的前情片段
         style_positive: 作者文风画像文本（空=零变化）
         author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
         serves_anchor: 胶囊挂的谋篇锚点文本（P1.4 M3 三锚定：双端缝合+锚点意图；空=零变化）
+        spine_anchors: 本章 spine 全锚点列表（C3 · §5.3，[{text, status}]，
+            路由从 chapter.spine 抽取；None/空 → 锚点行缺席=零变化。
+            胶囊不只看到自己挂的单锚，还有全章谋篇盘面）
 
     Returns:
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
-    system_prompt += _style_positive_block(style_positive)
-    system_prompt += _author_samples_block(author_samples)
-    system_prompt += _nouns_block(proper_nouns)
-    system_prompt += _canon_block(canon_context)
-    system_prompt += _echoes_block(memory_echoes)
-    system_prompt += _spatial_block(spatial_brief)
+    for _key, _block in render_system_blocks(
+        style_positive=style_positive,
+        author_samples=author_samples,
+        proper_nouns=proper_nouns,
+        canon_context=canon_context,
+        character_secrets=character_secrets,
+        memory_echoes=memory_echoes,
+        spatial_brief=spatial_brief,
+        mode="outline",  # A3b：outline 档过模式预算
+    ):
+        system_prompt += _block
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    # C3（§5.3）：全锚点行先于单锚——一般→具体（先给全章谋篇盘面，再点出
+    # 本段服务的锚点）；无 spine → 行缺席，prompt 逐字节不变
+    anchors_line = _format_spine_anchor_line(spine_anchors)
+    if anchors_line:
+        intent_line += f"\n{anchors_line}"
     if serves_anchor:
         intent_line += f"\n# 本段服务的谋篇锚点（作者定的方向，扩写要朝它去）\n{serves_anchor}"
     if after_text:
@@ -397,6 +677,7 @@ def build_opening_prompt(
     worldview_text: str = "",
     proper_nouns: Optional[List[str]] = None,
     canon_context: str = "",
+    character_secrets: Optional[List[dict]] = None,
     target_chars: int = 700,
     memory_echoes: Optional[List[str]] = None,
     style_positive: str = "",
@@ -414,6 +695,7 @@ def build_opening_prompt(
         worldview_text: 世界观（截 200，定基调，可空）
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
+        character_secrets: 私有实体档案（A1；空=零变化）
         target_chars: 总字数软上限（默认 700）
         style_positive: 作者文风画像文本（空=零变化）
         author_samples: 作者笔迹示范 few-shot 样本（空=零变化）
@@ -422,18 +704,23 @@ def build_opening_prompt(
         (system_prompt, user_prompt)
     """
     system_prompt = _base_system()
-    system_prompt += _style_positive_block(style_positive)
-    system_prompt += _author_samples_block(author_samples)
-    system_prompt += _nouns_block(proper_nouns)
-    system_prompt += _canon_block(canon_context)
-    system_prompt += _echoes_block(memory_echoes)
-    system_prompt += _spatial_block(spatial_brief)
+    for _key, _block in render_system_blocks(
+        style_positive=style_positive,
+        author_samples=author_samples,
+        proper_nouns=proper_nouns,
+        canon_context=canon_context,
+        character_secrets=character_secrets,
+        memory_echoes=memory_echoes,
+        spatial_brief=spatial_brief,
+        mode="open",  # A3b：open 档过模式预算
+    ):
+        system_prompt += _block
 
-    prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary[:300]}" if previous_summary else ""
-    worldview_line = f"\n# 世界观基调\n{worldview_text[:200]}" if worldview_text else ""
+    prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary[:STITCH_PREV_SUMMARY_MAX_CHARS]}" if previous_summary else ""
+    worldview_line = f"\n# 世界观基调\n{worldview_text[:STITCH_WORLDVIEW_MAX_CHARS]}" if worldview_text else ""
 
     user_prompt = f"""# 本章大纲（这是唯一的创作依据，开头必须服务于它的第一段进展）
-{(outline_text or "")[:800] or "（无大纲）"}
+{(outline_text or "")[:STITCH_OUTLINE_MAX_CHARS] or "（无大纲）"}
 {prev_line}{worldview_line}
 
 # 任务
@@ -443,91 +730,6 @@ def build_opening_prompt(
 - 段落之间用一个空行分隔
 - 只输出正文，不要标题、不要章节号、不要解释。"""
     return system_prompt, user_prompt
-
-
-# ============================================================
-# 段内实时岔路探测 prompt（轻量，max_tokens=800）
-# ============================================================
-
-_INLINE_BRANCH_SYSTEM = """你是剧情结构分析师。判断作者刚写的这段正文是否来到了一个「走向级岔路」——即接下来主角可以采取截然不同的方式/态度/代价来推进，而非只有一个必然路径。
-
-# 判定铁律
-1. 锁死结局 ≠ 没有岔路：只要大纲/意图没写明主角以什么方式/态度/代价达成结果，方式就是合法岔路。
-2. 物理动作级分歧不算（用剑还是用刀）——只判走向级（忍辱/反抗/逃避/妥协这类改变后续叙事轨迹的）。
-3. 宁漏勿滥：没有清晰岔路时，has_branch 返回 false。每次至多给 2 个互斥走向。
-
-只输出 JSON，不要解释。"""
-
-
-def build_inline_branch_prompt(
-    recent_text: str,
-    chapter_intent: str = "",
-    proper_nouns: Optional[List[str]] = None,
-) -> tuple:
-    """构建段内实时岔路探测 prompt。
-
-    Args:
-        recent_text: 作者最近写的正文尾部（≤500 字）
-        chapter_intent: 章节意图/大纲片段
-        proper_nouns: 在场角色名（帮助 LLM 理解谁在岔路口）
-
-    Returns:
-        (system_prompt, user_prompt)
-    输出 JSON schema: {"has_branch": bool, "options": [{"label": str, "plot_impact": str}], "urgency": "high"|"low"}
-    """
-    system_prompt = _INLINE_BRANCH_SYSTEM
-    nouns_str = "、".join(proper_nouns) if proper_nouns else "（未指定）"
-    user_prompt = f"""# 章节意图
-{chapter_intent or "（未提供，按正文推断）"}
-
-# 在场角色
-{nouns_str}
-
-# 作者最近正文
-{recent_text}
-
-判断这段正文是否来到了走向级岔路。输出 JSON：
-{{"has_branch": true/false, "options": [{{"label": "走向名（2-4字）", "plot_impact": "选择此走向对后续剧情的影响（一句话）"}}], "urgency": "high（岔路紧迫）/ low（可稍后决断）"}}"""
-    return system_prompt, user_prompt
-
-
-# ============================================================
-# 沉淀时机判断 prompt（0 LLM 版本由启发式承担，此为可选 LLM 增强）
-# ============================================================
-
-_SETTLE_PROPOSE_SYSTEM = """你是叙事节奏顾问。判断作者刚写完的这段正文是否形成了一个可沉淀的自然单元（场景/情节节拍）。
-
-只输出 JSON，不要解释。"""
-
-
-def build_settle_propose_prompt(
-    segment_text: str,
-    chapter_intent: str = "",
-    target_chars: int = 500,
-) -> tuple:
-    """构建沉淀时机判断 prompt。
-
-    Args:
-        segment_text: 待判断的正文段落
-        chapter_intent: 章节意图
-        target_chars: 参考的目标段落字数
-
-    Returns:
-        (system_prompt, user_prompt)
-    输出 JSON: {"ready": bool, "reason": str, "boundary_type": "scene_end"|"beat_end"|"within"}
-    """
-    user_prompt = f"""# 章节意图
-{chapter_intent or "（未提供）"}
-
-# 参考段落字数
-{target_chars} 字
-
-# 待判断正文
-{segment_text}
-
-判断这段是否形成可沉淀的自然单元。输出 JSON：
-{{"ready": true/false, "reason": "判断依据（一句话）", "boundary_type": "scene_end（场景收束）/ beat_end（节拍完成）/ within（仍在单元内）"}}"""
-    return _SETTLE_PROPOSE_SYSTEM, user_prompt
 
 
 # ============================================================

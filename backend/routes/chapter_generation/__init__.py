@@ -7,8 +7,10 @@
 - 处理 SSE 流式响应
 
 模块结构：
-- adf.py: V3.2 ADF 引擎路由（当前默认生成引擎）
+- adf.py: V3.2 ADF 引擎路由（引擎本体保留，前端已无 UI 入口）
 - refinery.py: V4.1 Refinery 精修流水线路由
+- adaptive.py: NLE-ADF 3.0 自适应辅助路由（前端默认路径）
+- usage.py: generation_runs 的 adaptive 用量聚合（只读，B3）
 - 本文件: extra_router（clarify-outline / cost-report / quality-report）
 
 引擎剥离（2026-07）：V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 三套引擎路由
@@ -50,10 +52,13 @@ from backend.routes.chapter_generation.adf import router as adf_router
 # V4.1 Refinery 精修流水线路由
 from backend.routes.chapter_generation.refinery import router as refinery_router
 
-# BS-ADF（Beat-Slot Anchor-Driven Flow）引擎路由（ADF 并行引擎，Phase 4 槽位化流水线）
-
-# NLE-ADF 3.0 自适应辅助路由（作者主导写作流程：perceive/stitch-ghost/settle/detect-branch/plan-suggest）
+# NLE-ADF 3.0 自适应辅助路由（前端默认路径；端点清单以 adaptive.py 的 @router 装饰器为准：
+# heartbeat / stitch-ghost / settle / finish / fix-sentence / spine GET·PATCH / spine-suggest /
+# model / context-preview / event + events/summary——不存在 perceive/detect-branch/plan-suggest）
 from backend.routes.chapter_generation.adaptive import router as adaptive_router
+
+# B3 · 用量可见（P5 地基加固期批次 1）：generation_runs 的 adaptive 消耗聚合（只读）
+from backend.routes.chapter_generation.usage import router as usage_router
 
 # 创建额外的路由（用于节拍预览等）
 extra_router = APIRouter(prefix="/api", tags=["chapter_generation"])
@@ -521,6 +526,7 @@ router.include_router(extra_router)
 router.include_router(adf_router)
 router.include_router(refinery_router)
 router.include_router(adaptive_router)
+router.include_router(usage_router)
 
 __all__ = [
     "router",

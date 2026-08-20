@@ -32,6 +32,33 @@ from backend.repositories import (
     RelationshipRepository,
     BookRepository,
 )
+from backend.services.context.budget import (
+    ASSET_DESC_MAX_CHARS,
+    ASSETS_PROMPT_MAX_ENTRIES,
+    BANNED_WORDS_MERGED_MAX_ENTRIES,
+    BANNED_WORDS_PROMPT_MAX_ENTRIES,
+    CANON_PRIVATE_LABEL_MAX_ENTRIES,
+    CANON_PUBLIC_FACT_MAX_CHARS,
+    CANON_PUBLIC_FACT_MAX_ENTRIES,
+    CHARACTER_DYNAMIC_MAX_CHARS,
+    CHARACTER_STATIC_MAX_CHARS,
+    CHARACTERS_PROMPT_MAX_ENTRIES,
+    CORE_MOTIFS_MAX_CHARS,
+    FORESHADOW_OPS_MAX_ENTRIES,
+    HOOK_CONTENT_MAX_CHARS,
+    HOOKS_PROMPT_MAX_ENTRIES,
+    LOCATIONS_PROMPT_MAX_ENTRIES,
+    MUST_HIT_EVENTS_MAX_ENTRIES,
+    PROPER_NOUNS_MAX_ENTRIES,
+    READER_EXPECTATION_DESC_MAX_CHARS,
+    READER_EXPECTATION_MAX_ENTRIES,
+    RELATION_DESC_MAX_CHARS,
+    RELATIONS_PROMPT_MAX_ENTRIES,
+    ROLLING_SUMMARY_MAX_CHARS,
+    STYLE_PARAGRAPH_RHYTHM_MAX_CHARS,
+    STYLE_POSITIVE_MAX_LINES,
+    STYLE_PROFILE_VALUE_MAX_CHARS,
+)
 from backend.services.context.loader import load_full_chapter_context
 from backend.services.canon.consistency import build_canon_context_for_prompt
 from backend.services.workflows.adf.setting_resolver import build_worldview_text
@@ -80,10 +107,19 @@ class SettingsBundle:
     # world 优先时 entities/assets/locations/relationships 已换为适配器视图对象
     world_sourced: bool = False
     world_time: int = 0  # 时间切片时刻 t（叙事时间四级降级解析）
+    # t 的解析来源（A4/B2 来源可见性；load_world_overlay 透传，零行为变化）：
+    # chapter_anchor=本章锚 | prev_anchor=前序最近锚 | max_event=事件最大时刻 | zero=空世界
+    world_time_source: str = "zero"
     world_state: Dict[str, Any] = field(default_factory=dict)  # t 时刻推演快照
     # D4-3 空间常识块（docs/map-scale-spatial.md §5）：双门槛（world_sourced 且
     # 已标定）才有内容；未标定恒空串——四模式 prompt 逐字节零变化
     spatial_brief: str = ""
+    # A1 私有通道（docs/foundation-hardening.md §3.1，D5 语义「AI 知晓但绝不
+    # 直接写出」）：visibility=private 世界实体（character/faction/asset 统一）的
+    # [{name, text}]，由 world_bridge.load_world_overlay 供给。进 prompt 走
+    # adaptive_prompts._secrets_block（canon 块后）；_characters_text 等装配层
+    # 同步排除这些实体（双轨纪律：文本轨排除 private props，算法轨吃适配器全量）。
+    character_secrets: List[Dict[str, str]] = field(default_factory=list)
 
     def to_prompt_context(self) -> Dict[str, Any]:
         """生成供 prompt 拼接的扁平 dict（文本化版本）。
@@ -96,6 +132,9 @@ class SettingsBundle:
             "locations": _locations_text(self.locations),
             "relationships": _relationships_text(self.relationships),
             "canon_context": self.canon_context,
+            # A1 私有通道：结构化 [{name, text}]（渲染口径统一在
+            # adaptive_prompts._secrets_block，此处不做文本拼接）
+            "character_secrets": self.character_secrets,
             "worldview_text": self.worldview_text,
             "open_hooks": _hooks_text(self.open_hooks),
             "outline_text": self.outline_text,
@@ -103,8 +142,8 @@ class SettingsBundle:
             "chapter_card": _chapter_card_text(self.chapter_card),
             "style_negative": _style_negative_text(self.style_card, self.style_blacklist),
             "style_positive": render_style_positive(self.style_card),
-            "rolling_summary": self.rolling_summary[:500] if self.rolling_summary else "",
-            "core_motifs_taboos": self.core_motifs_taboos[:300] if self.core_motifs_taboos else "",
+            "rolling_summary": self.rolling_summary[:ROLLING_SUMMARY_MAX_CHARS] if self.rolling_summary else "",
+            "core_motifs_taboos": self.core_motifs_taboos[:CORE_MOTIFS_MAX_CHARS] if self.core_motifs_taboos else "",
         }
 
     # ===== 分级访问：校对强度不同 =====
@@ -115,7 +154,10 @@ class SettingsBundle:
         - canon_private_labels：Canon [private] 节点的标签词（正文不许直接说出）
         - canon_public_facts：Canon [public] 已建立事实（必须一致）
         - banned_words：禁词合并（style_blacklist + StyleCard.negative_list + 禁词表）
-        - character_statics：角色永恒设定（防 OOC）
+        - character_statics：角色永恒设定（防 OOC）。⚠ A1 起排除 private 实体——
+          唯一消费方 build_dock_generator_prompt 把它拼进挂件生发 prompt（prompt
+          轨必须排除 private props）；算法轨需要全量档案的（如 sediment 冲突检测）
+          直读适配器 ent.character.static_prompt，不走本字段（双轨纪律）
         - core_motifs_taboos：书级核心母题禁忌
         """
         return {
@@ -124,7 +166,8 @@ class SettingsBundle:
             "banned_words": _merge_banned_words(self.style_card, self.style_blacklist),
             "character_statics": {
                 _entity_name(e): (_get_attr_nested(e, "character", "static_prompt") or "")
-                for e in self.entities if _entity_name(e)
+                for e in self.entities
+                if _entity_name(e) and not _entity_is_private(e)
             },
             "core_motifs_taboos": self.core_motifs_taboos or "",
         }
@@ -161,11 +204,11 @@ class SettingsBundle:
             "relationships": _relationships_text(self.relationships),
             "worldview_text": self.worldview_text,
             "previous_summary": self.previous_summary or "",
-            "rolling_summary": self.rolling_summary[:500] if self.rolling_summary else "",
+            "rolling_summary": self.rolling_summary[:ROLLING_SUMMARY_MAX_CHARS] if self.rolling_summary else "",
             "purpose": _get_attr(self.chapter_card, "purpose") or "",
         }
 
-    def proper_nouns(self, limit: int = 20) -> List[str]:
+    def proper_nouns(self, limit: int = PROPER_NOUNS_MAX_ENTRIES) -> List[str]:
         """提取角色名 + 资产名（专名表，防缝合时称呼漂移）。"""
         names: List[str] = []
         for e in self.entities:
@@ -197,10 +240,10 @@ def _reader_expectations_view(book: Any) -> List[Dict[str, Any]]:
     return [
         {
             "type": e.get("type") or "",
-            "description": (e.get("description") or "")[:40],
+            "description": (e.get("description") or "")[:READER_EXPECTATION_DESC_MAX_CHARS],
             "tension": e.get("current_tension") or 5,
         }
-        for e in active[:3]
+        for e in active[:READER_EXPECTATION_MAX_ENTRIES]
         if e.get("description")
     ]
 
@@ -276,6 +319,10 @@ async def load_chapter_settings_bundle(
                 bundle.relationships = overlay["relationships"]
                 bundle.world_state = overlay["world_state"]
                 bundle.world_time = overlay["world_time"]
+                bundle.world_time_source = overlay.get("world_time_source") or "zero"
+                # A1 私有通道：private 实体档案走 secrets（prompt 侧 _secrets_block
+                # 消费）；entities/assets 装配层已同步排除（见 _characters_text 等）
+                bundle.character_secrets = overlay.get("secrets") or []
                 bundle.world_sourced = True
         except Exception:
             pass  # 降级：world 桥失败走旧表（辅助不因桥接阻塞）
@@ -364,10 +411,33 @@ def _entity_name(ent: Any) -> str:
     return getattr(char, "name", "") or (char.get("name", "") if isinstance(char, dict) else "") or ""
 
 
+def _entity_is_private(ent: Any) -> bool:
+    """A1 私有判定（docs/foundation-hardening.md §3.1，D5 语义）。
+
+    - world 适配器：读 world_entity.visibility（world_entities.visibility 列，
+      models.py；character/faction/asset 三类统一）
+    - 旧表 ChapterEntity.character：Character 模型**无 visibility 列**（2026-08-20
+      查证）——防御性读取，未来旧表若加列则自动同待遇；不加则恒公开
+      （未迁移书零变化）。
+    判定只服务 prompt 文本装配层；算法轨（sediment 等）直读适配器全量，与本函数无关。
+    """
+    if _get_attr_nested(ent, "world_entity", "visibility") == "private":
+        return True
+    if _get_attr_nested(ent, "character", "visibility") == "private":
+        return True
+    return False
+
+
 def _characters_text(entities: List[Any]) -> str:
-    """本章角色文本（名 + 永恒设定 + 此刻状态）。"""
+    """本章角色文本（名 + 永恒设定 + 此刻状态）。
+
+    A1 私有通道：private 实体整行跳过（其档案经 bundle.character_secrets 走
+    prompt 私有块「知晓但绝不写出」，双轨纪律）；先过滤后截（上限见 budget），
+    公开实体顶替空出的席位。
+    """
     lines = []
-    for ent in (entities or [])[:8]:
+    visible = [e for e in (entities or []) if not _entity_is_private(e)]
+    for ent in visible[:CHARACTERS_PROMPT_MAX_ENTRIES]:
         char = getattr(ent, "character", None)
         if char is None and isinstance(ent, dict):
             char = ent.get("character")
@@ -378,28 +448,28 @@ def _characters_text(entities: List[Any]) -> str:
         dynamic = getattr(char, "dynamic_state", None) or (char.get("dynamic_state") if isinstance(char, dict) else None)
         parts = []
         if static:
-            parts.append(str(static)[:200])
+            parts.append(str(static)[:CHARACTER_STATIC_MAX_CHARS])
         if dynamic:
-            parts.append(f"此刻：{str(dynamic)[:150]}")
+            parts.append(f"此刻：{str(dynamic)[:CHARACTER_DYNAMIC_MAX_CHARS]}")
         lines.append(f"- {name}：{'｜'.join(parts)}" if parts else f"- {name}")
     return "\n".join(lines) if lines else "（未指定）"
 
 
 def _assets_text(assets: List[Any]) -> str:
-    """本章资产文本。"""
+    """本章资产文本（A1：private 资产跳过，其简介走 secrets 通道，同角色口径）。"""
     lines = []
-    for a in (assets or [])[:8]:
+    for a in [a for a in (assets or []) if not _entity_is_private(a)][:ASSETS_PROMPT_MAX_ENTRIES]:
         name = getattr(a, "name", "") or ""
         desc = getattr(a, "static_description", "") or ""
         if name:
-            lines.append(f"- {name}{'：' + desc[:120] if desc else ''}")
+            lines.append(f"- {name}{'：' + desc[:ASSET_DESC_MAX_CHARS] if desc else ''}")
     return "\n".join(lines) if lines else "（未指定）"
 
 
 def _locations_text(locations: List[Any]) -> str:
     """本章地点文本。"""
     lines = []
-    for loc in (locations or [])[:6]:
+    for loc in (locations or [])[:LOCATIONS_PROMPT_MAX_ENTRIES]:
         name = getattr(loc, "name", "") or ""
         if name:
             lines.append(f"- {name}")
@@ -409,21 +479,21 @@ def _locations_text(locations: List[Any]) -> str:
 def _relationships_text(relationships: List[Any]) -> str:
     """本章角色关系文本。"""
     lines = []
-    for r in (relationships or [])[:8]:
+    for r in (relationships or [])[:RELATIONS_PROMPT_MAX_ENTRIES]:
         src = getattr(r, "source_character", None)
         tgt = getattr(r, "target_character", None)
         rel = getattr(r, "relationship_type", "") or getattr(r, "description", "") or ""
         src_name = getattr(src, "name", "") if src else ""
         tgt_name = getattr(tgt, "name", "") if tgt else ""
         if src_name and tgt_name and rel:
-            lines.append(f"- {src_name} ↔ {tgt_name}：{rel[:80]}")
+            lines.append(f"- {src_name} ↔ {tgt_name}：{rel[:RELATION_DESC_MAX_CHARS]}")
     return "\n".join(lines) if lines else "（未指定）"
 
 
 def _hooks_text(hooks: List[Any]) -> str:
     """开放伏笔文本。"""
     lines = []
-    for h in (hooks or [])[:8]:
+    for h in (hooks or [])[:HOOKS_PROMPT_MAX_ENTRIES]:
         if isinstance(h, dict):
             content = h.get("content", "") or ""
             key = h.get("ledger_key", "") or ""
@@ -431,7 +501,7 @@ def _hooks_text(hooks: List[Any]) -> str:
             content = getattr(h, "content", "") or ""
             key = getattr(h, "ledger_key", "") or ""
         if content:
-            lines.append(f"- [{key}] {content[:120]}" if key else f"- {content[:120]}")
+            lines.append(f"- [{key}] {content[:HOOK_CONTENT_MAX_CHARS]}" if key else f"- {content[:HOOK_CONTENT_MAX_CHARS]}")
     return "\n".join(lines) if lines else "（无）"
 
 
@@ -472,7 +542,7 @@ def _extract_canon_private_labels(canon_context: str) -> List[str]:
         end = len(canon_context)
     section = canon_context[start:end]
     labels = re.findall(r"^-\s+([^：:\n]{2,})[：:]", section, re.MULTILINE)
-    return [l.strip() for l in labels if l.strip()][:10]
+    return [l.strip() for l in labels if l.strip()][:CANON_PRIVATE_LABEL_MAX_ENTRIES]
 
 
 def _extract_canon_public_facts(canon_context: str) -> List[str]:
@@ -485,7 +555,7 @@ def _extract_canon_public_facts(canon_context: str) -> List[str]:
         end = len(canon_context)
     section = canon_context[start:end]
     lines = [ln.strip() for ln in section.splitlines() if ln.strip().startswith("- ")]
-    return [ln[:120] for ln in lines][:10]
+    return [ln[:CANON_PUBLIC_FACT_MAX_CHARS] for ln in lines][:CANON_PUBLIC_FACT_MAX_ENTRIES]
 
 
 def _merge_banned_words(style_card: Any, style_blacklist: List[str]) -> List[str]:
@@ -516,7 +586,7 @@ def _merge_banned_words(style_card: Any, style_blacklist: List[str]) -> List[str
                 words.append(w)
     except Exception:
         pass
-    return words[:60]  # 上限防 prompt 膨胀
+    return words[:BANNED_WORDS_MERGED_MAX_ENTRIES]  # 上限防 prompt 膨胀
 
 
 def _chapter_card_text(card: Any) -> str:
@@ -529,12 +599,12 @@ def _chapter_card_text(card: Any) -> str:
         parts.append(f"主旨：{purpose}")
     hits = _get_attr(card, "must_hit_events") or []
     if hits:
-        hit_lines = [h.get("event", "") if isinstance(h, dict) else str(h) for h in hits[:8]]
+        hit_lines = [h.get("event", "") if isinstance(h, dict) else str(h) for h in hits[:MUST_HIT_EVENTS_MAX_ENTRIES]]
         parts.append("必达事件：" + "；".join(hit_lines))
     ops = _get_attr(card, "foreshadow_ops") or []
     if ops:
         op_lines = []
-        for op in ops[:6]:
+        for op in ops[:FORESHADOW_OPS_MAX_ENTRIES]:
             if isinstance(op, dict):
                 op_lines.append(f"{op.get('action', '')}{op.get('note', '')}")
             else:
@@ -549,7 +619,7 @@ def _chapter_card_text(card: Any) -> str:
 def _style_negative_text(style_card: Any, style_blacklist: List[str]) -> str:
     """禁词/禁句式文本。"""
     words = _merge_banned_words(style_card, style_blacklist)
-    return "、".join(words[:30]) if words else ""
+    return "、".join(words[:BANNED_WORDS_PROMPT_MAX_ENTRIES]) if words else ""
 
 
 # ============================================================
@@ -584,10 +654,10 @@ def render_style_positive(style_card: Any) -> str:
             if not text:
                 continue
             label = _PROFILE_LABELS.get(key, key)
-            lines.append(f"- {label}：{text[:120]}")
+            lines.append(f"- {label}：{text[:STYLE_PROFILE_VALUE_MAX_CHARS]}")
     paragraph_rhythm = _get_attr(style_card, "paragraph_rhythm")
     if paragraph_rhythm:
-        lines.append(f"- 段落节奏：{str(paragraph_rhythm)[:80]}")
+        lines.append(f"- 段落节奏：{str(paragraph_rhythm)[:STYLE_PARAGRAPH_RHYTHM_MAX_CHARS]}")
     dialogue_target = _get_attr(style_card, "dialogue_ratio_target")
     if dialogue_target is not None:
         try:
@@ -600,7 +670,7 @@ def render_style_positive(style_card: Any) -> str:
     knobs = _get_attr(style_card, "style_knobs")
     for knob_line in render_knob_lines(knobs if isinstance(knobs, dict) else {}):
         lines.append(f"- {knob_line}")
-    return "\n".join(lines[:14])
+    return "\n".join(lines[:STYLE_POSITIVE_MAX_LINES])
 
 
 def _must_hit_events_text(card: Any) -> str:
@@ -609,7 +679,7 @@ def _must_hit_events_text(card: Any) -> str:
         return ""
     hits = _get_attr(card, "must_hit_events") or []
     lines = []
-    for h in hits[:8]:
+    for h in hits[:MUST_HIT_EVENTS_MAX_ENTRIES]:
         if isinstance(h, dict):
             lines.append(h.get("event", ""))
         else:
@@ -623,7 +693,7 @@ def _foreshadow_ops_text(card: Any) -> str:
         return ""
     ops = _get_attr(card, "foreshadow_ops") or []
     lines = []
-    for op in ops[:6]:
+    for op in ops[:FORESHADOW_OPS_MAX_ENTRIES]:
         if isinstance(op, dict):
             lines.append(f"{op.get('action', '')} {op.get('note', '')}".strip())
         else:
