@@ -6,6 +6,9 @@
  * - 表驱动模板（EVENT_TEMPLATES），requiredPayloadFields 决定显示哪些字段
  * - move 的 path 默认 from/to 直线，可「点选途经点」升级为折线（弧长插值已支持任意折线）
  * - territory_change 的 polygon 一律「在地图上圈绘」录入（不再手填坐标文本）
+ * - 无专属地点字段的类型（death/battle/alliance/war_declare/coronation/custom）共用
+ *   「发生地」行：已知地点下拉，或 point 绘制档在地图上单击取点（存 payload.point；
+ *   旧数据 note 里的 @x,y 标记在编辑预填时迁移为结构化点，存盘即洗清 note）
  * - 绘制交互：点「圈绘/点选」→ emit draw-start → 面板收起为顶部悬浮条（drawing prop 驱动
  *   ModalShell minimized，表单状态保留）→ 完成 drawResult 回灌对应字段
  * - 编辑模式：传入 existing 预填并走 updateEvent（event_type 不可改——
@@ -15,6 +18,7 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from './ModalShell.vue'
 import InlineCreate from './InlineCreate.vue'
 import { EVENT_TEMPLATES, getTemplate, EVENT_TYPE_COLOR } from '../engine/eventTemplates'
+import { parsePointFromNote, stripPointFromNote } from '../engine/eventPoint'
 import type { EventType, WorldEvent, Point, DrawMode } from '../engine/types'
 import { fromYMD, breakdownTime } from '../engine/timeFormat'
 import { useWorld } from '../composables/useWorld'
@@ -64,7 +68,25 @@ const selectedType = ref<EventType>(
 const year = ref(exYmd.year)
 const month = ref(exYmd.month)
 const day = ref(exYmd.day)
-const note = ref(ex?.note || '')
+
+/** 无专属地点字段、共用「发生地」行的模板类型 */
+const GENERIC_LOC_TYPES: EventType[] = [
+  'death',
+  'battle',
+  'alliance',
+  'war_declare',
+  'coronation',
+  'custom',
+]
+const showGenericLocation = computed(() => GENERIC_LOC_TYPES.includes(selectedType.value))
+
+// 地图点选的发生地（编辑预填：payload.point 优先；旧 note @x,y 标记迁移进来，存盘即洗清 note）
+const exIsGenericLoc = !!ex && GENERIC_LOC_TYPES.includes(ex.event_type as EventType)
+const pickedPoint = ref<Point | null>(
+  (ex?.payload.point as Point | undefined) ||
+    (exIsGenericLoc && ex?.note ? parsePointFromNote(ex.note) : null),
+)
+const note = ref(ex?.note ? (exIsGenericLoc ? stripPointFromNote(ex.note) : ex.note) : '')
 const characterId = ref(
   (ex?.payload.character_id as string | undefined) || props.presetCharacterId || '',
 )
@@ -136,6 +158,7 @@ watch(
     if (!r) return
     if (r.kind === 'territory') territoryPolygon.value = [...r.points]
     else if (r.kind === 'move-path') waypoints.value = [...r.points]
+    else if (r.kind === 'point') pickedPoint.value = r.points[0] ?? null
     activeDrawKind.value = null
   },
 )
@@ -149,9 +172,9 @@ watch(
 
 const modalTitle = computed(() => {
   if (props.drawing) {
-    return activeDrawKind.value === 'territory'
-      ? '疆域圈绘中 · 连点加顶点，双击/Enter 闭合'
-      : '途经点选择中 · 连点加途经点，双击/Enter 完成'
+    if (activeDrawKind.value === 'territory') return '疆域圈绘中 · 连点加顶点，双击/Enter 闭合'
+    if (activeDrawKind.value === 'move-path') return '途经点选择中 · 连点加途经点，双击/Enter 完成'
+    return '位置点选中 · 点击地图任意处取点，Esc 取消'
   }
   return isEdit.value ? '编辑事件' : '记录事件'
 })
@@ -197,6 +220,11 @@ async function submit() {
       polygon,
       action: territoryAction.value,
     }
+  }
+
+  // 共用「发生地」组的地图点选：结构化存 payload.point（落图优先级见 eventPoint.ts）
+  if (GENERIC_LOC_TYPES.includes(selectedType.value) && pickedPoint.value) {
+    payload.point = [...pickedPoint.value]
   }
 
   if (isEdit.value && ex) {
@@ -403,12 +431,39 @@ async function submit() {
       </div>
     </template>
 
+    <!-- 无专属地点字段的类型：发生地 = 已知地点下拉 或 地图上点选任意点 -->
+    <div v-if="showGenericLocation" class="qc-row">
+      <label class="qc-label">发生地</label>
+      <div class="qc-selrow">
+        <select v-model="locId" class="qc-select">
+          <option value="">选择已知地点（可选）</option>
+          <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+        </select>
+        <InlineCreate :book-id="bookId" kind="location" @created="locId = $event.id" />
+      </div>
+      <div class="qc-path-row">
+        <button
+          v-if="!pickedPoint"
+          type="button"
+          class="qc-draw-btn"
+          @click="startDraw('point')"
+        >
+          在地图上点选位置
+        </button>
+        <div v-else class="qc-draw-summary">
+          <span class="qc-draw-ok">✓ 已在地图上点选位置</span>
+          <button type="button" class="qc-link" @click="startDraw('point')">重新点选</button>
+          <button type="button" class="qc-link" @click="pickedPoint = null">清除</button>
+        </div>
+        <div class="qc-hint qc-hint--dim">
+          不选也不点，事件只进时间轴不上图；两者都填时以地图点选为准
+        </div>
+      </div>
+    </div>
+
     <div class="qc-row">
       <label class="qc-label">备注</label>
       <input v-model="note" placeholder="（可选）发生了什么" class="qc-input" />
-      <div class="qc-hint qc-hint--dim">
-        小贴士：备注中写 @x,y（如 @500,300）可把事件定位到地图任意点
-      </div>
     </div>
     </div>
 

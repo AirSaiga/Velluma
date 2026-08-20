@@ -16,8 +16,8 @@ export type Point = [number, number]
 export type EntityType = 'character' | 'faction' | 'asset'
 export type LocationKind = 'point' | 'region' | 'route'
 
-/** 地图绘制模式：territory=疆域圈绘（≥3 顶点）/ move-path=move 途经点（≥0 个）/ null=未在画 */
-export type DrawMode = 'territory' | 'move-path' | null
+/** 地图绘制模式：territory=疆域圈绘（≥3 顶点）/ move-path=move 途经点（≥0 个）/ point=单击取点（一击即完成）/ null=未在画 */
+export type DrawMode = 'territory' | 'move-path' | 'point' | null
 
 export type EventType =
   | 'birth'

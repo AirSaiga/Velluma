@@ -267,7 +267,9 @@ async def build_scene_slice(
             if sxy is not None:
                 cands = []
                 for loc in locations:
-                    if str(loc.id) == str(scene["location_id"]) or loc.coord_x is None:
+                    # 半坐标防御：coord_y 缺失时 (coord_x, None) 进距离计算会 TypeError
+                    # （与上方 _loc_xy 的 x/y 双判同口径）
+                    if str(loc.id) == str(scene["location_id"]) or loc.coord_x is None or loc.coord_y is None:
                         continue
                     d = distance_days(sxy, (loc.coord_x, loc.coord_y), scale)
                     if d is not None and d > 0.05:

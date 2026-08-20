@@ -29,7 +29,7 @@ const props = defineProps<{
   bookId: string
   /** 拾取模式：null=浏览, 'location'=点选建地点（点击 emit pick） */
   pickingMode?: 'location' | null
-  /** 绘制模式：非 null 时地图点击收集顶点，双击/Enter/完成闭合后 emit draw-complete */
+  /** 绘制模式：非 null 时地图点击收集顶点（point 模式单击即完成），双击/Enter/完成闭合后 emit draw-complete */
   drawMode?: DrawMode
   /** D4 比例尺标定（books.map_scale；null=未标定角标显示引导） */
   mapScale?: MapScale | null
@@ -1219,9 +1219,9 @@ function renderDraw() {
   })
 }
 
-/** 闭合绘制：territory 需 ≥3 顶点，move-path ≥0；不达标静默忽略（继续画） */
+/** 闭合绘制：territory 需 ≥3 顶点，move-path ≥0；不达标静默忽略（继续画）。point 单击即完成，不经此路 */
 function finishDraw() {
-  if (!props.drawMode) return
+  if (!props.drawMode || props.drawMode === 'point') return
   const need = props.drawMode === 'territory' ? 3 : 0
   if (draftPoints.value.length < need) return
   const pts = draftPoints.value.map(({ p }) => [p[0], p[1]] as [number, number])
@@ -1307,6 +1307,11 @@ onMounted(() => {
       return
     }
     if (props.drawMode) {
+      // point 模式一击即完成（单击即所取，无顶点可攒，无需闭合动作）
+      if (props.drawMode === 'point') {
+        emit('draw-complete', [[e.latlng.lng, e.latlng.lat]])
+        return
+      }
       // 绘制优先：点击收集顶点（[lng,lat] → 内部 [x,y]，带时间戳供双击识别）
       draftPoints.value.push({ p: [e.latlng.lng, e.latlng.lat], t: Date.now() })
       renderDraw()

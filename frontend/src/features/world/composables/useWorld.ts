@@ -51,8 +51,48 @@ const characters = computed(() => entities.value.filter((e) => e.entity_type ===
 const factions = computed(() => entities.value.filter((e) => e.entity_type === 'faction'))
 const assets = computed(() => entities.value.filter((e) => e.entity_type === 'asset'))
 
+// ===== 游标时刻按书持久化（localStorage，与时间轴视野窗口 velluma:tl-range 同策略）=====
+// 恢复值只是「上次看到哪」：世界页 ?time= 深链在 load() 之后才 setCurrentTime，天然覆盖恢复值——深链优先。
+const timeStorageKey = (bookId: string) => `velluma:tl-time:${bookId}`
+let persistTimeTimer: ReturnType<typeof setTimeout> | null = null
+
+function restoreSavedTime(bookId: string) {
+  currentTime.value = 0
+  try {
+    const v = Number(localStorage.getItem(timeStorageKey(bookId)))
+    if (Number.isFinite(v) && v >= 0) currentTime.value = v
+  } catch {
+    /* 隐私模式/坏数据静默回退创世 */
+  }
+}
+
+function flushPersistTime() {
+  persistTimeTimer = null
+  const id = loadedBookId.value
+  if (!id) return
+  try {
+    localStorage.setItem(timeStorageKey(id), String(Math.floor(currentTime.value)))
+  } catch {
+    /* 存不进就当会话级 */
+  }
+}
+
+/** 拖动/播放是高频调用（rAF 帧/16ms 步进），尾部去抖合并成一次写 */
+function schedulePersistTime() {
+  if (persistTimeTimer) clearTimeout(persistTimeTimer)
+  persistTimeTimer = setTimeout(flushPersistTime, 300)
+}
+
+// 单例模块不随组件卸载，关窗/刷新时 pagehide 兜底冲刷，防去抖窗口内丢末次位置
+window.addEventListener('pagehide', () => {
+  if (!persistTimeTimer) return
+  clearTimeout(persistTimeTimer)
+  flushPersistTime()
+})
+
 async function load(bookId: string) {
   loadedBookId.value = bookId
+  restoreSavedTime(bookId)
   clearHistory() // 切书清空 undo 栈（避免指向被覆盖的旧数据）
   const [locs, evs, ents, rels, chapters, ledgers, layers, strokes] = await Promise.all([
     worldApi.listLocations(bookId),
@@ -630,6 +670,7 @@ async function setChapterAnchor(chapterId: string, narrativeTime: number) {
 
 function setCurrentTime(t: number) {
   currentTime.value = t
+  schedulePersistTime()
 }
 
 // ===== 底图（图片层 + 笔迹；不进全局 undo——编辑态用 useMapEdit 局部栈）=====
