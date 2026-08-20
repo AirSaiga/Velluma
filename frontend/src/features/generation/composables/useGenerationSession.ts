@@ -1302,12 +1302,15 @@ export function useGenerationSession(): GenerationSession {
     _chunkReplaceOnce.clear()
     _resetAuthoringTransient()
     // 中断态归正：刷新后无法续 LLM，强制为已完成的静态展示
-    if (snap.stage === 'done' || snap.stage === 'error') {
+    if (snap.stage === 'done') {
       stage.value = snap.stage
     } else {
       // 上次处于生成中途（tier_classifying/zone_writing/beat_pending 等），刷新后已无法续上
       // → 若已有正文则记为 done，否则记为 idle（避免显示假的"生成中"进度）
       // 同时清掉 stepProgress（中断态的进度是旧的，恢复会误导用户以为还在生成）
+      // error 必须同归正、不可原样恢复：错误原文不持久化（下方 error.value 恒恢复为 null），
+      // 恢复 error 只会让顶栏长期挂一句无因由的「生成失败」——消费 error 态的
+      // Overlay/Stepper 错误卡已随步进 UI 删除，live 代码没有 stage='error' 的展示消费者。
       stepProgress.value = null
       stage.value = snap.streamText ? 'done' : 'idle'
     }
