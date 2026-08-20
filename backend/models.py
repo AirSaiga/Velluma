@@ -210,6 +210,10 @@ class Book(Base):
     # 现实距离的换算锚。{refs:[{ax,ay,bx,by,days_foot,label}], detour_factor,
     # modes:{...}}；NULL=未标定（距离功能静默降级，prompt 零变化）
     map_scale = Column(JSONB, nullable=True)
+    # 时间轴 UI 状态（世界页游标时刻 + 手动视野窗口，按书服务端持久化）：
+    # {cursor: 日计数 int, range: {start,end} 年份 int}；NULL/缺键=未设置（自动视野）。
+    # 原 localStorage 方案随前端端口扫描换源即漂移（表现为重启后视野重置），弃用。
+    timeline_view = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")

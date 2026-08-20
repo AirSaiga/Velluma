@@ -659,6 +659,13 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB",
         "expected_udt_names": {"jsonb"},
     },
+    # 时间轴 UI 状态按书持久化（世界页游标+视野窗口；替代随前端端口扫描漂移的 localStorage）
+    {
+        "table": "books",
+        "column": "timeline_view",
+        "definition": "JSONB",
+        "expected_udt_names": {"jsonb"},
+    },
     # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
     {
         "table": "style_cards",

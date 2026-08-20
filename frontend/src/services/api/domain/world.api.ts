@@ -5,6 +5,7 @@
  * 类型复用 engine/types（前后端同构）。
  */
 import { requestJson } from '../transport'
+import type { TimelineViewState } from '../../../features/world/engine/timelineView'
 import type {
   WorldEntity,
   WorldEvent,
@@ -127,6 +128,10 @@ export interface SceneSlice {
   t: number
   /** chapter_anchor | prev_anchor | max_event | zero（四级降级来源） */
   t_source: string
+  /** A4 来源可见：max_event 时附最大时刻事件摘要（截 30 字；缺席 = 未取到） */
+  t_source_note?: string | null
+  /** A4 来源可见：prev_anchor 时来源章号（「来自第N章锚」；缺席 = 未取到） */
+  t_source_chapter?: number | null
   presence: ScenePresence[]
   scene: SceneBlock | null
   encounters: SceneEncounter[]
@@ -198,6 +203,20 @@ export interface WorldEventCandidate {
 }
 
 export const worldApi = {
+  // ===== 时间轴 UI 状态（游标时刻 + 视野窗口，服务端按书持久化——替代随端口扫描漂移的 localStorage）=====
+  getTimelineView: (bookId: string): Promise<TimelineViewState> =>
+    requestJson<{ timeline_view: TimelineViewState }>(`/books/${bookId}/timeline-view`).then(
+      (r) => r.timeline_view || {},
+    ),
+
+  /** 键级合并补丁；值传 null 删除该键（如 range: null 回自动视野） */
+  patchTimelineView: (bookId: string, patch: Partial<TimelineViewState>) =>
+    requestJson<{ timeline_view: TimelineViewState }>(`/books/${bookId}/timeline-view`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(patch),
+    }),
+
   // ===== 地点 =====
   listLocations: (bookId: string) =>
     requestJson<WorldLocation[]>(`/books/${bookId}/world/locations`),
@@ -397,8 +416,10 @@ export const worldApi = {
     return requestJson<WorldEventCandidate[]>(`/books/${bookId}/world/candidates?${qs.toString()}`)
   },
 
+  /** accept 分流（C3）：事件候选转正建事件（event 非空）；canon_extract 候选建真相
+   *  节点（event=null + canon_node_id 非空）——批量裁决的撤销据此删对产物 */
   acceptCandidate: (bookId: string, candidateId: string) =>
-    requestJson<{ event: WorldEvent; candidate_id: string }>(
+    requestJson<{ event: WorldEvent | null; candidate_id: string; canon_node_id?: string | null }>(
       `/books/${bookId}/world/candidates/${candidateId}/accept`,
       { method: 'POST' },
     ),

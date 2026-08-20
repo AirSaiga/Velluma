@@ -33,10 +33,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - WorldviewUpdate: 世界观/设定更新
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_book_repository, get_plot_ledger_repository, get_db
@@ -210,6 +210,79 @@ async def update_worldview_settings(
         raise HTTPException(status_code=404, detail="书籍不存在")
     await repo.update(book, {"worldview_settings": payload.worldview_settings or {}})
     return {"worldview_settings": book.worldview_settings}
+
+
+# =============================================================================
+# 时间轴 UI 状态 - 世界页游标时刻 + 视野窗口（按书持久化，前端端口漂移免疫）
+# =============================================================================
+
+def merge_timeline_view(existing: Optional[dict], patch: Dict[str, Any]) -> dict:
+    """合并时间轴 UI 状态补丁（纯函数，便于单测）。
+
+    契约（与前端 engine/timelineView.ts 同构）：
+    - cursor：日计数，非负整数（非 bool）；None = 删除键（回创世）
+    - range：{start, end} 年份，整数且 1 <= start < end；None = 删除键（回自动视野）
+    - 未知键静默忽略（前向兼容）；已知键值非法抛 ValueError（路由层转 400）
+    """
+    merged = dict(existing or {})
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+            continue
+        if key == "cursor":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError("cursor 须为非负整数日计数")
+            merged[key] = value
+        elif key == "range":
+            if (
+                not isinstance(value, dict)
+                or isinstance(value.get("start"), bool)
+                or isinstance(value.get("end"), bool)
+                or not isinstance(value.get("start"), int)
+                or not isinstance(value.get("end"), int)
+                or value["start"] < 1
+                or value["end"] <= value["start"]
+            ):
+                raise ValueError("range 须为 {start, end} 整数年份，且 1 <= start < end")
+            merged[key] = {"start": value["start"], "end": value["end"]}
+        # 未知键：忽略
+    return merged
+
+
+@router.get("/books/{book_id}/timeline-view")
+async def get_timeline_view(book_id: UUID, repo: BookRepository = Depends(get_book_repository)):
+    """业务目的：读取书籍的时间轴 UI 状态（游标时刻 + 手动视野窗口）。
+
+    数据流：从 book.timeline_view 读取（JSONB），未设置返回空字典（前端回退自动视野）。
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"timeline_view": book.timeline_view or {}}
+
+
+@router.patch("/books/{book_id}/timeline-view")
+async def patch_timeline_view(
+    book_id: UUID,
+    payload: Dict[str, Any] = Body(...),
+    repo: BookRepository = Depends(get_book_repository),
+):
+    """业务目的：增量合并时间轴 UI 状态（键级 merge，显式 null 删除该键）。
+
+    设计考量：
+    - 游标（拖动去抖高频写）与视野窗口（点击低频写）是两个独立写入方，
+      键级合并避免整对象覆盖互相踩踏
+    - 值非法返回 400 而非静默忽略，防止坏状态落库后污染每次加载
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    try:
+        merged = merge_timeline_view(book.timeline_view, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await repo.update(book, {"timeline_view": merged})
+    return {"timeline_view": merged}
 
 
 # =============================================================================

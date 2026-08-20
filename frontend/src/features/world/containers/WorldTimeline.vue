@@ -27,7 +27,7 @@ const emit = defineEmits<{
   'edit-foreshadow': [foreshadowId: string]
 }>()
 
-const { currentTime, events, setCurrentTime, chapterAnchors, setChapterAnchor, foreshadows, createForeshadow, updateForeshadowTimes, resolveForeshadow, dropForeshadow, deleteForeshadow, loadedBookId } =
+const { currentTime, events, setCurrentTime, chapterAnchors, setChapterAnchor, foreshadows, createForeshadow, updateForeshadowTimes, resolveForeshadow, dropForeshadow, deleteForeshadow, loadedBookId, timelineRange, setTimelineRange } =
   useWorld()
 
 const { showToast } = useToast()
@@ -38,52 +38,17 @@ const maxTime = computed(() =>
   Math.max(events.value.reduce((m, e) => Math.max(m, e.time_end), 0) + 365, 365 * 5),
 )
 
-// ===== 视野窗口：可手动框定起止年份（默认自动跟随事件延展；按书持久化到 localStorage）=====
-const manualRange = ref<{ start: number; end: number } | null>(null)
-const viewStart = computed(() => (manualRange.value ? fromYMD(manualRange.value.start, 1, 1) : 0))
+// ===== 视野窗口：可手动框定起止年份（默认自动跟随事件延展；按书持久化到服务端 books.timeline_view）=====
+// 状态在 useWorld 单例（timelineRange），随 load() 从服务端恢复；localStorage 旧键仅作一次性迁移来源。
+const viewStart = computed(() => (timelineRange.value ? fromYMD(timelineRange.value.start, 1, 1) : 0))
 const viewEnd = computed(() =>
-  manualRange.value ? fromYMD(manualRange.value.end + 1, 1, 1) : maxTime.value,
+  timelineRange.value ? fromYMD(timelineRange.value.end + 1, 1, 1) : maxTime.value,
 )
 const span = computed(() => Math.max(1, viewEnd.value - viewStart.value))
 /** 时刻 → 轨道百分比（窗外夹到缘） */
 const pctOf = (t: number) =>
   Math.min(100, Math.max(0, ((t - viewStart.value) / span.value) * 100))
 const pct = computed(() => pctOf(currentTime.value))
-
-const rangeStorageKey = () => `velluma:tl-range:${loadedBookId.value ?? 'unknown'}`
-
-watch(
-  loadedBookId,
-  () => {
-    manualRange.value = null
-    try {
-      const raw = localStorage.getItem(rangeStorageKey())
-      const v = raw ? JSON.parse(raw) : null
-      if (
-        v &&
-        Number.isInteger(v.start) &&
-        Number.isInteger(v.end) &&
-        v.start >= 1 &&
-        v.end > v.start
-      ) {
-        manualRange.value = v
-      }
-    } catch {
-      /* 隐私模式/坏数据静默回退自动 */
-    }
-  },
-  { immediate: true },
-)
-
-function persistRange() {
-  try {
-    const k = rangeStorageKey()
-    if (manualRange.value) localStorage.setItem(k, JSON.stringify(manualRange.value))
-    else localStorage.removeItem(k)
-  } catch {
-    /* 同上：存不进就当会话级 */
-  }
-}
 
 const rangeForm = ref<{ x: number; y: number; start: string; end: string } | null>(null)
 
@@ -92,8 +57,8 @@ function openRangeForm(e: MouseEvent) {
     // 触发点在屏幕底缘的时间轴头，弹层一律向上开
     x: Math.max(8, Math.min(e.clientX - 150, window.innerWidth - 260)),
     y: Math.max(8, e.clientY - 172),
-    start: String(manualRange.value?.start ?? 1),
-    end: String(manualRange.value?.end ?? yearOf(maxTime.value)),
+    start: String(timelineRange.value?.start ?? 1),
+    end: String(timelineRange.value?.end ?? yearOf(maxTime.value)),
   }
 }
 
@@ -106,8 +71,7 @@ function applyRange() {
     showToast('需为整数年份，且终止年大于起始年', 'error')
     return
   }
-  manualRange.value = { start: s, end: e }
-  persistRange()
+  setTimelineRange({ start: s, end: e })
   // 游标夹进新窗口，防失落到视野外
   if (currentTime.value < viewStart.value || currentTime.value > viewEnd.value) {
     setCurrentTime(Math.min(viewEnd.value, Math.max(viewStart.value, currentTime.value)))
@@ -116,14 +80,13 @@ function applyRange() {
 }
 
 function resetRange() {
-  manualRange.value = null
-  persistRange()
+  setTimelineRange(null)
   rangeForm.value = null
 }
 
 /** 手动窗口外的事件数（视野截断提醒，显示在头部） */
 const hiddenCount = computed(() =>
-  manualRange.value
+  timelineRange.value
     ? events.value.filter(
         (e) => e.time_start < viewStart.value || e.time_start >= viewEnd.value,
       ).length
@@ -448,13 +411,13 @@ onMounted(() => {
       </button>
       <button
         class="wt-meta"
-        :class="{ manual: manualRange }"
+        :class="{ manual: timelineRange }"
         title="设置时间轴起止年份"
         @click="openRangeForm"
       >
         {{ events.length }} 事件 ·
-        <template v-if="manualRange">
-          第 {{ manualRange.start }}–{{ manualRange.end }} 年<template v-if="hiddenCount"> · 窗外 {{ hiddenCount }}</template>
+        <template v-if="timelineRange">
+          第 {{ timelineRange.start }}–{{ timelineRange.end }} 年<template v-if="hiddenCount"> · 窗外 {{ hiddenCount }}</template>
         </template>
         <template v-else>至第 {{ yearOf(maxTime) }} 年</template>
       </button>
@@ -674,7 +637,7 @@ onMounted(() => {
         年
       </div>
       <div class="wt-range-actions">
-        <button v-if="manualRange" class="wt-range-reset" @click="resetRange">恢复自动</button>
+        <button v-if="timelineRange" class="wt-range-reset" @click="resetRange">恢复自动</button>
         <button class="wt-range-ok" @click="applyRange">框定视野</button>
       </div>
       <div class="wt-range-hint">窗口只收拢视野、不动史实；窗外事件数会标注在上方。</div>

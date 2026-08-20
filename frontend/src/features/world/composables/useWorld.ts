@@ -1,6 +1,12 @@
 import { ref, computed } from 'vue'
 import { worldApi, plotLedgerApi, type PlotLedgerCreateInput } from '../../../services/api'
 import { computeWorldState } from '../engine/computeWorldState'
+import {
+  normalizeTimelineCursor,
+  normalizeTimelineRange,
+  type TimelineRange,
+  type TimelineViewState,
+} from '../engine/timelineView'
 import { pushCommand, clearHistory } from './useWorldHistory'
 import { WORLD_REFRESH_EVENT } from './useWorldSlice'
 import type {
@@ -36,6 +42,8 @@ const mapLayers = ref<WorldMapLayer[]>([])
 const mapStrokes = ref<WorldMapStroke[]>([])
 const currentTime = ref<number>(0)
 const loadedBookId = ref<string | null>(null)
+/** 手动视野窗口（null=自动跟随事件延展）——与游标时刻一起按书持久化到服务端 */
+const timelineRange = ref<TimelineRange | null>(null)
 
 const locationsById = computed<Record<string, WorldLocation>>(() => {
   const m: Record<string, WorldLocation> = {}
@@ -51,50 +59,117 @@ const characters = computed(() => entities.value.filter((e) => e.entity_type ===
 const factions = computed(() => entities.value.filter((e) => e.entity_type === 'faction'))
 const assets = computed(() => entities.value.filter((e) => e.entity_type === 'asset'))
 
-// ===== 游标时刻按书持久化（localStorage，与时间轴视野窗口 velluma:tl-range 同策略）=====
+// ===== 时间轴 UI 状态按书持久化（服务端 books.timeline_view：游标时刻 + 视野窗口）=====
 // 恢复值只是「上次看到哪」：世界页 ?time= 深链在 load() 之后才 setCurrentTime，天然覆盖恢复值——深链优先。
-const timeStorageKey = (bookId: string) => `velluma:tl-time:${bookId}`
-let persistTimeTimer: ReturnType<typeof setTimeout> | null = null
+// 历史 localStorage 方案（velluma:tl-time / velluma:tl-range）因启动脚本端口扫描换 origin 即漂移弃用；
+// 旧键降级为一次性迁移来源（服务端缺键时读旧值顶上并写穿）+ 游标关窗竞态的同步兜底。
+const LEGACY_TIME_KEY = (bookId: string) => `velluma:tl-time:${bookId}`
+const LEGACY_RANGE_KEY = (bookId: string) => `velluma:tl-range:${bookId}`
+let persistViewTimer: ReturnType<typeof setTimeout> | null = null
+/** 服务端快照已应用的 bookId（加载竞态护栏：快照到达前的拖动不触发写库，防旧值覆盖新输入） */
+let viewReadyBookId: string | null = null
 
-function restoreSavedTime(bookId: string) {
-  currentTime.value = 0
+function applyTimelineView(bookId: string, view: TimelineViewState) {
+  const cursor = normalizeTimelineCursor(view.cursor)
+  const range = normalizeTimelineRange(view.range)
+  currentTime.value = cursor ?? 0
+  timelineRange.value = range
+
+  // localStorage 旧键一次性迁移：仅当服务端缺该键时读旧值顶上，写穿成功后删本地键
+  const legacy: Partial<TimelineViewState> = {}
   try {
-    const v = Number(localStorage.getItem(timeStorageKey(bookId)))
-    if (Number.isFinite(v) && v >= 0) currentTime.value = v
+    if (cursor === null) {
+      const raw = localStorage.getItem(LEGACY_TIME_KEY(bookId))
+      const v = raw === null ? null : normalizeTimelineCursor(Number(raw))
+      if (v !== null) {
+        currentTime.value = v
+        legacy.cursor = v
+      }
+    }
+    if (range === null) {
+      const raw = localStorage.getItem(LEGACY_RANGE_KEY(bookId))
+      const v = raw === null ? null : normalizeTimelineRange(JSON.parse(raw))
+      if (v) {
+        timelineRange.value = v
+        legacy.range = v
+      }
+    }
   } catch {
-    /* 隐私模式/坏数据静默回退创世 */
+    /* 隐私模式/坏数据静默忽略 */
+  }
+
+  if (Object.keys(legacy).length > 0) {
+    worldApi
+      .patchTimelineView(bookId, legacy)
+      .then(() => {
+        try {
+          if (legacy.cursor !== undefined) localStorage.removeItem(LEGACY_TIME_KEY(bookId))
+          if (legacy.range !== undefined) localStorage.removeItem(LEGACY_RANGE_KEY(bookId))
+        } catch {
+          /* 删不掉无碍——服务端值已优先 */
+        }
+      })
+      .catch(() => {
+        /* 写穿失败：本地键保留，下次加载重试迁移 */
+      })
   }
 }
 
-function flushPersistTime() {
-  persistTimeTimer = null
+function flushPersistView() {
+  persistViewTimer = null
   const id = loadedBookId.value
-  if (!id) return
+  if (!id || viewReadyBookId !== id) return
+  const cursor = Math.floor(currentTime.value)
+  // localStorage 同步写仅作 pagehide 竞态兜底（日常读取以服务端为准）
   try {
-    localStorage.setItem(timeStorageKey(id), String(Math.floor(currentTime.value)))
+    localStorage.setItem(LEGACY_TIME_KEY(id), String(cursor))
   } catch {
     /* 存不进就当会话级 */
   }
+  worldApi.patchTimelineView(id, { cursor }).catch(() => {
+    /* 离线/重启竞态：本地兜底键已留，下次加载迁移补写 */
+  })
 }
 
 /** 拖动/播放是高频调用（rAF 帧/16ms 步进），尾部去抖合并成一次写 */
-function schedulePersistTime() {
-  if (persistTimeTimer) clearTimeout(persistTimeTimer)
-  persistTimeTimer = setTimeout(flushPersistTime, 300)
+function schedulePersistView() {
+  if (persistViewTimer) clearTimeout(persistViewTimer)
+  persistViewTimer = setTimeout(flushPersistView, 300)
 }
 
 // 单例模块不随组件卸载，关窗/刷新时 pagehide 兜底冲刷，防去抖窗口内丢末次位置
 window.addEventListener('pagehide', () => {
-  if (!persistTimeTimer) return
-  clearTimeout(persistTimeTimer)
-  flushPersistTime()
+  if (!persistViewTimer) return
+  clearTimeout(persistViewTimer)
+  flushPersistView()
 })
+
+/** 框定/清除视野窗口（点击驱动低频，立即落库；null=回自动视野） */
+function setTimelineRange(range: TimelineRange | null) {
+  timelineRange.value = range
+  const id = loadedBookId.value
+  if (!id || viewReadyBookId !== id) return
+  if (range === null) {
+    // 清除动作必须同步抹掉本地旧键，防下次加载迁移复活已清除的窗口
+    try {
+      localStorage.removeItem(LEGACY_RANGE_KEY(id))
+    } catch {
+      /* 同上 */
+    }
+  }
+  worldApi.patchTimelineView(id, { range }).catch(() => {
+    /* 失败：本地 ref 已生效，本次会话内视野仍正确 */
+  })
+}
 
 async function load(bookId: string) {
   loadedBookId.value = bookId
-  restoreSavedTime(bookId)
+  viewReadyBookId = null
+  // 默认值先落地（服务端快照到达前不渲染上一本书的旧状态）；?time= 深链在 load() 后覆盖——深链优先
+  currentTime.value = 0
+  timelineRange.value = null
   clearHistory() // 切书清空 undo 栈（避免指向被覆盖的旧数据）
-  const [locs, evs, ents, rels, chapters, ledgers, layers, strokes] = await Promise.all([
+  const [locs, evs, ents, rels, chapters, ledgers, layers, strokes, view] = await Promise.all([
     worldApi.listLocations(bookId),
     worldApi.listEvents(bookId),
     worldApi.listEntities(bookId),
@@ -103,6 +178,7 @@ async function load(bookId: string) {
     plotLedgerApi.listByBook(bookId).catch(() => [] as Awaited<ReturnType<typeof plotLedgerApi.listByBook>>),
     worldApi.listMapLayers(bookId),
     worldApi.listMapStrokes(bookId),
+    worldApi.getTimelineView(bookId).catch(() => ({}) as TimelineViewState),
   ])
   locations.value = locs
   events.value = evs
@@ -112,6 +188,8 @@ async function load(bookId: string) {
   foreshadows.value = ledgers.map((l) => toForeshadow(l))
   mapLayers.value = layers
   mapStrokes.value = strokes
+  applyTimelineView(bookId, view)
+  viewReadyBookId = bookId
 }
 
 // ===== Location =====
@@ -670,7 +748,7 @@ async function setChapterAnchor(chapterId: string, narrativeTime: number) {
 
 function setCurrentTime(t: number) {
   currentTime.value = t
-  schedulePersistTime()
+  schedulePersistView()
 }
 
 // ===== 底图（图片层 + 笔迹；不进全局 undo——编辑态用 useMapEdit 局部栈）=====
@@ -725,6 +803,7 @@ export function useWorld() {
     factions,
     assets,
     currentTime,
+    timelineRange,
     worldState,
     locationsById,
     loadedBookId,
@@ -753,6 +832,7 @@ export function useWorld() {
     deleteForeshadow,
     setChapterAnchor,
     setCurrentTime,
+    setTimelineRange,
     createMapLayer,
     patchMapLayer,
     deleteMapLayerData,
