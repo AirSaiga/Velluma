@@ -1,6 +1,6 @@
 # Velluma AI 小说写作助手
 
-**专为长篇小说创作设计的 AI 驱动写作助手，采用 ADF 锚驱动生成 + Refinery 精修架构**
+**专为长篇小说创作设计的 AI 驱动写作助手，采用 NLE-ADF 自适应写作流（前端默认）+ ADF 锚驱动生成 + Refinery 精修架构**
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Vue.js](https://img.shields.io/badge/Vue-3.4-green.svg)](https://vuejs.org/)
@@ -29,7 +29,7 @@
 
 ## 项目简介
 
-Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器），通过 ADF（锚驱动正向流）引擎生成、Refinery 精修流水线打磨，产出高质量小说章节内容。它专为长篇叙事设计，支持：
+Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器）。写作主线为 **NLE-ADF 3.0 自适应融合写作台**（作者主导写作 + AI 柔性共生，打字即激活辅助层），并保留 ADF（锚驱动正向流）引擎与 Refinery 精修流水线。它专为长篇叙事设计，支持：
 
 - 角色状态追踪与关系图谱
 - 基于 RAG 的智能记忆系统
@@ -77,15 +77,16 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 **核心思想**：把"AI 觉得有问题"和"作者认可的问题"分开，避免 AI 自作主张乱改。详细设计见 `docs/generation-v4.1-refinery.md`。
 
-> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack）的代码与设计文档已归档至 `backend/_deprecated/`（代码）与 `backend/_deprecated/docs/`（设计文档），不再参与运行。
+> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / BS-ADF——2026-08-19 归档）的代码与设计文档已归档至 `backend/_deprecated/`（代码）与 `backend/_deprecated/docs/`（设计文档），不再参与运行。
 
 ### 🧠 长篇记忆与状态管理
 
 - **角色状态机**：静态设定（永恒）+ 动态状态（瞬时）+ 状态历史轨迹
 - **关系图谱**：角色间关系的演化追踪
-- **RAG 记忆**：基于 DashScope Embedding 的向量检索（默认 1536 维）
+- **RAG 记忆**：默认结构化前情 + 词法双路由召回；向量检索为专业级可选（任意 OpenAI 兼容 Embedding 服务）
 - **情节账本**：伏笔的埋设、回收、追踪，避免未来信息泄露
 - **全局资产**：道具/法宝/装备的跨章节状态连续性
+- **世界设定层**：事件溯源式世界建模（活舆图），生成上下文与世界页共用同一事实源
 
 ---
 
@@ -97,10 +98,10 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 |------|------|------|
 | 框架 | FastAPI | 0.109.0 |
 | ORM | SQLAlchemy | 2.0.25（异步） |
-| 数据库 | PostgreSQL + pgvector | 14+ |
-| 驱动 | asyncpg | 0.29.0 |
-| LLM | OpenAI SDK / DashScope | 1.10.0 / 1.14.1 |
-| Embedding | DashScope（text-embedding-v2） | - |
+| 数据库 | SQLite（默认，零配置）/ PostgreSQL + pgvector（可选专业级） | 14+（PG 路径） |
+| 驱动 | aiosqlite（默认）/ asyncpg（PG 路径） | - / 0.29.0 |
+| LLM | OpenAI SDK（OpenAI 兼容协议） | 1.10.0 |
+| Embedding | OpenAI 兼容协议（默认模型 text-embedding-v2） | - |
 | 服务器 | Uvicorn | 0.27.0 |
 | 重试 | tenacity | 8.2.3 |
 
@@ -123,7 +124,7 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 - **Python** 3.12+
 - **Node.js** 18+
-- **PostgreSQL** 14+（需启用 pgvector 扩展）
+- **数据库**：默认 **SQLite 零配置**（`data/velluma.db`，首次启动自动建库）；PostgreSQL 14+（含 pgvector 扩展）仅在显式设置 `DATABASE_URL` 走 PG 专业级路径时需要
 
 ### 1. 克隆仓库
 
@@ -134,16 +135,18 @@ cd Velluma
 
 ### 2. 配置
 
-**数据库**：复制 `.env.example` 为 `.env`（可选，仅数据库连接等少数变量，均有默认值）：
+**数据库**：默认无需任何配置——不设 `DATABASE_URL` 时自动使用 SQLite（`data/velluma.db`，零外部依赖）。如需切回 PostgreSQL，复制 `.env.example` 为 `.env` 并设置 `DATABASE_URL=postgresql+asyncpg://…`（需先启用 pgvector）：
 
 ```bash
 cp .env.example .env
 ```
 
-> 数据库需先启用 pgvector：
+> 仅 PG 路径需要：
 > ```sql
 > CREATE EXTENSION IF NOT EXISTS vector;
 > ```
+>
+> 存量 PostgreSQL 数据可一次性搬迁至 SQLite：`python scripts/migrate_pg_to_sqlite.py`（源库只读，行数对照 + 外键校验）。
 
 **LLM / Embedding / 代理**：复制 `model_config.example.json` 为 `model_config.json`（主配置入口，包含 API Key，已 gitignore），填入真实 API Key：
 
@@ -157,7 +160,7 @@ cp model_config.example.json model_config.json
     "reasoning": { "provider": "...", "api_key": "...", "model": "..." },
     "creative":  { "provider": "...", "api_key": "...", "model": "..." }
   },
-  "embedding": { "api_key": "...", "model": "text-embedding-v2", "dimensions": 1536 },
+  "embedding": { "api_key": "...", "base_url": "", "model": "text-embedding-v2", "dimensions": 1536, "follow_llm": false },
   "proxy":     { "enabled": false, "url": "http://127.0.0.1:4780" }
 }
 ```
@@ -239,12 +242,12 @@ Velluma/
 ├── AGENTS.md                 # 开发指南（架构与现状的权威说明）
 │
 ├── backend/                  # FastAPI 后端
-│   ├── main.py               # 应用入口、路由注册（17 个）、CORS、SPA fallback
-│   ├── models.py             # 14 个 SQLAlchemy ORM 模型
-│   ├── database.py           # 异步引擎、启动时自动迁移
+│   ├── main.py               # 应用入口、路由注册（21 个）、CORS、SPA fallback
+│   ├── models.py             # 31 个 SQLAlchemy ORM 模型
+│   ├── database.py           # 异步引擎（SQLite 默认 / PG 可选）、启动时自动迁移
 │   ├── core/                 # config（端口扫描）、model_config、依赖注入
 │   ├── config/               # V4.0 统一配置推导层
-│   ├── routes/               # 16+ 个 API 路由模块（含 chapter_generation 包）
+│   ├── routes/               # 20 个 API 路由模块（另含 chapter_generation 包）
 │   ├── schemas/              # Pydantic 模型
 │   ├── repositories/         # 数据访问层（Repository 模式）
 │   ├── services/             # 业务逻辑层
@@ -280,9 +283,15 @@ Velluma/
 
 ## 生成引擎
 
-当前后端保留两套生成引擎 + 一套章节优化功能：
+当前保留：**NLE-ADF 3.0 自适应流（前端默认主线）** + ADF 引擎（本体保留，前端已无 UI 入口）+ Refinery 精修 + 章节优化功能。
 
-### ADF 引擎（V3.2，默认）
+### NLE-ADF 3.0 自适应写作台（前端默认）
+
+作者主导写作 + AI 柔性共生：不预设拍、不跑整章管线，进章节打字即激活辅助层（心跳感知 / Space 幽灵草稿 / 走向卡连写 / 细纲胶囊扩写 / 沉淀与完稿审计 / 世界速记与情境浮卡）。编排代码：`backend/routes/chapter_generation/adaptive.py` + `backend/services/context/settings_bundle.py`。详见 `AGENTS.md`「NLE-ADF 3.0」节。
+
+主要端点：`/adaptive/heartbeat`（心跳感知）、`/adaptive/stitch-ghost`（续写，SSE）、`/adaptive/settle`（手动沉淀）、`/adaptive/finish`（完稿审计）、`/adaptive/fix-sentence`（残句定点修复）、`/adaptive/spine` + `/adaptive/spine-suggest`（章级谋篇）、`/adaptive/model`（世界模型快照）。
+
+### ADF 引擎（V3.2，本体保留）
 
 **编排代码**：
 - `backend/routes/chapter_generation/adf.py` — 入口路由（含 SSE）
@@ -314,13 +323,14 @@ CONTEXT_ASSEMBLING → SPINE_BUILDING → ANCHOR_DESIGN → TIER_DECIDE
 
 ### API 端点
 
-- `POST /api/chapters/{id}/generate-adf` — ADF 流式生成（SSE，默认引擎）
+- `POST /api/chapters/{id}/adaptive/*` — NLE-ADF 3.0 自适应流（前端默认，见上节端点清单）
+- `POST /api/chapters/{id}/generate-adf` — ADF 流式生成（SSE）
 - `POST /api/chapters/{id}/plan-suggestion` — 生成前章节规划建议
 - `POST /api/chapters/{id}/refinery/diagnose` — Refinery 诊断
 - `POST /api/chapters/{id}/refinery/confirm` — Refinery 精修（实时 SSE）
 - `POST /api/optimize_chapter` / `/optimize_selection` — 章节重写/局部优化（共享功能）
 
-> 已废弃端点 `/generate`（V3.1）、`/generate-v3`（V3.0）、`/generate-chapter`（V4.0）已随引擎一并移除。
+> 已废弃端点 `/generate`（V3.1）、`/generate-v3`（V3.0）、`/generate-chapter`（V4.0）已随引擎移除；`/generate-bsadf`、`/advance-beat`、`/stepping-run/{id}/state`、`/rerender-beat`、`/cancel-run` 已随 BS-ADF 归档移除（2026-08-19）。
 
 ---
 
@@ -343,13 +353,13 @@ Book (书籍)
 └── GenerationTask (异步生成任务)
 ```
 
-全部 14 个模型定义于 `backend/models.py`。
+全部 31 个模型定义于 `backend/models.py`（除上述核心表外，还包括世界层 `world_*` 事件溯源表族与候选池、文风族 `author_samples`/`style_cards`/`style_inbox_items`、真相面 canon/plot_ledgers 扩展列等）。
 
 ---
 
 ## RAG 记忆检索
 
-**Embedding 仅使用 DashScope SDK**（默认模型 `text-embedding-v2`，默认 1536 维，维度可在 `model_config.json` 配置）。API Key 来自 `model_config.json`，**不读环境变量**。
+**Embedding 走 OpenAI 兼容协议**（任意兼容服务均可接入；默认模型 `text-embedding-v2`、1536 维，`follow_llm=true` 时连接跟随文本模型槽；`base_url` 留空回退 DashScope 兼容端点，历史 Key 零迁移）。API Key 来自 `model_config.json`，**不读环境变量**。未配置 embedding 时记忆流自动走结构化前情 + 词法双路由默认流（向量层为专业级增强，三层叠加）。
 
 **检索权重参数**（`backend/services/rag/scoring.py`）：
 
@@ -372,17 +382,18 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 
 字段：
 - `llm.reasoning` / `llm.creative`：provider、api_key、base_url、model、enabled、effort
-- `embedding`：api_key、model、dimensions
+- `embedding`：api_key、base_url、model、dimensions、follow_llm
 - `proxy`：enabled、url
 
 ### 环境变量（.env，可选）
 
-后端代码实际读取的环境变量仅有以下 3 个（均有默认值，可全留空）：
+后端代码实际读取的环境变量仅有以下 4 个（均可留空——不设 `DATABASE_URL` 即默认 SQLite，开箱即用）：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver` |
-| `DB_POOL_PRE_PING` | 连接池预检 | Windows=false / 其他=true |
+| `DATABASE_URL` | 显式指定 PostgreSQL 连接串（切回 PG 专业级路径） | 无（不设即默认 SQLite `data/velluma.db`） |
+| `VELLUMA_DATA_DIR` | SQLite 数据目录（打包/便携场景） | 项目根 `data/` |
+| `DB_POOL_PRE_PING` | 连接池预检（仅 PG 路径） | Windows=false / 其他=true |
 | `VELLUMA_PORT` | 指定后端端口（跳过扫描） | 无（默认 8002 起扫描） |
 
 > 实际代理配置由 `model_config.json` 的 `proxy` 节决定，不读环境变量。

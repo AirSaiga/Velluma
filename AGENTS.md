@@ -13,11 +13,11 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 
 ## 技术栈
 
-**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· PostgreSQL 14+pgvector · asyncpg 0.29 · OpenAI SDK 1.10（LLM 与 Embedding 同走 OpenAI 兼容协议）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。根目录 `requirements.txt` 与 `backend/requirements.txt` 内容一致（两份均可，均含 `jieba`/`python-multipart`；旧版根目录清单曾误列 `pywebview==4.4.1`，已随 pywebview 桌面入口删除）。
+**后端** (`backend/`)：FastAPI 0.109 · SQLAlchemy 2.0.25（异步）· **SQLite（aiosqlite，默认——不设 DATABASE_URL 即 `data/velluma.db`，零外部依赖）**或 PostgreSQL 14+pgvector（显式设 DATABASE_URL 的专业级路径）· asyncpg 0.29（PG 路径）· OpenAI SDK 1.10（LLM 与 Embedding 同走 OpenAI 兼容协议）· Uvicorn 0.27 · pydantic 2.5.3 / pydantic-settings 2.1.0 / tenacity 8.2.3。根目录 `requirements.txt` 与 `backend/requirements.txt` 内容一致（两份均可，均含 `jieba`/`python-multipart`；旧版根目录清单曾误列 `pywebview==4.4.1`，已随 pywebview 桌面入口删除）。
 
 **前端** (`frontend/`)：Vue 3 ^3.4.15（Composition API）· TypeScript ^5.9.3 · Vite ^5.0.12 · Tailwind ^3.4.1 · TipTap ^2.24 · Electron ^28.3.3。
 
-**环境要求**：Python 3.12+（`.python-version`）· Node 18+ · PostgreSQL 14+（pgvector 仅为**专业级向量记忆**所需；未配置 embedding 可不装）。
+**环境要求**：Python 3.12+（`.python-version`）· Node 18+。数据库默认 SQLite **零外部依赖**（`data/velluma.db`）；PostgreSQL 14+ 仅在显式设置 `DATABASE_URL` 走 PG 路径时需要（pgvector 为该路径的专业级向量记忆）。
 
 ---
 
@@ -71,15 +71,14 @@ npm run build        # 生产构建
 ```
 backend/
 ├── main.py                 # 入口、路由注册、静态服务、CORS、asyncio 静默处理器
-├── models.py               # ★ 22 个 ORM 模型（GenerationTask:740 / GenerationRun:829 均生效）
+├── models.py               # ★ 31 个 ORM 模型（GenerationTask:788 / GenerationRun:877 均生效）
 ├── database.py             # 异步引擎 + 启动时自动迁移（MIGRATIONS 列表）+ 向量维度迁移
 ├── core/  (config 端口扫描 / model_config 读 model_config.json / dependencies / exceptions)
 ├── config/ (V4.0 配置推导层；PARAMETER_MAPPING.md 的 WorkflowPolicy 段含已废弃双轨参数，仅供历史参考)
 ├── routes/                 # API 路由（均在 main.py 注册）
-│   └── chapter_generation/ # 包结构：__init__ 合并 adf/bsadf/refinery/adaptive router + extra_router
-│       ├── adf.py          #   /generate-adf（前端已无 UI 入口）
-│       ├── bsadf.py        #   /generate-bsadf 步进 + /advance-beat + /stepping-run/{id}/state + /rerender-beat + /cancel-run（/confirm-beats 历史兼容）
-│       ├── adaptive.py     #   ★ NLE-ADF 3.0：/adaptive/heartbeat + /stitch-ghost + /settle + /finish + /model（作者主导写作，无预设拍）
+│   └── chapter_generation/ # 包结构：__init__ 合并 adf/refinery/adaptive router + extra_router
+│       ├── adaptive.py     #   ★ NLE-ADF 3.0（前端默认）：/adaptive/heartbeat + /stitch-ghost + /settle + /finish + /fix-sentence + /spine（GET/PATCH）+ /spine-suggest + /model + /event（+/events/summary）
+│       ├── adf.py          #   /generate-adf（引擎本体保留，前端已无 UI 入口）
 │       └── refinery.py     #   /refinery/diagnose + /confirm
 ├── schemas/  repositories/
 └── services/
@@ -93,16 +92,8 @@ backend/
     ├── validation/  (代码级 + LLM 级审计，服务 /chapters/{id}/quality-report 路由；统计原语 import 自 services/style/fingerprint.py)
     ├── workflows/
     │   ├── adf/            # V3.2 ADF 引擎（自包含，前端无入口）：adf_workflow 主类 + 各 phase 模块 + 3 单测
-    │   ├── bsadf/          # ⚠ 弃置中的步进引擎（自包含；思想迁移至 adaptive 后整体归档，勿新增功能）
-    │   │   ├── bsadf_workflow.py   # BSAdfWorkflow 主类（execute_stepping/render_one/run_post_step_phases）
-    │   │   ├── stepping_runtime.py # 步进运行时（SteppingRun 状态机 + stepping_loop + P3 回退快照栈）
-    │   │   ├── slot_builder.py / slot_renderer.py / downgrade.py  # Phase 4a/4c/4d
-    │   │   ├── outline_self_check.py / memory_ingestion.py        # Loop 1 / Loop 3
-    │   │   ├── dde/        # 导演决策引擎（decision_card_generator / slot_mutator / test_decision_set）
-    │   │   ├── types.py    # BeatSlotCard（13 字段）/ DegradedBeat
-    │   │   └── test_*.py   # 8 单测
     │   ├── conftest.py     # ★ autouse fixture，防 asyncio 事件循环污染（见"测试"节，勿删）
-    │   ├── sentence_integrity.py  # Phase 7.5 终稿残句门禁（BS-ADF 专用）+ test_sentence_integrity.py
+    │   ├── sentence_integrity.py  # 残句门禁 + repair_single_defect 单条修复（服务 /adaptive/fix-sentence）+ test_sentence_integrity.py
     │   ├── refining.py     # ★ 共享（前端在用，非废弃），服务 chapter_optimization 路由
     │   └── planning/clarification_agent/snapshot_extractor/state_validator/context_blocks/...
     └── refinery/           # V4.1 独立精修（refinery/diagnostician/planner/surgeon/holistic_reader/polisher）
@@ -116,9 +107,9 @@ frontend/
     │   ├── workspace/ chapter-editor/ bible/ outline/ library/ insights/ novel-wizard/ app/ extraction/ import-markdown/
     │   ├── world/         # ★ 活舆图（世界+伏笔/期待/世界观+真相层 Canon）；canon feature 已随 C1 融合删除（CanonView/CanonGraph/NodeEditModal/EdgeEditModal + useCanon 迁 world/composables）
     │   ├── style/         # ★ 文风页 S1（样本库+笔迹指纹+负面清单+章对账；StyleCardManager 已删除拆解迁入；docs/style-module-redesign.md）
-    └── services/api/  domain/（业务 API，index.ts 聚合，含 bookApi/chapterApi/bsadfApi/refineryApi 等）/ stream/（SSE）/ transport/（HTTP）
+    └── services/api/  domain/（业务 API：index.ts 聚合 bookApi/chapterApi/refineryApi + adaptive/world/canon/asset 等 *.api.ts）/ stream/（SSE）/ transport/（HTTP）
 
-backend/_deprecated/  # 废弃引擎归档（不参与 import 链，详见该目录 README）
+backend/_deprecated/  # 废弃引擎归档（V3.0/V3.1/V4.0 + BS-ADF 2026-08-19 整体迁入，含其路由与 schema；不参与 import 链，详见该目录 README）
 data/ logs/ .venv/
 ```
 
@@ -132,7 +123,7 @@ data/ logs/ .venv/
 
 | 引擎 | 端点 | 主类/模块 | 用途 |
 |------|------|------|------|
-| ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`+`/model` | `adaptive.py` + `settings_bundle.py` + `adaptive_prompts.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
+| ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`+`/fix-sentence`+`/spine`（GET/PATCH）+`/spine-suggest`+`/model`+`/event`（及`/events/summary`） | `adaptive.py` + `settings_bundle.py` + `adaptive_prompts.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
 | **BS-ADF** | （端点已摘除） | （已归档 `backend/_deprecated/bsadf/`） | **已归档 2026-08-19**（思想已迁入 adaptive；涌现抽取在 `services/adaptive/emergent_facts.py`） |
 | ADF | `/generate-adf` | `ADFWorkflow`（`workflows/adf/`） | 引擎本体，前端已无 UI 入口 |
 | Refinery | `/refinery/diagnose`+`/confirm` | `Refinery`（`services/refinery/`） | 独立精修（对任意草稿） |
@@ -140,7 +131,7 @@ data/ logs/ .venv/
 
 ### NLE-ADF 3.0 自适应融合写作台（前端默认路径）
 
-核心理念：**作者永远在写，AI 在画布上柔性共生**。与 BS-ADF 步进模式的根本区别——不预设拍划分、不跑整章管线前置；作者进章节打字即激活辅助层。
+核心理念：**作者永远在写，AI 在画布上柔性共生**。与已归档 BS-ADF 步进模式的根本区别——不预设拍划分、不跑整章管线前置；作者进章节打字即激活辅助层。
 
 - **双轴状态机**（`useGenerationSession.ts`）：`authorLane`（idle→composing→ghostStitching→settling，前台主线）+ `aiLane`（dormant→perceiving/suggesting/assisting/digesting/analyzing，后台）。两轴并行不阻塞，与旧 `stage` 单轴（legacy step）共存。
 - **激活**：作者进章节打字 ≥4 字 → `enterAdaptive(chapterId)` 置 `authorLane=composing`（不跑 startBeat 管线）。辅助层（`useAdaptiveAssist.ts`）据此挂载。
@@ -149,11 +140,13 @@ data/ logs/ .venv/
   - Space（有零件=缝合续写 / 无零件=顺句续写）→ `/adaptive/stitch-ghost`（SSE 打字机灌幽灵草稿，复用 `useGhostDraft`；mode 五档：stitch/continue/burst/open/**outline**；S2 起四模式 prompt 均注入文风：正面画像块 + 作者笔迹示范 few-shot（`style/retrieval.py` 按当前上下文检索 k≤2，无样本零变化））
   - **细纲胶囊**（Alt+O / 输入 `[[` / 选中文本转换，`extensions/OutlineNoteNode.ts` + `OutlineNoteChip.vue`）：作者亲笔剧情速记以胶囊嵌在正文任意位置 →「落笔扩写」走 stitch-ghost mode=outline（双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」clamp 100-800 缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门）。扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）；编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）
   - **情境浮卡 + 世界速记（写作桥，见世界设定层）**：选中正文 1-12 字或点击 @/# 提及 → `GET /world/context-card` 浮情境卡（此刻状态/编年史/控制方，解析不到静默缺席）；Alt+N → `POST /world/parse-event` 一句话解析成事件草稿（只产草稿绝不落库，作者过目入账 + 6 秒撤销胶囊）
+  - **章级谋篇（M1-M3，`docs/chapter-planning-spine.md`）**：`GET`/`PATCH /adaptive/spine`（`chapters.spine` JSONB，部分合并；副驾「章节」tab 谋篇区编辑，2s 防抖自动保存）+ `POST /adaptive/spine-suggest`（1×creative 建议不落库，D-4 红线）；走向卡 ⚑ 挂锚点（serves_anchor 写入/提取双侧代码闸）、pending 锚点关键词命中→纯算法进度判定进心跳、带 branch 的临近锚点置顶为硬提示卡（选向即决岔）+ finish 报告附 spine_note（未兑现锚点仅提示不阻塞）
   - 沉淀 → `/adaptive/settle`（**纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库，设定逆向生长；另触发 event_scout 抽候选事件进收件箱）
-  - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引 + 整章候选抽取）；`GET /adaptive/model` 世界模型快照（前端无调用方）
+  - 完稿审计 → `/adaptive/finish`（残句/覆盖率/Canon 合规/整章审阅 + 记忆重索引 + 整章候选抽取）；报告中的残句条目可走 `POST /adaptive/fix-sentence` 定点修复（作者裁决式：只产修复句不改正文，采纳才替换）；`GET /adaptive/model` 世界模型快照（副驾「章节」tab 折叠区调试视图，`InspectorPanel.vue`）
+  - 协作埋点 → `POST /adaptive/event` + `GET /adaptive/events/summary`（本地 `data/collab_events.jsonl` 零上报个人镜子，book_id 服务端解析防伪；insights「协作」面板消费）
 - **设定数据双向驱动**（`settings_bundle.py`）：章级绑定 + 书级 Canon（[public]/[private]）+ 世界观，一次加载供所有 adaptive 端点共用；**世界设定层优先**（见下节 world_bridge——世界页有实体时 bundle 的角色/资产/地点/关系切换为 world 数据 + 叙事时刻推演状态，无实体回退旧表）。写作中感知 + 后台方向权重规划两个层面同时利用。
 - **画布即事实源**：写作台无生成预览层（旧 preview 属性链已随写作台重构移除），作者写的即真实文档；沉淀只做后台消化（抽实体+可选落库），不产生第二份文本。落库由 `ChapterEditor` 的 `update-chapter` 机制实时覆盖。
-- **写作台「纸面优先」布局**（2026-08-17 重构）：880px 纸列是唯一主角——列内页面头（`第N章` label + 衬线大标题 input + ⋯ 章节动作菜单：发布/灵感/审阅/全文格式整理，经 `editorHandle.formatWholeDocument`），正文区**无常驻格式工具栏**（选中文字浮窗保留 B/I/U + AI 润色/改写 + 黄金片段[双写文风样本库]/这不像我[负面候选投文风收件箱，S3 起]；TipTap 排版扩展仍加载，仅删工具栏 UI，避免旧章节格式在下次保存被剥除）。顶栏极薄化：状态文案（adaptive 跟 aiLane）+ AI 辅助开关/快捷键/抽屉三按钮。右缘副驾抽屉收敛为三 tab：**此刻**（世界场景切片+候选收件箱）/ **章节**（大纲编辑、意图反推、字数与出场角色统计、真相账本跳转——世界页 `?panel=canon` 深链）/ **审校**（完稿审计按钮+报告、沉淀抽取结果、Refinery 润色、读者反馈、手术历史、审校结论），Ctrl+1/2/3 切换、Ctrl+\\ 固定；完稿审计报告到达时抽屉自动滑出一次。润色与读者反馈门槛由 `stage` 门控改为**本章有正文**（`chapterHasContent`），修活 adaptive 下（stage 恒 idle）永不可达的死入口。BS-ADF 步进 UI（GenerationStepper/StoryboardPanel/BranchDecisionPanel/CurrentTaskBar/BeatSlotCardView/FocusAssetsPanel/GhostTimeline/BranchBanner/AutoCutHint/GenerationOverlay/PlanConfirmModal/TierSelector）已整体删除，`useGenerationSession` 内步进逻辑休眠保留（无 UI 调用方）。
+- **写作台「纸面优先」布局**（2026-08-17 重构）：880px 纸列是唯一主角——列内页面头（`第N章` label + 衬线大标题 input + ⋯ 章节动作菜单：发布/灵感/审阅/全文格式整理，经 `editorHandle.formatWholeDocument`），正文区**无常驻格式工具栏**（选中文字浮窗保留 B/I/U + AI 润色/改写 + 黄金片段[双写文风样本库]/这不像我[负面候选投文风收件箱，S3 起]；TipTap 排版扩展仍加载，仅删工具栏 UI，避免旧章节格式在下次保存被剥除）。顶栏极薄化：状态文案（adaptive 跟 aiLane）+ AI 辅助开关/快捷键/抽屉三按钮。右缘副驾抽屉收敛为三 tab：**此刻**（世界场景切片+候选收件箱）/ **章节**（谋篇软脉络、大纲编辑、意图反推、字数与出场角色统计、真相账本跳转——世界页 `?panel=canon` 深链）/ **审校**（完稿审计按钮+报告、沉淀抽取结果、Refinery 润色、读者反馈、手术历史、审校结论），Ctrl+1/2/3 切换、Ctrl+\\ 固定；完稿审计报告到达时抽屉自动滑出一次。润色与读者反馈门槛由 `stage` 门控改为**本章有正文**（`chapterHasContent`），修活 adaptive 下（stage 恒 idle）永不可达的死入口。BS-ADF 步进 UI（GenerationStepper/StoryboardPanel/BranchDecisionPanel/CurrentTaskBar/BeatSlotCardView/FocusAssetsPanel/GhostTimeline/BranchBanner/AutoCutHint/GenerationOverlay/PlanConfirmModal/TierSelector）已整体删除，`useGenerationSession` 内步进调用逻辑亦已删除（2026-08-19，-1168 行；仅 `_cancelSteppingRun` 空壳保留防清理连锁）。
 - **Spark Dock 解耦**：gate 从 stage 解绑，`authorLane=composing` 即激活（零件源从拍卡改为心跳供给 + 章级兜底）。
 
 ### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
@@ -161,7 +154,7 @@ data/ logs/ .venv/
 事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`（人物/势力/资产固有属性，档案在 `props` JSONB 表驱动）+ `world_locations` + `world_relations`（static 或事件锚定的时变关系）+ 地图底图表 + 候选事件池 `world_event_candidates`。任意时刻的世界状态（谁在哪/生死/疆域/关系）由 `compute_world_state_from_events` 纯函数折叠推演（前后端同构，前端 `features/world/engine/`）。UI 单一画布（M6「活舆图」）：地图（Leaflet）承载全部实体/关系/事件（脑图透镜已退役，⇧拖建关系等手势平移至地图），**悬浮胶囊工具条**（记一笔历史/地点/实体/世界观/⋯）取代顶栏，**右缘 46px 图标栏 + 浮出抽屉**（待确认/伏笔/期待/真相/地点/事件/角色/势力/资产）取代右侧栏；书名水印题字；**空白舆图**（无底图时铺手绘风地球世界平面——`blankAtlas.ts` 的 `BLANK_ATLAS_INNER`（⚠ 生成物，由 `scripts/make_blank_atlas.py` 从 Natural Earth 50m 海岸线/湖泊/河流/国界生成，等距圆柱投影·中央经线 40°E（欧亚大陆居视觉中心，切线 140°W 过东太平洋，阿拉斯加/阿留申分列两缘），改轮廓/装饰锚点先改脚本再重跑），svgOverlay 随图缩放，viewBox 与 bounds 必须同为 2:1 防纵向变形，海岸线走 `wm-ink-soft` 细毛边滤镜，国界点状虚线/山河/经纬网，提示收进浮动卡，首个实体落地即退场；空白态初始视野框住世界平面，用户拖/缩后不再插手；数据缓存 `data/atlas-src/` 已 gitignore）+ **罗盘**（实功能：点击「回到全图」视野收拢到内容包围盒；针平时轻摆、点击大摆归北）；底部时间轴为编年史带（含章节叙事锚 `chapters.narrative_time` + 伏笔弧线带）。表单体验：textarea 统一走共享指令 `v-autogrow`（`presentation/autogrow.ts`，随内容长高、max-height 封顶）。
 
 - **生成桥接（world_bridge，已接通）**：`services/context/world_bridge.py`——世界页有实体时 settings_bundle 走 **world 优先**：实体/关系经鸭子类型适配器包装成旧 Character/Asset 形状（下游 hard/soft/nutrients 零改动），`dynamic_state` 自动携带叙事时刻推演状态（「位于北岸要塞」「在途（进度 40%）」「已死亡」）；叙事时间四级降级（本章锚→前序最近锚→事件最大时刻→0）。`bundle.world_state/world_time/world_sourced` 携带切片快照。桥接失败/世界为空 → 旧表兜底（未迁移书行为不变）。
-- **编辑入口收敛（M4/M5）**：设定页角色/资产/地图（M4）+ 伏笔账本/期待账本/世界观（M5）分区已退役为跳转卡（`WorldRedirectCard`，带 `?entity=`/`?panel=` 深链）；保留分区：文风/笔记/设置。旧面板 CharacterPanel/MapSettings/asset-panel/ForeshadowingPanel/ReaderMirrorPanel/WorldviewSettings 已删除。M5 世界页新增承载（M6 起位于图标栏抽屉/胶囊条）：「伏笔」抽屉（`ForeshadowSection` 全量账本+状态筛选，未锚定伏笔的唯一可见处）+ `ForeshadowDetailDrawer`（就地编辑/未锚定一键锚游标/回收/废弃/删除 undo）、「期待」摘要 + `ReaderMirrorModal`（火候看板/张力曲线整面板迁入）、胶囊条「世界观」+ `WorldviewModal`（2s 防抖自动保存/导入导出）；伏笔/期待/世界观编辑后统一广播 `velluma:world-refresh` 刷新写作页切片。
+- **编辑入口收敛（M4/M5）**：设定页角色/资产/地图（M4）+ 伏笔账本/期待账本/世界观（M5）分区已退役为跳转卡（`WorldRedirectCard`，带 `?entity=`/`?panel=` 深链）；保留分区仅剩**笔记+跳转卡**（文风已迁独立文风页 `/style/:bookId`，设置已改全局弹窗 `AppSettingsModal.vue`——AppRail 齿轮入口，任何页面可达）。旧面板 CharacterPanel/MapSettings/asset-panel/ForeshadowingPanel/ReaderMirrorPanel/WorldviewSettings/SettingsPanel 已删除。M5 世界页新增承载（M6 起位于图标栏抽屉/胶囊条）：「伏笔」抽屉（`ForeshadowSection` 全量账本+状态筛选，未锚定伏笔的唯一可见处）+ `ForeshadowDetailDrawer`（就地编辑/未锚定一键锚游标/回收/废弃/删除 undo）、「期待」摘要 + `ReaderMirrorModal`（火候看板/张力曲线整面板迁入）、胶囊条「世界观」+ `WorldviewModal`（2s 防抖自动保存/导入导出）；伏笔/期待/世界观编辑后统一广播 `velluma:world-refresh` 刷新写作页切片。
 - **章级在场改推演**：原角色/资产/地点勾选绑定（chapter_entities 等）退役——「本章在场」由事件按叙事时刻推演（`GET /world/state-for-chapter/{chapter_id}`，SceneSettingsPanel 只读展示）。entity-mention（@/#）建议与创建均走 world（无世界数据回退旧表），不再写章级绑定。
 - **AI 写路径（M4）**：`content_extractor.commit_extraction` 与 adaptive 沉淀落库改写 world_*（角色档案全文进 `props.background`——**迁移而非兼容**：启动数据迁移已把历史 `props.legacy_profile` 并入 background 并摘键，读写两侧均无 legacy 回退）；**未迁移书首次 AI 落库前自动执行幂等迁移**（防 world 优先切换后旧角色从生成上下文失踪）。伏笔（PlotLedger 共享表）与向量记忆不变。
 - **写作桥（world-writing-bridge，W1-W5lite 已上线，`docs/world-writing-bridge.md`）**：沙盘价值送货到写作现场——①`GET /world/scene-slice`「此刻此地」切片条（副驾抽屉「此刻」tab，替换旧 SceneSettingsPanel；在场/脚下含疆域控制方/相遇/头顶的线，与生成上下文同源）；②`GET /world/context-card` 情境浮卡（选中文本/点击提及）；③`POST /world/parse-event` Alt+N 世界速记（解析/落库分离红线）；④候选回流：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销；⑤保鲜三时机（章节切换/心跳 `world_version`/窗口聚焦，`useWorldSlice` 单例）；⑥深链往返 `?entity|loc|fs=&time=&from=chapter&chapter=`（世界页「返回本章」；`?fs=` 开伏笔详情抽屉，`?panel=expectations|worldview|canon` 开对应账本/真相格，写作页「头顶的线」伏笔/期待行可点击）；⑦本章场景钉 `chapters.scene_location_id`。事件解耦：`velluma:world-version` / `velluma:world-refresh` / `velluma:quick-note`。
@@ -182,24 +175,14 @@ data/ logs/ .venv/
 - **S5 UX 打磨与样本链路修复 ✅ 2026-08-18**：①**零状态 hero 化**——坡道第一幕垂直居中 + 衬线大标题 + 大输入区，场景/时期下拉框移出第一幕（默认 general/recent，事后样本卡可改），「整页只有一个邀请」成立；②**坡道门闸修正**——`zeroState` = 无样本**且无既有配置**（`hasStyleConfig` 扩入旋钮/对话目标；旧 StyleCardManager 时代有配置的书不再被折叠成邀请页），`growthStage` 三幕（ramp/early/full），章级特例深链强制 full 防死路；③**顶部常驻状态条**（`StyleStatusStrip.vue`：一句话总结实测指标 + ▶试听滚动锚点，sticky，语料为空不报假数字）；④**两栏仪表盘**（见上「页面」条）+ 直方图重做（柱子贴基线/柱顶计数/按最高桶归一峰值 96px/底线轴）+ 指标格 hint 两行不截断 + 样本列表限高 24rem 内滚；⑤**⚠ `--accent-400` 全局补齐**（`style.css` 浅色 #9685c2 / 深色 #8b6de8）——该 token 此前从未定义，文风页 6 组件 14 处引用（直方图渐变/hover 边框/焦点环）全部静默失效，是直方图柱子隐形的根因；⑥**样本创建链路事故级修复**——`AuthorSampleRepository.create_with_embedding` 把 ORM 实例传给 `BaseRepository.create(payload: dict)`（内部 `model(**payload)`）恒 TypeError，**手动粘贴/章节收编/黄金片段导入/收件箱确认四条创建通路曾全部 500**——已改 dict 契约并补 `era` 参数（此前 schema 有 era 但路由静默丢弃，已转发）。
 - **笔迹 vs 声纹切分现况**：叙述文风（句长/语域/浓淡/冷热）走文风页（旋钮+画像+样本 few-shot）；角色对话腔调走世界实体档案「说话风格」字段（world_bridge 注入）——两条通路在生成上下文里自然汇合。
 
-### BS-ADF 步进模式（⚠ 弃置中——迁移源，勿新增功能）
+### BS-ADF（已整体归档 2026-08-19）
 
-> **弃置策略**：前端 UI 入口（原 InspectorPanel「规划」tab「生成本章」及全部步进面板）已随 2026-08-17 写作台重构整体删除，后端引擎暂留供思想迁移取材；验证过的思想按需迁移进 adaptive 流后，引擎整体归档至 `backend/_deprecated/`。**迁移候选**：DDE 真岔路判断（adaptive 现为柔性走向卡）、章级规划层（脉络轨/锚点/定档/槽位卡，adaptive 无对应物）、残句门禁与一致性手术等修复型护栏（adaptive finish 只审计不修复）、RAG 检索管线与观测落库（trace/RunRecorder——adaptive 端点现无成本核算）。**已修复的洞**：Refinery 润色/读者反馈入口原要求 `stage==='done'`，adaptive 模式 stage 恒 idle 导致永不可达——写作台重构已改为「本章有正文」门槛（`InspectorPanel.vue` `chapterHasContent`）。
-
-链路：`generate-bsadf` 跑到 Phase 4b 暂停 → 常驻 `stepping_loop`（`stepping_runtime.py`）→ `STEPPING_INITIALIZED`（run_id + 全量槽位卡）→ **逐段**「渲染 → `BEAT_RENDER_READY` 挂起等裁决 → `/advance-beat` → 下一段」→ 末段锁死 → Phase 4.5-7.5 后处理 → `COMPLETE`（全量收尾字段）。
-
-- **裁决动作**（`AdvanceBeatRequest.action`）：`pass`/`edit`/`branch`/`skip`/`lock_with_text`/`back`，带 `beat_id` 校验（陈旧动作丢弃）。前端「接受」dirty 时自动改走 `lock_with_text`，删空文本路由 `skip`。
-- **岔路门**：渲染前卡挂 DDE 岔路且未选走向 → `BEAT_BRANCH_CHOICE` 暂停（原 `BranchDecisionPanel`，UI 已随写作台重构删除），取代 Track A 静默/Track B 弹窗。Track A/B 现为休眠兼容路径（`enable_stepping=false` 才进入）。
-- **请求开关**（`schemas/bsadf.py`）：前端固定开 `enable_stepping`+`enable_outline_self_check`+`enable_memory_ingestion`（`useGenerationSession.ts:1193-1207`）；`track` 步进模式忽略，前端已不传。
-- **BeatSlotCard 硬契约**（`workflows/bsadf/types.py`，13 字段）：`core_plot_event`/`key_anchors`/`text_carrier` + `outline_beat` + `branch_directive` + 内部字段。禁词/心理/感官限制已下沉为渲染器静态 system prompt（`bsadf_prompts.py` `_SLOT_RENDER_SYSTEM`），不再逐卡携带。
-- **DDE**（`workflows/bsadf/dde/`，全章 1×creative）：判断本章是否有剧情走向级真实岔路；无则放行。`slot_mutator` 写走向入 `branch_directive`，**绝不碰**硬契约字段。
+> 步进引擎已随 dc7af61/50099af 整体退役：引擎包 `workflows/bsadf/`（含 8 个单测与 `dde/`）→ `backend/_deprecated/bsadf/`，路由 → `_deprecated/routes/bsadf_route.py`，schema → `_deprecated/schemas/bsadf_schema.py`，`chapter_generation/__init__.py` 已摘除注册；前端步进调用与 `bsadfApi` 全部删除。**`/generate-bsadf`、`/advance-beat`、`/stepping-run/{id}/state`、`/rerender-beat`、`/cancel-run` 端点不复存在。**思想去向（详见 `_deprecated/README.md`）：DDE 真岔路→谋篇声明岔路 M3、章级规划层（脉络轨/锚点/定档/槽位卡）→软脉络 `chapters.spine`、字数闸→stitch-ghost outline 双层闸、Loop3 涌现抽取→`services/adaptive/emergent_facts.py`、残句门禁→`repair_single_defect`（`/adaptive/fix-sentence`）。步进运行时事实（`_STEPPING_RUNS` 纯内存 TTL 12h / 步进不自动写库 / 每条 advance-beat 一条新 SSE 流）随引擎归档，仅作历史参考。
 
 ### ⚠ 后端运行/落库边界（编辑前必读）
 
-1. **步进运行纯内存**：`_STEPPING_RUNS`（TTL 12h）。uvicorn `--reload` 重启（任何 backend 文件保存）即丢全部 run → `advance-beat`/`state` 返回 404 RUN_NOT_FOUND，前端按「会话失效，重试=从头重生成」处理。SSE 断连不影响后台执行；`GET /stepping-run/{id}/state` 2s 轮询兜底。
-2. **每条 `/advance-beat` = 一条新 SSE 流**：15s 空闲发 HEARTBEAT 保活（无 120s 硬超时），消费到终态事件优雅结束。advance 入口守卫：run 非 stepping→409，`edit` 无 edited_slot→422。
-3. **步进模式后端不自动写库**：`_run_generate` 步进分支提前返回。终稿由前端 COMPLETE 后 `PUT /api/chapters/{id}` 落库（`WorkspaceView.vue` watch stage→done）。槽位卡 `bsadf_beat_slots` 步进模式不落库；run 结束时 `_store_pending_beats` 暂存 rerender 上下文（done 后「重写本段」走 `/rerender-beat`）。
-4. **Refinery 与 ADF 内置的 REFINE 是完全不同代码**（同名不同实）；`services/refinery/__init__.py`「ADF Phase 4.5 触发」注释过时，代码无此集成。
+1. **adaptive 观测已接**（P0，`services/adaptive/observing.py`）：chapter 级常驻 RunRecorder（run_id=`adaptive_{chapter_id}`，per-chapter 锁 drain/restore 原子冲账防重复防丢账）；trace 按 chapter 单文件 `logs/trace_adaptive_{chapter_id}.jsonl` 追加；协作埋点本地 `data/collab_events.jsonl`（零上报）。
+2. **Refinery 与 ADF 内置的 REFINE 是完全不同代码**（同名不同实）；`services/refinery/__init__.py`「ADF Phase 4.5 触发」注释过时，代码无此集成。
 
 ### ⚠ thinking 关闭的正确姿势（`services/llm/client.py`）
 
@@ -207,13 +190,13 @@ data/ logs/ .venv/
 
 ### 关键质量护栏（事故根因，勿回退）
 
-> ⚠ 以下闸门多数位于 **bsadf**（弃置中）与共享模块；adaptive 流目前只继承了**字数硬闸门**（stitch-ghost mode=outline 的 ×1.6/×1.5 双层闸）与 enrich 双幻觉过滤的思想（adaptive 走「作者裁决即闸门」路线，无渲染期拦截）。迁移改造时从这里取材，勿凭空重写。
+> ⚠ 以下闸门多数位于已归档的 `_deprecated/bsadf/`（迁移取材用，不再随 live 代码演进）与共享模块；adaptive 流目前只继承了**字数硬闸门**（stitch-ghost mode=outline 的 ×1.6/×1.5 双层闸）与 enrich 双幻觉过滤的思想（adaptive 走「作者裁决即闸门」路线，无渲染期拦截）。迁移改造时从这里取材，勿凭空重写。
 
 - **字数硬闸门**：超 target×1.6 带压缩反馈重试，末次仍超句界截断到 target×1.5（截断上限必须 ≤1.6）；末段（结局段）豁免截断。
 - **REFINE 完整性闸门**：补埋输出采纳前强制句末完整性校验，回退后丢失过半则整段放弃（宁缺勿残）。
 - **enrich 幻觉闸门**：空种子禁自由扩写（防凭空产出）；剧情关键词/零接地双向过滤。
 - **POV 名闸门**：状态卡已知 POV 角色时正文必须出现其名至少一次。
-- **Phase 7.5 残句门禁**（`sentence_integrity.py`，BS-ADF）：高精确度正则扫残句（宁漏勿误），命中定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，上限 5）。
+- **残句门禁与单条修复**（`workflows/sentence_integrity.py`，在役）：高精确度正则扫残句（宁漏勿误），`repair_single_defect` 定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，批处理上限 5——现服务 `/adaptive/fix-sentence`；原 BS-ADF Phase 7.5 整章批处理用法已随引擎归档）。
 - **状态卡抽取失败**：沿用旧卡显式记 `result.degraded`（不静默）；max_tokens=1600 兜底。
 
 ### RAG / 记忆流（`recall_memories`：默认流始终打底 + 向量流增强叠加）
@@ -229,11 +212,13 @@ data/ logs/ .venv/
 
 ## 数据库与迁移
 
-**启动时自动迁移**（非 Alembic）：`backend/database.py` 的 `MIGRATIONS` 列表（约 50 条）定义增量列变更，`init_db()` 启动时自动补齐。改 ORM 后须同步加 MIGRATIONS 条目，重启即应用。
+**双路径（2026-08-19 起 SQLite 默认）**：不设 `DATABASE_URL` → SQLite 文件库 `data/velluma.db`（单机桌面零外部依赖；实现于 `backend/db_sqlite/`——`engine.py` WAL/外键/忙等 pragma 逐连接设置 + NullPool 防锁竞争，`type_compat.py` JSONB/Vector→SQLite 方言编译 + **UUID str 入参容忍补丁（⚠ 勿删：repo 惯约向 UUID 列传 str，PG+asyncpg 驱动层容忍，删此补丁 SQLite 下 world 查询全线 500）**，models 零改动；数据目录可用 `VELLUMA_DATA_DIR` 覆盖）。显式设 `DATABASE_URL=postgresql+asyncpg://…` → PG 原路径全保留（pgvector 向量记忆/连接池/维度迁移，专业级）。存量 PG→SQLite 一次性搬迁：`scripts/migrate_pg_to_sqlite.py`（PG 只读拓扑序，先对源库补齐 MIGRATIONS 缺失列再搬运，行数对照+外键校验）。
 
-⚠ **向量维度迁移破坏性**：启动时 `migrate_vector_dimension` 若 embedding 维度与库列不匹配会**删列重建**（清空全部向量数据）。切维度前注意。
+**启动时自动迁移**（非 Alembic）：`backend/database.py` 的 `MIGRATIONS` 列表（约 50 条）定义增量列变更，`init_db()` 启动时自动补齐（SQLite 路径走 `db_sqlite/schema.py` 的 `init_db_sqlite`：建表+同源列迁移+legacy 数据迁移+种子化）。改 ORM 后须同步加 MIGRATIONS 条目，重启即应用。
 
-连接池：`pool_size=10`/`max_overflow=20`；`DB_POOL_PRE_PING` Windows 默认关（asyncpg+greenlet），其他平台默认开。手动建表前需 `CREATE EXTENSION IF NOT EXISTS vector;`。
+⚠ **向量维度迁移破坏性**（仅 PG 路径）：启动时 `migrate_vector_dimension` 若 embedding 维度与库列不匹配会**删列重建**（清空全部向量数据）。切维度前注意。
+
+连接池（仅 PG 路径；SQLite 走 NullPool 无池参数）：`pool_size=10`/`max_overflow=20`；`DB_POOL_PRE_PING` Windows 默认关（asyncpg+greenlet），其他平台默认开。PG 手动建表前需 `CREATE EXTENSION IF NOT EXISTS vector;`。
 
 ---
 
@@ -247,8 +232,9 @@ LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.p
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `DATABASE_URL` | PG 连接串 | `postgresql+asyncpg://postgres:postgres@localhost:5432/storyweaver` |
-| `DB_POOL_PRE_PING` | 连接池预检 | Win=false / 其他=true |
+| `DATABASE_URL` | 显式指定 PG 连接串（切回 PostgreSQL 专业级路径） | 无——**不设即默认 SQLite** `data/velluma.db` |
+| `VELLUMA_DATA_DIR` | SQLite 数据目录（打包/便携场景覆盖 `data/`） | 项目根 `data/` |
+| `DB_POOL_PRE_PING` | 连接池预检（仅 PG 路径；SQLite NullPool 不涉及） | Win=false / 其他=true |
 | `VELLUMA_PORT` | 固定后端端口 | 无（默认 8002 起扫描） |
 
 ⚠ 实际代理配置由 `model_config.json` 的 `proxy` 节决定（`get_active_proxy()`），不读环境变量。代码中**不存在**以下环境变量：`PROXY_URL`/`DISABLE_PROXY`（已删除的死变量）、`AGENTIC_BEAT_CONCURRENCY`/`AGENTIC_FORCE_FAST_MODE`（历史误标，从未存在）、`DASHSCOPE_API_KEY`/`OPENAI_API_KEY`（Key 全来自 model_config.json）。注意区分：`AGENTIC_DEFAULT_*`（如 `AGENTIC_DEFAULT_WORD_COUNT`）是 `schemas/generation.py` 内**实际存在**的 Python 常量（非环境变量），供已废弃的 `orchestration/agentic.py` 引用。
@@ -276,13 +262,13 @@ services/api/transport  ← 底层 HTTP
 项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过（distance.test.ts 曾中招，4be1568 修复）
-- BS-ADF：已随引擎归档至 `_deprecated/`（其 8 单测同迁，不再运行） + `dde/test_decision_set.py`
+- BS-ADF：已随引擎归档至 `_deprecated/bsadf/`（8 个单测与 `dde/test_decision_set.py` 同迁，均不再运行）
 - ADF：`workflows/adf/` 下 `test_consistency_guard`/`test_beat_patcher`/`test_state_tracker`
-- `workflows/sentence_integrity.py` + `test_sentence_integrity.py`；`prompts/test_boundary_pacing_prompts.py`
+- `workflows/sentence_integrity.py` + `test_sentence_integrity.py`；`prompts/test_boundary_pacing_prompts.py`；`db_sqlite/test_db_sqlite.py`
 
-⚠ **`workflows/conftest.py`（autouse）勿删**：每个测试结束重置全新 current event loop。存在原因——`IsolatedAsyncioTestCase`（adf 测试）与 `asyncio.run` 收尾会把事件循环策略 `_set_called` 置位且 current loop 置空，污染同进程后续 `asyncio.get_event_loop()`（受害者：bsadf/test_downgrade.py、test_slot_builder.py 抛 RuntimeError）。跨多文件跑 pytest 时删除会随机失败。
+⚠ **`workflows/conftest.py`（autouse）勿删**：每个测试结束重置全新 current event loop。存在原因——`IsolatedAsyncioTestCase`（adf 测试）与 `asyncio.run` 收尾会把事件循环策略 `_set_called` 置位且 current loop 置空，污染同进程后续 `asyncio.get_event_loop()`（历史受害者：归档前的 bsadf/test_downgrade.py、test_slot_builder.py，现随引擎在 `_deprecated/`）。跨多文件跑 pytest 时删除会随机失败。
 
-**开发验证**：后端 `/api/health`；前端浏览器 DevTools + Vue DevTools；Prompt 日志 `logs/prompt_log_*.json`；生成全流程 trace `logs/trace_{run_id}.jsonl`（JSONL 实时追加，含 run_start/阶段事件/slots_built 快照/每次 llm_call 的 system+user+响应+usage+延迟/final_text/run_complete；质量 debug 先按 run_id 定位文件再逐事件排查；单章数百 KB 属预期）。
+**开发验证**：后端 `/api/health`；前端浏览器 DevTools + Vue DevTools；Prompt 日志 `logs/prompt_log_*.json`；生成全流程 trace `logs/trace_{run_id}.jsonl`（adaptive 流按章单文件 `logs/trace_adaptive_{chapter_id}.jsonl`）（JSONL 实时追加，含 run_start/阶段事件/slots_built 快照/每次 llm_call 的 system+user+响应+usage+延迟/final_text/run_complete；质量 debug 先按 run_id 定位文件再逐事件排查；单章数百 KB 属预期）。
 
 ---
 
@@ -306,4 +292,4 @@ services/api/transport  ← 底层 HTTP
 - **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建），建议查 `logs/prompt_log_*.json` 验证。
 - **前端加 Feature**：`features/` 建目录，按 `containers/`+`presentation/` 分层，经 `services/api/domain` 通信。
 
-> 废弃/归档清单：`backend/_deprecated/`（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 整引擎归档，不参与 import 链，详见该目录 README）；`backend/_deprecated/docs/`（对应废弃引擎的设计文档归档）。其余历史误标（`models_generation_task.py`、`services/` 空壳目录、`rag/tests/`、`state_machine/`、`PROXY_URL`/`DISABLE_PROXY`、pywebview/`app.py` 等）均已随代码清理删除，不再存在。
+> 废弃/归档清单：`backend/_deprecated/`（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / **BS-ADF（2026-08-19，含路由 `routes/bsadf_route.py` 与 schema `schemas/bsadf_schema.py`）**整引擎归档，不参与 import 链，详见该目录 README）；`backend/_deprecated/docs/`（对应废弃引擎的设计文档归档）。其余历史误标（`models_generation_task.py`、`services/` 空壳目录、`rag/tests/`、`state_machine/`、`PROXY_URL`/`DISABLE_PROXY`、pywebview/`app.py` 等）均已随代码清理删除，不再存在。
