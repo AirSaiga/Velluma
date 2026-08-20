@@ -52,7 +52,13 @@ export async function requestJson<T = any>(path: string, options: FetchOptions =
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: '请求失败' }))
-      throw new Error(error.detail || '请求失败')
+      // 设计意图：把 HTTP status 挂到错误对象上——消费方（如 useChapterSpine 的
+      // e?.status === 422 校验劝阻分支）依赖它分流，此前 throw new Error 不带
+      // status 导致该判断恒假。message 文本保持不变，防既有消息匹配逻辑
+      // （如 /422|锚点/ 正则兜底）受影响。
+      const err = new Error(error.detail || '请求失败') as Error & { status?: number }
+      err.status = response.status
+      throw err
     }
 
     if (response.status === 204) {

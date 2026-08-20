@@ -49,6 +49,10 @@ let suppressAutosave = false
 
 export function useChapterSpine() {
   async function load(chapterId: string) {
+    // 切章竞态保险一：撤销在途防抖定时器——否则旧回调闭包携带 A 章 spine，
+    // 而 save() 读「此刻」currentChapterId（已切到 B），A 数据会整包写到 B 章。
+    // 设计取舍：不在切章前 flush 旧章在途编辑，丢弃 <2s 编辑是最小代价
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
     currentChapterId = chapterId
     spine.value = null
     spineSuggestions.value = null
@@ -67,6 +71,8 @@ export function useChapterSpine() {
   }
 
   function unload() {
+    // 切章竞态保险一（与 load 同款）：卸载前撤销在途防抖定时器
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
     currentChapterId = null
     spine.value = null
     spineSuggestions.value = null
@@ -76,10 +82,19 @@ export function useChapterSpine() {
 
   async function save(patch: { intent?: ChapterSpine['intent'] | null; anchors?: SpineAnchor[] | null }) {
     if (!currentChapterId) return
+    // 发请求前快照：watcher 传的 {...val} 是浅拷贝但深层同引用，序列化一致，
+    // 回包后与本地整对象比对即可判断深层是否被再次编辑（意图输入/心跳回写 hit）
+    const sent = JSON.stringify(patch)
     try {
       const r = await adaptiveApi.patchSpine(currentChapterId, patch)
       suppressAutosave = true
-      spine.value = r.spine
+      // 仅当本地未被再次修改时才接受服务器值，防 PATCH 往返期间在途编辑被
+      // 整包替换静默回滚；r.spine=null（后端「全空归 null」契约）直接赋值——
+      // removeAnchor 主动清库传的是局部 patch {anchors:[]}，与本地整对象序列化
+      // 天然不等，靠 null 直赋兜底（本地随即也置 null，语义一致）
+      if (r.spine === null || (spine.value && JSON.stringify(spine.value) === sent)) {
+        spine.value = r.spine
+      }
       // nextTick 后恢复自动保存（赋值本身不该再触发一轮）
       setTimeout(() => { suppressAutosave = false }, 0)
     } catch (e: any) {
@@ -152,11 +167,17 @@ export function useChapterSpine() {
     if (patch.status === 'dropped') logCollabEvent(currentChapterId, 'spine_anchor_drop')
   }
 
-  function removeAnchor(id: string) {
+  async function removeAnchor(id: string) {
     const s = spine.value
     if (!s?.anchors) return
     s.anchors = s.anchors.filter((a) => a.id !== id)
-    if (!s.intent?.text && !s.anchors.length) spine.value = null  // 全空 = 无脉络
+    if (!s.intent?.text && !s.anchors.length) {
+      // 删空且无意图 → 置 null 前主动清库：watcher 对 !val 早退，不主动 save
+      // 则服务端旧 spine 永久残留（后端「全空归 null」契约落 null）。
+      // 保存失败也照旧本地置 null——本地清空优先，重载复活与现状同，不额外处理
+      await save({ anchors: [] }).catch(() => {})
+      spine.value = null  // 全空 = 无脉络
+    }
     logCollabEvent(currentChapterId, 'spine_anchor_remove')
   }
 
@@ -177,9 +198,15 @@ export function useChapterSpine() {
   watch(spine, (val) => {
     if (suppressAutosave || !currentChapterId || !val) return
     if (saveTimer) clearTimeout(saveTimer)
+    // 切章竞态保险二：捕获调度时的章 id，回调发现已切章则丢弃过期闭包
+    // （load/unload 的 clearTimeout 是第一道；此为兜底，防绕过两者的路径）
+    const cid = currentChapterId
     saveTimer = setTimeout(() => {
       saveTimer = null
-      void save({ ...val })
+      if (currentChapterId !== cid) return
+      // 防抖路径静默吞异常（422 时无 unhandled rejection）；
+      // adoptSuggestion/removeAnchor 等显式调用方的 throw 语义不变
+      void save({ ...val }).catch(() => {})
     }, 2000)
   }, { deep: true })
 
