@@ -63,13 +63,35 @@ from backend.services.llm.proxy import get_active_proxy as _get_active_proxy
 
 logger = logging.getLogger(__name__)
 
+# SQLite 方言一次性警告标志：首次因方言短路返回 False 时提示一次（防高频调用刷屏）
+_SQLITE_VECTOR_WARNED = False
+
 
 def is_embedding_configured() -> bool:
     """embedding 是否已配置（有效连接含 api_key）。
 
     记忆流路由开关：配置 → 向量召回增强（专业级）；未配置 → 结构化+词法默认流
     （recall.py）。纯读 model_config.json，无副作用。
+
+    方言门控：向量流（检索 cosine_distance + 写入 embedding 列）依赖 pgvector，
+    为 PG 专有——SQLite 默认后端下即使配置了 embedding，检索层也会报
+    `near ">": syntax error`（recall/style 检索静默降级、/samples/search 500）。
+    故 SQLite 下一律视为未配置：词法默认流不受影响，写入侧也不再产出
+    永远查不到的向量。
     """
+    global _SQLITE_VECTOR_WARNED
+    # 函数内延迟 import：backend.database 只依赖 sqlalchemy/dotenv，不反向
+    # import services.llm（无循环），延迟仅为隔离模块加载时序、稳妥起见
+    from backend.database import USE_SQLITE
+
+    if USE_SQLITE:
+        if not _SQLITE_VECTOR_WARNED:
+            logger.warning(
+                "SQLite 后端不支持向量记忆（pgvector 为 PG 专有），embedding 配置暂不生效；"
+                "词法默认流不受影响，切 PG（显式设 DATABASE_URL）可启用向量流"
+            )
+            _SQLITE_VECTOR_WARNED = True
+        return False
     return bool(get_embedding_connection().get("api_key"))
 
 
