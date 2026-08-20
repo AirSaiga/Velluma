@@ -169,7 +169,10 @@ async def upsert_book_style_card(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    fields = payload.model_dump(exclude={"chapter_id"}, exclude_none=True)
+    # exclude_unset 而非 exclude_none：前端 StyleView 总是全量发送，显式 null
+    # 是「清除」语义（如 dialogue_ratio_target=null 拨回「自动」档）——
+    # exclude_none 会把 null 键丢掉，DB 旧值复活（「自动」档清不掉事故）
+    fields = payload.model_dump(exclude={"chapter_id"}, exclude_unset=True)
     chapter_id = payload.chapter_id
 
     if chapter_id is None:
@@ -304,14 +307,26 @@ async def search_author_samples(
         raise HTTPException(status_code=500, detail=f"查询向量化失败: {e}")
 
     if not query_embedding:
-        raise HTTPException(status_code=500, detail="查询向量化返回空")
+        # 未配置 embedding 时 get_embedding 静默返回空——给人话而非裸 500
+        raise HTTPException(
+            status_code=409,
+            detail="向量检索不可用（未配置 embedding 或当前 SQLite 后端不支持——专业级向量记忆需 PostgreSQL）",
+        )
 
-    hits = await repo.search_by_style(
-        embedding=query_embedding,
-        book_id=book_id,
-        scene_type=payload.scene_type,
-        limit=payload.limit,
-    )
+    try:
+        hits = await repo.search_by_style(
+            embedding=query_embedding,
+            book_id=book_id,
+            scene_type=payload.scene_type,
+            limit=payload.limit,
+        )
+    except Exception as e:
+        # SQLite 方言下 cosine_distance 编译失败等——记内部日志，对外只回人话
+        logger.error(f"[AuthorSample] 向量检索执行失败: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=409,
+            detail="向量检索不可用（未配置 embedding 或当前 SQLite 后端不支持——专业级向量记忆需 PostgreSQL）",
+        )
     return [
         AuthorSampleSearchHit(
             sample=AuthorSampleResponse.model_validate(sample),
@@ -327,6 +342,17 @@ async def search_author_samples(
 
 # 语料聚合上限：防极端大样本库拖慢请求（拼接后整体测量，见 aggregate_corpus）
 _CORPUS_MAX_CHARS = 200_000
+
+
+def _plain_text(html: Optional[str]) -> str:
+    """剥 HTML 为纯文本（与 memory_indexing 同口径）。
+
+    画布正文以编辑器 getHTML 落库（content_text 是 HTML），一切「测量」消费
+    （章指纹 / 负面命中 / 章节收编）必须先剥——标签字符混入会污染句长/字数
+    统计，违反「同一把尺子」红线（services/style/fingerprint.py，对拍单测锁定同值）。
+    """
+    plain = re.sub(r"<[^>]+>", "\n", html or "")
+    return re.sub(r"\n{3,}", "\n\n", plain).strip()
 
 
 @router.get("/books/{book_id}/style-fingerprint", response_model=StyleFingerprintResponse)
@@ -377,16 +403,21 @@ async def get_book_style_fingerprint(
         result = await db.execute(query)
         rows = list(result.scalars().all())
         rows.reverse()  # 章 1 → N 的时间序，前端直接画趋势
-        chapters_payload = [
-            {
+        # 「同一把尺子」：content_text 是 HTML，先剥再测（标签字符会污染句长/字数）；
+        # 判空同样按纯文本——空文档落库为 "<p></p>"，HTML 判空会误判为有正文
+        chapters_payload = []
+        chapter_plain_texts: Dict[str, str] = {}
+        for c in rows:
+            plain = _plain_text(c.content_text)
+            if not plain:
+                continue
+            chapters_payload.append({
                 "chapter_id": str(c.id),
                 "chapter_number": c.chapter_number,
                 "title": c.title or c.chapter_name,
-                "fingerprint": compute_text_fingerprint(c.content_text or "", light=True),
-            }
-            for c in rows
-            if (c.content_text or "").strip()
-        ]
+                "fingerprint": compute_text_fingerprint(plain, light=True),
+            })
+            chapter_plain_texts[str(c.id)] = plain
         # 台账化：负面清单各词在近 10 章正文的命中次数（含 0——反向提醒可能不需要该词）
         negative_words = []
         if card and card.negative_list:
@@ -396,10 +427,13 @@ async def get_book_style_fingerprint(
                     if w:
                         negative_words.append(w)
         if negative_words:
+            # 「同一把尺子」：命中计数同样吃纯文本（HTML 标签残留会干扰词边界与口径）
             recent_chapter_texts = [
-                c.content_text for c in rows[-10:] if (c.content_text or "").strip()
+                chapter_plain_texts.get(str(c.id), "") for c in rows[-10:]
             ]
-            negative_hit_counts = count_negative_hits(recent_chapter_texts, negative_words)
+            negative_hit_counts = count_negative_hits(
+                [t for t in recent_chapter_texts if t], negative_words,
+            )
 
     # 指纹写穿缓存：供未来消费方（漂移提醒等）直接取用；读路径仍实时算保新鲜
     if card is not None:
@@ -441,14 +475,10 @@ async def create_samples_from_chapters(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    def _plain_text(html: str) -> str:
-        """画布正文是 HTML（编辑器 getHTML 落库），收编前转纯文本（与 memory_indexing 同口径）。"""
-        plain = re.sub(r"<[^>]+>", "\n", html or "")
-        return re.sub(r"\n{3,}", "\n\n", plain).strip()
-
     def _has_content(c: Chapter) -> bool:
         # 必须按纯文本判空——空文档落库为 "<p></p>"，HTML 判空会误判为有正文
-        return bool(_plain_text(c.content_text or ""))
+        # （_plain_text 已提升为模块级函数：指纹/命中/收编三处测量共用同一剥法）
+        return bool(_plain_text(c.content_text))
 
     base = (
         select(Chapter)
@@ -473,7 +503,7 @@ async def create_samples_from_chapters(
 
     created = []
     for chapter in picked:
-        excerpt = _excerpt_to_sentence_boundary(_plain_text(chapter.content_text or ""), payload.excerpt_chars)
+        excerpt = _excerpt_to_sentence_boundary(_plain_text(chapter.content_text), payload.excerpt_chars)
         if not excerpt:
             continue
         embedding = None
@@ -779,6 +809,8 @@ async def scan_negative(
 
     validator = StyleClicheValidator()
     await validator._ensure_loaded({
+        # db：系统层禁词直查 SystemCliche 表（用户增改的全局禁词进扫描）
+        "db": db,
         "style_blacklist": book.style_blacklist or [],
         "style_negative_list": card_negative,
         # 系统层本书豁免（完整落地批）：扫描同样尊重豁免

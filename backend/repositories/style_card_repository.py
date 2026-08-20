@@ -35,6 +35,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models import StyleCard
 from backend.repositories.base import BaseRepository, QuerySpec
 
+# 可空清除字段：显式传 None = 清除该值（如对话旋钮拨回「自动」档）。
+# 若无此白名单，v is not None 守卫会把清除语义拦下，DB 旧值复活。
+# 其余可空字段（style_knobs/locked_keys）的契约是「None=不改，{}=清空」，不走 null 清除。
+_NULLABLE_CLEAR = {"dialogue_ratio_target", "paragraph_rhythm"}
+
 
 class StyleCardRepository(BaseRepository[StyleCard]):
     """文风卡仓储。"""
@@ -83,8 +88,13 @@ class StyleCardRepository(BaseRepository[StyleCard]):
         existing = await self.get_book_card(book_id)
         if existing:
             for k, v in fields.items():
-                if hasattr(existing, k) and v is not None:
+                if hasattr(existing, k) and (v is not None or k in _NULLABLE_CLEAR):
                     setattr(existing, k, v)
-            return await self.update(existing)
-        card = StyleCard(book_id=book_id, **fields)
-        return await self.create(card)
+            # 设计意图：existing 已在 session 内，setattr 后直接提交即可——
+            # BaseRepository.update(item, payload) 需要第二参 payload，传 ORM 实例必 TypeError
+            await self._db.commit()
+            await self._db.refresh(existing)
+            return existing
+        # 设计意图：BaseRepository.create(payload: dict) 内部 model(**payload)——
+        # 必须传 dict（与 6e6670b 修 AuthorSampleRepository 同款），传 ORM 实例必 TypeError
+        return await self.create({"book_id": book_id, **fields})

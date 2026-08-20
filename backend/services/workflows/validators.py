@@ -71,7 +71,12 @@ class StyleClicheValidator(BaseValidator):
                 exemptions = {str(p) for p in raw_exemptions if p}
         try:
             from backend.services.style.cliche_provider import get_active_cliches
-            system_cliches = await get_active_cliches(db=None)  # 走缓存或种子降级
+            # 系统层直查 DB（use_cache=False，禁词量级小，单表查询开销可忽略）：
+            # 旧路径 db=None 永远只回种子降级，用户在 /system/cliches 增改的禁词
+            # 从不进审计/扫描。调用方经 context["db"] 传入 AsyncSession（路由与
+            # ClichéAuditor 均已接）；无 db 时维持种子降级（行为不变）。
+            db_session = context.get("db") if context else None
+            system_cliches = await get_active_cliches(db=db_session, use_cache=False)
             for item in system_cliches:
                 if item.get("pattern", "") in exemptions:
                     continue

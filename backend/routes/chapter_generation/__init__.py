@@ -403,6 +403,9 @@ async def _execute_dual_layer_audit(
 
     # 构造代码级审计 context（与 code_auditors 契约对齐）
     code_ctx = {
+        # db：ClichéAuditor → StyleClicheValidator 系统层禁词直查 SystemCliche 表
+        # （用户在 /system/cliches 增改的禁词由此进审计；无此键时降级种子）
+        "db": db,
         "book": {
             "style_blacklist": getattr(ctx["book"], "style_blacklist", []) if ctx["book"] else [],
             "core_motifs_taboos": getattr(ctx["book"], "core_motifs_taboos", "") if ctx["book"] else "",

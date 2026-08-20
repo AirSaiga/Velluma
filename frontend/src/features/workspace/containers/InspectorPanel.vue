@@ -272,7 +272,10 @@ watch(selectedChapterId, async (chapterId) => {
   if (!chapterId || !bookId) return
   chapterStyleLoading.value = true
   try {
-    chapterStyleOverride.value = await styleApi.get(bookId, chapterId).catch(() => null)
+    const card = await styleApi.get(bookId, chapterId).catch(() => null)
+    // 后端无章级覆盖时回退返回书级卡（回退是特性）——
+    // 判「本章有特例」必须看 chapter_id 非空，否则书级卡会被误报成章级特例
+    chapterStyleOverride.value = card?.chapter_id ? card : null
   } finally {
     chapterStyleLoading.value = false
   }

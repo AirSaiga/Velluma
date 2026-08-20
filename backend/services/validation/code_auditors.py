@@ -201,6 +201,9 @@ class ClichéAuditor(BaseAuditor):
         validator = StyleClicheValidator()
         # 预填 context 字段（StyleClicheValidator 在 _ensure_loaded 时读取）
         load_context = {
+            # db：系统层禁词直查 SystemCliche 表（审计上下文由路由注入会话；
+            # 无 db 时 StyleClicheValidator 降级种子，行为不变）
+            "db": context.get("db"),
             "style_blacklist": _get_book_attr(context, "style_blacklist", []),
             "style_negative_list": _get_style_card_attr(context, "negative_list", []),
             # 系统层本书豁免（完整落地批）：三层合并时剔除被豁免的系统陈词

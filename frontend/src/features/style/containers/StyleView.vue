@@ -478,7 +478,9 @@ async function switchScope(chapterId: string) {
   }
   scopeChapterId.value = chapterId
   const card = await styleApi.get(bookId, chapterId).catch(() => null)
-  scopeHasOverride.value = !!card
+  // 后端无章级覆盖时回退返回书级卡（回退是特性，编辑基底正是书级值）——
+  // 「已有特例」标记必须看 chapter_id 非空，书级卡不算特例
+  scopeHasOverride.value = !!card?.chapter_id
   applyCardToFields(card)
 }
 
