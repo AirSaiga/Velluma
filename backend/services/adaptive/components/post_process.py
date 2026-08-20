@@ -116,8 +116,14 @@ async def _llm_critique(text: str, bundle) -> Dict:
         # 审阅深度不足。
         model_type="reasoning", temperature=0.3, max_tokens=2000,
     )
-    from backend.services.adaptive.observing import get_adaptive_recorder
-    get_adaptive_recorder(str(bundle.chapter_id or "")).record_result(
-        "adaptive.post_process.critique", result, model_slot="reasoning")
+    # 观测记账：chapter_id 为空时跳过——get_adaptive_recorder("") 会在全局注册表
+    # 创建 _RECORDERS[""] 孤儿（无章节归属，任何端点的 flush 都按 chapter_id 找
+    # 不到它，永不冲账）。丢一条 critique 记账可接受（本就是异常场景），LLM 调用
+    # 结果本身不受影响。
+    recorder_chapter_id = str(bundle.chapter_id or "")
+    if recorder_chapter_id:
+        from backend.services.adaptive.observing import get_adaptive_recorder
+        get_adaptive_recorder(recorder_chapter_id).record_result(
+            "adaptive.post_process.critique", result, model_slot="reasoning")
     from backend.services.utils.json_safe import parse_json_safe
     return parse_json_safe(result.content or "") or {"verdict": "unknown"}

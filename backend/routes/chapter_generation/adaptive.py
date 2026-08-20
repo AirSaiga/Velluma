@@ -20,6 +20,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -300,9 +302,48 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
         logger.debug(f"[adaptive/spine] 进度判定失败（不阻塞心跳）: {e}")
 
     if changed:
-        chapter.spine = {**(spine or {}), "anchors": anchors}
+        # 防并发 PATCH 整包覆盖：commit 前重读，hit 只前进。
+        # spine 在本函数开头读入，判 hit 期间作者侧防抖 PATCH /adaptive/spine 可能
+        # 已落库（改意图/增删锚点/划掉锚点）——直接把「旧快照+hit」整包写回会静默
+        # 回滚作者的编辑。这里先结束当前读事务再 refresh 整行拿最新 spine，把已判
+        # hit 的锚点（按 id 匹配、仅 pending→hit 单向，不碰其他字段）应用到新鲜
+        # anchors 上再整体写回：作者的编辑保留，hit 迁移不丢。
+        # refresh/commit 异常沿用现状语义：debug 吞掉，绝不阻塞心跳返回（此时
+        # progress 仍用本地 anchors 组装，hit 只是不落库、下轮重判）。
         try:
+            # 先 commit 结束本会话至今的读事务（本会话到此只读，无写入副作用）——
+            # 防 SQLite WAL/PG 快照语义下 refresh 仍读到旧事务快照
             await db.commit()
+            await db.refresh(chapter)  # 同 session 强制重 SELECT 整行
+            fresh_spine = chapter.spine if isinstance(chapter.spine, dict) else {}
+            # 逐锚点浅拷贝（dict(a)），两个目的：
+            # ① JSONB 列无 mutable 追踪——直接改 ORM 值对象内层 dict 不会产生脏标记，
+            #    且 SQLAlchemy 标量属性按「值相等」判变更，共享内层 dict 会让
+            #    改写后的新包与 committed 值判等 → flush 静默跳过 UPDATE（实测踩坑）；
+            # ② 新旧值可区分，保证整体赋值一定被识别为变更、落库一定发生。
+            fresh_anchors = [
+                dict(a) if isinstance(a, dict) else a
+                for a in (fresh_spine.get("anchors") or [])
+            ]
+            if fresh_anchors:
+                hit_ids = {
+                    a.get("id") for a in anchors
+                    if isinstance(a, dict) and a.get("status") == "hit" and a.get("id")
+                }
+                for fa in fresh_anchors:
+                    if (
+                        isinstance(fa, dict) and fa.get("id")
+                        and fa.get("id") in hit_ids and fa.get("status") == "pending"
+                    ):
+                        fa["status"] = "hit"
+                chapter.spine = {**fresh_spine, "anchors": fresh_anchors}
+                await db.commit()
+            else:
+                # 作者已清空锚点（编辑权在作者）：无 hit 可迁移，不回写防污染
+                pass
+            # 局部变量同步到新鲜值：后续 progress 组装（intent/锚点清单）以最新为准
+            spine = fresh_spine or None
+            anchors = fresh_anchors
         except Exception as e:
             logger.debug(f"[adaptive/spine] 进度写库失败（不阻塞心跳）: {e}")
 
@@ -331,7 +372,11 @@ async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Opt
     """
     if chapter is None:
         return None
-    content = getattr(chapter, "content_text", "") or ""
+    # 同一把尺子红线：content_text 是 HTML（编辑器 getHTML 落库），测量前必须
+    # 先剥——与文风页章指纹/负面命中/章节收编同一剥法（routes/style._plain_text）
+    from backend.routes.style import _plain_text
+
+    content = _plain_text(getattr(chapter, "content_text", "") or "")
     cache_key = str(chapter.id)
     cached = _STYLE_HINT_CACHE.get(cache_key)
     if cached is not None and cached[0] == len(content):
@@ -713,7 +758,22 @@ async def fix_sentence(
     sentence = request.sentence.strip()
     content = chapter.content_text or ""
     if not sentence or sentence not in content:
-        raise HTTPException(status_code=409, detail="未在当前正文找到该句（正文可能已改动，请重新审计）")
+        # 同源兜底：审计的 full_text 优先由世界模型 facts 拼接（post_process.
+        # _get_full_text），此前只匹配 chapter.content_text → 两源不一致时未改正
+        # 文也 409（假阳性）。orchestrator 无常驻 model_snapshot 属性（快照每次经
+        # WorldModelRepository 现查，on_finish 亦如此），故这里与审计同源现查一次
+        # 再匹配；命中即放行——后续 repair 只用 sentence 本身，不需要 full_text。
+        # 快照缺失/异常仍走原 409（正文确实没有这句）。
+        facts_text = ""
+        try:
+            snap = await WorldModelRepository(db).snapshot(chapter_id)
+            facts_text = "\n\n".join(
+                f.get("text", "") for f in snap.get("facts", []) if f.get("text")
+            )
+        except Exception as e:
+            logger.debug(f"[adaptive/fix-sentence] 世界模型快照兜底失败: {e}")
+        if not sentence or sentence not in facts_text:
+            raise HTTPException(status_code=409, detail="未在当前正文找到该句（正文可能已改动，请重新审计）")
 
     from backend.services.workflows.sentence_integrity import repair_single_defect
     defect = {
@@ -907,7 +967,24 @@ async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
 #   spine_suggest_adopt {part} / spine_suggest_discard（P1.4 章级谋篇）
 # ============================================================
 
-_COLLAB_EVENTS_FILE = "data/collab_events.jsonl"
+# 埋点文件路径锚定项目根（与 backend/database.py 的 _sqlite_db_path 同款推导）：
+# 相对路径 "data/…" 会随服务启动 CWD 漂移（不同目录启动各写一份）。惰性函数而非
+# 模块常量——尊重 VELLUMA_DATA_DIR 运行时覆盖（打包/便携场景启动后才注入）。
+# 注：本文件位于 backend/routes/chapter_generation/，上三级即项目根。
+_COLLAB_EVENTS_MAX_BYTES = 5 * 1024 * 1024  # 单文件 5MB 上限：超出轮转一份（个人镜子只需近期数据）
+
+
+def _collab_events_path() -> Path:
+    """协作埋点 JSONL 路径（<data>/collab_events.jsonl，锚定项目根不随 CWD 漂移）。"""
+    root = Path(__file__).resolve().parents[3]
+    data_dir = Path(os.getenv("VELLUMA_DATA_DIR") or (root / "data"))
+    return data_dir / "collab_events.jsonl"
+
+
+def _collab_events_rotated_path() -> Path:
+    """轮转文件路径（collab_events.jsonl.1，写侧超限时当前文件 rename 过来）。"""
+    base = _collab_events_path()
+    return base.with_name(base.name + ".1")
 
 
 class CollabEventRequest(BaseModel):
@@ -916,14 +993,25 @@ class CollabEventRequest(BaseModel):
 
 
 def _append_collab_event(book_id: str, chapter_id: str, kind: str, detail: Dict) -> None:
-    """追加事件到本地 JSONL（失败静默——埋点绝不阻塞业务）。"""
+    """追加事件到本地 JSONL（失败静默——埋点绝不阻塞业务）。
+
+    无界增长防护：追加前检查当前文件超 5MB 则先轮转（当前 → .1，覆盖旧 .1——
+    单文件曾承载所有书所有章，不轮转会无限膨胀且 summary 全文件逐行扫越扫越慢）。
+    读侧 summary 对称读两份。轮转自身失败随外层静默契约吞掉（继续追加原文件）。
+    """
     import json as _json
     from datetime import datetime, timezone as _tz
-    from pathlib import Path as _Path
 
     try:
-        path = _Path(_COLLAB_EVENTS_FILE)
+        path = _collab_events_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if path.exists() and path.stat().st_size > _COLLAB_EVENTS_MAX_BYTES:
+                rotated = _collab_events_rotated_path()
+                rotated.unlink(missing_ok=True)  # Windows 下 rename 目标存在会报错，先清位
+                path.rename(rotated)
+        except Exception as e:
+            logger.debug(f"[CollabEvent] 轮转失败（继续追加原文件）: {e}")
         with path.open("a", encoding="utf-8") as f:
             f.write(_json.dumps({
                 "ts": datetime.now(_tz.utc).isoformat(),
@@ -961,7 +1049,6 @@ async def collab_events_summary(
     """协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊的采纳率——P0 出口标准）。"""
     import json as _json
     from collections import Counter as _Counter
-    from pathlib import Path as _Path
 
     book_id = ""
     try:
@@ -972,22 +1059,32 @@ async def collab_events_summary(
         pass
 
     counts: Dict = _Counter()
+    # quick_note 的 action 拆分计数（独立于 counts）：前端同 kind 发 commit/undo
+    # 两种 action，quick_note_commit 出口只应计入落账动作。不并入 counts——
+    # total/by_kind 保持纯 kind 口径（insights「协作」面板消费 by_kind['quick_note']
+    # 总数，并入会双计 total 且污染 by_kind）。
+    quick_note_actions: Dict = _Counter()
     encounter_cards = 0
     encounter_bursts = 0
     try:
-        path = _Path(_COLLAB_EVENTS_FILE)
-        if path.exists():
+        # 读侧与写侧轮转对称：当前文件 + 单份 .1 轮转（两次 open 复用同一段逐行统计）
+        for path in (_collab_events_path(), _collab_events_rotated_path()):
+            if not path.exists():
+                continue
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         ev = _json.loads(line)
                         if ev.get("chapter_id") == chapter_id:
-                            counts[ev.get("kind", "?")] += 1
+                            kind = ev.get("kind", "?")
+                            counts[kind] += 1
                             detail = ev.get("detail") or {}
+                            if kind == "quick_note":
+                                quick_note_actions[detail.get("action") or "commit"] += 1
                             # W5 桥验证指标：地图来源卡的亮出/连写（roadmap §3.2）
-                            if ev.get("kind") == "cards_delivered":
+                            if kind == "cards_delivered":
                                 encounter_cards += int(detail.get("encounter_count") or 0)
-                            elif ev.get("kind") == "card_burst" and detail.get("from_encounter"):
+                            elif kind == "card_burst" and detail.get("from_encounter"):
                                 encounter_bursts += 1
                     except Exception:
                         continue
@@ -1006,6 +1103,7 @@ async def collab_events_summary(
         "card_burst_rate": _rate("card_burst", "cards_delivered"),
         "ghost_adopt_rate": _rate("ghost_adopt", "ghost_request"),
         "capsule_expand_count": counts.get("capsule_expand", 0),
-        "quick_note_commit": counts.get("quick_note", 0),
+        # 只含 action=='commit'（世界速记落账）；undo 不计（防误计拉高采纳面貌）
+        "quick_note_commit": quick_note_actions.get("commit", 0),
         "encounter_card_burst_rate": round(encounter_bursts / encounter_cards, 3) if encounter_cards > 0 else None,
     }
