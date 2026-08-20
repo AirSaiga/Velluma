@@ -258,6 +258,8 @@ function createLoadingWindow() {
 <html>
 <head>
   <meta charset="UTF-8">
+  <!-- data: URL 无响应头可注 CSP，meta 兜底——纯静态 loading 页只放行内联样式 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -346,7 +348,9 @@ async function createMainWindow() {
         callback({
           responseHeaders: {
             ...details.responseHeaders,
-            'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
+            // script-src 不含 unsafe-eval/unsafe-inline：Vite dev 走原生 ESM + ws HMR，
+            // 均不需要二者；保留会触发 Electron 的 Insecure CSP 安全警告
+            'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
           }
         })
       })
