@@ -222,14 +222,17 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
         if profile is None:
             continue
         fields = profile.model_dump(exclude_none=True)
-        if not fields.get("api_key"):
-            fields.pop("api_key", None)  # 空 Key 视为保持不变
+        # 空 Key 或掩码回显值（GET 只回掩码，前端原样回传）都视为保持不变——
+        # 掩码是 truthy，旧条件拦不住，会把 "sk-1a****xyz" 当真 Key 覆盖落盘
+        if not fields.get("api_key") or "****" in str(fields.get("api_key")):
+            fields.pop("api_key", None)
         if fields:
             update_llm_profile(role, fields)
 
     if update.embedding is not None:
         fields = update.embedding.model_dump(exclude_none=True)
-        if not fields.get("api_key"):
+        # 掩码回显防御同上（embedding Key 同样只以掩码形态回显）
+        if not fields.get("api_key") or "****" in str(fields.get("api_key")):
             fields.pop("api_key", None)
         if fields:
             update_embedding_config(fields)
