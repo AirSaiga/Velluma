@@ -1265,8 +1265,6 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         </button>
       </template>
     </ModalShell>
-  </div>
-
     <!-- D4 比例尺标定·选档卡（拉线完成弹出：这段路相当于？） -->
     <Teleport to="body">
       <div v-if="calibDialog" class="calib-backdrop" @click.self="calibDialog = null">
@@ -1290,7 +1288,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         </div>
       </div>
     </Teleport>
-
+  </div>
 </template>
 
 <style scoped>
