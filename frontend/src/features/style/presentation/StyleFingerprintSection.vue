@@ -134,7 +134,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
       </p>
     </header>
 
-    <div v-if="!hasCorpus" class="empty-note">尚无语料——在「你的字」里贴入样本后，这里会长出你的句长分布。</div>
+    <div v-if="!hasCorpus" class="empty-note">还没有样本——在「你的字」里贴入样本后，这里会长出你的句长分布。</div>
 
     <template v-else>
       <!-- 句长分布直方图：第一个「原来我写字长这样」时刻 -->

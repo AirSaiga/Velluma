@@ -401,7 +401,7 @@ async function runExtract(validSamples: string[]) {
   try {
     const result = await styleApi.extract(bookId, validSamples, (currentBook.value?.genre as string) || undefined)
     if (result.degraded) {
-      showToast(`提炼降级：${result.degraded.reason}（已用题材默认画像）`, 'warning')
+      showToast(`提炼没成，先用题材默认画像：${result.degraded.reason}`, 'warning')
     } else {
       showToast('文风画像提炼完成', 'success')
     }
@@ -698,7 +698,7 @@ const anchors = [
   { id: 'style-sec-samples', label: '你的字' },
   { id: 'style-sec-fingerprint', label: '笔迹指纹' },
   { id: 'style-sec-negative', label: '负面清单' },
-  { id: 'style-sec-recon', label: '对账' },
+  { id: 'style-sec-recon', label: '逐章核对' },
 ]
 
 function scrollToSection(id: string) {
@@ -865,7 +865,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 
             <!-- 第二幕长成预告：数据再长一点，这些分区会展开 -->
             <div v-else class="grow-teaser">
-              负面清单 · 意图旋钮 · 对账 —— 再贴 {{ Math.max(0, 3 - samples.length) }} 条样本，这些分区会在这里长出来
+              负面清单 · 意图旋钮 · 逐章核对 —— 再贴 {{ Math.max(0, 3 - samples.length) }} 条样本，这些分区会在这里长出来
             </div>
           </template>
         </template>

@@ -88,7 +88,7 @@ function saveEdit(sample: AuthorSample) {
     <!-- 零状态 hero：整页只有一个邀请（设计稿 §6.3 第一幕） -->
     <div v-if="ramp" class="ramp-hero">
       <h2 class="hero-title">贴一段你写过的字</h2>
-      <p class="hero-sub">这是文风的事实源——指纹、画像、负面清单，都从这里长出来。</p>
+      <p class="hero-sub">你的文风以这里为准——指纹、画像、负面清单，都从这里长出来。</p>
       <textarea
         v-model="newSampleContent"
         rows="9"
@@ -116,7 +116,7 @@ function saveEdit(sample: AuthorSample) {
       <header class="sec-head">
         <h2 class="sec-title">你的字</h2>
         <p class="sec-sub">
-          贴一段你写过的文字——这是文风的事实源，指纹与画像都从这里长出来。
+          贴一段你写过的文字——你的文风以这里为准，指纹与画像都从这里长出来。
         </p>
       </header>
 
@@ -133,7 +133,7 @@ function saveEdit(sample: AuthorSample) {
           <select v-model="newSampleSceneType" class="scene-select">
             <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
           </select>
-          <select v-model="newSampleEra" class="scene-select" title="近期样本进语料聚合与检索；早期只存档">
+          <select v-model="newSampleEra" class="scene-select" title="近期的样本参与统计和检索；早期的只存档">
             <option value="recent">近期</option>
             <option value="early">早期</option>
           </select>
@@ -152,7 +152,7 @@ function saveEdit(sample: AuthorSample) {
             v-if="goldenCount && goldenCount > 0"
             class="btn-ghost"
             :disabled="busy"
-            :title="`把本书已有的 ${goldenCount} 条黄金片段导入样本库（few-shot 与指纹语料）`"
+            :title="`把本书已有的 ${goldenCount} 条黄金片段导入样本库（AI 照着范例学，也进统计）`"
             @click="emit('importGolden')"
           >导入黄金片段（{{ goldenCount }}）</button>
           <span v-else class="upload-hint">Ctrl+Enter 快速存入</span>
@@ -171,19 +171,19 @@ function saveEdit(sample: AuthorSample) {
             <button
               class="fav-btn"
               :class="{ active: sample.favorite }"
-              :title="sample.favorite ? '取消收藏（检索兜底将不再优先）' : '收藏：检索兜底流优先取这条'"
+              :title="sample.favorite ? '取消收藏（AI 找范例时不再优先带这条）' : '收藏：AI 找范例时优先带这条'"
               @click="emit('update-sample', sample.id, { favorite: !sample.favorite })"
             >{{ sample.favorite ? '★' : '☆' }}</button>
             <select
               class="badge badge-scene scene-edit"
-              title="场景类型（语料聚合与检索按此分类）"
+              title="场景类型（统计与检索按此分类）"
               :value="sample.scene_type"
               @change="emit('update-sample', sample.id, { scene_type: ($event.target as HTMLSelectElement).value as AuthorSampleSceneType })"
             >
               <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
             </select>
             <span v-if="sample.source !== 'manual'" class="badge badge-source">{{ sourceLabels[sample.source] || sample.source }}</span>
-            <span v-if="sample.era === 'early'" class="badge badge-early" title="早期样本只存档，不进语料聚合">早期</span>
+            <span v-if="sample.era === 'early'" class="badge badge-early" title="早期样本只存档，不参与统计">早期</span>
             <span class="sample-chips">
               <template v-if="fingerprintBySample[sample.id]">
                 <span class="chip">句均 {{ fingerprintBySample[sample.id].sentence_len_mean }} 字</span>
@@ -227,7 +227,7 @@ function saveEdit(sample: AuthorSample) {
           <p v-else class="sample-content">{{ sample.content }}</p>
 
           <div v-if="editingId !== sample.id" class="sample-foot">
-            <span v-if="sample.era === 'early'" class="muted-foot">早期样本不进语料聚合——若仍代表现在的你，可切回近期</span>
+            <span v-if="sample.era === 'early'" class="muted-foot">早期样本不参与统计——若仍代表现在的你，可切回近期</span>
             <button
               class="era-toggle"
               @click="emit('update-sample', sample.id, { era: sample.era === 'early' ? 'recent' : 'early' })"

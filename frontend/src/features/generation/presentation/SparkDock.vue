@@ -103,7 +103,7 @@ function onBurstEntry() {
             >期待</span>
             {{ part.icon }} {{ part.text }}
           </span>
-          <span class="spark-dock__hint">Space 缝合 · Esc 清空</span>
+          <span class="spark-dock__hint">Space 接着写 · Esc 清空</span>
         </div>
       </div>
     </Transition>

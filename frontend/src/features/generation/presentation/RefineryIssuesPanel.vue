@@ -144,7 +144,7 @@ function handleConfirm() {
       <button class="btn-mini" @click="confirmAll">全部确认</button>
       <button class="btn-mini" @click="ignoreAll">全部否决</button>
       <button class="btn-mini" @click="showCustomForm = !showCustomForm">+ 补充问题</button>
-      <button class="btn-mini canon-btn" @click="emit('edit-canon')">前往 Canon 补设定</button>
+      <button class="btn-mini canon-btn" @click="emit('edit-canon')">去世界页补设定</button>
     </div>
 
     <div v-if="showCustomForm" class="custom-form">

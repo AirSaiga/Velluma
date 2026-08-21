@@ -437,7 +437,7 @@ async function acceptCand(c: { id: string; source?: string; draft?: { summary?: 
     if (isCanon) {
       // C3 分流：canon 候选转正建真相节点——刷新真相账本与候选列表，不动事件推演
       window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
-      showToast(`已记入真相：${c.draft?.label || '新条目'}（草识——去真相抽屉核实）`, 'success')
+      showToast(`已记入真相：${c.draft?.label || '新条目'}（草稿——记得去真相抽屉核实）`, 'success')
     } else {
       await load(bookId.value) // 转正进入推演：事件/状态全量刷新
       showToast(`已入账：${c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')}`, 'success')
@@ -953,12 +953,12 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
               <div class="sc-body">
                 <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')) }}</span>
                 <span class="sc-badge">
-                  <template v-if="c.source === 'canon_extract'">◉ 正史候选 · 草识</template>
+                  <template v-if="c.source === 'canon_extract'">◉ 真相候选 · 待核实</template>
                   <template v-else>{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ formatTime(c.draft?.time_start || 0) }}</template>
                 </span>
               </div>
               <div class="sc-actions">
-                <button class="sc-act" :title="c.source === 'canon_extract' ? '记入真相账本（草识，去核实）' : '转正入账（进入事件推演）'" :disabled="busyCandidateId === c.id" @click.stop="acceptCand(c)">✓</button>
+                <button class="sc-act" :title="c.source === 'canon_extract' ? '记入真相账本（草稿，去核实）' : '采纳入账（进入世界推算）'" :disabled="busyCandidateId === c.id" @click.stop="acceptCand(c)">✓</button>
                 <button class="sc-act sc-act--danger" title="丢弃" :disabled="busyCandidateId === c.id" @click.stop="rejectCand(c)">✗</button>
               </div>
             </li>

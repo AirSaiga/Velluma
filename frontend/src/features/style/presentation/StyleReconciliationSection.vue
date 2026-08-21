@@ -117,7 +117,7 @@ const summary = computed<string[]>(() => {
   // 与语料实测对照：AI 腔在你不知觉时回归的探测器
   const corpusDlg = props.fingerprint?.corpus.dialogue_ratio
   if (corpusDlg !== undefined && Math.abs(avgDlg - corpusDlg) > 0.15) {
-    notes.push(`与你的笔迹差距明显（语料实测对话 ${Math.round(corpusDlg * 100)}%）——值得回头看一眼这几章。`)
+    notes.push(`与你的笔迹差距明显（你的样本实测对话 ${Math.round(corpusDlg * 100)}%）——值得回头看一眼这几章。`)
   }
   return notes
 })
@@ -133,8 +133,8 @@ const rangeLabel = computed(() => {
 <template>
   <section id="style-sec-recon" class="style-section">
     <header class="sec-head">
-      <h2 class="sec-title">对账</h2>
-      <p class="sec-sub">每章实测 vs 目标区间——同一把尺子量你的样本和 AI 的章节，数字可直接互相印证。</p>
+      <h2 class="sec-title">逐章核对</h2>
+      <p class="sec-sub">每章实测和目标区间比一比——同一把尺子量你的样本和 AI 的章节，数字可直接互相印证。</p>
     </header>
 
     <div v-if="chapters.length === 0" class="empty-note">本书还没有章节正文——开始写作后，这里会长出趋势线。</div>

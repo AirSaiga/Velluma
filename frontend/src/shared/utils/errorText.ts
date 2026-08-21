@@ -9,7 +9,7 @@ export function formatGenerationError(raw: string): string {
   const msg = (raw || '').trim()
   if (!msg) return '生成失败，请重试'
   if (/429|rate\s?limit|quota|配额|insufficient/i.test(msg)) {
-    return 'LLM 调用配额已达上限，请稍后重试或检查账户额度'
+    return 'AI 服务额度已用完，请稍后重试或检查账户额度'
   }
   if (/401|403|unauthorized|invalid[_\s]?api[_\s]?key|api[_\s]?key/i.test(msg)) {
     return 'API Key 无效或已过期，请到设置面板检查模型配置'

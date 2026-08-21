@@ -277,7 +277,7 @@ async function remove() {
           @blur="saveCanonText"
         ></textarea>
         <div v-if="node.visibility !== 'public'" class="ctd-warn">
-          ★ 绝不许在正文直接写出——AI 会把它当作隐藏动机影响行为；完稿审计会比对泄密，写作时左缘感知带会提醒。
+          ★ 绝不许在正文直接写出——AI 会把它当作隐藏动机影响行为；完稿体检会比对泄密，写作时左缘感知带会提醒。
         </div>
       </div>
     </section>

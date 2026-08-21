@@ -27,6 +27,38 @@ const router = useRouter()
 const store = useAppStore()
 const sortedChapters = store.sortedChapters
 
+/** 协作埋点 kind → 中文标签（未收录的键原样显示，防新埋点漏映射） */
+const COLLAB_KIND_LABELS: Record<string, string> = {
+  card_burst: '走向卡弹出',
+  cards_delivered: '走向卡送达',
+  dock_delivered: '灵感零件送达',
+  ghost_request: '请求幽灵续写',
+  ghost_adopt: '采纳幽灵稿',
+  ghost_discard: '蒸发幽灵稿',
+  capsule_create: '记细纲胶囊',
+  capsule_expand: '扩写细纲胶囊',
+  quick_note: '世界速记',
+  sentence_fix: '句子修复',
+  context_card: '情境浮卡',
+  slice_mode: '切片读者档切换',
+  branch_resolved: '选定岔路',
+  ignition: 'AI 开头（点火）',
+  ignition_dismiss: '放弃 AI 开头',
+  settle: '沉淀',
+  finish: '完稿体检',
+  spine_intent_set: '定方向一句话',
+  spine_anchor_add: '加锚点',
+  spine_anchor_drop: '划掉锚点',
+  spine_anchor_remove: '删锚点',
+  spine_suggest: '要谋篇建议',
+  spine_suggest_adopt: '收下谋篇建议',
+  spine_suggest_discard: '不用谋篇建议',
+  batch_accept: '批量入账',
+}
+function collabKindLabel(k: string): string {
+  return COLLAB_KIND_LABELS[k] || k
+}
+
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
 watch(
   bookIdFromRoute,
@@ -197,14 +229,14 @@ async function collectClicheCandidates(qr: { chapterId: string; chapterNumber: n
     }
   }
   if (phrases.length === 0) {
-    showToast('这章的审计报告里没有可提取的陈词命中', 'info')
+    showToast('这章的检查报告里没有可提取的陈词命中', 'info')
     return
   }
   try {
     for (const word of phrases.slice(0, 5)) {
       await styleApi.addInboxItem(
         bookId, 'negative_candidate',
-        { word, source_text: `第${qr.chapterNumber}章审计命中` },
+        { word, source_text: `第${qr.chapterNumber}章检查命中` },
         'audit',
       )
     }
@@ -228,9 +260,9 @@ async function rerunQuality(chapterId: string) {
       const chap = sortedChapters.value.find((c) => c.id === chapterId)
       qualityReports.value.push({ chapterId, chapterNumber: chap?.chapter_number ?? 0, report })
     }
-    showToast('质量审计已完成', 'success')
+    showToast('质量检查已完成', 'success')
   } catch (e: any) {
-    showToast(`质量审计失败：${e?.message || '未知错误'}`, 'error')
+    showToast(`质量检查失败：${e?.message || '未知错误'}`, 'error')
   } finally {
     rerunningIds.value.delete(chapterId)
   }
@@ -259,7 +291,7 @@ async function rerunQuality(chapterId: string) {
     <section class="summary-cards">
       <div class="summary-card">
         <span class="summary-num">{{ formatTokens(totalTokens) }}</span>
-        <span class="summary-label">累计 token</span>
+        <span class="summary-label">累计用量</span>
       </div>
       <div class="summary-card">
         <span class="summary-num">{{ totalCost }}</span>
@@ -267,7 +299,7 @@ async function rerunQuality(chapterId: string) {
       </div>
       <div class="summary-card">
         <span class="summary-num">{{ degradedEvents.length }}</span>
-        <span class="summary-label">降级事件</span>
+        <span class="summary-label">兜底记录</span>
       </div>
     </section>
 
@@ -277,7 +309,7 @@ async function rerunQuality(chapterId: string) {
         v-for="p in [
           { k: 'cost', l: '成本' },
           { k: 'quality', l: '质量' },
-          { k: 'degraded', l: '降级事件' },
+          { k: 'degraded', l: '兜底记录' },
           { k: 'collab', l: '协作' },
         ]"
         :key="p.k"
@@ -293,7 +325,7 @@ async function rerunQuality(chapterId: string) {
     <!-- 成本面板 -->
     <section v-else-if="activePanel === 'cost'" class="data-panel">
       <div v-if="costReports.every((r) => !r.report)" class="empty">
-        <p>暂无成本数据。生成章节后，token 消耗会在此汇总。</p>
+        <p>暂无用量数据。生成章节后，AI 的消耗会在此汇总。</p>
       </div>
       <div v-else class="chapter-cost-list">
         <article v-for="cr in costReports.filter((r) => r.report)" :key="cr.chapterId" class="cost-item">
@@ -330,11 +362,11 @@ async function rerunQuality(chapterId: string) {
               <button
                 class="rerun-btn"
                 :disabled="rerunningIds.has(qr.chapterId)"
-                :title="qr.report ? '基于当前正文重新执行双层质量审计' : '本章尚无质量报告，点击触发首次审计'"
+                :title="qr.report ? '基于当前正文重新做一遍质量检查' : '本章尚无质量报告，点击做首次检查'"
                 @click="rerunQuality(qr.chapterId)"
               >
                 <Icon name="arrow-path" :size="12" :class="{ spin: rerunningIds.has(qr.chapterId) }" />
-                <span>{{ rerunningIds.has(qr.chapterId) ? '审计中…' : qr.report ? '重新审计' : '立即审计' }}</span>
+                <span>{{ rerunningIds.has(qr.chapterId) ? '检查中…' : qr.report ? '重新检查' : '立即检查' }}</span>
               </button>
             </div>
           </header>
@@ -363,7 +395,7 @@ async function rerunQuality(chapterId: string) {
     <!-- 降级事件面板 -->
     <section v-else-if="activePanel === 'degraded'" class="data-panel">
       <div v-if="degradedEvents.length === 0" class="empty">
-        <p>无降级事件。所有生成阶段都正常执行。</p>
+        <p>无兜底记录。所有生成阶段都正常执行。</p>
       </div>
       <div v-else class="degraded-list">
         <article v-for="(ev, i) in degradedEvents" :key="i" class="degraded-item">
@@ -442,7 +474,7 @@ async function rerunQuality(chapterId: string) {
         </article>
       </div>
       <p v-else class="usage-empty">
-        AI 消耗：暂无记录。用 AI 辅助写作（心跳感知、Space 续写、沉淀、完稿审计）后，这里会照出每章与每日的 token 账单。
+        AI 消耗：暂无记录。用 AI 辅助写作（AI 揣着方向陪你写、Space 续写、沉淀、完稿体检）后，这里会照出每章与每日的用量。
       </p>
       <div v-if="!collabHasData" class="empty">
         <p>暂无协作数据。在写作台用 AI 辅助写一章（走向卡 / Space 续写 / 细纲胶囊），这里会照出你的采纳习惯。</p>
@@ -473,8 +505,8 @@ async function rerunQuality(chapterId: string) {
               <span class="cost-total">{{ cr.report?.total }} 次协作交互</span>
             </header>
             <div class="stage-bars">
-              <div v-for="(v, k) in cr.report?.by_kind || {}" :key="k" class="stage-bar" :title="`${k}: ${v} 次`">
-                <span class="stage-name">{{ k }}</span>
+              <div v-for="(v, k) in cr.report?.by_kind || {}" :key="k" class="stage-bar" :title="`${collabKindLabel(String(k))}: ${v} 次`">
+                <span class="stage-name">{{ collabKindLabel(String(k)) }}</span>
                 <span class="stage-calls">{{ v }}×</span>
               </div>
             </div>

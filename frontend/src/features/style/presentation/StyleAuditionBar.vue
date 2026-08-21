@@ -72,14 +72,14 @@ function runAB() {
         <button class="btn-ghost" :disabled="anyRunning() || !text.trim()" @click="runAB">
           A/B 对照
         </button>
-        <span class="bar-cost">约 5 秒 · 每次 1 次调用（A/B 为 2 次）</span>
+        <span class="bar-cost">约 5 秒 · 每次 1 次调用（对比试听为 2 次）</span>
       </div>
     </div>
 
     <!-- 结果区：A/B 双栏或单栏 -->
     <div v-if="runs.baseline.text || runs.baseline.running || runs.styled.text || runs.styled.running" class="bar-results">
       <div v-if="runs.baseline.text || runs.baseline.running" class="result-pane pane-baseline">
-        <span class="pane-tag">基线（不注入文风）</span>
+        <span class="pane-tag">对照版（不带你的文风）</span>
         <p class="pane-text">{{ runs.baseline.running ? '生成中…' : runs.baseline.text }}</p>
       </div>
       <div class="result-pane pane-styled">

@@ -43,7 +43,7 @@ describe('futureEventWarning（录入侧警示显隐）', () => {
 
   it('有锚书：超出最大章锚才提示，文案带事件日数', () => {
     const warn = futureEventWarning({ timeStart: 1240, chapterAnchors: [anchored, unanchored] })
-    expect(warn).toBe('此事件晚于当前叙事时刻，未锚定章节的『此刻』将被拉到第 1240 日')
+    expect(warn).toBe('这个事件发生在故事当前时间之后——没定时间的章节，『此刻』会被拉到第 1240 日')
     // 等于/不超出最大锚 → 不提示
     expect(futureEventWarning({ timeStart: 100, chapterAnchors: [anchored, unanchored] })).toBeNull()
     expect(futureEventWarning({ timeStart: 99, chapterAnchors: [anchored, unanchored] })).toBeNull()
@@ -52,7 +52,7 @@ describe('futureEventWarning（录入侧警示显隐）', () => {
   it('无锚书：超出事件流最大时刻（未锚章节的③级基准）才提示', () => {
     expect(
       futureEventWarning({ timeStart: 500, chapterAnchors: [unanchored], maxEventTime: 400 }),
-    ).toBe('此事件晚于当前叙事时刻，未锚定章节的『此刻』将被拉到第 500 日')
+    ).toBe('这个事件发生在故事当前时间之后——没定时间的章节，『此刻』会被拉到第 500 日')
     expect(
       futureEventWarning({ timeStart: 400, chapterAnchors: [unanchored], maxEventTime: 400 }),
     ).toBeNull() // 等于不超出
@@ -64,7 +64,7 @@ describe('futureEventWarning（录入侧警示显隐）', () => {
   it('无锚书且无事件：基准为 0，任何正时刻事件提示（首事件教学场景）', () => {
     expect(
       futureEventWarning({ timeStart: 10, chapterAnchors: [unanchored] }),
-    ).toBe('此事件晚于当前叙事时刻，未锚定章节的『此刻』将被拉到第 10 日')
+    ).toBe('这个事件发生在故事当前时间之后——没定时间的章节，『此刻』会被拉到第 10 日')
   })
 
   it('有锚书优先按最大章锚判（事件流最大时刻不参与）', () => {

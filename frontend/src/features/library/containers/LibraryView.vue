@@ -288,7 +288,7 @@ function openImportModal(book: Book) {
           </div>
           <div class="form-field">
             <label>全局提示词（可选）</label>
-            <textarea v-model="quickForm.global_sys_prompt" rows="2" placeholder="注入 LLM 的全局约束" />
+            <textarea v-model="quickForm.global_sys_prompt" rows="2" placeholder="写给 AI 的全书要求" />
           </div>
           <div class="modal-actions">
             <button class="btn-secondary" @click="showQuickCreate = false">取消</button>

@@ -179,7 +179,7 @@ async function addToGoldenSnippets() {
     })
     styleApi.logStyleEvent(props.bookId, 'golden_to_sample')
     showToast(
-      sample ? '已添加到黄金锚点 · 已汇入文风样本库' : '已添加到黄金锚点（样本库汇入失败）',
+      sample ? '已加入黄金片段 · 已汇入文风样本库' : '已加入黄金片段（样本库汇入失败）',
       sample ? 'success' : 'warning',
       6000,
       sample
@@ -948,7 +948,7 @@ defineExpose({
           @click="addToGoldenSnippets"
           :disabled="!props.bookId || !hasSelection"
           class="px-2 py-1 text-[10px] rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="将选中片段添加到黄金锚点"
+          title="将选中片段加入黄金片段（同时汇入文风样本库）"
         >
           <Icon name="star" :size="12" /> 黄金片段
         </button>

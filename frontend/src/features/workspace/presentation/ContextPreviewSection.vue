@@ -80,7 +80,7 @@ function isHot(b: ContextPreviewBlock): boolean {
       <span>{{ open ? '收起 AI 此刻所见' : 'AI 此刻所见（预览）' }}</span>
       <Icon :name="open ? 'chevron-down' : 'chevron-up'" :size="12" class="ctx-chevron" />
     </button>
-    <p class="ctx-hint">续写时 AI 实际读到的上下文——与真实注入同源，空块即「未配置」。</p>
+    <p class="ctx-hint">AI 续写时真的会读到这些——这里看到什么它就读到什么；空的块 = 这次用不上。</p>
 
     <template v-if="open">
       <!-- 模式五档：不同模式的检索锚不同（open 走大纲） -->
@@ -94,17 +94,17 @@ function isHot(b: ContextPreviewBlock): boolean {
         >{{ m.label }}</button>
       </div>
 
-      <div v-if="loading" class="ctx-status">装配中…</div>
-      <div v-else-if="error" class="ctx-status ctx-status--err">装配失败：{{ error }}</div>
+      <div v-if="loading" class="ctx-status">读取中…</div>
+      <div v-else-if="error" class="ctx-status ctx-status--err">读取失败：{{ error }}</div>
       <template v-else-if="preview">
-        <!-- 汇总行：注入总量 + 世界时刻来源（A4 来源可见） -->
+        <!-- 汇总行：总量 + 世界时刻来源（A4 来源可见） -->
         <div class="ctx-summary">
-          <span>注入 {{ preview.total_chars }} 字</span>
+          <span>共 {{ preview.total_chars }} 字</span>
           <span class="ctx-dot">·</span>
           <span>{{ worldTimeLabel }}</span>
           <span class="ctx-dot">·</span>
-          <span>{{ preview.world_sourced ? '世界舆图' : '章级绑定' }}</span>
-          <button class="ctx-refresh" title="按当前正文与设定重新装配" @click="emit('refresh')">刷新</button>
+          <span>{{ preview.world_sourced ? '设定来自世界页' : '设定来自章节' }}</span>
+          <button class="ctx-refresh" title="按当前正文与设定重新读取" @click="emit('refresh')">刷新</button>
         </div>
 
         <!-- 各块（注入序）；空块原样返回 → 「未配置」灰字 -->
@@ -123,7 +123,7 @@ function isHot(b: ContextPreviewBlock): boolean {
           <div v-if="b.budget_chars > 0" class="ctx-budget">
             <div
               class="ctx-budget-track"
-              :title="`${b.chars} / ${b.budget_chars} 字（块配额）`"
+              :title="`${b.chars} / ${b.budget_chars} 字（上限）`"
             >
               <div
                 class="ctx-budget-fill"

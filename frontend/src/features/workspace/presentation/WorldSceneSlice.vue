@@ -89,7 +89,7 @@ const visibleEncounters = computed(() => {
 const SOURCE_LABELS: Record<string, { label: string; hint: string }> = {
   chapter_anchor: { label: '本章锚', hint: '本章已锚定叙事时间（时间轴右键或此处「改」）' },
   prev_anchor: { label: '承前章', hint: '沿用前序最近已锚章节的叙事时间' },
-  max_event: { label: '事件最远', hint: '未锚定，按世界事件流最大时刻推演' },
+  max_event: { label: '事件最远', hint: '本章没定时间，按世界中最晚的事件推算' },
   zero: { label: '世界起点', hint: '世界尚无事件记录，从起点推演' },
 }
 const sourceInfo = computed(() => SOURCE_LABELS[slice.value?.t_source || 'zero'] || SOURCE_LABELS.zero)
@@ -350,7 +350,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
         <div v-show="!collapsed" class="slice-body">
           <!-- 在场 -->
           <section class="setting-group">
-            <div class="setting-group-label">在场<span class="muted">事件推演 · 与生成同源</span></div>
+            <div class="setting-group-label">在场<span class="muted">按事件推算 · 与 AI 所见一致</span></div>
             <div v-if="!presenceView.length" class="empty-hint">
               世界页还没有本章时刻的事态——去录移动/出生等事件，或先锚定本章叙事时间。
             </div>
@@ -476,7 +476,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
                   <button
                     class="inbox-btn ok"
                     :disabled="busyCandidateId === c.id"
-                    title="转正入账（进入事件推演）"
+                    title="采纳入账（进入世界推算）"
                     @click="onAccept(c)"
                   >
                     ✓
@@ -493,19 +493,19 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
               </li>
             </ul>
             <div v-show="!inboxOpen" class="inbox-hint" @click="inboxOpen = true">
-              来自沉淀/完稿的抽取，✓ 后进入世界推演
+              AI 从正文里发现的世界变化，✓ 后记入世界
             </div>
           </section>
 
           <div class="usage-hint">
-            <p>在场与位置由世界页事件推演；想改变此刻，去世界页录事件、Alt+N 速记一句话，或拖动时间轴。</p>
+            <p>在场与位置按世界事件推算而来；想改变此刻，去世界页录事件、Alt+N 速记一句话，或拖动时间轴。</p>
             <button class="go-world-btn subtle" @click="goWorld()">打开世界页</button>
           </div>
         </div>
       </template>
 
       <div v-else-if="loading" class="empty">
-        <p>推演中…</p>
+        <p>推算中…</p>
       </div>
     </template>
 

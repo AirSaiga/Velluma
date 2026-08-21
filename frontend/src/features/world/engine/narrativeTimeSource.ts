@@ -47,7 +47,7 @@ export interface FutureEventWarnInput {
 
 /** 未来事件警示文案（null = 不显示） */
 export const FUTURE_EVENT_WARN = (day: number) =>
-  `此事件晚于当前叙事时刻，未锚定章节的『此刻』将被拉到第 ${day} 日`
+  `这个事件发生在故事当前时间之后——没定时间的章节，『此刻』会被拉到第 ${day} 日`
 
 /**
  * 录入侧警示判定（只提示不拦截）：

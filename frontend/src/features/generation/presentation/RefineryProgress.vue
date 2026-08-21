@@ -48,7 +48,7 @@ const verdictLabel = computed(() => {
         :class="{ failed: !s.applied }"
       >
         <div class="surgery-head">
-          <span class="surgery-id">{{ s.operation_id || `修改 ${idx + 1}` }}</span>
+          <span class="surgery-id">修改 {{ idx + 1 }}</span>
           <span class="surgery-status" :class="{ ok: s.applied, fail: !s.applied }">
             {{ s.applied ? '✓' : '✗' }}
           </span>

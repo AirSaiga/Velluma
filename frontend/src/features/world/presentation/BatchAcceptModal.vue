@@ -67,7 +67,7 @@ function titleOf(c: WorldEventCandidate): string {
 }
 
 function metaOf(c: WorldEventCandidate): string {
-  if (c.source === 'canon_extract') return '记入真相账本（草识）'
+  if (c.source === 'canon_extract') return '记入真相账本（草稿）'
   return formatTime(c.draft?.time_start || 0)
 }
 </script>
@@ -103,7 +103,7 @@ function metaOf(c: WorldEventCandidate): string {
       </li>
     </ul>
 
-    <p class="ba-hint">✓ 后立即进入世界推演（真相候选则入真相账本）；确认后 6 秒内可整批撤销。</p>
+    <p class="ba-hint">✓ 后立即生效（真相候选进真相账本）；确认后 6 秒内可整批撤销。</p>
 
     <template #footer>
       <button class="ba-btn" :disabled="busy" @click="emit('close')">取消</button>

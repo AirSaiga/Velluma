@@ -264,7 +264,7 @@ async function submit() {
 <template>
   <ModalShell
     :title="modalTitle"
-    :subtitle="drawing ? '' : '事件是世界状态的唯一事实源——谁在哪、谁活着、疆域如何，都由事件流推演'"
+    :subtitle="drawing ? '' : '世界的现状都由你记下的事件推算而来——谁在哪、谁活着、疆域如何'"
     width="480px"
     :minimized="drawing"
     @close="emit('cancel')"
@@ -417,9 +417,9 @@ async function submit() {
         <div class="qc-row">
           <label class="qc-label">动作</label>
           <select v-model="territoryAction" class="qc-select">
-            <option value="gain">gain（获得/设定疆域）</option>
-            <option value="establish">establish（建立）</option>
-            <option value="lose">lose（失去全部疆域）</option>
+            <option value="gain">获得/设定疆域</option>
+            <option value="establish">建立（首次出现）</option>
+            <option value="lose">失去全部疆域</option>
           </select>
         </div>
       </div>

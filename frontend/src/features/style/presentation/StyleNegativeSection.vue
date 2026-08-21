@@ -108,7 +108,7 @@ function hitCount(word: string): number {
       </button>
       <div v-if="showSystem" class="system-list">
         <p class="system-note">
-          全局内置的 AI 腔禁词（系统层）。豁免 = 本书不生效（审计/扫描/生成合并都会跳过），
+          全局内置的 AI 腔禁词（系统层）。豁免 = 本书不生效（检查/扫描/生成合并都会跳过），
           不影响其他书。有替代建议的会随禁词一并注入。
         </p>
         <div

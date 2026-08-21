@@ -2,7 +2,7 @@
  * 章级谋篇·软脉络状态（P1.4 M1，docs/chapter-planning-spine.md）。
  *
  * 模块级单例（同 useWorldSlice 模式）：WorkspaceView（复合谋篇卡）与
- * InspectorPanel（副驾章节 tab 谋篇区）共享同一份 spine 状态。
+ * InspectorPanel（副驾谋篇 tab）共享同一份 spine 状态。
  *
  * 度优先的实现：意图一句话可空；锚点硬上限 5（超限后端 422 劝阻，本地
  * 也拦一道）；2s 防抖自动保存（文风页同款契约）；无脉络 → spine=null，

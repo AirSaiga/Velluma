@@ -22,8 +22,8 @@ const expanded = ref(false)
 /** kind → 短标签 + 色档（琥珀系：疑点是「请过目」不是「报错」） */
 const KIND_META: Record<GhostWarning['kind'], { label: string; cls: string }> = {
   dead_speak: { label: '死者开口', cls: 'is-dead' },
-  canon_leak: { label: 'canon 泄底', cls: 'is-canon' },
-  secret_leak: { label: '私有设定', cls: 'is-secret' },
+  canon_leak: { label: '疑似泄底', cls: 'is-canon' },
+  secret_leak: { label: '私有设定外泄', cls: 'is-secret' },
 }
 
 function meta(kind: GhostWarning['kind']) {

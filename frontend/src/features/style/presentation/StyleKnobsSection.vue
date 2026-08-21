@@ -161,7 +161,7 @@ const dialogueActiveTier = computed<number | null>(() => {
       <button
         class="tier-btn tier-auto"
         :class="{ active: knobs[knob.key] === undefined }"
-        title="自动：不注入该维度，交给画像与样本"
+        title="自动：这项不强制，交给画像和样本自然带出"
         @click="emit('update-knob', knob.key, null); emit('dirty')"
       >自动</button>
       <button
@@ -189,7 +189,7 @@ const dialogueActiveTier = computed<number | null>(() => {
       <button
         class="tier-btn tier-auto"
         :class="{ active: dialogueTarget === null || dialogueTarget === undefined }"
-        title="自动：不设目标，审计用默认区间"
+        title="自动：不设目标，检查时用默认区间"
         @click="emit('update-dialogue', null); emit('dirty')"
       >自动</button>
       <button

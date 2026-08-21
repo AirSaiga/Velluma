@@ -2,10 +2,12 @@
 /**
  * 副驾抽屉（NLE-ADF 3.0「纸面优先」写作台重构）。
  *
- * 三 tab（Ctrl+1~3 切换）：
+ * 五 tab（Ctrl+1~5 切换）：
  * - 此刻：世界切片「此刻此地」+ 候选回流收件箱（WorldSceneSlice，与生成上下文同源）
- * - 章节：大纲编辑 / 意图反推 / 统计 / 出场角色速查 / Canon 脑图跳转
+ * - 谋篇：章级软脉络（SpinePanel）+ 大纲编辑 + 意图反推——写前规划
+ * - 章节：统计 / 出场角色速查 / 本章文风 / Canon 真相账本跳转——章节状态
  * - 审校：完稿审计（按钮 + 报告）、沉淀抽取、润色（Refinery）、读者反馈、润色记录
+ * - 调试：AI 此刻所见预览 + 世界模型快照——引擎内部观测
  *
  * 旧 BS-ADF 步进工作台（节拍/聚焦/生成主控/Stepper）已随写作台重构移除；
  * 润色与读者反馈的门控从 stage==='done' 改为「本章有正文」——adaptive 模式 stage 恒 idle，
@@ -32,7 +34,7 @@ import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { requestOpenInbox, OPEN_INBOX_EVENT, inboxAutoOpen } from '../../world/composables/batchAccept'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
-type InspectorTab = 'now' | 'chapter' | 'review'
+type InspectorTab = 'now' | 'planning' | 'chapter' | 'review' | 'debug'
 
 interface TabDef {
   key: InspectorTab
@@ -57,8 +59,10 @@ const session = props.externalSession || useGenerationSession()
 
 const tabs: TabDef[] = [
   { key: 'now', label: '此刻', icon: 'map' },
+  { key: 'planning', label: '谋篇', icon: 'light-bulb' },
   { key: 'chapter', label: '章节', icon: 'document' },
   { key: 'review', label: '审校', icon: 'check-circle' },
+  { key: 'debug', label: '调试', icon: 'magnifying-glass' },
 ]
 
 const activeTab = ref<InspectorTab>('now')
@@ -205,7 +209,7 @@ async function loadContextPreview() {
   try {
     contextPreviewData.value = await adaptiveApi.contextPreview(chapterId, contextPreviewMode.value)
   } catch (e: any) {
-    contextPreviewError.value = e?.message || '装配失败'
+    contextPreviewError.value = e?.message || '读取失败'
   } finally {
     contextPreviewLoading.value = false
   }
@@ -381,8 +385,8 @@ async function handleResetChapterStyle() {
         <WorldSceneSlice :chapter-id="selectedChapterId" />
       </div>
 
-      <!-- ====== 章节 tab：大纲 + 意图反推 + 统计 + 出场角色 ====== -->
-      <div v-else-if="activeTab === 'chapter'" class="panel chapter-panel">
+      <!-- ====== 谋篇 tab：章级软脉络 + 大纲 + 意图反推（写前规划） ====== -->
+      <div v-else-if="activeTab === 'planning'" class="panel planning-panel">
         <div v-if="!selectedChapter" class="empty">
           <p>从左侧选择一个章节。</p>
         </div>
@@ -401,7 +405,18 @@ async function handleResetChapterStyle() {
             @discard-suggestions="chapterSpine.discardSuggestions"
           />
 
-          <!-- 章节卡（大纲编辑；标题编辑在纸面页面头） -->
+          <!-- 意图反推（心跳带回的后台规划淡建议；紧随方向区，同为「要去哪」层） -->
+          <section v-if="session.planSuggestions?.value" class="adaptive-settle">
+            <div class="section-label">AI 猜的方向</div>
+            <div class="settle-block">
+              <div class="settle-item">
+                <span class="muted">{{ session.planSuggestions.value.source === 'author' ? '来自作者意图' : 'AI 推测' }}</span>
+                <template v-if="session.planSuggestions.value.arc"> · 走向建议：{{ session.planSuggestions.value.arc }}</template>
+              </div>
+            </div>
+          </section>
+
+          <!-- 大纲卡（剧情层规划，与上方方向一句话分工：方向=要去哪，大纲=发生什么；标题编辑在纸面页面头） -->
           <section class="card-strip">
             <header class="strip-header">
               <span class="strip-num">第 {{ selectedChapter.chapter_number }} 章</span>
@@ -410,12 +425,20 @@ async function handleResetChapterStyle() {
             <textarea
               class="strip-outline-input"
               :value="selectedChapter.outline_text"
-              placeholder="一句话主旨 / 大纲（AI 辅助写作时会参考）"
+              placeholder="剧情大纲：这一章发生什么（AI 辅助写作会参考）"
               rows="6"
               @input="(e) => updateOutline((e.target as HTMLTextAreaElement).value)"
             ></textarea>
           </section>
+        </template>
+      </div>
 
+      <!-- ====== 章节 tab：统计 + 出场角色 + 本章文风 + Canon 跳转（章节状态） ====== -->
+      <div v-else-if="activeTab === 'chapter'" class="panel chapter-panel">
+        <div v-if="!selectedChapter" class="empty">
+          <p>从左侧选择一个章节。</p>
+        </div>
+        <template v-else>
           <!-- 统计 -->
           <section class="stats-section">
             <div class="stat">
@@ -425,17 +448,6 @@ async function handleResetChapterStyle() {
             <div class="stat">
               <span class="stat-num">{{ chapterCharacters.length }}</span>
               <span class="stat-label">出场角色</span>
-            </div>
-          </section>
-
-          <!-- 意图反推（心跳带回的后台规划淡建议） -->
-          <section v-if="session.planSuggestions?.value" class="adaptive-settle">
-            <div class="section-label">意图反推</div>
-            <div class="settle-block">
-              <div class="settle-item">
-                <span class="muted">{{ session.planSuggestions.value.source === 'author' ? '来自作者意图' : 'AI 推测' }}</span>
-                <template v-if="session.planSuggestions.value.arc"> · 走向建议：{{ session.planSuggestions.value.arc }}</template>
-              </div>
             </div>
           </section>
 
@@ -484,27 +496,6 @@ async function handleResetChapterStyle() {
             </button>
             <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划 / 因果图谱</p>
           </section>
-
-          <!-- AI 此刻所见（P5 B2：stitch-ghost 真实注入的上下文块预览，默认折叠） -->
-          <ContextPreviewSection
-            :open="contextPreviewOpen"
-            :loading="contextPreviewLoading"
-            :error="contextPreviewError"
-            :preview="contextPreviewData"
-            :mode="contextPreviewMode"
-            @toggle="toggleContextPreview"
-            @refresh="loadContextPreview"
-            @update:mode="switchContextPreviewMode"
-          />
-
-          <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口，默认折叠） -->
-          <section>
-            <button class="btn-refinery" @click="toggleWorldModelDebug">
-              <Icon name="magnifying-glass" :size="14" />
-              <span>{{ worldModelOpen ? '收起世界模型' : '世界模型（调试）' }}</span>
-            </button>
-            <pre v-if="worldModelOpen" class="world-model-debug">{{ worldModelText }}</pre>
-          </section>
         </template>
       </div>
 
@@ -516,25 +507,25 @@ async function handleResetChapterStyle() {
         <template v-else>
           <!-- 完稿审计 -->
           <section class="adaptive-finish">
-            <div class="section-label">完稿审计</div>
+            <div class="section-label">完稿体检</div>
             <button
               class="btn-finish"
               :disabled="session.aiLane?.value === 'analyzing' || !(session.adaptiveMode?.value && session.authorLane?.value === 'composing')"
-              :title="session.adaptiveMode?.value && session.authorLane?.value === 'composing' ? '触发全章审计' : '在章节内写满 4 字激活 AI 辅助后可用'"
+              :title="session.adaptiveMode?.value && session.authorLane?.value === 'composing' ? '触发全章检查' : '在章节内写满 4 字激活 AI 辅助后可用'"
               @click="session.triggerAdaptiveFinish()"
             >
               <Icon :name="session.aiLane?.value === 'analyzing' ? 'loader' : 'check-circle'" :size="14" />
-              <span>{{ session.aiLane?.value === 'analyzing' ? '审计中…' : '完稿审计' }}</span>
+              <span>{{ session.aiLane?.value === 'analyzing' ? '通读中…' : '完稿体检' }}</span>
             </button>
-            <p class="hint">触发全章审计：残句 / 必达覆盖 / Canon 泄露 / 编辑审阅，并重索引记忆。</p>
+            <p class="hint">AI 通读全章做检查：没写完的句子、锚点进度、秘密穿帮、编辑意见，并更新前情记忆。</p>
           </section>
 
           <!-- 完稿审计报告 -->
           <section v-if="session.finishReport?.value?.report" class="adaptive-report">
-            <div class="section-label">审计报告</div>
+            <div class="section-label">检查报告</div>
             <!-- 残句（P1.2：每条可定点修复——修复句过目，采纳才落正文） -->
             <div v-if="session.finishReport.value.report.sentence_defects?.length" class="report-block report-block--warn">
-              <div class="report-block-label">残句（{{ session.finishReport.value.report.sentence_defects.length }}）</div>
+              <div class="report-block-label">没写完的句子（{{ session.finishReport.value.report.sentence_defects.length }}）</div>
               <div
                 v-for="(d, i) in session.finishReport.value.report.sentence_defects.slice(0, 5)"
                 :key="'sd' + i"
@@ -563,7 +554,7 @@ async function handleResetChapterStyle() {
             <!-- 必达覆盖率 -->
             <div v-if="session.finishReport.value.report.coverage?.checked" class="report-block">
               <div class="report-block-label">
-                必达覆盖 {{ session.finishReport.value.report.coverage.hit_count }}/{{ session.finishReport.value.report.coverage.hit_count + session.finishReport.value.report.coverage.miss_count }}
+                锚点进度 {{ session.finishReport.value.report.coverage.hit_count }}/{{ session.finishReport.value.report.coverage.hit_count + session.finishReport.value.report.coverage.miss_count }}
               </div>
               <div v-if="session.finishReport.value.report.coverage.misses?.length" class="report-item report-item--miss">
                 未达：{{ session.finishReport.value.report.coverage.misses.join('；') }}
@@ -576,7 +567,7 @@ async function handleResetChapterStyle() {
             </div>
             <!-- Canon 泄露 -->
             <div v-if="session.finishReport.value.report.canon_check?.private_breaches?.length" class="report-block report-block--warn">
-              <div class="report-block-label">⚠️ Canon 泄露</div>
+              <div class="report-block-label">⚠️ 秘密穿帮</div>
               <div
                 v-for="(b, i) in session.finishReport.value.report.canon_check.private_breaches"
                 :key="'cb' + i"
@@ -585,7 +576,7 @@ async function handleResetChapterStyle() {
             </div>
             <!-- LLM 审阅 -->
             <div v-if="session.finishReport.value.report.critique?.issues?.length" class="report-block">
-              <div class="report-block-label">编辑审阅（{{ session.finishReport.value.report.critique.verdict === 'pass' ? '通过' : '需修改' }}）</div>
+              <div class="report-block-label">编辑意见（{{ session.finishReport.value.report.critique.verdict === 'pass' ? '通过' : '需修改' }}）</div>
               <div
                 v-for="(iss, i) in session.finishReport.value.report.critique.issues.slice(0, 5)"
                 :key="'iss' + i"
@@ -598,7 +589,7 @@ async function handleResetChapterStyle() {
             </div>
             <!-- 记忆倒灌：本章已入向量记忆（供后续章节前情召回）；memory_indexed 在响应顶层，与 candidates_pending 同层 -->
             <div v-if="session.finishReport.value.memory_indexed" class="report-block">
-              <div class="report-item">记忆索引 +{{ session.finishReport.value.memory_indexed }} 段（后续章节可呼应本章细节）</div>
+              <div class="report-item">前情记忆新增 {{ session.finishReport.value.memory_indexed }} 段（后面的章节能想起这些细节）</div>
             </div>
             <!-- A5c① 收件箱积压（book 级 pending 计数，>0 才显示）：一键直达「此刻」tab 裁决 -->
             <div v-if="(session.finishReport.value.candidates_pending ?? 0) > 0" class="report-block report-block--inbox">
@@ -612,10 +603,10 @@ async function handleResetChapterStyle() {
 
           <!-- 沉淀抽取结果（涌现实体 + 冲突；作者主权：冲突不自动改） -->
           <section v-if="session.settleResult?.value?.emergent_facts || session.settleResult?.value?.conflicts?.length" class="adaptive-settle">
-            <div class="section-label">沉淀抽取</div>
-            <!-- 涌现实体 -->
+            <div class="section-label">AI 从正文发现</div>
+            <!-- 新面孔 -->
             <div v-if="session.settleResult.value.emergent_facts?.new_entities?.length" class="settle-block">
-              <div class="settle-block-label">涌现实体</div>
+              <div class="settle-block-label">新出现的角色·事物</div>
               <div
                 v-for="(ent, i) in session.settleResult.value.emergent_facts.new_entities.slice(0, 5)"
                 :key="'ent' + i"
@@ -749,6 +740,35 @@ async function handleResetChapterStyle() {
           </section>
         </template>
       </div>
+
+      <!-- ====== 调试 tab：AI 所见预览 + 世界模型快照（引擎内部观测，与作者功能分区） ====== -->
+      <div v-else-if="activeTab === 'debug'" class="panel debug-panel">
+        <div v-if="!selectedChapter" class="empty">
+          <p>从左侧选择一个章节。</p>
+        </div>
+        <template v-else>
+          <!-- AI 此刻所见（P5 B2：stitch-ghost 真实注入的上下文块预览——与 stitch_context 同源，默认折叠） -->
+          <ContextPreviewSection
+            :open="contextPreviewOpen"
+            :loading="contextPreviewLoading"
+            :error="contextPreviewError"
+            :preview="contextPreviewData"
+            :mode="contextPreviewMode"
+            @toggle="toggleContextPreview"
+            @refresh="loadContextPreview"
+            @update:mode="switchContextPreviewMode"
+          />
+
+          <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口） -->
+          <section>
+            <button class="btn-refinery" @click="toggleWorldModelDebug">
+              <Icon name="magnifying-glass" :size="14" />
+              <span>{{ worldModelOpen ? '收起' : 'AI 眼中的世界' }}</span>
+            </button>
+            <pre v-if="worldModelOpen" class="world-model-debug">{{ worldModelText }}</pre>
+          </section>
+        </template>
+      </div>
     </div>
   </aside>
 </template>
@@ -837,8 +857,8 @@ async function handleResetChapterStyle() {
 .now-panel {
   height: 100%;
 }
-/* 章节 tab 撑满高度，大纲区可伸缩填满剩余空间 */
-.chapter-panel {
+/* 谋篇 tab 撑满高度，大纲卡（flex:1）伸缩填满剩余空间 */
+.planning-panel {
   height: 100%;
 }
 
@@ -850,7 +870,7 @@ async function handleResetChapterStyle() {
   line-height: 1.7;
 }
 
-/* 章节卡（大纲编辑，撑满章节 tab 剩余空间） */
+/* 章节卡（大纲编辑，撑满谋篇 tab 剩余空间） */
 .card-strip {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);

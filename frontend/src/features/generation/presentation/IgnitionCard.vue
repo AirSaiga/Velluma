@@ -66,8 +66,8 @@ const emit = defineEmits<{
       </template>
     </div>
     <div class="ignition-card__hint">
-      <template v-if="hasOutline">生成的是幽灵草稿：Enter 落地 · Esc 蒸发 · 落地后随时可改</template>
-      <template v-else>先在副驾「章节」页写两句大纲，就能让 AI 帮你开个头</template>
+      <template v-if="hasOutline">生成的是幽灵草稿：Enter 采纳 · Esc 蒸发 · 采纳后随时可改</template>
+      <template v-else>先在副驾「谋篇」页写两句大纲，就能让 AI 帮你开个头</template>
     </div>
     <button
       v-if="!suggestions"

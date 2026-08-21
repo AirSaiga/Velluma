@@ -6,7 +6,7 @@
  * - 左栏 Binder：章节导航（列表 + 状态徽标 + 新建/导入/分析）
  * - 中栏：纸面画布（ChapterEditorContainer）+ 超薄顶栏（状态文案 + AI 辅助/快捷键/抽屉）
  *   + 底部状态栏（字数 + 保存状态）；作者写的即真实文档，无生成预览投影
- * - 右缘副驾抽屉：此刻 / 章节 / 审校 三 tab（InspectorPanel）
+ * - 右缘副驾抽屉：此刻 / 谋篇 / 章节 / 审校 / 调试 五 tab（InspectorPanel）
  *
  * splitpanes 提供可拖拽分隔（依赖已装）。
  */
@@ -111,7 +111,7 @@ const adaptiveAssist = useAdaptiveAssist({
   reportWarn: (msg: string) => showToast(msg, 'warning'),
   // A5d 沉淀直达：settle 抽出候选 → toast 带 action，一键滑出副驾收件箱
   onCandidatesCreated: (n: number) => {
-    showToast(`沉淀抽取：${n} 条世界变化待确认`, 'info', 6000, {
+    showToast(`AI 从正文里发现 ${n} 条世界变化，待你确认`, 'info', 6000, {
       label: '去确认',
       onClick: () => requestOpenInbox(),
     })
@@ -456,7 +456,7 @@ const nleStateLabel = computed(() => {
       case 'suggesting': return '走向已备好'
       case 'assisting': return '续写中'
       case 'digesting': return '沉淀中'
-      case 'analyzing': return '审计中'
+      case 'analyzing': return '通读中'
       default: return ''
     }
   }
