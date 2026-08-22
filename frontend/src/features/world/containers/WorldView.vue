@@ -81,7 +81,7 @@ const {
   deleteEntity,
   locationsById,
   currentTime,
-  setCurrentTime,
+  jumpToTime,
   foreshadows,
 } = useWorld()
 
@@ -665,10 +665,12 @@ watch(bookId, (id) => {
 function consumeRouteQuery() {
   const ent = route.query.entity
   if (typeof ent === 'string' && ent) selectedEntityId.value = ent
-  // 游标跳到指定时刻（写作页「在世界页打开」带本章叙事时刻——回放观察与录入同焦点）
+  // 游标跳到指定时刻（写作页「在世界页打开」带本章叙事时刻——回放观察与录入同焦点）。
+  // 走 jumpToTime 而非 setCurrentTime：load() 未 await（挂载即消费 query），服务端恢复值
+  // 在 await 之后才落——jumpToTime 登记 pendingDeepLinkTime 保证深链值后到后赢
   const time = route.query.time
   if (typeof time === 'string' && time !== '' && Number.isFinite(Number(time))) {
-    setCurrentTime(Math.max(0, Math.floor(Number(time))))
+    jumpToTime(Math.max(0, Math.floor(Number(time))))
   }
   // 地点深链：数据可能仍在 load → 挂起，由下方 watch(locations) 兜底消费
   const loc = route.query.loc

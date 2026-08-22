@@ -60,7 +60,8 @@ const factions = computed(() => entities.value.filter((e) => e.entity_type === '
 const assets = computed(() => entities.value.filter((e) => e.entity_type === 'asset'))
 
 // ===== 时间轴 UI 状态按书持久化（服务端 books.timeline_view：游标时刻 + 视野窗口）=====
-// 恢复值只是「上次看到哪」：世界页 ?time= 深链在 load() 之后才 setCurrentTime，天然覆盖恢复值——深链优先。
+// 恢复值只是「上次看到哪」，深链跳时刻（?time=）优先于它——时序见 jumpToTime 的
+// pendingDeepLinkTime（恢复在 load() 的 await 之后执行，深链必须登记待覆盖值才能后到后赢）。
 // 历史 localStorage 方案（velluma:tl-time / velluma:tl-range）因启动脚本端口扫描换 origin 即漂移弃用；
 // 旧键降级为一次性迁移来源（服务端缺键时读旧值顶上并写穿）+ 游标关窗竞态的同步兜底。
 const LEGACY_TIME_KEY = (bookId: string) => `velluma:tl-time:${bookId}`
@@ -68,6 +69,8 @@ const LEGACY_RANGE_KEY = (bookId: string) => `velluma:tl-range:${bookId}`
 let persistViewTimer: ReturnType<typeof setTimeout> | null = null
 /** 服务端快照已应用的 bookId（加载竞态护栏：快照到达前的拖动不触发写库，防旧值覆盖新输入） */
 let viewReadyBookId: string | null = null
+/** 本次 load 的 ?time= 深链时刻（jumpToTime 登记；load() 末尾应用并清空——恢复值不得覆盖它） */
+let pendingDeepLinkTime: number | null = null
 
 function applyTimelineView(bookId: string, view: TimelineViewState) {
   const cursor = normalizeTimelineCursor(view.cursor)
@@ -162,10 +165,25 @@ function setTimelineRange(range: TimelineRange | null) {
   })
 }
 
+/**
+ * 深链跳时刻（?time=，W2 写作页往返「在世界页打开」）。
+ *
+ * 时序约束：WorldView 的挂载/切书路径都是 load(id) 不 await 即消费路由 query——
+ * jumpToTime 先写 currentTime，load() 的 await Promise.all 之后 applyTimelineView
+ * 才用服务端恢复值无条件覆盖 currentTime。因此除立即生效外还登记
+ * pendingDeepLinkTime，load() 末尾在恢复值之后再应用一次（后到后赢）。
+ */
+function jumpToTime(t: number) {
+  currentTime.value = t
+  pendingDeepLinkTime = t
+  schedulePersistView()
+}
+
 async function load(bookId: string) {
   loadedBookId.value = bookId
   viewReadyBookId = null
-  // 默认值先落地（服务端快照到达前不渲染上一本书的旧状态）；?time= 深链在 load() 后覆盖——深链优先
+  // 默认值先落地（服务端快照到达前不渲染上一本书的旧状态）；?time= 深链经
+  // pendingDeepLinkTime 在 load 末尾覆盖恢复值——深链优先
   currentTime.value = 0
   timelineRange.value = null
   clearHistory() // 切书清空 undo 栈（避免指向被覆盖的旧数据）
@@ -190,6 +208,13 @@ async function load(bookId: string) {
   mapStrokes.value = strokes
   applyTimelineView(bookId, view)
   viewReadyBookId = bookId
+  // ?time= 深链覆盖：恢复值先落、深链值后到——「跳到指定时刻」优先于「上次看到哪」。
+  // viewReady 已置位，随手的 schedulePersistView 会把深链时刻照常落库（与直接拖动同契约）。
+  if (pendingDeepLinkTime != null) {
+    currentTime.value = pendingDeepLinkTime
+    pendingDeepLinkTime = null
+    schedulePersistView()
+  }
 }
 
 // ===== Location =====
@@ -832,6 +857,7 @@ export function useWorld() {
     deleteForeshadow,
     setChapterAnchor,
     setCurrentTime,
+    jumpToTime,
     setTimelineRange,
     createMapLayer,
     patchMapLayer,
