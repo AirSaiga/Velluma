@@ -19,19 +19,20 @@ export interface NarrativeSourceInfo {
 }
 
 /**
- * 时刻行来源小字：来自本章锚 / 来自第N章锚 / 来自事件『……』 / 未锚定。
+ * 时刻行来源小字（人话版）：本章时间已固定 / 接着第N章的时间 /
+ * 还没定时间——跟着最新事件『……』走 / 还没有事件记录，从世界起点算。
  * 附加信息缺席时退到该 source 的无细节说法（不猜数据）。
  */
 export function narrativeSourceText(info: NarrativeSourceInfo): string {
   switch (info.source) {
     case 'chapter_anchor':
-      return '来自本章锚'
+      return '本章时间已固定'
     case 'prev_anchor':
-      return info.chapter != null ? `来自第${info.chapter}章锚` : '来自前章锚'
+      return info.chapter != null ? `接着第${info.chapter}章的时间` : '接着前一章的时间'
     case 'max_event':
-      return info.note ? `来自事件『${info.note}』` : '来自最远事件'
+      return info.note ? `还没定时间——跟着最新事件『${info.note}』走` : '还没定时间——跟着最新事件走'
     default:
-      return '未锚定'
+      return '还没有事件记录，从世界起点算'
   }
 }
 

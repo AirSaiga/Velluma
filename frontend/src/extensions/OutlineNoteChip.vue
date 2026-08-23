@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
     <span v-if="!collapsed && noteText" class="outline-note__text">{{ noteText }}</span>
     <span v-else-if="!collapsed" class="outline-note__text outline-note__text--empty">写细纲…</span>
     <!-- 挂的谋篇锚点小签（P1.4 M3：这段速记服务于哪个锚点） -->
-    <span v-if="anchorLabel" class="outline-note__anchor" title="服务于谋篇锚点">{{ anchorLabel }}</span>
+    <span v-if="anchorLabel" class="outline-note__anchor" title="这段服务于打算页列的情节">{{ anchorLabel }}</span>
     <Teleport to="body">
       <div v-if="open" ref="popEl" class="outline-note-pop" :style="popStyle" contenteditable="false">
         <textarea
@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
         <div class="outline-note-pop__hint">扩写目标 {{ targetHint }} · Enter 落笔扩写 · Esc 收起</div>
         <!-- 锚点选择（P1.4 M3 三锚定：服务于谋篇锚点的胶囊，扩写时锚点文本注入意图） -->
         <div v-if="pendingAnchors.length" class="outline-note-pop__anchors">
-          <span class="outline-note-pop__anchors-label">服务于锚点</span>
+          <span class="outline-note-pop__anchors-label">服务于哪条情节</span>
           <button
             class="outline-note-pop__anchor-opt"
             :class="{ 'is-on': !anchorId }"

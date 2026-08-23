@@ -7,23 +7,23 @@ import {
 
 describe('narrativeSourceText（切片条来源小字）', () => {
   it('四级来源各有文案，附加信息缺席时退到无细节说法', () => {
-    expect(narrativeSourceText({ source: 'chapter_anchor' })).toBe('来自本章锚')
-    expect(narrativeSourceText({ source: 'prev_anchor', chapter: 3 })).toBe('来自第3章锚')
-    expect(narrativeSourceText({ source: 'prev_anchor' })).toBe('来自前章锚') // 章号缺席
+    expect(narrativeSourceText({ source: 'chapter_anchor' })).toBe('本章时间已固定')
+    expect(narrativeSourceText({ source: 'prev_anchor', chapter: 3 })).toBe('接着第3章的时间')
+    expect(narrativeSourceText({ source: 'prev_anchor' })).toBe('接着前一章的时间') // 章号缺席
     expect(narrativeSourceText({ source: 'max_event', note: '结局之战' })).toBe(
-      '来自事件『结局之战』',
+      '还没定时间——跟着最新事件『结局之战』走',
     )
-    expect(narrativeSourceText({ source: 'max_event' })).toBe('来自最远事件') // 摘要缺席
-    expect(narrativeSourceText({ source: 'zero' })).toBe('未锚定')
+    expect(narrativeSourceText({ source: 'max_event' })).toBe('还没定时间——跟着最新事件走') // 摘要缺席
+    expect(narrativeSourceText({ source: 'zero' })).toBe('还没有事件记录，从世界起点算')
   })
 
-  it('未知 source 兜底为未锚定（向后兼容）', () => {
-    expect(narrativeSourceText({ source: 'future_source' } as NarrativeSourceInfo)).toBe('未锚定')
+  it('未知 source 兜底为世界起点说法（向后兼容）', () => {
+    expect(narrativeSourceText({ source: 'future_source' } as NarrativeSourceInfo)).toBe('还没有事件记录，从世界起点算')
   })
 
   it('null 与 undefined 的附加信息均按缺席处理', () => {
-    expect(narrativeSourceText({ source: 'prev_anchor', chapter: null })).toBe('来自前章锚')
-    expect(narrativeSourceText({ source: 'max_event', note: null })).toBe('来自最远事件')
+    expect(narrativeSourceText({ source: 'prev_anchor', chapter: null })).toBe('接着前一章的时间')
+    expect(narrativeSourceText({ source: 'max_event', note: null })).toBe('还没定时间——跟着最新事件走')
   })
 })
 

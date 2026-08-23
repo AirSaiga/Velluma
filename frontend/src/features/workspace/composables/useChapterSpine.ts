@@ -99,7 +99,7 @@ export function useChapterSpine() {
       setTimeout(() => { suppressAutosave = false }, 0)
     } catch (e: any) {
       // 422 劝阻文案直接冒给调用方 UI；其它静默（谋篇保存失败不打断写作）
-      if (e?.status === 422 || /422|锚点/.test(e?.message || '')) throw e
+      if (e?.status === 422 || /422|留给大纲/.test(e?.message || '')) throw e
     }
   }
 

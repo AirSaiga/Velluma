@@ -380,7 +380,7 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
             for a in anchors if isinstance(a, dict)
         ],
         "pending_count": pending_count,
-        "hint": f"还剩 {pending_count} 个锚点" if pending_count else "锚点都已写到",
+        "hint": f"还有 {pending_count} 条情节没写到" if pending_count else "打算里的情节都写到了",
     }
     if near_branches:
         progress["near_branches"] = near_branches
@@ -1040,9 +1040,9 @@ def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
         for i, a in enumerate(req.anchors):
             text = a.text.strip()
             if len(text) < SPINE_ANCHOR_TEXT_MIN:
-                raise HTTPException(422, detail=f"锚点「{text or '（空）'}」太短——锚点是 2-12 字的短语，细节请留给大纲")
+                raise HTTPException(422, detail=f"「{text or '（空）'}」太短——每条情节用 2-12 个字记个意思就行，细节请留给大纲")
             if len(text) > SPINE_ANCHOR_TEXT_MAX:
-                raise HTTPException(422, detail=f"锚点「{text[:12]}…」超过 12 字——锚点只记方向，展开请写进大纲")
+                raise HTTPException(422, detail=f"「{text[:12]}…」超过 12 字——这里只记个意思，展开请写进大纲")
             anchors.append({
                 "id": a.id or f"a{i + 1}",
                 "text": text,
@@ -1051,7 +1051,7 @@ def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
                 **({"branch": _normalize_branch(a.branch)} if a.branch else {}),
             })
         if len(anchors) > SPINE_MAX_ANCHORS:
-            raise HTTPException(422, detail=f"锚点超过 {SPINE_MAX_ANCHORS} 个——说明在写大纲了。细节留给大纲，谋篇只记方向")
+            raise HTTPException(422, detail=f"情节超过 {SPINE_MAX_ANCHORS} 条——说明在写大纲了。细节留给大纲，这里只记最要紧的")
         spine["anchors"] = anchors
     return spine
 

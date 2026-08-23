@@ -88,7 +88,7 @@ const floatingHidden = computed(() =>
     <!-- 谋篇进度行（P1.4 M2 §3.2）：意图短语 + ⚑ 旗标；hit 判定后旗标实心（划 todo 的满足感） -->
     <div v-if="spineProgress" class="spine-progress">
       <button class="spine-progress__head" :title="spineProgress.hint" @click="spineCollapsed = !spineCollapsed">
-        <span class="spine-progress__intent">{{ spineProgress.intent || '谋篇' }}</span>
+        <span class="spine-progress__intent">{{ spineProgress.intent || '打算' }}</span>
         <span class="spine-progress__flags">
           <span
             v-for="a in spineProgress.anchors"

@@ -39,7 +39,7 @@ const emit = defineEmits<{
       class="ignition-card__intent"
       rows="1"
       :value="spine?.intent?.text || ''"
-      placeholder="一句话：本章要去哪？（可空）"
+      placeholder="一句话：这一章主要讲什么？（可空）"
       @change="(e) => emit('update-intent', (e.target as HTMLTextAreaElement).value)"
     ></textarea>
     <template v-if="suggestions">
@@ -49,7 +49,7 @@ const emit = defineEmits<{
           <span v-for="(a, i) in suggestions.anchors" :key="i">{{ a }}</span>
         </div>
         <div class="ignition-card__suggest-actions">
-          <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('adopt', 'all')">收下谋篇</button>
+          <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('adopt', 'all')">收下建议</button>
           <button class="ignition-card__btn" @click="emit('discard-suggestions')">不用</button>
         </div>
       </div>
@@ -67,14 +67,14 @@ const emit = defineEmits<{
     </div>
     <div class="ignition-card__hint">
       <template v-if="hasOutline">生成的是幽灵草稿：Enter 采纳 · Esc 蒸发 · 采纳后随时可改</template>
-      <template v-else>先在副驾「谋篇」页写两句大纲，就能让 AI 帮你开个头</template>
+      <template v-else>先在副驾「打算」页写两句大纲，就能让 AI 帮你开个头</template>
     </div>
     <button
       v-if="!suggestions"
       class="ignition-card__suggest-link"
       :disabled="suggesting"
       @click="emit('suggest')"
-    >{{ suggesting ? '建议生成中…' : '✨ 让 AI 提个谋篇' }}</button>
+    >{{ suggesting ? '建议生成中…' : '✨ AI 帮我出出主意' }}</button>
   </div>
 </template>
 

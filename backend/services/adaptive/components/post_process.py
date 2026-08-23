@@ -57,7 +57,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 80
                 if isinstance(a, dict) and a.get("status") == "pending" and a.get("text")
             ]
             if pending:
-                report["spine_note"] = "未兑现锚点：" + "、".join(pending[:5])
+                report["spine_note"] = "这几条情节打算里列了还没写到：" + "、".join(pending[:5])
     except Exception as e:
         logger.debug(f"[post_process] 谋篇附注失败: {e}")
 

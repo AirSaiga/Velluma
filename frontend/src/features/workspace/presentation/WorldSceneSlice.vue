@@ -6,7 +6,8 @@ import { useWorldSlice, WORLD_REFRESH_EVENT } from '../../world/composables/useW
 import { formatTime, breakdownTime, fromYMD } from '../../world/engine/timeFormat'
 import { getTemplate } from '../../world/engine/eventTemplates'
 import { narrativeSourceText } from '../../world/engine/narrativeTimeSource'
-import type { EventType } from '../../world/engine/types'
+import type { EventType, WorldLocation } from '../../world/engine/types'
+import { worldApi } from '../../../services/api/domain/world.api'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
 import BatchAcceptModal from '../../world/presentation/BatchAcceptModal.vue'
 import {
@@ -85,14 +86,7 @@ const visibleEncounters = computed(() => {
   return encs.filter((e) => (e.names || []).every((n: string) => publicNames.has(n)))
 })
 
-// ---- 时刻来源徽标 ----
-const SOURCE_LABELS: Record<string, { label: string; hint: string }> = {
-  chapter_anchor: { label: '本章锚', hint: '本章已锚定叙事时间（时间轴右键或此处「改」）' },
-  prev_anchor: { label: '承前章', hint: '沿用前序最近已锚章节的叙事时间' },
-  max_event: { label: '事件最远', hint: '本章没定时间，按世界中最晚的事件推算' },
-  zero: { label: '世界起点', hint: '世界尚无事件记录，从起点推演' },
-}
-const sourceInfo = computed(() => SOURCE_LABELS[slice.value?.t_source || 'zero'] || SOURCE_LABELS.zero)
+// ---- 时刻来源小字（人话行，见 world/engine/narrativeTimeSource.ts）----
 
 // ---- A4 时刻来源小字：来自本章锚 / 来自第N章锚 / 来自事件『……』 / 未锚定 ----
 const sourceText = computed(() =>
@@ -139,14 +133,32 @@ async function clearAnchor() {
   await setNarrativeTime(currentBookId.value, props.chapterId, null)
 }
 
-// ---- 场景钉（W5-lite）----
-async function pinScene() {
-  if (!props.chapterId || !currentBookId.value || !slice.value?.scene) return
-  await setScenePin(currentBookId.value, props.chapterId, slice.value.scene.location_id)
+// ---- 场景钉（脚下：直接选一个地方即钉住；取消钉住回到按事件推算）----
+const locPickerOpen = ref(false)
+const locationOptions = ref<WorldLocation[]>([])
+async function toggleLocPicker() {
+  locPickerOpen.value = !locPickerOpen.value
+  if (locPickerOpen.value && !locationOptions.value.length && currentBookId.value) {
+    try {
+      locationOptions.value = (await worldApi.listLocations(currentBookId.value)) || []
+    } catch {
+      locationOptions.value = []
+    }
+  }
+}
+async function chooseLocation(loc: WorldLocation) {
+  if (!props.chapterId || !currentBookId.value) return
+  locPickerOpen.value = false
+  await setScenePin(currentBookId.value, props.chapterId, loc.id)
 }
 async function unpinScene() {
   if (!props.chapterId || !currentBookId.value) return
   await setScenePin(currentBookId.value, props.chapterId, null)
+}
+
+// ---- 在场补记（「少了谁？补一句」走 Alt+N 同一条速记通路：解析 → 过目 → 入账）----
+function openQuickNote() {
+  window.dispatchEvent(new CustomEvent('velluma:quick-note'))
 }
 
 // ---- 展示截断（每块 ≤2，超出计数跳世界页）----
@@ -287,62 +299,61 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
     <template v-else>
       <!-- 世界页无实体（旧表兜底书）：迁移引导（继承旧面板） -->
       <div v-if="slice?.world_empty && !loading" class="usage-hint">
-        <p>本书尚未在世界页建立设定。「此刻此地」由世界页的事件按叙事时间推演，与 AI 生成吃同一份数据。</p>
+        <p>这里显示故事里此刻的状态：什么时间、谁在哪。它由世界页记录的事件自动算出，AI 写作时看到的也是这份——先去世界页记几笔设定吧。</p>
         <button class="go-world-btn" @click="goWorld()">前往世界页</button>
       </div>
 
       <template v-else-if="slice">
         <header class="slice-header" @click="toggleCollapsed">
           <span class="slice-title">此刻此地</span>
-          <span class="slice-time">{{ formatTime(slice.t) }}</span>
-          <span class="source-badge" :title="sourceInfo.hint">{{ sourceInfo.label }}</span>
+          <span class="slice-time">故事时间 {{ formatTime(slice.t) }}</span>
           <button
             class="reader-toggle"
             :class="{ on: readerView }"
-            title="读者视角：隐藏作者已知（private）的实体与伏笔——自检揭示节奏"
+            title="看看读者眼里的世界：藏起他们还不知道的秘密，检查有没有提前泄底"
             @click.stop="toggleReaderView"
           >
             读者视角
           </button>
-          <button v-if="updated" class="update-dot" title="世界页数据已变化，切片已刷新" @click.stop="ack">
+          <button v-if="updated" class="update-dot" title="世界页有新记录，这里已经跟着更新了" @click.stop="ack">
             世界有更新
           </button>
           <span class="chevron" :class="{ open: !collapsed }">▾</span>
         </header>
 
-        <!-- 本章时刻编辑（叙事锚） -->
+        <!-- 本章故事时间编辑 -->
         <div v-if="editingTime" class="time-editor" @click.stop>
           <label>
-            世界日数
+            故事日数
             <input v-model="timeDraft" type="number" min="0" step="1" />
           </label>
           <span class="time-preview">{{ timePreview }}</span>
           <div class="time-actions">
-            <button class="mini-btn primary" @click="applyTime">锚定</button>
+            <button class="mini-btn primary" title="把本章固定在输入的时间" @click="applyTime">确定</button>
             <button
               v-if="slice.t_source === 'chapter_anchor'"
               class="mini-btn"
-              title="清除本章叙事锚，回落到前序章/事件推演"
+              title="取消固定，回到跟着前一章/最新事件走"
               @click="clearAnchor"
             >
-              清除锚
+              取消固定
             </button>
             <button class="mini-btn" @click="editingTime = false">取消</button>
           </div>
         </div>
         <div v-else class="time-edit-row">
-          <span class="source-note" :title="sourceInfo.hint">{{ sourceText }}</span>
+          <span class="source-note">{{ sourceText }}</span>
           <span class="time-row-actions">
             <button
               v-if="slice.t_source !== 'chapter_anchor'"
               class="link-btn"
-              title="把本章叙事锚钉在当前推演时刻——此后不再被后续事件拉走（与时间轴右键锚定同一通路）"
+              title="本章就固定在此刻——以后录新事件不会再拉动它（与世界页时间轴右键同一功能）"
               @click="anchorHere"
             >
-              锚定本章
+              定在这个时间
             </button>
-            <button class="link-btn" title="锚定本章发生的世界时刻（切片内容随之变化）" @click="openTimeEditor">
-              改
+            <button class="link-btn" title="手动定本章的故事时间（在场、脚下会跟着变）" @click="openTimeEditor">
+              改时间
             </button>
           </span>
         </div>
@@ -350,9 +361,10 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
         <div v-show="!collapsed" class="slice-body">
           <!-- 在场 -->
           <section class="setting-group">
-            <div class="setting-group-label">在场<span class="muted">按事件推算 · 与 AI 所见一致</span></div>
+            <div class="setting-group-label">在场<span class="muted">这个时间谁在哪、谁还活着——按世界页的事件推算</span></div>
             <div v-if="!presenceView.length" class="empty-hint">
-              世界页还没有本章时刻的事态——去录移动/出生等事件，或先锚定本章叙事时间。
+              世界页还没有这个时间的事态——先给本章定个时间，或
+              <button class="link-btn" @click="openQuickNote">补一句</button>（如「老王也到了上海」）。
             </div>
             <ul v-else class="presence-list">
               <li
@@ -360,44 +372,65 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
                 :key="row.entity_id"
                 class="presence-row clickable"
                 :class="{ dead: !row.alive }"
-                title="在世界页打开（游标停在本章时刻）"
+                :title="row.label ? `依据事件「${row.label}」· 点击去世界页看详情` : '点击去世界页看详情'"
                 @click="goWorld(row.entity_id)"
               >
                 <span class="presence-name">{{ row.name }}</span>
                 <span class="presence-where">
                   <template v-if="!row.alive">已死亡</template>
-                  <template v-else-if="row.location_name">位于{{ row.location_name }}</template>
+                  <template v-else-if="row.location_name">在{{ row.location_name }}</template>
                   <template v-else>位置未知</template>
-                  <template v-if="row.label && row.alive"> · {{ row.label }}</template>
                 </span>
               </li>
             </ul>
+            <button
+              v-if="presenceView.length"
+              class="link-btn quick-add"
+              title="用一句话记进世界页（同 Alt+N），你过目确认后这里自动更新"
+              @click="openQuickNote"
+            >少了谁？补一句</button>
           </section>
 
-          <!-- 脚下 -->
-          <section v-if="slice.scene" class="setting-group">
-            <div class="setting-group-label">
-              脚下
-              <button
-                class="pin-btn"
-                :title="slice.scene.pinned ? '取消钉定，回落事件/在场推演' : '钉定本章地点（优先于推演）'"
-                @click="slice.scene.pinned ? unpinScene() : pinScene()"
-              >
-                {{ slice.scene.pinned ? '📌 已钉 · 取消' : '钉住' }}
-              </button>
-            </div>
-            <div class="scene-row">
+          <!-- 脚下（直接选地点即钉住；不选则按事件推算） -->
+          <section class="setting-group">
+            <div class="setting-group-label">脚下<span class="muted">本章故事发生的地点</span></div>
+            <div v-if="slice.scene" class="scene-row">
               {{ slice.scene.name }}
               <span v-if="slice.scene.controlling_faction" class="faction-tag">
                 {{ slice.scene.controlling_faction }} 控制区
               </span>
+              <span v-if="slice.scene.pinned" class="pinned-tag" title="已钉住，不随事件推算变动">📌 已定</span>
             </div>
+            <div v-else class="empty-hint">还没定——不选就按事件推算。</div>
+            <div class="scene-actions">
+              <button class="link-btn" @click="toggleLocPicker">
+                {{ locPickerOpen ? '收起' : slice.scene?.pinned ? '换地方' : '选一个地方' }}
+              </button>
+              <button
+                v-if="slice.scene?.pinned"
+                class="link-btn"
+                title="取消钉住，回到按事件推算"
+                @click="unpinScene"
+              >取消钉住</button>
+            </div>
+            <ul v-if="locPickerOpen" class="loc-picker">
+              <li
+                v-for="loc in locationOptions"
+                :key="loc.id"
+                class="loc-option"
+                :class="{ current: slice.scene?.pinned && slice.scene.location_id === loc.id }"
+                @click="chooseLocation(loc)"
+              >{{ loc.name }}</li>
+              <li v-if="!locationOptions.length" class="loc-option loc-option--empty">
+                世界页还没有地点——先去世界页建一个
+              </li>
+            </ul>
           </section>
 
           <!-- 相遇提示（W5-lite：同地角色的戏剧机会；读者视角只显示全公开参与者的相遇——
                口径定夺：含 private 参与者的相遇是作者层信息，读者不该看到谁在场） -->
           <section v-if="visibleEncounters.length" class="setting-group">
-            <div class="setting-group-label">相遇</div>
+            <div class="setting-group-label">相遇<span class="muted">同在一地的角色，可能撞出戏</span></div>
             <div v-for="(enc, i) in visibleEncounters" :key="i" class="encounter-row">
               {{ enc.names.join(' × ') }}<span class="encounter-loc"> · {{ enc.location_name }}</span>
             </div>
@@ -405,9 +438,9 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 
           <!-- D4-2 比例尺距离（未标定整段缺席——零变化契约；作者视角信息，读者档隐藏） -->
           <section v-if="!readerView && (slice.proximities?.length || slice.nearest_anchor)" class="setting-group">
-            <div class="setting-group-label">距离（比例尺粗估）</div>
+            <div class="setting-group-label">距离（按地图粗估）</div>
             <div v-if="slice.nearest_anchor" class="encounter-row">
-              最近锚点 {{ slice.nearest_anchor.name }}<span class="encounter-loc"> · {{ slice.nearest_anchor.text }}</span>
+              最近地标 {{ slice.nearest_anchor.name }}<span class="encounter-loc"> · {{ slice.nearest_anchor.text }}</span>
             </div>
             <div v-for="(p, i) in slice.proximities || []" :key="'px' + i" class="encounter-row">
               {{ p.text }}
@@ -419,7 +452,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             v-if="!readerView && (slice.foreshadows.length || slice.expectations.length)"
             class="setting-group"
           >
-            <div class="setting-group-label">头顶的线</div>
+            <div class="setting-group-label">伏笔与期待<span class="muted">悬着的线，点击看详情</span></div>
             <ul class="thread-list">
               <li
                 v-for="f in foreshadowsShown"
@@ -498,7 +531,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           </section>
 
           <div class="usage-hint">
-            <p>在场与位置按世界事件推算而来；想改变此刻，去世界页录事件、Alt+N 速记一句话，或拖动时间轴。</p>
+            <p>这些都按世界页的事件推算。想改？去世界页记一笔（写作时按 Alt+N 也行），或拖世界页的时间轴。</p>
             <button class="go-world-btn subtle" @click="goWorld()">打开世界页</button>
           </div>
         </div>
@@ -561,14 +594,6 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .slice-time {
   color: var(--accent-500);
   font-size: 0.8rem;
-}
-.source-badge {
-  font-size: 0.65rem;
-  color: var(--text-muted);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 0.05rem 0.4rem;
-  cursor: help;
 }
 .reader-toggle {
   font-size: 0.62rem;
@@ -734,8 +759,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   display: flex;
   align-items: baseline;
   gap: 0.75rem;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border-color);
+  padding: 0.3rem 0.25rem;
   border-radius: 0.25rem;
   font-size: 0.78rem;
 }
@@ -746,7 +770,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   cursor: pointer;
 }
 .presence-row.clickable:hover {
-  border-color: var(--accent-500);
+  background: var(--hover-bg);
 }
 .presence-name {
   color: var(--text-primary);
@@ -757,12 +781,14 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   font-size: 0.72rem;
 }
 
+.quick-add {
+  margin-top: 0.25rem;
+}
+
 .scene-row {
   font-size: 0.8rem;
   color: var(--text-primary);
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  padding: 0.3rem 0.25rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -774,19 +800,44 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   border-radius: 999px;
   padding: 0.05rem 0.45rem;
 }
-.pin-btn {
-  margin-left: auto;
-  font-size: 0.62rem;
+.pinned-tag {
+  font-size: 0.68rem;
   color: var(--text-muted);
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  border-radius: 999px;
-  padding: 0.08rem 0.5rem;
+}
+.scene-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding-left: 0.25rem;
+}
+.loc-picker {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  background: var(--bg-canvas);
+  max-height: 10rem;
+  overflow-y: auto;
+}
+.loc-option {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  border-radius: 0.25rem;
   cursor: pointer;
 }
-.pin-btn:hover {
+.loc-option:hover {
+  background: var(--hover-bg);
+}
+.loc-option.current {
   color: var(--accent-500);
-  border-color: var(--accent-500);
+}
+.loc-option--empty {
+  color: var(--text-muted);
+  cursor: default;
+}
+.loc-option--empty:hover {
+  background: transparent;
 }
 
 .encounter-row {

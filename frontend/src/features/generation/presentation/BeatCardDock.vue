@@ -55,7 +55,7 @@ function onPick(card: DirectionCard | null) {
           <span class="beat-dock__num">{{ i + 1 }}</span>
           <span class="beat-dock__body">
             <span class="beat-dock__event">
-              <span v-if="card.is_branch" class="beat-dock__branch-mark" title="作者声明的岔路——选一个走向，即决此岔">⚡</span>
+              <span v-if="card.is_branch" class="beat-dock__branch-mark" title="这个情节你留了几种可能的发展——选一张卡就按它写">⚡</span>
               {{ card.event }}
               <!-- 地图来源小签（W5 桥：世界沙盘喂的卡——让某组相遇发生/错开） -->
               <span
@@ -67,7 +67,7 @@ function onPick(card: DirectionCard | null) {
               <span
                 v-if="card.serves_anchor && anchorText(card.serves_anchor)"
                 class="beat-dock__anchor-tag"
-                :title="'服务于谋篇锚点：' + anchorText(card.serves_anchor)"
+                :title="'这条建议帮你写到：' + anchorText(card.serves_anchor)"
                 @click.stop="flashAnchor(card.serves_anchor)"
               >⚑ {{ anchorText(card.serves_anchor) }}</span>
             </span>
