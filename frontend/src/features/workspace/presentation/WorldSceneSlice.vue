@@ -107,25 +107,24 @@ async function anchorHere() {
 }
 
 // ---- 本章时刻编辑（叙事锚 = 切片内容的螺丝）----
+// 内部存连续日数（Timestamp），编辑面按架空历法拆 年/月/日——作者不认日数
 const editingTime = ref(false)
-const timeDraft = ref('0')
-const draftYmd = computed(() => {
-  const n = Math.max(0, Math.floor(Number(timeDraft.value) || 0))
-  return breakdownTime(n)
-})
-const timePreview = computed(() => {
-  const ymd = draftYmd.value
-  return formatTime(fromYMD(ymd.year, ymd.month, ymd.day))
-})
+const draftYear = ref(1)
+const draftMonth = ref(1)
+const draftDay = ref(1)
+const draftT = computed(() => fromYMD(draftYear.value || 1, draftMonth.value || 1, draftDay.value || 1))
+const timePreview = computed(() => formatTime(draftT.value))
 function openTimeEditor() {
-  timeDraft.value = String(slice.value?.t ?? 0)
+  const ymd = breakdownTime(slice.value?.t ?? 0)
+  draftYear.value = ymd.year
+  draftMonth.value = ymd.month
+  draftDay.value = ymd.day
   editingTime.value = true
 }
 async function applyTime() {
   if (!props.chapterId || !currentBookId.value) return
-  const t = Math.max(0, Math.floor(Number(timeDraft.value) || 0))
   editingTime.value = false
-  await setNarrativeTime(currentBookId.value, props.chapterId, t)
+  await setNarrativeTime(currentBookId.value, props.chapterId, draftT.value)
 }
 async function clearAnchor() {
   if (!props.chapterId || !currentBookId.value) return
@@ -323,10 +322,15 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 
         <!-- 本章故事时间编辑 -->
         <div v-if="editingTime" class="time-editor" @click.stop>
-          <label>
-            故事日数
-            <input v-model="timeDraft" type="number" min="0" step="1" />
-          </label>
+          <div class="ymd-row">
+            第
+            <input v-model.number="draftYear" class="ymd-year" type="number" min="1" step="1" />
+            年
+            <input v-model.number="draftMonth" type="number" min="1" max="12" step="1" />
+            月
+            <input v-model.number="draftDay" type="number" min="1" max="30" step="1" />
+            日
+          </div>
           <span class="time-preview">{{ timePreview }}</span>
           <div class="time-actions">
             <button class="mini-btn primary" title="把本章固定在输入的时间" @click="applyTime">确定</button>
@@ -677,19 +681,23 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
-.time-editor label {
+.ymd-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 .time-editor input {
-  width: 6rem;
-  padding: 0.2rem 0.4rem;
+  width: 3rem;
+  padding: 0.2rem 0.3rem;
+  text-align: center;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
   border-radius: 0.25rem;
   color: var(--text-primary);
   font-size: 0.78rem;
+}
+.time-editor input.ymd-year {
+  width: 3.8rem;
 }
 .time-preview {
   color: var(--text-primary);

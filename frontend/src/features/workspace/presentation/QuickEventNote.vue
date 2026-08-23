@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { worldApi } from '../../../services/api/domain/world.api'
 import type { EventDraft } from '../../../services/api/domain/world.api'
-import { formatTime } from '../../world/engine/timeFormat'
+import { formatTime, breakdownTime, fromYMD } from '../../world/engine/timeFormat'
 import { EVENT_TEMPLATES, getTemplate } from '../../world/engine/eventTemplates'
 import type { EventType, WorldEntity, WorldLocation } from '../../world/engine/types'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
@@ -85,6 +85,25 @@ const typeLabel = computed(() =>
   draft.value ? getTemplate(draft.value.event_type as EventType)?.label || draft.value.event_type : ''
 )
 const timePreview = computed(() => (draft.value ? formatTime(draft.value.time_start) : ''))
+
+// 时刻编辑走 年/月/日（内部存连续日数 Timestamp，作者不认日数；fromYMD 自带 1-12/1-30 钳位）
+function ymdField(key: 'year' | 'month' | 'day') {
+  return computed({
+    get: () => breakdownTime(draft.value?.time_start ?? 0)[key],
+    set: (v: number) => {
+      if (!draft.value) return
+      const cur = breakdownTime(draft.value.time_start)
+      draft.value.time_start = fromYMD(
+        key === 'year' ? v : cur.year,
+        key === 'month' ? v : cur.month,
+        key === 'day' ? v : cur.day,
+      )
+    },
+  })
+}
+const draftYear = ymdField('year')
+const draftMonth = ymdField('month')
+const draftDay = ymdField('day')
 
 function removeParticipant(idx: number) {
   if (!draft.value) return
@@ -273,8 +292,16 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="qen-field">
-                时刻（世界日数）
-                <input v-model.number="draft.time_start" type="number" min="0" step="1" />
+                时刻
+                <span class="qen-ymd">
+                  第
+                  <input v-model.number="draftYear" class="qen-ymd-year" type="number" min="1" step="1" />
+                  年
+                  <input v-model.number="draftMonth" type="number" min="1" max="12" step="1" />
+                  月
+                  <input v-model.number="draftDay" type="number" min="1" max="30" step="1" />
+                  日
+                </span>
                 <span class="qen-preview">{{ timePreview }}</span>
               </label>
               <label v-if="draft.event_type === 'move'" class="qen-field">
@@ -420,6 +447,18 @@ onBeforeUnmount(() => {
 .qen-preview {
   font-size: 0.68rem;
   color: var(--accent-500);
+}
+.qen-ymd {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.qen-ymd input {
+  width: 3rem;
+  text-align: center;
+}
+.qen-ymd input.qen-ymd-year {
+  width: 3.8rem;
 }
 .qen-grid {
   display: grid;

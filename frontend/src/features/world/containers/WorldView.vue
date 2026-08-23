@@ -1070,7 +1070,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
                 class="evt-dot"
                 :style="{ background: EVENT_TYPE_COLOR[ev.event_type] || '#94a3b8' }"
               ></span>
-              <div class="sc-body">
+              <div class="sc-body sc-body--col">
                 <div class="evt-head">
                   <span class="sc-name">{{ eventLabel(ev.event_type) }}</span>
                   <span class="evt-time">{{ formatTime(ev.time_start) }}</span>
@@ -1791,6 +1791,12 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* 事件卡片：头行（类型+时刻）与备注纵向堆叠（基础 .sc-body 是横向行，直接复用会把备注挤到头行右侧并互相遮盖） */
+.sc-body--col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
 }
 .sc-name {
   font-size: 13px;
