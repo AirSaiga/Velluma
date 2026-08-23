@@ -399,6 +399,8 @@ export interface GenerationSession {
   triggerAdaptiveFinish: () => void
   /** 注入 adaptive 段落级连写函数（由 useAdaptiveAssist 注入，走向卡舱选定后触发） */
   setAdaptiveBurst: (fn: ((card: { event: string; anchors?: string[] } | null) => void) | null) => void
+  /** 注入 adaptive 零件即点取件函数（Tab 唤起卡片舱但无缓存零件时触发） */
+  setAdaptiveSummon: (fn: (() => void) | null) => void
 }
 
 export function useGenerationSession(): GenerationSession {
@@ -1601,6 +1603,13 @@ export function useGenerationSession(): GenerationSession {
     _adaptiveBurstFn = fn
   }
 
+  // adaptive 零件即点取件注入器：Tab 唤起卡片舱但无缓存零件时，由 WorkspaceView
+  // 注入（未激活章节先激活——Tab 是显式召唤，等同打字意图——再走停顿级心跳取件）
+  let _adaptiveSummonFn: (() => void) | null = null
+  function setAdaptiveSummon(fn: (() => void) | null) {
+    _adaptiveSummonFn = fn
+  }
+
   /** 失败重试：再次触发最近一次入口（startBeat / startRefinery 已记录 lastAction） */
   function retry() {
     if (generating.value) return
@@ -2157,6 +2166,29 @@ export function useGenerationSession(): GenerationSession {
       }
       return
     }
+    // Tab 结构闸（先于一切状态机门禁）：AI 辅助开启且焦点在正文编辑器内时，
+    // Tab 永远被消费，不走浏览器默认焦点导航——否则焦点顺序滑进副驾抽屉 tab 栏，
+    // 写作流被打断（2026-08-24 实测复现：未激活/沉淀中/幽灵在屏时按 Tab，
+    // 焦点跳到抽屉「打算」按钮）。焦点在编辑器外不碰（抽屉等控件键盘可达性不变）；
+    // Shift+Tab 放行，给键盘党留主动退出编辑器的出口。
+    if (e.key === 'Tab' && !e.shiftKey && assistEnabled.value) {
+      const tabTarget = e.target as HTMLElement | null
+      if (tabTarget?.isContentEditable) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!ghostActive.value) {
+          // 唤起卡片舱（零件有缓存即弹）；弹出失败=无缓存零件 → 即点取件，
+          // 停顿级心跳带回零件即弹（Tab 从「有时灵」变「必然有回应」）
+          if (stage.value === 'beat_authoring' || (
+            adaptiveMode.value && authorLane.value === 'composing'
+          )) {
+            showSparkDock()
+          }
+          if (!sparkDockVisible.value) _adaptiveSummonFn?.()
+        }
+        return
+      }
+    }
     // AI 辅助关闭（纯手写模式）：adaptive 分支全部不介入（Space 恢复普通空格、
     // Tab/Ctrl+Space/数字键/Ctrl+Enter 不拦截）。旧步进/创作路径（作者显式起的
     // 「规划本章」）不受影响。
@@ -2199,17 +2231,6 @@ export function useGenerationSession(): GenerationSession {
         clearAttachedParts()
         return
       }
-      return
-    }
-    // Tab：手动唤起 Spark Dock（parts 态——递设定物料做缝合锚点）。
-    // 旧路径 beat_authoring + 新路径 adaptive composing 均生效。
-    if (e.key === 'Tab' && !ghostActive.value && (
-      stage.value === 'beat_authoring'
-      || adaptiveComposing
-    )) {
-      e.preventDefault()
-      e.stopPropagation()
-      showSparkDock()
       return
     }
     // 数字键 1~4：走向卡舱打开时选定走向卡 → 触发 burst 连写
@@ -2410,6 +2431,7 @@ export function useGenerationSession(): GenerationSession {
     setAdaptiveFinish,
     triggerAdaptiveFinish,
     setAdaptiveBurst,
+    setAdaptiveSummon,
   }
 }
 

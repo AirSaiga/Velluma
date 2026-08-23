@@ -63,6 +63,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   let _lastActiveTs = 0
   let _continueAbort: AbortController | null = null
   let _heartbeatFailedOnce = false
+  let _summonInFlight = false  // Tab 即点取件在飞标记（连按不叠加 LLM 调用）
   // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
   let _lastCardSig = ''
   let _lastDockSig = ''
@@ -87,8 +88,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // 停顿心跳：4s 后发（若期间无新活动，作者卡住了）
     if (_pauseTimer) clearTimeout(_pauseTimer)
     _pauseTimer = setTimeout(() => {
-      // 仅光标在段尾才发停顿心跳（段中修改不算卡壳）
+      // 仅光标在段尾才算卡壳（段中修改不算）
       if (_isCursorAtParagraphEnd()) {
+        // 有缓存零件先秒弹（上次心跳存货），心跳在后台刷新零件；无缓存则等
+        // 响应带回再弹（响应侧有活状态守卫）——LLM 延迟退出唤醒关键路径。
+        // showSparkDock 自守：无零件/非 composing/幽灵在屏时静默 no-op
+        showSparkDock()
         void _sendHeartbeat(Date.now() - _lastActiveTs)
       }
     }, PAUSE_HEARTBEAT_MS)
@@ -101,11 +106,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     return $from.pos >= $from.end() - 1
   }
 
-  async function _sendHeartbeat(pausedMs: number) {
+  async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean }) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
     if (opts.authorLaneRef.value !== 'composing') return
     if (ghostActive.value) return  // 幽灵在屏时暂停心跳
+    const sendTs = _lastActiveTs  // 活动纪元：响应回来时比对，识别「发送后作者已动笔」
 
     const editor = chapterEditorHandle.value
     let wordCount = 0
@@ -131,7 +137,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         word_count: wordCount,
         segment_count: segmentCount,
         paused_ms: pausedMs,
-        cursor_at_paragraph_end: cursorAtEnd,
+        // Tab 显式召唤时光标未必在段尾，但「作者点名要零件」本身就是好时机——
+        // 后端 dock_generator 以段尾为生发闸，召唤一律放行（零件锚定段落文本不受影响）
+        cursor_at_paragraph_end: flags?.summoned ? true : cursorAtEnd,
         has_outline: hasOutline,
         outline_text: outlineText,
         recent_text: recentText.slice(0, 500),
@@ -148,8 +156,19 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       }))
       if (parts.length) {
         setSparkParts(parts)
-        // 停顿心跳且光标在段尾 → 触发 Dock 弹出（此时 sparkParts 已就绪，不会空舱）
-        if (pausedMs >= PAUSE_HEARTBEAT_MS && cursorAtEnd) {
+        // 弹舱看响应时刻的活状态，不用发送时刻的死快照：发送后作者重新动笔
+        // （_lastActiveTs 被刷新）或光标已离段尾 → 只静默更新零件供 Tab 用，不弹——
+        // 弹了也被下一个按键立刻收掉（2026-08-24 trace 实证：LLM 3~7s 延迟常使
+        // 响应落在下一次打字进行中，舱一闪即隐）。Tab 显式召唤例外：点名要的零件，直接弹。
+        const authorResumed = _lastActiveTs > sendTs
+        if (flags?.summoned) {
+          showSparkDock()
+        } else if (
+          pausedMs >= PAUSE_HEARTBEAT_MS
+          && cursorAtEnd
+          && !authorResumed
+          && _isCursorAtParagraphEnd()
+        ) {
           showSparkDock()
         }
       }
@@ -225,6 +244,18 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         opts.reportWarn?.('AI 辅助连接中断（不影响写作，恢复后自动重连）：' + (e?.message || '网络错误'))
       }
     }
+  }
+
+  // ---- 零件即点取件（Tab 显式召唤：无缓存零件时补一跳停顿级心跳）----
+  function summonParts() {
+    if (_summonInFlight) return  // 连按不叠加 LLM 调用
+    if (ghostActive.value) return
+    _summonInFlight = true
+    // 借停顿档（paused_ms=4000）让后端同步跑 dock_generator；summoned 标记让
+    // 响应侧跳过段尾/动笔守卫直接弹舱（作者点名要的零件）。期间思考点自动亮
+    // （停顿档 setThinkingPhase('perceiving')），等待有反馈。
+    void Promise.resolve(_sendHeartbeat(PAUSE_HEARTBEAT_MS, { summoned: true }))
+      .finally(() => { _summonInFlight = false })
   }
 
   // ---- 续写：stitch-ghost SSE 灌幽灵草稿 ----
@@ -525,9 +556,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   }
 
   function mount() {
+    // 打字（update）与光标移动（selectionUpdate）都算活动——「点过去想一想」也是
+    // 停顿场景；只挂 update 会让纯点击后的停顿不再武装计时器，心跳从此沉寂
     watch(chapterEditorHandle, (editor, prev) => {
       prev?.off('update', _onEditorActivity)
+      prev?.off('selectionUpdate', _onEditorActivity)
       editor?.on('update', _onEditorActivity)
+      editor?.on('selectionUpdate', _onEditorActivity)
     }, { immediate: true })
     window.addEventListener(OUTLINE_EXPAND_EVENT, _onOutlineExpand)
   }
@@ -539,10 +574,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
     const editor = chapterEditorHandle.value
     editor?.off('update', _onEditorActivity)
+    editor?.off('selectionUpdate', _onEditorActivity)
     window.removeEventListener(OUTLINE_EXPAND_EVENT, _onOutlineExpand)
     setSparkParts([])
     hideThinking()
   }
 
-  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, mount, unmount }
+  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, summonParts, mount, unmount }
 }

@@ -27,7 +27,7 @@ import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
 import GhostWarningsBar from '../../generation/presentation/GhostWarningsBar.vue'
-import { setExtraSparkParts } from '../../generation/composables/useSparkDock'
+import { setExtraSparkParts, setSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
 import { ghostActive, ghostWarnings } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
@@ -121,6 +121,13 @@ session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode
 session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
 session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
 session.setAdaptiveBurst((card) => adaptiveAssist.requestBurst(card))
+// Tab 无缓存零件时的即点取件：未激活章节先激活（Tab 是显式召唤，等同打字意图）再取件
+session.setAdaptiveSummon(() => {
+  const chapterId = selectedChapterId.value
+  if (!chapterId) return
+  _activateChapterAssist(chapterId)
+  adaptiveAssist.summonParts()
+})
 
 // 走向卡舱点选（鼠标路径；数字键路径在 session 键位状态机里走 setAdaptiveBurst）
 function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor?: string; is_branch?: boolean } | null) {
@@ -498,21 +505,29 @@ watch(selectedChapter, (ch, prev) => {
     _activatedChapterId = null
     // 切章时若在 adaptive 模式，退出（新章需重新激活）
     if (session.adaptiveMode.value) session.exitAdaptive()
+    // 切章清空缓存零件——旧章挂件是旧章上下文的产物，留着会被停顿秒弹错章节
+    setSparkParts([])
+    setExtraSparkParts([])
   }
 }, { immediate: true })
 
-function _onAuthorActivity() {
-  if (!assistEnabled.value) return  // AI 辅助关闭：纯手写，不激活 adaptive 辅助层
-  const chapterId = selectedChapterId.value
-  if (!chapterId) return
+/** 激活指定章节的 adaptive 辅助层（幂等）。打字 ≥4 字与 Tab 显式召唤共用入口。 */
+function _activateChapterAssist(chapterId: string) {
   if (_activatedChapterId === chapterId) return  // 已激活
   // 旧管线在跑则不抢（作者主动选了规划模式）
   if (session.generating.value && session.stage.value !== 'idle') return
   const editor = chapterEditorHandle.value
   const typed = editor ? editor.state.doc.textContent.trim().length : 0
-  if (typed < 4) return  // 作者刚开始打字，够 4 字才激活（防误触）
+  if (typed < 4) return  // 够 4 字才激活（空章防误触——空章走点火卡冷启动）
   _activatedChapterId = chapterId
   session.enterAdaptive(chapterId)
+}
+
+function _onAuthorActivity() {
+  if (!assistEnabled.value) return  // AI 辅助关闭：纯手写，不激活 adaptive 辅助层
+  const chapterId = selectedChapterId.value
+  if (!chapterId) return
+  _activateChapterAssist(chapterId)
 }
 watch(chapterEditorHandle, (editor, prev) => {
   prev?.off('update', _onAuthorActivity)
