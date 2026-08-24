@@ -5,6 +5,8 @@ import type { Timestamp } from './types'
  *
  * 内部存连续日计数（Timestamp=number，以创世为元年），显示层才转年月日。
  * 换架空历法只改本文件（默认：1 年 = 365 日，1 月 = 30 日，创世元年）。
+ * 年末余 5 日（每年第 361~365 天）记作「13 月 1~5 日」——365 ≠ 12×30，breakdownTime
+ * 与 fromYMD 必须对这 5 天成双射，编辑面「分解→重组」往返才不丢天。
  */
 const DAYS_PER_YEAR = 365
 const DAYS_PER_MONTH = 30
@@ -27,8 +29,12 @@ export function breakdownTime(t: Timestamp): YMD {
 
 export function fromYMD(year: number, month: number, day: number): Timestamp {
   const y = Math.max(1, year)
-  const m = Math.min(12, Math.max(1, month))
-  const d = Math.min(30, Math.max(1, day))
+  // 13 月 = 年末余日（365 = 12×30 + 5，仅 1~5 日）：breakdownTime 对每年最后 5 天
+  // 也产 13 月，此处同步接受，两函数才成双射——否则年末锚定的事件/章节被编辑确认
+  // 时会静默回退 30 天
+  const m = Math.min(13, Math.max(1, month))
+  const maxDay = m === 13 ? DAYS_PER_YEAR - 12 * DAYS_PER_MONTH : DAYS_PER_MONTH
+  const d = Math.min(maxDay, Math.max(1, day))
   return (y - 1) * DAYS_PER_YEAR + (m - 1) * DAYS_PER_MONTH + (d - 1)
 }
 
