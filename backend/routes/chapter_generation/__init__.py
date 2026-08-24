@@ -307,18 +307,10 @@ async def _build_audit_context(
             "word_target": chapter_card_obj.word_target,
         }
 
-    # 书级 StyleCard（CP2.2）：查 chapter_id=null 的书级卡
-    from backend.models import StyleCard
-    style_specs = await style_card_repo.find_all(
-        conditions=[
-            StyleCard.book_id == chapter.book_id,
-            StyleCard.chapter_id.is_(None),
-        ],
-        limit=1,
-    )
+    # 生效 StyleCard（Phase 4：章级特例整卡覆盖，回退书级；契约键不变）
+    sc = await style_card_repo.get_effective_card(chapter.book_id, chapter_id)
     style_card_dict = None
-    if style_specs:
-        sc = style_specs[0]
+    if sc:
         style_card_dict = {
             "negative_list": sc.negative_list or [],
             "dialogue_ratio_target": sc.dialogue_ratio_target,

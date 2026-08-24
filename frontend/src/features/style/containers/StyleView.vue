@@ -555,6 +555,8 @@ async function runAuditionOnce(track: 'baseline' | 'styled', text: string) {
         style_override: isBaseline ? null : currentDraftOverride(),
         use_samples: !isBaseline,
         target_chars: Math.min(2000, Math.max(80, text.length)),
+        // 章级编辑态：baseline 轨对照的应是该章生效卡（章级特例整卡覆盖）
+        ...(scopeChapterId.value ? { chapter_id: scopeChapterId.value } : {}),
       },
       {
         onChunk: (delta: string) => {

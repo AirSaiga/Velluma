@@ -31,6 +31,7 @@ from backend.repositories import (
     PlotLedgerRepository,
     RelationshipRepository,
     BookRepository,
+    StyleCardRepository,
 )
 from backend.services.context.budget import (
     ASSET_DESC_MAX_CHARS,
@@ -375,19 +376,16 @@ async def load_chapter_settings_bundle(
     # ---- 章节卡（must_hit_events / foreshadow_ops / continuity / purpose）----
     if bundle.book_id:
         try:
-            from backend.models import ChapterCard, StyleCard as StyleCardModel
+            from backend.models import ChapterCard
             cc_result = await db.execute(
                 select(ChapterCard).where(ChapterCard.chapter_id == chapter_id).limit(1)
             )
             bundle.chapter_card = cc_result.scalar_one_or_none()
-            # 书级 StyleCard（chapter_id=null）
-            sc_result = await db.execute(
-                select(StyleCardModel).where(
-                    StyleCardModel.book_id == bundle.book_id,
-                    StyleCardModel.chapter_id.is_(None),
-                ).limit(1)
+            # 生效 StyleCard（Phase 4 整卡覆盖语义）：章级特例卡存在即为本章
+            # 完整文风定义（负面清单亦整体替换书级），否则回退书级卡。
+            bundle.style_card = await StyleCardRepository(db).get_effective_card(
+                bundle.book_id, chapter_id,
             )
-            bundle.style_card = sc_result.scalar_one_or_none()
         except Exception:
             pass
 

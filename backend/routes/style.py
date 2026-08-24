@@ -752,7 +752,8 @@ async def style_audition(
     if request.style_override is not None:
         style_positive = render_style_positive(request.style_override)
     else:
-        card = await style_repo.get_effective_card(book_id, chapter_id=None)
+        # Phase 4：章级编辑态的 baseline 取该章生效卡（章级特例整卡覆盖）
+        card = await style_repo.get_effective_card(book_id, chapter_id=request.chapter_id)
         style_positive = render_style_positive(card)
 
     author_samples: List[str] = []
@@ -828,7 +829,8 @@ async def scan_negative(
     if not text.strip():
         raise HTTPException(status_code=400, detail="待扫描文本为空")
 
-    card = await style_repo.get_effective_card(book_id, chapter_id=None)
+    # Phase 4：扫描章级正文时禁忌面取该章生效卡（章级特例整卡覆盖）
+    card = await style_repo.get_effective_card(book_id, chapter_id=request.chapter_id)
 
     # 禁忌面归一（任务包 A）：四源合并唯一权威（db 直查 SystemCliche、
     # book.style_blacklist / style_cliche_exemptions、card.negative_list、静态词）

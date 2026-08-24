@@ -410,17 +410,14 @@ async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Opt
     hint: Optional[Dict] = None
     if len(content) >= 400:
         try:
-            from backend.models import StyleCard as StyleCardModel
+            from backend.repositories import StyleCardRepository
             from backend.services.style.fingerprint import compute_style_drift_hint
             from backend.services.validation.thresholds import CV_THRESHOLD_LO, CV_THRESHOLD_HI
 
-            sc_result = await db.execute(
-                select(StyleCardModel).where(
-                    StyleCardModel.book_id == chapter.book_id,
-                    StyleCardModel.chapter_id.is_(None),
-                ).limit(1)
+            # Phase 4：漂移参照取生效卡（章级特例整卡覆盖，回退书级）
+            card = await StyleCardRepository(db).get_effective_card(
+                chapter.book_id, chapter.id,
             )
-            card = sc_result.scalar_one_or_none()
             target = None
             if card is not None and card.dialogue_ratio_target is not None:
                 target = float(card.dialogue_ratio_target)
@@ -614,7 +611,8 @@ async def finish(
     # 不进任何 SSE 流式路径；任何失败仅 log，绝不阻塞完稿。
     semantic_hits: List[Dict] = []
     try:
-        from backend.models import Book, StyleCard as StyleCardModel
+        from backend.models import Book
+        from backend.repositories import StyleCardRepository
         from backend.routes.style import _plain_text
         from backend.services.style.prohibitions import load_prohibition_set
         from backend.services.style.semantic_match import semantic_scan_text
@@ -622,14 +620,12 @@ async def finish(
         chapter = await db.get(Chapter, str(chapter_id))
         if chapter is not None:
             book = await db.get(Book, str(chapter.book_id))
-            sc_result = await db.execute(
-                select(StyleCardModel).where(
-                    StyleCardModel.book_id == chapter.book_id,
-                    StyleCardModel.chapter_id.is_(None),
-                ).limit(1)
-            )
+            # Phase 4：语义扫描禁忌面取生效卡（章级特例整卡覆盖，回退书级）
             ps = await load_prohibition_set(
-                db, book=book, style_card=sc_result.scalar_one_or_none(),
+                db, book=book,
+                style_card=await StyleCardRepository(db).get_effective_card(
+                    chapter.book_id, chapter.id,
+                ),
             )
             content = _plain_text(chapter.content_text or "")
             semantic_hits = await semantic_scan_text(content, ps)

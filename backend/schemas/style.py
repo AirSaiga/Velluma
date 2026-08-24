@@ -288,12 +288,14 @@ class StyleAuditionRequest(BaseModel):
     """试听请求（文风页试衣间）：给定段落 + 文风配置 → 走真实注入管线改写。
 
     style_override 非空时用其渲染画像/禁词（未保存的草稿配置可试听，
-    A/B 对照的机制基础）；为空用已存书级文风卡。
+    A/B 对照的机制基础）；为空用已存生效文风卡（chapter_id 指定时章级
+    特例整卡覆盖，Phase 4）。
     """
     text: str = Field(..., min_length=10, max_length=4000, description="待试听段落")
     style_override: Optional[StyleCardBase] = Field(None, description="草稿文风配置（不落库）")
     use_samples: bool = Field(True, description="是否注入作者笔迹示范（A/B 基线版传 False）")
     target_chars: int = Field(400, ge=80, le=2000, description="目标字数（约等于原段）")
+    chapter_id: Optional[UUID] = Field(None, description="章级编辑态传入，baseline 取该章生效卡")
 
 
 class StyleScanNegativeRequest(BaseModel):

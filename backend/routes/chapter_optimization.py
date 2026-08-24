@@ -142,22 +142,19 @@ async def optimize_selection(
 
 
 async def _build_selection_style_context(db, chapter) -> str:
-    """拼装选区改写的文风约束块（书级文风卡画像+禁词 + 1 条笔迹示范）。
+    """拼装选区改写的文风约束块（生效文风卡画像+禁词 + 1 条笔迹示范）。
 
     纯增量：任一部分缺失就跳过；全空返回 ""（调用方 prompt 零变化）。
+    Phase 4：章级特例卡存在即整卡生效，回退书级。
     """
     parts = []
     try:
-        from backend.models import StyleCard as StyleCardModel
+        from backend.repositories import StyleCardRepository
         from backend.services.context.settings_bundle import render_style_positive
 
-        result = await db.execute(
-            select(StyleCardModel).where(
-                StyleCardModel.book_id == chapter.book_id,
-                StyleCardModel.chapter_id.is_(None),
-            ).limit(1)
+        style_card = await StyleCardRepository(db).get_effective_card(
+            chapter.book_id, chapter.id,
         )
-        style_card = result.scalar_one_or_none()
         if style_card:
             positive = render_style_positive(style_card)
             if positive:
@@ -198,7 +195,7 @@ class DefatSelectionRequest(BaseModel):
     must_keep: Optional[List[str]] = Field(
         None, description="洗涤必须保留的锚点词（防洗掉情节硬元素）"
     )
-    chapter_id: Optional[str] = Field(None, description="章节 ID（取书级负面清单喂洗涤）")
+    chapter_id: Optional[str] = Field(None, description="章节 ID（取生效负面清单喂洗涤，章级特例优先）")
     book_id: Optional[str] = Field(None, description="书籍 ID（无章节上下文时的兜底）")
 
 
@@ -227,14 +224,12 @@ async def defat_selection(
     book_id = str(chapter.book_id) if chapter else (request.book_id or "")
     if book_id:
         try:
-            from backend.models import Book as BookModel, StyleCard as StyleCardModel
-            sc_result = await db.execute(
-                select(StyleCardModel).where(
-                    StyleCardModel.book_id == book_id,
-                    StyleCardModel.chapter_id.is_(None),
-                ).limit(1)
+            from backend.models import Book as BookModel
+            from backend.repositories import StyleCardRepository
+            # Phase 4：章级特例整卡覆盖——有章节上下文时生效卡优先章级
+            card = await StyleCardRepository(db).get_effective_card(
+                book_id, chapter.id if chapter else None,
             )
-            card = sc_result.scalar_one_or_none()
             from backend.services.style.prohibitions import load_prohibition_set
             ps = await load_prohibition_set(
                 db, book=await db.get(BookModel, book_id), style_card=card,

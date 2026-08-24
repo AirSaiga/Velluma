@@ -63,7 +63,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
-from backend.models import Chapter, StyleCard
+from backend.models import Chapter
 from backend.repositories import (
     ChapterRepository, BookRepository, PlotLedgerRepository,
     ChapterCardRepository, StyleCardRepository,
@@ -125,15 +125,8 @@ async def _load_adf_context(
 
     chapter_card = await cc_repo.get_by_chapter(chapter.id)
 
-    # 书级 StyleCard
-    style_specs = await style_card_repo.find_all(
-        conditions=[
-            StyleCard.book_id == chapter.book_id,
-            StyleCard.chapter_id.is_(None),
-        ],
-        limit=1,
-    )
-    style_card = style_specs[0] if style_specs else None
+    # 生效 StyleCard（Phase 4：章级特例整卡覆盖，回退书级）
+    style_card = await style_card_repo.get_effective_card(chapter.book_id, chapter.id)
 
     repos = {
         "chapter": chapter_repo,

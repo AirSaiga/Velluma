@@ -472,6 +472,7 @@ export const styleApi = {
       style_override?: Partial<StyleCard> | null
       use_samples?: boolean
       target_chars?: number
+      chapter_id?: string
     },
     handlers: { onChunk?: (delta: string) => void; onDone?: (text: string) => void; onError?: (msg: string) => void },
     signal?: AbortSignal,

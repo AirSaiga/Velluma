@@ -41,7 +41,6 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_db
@@ -125,19 +124,16 @@ async def _build_refinery_context(
     # 章节主旨
     purpose = (getattr(chapter, "outline_text", "") or "")[:300]
 
-    # 文风卡（书级）+ 作者样本（S2 E5）
+    # 文风卡（Phase 4：章级特例整卡覆盖，回退书级）+ 作者样本（S2 E5）
     # 禁忌面归一（任务包 A）：负面禁词改走 prohibitions.py 四源合并
     # （系统陈词 + 文风卡负面清单 + 书级黑名单 + 静态反 AI 词），顿号串前 30
     style_negative_terms = ""
     try:
-        from backend.models import Book as BookModel, StyleCard as StyleCardModel
-        sc_result = await db.execute(
-            select(StyleCardModel).where(
-                StyleCardModel.book_id == chapter.book_id,
-                StyleCardModel.chapter_id.is_(None),
-            ).limit(1)
+        from backend.models import Book as BookModel
+        from backend.repositories import StyleCardRepository
+        style_card = await StyleCardRepository(db).get_effective_card(
+            chapter.book_id, chapter.id,
         )
-        style_card = sc_result.scalar_one_or_none()
         from backend.services.style.prohibitions import load_prohibition_set
         ps = await load_prohibition_set(
             db,
