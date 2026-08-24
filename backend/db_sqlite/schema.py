@@ -66,6 +66,7 @@ async def init_db_sqlite(engine, sessionmaker: Optional[Any] = None) -> None:
 
     if sessionmaker is not None:
         await _seed_system_cliches_sqlite(sessionmaker)
+        await _migrate_style_blacklist_sqlite(sessionmaker)
 
 
 async def _sqlite_table_columns(conn, table_name: str) -> Optional[set[str]]:
@@ -156,3 +157,18 @@ async def _seed_system_cliches_sqlite(sessionmaker) -> None:
                 logger.info(f"[INIT-SQLITE] SystemCliche 表已种子化 {inserted} 条默认禁词")
     except Exception as e:
         logger.warning(f"[INIT-SQLITE] SystemCliche 种子化失败（不阻断启动）: {e}")
+
+
+async def _migrate_style_blacklist_sqlite(sessionmaker) -> None:
+    """style_blacklist → 书级 StyleCard.negative_list 迁移（复用 database.py 单一实现）。
+
+    两侧共用同一 ORM 实现（方言无关）；本包装只负责开会话 + 兜底 try/except，
+    迁移失败只 log 不阻断启动（语义同 PG 侧 init_db 挂点）。
+    """
+    from backend.database import _migrate_style_blacklist_into_negative_cards
+
+    try:
+        async with sessionmaker() as session:
+            await _migrate_style_blacklist_into_negative_cards(session)
+    except Exception as e:
+        logger.error(f"[MIGRATION-SQLITE] style_blacklist → negative_list 迁移失败（不阻断启动）: {e}")

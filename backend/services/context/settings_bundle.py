@@ -95,7 +95,6 @@ class SettingsBundle:
     style_card: Any = None
     # 书级硬约束
     core_motifs_taboos: str = ""
-    style_blacklist: List[str] = field(default_factory=list)
     rolling_summary: str = ""
     # 章节元信息（便捷访问）
     chapter_id: str = ""
@@ -122,8 +121,9 @@ class SettingsBundle:
     character_secrets: List[Dict[str, str]] = field(default_factory=list)
     # ---- 禁忌面归一（任务包 A，services/style/prohibitions.py 唯一权威）----
     # 四源合并（SystemCliche + negative_list + style_blacklist + 静态反 AI 词）
-    # 的编译视图。None = 未加载/加载失败，消费侧回退旧 _merge_banned_words
-    # 路径（deprecated 回退，Phase 1 末删除）。类型 Any：避免与 ORM 层耦合。
+    # 的编译视图。None = 未加载/加载失败——任务包 B 起旧三源合并回退已删，
+    # None 时消费侧降级为空（load_prohibition_set 内部各层独立降级，整体
+    # None 仅在极端异常时出现）。类型 Any：避免与 ORM 层耦合。
     prohibitions: Any = None
 
     def to_prompt_context(self) -> Dict[str, Any]:
@@ -146,11 +146,11 @@ class SettingsBundle:
             "previous_summary": self.previous_summary or "",
             "chapter_card": _chapter_card_text(self.chapter_card),
             # 禁忌面归一：prohibitions 已加载时走唯一权威（四源合并、顿号串
-            # 截 BANNED_WORDS_PROMPT_MAX_ENTRIES）；None 回退旧三源合并
+            # 截 BANNED_WORDS_PROMPT_MAX_ENTRIES）；None（极端加载失败）降级空串
             "style_negative": (
                 self.prohibitions.prompt_text(BANNED_WORDS_PROMPT_MAX_ENTRIES)
                 if self.prohibitions is not None
-                else _style_negative_text(self.style_card, self.style_blacklist)
+                else ""
             ),
             "style_positive": render_style_positive(self.style_card),
             "rolling_summary": self.rolling_summary[:ROLLING_SUMMARY_MAX_CHARS] if self.rolling_summary else "",
@@ -164,7 +164,7 @@ class SettingsBundle:
 
         - canon_private_labels：Canon [private] 节点的标签词（正文不许直接说出）
         - canon_public_facts：Canon [public] 已建立事实（必须一致）
-        - banned_words：禁词合并（style_blacklist + StyleCard.negative_list + 禁词表）
+        - banned_words：禁词合并（StyleCard.negative_list + 禁词表等四源，prohibitions 唯一权威）
         - character_statics：角色永恒设定（防 OOC）。⚠ A1 起排除 private 实体——
           唯一消费方 build_dock_generator_prompt 把它拼进挂件生发 prompt（prompt
           轨必须排除 private props）；算法轨需要全量档案的（如 sediment 冲突检测）
@@ -175,11 +175,11 @@ class SettingsBundle:
             "canon_private_labels": _extract_canon_private_labels(self.canon_context),
             "canon_public_facts": _extract_canon_public_facts(self.canon_context),
             # 禁忌面归一：prohibitions 已加载时走唯一权威（四源合并、前
-            # BANNED_WORDS_MERGED_MAX_ENTRIES 条）；None 回退旧三源合并
+            # BANNED_WORDS_MERGED_MAX_ENTRIES 条）；None（极端加载失败）降级空表
             "banned_words": (
                 self.prohibitions.words(BANNED_WORDS_MERGED_MAX_ENTRIES)
                 if self.prohibitions is not None
-                else _merge_banned_words(self.style_card, self.style_blacklist)
+                else []
             ),
             "character_statics": {
                 _entity_name(e): (_get_attr_nested(e, "character", "static_prompt") or "")
@@ -394,7 +394,6 @@ async def load_chapter_settings_bundle(
     # ---- 书级硬约束 ----
     if bundle.book:
         bundle.core_motifs_taboos = getattr(bundle.book, "core_motifs_taboos", "") or ""
-        bundle.style_blacklist = getattr(bundle.book, "style_blacklist", []) or []
         bundle.rolling_summary = getattr(bundle.book, "rolling_summary", "") or ""
 
     # ---- 禁忌面（任务包 A 归一：四源合并唯一权威）----
@@ -586,43 +585,6 @@ def _extract_canon_public_facts(canon_context: str) -> List[str]:
     return [ln[:CANON_PUBLIC_FACT_MAX_CHARS] for ln in lines][:CANON_PUBLIC_FACT_MAX_ENTRIES]
 
 
-def _merge_banned_words(style_card: Any, style_blacklist: List[str]) -> List[str]:
-    """合并禁词来源：style_blacklist（书级）+ StyleCard.negative_list + 反 AI 腔禁词表。
-
-    deprecated 回退，Phase 1 末删除——禁忌面已归一至
-    services/style/prohibitions.py 的 load_prohibition_set（四源合并）。
-    本函数仅在 bundle.prohibitions 为 None（加载失败）时被
-    hard_constraints()["banned_words"] 回退使用。
-    """
-    words: List[str] = []
-    # 书级 style_blacklist
-    for w in (style_blacklist or []):
-        if isinstance(w, str) and w not in words:
-            words.append(w)
-        elif isinstance(w, dict):
-            term = w.get("word") or w.get("phrase") or ""
-            if term and term not in words:
-                words.append(term)
-    # StyleCard.negative_list
-    neg = _get_attr(style_card, "negative_list") or []
-    for item in neg:
-        if isinstance(item, str) and item not in words:
-            words.append(item)
-        elif isinstance(item, dict):
-            term = item.get("word") or item.get("phrase") or ""
-            if term and term not in words:
-                words.append(term)
-    # 反 AI 腔禁词表（复用）
-    try:
-        from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
-        for w in DEFAULT_BAN_LIST.banned_words:
-            if w not in words:
-                words.append(w)
-    except Exception:
-        pass
-    return words[:BANNED_WORDS_MERGED_MAX_ENTRIES]  # 上限防 prompt 膨胀
-
-
 def _chapter_card_text(card: Any) -> str:
     """章节卡文本（purpose + must_hit + foreshadow_ops + continuity）。"""
     if not card:
@@ -648,18 +610,6 @@ def _chapter_card_text(card: Any) -> str:
     if isinstance(cont, dict) and cont:
         parts.append(f"衔接：{cont.get('from_chapter', '')} → 本章（{cont.get('time_gap', '')}）")
     return "\n".join(parts)
-
-
-def _style_negative_text(style_card: Any, style_blacklist: List[str]) -> str:
-    """禁词/禁句式文本。
-
-    deprecated 回退，Phase 1 末删除——禁忌面已归一至
-    services/style/prohibitions.py（prompt_text 同口径顿号串）。
-    本函数仅在 bundle.prohibitions 为 None（加载失败）时被
-    to_prompt_context()["style_negative"] 回退使用。
-    """
-    words = _merge_banned_words(style_card, style_blacklist)
-    return "、".join(words[:BANNED_WORDS_PROMPT_MAX_ENTRIES]) if words else ""
 
 
 # ============================================================

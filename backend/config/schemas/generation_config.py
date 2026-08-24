@@ -102,11 +102,12 @@ class StoryConfig(BaseModel):
     themes_and_taboos: str = Field(default="", description="核心主题与禁忌")
     worldview_settings: Dict[str, Any] = Field(default_factory=dict, description="世界观设定集")
     golden_snippets: List[str] = Field(default_factory=list, description="金句模板")
-    style_blacklist: List[str] = Field(default_factory=list, description="风格黑名单")
-    
+    # 双写收敛（任务包 B）：style_blacklist 字段已删——历史书级黑名单已迁移并入
+    # style_cards.negative_list（prohibitions.py 消费），本配置层无任何下游读者。
+
     # 推导字段
     style_complexity: float = Field(default=0.5, ge=0.0, le=1.0, description="风格复杂度（影响 prompt 长度）")
-    
+
     @classmethod
     def from_book(cls, book: Any) -> "StoryConfig":
         """从 Book 实体构建配置"""
@@ -116,7 +117,6 @@ class StoryConfig(BaseModel):
             themes_and_taboos=getattr(book, "core_motifs_taboos", "") or "",
             worldview_settings=getattr(book, "worldview_settings", {}) or {},
             golden_snippets=getattr(book, "golden_snippets", []) or [],
-            style_blacklist=getattr(book, "style_blacklist", []) or [],
         )
 
 

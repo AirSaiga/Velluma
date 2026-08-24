@@ -157,14 +157,6 @@ class CritiqueResponse(BaseModel):
     overall_praise: str
 
 
-class GoldenSnippetsUpdate(BaseModel):
-    golden_snippets: List[str]
-
-
-class StyleBlacklistUpdate(BaseModel):
-    style_blacklist: List[str]
-
-
 class ProxyConfig(BaseModel):
     enabled: bool
     url: str

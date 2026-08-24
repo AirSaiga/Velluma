@@ -393,26 +393,9 @@ class TestFinditerParity:
 
 
 # ============================================================
-# 与 settings_bundle._merge_banned_words 的集合对拍
+# 与旧 settings_bundle._merge_banned_words 的集合对拍——
+# 已随任务包 B 删除（deprecated 回退函数退役，prohibitions 成为唯一权威）
 # ============================================================
-
-class TestOldMergeParity:
-    def test_set_equality_without_system_layer(self, monkeypatch):
-        from backend.services.context.settings_bundle import _merge_banned_words
-
-        _mock_system_empty(monkeypatch)
-        card = _FakeCard(negative_list=[{"word": "负面甲"}, {"phrase": "负面乙"}])
-        blacklist = ["黑一", {"word": "黑二", "alternative": "x"}]
-
-        ps = _load(book=_FakeBook(style_blacklist=blacklist), style_card=card)
-        old = _merge_banned_words(card, blacklist)
-
-        assert set(old) == set(ps.words(60))
-        assert {"负面甲", "负面乙", "黑一", "黑二"} <= set(old)
-        assert set(DEFAULT_BAN_LIST.banned_words) <= set(old)
-        # 顺序是有意变化（旧：blacklist → negative → static；
-        # 新：negative → blacklist → static），只锁集合
-        assert ps.words(60)[:2] == ["负面甲", "负面乙"]
 
 
 # ============================================================

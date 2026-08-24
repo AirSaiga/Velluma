@@ -20,7 +20,7 @@ import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
 import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHistory'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { bookApi, styleApi } from '../services/api/domain'
+import { styleApi } from '../services/api/domain'
 import Icon from './Icon.vue'
 import { useToast } from '../composables/useToast'
 
@@ -163,37 +163,24 @@ async function addToGoldenSnippets() {
     return
   }
   try {
-    const currentBook = await bookApi.get(props.bookId)
-    const currentSnippets = currentBook.golden_snippets || []
-    currentSnippets.push(selectedText)
-    await bookApi.update(props.bookId, { golden_snippets: currentSnippets })
-    // S3 文风喂养通路 + S4 撤销胶囊：黄金片段同时汇入文风样本库
-    // （source=golden_snippet），6 秒内可撤销（撤销只撤样本，黄金锚点保留）
+    // 双写收敛（任务包 B）：黄金片段只汇入文风样本库（source=golden_snippet）；
+    // 旧 books.golden_snippets 表冻结只读（存量经文风页「from-golden」导入收编），
+    // 不再双写。6 秒撤销胶囊即完整撤销（撤销只撤样本，正是全部副作用）。
     const sample = await styleApi.createSample(props.bookId, {
       content: selectedText,
       scene_type: 'general',
       source: 'golden_snippet',
-    }).catch((e) => {
-      console.warn('黄金片段汇入文风样本库失败（不影响黄金锚点）:', e)
-      return null
     })
     styleApi.logStyleEvent(props.bookId, 'golden_to_sample')
-    showToast(
-      sample ? '已加入黄金片段 · 已汇入文风样本库' : '已加入黄金片段（样本库汇入失败）',
-      sample ? 'success' : 'warning',
-      6000,
-      sample
-        ? {
-            label: '撤销',
-            onClick: () => {
-              styleApi.deleteSample(props.bookId, sample.id).catch(() => {})
-            },
-          }
-        : undefined,
-    )
+    showToast('已汇入文风样本库', 'success', 6000, {
+      label: '撤销',
+      onClick: () => {
+        styleApi.deleteSample(props.bookId, sample.id).catch(() => {})
+      },
+    })
   } catch (e) {
-    console.error('添加黄金片段失败:', e)
-    showToast('添加失败: ' + (e.message || ''), 'error')
+    console.error('汇入文风样本库失败:', e)
+    showToast('汇入失败: ' + (e.message || ''), 'error')
   }
 }
 

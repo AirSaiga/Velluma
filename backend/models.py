@@ -1048,7 +1048,8 @@ class StyleInboxItem(Base):
     - 写作台「这不像我」/ 负面清单抓虫等产生的**候选**，先进收件箱待作者过目，
       绝不直接生效（红线：候选不落库生效，作者裁决即闸门）
     - 与 world_event_candidates 同构的物理隔离候选池（✓/✗/撤销契约）
-    - confirm 负面候选 → 写入书级 StyleCard.negative_list + 同步 book.style_blacklist
+    - confirm 负面候选 → 写入书级 StyleCard.negative_list（任务包 B 起不再
+      同步 book.style_blacklist——该列冻结只读，负面清单唯一权威）
 
     kind 语义：
     - negative_candidate  禁词候选 {word, alternative?, source_text?}

@@ -299,14 +299,16 @@ ROLLING_SUMMARY_MAX_CHARS = 500
 # 首版出处：services/context/settings_bundle.py SettingsBundle
 CORE_MOTIFS_MAX_CHARS = 300
 
-# 禁词合并上限（style_blacklist + negative_list + 反 AI 腔禁词表）——
-# 三源合并去重后截 60，防 prompt 膨胀。
-# 首版出处：services/context/settings_bundle.py _merge_banned_words
+# 禁词合并上限（prohibitions 四源合并：SystemCliche + style_blacklist +
+# negative_list + 反 AI 腔禁词表）——合并去重后截 60，防 prompt 膨胀。
+# 首版出处：settings_bundle._merge_banned_words（已随任务包 B 双写收敛删除）；
+# 现权威消费方：services/style/prohibitions.py
 BANNED_WORDS_MERGED_MAX_ENTRIES = 60
 
 # 禁词 prompt 文本行上限——style_negative 顿号串再截 30（校对列表与
 # 文本行两级口径）。
-# 首版出处：services/context/settings_bundle.py _style_negative_text
+# 首版出处：settings_bundle._style_negative_text（已随任务包 B 双写收敛删除）；
+# 现权威消费方：services/style/prohibitions.py（prompt_text 同口径顿号串）
 BANNED_WORDS_PROMPT_MAX_ENTRIES = 30
 
 # 开放伏笔（open_hooks）prompt 行数上限——「本章可呼应」的提示面。

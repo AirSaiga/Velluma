@@ -11,11 +11,8 @@ export const bookApi = {
   updateWorldview: (id: string, data: any) =>
     requestJson(`/books/${id}/worldview`, { method: 'PATCH', body: JSON.stringify(data) }),
   getGoldenSnippets: (id: string) => requestJson(`/books/${id}/golden-snippets`),
-  updateGoldenSnippets: (id: string, data: string[]) =>
-    requestJson(`/books/${id}/golden-snippets`, { method: 'PUT', body: JSON.stringify({ golden_snippets: data }) }),
-  getStyleBlacklist: (id: string) => requestJson(`/books/${id}/style-blacklist`),
-  updateStyleBlacklist: (id: string, data: string[]) =>
-    requestJson(`/books/${id}/style-blacklist`, { method: 'PUT', body: JSON.stringify({ style_blacklist: data }) }),
+  // 双写收敛（任务包 B）：updateGoldenSnippets / GET+PUT style-blacklist 通道已删——
+  // 黄金片段只写文风样本库（styleApi.createSample），负面清单唯一入口是 style-card。
 }
 
 export const characterApi = {

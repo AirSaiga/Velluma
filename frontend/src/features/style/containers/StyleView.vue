@@ -77,7 +77,8 @@ const dialogueRatioTarget = ref<number | null>(null)
 const paragraphRhythm = ref('')
 const styleKnobs = ref<Record<string, number>>({})
 const lockedKeys = ref<string[]>([])
-const styleBlacklistSync = ref<string[]>([])
+// 双写收敛（任务包 B）：book.style_blacklist 同步通道已删——历史书级黑名单由后端
+// 启动迁移并入 negative_list，负面清单唯一权威是文风卡。
 
 // 系统陈词库 + 本书豁免（补全批）
 const systemCliches = ref<Array<{ id: string; pattern: string; alternative?: string | null; severity: string }>>([])
@@ -173,9 +174,8 @@ async function loadAll() {
   if (!bookId) return
   isLoading.value = true
   try {
-    const [styleCard, blacklistData, samplesData, fingerprintData, inboxData, chapterData, exemptionData, systemClicheData, goldenData] = await Promise.all([
+    const [styleCard, samplesData, fingerprintData, inboxData, chapterData, exemptionData, systemClicheData, goldenData] = await Promise.all([
       styleApi.get(bookId).catch(() => null),
-      bookApi.getStyleBlacklist(bookId).catch(() => ({ style_blacklist: [] })),
       styleApi.listSamples(bookId).catch(() => []),
       styleApi.getFingerprint(bookId, true, 50).catch(() => null),
       styleApi.listInbox(bookId).catch(() => []),
@@ -203,7 +203,6 @@ async function loadAll() {
       if (!(key in positiveProfile.value)) positiveProfile.value[key] = ''
     }
 
-    styleBlacklistSync.value = (blacklistData as { style_blacklist?: string[] })?.style_blacklist || []
     samples.value = samplesData as AuthorSample[]
     fingerprint.value = fingerprintData
     inboxItems.value = inboxData as StyleInboxItem[]
@@ -266,17 +265,6 @@ async function saveStyleCard() {
     if (scopeChapterId.value) payload.chapter_id = scopeChapterId.value
     await styleApi.upsert(bookId, payload)
     if (scopeChapterId.value) scopeHasOverride.value = true
-
-    // 兼容同步（仅书级）：negative_list ↔ book.style_blacklist（旧消费方仍读书级黑名单）
-    if (!scopeChapterId.value) {
-      const blacklistFromNegative = negativeList.value
-        .filter(n => n.word.trim())
-        .map(n => n.word.trim())
-      if (JSON.stringify(blacklistFromNegative) !== JSON.stringify(styleBlacklistSync.value)) {
-        styleBlacklistSync.value = blacklistFromNegative
-        await bookApi.updateStyleBlacklist(bookId, blacklistFromNegative).catch(() => {})
-      }
-    }
 
     status.value = 'saved'
     setTimeout(() => {

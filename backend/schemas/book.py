@@ -51,12 +51,14 @@ class BookUpdate(BaseModel):
     core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = None
     golden_snippets: Optional[list] = None
-    style_blacklist: Optional[list] = None
     outline: Optional[str] = None
     rolling_summary: Optional[str] = None
     # D4 比例尺标定（docs/map-scale-spatial.md §2.1）：refs ≤5 取均值；None=不动，
     # 显式空 dict = 清除标定（未标定书距离功能静默降级）
     map_scale: Optional[dict] = None
+    # 双写收敛（任务包 B）：style_blacklist 不再接受更新——历史书级黑名单已启动
+    # 迁移并入 style_cards.negative_list，该列冻结只读（BookBase/BookResponse 保留
+    # 该字段仅作只读输出）
 
 
 class BookResponse(BookBase):

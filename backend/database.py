@@ -35,7 +35,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional, Sequence
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
@@ -851,6 +851,80 @@ async def _migrate_legacy_profile_keys(conn) -> None:
     )
 
 
+async def _migrate_style_blacklist_into_negative_cards(session: AsyncSession) -> None:
+    """books.style_blacklist（历史书级黑名单）→ 书级 StyleCard.negative_list 一次性数据迁移（幂等）。
+
+    双写收敛（任务包 B）：负面清单唯一权威是 style_cards.negative_list（经
+    services/style/prohibitions.py 四源合并消费），books.style_blacklist 冻结为
+    只读列。迁移完成后置空书级黑名单——清空即「已迁移」标记，二跑不再命中
+    非空条件（天然幂等，跑过一次后后续启动零写入）。
+
+    策略：书行数少（单机桌面），SELECT 全部 Python 侧过滤；逐条归并
+    （word 去重、已有条目无 alternative 而新条有则补全）；无书级卡的书自动
+    建空卡再归并。副作用：由调用方包裹 try/except（迁移失败只 log，绝不阻断启动）。
+    """
+    from backend.models import Book, StyleCard
+
+    result = await session.execute(select(Book))
+    books = result.scalars().all()
+    migrated_books = 0
+    merged_words = 0
+    for book in books:
+        blacklist = getattr(book, "style_blacklist", None)
+        if not isinstance(blacklist, list) or not blacklist:
+            continue
+        card = (
+            await session.execute(
+                select(StyleCard)
+                .where(StyleCard.book_id == book.id, StyleCard.chapter_id.is_(None))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if card is None:
+            card = StyleCard(book_id=book.id, negative_list=[])
+            session.add(card)
+        # 整体赋新列表触发 ORM 变更检测（JSONB 无 Mutable 追踪，原地改不落库）
+        negative = list(card.negative_list or [])
+
+        def _entry_word(e: Any) -> str:
+            if isinstance(e, dict):
+                return str(e.get("word") or e.get("phrase") or "").strip()
+            if isinstance(e, str):
+                return e.strip()
+            return ""
+
+        for item in blacklist:
+            if isinstance(item, dict):
+                word = str(item.get("word") or item.get("phrase") or "").strip()
+                alt = str(item.get("alternative") or "").strip() or None
+            elif isinstance(item, str):
+                word = item.strip()
+                alt = None
+            else:
+                continue
+            if not word:
+                continue
+            existing = next((e for e in negative if isinstance(e, dict) and _entry_word(e) == word), None)
+            if existing is not None:
+                # 已有同 word 条目：仅当已有条目无 alternative 而新条有则补上
+                if alt and not str(existing.get("alternative") or "").strip():
+                    existing["alternative"] = alt
+                continue
+            negative.append({"word": word, "alternative": alt})
+            merged_words += 1
+
+        card.negative_list = negative
+        book.style_blacklist = []  # 清空 = 已迁移标记
+        migrated_books += 1
+
+    await session.commit()
+    if migrated_books:
+        logger.info(
+            f"[MIGRATION] books.style_blacklist → style_cards.negative_list: "
+            f"{migrated_books} books / {merged_words} words"
+        )
+
+
 async def init_db():
     """
     初始化数据库表结构。
@@ -923,6 +997,14 @@ async def init_db():
     # CP2.1c：SystemCliche 表种子化（首次启动检测空表则插入默认禁词）
     # 注意：种子化需要 AsyncSession（不是 engine.begin 的 conn），用独立会话
     await _seed_system_cliches_if_empty()
+
+    # 任务包 B：books.style_blacklist → 书级 StyleCard.negative_list 迁移（幂等；
+    # 失败只 log 不阻断启动——挂点在迁移事务外，用独立会话）
+    try:
+        async with AsyncSessionLocal() as session:
+            await _migrate_style_blacklist_into_negative_cards(session)
+    except Exception as e:
+        logger.error(f"[MIGRATION] style_blacklist → negative_list 迁移失败（不阻断启动）: {e}")
 
 
 async def _seed_system_cliches_if_empty() -> None:

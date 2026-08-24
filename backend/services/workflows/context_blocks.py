@@ -46,7 +46,6 @@ MAX_CHARACTER_STATIC_LEN = 200
 MAX_OPEN_HOOKS = 5
 MAX_GOLDEN_SNIPPETS = 2
 MAX_GOLDEN_SNIPPET_LEN = 200
-MAX_BLACKLIST_ITEMS = 10
 MAX_SNAPSHOT_LEN = 600
 
 
@@ -174,39 +173,6 @@ def render_golden_snippets_block(golden_snippets: Optional[list]) -> str:
     lines = ["【作者样本】（请模仿以下片段的句长节奏、词汇层级、叙事语气）"]
     for i, text in enumerate(snippets_text, 1):
         lines.append(f"样本{i}：{text}")
-
-    return "\n".join(lines) + "\n"
-
-
-def render_style_blacklist_block(style_blacklist: Optional[list]) -> str:
-    """渲染文风黑名单块。
-
-    Args:
-        style_blacklist: 禁词/禁句式列表（来自 book.style_blacklist）
-
-    Returns:
-        渲染后的 prompt 片段；无数据时返回空串
-    """
-    if not style_blacklist:
-        return ""
-
-    items = []
-    for b in style_blacklist[:MAX_BLACKLIST_ITEMS]:
-        if isinstance(b, str):
-            items.append(b)
-        elif isinstance(b, dict):
-            word = b.get("word") or b.get("text") or b.get("phrase") or ""
-            if word:
-                items.append(word)
-        else:
-            items.append(str(b))
-
-    if not items:
-        return ""
-
-    lines = ["【文风禁词】（严禁在正文中出现以下词汇/句式）"]
-    for item in items:
-        lines.append(f"- {item[:60]}")
 
     return "\n".join(lines) + "\n"
 

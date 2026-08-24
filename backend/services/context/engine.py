@@ -40,7 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         sys_p, usr_p = engine.build_draft_prompt(beat, previous_tail, sketch_segment, ...)
 
 依赖项：
-- backend.services.workflows.context_blocks：复用 Phase 0 T4 的 6 个渲染器
+- backend.services.workflows.context_blocks：复用 Phase 0 T4 的渲染器
 """
 
 import logging
@@ -51,13 +51,11 @@ from backend.services.workflows.context_blocks import (
     MAX_OPEN_HOOKS,
     MAX_GOLDEN_SNIPPETS,
     MAX_GOLDEN_SNIPPET_LEN,
-    MAX_BLACKLIST_ITEMS,
     MAX_SNAPSHOT_LEN,
     render_character_cards_block,
     render_open_hooks_block,
     render_world_snapshot_block,
     render_golden_snippets_block,
-    render_style_blacklist_block,
     render_author_intent_block,
 )
 
@@ -134,7 +132,7 @@ class ContextEngine:
 
         Args:
             book: Book ORM 对象（取 global_sys_prompt / worldview_settings / genre /
-                  golden_snippets / style_blacklist / core_motifs_taboos）
+                  golden_snippets / core_motifs_taboos）
             chapter: Chapter ORM 对象（取 chapter_name / chapter_goals /
                    outline_text / author_intent / pacing_style / tension_level）
             entities: ChapterEntity 列表（含 .character 关联）
@@ -262,7 +260,7 @@ class ContextEngine:
         """身份 + 文风卡（正负清单） + 书级设定摘要 + 作者样本 few-shot。
 
         CP2.2d：优先用 StyleCard（正面画像 + 负面清单）。
-        无 StyleCard 时 fallback 到 book.style_blacklist + golden_snippets（向下兼容）。
+        无 StyleCard 时 fallback 到 golden_snippets（向下兼容）。
         """
         parts: List[str] = []
 
@@ -297,10 +295,8 @@ class ContextEngine:
             if snippets_block:
                 parts.append(snippets_block)
         else:
-            # Fallback：Phase 0 的 book.style_blacklist + golden_snippets
-            blacklist_block = render_style_blacklist_block(getattr(book, "style_blacklist", None) or [])
-            if blacklist_block:
-                parts.append(blacklist_block)
+            # Fallback：Phase 0 的 golden_snippets（书级黑名单读点已随双写收敛
+            # 删除——历史数据已迁移并入 StyleCard.negative_list，该列冻结恒空）
             snippets_block = render_golden_snippets_block(getattr(book, "golden_snippets", None) or [])
             if snippets_block:
                 parts.append(snippets_block)

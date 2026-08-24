@@ -618,7 +618,7 @@ async def confirm_style_inbox_item(
     style_repo: StyleCardRepository = Depends(get_style_card_repo),
     sample_repo: AuthorSampleRepository = Depends(get_author_sample_repo),
 ):
-    """确认候选（✓）。negative_candidate → 写入书级文风卡负面清单并同步书级黑名单；
+    """确认候选（✓）。negative_candidate → 写入书级文风卡负面清单；
     sample_candidate → 存入作者样本库（自动向量化）。
     """
     book = await book_repo.get_by_id(book_id)
@@ -648,11 +648,8 @@ async def confirm_style_inbox_item(
         if not any((e.get("word") if isinstance(e, dict) else "") == word for e in negative):
             negative.append({"word": word, "alternative": alternative})
             card.negative_list = negative
-        # 与书级黑名单保持一致（旧消费方仍读 book.style_blacklist）
-        blacklist = list(book.style_blacklist or [])
-        if word not in blacklist:
-            blacklist.append(word)
-            book.style_blacklist = blacklist
+        # 双写收敛（任务包 B）：不再同步 book.style_blacklist（历史书级黑名单已
+        # 启动迁移并入 negative_list，该列冻结只读）；负面清单是唯一权威。
         invalidate_cliche_cache()
     elif item.kind == "sample_candidate":
         content = str(item.payload.get("content") or "").strip()
