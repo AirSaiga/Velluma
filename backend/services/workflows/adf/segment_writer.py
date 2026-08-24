@@ -238,15 +238,24 @@ def update_precondition_landed_state(
 # 辅助：构造 system 层固定文本（吃 prompt 缓存）
 # ============================================================
 
-def _build_style_contract(style_card: Any) -> str:
+def _build_style_contract(
+    style_card: Any,
+    negative_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
+) -> str:
     """从 StyleCard 抽取文风契约文本。
 
     修正历史：此前误读 positive_traits/negative_traits（不存在），
     导致 StyleCard 从未注入正文生成。现对齐 ORM 字段
     positive_profile(dict)/negative_list(list)/dialogue_ratio_target/paragraph_rhythm，
     渲染逻辑参照 context/engine.py:_render_style_card_block。
+
+    禁忌面归一（任务包 A）：negative_entries 非 None 时负面段改由其渲染
+    ——来源是 prohibitions.load_prohibition_set 四源合并的前 15 条
+    [(pattern, alternative), ...]（路由层加载后沿参数通道传入）；None 时
+    维持旧行为读 style_card.negative_list（加载失败降级，输出与现状一致）。
+    无卡但禁忌面已加载时不再走「未指定」早退（系统陈词/静态词仍生效）。
     """
-    if style_card is None:
+    if style_card is None and negative_entries is None:
         return "（未指定，按通用中文文学小说风格）"
     parts = []
 
@@ -265,11 +274,20 @@ def _build_style_contract(style_card: Any) -> str:
             # 兜底：非 dict（旧数据可能是 list/str）原样取
             parts.append(f"正向特征：{str(positive)[:300]}")
 
-    # 负面清单：list of {word/phrase, alternative}
-    negative = getattr(style_card, "negative_list", None)
-    if negative:
+    # 负面清单：归一禁忌面前 15 条（word + 可选替代）或旧 negative_list
+    negative_lines: List[str] = []
+    if negative_entries is not None:
+        # 禁忌面归一：四源合并条目（系统陈词优先，含替代建议）
+        for word, alt in negative_entries[:15]:
+            if not word:
+                continue
+            line = f"- {word}"
+            if alt:
+                line += f"（→ {str(alt)[:80]}）"
+            negative_lines.append(line)
+    else:
+        negative = getattr(style_card, "negative_list", None)
         if isinstance(negative, list):
-            lines = []
             for item in negative[:15]:
                 if isinstance(item, dict):
                     word = item.get("word") or item.get("phrase") or ""
@@ -278,13 +296,13 @@ def _build_style_contract(style_card: Any) -> str:
                         line = f"- {word}"
                         if alt:
                             line += f"（→ {alt[:80]}）"
-                        lines.append(line)
+                        negative_lines.append(line)
                 elif isinstance(item, str) and item:
-                    lines.append(f"- {item}")
-            if lines:
-                parts.append("避免特征：\n" + "\n".join(lines))
-        else:
+                    negative_lines.append(f"- {item}")
+        elif negative:
             parts.append(f"避免特征：{str(negative)[:300]}")
+    if negative_lines:
+        parts.append("避免特征：\n" + "\n".join(negative_lines))
 
     # 量化指标：对话占比目标 + 段落节奏
     metric_lines = []
@@ -530,6 +548,10 @@ async def write_chapter_segments(
     genre: Optional[str] = None,
     # Agent Loop 1：段级状态卡（每段 1 次小 creative 抽取 + 统一闸门校验）
     enable_state_tracker: bool = True,
+    # 禁忌面归一（任务包 A）：四源合并负面条目 [(pattern, alternative), ...]
+    # （路由层 prohibitions.load_prohibition_set 加载后传入；None=未加载，
+    # 走 _build_style_contract 旧的 style_card.negative_list 路径）
+    negative_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
 ) -> Tuple[List[SegmentResult], ChapterClimax]:
     """Phase 4: 正向流写作（N 次 creative LLM，串行）。
 
@@ -582,7 +604,7 @@ async def write_chapter_segments(
         {"progress": s.progress, "register": s.register, "energy": s.energy}
         for s in anchor.emotion_curve.samples
     ])
-    style_contract = _build_style_contract(style_card)
+    style_contract = _build_style_contract(style_card, negative_entries)
     author_samples_text = _build_author_samples(author_samples)
 
     purpose = ""

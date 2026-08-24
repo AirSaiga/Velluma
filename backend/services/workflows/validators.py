@@ -33,121 +33,49 @@ class BaseValidator:
 class StyleClicheValidator(BaseValidator):
     """AI 腔陈词滥调及黑名单拦截（Cliché & Blacklist Regex Filter）。
 
-    CP2.2c 改造：禁词数据源从硬编码改为三层合并：
-    1. SystemCliche 表（通过 cliche_provider，带缓存）
-    2. book.style_blacklist（书级，向后兼容）
-    3. style_card.negative_list（书级 StyleCard，CP2.2d 接入）
+    禁忌面归一（任务包 A）：数据源改为 services/style/prohibitions.py 的
+    load_prohibition_set（四源合并唯一权威）：
+    1. SystemCliche 表（cliche_provider 直查，DB 失败降级种子）
+    2. style_card.negative_list（context["style_negative_list"]）
+    3. book.style_blacklist（context["style_blacklist"]）
+    4. anti_ai_rules.DEFAULT_BAN_LIST.banned_words（静态反 AI 词，全 warning）
+    本书豁免 context["cliche_exemptions"] 仅作用于系统层。
 
     设计：
-    - 首次 validate 时异步加载 cliches（缓存到实例）
+    - 首次 validate 时异步加载（缓存到实例）
     - 后续 validate 直接用缓存
     - 可手动 reload() 刷新（SystemCliche CRUD 后）
+    - validate 的软失败计数排除静态源命中（见 validate 注释）
     """
     def __init__(self, threshold: int = 2):
-        # CP2.2c：硬编码 default_cliches 已外迁到 services/style/default_cliches.py
-        # 通过 cliche_provider 在首次 validate 时异步加载（带缓存）
         self.threshold = threshold
         # 实例缓存：编译后的正则列表 + 原始 cliches 描述（用于命中后给 LLM 看替代建议）
         self._compiled_patterns: List[tuple] = []  # [(compiled_re, alternative, severity), ...]
+        # 禁忌面归一新增：[(compiled, ProhibitionEntry)]——validate 按
+        # entry.source 排除静态源命中；ClichéAuditor 等旧消费方仍用 _compiled_patterns
+        self._compiled_entries: List[tuple] = []
         self._loaded: bool = False
 
     async def _ensure_loaded(self, context: Optional[Dict[str, Any]] = None) -> None:
-        """首次访问时加载禁词（含 SystemCliche DB 数据 + book 级 blacklist + style_card.negative_list）。
+        """首次访问时加载禁词（四源合并，prohibitions.py 唯一权威）。
 
         幂等：已加载则跳过。reload() 可强制刷新。
+        context 契约键名不变：db / style_blacklist / style_negative_list /
+        cliche_exemptions（供 ClichéAuditor / scan-negative 等调用方预填）。
         """
         if self._loaded:
             return
 
-        cliches: List[tuple] = []  # [(pattern_str, is_regex, alternative, severity), ...]
+        from backend.services.style.prohibitions import load_prohibition_set
 
-        # 层 1：SystemCliche（通过 cliche_provider，DB 优先、降级到种子）
-        # 本书豁免（设计稿 §6.4 三层可见性）：books.style_cliche_exemptions 里的
-        # pattern 从系统层剔除（不删全局，仅本书不生效）
-        exemptions = set()
-        if context:
-            raw_exemptions = context.get("cliche_exemptions")
-            if isinstance(raw_exemptions, (list, tuple, set)):
-                exemptions = {str(p) for p in raw_exemptions if p}
-        try:
-            from backend.services.style.cliche_provider import get_active_cliches
-            # 系统层直查 DB（use_cache=False，禁词量级小，单表查询开销可忽略）：
-            # 旧路径 db=None 永远只回种子降级，用户在 /system/cliches 增改的禁词
-            # 从不进审计/扫描。调用方经 context["db"] 传入 AsyncSession（路由与
-            # ClichéAuditor 均已接）；无 db 时维持种子降级（行为不变）。
-            db_session = context.get("db") if context else None
-            system_cliches = await get_active_cliches(db=db_session, use_cache=False)
-            for item in system_cliches:
-                if item.get("pattern", "") in exemptions:
-                    continue
-                cliches.append((
-                    item.get("pattern", ""),
-                    bool(item.get("is_regex", False)),
-                    item.get("alternative"),
-                    item.get("severity", "warning"),
-                ))
-        except Exception as e:
-            logger.warning(f"[StyleClicheValidator] 加载 SystemCliche 失败，降级: {e}")
-            # 兜底：直接用 default_cliches 种子
-            from backend.services.style.default_cliches import get_all_seed_cliches
-            for item in get_all_seed_cliches():
-                if item.get("pattern", "") in exemptions:
-                    continue
-                cliches.append((
-                    item.get("pattern", ""),
-                    bool(item.get("is_regex", False)),
-                    item.get("alternative"),
-                    item.get("severity", "warning"),
-                ))
-
-        # 层 2：book.style_blacklist（向后兼容，CP0 字段）
-        if context:
-            book_blacklist = context.get("style_blacklist")
-            if book_blacklist:
-                items = []
-                if isinstance(book_blacklist, str):
-                    items = [c.strip() for c in re.split(r'[,，\n]', book_blacklist) if c.strip()]
-                elif isinstance(book_blacklist, list):
-                    items = book_blacklist
-                for item in items:
-                    if isinstance(item, str):
-                        cliches.append((item, False, None, "warning"))
-                    elif isinstance(item, dict):
-                        word = item.get("word") or item.get("phrase") or ""
-                        if word:
-                            cliches.append((
-                                word, False,
-                                item.get("alternative"),
-                                item.get("severity", "warning"),
-                            ))
-
-        # 层 3：style_card.negative_list（CP2.2d 接入，CP2.2c 预留）
-        if context:
-            style_negative = context.get("style_negative_list")
-            if style_negative and isinstance(style_negative, list):
-                for item in style_negative:
-                    if isinstance(item, dict):
-                        word = item.get("word") or item.get("phrase") or ""
-                        if word:
-                            cliches.append((
-                                word, False,
-                                item.get("alternative"),
-                                "warning",
-                            ))
-
-        # 编译正则
-        self._compiled_patterns = []
-        for pattern_str, is_regex, alt, sev in cliches:
-            if not pattern_str:
-                continue
-            try:
-                flags = 0 if is_regex else 0
-                # 非 regex 模式按字面匹配（转义特殊字符）
-                actual_pattern = pattern_str if is_regex else re.escape(pattern_str)
-                compiled = re.compile(actual_pattern, flags)
-                self._compiled_patterns.append((compiled, alt or "", sev or "warning"))
-            except re.error:
-                continue
+        ps = await load_prohibition_set(
+            db=context.get("db") if context else None,
+            style_blacklist=context.get("style_blacklist") if context else None,
+            negative_list=context.get("style_negative_list") if context else None,
+            cliche_exemptions=context.get("cliche_exemptions") if context else None,
+        )
+        self._compiled_patterns = ps.compiled_patterns
+        self._compiled_entries = list(ps.compiled)
 
         self._loaded = True
         logger.info(f"[StyleClicheValidator] 已加载 {len(self._compiled_patterns)} 条禁词")
@@ -156,6 +84,7 @@ class StyleClicheValidator(BaseValidator):
         """强制下次 validate 时重新加载（SystemCliche CRUD 后调用）。"""
         self._loaded = False
         self._compiled_patterns = []
+        self._compiled_entries = []
 
     async def validate(self, text: str, context: Dict[str, Any]) -> ValidationResult:
         errors = []
@@ -168,13 +97,19 @@ class StyleClicheValidator(BaseValidator):
         matched_cliches = []
         blocker_matches = []
 
-        for compiled, alternative, severity in self._compiled_patterns:
+        for compiled, entry in self._compiled_entries:
             matches = compiled.findall(text)
-            if matches:
+            if not matches:
+                continue
+            # 禁忌面归一：软失败计数排除静态反 AI 词（深邃/宛如等高频词
+            # 在正常叙事里也会出现，计入会轻易越过 threshold=2 误伤——
+            # 静态词的约束交给 ai_taste_meter 密度算法，不进 fail-fast）
+            if entry.source != "anti_ai_static":
                 match_count += len(matches)
                 matched_cliches.extend(matches)
-                if severity == "blocker":
-                    blocker_matches.extend(matches)
+            # blocker 判定不变：静态源全 warning，天然不影响
+            if entry.severity == "blocker":
+                blocker_matches.extend(matches)
 
         # blocker 命中即硬失败（不受 threshold 调节）
         if blocker_matches:

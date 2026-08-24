@@ -218,15 +218,16 @@ async def defat_selection(
 
     text = request.text.strip()
     report = measure_ai_taste(text)
-    # S3 E3：洗涤顺带处理本书负面清单禁词（defat 无 chapter 上下文，
-    # 从请求的 chapter_id 取书级文风卡；无卡/加载失败 → 空列表，行为不变）
+    # 禁忌面归一（任务包 A）：四源合并（系统陈词 + 文风卡负面清单 + 书级
+    # 黑名单 + 静态反 AI 词）取「词（→ 替代）」格式前 30 条喂洗涤；
+    # 加载失败 → 空列表，行为不变
     extra_banned: list[str] = []
     db = chapter_repo.get_session()
     chapter = await chapter_repo.get_by_id(request.chapter_id) if request.chapter_id else None
     book_id = str(chapter.book_id) if chapter else (request.book_id or "")
     if book_id:
         try:
-            from backend.models import StyleCard as StyleCardModel
+            from backend.models import Book as BookModel, StyleCard as StyleCardModel
             sc_result = await db.execute(
                 select(StyleCardModel).where(
                     StyleCardModel.book_id == book_id,
@@ -234,13 +235,14 @@ async def defat_selection(
                 ).limit(1)
             )
             card = sc_result.scalar_one_or_none()
-            if card and card.negative_list:
-                extra_banned = [
-                    (item.get("word") or item.get("phrase") or "")
-                    + (f"（→ {item['alternative']}）" if item.get("alternative") else "")
-                    for item in card.negative_list
-                    if isinstance(item, dict) and (item.get("word") or item.get("phrase"))
-                ]
+            from backend.services.style.prohibitions import load_prohibition_set
+            ps = await load_prohibition_set(
+                db, book=await db.get(BookModel, book_id), style_card=card,
+            )
+            extra_banned = [
+                e.pattern + (f"（→ {e.alternative}）" if e.alternative else "")
+                for e in ps.entries
+            ][:30]
         except Exception:
             pass
     result = await wash_segment_if_too_ai(

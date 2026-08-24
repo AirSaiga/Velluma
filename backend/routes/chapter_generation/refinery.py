@@ -126,9 +126,11 @@ async def _build_refinery_context(
     purpose = (getattr(chapter, "outline_text", "") or "")[:300]
 
     # 文风卡（书级）+ 作者样本（S2 E5）
+    # 禁忌面归一（任务包 A）：负面禁词改走 prohibitions.py 四源合并
+    # （系统陈词 + 文风卡负面清单 + 书级黑名单 + 静态反 AI 词），顿号串前 30
     style_negative_terms = ""
     try:
-        from backend.models import StyleCard as StyleCardModel
+        from backend.models import Book as BookModel, StyleCard as StyleCardModel
         sc_result = await db.execute(
             select(StyleCardModel).where(
                 StyleCardModel.book_id == chapter.book_id,
@@ -136,12 +138,13 @@ async def _build_refinery_context(
             ).limit(1)
         )
         style_card = sc_result.scalar_one_or_none()
-        if style_card and style_card.negative_list:
-            style_negative_terms = "、".join(
-                (item.get("word") or item.get("phrase") or "")
-                for item in style_card.negative_list
-                if isinstance(item, dict) and (item.get("word") or item.get("phrase"))
-            )
+        from backend.services.style.prohibitions import load_prohibition_set
+        ps = await load_prohibition_set(
+            db,
+            book=await db.get(BookModel, chapter.book_id),
+            style_card=style_card,
+        )
+        style_negative_terms = ps.prompt_text(30)
     except Exception as e:
         logger.warning(f"[Refinery] 文风卡加载失败（降级为空）: {e}")
 

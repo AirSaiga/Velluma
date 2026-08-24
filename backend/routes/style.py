@@ -783,9 +783,13 @@ async def scan_negative(
 ):
     """禁词扫描（E3 审稿模式数据源，纯 code 0 LLM）。
 
-    三层禁词（系统陈词库 + 书级黑名单 + 文风卡负面清单）合并后扫描文本，
-    返回按词聚合的命中清单（替代建议 + 每处上下文）。
-    替换由作者逐条 ✓ 后前端应用——本端点绝不改正文。
+    四层禁忌面（系统陈词库 + 书级黑名单 + 文风卡负面清单 + 静态反 AI 词）
+    经 prohibitions.py 归一合并后扫描文本，返回按词聚合的命中清单
+    （替代建议 + 每处上下文）。替换由作者逐条 ✓ 后前端应用——本端点
+    绝不改正文。
+    ⚠ 禁忌面归一起行为变化：命中现在**含静态反 AI 词**（深邃/宛如等 15 词，
+    severity 恒 warning）——审稿扫描是呈现面，全量可见符合「让作者看见」
+    的设计；fail-fast 校验侧（StyleClicheValidator.validate）才排除静态源。
     """
     book = await book_repo.get_by_id(book_id)
     if not book:
@@ -803,36 +807,28 @@ async def scan_negative(
         raise HTTPException(status_code=400, detail="待扫描文本为空")
 
     card = await style_repo.get_effective_card(book_id, chapter_id=None)
-    card_negative = list(card.negative_list or []) if card else []
 
-    from backend.services.workflows.validators import StyleClicheValidator
+    # 禁忌面归一（任务包 A）：四源合并唯一权威（db 直查 SystemCliche、
+    # book.style_blacklist / style_cliche_exemptions、card.negative_list、静态词）
+    from backend.services.style.prohibitions import load_prohibition_set
 
-    validator = StyleClicheValidator()
-    await validator._ensure_loaded({
-        # db：系统层禁词直查 SystemCliche 表（用户增改的全局禁词进扫描）
-        "db": db,
-        "style_blacklist": book.style_blacklist or [],
-        "style_negative_list": card_negative,
-        # 系统层本书豁免（完整落地批）：扫描同样尊重豁免
-        "cliche_exemptions": getattr(book, "style_cliche_exemptions", None) or [],
-    })
+    ps = await load_prohibition_set(db, book=book, style_card=card)
 
     grouped: Dict[str, Dict[str, Any]] = {}
-    for compiled, alternative, severity in validator._compiled_patterns:
-        for m in compiled.finditer(text):
-            word = m.group(0)
-            entry = grouped.setdefault(word, {
-                "word": word,
-                "alternative": alternative or "",
-                "severity": severity or "warning",
-                "count": 0,
-                "occurrences": [],
-            })
-            offset = m.start()
-            context = text[max(0, offset - 15): offset + len(word) + 15]
-            entry["count"] += 1
-            if len(entry["occurrences"]) < 5:
-                entry["occurrences"].append({"offset": offset, "context": context})
+    for m, entry in ps.finditer(text):
+        word = m.group(0)
+        g = grouped.setdefault(word, {
+            "word": word,
+            "alternative": entry.alternative or "",
+            "severity": entry.severity or "warning",
+            "count": 0,
+            "occurrences": [],
+        })
+        offset = m.start()
+        snippet = text[max(0, offset - 15): offset + len(word) + 15]
+        g["count"] += 1
+        if len(g["occurrences"]) < 5:
+            g["occurrences"].append({"offset": offset, "context": snippet})
 
     hits = sorted(grouped.values(), key=lambda e: -e["count"])[:50]
     return {"word_count": len(text), "hit_words": len(hits), "total_hits": sum(e["count"] for e in hits), "hits": hits}

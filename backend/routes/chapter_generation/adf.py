@@ -333,6 +333,23 @@ class _ADFStreamHandler:
                 k=3,
             )
 
+            # 禁忌面归一（任务包 A）：四源合并（系统陈词 + 文风卡负面清单 +
+            # 书级黑名单 + 静态反 AI 词）前 15 条沿 ADFWorkflow 参数通道进
+            # segment_writer 的文风契约负面段；加载失败 → None（旧
+            # style_card.negative_list 路径，行为与现状一致）
+            negative_entries = None
+            try:
+                from backend.services.style.prohibitions import load_prohibition_set
+                _ps = await load_prohibition_set(
+                    self.db, book=ctx["book"], style_card=ctx["style_card"],
+                )
+                negative_entries = [
+                    (e.pattern, e.alternative) for e in _ps.entries[:15]
+                ]
+            except Exception as e:
+                logger.warning(f"[ADF] 禁忌面加载失败（降级文风卡负面清单）: {e}")
+                negative_entries = None
+
             # ---- 初始化 RunRecorder ----
             recorder = RunRecorder(chapter_id=self.chapter_id, run_id=run_id)
             yield build_sse_event("GENERATION_RUN", "ADF 引擎已初始化", generation_run_id=run_id)
@@ -358,6 +375,7 @@ class _ADFStreamHandler:
                 assets=ctx.get("assets", []),
                 relationships=ctx.get("relationships", []),
                 worldview_text=ctx.get("worldview_text", ""),  # V3.5 世界观设定
+                negative_entries=negative_entries,  # 禁忌面归一（任务包 A）
             )
 
             # ---- progress_callback 转 SSE v3.2 事件（实时流出）----

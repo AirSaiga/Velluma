@@ -50,7 +50,7 @@ ADF（Anchor-Driven Flow）工作流主类（V3.2 §4 新建）。
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backend.services.observability.run_recorder import RunRecorder
 from backend.services.workflows.adf.story_context_builder import build_story_context
@@ -108,6 +108,10 @@ class ADFWorkflow:
         assets: Optional[List[Any]] = None,
         relationships: Optional[List[Any]] = None,
         worldview_text: str = "",
+        # 禁忌面归一（任务包 A）：四源合并负面条目 [(pattern, alternative), ...]
+        # 前缀 15（路由层 prohibitions.load_prohibition_set 加载后传入；
+        # None=未加载，走 style_card.negative_list 旧路径，行为不变）
+        negative_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
     ):
         self.chapter = chapter
         self.book = book
@@ -128,6 +132,8 @@ class ADFWorkflow:
         self.assets = assets or []
         self.relationships = relationships or []
         self.worldview_text = worldview_text or ""
+        # 禁忌面归一（任务包 A）
+        self.negative_entries = negative_entries
 
     async def execute(
         self,
@@ -304,6 +310,7 @@ class ADFWorkflow:
                 worldview_text=self.worldview_text,
                 genre=getattr(self.book, "genre", None),
                 enable_state_tracker=getattr(request, "enable_state_tracker", True),
+                negative_entries=self.negative_entries,
             )
         except Exception as e:
             logger.exception(f"[ADF] Phase 4 正向流写作异常: {e}")
@@ -340,7 +347,7 @@ class ADFWorkflow:
             # 复用 segment_writer 的构建函数，保证剪枝用的角色/文风/样本
             # 与正文生成时注入的完全一致（OOC/文风红线基准一致）
             characters_setting = _build_characters_text(self.entities)
-            style_contract = _build_style_contract(self.style_card)
+            style_contract = _build_style_contract(self.style_card, self.negative_entries)
             author_samples = _build_author_samples(self.author_samples)
 
             pruned_segments, pruned_text, prune_report = await run_prune_pass(
@@ -496,7 +503,7 @@ class ADFWorkflow:
                     final_text=result.final_text,
                     missing_beats=audit.missing_beats,
                     purpose=purpose,
-                    style_contract=_build_style_contract(self.style_card),
+                    style_contract=_build_style_contract(self.style_card, self.negative_entries),
                     name_registry_block=registry_block,
                     recorder=self.recorder,
                 )

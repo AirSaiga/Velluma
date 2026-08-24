@@ -24,13 +24,17 @@ from __future__ import annotations
 
 职责：
 - stitch-ghost 完整文本生成后、GHOST_DONE 帧前跑纯算法快检（<10ms，零 LLM）
-- 三类疑点（宁漏勿误，全部只提示不拦截——§9 红线「提示不拦截」）：
+- 四类疑点（宁漏勿误，全部只提示不拦截——§9 红线「提示不拦截」）：
   1. dead_speak：新文本实体名（含别名）命中 world_state 里 alive=False 的角色
      （死者开口；回忆/闪回属合法用法，故只提示）
   2. canon_leak：canon_private_labels（Canon [private] 标签词，settings_bundle
      正则抽取，A1 同源）在正文子串命中
   3. secret_leak：A1 私有通道 character_secrets 文本的 ≥4 字连续片段
      （按标点/换行切段）在正文子串命中——整段复现才算命中，宁可漏报
+  4. cliche_hit：禁忌面命中（任务包 A）——bundle.prohibitions
+     （services/style/prohibitions.py 四源合并）非空时对 text 跑 finditer，
+     任一 blocker 或总命中数 ≥ GHOST_GUARD_CLICHE_MIN_TOTAL 报一条 warning
+     （命中 pattern 去重前 5 进 detail）
 
 输入两种形态：直接传 SettingsBundle（stitch 路由在用），或显式传
 canon_private_labels / character_secrets / world_state + entity_names_by_id
@@ -52,6 +56,11 @@ SECRET_PHRASE_MIN_CHARS = 4
 SECRET_PHRASE_MAX_CHARS = 20
 # warnings 总量上限（防 DONE 帧膨胀；同一触发词只报一次）
 MAX_WARNINGS = 10
+# cliche_hit 总命中数下限（任务包 A）：静态反 AI 词在正常叙事里也会出现，
+# 单发命中不报；任一 blocker 严重级的条目命中则立即报（不受此阈值调节）
+GHOST_GUARD_CLICHE_MIN_TOTAL = 3
+# cliche_hit 命中 pattern 去重上报上限（detail 列表长度）
+GHOST_GUARD_CLICHE_MAX_PATTERNS = 5
 
 # secret 文本切段：按换行与中英文标点/空白切成连续片段（标签前缀如「背景：」
 # 的「背景」二字低于 4 字门槛自然淘汰，剩余即关键短语）
@@ -79,8 +88,9 @@ def check_ghost_text(
         entity_names_by_id: 显式覆盖——实体 id → [主名, *别名]（dead_speak 用）
 
     Returns:
-        [{kind: dead_speak|canon_leak|secret_leak, span_text, message}]，
-        上限 MAX_WARNINGS；无输入/无命中/内部异常一律空列表（零报错契约）。
+        [{kind: dead_speak|canon_leak|secret_leak|cliche_hit, span_text, message,
+        detail?}], 上限 MAX_WARNINGS；无输入/无命中/内部异常一律空列表
+        （零报错契约）。detail 仅 cliche_hit 携带（命中 pattern 去重前 5）。
     """
     try:
         if not text or not isinstance(text, str):
@@ -97,15 +107,18 @@ def check_ghost_text(
             if entity_names_by_id is None:
                 entity_names_by_id = _bundle_entity_names(bundle)
 
-        warnings: List[Dict[str, str]] = []
+        warnings: List[Dict[str, Any]] = []
         seen_spans: set = set()
 
-        def _hit(kind: str, span: str, message: str) -> None:
+        def _hit(kind: str, span: str, message: str, detail: Any = None) -> None:
             key = (kind, span)
             if key in seen_spans or len(warnings) >= MAX_WARNINGS:
                 return
             seen_spans.add(key)
-            warnings.append({"kind": kind, "span_text": span, "message": message})
+            warning: Dict[str, Any] = {"kind": kind, "span_text": span, "message": message}
+            if detail is not None:
+                warning["detail"] = detail
+            warnings.append(warning)
 
         # ---- 1. dead_speak：死者名（含别名）出现 ----
         for name in _dead_entity_names(world_state, entity_names_by_id):
@@ -137,6 +150,37 @@ def check_ghost_text(
                         "secret_leak", phrase,
                         f"疑似泄底：正文与{owner_note}私有设定片段「{phrase}」重合",
                     )
+
+        # ---- 4. cliche_hit：禁忌面命中（任务包 A，只提示不拦截）----
+        # bundle.prohibitions（settings_bundle 禁忌面归一）非空时对 text 跑
+        # finditer；任一 blocker 或总命中 ≥ GHOST_GUARD_CLICHE_MIN_TOTAL 报
+        # 一条 warning（命中 pattern 去重前 5 进 detail）。静态反 AI 词计入
+        # ——上屏快检是呈现面（与 fail-fast validate 的静态源排除策略不同）。
+        # 本段自带异常兜底：禁忌面快检失败不吞掉前面三类已产出的 warnings。
+        try:
+            if bundle is not None:
+                ps = getattr(bundle, "prohibitions", None)
+                if ps:
+                    total_hits = 0
+                    has_blocker = False
+                    hit_patterns: List[str] = []
+                    for _m, entry in ps.finditer(text):
+                        total_hits += 1
+                        if entry.severity == "blocker":
+                            has_blocker = True
+                        pattern = entry.pattern
+                        if pattern and pattern not in hit_patterns:
+                            hit_patterns.append(pattern)
+                    if has_blocker or total_hits >= GHOST_GUARD_CLICHE_MIN_TOTAL:
+                        top = hit_patterns[:GHOST_GUARD_CLICHE_MAX_PATTERNS]
+                        _hit(
+                            "cliche_hit", "、".join(top),
+                            f"草稿命中禁忌词：{'、'.join(top)}"
+                            f"（若是有意的引语/戏仿可忽略）",
+                            detail=top,
+                        )
+        except Exception:
+            pass  # 零报错契约：本类快检失败静默跳过
 
         return warnings
     except Exception:
