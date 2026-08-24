@@ -148,9 +148,9 @@ from .world_state import (
 
 # CP2.1b 新增：文风体系 schemas
 from .style import (
+    NegativeEntry,
     StyleCardBase,
     StyleCardCreate,
-    StyleCardUpdate,
     StyleCardResponse,
     AuthorSampleBase,
     AuthorSampleCreate,
@@ -167,6 +167,7 @@ from .style import (
     SamplesFromChaptersRequest,
     StyleInboxAddRequest,
     StyleInboxItemResponse,
+    StyleInboxConfirmRequest,
     StyleAuditionRequest,
     StyleScanNegativeRequest,
     AuthorSamplePatchRequest,
@@ -378,9 +379,9 @@ __all__ = [
     # Functions
     "map_tension_to_workflow_tier",
     # CP2.1b 文风体系 schemas
+    "NegativeEntry",
     "StyleCardBase",
     "StyleCardCreate",
-    "StyleCardUpdate",
     "StyleCardResponse",
     "AuthorSampleBase",
     "AuthorSampleCreate",

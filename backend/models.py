@@ -968,7 +968,7 @@ class StyleCard(Base):
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
     positive_profile = Column(JSONB, default=dict)
-    negative_list = Column(JSONB, default=list)                 # [{word/phrase, alternative}]
+    negative_list = Column(JSONB, default=list)                 # [{word, alternative, severity: warning|blocker}]（severity 缺省=warning，旧数据零迁移）
     dialogue_ratio_target = Column(Float, nullable=True)        # 对话占比目标（0-1）
     paragraph_rhythm = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)

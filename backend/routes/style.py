@@ -54,7 +54,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -72,7 +72,6 @@ from backend.repositories import (
 )
 from backend.schemas import (
     StyleCardCreate,
-    StyleCardUpdate,
     StyleCardResponse,
     AuthorSampleCreate,
     AuthorSampleResponse,
@@ -87,6 +86,7 @@ from backend.schemas import (
     SamplesFromChaptersRequest,
     StyleInboxAddRequest,
     StyleInboxItemResponse,
+    StyleInboxConfirmRequest,
     StyleAuditionRequest,
     StyleScanNegativeRequest,
     AuthorSamplePatchRequest,
@@ -609,10 +609,33 @@ async def add_style_inbox_item(
     return item
 
 
+def _resolve_negative_confirm(
+    item_payload: Dict[str, Any],
+    override: Optional[StyleInboxConfirmRequest] = None,
+) -> Tuple[str, Optional[str], str]:
+    """解析 negative_candidate 确认入清单的 (word, alternative, severity)。
+
+    - severity 白名单透传：仅 payload 显式 "blocker" 原样收，其余一律 "warning"
+    - override（Phase 3 确认前就地编辑）：word 覆盖 strip 后非空才生效；
+      alternative 覆盖空串=清除替代（None=不覆盖）。旧调用方不带覆盖字段
+      时行为逐字节不变。
+    """
+    word = str(item_payload.get("word") or "").strip()
+    alternative = str(item_payload.get("alternative") or "").strip() or None
+    severity = "blocker" if item_payload.get("severity") == "blocker" else "warning"
+    if override is not None:
+        if override.word is not None and override.word.strip():
+            word = override.word.strip()
+        if override.alternative is not None:
+            alternative = override.alternative.strip() or None
+    return word, alternative, severity
+
+
 @router.post("/books/{book_id}/style/inbox/{item_id}/confirm", response_model=StyleInboxItemResponse)
 async def confirm_style_inbox_item(
     book_id: UUID,
     item_id: UUID,
+    override: Optional[StyleInboxConfirmRequest] = None,
     db: AsyncSession = Depends(get_db),
     book_repo: BookRepository = Depends(get_book_repo),
     style_repo: StyleCardRepository = Depends(get_style_card_repo),
@@ -620,6 +643,9 @@ async def confirm_style_inbox_item(
 ):
     """确认候选（✓）。negative_candidate → 写入书级文风卡负面清单；
     sample_candidate → 存入作者样本库（自动向量化）。
+
+    可选请求体 {word?, alternative?}：确认前就地编辑词块的覆盖值
+    （Phase 3，前端收件箱契约）；空 body（旧调用方）行为不变。
     """
     book = await book_repo.get_by_id(book_id)
     if not book:
@@ -637,8 +663,7 @@ async def confirm_style_inbox_item(
         raise HTTPException(status_code=409, detail=f"条目已处理（{item.status}）")
 
     if item.kind == "negative_candidate":
-        word = str(item.payload.get("word") or "").strip()
-        alternative = str(item.payload.get("alternative") or "").strip() or None
+        word, alternative, severity = _resolve_negative_confirm(item.payload, override)
         card = await style_repo.get_effective_card(book_id, chapter_id=None)
         if card is None:
             from backend.models import StyleCard as StyleCardModel
@@ -646,7 +671,7 @@ async def confirm_style_inbox_item(
             db.add(card)
         negative = list(card.negative_list or [])
         if not any((e.get("word") if isinstance(e, dict) else "") == word for e in negative):
-            negative.append({"word": word, "alternative": alternative})
+            negative.append({"word": word, "alternative": alternative, "severity": severity})
             card.negative_list = negative
         # 双写收敛（任务包 B）：不再同步 book.style_blacklist（历史书级黑名单已
         # 启动迁移并入 negative_list，该列冻结只读）；负面清单是唯一权威。

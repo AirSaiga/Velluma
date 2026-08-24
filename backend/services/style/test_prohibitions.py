@@ -182,6 +182,30 @@ class TestNegativeList:
             ("丙词", "替代", "warning", "negative_list"),
         ]
 
+    def test_severity_blocker_passthrough(self, monkeypatch):
+        """Phase 3：negative_list 条目标 blocker 原样收（层② 读 severity）。"""
+        _mock_system_empty(monkeypatch)
+        ps = _load(negative_list=[{"word": "测试词", "severity": "blocker"}])
+        entry = next(e for e in ps.entries if e.pattern == "测试词")
+        assert entry.severity == "blocker"
+        assert entry.source == "negative_list"
+
+    def test_severity_invalid_downgrades_to_warning(self, monkeypatch):
+        """白名单校验：None / 非法串 / 大小写不一致 一律降级 warning。"""
+        _mock_system_empty(monkeypatch)
+        ps = _load(negative_list=[
+            {"word": "无键词"},                                  # 无 severity 键
+            {"word": "非法词", "severity": "hard"},              # 非法串
+            {"word": "空串词", "severity": ""},                  # 空串
+            {"word": "大写词", "severity": "BLOCKER"},           # 大小写敏感——降级
+            {"word": "正常词", "severity": "warning"},           # 合法 warning
+        ])
+        got = {e.pattern: e.severity for e in ps.entries if e.source == "negative_list"}
+        assert got == {
+            "无键词": "warning", "非法词": "warning", "空串词": "warning",
+            "大写词": "warning", "正常词": "warning",
+        }
+
 
 # ============================================================
 # style_blacklist 三形态
@@ -364,6 +388,58 @@ class TestPresentation:
 
 
 # ============================================================
+# 呈现排序（Phase 3 任务包 E：作者负面清单第一档、blocker 次档）
+# ============================================================
+
+class TestPresentationOrder:
+    def test_mixed_sources_ordering(self, monkeypatch):
+        """混合源集合的呈现序：作者 blocker → 作者 warning → 系统 blocker →
+        系统 warning / blacklist / static 按原层序。"""
+        _mock_system(monkeypatch, [
+            {"pattern": "系警", "is_regex": False, "severity": "warning"},
+            {"pattern": "系禁", "is_regex": False, "severity": "blocker"},
+        ])
+        ps = _load(
+            book=_FakeBook(style_blacklist=["黑词"]),
+            negative_list=[
+                {"word": "作警", "severity": "warning"},
+                {"word": "作禁", "severity": "blocker"},
+            ],
+        )
+        assert ps.prompt_text(99) == "作禁、作警、系禁、系警、黑词、" + "、".join(
+            DEFAULT_BAN_LIST.banned_words
+        )
+
+    def test_entries_storage_order_unchanged(self, monkeypatch):
+        """呈现排序不回写存储序：entries / compiled 仍按层序（加载序）。"""
+        _mock_system(monkeypatch, [{"pattern": "系词", "is_regex": False}])
+        ps = _load(
+            book=_FakeBook(style_blacklist=["黑词"]),
+            negative_list=[{"word": "负词", "severity": "blocker"}],
+        )
+        sources = [e.source for e in ps.entries]
+        assert sources[0] == "system_cliche"
+        assert sources[1] == "negative_list"       # blocker 仍排存储序第二
+        assert sources[2] == "book_blacklist"
+        # compiled 遍历序与 entries 一致（匹配行为零变化）
+        assert [e.pattern for _c, e in ps.compiled][:3] == ["系词", "负词", "黑词"]
+
+    def test_truncation_prefers_author_entries(self, monkeypatch):
+        """截断时作者负面清单优先占坑（prompt 预算内作者的话先说）。"""
+        _mock_system(monkeypatch, [
+            {"pattern": f"系词{i}", "is_regex": False} for i in range(5)
+        ])
+        ps = _load(negative_list=[{"word": "作者词"}])
+        assert ps.words(3) == ["作者词", "系词0", "系词1"]
+        assert ps.words(1) == ["作者词"]
+
+    def test_same_tier_stable_original_order(self):
+        """同档内保持原 index（sort 稳定性）——无 source/severity 的裸条目序不变。"""
+        ps = ProhibitionSet(tuple(ProhibitionEntry(pattern=w) for w in ["甲", "乙", "丙"]))
+        assert ps.words(10) == ["甲", "乙", "丙"]
+
+
+# ============================================================
 # finditer 与旧三层实现对拍（span 集合相等）
 # ============================================================
 
@@ -450,6 +526,113 @@ class TestValidatorStaticExclusion:
         }))
         assert not result.is_valid
         assert any("硬阻断" in e for e in result.errors)
+
+
+# ============================================================
+# NegativeEntry schema 兼容（Phase 3 任务 1：旧数据零迁移零 422 硬约束）
+# ============================================================
+
+class TestNegativeEntrySchema:
+    def _orm_like(self, negative_list):
+        """SimpleNamespace 模拟 StyleCard ORM 行（from_attributes 走属性访问）。"""
+        from datetime import datetime, timezone as _tz
+        from types import SimpleNamespace
+        from uuid import uuid4
+
+        return SimpleNamespace(
+            id=uuid4(), book_id=uuid4(), chapter_id=None,
+            created_at=datetime.now(_tz.utc), updated_at=datetime.now(_tz.utc),
+            positive_profile={}, negative_list=negative_list,
+            dialogue_ratio_target=None, paragraph_rhythm=None, notes=None,
+            style_knobs={}, locked_keys=None, fingerprint=None,
+        )
+
+    def test_legacy_entry_without_severity_no_422(self):
+        """硬约束实证：DB 存量条目（无 severity 键）经 from_attributes 不断言
+        错误，且条目 severity 兜底 "warning"。"""
+        from backend.schemas import StyleCardResponse
+
+        obj = self._orm_like([
+            {"word": "旧词", "alternative": "替"},   # 无 severity 键（存量主流形态）
+            {"word": "另一旧词"},                     # 无 alternative 无 severity
+        ])
+        resp = StyleCardResponse.model_validate(obj)  # 不得 422
+        assert [e.severity for e in resp.negative_list] == ["warning", "warning"]
+        assert resp.negative_list[0].alternative == "替"
+
+    def test_legacy_phrase_only_entry_mapped_to_word(self):
+        """仅带 phrase 键的存量条目归一到 word（读取侧 phrase 容错口径对齐）。"""
+        from backend.schemas import StyleCardResponse
+
+        obj = self._orm_like([{"phrase": "旧短语", "alternative": "替"}])
+        resp = StyleCardResponse.model_validate(obj)
+        assert resp.negative_list[0].word == "旧短语"
+        assert resp.negative_list[0].severity == "warning"
+
+    def test_blocker_entry_roundtrip(self):
+        from backend.schemas import StyleCardResponse
+
+        obj = self._orm_like([{"word": "硬禁词", "severity": "blocker"}])
+        resp = StyleCardResponse.model_validate(obj)
+        assert resp.negative_list[0].severity == "blocker"
+
+    def test_invalid_severity_rejected_on_write_path(self):
+        """写入侧（PUT /style-card）严格校验：非法 severity 422——脏数据
+        不入库（与 prohibitions 读取侧白名单降级是两道独立的闸）。"""
+        import pytest as _pytest
+        from pydantic import ValidationError
+        from backend.schemas import NegativeEntry
+
+        with _pytest.raises(ValidationError):
+            NegativeEntry(word="词", severity="hard")
+
+    def test_extract_response_normalizes_entries(self):
+        """StyleExtractResponse.negative_list 同步结构化：缺省 severity 归一。"""
+        from backend.schemas import StyleExtractResponse
+
+        resp = StyleExtractResponse(
+            positive_profile={}, negative_list=[{"word": "提炼词", "alternative": "替"}],
+        )
+        assert resp.negative_list[0].severity == "warning"
+
+
+# ============================================================
+# confirm 收件箱确认解析（Phase 3 任务 3：severity 透传 + 可选覆盖字段）
+# ============================================================
+
+class TestConfirmNegativeResolve:
+    def _resolve(self, payload, **override_kwargs):
+        from backend.routes.style import _resolve_negative_confirm
+        from backend.schemas import StyleInboxConfirmRequest
+
+        override = StyleInboxConfirmRequest(**override_kwargs) if override_kwargs else None
+        return _resolve_negative_confirm(payload, override)
+
+    def test_no_override_passthrough(self):
+        """旧调用方（空 body）行为逐字节不变。"""
+        assert self._resolve({"word": "原词", "alternative": "原替"}) == ("原词", "原替", "warning")
+
+    def test_severity_passthrough_and_downgrade(self):
+        assert self._resolve({"word": "w", "severity": "blocker"})[2] == "blocker"
+        assert self._resolve({"word": "w", "severity": "hard"})[2] == "warning"
+        assert self._resolve({"word": "w"})[2] == "warning"
+
+    def test_word_override_non_empty(self):
+        got = self._resolve({"word": "原词"}, word="  改后词  ")
+        assert got == ("改后词", None, "warning")
+
+    def test_word_override_empty_ignored(self):
+        """word 覆盖 strip 后为空 → 忽略覆盖（词是非空必填，空值不成条目）。"""
+        got = self._resolve({"word": "原词"}, word="   ")
+        assert got[0] == "原词"
+
+    def test_alternative_override_set_and_clear(self):
+        # 覆盖为非空：替代改写
+        assert self._resolve({"word": "w", "alternative": "旧替"}, alternative="新替")[1] == "新替"
+        # 覆盖为空串：清除替代（None）
+        assert self._resolve({"word": "w", "alternative": "旧替"}, alternative="  ")[1] is None
+        # 未携带（None）：维持原候选
+        assert self._resolve({"word": "w", "alternative": "旧替"})[1] == "旧替"
 
 
 if __name__ == "__main__":

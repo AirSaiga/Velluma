@@ -24,7 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 把散落在四处的文风禁忌数据合并为单一 ProhibitionSet：
   1. SystemCliche 表（cliche_provider 直查，DB 失败降级 default_cliches 种子；
      books.style_cliche_exemptions 为本书豁免 pattern 集，仅作用于本层）
-  2. style_cards.negative_list（书级文风卡负面清单，[{word/phrase, alternative}]）
+  2. style_cards.negative_list（书级文风卡负面清单，[{word/phrase, alternative,
+     severity}]——severity 可选，仅 "blocker" 原样收，缺省/非法一律 warning）
   3. books.style_blacklist（书级黑名单，str 逗号/换行分隔串或 str/dict 混合数组）
   4. anti_ai_rules.DEFAULT_BAN_LIST.banned_words（15 个静态反 AI 味词）
 - 供 settings_bundle（prompt 注入）、StyleClicheValidator（fail-fast 校验）、
@@ -107,9 +108,28 @@ class ProhibitionSet:
 
     # ---- 呈现辅助（截断是消费方策略，这里只提供切片）----
 
+    def _presentation_order(self) -> List[ProhibitionEntry]:
+        """呈现序（Phase 3，修任务包 A 遗留）：作者负面清单第一档 → blocker
+        次档 → 其余按原层序（存储序，sort 稳定性保原 index）。
+
+        ⚠ 仅 words()/prompt_text() 两个呈现方法使用；entries 存储序与
+        compiled/finditer 遍历序不变（匹配与去重行为零变化）。
+        """
+        return [
+            entry
+            for _idx, entry in sorted(
+                enumerate(self.entries),
+                key=lambda pair: (
+                    pair[1].source != "negative_list",
+                    pair[1].severity != "blocker",
+                    pair[0],
+                ),
+            )
+        ]
+
     def words(self, max_entries: int) -> List[str]:
-        """前 N 条 pattern（prompt / 校对列表用）。"""
-        return [e.pattern for e in self.entries if e.pattern][:max_entries]
+        """前 N 条 pattern（呈现序：作者负面清单优先；prompt / 校对列表用）。"""
+        return [e.pattern for e in self._presentation_order() if e.pattern][:max_entries]
 
     def prompt_text(self, max_entries: int) -> str:
         """顿号连接前 N 条 pattern；空集合返回空串（prompt 零变化契约）。"""
@@ -220,7 +240,11 @@ async def load_prohibition_set(
             word = item.get("word") or item.get("phrase") or ""
             if not word:
                 continue
-            _add(word, False, item.get("alternative"), "warning", "negative_list")
+            # severity 白名单（Phase 3）：仅 "blocker" 原样收，None/非法串一律
+            # "warning"（与层③ dict 形态的容错口径对齐，防脏数据流进下游闸门）
+            raw_sev = item.get("severity")
+            _add(word, False, item.get("alternative"),
+                 raw_sev if raw_sev == "blocker" else "warning", "negative_list")
 
     # ---- 层③ books.style_blacklist（str 分隔串 / list[str|dict] 三形态）----
     if style_blacklist is None and book is not None:

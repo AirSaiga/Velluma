@@ -31,15 +31,43 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================
 # StyleCard（文风卡）
 # ============================================================
+
+class NegativeEntry(BaseModel):
+    """负面清单单条（Phase 3 severity 贯通：结构化 + 旧数据零 422）。
+
+    severity 默认值 "warning" 是旧数据兼容硬约束——DB 存量条目（JSONB，
+    无 severity 键）经 from_attributes / model_validate 校验不得 422。
+    """
+    word: str = Field(min_length=1, description="禁词/禁句式")
+    alternative: Optional[str] = Field(None, description="正面替代建议")
+    severity: Literal["warning", "blocker"] = Field(
+        "warning",
+        description="warning=提醒 / blocker=硬禁（检查命中判不通过，绝不自动改正文）",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_phrase_fallback(cls, data: Any) -> Any:
+        """旧数据兼容：仅带 phrase 键（无 word）的存量条目归一到 word。
+
+        prohibitions.py 层② / 启动迁移的读取侧历来容 phrase 键，此处对齐
+        同一容错口径（「旧数据零迁移零 422」红线），不引入新写路径。
+        """
+        if isinstance(data, dict) and not data.get("word"):
+            phrase = data.get("phrase")
+            if isinstance(phrase, str) and phrase.strip():
+                data = {**data, "word": phrase.strip()}
+        return data
+
 
 class StyleCardBase(BaseModel):
     """文风卡基础字段。"""
@@ -47,9 +75,9 @@ class StyleCardBase(BaseModel):
         default_factory=dict,
         description="正面画像：句长节奏/词汇层级/语域/开头结尾习惯等",
     )
-    negative_list: List[dict] = Field(
+    negative_list: List[NegativeEntry] = Field(
         default_factory=list,
-        description="负面清单：[{word/phrase, alternative}]，每条禁令配正面替代",
+        description="负面清单：[{word, alternative, severity}]，severity: warning 提醒 / blocker 硬禁（检查命中判不通过，绝不自动改正文）",
     )
     dialogue_ratio_target: Optional[float] = Field(
         None, ge=0.0, le=1.0,
@@ -70,15 +98,6 @@ class StyleCardBase(BaseModel):
 class StyleCardCreate(StyleCardBase):
     """创建文风卡（书级或章级覆盖）。"""
     chapter_id: Optional[UUID] = Field(None, description="非空表示章级覆盖")
-
-
-class StyleCardUpdate(BaseModel):
-    """更新文风卡（所有字段可选）。"""
-    positive_profile: Optional[dict] = None
-    negative_list: Optional[List[dict]] = None
-    dialogue_ratio_target: Optional[float] = Field(None, ge=0.0, le=1.0)
-    paragraph_rhythm: Optional[str] = None
-    notes: Optional[str] = None
 
 
 class StyleCardResponse(StyleCardBase):
@@ -189,7 +208,7 @@ class StyleExtractRequest(BaseModel):
 class StyleExtractResponse(BaseModel):
     """文风画像提炼响应。"""
     positive_profile: dict = Field(..., description="正面画像")
-    negative_list: List[dict] = Field(..., description="负面清单")
+    negative_list: List[NegativeEntry] = Field(..., description="负面清单")
     dialogue_ratio_target: Optional[float] = None
     paragraph_rhythm: Optional[str] = None
     degraded: Optional[dict] = Field(None, description="提炼降级标记（如有）")
@@ -252,6 +271,17 @@ class StyleInboxItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class StyleInboxConfirmRequest(BaseModel):
+    """确认收件箱候选的可选覆盖（Phase 3：确认前就地编辑词块）。
+
+    旧调用方 POST 空 body 时 FastAPI 解析为 None，行为逐字节不变；
+    仅携带显式有值的键生效——word 覆盖 strip 后非空才采纳，
+    alternative 覆盖空串=清除替代（None=不覆盖）。
+    """
+    word: Optional[str] = Field(None, description="覆盖负面候选的词（确认前就地编辑）")
+    alternative: Optional[str] = Field(None, description="覆盖替代建议（空串=清除替代）")
 
 
 class StyleAuditionRequest(BaseModel):
