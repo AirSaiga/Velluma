@@ -28,12 +28,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import asyncio
+from itertools import product
 
 import pytest
 
 from backend.services.style.fingerprint import (
     aggregate_corpus,
     coefficient_of_variation,
+    compute_style_drift_hint,
     compute_text_fingerprint,
     count_dialogue_chars,
     count_words,
@@ -223,3 +225,137 @@ class TestAuditParity:
                 f"对话占比口径漂移: fingerprint={fp['dialogue_ratio']} "
                 f"auditor={audit.metrics['dialogue_ratio']}"
             )
+
+
+# ============================================================
+# 词汇丰富度与重复密度（NLP 扩展，任务包 C）
+# ============================================================
+# 精确断言用空格分隔的英文伪 token——jieba 对空格分词确定性高
+# （每个 ASCII 词为独立 token，空格/标点被 _tokenize 过滤）。
+
+# 12 个互异伪词；×3 + 前 4 词 = 40 token、12 类型 → ttr = 12/40 = 0.3
+_PSEUDO_WORDS = [
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta",
+    "eta", "theta", "iota", "kappa", "lambda", "mu",
+]
+PSEUDO_FLAT = " ".join(_PSEUDO_WORDS * 3 + _PSEUDO_WORDS[:4])  # 40 token
+
+# 同一句子循环拼接（13 遍 ≈ 442 字 / 273 token）：bigram 几乎全部高频重复
+REPETITIVE_CN = "夜色像墨一样浓。他推门进来，抖了抖肩上的雨。灯火晃了一下，又稳住了。" * 13
+
+# 144 个互异双字母伪词（431 字）：bigram 全互异 → ratio = 0；兼作漂移提示的反例长文本
+VARIED_TOKENS = " ".join("".join(p) for p in product("abcdefghijkl", repeat=2))
+
+
+class TestLexicalStats:
+    def test_exact_ttr_with_pseudo_tokens(self):
+        # 手工可算：40 token / 12 类型 → ttr = 0.3；token <100 → mattr 回落全体 ttr
+        fp = compute_text_fingerprint(PSEUDO_FLAT)
+        assert fp["lexical"] == {"token_count": 40, "ttr": 0.3, "mattr": 0.3}
+
+    def test_short_text_guard_returns_none(self):
+        # 24 token < 30 → 不判丰富度（同碎句率「句数<10 不判」哲学）
+        fp = compute_text_fingerprint(" ".join(_PSEUDO_WORDS * 2))
+        assert fp["lexical"] == {"token_count": 24, "ttr": None, "mattr": None}
+
+    def test_mattr_window_engaged_over_100_tokens(self):
+        # 110 token = a×50 + b×50 + c×10，手算逐窗 TTR（窗口 100、步长 1，共 11 窗）：
+        #   首窗（0-99）含 a、b 两型 → 0.02；其余 10 窗（右端进入 c）各 3 型 → 0.03
+        #   MATTR = (0.02 + 10×0.03) / 11 = 0.02909… → 0.029 ≠ 全体 ttr（3/110=0.027）
+        #   ——mattr ≠ ttr 证实窗口逻辑确实生效（而非全体 TTR 冒充）
+        text = " ".join(["a"] * 50 + ["b"] * 50 + ["c"] * 10)
+        lex = compute_text_fingerprint(text)["lexical"]
+        assert lex["token_count"] == 110
+        assert lex["ttr"] == 0.027
+        assert lex["mattr"] == 0.029
+        assert lex["mattr"] != lex["ttr"]
+
+    def test_mattr_one_when_all_distinct(self):
+        # 144 个互异 token：每窗 100 型全互异 → mattr = ttr = 1.0（滑窗计数器守恒 sanity）
+        lex = compute_text_fingerprint(VARIED_TOKENS)["lexical"]
+        assert lex == {"token_count": 144, "ttr": 1.0, "mattr": 1.0}
+
+    def test_empty_and_punct_only_isomorphic_none(self):
+        # 空文本与纯标点（分词后零 token）同构：token_count=0、其余 None
+        for text in ("", "   ", "。……！"):
+            fp = compute_text_fingerprint(text)
+            assert fp["lexical"] == {"token_count": 0, "ttr": None, "mattr": None}
+            assert fp["repetition"] == {"bigram_repeat_ratio": None, "repeated_bigrams_top": []}
+
+    def test_bounds_within_unit_interval(self):
+        for text in (RICH_TEXT, REPETITIVE_CN, VARIED_TOKENS):
+            lex = compute_text_fingerprint(text)["lexical"]
+            for value in (lex["ttr"], lex["mattr"]):
+                assert value is None or 0.0 <= value <= 1.0
+
+
+class TestRepetitionStats:
+    def test_zero_ratio_on_all_distinct_bigrams(self):
+        rep = compute_text_fingerprint(VARIED_TOKENS)["repetition"]
+        assert rep == {"bigram_repeat_ratio": 0.0, "repeated_bigrams_top": []}
+
+    def test_repetitive_text_ratio_significantly_higher(self):
+        # 同句循环 → 几乎全部 bigram 频次 13 → ratio 1.0，显著高于互异文本的 0.0
+        rep_loop = compute_text_fingerprint(REPETITIVE_CN)["repetition"]["bigram_repeat_ratio"]
+        rep_varied = compute_text_fingerprint(VARIED_TOKENS)["repetition"]["bigram_repeat_ratio"]
+        assert rep_loop > 0.5
+        assert rep_loop > rep_varied + 0.4
+
+    def test_top_bigrams_shape(self):
+        top = compute_text_fingerprint(REPETITIVE_CN)["repetition"]["repeated_bigrams_top"]
+        assert isinstance(top, list) and 0 < len(top) <= 5
+        counts = []
+        for item in top:
+            assert isinstance(item, list) and len(item) == 2
+            assert isinstance(item[0], str) and item[0]  # 两 token 直接拼接成串
+            assert isinstance(item[1], int) and item[1] >= 3
+            counts.append(item[1])
+        assert counts == sorted(counts, reverse=True)
+
+    def test_short_text_guard_returns_none(self):
+        # 36 token < 50 → 不判重复密度
+        fp = compute_text_fingerprint(" ".join(_PSEUDO_WORDS * 3))
+        assert fp["repetition"] == {"bigram_repeat_ratio": None, "repeated_bigrams_top": []}
+
+    def test_deterministic_new_keys(self):
+        a = compute_text_fingerprint(REPETITIVE_CN)
+        b = compute_text_fingerprint(REPETITIVE_CN)
+        assert a["lexical"] == b["lexical"]
+        assert a["repetition"] == b["repetition"]
+
+    def test_light_mode_includes_new_families(self):
+        # light 模式省略修辞，但词汇/重复两族照算（jieba 单遍代价可承受）
+        fp = compute_text_fingerprint(REPETITIVE_CN, light=True)
+        assert fp["rhetoric"] is None
+        assert fp["lexical"]["token_count"] > 0
+        assert fp["repetition"]["bigram_repeat_ratio"] is not None
+
+    def test_top_level_key_structure_locked(self):
+        # 结构锁：新键只增不改——既有 14 键 + lexical/repetition，防意外增删键
+        fp = compute_text_fingerprint(PSEUDO_FLAT)
+        assert set(fp.keys()) == {
+            "char_count", "word_count",
+            "sentence_count", "sentence_len_mean", "sentence_len_median",
+            "sentence_len_cv", "short_sentence_ratio", "sentence_len_histogram",
+            "dialogue_ratio", "paragraph_count", "paragraph_len_mean",
+            "short_paragraph_ratio", "punctuation", "rhetoric",
+            "lexical", "repetition",
+        }
+
+
+class TestStyleDriftRepeatHint:
+    """compute_style_drift_hint 的用词重复度检查（阈值 NGRAM_REPEAT_RATIO_HI=0.15）。"""
+
+    def test_repeat_note_fires_on_repetitive_long_text(self):
+        hint = compute_style_drift_hint(REPETITIVE_CN, None, 0.35, 0.80)
+        assert hint is not None
+        assert "用词重复度偏高" in hint
+
+    def test_no_repeat_note_on_varied_text(self):
+        # 互异伪词长文本（>400 字）不触发重复度提示（其余条件也不满足 → 整体 None）
+        hint = compute_style_drift_hint(VARIED_TOKENS, None, 0.35, 0.80)
+        assert hint is None or "用词重复度偏高" not in hint
+
+    def test_short_text_still_returns_none(self):
+        # <400 字维持既有行为（不测量、不提示）
+        assert compute_style_drift_hint("短文本。", None, 0.35, 0.80) is None

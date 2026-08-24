@@ -20,8 +20,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 文风指纹测量（文风模块重构 S1 测量层，docs/style-module-redesign.md §3-②/§7.3）。
 
 职责：
-- 输入一段中文文本，输出确定性指纹 dict（句长/对话占比/段落/标点/修辞密度）
-- 零 LLM 依赖、零 I/O、纯标准库（re/statistics）+ ai_taste_meter 复用
+- 输入一段中文文本，输出确定性指纹 dict（句长/对话占比/段落/标点/修辞密度/
+  词汇丰富度/词级重复密度）
+- 零 LLM 依赖、零 I/O；标准库（re/statistics）+ ai_taste_meter 复用
+  + jieba 分词（懒加载，仅词汇/重复两族指标用，首调用建词典一次）
 - 确定性：相同输入永远相同输出，便于单测与对账
 
 「同一把尺子」原则（设计稿 §3-②）：
@@ -40,6 +42,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - paragraph_count / paragraph_len_mean / short_paragraph_ratio（叙述段，排除对白段）
 - punctuation                             破折号/省略号/叹号/问号 每千字频率
 - rhetoric（light 模式省略）              比喻/微操/过渡词 每 500 字密度 + AI 味综合分
+- lexical                                 词汇丰富度：token_count/ttr/mattr（MATTR 窗口
+                                          100 词；<30 词不判 → None，同碎句率哲学）
+- repetition                              词级 bigram 重复密度 + 频次 top5（<50 词不判；
+                                          参考性指标——角色名等正当重复会抬高，不进门禁）
 """
 
 import re
@@ -213,6 +219,88 @@ def _rhetoric_stats(text: str) -> Dict[str, float]:
 
 
 # ============================================================
+# 词汇丰富度与重复密度（NLP 扩展：jieba 分词 + 纯算法统计）
+# ============================================================
+
+_TOKEN_KEEP = re.compile(r"[\w一-鿿]+")  # 去纯标点/空白/符号（含 CJK 区间）
+_LEX_MIN_TOKENS = 30    # token 不足不判丰富度（同碎句率「句数<10 不判」哲学）
+_MATTR_WINDOW = 100     # MATTR 移动窗口（词数）
+_REP_MIN_TOKENS = 50    # token 不足不判重复密度
+_REP_BIGRAM_MIN_FREQ = 3  # bigram 频次达此值计为「重复」
+_REP_TOP_K = 5          # 重复 bigram 取前 K
+
+
+def _tokenize(text: str) -> List[str]:
+    """jieba 分词 + 过滤纯标点/空白/符号。
+
+    jieba 在函数内懒 import：首调用建缓存词典约数百毫秒（一次性），
+    模块顶层 import 会拖慢启动与测试首载，勿上提。
+    """
+    import jieba
+
+    return [tok for tok in jieba.lcut(text) if _TOKEN_KEEP.fullmatch(tok)]
+
+
+def _mattr(tokens: List[str], window: int) -> float:
+    """移动平均 TTR（MATTR，Covington & McFall 1982）：步长 1 逐窗 TTR 取均值。
+
+    滑窗计数增量维护（O(n)）而非逐窗重建 set（O(n·window)）——
+    语料聚合指纹可达数万 token，逐窗重建在长语料上不可承受。
+    """
+    n_windows = len(tokens) - window + 1
+    counts: Dict[str, int] = {}
+    for tok in tokens[:window]:
+        counts[tok] = counts.get(tok, 0) + 1
+    distinct_sum = len(counts)
+    for i in range(1, n_windows):
+        # 移出左端 tokens[i-1]，移入右端 tokens[i+window-1]
+        left = tokens[i - 1]
+        counts[left] -= 1
+        if counts[left] == 0:
+            del counts[left]
+        right = tokens[i + window - 1]
+        counts[right] = counts.get(right, 0) + 1
+        distinct_sum += len(counts)
+    return distinct_sum / n_windows / window
+
+
+def _lexical_stats(tokens: List[str]) -> Dict:
+    """词汇丰富度：TTR（类型/令牌比）+ MATTR（长度不敏感的移动平均 TTR）。"""
+    n = len(tokens)
+    if n < _LEX_MIN_TOKENS:
+        return {"token_count": n, "ttr": None, "mattr": None}
+    ttr = round(len(set(tokens)) / n, 3)
+    mattr = ttr if n < _MATTR_WINDOW else round(_mattr(tokens, _MATTR_WINDOW), 3)
+    return {"token_count": n, "ttr": ttr, "mattr": mattr}
+
+
+def _repetition_stats(tokens: List[str]) -> Dict:
+    """词级 bigram 重复密度。
+
+    ⚠ 参考性指标：角色名/固定搭配等正当重复会自然抬高该值，
+    只用于呈现与漂移轻提示，不进任何门禁（判断权在作者）。
+    """
+    n = len(tokens)
+    if n < _REP_MIN_TOKENS:
+        return {"bigram_repeat_ratio": None, "repeated_bigrams_top": []}
+    bigram_counts: Dict[str, int] = {}
+    for i in range(n - 1):
+        key = tokens[i] + tokens[i + 1]
+        bigram_counts[key] = bigram_counts.get(key, 0) + 1
+    total = n - 1
+    repeated_total = sum(c for c in bigram_counts.values() if c >= _REP_BIGRAM_MIN_FREQ)
+    # 频次降序 + 字符串升序 tiebreak（保确定性）
+    top = sorted(
+        ((bg, c) for bg, c in bigram_counts.items() if c >= _REP_BIGRAM_MIN_FREQ),
+        key=lambda kv: (-kv[1], kv[0]),
+    )[:_REP_TOP_K]
+    return {
+        "bigram_repeat_ratio": round(repeated_total / total, 3),
+        "repeated_bigrams_top": [[bg, c] for bg, c in top],
+    }
+
+
+# ============================================================
 # 出口：单文本指纹 + 语料聚合
 # ============================================================
 
@@ -236,11 +324,15 @@ def compute_text_fingerprint(text: str, *, light: bool = False) -> Dict:
             **_paragraph_stats(""),
             "punctuation": _punctuation_stats("", 0),
             "rhetoric": None,
+            # 空文本同构返回（token_count=0、其余 None/[]，消费方零判空分支）
+            "lexical": _lexical_stats([]),
+            "repetition": _repetition_stats([]),
         }
         return fp
 
     word_count = count_words(text)
     sentences = split_sentences(text)
+    tokens = _tokenize(text)  # 词汇/重复两族共用，只分词一次
     fingerprint: Dict = {
         "char_count": len(text),
         "word_count": word_count,
@@ -249,6 +341,9 @@ def compute_text_fingerprint(text: str, *, light: bool = False) -> Dict:
         **_paragraph_stats(text),
         "punctuation": _punctuation_stats(text, word_count),
         "rhetoric": None if light else _rhetoric_stats(text),
+        # light 模式也算——jieba 单遍 + 纯算法统计，代价可承受
+        "lexical": _lexical_stats(tokens),
+        "repetition": _repetition_stats(tokens),
     }
     return fingerprint
 
@@ -320,6 +415,13 @@ def compute_style_drift_hint(
     cv = fp["sentence_len_cv"]
     if cv > 0 and cv < cv_lo:
         notes.append(f"句长起伏 {cv:.2f} 偏匀速（AI 腔征兆，健康 ≥{cv_lo}）")
+    # 用词重复度（NLP 扩展）：阈值常量懒 import——validation 包 __init__ 直引
+    # code_auditors（其又 import 本模块），模块顶层 import 会成环，勿上提
+    from backend.services.validation.thresholds import NGRAM_REPEAT_RATIO_HI
+
+    rep_ratio = fp["repetition"]["bigram_repeat_ratio"]
+    if rep_ratio is not None and rep_ratio >= NGRAM_REPEAT_RATIO_HI:
+        notes.append("用词重复度偏高（疑似套路化表达）")
 
     if not notes:
         return None

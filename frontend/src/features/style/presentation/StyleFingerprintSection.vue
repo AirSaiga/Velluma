@@ -91,6 +91,21 @@ const metrics = computed<MetricRow[]>(() => {
       hint: `每500字比喻；微操 ${fp.rhetoric.micro_action_per_500}；AI 味综合 ${fp.rhetoric.ai_taste_score}`,
     })
   }
+  // 词汇丰富度 / 重复度（NLP 扩展）：旧指纹无此键或数据不足（null）则整格不渲染
+  if (fp.lexical?.mattr != null) {
+    rows.push({
+      label: '词汇丰富度',
+      value: fp.lexical.mattr.toFixed(2),
+      hint: `词汇多样性（0-1），越低越说明翻来覆去用同一批词；TTR ${fp.lexical.ttr ?? '—'}`,
+    })
+  }
+  if (fp.repetition?.bigram_repeat_ratio != null) {
+    rows.push({
+      label: '重复度',
+      value: pct(fp.repetition.bigram_repeat_ratio),
+      hint: '反复出现的相邻词组占比，偏高疑似套路化表达（人名等正常重复也算）',
+    })
+  }
   return rows
 })
 

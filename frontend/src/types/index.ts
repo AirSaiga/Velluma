@@ -517,6 +517,17 @@ export interface TextFingerprint {
     transition_per_500: number
     ai_taste_score: number
   } | null
+  /** 词汇丰富度（<30 词时 ttr/mattr 为 null；旧指纹无此键） */
+  lexical?: {
+    token_count: number
+    ttr: number | null
+    mattr: number | null
+  } | null
+  /** 词级重复密度（<50 词时 ratio 为 null；参考性指标不进门禁；旧指纹无此键） */
+  repetition?: {
+    bigram_repeat_ratio: number | null
+    repeated_bigrams_top: [string, number][]
+  } | null
 }
 
 export interface SampleFingerprint {

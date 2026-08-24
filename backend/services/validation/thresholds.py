@@ -66,3 +66,14 @@ CONSECUTIVE_SAME_LEN_THRESHOLD: int = 6
 # 升华腔模式（如"命运的齿轮""这一刻"）命中次数 ≥ 此值 → finding
 
 SUBLIMATION_HITS_THRESHOLD: int = 2
+
+
+# ============================================================
+# 词级 bigram 重复密度高阈（文风漂移轻提示用）
+# ============================================================
+# fingerprint.repetition.bigram_repeat_ratio ≥ 此值 → 心跳漂移提示
+# 「用词重复度偏高（疑似套路化表达）」。
+# ⚠ 初值 0.15 为经验猜测，待实测校准（角色名等正当重复会抬高该值）；
+# 仅软提示不进门禁（判断权在作者，见 fingerprint.compute_style_drift_hint）。
+
+NGRAM_REPEAT_RATIO_HI: float = 0.15
