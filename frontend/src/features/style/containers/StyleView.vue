@@ -191,6 +191,7 @@ async function loadAll() {
         ? styleCard.negative_list.map((n, i) => ({
             word: n.word || '',
             alternative: n.alternative || '',
+            severity: n.severity,
             id: `neg_${i}_${Date.now()}`,
           } as NegativeItem))
         : []
@@ -255,7 +256,12 @@ async function saveStyleCard() {
       positive_profile: { ...positiveProfile.value },
       negative_list: negativeList.value
         .filter(n => n.word.trim())
-        .map(n => ({ word: n.word.trim(), alternative: n.alternative?.trim() || null })),
+        // severity 未设不补键——后端按 warning（提醒）兜底
+        .map(n => ({
+          word: n.word.trim(),
+          alternative: n.alternative?.trim() || null,
+          ...(n.severity ? { severity: n.severity } : {}),
+        })),
       dialogue_ratio_target: dialogueRatioTarget.value,
       paragraph_rhythm: paragraphRhythm.value || null,
       style_knobs: { ...styleKnobs.value },
@@ -411,6 +417,7 @@ async function runExtract(validSamples: string[]) {
       negativeList.value = result.negative_list.map((n, i) => ({
         word: n.word || '',
         alternative: n.alternative || '',
+        severity: n.severity,
         id: `neg_extract_${i}_${Date.now()}`,
       } as NegativeItem))
     }
@@ -475,7 +482,7 @@ async function switchScope(chapterId: string) {
 function applyCardToFields(card: { positive_profile?: Record<string, string>; negative_list?: NegativeItem[]; dialogue_ratio_target?: number | null; paragraph_rhythm?: string | null; style_knobs?: Record<string, number> | null; locked_keys?: string[] | null } | null) {
   positiveProfile.value = { ...(card?.positive_profile || {}) }
   negativeList.value = Array.isArray(card?.negative_list)
-    ? card!.negative_list!.map(n => ({ word: n.word || '', alternative: n.alternative || '' }))
+    ? card!.negative_list!.map(n => ({ word: n.word || '', alternative: n.alternative || '', severity: n.severity }))
     : []
   dialogueRatioTarget.value = card?.dialogue_ratio_target ?? null
   paragraphRhythm.value = card?.paragraph_rhythm || ''
@@ -576,11 +583,13 @@ async function runAudition(text: string, withBaseline: boolean) {
 }
 
 // ============ 收件箱（S3）============
-async function confirmInbox(itemId: string) {
+/** confirm（✓ 收入清单）：overrides = 收件箱就地编辑后的词块覆盖（Phase 3——
+ *  后端 confirm 端点支持可选 word/alternative 覆盖字段，不带则维持原候选入清单） */
+async function confirmInbox(itemId: string, overrides?: { word?: string; alternative?: string | null }) {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
   try {
-    await styleApi.confirmInboxItem(bookId, itemId)
+    await styleApi.confirmInboxItem(bookId, itemId, overrides)
     if (bookId) styleApi.logStyleEvent(bookId, 'inbox_confirm')
     showToast('已生效（负面清单已更新）', 'success')
     // 重载卡字段 + 收件箱（负面清单变了）
@@ -668,10 +677,15 @@ async function applyHit(hit: StyleScanHit) {
 }
 
 function collectHit(hit: StyleScanHit) {
-  // 仅收入清单：加入负面清单本地编辑（走 2s 防抖保存），不改本章正文
+  // 仅收入清单：加入负面清单本地编辑（走 2s 防抖保存），不改本章正文；
+  // 硬禁档随命中一并带入（Phase 3 severity 贯通）
   const exists = negativeList.value.some(n => n.word.trim() === hit.word)
   if (!exists) {
-    negativeList.value.unshift({ word: hit.word, alternative: hit.alternative || '' })
+    negativeList.value.unshift({
+      word: hit.word,
+      alternative: hit.alternative || '',
+      severity: hit.severity === 'blocker' ? 'blocker' : undefined,
+    })
     markDirty()
   }
   scanResolvedWords.value.push(hit.word)

@@ -91,6 +91,7 @@ function isResolved(word: string): boolean {
             <div class="hit-head">
               <span class="hit-word">「{{ hit.word }}」</span>
               <span class="hit-count">× {{ hit.count }}</span>
+              <span v-if="hit.severity === 'blocker'" class="hit-sev" title="硬禁：检查时命中即判不通过（只提示，绝不自动改正文）">硬禁</span>
               <span v-if="hit.alternative" class="hit-alt">→ {{ hit.alternative }}</span>
               <span v-else class="hit-alt dim">（无替代建议）</span>
             </div>
@@ -228,6 +229,14 @@ function isResolved(word: string): boolean {
 .hit-count {
   padding: 0.0625rem 0.375rem;
   font-size: 0.625rem;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-radius: 0.25rem;
+}
+/* 硬禁档标识（Phase 3：与负面清单/系统陈词库同款红 chip） */
+.hit-sev {
+  padding: 0.0625rem 0.3125rem;
+  font-size: 0.5625rem;
   color: #b91c1c;
   background: #fee2e2;
   border-radius: 0.25rem;

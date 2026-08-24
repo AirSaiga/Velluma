@@ -31,6 +31,7 @@ import type { ContextPreview } from '../../../services/api/domain/adaptive.api'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
+import { useToast } from '../../../composables/useToast'
 import { requestOpenInbox, OPEN_INBOX_EVENT, inboxAutoOpen } from '../../world/composables/batchAccept'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 
@@ -115,6 +116,7 @@ watch(
 watch(() => session.finishReport?.value, (report) => {
   if (report) activeTab.value = 'review'
   fixStates.value = {}  // 新一轮审计 → 残句修复裁决态复位
+  semanticSent.value = {}  // 语义命中回流态同步复位（新报告可重新投递）
 })
 watch(() => session.settleResult?.value, (result) => {
   if (result) activeTab.value = 'review'
@@ -347,6 +349,32 @@ function adoptFix(i: number, d: any) {
 function dismissFix(i: number) {
   fixStates.value = { ...fixStates.value, [i]: {} }
   dispatchCollabEvent('sentence_fix', { action: 'reject' })
+}
+
+// ===== 语义命中 → 文风收件箱（Phase 3 F：疑似 AI 味变体逐条回流）=====
+// 只投候选不直接生效（红线同「这不像我」）；word 取片段前 20 字，过目时可再改。
+const { showToast } = useToast()
+const currentBookId = computed(() => store.currentBookId.value)
+type SemanticSentState = 'sending' | 'sent' | 'error'
+const semanticSent = ref<Record<number, SemanticSentState>>({})
+
+async function collectSemanticHit(i: number, hit: { segment: string; alternative?: string | null }) {
+  const bookId = currentBookId.value
+  if (!bookId || semanticSent.value[i] === 'sending' || semanticSent.value[i] === 'sent') return
+  semanticSent.value = { ...semanticSent.value, [i]: 'sending' }
+  try {
+    await styleApi.addInboxItem(
+      bookId,
+      'negative_candidate',
+      { word: hit.segment.slice(0, 20), alternative: hit.alternative ?? null, source_text: hit.segment },
+      'semantic_scan',
+    )
+    semanticSent.value = { ...semanticSent.value, [i]: 'sent' }
+    showToast('已投进文风收件箱——去文风页过目后再收入清单', 'success')
+  } catch (e: any) {
+    semanticSent.value = { ...semanticSent.value, [i]: 'error' }
+    showToast('投递失败: ' + (e?.message || ''), 'error')
+  }
 }
 
 // ===== 本章文风卡（S3：章级特例状态 + 跳文风页深链）=====
@@ -587,6 +615,17 @@ async function handleResetChapterStyle() {
                 <div class="fix-sent">{{ hit.segment }}</div>
                 <div class="fix-desc">
                   ≈「{{ hit.pattern }}」（相似度 {{ hit.similarity }}）<template v-if="hit.alternative"> · 可改为：{{ hit.alternative }}</template>
+                </div>
+                <!-- 回流收件箱（Phase 3 F）：投候选过目，不直接入清单；无书上下文不渲染 -->
+                <div v-if="currentBookId" class="fix-actions">
+                  <button
+                    v-if="!semanticSent[i] || semanticSent[i] === 'error'"
+                    class="btn-mini-reset"
+                    title="把这条片段投进文风收件箱——去文风页过目后再收入清单"
+                    @click="collectSemanticHit(i, hit)"
+                  >收入收件箱</button>
+                  <span v-else-if="semanticSent[i] === 'sending'" class="fix-status">投递中…</span>
+                  <span v-else-if="semanticSent[i] === 'sent'" class="fix-status fix-status--ok">✓ 已投递</span>
                 </div>
               </div>
             </div>

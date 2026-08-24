@@ -45,6 +45,12 @@ function removeNegative(index: number) {
   emit('dirty')
 }
 
+/** 档位切换（Phase 3）：提醒 ⇄ 硬禁。缺省/未设 = 提醒（与后端 warning 兜底一致） */
+function toggleSeverity(item: NegativeItem) {
+  item.severity = item.severity === 'blocker' ? 'warning' : 'blocker'
+  emit('dirty')
+}
+
 function hitCount(word: string): number {
   return props.hitCounts?.[word] ?? -1  // -1 = 未统计（无章数据）
 }
@@ -97,6 +103,12 @@ function hitCount(word: string): number {
         :class="{ 'hit-zero': hitCount(item.word) === 0 }"
         :title="hitCount(item.word) === 0 ? '近 10 章零命中——这条可能不需要了' : '近 10 章命中次数'"
       >{{ hitCount(item.word) === 0 ? '未命中' : `近10章 ×${hitCount(item.word)}` }}</span>
+      <button
+        class="sev-toggle"
+        :class="{ 'sev-blocker': item.severity === 'blocker' }"
+        title="硬禁：检查时命中即判不通过（只提示，绝不自动改正文）/ 提醒：仅提示与统计"
+        @click="toggleSeverity(item)"
+      >{{ item.severity === 'blocker' ? '硬禁' : '提醒' }}</button>
       <button class="icon-danger" title="删除此条" @click="removeNegative(idx)">✕</button>
     </div>
 
@@ -236,6 +248,25 @@ function hitCount(word: string): number {
 .hit-chip.hit-zero {
   color: var(--text-muted);
   background: var(--bg-tertiary);
+}
+/* 档位切换：提醒（灰、可点） ⇄ 硬禁（红 chip，同系统陈词库 system-sev 视觉） */
+.sev-toggle {
+  flex-shrink: 0;
+  padding: 0.125rem 0.4375rem;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sev-toggle:hover {
+  color: var(--text-secondary);
+}
+.sev-toggle.sev-blocker {
+  color: #b91c1c;
+  background: #fee2e2;
 }
 .icon-danger {
   flex-shrink: 0;

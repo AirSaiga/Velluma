@@ -426,6 +426,8 @@ export interface PlanConfirmRequest {
 export interface NegativeItem {
   word: string
   alternative?: string | null
+  /** 禁令档位：warning=提醒（默认，仅提示与统计） / blocker=硬禁（检查命中即判不通过）；缺省按 warning 兜底 */
+  severity?: 'warning' | 'blocker'
 }
 
 export interface StyleCard {

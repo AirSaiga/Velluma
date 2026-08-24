@@ -451,3 +451,16 @@ E2/refiner bug 可提前单独修；S3 依赖 S2（试听走真实注入管线�
     只调 embedding API 不碰向量库，不受 SQLite 方言门控影响）。
   - 单测 `backend/services/style/test_semantic_match.py`（14 项：合成向量
     精确控制余弦值，覆盖阈值边界/候选过滤/切段/截断/缓存命中/降级）。
+- **Phase 3 severity 两档与语义回流（任务包 E/F，2026-08-24）**：负面清单条目
+  `NegativeItem.severity` 两档贯通——**提醒**（warning，默认；仅提示与统计）/
+  **硬禁**（blocker；检查时命中即判不通过，只提示**绝不自动改正文**）；未设
+  severity 处处按提醒兜底（前端保存不补键，后端默认 warning）。前端触点：
+  负面清单每条「提醒 ⇄ 硬禁」切换（StyleNegativeSection）、禁词扫描审稿模态
+  硬禁红 chip（StyleScanModal）；prompt 注入作者清单优先排序（后端包 E）。
+  收件箱 confirm 端点支持可选 `word`/`alternative` 覆盖字段——收件箱确认前
+  可就地编辑词块（点词/✎ 进编辑，Enter/失焦定稿、Esc 取消），编辑后随
+  confirm 请求覆盖生效（不带则旧行为）。完稿报告「疑似 AI 味变体」每条新增
+  「收入收件箱」按钮（InspectorPanel → `styleApi.addInboxItem`，
+  `source=semantic_scan`，word 取片段前 20 字，投后按钮变「已投递」防重复；
+  只投候选不直接入清单，红线同「这不像我」）。**章级特例卡消费接通留
+  Phase 4**。

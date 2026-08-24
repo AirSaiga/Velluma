@@ -431,9 +431,21 @@ export const styleApi = {
     })
   },
 
-  /** 确认候选（✓）：负面候选入负面清单，样本候选入库。 */
-  confirmInboxItem: async (bookId: string, itemId: string): Promise<StyleInboxItem> => {
-    return requestJson(`/books/${bookId}/style/inbox/${itemId}/confirm`, { method: 'POST' })
+  /** 确认候选（✓）：负面候选入负面清单，样本候选入库。
+   *  overrides（Phase 3 可选）：收件箱就地编辑后的词块覆盖——后端 confirm 端点
+   *  支持可选 word/alternative 字段，仅带上显式有值的键；不带则维持原候选入清单。 */
+  confirmInboxItem: async (
+    bookId: string,
+    itemId: string,
+    overrides?: { word?: string; alternative?: string | null },
+  ): Promise<StyleInboxItem> => {
+    const body: Record<string, unknown> = {}
+    if (overrides?.word) body.word = overrides.word
+    if (overrides?.alternative != null) body.alternative = overrides.alternative
+    return requestJson(`/books/${bookId}/style/inbox/${itemId}/confirm`, {
+      method: 'POST',
+      ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
+    })
   },
 
   /** 忽略候选（✗）。 */
