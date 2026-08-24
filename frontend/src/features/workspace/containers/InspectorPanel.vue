@@ -576,6 +576,20 @@ async function handleResetChapterStyle() {
                 <span v-else class="fix-status">未能修复（{{ fixStates[i].reason }}）</span>
               </div>
             </div>
+            <!-- 疑似 AI 味变体（语义扫描：embedding 相似度抓「换字逃逸」改写变体；只提示，作者裁决） -->
+            <div v-if="session.finishReport.value.semantic_hits?.length" class="report-block report-block--warn">
+              <div class="report-block-label">疑似 AI 味变体（{{ session.finishReport.value.semantic_hits.length }}）</div>
+              <div
+                v-for="(hit, i) in session.finishReport.value.semantic_hits.slice(0, 5)"
+                :key="'sem' + i"
+                class="report-item"
+              >
+                <div class="fix-sent">{{ hit.segment }}</div>
+                <div class="fix-desc">
+                  ≈「{{ hit.pattern }}」（相似度 {{ hit.similarity }}）<template v-if="hit.alternative"> · 可改为：{{ hit.alternative }}</template>
+                </div>
+              </div>
+            </div>
             <!-- 关键情节完成度（打算页列的情节写没写到） -->
             <div v-if="session.finishReport.value.report.coverage?.checked" class="report-block">
               <div class="report-block-label">

@@ -413,3 +413,41 @@ E2/refiner bug 可提前单独修；S3 依赖 S2（试听走真实注入管线�
 - **RAG 记忆流**：不动 recall_memories 三层结构；样本检索是独立通路，不混入记忆检索。
 - **设置面板（model_config）**：文风不引入新模型配置项；提炼/试听/改写全部复用
   reasoning/creative 既有配置。
+
+---
+
+## 12. 2026-08-24 禁忌面归一与 NLP 扩展（任务包 A-D 注记）
+
+设计稿 S1-S5 之后的后续批次，本节为增量记录（详规见各模块 docstring）：
+
+- **禁忌面四源归一（任务包 A/B/C）**：负面清单/黑名单的**四源唯一权威**收敛到
+  `backend/services/style/prohibitions.py`（`load_prohibition_set`：SystemCliche +
+  `style_cards.negative_list` + `books.style_blacklist` + 静态反 AI 词表，按层序
+  先到先得去重，产出编译好的 `ProhibitionSet`）。**双写已消亡**——
+  `style_blacklist` 启动时迁移并入 `negative_list`，原列冻结不再读写。
+  消费方（settings_bundle prompt 注入 / ClichéValidator / scan-negative /
+  defat / refinery / ghost_guard）全部换源，`bundle.prohibitions` 即加载产物。
+- **指纹扩展**：指纹结构在原句长/对话/段落/标点/修辞之外补
+  `lexical`（词汇丰富度：token_count/ttr/mattr）与 `repetition`（词级 bigram
+  重复密度+频次 top5，<50 词不判）两键（`services/style/fingerprint.py`）。
+- **语义扫描（任务包 D）**：`backend/services/style/semantic_match.py` 的
+  `semantic_scan_text`——embedding 余弦相似度抓精确匹配漏掉的「换字逃逸」变体
+  （「眼底闪过一丝」→「眼底掠过一抹」）。要点与红线：
+  - 挂点仅在 `/adaptive/finish` 完稿报告 `semantic_hits`（前端报告区
+    「疑似 AI 味变体」块），作者裁决；**不进收件箱 / scan-negative /
+    任何 SSE 流式路径**。
+  - `is_embedding_configured()` 门控：未配置（SQLite 默认后端恒未配置）
+    第一时刻短路直返 `[]`——**SQLite 默认路径行为逐字节零变化**。
+  - 切段与指纹同一把尺子（`split_sentences` 句切 + 超长句按 [，；、：]
+    细切，段上限 200）；批量向量走 `embedding.get_embeddings`（一次调用
+    带全量 input，逐条维度校验，失败等长降级全 `[]`）；禁忌 pattern 向量
+    进程级缓存（key = sha1(model|dims|sorted(patterns))，全空不落缓存防
+    瞬时故障毒化）。
+  - 上限：每 pattern ≤3 段、总命中按相似度降序截 20、短模式（<4 字）与
+    正则条目不进语义流（精确匹配已覆盖/句式形状语义不同）。
+  - **阈值 0.78 未经实测校准**（遗留风险：可能漏抓或误报）——校准脚本
+    `scripts/calibrate_semantic_threshold.py`（约 10 条种子陈词 × 手写同义
+    变体句 vs 无关句的相似度矩阵与分离度建议，手动小工具不进 CI；
+    只调 embedding API 不碰向量库，不受 SQLite 方言门控影响）。
+  - 单测 `backend/services/style/test_semantic_match.py`（14 项：合成向量
+    精确控制余弦值，覆盖阈值边界/候选过滤/切段/截断/缓存命中/降级）。

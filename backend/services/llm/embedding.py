@@ -48,7 +48,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
-from typing import Optional
+import math
+from typing import List, Optional, Union
 
 import httpx
 from openai import AsyncOpenAI
@@ -113,16 +114,37 @@ def _supports_dimensions_param(model: str) -> bool:
     return model.lower().startswith(_DIMENSIONS_PARAM_PREFIXES)
 
 
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """余弦相似度（纯函数）：空向量/零模返回 0.0。
+
+    语义与 services/workflows/validators.py 的同名实现一致（那边不动，
+    避免触碰在役引擎）；本处提供新消费方（style/semantic_match.py 语义
+    匹配器、校准脚本）共用的规范实现，勿再散第三份。
+    """
+    if not v1 or not v2:
+        return 0.0
+    dot_product = sum(a * b for a, b in zip(v1, v2))
+    mag1 = math.sqrt(sum(a * a for a in v1))
+    mag2 = math.sqrt(sum(b * b for b in v2))
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    return dot_product / (mag1 * mag2)
+
+
 async def _request_embedding(
-    text: str,
+    text: Union[str, List[str]],
     *,
     api_key: str,
     base_url: str,
     model: str,
     dimensions: int,
     timeout: float,
-) -> list:
-    """底层调用：成功返回向量；网络/鉴权/参数错误直接抛异常（调用方决定降级或上报）。"""
+) -> Union[list, List[list]]:
+    """底层调用：成功返回向量；网络/鉴权/参数错误直接抛异常（调用方决定降级或上报）。
+
+    input 兼容单文本（str → 单向量）与批量（List[str] → 按输入序对齐的
+    向量列表，OpenAI 兼容协议一次请求带全量 input）。
+    """
     call_kwargs: dict = {"model": model, "input": text}
     if _supports_dimensions_param(model):
         call_kwargs["dimensions"] = dimensions
@@ -135,6 +157,8 @@ async def _request_embedding(
             http_client=http_client,
         )
         resp = await client.embeddings.create(**call_kwargs)
+        if isinstance(text, list):
+            return [item.embedding for item in resp.data]
         return resp.data[0].embedding
     finally:
         await http_client.aclose()
@@ -186,6 +210,63 @@ async def get_embedding(
         f"连接: {connection['source']} ({connection['base_url']})"
     )
     return embedding
+
+
+async def get_embeddings(
+    texts: List[str],
+    model: Optional[str] = None,
+    timeout: int = 120,
+) -> List[list]:
+    """批量版 get_embedding：一次 API 调用带全量 input（省往返次数）。
+
+    静默降级风格与 get_embedding 一致：
+    - 空列表 → []；未配置（is_embedding_configured() False，含 SQLite
+      方言门控）→ 与输入等长的全 [] 列表（零网络调用）
+    - 整体异常 / 响应条数与输入不齐 → 与输入等长的全 [] 列表
+    - 逐条维度校验（不符该条置 []，其余条不受牵连）
+    - 不缓存（缓存策略是调用方的职责，如 semantic_match 的模式向量缓存）
+    """
+    if not texts:
+        return []
+    if not is_embedding_configured():
+        return [[] for _ in texts]
+
+    connection = get_embedding_connection()
+    api_key = connection["api_key"]
+    emb_model = model or connection["model"]
+    expected_dimensions = connection["dimensions"]
+
+    try:
+        embeddings = await _request_embedding(
+            list(texts),
+            api_key=api_key,
+            base_url=connection["base_url"],
+            model=emb_model,
+            dimensions=expected_dimensions,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error(f"[Embeddings] 批量异常: {e}")
+        return [[] for _ in texts]
+
+    if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+        logger.error(
+            f"[Embeddings] 响应条数不齐: 期望 {len(texts)} 实得 "
+            f"{len(embeddings) if isinstance(embeddings, list) else '非列表'}"
+        )
+        return [[] for _ in texts]
+
+    results: List[list] = []
+    for emb in embeddings:
+        if len(emb) != expected_dimensions:
+            logger.error(
+                f"[Embeddings] 维度不匹配: 模型 {emb_model} 输出 {len(emb)} 维, "
+                f"配置 {expected_dimensions} 维，该条置空"
+            )
+            results.append([])
+        else:
+            results.append(emb)
+    return results
 
 
 async def probe_embedding(overrides: Optional[dict] = None, timeout: int = 15) -> dict:

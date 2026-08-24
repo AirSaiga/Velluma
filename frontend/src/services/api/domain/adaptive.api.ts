@@ -109,6 +109,21 @@ export interface FinishReport {
   candidates_pending?: number
   /** 记忆倒灌：完稿时本章写入向量记忆的块数（后端路由写在响应顶层，与 candidates_pending 同层；勿放回嵌套 report） */
   memory_indexed?: number
+  /**
+   * 疑似 AI 味变体（D 包语义扫描：embedding 余弦相似度抓「换字逃逸」改写变体，
+   * 只提示作者裁决不改正文；未配置 embedding / 零命中时后端不设此键）
+   */
+  semantic_hits?: Array<{
+    /** 正文段（命中嫌疑最强的原文片段） */
+    segment: string
+    /** 疑似变体的禁忌 pattern */
+    pattern: string
+    /** 余弦相似度（0-1，保留 3 位） */
+    similarity: number
+    severity: string
+    alternative?: string | null
+    source: string
+  }>
   report?: {
     chapter_id?: string
     word_count?: number
