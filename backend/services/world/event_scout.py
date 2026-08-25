@@ -14,7 +14,9 @@ LLM 只产草稿 → 落 pending 候选（与事件账本物理隔离）→ 作�
   ② 落池前纯算法预筛：draft.summary 与已入账 note 归一化（去空白/标点）
     子串重合即跳过——宁漏勿误（短于 4 字的归一化文本不参与比对）
   ③ pending 池同章同 (event_type, summary) 不重复建（原有行为不变）
-- 失败/无实体/正文过短 → 返回 0，绝不阻塞 settle/finish 主流程
+- 失败/无实体/正文过短 → 返回 0 + skipped 原因（P3-4/C6：机器可读短码 +
+  人话一句——轻设定书收件箱永空且不可见，带原因给前端空态一句提示），
+  绝不阻塞 settle/finish 主流程
 
 副作用：写 world_event_candidates（pending）。警示：绝不写 world_events。
 """
@@ -42,6 +44,14 @@ logger = logging.getLogger(__name__)
 _MIN_TEXT_LEN = 20      # 正文过短（如空段/一两字）不浪费 LLM
 _MAX_CANDIDATES = 6
 _MAX_RECENT_EVENTS = 15   # 排除块/预筛取 t 之前最近 N 条（prompt 预算与查全的折中）
+
+# P3-4（C6）跳过原因短码 → 人话（作者语言口径，上屏原文；堆栈/技术词不上屏）
+_SCOUT_SKIP_REASONS = {
+    "no_chapter": "章节暂时读不到，稍后再试",
+    "short_text": "这段正文还太短，AI 还发现不了世界变化",
+    "no_entities": "世界页还没有角色——建几个角色后，AI 才能从正文发现世界变化",
+    "llm_failed": "这次提取没成功（不影响写作），下次沉淀或完稿时会再试",
+}
 
 # 归一化：去全部空白 + 中西文标点（比较只认实词字形，措辞/标点差异归零）。
 # 标点集经 re.escape 逐字转义进字符类——防手写转义/引号拼接出错。
@@ -74,6 +84,15 @@ def _is_ledger_duplicate(summary: str, recent_notes: List[str]) -> bool:
     return False
 
 
+def _skip(code: str) -> Dict[str, Any]:
+    """P3-4（C6）：跳过返回 {created: 0, skipped: {code, reason}}。
+
+    消费方（orchestrator.on_settle/on_finish）只在「无候选产出」时透出 skipped，
+    正常产出时该键缺席（零变化契约）；LLM 找不到候选/全被去重筛掉不算跳过，不带原因。
+    """
+    return {"created": 0, "skipped": {"code": code, "reason": _SCOUT_SKIP_REASONS[code]}}
+
+
 async def run(
     chapter_id: str,
     db: AsyncSession,
@@ -83,20 +102,20 @@ async def run(
     text: str = "",
     **kw,
 ) -> Dict[str, Any]:
-    """抽取候选事件 → pending 池。返回 {created: N}。"""
+    """抽取候选事件 → pending 池。返回 {created: N}（跳过时附 skipped 原因）。"""
     chapter = await db.get(Chapter, chapter_id)
     if chapter is None:
-        return {"created": 0}
+        return _skip("no_chapter")
 
     body = (text or "").strip() or (chapter.content_text or "").strip()
     if len(body) < _MIN_TEXT_LEN:
-        return {"created": 0}
+        return _skip("short_text")
 
     book_id = str(chapter.book_id)
     repo = WorldRepository(db)
     entities = await repo.entities.list_by_book(book_id)
     if not entities:
-        return {"created": 0}
+        return _skip("no_entities")
     locations = await repo.locations.list_by_book(book_id)
     t = (await resolve_narrative_time(db, chapter)).t
 
@@ -141,7 +160,7 @@ async def run(
         parsed = parse_json_safe(raw) or _safe_json(raw)
     except Exception as e:
         logger.warning(f"[event_scout] LLM 抽取失败（不阻塞主流程）: {e}")
-        return {"created": 0}
+        return _skip("llm_failed")
 
     items = parsed.get("candidates") if isinstance(parsed, dict) else None
     if not isinstance(items, list) or not items:

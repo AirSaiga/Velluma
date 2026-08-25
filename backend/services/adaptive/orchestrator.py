@@ -60,6 +60,11 @@ class AdaptiveOrchestrator:
         self._last_inference_ts: float = 0.0
         self._prev_outline_sig: str = ""
         self._active_tasks: Dict[str, asyncio.Task] = {}  # component → running task
+        # P3-2（C4）双跑去重：异步激活的入参签名（recent_text 签名 + budget 档）
+        self._active_task_sigs: Dict[str, str] = {}
+        # P3-1（C5）组件失败可见化：component → {"ts": 秒级时间戳, "error": 一行摘要}。
+        # 成功即清（「最近一次失败」语义，非历史账）；per-orchestrator 内存态
+        self._last_component_errors: Dict[str, Dict[str, Any]] = {}
         # 谋篇进度判定的增量基准（P1.4 M2）：上次心跳时的正文长度，-1=首次（判全文）
         self._last_content_len: int = -1
         # dock 缓存：段落文本 + projection 签名未变则复用上次碎片，省 ~90% dock 成本
@@ -77,6 +82,41 @@ class AdaptiveOrchestrator:
     def register_component(self, name: str, runner: Callable):
         """注册能力组件（runner 签名：async def(chapter_id, db, model_snapshot, budget) -> result）。"""
         self._components[name] = runner
+
+    # ============================================================
+    # P3-1（C5）组件失败可见化 + P3-2（C4）入参签名
+    # ============================================================
+
+    def _note_component_error(self, component: str, exc: BaseException) -> None:
+        """记录组件最近一次失败（秒级时间戳 + 一行摘要，不带堆栈）。
+
+        此前异步组件失败只有后台 log，前端「辅助层偶尔什么都不出」完全不可
+        分辨原因。经心跳响应 / /adaptive/model 透出（副驾「AI 视角」调试区），
+        堆栈不给作者看。
+        """
+        summary = " ".join(str(exc).split())[:120] or exc.__class__.__name__
+        self._last_component_errors[component] = {
+            "ts": int(time.time()),
+            "error": summary,
+        }
+
+    def _clear_component_error(self, component: str) -> None:
+        """成功即清该组件的失败记录（最近一次失败语义）。"""
+        self._last_component_errors.pop(component, None)
+
+    def last_component_errors(self) -> Dict[str, Dict[str, Any]]:
+        """最近失败组件快照（浅拷贝防外部改动内存态；空 dict = 一切正常）。"""
+        return {k: dict(v) for k, v in self._last_component_errors.items()}
+
+    @staticmethod
+    def _component_input_sig(recent_text: str, budget: int) -> str:
+        """P3-2（C4）组件入参签名：recent_text 签名 + budget 档。
+
+        等效 = 同段落文本 + 同预算档——await 完的在跑异步任务产出可直接复用；
+        签名不等效时维持重跑（现状兜底：异步任务可能用的旧参数，产出无效）。
+        """
+        from backend.services.adaptive.change_detector import _text_sig
+        return f"{_text_sig(recent_text)}:{int(budget)}"
 
     async def on_heartbeat(self, state: AuthorState) -> Dict[str, Any]:
         """前端心跳到达。返回当前世界模型快照 + 本次激活的组件列表。
@@ -98,20 +138,22 @@ class AdaptiveOrchestrator:
                 self._prev_outline_sig = _text_sig(state.outline_text)
 
             # ---- 方向权重更新（纯算法，每次心跳都跑，零 LLM）----
-            # 输入：意图(must_hits/foreshadows) + 软约束 + 当前段落(惯性力) + 已写事实(推动力)
+            # 输入：意图(must_hits/foreshadows) + 软约束 + 当前段落(惯性力) + 已写正文(推动力)
             # 产出：5 方向的归一化权重，dock_generator 据此分布生成碎片
             from backend.services.adaptive.direction_weights import compute as compute_weights
+            from backend.services.adaptive.paragraph_source import written_text
             from backend.services.context.settings_bundle import load_chapter_settings_bundle
             bundle = await load_chapter_settings_bundle(self.chapter_id, db)
             intent = snapshot.get("intent", {})
             soft = bundle.soft_constraints()
-            facts = snapshot.get("facts", [])
-            facts_text = "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
+            # 推动力「已达成」判定用画布全文——写到画布即已写（无论是否沉淀）；
+            # 层 1 事实作者删改后过期，不再作为判定文本
+            written_for_weights = written_text(bundle.content_text or "")
             self._direction_weights = compute_weights(
                 intent=intent,
                 soft=soft,
                 recent_text=state.recent_text or "",
-                facts_text=facts_text,
+                facts_text=written_for_weights,
                 prev_weights=self._direction_weights,
                 settled_just_now=False,  # on_heartbeat 不触发节拍重置（on_settle 才触发）
                 adopted_directions=self._adopted_directions,
@@ -129,11 +171,15 @@ class AdaptiveOrchestrator:
 
             for act in activations:
                 if act.component in sync_components:
-                    # dock_generator 同步激活时透传方向权重（LLM 据此分布生成）
-                    extra = {"direction_weights": self._direction_weights} if act.component == "dock_generator" else None
+                    # 停顿心跳同步组件统一透传实时段落（前端光标段纯文本）——
+                    # dock_generator/canon_watch 据此锚定「作者当前段落」；
+                    # dock 另带方向权重（LLM 据此分布生成）
+                    extra: Dict[str, Any] = {"recent_text": state.recent_text or ""}
+                    if act.component == "dock_generator":
+                        extra["direction_weights"] = self._direction_weights
                     await self._activate_sync(act, db, extra_context=extra)
                 else:
-                    await self._activate(act)
+                    await self._activate(act, recent_text=state.recent_text or "")
 
             await db.commit()
             # 同步执行后重新拉快照（挂件已写入）
@@ -181,12 +227,30 @@ class AdaptiveOrchestrator:
             ))
 
         # ---- 规则 2：挂件生发（停顿 4s + 段尾 + 有意图或正文足够）----
+        # 句子级闸门（2026-08-25）：段落停在半句（无句末标点）时挂件闭嘴——
+        # 此刻作者要的是把句子写完（Space 续写的活），推新画面全是噪音；
+        # 空段=段界不判半句（写完一段回车进新段是挂件黄金时机）；
+        # Tab 显式点名（summoned）豁免，作者主权优先
+        from backend.services.adaptive.paragraph_source import ends_mid_sentence
         if (state.paused_ms >= 4000
             and state.cursor_at_paragraph_end
+            and (state.summoned or not ends_mid_sentence(state.recent_text or ""))
             and (intent_source != "none" or effective_words >= 300)):
             # projection 是否过期？（懒加载：没 projection 或 intent 刚变）
-            projections = snapshot.get("projections", [])
-            need_proj = not projections or intent.get("confidence", 0) < 0.5
+            # ⚠ 只看真实推测——layer3 混装着 __dock__/__canon_watch__ 缓存标记项，
+            # 不滤掉的话首次停顿后缓存项占位、not projections 永假，走向卡
+            # 整章不刷新（无意图时停顿过一次即整章缺席）
+            real_projs = [
+                p for p in (snapshot.get("projections") or [])
+                if isinstance(p, dict) and not p.get("__dock__") and not p.get("__canon_watch__")
+            ]
+            # 意图版本比对：意图重算后旧推测过期（缺键=修复前的旧推测，刷新一次）
+            intent_ver = snapshot.get("intent_version", 0)
+            proj_stale = bool(real_projs) and real_projs[0].get("intent_version") != intent_ver
+            need_proj = (
+                intent_source != "none"
+                and (not real_projs or intent.get("confidence", 0) < 0.5 or proj_stale)
+            )
             if need_proj:
                 activations.append(Activation(
                     component="future_projection",
@@ -199,11 +263,10 @@ class AdaptiveOrchestrator:
             cur_text_sig = _text_sig(state.recent_text or "")
             # projection 签名 = projection 内容的 hash（简化：取数量 + 首项 event）
             cur_proj_sig = ""
-            for p in projections:
-                if isinstance(p, dict) and not p.get("__dock__"):
-                    ev = p.get("possible_beats", [{}])[0].get("event", "") if p.get("possible_beats") else ""
-                    cur_proj_sig = f"{len(projections)}:{ev[:30]}"
-                    break
+            for p in real_projs:
+                ev = p.get("possible_beats", [{}])[0].get("event", "") if p.get("possible_beats") else ""
+                cur_proj_sig = f"{len(real_projs)}:{ev[:30]}"
+                break
             dock_cache_hit = (
                 cur_text_sig == self._last_dock_text_sig
                 and cur_proj_sig == self._last_dock_proj_sig
@@ -247,7 +310,7 @@ class AdaptiveOrchestrator:
                 unique.append(a)
         return unique
 
-    async def _activate(self, act: Activation):
+    async def _activate(self, act: Activation, recent_text: str = ""):
         """异步激活组件（后台 task，不阻塞心跳）。"""
         runner = self._components.get(act.component)
         if not runner:
@@ -257,6 +320,11 @@ class AdaptiveOrchestrator:
         existing = self._active_tasks.get(act.component)
         if existing and not existing.done():
             return
+        # P3-2（C4）：记录入参签名——_activate_sync await 到本任务后比对等效性，
+        # 等效则直接复用产出不再重跑（同参数 LLM 双调用消除）
+        self._active_task_sigs[act.component] = self._component_input_sig(
+            recent_text, act.budget_tokens,
+        )
 
         async def _run():
             try:
@@ -268,10 +336,13 @@ class AdaptiveOrchestrator:
                     await db.commit()
                 if act.component == "intent_inference":
                     self._last_inference_ts = time.time()
+                self._clear_component_error(act.component)  # P3-1：成功即清
             except Exception as e:
                 logger.warning(f"[orchestrator] 组件 {act.component} 失败: {e}", exc_info=True)
+                self._note_component_error(act.component, e)  # P3-1
             finally:
                 self._active_tasks.pop(act.component, None)
+                self._active_task_sigs.pop(act.component, None)
 
         self._active_tasks[act.component] = asyncio.create_task(_run())
 
@@ -287,17 +358,25 @@ class AdaptiveOrchestrator:
         runner = self._components.get(act.component)
         if not runner:
             return
-        # 若已有异步 task 在跑，等它完成（避免并发写冲突），但不 return——
-        # 同步调用仍需自己执行一遍（异步 task 可能用的旧 budget/旧参数，
-        # 产出可能无效；同步调用方持有 db session 能拿到最新结果）
+        # 若已有异步 task 在跑，等它完成（避免并发写冲突）——
+        # P3-2（C4）：await 完成后入参签名与本次等效（同段落签名 + 同 budget 档）
+        # → 直接复用其产出不再重跑（任务已把产出写进世界模型）；不等效才维持
+        # 重跑（旧行为兜底：异步 task 可能用的旧 budget/旧参数，产出可能无效）
         existing = self._active_tasks.get(act.component)
         if existing and not existing.done():
+            prior_sig = self._active_task_sigs.get(act.component, "")
             try:
                 await existing
             except Exception:
                 pass
             finally:
                 self._active_tasks.pop(act.component, None)
+                self._active_task_sigs.pop(act.component, None)
+            cur_sig = self._component_input_sig(
+                str((extra_context or {}).get("recent_text") or ""), act.budget_tokens,
+            )
+            if prior_sig and prior_sig == cur_sig:
+                return
         try:
             from backend.services.adaptive.world_model import WorldModelRepository
             repo = WorldModelRepository(db)
@@ -306,8 +385,10 @@ class AdaptiveOrchestrator:
             # 不在此 commit（由 on_heartbeat 统一 commit）
             if act.component == "intent_inference":
                 self._last_inference_ts = time.time()
+            self._clear_component_error(act.component)  # P3-1：成功即清
         except Exception as e:
             logger.warning(f"[orchestrator] 同步组件 {act.component} 失败: {e}", exc_info=True)
+            self._note_component_error(act.component, e)  # P3-1
 
     def on_direction_adopted(self, direction: str) -> None:
         """作者缝合采纳了某方向的碎片 → 记录，下次心跳 compute 时该方向降权（负反馈）。
@@ -338,17 +419,22 @@ class AdaptiveOrchestrator:
         # ---- 节拍力：沉淀触发方向权重重算（新段新节拍，刻画/环境部分重置）----
         try:
             from backend.services.adaptive.direction_weights import compute as compute_weights
+            from backend.services.adaptive.paragraph_source import written_text
             from backend.services.context.settings_bundle import load_chapter_settings_bundle
             async with self.db_factory() as db:
                 snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)
                 bundle = await load_chapter_settings_bundle(self.chapter_id, db)
                 intent = snapshot.get("intent", {})
                 soft = bundle.soft_constraints()
-                facts = snapshot.get("facts", [])
-                facts_text = "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
+                # 推动力判定文本=画布全文；刚沉淀的段落可能尚未过存盘防抖落库，
+                # 判定文本缺席会让本段 must_hit 被误判未达——补在尾部
+                written_for_weights = written_text(bundle.content_text or "")
+                seg = segment_text.strip()
+                if seg and seg not in written_for_weights:
+                    written_for_weights = written_for_weights + "\n\n" + seg
                 self._direction_weights = compute_weights(
                     intent=intent, soft=soft,
-                    recent_text=segment_text, facts_text=facts_text,
+                    recent_text=segment_text, facts_text=written_for_weights,
                     prev_weights=self._direction_weights,
                     settled_just_now=True,  # ← 节拍力触发
                     adopted_directions=self._adopted_directions,
@@ -366,11 +452,14 @@ class AdaptiveOrchestrator:
                     snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)
                     sediment_result = await sediment_runner(self.chapter_id, db, snapshot, 1500, commit=commit)
                     await db.commit()
+                self._clear_component_error("sediment")  # P3-1
             except Exception as e:
                 logger.warning(f"[orchestrator] sediment 失败: {e}", exc_info=True)
+                self._note_component_error("sediment", e)  # P3-1
 
         # ---- W4 候选事件抽取（本段 → 待确认池；失败不影响沉淀结果）----
         candidates_created = 0
+        scout_skipped = None
         scout_runner = self._components.get("event_scout")
         if scout_runner:
             try:
@@ -379,17 +468,26 @@ class AdaptiveOrchestrator:
                         self.chapter_id, db, {}, 1500, source="settle", text=segment_text
                     )
                     candidates_created = int(scout_result.get("created", 0))
+                    # P3-4（C6）：无候选产出且带跳过原因（无实体/正文不足）→ 透出给
+                    # 前端收件箱空态（有候选产出时缺省不出，零变化契约）
+                    if not candidates_created:
+                        scout_skipped = scout_result.get("skipped")
                     await db.commit()
+                self._clear_component_error("event_scout")  # P3-1
             except Exception as e:
                 logger.warning(f"[orchestrator] event_scout 失败: {e}", exc_info=True)
+                self._note_component_error("event_scout", e)  # P3-1
 
-        return {
+        result = {
             "settled": True,
             "fact_count": (await self._fact_count()),
             "emergent_facts": sediment_result.get("emergent_facts") if sediment_result else None,
             "conflicts": sediment_result.get("conflicts") if sediment_result else None,
             "candidates_created": candidates_created,
         }
+        if scout_skipped:
+            result["scout_skipped"] = scout_skipped
+        return result
 
     async def on_finish(self) -> Dict[str, Any]:
         """作者完稿：同步触发后处理（审计/一致性/残句/覆盖率），返回完整报告。
@@ -412,8 +510,10 @@ class AdaptiveOrchestrator:
                 snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)
                 report = await post_runner(self.chapter_id, db, snapshot, 8000)
                 await db.commit()
+            self._clear_component_error("post_process")  # P3-1
             # ---- W4 候选事件抽取（整章 → 待确认池；失败不影响审计结果）----
             candidates_created = 0
+            scout_skipped = None
             scout_runner = self._components.get("event_scout")
             if scout_runner:
                 try:
@@ -422,15 +522,23 @@ class AdaptiveOrchestrator:
                             self.chapter_id, db, {}, 2500, source="finish"
                         )
                         candidates_created = int(scout_result.get("created", 0))
+                        # P3-4（C6）：无候选产出且带跳过原因 → 透出（增量字段，零变化）
+                        if not candidates_created:
+                            scout_skipped = scout_result.get("skipped")
                         await db.commit()
+                    self._clear_component_error("event_scout")  # P3-1
                 except Exception as e:
                     logger.warning(f"[orchestrator] event_scout(finish) 失败: {e}", exc_info=True)
+                    self._note_component_error("event_scout", e)  # P3-1
             result = {"finished": True, "report": report or {}}
             if candidates_created:
                 result["candidates_created"] = candidates_created
+            if scout_skipped:
+                result["scout_skipped"] = scout_skipped
             return result
         except Exception as e:
             logger.warning(f"[orchestrator] post_process 失败: {e}", exc_info=True)
+            self._note_component_error("post_process", e)  # P3-1
             return {"finished": False, "reason": str(e)}
         finally:
             self._active_tasks.pop("post_process", None)

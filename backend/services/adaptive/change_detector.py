@@ -42,6 +42,7 @@ class AuthorState:
     outline_text: str = ""
     recent_text: str = ""        # 当前段落尾部（≤500字）
     latest_fact: Optional[Dict] = None  # 最新沉淀的层1事实（如有）
+    summoned: bool = False       # Tab 显式点名要零件（豁免句子级闸门——作者主权）
 
 
 # ============================================================

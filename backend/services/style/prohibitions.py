@@ -127,9 +127,17 @@ class ProhibitionSet:
             )
         ]
 
-    def words(self, max_entries: int) -> List[str]:
-        """前 N 条 pattern（呈现序：作者负面清单优先；prompt / 校对列表用）。"""
-        return [e.pattern for e in self._presentation_order() if e.pattern][:max_entries]
+    def words(self, max_entries: int, severity: Optional[str] = None) -> List[str]:
+        """前 N 条 pattern（呈现序：作者负面清单优先；prompt / 校对列表用）。
+
+        severity 指定档位时只收该档（如 "blocker"——供生成侧硬拦截校对）；
+        缺省 None 收全量（零变化契约：prompt 注入等存量消费方行为不变）。
+        """
+        return [
+            e.pattern
+            for e in self._presentation_order()
+            if e.pattern and (severity is None or (e.severity or "warning") == severity)
+        ][:max_entries]
 
     def prompt_text(self, max_entries: int) -> str:
         """顿号连接前 N 条 pattern；空集合返回空串（prompt 零变化契约）。"""

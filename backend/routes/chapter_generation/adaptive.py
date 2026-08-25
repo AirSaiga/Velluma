@@ -26,7 +26,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -43,6 +45,10 @@ from backend.models import Chapter
 from backend.repositories.world_repository import WorldRepository
 from backend.services.adaptive.orchestrator import get_orchestrator
 from backend.services.adaptive.change_detector import AuthorState
+# P1-2（A4）碎片拼回判定规范化：抹空白共用组件侧同一把规范化尺子
+from backend.services.adaptive.paragraph_source import normalize_for_match
+# B2（2026-08-25 治理）：spine 锚点进度判定换 text_match 共享判据（勿另写滑窗）
+from backend.services.adaptive.text_match import matches as text_matches
 from backend.services.adaptive.observing import (
     bind_adaptive_trace,
     flush_adaptive_records,
@@ -90,6 +96,11 @@ router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
 OUTLINE_WC_HARD_RATIO = 1.6      # 超过 target×1.6 → 带压缩反馈重试一次
 OUTLINE_WC_TRUNCATE_RATIO = 1.5  # 仍超 → 句界硬截断（截断上限必须 ≤ HARD）
 
+# stitch LLM 预算下限（C2，P1-4）：deepseek 类推理模型即使传 REASONING_DISABLED
+# 仍烧 ~800-1000 隐藏思考 tokens，1200 下限时正文余量太薄 → 「续写产出为空」；
+# 抬到 2200 给隐藏推理留足死余量。纯上限放宽——非推理模型产出短于上限不多花。
+STITCH_MAX_TOKENS_FLOOR = 2200
+
 
 def _truncate_at_sentence(text: str, limit: int) -> str:
     """句界硬截断：在 limit 内找最后一个句末标点切断。
@@ -106,6 +117,76 @@ def _truncate_at_sentence(text: str, limit: int) -> str:
     return text[:limit]
 
 
+def _truncate_keep_tail(text: str, limit: int) -> str:
+    """保尾截断（P1-1，A3）：末段完整保留，超字从前往后按句界删节到 ≤ limit。
+
+    outline 模式的价值重心在末段——双端锚定的「后端缝合」全靠末段引向
+    after_text，现有尾截砍掉的恰是承接段，等于砍掉整次扩写的意义；与旧
+    引擎「末段（结局段）豁免截断」护栏思想对齐。仅 outline 字数硬闸使用，
+    其他模式维持尾截口径不变。
+
+    退化路径（防死循环）：全文单段（末段即全文）或末段自身 ≥ limit 时，
+    已没有「删前保尾」的操作空间，回落现有尾截 _truncate_at_sentence。
+    入参契约：text 已 strip（路由侧字数闸前的统一清洗）。
+    """
+    if len(text) <= limit:
+        return text
+    # 段落切分保留分隔符形态：[段, 分隔, 段, 分隔, 末段]
+    parts = re.split(r"(\n+)", text)
+    if len(parts) < 3 or not parts[-1]:
+        return _truncate_at_sentence(text, limit)
+    sep, tail = parts[-2], parts[-1]
+    if len(tail) + len(sep) >= limit:
+        # 末段自身超限：保不住，回落尾截
+        return _truncate_at_sentence(text, limit)
+    head = "".join(parts[:-2])
+    head_limit = limit - len(tail) - len(sep)
+    if len(head) <= head_limit:
+        return text
+    # 从前往后找最早能装进 head_limit 的句界：head[:p] 整句让位（删最少句数
+    # 优先）；找不到（前段末句是超长单句）则整个前段让位、只留末段
+    for i, ch in enumerate(head):
+        if ch in ("。", "！", "？", "…") and len(head) - (i + 1) <= head_limit:
+            return head[i + 1:] + sep + tail
+    return tail
+
+
+# ============================================================
+# 碎片拼回判定规范化（P1-2，A4）
+# ============================================================
+# 模型常在「已把作者碎片复述进产出」时换了同类标点/夹了空白（「他握紧刀。」
+# →「他握紧刀 !」）——裸子串 `fragment in text` 会误判「不含」，把作者原句
+# 再拼回句首造成开头重复。判定口径：抹全部空白（normalize_for_match，与
+# 组件侧同一把尺子）+ 标点折叠为等价类；字符内容（语义）变了仍判不含。
+_PUNCT_FOLD = str.maketrans({
+    # 句末等价类：句/叹/问/省略（全半角）视为同一种「一句终了」
+    "。": ".", "．": ".", ".": ".",
+    "！": ".", "!": ".", "？": ".", "?": ".", "…": ".",
+    # 停顿等价类：逗/顿/分号
+    "，": ",", ",": ",", "、": ",", "；": ",", ";": ",",
+    # 冒号
+    "：": ":", ":": ":",
+    # 引号/括号
+    "“": "\"", "”": "\"", "\"": "\"",
+    "‘": "'", "’": "'", "'": "'", "「": "'", "」": "'", "『": "'", "』": "'",
+    "（": "(", "(": "(", "）": ")", ")": ")",
+    # 破折号
+    "—": "-", "－": "-", "―": "-", "-": "-",
+})
+
+
+def _contains_fragment(text: str, fragment: str) -> bool:
+    """stitch 碎片拼回判定（规范化）：抹空白 + 标点折叠等价类后的子串命中。
+
+    只容纳「模型已复述碎片」的形态微差（标点/空白变体）；字符内容变了
+    （加字/换词，如「他握紧刀」→「他握紧了刀」）仍判不含 → 路由照常拼回。
+    """
+    key = normalize_for_match(fragment).translate(_PUNCT_FOLD)
+    if not key:
+        return True  # 空碎片按已含处理（路由层已有 fragment 真值门，防御位）
+    return key in normalize_for_match(text).translate(_PUNCT_FOLD)
+
+
 # ============================================================
 # Schemas
 # ============================================================
@@ -118,6 +199,7 @@ class HeartbeatRequest(BaseModel):
     has_outline: bool = False
     outline_text: str = ""
     recent_text: str = Field("", description="当前段落尾部（≤500字）")
+    summoned: bool = Field(False, description="Tab 显式点名要零件（豁免句子级闸门）")
 
 
 class HeartbeatResponse(BaseModel):
@@ -135,6 +217,9 @@ class HeartbeatResponse(BaseModel):
     world_version: Optional[Dict] = Field(None)
     # 章级谋篇进度（P1.4 M2）：无脉络/无锚点为 None（感知带进度行静默缺席）
     spine_progress: Optional[Dict] = Field(None)
+    # P3-1（C5）组件失败可见化：最近一次失败的辅助组件（组件名 → 秒级时间戳 +
+    # 一行错误摘要；成功即清）。空 dict = 一切正常（增量字段，旧前端忽略无碍）
+    last_component_errors: Dict[str, Dict] = Field(default_factory=dict)
 
 
 class SettleRequest(BaseModel):
@@ -183,6 +268,7 @@ async def heartbeat(
         has_outline=request.has_outline,
         outline_text=request.outline_text,
         recent_text=request.recent_text,
+        summoned=request.summoned,
     )
     result = await orch.on_heartbeat(state)
     snapshot = result.get("snapshot", {})
@@ -196,6 +282,13 @@ async def heartbeat(
 
     # 从世界模型拉挂件缓存（dock_generator 写入的 __dock__ 项）
     dock_parts = _extract_dock_parts(snapshot)
+    # 句子级闸门（2026-08-25）：作者段落停在半句（无句末标点）时挂件闭嘴——
+    # 此刻要的是把句子写完（Space 续写的活），缓存旧件也一并藏起；
+    # 空段=段界不判半句（写完一段回车进新段是挂件黄金时机）；
+    # Tab 显式点名（summoned）豁免，作者主权优先
+    from backend.services.adaptive.paragraph_source import ends_mid_sentence
+    if ends_mid_sentence(request.recent_text) and not request.summoned:
+        dock_parts = []
     # 走向卡（层 3 推测首 beat）——Ctrl+Space 走向卡舱的数据源
     direction_cards = _extract_direction_cards(snapshot, spine=chapter.spine if chapter is not None else None)
     # Canon 感知（canon_watch 写入的 __canon_watch__ 项）
@@ -223,8 +316,9 @@ async def heartbeat(
     if inbox_hint:
         canon_hints = list(canon_hints) + [inbox_hint]
 
-    # 章级谋篇进度（P1.4 M2 §4.3）：纯算法零 LLM，宁漏勿误（全词命中才判 hit，
-    # 误报破坏信任；漏报作者自己划掉即可）。按内容长度缓存；pending→hit 迁移才写库
+    # 章级谋篇进度（P1.4 M2 §4.3）：纯算法零 LLM，宁漏勿误（B2 治理后走
+    # text_match 共享判据的全片段命中 + 就近窗口；误报破坏信任，漏报作者自己
+    # 划掉即可 + finish 报告兜底）。按内容 hash 缓存；pending→hit 迁移才写库
     spine_progress = await _spine_progress_for_heartbeat(chapter, orch, db)
 
     # 观测（P0-2）：心跳事件进 chapter 级 trace；顺路冲走累积的组件调用账
@@ -253,6 +347,7 @@ async def heartbeat(
         canon_hints=canon_hints,
         world_version=world_version,
         spine_progress=spine_progress,
+        last_component_errors=orch.last_component_errors(),
     )
 
 
@@ -268,17 +363,56 @@ def _extract_dock_parts(snapshot: Dict) -> List[Dict]:
 _STYLE_HINT_CACHE: Dict[str, tuple] = {}
 
 
-# 谋篇进度缓存（chapter_id → (content_len, progress|None)）——同漂移提醒策略
+# 谋篇进度缓存（chapter_id → (content_md5, progress|None)）——键为内容 hash
+# （B2 治理 2026-08-25：旧键=内容长度，等长改写会吃到旧缓存的旧进度）
 _SPINE_PROG_CACHE: Dict[str, tuple] = {}
+
+
+# ---- B2（2026-08-25 治理，docs/adaptive-assist-hardening.md P2）：判定参数 ----
+# hit 档阈值=全部滑窗片段命中：hit 是「3 字滑窗」一族三处判定里唯一写库的
+# （pending→hit 只前进不回退，不可逆），取最严档。旧判据 jieba topK=3 通用词
+# 全命中——「他没有」「不多时」类词几乎必然散落在任何长文本里，大面积误 hit；
+# 3 字滑窗片段比 jieba 单词具体得多，全命中可把通用词噪声压到近零。
+SPINE_HIT_THRESHOLD = 1.0
+# 临近岔路低阈值档（有意保留的宽松提示语义，M3 §5）：1/3 等效「任一~两个
+# 片段现身」≈ 旧『任一关键词现身』的提示强度。它只多一张走向卡舱硬提示卡
+# （不写库、作者可无视），宽松无害。
+SPINE_NEAR_BRANCH_THRESHOLD = 1.0 / 3.0
+# 增量区段就近窗口：常规心跳增量几十字；幽灵草稿连写采纳/心跳停跳后一次
+# 可能积数千字。封顶 2000（≈ 两轮 burst 连写 700 字 + 一轮打字）覆盖真实
+# 增量上限，同时把「大块文本里任意散落拼凑命中」的噪声面封住；窗口外的
+# 更早文本属于已判定区段，漏判由 finish 报告 spine_note 兜底（宁漏勿误）。
+SPINE_GROWTH_TAIL_CHARS = 2000
+
+
+def _build_spine_progress(
+    spine: Any, anchors: List[Any], near_branches: Optional[List[Dict]] = None,
+) -> Dict:
+    """进度组装（纯函数）：意图一句话 + 锚点清单 + pending 计数 + 人话 hint。"""
+    pending_count = sum(1 for a in anchors if isinstance(a, dict) and a.get("status") == "pending")
+    progress = {
+        "intent": (spine or {}).get("intent", {}).get("text", ""),
+        "anchors": [
+            {"id": a.get("id", ""), "text": a.get("text", ""), "status": a.get("status", "pending")}
+            for a in anchors if isinstance(a, dict)
+        ],
+        "pending_count": pending_count,
+        "hint": f"还有 {pending_count} 条情节没写到" if pending_count else "打算里的情节都写到了",
+    }
+    if near_branches:
+        progress["near_branches"] = near_branches
+    return progress
 
 
 async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) -> Optional[Dict]:
     """章级谋篇进度判定（P1.4 M2，设计稿 §4.3——纯算法零 LLM）。
 
-    对每个 pending 锚点：jieba 抽 3 关键词，**全部**出现在上次心跳以来的新增
-    正文 → hit（宁漏勿误：漏了作者手点，误了破坏信任）。增量区段由 orchestrator
-    记录的上次正文长度推（首次=全文；改写收缩退化为尾部 500 字）。结果按内容
-    长度缓存；pending→hit 迁移才写库（progress 只前进不回退）。
+    B2 治理（2026-08-25）：判定走 text_match 共享判据（3 字滑窗片段命中率，
+    禁止在此另写滑窗逻辑）——hit=全部片段命中**新增区段**（就近窗口内）；
+    临近岔路走低阈值档宽松提示。增量区段由 orchestrator 记录的上次正文长度
+    推（**首轮只记基线不判定**——进程重启后 growth=全文的大面积误 hit 不可逆，
+    宁漏勿误，漏判由 finish 报告 spine_note 兜底；改写收缩退化为尾部 500 字）。
+    结果按内容 hash 缓存；pending→hit 迁移才写库（progress 只前进不回退）。
     """
     if chapter is None:
         return None
@@ -286,37 +420,60 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
     spine = chapter.spine if isinstance(chapter.spine, dict) else None
     anchors = list((spine or {}).get("anchors") or [])
     content = chapter.content_text or ""
+    content_md5 = hashlib.md5(content.encode("utf-8")).hexdigest()
     if not anchors:
         orch._last_content_len = len(content)
         _SPINE_PROG_CACHE.pop(cid, None)
         return None
 
     cached = _SPINE_PROG_CACHE.get(cid)
-    if cached is not None and cached[0] == len(content):
+    if cached is not None and cached[0] == content_md5:
         orch._last_content_len = len(content)
         return cached[1]
 
-    prev_len = orch._last_content_len if getattr(orch, "_last_content_len", -1) >= 0 else 0
+    # 首轮（orchestrator 内存态归零——进程重启/重新进章后 _last_content_len=-1）：
+    # 只记基线长度，不做 hit 判定。旧行为本轮 growth=全文，通用关键词大面积
+    # 误 hit 写库不可逆（hit 只前进不回退）；宁漏勿误——漏判有 finish 报告
+    # spine_note 兜底提醒，误判没有出路
+    if getattr(orch, "_last_content_len", -1) < 0:
+        orch._last_content_len = len(content)
+        progress = _build_spine_progress(spine, anchors)
+        _SPINE_PROG_CACHE[cid] = (content_md5, progress)
+        return progress
+
+    prev_len = orch._last_content_len
     growth = content[prev_len:] if len(content) > prev_len else content[-500:]
 
     changed = False
     near_branches = []
     try:
-        import jieba.analyse  # noqa: F401（与 RAG 词法检索同一分词器）
-
         for a in anchors:
             if not isinstance(a, dict) or a.get("status") != "pending" or not a.get("text"):
                 continue
-            keywords = jieba.analyse.extract_tags(a["text"], topK=3)
-            if keywords and all(k in growth for k in keywords):
+            anchor_text = str(a["text"])
+            # hit：全片段命中新增区段（就近窗口内）。整串捷径仅对 ≥3 字锚点
+            # 开放——2 字通用词的裸子串命中（「高山」∈「高山上」）正是旧噪声
+            # 之源；无可判片段（<3 字锚点）按未命中处理，不给它留回归的门
+            # （漏判有 finish 报告 spine_note 兜底）
+            if text_matches(
+                anchor_text, growth,
+                threshold=SPINE_HIT_THRESHOLD,
+                tail_chars=SPINE_GROWTH_TAIL_CHARS,
+                exact_shortcut=len(anchor_text) >= 3,
+            ):
                 a["status"] = "hit"
                 changed = True
-            # 临近岔路（M3 §5）：带岔路标记的 pending 锚点，任一关键词已现身
-            # （写到附近了但还没兑现）→ 走向卡舱硬提示置顶其走向选项
+            # 临近岔路（M3 §5）：带岔路标记的 pending 锚点走低阈值档宽松判定
+            # （写到附近了但还没兑现）→ 走向卡舱硬提示置顶其走向选项。
+            # 有意宽松：只多一张提示卡、不写任何库，作者可无视
             elif (
-                keywords and any(k in growth for k in keywords)
-                and isinstance(a.get("branch"), dict)
+                isinstance(a.get("branch"), dict)
                 and a["branch"].get("options")
+                and text_matches(
+                    anchor_text, growth,
+                    threshold=SPINE_NEAR_BRANCH_THRESHOLD,
+                    tail_chars=SPINE_GROWTH_TAIL_CHARS,
+                )
             ):
                 near_branches.append({
                     "id": a.get("id", ""),
@@ -372,19 +529,8 @@ async def _spine_progress_for_heartbeat(chapter: Any, orch, db: AsyncSession) ->
         except Exception as e:
             logger.debug(f"[adaptive/spine] 进度写库失败（不阻塞心跳）: {e}")
 
-    pending_count = sum(1 for a in anchors if isinstance(a, dict) and a.get("status") == "pending")
-    progress = {
-        "intent": (spine or {}).get("intent", {}).get("text", ""),
-        "anchors": [
-            {"id": a.get("id", ""), "text": a.get("text", ""), "status": a.get("status", "pending")}
-            for a in anchors if isinstance(a, dict)
-        ],
-        "pending_count": pending_count,
-        "hint": f"还有 {pending_count} 条情节没写到" if pending_count else "打算里的情节都写到了",
-    }
-    if near_branches:
-        progress["near_branches"] = near_branches
-    _SPINE_PROG_CACHE[cid] = (len(content), progress)
+    progress = _build_spine_progress(spine, anchors, near_branches)
+    _SPINE_PROG_CACHE[cid] = (content_md5, progress)
     orch._last_content_len = len(content)
     return progress
 
@@ -671,7 +817,12 @@ async def get_model(
 ):
     """拉取世界模型快照（前端恢复/调试用）。"""
     repo = WorldModelRepository(db)
-    return await repo.snapshot(chapter_id)
+    snapshot = await repo.snapshot(chapter_id)
+    # P3-1（C5）：快照附带最近失败组件（副驾「AI 视角」调试区消费；空 dict 零变化，
+    # 与心跳响应同源——per-orchestrator 内存态，进程重启自然归零）
+    orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
+    snapshot["last_component_errors"] = orch.last_component_errors()
+    return snapshot
 
 
 # ============================================================
@@ -710,6 +861,17 @@ async def stitch_ghost(
     style_positive = ctx.style_positive
     author_samples = ctx.author_samples
 
+    # P1-3（C1）短窗观测：只加观察不改常量——rolling_prefix 原始上送长度 vs
+    # 截窗后实际进 prompt 的长度，随 adaptive_stitch_complete 埋点回收「短窗
+    # 截断点/重复前文」真实案例后再定量调窗。截窗表达式与原各分支内联写法
+    # 逐字节一致，收敛到一处防观测与注入漂移（open 模式不消费 rolling_prefix）
+    _rolling_cap = (
+        0 if request.mode == "open"
+        else STITCH_ROLLING_LONG_MAX_CHARS if request.mode in ("outline", "burst")
+        else STITCH_ROLLING_SHORT_MAX_CHARS
+    )
+    rolling_windowed = (request.rolling_prefix or "")[-_rolling_cap:].strip() if _rolling_cap else ""
+
     if request.mode == "open":
         # 点火（冷启动）：空章 + 大纲 → 开篇引子。大纲是唯一燃料，无已写正文
         system_prompt, user_prompt = build_opening_prompt(
@@ -733,7 +895,7 @@ async def stitch_ghost(
         spine_anchor_rows = await _spine_anchor_rows_for_prompt(chapter_id, db)
         system_prompt, user_prompt = build_outline_expand_prompt(
             outline_note=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_LONG_MAX_CHARS:].strip(),
+            rolling_prefix=rolling_windowed,
             after_text=(request.after_text or "")[:STITCH_AFTER_TEXT_MAX_CHARS].strip(),
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
@@ -751,7 +913,7 @@ async def stitch_ghost(
         # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
         system_prompt, user_prompt = build_burst_prompt(
             fragment=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_LONG_MAX_CHARS:].strip(),
+            rolling_prefix=rolling_windowed,
             beat_guidance=request.beat_guidance.strip(),
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
@@ -766,7 +928,7 @@ async def stitch_ghost(
     else:
         system_prompt, user_prompt = build_continue_prompt(
             fragment=request.fragment.strip(),
-            rolling_prefix=(request.rolling_prefix or "")[-STITCH_ROLLING_SHORT_MAX_CHARS:].strip(),
+            rolling_prefix=rolling_windowed,
             mode=request.mode,
             picked_parts=request.picked_parts,
             proper_nouns=proper_nouns,
@@ -788,9 +950,10 @@ async def stitch_ghost(
                 user_prompt=user_prompt,
                 model_type="creative",
                 temperature=0.7,
-                # 推理模型（deepseek-v4-pro）即使 REASONING_DISABLED 仍消耗 reasoning tokens（~800-1000），
-                # max_tokens 必须给 reasoning 留够空间，否则产出为空
-                max_tokens=max(1200, request.target_chars * 2 + 1000),
+                # 推理模型预算余量见 STITCH_MAX_TOKENS_FLOOR（C2）：deepseek 类
+                # 即使 REASONING_DISABLED 仍烧 ~800-1000 隐藏思考 tokens，
+                # 下限太薄会「续写产出为空」
+                max_tokens=max(STITCH_MAX_TOKENS_FLOOR, request.target_chars * 2 + 1000),
                 reasoning_config=REASONING_DISABLED,
             )
             recorder.record_result(f"adaptive.stitch_ghost.{request.mode}", result, model_slot="creative")
@@ -799,7 +962,8 @@ async def stitch_ghost(
                 yield build_sse_error("续写产出为空，请重试")
                 return
             # 字数硬闸门（outline 模式）：超 target×1.6 先带压缩反馈重试一次，
-            # 仍超则句界硬截断到 ×1.5。先生成后播放，对前端完全透明
+            # 仍超则保尾截断到 ×1.5（末段承接段豁免，P1-1）。先生成后播放，
+            # 对前端完全透明
             if request.mode == "outline" and request.target_chars > 0:
                 hard_limit = int(request.target_chars * OUTLINE_WC_HARD_RATIO)
                 if len(text) > hard_limit:
@@ -813,7 +977,8 @@ async def stitch_ghost(
                         ),
                         model_type="creative",
                         temperature=0.7,
-                        max_tokens=max(1200, request.target_chars * 2 + 1000),
+                        # 压缩重试同烧隐藏思考 tokens，同 STITCH_MAX_TOKENS_FLOOR 下限（C2）
+                        max_tokens=max(STITCH_MAX_TOKENS_FLOOR, request.target_chars * 2 + 1000),
                         reasoning_config=REASONING_DISABLED,
                     )
                     recorder.record_result("adaptive.stitch_ghost.compress", compressed, model_slot="creative")
@@ -821,13 +986,18 @@ async def stitch_ghost(
                     if cand:
                         text = cand
                 if len(text) > hard_limit:
-                    text = _truncate_at_sentence(text, int(request.target_chars * OUTLINE_WC_TRUNCATE_RATIO))
+                    # P1-1（A3）：保尾截断——末段承接段（引向 after_text）完整
+                    # 保留，超字从前往后句界删节；末段自身超限在 helper 内退化
+                    # 为尾截。仅 outline 模式进此分支，其他模式口径不变
+                    text = _truncate_keep_tail(text, int(request.target_chars * OUTLINE_WC_TRUNCATE_RATIO))
                     logger.info(
                         f"[adaptive/stitch-ghost] 细纲扩写字数末次仍超上限，"
-                        f"句界截断到 {len(text)} 字（目标 {request.target_chars}）"
+                        f"保尾截断到 {len(text)} 字（目标 {request.target_chars}）"
                     )
             fragment = request.fragment.strip()
-            if request.mode == "stitch" and fragment and fragment not in text:
+            # P1-2（A4）：规范化判定——裸 `fragment not in text` 会被标点/空白
+            # 微差骗过（模型已复述碎片却误判「不含」），把作者原句重复拼回句首
+            if request.mode == "stitch" and fragment and not _contains_fragment(text, fragment):
                 text = f"{fragment}{text}"
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
             # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
@@ -856,6 +1026,9 @@ async def stitch_ghost(
                 target_chars=request.target_chars,
                 actual_chars=len(text),
                 warnings=len(ghost_warnings),
+                # P1-3（C1）短窗观测：原始上送 vs 截窗后实际进 prompt 的长度
+                rolling_prefix_raw_len=len(request.rolling_prefix or ""),
+                rolling_prefix_used_len=len(rolling_windowed),
             )
         except Exception as e:
             logger.warning(f"[adaptive/stitch-ghost] 失败: {e}")
@@ -979,24 +1152,13 @@ async def fix_sentence(
         raise HTTPException(status_code=429, detail="本章修复已达上限（5 处），重新完稿审计后可继续")
 
     sentence = request.sentence.strip()
-    content = chapter.content_text or ""
+    # 画布即事实源：完稿审计对象 = 画布剥 HTML 全文（post_process._get_full_text），
+    # 匹配与修复上下文同口径走 written_text——含内联标签/跨段的句子在原始 HTML
+    # 里未必子串命中；层 1 事实不再兜底（作者删改后过期，曾致两源不一致假阳性）
+    from backend.services.adaptive.paragraph_source import written_text
+    content = written_text(chapter.content_text or "")
     if not sentence or sentence not in content:
-        # 同源兜底：审计的 full_text 优先由世界模型 facts 拼接（post_process.
-        # _get_full_text），此前只匹配 chapter.content_text → 两源不一致时未改正
-        # 文也 409（假阳性）。orchestrator 无常驻 model_snapshot 属性（快照每次经
-        # WorldModelRepository 现查，on_finish 亦如此），故这里与审计同源现查一次
-        # 再匹配；命中即放行——后续 repair 只用 sentence 本身，不需要 full_text。
-        # 快照缺失/异常仍走原 409（正文确实没有这句）。
-        facts_text = ""
-        try:
-            snap = await WorldModelRepository(db).snapshot(chapter_id)
-            facts_text = "\n\n".join(
-                f.get("text", "") for f in snap.get("facts", []) if f.get("text")
-            )
-        except Exception as e:
-            logger.debug(f"[adaptive/fix-sentence] 世界模型快照兜底失败: {e}")
-        if not sentence or sentence not in facts_text:
-            raise HTTPException(status_code=409, detail="未在当前正文找到该句（正文可能已改动，请重新审计）")
+        raise HTTPException(status_code=409, detail="未在当前正文找到该句（正文可能已改动，请重新审计）")
 
     from backend.services.workflows.sentence_integrity import repair_single_defect
     defect = {

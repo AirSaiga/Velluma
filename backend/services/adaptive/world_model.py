@@ -127,9 +127,19 @@ class WorldModelRepository:
     # ---- 层 1：已写事实（追加式，不可变）----
 
     async def append_fact(self, chapter_id: str, segment: SettledSegment) -> None:
-        """追加一段已锁死的事实到层 1。"""
+        """追加一段已锁死的事实到层 1。
+
+        精确去重：与最后一条事实规范化文本相同（连续沉淀同一段——2026-08
+        事故现场 4 秒内沉淀两次）则跳过，不产生重复账。
+        """
+        from backend.services.adaptive.paragraph_source import normalize_for_match
         model = await self.get_or_create(chapter_id)
         facts = list(model.layer1_facts or [])
+        new_norm = normalize_for_match(segment.text or "")
+        if new_norm and facts:
+            last = facts[-1]
+            if isinstance(last, dict) and normalize_for_match(last.get("text", "") or "") == new_norm:
+                return
         facts.append({
             "text": segment.text,
             "entities": segment.entities,
@@ -169,8 +179,18 @@ class WorldModelRepository:
     # ---- 层 3：未来推测（覆盖式）----
 
     async def set_projections(self, chapter_id: str, projections: List[SegmentProjection]) -> None:
+        """覆写层 3 推测，保留挂件/感知带缓存标记项。
+
+        layer3 同时是 __dock__/__canon_watch__ 缓存的载体（ORM 无专门字段）——
+        整列覆盖会把缓存清掉：调度器刚判完「缓存命中复用」，路由却取不到件。
+        标记项由各自组件的 _cache_* 自行更替，推测覆写不碰。
+        """
         model = await self.get_or_create(chapter_id)
-        model.layer3_projections = [p.to_dict() for p in projections]
+        kept = [
+            p for p in (model.layer3_projections or [])
+            if isinstance(p, dict) and (p.get("__dock__") or p.get("__canon_watch__"))
+        ]
+        model.layer3_projections = [p.to_dict() for p in projections] + kept
 
     async def get_projections(self, chapter_id: str) -> List[Dict]:
         model = await self.get_or_create(chapter_id)
@@ -189,13 +209,40 @@ class WorldModelRepository:
     # ---- 快照（组件只读，不持锁）----
 
     async def snapshot(self, chapter_id: str) -> Dict[str, Any]:
-        """返回完整世界模型快照（组件读输入用）。"""
+        """返回完整世界模型快照（组件读输入用）。
+
+        层 1 事实带派生活性：规范化文本仍是画布全文的子串 = 活，否则过期
+        （作者删改重写后事实即过期——2026-08 事故加固，活性现算不回写，
+        作者把删掉的段落贴回来事实自动复活）。fact_count / total_words /
+        live_facts 只计活事实；facts 原样返回全量（沉淀去重等历史语义仍用）。
+        """
         model = await self.get_or_create(chapter_id)
+        facts = [f for f in (model.layer1_facts or []) if isinstance(f, dict)]
+        live_facts: List[Dict] = []
+        stale_count = 0
+        canvas_norm = ""
+        try:
+            from backend.models import Chapter as _Chapter
+            from backend.services.adaptive.paragraph_source import (
+                normalize_for_match, written_text,
+            )
+            ch = await self.db.get(_Chapter, chapter_id)
+            canvas_norm = normalize_for_match(written_text(getattr(ch, "content_text", "") or ""))
+        except Exception:
+            canvas_norm = ""
+        for f in facts:
+            n = normalize_for_match(f.get("text", "") or "")
+            if n and n not in canvas_norm:
+                stale_count += 1
+                continue
+            live_facts.append(f)
         return {
-            "facts": list(model.layer1_facts or []),
+            "facts": facts,
+            "live_facts": live_facts,
+            "stale_fact_count": stale_count,
             "intent": model.layer2_intent or {},
             "projections": list(model.layer3_projections or []),
             "intent_version": model.intent_version or 0,
-            "fact_count": len(model.layer1_facts or []),
-            "total_words": sum((f.get("word_count", 0) for f in (model.layer1_facts or [])), 0),
+            "fact_count": len(live_facts),
+            "total_words": sum((f.get("word_count", 0) for f in live_facts), 0),
         }

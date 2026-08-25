@@ -62,22 +62,26 @@ async def run(
     """
     bundle = await load_chapter_settings_bundle(chapter_id, db)
 
-    # 最近段落（优先层 1 最近事实，fallback 章节正文尾部）
-    recent_text = (bundle.content_text or "")[-500:]
-    facts = model_snapshot.get("facts", [])
-    if facts:
-        recent_text = facts[-1].get("text", "")[-500:] or recent_text
+    # 最近段落：心跳实时段（orchestrator 停顿心跳透传）→ 正文尾部（剥 HTML）。
+    # ⚠ 不用层 1 事实——历史沉淀在作者删改后即过期，曾致感知锚定已删除文本。
+    from backend.services.adaptive.paragraph_source import resolve_current_paragraph
+    recent_text = resolve_current_paragraph(kw.get("recent_text") or "", bundle.content_text or "")
     if not recent_text or len(recent_text) < 30:
         return {"skipped": True, "reason": "正文不足"}
 
     hints: List[Dict] = []
     seen: set = set()  # 去重 key
 
+    # 词边界出场判定共用一次分词（角色名 + 伏笔标签；jieba 不可用回退子串）
+    token_spans = _token_spans(recent_text)
+
     # ---- 1. 角色出场感知 ----
     # 本章绑定角色名出现在 recent_text → 提示「写到他了，这是他的设定」
+    # P2 治理（B4）：裸子串会把「高山」误命中「高山上」——改走词边界判定，
+    # 判据见 _name_in_text。
     for entity in (bundle.entities or []):
         name = _name_of(entity)
-        if name and len(name) >= 2 and name in recent_text:
+        if name and len(name) >= 2 and _name_in_text(name, recent_text, token_spans):
             key = f"appearance:{name}"
             if key in seen:
                 continue
@@ -92,9 +96,15 @@ async def run(
 
     # ---- 2. 开放伏笔回收时机 ----
     # 开放伏笔标签出现在 recent_text → 可考虑推进/回收
+    # P2 治理（B4 顺带）：标签同为专有名词，词边界判定同样受益——但物件
+    # 标签跟方位字是「物确实在场」（「玉佩上的裂纹」），不启用人名那套
+    # 方位粘连排除（locative_guard=False），只吃跨词误中（「月高」不在
+    # 「明月高悬」的边界上）这一层降噪。
     for hook in (bundle.open_hooks or []):
         label = _label_of(hook)
-        if label and len(label) >= 2 and label in recent_text:
+        if label and len(label) >= 2 and _name_in_text(
+            label, recent_text, token_spans, locative_guard=False
+        ):
             key = f"callback:{label}"
             if key in seen:
                 continue
@@ -215,6 +225,68 @@ async def run(
 # ============================================================
 # 辅助
 # ============================================================
+
+# ---- 词边界出场判定（B4，P2 治理 2026-08-25）----
+
+# 方位/处所粘连字：人名后紧跟这些单字 token 时读作「X上/X中」的普通名词
+# 短语（「高山上」是山不是人），不算角色出场。「的」刻意不在此列——
+# 「高山的剑」是所有格，恰是角色被提及的高频句式。
+_LOCATIVE_EXTEND_CHARS = set("上下中里边前后之间旁内外")
+
+
+def _token_spans(text: str):
+    """jieba 分词并建字符位置索引 [(start, end, token)]；失败返回 None。
+
+    返回 None 时调用方回退旧子串匹配（柔性红线：感知带宁旧勿炸）。
+    每次心跳只分词一次，角色名与伏笔标签共用；recent_text ≤500 字，
+    开销可忽略。惰性 import + try/except：jieba 缺失/词库损坏不炸心跳。
+    """
+    try:
+        import jieba
+        tokens = jieba.lcut(text)
+    except Exception as e:
+        logger.debug(f"[canon_watch] jieba 分词失败，出场判定回退子串匹配: {e}")
+        return None
+    spans = []
+    pos = 0
+    for tok in tokens:
+        spans.append((pos, pos + len(tok), tok))
+        pos += len(tok)
+    return spans
+
+
+def _name_in_text(name: str, text: str, spans=None, *, locative_guard: bool = True) -> bool:
+    """专有名词（角色名/伏笔标签）是否在文本中出场（词边界感知，B4）。
+
+    旧判据是裸子串（「高山」命中「高山上」）。新判据：名字的某次出现
+    必须对齐完整 token 边界——覆盖该次出现的连续 token 拼接恰为名字本身
+    （「月高」跨在「明月高悬」的 明月/高悬 边界上 → 不算；「欧阳明」被
+    「欧阳明亮」整体盖住 → 不算）；locative_guard=True 时再排除「人名 +
+    方位粘连字」的普通名词读法（「高山上」）。代价是成语整块切分时
+    （「高山仰止」）人名漏判——info 级感知宁漏勿误，可接受。
+    spans 为 None（jieba 不可用）时回退旧子串行为。
+    """
+    if not name or not text:
+        return False
+    if spans is None:
+        return name in text
+    start = 0
+    while True:
+        i = text.find(name, start)
+        if i < 0:
+            return False
+        j = i + len(name)
+        covered = "".join(tok for (s, e, tok) in spans if s < j and e > i)
+        if covered == name and not (
+            locative_guard
+            and any(
+                s == j and e == j + 1 and tok in _LOCATIVE_EXTEND_CHARS
+                for (s, e, tok) in spans
+            )
+        ):
+            return True
+        start = i + 1
+
 
 _SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
 

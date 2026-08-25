@@ -30,15 +30,11 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     bundle = await load_chapter_settings_bundle(chapter_id, db)
     repo = WorldModelRepository(db)
 
-    # 正文来源：优先层 1（已沉淀事实），层 1 为空时回退章节 content_text（已落库正文）
-    # 关键：作者刚开始写、还没沉淀时，层 1 是空的——但 content_text 已有正文
-    facts = model_snapshot.get("facts", [])
-    written_text = "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
-    if not written_text or len(written_text.strip()) < 100:
-        # 层 1 不足，回退章节正文
-        written_text = bundle.content_text or ""
-
-    if not written_text or len(written_text.strip()) < 100:
+    # 正文来源：画布全文（剥 HTML）——画布即事实源。层 1 事实是沉淀审计账，
+    # 作者删改后即过期，不得代替正文（曾致意图反推被已删除文本带偏）
+    from backend.services.adaptive.paragraph_source import written_text
+    written = written_text(bundle.content_text or "")
+    if len(written.strip()) < 100:
         return {"skipped": True, "reason": "正文不足"}
 
     outline = bundle.outline_text or ""
@@ -61,7 +57,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     # ---- 无大纲：LLM 反推 ----
     nutrients = bundle.nutrients()
     soft = bundle.soft_constraints()
-    sys_p, usr_p = build_intent_inference_prompt(written_text, outline, nutrients, soft)
+    sys_p, usr_p = build_intent_inference_prompt(written, outline, nutrients, soft)
     try:
         result = await call_llm_with_usage(
             system_prompt=sys_p,

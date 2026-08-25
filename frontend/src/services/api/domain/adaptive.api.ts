@@ -70,6 +70,11 @@ export interface HeartbeatResult {
   world_version?: { events: number; updated_at: string | null } | null
   /** 章级谋篇进度（P1.4 M2；无脉络/无锚点无此字段——进度行静默缺席） */
   spine_progress?: SpineProgress | null
+  /**
+   * 最近一次失败的辅助组件（P3-1：组件名 → 秒级时间戳 + 一行错误摘要；
+   * 成功即清。空/缺省 = 一切正常——副驾「AI 视角」调试区消费，空则整块不渲染
+   */
+  last_component_errors?: Record<string, { ts: number; error: string }>
 }
 
 /** 章级谋篇进度（纯算法判定：pending→hit 只前进；dropped 作者手点） */
@@ -99,6 +104,8 @@ export interface SettleResult {
   conflicts?: any[]
   /** 本次沉淀抽取产生的候选事件条数（A5d toast 直达收件箱用；0/缺省=无候选） */
   candidates_created?: number
+  /** P3-4：世界发现被跳过的原因（无实体/正文不足等；有候选产出时缺省不出） */
+  scout_skipped?: { code: string; reason: string }
 }
 
 /** 完稿后处理审计报告 */
@@ -109,6 +116,8 @@ export interface FinishReport {
   candidates_pending?: number
   /** 记忆倒灌：完稿时本章写入向量记忆的块数（后端路由写在响应顶层，与 candidates_pending 同层；勿放回嵌套 report） */
   memory_indexed?: number
+  /** P3-4：世界发现被跳过的原因（无实体/正文不足等；有候选产出时缺省不出） */
+  scout_skipped?: { code: string; reason: string }
   /**
    * 疑似 AI 味变体（D 包语义扫描：embedding 余弦相似度抓「换字逃逸」改写变体，
    * 只提示作者裁决不改正文；未配置 embedding / 零命中时后端不设此键）
@@ -155,6 +164,8 @@ export interface WorldModelSnapshot {
   intent_version: number
   fact_count: number
   total_words: number
+  /** P3-1：最近一次失败的辅助组件（与心跳响应同源；空/缺省 = 一切正常） */
+  last_component_errors?: Record<string, { ts: number; error: string }>
 }
 
 // ===== 章级谋篇·软脉络（P1.4，docs/chapter-planning-spine.md）=====
@@ -219,6 +230,8 @@ export const adaptiveApi = {
       has_outline: boolean
       outline_text: string
       recent_text: string
+      /** Tab 显式点名要零件（豁免句子级闸门） */
+      summoned?: boolean
     },
   ): Promise<HeartbeatResult> => {
     return requestJson(`/chapters/${chapterId}/adaptive/heartbeat`, {

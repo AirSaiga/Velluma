@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from backend.services.adaptive import text_match
+
 # ============================================================
 # 5 个固定方向
 # ============================================================
@@ -182,10 +184,12 @@ def _as_str_list(val) -> List[str]:
 
 
 def _count_unmet(items: List[str], text: str) -> int:
-    """统计 items 里有多少还没在 text 中出现（关键词交集判定，宽松）。
+    """统计 items 里有多少还没在 text 中出现（共享判据，P2 治理后收紧）。
 
-    匹配规则：把 item 拆成 2-3 字的关键词片段，只要 text 命中其中任一关键词，
-    就算"已达成"（宁可漏判未达，也不误判已达——避免主线权重虚高）。
+    匹配规则：整串直接命中，或 item 的 3 字滑窗片段命中率 ≥50%
+    （见 _is_met / text_match.matches），才算"已达成"——既不因单个通用
+    三字组误判已达（主线推动力提前熄火），也不因作者转述的虚词出入
+    误判未达（主线权重虚高）。
     """
     if not text:
         return len(items)
@@ -198,41 +202,29 @@ def _count_unmet(items: List[str], text: str) -> int:
 
 
 def _is_met(item: str, text: str) -> bool:
-    """item 是否已在 text 中达成（关键词命中即算）。"""
+    """item 是否已在 text 中达成（P2 治理：改走共享判据 text_match）。
+
+    有意变化（P2 治理，2026-08-25）：旧判据「任一 3 字片段命中全文即达成」
+    ——通用三字组（「他没有」）几乎必现于任何正文，must_hit 被提前判达成，
+    主线推动力熄火、方向权重信号失真。收紧为「4 个片段命中率 ≥50% 才算
+    达成」；整串直接命中仍直接算达成（逐字写过不必走统计）。
+
+    阈值取 50%（2/4 命中）而非更高：must_hit 多为短语，作者转述时常有
+    虚词/语序出入（「主角拿到了那把铜钥匙」vs「主角拿到了钥匙」3/4 命中），
+    过严会把真已达成当未达成、主线权重虚高，是等量的反向失真。
+    判定范围维持全文——本函数只判「有没有写」，不判「写得近不近」
+    （must_hit 写在章首也算达成，这点不改）。无可判片段（纯数字/标点条目）
+    判未达成，与旧兜底一致。
+    """
     item = item.strip()
     if not item:
         return True
-    # 整串直接命中
-    if item in text:
-        return True
-    # 拆成 2-3 字关键词片段（滑动窗口），任一命中即算达成
-    # 取 item 中间 60% 的片段做关键词（去掉首尾噪声）
-    keywords = _extract_keywords(item)
-    for kw in keywords:
-        if kw in text:
-            return True
-    return False
-
-
-def _extract_keywords(text: str) -> List[str]:
-    """从文本提取 2-3 字关键词片段（用于模糊匹配）。
-
-    策略：滑动 3 字窗口，过滤掉纯标点/数字片段。
-    """
-    kws = []
-    # 3 字滑动窗口
-    for i in range(len(text) - 2):
-        frag = text[i:i+3]
-        # 过滤含标点/数字的片段
-        if any(c in "。，、；：！？""''「」（）《》0123456789 " for c in frag):
-            continue
-        kws.append(frag)
-    # 去重，取最多 4 个关键词（够判断）
-    seen = []
-    for k in kws:
-        if k not in seen:
-            seen.append(k)
-    return seen[:4]
+    return text_match.matches(
+        item, text,
+        threshold=0.5,          # 2/4 片段命中：治通用三字组污染，容虚词出入
+        size=3, max_fragments=4,  # 片段数与旧实现一致（4 个够判）
+        no_fragments=False,     # 无可判片段 = 无证据 = 未达成（旧兜底保持）
+    )
 
 
 def _normalize(weights: Dict[str, float]) -> Dict[str, float]:

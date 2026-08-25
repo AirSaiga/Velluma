@@ -637,3 +637,42 @@ class TestConfirmNegativeResolve:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ============================================================
+# words() severity 过滤（2026-08-25 A2：生成侧只拦 blocker 档）
+# ============================================================
+
+class TestWordsSeverityFilter:
+    def _set(self):
+        return ProhibitionSet((
+            ProhibitionEntry(pattern="作者提醒词", severity="warning", source="negative_list"),
+            ProhibitionEntry(pattern="作者硬禁词", severity="blocker", source="negative_list"),
+            ProhibitionEntry(pattern="系统陈词", severity="warning", source="system_cliche"),
+        ))
+
+    def test_default_returns_all_zero_change(self):
+        """缺省 severity=None 收全量——prompt 注入等存量消费方零变化。
+
+        呈现序（既有语义）：作者负面清单第一档、其中 blocker 在前。
+        """
+        assert self._set().words(60) == ["作者硬禁词", "作者提醒词", "系统陈词"]
+
+    def test_blocker_only(self):
+        assert self._set().words(60, severity="blocker") == ["作者硬禁词"]
+
+    def test_warning_only(self):
+        got = self._set().words(60, severity="warning")
+        assert got == ["作者提醒词", "系统陈词"]
+
+    def test_missing_severity_defaults_to_warning(self):
+        """条目 severity 缺省/None 按 warning 档归（与 load 侧口径一致）。"""
+        s = ProhibitionSet((
+            ProhibitionEntry(pattern="无档词", source="book_blacklist"),
+            ProhibitionEntry(pattern="硬词", severity="blocker", source="negative_list"),
+        ))
+        assert s.words(60, severity="blocker") == ["硬词"]
+        assert "无档词" in s.words(60, severity="warning")
+
+    def test_max_entries_applies_after_filter(self):
+        assert self._set().words(1, severity="warning") == ["作者提醒词"]

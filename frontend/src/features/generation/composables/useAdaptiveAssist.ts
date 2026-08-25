@@ -15,7 +15,7 @@
  * - 实现：编辑器活动重置两个计时器（活跃心跳 3s + 停顿心跳 4s），
  *   停顿心跳跑完后 sparkParts 已就绪，Spark Dock 此时弹出即有内容。
  */
-import { watch, type Ref } from 'vue'
+import { watch, ref, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard } from '../../../services/api/domain/adaptive.api'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
@@ -31,6 +31,29 @@ import { findOutlineNotes } from '../../../extensions/OutlineNoteNode'
 
 /** 细纲胶囊「落笔扩写」事件（OutlineNoteChip 派发，本层监听编排） */
 const OUTLINE_EXPAND_EVENT = 'velluma:outline-expand'
+
+/** P3-1（C5）「世界发现」跳过事件：settle/finish 带回原因 → 收件箱空态一句提示 */
+const SCOUT_SKIPPED_EVENT = 'velluma:scout-skipped'
+
+/**
+ * 最近一次失败的辅助组件（P3-1/C5：心跳带回，per-chapter 后端内存态）。
+ * 模块级单例（同 useChapterSpine 模式）——InspectorPanel「AI 视角」直接读；
+ * 空 = 一切正常，UI 整块不渲染。
+ */
+export interface ComponentErrorInfo { component: string; ts: number; error: string }
+export const componentErrors = ref<ComponentErrorInfo[]>([])
+export function setComponentErrors(raw?: Record<string, { ts: number; error: string }> | null | undefined) {
+  componentErrors.value = Object.entries(raw || {}).map(([component, v]) => ({
+    component,
+    ts: Number(v?.ts) || 0,
+    error: String(v?.error || ''),
+  }))
+}
+
+/** P3-4（C6）：把 settle/finish 带回的「世界发现」跳过原因广播给收件箱空态（null = 清除） */
+function notifyScoutSkipped(reason?: string | null) {
+  window.dispatchEvent(new CustomEvent(SCOUT_SKIPPED_EVENT, { detail: { reason: reason || null } }))
+}
 
 const ACTIVE_HEARTBEAT_MS = 3000   // 活跃心跳防抖
 const PAUSE_HEARTBEAT_MS = 4000    // 停顿心跳（与 Spark Dock 弹出门控对齐）
@@ -138,11 +161,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         segment_count: segmentCount,
         paused_ms: pausedMs,
         // Tab 显式召唤时光标未必在段尾，但「作者点名要零件」本身就是好时机——
-        // 后端 dock_generator 以段尾为生发闸，召唤一律放行（零件锚定段落文本不受影响）
+        // 后端 dock_generator 以段尾为生发闸，召唤一律放行（零件锚定段落文本不受影响）；
+        // summoned 同时豁免句子级闸门（半句悬停时自然停顿不推零件，点名要则给）
         cursor_at_paragraph_end: flags?.summoned ? true : cursorAtEnd,
         has_outline: hasOutline,
         outline_text: outlineText,
         recent_text: recentText.slice(0, 500),
+        summoned: !!flags?.summoned,
       })
 
       // 挂件 → Spark Dock（停顿心跳会带 dock_parts；活跃心跳通常空）
@@ -225,6 +250,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
           detail: { chapterId, version: result.world_version },
         }))
       }
+
+      // P3-1（C5）：最近失败的辅助组件 → 「AI 视角」调试区（空即清——成功即清语义）
+      setComponentErrors(result.last_component_errors)
 
       // P0-4 接线：有建议在屏（挂件/走向卡）→ suggesting（顶栏「走向已备好」
       // 此前枚举从未赋值，文案一直死代码）；无建议 → dormant
@@ -352,6 +380,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       if (opts.authorLaneRef.value === 'settling') opts.authorLaneRef.value = 'composing'
       // W4 候选回流：settle 可能抽出候选事件 → 切片/收件箱静默刷新
       window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+      // P3-4（C6）：无候选产出时带出「世界发现」跳过原因 → 收件箱空态提示
+      notifyScoutSkipped(result?.scout_skipped?.reason)
       // A5d 沉淀直达：抽出候选时 toast 带「去确认」action 直达副驾收件箱
       const createdCount = Number(result?.candidates_created) || 0
       if (createdCount > 0) opts.onCandidatesCreated?.(createdCount)
@@ -535,6 +565,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       opts.aiLaneRef.value = 'dormant'
       // W4 候选回流：完稿整章抽取 → 切片/收件箱静默刷新
       window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+      // P3-4（C6）：无候选产出时带出「世界发现」跳过原因 → 收件箱空态提示
+      notifyScoutSkipped(result?.scout_skipped?.reason)
       return result
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'

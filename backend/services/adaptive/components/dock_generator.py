@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
+from backend.services.adaptive import text_match
 from backend.services.adaptive.observing import get_adaptive_recorder
 from backend.services.prompts.adaptive_prompts import build_dock_generator_prompt
 from backend.services.utils.json_safe import parse_json_safe
@@ -46,11 +47,12 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     direction_weights = kw.get("direction_weights") or None
     bundle = await load_chapter_settings_bundle(chapter_id, db)
 
-    # 取作者当前段落（从 content_text 尾部，或最近事实）
-    recent_text = (bundle.content_text or "")[-500:]
-    facts = model_snapshot.get("facts", [])
-    if facts:
-        recent_text = facts[-1].get("text", "")[-500:] or recent_text
+    # 取作者当前段落：心跳实时段（orchestrator 停顿心跳透传）→ 正文尾部（剥 HTML）。
+    # ⚠ 不用层 1 事实——历史沉淀在作者删改后即过期，曾致挂件锚定已删除文本。
+    from backend.services.adaptive.paragraph_source import (
+        resolve_current_paragraph, written_text,
+    )
+    recent_text = resolve_current_paragraph(kw.get("recent_text") or "", bundle.content_text or "")
     if not recent_text or len(recent_text) < 30:
         return {"skipped": True, "reason": "正文不足"}
 
@@ -78,6 +80,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         reader_expectations=soft.get("reader_expectations") or None,
         memory_echoes=memory_echoes or None,
         spine_intent=await _spine_intent(chapter_id, db),
+        outline_nearby=_outline_nearby(
+            getattr(bundle, "outline_text", "") or "",
+            written_text(bundle.content_text or ""),
+        ),
     )
 
     try:
@@ -141,12 +147,71 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         return {"error": str(e)}
 
 
+# 大纲就近节拍：结构性行标签太短不携带画面信息，跳过
+# （旧片段过滤表 _PUNCT 已并入 text_match.FRAGMENT_INVALID_CHARS——P2 统一判据）
+_OUTLINE_MIN_LINE = 8
+
+
+def _outline_nearby(outline_text: str, written: str, take: int = 2) -> List[str]:
+    """大纲就近节拍：从头扫作者大纲，跳过已写行，取接下来 1-2 拍原文。
+
+    就近铁律的数据面（2026-08-25）：意图/养料天然指向章末，挂件曾一步
+    跳到高潮场面。这里把作者自己的大纲里「接下来一两拍」递给 prompt，
+    LLM 贴着生发。已写判定纯算法（P2 治理：行的 3 字片段命中率 ≥2/3 才算
+    已写，见 _outline_line_written）；全部已写（章近尾声）返回空列表
+    （零注入零变化）。
+    """
+    lines = [l.strip() for l in (outline_text or "").splitlines() if len(l.strip()) >= _OUTLINE_MIN_LINE]
+    if not lines:
+        return []
+    out: List[str] = []
+    for i, line in enumerate(lines):
+        if _outline_line_written(line, written):
+            continue
+        out.append(line[:60])
+        for nxt in lines[i + 1:]:
+            if not _outline_line_written(nxt, written):
+                out.append(nxt[:60])
+                break
+        break
+    return out[:take]
+
+
+def _outline_line_written(line: str, written: str) -> bool:
+    """大纲行是否已写进正文（共享判据 text_match；无可判片段按已写跳过防噪音）。
+
+    有意变化（P2 治理，2026-08-25）：旧判据 3 字片段过半（1/2）命中即算已写
+    ——行内常见三字组（「自己没」「他发现」）散落正文就能把未写行误判已写，
+    就近节拍跳到更远的拍子、挂件就近铁律被抵消。收紧为命中率 ≥2/3
+    （6 片段须中 4）：不取更长的 4 字片段——大纲是速记、作者成文常改写，
+    4 字片段对改写容差过狠，会把真已写误判未写、就近节拍回退重推旧拍
+    （反向噪声）。片段过滤统一为共享判据的标点+数字表（旧 _PUNCT 不过滤
+    数字，数字片段对「已写」判定无意义）。
+    """
+    return text_match.matches(
+        line, written,
+        threshold=2 / 3,        # 6 片段须中 4：治通用三字组散落误判已写
+        size=3, max_fragments=6,  # 片段数与旧实现一致
+        no_fragments=True,      # 无可判片段按已写跳过（结构性短行，旧兜底保持）
+    )
+
+
 def _violates(text: str, hard: Dict) -> bool:
-    """校对挂件是否违规（禁词 / canon private）。"""
+    """校对挂件是否违规（canon private 泄密 / blocker 级硬禁词）。
+
+    severity 分级（2026-08-25 A2）：提醒级词只进 prompt 软提醒与审计统计，
+    不在生成侧硬拦——曾因提醒级词（角色名误录负面清单）把锚定挂件全部
+    静默丢弃。banned_words_blocker 键缺失（手工构造的 hard dict）回退
+    banned_words 全量，保持旧行为。
+    """
     for label in hard.get("canon_private_labels", []):
         if label and len(label) >= 2 and label in text:
             return True
-    for word in hard.get("banned_words", []):
+    if "banned_words_blocker" in hard:
+        banned = hard.get("banned_words_blocker") or []
+    else:
+        banned = hard.get("banned_words", [])
+    for word in banned:
         if word and len(word) >= 2 and word in text:
             return True
     return False

@@ -27,14 +27,27 @@ import type {
 
 export const WORLD_VERSION_EVENT = 'velluma:world-version'
 export const WORLD_REFRESH_EVENT = 'velluma:world-refresh'
+/** P3-4（C6）：settle/finish 带回的「世界发现」跳过原因（detail.reason 为 null 时清除） */
+export const SCOUT_SKIPPED_EVENT = 'velluma:scout-skipped'
 
 const slice = ref<SceneSlice | null>(null)
 const candidates = ref<WorldEventCandidate[]>([])
 const loading = ref(false)
 const updated = ref(false)
+/** 「世界发现」跳过原因（作者语言一句话；空 = 无提示，收件箱空态维持现状） */
+const scoutSkipped = ref<string | null>(null)
 
 let currentKey: { bookId: string; chapterId: string } | null = null
 let listenersAttached = false
+
+// 模块顶层直接挂监听（不进 attachListeners 的惰性挂载）：dispatch 时刻
+// WorldSceneSlice 可能处于卸载态（副驾不在「此刻」tab），惰性挂载会丢事件
+if (typeof window !== 'undefined') {
+  window.addEventListener(SCOUT_SKIPPED_EVENT, (ev) => {
+    const detail = (ev as CustomEvent<{ reason: string | null }>).detail
+    scoutSkipped.value = detail?.reason || null
+  })
+}
 
 /** 内容签名：变化才算「世界有更新」（版本号变化但内容等价不亮红点） */
 function signature(s: SceneSlice): string {
@@ -154,6 +167,7 @@ export function useWorldSlice() {
     candidates,
     loading,
     updated,
+    scoutSkipped,
     load,
     notifyVersion,
     setNarrativeTime,

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 8000, **kw) -> Dict:
     """后处理。由 orchestrator.on_finish 调度。"""
     bundle = await load_chapter_settings_bundle(chapter_id, db)
-    full_text = await _get_full_text(model_snapshot, bundle)
+    full_text = _get_full_text(bundle)
     if not full_text or len(full_text) < 200:
         return {"skipped": True, "reason": "正文不足"}
 
@@ -75,16 +75,38 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 80
     return report
 
 
-async def _get_full_text(model_snapshot: Dict, bundle) -> str:
-    """优先用层 1 拼接，fallback 章节正文。"""
-    facts = model_snapshot.get("facts", [])
-    if facts:
-        return "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
-    return bundle.content_text or ""
+def _get_full_text(bundle) -> str:
+    """完稿审阅对象：画布全文（剥 HTML）——画布即事实源。
+
+    层 1 事实是沉淀审计账，作者删改后即过期，曾致完稿体检审阅的是
+    facts 拼接而非真实正文（残句/覆盖率/审阅全部失真）。
+    """
+    from backend.services.adaptive.paragraph_source import written_text
+    return written_text(bundle.content_text or "")
 
 
 # 注：check_must_hit_coverage / check_canon_compliance 已抽到
 # backend/services/adaptive/components/canon_checks.py（供 canon_watch 写中感知共用）
+
+
+# ---- C3（2026-08-25 治理 P3-3）：审阅窗口改「首尾截取」 ----
+# 旧 text[:6000] 使长章后半不在审阅视野（结局段/收尾伏笔的矛盾盲区）。
+# 首 3000 + 尾 3000 拼接，中间标省略记号；短于 6000 时原样返回（逐字节零变化，
+# 不插省略记号）。
+_CRITIQUE_HEAD_CHARS = 3000
+_CRITIQUE_TAIL_CHARS = 3000
+
+
+def _critique_text_window(text: str) -> str:
+    """审阅文本窗口：首尾各取一段，中间以省略记号衔接（纯函数）。"""
+    if len(text) <= _CRITIQUE_HEAD_CHARS + _CRITIQUE_TAIL_CHARS:
+        return text
+    omitted = len(text) - _CRITIQUE_HEAD_CHARS - _CRITIQUE_TAIL_CHARS
+    return (
+        f"{text[:_CRITIQUE_HEAD_CHARS]}"
+        f"\n\n（……中间 {omitted} 字省略，审阅聚焦本章开头与结尾……）\n\n"
+        f"{text[-_CRITIQUE_TAIL_CHARS:]}"
+    )
 
 
 async def _llm_critique(text: str, bundle) -> Dict:
@@ -93,7 +115,7 @@ async def _llm_critique(text: str, bundle) -> Dict:
     soft = bundle.soft_constraints()
     sys_p = "你是资深小说编辑。审阅以下章节正文，找出设定一致性问题、情节漏洞、伏笔遗漏。只输出 JSON。"
     usr_p = f"""# 章节正文
-{text[:6000]}
+{_critique_text_window(text)}
 
 # 本章必达事件（校对覆盖）
 {soft.get('must_hit_events', '（无）')}

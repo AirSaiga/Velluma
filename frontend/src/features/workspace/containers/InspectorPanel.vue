@@ -28,6 +28,7 @@ import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
 import { refineryApi, styleApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import type { ContextPreview } from '../../../services/api/domain/adaptive.api'
+import { componentErrors } from '../../generation/composables/useAdaptiveAssist'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
@@ -219,6 +220,29 @@ function handleEditCanon() {
 // ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次）=====
 const worldModelOpen = ref(false)
 const worldModelText = ref('')
+
+// ===== AI 辅助组件健康状况（P3-1/C5：最近失败的组件，心跳带回）=====
+// 空 = 一切正常，整块不渲染；成功即清（后端语义），恢复后自动消失
+const COMPONENT_LABELS: Record<string, string> = {
+  intent_inference: '方向猜测',
+  future_projection: '走向推测',
+  dock_generator: '挂件生发',
+  canon_watch: '世界感知',
+  sediment: '沉淀整理',
+  post_process: '完稿体检',
+  event_scout: '世界发现',
+}
+function componentLabelOf(name: string) {
+  return COMPONENT_LABELS[name] || name
+}
+function relTimeOf(ts: number) {
+  if (!ts) return ''
+  const diff = Math.max(0, Date.now() / 1000 - ts)
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  return new Date(ts * 1000).toLocaleDateString()
+}
 
 // ===== AI 此刻所见预览（P5 B2：/adaptive/context-preview，展开即装配一次）=====
 type PreviewMode = 'stitch' | 'continue' | 'burst' | 'outline' | 'open'
@@ -841,6 +865,17 @@ async function handleResetChapterStyle() {
             @update:mode="switchContextPreviewMode"
           />
 
+          <!-- AI 辅助组件健康状况（P3-1/C5：最近失败记录；空 = 一切正常，整块不渲染） -->
+          <section v-if="componentErrors.length" class="comp-errors">
+            <div class="section-label">AI 辅助遇到的问题</div>
+            <div v-for="err in componentErrors" :key="err.component" class="comp-error-row">
+              <span class="comp-error-name">{{ componentLabelOf(err.component) }}</span>
+              <span class="comp-error-time">{{ relTimeOf(err.ts) }}</span>
+              <span class="comp-error-detail">{{ err.error }}</span>
+            </div>
+            <p class="hint">都是最近一次的记录，恢复了会自动消失，不影响写作。</p>
+          </section>
+
           <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口） -->
           <section>
             <button class="btn-refinery" @click="toggleWorldModelDebug">
@@ -1266,6 +1301,38 @@ async function handleResetChapterStyle() {
   word-break: break-all;
   max-height: 16rem;
   overflow-y: auto;
+}
+
+/* AI 辅助组件健康状况（P3-1/C5）：最近失败记录行 */
+.comp-errors {
+  flex-shrink: 0;
+}
+.comp-error-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 0.375rem;
+  margin-bottom: 0.375rem;
+}
+.comp-error-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.comp-error-time {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.comp-error-detail {
+  color: var(--text-secondary);
+  word-break: break-all;
 }
 
 /* 残句定点修复（P1.2）：句子 + 描述 + 修复裁决流 */

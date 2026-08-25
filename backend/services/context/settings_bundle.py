@@ -165,7 +165,9 @@ class SettingsBundle:
 
         - canon_private_labels：Canon [private] 节点的标签词（正文不许直接说出）
         - canon_public_facts：Canon [public] 已建立事实（必须一致）
-        - banned_words：禁词合并（StyleCard.negative_list + 禁词表等四源，prohibitions 唯一权威）
+        - banned_words：禁词合并（StyleCard.negative_list + 禁词表等四源，prohibitions 唯一权威；
+          全量，供 prompt 注入）
+        - banned_words_blocker：仅 blocker 硬禁档（生成侧 _violates 校对专用，提醒级不拦）
         - character_statics：角色永恒设定（防 OOC）。⚠ A1 起排除 private 实体——
           唯一消费方 build_dock_generator_prompt 把它拼进挂件生发 prompt（prompt
           轨必须排除 private props）；算法轨需要全量档案的（如 sediment 冲突检测）
@@ -179,6 +181,14 @@ class SettingsBundle:
             # BANNED_WORDS_MERGED_MAX_ENTRIES 条）；None（极端加载失败）降级空表
             "banned_words": (
                 self.prohibitions.words(BANNED_WORDS_MERGED_MAX_ENTRIES)
+                if self.prohibitions is not None
+                else []
+            ),
+            # 生成侧校对专用（2026-08-25 A2 修复）：只收 blocker 硬禁档。
+            # 提醒级词归 prompt 软提醒与审计统计，不再把挂件/走向卡静默杀死
+            # （事故：负面清单误录角色名，锚定挂件被 _violates 全部丢弃）
+            "banned_words_blocker": (
+                self.prohibitions.words(BANNED_WORDS_MERGED_MAX_ENTRIES, severity="blocker")
                 if self.prohibitions is not None
                 else []
             ),

@@ -27,14 +27,12 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     bundle = await load_chapter_settings_bundle(chapter_id, db)
     repo = WorldModelRepository(db)
 
-    # 层 1 正文尾部（最近写的）
-    facts = model_snapshot.get("facts", [])
-    written_text = "\n\n".join(f.get("text", "") for f in facts if f.get("text"))
-    # 画布即事实源：层 1 未沉淀时回退到画布正文（与 dock_generator 同一数据源）——
-    # 否则作者只打字不按 Ctrl+Enter 时推测永远饿死，走向卡恒为空
-    if not written_text:
-        written_text = (bundle.content_text or "")[-2000:]
-    if not written_text:
+    # 已写正文：画布全文（剥 HTML）尾部——画布即事实源，写到画布即已写
+    # （无论是否沉淀）。层 1 事实是沉淀审计账，作者删改后即过期，
+    # 不得代替正文（曾致推测锚定已删除文本）
+    from backend.services.adaptive.paragraph_source import written_text
+    written = written_text(bundle.content_text or "")[-2000:]
+    if not written:
         return {"skipped": True, "reason": "无已写正文"}
 
     intent = model_snapshot.get("intent", {})
@@ -78,7 +76,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     except Exception as e:
         logger.debug(f"[future_projection] 相遇机会读取失败（跳过注入）: {e}")
 
-    sys_p, usr_p = build_future_projection_prompt(written_text, intent, nutrients, soft, spine_anchors=spine_anchors, encounters=_encounter_lines)
+    sys_p, usr_p = build_future_projection_prompt(written, intent, nutrients, soft, spine_anchors=spine_anchors, encounters=_encounter_lines)
 
     try:
         result = await call_llm_with_usage(
@@ -113,6 +111,9 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             # W5 桥：from_encounter 闸（必须严格布尔 true，其余剥除——防 LLM 乱标字符串）
             if proj.get("from_encounter") is not True:
                 proj = {k: v for k, v in proj.items() if k != "from_encounter"}
+            # 打上生成时的意图版本：调度器据此判「意图重算后旧推测过期」
+            # （缺键=修复前的旧推测，心跳侧视为过期刷新一次）
+            proj = {**proj, "intent_version": model_snapshot.get("intent_version", 0)}
             sig = _signature(proj)
             valid.append(SegmentProjection(
                 possible_beats=[proj],
@@ -128,13 +129,20 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
 
 def _violates_constraints(text: str, hard: Dict) -> bool:
-    """校对：文本是否触碰 canon private 或含禁词。"""
+    """校对：文本是否触碰 canon private 或含 blocker 级硬禁词。
+
+    severity 分级同 dock_generator._violates：提醒级词不拦生成侧。
+    """
     # private 标签词出现在文本里 = 泄密
     for label in hard.get("canon_private_labels", []):
         if label and len(label) >= 2 and label in text:
             return True
-    # 禁词
-    for word in hard.get("banned_words", []):
+    # 硬禁词（提醒级只进 prompt/审计，不在此拦）
+    if "banned_words_blocker" in hard:
+        banned = hard.get("banned_words_blocker") or []
+    else:
+        banned = hard.get("banned_words", [])
+    for word in banned:
         if word and len(word) >= 2 and word in text:
             return True
     return False

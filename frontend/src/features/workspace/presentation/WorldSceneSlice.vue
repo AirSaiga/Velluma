@@ -42,6 +42,7 @@ const {
   candidates,
   loading,
   updated,
+  scoutSkipped,
   load,
   setNarrativeTime,
   setScenePin,
@@ -534,6 +535,12 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             </div>
           </section>
 
+          <!-- P3-4（C6）：「世界发现」跳过原因——收件箱空态一句作者语言提示
+               （settle/finish 带回；无原因字段时整块缺席，维持现状） -->
+          <div v-if="!candidates.length && scoutSkipped" class="empty-hint scout-skipped">
+            {{ scoutSkipped }}
+          </div>
+
           <div class="usage-hint">
             <p>这些都按世界页的事件推算。想改？去世界页记一笔（写作时按 Alt+N 也行），或拖世界页的时间轴。</p>
             <button class="go-world-btn subtle" @click="goWorld()">打开世界页</button>
@@ -753,6 +760,11 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   font-style: italic;
   padding: 0.25rem 0;
   line-height: 1.6;
+}
+
+/* P3-4（C6）：收件箱空态的「世界发现」跳过提示（复用 empty-hint 排版） */
+.scout-skipped {
+  margin: 0 0 0.25rem;
 }
 
 .presence-list {
