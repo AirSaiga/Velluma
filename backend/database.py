@@ -666,6 +666,22 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB",
         "expected_udt_names": {"jsonb"},
     },
+    # 学着闭嘴：被拒学习宽恕时间戳（静音集合从行为派生不落库，此列只存「恢复」锚点；
+    # 见 services/adaptive/quiet_learning.py）
+    {
+        "table": "books",
+        "column": "assist_mutes",
+        "definition": "JSONB",
+        "expected_udt_names": {"jsonb"},
+    },
+    # 系统自己去读：自动阅读的章级幂等锚（内容哈希 + 上次运行时刻；
+    # 见 services/adaptive/read_budget.py）
+    {
+        "table": "chapters",
+        "column": "auto_read_state",
+        "definition": "JSONB",
+        "expected_udt_names": {"jsonb"},
+    },
     # 文风模块重构 S4：意图旋钮档位（{knob_key: tier 1-5}，缺键=自动档不注入）
     {
         "table": "style_cards",

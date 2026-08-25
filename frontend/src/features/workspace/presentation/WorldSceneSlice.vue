@@ -9,6 +9,7 @@ import { narrativeSourceText } from '../../world/engine/narrativeTimeSource'
 import type { EventType, WorldLocation } from '../../world/engine/types'
 import { worldApi } from '../../../services/api/domain/world.api'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
+import { getAssistMutes, forgiveAssistMute, type AssistMute } from '../../../services/api/domain/assist.api'
 import BatchAcceptModal from '../../world/presentation/BatchAcceptModal.vue'
 import {
   runBatchAccept,
@@ -190,6 +191,7 @@ async function onReject(c: WorldEventCandidate) {
   busyCandidateId.value = c.id
   try {
     await rejectCandidate(currentBookId.value, c.id)
+    loadAssistMutes() // 学着闭嘴：✗ 可能触发静音阈值，顺手刷新静音清单（异步不阻塞）
   } finally {
     busyCandidateId.value = null
   }
@@ -201,6 +203,25 @@ async function undoLastAccept() {
   if (capsuleTimer) window.clearTimeout(capsuleTimer)
   await undoAccept(currentBookId.value, candidateId, eventId)
 }
+
+// ---- 学着闭嘴（2026-08-25 战略定稿）：静音清单可见 + 一键恢复 ----
+// 静音由后端从拒绝行为派生（quiet_learning）；此处是唯一可见面——尤其覆盖
+// 「收件箱为什么空了」的困惑场景（空箱 + 有静音 → 作者知道是自己在掌舵）。
+const assistMutes = ref<AssistMute[]>([])
+async function loadAssistMutes() {
+  if (!currentBookId.value) return
+  assistMutes.value = await getAssistMutes(currentBookId.value)
+}
+async function restoreMute(key: string) {
+  if (!currentBookId.value) return
+  try {
+    assistMutes.value = await forgiveAssistMute(currentBookId.value, key)
+    showToast('已恢复，这类还会再提', 'success')
+  } catch {
+    showToast('恢复失败，请重试', 'error')
+  }
+}
+onMounted(loadAssistMutes)
 
 // ---- A5b 批量裁决：全部采纳 → 预览剔除 → 串行 accept → toast 6 秒整批撤销 ----
 const { showToast } = useToast()
@@ -541,6 +562,15 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             {{ scoutSkipped }}
           </div>
 
+          <!-- 学着闭嘴：静音清单（有静音才显示——覆盖「收件箱怎么空了」的困惑场景） -->
+          <div v-if="assistMutes.length" class="mute-line">
+            <span class="mute-line__label">已按你的拒绝少提：</span>
+            <span v-for="m in assistMutes" :key="m.key" class="mute-chip">
+              {{ m.label }}
+              <button class="mute-chip__restore" title="恢复此类（此前的拒绝记录一笔勾销）" @click="restoreMute(m.key)">恢复</button>
+            </span>
+          </div>
+
           <div class="usage-hint">
             <p>这些都按世界页的事件推算。想改？去世界页记一笔（写作时按 Alt+N 也行），或拖世界页的时间轴。</p>
             <button class="go-world-btn subtle" @click="goWorld()">打开世界页</button>
@@ -765,6 +795,36 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 /* P3-4（C6）：收件箱空态的「世界发现」跳过提示（复用 empty-hint 排版） */
 .scout-skipped {
   margin: 0 0 0.25rem;
+}
+
+/* 学着闭嘴：静音清单行（低存在感——作者需要时才看见；chip 带恢复阀） */
+.mute-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.mute-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  border: 1px dashed var(--border-color, #d6d3d1);
+  border-radius: 9999px;
+}
+.mute-chip__restore {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.6875rem;
+  color: var(--accent-500, #7c6aad);
+  cursor: pointer;
+}
+.mute-chip__restore:hover {
+  text-decoration: underline;
 }
 
 .presence-list {

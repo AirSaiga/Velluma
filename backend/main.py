@@ -180,6 +180,10 @@ logger.info("[Main] Canon 路由已加载")
 from backend.routes.world import router as world_router
 logger.info("[Main] World 路由已加载")
 
+# 辅助层「学着闭嘴」静音清单与宽恕复位（2026-08-25 战略定稿）
+from backend.routes.assist import router as assist_router
+logger.info("[Main] Assist 路由已加载")
+
 # V4.2 Reader Mirror（读者状态镜像）路由
 from backend.routes.reader_mirror import router as reader_mirror_router
 logger.info("[Main] Reader Mirror 路由已加载")
@@ -283,6 +287,10 @@ logger.info("[Main] Canon 路由已注册: /api/books/{book_id}/canon")
 # V5.0 World 设定层路由
 app.include_router(world_router)
 logger.info("[Main] World 路由已注册: /api/books/{book_id}/world")
+
+# 辅助层「学着闭嘴」静音路由
+app.include_router(assist_router)
+logger.info("[Main] Assist 路由已注册: /api/books/{book_id}/assist-mutes")
 
 # V4.2 Reader Mirror 路由
 app.include_router(reader_mirror_router)

@@ -26,6 +26,18 @@ const props = defineProps<{
   spineProgress?: SpineProgress | null
 }>()
 
+// 学着闭嘴（2026-08-25 战略定稿）：可静音类别的提醒卡带 × 收起——presentation 只抛事件，
+// 埋点与本地摘除由容器（WorkspaceView）接线。白名单与后端 quiet_learning.HINT_MUTEABLE_KINDS
+// 同步（改任一侧先对拍）；泄露/矛盾是安全类，永不出现 ×。
+const MUTEABLE_KINDS = new Set(['appearance', 'callback', 'style_drift', 'world_inbox'])
+function dismissable(kind: string) {
+  return MUTEABLE_KINDS.has(kind)
+}
+
+const emit = defineEmits<{
+  'dismiss-hint': [payload: { kind: string; label: string }]
+}>()
+
 // 谋篇进度行折叠（默认展开锚点清单；点击行头收起只留旗标）
 const spineCollapsed = ref(false)
 
@@ -126,6 +138,12 @@ const floatingHidden = computed(() =>
           <span class="hint-card__icon">{{ kindMeta(item.hint.kind).icon }}</span>
           <span class="hint-card__label" :title="item.hint.node_label">{{ item.hint.node_label }}</span>
           <span class="hint-card__tag">{{ kindMeta(item.hint.kind).label }}</span>
+          <button
+            v-if="dismissable(item.hint.kind)"
+            class="hint-card__dismiss"
+            title="收起此类提醒（同类多次收起后将少提，可在收件箱恢复）"
+            @click.stop="emit('dismiss-hint', { kind: item.hint.kind, label: item.hint.node_label })"
+          >×</button>
         </div>
         <div v-if="item.hint.detail" class="hint-card__detail">{{ item.hint.detail }}</div>
       </div>
@@ -144,6 +162,12 @@ const floatingHidden = computed(() =>
           <span class="hint-card__icon">{{ kindMeta(hint.kind).icon }}</span>
           <span class="hint-card__label" :title="hint.node_label">{{ hint.node_label }}</span>
           <span class="hint-card__tag">{{ kindMeta(hint.kind).label }}</span>
+          <button
+            v-if="dismissable(hint.kind)"
+            class="hint-card__dismiss"
+            title="收起此类提醒（同类多次收起后将少提，可在收件箱恢复）"
+            @click.stop="emit('dismiss-hint', { kind: hint.kind, label: hint.node_label })"
+          >×</button>
         </div>
         <div v-if="hint.detail" class="hint-card__detail">{{ hint.detail }}</div>
       </div>
@@ -342,6 +366,25 @@ const floatingHidden = computed(() =>
   background: #f1f5f9;
   color: #64748b;
   flex-shrink: 0;
+}
+/* 学着闭嘴：× 收起按钮默认隐身、悬停卡片浮现（常驻 × 是视觉噪声——学着闭嘴先从自己做起） */
+.hint-card__dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.hint-card:hover .hint-card__dismiss {
+  opacity: 0.85;
+}
+.hint-card__dismiss:hover {
+  color: #475569;
 }
 .hint-card__detail {
   font-size: 11px;

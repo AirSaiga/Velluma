@@ -17,15 +17,17 @@ export interface ToastAction {
 }
 
 export function useToast() {
-  /** 显示 toast；action（可选）渲染为可点按钮——点击即执行并关掉 toast（S4 撤销胶囊基础） */
+  /** 显示 toast；action（可选）渲染为可点按钮——点击即执行并关掉 toast（S4 撤销胶囊基础）。
+   *  actions（可选，学着闭嘴）渲染为多动作按钮组，与 action 可同时存在（互不影响）。 */
   const showToast = (
     message: string,
     type: ToastType = 'info',
     duration?: number,
     action?: ToastAction,
+    actions?: ToastAction[],
   ) => {
     const id = nextId++
-    toasts.value.push({ id, message, type, action })
+    toasts.value.push({ id, message, type, action, actions })
     setTimeout(() => {
       removeToast(id)
     }, duration ?? typeDurations[type])

@@ -214,6 +214,11 @@ class Book(Base):
     # {cursor: 日计数 int, range: {start,end} 年份 int}；NULL/缺键=未设置（自动视野）。
     # 原 localStorage 方案随前端端口扫描换源即漂移（表现为重启后视野重置），弃用。
     timeline_view = Column(JSONB, nullable=True)
+    # 学着闭嘴（2026-08-25 战略定稿）：被拒学习的宽恕时间戳 {mute_key: forgiven_at ISO}
+    # ——mute_key 形如 wevt:<event_type> / hint:<kind>；键存在=该时刻前的拒绝记录
+    # 一笔勾销（作者点「恢复」后重新计数）。静音状态本身不落库，永远从行为数据
+    # 派生（services/adaptive/quiet_learning.py），杜绝静音态与历史漂移。
+    assist_mutes = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
@@ -292,6 +297,10 @@ class Chapter(Base):
     # anchors:[{id,text,source,status}]}。NULL=本章无脉络（一切 UI 静默缺席，D-3 可完全忽略）。
     # 章级一次性消耗品：不进正文版本历史、不触发 world-refresh（度优先）。
     spine = Column(JSONB, nullable=True)
+    # 自动阅读幂等锚（2026-08-25 战略定稿「系统自己去读」）：{hash, last_run_at,
+    # last_created, entities_hash}——内容哈希不变则不重读（切章触发随处发枪也安全）；
+    # entities_hash 是全书通读阶段 A（实体候选抽取）的独立幂等键。NULL=从未读过。
+    auto_read_state = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     book = relationship("Book", back_populates="chapters")

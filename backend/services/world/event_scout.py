@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
+from backend.services.adaptive.quiet_learning import load_muted_keys, muted_event_types
 from backend.services.context.world_bridge import resolve_narrative_time
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
 from backend.services.prompts.world_event_prompts import (
@@ -134,9 +135,18 @@ async def run(
         .all()
     )
 
+    # 学着闭嘴（2026-08-25 战略定稿）：作者多次 ✗ 的事件类型静音——prompt 排除 +
+    # 落池过滤双闸。失败静默按无静音继续：学习链路故障绝不阻塞候选生产。
+    try:
+        muted_types = muted_event_types(await load_muted_keys(db, book_id))
+    except Exception as e:
+        logger.debug(f"[event_scout] 静音集加载失败（按无静音继续）: {e}")
+        muted_types = set()
+
     system_prompt, user_prompt = build_event_candidates_prompt(
         body, t, entities, locations, max_candidates=_MAX_CANDIDATES,
         recent_events=recent_events,
+        muted_types=sorted(muted_types) or None,
     )
     try:
         from backend.services.utils.json_safe import parse_json_safe
@@ -176,6 +186,7 @@ async def run(
     ledger_notes = [str(getattr(e, "note", None) or "") for e in recent_events]
 
     created = 0
+    suppressed_muted = 0
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -188,8 +199,14 @@ async def run(
             continue
         if _is_ledger_duplicate(draft["summary"], ledger_notes):
             continue  # 已入账事件的换皮重提，不入池省一次作者裁决
+        if muted_types and draft["event_type"] in muted_types:
+            suppressed_muted += 1
+            continue  # 学着闭嘴落池过滤闸（与 prompt 排除双保险；作者可在收件箱恢复该类型）
         seen.add(key)
         await repo.candidates.create(book_id, chapter_id, draft, source=source)
         created += 1
 
-    return {"created": created}
+    result: Dict[str, Any] = {"created": created}
+    if suppressed_muted:
+        result["suppressed_muted"] = suppressed_muted  # 仅在有静音拦截时带出（零变化契约）
+    return result

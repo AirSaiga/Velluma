@@ -289,8 +289,31 @@ export function evaporateGhost(): void {
   const editor = chapterEditorHandle.value
   const range = findGhostRange()
   if (editor && range) {
-    dispatchCollabEvent('ghost_discard', { source: ghostSource.value })
+    const source = ghostSource.value
+    dispatchCollabEvent('ghost_discard', { source })
+    // 失败理由埋点（2026-08-25 实测主线「失败分类学」）：先取文本再删——
+    // ≥30 字的蒸发才问（琐碎蒸发多是试键/误触，问了也是噪声）；
+    // 可点可无视 8s 自灭，零打扰红线；理由枚举见 InsightsView COLLAB_KIND_LABELS。
+    const discardedText = editor.state.doc.textBetween(range.from, range.to, '\n\n')
     editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).run()
+    if (discardedText.trim().length >= 30) {
+      const mk = (reason: string, label: string) => ({
+        label,
+        onClick: () => dispatchCollabEvent('ghost_discard_reason', { source, reason }),
+      })
+      useToast().showToast(
+        '幽灵已蒸发——点个原因，帮我学会少写这种',
+        'info',
+        8000,
+        undefined,
+        [
+          mk('misfit', '接错了'),
+          mk('not_my_voice', '不像我'),
+          mk('pacing', '节奏不对'),
+          mk('other', '其他'),
+        ],
+      )
+    }
   }
   ghostActive.value = false
   ghostSource.value = null

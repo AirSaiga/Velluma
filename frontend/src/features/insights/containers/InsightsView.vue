@@ -54,6 +54,9 @@ const COLLAB_KIND_LABELS: Record<string, string> = {
   spine_suggest_adopt: '收下 AI 建议',
   spine_suggest_discard: '不用 AI 建议',
   batch_accept: '批量入账',
+  // 学着闭嘴（2026-08-25）：幽灵蒸发理由反馈 + 感知带提醒收起
+  ghost_discard_reason: '幽灵稿蒸发理由',
+  hint_dismiss: '收起提醒',
 }
 function collabKindLabel(k: string): string {
   return COLLAB_KIND_LABELS[k] || k

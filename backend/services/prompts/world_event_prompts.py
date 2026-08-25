@@ -128,6 +128,22 @@ def _recent_events_block(recent_events) -> str:
     )
 
 
+def _muted_types_block(muted_types) -> str:
+    """作者拒收史排除块（学着闭嘴，2026-08-25 战略定稿）。
+
+    空 → 空串（零变化契约同 _recent_events_block：无拒收史的书 prompt
+    逐字节不变）。类型用原始 key（与 LLM 输出 JSON 的 event_type 同词表，
+    比对零翻译损耗，同 recent_events 块的选型理由）。
+    """
+    if not muted_types:
+        return ""
+    return (
+        "\n作者已多次拒绝以下类型的候选，本次不要再提："
+        + "、".join(str(t) for t in muted_types)
+        + "\n"
+    )
+
+
 def build_event_candidates_prompt(
     text: str,
     t: int,
@@ -135,17 +151,19 @@ def build_event_candidates_prompt(
     locations,
     max_candidates: int = 6,
     recent_events=None,
+    muted_types=None,
 ):
     """构造 (system, user)：正文 → 候选事件草稿列表。
 
     recent_events：t 时刻之前的已入账事件（WorldEvent 或鸭子同形对象），
     注入排除块防 LLM 重复提取；None/空 → prompt 与旧版逐字节一致。
+    muted_types：学着闭嘴的作者拒收类型（quiet_learning 派生）；None/空 → 零变化。
     """
     user = f"""当前世界时刻（连续日计数）：t = {t}
 
 角色与地点名单：
 {_roster_text(entities, locations)}
-{_recent_events_block(recent_events)}
+{_recent_events_block(recent_events)}{_muted_types_block(muted_types)}
 正文：
 ---
 {text[:4000]}

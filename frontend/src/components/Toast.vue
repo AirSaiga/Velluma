@@ -14,6 +14,8 @@ export interface Toast {
   type: ToastType
   /** 可选动作按钮（S4：撤销胶囊等；点击即执行并关闭） */
   action?: ToastAction
+  /** 多动作按钮组（学着闭嘴：幽灵蒸发理由条等；点击任一即执行并关闭） */
+  actions?: ToastAction[]
 }
 
 const props = defineProps<{
@@ -78,6 +80,15 @@ function runAction(id: number, action: ToastAction) {
               </svg>
             </button>
           </div>
+        </div>
+        <!-- 多动作按钮组（学着闭嘴：理由条等；任一点击即执行并关闭） -->
+        <div v-if="toast.actions?.length" class="flex flex-wrap gap-1.5 mt-2">
+          <button
+            v-for="a in toast.actions"
+            :key="a.label"
+            @click="runAction(toast.id, a)"
+            class="text-xs font-semibold px-2 py-1 rounded bg-white/20 hover:bg-white/35 transition-colors"
+          >{{ a.label }}</button>
         </div>
       </div>
     </TransitionGroup>
