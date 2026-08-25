@@ -232,5 +232,50 @@ class TestEdgeCases:
         assert result["reasoning"]["exclude"] is False
 
 
+# ============================================================
+# get_default_reasoning_config 语义（2026-08-25 修复：enabled=False → 显式关闭）
+# ============================================================
+
+class TestDefaultReasoningConfigSemantics:
+    """槽位 enabled=False 的旧语义是返回 None（不表态）——MiMo 等厂商服务端默认
+    思考开，「不表态=开」（实证：spine-suggest 被隐藏思考烧光 800 预算返回空）。
+    修复后返回显式关闭（与 REASONING_DISABLED 同形）。
+    """
+
+    def test_disabled_profile_returns_explicit_disable(self, monkeypatch):
+        from backend.core import model_config as mc
+        monkeypatch.setattr(mc, "get_model_profile", lambda role: {"enabled": False, "effort": "medium"})
+        assert mc.get_default_reasoning_config("creative") == {"reasoning": {"enabled": False}}
+
+    def test_missing_enabled_key_means_explicit_disable(self, monkeypatch):
+        """profile 缺 enabled 键（从未配置过）同样显式关闭——不表态的时代结束。"""
+        from backend.core import model_config as mc
+        monkeypatch.setattr(mc, "get_model_profile", lambda role: {})
+        assert mc.get_default_reasoning_config("default") == {"reasoning": {"enabled": False}}
+
+    def test_enabled_profile_unchanged(self, monkeypatch):
+        from backend.core import model_config as mc
+        monkeypatch.setattr(
+            mc, "get_model_profile",
+            lambda role: {"enabled": True, "effort": "high", "exclude": True},
+        )
+        assert mc.get_default_reasoning_config("reasoning") == {
+            "reasoning": {"enabled": True, "effort": "high", "exclude": True},
+        }
+
+    def test_explicit_disable_safe_for_openai_and_local(self):
+        """零变化契约：显式关闭经适配层后，OpenAI/本地端点依然不发任何参数。"""
+        disabled = {"reasoning": {"enabled": False}}
+        assert adapt_reasoning_config(disabled, "https://api.openai.com/v1") is None
+        assert adapt_reasoning_config(disabled, "http://localhost:11434/v1") is None
+
+    def test_explicit_disable_reaches_default_on_vendors(self):
+        """修复的目标：默认即开的厂商能收到显式关闭（MiMo 为代表）。"""
+        disabled = {"reasoning": {"enabled": False}}
+        assert adapt_reasoning_config(disabled, "https://api.xiaomimimo.com/v1") == {
+            "thinking": {"type": "disabled"}
+        }
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

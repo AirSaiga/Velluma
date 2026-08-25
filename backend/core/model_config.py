@@ -335,7 +335,13 @@ def get_default_reasoning_config(model_type: str = "default") -> Optional[dict]:
     获取默认推理配置（extra_body 格式）。
 
     根据 model_type 从对应 profile 的 enabled/effort/exclude 读取。
-    如果 enabled 为 False，返回 None。
+
+    语义修复（2026-08-25）：enabled 为 False → 返回**显式关闭**（与
+    services/llm/client.py 的 REASONING_DISABLED 同形），不再是 None
+    「不表态」。动机实证：MiMo 等厂商服务端默认思考开，「不表态=开」——
+    spine-suggest 曾被隐藏思考烧光 800 token 预算返回空输出（finish=length）。
+    对 OpenAI/本地端点零变化：适配层在这些厂商的 enabled=False 分支
+    依然返回 None 不发参数（reasoning_adapter.py 各分支保证）。
     """
     profile = get_model_profile(model_type)
     if profile.get("enabled"):
@@ -346,7 +352,8 @@ def get_default_reasoning_config(model_type: str = "default") -> Optional[dict]:
                 "exclude": profile.get("exclude", False),
             }
         }
-    return None
+    # 显式关闭（与 REASONING_DISABLED 同形；此处不 import client 防循环依赖）
+    return {"reasoning": {"enabled": False}}
 
 
 def resolve_model_name(model: Optional[str] = None, model_type: str = "default") -> str:

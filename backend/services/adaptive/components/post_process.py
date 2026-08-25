@@ -133,9 +133,9 @@ async def _llm_critique(text: str, bundle) -> Dict:
         # 整章审阅是判断/审计任务（找设定矛盾、情节漏洞、伏笔遗漏），属分析型工作，
         # 走 reasoning 槽并保留 thinking（不传 REASONING_DISABLED）。与 BS-ADF
         # Phase 5 锚审计 / Phase 7 一致性守卫同类，本就该开思考。完稿后触发，
-        # 延迟不敏感。此前用 creative 且漏传 reasoning_config，致 thinking 被静默
-        # 关掉（creative.enabled=false → get_default_reasoning_config 返回 None），
-        # 审阅深度不足。
+        # 延迟不敏感。此前用 creative 且漏传 reasoning_config——2026-08-25 语义
+        # 修复前 get_default_reasoning_config 对 enabled=False 返回 None（不表态），
+        # 思考状态随厂商默认漂移（现已修为显式关闭）。
         model_type="reasoning", temperature=0.3, max_tokens=2000,
     )
     # 观测记账：chapter_id 为空时跳过——get_adaptive_recorder("") 会在全局注册表

@@ -285,10 +285,15 @@ async def test_model_connection(request: ModelTestRequest):
 
     if reasoning_enabled is None:
         default_cfg = get_default_reasoning_config("reasoning")
-        if default_cfg:
+        # 2026-08-25 语义修复后：enabled=False 也返回非空（显式关闭）——
+        # 此处要的是「思考是否开启」，必须看标志位而非真值
+        if default_cfg and default_cfg.get("reasoning", {}).get("enabled"):
             reasoning_config = default_cfg
             reasoning_enabled = True
             reasoning_effort = default_cfg.get("reasoning", {}).get("effort", "medium")
+        else:
+            reasoning_config = default_cfg  # 显式关闭也透传（让测试连接走真实语义）
+            reasoning_enabled = False
     elif reasoning_enabled:
         reasoning_config = {
             "reasoning": {
