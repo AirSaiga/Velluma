@@ -407,9 +407,30 @@ async def list_candidates(
 ):
     """候选事件列表（写作页收件箱只管本章；世界页待确认分区看全书）。"""
     repo = WorldRepository(db)
-    return await repo.candidates.list_by_book(
+    rows = await repo.candidates.list_by_book(
         str(book_id), status=status, chapter_id=str(chapter_id) if chapter_id else None
     )
+    # 联表补归属章号（2026-08-26 实测痛点：无叙事锚的书所有候选时间都是默认
+    # 「第1年1月1日」——前端改显示「第 N 章」，章节序是诚实的已有信息）
+    from sqlalchemy import select as sa_select
+
+    from backend.models import Chapter as _Chapter
+
+    ch_ids = [c.chapter_id for c in rows if c.chapter_id]
+    num_map = {}
+    if ch_ids:
+        num_map = {
+            str(cid): num
+            for cid, num in (await db.execute(
+                sa_select(_Chapter.id, _Chapter.chapter_number).where(_Chapter.id.in_(ch_ids))
+            )).all()
+        }
+    out = []
+    for c in rows:
+        resp = WorldEventCandidateResponse.model_validate(c)
+        resp.chapter_number = num_map.get(str(c.chapter_id)) if c.chapter_id else None
+        out.append(resp)
+    return out
 
 
 @router.post("/{book_id}/world/candidates/{candidate_id}/accept")
@@ -444,6 +465,34 @@ async def accept_candidate(
         await repo.candidates.set_status(str(candidate_id), "accepted")
         await db.commit()
         return {"candidate_id": cand.id, "event": None, "canon_node_id": str(node.id)}
+
+    # 重复转正闸（2026-08-26 全书通读实测）：同一事件换措辞的候选可并存于
+    # pending 池（跨章抽取/历史存量），全部采纳会把账本写重。转正前对全书
+    # 账本近期事件做归一化子串判重（与 event_scout 同一把尺子，勿平行实现）；
+    # 命中则不建事件——候选标 rejected + draft.auto_reject="duplicate" 留痕
+    # （可 reopen 翻案；quiet_learning 不计系统跳过的假拒绝，防静音学习失真）。
+    d = cand.draft or {}
+    summary_for_check = str(d.get("summary") or d.get("note") or "")
+    if summary_for_check and cand.source != "canon_extract":
+        from sqlalchemy import select as sa_select
+
+        from backend.models import WorldEvent as _WorldEvent
+        from backend.services.world.event_scout import is_ledger_duplicate
+
+        recent_notes = [
+            str(n or "")
+            for n in (await db.execute(
+                sa_select(_WorldEvent.note)
+                .where(_WorldEvent.book_id == str(book_id))
+                .order_by(_WorldEvent.sequence_num.desc())
+                .limit(200)
+            )).scalars().all()
+        ]
+        if is_ledger_duplicate(summary_for_check, recent_notes):
+            cand.draft = {**d, "auto_reject": "duplicate"}
+            await repo.candidates.set_status(str(candidate_id), "rejected")
+            await db.commit()
+            return {"candidate_id": cand.id, "event": None, "duplicated": True}
 
     ev = await repo.events.create(str(book_id), **_event_fields_from_draft(cand.draft or {}))
     await repo.candidates.set_status(str(candidate_id), "accepted")

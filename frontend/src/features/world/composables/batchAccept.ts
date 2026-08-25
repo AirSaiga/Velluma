@@ -72,6 +72,8 @@ export interface BatchAcceptOutcome {
   candidateId: string
   /** 采纳成功（转正或建节点） */
   ok: boolean
+  /** 命中重复转正闸（账本已有同义事件）——未建事件、候选已留痕，不算失败也不进撤销名单 */
+  duplicated: boolean
   /** 候选归属章（埋点归账用；跨章批量时逐章计数） */
   chapterId: string | null
   /** event_scout/settle 候选转正创建的事件 id（撤销时删；canon 候选为 null） */
@@ -83,12 +85,18 @@ export interface BatchAcceptOutcome {
 export interface BatchSummary {
   ok: number
   failed: number
+  /** 重复跳过条数（重复转正闸；从 failed 里拆出——它不是作者的失败） */
+  dup: number
 }
 
 export function summarizeBatch(outcomes: BatchAcceptOutcome[]): BatchSummary {
   let ok = 0
-  for (const o of outcomes) if (o.ok) ok++
-  return { ok, failed: outcomes.length - ok }
+  let dup = 0
+  for (const o of outcomes) {
+    if (o.ok) ok++
+    else if (o.duplicated) dup++
+  }
+  return { ok, failed: outcomes.length - ok - dup, dup }
 }
 
 /** 撤销名单 = 成功项（失败项无转正产物，无需 reopen）——纯函数供测试 */
@@ -109,14 +117,18 @@ export async function runBatchAccept(
   let done = 0
   for (const c of candidates) {
     const item: BatchAcceptOutcome = {
-      candidateId: c.id, ok: false, chapterId: c.chapter_id || null,
+      candidateId: c.id, ok: false, duplicated: false, chapterId: c.chapter_id || null,
       eventId: null, canonNodeId: null,
     }
     try {
       const r = await worldApi.acceptCandidate(bookId, c.id)
-      item.ok = true
-      item.eventId = r?.event?.id || null
-      item.canonNodeId = r?.canon_node_id || null
+      if (r?.duplicated) {
+        item.duplicated = true  // 重复转正闸：不建事件不失败，留痕跳过
+      } else {
+        item.ok = true
+        item.eventId = r?.event?.id || null
+        item.canonNodeId = r?.canon_node_id || null
+      }
     } catch {
       item.ok = false  // 单条失败不阻断批次（如 409 已处理），尾部汇总提示
     }

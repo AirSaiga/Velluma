@@ -85,6 +85,11 @@ def _is_ledger_duplicate(summary: str, recent_notes: List[str]) -> bool:
     return False
 
 
+# 公开别名（routes/world.py 转正判重同用——归一化判重判据只此一处，勿平行实现）
+normalize_for_dedup = _normalize_for_dedup
+is_ledger_duplicate = _is_ledger_duplicate
+
+
 def _skip(code: str) -> Dict[str, Any]:
     """P3-4（C6）：跳过返回 {created: 0, skipped: {code, reason}}。
 
@@ -176,8 +181,12 @@ async def run(
     if not isinstance(items, list) or not items:
         return {"created": 0}
 
-    # 幂等去重：pending 池同章同 (event_type, summary) 跳过
-    existing = await repo.candidates.list_by_book(book_id, status="pending", chapter_id=chapter_id)
+    # 幂等去重闸升级（2026-08-25 全书通读实测）：pending 池判重从「同章同
+    # (type,summary)」扩为**全书级归一化子串判重**——同一事件在不同章被重复
+    # 抽取（前文回顾/跨章场景）是通读场景的常态，同章幂等拦不住。
+    # seen 保留本批内去重（同次 LLM 输出的重复条）。
+    existing = await repo.candidates.list_by_book(book_id, status="pending")
+    pending_notes = [str((c.draft or {}).get("summary") or "") for c in existing]
     seen = {
         ((c.draft or {}).get("event_type"), (c.draft or {}).get("summary"))
         for c in existing
@@ -199,6 +208,8 @@ async def run(
             continue
         if _is_ledger_duplicate(draft["summary"], ledger_notes):
             continue  # 已入账事件的换皮重提，不入池省一次作者裁决
+        if _is_ledger_duplicate(draft["summary"], pending_notes):
+            continue  # 全书 pending 池判重：跨章/换措辞的重复候选不再出生
         if muted_types and draft["event_type"] in muted_types:
             suppressed_muted += 1
             continue  # 学着闭嘴落池过滤闸（与 prompt 排除双保险；作者可在收件箱恢复该类型）

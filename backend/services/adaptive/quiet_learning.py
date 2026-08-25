@@ -266,6 +266,8 @@ async def _compute_muted_keys(db: AsyncSession, book_id: str) -> Set[str]:
         etype = str((draft or {}).get("event_type") or "")
         if not etype:
             continue
+        if (draft or {}).get("auto_reject"):
+            continue  # 系统判重跳过的假拒绝（重复转正闸留痕）不是作者态度，不计入学习
         f = _parse_ts(forgiven.get(event_mute_key(etype)))
         decided_at = _parse_ts(updated_at)
         if f is not None and decided_at is not None and decided_at <= f:

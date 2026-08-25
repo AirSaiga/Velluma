@@ -159,6 +159,29 @@ class TestLoadMutedKeysWithDb:
             asyncio.run(engine.dispose())
             ql.invalidate_mutes_cache(str(BOOK_ID))
 
+    def test_auto_reject_marked_rows_not_counted(self, tmp_path, monkeypatch):
+        """重复转正闸的系统跳过（auto_reject 留痕）不是作者态度——不计入静音学习
+        （否则三条重复候选会把该类型误静音）。"""
+        monkeypatch.setenv("VELLUMA_DATA_DIR", str(tmp_path))
+        engine, maker = _make_stack(tmp_path, "quiet_autoreject.db")
+
+        async def run():
+            async with maker() as s:
+                s.add(m.Book(id=BOOK_ID, title="假拒绝豁免测试书"))
+                for _ in range(3):
+                    c = _candidate("move", "rejected")
+                    c.draft = {**(c.draft or {}), "auto_reject": "duplicate"}
+                    s.add(c)
+                await s.commit()
+                keys = await ql.load_muted_keys(s, str(BOOK_ID), use_cache=False)
+                assert "wevt:move" not in keys
+
+        try:
+            asyncio.run(run())
+        finally:
+            asyncio.run(engine.dispose())
+            ql.invalidate_mutes_cache(str(BOOK_ID))
+
     def test_hint_dismiss_events_mute_only_whitelisted(self, tmp_path, monkeypatch):
         """感知带拒收史：appearance 收 3 次静音；leak 收 5 次永不静音；30 天外过期原谅。"""
         monkeypatch.setenv("VELLUMA_DATA_DIR", str(tmp_path))

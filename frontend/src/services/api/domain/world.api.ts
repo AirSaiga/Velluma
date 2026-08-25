@@ -195,6 +195,8 @@ export interface WorldEventCandidate {
   id: string
   book_id: string
   chapter_id: string | null
+  /** 归属章号（后端联表补；无时间锚时显示「第 N 章」替代默认日期） */
+  chapter_number?: number | null
   /** C3 起 canon_extract 候选的 draft 是真相候选形状（label/type/canon_text/public_text） */
   draft: EventDraft & { label?: string; type?: string; canon_text?: string; public_text?: string }
   source: 'settle' | 'finish' | 'canon_extract' | string
@@ -419,7 +421,13 @@ export const worldApi = {
   /** accept 分流（C3）：事件候选转正建事件（event 非空）；canon_extract 候选建真相
    *  节点（event=null + canon_node_id 非空）——批量裁决的撤销据此删对产物 */
   acceptCandidate: (bookId: string, candidateId: string) =>
-    requestJson<{ event: WorldEvent | null; candidate_id: string; canon_node_id?: string | null }>(
+    requestJson<{
+      event: WorldEvent | null
+      candidate_id: string
+      canon_node_id?: string | null
+      /** 命中重复转正闸：未建事件，候选已标 rejected 留痕（勿计入失败） */
+      duplicated?: boolean
+    }>(
       `/books/${bookId}/world/candidates/${candidateId}/accept`,
       { method: 'POST' },
     ),

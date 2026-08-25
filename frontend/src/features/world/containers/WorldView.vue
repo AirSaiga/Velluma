@@ -14,7 +14,7 @@ import { useWorld } from '../composables/useWorld'
 import { worldApi } from '../../../services/api'
 import { bookApi } from '../../../services/api/domain'
 import { useAppStore } from '../../app/useAppStore'
-import { formatTime } from '../engine/timeFormat'
+import { formatTime, displayCandidateTime } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
 import type { WorldEvent, WorldLocation, EventType, DrawMode, Point } from '../engine/types'
@@ -516,13 +516,17 @@ async function onBatchConfirm(ids: string[]) {
     await load(bookId.value)
     await loadCandidates()
   }
-  const { ok, failed } = summarizeBatch(outcomes)
+  const { ok, failed, dup } = summarizeBatch(outcomes)
   if (ok > 0) {
-    showToast(`已批量入账 ${ok} 条世界变化`, 'success', 6000, {
+    showToast(
+      `已批量入账 ${ok} 条世界变化` + (dup > 0 ? `（另 ${dup} 条与账本重复，已自动跳过）` : ''),
+      'success', 6000, {
       label: '撤销',
       // 撤销闭包捕获本批 outcomes——连开两批时旧 toast 只撤旧批
       onClick: () => { void undoBatch(outcomes) },
     })
+  } else if (dup > 0) {
+    showToast(`${dup} 条与账本已有事件重复，已自动跳过`, 'info')
   }
   if (failed > 0) showToast(`${failed} 条采纳失败（可能已被处理），可稍后重试`, 'warning')
 }
@@ -990,7 +994,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
                 <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')) }}</span>
                 <span class="sc-badge">
                   <template v-if="c.source === 'canon_extract'">◉ 真相候选 · 待核实</template>
-                  <template v-else>{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ formatTime(c.draft?.time_start || 0) }}</template>
+                  <template v-else>{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ displayCandidateTime(c.draft?.time_start || 0, c.chapter_number) }}</template>
                 </span>
               </div>
               <div class="sc-actions">

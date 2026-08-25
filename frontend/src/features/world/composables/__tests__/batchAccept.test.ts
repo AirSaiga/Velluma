@@ -69,19 +69,32 @@ describe('A5b 批量勾选（默认全选 + 逐条剔除）', () => {
 
 describe('A5b 批次汇总与撤销名单', () => {
   const ok = (id: string, extra?: Partial<BatchAcceptOutcome>): BatchAcceptOutcome => ({
-    candidateId: id, ok: true, chapterId: 'ch1', eventId: null, canonNodeId: null, ...extra,
+    candidateId: id, ok: true, duplicated: false, chapterId: 'ch1', eventId: null, canonNodeId: null, ...extra,
   })
   const fail = (id: string): BatchAcceptOutcome => ({
-    candidateId: id, ok: false, chapterId: 'ch1', eventId: null, canonNodeId: null,
+    candidateId: id, ok: false, duplicated: false, chapterId: 'ch1', eventId: null, canonNodeId: null,
+  })
+  const dup = (id: string): BatchAcceptOutcome => ({
+    candidateId: id, ok: false, duplicated: true, chapterId: 'ch1', eventId: null, canonNodeId: null,
   })
 
   it('summarizeBatch：成功/失败分账', () => {
     const outcomes = [ok('a'), fail('b'), ok('c', { eventId: 'e1' })]
-    expect(summarizeBatch(outcomes)).toEqual({ ok: 2, failed: 1 })
+    expect(summarizeBatch(outcomes)).toEqual({ ok: 2, failed: 1, dup: 0 })
+  })
+
+  it('summarizeBatch：重复跳过单独成账（不计失败——它不是作者的失败）', () => {
+    const outcomes = [ok('a'), dup('b'), fail('c'), dup('d')]
+    expect(summarizeBatch(outcomes)).toEqual({ ok: 1, failed: 1, dup: 2 })
   })
 
   it('空批次零值', () => {
-    expect(summarizeBatch([])).toEqual({ ok: 0, failed: 0 })
+    expect(summarizeBatch([])).toEqual({ ok: 0, failed: 0, dup: 0 })
+  })
+
+  it('重复跳过不进撤销名单（无转正产物，候选已留痕 rejected）', () => {
+    const outcomes = [ok('a', { eventId: 'e1' }), dup('b')]
+    expect(undoableOutcomes(outcomes).map((o) => o.candidateId)).toEqual(['a'])
   })
 
   it('undoableOutcomes 只含成功项（失败项无转正产物，无需 reopen）', () => {

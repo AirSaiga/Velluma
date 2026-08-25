@@ -383,15 +383,20 @@ class WorldEventCandidateResponse(BaseModel):
     source: str = "settle"
     status: str = "pending"
     created_at: datetime
+    # 归属章号（路由侧联表补；无时间锚时前端显示「第 N 章」替代默认日期）
+    chapter_number: Optional[int] = None
 
     class Config:
         from_attributes = True
 
 
 class AcceptCandidateResponse(BaseModel):
-    """✓ 转正：真事件（已分配回放序号，进入推演）+ 候选留痕。"""
-    event: WorldEventResponse
+    """✓ 转正：真事件（已分配回放序号，进入推演）+ 候选留痕。
+    duplicated=True：命中重复转正闸——未建事件，候选已标 rejected 留痕。"""
+    event: Optional[WorldEventResponse] = None
     candidate_id: UUID
+    canon_node_id: Optional[UUID] = None
+    duplicated: bool = False
 
 
 # ============================================================

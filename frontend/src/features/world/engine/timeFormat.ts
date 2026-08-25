@@ -43,6 +43,17 @@ export function formatTime(t: Timestamp): string {
   return `第${year}年${month}月${day}日`
 }
 
+/**
+ * 候选事件的时刻显示（2026-08-26 实测痛点）：t=0 意味着「没有叙事锚，系统
+ * 无法推断时间」——显示成「第1年1月1日」是伪造精度。诚实降级为章节序
+ * （第 N 章是真实信息）；无章号再退「未锚定」。
+ */
+export function displayCandidateTime(t: Timestamp, chapterNumber?: number | null): string {
+  if (t) return formatTime(t)
+  if (chapterNumber) return `第${chapterNumber}章`
+  return '未锚定'
+}
+
 /** 年份（时间轴年粒度刻度用） */
 export function yearOf(t: Timestamp): number {
   return breakdownTime(t).year

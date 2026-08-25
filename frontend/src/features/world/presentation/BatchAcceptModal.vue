@@ -9,7 +9,7 @@
 import { computed, ref } from 'vue'
 import ModalShell from './ModalShell.vue'
 import { getTemplate } from '../engine/eventTemplates'
-import { formatTime } from '../engine/timeFormat'
+import { displayCandidateTime } from '../engine/timeFormat'
 import type { EventType } from '../engine/types'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
 import {
@@ -68,7 +68,8 @@ function titleOf(c: WorldEventCandidate): string {
 
 function metaOf(c: WorldEventCandidate): string {
   if (c.source === 'canon_extract') return '记入真相账本（草稿）'
-  return formatTime(c.draft?.time_start || 0)
+  // t=0 = 无叙事锚无法推断——显示章节序（真实信息），不伪造「第1年1月1日」
+  return displayCandidateTime(c.draft?.time_start || 0, c.chapter_number)
 }
 </script>
 

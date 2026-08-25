@@ -264,3 +264,20 @@ class TestRunEndToEnd:
 
         assert result == {"created": 0}
         assert created == []
+
+    def test_cross_chapter_pending_dedup_by_containment(self):
+        """2026-08-26 全书通读实测：同一事件跨章被重复抽取（前文回顾/场景延续），
+        pending 判重从「同章精确对」升级为「全书归一化子串」——换措辞也拦住。"""
+        pending = [SimpleNamespace(draft={"event_type": "move", "summary": "陈朗救走李岩父女二人"})]
+        repo, created = _fake_repo(ENTS, LOCS, pending=pending)
+        db = _FakeDb(_CHAPTER, recent=[])
+        # 同一事件换措辞 + 不同章（pending 来自他章）——子串判重应拦
+        dup_reworded = {**_CAND_NEW, "event_type": "move", "summary": "陈朗救走李岩父女"}
+
+        with patch(_LLM, new=AsyncMock(return_value=_llm_resp([dup_reworded]))), \
+                patch(_RNT, new=AsyncMock(return_value=NarrativeTime(T, "chapter_anchor"))), \
+                patch(_REPO, new=lambda _: repo):
+            result = _run(run("c1", db, {}, 0, source="auto_read", text=BODY))
+
+        assert result == {"created": 0}
+        assert created == []

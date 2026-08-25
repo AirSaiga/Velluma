@@ -3,7 +3,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../../app/useAppStore'
 import { useWorldSlice, WORLD_REFRESH_EVENT } from '../../world/composables/useWorldSlice'
-import { formatTime, breakdownTime, fromYMD } from '../../world/engine/timeFormat'
+import { formatTime, breakdownTime, fromYMD, displayCandidateTime } from '../../world/engine/timeFormat'
 import { getTemplate } from '../../world/engine/eventTemplates'
 import { narrativeSourceText } from '../../world/engine/narrativeTimeSource'
 import type { EventType, WorldLocation } from '../../world/engine/types'
@@ -254,13 +254,17 @@ async function onBatchConfirm(ids: string[]) {
     // 收件箱/切片随 useWorldSlice 的 world-refresh 监听静默重取
     window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
   }
-  const { ok, failed } = summarizeBatch(outcomes)
+  const { ok, failed, dup } = summarizeBatch(outcomes)
   if (ok > 0) {
-    showToast(`已批量入账 ${ok} 条世界变化`, 'success', 6000, {
+    showToast(
+      `已批量入账 ${ok} 条世界变化` + (dup > 0 ? `（另 ${dup} 条与账本重复，已自动跳过）` : ''),
+      'success', 6000, {
       label: '撤销',
       // 撤销闭包捕获本批 outcomes——连开两批时旧 toast 只撤旧批
       onClick: () => { void undoBatch(outcomes) },
     })
+  } else if (dup > 0) {
+    showToast(`${dup} 条与账本已有事件重复，已自动跳过`, 'info')
   }
   if (failed > 0) showToast(`${failed} 条采纳失败（可能已被处理），可稍后重试`, 'warning')
 }
@@ -530,7 +534,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
               <li v-for="c in candidates" :key="c.id" class="inbox-row">
                 <span class="inbox-type">{{ eventLabelOf(c.draft?.event_type || 'custom') }}</span>
                 <span class="inbox-text">{{ c.draft?.summary || c.draft?.note || '（无摘要）' }}</span>
-                <span class="inbox-meta">{{ formatTime(c.draft?.time_start || 0) }}</span>
+                <span class="inbox-meta">{{ displayCandidateTime(c.draft?.time_start || 0, c.chapter_number) }}</span>
                 <span class="inbox-actions">
                   <button
                     class="inbox-btn ok"
