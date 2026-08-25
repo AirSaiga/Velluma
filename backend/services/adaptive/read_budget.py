@@ -75,15 +75,19 @@ def decide_auto_read(
     hash_key: str = "hash",
     now: Optional[datetime] = None,
     daily_used: int = 0,
+    force: bool = False,
 ) -> Tuple[bool, Optional[str]]:
     """纯判定：该章此刻该不该自动读。返回 (该不该, 跳过短码)。
 
     判定序有语义：unchanged 先于 too_soon/daily_cap——「没变」是最常见静默出口，
     避免无事时也暴露预算信息；间隔闸只对「确实要读」的情况生效。
+    force=True（全书通读「重新认人」补救：刷新丢 review 状态后哈希全跳过的死局）
+    只豁免 unchanged/too_soon 两道幂等闸；short_text 与 daily_cap 永远生效
+    （防爆冲红线不因作者主动重跑而松动）。
     """
     if text_len < AUTO_READ_MIN_TEXT:
         return False, "short_text"
-    if state:
+    if not force and state:
         if state.get(hash_key) == fingerprint:
             return False, "unchanged"
         last = _parse_ts(state.get("last_run_at"))

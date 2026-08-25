@@ -1483,6 +1483,12 @@ async def auto_read_chapter(chapter_id: str, db: AsyncSession = Depends(get_db))
     )
 
 
+class ReadEntitiesRequest(BaseModel):
+    """force=True：豁免幂等闸（unchanged/too_soon），用于全书通读刷新丢 review
+    状态后的「重新认人」补救；预算闸（short_text/daily_cap）不豁免。"""
+    force: bool = False
+
+
 class ReadEntitiesResponse(BaseModel):
     ran: bool
     entities: List[Dict[str, Any]] = Field(default_factory=list)
@@ -1491,7 +1497,11 @@ class ReadEntitiesResponse(BaseModel):
 
 
 @router.post("/{chapter_id}/adaptive/read-entities", response_model=ReadEntitiesResponse)
-async def read_chapter_entities(chapter_id: str, db: AsyncSession = Depends(get_db)):
+async def read_chapter_entities(
+    chapter_id: str,
+    payload: Optional[ReadEntitiesRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """全书通读·阶段 A：从正文抽实体/地点候选——只产草稿不落库（作者批量过目后才建）。
 
     长章折叠策略：≤5000 字全量；超长取头 4000 + 尾 1000（实体介绍密度
@@ -1519,6 +1529,7 @@ async def read_chapter_entities(chapter_id: str, db: AsyncSession = Depends(get_
     ok, code = decide_auto_read(
         text_len=len(plain), state=state, fingerprint=fp,
         hash_key="entities_hash", daily_used=daily_used,
+        force=bool(payload and payload.force),
     )
     if not ok:
         return ReadEntitiesResponse(

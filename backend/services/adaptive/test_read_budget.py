@@ -77,6 +77,38 @@ class TestDecideAutoRead:
         assert (ok, code) == (False, "too_soon")
 
 
+class TestForceSemantics:
+    """force=True（通读「重新认人」补救）：只豁免幂等闸，不豁免预算闸。"""
+
+    def test_force_bypasses_unchanged(self):
+        state = {"hash": "fp1", "last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="fp1", now=NOW, force=True,
+        )
+        assert (ok, code) == (True, None)
+
+    def test_force_bypasses_too_soon(self):
+        state = {"hash": "old", "last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="new", now=NOW, force=True,
+        )
+        assert (ok, code) == (True, None)
+
+    def test_force_never_bypasses_daily_cap(self):
+        """防爆冲红线不因作者主动重跑而松动。"""
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=None, fingerprint="x", now=NOW,
+            daily_used=rb.AUTO_READ_DAILY_CAP, force=True,
+        )
+        assert (ok, code) == (False, "daily_cap")
+
+    def test_force_never_bypasses_short_text(self):
+        ok, code = rb.decide_auto_read(
+            text_len=10, state=None, fingerprint="x", now=NOW, force=True,
+        )
+        assert (ok, code) == (False, "short_text")
+
+
 class TestFingerprint:
     def test_whitespace_insensitive(self):
         assert rb.content_fingerprint("一 段\n话。") == rb.content_fingerprint("一段话。")

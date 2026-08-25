@@ -1800,6 +1800,11 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
   height: 100%;
+  /* 独立层叠上下文（2026-08-25 从 .world-map 上移到此）：wrap 内全部覆盖层
+     ——暗角 645 / 空白舆图卡 660 / 图例 700 / 右键菜单 850 / 创建表单 860——
+     此前与页面 z-110 的模态在根层叠上下文混排，空白舆图卡曾压盖住通读向导
+     模态（实测：「建好勾选的」按钮区被拦）。关在 wrap 内后模态恒在其上。 */
+  isolation: isolate;
 }
 /* 羊皮古卷画布：做旧纸底 + 纤维纹 + 淡墨绘制网格（零图片，纯 CSS gradient 不触 CSP） */
 .world-map {
@@ -1824,8 +1829,8 @@ onBeforeUnmount(() => {
     auto,
     auto,
     auto;
-  /* 独立层叠上下文：Leaflet 内部 pane z-index 高达 700，
-     不隔离会压过页面 z-110 的模态/确认弹窗 */
+  /* Leaflet 内部 pane z-index 高达 700——本层隔离只收 pane；
+     外层 .world-map-wrap 的 isolation 才挡页面模态（2026-08-25 上移） */
   isolation: isolate;
 }
 :deep(.leaflet-container) {

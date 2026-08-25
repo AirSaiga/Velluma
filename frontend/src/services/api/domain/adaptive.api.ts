@@ -282,10 +282,12 @@ export const adaptiveApi = {
     })
   },
 
-  /** 系统自己去读·阶段 A：从一章抽实体/地点候选（只产草稿不落库） */
-  readEntities: async (chapterId: string): Promise<ReadEntitiesResult> => {
+  /** 系统自己去读·阶段 A：从一章抽实体/地点候选（只产草稿不落库）。
+   *  force=true 豁免幂等闸（通读向导刷新丢 review 后的重新认人补救；预算闸不豁免） */
+  readEntities: async (chapterId: string, force = false): Promise<ReadEntitiesResult> => {
     return requestJson(`/chapters/${chapterId}/adaptive/read-entities`, {
       method: 'POST',
+      body: JSON.stringify({ force }),
     })
   },
 

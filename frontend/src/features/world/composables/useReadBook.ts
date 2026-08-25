@@ -99,6 +99,25 @@ export function useReadBook() {
       return
     }
 
+    await extractAll(targets, false)
+    // 重跑死局保险（2026-08-25 实测）：全部章节因哈希幂等跳过且零产出——
+    // 说明此前读过但 review 状态丢了（刷新/中断）；若世界仍零实体，
+    // 候选从未被确认落库，自动带 force 重抽一次（预算闸不豁免）。
+    if (!entityCandidates.value.length && !locationCandidates.value.length && !cancelled) {
+      let existing: any[] = []
+      try {
+        existing = await worldApi.listEntities(bookId)
+      } catch { /* 查询失败按有实体处理，不重抽 */ }
+      if (!existing.length) {
+        skippedCount.value = 0
+        await extractAll(targets, true)
+      }
+    }
+    progress.value = null
+    if (phase.value === 'entities') phase.value = 'review'
+  }
+
+  async function extractAll(targets: any[], force: boolean) {
     const entMap = new Map<string, EntityCandidate>()
     const locMap = new Map<string, LocationCandidate>()
     for (let i = 0; i < targets.length; i++) {
@@ -106,7 +125,7 @@ export function useReadBook() {
       const ch = targets[i]
       progress.value = { done: i + 1, total: targets.length, label: ch.title || `第${ch.chapter_number}章` }
       try {
-        const r = await adaptiveApi.readEntities(ch.id)
+        const r = await adaptiveApi.readEntities(ch.id, force)
         if (!r.ran) { if (r.skipped) skippedCount.value++; continue }
         for (const e of r.entities || []) {
           const key = normalizeName(e.name)
@@ -134,8 +153,6 @@ export function useReadBook() {
     }
     entityCandidates.value = [...entMap.values()].sort((a, b) => b.mentions - a.mentions)
     locationCandidates.value = [...locMap.values()].sort((a, b) => b.mentions - a.mentions)
-    progress.value = null
-    phase.value = 'review'
   }
 
   /** 作者确认勾选 → 建实体/地点（此处才落库）→ 自动接阶段 B。 */
