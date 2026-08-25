@@ -30,6 +30,7 @@ import hashlib
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,12 @@ from backend.services.adaptive.change_detector import AuthorState
 from backend.services.adaptive.paragraph_source import normalize_for_match
 # B2（2026-08-25 治理）：spine 锚点进度判定换 text_match 共享判据（勿另写滑窗）
 from backend.services.adaptive.text_match import matches as text_matches
+# 学着闭嘴（2026-08-25 战略定稿）：心跳提醒静音过滤的唯一权威在 quiet_learning
+from backend.services.adaptive.quiet_learning import hint_mute_key, load_muted_keys
+# 视野配比（2026-08-25 实测调窗）：滚动窗口句界净截，防窗首半截句误导续写锚点
+from backend.services.adaptive.paragraph_source import sentence_clean_tail
+# 就近节拍共享判据：点火剂量闸（open 只给开头一两拍）与意图块兜底同消费
+from backend.services.adaptive.outline_nearby import outline_nearby
 from backend.services.adaptive.observing import (
     bind_adaptive_trace,
     flush_adaptive_records,
@@ -62,6 +69,7 @@ from backend.services.context.stitch_context import (
 )
 # A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：stitch 注入剂量改引 budget 表
 from backend.services.context.budget import (
+    SPINE_SUGGEST_MAX_TOKENS,
     STITCH_AFTER_TEXT_MAX_CHARS,
     STITCH_OUTLINE_MAX_CHARS,
     STITCH_ROLLING_LONG_MAX_CHARS,
@@ -315,6 +323,20 @@ async def heartbeat(
     inbox_hint = await _world_inbox_hint_for_heartbeat(chapter, db)
     if inbox_hint:
         canon_hints = list(canon_hints) + [inbox_hint]
+
+    # 学着闭嘴（2026-08-25 战略定稿）：作者多次收起（感知带 ×）的提醒类别在此静音。
+    # 安全类（leak/contradiction）永不进静音集——quiet_learning 白名单保证；
+    # 失败静默：学习链路故障不阻塞心跳本体（静音集派生侧已内兜，此处再兜一层）。
+    if chapter is not None and canon_hints:
+        try:
+            _muted_keys = await load_muted_keys(db, str(chapter.book_id))
+            if _muted_keys:
+                canon_hints = [
+                    h for h in canon_hints
+                    if hint_mute_key(str((h or {}).get("kind") or "")) not in _muted_keys
+                ]
+        except Exception:
+            pass
 
     # 章级谋篇进度（P1.4 M2 §4.3）：纯算法零 LLM，宁漏勿误（B2 治理后走
     # text_match 共享判据的全片段命中 + 就近窗口；误报破坏信任，漏报作者自己
@@ -861,21 +883,32 @@ async def stitch_ghost(
     style_positive = ctx.style_positive
     author_samples = ctx.author_samples
 
-    # P1-3（C1）短窗观测：只加观察不改常量——rolling_prefix 原始上送长度 vs
-    # 截窗后实际进 prompt 的长度，随 adaptive_stitch_complete 埋点回收「短窗
-    # 截断点/重复前文」真实案例后再定量调窗。截窗表达式与原各分支内联写法
-    # 逐字节一致，收敛到一处防观测与注入漂移（open 模式不消费 rolling_prefix）
+    # P1-3（C1）短窗观测→2026-08-25 实测调窗：观测埋点回收的真实案例坐实短窗是
+    # 「驴头不对马嘴」主因（used_len 长期钉死 200 上限）——常量已按实测上调
+    # （SHORT 800 / LONG 1200，见 budget.py），观测键保留以持续回收配比数据。
+    # 截窗走句界净截（窗首丢弃半截句，防模型误以为要续窗首）；
+    # open 模式不消费 rolling_prefix。
     _rolling_cap = (
         0 if request.mode == "open"
         else STITCH_ROLLING_LONG_MAX_CHARS if request.mode in ("outline", "burst")
         else STITCH_ROLLING_SHORT_MAX_CHARS
     )
-    rolling_windowed = (request.rolling_prefix or "")[-_rolling_cap:].strip() if _rolling_cap else ""
+    rolling_windowed = (
+        sentence_clean_tail(request.rolling_prefix or "", _rolling_cap).strip() if _rolling_cap else ""
+    )
 
     if request.mode == "open":
         # 点火（冷启动）：空章 + 大纲 → 开篇引子。大纲是唯一燃料，无已写正文
+        # 点火剂量闸（2026-08-25 实测修复）：全章地图在场模型就往终点冲（真实事故：
+        # 700 字点火写完了袭击+跌落全序列，作者整段删除）——空章就近=开头一两拍，
+        # 只给开头；无合格节拍行的短大纲回退原文截断（剂量天然小，不算破闸）
+        _open_beats = outline_nearby(bundle.outline_text or "", "")
+        open_outline = (
+            "\n".join(_open_beats) if _open_beats
+            else bundle.outline_text[:STITCH_OUTLINE_MAX_CHARS]
+        )
         system_prompt, user_prompt = build_opening_prompt(
-            outline_text=bundle.outline_text[:STITCH_OUTLINE_MAX_CHARS],
+            outline_text=open_outline,
             previous_summary=bundle.previous_summary or "",
             worldview_text=bundle.worldview_text[:STITCH_WORLDVIEW_MAX_CHARS] if bundle.worldview_text else "",
             proper_nouns=proper_nouns,
@@ -1095,13 +1128,16 @@ async def context_preview(
         raise HTTPException(422, detail=f"mode 仅支持 {'/'.join(_PREVIEW_MODES)}")
 
     # rolling_prefix = 章节正文尾部（剥 HTML；失败/无章退化为空串，open 模式不消费）
+    # 句界净截与 stitch 路由同源（预览与注入同源红线，2026-08-25 调窗后同步）
     rolling_prefix = ""
     try:
         chapter = await db.get(Chapter, chapter_id)
         if chapter is not None:
             from backend.services.rag.memory_indexing import _html_to_plain
 
-            rolling_prefix = _html_to_plain(chapter.content_text or "")[-STITCH_ROLLING_LONG_MAX_CHARS:]
+            rolling_prefix = sentence_clean_tail(
+                _html_to_plain(chapter.content_text or ""), STITCH_ROLLING_LONG_MAX_CHARS,
+            )
     except Exception:
         rolling_prefix = ""
 
@@ -1344,13 +1380,28 @@ async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
     )
     result = await call_llm_with_usage(
         system_prompt=sys_p, user_prompt=usr_p,
-        # 谋篇建议要质量：走 creative 槽、保留默认 thinking（设计稿 §4.1）
-        model_type="creative", temperature=0.4, max_tokens=800,
+        # 谋篇建议要质量：走 creative 槽、保留默认 thinking（设计稿 §4.1）。
+        # 预算提额（2026-08-25 实证：800 曾被 MiMo 隐藏思考烧光返回空，
+        # finish=length——谋篇建议空输出是静默失败，作者只会看到「没建议」）
+        model_type="creative", temperature=0.4, max_tokens=SPINE_SUGGEST_MAX_TOKENS,
     )
     get_adaptive_recorder(chapter_id).record_result("adaptive.spine_suggest", result, model_slot="creative")
 
     from backend.services.utils.json_safe import parse_json_safe
     parsed = parse_json_safe(result.content or "") or {}
+    if not (parsed.get("intent") or parsed.get("anchors")):
+        # 空输出兜底重试一次：关思考小预算再试（烧光预算型空输出的针对性解法）；
+        # 还空就算了——建议本就柔性，空结果契约不变
+        retry = await call_llm_with_usage(
+            system_prompt=sys_p, user_prompt=usr_p,
+            model_type="creative", temperature=0.4, max_tokens=800,
+            reasoning_config=REASONING_DISABLED,
+        )
+        get_adaptive_recorder(chapter_id).record_result(
+            "adaptive.spine_suggest.retry", retry, model_slot="creative")
+        retry_parsed = parse_json_safe(retry.content or "") or {}
+        if retry_parsed.get("intent") or retry_parsed.get("anchors"):
+            parsed = retry_parsed
     intent = str(parsed.get("intent", "") or "").strip()[:SPINE_INTENT_TEXT_MAX]
     anchors = []
     for a in (parsed.get("anchors") or [])[:SPINE_MAX_ANCHORS]:
@@ -1360,6 +1411,150 @@ async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
     trace_event("adaptive_spine_suggest", intent=bool(intent), anchors=len(anchors))
     await flush_adaptive_records(chapter_id)
     return {"intent": intent, "anchors": anchors}
+
+
+# ============================================================
+# 端点 5.7：auto-read / read-entities — 系统自己去读（2026-08-25 战略定稿）
+# ============================================================
+# 观察触发权从手动（Ctrl+Enter 沉淀）扩展到系统自然时机：切章发枪、全书通读。
+# 红线不变：只产候选进 pending 池（物理隔离），作者 ✓ 才转正——喂养从
+# 「作者要做的事」变成「作者要批的事」。成本护栏全在 read_budget（哈希幂等 +
+# 章级间隔 + 每书每日上限）；event_scout 内部已有「学着闭嘴」静音双闸。
+# read-entities 只产草稿不落库（实体建设永远是作者动作，批量确认走前端）。
+
+
+class AutoReadResponse(BaseModel):
+    ran: bool
+    created: int = 0
+    suppressed_muted: int = 0
+    skipped: Optional[Dict[str, str]] = None
+    budget: Optional[Dict[str, int]] = None
+
+
+@router.post("/{chapter_id}/adaptive/auto-read", response_model=AutoReadResponse)
+async def auto_read_chapter(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    """读一章 → 世界事件候选进收件箱。幂等（哈希不变不重读），随处发枪安全。"""
+    from backend.services.adaptive.read_budget import (
+        AUTO_READ_DAILY_CAP,
+        AUTO_READ_SKIP_REASONS,
+        content_fingerprint,
+        count_auto_reads_24h,
+        decide_auto_read,
+    )
+
+    chapter = await db.get(Chapter, chapter_id)
+    if chapter is None:
+        return AutoReadResponse(ran=False, skipped={"code": "no_chapter", "reason": "章节不存在"})
+
+    from backend.services.rag.memory_indexing import _html_to_plain
+    plain = _html_to_plain(chapter.content_text or "").strip()
+    book_id = str(chapter.book_id)
+    daily_used = await count_auto_reads_24h(db, book_id)
+    state = dict(chapter.auto_read_state or {})
+    fp = content_fingerprint(plain)
+    ok, code = decide_auto_read(
+        text_len=len(plain), state=state, fingerprint=fp, daily_used=daily_used,
+    )
+    if not ok:
+        return AutoReadResponse(
+            ran=False,
+            skipped={"code": code or "", "reason": AUTO_READ_SKIP_REASONS.get(code or "", "")},
+        )
+
+    from backend.services.world import event_scout
+    result = await event_scout.run(str(chapter.id), db, {}, 0, source="auto_read", text=plain)
+    await flush_adaptive_records(chapter_id)
+    if result.get("skipped"):
+        # 跳过（无实体/LLM 失败等）不写幂等锚——保留下次重试的资格
+        return AutoReadResponse(ran=False, skipped=result["skipped"])
+
+    chapter.auto_read_state = {
+        **state,
+        "hash": fp,
+        "last_run_at": datetime.now(timezone.utc).isoformat(),
+        "last_created": result.get("created", 0),
+    }
+    await db.commit()
+    return AutoReadResponse(
+        ran=True,
+        created=result.get("created", 0),
+        suppressed_muted=result.get("suppressed_muted", 0),
+        budget={"daily_used": daily_used + 1, "daily_cap": AUTO_READ_DAILY_CAP},
+    )
+
+
+class ReadEntitiesResponse(BaseModel):
+    ran: bool
+    entities: List[Dict[str, Any]] = Field(default_factory=list)
+    locations: List[Dict[str, Any]] = Field(default_factory=list)
+    skipped: Optional[Dict[str, str]] = None
+
+
+@router.post("/{chapter_id}/adaptive/read-entities", response_model=ReadEntitiesResponse)
+async def read_chapter_entities(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    """全书通读·阶段 A：从正文抽实体/地点候选——只产草稿不落库（作者批量过目后才建）。
+
+    长章折叠策略：≤5000 字全量；超长取头 4000 + 尾 1000（实体介绍密度
+    前重后轻，尾部带上防漏后期登场角色）。
+    """
+    from backend.services.adaptive.emergent_facts import extract_emergent_facts
+    from backend.services.adaptive.read_budget import (
+        AUTO_READ_DAILY_CAP,
+        AUTO_READ_SKIP_REASONS,
+        content_fingerprint,
+        count_auto_reads_24h,
+        decide_auto_read,
+    )
+
+    chapter = await db.get(Chapter, chapter_id)
+    if chapter is None:
+        return ReadEntitiesResponse(ran=False, skipped={"code": "no_chapter", "reason": "章节不存在"})
+
+    from backend.services.rag.memory_indexing import _html_to_plain
+    plain = _html_to_plain(chapter.content_text or "").strip()
+    book_id = str(chapter.book_id)
+    daily_used = await count_auto_reads_24h(db, book_id)
+    state = dict(chapter.auto_read_state or {})
+    fp = content_fingerprint(plain)
+    ok, code = decide_auto_read(
+        text_len=len(plain), state=state, fingerprint=fp,
+        hash_key="entities_hash", daily_used=daily_used,
+    )
+    if not ok:
+        return ReadEntitiesResponse(
+            ran=False,
+            skipped={"code": code or "", "reason": AUTO_READ_SKIP_REASONS.get(code or "", "")},
+        )
+
+    # 已有实体名单注入前文摘要位（防重复提名已有角色；语义复用 prev_state_summary
+    # 槽——它本就是「前文已知状态」的注入口）
+    from backend.repositories.world_repository import WorldRepository
+    existing = await WorldRepository(db).entities.list_by_book(book_id)
+    known = [str(getattr(e, "name", "") or "") for e in existing if getattr(e, "name", None)]
+    prev_state = ("已知实体名单（勿重复抽取）：" + "、".join(known[:50])) if known else ""
+
+    segment = plain if len(plain) <= 5000 else plain[:4000] + "\n……\n" + plain[-1000:]
+    facts = await extract_emergent_facts(
+        segment,
+        beat_id=f"auto_read_{chapter_id}",
+        prev_state_summary=prev_state,
+        recorder=get_adaptive_recorder(str(chapter_id)),
+    )
+    await flush_adaptive_records(chapter_id)
+
+    # 空结果无法区分「没有涌现」与「LLM 失败」（extract 契约静默），照样写锚——
+    # 重试入口是全书通读的整批重跑或正文变化，不为罕见失败保留热路径
+    chapter.auto_read_state = {
+        **state,
+        "entities_hash": fp,
+        "last_run_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.commit()
+    return ReadEntitiesResponse(
+        ran=True,
+        entities=list(facts.new_entities or []),
+        locations=list(facts.new_locations or []),
+    )
 
 
 # ============================================================

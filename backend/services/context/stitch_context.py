@@ -11,7 +11,8 @@ builder 与预览共用），注入序只有一处定义。
 
 内容（自 stitch 路由逐字迁移，行为逐字节不变）：
 - load_chapter_settings_bundle（章级绑定 + Canon + 世界观 + world 桥接）
-- proper_nouns / chapter_intent（请求值 or 大纲前 200 字兜底）
+- proper_nouns / chapter_intent（请求值 or 大纲就近节拍兜底——只给接下来
+  一两拍，防整章地图诱导冲章；2026-08-25 实测修复，原为前 200 字截断）
 - 前情召回 recall_memories（query：open=大纲，其余=正文尾部150字+碎片）
 - 文风执行层 render_style_positive + retrieve_author_samples（few-shot）
 
@@ -37,6 +38,9 @@ from backend.services.context.settings_bundle import (
     load_chapter_settings_bundle,
     render_style_positive,
 )
+# 大纲就近节拍共享判据（2026-08-25 实测修复：意图块只给接下来一两拍，防冲章）
+from backend.services.adaptive.outline_nearby import outline_nearby
+from backend.services.adaptive.paragraph_source import written_text
 from backend.services.prompts.adaptive_prompts import (
     render_system_blocks,
     render_system_blocks_with_usage,
@@ -115,6 +119,21 @@ class StitchContext:
 # 装配主入口（stitch 路由与 context-preview 共用）
 # ============================================================
 
+def _nearby_intent_from_outline(bundle: SettingsBundle) -> str:
+    """章节意图兜底：大纲就近节拍（接下来一两拍原文，换行连接）。
+
+    2026-08-25 实测修复：旧兜底是「大纲前 200 字粗暴截断」——整章剧情地图
+    喂给轻量续写，模型直奔终点（冲章），且截断落在半截词（真实 trace 实证）。
+    现在只给未写的就近一两拍（dock 挂件就近铁律的同源推广）；无大纲 /
+    全部已写（章近尾声）→ 空串，意图块整块缺席（零变化契约）。
+    """
+    outline = getattr(bundle, "outline_text", "") or ""
+    if not outline.strip():
+        return ""
+    beats = outline_nearby(outline, written_text(bundle.content_text or ""))
+    return "\n".join(beats)
+
+
 async def assemble_stitch_context(
     chapter_id: str,
     mode: str,
@@ -131,14 +150,15 @@ async def assemble_stitch_context(
         fragment: 作者原句碎片（outline 模式=细纲速记原文；预览传空串）
         rolling_prefix: 已写正文尾部（前端纯文本；预览由路由剥 HTML 后给）
         db: 异步 DB session
-        chapter_intent: 请求携带的章节意图（空=大纲前 200 字兜底，同旧路由）
+        chapter_intent: 请求携带的章节意图（空=大纲就近节拍兜底，见
+            _nearby_intent_from_outline）
 
     Returns:
         StitchContext：装配快照。任何子查询失败由 bundle/检索层各自降级为空。
     """
     bundle = await load_chapter_settings_bundle(chapter_id, db)
     proper_nouns = bundle.proper_nouns()
-    resolved_intent = chapter_intent or bundle.outline_text[:STITCH_INTENT_OUTLINE_MAX_CHARS]
+    resolved_intent = chapter_intent or _nearby_intent_from_outline(bundle)
 
     # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
     # 降级为空列表时 prompt 零变化（不阻塞生成）

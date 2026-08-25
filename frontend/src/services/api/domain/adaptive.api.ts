@@ -108,6 +108,23 @@ export interface SettleResult {
   scout_skipped?: { code: string; reason: string }
 }
 
+/** 自动阅读（阶段 B）结果——ran=false 时带 skipped 原因 */
+export interface AutoReadResult {
+  ran: boolean
+  created?: number
+  suppressed_muted?: number
+  skipped?: { code: string; reason: string }
+  budget?: { daily_used: number; daily_cap: number }
+}
+
+/** 自动阅读（阶段 A）实体候选结果——只产草稿不落库 */
+export interface ReadEntitiesResult {
+  ran: boolean
+  entities?: Array<{ name: string; type?: string; description?: string }>
+  locations?: Array<{ name: string; description?: string }>
+  skipped?: { code: string; reason: string }
+}
+
 /** 完稿后处理审计报告 */
 export interface FinishReport {
   finished: boolean
@@ -254,6 +271,20 @@ export const adaptiveApi = {
   /** 完稿 → 后处理审计（同步等待返回报告） */
   finish: async (chapterId: string): Promise<FinishReport> => {
     return requestJson(`/chapters/${chapterId}/adaptive/finish`, {
+      method: 'POST',
+    })
+  },
+
+  /** 系统自己去读·阶段 B：读一章 → 世界事件候选进收件箱（幂等，随处发枪安全） */
+  autoRead: async (chapterId: string): Promise<AutoReadResult> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/auto-read`, {
+      method: 'POST',
+    })
+  },
+
+  /** 系统自己去读·阶段 A：从一章抽实体/地点候选（只产草稿不落库） */
+  readEntities: async (chapterId: string): Promise<ReadEntitiesResult> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/read-entities`, {
       method: 'POST',
     })
   },

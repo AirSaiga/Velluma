@@ -223,7 +223,7 @@ def test_route_outline_truncation_keeps_tail(monkeypatch):
     head_first = _sents("檐水", 16)[0]
     req = StitchGhostRequest(
         fragment="主角在檐下躲雨的速记。",
-        rolling_prefix="雨夜占位" * 150,   # 原始上送 600 字
+        rolling_prefix="雨夜占位" * 400,   # 原始上送 1600 字（超 1200 长窗）
         mode="outline",
         target_chars=100,
         after_text="再往后他已经走到街角。",
@@ -242,9 +242,9 @@ def test_route_outline_truncation_keeps_tail(monkeypatch):
     assert not body.startswith(head_first)     # 开头被删节
     assert body in text
 
-    # P1-3 观测字段：outline 长窗（600 原始 → 500 截窗）
+    # P1-3 观测字段：outline 长窗（1600 原始 → 1200 截窗；2026-08-25 实测调窗后）
     complete = traces["adaptive_stitch_complete"][-1]
-    assert complete["rolling_prefix_raw_len"] == 600
+    assert complete["rolling_prefix_raw_len"] == 1600
     assert complete["rolling_prefix_used_len"] == STITCH_ROLLING_LONG_MAX_CHARS
 
 
@@ -266,21 +266,25 @@ def test_route_stitch_semantic_change_still_prepends(monkeypatch):
 
 
 def test_route_trace_rolling_window_fields_and_token_floor(monkeypatch):
-    """P1-3 短窗观测 + P1-4 预算下限：continue 短窗 200 截窗可见、下限 2200 生效。"""
+    """P1-3 短窗观测 + P1-4 预算下限：continue 短窗截窗可见、下限 2200 生效。
+
+    2026-08-25 实测调窗（200→800）：真实 trace 回收的「驴头不对马嘴」案例坐实
+    短窗是主因之一——数据门控达成，常量上调；本测试改为锁定新窗口值。
+    """
     req = StitchGhostRequest(
         fragment="承接占位。",
         mode="continue",
-        rolling_prefix="前" * 600,
+        rolling_prefix="前" * 900,
         target_chars=120,
     )
     done, llm_calls, traces = _run_stitch(monkeypatch, req, ["短续写一句。"])
     assert done is not None
 
     complete = traces["adaptive_stitch_complete"][-1]
-    # 短窗截断观测：原始 600 → 截窗 200；常量本身不许动（数据门控红线）
-    assert complete["rolling_prefix_raw_len"] == 600
+    # 短窗截断观测：原始 900 → 截窗 800（新窗口值锚点；无句界文本净截原样保留整窗）
+    assert complete["rolling_prefix_raw_len"] == 900
     assert complete["rolling_prefix_used_len"] == STITCH_ROLLING_SHORT_MAX_CHARS
-    assert STITCH_ROLLING_SHORT_MAX_CHARS == 200
+    assert STITCH_ROLLING_SHORT_MAX_CHARS == 800
 
     # max_tokens 下限：target 120 → 120×2+1000=1240 < 2200 → 取下限
     assert llm_calls[0]["max_tokens"] == STITCH_MAX_TOKENS_FLOOR == 2200

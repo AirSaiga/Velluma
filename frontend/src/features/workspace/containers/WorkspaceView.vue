@@ -33,6 +33,7 @@ import { ghostActive, ghostWarnings } from '../../generation/composables/useGhos
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
+import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { useChapterSpine } from '../composables/useChapterSpine'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
@@ -141,6 +142,16 @@ function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor
 }
 // adaptive composing 态才显示「多写几段」入口（SparkDock props 注入）
 const adaptiveComposing = computed(() => session.adaptiveMode.value && session.authorLane.value === 'composing')
+
+// 学着闭嘴（2026-08-25 战略定稿）：感知带 × 收起——本地即时摘除该条 +
+// hint_dismiss 埋点（后端累计同类别 ≥3 次即静音，可在副驾收件箱恢复；
+// 安全类泄露/矛盾不出 ×，由 PerceptionBand 白名单保证）
+function onDismissHint(payload: { kind: string; label: string }) {
+  session.adaptiveSuggestions.value = session.adaptiveSuggestions.value.filter(
+    (h: any) => !(h.kind === payload.kind && h.node_label === payload.label),
+  )
+  dispatchCollabEvent('hint_dismiss', { kind: payload.kind, label: payload.label })
+}
 
 // NLE-ADF 3.0 Canon 词高亮词表：本章绑定角色名 + 感知 hints 的角色/伏笔标签
 // 词表变化 → setCanonTerms dispatch 空 tr 触发 ProseMirror decorations 重算
@@ -329,13 +340,18 @@ watch(selectedChapterId, (newId) => {
 
 // 章节切换/进入：恢复该章的上次生成产物（localStorage 持久化）
 // immediate=true 确保刷新后首屏即恢复；切章时 loadForChapter 内部会先 persist 旧章
-watch(selectedChapterId, (newId) => {
+watch(selectedChapterId, (newId, oldId) => {
   saveStatus.value = 'idle'
   if (newId) {
     session.loadForChapter(newId)
     void chapterSpine.load(newId)  // 软脉络随章加载（无脉络=null，UI 静默缺席）
   } else {
     chapterSpine.unload()
+  }
+  // 系统自己去读（2026-08-25 战略定稿）：离开一章即发枪——后端哈希幂等闸
+  // 保证「没变不读/太短不读/超预算不读」，前端无需跟踪内容变化，静默失败不打扰
+  if (oldId && oldId !== newId) {
+    void adaptiveApi.autoRead(oldId).catch(() => {})
   }
 }, { immediate: true })
 
@@ -904,6 +920,7 @@ async function confirmDeleteChapter(ch: Chapter) {
               v-if="adaptiveComposing"
               :suggestions="session.adaptiveSuggestions.value"
               :spine-progress="chapterSpine.spineProgress.value"
+              @dismiss-hint="onDismissHint"
             >
               <template #dock>
                 <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />

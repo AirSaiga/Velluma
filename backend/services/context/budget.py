@@ -357,11 +357,16 @@ STITCH_PREV_SUMMARY_MAX_CHARS = 300
 # outline/burst 模式衔接窗口（rolling_prefix 尾窗）——段落级续写需要更长
 # 语气锚；context-preview 取章节正文尾部同窗口（预览与注入同源）。
 # 首版出处：routes/chapter_generation/adaptive.py（stitch 路由 + context-preview）
-STITCH_ROLLING_LONG_MAX_CHARS = 500
+# 2026-08-25 实测调窗（500→1200）：真实 trace 显示窗口长期顶满上限，burst 要写
+# 700 字却只看 500 字上文，场景级连贯不够——段落级生成配场景级视野。
+STITCH_ROLLING_LONG_MAX_CHARS = 1200
 
 # stitch/continue 模式衔接窗口——顺句续写小窗口防束缚手感（continue 轻档）。
 # 首版出处：routes/chapter_generation/adaptive.py stitch 路由
-STITCH_ROLLING_SHORT_MAX_CHARS = 200
+# 2026-08-25 实测调窗（200→800）：真实 trace 坐实「驴头不对马嘴」主因之一——
+# 窗口钉死上限（200/200），模型只看得见两三句话，不知道此刻场景在哪；
+# 800 字 ≈ 一个完整场景的上下文，token 代价约 +400/次，可接受。
+STITCH_ROLLING_SHORT_MAX_CHARS = 800
 
 # outline 模式后文锚定窗口（after_text 头窗）——细纲胶囊后文只做「引向」，
 # 300 字足够。
@@ -384,6 +389,12 @@ STITCH_INTENT_OUTLINE_MAX_CHARS = 200
 # spine 存档即已 ≤5，此处是 builder 直调调用方的防御性封顶。
 # 首版出处：services/prompts/adaptive_prompts.py build_outline_expand_prompt
 STITCH_OUTLINE_SPINE_ANCHORS_MAX = 5
+
+# 谋篇建议（spine-suggest）LLM 预算——保留 thinking 的设计意图不变，但 800
+# 曾被 MiMo 隐藏思考整个烧光返回空（2026-08-25 真实 trace：finish=length、
+# content 空）。给思考留真实余量；空输出仍兜底重试一次（端点侧 REASONING_DISABLED）。
+# 首版出处：routes/chapter_generation/adaptive.py 端点 spine-suggest
+SPINE_SUGGEST_MAX_TOKENS = 2400
 
 
 # ============================================================

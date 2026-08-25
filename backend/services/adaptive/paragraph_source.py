@@ -70,3 +70,22 @@ def ends_mid_sentence(text: str) -> bool:
     """
     t = (text or "").rstrip()
     return bool(t) and (t[-1] not in _SENTENCE_TERMINALS)
+
+
+def sentence_clean_tail(text: str, cap: int) -> str:
+    """取尾部 ≤cap 字；截断点落在句中时丢弃窗内第一个句界前的半截句。
+
+    2026-08-25 视野配比修复：滚动窗口扩容（200→800）后窗口起点大概率落在
+    某个句子的腰上——半句开头的上文会让模型误以为要续的是窗首那句。
+    在窗内找第一个句末标点或换行，弃其前；找不到句界则原样保留
+    （宁要半截句不要空窗——正文可能是对话连排无终止符的长段）。
+    文本本就不超 cap → 原样返回（零变化）。
+    """
+    t = text or ""
+    if len(t) <= cap:
+        return t
+    window = t[-cap:]
+    for i, ch in enumerate(window):
+        if ch in _SENTENCE_TERMINALS or ch == "\n":
+            return window[i + 1:].lstrip()
+    return window

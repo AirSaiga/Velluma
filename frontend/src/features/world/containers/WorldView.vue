@@ -33,6 +33,7 @@ import CanonSection from '../presentation/CanonSection.vue'
 import CanonTruthDetailDrawer from '../presentation/CanonTruthDetailDrawer.vue'
 import CausalityGraphModal from '../presentation/CausalityGraphModal.vue'
 import BatchAcceptModal from '../presentation/BatchAcceptModal.vue'
+import ReadBookModal from '../presentation/ReadBookModal.vue'
 import {
   runBatchAccept,
   undoBatchAccept,
@@ -40,6 +41,7 @@ import {
   type BatchAcceptOutcome,
 } from '../composables/batchAccept'
 import { useCanon } from '../composables/useCanon'
+import { useReadBook } from '../composables/useReadBook'
 import { readerMirrorApi } from '../../../services/api/domain/reader-mirror.api'
 import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory'
 import { useMapEdit, editUndo, editRedo } from '../composables/useMapEdit'
@@ -464,6 +466,32 @@ async function rejectCand(c: { id: string }) {
 const batchOpen = ref(false)
 const batchBusy = ref(false)
 const batchProgress = ref<{ done: number; total: number } | null>(null)
+
+// ===== 全书通读（2026-08-25「系统自己去读」存量首秀）：认人 → 过目 → 记事 =====
+const readBookOpen = ref(false)
+const readBook = useReadBook()
+
+function openReadBook() {
+  readBook.reset()
+  readBookOpen.value = true
+  if (bookId.value) void readBook.start(bookId.value)
+}
+
+async function onReadBookConfirmEntities() {
+  if (!bookId.value) return
+  await readBook.confirmEntities(bookId.value)
+}
+
+async function onReadBookClose() {
+  readBookOpen.value = false
+  // 通读可能新建了实体/地点 + 填满了收件箱——全量刷新（实体进推演 + 候选重取）
+  if (bookId.value && (readBook.createdEntities.value || readBook.createdCandidates.value)) {
+    window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
+    await load(bookId.value)
+    await loadCandidates()
+  }
+  readBook.reset()
+}
 
 async function onBatchConfirm(ids: string[]) {
   if (!bookId.value) return
@@ -944,6 +972,11 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             <span>待确认</span>
             <span class="side-count">{{ pendingCandidates.length }}</span>
             <button
+              class="side-batch-btn"
+              title="AI 自己通读全书正文：先认人（你过目后才建），再把发现的世界变化放进这里"
+              @click="openReadBook"
+            >通读本书</button>
+            <button
               v-if="pendingCandidates.length"
               class="side-batch-btn"
               title="逐条预览后批量采纳（可剔除，确认后 6 秒内可整批撤销）"
@@ -1238,6 +1271,23 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       :progress="batchProgress"
       @confirm="onBatchConfirm"
       @close="batchOpen = false"
+    />
+
+    <!-- 全书通读模态（2026-08-25「系统自己去读」存量首秀：认人→过目→记事） -->
+    <ReadBookModal
+      v-if="readBookOpen"
+      :phase="readBook.phase.value"
+      :progress="readBook.progress.value"
+      :entity-candidates="readBook.entityCandidates.value"
+      :location-candidates="readBook.locationCandidates.value"
+      :created-entities="readBook.createdEntities.value"
+      :created-candidates="readBook.createdCandidates.value"
+      :skipped-count="readBook.skippedCount.value"
+      :error-msg="readBook.errorMsg.value"
+      :review-count="readBook.reviewCount.value"
+      @cancel="readBook.cancel()"
+      @confirm-entities="onReadBookConfirmEntities"
+      @close="onReadBookClose"
     />
 
     <!-- 新地点（点选坐标后） -->
