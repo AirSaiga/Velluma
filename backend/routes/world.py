@@ -118,6 +118,14 @@ async def create_location(book_id: UUID, payload: WorldLocationCreate, db: Async
     if payload.book_id != book_id:
         raise HTTPException(400, "book_id 不匹配")
     repo = WorldRepository(db)
+    # 幂等闸（同实体，2026-08-26 实测事故）：同名地点已存在则返回既有；
+    # 显式 id 的 undo/redo 重建路径豁免
+    if not payload.id:
+        want = " ".join((payload.name or "").split())
+        if want:
+            for loc in await repo.locations.list_by_book(str(book_id)):
+                if " ".join((loc.name or "").split()) == want:
+                    return loc
     fields = payload.model_dump(exclude={"book_id"}, by_alias=False)
     if fields.get("parent_id"):
         fields["parent_id"] = str(fields["parent_id"])
@@ -171,6 +179,15 @@ async def create_entity(book_id: UUID, payload: WorldEntityCreate, db: AsyncSess
     if payload.book_id != book_id:
         raise HTTPException(400, "book_id 不匹配")
     repo = WorldRepository(db)
+    # 幂等闸（2026-08-26 实测事故：通读确认无防连点，14 连击建出 14 份同名实体）——
+    # 同名同类（归一化空白后）已存在则返回既有，不再新建；显式 id 的
+    # undo/redo 幂等重建路径豁免（它带的是同一个 id，语义就是恢复原物）
+    if not payload.id:
+        want = " ".join((payload.name or "").split())
+        if want:
+            for e in await repo.entities.list_by_book(str(book_id), payload.entity_type):
+                if " ".join((e.name or "").split()) == want:
+                    return e
     ent = await repo.entities.create(
         book_id=str(book_id), **payload.model_dump(exclude={"book_id"}, by_alias=False)
     )

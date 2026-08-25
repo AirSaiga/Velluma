@@ -1294,6 +1294,8 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       :skipped-count="readBook.skippedCount.value"
       :error-msg="readBook.errorMsg.value"
       :review-count="readBook.reviewCount.value"
+      :creating="readBook.creating.value"
+      :create-progress="readBook.createProgress.value"
       @cancel="readBook.cancel()"
       @confirm-entities="onReadBookConfirmEntities"
       @close="onReadBookClose"

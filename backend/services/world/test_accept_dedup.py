@@ -23,7 +23,8 @@ import backend.models as m
 from backend.db_sqlite import build_sqlite_engine, build_sqlite_sessionmaker
 from backend.db_sqlite.schema import init_db_sqlite
 from backend.repositories.world_repository import WorldRepository
-from backend.routes.world import accept_candidate
+from backend.routes.world import accept_candidate, create_entity, create_location
+from backend.schemas.world import WorldEntityCreate, WorldLocationCreate
 
 BOOK_ID = uuid.UUID("aa770000-0000-4000-8000-000000000001")
 CH_ID = uuid.UUID("aa770000-0000-4000-8000-0000000000c1")
@@ -59,7 +60,78 @@ async def _ledger_count(session):
     return len(await repo.events.list_all_by_book(str(BOOK_ID)))
 
 
-class TestAcceptDedupGate:
+class TestCreateIdempotencyGate:
+    """服务端幂等闸（2026-08-26 实测事故：确认无防连点，14 连击建出 14 份同名实体）。"""
+
+    def test_same_name_same_type_returns_existing(self, tmp_path):
+        engine, maker = _make_stack(tmp_path, "idem.db")
+
+        async def run():
+            async with maker() as s:
+                await _seed(s)
+                p = WorldEntityCreate(book_id=BOOK_ID, entity_type="character", name="陈朗")
+                first = await create_entity(BOOK_ID, p, s)
+                second = await create_entity(BOOK_ID, p, s)
+                assert str(first.id) == str(second.id)
+                repo = WorldRepository(s)
+                assert len(await repo.entities.list_by_book(str(BOOK_ID), "character")) == 1
+
+        try:
+            asyncio.run(run())
+        finally:
+            asyncio.run(engine.dispose())
+
+    def test_same_name_different_type_both_created(self, tmp_path):
+        """同名不同类是两个东西（组织「鹰翼」与机甲「鹰翼」）——不误合并。"""
+        engine, maker = _make_stack(tmp_path, "idem_type.db")
+
+        async def run():
+            async with maker() as s:
+                await _seed(s)
+                a = await create_entity(BOOK_ID, WorldEntityCreate(
+                    book_id=BOOK_ID, entity_type="faction", name="鹰翼"), s)
+                b = await create_entity(BOOK_ID, WorldEntityCreate(
+                    book_id=BOOK_ID, entity_type="asset", name="鹰翼"), s)
+                assert str(a.id) != str(b.id)
+
+        try:
+            asyncio.run(run())
+        finally:
+            asyncio.run(engine.dispose())
+
+    def test_explicit_id_bypasses_gate(self, tmp_path):
+        """undo/redo 幂等重建路径豁免：显式 id 直入不查重。"""
+        engine, maker = _make_stack(tmp_path, "idem_undo.db")
+
+        async def run():
+            async with maker() as s:
+                await _seed(s)
+                fixed = uuid.uuid4()
+                p1 = WorldEntityCreate(book_id=BOOK_ID, entity_type="character", name="陈朗", id=fixed)
+                first = await create_entity(BOOK_ID, p1, s)
+                assert str(first.id) == str(fixed)
+
+        try:
+            asyncio.run(run())
+        finally:
+            asyncio.run(engine.dispose())
+
+    def test_location_same_name_returns_existing(self, tmp_path):
+        engine, maker = _make_stack(tmp_path, "idem_loc.db")
+
+        async def run():
+            async with maker() as s:
+                await _seed(s)
+                p = WorldLocationCreate(book_id=BOOK_ID, name="北岸要塞")
+                first = await create_location(BOOK_ID, p, s)
+                second = await create_location(BOOK_ID, p, s)
+                assert str(first.id) == str(second.id)
+
+        try:
+            asyncio.run(run())
+        finally:
+            asyncio.run(engine.dispose())
+
     def test_duplicate_accept_skips_event_creation(self, tmp_path):
         """账本已有同义事件 → 转正闸：不建事件、候选 rejected + auto_reject 留痕。"""
         engine, maker = _make_stack(tmp_path, "accept_dup.db")

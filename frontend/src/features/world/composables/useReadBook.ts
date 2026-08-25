@@ -55,6 +55,9 @@ export function useReadBook() {
   const createdCandidates = ref(0)
   const skippedCount = ref(0)
   const errorMsg = ref('')
+  /** 建设期忙碌闸 + 进度（防连点，2026-08-26 实测事故） */
+  const creating = ref(false)
+  const createProgress = ref<{ done: number; total: number } | null>(null)
   let cancelled = false
 
   const reviewCount = computed(() =>
@@ -71,6 +74,8 @@ export function useReadBook() {
     createdCandidates.value = 0
     skippedCount.value = 0
     errorMsg.value = ''
+    creating.value = false
+    createProgress.value = null
     cancelled = false
   }
 
@@ -155,26 +160,41 @@ export function useReadBook() {
     locationCandidates.value = [...locMap.values()].sort((a, b) => b.mentions - a.mentions)
   }
 
-  /** 作者确认勾选 → 建实体/地点（此处才落库）→ 自动接阶段 B。 */
+  /** 作者确认勾选 → 建实体/地点（此处才落库）→ 自动接阶段 B。
+   *  忙碌闸（2026-08-26 实测事故：连点 14 次建出 14 份同名实体）——
+   *  建设期间重复点击直接忽略；进度外露给模态禁用按钮用。 */
   async function confirmEntities(bookId: string) {
-    if (cancelled) { phase.value = 'idle'; return }
-    for (const c of entityCandidates.value.filter((x) => x.checked)) {
-      try {
-        await worldApi.createEntity(bookId, {
-          entity_type: toEntityType(c.type),
-          name: c.name,
-          intro: c.description,
-        })
-        createdEntities.value++
-      } catch { /* 单个失败不阻塞（重名等） */ }
+    if (creating.value || cancelled) return
+    creating.value = true
+    const ents = entityCandidates.value.filter((x) => x.checked)
+    const locs = locationCandidates.value.filter((x) => x.checked)
+    const total = ents.length + locs.length
+    let done = 0
+    createProgress.value = { done: 0, total }
+    try {
+      for (const c of ents) {
+        try {
+          await worldApi.createEntity(bookId, {
+            entity_type: toEntityType(c.type),
+            name: c.name,
+            intro: c.description,
+          })
+          createdEntities.value++
+        } catch { /* 单个失败不阻塞（服务端幂等闸兜重名） */ }
+        createProgress.value = { done: ++done, total }
+      }
+      for (const l of locs) {
+        try {
+          await worldApi.createLocation(bookId, { name: l.name, intro: l.description })
+          createdEntities.value++
+        } catch { /* 同上 */ }
+        createProgress.value = { done: ++done, total }
+      }
+    } finally {
+      creating.value = false
+      createProgress.value = null
     }
-    for (const l of locationCandidates.value.filter((x) => x.checked)) {
-      try {
-        await worldApi.createLocation(bookId, { name: l.name, intro: l.description })
-        createdEntities.value++
-      } catch { /* 同上 */ }
-    }
-    await runEvents(bookId)
+    if (!cancelled) await runEvents(bookId)
   }
 
   /** 阶段 B：逐章 auto-read，事件候选进收件箱。 */
@@ -207,6 +227,7 @@ export function useReadBook() {
   return {
     phase, progress, entityCandidates, locationCandidates,
     createdEntities, createdCandidates, skippedCount, errorMsg, reviewCount,
+    creating, createProgress,
     start, confirmEntities, runEvents, cancel, reset,
   }
 }

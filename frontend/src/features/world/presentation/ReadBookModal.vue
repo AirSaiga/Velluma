@@ -18,6 +18,9 @@ const props = defineProps<{
   skippedCount: number
   errorMsg: string
   reviewCount: number
+  /** 建设期忙碌闸（防连点重复建实体，2026-08-26 实测事故） */
+  creating: boolean
+  createProgress: { done: number; total: number } | null
 }>()
 
 const emit = defineEmits<{
@@ -89,15 +92,19 @@ const emit = defineEmits<{
     </div>
 
     <template #footer>
+      <span v-if="creating && createProgress" class="rb-creating">
+        正在建设 {{ createProgress.done }}/{{ createProgress.total }}……
+      </span>
       <button
         v-if="phase === 'review'"
         class="rb-btn rb-btn--ghost"
+        :disabled="creating"
         @click="emit('confirmEntities')"
       >一个都不建，直接记事</button>
       <button
         v-if="phase === 'review'"
         class="rb-btn rb-btn--primary"
-        :disabled="!reviewCount && (entityCandidates.length + locationCandidates.length) > 0"
+        :disabled="creating || (!reviewCount && (entityCandidates.length + locationCandidates.length) > 0)"
         @click="emit('confirmEntities')"
       >建好勾选的（{{ reviewCount }}），开始记事</button>
       <button
@@ -133,5 +140,7 @@ const emit = defineEmits<{
 }
 .rb-btn--primary { background: var(--accent-500, #7c6aad); border-color: transparent; color: #fff; }
 .rb-btn--primary:disabled { opacity: 0.4; cursor: default; }
+.rb-btn--ghost:disabled { opacity: 0.4; cursor: default; }
+.rb-creating { font-size: 12px; color: var(--text-muted, #a09a92); margin-right: auto; align-self: center; }
 .rb-btn--ghost:hover { background: var(--bg-muted, #f5f4f0); }
 </style>
