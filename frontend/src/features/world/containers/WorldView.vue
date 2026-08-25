@@ -916,15 +916,16 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
 
       <!-- M6 图标栏：原右侧栏收成右缘 46px 栏，点图标浮出抽屉（同一时间只开一格） -->
       <div class="atlas-rail">
+        <!-- 待确认常驻（2026-08-25 修复冷启动自锁：抽屉承载「通读本书」入口，
+             空箱时隐藏图标 = 填满收件箱的入口在收件箱为空时不可达） -->
         <button
-          v-if="pendingCandidates.length"
           class="ar-btn"
           :class="{ 'ar-btn--on': activePanel === 'cand' }"
           title="待确认 · 候选事件"
           @click="togglePanel('cand')"
         >
           <Icon name="clock" :size="15" />
-          <span class="ar-n">{{ pendingCandidates.length }}</span>
+          <span v-if="pendingCandidates.length" class="ar-n">{{ pendingCandidates.length }}</span>
         </button>
         <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'fs' }" title="伏笔" @click="togglePanel('fs')">
           <Icon name="link" :size="15" />
@@ -998,6 +999,10 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
               </div>
             </li>
           </ul>
+          <!-- 冷启动空态（图标栏改为常驻后，空箱是第一印象场景）：引导通读首秀 -->
+          <p v-if="!pendingCandidates.length" class="side-empty">
+            还没有待确认的世界变化。点上方「通读本书」，让 AI 自己把已写的章节读一遍——它发现的都会放进这里等你过目。
+          </p>
         </div>
         </template>
 
