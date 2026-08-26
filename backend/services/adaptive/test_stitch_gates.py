@@ -248,21 +248,29 @@ def test_route_outline_truncation_keeps_tail(monkeypatch):
     assert complete["rolling_prefix_used_len"] == STITCH_ROLLING_LONG_MAX_CHARS
 
 
-def test_route_stitch_punct_variant_not_prepended(monkeypatch):
+def test_route_stitch_punct_variant_reemission_stripped(monkeypatch):
+    """追加式契约（2026-08-26）：模型复读原句（标点变体）→ 剥掉前缀只留续写。
+
+    幽灵纯追加在原句之后，原句已在画布里——复读=屏幕重复，拼回已废除。
+    """
     req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch", rolling_prefix="前文占位。")
     model_text = "他握紧刀! 刀锋映出他通红的眼。"
     done, _, _ = _run_stitch(monkeypatch, req, [model_text])
-    # 模型已用标点变体复述碎片——不再把作者原句拼回句首（A4 现场）
-    assert done["text"] == model_text
-    assert not done["text"].startswith("他握紧刀。他")
+    assert done["text"] == "刀锋映出他通红的眼。"
 
 
-def test_route_stitch_semantic_change_still_prepends(monkeypatch):
+def test_route_stitch_exact_reemission_stripped(monkeypatch):
+    req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch", rolling_prefix="前文占位。")
+    done, _, _ = _run_stitch(monkeypatch, req, ["他握紧刀。刀锋映出他通红的眼。"])
+    assert done["text"] == "刀锋映出他通红的眼。"
+
+
+def test_route_stitch_semantic_variant_not_stripped(monkeypatch):
+    """语义变体（换词/加字）不是复读——不剥、也绝不拼回（拼回已废除）。"""
     req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch", rolling_prefix="前文占位。")
     model_text = "他握紧了刀，指节泛白。"
     done, _, _ = _run_stitch(monkeypatch, req, [model_text])
-    # 语义变了（加「了」）——碎片照常拼回，保证句子完整
-    assert done["text"] == "他握紧刀。" + model_text
+    assert done["text"] == model_text
 
 
 def test_route_trace_rolling_window_fields_and_token_floor(monkeypatch):

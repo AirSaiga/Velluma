@@ -184,15 +184,45 @@ _PUNCT_FOLD = str.maketrans({
 
 
 def _contains_fragment(text: str, fragment: str) -> bool:
-    """stitch 碎片拼回判定（规范化）：抹空白 + 标点折叠等价类后的子串命中。
+    """stitch 碎片复述判定（规范化）：抹空白 + 标点折叠等价类后的子串命中。
 
     只容纳「模型已复述碎片」的形态微差（标点/空白变体）；字符内容变了
-    （加字/换词，如「他握紧刀」→「他握紧了刀」）仍判不含 → 路由照常拼回。
+    （加字/换词，如「他握紧刀」→「他握紧了刀」）仍判不含。
     """
     key = normalize_for_match(fragment).translate(_PUNCT_FOLD)
     if not key:
         return True  # 空碎片按已含处理（路由层已有 fragment 真值门，防御位）
     return key in normalize_for_match(text).translate(_PUNCT_FOLD)
+
+
+def _strip_fragment_prefix(text: str, fragment: str) -> str:
+    """剥离模型复读的原句前缀（追加式幽灵契约，2026-08-26 实测修复）。
+
+    幽灵是纯追加插入（光标后落文档），作者原句已在画布里——模型若把原句
+    再吐回来（含标点/空白变体），屏幕上会出现「原句 + 幽灵复读原句 + 续写」
+    的重复。此处把复读前缀剥掉，只留纯续写；语义变体（换词/加字）不是复读，
+    不剥（旧拼回判定的等价类口径，_contains_fragment 同款规范化）。
+    """
+    frag = (fragment or "").strip()
+    if not frag:
+        return text
+    if text.startswith(frag):
+        return text[len(frag):].lstrip()
+    key = normalize_for_match(frag).translate(_PUNCT_FOLD)
+    if not key:
+        return text
+    acc: list = []
+    for i, ch in enumerate(text):
+        n = normalize_for_match(ch).translate(_PUNCT_FOLD)
+        if not n:
+            continue
+        acc.append(n)
+        joined = "".join(acc)
+        if joined == key:
+            return text[i + 1:].lstrip()   # 等价复读完整复现原句 → 剥到此处
+        if len(joined) > len(key):
+            break                            # 内容已偏离原句 → 不是复读
+    return text
 
 
 # ============================================================
@@ -1037,10 +1067,11 @@ async def stitch_ghost(
                         f"保尾截断到 {len(text)} 字（目标 {request.target_chars}）"
                     )
             fragment = request.fragment.strip()
-            # P1-2（A4）：规范化判定——裸 `fragment not in text` 会被标点/空白
-            # 微差骗过（模型已复述碎片却误判「不含」），把作者原句重复拼回句首
-            if request.mode == "stitch" and fragment and not _contains_fragment(text, fragment):
-                text = f"{fragment}{text}"
+            # P1-2（A4→2026-08-26 契约反转）：幽灵是纯追加插入，作者原句已在
+            # 画布里——拼回（把原句塞回句首）必造成屏幕重复，改为**复读剥离**：
+            # 模型若仍把原句吐回来（prompt 已禁，等价类变体兜底），剥掉前缀只留续写
+            if request.mode == "stitch" and fragment:
+                text = _strip_fragment_prefix(text, fragment)
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
             # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
             # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
