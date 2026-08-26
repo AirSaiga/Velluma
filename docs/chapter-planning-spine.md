@@ -159,7 +159,7 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 | 端点 | 说明 |
 |---|---|
 | `PATCH /api/chapters/{id}/spine` | 存/改脉络（轻量，不进正文版本历史，不触发 world-refresh） |
-| `POST /api/chapters/{id}/spine-suggest` | 1×creative 建议，**不落库**；REASONING_DISABLED 不适用（要质量，走 creative 默认）；max_tokens 预算 ≤800 |
+| `POST /api/chapters/{id}/spine-suggest` | 1×creative 建议，**不落库**；REASONING_DISABLED 不适用（要质量，走 creative 默认）；max_tokens = `budget.SPINE_SUGGEST_MAX_TOKENS`（2400，2026-08-25 由 800 上调——800 曾被 MiMo 隐藏思考整个烧光返回空）；空输出兜底重试一次（关思考小预算再试，仍空则按空建议返回，契约不变） |
 
 ### 4.2 心跳集成（`adaptive.py` heartbeat）
 
@@ -174,15 +174,29 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 
 ### 4.3 进度判定（纯算法，宁漏勿误——D-5 同款保守）
 
+> **2026-08-25 B2 治理修订**（3b466d5，台账见 `docs/adaptive-assist-hardening.md`
+> §P2）：初版「jieba 关键词全词命中」被实测噪声推翻（通用关键词误 hit + 进程
+> 重启后 growth=全文 + 等长改写吃旧缓存）。现行判据如下。
+
 ```
 对每个 pending 锚点：
-  关键词 = jieba.analyse.extract_tags(锚点 text, topK=3)
-  若全部关键词出现在最近新增正文（上次心跳以来的 diff 区段）→ hit
+  片段 = text_match 共享判据的 3 字滑窗片段（命中率阈值/就近窗口唯一权威，
+        禁止在此另写滑窗逻辑）
+  若全部片段命中新增区段（就近窗口内）→ hit
 ```
 
-- 全词命中才判 hit——宁可不跳勾，不可误报已兑现（误报会破坏信任，漏报只是
-  作者自己划掉）；
-- 结果按内容长度缓存（沿用章尾漂移提醒的缓存策略），心跳零 LLM；
+- 全片段命中才判 hit——宁可不跳勾，不可误报已兑现（误报会破坏信任，漏报
+  只是作者自己划掉）；整串捷径仅对 ≥3 字锚点开放（2 字通用词裸子串命中
+  正是旧噪声之源），<3 字锚点按未命中处理——漏判由 finish 报告 spine_note
+  兜底，误判没有出路；临近岔路走低阈值档宽松提示；
+- 新增区段由 orchestrator 记录的上次正文长度推（growth=正文[上次长度:]）；
+  **首轮只记基线不判定**——进程重启/重新进章后 growth=全文的大面积误 hit
+  不可逆（hit 只前进不回退）；改写收缩（正文变短）退化为尾部 500 字；
+- 结果按**内容 hash** 缓存（治等长改写吃旧缓存），心跳零 LLM；
+- 写库防并发（9d6c066）：判 hit 期间作者侧防抖 PATCH 可能已改 spine——
+  commit 前结束读事务 refresh 重读整行，hit 按 id 单向（pending→hit）应用
+  到新鲜 anchors 再写回（逐锚点浅拷贝防 JSONB 按值相等漏 UPDATE）；作者
+  已清空锚点则不回写（编辑权在作者）；
 - `spine_progress = { anchors: [{id, text, status}], pending_count, hint: "还剩 1 个锚点" }`。
 
 ### 4.4 预算

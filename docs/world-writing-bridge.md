@@ -236,6 +236,11 @@ created_at
 
 排序逻辑（产品死穴是「录入先于价值」）：**先让价值可见（W1-W2）→ 再让录入变懒（W3-W4）→ 最后让启发生长（W5）**。
 
+> **W4 后续演进（本表登记 2026-08-16 之后，行为已多轮升级）**：
+> ① **P5 地基加固（2026-08-21，`e44dd59`，详见 `foundation-hardening.md` A5b）**——收件箱**批量裁决**（「全部采纳」→ 逐条预览可剔除 → 6s 复合撤销 = 删产物 + reopen，前端 `features/world/composables/batchAccept.ts` + `BatchAcceptModal.vue`）；settle 候选**三重去重**（prompt 排除近 15 条已入账 + 归一化双向子串预筛 + pending 池幂等）；积压 >5 心跳 `kind=world_inbox` 感知带提示 + settle 完成 toast 直达收件箱。
+> ② **战略定稿期（2026-08-25/26，详见 `auto-read-quiet-learning.md`）**——自动阅读 / 全书通读的候选入池（新 source）；候选判重升**全书级**归一化子串 + 转正前账本判重闸（命中标 `auto_reject=duplicate`）；accept 服务端实体/地点创建按（书 + 归一化名 + 类型）**幂等**（治连点重复建事故）；候选联表补 `chapter_number`（无叙事锚显示「第 N 章」不伪造默认日期）。
+> ③ 收件箱随切片条位于副驾「此刻」tab（2026-08-17 写作台重构迁入切片条所在 tab，2026-08-22 副驾四 tab 化后沿用，组件仍为 `WorldSceneSlice`）；世界页「待确认」图标栏改为**常驻**（空箱也可开抽屉发起通读，2026-08-25 `28c8e73` 修冷启动自锁）。
+
 ---
 
 ## 7. 风险与对策

@@ -416,7 +416,7 @@ E2/refiner bug 可提前单独修；S3 依赖 S2（试听走真实注入管线�
 
 ---
 
-## 12. 2026-08-24 禁忌面归一与 NLP 扩展（任务包 A-D 注记）
+## 12. 2026-08-24 禁忌面归一、NLP 扩展与章级特例接通（任务包 A-F + Phase 4 注记）
 
 设计稿 S1-S5 之后的后续批次，本节为增量记录（详规见各模块 docstring）：
 
@@ -462,5 +462,16 @@ E2/refiner bug 可提前单独修；S3 依赖 S2（试听走真实注入管线�
   confirm 请求覆盖生效（不带则旧行为）。完稿报告「疑似 AI 味变体」每条新增
   「收入收件箱」按钮（InspectorPanel → `styleApi.addInboxItem`，
   `source=semantic_scan`，word 取片段前 20 字，投后按钮变「已投递」防重复；
-  只投候选不直接入清单，红线同「这不像我」）。**章级特例卡消费接通留
-  Phase 4**。
+  只投候选不直接入清单，红线同「这不像我」）。
+- **Phase 4 章级特例卡消费接通 ✅ 2026-08-24（c1f8094）**：章级卡
+  （`style_cards.chapter_id` 非空）存在即该章**完整文风定义**——负面清单/
+  正面画像/旋钮/对话目标/段落节奏**整卡生效，书级不再参与**（整卡覆盖语义，
+  用户拍板：负面清单不合并）；无章级卡回退书级，无卡逐字节零变化。统一入口
+  `StyleCardRepository.get_effective_card(book_id, chapter_id)`，消费点全部接线：
+  settings_bundle（主通路——stitch-ghost 五模式/dock/context-preview/finish
+  审阅/ghost_guard）、ADF、Refinery、选区改写、defat、心跳漂移参照、finish
+  语义扫描、quality-report 审计上下文、scan-negative（扫哪章用哪张生效卡）、
+  试听 baseline 轨（请求带 chapter_id，前端章级编辑态已传）。**保持书级**：
+  指纹对账参考带（书级仪表盘）、收件箱确认写路径。prohibitions 四源权威与
+  prompt 排序零改动。单测 `services/context/test_chapter_style_override.py`
+  （7 项：repository 三态 + bundle 整卡覆盖/回退/无卡零变化）。
