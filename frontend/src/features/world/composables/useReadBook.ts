@@ -217,7 +217,10 @@ export function useReadBook() {
       progress.value = { done: i + 1, total: targets.length, label: ch.title || `第${ch.chapter_number}章` }
       try {
         const r = await adaptiveApi.autoRead(ch.id)
+        // 跳过也要计账（2026-08-26 审计修复）：阶段 B 曾把 skipped 整个丢弃——
+        // 额度用完/间隔未到时完成页谎报「读完了、0 条」；与阶段 A 同口径计入跳过数
         if (r.ran) createdCandidates.value += r.created || 0
+        else if (r.skipped) skippedCount.value++
       } catch { /* 单章失败不阻塞 */ }
     }
     progress.value = null

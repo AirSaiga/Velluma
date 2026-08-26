@@ -298,8 +298,9 @@ class Chapter(Base):
     # 章级一次性消耗品：不进正文版本历史、不触发 world-refresh（度优先）。
     spine = Column(JSONB, nullable=True)
     # 自动阅读幂等锚（2026-08-25 战略定稿「系统自己去读」）：{hash, last_run_at,
-    # last_created, entities_hash}——内容哈希不变则不重读（切章触发随处发枪也安全）；
-    # entities_hash 是全书通读阶段 A（实体候选抽取）的独立幂等键。NULL=从未读过。
+    # last_created, entities_hash, entities_last_run_at}——内容哈希不变则不重读
+    # （切章触发随处发枪也安全）；entities_* 两键是全书通读阶段 A（实体候选抽取）
+    # 的独立幂等/间隔键（2026-08-26 分立：认人不封锁记事）。NULL=从未读过。
     auto_read_state = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 

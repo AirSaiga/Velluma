@@ -62,7 +62,9 @@
 ### 3.2 系统自己去读（自动阅读 + 预算闸 + 全书通读）
 
 - 预算闸 `read_budget.py`：章级内容哈希幂等（`chapters.auto_read_state`）+
-  同章 300s 间隔 + 每书滚动 24h 上限 30 次（generation_runs 计数零新表）；
+  同章**同阶段** 300s 间隔（事件/实体各记各的时间戳，认人不封锁记事——
+  2026-08-26 修复：共享时间戳时阶段 A 跑完 300s 内阶段 B 整批静默空跑）+
+  每书滚动 24h 上限 30 次（generation_runs 计数零新表，A/B 两阶段共池）；
   跳过原因全人话；`force=True` 只豁免幂等闸（通读刷新丢 review 的补救），
   预算闸永不豁免。
 - 端点：`POST /chapters/{id}/adaptive/auto-read`（事件候选）与
@@ -75,6 +77,9 @@
 `get_default_reasoning_config` 的 `enabled=False` 从「不表态」改为显式关闭
 （REASONING_DISABLED 同形）——MiMo 等厂商服务端默认思考开，「不发参数=开」。
 OpenAI/本地端点经适配层分支零变化。此后「关思考」从调用点纪律变为默认正确。
+（2026-08-26 补修：unknown 厂商分支关闭态恢复「不发参数」——透传 OpenRouter
+协议的 reasoning.enabled 对不认它的网关无效、对严格校验的网关反是 400；
+需要显式关闭的厂商走 detect_provider 加分支，MiMo 先例。）
 
 ## 4. 通读首秀实测四修（2026-08-25/26，28c8e73 / cdfb740 / 61bdd01 / b4e38b8）
 

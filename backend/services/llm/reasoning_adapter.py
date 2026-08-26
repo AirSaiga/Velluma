@@ -238,7 +238,13 @@ def adapt_reasoning_config(
         # 默认不发，避免触发不可预期行为（vLLM 可能容忍、LM Studio 静默忽略、Ollama 行为不定）。
         return None
 
-    # unknown：默认按 OpenRouter 协议透传（向后兼容——Velluma 历史行为即 OpenRouter 协议）
+    # unknown：默认按 OpenRouter 协议透传（向后兼容——Velluma 历史行为即 OpenRouter 协议）。
+    # 关闭态例外（2026-08-26 修复）：历史行为是「不发参数」（862132d 语义修复前上游
+    # 返回 None）；对不认 OpenRouter 协议的未知网关该参数本就无效，而严格校验 body
+    # 的网关会 400（全槽位调用失败）。需要显式关闭的服务端默认思考厂商，正路是往
+    # _PROVIDER_DOMAIN_RULES 加识别分支（MiMo 先例——实测认证的协议才接）。
+    if not enabled:
+        return None
     return {
         "reasoning": {
             "enabled": enabled,

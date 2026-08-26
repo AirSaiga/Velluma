@@ -5,6 +5,7 @@
 1. 判定序语义：short_text → unchanged → too_soon → daily_cap（「没变」是最常见
    静默出口，先于预算曝光；间隔闸只对真要读的生效）。
 2. 幂等锚：同指纹不重读；entities_hash 与 hash 是两个独立键（阶段 A/B 互不封锁）。
+   间隔时间戳同按阶段分键（last_run_at / entities_last_run_at）——A 刚跑完不封锁 B。
 3. 24h 滚动窗口计数：只算自动观察口径 stage、只算窗口内、只算本书。
 4. 指纹折叠空白（排版抖动不重新武装）。
 
@@ -75,6 +76,51 @@ class TestDecideAutoRead:
             text_len=500, state=state, fingerprint="new", now=NOW,
         )
         assert (ok, code) == (False, "too_soon")
+
+
+class TestCrossPhaseIndependence:
+    """间隔时间键按阶段分立（2026-08-26 修复）。
+
+    事故现场：共享 last_run_at 时，通读向导阶段 A（认人）跑完 300s 内
+    阶段 B（记事）整批 too_soon 静默空跑——完成页谎报「读完了、0 条」，
+    与模块 docstring「阶段 A 与阶段 B 互不封锁」的承诺相悖。
+    """
+
+    def test_phase_a_recent_run_does_not_block_phase_b(self):
+        """阶段 A 刚跑完（修复后路由写入形状）不封锁阶段 B 的事件抽取。"""
+        state = {"entities_hash": "fpA", "entities_last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="fpB", now=NOW,
+        )
+        assert (ok, code) == (True, None)
+
+    def test_phase_b_recent_run_does_not_block_phase_a(self):
+        """反向：事件刚读完不封锁实体抽取。"""
+        state = {"hash": "fpB", "last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="fpA",
+            hash_key="entities_hash", ts_key="entities_last_run_at", now=NOW,
+        )
+        assert (ok, code) == (True, None)
+
+    def test_entities_interval_still_guards_same_phase(self):
+        """分键不是拆闸：实体阶段自身 300s 内重读仍被拦。"""
+        state = {"entities_hash": "old", "entities_last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="new",
+            hash_key="entities_hash", ts_key="entities_last_run_at", now=NOW,
+        )
+        assert (ok, code) == (False, "too_soon")
+
+    def test_legacy_shared_timestamp_only_binds_events_side(self):
+        """修复前阶段 A 写的旧数据（裸 last_run_at）只约束事件侧间隔——
+        实体侧不再读它，过期自然失效，无需数据迁移。"""
+        state = {"entities_hash": "old", "last_run_at": NOW.isoformat()}
+        ok, code = rb.decide_auto_read(
+            text_len=500, state=state, fingerprint="new",
+            hash_key="entities_hash", ts_key="entities_last_run_at", now=NOW,
+        )
+        assert (ok, code) == (True, None)
 
 
 class TestForceSemantics:

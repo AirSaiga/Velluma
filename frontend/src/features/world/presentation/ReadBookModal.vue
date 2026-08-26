@@ -84,7 +84,7 @@ const emit = defineEmits<{
       <ul class="rb-done__list">
         <li v-if="createdEntities">新建人物/地点 {{ createdEntities }} 个</li>
         <li>收件箱新增 {{ createdCandidates }} 条世界变化，等你过目</li>
-        <li v-if="skippedCount">跳过 {{ skippedCount }} 章（太短或已读过）</li>
+        <li v-if="skippedCount">跳过 {{ skippedCount }} 章（太短、刚读过或今日额度用完——明天重跑会接着读）</li>
       </ul>
     </div>
     <div v-else-if="phase === 'error'" class="rb-done">

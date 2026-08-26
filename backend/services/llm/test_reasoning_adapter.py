@@ -187,16 +187,20 @@ class TestAdaptLocal:
 
 
 class TestAdaptUnknown:
-    """未知 provider：默认按 OpenRouter 协议透传（向后兼容）。"""
+    """未知 provider：开启态按 OpenRouter 协议透传（向后兼容）；关闭态不发参数。"""
 
     def test_enabled_falls_back_to_openrouter_protocol(self):
         result = adapt_reasoning_config(ENABLED_HIGH, "https://some-proxy.example.com/v1")
         assert "reasoning" in result
         assert result["reasoning"]["enabled"] is True
 
-    def test_disabled_falls_back(self):
+    def test_disabled_returns_none(self):
+        """关闭态不发参数（2026-08-26 修复）：862132d 语义修复后 unknown 分支曾把
+        reasoning.enabled=false 透传给未知网关——不认该协议的网关无感（参数本就
+        无效），严格校验 body 的网关却会 400（全槽位失败）。恢复「不发」的历史
+        行为；需要显式关闭的服务端默认思考厂商，正路是加 detect 分支（MiMo 先例）。"""
         result = adapt_reasoning_config(REASONING_DISABLED, "https://some-proxy.example.com/v1")
-        assert result["reasoning"]["enabled"] is False
+        assert result is None
 
 
 # ============================================================

@@ -8,7 +8,11 @@
 1. 幂等锚：chapters.auto_read_state 内容哈希——正文没变就不重读
    （切章随处发枪、全书通读刷新重跑，都安全幂等）。实体抽取用独立键
    entities_hash（阶段 A 与阶段 B 互不封锁）。
-2. 章级最小间隔：同章两次自动阅读 ≥300s（防开关章抖动连发）。
+2. 章级最小间隔：同章**同阶段**两次自动阅读 ≥300s（防开关章抖动连发）。
+   间隔时间戳同样按阶段分键——事件读 last_run_at、实体读 entities_last_run_at
+   （2026-08-26 修复：共享 last_run_at 时阶段 A 跑完 300s 内阶段 B 全部
+   too_soon 静默空跑，与「互不封锁」的文档承诺相悖；旧数据里阶段 A 写过的
+   last_run_at 只影响事件侧 ≤300s，过期自然失效，无需迁移）。
 3. 每书每日上限：滚动 24h 窗口内自动观察类 LLM 调用 ≤30（口径：
    event_scout.auto_read + loop3.emergent_facts——后者与手动沉淀的涌现
    抽取共用 stage，故手动沉淀也占用本池；沉淀是低频手动动作，可接受，
@@ -73,6 +77,7 @@ def decide_auto_read(
     state: Optional[Dict[str, Any]],
     fingerprint: str,
     hash_key: str = "hash",
+    ts_key: str = "last_run_at",
     now: Optional[datetime] = None,
     daily_used: int = 0,
     force: bool = False,
@@ -81,6 +86,8 @@ def decide_auto_read(
 
     判定序有语义：unchanged 先于 too_soon/daily_cap——「没变」是最常见静默出口，
     避免无事时也暴露预算信息；间隔闸只对「确实要读」的情况生效。
+    hash_key / ts_key 成对使用（事件="hash"+"last_run_at"、实体="entities_hash"+
+    "entities_last_run_at"）——幂等锚与间隔闸都按阶段独立，A/B 互不封锁。
     force=True（全书通读「重新认人」补救：刷新丢 review 状态后哈希全跳过的死局）
     只豁免 unchanged/too_soon 两道幂等闸；short_text 与 daily_cap 永远生效
     （防爆冲红线不因作者主动重跑而松动）。
@@ -90,7 +97,7 @@ def decide_auto_read(
     if not force and state:
         if state.get(hash_key) == fingerprint:
             return False, "unchanged"
-        last = _parse_ts(state.get("last_run_at"))
+        last = _parse_ts(state.get(ts_key))
         now = now or datetime.now(timezone.utc)
         if last is not None and (now - last).total_seconds() < AUTO_READ_MIN_INTERVAL_S:
             return False, "too_soon"
