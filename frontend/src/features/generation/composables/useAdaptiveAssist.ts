@@ -22,7 +22,7 @@ import { applySpineProgress, spine } from '../../workspace/composables/useChapte
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings,
 } from './useGhostDraft'
-import { setSparkParts, showSparkDock, type SparkPart } from './useSparkDock'
+import { setSparkParts, showSparkDock, hideSparkDock, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
 import { setThinkingPhase, hideThinking } from './useThinkingIndicator'
 import { assistEnabled } from './useAssistEnabled'
@@ -171,6 +171,14 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       })
 
       // 挂件 → Spark Dock（停顿心跳会带 dock_parts；活跃心跳通常空）
+      // 句子级闸门信号（2026-08-26）：半句悬停时后端回 dock_muted=true——
+      // 清舱收卡把「闭嘴」执行到端上。此前只清响应不清前端，旧件（上轮缓存/
+      // 章节恢复兜底）一直躺在舱里，作者正写感想半句时卡照样在屏（实测事故）。
+      // Tab 点名走 summoned 心跳重取，清舱无损失。
+      if (result.dock_muted) {
+        setSparkParts([])
+        hideSparkDock()
+      }
       const parts: SparkPart[] = (result.dock_parts || []).map((p) => ({
         key: p.key,
         kind: (p.kind as any) || 'anchor',

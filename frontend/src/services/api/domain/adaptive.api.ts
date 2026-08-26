@@ -56,6 +56,8 @@ export interface GhostWarning {
 
 export interface HeartbeatResult {
   dock_parts: DockPart[]
+  /** 句子级闸门触发（半句悬停，挂件应静默）——前端据此清舱收卡 */
+  dock_muted?: boolean
   direction_cards: DirectionCard[]
   intent_source: string
   intent_arc: string

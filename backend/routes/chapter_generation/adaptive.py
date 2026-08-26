@@ -212,6 +212,9 @@ class HeartbeatRequest(BaseModel):
 
 class HeartbeatResponse(BaseModel):
     dock_parts: List[Dict] = Field(default_factory=list)
+    # 句子级闸门触发位（2026-08-26）：True=作者半句悬停，挂件应静默——前端据此
+    # 清舱收卡（区别于 dock_parts 空但可保留旧件供 Tab 的常态）
+    dock_muted: bool = False
     direction_cards: List[Dict] = Field(default_factory=list)  # 走向卡（层3推测首 beat：event+anchors）
     intent_source: str = "none"
     intent_arc: str = ""
@@ -294,9 +297,14 @@ async def heartbeat(
     # 此刻要的是把句子写完（Space 续写的活），缓存旧件也一并藏起；
     # 空段=段界不判半句（写完一段回车进新段是挂件黄金时机）；
     # Tab 显式点名（summoned）豁免，作者主权优先
+    # dock_muted（2026-08-26 实测补强）：此前只清响应不清前端——旧件在舱里
+    # 留存（章节恢复兜底/上一轮缓存），作者半句悬停时卡照样在屏。信号位让
+    # 前端把「闭嘴」执行到端上：清舱收卡（Tab 点名会带 summoned 重取，无损）。
     from backend.services.adaptive.paragraph_source import ends_mid_sentence
+    dock_muted = False
     if ends_mid_sentence(request.recent_text) and not request.summoned:
         dock_parts = []
+        dock_muted = True
     # 走向卡（层 3 推测首 beat）——Ctrl+Space 走向卡舱的数据源
     direction_cards = _extract_direction_cards(snapshot, spine=chapter.spine if chapter is not None else None)
     # Canon 感知（canon_watch 写入的 __canon_watch__ 项）
@@ -358,6 +366,7 @@ async def heartbeat(
 
     return HeartbeatResponse(
         dock_parts=dock_parts,
+        dock_muted=dock_muted,
         direction_cards=direction_cards,
         intent_source=intent.get("source", "none"),
         intent_arc=intent.get("arc", ""),
@@ -1528,7 +1537,8 @@ async def read_chapter_entities(
     fp = content_fingerprint(plain)
     ok, code = decide_auto_read(
         text_len=len(plain), state=state, fingerprint=fp,
-        hash_key="entities_hash", daily_used=daily_used,
+        hash_key="entities_hash", ts_key="entities_last_run_at",
+        daily_used=daily_used,
         force=bool(payload and payload.force),
     )
     if not ok:
@@ -1554,11 +1564,12 @@ async def read_chapter_entities(
     await flush_adaptive_records(chapter_id)
 
     # 空结果无法区分「没有涌现」与「LLM 失败」（extract 契约静默），照样写锚——
-    # 重试入口是全书通读的整批重跑或正文变化，不为罕见失败保留热路径
+    # 重试入口是全书通读的整批重跑或正文变化，不为罕见失败保留热路径。
+    # 间隔时间键与事件侧分立（entities_last_run_at）：认人刚跑完不封锁记事
     chapter.auto_read_state = {
         **state,
         "entities_hash": fp,
-        "last_run_at": datetime.now(timezone.utc).isoformat(),
+        "entities_last_run_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.commit()
     return ReadEntitiesResponse(
