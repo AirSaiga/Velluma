@@ -297,10 +297,25 @@ def _rank_and_cap(hints: List[Dict], cap: int = 10) -> List[Dict]:
 
 
 def _name_of(obj: Any) -> str:
-    """从 ORM 对象或 dict 提取 name（防御性）。"""
+    """从实体视图提取名字（防御性）。
+
+    ⚠ 形状事故（2026-08-26 实测发现）：bundle.entities 两种来源都不在顶层
+    挂 .name——旧 ChapterEntity 与 world 桥的 WorldEntityAdapter 均为
+    ent.character.name 访问链（settings_bundle._entity_name 同判据）。旧实现
+    读顶层 .name 恒空 → 出场提醒自诞生起零命中（26 次心跳 hints 恒 0 实证）。
+    dict 形态（旧缓存/测试桩）保留顶层 name 兜底。
+    """
     if obj is None:
         return ""
-    return getattr(obj, "name", None) or (obj.get("name") if isinstance(obj, dict) else "") or ""
+    if isinstance(obj, dict):
+        char = obj.get("character")
+        if isinstance(char, dict):
+            return str(char.get("name") or "")
+        return str(obj.get("name") or "")
+    char = getattr(obj, "character", None)
+    if char is not None:
+        return getattr(char, "name", "") or ""
+    return getattr(obj, "name", "") or ""
 
 
 def _label_of(obj: Any) -> str:
@@ -315,10 +330,27 @@ def _label_of(obj: Any) -> str:
 
 
 def _entity_brief(entity: Any) -> str:
-    """角色一句话简介（防御性提取，拿不到给通用文本）。"""
+    """角色一句话简介（防御性提取，拿不到给通用文本）。
+
+    优先 world 桥视图的 character.static_prompt（世界页档案一句话），旧表
+    description/role 兜底；全缺席回退通用文本——不读 dynamic_state（状态行
+    归切片条，感知带保持一句话轻量）。
+    """
+    if entity is None:
+        return "本章绑定角色"
+    char = getattr(entity, "character", None) or (
+        entity.get("character") if isinstance(entity, dict) else None
+    )
+    parts: List[str] = []
+    if char is not None:
+        sp = getattr(char, "static_prompt", "") or (
+            char.get("static_prompt", "") if isinstance(char, dict) else ""
+        )
+        if sp:
+            parts.append(str(sp))
     desc = getattr(entity, "description", None) or (entity.get("description") if isinstance(entity, dict) else "") or ""
     role = getattr(entity, "role", None) or (entity.get("role") if isinstance(entity, dict) else "") or ""
-    parts = [p.strip() for p in [role, desc] if p and p.strip()]
+    parts += [p.strip() for p in [role, desc] if p and p.strip()]
     return ("·".join(parts))[:60] if parts else "本章绑定角色"
 
 
