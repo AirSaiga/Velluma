@@ -144,6 +144,11 @@ def test_dock_prompt_carries_nearby_discipline(monkeypatch):
     # system：就近铁律在
     assert "下一屏" in captured["system"]
     assert "绝不提前搬上来" in captured["system"]
+    # system：场景锚定铁律在（2026-08-26 实测补强——报纸茶渍/复述已写/场景瞬移三类怪件）
+    assert "道具不凭空发明" in captured["system"]
+    assert "不复述已写" in captured["system"]
+    assert "空间不瞬移" in captured["system"]
+    assert "保底本场景" in captured["system"]
     # user：作者大纲·就近节拍块带出工头打断拍
     assert "作者大纲·就近节拍" in captured["user"]
     assert "工头打断" in captured["user"]
