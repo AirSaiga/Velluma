@@ -791,6 +791,19 @@ async def finish(
     orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
     result = await orch.on_finish()
 
+    # B5 现实校验（不变量 10：失败即失效不沉默）：知识视图的生死论断回查
+    # fresh fold——mismatches 非空 = 缓存过期/派生物说谎的直接证据，进报告
+    try:
+        from backend.services.world.reality_check import run_reality_check
+
+        _bundle = await load_chapter_settings_bundle(chapter_id, db)
+        _kg = build_knowledge_view(_bundle)
+        result["reality_check"] = await run_reality_check(
+            db, _bundle.book_id, _bundle.world_time, _kg,
+        )
+    except Exception as e:
+        logger.debug(f"[adaptive/finish] 现实校验失败（不阻塞完稿）: {e}")
+
     # ---- 记忆倒灌（写入侧）：完稿 = 章级定稿时刻，整章重索引（章级替换，幂等）----
     # 画布即事实源：索引正文取 chapters.content_text；失败绝不让完稿失败
     memory_indexed = 0

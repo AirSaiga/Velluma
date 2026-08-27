@@ -82,6 +82,7 @@ class KnowledgeView:
     recency_pin: str = ""               # user 尾部「此刻·切记」重钉（3-5 行）
     previous_summary: str = ""          # 紧前一章摘要（恒选，不截断）
     # 审计面（预览「未选清单」与 trace 选择集记录的数据源）
+    provenance: Dict[str, Any] = field(default_factory=dict)  # B5 信封
     selected_keys: List[str] = field(default_factory=list)
     present_names: List[str] = field(default_factory=list)
     dead_names: List[str] = field(default_factory=list)
@@ -364,7 +365,8 @@ def _indent_body(body: str, prefix_first: str) -> str:
 
 
 def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
-                          unselected: List[Dict[str, str]]) -> KnowledgeView:
+                          unselected: List[Dict[str, str]],
+                          chapter_text: str = "") -> KnowledgeView:
     """渲染知识视图（完整注入；空数据=空串=块缺席=零变化）。"""
     kv = KnowledgeView(unselected=unselected)
     kv.previous_summary = str(getattr(bundle, "previous_summary", "") or "")
@@ -459,6 +461,21 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         kv.recency_pin = "【此刻·切记】" + "｜".join(pin_bits)
 
     kv.selected_keys = [e.key for e in selected]
+    # B5 provenance 信封（不变量 5）：按 (章/t/场景钉/正文长) 参数哈希——
+    # 同信封重算应逐字节相等（对拍测试锁）；digest/场景卡接入时复用同构
+    from backend.services.world.reality_check import envelope
+
+    kv.provenance = envelope(
+        kind="knowledge_view",
+        source_keys=kv.selected_keys,
+        params={
+            "book_id": str(getattr(bundle, "book_id", "") or ""),
+            "chapter_id": str(getattr(getattr(bundle, "chapter", None), "id", "") or ""),
+            "world_time": world_time,
+            "scene_loc": scene_loc_id,
+            "content_len": len(chapter_text),
+        },
+    )
     return kv
 
 
@@ -483,4 +500,4 @@ def build_knowledge_view(bundle: Any) -> KnowledgeView:
     entries = build_knowledge_entries(bundle)
     chapter_text = str(getattr(bundle, "content_text", "") or "")
     selected, unselected = select_knowledge(entries, bundle, chapter_text)
-    return render_knowledge_view(bundle, selected, unselected)
+    return render_knowledge_view(bundle, selected, unselected, chapter_text)
