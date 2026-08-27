@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 INFERENCE_MIN_INTERVAL_S = 30.0
 # 信号严重度阈值——低于此值不触发反推
 INFERENCE_SEVERITY_THRESHOLD = 0.5
+# 停顿档同步组件的单个等待上限（秒）（2026-08-27）：慢端点实测推测 70s/挂件
+# 104s——停顿心跳响应被拖到几分钟，前端自动弹舱守卫（响应落地时作者须未动笔）
+# 永不满足，卡片舱「只有 Tab 活着」。超时即放弃本轮产出（下次停顿重算），
+# 把自动唤醒的最坏等待钉死。正常端点（推测 4s+挂件 3s）远够用。
+SYNC_COMPONENT_TIMEOUT_S = 12.0
 
 
 @dataclass
@@ -68,6 +73,7 @@ class AdaptiveOrchestrator:
         # 谋篇进度判定的增量基准（P1.4 M2）：上次心跳时的正文长度，-1=首次（判全文）
         self._last_content_len: int = -1
         # dock 缓存：段落文本 + projection 签名未变则复用上次碎片，省 ~90% dock 成本
+        self._sync_inflight: set = set()  # 停顿档同步组件在飞标记（跨心跳去重，防慢端点下并发双烧 LLM）
         self._last_dock_text_sig: str = ""
         self._last_dock_proj_sig: str = ""
         # 方向权重（NLE-ADF 3.0）：5 叙事方向的偏好，每次心跳更新，dock_generator 据此分布生成
@@ -171,13 +177,22 @@ class AdaptiveOrchestrator:
 
             for act in activations:
                 if act.component in sync_components:
+                    # 停顿档在飞去重（2026-08-27）：上一停顿的同名组件仍在跑
+                    #（慢端点下 60s+）时本轮不重复花 LLM——trace 实证两次停顿
+                    # 间隔 23s 会并发双跑推测。产出落地后下轮心跳自然取走
+                    if act.component in self._sync_inflight:
+                        continue
                     # 停顿心跳同步组件统一透传实时段落（前端光标段纯文本）——
                     # dock_generator/canon_watch 据此锚定「作者当前段落」；
                     # dock 另带方向权重（LLM 据此分布生成）
                     extra: Dict[str, Any] = {"recent_text": state.recent_text or ""}
                     if act.component == "dock_generator":
                         extra["direction_weights"] = self._direction_weights
-                    await self._activate_sync(act, db, extra_context=extra)
+                    self._sync_inflight.add(act.component)
+                    try:
+                        await self._activate_sync(act, db, extra_context=extra)
+                    finally:
+                        self._sync_inflight.discard(act.component)
                 else:
                     await self._activate(act, recent_text=state.recent_text or "")
 
@@ -261,11 +276,16 @@ class AdaptiveOrchestrator:
             # 省 ~90% dock 调用（作者没沉淀新段落时，碎片本来就不该变）
             from backend.services.adaptive.change_detector import _text_sig
             cur_text_sig = _text_sig(state.recent_text or "")
-            # projection 签名 = projection 内容的 hash（简化：取数量 + 首项 event）
+            # projection 签名基于**接缝裁剪后**集合（2026-08-27）：过滤是 dock 产出
+            # 的实际取材池——stage 变化导致 kept 集合变化时必须触发重算，否则
+            # 缓存命中会端出旧取材池的碎片
+            from backend.services.adaptive.components.dock_generator import _prebeat_projections
+            kept_projs = _prebeat_projections(real_projs)
+            # 签名 = 过滤后数量 + 首项 event（简化 hash，沿用旧口径）
             cur_proj_sig = ""
-            for p in real_projs:
+            for p in kept_projs:
                 ev = p.get("possible_beats", [{}])[0].get("event", "") if p.get("possible_beats") else ""
-                cur_proj_sig = f"{len(real_projs)}:{ev[:30]}"
+                cur_proj_sig = f"{len(kept_projs)}:{ev[:30]}"
                 break
             dock_cache_hit = (
                 cur_text_sig == self._last_dock_text_sig
@@ -381,11 +401,25 @@ class AdaptiveOrchestrator:
             from backend.services.adaptive.world_model import WorldModelRepository
             repo = WorldModelRepository(db)
             snapshot = await repo.snapshot(self.chapter_id)
-            await runner(self.chapter_id, db, snapshot, act.budget_tokens, **(extra_context or {}))
+            # 同步超时钳制（2026-08-27）：wait_for 超时即放弃本轮产出——组件
+            # 不落库、下次停顿重算。取消落在 LLM HTTP await 上（耗时所在），
+            # DB 写全部在其后，无半写状态
+            await asyncio.wait_for(
+                runner(self.chapter_id, db, snapshot, act.budget_tokens, **(extra_context or {})),
+                timeout=SYNC_COMPONENT_TIMEOUT_S,
+            )
             # 不在此 commit（由 on_heartbeat 统一 commit）
             if act.component == "intent_inference":
                 self._last_inference_ts = time.time()
             self._clear_component_error(act.component)  # P3-1：成功即清
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[orchestrator] 同步组件 {act.component} 超时（>{SYNC_COMPONENT_TIMEOUT_S}s），本轮产出放弃"
+            )
+            self._note_component_error(
+                act.component,
+                TimeoutError(f"同步超时 >{SYNC_COMPONENT_TIMEOUT_S}s（端点缓慢，本轮产出放弃，下轮停顿重算）"),
+            )
         except Exception as e:
             logger.warning(f"[orchestrator] 同步组件 {act.component} 失败: {e}", exc_info=True)
             self._note_component_error(act.component, e)  # P3-1

@@ -31,7 +31,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     # （无论是否沉淀）。层 1 事实是沉淀审计账，作者删改后即过期，
     # 不得代替正文（曾致推测锚定已删除文本）
     from backend.services.adaptive.paragraph_source import written_text
-    written = written_text(bundle.content_text or "")[-2000:]
+    _written_full = written_text(bundle.content_text or "")
+    written = _written_full[-2000:]
     if not written:
         return {"skipped": True, "reason": "无已写正文"}
 
@@ -76,7 +77,21 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     except Exception as e:
         logger.debug(f"[future_projection] 相遇机会读取失败（跳过注入）: {e}")
 
-    sys_p, usr_p = build_future_projection_prompt(written, intent, nutrients, soft, spine_anchors=spine_anchors, encounters=_encounter_lines)
+    from backend.services.adaptive.outline_nearby import (
+        outline_nearby as _outline_nearby,
+    )
+    sys_p, usr_p = build_future_projection_prompt(
+        written, intent, nutrients, soft,
+        spine_anchors=spine_anchors, encounters=_encounter_lines,
+        # 大纲就近节拍（2026-08-27 场景锚定修复）：推测组件此前看不到作者大纲——
+        # 只凭「读书+上海」字面自由联想，实测幻觉出整套错误时代场景（2177 工地
+        # 发愣 → 民国书房钢笔木窗），下游挂件链全部锚错。与 dock_generator 同源
+        # 注入就近 1-2 拍，推测必须停在通往节拍的合理一步。
+        outline_nearby=_outline_nearby(
+            getattr(bundle, "outline_text", "") or "",
+            _written_full,
+        ),
+    )
 
     try:
         result = await call_llm_with_usage(

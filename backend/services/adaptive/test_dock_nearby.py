@@ -146,9 +146,12 @@ def test_dock_prompt_carries_nearby_discipline(monkeypatch):
     assert "绝不提前搬上来" in captured["system"]
     # system：文流第一（2026-08-26 定位修正——碎片贴文流，节拍是目的地非内容）
     assert "文流第一" in captured["system"]
-    assert "绝不直接呈现节拍本身的场面" in captured["system"]
-    # system：场景锚定铁律在（2026-08-26 实测补强——报纸茶渍/复述已写/场景瞬移三类怪件）
-    assert "道具不凭空发明" in captured["system"]
+    # 2026-08-27 导师裁决：旧「绝不直接呈现节拍场面」升级为节拍保全检验
+    assert "节拍保全检验" in captured["system"]
+    assert "写不坏节拍的才是第一步" in captured["system"]
+    # system：场景锚定铁律在（2026-08-26 实测补强；08-27 道具两分——氛围件/上手件）
+    assert "道具分两类" in captured["system"]
+    assert "上手件" in captured["system"]
     assert "不复述已写" in captured["system"]
     assert "空间不瞬移" in captured["system"]
     assert "保底本场景" in captured["system"]

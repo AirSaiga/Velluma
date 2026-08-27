@@ -13,7 +13,7 @@
  * 查 .canon-mark 标记元素视口 Y）。找到位置的卡在锚定层 absolute 渲染；
  * 找不到的（orphan/leak，label 不在当前段落）落底部兜底区 + 折叠。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { CanonHint, SpineProgress } from '../../../services/api/domain/adaptive.api'
 import { usePerceptionAlignment } from '../composables/usePerceptionAlignment'
 
@@ -64,8 +64,31 @@ function kindMeta(kind: string) {
 
 // 按行对齐：感知带元素 + labels → anchors（每个 label 的 top，null=找不到）
 const bandEl = ref<HTMLElement | null>(null)
+// 顶部固定区实高（header+谋篇行+镜头碎片舱）：锚定卡避让线，动态实测。
+// 旧硬编码 92 只够 header+spine——4 挂件的舱体占 ~230px，卡位落进舱体
+// 范围被 z-2 的舱盖住头部（2026-08-27 实测事故）。舱是临时面（打字/Esc
+// 即收），收舱后 RO 触发重测，卡回到行位。
+const dockSlotEl = ref<HTMLElement | null>(null)
+const topReservePx = ref(0)
+let _dockRO: ResizeObserver | null = null
+function _measureTopReserve() {
+  const el = dockSlotEl.value
+  if (!el) { topReservePx.value = 0; return }
+  topReservePx.value = el.offsetTop + el.offsetHeight + 6
+}
+watch(dockSlotEl, (el) => {
+  _dockRO?.disconnect()
+  _dockRO = null
+  if (!el) return
+  _dockRO = new ResizeObserver(_measureTopReserve)
+  _dockRO.observe(el)
+  _measureTopReserve()
+}, { flush: 'post' })
+// offsetTop 变化（谋篇行折叠/出现）不触发 RO，补测；dock 自身高度变化走 RO
+watch([spineCollapsed, () => props.spineProgress], () => { nextTick(_measureTopReserve) })
+onBeforeUnmount(() => { _dockRO?.disconnect(); _dockRO = null })
 const labels = computed(() => props.suggestions.map((h) => h.node_label))
-const { anchors } = usePerceptionAlignment(labels, bandEl)
+const { anchors } = usePerceptionAlignment(labels, bandEl, topReservePx)
 
 // 锚定卡（找到正文位置）—— absolute 渲染到对应行
 const located = computed(() => {
@@ -120,7 +143,9 @@ const floatingHidden = computed(() =>
         <div class="spine-progress__hint">{{ spineProgress.hint }}</div>
       </div>
     </div>
-    <slot name="dock" />
+    <div ref="dockSlotEl" class="band-dock-slot">
+      <slot name="dock" />
+    </div>
     <div v-if="suggestions.length === 0" class="band-empty">
       写到相关角色 / 伏笔时，<br />这里会浮现提醒
     </div>
@@ -266,8 +291,8 @@ const floatingHidden = computed(() =>
   font-size: 10px;
   color: #94a3b8;
 }
-/* 顶部固定区 slot（SparkDock）置顶，盖在锚定层之上 */
-.perception-band > :slotted(*) {
+/* 顶部固定区 slot（SparkDock）wrapper：实高供锚定卡避让（topReservePx），z-2 盖在锚定层之上 */
+.band-dock-slot {
   position: relative;
   z-index: 2;
 }

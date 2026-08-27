@@ -22,7 +22,7 @@ import { applySpineProgress, spine } from '../../workspace/composables/useChapte
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings,
 } from './useGhostDraft'
-import { setSparkParts, showSparkDock, hideSparkDock, type SparkPart } from './useSparkDock'
+import { setSparkParts, showSparkDock, hideSparkDock, sparkDockVisible, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
 import { setThinkingPhase, hideThinking } from './useThinkingIndicator'
 import { assistEnabled } from './useAssistEnabled'
@@ -59,6 +59,17 @@ const ACTIVE_HEARTBEAT_MS = 3000   // 活跃心跳防抖
 const PAUSE_HEARTBEAT_MS = 4000    // 停顿心跳（与 Spark Dock 弹出门控对齐）
 const PREVIEW_DELAY_MS = 2000      // 思考指示器预览态延迟（停顿 2s 即显示淡灰点）
 
+// ---- 句子级闸门的前端镜像（与后端 paragraph_source.ends_mid_sentence 同判据）----
+// 半句悬停时停顿心跳必然被后端静音（dock_muted）——等待/感知灯不该为一个
+// 设计上不会兑现的承诺亮起：实测「绿点亮一下立马消失」被作者当成断线。
+// 空段=段界不判半句（与后端 2026-08-25 审计口径一致，勿回退）。
+const _SENTENCE_TERMINALS = new Set('。！？!?…‥．。”」』）)'.split(''))
+
+function _endsMidSentence(text: string): boolean {
+  const t = (text || '').replace(/\s+$/, '')
+  return !!t && !_SENTENCE_TERMINALS.has(t[t.length - 1])
+}
+
 interface AdaptiveAssistOptions {
   getChapterId: () => string | null
   getOutline: () => string  // 章节大纲（WorkspaceView 注入 selectedChapter.outline_text）
@@ -87,6 +98,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   let _continueAbort: AbortController | null = null
   let _heartbeatFailedOnce = false
   let _summonInFlight = false  // Tab 即点取件在飞标记（连按不叠加 LLM 调用）
+  // 心跳在飞去重（2026-08-27 Tab 实测事故）：生发档（停顿/召唤）要跑 2~7s LLM，
+  // 期间打字武装的活跃档计时器照常触发，其快速响应带着 dock_muted 清舱 +
+  // hideThinking + 状态翻 dormant，把作者正盯着等的绿点半路杀掉——绿点消失到
+  // 舱弹出之间 3~5s 零反馈，作者以为断线。两道闸：发送侧在飞让路 + 响应侧
+  // 生发档在飞时活跃档响应只更数据不动反馈态。
+  let _activeHeartbeatInFlight = false
+  let _generationHeartbeatsInFlight = 0
   // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
   let _lastCardSig = ''
   let _lastDockSig = ''
@@ -102,7 +120,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     _previewTimer = setTimeout(() => {
       // 仅 composing 态 + 光标在段尾才预览（段中编辑/选词不算停顿思考）
       if (opts.authorLaneRef.value === 'composing' && _isCursorAtParagraphEnd()) {
-        setThinkingPhase('waiting')
+        // 半句不预告：闸门下停顿心跳必空手而归，灰点是许愿不兑现
+        if (!_endsMidSentence(_recentText500())) setThinkingPhase('waiting')
       }
     }, PREVIEW_DELAY_MS)
     // 活跃心跳：3s 后发（让后端感知正文推进）
@@ -129,11 +148,23 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     return $from.pos >= $from.end() - 1
   }
 
+  /** 与后端同源的光标段文本——心跳发送的 recent_text 就是它的前 500 字 */
+  function _recentText500(): string {
+    const editor = chapterEditorHandle.value
+    if (!editor) return ''
+    return editor.state.selection.$from.parent.textContent.slice(0, 500)
+  }
+
   async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean }) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
     if (opts.authorLaneRef.value !== 'composing') return
     if (ghostActive.value) return  // 幽灵在屏时暂停心跳
+    const generationTier = pausedMs >= PAUSE_HEARTBEAT_MS
+    // 发送侧在飞让路：生发档在飞时新心跳一律不发（活跃档冗余——生发响应同样
+    // 带回走向卡/感知带全量快照；生发档重复触发白烧一次 LLM）；活跃档在飞时
+    // 只有生发档可插队（活跃档只更缓存，生发档才是作者等的主事件）
+    if (generationTier ? _generationHeartbeatsInFlight > 0 : _activeHeartbeatInFlight) return
     const sendTs = _lastActiveTs  // 活动纪元：响应回来时比对，识别「发送后作者已动笔」
 
     const editor = chapterEditorHandle.value
@@ -150,11 +181,17 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const outlineText = opts.getOutline() || ''
     const hasOutline = outlineText.trim().length > 0
 
-    opts.aiLaneRef.value = pausedMs >= PAUSE_HEARTBEAT_MS ? 'perceiving' : 'perceiving'
-    // 停顿心跳发出 → 切强态（后端开始算 dock_generator，让用户看到「AI 正在读」）
-    if (pausedMs >= PAUSE_HEARTBEAT_MS) {
+    // 仅停顿档切「感知中」：活跃档是后台探查（走向卡缓存/感知带），不该让顶栏
+    // 状态闪烁——它 0.3s 后就被自家响应改写，作者只看到标签乱跳（2026-08-27 实测）
+    // 半句静音轮不亮灯：闸门会让本轮必空手而归——绿点亮一下就灭比不亮更伤
+    //（实测被当成断线）。心跳照发：感知带/世界保鲜数据照常带回。Tab 点名豁免。
+    if (pausedMs >= PAUSE_HEARTBEAT_MS && (flags?.summoned || !_endsMidSentence(recentText.slice(0, 500)))) {
+      opts.aiLaneRef.value = 'perceiving'
+      // 停顿心跳发出 → 切强态（后端开始算 dock_generator，让用户看到「AI 正在读」）
       setThinkingPhase('perceiving')
     }
+    _activeHeartbeatInFlight = true
+    if (generationTier) _generationHeartbeatsInFlight += 1
     try {
       const result: HeartbeatResult = await adaptiveApi.heartbeat(chapterId, {
         word_count: wordCount,
@@ -175,7 +212,10 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 清舱收卡把「闭嘴」执行到端上。此前只清响应不清前端，旧件（上轮缓存/
       // 章节恢复兜底）一直躺在舱里，作者正写感想半句时卡照样在屏（实测事故）。
       // Tab 点名走 summoned 心跳重取，清舱无损失。
-      if (result.dock_muted) {
+      // 生发档仍在飞（含活跃档先发慢归竞态）→ 本响应只更数据不动反馈态：
+      // 清舱/hideThinking/状态翻 dormant 都会杀掉作者正盯着等的绿点。
+      const generationStillBusy = _generationHeartbeatsInFlight > (generationTier ? 1 : 0)
+      if (result.dock_muted && !generationStillBusy) {
         setSparkParts([])
         hideSparkDock()
       }
@@ -262,23 +302,37 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // P3-1（C5）：最近失败的辅助组件 → 「AI 视角」调试区（空即清——成功即清语义）
       setComponentErrors(result.last_component_errors)
 
-      // P0-4 接线：有建议在屏（挂件/走向卡）→ suggesting（顶栏「走向已备好」
-      // 此前枚举从未赋值，文案一直死代码）；无建议 → dormant
-      opts.aiLaneRef.value = (parts.length || (result.direction_cards || []).length)
-        ? 'suggesting'
-        : 'dormant'
-      // 心跳完成：有挂件→Dock 接管（指示器已在 visible 计算里被 sparkDockVisible 隐藏）；
-      // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）
-      if (!parts.length) hideThinking()
+      // P0-4 接线（2026-08-27 语义收紧）：suggesting ⇔ 卡片舱真实在屏。
+      // 此前条件是 parts.length || direction_cards.length——走向卡由活跃档心跳
+      //（3s，纯算法）提前带回且只进 Ctrl+Space 缓存不可见，顶栏便先亮「走向已备好」，
+      // 卡片舱要等停顿档（4s）+ dock_generator LLM（2~7s）才弹，标签比舱早 3~8s，
+      // 半句静音（dock_muted）时甚至永不弹——实测作者困惑「说备好了舱呢」。
+      // 此刻 hide/show 都已执行完，sparkDockVisible 即最终事实：舱弹出来标签才亮，
+      // 与舱同帧出现；只有隐形缓存（走向卡/静默收仓）时保持安静。
+      // 生发档在飞时不动反馈态（绿点/顶栏状态归在飞的生发档所有）；纯数据
+      // 更新（走向卡缓存/感知带/埋点）照常应用
+      if (!generationStillBusy) {
+        opts.aiLaneRef.value = sparkDockVisible.value ? 'suggesting' : 'dormant'
+        // 心跳完成：有挂件→Dock 接管（指示器已在 visible 计算里被 sparkDockVisible 隐藏）；
+        // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）
+        if (!parts.length) hideThinking()
+      }
       _heartbeatFailedOnce = false  // 连接恢复，允许下次中断再提示一次
     } catch (e: any) {
-      opts.aiLaneRef.value = 'dormant'
-      hideThinking()
+      // 失败响应同样不得越权杀生发档的等待反馈（await 抛错时上面的 busy 判断
+      // 未执行，须现算；生发档自身失败时计数含自己在内，1>1 不成立=允许清理）
+      if (_generationHeartbeatsInFlight <= (generationTier ? 1 : 0)) {
+        opts.aiLaneRef.value = 'dormant'
+        hideThinking()
+      }
       // 后台心跳中断：warning 提示一次后静默（3-4s 周期，不能刷屏；写作本身不受影响）
       if (!_heartbeatFailedOnce) {
         _heartbeatFailedOnce = true
         opts.reportWarn?.('AI 辅助连接中断（不影响写作，恢复后自动重连）：' + (e?.message || '网络错误'))
       }
+    } finally {
+      _activeHeartbeatInFlight = false
+      if (generationTier) _generationHeartbeatsInFlight -= 1
     }
   }
 
@@ -286,6 +340,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   function summonParts() {
     if (_summonInFlight) return  // 连按不叠加 LLM 调用
     if (ghostActive.value) return
+    // Tab 点名 = 作者显式要件：拆掉打字武装的三只计时器——它们都会在召唤的
+    // 2~7s LLM 等待期内触发（活跃档响应半路杀绿点、停顿档白烧一次生发、
+    // 预览点降级闪烁），下一次打字会重新武装
+    if (_activeTimer) { clearTimeout(_activeTimer); _activeTimer = null }
+    if (_pauseTimer) { clearTimeout(_pauseTimer); _pauseTimer = null }
+    if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null }
     _summonInFlight = true
     // 借停顿档（paused_ms=4000）让后端同步跑 dock_generator；summoned 标记让
     // 响应侧跳过段尾/动笔守卫直接弹舱（作者点名要的零件）。期间思考点自动亮

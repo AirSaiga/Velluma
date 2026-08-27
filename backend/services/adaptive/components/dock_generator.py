@@ -60,7 +60,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     if not recent_text or len(recent_text) < 30:
         return {"skipped": True, "reason": "正文不足"}
 
-    projections = model_snapshot.get("projections", [])
+    # 接缝裁剪（2026-08-27 导师裁决）：beat/after 素材不进挂件 prompt——
+    # 对服从度有限的模型，切断供给比命令拒绝可靠（LLM 没见过的素材漏不出来；
+    # 同哲学先例：serves_anchor 代码闸门「不信任 prompt 约束」）
+    projections = _prebeat_projections(model_snapshot.get("projections", []))
     nutrients = bundle.nutrients()
     hard = bundle.hard_constraints()
     soft = bundle.soft_constraints()
@@ -116,6 +119,11 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             # 禁词 / canon private 拦截
             if _violates(text, hard):
                 continue
+            # 陈词嗅探（2026-08-27）：感知层不喂生成层的库存词——菜单是作者的
+            # 第一眼，陈词在菜单就被闻到，还没到缝合那步。清单小而狠（<10），
+            # 误丢一枚碎片的代价远小于菜单闻出 AI 味
+            if _has_camera_stock(text):
+                continue
             kind = p.get("type", "action")
             # direction 校验：必须是 5 方向之一，否则回退到"环境"
             direction = p.get("direction", "环境")
@@ -153,6 +161,51 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
 # 大纲就近节拍已提取共享（services/adaptive/outline_nearby.py，2026-08-25：
 # stitch 意图块同消费）。保留私有别名——test_dock_nearby.py 等既有引用零改动。
+
+# ---- 接缝裁剪（2026-08-27 导师裁决）：节拍边界是挂件取材的时间锚线 ----
+# 推测组件按 prompt 契约为每幅画面标 stage（now/approach/beat/after）；
+# beat/after（节拍事件本身及其后）不进挂件取材池——碎片 3「工头拍肩」+
+# 4「弯腰捡书」曾把整条节拍弧预写完，作者连吸两枚一次 Space 就把自己的
+# 转折点写穿了。切断供给 > 命令拒绝。
+def _prebeat_projections(projs: list) -> list:
+    """过滤掉节拍侧（beat/after）的推测，只留此刻（now）与逼近（approach）。
+
+    降级策略：显式 beat/after 标注可信（直接丢弃，不占「首幅宽容」位）；
+    缺标/乱标时首幅宽容视为 now（推测契约首幅必为 now）、其余保守视为
+    节拍侧丢弃——宁可菜单薄，不可抢拍。
+    纯函数：编排器的 dock 缓存签名同源消费（签名必须基于过滤后集合，
+    否则裁剪变化不触发重算）。
+    """
+    keep: list = []
+    seen = 0
+    for p in projs or []:
+        if not isinstance(p, dict) or p.get("__dock__") or p.get("__canon_watch__"):
+            continue
+        beats = p.get("possible_beats") or []
+        stage = beats[0].get("stage") if beats and isinstance(beats[0], dict) else None
+        if stage in ("beat", "after"):
+            seen += 1
+            continue
+        if stage not in ("now", "approach") and seen > 0:
+            seen += 1
+            continue
+        seen += 1
+        keep.append(p)
+    return keep
+
+
+# 陈词嗅探清单（2026-08-27）：走神镜头/远景虚化家族——感知层菜单的第一眼
+# 不能带生成层都在禁的库存词。保持小而狠（<10），勿堆叠。
+CAMERA_STOCK_PHRASES = (
+    "目光失焦", "望向远处", "望向远方", "轮廓模糊", "视线模糊",
+    "瞳孔", "目光深邃", "目光空洞",
+)
+
+
+def _has_camera_stock(text: str) -> bool:
+    """碎片文本是否命中镜头陈词库存（命中即弃，校对环消费）。"""
+    return any(w in text for w in CAMERA_STOCK_PHRASES)
+
 
 def _violates(text: str, hard: Dict) -> bool:
     """校对挂件是否违规（canon private 泄密 / blocker 级硬禁词）。

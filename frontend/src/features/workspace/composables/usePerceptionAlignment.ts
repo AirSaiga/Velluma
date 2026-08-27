@@ -15,17 +15,22 @@ import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
  * 返回 null，由 PerceptionBand 放底部兜底区。
  */
 
-/** header + dock 区占的顶部高度，锚定卡不进此区（避让顶部固定区） */
-const TOP_OFFSET = 92
+/** 锚定卡最小避让（header 保底；顶部固定区实高由 reserveTop 动态传入） */
+const RESERVED_FLOOR = 40
 /** 编辑器滚动容器选择器（RichTextEditor 的 .overflow-y-auto） */
 const SCROLL_HOST_SEL = '.overflow-y-auto'
 
 export function usePerceptionAlignment(
   labels: Ref<string[]>,
   bandEl: Ref<HTMLElement | null>,
+  /** 顶部固定区实高（header+谋篇行+镜头碎片舱），锚定卡避让到它之下。
+   *  动态传入——舱体 4 挂件可占 ~230px，旧硬编码 92 只够 header+spine，
+   *  卡位落进舱体范围会被 z-2 的舱盖住（2026-08-27 实测事故）。 */
+  reserveTop?: Ref<number>,
 ) {
   /** 每个 label 相对感知带的 top（px）；null = 找不到正文位置 */
   const anchors = ref<(number | null)[]>([])
+  const reserve = reserveTop ?? ref(0)
   let scrollHost: HTMLElement | null = null
   let rafId: number | null = null
 
@@ -58,8 +63,8 @@ export function usePerceptionAlignment(
       const viewportY = findLabelViewportTop(editor, label)
       if (viewportY === null) return null
       const relY = viewportY - bandRect.top
-      // 避让顶部 header+dock 区；负值（label 在可见区上方）也压到 offset
-      return Math.max(relY, TOP_OFFSET)
+      // 避让顶部固定区（实高动态测得，40px 保底）；负值（label 在可见区上方）也压进去
+      return Math.max(relY, reserve.value, RESERVED_FLOOR)
     })
   }
 
@@ -112,6 +117,9 @@ export function usePerceptionAlignment(
     },
     { immediate: true },
   )
+
+  // 顶部固定区实高变化（舱弹出/收起/挂件增减）→ 重算（锚定卡避让线随动）
+  watch(reserve, () => { scheduleRecompute() })
 
   onBeforeUnmount(() => {
     cleanupScroll()
