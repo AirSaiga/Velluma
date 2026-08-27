@@ -79,6 +79,8 @@ class KnowledgeView:
     worldview_text: str = ""            # 世界观块（条目完整）
     relations_text: str = ""            # 关系块（t 时刻活跃）
     negative_constraints: str = ""      # 负面清单约束块（四源合并全量）
+    warm_card: str = ""                 # 计划层温卡（spine 意图+锚点，章内冻结——B6）
+    mentioned_names: List[str] = field(default_factory=list)  # 热层雏形：本章提及（后缀）
     recency_pin: str = ""               # user 尾部「此刻·切记」重钉（3-5 行）
     previous_summary: str = ""          # 紧前一章摘要（恒选，不截断）
     # 审计面（预览「未选清单」与 trace 选择集记录的数据源）
@@ -91,7 +93,7 @@ class KnowledgeView:
     def total_chars(self) -> int:
         return sum(len(x) for x in (
             self.scene_identity, self.entities_text, self.worldview_text,
-            self.relations_text, self.negative_constraints,
+            self.relations_text, self.negative_constraints, self.warm_card,
         ))
 
 
@@ -277,11 +279,14 @@ def select_knowledge(
     entries: List[KnowledgeEntry],
     bundle: Any,
     chapter_text: str,
-) -> Tuple[List[KnowledgeEntry], List[Dict[str, str]]]:
-    """对条目池跑一期选择器，返回 (选中条目有序列表, 未选清单)。
+) -> Tuple[List[KnowledgeEntry], List[Dict[str, str]], List[str]]:
+    """对条目池跑一期选择器，返回 (选中条目有序列表, 未选清单, 提及名单)。
 
     选择器不对称原则（公理四）：宁多勿漏——误选由逃逸阀兜住，漏选无兜底。
-    提及扫描窗=本章全文（docs §5 选择器 3：实体类临场事实的主要缓解手段）。
+    B6 前缀纪律（docs/world-cognition-architecture.md §3）：**提及驱动的注入
+    逐出前缀**——提及者不再展开为前缀实体条目（那会让每次打字都作废整个
+    前缀缓存），改为返回提及名单（热层后缀，recency 位旁重钉）；前缀实体
+    块=进章冻结版（在场/死亡/作者绑定），刷新点=切章/沉淀/场景钉/世界编辑。
     """
     world_sourced = bool(getattr(bundle, "world_sourced", False))
     plain_text = re.sub(r"\s+", "", written_text(chapter_text or ""))
@@ -289,6 +294,7 @@ def select_knowledge(
     selected: List[KnowledgeEntry] = []
     unselected: List[Dict[str, str]] = []
     selected_entity_titles: set = set()
+    mentioned: List[str] = []
 
     for e in entries:
         if e.kind == "worldview" or e.kind == "hook":
@@ -304,9 +310,7 @@ def select_knowledge(
                 continue
             names = [e.title] + [a for a in e.aliases if a]
             if any(n in plain_text for n in names if n):
-                e.selector = "提及（本章）"
-                selected.append(e)
-                selected_entity_titles.add(e.title)
+                mentioned.append(e.title)  # 热层后缀（前缀冻结纪律）
                 continue
             if not world_sourced:
                 # legacy 模式：entities 本身就是作者章级绑定 = 作者显式选择
@@ -314,10 +318,10 @@ def select_knowledge(
                 selected.append(e)
                 selected_entity_titles.add(e.title)
                 continue
-            unselected.append({"key": e.key, "title": e.title, "reason": "未在场且未提及"})
+            unselected.append({"key": e.key, "title": e.title, "reason": "未在场未提及（提及时进后缀）"})
             continue
         if e.kind == "relation":
-            # 邻近选择：两端点均被选中才进（单端命中已在 world_bridge 排序提前）
+            # 邻近选择：两端点均在前缀选中集才进（提及者的边随后缀走，不进前缀）
             parts = e.title.split("↔")
             if len(parts) == 2 and parts[0] in selected_entity_titles and parts[1] in selected_entity_titles:
                 e.selector = "邻近·在场一跳"
@@ -341,7 +345,7 @@ def select_knowledge(
             unselected.append({"key": e.key, "title": e.title, "reason": "预算整条丢弃"})
         selected = [e for e in selected if e.key not in dropped_keys]
 
-    # 渲染序：在场 → 死亡 → 提及/绑定（资产随实体序）→ 关系 → 伏笔；世界观单独块
+    # 渲染序：在场 → 死亡 → 绑定（资产随实体序）→ 关系 → 伏笔；世界观单独块
     order_rank = {
         "entity": 0, "asset": 1, "relation": 2, "hook": 3, "worldview": 4,
     }
@@ -349,7 +353,7 @@ def select_knowledge(
         order_rank.get(e.kind, 5),
         0 if (e.present or e.dead) else 1,
     ))
-    return selected, unselected
+    return selected, unselected, mentioned
 
 
 # ============================================================
@@ -364,12 +368,42 @@ def _indent_body(body: str, prefix_first: str) -> str:
     return prefix_first + "\n".join([" " + lines[0]] + ["  " + ln for ln in lines[1:]])
 
 
+def _render_warm_card(bundle: Any) -> str:
+    """计划层温卡（B6 · docs/world-cognition-architecture.md §1 第四层）。
+
+    spine 意图 + 锚点（作者亲笔方向，章内稳定——天然住前缀；就近节拍
+    不进此处：它已经由 user 侧「章节意图」携带，避免重复注入）。
+    无 spine → 空串（零变化契约）。
+    """
+    chapter = getattr(bundle, "chapter", None)
+    spine = getattr(chapter, "spine", None) if chapter is not None else None
+    if not isinstance(spine, dict):
+        return ""
+    lines = []
+    intent = spine.get("intent") or {}
+    text = str((intent.get("text") if isinstance(intent, dict) else intent) or "").strip()
+    if text:
+        lines.append(f"本章打算：{text}")
+    anchors = [
+        str(a.get("text") or "").strip()
+        for a in (spine.get("anchors") or [])
+        if isinstance(a, dict) and str(a.get("status") or "") != "dropped"
+        and str(a.get("text") or "").strip()
+    ]
+    if anchors:
+        lines.append("非写不可的情节：" + "；".join(anchors))
+    return ("# 本章打算（作者定的方向，软约束）\n" + "\n".join(lines)) if lines else ""
+
+
 def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
                           unselected: List[Dict[str, str]],
-                          chapter_text: str = "") -> KnowledgeView:
+                          chapter_text: str = "",
+                          mentioned: Optional[List[str]] = None) -> KnowledgeView:
     """渲染知识视图（完整注入；空数据=空串=块缺席=零变化）。"""
     kv = KnowledgeView(unselected=unselected)
     kv.previous_summary = str(getattr(bundle, "previous_summary", "") or "")
+    kv.warm_card = _render_warm_card(bundle)
+    kv.mentioned_names = list(mentioned or [])
 
     # ---- 场景身份（场景恒选集的渲染面）----
     chapter = getattr(bundle, "chapter", None)
@@ -459,6 +493,9 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         pin_bits.append(f"t={world_time}")
     if pin_bits:
         kv.recency_pin = "【此刻·切记】" + "｜".join(pin_bits)
+    # B6 热层后缀：本章提及（前缀冻结纪律——随段落变的部分只住后缀）
+    if kv.mentioned_names:
+        kv.recency_pin += "\n本章提及：" + "、".join(kv.mentioned_names[:12])
 
     kv.selected_keys = [e.key for e in selected]
     # B5 provenance 信封（不变量 5）：按 (章/t/场景钉/正文长) 参数哈希——
@@ -488,6 +525,7 @@ def kg_block_kwargs(kv: Any) -> Dict[str, str]:
     """
     return dict(
         scene_identity=str(getattr(kv, "scene_identity", "") or ""),
+        warm_card=str(getattr(kv, "warm_card", "") or ""),
         entities_text=str(getattr(kv, "entities_text", "") or ""),
         worldview_text=str(getattr(kv, "worldview_text", "") or ""),
         relations_text=str(getattr(kv, "relations_text", "") or ""),
@@ -495,9 +533,75 @@ def kg_block_kwargs(kv: Any) -> Dict[str, str]:
     )
 
 
+# ---- B6 章内冻结前缀缓存（WCA §3 前缀纪律）----
+# 键=世界侧输入签名（章/t/场景钉/spine/实体数/事件数/世界观条数/canon 长度），
+# **不含正文内容**——作者打字不再作废前缀；刷新点=切章/世界编辑/场景钉/
+# spine 变更/锚定时刻变化（全部落在键里）。提及扫描每调用重跑（纯 CPU）。
+_PREFIX_CACHE: Dict[Any, tuple] = {}
+_PREFIX_CACHE_MAX = 64
+
+
+def _prefix_signature(bundle: Any) -> tuple:
+    import json as _json
+
+    chapter = getattr(bundle, "chapter", None)
+    spine = getattr(chapter, "spine", None) if chapter is not None else None
+    try:
+        spine_hash = _json.dumps(spine, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        spine_hash = str(spine)
+    return (
+        str(getattr(bundle, "book_id", "") or ""),
+        str(getattr(chapter, "id", "") or ""),
+        getattr(bundle, "world_time", 0) or 0,
+        str(getattr(chapter, "scene_location_id", None) or ""),
+        spine_hash,
+        len(getattr(bundle, "entities", None) or []),
+        len(getattr(bundle, "assets", None) or []),
+        len(getattr(bundle, "relationships", None) or []),
+        len(getattr(bundle, "open_hooks", None) or []),
+        len(_worldview_items(getattr(bundle, "book", None))),
+        len(getattr(bundle, "canon_context", "") or ""),
+        len(getattr(bundle, "previous_summary", "") or ""),
+        # 折叠态摘要（在场/死亡判定输入——world_state 变化必须换前缀）
+        _json.dumps(
+            sorted(
+                (str(cs.get("entity_id")), str(cs.get("alive")), str(cs.get("location_id") or ""))
+                for cs in ((getattr(bundle, "world_state", None) or {}).get("character_states") or [])
+            ),
+            ensure_ascii=False,
+        ),
+    )
+
+
 def build_knowledge_view(bundle: Any) -> KnowledgeView:
-    """装配入口：条目化 → 选择 → 渲染（纯 CPU，零 DB 查询）。"""
-    entries = build_knowledge_entries(bundle)
+    """装配入口：条目化 → 选择（前缀冻结）→ 渲染（纯 CPU，零 DB 查询）。
+
+    前缀部分（选择+渲染）走章内冻结缓存；提及扫描与 provenance 每调用
+    新鲜——「什么随段变、什么章内冻结」在此落锚（B6 验收=prefix byte-equal）。
+    """
+    sig = _prefix_signature(bundle)
+    cached = _PREFIX_CACHE.get(sig)
+    if cached is None:
+        entries = build_knowledge_entries(bundle)
+        # 前缀选择不吃正文（提及走后缀）——空 text 选择=冻结语义
+        selected, unselected, _ = select_knowledge(entries, bundle, "")
+        cached = (selected, unselected, entries)
+        if len(_PREFIX_CACHE) >= _PREFIX_CACHE_MAX:
+            _PREFIX_CACHE.clear()
+        _PREFIX_CACHE[sig] = cached
+    selected, unselected, entries = cached
+    # 渲染每调用新鲜（纯 CPU 且免跨调用污染：负面清单/温卡等 bundle 派生
+    # 字段不进缓存）；提及扫描用当前正文——「随段变」只影响后缀行
     chapter_text = str(getattr(bundle, "content_text", "") or "")
-    selected, unselected = select_knowledge(entries, bundle, chapter_text)
-    return render_knowledge_view(bundle, selected, unselected, chapter_text)
+    _, _, mentioned = select_knowledge(entries, bundle, chapter_text)
+    kv = render_knowledge_view(bundle, selected, unselected, "", mentioned=mentioned)
+    # provenance 信封（B5）：同参同哈希
+    from backend.services.world.reality_check import envelope
+
+    kv.provenance = envelope(
+        kind="knowledge_view",
+        source_keys=kv.selected_keys,
+        params={"sig": list(sig)},
+    )
+    return kv

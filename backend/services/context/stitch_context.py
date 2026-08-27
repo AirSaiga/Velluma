@@ -230,6 +230,7 @@ async def assemble_stitch_context(
 # 块 key → 展示标题（与 builder 块标题同词根；key 与 render_system_blocks 一一对应）
 _BLOCK_TITLES = {
     "scene": "场景身份",
+    "warm": "本章打算",
     "entities": "在场与相关",
     "proper_nouns": "在场专名",
     "canon": "Canon 图谱",
@@ -256,6 +257,8 @@ def _block_source(key: str, bundle: SettingsBundle, scene_hint: str = "") -> str
         return "知识平面 · " + ("世界实体" if bundle.world_sourced else "章级绑定")
     if key == "scene":
         return "场景钉 + 叙事时刻"
+    if key == "warm":
+        return "打算 tab · spine（章内冻结）"
     if key == "worldview":
         return "世界页 · 世界观"
     if key == "relations":

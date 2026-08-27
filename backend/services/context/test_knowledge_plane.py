@@ -75,32 +75,35 @@ class TestSelectors(unittest.TestCase):
         )
         return b
 
-    def test_present_dead_mention_selected_and_reason(self):
+    def test_present_dead_selected_mention_to_suffix(self):
+        """B6 前缀纪律：提及者逐出前缀——进 mentioned 后缀名单，不进 selected。"""
         b = self._world()
         entries = kp.build_knowledge_entries(b)
-        selected, unselected = kp.select_knowledge(entries, b, b.content_text)
+        selected, unselected, mentioned = kp.select_knowledge(entries, b, b.content_text)
         keys = [e.key for e in selected]
         self.assertIn("entity:林尘", keys)
         self.assertIn("entity:红月", keys)
-        self.assertIn("entity:白露", keys)          # 提及（本章全文）
-        self.assertNotIn("entity:远方角色", keys)   # 未在场未提及
+        self.assertNotIn("entity:白露", keys)       # 提及→后缀（B6）
+        self.assertNotIn("entity:远方角色", keys)
+        self.assertIn("白露", mentioned)             # 后缀名单
+        self.assertNotIn("远方角色", mentioned)
         reasons = {u["key"]: u["reason"] for u in unselected}
-        self.assertEqual(reasons.get("entity:远方角色"), "未在场且未提及")
+        self.assertEqual(reasons.get("entity:远方角色"), "未在场未提及（提及时进后缀）")
 
     def test_hard_flags(self):
         b = self._world()
         entries = kp.build_knowledge_entries(b)
-        selected, _ = kp.select_knowledge(entries, b, b.content_text)
+        selected, _, _m = kp.select_knowledge(entries, b, b.content_text)
         by = {e.key: e for e in selected}
         self.assertTrue(by["entity:林尘"].hard)   # 在场=硬
         self.assertTrue(by["entity:红月"].hard)   # 死亡=硬
-        self.assertFalse(by["entity:白露"].hard)  # 提及=软
 
-    def test_relation_needs_both_endpoints(self):
+    def test_relation_needs_both_prefix_endpoints(self):
+        """B6：关系两端点须都在前缀选中集（提及者不算——其边随后缀语义）。"""
         b = self._world()
         rel = _Ns(
             source_character=_Ns(name="林尘"),
-            target_character=_Ns(name="白露"),
+            target_character=_Ns(name="红月"),
             relationship_type="ally", description="并肩（旧识）",
         )
         rel_far = _Ns(
@@ -110,9 +113,9 @@ class TestSelectors(unittest.TestCase):
         )
         b.relationships = [rel, rel_far]
         entries = kp.build_knowledge_entries(b)
-        selected, unselected = kp.select_knowledge(entries, b, b.content_text)
+        selected, unselected, mentioned = kp.select_knowledge(entries, b, b.content_text)
         keys = [e.key for e in selected]
-        self.assertIn("relation:林尘~白露", keys)
+        self.assertIn("relation:林尘~红月", keys)   # 死者也是前缀选中（在场·死亡）
         reasons = {u["key"] for u in unselected}
         self.assertIn("relation:林尘~远方角色", reasons)
 
@@ -120,7 +123,7 @@ class TestSelectors(unittest.TestCase):
         ent = _entity("e1", "旧表角色", static="档案")
         b = _bundle(entities=[ent], world_sourced=False, states=[], content="")
         entries = kp.build_knowledge_entries(b)
-        selected, unselected = kp.select_knowledge(entries, b, "")
+        selected, unselected, mentioned = kp.select_knowledge(entries, b, "")
         self.assertEqual([e.key for e in selected], ["entity:旧表角色"])
         self.assertEqual(selected[0].selector, "作者显式·章级绑定")
         self.assertEqual(unselected, [])
@@ -134,7 +137,7 @@ class TestSelectors(unittest.TestCase):
         original = kp.KG_BUDGET_CHARS
         kp.KG_BUDGET_CHARS = 600  # 压低逃逸阀
         try:
-            selected, unselected = kp.select_knowledge(entries, b, b.content_text)
+            selected, unselected, mentioned = kp.select_knowledge(entries, b, b.content_text)
         finally:
             kp.KG_BUDGET_CHARS = original
         keys = [e.key for e in selected]
@@ -171,6 +174,7 @@ class TestRendering(unittest.TestCase):
     def test_temporal_prefix_and_fold_priority_note(self):
         kv, _ = self._kv()
         self.assertIn("【此刻·t=3520·位于北岸要塞】", kv.entities_text)
+        self.assertNotIn("白露", kv.entities_text)  # 提及者已被逐出前缀（B6）
         self.assertIn("以【此刻】为准", kv.entities_text)
         self.assertIn("档案（作者录入，未删节）", kv.entities_text)
 
@@ -219,6 +223,72 @@ class TestRendering(unittest.TestCase):
         b.prohibitions = _Proh()
         kv = kp.build_knowledge_view(b)
         self.assertIn("自定义禁词", kv.negative_constraints)
+
+
+class TestPrefixDiscipline(unittest.TestCase):
+    """B6 前缀纪律：作者打字（正文变化）不作废前缀；提及只进后缀。"""
+
+    def _world_bundle(self, content):
+        loc = _Ns(id="loc1", name="北岸要塞")
+        e1 = _entity("e1", "林尘", static="外貌：清瘦")
+        e2 = _entity("e2", "白露", static="语言习惯：短句")  # 未在场（提及后缀对象）
+        states = [{"entity_id": "e1", "alive": True, "location_id": "loc1"}]
+        return _bundle(
+            entities=[e1, e2], locations=[loc], scene_loc="loc1", states=states,
+            source="chapter_anchor",
+            worldview={"version": 1, "items": [{"id": "w1", "title": "机甲分级", "content": "D级……"}]},
+            content=content,
+        )
+
+    def test_prefix_byte_equal_across_typing(self):
+        kp._PREFIX_CACHE.clear()
+        b1 = self._world_bundle("<p>林尘拧紧了螺栓。</p>")
+        kv1 = kp.build_knowledge_view(b1)
+        b2 = self._world_bundle("<p>林尘拧紧了螺栓。他又想起白露说过的话，白露此刻并不在这里。</p>")
+        kv2 = kp.build_knowledge_view(b2)
+        for field in ("scene_identity", "entities_text", "worldview_text",
+                      "relations_text", "negative_constraints", "warm_card"):
+            self.assertEqual(getattr(kv1, field), getattr(kv2, field),
+                             f"前缀字段 {field} 应章内逐字节稳定")
+        self.assertNotIn("白露", kv1.recency_pin)
+        self.assertIn("本章提及：白露", kv2.recency_pin)  # 提及只进后缀
+
+    def test_world_edit_invalidates_prefix(self):
+        kp._PREFIX_CACHE.clear()
+        b1 = self._world_bundle("<p>正文。</p>")
+        kv1 = kp.build_knowledge_view(b1)
+        b2 = self._world_bundle("<p>正文。</p>")
+        e2 = _entity("e9", "新角色", static="外貌：新人")
+        b2.entities = [b2.entities[0], e2]  # 世界侧变化（实体数变）
+        kv2 = kp.build_knowledge_view(b2)
+        # 新实体未在场未提及 → 前缀实体块不变，但签名已换（缓存不复用错值）
+        self.assertEqual(kv1.entities_text, kv2.entities_text)
+        b3 = self._world_bundle("<p>正文。</p>")
+        states3 = [{"entity_id": "e9", "alive": True, "location_id": "loc1"}]
+        e9 = _entity("e9", "新角色", static="外貌：新人")
+        b3.entities = [b3.entities[0], e9]
+        b3.world_state = {"character_states": states3}
+        kv3 = kp.build_knowledge_view(b3)
+        self.assertIn("新角色", kv3.entities_text)  # 在场=新前缀
+
+    def test_warm_card_from_spine(self):
+        b = self._world_bundle("<p>正文。</p>")
+        b.chapter = _Ns(scene_location_id="loc1", spine={
+            "intent": {"text": "林尘决定夜探灯塔", "source": "author"},
+            "anchors": [
+                {"id": "a1", "text": "发现日志", "status": "pending"},
+                {"id": "a2", "text": "已划掉的", "status": "dropped"},
+            ],
+        })
+        kp._PREFIX_CACHE.clear()
+        kv = kp.build_knowledge_view(b)
+        self.assertIn("本章打算：林尘决定夜探灯塔", kv.warm_card)
+        self.assertIn("非写不可的情节：发现日志", kv.warm_card)
+        self.assertNotIn("已划掉的", kv.warm_card)
+        # 无 spine → 空串（零变化）
+        kp._PREFIX_CACHE.clear()
+        kv2 = kp.build_knowledge_view(self._world_bundle("<p>正文。</p>"))
+        self.assertEqual(kv2.warm_card, "")
 
 
 class TestRenderSystemBlocksOrder(unittest.TestCase):

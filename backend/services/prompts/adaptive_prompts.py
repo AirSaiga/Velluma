@@ -284,6 +284,7 @@ def render_system_blocks_with_usage(
     worldview_text: str = "",
     relations_text: str = "",
     negative_constraints: str = "",
+    warm_card: str = "",
 ) -> tuple:
     """渲染 system 知识块（知识检索平面 v3.1 注入序权威）。
 
@@ -323,6 +324,7 @@ def render_system_blocks_with_usage(
         by_key.pop("proper_nouns", None)  # 实体块已含全部名字，去重
     blocks = [
         ("scene", _wrap_kg(scene_identity)),
+        ("warm", _wrap_kg(warm_card)),
         ("entities", _wrap_kg(entities_text)),
         ("canon", by_key.get("canon", "")),
         ("secrets", by_key.get("secrets", "")),
@@ -335,8 +337,8 @@ def render_system_blocks_with_usage(
         ("author_samples", by_key.get("author_samples", "")),
     ]
     if not entities_text:
-        # 专名兜底位：无知识平面实体块时维持旧序位置（canon 前）
-        blocks.insert(2, ("proper_nouns", by_key.get("proper_nouns", "")))
+        # 专名兜底位：无知识平面实体块时维持旧序位置（entities 后、canon 前）
+        blocks.insert(3, ("proper_nouns", by_key.get("proper_nouns", "")))
     return blocks, usages
 
 
@@ -354,6 +356,7 @@ def render_system_blocks(
     worldview_text: str = "",
     relations_text: str = "",
     negative_constraints: str = "",
+    warm_card: str = "",
 ) -> List[tuple]:
     """按真实注入序渲染 system 知识块，返回 [(key, block_text)]。
 
@@ -388,6 +391,7 @@ def render_system_blocks(
         worldview_text=worldview_text,
         relations_text=relations_text,
         negative_constraints=negative_constraints,
+        warm_card=warm_card,
     )
     return blocks
 
@@ -428,6 +432,7 @@ def build_continue_prompt(
     worldview_text: str = "",
     relations_text: str = "",
     negative_constraints: str = "",
+    warm_card: str = "",
     previous_summary: str = "",
     recency_pin: str = "",
 ) -> tuple:
@@ -464,6 +469,7 @@ def build_continue_prompt(
         worldview_text=worldview_text,
         relations_text=relations_text,
         negative_constraints=negative_constraints,
+        warm_card=warm_card,
     ):
         system_prompt += _block
 
@@ -527,6 +533,7 @@ def build_burst_prompt(
     worldview_text: str = "",
     relations_text: str = "",
     negative_constraints: str = "",
+    warm_card: str = "",
     previous_summary: str = "",
     recency_pin: str = "",
 ) -> tuple:
@@ -565,6 +572,7 @@ def build_burst_prompt(
         worldview_text=worldview_text,
         relations_text=relations_text,
         negative_constraints=negative_constraints,
+        warm_card=warm_card,
     ):
         system_prompt += _block
 
@@ -647,6 +655,7 @@ def build_outline_expand_prompt(
     worldview_text: str = "",
     relations_text: str = "",
     negative_constraints: str = "",
+    warm_card: str = "",
     previous_summary: str = "",
     recency_pin: str = "",
 ) -> tuple:
@@ -694,6 +703,7 @@ def build_outline_expand_prompt(
         worldview_text=worldview_text,
         relations_text=relations_text,
         negative_constraints=negative_constraints,
+        warm_card=warm_card,
     ):
         system_prompt += _block
 
@@ -785,6 +795,7 @@ def build_opening_prompt(
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
+    warm_card: str = "",
     scene_identity: str = "",
     entities_text: str = "",
     relations_text: str = "",
@@ -826,6 +837,7 @@ def build_opening_prompt(
         worldview_text=worldview_text,
         relations_text=relations_text,
         negative_constraints=negative_constraints,
+        warm_card=warm_card,
     ):
         system_prompt += _block
 

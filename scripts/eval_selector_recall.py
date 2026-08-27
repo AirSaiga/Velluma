@@ -40,7 +40,7 @@ async def _make_template():
                 continue
             bundle = await load_chapter_settings_bundle(str(ch.id), db)
             entries = build_knowledge_entries(bundle)
-            selected, _ = select_knowledge(entries, bundle, bundle.content_text or "")
+            selected, _, _mentions = select_knowledge(entries, bundle, bundle.content_text or "")
             out.append({
                 "chapter_id": str(ch.id),
                 "chapter_title": ch.title,
@@ -65,7 +65,7 @@ async def _eval():
                 continue
             bundle = await load_chapter_settings_bundle(it["chapter_id"], db)
             entries = build_knowledge_entries(bundle)
-            selected, _ = select_knowledge(entries, bundle, bundle.content_text or "")
+            selected, _, _mentions = select_knowledge(entries, bundle, bundle.content_text or "")
             got = {e.key for e in selected}
             inter = expected & got
             rec = len(inter) / len(expected)
