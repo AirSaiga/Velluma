@@ -1382,12 +1382,38 @@ class WorldEvent(Base):
     tags = Column(JSONB, default=list)
     note = Column(Text, default="")
     metadata_ = Column("metadata", JSONB, default=dict)
+    # ---- 世界内核 v2（B1 · 决策 1 三轴分离）----
+    # time_precision：叙事时间精度枚举（exact/interval/unknown）——unknown 允许
+    # 事件只靠序约束边定序，不伪造默认日期（AGENTS「无叙事锚不伪造日期」的内核化）
+    time_precision = Column(String(16), nullable=True)
+    # supersedes：修订链（transaction time 轴）——重写旧章时新事件 supersede
+    # 旧事件而非物理删改；append-only 纪律由此保持（决策 1）
+    supersedes = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="SET NULL"),
+                        nullable=True, index=True)
 
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self):
         return f"<WorldEvent {self.event_type} seq={self.sequence_num}>"
+
+
+class WorldEventEdge(Base):
+    """事件间时序约束边（B1 · docs/world-kernel-foundation.md §3 决策 1）。
+
+    与因果边（world_events.causes）分管不同语义不混用：时序边管折叠顺序与
+    未知日期事件的定位（time_precision=unknown 的事件靠边定序）；因果边管
+    一致性检查与连锁分析。append-only，与事件同纪律。
+    """
+
+    __tablename__ = "world_event_edges"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_event_id = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    object_event_id = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # before|after：subject 在 object 之(前|后)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class WorldLocation(Base):

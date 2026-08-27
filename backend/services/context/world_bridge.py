@@ -262,7 +262,12 @@ async def load_world_overlay(
 
     nt = await resolve_narrative_time(db, chapter)
     t = nt.t
-    state = await repo.compute_world_state(book_id, t)
+    # 世界内核 B1（docs/world-kernel-foundation.md §3）：世界状态消费收口到
+    # Fold API 唯一入口——四域模态封闭由此保证，禁止旁路直调仓储折叠
+    from backend.services.world.fold import fold as world_fold
+    state = (await world_fold(
+        db, book_id, t=t, domains=("truth",), perspective_set=(),
+    ))["truth"]
     locations = await repo.locations.list_by_book(book_id)
     relations = await repo.relations.list_by_book(book_id)
 

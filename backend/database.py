@@ -115,6 +115,19 @@ if not USE_SQLITE:
 Base = declarative_base()
 
 MIGRATIONS: list[dict[str, Any]] = [
+    # ---- 世界内核 v2（B1 · docs/world-kernel-foundation.md §3 决策 1）----
+    {
+        "table": "world_events",
+        "column": "time_precision",
+        "definition": "VARCHAR(16)",
+        "expected_udt_names": {"varchar", "character varying"},
+    },
+    {
+        "table": "world_events",
+        "column": "supersedes",
+        "definition": "UUID",
+        "expected_udt_names": {"uuid", "CHARACTER(36)"},
+    },
     {
         "table": "books",
         "column": "worldview_settings",
