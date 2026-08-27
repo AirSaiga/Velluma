@@ -116,10 +116,11 @@ class TestPerceptionBeatBoundary:
             projections=[],
             nutrients={},
             hard_constraints={},
-            direction_weights={"主线": 0.36, "伏笔": 0.18},
+            salience_hints=["林尘（近3段提及2次）", "白露（被冷落的重要）"],
         )
-        assert "当前时刻" in user
-        assert "禁止跳到节拍之后凑数" in user
+        # B7：方向权重配额已废——热层具名提示行取代（常量权重下的硬性扭曲）
+        assert "此刻值得盯住" in user
+        assert "林尘（近3段提及2次）" in user
 
     def test_projection_block_anti_compressor(self):
         """推测注入块：防挂件退化成推测压缩器（优先从当前段落生发）。"""

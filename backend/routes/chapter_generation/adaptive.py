@@ -912,10 +912,10 @@ async def stitch_ghost(
     """续写/缝合幽灵草稿，SSE 打字机推流。不依赖 run_id（自由路径）。"""
     bind_adaptive_trace(chapter_id)
     trace_event("adaptive_stitch_start", mode=request.mode, target_chars=request.target_chars)
-    # 方向采纳回报：作者缝合了某方向的碎片 → 通知调度器降权（负反馈）
+    # 方向采纳回报（B7）：负反馈力学已退役——保留为行为信号埋点
+    # （热层行为乘子的数据源：一次肯定胜过三次否定，见 salience 模块头）
     if request.adopted_direction:
-        orch = get_orchestrator(chapter_id, lambda: AsyncSessionLocal())
-        orch.on_direction_adopted(request.adopted_direction)
+        trace_event("direction_adopted", direction=request.adopted_direction)
 
     # 上下文装配（B2 单一装配源）：bundle/召回/文风检索统一下沉到
     # services/context/stitch_context.py——本路由与 context-preview 端点共用

@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+from backend.services.observability.run_trace import trace_event
 from backend.services.adaptive.change_detector import (
     AuthorState, ChangeSignal, detect, aggregate_severity,
 )
@@ -77,9 +78,8 @@ class AdaptiveOrchestrator:
         self._last_dock_text_sig: str = ""
         self._last_dock_proj_sig: str = ""
         # 方向权重（NLE-ADF 3.0）：5 叙事方向的偏好，每次心跳更新，dock_generator 据此分布生成
-        self._direction_weights: Dict[str, float] = {}
+        # B7：direction_weights 已退役（尸检见 docs/world-kernel-foundation.md 动因）
         # 被采纳的方向（缝合降权用，compute 后清空）
-        self._adopted_directions: List[str] = []
         # canon 感知缓存：recent_text 签名未变则复用上次 hints（纯算法但省 DB 查询）
         self._last_canon_text_sig: str = ""
         # 组件注册（延迟 import 避免循环）
@@ -143,28 +143,42 @@ class AdaptiveOrchestrator:
                 from backend.services.adaptive.change_detector import _text_sig
                 self._prev_outline_sig = _text_sig(state.outline_text)
 
-            # ---- 方向权重更新（纯算法，每次心跳都跑，零 LLM）----
-            # 输入：意图(must_hits/foreshadows) + 软约束 + 当前段落(惯性力) + 已写正文(推动力)
-            # 产出：5 方向的归一化权重，dock_generator 据此分布生成碎片
-            from backend.services.adaptive.direction_weights import compute as compute_weights
-            from backend.services.adaptive.paragraph_source import written_text
-            from backend.services.context.settings_bundle import load_chapter_settings_bundle
-            bundle = await load_chapter_settings_bundle(self.chapter_id, db)
-            intent = snapshot.get("intent", {})
-            soft = bundle.soft_constraints()
-            # 推动力「已达成」判定用画布全文——写到画布即已写（无论是否沉淀）；
-            # 层 1 事实作者删改后过期，不再作为判定文本
-            written_for_weights = written_text(bundle.content_text or "")
-            self._direction_weights = compute_weights(
-                intent=intent,
-                soft=soft,
-                recent_text=state.recent_text or "",
-                facts_text=written_for_weights,
-                prev_weights=self._direction_weights,
-                settled_just_now=False,  # on_heartbeat 不触发节拍重置（on_settle 才触发）
-                adopted_directions=self._adopted_directions,
-            )
-            self._adopted_directions = []  # 消费完清空
+            # ---- 热层影子（B7 · 方向权重葬礼后的转世）----
+            # 力学模型已删（尸检：18 次恒常量输出）；有价值的信号（未兑现伏笔/
+            # 期待张力/先验重要度）由 salience 三族信号承接。此处 log-only：
+            # 算而不注，攒影子数据过 A/B 闸后才供 dock 单车道
+            try:
+                from backend.services.adaptive.salience import compute_salience
+                from backend.services.context.settings_bundle import load_chapter_settings_bundle
+
+                _bundle = await load_chapter_settings_bundle(self.chapter_id, db)
+                _names = {
+                    str(getattr(getattr(e, "character", None), "name", "") or ""): [
+                        str(getattr(getattr(e, "character", None), "name", "") or "")
+                    ] + [str(a) for a in (getattr(getattr(e, "character", None), "aliases", None) or [])]
+                    for e in (_bundle.entities or [])
+                }
+                _names = {k: v for k, v in _names.items() if k}
+                _priors = {
+                    k: int(getattr(getattr(e, "world_entity", None), "importance", 5) or 5)
+                    for e in (_bundle.entities or [])
+                    for k in [str(getattr(getattr(e, "character", None), "name", "") or "")]
+                    if k
+                }
+                _loops = [str(getattr(h, "content", "") or "") if not isinstance(h, dict)
+                          else str(h.get("content", "") or "") for h in (_bundle.open_hooks or [])]
+                _hot = compute_salience(
+                    canvas_text=_bundle.content_text or "",
+                    entity_names=_names,
+                    priors=_priors,
+                    open_loops=_loops,
+                )
+                trace_event(
+                    "salience_shadow",
+                    hot=[{"title": e.title, "slot": e.slot, "score": e.score} for e in _hot],
+                )
+            except Exception as e:
+                logger.debug(f"[orchestrator] 热层影子失败（不阻塞心跳）: {e}")
 
             # ---- 决策：哪些组件该激活 ----
             activations = self._decide(state, snapshot, signals)
@@ -186,8 +200,6 @@ class AdaptiveOrchestrator:
                     # dock_generator/canon_watch 据此锚定「作者当前段落」；
                     # dock 另带方向权重（LLM 据此分布生成）
                     extra: Dict[str, Any] = {"recent_text": state.recent_text or ""}
-                    if act.component == "dock_generator":
-                        extra["direction_weights"] = self._direction_weights
                     self._sync_inflight.add(act.component)
                     try:
                         await self._activate_sync(act, db, extra_context=extra)
@@ -424,14 +436,6 @@ class AdaptiveOrchestrator:
             logger.warning(f"[orchestrator] 同步组件 {act.component} 失败: {e}", exc_info=True)
             self._note_component_error(act.component, e)  # P3-1
 
-    def on_direction_adopted(self, direction: str) -> None:
-        """作者缝合采纳了某方向的碎片 → 记录，下次心跳 compute 时该方向降权（负反馈）。
-
-        由 stitch-ghost 端点调用（缝合时前端回报 adopted_direction）。
-        """
-        if direction and direction not in self._adopted_directions:
-            self._adopted_directions.append(direction)
-
     async def on_settle(self, segment_text: str, entities: List[Dict], commit: bool = False) -> Dict[str, Any]:
         """段落锁死事件：追加层 1 + 同步触发沉淀（抽涌现实体 + 冲突检测）+ 节拍力权重重算。
 
@@ -450,32 +454,8 @@ class AdaptiveOrchestrator:
             await repo.append_fact(self.chapter_id, seg)
             await db.commit()
 
-        # ---- 节拍力：沉淀触发方向权重重算（新段新节拍，刻画/环境部分重置）----
-        try:
-            from backend.services.adaptive.direction_weights import compute as compute_weights
-            from backend.services.adaptive.paragraph_source import written_text
-            from backend.services.context.settings_bundle import load_chapter_settings_bundle
-            async with self.db_factory() as db:
-                snapshot = await WorldModelRepository(db).snapshot(self.chapter_id)
-                bundle = await load_chapter_settings_bundle(self.chapter_id, db)
-                intent = snapshot.get("intent", {})
-                soft = bundle.soft_constraints()
-                # 推动力判定文本=画布全文；刚沉淀的段落可能尚未过存盘防抖落库，
-                # 判定文本缺席会让本段 must_hit 被误判未达——补在尾部
-                written_for_weights = written_text(bundle.content_text or "")
-                seg = segment_text.strip()
-                if seg and seg not in written_for_weights:
-                    written_for_weights = written_for_weights + "\n\n" + seg
-                self._direction_weights = compute_weights(
-                    intent=intent, soft=soft,
-                    recent_text=segment_text, facts_text=written_for_weights,
-                    prev_weights=self._direction_weights,
-                    settled_just_now=True,  # ← 节拍力触发
-                    adopted_directions=self._adopted_directions,
-                )
-                self._adopted_directions = []
-        except Exception as e:
-            logger.warning(f"[orchestrator] 沉淀节拍力重算失败: {e}")
+        # B7：沉淀节拍力（方向权重重算）已随力学模型退役——新段新节拍的
+        # 注意力刷新由热层 salience 的段距衰减天然承担（纯函数无需事件触发）
 
         # ---- 同步触发沉淀（抽涌现实体 + 冲突检测）----
         sediment_result = {}

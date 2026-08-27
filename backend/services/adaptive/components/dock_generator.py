@@ -48,7 +48,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
     kw 可带 direction_weights（5 叙事方向权重），碎片按此分布生成并自标 direction。
     """
-    direction_weights = kw.get("direction_weights") or None
+    direction_weights = kw.get("direction_weights") or None  # 已退役（B7 忽略）
+    # B7 热层单车道：dock 消费 salience 六槽热集的具名提示（A/B 闸：
+    # SALIENCE_DOCK_LANE 常量翻转即回退；影子 trace 由 orchestrator 常开）
+    salience_hints = kw.get("salience_hints") or None
     bundle = await load_chapter_settings_bundle(chapter_id, db)
 
     # 取作者当前段落：心跳实时段（orchestrator 停顿心跳透传）→ 正文尾部（剥 HTML）。
@@ -84,6 +87,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     sys_p, usr_p = build_dock_generator_prompt(
         recent_text, projections, nutrients, hard,
         direction_weights=direction_weights,
+        salience_hints=salience_hints,
         reader_expectations=soft.get("reader_expectations") or None,
         memory_echoes=memory_echoes or None,
         spine_intent=await _spine_intent(chapter_id, db),

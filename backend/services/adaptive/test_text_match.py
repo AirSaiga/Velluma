@@ -18,7 +18,7 @@
 # 快照纪律：以下断言在改动前先跑绿，锁定现状；判据收紧后行为有变的
 # 条目按「有意变化」更新，无变的条目保持——防止柔性机制隐性转向。
 
-from backend.services.adaptive.direction_weights import _is_met
+from backend.services.adaptive.text_match import matches as _is_met  # B7：direction_weights 退役，_is_met 语义由共享判据直供
 
 
 def test_b1_snapshot_exact_verbatim_is_met():
@@ -57,9 +57,11 @@ def test_b1_snapshot_no_fragment_item_is_unmet():
 
 
 def test_b1_snapshot_empty_item_is_met():
-    """空条目 → 已达成（防御性短路，保持）。"""
-    assert _is_met("", "任意正文") is True
-    assert _is_met("   ", "任意正文") is True
+    """空条目语义（B7 更新）：direction_weights 退役后由共享判据直供——
+    空条目=无可判片段=无证据（未达成）。旧「空=已达成」短路属于已删除的
+    推动力计数语义，不再保留。"""
+    assert _is_met("", "任意正文", no_fragments=False) is False
+    assert _is_met("   ", "任意正文", no_fragments=True) is True  # 空白条目走 B3 兜底语义
 
 
 # ============================================================

@@ -1083,7 +1083,8 @@ def build_dock_generator_prompt(
     projections: list,
     nutrients: dict,
     hard_constraints: dict,
-    direction_weights: dict = None,
+    direction_weights: dict = None,  # 已退役（B7），参数保留兼容
+    salience_hints: Optional[List[str]] = None,
     reader_expectations: list = None,
     memory_echoes: list = None,
     spine_intent: str = "",
@@ -1096,7 +1097,8 @@ def build_dock_generator_prompt(
         projections: 层 3 推测（SegmentProjection.to_dict() 列表）
         nutrients: 设定养料（角色物理特征/资产/地点）
         hard_constraints: 硬约束（banned_words / character_statics / canon_private_labels）
-        direction_weights: 5 叙事方向权重（{"主线":0.4,...}），碎片按此分布生成并自标 direction
+        direction_weights: 已退役参数（B7 方向权重葬礼；保留签名兼容，忽略）
+        salience_hints: 热层六槽热集的具名提示行（salience.compute_salience 产出；空=无提示块
         reader_expectations: 读者期待（[{type, description, tension}]，最多取前 2 条进块；
             呼应期待的碎片须标 from_expectation，呼应=侧面暗示，绝不直接揭晓）
         spine_intent: 章级谋篇意图一句话（P1.4 M2；空=不注入。8-14 字零件吃
@@ -1120,19 +1122,16 @@ def build_dock_generator_prompt(
     statics = hard_constraints.get("character_statics", {})
     static_lines = [f"- {k}：{v[:80]}" for k, v in statics.items() if k and v][:5]
 
-    # 方向权重块（碎片按此分布生成；防剧透——只给权重数字，不给剧情细节）
-    if direction_weights:
-        dw_lines = []
-        for d, w in sorted(direction_weights.items(), key=lambda x: -x[1]):
-            pct = int(w * 100)
-            if pct > 0:
-                dw_lines.append(f"{d} {pct}%")
-        dw_text = "｜".join(dw_lines) if dw_lines else "（均匀分布）"
-        dw_block = f"""
-# 叙事方向权重（碎片请按此分布生成，高权重方向至少占 1 个）
-{dw_text}
-每个碎片必须标注 direction（只能从 主线/伏笔/刻画/环境/关系 里选）。高权重方向必须用**当前时刻**做得到的画面满足——若该方向的下一步就是节拍事件，给到达前的最后一步或换侧面补位，禁止跳到节拍之后凑数。
-"""
+    # 注意力提示行（B7 · 方向权重葬礼后的转世）：热层六槽热集的具名提示
+    # 取代抽象方向百分比——「该盯住谁/什么」比「主线 36%」对模型可操作性强
+    # 一个层级；配额强制（高权重方向至少占一枚）随之废除（常量权重下的
+    # 硬性扭曲）。direction 标注保留（分析面元数据）。
+    if salience_hints:
+        hint_lines = [f"- {h}" for h in salience_hints[:6]]
+        dw_block = (
+            "\n# 此刻值得盯住（注意力提示，参考非强制——正文事实与就近铁律优先）\n"
+            + "\n".join(hint_lines) + "\n"
+        )
     else:
         dw_block = ""
 
