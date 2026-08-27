@@ -201,27 +201,24 @@ class TestContinueStyleCondense:
         for mode in ("continue", "stitch", "burst", "outline", "open"):
             assert render_system_blocks(mode=mode) == render_system_blocks(mode="")
 
-    def test_light_modes_keep_key_lines_only(self):
-        """生效路径：continue/stitch 画像只剩关键行（句长节奏 + 对话目标 +
-        旋钮意图行），其余画像行缺席。"""
+    def test_all_modes_keep_full_profile_task_parity(self):
+        """知识检索平面 v3.1（2026-08-27）：轻档画像压缩退役——任务平权，
+        句级两档与段落级三档拿到同一份完整画像（docs §1 公理二；
+        实测证伪「句级少注入」：stitch 档 0/7 采纳恰是最瞎的档）。"""
         for mode in ("continue", "stitch"):
             sys_prompt, _ = build_continue_prompt(
                 fragment="他攥紧扳手", rolling_prefix="灯下。",
                 mode=mode, style_positive=STYLE_FULL,
             )
-            for line in STYLE_LIGHT_LINES:
-                assert line in sys_prompt, f"{mode} 应保留关键行: {line}"
-            for dropped in ("词汇层级", "语域偏好", "开头习惯", "结尾习惯", "段落节奏：两长一短"):
-                assert dropped not in sys_prompt, f"{mode} 不应保留非关键行: {dropped}"
-            assert "作者文风画像" in sys_prompt  # 块头仍在（有关键行存活）
+            for line in STYLE_FULL.split("\n"):
+                assert line in sys_prompt, f"{mode} 应保留完整画像行: {line}"
 
-    def test_light_mode_block_equals_expected_text(self):
-        """轻档 style 块内容 = 固定头 + 关键行拼接（逐字节口径）。"""
-        by_key = dict(render_system_blocks(style_positive=STYLE_FULL, mode="continue"))
-        lines = by_key["style_positive"].split("\n")
-        assert lines[2] == "# 作者文风画像（贴合其笔迹写作，软约束）"
-        assert lines[3] == "以下是这位作者的文风特征，续写的语感、句式与节奏都应向它靠拢："
-        assert "\n".join(lines[4:]) == "\n".join(STYLE_LIGHT_LINES)
+    def test_style_block_mode_identity(self):
+        """五档 style 块与恒等路径逐字节一致（档间差分已随轻档压缩退役）。"""
+        base = dict(render_system_blocks(style_positive=STYLE_FULL, mode=""))
+        for mode in ("continue", "stitch", "burst", "outline", "open"):
+            by = dict(render_system_blocks(style_positive=STYLE_FULL, mode=mode))
+            assert by["style_positive"] == base["style_positive"]
 
     def test_paragraph_modes_keep_full_profile(self):
         """burst/outline/open 保持完整画像（段落级生成不压缩）。"""
@@ -241,12 +238,12 @@ class TestContinueStyleCondense:
         for line in STYLE_FULL.split("\n"):
             assert line in sys_prompt
 
-    def test_preview_usage_reflects_condensed_entries(self):
-        """预算器同源：轻档压缩后 BlockUsage 的条目口径=压缩后行数（3）。"""
+    def test_preview_usage_full_entries_no_condense(self):
+        """预算器同源：BlockUsage 条目口径=完整画像行数（压缩退役后无档间差分）。"""
         _blocks, usages = render_system_blocks_with_usage(
             style_positive=STYLE_FULL, mode="continue",
         )
         style_usage = next(u for u in usages if u.key == "style_positive")
-        assert style_usage.entries_total == len(STYLE_LIGHT_LINES)
-        assert style_usage.entries_kept == len(STYLE_LIGHT_LINES)
-        assert style_usage.trimmed is False  # 压缩≠裁剪：allocate 未触发
+        assert style_usage.entries_total == len(STYLE_FULL.split("\n"))
+        assert style_usage.entries_kept == len(STYLE_FULL.split("\n"))
+        assert style_usage.trimmed is False  # allocate 未触发
