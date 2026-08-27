@@ -1415,6 +1415,11 @@ class WorldEventEdge(Base):
     kind = Column(String(16), nullable=False)  # before|after：subject 在 object 之(前|后)
     created_at = Column(DateTime, default=utc_now)
 
+    # uow 依赖边（flush 排序按 relationship 而非裸 FK——无此声明时本表会
+    # 排到 chapters/world_events 之前触发 FK 失败，见 B4 施工记录）
+    subject_event = relationship("WorldEvent", foreign_keys=[subject_event_id])
+    object_event = relationship("WorldEvent", foreign_keys=[object_event_id])
+
 
 # 世界内核 Intent 生命周期枚举（B2 · docs/world-kernel-foundation.md §2 决策 4：
 # 枚举与区间，拒绝概率浮点——意图的不确定性用生命周期+软窗口表达）
@@ -1462,6 +1467,43 @@ class WorldIntent(Base):
     note = Column(Text, default="")
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    chapter = relationship("Chapter", foreign_keys=[chapter_id])
+    book = relationship("Book", foreign_keys=[book_id])
+
+
+# 呈现方式枚举（B4 · fabula↔syuzhet 的桥）：发生了 vs 怎么写给读者
+DEPICTION_MODES = ("shown", "told", "hinted", "symbolized")
+
+
+class WorldDepiction(Base):
+    """呈现关系（B4 · docs/world-kernel-foundation.md §3）——哪个事实在哪章
+    以何种方式被写给读者。读者认知折叠（fold reader 域）的唯一原料；
+    负空间引擎（世界真相 − 读者认知 = 可揭示戏剧资本）的数据基座。
+
+    摄入纪律：只经候选池气闸（author 裁决后 confirmed）；status=candidate
+    的是 AI/启发式提案，confirmed 才进读者折叠（诚实降级：未回填=unknown）。
+    """
+
+    __tablename__ = "world_depictions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_type = Column(String(16), nullable=False)  # event | proposition
+    subject_id = Column(String(64), nullable=False, index=True)  # world_event.id / canon_node.id
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="shown")  # DEPICTION_MODES
+    status = Column(String(16), nullable=False, default="candidate")  # candidate | confirmed
+    source = Column(String(16), nullable=False, default="heuristic")  # heuristic | extracted | author
+    created_at = Column(DateTime, default=utc_now)
+
+    chapter = relationship("Chapter", foreign_keys=[chapter_id])
+    book = relationship("Book", foreign_keys=[book_id])
+
+    __table_args__ = (
+        UniqueConstraint("book_id", "subject_type", "subject_id", "chapter_id",
+                         name="uq_depiction_subject_chapter"),
+    )
 
 
 class WorldLocation(Base):

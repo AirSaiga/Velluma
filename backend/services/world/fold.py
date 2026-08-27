@@ -128,5 +128,17 @@ async def fold(
             "reveals": await repo_i.read_merge_reveals(UUID(str(book_id))),
         }
     if "reader" in domain_set:
-        result["reader"] = {}  # B4 接入（Depiction 折叠，未回填=unknown）
+        # B4 接入：Depiction 折叠（confirmed 呈现 → 读者认知；未回填=unknown）
+        from sqlalchemy import select as _rs
+
+        from backend.models import WorldDepiction as _WD
+        from backend.services.world.negative_space import fold_reader
+
+        _deps = (await db.execute(
+            _rs(_WD).where(
+                _WD.book_id == UUID(str(book_id)),
+                _WD.status == "confirmed",
+            )
+        )).scalars().all()
+        result["reader"] = fold_reader(list(_deps))
     return result

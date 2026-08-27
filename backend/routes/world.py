@@ -820,3 +820,118 @@ async def upload_map_image(book_id: UUID, file: UploadFile = File(...)):
     with open(path, "wb") as f:
         f.write(content)
     return {"url": f"/world-images/{book_id}/{filename}"}
+
+# ============================================================
+# 世界内核 B4：呈现关系（Depiction）与负空间（docs/world-kernel-foundation.md §3）
+# ============================================================
+
+
+class DepictionBackfillRequest(BaseModel):
+    chapter_id: UUID
+
+
+@router.get("/{book_id}/world/dramatic-capital")
+async def get_dramatic_capital(
+    book_id: UUID,
+    chapter_id: Optional[UUID] = Query(None, description="以此章叙事时刻为 t；缺省 t=0"),
+    db: AsyncSession = Depends(get_db),
+):
+    """负空间清单：可揭示戏剧资本（世界真相 − 读者已知 − 已排期揭示）。
+
+    B9 认知浮现三时机之一的数据源；认知模型默认不可见的红线不破——
+    本端点仅供前端显式入口（负空间清单）与 finish 报告消费。
+    """
+    from backend.services.world.negative_space import dramatic_capital
+
+    t = 0
+    if chapter_id:
+        from backend.models import Chapter as _Chapter
+
+        ch = await db.get(_Chapter, chapter_id)
+        t = (getattr(ch, "narrative_time", None) or 0) if ch else 0
+    capital = await dramatic_capital(db, book_id, t=t)
+    return {"capital": capital, "count": len(capital)}
+
+
+@router.post("/{book_id}/world/depictions/backfill")
+async def backfill_depictions(
+    book_id: UUID, payload: DepictionBackfillRequest, db: AsyncSession = Depends(get_db)
+):
+    """通读阶段 C（启发式首版）：从章正文回填呈现关系候选。
+
+    纪律：只产 candidate（作者 confirm 才进读者折叠）；source=heuristic
+    如实标注；幂等（同章同命题不重复提案）。匹配口径：canon 命题的
+    label/public_text 出现在章正文 → 该命题在本章被「写出」（mode=shown）。
+    """
+    import re as _re
+
+    from backend.models import Chapter as _Chapter, WorldDepiction
+    from backend.services.rag.memory_indexing import _html_to_plain
+
+    ch = await db.get(_Chapter, payload.chapter_id)
+    if not ch or str(ch.book_id) != str(book_id):
+        raise HTTPException(404, "章节不存在")
+    text = _re.sub(r"\s+", "", _html_to_plain(ch.content_text or ""))
+    if not text:
+        return {"created": 0, "candidates": []}
+
+    from backend.models import CanonNode
+
+    nodes = (await db.execute(
+        select(CanonNode).where(CanonNode.book_id == book_id)
+    )).scalars().all()
+    existing = {
+        (str(d.subject_id))
+        for d in (await db.execute(
+            select(WorldDepiction).where(
+                WorldDepiction.book_id == book_id,
+                WorldDepiction.chapter_id == payload.chapter_id,
+            )
+        )).scalars().all()
+    }
+    created = []
+    for node in nodes:
+        nid = str(node.id)
+        if nid in existing:
+            continue
+        probes = [p for p in (node.label, (node.public_text or "")[:40]) if p and len(p) >= 3]
+        if any(p in text for p in probes):
+            row = WorldDepiction(
+                book_id=book_id, subject_type="proposition", subject_id=nid,
+                chapter_id=payload.chapter_id, mode="shown",
+                status="candidate", source="heuristic",
+            )
+            db.add(row)
+            created.append({"subject_id": nid, "label": node.label})
+    await db.commit()
+    return {"created": len(created), "candidates": created}
+
+
+@router.post("/{book_id}/world/depictions/{depiction_id}/confirm")
+async def confirm_depiction(
+    book_id: UUID, depiction_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """作者裁决：候选呈现 → confirmed（进读者折叠）。"""
+    from backend.models import WorldDepiction
+
+    row = await db.get(WorldDepiction, depiction_id)
+    if not row or str(row.book_id) != str(book_id):
+        raise HTTPException(404, "呈现关系不存在")
+    row.status = "confirmed"
+    await db.commit()
+    return {"id": str(row.id), "status": row.status}
+
+
+@router.post("/{book_id}/world/depictions/{depiction_id}/reject")
+async def reject_depiction(
+    book_id: UUID, depiction_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """作者裁决：否决候选呈现（留痕不进读者折叠）。"""
+    from backend.models import WorldDepiction
+
+    row = await db.get(WorldDepiction, depiction_id)
+    if not row or str(row.book_id) != str(book_id):
+        raise HTTPException(404, "呈现关系不存在")
+    row.status = "rejected"
+    await db.commit()
+    return {"id": str(row.id), "status": row.status}
