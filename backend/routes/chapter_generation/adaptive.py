@@ -67,6 +67,7 @@ from backend.services.context.stitch_context import (
     assemble_stitch_context,
     build_context_preview,
 )
+from backend.services.context.knowledge_plane import KnowledgeView, kg_block_kwargs
 # A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：stitch 注入剂量改引 budget 表
 from backend.services.context.budget import (
     SPINE_SUGGEST_MAX_TOKENS,
@@ -74,7 +75,6 @@ from backend.services.context.budget import (
     STITCH_OUTLINE_MAX_CHARS,
     STITCH_ROLLING_LONG_MAX_CHARS,
     STITCH_ROLLING_SHORT_MAX_CHARS,
-    STITCH_WORLDVIEW_MAX_CHARS,
 )
 from backend.services.llm.client import REASONING_DISABLED, call_llm_with_usage
 from backend.services.prompts.adaptive_prompts import (
@@ -921,6 +921,18 @@ async def stitch_ghost(
     memory_echoes = ctx.memory_echoes
     style_positive = ctx.style_positive
     author_samples = ctx.author_samples
+    # 知识检索平面 v3.1：五模式统一消费知识视图（任务平权——模式差异只在
+    # 任务指令，docs/knowledge-retrieval-plane.md §1 公理二）。防御式取用：
+    # kg 缺失（测试桩/降级）=空视图=块缺席=零变化，不阻塞生成路径
+    kg = getattr(ctx, "kg", None) or KnowledgeView()
+    kg_kwargs = kg_block_kwargs(kg)
+    trace_event(
+        "kg_selected",
+        mode=request.mode,
+        selected=list(getattr(kg, "selected_keys", []) or [])[:40],
+        unselected=list(getattr(kg, "unselected", []) or [])[:40],
+        knowledge_chars=kg.total_chars() if isinstance(kg, KnowledgeView) else 0,
+    )
 
     # P1-3（C1）短窗观测→2026-08-25 实测调窗：观测埋点回收的真实案例坐实短窗是
     # 「驴头不对马嘴」主因（used_len 长期钉死 200 上限）——常量已按实测上调
@@ -949,7 +961,6 @@ async def stitch_ghost(
         system_prompt, user_prompt = build_opening_prompt(
             outline_text=open_outline,
             previous_summary=bundle.previous_summary or "",
-            worldview_text=bundle.worldview_text[:STITCH_WORLDVIEW_MAX_CHARS] if bundle.worldview_text else "",
             proper_nouns=proper_nouns,
             canon_context=bundle.canon_context,
             target_chars=request.target_chars,
@@ -958,6 +969,8 @@ async def stitch_ghost(
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
             character_secrets=bundle.character_secrets,
+            recency_pin=kg.recency_pin,
+            **kg_kwargs,
         )
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
@@ -980,6 +993,9 @@ async def stitch_ghost(
             character_secrets=bundle.character_secrets,
             serves_anchor=request.serves_anchor.strip(),
             spine_anchors=spine_anchor_rows,
+            previous_summary=kg.previous_summary,
+            recency_pin=kg.recency_pin,
+            **kg_kwargs,
         )
     elif request.mode == "burst":
         # 段落级连写：走向卡驱动 + 更大衔接窗口 + 更快打字机节奏
@@ -996,6 +1012,9 @@ async def stitch_ghost(
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
             character_secrets=bundle.character_secrets,
+            previous_summary=kg.previous_summary,
+            recency_pin=kg.recency_pin,
+            **kg_kwargs,
         )
     else:
         system_prompt, user_prompt = build_continue_prompt(
@@ -1012,6 +1031,9 @@ async def stitch_ghost(
             author_samples=author_samples,
             spatial_brief=bundle.spatial_brief,
             character_secrets=bundle.character_secrets,
+            previous_summary=kg.previous_summary,
+            recency_pin=kg.recency_pin,
+            **kg_kwargs,
         )
 
     async def _stream():
@@ -1081,6 +1103,22 @@ async def stitch_ghost(
                 ghost_warnings = check_ghost_text(text, bundle)
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
+            # 知识平面 v3.1 join 埋点（§10 在线召回证据，只记录不 retry）：
+            # 死者开口类 warning 命中时回查对应条目是否在当次选择集内——
+            # 缺席即选择器漏召的直接证据，攒够样本后再决策自动补选重发
+            for w in ghost_warnings:
+                if (w.get("kind") or "") != "dead_speak":
+                    continue
+                _name = str(w.get("span_text") or "")
+                _sel_titles = set(kg.present_names) | set(kg.dead_names) | {
+                    k.split(":", 1)[1] for k in kg.selected_keys
+                    if k.startswith(("entity:", "asset:"))
+                }
+                trace_event(
+                    "kg_join_dead_speak",
+                    name=_name,
+                    entry_selected=_name in _sel_titles,
+                )
             yield build_sse_event("GHOST_START", "", mode=request.mode)
             # burst/open/outline 文本长 → 更大步长更快节奏（700 字约 2.3s 播完），短档保持原速
             chunk_size = 12 if request.mode in ("burst", "open", "outline") else 6
@@ -1127,8 +1165,8 @@ _PREVIEW_MODES = ("stitch", "continue", "burst", "outline", "open")
 
 
 class ContextPreviewBlock(BaseModel):
-    key: str          # style_positive|author_samples|proper_nouns|canon|secrets|echoes|spatial
-    title: str        # 展示标题（文风画像/笔迹示范/…）
+    key: str          # scene|entities|proper_nouns|canon|secrets|worldview|relations|negative|echoes|spatial|style_positive|author_samples
+    title: str        # 展示标题（场景身份/在场与相关/…）
     content: str      # 块渲染文本（与真实 system prompt 对应段逐字节一致；空块=""）
     chars: int
     source: str       # 来源徽标（世界实体/章级绑定/真相层/文风卡/…）
@@ -1138,6 +1176,13 @@ class ContextPreviewBlock(BaseModel):
     trimmed: Optional[str] = None
 
 
+class ContextPreviewUnselectedItem(BaseModel):
+    """知识平面审计面（v3.1 §5 纠正回路②）：未选条目及原因。"""
+    key: str
+    title: str
+    reason: str
+
+
 class ContextPreviewResponse(BaseModel):
     mode: str
     blocks: List[ContextPreviewBlock] = Field(default_factory=list)
@@ -1145,6 +1190,9 @@ class ContextPreviewResponse(BaseModel):
     world_time: int = 0
     world_time_source: str = "zero"  # chapter_anchor|prev_anchor|max_event|zero
     world_sourced: bool = False
+    # 知识平面「已选/未选」两栏（向后兼容增量字段：前端未消费前可忽略）
+    unselected: List[ContextPreviewUnselectedItem] = Field(default_factory=list)
+    selected_keys: List[str] = Field(default_factory=list)
 
 
 @router.get(

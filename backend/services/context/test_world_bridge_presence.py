@@ -185,21 +185,22 @@ def test_pinned_scene_boosts_present_character_and_edges(tmp_path):
         assert overlay["world_time_source"] == "chapter_anchor"
 
         names = _char_names(overlay)
-        # 仍截 16：在场者进名单，把最低重要度的远端角色（远端00，重要度 2）挤出去
-        assert len(names) == 16
+        # 知识检索平面 v3.1（2026-08-27）：名单数量上限退役——选择在消费侧
+        # knowledge_plane 完成（宁多勿漏），桥接层只排序不裁剪；在场者仍排首位
+        assert len(names) == 17
         assert names[0] == "扫地僧"
-        assert "远端00" not in names
-        # 其余席位按重要度降序：远端15（17）…远端01（3）
+        assert "远端00" in names  # 不再被挤出名单（未选时由知识平面标注原因）
+        # 其余席位按重要度降序：远端15（17）…远端00（2）——全员保留
         assert names[1] == "远端15"
-        assert names[-1] == "远端01"
+        assert names[-1] == "远端00"
 
         pairs = _rel_pairs(overlay)
-        # 仍截 8；在场边（扫地僧—远端00，两端任一在场即提权）提前到首位，
-        # 最后建的远端边（07↔15）被挤出；其余远端边保持 created_at 序
-        assert len(pairs) == 8
+        # 数量上限退役：全部活跃边保留；在场边（扫地僧—远端00）提前到首位，
+        # 其余远端边保持 created_at 序（07↔15 不再被截）
+        assert len(pairs) >= 8  # 不再截 8（v3.1 桥接层去 cap）
         assert pairs[0] == ("扫地僧", "远端00")
         assert ("远端00", "远端08") in pairs
-        assert ("远端07", "远端15") not in pairs
+        assert ("远端07", "远端15") in pairs
     finally:
         asyncio.run(engine.dispose())
 
@@ -218,19 +219,19 @@ def test_unpinned_matches_legacy_ordering(tmp_path):
         overlay = asyncio.run(run())
         assert overlay is not None
 
-        # 旧逻辑：全员有事态 → 纯重要度降序截 16，扫地僧（重要度 1）垫底被截
+        # v3.1（2026-08-27）：桥接层数量 cap 退役——全员保留、纯重要度降序
+        # 排序不变（无钉时在场第一键恒 0，排序与旧逻辑同序只是不再截尾）
         names = _char_names(overlay)
-        assert len(names) == 16
-        assert "扫地僧" not in names
+        assert len(names) == 17
+        assert "扫地僧" in names
         assert names[0] == "远端15"
-        assert names[-1] == "远端00"
+        assert names[-1] == "扫地僧"
 
-        # 旧逻辑：活跃边按 created_at 序截 8，最后建的扫地僧边被截
+        # 活跃边全部保留（原 created_at 序不变）
         pairs = _rel_pairs(overlay)
-        assert len(pairs) == 8
-        assert ("扫地僧", "远端00") not in pairs
+        assert len(pairs) >= 8
+        assert ("扫地僧", "远端00") in pairs
         assert pairs[0] == ("远端00", "远端08")
-        assert pairs[-1] == ("远端07", "远端15")
     finally:
         asyncio.run(engine.dispose())
 
@@ -347,13 +348,14 @@ def test_dead_character_at_scene_not_boosted(tmp_path):
         overlay = asyncio.run(run())
         assert overlay is not None
         names = _char_names(overlay)
-        # 扫地僧虽位置仍在大厅，但已死亡 → 不进在场集、不提权；
-        # 全员有事态下退化为纯重要度序，与无钉基线一致
+        # 扫地僧虽位置仍在大厅，但已死亡 → 不进在场集、不提权（v3.1 去 cap
+        # 后死者仍在名单尾部——死亡拦截发生在知识平面的在场标记/recency 重钉，
+        # 而非名单裁剪）；纯重要度序与无钉基线一致
         assert names[0] == "远端15"
-        assert "扫地僧" not in names
+        assert names[-1] == "扫地僧"
         pairs = _rel_pairs(overlay)
-        assert ("扫地僧", "远端00") not in pairs
-        assert pairs[0] == ("远端00", "远端08")
+        assert pairs[0] == ("远端00", "远端08")  # 死者边不获在场提权（不在首位）
+        assert ("扫地僧", "远端00") in pairs     # v3.1 去 cap 后保留（死亡标记在知识平面）
     finally:
         asyncio.run(engine.dispose())
 

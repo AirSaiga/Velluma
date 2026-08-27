@@ -34,27 +34,11 @@ from backend.repositories import (
     StyleCardRepository,
 )
 from backend.services.context.budget import (
-    ASSET_DESC_MAX_CHARS,
-    ASSETS_PROMPT_MAX_ENTRIES,
     BANNED_WORDS_MERGED_MAX_ENTRIES,
-    BANNED_WORDS_PROMPT_MAX_ENTRIES,
-    CANON_PRIVATE_LABEL_MAX_ENTRIES,
-    CANON_PUBLIC_FACT_MAX_CHARS,
-    CANON_PUBLIC_FACT_MAX_ENTRIES,
-    CHARACTER_DYNAMIC_MAX_CHARS,
-    CHARACTER_STATIC_MAX_CHARS,
-    CHARACTERS_PROMPT_MAX_ENTRIES,
     CORE_MOTIFS_MAX_CHARS,
-    FORESHADOW_OPS_MAX_ENTRIES,
-    HOOK_CONTENT_MAX_CHARS,
-    HOOKS_PROMPT_MAX_ENTRIES,
-    LOCATIONS_PROMPT_MAX_ENTRIES,
-    MUST_HIT_EVENTS_MAX_ENTRIES,
     PROPER_NOUNS_MAX_ENTRIES,
     READER_EXPECTATION_DESC_MAX_CHARS,
     READER_EXPECTATION_MAX_ENTRIES,
-    RELATION_DESC_MAX_CHARS,
-    RELATIONS_PROMPT_MAX_ENTRIES,
     ROLLING_SUMMARY_MAX_CHARS,
     STYLE_PARAGRAPH_RHYTHM_MAX_CHARS,
     STYLE_POSITIVE_MAX_LINES,
@@ -146,10 +130,10 @@ class SettingsBundle:
             "outline_text": self.outline_text,
             "previous_summary": self.previous_summary or "",
             "chapter_card": _chapter_card_text(self.chapter_card),
-            # 禁忌面归一：prohibitions 已加载时走唯一权威（四源合并、顿号串
-            # 截 BANNED_WORDS_PROMPT_MAX_ENTRIES）；None（极端加载失败）降级空串
+            # 禁忌面归一：prohibitions 已加载时走唯一权威（四源合并、全量——
+            # 知识检索平面 v3.1：条目截断退役，选中即完整）；None 降级空串
             "style_negative": (
-                self.prohibitions.prompt_text(BANNED_WORDS_PROMPT_MAX_ENTRIES)
+                "、".join(self.prohibitions.words(10 ** 6))
                 if self.prohibitions is not None
                 else ""
             ),
@@ -467,12 +451,15 @@ def _characters_text(entities: List[Any]) -> str:
     """本章角色文本（名 + 永恒设定 + 此刻状态）。
 
     A1 私有通道：private 实体整行跳过（其档案经 bundle.character_secrets 走
-    prompt 私有块「知晓但绝不写出」，双轨纪律）；先过滤后截（上限见 budget），
-    公开实体顶替空出的席位。
+    prompt 私有块「知晓但绝不写出」，双轨纪律）。
+    知识检索平面 v3.1（2026-08-27）：字符截断与条目数上限全部退役——
+    选中即完整是设计公理（docs/knowledge-retrieval-plane.md §1），
+    体量由选择器与逃逸阀管辖，不再由渲染层腰斩。
     """
     lines = []
-    visible = [e for e in (entities or []) if not _entity_is_private(e)]
-    for ent in visible[:CHARACTERS_PROMPT_MAX_ENTRIES]:
+    for ent in (entities or []):
+        if _entity_is_private(ent):
+            continue
         char = getattr(ent, "character", None)
         if char is None and isinstance(ent, dict):
             char = ent.get("character")
@@ -483,9 +470,9 @@ def _characters_text(entities: List[Any]) -> str:
         dynamic = getattr(char, "dynamic_state", None) or (char.get("dynamic_state") if isinstance(char, dict) else None)
         parts = []
         if static:
-            parts.append(str(static)[:CHARACTER_STATIC_MAX_CHARS])
+            parts.append(str(static))
         if dynamic:
-            parts.append(f"此刻：{str(dynamic)[:CHARACTER_DYNAMIC_MAX_CHARS]}")
+            parts.append(f"此刻：{dynamic}")
         lines.append(f"- {name}：{'｜'.join(parts)}" if parts else f"- {name}")
     return "\n".join(lines) if lines else "（未指定）"
 
@@ -493,18 +480,20 @@ def _characters_text(entities: List[Any]) -> str:
 def _assets_text(assets: List[Any]) -> str:
     """本章资产文本（A1：private 资产跳过，其简介走 secrets 通道，同角色口径）。"""
     lines = []
-    for a in [a for a in (assets or []) if not _entity_is_private(a)][:ASSETS_PROMPT_MAX_ENTRIES]:
+    for a in (assets or []):
+        if _entity_is_private(a):
+            continue
         name = getattr(a, "name", "") or ""
         desc = getattr(a, "static_description", "") or ""
         if name:
-            lines.append(f"- {name}{'：' + desc[:ASSET_DESC_MAX_CHARS] if desc else ''}")
+            lines.append(f"- {name}{'：' + desc if desc else ''}")
     return "\n".join(lines) if lines else "（未指定）"
 
 
 def _locations_text(locations: List[Any]) -> str:
     """本章地点文本。"""
     lines = []
-    for loc in (locations or [])[:LOCATIONS_PROMPT_MAX_ENTRIES]:
+    for loc in (locations or []):
         name = getattr(loc, "name", "") or ""
         if name:
             lines.append(f"- {name}")
@@ -514,21 +503,21 @@ def _locations_text(locations: List[Any]) -> str:
 def _relationships_text(relationships: List[Any]) -> str:
     """本章角色关系文本。"""
     lines = []
-    for r in (relationships or [])[:RELATIONS_PROMPT_MAX_ENTRIES]:
+    for r in (relationships or []):
         src = getattr(r, "source_character", None)
         tgt = getattr(r, "target_character", None)
         rel = getattr(r, "relationship_type", "") or getattr(r, "description", "") or ""
         src_name = getattr(src, "name", "") if src else ""
         tgt_name = getattr(tgt, "name", "") if tgt else ""
         if src_name and tgt_name and rel:
-            lines.append(f"- {src_name} ↔ {tgt_name}：{rel[:RELATION_DESC_MAX_CHARS]}")
+            lines.append(f"- {src_name} ↔ {tgt_name}：{rel}")
     return "\n".join(lines) if lines else "（未指定）"
 
 
 def _hooks_text(hooks: List[Any]) -> str:
     """开放伏笔文本。"""
     lines = []
-    for h in (hooks or [])[:HOOKS_PROMPT_MAX_ENTRIES]:
+    for h in (hooks or []):
         if isinstance(h, dict):
             content = h.get("content", "") or ""
             key = h.get("ledger_key", "") or ""
@@ -536,7 +525,7 @@ def _hooks_text(hooks: List[Any]) -> str:
             content = getattr(h, "content", "") or ""
             key = getattr(h, "ledger_key", "") or ""
         if content:
-            lines.append(f"- [{key}] {content[:HOOK_CONTENT_MAX_CHARS]}" if key else f"- {content[:HOOK_CONTENT_MAX_CHARS]}")
+            lines.append(f"- [{key}] {content}" if key else f"- {content}")
     return "\n".join(lines) if lines else "（无）"
 
 
@@ -577,7 +566,7 @@ def _extract_canon_private_labels(canon_context: str) -> List[str]:
         end = len(canon_context)
     section = canon_context[start:end]
     labels = re.findall(r"^-\s+([^：:\n]{2,})[：:]", section, re.MULTILINE)
-    return [l.strip() for l in labels if l.strip()][:CANON_PRIVATE_LABEL_MAX_ENTRIES]
+    return [l.strip() for l in labels if l.strip()]
 
 
 def _extract_canon_public_facts(canon_context: str) -> List[str]:
@@ -590,7 +579,7 @@ def _extract_canon_public_facts(canon_context: str) -> List[str]:
         end = len(canon_context)
     section = canon_context[start:end]
     lines = [ln.strip() for ln in section.splitlines() if ln.strip().startswith("- ")]
-    return [ln[:CANON_PUBLIC_FACT_MAX_CHARS] for ln in lines][:CANON_PUBLIC_FACT_MAX_ENTRIES]
+    return lines
 
 
 def _chapter_card_text(card: Any) -> str:
@@ -603,12 +592,12 @@ def _chapter_card_text(card: Any) -> str:
         parts.append(f"主旨：{purpose}")
     hits = _get_attr(card, "must_hit_events") or []
     if hits:
-        hit_lines = [h.get("event", "") if isinstance(h, dict) else str(h) for h in hits[:MUST_HIT_EVENTS_MAX_ENTRIES]]
+        hit_lines = [h.get("event", "") if isinstance(h, dict) else str(h) for h in hits]
         parts.append("必达事件：" + "；".join(hit_lines))
     ops = _get_attr(card, "foreshadow_ops") or []
     if ops:
         op_lines = []
-        for op in ops[:FORESHADOW_OPS_MAX_ENTRIES]:
+        for op in ops:
             if isinstance(op, dict):
                 op_lines.append(f"{op.get('action', '')}{op.get('note', '')}")
             else:
@@ -677,7 +666,7 @@ def _must_hit_events_text(card: Any) -> str:
         return ""
     hits = _get_attr(card, "must_hit_events") or []
     lines = []
-    for h in hits[:MUST_HIT_EVENTS_MAX_ENTRIES]:
+    for h in hits:
         if isinstance(h, dict):
             lines.append(h.get("event", ""))
         else:
@@ -691,7 +680,7 @@ def _foreshadow_ops_text(card: Any) -> str:
         return ""
     ops = _get_attr(card, "foreshadow_ops") or []
     lines = []
-    for op in ops[:FORESHADOW_OPS_MAX_ENTRIES]:
+    for op in ops:
         if isinstance(op, dict):
             lines.append(f"{op.get('action', '')} {op.get('note', '')}".strip())
         else:

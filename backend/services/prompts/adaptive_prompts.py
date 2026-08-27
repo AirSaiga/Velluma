@@ -31,8 +31,6 @@ from backend.services.context.budget import (
     SPATIAL_BRIEF_MAX_CHARS,
     STITCH_OUTLINE_MAX_CHARS,
     STITCH_OUTLINE_SPINE_ANCHORS_MAX,
-    STITCH_PREV_SUMMARY_MAX_CHARS,
-    STITCH_WORLDVIEW_MAX_CHARS,
     BudgetBlock,
     BlockUsage,
     MODE_BLOCK_BUDGET_OVERRIDES,
@@ -40,7 +38,12 @@ from backend.services.context.budget import (
     allocate,
 )
 
-_BANNED_WORDS_TEXT = "、".join(DEFAULT_BAN_LIST.banned_words)
+# prompt 侧禁词扩展（2026-08-27 文学诊断轮）：只进生成 prompt 的禁词表，
+# 不进 DEFAULT_BAN_LIST——sanitizer 对禁词做确定性子串删除，「回味」「顿了顿」
+# 这类词删除会打穿句子（「脑子里却还在回味那行字」→「脑子里却还在那行字」）。
+# 词表按消费方分层：代码删除层保持人工筛选最小集，prompt 禁令层可放宽。
+_PROMPT_ONLY_BANNED = ("一抹", "氤氲", "指腹", "眸子", "眸光", "回味", "顿了顿")
+_BANNED_WORDS_TEXT = "、".join(DEFAULT_BAN_LIST.banned_words + _PROMPT_ONLY_BANNED)
 
 
 # ============================================================
@@ -69,9 +72,29 @@ _ADAPTIVE_SYSTEM = """你是顶级的中文长篇小说作家，此刻在辅助�
 禁止直接心理升华与内心独白式总结（如"他感到愤怒"、"她知道自己必须坚强"）。
 情绪必须用物理动作与环境呈现；每段至多 1 处间接心理暗示，且必须附着在具体动作上。
 
-# 感官描写指导
-每段至多 2 处感官细节，且必须服务当前镜头焦点，禁止堆砌。
+# 细节功能（好细节的尺子）
+每个细节必须改变点什么：回答上文悬着的问题、与场内另一物发生关系、或携带人物的过去（「边缘已经起了毛」一个词就写出他反复重读）。三项皆不沾的静态贴图（手部小动作、材质、光线）每段至多 1 个；可写可不写的细节，不写。限额不是配额，不必用满。
 """
+# 2026-08-27 诊断轮：本节换血替换旧「感官描写指导」（每段至多 2 处感官细节）——
+# 该指令只考核细节的具体性不考核功能性，中档模型把它解析成「插入特写道具=推进」，
+# 限额被当配额用满，催生手部特写/材质/光线三类静态贴图库存。
+
+
+# ---- 句级续写三律（2026-08-27 文学诊断轮）----
+# 实测幽灵草稿的三类结构性 AI 腔，词表打不中（好句坏句共享词汇），须指令级：
+# ①回说式填充/三通道冗余：字面复读已禁，模型改道语义层——用「回味/想起」
+#   复述刚消费过的信息，或手/物/心三个感官通道重演同一状态；
+# ②断点徘徊：作者停在半个判断上，模型接住却不敢担纲（「显得有些」式软化），
+#   补完后还回头对它做文章；
+# ③外部打断收尾：「吼声突然炸开」式结束——段尾是中档模型注意力最弱、
+#   对约束服从最差的位置。
+# 措辞以正面任务式为主（「只写新东西」「停在动作上」）：中档模型对任务指令的
+# 服从度高于负面禁令，禁令堆叠只会催生新套路与判断稀释（导师诊断结论）。
+_RULE_NEW_INFO = "- 只写新东西：每一句都要推进——新动作、新事实、时间或处境的变化。作者已写的每一句读者都读过了，不得再提：不复述、不「回味/想起/还在想」、不换一个感官通道重演刚才的状态；凡是回答「刚才怎样」的句子删掉，只回答「接下来发生什么」。"
+_RULE_BREAKPOINT = "- 作者正文停在半句或半个判断上：第一句用最少的字把它补完，补完立即向前走，不再回头对它做文章。"
+_RULE_ENDING = "- 最后一句停在人物自己正在做的事上（一个动作、一句话头、一个没想完的具体念头），不用突然响起的声响或喊声收尾，不总结、不抒情。"
+# 段落级模式（burst/open）共用的收尾律（单行版）
+_RULE_ENDING_PARA = "- 收尾停在人物自己正在做的事上，不用突然响起的声响或喊声结束，不总结、不抒情。"
 
 
 def _spatial_block(spatial_brief: str) -> str:
@@ -106,31 +129,11 @@ def _style_block_def(style_positive: str) -> BudgetBlock:
     )
 
 
-# ---- C3 continue 轻档画像压缩（docs/foundation-hardening.md §5.3）----
-# 句级顺写（continue/stitch）怕束缚手感——画像只留关键行（句长节奏 +
-# 对话目标两行 + 旋钮意图行若有），段落级三模式（burst/outline/open）
-# 保持完整画像。压缩发生在 BudgetBlock 的 entries 侧（建 def 前滤行），
-# 预算器与预览（B2）走同一入口，看到的即注入的。无文风卡（空文本）
-# 与 mode 空/未知（旁路调用方）零变化。
-_LIGHT_STYLE_MODES = ("continue", "stitch")
-_LIGHT_STYLE_LINE_PREFIXES = ("- 句长节奏：", "- 对话占比目标：")
+# ---- 轻档画像压缩（C3）已随知识检索平面 v3.1 退役（2026-08-27）----
+# 实测证伪：「句级轻档少注入」的先验恰恰落在产出全部不可用的档位
+# （stitch 0/7 采纳）。任务平权后五模式消费同一份完整知识，画像不再
+# 按档压缩（docs/knowledge-retrieval-plane.md §1 公理二）。
 
-
-def _light_mode_style_positive(style_positive: str, mode: str) -> str:
-    """continue/stitch 档的画像关键行筛选（C3 · §5.3）。
-
-    保留：句长节奏行、对话占比目标行、旋钮意图行（含「意图：」的行——
-    S4 手动档才渲染，口径见 settings_bundle.render_style_positive）；
-    其余（词汇层级/语域偏好/开头结尾习惯/段落节奏）缺席。
-    非 continue/stitch 档原样返回（burst/outline/open 完整画像）。
-    """
-    if mode not in _LIGHT_STYLE_MODES or not style_positive:
-        return style_positive
-    kept = [
-        ln for ln in style_positive.split("\n")
-        if ln.startswith(_LIGHT_STYLE_LINE_PREFIXES) or "意图：" in ln
-    ]
-    return "\n".join(kept)
 
 
 def _samples_block_def(author_samples: Optional[List[str]]) -> BudgetBlock:
@@ -262,6 +265,11 @@ def _author_samples_block(author_samples: Optional[List[str]]) -> str:
 # A3b 跨块预算接线点，§4.2）
 # ============================================================
 
+def _wrap_kg(text: str) -> str:
+    """知识平面硬块的包装（空=空串块；非空带 \\n\\n 前导，与其余块同约定）。"""
+    return f"\n\n{text}" if text else ""
+
+
 def render_system_blocks_with_usage(
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
@@ -271,27 +279,29 @@ def render_system_blocks_with_usage(
     memory_echoes: Optional[List[str]] = None,
     spatial_brief: str = "",
     mode: str = "",
+    scene_identity: str = "",
+    entities_text: str = "",
+    worldview_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
 ) -> tuple:
-    """渲染七个 system 块并按模式总预算过 allocate（A3b 接线层）。
+    """渲染 system 知识块（知识检索平面 v3.1 注入序权威）。
 
-    返回 ([(key, block_text)], usages)：
-    - blocks：注入序（画像→样本→专名→canon→私有→回响→空间）的渲染块，
-      空数据对应空串块；
-    - usages：List[BlockUsage] 或 None——mode 在 MODE_CONTEXT_BUDGETS 有档时
-      返回 allocate 的每块配额使用明细（供预览预算条），无档（mode="" 或
-      未知模式）不过 allocate、返回 None（恒等路径，任何调用方零变化）。
+    注入序（事实层全前于文风层——中档模型对 prompt 中部遗忘，连续性事实
+    必须占据 primacy 位；docs/knowledge-retrieval-plane.md §6）：
+    场景身份 → 在场实体 → canon → 私有 → 世界观 → 关系 → 禁词 →
+    回响 → 空间 → 画像 → 样本。
 
-    默认预算（初值=各块 worst-case 总和）下 allocate 恒等 → 输出与不接
-    预算器逐字节一致（test_budget_allocate 零变化锁）；只有实测期把
-    MODE_CONTEXT_BUDGETS 调小后才可能触发软块收缩。
+    知识平面五块（scene/entities/worldview/relations/negative）为预渲染
+    完整文本（services/context/knowledge_plane.py 产出，条目原子、一字
+    不砍），不进 allocate——硬层无预算裁剪；usages 只覆盖旧七块中仍在
+    预算器内的软块（画像/样本/回响/空间），默认预算下 allocate 恒等。
 
-    C3（§5.3 分模式差异化注入首版）：①mode ∈ {continue, stitch} 时画像
-    先经 _light_mode_style_positive 压缩为关键行再建块（无文风卡零变化）；
-    ②burst 档 allocate 透传 MODE_BLOCK_BUDGET_OVERRIDES 的块配额覆盖
-    （仅 usages.budget_chars 展示口径，裁剪仍只看模式总预算）。
+    在场实体块存在时取代旧专名块（名字已含于实体条目，避免重复注入）；
+    无实体数据（空书/未迁移书）时保留专名块兜底（零变化契约）。
     """
     defs = [
-        _style_block_def(_light_mode_style_positive(style_positive, mode)),
+        _style_block_def(style_positive),
         _samples_block_def(author_samples),
         _nouns_block_def(proper_nouns),
         _canon_block_def(canon_context),
@@ -308,7 +318,26 @@ def render_system_blocks_with_usage(
         )
         defs = result.blocks
         usages = result.usages
-    return [(b.key, b.render()) for b in defs], usages
+    by_key = {b.key: b.render() for b in defs}
+    if entities_text:
+        by_key.pop("proper_nouns", None)  # 实体块已含全部名字，去重
+    blocks = [
+        ("scene", _wrap_kg(scene_identity)),
+        ("entities", _wrap_kg(entities_text)),
+        ("canon", by_key.get("canon", "")),
+        ("secrets", by_key.get("secrets", "")),
+        ("worldview", _wrap_kg(worldview_text)),
+        ("relations", _wrap_kg(relations_text)),
+        ("negative", _wrap_kg(negative_constraints)),
+        ("echoes", by_key.get("echoes", "")),
+        ("spatial", by_key.get("spatial", "")),
+        ("style_positive", by_key.get("style_positive", "")),
+        ("author_samples", by_key.get("author_samples", "")),
+    ]
+    if not entities_text:
+        # 专名兜底位：无知识平面实体块时维持旧序位置（canon 前）
+        blocks.insert(2, ("proper_nouns", by_key.get("proper_nouns", "")))
+    return blocks, usages
 
 
 def render_system_blocks(
@@ -320,23 +349,26 @@ def render_system_blocks(
     memory_echoes: Optional[List[str]] = None,
     spatial_brief: str = "",
     mode: str = "",
+    scene_identity: str = "",
+    entities_text: str = "",
+    worldview_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
 ) -> List[tuple]:
-    """按真实注入序渲染七个 system 块，返回 [(key, block_text)]。
+    """按真实注入序渲染 system 知识块，返回 [(key, block_text)]。
 
-    四个 stitch builder（continue/burst/outline/open）的 system prompt 组装段
-    统一走此函数——注入序 = 返回序（画像→样本→专名→canon→私有→回响→空间，
-    私有块紧随 canon，对齐「真相类约束相邻」的排布），空数据对应空串块
+    五个 stitch builder（continue/burst/outline/open）的 system prompt 组装段
+    统一走此函数——注入序 = 返回序（场景身份→在场实体→canon→私有→世界观→
+    关系→禁词→回响→空间→画像→样本，事实层前置于文风层），空数据对应空串块
     （拼接后 prompt 逐字节零变化）。
 
-    mode（A3b）：stitch 五模式档名——有档则过 budget.allocate 跨块预算
-    （默认预算下恒等，见 render_system_blocks_with_usage）；空串/未知模式
-    不过预算器（build_audition_prompt 等旁路调用方零变化）。
-    C3（§5.3）：mode ∈ {continue, stitch} 时画像块压缩为关键行
-    （_light_mode_style_positive）——同源红线下预览与真实注入一同生效。
+    知识平面五块（scene/entities/worldview/relations/negative）由
+    services/context/knowledge_plane.py 预渲染（条目原子、选中即完整、时态
+    标注），此处只做注入序编排——改知识内容去知识平面，改注入序来这里。
 
     character_secrets 是 A1 私有通道（bundle.character_secrets，[{name, text}]）：
-    私有实体档案只经此块注入（「AI 知晓但绝不直接写出」），_characters_text 等
-    装配层已同步排除——两轨不渗漏。
+    私有实体档案只经此块注入（「AI 知晓但绝不直接写出」），装配层已同步
+    排除——两轨不渗漏。
 
     这是「预览与注入同源」红线的落点：GET /adaptive/context-preview（AI 所见
     预览，services/context/stitch_context.py）与 builder 消费同一份块渲染，
@@ -351,6 +383,11 @@ def render_system_blocks(
         memory_echoes=memory_echoes,
         spatial_brief=spatial_brief,
         mode=mode,
+        scene_identity=scene_identity,
+        entities_text=entities_text,
+        worldview_text=worldview_text,
+        relations_text=relations_text,
+        negative_constraints=negative_constraints,
     )
     return blocks
 
@@ -358,6 +395,19 @@ def render_system_blocks(
 # ============================================================
 # 续写 prompt（缝合/代笔/顺写统一入口，mode 区分粒度）
 # ============================================================
+
+def _prev_summary_line(previous_summary: str) -> str:
+    """紧前一章摘要行（知识平面 v3.1：恒选不截断，五模式统一注入）。"""
+    return (
+        f"\n# 上一章结尾（连续性参考，保持衔接，不重复其内容）\n{previous_summary}"
+        if previous_summary else ""
+    )
+
+
+def _recency_pin_line(recency_pin: str) -> str:
+    """recency 位重钉（user 尾部此刻硬事实；lost-in-the-middle 的 recency 锚）。"""
+    return f"\n{recency_pin}" if recency_pin else ""
+
 
 def build_continue_prompt(
     fragment: str,
@@ -373,6 +423,13 @@ def build_continue_prompt(
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
+    scene_identity: str = "",
+    entities_text: str = "",
+    worldview_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
+    previous_summary: str = "",
+    recency_pin: str = "",
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -402,17 +459,24 @@ def build_continue_prompt(
         memory_echoes=memory_echoes,
         spatial_brief=spatial_brief,
         mode=mode,  # A3b：stitch/continue 两档过模式预算
+        scene_identity=scene_identity,
+        entities_text=entities_text,
+        worldview_text=worldview_text,
+        relations_text=relations_text,
+        negative_constraints=negative_constraints,
     ):
         system_prompt += _block
 
     parts_str = "、".join(picked_parts) if picked_parts else "（无——仅按作者原句顺势续写）"
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    prev_line = _prev_summary_line(previous_summary)
+    pin_line = _recency_pin_line(recency_pin)
 
     if mode == "stitch":
         # 追加式契约（2026-08-26 实测修复）：幽灵纯追加在作者原句之后，
         # 原句已在画布里——旧契约「原句一字不改保留在片段中」会致屏幕复读。
         user_prompt = f"""# 上文衔接（保持连续，不重复）
-{rolling_prefix or "（开篇）"}
+{rolling_prefix or "（开篇）"}{prev_line}
 {intent_line}
 
 # 作者原句（已在你身后的画布里——绝不重复它，从它的断点直接往下写）
@@ -421,16 +485,23 @@ def build_continue_prompt(
 # 选定镜头零件（必须落地为画面）
 {parts_str}
 
-请只输出续写部分：从作者原句的断点顺势接下去（原句停在半句就先自然补完这一句，从断点最后一个词的后面直接续，不要重说断点附近的词），把零件落地为具体画面。禁止以任何形式重复原句（原文复读、换说法复述都不行）。控制在 {target_chars} 字以内。只输出正文，不要标题、不要解释。"""
+请只输出续写部分：从作者原句的断点顺势接下去（原句停在半句就先自然补完这一句，从断点最后一个词的后面直接续，不要重说断点附近的词），把零件落地为具体画面。零件是画面灵感，作者正文的事实最高优先——零件与正文此刻的场景/时间明显矛盾时（如物件此刻并不在手边），改造零件贴合当下场景，改造不了就舍弃它，绝不硬塞。禁止以任何形式重复原句（原文复读、换说法复述都不行）。
+{_RULE_NEW_INFO}
+{_RULE_ENDING}
+控制在 {target_chars} 字以内。只输出正文，不要标题、不要解释。{pin_line}"""
     else:  # continue
         user_prompt = f"""# 上文衔接（保持连续，不重复已写动作与意象）
-{rolling_prefix or "（开篇）"}
+{rolling_prefix or "（开篇）"}{prev_line}
 {intent_line}
 
 # 作者当前正文（顺着它的语气、人称、节奏往下写）
 {fragment}
 
-请顺着作者正文往下续写，控制在 {target_chars} 字以内。只输出续写部分，不要重复作者原文，不要标题、不要解释。"""
+请顺着作者正文往下续写，控制在 {target_chars} 字以内：
+{_RULE_NEW_INFO}
+{_RULE_BREAKPOINT}
+{_RULE_ENDING}
+只输出续写部分，不要重复作者原文，不要标题、不要解释。{pin_line}"""
     return system_prompt, user_prompt
 
 
@@ -451,6 +522,13 @@ def build_burst_prompt(
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
+    scene_identity: str = "",
+    entities_text: str = "",
+    worldview_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
+    previous_summary: str = "",
+    recency_pin: str = "",
 ) -> tuple:
     """构建段落级连写 prompt（Ctrl+Space 走向卡舱选定后触发）。
 
@@ -482,10 +560,17 @@ def build_burst_prompt(
         memory_echoes=memory_echoes,
         spatial_brief=spatial_brief,
         mode="burst",  # A3b：burst 档过模式预算
+        scene_identity=scene_identity,
+        entities_text=entities_text,
+        worldview_text=worldview_text,
+        relations_text=relations_text,
+        negative_constraints=negative_constraints,
     ):
         system_prompt += _block
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    prev_line = _prev_summary_line(previous_summary)
+    pin_line = _recency_pin_line(recency_pin)
     if beat_guidance:
         guidance_block = f"""# 本段走向（作者选定）
 {beat_guidance}
@@ -495,7 +580,7 @@ def build_burst_prompt(
 （作者未指定——顺着上文的语气与悬念自然推进，写到一个小节拍收束处停笔）"""
 
     user_prompt = f"""# 上文衔接（保持连续，不重复已写动作与意象）
-{rolling_prefix or "（开篇）"}
+{rolling_prefix or "（开篇）"}{prev_line}
 {intent_line}
 
 {guidance_block}
@@ -504,7 +589,8 @@ def build_burst_prompt(
 {fragment}
 
 请顺着作者正文连写 2-4 个段落，总字数控制在 {target_chars} 字以内，写到走向覆盖、场景自然收束处停笔，不要为凑字数拖沓。
-段落之间用一个空行分隔。只输出续写部分，不要重复作者原文，不要标题、不要解释。"""
+{_RULE_ENDING_PARA}
+段落之间用一个空行分隔。只输出续写部分，不要重复作者原文，不要标题、不要解释。{pin_line}"""
     return system_prompt, user_prompt
 
 
@@ -556,6 +642,13 @@ def build_outline_expand_prompt(
     spatial_brief: str = "",
     serves_anchor: str = "",
     spine_anchors: Optional[List[dict]] = None,
+    scene_identity: str = "",
+    entities_text: str = "",
+    worldview_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
+    previous_summary: str = "",
+    recency_pin: str = "",
 ) -> tuple:
     """构建细纲扩写 prompt（胶囊节点「落笔扩写」触发）。
 
@@ -596,10 +689,17 @@ def build_outline_expand_prompt(
         memory_echoes=memory_echoes,
         spatial_brief=spatial_brief,
         mode="outline",  # A3b：outline 档过模式预算
+        scene_identity=scene_identity,
+        entities_text=entities_text,
+        worldview_text=worldview_text,
+        relations_text=relations_text,
+        negative_constraints=negative_constraints,
     ):
         system_prompt += _block
 
     intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    prev_line = _prev_summary_line(previous_summary)
+    pin_line = _recency_pin_line(recency_pin)
     # C3（§5.3）：全锚点行先于单锚——一般→具体（先给全章谋篇盘面，再点出
     # 本段服务的锚点）；无 spine → 行缺席，prompt 逐字节不变
     anchors_line = _format_spine_anchor_line(spine_anchors)
@@ -617,7 +717,7 @@ def build_outline_expand_prompt(
         closing_line = "写到细纲内容自然收束处停笔，不要顺势往下写。"
 
     user_prompt = f"""# 上文正文（你的开头要自然承接它的结尾，不重复已写动作与意象）
-{rolling_prefix or "（开篇）"}
+{rolling_prefix or "（开篇）"}{prev_line}
 {intent_line}
 
 # 细纲速记（作者亲笔，本段必须完整兑现的核心事件）
@@ -626,7 +726,7 @@ def build_outline_expand_prompt(
 
 {after_block}
 # 任务
-请把细纲速记扩写成正文，总字数控制在 {target_chars} 字以内。只输出扩写的正文——不要复述细纲原文，不要标题、不要解释。{closing_line}"""
+请把细纲速记扩写成正文，总字数控制在 {target_chars} 字以内。只输出扩写的正文——不要复述细纲原文，不要标题、不要解释。{closing_line}{pin_line}"""
     return system_prompt, user_prompt
 
 
@@ -685,6 +785,11 @@ def build_opening_prompt(
     style_positive: str = "",
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
+    scene_identity: str = "",
+    entities_text: str = "",
+    relations_text: str = "",
+    negative_constraints: str = "",
+    recency_pin: str = "",
 ) -> tuple:
     """构建开篇点火 prompt（空章冷启动：大纲是唯一燃料）。
 
@@ -692,9 +797,10 @@ def build_opening_prompt(
     与 burst 的区别：无任何已写正文，大纲从"方向参考"升级为主输入。
 
     Args:
-        outline_text: 本章大纲（全文截 800，主燃料）
-        previous_summary: 上一章结尾/摘要（截 300，衔接用，可空）
-        worldview_text: 世界观（截 200，定基调，可空）
+        outline_text: 本章大纲（主燃料；就近剂量由路由侧 outline_nearby 把关）
+        previous_summary: 上一章结尾/摘要（恒选不截断，知识平面 v3.1）
+        worldview_text: 世界观知识块（knowledge_plane 预渲染完整文本，经
+            system 块注入——原 user 侧 200 字特判与双重截断已随 v3.1 退役）
         proper_nouns: 在场角色/资产名专名表
         canon_context: Canon 上下文（public/private 约束）
         character_secrets: 私有实体档案（A1；空=零变化）
@@ -715,22 +821,31 @@ def build_opening_prompt(
         memory_echoes=memory_echoes,
         spatial_brief=spatial_brief,
         mode="open",  # A3b：open 档过模式预算
+        scene_identity=scene_identity,
+        entities_text=entities_text,
+        worldview_text=worldview_text,
+        relations_text=relations_text,
+        negative_constraints=negative_constraints,
     ):
         system_prompt += _block
 
-    prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary[:STITCH_PREV_SUMMARY_MAX_CHARS]}" if previous_summary else ""
-    worldview_line = f"\n# 世界观基调\n{worldview_text[:STITCH_WORLDVIEW_MAX_CHARS]}" if worldview_text else ""
+    # 知识平面 v3.1（2026-08-27）：世界观改经 system 块完整注入（原 user 侧
+    # 「世界观基调 200 字」特判退役——open 与其余四档同源同量，任务平权）；
+    # previous_summary 恒选不截断；大纲就近剂量闸（路由侧）不变
+    prev_line = f"\n# 上一章结尾（新章开头要与其自然衔接）\n{previous_summary}" if previous_summary else ""
+    pin_line = _recency_pin_line(recency_pin)
 
     user_prompt = f"""# 本章大纲（这是唯一的创作依据，开头必须服务于它的第一段进展）
 {(outline_text or "")[:STITCH_OUTLINE_MAX_CHARS] or "（无大纲）"}
-{prev_line}{worldview_line}
+{prev_line}
 
 # 任务
 作者面对空白页，请你为本章写开篇 2-5 个段落，总字数控制在 {target_chars} 字以内。
 - 从一个具体的场景、动作或对话切入，把读者直接扔进现场——禁止"多年以后/这是一个/话说"这类概述式开场
 - 只写"引子"：推进到大纲的第一个小进展、留出悬念就停笔，不要试图写完整章
+{_RULE_ENDING_PARA}
 - 段落之间用一个空行分隔
-- 只输出正文，不要标题、不要章节号、不要解释。"""
+- 只输出正文，不要标题、不要章节号、不要解释。{pin_line}"""
     return system_prompt, user_prompt
 
 
@@ -799,8 +914,8 @@ _FUTURE_PROJECTION_SYSTEM = """你是小说叙事参谋。基于作者已写的�
 - emotion：这个画面的情绪基调（一个词）
 
 扎根已写正文（衔接连贯），参考角色此刻状态（dynamic_state）和在场资产。不要编造与已建立事实矛盾的剧情。
+场景锚定：推测画面发生在此刻的场景里——人物此刻在哪、正在做什么，以正文叙述与大纲节拍为准；不得因正文里的字面联想（如提到某本书、某个地名）就切换到另一个场景、时代或道具库。
 只输出 JSON，不要解释。"""
-
 
 def build_future_projection_prompt(
     written_text: str,
@@ -809,6 +924,7 @@ def build_future_projection_prompt(
     soft_constraints: dict,
     spine_anchors: Optional[List[dict]] = None,
     encounters: Optional[List[str]] = None,
+    outline_nearby: Optional[List[str]] = None,
 ) -> tuple:
     """构建未来推测 prompt。
 
@@ -820,6 +936,9 @@ def build_future_projection_prompt(
         spine_anchors: 章级软脉络的 pending 锚点（P1.4 M2：[{id,text}]，空=不注入零变化）
         encounters: 地图相遇机会行（W5 桥：此刻同地角色组，如「甲与乙（北岸要塞）」；
             空=不注入零变化）
+        outline_nearby: 大纲就近节拍原文（2026-08-27 场景锚定；空=不注入零变化。
+            推测组件此前看不到大纲，凭正文字面联想换场景——实测 2177 工地发愣被
+            推测成民国书房，下游挂件链全锚错）
 
     Returns:
         (system_prompt, user_prompt)
@@ -848,11 +967,21 @@ def build_future_projection_prompt(
         serve_note += (
             '\n若某推测正是让某组相遇发生/错开，给它加 "from_encounter": true。'
         )
+    # 大纲就近节拍（2026-08-27 场景锚定）：作者定的下一步是推测的空间/时间锚——
+    # 无此块时推测凭正文字面联想自由发挥（实测幻觉出错误时代的整套场景）。
+    # 空=整块缺席，prompt 与旧版逐字节一致
+    nearby_block = ""
+    if outline_nearby:
+        nearby_lines = "\n".join(f"- {b}" for b in outline_nearby[:2])
+        nearby_block = f"""
+# 作者大纲·就近节拍（接下来 1-2 拍的原文——推测画面必须是通往它路上的合理一步，人物此刻在哪/在做什么以此为准，不得与节拍的场景矛盾）
+{nearby_lines}
+"""
     user_prompt = f"""# 本章意图
 弧线：{intent.get('arc', '（未推断）')}
 情绪走向：{intent.get('emotion_curve', [])}
 铺陈要点：{intent.get('setup_points', [])}
-{spine_block}{encounter_block}
+{spine_block}{nearby_block}{encounter_block}
 # 作者最近写的正文（衔接此处继续）
 {written_text[-500:]}
 
@@ -865,8 +994,8 @@ def build_future_projection_prompt(
 # 可呼应的伏笔
 {soft_constraints.get('open_hooks', '（无）')[:200]}
 
-推测接下来的 2-3 个画面方向。输出 JSON：
-{{"projections": [{{"event": "老烟用残手砸灭油灯", "anchors": ["渗血的绷带", "熄灭的灯"], "emotion": "压抑"}}]}}{serve_note}"""
+推测接下来的 2-3 个画面方向。每幅画面标注 "stage"："now"=作者此刻光标处的画面；"approach"=通往下一拍的过渡（渐近的脚步、将临的影子）；"beat"=下一拍事件本身；"after"=下一拍之后。**第一幅必须是 "now"**。输出 JSON：
+{{"projections": [{{"event": "老烟用残手砸灭油灯", "anchors": ["渗血的绷带", "熄灭的灯"], "emotion": "压抑", "stage": "now"}}]}}{serve_note}"""
     return _FUTURE_PROJECTION_SYSTEM, user_prompt
 
 
@@ -884,6 +1013,9 @@ _DOCK_GENERATOR_SYSTEM = """你是一个物理镜头碎片生成器。基于作�
 - line 类：[完整台词原文] +（可选说话人）→ "别在退潮时回头。阿晚的声音"
 - 必须扎根设定但生发新画面：角色动作符合其性格设定，但要是作者还没写过的具体动作
 
+【第一优先 —— 接住作者刚写的】
+3-4 枚碎片中必须有 1 枚是作者最后一句（或正说着的那句话）的"物理落点"：把抽象的感慨、判断、情绪翻译成人物此刻**主动做出**的一个小动作（把书往口袋深处按了按、把后半句咽回去、手上的活故意慢了半拍）。必须是人物主动发出的动作——不是表情、不是静止状态。先给这一枚，再给其他方向。
+
 【5 个叙事方向 —— 每个碎片必须服务其中一个】
 - 主线：朝本章核心事件/弧线推进【一小步】（角色发现了线索、做出决定、遭遇关键转折）
 - 伏笔：埋下隐患或铺垫（物件异常、不经意的细节、暗藏的线索）
@@ -893,15 +1025,16 @@ _DOCK_GENERATOR_SYSTEM = """你是一个物理镜头碎片生成器。基于作�
 
 【就近铁律 —— 碎片是"下一屏"的画面，不是章末预告】
 - 文流第一：碎片必须与作者当前段落的最后一句**直接衔接**——作者下一句就能顺着接上写，中间不需要任何过渡句
-- 大纲节拍是几步之外的目的地，不是碎片内容：只给通往节拍的路上的第一步（过渡、铺垫、临近的动作），绝不直接呈现节拍本身的场面——**节拍里写着的对白（如某人的呵斥/问话）绝对禁止直接当碎片**，那是作者写到跟前才该写的
+- 节拍保全检验（判断是否抢拍，唯一主判据）：把碎片想象着写进正文，大纲那一拍还完整可写吗？写完"工头的手拍上肩"，"突然被工头打断"就被消费掉了——抢拍，禁止；写完"他按了按口袋里的书"，节拍毫发无损——通往它的第一步，允许。**写不坏节拍的才是第一步**
+- 节拍事件本身和它紧接着的反应（被打断、惊得掉东西）都是作者的，碎片不许写；碎片只发生在主角一侧（他的身体、他的物件、他的感知），节拍里的其他人物最多"在来的路上"（脚步声、影子），不许"已经到达"
+- 节拍 > 推测：推测方向与大纲就近节拍的场景/时间对不上时，以节拍为准——推测只取其情绪，不取其场景与道具
 - 禁止跳到本章后段的高潮/转折/结局场面——核心事件等作者写到跟前再提，绝不提前搬上来
-- 主线方向 = 朝目的地推进的下一小步，不是把节拍事件直接搬上来
 - 没有大纲节拍可用时，也只许在当前文流上就近生发
 
 【场景锚定 —— 碎片长在作者此刻的场景里】
-- 道具不凭空发明：碎片里的物件/地点必须已出现在当前段落、设定养料或就近节拍里——伏笔类尤其如此，「物件异常」用已有物件的异常，不得为埋伏笔造新道具
+- 道具分两类：**氛围件**（光线、灰尘、天气、远景、声响）可自由生发，不算发明；**上手件**——人物握、拿、放、捡、掏、开的那个物件——必须有出处（本章正文/场景设定/设定养料/就近节拍四处之一）：人物碰过的物件会进入后续所有画面，作者接了它就欠下连续性债
 - 不复述已写：碎片必须是还没落笔的画面——作者已写的画面（刚引用的原文、刚描写过的物件）换个说法再端上来，等于没给选项
-- 空间不瞬移：碎片发生在当前段落的同一场景/时刻，或通向下一拍的过渡画面（抵达、开门、天亮）；就近节拍若在别的场景，给「过渡到那一拍」的第一步，不给那一拍的进行中
+- 空间不瞬移：碎片发生在当前段落的同一场景/时刻，或通向下一拍的过渡画面（抵达、开门、天亮——除非抵达本身就是那一拍的事件，用节拍保全检验判断）；就近节拍若在别的场景，给「过渡到那一拍」的第一步，不给那一拍的进行中
 - 保底本场景：3-4 个碎片中至少 2 个发生在当前段落的同一场景内——作者不换景就能直接落笔
 
 【反例 —— 这些是"太笼统"，禁止产出】
@@ -986,7 +1119,7 @@ def build_dock_generator_prompt(
         dw_block = f"""
 # 叙事方向权重（碎片请按此分布生成，高权重方向至少占 1 个）
 {dw_text}
-每个碎片必须标注 direction（只能从 主线/伏笔/刻画/环境/关系 里选）。
+每个碎片必须标注 direction（只能从 主线/伏笔/刻画/环境/关系 里选）。高权重方向必须用**当前时刻**做得到的画面满足——若该方向的下一步就是节拍事件，给到达前的最后一步或换侧面补位，禁止跳到节拍之后凑数。
 """
     else:
         dw_block = ""
@@ -1033,7 +1166,7 @@ def build_dock_generator_prompt(
     user_prompt = f"""# 作者当前段落
 {recent_text[:300]}
 {spine_line}{nearby_block}
-# 接下来的画面方向（参考，可偏离）
+# 接下来的画面方向（方向参考——优先从作者当前段落生发，不得整句照搬推测画面）
 {proj_text}
 {dw_block}{exp_block}{echo_block}
 # 设定养料（角色物理特征/资产/地点，自由用作画面素材）

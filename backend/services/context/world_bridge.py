@@ -30,14 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
 
-# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：名单上限改引 budget 表
-from backend.services.context.budget import (
-    ASSETS_MAX_ENTRIES,
-    CHARACTERS_MAX_ENTRIES,
-    LOCATIONS_MAX_ENTRIES,
-    RELATIONS_MAX_ENTRIES,
-)
-
 
 # ============================================================
 # 叙事时间解析（时间切片的 t 从哪来）
@@ -307,11 +299,10 @@ async def load_world_overlay(
             -int(getattr(a.world_entity, "importance", 1) or 1),
         )
     )
-    characters = characters[:CHARACTERS_MAX_ENTRIES]
 
     assets_all = [e for e in entities_all if e.entity_type == "asset"]
     assets_all.sort(key=lambda e: -int(getattr(e, "importance", 1) or 1))
-    assets = [WorldAssetAdapter(e) for e in assets_all[:ASSETS_MAX_ENTRIES]]
+    assets = [WorldAssetAdapter(e) for e in assets_all]
 
     # 关系：只保留 t 时刻活跃边；有场景钉时任一端点在场的边提前（仍截 budget 上限）
     active_rel_ids = {
@@ -335,7 +326,6 @@ async def load_world_overlay(
                 else 1
             )
         )
-    relationships = relationships[:RELATIONS_MAX_ENTRIES]
 
     # A1 私有通道（docs/foundation-hardening.md §3.1，D5 拍板）：private 实体的
     # 档案不进正文上下文（过滤在 settings_bundle 装配层），改走 secrets——
@@ -352,7 +342,10 @@ async def load_world_overlay(
     return {
         "entities": characters,
         "assets": assets,
-        "locations": locations[:LOCATIONS_MAX_ENTRIES],  # WorldLocation 自带 name，_locations_text 直接吃
+        # 知识检索平面 v3.1（2026-08-27）：实体/资产/关系/地点的数量上限全部退役——
+        # 选择（在场/提及/邻近）在消费侧 knowledge_plane 完成，桥接层只排序不裁剪；
+        # 排序（在场→有事态→重要度）保留，供 UI 与选择器复用同一顺序
+        "locations": locations,
         "relationships": relationships,
         "world_state": state,
         "world_time": t,

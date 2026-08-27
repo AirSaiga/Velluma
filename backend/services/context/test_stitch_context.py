@@ -54,7 +54,9 @@ BOOK_ID = uuid.UUID("cc330000-0000-4000-8000-000000000001")
 CH_ID = uuid.UUID("cc330000-0000-4000-8000-0000000000b1")
 ENT_ID = uuid.UUID("cc330000-0000-4000-8000-0000000000e1")
 
-BLOCK_ORDER = ["style_positive", "author_samples", "proper_nouns", "canon", "secrets", "echoes", "spatial"]
+# 知识检索平面 v3.1（2026-08-27）：注入序=事实层前于文风层；空 kg 时专名兜底位在 entities 后
+BLOCK_ORDER = ["scene", "entities", "proper_nouns", "canon", "secrets", "worldview",
+               "relations", "negative", "echoes", "spatial", "style_positive", "author_samples"]
 
 # 固定装配值（六块全非空，逼出完整块渲染）
 FIXED = dict(
@@ -390,6 +392,9 @@ def test_endpoint_preview_through_real_pipeline(tmp_path, monkeypatch):
                     chapter_intent=ctx.chapter_intent, memory_echoes=ctx.memory_echoes,
                     style_positive=ctx.style_positive, author_samples=ctx.author_samples,
                     spatial_brief=ctx.bundle.spatial_brief,
+                    previous_summary=ctx.kg.previous_summary,
+                    recency_pin=ctx.kg.recency_pin,
+                    **ctx._kg_kwargs(),
                 )
                 return resp, ctx, sys_prompt
 
@@ -397,7 +402,8 @@ def test_endpoint_preview_through_real_pipeline(tmp_path, monkeypatch):
         block_text = "".join(c for _k, c in ctx.system_blocks())
         assert sys_prompt == _base_system() + block_text
         # 端点返回块与装配函数输出逐项一致
-        assert [b.key for b in resp.blocks] == BLOCK_ORDER
+        # v3.1：种子书有实体 → 实体块在场、专名块被取代（无 proper_nouns 键）
+        assert [b.key for b in resp.blocks] == [k for k in BLOCK_ORDER if k != "proper_nouns"]
         assert [b.content for b in resp.blocks] == [c for _k, c in ctx.system_blocks()]
         assert [b.chars for b in resp.blocks] == [len(c) for _k, c in ctx.system_blocks()]
         assert resp.total_chars == sum(b.chars for b in resp.blocks)
@@ -406,7 +412,7 @@ def test_endpoint_preview_through_real_pipeline(tmp_path, monkeypatch):
         # 种子数据断言：画像/样本/专名/回响非空；canon/空间未配置 → 空块
         assert by_key["style_positive"].chars > 0
         assert by_key["author_samples"].chars > 0
-        assert "林尘" in by_key["proper_nouns"].content
+        assert "林尘" in by_key["entities"].content  # v3.1：名字+档案在实体块
         assert by_key["echoes"].chars > 0            # 世界事件结构化前情
         assert by_key["canon"].content == ""
         assert by_key["spatial"].content == ""
@@ -414,7 +420,7 @@ def test_endpoint_preview_through_real_pipeline(tmp_path, monkeypatch):
         assert resp.world_time == 100
         assert resp.world_time_source == "chapter_anchor"
         assert resp.world_sourced is True
-        assert by_key["proper_nouns"].source == "世界实体"
+        assert by_key["entities"].source == "知识平面 · 世界实体"  # v3.1：专名块被实体块取代
     finally:
         asyncio.run(engine.dispose())
 
@@ -471,7 +477,7 @@ def test_endpoint_open_mode_query_from_outline(tmp_path, monkeypatch):
         # open 与其他档的检索锚不同 → 样本块可能不同；但专名/画像/canon 块与模式无关
         for r in resps:
             by_key = {b.key: b for b in r.blocks}
-            assert by_key["proper_nouns"].chars > 0
+            assert by_key["entities"].chars > 0  # v3.1：实体块（含档案）取代专名块
             assert by_key["style_positive"].chars > 0
     finally:
         asyncio.run(engine.dispose())

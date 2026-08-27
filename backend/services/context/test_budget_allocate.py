@@ -407,9 +407,9 @@ class TestCrowdedBookPresenceSurvives:
 
 class TestEmptyBlocksSafe:
     def test_all_blocks_empty_with_mode(self):
-        """全空块 + 模式预算：七块全空串、恒等、不抛错。"""
+        """全空块 + 模式预算：全块空串、恒等、不抛错（v3.1 起 12 键：知识平面 5 块 + 旧 7 块）。"""
         blocks, usages = render_system_blocks_with_usage(mode="stitch")
-        assert len(blocks) == 7
+        assert len(blocks) == 12
         assert all(content == "" for _k, content in blocks)
         assert all(u.chars == 0 and not u.trimmed for u in usages)
 

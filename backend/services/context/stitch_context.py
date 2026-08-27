@@ -38,6 +38,7 @@ from backend.services.context.settings_bundle import (
     load_chapter_settings_bundle,
     render_style_positive,
 )
+from backend.services.context.knowledge_plane import KnowledgeView, build_knowledge_view, kg_block_kwargs
 # 大纲就近节拍共享判据（2026-08-25 实测修复：意图块只给接下来一两拍，防冲章）
 from backend.services.adaptive.outline_nearby import outline_nearby
 from backend.services.adaptive.paragraph_source import written_text
@@ -75,16 +76,22 @@ class StitchContext:
     # C2 场景判定结果（"dialogue"/"general"；默认空串=未装配）——样本检索
     # 加成的输入，预览徽标据此展示（见 _block_source）
     scene_hint: str = ""
+    # 知识检索平面 v3.1（docs/knowledge-retrieval-plane.md）：条目化+选择+
+    # 完整渲染的知识视图——五模式/dock/预览共同消费，任务平权
+    kg: KnowledgeView = field(default_factory=KnowledgeView)
+
+    def _kg_kwargs(self) -> Dict[str, str]:
+        """知识视图块参数（system_blocks 与 builder 调用同源同参）。"""
+        return kg_block_kwargs(self.kg)
 
     def system_blocks(self) -> List[tuple]:
-        """七块渲染（key, block_text）——与真实 system prompt 逐字节同源。
+        """system 知识块渲染（key, block_text）——与真实 system prompt 逐字节同源。
 
-        块内容 = 四 builder 实际拼进 system prompt 的七个附加块
+        块内容 = 五 builder 实际拼进 system prompt 的知识块
         （adaptive_prompts.render_system_blocks 唯一权威，注入序=返回序：
-        画像→样本→专名→canon→私有→回响→空间）。
-        ⚠ A1 接线契约：stitch 路由侧四次 builder 调用需同传
-        character_secrets=bundle.character_secrets 才与预览完全同源
-        （canon/spatial 等其余块路由已直传 bundle 字段，同此模式）。
+        场景身份→在场实体→canon→私有→世界观→关系→禁词→回响→空间→画像→样本）。
+        ⚠ A1 接线契约：stitch 路由侧 builder 调用需同传
+        character_secrets=bundle.character_secrets 与 kg 块参数才与预览完全同源。
         """
         return render_system_blocks(
             style_positive=self.style_positive,
@@ -95,10 +102,11 @@ class StitchContext:
             memory_echoes=self.memory_echoes,
             spatial_brief=self.bundle.spatial_brief,
             mode=self.mode,
+            **self._kg_kwargs(),
         )
 
     def system_blocks_with_usage(self) -> tuple:
-        """七块渲染 + A3b 配额使用明细（build_context_preview 预算条数据源）。
+        """知识块渲染 + A3b 配额使用明细（build_context_preview 预算条数据源）。
 
         与 system_blocks 同一渲染函数（同源红线），只是带回 allocate 的
         usages；mode 无预算档时 usages=None（预览侧降级为不显示预算条）。
@@ -112,6 +120,7 @@ class StitchContext:
             memory_echoes=self.memory_echoes,
             spatial_brief=self.bundle.spatial_brief,
             mode=self.mode,
+            **self._kg_kwargs(),
         )
 
 
@@ -193,6 +202,13 @@ async def assemble_stitch_context(
             scene_hint=scene_hint,
         )
 
+    # 知识检索平面 v3.1：条目化→选择→完整渲染（纯 CPU 零新增查询；失败
+    # 降级空视图=块缺席=零变化，不阻塞装配）
+    try:
+        kg = build_knowledge_view(bundle)
+    except Exception:
+        kg = KnowledgeView()
+
     return StitchContext(
         bundle=bundle,
         proper_nouns=proper_nouns,
@@ -203,6 +219,7 @@ async def assemble_stitch_context(
         author_samples=author_samples,
         mode=mode,
         scene_hint=scene_hint,
+        kg=kg,
     )
 
 
@@ -212,13 +229,18 @@ async def assemble_stitch_context(
 
 # 块 key → 展示标题（与 builder 块标题同词根；key 与 render_system_blocks 一一对应）
 _BLOCK_TITLES = {
-    "style_positive": "文风画像",
-    "author_samples": "笔迹示范",
+    "scene": "场景身份",
+    "entities": "在场与相关",
     "proper_nouns": "在场专名",
     "canon": "Canon 图谱",
     "secrets": "私有设定",
+    "worldview": "世界观",
+    "relations": "人物关系",
+    "negative": "禁词约束",
     "echoes": "前情回响",
     "spatial": "空间常识",
+    "style_positive": "文风画像",
+    "author_samples": "笔迹示范",
 }
 
 
@@ -230,6 +252,16 @@ def _block_source(key: str, bundle: SettingsBundle, scene_hint: str = "") -> str
     """
     if key == "proper_nouns":
         return "世界实体" if bundle.world_sourced else "章级绑定"
+    if key == "entities":
+        return "知识平面 · " + ("世界实体" if bundle.world_sourced else "章级绑定")
+    if key == "scene":
+        return "场景钉 + 叙事时刻"
+    if key == "worldview":
+        return "世界页 · 世界观"
+    if key == "relations":
+        return "世界页 · 关系（t 时刻活跃）"
+    if key == "negative":
+        return "文风页负面清单 + 系统陈词"
     if key == "canon":
         return "真相层（含私有）" if "[private]" in (bundle.canon_context or "") else "真相层"
     if key == "secrets":
@@ -284,4 +316,8 @@ def build_context_preview(ctx: StitchContext, mode: str) -> Dict[str, Any]:
         "world_time": ctx.bundle.world_time,
         "world_time_source": ctx.bundle.world_time_source,
         "world_sourced": ctx.bundle.world_sourced,
+        # 知识平面审计面（v3.1 §5 纠正回路②）：未选清单含原因——完备性
+        # 从暗箱变成可审计、可申诉；前端未消费前为向后兼容增量字段
+        "unselected": ctx.kg.unselected[:60],
+        "selected_keys": ctx.kg.selected_keys[:60],
     }
