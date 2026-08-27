@@ -81,7 +81,44 @@ async def fold(
         if tx_head is not None:
             result["truth_tx_note"] = f"as-of {tx_head}（修订时间旅行由 B5 信封校验消费）"
     if "belief" in domain_set:
-        result["belief"] = {}  # B3 接入（曝光级折叠 + 四值查询）
+        # B3 接入：曝光级折叠（认知事件 + 参与者在场推导），纯函数
+        from sqlalchemy import select as _sa_select
+
+        from backend.models import WorldEvent as _WE
+        from backend.services.world.belief import fold_belief
+
+        _bid = UUID(str(book_id))
+        _evs = (await db.execute(
+            _sa_select(_WE).where(
+                _WE.book_id == _bid,
+                _WE.event_type.in_(EPISTEMIC_EVENT_TYPES),
+                _WE.time_start <= t,
+            ).order_by(_WE.sequence_num)
+        )).scalars().all()
+        _belief = fold_belief(list(_evs), t)
+        # 视角配给视图：perspective_set 内各成员的命题 clearance（四值）
+        from backend.services.world.belief import proposition_status
+
+        result["belief"] = {
+            "states": _belief,
+            "perspective": {
+                str(pid): {
+                    "knows_propositions": (_belief.get(str(pid)) or {}).get("knows_propositions", []),
+                    "believes_false": (_belief.get(str(pid)) or {}).get("believes_false", []),
+                }
+                for pid in perspective_set
+            },
+            "proposition_status": {
+                # 全部被引用命题 × 视角集的四值（B9 反讽机会/负空间消费）
+                ref: proposition_status(ref, perspective_set, _belief)
+                for ref in {
+                    str(p)
+                    for slot in _belief.values()
+                    for p in (slot.get("knows_propositions") or [])
+                    + [b.get("proposition_ref") for b in slot.get("believes_false") or []]
+                }
+            },
+        }
     if "intent" in domain_set:
         from backend.repositories.intent_repository import IntentRepository
 

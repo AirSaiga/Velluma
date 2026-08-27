@@ -75,6 +75,7 @@ def check_ghost_text(
     character_secrets: Optional[List[Dict[str, str]]] = None,
     world_state: Optional[Dict[str, Any]] = None,
     entity_names_by_id: Optional[Dict[str, List[str]]] = None,
+    canon_node_ids_by_label: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, str]]:
     """幽灵草稿快检：返回 warnings: [{kind, span_text, message}]。
 
@@ -120,6 +121,14 @@ def check_ghost_text(
                 warning["detail"] = detail
             warnings.append(warning)
 
+        def _hit_dict(warning: Dict[str, Any]) -> None:
+            """带扩展字段（如 canon_node_id）的命中——去重/上限纪律同 _hit。"""
+            key = (warning.get("kind"), warning.get("span_text"))
+            if key in seen_spans or len(warnings) >= MAX_WARNINGS:
+                return
+            seen_spans.add(key)
+            warnings.append(warning)
+
         # ---- 1. dead_speak：死者名（含别名）出现 ----
         for name in _dead_entity_names(world_state, entity_names_by_id):
             if len(name) >= NAME_MIN_CHARS and name in text:
@@ -129,14 +138,21 @@ def check_ghost_text(
                     f"（若是有意的回忆/闪回可忽略）",
                 )
 
-        # ---- 2. canon_leak：私有标签词出现 ----
+        # ---- 2. canon_leak：私有标签词出现（B3 命题精确化：携带 canon_node_id，
+        # 调用方经 canon_node_ids_by_label 供 label→命题注册表 id 的映射——
+        # 泄密疑点从「词命中」升格为「命题命中」，B9 认知浮现消费同一证据链）----
         for label in (canon_private_labels or []):
             label = (label or "").strip()
             if len(label) >= NAME_MIN_CHARS and label in text:
-                _hit(
-                    "canon_leak", label,
-                    f"疑似泄底：正文直接写出了真相层私有标签「{label}」",
-                )
+                warning = {
+                    "kind": "canon_leak",
+                    "span_text": label,
+                    "message": f"疑似泄底：正文直接写出了真相层私有标签「{label}」",
+                }
+                node_id = (canon_node_ids_by_label or {}).get(label)
+                if node_id:
+                    warning["canon_node_id"] = node_id
+                _hit_dict(warning)
 
         # ---- 3. secret_leak：私有实体档案关键短语复现 ----
         for secret in (character_secrets or []):

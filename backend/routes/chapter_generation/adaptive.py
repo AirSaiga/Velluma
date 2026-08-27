@@ -1116,7 +1116,21 @@ async def stitch_ghost(
             # 防御——warnings 是柔性增量字段，绝不让它阻塞幽灵推送。
             ghost_warnings: List[Dict] = []
             try:
-                ghost_warnings = check_ghost_text(text, bundle)
+                # B3 命题精确化：label→canon 命题注册表 id 映射（一次轻查询），
+                # canon_leak 警告携带 canon_node_id——B9 认知浮现消费同一证据链
+                _label_map: Dict[str, str] = {}
+                if bundle.book_id:
+                    try:
+                        from backend.models import CanonNode as _CN
+                        _rows = (await db.execute(
+                            select(_CN.id, _CN.label).where(_CN.book_id == bundle.book_id)
+                        )).all()
+                        _label_map = {label: str(nid) for nid, label in _rows if label}
+                    except Exception:
+                        _label_map = {}
+                ghost_warnings = check_ghost_text(
+                    text, bundle, canon_node_ids_by_label=_label_map,
+                )
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
             # 知识平面 v3.1 join 埋点（§10 在线召回证据，只记录不 retry）：
