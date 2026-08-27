@@ -219,6 +219,9 @@ class Book(Base):
     # 一笔勾销（作者点「恢复」后重新计数）。静音状态本身不落库，永远从行为数据
     # 派生（services/adaptive/quiet_learning.py），杜绝静音态与历史漂移。
     assist_mutes = Column(JSONB, nullable=True)
+    # 世界内核 B9：认知浮现总开关（三时机：泄密疑点/反讽机会/负空间清单
+    # 之外的认知模型默认不可见——可见性悖论纪律，docs/world-kernel-foundation.md §8）
+    cognition_surfacing = Column(Boolean, default=True, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")

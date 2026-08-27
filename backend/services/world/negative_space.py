@@ -104,3 +104,43 @@ async def dramatic_capital(
             "note": perspective_note,
         })
     return capital
+
+
+async def irony_opportunities(
+    db: AsyncSession,
+    book_id: UUID | str,
+    t: int,
+    perspective_entity_ids: List[str],
+) -> List[Dict[str, Any]]:
+    """反讽机会（B9 三时机之二）：读者已知而视角角色未知的命题清单。
+
+    戏剧反讽的可计算形态——读者知道（Depiction confirmed）、在场者不知道
+    （belief 域四值=unknown/unaware），差集即「此刻写出来就是反讽」的原料。
+    诚实降级：任一侧数据缺失（无回填/无认知事件）返回空（不猜）。
+    """
+    from backend.services.world.fold import fold
+    from backend.services.world.belief import proposition_status
+
+    bid = book_id if isinstance(book_id, UUID) else UUID(str(book_id))
+    out = await fold(db, bid, t=t, domains=("belief", "reader"),
+                     perspective_set=perspective_entity_ids)
+    reader_known = {
+        k.split(":", 1)[1]
+        for k in (out["reader"].get("known_subjects") or [])
+        if k.startswith("proposition:")
+    }
+    if not reader_known:
+        return []  # 读者侧未回填：诚实降级
+    belief_states = out["belief"].get("states") or {}
+    if not belief_states:
+        return []  # 认知事件未录：差集无意义（全员 unknown 会误报全量反讽）
+    opportunities = []
+    for prop in reader_known:
+        status = proposition_status(prop, perspective_entity_ids, belief_states)
+        if status == "unknown":
+            opportunities.append({
+                "kind": "irony",
+                "canon_node_id": prop,
+                "note": "读者已知、在场角色不知——此刻的言行可构成反讽",
+            })
+    return opportunities[:10]

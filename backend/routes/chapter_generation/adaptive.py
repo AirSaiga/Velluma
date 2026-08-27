@@ -804,6 +804,25 @@ async def finish(
     except Exception as e:
         logger.debug(f"[adaptive/finish] 现实校验失败（不阻塞完稿）: {e}")
 
+    # B9 认知浮现三时机（完稿时机）：总开关开且数据存在才浮现——可见性
+    # 悖论纪律（认知模型默认不可见，docs/world-kernel-foundation.md §8）
+    try:
+        from backend.services.world.negative_space import dramatic_capital, irony_opportunities
+
+        _ch = await db.get(Chapter, chapter_id)
+        _bid = str(_ch.book_id) if _ch else ""
+        _t = (getattr(_ch, "narrative_time", None) or 0) if _ch else 0
+        from backend.models import Book as _Book2
+
+        _book = await db.get(_Book2, _bid) if _bid else None
+        if _book is None or bool(getattr(_book, "cognition_surfacing", True)):
+            result["cognition_surface"] = {
+                "irony": await irony_opportunities(db, _bid, _t, []),
+                "capital_count": len(await dramatic_capital(db, _bid, t=_t)),
+            }
+    except Exception as e:
+        logger.debug(f"[adaptive/finish] 认知面聚合失败（不阻塞完稿）: {e}")
+
     # ---- 记忆倒灌（写入侧）：完稿 = 章级定稿时刻，整章重索引（章级替换，幂等）----
     # 画布即事实源：索引正文取 chapters.content_text；失败绝不让完稿失败
     memory_indexed = 0

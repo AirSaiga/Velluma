@@ -123,6 +123,12 @@ MIGRATIONS: list[dict[str, Any]] = [
         "expected_udt_names": {"varchar", "character varying"},
     },
     {
+        "table": "books",
+        "column": "cognition_surfacing",
+        "definition": "BOOLEAN DEFAULT 1",
+        "expected_udt_names": {"boolean"},
+    },
+    {
         "table": "world_events",
         "column": "supersedes",
         "definition": "UUID",

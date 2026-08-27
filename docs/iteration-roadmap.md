@@ -336,7 +336,7 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 
 ---
 
-## 13. 世界内核期（2026-08-28 立项，施工中——执行计划唯一载体 `docs/world-kernel-construction-plan.md`）
+## 13. 世界内核期（2026-08-28 立项，B0-B9 ✅ 2026-08-28 施工完成——执行计划唯一载体 `docs/world-kernel-construction-plan.md`；B8 stitch 门与金标准标注待真实使用签发）
 
 **定位**：四域存在论（truth/intent/belief/presentation）内核 + WCA 分层认知——
 设计唯一权威 `docs/world-kernel-foundation.md`（地基）与 `docs/world-cognition-architecture.md`（四层）。
@@ -346,15 +346,15 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 
 | 批次 | 内容 | 状态 |
 |---|---|---|
-| B0 | 清账提交 + context_manifest 观测 + 注入未消费率脚本 + 金标准评测工具 | 🔨 |
-| B1 | Event v2（time_precision/supersedes/认知事件家族/时序边）+ Fold API 唯一入口 | ⬜ |
-| B2 | Intent 统一存储（伏笔/期待/揭示/节拍/锚点归一）+ 双读迁移 | ⬜ |
-| B3 | belief 域折叠 + 场景级视角配给 + 泄密检测命题化 | ⬜ |
-| B4 | Depiction 呈现关系 + 通读阶段 C 回填 + reader 折叠 + 负空间差集 | ⬜ |
-| B5 | provenance 信封 + 现实校验任务 | ⬜ |
-| B6 | 温层场景卡 + 计划层 + 提及逐出前缀（WCA P1） | ⬜ |
-| B7 | 热层显著性 + 方向权重拆解（WCA P2） | ⬜ |
-| B8 | 冷层 digest（WCA P3，双门：manifest 数据 + 双模型对照） | ⬜ |
-| B9 | 认知浮现三时机 + 总开关（可见性悖论纪律） | ⬜ |
+| B0 | 清账提交 + context_manifest 观测 + 注入未消费率脚本 + 金标准评测工具 | ✅ 68f6f21 |
+| B1 | Event v2（time_precision/supersedes/认知事件家族/时序边）+ Fold API 唯一入口 | ✅ b13bf7f |
+| B2 | Intent 统一存储（伏笔/期待/揭示迁入；spine/大纲因作者主权保留原状）+ 双读迁移 | ✅ cd08985 |
+| B3 | belief 域折叠（四值 clearance）+ 泄密检测命题化（视角配给随数据激活） | ✅ c88481b |
+| B4 | Depiction 呈现关系 + 回填气闸端点 + reader 折叠 + 负空间差集（阶段 C 前端 UI 待接） | ✅ 4eb3619 |
+| B5 | provenance 信封 + 现实校验挂 finish | ✅ dc4a4df |
+| B6 | 温层计划层温卡 + 提及逐出前缀 + 章内冻结缓存（prefix byte-equal 测试锁） | ✅ e6cd2e7 |
+| B7 | 热层显著性（影子常开）+ 方向权重引擎删除（信号转世）+ dock 具名提示单车道 | ✅ 3921bbc |
+| B8 | 冷层 digest（节级键控+事实节纯代码+ops 编译器+预算分池；**门控关闭中**——stitch 双门未签发） | ✅ 56a86ac |
+| B9 | 认知浮现三时机 + books.cognition_surfacing 总开关（可见性悖论防线） | ✅ 本批 |
 
 不变量验收（11 条，见地基文档 §4）与每批回退路径随批登记。

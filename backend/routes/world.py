@@ -976,3 +976,50 @@ async def compile_digest_route(
 
     out = await compile_digest(db, book_id, t=t)
     return out
+
+# ============================================================
+# 世界内核 B9：认知浮现三时机（可见性悖论纪律——认知模型默认不可见，
+# 仅泄密疑点/反讽机会/负空间清单三处浮现；books.cognition_surfacing 总开关可全关）
+# ============================================================
+
+
+@router.get("/{book_id}/world/cognition-surface")
+async def get_cognition_surface(
+    book_id: UUID,
+    chapter_id: Optional[UUID] = Query(None, description="本章在场者构成反讽视角"),
+    db: AsyncSession = Depends(get_db),
+):
+    """认知浮现面（三时机聚合）：反讽机会 + 负空间清单。
+
+    总开关关（books.cognition_surfacing=false）→ 全空（人话说明）；
+    数据缺失 → 诚实降级为空（不猜）。泄密疑点走 ghost_guard 既有通道
+    （B3 起带 canon_node_id 证据链），不经此端点。
+    """
+    from backend.models import Book as _Book, Chapter as _Chapter
+    from backend.services.world.negative_space import dramatic_capital, irony_opportunities
+
+    book = await db.get(_Book, book_id)
+    enabled = bool(getattr(book, "cognition_surfacing", True))
+    if not enabled:
+        return {"enabled": False, "irony": [], "capital": [],
+                "note": "认知浮现总开关已关（可见性悖论防线）"}
+
+    t = 0
+    present_ids: List[str] = []
+    if chapter_id:
+        ch = await db.get(_Chapter, chapter_id)
+        if ch:
+            t = getattr(ch, "narrative_time", None) or 0
+        # 在场集：场景钉 + 折叠（与知识平面同判据的轻量版）
+        from backend.services.world.fold import fold
+
+        truth = (await fold(db, book_id, t=t, domains=("truth",), perspective_set=()))["truth"]
+        scene_loc = str(getattr(ch, "scene_location_id", None) or "") if ch else ""
+        for cs in truth.get("character_states") or []:
+            if scene_loc and str(cs.get("location_id") or "") == scene_loc and cs.get("alive", False):
+                present_ids.append(str(cs.get("entity_id") or ""))
+
+    irony = await irony_opportunities(db, book_id, t, present_ids)
+    capital = await dramatic_capital(db, book_id, t=t)
+    return {"enabled": True, "irony": irony, "capital": capital[:8],
+            "note": "反讽=读者知而角色不知；资本=可揭示而未排期"}
