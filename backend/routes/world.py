@@ -902,7 +902,8 @@ async def backfill_depictions(
                 status="candidate", source="heuristic",
             )
             db.add(row)
-            created.append({"subject_id": nid, "label": node.label})
+            await db.flush()  # 取行 id（裁决端点按呈现行 id 操作）
+            created.append({"id": str(row.id), "subject_id": nid, "label": node.label})
     await db.commit()
     return {"created": len(created), "candidates": created}
 

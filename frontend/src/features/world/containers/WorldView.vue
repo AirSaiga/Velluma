@@ -482,6 +482,11 @@ async function onReadBookConfirmEntities() {
   await readBook.confirmEntities(bookId.value)
 }
 
+async function onReadBookConfirmDepictions() {
+  if (!bookId.value) return
+  await readBook.confirmDepictions(bookId.value)
+}
+
 async function onReadBookClose() {
   readBookOpen.value = false
   // 通读可能新建了实体/地点 + 填满了收件箱——全量刷新（实体进推演 + 候选重取）
@@ -1296,8 +1301,12 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       :review-count="readBook.reviewCount.value"
       :creating="readBook.creating.value"
       :create-progress="readBook.createProgress.value"
+      :depiction-candidates="readBook.depictionCandidates.value"
+      :confirmed-depictions="readBook.confirmedDepictions.value"
+      :depiction-review-count="readBook.depictionReviewCount.value"
       @cancel="readBook.cancel()"
       @confirm-entities="onReadBookConfirmEntities"
+      @confirm-depictions="onReadBookConfirmDepictions"
       @close="onReadBookClose"
     />
 

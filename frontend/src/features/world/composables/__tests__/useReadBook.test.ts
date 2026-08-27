@@ -15,7 +15,9 @@ vi.mock('../../../../services/api/domain', () => ({ chapterApi: { getAll: vi.fn(
 vi.mock('../../../../services/api/domain/adaptive.api', () => ({
   adaptiveApi: { autoRead: vi.fn(), readEntities: vi.fn() },
 }))
-vi.mock('../../../../services/api/domain/world.api', () => ({ worldApi: { listEntities: vi.fn() } }))
+vi.mock('../../../../services/api/domain/world.api', () => ({
+  worldApi: { listEntities: vi.fn(), backfillDepictions: vi.fn() },
+}))
 
 const chapter = (id: string, n: number) => ({
   id, chapter_number: n, title: `第${n}章`, content_text: 'x'.repeat(150),

@@ -491,6 +491,32 @@ export const worldApi = {
       method: 'DELETE',
     }),
 
+  // ===== 呈现关系（世界内核 B4 · 通读阶段 C 回填）=====
+  /** 按章生成呈现关系候选（启发式零 LLM，幂等；只产 candidate 不落读者折叠） */
+  backfillDepictions: (bookId: string, chapterId: string) =>
+    requestJson<{ created: number; candidates: { id: string; subject_id: string; label: string }[] }>(
+      `/books/${bookId}/world/depictions/backfill`,
+      {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ chapter_id: chapterId }),
+      },
+    ),
+
+  /** 作者裁决：候选呈现 → confirmed（进读者折叠，负空间/反讽差集从此有据） */
+  confirmDepiction: (bookId: string, depictionId: string) =>
+    requestJson<{ id: string; status: string }>(
+      `/books/${bookId}/world/depictions/${depictionId}/confirm`,
+      { method: 'POST' },
+    ),
+
+  /** 作者裁决：否决候选呈现（留痕不进读者折叠） */
+  rejectDepiction: (bookId: string, depictionId: string) =>
+    requestJson<{ id: string; status: string }>(
+      `/books/${bookId}/world/depictions/${depictionId}/reject`,
+      { method: 'POST' },
+    ),
+
   // ===== 底图：图片上传（multipart，不设 Content-Type 让浏览器带 boundary）=====
   uploadMapImage: (bookId: string, file: File) => {
     const form = new FormData()

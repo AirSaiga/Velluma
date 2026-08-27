@@ -2,11 +2,14 @@
 /**
  * 全书通读模态（2026-08-25「系统自己去读」存量首秀入口）。
  *
- * 流程：介绍 → 阶段 A 认人（进度）→ 实体过目（勾选）→ 阶段 B 记事（进度）→ 完成。
+ * 流程：介绍 → 阶段 A 认人（进度）→ 实体过目（勾选）→ 阶段 B 记事（进度）
+ *      → 阶段 C 呈现对账（进度 + 勾选）→ 完成（世界内核 B4，2026-08-28）。
  * 职责切分：本组件只渲染 + 抛动作，编排全在 useReadBook（composable 层）。
  */
 import ModalShell from './ModalShell.vue'
-import type { EntityCandidate, LocationCandidate, ReadBookPhase } from '../composables/useReadBook'
+import type {
+  DepictionCandidate, EntityCandidate, LocationCandidate, ReadBookPhase,
+} from '../composables/useReadBook'
 
 const props = defineProps<{
   phase: ReadBookPhase
@@ -21,12 +24,17 @@ const props = defineProps<{
   /** 建设期忙碌闸（防连点重复建实体，2026-08-26 实测事故） */
   creating: boolean
   createProgress: { done: number; total: number } | null
+  /** 阶段 C：呈现关系候选与裁决计数（B4） */
+  depictionCandidates: DepictionCandidate[]
+  confirmedDepictions: number
+  depictionReviewCount: number
 }>()
 
 const emit = defineEmits<{
   close: []
   cancel: []
   confirmEntities: []
+  confirmDepictions: []
 }>()
 </script>
 
@@ -37,10 +45,10 @@ const emit = defineEmits<{
     width="560px"
     @close="emit('close')"
   >
-    <!-- 阶段 A/B 进度 -->
-    <div v-if="phase === 'entities' || phase === 'events'" class="rb-progress">
+    <!-- 阶段 A/B/C 进度 -->
+    <div v-if="phase === 'entities' || phase === 'events' || phase === 'depictions'" class="rb-progress">
       <p class="rb-progress__label">
-        {{ phase === 'entities' ? '正在认人（第' : '正在记事（第' }}{{ progress?.done }}/{{ progress?.total }}章）<template v-if="progress?.label">：{{ progress.label }}</template>
+        {{ phase === 'entities' ? '正在认人（第' : phase === 'events' ? '正在记事（第' : '正在对账呈现（第' }}{{ progress?.done }}/{{ progress?.total }}章）<template v-if="progress?.label">：{{ progress.label }}</template>
       </p>
       <div class="rb-bar">
         <div
@@ -78,12 +86,26 @@ const emit = defineEmits<{
       <p v-else class="rb-review__lead">没有认出新人物或地点——可以直接记事。</p>
     </div>
 
+    <!-- 阶段 C 过目：呈现关系候选（哪个真相在哪章已写给读者） -->
+    <div v-else-if="phase === 'depictions-review'" class="rb-review">
+      <p class="rb-review__lead">
+        对账完成——这些真相已经在正文里写给读者了。勾掉的记入「读者已知」
+        （可揭示的戏剧资本与反讽提示从此有据），划掉的不算。
+      </p>
+      <label v-for="c in depictionCandidates" :key="c.id" class="rb-row">
+        <input v-model="c.checked" type="checkbox" />
+        <span class="rb-row__name">{{ c.label }}</span>
+        <span class="rb-row__desc">{{ c.chapterTitle }} 已写出</span>
+      </label>
+    </div>
+
     <!-- 完成 / 出错 -->
     <div v-else-if="phase === 'done'" class="rb-done">
       <p>读完了。</p>
       <ul class="rb-done__list">
         <li v-if="createdEntities">新建人物/地点 {{ createdEntities }} 个</li>
         <li>收件箱新增 {{ createdCandidates }} 条世界变化，等你过目</li>
+        <li v-if="confirmedDepictions">确认 {{ confirmedDepictions }} 条「读者已知」的呈现关系</li>
         <li v-if="skippedCount">跳过 {{ skippedCount }} 章（太短、刚读过或今日额度用完——明天重跑会接着读）</li>
       </ul>
     </div>
@@ -107,6 +129,12 @@ const emit = defineEmits<{
         :disabled="creating || (!reviewCount && (entityCandidates.length + locationCandidates.length) > 0)"
         @click="emit('confirmEntities')"
       >建好勾选的（{{ reviewCount }}），开始记事</button>
+      <button
+        v-if="phase === 'depictions-review'"
+        class="rb-btn rb-btn--primary"
+        :disabled="creating"
+        @click="emit('confirmDepictions')"
+      >记下勾选的（{{ depictionReviewCount }}），完成</button>
       <button
         v-if="phase === 'done' || phase === 'error'"
         class="rb-btn rb-btn--primary"

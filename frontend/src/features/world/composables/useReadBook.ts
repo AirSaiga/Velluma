@@ -1,10 +1,14 @@
 /**
  * 全书通读编排（2026-08-25 战略定稿「系统自己去读」的存量通读首秀）。
  *
- * 两阶段（严格保序：事件抽取需要实体打底，无人可认则无话可记）：
+ * 三阶段（严格保序：事件抽取需要实体打底，无人可认则无话可记）：
  *   阶段 A「认人」：逐章 read-entities（只产草稿不落库）→ 汇总去重 → 作者批量
  *     过目勾选 → 确认才建实体/地点（实体建设永远是作者动作）；
- *   阶段 B「记事」：逐章 auto-read → 事件候选进收件箱（物理隔离，作者 ✓ 才转正）。
+ *   阶段 B「记事」：逐章 auto-read → 事件候选进收件箱（物理隔离，作者 ✓ 才转正）；
+ *   阶段 C「对账」（世界内核 B4 · docs/world-kernel-foundation.md §3）：逐章
+ *     backfill 呈现关系候选（哪个真相在哪章被写给读者）→ 作者 ✓/✗ 裁决 →
+ *     confirmed 进读者折叠——负空间（可揭示戏剧资本）与反讽差集从此有据。
+ *     幂等：后端按（章×命题）去重，重跑只补新增；诚实降级：未回填=unknown。
  *
  * 幂等：后端按章内容哈希跳过重读，中断后重跑只补未读的章。
  * 可中断：章间检查取消标志（单章 LLM 调用不可中断，最多多跑一章）。
@@ -14,7 +18,7 @@ import { chapterApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { worldApi } from '../../../services/api/domain/world.api'
 
-export type ReadBookPhase = 'idle' | 'entities' | 'review' | 'events' | 'done' | 'error'
+export type ReadBookPhase = 'idle' | 'entities' | 'review' | 'events' | 'depictions' | 'depictions-review' | 'done' | 'error'
 
 export interface EntityCandidate {
   name: string
@@ -30,6 +34,16 @@ export interface LocationCandidate {
   name: string
   description: string
   mentions: number
+  checked: boolean
+}
+
+/** 呈现关系候选（阶段 C）：某真相在某章被「写出/提及/暗示」的判定草稿 */
+export interface DepictionCandidate {
+  id: string
+  /** canon 命题 id（裁决端点按呈现行 id 操作，此处冗余展示用） */
+  subjectId: string
+  label: string
+  chapterTitle: string
   checked: boolean
 }
 
@@ -55,6 +69,9 @@ export function useReadBook() {
   const createdCandidates = ref(0)
   const skippedCount = ref(0)
   const errorMsg = ref('')
+  /** 阶段 C：呈现关系候选与裁决计数 */
+  const depictionCandidates = ref<DepictionCandidate[]>([])
+  const confirmedDepictions = ref(0)
   /** 建设期忙碌闸 + 进度（防连点，2026-08-26 实测事故） */
   const creating = ref(false)
   const createProgress = ref<{ done: number; total: number } | null>(null)
@@ -72,6 +89,8 @@ export function useReadBook() {
     locationCandidates.value = []
     createdEntities.value = 0
     createdCandidates.value = 0
+    depictionCandidates.value = []
+    confirmedDepictions.value = 0
     skippedCount.value = 0
     errorMsg.value = ''
     creating.value = false
@@ -224,13 +243,79 @@ export function useReadBook() {
       } catch { /* 单章失败不阻塞 */ }
     }
     progress.value = null
-    phase.value = 'done'
+    // 阶段 B 毕 → 阶段 C（呈现关系回填，B4；可取消跳过）
+    if (!cancelled) await runDepictions(bookId)
   }
+
+  /** 阶段 C：逐章回填呈现关系候选（启发式零 LLM，幂等）→ 作者裁决。 */
+  async function runDepictions(bookId: string) {
+    phase.value = 'depictions'
+    let chapters: any[] = []
+    try {
+      chapters = (await chapterApi.getAll(bookId)) || []
+    } catch {
+      // 章节列表都拿不到说明接口异常——阶段 C 静默跳过不阻塞完成页
+      phase.value = 'done'
+      return
+    }
+    const targets = chapters
+      .filter((c) => (c.content_text || '').length >= MIN_CHAPTER_TEXT)
+      .sort((a, b) => (a.chapter_number || 0) - (b.chapter_number || 0))
+    for (let i = 0; i < targets.length; i++) {
+      if (cancelled) { phase.value = 'idle'; return }
+      const ch = targets[i]
+      progress.value = { done: i + 1, total: targets.length, label: ch.title || `第${ch.chapter_number}章` }
+      try {
+        const r = await worldApi.backfillDepictions(bookId, ch.id)
+        for (const c of r.candidates || []) {
+          depictionCandidates.value.push({
+            id: c.id, // 呈现行 id（confirm/reject 端点按行操作）
+            subjectId: c.subject_id,
+            label: c.label || '真相',
+            chapterTitle: ch.title || `第${ch.chapter_number}章`,
+            checked: true,
+          })
+        }
+      } catch { /* 单章失败不阻塞 */ }
+    }
+    progress.value = null
+    phase.value = depictionCandidates.value.length ? 'depictions-review' : 'done'
+  }
+
+  /** 阶段 C 裁决：勾选的 confirm（进读者折叠），其余 reject（留痕）。 */
+  async function confirmDepictions(bookId: string) {
+    if (creating.value || cancelled) return
+    creating.value = true
+    const total = depictionCandidates.value.length
+    let done = 0
+    createProgress.value = { done: 0, total }
+    try {
+      for (const c of depictionCandidates.value) {
+        try {
+          if (c.checked) {
+            await worldApi.confirmDepiction(bookId, c.id)
+            confirmedDepictions.value++
+          } else {
+            await worldApi.rejectDepiction(bookId, c.id)
+          }
+        } catch { /* 单条失败不阻塞 */ }
+        createProgress.value = { done: ++done, total }
+      }
+    } finally {
+      creating.value = false
+      createProgress.value = null
+    }
+    if (!cancelled) phase.value = 'done'
+  }
+
+  const depictionReviewCount = computed(() =>
+    depictionCandidates.value.filter((c) => c.checked).length)
 
   return {
     phase, progress, entityCandidates, locationCandidates,
     createdEntities, createdCandidates, skippedCount, errorMsg, reviewCount,
     creating, createProgress,
-    start, confirmEntities, runEvents, cancel, reset,
+    depictionCandidates, confirmedDepictions, depictionReviewCount,
+    start, confirmEntities, runEvents, runDepictions, confirmDepictions, cancel, reset,
   }
 }
