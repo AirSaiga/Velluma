@@ -28,6 +28,7 @@ tx_head=None 语义 =「链头（最新真相）」；传事件 id 即时间旅�
 from __future__ import annotations
 
 from typing import Any, Dict, FrozenSet, Iterable, Sequence, Tuple
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,7 +83,13 @@ async def fold(
     if "belief" in domain_set:
         result["belief"] = {}  # B3 接入（曝光级折叠 + 四值查询）
     if "intent" in domain_set:
-        result["intent"] = {}  # B2 接入（IntentRepository 查询面）
+        from backend.repositories.intent_repository import IntentRepository
+
+        repo_i = IntentRepository(db)
+        result["intent"] = {
+            "hooks": await repo_i.read_merge_hooks(UUID(str(book_id))),
+            "reveals": await repo_i.read_merge_reveals(UUID(str(book_id))),
+        }
     if "reader" in domain_set:
         result["reader"] = {}  # B4 接入（Depiction 折叠，未回填=unknown）
     return result

@@ -214,28 +214,16 @@ async def load_open_hooks(
     repositories: RepositoriesDict,
     chapter: Chapter
 ) -> List[Dict[str, str]]:
-    """加载开放的伏笔/情节点"""
+    """加载开放的伏笔/情节点（世界内核 B2：Intent 双读——新表优先/旧表兜底）"""
     plot_repo: "PlotLedgerRepository" = repositories.get("plot_ledger")
     if not plot_repo or not chapter.book_id:
         return []
-    
-    hooks = await plot_repo.get_open_hooks(
+
+    from backend.repositories.intent_repository import IntentRepository
+    return await IntentRepository(plot_repo._db).read_merge_hooks(
         book_id=chapter.book_id,
         before_chapter=chapter.chapter_number,
     )
-    
-    result = []
-    for row in hooks:
-        content = str(getattr(row, "content", "") or "").strip()
-        if not content:
-            continue
-        result.append({
-            "hook_id": str(getattr(row, "hook_id", None) or getattr(row, "ledger_key", None) or "").strip(),
-            "ledger_key": str(getattr(row, "ledger_key", "") or "").strip(),
-            "content": content,
-        })
-    
-    return result
 
 
 async def load_chapter_locations(

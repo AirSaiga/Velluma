@@ -145,37 +145,33 @@ async def run(
     # 纯算法零 LLM；作者定的揭示计划自己长脚走到写作现场。
     if bundle.book_id and bundle.chapter_number:
         try:
-            from sqlalchemy import select as sa_select
-            from backend.models import CanonNode as _CanonNode
+            # 世界内核 B2：揭示临近走 Intent 双读（新表 reveal 意图优先，
+            # canon_nodes.expected_reveal_chapter 兜底；口径仍为距本章 ≤2 章）
+            from backend.repositories.intent_repository import IntentRepository
 
-            rows = (
-                await db.execute(
-                    sa_select(_CanonNode).where(
-                        _CanonNode.book_id == bundle.book_id,
-                        _CanonNode.expected_reveal_chapter.isnot(None),
-                    )
-                )
-            ).scalars().all()
-            for n in rows:
-                gap = (n.expected_reveal_chapter or 0) - bundle.chapter_number
-                if -1 <= gap <= 2 and (n.canon_text or "").strip():
-                    key = f"reveal_due:{n.id}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    hints.append({
-                        "kind": "callback",
-                        "node_label": n.label,
-                        "node_type": "canon",
-                        "detail": (
-                            f"揭示计划临近：预期第 {n.expected_reveal_chapter} 章（"
-                            + ("就是本章" if gap == 0 else f"还差 {gap} 章")
-                            + f"）——{n.reveal_plan[:60]}" if n.reveal_plan
-                            else f"揭示计划临近：预期第 {n.expected_reveal_chapter} 章（"
-                                + ("就是本章" if gap == 0 else f"还差 {gap} 章") + "）"
-                        ),
-                        "severity": "info",
-                    })
+            rows = await IntentRepository(db).read_merge_reveals(
+                book_id=bundle.book_id,
+                chapter_number=bundle.chapter_number,
+                within_chapters=2,
+            )
+            for r in rows:
+                target_ch = r.get("expected_reveal_chapter") or 0
+                gap = target_ch - bundle.chapter_number
+                key = f"reveal_due:{r.get('canon_node_id') or r.get('label')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                hints.append({
+                    "kind": "callback",
+                    "node_label": r.get("label") or "真相揭示",
+                    "node_type": "canon",
+                    "detail": (
+                        f"揭示计划临近：预期第 {target_ch} 章（"
+                        + ("就是本章" if gap == 0 else f"还差 {gap} 章") + "）"
+                        + (f"——{r.get('label', '')[:60]}" if r.get("source") == "intent" else "")
+                    ),
+                    "severity": "info",
+                })
         except Exception as e:
             logger.debug(f"[canon_watch] 揭示临近检查失败: {e}")
 

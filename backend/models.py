@@ -1416,6 +1416,54 @@ class WorldEventEdge(Base):
     created_at = Column(DateTime, default=utc_now)
 
 
+# 世界内核 Intent 生命周期枚举（B2 · docs/world-kernel-foundation.md §2 决策 4：
+# 枚举与区间，拒绝概率浮点——意图的不确定性用生命周期+软窗口表达）
+INTENT_KINDS = ("beat", "foreshadow", "expectation", "reveal", "promise")
+INTENT_LIFECYCLES = (
+    "declared", "tentative", "fulfilled", "abandoned", "broken_deliberately",
+)
+
+
+class WorldIntent(Base):
+    """统一意图存储（B2 · 四域存在论的 intent 域）——「打算发生的事」。
+
+    归一五类：伏笔(plot_ledgers)/期待(reader_mirror)/揭示计划(canon)/
+    节拍(spine 锚点、大纲)/承诺。与 world_events 的模态纪律（决策 3）：
+    本表是**可变规划存储**，兑现时产生真 event 并回填 realized_by——
+    两张表类型级分离，统一轴不统一真值。
+
+    双读过渡（B2）：迁移脚本幂等复制旧源（source_key 记来源去重），
+    IntentRepository 读合并（新表优先/旧表兜底），旧表在全部消费方切走
+    并稳定一章后冻结只读（docs/world-kernel-construction-plan.md §3）。
+    """
+
+    __tablename__ = "world_intents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, index=True)          # INTENT_KINDS
+    scope = Column(String(16), nullable=False, default="book")     # book|chapter
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True)
+    # target 三态（决策 2：逐步收敛到引用，自由文本是过渡态）
+    target_type = Column(String(16), nullable=False, default="free_text")  # event_stub|proposition_ref|free_text
+    target_ref = Column(String(64), nullable=True)                 # canon_node.id / world_event.id
+    target_text = Column(Text, default="")
+    # 软窗口（决策 4）：叙事 t 区间或章区间，均可空=不限
+    window_t_start = Column(Integer, nullable=True)
+    window_t_end = Column(Integer, nullable=True)
+    window_chapter_start = Column(Integer, nullable=True)
+    window_chapter_end = Column(Integer, nullable=True)
+    lifecycle = Column(String(20), nullable=False, default="declared")  # INTENT_LIFECYCLES
+    setup_event_id = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="SET NULL"), nullable=True)
+    realized_by = Column(UUID(as_uuid=True), ForeignKey("world_events.id", ondelete="SET NULL"), nullable=True)
+    serves_anchor = Column(String(128), default="")
+    provenance = Column(String(8), nullable=False, default="author")     # author|ai
+    source_key = Column(String(128), nullable=True, index=True)          # 迁移来源幂等键（legacy:<表>:<id>）
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
 class WorldLocation(Base):
     """世界地点（带空间坐标）。region/route 的复杂几何放 geometry JSONB。
 

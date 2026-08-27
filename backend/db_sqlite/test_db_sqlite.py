@@ -77,7 +77,7 @@ def test_create_all_builds_every_table(tmp_path):
         actual = _table_names(engine)
         missing = expected - actual
         assert not missing, f"缺表: {missing}"
-        assert len(expected) == 32, f"ORM 表数变化: {len(expected)}（新增表请同步更新本断言；B1 新增 world_event_edges）"
+        assert len(expected) == 33, f"ORM 表数变化: {len(expected)}（新增表请同步更新本断言；B1 world_event_edges、B2 world_intents）"
     finally:
         asyncio.run(engine.dispose())
 
