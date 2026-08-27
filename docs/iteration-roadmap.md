@@ -332,3 +332,29 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 静音准确性、模型 A/B 归因（**卡 DeepSeek Key 失效**——A/B 乙侧与 mimo 禁令
 不服从两悬案的钥匙）、自动阅读日花费带、感知带出场卡真实触发验证。
 基线：后端 624 / 前端 93 全绿（2026-08-26 二次归档时）。
+
+
+---
+
+## 13. 世界内核期（2026-08-28 立项，施工中——执行计划唯一载体 `docs/world-kernel-construction-plan.md`）
+
+**定位**：四域存在论（truth/intent/belief/presentation）内核 + WCA 分层认知——
+设计唯一权威 `docs/world-kernel-foundation.md`（地基）与 `docs/world-cognition-architecture.md`（四层）。
+动因：方向权重引擎尸检（18 次恒常量输出，先验力学无观测无回路）+ 用户定调
+「地基优先、不模仿业界、创新超越」。知识检索平面 v3.1（2026-08-27 施工，
+`docs/knowledge-retrieval-plane.md`）是本期的注入车道底座。
+
+| 批次 | 内容 | 状态 |
+|---|---|---|
+| B0 | 清账提交 + context_manifest 观测 + 注入未消费率脚本 + 金标准评测工具 | 🔨 |
+| B1 | Event v2（time_precision/supersedes/认知事件家族/时序边）+ Fold API 唯一入口 | ⬜ |
+| B2 | Intent 统一存储（伏笔/期待/揭示/节拍/锚点归一）+ 双读迁移 | ⬜ |
+| B3 | belief 域折叠 + 场景级视角配给 + 泄密检测命题化 | ⬜ |
+| B4 | Depiction 呈现关系 + 通读阶段 C 回填 + reader 折叠 + 负空间差集 | ⬜ |
+| B5 | provenance 信封 + 现实校验任务 | ⬜ |
+| B6 | 温层场景卡 + 计划层 + 提及逐出前缀（WCA P1） | ⬜ |
+| B7 | 热层显著性 + 方向权重拆解（WCA P2） | ⬜ |
+| B8 | 冷层 digest（WCA P3，双门：manifest 数据 + 双模型对照） | ⬜ |
+| B9 | 认知浮现三时机 + 总开关（可见性悖论纪律） | ⬜ |
+
+不变量验收（11 条，见地基文档 §4）与每批回退路径随批登记。

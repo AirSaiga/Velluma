@@ -926,9 +926,25 @@ async def stitch_ghost(
     # kg 缺失（测试桩/降级）=空视图=块缺席=零变化，不阻塞生成路径
     kg = getattr(ctx, "kg", None) or KnowledgeView()
     kg_kwargs = kg_block_kwargs(kg)
+    # B0.2 context_manifest（docs/world-kernel-construction-plan.md §1）：
+    # 每次生成记录逐块明细 + 稳定前缀哈希——「注入未消费率」与前缀稳定性
+    # 观测的数据源（scripts/analyze_context_manifest.py 消费），B8 冷层的
+    # 第一道开工许可按此数据签发
+    try:
+        _blocks_detail = [{"key": k, "chars": len(t)} for k, t in ctx.system_blocks()]
+        _prefix_text = "".join(
+            t for k, t in ctx.system_blocks()
+            if k in ("scene", "entities", "proper_nouns", "canon", "secrets",
+                     "worldview", "relations", "negative")
+        )
+        _prefix_sha = hashlib.sha1(_prefix_text.encode("utf-8")).hexdigest()[:12]
+    except Exception:
+        _blocks_detail, _prefix_sha = [], ""
     trace_event(
-        "kg_selected",
+        "context_manifest",
         mode=request.mode,
+        blocks=_blocks_detail,
+        prefix_sha1=_prefix_sha,
         selected=list(getattr(kg, "selected_keys", []) or [])[:40],
         unselected=list(getattr(kg, "unselected", []) or [])[:40],
         knowledge_chars=kg.total_chars() if isinstance(kg, KnowledgeView) else 0,
