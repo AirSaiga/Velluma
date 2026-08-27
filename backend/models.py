@@ -1506,6 +1506,37 @@ class WorldDepiction(Base):
     )
 
 
+class WorldDigestSection(Base):
+    """冷层世界总账的分节（B8 · docs/world-cognition-architecture.md §2）。
+
+    节级键控：section_key 唯一；source_refs 未变 → frozen（逐字节冻结，
+    缓存友好）；事实节 derived='code'（fold 纯代码渲染零 LLM），综合节
+    derived='llm'（悬置之事/弧线张力/基调——只输出结构化 ops 由代码执行）。
+    纯派生缓存（不变量 1：可全量重建，DB 是唯一事实源）。
+
+    门控纪律（docs/world-kernel-construction-plan.md §9）：stitch 消费
+    双门未开（manifest 数据 + 双模型对照）前保持关闭；kill criterion
+    上线时即存在。预算分池：DIGEST_DAILY_LLM_CALLS 与 auto-read 隔离。
+    """
+
+    __tablename__ = "world_digest_sections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=generate_uuid)
+    book_id = Column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_key = Column(String(128), nullable=False)  # entity:林尘 / arc:北线 / tone
+    text = Column(Text, default="")
+    source_refs = Column(JSONB, default=dict)  # {entity_ids, event_seq_max, chapter_anchor}
+    frozen = Column(Boolean, default=False)
+    derived = Column(String(8), nullable=False, default="code")  # code | llm
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    book = relationship("Book", foreign_keys=[book_id])
+
+    __table_args__ = (
+        UniqueConstraint("book_id", "section_key", name="uq_digest_book_section"),
+    )
+
+
 class WorldLocation(Base):
     """世界地点（带空间坐标）。region/route 的复杂几何放 geometry JSONB。
 

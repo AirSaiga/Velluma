@@ -935,3 +935,44 @@ async def reject_depiction(
     row.status = "rejected"
     await db.commit()
     return {"id": str(row.id), "status": row.status}
+
+# ============================================================
+# 世界内核 B8：冷层世界总账（digest）——门控关闭中，双门签发前不接生成主链
+# ============================================================
+
+
+@router.get("/{book_id}/world/digest")
+async def list_digest(book_id: UUID, db: AsyncSession = Depends(get_db)):
+    """世界总账节列表（只读；frozen 节逐字节稳定）。"""
+    from backend.models import WorldDigestSection
+
+    rows = (await db.execute(
+        select(WorldDigestSection).where(WorldDigestSection.book_id == book_id)
+        .order_by(WorldDigestSection.section_key)
+    )).scalars().all()
+    return {
+        "sections": [
+            {"section_key": r.section_key, "text": r.text, "derived": r.derived,
+             "frozen": bool(r.frozen), "source_refs": r.source_refs}
+            for r in rows
+        ],
+        "enabled": __import__("backend.services.world.digest", fromlist=["DIGEST_ENABLED"]).DIGEST_ENABLED,
+    }
+
+
+@router.post("/{book_id}/world/digest/compile")
+async def compile_digest_route(
+    book_id: UUID,
+    t: int = Query(0, description="叙事时刻 t"),
+    db: AsyncSession = Depends(get_db),
+):
+    """编译世界总账：事实节（纯代码恒产出）+ 综合节（门控+预算分池）。
+
+    门控纪律（docs/world-kernel-construction-plan.md §9）：DIGEST_ENABLED
+    双门签发前为 False——综合节编译被挡（响应 skipped 带人话原因），
+    事实节与机件照常可用/可测；kill criterion 已写入设计。
+    """
+    from backend.services.world.digest import compile_digest
+
+    out = await compile_digest(db, book_id, t=t)
+    return out
