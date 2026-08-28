@@ -74,6 +74,7 @@ test_chapter_ids.json
 # ---- 临时/一次性脚本(切勿提交) ----
 tmp_*.py
 scratch_*.py
+tmp_research/
 
 # ---- OS ----
 .DS_Store

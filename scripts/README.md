@@ -14,7 +14,7 @@ scripts/
 │   ├── start-dev.sh          #   开发模式入口（薄包装）
 │   ├── start-debug.sh        #   调试模式入口（薄包装）
 │   └── start-prod.sh         #   生产体验入口（薄包装）
-└── make_blank_atlas.py       # 工具脚本（非启动）：世界页空白舆图 SVG 生成器，平台无关
+└── *.py                      # 工具脚本（非启动，见下「工具脚本」节）
 ```
 
 ## 三种模式（两平台一致）
@@ -90,3 +90,8 @@ scripts/
 ## 工具脚本（非启动）
 
 - `make_blank_atlas.py`：从 Natural Earth 数据生成世界页空白舆图 SVG（`frontend/src/features/world/containers/blankAtlas.ts`），与平台启动无关，详见 `docs/world-unified-settings.md`。
+- `migrate_pg_to_sqlite.py`：存量 PG 库 → SQLite 一次性搬迁（拓扑序搬运+行数对照+外键校验），详见 `AGENTS.md` 数据库节。
+- `calibrate_semantic_threshold.py`：文风语义扫描阈值（0.78）校准矩阵，手动跑不进 CI，详见 `docs/style-module-redesign.md`。
+- `analyze_context_manifest.py`：解析 trace 的 context_manifest 事件（注入未消费率/前缀稳定性/块体积分布），世界内核 B0.2 观测工具，详见 `docs/world-kernel-construction-plan.md`。
+- `eval_selector_recall.py`：知识平面选择器 recall/precision 金标准评测（--make-template 生成标注模板 / --eval 评测），世界内核 B0.3 验收工具。
+- `migrate_to_intents.py`：旧源 → world_intents 幂等复制（手动跑，不进启动链），世界内核 B2 迁移工具。

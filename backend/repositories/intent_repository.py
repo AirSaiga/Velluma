@@ -65,12 +65,50 @@ class IntentRepository:
 
         返回形状与 loader.load_open_hooks 的 dict 对齐（hook_id/ledger_key/content）
         ——消费方零改动切换。
+
+        legacy 副本让位（2026-08-28 审计修复）：过渡期写侧仍走旧表，迁移复制出的
+        intent 行若不随源行生死，被关闭/回收的钩子会从新表「复活」（隔离库复现：
+        迁移→旧表置 closed→合并读仍返回该钩子）。规则：source_key 带 legacy: 前缀
+        且源行仍存在 → 让位给源（终结不复活、内容以源为准防编辑双条）；源行被
+        物理删除 → 副本独立生效。效果=过渡期合并读与旧表直读一致（回退路径语义）。
         """
+        from backend.models import Book
+
         bid = UUID(str(book_id))
+        # 旧表全量（过渡期事实源；不只 open——终结行是让位判据）
+        legacy_rows = (await self._db.execute(
+            select(PlotLedger).where(PlotLedger.book_id == bid)
+            .order_by(PlotLedger.created_at_chapter.desc())
+        )).scalars().all()
+        legacy_by_id = {str(r.id): r for r in legacy_rows}
+        # 期待账本源（legacy:reader_mirror 副本的让位判据）
+        book = await self._db.get(Book, bid)
+        mirror_ids: set = set()
+        if book is not None and isinstance(getattr(book, "reader_mirror", None), dict):
+            mirror_ids = {
+                str(e.get("id"))
+                for e in (book.reader_mirror.get("expectations") or [])
+                if isinstance(e, dict)
+            }
+
+        def _superseded_by_source(source_key: Optional[str]) -> bool:
+            sk = source_key or ""
+            if not sk.startswith("legacy:"):
+                return False
+            # legacy:plot_ledgers:{row_id} / legacy:reader_mirror:{book_id}:{eid}
+            parts = sk.split(":")
+            if len(parts) >= 3 and parts[1] == "plot_ledgers":
+                return parts[2] in legacy_by_id
+            if len(parts) >= 4 and parts[1] == "reader_mirror":
+                return parts[3] in mirror_ids
+            return False
+
         out: List[Dict[str, str]] = []
         seen = set()
         for it in await self.list_open(bid, kinds=["foreshadow", "expectation", "promise"],
                                        before_chapter=before_chapter):
+            if _superseded_by_source(it.source_key):
+                continue
             content = (it.target_text or "").strip()
             if not content:
                 continue
@@ -83,16 +121,14 @@ class IntentRepository:
                 "ledger_key": it.source_key or f"intent:{it.kind}",
                 "content": content,
             })
-        # 旧表兜底：plot_ledgers open 行（迁移后已复制的会因内容归一命中 seen 跳过）
-        legacy = await self._db.execute(
-            select(PlotLedger).where(
-                PlotLedger.book_id == bid,
-                PlotLedger.status == "open",
-                *( [PlotLedger.created_at_chapter < before_chapter]
-                   if before_chapter is not None else [] ),
-            ).order_by(PlotLedger.created_at_chapter.desc())
-        )
-        for row in legacy.scalars().all():
+        # 旧表兜底：open 行（迁移副本已让位+内容归一，不会重复出现）
+        for row in legacy_rows:
+            if str(getattr(row, "status", "")) != "open":
+                continue
+            ch_anchor = getattr(row, "created_at_chapter", None)
+            # 与 SQL NULL 三值语义对齐：无锚行不进「第 N 章之前」窗口
+            if before_chapter is not None and (ch_anchor is None or ch_anchor >= before_chapter):
+                continue
             content = str(getattr(row, "content", "") or "").strip()
             if not content or _normalize(content) in seen:
                 continue
@@ -112,17 +148,31 @@ class IntentRepository:
     ) -> List[Dict[str, Any]]:
         """揭示临近的合并读（新表 reveal 意图 + canon 节点 expected_reveal_chapter 兜底）。
 
-        过滤：距本章 ≤ within_chapters 章（C3 口径不变）。
+        过滤：距本章 ≤ within_chapters 章（C3 口径），下界含逾期 1 章
+        （2026-08-28 恢复 B2 切换前的 -1≤gap≤2 口径——错过的揭示计划恰是
+        最要紧的提醒，切换 read_merge 时曾被静默收窄为 [0, +2]）。
+        legacy 副本让位（同 read_merge_hooks 修复）：canon 节点仍存在时以节点
+        现状为准——揭示计划被清空/改期后迁移副本不再复活提醒。
         """
         from backend.models import CanonNode
 
         bid = UUID(str(book_id))
+        nodes = (await self._db.execute(
+            select(CanonNode).where(CanonNode.book_id == bid)
+        )).scalars().all()
+        node_by_id = {str(n.id): n for n in nodes}
+
         out: List[Dict[str, Any]] = []
         seen_ref = set()
         for it in await self.list_open(bid, kinds=["reveal"]):
+            sk = it.source_key or ""
+            parts = sk.split(":", 2)
+            if len(parts) == 3 and parts[0] == "legacy" and parts[1] == "canon_reveal":
+                if parts[2] in node_by_id:
+                    continue  # 节点仍在 → 让位（以 canon 现状为准）
             target_ch = it.window_chapter_end or it.window_chapter_start
             if chapter_number is not None and target_ch is not None:
-                if not (chapter_number <= target_ch <= chapter_number + within_chapters):
+                if not (chapter_number - 1 <= target_ch <= chapter_number + within_chapters):
                     continue
             if it.target_ref:
                 if it.target_ref in seen_ref:
@@ -134,17 +184,16 @@ class IntentRepository:
                 "canon_node_id": it.target_ref,
                 "source": "intent",
             })
-        # 旧源兜底：canon_nodes.expected_reveal_chapter（被迁移复制的按 ref 去重）
-        q = select(CanonNode).where(
-            CanonNode.book_id == bid,
-            CanonNode.expected_reveal_chapter.isnot(None),
-        )
-        if chapter_number is not None:
-            q = q.where(
-                CanonNode.expected_reveal_chapter >= chapter_number,
-                CanonNode.expected_reveal_chapter <= chapter_number + within_chapters,
-            )
-        for node in (await self._db.execute(q)).scalars().all():
+        # 旧源兜底：canon_nodes.expected_reveal_chapter（让位+ref 去重后不重复）
+        for node in nodes:
+            if node.expected_reveal_chapter is None:
+                continue
+            if chapter_number is not None and not (
+                chapter_number - 1
+                <= node.expected_reveal_chapter
+                <= chapter_number + within_chapters
+            ):
+                continue
             if str(node.id) in seen_ref:
                 continue
             out.append({

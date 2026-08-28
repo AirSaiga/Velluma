@@ -10,7 +10,7 @@ DDE（Director Decision Engine，导演决策引擎）—— 章节级剧情分�
 - types.py                  数据结构（ChapterDecisionSet / StoryBranch / BranchOption）
 - decision_card_generator.py 章节分叉判断（全章 1×creative LLM + 代码闸门）
 - slot_mutator.py           SlotMutator 纯函数（branch_choices → branch_directive 突变）
-- prompts/dde_prompts.py    DDE Prompt 模板（位于 services/prompts/）
+- prompts/dde_prompts.py    DDE Prompt 模板（原位于 services/prompts/，2026-08-28 随死代码清理删除，git 历史可查）
 
 业务场景：enable_dde=True（默认）时 Track A/B 都生效；无岔路自动放行是常态。
 """

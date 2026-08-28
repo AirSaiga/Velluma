@@ -124,5 +124,114 @@ class TestIntentMigration(unittest.TestCase):
                 asyncio.run(engine.dispose())
 
 
+class TestLegacySupersede(unittest.TestCase):
+    """legacy 副本让位（2026-08-28 审计修复的回归锁）。
+
+    复现配方即审计复现脚本：迁移后旧表关闭/删除钩子，合并读不得复活。
+    """
+
+    def test_closed_hook_not_resurrected_after_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            engine, maker = _make_stack(Path(td), "super1.db")
+            try:
+                async def run():
+                    from sqlalchemy import update
+
+                    async with maker() as s:
+                        _seed(s)
+                        await s.commit()
+                        await migrate_legacy_to_intents(s)
+                        await s.commit()
+                    # 模拟 UI 写路径：作者回收伏笔（只写旧表）
+                    async with maker() as s:
+                        await s.execute(update(m.PlotLedger).where(
+                            m.PlotLedger.book_id == BOOK,
+                            m.PlotLedger.ledger_key == "world-fs-1",
+                        ).values(status="closed"))
+                        await s.commit()
+                    async with maker() as s:
+                        hooks = await IntentRepository(s).read_merge_hooks(BOOK)
+                        self.assertEqual(
+                            [h["content"] for h in hooks],
+                            ["读者在等主角反击"],  # 已回收的伏笔不再从新表复活
+                        )
+                asyncio.run(run())
+            finally:
+                asyncio.run(engine.dispose())
+
+    def test_deleted_source_lets_copy_live(self):
+        with tempfile.TemporaryDirectory() as td:
+            engine, maker = _make_stack(Path(td), "super2.db")
+            try:
+                async def run():
+                    from sqlalchemy import delete
+
+                    async with maker() as s:
+                        _seed(s)
+                        await s.commit()
+                        await migrate_legacy_to_intents(s)
+                        await s.commit()
+                    # 源行被物理删除（非状态终结）→ 副本独立生效（意图存档语义）
+                    async with maker() as s:
+                        await s.execute(delete(m.PlotLedger).where(
+                            m.PlotLedger.book_id == BOOK,
+                            m.PlotLedger.ledger_key == "world-fs-1",
+                        ))
+                        await s.commit()
+                    async with maker() as s:
+                        hooks = await IntentRepository(s).read_merge_hooks(BOOK)
+                        contents = [h["content"] for h in hooks]
+                        self.assertIn("北岸的旧灯塔里藏着什么", contents)
+                        self.assertIn("读者在等主角反击", contents)
+                asyncio.run(run())
+            finally:
+                asyncio.run(engine.dispose())
+
+    def test_cleared_reveal_plan_not_resurrected(self):
+        with tempfile.TemporaryDirectory() as td:
+            engine, maker = _make_stack(Path(td), "super3.db")
+            try:
+                async def run():
+                    async with maker() as s:
+                        _seed(s)
+                        await s.commit()
+                        await migrate_legacy_to_intents(s)
+                        await s.commit()
+                    # 作者在真相抽屉清掉揭示计划（canon 侧）→ 不得从新表复活提醒
+                    async with maker() as s:
+                        node = await s.get(
+                            m.CanonNode, uuid.UUID("b2000000-0000-4000-8000-0000000000a1"))
+                        node.expected_reveal_chapter = None
+                        await s.commit()
+                    async with maker() as s:
+                        reveals = await IntentRepository(s).read_merge_reveals(
+                            BOOK, chapter_number=3)
+                        self.assertEqual(reveals, [])
+                asyncio.run(run())
+            finally:
+                asyncio.run(engine.dispose())
+
+    def test_overdue_reveal_still_reminded(self):
+        """逾期 1 章的揭示计划仍提醒（恢复 B2 切换前 -1≤gap≤2 口径）。"""
+        with tempfile.TemporaryDirectory() as td:
+            engine, maker = _make_stack(Path(td), "super4.db")
+            try:
+                async def run():
+                    async with maker() as s:
+                        _seed(s)
+                        await s.flush()
+                        node = await s.get(
+                            m.CanonNode, uuid.UUID("b2000000-0000-4000-8000-0000000000a1"))
+                        node.expected_reveal_chapter = 2  # 第 3 章时已逾期 1 章
+                        await s.flush()
+                        reveals = await IntentRepository(s).read_merge_reveals(
+                            BOOK, chapter_number=3)
+                        self.assertEqual(len(reveals), 1)
+                        self.assertEqual(reveals[0]["expected_reveal_chapter"], 2)
+                asyncio.run(run())
+            finally:
+                asyncio.run(engine.dispose())
+
+
 if __name__ == "__main__":
     unittest.main()
