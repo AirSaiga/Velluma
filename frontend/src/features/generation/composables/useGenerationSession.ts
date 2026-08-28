@@ -10,8 +10,8 @@
  * V3.2 ADF 整章生成入口（start/startAdf/adfApi.streamGenerate）已移除，前端不再有 ADF UI 入口。
  *
  * BS-ADF 引擎（/generate-bsadf）当前只以「步进模式」运行：
- * startBeat(enable_stepping=true) → 槽位卡就绪 → 逐段渲染/裁决 → COMPLETE。
- * Track A/B 全章自动/单次暂停路径为历史兼容，前端不再调用 confirmBeats 入口。
+ * 【已归档 2026-08-29】BS-ADF 步进链路（startBeat/advanceBeat/重渲/轮询自愈）整体退役，
+ * 详见 backend/_deprecated 与 frontend 归档清单（_deprecated/README）。
  *
  * V4.1 Refinery 两阶段（独立于 start，生成完成后调用）：
  * - startRefinery：诊断阶段，产出问题清单后停在 refining 等作者确认
@@ -29,8 +29,7 @@
  * - degraded：降级事件
  */
 import { ref, computed, watch, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import { refineryApi, chapterApi, type AdfEngine, type AdfAuditResult, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot, type RenderProgress, type DegradedBeat, type ChapterDecisionSet, type RescueNeededItem } from '../../../services/api/domain'
-import { formatDegradedReason } from '../../../shared/constants/degradation'
+import { refineryApi, chapterApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot } from '../../../services/api/domain'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { noHistory } from '../../chapter-editor/noHistory'
 import {
@@ -40,7 +39,7 @@ import {
 import {
   sparkDockVisible, attachedParts,
   setSparkDockGate, setSparkParts,
-  showSparkDock, hideSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky, moveSparkSelection,
+  showSparkDock, hideSparkDock, stashSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky, moveSparkSelection,
   type SparkPart,
 } from './useSparkDock'
 import { beatDockVisible, beatCards, showBeatDock, hideBeatDock } from './useBeatDock'
@@ -67,37 +66,12 @@ interface SessionSnapshot {
   stage: SessionStage
   engine: AdfEngine
   stepProgress: StepProgress | null
-  tierDecision: TierDecision | null
   streamText: string
-  climaxScore: number | null
-  auditVerdict: string | null
-  auditFindings: AuditFinding[]
-  degraded: any[]
   finalStats: Record<string, any> | null
-  // V3.2 ADF 产物
-  adfAnchor: any | null
-  adfPreconditions: any[]
-  adfEmotionCurve: any[]
-  adfAudit: any | null
-  // V4.1 Refinery 产物
   refineryIssues: RefineryIssue[]
   refinerySurgeries: RefinerySurgery[]
   refineryHolisticVerdict: RefineryHolisticVerdict | null
   refineryStats: Record<string, any> | null
-  // BS-ADF 产物（beatRunId 是临时凭证，不持久化，故不在此）
-  beatSlots?: BeatSlot[]
-  renderProgress?: RenderProgress[]
-  degradedBeats?: DegradedBeat[]
-  decisionSet?: ChapterDecisionSet | null
-  rescueNeeded?: RescueNeededItem[]
-  /** 步进段态：各段正文 + 已锁集合。刷新恢复后 done 态单段重渲（rerenderBeat）
-   *  靠 segmentTexts 重建终稿——不持久化则刷新后重建只剩刚重渲的一段，
-   *  落库把全章覆盖成单段（真实数据丢失事故）。 */
-  segmentTexts?: Record<string, string>
-  lockedBeatIds?: string[]
-  /** 引擎守卫与渲染期进度视图分工标记（恢复快照时一并还原，防切章残留） */
-  bsadfTrack?: 'A' | 'B' | null
-  steppingEnabled?: boolean
   // 保存时间戳（供调试/未来做过期清理）
   savedAt: number
 }
@@ -157,54 +131,6 @@ export type SessionStage =
   | 'done' // 完成
   | 'error'
 
-/**
- * 当前任务焦点（渲染阶段「当前任务」焦点条的派生数据）。
- *
- * 职责：把散落的渲染阶段引导收敛成"作者此刻只需做一件事"的单一焦点。
- * 这是纯派生 computed，不引入新状态、不改 action，只读现有 ref。
- */
-export interface CurrentTask {
-  /** 焦点类型，决定焦点条渲染哪个形态 */
-  kind:
-    | 'edit-beats' // 渲染前：分镜卡就绪，等作者检查后开始渲染（Track B 单次暂停）
-    | 'rendering' // 渲染中：某段正在渲染，纯进度无按钮
-    | 'advance' // 裁决态：某段已就绪，等作者三选一（接受/改/重写）
-    | 'post-rescue' // 完成但有降级/救援段需复查
-    | 'done' // 全部完成，无待处理
-    | 'idle' // 非渲染阶段 / 岔路门（决策在 BranchDecisionPanel，焦点条不渲染）
-  /** 焦点条主标题（作者语言，如"第 2 段已生成 · 1180 字"） */
-  title: string
-  /** 副标题/提示（作者语言，如"这段写了「与守卫正面对峙」"） */
-  hint?: string
-  /**
-   * 当前段是否渲染降级（advance 态专用）。
-   * 降级段正文为空、终稿会消失，焦点条据此重组按钮：把「重写本段」提为
-   * 主操作、弱化「接受」并明示后果、隐藏 Space 快捷键栏，避免作者按
-   * 习惯按 Space 导致该段默默丢失（降级引导事故）。
-   */
-  degraded?: boolean
-  /** 当前段号（1-based），用于"第 N/M 段" */
-  segIndex?: number
-  /** 总段数 */
-  segTotal?: number
-  /**
-   * 当前段是否末段（advance 态专用）。
-   * 后端靠循环退出触发 COMPLETE、不传 is_last 标志，前端以
-   * segment_index === total-1 自行判断。用于把"进入下一段"措辞
-   * 改为"完成本章"，避免末段按钮显示"进入第 N+1 段"（误导事故）。
-   */
-  isLast?: boolean
-  /**
-   * 主行动按钮（最多 1 个；rendering 态为 undefined 表示无按钮纯等待）。
-   * action 决定父级调哪个 session 方法。
-   */
-  primary?: {
-    label: string
-    hint?: string // 右侧小字（如"Space"）
-    action: 'accept' // accept→advanceBeat('pass')；start-render 已移除（见 beat_pending 分支注释）
-  }
-}
-
 /** 步骤进度（驱动右栏步骤条） */
 export interface StepProgress {
   /** 当前阶段标签（写作语言，如"蓄势段"/"铺陈段"/"组装"/"审校"） */
@@ -217,31 +143,8 @@ export interface StepProgress {
   zone?: string
 }
 
-/** 定档决策 */
-export interface TierDecision {
-  tier: 'climax' | 'turn' | 'progress' | 'transition'
-  reason: string
-  climax_score?: number | null
-  forced_by_user: boolean
-  max_depth: number
-  development_ratio: number
-}
 
-/** 飞行中调节事件 */
-export interface InflightEvent {
-  type: string
-  [k: string]: any
-}
 
-/** 审校问题（F4 点击定位用，带 offset） */
-export interface AuditFinding {
-  severity?: string
-  category?: string
-  quote?: string
-  offset?: [number, number]
-  detail?: string
-  suggestion?: string
-}
 
 export interface GenerationSession {
   // 状态
@@ -251,115 +154,24 @@ export interface GenerationSession {
   stepProgress: Ref<StepProgress | null>
   engine: Ref<AdfEngine>
   // 产物
-  tierDecision: Ref<TierDecision | null>
   streamText: Ref<string>
-  climaxScore: Ref<number | null>
-  inflightEvents: Ref<InflightEvent[]>
-  auditFindings: Ref<AuditFinding[]>
-  auditVerdict: Ref<string | null>
-  degraded: Ref<any[]>
   finalStats: Ref<Record<string, any> | null>
   /** 最近一次完成来自 ADF 还是 Refinery 还是 BS-ADF（弹窗标题用） */
   lastDoneMode: Ref<'adf' | 'refinery' | 'bsadf' | null>
   // V3.2 ADF 专用产物
-  adfAnchor: Ref<any | null>
-  adfPreconditions: Ref<any[]>
-  adfEmotionCurve: Ref<any[]>
-  adfAudit: Ref<any | null>
-  // V4.1 Refinery 精修产物
+  // V4.1 Refinery 精修产物（2026-08-29 后唯一持久化产物）
   refineryIssues: Ref<RefineryIssue[]>
   refineryRunId: Ref<string | null>
   refinerySurgeries: Ref<RefinerySurgery[]>
   refineryHolisticVerdict: Ref<RefineryHolisticVerdict | null>
   refineryStats: Ref<Record<string, any> | null>
-  // BS-ADF 产物
-  beatSlots: Ref<BeatSlot[]>
-  beatRunId: Ref<string | null>
-  renderProgress: Ref<RenderProgress[]>
-  degradedBeats: Ref<DegradedBeat[]>
-  /** 本次 BS-ADF 生成选择的轨道；null = 当前会话未跑过 BS-ADF（引擎守卫用） */
-  bsadfTrack: Ref<'A' | 'B' | null>
-  /** 本次 BS-ADF 是否步进模式（渲染期进度视图分工用） */
-  steppingEnabled: Ref<boolean>
-  /** 正在单卡重渲染（/rerender-beat）的 beat_id；null = 无进行中重渲染 */
-  rerenderingBeatId: Ref<string | null>
-  /** DDE 章节级剧情分叉决策集（Track A 由 DDE_AUTO_APPLIED 给；Track B 随 BEAT_SLOTS_BUILT 内嵌） */
-  decisionSet: Ref<ChapterDecisionSet | null>
-  /** 救援标记：审计判核心转折未落地的节拍（RESCUE_NEEDED 事件 / COMPLETE 载荷） */
-  rescueNeeded: Ref<RescueNeededItem[]>
-  // NLE-ADF 步进产物
-  /** 各段已渲染文本（按 beat_id 索引） */
-  segmentTexts: Ref<Record<string, string>>
-  /** 当前已就绪等空格推进的 beat_id；null = 无段在等推进 */
-  readyBeatId: Ref<string | null>
-  /** 就绪段对应的卡片快照（advanceBeat 可带 editedSlot 编辑） */
-  readyBeatCard: Ref<BeatSlot | null>
-  /** 已锁死的 beat_id 集合 */
-  lockedBeatIds: Ref<Set<string>>
-  /** 正在渲染的 beat_id；null = 无段在渲染 */
-  renderingBeatId: Ref<string | null>
-  /** Loop1 大纲自检结果（hard_facts/gaps/critique_pass/violations） */
-  loop1Result: Ref<{ hard_facts: any[]; gaps: any[]; critique_pass: boolean; violations: any[] } | null>
-  /** 步进会话 run_id（advanceBeat 推进用，来自 BEAT_SLOTS_BUILT） */
-  steppingRunId: Ref<string | null>
-  /** 各段抽取的涌现事实（Loop3 记忆注入产物，按 beat_id 索引） */
-  emergentFacts: Ref<Record<string, any>>
-  /** 步进态待作者选择的 DDE 岔路门（null = 无待决策岔路） */
-  branchChoicePending: Ref<{
-    beat_id: string
-    segment_index: number
-    node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string; source?: 'dde' | 'loop1_gap' }
-    card: BeatSlot | null
-  } | null>
-  /** 当前就绪段是否渲染降级（BEAT_RENDER_READY.degraded 载荷；裁决焦点条据
-   *  此显示降级警告 + 引导「重写本段/跳过本段」） */
-  readyBeatDegraded: Ref<{
-    beat_id?: string
-    segment_index?: number
-    reason?: string
-    attempts?: number
-  } | null>
-  /** rerender-beat 成功后的待落库正文（非空 = 待落库；落库后消费方清空） */
-  pendingSaveText: Ref<string | null>
-  /** 主编辑器直改：作者是否改过当前就绪段（dirty → 接受时走 lock_with_text） */
-  readySegmentDirty: Ref<boolean>
-  /** 主编辑器直改：裁决期作者输入实时回写当前就绪段文本 */
-  setReadySegmentText: (text: string) => void
-  /** 主编辑器直改：放弃作者改动，还原为 LLM 原文 */
-  revertReadySegment: () => void
-  /** 裁决「接受」路由：dirty 走 lock_with_text（作者文本定稿），否则 pass */
-  acceptReadySegment: (chapterId: string) => void
-  // ===== NLE-ADF 2.0 作者模式 =====
-  /** 本次 BS-ADF 是否作者模式（拍不自动渲染：作者写碎片微缝合 / 空行 Space 召唤代笔） */
-  authoringEnabled: Ref<boolean>
-  /** 当前开放创作的拍（BEAT_AUTHORING_OPEN；null = 无创作中的拍） */
-  authoringBeatId: Ref<string | null>
-  /** 创作拍卡快照（Spark Dock 零件与导演意图数据源） */
-  authoringBeatCard: Ref<BeatSlot | null>
-  /** 微缝合进行中（Space 触发 → STITCH_DONE/ERROR） */
-  stitching: Ref<boolean>
-  /** 各拍已锁碎片数（幽灵时间轴 ● 节点数据源，按 beat_id 索引） */
-  fragmentCounts: Ref<Record<string, number>>
-  /** 微缝合：取光标处作者碎片 + 点选零件 → 幽灵草稿流式灌入画布 */
-  /** Ctrl+Enter 锁死本拍：创作区全部文本走 lock_with_text（空 = skip） */
-  lockAuthoringBeat: () => void
-  /** Enter 锁死当前幽灵碎片：摘 mark 变正文（幽灵时间轴 ●+1） */
-  commitGhostFragment: () => boolean
-  /** 空行 Space = 召唤 AI 整段代笔（advanceBeat action=render） */
-  /** 时间轴回拨：恢复当前创作拍到第 count 个碎片锁死时的文档（v1 仅当前拍内） */
-  scrubToFragment: (beatId: string, count: number) => boolean
-  /** 软切淡提示（AutoCutHint 数据源；非空 = 展示中） */
-  autoCutNotice: Ref<{ beatId: string; message: string } | null>
-  /** 软切撤回合并：back 回退本拍但保留全部文档文本 */
-  mergeAutoCut: () => void
   // 派生
   isTerminal: ComputedRef<boolean>
   /** 渲染阶段「当前任务」焦点（驱动右栏焦点条；纯派生，不持久化） */
-  currentTask: ComputedRef<CurrentTask>
   // 控制
   cancel: () => void
   reset: () => void
-  /** 失败重试：再次触发最近一次入口（精修诊断 startRefinery / BS-ADF startBeat） */
+  /** 失败重试：再次触发最近一次入口（精修诊断 startRefinery） */
   retry: () => void
   // V4.1 Refinery 控制
   startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
@@ -433,24 +245,13 @@ export function useGenerationSession(): GenerationSession {
   const settleResult = ref<import('../../../services/api/domain/adaptive.api').SettleResult | null>(null)
 
 
-  const tierDecision = ref<TierDecision | null>(null)
   const streamText = ref('')
-  const climaxScore = ref<number | null>(null)
-  const inflightEvents = ref<InflightEvent[]>([])
-  const auditFindings = ref<AuditFinding[]>([])
-  const auditVerdict = ref<string | null>(null)
-  const degraded = ref<any[]>([])
   const finalStats = ref<Record<string, any> | null>(null)
   /** 最近一次完成来自哪条流程（供完成弹窗区分标题） */
   const lastDoneMode = ref<'adf' | 'refinery' | 'bsadf' | null>(null)
   /** 本次生成开始时间戳（ms），onDone 时计算耗时；不持久化（刷新后无法准确恢复） */
   let startedAt: number | null = null
 
-  // V3.2 ADF 专用产物
-  const adfAnchor = ref<any | null>(null)
-  const adfPreconditions = ref<any[]>([])
-  const adfEmotionCurve = ref<any[]>([])
-  const adfAudit = ref<any | null>(null)
 
   // V4.1 Refinery 精修产物
   const refineryIssues = ref<RefineryIssue[]>([])
@@ -459,175 +260,9 @@ export function useGenerationSession(): GenerationSession {
   const refineryHolisticVerdict = ref<RefineryHolisticVerdict | null>(null)
   const refineryStats = ref<Record<string, any> | null>(null)
 
-  // BS-ADF 产物
-  const beatSlots = ref<BeatSlot[]>([])
-  const beatRunId = ref<string | null>(null)
-  // rerender 上下文 run_id：完成态下 beatRunId 已清空，但 /rerender-beat 需要它
-  // 从 _PENDING_BEAT_SLOTS 取完整渲染上下文（专名表/场景设定/canon）。
-  // Track A：onDone 时存 COMPLETE 的 generation_run_id；
-  // Track B：confirmBeats 时存原始暂停 run_id（pending 的 key 是它，不是 confirm 的新 run_id）。
-  const rerenderRunId = ref<string | null>(null)
-  const renderProgress = ref<RenderProgress[]>([])
-  const degradedBeats = ref<DegradedBeat[]>([])
-  const bsadfTrack = ref<'A' | 'B' | null>(null)
-  /** 本次 BS-ADF 是否步进模式（P5：步进态逐段列表与卡状态灯重叠，按此隐藏 BeatProgress 列表） */
-  const steppingEnabled = ref(false)
-  const rerenderingBeatId = ref<string | null>(null)
-  // DDE 章节级剧情分叉（Track A：DDE_AUTO_APPLIED；Track B：BEAT_SLOTS_BUILT 内嵌）
-  const decisionSet = ref<ChapterDecisionSet | null>(null)
-  // 救援标记：核心转折未落地的节拍（路线 C 内联救援卡数据源）
-  const rescueNeeded = ref<RescueNeededItem[]>([])
 
-  // ===== NLE-ADF 步进状态 =====
-  const segmentTexts = ref<Record<string, string>>({})
-  /**
-   * 待落库正文信号：rerender-beat 成功重渲单段后，新正文需写回章节库（步进模式
-   * 后端不自动落库，落库责任在前端）。stage 已是 done、watch stage→done 不会重触发，
-   * 故在此置新正文，由 WorkspaceView watch 本字段 → store.updateChapter 落库。
-   * null = 无待落库；非空 = 待落库的完整正文（落库后由消费方清空）。
-   */
-  const pendingSaveText = ref<string | null>(null)
-  const readyBeatId = ref<string | null>(null)
-  const readyBeatCard = ref<BeatSlot | null>(null)
-  const lockedBeatIds = ref<Set<string>>(new Set())
-  const renderingBeatId = ref<string | null>(null)
-  const loop1Result = ref<{
-    hard_facts: any[]
-    gaps: any[]
-    critique_pass: boolean
-    violations: any[]
-  } | null>(null)
-  const steppingRunId = ref<string | null>(null)
-  // 风险3修复：轮询定时器变量提前声明（避免 TDZ：_resetInternal 调用 _stopSteppingPoll）
-  let _steppingPollTimer: ReturnType<typeof setTimeout> | null = null
-  let _steppingPollCount = 0
-  const _STEPPING_POLL_MAX = 90  // 最多 90 次（约 3 分钟）
-  const emergentFacts = ref<Record<string, any>>({})
-  // NLE-ADF 步进岔路门：当前待作者选择的 DDE 节点（null = 无待决策岔路）
-  const branchChoicePending = ref<{
-    beat_id: string
-    segment_index: number
-    node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string; source?: 'dde' | 'loop1_gap' }
-    card: BeatSlot | null
-  } | null>(null)
-  // 当前就绪段是否渲染降级（BEAT_RENDER_READY.degraded 载荷）。
-  // 步进模式下后端不发 BEAT_DOWNGRADED 事件，降级信息只挂在 READY 上——
-  // 此前被丢弃，作者只见"0 字"不知是降级。裁决焦点条据此显示警告 + 引导重写/跳过。
-  const readyBeatDegraded = ref<{
-    beat_id?: string
-    segment_index?: number
-    reason?: string
-    attempts?: number
-  } | null>(null)
-  // ===== 主编辑器直改（裁决窗口期当前段可编辑） =====
-  // 就绪段的服务器原文快照：dirty 判定基准 +「放弃改动」还原用。
-  // watch readyBeatId 统一快照，覆盖 SSE onBeatReady / 轮询恢复 / resync 三条路径。
-  const readySegmentOriginal = ref('')
-  // 作者是否在主编辑器改过当前就绪段（dirty → 接受时走 lock_with_text 而非 pass）
-  const readySegmentDirty = ref(false)
-  watch(readyBeatId, (newId) => {
-    readySegmentDirty.value = false
-    readySegmentOriginal.value = newId ? (segmentTexts.value[newId] || '') : ''
-  })
 
-  /** 主编辑器直改回写：裁决期作者在当前段的每次输入同步到 segmentTexts
-   *  （预览随之 rebuild；与原文不一致才标 dirty，改回去 = 恢复干净态）。 */
-  function setReadySegmentText(text: string) {
-    const id = readyBeatId.value
-    if (!id) return
-    segmentTexts.value = { ...segmentTexts.value, [id]: text }
-    streamText.value = Object.values(segmentTexts.value).join('\n\n')
-    readySegmentDirty.value = text.trim() !== readySegmentOriginal.value.trim()
-  }
 
-  /** 放弃作者改动：还原为 LLM 原文（预览 rebuild 后编辑器显示原文） */
-  function revertReadySegment() {
-    const id = readyBeatId.value
-    if (!id || !readySegmentDirty.value) return
-    segmentTexts.value = { ...segmentTexts.value, [id]: readySegmentOriginal.value }
-    streamText.value = Object.values(segmentTexts.value).join('\n\n')
-    readySegmentDirty.value = false
-  }
-
-  /** 裁决「接受」：作者改过正文则走 lock_with_text（作者文本定稿，跳过 LLM），
-   *  否则 pass。Space 快捷键与焦点条①按钮共用本路由。
-   *  特例：作者把正文删空（dirty 但 text 为空）=「不要这段」，路由到 skip——
-   *  走 pass 会把 LLM 原文静默锁进终稿，与作者意图完全相反（真实事故）。
-   *
-   *  NLE-ADF 3.0：作者模式裁决态（代笔就绪）下，画布幽灵草稿是事实源——
-   *  作者可能已改幽灵文本，segmentTexts 路由感知不到画布编辑，走 pass 会丢字。
-   *  此态委托 lockAuthoringBeat（读画布文档 [base, docEnd]，统一锁拍路由），
-   *  保证「画布即事实源」。非作者模式仍走 segmentTexts 路由（预览投影态）。 */
-  function acceptReadySegment(chapterId: string) {
-    const id = readyBeatId.value
-    if (!id) return
-    // 作者模式裁决态：画布即事实源，委托 lockAuthoringBeat
-    if (authoringEnabled.value) {
-      lockAuthoringBeat()
-      return
-    }
-    // BS-ADF 步进已归档（roadmap P3.2）：裁决路由的 stepping 出口移除，
-    // 残段不再外发（stage 不可达，防御性返回）
-    void chapterId
-  }
-
-  // lock_with_text 提交后，后端 lock_segment_with_author_text 会把作者文本以
-  // BEAT_TEXT_CHUNK 全量推回，而作者文本经 setReadySegmentText 已在 segmentTexts 里，
-  // onBeatChunk 的 append 会拼成两遍——置一次性替换标记，下一个 chunk 改为整段替换。
-  const _chunkReplaceOnce = new Set<string>()
-
-  /** BEAT_TEXT_CHUNK 统一入口：lock_with_text 全量推回做替换，其余 append（流式增量） */
-  function _handleBeatChunk(data: { beat_id: string; delta: string }) {
-    const prev = _chunkReplaceOnce.has(data.beat_id) ? '' : (segmentTexts.value[data.beat_id] || '')
-    _chunkReplaceOnce.delete(data.beat_id)
-    segmentTexts.value = { ...segmentTexts.value, [data.beat_id]: prev + data.delta }
-    streamText.value = Object.values(segmentTexts.value).join('\n\n')
-    _noteSteppingActivity()
-  }
-
-  /** 步进活动心跳：任何步进 SSE 事件到达都重置轮询超时计数——
-   *  慢渲染（重试/慢模型数分钟）时 SSE 明明健康，90 次计数上限却把会话
-   *  误砸成 error（真实事故）。渲染期每个 chunk/start 事件都证明后端活着。 */
-  function _noteSteppingActivity() {
-    _steppingPollCount = 0
-  }
-
-  /** back 回退统一回滚：后端弹栈语义是「目标段及之后全部作废重渲」
-   *  （stepping_runtime 恢复 target_i 前的快照后从 target_i 依次重渲），
-   *  前端必须同步清掉目标段及其后各段的正文/锁定/进度——只清目标段会让
-   *  后段旧文本在重渲时被 chunk append 拼成翻倍、状态轨残留陈旧「已就绪」灯。 */
-  function _rollbackFromBeat(beatId: string, segmentIndex?: number) {
-    const targetIdx = segmentIndex
-      ?? beatSlots.value.find(s => s.beat_id === beatId)?.segment_index
-      ?? 0
-    const affected = new Set<string>([beatId])
-    for (const s of beatSlots.value) {
-      if (typeof s.segment_index === 'number' && s.segment_index >= targetIdx) {
-        affected.add(s.beat_id)
-      }
-    }
-    const texts = { ...segmentTexts.value }
-    for (const id of affected) delete texts[id]
-    segmentTexts.value = texts
-    streamText.value = Object.values(segmentTexts.value).join('\n\n')
-    lockedBeatIds.value = new Set([...lockedBeatIds.value].filter(id => !affected.has(id)))
-    renderProgress.value = renderProgress.value.filter(p => !affected.has(p.beat_id))
-    // 作者模式：回滚拍的碎片计数一并作废（幽灵时间轴节点退回 ○）
-    const counts = { ...fragmentCounts.value }
-    for (const id of affected) delete counts[id]
-    fragmentCounts.value = counts
-  }
-
-  /** 重渲/跳过前清段文本：BEAT_TEXT_CHUNK 在步进模式是整段全量推回
-   *  （bsadf_workflow render_one），append 语义下旧文本必须先行清除，
-   *  否则 edit/back 重渲后旧文+新文拼成两倍（真实正文翻倍事故）。 */
-  function _clearSegmentText(beatId: string) {
-    if (!(beatId in segmentTexts.value)) return
-    const texts = { ...segmentTexts.value }
-    delete texts[beatId]
-    segmentTexts.value = texts
-    streamText.value = Object.values(segmentTexts.value).join('\n\n')
-  }
 
   // ============================================================
   // NLE-ADF 2.0 作者模式：拍创作（碎片 + 微缝合 + 代笔 + 锁拍）
@@ -654,23 +289,6 @@ export function useGenerationSession(): GenerationSession {
   // 防 COMPLETE 覆盖落库时丢失开局文字。
   let _freshCanvas = false
 
-  // ===== 无感自沉淀（三重门 + 软切混合；常量即 UX 规划案的时机旋钮） =====
-  const AUTO_LOCK_MIN_PAUSE_MS = 5000   // 停顿门：连续无输入时长
-  const AUTO_LOCK_MIN_INTERVAL_MS = 30000  // 间隔门：距上次沉淀
-  const AUTO_LOCK_READY_RATIO = 0.9     // 字数门：拍目标达成度
-  const SOFT_CUT_RATIO = 1.2            // 软切阈值：一气呵成写过头时句界收束
-  let _lastEditTs = 0
-  let _lastLockTs = 0
-  let _sedimentTimer: ReturnType<typeof setInterval> | null = null
-  /** 软切淡提示（AutoCutHint 数据源） */
-  const autoCutNotice = ref<{ beatId: string; message: string } | null>(null)
-  let _autoCutTimer: ReturnType<typeof setTimeout> | null = null
-  /** 软切后余文顺延：下次 AUTHORING_OPEN 的创作区基线 */
-  let _pendingCarryBasePos: number | null = null
-  /** 撤回合并后该拍目标临时翻倍（防立刻再切同一拍） */
-  let _mergeBoostBeatId: string | null = null
-  /** 撤回合并标记：下一次 back 回退保留文档文本（只回生成状态） */
-  let _keepTextOnNextRollback = false
 
   // Spark Dock 接线：可展示门。
   // NLE-ADF 3.0：gate 从 stage 解耦——自适应 composing 态（authorLane）也激活，
@@ -704,55 +322,6 @@ export function useGenerationSession(): GenerationSession {
     hideSparkDock()
   }, { immediate: true })
 
-  /** BEAT_AUTHORING_OPEN 统一处理（SSE 事件 / 轮询自愈 / 失步 resync 三路共用）。
-   *  与岔路门同理：挂起等作者期间必须停轮询（run 无限期等动作，90 次上限会误报超时）。 */
-  function _onBeatAuthoringOpen(data: { beat_id: string; segment_index: number; target_word_count?: number; card_snapshot?: BeatSlot }) {
-    _stopSteppingPoll()
-    authoringBeatId.value = data.beat_id
-    authoringBeatCard.value = data.card_snapshot
-      || beatSlots.value.find(s => s.beat_id === data.beat_id)
-      || null
-    renderingBeatId.value = null
-    readyBeatId.value = null
-    readyBeatDegraded.value = null
-    stage.value = 'beat_authoring'
-    generating.value = false
-    // 记录创作区基线。栈里已有本拍（back 重开 / resync 重建）→ 复用旧基线
-    // （重开前的本拍碎片文本仍在文档里，新基线会把它漏出 authorText）；
-    // 软切顺延 → 用句界切点作基线（余文归本拍）；
-    // freshCanvas 首开 → 文档开头（开局自由文字归入拍 0）；
-    // 否则以当前文档末尾为新基线压栈。
-    const editor = chapterEditorHandle.value
-    const existIdx = beatBaseStack.findIndex(e => e.beatId === data.beat_id)
-    if (existIdx >= 0) {
-      authoringBasePos = beatBaseStack[existIdx].basePos
-      beatBaseStack.length = existIdx + 1
-    } else {
-      if (_pendingCarryBasePos != null) {
-        const docEnd = editor ? editor.state.doc.content.size : _pendingCarryBasePos
-        authoringBasePos = Math.min(_pendingCarryBasePos, docEnd)
-        _pendingCarryBasePos = null
-      } else if (_freshCanvas && beatBaseStack.length === 0) {
-        authoringBasePos = 0
-      } else {
-        authoringBasePos = editor ? editor.state.doc.content.size : 0
-      }
-      beatBaseStack.push({ beatId: data.beat_id, basePos: authoringBasePos })
-    }
-    // 合并助推只对本拍有效（开新拍即失效）
-    if (_mergeBoostBeatId && _mergeBoostBeatId !== data.beat_id) _mergeBoostBeatId = null
-    fragmentAnchorPos = authoringBasePos
-    // 拍基线快照（count=0）：本拍"全部撤销"的回拨终点（重开不重复记录）
-    if (!fragmentSnapshots.value.some((s) => s.beatId === data.beat_id && s.count === 0)) {
-      _snapshotFragment(data.beat_id, 0)
-    }
-    upsertRenderProgress(data.beat_id, 'ready', { segmentIndex: data.segment_index })
-    stepProgress.value = {
-      label: '等你创作',
-      index: (data.segment_index ?? 0) + 1,
-      total: beatSlots.value.length,
-    }
-  }
   function commitGhostFragment(): boolean {
     if (!ghostActive.value) return false
     commitGhost()
@@ -788,229 +357,13 @@ export function useGenerationSession(): GenerationSession {
     fragmentSnapshots.value.push({ beatId, count, text })
   }
 
-  /** 时间轴回拨：恢复当前创作拍到第 count 个碎片锁死时的文档状态。
-   *  v1 边界：仅当前创作拍内可划（跨已锁拍的回拨走 back 动作链）。 */
-  function scrubToFragment(beatId: string, count: number): boolean {
-    if (beatId !== authoringBeatId.value) return false
-    const snap = fragmentSnapshots.value.find((s) => s.beatId === beatId && s.count === count)
-    const editor = chapterEditorHandle.value
-    if (!snap || !editor) return false
-    if (ghostActive.value) evaporateGhost()
-    // 全量恢复（快照含已锁拍前缀，恢复即全局一致）
-    const html = snap.text
-      .split(/\n\n+/)
-      .map((p) => p.trim())
-      .filter(Boolean)
-      .map((p) => `<p>${p}</p>`)
-      .join('')
-    editor.chain().command(noHistory).setContent(html || '<p></p>', true).run()
-    // 光标落到文档末尾（回拨后继续写的位置），碎片锚点同步复位
-    editor.commands.setTextSelection(editor.state.doc.content.size)
-    fragmentAnchorPos = editor.state.doc.content.size
-    fragmentCounts.value = { ...fragmentCounts.value, [beatId]: count }
-    fragmentSnapshots.value = fragmentSnapshots.value.filter(
-      (s) => !(s.beatId === beatId && s.count > count),
-    )
-    return true
-  }
 
-  /** Ctrl+Enter 锁死本拍（作者模式主出口）。
-   *  创作区 [基线, 文档末尾] 全部文本 = 作者定稿（碎片 + 缝合稿 + 代笔稿 +
-   *  一切手动修改），走 lock_with_text；空定稿 = 不要这拍 → skip。 */
-  function lockAuthoringBeat() {
-    if (!currentChapterId) return
-    // 裁决态（代笔就绪）与创作态都可锁拍；其余阶段不响应
-    const inAdjudication = stage.value === 'beat_stepping' && !!readyBeatId.value && authoringEnabled.value
-    if (stage.value !== 'beat_authoring' && !inAdjudication) return
-    const beatId = inAdjudication ? readyBeatId.value! : authoringBeatId.value
-    const editor = chapterEditorHandle.value
-    if (!beatId || !editor) return
-    // 有未提交幽灵：先并入（Ctrl+Enter 的意图显然是连草稿一起定稿）
-    if (ghostActive.value) commitGhostFragment()
-    const doc = editor.state.doc
-    const base = Math.min(authoringBasePos, doc.content.size)
-    const text = doc.textBetween(base, doc.content.size, '\n\n').trim()
-    _lastLockTs = Date.now()  // 手动沉淀也计入间隔门（防自动沉淀紧跟着连击）
-    // BS-ADF 归档：锁拍外发出口移除（beat_authoring 态不可达，防御性收尾）
-    void text
-  }
 
-  /** 作者模式 back 回拨的画布侧回滚：删掉目标拍及之后的创作区文本
-   *  （后端弹栈只回滚生成状态，文档里已锁拍的正文不删会混进重写的拍）。
-   *  在 onBeatBacked 里调用；目标拍基线保留在栈顶供 AUTHORING_OPEN 复用。
-   *  撤回合并模式（_keepTextOnNextRollback）：只回生成状态，文档一字不动。 */
-  function _authoringRollbackDoc(beatId: string) {
-    const editor = chapterEditorHandle.value
-    const entryIdx = beatBaseStack.findIndex(e => e.beatId === beatId)
-    if (_keepTextOnNextRollback) {
-      _keepTextOnNextRollback = false
-      // 保留目标拍基线条目（重开时区域 = 原基线→文档末尾的完整未切文本）
-      if (entryIdx >= 0) beatBaseStack.length = entryIdx + 1
-      if (ghostActive.value) evaporateGhost()
-      return
-    }
-    if (editor && entryIdx >= 0) {
-      const base = Math.min(beatBaseStack[entryIdx].basePos, editor.state.doc.content.size)
-      if (base < editor.state.doc.content.size) {
-        // 隔离撤销栈：回拨删文若入栈，Ctrl+Z 会复活已回滚的拍文本（与快照栈双时间线打架）
-        editor.chain().command(noHistory).deleteRange({ from: base, to: editor.state.doc.content.size }).run()
-      }
-      beatBaseStack.length = entryIdx
-    }
-    if (ghostActive.value) evaporateGhost()
-  }
+  
 
-  // ===== 无感自沉淀引擎 =====
-  function _markEditActivity() {
-    _lastEditTs = Date.now()
-  }
-  watch(chapterEditorHandle, (editor, prev) => {
-    prev?.off('update', _markEditActivity)
-    prev?.off('selectionUpdate', _markEditActivity)
-    editor?.on('update', _markEditActivity)
-    editor?.on('selectionUpdate', _markEditActivity)
-  }, { immediate: true })
 
-  function _startSedimentLoop() {
-    if (_sedimentTimer) return
-    _sedimentTimer = setInterval(_sedimentTick, 1000)
-  }
-  function _stopSedimentLoop() {
-    if (_sedimentTimer) { clearInterval(_sedimentTimer); _sedimentTimer = null }
-  }
-  watch(stage, (s) => {
-    if (s === 'beat_authoring') _startSedimentLoop()
-    else _stopSedimentLoop()
-  })
 
-  /** 懒增强载荷应用（SSE 事件与 state 慢查两路共用）：增强卡/决策集/Loop1 刷新，
-   *  当前创作拍卡快照同步（Dock 零件随之从种子升级到增强版）。幂等。 */
-  function _applyEnhancedCards(data: { beat_slots?: BeatSlot[]; decision_set?: ChapterDecisionSet; loop1_result?: any }) {
-    if (Array.isArray(data.beat_slots) && data.beat_slots.length) {
-      beatSlots.value = data.beat_slots
-    }
-    if (data.decision_set) decisionSet.value = data.decision_set
-    if (data.loop1_result) loop1Result.value = data.loop1_result
-    if (authoringBeatId.value && Array.isArray(data.beat_slots)) {
-      const cur = data.beat_slots.find((s) => s.beat_id === authoringBeatId.value)
-      if (cur) authoringBeatCard.value = cur
-    }
-  }
 
-  /** 创作期慢查增强就绪（10s 一次，sediment 循环驱动；SSE 事件的兜底通道） */
-  let _enhanceSyncTicks = 0
-  async function _syncEnhancedCards() {
-    if (!steppingRunId.value) return
-    try {
-      const resp = await fetch(`/api/chapters/stepping-run/${steppingRunId.value}/state`)
-      if (!resp.ok) return
-      const st = await resp.json()
-      if (st.cards_enhanced && Array.isArray(st.enhanced_beat_slots)) {
-        _applyEnhancedCards({
-          beat_slots: st.enhanced_beat_slots,
-          decision_set: st.enhanced_decision_set,
-          loop1_result: st.loop1_result,
-        })
-      }
-    } catch {
-      // 静默：增强同步是锦上添花，失败等下一轮
-    }
-  }
-
-  /** 三重门检查：字数≥目标90% + 停顿≥5s + 距上次≥30s（令牌节度核心） */
-  function _sedimentTick() {
-    if (stage.value !== 'beat_authoring') return
-    if (!authoringBeatId.value || !currentChapterId) return
-    if (ghostActive.value || stitching.value || generating.value) return
-    // 懒增强慢查（10s 一次）：卡增强就绪后刷新 Dock 零件与决策集
-    _enhanceSyncTicks++
-    if (_enhanceSyncTicks >= 10) {
-      _enhanceSyncTicks = 0
-      void _syncEnhancedCards()
-    }
-    const editor = chapterEditorHandle.value
-    if (!editor) return
-    const now = Date.now()
-    if (now - _lastEditTs < AUTO_LOCK_MIN_PAUSE_MS) return
-    if (now - _lastLockTs < AUTO_LOCK_MIN_INTERVAL_MS) return
-    const doc = editor.state.doc
-    const base = Math.min(authoringBasePos, doc.content.size)
-    const region = doc.textBetween(base, doc.content.size, '\n\n')
-    const target = authoringBeatCard.value?.target_word_count || 500
-    // 撤回合并助推：本拍目标临时翻倍（防立刻再切同一拍）
-    const effectiveTarget = _mergeBoostBeatId === authoringBeatId.value ? target * 2 : target
-    if (region.trim().length < effectiveTarget * AUTO_LOCK_READY_RATIO) return
-    _autoLockCurrentBeat(region.trim(), effectiveTarget)
-  }
-
-  /** 软切切点：在 [0.9×target, 1.2×target] 内找最后一个句末标点；找不到返回 -1 */
-  function _findSentenceCutIndex(text: string, target: number): number {
-    const lo = Math.floor(target * AUTO_LOCK_READY_RATIO)
-    const hi = Math.min(text.length - 1, Math.floor(target * SOFT_CUT_RATIO))
-    for (let i = hi; i >= lo; i--) {
-      if ('。！？…'.includes(text[i])) return i
-    }
-    return -1
-  }
-
-  /** 文本偏移 → PM 位置探测（段落边界两侧计数口径不同，±4 窗口内穷举对齐） */
-  function _pmPosForTextOffset(basePos: number, textOffset: number): number | null {
-    const editor = chapterEditorHandle.value
-    if (!editor) return null
-    const doc = editor.state.doc
-    const size = doc.content.size
-    const guess = Math.min(size, Math.max(basePos, basePos + textOffset))
-    for (let delta = 0; delta <= 4; delta++) {
-      for (const cand of [guess + delta, guess - delta]) {
-        if (cand < basePos || cand > size) continue
-        if (doc.textBetween(basePos, cand, '\n\n').length === textOffset) return cand
-      }
-    }
-    return null
-  }
-
-  function _showAutoCutNotice(beatId: string) {
-    autoCutNotice.value = { beatId, message: '已替你在这里喘了口气（句界收束），余文顺延下一拍' }
-    if (_autoCutTimer) clearTimeout(_autoCutTimer)
-    _autoCutTimer = setTimeout(() => { autoCutNotice.value = null }, 8000)
-  }
-
-  /** 自动沉淀主出口：达标锁定；写过头（≥1.2×目标）时软切——句界前段沉淀，
-   *  余文顺延下一拍并给淡提示（可撤回合并）。 */
-  function _autoLockCurrentBeat(regionText: string, target: number) {
-    const beatId = authoringBeatId.value
-    if (!beatId || !currentChapterId) return
-    _lastLockTs = Date.now()
-    if (regionText.length >= target * SOFT_CUT_RATIO) {
-      const cutIdx = _findSentenceCutIndex(regionText, target)
-      if (cutIdx > 0) {
-        const cutPos = _pmPosForTextOffset(
-          Math.min(authoringBasePos, chapterEditorHandle.value?.state.doc.content.size ?? 0),
-          cutIdx + 1,
-        )
-        if (cutPos != null) {
-          _pendingCarryBasePos = cutPos
-          _showAutoCutNotice(beatId)
-          // BS-ADF 归档：软切外发出口移除（stage 不可达，防御性返回）
-          return
-        }
-        // 位置换算失败：整段锁（宁可胖拍，不错切）
-      }
-    }
-    // BS-ADF 归档：达标锁定兜底出口移除
-    void regionText
-  }
-
-  /** 软切撤回合并：back 回退本拍但保留全部文档文本；本拍目标临时翻倍。 */
-  function mergeAutoCut() {
-    const notice = autoCutNotice.value
-    if (!notice || !currentChapterId) return
-    if (stage.value !== 'beat_authoring' || !authoringBeatId.value) return
-    autoCutNotice.value = null
-    _mergeBoostBeatId = notice.beatId
-    _keepTextOnNextRollback = true
-    // BS-ADF 归档：back 外发出口移除（stage 不可达）
-  }
 
   /** 作者模式瞬时段态复位（终态/取消/切章/重置共用）。 */
   function _resetAuthoringTransient() {
@@ -1023,13 +376,6 @@ export function useGenerationSession(): GenerationSession {
     beatBaseStack.length = 0
     // 防御：复位时幽灵草稿不该存在；存在即蒸发（AI 临时元素零残留）
     if (ghostActive.value) evaporateGhost()
-    // 沉淀引擎态一并复位
-    autoCutNotice.value = null
-    if (_autoCutTimer) { clearTimeout(_autoCutTimer); _autoCutTimer = null }
-    _pendingCarryBasePos = null
-    _mergeBoostBeatId = null
-    _keepTextOnNextRollback = false
-    _lastLockTs = 0
   }
 
   let abortController: AbortController | null = null
@@ -1037,158 +383,8 @@ export function useGenerationSession(): GenerationSession {
 
   const isTerminal = computed(() => stage.value === 'done' || stage.value === 'error')
 
-  // ============================================================
-  // 派生：当前任务焦点（渲染阶段「当前任务」焦点条的唯一数据源）
-  // 纯只读消费现有 ref，不引入新状态。把散落三处的引导收敛为单一焦点。
-  // 设计：任何时刻焦点条只表达一件事，最多一个主按钮（或无）。
-  // ============================================================
-  const currentTask = computed<CurrentTask>(() => {
-    const st = stage.value
-    const total = beatSlots.value.length
-    const segNo = (idx?: number) => (typeof idx === 'number' ? idx + 1 : undefined)
-
-    // 渲染前：Track B 单次暂停，分镜卡就绪。
-    // ⚠ 不给主按钮（曾传原始卡 + 空 branch_choices 提交，绕过 StoryboardPanel 的
-    // 草稿与分支选择 → 作者编辑静默丢失；分镜卡草稿只存在于 StoryboardPanel 内部，
-    // 焦点条无法取得）。开始渲染的唯一出口 = 下方分镜工作台底部 CTA。
-    if (st === 'beat_pending') {
-      return {
-        kind: 'edit-beats',
-        title: '分镜卡已就绪',
-        hint: '检查下面每张分镜卡（核心转折 / 必现画面 / 台词）后，点击下方「开始渲染」。结构（段数、段序）一旦开始渲染即锁定。',
-        segTotal: total,
-      }
-    }
-
-    // 渲染中：某段正在渲染，纯进度无按钮
-    if (st === 'beat_rendering') {
-      const rId = renderingBeatId.value
-      const slot = rId ? beatSlots.value.find(s => s.beat_id === rId) : null
-      const idx = slot?.segment_index
-      // 推进过渡态识别：advanceBeat 为即时反馈把 renderingBeatId 设成刚被接受的
-      // 旧段，但该段此时已在 lockedBeatIds 里（pass/skip/lock_with_text 已锁），
-      // 并非真在渲染——下一段的 BEAT_RENDER_START 要等后端跑完记忆倒灌才到达。
-      // 此处据此区分，避免显示误导性的「正在渲染第 N 段」（N=已锁的旧段，
-      // 看像在重渲染本段——推进重渲事故）。
-      const advancingTransition = !!rId && lockedBeatIds.value.has(rId)
-      return {
-        kind: 'rendering',
-        title: advancingTransition
-          ? '正在准备下一段…'
-          : (rId ? `正在渲染第 ${segNo(idx)}${total ? '/' + total : ''} 段` : '正在渲染'),
-        hint: advancingTransition
-          ? '上一段已定稿，正在为下一段整理记忆与状态。'
-          : (slot ? `这段写「${slot.core_plot_event}」。完成后会自动停下等你。` : 'AI 正在写，完成后会自动停下等你。'),
-        segIndex: advancingTransition ? undefined : segNo(idx),
-        segTotal: total,
-      }
-    }
-
-    // 裁决态：某段已就绪，等作者三选一
-    if (st === 'beat_stepping' && readyBeatId.value) {
-      const slot = readyBeatCard.value || beatSlots.value.find(s => s.beat_id === readyBeatId.value)
-      const idx = slot?.segment_index
-      const text = readyBeatId.value ? segmentTexts.value[readyBeatId.value] : ''
-      const wc = text ? text.length : 0
-      const degradedInfo = readyBeatDegraded.value
-      // 是否末段：后端靠循环退出触发 COMPLETE，不传 is_last 标志，前端以
-      // segment_index === total-1 自行判断（与 StoryboardPanel 高潮段标记同款）。
-      const isLast = total > 0 && (idx ?? -1) + 1 >= total
-      // 降级段：正文为空、终稿会消失。明示"接受=这段不进正文"，并把引导重心
-      // 从"接受(Space)"转向"重写本段/直接在正文写"（CurrentTaskBar 据 degraded 重组按钮）。
-      // 降级 reason 经 formatDegradedReason 翻译，避免裸露英文枚举。
-      if (degradedInfo) {
-        return {
-          kind: 'advance',
-          degraded: true,
-          title: `⚠ 第 ${segNo(idx)}${total ? '/' + total : ''} 段渲染失败`,
-          hint: `原因：${formatDegradedReason(degradedInfo.reason)}（已重试 ${degradedInfo.attempts ?? 2} 次）。这段没有正文。建议「重写本段」让 AI 重试，或直接在左侧正文里写一段（改动随接受定稿）。${isLast ? '这是最后一段。' : ''}若直接接受，这段将不出现在最终正文中。`,
-          segIndex: segNo(idx),
-          segTotal: total,
-          isLast,
-          primary: {
-            label: isLast
-              ? '接受并跳过（本段不进正文），完成本章生成'
-              : `接受并跳过（本段不进正文），进入第 ${(segNo(idx) ?? 0) + 1} 段`,
-            hint: '',
-            action: 'accept',
-          },
-        }
-      }
-      return {
-        kind: 'advance',
-        title: `第 ${segNo(idx)}${total ? '/' + total : ''} 段已生成${wc ? ' · ' + wc + ' 字' : ''}`,
-        hint: slot
-          ? isLast
-            ? `这段写「${slot.core_plot_event}」。可直接在左侧正文里改字（改动随接受定稿），或接受它完成本章、重写本段。`
-            : `这段写「${slot.core_plot_event}」。可直接在左侧正文里改字（改动随接受定稿），或接受它进入下一段、重写本段。`
-          : isLast
-            ? '可直接在左侧正文里改字（改动随接受定稿），或接受本段完成本章、重写本段。'
-            : '可直接在左侧正文里改字（改动随接受定稿），或接受本段进入下一段、重写本段。',
-        segIndex: segNo(idx),
-        segTotal: total,
-        isLast,
-        primary: {
-          label: isLast ? '接受，完成本章生成' : `接受，进入第 ${(segNo(idx) ?? 0) + 1} 段`,
-          hint: 'Space',
-          action: 'accept',
-        },
-      }
-    }
-
-    // 岔路态（beat_branch_choosing）：决策交互在顶部 BranchDecisionPanel 完成，
-    // 焦点条不渲染（落兜底 idle），两者互斥同槽。
-
-    // 完成但有降级/救援段
-    if (st === 'done' && (degradedBeats.value.length > 0 || rescueNeeded.value.length > 0)) {
-      const n = degradedBeats.value.length + rescueNeeded.value.length
-      return {
-        kind: 'post-rescue',
-        title: `全章已生成，但有 ${n} 段需复查`,
-        hint: '这些段渲染失败或核心转折未落地。可以在下面分镜卡里对它们「重写本段」。',
-        segTotal: total,
-      }
-    }
-
-    // 全部完成
-    if (st === 'done') {
-      return {
-        kind: 'done',
-        title: '全章渲染完成',
-        hint: '你随时可以对任意一段「重写本段」。',
-        segTotal: total,
-      }
-    }
-
-    // 兜底（非渲染阶段，焦点条通常不显示）
-    return { kind: 'idle', title: '' }
-  })
 
   // ---- 持久化：把当前产物序列化到 localStorage ----
-  /**
-   * 按 segment_index 顺序把 segmentTexts 拼成完整终稿（段间 \n\n 分隔）。
-   *
-   * 用于 rerender-beat 成功后重建 streamText：segmentTexts 按 beat_id 存（无序），
-   * 需借 beatSlots 的 segment_index 排序，保证终稿段序正确。空段（降级/skip 残留）
-   * 过滤，与后端 stepping_runtime.py 终稿拼接规则一致。
-   */
-  function _rebuildStreamTextFromSegments(): string {
-    // beat_id → segment_index 映射（beatSlots 已含全部卡的 segment_index）
-    const order = new Map<string, number>()
-    for (const s of beatSlots.value) {
-      if (typeof s.segment_index === 'number') order.set(s.beat_id, s.segment_index)
-    }
-    // skipped 段不进终稿（与后端 stepping_loop 终稿只拼 locked_segments 一致）——
-    // onBeatSkipped 已清文本，这里是残留防御，防旧快照里的跳过段文本混入落库
-    const skipped = new Set(
-      renderProgress.value.filter(p => p.status === 'skipped').map(p => p.beat_id),
-    )
-    const entries = Object.entries(segmentTexts.value)
-      .map(([beatId, text]) => ({ beatId, text, idx: order.has(beatId) ? order.get(beatId)! : 999 }))
-      .filter(e => (e.text || '').trim() && !skipped.has(e.beatId)) // 过滤空段 + 跳过段
-      .sort((a, b) => a.idx - b.idx)
-    return entries.map(e => e.text).join('\n\n')
-  }
 
   /** 收集当前 ref 值为快照（不含版本/章节/时间戳，由 _saveSnapshot 补） */
   function _collectSnapshot() {
@@ -1196,32 +392,12 @@ export function useGenerationSession(): GenerationSession {
       stage: stage.value,
       engine: engine.value,
       stepProgress: stepProgress.value,
-      tierDecision: tierDecision.value,
       streamText: streamText.value,
-      climaxScore: climaxScore.value,
-      auditVerdict: auditVerdict.value,
-      auditFindings: auditFindings.value,
-      degraded: degraded.value,
       finalStats: finalStats.value,
-      adfAnchor: adfAnchor.value,
-      adfPreconditions: adfPreconditions.value,
-      adfEmotionCurve: adfEmotionCurve.value,
-      adfAudit: adfAudit.value,
       refineryIssues: refineryIssues.value,
       refinerySurgeries: refinerySurgeries.value,
       refineryHolisticVerdict: refineryHolisticVerdict.value,
       refineryStats: refineryStats.value,
-      // BS-ADF：beatRunId 是临时会话凭证（同 refineryRunId），不持久化
-      beatSlots: beatSlots.value,
-      renderProgress: renderProgress.value,
-      degradedBeats: degradedBeats.value,
-      decisionSet: decisionSet.value,
-      rescueNeeded: rescueNeeded.value,
-      // 步进段态持久化（刷新恢复后 rerenderBeat 重建终稿依赖 segmentTexts）
-      segmentTexts: segmentTexts.value,
-      lockedBeatIds: [...lockedBeatIds.value],
-      bsadfTrack: bsadfTrack.value,
-      steppingEnabled: steppingEnabled.value,
     }
   }
 
@@ -1244,8 +420,6 @@ export function useGenerationSession(): GenerationSession {
     // 切换章节：先把当前章的状态存下来，再取消可能进行中的步进运行
     if (currentChapterId && currentChapterId !== chapterId) {
       persist()
-      _cancelSteppingRun()
-      _stopSteppingPoll()
     }
     currentChapterId = chapterId
     const snap = _loadSnapshot(chapterId)
@@ -1258,50 +432,14 @@ export function useGenerationSession(): GenerationSession {
     // 恢复产物
     engine.value = snap.engine
     stepProgress.value = snap.stepProgress
-    tierDecision.value = snap.tierDecision
     streamText.value = snap.streamText
-    climaxScore.value = snap.climaxScore
-    auditVerdict.value = snap.auditVerdict
-    auditFindings.value = snap.auditFindings
-    degraded.value = snap.degraded
     finalStats.value = snap.finalStats
-    adfAnchor.value = snap.adfAnchor
-    adfPreconditions.value = snap.adfPreconditions
-    adfEmotionCurve.value = snap.adfEmotionCurve
-    adfAudit.value = snap.adfAudit
     refineryIssues.value = snap.refineryIssues
     refinerySurgeries.value = snap.refinerySurgeries
     refineryHolisticVerdict.value = snap.refineryHolisticVerdict
     refineryStats.value = snap.refineryStats
-    // 防御：旧 schema 快照（anchor_actions/conflict_trigger 时代）与新字段不兼容，
-    // 逐卡校验 key_anchors 数组存在才恢复，否则丢弃（避免 UI 读 undefined 崩溃）
-    beatSlots.value = (snap.beatSlots || []).filter(
-      (s: any) => s && Array.isArray(s.key_anchors) && typeof s.core_plot_event === 'string',
-    )
-    renderProgress.value = snap.renderProgress || []
-    degradedBeats.value = snap.degradedBeats || []
-    decisionSet.value = snap.decisionSet || null
-    rescueNeeded.value = (snap.rescueNeeded || []).filter(
-      (r: any) => r && typeof r.segment_index === 'number',
-    )
-    // 步进段态恢复（done 态单段重渲重建终稿依赖 segmentTexts；缺省为旧版快照，给空）
-    segmentTexts.value = snap.segmentTexts || {}
-    lockedBeatIds.value = new Set(snap.lockedBeatIds || [])
-    bsadfTrack.value = snap.bsadfTrack ?? null
-    steppingEnabled.value = snap.steppingEnabled ?? false
-    // 瞬时段态统一复位：步进运行态（就绪/渲染中/岔路门/降级提示）是会话凭证，
-    // 刷新/切章后后端 run 已失效，不复位会残留到目标章——分镜卡级动作被
-    // steppingActive 恒 true 锁死、A 章段文本串进 B 章终稿（真实事故）。
-    readyBeatId.value = null
-    readyBeatCard.value = null
-    readyBeatDegraded.value = null
-    renderingBeatId.value = null
-    branchChoicePending.value = null
-    steppingRunId.value = null
-    emergentFacts.value = {}
-    loop1Result.value = null
-    pendingSaveText.value = null
-    _chunkReplaceOnce.clear()
+    // 旧引擎快照字段（BS-ADF/ADF 产物）已随 2026-08-29 归档移除——旧快照里的
+    // 对应数据静默丢弃；瞬时段态统一复位（run 已失效，不复位会残留到目标章）。
     _resetAuthoringTransient()
     // 中断态归正：刷新后无法续 LLM，强制为已完成的静态展示
     if (snap.stage === 'done') {
@@ -1318,10 +456,7 @@ export function useGenerationSession(): GenerationSession {
     }
     generating.value = false
     error.value = null
-    inflightEvents.value = []  // 飞行中事件不持久化（瞬时态）
     refineryRunId.value = null  // runId 是临时会话凭证，刷新后失效
-    beatRunId.value = null  // beat runId 同样是临时凭证，刷新后失效
-    rerenderRunId.value = null  // 同上：pending 在后端内存，刷新后前端不再引用
   }
 
   /** 内部 reset（不触碰 currentChapterId，不 persist） */
@@ -1331,44 +466,15 @@ export function useGenerationSession(): GenerationSession {
     error.value = null
     stepProgress.value = null
     engine.value = 'v3.2'
-    tierDecision.value = null
     streamText.value = ''
-    climaxScore.value = null
-    inflightEvents.value = []
-    auditFindings.value = []
-    auditVerdict.value = null
-    degraded.value = []
     finalStats.value = null
-    adfAnchor.value = null
-    adfPreconditions.value = []
-    adfEmotionCurve.value = []
-    adfAudit.value = null
     refineryIssues.value = []
     refineryRunId.value = null
     refinerySurgeries.value = []
     refineryHolisticVerdict.value = null
     refineryStats.value = null
-    beatSlots.value = []
-    beatRunId.value = null
-    rerenderRunId.value = null
-    renderProgress.value = []
-    degradedBeats.value = []
-    bsadfTrack.value = null
-    steppingEnabled.value = false
-    rerenderingBeatId.value = null
-    decisionSet.value = null
-    rescueNeeded.value = []
     lastDoneMode.value = null
     // 风险3修复：清理步进轮询定时器 + 清空 steppingRunId（防止拆卸后永久轮询）
-    _stopSteppingPoll()
-    steppingRunId.value = null
-    branchChoicePending.value = null
-    segmentTexts.value = {}
-    readyBeatId.value = null  // 触发 readyBeatId watch → 同步复位 readySegmentOriginal/Dirty
-    readyBeatDegraded.value = null
-    _chunkReplaceOnce.clear()
-    lockedBeatIds.value = new Set()
-    renderingBeatId.value = null
     authoringEnabled.value = false
     _resetAuthoringTransient()
   }
@@ -1376,146 +482,11 @@ export function useGenerationSession(): GenerationSession {
   /** 最近一次入口（供失败重试 retry 再次触发）；start / startRefinery 时记录 */
   let lastAction: (() => void) | null = null
 
-  /** 定档事件填充（ADF 的 onTierDecided 与 BS-ADF 的 TIER_DECIDED 共用，载荷结构一致） */
-  function applyTierDecision(decision: { tier: string; reason: string; climax_score?: number | null }) {
-    tierDecision.value = {
-      tier: decision.tier as any,
-      reason: decision.reason,
-      climax_score: decision.climax_score ?? null,
-      forced_by_user: decision.tier !== 'auto',
-      max_depth: 0,
-      development_ratio: 0,
-    }
-    stage.value = 'tier_decided'
-    stepProgress.value = { label: `篇幅：${tierLabel(decision.tier)}` }
-  }
 
-  /** 审计结论填充（ADF 的 onAudit 与 BS-ADF 的 ADF_AUDIT / BSADF_METADATA.audit 兜底共用）。
-   *  BSADF_METADATA.audit 是后端 audit_to_dict 产物，比 ADF_AUDIT 事件多
-   *  style_violations/style_score/missing_beats 字段，结构兼容可直接传入。 */
-  function applyAdfAudit(audit: AdfAuditResult) {
-    adfAudit.value = audit
-    auditVerdict.value = audit.verdict
-    if (audit.climax_score != null) climaxScore.value = audit.climax_score
-    if (Array.isArray(audit.structure_issues)) {
-      auditFindings.value = audit.structure_issues.map((v: string) => ({
-        detail: v,
-        severity: 'warning',
-        category: 'structure',
-      }))
-    }
-    if (Array.isArray(audit.emotion_mismatches)) {
-      auditFindings.value.push(
-        ...audit.emotion_mismatches.map((v: string) => ({
-          detail: v,
-          severity: 'info',
-          category: 'emotion',
-        })),
-      )
-    }
-  }
 
-  /** BS-ADF 兜底事件（onEvent 通道）：审计 / 降级 / 元数据 / 正文输出提示，
-   *  对齐 ADF 路径的填充逻辑（此前这些事件被 _dispatchEvent 安全忽略，
-   *  导致 BS-ADF 生成后降级详情 / 审计结论 / 铺垫要点恒空）。 */
-  function handleBsadfEvent(event: string, data: any) {
-    // NLE-ADF 2.0 懒增强完成：种子卡 → 增强卡（Dock 零件/DDE 决策集/Loop1 缺口刷新）
-    if (event === 'BEAT_CARDS_ENRICHED') {
-      _applyEnhancedCards(data)
-      return
-    }
-    // ADF_ANCHOR_DESIGNED：存锚点设计（climax_description 供脉络条摘要展示）
-    if (event === 'ADF_ANCHOR_DESIGNED') {
-      adfAnchor.value = {
-        climax_intensity: data.climax_intensity,
-        climax_description: data.climax_description,
-        setup_points: data.setup_points,
-        emotion_flow_samples: data.emotion_flow_samples,
-      }
-      // ⚠ BS-ADF 情绪曲线恒空修复：此前 emotion_flow_samples 只存进 adfAnchor
-      // 不喂 adfEmotionCurve（ADF 路径 start() 有喂），Canon tab 曲线对 BS-ADF
-      // 章节永远空白——数据明明已到达前端
-      adfEmotionCurve.value = data.emotion_flow_samples || []
-      return
-    }
-    if (event === 'ADF_AUDIT') {
-      applyAdfAudit({
-        verdict: data.verdict,
-        missing_setup_points: data.missing_setup_points || [],
-        emotion_mismatches: data.emotion_mismatches || [],
-        structure_issues: data.structure_issues || [],
-        climax_score: data.climax_score,
-        fix_targets: data.fix_targets || [],
-      })
-    } else if (event === 'DEGRADED') {
-      degraded.value.push({
-        reason: data.reason,
-        phase: data.phase,
-        detail: data.detail,
-      })
-    } else if (event === 'BSADF_METADATA') {
-      // 完整元数据：填充铺垫要点（同 ADF_METADATA 的处理）
-      if (Array.isArray(data.climax_design?.setup_points)) {
-        adfPreconditions.value = data.climax_design.setup_points
-      }
-      // audit 兜底：ADF_AUDIT 事件正常会先到；未到（异常路径）时用
-      // BSADF_METADATA.audit（audit_to_dict 产物）补，避免审计结论恒空
-      if (!adfAudit.value && data.audit && data.audit.verdict) {
-        applyAdfAudit(data.audit)
-      }
-    } else if (event === 'FINAL_TEXT_STREAM') {
-      stepProgress.value = { label: '输出正文' }
-      // 终稿重放前清掉渲染期原稿：渲染中 segmentTexts/streamText 装的是
-      // 各段 BEAT_TEXT_CHUNK 原稿，随后 TEXT_CHUNK 会按 200 字切块重放
-      // 后处理终稿，不清会原稿+终稿双份拼接；预览同时切到精修全文流式视图
-      streamText.value = ''
-      segmentTexts.value = {}
-    }
-    // UNIFIED_METRIC / GENERATION_RUN：audit 已通过 ADF_AUDIT 处理（同 ADF onMetric 语义）
-  }
-
-  /** 把 BS-ADF 的 BSADF_STAGE/ADF_STAGE 事件映射为写作语言步骤标签。
-   *  sessionStage 为 null 时只换标签、不动 stage 状态机
-   *  （AUTHOR_DIALOGUE 的 beat_pending 由 onSlots 负责；未知事件保持现状）。 */
-  function mapBsadfStageToLabel(stageName: string): { label: string; sessionStage: SessionStage | null } {
-    switch (stageName) {
-      case 'CONTEXT_ASSEMBLING':
-        return { label: '组装上下文', sessionStage: 'tier_classifying' }
-      case 'SPINE_BUILDING':
-        return { label: '构建脉络骨架', sessionStage: 'tier_classifying' }
-      case 'ANCHOR_DESIGN':
-        return { label: '设计远端锚点', sessionStage: 'tier_classifying' }
-      case 'TIER_DECIDE':
-        return { label: '章节定档', sessionStage: 'tier_classifying' }
-      case 'SLOT_BUILD':
-        return { label: '构建分镜卡', sessionStage: 'setup_growing' }
-      case 'BRANCH_CHECK':
-        return { label: '检查剧情岔路', sessionStage: 'setup_growing' }
-      case 'RENDER':
-      case 'RENDER_RESUMED':
-        return { label: '逐段渲染', sessionStage: 'beat_rendering' }
-      case 'AUTHOR_DIALOGUE':
-        return { label: '等待你编辑分镜卡', sessionStage: null }
-      case 'PRUNE':
-        // 剪枝属后处理（全段已锁），映射 refining 而非 zone_writing——
-        // 否则底栏误标「写作中」，作者以为还在逐段产出
-        return { label: '重构剪枝', sessionStage: 'refining' }
-      case 'ANCHOR_AUDIT':
-        return { label: '锚点审计', sessionStage: 'auditing' }
-      case 'REFINE':
-        return { label: '条件补埋', sessionStage: 'refining' }
-      case 'BEAT_PATCH':
-        return { label: '补写遗漏节拍', sessionStage: 'refining' }
-      case 'CONSISTENCY_GUARD':
-        return { label: '一致性守卫', sessionStage: 'auditing' }
-      default:
-        return { label: stageName, sessionStage: null }
-    }
-  }
+  
 
   function cancel() {
-    _cancelSteppingRun()
-    _stopSteppingPoll()
     if (abortController) {
       abortController.abort()
       abortController = null
@@ -1531,17 +502,15 @@ export function useGenerationSession(): GenerationSession {
   // 与旧 step 路径的根本区别：不跑整章管线、不预设拍划分。
   // 作者进章节打字即激活 composing，辅助层（useAdaptiveAssist）据此挂载。
   // 双轴 authorLane/aiLane 与 stage 并行——adaptive 模式下 stage 保持 idle，
-  // 旧路径（startBeat）保持 legacy 可切换。
+  // 旧 step 路径已随 BS-ADF 归档移除（2026-08-29）——adaptive 是唯一写作路径。
 
   /** 激活自适应写作模式。
-   *  作者进章节开始打字时调（取代旧冷启动 startBeat）。
+   *  作者进章节开始打字时调。
    *  不跑定档/锚点/分镜管线——作者轴置 composing，辅助层据此挂载。 */
   function enterAdaptive(chapterId: string) {
     if (adaptiveMode.value && authorLane.value === 'composing') return  // 已激活
     // 若旧管线在跑，先取消（adaptive 与 step 互斥）
     if (generating.value && stage.value !== 'idle') {
-      _cancelSteppingRun()
-      _stopSteppingPoll()
       if (abortController) { abortController.abort(); abortController = null }
       generating.value = false
     }
@@ -1610,7 +579,7 @@ export function useGenerationSession(): GenerationSession {
     _adaptiveSummonFn = fn
   }
 
-  /** 失败重试：再次触发最近一次入口（startBeat / startRefinery 已记录 lastAction） */
+  /** 失败重试：再次触发最近一次入口（startRefinery 已记录 lastAction） */
   function retry() {
     if (generating.value) return
     error.value = null
@@ -1618,8 +587,6 @@ export function useGenerationSession(): GenerationSession {
   }
 
   function reset() {
-    _cancelSteppingRun()
-    _stopSteppingPoll()
     if (abortController) {
       abortController.abort()
       abortController = null
@@ -1770,294 +737,6 @@ export function useGenerationSession(): GenerationSession {
     )
   }
 
-  /** 步进事件 → renderProgress 同步（P3 修复）。
-   *  步进路径（generate/advance-beat）后端不发 BEAT_RENDER_PROGRESS，
-   *  不喂数据的话 BeatProgress 恒「准备中」、脉络条 currentIndex 恒 0
-   *  （真实误导：步进到第 5 段仍高亮第 1 段）。
-   *  segment_index / word_count 缺省时回查已有项与 beatSlots。幂等（按 beat_id upsert）。 */
-  function upsertRenderProgress(
-    beatId: string,
-    status: 'rendering' | 'ready' | 'rendered' | 'skipped',
-    opts: { segmentIndex?: number; wordCount?: number } = {},
-  ) {
-    const idx = renderProgress.value.findIndex(p => p.beat_id === beatId)
-    const prev = idx >= 0 ? renderProgress.value[idx] : null
-    const segIdx = opts.segmentIndex
-      ?? prev?.segment_index
-      ?? beatSlots.value.find(s => s.beat_id === beatId)?.segment_index
-      ?? 0
-    const item: RenderProgress = {
-      beat_id: beatId,
-      segment_index: segIdx,
-      status,
-      word_count: opts.wordCount ?? prev?.word_count ?? 0,
-      reason: prev?.reason,
-      coverage_missing: prev?.coverage_missing,
-      word_overflow: prev?.word_overflow,
-    }
-    if (idx >= 0) renderProgress.value[idx] = item
-    else renderProgress.value.push(item)
-  }
-  function _stopSteppingPoll() {
-    if (_steppingPollTimer) { clearTimeout(_steppingPollTimer); _steppingPollTimer = null }
-    _steppingPollCount = 0
-  }
-  function _pollSteppingReady(runId: string, chapterId: string) {
-    _stopSteppingPoll()
-    const poll = async () => {
-      // 风险3修复：停止条件检查（含 idle/error/done/beat_stepping + session 变更）
-      // beat_branch_choosing 也必须停：岔路门挂起期间 run 在等作者选走向，
-      // current_segment_ready 恒为 False，继续轮询只会走到上限误报超时
-      if (stage.value === 'beat_stepping' || stage.value === 'done' || stage.value === 'idle' || stage.value === 'error' || stage.value === 'beat_branch_choosing' || stage.value === 'beat_authoring') return
-      if (steppingRunId.value !== runId) return
-      // 风险7修复：轮询次数上限 + 退避
-      _steppingPollCount++
-      if (_steppingPollCount > _STEPPING_POLL_MAX) {
-        error.value = '步进轮询超时（3 分钟无响应）'
-        stage.value = 'error'
-        generating.value = false
-        return
-      }
-      try {
-        const resp = await fetch(`/api/chapters/stepping-run/${runId}/state`)
-        // run 已不存在（后端重启/会话过期，内存态即丢）：立即失败并明说原因，
-        // 不再每 2s 空轮 3 分钟（既刷屏后端 404 日志，又让作者干等）
-        if (resp.status === 404) {
-          error.value = '步进会话已失效（后端重启或会话过期），请重新生成'
-          stage.value = 'error'
-          generating.value = false
-          return
-        }
-        if (!resp.ok) { _steppingPollTimer = setTimeout(poll, 2000); return }
-        const st = await resp.json()
-        if (st.status === 'error') {
-          // 后端步进循环异常兜底（stepping_loop 包装器置 error 态；SSE 断流时
-          // 事件丢失，轮询是唯一通道——此前静默 return，界面永久卡在渲染中）
-          error.value = '生成失败：后端步进循环异常'
-          stage.value = 'error'
-          generating.value = false
-          return
-        }
-        // 后处理阶段（PRUNE/审计/守卫/残句，N 次 LLM 串行可达数分钟）：
-        // 不算超时次数——此前 90 次上限（约 3 分钟）必然误报"步进轮询超时"
-        // 把正常运行砸成 error（真实事故隐患：慢模型后处理常态超 3 分钟）
-        if (st.status === 'post_processing') {
-          _steppingPollCount = 0
-          _steppingPollTimer = setTimeout(poll, 2000)
-          return
-        }
-        if (st.status === 'done') {
-          // COMPLETE 帧丢失兜底：SSE 断流（sse.ts 容忍结束不报错）时轮询发现
-          // 后端已终态 → 用 final_result 补齐 done 落地（同 advanceBeat onDone
-          // 逻辑），否则界面永久卡在后处理态、正文永不落库
-          if (st.final_result) {
-            _finalizeDoneFromPoll(st.final_result)
-          } else {
-            // status 先于 final_result 置位的瞬时窗口（stepping_runtime 先改
-            // status 再赋 result），下一轮再取
-            _steppingPollTimer = setTimeout(poll, 500)
-          }
-          return
-        }
-        // 岔路门自愈：BEAT_BRANCH_CHOICE 事件丢失（IAB 短 SSE 断流）时，
-        // 轮询发现 run 挂在岔路门 → 本地重建待选状态切 beat_branch_choosing，
-        // 否则前端停在 beat_rendering 空等，90 次后误报"轮询超时"
-        if (st.awaiting_branch_choice && st.pending_branch?.node) {
-          branchChoicePending.value = {
-            beat_id: st.pending_branch.beat_id,
-            segment_index: st.pending_branch.segment_index,
-            node: st.pending_branch.node,
-            card: st.pending_branch.card_snapshot || null,
-          }
-          readyBeatId.value = null
-          readyBeatDegraded.value = null
-          renderingBeatId.value = null
-          stage.value = 'beat_branch_choosing'
-          generating.value = false
-          return
-        }
-        // 作者模式自愈：BEAT_AUTHORING_OPEN 事件丢失（IAB 短 SSE 断流）时，
-        // 轮询发现 run 挂在作者模式门 → 本地重建创作态（画布基线随之记录），
-        // 否则前端停在 beat_rendering 空等，90 次后误报"轮询超时"
-        if (st.awaiting_authoring && st.pending_authoring) {
-          _onBeatAuthoringOpen({
-            beat_id: st.pending_authoring.beat_id,
-            segment_index: st.pending_authoring.segment_index,
-            target_word_count: st.pending_authoring.target_word_count,
-            card_snapshot: st.pending_authoring.card_snapshot,
-          })
-          return
-        }
-        if (st.current_segment_ready && st.current_beat_id) {
-          if (st.current_segment_text) {
-            segmentTexts.value = {
-              ...segmentTexts.value,
-              [st.current_beat_id]: st.current_segment_text,
-            }
-            streamText.value = Object.values(segmentTexts.value).join('\n\n')
-          }
-          readyBeatId.value = st.current_beat_id
-          // state 端点从卡快照重建降级提示（SSE 断流后 READY.degraded 已丢）
-          readyBeatDegraded.value = st.current_segment_degraded || null
-          const cardIdx = beatSlots.value.findIndex(s => s.beat_id === st.current_beat_id)
-          readyBeatCard.value = cardIdx >= 0 ? beatSlots.value[cardIdx] : null
-          renderingBeatId.value = null
-          stage.value = 'beat_stepping'
-          generating.value = false
-          upsertRenderProgress(st.current_beat_id, 'ready', {
-            wordCount: (st.current_segment_text || '').length,
-          })
-          return
-        }
-      } catch (e) {
-        // 网络错误，继续轮询（有次数上限兜底）
-      }
-      _steppingPollTimer = setTimeout(poll, 2000)
-    }
-    _steppingPollTimer = setTimeout(poll, 3000)
-  }
-
-  /** 轮询兜底完成：SSE 断流丢失 COMPLETE 帧时，用 state 端点返回的
-   *  final_result 补齐 done 落地（与 advanceBeat onDone 同逻辑；兼容无
-   *  final_result 的旧后端版本，退化为本地拼接文本）。 */
-  function _finalizeDoneFromPoll(result: any) {
-    _stopSteppingPoll()
-    stage.value = 'done'
-    lastDoneMode.value = 'bsadf'
-    streamText.value = result?.text || Object.values(segmentTexts.value).join('\n\n')
-    finalStats.value = result?.stats || null
-    generating.value = false
-    // 终态统一复位瞬时段态（与 advanceBeat onDone 一致；renderingBeatId 残留
-    // 会让分镜卡「重写本段」被 steppingActive 恒 true 锁死）
-    renderingBeatId.value = null
-    readyBeatId.value = null
-    readyBeatCard.value = null
-    readyBeatDegraded.value = null
-    branchChoicePending.value = null
-    abortController = null
-    steppingRunId.value = null
-    beatRunId.value = null
-    if (result?.beat_slots?.length) beatSlots.value = result.beat_slots
-    if (result?.rescue_needed?.length) rescueNeeded.value = result.rescue_needed
-    // 降级清单（步进不发 BEAT_DOWNGRADED，done 态降级段复查入口的唯一来源）
-    if (result?.degraded_beats?.length) {
-      degradedBeats.value = result.degraded_beats.map((d: any) => ({
-        beat_id: d.beat_id,
-        segment_index: d.segment_index,
-        reason: d.reason,
-        attempts: d.attempts ?? 2,
-      }))
-    }
-    // 审校结论兜底（ADF_AUDIT 事件丢帧时仍可落地）
-    if (result?.audit?.verdict && !adfAudit.value) {
-      applyAdfAudit({
-        verdict: result.audit.verdict,
-        missing_setup_points: result.audit.missing_setup_points || [],
-        emotion_mismatches: [],
-        structure_issues: [],
-        climax_score: result.audit.climax_score ?? result.climax_score,
-        fix_targets: [],
-      })
-    }
-    if (result?.generation_run_id) rerenderRunId.value = result.generation_run_id
-    _resetAuthoringTransient()
-    persist()
-  }
-
-  /** NLE-ADF 失步自愈：advanceBeat 收到 409/404 时，用 state 端点把本地
-   *  步进态重新对齐到后端真实进度（本地 readyBeatId 陈旧/后端已前进的场景）。
-   *  对齐成功回 beat_stepping 继续裁决；run 已终态/丢失才落到 error。 */
-  async function _resyncStepping(runId: string, origMsg: string) {
-    try {
-      const resp = await fetch(`/api/chapters/stepping-run/${runId}/state`)
-      if (!resp.ok) throw new Error(`state ${resp.status}`)
-      const st = await resp.json()
-      // 作者模式挂起（409 的另一种典型场景：作者动作与后端开门时序交错）：
-      // 对齐回创作态继续写，不落「失步无法恢复」误报
-      if (st.status === 'stepping' && st.awaiting_authoring && st.pending_authoring) {
-        error.value = null
-        _onBeatAuthoringOpen({
-          beat_id: st.pending_authoring.beat_id,
-          segment_index: st.pending_authoring.segment_index,
-          target_word_count: st.pending_authoring.target_word_count,
-          card_snapshot: st.pending_authoring.card_snapshot,
-        })
-        return
-      }
-      // 渲染中/后处理中（409 SEGMENT_NOT_READY 的典型场景：段还在渲染，
-      // 本地重复提交或旧流超时触发 resync）：后端健康，对齐到渲染态继续等，
-      // 不能落「失步无法恢复」误报（真实误报事故）
-      if (st.status === 'stepping' && !st.current_segment_ready) {
-        renderingBeatId.value = st.current_beat_id || null
-        readyBeatId.value = null
-        stage.value = 'beat_rendering'
-        generating.value = true
-        error.value = null
-        _pollSteppingReady(runId, currentChapterId || '')
-        return
-      }
-      if (st.status === 'post_processing') {
-        renderingBeatId.value = null
-        stage.value = 'assembling'
-        generating.value = true
-        error.value = null
-        _pollSteppingReady(runId, currentChapterId || '')
-        return
-      }
-      if (st.status === 'stepping' && st.current_segment_ready && st.current_beat_id) {
-        const idx = typeof st.current_beat_index === 'number' ? st.current_beat_index : 0
-        const ids: string[] = Array.isArray(st.cards) ? st.cards : []
-        lockedBeatIds.value = new Set(ids.slice(0, Math.max(idx, 0)))
-        if (st.current_segment_text) {
-          segmentTexts.value = {
-            ...segmentTexts.value,
-            [st.current_beat_id]: st.current_segment_text,
-          }
-          streamText.value = Object.values(segmentTexts.value).join('\n\n')
-        }
-        readyBeatId.value = st.current_beat_id
-        readyBeatDegraded.value = st.current_segment_degraded || null  // 恢复降级态
-        const cardIdx = beatSlots.value.findIndex(s => s.beat_id === st.current_beat_id)
-        readyBeatCard.value = cardIdx >= 0 ? beatSlots.value[cardIdx] : null
-        renderingBeatId.value = null
-        stage.value = 'beat_stepping'
-        generating.value = false
-        error.value = null
-        upsertRenderProgress(st.current_beat_id, 'ready', {
-          wordCount: (st.current_segment_text || '').length,
-        })
-        persist()
-        return
-      }
-      if (st.status === 'done') {
-        if (st.final_result) {
-          // 优先用 final_result 补齐终稿/统计（resync 场景同样可能丢 COMPLETE 帧）
-          _finalizeDoneFromPoll(st.final_result)
-        } else {
-          stage.value = 'done'
-          generating.value = false
-          persist()
-        }
-        return
-      }
-    } catch {
-      // 对齐失败（run 丢失/网络错误），落到下面的 error 分支
-    }
-    // 404 = run 在后端内存中已不存在（uvicorn --reload 重启 / 超 TTL 被回收），
-    // 与网络抖动区分开，文案直接说清原因，避免作者以为是临时故障反复重试。
-    error.value = /404/.test(origMsg)
-      ? '步进会话已失效（后端已重启或等待超时），点「重试」从头重新生成本章'
-      : `步进会话失步且无法恢复（${origMsg}），请重新生成`
-    stage.value = 'error'
-    generating.value = false
-    persist()
-  }
-
-  /** BS-ADF 归档（roadmap P3.2）：步进运行取消出口移除——run 早已不存在，
-   *  保留空壳防调用点（enterAdaptive/切章清理）连锁改动。 */
-  function _cancelSteppingRun() {
-    // no-op（stepping run 已随引擎归档）
-  }
 
   // ===== NLE-ADF：Space 键步进锁死推进 =====
   function _spaceKeyHandler(e: KeyboardEvent) {
@@ -2070,21 +749,6 @@ export function useGenerationSession(): GenerationSession {
     // 旧路径（stage 机器态）保留原守卫——contenteditable 内 Space 一律放行不拦截。
     const _adaptiveComposing = adaptiveMode.value && authorLane.value === 'composing'
     if (target?.isContentEditable && !_adaptiveComposing) return
-    if (stage.value === 'beat_stepping' && readyBeatId.value && currentChapterId) {
-      // 降级段禁用 Space 推进：降级段正文为空、终稿会消失，按 Space(=pass)
-      // 会默默丢段且无强警告（降级引导事故）。降级态焦点条已隐藏 Space 提示，
-      // 这里同步禁用快捷键，引导作者走「重写本段/直接在正文写」。
-      if (readyBeatDegraded.value) return
-      e.preventDefault()
-      if (authoringEnabled.value) {
-        // 作者模式代笔裁决：画布幽灵即事实源，统一走锁拍路由
-        // （作者可能已改幽灵文本；segmentTexts 路由感知不到画布编辑）
-        lockAuthoringBeat()
-        return
-      }
-      // 作者在主编辑器改过正文时自动改走 lock_with_text（改动随本段定稿）
-      acceptReadySegment(currentChapterId)
-    }
   }
   // ===== NLE-ADF 2.0 作者模式键位（捕获阶段） =====
   // 深度清脂防重入标记（LLM 洗涤期间重复按 Alt+Shift+↓ 不叠加调用）
@@ -2283,7 +947,6 @@ export function useGenerationSession(): GenerationSession {
       }
       e.preventDefault()
       e.stopPropagation()
-      lockAuthoringBeat()
       return
     }
     // Ctrl+Space：走向卡舱（adaptive composing 态的段落级连写入口）。
@@ -2318,10 +981,14 @@ export function useGenerationSession(): GenerationSession {
           e.preventDefault()
           e.stopPropagation()
           _adaptiveContinueFn?.('stitch', attachedParts.value.map((p) => ({ text: p.text, direction: p.direction })))
-          // 缝合触发：清吸附意图 + 隐藏卡片舱（让位给脉冲点/幽灵草稿，避免视觉混乱）
-          // 下次停顿心跳会重新弹出卡片舱（如果段落变了）
+          // 缝合触发：清吸附意图 + 藏舱让位幽灵（2026-08-28 修复：此前 hideSparkDock
+          // 直接退出舱、且 setSparkSticky 全工程零调用——「连续吸附多件缝合」从未生效，
+          // 打一个字舱就永久消失，每件都要重新停顿 4s/Tab 唤醒。现改为 sticky+stash：
+          // 视觉上藏（避免与幽灵草稿重叠），幽灵落定（Enter/Esc）后自动弹回，
+          // 打字不再收舱——Esc 关舱仍是唯一退出 sticky 的手动出口）
           clearAttachedParts()
-          hideSparkDock()
+          setSparkSticky()
+          stashSparkDock()
           return
         }
         const $fromAd = editor.state.selection.$from
@@ -2340,8 +1007,6 @@ export function useGenerationSession(): GenerationSession {
   onMounted(() => window.addEventListener('keydown', _spaceKeyHandler))
   onMounted(() => window.addEventListener('keydown', _authoringKeyHandler, true))
   onUnmounted(() => {
-    _cancelSteppingRun()
-    _stopSteppingPoll()
     // 卸载即中止在途 SSE：否则流继续跑到终态事件，期间 mutate 已卸载 session
     // 的 ref（有界泄漏）；主动 abort 在 sse.ts 按非错误静默结束
     if (abortController) {
@@ -2358,20 +1023,10 @@ export function useGenerationSession(): GenerationSession {
     error,
     stepProgress,
     engine,
-    tierDecision,
     streamText,
-    climaxScore,
-    inflightEvents,
-    auditFindings,
-    auditVerdict,
-    degraded,
     finalStats,
     lastDoneMode,
     // V3.2 ADF
-    adfAnchor,
-    adfPreconditions,
-    adfEmotionCurve,
-    adfAudit,
     // V4.1 Refinery
     refineryIssues,
     refineryRunId,
@@ -2379,33 +1034,10 @@ export function useGenerationSession(): GenerationSession {
     refineryHolisticVerdict,
     refineryStats,
     // BS-ADF
-    beatSlots,
-    beatRunId,
-    renderProgress,
-    degradedBeats,
-    bsadfTrack,
-    steppingEnabled,
-    rerenderingBeatId,
-    decisionSet,
-    rescueNeeded,
     // NLE-ADF 步进
-    segmentTexts, readyBeatId, readyBeatCard, lockedBeatIds,
-    renderingBeatId, loop1Result, steppingRunId, emergentFacts,
-    branchChoicePending, readyBeatDegraded,
     // rerender-beat 成功后的待落库正文信号（WorkspaceView watch → 落库）
-    pendingSaveText,
     // NLE-ADF 2.0 作者模式
-    authoringEnabled, authoringBeatId, authoringBeatCard, stitching, fragmentCounts,
-    lockAuthoringBeat, commitGhostFragment,
-    scrubToFragment,
-    autoCutNotice, mergeAutoCut,
-    // 主编辑器直改（裁决期）：dirty 标记 + 回写/还原/接受路由
-    readySegmentDirty,
-    setReadySegmentText,
-    revertReadySegment,
-    acceptReadySegment,
     isTerminal,
-    currentTask,
     cancel,
     reset,
     retry,
@@ -2435,17 +1067,3 @@ export function useGenerationSession(): GenerationSession {
   }
 }
 
-function tierLabel(tier: string): string {
-  switch (tier) {
-    case 'climax':
-      return '高潮章'
-    case 'turn':
-      return '转折章'
-    case 'progress':
-      return '推进章'
-    case 'transition':
-      return '过渡章'
-    default:
-      return tier
-  }
-}

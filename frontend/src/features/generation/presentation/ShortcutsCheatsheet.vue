@@ -2,7 +2,7 @@
 /**
  * 快捷键速查弹层（UX 修复：键位可发现性）。
  *
- * 此前 Alt+↓ 清脂、Ctrl+Backspace 回退等键位在全工程任何 UI 文本中都不出现，
+ * 此前 Alt+↓ 清脂等键位在全工程任何 UI 文本中都不出现，
  * 用户无从知晓。顶栏「?」按钮触发本弹层。
  */
 import { onMounted, onBeforeUnmount } from 'vue'
@@ -30,7 +30,6 @@ const groups = [
       ['Ctrl + Shift + Z', '重做'],
       ['Alt + ↓', '清脂：刮掉当前段 AI 味用词'],
       ['Alt + Shift + ↓', '深度清脂（AI 重写当前段，去 AI 味更狠）'],
-      ['Ctrl + Backspace', '回退上一步'],
     ],
   },
   {

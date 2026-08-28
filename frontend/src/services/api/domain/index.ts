@@ -196,6 +196,20 @@ export interface ModelConfigUpdatePayload {
   proxy?: { enabled: boolean; url: string }
 }
 
+/** 厂商能力目录条目（GET /system/model-catalog；2026-08-28 五厂商调研） */
+export interface VendorCatalogEntry {
+  id: string
+  label: string
+  base_url: string
+  docs_url: string
+  notes: string[]
+  models: { id: string; label: string; note: string }[]
+}
+
+export interface ModelCatalog {
+  vendors: VendorCatalogEntry[]
+}
+
 export const systemApi = {
   /**
    * 获取模型配置（LLM / Embedding / 代理）
@@ -203,6 +217,14 @@ export const systemApi = {
    */
   getModelConfig: async (): Promise<ModelConfig> => {
     return requestJson('/system/model-config')
+  },
+
+  /**
+   * 厂商能力目录：选厂商自动填 base_url + 模型候选 + 能力提示。
+   * 静态档案（vendor_profiles.py），失败不阻塞设置面板（回退自由输入）。
+   */
+  getModelCatalog: async (): Promise<ModelCatalog> => {
+    return requestJson('/system/model-catalog')
   },
 
   /**
@@ -344,6 +366,21 @@ export const styleApi = {
   /** 黄金片段（旧表）一键导入文风样本库（按内容去重）。 */
   createSamplesFromGolden: async (bookId: string): Promise<AuthorSample[]> => {
     return requestJson(`/books/${bookId}/samples/from-golden`, { method: 'POST' })
+  },
+
+  /** 可逆学习（呈现平面 P1）：作者明示保留被洗词——该禁忌降为提醒档。 */
+  washPreferOriginal: async (bookId: string, pattern: string): Promise<void> => {
+    await requestRaw(`/books/${bookId}/style/wash-prefer-original`, {
+      method: 'POST',
+      body: JSON.stringify({ pattern }),
+    })
+  },
+
+  /** P5 采纳幽灵收编池：作者采纳过的幽灵草稿（文风页「收为样本」用）。 */
+  listAdoptedGhosts: async (
+    bookId: string,
+  ): Promise<Array<{ ts: string; source: string; wash_hits: number; text: string }>> => {
+    return requestJson(`/books/${bookId}/style/adopted-ghosts`)
   },
 
   /** 系统陈词库列表（全局层，负面清单区折叠展示用）。 */
@@ -669,13 +706,7 @@ export interface IssueDecision {
   edited_suggestion?: string
 }
 
-// ============================================================
-// BS-ADF 引擎（Beat-Slot Anchor-Driven Flow）
-// ============================================================
-// 端点（前缀 /api/chapters/{chapter_id}）：
-// - POST /generate-bsadf  Track A 全自动 / Track B 跑到槽位卡暂停
-// - POST /confirm-beats   Track B 作者编辑后恢复渲染
-// - POST /rerender-beat   降级单卡恢复（同步 JSON，非 SSE）
+// BS-ADF 引擎 API 已随引擎归档整体移除（2026-08-29，backend/_deprecated）
 //
 // SSE 事件序列（设计文档）：
 // - BSADF_STAGE / ADF_STAGE / BEAT_SLOTS_BUILT（Track B 暂停点）/
@@ -955,174 +986,6 @@ export const refineryApi = {
       }
     })
   },
-}
-
-// ============================================================
-// BS-ADF 引擎 API（Beat-Slot Anchor-Driven Flow）
-// ============================================================
-// 端点（前缀 /api/chapters/{chapter_id}）：
-// - POST /generate-bsadf  Track A 全自动 / Track B 跑到槽位卡暂停（SSE）
-// - POST /confirm-beats   Track B 作者编辑后恢复渲染（SSE）
-// - POST /rerender-beat   降级单卡恢复（同步 JSON，非 SSE）
-
-/** BS-ADF 流式回调集（start / confirm 共用，由 _dispatchEvent 统一分发） */
-export interface BsadfStreamCallbacks {
-  onStage?: (stage: string, data: any) => void
-  /** Track B 暂停：槽位卡就绪（载荷内嵌 decision_set 分支信息） */
-  onSlots?: (payload: { run_id: string; slots: BeatSlot[]; decision_set?: ChapterDecisionSet }) => void
-  /** Track A 静默 DDE 结果：有分支=已按默认走向突变；无分支=has_story_branch=false */
-  onDdeAutoApplied?: (payload: { decision_set: ChapterDecisionSet; applied: Record<string, string> }) => void
-  onSlotEnrichProgress?: (current: number, total: number, beatId: string) => void
-  onRenderProgress?: (data: RenderProgress) => void
-  onDowngraded?: (data: DegradedBeat) => void
-  /** 救援标记：审计判核心转折未落地且补写未救回的节拍 */
-  onRescueNeeded?: (items: RescueNeededItem[]) => void
-  /** 定档通知（复用 ADF 的 TIER_DECIDED 事件，仅 start 流 Phase 3 后发） */
-  onTierDecided?: (decision: { tier: string; reason: string; climax_score?: number; target_word_count?: number; max_segments?: number }) => void
-  // ===== NLE-ADF 步进事件回调 =====
-  onBeatRenderStart?: (data: { beat_id: string; segment_index: number; target_word_count: number; card_snapshot: BeatSlot }) => void
-  /** NLE-ADF 2.0 作者模式：拍已打开，等作者创作（写碎片微缝合 / render 召唤代笔 /
-   *  lock_with_text 整拍定稿）。渲染不会自动开始。 */
-  onBeatAuthoringOpen?: (data: { beat_id: string; segment_index: number; target_word_count: number; card_snapshot: BeatSlot }) => void
-  /** NLE-ADF 步进岔路门：渲染某段前发现 DDE 岔路，暂停等作者选走向 */
-  onBeatBranchChoice?: (data: { beat_id: string; segment_index: number; node: { beat_id: string; node_title: string; options: { option_id: string; label: string; plot_impact: string }[]; default_option: string }; card_snapshot: BeatSlot }) => void
-  onBeatChunk?: (data: { beat_id: string; segment_index: number; delta: string }) => void
-  onBeatReady?: (data: { beat_id: string; segment_index: number; word_count: number; degraded?: any; card_snapshot: BeatSlot }) => void
-  onBeatLocked?: (data: { beat_id: string; segment_index: number; extracted_facts?: any }) => void
-  /** NLE-ADF 步进回退：作者选择回退上一段，后端已弹栈并准备重渲 */
-  onBeatBacked?: (data: { beat_id: string; segment_index: number; rejected?: boolean }) => void
-  onBeatSkipped?: (data: { beat_id: string; segment_index: number }) => void
-  onAllBeatsLocked?: (data: { segment_count: number; total_word_count: number }) => void
-  onLoop1Checked?: (data: { hard_facts: any[]; gaps: any[]; critique_pass: boolean; violations: any[] }) => void
-  /** 兜底事件通道：ADF_AUDIT / DEGRADED / BSADF_METADATA / UNIFIED_METRIC /
-   *  FINAL_TEXT_STREAM / GENERATION_RUN（原被安全忽略，现交会话层填充产物） */
-  onEvent?: (event: string, data: any) => void
-  onChunk?: (chunk: string) => void
-  onDone?: (result: BSAdfCompleteResult) => void
-  onError?: (error: string) => void
-}
-
-/** 把 SSE 事件 payload 分流到对应回调（start / confirm 两条流共用） */
-/**
- * BS-ADF 流的终态事件集：收到任一即视为正常收流（后端在这些事件后主动关流）。
- * BEAT_BACKED/BEAT_SKIPPED 列入是保守选择：它们之后本应跟重渲事件，但即便流
- * 恰在其后断开，步进轮询看门狗也能自愈——宁可漏报一次「中断」，不可误报刷屏。
- */
-const BSADF_TERMINAL_EVENTS = new Set([
-  'COMPLETE', 'ERROR',
-  'BEAT_RENDER_READY', 'BEAT_BRANCH_CHOICE', 'BEAT_AUTHORING_OPEN',
-  'STEPPING_INITIALIZED', 'BEAT_SLOTS_BUILT',
-  'BEAT_BACKED', 'BEAT_SKIPPED',
-])
-
-function _dispatchEvent(
-  payload: any,
-  callbacks: BsadfStreamCallbacks,
-) {
-  if (!payload || !payload.event) return
-
-  const ev = payload.event
-  if (ev === 'BSADF_STAGE' || ev === 'ADF_STAGE') {
-    callbacks.onStage?.(payload.stage, payload)
-  } else if (ev === 'SLOT_ENRICH_PROGRESS') {
-    callbacks.onSlotEnrichProgress?.(payload.current || 0, payload.total || 0, payload.beat_id || '')
-  } else if (ev === 'DDE_AUTO_APPLIED') {
-    callbacks.onDdeAutoApplied?.({
-      decision_set: payload.decision_set || { has_story_branch: false, decision_nodes: [] },
-      applied: payload.applied || {},
-    })
-  } else if (ev === 'BEAT_SLOTS_BUILT') {
-    callbacks.onSlots?.({
-      run_id: payload.run_id,
-      slots: payload.beat_slots || [],
-      decision_set: payload.decision_set,
-    })
-  } else if (ev === 'STEPPING_INITIALIZED') {
-    // NLE-ADF 步进就绪：route 层补发，携带 run_id（workflow 内部的 BEAT_SLOTS_BUILT 不带 run_id）
-    callbacks.onSlots?.({
-      run_id: payload.run_id,
-      slots: payload.beat_slots || [],
-      decision_set: payload.decision_set,
-    })
-  } else if (ev === 'BEAT_RENDER_PROGRESS') {
-    callbacks.onRenderProgress?.({
-      beat_id: payload.beat_id,
-      segment_index: payload.segment_index,
-      status: payload.status,
-      word_count: payload.word_count || 0,
-      reason: payload.reason,
-      coverage_missing: payload.coverage_missing,
-      word_overflow: payload.word_overflow,
-    })
-  } else if (ev === 'BEAT_DOWNGRADED') {
-    callbacks.onDowngraded?.({
-      beat_id: payload.beat_id,
-      segment_index: payload.segment_index,
-      reason: payload.reason,
-      attempts: payload.attempts || 0,
-    })
-  } else if (ev === 'RESCUE_NEEDED') {
-    callbacks.onRescueNeeded?.(payload.items || [])
-  } else if (ev === 'TIER_DECIDED') {
-    // 复用 ADF 同名事件的载荷结构（tier/reason/climax_score/target_word_count/max_segments）
-    callbacks.onTierDecided?.({
-      tier: payload.tier,
-      reason: payload.reason,
-      climax_score: payload.climax_score,
-      target_word_count: payload.target_word_count,
-      max_segments: payload.max_segments,
-    })
-  } else if (ev === 'BEAT_RENDER_START') {
-    callbacks.onBeatRenderStart?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, target_word_count: payload.target_word_count, card_snapshot: payload.card_snapshot })
-  } else if (ev === 'BEAT_AUTHORING_OPEN') {
-    callbacks.onBeatAuthoringOpen?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, target_word_count: payload.target_word_count, card_snapshot: payload.card_snapshot })
-  } else if (ev === 'BEAT_BRANCH_CHOICE') {
-    callbacks.onBeatBranchChoice?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, node: payload.node, card_snapshot: payload.card_snapshot })
-  } else if (ev === 'BEAT_TEXT_CHUNK') {
-    callbacks.onBeatChunk?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, delta: payload.delta || '' })
-  } else if (ev === 'BEAT_RENDER_READY') {
-    callbacks.onBeatReady?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, word_count: payload.word_count, degraded: payload.degraded, card_snapshot: payload.card_snapshot })
-  } else if (ev === 'BEAT_LOCKED') {
-    callbacks.onBeatLocked?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, extracted_facts: payload.extracted_facts })
-  } else if (ev === 'BEAT_BACKED') {
-    callbacks.onBeatBacked?.({ beat_id: payload.beat_id, segment_index: payload.segment_index, rejected: payload.rejected })
-  } else if (ev === 'BEAT_SKIPPED') {
-    callbacks.onBeatSkipped?.({ beat_id: payload.beat_id, segment_index: payload.segment_index })
-  } else if (ev === 'ALL_BEATS_LOCKED') {
-    callbacks.onAllBeatsLocked?.({ segment_count: payload.segment_count, total_word_count: payload.total_word_count })
-  } else if (ev === 'LOOP1_OUTLINE_CHECKED') {
-    callbacks.onLoop1Checked?.({ hard_facts: payload.hard_facts || [], gaps: payload.gaps || [], critique_pass: payload.critique_pass, violations: payload.violations || [] })
-  } else if (ev === 'TEXT_CHUNK' && payload.content) {
-    callbacks.onChunk?.(payload.content)
-  } else if (ev === 'COMPLETE') {
-    callbacks.onDone?.({
-      text: payload.text || '',
-      engine: 'bsadf',
-      tier: payload.tier || 'auto',
-      reason: payload.tier_reason,
-      target_word_count: payload.target_word_count,
-      segment_count: payload.segment_count || 0,
-      climax_score: payload.climax_score ?? null,
-      audit_verdict: payload.audit_verdict ?? null,
-      generation_run_id: payload.generation_run_id || '',
-      stats: payload.stats || {},
-      degraded_count: payload.degraded_count || 0,
-      beat_slots: payload.beat_slots,
-      rescue_needed: payload.rescue_needed,
-      degraded_beats: payload.degraded_beats,
-      audit: payload.audit,
-    })
-  } else if (ev === 'ERROR') {
-    callbacks.onError?.(payload.error || '生成失败')
-  } else if (
-    ev === 'ADF_AUDIT' || ev === 'DEGRADED' || ev === 'BSADF_METADATA'
-    || ev === 'UNIFIED_METRIC' || ev === 'FINAL_TEXT_STREAM' || ev === 'GENERATION_RUN'
-    || ev === 'SENTENCE_DEFECTS_UNFIXED' || ev === 'BEAT_CARDS_ENRICHED'
-  ) {
-    // 此前安全忽略的事件统一走 onEvent 兜底通道，由会话层按需填充产物
-    // （降级详情 / 定档卡 / 审计结论 / 铺垫要点）
-    callbacks.onEvent?.(ev, payload)
-  }
 }
 
 // ============================================================

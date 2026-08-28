@@ -59,12 +59,6 @@ const props = withDefaults(defineProps<{
 })
 const session = props.externalSession || useGenerationSession()
 
-const chapterCharacters = computed(() => {
-  if (!selectedChapter.value) return []
-  const ids = (selectedChapter.value as any).character_ids || []
-  return characters.value.filter((c) => ids.includes(c.id))
-})
-
 // 字数口径：剥 HTML 标签后计字符（此前 .length 把 <p>/mark 标签计入，虚高）
 const wordCount = computed(() => countChapterWords(selectedChapter.value?.content_text || ''))
 
@@ -514,29 +508,12 @@ async function handleResetChapterStyle() {
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- 统计 -->
+          <!-- 统计（出场角色卡已退役 2026-08-29：旧 chapter_entities 表口径，
+               世界页「此刻·在场」推演取代——统计恒 0 还会误导） -->
           <section class="stats-section">
             <div class="stat">
               <span class="stat-num">{{ wordCount }}</span>
               <span class="stat-label">字</span>
-            </div>
-            <div class="stat">
-              <span class="stat-num">{{ chapterCharacters.length }}</span>
-              <span class="stat-label">出场角色</span>
-            </div>
-          </section>
-
-          <!-- 出场角色速查（与「此刻·在场」分工：在场=世界推算此刻谁在哪，这里=本章正文 @ 关联的角色） -->
-          <section>
-            <div class="section-label">出场角色（{{ chapterCharacters.length }}）<span class="label-note">在正文用 @ 提及关联的角色</span></div>
-            <div v-if="chapterCharacters.length === 0" class="empty-inline">
-              本章暂未关联角色——在正文用 @ 提及即可关联。
-            </div>
-            <div v-else class="char-list">
-              <div v-for="c in chapterCharacters" :key="c.id" class="char-item">
-                <span class="char-name">{{ c.name }}</span>
-                <span v-if="c.dynamic_state" class="char-state">{{ c.dynamic_state.slice(0, 60) }}</span>
-              </div>
             </div>
           </section>
 
@@ -794,7 +771,7 @@ async function handleResetChapterStyle() {
           </section>
 
           <!-- 组三：反馈（读者反馈 + 审校结论；本章无正文且无论断时整组缺席） -->
-          <div v-if="chapterHasContent || session.adfAudit.value || session.refineryHolisticVerdict.value" class="group-title">反馈</div>
+          <div v-if="chapterHasContent || session.refineryHolisticVerdict.value" class="group-title">反馈</div>
           <!-- 读者反馈 -->
           <section v-if="chapterHasContent" class="feedback-section">
             <div class="section-label">读者反馈</div>
@@ -816,26 +793,10 @@ async function handleResetChapterStyle() {
             </p>
           </section>
 
-          <!-- 检查结论（结构检查 / 润色回读；有数据才显示） -->
-          <section v-if="session.adfAudit.value || session.refineryHolisticVerdict.value" class="audit-section">
+          <!-- 检查结论（润色回读；有数据才显示。旧 ADF 结构检查块已随引擎归档移除） -->
+          <section v-if="session.refineryHolisticVerdict.value" class="audit-section">
             <div class="section-label">检查结论</div>
-            <!-- 结构审计 -->
-            <div v-if="session.adfAudit.value" class="audit-block">
-              <div class="audit-row">
-                <span class="audit-label">结构检查</span>
-                <span class="audit-value" :class="`verdict-${session.adfAudit.value.verdict}`">{{ verdictLabel(session.adfAudit.value.verdict) }}</span>
-              </div>
-              <div v-if="session.adfAudit.value.climax_score" class="audit-row">
-                <span class="audit-label">高潮评分</span>
-                <span class="audit-value">{{ session.adfAudit.value.climax_score }}/10</span>
-              </div>
-              <div v-if="session.adfAudit.value.missing_preconditions?.length" class="audit-row">
-                <span class="audit-label">未交代的要点</span>
-                <span class="audit-value warn">{{ session.adfAudit.value.missing_preconditions.join(', ') }}</span>
-              </div>
-            </div>
-            <!-- 润色整体回读 -->
-            <div v-if="session.refineryHolisticVerdict.value" class="audit-block">
+            <div class="audit-block">
               <div class="audit-row">
                 <span class="audit-label">通读检查</span>
                 <span class="audit-value" :class="`verdict-${session.refineryHolisticVerdict.value.verdict}`">

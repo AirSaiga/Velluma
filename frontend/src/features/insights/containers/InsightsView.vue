@@ -75,7 +75,7 @@ watch(
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-type PanelKey = 'cost' | 'quality' | 'degraded' | 'collab'
+type PanelKey = 'cost' | 'quality' | 'collab'
 const activePanel = ref<PanelKey>('cost')
 
 const costReports = ref<{ chapterId: string; chapterNumber: number; report: CostReport | null }[]>([])
@@ -160,23 +160,6 @@ const totalCost = computed(() =>
   costReports.value.reduce((sum, r) => sum + (r.report?.totals?.calls || 0), 0)
 )
 
-const degradedEvents = computed(() => {
-  const events: { chapter: number; stage: string; reason: string; action: string }[] = []
-  for (const cr of costReports.value) {
-    if (!cr.report) continue
-    for (const stage of cr.report.stages) {
-      if (stage.degraded_count > 0) {
-        events.push({
-          chapter: cr.chapterNumber,
-          stage: stage.stage,
-          reason: `${stage.degraded_count} 次降级`,
-          action: '',
-        })
-      }
-    }
-  }
-  return events
-})
 
 function backToLibrary() {
   router.push({ name: 'library' })
@@ -300,10 +283,6 @@ async function rerunQuality(chapterId: string) {
         <span class="summary-num">{{ totalCost }}</span>
         <span class="summary-label">累计调用</span>
       </div>
-      <div class="summary-card">
-        <span class="summary-num">{{ degradedEvents.length }}</span>
-        <span class="summary-label">兜底记录</span>
-      </div>
     </section>
 
     <!-- 面板切换 -->
@@ -312,7 +291,6 @@ async function rerunQuality(chapterId: string) {
         v-for="p in [
           { k: 'cost', l: '成本' },
           { k: 'quality', l: '质量' },
-          { k: 'degraded', l: '兜底记录' },
           { k: 'collab', l: '协作' },
         ]"
         :key="p.k"
@@ -391,20 +369,6 @@ async function rerunQuality(chapterId: string) {
             >＋ 收入负面清单（候选）</button>
           </template>
           <p v-else class="no-report">尚无质量报告。</p>
-        </article>
-      </div>
-    </section>
-
-    <!-- 降级事件面板 -->
-    <section v-else-if="activePanel === 'degraded'" class="data-panel">
-      <div v-if="degradedEvents.length === 0" class="empty">
-        <p>无兜底记录。所有生成阶段都正常执行。</p>
-      </div>
-      <div v-else class="degraded-list">
-        <article v-for="(ev, i) in degradedEvents" :key="i" class="degraded-item">
-          <span class="deg-chapter">第 {{ ev.chapter }} 章</span>
-          <span class="deg-stage">{{ ev.stage }}</span>
-          <span class="deg-reason">{{ ev.reason }}</span>
         </article>
       </div>
     </section>
