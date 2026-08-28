@@ -162,7 +162,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     return editor.state.selection.$from.parent.textContent.slice(0, 500)
   }
 
-  async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean }) {
+  async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean; _summonRetry?: boolean }) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
     if (opts.authorLaneRef.value !== 'composing') return
@@ -260,11 +260,20 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         }
       }
       // 挂起的 Tab 点名兑现（2026-08-28）：本轮生发响应的零件即点名所得，
-      // 弹舱条件同召唤语义（点名要的直接弹，不受段尾/动笔守卫）。放在
-      // parts 块外——空响应（半句静音等）也要清挂起，下一按 Tab 走正常召唤。
+      // 弹舱条件同召唤语义（点名要的直接弹，不受段尾/动笔守卫）。
+      // 空响应补发（2026-08-29 Tab 失效修复）：在飞心跳被限流/慢端点拖到
+      // 12s 超时空手而归时，兑现即死——此刻在飞计数即将归零（finally 在本
+      // 响应处理后执行），延迟一拍补发真 summoned 心跳，其响应走召唤语义
+      // 必弹；仅补一次（_summonRetry 防循环），再空则下一按 Tab 全新尝试。
       if (_summonPending) {
         _summonPending = false
-        if (parts.length) showSparkDock()
+        if (parts.length) {
+          showSparkDock()
+        } else if (!flags?._summonRetry) {
+          setTimeout(() => {
+            void _sendHeartbeat(PAUSE_HEARTBEAT_MS, { summoned: true, _summonRetry: true })
+          }, 0)
+        }
       }
 
       // 走向卡缓存（Ctrl+Space 走向卡舱的数据源；层 3 推测首 beat）
