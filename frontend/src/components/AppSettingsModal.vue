@@ -8,7 +8,7 @@
 import { reactive, ref, watch } from 'vue'
 import ModalShell from '../features/world/presentation/ModalShell.vue'
 import { systemApi } from '../services/api'
-import type { ModelConfig, ModelConfigUpdatePayload } from '../services/api'
+import type { ModelConfig, ModelConfigUpdatePayload, VendorCatalogEntry } from '../services/api'
 import { useAppSettings } from '../composables/useAppSettings'
 import { useToast } from '../composables/useToast'
 import { useNotifyPrefs } from '../composables/useNotifyPrefs'
@@ -57,8 +57,88 @@ const ROLE_HINTS: Record<ProfileRole, string> = {
 }
 
 const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
-  reasoning: '如 deepseek-reasoner',
-  creative: '如 deepseek-chat',
+  reasoning: '如 deepseek-v4-flash',
+  creative: '如 kimi-k2.6',
+}
+
+// ============================================================
+// 厂商能力目录（2026-08-28 五厂商调研）：选厂商自动填 base_url + 模型候选 + 提示
+// ============================================================
+
+const vendorCatalog = ref<VendorCatalogEntry[]>([])
+/** 每槽位的厂商选择（'custom' = 自定义/其他，自由输入 base_url） */
+const vendorSelection = reactive<Record<ProfileRole, string>>({
+  reasoning: 'custom',
+  creative: 'custom',
+})
+
+/** base_url 域名 → 厂商 id（与后端 vendor_profiles.detect_provider 同判据） */
+const DOMAIN_FRAGMENTS: [string, string][] = [
+  ['api.deepseek.com', 'deepseek'],
+  ['bigmodel.cn', 'glm'],
+  ['moonshot.cn', 'kimi'],
+  ['moonshot.ai', 'kimi'],
+  ['xiaomimimo.com', 'mimo'],
+  ['dashscope.aliyuncs.com', 'qwen'],
+  ['maas.aliyuncs.com', 'qwen'],
+  ['api.openai.com', 'openai'],
+  ['openrouter.ai', 'openrouter'],
+  ['localhost', 'local'],
+  ['127.0.0.1', 'local'],
+]
+
+function matchVendorByBaseUrl(url: string): string {
+  if (!url) return 'custom'
+  const lowered = url.toLowerCase()
+  for (const [fragment, id] of DOMAIN_FRAGMENTS) {
+    if (lowered.includes(fragment)) return id
+  }
+  return 'custom'
+}
+
+function currentVendor(role: ProfileRole): VendorCatalogEntry | null {
+  return vendorCatalog.value.find((v) => v.id === vendorSelection[role]) || null
+}
+
+function vendorModels(role: ProfileRole): { id: string; label: string; note: string }[] {
+  return currentVendor(role)?.models || []
+}
+
+/** 厂商能力提示 + 模型级动态警示（弃用/下线/强制思考） */
+function vendorNotes(role: ProfileRole): string[] {
+  return currentVendor(role)?.notes || []
+}
+
+function modelWarning(role: ProfileRole): string {
+  const m = profileForms[role].model.trim().toLowerCase()
+  const b = profileForms[role].base_url.toLowerCase()
+  if (!m) return ''
+  if (b.includes('deepseek') && (m === 'deepseek-chat' || m === 'deepseek-reasoner')) {
+    return '⚠ 该模型名已于 2026-07-24 弃用，请换 deepseek-v4-flash / deepseek-v4-pro'
+  }
+  if (b.includes('moonshot') && (m.startsWith('moonshot-v1') || m === 'kimi-k2.5')) {
+    return '⚠ 该模型 2026-08-31 全平台下线，请换 kimi-k2.6'
+  }
+  if (b.includes('bigmodel') && m.startsWith('glm-5.3') && !profileForms[role].enabled) {
+    return '⚠ glm-5.3 强制思考无法关闭；此槽若要关思考请换 glm-5.2 或免费的 glm-4.7-flash'
+  }
+  return ''
+}
+
+/** 手选厂商：自动填推荐 base_url（模型名保留，可从候选里选或继续手输） */
+function onVendorChange(role: ProfileRole) {
+  if (vendorSelection[role] === 'custom') return
+  const entry = currentVendor(role)
+  if (entry?.base_url) profileForms[role].base_url = entry.base_url
+}
+
+async function loadCatalog() {
+  if (vendorCatalog.value.length) return
+  try {
+    vendorCatalog.value = (await systemApi.getModelCatalog()).vendors
+  } catch {
+    /* 静默回退：目录拿不到时厂商下拉只剩「自定义」，行为同旧版 */
+  }
 }
 
 const embeddingForm = reactive({ model: '', api_key: '', base_url: '', dimensions: 1536, follow_llm: false })
@@ -89,6 +169,7 @@ function applyConfig(config: ModelConfig) {
     profileMeta[role].has_api_key = p.has_api_key
     profileMeta[role].api_key_masked = p.api_key_masked
     profileMeta[role].configured = p.configured
+    vendorSelection[role] = matchVendorByBaseUrl(p.base_url)
   }
   embeddingForm.model = config.embedding.model
   embeddingForm.dimensions = config.embedding.dimensions
@@ -200,6 +281,7 @@ async function runTest() {
 watch(visible, (v) => {
   if (v) {
     loadConfig()
+    loadCatalog()
     testResult.value = null
   }
 })
@@ -230,12 +312,28 @@ watch(visible, (v) => {
           </div>
 
           <label class="field">
+            <span class="field-label">厂商</span>
+            <select
+              v-model="vendorSelection[role]"
+              class="field-input"
+              @change="onVendorChange(role)"
+            >
+              <option value="custom">自定义 / 其他</option>
+              <option v-for="v in vendorCatalog" :key="v.id" :value="v.id">{{ v.label }}</option>
+            </select>
+          </label>
+
+          <label class="field">
             <span class="field-label">模型</span>
             <input
               v-model="profileForms[role].model"
               class="field-input"
+              :list="`model-options-${role}`"
               :placeholder="MODEL_PLACEHOLDERS[role]"
             />
+            <datalist :id="`model-options-${role}`">
+              <option v-for="m in vendorModels(role)" :key="m.id" :value="m.id">{{ m.label }}——{{ m.note }}</option>
+            </datalist>
           </label>
 
           <label class="field">
@@ -272,6 +370,10 @@ watch(visible, (v) => {
               <option value="max">max</option>
             </select>
           </div>
+
+          <!-- 厂商能力提示（目录静态）+ 模型级动态警示（弃用/下线/强制思考） -->
+          <div v-for="n in vendorNotes(role)" :key="n" class="field-sub-hint">{{ n }}</div>
+          <div v-if="modelWarning(role)" class="field-sub-hint profile-warn">{{ modelWarning(role) }}</div>
         </section>
       </div>
 
@@ -587,6 +689,11 @@ watch(visible, (v) => {
 
 .follow-missing {
   color: #f59e0b;
+}
+
+/* 模型级动态警示（弃用/下线/强制思考）——比普通提示醒目但不打断 */
+.profile-warn {
+  color: #d97706;
 }
 
 .field-warning {

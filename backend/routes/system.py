@@ -51,6 +51,7 @@ from backend.core.model_config import (
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.llm.embedding import probe_embedding
+from backend.services.llm.vendor_profiles import vendor_catalog
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate
 
@@ -203,6 +204,16 @@ def _serialize_model_config() -> dict:
 async def get_model_config_endpoint():
     """获取模型配置（LLM / Embedding / 代理），API Key 以掩码返回"""
     return _serialize_model_config()
+
+
+@router.get("/system/model-catalog")
+async def get_model_catalog_endpoint():
+    """厂商能力目录（2026-08-28 五厂商调研，docs/model-vendor-matrix.md）。
+
+    前端设置弹窗消费：选厂商 → 自动填 base_url + 模型候选 + 能力提示
+    （采样锁定/强制思考/定价速览）。模型名永远允许自由输入，目录只是候选。
+    """
+    return {"vendors": vendor_catalog()}
 
 
 @router.put("/system/model-config")

@@ -55,7 +55,7 @@ import time
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 from openai import AsyncOpenAI
 from tenacity import (
@@ -76,6 +76,7 @@ from backend.services.llm.proxy import (
 )
 from backend.services.llm.embedding import get_embedding
 from backend.services.llm.reasoning_adapter import adapt_reasoning_config
+from backend.services.llm.vendor_profiles import shape_sampling_params
 from backend.core.model_config import get_model_profile, resolve_model_name, get_default_reasoning_config, DEFAULT_BASE_URL
 
 
@@ -102,10 +103,47 @@ def _should_retry_exception(exception: Exception) -> bool:
     return False
 
 
+# 429 报错文案里的服务端提示："please try again after 1 seconds"（Moonshot 实测形态）
+_RETRY_AFTER_RE = re.compile(r"try again after ([\d.]+) second", re.IGNORECASE)
+
+
+def _parse_retry_after_hint(exception: Exception) -> Optional[float]:
+    """从异常提取服务端重试提示（秒）：Retry-After 响应头优先，其次报错文案。
+
+    背景（2026-08-28 Kimi Tier0 限流实测）：429 文案明说「1 秒后重试」，
+    指数退避却排到 16 秒——白等 15 秒还挤占停顿组件的 12s 超时预算。
+    """
+    response = getattr(exception, "response", None)
+    if response is not None:
+        try:
+            header = response.headers.get("retry-after")
+            if header:
+                return float(header)
+        except Exception:
+            pass
+    m = _RETRY_AFTER_RE.search(str(exception))
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _wait_with_retry_after(retry_state):
+    """429 优先按服务端提示等（+20% 余量，钳 1~30s）；其余错误走指数退避。"""
+    try:
+        exc = retry_state.outcome.exception()
+    except Exception:
+        exc = None
+    if exc is not None:
+        hint = _parse_retry_after_hint(exc)
+        if hint is not None:
+            return max(min(hint * 1.2 + 0.5, 30.0), 1.0)
+    return wait_exponential(multiplier=2, min=2, max=60)(retry_state)
+
+
 @retry(
     retry=retry_if_exception_type(Exception) & retry_if_exception(_should_retry_exception),
     stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=2, min=2, max=60),
+    wait=_wait_with_retry_after,
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True
 )
@@ -117,21 +155,37 @@ async def _create_chat_completion(client: AsyncOpenAI, **kwargs):
 _PARAM_LOCK_RE = re.compile(r"invalid (\w+): only ([\d.]+) is allowed", re.IGNORECASE)
 # 允许自适应改写的参数白名单（防错误消息注入任意参数）
 _ADAPTIVE_PARAMS = {"temperature", "top_p", "frequency_penalty", "presence_penalty"}
+# 已发现的参数锁（进程级缓存）：key = "base_url|model" → {param: 锁定值}。
+# 锁是「端点+模型」的属性不是单次调用的属性——不缓存的话每次调用都要先吃
+# N 发 400 往返再自适应（kimi-k2.6/k3 双锁 temperature+top_p，心跳/续写高频
+# 路径每次平白多数百毫秒延迟 + 日志刷屏）。首次发现后记住，后续预应用直发。
+_PARAM_LOCK_CACHE: Dict[str, Dict[str, float]] = {}
 
 
 async def _create_chat_completion_adaptive(client: AsyncOpenAI, **kwargs):
     """带参数锁自适应的补全调用。
 
-    业务场景：部分模型把采样参数锁死（kimi-k3 锁 temperature=1、top_p=0.95；
-    OpenAI o 系列 / GPT-5 锁 temperature=1），显式传其他值直接报 400。
+    业务场景：部分模型把采样参数锁死（kimi-k2.6/k3 锁 temperature=1、
+    top_p=0.95；OpenAI o 系列 / GPT-5 锁 temperature=1），显式传其他值直接报 400。
     此处解析 "invalid X: only Y is allowed" 错误，按锁定值改写参数重试，
-    最多自适应 2 个参数（如同时锁 temperature + top_p）。
-    无法解析的旧式锁温报错兜底为去掉 temperature 重试一次。
+    最多自适应 2 个参数（如同时锁 temperature + top_p）。发现即写入
+    _PARAM_LOCK_CACHE——同一端点+模型的后续调用预应用锁定值，零 400 往返。
+    无法解析的旧式锁温报错兜底为去掉 temperature 重试一次（该形态无锁定值，不缓存）。
     400 不会触发 tenacity 重试（_should_retry_exception 只放行 5xx/429/连接错误），
     所以自适应路径是即时的，不会拖慢正常失败。
     """
     adapted = 0
+    base_url = ""
+    try:
+        if getattr(client, "base_url", None):
+            base_url = str(client.base_url)
+    except Exception:
+        pass
+    lock_key = f"{base_url}|{kwargs.get('model') or ''}"
     while True:
+        locks = _PARAM_LOCK_CACHE.get(lock_key)
+        if locks:
+            kwargs.update(locks)
         try:
             return await _create_chat_completion(client=client, **kwargs)
         except Exception as e:
@@ -141,7 +195,8 @@ async def _create_chat_completion_adaptive(client: AsyncOpenAI, **kwargs):
                 param, value = m.group(1).lower(), float(m.group(2))
                 kwargs[param] = value
                 adapted += 1
-                logger.warning(f"[LLM] 模型锁定 {param}={value}，已按锁定值重试: {msg[:120]}")
+                _PARAM_LOCK_CACHE.setdefault(lock_key, {})[param] = value
+                logger.warning(f"[LLM] 模型锁定 {param}={value}（已缓存，后续调用直用锁定值）: {msg[:120]}")
                 continue
             lowered = msg.lower()
             if "temperature" in lowered and "invalid" in lowered and "temperature" in kwargs:
@@ -194,6 +249,17 @@ async def generate_stream_response(
             adapted = adapt_reasoning_config(reasoning_config, base_url, resolved_model)
             if adapted:
                 create_kwargs["extra_body"] = adapted
+
+        # 厂商能力档案前置整形（2026-08-28 五厂商调研，docs/model-vendor-matrix.md）：
+        # 发送前删掉/钳制会被拒或无效的采样参数（Kimi K 系采样锁、DeepSeek 废弃
+        # penalty、GLM 温度≤1.0、思考锁采样厂商），400 自适应降为最后防线。
+        _inner_rc = reasoning_config.get("reasoning") if isinstance(reasoning_config, dict) else None
+        create_kwargs, _dropped_sampling = shape_sampling_params(
+            base_url, resolved_model, create_kwargs,
+            thinking_enabled=bool(isinstance(_inner_rc, dict) and _inner_rc.get("enabled")),
+        )
+        if _dropped_sampling:
+            logger.debug("[LLM] 采样参数按厂商档案整形，删/钳 %s（%s）", _dropped_sampling, resolved_model)
 
         stream = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         async for chunk in stream:
@@ -406,6 +472,15 @@ async def call_llm_with_usage(
             adapted = adapt_reasoning_config(reasoning_config, base_url, resolved_model)
             if adapted:
                 create_kwargs["extra_body"] = adapted
+
+        # 厂商能力档案前置整形（同 generate_stream_response；只动采样四键，其余原样）
+        _inner_rc = reasoning_config.get("reasoning") if isinstance(reasoning_config, dict) else None
+        create_kwargs, _dropped_sampling = shape_sampling_params(
+            base_url, resolved_model, create_kwargs,
+            thinking_enabled=bool(isinstance(_inner_rc, dict) and _inner_rc.get("enabled")),
+        )
+        if _dropped_sampling:
+            logger.debug("[LLM] 采样参数按厂商档案整形，删/钳 %s（%s）", _dropped_sampling, resolved_model)
 
         response = await _create_chat_completion_adaptive(client=client, **create_kwargs)
         content = ""

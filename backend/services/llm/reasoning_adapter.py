@@ -5,11 +5,6 @@
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
 
 """
 LLM 推理参数 provider 适配层。
@@ -21,17 +16,24 @@ LLM 推理参数 provider 适配层。
 设计意图：
 - Velluma 上层（get_default_reasoning_config / REASONING_DISABLED）只产出统一中间表示，
   不感知 provider 差异；本模块是唯一的「中间表示 → 原生参数」转换点。
-- provider 识别基于 base_url 域名匹配（用户可自定义 base_url，域名是可用的信号）。
+- provider 识别（detect_provider）与厂商档案在 vendor_profiles.py 定义（2026-08-28
+  五厂商调研定稿，docs/model-vendor-matrix.md），本模块 import 并 re-export 保持兼容。
 - 这是一个「尽力适配」层：各 provider 协议会随模型代际变化，本模块负责消除最常见的
   协议错配，不做绝对正确性保证。未识别的 provider 默认按 OpenRouter 协议透传
   （向后兼容历史行为）。
 
-各 provider 原生协议（2026-08 调研）：
-- DeepSeek：thinking.type（"enabled"|"disabled"）+ 顶层 reasoning_effort（low/high/max）
-- OpenAI：顶层 reasoning_effort（low/medium/high/...），无独立开关，靠选模型
+各 provider 原生思考协议（2026-08-28 调研，docs/model-vendor-matrix.md）：
+- DeepSeek V4：thinking.type（enabled/disabled）+ 顶层 reasoning_effort（low/high/max）；默认开
+- Kimi：k2.6/k2.5 thinking.type 同上；**k3 无 thinking 参数**只有顶层 reasoning_effort
+  （low/high/max，恒思考）；k2.7-code 只认 enabled（恒思考）——强制思考模型收到
+  「关闭」请求时一律不发参数（发 disabled 会 400 或无效）
+- 智谱 GLM：thinking.type + clear_thinking；reasoning_effort 仅 5.2+（low/high/max）；
+  **glm-5.3 系强制思考，disabled 报错**——同样转不发参数
+- OpenAI：顶层 reasoning_effort（low/medium/high），无独立开关，靠选模型
 - OpenRouter：嵌套 reasoning.effort（low/medium/high/max），Velluma 原生设计目标
 - Qwen/通义：enable_thinking（布尔）+ thinking_budget（整数 token）
-- 火山豆包：thinking.type（"enabled"|"disabled"），无 effort 控制
+- 火山豆包：thinking.type（enabled/disabled），无 effort 控制
+- 小米 MiMo：thinking.type（唯一方言，实测+官方双证）；无 effort/budget 字段
 - 本地（Ollama/vLLM/LM Studio）：推理参数支持不可靠/忽略，默认不发
 
 副作用：无（纯函数）。改后即时生效（无需重建）。
@@ -39,65 +41,17 @@ LLM 推理参数 provider 适配层。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
+from backend.services.llm.vendor_profiles import (
+    DEEPSEEK, GLM, KIMI, MIMO, OPENAI, OPENROUTER, QWEN, DOUBAO, LOCAL, UNKNOWN,
+    detect_provider,
+    get_vendor_profile,
+    match_model_rule,
+)
+
 logger = logging.getLogger(__name__)
-
-# ============================================================
-# Provider 识别
-# ============================================================
-
-# 已知 provider 类型
-DEEPSEEK = "deepseek"
-OPENAI = "openai"
-OPENROUTER = "openrouter"
-QWEN = "qwen"          # 阿里通义/Qwen（dashscope）
-DOUBAO = "doubao"      # 火山引擎豆包（volces）
-MIMO = "mimo"          # 小米 MiMo（api.xiaomimimo.com）
-LOCAL = "local"        # 本地 OpenAI 兼容端点（Ollama/vLLM/LM Studio）
-UNKNOWN = "unknown"
-
-# base_url 域名 → provider 映射（按子串匹配，顺序敏感：更具体的放前面）
-# 警示：dashscope（通义）和 volces（豆包）是不同厂商的域名，不能混。
-_PROVIDER_DOMAIN_RULES: list[tuple[str, str]] = [
-    ("api.deepseek.com", DEEPSEEK),
-    ("api.openai.com", OPENAI),
-    ("openrouter.ai", OPENROUTER),
-    ("dashscope.aliyuncs.com", QWEN),
-    ("ark.cn-beijing.volces.com", DOUBAO),
-    ("volces.com", DOUBAO),
-    ("xiaomimimo.com", MIMO),
-    # 本地端点
-    ("localhost", LOCAL),
-    ("127.0.0.1", LOCAL),
-    ("0.0.0.0", LOCAL),
-]
-
-
-def detect_provider(base_url: str, model: str = "") -> str:
-    """按 base_url 域名识别 provider。
-
-    Args:
-        base_url: 模型配置里的 base_url（如 "https://api.deepseek.com/v1"）
-        model: 模型名（当前未参与识别，保留参数供后续按模型名细分）
-
-    Returns:
-        provider 类型字符串（DEEPSEEK/OPENAI/OPENROUTER/QWEN/DOUBAO/LOCAL/UNKNOWN）
-    """
-    if not base_url:
-        return UNKNOWN
-    # 提取域名（去掉协议、端口、路径），小写匹配
-    try:
-        parsed = urlparse(base_url if "://" in base_url else f"http://{base_url}")
-        host = (parsed.hostname or "").lower()
-    except Exception:
-        host = base_url.lower()
-
-    for domain_fragment, provider in _PROVIDER_DOMAIN_RULES:
-        if domain_fragment in host:
-            return provider
-    return UNKNOWN
 
 
 # ============================================================
@@ -114,11 +68,25 @@ _VALID_EFFORTS = {EFFORT_LOW, EFFORT_MEDIUM, EFFORT_HIGH, EFFORT_MAX}
 # Qwen thinking_budget（token 数）按 effort 档位估算。
 # 依据：Qwen3 thinking 模式典型预算范围；max 对应较大预算。
 # 设计意图：Qwen 没有 effort 枚举，只有 token 预算，这里把档位折算成具体数值。
-_EFFORT_TO_QWEN_BUDGET: Dict[str, int] = {
+_EFFORT_TO_QWEN_BUDGET: dict = {
     EFFORT_LOW: 2048,
     EFFORT_MEDIUM: 8192,
     EFFORT_HIGH: 16384,
     EFFORT_MAX: 32768,
+}
+
+# effort 白名单外的就近映射（DeepSeek/GLM/Kimi 只认 low/high/max → medium 归 high；
+# OpenAI 不认 max → max 归 high）。找不到映射时回退白名单最后一档。
+_EFFORT_FALLBACK = {
+    EFFORT_MEDIUM: EFFORT_HIGH,
+    EFFORT_MAX: EFFORT_HIGH,
+    "xhigh": EFFORT_MAX,
+    "minimal": EFFORT_LOW,
+}
+
+# 厂商级 effort 白名单（模型级规则优先；None=不约束透传）
+_VENDOR_EFFORT_WHITELIST = {
+    OPENAI: (EFFORT_LOW, EFFORT_MEDIUM, EFFORT_HIGH),  # max 会 400，归一为 high
 }
 
 
@@ -129,11 +97,33 @@ def _normalize_effort(effort: Optional[str]) -> str:
     return EFFORT_MEDIUM
 
 
+def _effort_for_provider(provider: str, model: str, effort: str) -> str:
+    """按厂商/模型 effort 白名单归一档位。
+
+    模型级规则（vendor_profiles.ModelRule.effort_values，如 deepseek-*/glm-5.2*/
+    kimi-k3 只认 low/high/max）优先；无模型规则时查厂商白名单；都无则透传。
+    """
+    allowed = None
+    rule = match_model_rule(get_vendor_profile(provider), model)
+    if rule is not None and rule.effort_values:
+        allowed = rule.effort_values
+    else:
+        allowed = _VENDOR_EFFORT_WHITELIST.get(provider)
+    if allowed is None or effort in allowed:
+        return effort
+    mapped = _EFFORT_FALLBACK.get(effort, allowed[-1])
+    logger.info(
+        "[LLM] effort=%s 不在 %s/%s 白名单 %s，归一为 %s",
+        effort, provider, model, list(allowed), mapped,
+    )
+    return mapped
+
+
 # ============================================================
 # 中间表示解析
 # ============================================================
 
-def _parse_intermediate(reasoning_config: dict) -> tuple[bool, str, bool]:
+def _parse_intermediate(reasoning_config: dict) -> tuple:
     """从统一中间表示 {"reasoning": {...}} 解析出 (enabled, effort, exclude)。
 
     兼容两种输入：
@@ -168,15 +158,18 @@ def adapt_reasoning_config(
         reasoning_config: 统一中间表示 dict（通常是 get_default_reasoning_config
             或 REASONING_DISABLED 的返回值）。None 时直接返回 None（不发）。
         base_url: 当前调用的 base_url，用于识别 provider。
-        model: 模型名（保留供后续按模型细分）。
+        model: 模型名（强制思考/effort 白名单等模型级规则的判据）。
 
     Returns:
         转换后的 dict（放进 OpenAI SDK 的 extra_body），或 None（不发任何推理参数）。
 
     设计说明：
     - None 输入 → None 输出（上层 client.py 的 if 判断已过滤，这里防御性处理）。
-    - 各 provider 的 enabled=False 策略不同：DeepSeek/豆包/Qwen 能显式关闭，
+    - 各 provider 的 enabled=False 策略不同：DeepSeek/GLM/Kimi/豆包/Qwen 能显式关闭，
       OpenAI 无独立开关（靠选模型），local 默认不发。
+    - **强制思考模型**（glm-5.3*、kimi-k3、kimi-k2.7-code）：收到「关闭」请求时
+      返回 None 不发参数——这些模型 disabled 会 400（GLM 5.3 官方迁移指南）或
+      根本没有关闭通道（K3 恒思考），「不发」是唯一不发错的形态。
     - 未识别 provider（unknown）默认按 OpenRouter 协议透传，向后兼容历史行为。
     """
     if not reasoning_config:
@@ -184,15 +177,50 @@ def adapt_reasoning_config(
 
     enabled, effort, _exclude = _parse_intermediate(reasoning_config)
     provider = detect_provider(base_url, model)
+    rule = match_model_rule(get_vendor_profile(provider), model)
 
     if provider == DEEPSEEK:
         # DeepSeek：thinking.type 控制开关，reasoning_effort 控制强度。
         # 关键修复：DeepSeek 不认 OpenRouter 的 reasoning.enabled，必须用 thinking.type。
-        result: Dict[str, Any] = {"thinking": {"type": "enabled" if enabled else "disabled"}}
+        result: dict = {"thinking": {"type": "enabled" if enabled else "disabled"}}
         if enabled:
-            # effort 仅在开启时有意义；DeepSeek 认 low/high/max（medium 透传由 provider 裁决）
-            result["reasoning_effort"] = effort
+            # effort 仅在开启时有意义；low/high/max（medium 经白名单归一为 high）
+            result["reasoning_effort"] = _effort_for_provider(provider, model, effort)
         return result
+
+    if provider == GLM:
+        # 智谱：thinking.type（4.5+）；reasoning_effort 仅 5.2+（模型规则标记）。
+        if rule is not None and rule.force_thinking:
+            # glm-5.3 系强制思考：disabled 报错（官方迁移指南），只能不发（服务端强制开）
+            if not enabled:
+                logger.info("[LLM] %s 强制思考（无法关闭），跳过关闭请求按服务端默认执行", model)
+                return None
+            result = {"thinking": {"type": "enabled"}}
+            if rule.effort_values:
+                result["reasoning_effort"] = _effort_for_provider(provider, model, effort)
+            return result
+        result = {"thinking": {"type": "enabled" if enabled else "disabled"}}
+        if enabled and rule is not None and rule.effort_values:
+            result["reasoning_effort"] = _effort_for_provider(provider, model, effort)
+        return result
+
+    if provider == KIMI:
+        # Kimi：方言按模型分三族（2026-08-28 调研）。
+        model_lower = (model or "").lower()
+        if model_lower.startswith("moonshot-v1"):
+            # 老系非思考模型（8-31 下线中）：无思考参数，不发
+            return None
+        if rule is not None and rule.force_thinking:
+            if not enabled:
+                # k3 恒思考 / k2.7-code 只认 enabled：关不掉，不发参数
+                logger.info("[LLM] %s 强制思考（无法关闭），跳过关闭请求按服务端默认执行", model)
+                return None
+            if rule.effort_values:
+                # k3：无 thinking 参数，只有顶层 reasoning_effort（low/high/max）
+                return {"reasoning_effort": _effort_for_provider(provider, model, effort)}
+            return {"thinking": {"type": "enabled"}}
+        # k2.6 / k2.5：thinking.type 开关（keep 不发——默认不保留思考，单轮调用语义）
+        return {"thinking": {"type": "enabled" if enabled else "disabled"}}
 
     if provider == OPENAI:
         # OpenAI：无独立思考开关（靠选 o1/o3/gpt-5 等推理模型）。
@@ -200,8 +228,8 @@ def adapt_reasoning_config(
         if not enabled:
             return None
         # reasoning_effort 是 OpenAI Chat Completions 的顶层 body 参数，
-        # 通过 extra_body 透传（SDK 会合并到请求体顶层）。
-        return {"reasoning_effort": effort}
+        # 通过 extra_body 透传（SDK 会合并到请求体顶层）；max 不在枚举内，归一。
+        return {"reasoning_effort": _effort_for_provider(provider, model, effort)}
 
     if provider == OPENROUTER:
         # OpenRouter：Velluma 的原生设计目标，协议本身即统一中间表示，原样透传。
@@ -227,7 +255,7 @@ def adapt_reasoning_config(
         return {"thinking": {"type": "enabled" if enabled else "disabled"}}
 
     if provider == MIMO:
-        # 小米 MiMo（api.xiaomimimo.com）：实测（2026-08-16）认 DeepSeek 风格 thinking.type；
+        # 小米 MiMo（api.xiaomimimo.com）：认 DeepSeek 风格 thinking.type；
         # OpenRouter 的 reasoning.enabled 与 Qwen 的 enable_thinking 均被静默忽略——
         # 推理继续烧 token 预算，小预算调用（速记解析 max_tokens=800）finish=length 空输出。
         # effort 档位未验证支持，保守不发。
@@ -242,7 +270,8 @@ def adapt_reasoning_config(
     # 关闭态例外（2026-08-26 修复）：历史行为是「不发参数」（862132d 语义修复前上游
     # 返回 None）；对不认 OpenRouter 协议的未知网关该参数本就无效，而严格校验 body
     # 的网关会 400（全槽位调用失败）。需要显式关闭的服务端默认思考厂商，正路是往
-    # _PROVIDER_DOMAIN_RULES 加识别分支（MiMo 先例——实测认证的协议才接）。
+    # vendor_profiles._PROVIDER_DOMAIN_RULES 加识别分支（MiMo/Kimi 先例——实测认证
+    # 的协议才接）。
     if not enabled:
         return None
     return {
