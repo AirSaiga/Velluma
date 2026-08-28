@@ -1,5 +1,7 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { ghostActive } from './useGhostDraft'
+import { followEditorLayout } from './editorLayoutFollower'
 
 /**
  * NLE-ADF 灵感悬浮舱（Spark Dock）状态控制器。
@@ -43,8 +45,13 @@ export const attachedParts = ref<SparkPart[]>([])
 /**
  * Sticky 态：缝合触发后置 true，舱持续显示不被打字活动隐藏，
  * 让作者连续吸附多件缝合。Esc 关舱 / 切章 / unmount 退出。
+ *
+ * ⚠ 2026-08-28 排查发现：setSparkSticky 曾全工程零调用（死代码）——缝合后
+ * 舱即被 hideSparkDock 永久收走，"连续吸附多件缝合"从未生效。现复活：
+ * 缝合触发时 setSparkSticky + stashSparkDock（藏舱让位幽灵），幽灵落定
+ * （Enter 定稿 / Esc 蒸发）由下方 watch 自动 restore——打字不再收舱。
  */
-const _sticky = ref(false)
+export const sparkSticky = ref(false)
 
 const _baseParts = ref<SparkPart[]>([])
 const _extraParts = ref<SparkPart[]>([])
@@ -81,8 +88,32 @@ export function setExtraSparkParts(parts: SparkPart[]): void {
 
 /** 触发 sticky（缝合后调用）：舱持续显示，不被打字活动隐藏 */
 export function setSparkSticky(): void {
-  _sticky.value = true
+  sparkSticky.value = true
 }
+
+/**
+ * 藏舱让位幽灵（缝合触发时调用）：视觉上隐藏（避免与幽灵草稿重叠混乱），
+ * 但保留 sticky 态——幽灵落定后 restoreSparkDock 自动弹回，连续吸附不断流。
+ * 与 hideSparkDock 的区别：hide 是完全退出（清 sticky），stash 是暂避。
+ */
+export function stashSparkDock(): void {
+  sparkDockVisible.value = false
+  sparkSelectedIndex.value = -1
+}
+
+/** 幽灵落定（Enter 定稿 / Esc 蒸发 / 出错回滚）后的自动回弹：sticky 态即弹回。 */
+export function restoreSparkDock(): void {
+  if (!sparkSticky.value) return
+  showSparkDock()
+}
+
+// 幽灵生命周期 ↔ sticky 回弹：幽灵消失（无论定稿/蒸发/失败）且 sticky 在，
+// 舱自动弹回（零件缓存仍在，作者接着吸附下一件）。nextTick 推迟：本 watch
+// 在模块加载时注册，先于 session 的 authorLane 回写 watch 执行——不推迟的话
+// 弹舱时闸门还停在 ghostStitching，回弹被静默吞掉。门禁由 showSparkDock 自守。
+watch(ghostActive, (active, prev) => {
+  if (!active && prev) nextTick(() => restoreSparkDock())
+})
 
 /**
  * 计算光标下方的浮舱定位（Spark Dock / Beat Dock 共用）。
@@ -111,6 +142,28 @@ function _positionDockAtCursor(): boolean {
   return true
 }
 
+// ============================================================
+// 布局跟随（2026-08-28 错位修复）：舱可见期间跟随滚动/回流/光标重定位
+// ============================================================
+// sparkDockPos 此前只在弹出时算一次——感知带出现挤动编辑区、滚动都会让
+// fixed 定位的舱漂离正文。可见期间挂 followEditorLayout，隐藏即卸；
+// 编辑器热换（切章）重挂。
+let _unfollowDock: (() => void) | null = null
+
+function _syncDockPos(): void {
+  if (sparkDockVisible.value) _positionDockAtCursor()
+}
+
+watch(sparkDockVisible, (visible) => {
+  if (visible && !_unfollowDock) _unfollowDock = followEditorLayout(_syncDockPos)
+  else if (!visible && _unfollowDock) { _unfollowDock(); _unfollowDock = null }
+})
+
+watch(chapterEditorHandle, () => {
+  if (_unfollowDock) { _unfollowDock(); _unfollowDock = null }
+  if (sparkDockVisible.value) _unfollowDock = followEditorLayout(_syncDockPos)
+})
+
 /** 主动唤起（Tab）或停顿心跳驱动（useAdaptiveAssist 调用）共用的展示入口 */
 export function showSparkDock(): void {
   if (!_canShow()) return
@@ -121,7 +174,7 @@ export function showSparkDock(): void {
 }
 
 export function hideSparkDock(): void {
-  _sticky.value = false   // 显式隐藏同时取消 sticky
+  sparkSticky.value = false   // 显式隐藏同时取消 sticky
   sparkDockVisible.value = false
   sparkSelectedIndex.value = -1
 }
@@ -150,7 +203,7 @@ export const sparkSelectedIndex = ref(-1)
 /** ↑↓ 移动选中（循环）；Dock 未开 / 无碎片 / sticky 态返回 false（让作者用 ↑↓ 移光标）。 */
 export function moveSparkSelection(delta: number): boolean {
   if (!sparkDockVisible.value || sparkParts.value.length === 0) return false
-  if (_sticky.value) return false  // sticky 态放行（连续缝合时作者要编辑移光标）
+  if (sparkSticky.value) return false  // sticky 态放行（连续缝合时作者要编辑移光标）
   const n = sparkParts.value.length
   sparkSelectedIndex.value = (sparkSelectedIndex.value + delta + n) % n
   return true
@@ -169,7 +222,7 @@ export function resetSparkSelection(): void {
  * 本模块只管：打字隐藏（sticky 除外）+ Tab 主动唤起 + 数字吸附。
  */
 function _onEditorActivity(): void {
-  if (_sticky.value) {
+  if (sparkSticky.value) {
     // sticky 态：跟随光标重定位，但不隐藏
     if (sparkDockVisible.value) _positionDockAtCursor()
     return
@@ -195,11 +248,14 @@ export function useSparkDock() {
     sparkParts,
     attachedParts,
     sparkSelectedIndex,
+    sparkSticky,
     setSparkDockGate,
     setSparkParts,
     setExtraSparkParts,
     showSparkDock,
     hideSparkDock,
+    stashSparkDock,
+    restoreSparkDock,
     clearAttachedParts,
     attachSparkPart,
     moveSparkSelection,

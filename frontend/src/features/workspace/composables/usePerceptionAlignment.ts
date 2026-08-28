@@ -20,6 +20,34 @@ const RESERVED_FLOOR = 40
 /** 编辑器滚动容器选择器（RichTextEditor 的 .overflow-y-auto） */
 const SCROLL_HOST_SEL = '.overflow-y-auto'
 
+/**
+ * 锚定卡碰撞避让（2026-08-28 重叠修复）：按锚定 Y 排序后逐张下推，
+ * 保证相邻卡不叠（此前各卡独立 absolute——多个 label 落在相邻行甚至
+ * 同一 label 多条提醒同 Y 时，卡片直接叠在一起）。
+ *
+ * 纯函数：tops 与输入同序返回（null 原样保留）；下推只向后传染
+ * （前卡不动，后卡让位），同 Y 时按数组序稳定排列。
+ */
+export function stackAnchoredTops(
+  tops: Array<number | null | undefined>,
+  heights: number[],
+): Array<number | null> {
+  const out: Array<number | null> = tops.map((t) => (t === null || t === undefined ? null : t))
+  const idx: Array<{ top: number; i: number }> = []
+  for (let i = 0; i < tops.length; i++) {
+    const t = tops[i]
+    if (t !== null && t !== undefined) idx.push({ top: t, i })
+  }
+  idx.sort((a, b) => a.top - b.top || a.i - b.i)
+  let floor = -Infinity
+  for (const { top, i } of idx) {
+    const placed = Math.max(top, floor)
+    out[i] = placed
+    floor = placed + (heights[i] ?? 44)
+  }
+  return out
+}
+
 export function usePerceptionAlignment(
   labels: Ref<string[]>,
   bandEl: Ref<HTMLElement | null>,

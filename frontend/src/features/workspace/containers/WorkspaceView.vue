@@ -27,13 +27,15 @@ import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
 import GhostWarningsBar from '../../generation/presentation/GhostWarningsBar.vue'
+import GhostWashChip from '../../generation/presentation/GhostWashChip.vue'
 import { setExtraSparkParts, setSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
-import { ghostActive, ghostWarnings } from '../../generation/composables/useGhostDraft'
+import { ghostActive, ghostWarnings, ghostWash, useGhostOriginal } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
+import { styleApi } from '../../../services/api'
 import { useChapterSpine } from '../composables/useChapterSpine'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
@@ -153,6 +155,20 @@ function onDismissHint(payload: { kind: string; label: string }) {
   dispatchCollabEvent('hint_dismiss', { kind: payload.kind, label: payload.label })
 }
 
+// 「用原稿」（呈现平面 P1 可逆学习）：重灌洗前原稿 + 对每个已替换命中调降级
+// 端点（blocker→warning）——作者一次肯定胜过三次否定，此书此后不再自动替换这些词
+async function onUseGhostOriginal() {
+  if (!useGhostOriginal()) return
+  const bookId = currentBook.value?.id
+  if (bookId) {
+    const patterns = [...new Set(ghostWash.value.hits.filter((h) => h.replaced).map((h) => h.pattern))]
+    for (const p of patterns) {
+      try { await styleApi.washPreferOriginal(bookId, p) } catch { /* 降级失败不阻塞 */ }
+    }
+  }
+  showToast('已恢复原稿，这些词此后降为提醒（不再自动替换）', 'info')
+}
+
 // NLE-ADF 3.0 Canon 词高亮词表：本章绑定角色名 + 感知 hints 的角色/伏笔标签
 // 词表变化 → setCanonTerms dispatch 空 tr 触发 ProseMirror decorations 重算
 const canonMarkTerms = computed<CanonTerm[]>(() => {
@@ -182,7 +198,8 @@ const canonMarkTerms = computed<CanonTerm[]>(() => {
       terms.push({ text: h.node_label, kind: 'hook' })
     } else if (h.kind === 'contradiction') {
       seen.add(h.node_label)
-      terms.push({ text: h.node_label, kind: 'contradiction' })
+      // note 带矛盾详情 → 红条/玫红下划线悬停 title（2026-08-28：红条无解释被当 bug）
+      terms.push({ text: h.node_label, kind: 'contradiction', note: h.detail || '' })
     }
   }
   return terms
@@ -257,7 +274,7 @@ const lastSavedAt = ref<Date | null>(null)
 
 // 生成/精修失败：统一弹 error toast（技术原文经 formatGenerationError 归类为可读文案）。
 // 不再消费后即清空——error 原文需存活到 stage 离开 error（Overlay/Stepper 错误卡据此
-// 展示真实原因）；各入口（retry/cancel/startBeat/loadForChapter 等）已负责清空。
+// 展示真实原因）；各入口（retry/cancel/loadForChapter 等）已负责清空。
 watch(() => session.error.value, (err) => {
   if (err) {
     console.error('[生成错误]', err)
@@ -277,26 +294,7 @@ watch(() => session.stage.value, (newStage, oldStage) => {
   }
 })
 
-// rerender-beat 单段重渲成功后落库（修复"重写本段"结果不进正文的 stub）。
-// stage 已是 done、上面的 watch 不会重触发，故由 session.pendingSaveText 信号驱动。
-// 非空 = 有新正文待落库；落库后清空信号。
-watch(() => session.pendingSaveText.value, async (text) => {
-  if (text && selectedChapter.value) {
-    try {
-      saveStatus.value = 'saving'
-      await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
-      saveStatus.value = 'saved'
-      lastSavedAt.value = new Date()
-      clearChapterDraft(selectedChapter.value.id)
-      showToast('已更新该段正文并保存', 'success')
-    } catch (e: any) {
-      saveStatus.value = 'error'
-      showToast('写入失败：' + e.message, 'error')
-    } finally {
-      session.pendingSaveText.value = null
-    }
-  }
-})
+// 旧 rerender-beat 落库 watch 已随 BS-ADF 步进链路归档移除（2026-08-29）
 
 // 同步路由 bookId 到 store
 watch(
@@ -513,7 +511,7 @@ watch(
 //   4) 每章每次会话至多自动起一次
 // NLE-ADF 3.0：作者进章节打字即激活自适应写作模式（取代旧冷启动跑整章管线）。
 // 不跑定档/锚点/分镜——只把 authorLane 置 composing，辅助层（useAdaptiveAssist）
-// 据此挂载 perceive/续写/沉淀能力。旧 step 路径（startBeat）保留为「规划本章」入口。
+// 据此挂载 perceive/续写/沉淀能力。旧 step 路径已随 BS-ADF 归档移除——adaptive 是唯一写作路径。
 let _activatedChapterId: string | null = null
 
 watch(selectedChapter, (ch, prev) => {
@@ -927,6 +925,12 @@ async function confirmDeleteChapter(ch: Chapter) {
                 <!-- C1 快检疑点条：幽灵在屏且有命中时接在挂件舱位（幽灵在屏时
                      挂件舱自身隐藏，此位恰好空出；只提示不拦截） -->
                 <GhostWarningsBar v-if="ghostActive && ghostWarnings.length" :warnings="ghostWarnings" />
+                <!-- 呈现平面洗层条（三平面分权 P1）：薄荷系「已规避」；用原稿=可逆学习 -->
+                <GhostWashChip
+                  v-if="ghostActive && ghostWash.hits.length"
+                  :wash="ghostWash"
+                  @use-original="onUseGhostOriginal"
+                />
               </template>
             </PerceptionBand>
 

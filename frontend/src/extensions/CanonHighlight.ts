@@ -6,8 +6,10 @@ import type { Editor } from '@tiptap/vue-3'
 export interface CanonTerm {
   /** 要标记的词（角色名 / 伏笔标签） */
   text: string
-  /** 着色类型：character 角色 / hook 伏笔 */
+  /** 着色类型：character 角色 / hook 伏笔 / contradiction 矛盾 */
   kind: 'character' | 'hook' | 'contradiction'
+  /** 悬停说明（矛盾类带 hint.detail——2026-08-28 实测作者不认识红条，补可发现性） */
+  note?: string
 }
 
 const canonHighlightKey = new PluginKey('canonHighlight')
@@ -53,6 +55,12 @@ export const CanonHighlight = Extension.create({
             const contradictionTexts = valid
               .filter((t) => t.kind === 'contradiction')
               .map((t) => t.text)
+            // 矛盾提示文案（悬停 title）：红条曾无任何解释「突然冒出来」被当 bug
+            // （2026-08-28 实测）——native title 是零样式成本的最低可发现性补丁
+            const contraNote = (t: CanonTerm) =>
+              t.kind === 'contradiction'
+                ? `AI 怀疑此处与设定矛盾${t.note ? '：' + t.note : ''}——详见左侧感知带（纯提示，不改你的正文）`
+                : undefined
             state.doc.descendants((node, pos) => {
               if (node.isText && node.text) {
                 // inline 词标记（角色/伏笔/矛盾）
@@ -60,22 +68,31 @@ export const CanonHighlight = Extension.create({
                 for (const t of valid) {
                   let idx = text.indexOf(t.text)
                   while (idx !== -1) {
+                    const attrs: Record<string, string> = {
+                      class: `canon-mark canon-mark--${t.kind}`,
+                    }
+                    const note = contraNote(t)
+                    if (note) attrs.title = note
                     decos.push(
-                      Decoration.inline(pos + idx, pos + idx + t.text.length, {
-                        class: `canon-mark canon-mark--${t.kind}`,
-                      }),
+                      Decoration.inline(pos + idx, pos + idx + t.text.length, attrs),
                     )
                     idx = text.indexOf(t.text, idx + t.text.length)
                   }
                 }
               } else if (node.isTextblock && contradictionTexts.length) {
-                // 段落级：含矛盾词的段加左缘条（Decoration.node）
+                // 段落级：含矛盾词的段加左缘条（Decoration.node）+ 悬停说明
                 const paraText = node.textContent
-                if (contradictionTexts.some((ct) => ct && paraText.includes(ct))) {
+                const hit = valid.find(
+                  (t) => t.kind === 'contradiction' && t.text && paraText.includes(t.text),
+                )
+                if (hit) {
+                  const attrs: Record<string, string> = {
+                    class: 'canon-para--contradiction',
+                  }
+                  const note = contraNote(hit)
+                  if (note) attrs.title = note
                   decos.push(
-                    Decoration.node(pos, pos + node.nodeSize, {
-                      class: 'canon-para--contradiction',
-                    }),
+                    Decoration.node(pos, pos + node.nodeSize, attrs),
                   )
                 }
               }

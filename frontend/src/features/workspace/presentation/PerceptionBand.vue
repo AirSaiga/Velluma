@@ -15,7 +15,7 @@
  */
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { CanonHint, SpineProgress } from '../../../services/api/domain/adaptive.api'
-import { usePerceptionAlignment } from '../composables/usePerceptionAlignment'
+import { usePerceptionAlignment, stackAnchoredTops } from '../composables/usePerceptionAlignment'
 
 /** 兜底区折叠阈值（空间有限） */
 const COLLAPSE_AT = 4
@@ -90,11 +90,21 @@ onBeforeUnmount(() => { _dockRO?.disconnect(); _dockRO = null })
 const labels = computed(() => props.suggestions.map((h) => h.node_label))
 const { anchors } = usePerceptionAlignment(labels, bandEl, topReservePx)
 
-// 锚定卡（找到正文位置）—— absolute 渲染到对应行
+// 锚定卡（找到正文位置）—— absolute 渲染到对应行。
+// 碰撞避让（2026-08-28 重叠修复）：各卡锚 Y 独立而来，相邻行/同 label 多条
+// 提醒会叠在一起——stackAnchoredTops 按 Y 排序逐张下推（卡高按内容估算：
+// 卡体 ~38px + detail 行数 × 15px + 间距）。
+function cardHeight(h: CanonHint): number {
+  const detail = h.detail || ''
+  const lines = detail ? Math.min(6, Math.ceil(detail.length / 11)) : 0
+  return 38 + (lines ? lines * 15 + 6 : 0) + 7
+}
 const located = computed(() => {
+  const tops = anchors.value.map((t) => (t === null || t === undefined ? null : t))
+  const stacked = stackAnchoredTops(tops, props.suggestions.map(cardHeight))
   const out: { hint: CanonHint; top: number }[] = []
   for (let i = 0; i < props.suggestions.length; i++) {
-    const top = anchors.value[i]
+    const top = stacked[i]
     if (top !== null && top !== undefined) {
       out.push({ hint: props.suggestions[i], top })
     }
