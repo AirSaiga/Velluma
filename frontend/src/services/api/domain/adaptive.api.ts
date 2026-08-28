@@ -387,7 +387,16 @@ export const adaptiveApi = {
     callbacks: {
       onStart?: (mode: string) => void
       onChunk?: (delta: string) => void
-      onDone?: (result: { text: string; word_count: number; warnings?: GhostWarning[] }) => void
+      onDone?: (result: {
+        text: string
+        word_count: number
+        warnings?: GhostWarning[]
+        /** 呈现平面洗层（三平面分权 P1，2026-08-29）：命中清单 + 原稿快照（有替换时非空） */
+        wash?: { hits: Array<{ pattern: string; span: string; replaced: boolean; alternative: string }>; original_text: string }
+        /** P5 回流对齐令牌 + 本发注入样本 id（采纳/蒸发埋点回传用） */
+        ghost_token?: string
+        sample_ids?: string[]
+      }) => void
       onError?: (error: string) => void
     },
     signal?: AbortSignal,
@@ -400,9 +409,16 @@ export const adaptiveApi = {
         } else if (payload.event === 'GHOST_CHUNK') {
           callbacks.onChunk?.(payload.delta || '')
         } else if (payload.event === 'GHOST_DONE') {
-          // C1 快检疑点随 DONE 帧到达（向后兼容增量字段；旧后端/无命中为空数组）
+          // C1 快检疑点 / P1 洗层 / P5 回流令牌随 DONE 帧到达（向后兼容增量字段）
           const warnings: GhostWarning[] = Array.isArray(payload.warnings) ? payload.warnings : []
-          callbacks.onDone?.({ text: payload.text || '', word_count: payload.word_count || 0, warnings })
+          callbacks.onDone?.({
+            text: payload.text || '',
+            word_count: payload.word_count || 0,
+            warnings,
+            wash: payload.wash || undefined,
+            ghost_token: payload.ghost_token || undefined,
+            sample_ids: Array.isArray(payload.sample_ids) ? payload.sample_ids : undefined,
+          })
           return true
         } else if (payload.event === 'ERROR' || payload.event === 'GHOST_ERROR') {
           callbacks.onError?.(payload.error || '续写失败')

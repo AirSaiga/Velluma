@@ -47,7 +47,7 @@ from backend.services.prompts.adaptive_prompts import (
     render_system_blocks_with_usage,
 )
 from backend.services.rag.recall import recall_memories
-from backend.services.style.retrieval import retrieve_author_samples
+from backend.services.style.retrieval import retrieve_author_samples, retrieve_author_samples_with_meta
 from backend.services.style.scene_hint import SCENE_HINT_TAIL_CHARS, detect_scene_type
 
 
@@ -72,6 +72,9 @@ class StitchContext:
     memory_echoes: List[str] = field(default_factory=list)
     style_positive: str = ""
     author_samples: List[str] = field(default_factory=list)
+    # P5 回流埋点（2026-08-29）：本发注入的样本 id——GHOST_DONE 帧带回前端，
+    # ghost_adopt/ghost_discard 事件据此回传，sample_prior 派生采纳先验
+    sample_ids: List[str] = field(default_factory=list)
     mode: str = ""
     # C2 场景判定结果（"dialogue"/"general"；默认空串=未装配）——样本检索
     # 加成的输入，预览徽标据此展示（见 _block_source）
@@ -150,6 +153,7 @@ async def assemble_stitch_context(
     rolling_prefix: str,
     db: AsyncSession,
     chapter_intent: str = "",
+    drift_anchor: bool = False,
 ) -> StitchContext:
     """装配 stitch-ghost 的全套上下文（五模式共用，行为与旧路由内联段一致）。
 
@@ -196,11 +200,19 @@ async def assemble_stitch_context(
     scene_hint = detect_scene_type((rolling_prefix or "")[-SCENE_HINT_TAIL_CHARS:])
     samples_k = AUTHOR_SAMPLES_K_BURST if mode == "burst" else AUTHOR_SAMPLES_MAX_K
     author_samples: List[str] = []
+    sample_ids: List[str] = []
     if bundle.book_id:
-        author_samples = await retrieve_author_samples(
+        # P5/P6 选择平面（2026-08-29）：meta 变体带回样本 id（回流埋点），
+        # 并把文风卡传入——旋钮/对话目标编译为样本排序条件；drift_anchor
+        # 时收藏样本获加成（漂移检出 → 作者认证示范优先）
+        pairs = await retrieve_author_samples_with_meta(
             db, bundle.book_id, recall_query, k=samples_k,
             scene_hint=scene_hint,
+            style_card=bundle.style_card,
+            drift_anchor=drift_anchor,
         )
+        sample_ids = [sid for sid, _t in pairs]
+        author_samples = [t for _sid, t in pairs]
 
     # 知识检索平面 v3.1：条目化→选择→完整渲染（纯 CPU 零新增查询；失败
     # 降级空视图=块缺席=零变化，不阻塞装配）
@@ -217,6 +229,7 @@ async def assemble_stitch_context(
         memory_echoes=memory_echoes,
         style_positive=style_positive,
         author_samples=author_samples,
+        sample_ids=sample_ids,
         mode=mode,
         scene_hint=scene_hint,
         kg=kg,

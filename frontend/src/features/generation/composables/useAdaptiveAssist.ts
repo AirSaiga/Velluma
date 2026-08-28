@@ -20,9 +20,9 @@ import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
-  ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings,
+  ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
 } from './useGhostDraft'
-import { setSparkParts, showSparkDock, hideSparkDock, sparkDockVisible, type SparkPart } from './useSparkDock'
+import { setSparkParts, showSparkDock, hideSparkDock, sparkDockVisible, sparkSticky, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
 import { setThinkingPhase, hideThinking } from './useThinkingIndicator'
 import { assistEnabled } from './useAssistEnabled'
@@ -105,6 +105,10 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // 生发档在飞时活跃档响应只更数据不动反馈态。
   let _activeHeartbeatInFlight = false
   let _generationHeartbeatsInFlight = 0
+  // Tab 点名挂起（2026-08-28 修复：点名撞上在飞生发档时此前被静默吞掉——
+  // 作者按 Tab 毫无反应，要等 2~7s 再按一次才灵，体感「Tab 有时灵有时不灵」。
+  // 现转挂起：在飞生发响应带回的零件即点名所得，响应落地直接弹舱兑现）
+  let _summonPending = false
   // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
   let _lastCardSig = ''
   let _lastDockSig = ''
@@ -134,8 +138,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       if (_isCursorAtParagraphEnd()) {
         // 有缓存零件先秒弹（上次心跳存货），心跳在后台刷新零件；无缓存则等
         // 响应带回再弹（响应侧有活状态守卫）——LLM 延迟退出唤醒关键路径。
-        // showSparkDock 自守：无零件/非 composing/幽灵在屏时静默 no-op
-        showSparkDock()
+        // showSparkDock 自守：无零件/非 composing/幽灵在屏时静默 no-op。
+        // 秒弹同吃半句闸门（2026-08-28 修复）：光标段尾但句子未写完时，心跳
+        // 响应必带 dock_muted 清舱——秒弹先亮再被收掉 = 舱一闪即隐（预览灰点
+        // 有此闸，秒弹漏了，口径对齐；心跳照发，感知带数据照常带回）
+        if (!_endsMidSentence(_recentText500())) showSparkDock()
         void _sendHeartbeat(Date.now() - _lastActiveTs)
       }
     }, PAUSE_HEARTBEAT_MS)
@@ -161,10 +168,15 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (opts.authorLaneRef.value !== 'composing') return
     if (ghostActive.value) return  // 幽灵在屏时暂停心跳
     const generationTier = pausedMs >= PAUSE_HEARTBEAT_MS
-    // 发送侧在飞让路：生发档在飞时新心跳一律不发（活跃档冗余——生发响应同样
-    // 带回走向卡/感知带全量快照；生发档重复触发白烧一次 LLM）；活跃档在飞时
-    // 只有生发档可插队（活跃档只更缓存，生发档才是作者等的主事件）
-    if (generationTier ? _generationHeartbeatsInFlight > 0 : _activeHeartbeatInFlight) return
+    // 发送侧在飞让路（2026-08-28 修正为与注释一致的两档统一闸）：生发档在飞时
+    // 新心跳一律不发——活跃档冗余（生发响应同样带回走向卡/感知带全量快照），
+    // 且活跃档快响应曾半路杀绿点（响应侧守卫兜过，但请求本身白烧）；Tab 点名
+    // 例外转挂起：_summonPending 由在飞生发响应兑现，不再石沉大海。
+    if (_generationHeartbeatsInFlight > 0) {
+      if (flags?.summoned) _summonPending = true
+      return
+    }
+    if (!generationTier && _activeHeartbeatInFlight) return
     const sendTs = _lastActiveTs  // 活动纪元：响应回来时比对，识别「发送后作者已动笔」
 
     const editor = chapterEditorHandle.value
@@ -215,7 +227,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 生发档仍在飞（含活跃档先发慢归竞态）→ 本响应只更数据不动反馈态：
       // 清舱/hideThinking/状态翻 dormant 都会杀掉作者正盯着等的绿点。
       const generationStillBusy = _generationHeartbeatsInFlight > (generationTier ? 1 : 0)
-      if (result.dock_muted && !generationStillBusy) {
+      // sticky 态豁免（2026-08-28）：作者缝合后显式留下的舱（连续吸附流），
+      // 半句静音管「自动弹出新件」不管作者留下的舱——杀掉它等于打断连续缝合流
+      if (result.dock_muted && !generationStillBusy && !sparkSticky.value) {
         setSparkParts([])
         hideSparkDock()
       }
@@ -244,6 +258,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         ) {
           showSparkDock()
         }
+      }
+      // 挂起的 Tab 点名兑现（2026-08-28）：本轮生发响应的零件即点名所得，
+      // 弹舱条件同召唤语义（点名要的直接弹，不受段尾/动笔守卫）。放在
+      // parts 块外——空响应（半句静音等）也要清挂起，下一按 Tab 走正常召唤。
+      if (_summonPending) {
+        _summonPending = false
+        if (parts.length) showSparkDock()
       }
 
       // 走向卡缓存（Ctrl+Space 走向卡舱的数据源；层 3 推测首 beat）
@@ -401,6 +422,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       onDone: (result) => {
         // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
         setGhostWarnings(result.warnings || [])
+        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
+        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -506,6 +529,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       onChunk: (delta) => appendGhost(delta),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
+        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
+        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -539,6 +564,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       onChunk: (delta) => appendGhost(delta),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
+        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
+        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -608,6 +635,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       onChunk: (delta) => appendGhost(delta),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
+        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
+        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },

@@ -204,10 +204,12 @@ class _Capture:
         self.calls.append(("recall", kw))
         return self._echoes
 
-    async def samples(self, db, book_id, query, k=2, scene_hint=None):
+    async def samples_meta(self, db, book_id, query, k=2, scene_hint=None,
+                           style_card=None, drift_anchor=False):
         self.calls.append(("samples", book_id, query, k))
         self.sample_hints.append(scene_hint)
-        return self._samples
+        # P5 meta 契约：[(sample_id, text)]；样本 id 用序号占位（埋点测试用）
+        return [(f"sid-{i}", t) for i, t in enumerate(self._samples)]
 
 
 def _mock_bundle(monkeypatch, capture, **bundle_kw) -> SettingsBundle:
@@ -218,7 +220,7 @@ def _mock_bundle(monkeypatch, capture, **bundle_kw) -> SettingsBundle:
         return bundle
     monkeypatch.setattr("backend.services.context.stitch_context.load_chapter_settings_bundle", _load)
     monkeypatch.setattr("backend.services.context.stitch_context.recall_memories", capture.recall)
-    monkeypatch.setattr("backend.services.context.stitch_context.retrieve_author_samples", capture.samples)
+    monkeypatch.setattr("backend.services.context.stitch_context.retrieve_author_samples_with_meta", capture.samples_meta)
     return bundle
 
 

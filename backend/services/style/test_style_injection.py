@@ -137,7 +137,8 @@ class TestInjection:
         assert lines[0] == "- 句长节奏：短促，常 2-3 句一段"
         assert "- 开头习惯" not in text          # 空值字段不渲染
         assert "- 段落节奏：段落短促" in text
-        assert "- 对话占比目标：35%" in text
+        # P6：对话占比目标编译进检索选择器，不再进 prompt 画像
+        assert "对话占比" not in text
 
     def test_render_style_positive_empty(self):
         assert render_style_positive(None) == ""

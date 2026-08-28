@@ -26,6 +26,7 @@ import StyleReconciliationSection from '../presentation/StyleReconciliationSecti
 import StyleExtractModal from '../presentation/StyleExtractModal.vue'
 import StyleAuditionBar, { type AuditionRunState } from '../presentation/StyleAuditionBar.vue'
 import StyleInboxSection from '../presentation/StyleInboxSection.vue'
+import StyleAdoptedPool, { type AdoptedGhostItem } from '../presentation/StyleAdoptedPool.vue'
 import StyleScanModal from '../presentation/StyleScanModal.vue'
 import StyleStatusStrip from '../presentation/StyleStatusStrip.vue'
 import type {
@@ -230,7 +231,7 @@ async function loadAll() {
   }
 }
 
-/** 样本增删后只刷新样本与指纹（文风卡与章正文未变） */
+/** 样本增删后只刷新样本与指纹（文风卡与章正文未变）；顺带刷新采纳池 */
 async function reloadSamplesAndFingerprint() {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
@@ -240,6 +241,7 @@ async function reloadSamplesAndFingerprint() {
   ])
   samples.value = samplesData as AuthorSample[]
   fingerprint.value = fingerprintData
+  void loadAdoptedPool()
 }
 
 // ============ 保存（2s 防抖，迁移自 StyleCardManager） ============
@@ -294,6 +296,38 @@ function markDirty() {
 }
 
 // ============ 样本操作 ============
+// ===== P5 采纳幽灵收编池（三平面分权·选择平面，2026-08-29）=====
+// 作者采纳过的幽灵草稿——「这段 AI 写的你觉得像你，收为样本？」
+// 红线：候选不直接生效，确认才入库（source=adopted_ghost，装配每批 ≤1）
+const adoptedPool = ref<AdoptedGhostItem[]>([])
+const adoptedBusyKey = ref<string | null>(null)
+
+async function loadAdoptedPool() {
+  const bookId = bookIdFromRoute.value
+  if (!bookId) return
+  try {
+    adoptedPool.value = await styleApi.listAdoptedGhosts(bookId)
+  } catch {
+    adoptedPool.value = []  // 池拿不到静默（非关键路径）
+  }
+}
+
+async function collectAdopted(item: AdoptedGhostItem) {
+  const bookId = bookIdFromRoute.value
+  if (!bookId) return
+  adoptedBusyKey.value = item.ts
+  try {
+    await styleApi.createSample(bookId, { content: item.text, source: 'adopted_ghost' })
+    adoptedPool.value = adoptedPool.value.filter((g) => g !== item)
+    await reloadSamplesAndFingerprint()
+    showToast('已收为样本（AI 来源，每批示范至多占 1 条）', 'success')
+  } catch (error: unknown) {
+    showToast('收编失败: ' + ((error as Error)?.message || ''), 'error')
+  } finally {
+    adoptedBusyKey.value = null
+  }
+}
+
 async function uploadSample(content: string, sceneType: AuthorSampleSceneType, era: 'recent' | 'early' = 'recent') {
   const bookId = bookIdFromRoute.value
   if (!bookId || !content.trim()) return
@@ -808,6 +842,11 @@ onUnmounted(() => clearTimeout(autosaveTimer))
                 @import-chapters="importFromChapters"
                 @import-golden="importFromGolden"
                 @update-sample="patchSample"
+              />
+              <StyleAdoptedPool
+                :items="adoptedPool"
+                :busy-id="adoptedBusyKey"
+                @collect="collectAdopted"
               />
 
               <StyleFingerprintSection

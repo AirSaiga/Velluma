@@ -119,6 +119,37 @@ class TestSelectors(unittest.TestCase):
         reasons = {u["key"] for u in unselected}
         self.assertIn("relation:林尘~远方角色", reasons)
 
+    def test_escape_valve_drops_hooks_before_entities(self):
+        """丢弃序回归锁（2026-08-28 审计修复）：养料（hook）最先丢、关系次之、
+        绑定实体档案最后——此前 reversed() 实现与注释/设计相反（实体先丢）。"""
+        b = _bundle(
+            entities=[_entity("e1", "甲", static="档" * 100),
+                      _entity("e2", "乙", static="案" * 100)],
+            relations=[_Ns(source_character=_Ns(name="甲"), target_character=_Ns(name="乙"),
+                           relationship_type="旧识", description="旧识" * 50)],
+            hooks=[{"content": "伏笔" + "线" * 60} for _ in range(10)],
+            world_sourced=False,
+        )
+        entries = kp.build_knowledge_entries(b)
+        original = kp.KG_BUDGET_CHARS
+        kp.KG_BUDGET_CHARS = 300
+        try:
+            selected, unselected, _ = kp.select_knowledge(entries, b, "")
+        finally:
+            kp.KG_BUDGET_CHARS = original
+        dropped_kinds = [
+            "hook" if u["key"].startswith("hook:")
+            else "relation" if u["key"].startswith("relation:")
+            else "entity"
+            for u in unselected if u["reason"] == "预算整条丢弃"
+        ]
+        first_non_hook = next(
+            (i for i, k in enumerate(dropped_kinds) if k != "hook"), len(dropped_kinds))
+        self.assertEqual(dropped_kinds[:first_non_hook], ["hook"] * first_non_hook,
+                         f"hook 应最先被丢，实际丢弃顺序：{dropped_kinds}")
+        self.assertTrue(any(e.key.startswith("entity:") for e in selected),
+                        "实体档案最后才轮到丢（丢完养料/关系后预算已够）")
+
     def test_legacy_mode_all_entities_author_selected(self):
         ent = _entity("e1", "旧表角色", static="档案")
         b = _bundle(entities=[ent], world_sourced=False, states=[], content="")
@@ -270,6 +301,19 @@ class TestPrefixDiscipline(unittest.TestCase):
         b3.world_state = {"character_states": states3}
         kv3 = kp.build_knowledge_view(b3)
         self.assertIn("新角色", kv3.entities_text)  # 在场=新前缀
+
+    def test_world_content_edit_invalidates_prefix(self):
+        """签名内容化回归锁（2026-08-28 审计修复）：同数量的档案内容编辑必须
+        换签名重算——此前签名只含 len()，改档案不换签名，冻结前缀继续供旧
+        档案到切章为止（隔离复现：改后 entities_text 仍为旧档案）。"""
+        kp._PREFIX_CACHE.clear()
+        kv1 = kp.build_knowledge_view(self._world_bundle("<p>林尘拧紧了螺栓。</p>"))
+        self.assertIn("外貌：清瘦", kv1.entities_text)
+        b2 = self._world_bundle("<p>林尘拧紧了螺栓。</p>")
+        b2.entities[0].character.static_prompt = "外貌：魁梧"  # 同数量、只改内容
+        kv2 = kp.build_knowledge_view(b2)
+        self.assertIn("外貌：魁梧", kv2.entities_text)
+        self.assertNotIn("外貌：清瘦", kv2.entities_text)
 
     def test_warm_card_from_spine(self):
         b = self._world_bundle("<p>正文。</p>")

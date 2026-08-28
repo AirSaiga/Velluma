@@ -58,6 +58,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
@@ -1050,6 +1051,119 @@ async def style_events_summary(
         "inbox_accept_rate": round(confirms / (confirms + counts.get("inbox_dismiss", 0)), 3)
         if (confirms + counts.get("inbox_dismiss", 0)) > 0 else None,
     }
+
+
+# ============================================================
+# 三平面分权·呈现平面配套（2026-08-29，docs/style-paradigm.md）
+# ============================================================
+
+class WashPreferOriginalRequest(BaseModel):
+    pattern: str
+
+
+@router.post("/books/{book_id}/style/wash-prefer-original", status_code=204)
+async def wash_prefer_original(
+    book_id: UUID,
+    payload: WashPreferOriginalRequest,
+    db: AsyncSession = Depends(get_db),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """可逆学习（P1 配套铁律 3）：作者查看原稿后仍用原稿 = 一次肯定胜过三次
+    否定——该禁忌从硬禁降为提醒（洗层此后对该词只提示不动手）。
+
+    处置分两路：负面清单里的条目直接 severity 降级（作者自己标的，作者自己
+    撤）；不在负面清单（系统陈词层来的 blocker）→ 加本书豁免
+    （books.style_cliche_exemptions，与系统陈词豁免同一机制）。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    pattern = (payload.pattern or "").strip()
+    if not pattern:
+        return
+
+    demoted_in_list = False
+    try:
+        from backend.repositories import StyleCardRepository
+        card = await StyleCardRepository(db).get_book_card(book_id)
+        if card is not None:
+            negative = list(card.negative_list or [])
+            changed = False
+            for item in negative:
+                if isinstance(item, dict) and item.get("word") == pattern and item.get("severity") == "blocker":
+                    item["severity"] = "warning"
+                    changed = True
+            if changed:
+                card.negative_list = negative
+                await db.commit()
+                demoted_in_list = True
+    except Exception as e:
+        logger.warning(f"[StyleWash] 负面清单降级失败: {e}")
+
+    if not demoted_in_list:
+        # 系统层 blocker → 本书豁免（作者明示保留该词）
+        try:
+            exemptions = list(book.style_cliche_exemptions or [])
+            if pattern not in exemptions:
+                exemptions.append(pattern)
+                book.style_cliche_exemptions = exemptions
+                await db.commit()
+                invalidate_cliche_cache()
+        except Exception as e:
+            logger.warning(f"[StyleWash] 豁免写入失败: {e}")
+
+    _append_style_event(str(book_id), "wash_prefer_original", pattern)
+
+
+@router.get("/books/{book_id}/style/adopted-ghosts")
+async def list_adopted_ghosts(
+    book_id: UUID,
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """P5 采纳幽灵收编池：作者采纳过的幽灵草稿（带正文者），文风页「收为
+    样本」用。红线：候选不直接生效——作者确认才入库（收编走既有 samples
+    创建端点，source=adopted_ghost，装配时 AI 来源样本每批 ≤1 防自蒸馏）。
+
+    数据源：本地 collab_events.jsonl 的 ghost_adopt 事件（detail.text 由
+    前端在采纳时携带）。近 30 条、正文去重、每条 ≤400 字。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    import json as _json
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[2]
+    path = root / "data" / "collab_events.jsonl"
+    out = []
+    seen_text = set()
+    try:
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                for line in reversed(path.read_text(encoding="utf-8").splitlines() or []):
+                    try:
+                        ev = _json.loads(line)
+                    except Exception:
+                        continue
+                    if ev.get("kind") != "ghost_adopt" or ev.get("book_id") != str(book_id):
+                        continue
+                    detail = ev.get("detail") or {}
+                    text = str(detail.get("text") or "").strip()
+                    if not text or text in seen_text:
+                        continue
+                    seen_text.add(text)
+                    out.append({
+                        "ts": ev.get("ts", ""),
+                        "source": detail.get("source") or "",
+                        "wash_hits": int(detail.get("wash_hits") or 0),
+                        "text": text[:400],
+                    })
+                    if len(out) >= 30:
+                        break
+    except Exception as e:
+        logger.debug(f"[StyleWash] 采纳池读取失败: {e}")
+    return out
 
 
 # ============================================================

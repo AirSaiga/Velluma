@@ -30,6 +30,7 @@ import hashlib
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -104,10 +105,25 @@ router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
 OUTLINE_WC_HARD_RATIO = 1.6      # 超过 target×1.6 → 带压缩反馈重试一次
 OUTLINE_WC_TRUNCATE_RATIO = 1.5  # 仍超 → 句界硬截断（截断上限必须 ≤ HARD）
 
+# stitch/continue 字数闸（2026-08-28 扩面）：kimi-k2.6 实测对「控制在 N 字
+# 以内」严重不服从（120 字目标产出 600-700 字、8-10 段，mimo 同病）——
+# prompt 杠杆已尽，上代码闸。与 outline 方向相反：续写的锚在句首（衔接
+# 作者断点），走保头句界截断；不做压缩重试（小目标下压缩=整段重写，
+# 截断免费且首句必连断点）。burst/open 是长文体，超字不截（故意放开）。
+STITCH_WC_HARD_RATIO = 1.6
+STITCH_WC_TRUNCATE_RATIO = 1.5
+
 # stitch LLM 预算下限（C2，P1-4）：deepseek 类推理模型即使传 REASONING_DISABLED
 # 仍烧 ~800-1000 隐藏思考 tokens，1200 下限时正文余量太薄 → 「续写产出为空」；
 # 抬到 2200 给隐藏推理留足死余量。纯上限放宽——非推理模型产出短于上限不多花。
 STITCH_MAX_TOKENS_FLOOR = 2200
+
+# P2 修补重试纪律（三平面分权·呈现平面，2026-08-29 导师方案 §二）：残留
+# blocker（无替代词）→ 单次句级修补。每章 60s 冷却 + 在飞去重（复用停顿心跳
+# 双烧事故的教训模式）；限流/失败/超时静默降级为 chip 呈现——终点永远是作者裁决。
+_GHOST_REPAIR_TS: Dict[str, float] = {}
+_GHOST_REPAIR_INFLIGHT: set = set()
+_GHOST_REPAIR_COOLDOWN_S = 60.0
 
 
 def _truncate_at_sentence(text: str, limit: int) -> str:
@@ -939,6 +955,16 @@ async def stitch_ghost(
     # 上下文装配（B2 单一装配源）：bundle/召回/文风检索统一下沉到
     # services/context/stitch_context.py——本路由与 context-preview 端点共用
     # 同一函数（预览与注入同源红线），行为与旧内联段逐字节一致。
+    # P5 漂移锚样（2026-08-29）：本章漂移提醒在态 → 检索加成收藏样本
+    # （内容哈希缓存的心跳侧口径复用，纯 code 零 LLM；防御式——查库失败
+    # 视为无漂移，不阻塞装配）。
+    _drift_anchor = False
+    try:
+        _chapter_row = await db.get(Chapter, str(chapter_id))
+        if _chapter_row is not None:
+            _drift_anchor = await _style_drift_hint_for_heartbeat(_chapter_row, db) is not None
+    except Exception:
+        _drift_anchor = False
     ctx = await assemble_stitch_context(
         chapter_id=chapter_id,
         mode=request.mode,
@@ -946,6 +972,7 @@ async def stitch_ghost(
         rolling_prefix=request.rolling_prefix,
         db=db,
         chapter_intent=request.chapter_intent,
+        drift_anchor=_drift_anchor,
     )
     bundle = ctx.bundle
     proper_nouns = ctx.proper_nouns
@@ -1142,6 +1169,42 @@ async def stitch_ghost(
             # 模型若仍把原句吐回来（prompt 已禁，等价类变体兜底），剥掉前缀只留续写
             if request.mode == "stitch" and fragment:
                 text = _strip_fragment_prefix(text, fragment)
+            # 字数硬闸扩面（2026-08-28，2026-08-29 改两级）：stitch/continue
+            # 超过 target×1.6 → 先保头句界截到 ×1.5，再把截取稿发回模型按目标
+            # 字数压缩改写（用户拍板方案：纯截断常断在平淡处，压缩改写把同样
+            # 信息收得更有效）。压缩产物超硬限再句界截一次；空产出回落截取稿
+            # ——永不劣于纯截断。放在复读剥离之后：复读原句不计入续写配额。
+            if request.mode in ("stitch", "continue") and request.target_chars > 0:
+                stitch_hard_limit = int(request.target_chars * STITCH_WC_HARD_RATIO)
+                if len(text) > stitch_hard_limit:
+                    head = _truncate_at_sentence(
+                        text, int(request.target_chars * STITCH_WC_TRUNCATE_RATIO)
+                    )
+                    compressed = await call_llm_with_usage(
+                        system_prompt=system_prompt,
+                        user_prompt=(
+                            f"下面是紧接作者断点的续写草稿，超出了 {request.target_chars} 字目标"
+                            f"（现 {len(head)} 字）。请压缩改写到 {request.target_chars} 字以内："
+                            f"保持开头的衔接语义不变，删减修饰与重复动作，每个细节都要推进信息。"
+                            f"只输出压缩后的续写正文，不要解释。\n\n--- 草稿 ---\n{head}"
+                        ),
+                        model_type="creative",
+                        temperature=0.7,
+                        max_tokens=max(STITCH_MAX_TOKENS_FLOOR, request.target_chars * 2 + 1000),
+                        reasoning_config=REASONING_DISABLED,
+                    )
+                    recorder.record_result("adaptive.stitch_ghost.compress", compressed, model_slot="creative")
+                    cand = (compressed.content or "").strip()
+                    if cand:
+                        text = cand if len(cand) <= stitch_hard_limit else _truncate_at_sentence(
+                            cand, int(request.target_chars * STITCH_WC_TRUNCATE_RATIO)
+                        )
+                    else:
+                        text = head
+                        logger.info(
+                            f"[adaptive/stitch-ghost] {request.mode} 压缩改写空产出，"
+                            f"回落截取稿 {len(head)} 字（目标 {request.target_chars}）"
+                        )
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
             # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
             # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
@@ -1181,6 +1244,102 @@ async def stitch_ghost(
                     name=_name,
                     entry_selected=_name in _sel_titles,
                 )
+            # ============================================================
+            # 呈现平面（三平面分权，2026-08-29，docs/style-paradigm.md）：
+            # P1 确定性洗（blocker+alternative 精确替换）→ P2 单次句级修补
+            # （残留 blocker，冷却/在飞纪律）→ P4 语义 shadow（只落事件不改文）。
+            # 作用域 = 采纳线前的 AI 提案；warning 档永不动手；失败不阻塞生成。
+            # ============================================================
+            wash_payload: Dict = {"hits": [], "original_text": ""}
+            ghost_token = uuid.uuid4().hex[:12]  # P5 回流：采纳/蒸发事件据此对齐
+            sample_ids = list(getattr(ctx, "sample_ids", []) or [])
+            repaired_flag = False
+            try:
+                from backend.models import Book as _BookM
+                from backend.services.style.prohibitions import load_prohibition_set
+                from backend.services.style.ghost_wash import wash_ghost_text, build_repair_prompt
+                from backend.services.style.events import append_style_event
+                from backend.services.style.semantic_match import semantic_scan_text
+
+                _prohibitions = None
+                if bundle.book_id:
+                    _prohibitions = await load_prohibition_set(
+                        db,
+                        book=await db.get(_BookM, bundle.book_id),
+                        style_card=getattr(bundle, "style_card", None),
+                    )
+                wash_result = wash_ghost_text(text, _prohibitions)
+                text = wash_result.text
+
+                # P2：残留 blocker（无替代词，洗层只记录未替换）→ 单次句级修补。
+                # 严格验收：修补稿重洗后零残留才采纳，否则维持洗层结果带 chip。
+                if wash_result.residual_hits:
+                    cid = str(chapter_id)
+                    now = time.time()
+                    if (
+                        now - _GHOST_REPAIR_TS.get(cid, 0.0) >= _GHOST_REPAIR_COOLDOWN_S
+                        and cid not in _GHOST_REPAIR_INFLIGHT
+                    ):
+                        _GHOST_REPAIR_INFLIGHT.add(cid)
+                        try:
+                            rep = await call_llm_with_usage(
+                                system_prompt=system_prompt,
+                                user_prompt=build_repair_prompt(text, wash_result.residual_hits),
+                                model_type="creative",
+                                temperature=0.3,
+                                max_tokens=max(STITCH_MAX_TOKENS_FLOOR, len(text) * 2 + 800),
+                                reasoning_config=REASONING_DISABLED,
+                            )
+                            cand = (rep.content or "").strip()
+                            if cand:
+                                recheck = wash_ghost_text(cand, _prohibitions)
+                                if not recheck.residual_hits:
+                                    text = cand
+                                    wash_result = recheck
+                                    repaired_flag = True
+                        finally:
+                            _GHOST_REPAIR_INFLIGHT.discard(cid)
+                            _GHOST_REPAIR_TS[cid] = time.time()
+
+                if wash_result.hits:
+                    wash_payload = {
+                        "hits": [
+                            {
+                                "pattern": h.pattern, "span": h.span,
+                                "replaced": h.replaced, "alternative": h.alternative,
+                            }
+                            for h in wash_result.hits
+                        ],
+                        "original_text": wash_result.original_text,
+                    }
+                    append_style_event(
+                        str(bundle.book_id or ""), "ghost_wash",
+                        f"hits={len(wash_result.hits)};"
+                        f"replaced={len(wash_result.replaced_hits)};"
+                        f"repaired={int(repaired_flag)};mode={request.mode}",
+                    )
+
+                # P4 语义 shadow：blocker 模式向量 × 幽灵文本，抓「换字逃逸」。
+                # shadow 纪律——只落事件（trace + style_events）不改文不弹 chip，
+                # 与 finish 扫描对拍攒校准数据；未配置 embedding 内部零调用短路。
+                try:
+                    sem_hits = await semantic_scan_text(text, _prohibitions)
+                    if sem_hits:
+                        trace_event(
+                            "ghost_semantic_shadow",
+                            hits=len(sem_hits),
+                            top=round(float(sem_hits[0].get("similarity") or 0), 3),
+                            mode=request.mode, ghost_token=ghost_token,
+                        )
+                        append_style_event(
+                            str(bundle.book_id or ""), "ghost_semantic_shadow",
+                            f"hits={len(sem_hits)};top={sem_hits[0].get('similarity')};mode={request.mode}",
+                        )
+                except Exception as sem_e:
+                    logger.debug(f"[adaptive/stitch-ghost] 语义 shadow 失败（静默）: {sem_e}")
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] 洗层失败（不阻塞生成）: {e}")
+
             yield build_sse_event("GHOST_START", "", mode=request.mode)
             # burst/open/outline 文本长 → 更大步长更快节奏（700 字约 2.3s 播完），短档保持原速
             chunk_size = 12 if request.mode in ("burst", "open", "outline") else 6
@@ -1188,10 +1347,13 @@ async def stitch_ghost(
             for pos in range(0, len(text), chunk_size):
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
                 await asyncio.sleep(frame_delay)
-            # warnings 为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
+            # warnings/wash 均为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
             yield build_sse_event(
                 "GHOST_DONE", "", text=text, word_count=len(text),
                 warnings=ghost_warnings,
+                wash=wash_payload,
+                ghost_token=ghost_token,
+                sample_ids=sample_ids,
             )
             trace_event(
                 "adaptive_stitch_complete",
@@ -1199,6 +1361,10 @@ async def stitch_ghost(
                 target_chars=request.target_chars,
                 actual_chars=len(text),
                 warnings=len(ghost_warnings),
+                wash_hits=len(wash_payload.get("hits") or []),
+                wash_repaired=int(repaired_flag),
+                ghost_token=ghost_token,
+                sample_ids=sample_ids,
                 # P1-3（C1）短窗观测：原始上送 vs 截窗后实际进 prompt 的长度
                 rolling_prefix_raw_len=len(request.rolling_prefix or ""),
                 rolling_prefix_used_len=len(rolling_windowed),

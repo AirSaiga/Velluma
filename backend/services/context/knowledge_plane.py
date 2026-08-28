@@ -28,6 +28,7 @@ prompt 逐字节不变）。
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -330,14 +331,16 @@ def select_knowledge(
                 unselected.append({"key": e.key, "title": e.title, "reason": "端点未选中"})
 
     # 逃逸阀（丢整条，永不腰斩；硬层永不丢）：养料序=hook → relation → 提及实体
+    # （2026-08-28 审计修复：原 reversed() 与注释/设计相反——实体最先丢、hook
+    # 最后受保护；升序遍历才是「养料最先丢」的本意，对拍测试已锁顺序）
     total = sum(len(e.body) + len(e.title) for e in selected)
     if total > KG_BUDGET_CHARS:
         soft_order = [e for e in selected if not e.hard]
-        # 丢弃序：hook 最先、relation 次之、提及实体最后
+        # 丢弃序：hook 最先（rank 0）、relation 次之、提及实体最后
         rank = {"hook": 0, "relation": 1, "entity": 2, "asset": 2, "worldview": 3}
         soft_order.sort(key=lambda e: rank.get(e.kind, 2))
         dropped_keys = set()
-        for e in reversed(soft_order):  # 从最不重要的一端开始丢
+        for e in soft_order:  # 从最不重要的一端（hook）开始丢
             if total <= KG_BUDGET_CHARS:
                 break
             total -= len(e.body) + len(e.title)
@@ -471,13 +474,18 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
     if rel:
         kv.relations_text = "# 人物关系（此刻活跃）\n" + "\n".join(f"- {e.title}：{e.body}" for e in rel)
 
-    # ---- 负面清单约束块（四源合并，全量；现状五 builder 不消费禁词的同构洞收编）----
+    # ---- 负面清单约束块（四源合并；P0 2026-08-29 分档：块内只留 warning 档）----
+    # 三平面分权（docs/style-paradigm.md）：负面块的执法职能移交呈现平面洗层
+    # （wash_ghost_text），prompt 只承担偏置——blocker 档抽走去 user 尾部重钉
+    # （模型对 prompt 头尾服从最高，作者最硬的禁忌不该埋在第 8 块遗忘区），
+    # warning 档维持提醒语义留原位。无 blocker 条目的书逐字节零变化。
     prohibitions = getattr(bundle, "prohibitions", None)
+    blocker_bits: List[str] = []
     if prohibitions is not None:
         try:
-            words = prohibitions.words(10 ** 6)
-            if words:
-                kv.negative_constraints = "# 本书禁词（作者负面清单与系统陈词合并，硬约束）\n" + "、".join(words)
+            warn_words, blocker_bits = split_prohibition_tiers(prohibitions)
+            if warn_words:
+                kv.negative_constraints = "# 本书禁词（提醒档，尽量避开）\n" + "、".join(warn_words)
         except Exception:
             pass  # 降级空串（块缺席），不阻塞装配
 
@@ -493,6 +501,10 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         pin_bits.append(f"t={world_time}")
     if pin_bits:
         kv.recency_pin = "【此刻·切记】" + "｜".join(pin_bits)
+    # P0 blocker 重钉（三平面分权）：作者硬禁忌正面化编译进 user 尾部——
+    # recency 位是模型服从最高区，与「此刻」行同屏重钉
+    if blocker_bits:
+        kv.recency_pin = (kv.recency_pin + "\n" if kv.recency_pin else "") + "【作者禁忌】" + "；".join(blocker_bits)
     # B6 热层后缀：本章提及（前缀冻结纪律——随段落变的部分只住后缀）
     if kv.mentioned_names:
         kv.recency_pin += "\n本章提及：" + "、".join(kv.mentioned_names[:12])
@@ -516,6 +528,25 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
     return kv
 
 
+def split_prohibition_tiers(prohibitions: Any) -> Tuple[List[str], List[str]]:
+    """P0 分档纯函数：负面清单按 severity 拆两路。
+
+    返回 (warning 词表——负面块渲染用, blocker 正面化重钉行——user 尾部用)。
+    blocker 行格式「不用「X」——改用 Y」：有 alternative 给正路，无 alternative
+    给通用正路（具体动作/物件）。≤6 行（重钉是 3-5 行的 recency 位，不是清单墙）。
+    """
+    warn = prohibitions.words(10 ** 6, severity="warning")
+    bits: List[str] = []
+    for e in getattr(prohibitions, "entries", ()) or ():
+        if (getattr(e, "severity", "") or "warning") != "blocker" or not e.pattern:
+            continue
+        alt = e.alternative or "换成具体的动作或物件"
+        bits.append(f"不用「{e.pattern}」——{alt}")
+        if len(bits) >= 6:
+            break
+    return warn, bits
+
+
 def kg_block_kwargs(kv: Any) -> Dict[str, str]:
     """知识视图 → render_system_blocks / builder 的块参数 dict。
 
@@ -534,11 +565,65 @@ def kg_block_kwargs(kv: Any) -> Dict[str, str]:
 
 
 # ---- B6 章内冻结前缀缓存（WCA §3 前缀纪律）----
-# 键=世界侧输入签名（章/t/场景钉/spine/实体数/事件数/世界观条数/canon 长度），
+# 键=世界侧输入签名（章/t/场景钉/spine/各知识源内容哈希/折叠态摘要），
 # **不含正文内容**——作者打字不再作废前缀；刷新点=切章/世界编辑/场景钉/
 # spine 变更/锚定时刻变化（全部落在键里）。提及扫描每调用重跑（纯 CPU）。
+# 2026-08-28 审计修复：签名从「数量/长度」升级为内容哈希——同数量的内容级
+# 世界编辑（改档案/改关系描述/改世界观条目/同长 canon）此前不换签名，冻结
+# 前缀会继续供旧档案到切章为止；哈希开销微秒~毫秒级，远低于一次 bundle 加载。
 _PREFIX_CACHE: Dict[Any, tuple] = {}
 _PREFIX_CACHE_MAX = 64
+
+
+def _sig_hash(text: str) -> str:
+    """前缀签名用稳定短哈希（内容级失效——数量/长度只在巧合时才失配）。"""
+    return hashlib.sha1((text or "").encode("utf-8", "ignore")).hexdigest()[:12]
+
+
+def _entity_sig_line(ent: Any) -> str:
+    """实体进签名的字段行（名/档案/此刻标注/别名/可见性——渲染产物的内容源）。"""
+    char = getattr(ent, "character", None)
+    if char is None and isinstance(ent, dict):
+        char = ent.get("character")
+
+    def c(attr: str) -> str:
+        if char is None:
+            return ""
+        v = getattr(char, attr, None)
+        if v is None and isinstance(char, dict):
+            v = char.get(attr)
+        return str(v or "")
+
+    we = getattr(ent, "world_entity", None)
+    vis = str(getattr(we, "visibility", "") or "") if we is not None else ""
+    return "|".join([c("name"), c("static_prompt"), c("dynamic_state"), c("aliases"), vis])
+
+
+def _asset_sig_line(a: Any) -> str:
+    we = getattr(a, "world_entity", None)
+    vis = str(getattr(we, "visibility", "") or "") if we is not None else ""
+    return "|".join([
+        str(getattr(a, "name", "") or ""),
+        str(getattr(a, "static_description", "") or ""),
+        vis,
+    ])
+
+
+def _rel_sig_line(r: Any) -> str:
+    src = getattr(r, "source_character", None)
+    tgt = getattr(r, "target_character", None)
+    return "|".join([
+        (getattr(src, "name", "") or "") if src is not None else "",
+        (getattr(tgt, "name", "") or "") if tgt is not None else "",
+        str(getattr(r, "relationship_type", "") or ""),
+        str(getattr(r, "description", "") or ""),
+    ])
+
+
+def _hook_sig_line(h: Any) -> str:
+    if isinstance(h, dict):
+        return str(h.get("content", "") or "")
+    return str(getattr(h, "content", "") or "")
 
 
 def _prefix_signature(bundle: Any) -> tuple:
@@ -556,17 +641,19 @@ def _prefix_signature(bundle: Any) -> tuple:
         getattr(bundle, "world_time", 0) or 0,
         str(getattr(chapter, "scene_location_id", None) or ""),
         spine_hash,
-        len(getattr(bundle, "entities", None) or []),
-        len(getattr(bundle, "assets", None) or []),
-        len(getattr(bundle, "relationships", None) or []),
-        len(getattr(bundle, "open_hooks", None) or []),
-        len(_worldview_items(getattr(bundle, "book", None))),
-        len(getattr(bundle, "canon_context", "") or ""),
-        len(getattr(bundle, "previous_summary", "") or ""),
-        # 折叠态摘要（在场/死亡判定输入——world_state 变化必须换前缀）
+        _sig_hash("\n".join(_entity_sig_line(e) for e in (getattr(bundle, "entities", None) or []))),
+        _sig_hash("\n".join(_asset_sig_line(a) for a in (getattr(bundle, "assets", None) or []))),
+        _sig_hash("\n".join(_rel_sig_line(r) for r in (getattr(bundle, "relationships", None) or []))),
+        _sig_hash("\n".join(_hook_sig_line(h) for h in (getattr(bundle, "open_hooks", None) or []))),
+        _sig_hash(_json.dumps(_worldview_items(getattr(bundle, "book", None)), ensure_ascii=False)),
+        _sig_hash(str(getattr(bundle, "canon_context", "") or "")),
+        _sig_hash(str(getattr(bundle, "previous_summary", "") or "")),
+        # 折叠态摘要（在场/死亡判定输入——world_state 变化必须换前缀；
+        # label 一并入键：状态行文案变化也是前缀渲染输入）
         _json.dumps(
             sorted(
-                (str(cs.get("entity_id")), str(cs.get("alive")), str(cs.get("location_id") or ""))
+                (str(cs.get("entity_id")), str(cs.get("alive")),
+                 str(cs.get("location_id") or ""), str(cs.get("label") or ""))
                 for cs in ((getattr(bundle, "world_state", None) or {}).get("character_states") or [])
             ),
             ensure_ascii=False,

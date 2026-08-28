@@ -146,12 +146,14 @@ class _Rec:
 
 
 class _Bundle:
+    book_id = "bk-wash"
     outline_text = ""
     previous_summary = ""
     worldview_text = ""
     canon_context = ""
     spatial_brief = ""
     character_secrets = []
+    style_card = None
 
 
 class _Ctx:
@@ -174,7 +176,7 @@ def _run_stitch(monkeypatch, request: StitchGhostRequest, llm_contents):
     traces = {}
 
     async def fake_llm(system_prompt, user_prompt, **kw):
-        llm_calls.append(kw)
+        llm_calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt, **kw})
         return _Result(llm_contents[min(len(llm_calls) - 1, len(llm_contents) - 1)])
 
     async def fake_assemble(**kw):
@@ -271,6 +273,261 @@ def test_route_stitch_semantic_variant_not_stripped(monkeypatch):
     model_text = "他握紧了刀，指节泛白。"
     done, _, _ = _run_stitch(monkeypatch, req, [model_text])
     assert done["text"] == model_text
+
+
+# ============================================================
+# 4. stitch/continue 字数闸扩面（2026-08-28 落地，2026-08-29 改两级：
+#    kimi 120 字目标实测产出 600-700 字 8-10 段 → 保头截断 + 压缩改写）
+# ============================================================
+
+def test_route_stitch_overlong_compressed(monkeypatch):
+    """stitch 超字：保头截断 → 压缩改写达标 → 落屏压缩稿（≤ target×1.5）。"""
+    text = "".join(_sents("檐水", 30))   # 390 字 > 120×1.6=192
+    compressed = "檐水改后两句的压缩稿。"   # 压缩产物达标
+    req = StitchGhostRequest(
+        fragment="他握紧刀。", mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
+
+    assert done["text"] == compressed          # 压缩稿落屏
+    assert len(llm_calls) == 2                 # 主生成 + 压缩改写
+    assert "压缩改写" in llm_calls[1]["user_prompt"]  # 压缩指令在第二次调用
+    assert llm_calls[1]["reasoning_config"] == REASONING_DISABLED
+
+
+def test_route_stitch_compress_empty_falls_back_to_head(monkeypatch):
+    """压缩空产出 → 回落截取稿（句界收尾，永不劣于纯截断）。"""
+    text = "".join(_sents("檐水", 30))
+    req = StitchGhostRequest(
+        fragment="他握紧刀。", mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, ""])
+
+    body = done["text"]
+    assert len(body) <= 180                          # target×1.5
+    assert body.startswith(_sents("檐水", 30)[0])     # 保头
+    assert body.endswith("。")                        # 句界收尾
+    assert len(llm_calls) == 2                        # 压缩尝试确实发了
+
+
+def test_route_stitch_compress_still_over_truncated_again(monkeypatch):
+    """压缩产物仍超硬限 → 对压缩稿再句界截一次（吃压缩收益，不整段丢弃）。"""
+    text = "".join(_sents("檐水", 30))
+    overlong_compress = "".join(_sents("压缩", 30))   # 压缩稿也 ~390 字
+    req = StitchGhostRequest(
+        fragment="他握紧刀。", mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, _, _ = _run_stitch(monkeypatch, req, [text, overlong_compress])
+
+    body = done["text"]
+    assert len(body) <= 180
+    assert body.startswith(_sents("压缩", 30)[0])     # 落屏的是压缩稿的截取
+
+
+def test_route_continue_overlong_compressed(monkeypatch):
+    text = "".join(_sents("巷口", 40))
+    compressed = "巷口压缩改写后的两句。"
+    req = StitchGhostRequest(
+        fragment="承接占位。", mode="continue",
+        rolling_prefix="前" * 100, target_chars=200,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
+    assert done["text"] == compressed
+    assert len(done["text"]) <= 300
+    assert len(llm_calls) == 2
+
+
+def test_route_stitch_mild_overrun_not_touched(monkeypatch):
+    """轻微超字（≤×1.6）不动——130 字对 120 目标是句界自然收尾，别腰斩，
+    也不白烧压缩调用。"""
+    text = "他握紧刀。" + "檐下占位一句。" * 10   # 剥离后续写 70 字 < 192
+    req = StitchGhostRequest(
+        fragment="他握紧刀。", mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text])
+    assert done["text"] == "檐下占位一句。" * 10
+    assert len(llm_calls) == 1                 # 未触发压缩
+
+
+# ============================================================
+# 5. 呈现平面洗层（三平面分权 P1/P2，2026-08-29）
+# ============================================================
+
+class _FakeBook:
+    id = "bk-wash"
+
+
+class _FakeDb:
+    async def get(self, model, pk):
+        return _FakeBook()
+
+
+def _patch_prohibitions(monkeypatch, ps):
+    import backend.services.style.prohibitions as prohib_mod
+    from backend.services.style import ghost_wash  # noqa: F401
+
+    async def _load(db=None, *, book=None, style_card=None, **kw):
+        return ps
+    monkeypatch.setattr(prohib_mod, "load_prohibition_set", _load)
+
+
+def _run_stitch_wash(monkeypatch, req, llm_contents, ps):
+    """洗层版 harness：真 db 替身（book 命中）+ 禁忌面注入 + 事件/语义打桩。"""
+    from backend.routes.chapter_generation import adaptive as adaptive_route
+    import backend.services.style.events as events_mod
+    import backend.services.style.semantic_match as sem_mod
+
+    events = []
+    monkeypatch.setattr(events_mod, "append_style_event",
+                        lambda *a, **k: events.append(a))
+    async def _no_sem(text, ps_):
+        return []
+    monkeypatch.setattr(sem_mod, "semantic_scan_text", _no_sem)
+    _patch_prohibitions(monkeypatch, ps)
+
+    done, llm_calls, _traces = _run_stitch(monkeypatch, req, llm_contents)
+    return done, llm_calls, events
+
+
+def test_route_stitch_wash_replaces_blocker(monkeypatch):
+    """P1：blocker+alternative 命中 → GHOST_DONE 文本已替换 + wash 增量字段。"""
+    from backend.services.style.prohibitions import ProhibitionEntry, ProhibitionSet
+    ps = ProhibitionSet((
+        ProhibitionEntry(pattern="深邃", is_regex=False, alternative="沉静",
+                         severity="blocker", source="test"),
+    ))
+    req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch",
+                             rolling_prefix="前文占位。", target_chars=400)
+    # monkeypatch _run_stitch 内部桩 + 本测 db 替身：直调路由太重，改走 harness
+    # 的 db 参数不可注入——用 route 层重跑（见下），此处先验证核心函数已单测。
+    # 路由级：借 _run_stitch（db=None → 洗层 try 内 db.get 失败静默跳过），
+    # 因此路由级断言用可注入 db 的直调。
+    async def scenario():
+        from backend.routes.chapter_generation import adaptive as adaptive_route
+        import backend.services.style.events as events_mod
+        import backend.services.style.semantic_match as sem_mod
+
+        events = []
+        monkeypatch.setattr(events_mod, "append_style_event",
+                            lambda *a, **k: events.append(a))
+        async def _no_sem(text, ps_):
+            return []
+        monkeypatch.setattr(sem_mod, "semantic_scan_text", _no_sem)
+        _patch_prohibitions(monkeypatch, ps)
+
+        async def fake_llm(system_prompt, user_prompt, **kw):
+            return _Result("他的目光深邃如海，握紧了刀柄。")
+        async def fake_assemble(**kw):
+            ctx = _Ctx()
+            ctx.sample_ids = ["s1", "s2"]
+            return ctx
+        async def fake_spine(cid, db):
+            return []
+        monkeypatch.setattr(adaptive_route, "call_llm_with_usage", fake_llm)
+        monkeypatch.setattr(adaptive_route, "assemble_stitch_context", fake_assemble)
+        monkeypatch.setattr(adaptive_route, "_spine_anchor_rows_for_prompt", fake_spine)
+        monkeypatch.setattr(adaptive_route, "get_adaptive_recorder", lambda cid: _Rec())
+        async def _flush(cid):
+            return None
+        monkeypatch.setattr(adaptive_route, "flush_adaptive_records", _flush)
+        monkeypatch.setattr(adaptive_route, "bind_adaptive_trace", lambda cid: None)
+        monkeypatch.setattr(adaptive_route, "trace_event", lambda *a, **k: None)
+        monkeypatch.setattr(adaptive_route, "_style_drift_hint_for_heartbeat",
+                            lambda ch, db: None)
+
+        resp = await adaptive_route.stitch_ghost(CH, req, _FakeDb())
+        frames = []
+        async for chunk in resp.body_iterator:
+            frames.append(chunk if isinstance(chunk, str) else chunk.decode("utf-8"))
+        return frames, events
+
+    import asyncio, json as _json
+    frames, events = asyncio.run(scenario())
+    done = None
+    for f in frames:
+        if f.startswith("data: "):
+            payload = _json.loads(f[len("data: "):].strip())
+            if payload.get("event") == "GHOST_DONE":
+                done = payload
+
+    assert done is not None
+    assert "深邃" not in done["text"] and "沉静" in done["text"]
+    wash = done["wash"]
+    assert len(wash["hits"]) == 1 and wash["hits"][0]["replaced"]
+    assert wash["original_text"].startswith("他的目光深邃")   # 原稿快照（用原稿用）
+    assert done["sample_ids"] == ["s1", "s2"]                 # P5 埋点贯通
+    assert any(e[1] == "ghost_wash" for e in events)          # style_events 落账
+
+
+def test_route_stitch_wash_repair_residual(monkeypatch):
+    """P2：残留 blocker（无替代词）→ 单次修补重试，严格验收（零残留才采纳）。"""
+    from backend.services.style.prohibitions import ProhibitionEntry, ProhibitionSet
+    ps = ProhibitionSet((
+        ProhibitionEntry(pattern="指腹", is_regex=False, alternative=None,
+                         severity="blocker", source="test"),
+    ))
+    req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch",
+                             rolling_prefix="前文占位。", target_chars=400)
+
+    async def scenario():
+        from backend.routes.chapter_generation import adaptive as adaptive_route
+        import backend.services.style.events as events_mod
+        import backend.services.style.semantic_match as sem_mod
+
+        monkeypatch.setattr(events_mod, "append_style_event", lambda *a, **k: None)
+        async def _no_sem(text, ps_):
+            return []
+        monkeypatch.setattr(sem_mod, "semantic_scan_text", _no_sem)
+        _patch_prohibitions(monkeypatch, ps)
+
+        calls = []
+
+        async def fake_llm(system_prompt, user_prompt, **kw):
+            calls.append(user_prompt)
+            if len(calls) == 1:
+                return _Result("他的指腹磨出茧，握紧了刀柄。")
+            return _Result("他的指尖磨出茧，握紧了刀柄。")   # 修补稿：零残留
+        async def fake_assemble(**kw):
+            return _Ctx()
+        monkeypatch.setattr(adaptive_route, "call_llm_with_usage", fake_llm)
+        monkeypatch.setattr(adaptive_route, "assemble_stitch_context", fake_assemble)
+        monkeypatch.setattr(adaptive_route, "_spine_anchor_rows_for_prompt",
+                            lambda cid, db: None)
+        monkeypatch.setattr(adaptive_route, "get_adaptive_recorder", lambda cid: _Rec())
+        async def _flush(cid):
+            return None
+        monkeypatch.setattr(adaptive_route, "flush_adaptive_records", _flush)
+        monkeypatch.setattr(adaptive_route, "bind_adaptive_trace", lambda cid: None)
+        monkeypatch.setattr(adaptive_route, "trace_event", lambda *a, **k: None)
+        monkeypatch.setattr(adaptive_route, "_style_drift_hint_for_heartbeat",
+                            lambda ch, db: None)
+        monkeypatch.setattr(adaptive_route, "_GHOST_REPAIR_TS", {})
+
+        resp = await adaptive_route.stitch_ghost(CH, req, _FakeDb())
+        frames = []
+        async for chunk in resp.body_iterator:
+            frames.append(chunk if isinstance(chunk, str) else chunk.decode("utf-8"))
+        return frames, calls
+
+    import asyncio, json as _json
+    frames, calls = asyncio.run(scenario())
+    done = None
+    for f in frames:
+        if f.startswith("data: "):
+            payload = _json.loads(f[len("data: "):].strip())
+            if payload.get("event") == "GHOST_DONE":
+                done = payload
+
+    assert done is not None
+    assert len(calls) == 2                                  # 主生成 + 一次修补
+    assert "指腹" in calls[1]                               # 修补指令点名禁词
+    assert "指腹" not in done["text"] and "指尖" in done["text"]
+    wash = done["wash"]
+    assert wash["hits"] == [] and wash["original_text"] == ""  # 修补稿零命中
 
 
 def test_route_trace_rolling_window_fields_and_token_floor(monkeypatch):

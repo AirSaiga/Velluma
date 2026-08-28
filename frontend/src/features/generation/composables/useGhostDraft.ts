@@ -38,6 +38,17 @@ export const ghostDegraded = ref(false)
 /** C1 上屏前快检疑点（GHOST_DONE 到达时由 useAdaptiveAssist 灌入；随生命周期重置） */
 export const ghostWarnings = ref<GhostWarning[]>([])
 
+// ---- 呈现平面洗层状态（三平面分权 P1，2026-08-29）----
+/** 洗层命中清单 + 原稿快照（GHOST_DONE 灌入；随生命周期重置；空 hits=未触发） */
+export interface GhostWashPayload {
+  hits: Array<{ pattern: string; span: string; replaced: boolean; alternative: string }>
+  original_text: string
+}
+export const ghostWash = ref<GhostWashPayload>({ hits: [], original_text: '' })
+
+/** P5 回流 meta：本发幽灵的对齐令牌 + 注入样本 id（采纳/蒸发埋点携带） */
+let _lastGhostMeta: { token: string; sampleIds: string[] } | null = null
+
 /** 快检 kind → 人话短标签（toast 汇总 + 停靠区明细共用一张词表） */
 const WARNING_KIND_LABELS: Record<GhostWarning['kind'], string> = {
   dead_speak: '死者开口',
@@ -64,6 +75,45 @@ export function summarizeGhostWarnings(warnings: GhostWarning[]): string {
 /** GHOST_DONE 帧到达时灌入快检疑点（useAdaptiveAssist 调用；随 begin/evaporate/commit 重置）。 */
 export function setGhostWarnings(warnings: GhostWarning[]): void {
   ghostWarnings.value = Array.isArray(warnings) ? warnings : []
+}
+
+/** GHOST_DONE 帧到达时灌入洗层结果与回流 meta（useAdaptiveAssist 调用）。 */
+export function setGhostWash(
+  wash?: { hits?: Array<{ pattern: string; span: string; replaced: boolean; alternative: string }>; original_text?: string },
+  meta?: { token?: string; sampleIds?: string[] },
+): void {
+  ghostWash.value = {
+    hits: Array.isArray(wash?.hits) ? wash!.hits! : [],
+    original_text: wash?.original_text || '',
+  }
+  _lastGhostMeta = meta?.token ? { token: meta.token, sampleIds: meta.sampleIds || [] } : null
+}
+
+/**
+ * 「用原稿」（P1 可逆学习）：把幽灵区内容重灌为洗前原稿（保留 ghost mark、
+ * 隔离撤销栈）。作者明示保留被洗掉的词——调用方随后应对每个 replaced 命中
+ * 调 wash-prefer-original（blocker 降 warning，一次肯定胜过三次否定）。
+ */
+export function useGhostOriginal(): boolean {
+  const original = ghostWash.value.original_text
+  if (!original) return false
+  const editor = chapterEditorHandle.value
+  const range = findGhostRange()
+  if (!editor || !range) return false
+  const paras = original.split(/\n\n+/).filter((p) => p.trim())
+  const blocks = paras.length > 1
+    ? paras.map((p) => ({
+        type: 'paragraph',
+        content: [{ type: 'text', text: p, marks: [editor.schema.marks.ghostDraft.create()] }],
+      }))
+    : [{ type: 'paragraph', content: [{ type: 'text', text: original, marks: [editor.schema.marks.ghostDraft.create()] }] }]
+  editor.chain()
+    .command(noHistory)
+    .deleteRange({ from: range.from, to: range.to })
+    .insertContentAt(range.from, blocks)
+    .run()
+  ghostOriginal.value = original  // dirty 基准同步（原稿即新的“未修改态”）
+  return true
 }
 
 /**
@@ -109,6 +159,7 @@ export function beginGhost(
   ghostOriginal.value = ''
   ghostDegraded.value = degraded
   ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
   ghostAnchorPos = anchorPos ?? null
   ghostActive.value = true
 }
@@ -234,9 +285,18 @@ export function commitGhost(): string {
     ghostActive.value = false
     ghostSource.value = null
     ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
     return ''
   }
-  dispatchCollabEvent('ghost_adopt', { source: ghostSource.value })
+  // P5 回流（2026-08-29）：meta（token/样本 id）+ 正文随采纳事件落账——
+  // sample_prior 据此派生采纳先验；文风页「AI 采纳收样本」池读正文
+  dispatchCollabEvent('ghost_adopt', {
+    source: ghostSource.value,
+    ghost_token: _lastGhostMeta?.token || '',
+    sample_ids: _lastGhostMeta?.sampleIds || [],
+    wash_hits: ghostWash.value.hits.length,
+    text: editor.state.doc.textBetween(range.from, range.to, '\n\n').slice(0, 400),
+  })
   const text = editor.state.doc.textBetween(range.from, range.to, '\n\n')
   editor
     .chain()
@@ -276,6 +336,7 @@ export function commitGhost(): string {
   ghostSource.value = null
   ghostAnchorPos = null
   ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
   const summary = summarizeGhostWarnings(adoptedWarnings)
   if (summary) {
     const { showToast } = useToast()
@@ -290,7 +351,11 @@ export function evaporateGhost(): void {
   const range = findGhostRange()
   if (editor && range) {
     const source = ghostSource.value
-    dispatchCollabEvent('ghost_discard', { source })
+    dispatchCollabEvent('ghost_discard', {
+      source,
+      ghost_token: _lastGhostMeta?.token || '',
+      sample_ids: _lastGhostMeta?.sampleIds || [],
+    })
     // 失败理由埋点（2026-08-25 实测主线「失败分类学」）：先取文本再删——
     // ≥30 字的蒸发才问（琐碎蒸发多是试键/误触，问了也是噪声）；
     // 可点可无视 8s 自灭，零打扰红线；理由枚举见 InsightsView COLLAB_KIND_LABELS。
@@ -320,6 +385,7 @@ export function evaporateGhost(): void {
   ghostOriginal.value = ''
   ghostDegraded.value = false
   ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
   ghostAnchorPos = null
 }
 

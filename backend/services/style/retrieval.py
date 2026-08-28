@@ -34,12 +34,23 @@ C2 场景匹配（docs/foundation-hardening.md §5.2）：scene_hint（v1 仅
 候选池内（宁缺排序变化，不做排他筛选）。hint 为 None/"general" 时行为与
 现状逐一致（零变化契约）。
 
+三平面分权·选择平面扩展（2026-08-29，docs/style-paradigm.md §3）：
+- P5 采纳率先验：每样本「注入后被采纳」贝叶斯先验（ghost_token 埋点派生），
+  向量流距离 ÷ 因子（0.8~1.2）、兜底流作排序末位键——只调序不筛选；
+- P5 漂移锚样：drift_anchor=True 时收藏样本 +0.1（漂移检出 → 作者认证的
+  最佳示范优先，v1 锚样启发式）；
+- P6 旋钮选择器：意图旋钮/对话目标编译为样本轻指纹（句均长/对话占比）的
+  匹配度微调——「描述」不再写给模型看，编译成挑样本的条件；
+- P5 AI 来源配比：source=adopted_ghost 的样本每批 ≤1 条（防采纳幽灵自蒸馏
+  污染样本库——长期回流会让文风向 AI 味收敛）。
+
 红线：任何失败降级为空列表，调用方 prompt 零变化（不阻塞生成）。
 预算：k≤2 × max_chars（默认 1200）≈ 单次注入 ≤2400 字（设计稿 §4 E1）。
 """
 
 import logging
-from typing import Any, List, Optional
+import re
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,8 +61,12 @@ from backend.services.llm.embedding import get_embedding, is_embedding_configure
 from backend.services.context.budget import AUTHOR_SAMPLE_MAX_CHARS, AUTHOR_SAMPLES_MAX_K
 # C2 场景匹配（docs/foundation-hardening.md §5.2）：dialogue hint 下同型样本加成
 from backend.services.style.scene_hint import SCENE_GENERAL
+from backend.services.style.sample_prior import PRIOR_FACTOR_MAX, sample_prior_factor
 
 logger = logging.getLogger(__name__)
+
+# AI 来源样本配比上限（P5）：每批 few-shot 至多 1 条采纳幽灵收编的样本
+_AI_SOURCE_CAP = 1
 
 # ============================================================
 # C2 场景加成口径
@@ -111,7 +126,76 @@ def order_samples_for_fallback(samples: List[Any], scene_hint: Optional[str] = N
     return sorted(samples, key=rank)
 
 
-async def retrieve_author_samples(
+# ============================================================
+# P6 样本轻指纹（选择器用，纯算法——候选池小，逐条现算可接受）
+# ============================================================
+
+_SENT_SPLIT_RE = re.compile(r"[。！？!?…]+")
+
+
+def sample_light_stats(text: str) -> Tuple[float, float]:
+    """样本轻指纹：(句均长, 对话占比)。空文本 → (0, 0)。
+
+    句长切分与 fingerprint.split_sentences 同判据（。！？!?…）；对话占比按
+    中英引号字符密度近似（选择器只需相对可比，不必与审计尺子逐位对齐）。
+    """
+    t = text or ""
+    if not t.strip():
+        return (0.0, 0.0)
+    parts = [p for p in _SENT_SPLIT_RE.split(t) if p.strip()]
+    mean_len = (len(t.strip()) / len(parts)) if parts else 0.0
+    quotes = sum(t.count(c) for c in "“”「」\"")
+    ratio = min(1.0, quotes / 2 / max(len(parts), 1))
+    return (round(mean_len, 1), round(ratio, 2))
+
+
+# 旋钮档位 → 目标句均长锚（rhythm 1-5；档间线性近似，选择器只比相对距离）
+_RHYTHM_TARGET_MEAN_LEN = {1: 10.0, 2: 16.0, 3: 22.0, 4: 30.0, 5: 38.0}
+
+
+def _selector_adjust(sample: Any, style_card: Any) -> float:
+    """P6 选择器微调量（向量流加到距离上、兜底流作排序键；越小越好）。
+
+    旋钮/对话目标是「筛选条件」不是「prompt 声明」：rhythm 手动档 → 样本
+    句均长与档位锚的距离（归一）；dialogue_ratio_target → 样本对话占比与
+    目标的距离。无卡/自动档 → 0（零变化）。
+    """
+    if style_card is None:
+        return 0.0
+    knobs = getattr(style_card, "style_knobs", None)
+    knobs = knobs if isinstance(knobs, dict) else {}
+    mean_len, dialogue_ratio = sample_light_stats(getattr(sample, "content", "") or "")
+    adj = 0.0
+    rhythm = knobs.get("rhythm")
+    if isinstance(rhythm, int) and rhythm in _RHYTHM_TARGET_MEAN_LEN:
+        target = _RHYTHM_TARGET_MEAN_LEN[rhythm]
+        adj += 0.1 * min(1.0, abs(mean_len - target) / 15.0)
+    target_ratio = getattr(style_card, "dialogue_ratio_target", None)
+    if target_ratio is not None and dialogue_ratio > 0:
+        try:
+            adj += 0.05 * min(1.0, abs(dialogue_ratio - float(target_ratio)) / 0.3)
+        except (TypeError, ValueError):
+            pass
+    return adj
+
+
+def _cap_ai_source(ordered: List[Any], k: int) -> List[Any]:
+    """P5 AI 来源配比：source=adopted_ghost 的样本每批至多 _AI_SOURCE_CAP 条，
+    超出的让位给后面的非 AI 样本（不足 k 时保留原序补位）。"""
+    out: List[Any] = []
+    ai_used = 0
+    for s in ordered:
+        if str(getattr(s, "source", "") or "") == "adopted_ghost":
+            if ai_used >= _AI_SOURCE_CAP:
+                continue
+            ai_used += 1
+        out.append(s)
+        if len(out) >= k:
+            break
+    return out
+
+
+async def retrieve_author_samples_with_meta(
     db: AsyncSession,
     book_id: str,
     query_text: str = "",
@@ -119,23 +203,13 @@ async def retrieve_author_samples(
     max_chars: int = AUTHOR_SAMPLE_MAX_CHARS,
     scene_type: Optional[str] = None,
     scene_hint: Optional[str] = None,
-) -> List[str]:
-    """检索 few-shot 作者样本（返回截断后的样本原文列表）。
+    style_card: Any = None,
+    drift_anchor: bool = False,
+) -> List[Tuple[str, str]]:
+    """检索 few-shot 样本（带样本 id——P5 回流埋点用）。
 
-    Args:
-        db: 异步 DB session
-        book_id: 书籍 ID
-        query_text: 检索锚文本（当前写作上下文；空则直接走兜底流）
-        k: 返回条数上限（默认 2，设计稿预算）
-        max_chars: 每条截断上限
-        scene_type: 可选场景**硬过滤**（对话/动作/抒情/悬念；None 不过滤；
-            现无调用方传入，保留字段——C2 起软加成走 scene_hint，勿混用）
-        scene_hint: C2 场景匹配软加成（None/"general" 零行为）：
-            "dialogue" 时向量流同型样本得分 +0.1（距离 -0.1 重排）、
-            兜底流同型同档内排前；异型样本不淘汰（非过滤）
-
-    Returns:
-        List[str]：样本原文（已截断）。无样本/全失败 → []
+    与 retrieve_author_samples 同为两级检索，另叠加选择平面扩展（先验/
+    漂移锚/旋钮选择器/AI 配比，见模块 docstring）。返回 [(sample_id, 截断文本)]。
     """
     if not book_id:
         return []
@@ -147,8 +221,6 @@ async def retrieve_author_samples(
         try:
             query_embedding = await get_embedding(query_text)
             if query_embedding:
-                # C2：hint 生效时超额取候选再加成重排（top-k 外的同型样本
-                # 才有机会进前 k）；无 hint 保持 limit=k 原口径（零变化）
                 fetch_limit = (
                     max(k * _SCENE_HINT_OVERFETCH_FACTOR, k)
                     if scene_hint_active(scene_hint) else k
@@ -159,26 +231,69 @@ async def retrieve_author_samples(
                     scene_type=scene_type,
                     limit=fetch_limit,
                 )
-                if scene_hint_active(scene_hint):
-                    hits = sorted(
-                        ((s, d - SCENE_HINT_BONUS) if _scene_match(s, scene_hint) else (s, d)
-                         for s, d in hits),
-                        key=lambda t: t[1],
-                    )
-                samples = [s for s, _distance in hits][:k]
+
+                def vec_adjust(s: Any, d: float) -> float:
+                    """距离微调：场景加成（既有）+ 先验因子 + 旋钮选择器 + 漂移锚。"""
+                    adj = d - SCENE_HINT_BONUS if _scene_match(s, scene_hint) else d
+                    adj /= sample_prior_factor(book_id, str(getattr(s, "id", "") or ""))
+                    adj += _selector_adjust(s, style_card)
+                    if drift_anchor and getattr(s, "favorite", False):
+                        adj -= 0.1
+                    return adj
+
+                hits = sorted(
+                    ((s, vec_adjust(s, d)) for s, d in hits),
+                    key=lambda t: t[1],
+                )
+                samples = _cap_ai_source([s for s, _ in hits], k)
         except Exception as e:
             logger.info(f"[StyleRetrieval] 向量检索降级（走新近兜底）: {e}")
             samples = None
 
-    # ---- 兜底流：收藏优先 → 近期优先（hint 生效时同型同档内提前）----
+    # ---- 兜底流：收藏优先 → 近期优先 → 场景 → 先验 → 旋钮（全为软排序键）----
     if samples is None:
         try:
-            samples = order_samples_for_fallback(
-                (await repo.list_by_book(book_id, scene_type=scene_type))[: max(k * 3, k)],
-                scene_hint=scene_hint,
-            )[:k]
+            pool = (await repo.list_by_book(book_id, scene_type=scene_type))[: max(k * 3, k)]
+
+            def fallback_rank(s: Any) -> tuple:
+                favorite = 0 if getattr(s, "favorite", False) else 1
+                era = 0 if (getattr(s, "era", "recent") or "recent") != "early" else 1
+                scene = 0 if _scene_match(s, scene_hint) else 1
+                # 先验因子升序键（factor∈[0.8,1.2] → 键∈[0,0.4]，越大越靠后）
+                prior_key = PRIOR_FACTOR_MAX - sample_prior_factor(
+                    book_id, str(getattr(s, "id", "") or ""))
+                return (favorite, era, scene, round(prior_key, 3),
+                        round(_selector_adjust(s, style_card), 3))
+
+            ordered = sorted(pool, key=fallback_rank)
+            samples = _cap_ai_source(ordered, k)
         except Exception as e:
             logger.warning(f"[StyleRetrieval] 样本加载失败（返回空）: {e}")
             return []
 
-    return [truncate_sample(s.content or "", max_chars) for s in samples if (s.content or "").strip()]
+    return [
+        # id 防御式取用：测试桩/异常形态的样本对象可能无 id（P5 埋点容忍缺席）
+        (str(getattr(s, "id", "") or ""), truncate_sample(s.content or "", max_chars))
+        for s in samples if (s.content or "").strip()
+    ]
+
+
+async def retrieve_author_samples(
+    db: AsyncSession,
+    book_id: str,
+    query_text: str = "",
+    k: int = AUTHOR_SAMPLES_MAX_K,
+    max_chars: int = AUTHOR_SAMPLE_MAX_CHARS,
+    scene_type: Optional[str] = None,
+    scene_hint: Optional[str] = None,
+) -> List[str]:
+    """检索 few-shot 作者样本（返回截断后的样本原文列表）——兼容包装。
+
+    存量消费方（ADF/refinery/audition）不需要样本 id，经此包装保持签名不变；
+    stitch 链（需 P5 埋点 sample_ids）走 retrieve_author_samples_with_meta。
+    """
+    pairs = await retrieve_author_samples_with_meta(
+        db, book_id, query_text=query_text, k=k, max_chars=max_chars,
+        scene_type=scene_type, scene_hint=scene_hint,
+    )
+    return [text for _sid, text in pairs]

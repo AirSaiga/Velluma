@@ -180,8 +180,10 @@ class TestBundleChapterOverride:
             assert BOOK_PROFILE_TEXT not in positive
             # to_prompt_context 暴露键同步走章级
             assert CHAPTER_PROFILE_TEXT in bundle.to_prompt_context()["style_positive"]
-            # 对话目标整卡覆盖（章级 0.6，非书级 0.3）
-            assert "60%" in positive
+            # P6 选择平面（2026-08-29）：对话目标不再进 prompt 画像——编译为
+            # 样本检索排序条件（retrieval._selector_adjust），整卡覆盖语义由
+            # style_card 即章级卡保证（选择器消费同一张卡）
+            assert "对话占比" not in positive
 
             ps = bundle.prohibitions
             assert ps is not None
@@ -209,7 +211,8 @@ class TestBundleChapterOverride:
             assert bundle.style_card.chapter_id is None
             positive = render_style_positive(bundle.style_card)
             assert BOOK_PROFILE_TEXT in positive
-            assert "30%" in positive
+            # P6：对话目标不进 prompt 画像（编译进检索选择器）
+            assert "对话占比" not in positive
             assert bundle.prohibitions is not None
             assert list(bundle.prohibitions.finditer(f"她{BOOK_BAN_WORD}。"))
         finally:

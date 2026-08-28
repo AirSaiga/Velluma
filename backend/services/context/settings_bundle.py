@@ -645,17 +645,17 @@ def render_style_positive(style_card: Any) -> str:
     paragraph_rhythm = _get_attr(style_card, "paragraph_rhythm")
     if paragraph_rhythm:
         lines.append(f"- 段落节奏：{str(paragraph_rhythm)[:STYLE_PARAGRAPH_RHYTHM_MAX_CHARS]}")
-    dialogue_target = _get_attr(style_card, "dialogue_ratio_target")
-    if dialogue_target is not None:
-        try:
-            lines.append(f"- 对话占比目标：{float(dialogue_target) * 100:.0f}%")
-        except (TypeError, ValueError):
-            pass
-    # 意图旋钮行（S4）：手动档才渲染，自动档零注入
+    # P6 选择平面（2026-08-29，docs/style-paradigm.md §3.1）：可测维度不再写
+    # 进 prompt——对话占比目标与节奏旋钮编译为样本检索排序条件
+    # （retrieval._selector_adjust），prompt 画像只留样本筛选表达不了的全局
+    # 维度（语域/浓淡/冷热/作者亲笔的节奏描述）。「测量>声明、范例>形容」。
+    # 意图旋钮行（S4）：手动档才渲染，自动档零注入（节奏档除外——已编译进选择器）
     from backend.services.style.knobs import render_knob_lines
 
     knobs = _get_attr(style_card, "style_knobs")
     for knob_line in render_knob_lines(knobs if isinstance(knobs, dict) else {}):
+        if knob_line.startswith("节奏"):
+            continue
         lines.append(f"- {knob_line}")
     return "\n".join(lines[:STYLE_POSITIVE_MAX_LINES])
 

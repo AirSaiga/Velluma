@@ -101,12 +101,14 @@ class TestDetectSceneType:
 # ============================================================
 
 class _Sample:
-    def __init__(self, name, scene_type="general", favorite=False, era="recent"):
+    def __init__(self, name, scene_type="general", favorite=False, era="recent", source="manual"):
         self.name = name
+        self.id = name  # P5 meta 契约：id 用 name 占位
         self.content = name
         self.scene_type = scene_type
         self.favorite = favorite
         self.era = era
+        self.source = source
 
 
 def _names(samples):
@@ -189,9 +191,17 @@ def _disable_embedding(monkeypatch):
     monkeypatch.setattr(retrieval_mod, "is_embedding_configured", lambda: False)
 
 
+def _neutral_prior(monkeypatch):
+    """P5 采纳先验中性化：检索排序对拍需要确定性——真实 collab 事件会引入
+    非 1.0 因子（先验行为见 test_sample_prior.py 专属单测）。"""
+    monkeypatch.setattr(retrieval_mod, "sample_prior_factor", lambda book_id, sid: 1.0)
+
+
 def _use_repo(monkeypatch, repo):
-    """把假 repo 注入 retrieve_author_samples 的构造点（db 传 None 即可）。"""
+    """把假 repo 注入 retrieve_author_samples 的构造点（db 传 None 即可）。
+    同时中性化 P5 采纳先验（排序对拍的确定性）。"""
     monkeypatch.setattr(retrieval_mod, "AuthorSampleRepository", lambda db: repo)
+    _neutral_prior(monkeypatch)
 
 
 def _enable_embedding(monkeypatch, repo):
