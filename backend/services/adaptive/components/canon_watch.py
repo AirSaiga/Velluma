@@ -199,11 +199,22 @@ async def run(
                 entity = c.get("entity", "") or ""
                 if entity and entity not in seen:
                     seen.add(entity)
+                    # 文案点名矛盾词对（2026-08-29「不知所云」修复）：旧文案
+                    # 直接甩两段原文（new[:50]/existing[:40]），触发词埋在句中，
+                    # 作者看不出哪里矛盾；现在第一眼是「正文写X，设定是Y」
+                    pair = c.get("pair") or []
+                    pair_txt = (
+                        f"正文写「{pair[1]}」，设定是「{pair[0]}」——"
+                        if len(pair) == 2 else "可能与设定冲突："
+                    )
                     hints.append({
                         "kind": "contradiction",
                         "node_label": entity,
                         "node_type": "character",
-                        "detail": f"可能与设定冲突：{c.get('new', '')[:50]}（已有：{c.get('existing', '')[:40]}）",
+                        "detail": (
+                            f"{pair_txt}{c.get('new', '')[:30]}"
+                            f"（已有：{c.get('existing', '')[:30]}）"
+                        ),
                         "severity": "warning",
                     })
             _CONTRADICTION_TS[chapter_id] = now

@@ -84,24 +84,77 @@ def _detect_conflicts(facts_dict: Dict, bundle) -> List[Dict]:
         desc = new_ent.get("description", "")
         if name in existing_chars:
             existing_desc = existing_chars[name]
-            # 简单冲突检测：描述里有明显矛盾词（如已有"右手残疾"，新提"右手"动作）
-            if existing_desc and _has_contradiction(existing_desc, desc):
-                conflicts.append({
-                    "entity": name,
-                    "existing": existing_desc[:80],
-                    "new": desc[:80],
-                    "type": "character_contradiction",
-                })
+            # 矛盾判定（2026-08-29 重写，详见 _find_contradiction）
+            if existing_desc:
+                pair = _find_contradiction(existing_desc, desc)
+                if pair:
+                    conflicts.append({
+                        "entity": name,
+                        "existing": existing_desc[:80],
+                        "new": desc[:80],
+                        "type": "character_contradiction",
+                        # 点名矛盾词对（前端卡片直读——作者第一眼看到「矛盾在哪」
+                        # 而不是两段埋着触发词的原文互相面面相觑）
+                        "pair": [pair[0], pair[1]],
+                    })
     return conflicts
 
 
-def _has_contradiction(existing: str, new: str) -> bool:
-    """简单矛盾检测：左右手/死活/有无 等成对矛盾词。"""
-    pairs = [("左手", "右手"), ("活", "死"), ("有", "无"), ("年轻", "老")]
-    for a, b in pairs:
-        if (a in existing and b in new) or (b in existing and a in new):
+# 成对矛盾词（2026-08-29 重写）：旧清单 [("左手","右手"),("活","死"),("有","无"),
+# ("年轻","老")] 裸子串查单字——「生活」×「死寂」、「没有」×「毫无」、「老周」×
+# 「年轻」全都成对命中，矛盾卡遍地误报且作者看不出哪里矛盾（实测事故）；且
+# 左手/右手这对语义是反的（设定「左手残疾」+正文「用右手」是一致不是矛盾）。
+# 新纪律：
+# 1. 只留**死活对**——设定已死/阵亡/牺牲 vs 正文活着行动，语义无歧义、价值
+#    最高（死者开口类）；肢体侧别/年龄对退役（正确的残障矛盾判定需要语义
+#    读取，词对凑不出来，硬凑就是误报）；
+# 2. 全部 ≥2 字 + 分词 token 边界匹配（连续 token 拼接恰为该词），杜绝
+#    「毫无」命中「无」这类嵌词误报；jieba 不可用退回子串（柔性红线）。
+_CONTRA_PAIRS: List[tuple] = [
+    ("活着", "已死"), ("活着", "死了"), ("活着", "阵亡"), ("活着", "牺牲"),
+]
+
+
+def _token_list(text: str) -> List[str] | None:
+    """jieba 分词；失败返回 None（调用方回退子串匹配）。"""
+    try:
+        import jieba
+        return jieba.lcut(text)
+    except Exception:
+        return None
+
+
+def _term_hit(term: str, text: str, tokens: List[str] | None) -> bool:
+    """词以完整分词边界出现（连续 token 拼接恰为该词）。
+
+    tokens 不可用时退回裸子串——term 均 ≥2 字，误报面已比旧单字对小一个
+    数量级，柔性红线（检测器宁可用不完美判据也不整体失明）。
+    """
+    if tokens is None:
+        return term in text
+    if term not in "".join(tokens):
+        return False  # 快速预筛：拼接串里没有就不必滑窗
+    for i in range(len(tokens)):
+        seg = ""
+        for j in range(i, len(tokens)):
+            seg += tokens[j]
+            if len(seg) >= len(term):
+                break
+        if seg == term:
             return True
     return False
+
+
+def _find_contradiction(existing: str, new: str):
+    """成对矛盾词检测：命中返回 (设定侧词, 正文侧词)，未命中返回 None。"""
+    ex_tokens = _token_list(existing)
+    new_tokens = _token_list(new)
+    for a, b in _CONTRA_PAIRS:
+        if _term_hit(a, existing, ex_tokens) and _term_hit(b, new, new_tokens):
+            return (a, b)   # a 出现在设定、b 出现在正文
+        if _term_hit(b, existing, ex_tokens) and _term_hit(a, new, new_tokens):
+            return (b, a)   # 反向：b 在设定、a 在正文
+    return None
 
 
 async def _commit(db, bundle, raw_text: str, facts_dict: Dict) -> Dict:
