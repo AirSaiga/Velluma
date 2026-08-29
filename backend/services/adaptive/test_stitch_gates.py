@@ -281,7 +281,10 @@ def test_route_stitch_semantic_variant_not_stripped(monkeypatch):
 # ============================================================
 
 def test_route_stitch_overlong_compressed(monkeypatch):
-    """stitch 超字：保头截断 → 压缩改写达标 → 落屏压缩稿（≤ target×1.5）。"""
+    """stitch 超字：保头截断 → 压缩改写达标 → 落屏压缩稿（≤ target×1.5）。
+
+    2026-08-29 断点衔接首句豁免后：落屏=首句+压缩稿（首句物理隔离不进压缩）。
+    """
     text = "".join(_sents("檐水", 30))   # 390 字 > 120×1.6=192
     compressed = "檐水改后两句的压缩稿。"   # 压缩产物达标
     req = StitchGhostRequest(
@@ -290,9 +293,14 @@ def test_route_stitch_overlong_compressed(monkeypatch):
     )
     done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
 
-    assert done["text"] == compressed          # 压缩稿落屏
+    first_sent = _sents("檐水", 30)[0]
+    assert done["text"] == first_sent + compressed   # 首句豁免 + 压缩稿
+    assert len(done["text"]) <= 192                   # ×1.6 硬上限
     assert len(llm_calls) == 2                 # 主生成 + 压缩改写
     assert "压缩改写" in llm_calls[1]["user_prompt"]  # 压缩指令在第二次调用
+    assert "作者正文停在" in llm_calls[1]["user_prompt"]  # 压缩带断点坐标
+    # 首句不进压缩草稿区（锚句声明行有意引用它，只断言草稿区干净）
+    assert first_sent not in llm_calls[1]["user_prompt"].split("--- 草稿 ---")[-1]
     assert llm_calls[1]["reasoning_config"] == REASONING_DISABLED
 
 
@@ -313,7 +321,10 @@ def test_route_stitch_compress_empty_falls_back_to_head(monkeypatch):
 
 
 def test_route_stitch_compress_still_over_truncated_again(monkeypatch):
-    """压缩产物仍超硬限 → 对压缩稿再句界截一次（吃压缩收益，不整段丢弃）。"""
+    """压缩产物仍超硬限 → 对压缩稿再句界截一次（吃压缩收益，不整段丢弃）。
+
+    首句豁免下再截只动压缩稿部分，衔接首句永不被截。
+    """
     text = "".join(_sents("檐水", 30))
     overlong_compress = "".join(_sents("压缩", 30))   # 压缩稿也 ~390 字
     req = StitchGhostRequest(
@@ -324,7 +335,8 @@ def test_route_stitch_compress_still_over_truncated_again(monkeypatch):
 
     body = done["text"]
     assert len(body) <= 180
-    assert body.startswith(_sents("压缩", 30)[0])     # 落屏的是压缩稿的截取
+    assert body.startswith(_sents("檐水", 30)[0])     # 衔接首句豁免（永不被截）
+    assert _sents("压缩", 30)[0] in body               # 落屏含压缩稿的截取
 
 
 def test_route_continue_overlong_compressed(monkeypatch):
@@ -335,8 +347,8 @@ def test_route_continue_overlong_compressed(monkeypatch):
         rolling_prefix="前" * 100, target_chars=200,
     )
     done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
-    assert done["text"] == compressed
-    assert len(done["text"]) <= 300
+    assert done["text"] == _sents("巷口", 40)[0] + compressed   # 首句豁免+压缩稿
+    assert len(done["text"]) <= 320
     assert len(llm_calls) == 2
 
 
@@ -553,3 +565,124 @@ def test_route_trace_rolling_window_fields_and_token_floor(monkeypatch):
 
     # max_tokens 下限：target 120 → 120×2+1000=1240 < 2200 → 取下限
     assert llm_calls[0]["max_tokens"] == STITCH_MAX_TOKENS_FLOOR == 2200
+
+
+# ============================================================
+# 6. 断点衔接首句豁免 + 半句尾缀复读剥离（2026-08-29 接缝断裂事故）
+#    现场：logs/trace_adaptive_07136b7a（08-29 03:11 / 03:40 两次 stitch，
+#    作者停在半句『…在这个世道，这句』，压缩改写把补完断点的首句当修饰删除，
+#    上屏读作「在这个世道，这句扳手悬在传动轴旁…」）
+# ============================================================
+
+FRAG_MID = "这是林尘昨晚睡前翻书时撇到的话，在这个世道，这句"
+
+
+def test_strip_tail_repeat_mid_sentence_break():
+    """半句断点：模型从悬空处重启（复读原句尾缀）→ 剥尾缀，拼合恰成完整句。
+
+    03:11 现场：画布『…在这个世道，这句』+ 产出『在这个世道，这句话连垫桌脚
+    都嫌薄。…』——不剥则上屏重复「在这个世道，这句」两遍。
+    """
+    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+
+    out = _strip_fragment_prefix(
+        "在这个世道，这句话连垫桌脚都嫌薄。他把书按进口袋。", FRAG_MID
+    )
+    assert out == "话连垫桌脚都嫌薄。他把书按进口袋。"
+
+
+def test_strip_tail_repeat_short_suffix():
+    """短尾缀（『他握紧』）同样剥：拼合『他握紧刀，…』成完整句。"""
+    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+
+    out = _strip_fragment_prefix("他握紧刀，刀锋映出他通红的眼。", "他握紧")
+    assert out == "刀，刀锋映出他通红的眼。"
+
+
+def test_strip_no_tail_repeat_when_fragment_at_sentence_end():
+    """断点在句末：产出同词开头是新句复用词汇，不是复读——不剥。"""
+    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+
+    out = _strip_fragment_prefix("他握紧刀把门闩上了。", "他握紧刀。")
+    assert out == "他握紧刀把门闩上了。"
+
+
+def test_strip_tail_repeat_keeps_following_punct():
+    """切割点后的标点保留：『他握紧』+『。他退后半步。』拼合成自然句。
+
+    剥掉反而腰斩（画布『…指节发白』+『，转身走了。』若剥逗号成连run-on）。
+    """
+    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+
+    out = _strip_fragment_prefix("他握紧。他退后半步。", "他握紧")
+    assert out == "。他退后半步。"
+
+
+def test_split_first_sentence():
+    from backend.routes.chapter_generation.adaptive import _split_first_sentence
+
+    assert _split_first_sentence("话连垫桌脚都嫌薄。他把书按进口袋。") == (
+        "话连垫桌脚都嫌薄。", "他把书按进口袋。",
+    )
+    # 无句读极端长句 → 空锚（调用方退整稿路径）
+    assert _split_first_sentence("一条没有句读的长句拖着走") == ("", "一条没有句读的长句拖着走")
+
+
+def test_route_seam_kept_when_compressor_drops_first_sentence(monkeypatch):
+    """03:40 现场：压缩模型删掉补完断点的首句 → 首句豁免强制拼回，接缝存活。
+
+    画布『…在这个世道，这句』+ 落屏『话像块锈铁卡在齿缝里。…』拼合恰为
+    「在这个世道，这句话像块锈铁卡在齿缝里」——事故前压缩稿以「扳手悬在
+    传动轴旁」开头，半句悬空直接跳到不相关画面。
+    """
+    draft = (
+        "话像块锈铁卡在齿缝里。"
+        + "他蹲在机甲传动轴旁边，扳手悬在半空，机油顺着指缝往袖口里渗。" * 7
+    )   # 221 字 > 192
+    kimi_compress = "扳手悬在传动轴旁，机油顺着指缝往袖口里渗。"   # 删了首句的压缩稿
+    req = StitchGhostRequest(
+        fragment=FRAG_MID, mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft, kimi_compress])
+
+    assert done["text"].startswith("话像块锈铁卡在齿缝里。")   # 衔接首句豁免
+    assert "扳手悬在传动轴旁" in done["text"]                   # 压缩稿内容保留
+    assert "作者正文停在" in llm_calls[1]["user_prompt"]        # 压缩带断点坐标
+    assert len(done["text"]) <= 192                              # ×1.6 硬上限
+
+
+def test_route_seam_kept_with_tail_repeat_draft(monkeypatch):
+    """03:11 现场：草稿复读断点尾缀 + 超字压缩两连 → 尾缀剥净 + 首句豁免。"""
+    draft = (
+        "在这个世道，这句话连垫桌脚都嫌薄。"
+        + "林尘把书往口袋深处按了按。" * 15
+    )   # 212 字；剥尾缀 10 字后 202 > 192 仍触发压缩
+    compressed = "他把书按进口袋，传送带还在转。"
+    req = StitchGhostRequest(
+        fragment=FRAG_MID, mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft, compressed])
+
+    body = done["text"]
+    assert body.startswith("话连垫桌脚都嫌薄。")    # 补完句存活（豁免）
+    assert "在这个世道，这句" not in body            # 尾缀复读已剥净
+    assert "他把书按进口袋" in body                  # 压缩稿内容保留
+    assert len(llm_calls) == 2
+
+
+def test_route_seam_anchor_oversize_degrades_to_whole_text(monkeypatch):
+    """首句吃掉大半配额（>×0.6）→ 豁免失去意义，退整稿压缩（仍带断点坐标）。"""
+    giant_first = "一句没有任何句读的超长首句拖着走" * 10 + "。"   # 130 字 > 120×0.6
+    draft = giant_first + "".join(_sents("檐水", 10))
+    compressed = "压缩后的整稿两句。"
+    req = StitchGhostRequest(
+        fragment=FRAG_MID, mode="stitch",
+        rolling_prefix="前文占位。", target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft, compressed])
+
+    assert done["text"] == compressed                      # 整稿路径：压缩稿直接落屏
+    assert giant_first not in llm_calls[1]["user_prompt"].split("--- 草稿 ---")[0]  # 无锚句声明
+    assert "作者正文停在" in llm_calls[1]["user_prompt"]    # 断点坐标仍在

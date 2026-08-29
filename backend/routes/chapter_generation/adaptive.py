@@ -223,7 +223,8 @@ def _strip_fragment_prefix(text: str, fragment: str) -> str:
     if not frag:
         return text
     if text.startswith(frag):
-        return text[len(frag):].lstrip()
+        stripped = text[len(frag):].lstrip()
+        return stripped or text
     key = normalize_for_match(frag).translate(_PUNCT_FOLD)
     if not key:
         return text
@@ -235,10 +236,57 @@ def _strip_fragment_prefix(text: str, fragment: str) -> str:
         acc.append(n)
         joined = "".join(acc)
         if joined == key:
-            return text[i + 1:].lstrip()   # 等价复读完整复现原句 → 剥到此处
+            stripped = text[i + 1:].lstrip()   # 等价复读完整复现原句 → 剥到此处
+            return stripped or text
         if len(joined) > len(key):
             break                            # 内容已偏离原句 → 不是复读
+    return _strip_fragment_tail_repeat(text, frag, key)
+
+
+def _strip_fragment_tail_repeat(text: str, frag: str, key: str) -> str:
+    """半句断点的尾缀复读剥离（2026-08-29 接缝断裂事故）。
+
+    作者停在半句（『…在这个世道，这句』）时，模型常从断点悬空处重启整句
+    （『在这个世道，这句话连垫桌脚都嫌薄。…』）——复读的是原句**尾缀**而
+    非整句，整句匹配剥不到，上屏成『…在这个世道，这句在这个世道，这句…』
+    重复。判据：断点非句末（悬空半句）且产出以原句尾缀（≥2 个规范化字符）
+    开头 → 剥掉该尾缀，画布半句与续写拼合恰成完整句。断点已在句末时不开
+    此闸——句末后的同词开头是新句复用词汇，不是复读（『…他握紧刀。』+
+    『他握紧刀把门闩上。』各是各的句子）。
+    """
+    if not text or not frag or len(key) < 2:
+        return text
+    # 断点在句末 → 尾缀同词是新句，不是复读
+    if frag[-1] in ("。", "！", "？", "…", ".", "!", "?"):
+        return text
+    # 规范化坐标系下做尾缀匹配（等价类口径同整句匹配）；命中后映射回原文切割点
+    norm_pairs = [(i, normalize_for_match(ch).translate(_PUNCT_FOLD))
+                  for i, ch in enumerate(text)]
+    norm_pairs = [(i, n) for i, n in norm_pairs if n]
+    if not norm_pairs:
+        return text
+    norm_text = "".join(n for _, n in norm_pairs)
+    for k in range(min(len(key), len(norm_text)), 1, -1):   # 最长尾缀优先
+        if norm_text.startswith(key[-k:]):
+            cut = norm_pairs[k - 1][0] + 1
+            stripped = text[cut:].lstrip()
+            # 切割点后紧跟的标点**保留**（『他握紧』+『。他退后半步。』拼合成
+            # 「他握紧。他退后半步。」是自然句；剥掉反而腰斩拼合）；剥空=全文
+            # 纯复读，留原文走后续空产出处理，不在剥离层吞掉幽灵
+            return stripped or text
     return text
+
+
+def _split_first_sentence(text: str) -> tuple:
+    """首句切分：到第一个句末标点（含标点）为止，返回 (首句, 其余)。
+
+    句末标点取 _truncate_at_sentence 同族；找不到（极端长句/对白未闭合）
+    返回 ("", text)——调用方退整稿路径。
+    """
+    for i, ch in enumerate(text):
+        if ch in ("。", "！", "？", "…"):
+            return text[: i + 1], text[i + 1:]
+    return "", text
 
 
 # ============================================================
@@ -1174,17 +1222,40 @@ async def stitch_ghost(
             # 字数压缩改写（用户拍板方案：纯截断常断在平淡处，压缩改写把同样
             # 信息收得更有效）。压缩产物超硬限再句界截一次；空产出回落截取稿
             # ——永不劣于纯截断。放在复读剥离之后：复读原句不计入续写配额。
+            # ⚠ 断点衔接首句豁免压缩（2026-08-29 接缝断裂事故）：压缩模型
+            # 看不到作者断点，曾把「补完断点的首句」（『…在这个世道，这句』+
+            # 『话像块锈铁卡在齿缝里。』）当修饰整句删除——作者的半句永远悬空，
+            # 上屏读作「在这个世道，这句扳手悬在传动轴旁…」。修复：首句物理
+            # 摘出、只压缩剩余部分，产物=首句+压缩稿——衔接句永不进压缩，
+            # 零依赖模型服从（三平面纲领：prompt 管不住的确定性约束下沉代码层）。
+            # 压缩 prompt 同时带作者断点尾句，给剩余部分保衔接语义提供坐标。
             if request.mode in ("stitch", "continue") and request.target_chars > 0:
                 stitch_hard_limit = int(request.target_chars * STITCH_WC_HARD_RATIO)
                 if len(text) > stitch_hard_limit:
+                    anchor, body = _split_first_sentence(text)
+                    # 首句缺席（无句读极端长句）或首句吃掉大半配额（>×0.6）时
+                    # 豁免失去意义 → 退整稿压缩（prompt 仍带断点坐标）
+                    if not anchor or len(anchor) > int(request.target_chars * 0.6):
+                        anchor, body = "", text
                     head = _truncate_at_sentence(
-                        text, int(request.target_chars * STITCH_WC_TRUNCATE_RATIO)
+                        body,
+                        max(int(request.target_chars * STITCH_WC_TRUNCATE_RATIO) - len(anchor), 40),
+                    )
+                    body_target = max(request.target_chars - len(anchor), 40)
+                    frag_ctx = (
+                        f"作者正文停在：『…{fragment[-40:]}』（续写草稿正是在补它/接它）\n"
+                        if fragment else ""
+                    )
+                    anchor_ctx = (
+                        f"草稿开头的衔接句『{anchor}』已单独保留、不在下面草稿里，"
+                        f"压缩稿不要复述它。\n" if anchor else ""
                     )
                     compressed = await call_llm_with_usage(
                         system_prompt=system_prompt,
                         user_prompt=(
+                            f"{frag_ctx}{anchor_ctx}"
                             f"下面是紧接作者断点的续写草稿，超出了 {request.target_chars} 字目标"
-                            f"（现 {len(head)} 字）。请压缩改写到 {request.target_chars} 字以内："
+                            f"（现 {len(head)} 字）。请压缩改写到 {body_target} 字以内："
                             f"保持开头的衔接语义不变，删减修饰与重复动作，每个细节都要推进信息。"
                             f"只输出压缩后的续写正文，不要解释。\n\n--- 草稿 ---\n{head}"
                         ),
@@ -1196,14 +1267,24 @@ async def stitch_ghost(
                     recorder.record_result("adaptive.stitch_ghost.compress", compressed, model_slot="creative")
                     cand = (compressed.content or "").strip()
                     if cand:
-                        text = cand if len(cand) <= stitch_hard_limit else _truncate_at_sentence(
-                            cand, int(request.target_chars * STITCH_WC_TRUNCATE_RATIO)
-                        )
+                        # 模型若在压缩稿里复述衔接句（已被告知不要），剥掉再拼
+                        if anchor and cand.startswith(anchor):
+                            cand = cand[len(anchor):].lstrip()
+                        if cand:
+                            merged = anchor + cand
+                            if len(merged) > stitch_hard_limit:
+                                merged = anchor + _truncate_at_sentence(
+                                    cand,
+                                    max(int(request.target_chars * STITCH_WC_TRUNCATE_RATIO) - len(anchor), 40),
+                                )
+                            text = merged
+                        else:
+                            text = anchor + head
                     else:
-                        text = head
+                        text = anchor + head
                         logger.info(
                             f"[adaptive/stitch-ghost] {request.mode} 压缩改写空产出，"
-                            f"回落截取稿 {len(head)} 字（目标 {request.target_chars}）"
+                            f"回落截取稿 {len(text)} 字（目标 {request.target_chars}）"
                         )
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
             # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
