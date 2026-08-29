@@ -242,7 +242,9 @@ function onIgnitionDismiss() {
   dispatchCollabEvent('ignition_dismiss')
 }
 onMounted(() => adaptiveAssist.mount())
-onBeforeUnmount(() => adaptiveAssist.unmount())
+// 感知常驻（2026-08-29 用户拍板）：切页只 detach（解除编辑器监听/中止需要
+// 活编辑器的 SSE），pending 感知计时器与舱内零件保留——感知只随应用关闭停机
+onBeforeUnmount(() => adaptiveAssist.detach())
 
 // 协作埋点桥（P0-3）：展示组件派发的 velluma:collab-event 统一转发后端本地 jsonl
 function _onCollabEvent(e: Event) {

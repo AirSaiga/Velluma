@@ -112,11 +112,28 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
   let _lastCardSig = ''
   let _lastDockSig = ''
+  // 感知上下文快照（2026-08-29 感知常驻拍板）：每次编辑器活动时记下
+  // {章, 段文本, 字数, 段尾}——写作台卸载（切到世界页/文风页等）后 pending
+  // 计时器照发心跳，用快照代替已卸载的编辑器读数，切页前的最后一次感知
+  // 不因页面切换静默夭折；快照带章号，切章后旧快照作废不串章
+  let _lastCtx: { chapterId: string; recentText: string; wordCount: number; cursorAtEnd: boolean } | null = null
 
   // ---- 编辑器活动：重置三个计时器 + 隐藏思考指示器 ----
   function _onEditorActivity() {
     if (!assistEnabled.value) return  // AI 辅助关闭（纯手写模式）：心跳/思考点全停
     _lastActiveTs = Date.now()
+    // 感知上下文快照：卸载后 pending 心跳的数据源（感知常驻，2026-08-29）
+    const chId = opts.getChapterId()
+    const ed = chapterEditorHandle.value
+    if (chId && ed) {
+      const $from = ed.state.selection.$from
+      _lastCtx = {
+        chapterId: chId,
+        recentText: $from.parent.textContent,
+        wordCount: ed.state.doc.textContent.length,
+        cursorAtEnd: $from.pos >= $from.end() - 1,
+      }
+    }
     // 作者重新动笔 → 立即隐藏思考点（任何 pending 计时器随之清掉）
     hideThinking()
     // 预览计时器：2s 后若无新活动 → 显示淡灰「等待中」点（预示即将凑近）
@@ -189,6 +206,17 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       const $from = editor.state.selection.$from
       recentText = $from.parent.textContent
       cursorAtEnd = $from.pos >= $from.end() - 1
+    } else if (_lastCtx && _lastCtx.chapterId === chapterId) {
+      // 感知常驻（2026-08-29 用户拍板「无论切到哪都不停感知」）：写作台已
+      // 卸载（作者在看世界页/文风页等）时 pending 计时器照发，用最近一次
+      // 活动的快照代替已卸载的编辑器读数——切页前的停顿感知跑完、结果进
+      // 世界模型缓存，回台后停顿秒弹直接可用。快照带章号：切章后旧快照
+      // 作废（不拿旧章的段文本去感知新章）
+      wordCount = _lastCtx.wordCount
+      recentText = _lastCtx.recentText
+      cursorAtEnd = _lastCtx.cursorAtEnd
+    } else {
+      return  // 无编辑器也无同章快照（卸载后从未活动过/已切章）：无从感知
     }
     const outlineText = opts.getOutline() || ''
     const hasOutline = outlineText.trim().length > 0
@@ -218,6 +246,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         recent_text: recentText.slice(0, 500),
         summoned: !!flags?.summoned,
       })
+
+      // 章节纪元守卫（2026-08-29 错章零件修复）：发送后切章 → 本响应是旧章的
+      // 感知产物，落舱会污染新章（旧章零件被新章停顿秒弹错弹；生发档在飞还
+      // 压住新章的刷新心跳，污染窗口=旧章 LLM 全程延迟）。直接丢弃——finally
+      // 照常清在飞计数，不落任何数据
+      if (chapterId !== opts.getChapterId()) return
 
       // 挂件 → Spark Dock（停顿心跳会带 dock_parts；活跃心跳通常空）
       // 句子级闸门信号（2026-08-26）：半句悬停时后端回 dock_muted=true——
@@ -344,8 +378,10 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       if (!generationStillBusy) {
         opts.aiLaneRef.value = sparkDockVisible.value ? 'suggesting' : 'dormant'
         // 心跳完成：有挂件→Dock 接管（指示器已在 visible 计算里被 sparkDockVisible 隐藏）；
-        // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）
-        if (!parts.length) hideThinking()
+        // 无挂件→直接隐藏指示器（后端判本段不够触发，别让脉冲点一直转）。
+        // 感知常驻补充（2026-08-29）：作者不在写作台（编辑器已卸载）时无论有无
+        // 挂件都清思考点——舱本来就看不见，留着 perceiving 相位回台后会误亮
+        if (!parts.length || !chapterEditorHandle.value) hideThinking()
       }
       _heartbeatFailedOnce = false  // 连接恢复，允许下次中断再提示一次
     } catch (e: any) {
@@ -705,18 +741,24 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     window.addEventListener(OUTLINE_EXPAND_EVENT, _onOutlineExpand)
   }
 
-  function unmount() {
-    if (_activeTimer) { clearTimeout(_activeTimer); _activeTimer = null }
-    if (_pauseTimer) { clearTimeout(_pauseTimer); _pauseTimer = null }
-    if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null }
+  /**
+   * 写作台卸载（切到世界页/文风页等）时的分离——感知常驻（2026-08-29 用户
+   * 拍板「无论切到哪都不停掉感知，除非关闭应用」）：
+   * - **保留**：三只计时器不清（pending 的活跃/停顿感知照常发出，用卸载前的
+   *   上下文快照），舱内零件不清（回台秒弹直接用），思考点不灭（在飞感知
+   *   跑完时响应侧自行归位）
+   * - **解除**：编辑器活动监听（编辑器已卸载，新实例重挂）、细纲扩写事件、
+   *   进行中的 stitch/扩写 SSE（幽灵灌入需要活编辑器，卸载后无法落笔）
+   * 真正的全量停机只随应用关闭发生（进程销毁）。切章清舱由 WorkspaceView
+   * 的章节 watch 负责（旧章零件是旧章上下文的产物）。
+   */
+  function detach() {
     if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
     const editor = chapterEditorHandle.value
     editor?.off('update', _onEditorActivity)
     editor?.off('selectionUpdate', _onEditorActivity)
     window.removeEventListener(OUTLINE_EXPAND_EVENT, _onOutlineExpand)
-    setSparkParts([])
-    hideThinking()
   }
 
-  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, summonParts, mount, unmount }
+  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, summonParts, mount, detach }
 }
