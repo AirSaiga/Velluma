@@ -996,6 +996,13 @@ export function useGenerationSession(): GenerationSession {
           e.preventDefault()
           e.stopPropagation()
           _adaptiveContinueFn?.('continue', [])
+          // 顺句续写同样藏舱让位幽灵（2026-08-29 实测事故：此分支漏了
+          // sticky+stash——幽灵流式插入触发编辑器活动，非 sticky 态走
+          // hideSparkDock 连 sticky 一并清掉，Space 后侧栏零件直接蒸发，
+          // 幽灵落定后的回弹钩子查 sticky=false 永不弹回；缝合分支 08-28
+          // 修过，顺句分支漏网，同款语义补齐）
+          setSparkSticky()
+          stashSparkDock()
           return
         }
         return  // 空行 + 无零件：不拦截（adaptive 模式不召唤代笔，由作者主动）
