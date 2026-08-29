@@ -1025,15 +1025,12 @@ _DOCK_GENERATOR_SYSTEM = """你是一个物理镜头碎片生成器。基于作�
 - line 类：[完整台词原文] +（可选说话人）→ "别在退潮时回头。阿晚的声音"
 - 必须扎根设定但生发新画面：角色动作符合其性格设定，但要是作者还没写过的具体动作
 
-【第一优先 —— 接住作者刚写的】
-3-4 枚碎片中必须有 1 枚是作者最后一句（或正说着的那句话）的"物理落点"：把抽象的感慨、判断、情绪翻译成人物此刻**主动做出**的一个小动作（把书往口袋深处按了按、把后半句咽回去、手上的活故意慢了半拍）。必须是人物主动发出的动作——不是表情、不是静止状态。先给这一枚，再给其他方向。
-
-【5 个叙事方向 —— 每个碎片必须服务其中一个】
-- 主线：朝本章核心事件/弧线推进【一小步】（角色发现了线索、做出决定、遭遇关键转折）
-- 伏笔：埋下隐患或铺垫（物件异常、不经意的细节、暗藏的线索）
-- 刻画：深化角色形象或性格（符合人设的具体行为、习惯动作、技能展示）
-- 环境：场景的物理质感（光影、声音、气味、空间细节）
-- 关系：角色间的暗流张力（对话、肢体语言、眼神、未说出口的话）
+【功能槽位 —— 每个碎片属于一个槽位，按槽位生发（2026-08-29 不知所云事故重构：
+作者必须能看懂「选这枚会发生什么」，槽位就是答案）】
+- slot=landing【接着写】（必有 1 枚，放首位）——接住作者刚写的：作者最后一句（或正说着的那句话）的"物理落点"——把抽象的感慨、判断、情绪翻译成人物此刻**主动做出**的一个小动作（把书往口袋深处按了按、把后半句咽回去、手上的活故意慢了半拍）。必须是人物主动发出的动作——不是表情、不是静止状态
+- slot=toward_beat【通往节拍】（给了「作者大纲·就近节拍」时出 1 枚）：通往那拍的**第一步**过渡画面，不是节拍本身的画面
+- slot=echo【呼应】（至多 1 枚）：呼应前情回响或读者期待的碎片——呼应哪一条就在 JSON 里标 from_memory/from_expectation + echo_ref（所呼应条目在对应素材块里的序号，从 1 数）。呼应必须是**当下场景里的新画面**侧面带出旧物/旧事（书页翻到夹层、扳手柄上的旧划痕），绝不是旧画面换个说法重演——重演前情等于没给选项
+- slot=ambient【氛围】（其余补位）：无叙事包袱的画面（光影/声响/物件质感），作者随手就能用，不指向任何去向
 
 【就近铁律 —— 碎片是"下一屏"的画面，不是章末预告】
 - 文流第一：碎片必须与作者当前段落的最后一句**直接衔接**——作者下一句就能顺着接上写，中间不需要任何过渡句
@@ -1067,13 +1064,13 @@ _DOCK_GENERATOR_SYSTEM = """你是一个物理镜头碎片生成器。基于作�
 2. 禁词表（以下词汇禁止）：{banned_words}
 3. 角色动作必须符合其永恒设定（static_prompt），不许 OOC
 4. 多样性：不要全是 action 或全是 line，混搭让作者有不同方向
-5. 每个碎片必须标注 direction（从 主线/伏笔/刻画/环境/关系 里选），按方向权重分布生成
+5. landing 必居首位；toward_beat 只在大纲就近节拍给了的时候出
 
 【自检 —— 输出前对每个碎片问】
 - 作者扫一眼能想象出画面吗？（不能 → 太笼统，重写）
 - 有明确的"谁"或"什么物件"吗？（没有 → 补主语）
 - 动作/状态是具体的可视细节吗？（是抽象形容词 → 换成物理动作/感官）
-- direction 标了吗？和画面匹配吗？
+- slot 标了吗？landing 在首位吗？
 
 只输出 JSON，不要解释。"""
 
@@ -1135,29 +1132,32 @@ def build_dock_generator_prompt(
     else:
         dw_block = ""
 
-    # 读者期待块（账本为空则整块省略——不用账本的作者 prompt 零变化）
+    # 读者期待块（账本为空则整块省略——不用账本的作者 prompt 零变化）。
+    # 条目带 [1]/[2] 序号（echo_ref 的引用坐标系——模型报序号，后端按
+    # 序号回查账本原文拼 note，模型不经手出处文本）
     exp_lines = []
-    for e in (reader_expectations or [])[:2]:
+    for i, e in enumerate((reader_expectations or [])[:2], start=1):
         if not isinstance(e, dict):
             continue
         desc = (e.get("description") or "")[:40]
         tension = e.get("tension") or 5
         if desc:
-            exp_lines.append(f"- （张力{tension}/10）{desc}")
+            exp_lines.append(f"- [{i}]（张力{tension}/10）{desc}")
     exp_block = ""
     if exp_lines:
         exp_block = f"""
-# 读者期待（读者正在等的事；最多用 1 个碎片【侧面】呼应——暗示/推进，绝不直接揭晓；呼应的碎片须加 "from_expectation": true）
+# 读者期待（读者正在等的事；至多 1 个碎片【侧面】呼应——暗示/推进，绝不直接揭晓；呼应哪条就在该碎片标 "from_expectation": true + "echo_ref": 序号）
 {chr(10).join(exp_lines)}
 """
 
-    # 前情回响块（向量召回的更早章节片段——「伏笔呼应」类零件的素材源）
+    # 前情回响块（向量召回的更早章节片段——「伏笔呼应」类零件的素材源）。
+    # 同样带序号（from_memory + echo_ref 的引用坐标系）
     echo_lines = [e.strip() for e in (memory_echoes or []) if e and e.strip()]
     echo_block = ""
     if echo_lines:
         echo_block = f"""
-# 前情回响（更早章节的片段——可用作呼应素材，让零件呼应前情细节/物件/悬念）
-{chr(10).join('- ' + e for e in echo_lines[:2])}
+# 前情回响（更早章节的片段——可用作呼应素材；呼应哪条就在该碎片标 "from_memory": true + "echo_ref": 序号）
+{chr(10).join(f'- [{i}] ' + e for i, e in enumerate(echo_lines[:2], start=1))}
 """
 
     # 章级谋篇意图一行（P1.4 M2；空=零变化。克制：只给方向不给展开）
@@ -1192,8 +1192,8 @@ def build_dock_generator_prompt(
 {hard_constraints.get('canon_private_labels', [])[:5] or '（无）'}
 
 生成 3-4 个镜头特写挂件（每个 8-14 字，主语+具体动作/状态，作者能一眼想象出画面）。
-若某个碎片呼应了"读者期待"，给它加 "from_expectation": true（至多 1 个）。输出 JSON：
-{{"parts": [{{"type": "action", "text": "林尘攥紧扳手摸向灯塔基座", "direction": "主线"}}, {{"type": "scene", "text": "礁石滩泛着暗红的金属锈光", "direction": "环境"}}, {{"type": "line", "text": "别在退潮时回头。阿晚的声音", "direction": "关系"}}]}}"""
+按功能槽位生发（landing 必居首位；给了就近节拍则含 1 枚 toward_beat；呼应类至多 1 枚）。输出 JSON：
+{{"parts": [{{"slot": "landing", "type": "action", "text": "林尘把书往口袋深处按了按"}}, {{"slot": "toward_beat", "type": "action", "text": "他拎起墙边最沉的备件箱", "direction": "主线"}}, {{"slot": "echo", "type": "action", "text": "扳手从指间滑落砸中脚边铁屑", "from_memory": true, "echo_ref": 1}}, {{"slot": "ambient", "type": "scene", "text": "天窗灰光里浮着机油味的尘", "direction": "环境"}}]}}"""
     return system_prompt, user_prompt
 
 

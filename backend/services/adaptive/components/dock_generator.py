@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List
 
 from backend.services.context.settings_bundle import load_chapter_settings_bundle
@@ -83,18 +84,21 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         query_text=recent_text[-300:],
         k=ECHOES_K_DOCK,
     )
+    # 读者期待 + 大纲就近节拍：prompt 素材与 _finalize_parts 的 note 拼装共用
+    reader_expectations = soft.get("reader_expectations") or None
+    outline_nearby = _outline_nearby(
+        getattr(bundle, "outline_text", "") or "",
+        written_text(bundle.content_text or ""),
+    )
 
     sys_p, usr_p = build_dock_generator_prompt(
         recent_text, projections, nutrients, hard,
         direction_weights=direction_weights,
         salience_hints=salience_hints,
-        reader_expectations=soft.get("reader_expectations") or None,
+        reader_expectations=reader_expectations,
         memory_echoes=memory_echoes or None,
         spine_intent=await _spine_intent(chapter_id, db),
-        outline_nearby=_outline_nearby(
-            getattr(bundle, "outline_text", "") or "",
-            written_text(bundle.content_text or ""),
-        ),
+        outline_nearby=outline_nearby,
     )
 
     try:
@@ -111,40 +115,14 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         parsed = parse_json_safe(result.content or "") or {}
         raw_parts = parsed.get("parts", [])
 
-        # ---- 校对：丢弃违规挂件 + direction 合法性 ----
-        valid_parts: List[Dict] = []
-        icon_map = {"action": "👤", "scene": "⚙️", "line": "💬"}
-        for p in raw_parts[:4]:
-            if not isinstance(p, dict):
-                continue
-            text = (p.get("text", "") or "").strip()
-            if not text or len(text) < 2:
-                continue
-            # 禁词 / canon private 拦截
-            if _violates(text, hard):
-                continue
-            # 陈词嗅探（2026-08-27）：感知层不喂生成层的库存词——菜单是作者的
-            # 第一眼，陈词在菜单就被闻到，还没到缝合那步。清单小而狠（<10），
-            # 误丢一枚碎片的代价远小于菜单闻出 AI 味
-            if _has_camera_stock(text):
-                continue
-            kind = p.get("type", "action")
-            # direction 校验：必须是 5 方向之一，否则回退到"环境"
-            direction = p.get("direction", "环境")
-            if direction not in ("主线", "伏笔", "刻画", "环境", "关系"):
-                direction = "环境"
-            # 截断到 16 字（prompt 允许 8-14 字，留余量防超长产出被生生截断）
-            safe_text = text[:16]
-            valid_parts.append({
-                "key": f"{kind}:{safe_text[:12]}",
-                "kind": kind,
-                "icon": icon_map.get(kind, "✨"),
-                "text": safe_text,
-                "direction": direction,
-                # 期待账本衍生件标记（前端 Dock 显示「期待」tag）；
-                # LLM 未标 from_expectation 则无此键——优雅降级为普通零件
-                **({"origin": "expectation"} if p.get("from_expectation") else {}),
-            })
+        # ---- 校对：丢弃违规挂件 + 功能槽位规整（source/note 贯通）----
+        valid_parts = _finalize_parts(
+            raw_parts,
+            outline_nearby=outline_nearby,
+            reader_expectations=reader_expectations,
+            memory_echoes=memory_echoes,
+            violates=lambda t: _violates(t, hard) or _has_camera_stock(t),
+        )
 
         # 挂件产出缓存到世界模型（前端 heartbeat 响应里取）
         from backend.services.adaptive.world_model import WorldModelRepository
@@ -161,6 +139,135 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     except Exception as e:
         logger.warning(f"[dock_generator] 失败: {e}")
         return {"error": str(e)}
+
+
+# ============================================================
+# 功能槽位规整（2026-08-29「不知所云」重构：provenance 贯通）
+# ============================================================
+# 四槽位与作者决策一一对应（导师裁决：内容分类学 → 功能分类学——
+# 「这枚是什么题材」对选择毫无帮助，「选这枚会发生什么」才是答案）：
+#   landing     接着写：作者最后一句的物理落点（固定 note，首位）
+#   toward_beat 通往节拍：通往大纲就近节拍的第一步（note=节拍原文）
+#   echo        呼应：前情/读者期待（note 按模型报的 echo_ref 回查素材原文拼装）
+#   ambient     氛围：无叙事包袱（note 留白——留白本身是信息）
+# note 一律后端拼装不经 LLM（mimo 服从度教训：模型自由创作出处=编造风险）；
+# 槽位拿不到出处文本就降级 ambient（标签必须承载真实出处，否则不标）。
+SOURCE_PRIORITY = {"landing": 0, "toward_beat": 1, "echo": 2, "ambient": 3}
+_SLOTS = ("landing", "toward_beat", "echo", "ambient")
+
+
+def _normalize_slot(p: Dict) -> str:
+    """槽位归一：显式 slot 优先；旧契约 from_expectation → echo；其余 ambient。"""
+    s = p.get("slot")
+    if isinstance(s, str) and s in _SLOTS:
+        return s
+    if p.get("from_expectation"):
+        return "echo"
+    return "ambient"
+
+
+def _clean_echo_note(raw: str) -> str:
+    """把记忆/前情素材清洗成作者语言（2026-08-29 二轮实测：note 透传机器格式
+    【前情事件·物品】第三章：… 对作者是乱码，还常被截断在格式中间）。
+
+    剥【…】账本标签 → 「第N章：」规整为「第N章·」→ 去首尾杂 punctuation。
+    【前情事件·物品】第三章：扳手砸中脚边铁屑 → 第三章·扳手砸中脚边铁屑
+    """
+    s = str(raw).strip()
+    s = re.sub(r"^【[^】]*】", "", s)
+    s = re.sub(r"^第([一二三四五六七八九十百零\d]+)章\s*[:：]\s*", r"第\1章·", s)
+    return s.strip(" \t:：,，、;；")
+
+
+def _assemble_note(slot: str, p: Dict, outline_nearby, reader_expectations, memory_echoes) -> str:
+    """按槽位拼装后果短语（后端权威，模型不经手出处文本）。
+
+    文案纪律（2026-08-29 二轮）：副行必须回答「选它之后那一百字会写成什么」
+    ——来历词（呼应/出处）只作谓语，不单独成句。
+    """
+    if slot == "landing":
+        return "接着刚才那句往下写"
+    if slot == "toward_beat":
+        beats = [str(b).strip() for b in (outline_nearby or []) if b and str(b).strip()]
+        if beats:
+            return f"往「{beats[0][:10]}」那拍走的第一步"
+        return ""
+    if slot == "echo":
+        try:
+            ref = int(p.get("echo_ref") or 0)
+        except (TypeError, ValueError):
+            ref = 0
+        if ref >= 1:
+            if p.get("from_expectation"):
+                descs = [
+                    (e.get("description") or "").strip()
+                    for e in (reader_expectations or [])
+                    if isinstance(e, dict) and (e.get("description") or "").strip()
+                ]
+                if ref <= len(descs):
+                    return f"暗示读者在等：{descs[ref - 1][:12]}"
+            elif p.get("from_memory"):
+                echoes = [str(e).strip() for e in (memory_echoes or []) if e and str(e).strip()]
+                if ref <= len(echoes):
+                    cleaned = _clean_echo_note(echoes[ref - 1])
+                    if cleaned:
+                        return f"顺笔带出前情：{cleaned[:12]}"
+        return ""
+    return ""
+
+
+def _finalize_parts(
+    raw_parts: List,
+    *,
+    outline_nearby=None,
+    reader_expectations=None,
+    memory_echoes=None,
+    violates=None,
+) -> List[Dict]:
+    """校对 + 槽位规整 + note 拼装 + 槽位序排序（landing 首位）。
+
+    violates(text) → True 的碎片丢弃（禁词/canon private/陈词嗅探，调用方
+    注入组合判定）。旧形状（无 slot）碎片照常通过：槽位归一 ambient、无
+    note——缓存里的历史零件/旧模型产出零破坏。
+    """
+    icon_map = {"action": "👤", "scene": "⚙️", "line": "💬"}
+    valid_parts: List[Dict] = []
+    for p in (raw_parts or [])[:6]:
+        if not isinstance(p, dict):
+            continue
+        text = (p.get("text", "") or "").strip()
+        if not text or len(text) < 2:
+            continue
+        if violates and violates(text):
+            continue
+        kind = p.get("type", "action")
+        # direction 校验：必须是 5 方向之一，否则回退到"环境"（分析面元数据，
+        # 前端已不渲染——2026-08-29 不知所云重构：退役字段不再上屏）
+        direction = p.get("direction", "环境")
+        if direction not in ("主线", "伏笔", "刻画", "环境", "关系"):
+            direction = "环境"
+        slot = _normalize_slot(p)
+        note = _assemble_note(slot, p, outline_nearby, reader_expectations, memory_echoes)
+        # 槽位拿不到出处 → 降级 ambient（留白而非谎标）
+        if slot in ("toward_beat", "echo") and not note:
+            slot = "ambient"
+            note = ""
+        # 截断到 16 字（prompt 允许 8-14 字，留余量防超长产出被生生截断）
+        safe_text = text[:16]
+        valid_parts.append({
+            "key": f"{slot}:{safe_text[:12]}",
+            "kind": kind,
+            "icon": icon_map.get(kind, "✨"),
+            "text": safe_text,
+            "direction": direction,
+            "source": slot,
+            **({"note": note} if note else {}),
+            # 期待账本衍生件标记（分析面；前端 echo note 取代了旧「期待」tag）
+            **({"origin": "expectation"} if p.get("from_expectation") else {}),
+        })
+    # 槽位序排序（landing 首位 → toward_beat → echo → ambient；稳定排序）
+    valid_parts.sort(key=lambda p: SOURCE_PRIORITY.get(p["source"], 3))
+    return valid_parts[:4]
 
 
 # 大纲就近节拍已提取共享（services/adaptive/outline_nearby.py，2026-08-25：

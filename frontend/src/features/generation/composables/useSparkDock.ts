@@ -26,16 +26,32 @@ import { followEditorLayout } from './editorLayoutFollower'
  */
 
 export interface SparkPart {
-  /** 去重键（kind:文本） */
+  /** 去重键（source:文本） */
   key: string
   kind: 'anchor' | 'carrier' | 'character' | 'asset'
   icon: string
   /** 挂件文本：6 字以内的镜头特写词（"老烟的血手"/"咬平齿的管钳"），非角色名 */
   text: string
-  /** NLE-ADF 3.0 叙事方向（主线/伏笔/刻画/环境/关系），碎片服务该方向 */
+  /** NLE-ADF 3.0 叙事方向（主线/伏笔/刻画/环境/关系）——分析面元数据，2026-08-29 起不再上屏 */
   direction?: '主线' | '伏笔' | '刻画' | '环境' | '关系'
-  /** 来源标记：'expectation' = 期待账本衍生件（Dock 显示「期待」tag） */
+  /** 来源标记：'expectation' = 期待账本衍生件（分析面；前端以 echo note 取代旧「期待」tag） */
   origin?: 'expectation'
+  /**
+   * 功能槽位（2026-08-29「不知所云」重构）：作者必须能看懂「选这枚会发生什么」——
+   * landing=接着写（作者最后一句的物理落点）/ toward_beat=通往大纲就近节拍 /
+   * echo=呼应前情或读者期待 / ambient=纯氛围（留白）。旧缓存零件无此字段按 ambient。
+   */
+  source?: 'landing' | 'toward_beat' | 'echo' | 'ambient'
+  /** 出处短语（后端按注入素材拼装，≤16 字：「通往「领物资」」「读者在等：书的来历」） */
+  note?: string
+}
+
+/** 槽位展示序（landing 首位；无 source 的旧零件沉底） */
+const SOURCE_ORDER: Record<NonNullable<SparkPart['source']>, number> = {
+  landing: 0,
+  toward_beat: 1,
+  echo: 2,
+  ambient: 3,
 }
 
 export const sparkDockVisible = ref(false)
@@ -56,13 +72,16 @@ export const sparkSticky = ref(false)
 const _baseParts = ref<SparkPart[]>([])
 const _extraParts = ref<SparkPart[]>([])
 
-/** 展示挂件 = 基础件 + 兜底件（去重，上限 4）。基础件来自后端 LLM 生发。 */
+/** 展示挂件 = 基础件 + 兜底件（去重，上限 4，槽位序——「接着写」恒居首位）。基础件来自后端 LLM 生发。 */
 export const sparkParts = computed<SparkPart[]>(() => {
   const merged: SparkPart[] = []
   for (const part of [..._baseParts.value, ..._extraParts.value]) {
     if (!merged.some((m) => m.key === part.key)) merged.push(part)
   }
-  return merged.slice(0, 4)
+  return merged
+    .slice(0, 6)
+    .sort((a, b) => (SOURCE_ORDER[a.source ?? 'ambient'] ?? 3) - (SOURCE_ORDER[b.source ?? 'ambient'] ?? 3))
+    .slice(0, 4)
 })
 
 /** 可展示门（session 注入：创作态/composing + 无幽灵 + 非缝合中） */
