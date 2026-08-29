@@ -18,6 +18,7 @@ import OutlineNoteNode from '../extensions/OutlineNoteNode'
 import { buildEntityMentionExtensions } from '../extensions/entityMention'
 import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
 import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHistory'
+import { reapGhostIfDead } from '../features/generation/composables/useGhostDraft'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { styleApi } from '../services/api/domain'
@@ -409,6 +410,11 @@ const editor = useEditor({
     },
   },
   onUpdate: ({ editor }) => {
+    // 幽灵死亡收割（2026-08-29 手动删除事故）：作者退格/选删亲手删光幽灵
+    // 文本时 ghostActive 残留真值——僵尸态吃 Tab、禁 Space、卡 authorLane、
+    // sticky 卡舱恢复等不到落沿。每个文档事务后扫一次：状态说有幽灵而文档
+    // 扫不到即收尾（作者自己的流式灌入事务里幽灵恒在，纯空转一次树扫）。
+    reapGhostIfDead()
     emit('update:modelValue', editor.getHTML())
   },
   onBlur: ({ editor }) => {

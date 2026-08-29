@@ -389,6 +389,34 @@ export function evaporateGhost(): void {
   ghostAnchorPos = null
 }
 
+/**
+ * 幽灵死亡收割（2026-08-29 手动删除事故）：
+ * 作者用退格/选删亲手删光幽灵文本（而非 Esc 蒸发）时，文档里已无
+ * ghostDraft 节点，但 ghostActive 仍为真——僵尸态吃掉 Tab（结构闸
+ * 「ghostActive 只吞不唤」）、禁掉 Space（spaceActive 判 !ghostActive）、
+ * 卡住 authorLane 在 ghostStitching、sticky 卡舱恢复等不到落沿。
+ * 编辑器每次文档事务后调用（RichTextEditor onUpdate）：状态说有幽灵而
+ * 文档扫不到 → 按「作者亲手蒸发」收尾——埋 ghost_discard 供学习回流
+ * （作者已用删除表达拒绝，不弹理由 toast 问第二遍），文档已干净不再删。
+ * 部分删除/改词不触发（mark 仍在 = 幽灵还活着，走 ghostDirty 微调语义）。
+ */
+export function reapGhostIfDead(): void {
+  if (!ghostActive.value) return
+  if (findGhostRange()) return
+  dispatchCollabEvent('ghost_discard', {
+    source: ghostSource.value,
+    ghost_token: _lastGhostMeta?.token || '',
+    sample_ids: _lastGhostMeta?.sampleIds || [],
+  })
+  ghostActive.value = false
+  ghostSource.value = null
+  ghostOriginal.value = ''
+  ghostDegraded.value = false
+  ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
+  ghostAnchorPos = null
+}
+
 export function useGhostDraft() {
   return {
     ghostActive,
@@ -404,6 +432,7 @@ export function useGhostDraft() {
     ghostText,
     commitGhost,
     evaporateGhost,
+    reapGhostIfDead,
     findGhostRange,
   }
 }
