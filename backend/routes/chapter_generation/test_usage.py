@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """B3 · 用量可见单测：generation_runs 聚合（纯函数 + 端点级 stub db）。
 
 覆盖：

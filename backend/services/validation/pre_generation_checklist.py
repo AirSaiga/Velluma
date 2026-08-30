@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - AI Novel Writing Assistant
 # 生成前检查清单模块
 

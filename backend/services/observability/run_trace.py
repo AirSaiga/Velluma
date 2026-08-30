@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """
 运行级全流程 trace 日志（JSONL，实时追加）。
 

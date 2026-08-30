@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """event_scout 候选去重单测（A5a，mock LLM——不连真实 LLM/DB）。
 
 覆盖（docs/foundation-hardening.md §2.4）：

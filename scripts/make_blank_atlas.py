@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - AI novel writing assistant
 # Copyright (C) 2026 Velluma contributors
 #

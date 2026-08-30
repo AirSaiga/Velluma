@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """A5c · 收件箱积压提醒单测（P5 docs/foundation-hardening.md §3.2）。
 
 覆盖：

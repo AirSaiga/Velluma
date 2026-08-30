@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """sentence_integrity 单测：残句扫描（高精确度正则）+ 定点修复流程（mock LLM）。
 
 真实残句必须命中："但演习的警报是的、急促的"（缺中心语）、"白霆的了一下"
