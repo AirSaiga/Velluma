@@ -71,6 +71,7 @@ docs/superpowers/
 coverage/
 test_chapter_ids.json
 .pytest_cache/
+gui-test-screenshots/
 
 # ---- 临时/一次性脚本(切勿提交) ----
 tmp_*.py

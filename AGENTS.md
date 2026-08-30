@@ -272,7 +272,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 测试
 
-项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。GUI 测试证据截图只有被 `docs/` 正式测试报告引用才入库（`gui-test-screenshots/`，现约 7.4MB——增量纪律防仓库膨胀），过程性截图一律本地留存。
+项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。GUI 测试证据截图不入库、一律本地留存（曾在库的 `gui-test-screenshots/` 已于 2026-08-31 移除并进 `.gitignore`，`docs/gui-test-report-2026-08-30.md` 文字结论为权威记录），过程性截图同理。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过（distance.test.ts 曾中招，4be1568 修复）
 - BS-ADF：已随引擎归档至 `_deprecated/bsadf/`（8 个单测与 `dde/test_decision_set.py` 同迁，均不再运行）
