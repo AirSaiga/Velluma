@@ -36,6 +36,15 @@ jobs:
       - name: Compile-check backend
         run: python -m compileall -q backend/
 
+      # 非阻断:统计缺 AGPL SPDX 头的在役 py 文件数,防缺口再生(批量补齐见 scripts/add_license_headers.py)
+      - name: License header check (non-blocking)
+        run: |
+          missing=$(find backend -name '*.py' -not -path 'backend/_deprecated/*' -print0 | xargs -0 grep -L "SPDX-License-Identifier: AGPL" | wc -l)
+          echo "缺 SPDX 头的在役 py 文件数: $missing"
+          if [ "$missing" -gt 0 ]; then
+            echo "::warning::发现 $missing 个在役 py 文件缺 AGPL-3.0 SPDX 头"
+          fi
+
   # --------------------------------------------------------------------------
   # 前端:TypeScript 类型检查(非阻断)
   # --------------------------------------------------------------------------

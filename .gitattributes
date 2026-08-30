@@ -1,2 +1,18 @@
 # Shell 脚本必须保持 LF：CRLF 会让 macOS/Linux 的 bash 直接报 bad interpreter
 *.sh text eol=lf
+# ---- 行尾钉死：Windows 脚本必须 CRLF（.bat 的 label/goto 在 LF 下会断）----
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ---- 二进制钉死：防止未来 text 规则误转换 ----
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.db binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

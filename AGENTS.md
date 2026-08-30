@@ -254,7 +254,7 @@ LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.p
 
 ## 代码规范
 
-**Python**：新 `.py` 必须加 AGPL-3.0 许可证头（⚠ `workflows/adf/`/`refinery/`/`routes/chapter_generation/` 等较新模块现状缺失）。LLM 调用用 tenacity 指数退避重试；流式错误发 error 帧+done 帧；Windows asyncio 无害连接错误已在 `main.py` 注册静默处理器。注释风格：模块顶用 `====`/`----` 分段，关键逻辑前标设计意图，副作用标 `副作用：`/`警示：`。
+**Python**：新 `.py` 必须加 AGPL-3.0 许可证头，统一 SPDX 短形式两行（`# SPDX-License-Identifier: AGPL-3.0-or-later` + `# Copyright (C) 2026 Velluma Contributors`），插在 shebang/coding 声明之后；2026-08-30 已批量补齐在役全部（`_deprecated/` 豁免），存量漏网跑 `python scripts/add_license_headers.py` 幂等补齐，CI 有非阻断计数告警。LLM 调用用 tenacity 指数退避重试；流式错误发 error 帧+done 帧；Windows asyncio 无害连接错误已在 `main.py` 注册静默处理器。注释风格：模块顶用 `====`/`----` 分段，关键逻辑前标设计意图，副作用标 `副作用：`/`警示：`。
 
 **TypeScript 前端分层**（依赖方向）：
 ```
@@ -272,7 +272,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 测试
 
-项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。
+项目快速迭代期，测试有限，主要靠手动验证。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`python -m pytest <文件>`。GUI 测试证据截图只有被 `docs/` 正式测试报告引用才入库（`gui-test-screenshots/`，现约 7.4MB——增量纪律防仓库膨胀），过程性截图一律本地留存。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过（distance.test.ts 曾中招，4be1568 修复）
 - BS-ADF：已随引擎归档至 `_deprecated/bsadf/`（8 个单测与 `dde/test_decision_set.py` 同迁，均不再运行）

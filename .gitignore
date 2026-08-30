@@ -30,6 +30,7 @@ frontend/node_modules/
 
 # ---- 前端构建产物 ----
 frontend/dist/
+frontend/dist-electron/
 frontend/nul
 
 # ---- 通用构建产物 ----
