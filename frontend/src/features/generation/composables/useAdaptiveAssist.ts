@@ -151,15 +151,24 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // 停顿心跳：4s 后发（若期间无新活动，作者卡住了）
     if (_pauseTimer) clearTimeout(_pauseTimer)
     _pauseTimer = setTimeout(() => {
-      // 仅光标在段尾才算卡壳（段中修改不算）
-      if (_isCursorAtParagraphEnd()) {
+      // 仅光标在段尾才算卡壳（段中修改不算）。感知常驻补充（2026-08-30 审计
+      // 修复）：此前光标闸在编辑器卸载（作者切页）后恒 false，把切页后的
+      // pending 停顿感知整段挡死——_lastCtx 快照本为此而建却永远走不到。现改：
+      // 有编辑器看实时光标；无编辑器看同章快照的段尾记录（快照带章号，切章
+      // 即作废，不拿旧章段文本感知新章）
+      const editorPresent = !!chapterEditorHandle.value
+      const atEnd = editorPresent
+        ? _isCursorAtParagraphEnd()
+        : !!(_lastCtx && _lastCtx.chapterId === opts.getChapterId() && _lastCtx.cursorAtEnd)
+      if (atEnd) {
         // 有缓存零件先秒弹（上次心跳存货），心跳在后台刷新零件；无缓存则等
         // 响应带回再弹（响应侧有活状态守卫）——LLM 延迟退出唤醒关键路径。
         // showSparkDock 自守：无零件/非 composing/幽灵在屏时静默 no-op。
         // 秒弹同吃半句闸门（2026-08-28 修复）：光标段尾但句子未写完时，心跳
         // 响应必带 dock_muted 清舱——秒弹先亮再被收掉 = 舱一闪即隐（预览灰点
-        // 有此闸，秒弹漏了，口径对齐；心跳照发，感知带数据照常带回）
-        if (!_endsMidSentence(_recentText500())) showSparkDock()
+        // 有此闸，秒弹漏了，口径对齐；心跳照发，感知带数据照常带回）。
+        // 秒弹只活在编辑器在场时——作者不在台，弹了也没人看
+        if (editorPresent && !_endsMidSentence(_recentText500())) showSparkDock()
         void _sendHeartbeat(Date.now() - _lastActiveTs)
       }
     }, PAUSE_HEARTBEAT_MS)
@@ -274,6 +283,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         text: p.text,
         direction: p.direction as SparkPart['direction'],
         origin: p.origin === 'expectation' ? 'expectation' : undefined,
+        // 功能槽位贯通（2026-08-30 审计修复）：source/note 是槽位重构的用户
+        // 可见层——此前映射漏拷这两字段，副行恒退化「○ 纯画面 · 不牵动剧情」，
+        // landing/echo 的后果短语从未上屏（两侧各自有测试、接缝无对拍所致）
+        source: p.source as SparkPart['source'],
+        note: p.note || undefined,
       }))
       if (parts.length) {
         setSparkParts(parts)

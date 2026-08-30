@@ -26,6 +26,10 @@ export interface DockPart {
   direction?: string
   /** 来源标记：'expectation' = 期待账本衍生件 */
   origin?: string
+  /** 功能槽位（2026-08-29 槽位重构）：landing / toward_beat / echo / ambient */
+  source?: string
+  /** 出处短语（后端按注入素材拼装，≤16 字：「接着刚才那句往下写」等） */
+  note?: string
 }
 
 /** Canon 感知提示（canon_watch 组件产，写中停顿心跳返回） */
