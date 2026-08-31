@@ -480,6 +480,7 @@ async def activate_plot_ledgers(
     plot_ledger_repository: Any,
     chapter_id: Any,
     chapter_number: Optional[int] = None,
+    book_id: Any = None,
 ) -> List[ForeshadowOpStatus]:
     """CP3.3 PlotLedger 激活（decisions §3.5）。
 
@@ -495,6 +496,8 @@ async def activate_plot_ledgers(
         plot_ledger_repository: PlotLedgerRepository 实例
         chapter_id: 当前章节 ID（用于 resolved_in_chapter_id）
         chapter_number: 当前章节序号（用于日志）
+        book_id: 书籍 ID（2026-09-01 审计补——ledger_key 唯一约束是「书内唯一」
+            uq_plot_ledger_book_key，不带书过滤跨书同 key 会误关别书伏笔）
 
     Returns:
         List[ForeshadowOpStatus]
@@ -587,11 +590,13 @@ async def activate_plot_ledgers(
     try:
         from backend.models import PlotLedgerStatus
         for st in statuses:
-            # 按 ledger_id 查记录
-            # PlotLedgerRepository 没有按 ledger_id 单查的方法，用 find_one
+            # 按 ledger_id 查记录（必须带书过滤：ledger_key 是书内唯一，跨书同 key 互撞）
             from backend.models import PlotLedger
+            conds = [PlotLedger.ledger_key == st.ledger_id]
+            if book_id is not None:
+                conds.append(PlotLedger.book_id == book_id)
             record = await plot_ledger_repository.find_one(
-                conditions=[PlotLedger.ledger_key == st.ledger_id],
+                conditions=conds,
             )
             if not record:
                 continue

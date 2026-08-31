@@ -373,6 +373,7 @@ async def publish_chapter(
                 plot_ledger_repository=plot_ledger_repo,
                 chapter_id=chapter.id,
                 chapter_number=chapter.chapter_number,
+                book_id=chapter.book_id,
             )
             svc_logger.info(
                 f"PlotLedger activated for chapter {chapter_id}: "
