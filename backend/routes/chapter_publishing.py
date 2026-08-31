@@ -267,85 +267,85 @@ async def publish_chapter(
             )
         )
 
-        # ========================================================================
-        # V4.0: 世界终端状态提取 (WorldTerminalState)
-        # ========================================================================
-        if text_to_summarize:
-            try:
-                # 获取上一章的状态作为参考
-                prev_chapter = await chapter_repo.get_previous_chapter(chapter)
-                previous_state = None
-                if prev_chapter and prev_chapter.world_snapshot:
-                    previous_state = WorldTerminalState.from_chapter_snapshot(
-                        prev_chapter.world_snapshot
-                    )
-
-                # 获取关联资产
-                chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
-                assets = [ca.asset for ca in chapter_assets if ca.asset]
-
-                # 使用 V4.0 SnapshotExtractorAgent
-                world_state = await asyncio.wait_for(
-                    extract_world_terminal_state(
-                        chapter_content=text_to_summarize,
-                        character_list=character_list,
-                        chapter_id=chapter.id,
-                        book_id=chapter.book_id,
-                        previous_state=previous_state,
-                        assets=assets,
-                    ),
-                    timeout=150,
+    # ========================================================================
+    # V4.0: 世界终端状态提取 (WorldTerminalState)
+    # ========================================================================
+    if text_to_summarize:
+        try:
+            # 获取上一章的状态作为参考
+            prev_chapter = await chapter_repo.get_previous_chapter(chapter)
+            previous_state = None
+            if prev_chapter and prev_chapter.world_snapshot:
+                previous_state = WorldTerminalState.from_chapter_snapshot(
+                    prev_chapter.world_snapshot
                 )
+
+            # 获取关联资产
+            chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
+            assets = [ca.asset for ca in chapter_assets if ca.asset]
+
+            # 使用 V4.0 SnapshotExtractorAgent
+            world_state = await asyncio.wait_for(
+                extract_world_terminal_state(
+                    chapter_content=text_to_summarize,
+                    character_list=character_list,
+                    chapter_id=chapter.id,
+                    book_id=chapter.book_id,
+                    previous_state=previous_state,
+                    assets=assets,
+                ),
+                timeout=150,
+            )
                 
-                if world_state:
-                    # 使用 mode='json' 确保 datetime 等复杂类型被正确序列化为字符串
-                    chapter.world_snapshot = world_state.model_dump(mode='json')
-                    svc_logger.info(
-                        "WorldTerminalState saved",
-                        chapter_id=str(chapter_id),
-                        character_count=len(world_state.characters),
-                        location=world_state.scene.location_summary[:30],
-                    )
+            if world_state:
+                # 使用 mode='json' 确保 datetime 等复杂类型被正确序列化为字符串
+                chapter.world_snapshot = world_state.model_dump(mode='json')
+                svc_logger.info(
+                    "WorldTerminalState saved",
+                    chapter_id=str(chapter_id),
+                    character_count=len(world_state.characters),
+                    location=world_state.scene.location_summary[:30],
+                )
 
-                    # ========================================================================
-                    # V4.0: 更新角色此刻状态 (current_state)
-                    # ========================================================================
-                    for character in character_list:
-                        if character and str(character.id) in world_state.characters:
-                            char_state = world_state.characters[str(character.id)]
-                            if char_state.emotional_state:
-                                character.current_state = char_state.emotional_state
-                                svc_logger.debug("Updated character current_state", character=character.name)
+                # ========================================================================
+                # V4.0: 更新角色此刻状态 (current_state)
+                # ========================================================================
+                for character in character_list:
+                    if character and str(character.id) in world_state.characters:
+                        char_state = world_state.characters[str(character.id)]
+                        if char_state.emotional_state:
+                            character.current_state = char_state.emotional_state
+                            svc_logger.debug("Updated character current_state", character=character.name)
 
-                    # ========================================================================
-                    # V4.0: 更新场景此刻状态
-                    # ========================================================================
-                    if world_state.scene.atmosphere:
-                        chapter_locations = await chapter_repo.list_locations_with_details(chapter_id)
-                        for ch_loc in chapter_locations:
-                            if ch_loc.location:
-                                ch_loc.location.current_state = world_state.scene.atmosphere
-                                svc_logger.debug("Updated location current_state", location=ch_loc.location.name)
+                # ========================================================================
+                # V4.0: 更新场景此刻状态
+                # ========================================================================
+                if world_state.scene.atmosphere:
+                    chapter_locations = await chapter_repo.list_locations_with_details(chapter_id)
+                    for ch_loc in chapter_locations:
+                        if ch_loc.location:
+                            ch_loc.location.current_state = world_state.scene.atmosphere
+                            svc_logger.debug("Updated location current_state", location=ch_loc.location.name)
                                 
-                    # ========================================================================
-                    # V4.0: 更新资产此刻状态
-                    # ========================================================================
-                    if world_state.assets:
-                        chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
-                        asset_map = {str(ca.asset.id): ca.asset for ca in chapter_assets if ca.asset}
-                        for asset_state in world_state.assets:
-                            asset_obj = asset_map.get(asset_state.asset_id)
-                            if asset_obj:
-                                asset_obj.current_state = asset_state.current_state
-                                svc_logger.debug("Updated asset current_state", asset=asset_obj.name)
+                # ========================================================================
+                # V4.0: 更新资产此刻状态
+                # ========================================================================
+                if world_state.assets:
+                    chapter_assets = await ChapterAssetRepository(chapter_repo.get_session()).list_by_chapter(chapter_id)
+                    asset_map = {str(ca.asset.id): ca.asset for ca in chapter_assets if ca.asset}
+                    for asset_state in world_state.assets:
+                        asset_obj = asset_map.get(asset_state.asset_id)
+                        if asset_obj:
+                            asset_obj.current_state = asset_state.current_state
+                            svc_logger.debug("Updated asset current_state", asset=asset_obj.name)
                 
-                else:
-                    svc_logger.warning("WorldTerminalState extraction returned None")
+            else:
+                svc_logger.warning("WorldTerminalState extraction returned None")
 
-            except asyncio.TimeoutError:
-                svc_logger.warning("WorldTerminalState extraction timed out")
-            except Exception as e:
-                svc_logger.error("WorldTerminalState extraction error", error=str(e))
+        except asyncio.TimeoutError:
+            svc_logger.warning("WorldTerminalState extraction timed out")
+        except Exception as e:
+            svc_logger.error("WorldTerminalState extraction error", error=str(e))
 
     # ========================================================================
     # CP3.3 PlotLedger 激活（decisions §3.5）

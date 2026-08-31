@@ -94,6 +94,8 @@
 
 相关既有事实：`WorldLocationRepository.update` 为「键存在即设」语义（coord/parent 显式 null 落库——清除坐标/脱离子树；路由层拦 name/kind 的显式 null）；DELETE 响应带 `ids`（删除的整棵子树）。
 
+PUT 父闸（2026-09-01 审计补齐，与 create 同口径）：`update_location` 换 parent 时校验存在且同书、不得是自身、不得落在自己的子树里（防环）——对拍 `routes/test_location_parent_gate.py`。
+
 ---
 
 ## 6. 验证记录

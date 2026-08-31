@@ -32,7 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import ChapterCard
@@ -87,10 +86,12 @@ class ChapterCardRepository(BaseRepository[ChapterCard]):
         existing = await self.get_by_chapter(chapter_id)
         if existing:
             return existing
-        card = ChapterCard(
-            book_id=book_id,
-            chapter_id=chapter_id,
-            chapter_number=chapter_number,
-            status="draft",
-        )
-        return await self.create(card)
+        # 设计意图：BaseRepository.create(payload: dict) 内部 model(**payload)——
+        # 必须传 dict（与 6e6670b 修 AuthorSampleRepository / S5 修 style_card 同款），
+        # 传 ORM 实例必 TypeError（2026-09-01 审计发现的潜伏雷，修于有人接线之前）
+        return await self.create({
+            "book_id": book_id,
+            "chapter_id": chapter_id,
+            "chapter_number": chapter_number,
+            "status": "draft",
+        })

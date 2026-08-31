@@ -37,13 +37,18 @@ class ChapterAssetRepository(BaseRepository[ChapterAsset]):
         )
         return list(result.scalars().all())
 
-    async def delete_by_chapter(self, chapter_id: UUID):
-        await self._db.execute(
-            select(ChapterAsset)
-            .filter(ChapterAsset.chapter_id == chapter_id)
-        )
+    async def delete_by_chapter(self, chapter_id: UUID) -> int:
+        """清空章节的全部资产关联（PUT /chapters/{id}/assets 空列表 = 清空语义）。
+
+        警示（2026-09-01 审计修复）：旧实现只做 ORM delete 标记、从不 commit——
+        非空列表靠路由后续 create() 的 commit 顺带冲刷侥幸生效；空列表（清空
+        全部）则无任何提交，请求结束即回滚、静默失效。改单条 bulk DELETE +
+        显式 commit（与 BaseRepository 单操作事务惯例一致）。
+        """
+        from sqlalchemy import delete
+
         result = await self._db.execute(
-            select(ChapterAsset).filter(ChapterAsset.chapter_id == chapter_id)
+            delete(ChapterAsset).where(ChapterAsset.chapter_id == chapter_id)
         )
-        for item in result.scalars().all():
-            await self._db.delete(item)
+        await self._db.commit()
+        return int(result.rowcount or 0)

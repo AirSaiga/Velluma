@@ -29,6 +29,20 @@ from backend.models import Chapter, MemoryChunk, PlotLedger
 from backend.repositories.base import BaseRepository, QuerySpec
 
 
+def _as_utc(dt: Optional[datetime]) -> datetime:
+    """排序键安全归一（2026-09-01 审计修复）：None → tz 感知 epoch 下界；naive → 补 UTC。
+
+    背景：PG/asyncpg 返回 aware datetime、SQLite 返回 naive，排序键里裸用
+    `created_at or datetime.min`（naive）会与 aware 值混比较 TypeError——
+    单条 NULL created_at 行即触发整次检索 500。归一后两侧路径一致可比。
+    """
+    if dt is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 class MemoryRepository(BaseRepository[MemoryChunk]):
     """
     记忆块仓储：管理 AI 上下文记忆数据。
@@ -121,7 +135,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             score = keyword_coverage(chunk.chunk_text or "", keywords)
             if chunk.chapter_id in ledger_chapter_ids:
                 score += 1.0
-            return (score, chunk.created_at or datetime.min)
+            return (score, _as_utc(chunk.created_at))
 
         return sorted(chunks, key=_rank_key, reverse=True)[:limit]
 
@@ -194,7 +208,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
                 gamma=gamma,
                 lambda_decay=lambda_decay,
             )
-            ranked.append((score, cosine_similarity, chunk.created_at or datetime.min, chunk))
+            ranked.append((score, cosine_similarity, _as_utc(chunk.created_at), chunk))
 
         ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
         return [item[3] for item in ranked[:limit]]

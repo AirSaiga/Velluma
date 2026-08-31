@@ -84,10 +84,6 @@ class PlotLedgerRepository(BaseRepository[PlotLedger]):
         Returns:
             List[PlotLedger]: 符合条件的伏笔列表，按创建章节倒序
         """
-        statuses = [PlotLedger.status == "open"]
-        if include_addressed:
-            statuses.append(PlotLedger.status == "addressed")
-
         spec = QuerySpec.create().where(
             PlotLedger.book_id == book_id,
             *([PlotLedger.status.in_(["open", "addressed"])] if include_addressed else [PlotLedger.status == "open"])

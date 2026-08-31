@@ -144,6 +144,8 @@ async def create_location(book_id: UUID, payload: WorldLocationCreate, db: Async
 
 @router.put("/{book_id}/world/locations/{location_id}", response_model=WorldLocationResponse)
 async def update_location(book_id: UUID, location_id: UUID, payload: WorldLocationUpdate, db: AsyncSession = Depends(get_db)):
+    from backend.services.world.location_tree import collect_subtree_ids
+
     repo = WorldRepository(db)
     fields = payload.model_dump(exclude_unset=True, by_alias=False)
     # 必填字段显式 null 不落（repo.update 已改「键存在即设」，此处拦住清空名/类的手滑）
@@ -151,7 +153,18 @@ async def update_location(book_id: UUID, location_id: UUID, payload: WorldLocati
         if k in fields and not fields[k]:
             fields.pop(k)
     if fields.get("parent_id"):
-        fields["parent_id"] = str(fields["parent_id"])
+        # 父地点闸（2026-09-01 审计补齐，与 create 同口径）：parent 必须存在且同书、
+        # 不能是自身、不能落在自己的子树里（后者会造环——读侧 location_path/
+        # ancestor_chain 有防环护栏不会崩，但树就脏了：面包屑截断、场景作用域漏祖先）
+        pid = str(fields["parent_id"])
+        existing = await repo.locations.list_by_book(str(book_id))
+        if pid == str(location_id):
+            raise HTTPException(400, "父地点不能是自身")
+        if pid not in {str(l.id) for l in existing}:
+            raise HTTPException(400, "父地点不存在")
+        if pid in collect_subtree_ids(existing, str(location_id)):
+            raise HTTPException(400, "父地点不能是自己的子级（会成环）")
+        fields["parent_id"] = pid
     loc = await repo.locations.update(str(location_id), **fields)
     if loc is None:
         raise HTTPException(404, "地点不存在")
