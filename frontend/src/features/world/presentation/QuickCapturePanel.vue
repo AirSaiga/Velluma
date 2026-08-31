@@ -19,6 +19,7 @@ import ModalShell from './ModalShell.vue'
 import InlineCreate from './InlineCreate.vue'
 import { EVENT_TEMPLATES, getTemplate, EVENT_TYPE_COLOR } from '../engine/eventTemplates'
 import { parsePointFromNote, stripPointFromNote } from '../engine/eventPoint'
+import { locationPath } from '../engine/locationTree'
 import type { EventType, WorldEvent, Point, DrawMode } from '../engine/types'
 import { fromYMD, breakdownTime } from '../engine/timeFormat'
 import { futureEventWarning } from '../engine/narrativeTimeSource'
@@ -144,6 +145,15 @@ function locCoord(id: string): Point | null {
   if (loc && loc.coord_x != null && loc.coord_y != null) return [loc.coord_x, loc.coord_y]
   return null
 }
+
+/** 地点下拉选项：内部构造（有父级）带全路径显示——重名消歧 + 一眼看出是房间级 */
+const locOptions = computed(() => {
+  const byId = new Map(locations.value.map((l) => [l.id, l]))
+  return locations.value.map((l) => ({
+    id: l.id,
+    label: l.parent_id ? locationPath(l, byId) : l.name,
+  }))
+})
 
 /** move 起终点均有坐标时才允许点选途经点（否则路径无从锚定） */
 const canPickWaypoints = computed(
@@ -325,7 +335,7 @@ async function submit() {
       <div class="qc-selrow">
         <select v-model="locId" class="qc-select">
           <option value="">（无）</option>
-          <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+          <option v-for="l in locOptions" :key="l.id" :value="l.id">{{ l.label }}</option>
         </select>
         <InlineCreate :book-id="bookId" kind="location" @created="locId = $event.id" />
       </div>
@@ -353,7 +363,7 @@ async function submit() {
           <div class="qc-selrow">
             <select v-model="fromLocId" class="qc-select">
               <option value="">起点</option>
-              <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+              <option v-for="l in locOptions" :key="l.id" :value="l.id">{{ l.label }}</option>
             </select>
             <InlineCreate :book-id="bookId" kind="location" @created="fromLocId = $event.id" />
           </div>
@@ -363,7 +373,7 @@ async function submit() {
           <div class="qc-selrow">
             <select v-model="toLocId" class="qc-select">
               <option value="">终点</option>
-              <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+              <option v-for="l in locOptions" :key="l.id" :value="l.id">{{ l.label }}</option>
             </select>
             <InlineCreate :book-id="bookId" kind="location" @created="toLocId = $event.id" />
           </div>
@@ -396,7 +406,7 @@ async function submit() {
       <div class="qc-selrow">
         <select v-model="targetId" class="qc-select">
           <option value="">选择地点</option>
-          <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+          <option v-for="l in locOptions" :key="l.id" :value="l.id">{{ l.label }}</option>
         </select>
         <InlineCreate :book-id="bookId" kind="location" @created="targetId = $event.id" />
       </div>
@@ -450,7 +460,7 @@ async function submit() {
       <div class="qc-selrow">
         <select v-model="locId" class="qc-select">
           <option value="">选择已知地点（可选）</option>
-          <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+          <option v-for="l in locOptions" :key="l.id" :value="l.id">{{ l.label }}</option>
         </select>
         <InlineCreate :book-id="bookId" kind="location" @created="locId = $event.id" />
       </div>

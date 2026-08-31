@@ -282,13 +282,18 @@ async def load_world_overlay(
     # 不再被高重要度远端角色挤出 16 名单。无场景钉时在场集恒空、第一键恒 0，
     # 排序与旧逻辑逐一致（零变化契约）。chapter 走 getattr 防御（鸭子类型对象）。
     # 死者不进在场集：death 不清 location_id，不拦截则尸体原位会一直占在场名额。
+    # 场景作用域（location-interior 二期）：钉到房间时祖先（基地）上的角色也算
+    # 在场——「在建筑物里」是「在这个房间的场景里」的合理上界；顶层钉=精确匹配同旧。
+    from backend.services.world.location_tree import scene_scope_ids
+
     scene_loc_id = str(getattr(chapter, "scene_location_id", None) or "")
+    scene_scope = scene_scope_ids(locations, scene_loc_id)
     present_ids: set = set()
-    if scene_loc_id:
+    if scene_scope:
         for eid, cs in char_states.items():
             if not (cs or {}).get("alive", False):
                 continue
-            if str((cs or {}).get("location_id") or "") == scene_loc_id:
+            if str((cs or {}).get("location_id") or "") in scene_scope:
                 present_ids.add(eid)
 
     # 角色适配：在场 → 切片时刻有事态 → 重要度降序；上限见 budget（prompt 预算护栏）

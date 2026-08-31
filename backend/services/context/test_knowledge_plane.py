@@ -256,6 +256,68 @@ class TestRendering(unittest.TestCase):
         self.assertIn("自定义禁词", kv.negative_constraints)
 
 
+class TestLocationInterior(unittest.TestCase):
+    """场景钉房间（location-interior 二期）：作用域在场 / 全路径名 / 地点档案 / 零变化。"""
+
+    def _world(self, base_intro="", cell_intro=""):
+        base = _Ns(id="base", name="统合局基地", parent_id=None, intro=base_intro)
+        cell = _Ns(id="cell", name="B2 拘留层", parent_id="base", intro=cell_intro)
+        e1 = _entity("e1", "林尘", static="外貌：清瘦")  # 钉在基地（祖先）
+        e2 = _entity("e2", "审讯官", static="性格：阴冷")  # 钉在房间
+        states = [
+            {"entity_id": "e1", "alive": True, "location_id": "base"},
+            {"entity_id": "e2", "alive": True, "location_id": "cell"},
+        ]
+        return _bundle(
+            entities=[e1, e2], locations=[base, cell], scene_loc="cell",
+            states=states, source="chapter_anchor",
+        )
+
+    def test_room_pin_ancestors_present(self):
+        """钉「拘留层」→ 基地上的林尘也算在场（祖先=合理上界）。"""
+        entries = kp.build_knowledge_entries(self._world())
+        by_title = {e.title: e for e in entries}
+        self.assertTrue(by_title["林尘"].present)   # location_id=base ∈ scope
+        self.assertTrue(by_title["审讯官"].present)  # location_id=cell 精确命中
+
+    def test_temporal_child_location_full_path(self):
+        """角色钉在房间 → 时态行全路径「位于X·Y」（无歧义）。"""
+        entries = kp.build_knowledge_entries(self._world())
+        by_title = {e.title: e for e in entries}
+        self.assertIn("位于统合局基地·B2 拘留层", by_title["审讯官"].temporal)
+        self.assertIn("位于统合局基地", by_title["林尘"].temporal)  # 顶层=裸名
+
+    def test_scene_identity_location_archive(self):
+        """场景身份块带地点档案：场景地点+祖先 intro，从外到内。"""
+        b = self._world(base_intro="旧战争部改建，地下三层", cell_intro="无窗，铁门七道")
+        kv = kp.build_knowledge_view(b)
+        self.assertIn("本章场景：统合局基地·B2 拘留层（作者钉定）", kv.scene_identity)
+        self.assertIn(
+            "地点档案：统合局基地：旧战争部改建，地下三层；B2 拘留层：无窗，铁门七道",
+            kv.scene_identity,
+        )
+
+    def test_archive_zero_change_without_intro(self):
+        """全链无 intro → 不追加地点档案行（无内部构造的书 prompt 零变化）。"""
+        kv = kp.build_knowledge_view(self._world())
+        self.assertIn("本章场景：统合局基地·B2 拘留层（作者钉定）", kv.scene_identity)
+        self.assertNotIn("地点档案", kv.scene_identity)
+
+    def test_top_level_pin_name_unchanged(self):
+        """顶层钉 + 裸名地点：场景行/时态行与旧版同形（_location_name 零变化面）。"""
+        loc = _Ns(id="loc1", name="北岸要塞", parent_id=None, intro="")
+        e1 = _entity("e1", "林尘")
+        b = _bundle(
+            entities=[e1], locations=[loc], scene_loc="loc1",
+            states=[{"entity_id": "e1", "alive": True, "location_id": "loc1"}],
+            source="chapter_anchor",
+        )
+        kv = kp.build_knowledge_view(b)
+        self.assertIn("本章场景：北岸要塞（作者钉定）", kv.scene_identity)
+        self.assertNotIn("北岸要塞·", kv.entities_text)
+        self.assertNotIn("地点档案", kv.scene_identity)
+
+
 class TestPrefixDiscipline(unittest.TestCase):
     """B6 前缀纪律：作者打字（正文变化）不作废前缀；提及只进后缀。"""
 

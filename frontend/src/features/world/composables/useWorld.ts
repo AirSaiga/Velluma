@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
-import { worldApi, plotLedgerApi, type PlotLedgerCreateInput } from '../../../services/api'
+import { worldApi, plotLedgerApi, type PlotLedgerCreateInput, type WorldLocationCreate } from '../../../services/api'
 import { computeWorldState } from '../engine/computeWorldState'
+import { collectSubtree } from '../engine/locationTree'
 import {
   normalizeTimelineCursor,
   normalizeTimelineRange,
@@ -218,17 +219,22 @@ async function load(bookId: string) {
 }
 
 // ===== Location =====
-async function createLocation(
-  bookId: string,
-  data: {
-    id?: string
-    name: string
-    kind?: string
-    coord_x?: number | null
-    coord_y?: number | null
-    intro?: string
-  },
-) {
+
+/** 地点完整字段快照（undo/redo 重建用——树形化后 parent_id/tags 也不能丢） */
+function _loc_payload(loc: WorldLocation) {
+  return {
+    id: loc.id,
+    name: loc.name,
+    kind: loc.kind,
+    parent_id: loc.parent_id,
+    coord_x: loc.coord_x,
+    coord_y: loc.coord_y,
+    intro: loc.intro,
+    tags: loc.tags,
+  }
+}
+
+async function createLocation(bookId: string, data: WorldLocationCreate) {
   const loc = await worldApi.createLocation(bookId, data)
   locations.value = [...locations.value, loc]
   pushCommand({
@@ -238,14 +244,7 @@ async function createLocation(
       locations.value = locations.value.filter((l) => l.id !== loc.id)
     },
     redo: async () => {
-      const r = await worldApi.createLocation(bookId, {
-        id: loc.id, // 幂等恢复：沿用原 id，保住 relation/事件对该地点的引用
-        name: loc.name,
-        kind: loc.kind,
-        coord_x: loc.coord_x,
-        coord_y: loc.coord_y,
-        intro: loc.intro,
-      })
+      const r = await worldApi.createLocation(bookId, _loc_payload(loc))
       locations.value = [...locations.value, r]
     },
   })
@@ -263,6 +262,18 @@ async function renameEntity(bookId: string, entityId: string, name: string) {
   entities.value = entities.value.map((e) => (e.id === entityId ? { ...e, name } : e))
 }
 
+/** 详情抽屉的通用字段更新（轻量不进 undo，与实体档案同策略）。
+ *  coord 传 null = 清除坐标（后端「键存在即设」显式 null 语义）。 */
+async function updateLocation(
+  bookId: string,
+  locationId: string,
+  patch: Partial<WorldLocationCreate>,
+) {
+  const r = await worldApi.updateLocation(bookId, locationId, patch)
+  locations.value = locations.value.map((l) => (l.id === locationId ? { ...l, ...r } : l))
+  return r
+}
+
 /** 地图拖拽微调地点坐标（不进 undo 栈——高频微调不值得占历史步） */
 async function updateLocationCoords(
   bookId: string,
@@ -276,27 +287,25 @@ async function updateLocationCoords(
   )
 }
 
+/** 树删：内部构造随父地点一并删除（docs/location-interior.md 删除语义）。
+ *  删前收整棵子树快照，undo 按「父前子后」顺序带原 id 幂等重建。 */
 async function deleteLocation(bookId: string, locationId: string) {
-  const snap = locations.value.find((l) => l.id === locationId)
+  const tree = collectSubtree(locations.value, locationId)
   await worldApi.deleteLocation(bookId, locationId)
-  locations.value = locations.value.filter((l) => l.id !== locationId)
-  if (snap) {
+  const gone = new Set(tree.map((l) => l.id))
+  locations.value = locations.value.filter((l) => !gone.has(l.id))
+  if (tree.length) {
     pushCommand({
-      description: `删除地点「${snap.name}」`,
+      description: `删除地点「${tree[0].name}」${tree.length > 1 ? `（含 ${tree.length - 1} 个内部构造）` : ''}`,
       undo: async () => {
-        const r = await worldApi.createLocation(bookId, {
-          id: snap.id, // 幂等恢复：沿用原 id
-          name: snap.name,
-          kind: snap.kind,
-          coord_x: snap.coord_x,
-          coord_y: snap.coord_y,
-          intro: snap.intro,
-        })
-        locations.value = [...locations.value, r]
+        for (const snap of tree) {
+          const r = await worldApi.createLocation(bookId, _loc_payload(snap))
+          locations.value = [...locations.value, r]
+        }
       },
       redo: async () => {
         await worldApi.deleteLocation(bookId, locationId)
-        locations.value = locations.value.filter((l) => l.id !== locationId)
+        locations.value = locations.value.filter((l) => !gone.has(l.id))
       },
     })
   }
@@ -838,6 +847,7 @@ export function useWorld() {
     createLocation,
     updateLocationCoords,
     renameLocation,
+    updateLocation,
     renameEntity,
     deleteLocation,
     createEvent,

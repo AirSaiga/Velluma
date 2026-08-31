@@ -197,9 +197,13 @@ async def build_scene_slice(
     if scene_loc is None:
         scene_loc = _resolve_scene_location(events, t, locations_by_id, presence, presence_loc_ids)
     if scene_loc is not None:
+        from backend.services.world.location_tree import location_path
+
         scene = {
             "location_id": str(scene_loc.id),
             "name": scene_loc.name or "",
+            # 全路径（内部构造脚下的无歧义显示；顶层=裸名与 name 同值）
+            "path": location_path(scene_loc, locations_by_id),
             "controlling_faction": _controlling_faction_for_location(state, scene_loc, entities_by_id),
             "pinned": scene_pinned,
         }

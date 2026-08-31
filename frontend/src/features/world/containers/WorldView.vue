@@ -17,11 +17,13 @@ import { useAppStore } from '../../app/useAppStore'
 import { formatTime, displayCandidateTime } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
+import { childrenIndex, collectSubtree, topLevelLocations } from '../engine/locationTree'
 import type { WorldEvent, WorldLocation, EventType, DrawMode, Point } from '../engine/types'
 import WorldMap from './WorldMap.vue'
 import WorldTimeline from './WorldTimeline.vue'
 import QuickCapturePanel from '../presentation/QuickCapturePanel.vue'
 import EntityDetailDrawer from '../presentation/EntityDetailDrawer.vue'
+import LocationDetailDrawer from '../presentation/LocationDetailDrawer.vue'
 import EntityCard from '../presentation/EntityCard.vue'
 import BulkImportDialog from '../presentation/BulkImportDialog.vue'
 import ModalShell from '../presentation/ModalShell.vue'
@@ -123,6 +125,12 @@ function onQuickEvent(type: EventType, entityId: string) {
 
 // ===== 实体详情抽屉（M2：档案/编年史/快捷事态的家，三透镜共享选中态）=====
 const selectedEntityId = ref<string | null>(null)
+
+// ===== 地点详情抽屉（docs/location-interior.md：内部构造的二级面板）=====
+const selectedLocId = ref<string | null>(null)
+function openLocDetail(id: string) {
+  selectedLocId.value = id
+}
 
 // ===== M5：伏笔详情抽屉 / 期待账本 / 世界观模态 =====
 const selectedForeshadowId = ref<string | null>(null)
@@ -613,11 +621,32 @@ function cancelDraft() {
   pickingMode.value = null
 }
 
+// ===== 地点树（列表缩进子树 + 顶层计数口径）=====
+/** 树序展开：顶层在前、子级紧随父后带深度（列表缩进用） */
+const orderedLocations = computed(() => {
+  const kids = childrenIndex(locations.value)
+  const out: { loc: WorldLocation; depth: number }[] = []
+  const walk = (list: WorldLocation[], depth: number) => {
+    for (const l of list) {
+      out.push({ loc: l, depth })
+      walk(kids.get(l.id) || [], depth + 1)
+    }
+  }
+  walk(topLevelLocations(locations.value), 0)
+  return out
+})
+/** 计数徽标只数顶层（内部构造不进「N 地点」——防房间把数字灌虚） */
+const topLocationCount = computed(() => topLevelLocations(locations.value).length)
+const locChildren = computed(() => childrenIndex(locations.value))
+
 async function removeLoc(loc: WorldLocation) {
+  const innerCount = Math.max(0, collectSubtree(locations.value, loc.id).length - 1)
   const ok = await showConfirm({
     title: '删除地点',
     message: `确定删除地点「${loc.name}」吗？`,
-    warning: '关联事件的地点引用会被清空（可用 Ctrl+Z 撤销）。',
+    warning:
+      (innerCount ? `含 ${innerCount} 个内部构造，将一并删除。` : '') +
+      '关联事件的地点引用会被清空（可用 Ctrl+Z 撤销）。',
     confirmText: '删除',
   })
   if (!ok) return
@@ -728,7 +757,9 @@ watch(locations, (list) => {
   const loc = list.find((l) => l.id === pendingLocId.value)
   if (loc) {
     pendingLocId.value = null
-    focusLocation(loc)
+    // 内部构造不上图——深链进它的唯一「面」是详情抽屉；顶层维持定位地图
+    if (loc.parent_id) selectedLocId.value = loc.id
+    else focusLocation(loc)
   }
 })
 
@@ -790,7 +821,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         <div class="atlas-watermark">
           <div class="aw-title">{{ bookTitle ? `《${bookTitle}》` : '世界设定' }}</div>
           <div class="aw-sub">
-            {{ locations.length }} 地点 · {{ events.length }} 事件 ·
+            {{ topLocationCount }} 地点 · {{ events.length }} 事件 ·
             {{ characters.length + factions.length + assets.length }} 实体
           </div>
         </div>
@@ -831,6 +862,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             @pick="onPick"
             @draw-complete="onDrawComplete"
             @entity-click="(id: string) => (selectedEntityId = id)"
+            @location-detail="openLocDetail"
           />
         </div>
 
@@ -905,6 +937,15 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           @focus-event="focusEvent"
         />
 
+        <!-- 地点详情抽屉（地图 popup 详情/地点列表/深链打开——内部构造的家） -->
+        <LocationDetailDrawer
+          v-if="selectedLocId"
+          :book-id="bookId"
+          :location-id="selectedLocId"
+          @close="selectedLocId = null"
+          @locate="(loc: WorldLocation) => focusLocation(loc)"
+        />
+
         <!-- 伏笔详情抽屉（M5：侧栏账本行/写作页 ?fs= 深链/弧线带「编辑详情」打开） -->
         <ForeshadowDetailDrawer
           v-if="selectedForeshadowId"
@@ -951,7 +992,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         <span class="ar-sep"></span>
         <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'loc' }" title="地点" @click="togglePanel('loc')">
           <Icon name="map-pin" :size="15" />
-          <span class="ar-n">{{ locations.length }}</span>
+          <span class="ar-n">{{ topLocationCount }}</span>
         </button>
         <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'evt' }" title="事件" @click="togglePanel('evt')">
           <Icon name="flag" :size="15" />
@@ -1049,22 +1090,23 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         />
         </template>
 
-        <!-- 地点 -->
+        <!-- 地点（缩进子树：顶层定位地图，内部构造开详情抽屉）-->
         <template v-if="activePanel === 'loc'">
         <div class="side-section">
           <div class="side-title">
             <Icon name="map-pin" :size="13" />
             <span>地点</span>
-            <span class="side-count">{{ locations.length }}</span>
+            <span class="side-count">{{ topLocationCount }}</span>
           </div>
           <ul v-if="locations.length" class="side-list">
             <li
-              v-for="loc in locations"
+              v-for="{ loc, depth } in orderedLocations"
               :key="loc.id"
               class="side-card"
-              :class="{ 'side-card--click': loc.coord_x != null }"
-              title="点击定位 · 双击名字改名"
-              @click="focusLocation(loc)"
+              :class="{ 'side-card--click': depth > 0 || loc.coord_x != null }"
+              :style="depth ? { paddingLeft: `${8 + depth * 14}px` } : undefined"
+              :title="depth > 0 ? '点击看详情与内部构造' : loc.coord_x != null ? '点击定位 · 双击名字改名' : '点击看详情'"
+              @click="depth > 0 || loc.coord_x == null ? openLocDetail(loc.id) : focusLocation(loc)"
             >
               <div class="sc-body">
                 <input
@@ -1078,9 +1120,18 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
                   @click.stop
                 />
                 <span v-else class="sc-name" @dblclick.stop="startEditLoc(loc)">{{ loc.name }}</span>
-                <span class="sc-badge">{{ LOC_KIND_LABEL[loc.kind] || loc.kind }}</span>
+                <span v-if="depth > 0" class="sc-badge sc-badge--inner">内部</span>
+                <span v-else class="sc-badge">{{ LOC_KIND_LABEL[loc.kind] || loc.kind }}</span>
+                <span
+                  v-if="(locChildren.get(loc.id) || []).length"
+                  class="sc-badge sc-badge--inner"
+                  title="内部构造数"
+                >{{ (locChildren.get(loc.id) || []).length }} 内</span>
               </div>
               <div class="sc-actions">
+                <button class="sc-act" title="详情 / 内部构造" @click.stop="openLocDetail(loc.id)">
+                  <Icon name="information-circle" :size="13" />
+                </button>
                 <button class="sc-act sc-act--danger" title="删除" @click.stop="removeLoc(loc)">
                   <Icon name="trash" :size="13" />
                 </button>
@@ -1896,6 +1947,11 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   background: var(--bg-tertiary);
   border-radius: 9999px;
   padding: 1px 7px;
+}
+/* 内部构造徽标（缩进子级行 / 子数提示）：与地点类型徽标同形不同色 */
+.sc-badge--inner {
+  color: var(--accent-400, #8b6de8);
+  background: rgba(139, 109, 232, 0.1);
 }
 .sc-actions {
   display: flex;

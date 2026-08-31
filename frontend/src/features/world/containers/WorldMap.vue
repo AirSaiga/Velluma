@@ -18,6 +18,7 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useWorld } from '../composables/useWorld'
 import { useMapEdit, resolveImageUrl, editUndo, editRedo } from '../composables/useMapEdit'
 import { eventPoint, stripPointFromNote, centroid } from '../engine/eventPoint'
+import { childrenIndex } from '../engine/locationTree'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { formatTime } from '../engine/timeFormat'
 import { relationTypeMeta } from '../engine/relationTypes'
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   pick: [point: [number, number]]
   'draw-complete': [points: [number, number][]]
   'entity-click': [entityId: string]
+  'location-detail': [locationId: string]
 }>()
 
 // ===== D4 比例尺标定：拉线捕获 + 左下角比例尺角标 =====
@@ -606,17 +608,27 @@ function distToSeg(p: L.Point, a: L.Point, b: L.Point): number {
   return p.distanceTo(L.point(a.x + t * dx, a.y + t * dy))
 }
 
+/** 地点子级索引（marker 内部构造记号 / popup 计数行共用） */
+const locChildren = computed(() => childrenIndex(locations.value))
+
 function renderMarkers() {
   if (!map || !markerLayer) return
   markerLayer.clearLayers()
   if (!layerVisible.value.locations) return
   const withLabel = showLabels()
+  // 有子级标记（内部构造提示）：环点内加一点
+  const locKids = locChildren.value
   for (const loc of locations.value) {
+    // 上图权 = parent_id IS NULL（docs/location-interior.md 渲染契约）：内部构造只进详情抽屉
+    if (loc.parent_id) continue
     if (loc.coord_x == null || loc.coord_y == null) continue
     const color = LOC_KIND_COLOR[loc.kind] || LOC_KIND_COLOR.point
+    const hasInner = (locKids.get(loc.id) || []).length > 0
     const icon = L.divIcon({
       className: 'wm-loc-icon',
-      html: `<div class="wm-loc" style="--c:${color}"><span class="wm-loc-ring"></span>${
+      html: `<div class="wm-loc${hasInner ? ' wm-loc--inner' : ''}" style="--c:${color}"><span class="wm-loc-ring"></span>${
+        hasInner ? '<span class="wm-loc-dot"></span>' : ''
+      }${
         withLabel ? `<span class="wm-loc-name">${esc(loc.name)}</span>` : ''
       }</div>`,
       iconSize: [0, 0],
@@ -637,14 +649,17 @@ function renderMarkers() {
   }
 }
 
-/** 地点 popup：名字 + 类型/简介 + 就地改名/删除（事件在 popupopen 委托绑定） */
+/** 地点 popup：名字 + 类型/简介 + 内部构造行 + 详情/改名/删除（事件在 popupopen 委托绑定） */
 function buildLocPopupHtml(loc: WorldLocation): string {
+  const innerCount = (locChildren.value.get(loc.id) || []).length
   return (
     `<div class="wm-pop-title">${esc(loc.name)}</div>` +
     `<span class="wm-pop-sub">${esc(loc.kind)}</span>` +
     (loc.intro ? `<div class="wm-pop-intro">${esc(loc.intro)}</div>` : '') +
+    (innerCount ? `<div class="wm-pop-inner">内部构造 ${innerCount} ›</div>` : '') +
     `<div class="wm-pop-edit" data-loc-id="${loc.id}">` +
     `<input class="wm-pop-input" data-loc-name value="${esc(loc.name)}" />` +
+    `<button class="wm-pop-btn" data-act="detail" title="地点详情与内部构造">详情</button>` +
     `<button class="wm-pop-btn" data-act="save" title="保存改名">改名</button>` +
     `<button class="wm-pop-btn wm-pop-btn--danger" data-act="del" title="删除地点">删除</button>` +
     `</div>`
@@ -1374,7 +1389,7 @@ onMounted(() => {
   })
   // 笔迹 canvas 与地图视图同步（拖动/缩放/窗口变化 → rAF 重绘）
   map.on('move zoom viewreset resize', scheduleStrokeRedraw)
-  // 地点 popup 的就地改名/删除（popup DOM 随开随建，委托绑定无泄漏）
+  // 地点 popup 的就地改名/删除/详情（popup DOM 随开随建，委托绑定无泄漏）
   map.on('popupopen', (e: L.PopupEvent) => {
     const root = e.popup.getElement()
     const box = root?.querySelector('.wm-pop-edit') as HTMLElement | null
@@ -1396,13 +1411,20 @@ onMounted(() => {
         doSave()
       }
     })
+    box.querySelector('[data-act="detail"]')?.addEventListener('click', () => {
+      map?.closePopup()
+      emit('location-detail', locId)
+    })
     box.querySelector('[data-act="del"]')?.addEventListener('click', async () => {
       const loc = locations.value.find((l) => l.id === locId)
+      const innerCount = (locChildren.value.get(locId) || []).length
       map?.closePopup()
       const ok = await showConfirm({
         title: '删除地点',
         message: `确定删除地点「${loc?.name || ''}」吗？`,
-        warning: '关联事件的地点引用会被清空（可用 Ctrl+Z 撤销）。',
+        warning:
+          (innerCount ? `含 ${innerCount} 个内部构造，将一并删除。` : '') +
+          '关联事件的地点引用会被清空（可用 Ctrl+Z 撤销）。',
         confirmText: '删除',
       })
       if (ok) {
@@ -2054,6 +2076,28 @@ onBeforeUnmount(() => {
   box-shadow: 0 1px 5px rgba(60, 44, 22, 0.3);
   transition: transform 0.15s ease-out;
 }
+/* 有内部构造的地点：环心加一点（提示「里面还有东西，点开详情」） */
+.wm-loc-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 13px;
+  height: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.wm-loc-dot::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--c, #7c6aad);
+}
+.wm-loc--inner {
+  position: relative;
+}
 .wm-loc:hover .wm-loc-ring {
   transform: scale(1.25);
 }
@@ -2509,6 +2553,11 @@ path.wm-track-flow {
   line-height: 1.5;
   color: var(--text-secondary, #64748b);
   max-width: 200px;
+}
+.wm-pop-inner {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--accent-400, #8b6de8);
 }
 /* 地点 popup 就地改名/删除 */
 .wm-pop-edit {

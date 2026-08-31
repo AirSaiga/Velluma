@@ -119,13 +119,20 @@ async def create_location(book_id: UUID, payload: WorldLocationCreate, db: Async
     if payload.book_id != book_id:
         raise HTTPException(400, "book_id 不匹配")
     repo = WorldRepository(db)
-    # 幂等闸（同实体，2026-08-26 实测事故）：同名地点已存在则返回既有；
+    existing = await repo.locations.list_by_book(str(book_id))
+    # 父地点校验（防悬空树）：parent 必须存在且同书
+    if payload.parent_id and str(payload.parent_id) not in {str(l.id) for l in existing}:
+        raise HTTPException(400, "父地点不存在")
+    # 幂等闸（同实体纪律，2026-08-26 实测事故）：「同父 + 归一化名」已存在则返回既有——
+    # 树形化后跨父同名合法（两个基地各有一个「拘留室」），全书同名不再算重复；
     # 显式 id 的 undo/redo 重建路径豁免
     if not payload.id:
         want = " ".join((payload.name or "").split())
+        parent_key = str(payload.parent_id) if payload.parent_id else ""
         if want:
-            for loc in await repo.locations.list_by_book(str(book_id)):
-                if " ".join((loc.name or "").split()) == want:
+            for loc in existing:
+                same_parent = (str(loc.parent_id) if loc.parent_id else "") == parent_key
+                if same_parent and " ".join((loc.name or "").split()) == want:
                     return loc
     fields = payload.model_dump(exclude={"book_id"}, by_alias=False)
     if fields.get("parent_id"):
@@ -139,6 +146,10 @@ async def create_location(book_id: UUID, payload: WorldLocationCreate, db: Async
 async def update_location(book_id: UUID, location_id: UUID, payload: WorldLocationUpdate, db: AsyncSession = Depends(get_db)):
     repo = WorldRepository(db)
     fields = payload.model_dump(exclude_unset=True, by_alias=False)
+    # 必填字段显式 null 不落（repo.update 已改「键存在即设」，此处拦住清空名/类的手滑）
+    for k in ("name", "kind"):
+        if k in fields and not fields[k]:
+            fields.pop(k)
     if fields.get("parent_id"):
         fields["parent_id"] = str(fields["parent_id"])
     loc = await repo.locations.update(str(location_id), **fields)
@@ -150,15 +161,22 @@ async def update_location(book_id: UUID, location_id: UUID, payload: WorldLocati
 
 @router.delete("/{book_id}/world/locations/{location_id}")
 async def delete_location(book_id: UUID, location_id: UUID, db: AsyncSession = Depends(get_db)):
+    from backend.services.world.location_tree import collect_subtree_ids
+
     repo = WorldRepository(db)
-    if not await repo.locations.delete(str(location_id)):
+    # 树删（docs/location-interior.md）：内部构造随父地点一并删除；父前子后顺序执行，
+    # 不让 DB 的 ondelete=SET NULL 把子级悬空成顶层孤儿
+    ids = collect_subtree_ids(await repo.locations.list_by_book(str(book_id)), str(location_id))
+    if not ids:
         raise HTTPException(404, "地点不存在")
-    # C2：地点删除 → 挂接的信息面 overlay 同步清理（应用层级联，防悬空 ref）
+    # C2：地点删除 → 挂接的信息面 overlay 同步清理（应用层级联，防悬空 ref）——子树逐个清
     from sqlalchemy import delete as sa_delete
     from backend.models import CanonNode as _CanonNode
-    await db.execute(sa_delete(_CanonNode).where(_CanonNode.ref_id == location_id, _CanonNode.ref_type == "location"))
+    for lid in ids:
+        await repo.locations.delete(lid)
+        await db.execute(sa_delete(_CanonNode).where(_CanonNode.ref_id == lid, _CanonNode.ref_type == "location"))
     await db.commit()
-    return {"deleted": True}
+    return {"deleted": True, "ids": ids}
 
 
 # ============================================================

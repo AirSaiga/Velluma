@@ -22,6 +22,7 @@ export interface WorldLocationCreate {
   id?: string // 幂等重建（undo/redo 恢复路径）
   name: string
   kind?: string
+  parent_id?: string | null // 非空 = 内部构造（上图权 = parent_id IS NULL，docs/location-interior.md）
   coord_x?: number | null
   coord_y?: number | null
   intro?: string
@@ -101,6 +102,8 @@ export interface ScenePresence {
 export interface SceneBlock {
   location_id: string
   name: string
+  /** 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/location-interior.md） */
+  path?: string
   controlling_faction: string | null
   /** True=作者显式钉定（chapters.scene_location_id） */
   pinned: boolean

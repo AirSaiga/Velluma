@@ -119,9 +119,10 @@ class WorldLocationRepository:
         loc = await self.get(location_id)
         if loc is None:
             return None
+        # 「键存在即设」：coord/parent 的显式 null 必须落库（清除坐标/脱离子树）——
+        # 与其他 repo 的「跳过 None」不同，调用方（路由 exclude_unset）保证键语义
         for k, v in fields.items():
-            if v is not None:
-                setattr(loc, k, v)
+            setattr(loc, k, v)
         await self.db.flush()
         return loc
 

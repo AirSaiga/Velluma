@@ -261,6 +261,7 @@ class SceneBlockResponse(BaseModel):
     """脚下（场景地点）。controlling_faction 仅在地点有坐标且对疆域 polygon 唯一命中时有值。"""
     location_id: str
     name: str
+    path: str = ""  # 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/location-interior.md）
     controlling_faction: Optional[str] = None
     pinned: bool = False  # True=作者显式钉定（chapters.scene_location_id）
 

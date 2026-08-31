@@ -50,6 +50,27 @@ def _clamp_int(v: Any, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
 
 
+def _location_lookup(locations: List[Any], name: str) -> Optional[Any]:
+    """名字 → 地点：全路径（父·子）精确优先，裸名兜底。
+
+    树形化后跨父同名合法（两个基地各有一个「拘留室」）——全路径无歧义；
+    裸名多命中时取先建者（速记口语通常只说裸名，歧义留作者在表单里改）。
+    """
+    from backend.services.world.location_tree import location_path, locations_by_id
+
+    want = name.strip()
+    if not want:
+        return None
+    by_id = locations_by_id(locations)
+    bare: Dict[str, Any] = {}
+    for l in locations:
+        path = location_path(l, by_id)
+        if path == want:
+            return l
+        bare.setdefault(l.name or "", l)
+    return bare.get(want)
+
+
 def normalize_draft(
     parsed: Dict[str, Any],
     t: int,
@@ -61,8 +82,7 @@ def normalize_draft(
     if etype not in _VALID_TYPES:
         etype = "custom"
     resolved = _resolve_names(list(parsed.get("participants") or []), entities)
-    loc_table = {l.name or "": l for l in locations}
-    loc = loc_table.get(str(parsed.get("location") or "").strip())
+    loc = _location_lookup(locations, str(parsed.get("location") or ""))
     time_start = t + _clamp_int(parsed.get("day_offset"), 0, -t, _MAX_DAY_OFFSET)
     time_start = max(0, time_start)
     duration = _clamp_int(parsed.get("duration_days"), 0, 0, 3650)

@@ -6,6 +6,7 @@ import { useWorldSlice, WORLD_REFRESH_EVENT } from '../../world/composables/useW
 import { formatTime, breakdownTime, fromYMD, displayCandidateTime } from '../../world/engine/timeFormat'
 import { getTemplate } from '../../world/engine/eventTemplates'
 import { narrativeSourceText } from '../../world/engine/narrativeTimeSource'
+import { locationPath } from '../../world/engine/locationTree'
 import type { EventType, WorldLocation } from '../../world/engine/types'
 import { worldApi } from '../../../services/api/domain/world.api'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
@@ -137,6 +138,11 @@ async function clearAnchor() {
 // ---- 场景钉（脚下：直接选一个地方即钉住；取消钉住回到按事件推算）----
 const locPickerOpen = ref(false)
 const locationOptions = ref<WorldLocation[]>([])
+/** 内部构造（有父级）带全路径显示——钉到房间级时无歧义，且能看出进路 */
+const locOptionLabels = computed(() => {
+  const byId = new Map(locationOptions.value.map((l) => [l.id, l]))
+  return new Map(locationOptions.value.map((l) => [l.id, l.parent_id ? locationPath(l, byId) : l.name]))
+})
 async function toggleLocPicker() {
   locPickerOpen.value = !locPickerOpen.value
   if (locPickerOpen.value && !locationOptions.value.length && currentBookId.value) {
@@ -425,7 +431,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           <section class="setting-group">
             <div class="setting-group-label">脚下<span class="muted">本章故事发生的地点</span></div>
             <div v-if="slice.scene" class="scene-row">
-              {{ slice.scene.name }}
+              {{ slice.scene.path || slice.scene.name }}
               <span v-if="slice.scene.controlling_faction" class="faction-tag">
                 {{ slice.scene.controlling_faction }} 控制区
               </span>
@@ -448,9 +454,12 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
                 v-for="loc in locationOptions"
                 :key="loc.id"
                 class="loc-option"
-                :class="{ current: slice.scene?.pinned && slice.scene.location_id === loc.id }"
+                :class="{
+                  current: slice.scene?.pinned && slice.scene.location_id === loc.id,
+                  'loc-option--inner': !!loc.parent_id,
+                }"
                 @click="chooseLocation(loc)"
-              >{{ loc.name }}</li>
+              >{{ locOptionLabels.get(loc.id) || loc.name }}</li>
               <li v-if="!locationOptions.length" class="loc-option loc-option--empty">
                 世界页还没有地点——先去世界页建一个
               </li>
@@ -909,6 +918,11 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   color: var(--text-primary);
   border-radius: 0.25rem;
   cursor: pointer;
+}
+/* 内部构造选项：全路径 + 缩进，一眼分清大地点与房间 */
+.loc-option--inner {
+  padding-left: 1.1rem;
+  color: var(--text-secondary, var(--text-primary));
 }
 .loc-option:hover {
   background: var(--hover-bg);

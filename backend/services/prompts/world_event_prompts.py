@@ -19,12 +19,17 @@ _EVENT_TYPE_DOC = """事件类型（11 种，选最贴切的一个）：
 
 
 def _roster_text(entities, locations) -> str:
+    from backend.services.world.location_tree import location_path, locations_by_id
+
     ents = []
     for e in entities:
         aliases = [str(a) for a in (getattr(e, "aliases", None) or []) if a]
         alias_part = f"（别名：{'、'.join(aliases)}）" if aliases else ""
         ents.append(f"- {e.name} [{e.entity_type}]{alias_part}")
-    locs = [f"- {l.name} [地点]" for l in locations]
+    # 子地点带全路径（父·子）：名单消歧——两个基地各有一个「拘留室」时
+    # LLM 可用全路径精确指认；顶层地点无父，显示不变（零变化契约）
+    by_id = locations_by_id(locations)
+    locs = [f"- {location_path(l, by_id)} [地点]" for l in locations]
     return "\n".join(ents + locs) or "（世界页暂无实体与地点）"
 
 
@@ -38,7 +43,7 @@ _PARSE_SYSTEM = f"""你是小说世界设定的速记解析器。作者用一句
 
 规则：
 - participants 只填角色名单中出现的人（名或别名精确对应），名单外的人不要编 id，留在 note 里
-- location 填地点名单中的名字，名单外填 null
+- location 填地点名单中的名字；名单里「父·子」形式的是某地点的内部构造，重名时用全路径，名单外填 null
 - day_offset：事件发生在「当前时刻」之后几天（之前为负数）；速记里通常没有时间信息，默认 0
 - duration_days：事件持续天数（移动/迁徙类按常理估，其余默认 0）
 - 宁缺勿滥：解析不出就 event_type 填 "custom"、participants 留空数组，不要编造

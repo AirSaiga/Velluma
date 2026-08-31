@@ -149,6 +149,10 @@ def build_knowledge_entries(bundle: Any) -> List[KnowledgeEntry]:
 
     chapter = getattr(bundle, "chapter", None)
     scene_loc_id = str(getattr(chapter, "scene_location_id", None) or "")
+    # 场景作用域（location-interior 二期）：钉房间时祖先上的角色算在场，与 world_bridge 提权同口径
+    from backend.services.world.location_tree import scene_scope_ids
+
+    scene_scope = scene_scope_ids(getattr(bundle, "locations", None) or [], scene_loc_id)
     world_state = getattr(bundle, "world_state", None) or {}
     states: Dict[str, Dict[str, Any]] = {}
     if isinstance(world_state, dict):
@@ -190,7 +194,7 @@ def build_knowledge_entries(bundle: Any) -> List[KnowledgeEntry]:
                 dead = True
                 temporal = f"t={world_time}·已死亡"
             else:
-                if scene_loc_id and str(cs.get("location_id") or "") == scene_loc_id:
+                if scene_scope and str(cs.get("location_id") or "") in scene_scope:
                     present = True
                 bits = []
                 if str(cs.get("location_id") or ""):
@@ -266,10 +270,16 @@ def build_knowledge_entries(bundle: Any) -> List[KnowledgeEntry]:
 
 
 def _location_name(bundle: Any, loc_id: str) -> str:
-    for loc in (getattr(bundle, "locations", None) or []):
-        if str(getattr(loc, "id", "") or "") == loc_id:
-            return str(getattr(loc, "name", "") or "")
-    return ""
+    """地点显示名：内部构造（有父级）返回全路径「统合局基地·B2 拘留层」——
+    上下文里「位于X·Y」比裸房间名无歧义；顶层无父返回裸名（零变化契约）。"""
+    from backend.services.world.location_tree import location_path, locations_by_id
+
+    locs = getattr(bundle, "locations", None) or []
+    by_id = locations_by_id(locs)
+    loc = by_id.get(loc_id)
+    if loc is None:
+        return ""
+    return location_path(loc, by_id)
 
 
 # ============================================================
@@ -419,6 +429,20 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         scene_bits.append(f"本章场景：{loc_name}（作者钉定）")
     elif scene_loc_id:
         scene_bits.append("本章场景：已钉定（地点档案缺失）")
+    # 场景地点档案（location-interior 二期）：场景地点及其祖先链的 intro，从外到内——
+    # 钉到「B2 拘留层」时 AI 知道整条进路（基地是什么、这一层是什么）。
+    # 全链无 intro 不追加任何行（零变化契约：无内部构造的书 prompt 逐字节不变）。
+    if scene_loc_id:
+        from backend.services.world.location_tree import ancestor_chain, locations_by_id
+
+        by_id = locations_by_id(getattr(bundle, "locations", None) or [])
+        archive = [
+            f"{l.name}：{str(getattr(l, 'intro', '') or '').strip()}"
+            for l in reversed(ancestor_chain(by_id, scene_loc_id))
+            if str(getattr(l, "intro", "") or "").strip()
+        ]
+        if archive:
+            scene_bits.append("地点档案：" + "；".join(archive))
     if world_time_source != "zero":
         source_label = {
             "chapter_anchor": "本章锚", "prev_anchor": "前序最近锚", "max_event": "事件最大时刻",
