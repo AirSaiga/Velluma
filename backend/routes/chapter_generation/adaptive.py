@@ -1286,6 +1286,59 @@ async def stitch_ghost(
                             f"[adaptive/stitch-ghost] {request.mode} 压缩改写空产出，"
                             f"回落截取稿 {len(text)} 字（目标 {request.target_chars}）"
                         )
+            # ============================================================
+            # deai 小模型抛光（预留接口，docs/deai-integration.md；deai/ 子项目）：
+            # 呈现平面的模型层——自训「去AI味」小模型对最终短稿做只改质感的
+            # 改写（卡舱幽灵 ≤100 字契约窗内才生效，burst/outline 长稿自动跳过）。
+            # 位置在字数闸后、快检前：ghost_guard 扫的是抛光后的文本（死者开口
+            # 等疑点以最终上屏稿为准）。未配置/超长/任何失败 = 原样通过，
+            # 逐字节零变化（零变化契约，同 embedding 未配置短路纪律）。
+            # ============================================================
+            deai_payload: Dict = {"applied": False, "reason": "", "warnings": []}
+            try:
+                from backend.services.deai import is_deai_configured, polish_fragment
+                from backend.services.style.events import append_style_event
+
+                if is_deai_configured():
+                    # 保名闸素材（导师审 P1-1）：契约专名闸只护引文/书名与
+                    # 拉丁 token，中文名不在其内——用 kg 在场/死者名单给
+                    # 抛光稿加一道「原文出现的实体名必须逐字保留」的加护
+                    _deai_names = {
+                        n for n in (
+                            *(getattr(kg, "present_names", None) or []),
+                            *(getattr(kg, "dead_names", None) or []),
+                        ) if n
+                    }
+                    deai_res = await polish_fragment(
+                        text, protected_names=_deai_names
+                    )
+                    if deai_res.applied:
+                        text = deai_res.text
+                    deai_payload = {
+                        "applied": deai_res.applied,
+                        "reason": deai_res.reason,
+                        "warnings": deai_res.warnings,
+                    }
+                    trace_event(
+                        "deai_polish",
+                        mode=request.mode,
+                        applied=int(deai_res.applied),
+                        skipped=int(deai_res.skipped),
+                        reason=(deai_res.reason[:120] if deai_res.reason else ""),
+                        warnings=len(deai_res.warnings),
+                        names=len(_deai_names),
+                        tokens_in=deai_res.tokens_in,
+                        tokens_out=deai_res.tokens_out,
+                        text_len=len(text),
+                    )
+                    append_style_event(
+                        str(bundle.book_id or ""), "deai_polish",
+                        f"applied={int(deai_res.applied)};skipped={int(deai_res.skipped)};"
+                        f"mode={request.mode};reason={deai_res.reason[:80]}",
+                    )
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] deai 抛光失败（不阻塞生成）: {e}")
+
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
             # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
             # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
@@ -1428,11 +1481,12 @@ async def stitch_ghost(
             for pos in range(0, len(text), chunk_size):
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
                 await asyncio.sleep(frame_delay)
-            # warnings/wash 均为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
+            # warnings/wash/deai 均为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
             yield build_sse_event(
                 "GHOST_DONE", "", text=text, word_count=len(text),
                 warnings=ghost_warnings,
                 wash=wash_payload,
+                deai=deai_payload,
                 ghost_token=ghost_token,
                 sample_ids=sample_ids,
             )
@@ -1444,6 +1498,7 @@ async def stitch_ghost(
                 warnings=len(ghost_warnings),
                 wash_hits=len(wash_payload.get("hits") or []),
                 wash_repaired=int(repaired_flag),
+                deai_applied=int(deai_payload.get("applied", False)),
                 ghost_token=ghost_token,
                 sample_ids=sample_ids,
                 # P1-3（C1）短窗观测：原始上送 vs 截窗后实际进 prompt 的长度

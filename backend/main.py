@@ -194,6 +194,10 @@ logger.info("[Main] Reader Mirror 路由已加载")
 from backend.routes.extraction import router as extraction_router
 logger.info("[Main] Extraction 路由已加载")
 
+# deai 子项目路由（去AI味小模型：写作台手动配对收集，docs/deai-integration.md）
+from backend.routes.deai import router as deai_router
+logger.info("[Main] deai 路由已加载")
+
 # =============================================================================
 # 端口持久化机制
 # =============================================================================
@@ -302,6 +306,10 @@ logger.info("[Main] 文风体系路由已注册: /api/books/{id}/style-card, /sa
 # 正文逆向提取路由
 app.include_router(extraction_router)
 logger.info("[Main] Extraction 路由已注册: /api/chapters/{chapter_id}/extraction")
+
+# deai 子项目路由（写作台手动配对收集 → data/deai_pairs.jsonl）
+app.include_router(deai_router)
+logger.info("[Main] deai 路由已注册: /api/deai/pairs")
 
 # =============================================================================
 # V5.0 World 底图图片静态服务

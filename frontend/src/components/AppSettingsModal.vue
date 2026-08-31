@@ -152,6 +152,23 @@ const embeddingInherited = reactive<{ source: 'creative' | 'reasoning' | null; b
 /** 专业级折叠：向量记忆（默认收起——未配置时走结构化+词法默认记忆流） */
 const showAdvanced = ref(false)
 
+// ============================================================
+// 去 AI 味小模型（deai/ 子项目，实验）：卡片舱续写短稿上屏前的抛光
+// ============================================================
+
+const showDeai = ref(false)
+const deaiForm = reactive({ enabled: false, model: '', api_key: '', base_url: '' })
+const deaiMeta = reactive({ has_api_key: false, api_key_masked: '', effective_model: '', effective_base_url: '' })
+const deaiTesting = ref(false)
+const deaiTestResult = ref<{
+  success: boolean
+  message: string
+  input_text: string
+  output_text: string
+  applied: boolean
+  elapsed_ms: number
+} | null>(null)
+
 const proxyForm = reactive({ enabled: true, url: '' })
 
 const loading = ref(false)
@@ -181,6 +198,15 @@ function applyConfig(config: ModelConfig) {
   embeddingInherited.source = config.embedding.inherited?.source ?? null
   embeddingInherited.base_url = config.embedding.inherited?.base_url ?? ''
   embeddingInherited.has_api_key = config.embedding.inherited?.has_api_key ?? false
+  const deai = config.deai
+  deaiForm.enabled = deai?.enabled ?? false
+  deaiForm.model = deai?.model ?? ''
+  deaiForm.base_url = deai?.base_url ?? ''
+  deaiForm.api_key = '' // 不回填明文，留空即保持
+  deaiMeta.has_api_key = deai?.has_api_key ?? false
+  deaiMeta.api_key_masked = deai?.api_key_masked ?? ''
+  deaiMeta.effective_model = deai?.effective_model ?? ''
+  deaiMeta.effective_base_url = deai?.effective_base_url ?? ''
   proxyForm.enabled = config.proxy.enabled
   proxyForm.url = config.proxy.url
 }
@@ -210,6 +236,12 @@ async function save() {
         follow_llm: embeddingForm.follow_llm,
         base_url: embeddingForm.base_url,
         api_key: embeddingForm.api_key || undefined,
+      },
+      deai: {
+        enabled: deaiForm.enabled,
+        model: deaiForm.model,
+        base_url: deaiForm.base_url,
+        api_key: deaiForm.api_key || undefined,
       },
       proxy: { enabled: proxyForm.enabled, url: proxyForm.url },
     }
@@ -277,12 +309,42 @@ async function runTest() {
   }
 }
 
+// ============================================================
+// 去 AI 味小模型：试一试（表单实时值，未保存也能测）
+// ============================================================
+
+async function runDeaiTest() {
+  deaiTesting.value = true
+  deaiTestResult.value = null
+  try {
+    const result = await systemApi.testDeai({
+      model: deaiForm.model || undefined,
+      base_url: deaiForm.base_url || undefined,
+      api_key: deaiForm.api_key || undefined,
+    })
+    deaiTestResult.value = result
+    // 契约§6 保底回退（事实被改→回退原文）不算失败——闸门在工作
+    if (result.success) {
+      showToast('小模型调用走通', 'success')
+    } else if (result.skipped) {
+      showToast('未发起调用：' + result.message, 'error')
+    } else {
+      showToast('小模型调用失败', 'error')
+    }
+  } catch (error: any) {
+    showToast('试一试请求异常: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    deaiTesting.value = false
+  }
+}
+
 // 每次打开弹窗重新拉取配置（本地后端，开销可忽略），并清掉上次测试结果
 watch(visible, (v) => {
   if (v) {
     loadConfig()
     loadCatalog()
     testResult.value = null
+    deaiTestResult.value = null
   }
 })
 </script>
@@ -439,6 +501,69 @@ watch(visible, (v) => {
 
         <div class="field-warning">
           修改维度需重启后端；重启迁移会删列重建，清空全部向量记忆数据。
+        </div>
+      </template>
+
+      <!-- 去 AI 味小模型（deai/ 子项目，实验）：卡片舱续写短稿上屏前的抛光 -->
+      <button type="button" class="advanced-toggle deai-toggle" @click="showDeai = !showDeai">
+        <span>实验：去 AI 味小模型（续写短稿抛光）</span>
+        <span class="advanced-caret">{{ showDeai ? '▾' : '▸' }}</span>
+      </button>
+
+      <template v-if="showDeai">
+        <div class="field-hint">
+          续写草稿上屏前，用部署在阿里云百炼的自训小模型再做一轮「像人改写」——只改语言质感，
+          不动事实、数字、专名；模型改坏事实会自动回退原文。只处理 100 字以内的短稿，长稿自动跳过。
+        </div>
+
+        <label class="field-inline follow-toggle">
+          <input v-model="deaiForm.enabled" type="checkbox" />
+          <span>启用（未启用或未填 Key 时，写作流程零变化）</span>
+        </label>
+
+        <div class="deai-grid">
+          <label class="field">
+            <span class="field-label">模型（部署名）</span>
+            <input
+              v-model="deaiForm.model"
+              class="field-input"
+              :placeholder="deaiMeta.effective_model || 'qwen3-4b-instruct-2507-…'"
+            />
+            <span class="field-sub-hint">百炼「部署管理」里的部署名；重新部署后会变，需回来更新。</span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">API Key</span>
+            <input
+              v-model="deaiForm.api_key"
+              type="password"
+              class="field-input"
+              :placeholder="deaiMeta.has_api_key
+                ? `已保存 (${deaiMeta.api_key_masked})，留空保持不变`
+                : '阿里云百炼 DashScope API Key'"
+              autocomplete="new-password"
+            />
+          </label>
+        </div>
+
+        <div class="deai-actions">
+          <button type="button" class="btn-secondary" :disabled="deaiTesting" @click="runDeaiTest">
+            <Icon v-if="deaiTesting" name="loader" :size="14" class="spin" />
+            <Icon v-else name="play" :size="14" />
+            {{ deaiTesting ? '试一试中...' : '试一试' }}
+          </button>
+          <span v-if="deaiMeta.effective_base_url" class="field-sub-hint">{{ deaiMeta.effective_base_url }}</span>
+        </div>
+
+        <div v-if="deaiTestResult" class="deai-result" :class="{ success: deaiTestResult.success, error: !deaiTestResult.success }">
+          <div class="test-status">
+            <span class="status-text">{{ deaiTestResult.message }}</span>
+            <span v-if="deaiTestResult.elapsed_ms" class="response-time">{{ deaiTestResult.elapsed_ms }}ms</span>
+          </div>
+          <div v-if="deaiTestResult.input_text" class="deai-diff">
+            <div>原文：{{ deaiTestResult.input_text }}</div>
+            <div>结果：{{ deaiTestResult.output_text }}<span v-if="!deaiTestResult.applied" class="deai-notapplied">（未采纳，见上方说明）</span></div>
+          </div>
         </div>
       </template>
 
@@ -706,6 +831,62 @@ watch(visible, (v) => {
   margin-bottom: 10px;
 }
 
+/* ---------- 去 AI 味小模型（deai） ---------- */
+
+.deai-toggle {
+  margin-top: 12px;
+}
+
+.deai-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.deai-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 10px;
+}
+
+.deai-result {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.deai-result.success {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.deai-result.error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.deai-result .status-text {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.deai-diff {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.deai-notapplied {
+  margin-left: 6px;
+  color: var(--text-muted);
+}
+
 /* ---------- 代理 + 通知偏好 ---------- */
 
 .misc-grid {
@@ -851,7 +1032,8 @@ watch(visible, (v) => {
 @media (max-width: 640px) {
   .profiles-grid,
   .misc-grid,
-  .embedding-grid {
+  .embedding-grid,
+  .deai-grid {
     grid-template-columns: 1fr;
   }
 }

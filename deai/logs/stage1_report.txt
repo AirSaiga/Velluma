@@ -1,0 +1,32 @@
+[OK]   D:\qoder\Velluma\deai\contracts
+[OK]   D:\qoder\Velluma\deai\data\sft
+[OK]   D:\qoder\Velluma\deai\data\dpo
+[OK]   D:\qoder\Velluma\deai\data\eval
+[OK]   D:\qoder\Velluma\deai\docs
+[OK]   D:\qoder\Velluma\deai\scripts
+[OK]   D:\qoder\Velluma\deai\logs
+[OK]   D:\qoder\Velluma\deai\README.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+[OK]   D:\qoder\Velluma\deai\contracts\forbidden_words.txt
+[OK]   D:\qoder\Velluma\deai\docs\roadmap.md
+[OK]   D:\qoder\Velluma\deai\docs\open_questions.md
+[OK]   D:\qoder\Velluma\deai\scripts\check_stage1.py
+[OK]   D:\qoder\Velluma\deai\contracts\forbidden_words.txt
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\task_contract.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+[OK]   D:\qoder\Velluma\deai\contracts\data_format.md
+------------------------------------------------------------
+检查项: 28  通过: 28  失败: 0
+违禁词表条数: 10
+失败样例（前5条）: 无

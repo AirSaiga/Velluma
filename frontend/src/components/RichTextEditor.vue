@@ -21,9 +21,10 @@ import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHis
 import { reapGhostIfDead } from '../features/generation/composables/useGhostDraft'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { styleApi } from '../services/api/domain'
+import { styleApi, deaiApi } from '../services/api/domain'
 import Icon from './Icon.vue'
 import { useToast } from '../composables/useToast'
+import { useDeaiPairMark } from '../composables/useDeaiPairMark'
 
 const { showToast } = useToast()
 
@@ -214,6 +215,56 @@ async function notLikeMyStyle() {
     console.error('投递文风候选失败:', e)
     showToast('投递失败: ' + (e.message || ''), 'error')
   }
+}
+
+// deai 训练对收集（docs/deai-integration.md §5a，数据飞轮手动起点）：
+// 两步配对——①选中卡片舱生成的原样文本点「记改前」暂存 ②亲手改完，
+// 选中改后文本点「记改后」成对落 data/deai_pairs.jsonl（本地零上报）。
+// 攒够后跑 deai/scripts/ingest_behavior_pairs.py 六闸入库出训练集。
+// pending 状态在 useDeaiPairMark 模块单例——浮窗开合不丢，换书作废。
+const { pendingBad, markBad, markGood, clearPending } = useDeaiPairMark()
+
+async function markDeaiPair() {
+  const selectedText = getSelectedText()
+  const goodText = selectedText.trim()
+  const bookKey = String(props.bookId || '')
+  if (!pendingBad.value) {
+    const r = markBad(selectedText, bookKey)
+    showToast(r.message, r.ok ? 'success' : 'warning')
+    return
+  }
+  const r = markGood(selectedText, bookKey)
+  if (!r.ok) {
+    showToast(r.message, 'warning')
+    return
+  }
+  try {
+    const saved = await deaiApi.savePair({
+      bad: r.bad || '',
+      good: goodText,
+      book_id: props.bookId || undefined,
+    })
+    clearPending()
+    showToast(
+      `已存第 ${saved.total} 对训练样本（改前 ${r.bad?.length ?? 0} 字 → 改后 ${goodText.length} 字）`,
+      'success',
+      6000,
+      {
+        label: '撤销',
+        onClick: () => {
+          deaiApi.deletePair(saved.id).catch(() => {})
+        },
+      },
+    )
+  } catch (e) {
+    // 失败保留 pending——修好网络或换个选区可直接重试/重配
+    showToast('存对失败: ' + (e?.message || '未知错误'), 'error')
+  }
+}
+
+function cancelDeaiPairMark() {
+  clearPending()
+  showToast('已放弃这次配对', 'info')
 }
 
 const SELECTION_DEBOUNCE_MS = 600
@@ -952,6 +1003,28 @@ defineExpose({
           title="这段不像你写的——记为负面清单候选（进文风收件箱，过目后生效）"
         >
           <Icon name="x-mark" :size="12" /> 这不像我
+        </button>
+        <div class="w-px h-4 bg-[var(--border-color)]"></div>
+        <button
+          @click="markDeaiPair"
+          :disabled="!props.bookId || !hasSelection"
+          class="px-2 py-1 text-[10px] rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          :class="pendingBad
+            ? 'bg-amber-200 text-amber-800 hover:bg-amber-300 font-medium'
+            : 'bg-amber-50 text-amber-600 hover:bg-amber-100'"
+          :title="pendingBad
+            ? `配对中（改前 ${pendingBad.text.length} 字）——选中你改好的文字，点这里完成配对`
+            : '教去AI味小模型：先记下这段原文（改前），你亲手改完后选中它点「记改后」，成一对训练样本'"
+        >
+          <Icon name="check-badge" :size="12" /> {{ pendingBad ? '记改后' : '记改前' }}
+        </button>
+        <button
+          v-if="pendingBad"
+          @click="cancelDeaiPairMark"
+          class="px-1.5 py-1 text-[10px] rounded-md text-amber-500 hover:text-amber-700 hover:bg-amber-100 transition-colors"
+          title="放弃这次配对"
+        >
+          <Icon name="x-mark" :size="12" />
         </button>
       </template>
 

@@ -358,3 +358,22 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 | B9 | 认知浮现三时机 + books.cognition_surfacing 总开关（可见性悖论防线） | ✅ 本批 |
 
 不变量验收（11 条，见地基文档 §4）与每批回退路径随批登记。
+
+---
+
+## 14. deai 期（2026-08-31 迁入立项——去AI味小模型子项目 + 宿主接口预留）
+
+**定位**：卡片舱（幽灵草稿）上屏前的「小模型抛光」。`deai/` 自 `D:\deai` 整体迁入
+（v1 已收官：百炼 SFT Qwen3-4B+LoRA，15 条 holdout 六闸 14/15=93% 基线；模型侧契约
+唯一权威 `deai/docs/contract.md`，归档报告 `deai/docs/archive.md`）。宿主集成唯一
+权威 `docs/deai-integration.md`。
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| 迁移 | deai/ 44 文件入库（.gitignore 对 deai/data、deai/logs 反排除 + 脚本 SPDX 补头）+ 迁移后四自检全绿 | ✅ 本批 |
+| 配置 | model_config.json `deai` 节（enabled/api_key/model/base_url；未配置=零调用、逐字节零变化） | ✅ 本批 |
+| 后端 | `backend/services/deai/`：`polish_fragment` 公共入口 + 契约§6 事实闸保底回退原文 + `gates.py` 运行时闸门移植副本（权威在 deai/scripts/validate_pairs.py）+ 17 单测对拍 | ✅ 本批 |
+| 挂点 | stitch-ghost 呈现平面（字数闸后、ghost_guard 快检前）；≤100 字契约窗内短稿生效、长稿自动跳过；GHOST_DONE `deai` 增量字段；trace/style_events `deai_polish` 遥测 | ✅ 本批 |
+| 设置 | 设置弹窗「实验：去 AI 味小模型」折叠分区 + `POST /api/system/deai/test` 试一试（表单实时值；事实闸保底回退不算失败） | ✅ 本批 |
+| 训练对收集 | 写作台浮窗「记改前/记改后」两步配对 → `data/deai_pairs.jsonl` → `ingest_behavior_pairs.py` 去重+六闸 → `behavior_sft.jsonl`（数据飞轮手动起点，导师评价轮采纳：bad=主模型原样产出、good=作者亲手版） | ✅ 本批 |
+| v2 扩量 | 叙事类语料收集（deai/data/inbox/ 收集箱，v1 训练语料无小说文本）→ 六闸管线 → 重训重部署 → 仅需换配置里的部署名；句级分片长稿覆盖 / GHOST_DONE `deai` 字段前端消费（抛光 chip）待评估 | ⏸ 搁置（等真实使用回收） |

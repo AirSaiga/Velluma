@@ -50,12 +50,17 @@ from backend.core.model_config import (
     get_embedding_connection,
     update_llm_profile,
     update_embedding_config,
+    get_deai_config,
+    update_deai_config,
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.llm.embedding import probe_embedding
 from backend.services.llm.vendor_profiles import vendor_catalog
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
-from backend.schemas import ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate
+from backend.schemas import (
+    ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate,
+    DeaiTestRequest, DeaiTestResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["system"])
 logger = logging.getLogger(__name__)
@@ -189,6 +194,26 @@ def _serialize_embedding() -> dict:
     }
 
 
+def _serialize_deai() -> dict:
+    """deai 去AI味小模型配置序列化（deai/ 子项目，docs/deai-integration.md）。
+
+    get_deai_config 已做默认值兜底（model/base_url 常有默认），序列化时
+    raw 取原始存储值供表单回显，effective 取兜底后值供提示。
+    """
+    raw = get_model_config().get("deai", {})
+    effective = get_deai_config()
+    return {
+        "api_key_masked": _mask_api_key(raw.get("api_key", "")),
+        "has_api_key": bool(raw.get("api_key")),
+        "base_url": raw.get("base_url", ""),
+        "effective_base_url": effective["base_url"],
+        "model": raw.get("model", ""),
+        "effective_model": effective["model"],
+        "enabled": bool(raw.get("enabled", False)),
+        "configured": bool(raw.get("enabled") and raw.get("api_key") and (raw.get("model") or effective["model"])),
+    }
+
+
 def _serialize_model_config() -> dict:
     """序列化完整模型配置（API Key 掩码后返回）"""
     return {
@@ -198,6 +223,7 @@ def _serialize_model_config() -> dict:
             "wash": _serialize_wash_profile(),
         },
         "embedding": _serialize_embedding(),
+        "deai": _serialize_deai(),
         "proxy": get_proxy_config(),
     }
 
@@ -250,11 +276,83 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
         if fields:
             update_embedding_config(fields)
 
+    if update.deai is not None:
+        fields = update.deai.model_dump(exclude_none=True)
+        # 掩码回显防御同上（deai Key 同样只以掩码形态回显）
+        if not fields.get("api_key") or "****" in str(fields.get("api_key")):
+            fields.pop("api_key", None)
+        if fields:
+            update_deai_config(fields)
+
     if update.proxy is not None:
         set_proxy_config(update.proxy.enabled, update.proxy.url)
 
     svc_logger.info("模型配置已更新")
     return _serialize_model_config()
+
+
+# =============================================================================
+# deai 小模型试一试（deai/ 子项目，docs/deai-integration.md）
+# =============================================================================
+
+# 内置示例：带典型 AI 味（套话连接+空泛总结），落在 ≤100 字契约窗内
+DEAI_TEST_SAMPLE = "综上所述，这轮改动显著提升了整体体验，为后续的迭代夯实了基础。"
+
+
+@router.post("/system/deai/test", response_model=DeaiTestResponse)
+async def test_deai_model(request: DeaiTestRequest):
+    """deai 去AI味小模型实测（设置面板「试一试」按钮）。
+
+    表单实时值探测（未保存也能测，同 embedding probe 契约）：model /
+    api_key / base_url 留空沿用已保存配置。走 polish_fragment 全链路，
+    含契约§6 事实闸保底——事实闸回退**不算失败**（模型答了、闸门拦了，
+    恰是保底机制在工作的证据）；网络/HTTP 异常与未配置才算失败。
+    """
+    import time
+
+    from backend.services.deai import polish_fragment
+
+    text = (request.text or DEAI_TEST_SAMPLE).strip()
+    model = (request.model or "").strip() or get_deai_config()["model"]
+    start = time.perf_counter()
+    try:
+        result = await polish_fragment(
+            text,
+            model=request.model or None,
+            api_key=request.api_key or None,
+            base_url=request.base_url or None,
+        )
+    except Exception as e:
+        return DeaiTestResponse(
+            success=False, message=f"调用异常: {e}",
+            input_text=text, output_text=text, model=model,
+            elapsed_ms=round((time.perf_counter() - start) * 1000, 1),
+        )
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+
+    if result.skipped:
+        success, message = False, f"未发起调用：{result.reason}"
+    elif result.applied:
+        success = True
+        message = "改写被采纳" + (f"（带警告：{'；'.join(result.warnings)}）" if result.warnings else "")
+    elif result.reason.startswith("事实被改"):
+        success = True
+        message = f"模型动了事实，契约保底已回退原文（闸门生效）——{result.reason}"
+    else:
+        success, message = False, f"调用失败：{result.reason}"
+
+    return DeaiTestResponse(
+        success=success,
+        message=message,
+        input_text=text,
+        output_text=result.text,
+        applied=result.applied,
+        skipped=result.skipped,
+        fallback_reason=result.reason,
+        warnings=result.warnings,
+        model=model,
+        elapsed_ms=elapsed_ms,
+    )
 
 
 # =============================================================================

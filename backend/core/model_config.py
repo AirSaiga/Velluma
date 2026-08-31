@@ -55,6 +55,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     "dimensions": 1536,       // 向量维度，必须与数据库 schema 一致
     "follow_llm": false       // true=连接（api_key/base_url）跟随文本模型，忽略自管 Key/URL
   },
+  "deai": {                   // 去AI味小模型（deai/ 子项目，2026-08-31 接入，实验）
+    "enabled": false,         // 卡片舱幽灵短稿上屏前的「小模型抛光」开关
+    "api_key": "...",         // 阿里云百炼 DashScope Key
+    "model": "qwen3-4b-instruct-2507-78a06917f4ca",  // 部署后的 deployed_model（重训会变）
+    "base_url": ""            // 留空 = DashScope 原生端点（调优模型不支持 OpenAI 兼容入口）
+  },
   "proxy": {
     "enabled": true,
     "url": "http://127.0.0.1:4780"
@@ -101,6 +107,16 @@ DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 # 历史配置（只有 DashScope Key、无 base_url）经此零迁移切换到兼容协议，
 # 同一 Key 在该端点上可直接调 text-embedding-v2/v3/v4。
 DASHSCOPE_COMPAT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# deai 小模型（去AI味改写，deai/ 子项目）的 DashScope 原生生成端点兜底。
+# 百炼调优模型只认原生接口，OpenAI 兼容入口报 model_not_found
+# （deai/docs/usage.md §2 实测踩坑，勿改成 compatible-mode）。
+DASHSCOPE_NATIVE_GENERATION_URL = (
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+)
+# 2026-08-31 v1 部署的 deployed_model（deai/docs/archive.md §3）；
+# 重训/重部署后此 ID 会变，用百炼控制台或部署管理接口查新值。
+DEFAULT_DEAI_MODEL = "qwen3-4b-instruct-2507-78a06917f4ca"
 
 
 def _load_config() -> Dict:
@@ -269,6 +285,36 @@ def get_embedding_connection() -> Dict:
     connection["api_key"] = emb.get("api_key", "")
     connection["base_url"] = emb.get("base_url", "") or DASHSCOPE_COMPAT_BASE_URL
     return connection
+
+
+def get_deai_config() -> Dict:
+    """获取 deai 去AI味小模型配置（deai/ 子项目，docs/deai-integration.md）。
+
+    结构：{enabled, api_key, model, base_url}。「已配置」判据 = enabled 且
+    api_key 且 model 三者齐备（调用方 services/deai/client.py 的
+    is_deai_configured）；未配置时运行时直通零调用——幽灵文本逐字节
+    零变化（零变化契约，同 embedding 未配置短路）。
+
+    base_url 默认 DashScope 原生 text-generation 端点：百炼调优模型
+    实测不支持 OpenAI 兼容入口（deai/docs/usage.md §2 踩坑记录）。
+    model 默认 2026-08-31 部署的 deployed_model，重训/重部署后会变
+    （百炼控制台或 GET /api/v1/deployments 查询新值后改配置）。
+    """
+    deai = _load_config().get("deai", {})
+    return {
+        "enabled": bool(deai.get("enabled", False)),
+        "api_key": deai.get("api_key", ""),
+        "model": deai.get("model", "") or DEFAULT_DEAI_MODEL,
+        "base_url": deai.get("base_url", "") or DASHSCOPE_NATIVE_GENERATION_URL,
+    }
+
+
+def update_deai_config(updates: Dict):
+    """合并更新 deai 配置节并持久化（仅更新出现的字段，其余保持原值）。"""
+    config = _load_config()
+    deai = config.setdefault("deai", {})
+    deai.update(updates)
+    _write_config(config)
 
 
 def get_proxy_config() -> dict:

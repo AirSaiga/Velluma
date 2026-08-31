@@ -59,6 +59,13 @@ backend/logs/
 *.swo
 *~
 
+# ---- deai 子项目（去AI味小模型）----
+# 上面的 data/、logs/ 通配会误伤子项目目录——deai 的数据/日志是项目资产，必须入库
+!deai/data/
+!deai/data/**
+!deai/logs/
+!deai/logs/**
+
 # ---- 归档与死代码 ----
 backend/_archive/
 

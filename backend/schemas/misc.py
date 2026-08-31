@@ -189,12 +189,25 @@ class EmbeddingConfigUpdate(BaseModel):
     follow_llm: Optional[bool] = None
 
 
+class DeaiConfigUpdate(BaseModel):
+    """deai 去AI味小模型配置更新（deai/ 子项目，docs/deai-integration.md）；None 字段保持原值。
+
+    api_key 传空字符串或 None 表示保持不变（GET 端点只返回掩码，不回传明文）。
+    base_url 留空 = DashScope 原生端点（调优模型不支持 OpenAI 兼容入口）。
+    """
+    enabled: Optional[bool] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 class ModelConfigUpdate(BaseModel):
     """模型配置整体更新（设置面板保存），各节均为可选。"""
     reasoning: Optional[LLMProfileUpdate] = None
     creative: Optional[LLMProfileUpdate] = None
     wash: Optional[LLMProfileUpdate] = None  # 洗涤槽（可选；不配则跟随 creative）
     embedding: Optional[EmbeddingConfigUpdate] = None
+    deai: Optional[DeaiConfigUpdate] = None  # 去AI味小模型（可选；未配置=零变化直通）
     proxy: Optional[ProxyConfig] = None
 
 
@@ -205,6 +218,34 @@ class EmbeddingProbePayload(BaseModel):
     dimensions: Optional[int] = None
     follow_llm: Optional[bool] = None
     api_key: Optional[str] = None
+
+
+class DeaiTestRequest(BaseModel):
+    """deai 小模型「试一试」（POST /system/deai/test）请求体。
+
+    表单实时值探测（未保存也能测，同 embedding probe 契约）：
+    model/api_key/base_url 留空沿用已保存配置；text 缺省用内置示例片段。
+    """
+    text: Optional[str] = Field(default=None, max_length=500)
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class DeaiTestResponse(BaseModel):
+    """deai 试一试结果。success=调用链走通（改写被采纳或契约§6 保底回退均算走通；
+    保底不是失败——它证明闸门在工作）。skipped=true 表示根本没起调用（未配 Key 等）。
+    """
+    success: bool
+    message: str
+    input_text: str
+    output_text: str
+    applied: bool = False
+    skipped: bool = False
+    fallback_reason: str = ""
+    warnings: List[str] = Field(default_factory=list)
+    model: str = ""
+    elapsed_ms: float = 0.0
 
 
 class ModelTestRequest(BaseModel):

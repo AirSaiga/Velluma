@@ -109,6 +109,7 @@ frontend/
     │   ├── style/         # ★ 文风页 S1（样本库+笔迹指纹+负面清单+章对账；StyleCardManager 已删除拆解迁入；docs/style-module-redesign.md）
     └── services/api/  domain/（业务 API：index.ts 聚合 bookApi/chapterApi/refineryApi + adaptive/world/canon/asset 等 *.api.ts）/ stream/（SSE）/ transport/（HTTP）
 
+deai/                   # ★ 去AI味小模型子项目（自训 Qwen3-4B+LoRA，百炼部署；契约/数据/脚本完整档案 v1 收官，docs/deai-integration.md 管宿主集成）
 backend/_deprecated/  # 废弃引擎归档（V3.0/V3.1/V4.0 + BS-ADF 2026-08-19 整体迁入，含其路由与 schema；不参与 import 链，详见该目录 README）
 data/ logs/ .venv/
 ```
@@ -183,6 +184,10 @@ data/ logs/ .venv/
 - **笔迹 vs 声纹切分现况**：叙述文风（句长/语域/浓淡/冷热）走文风页（旋钮+画像+样本 few-shot）；角色对话腔调走世界实体档案「说话风格」字段（world_bridge 注入）——两条通路在生成上下文里自然汇合。
 - **章级特例卡消费接通（Phase 4 ✅ 2026-08-24，整卡覆盖语义）**：章级卡（`style_cards.chapter_id` 非空）存在即该章**完整文风定义**——负面清单/正面画像/旋钮/对话目标/段落节奏整卡生效，书级不再参与（前端编辑本是「书级基底快照+全量保存」，语义自洽）；无章级卡回退书级，无卡逐字节零变化。统一入口 `StyleCardRepository.get_effective_card(book_id, chapter_id)`，全部消费点已接线：settings_bundle（主通路→stitch-ghost 五模式/dock/context-preview/finish 审阅/ghost_guard）、ADF、Refinery、选区改写、defat、心跳漂移参照、finish 语义扫描、quality-report 审计上下文（`_build_audit_context`）、scan-negative（扫哪章用哪章生效卡）、试听 baseline 轨（请求带 chapter_id，前端章级编辑态已传）。**保持书级**：指纹对账参考带（书级仪表盘）、收件箱确认写路径。prohibitions 四源权威与 prompt 排序零改动；单测 `services/context/test_chapter_style_override.py`（7 项：repository 三态 + bundle 整卡覆盖/回退/无卡零变化）。
 
+### deai 去 AI 味小模型（子项目，2026-08-31 自 D:\deai 迁入）
+
+`deai/`（仓库根）= 自训「去AI味」改写小模型完整档案（v1 收官：百炼 SFT Qwen3-4B+LoRA，15 条 holdout 六闸 14/15；契约唯一权威 `deai/docs/contract.md`）。宿主集成唯一权威 **`docs/deai-integration.md`**：配置节 `model_config.json` 的 `deai`（enabled/api_key/model/base_url；未配置=零调用、幽灵文本逐字节零变化）、服务包 `backend/services/deai/`（`polish_fragment` 公共入口 + 契约§6 事实闸保底回退原文 + **宿主侧保名闸**——契约专名闸只护引文/书名与拉丁 token 不护中文名，kg 在场/死者名单中原文出现的实体名必须在改写稿逐字保留否则回退 + `gates.py` 运行时闸门**移植副本**——判据唯一权威在 `deai/scripts/validate_pairs.py`，改判据先改那边跑 `--selftest` 再同步，打包产物不含 deai/ 故不能运行时 import）、挂点 stitch-ghost 呈现平面（**字数闸后、ghost_guard 快检前**——与洗层同口径：快检扫模型层产物，其后 P1/P2 只作确定性替换不重扫；≤100 字契约窗内短稿生效，burst/outline 长稿自动跳过）、GHOST_DONE 增量字段 `deai`（前端暂不消费）、trace `deai_polish`（含 tokens_in/out——deai 不进 generation_runs 用量聚合，DashScope 原生槽不走 call_llm_with_usage，用量以 trace 为准）+ style event `deai_polish` 遥测、设置弹窗「实验：去 AI 味小模型」折叠分区 + `POST /api/system/deai/test` 试一试（表单实时值，事实闸保底回退不算失败）。**训练对收集（§5a 数据飞轮手动起点）**：写作台选中浮窗「记改前/记改后」两步配对（`useDeaiPairMark` 模块单例暂存、换书作废、6s 撤销）→ `POST /api/deai/pairs` → `data/deai_pairs.jsonl`（格式与 validate_pairs 输入契约兼容）→ `deai/scripts/ingest_behavior_pairs.py` 去重+六闸（check_gates fact=None，判据零私货）→ `behavior_sft.jsonl`（合并进 clean_sft.jsonl 须人工过目）；收集侧只做硬校验（bad≤100 契约 C1），闸门执法全在入库侧。v1 训练语料为产品/公告/观点类，**叙事文本未训练**——写作场景质量解锁靠 v2 扩量（`deai/data/inbox/` 收集箱）。⚠ 调用三要点（勿改）：DashScope **原生**端点（调优模型不走 OpenAI 兼容入口）/ model 填部署名（非 ft-ID，重部署会变）/ `enable_thinking=false`；超时 8s 挂死上限（常态 1-3s，超时即保底回退）。
+
 ### BS-ADF（已整体归档 2026-08-19）
 
 > 步进引擎已随 dc7af61/50099af 整体退役：引擎包 `workflows/bsadf/`（含 8 个单测与 `dde/`）→ `backend/_deprecated/bsadf/`，路由 → `_deprecated/routes/bsadf_route.py`，schema → `_deprecated/schemas/bsadf_schema.py`，`chapter_generation/__init__.py` 已摘除注册；前端步进调用与 `bsadfApi` 全部删除。**`/generate-bsadf`、`/advance-beat`、`/stepping-run/{id}/state`、`/rerender-beat`、`/cancel-run` 端点不复存在。**思想去向（详见 `_deprecated/README.md`）：DDE 真岔路→谋篇声明岔路 M3、章级规划层（脉络轨/锚点/定档/槽位卡）→软脉络 `chapters.spine`、字数闸→stitch-ghost outline 双层闸、Loop3 涌现抽取→`services/adaptive/emergent_facts.py`、残句门禁→`repair_single_defect`（`/adaptive/fix-sentence`）。步进运行时事实（`_STEPPING_RUNS` 纯内存 TTL 12h / 步进不自动写库 / 每条 advance-beat 一条新 SSE 流）随引擎归档，仅作历史参考。
@@ -237,7 +242,7 @@ data/ logs/ .venv/
 
 ### model_config.json（主要配置入口，已 gitignore）
 
-LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`proxy`。除手动编辑外可通过前端设置弹窗（`AppSettingsModal.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
+LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`deai`（去AI味小模型，见 docs/deai-integration.md）/`proxy`。除手动编辑外可通过前端设置弹窗（`AppSettingsModal.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
 
 ### 环境变量（.env 可选，仅以下几个实际生效）
 

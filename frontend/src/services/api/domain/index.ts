@@ -158,6 +158,18 @@ export interface LLMProfileConfig {
   configured?: boolean
 }
 
+/** deai 去AI味小模型配置（deai/ 子项目；effective_* = 兜底后的实际生效值） */
+export interface DeaiConfig {
+  api_key_masked: string
+  has_api_key: boolean
+  base_url: string
+  effective_base_url: string
+  model: string
+  effective_model: string
+  enabled: boolean
+  configured: boolean
+}
+
 export interface ModelConfig {
   llm: {
     reasoning: LLMProfileConfig
@@ -181,6 +193,8 @@ export interface ModelConfig {
       has_api_key: boolean
     }
   }
+  /** 去 AI 味小模型（未配置时后端也返回该节；旧后端可能缺省） */
+  deai?: DeaiConfig
   proxy: {
     enabled: boolean
     url: string
@@ -193,6 +207,7 @@ export interface ModelConfigUpdatePayload {
   creative?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   wash?: Partial<Pick<LLMProfileConfig, 'base_url' | 'model' | 'enabled' | 'effort'>> & { api_key?: string }
   embedding?: { api_key?: string; base_url?: string; model?: string; dimensions?: number; follow_llm?: boolean }
+  deai?: { enabled?: boolean; api_key?: string; model?: string; base_url?: string }
   proxy?: { enabled: boolean; url: string }
 }
 
@@ -271,6 +286,60 @@ export const systemApi = {
       method: 'POST',
       body: JSON.stringify(embedding ? { embedding } : {})
     })
+  },
+
+  /**
+   * deai 去AI味小模型「试一试」（表单实时值探测，未保存也能测）
+   * 走后端全链路，含契约§6 事实闸保底——保底回退不算失败（闸门在工作）
+   */
+  testDeai: async (payload?: {
+    text?: string
+    model?: string
+    api_key?: string
+    base_url?: string
+  }): Promise<{
+    success: boolean
+    message: string
+    input_text: string
+    output_text: string
+    applied: boolean
+    skipped: boolean
+    fallback_reason: string
+    warnings: string[]
+    model: string
+    elapsed_ms: number
+  }> => {
+    return requestJson('/system/deai/test', {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {})
+    })
+  }
+}
+
+// ============================================================
+// deai 子项目（去AI味小模型）：写作台手动配对收集（docs/deai-integration.md §5a）
+// ============================================================
+
+export const deaiApi = {
+  /**
+   * 存一对训练样本（bad=卡片舱生成原样文本，good=作者改定版）
+   * 落本地 data/deai_pairs.jsonl（零上报）；返回 id 供 6 秒撤销胶囊
+   */
+  savePair: async (payload: {
+    bad: string
+    good: string
+    book_id?: string
+    chapter_id?: string
+  }): Promise<{ id: string; total: number }> => {
+    return requestJson('/deai/pairs', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+
+  /** 撤销一对（写作台撤销胶囊） */
+  deletePair: async (id: string): Promise<{ deleted: boolean; total: number }> => {
+    return requestJson(`/deai/pairs/${id}`, { method: 'DELETE' })
   }
 }
 
