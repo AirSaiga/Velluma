@@ -7,7 +7,14 @@
  * 挂一句无因由的「生成失败」（WorkspaceView nleStateLabel），还挡住「启动精修」
  * 按钮（要求 stage='done'）。修复：error 与中断态同归正（有正文→done，无正文→idle）。
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+// 切章中止用例：诊断在飞需 mock refineryApi（静态 mock，避免拉起 transport 层）
+vi.mock('../../../services/api/domain', () => ({
+  refineryApi: { diagnose: vi.fn(), confirm: vi.fn() },
+  chapterApi: { defatSelection: vi.fn() },
+}))
+import { refineryApi } from '../../../services/api/domain'
 import { useGenerationSession } from '../composables/useGenerationSession'
 
 const storageKey = (chapterId: string) => `velluma:gensess:${chapterId}`
@@ -68,5 +75,47 @@ describe('useGenerationSession.loadForChapter 快照恢复', () => {
     const session = useGenerationSession()
     session.loadForChapter('ch-never')
     expect(session.stage.value).toBe('idle')
+  })
+})
+
+describe('useGenerationSession 切章中止在途 SSE（2026-09-01 页面逻辑审查修复）', () => {
+  beforeEach(() => {
+    ;(globalThis as Record<string, unknown>).localStorage = new LocalStorageMock()
+    vi.clearAllMocks()
+  })
+
+  it('诊断在飞时切章：abort 信号触发 + generating 归位', () => {
+    const session = useGenerationSession()
+    let capturedSignal: AbortSignal | undefined
+    vi.mocked(refineryApi.diagnose).mockImplementation(
+      (_id: string, _body: any, _handlers: any, signal?: AbortSignal) => {
+        capturedSignal = signal
+        return Promise.resolve()
+      },
+    )
+    session.loadForChapter('chapterA')  // 先绑定章（currentChapterId 由它设置）
+    session.startRefinery('chapterA', {})
+    expect(session.generating.value).toBe(true)
+    expect(capturedSignal?.aborted).toBe(false)
+
+    // 切章：中止在飞的诊断流（旧实现只 persist 不 abort，跨章污染窗口开到流跑完）
+    session.loadForChapter('chapterB')
+    expect(capturedSignal?.aborted).toBe(true)
+    expect(session.generating.value).toBe(false)
+  })
+
+  it('同章重入不误杀在飞流', () => {
+    const session = useGenerationSession()
+    let capturedSignal: AbortSignal | undefined
+    vi.mocked(refineryApi.diagnose).mockImplementation(
+      (_id: string, _body: any, _handlers: any, signal?: AbortSignal) => {
+        capturedSignal = signal
+        return Promise.resolve()
+      },
+    )
+    session.loadForChapter('chapterA')  // 先绑定章
+    session.startRefinery('chapterA', {})
+    session.loadForChapter('chapterA')  // 同章恢复路径
+    expect(capturedSignal?.aborted).toBe(false)
   })
 })

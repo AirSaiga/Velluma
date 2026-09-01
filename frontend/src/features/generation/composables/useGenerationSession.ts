@@ -417,8 +417,17 @@ export function useGenerationSession(): GenerationSession {
    * - 切换到不同章节：先 persist 旧章，再 load 新章。
    */
   function loadForChapter(chapterId: string) {
-    // 切换章节：先把当前章的状态存下来，再取消可能进行中的步进运行
+    // 切换章节：先中止在途 SSE（2026-09-01 页面逻辑审查修复：注释一直声称
+    // 「取消可能进行中的步进运行」但代码从未做——精修手术流式中途切章，旧章
+    // 的流会继续往会话 ref 灌内容，新章界面显示旧章的手术进度/流文本，跨章
+    // 污染窗口一直开到流跑完。abort 在 sse.ts 按非错误静默结束，不触发 onError），
+    // 再把当前章的状态存下来
     if (currentChapterId && currentChapterId !== chapterId) {
+      if (abortController) {
+        abortController.abort()
+        abortController = null
+      }
+      generating.value = false
       persist()
     }
     currentChapterId = chapterId
@@ -738,18 +747,6 @@ export function useGenerationSession(): GenerationSession {
   }
 
 
-  // ===== NLE-ADF：Space 键步进锁死推进 =====
-  function _spaceKeyHandler(e: KeyboardEvent) {
-    if (e.code !== 'Space') return
-    if (e.isComposing) return  // IME 候选期的 Space 是选词键
-    const target = e.target as HTMLElement | null
-    const tag = target?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-    // adaptive composing 态作者就在正文编辑器里写，Space 必须能触发缝合/续写；
-    // 旧路径（stage 机器态）保留原守卫——contenteditable 内 Space 一律放行不拦截。
-    const _adaptiveComposing = adaptiveMode.value && authorLane.value === 'composing'
-    if (target?.isContentEditable && !_adaptiveComposing) return
-  }
   // ===== NLE-ADF 2.0 作者模式键位（捕获阶段） =====
   // 深度清脂防重入标记（LLM 洗涤期间重复按 Alt+Shift+↓ 不叠加调用）
   let _deepDefatting = false
@@ -1011,7 +1008,6 @@ export function useGenerationSession(): GenerationSession {
       // adaptive 分支在前已 return，此处放行默认空格
     }
   }
-  onMounted(() => window.addEventListener('keydown', _spaceKeyHandler))
   onMounted(() => window.addEventListener('keydown', _authoringKeyHandler, true))
   onUnmounted(() => {
     // 卸载即中止在途 SSE：否则流继续跑到终态事件，期间 mutate 已卸载 session
@@ -1020,7 +1016,6 @@ export function useGenerationSession(): GenerationSession {
       abortController.abort()
       abortController = null
     }
-    window.removeEventListener('keydown', _spaceKeyHandler)
     window.removeEventListener('keydown', _authoringKeyHandler, true)
   })
 
