@@ -199,6 +199,10 @@ async function load(bookId: string) {
     worldApi.listMapStrokes(bookId),
     worldApi.getTimelineView(bookId).catch(() => ({}) as TimelineViewState),
   ])
+  // 过期响应守卫（2026-09-01 页面逻辑审查）：快速切书时两次 load 并发，旧书
+  // 的响应若后到会整包覆盖新书画面（地点/事件/实体全串书）。await 后校验
+  // 「本请求仍是当前书」，过期即整包丢弃——与心跳的章节纪元守卫同款语义。
+  if (loadedBookId.value !== bookId) return
   locations.value = locs
   events.value = evs
   entities.value = ents
