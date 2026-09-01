@@ -48,11 +48,27 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAutosave = false
 
 export function useChapterSpine() {
+  /**
+   * 冲刷在途防抖保存（2026-09-01 丢稿修复）。
+   *
+   * 旧语义：load/unload 直接丢弃 <2s 的在途编辑（当时取舍「最小代价」）——
+   * GUI 实测证实是丢稿路径（编辑后 2s 内切章/离开页面即静默丢失）。
+   * 新语义：以「此刻」章 id + 本地当前值立即落库；回包守卫（快照比对）
+   * 天然防串章——切章后 spine 已是新章数据，与 sent 序列化不等 → 旧回包不被接受。
+   */
+  function _flushPendingSave() {
+    if (!saveTimer) return
+    clearTimeout(saveTimer)
+    saveTimer = null
+    const cid = currentChapterId
+    const val = spine.value
+    if (cid && val) void save({ ...val }).catch(() => {})
+  }
+
   async function load(chapterId: string) {
-    // 切章竞态保险一：撤销在途防抖定时器——否则旧回调闭包携带 A 章 spine，
-    // 而 save() 读「此刻」currentChapterId（已切到 B），A 数据会整包写到 B 章。
-    // 设计取舍：不在切章前 flush 旧章在途编辑，丢弃 <2s 编辑是最小代价
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    // 切章竞态保险一：冲刷旧章在途防抖（丢稿修复，见 _flushPendingSave）；
+    // save 同步段读取 currentChapterId 发请求，先于下面的重赋值 → 必然写到旧章
+    _flushPendingSave()
     currentChapterId = chapterId
     spine.value = null
     spineSuggestions.value = null
@@ -71,8 +87,8 @@ export function useChapterSpine() {
   }
 
   function unload() {
-    // 切章竞态保险一（与 load 同款）：卸载前撤销在途防抖定时器
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    // 切章竞态保险一（与 load 同款）：冲刷在途防抖（丢稿修复，见 _flushPendingSave）
+    _flushPendingSave()
     currentChapterId = null
     spine.value = null
     spineSuggestions.value = null

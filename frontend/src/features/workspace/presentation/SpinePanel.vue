@@ -6,7 +6,7 @@
  * 不过目不落库（D-4）；划掉 = dropped（写的过程中决定不写了是合法动作）。
  * 纯展示组件——状态与保存经 useChapterSpine 由容器传入/调用。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ChapterSpine, SpineAnchor, SpineSuggestion } from '../../../services/api/domain/adaptive.api'
 import { highlightAnchorId } from '../composables/useChapterSpine'
 
@@ -32,6 +32,35 @@ const intentText = computed(() => props.spine?.intent?.text || '')
 const anchors = computed(() => props.spine?.anchors || [])
 const addingAnchor = ref('')
 const anchorFull = computed(() => anchors.value.length >= 5)
+
+// ---- 意图草稿（2026-09-01 丢稿修复）----
+// 旧绑定是单向 :value + 仅 @change：失焦才提交，期间任何重渲染（心跳回写锚点
+// 状态等，几秒一次）都会把未失焦的输入重置回旧值——输入没进保存链就被清掉。
+// 改本地草稿 + 输入即 600ms 防抖提交 + 失焦兜底；外部值仅在本地无未提交
+// 改动时同步（作者正在打字时不被回包/心跳打断）。
+const intentDraft = ref('')
+const intentDirty = ref(false)
+let intentCommitTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(() => props.spine?.intent?.text, (t) => {
+  if (!intentDirty.value) intentDraft.value = t || ''
+}, { immediate: true })
+
+function commitIntent() {
+  if (intentCommitTimer) { clearTimeout(intentCommitTimer); intentCommitTimer = null }
+  if (!intentDirty.value) return
+  intentDirty.value = false
+  emit('update-intent', intentDraft.value)
+}
+
+function onIntentInput(e: Event) {
+  intentDraft.value = (e.target as HTMLTextAreaElement).value
+  intentDirty.value = true
+  if (intentCommitTimer) clearTimeout(intentCommitTimer)
+  intentCommitTimer = setTimeout(commitIntent, 600)
+}
+
+onBeforeUnmount(() => commitIntent())
 
 function submitAnchor() {
   const t = addingAnchor.value.trim()
@@ -77,13 +106,15 @@ function clearBranch() {
       <span class="spine-hint">写之前记两句：这章讲什么、哪些情节非写不可</span>
     </div>
 
-    <!-- 意图：一行（autogrow 由 textarea rows=1 + CSS 承担） -->
+    <!-- 意图：一行（本地草稿防抖提交，maxlength 与 store 的 60 字截断对齐） -->
     <textarea
       class="spine-intent"
       rows="1"
-      :value="intentText"
+      maxlength="60"
+      :value="intentDraft"
       placeholder="一句话：这一章主要讲什么？（可空，直接开写也行）"
-      @change="(e) => emit('update-intent', (e.target as HTMLTextAreaElement).value)"
+      @input="onIntentInput"
+      @blur="commitIntent"
     ></textarea>
 
     <!-- 锚点 chips -->

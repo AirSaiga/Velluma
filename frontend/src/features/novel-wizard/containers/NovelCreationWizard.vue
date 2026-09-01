@@ -163,9 +163,11 @@ async function handleClose() {
             </button>
           </div>
           
-          <!-- 关闭按钮 -->
+          <!-- 关闭按钮（D3 加固：图标钮无文字，文字版按钮清单易漏看——补 title/aria 提升可发现性） -->
           <button
             @click="handleClose"
+            title="关闭向导（未保存更改会先确认）"
+            aria-label="关闭向导"
             class="p-2 rounded-lg hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

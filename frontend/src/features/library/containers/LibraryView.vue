@@ -111,7 +111,12 @@ async function submitQuickCreate() {
     } as Partial<Book>)
     showQuickCreate.value = false
     showToast('书籍已创建', 'success')
-    if (newBook) openBook(newBook)
+    if (newBook) {
+      // D2 修复（GUI 实测 2026-08-30）：路由 fade 是 out-in——旧视图离场与弹窗
+      // 离场过渡并发时换装可能被挂起（URL 已切、视图停在书架+弹窗 >25s）。
+      // 先关弹窗、等它的 0.2s 离场完成再跳转，彻底错开两段过渡。
+      setTimeout(() => openBook(newBook), 250)
+    }
   } catch (e: any) {
     showToast('创建失败：' + e.message, 'error')
   }

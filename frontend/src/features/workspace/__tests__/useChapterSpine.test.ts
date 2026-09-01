@@ -1,9 +1,10 @@
 /**
  * useChapterSpine 切章竞态与保存契约单测（纯逻辑，mock adaptiveApi，不依赖网络）。
  *
- * 覆盖四项修复：
- * 1. 切章竞态——load/unload 撤销在途防抖定时器 + 定时器回调章 id 兜底
- *    （A 章 spine 不再误写到 B 章）；
+ * 覆盖的修复：
+ * 1. 切章竞态——load/unload **冲刷**在途防抖保存到旧章（2026-09-01 丢稿修复：
+ *    旧语义直接丢弃 <2s 在途编辑，GUI 实测丢稿）+ 定时器回调章 id 兜底
+ *    （A 章 spine 不误写到 B 章）；
  * 2. save 回包快照比对——PATCH 往返期间的在途编辑不被服务器整包回滚；
  * 3. removeAnchor 删空主动清库——watcher 对 null 早退的死路径不再吞掉清空；
  * 4. 防抖保存 422 静默——watcher 调用点 .catch(() => {})，无 unhandled rejection
@@ -56,24 +57,33 @@ describe('useChapterSpine 切章竞态与保存契约', () => {
     )
   })
 
-  it('切章竞态（load 撤销定时器）：A 章 spine 不误写 B 章', async () => {
+  it('切章冲刷（load）：A 章在途编辑立即落库且不误写 B 章', async () => {
     vi.useFakeTimers()
     await api.load('chapterA')
     api.addAnchor('A 章锚点')
     await nextTick() // 定时器已挂（闭包携带 chapterA 的 spine）
-    await api.load('chapterB') // 切章——保险一 clearTimeout + 保险二回调 cid 兜底
+    await api.load('chapterB') // 切章——冲刷在途防抖到 A 章（丢稿修复）
+    expect(adaptiveApi.patchSpine).toHaveBeenCalledTimes(1)
+    expect(adaptiveApi.patchSpine).toHaveBeenCalledWith(
+      'chapterA',
+      expect.objectContaining({ anchors: [expect.objectContaining({ text: 'A 章锚点' })] }),
+    )
     await vi.advanceTimersByTimeAsync(2000)
-    expect(adaptiveApi.patchSpine).not.toHaveBeenCalled()
+    expect(adaptiveApi.patchSpine).toHaveBeenCalledTimes(1) // 旧回调闭包不再补一发 B 章写入
   })
 
-  it('切章竞态（unload 撤销定时器）：在途防抖保存不再触发', async () => {
+  it('卸载冲刷（unload）：setIntent 在途编辑不再被丢弃', async () => {
     vi.useFakeTimers()
     await api.load('chapterA')
-    api.addAnchor('A 章锚点')
+    api.setIntent('写完这段就收尾')
     await nextTick()
-    api.unload()
+    api.unload() // 离开写作页——冲刷而非丢弃
+    expect(adaptiveApi.patchSpine).toHaveBeenCalledWith(
+      'chapterA',
+      expect.objectContaining({ intent: { text: '写完这段就收尾', source: 'author' } }),
+    )
     await vi.advanceTimersByTimeAsync(2000)
-    expect(adaptiveApi.patchSpine).not.toHaveBeenCalled()
+    expect(adaptiveApi.patchSpine).toHaveBeenCalledTimes(1)
   })
 
   it('save 回包快照比对：PATCH 往返期间的在途编辑不被回滚', async () => {
