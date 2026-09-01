@@ -53,10 +53,6 @@ from .loader import (
     ChapterContext,
 )
 
-from backend.services.orchestration.beat_manager import (
-    save_story_beats,
-    build_physical_state_lock,
-)
 
 __all__ = [
     "load_chapter",
@@ -70,6 +66,4 @@ __all__ = [
     "load_relevant_memories",
     "load_full_chapter_context",
     "ChapterContext",
-    "save_story_beats",
-    "build_physical_state_lock",
 ]

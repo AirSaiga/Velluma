@@ -21,40 +21,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 编排模块 - 统一导出入口。
 
-职责：
-- 统一导出 Agentic 工作流编排相关函数
-- 提供节拍管理和层级映射
+2026-09-01 死代码归档：agentic.py / beat_manager.py（V4.0 编排遗存，零运行
+路径）迁至 `backend/_deprecated/services/orchestration/`。仅存 tier_mapper
+（schemas 懒加载消费：张力值 → 工作流层级映射）。
 
 子模块：
-- agentic.py: Agentic 工作流编排
-- beat_manager.py: 节拍管理
 - tier_mapper.py: 层级映射
-
-主要功能：
-- 高层参数解析
-- 节拍预览
-- 节拍保存
-- 张力层级映射
-
-依赖项：
-- backend.models: 数据模型
-- backend.services.workflows: 工作流阶段
 """
 
-from .agentic import (
-    resolve_high_level_params,
-    normalize_confirmed_beats,
-)
-from .beat_manager import (
-    save_story_beats,
-    build_physical_state_lock,
-)
 from .tier_mapper import map_tension_to_workflow_tier
 
 __all__ = [
-    "resolve_high_level_params",
-    "normalize_confirmed_beats",
-    "save_story_beats",
-    "build_physical_state_lock",
     "map_tension_to_workflow_tier",
 ]

@@ -74,7 +74,7 @@ backend/
 ├── models.py               # ★ 31 个 ORM 模型（GenerationTask:788 / GenerationRun:877 均生效）
 ├── database.py             # 异步引擎 + 启动时自动迁移（MIGRATIONS 列表）+ 向量维度迁移
 ├── core/  (config 端口扫描 / model_config 读 model_config.json / dependencies / exceptions)
-├── config/ (V4.0 配置推导层；PARAMETER_MAPPING.md 的 WorkflowPolicy 段含已废弃双轨参数，仅供历史参考)
+├── config/ (仅存 intent_driven/intent_engine 两活件；V4.0 参数推导层全家 2026-09-01 归档 _deprecated/config/)
 ├── routes/                 # API 路由（均在 main.py 注册）
 │   └── chapter_generation/ # 包结构：__init__ 合并 adf/refinery/adaptive router + extra_router
 │       ├── adaptive.py     #   ★ NLE-ADF 3.0（前端默认）：/adaptive/heartbeat + /stitch-ghost + /settle + /finish + /fix-sentence + /spine（GET/PATCH）+ /spine-suggest + /model + /context-preview（P5 AI 所见预览）+ /event（+/events/summary）+ /auto-read + /read-entities（2026-08-25 系统自己去读）；usage.py 同包：/adaptive/usage 章/书两级聚合
@@ -87,7 +87,7 @@ backend/
     ├── nlg/ (去 AI 味洗涤 de_ai_washer.py)
     ├── prompts/            # Prompt 模板（改后即时生效，无需重建）。含 bsadf/adf/dde/nle/adaptive_prompts 等 + 测试
     ├── context/            # ★ settings_bundle.py（NLE-ADF 3.0 设定数据共享加载器：章级绑定+Canon+世界观）+ loader.py
-    ├── rag/  (17+ 模块；scoring.py alpha/beta/gamma/lambda_decay 权重；enhanced/ 子包为评分增强层，在用)
+    ├── rag/  (三活件：recall.py 唯一检索入口 + lexical.py 纯函数 + memory_indexing.py 写侧；检索器全家 18 文件+enhanced 子包 2026-09-01 归档 _deprecated/rag/)
     ├── style/  (★ 文风体系：extractor.py 样本提炼 / cliche_provider / fingerprint.py 句长/字数/CV/对话统计规范实现（审计侧共用同一把尺子，对拍单测勿删）/ retrieval.py 作者样本检索（向量优先+新近兜底，stitch-ghost/ADF/refinery few-shot 共用）)
     ├── validation/  (代码级 + LLM 级审计，服务 /chapters/{id}/quality-report 路由；统计原语 import 自 services/style/fingerprint.py)
     ├── workflows/
@@ -310,4 +310,4 @@ services/api/transport  ← 底层 HTTP
 - **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建），建议查 `logs/prompt_log_*.json` 验证。
 - **前端加 Feature**：`features/` 建目录，按 `containers/`+`presentation/` 分层，经 `services/api/domain` 通信。
 
-> 废弃/归档清单：`backend/_deprecated/`（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / **BS-ADF（2026-08-19，含路由 `routes/bsadf_route.py` 与 schema `schemas/bsadf_schema.py`）**整引擎归档，不参与 import 链，详见该目录 README）；`backend/_deprecated/docs/`（对应废弃引擎的设计文档归档）。其余历史误标（`models_generation_task.py`、`services/` 空壳目录、`rag/tests/`、`state_machine/`、`PROXY_URL`/`DISABLE_PROXY`、pywebview/`app.py` 等）均已随代码清理删除，不再存在。
+> 废弃/归档清单：`backend/_deprecated/`（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / **BS-ADF（2026-08-19，含路由 `routes/bsadf_route.py` 与 schema `schemas/bsadf_schema.py`）**整引擎归档；**2026-09-01 死代码批量归档**：rag 检索器全家 18 文件+enhanced 子包、V4.0 config 参数推导层 7 件、orchestration agentic/beat_manager、prompts 三件、context.engine/generation.chapter_card/utils.sanitizer、workflows planning/context_blocks/state_validator——静态可达性+消费方 grep 双验零运行路径，不参与 import 链，详见该目录 README）；`backend/_deprecated/docs/`（对应废弃引擎的设计文档归档）。其余历史误标（`models_generation_task.py`、`services/` 空壳目录、`rag/tests/`、`state_machine/`、`PROXY_URL`/`DISABLE_PROXY`、pywebview/`app.py` 等）均已随代码清理删除，不再存在。

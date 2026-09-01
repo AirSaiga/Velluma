@@ -29,17 +29,12 @@ fortress_candidate / dual_track 包 / detonation 包）已整体迁至 backend/_
 当前保留的活跃消费者见各文件 docstring。
 
 模块组织（引擎剥离后）：
-- planning.py: 规划阶段（节拍拆分 + POV 锚点分配，共享编排层）
 - refining.py: 精修阶段（refine_draft，服务于 chapter_optimization 路由）
-- snapshot_extractor.py / state_validator.py / clarification_agent.py / context_blocks.py
-  / formatting_utils.py / validators.py / utils.py: 各有活跃消费者，详见各自 import 图
 """
 
-from backend.services.workflows.planning import generate_beats
 from backend.services.workflows.refining import refine_draft, refine_single_beat
 
 __all__ = [
-    "generate_beats",
     "refine_draft",
     "refine_single_beat",
 ]

@@ -113,3 +113,13 @@ _deprecated/
 5. 注意 `tier_classifier.py`：若恢复 detonation 包，需决定是把它迁回 detonation/ 还是保留在 adf/
 
 由于全程使用 `git mv`，git 历史完整保留，可通过 `git log --follow <file>` 追溯。
+
+## 2026-09-01 死代码批量归档
+
+**判定方法**：静态可达性分析（backend.main 起 BFS import 图）+ 消费方 grep 双重验证，零运行路径方入档。**教训**：schemas/* 曾被误判（相对导入不可见），config/intent_* 曾被误搬（整目录 mv 前未核对活清单）——整目录搬移前必须逐文件核对活死清单。
+
+- `config/`：V4.0 参数推导层（adapter/derivation/engine/mapper/rules/schemas+generation_config）。活件 intent_driven/intent_engine 已回迁 backend/config/。
+- `rag/`：旧检索器全家 18 文件 + enhanced/ 子包（retriever/scoring/编排链/context_packager/伏笔追踪/explainability/workflow_integration 等）。在役三件（recall/lexical/memory_indexing）留在 backend/services/rag/。
+- `services/orchestration/`：agentic.py + beat_manager.py（tier_mapper 在役留下）。
+- `services/prompts/`：bsadf_prompts / chapter_card_prompts / inspiration_prompts。
+- `services/`：context/engine.py、generation/chapter_card.py、utils/sanitizer.py、workflows/{planning,context_blocks,state_validator}.py（conftest.py 在役留下）。

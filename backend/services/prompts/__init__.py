@@ -32,7 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - scene_intent_prompts.py: 场景意图分析提示词
 - review_prompts.py: 审阅/精修 Agent 提示词
 - format_prompts.py: 文本格式整理提示词
-- inspiration_prompts.py: 灵感生成提示词
+- （2026-09-01 归档：bsadf/chapter_card/inspiration_prompts 零运行路径 → _deprecated）
 
 使用场景：
 - agentic_workflow.py: 调用各 Agent 提示词构建函数
