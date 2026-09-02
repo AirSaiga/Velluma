@@ -436,9 +436,10 @@ _NAME_ALLOWANCE_CHARS = 16
 #   AUTHOR_SAMPLE_MAX_CHARS=1200）+ 条间 "\n\n" 2 + 尾句 37——实测 2494。
 #   ⚠ 配额按 k=2（continue 档）编制；burst 档 k=3（C3）的配额在
 #   MODE_BLOCK_BUDGET_OVERRIDES 按模式覆盖，基表不追高。
-# proper_nouns = 380
-#   固定头 40（标题行+冒号引导句）+ 20 名（PROPER_NOUNS_MAX_ENTRIES）× 16 字
-#   + 19 个顿号——实测 379。
+# proper_nouns = 420
+#   固定头 79（标题行+「称呼规范非登场清单」引导句，2026-09-01 穿帮修复改
+#   措辞后实测变长）+ 20 名（PROPER_NOUNS_MAX_ENTRIES）× 16 字
+#   + 19 个顿号——实测 418。
 # canon = 5480
 #   块头 20 + canon_context 三段 worst-case（consistency.build_canon_context_
 #   for_prompt 格式）：[private] 段头 33 + 10 条×（"- "+标签16+"："+150
@@ -462,7 +463,7 @@ _NAME_ALLOWANCE_CHARS = 16
 BLOCK_CHAR_BUDGETS: Dict[str, int] = {
     "style_positive": 2020,
     "author_samples": 2500,
-    "proper_nouns": 380,
+    "proper_nouns": 420,
     "canon": 5480,
     "secrets": 1400,
     "echoes": 545,

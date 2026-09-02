@@ -550,12 +550,34 @@ class WorldRepository:
         self.map_strokes = WorldMapStrokeRepository(db)
 
     async def compute_world_state(self, book_id: str, t: int) -> Dict[str, Any]:
-        """推演时刻 t 的世界状态。加载事件 + 地点 + 关系，调纯函数 fold。"""
+        """推演时刻 t 的世界状态。加载事件 + 地点 + 关系，调纯函数 fold。
+
+        词法兜底（2026-09-02 约束治理一期）：本方法是全部 DB 路径的唯一汇聚点
+        （routes/fold/world_bridge 都走这里），fold 后统一做缺失实体的 note 词法
+        在场增强（services/world/lexical_presence.py 纯函数，标
+        presence_source=lexical；失败静默不阻塞主链）。
+        """
         events = await self.events.list_all_by_book(book_id)
         locations = await self.locations.list_by_book(book_id)
         relations = await self.relations.list_by_book(book_id)
         locations_by_id = {str(loc.id): loc for loc in locations}
-        return compute_world_state_from_events(events, locations_by_id, t, relations)
+        state = compute_world_state_from_events(events, locations_by_id, t, relations)
+        try:
+            from backend.services.world.lexical_presence import enrich_state_with_lexical_presence
+
+            entities = await self.entities.list_by_book(book_id)
+
+            def _on_gap(cid, outcome, reason, detail, _book=str(book_id)):
+                from backend.services.constraints.events import log_constraint_event
+
+                log_constraint_event(_book, "", cid, outcome, reason=reason, detail=detail)
+
+            enrich_state_with_lexical_presence(
+                state, events, entities, locations_by_id, t, on_event=_on_gap,
+            )
+        except Exception:
+            pass  # 兜底失败不阻塞推演主链
+        return state
 
     async def world_version(self, book_id: str) -> Dict[str, Any]:
         """世界数据版本（写作页切片保鲜比对；docs/world-writing-bridge.md §4.2）。

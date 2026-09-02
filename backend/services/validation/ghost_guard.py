@@ -78,6 +78,9 @@ def check_ghost_text(
     world_state: Optional[Dict[str, Any]] = None,
     entity_names_by_id: Optional[Dict[str, List[str]]] = None,
     canon_node_ids_by_label: Optional[Dict[str, str]] = None,
+    visible_names: Optional[List[str]] = None,
+    all_names: Optional[List[str]] = None,
+    on_event=None,
 ) -> List[Dict[str, str]]:
     """幽灵草稿快检：返回 warnings: [{kind, span_text, message}]。
 
@@ -89,11 +92,18 @@ def check_ghost_text(
         character_secrets: 显式覆盖——A1 私有通道 [{name, text}]
         world_state: 显式覆盖——t 时刻推演快照（character_states 的 alive）
         entity_names_by_id: 显式覆盖——实体 id → [主名, *别名]（dead_speak 用）
+        visible_names: 在场/提及白名单（scene_visible_proper_nouns 同一产物，
+            路由透传不重算）；None = 第五检不跑（零变化契约）
+        all_names: 书级实体+资产名全集（第五检候选宇宙；bundle 形态自动取用）
+        on_event: 约束事件回调 (constraint_id, outcome, reason, detail)——
+            out_of_scene 命中/闪回豁免的台账埋点；None = 不埋
 
     Returns:
-        [{kind: dead_speak|canon_leak|secret_leak|cliche_hit, span_text, message,
-        detail?}], 上限 MAX_WARNINGS；无输入/无命中/内部异常一律空列表
-        （零报错契约）。detail 仅 cliche_hit 携带（命中 pattern 去重前 5）。
+        [{kind: dead_speak|canon_leak|secret_leak|cliche_hit|out_of_scene,
+        span_text, message, detail?, local_only?}], 上限 MAX_WARNINGS；
+        无输入/无命中/内部异常一律空列表（零报错契约）。detail 仅
+        cliche_hit/out_of_scene 携带；out_of_scene 带 local_only=True（shadow
+        出生——路由过滤后不进 GHOST_DONE 帧，只落 constraint_events）。
     """
     try:
         if not text or not isinstance(text, str):
@@ -200,6 +210,43 @@ def check_ghost_text(
         except Exception:
             pass  # 零报错契约：本类快检失败静默跳过
 
+        # ---- 5. out_of_scene：非在场/提及名单实体 × 上手级动词框架（shadow 出生，
+        # 2026-09-02 约束治理一期）——流光穿帮的输出侧镜像。白名单与称呼表同一
+        # 产物（路由透传 ctx.proper_nouns，不重算）；命中带 local_only=True 由
+        # 路由过滤出 SSE 帧；闪回豁免只落台账（outcome=exempt）连 warning 都不产。
+        if visible_names is not None:
+            try:
+                from backend.services.context.scene_visibility import find_out_of_scene_hits
+
+                candidates = all_names
+                if candidates is None and bundle is not None:
+                    candidates = _bundle_all_names(bundle)
+                for h in find_out_of_scene_hits(text, visible_names, candidates or []):
+                    if on_event is not None:
+                        try:
+                            if h.get("exempt"):
+                                on_event("ghost-guard-out-of-scene", "exempt", "flashback",
+                                         {"name": h.get("name"), "sentence": h.get("sentence")})
+                            else:
+                                on_event("ghost-guard-out-of-scene", "hit", "handling_verb_frame",
+                                         {"name": h.get("name"), "verb": h.get("verb")})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    if h.get("exempt"):
+                        continue
+                    _hit_dict({
+                        "kind": "out_of_scene",
+                        "span_text": str(h.get("name") or ""),
+                        "message": (
+                            f"「{h.get('name')}」不在此刻在场/提及名单，却被写成可上手对象"
+                            f"（动词「{h.get('verb')}」；若是有意的预告/回忆可忽略）"
+                        ),
+                        "detail": {"verb": h.get("verb")},
+                        "local_only": True,
+                    })
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
         return warnings
     except Exception:
         # 零报错契约：快检是柔性信号，任何异常静默为空（绝不阻塞生成）
@@ -209,6 +256,31 @@ def check_ghost_text(
 # ============================================================
 # 内部工具
 # ============================================================
+
+def _bundle_all_names(bundle: Any) -> List[str]:
+    """从 bundle 取书级实体+资产名全集（out_of_scene 检测候选宇宙；去重保序）。
+
+    只收可被「上手」的实体类：character/asset（势力是组织不是物件，编不进
+    「拧流光的螺栓」这类物理操纵帧；事故语料实证「统合局×检修」是纯碰撞）。
+    world 适配器带 world_entity.entity_type；legacy ChapterEntity 无类型信息
+    放行（宁多勿漏，shadow 形态下误报无用户代价）。与 proper_nouns 同口径
+    （bundle 形态下路由已透传 visible/all，此处只服务显式参数形态的测试）。
+    """
+    names: List[str] = []
+    for ent in (getattr(bundle, "entities", None) or []):
+        we = _get_nested(ent, "world_entity", None)
+        etype = str(getattr(we, "entity_type", "") or "") if we is not None else ""
+        if etype and etype not in ("character", "asset"):
+            continue
+        name = str(_get_nested(ent, "character", "name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    for a in (getattr(bundle, "assets", None) or []):
+        name = str(getattr(a, "name", "") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
 
 def _bundle_canon_labels(bundle: Any) -> List[str]:
     """从 bundle 取 canon 私有标签（与 A1 抽取同源——hard_constraints 唯一权威）。"""

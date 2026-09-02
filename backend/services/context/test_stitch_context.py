@@ -39,7 +39,9 @@ from backend.services.context.stitch_context import (
     StitchContext,
     assemble_stitch_context,
     build_context_preview,
+    scene_visible_proper_nouns,
 )
+from backend.services.context.knowledge_plane import KnowledgeView
 from backend.services.prompts.adaptive_prompts import (
     _base_system,
     build_burst_prompt,
@@ -123,7 +125,7 @@ class TestPreviewBlocksMatchRealPrompt:
             assert content == "", f"{key} 空上下文应为空块"
         # 空块拼接 → builder prompt 无任何块头（零变化契约）
         sys_prompt, _ = build_continue_prompt(fragment="他攥紧扳手", rolling_prefix="灯下。")
-        for header in ("作者文风画像", "作者笔迹示范", "在场实体专名", "作者脑中世界图谱", "作者私有设定", "前情回响", "空间常识"):
+        for header in ("作者文风画像", "作者笔迹示范", "实体称呼", "作者脑中世界图谱", "作者私有设定", "前情回响", "空间常识"):
             assert header not in sys_prompt
 
 
@@ -314,6 +316,140 @@ class TestAssembleQueryContract:
         ))
         assert ctx.scene_hint == "general"
         assert capture.sample_hints == ["general"]
+
+
+# ============================================================
+# 3.5 专名称呼表过滤（2026-09-01 穿帮修复）
+# ============================================================
+
+class TestProperNounSceneFilter:
+    """称呼表按可见文本过滤（scene_visible_proper_nouns）。
+
+    事故：书级全量专名 + 旧措辞「以下名称必须原样使用」→ 小模型把不在场的
+    敌方机甲硬编成主角正在修的螺丝（《最终武装》第 1 章工头喊「把流光左腿
+    关节的螺栓拧紧」，流光是后续节拍才袭基地的敌方机甲）。修复后 world 书
+    名单 = 在场 ∪ 死亡 ∪ 本章提及 ∪ 本次可见文本点名；legacy 书零变化。
+    """
+
+    @staticmethod
+    def _bundle(**kw) -> SettingsBundle:
+        """世界书桩：角色 林尘/白霆/流光 + 资产 血噬/红月（候选序固定）。"""
+        ents = [SimpleNamespace(character=SimpleNamespace(name=n)) for n in ("林尘", "白霆", "流光")]
+        assets = [SimpleNamespace(name="血噬"), SimpleNamespace(name="红月")]
+        defaults = dict(
+            chapter_id="ch-1", book_id="bk-1", chapter_number=1,
+            entities=ents, assets=assets, world_sourced=True,
+        )
+        defaults.update(kw)
+        return SettingsBundle(**defaults)
+
+    @staticmethod
+    def _kg(**kw) -> KnowledgeView:
+        defaults = dict(selected_keys=["worldview:0"],
+                        unselected=[{"key": "entity:白霆", "reason": "未在场未提及"}])
+        defaults.update(kw)
+        return KnowledgeView(**defaults)
+
+    ALL = ["林尘", "白霆", "流光", "血噬", "红月"]
+
+    def test_absent_names_filtered_out(self):
+        """流光式穿帮的正面锁：未在场未提及的名字不进称呼表——prompt 无此名
+        就无从硬编。"""
+        kg = self._kg(mentioned_names=["林尘"])
+        out = scene_visible_proper_nouns(self._bundle(), kg)
+        assert out == ["林尘"]
+
+    def test_present_and_dead_names_kept(self):
+        """在场（正面登场）与死亡（闪回提及称呼仍须一致）都保留。"""
+        kg = self._kg(present_names=["白霆"], dead_names=["红月"])
+        out = scene_visible_proper_nouns(self._bundle(), kg)
+        assert out == ["白霆", "红月"]
+
+    def test_intent_mention_sanctions_name(self):
+        """就近节拍点名（袭击拍写到大纲那行）：名字回到称呼表，命名不漂移。"""
+        kg = self._kg(mentioned_names=["林尘"])
+        out = scene_visible_proper_nouns(
+            self._bundle(), kg, intent_text="不多时，流光带领武装机甲侵入内部。",
+        )
+        assert out == ["林尘", "流光"]
+
+    def test_rolling_prefix_and_fragment_mention(self):
+        """滚窗/当前碎片里的名字（可能尚未落库）同样算可见点名。"""
+        kg = self._kg()
+        out = scene_visible_proper_nouns(
+            self._bundle(), kg,
+            rolling_prefix="仓库深处传来血噬的低鸣。",
+            fragment="他想起红月。",
+        )
+        assert out == ["血噬", "红月"]
+
+    def test_legacy_book_keeps_full_list(self):
+        """legacy 书：实体即作者章级显式绑定，全量保留（零变化契约）。"""
+        bundle = self._bundle(world_sourced=False)
+        out = scene_visible_proper_nouns(bundle, self._kg())
+        assert out == self.ALL
+
+    def test_empty_kg_fallback_keeps_full_list(self):
+        """kg 构建失败降级为空视图：回退全量——降级不劣于旧行为。"""
+        out = scene_visible_proper_nouns(self._bundle(), KnowledgeView())
+        assert out == self.ALL
+
+    def test_after_only_names_excluded(self, monkeypatch):
+        """泄漏手术（2026-09-02）：仅在 after 区出现、可见文本未出现的名字
+        不进称呼表——细纲胶囊文中部扩写时光标后的「未来实体」不再泄进名单。"""
+        kg = self._kg(mentioned_names=["林尘", "流光"])  # 全画布扫描带出 after 区的流光
+        out = scene_visible_proper_nouns(
+            self._bundle(), kg, rolling_prefix="他继续搬着箱子。",
+            after_text="不多时，流光带领武装机甲侵入内部。",
+        )
+        assert out == ["林尘"]
+
+    def test_after_name_kept_when_also_visible(self, monkeypatch):
+        """名字同时出现在可见文本与 after 区：保留（既已提及则称呼须一致）。"""
+        kg = self._kg(mentioned_names=["林尘", "流光"])
+        out = scene_visible_proper_nouns(
+            self._bundle(), kg, rolling_prefix="他嘴里念叨着流光的名字。",
+            after_text="不多时，流光带领武装机甲侵入内部。",
+        )
+        assert "流光" in out
+
+    def test_after_text_default_zero_change(self):
+        """after_text 缺省空串=旧行为逐字节一致（context-preview 同源红线）。"""
+        kg = self._kg(mentioned_names=["林尘", "流光"])
+        out = scene_visible_proper_nouns(self._bundle(), kg)
+        assert out == ["林尘", "流光"]
+
+    def test_assemble_wires_filtered_nouns(self, monkeypatch):
+        """装配接线：ctx.proper_nouns 是过滤后的名单（路由五模式+预览共用）。"""
+        capture = _Capture()
+        bundle = self._bundle(outline_text="大纲：林尘发愣被工头打断。")
+        async def _load(chapter_id, db):
+            return bundle
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context.load_chapter_settings_bundle", _load)
+        monkeypatch.setattr("backend.services.context.stitch_context.recall_memories", capture.recall)
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context.retrieve_author_samples_with_meta",
+            capture.samples_meta)
+        def _fake_kv(b):
+            return self._kg(mentioned_names=["林尘"])
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context.build_knowledge_view", _fake_kv)
+        ctx = asyncio.run(assemble_stitch_context(
+            "ch-1", "stitch", fragment="", rolling_prefix="", db=None,
+            chapter_intent="不多时，流光带队突袭。",
+        ))
+        assert ctx.proper_nouns == ["林尘", "流光"]
+
+    def test_nouns_block_wording_is_not_a_casting_list(self):
+        """块措辞回归锁：称呼规范而非登场指令——「必须原样使用」的旧推力卸掉。"""
+        sys_prompt, _ = build_continue_prompt(
+            fragment="他攥紧扳手", rolling_prefix="灯下。",
+            proper_nouns=["林尘"],
+        )
+        assert "实体称呼" in sys_prompt
+        assert "不是登场清单" in sys_prompt
+        assert "以下名称必须原样使用" not in sys_prompt
 
 
 # ============================================================

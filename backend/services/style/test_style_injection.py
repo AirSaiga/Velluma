@@ -114,7 +114,7 @@ class TestInjection:
         # 风格块在基座之后、专名块之前（顺序稳定）
         # 知识检索平面 v3.1（2026-08-27）：注入序=事实层前于文风层——专名块
         # （此处无实体数据走兜底）先于画像块（docs/knowledge-retrieval-plane.md §6）
-        assert sys_prompt.index("反 AI 腔指令") < sys_prompt.index("在场实体专名") < sys_prompt.index("作者文风画像")
+        assert sys_prompt.index("反 AI 腔指令") < sys_prompt.index("实体称呼") < sys_prompt.index("作者文风画像")
 
     def test_samples_block_empty_strings_filtered(self):
         sys_prompt, _ = build_burst_prompt(

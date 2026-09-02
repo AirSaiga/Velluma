@@ -1021,6 +1021,9 @@ async def stitch_ghost(
         db=db,
         chapter_intent=request.chapter_intent,
         drift_anchor=_drift_anchor,
+        # 2026-09-02 after_text 泄漏手术：仅出现于胶囊后文的名字不进称呼表
+        # （scene_visible_proper_nouns 内部判定；其余模式空串零变化）
+        after_text=request.after_text or "",
     )
     bundle = ctx.bundle
     proper_nouns = ctx.proper_nouns
@@ -1052,6 +1055,10 @@ async def stitch_ghost(
         mode=request.mode,
         blocks=_blocks_detail,
         prefix_sha1=_prefix_sha,
+        # 2026-09-01 穿帮修复后的审计位：记录过滤后的最终专名表（对照
+        # kg.unselected 可回放「某实体为何没进称呼表」——工头拧流光螺栓事故
+        # 的诊断路径依赖过 trace 里能看见注入了什么名字）
+        proper_nouns=list(proper_nouns)[:24],
         selected=list(getattr(kg, "selected_keys", []) or [])[:40],
         unselected=list(getattr(kg, "unselected", []) or [])[:40],
         knowledge_chars=kg.total_chars() if isinstance(kg, KnowledgeView) else 0,
@@ -1359,7 +1366,21 @@ async def stitch_ghost(
                         _label_map = {}
                 ghost_warnings = check_ghost_text(
                     text, bundle, canon_node_ids_by_label=_label_map,
+                    # 约束治理一期（2026-09-02）：白名单=称呼表同一产物（透传
+                    # 不重算）；on_event 落 constraint_events 台账。out_of_scene
+                    # 为 shadow 出生——warnings 带 local_only 由下方过滤出 SSE 帧。
+                    # ⚠ 不传 all_names：候选宇宙走 bundle 内省路径
+                    # （_bundle_all_names 只收 character/asset——势力是组织不是
+                    # 物件；显式传 proper_nouns() 会混入全类型名，语料库口径分叉）
+                    visible_names=list(proper_nouns or []),
+                    on_event=lambda cid, outcome, reason, detail: _log_constraint_event(
+                        str(bundle.book_id or ""), str(chapter_id), cid, outcome,
+                        reason=reason, detail=detail,
+                    ),
                 )
+                # shadow 纪律：local_only（out_of_scene）不进 GHOST_DONE 帧——
+                # 前端零感知，攒精确率数据后由 registry status 翻转 promote
+                ghost_warnings = [w for w in ghost_warnings if not w.get("local_only")]
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
             # 知识平面 v3.1 join 埋点（§10 在线召回证据，只记录不 retry）：
@@ -1474,6 +1495,25 @@ async def stitch_ghost(
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] 洗层失败（不阻塞生成）: {e}")
 
+            # B5 人称漂移（约束治理一期 report-only）：叙述段第一人称密度超阈值
+            # 落台账（signal-only——每发都记会污染 hit 语义），不上屏不进帧；
+            # 密度本身进 adaptive_stitch_complete trace（P2-2：校准需要分布
+            # 而不只是尾部信号）。
+            _persona_density = None
+            try:
+                from backend.services.constraints.persona_drift import narrative_first_person_density
+
+                _pd = narrative_first_person_density(text)
+                _persona_density = _pd.get("density")
+                if _pd.get("sufficient") and _pd.get("density", 0) >= 2.0:
+                    _log_constraint_event(
+                        str(bundle.book_id or ""), str(chapter_id), "persona-drift",
+                        "hit", reason="report_only_above_threshold",
+                        detail={"density": _pd.get("density"), "mode": request.mode},
+                    )
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] 人称漂移埋点失败（静默）: {e}")
+
             yield build_sse_event("GHOST_START", "", mode=request.mode)
             # burst/open/outline 文本长 → 更大步长更快节奏（700 字约 2.3s 播完），短档保持原速
             chunk_size = 12 if request.mode in ("burst", "open", "outline") else 6
@@ -1501,6 +1541,7 @@ async def stitch_ghost(
                 deai_applied=int(deai_payload.get("applied", False)),
                 ghost_token=ghost_token,
                 sample_ids=sample_ids,
+                persona_density=_persona_density,
                 # P1-3（C1）短窗观测：原始上送 vs 截窗后实际进 prompt 的长度
                 rolling_prefix_raw_len=len(request.rolling_prefix or ""),
                 rolling_prefix_used_len=len(rolling_windowed),
@@ -2098,6 +2139,28 @@ def _append_collab_event(book_id: str, chapter_id: str, kind: str, detail: Dict)
         logger.debug(f"[CollabEvent] 写入失败（静默）: {e}")
 
 
+def _log_constraint_event(
+    book_id: str,
+    chapter_id: str,
+    constraint_id: str,
+    outcome: str,
+    reason: str = "",
+    detail: Optional[Dict] = None,
+) -> None:
+    """约束事件台账薄包装（2026-09-02 约束治理一期）。
+
+    与 collab 埋点同级静默契约：失败绝不阻塞生成。schema 与轮转在
+    services/constraints/events.py（照抄本文件 collab_events 模式）。
+    """
+    try:
+        from backend.services.constraints.events import log_constraint_event
+
+        log_constraint_event(book_id, chapter_id, constraint_id, outcome,
+                             reason=reason, detail=detail)
+    except Exception as e:
+        logger.debug(f"[ConstraintEvent] 埋点失败（静默）: {e}")
+
+
 @router.post("/{chapter_id}/adaptive/event", status_code=204)
 async def log_collab_event(
     chapter_id: str,
@@ -2113,6 +2176,30 @@ async def log_collab_event(
     except Exception:
         pass
     _append_collab_event(book_id, chapter_id, payload.kind, payload.detail)
+
+
+@router.get("/{chapter_id}/adaptive/constraints/summary")
+async def constraints_summary(
+    chapter_id: str,
+):
+    """约束执法事件汇总（约束治理一期 2026-09-02：信用分/服从率度量的读面）。
+
+    形状：{chapter_id, total, by_constraint, by_outcome, recent(最新 20 条)}。
+    前端「约束健康」面板等数据体量后再接线。failure 静默返回空结构。
+    """
+    try:
+        from backend.services.constraints.events import read_constraint_events
+
+        data = read_constraint_events(chapter_id=chapter_id)
+    except Exception:
+        data = {"total": 0, "by_constraint": {}, "by_outcome": {}, "recent": []}
+    return {
+        "chapter_id": chapter_id,
+        "total": data.get("total", 0),
+        "by_constraint": data.get("by_constraint", {}),
+        "by_outcome": data.get("by_outcome", {}),
+        "recent": data.get("recent", []),
+    }
 
 
 @router.get("/{chapter_id}/adaptive/events/summary")

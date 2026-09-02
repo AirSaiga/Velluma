@@ -39,6 +39,9 @@ from backend.services.context.settings_bundle import (
     render_style_positive,
 )
 from backend.services.context.knowledge_plane import KnowledgeView, build_knowledge_view, kg_block_kwargs
+# 场景可见性共享判据（2026-09-02 约束治理一期迁入 scene_visibility：ghost_guard
+# 第五检与称呼表共用同一白名单函数；此处 re-export 保住既有引用面）
+from backend.services.context.scene_visibility import scene_visible_proper_nouns
 # 大纲就近节拍共享判据（2026-08-25 实测修复：意图块只给接下来一两拍，防冲章）
 from backend.services.adaptive.outline_nearby import outline_nearby
 from backend.services.adaptive.paragraph_source import written_text
@@ -146,6 +149,11 @@ def _nearby_intent_from_outline(bundle: SettingsBundle) -> str:
     return "\n".join(beats)
 
 
+# scene_visible_proper_nouns 已迁 backend/services/context/scene_visibility.py
+# （2026-09-02 约束治理一期；模块头 import + re-export，引用面零破坏）。
+# after_text 泄漏手术与越界检测判据同住新模块。
+
+
 async def assemble_stitch_context(
     chapter_id: str,
     mode: str,
@@ -154,6 +162,7 @@ async def assemble_stitch_context(
     db: AsyncSession,
     chapter_intent: str = "",
     drift_anchor: bool = False,
+    after_text: str = "",
 ) -> StitchContext:
     """装配 stitch-ghost 的全套上下文（五模式共用，行为与旧路由内联段一致）。
 
@@ -170,7 +179,6 @@ async def assemble_stitch_context(
         StitchContext：装配快照。任何子查询失败由 bundle/检索层各自降级为空。
     """
     bundle = await load_chapter_settings_bundle(chapter_id, db)
-    proper_nouns = bundle.proper_nouns()
     resolved_intent = chapter_intent or _nearby_intent_from_outline(bundle)
 
     # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
@@ -221,6 +229,18 @@ async def assemble_stitch_context(
     except Exception:
         kg = KnowledgeView()
 
+    # 称呼表按可见文本过滤（2026-09-01 穿帮修复，见函数 docstring）：
+    # 必须在 kg 构建之后——过滤口径复用知识平面的在场/死亡/提及选择集。
+    # after_text：outline 路由透传的胶囊后文（2026-09-02 泄漏手术——仅出现于
+    # after 区的名字不进称呼表）；其余模式空串=逐字节零变化。
+    proper_nouns = scene_visible_proper_nouns(
+        bundle, kg,
+        intent_text=resolved_intent,
+        rolling_prefix=rolling_prefix,
+        fragment=fragment,
+        after_text=after_text,
+    )
+
     return StitchContext(
         bundle=bundle,
         proper_nouns=proper_nouns,
@@ -245,7 +265,7 @@ _BLOCK_TITLES = {
     "scene": "场景身份",
     "warm": "本章打算",
     "entities": "在场与相关",
-    "proper_nouns": "在场专名",
+    "proper_nouns": "实体称呼",
     "canon": "Canon 图谱",
     "secrets": "私有设定",
     "worldview": "世界观",

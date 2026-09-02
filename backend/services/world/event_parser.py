@@ -27,18 +27,64 @@ _VALID_TYPES = {
 
 
 def _resolve_names(names: List[Any], entities: List[Any]) -> Dict[str, Any]:
-    """名字（含别名）→ {name: entity} 精确匹配表。"""
-    table: Dict[str, Any] = {}
+    """名字（含别名）→ {name: entity} 三级匹配（约束治理一期 2026-09-02）。
+
+    LLM 报的参与者名常带修饰（「阿晚姑娘」「老王头」），纯精确匹配必然漏——
+    漏掉的进 unresolved → participant_ids 缺失 → 在场推演断链（数据缺口 B6
+    的写入侧根源）。三级依次收敛：
+    1. 精确：strip 后等于名或别名（零误报）；
+    2. 包含/被包含：双向子串且 ≥2 字（「阿晚姑娘」⊃「阿晚」；「阿晚」⊃「晚姑娘」
+       这类短修饰也可挂上）；
+    3. jieba token 边界：LLM 名的连续 token 拼接恰为实体名（防嵌词假阳性，
+       canon_watch._name_in_text 同款纪律；jieba 缺失跳过此级）。
+    同级多实体命中=歧义，不猜（宁缺勿滥，留作者在表单里改）。
+    """
+    table: Dict[str, List[Any]] = {}
     for e in entities:
-        table[e.name or ""] = e
-        for a in (getattr(e, "aliases", None) or []):
-            if a:
-                table[str(a)] = e
-    out = {}
-    for n in names:
-        ent = table.get(str(n or "").strip())
+        ent_names = [str(e.name or "").strip()]  # ⚠ 不可叫 names——会遮蔽同名参数
+        ent_names += [str(a).strip() for a in (getattr(e, "aliases", None) or []) if a]
+        for n in ent_names:
+            if n:
+                table.setdefault(n, []).append(e)
+
+    def _unambiguous(cands: List[Any]) -> Optional[Any]:
+        uniq = {str(e.id): e for e in cands}
+        return next(iter(uniq.values())) if len(uniq) == 1 else None
+
+    def _level2(reported: str) -> Optional[Any]:
+        hits = [
+            e for n, es in table.items()
+            if len(n) >= 2 and (n in reported or reported in n)
+            for e in es
+        ]
+        return _unambiguous(hits)
+
+    def _level3(reported: str) -> Optional[Any]:
+        try:
+            import jieba as _jieba
+
+            tokens = [t for t in _jieba.cut(reported) if t.strip()]
+        except Exception:
+            return None
+        if not tokens:
+            return None
+        accs = set()
+        for i in range(len(tokens)):
+            acc = ""
+            for j in range(i, min(i + 6, len(tokens))):
+                acc += tokens[j]
+                accs.add(acc)
+        hits = [e for n, es in table.items() if len(n) >= 2 and n in accs for e in es]
+        return _unambiguous(hits)
+
+    out: Dict[str, Any] = {}
+    for raw in names:
+        n = str(raw or "").strip()
+        if not n:
+            continue
+        ent = _unambiguous(table.get(n, [])) or _level2(n) or _level3(n)
         if ent is not None:
-            out[str(n)] = ent
+            out[str(raw)] = ent
     return out
 
 

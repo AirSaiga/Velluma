@@ -417,6 +417,13 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
                   <template v-else-if="row.location_name">在{{ row.location_name }}</template>
                   <template v-else>位置未知</template>
                 </span>
+                <!-- 词法兜底 badge（2026-09-02）：位置从事件记录的文字推断，非结构化链接
+                     ——兼作补录建议：点了「补一句」把这个人正式记进事件 -->
+                <span
+                  v-if="row.presence_source === 'lexical'"
+                  class="presence-inferred"
+                  title="这个位置是从事件记录的文字里推断的——世界页补一条正式事件会更准"
+                >据正文推断</span>
               </li>
             </ul>
             <button
@@ -872,6 +879,16 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .presence-where {
   color: var(--text-muted);
   font-size: 0.72rem;
+}
+
+.presence-inferred {
+  color: var(--accent-400, #9685c2);
+  font-size: 0.66rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  line-height: 1.3;
+  opacity: 0.85;
 }
 
 .quick-add {

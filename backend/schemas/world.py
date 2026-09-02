@@ -253,6 +253,9 @@ class ScenePresenceItem(BaseModel):
     alive: bool = True
     location_name: str = ""
     label: str = ""  # "在途（进度 40%）" / "驻留" / "出生" / "已死亡"
+    # 词法兜底标记（2026-09-02）：lexical=位置从事件 note 推断（结构化链接缺失）
+    # ——前端渲染「据正文推断」badge，兼作补录事件参与者的建议通道
+    presence_source: Optional[str] = None
     importance: int = 1
     visibility: str = "public"
 

@@ -116,12 +116,43 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         raw_parts = parsed.get("parts", [])
 
         # ---- 校对：丢弃违规挂件 + 功能槽位规整（source/note 贯通）----
+        # 约束治理一期（2026-09-02）：camera/psych/rehash/beat_overlap 下沉为
+        # 枚举原因的代码闸（violates 只剩 canon/blocker 禁词），丢件落
+        # constraint_events 台账（丢什么、为什么——剂量与服从率度量的数据源）。
+        _DROP_CONSTRAINT_IDS = {
+            "not_dict": "dock-part-shape",
+            "too_short": "dock-part-shape",
+            "overflow_tail": "dock-part-shape",
+            "violates_hard": "dock-banned-words",
+            "camera_stock": "dock-camera-stock",
+            "psych_word": "dock-no-psych",
+            "rehash": "dock-rehash",
+            "beat_overlap": "dock-beat-overlap",
+        }
+
+        def _on_drop(reason: str, text: str = "", outcome: str = "drop") -> None:
+            try:
+                from backend.services.constraints.events import log_constraint_event
+
+                log_constraint_event(
+                    str(bundle.book_id or ""), str(chapter_id),
+                    _DROP_CONSTRAINT_IDS.get(reason, "dock-part-shape"),
+                    outcome, reason=reason,
+                    detail={"text": text[:20], "model": (model_snapshot.get("meta") or {}).get("model_name", "") if isinstance(model_snapshot, dict) else ""},
+                )
+            except Exception:
+                pass  # 埋点绝不阻塞校对环
+
         valid_parts = _finalize_parts(
             raw_parts,
             outline_nearby=outline_nearby,
             reader_expectations=reader_expectations,
             memory_echoes=memory_echoes,
-            violates=lambda t: _violates(t, hard) or _has_camera_stock(t),
+            violates=lambda t: _violates(t, hard),
+            recent_text=recent_text,
+            projections=projections,
+            check_beat_overlap=True,
+            on_drop=_on_drop,
         )
 
         # 挂件产出缓存到世界模型（前端 heartbeat 响应里取）
@@ -223,22 +254,60 @@ def _finalize_parts(
     reader_expectations=None,
     memory_echoes=None,
     violates=None,
+    recent_text: str = "",
+    projections=None,
+    check_beat_overlap: bool = False,
+    on_drop=None,
 ) -> List[Dict]:
     """校对 + 槽位规整 + note 拼装 + 槽位序排序（landing 首位）。
 
-    violates(text) → True 的碎片丢弃（禁词/canon private/陈词嗅探，调用方
-    注入组合判定）。旧形状（无 slot）碎片照常通过：槽位归一 ambient、无
+    violates(text) → True 的碎片丢弃（canon private/blocker 禁词，调用方
+    注入判定）。旧形状（无 slot）碎片照常通过：槽位归一 ambient、无
     note——缓存里的历史零件/旧模型产出零破坏。
+
+    约束治理一期（2026-09-02）：校对环从单一 violates 扩为枚举原因链——
+    camera_stock / psych_word / rehash / beat_overlap 依次判定，on_drop
+    (reason, text[, outcome]) 回调供台账埋点（None = 不埋，纯函数性不变）。
+    reason 枚举：not_dict/too_short/violates_hard/camera_stock/psych_word/
+    rehash/beat_overlap/overflow_head/overflow_tail；overflow_* 的 outcome
+    =trim（过采样配额消化），与 drop=违规 分列（P2-1）。
     """
     icon_map = {"action": "👤", "scene": "⚙️", "line": "💬"}
     valid_parts: List[Dict] = []
-    for p in (raw_parts or [])[:6]:
+
+    def _drop(reason: str, text: str = "", outcome: str = "drop") -> None:
+        if on_drop is not None:
+            try:
+                on_drop(reason, text, outcome)
+            except Exception:
+                pass  # 埋点绝不阻塞校对环
+
+    raw_all = raw_parts or []
+    for overflow in raw_all[6:]:  # 输入截断（P2-1：过采样时代 7+ 枚不再静默消失）
+        _drop("overflow_head", str(getattr(overflow, "get", lambda *_: "")("text") or "")[:20]
+              if isinstance(overflow, dict) else "", outcome="trim")
+    for p in raw_all[:6]:
         if not isinstance(p, dict):
+            _drop("not_dict")
             continue
         text = (p.get("text", "") or "").strip()
         if not text or len(text) < 2:
+            _drop("too_short", text)
             continue
         if violates and violates(text):
+            _drop("violates_hard", text)
+            continue
+        if _has_camera_stock(text):
+            _drop("camera_stock", text)
+            continue
+        if _has_psych_stock(text):
+            _drop("psych_word", text)
+            continue
+        if recent_text and _is_rehash(text, recent_text, projections):
+            _drop("rehash", text)
+            continue
+        if check_beat_overlap and _beats_overlap_hit(text, outline_nearby):
+            _drop("beat_overlap", text)
             continue
         kind = p.get("type", "action")
         # direction 校验：必须是 5 方向之一，否则回退到"环境"（分析面元数据，
@@ -267,6 +336,9 @@ def _finalize_parts(
         })
     # 槽位序排序（landing 首位 → toward_beat → echo → ambient；稳定排序）
     valid_parts.sort(key=lambda p: SOURCE_PRIORITY.get(p["source"], 3))
+    for overflow in valid_parts[4:]:
+        # outcome=trim（P2-1）：保 4 截断是过采样的配额消化，与 drop=违规 分列
+        _drop("overflow_tail", overflow.get("text") or "", outcome="trim")
     return valid_parts[:4]
 
 
@@ -312,10 +384,72 @@ CAMERA_STOCK_PHRASES = (
     "瞳孔", "目光深邃", "目光空洞",
 )
 
+# 心理词族嗅探（2026-09-02 约束治理一期）：prompt 铁律「禁心理描写」的代码
+# 侧执法（同一约束双层执法，registry 用同一 constraint_id 关联——
+# dock-no-psych layers=[prompt, code_gate]）。与 CAMERA_STOCK 同构，小而狠。
+PSYCH_STOCK_PHRASES = (
+    "心中一紧", "感到不安", "心头一沉", "心里发慌", "暗自庆幸",
+    "心中窃喜", "涌起一股", "不由得害怕",
+)
+
 
 def _has_camera_stock(text: str) -> bool:
     """碎片文本是否命中镜头陈词库存（命中即弃，校对环消费）。"""
     return any(w in text for w in CAMERA_STOCK_PHRASES)
+
+
+def _has_psych_stock(text: str) -> bool:
+    """碎片文本是否命中心理描写词族（命中即弃，校对环消费）。"""
+    return any(w in text for w in PSYCH_STOCK_PHRASES)
+
+
+def _is_rehash(text: str, recent_text: str, projections: list) -> bool:
+    """碎片是否照搬推测原文/复述刚写的画面（dock-rehash 代码闸）。
+
+    prompt 侧「不得整句照搬推测/不复述已写」对中档模型服从不足（2026-08-25
+    实测 mimo 把推测逐条压缩成挂件）——下沉为 n-gram 重叠判定：碎片对
+    最近正文或任一推测原文的 3 字片段命中率 ≥0.5（或整串捷径）即判照搬。
+    text_match.matches 共享判据，无素材时返回 False（不误伤）。
+    """
+    from backend.services.adaptive.text_match import matches
+
+    if recent_text and matches(text, recent_text, threshold=0.5):
+        return True
+    for p in (projections or []):
+        if not isinstance(p, dict):
+            continue
+        for b in (p.get("possible_beats") or [])[:2]:
+            if not isinstance(b, dict):
+                continue
+            event_text = str(b.get("event") or "").strip()
+            if event_text and matches(text, event_text, threshold=0.5):
+                return True
+    return False
+
+
+def _beats_overlap_hit(text: str, outline_nearby: list) -> bool:
+    """碎片与就近节拍原文去标点后存在 ≥4 字连续重叠（dock-beat-overlap 闸）。
+
+    抢拍 = 碎片把节拍事件本身的措辞写出来了（「写完它，那一拍就被消费掉」）。
+    供给侧切断（_prebeat_projections）后模型仍看得到就近节拍文本——这是
+    残余风险的确定性兜底。任何 4 字滑窗命中即等价于 ≥4 连续公共子串。
+    """
+    from backend.services.adaptive.text_match import FRAGMENT_INVALID_CHARS
+
+    def _clean(s: str) -> str:
+        return "".join(c for c in (s or "") if c not in FRAGMENT_INVALID_CHARS)
+
+    cleaned = _clean(text)
+    if len(cleaned) < 4:
+        return False
+    for beat in (outline_nearby or []):
+        beat_clean = _clean(str(beat))
+        if not beat_clean:
+            continue
+        for i in range(len(cleaned) - 3):
+            if cleaned[i: i + 4] in beat_clean:
+                return True
+    return False
 
 
 def _violates(text: str, hard: Dict) -> bool:

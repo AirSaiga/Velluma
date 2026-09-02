@@ -95,6 +95,8 @@ export interface ScenePresence {
   alive: boolean
   location_name: string
   label: string
+  /** 词法兜底标记：lexical=位置从事件 note 推断（据正文推断 badge） */
+  presence_source: string | null
   importance: number
   visibility: string
 }

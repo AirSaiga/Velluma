@@ -9,16 +9,32 @@
 
 锁定：
 - 推测 prompt：大纲就近节拍块注入/缺席零变化；系统行场景锚定在位
-- 挂件系统：时态锚定（道具必须在「此刻」）与节拍>推测两条新铁律在位
+- 挂件系统：时态锚定（道具必须在「此刻」）与节拍>推测两条铁律在位
+  （2026-09-02 约束治理一期：_DOCK_GENERATOR_SYSTEM 常量改分节条件拼装，
+  断言从常量改对全素材拼装产物——has_nearby=True 形态；子句级条件化的
+  缺席形态见 test_dock_nearby.py 零大纲用例）
 - stitch：零件落地的「正文事实最高优先」改造出口在位
 """
 from backend.services.prompts.adaptive_prompts import (
     build_continue_prompt,
     build_dock_generator_prompt,
     build_future_projection_prompt,
-    _DOCK_GENERATOR_SYSTEM,
     _FUTURE_PROJECTION_SYSTEM,
 )
+
+
+def _full_dock_system() -> str:
+    """全素材形态（has_nearby=True）的 dock system prompt——原常量断言的替身。"""
+    system, _user = build_dock_generator_prompt(
+        "林尘停下手里的活，在这个世道，这句话",
+        projections=[],
+        nutrients={},
+        hard_constraints={},
+        outline_nearby=["林尘喜欢读书，干着活的期间想到昨晚读到的内容，正在发愣"],
+        reader_expectations=[{"type": "mystery", "description": "那本书的来历", "tension": 7}],
+        memory_echoes=["第三章：扳手砸中脚边铁屑"],
+    )
+    return system
 
 
 class TestProjectionSceneAnchoring:
@@ -53,9 +69,10 @@ class TestProjectionSceneAnchoring:
 
 class TestDockTemporalRules:
     def test_beat_over_projection_rule(self):
-        """节拍 > 推测：冲突时以节拍为准，推测只取情绪。"""
-        assert "节拍 > 推测" in _DOCK_GENERATOR_SYSTEM
-        assert "不取其场景与道具" in _DOCK_GENERATOR_SYSTEM
+        """节拍 > 推测：冲突时以节拍为准，推测只取情绪（有就近节拍形态）。"""
+        system = _full_dock_system()
+        assert "节拍 > 推测" in system
+        assert "不取其场景与道具" in system
 
 
 class TestStitchPartEscapeHatch:
@@ -88,26 +105,29 @@ class TestPerceptionBeatBoundary:
 
     def test_dock_physical_landing_priority(self):
         """第一优先：作者最后一句的物理落点（主动作，非表情非静止）。"""
-        assert "接住作者刚写的" in _DOCK_GENERATOR_SYSTEM
-        assert "物理落点" in _DOCK_GENERATOR_SYSTEM
-        assert "主动发出" in _DOCK_GENERATOR_SYSTEM
+        system = _full_dock_system()
+        assert "接住作者刚写的" in system
+        assert "物理落点" in system
+        assert "主动发出" in system
 
     def test_dock_beat_preservation_test(self):
         """节拍保全检验替换旧对白禁令：写不坏节拍的才是第一步。"""
-        assert "节拍保全检验" in _DOCK_GENERATOR_SYSTEM
-        assert "写不坏节拍的才是第一步" in _DOCK_GENERATOR_SYSTEM
-        assert "在来的路上" in _DOCK_GENERATOR_SYSTEM
-        assert "不许" in _DOCK_GENERATOR_SYSTEM and "已经到达" in _DOCK_GENERATOR_SYSTEM
+        system = _full_dock_system()
+        assert "节拍保全检验" in system
+        assert "写不坏节拍的才是第一步" in system
+        assert "在来的路上" in system
+        assert "不许" in system and "已经到达" in system
 
     def test_dock_prop_two_classes(self):
         """道具两分：氛围件自由生发，上手件须出处（连续性债判据）。"""
-        assert "氛围件" in _DOCK_GENERATOR_SYSTEM
-        assert "上手件" in _DOCK_GENERATOR_SYSTEM
-        assert "连续性债" in _DOCK_GENERATOR_SYSTEM
+        system = _full_dock_system()
+        assert "氛围件" in system
+        assert "上手件" in system
+        assert "连续性债" in system
 
     def test_dock_arrival_exception_noted(self):
         """空间不瞬移括注：抵达即节拍的情形交给保全检验。"""
-        assert "除非抵达本身就是那一拍的事件" in _DOCK_GENERATOR_SYSTEM
+        assert "除非抵达本身就是那一拍的事件" in _full_dock_system()
 
     def test_quota_current_moment_bound(self):
         """方向配额满足域限定：禁止跳到节拍之后凑数。"""

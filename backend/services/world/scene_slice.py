@@ -97,6 +97,21 @@ def _resolve_scene_location(
     return None
 
 
+def _gap_logger(book_id: str, chapter: Any):
+    """词法兜底缺口事件的台账回调（P1-3：数据缺口可度量；失败静默）。"""
+    from backend.services.constraints.events import log_constraint_event
+
+    chapter_id = str(getattr(chapter, "id", "") or "")
+
+    def _log(cid, outcome, reason, detail):
+        try:
+            log_constraint_event(book_id, chapter_id, cid, outcome, reason=reason, detail=detail)
+        except Exception:
+            pass
+
+    return _log
+
+
 async def build_scene_slice(
     db: AsyncSession,
     book_id: str,
@@ -131,6 +146,13 @@ async def build_scene_slice(
     relations = await repo.relations.list_by_book(book_id)
     locations_by_id = {str(loc.id): loc for loc in locations}
     state = compute_world_state_from_events(events, locations_by_id, t, relations)
+    # 词法兜底（2026-09-02 约束治理一期）：与 repo.compute_world_state 同一
+    # 增强函数——本文件三处直调点不做各自 inline（口径漂移的培养基）
+    from backend.services.world.lexical_presence import enrich_state_with_lexical_presence
+
+    enrich_state_with_lexical_presence(
+        state, events, entities, locations_by_id, t, on_event=_gap_logger(book_id, chapter),
+    )
 
     # ---- A4 叙事时间来源可见（docs/foundation-hardening.md §2.2，零行为变化）----
     # max_event：附 time_start 最大事件的摘要（note 优先、event_type 兜底，截 30 字）——
@@ -164,6 +186,8 @@ async def build_scene_slice(
                 "alive": bool(cs.get("alive")),
                 "location_name": (loc.name or "") if loc is not None else "",
                 "label": str(cs.get("label") or ""),
+                # 词法兜底标记（lexical=据正文推断，前端渲染补录建议 badge）
+                "presence_source": str(cs.get("presence_source") or "") or None,
                 "importance": int(getattr(ent, "importance", 1) or 1),
                 "visibility": getattr(ent, "visibility", "public") or "public",
                 "_location_id": loc_id,
@@ -411,10 +435,18 @@ async def build_context_card(
         alive: Optional[bool] = None
         location_name = ""
         label = ""
+        presence_source = ""
         if ent.entity_type == "character":
             locations = await repo.locations.list_by_book(book_id)
             locations_by_id = {str(l.id): l for l in locations}
             state = compute_world_state_from_events(events, locations_by_id, t)
+            # 词法兜底（同 build_scene_slice：三处直调点共用同一增强函数）
+            from backend.services.world.lexical_presence import enrich_state_with_lexical_presence
+
+            enrich_state_with_lexical_presence(
+                state, events, await repo.entities.list_by_book(book_id), locations_by_id, t,
+                on_event=_gap_logger(book_id, chapter),
+            )
             cs = next(
                 (c for c in state.get("character_states", []) if str(c.get("entity_id")) == eid),
                 None,
@@ -424,6 +456,7 @@ async def build_context_card(
                 loc_obj = locations_by_id.get(str(cs.get("location_id") or ""))
                 location_name = (loc_obj.name or "") if loc_obj is not None else ""
                 label = str(cs.get("label") or "")
+                presence_source = str(cs.get("presence_source") or "")
         return {
             "kind": "entity",
             "id": eid,
@@ -434,6 +467,7 @@ async def build_context_card(
             "alive": alive,
             "location_name": location_name,
             "label": label,
+            "presence_source": presence_source or None,
             "chronicle": _entity_chronicle(events, eid, t),
         }
 
@@ -442,6 +476,13 @@ async def build_context_card(
     locations_by_id = {str(l.id): l for l in locations}
     relations = await repo.relations.list_by_book(book_id)
     state = compute_world_state_from_events(events, locations_by_id, t, relations)
+    # 词法兜底（第三处直调点，同口径）
+    from backend.services.world.lexical_presence import enrich_state_with_lexical_presence
+
+    enrich_state_with_lexical_presence(
+        state, events, await repo.entities.list_by_book(book_id), locations_by_id, t,
+        on_event=_gap_logger(book_id, chapter),
+    )
     recent: List[Dict[str, Any]] = []
     for ev in _events_sorted_desc(events):
         if (ev.time_start or 0) > t:
