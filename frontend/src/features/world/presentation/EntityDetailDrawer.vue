@@ -335,7 +335,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
       <div v-else class="edd-nofields">还没有涉及其的事件。用下方快捷动作记录第一条。</div>
     </div>
 
-    <!-- 读者认知（C2 §5.3：实体信息面——表里两面就地编辑，折叠态默认） -->
+    <!-- 读者认知（C2 §5.3：实体信息面——表里两面就地编辑，折叠态默认；09-03 文案对齐 truth-ux 稿） -->
     <details class="edd-canon">
       <summary class="edd-sec-title">读者认知{{ overlay ? ` · ${VIS_LABELS[overlay.visibility] || overlay.visibility}` : '' }}</summary>
       <template v-if="overlay">
@@ -349,15 +349,15 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
           >{{ lbl }}</button>
         </div>
         <label class="edd-canon-field">
-          <span class="edd-canon-label">里 · 作者真相（绝不许在正文直接写出）</span>
+          <span class="edd-canon-label">实际真相（里）——AI 死守，绝不写进正文</span>
           <textarea v-autogrow rows="2" :value="overlay.canon_text" placeholder="此人此物的真相……" @change="(e) => saveOverlayField('canon_text', (e.target as HTMLTextAreaElement).value)"></textarea>
         </label>
         <label class="edd-canon-field">
-          <span class="edd-canon-label">表 · 读者所见</span>
+          <span class="edd-canon-label">读者目前看到的版本（表）</span>
           <textarea v-autogrow rows="2" :value="overlay.public_text" placeholder="读者目前看到的描述（可空）" @change="(e) => saveOverlayField('public_text', (e.target as HTMLTextAreaElement).value)"></textarea>
         </label>
         <label class="edd-canon-field">
-          <span class="edd-canon-label">揭示计划</span>
+          <span class="edd-canon-label">打算怎么抖出来</span>
           <input
             class="edd-canon-input"
             :value="overlay.reveal_plan"
@@ -366,7 +366,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
           />
         </label>
         <label class="edd-canon-field edd-canon-field--half">
-          <span class="edd-canon-label">预期揭示章</span>
+          <span class="edd-canon-label">第几章揭</span>
           <input
             class="edd-canon-input"
             type="number" min="1"
@@ -377,10 +377,10 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
         </label>
       </template>
       <div v-else class="edd-canon-empty">
-        <p>此人尚未入正史。</p>
+        <p>此人还没有真相记录。</p>
         <div class="edd-canon-empty-actions">
-          <button class="edd-act" @click="createOverlay('private')">设为秘密</button>
-          <button class="edd-act" @click="createOverlay('public')">公开设定</button>
+          <button class="edd-act" @click="createOverlay('private')">记为秘密</button>
+          <button class="edd-act" @click="createOverlay('public')">记为公开事实</button>
         </div>
       </div>
     </details>

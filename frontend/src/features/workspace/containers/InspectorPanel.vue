@@ -546,7 +546,7 @@ async function handleResetChapterStyle() {
               <Icon name="truth" :size="14" />
               <span>在世界页查看真相</span>
             </button>
-            <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划 / 因果图谱</p>
+            <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划</p>
           </section>
         </template>
       </div>

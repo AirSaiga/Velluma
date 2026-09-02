@@ -33,7 +33,6 @@ import ReaderMirrorModal from '../presentation/ReaderMirrorModal.vue'
 import WorldviewModal from '../presentation/WorldviewModal.vue'
 import CanonSection from '../presentation/CanonSection.vue'
 import CanonTruthDetailDrawer from '../presentation/CanonTruthDetailDrawer.vue'
-import CausalityGraphModal from '../presentation/CausalityGraphModal.vue'
 import BatchAcceptModal from '../presentation/BatchAcceptModal.vue'
 import ReadBookModal from '../presentation/ReadBookModal.vue'
 import {
@@ -137,9 +136,10 @@ const selectedForeshadowId = ref<string | null>(null)
 const showExpectations = ref(false)
 const showWorldview = ref(false)
 
-// ===== C1 真相层（Canon 融入）：真相详情抽屉 / 因果图谱模态（docs/canon-world-fusion.md）=====
+// ===== C1 真相层（Canon 融入）：真相详情抽屉（docs/canon-world-fusion.md）=====
+// 2026-09-03：因果图谱模态退役（建边零入口——边恒为零，图谱永远是一屏孤立圆点；
+// 后端边表/CRUD 保留零数据风险），设计稿 docs/design/truth-ux/
 const selectedTruthId = ref<string | null>(null)
-const showCanonGraph = ref(false)
 const { nodes: canonNodes, ensureLoaded: ensureCanonLoaded } = useCanon()
 
 /** 期待摘要（侧栏「期待」分组：活跃 N · 该收了 M；账本本体在 ReaderMirrorModal） */
@@ -954,13 +954,12 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           @close="selectedForeshadowId = null"
         />
 
-        <!-- 真相详情抽屉（C1：账本行/因果图谱「打开真相条目」唤起——表里两面就地编辑） -->
+        <!-- 真相详情抽屉（C1：账本行唤起——表里两面就地编辑） -->
         <CanonTruthDetailDrawer
           v-if="selectedTruthId"
           :book-id="bookId"
           :node-id="selectedTruthId"
           @close="selectedTruthId = null"
-          @open-graph="showCanonGraph = true"
         />
       </div>
 
@@ -985,7 +984,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           <Icon name="sparkles" :size="15" />
           <span class="ar-n">{{ mirrorSummary?.active ?? 0 }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'canon' }" title="真相——表（读者所见）与里（作者真相）的账本" @click="togglePanel('canon')">
+        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'canon' }" title="真相账本——读者知道与不知道的事，秘密 AI 替你守住" @click="togglePanel('canon')">
           <Icon name="truth" :size="15" />
           <span class="ar-n">{{ canonNodes.length }}</span>
         </button>
@@ -1086,7 +1085,6 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         <CanonSection
           :book-id="bookId"
           @select="(id: string) => (selectedTruthId = id)"
-          @open-graph="showCanonGraph = true"
         />
         </template>
 
@@ -1313,19 +1311,6 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
       v-if="showWorldview"
       :book-id="bookId"
       @close="showWorldview = false"
-    />
-
-    <!-- 因果图谱（C1：只读透镜——真相账本底部/详情「关联」唤起，随旧 CanonView 降格迁入） -->
-    <CausalityGraphModal
-      v-if="showCanonGraph"
-      :book-id="bookId"
-      @close="showCanonGraph = false"
-      @open-truth="
-        (id: string) => {
-          showCanonGraph = false
-          selectedTruthId = id
-        }
-      "
     />
 
     <!-- A5b 批量裁决模态（待确认分区「全部采纳」唤起） -->

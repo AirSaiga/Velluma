@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>场景 A · 真相账本——价值常驻</title>
+<style>
+  :root {
+    --paper: #f1e9d8; --paper-2: #ece4d3; --paper-3: #f7f1e3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd;
+    --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c; --pine: #5f7d5a;
+    --zhu: #a63e2a; --zhu-soft: rgba(166, 62, 42, .08); --zhu-line: rgba(166, 62, 42, .5);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); color: var(--ink); background: var(--paper); padding: 0 0 80px; }
+
+  .screen-wrap { padding: 40px 28px 8px; }
+  .cap { max-width: 1180px; margin: 0 auto 14px; }
+  .cap .k { font-size: 10px; letter-spacing: .35em; color: var(--gold); }
+  .cap h2 { font-family: var(--serif); font-size: 20px; letter-spacing: .06em; margin: 4px 0 6px; }
+  .cap p { font-size: 12px; color: var(--ink-3); line-height: 1.9; max-width: 780px; }
+  .cap p b { color: var(--ink-2); }
+
+  .stage { max-width: 1180px; margin: 0 auto; }
+  .frame {
+    position: relative; height: 640px; overflow: hidden; border-radius: 10px;
+    border: 1px solid var(--rule); box-shadow: 0 18px 50px rgba(96, 72, 36, .16);
+    background:
+      radial-gradient(ellipse at 25% 20%, rgba(120, 90, 40, .06), transparent 55%),
+      radial-gradient(ellipse at 78% 82%, rgba(120, 90, 40, .07), transparent 50%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .014) 2px 3px),
+      var(--paper);
+  }
+  .frame::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 150px rgba(96, 72, 36, .24), inset 0 0 36px rgba(96, 72, 36, .1);
+  }
+
+  /* ===== 画布上的既有要素（简化示意） ===== */
+  .atlas-title { position: absolute; left: 40px; top: 66px; pointer-events: none; font-family: var(--serif); color: rgba(74,68,56,.26); }
+  .atlas-title .zh { font-size: 34px; font-weight: 700; letter-spacing: .3em; }
+  .atlas-title .en { font-size: 9px; letter-spacing: .5em; margin-top: 5px; }
+  .node { position: absolute; transform: translate(-50%, -50%); text-align: center; z-index: 5; }
+  .node .seal { width: 11px; height: 11px; margin: 0 auto; border-radius: 50%; border: 2px solid var(--paper); outline: 1.5px solid currentColor; background: currentColor; }
+  .node .nl { display: inline-block; margin-top: 4px; padding: 1px 7px; font-family: var(--serif); font-size: 11.5px; color: var(--ink); background: rgba(244,238,225,.78); border-radius: 4px; position: relative; }
+  .node .nl .zd { position: absolute; right: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--zhu); }
+  .node.ochre { color: var(--ochre); } .node.pine { color: var(--pine); } .node.blue { color: var(--blue); }
+
+  .topbar {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 20;
+    background: rgba(244,238,225,.92); border: 1px solid var(--rule); border-radius: 999px;
+    padding: 5px 8px; box-shadow: 0 6px 24px rgba(96,72,36,.16); font-size: 12px; color: var(--ink-2);
+  }
+  .topbar .tb { padding: 6px 13px; border-radius: 999px; }
+  .topbar .sep { width: 1px; height: 15px; background: var(--rule); margin: 0 3px; }
+
+  /* ===== 右缘图标栏 ===== */
+  .rail {
+    position: absolute; right: 0; top: 56px; bottom: 70px; width: 46px; z-index: 18;
+    background: rgba(236,228,211,.94); border-left: 1px solid var(--rule);
+    display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 1px;
+  }
+  .rail button {
+    width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent;
+    color: var(--ink-3); font-size: 14px; cursor: pointer; position: relative;
+  }
+  .rail button.on { background: rgba(166,62,42,.12); color: var(--zhu); }
+  .rail button .n { position: absolute; top: 1px; right: 3px; font-size: 8.5px; color: var(--gold); font-family: var(--serif); }
+  .rail button.on .n { color: var(--zhu); font-weight: 700; }
+  .rail .rsep { width: 20px; height: 1px; background: var(--rule); margin: 5px 0; }
+
+  /* ===== 真相账本抽屉（340px） ===== */
+  .drawer {
+    position: absolute; right: 46px; top: 56px; bottom: 70px; width: 340px; z-index: 17;
+    background: var(--paper-2); border-left: 1px solid var(--rule);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .d-head { padding: 12px 14px 0; }
+  .d-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .d-title .mark { width: 8px; height: 8px; border-radius: 50%; background: var(--zhu); box-shadow: 0 0 0 2px rgba(166,62,42,.14); }
+  .d-title .cnt { margin-left: auto; font-size: 10px; color: var(--ink-3); font-family: ui-monospace, monospace; }
+  /* 新增：常驻价值句 */
+  .d-value {
+    margin-top: 6px; font-size: 10.5px; line-height: 1.8; color: var(--ink-3);
+  }
+  .d-value b { color: var(--zhu); font-weight: 600; }
+
+  .d-filter { display: flex; gap: 5px; padding: 10px 14px 8px; }
+  .chip { font-size: 10px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--rule); background: rgba(247,241,227,.7); color: var(--ink-2); cursor: pointer; }
+  .chip.on { background: var(--violet); border-color: var(--violet); color: #f8f5ee; }
+
+  .d-list { flex: 1; overflow-y: auto; padding: 0 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .row {
+    background: rgba(247,241,227,.85); border: 1px solid var(--rule); border-left-width: 2.5px;
+    border-radius: 7px; padding: 8px 10px 7px; cursor: pointer;
+  }
+  .row.private { border-left-color: var(--zhu); }
+  .row.partial { border-left-color: var(--violet); }
+  .row.public { border-left-color: var(--pine); }
+  .row .r1 { display: flex; align-items: center; gap: 6px; }
+  .row .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .row .dot.private { background: var(--zhu); } .row .dot.partial { background: var(--violet); } .row .dot.public { background: var(--pine); }
+  .row .nm { font-family: var(--serif); font-size: 12.5px; color: var(--ink); }
+  .row .tp { font-size: 9px; color: #f8f5ee; border-radius: 3px; padding: 1px 5px; flex-shrink: 0; }
+  .row .rv { margin-left: auto; font-size: 9.5px; color: var(--gold); font-family: var(--serif); flex-shrink: 0; }
+  .row .r2 { margin-top: 3px; font-size: 11px; color: var(--ink-2); line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .biao-neq { font-size: 9px; color: var(--violet); border: 1px solid rgba(111,95,158,.4); border-radius: 3px; padding: 0 4px; flex-shrink: 0; }
+
+  .d-foot { padding: 8px 14px 12px; border-top: 1px dashed var(--rule); }
+  .add-btn {
+    width: 100%; padding: 7px 0; font-size: 11.5px; font-family: inherit; color: var(--zhu);
+    background: transparent; border: 1px dashed rgba(166,62,42,.5); border-radius: 8px; cursor: pointer;
+  }
+  .sub-acts { margin-top: 8px; text-align: center; font-size: 10px; color: var(--ink-3); }
+  .sub-acts a { color: var(--ink-3); text-decoration: none; border-bottom: 1px dotted var(--ink-3); cursor: pointer; }
+  .sub-acts a:hover { color: var(--ink-2); }
+  .sub-acts .sep { margin: 0 7px; color: var(--rule); }
+
+  /* 批注 */
+  .ann { max-width: 1180px; margin: 18px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .ann { grid-template-columns: 1fr; } }
+  .ann .card { border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,252,244,.6); padding: 16px 18px 13px; }
+  .ann .card .t { font-family: var(--serif); font-size: 14px; margin-bottom: 6px; }
+  .ann .card .t .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }
+  .ann .card ul { list-style: none; font-size: 11.5px; color: var(--ink-2); line-height: 2; }
+  .ann .card ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+  .ann .card ul li s { color: var(--ink-3); text-decoration-color: rgba(166,62,42,.5); }
+  .ann .card ul li b { font-family: var(--serif); }
+
+  .foot { max-width: 1180px; margin: 26px auto 0; font-size: 10.5px; color: var(--ink-3); line-height: 1.9; }
+</style>
+</head>
+<body>
+<div class="screen-wrap">
+  <div class="cap">
+    <div class="k">SCENE A</div>
+    <h2>真相账本——价值常驻，噪音收编</h2>
+    <p>
+      翻账的作者第一眼看到「记这个有什么用」，而不是一串状态点。过滤轴（秘密/半露/公开）与行结构不动；
+      新增的只有标题下一行小字，删掉的是底部永远画不出图的「查看因果图谱 ↗」。
+      图中舆图名签右肩的朱点与账本的朱点同一语义——谁身上压着秘密，扫一眼便知。
+    </p>
+  </div>
+  <div class="stage">
+    <div class="frame">
+      <div class="atlas-title">
+        <div class="zh">最终武装</div>
+        <div class="en">THE LAST ARMAMENT</div>
+      </div>
+
+      <div class="node ochre" style="left: 24%; top: 42%;"><div class="seal"></div><span class="nl">林尘<span class="zd"></span></span></div>
+      <div class="node blue" style="left: 46%; top: 30%;"><div class="seal"></div><span class="nl">流光<span class="zd"></span></span></div>
+      <div class="node pine" style="left: 38%; top: 62%;"><div class="seal"></div><span class="nl">北岸要塞</span></div>
+
+      <div class="topbar">
+        <span class="tb">记一笔</span><span class="tb">地点</span><span class="tb">实体</span><span class="tb">世界观</span><span class="sep"></span><span class="tb">⋯</span>
+      </div>
+
+      <div class="rail">
+        <button title="待确认">✓<span class="n">2</span></button>
+        <button title="伏笔">⚑<span class="n">5</span></button>
+        <button title="期待">☆</button>
+        <button class="on" title="真相账本——读者知道与不知道的事，秘密 AI 替你守住">◉<span class="n">4</span></button>
+        <div class="rsep"></div>
+        <button title="地点">⌖</button>
+        <button title="事件">§</button>
+        <button title="角色">♟</button>
+      </div>
+
+      <!-- 真相账本抽屉 -->
+      <div class="drawer">
+        <div class="d-head">
+          <div class="d-title"><span class="mark"></span>真相<span class="cnt">4</span></div>
+          <div class="d-value">记在这里的秘密，<b>AI 写作时替你守住</b>——不剧透、防写漏、到点提醒该抖了。</div>
+        </div>
+
+        <div class="d-filter">
+          <button class="chip on">全部 4</button>
+          <button class="chip">秘密 2</button>
+          <button class="chip">半露 1</button>
+          <button class="chip">公开 1</button>
+        </div>
+
+        <div class="d-list">
+          <div class="row private">
+            <div class="r1">
+              <span class="dot private"></span>
+              <span class="nm">林尘</span>
+              <span class="tp" style="background: var(--ochre);">角色</span>
+              <span class="rv">第 30 章揭</span>
+            </div>
+            <div class="r2">统合局局长的私生子，生母因「素壤计划」被灭口</div>
+          </div>
+          <div class="row private">
+            <div class="r1">
+              <span class="dot private"></span>
+              <span class="nm">流光</span>
+              <span class="tp" style="background: var(--blue);">物件</span>
+            </div>
+            <div class="r2">驾驶舱里从来没有坐过人类驾驶员</div>
+          </div>
+          <div class="row partial">
+            <div class="r1">
+              <span class="dot partial"></span>
+              <span class="nm">素壤计划</span>
+              <span class="tp" style="background: var(--violet);">叙事</span>
+              <span class="biao-neq">表≠里</span>
+            </div>
+            <div class="r2">官方口径是塌方事故，实际是活体实验外泄</div>
+          </div>
+          <div class="row public">
+            <div class="r1">
+              <span class="dot public"></span>
+              <span class="nm">北岸要塞陷落</span>
+              <span class="tp" style="background: var(--pine);">叙事</span>
+            </div>
+            <div class="r2">第 12 章已写给读者——已成事实，AI 必须遵守</div>
+          </div>
+        </div>
+
+        <div class="d-foot">
+          <button class="add-btn">＋ 记一条真相</button>
+          <div class="sub-acts">
+            <a title="从最新有正文的章节抽取真相候选，先进待确认池，✓ 才入账">从最近章节找漏记的真相</a><span class="sep">·</span><a title="把旧条目按名字挂到世界对象——挂上后对象改名将跟随">旧条目挂接到世界对象</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批注 -->
+  <div class="ann">
+    <div class="card">
+      <div class="t"><span class="sw" style="background: var(--pine);"></span>新增（只有两处）</div>
+      <ul>
+        <li><b>常驻价值句</b>——「记在这里的秘密，AI 写作时替你守住——不剧透、防写漏、到点提醒该抖了」。三个承诺都有既有实现背书（secrets 通道 / 完稿体检比对 / 感知带揭示临近），无虚词。</li>
+        <li><b>半露行「表≠里」小标</b>——半露的本义一眼可辨，不必点开猜。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="t"><span class="sw" style="background: var(--zhu);"></span>收编与摘除</div>
+      <ul>
+        <li><s>查看因果图谱 ↗</s> 摘除——建边零入口，图谱永远是一屏孤立圆点（见 index 病因一）。</li>
+        <li><s>⧉ 从章节提取候选 / ⇄ 迁入世界对象</s> 两个小按钮收为小字行——主按钮只剩「＋ 记一条真相」。</li>
+        <li><s>→30章</s> 改 <b>第 30 章揭</b>——monospace 箭头换成作者语言。</li>
+        <li>行摘要行 =「里」的首行（现状即如此，本稿只是用真实内容示例）。</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="foot">
+    交互零新增学习成本：过滤 chips、行点击开详情、句子优先录入全部保持现状。空态文案维持现版
+    （「还没有记录真相——秘而不宣的身世、读者尚不知道的事实，先记在这里」），它本就是全界面最说人话的一段。
+  </p>
+</div>
+</body>
+</html>

@@ -2,6 +2,10 @@
 /**
  * 真相账本侧栏分组（C1：Canon 融入世界页——信息层账本，替代旧 CanonView 节点列表 tab）。
  *
+ * 2026-09-03 人话化重修（设计稿 docs/design/truth-ux/）：标题下常驻一句价值句
+ * （记在这里的秘密 AI 替你守住）；次动作（从章节找漏记/旧条目挂接）收为小字行；
+ * 底部「查看因果图谱 ↗」入口摘除——建边零入口，图谱永远是一屏孤立圆点。
+ *
  * 主过滤轴 = 表里三态（全部/秘密/半露/公开），类型是行上的次级徽标——作者翻这本账
  * 时的问题是「读者还不知道什么」，不是「这是角色还是物件」。
  * 句子优先录入：一句话即「里」的全文，Enter 建条并开详情（C1 无对象挂接，
@@ -20,7 +24,6 @@ const props = defineProps<{ bookId: string }>()
 
 const emit = defineEmits<{
   select: [nodeId: string]
-  'open-graph': []
 }>()
 
 const { nodes, ensureLoaded, refresh: refreshCanon, createNode, loading } = useCanon()
@@ -182,10 +185,11 @@ async function submitAdd() {
 <template>
   <div class="side-section">
     <div class="side-title">
-      <span class="cs-mark" title="真相——表（读者所见）与里（作者真相）的账本"></span>
+      <span class="cs-mark" title="真相账本——读者知道与不知道的事，秘密 AI 替你守住"></span>
       <span>真相</span>
       <span class="side-count">{{ counts.all }}</span>
     </div>
+    <p class="cs-value">记在这里的秘密，AI 写作时替你守住——不剧透、防写漏、到点提醒该抖了。</p>
 
     <div v-if="counts.all" class="cs-filter">
       <button
@@ -215,7 +219,8 @@ async function submitAdd() {
             <span class="cs-type" :style="{ background: NODE_TYPE_COLORS[n.type] || '#6b7280' }">
               {{ typeBadge(n) }}
             </span>
-            <span v-if="n.expected_reveal_chapter" class="cs-reveal">→{{ n.expected_reveal_chapter }}章</span>
+            <span v-if="n.visibility === 'partial'" class="cs-biao-neq" title="读者见过伪装版——表里两面都要维护">表≠里</span>
+            <span v-if="n.expected_reveal_chapter" class="cs-reveal">第 {{ n.expected_reveal_chapter }} 章揭</span>
           </div>
           <div v-if="n.canon_text" class="cs-what">{{ n.canon_text }}</div>
         </div>
@@ -240,9 +245,21 @@ async function submitAdd() {
         @blur="submitAdd"
       />
       <template v-else>
-        <button class="cs-add-btn" @click="startAdd">＋ 记一条真相</button>
-        <button class="cs-add-btn cs-add-btn--migrate" :disabled="extracting" title="从最新有正文的章节抽取真相候选——先进待确认池，✓ 才入账" @click="extractToInbox">{{ extracting ? '提取中…' : '⧉ 从章节提取候选' }}</button>
-        <button class="cs-add-btn cs-add-btn--migrate" title="把旧 canon 条目按名字挂到世界对象/伏笔账本——挂上后实体改名会跟随" @click="startMigrate">⇄ 迁入世界对象</button>
+        <button class="cs-add-btn cs-add-btn--main" @click="startAdd">＋ 记一条真相</button>
+        <div class="cs-sub-acts">
+          <button
+            class="cs-sub-act"
+            :disabled="extracting"
+            title="从最新有正文的章节抽取真相候选——先进待确认池，✓ 才入账"
+            @click="extractToInbox"
+          >{{ extracting ? '正在找…' : '从最近章节找漏记的真相' }}</button>
+          <span class="cs-sub-sep">·</span>
+          <button
+            class="cs-sub-act"
+            title="把旧条目按名字挂到世界对象/伏笔账本——挂上后对象改名将跟随"
+            @click="startMigrate"
+          >旧条目挂接到世界对象</button>
+        </div>
       </template>
     </div>
 
@@ -268,10 +285,6 @@ async function submitAdd() {
       </template>
       <div v-else class="side-empty">没有可迁移的条目——都挂好了。</div>
     </div>
-
-    <button class="cs-graph" title="因果关系的只读透镜——只看不编" @click="emit('open-graph')">
-      查看因果图谱 ↗
-    </button>
   </div>
 </template>
 
@@ -306,6 +319,15 @@ async function submitAdd() {
   background: #a63e2a;
   box-shadow: 0 0 0 2px rgba(166, 62, 42, 0.14);
   flex-shrink: 0;
+}
+
+/* 常驻价值句（2026-09-03 人话化重修：翻账第一眼看到「记这个有什么用」） */
+.cs-value {
+  margin: 0;
+  padding: 0 0.125rem 0.25rem;
+  font-size: 0.625rem;
+  line-height: 1.7;
+  color: var(--text-muted);
 }
 
 .cs-filter {
@@ -399,7 +421,16 @@ async function submitAdd() {
   flex-shrink: 0;
   font-size: 0.625rem;
   color: var(--accent-500, #b08d3e);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+}
+/* 半露小标：表里不一一眼可辨，不必点开猜 */
+.cs-biao-neq {
+  flex-shrink: 0;
+  font-size: 0.5625rem;
+  color: #7c5faf;
+  border: 1px solid rgba(124, 95, 175, 0.4);
+  border-radius: 0.1875rem;
+  padding: 0 0.25rem;
 }
 .cs-what {
   font-size: 0.6875rem;
@@ -434,6 +465,12 @@ async function submitAdd() {
   transition: all 0.12s ease;
 }
 .cs-add-btn:hover { background: rgba(166, 62, 42, 0.08); }
+/* 主按钮独占整行：账本只剩这一个主动作 */
+.cs-add-btn--main {
+  width: 100%;
+  justify-content: center;
+  padding: 6px 0;
+}
 .cs-add-input {
   width: 100%;
   box-sizing: border-box;
@@ -447,26 +484,26 @@ async function submitAdd() {
   outline: none;
 }
 
-.cs-graph {
-  display: block;
-  width: 100%;
-  padding: 5px 0;
-  font-size: 10.5px;
-  font-family: inherit;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-top: 1px dashed var(--border-color);
-  cursor: pointer;
-  transition: color 0.12s ease;
-}
-.cs-graph:hover { color: var(--text-primary); }
-
-.cs-add-btn--migrate {
-  margin-left: 6px;
+/* 次动作收为小字行（提取候选/迁移挂接——低频，不占按钮位） */
+.cs-sub-acts {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 10px;
   color: var(--text-muted);
-  border-color: var(--border-color);
 }
+.cs-sub-act {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 10px;
+  font-family: inherit;
+  color: var(--text-muted);
+  border-bottom: 1px dotted var(--text-muted);
+  cursor: pointer;
+}
+.cs-sub-act:hover:not(:disabled) { color: var(--text-secondary); }
+.cs-sub-act:disabled { cursor: default; opacity: 0.6; }
+.cs-sub-sep { margin: 0 7px; color: var(--border-color); }
 
 /* C2 迁移面板 */
 .cs-migrate {

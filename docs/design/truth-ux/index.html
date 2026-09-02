@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>真相层 UX 重修 · 设计稿——把「AI 替你守住」写到台面上</title>
+<style>
+  :root {
+    --paper: #f4eee1; --paper-2: #ece4d3; --paper-3: #f7f1e3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd; --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c; --pine: #5f7d5a;
+    --zhu: #a63e2a; --zhu-soft: rgba(166,62,42,.08); --zhu-line: rgba(166,62,42,.5);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans); color: var(--ink); min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(120, 90, 40, .05), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .012) 2px 3px),
+      var(--paper);
+    padding: 56px 24px 64px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .over { font-size: 10px; letter-spacing: .42em; color: var(--gold); text-indent: .42em; text-align: center; }
+  h1 { font-family: var(--serif); font-size: 30px; letter-spacing: .1em; text-align: center; margin-top: 10px; }
+  .lede { text-align: center; color: var(--ink-3); font-size: 13px; line-height: 1.9; max-width: 720px; margin: 14px auto 0; }
+  .lede b { color: var(--ink-2); }
+  .orn { display: block; margin: 20px auto 34px; width: 120px; color: rgba(110, 85, 45, .5); }
+
+  h3.sec { font-family: var(--serif); font-size: 17px; letter-spacing: .12em; margin: 40px 0 6px; }
+  h3.sec small { font-size: 10px; letter-spacing: .32em; color: var(--gold); display: block; margin-bottom: 4px; font-family: var(--sans); }
+  .sec-p { font-size: 12.5px; color: var(--ink-2); line-height: 2; max-width: 860px; }
+  .sec-p b { font-family: var(--serif); }
+
+  /* 诊断三卡 */
+  .diag { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+  @media (max-width: 900px) { .diag { grid-template-columns: 1fr; } }
+  .diag .d-card { border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,252,244,.6); padding: 16px 18px 14px; border-top: 3px solid var(--zhu); }
+  .diag .d-card .n { font-size: 10px; letter-spacing: .3em; color: var(--zhu); margin-bottom: 6px; }
+  .diag .d-card .t { font-family: var(--serif); font-size: 15px; margin-bottom: 6px; }
+  .diag .d-card p { font-size: 11.5px; color: var(--ink-2); line-height: 1.9; }
+  .diag .d-card p b { color: var(--zhu); }
+  .diag .d-card code { font-family: ui-monospace, monospace; font-size: 10px; color: var(--blue); background: rgba(74,107,138,.08); border-radius: 4px; padding: 1px 5px; }
+  .diag-note { margin-top: 12px; border: 1px dashed var(--rule); border-radius: 10px; padding: 12px 16px; font-size: 12px; color: var(--ink-2); line-height: 2; background: rgba(255,252,244,.4); }
+  .diag-note b { font-family: var(--serif); color: var(--ochre); }
+
+  /* 立论 */
+  .thesis { margin-top: 16px; border: 1px solid var(--zhu-line); border-radius: 12px; background: var(--zhu-soft); padding: 20px 24px 16px; text-align: center; }
+  .thesis .q { font-family: var(--serif); font-size: 19px; letter-spacing: .06em; line-height: 1.9; }
+  .thesis .q b { color: var(--zhu); }
+  .thesis .a { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; }
+  .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  @media (max-width: 900px) { .principles { grid-template-columns: 1fr; } }
+  .principles .p-card { border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,252,244,.6); padding: 14px 16px 12px; }
+  .principles .p-card .t { font-family: var(--serif); font-size: 13.5px; margin-bottom: 4px; }
+  .principles .p-card p { font-size: 11.5px; color: var(--ink-2); line-height: 1.9; }
+
+  /* 表 */
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; background: rgba(255,252,244,.55); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  th { font-size: 10.5px; letter-spacing: .18em; color: var(--ink-3); text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); background: rgba(236,228,211,.6); font-weight: 600; }
+  td { padding: 9px 14px; border-bottom: 1px solid rgba(221,210,189,.55); color: var(--ink-2); line-height: 1.8; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td code { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--blue); background: rgba(74,107,138,.08); border-radius: 4px; padding: 1px 5px; }
+  .tag-keep, .tag-retire, .tag-reword { display: inline-block; font-size: 10px; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  .tag-keep { color: var(--pine); border: 1px solid var(--pine); }
+  .tag-retire { color: var(--zhu); border: 1px solid var(--zhu); }
+  .tag-reword { color: var(--gold); border: 1px solid var(--gold); }
+  td .old { color: var(--ink-3); text-decoration: line-through; text-decoration-color: rgba(166,62,42,.45); }
+  td .new { font-family: var(--serif); color: var(--ink); }
+
+  /* 场景卡 */
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-top: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: rgba(255,252,244,.6); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 20px 18px; display: flex; flex-direction: column; transition: box-shadow .2s ease, transform .2s ease; }
+  .card:hover { box-shadow: 0 10px 30px rgba(96,72,36,.14); transform: translateY(-2px); }
+  .card .tag { font-size: 10px; letter-spacing: .3em; margin-bottom: 8px; }
+  .card.a .tag { color: var(--zhu); } .card.b .tag { color: var(--ochre); }
+  .card h2 { font-family: var(--serif); font-size: 19px; letter-spacing: .06em; }
+  .card .pitch { font-size: 12px; color: var(--ink-2); margin: 8px 0 12px; line-height: 1.7; }
+  .card ul { list-style: none; font-size: 11px; color: var(--ink-3); line-height: 1.9; flex: 1; }
+  .card ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+  .card a.open { margin-top: 14px; display: block; text-align: center; text-decoration: none; font-size: 12px; padding: 8px 0; border-radius: 7px; border: 1px solid var(--rule); color: var(--ink-2); }
+  .card a.open:hover { border-color: var(--zhu); color: var(--zhu); }
+
+  /* 流程 */
+  .flow { border-left: 3px solid var(--gold); background: rgba(255,252,244,.55); border-radius: 0 10px 10px 0; padding: 14px 20px; margin-top: 12px; font-size: 12.5px; line-height: 2; color: var(--ink-2); }
+  .flow b { font-family: var(--serif); }
+  .flow .step { color: var(--gold); font-family: ui-monospace, monospace; font-size: 11px; margin-right: 6px; }
+
+  .foot { margin-top: 34px; text-align: center; font-size: 10.5px; color: var(--ink-3); line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="over">TRUTH LAYER · UX REDESIGN</div>
+  <h1>把「AI 替你守住」写到台面上</h1>
+  <p class="lede">
+    真相层对作者的价值，一句话就说得清：<b>记在这里的秘密，AI 写作时绝不剧透、盯着你别写漏、到点提醒该抖了。</b>
+    现状把这句话埋在了十一个系统词汇和一个永远长不出内容的图谱下面——作者盯着「两面/揭示/钩子/连锁分析/一度 0」，
+    看不出记这个有什么用。本稿<b>不动一个后端字段、不删一行数据</b>，只做三件事：摘图谱、翻人话、把价值写在使用现场。
+  </p>
+  <svg class="orn" viewBox="0 0 120 12"><path d="M0,6 H48 M72,6 H120" stroke="currentColor" stroke-width="1"/><path d="M60,1 L65,6 L60,11 L55,6 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+
+  <!-- ============ 一、诊断 ============ -->
+  <h3 class="sec"><small>01 · DIAGNOSIS</small>为什么「完全不知道是什么」</h3>
+  <p class="sec-p">三个病因都是实证，不是口味问题。</p>
+  <div class="diag">
+    <div class="d-card">
+      <div class="n">病因一</div>
+      <div class="t">图谱是空转透镜</div>
+      <p>「因果图谱」只读，但全系统<b>没有任何入口能建边</b>：前端建边函数 <code>createEdge</code> 零组件调用，候选转正只建节点不建边，后端无自动推导。于是它永远是一屏孤立圆点——截图里的「3」「2」两个大圆球不是数据太少，是它的设计上限。依赖边扩散的「连锁分析」同样永远答「没有波及」。</p>
+    </div>
+    <div class="d-card">
+      <div class="n">病因二</div>
+      <div class="t">每个词都要查词典</div>
+      <p>两面 / 表 / 里 / 揭示 / 钩子·强度·埋设手法 / 连锁分析 / 查片段 / 一度 0——一屏十一个系统词。而作者语言里只有两个问题：<b>「读者现在知道吗？」「打算什么时候抖出来？」</b>字段摆了一墙，问题没人问。</p>
+    </div>
+    <div class="d-card">
+      <div class="n">病因三</div>
+      <div class="t">价值不在现场</div>
+      <p>守秘密（生成上下文 secrets 通道）、防写漏（完稿体检比对泄密）、到点提醒（写作台感知带）——全部发生在<b>别的界面</b>。账本和详情里没有一个字告诉作者「记这个会发生什么」，记了像没记。</p>
+    </div>
+  </div>
+  <div class="diag-note">
+    <b>附带一笔重复建设：</b>「钩子」类型（强度/状态/埋设手法三字段）与伏笔账本（埋设/回收/预期章）是同一回事的两份表单。
+    代码注释里早已写明「C2 并入伏笔账本后退役」，界面至今还在收两份租——本轮一并退役，存量由既有「迁入世界对象」面板承接。
+  </div>
+
+  <!-- ============ 二、立论 ============ -->
+  <h3 class="sec"><small>02 · THESIS</small>一句话立论与三条原则</h3>
+  <div class="thesis">
+    <div class="q">真相 = 作者知道、读者暂时不知道的事。<br/>记它只有一个理由——<b>AI 替你守住。</b></div>
+    <div class="a">不剧透（secrets 通道 + 泄密闸）· 防写漏（完稿体检比对）· 到点提醒（感知带揭示临近）</div>
+  </div>
+  <div class="principles">
+    <div class="p-card">
+      <div class="t">一、问作者的问题，不摆系统的字段</div>
+      <p>详情抽屉按两问组织：「读者现在知道吗？」「打算怎么抖出来？」所有字段挂进这两问，问不出归属的字段不进界面。</p>
+    </div>
+    <div class="p-card">
+      <div class="t">二、价值写在使用现场</div>
+      <p>账本标题下常驻一句「记在这里的，AI 替你守住」；填「第几章揭」时当场预告「写到第 N−2 章感知带会提醒你」——规则第一次有了回声。</p>
+    </div>
+    <div class="p-card">
+      <div class="t">三、摘掉的比新增的重要</div>
+      <p>图谱、连锁分析、钩子区三块死重先摘，再谈美化。每少一个永远答「没有」的按钮，剩下每个按钮都更可信。</p>
+    </div>
+  </div>
+
+  <!-- ============ 三、信息架构 ============ -->
+  <h3 class="sec"><small>03 · IA</small>信息架构：保留、重排与退役</h3>
+  <table>
+    <tr><th style="width: 200px;">表面</th><th style="width: 88px;">处置</th><th>设计</th></tr>
+    <tr>
+      <td><b>图标栏「真相」格</b></td><td><span class="tag-keep">保留</span></td>
+      <td>位置与角标不动。tooltip 从「表（读者所见）与里（作者真相）的账本」改 <b>「真相账本——读者知道与不知道的事，秘密 AI 替你守住」</b>（第一触点就把价值说掉）。</td>
+    </tr>
+    <tr>
+      <td><b>真相账本抽屉</b></td><td><span class="tag-reword">重排</span></td>
+      <td>场景 A。标题下常驻一句价值句；主按钮只剩「＋ 记一条真相」；两个次动作（从章节找漏记 / 旧条目挂接）收为小字行；行内「→30章」改「第 30 章揭」。</td>
+    </tr>
+    <tr>
+      <td><b>真相详情抽屉</b></td><td><span class="tag-reword">重排</span></td>
+      <td>场景 B。按「读者现在知道吗 / 打算怎么抖出来」两问组织；动作行只剩「贴段正文查泄密」与「删除」。失焦即存不变。</td>
+    </tr>
+    <tr>
+      <td><b>因果图谱模态</b></td><td><span class="tag-retire">退役</span></td>
+      <td>两个入口（账本底部「查看因果图谱 ↗」、详情「因果图谱 · 一度 N」）摘除，组件删除。<b>后端边表与 CRUD 路由保留</b>——零数据风险，存量老书的历史边仍可被 API 读到；未来若有自动推边能力再议复活。</td>
+    </tr>
+    <tr>
+      <td><b>连锁分析</b></td><td><span class="tag-retire">退役</span></td>
+      <td>随图谱一并摘。它沿因果边扩散——边永远为零，它永远答「没有波及」，留着是谎话。后端 <code>POST /impact/{id}</code> 保留。</td>
+    </tr>
+    <tr>
+      <td><b>查片段</b></td><td><span class="tag-keep">保留</span></td>
+      <td>改名「贴段正文查泄密」。它是纯节点短语比对，不依赖边，是真能用的能力——留在详情动作行。</td>
+    </tr>
+    <tr>
+      <td><b>「钩子」字段区</b></td><td><span class="tag-retire">退役</span></td>
+      <td>强度/状态/埋设手法三字段从详情删除。存量 hook 条目在详情顶部给一行指引：「这是旧『钩子』条目，建议迁入伏笔账本」→ 复用账本既有迁移面板。</td>
+    </tr>
+    <tr>
+      <td><b>实体抽屉「读者认知」</b></td><td><span class="tag-reword">对齐</span></td>
+      <td>文案与详情抽屉同口径：表/里小徽标保留，标题改人话（「读者目前看到的版本」「实际真相」）。交互零改动。</td>
+    </tr>
+    <tr>
+      <td><b>提醒与闸门</b></td><td><span class="tag-keep">零改动</span></td>
+      <td>感知带揭示提醒（≤2 章）、时间轴揭示朱点、名签朱点、secrets 通道、完稿泄密比对、ghost_guard 泄密闸——本稿全部不动，纯前端表面重修。</td>
+    </tr>
+  </table>
+
+  <!-- ============ 四、场景稿 ============ -->
+  <h3 class="sec"><small>04 · SCENES</small>两张场景稿</h3>
+  <div class="grid">
+    <div class="card a">
+      <div class="tag">场景 A</div>
+      <h2>真相账本：价值常驻</h2>
+      <p class="pitch">翻账的作者第一眼看到「记这个有什么用」，而不是一串状态点。过滤轴与行结构不动，噪音收编。</p>
+      <ul>
+        <li>标题下常驻价值句：AI 替你守住——不剧透、防写漏、到点提醒</li>
+        <li>过滤仍是 秘密 / 半露 / 公开（品牌词不动）</li>
+        <li>行 = 状态点 + 名称 +「第 N 章揭」+ 真相首行</li>
+        <li>次动作收小字行：找漏记的真相 · 旧条目挂接</li>
+        <li>底部「查看因果图谱 ↗」摘除</li>
+      </ul>
+      <a class="open" href="a-truth-ledger.html">打开场景 A</a>
+    </div>
+    <div class="card b">
+      <div class="tag">场景 B</div>
+      <h2>真相详情：两问组织</h2>
+      <p class="pitch">一屏只回答两个作者问题。表/里小徽标与三态词保留（品牌不丢），标题全部换成作者语言。</p>
+      <ul>
+        <li>问一「读者现在知道吗？」= 三态直切 + 一句释义</li>
+        <li>表卡「读者目前看到的版本」/ 里卡「实际真相 · AI 死守」</li>
+        <li>问二「打算怎么抖出来？」= 怎么揭 + 第几章揭</li>
+        <li>填章号当场预告：写到第 N−2 章感知带提醒你</li>
+        <li>动作行只剩 查泄密 / 删除；图谱、连锁分析、钩子区退役</li>
+      </ul>
+      <a class="open" href="b-truth-detail.html">打开场景 B</a>
+    </div>
+  </div>
+
+  <!-- ============ 五、文案对照 ============ -->
+  <h3 class="sec"><small>05 · COPY</small>文案对照表（旧 → 新）</h3>
+  <p class="sec-p">品牌词（真相 / 表 / 里 / 秘密 / 半露 / 公开）全部保留——改的是标题、按钮与说明行。</p>
+  <table>
+    <tr><th style="width: 220px;">位置</th><th style="width: 240px;">现状</th><th>改后</th></tr>
+    <tr><td>详情分区题</td><td><span class="old">两 面</span></td><td class="new">读者现在知道吗？<span style="color: var(--ink-3); font-family: var(--sans); font-size: 11px;">（兼作三态控件的小标题）</span></td></tr>
+    <tr><td>表卡头</td><td><span class="old">表 · 读者目前所见</span></td><td class="new">读者目前看到的版本<span style="color: var(--ink-3); font-family: var(--sans); font-size: 11px;">（角上保留「表」小徽标）</span></td></tr>
+    <tr><td>里卡头</td><td><span class="old">里 · 作者知道的真相</span></td><td class="new">实际真相 · AI 死守<span style="color: var(--ink-3); font-family: var(--sans); font-size: 11px;">（角上保留「里」徽标与密印）</span></td></tr>
+    <tr><td>详情分区题</td><td><span class="old">揭 示</span></td><td class="new">打算怎么抖出来？</td></tr>
+    <tr><td>字段标签</td><td><span class="old">计划 / 揭示章</span></td><td class="new">怎么揭 / 第几章揭</td></tr>
+    <tr><td>揭示章旁（新增）</td><td><span class="old">（无）</span></td><td class="new">写到第 N−2 章时，写作台会提醒你<span style="color: var(--ink-3); font-family: var(--sans); font-size: 11px;">（把既有 ≤2 章规则显性化，零后端改动）</span></td></tr>
+    <tr><td>详情动作行</td><td><span class="old">因果图谱 · 一度 0</span></td><td class="new">（摘除）</td></tr>
+    <tr><td>详情动作行</td><td><span class="old">连锁分析</span></td><td class="new">（摘除——永远答「没有波及」）</td></tr>
+    <tr><td>详情动作行</td><td><span class="old">查片段</span></td><td class="new">贴段正文查泄密</td></tr>
+    <tr><td>详情「钩子」区</td><td><span class="old">强度 / 状态 / 埋设手法</span></td><td class="new">（摘除，存量条目给迁移指引行）</td></tr>
+    <tr><td>账本行揭示章</td><td><span class="old">→30章</span></td><td class="new">第 30 章揭</td></tr>
+    <tr><td>账本底部</td><td><span class="old">查看因果图谱 ↗</span></td><td class="new">（摘除）</td></tr>
+    <tr><td>账本次动作</td><td><span class="old">⧉ 从章节提取候选 / ⇄ 迁入世界对象</span></td><td class="new">小字行：从最近章节找漏记的真相 · 旧条目挂接到世界对象</td></tr>
+    <tr><td>账本标题下（新增）</td><td><span class="old">（无）</span></td><td class="new">记在这里的秘密，AI 写作时替你守住——不剧透、防写漏、到点提醒该抖了</td></tr>
+    <tr><td>图标栏 tooltip</td><td><span class="old">真相——表（读者所见）与里（作者真相）的账本</span></td><td class="new">真相账本——读者知道与不知道的事，秘密 AI 替你守住</td></tr>
+    <tr><td>详情头部类型</td><td><span class="old">类型下拉（可改）</span></td><td class="new">已挂接对象 = 只读徽标（类型随对象推演）；自由条目保留下拉</td></tr>
+  </table>
+
+  <!-- ============ 六、关键流程 ============ -->
+  <h3 class="sec"><small>06 · FLOWS</small>关键流程走查</h3>
+
+  <div class="flow">
+    <b>记一条秘密（流程不变，第一次就懂）</b><br/>
+    <span class="step">①</span>账本「＋ 记一条真相」→ 写「林尘其实是局长的私生子」，Enter；
+    <span class="step">②</span>详情滑入，三态默认「秘密」，释义行就在按钮下：「读者全然不知——『实际真相』AI 绝不写进正文」；
+    <span class="step">③</span>顺手补「读者目前看到的版本」与抖出来的计划——不补也无妨，价值句已经告诉他不补会怎样（AI 照样守）。
+  </div>
+
+  <div class="flow">
+    <b>到点提醒（字段第一次有了回声）</b><br/>
+    <span class="step">①</span>详情里填「第 30 章揭」，旁边当场出小字：「写到第 28 章时，写作台会提醒你」；
+    <span class="step">②</span>真写到第 28 章，感知带如期出现「揭示计划临近：预期第 30 章（还差 2 章）」——作者亲眼看到账本长脚走回写作现场，下一条真相就愿意记了。
+  </div>
+
+  <div class="flow">
+    <b>查泄密（保留能力的真实用法）</b><br/>
+    <span class="step">①</span>详情「贴段正文查泄密」→ 展开贴片框；<span class="step">②</span>贴入要发布的段落点「检查」；
+    <span class="step">③</span>命中列出「【林尘】关键短语出现在文本中：私生子」——纯节点短语比对，不依赖任何边。
+  </div>
+
+  <!-- ============ 七、待拍板 ============ -->
+  <h3 class="sec"><small>07 · OPEN</small>待拍板清单</h3>
+  <table>
+    <tr><th style="width: 200px;">分歧点</th><th style="width: 150px;">本稿建议</th><th>说明</th></tr>
+    <tr><td><b>因果图谱去留</b></td><td>退役（摘入口 + 删组件）</td><td>建边零入口是代码事实，不是数据太少。后端边表/路由保留，存量数据零风险。2026-08-17 拍板曾定「保留为只读查看器」——彼时假设边会由提取流程产生，该假设已被证伪（候选转正只建节点）。</td></tr>
+    <tr><td><b>连锁分析去留</b></td><td>随图谱退役</td><td>沿边扩散，边恒为零则恒答「没有」。若拍板保留图谱，此件一并保留。</td></tr>
+    <tr><td><b>「钩子」区</b></td><td>退役</td><td>与伏笔账本重复建设，代码注释早已写明退役方向。存量 hook 条目给迁移指引行，不强行自动迁移。</td></tr>
+    <tr><td><b>常驻价值句文案</b></td><td>见文案表末行</td><td>「不剧透、防写漏、到点提醒该抖了」三个承诺都有既有实现背书，无虚词；措辞可再酌。</td></tr>
+    <tr><td><b>表/里徽标去留</b></td><td>保留小徽标</td><td>品牌词不丢（柔化轮定档），但退居卡面角落；主标题一律人话。</td></tr>
+    <tr><td><b>类型下拉降级</b></td><td>挂接条目只读</td><td>C2 起类型由挂接对象推演，下拉对挂接条目是矛盾源；自由叙事条目保留可改。</td></tr>
+  </table>
+
+  <p class="foot">
+    设计稿为纯静态 HTML（零依赖、零素材），沿用活舆图 M6 视觉令牌（暖纸/墨色/朱砂、衬线名签），仅作方向评审，不代表最终实现细节。<br/>
+    红线：本稿不动任何后端字段与提醒/闸门规则；品牌词（真相/表/里/秘密/半露/公开）保留；失焦即存交互不变。<br/>
+    上一代设计：docs/design/canon-fusion/（2026-08-17，信息层并入活舆图）；本稿是其表面重修，非架构变更。
+  </p>
+</div>
+</body>
+</html>

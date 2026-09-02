@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>场景 B · 真相详情——两问组织</title>
+<style>
+  :root {
+    --paper: #f1e9d8; --paper-2: #ece4d3; --paper-3: #f7f1e3;
+    --ink: #33302a; --ink-2: #4a4438; --ink-3: #8a8172;
+    --rule: #ddd2bd;
+    --violet: #6f5f9e; --gold: #b08d3e; --blue: #4a6b8a; --ochre: #a05f3c; --pine: #5f7d5a;
+    --zhu: #a63e2a; --zhu-soft: rgba(166, 62, 42, .08); --zhu-line: rgba(166, 62, 42, .5);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+    --sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); color: var(--ink); background: var(--paper); padding: 0 0 80px; }
+
+  .screen-wrap { padding: 40px 28px 8px; }
+  .cap { max-width: 1180px; margin: 0 auto 14px; }
+  .cap .k { font-size: 10px; letter-spacing: .35em; color: var(--gold); }
+  .cap h2 { font-family: var(--serif); font-size: 20px; letter-spacing: .06em; margin: 4px 0 6px; }
+  .cap p { font-size: 12px; color: var(--ink-3); line-height: 1.9; max-width: 780px; }
+  .cap p b { color: var(--ink-2); }
+
+  .stage { max-width: 1180px; margin: 0 auto; }
+  .frame {
+    position: relative; height: 700px; overflow: hidden; border-radius: 10px;
+    border: 1px solid var(--rule); box-shadow: 0 18px 50px rgba(96, 72, 36, .16);
+    background:
+      radial-gradient(ellipse at 25% 20%, rgba(120, 90, 40, .06), transparent 55%),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 95, 50, .014) 2px 3px),
+      var(--paper);
+  }
+  .frame::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 150px rgba(96, 72, 36, .24), inset 0 0 36px rgba(96, 72, 36, .1);
+  }
+
+  .atlas-title { position: absolute; left: 40px; top: 66px; pointer-events: none; font-family: var(--serif); color: rgba(74,68,56,.22); }
+  .atlas-title .zh { font-size: 34px; font-weight: 700; letter-spacing: .3em; }
+  .atlas-title .en { font-size: 9px; letter-spacing: .5em; margin-top: 5px; }
+  .node { position: absolute; transform: translate(-50%, -50%); text-align: center; z-index: 5; opacity: .55; }
+  .node .seal { width: 11px; height: 11px; margin: 0 auto; border-radius: 50%; border: 2px solid var(--paper); outline: 1.5px solid currentColor; background: currentColor; }
+  .node .nl { display: inline-block; margin-top: 4px; padding: 1px 7px; font-family: var(--serif); font-size: 11.5px; color: var(--ink); background: rgba(244,238,225,.78); border-radius: 4px; position: relative; }
+  .node .nl .zd { position: absolute; right: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--zhu); }
+  .node.ochre { color: var(--ochre); } .node.blue { color: var(--blue); }
+
+  .rail {
+    position: absolute; right: 0; top: 56px; bottom: 70px; width: 46px; z-index: 18;
+    background: rgba(236,228,211,.94); border-left: 1px solid var(--rule);
+    display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 1px;
+  }
+  .rail button { width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 14px; position: relative; }
+  .rail button .n { position: absolute; top: 1px; right: 3px; font-size: 8.5px; color: var(--gold); font-family: var(--serif); }
+
+  /* ===== 真相详情抽屉（360px） ===== */
+  .ctd {
+    position: absolute; top: 48px; right: 58px; bottom: 20px; width: 360px; z-index: 17;
+    background: var(--paper-3); border: 1px solid var(--rule); border-radius: 14px;
+    box-shadow: 0 16px 44px rgba(0,0,0,.16);
+    padding: 16px; overflow-y: auto; font-size: 13px;
+  }
+
+  .ctd-head { display: flex; align-items: center; gap: 8px; }
+  .ctd-name { font-family: var(--serif); font-size: 17px; font-weight: 700; letter-spacing: .04em; color: var(--ink); border-bottom: 1px dashed transparent; padding: 2px 0; }
+  /* 类型降级：只读徽标 + 挂接来源 */
+  .ctd-type { flex-shrink: 0; font-size: 10px; color: var(--ink-3); background: var(--paper-2); border: 1px solid var(--rule); border-radius: 7px; padding: 2px 7px; }
+  .ctd-close { flex-shrink: 0; width: 26px; height: 26px; border: none; border-radius: 7px; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+
+  /* 问一 */
+  .q-sec { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--rule); }
+  .q-sec:first-of-type { border-top: none; padding-top: 0; }
+  .q-title { font-family: var(--serif); font-size: 13px; color: var(--ink-2); letter-spacing: .06em; margin-bottom: 8px; }
+  .q-title .qnum { color: var(--zhu); margin-right: 6px; font-size: 11px; }
+
+  .seg { display: flex; gap: 2px; padding: 3px; background: var(--paper-2); border-radius: 999px; }
+  .seg button { flex: 1; padding: 5px 0; font-size: 11px; border: none; border-radius: 999px; background: transparent; color: var(--ink-3); }
+  .seg button.on-private { background: var(--zhu); color: #fff; }
+  .seg-note { margin: 7px 2px 0; font-size: 10.5px; line-height: 1.7; color: var(--ink-3); }
+  .seg-note b { color: var(--zhu); font-weight: 600; }
+
+  .face { border: 1px solid var(--rule); border-radius: 10px; padding: 9px 12px 10px; background: var(--paper-2); margin-top: 8px; }
+  .face.li { background: var(--zhu-soft); border-color: rgba(166,62,42,.32); border-left: 3px solid var(--zhu); }
+  .face .fh { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
+  .face .ft { font-family: var(--serif); font-size: 13px; font-weight: 700; color: var(--ink); }
+  .face.li .ft { color: var(--zhu); }
+  /* 表/里退居角标 */
+  .face .badge { margin-left: auto; font-family: var(--serif); font-size: 10px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 3px; padding: 0 5px; letter-spacing: .1em; }
+  .face.li .badge { color: var(--zhu); border-color: var(--zhu); }
+  .face .seal { font-family: var(--serif); font-size: 10px; color: var(--zhu); border: 1px solid var(--zhu); border-radius: 3px; padding: 0 4px; }
+  .face .ftext { font-family: var(--serif); font-size: 13px; line-height: 1.8; color: var(--ink); }
+  .face .warn { margin-top: 8px; padding-top: 7px; border-top: 1px dashed rgba(166,62,42,.45); font-size: 10.5px; line-height: 1.7; color: var(--zhu); }
+
+  /* 问二 */
+  .frow { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .frow label { flex-shrink: 0; width: 64px; font-size: 11px; color: var(--ink-3); }
+  .finput { flex: 1; min-width: 0; font-size: 12px; color: var(--ink); background: var(--paper-2); border: 1px solid var(--rule); border-radius: 8px; padding: 6px 10px; }
+  .finput.num { max-width: 88px; text-align: center; }
+  /* 新增：填写即有回声 */
+  .reveal-echo { margin: 2px 2px 0 72px; font-size: 10.5px; color: var(--gold); line-height: 1.7; }
+
+  .tags-row { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--rule); display: flex; align-items: center; gap: 8px; }
+  .tags-row label { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+  .tags-row .finput { font-size: 11.5px; }
+
+  .ctd-acts { display: flex; gap: 6px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--rule); }
+  .act { padding: 7px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper-2); color: var(--ink-2); font-size: 12px; }
+  .act.danger { margin-left: auto; color: var(--zhu); border-color: rgba(166,62,42,.4); }
+
+  /* 批注 */
+  .ann { max-width: 1180px; margin: 18px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .ann { grid-template-columns: 1fr; } }
+  .ann .card { border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,252,244,.6); padding: 16px 18px 13px; }
+  .ann .card .t { font-family: var(--serif); font-size: 14px; margin-bottom: 6px; }
+  .ann .card .t .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }
+  .ann .card ul { list-style: none; font-size: 11.5px; color: var(--ink-2); line-height: 2; }
+  .ann .card ul li::before { content: "·"; margin-right: 6px; color: var(--gold); }
+  .ann .card ul li s { color: var(--ink-3); text-decoration-color: rgba(166,62,42,.5); }
+  .ann .card ul li b { font-family: var(--serif); }
+
+  .foot { max-width: 1180px; margin: 26px auto 0; font-size: 10.5px; color: var(--ink-3); line-height: 1.9; }
+</style>
+</head>
+<body>
+<div class="screen-wrap">
+  <div class="cap">
+    <div class="k">SCENE B</div>
+    <h2>真相详情——一屏只回答两个作者问题</h2>
+    <p>
+      「读者现在知道吗？」「打算怎么抖出来？」——所有字段挂进这两问，问不出归属的字段不进界面。
+      表/里退居卡面角标（品牌词不丢），主标题全部换成作者语言；填「第几章揭」当场看到提醒规则的回声。
+      失焦即存、朱晕「里」卡、密印、泄密警示——全部保留。
+    </p>
+  </div>
+  <div class="stage">
+    <div class="frame">
+      <div class="atlas-title">
+        <div class="zh">最终武装</div>
+        <div class="en">THE LAST ARMAMENT</div>
+      </div>
+
+      <div class="node ochre" style="left: 20%; top: 44%;"><div class="seal"></div><span class="nl">林尘<span class="zd"></span></span></div>
+      <div class="node blue" style="left: 38%; top: 30%;"><div class="seal"></div><span class="nl">流光<span class="zd"></span></span></div>
+
+      <div class="rail">
+        <button>✓<span class="n">2</span></button>
+        <button>⚑<span class="n">5</span></button>
+        <button>☆</button>
+        <button>◉<span class="n">4</span></button>
+        <button>⌖</button>
+        <button>§</button>
+        <button>♟</button>
+      </div>
+
+      <!-- 真相详情抽屉 -->
+      <div class="ctd">
+        <div class="ctd-head">
+          <span class="ctd-name">林尘</span>
+          <span class="ctd-type" title="类型随挂接对象推演——改类型请改挂接">角色 · 已挂接</span>
+          <button class="ctd-close" title="关闭 (Esc)">✕</button>
+        </div>
+
+        <!-- 问一 -->
+        <div class="q-sec">
+          <div class="q-title"><span class="qnum">问一</span>读者现在知道吗？</div>
+          <div class="seg">
+            <button class="on-private">秘密</button>
+            <button>半露</button>
+            <button>公开</button>
+          </div>
+          <p class="seg-note">读者全然不知——下面的<b>「实际真相」AI 绝不写进正文</b>，只当隐藏动机。</p>
+
+          <div class="face">
+            <div class="fh">
+              <span class="ft">读者目前看到的版本</span>
+              <span class="badge">表</span>
+            </div>
+            <div class="ftext">废墟区捡回来的机修工，手艺极好，沉默寡言。</div>
+          </div>
+          <div class="face li">
+            <div class="fh">
+              <span class="ft">实际真相 · AI 死守</span>
+              <span class="badge">里</span>
+              <span class="seal" title="密级内容：不进正文，只影响 AI 行为">密</span>
+            </div>
+            <div class="ftext">统合局局长的私生子，生母因「素壤计划」被灭口。</div>
+            <div class="warn">★ AI 会把它当隐藏动机，绝不直接写出；完稿体检会比对泄密，写作时左缘感知带会提醒。</div>
+          </div>
+        </div>
+
+        <!-- 问二 -->
+        <div class="q-sec">
+          <div class="q-title"><span class="qnum">问二</span>打算怎么抖出来？</div>
+          <div class="frow">
+            <label>怎么揭</label>
+            <div class="finput">第 30 章借局长遗言半揭</div>
+          </div>
+          <div class="frow">
+            <label>第几章揭</label>
+            <div class="finput num">30</div>
+          </div>
+          <div class="reveal-echo">⏳ 写到第 28 章时，写作台会提醒你。</div>
+        </div>
+
+        <!-- 标签 -->
+        <div class="tags-row">
+          <label>标签</label>
+          <div class="finput">身世, 主线</div>
+        </div>
+
+        <!-- 动作行 -->
+        <div class="ctd-acts">
+          <button class="act" title="贴一段正文，对照真相账本查泄露与矛盾">贴段正文查泄密</button>
+          <button class="act danger">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批注 -->
+  <div class="ann">
+    <div class="card">
+      <div class="t"><span class="sw" style="background: var(--pine);"></span>新增（只有两处）</div>
+      <ul>
+        <li><b>两个问句小标题</b>——「问一 / 问二」替掉「两 面」「揭 示」两个分区题，字段各归其问。</li>
+        <li><b>提醒回声</b>——填「第几章揭 = 30」即出「写到第 28 章时，写作台会提醒你」。把既有 ≤2 章感知带规则显性化，零后端改动；字段从「记了就忘」变成「会看到它回来」。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="t"><span class="sw" style="background: var(--zhu);"></span>收编与摘除</div>
+      <ul>
+        <li><s>因果图谱 · 一度 0</s> 与 <s>连锁分析</s> 摘除——边永远建不起来，两者永远答「没有」，留着是谎话。</li>
+        <li><s>钩子区（强度/状态/埋设手法）</s> 摘除——与伏笔账本重复；存量 hook 条目此处改显示一行「这是旧『钩子』条目，建议迁入伏笔账本」。</li>
+        <li><s>查片段</s> 改名 <b>贴段正文查泄密</b>（能力保留：纯节点短语比对，不依赖边）。</li>
+        <li><s>类型下拉</s> 对已挂接条目降级为只读徽标——类型随对象推演，不再手改出矛盾。</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="foot">
+    三态行为不变：切「公开」时表卡消失（读者已知 = 里即事实，无需维护表象），释义行同步换成「已建立的事实，AI 必须遵守」；
+    切「半露」时释义行为「读者见过伪装版——两面都要维护」。「贴段正文查泄密」展开态维持现状：贴片框 + 命中列表逐条列出。
+  </p>
+</div>
+</body>
+</html>
