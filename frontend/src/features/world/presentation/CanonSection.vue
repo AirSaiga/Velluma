@@ -8,8 +8,9 @@
  *
  * 主过滤轴 = 表里三态（全部/秘密/半露/公开），类型是行上的次级徽标——作者翻这本账
  * 时的问题是「读者还不知道什么」，不是「这是角色还是物件」。
- * 句子优先录入：一句话即「里」的全文，Enter 建条并开详情（C1 无对象挂接，
- * 主语匹配是 C2 能力；过渡期默认建「叙事」自由节点，类型可在详情里改）。
+ * 句子优先录入：一句话即「里」的全文，Enter 建条**不弹详情**（行落账顶闪朱 + toast
+ * 确认即闭环——2026-09-03 实测修正，曾自动滑出详情表单致「记一句话跳出一屏字段」；
+ * 要补两面/揭示由作者点行打开）。C1 无对象挂接，过渡期默认建「叙事」自由节点。
  * 本组件只读 + 创建——编辑集中在真相详情抽屉。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -171,15 +172,25 @@ async function submitAdd() {
     const node = await createNode(props.bookId, {
       book_id: props.bookId,
       type: 'event', // C1 过渡：叙事自由节点；C2 起主语按实体名/别名自动挂接
-      label: sentence.length > 12 ? sentence.slice(0, 12) + '…' : sentence,
+      label: sentence.length > 40 ? sentence.slice(0, 40) + '…' : sentence,
       canon_text: sentence,
       visibility: 'private', // 特意记下的真相默认是秘密，可就近改
     })
-    emit('select', node.id)
+    // 2026-09-03 实测修正：记账是轻动作——不再自动弹详情表单（曾令作者
+    // 「输入一段文字后就跳出这个面板，非常令人迷惑」）。行落账顶闪朱 + toast
+    // 确认即闭环；要补「读者看到的版本/揭示计划」由作者主动点行打开详情。
+    freshId.value = node.id
+    if (freshTimer) clearTimeout(freshTimer)
+    freshTimer = setTimeout(() => (freshId.value = ''), 2600)
+    showToast('已记下——AI 会替你守住', 'success')
   } catch (e: any) {
     console.warn('[CanonSection] create failed:', e)
   }
 }
+
+/** 新记账条目的短暂闪朱高亮（记账反馈——「它落在哪」一眼可见） */
+const freshId = ref('')
+let freshTimer: ReturnType<typeof setTimeout> | null = null
 </script>
 
 <template>
@@ -208,7 +219,7 @@ async function submitAdd() {
         v-for="n in shown"
         :key="n.id"
         class="side-card side-card--click cs-row"
-        :class="`cs-row--${n.visibility}`"
+        :class="[`cs-row--${n.visibility}`, { 'cs-row--fresh': n.id === freshId }]"
         title="打开真相详情"
         @click="emit('select', n.id)"
       >
@@ -400,6 +411,15 @@ async function submitAdd() {
 .cs-row--private { border-left-color: #a63e2a; }
 .cs-row--partial { border-left-color: #7c5faf; }
 .cs-row--public { border-left-color: #5f7d5a; }
+
+/* 新记账短暂闪朱（记账反馈，2.6s 后消退） */
+.cs-row--fresh {
+  animation: cs-fresh 2.6s ease-out;
+}
+@keyframes cs-fresh {
+  0% { box-shadow: 0 0 0 3px rgba(166, 62, 42, 0.28); background: rgba(166, 62, 42, 0.07); }
+  100% { box-shadow: 0 0 0 0 rgba(166, 62, 42, 0); background: var(--bg-secondary); }
+}
 
 .cs-name {
   font-size: 0.75rem;

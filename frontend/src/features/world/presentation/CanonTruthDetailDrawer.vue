@@ -5,7 +5,9 @@
  * 一屏只回答两个作者问题：问一「读者现在知道吗？」（表里三态 + 表/里两卡，
  * 失焦即存；表 = 普通纸面卡，里 = 朱晕卡 + 密印 + 泄密警示——仅秘密/半露态）；
  * 问二「打算怎么抖出来？」（计划 + 章号；章号带提醒回声——写到第 N−2 章感知带
- * 会提醒，把 canon_watch 既有 ≤2 章规则显性化，零后端改动）。
+ * 会提醒，把 canon_watch 既有 ≤2 章规则显性化，零后端改动）与标签收进「补充」
+ * 折叠区（2026-09-03 实测修正：详情第一眼只留「读者知道吗 + 表里两面」，低频
+ * 字段不抢视线，有值自动展开）。详情只由作者主动点行打开——录入不再自动弹出。
  * 动作行只剩「贴段正文查泄密」（纯节点短语比对，不依赖边）与「删除」。
  *
  * 退役（同轮，拍板见设计稿 §07）：因果图谱入口与连锁分析（建边零入口——边恒为零，
@@ -69,6 +71,15 @@ const revealEcho = computed(() => {
   if (!n || n < 1) return ''
   return `⏳ 写到第 ${Math.max(n - 2, 1)} 章时，写作台会提醒你。`
 })
+
+/**
+ * 补充区（抖出来的计划 · 标签）默认折叠——2026-09-03 实测修正：
+ * 详情第一眼只留「读者知道吗 + 表里两面」，低频字段不抢视线；有值时自动展开。
+ */
+const moreOpen = computed(
+  () =>
+    !!(node.value?.reveal_plan || node.value?.expected_reveal_chapter || (node.value?.tags || []).length),
+)
 
 const VIS_OPTS: { k: CanonVisibility; l: string }[] = [
   { k: 'private', l: '秘密' },
@@ -279,45 +290,50 @@ async function remove() {
       </div>
     </section>
 
-    <!-- 问二：打算怎么抖出来？ -->
-    <section class="ctd-sec">
-      <div class="ctd-q-title"><span class="ctd-q-num">问二</span>打算怎么抖出来？</div>
-      <div class="ctd-row">
-        <label class="ctd-lbl">怎么揭</label>
-        <input
-          v-model="planDraft"
-          class="ctd-input"
-          placeholder="如：第 30 章通过局长遗言半揭"
-          @blur="savePlan"
-          @keyup.enter="($event.target as HTMLInputElement).blur()"
-        />
-      </div>
-      <div class="ctd-row">
-        <label class="ctd-lbl">第几章揭</label>
-        <input
-          v-model.number="chapterDraft"
-          class="ctd-input ctd-input--num"
-          type="number"
-          min="1"
-          placeholder="可选"
-          @blur="saveChapter"
-          @keyup.enter="($event.target as HTMLInputElement).blur()"
-        />
-      </div>
-      <p v-if="revealEcho" class="ctd-reveal-echo">{{ revealEcho }}</p>
-    </section>
+    <!-- 补充：抖出来的计划 · 标签（默认折叠，有值自动展开） -->
+    <details class="ctd-more" :open="moreOpen">
+      <summary class="ctd-more-summary">补充：抖出来的计划 · 标签</summary>
 
-    <!-- 标签 -->
-    <section class="ctd-sec">
-      <div class="ctd-sec-title">标 签</div>
-      <input
-        v-model="tagsDraft"
-        class="ctd-input"
-        placeholder="逗号分隔，如：身世, 主线"
-        @blur="saveTags"
-        @keyup.enter="($event.target as HTMLInputElement).blur()"
-      />
-    </section>
+      <!-- 问二：打算怎么抖出来？ -->
+      <section class="ctd-sec ctd-sec--inmore">
+        <div class="ctd-q-title"><span class="ctd-q-num">问二</span>打算怎么抖出来？</div>
+        <div class="ctd-row">
+          <label class="ctd-lbl">怎么揭</label>
+          <input
+            v-model="planDraft"
+            class="ctd-input"
+            placeholder="如：第 30 章通过局长遗言半揭"
+            @blur="savePlan"
+            @keyup.enter="($event.target as HTMLInputElement).blur()"
+          />
+        </div>
+        <div class="ctd-row">
+          <label class="ctd-lbl">第几章揭</label>
+          <input
+            v-model.number="chapterDraft"
+            class="ctd-input ctd-input--num"
+            type="number"
+            min="1"
+            placeholder="可选"
+            @blur="saveChapter"
+            @keyup.enter="($event.target as HTMLInputElement).blur()"
+          />
+        </div>
+        <p v-if="revealEcho" class="ctd-reveal-echo">{{ revealEcho }}</p>
+      </section>
+
+      <!-- 标签 -->
+      <section class="ctd-sec ctd-sec--inmore">
+        <div class="ctd-sec-title">标 签</div>
+        <input
+          v-model="tagsDraft"
+          class="ctd-input"
+          placeholder="逗号分隔，如：身世, 主线"
+          @blur="saveTags"
+          @keyup.enter="($event.target as HTMLInputElement).blur()"
+        />
+      </section>
+    </details>
 
     <!-- C3 片段一致性检查（贴一段正文，对照真相账本查泄露/矛盾） -->
     <section v-if="checkOpen" class="ctd-check">
@@ -531,6 +547,42 @@ async function remove() {
   color: var(--text-muted);
   margin-bottom: 8px;
   user-select: none;
+}
+
+/* ===== 补充区折叠（问二+标签：低频字段，默认收起不抢视线） ===== */
+.ctd-more {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+.ctd-more-summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ctd-more-summary::-webkit-details-marker {
+  display: none;
+}
+.ctd-more-summary::before {
+  content: "▸";
+  font-size: 10px;
+  transition: transform 0.12s ease;
+}
+.ctd-more[open] > .ctd-more-summary::before {
+  transform: rotate(90deg);
+}
+.ctd-more-summary:hover {
+  color: var(--text-secondary);
+}
+.ctd-sec--inmore {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 12px;
 }
 
 /* ===== 两面卡片（编辑框本体） =====
