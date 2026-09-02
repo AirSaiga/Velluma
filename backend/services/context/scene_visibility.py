@@ -198,3 +198,82 @@ def find_out_of_scene_hits(
             })
             break  # 同名只报首个命中（宁漏勿误，防同段反复报）
     return hits
+
+
+# ============================================================
+# location_jump 检测判据（ghost_guard 第六检消费；shadow 出生，2026-09-02 二期）
+# ============================================================
+
+# 转场动词框架：「动词+地点名」邻接才算空间跳转形态——裸查地点名必死
+# （谈论/回忆/远眺合法）。与 HANDLING_VERBS 同纪律：小而狠，光/运动类词不进表。
+LOCATION_JUMP_VERBS: Tuple[str, ...] = (
+    "回到", "来到", "走进", "走入", "进入", "踏入", "迈进",
+    "抵达", "赶回", "赶到", "前往",
+)
+# 动词与地点名之间允许的填充字数（「走进了北岸」「赶回那座要塞」）
+LOCATION_JUMP_FILLER_CHARS = 2
+
+
+def _match_jump_verb(prefix: str) -> Optional[str]:
+    """名前缀是否以「转场动词 + ≤2 字填充」结尾（「走进了北岸」「赶回要塞」）；
+    返回命中的动词，未命中 None。填充窗窄化是防误报主闸（转场语义由动宾
+    紧邻承载，宽窗必误报）。"""
+    for v in LOCATION_JUMP_VERBS:
+        if prefix.endswith(v):
+            return v
+        for filler in range(1, LOCATION_JUMP_FILLER_CHARS + 1):
+            if len(prefix) > filler and prefix[:-filler].endswith(v):
+                return v
+    return None
+
+
+def find_location_jump_hits(
+    text: str,
+    off_scene_locations: List[str],
+) -> List[Dict[str, Any]]:
+    """地点穿越检测：转场动词 × 场景作用域外已知地点名邻接共现。
+
+    - 候选 = 作用域外地点名表（调用方算好闭包传入：自身+祖先+后裔合法，
+      其余世界地点为候选——本函数不感知树结构）；
+    - 判据 = 地点名紧跟转场动词（≤2 字填充）——「走进北岸要塞」。距离窗
+      比 out_of_scene 窄得多：转场语义由动宾紧邻承载，宽窗必误报；
+    - 边界复核与闪回豁免同 out_of_scene 同一份判据（嵌词/回忆不命中）。
+
+    返回 [{name, verb, sentence, exempt}]；纯函数零 IO。
+    """
+    hits: List[Dict[str, Any]] = []
+    norm_text = _norm(text)
+    if not norm_text:
+        return hits
+    names = [
+        n for n in (off_scene_locations or [])
+        if n and len(n) >= NAME_MIN_CHARS
+    ]
+    if not names:
+        return hits
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(norm_text) if s]
+    for name in names:
+        start = 0
+        while True:
+            idx = norm_text.find(name, start)
+            if idx < 0:
+                break
+            start = idx + 1
+            if not _name_in_text(name, norm_text[max(0, idx - 2): idx + len(name) + 2]):
+                continue
+            verb = _match_jump_verb(norm_text[max(0, idx - 6): idx])
+            if verb is None:
+                continue
+            sentence = next((s for s in sentences if name in s), "")
+            exempt = any(
+                w in sentence or _FLASHBACK_YEARS_RE.search(sentence)
+                for w in FLASHBACK_WORDS
+            ) if sentence else False
+            hits.append({
+                "name": name,
+                "verb": verb,
+                "sentence": sentence[:40],
+                "exempt": exempt,
+            })
+            break  # 同名只报首个命中（同 out_of_scene 纪律）
+    return hits

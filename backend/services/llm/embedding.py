@@ -98,6 +98,21 @@ def is_embedding_configured() -> bool:
     return bool(get_embedding_connection().get("api_key"))
 
 
+def is_embedding_api_configured() -> bool:
+    """存储无关的窄判定（2026-09-02 约束治理二期）：只看 embedding 连接是否
+    配了 Key——纯 API 余弦比对（semantic_overlap 抢拍语义闸等**不写向量列、
+    不走 pgvector 检索**的消费面）在 SQLite 默认部署下同样可用。
+
+    与 is_embedding_configured()（含 SQLite 方言门控，管向量存储/检索流）
+    并列，各管各的消费面——不要把本判定塞进旧函数（会放行 SQLite 下的
+    pgvector 检索路径报语法错）。纯读 model_config.json，无副作用。
+    """
+    try:
+        return bool(get_embedding_connection().get("api_key"))
+    except Exception:
+        return False
+
+
 # 已知接受 OpenAI 风格 dimensions 参数的模型名前缀（小写比对）。
 # 未命中的模型一律不传 dimensions——部分服务对未知参数直接 400
 # （DashScope text-embedding-v2 传 dimensions 必报错），按原生维度返回后
@@ -264,6 +279,65 @@ async def get_embeddings(
             logger.error(
                 f"[Embeddings] 维度不匹配: 模型 {emb_model} 输出 {len(emb)} 维, "
                 f"配置 {expected_dimensions} 维，该条置空"
+            )
+            results.append([])
+        else:
+            results.append(emb)
+    return results
+
+
+async def get_embeddings_api_only(
+    texts: List[str],
+    model: Optional[str] = None,
+    timeout: int = 120,
+) -> List[list]:
+    """纯 API 语义的批量向量（2026-09-02 约束治理二期，语义比对专用入口）。
+
+    与 get_embeddings 的唯一区别：门控是 is_embedding_api_configured()
+    （只看 Key）而非 is_embedding_configured()（含 SQLite 存储门控）——
+    语义余弦比对（semantic_overlap 抢拍语义闸）不落库、不走 pgvector
+    检索，SQLite 默认部署同样可用。
+
+    纪律：调用方不得把产物写向量列（写侧永远走 get_embeddings——SQLite
+    下它正确地空转省钱，本入口放行是因为比对面根本不碰存储）。降级行为
+    与 get_embeddings 完全一致（未配置/异常/条数不齐/维度不符 → 对应位
+    置 []）。
+    """
+    if not texts:
+        return []
+    if not is_embedding_api_configured():
+        return [[] for _ in texts]
+
+    connection = get_embedding_connection()
+    emb_model = model or connection["model"]
+    expected_dimensions = connection["dimensions"]
+
+    try:
+        embeddings = await _request_embedding(
+            list(texts),
+            api_key=connection["api_key"],
+            base_url=connection["base_url"],
+            model=emb_model,
+            dimensions=expected_dimensions,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error(f"[Embeddings] api_only 批量异常: {e}")
+        return [[] for _ in texts]
+
+    if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+        logger.error(
+            f"[Embeddings] api_only 响应条数不齐: 期望 {len(texts)} 实得 "
+            f"{len(embeddings) if isinstance(embeddings, list) else '非列表'}"
+        )
+        return [[] for _ in texts]
+
+    results: List[list] = []
+    for emb in embeddings:
+        if len(emb) != expected_dimensions:
+            logger.error(
+                f"[Embeddings] api_only 维度不匹配: 模型 {emb_model} 输出 "
+                f"{len(emb)} 维, 配置 {expected_dimensions} 维，该条置空"
             )
             results.append([])
         else:

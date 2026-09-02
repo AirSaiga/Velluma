@@ -40,11 +40,22 @@ STATUS_LIVE = "live"              # 在役执法
 STATUS_REPORT_ONLY = "report-only"
 STATUS_RETIRED = "retired"
 
+# 返修资格（2026-09-02 二期·缝合返修环，导师裁决：fail-closed 显式声明——
+# 不从 gate+ghost+live 通用字段推导，缺省 none 即「检出也只提示不返修」）
+REPAIR_NONE = "none"              # 不返修（默认；只提示/只落台账）
+REPAIR_REWRITE = "rewrite"        # 带稿改写重试（违规清单反馈 → 重写整稿）
+REPAIR_EXCISE = "excise"          # 允许句级切除兜底（rewrite 失败后删违规句）
+REPAIR_REGENERATE = "regenerate"  # 预留：全量重生成（本期无租户）
+
 
 @dataclass(frozen=True)
 class Constraint:
     """一条约束的登记项。layers 列出该约束的所有执法层（同一约束多层执法
-    用同一 id 关联——如 dock 心理词族 prompt 禁令+代码嗅探双层）。"""
+    用同一 id 关联——如 dock 心理词族 prompt 禁令+代码嗅探双层）。
+
+    repair（二期）：命中后是否进缝合返修环——显式声明，缺省 none
+    （fail-closed）；「进帧上屏」（status=live）与「返修资格」（repair）
+    是两个独立开关。"""
 
     id: str
     statement: str
@@ -52,6 +63,7 @@ class Constraint:
     enforcement: str = ENFORCE_LOG
     surface: str = SURFACE_GHOST
     status: str = STATUS_LIVE
+    repair: str = REPAIR_NONE
     when: str = ""          # 条件注入谓词的人读描述（数据驱动编译器消费其代码形态）
     origin: str = ""        # 事故/决策溯源
     cost_chars: Optional[int] = None  # prompt 条文的字符成本（代码闸条文为 None）
@@ -104,13 +116,17 @@ REGISTRY: List[Constraint] = [
     ),
     Constraint(
         id="ghost-guard-canon-leak",
-        statement="canon [private] 标签词复现 → 泄底提示",
+        statement="canon [private] 标签词复现 → 泄底提示；二期起进返修环（带稿改写，rewrite）",
         layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        repair=REPAIR_REWRITE,
+        origin="二期：泄底是零合法意图的违规（与死者开口的闪回合法性不同），可直接改写修复",
     ),
     Constraint(
         id="ghost-guard-secret-leak",
-        statement="私有档案 ≥4 字片段复现 → 泄底提示",
+        statement="私有档案 ≥4 字片段复现 → 泄底提示；二期起进返修环（带稿改写，rewrite）",
         layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        repair=REPAIR_REWRITE,
+        origin="二期：泄底是零合法意图的违规（与死者开口的闪回合法性不同），可直接改写修复",
     ),
     Constraint(
         id="ghost-guard-cliche-hit",
@@ -119,11 +135,26 @@ REGISTRY: List[Constraint] = [
     ),
     Constraint(
         id="ghost-guard-out-of-scene",
-        statement="非在场/提及名单的实体名 × 上手级动词框架共现 → 越界登场疑点（shadow：只落台账不进 GHOST_DONE）",
+        statement="非在场/提及名单的实体名 × 上手级动词框架共现 → 越界登场疑点（二期转 live-warn 进帧；返修资格攒数据后另开）",
         layers=[ENFORCE_INPUT, ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
-        status=STATUS_SHADOW,
         when="visible_names 非空（world 书）",
-        origin="2026-09-01 流光穿帮的输出侧镜像；promote 门槛=语料库准入+≥20 次真实命中人工抽检 FP<10%",
+        origin="2026-09-01 流光穿帮的输出侧镜像；二期导师裁决：上屏提示与返修资格两级独立开关，"
+               "进帧先行（FP 代价=一条提示），excise 资格仍按原门槛=语料库准入+≥20 次真实命中人工抽检 FP<10%",
+    ),
+    Constraint(
+        id="ghost-guard-location-jump",
+        statement="幽灵文本出现「转场动词+场景作用域外已知地点名」→ 地点穿越疑点（shadow：只落台账）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW,
+        when="world 书且本章有场景钉；作用域闭包=自身+祖先+后裔（保守，后裔算合法转场）",
+        origin="2026-09-02 用户实测「人物地点穿越」；shadow 攒精确率，promote 门槛同 out_of_scene",
+    ),
+    Constraint(
+        id="ghost-repair-loop",
+        statement="硬违规（live 且声明 repair 的约束命中）→ 带稿改写重试 1 次 → 句级切除（三豁免）→ 拒稿不上屏；"
+                  "章级滑窗 10min ≥2 次拒稿触发熔断降级为警示上屏",
+        layers=[ENFORCE_REWRITE], enforcement=ENFORCE_REWRITE, surface=SURFACE_GHOST,
+        origin="2026-09-02 用户拍板：可接受生成变慢，不可接受错误结果上屏；不相信模型自觉",
     ),
     # ---- dock 挂件校对环族（菜单件可自动丢弃）----
     Constraint(
@@ -153,6 +184,22 @@ REGISTRY: List[Constraint] = [
         statement="挂件与就近节拍原文去标点后 ≥4 字连续重叠 → 抢拍丢件（供给侧切断的残余兜底）",
         layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_MENU,
         origin="2026-08-26 节拍对白事故（mimo 三连不服从→2026-08-27 供给切断→2026-09-02 重叠检测补残余）",
+    ),
+    Constraint(
+        id="dock-beat-rush-semantic",
+        statement="挂件与就近节拍语义重合（向量相似度超阈）→ 抢拍（shadow：与 ≥4 字面闸/≥3 加强版双跑对拍攒校准数据）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_MENU,
+        status=STATUS_SHADOW,
+        when="embedding API 已配置（存储无关窄判定 is_embedding_api_configured）",
+        origin="字面重合抓不住改写式抢拍（「两人决裂」→「他摔门而去」零字面重合）；转正后丢件由过采样吸收",
+    ),
+    Constraint(
+        id="stitch-beat-rush-semantic",
+        statement="幽灵全文与就近节拍语义重合 → 抢拍（shadow 只落台账；转正后走返修环 regenerate，不切除）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW,
+        when="embedding API 已配置",
+        origin="同 dock-beat-rush-semantic；切除对整稿伤害面大，导师裁决返修-only",
     ),
     Constraint(
         id="dock-part-shape",
@@ -223,6 +270,13 @@ def status_of(constraint_id: str) -> str:
     """约束当前状态（未知 id 返回 live——登记滞后不阻塞执法）。"""
     c = _BY_ID.get(constraint_id)
     return c.status if c else STATUS_LIVE
+
+
+def repair_policy(constraint_id: str) -> str:
+    """约束的返修资格（二期返修环；fail-closed：未知 id / 未声明一律 none——
+    资格收紧方向的遗忘是安全的，资格放宽方向的遗忘（误开返修）必须显式）。"""
+    c = _BY_ID.get(constraint_id)
+    return c.repair if c else REPAIR_NONE
 
 
 # ============================================================

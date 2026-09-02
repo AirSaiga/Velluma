@@ -129,6 +129,9 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             "psych_word": "dock-no-psych",
             "rehash": "dock-rehash",
             "beat_overlap": "dock-beat-overlap",
+            # 二期 shadow 双跑（只落台账不丢件）：语义抢拍 / ≥3 字面收紧候选
+            "beat_rush_semantic": "dock-beat-rush-semantic",
+            "beat_overlap_n3": "dock-beat-overlap",
         }
 
         def _on_drop(reason: str, text: str = "", outcome: str = "drop") -> None:
@@ -155,6 +158,31 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             check_beat_overlap=True,
             on_drop=_on_drop,
         )
+
+        # ---- 抢拍 shadow 双跑（约束治理二期，2026-09-02）：只落台账不丢件——
+        # 与 live 的 ≥4 字面闸对拍攒校准数据，转正（改 registry status）后才执法。
+        # ① 语义版：卡片 vs 就近节拍的向量重合（抓改写式抢拍：零字面重合但剧情
+        #    被推完）；② ≥3 字面加强版：现役闸的收紧候选。未配置 embedding /
+        #    任何失败静默跳过（菜单件生成绝不阻塞）。
+        try:
+            if outline_nearby and valid_parts:
+                from backend.services.validation.semantic_overlap import (
+                    BEAT_RUSH_SHADOW_THRESHOLD,
+                    semantic_overlap_hits,
+                )
+
+                for _p in valid_parts:
+                    _pt = str(_p.get("text") or "")
+                    if not _pt:
+                        continue
+                    _sem = await semantic_overlap_hits(
+                        _pt, outline_nearby, threshold=BEAT_RUSH_SHADOW_THRESHOLD)
+                    if _sem:
+                        _on_drop("beat_rush_semantic", _pt, outcome="hit")
+                    if _beats_overlap_hit(_pt, outline_nearby, n=3):
+                        _on_drop("beat_overlap_n3", _pt, outcome="hit")
+        except Exception:
+            pass  # shadow 埋点绝不阻塞校对环
 
         # 挂件产出缓存到世界模型（前端 heartbeat 响应里取）
         from backend.services.adaptive.world_model import WorldModelRepository
@@ -428,12 +456,13 @@ def _is_rehash(text: str, recent_text: str, projections: list) -> bool:
     return False
 
 
-def _beats_overlap_hit(text: str, outline_nearby: list) -> bool:
-    """碎片与就近节拍原文去标点后存在 ≥4 字连续重叠（dock-beat-overlap 闸）。
+def _beats_overlap_hit(text: str, outline_nearby: list, n: int = 4) -> bool:
+    """碎片与就近节拍原文去标点后存在 ≥n 字连续重叠（dock-beat-overlap 闸）。
 
     抢拍 = 碎片把节拍事件本身的措辞写出来了（「写完它，那一拍就被消费掉」）。
     供给侧切断（_prebeat_projections）后模型仍看得到就近节拍文本——这是
-    残余风险的确定性兜底。任何 4 字滑窗命中即等价于 ≥4 连续公共子串。
+    残余风险的确定性兜底。任何 n 字滑窗命中即等价于 ≥n 连续公共子串。
+    n=4 为现役 live 口径；n=3 仅供二期 shadow 收紧候选对拍（不落执法）。
     """
     from backend.services.adaptive.text_match import FRAGMENT_INVALID_CHARS
 
@@ -441,14 +470,14 @@ def _beats_overlap_hit(text: str, outline_nearby: list) -> bool:
         return "".join(c for c in (s or "") if c not in FRAGMENT_INVALID_CHARS)
 
     cleaned = _clean(text)
-    if len(cleaned) < 4:
+    if len(cleaned) < n:
         return False
     for beat in (outline_nearby or []):
         beat_clean = _clean(str(beat))
         if not beat_clean:
             continue
-        for i in range(len(cleaned) - 3):
-            if cleaned[i: i + 4] in beat_clean:
+        for i in range(len(cleaned) - (n - 1)):
+            if cleaned[i: i + n] in beat_clean:
                 return True
     return False
 

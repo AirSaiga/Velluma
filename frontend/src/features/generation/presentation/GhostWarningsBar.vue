@@ -24,6 +24,11 @@ const KIND_META: Record<GhostWarning['kind'], { label: string; cls: string }> = 
   dead_speak: { label: '死者开口', cls: 'is-dead' },
   canon_leak: { label: '疑似泄底', cls: 'is-canon' },
   secret_leak: { label: '私有设定外泄', cls: 'is-secret' },
+  // 二期扩（约束治理 2026-09-02）：禁忌面/不在场/地点穿越/熔断降级
+  cliche_hit: { label: '禁忌词', cls: 'is-cliche' },
+  out_of_scene: { label: '人物不在场', cls: 'is-oos' },
+  location_jump: { label: '地点穿越', cls: 'is-loc' },
+  quality_breaker: { label: '自动修正暂停', cls: 'is-breaker' },
 }
 
 function meta(kind: GhostWarning['kind']) {

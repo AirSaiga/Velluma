@@ -16,11 +16,13 @@
  *   停顿心跳跑完后 sparkParts 已就绪，Spark Dock 此时弹出即有内容。
  */
 import { watch, ref, type Ref } from 'vue'
-import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard } from '../../../services/api/domain/adaptive.api'
+import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard, type GhostWarning } from '../../../services/api/domain/adaptive.api'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
+import { useToast } from '../../../composables/useToast'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
+  setGhostRepaired, materializeRejectedGhost,
 } from './useGhostDraft'
 import { setSparkParts, showSparkDock, hideSparkDock, sparkDockVisible, sparkSticky, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
@@ -91,6 +93,37 @@ interface AdaptiveAssistOptions {
 }
 
 export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
+  const { showToast } = useToast()
+
+  /**
+   * 二期质量拒稿（GHOST_REJECT，约束治理 2026-09-02）：后端返修环返修/切除
+   * 均未通过 → 幽灵不上屏（用户拍板：不可接受错误结果上屏）。逃生舱=
+   * warning toast 带「仍以疑点提示上屏」按钮——作者裁决后原稿以幽灵形态
+   * 灌回（疑点清单随附，Enter/Esc 同契约）。
+   */
+  function _onGhostReject(
+    payload: { message: string; mode: string; text: string; warnings: GhostWarning[] },
+    source: 'stitch' | 'outline',
+  ): void {
+    opts.aiLaneRef.value = 'dormant'
+    _continueAbort = null
+    hideThinking()
+    showToast(
+      payload.message || '这次没能写出合格的续写（检出设定硬伤，自动修正未通过）',
+      'warning',
+      8000,
+      payload.text
+        ? {
+            label: '仍以疑点提示上屏',
+            onClick: () => {
+              materializeRejectedGhost(payload.text, source)
+              setGhostWarnings(payload.warnings || [])
+            },
+          }
+        : undefined,
+    )
+  }
+
   let _activeTimer: ReturnType<typeof setTimeout> | null = null
   let _pauseTimer: ReturnType<typeof setTimeout> | null = null
   let _previewTimer: ReturnType<typeof setTimeout> | null = null
@@ -478,11 +511,14 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
+      onReject: (p) => _onGhostReject(p, 'stitch'),
       onDone: (result) => {
         // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -586,10 +622,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
+      onReject: (p) => _onGhostReject(p, 'stitch'),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -621,10 +660,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('stitch'); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
+      onReject: (p) => _onGhostReject(p, 'stitch'),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
@@ -692,10 +734,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }, {
       onStart: () => { beginGhost('outline', false, noteEnd); hideThinking() },
       onChunk: (delta) => appendGhost(delta),
+      onReject: (p) => _onGhostReject(p, 'outline'),
       onDone: (result) => {
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },

@@ -78,6 +78,7 @@ _STAGE_LABELS: Dict[str, str] = {
     "adaptive.stitch_ghost.open": "续写·开篇",
     "adaptive.stitch_ghost.outline": "续写·细纲扩写",
     "adaptive.stitch_ghost.compress": "续写·压缩重试",
+    "adaptive.stitch_ghost.repair": "续写·硬伤返修",
     # ---- 谋篇 ----
     "adaptive.spine_suggest": "谋篇建议",
     # ---- 沉淀涌现抽取（历史名：BS-ADF Loop3，adaptive 沿用未改名）----

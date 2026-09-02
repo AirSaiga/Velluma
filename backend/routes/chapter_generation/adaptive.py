@@ -126,6 +126,25 @@ _GHOST_REPAIR_TS: Dict[str, float] = {}
 _GHOST_REPAIR_INFLIGHT: set = set()
 _GHOST_REPAIR_COOLDOWN_S = 60.0
 
+# 质量拒稿熔断（约束治理二期，2026-09-02）：返修环拒稿是「宁缺毋错」的硬终点，
+# 但弱模型可能频繁返修失败把续写功能打没——章级滑窗 10min 内 ≥2 次拒稿即熔断，
+# 降级为「带病上屏+醒目警示」（终点回到作者裁决），落 breaker_open 台账。
+# 窗口自然老化自愈：熔断期内不再记新拒稿，旧拒稿超窗即恢复硬闸。
+_QUALITY_REJECT_TS: Dict[str, List[float]] = {}
+_QUALITY_BREAKER_WINDOW_S = 600.0
+_QUALITY_BREAKER_THRESHOLD = 2
+
+
+def _record_quality_reject(chapter_id: str) -> bool:
+    """记一次拒稿并返回熔断是否开启（章级滑窗 ≥ 阈值）。开启后本次应降级
+    上屏而非拒稿；熔断期内不再记新拒稿（窗口老化即自愈）。"""
+    now = time.time()
+    cid = str(chapter_id)
+    ts = [t for t in _QUALITY_REJECT_TS.get(cid, []) if now - t <= _QUALITY_BREAKER_WINDOW_S]
+    ts.append(now)
+    _QUALITY_REJECT_TS[cid] = ts
+    return len(ts) >= _QUALITY_BREAKER_THRESHOLD
+
 
 def _truncate_at_sentence(text: str, limit: int) -> str:
     """句界硬截断：在 limit 内找最后一个句末标点切断。
@@ -288,6 +307,150 @@ def _split_first_sentence(text: str) -> tuple:
         if ch in ("。", "！", "？", "…"):
             return text[: i + 1], text[i + 1:]
     return "", text
+
+
+# ============================================================
+# 缝合返修环路由侧辅助（约束治理二期，2026-09-02；环本体在
+# services/validation/repair_loop.py——本区只承载 stitch 专属的确定性后处理、
+# 句级切除豁免纪律与返修 prompt 组装）
+# ============================================================
+
+def _postprocess_repair_draft(text: str, mode: str, fragment: str, target_chars: int) -> str:
+    """返修稿的确定性后处理（与主生成同一套判据，但**零 LLM**——单次 stitch
+    creative 调用 3 次封顶：初生成 + 可能已有的压缩重试 + 返修改写；返修稿
+    不再触发压缩改写，超字走纯截断）。
+
+    - stitch：复读剥离（返修模型同样可能把作者原句吐回来）；
+    - stitch/continue 超硬限：首句锚定 + 保头句界截（豁免口径同主路径）；
+    - outline 超硬限：保尾截断（末段承接段豁免）。
+    """
+    if mode == "stitch" and fragment:
+        text = _strip_fragment_prefix(text, fragment)
+    if target_chars > 0:
+        if mode in ("stitch", "continue"):
+            hard = int(target_chars * STITCH_WC_HARD_RATIO)
+            if len(text) > hard:
+                anchor, body = _split_first_sentence(text)
+                if not anchor or len(anchor) > int(target_chars * 0.6):
+                    anchor, body = "", text
+                text = anchor + _truncate_at_sentence(
+                    body, max(int(target_chars * STITCH_WC_TRUNCATE_RATIO) - len(anchor), 40),
+                )
+        elif mode == "outline":
+            hard = int(target_chars * OUTLINE_WC_HARD_RATIO)
+            if len(text) > hard:
+                text = _truncate_keep_tail(text, int(target_chars * OUTLINE_WC_TRUNCATE_RATIO))
+    return text
+
+
+# 句级切分（切除用）：句子单元（含句末标点）与换行单元分列，重建时保结构
+_EXCISE_UNITS_RE = re.compile(r"[^。！？…\n]+[。！？…]?|\n+")
+
+
+def _excise_violating_sentences(
+    text: str,
+    violations: List[Dict],
+    *,
+    mode: str,
+    target_chars: int,
+) -> Optional[str]:
+    """句级切除兜底：删掉含违规 span 的句子，重建文本。失败返 None。
+
+    切除三豁免（导师裁决 2026-09-02）：
+    1. stitch/continue/burst 的首句（衔接锚句）不可切——切了作者的半句
+       永远悬空（2026-08-29 接缝事故同族防线）；
+    2. outline 的末段（引向 after_text 的承接段）不可切；
+    3. 切除后剩余 < max(target×0.6, 80 字) 不可切——保不了基本体量宁可拒稿。
+    另：切除只动内部句；切除产物仍须过返修环的零违规验收（调用方职责）。
+    """
+    if not text or not violations:
+        return None
+    spans: List[str] = []
+    for w in violations:
+        span = str(w.get("span_text") or "").strip()
+        if not span:
+            continue
+        # cliche 类复合 span（「、」连接）逐词匹配；其余整 span 匹配
+        spans.extend(s for s in re.split(r"[、]", span) if s)
+    if not spans:
+        return None
+
+    units = _EXCISE_UNITS_RE.findall(text)
+    if not units:
+        return None
+    # 句子单元的索引（换行单元不参与豁免/切除判定）
+    sent_idx = [i for i, u in enumerate(units) if u.strip(" \t\n")]
+    if not sent_idx:
+        return None
+    first_sent = sent_idx[0]
+    # outline 末段保护：最后一个非空句子单元起的连续尾部
+    tail_sent = sent_idx[-1] if mode == "outline" else -1
+
+    protected = {first_sent} if mode in ("stitch", "continue", "burst", "open") else set()
+    if mode == "outline":
+        protected.add(tail_sent)
+
+    drop: set = set()
+    for i in sent_idx:
+        if i in protected:
+            # 违规落在豁免句上 → 切除兜底整体失败（拒稿或降级由返修环裁决）
+            if any(s in units[i] for s in spans):
+                return None
+            continue
+        if any(s in units[i] for s in spans):
+            drop.add(i)
+    if not drop:
+        return None
+
+    kept = [u for i, u in enumerate(units) if i not in drop]
+    rebuilt = "".join(kept)
+    rebuilt = re.sub(r"\n{3,}", "\n\n", rebuilt).strip("\n")
+    # 切除把段落掏空了（全文/整段被删）→ 失败
+    if not rebuilt.strip():
+        return None
+    floor = max(int(target_chars * 0.6), 80) if target_chars > 0 else 80
+    if len(rebuilt) < floor:
+        return None
+    return rebuilt
+
+
+_VIOLATION_REPAIR_LINES = {
+    "canon_leak": "「{span}」是作者设定中读者不该看到的真相，绝不能直接写出——改为侧面暗示或删去相关表述",
+    "secret_leak": "「{span}」出自私密设定，绝不能直接写出——改为行为/神态暗示或删去",
+    "out_of_scene": "「{span}」此刻不在场，不得让它登场行动——删改相关动作，换在场的人/物承接",
+    "location_jump": "「{span}」不在当前场景，不得写抵达那里——改为当前场景内的动作",
+    "dead_speak": "「{span}」已死亡，不得让它开口或行动（除非明确写成回忆/转述）",
+}
+
+
+def _build_violation_repair_prompt(
+    *,
+    mode: str,
+    fragment: str,
+    target_chars: int,
+    violations: List[Dict],
+    draft: str,
+) -> str:
+    """返修环的带稿改写 prompt：违规清单是硬事实（代码闸检出，非模型自评），
+    指令收敛为「只修这些问题，其余保持不变」——改写面越小，弱模型越不容易
+    修一个砸三个。"""
+    lines: List[str] = []
+    for w in violations:
+        kind = str(w.get("kind") or "")
+        span = str(w.get("span_text") or "")
+        tpl = _VIOLATION_REPAIR_LINES.get(kind)
+        lines.append("- " + (tpl.format(span=span) if tpl else (w.get("message") or span or kind)))
+    frag_ctx = (
+        f"作者正文停在：『…{fragment[-40:]}』（草稿正是在补它/接它，开头衔接必须保留）\n"
+        if fragment else ""
+    )
+    wc = f"改写后控制在 {target_chars} 字以内；" if target_chars > 0 else ""
+    return (
+        f"{frag_ctx}下面这段续写草稿存在必须修复的硬伤：\n"
+        + "\n".join(lines)
+        + f"\n\n请改写整段草稿：只修复上述问题，保持衔接、剧情方向与文风不变；{wc}"
+        f"只输出改写后的续写正文，不要解释。\n\n--- 草稿 ---\n{draft}"
+    )
 
 
 # ============================================================
@@ -1008,6 +1171,7 @@ async def stitch_ghost(
     # （内容哈希缓存的心跳侧口径复用，纯 code 零 LLM；防御式——查库失败
     # 视为无漂移，不阻塞装配）。
     _drift_anchor = False
+    _chapter_row = None
     try:
         _chapter_row = await db.get(Chapter, str(chapter_id))
         if _chapter_row is not None:
@@ -1037,6 +1201,67 @@ async def stitch_ghost(
     # kg 缺失（测试桩/降级）=空视图=块缺席=零变化，不阻塞生成路径
     kg = getattr(ctx, "kg", None) or KnowledgeView()
     kg_kwargs = kg_block_kwargs(kg)
+
+    # ============================================================
+    # 约束治理二期（2026-09-02）：返修环/终检的共享素材，路由侧一次算好
+    # ============================================================
+    # ① canon label→命题 id 映射（原快检块内联查询上提——预检与终检复用同一份，
+    #    一次轻查询）
+    _label_map: Dict[str, str] = {}
+    _bundle_book_id = getattr(bundle, "book_id", None)  # 测试桩 bundle 可能无此字段
+    if _bundle_book_id:
+        try:
+            from backend.models import CanonNode as _CN
+
+            _rows = (await db.execute(
+                select(_CN.id, _CN.label).where(_CN.book_id == _bundle_book_id)
+            )).all()
+            _label_map = {label: str(nid) for nid, label in _rows if label}
+        except Exception:
+            _label_map = {}
+    # ② 地点穿越闸素材（第六检候选）：场景作用域闭包外的已知地点名表。
+    #    闭包 = 场景钉自身+祖先（scene_scope_ids 既有口径）∪ 全部后裔
+    #    （保守裁决：建筑内走到下属房间算合法转场，不误报）。关闭条件（任一
+    #    即 None，整检不跑零变化）：非 world 书 / 无场景钉 / 无地点数据。
+    _off_scene_loc_names: Optional[List[str]] = None
+    try:
+        _scene_loc_id = (
+            str(getattr(_chapter_row, "scene_location_id", None) or "")
+            if _chapter_row is not None else ""
+        )
+        if getattr(bundle, "world_sourced", False) and _scene_loc_id:
+            from backend.services.world.location_tree import (
+                collect_subtree_ids,
+                locations_by_id,
+                scene_scope_ids,
+            )
+
+            _locs = getattr(bundle, "locations", None) or []
+            if _locs:
+                _by_id = locations_by_id(_locs)
+                _legal = set(scene_scope_ids(_locs, _scene_loc_id)) | set(
+                    collect_subtree_ids(_locs, _scene_loc_id)
+                )
+                _off_scene_loc_names = [
+                    (getattr(l, "name", "") or "").strip()
+                    for k, l in _by_id.items()
+                    if k not in _legal and len((getattr(l, "name", "") or "").strip()) >= 2
+                ]
+    except Exception:
+        _off_scene_loc_names = None
+    # ③ 快检台账埋点（预检/终检共用同一回调 → (约束, 结果, 明细) 去重，
+    #    返修成功后终检不会把同一命中记两次；命中语义=首次检测）
+    _guard_event_keys: set = set()
+
+    def _on_guard_event(cid: str, outcome: str, reason: str, detail) -> None:
+        key = (cid, outcome, str(detail or {}))
+        if key in _guard_event_keys:
+            return
+        _guard_event_keys.add(key)
+        _log_constraint_event(
+            str(_bundle_book_id or ""), str(chapter_id), cid, outcome,
+            reason=reason, detail=detail,
+        )
     # B0.2 context_manifest（docs/world-kernel-construction-plan.md §1）：
     # 每次生成记录逐块明细 + 稳定前缀哈希——「注入未消费率」与前缀稳定性
     # 观测的数据源（scripts/analyze_context_manifest.py 消费），B8 冷层的
@@ -1295,6 +1520,137 @@ async def stitch_ghost(
                             f"回落截取稿 {len(text)} 字（目标 {request.target_chars}）"
                         )
             # ============================================================
+            # 缝合返修环（约束治理二期，2026-09-02；docs/constraint-governance.md
+            # §二期唯一权威）：预检硬违规（登记册 live + 显式 repair 资格）→
+            # 带稿改写重试 1 次 → 句级切除（三豁免）→ 拒稿不上屏（熔断降级）。
+            # 位置：字数闸之后、deai 之前——违规原稿绝不进任何后续通道（wash
+            # 原稿快照/deai 抛光防回退污染纪律）；返修稿重跑确定性后处理。
+            # 终检（warnings 上屏）在 wash P2 之后——那里产出的修补稿也必须过检。
+            # ============================================================
+            from backend.services.validation.ghost_guard import repair_eligible
+            from backend.services.validation.repair_loop import (
+                ACTION_EXCISED,
+                ACTION_REPAIRED,
+                ACTION_REJECTED,
+                run_repair_loop,
+            )
+
+            repaired_payload: Dict = {}
+            breaker_open = False
+            try:
+                _precheck = check_ghost_text(
+                    text, bundle, canon_node_ids_by_label=_label_map,
+                    visible_names=list(proper_nouns or []),
+                    off_scene_locations=_off_scene_loc_names,
+                    on_event=_on_guard_event,
+                )
+                _hard = [w for w in _precheck if repair_eligible(w)]
+                if _hard:
+                    async def _repair_regenerate(draft: str, viols: List[Dict]) -> str:
+                        rep = await call_llm_with_usage(
+                            system_prompt=system_prompt,
+                            user_prompt=_build_violation_repair_prompt(
+                                mode=request.mode,
+                                fragment=fragment,
+                                target_chars=request.target_chars,
+                                violations=viols,
+                                draft=draft,
+                            ),
+                            model_type="creative",
+                            temperature=0.3,
+                            max_tokens=max(STITCH_MAX_TOKENS_FLOOR, len(draft) * 2 + 800),
+                            reasoning_config=REASONING_DISABLED,
+                        )
+                        recorder.record_result(
+                            "adaptive.stitch_ghost.repair", rep, model_slot="creative")
+                        cand = (rep.content or "").strip().strip('"').strip('"').strip()
+                        if not cand:
+                            return ""
+                        # 返修稿重跑确定性后处理（零 LLM 版——调用 3 次封顶纪律）
+                        return _postprocess_repair_draft(
+                            cand, request.mode, fragment, request.target_chars)
+
+                    def _hard_violations_of(t: str) -> List[Dict]:
+                        # 验收与预检同一套判定；on_event=None——验收不重复记 hit
+                        return [w for w in check_ghost_text(
+                            t, bundle, canon_node_ids_by_label=_label_map,
+                            visible_names=list(proper_nouns or []),
+                            off_scene_locations=_off_scene_loc_names,
+                        ) if repair_eligible(w)]
+
+                    outcome = await run_repair_loop(
+                        text, _hard,
+                        regenerate=_repair_regenerate,
+                        recheck=_hard_violations_of,
+                        excise=lambda t, viols: _excise_violating_sentences(
+                            t, viols, mode=request.mode, target_chars=request.target_chars),
+                        max_retries=1,
+                    )
+                    _kinds = sorted({str(w.get("kind") or "") for w in _hard if w.get("kind")})
+                    if outcome.action in (ACTION_REPAIRED, ACTION_EXCISED):
+                        text = outcome.text
+                        repaired_payload = {
+                            "count": len(_hard),
+                            "kinds": outcome.fixed_kinds,
+                            "action": outcome.action,
+                        }
+                        for cid in {
+                            "ghost-guard-" + k.replace("_", "-") for k in _kinds
+                        }:
+                            _log_constraint_event(
+                                str(_bundle_book_id or ""), str(chapter_id), cid,
+                                "repair" if outcome.action == ACTION_REPAIRED else "excise",
+                                reason="repair_loop", detail={"kinds": _kinds},
+                            )
+                        trace_event(
+                            "adaptive_stitch_repair",
+                            mode=request.mode, action=outcome.action,
+                            kinds=_kinds, attempts=outcome.attempts,
+                            text_len=len(text),
+                        )
+                    elif outcome.action == ACTION_REJECTED:
+                        if _record_quality_reject(str(chapter_id)):
+                            # 熔断降级：带病上屏 + 终检醒目警示（终点回到作者裁决）
+                            breaker_open = True
+                            _log_constraint_event(
+                                str(_bundle_book_id or ""), str(chapter_id),
+                                "ghost-repair-loop", "breaker_open",
+                                reason="reject_window_threshold",
+                                detail={"kinds": _kinds},
+                            )
+                            trace_event(
+                                "adaptive_stitch_repair",
+                                mode=request.mode, action="breaker_open", kinds=_kinds,
+                            )
+                        else:
+                            for cid in {
+                                "ghost-guard-" + k.replace("_", "-") for k in _kinds
+                            }:
+                                _log_constraint_event(
+                                    str(_bundle_book_id or ""), str(chapter_id), cid,
+                                    "reject", reason="repair_loop_exhausted",
+                                    detail={"kinds": _kinds},
+                                )
+                            trace_event(
+                                "adaptive_stitch_reject",
+                                mode=request.mode, kinds=_kinds,
+                                text_len=len(text),
+                            )
+                            # 拒稿不上屏（用户拍板：不可接受错误结果）；原稿随帧
+                            # 带往前端逃生舱（作者可裁决「仍以疑点提示上屏」）
+                            yield build_sse_event(
+                                "GHOST_REJECT",
+                                "这次没能写出合格的续写（检出设定硬伤且自动修正未通过）",
+                                code="quality_reject",
+                                mode=request.mode,
+                                text=text,
+                                warnings=[w for w in _precheck if not w.get("local_only")],
+                            )
+                            return
+            except Exception as e:
+                # 返修环自身故障绝不阻塞生成——原稿照走后续通道（终检仍提示）
+                logger.debug(f"[adaptive/stitch-ghost] 返修环失败（不阻塞生成）: {e}")
+            # ============================================================
             # deai 小模型抛光（预留接口，docs/deai-integration.md；deai/ 子项目）：
             # 呈现平面的模型层——自训「去AI味」小模型对最终短稿做只改质感的
             # 改写（卡舱幽灵 ≤100 字契约窗内才生效，burst/outline 长稿自动跳过）。
@@ -1340,66 +1696,16 @@ async def stitch_ghost(
                         text_len=len(text),
                     )
                     append_style_event(
-                        str(bundle.book_id or ""), "deai_polish",
+                        str(_bundle_book_id or ""), "deai_polish",
                         f"applied={int(deai_res.applied)};skipped={int(deai_res.skipped)};"
                         f"mode={request.mode};reason={deai_res.reason[:80]}",
                     )
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] deai 抛光失败（不阻塞生成）: {e}")
 
-            # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
-            # 最终形态）生成后、GHOST_DONE 帧前跑纯算法疑点检查（四类上帧 + out_of_scene shadow 只落台账；<10ms
-            # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
-            # 防御——warnings 是柔性增量字段，绝不让它阻塞幽灵推送。
+            # C1 上屏前快检已迁移（约束治理二期）：预检随返修环提前到字数闸后，
+            # 终检移到 wash P2 之后（见下方「终检」段）——P2 修补稿同样必须过检。
             ghost_warnings: List[Dict] = []
-            try:
-                # B3 命题精确化：label→canon 命题注册表 id 映射（一次轻查询），
-                # canon_leak 警告携带 canon_node_id——B9 认知浮现消费同一证据链
-                _label_map: Dict[str, str] = {}
-                if bundle.book_id:
-                    try:
-                        from backend.models import CanonNode as _CN
-                        _rows = (await db.execute(
-                            select(_CN.id, _CN.label).where(_CN.book_id == bundle.book_id)
-                        )).all()
-                        _label_map = {label: str(nid) for nid, label in _rows if label}
-                    except Exception:
-                        _label_map = {}
-                ghost_warnings = check_ghost_text(
-                    text, bundle, canon_node_ids_by_label=_label_map,
-                    # 约束治理一期（2026-09-02）：白名单=称呼表同一产物（透传
-                    # 不重算）；on_event 落 constraint_events 台账。out_of_scene
-                    # 为 shadow 出生——warnings 带 local_only 由下方过滤出 SSE 帧。
-                    # ⚠ 不传 all_names：候选宇宙走 bundle 内省路径
-                    # （_bundle_all_names 只收 character/asset——势力是组织不是
-                    # 物件；显式传 proper_nouns() 会混入全类型名，语料库口径分叉）
-                    visible_names=list(proper_nouns or []),
-                    on_event=lambda cid, outcome, reason, detail: _log_constraint_event(
-                        str(bundle.book_id or ""), str(chapter_id), cid, outcome,
-                        reason=reason, detail=detail,
-                    ),
-                )
-                # shadow 纪律：local_only（out_of_scene）不进 GHOST_DONE 帧——
-                # 前端零感知，攒精确率数据后由 registry status 翻转 promote
-                ghost_warnings = [w for w in ghost_warnings if not w.get("local_only")]
-            except Exception as e:
-                logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
-            # 知识平面 v3.1 join 埋点（§10 在线召回证据，只记录不 retry）：
-            # 死者开口类 warning 命中时回查对应条目是否在当次选择集内——
-            # 缺席即选择器漏召的直接证据，攒够样本后再决策自动补选重发
-            for w in ghost_warnings:
-                if (w.get("kind") or "") != "dead_speak":
-                    continue
-                _name = str(w.get("span_text") or "")
-                _sel_titles = set(kg.present_names) | set(kg.dead_names) | {
-                    k.split(":", 1)[1] for k in kg.selected_keys
-                    if k.startswith(("entity:", "asset:"))
-                }
-                trace_event(
-                    "kg_join_dead_speak",
-                    name=_name,
-                    entry_selected=_name in _sel_titles,
-                )
             # ============================================================
             # 呈现平面（三平面分权，2026-08-29，docs/style-paradigm.md）：
             # P1 确定性洗（blocker+alternative 精确替换）→ P2 单次句级修补
@@ -1469,7 +1775,7 @@ async def stitch_ghost(
                         "original_text": wash_result.original_text,
                     }
                     append_style_event(
-                        str(bundle.book_id or ""), "ghost_wash",
+                        str(_bundle_book_id or ""), "ghost_wash",
                         f"hits={len(wash_result.hits)};"
                         f"replaced={len(wash_result.replaced_hits)};"
                         f"repaired={int(repaired_flag)};mode={request.mode}",
@@ -1488,13 +1794,91 @@ async def stitch_ghost(
                             mode=request.mode, ghost_token=ghost_token,
                         )
                         append_style_event(
-                            str(bundle.book_id or ""), "ghost_semantic_shadow",
+                            str(_bundle_book_id or ""), "ghost_semantic_shadow",
                             f"hits={len(sem_hits)};top={sem_hits[0].get('similarity')};mode={request.mode}",
                         )
                 except Exception as sem_e:
                     logger.debug(f"[adaptive/stitch-ghost] 语义 shadow 失败（静默）: {sem_e}")
             except Exception as e:
                 logger.debug(f"[adaptive/stitch-ghost] 洗层失败（不阻塞生成）: {e}")
+
+            # ============================================================
+            # 终检（约束治理二期移位）：GHOST_DONE 帧前的最后一道——wash P2
+            # 修补稿/deai 抛光稿都必须过检（旧链 P2 修补稿不重检，是「拒稿时代」
+            # 的承重墙裂缝）。台账回调与预检同一去重包装（同一命中不记两次）；
+            # local_only（shadow 约束）由登记册 status 驱动，过滤后不进帧。
+            # ============================================================
+            try:
+                ghost_warnings = check_ghost_text(
+                    text, bundle, canon_node_ids_by_label=_label_map,
+                    # ⚠ 不传 all_names：候选宇宙走 bundle 内省路径
+                    # （_bundle_all_names 只收 character/asset——势力是组织不是
+                    # 物件；显式传 proper_nouns() 会混入全类型名，语料库口径分叉）
+                    visible_names=list(proper_nouns or []),
+                    off_scene_locations=_off_scene_loc_names,
+                    on_event=_on_guard_event,
+                )
+                ghost_warnings = [w for w in ghost_warnings if not w.get("local_only")]
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] 快检失败（不阻塞生成）: {e}")
+            if breaker_open:
+                # 熔断降级指示（感知带可见）：自动修正已连续失败，转为仅提示
+                ghost_warnings.append({
+                    "kind": "quality_breaker",
+                    "span_text": "",
+                    "message": "自动修正连续失败，已暂时转为仅提示（不再拦截）",
+                })
+            # 知识平面 v3.1 join 埋点（§10 在线召回证据，只记录不 retry）：
+            # 死者开口类 warning 命中时回查对应条目是否在当次选择集内——
+            # 缺席即选择器漏召的直接证据，攒够样本后再决策自动补选重发
+            for w in ghost_warnings:
+                if (w.get("kind") or "") != "dead_speak":
+                    continue
+                _name = str(w.get("span_text") or "")
+                _sel_titles = set(kg.present_names) | set(kg.dead_names) | {
+                    k.split(":", 1)[1] for k in kg.selected_keys
+                    if k.startswith(("entity:", "asset:"))
+                }
+                trace_event(
+                    "kg_join_dead_speak",
+                    name=_name,
+                    entry_selected=_name in _sel_titles,
+                )
+            # stitch 语义抢拍闸（二期 shadow）：幽灵全文 vs 大纲就近节拍的语义
+            # 重合——字面闸（dock ≥4 字重叠）抓不住的改写式抢拍由向量补位。
+            # shadow 纪律：只落台账/trace 攒校准数据，不返修不切除不提示；
+            # 未配置 embedding API 内部零调用短路（SQLite 存储门控不挡纯 API
+            # 比对——is_embedding_api_configured 窄判定）。
+            try:
+                from backend.services.validation.semantic_overlap import (
+                    BEAT_RUSH_SHADOW_THRESHOLD,
+                    semantic_overlap_hits,
+                )
+
+                _rush_beats = outline_nearby(
+                    bundle.outline_text or "",
+                    (request.rolling_prefix or "") + "\n" + (request.fragment or ""),
+                )
+                if _rush_beats:
+                    _rush_hits = await semantic_overlap_hits(
+                        text, _rush_beats, threshold=BEAT_RUSH_SHADOW_THRESHOLD)
+                    if _rush_hits:
+                        _log_constraint_event(
+                            str(_bundle_book_id or ""), str(chapter_id),
+                            "stitch-beat-rush-semantic", "hit", reason="shadow",
+                            detail={
+                                "top": _rush_hits[0].get("similarity"),
+                                "segment": str(_rush_hits[0].get("segment") or "")[:40],
+                                "mode": request.mode,
+                            },
+                        )
+                        trace_event(
+                            "stitch_beat_rush_shadow",
+                            mode=request.mode, hits=len(_rush_hits),
+                            top=_rush_hits[0].get("similarity"),
+                        )
+            except Exception as e:
+                logger.debug(f"[adaptive/stitch-ghost] 语义抢拍 shadow 失败（静默）: {e}")
 
             # B5 人称漂移（约束治理一期 report-only）：叙述段第一人称密度超阈值
             # 落台账（signal-only——每发都记会污染 hit 语义），不上屏不进帧；
@@ -1508,7 +1892,7 @@ async def stitch_ghost(
                 _persona_density = _pd.get("density")
                 if _pd.get("sufficient") and _pd.get("density", 0) >= 2.0:
                     _log_constraint_event(
-                        str(bundle.book_id or ""), str(chapter_id), "persona-drift",
+                        str(_bundle_book_id or ""), str(chapter_id), "persona-drift",
                         "hit", reason="report_only_above_threshold",
                         detail={"density": _pd.get("density"), "mode": request.mode},
                     )
@@ -1522,7 +1906,8 @@ async def stitch_ghost(
             for pos in range(0, len(text), chunk_size):
                 yield build_sse_event("GHOST_CHUNK", "", delta=text[pos: pos + chunk_size])
                 await asyncio.sleep(frame_delay)
-            # warnings/wash/deai 均为向后兼容增量字段（无命中/旧前端缺省均为空/忽略）
+            # warnings/wash/deai/repaired/breaker_open 均为向后兼容增量字段
+            # （无命中/旧前端缺省均为空/忽略）
             yield build_sse_event(
                 "GHOST_DONE", "", text=text, word_count=len(text),
                 warnings=ghost_warnings,
@@ -1530,6 +1915,8 @@ async def stitch_ghost(
                 deai=deai_payload,
                 ghost_token=ghost_token,
                 sample_ids=sample_ids,
+                repaired=repaired_payload,
+                breaker_open=breaker_open,
             )
             trace_event(
                 "adaptive_stitch_complete",
@@ -1543,6 +1930,10 @@ async def stitch_ghost(
                 ghost_token=ghost_token,
                 sample_ids=sample_ids,
                 persona_density=_persona_density,
+                # 约束治理二期：返修环结果与熔断状态进 trace（校准与事故诊断面）
+                repair_action=str(repaired_payload.get("action") or ""),
+                repaired_count=int(repaired_payload.get("count") or 0),
+                breaker_open=int(breaker_open),
                 # P1-3（C1）短窗观测：原始上送 vs 截窗后实际进 prompt 的长度
                 rolling_prefix_raw_len=len(request.rolling_prefix or ""),
                 rolling_prefix_used_len=len(rolling_windowed),

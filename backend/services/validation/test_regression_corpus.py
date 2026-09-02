@@ -20,7 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from backend.services.context.scene_visibility import find_out_of_scene_hits
+from backend.services.context.scene_visibility import (
+    find_location_jump_hits,
+    find_out_of_scene_hits,
+)
 
 CORPUS_DIR = Path(__file__).parent / "regression_corpus"
 # 《最终武装》第 1 章开篇形态：林尘是唯一在场/提及者；势力「统合局」不入
@@ -30,8 +33,11 @@ UNIVERSE = ["林尘", "流光", "白霆", "血噬", "红月"]
 
 
 def _cases(filename: str) -> list:
-    data = json.loads((CORPUS_DIR / filename).read_text(encoding="utf-8"))
-    return data["cases"]
+    return _corpus(filename)["cases"]
+
+
+def _corpus(filename: str) -> dict:
+    return json.loads((CORPUS_DIR / filename).read_text(encoding="utf-8"))
 
 
 def _hits(text: str) -> list:
@@ -78,3 +84,35 @@ def test_flagship_incident_hits_liuguang_exact():
     )
     hits = _hits(case["text"])
     assert any(h["name"] == "流光" and h["verb"] == "拧" for h in hits)
+
+
+# ============================================================
+# 地点穿越闸（ghost-guard-location-jump，二期 shadow 出生）
+# ============================================================
+
+_LOCATION_JUMP = _corpus("location_jump_cases.json")
+OFF_SCENE_LOCATIONS = _LOCATION_JUMP["off_scene_locations"]
+
+
+@pytest.mark.parametrize(
+    "case", _LOCATION_JUMP["cases"], ids=lambda c: c["text"][:18]
+)
+def test_location_jump_corpus(case):
+    hits = find_location_jump_hits(case["text"], OFF_SCENE_LOCATIONS)
+    if case["expect"] == "no_hit":
+        assert not hits, f"合法样本误报：{hits} | {case['note']}"
+    elif case["expect"] == "exempt":
+        assert hits and all(h["exempt"] for h in hits), (
+            f"闪回豁免样本应产 exempt 而非真命中：{hits} | {case['note']}"
+        )
+    elif case["expect"] == "hit":
+        assert hits and not any(h["exempt"] for h in hits), (
+            f"穿越样本漏报（或被豁免吞掉）：{hits} | {case['note']}"
+        )
+
+
+def test_location_jump_flagship_verb_adjacency():
+    """旗舰断言：「走进了北岸要塞」必须由 走进×北岸要塞 本体命中。"""
+    case = _LOCATION_JUMP["cases"][0]
+    hits = find_location_jump_hits(case["text"], OFF_SCENE_LOCATIONS)
+    assert any(h["name"] == "北岸要塞" and h["verb"] == "走进" for h in hits)

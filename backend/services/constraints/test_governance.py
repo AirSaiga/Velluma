@@ -19,12 +19,15 @@ from types import SimpleNamespace
 from backend.services.constraints import events as constraint_events_mod
 from backend.services.constraints.prompt_sections import PromptSection, render_sections
 from backend.services.constraints.registry import (
+    REPAIR_NONE,
+    REPAIR_REWRITE,
     get_constraint,
+    repair_policy,
     scan_prompt_wording,
     status_of,
 )
 from backend.services.constraints.persona_drift import narrative_first_person_density
-from backend.services.validation.ghost_guard import check_ghost_text
+from backend.services.validation.ghost_guard import check_ghost_text, repair_eligible
 
 
 # ============================================================
@@ -40,7 +43,29 @@ def test_multilayer_constraint_associated_by_id():
 
 def test_unknown_constraint_status_falls_back_live():
     assert status_of("no-such-constraint") == "live"
-    assert status_of("ghost-guard-out-of-scene") == "shadow"
+    # 二期（2026-09-02）：out_of_scene 已转 live-warn；location_jump 仍 shadow
+    assert status_of("ghost-guard-out-of-scene") == "live"
+    assert status_of("ghost-guard-location-jump") == "shadow"
+
+
+def test_repair_policy_fail_closed():
+    """返修资格 fail-closed：未知 id/未声明一律 none；显式声明才返修。"""
+    assert repair_policy("no-such-constraint") == REPAIR_NONE
+    assert repair_policy("ghost-guard-dead-speak") == REPAIR_NONE      # 只提示
+    assert repair_policy("ghost-guard-cliche-hit") == REPAIR_NONE      # wash 辖区
+    assert repair_policy("ghost-guard-out-of-scene") == REPAIR_NONE    # 两级开关：进帧≠返修
+    assert repair_policy("ghost-guard-canon-leak") == REPAIR_REWRITE
+    assert repair_policy("ghost-guard-secret-leak") == REPAIR_REWRITE
+
+
+def test_repair_eligible_triple_gate():
+    """repair_eligible 三重门：kind 未登记 / status 非 live / 未声明 repair。"""
+    assert repair_eligible({"kind": "canon_leak", "span_text": "x"}) is True
+    assert repair_eligible({"kind": "secret_leak", "span_text": "x"}) is True
+    assert repair_eligible({"kind": "dead_speak", "span_text": "x"}) is False
+    assert repair_eligible({"kind": "out_of_scene", "span_text": "x"}) is False
+    assert repair_eligible({"kind": "location_jump", "span_text": "x"}) is False  # shadow
+    assert repair_eligible({"kind": "future_kind", "span_text": "x"}) is False
 
 
 def test_wording_lint_counts():
@@ -64,7 +89,7 @@ def test_event_schema_roundtrip(tmp_path, monkeypatch):
     ev = data["recent"][0]
     # 信用分不可补采字段：constraint_id + status_at_event + outcome + reason
     assert ev["constraint_id"] == "ghost-guard-out-of-scene"
-    assert ev["status_at_event"] == "shadow"
+    assert ev["status_at_event"] == "live"  # 二期转正后写入即 live（当时状态快照）
     assert ev["outcome"] == "hit" and ev["reason"] == "handling_verb_frame"
     assert ev["detail"]["name"] == "流光"
     assert ev["ts"]
@@ -147,7 +172,8 @@ def _bundle():
     )
 
 
-def test_out_of_scene_hit_marked_local_only():
+def test_out_of_scene_hit_live_warns_on_screen():
+    """二期转正：out_of_scene 命中不再带 local_only——上屏提示（live-warn）。"""
     events_log = []
     warnings = check_ghost_text(
         "工头炸在耳边：发什么愣！把流光左腿关节的螺栓给我拧紧了！",
@@ -157,8 +183,29 @@ def test_out_of_scene_hit_marked_local_only():
         on_event=lambda cid, outcome, reason, detail: events_log.append((cid, outcome, reason)),
     )
     hit = next(w for w in warnings if w["kind"] == "out_of_scene")
-    assert hit["span_text"] == "流光" and hit["local_only"] is True
+    assert hit["span_text"] == "流光" and "local_only" not in hit
     assert events_log and events_log[0][1] == "hit"
+
+
+def test_location_jump_shadow_stays_local_only():
+    """第六检（地点穿越）shadow 出生：命中带 local_only（只落台账不进帧）。"""
+    events_log = []
+    warnings = check_ghost_text(
+        "他收拾好东西，走进了北岸要塞的大门。",
+        _bundle(),
+        off_scene_locations=["北岸要塞"],
+        on_event=lambda cid, outcome, reason, detail: events_log.append((cid, outcome, reason)),
+    )
+    hit = next(w for w in warnings if w["kind"] == "location_jump")
+    assert hit["span_text"] == "北岸要塞" and hit["local_only"] is True
+    assert events_log and events_log[0] == (
+        "ghost-guard-location-jump", "hit", "transition_verb_frame")
+
+
+def test_location_jump_skipped_without_off_scene_locations():
+    """off_scene_locations=None（无场景钉/legacy 书）→ 第六检不跑——零变化契约。"""
+    warnings = check_ghost_text("他走进了北岸要塞。", _bundle())
+    assert not [w for w in warnings if w["kind"] == "location_jump"]
 
 
 def test_out_of_scene_flashback_exempt_never_warns():

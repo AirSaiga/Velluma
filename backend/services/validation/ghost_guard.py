@@ -69,6 +69,52 @@ GHOST_GUARD_CLICHE_MAX_PATTERNS = 5
 _SECRET_SPLIT_RE = re.compile(r"[\s，。；：:、！？!?,.;~—…·\"'「」『』()（）\[\]{}<>|-]+")
 
 
+# ============================================================
+# 约束登记册控制面（2026-09-02 二期）：warning kind ↔ constraint id 关联 +
+# status/repair 两开关读取。local_only 与返修资格都由登记册驱动——状态翻转
+# 即行为翻转，检查点不再硬编码。
+# ============================================================
+
+WARNING_CONSTRAINT_IDS: Dict[str, str] = {
+    "dead_speak": "ghost-guard-dead-speak",
+    "canon_leak": "ghost-guard-canon-leak",
+    "secret_leak": "ghost-guard-secret-leak",
+    "cliche_hit": "ghost-guard-cliche-hit",
+    "out_of_scene": "ghost-guard-out-of-scene",
+    "location_jump": "ghost-guard-location-jump",
+}
+
+
+def _is_shadow(constraint_id: str) -> bool:
+    """登记册读该约束是否 shadow（命中只落台账不进帧）。读不到登记册按
+    shadow 兜底——静默方向的遗忘是安全的（不打扰作者），反向必须显式。"""
+    try:
+        from backend.services.constraints import registry as _reg
+
+        return _reg.status_of(constraint_id) == _reg.STATUS_SHADOW
+    except Exception:
+        return True
+
+
+def repair_eligible(warning: Dict[str, Any]) -> bool:
+    """该 warning 是否有返修资格（缝合返修环消费）。
+
+    fail-closed 三重门：kind 未登记 / 约束 status 非 live / 未显式声明
+    repair 策略——任一不满足即 False（检出只提示，不动稿子）。
+    """
+    try:
+        from backend.services.constraints import registry as _reg
+
+        cid = WARNING_CONSTRAINT_IDS.get(str(warning.get("kind") or ""))
+        if not cid:
+            return False
+        if _reg.status_of(cid) != _reg.STATUS_LIVE:
+            return False
+        return _reg.repair_policy(cid) != _reg.REPAIR_NONE
+    except Exception:
+        return False
+
+
 def check_ghost_text(
     text: str,
     bundle: Optional[Any] = None,
@@ -80,6 +126,7 @@ def check_ghost_text(
     canon_node_ids_by_label: Optional[Dict[str, str]] = None,
     visible_names: Optional[List[str]] = None,
     all_names: Optional[List[str]] = None,
+    off_scene_locations: Optional[List[str]] = None,
     on_event=None,
 ) -> List[Dict[str, str]]:
     """幽灵草稿快检：返回 warnings: [{kind, span_text, message}]。
@@ -95,15 +142,19 @@ def check_ghost_text(
         visible_names: 在场/提及白名单（scene_visible_proper_nouns 同一产物，
             路由透传不重算）；None = 第五检不跑（零变化契约）
         all_names: 书级实体+资产名全集（第五检候选宇宙；bundle 形态自动取用）
+        off_scene_locations: 场景作用域外的已知地点名表（第六检候选；调用方
+            算好闭包传入——自身+祖先+后裔合法）；None = 第六检不跑（零变化契约）
         on_event: 约束事件回调 (constraint_id, outcome, reason, detail)——
-            out_of_scene 命中/闪回豁免的台账埋点；None = 不埋
+            out_of_scene/location_jump 命中与闪回豁免的台账埋点；None = 不埋
 
     Returns:
-        [{kind: dead_speak|canon_leak|secret_leak|cliche_hit|out_of_scene,
-        span_text, message, detail?, local_only?}], 上限 MAX_WARNINGS；
-        无输入/无命中/内部异常一律空列表（零报错契约）。detail 仅
-        cliche_hit/out_of_scene 携带；out_of_scene 带 local_only=True（shadow
-        出生——路由过滤后不进 GHOST_DONE 帧，只落 constraint_events）。
+        [{kind: dead_speak|canon_leak|secret_leak|cliche_hit|out_of_scene|
+        location_jump, span_text, message, detail?, local_only?}], 上限
+        MAX_WARNINGS；无输入/无命中/内部异常一律空列表（零报错契约）。
+        detail 仅 cliche_hit/out_of_scene/location_jump 携带；
+        **local_only 由约束登记册 status 驱动（二期控制面化）**——status=shadow
+        的约束命中带 local_only=True（路由过滤出 SSE 帧只落台账），转 live
+        即自动进帧，无需改本模块代码。
     """
     try:
         if not text or not isinstance(text, str):
@@ -210,10 +261,11 @@ def check_ghost_text(
         except Exception:
             pass  # 零报错契约：本类快检失败静默跳过
 
-        # ---- 5. out_of_scene：非在场/提及名单实体 × 上手级动词框架（shadow 出生，
-        # 2026-09-02 约束治理一期）——流光穿帮的输出侧镜像。白名单与称呼表同一
-        # 产物（路由透传 ctx.proper_nouns，不重算）；命中带 local_only=True 由
-        # 路由过滤出 SSE 帧；闪回豁免只落台账（outcome=exempt）连 warning 都不产。
+        # ---- 5. out_of_scene：非在场/提及名单实体 × 上手级动词框架（2026-09-02
+        # 约束治理一期 shadow 出生 → 二期转 live-warn）——流光穿帮的输出侧镜像。
+        # 白名单与称呼表同一产物（路由透传 ctx.proper_nouns，不重算）；命中是否
+        # 带 local_only 由登记册 status 驱动（shadow=只落台账）；闪回豁免只落
+        # 台账（outcome=exempt）连 warning 都不产。
         if visible_names is not None:
             try:
                 from backend.services.context.scene_visibility import find_out_of_scene_hits
@@ -234,7 +286,7 @@ def check_ghost_text(
                             pass  # 埋点失败不阻塞快检
                     if h.get("exempt"):
                         continue
-                    _hit_dict({
+                    warning = {
                         "kind": "out_of_scene",
                         "span_text": str(h.get("name") or ""),
                         "message": (
@@ -242,8 +294,46 @@ def check_ghost_text(
                             f"（动词「{h.get('verb')}」；若是有意的预告/回忆可忽略）"
                         ),
                         "detail": {"verb": h.get("verb")},
-                        "local_only": True,
-                    })
+                    }
+                    if _is_shadow("ghost-guard-out-of-scene"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
+        # ---- 6. location_jump：转场动词 × 场景作用域外已知地点名（2026-09-02
+        # 二期 shadow 出生）——用户实测「人物地点穿越」的确定性检出面。候选表
+        # 由调用方算闭包传入（自身+祖先+后裔合法）；无场景钉/legacy 书/空世界
+        # 时调用方传 None 整检关闭（零变化契约）。
+        if off_scene_locations is not None:
+            try:
+                from backend.services.context.scene_visibility import find_location_jump_hits
+
+                for h in find_location_jump_hits(text, off_scene_locations):
+                    if on_event is not None:
+                        try:
+                            if h.get("exempt"):
+                                on_event("ghost-guard-location-jump", "exempt", "flashback",
+                                         {"name": h.get("name"), "sentence": h.get("sentence")})
+                            else:
+                                on_event("ghost-guard-location-jump", "hit", "transition_verb_frame",
+                                         {"name": h.get("name"), "verb": h.get("verb")})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    if h.get("exempt"):
+                        continue
+                    warning = {
+                        "kind": "location_jump",
+                        "span_text": str(h.get("name") or ""),
+                        "message": (
+                            f"场景疑似穿越：本章场景不在「{h.get('name')}」，"
+                            f"正文却写「{h.get('verb')}」到那里（若是有意的转场可忽略）"
+                        ),
+                        "detail": {"verb": h.get("verb")},
+                    }
+                    if _is_shadow("ghost-guard-location-jump"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
             except Exception:
                 pass  # 零报错契约：本类快检失败静默跳过
 

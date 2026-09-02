@@ -9,7 +9,10 @@ schema 第一天带齐（导师审查硬性验收：数据不可补采，缺了�
 outcome, reason, detail}。
 
 - outcome: hit（检测命中）| drop（菜单件丢弃）| exempt（豁免命中，信号流
-  与真命中分列）| mute（静音）| rewrite（确定性改写）
+  与真命中分列）| mute（静音）| rewrite（确定性改写）；
+  二期返修环扩词（2026-09-02）：repair（带稿改写返修成功）| excise
+  （句级切除兜底成功）| reject（返修切除均失败，拒稿不上屏）|
+  breaker_open（章级滑窗拒稿熔断开启，降级为警示上屏）。
 - status_at_event 写入时从 registry 取——约束 promote/降级后历史事件仍可
   按当时状态分桶。
 

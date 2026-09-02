@@ -28,9 +28,10 @@ import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.v
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
 import GhostWarningsBar from '../../generation/presentation/GhostWarningsBar.vue'
 import GhostWashChip from '../../generation/presentation/GhostWashChip.vue'
+import GhostRepairedChip from '../../generation/presentation/GhostRepairedChip.vue'
 import { setExtraSparkParts, setSparkParts } from '../../generation/composables/useSparkDock'
 import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
-import { ghostActive, ghostWarnings, ghostWash, useGhostOriginal } from '../../generation/composables/useGhostDraft'
+import { ghostActive, ghostWarnings, ghostWash, ghostRepaired, useGhostOriginal } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
@@ -927,6 +928,8 @@ async function confirmDeleteChapter(ch: Chapter) {
                 <!-- C1 快检疑点条：幽灵在屏且有命中时接在挂件舱位（幽灵在屏时
                      挂件舱自身隐藏，此位恰好空出；只提示不拦截） -->
                 <GhostWarningsBar v-if="ghostActive && ghostWarnings.length" :warnings="ghostWarnings" />
+                <!-- 二期返修条（约束治理）：设定硬伤已自动修正（改写/删句）的薄荷条 -->
+                <GhostRepairedChip v-if="ghostActive && ghostRepaired" :repaired="ghostRepaired" />
                 <!-- 呈现平面洗层条（三平面分权 P1）：薄荷系「已规避」；用原稿=可逆学习 -->
                 <GhostWashChip
                   v-if="ghostActive && ghostWash.hits.length"

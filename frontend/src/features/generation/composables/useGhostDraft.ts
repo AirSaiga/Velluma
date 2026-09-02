@@ -54,6 +54,30 @@ const WARNING_KIND_LABELS: Record<GhostWarning['kind'], string> = {
   dead_speak: '死者开口',
   canon_leak: '疑似泄底',
   secret_leak: '私有设定外泄',
+  // 二期扩（约束治理 2026-09-02）
+  cliche_hit: '禁忌词',
+  out_of_scene: '人物不在场',
+  location_jump: '地点穿越',
+  quality_breaker: '自动修正暂停',
+}
+
+/** kind → 人话标签（未登记 kind 回退原串——repaired chip 与汇总共用） */
+export function warningKindLabel(kind: string): string {
+  return (WARNING_KIND_LABELS as Record<string, string>)[kind] || kind
+}
+
+/** 二期返修环结果（GHOST_DONE 增量字段）：自动修正了 N 处硬伤 */
+export const ghostRepaired = ref<{ count: number; kinds: string[]; action: string } | null>(null)
+/** 拒稿熔断开启（自动修正连续失败转为仅提示）——感知带指示数据源 */
+export const ghostBreakerOpen = ref(false)
+
+/** GHOST_DONE 帧到达时灌入返修环结果（useAdaptiveAssist 调用；随 begin 重置）。 */
+export function setGhostRepaired(
+  repaired?: { count: number; kinds: string[]; action: string },
+  breakerOpen?: boolean,
+): void {
+  ghostRepaired.value = repaired && repaired.count > 0 ? repaired : null
+  ghostBreakerOpen.value = breakerOpen === true
 }
 
 /**
@@ -160,8 +184,24 @@ export function beginGhost(
   ghostDegraded.value = degraded
   ghostWarnings.value = []
   ghostWash.value = { hits: [], original_text: '' }
+  ghostRepaired.value = null
+  ghostBreakerOpen.value = false
   ghostAnchorPos = anchorPos ?? null
   ghostActive.value = true
+}
+
+/**
+ * 二期质量拒稿逃生舱（约束治理 2026-09-02）：后端返修/切除均未通过、幽灵
+ * 不上屏时，作者可裁决「仍以疑点提示上屏」——被拒原稿以普通幽灵形态灌回
+ * （Enter 采纳/Esc 蒸发同契约；疑点清单由调用方随 setGhostWarnings 附）。
+ */
+export function materializeRejectedGhost(
+  text: string,
+  source: Exclude<GhostSource, null> = 'stitch',
+): void {
+  if (!text) return
+  beginGhost(source)
+  appendGhost(text)
 }
 
 /** 向文档插入带 mark 的文本（单段内联追加或多段落块追加）。 */

@@ -49,9 +49,12 @@ export interface CanonHint {
 /**
  * 幽灵草稿上屏前快检疑点（P5 C1，后端 ghost_guard 纯算法产；只提示不拦截）。
  * kind：dead_speak=死者开口 / canon_leak=canon 私有标签泄底 / secret_leak=私有设定片段外泄
+ * 二期扩（2026-09-02 约束治理二期）：cliche_hit=禁忌面命中 / out_of_scene=人物不在场
+ * （live-warn 转正）/ location_jump=地点穿越（shadow 攒数中）/ quality_breaker=
+ * 自动修正熔断降级指示（返修环连续失败，转为仅提示）。
  */
 export interface GhostWarning {
-  kind: 'dead_speak' | 'canon_leak' | 'secret_leak'
+  kind: 'dead_speak' | 'canon_leak' | 'secret_leak' | 'cliche_hit' | 'out_of_scene' | 'location_jump' | 'quality_breaker'
   /** 命中触发词（实体名/别名/私有标签/秘密关键短语） */
   span_text: string
   /** 人话说明（含「可忽略」口径——回忆/闪回属合法用法） */
@@ -400,8 +403,17 @@ export const adaptiveApi = {
         /** P5 回流对齐令牌 + 本发注入样本 id（采纳/蒸发埋点回传用） */
         ghost_token?: string
         sample_ids?: string[]
+        /** 二期返修环结果：自动修正了 N 处硬伤（action=repaired/excised；空=未触发） */
+        repaired?: { count: number; kinds: string[]; action: string }
+        /** 拒稿熔断开启（自动修正连续失败，本次起转为仅提示） */
+        breaker_open?: boolean
       }) => void
       onError?: (error: string) => void
+      /**
+       * 二期质量拒稿（code=quality_reject）：返修/切除均失败，幽灵不上屏。
+       * 载荷带被拒原稿与疑点清单——逃生舱「仍以疑点提示上屏」由调用方裁决。
+       */
+      onReject?: (payload: { message: string; mode: string; text: string; warnings: GhostWarning[] }) => void
     },
     signal?: AbortSignal,
   ) => {
@@ -422,6 +434,18 @@ export const adaptiveApi = {
             wash: payload.wash || undefined,
             ghost_token: payload.ghost_token || undefined,
             sample_ids: Array.isArray(payload.sample_ids) ? payload.sample_ids : undefined,
+            repaired: payload.repaired && payload.repaired.count ? payload.repaired : undefined,
+            breaker_open: payload.breaker_open || undefined,
+          })
+          return true
+        } else if (payload.event === 'GHOST_REJECT') {
+          // 二期质量拒稿：自动修正未通过，幽灵不上屏（逃生舱载荷随车）
+          const rejectWarnings: GhostWarning[] = Array.isArray(payload.warnings) ? payload.warnings : []
+          callbacks.onReject?.({
+            message: payload.message || '这次没能写出合格的续写',
+            mode: payload.mode || 'stitch',
+            text: payload.text || '',
+            warnings: rejectWarnings,
           })
           return true
         } else if (payload.event === 'ERROR' || payload.event === 'GHOST_ERROR') {
