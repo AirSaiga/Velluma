@@ -35,6 +35,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - WorldviewUpdate: 世界观/设定更新
 """
 
+import math
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -223,7 +224,13 @@ def merge_timeline_view(existing: Optional[dict], patch: Dict[str, Any]) -> dict
 
     契约（与前端 engine/timelineView.ts 同构）：
     - cursor：日计数，非负整数（非 bool）；None = 删除键（回创世）
-    - range：{start, end} 年份，整数且 1 <= start < end；None = 删除键（回自动视野）
+    - range：{start, end} 年份；None = 删除键（回自动视野）。
+      编码约定（2026-09-02 浮点化，滚轮缩放产日精度窗口）：窗口日计数 =
+      [round((start-1)*365), round(end*365))——start=1+起日/365（1 基年坐标），
+      end=止日/365（0 基「已完成年数」坐标）。两坐标系相差整 1 年：整数年与旧语义
+      逐日等价（start=首年、end=末年的下一年，存量数据零迁移）；浮点窗口落在单年
+      内时 start 可大于 end 近 1 年。合法性只看日空间：start >= 1 且窗口非空——
+      end > start-1 且名义跨度 >= 1 天（(end-(start-1))*365 >= 1）
     - 未知键静默忽略（前向兼容）；已知键值非法抛 ValueError（路由层转 400）
     """
     merged = dict(existing or {})
@@ -236,16 +243,21 @@ def merge_timeline_view(existing: Optional[dict], patch: Dict[str, Any]) -> dict
                 raise ValueError("cursor 须为非负整数日计数")
             merged[key] = value
         elif key == "range":
+            start = value.get("start") if isinstance(value, dict) else None
+            end = value.get("end") if isinstance(value, dict) else None
             if (
                 not isinstance(value, dict)
-                or isinstance(value.get("start"), bool)
-                or isinstance(value.get("end"), bool)
-                or not isinstance(value.get("start"), int)
-                or not isinstance(value.get("end"), int)
-                or value["start"] < 1
-                or value["end"] <= value["start"]
+                or isinstance(start, bool)
+                or isinstance(end, bool)
+                or not isinstance(start, (int, float))
+                or not isinstance(end, (int, float))
+                or not math.isfinite(start)
+                or not math.isfinite(end)
+                or start < 1
+                or end <= start - 1
+                or (end - (start - 1)) * 365 < 1
             ):
-                raise ValueError("range 须为 {start, end} 整数年份，且 1 <= start < end")
+                raise ValueError("range 须为 {start, end} 年份（整数或浮点），start >= 1 且日精度窗口非空")
             merged[key] = {"start": value["start"], "end": value["end"]}
         # 未知键：忽略
     return merged

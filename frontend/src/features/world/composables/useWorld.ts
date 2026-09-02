@@ -119,6 +119,16 @@ function applyTimelineView(bookId: string, view: TimelineViewState) {
   }
 }
 
+/**
+ * 时间轴 UI 状态全量快照补丁（cursor + range 两键一起带）。
+ * 服务端是读-改-写合并，两个调用点若分头发 PATCH（range 立即 / cursor 300ms 防抖）
+ * 慢请求会被后到的请求用旧快照覆盖丢键（缩放落盘曾被游标落盘覆盖）——
+ * 全量快照让「后写赢」恒为一致状态，与到达顺序无关。
+ */
+function buildViewPatch(): { cursor: number; range: TimelineRange | null } {
+  return { cursor: Math.floor(currentTime.value), range: timelineRange.value }
+}
+
 function flushPersistView() {
   persistViewTimer = null
   const id = loadedBookId.value
@@ -130,7 +140,7 @@ function flushPersistView() {
   } catch {
     /* 存不进就当会话级 */
   }
-  worldApi.patchTimelineView(id, { cursor }).catch(() => {
+  worldApi.patchTimelineView(id, buildViewPatch()).catch(() => {
     /* 离线/重启竞态：本地兜底键已留，下次加载迁移补写 */
   })
 }
@@ -161,7 +171,7 @@ function setTimelineRange(range: TimelineRange | null) {
       /* 同上 */
     }
   }
-  worldApi.patchTimelineView(id, { range }).catch(() => {
+  worldApi.patchTimelineView(id, buildViewPatch()).catch(() => {
     /* 失败：本地 ref 已生效，本次会话内视野仍正确 */
   })
 }

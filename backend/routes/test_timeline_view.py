@@ -59,16 +59,32 @@ class MergeTimelineViewTest(unittest.TestCase):
     def test_rejects_invalid_range(self):
         for bad in (
             {"start": 0, "end": 5},      # start < 1
-            {"start": 5, "end": 5},      # end <= start
-            {"start": 6, "end": 5},
-            {"start": 1.5, "end": 5},    # 非整数
+            {"start": 6, "end": 5},      # end <= start-1（日空间窗口为空）
+            {"start": 2.0, "end": 1.001},  # 名义跨度 < 1 天（0.365 天）
+            {"start": float("nan"), "end": 5},   # 非有限数
+            {"start": 1, "end": float("inf")},
             {"start": 1},                # 缺键
-            {"start": True, "end": 5},   # bool 不是 int
+            {"start": True, "end": 5},   # bool 不是数值
             "1-5",
             [1, 5],
         ):
             with self.assertRaises(ValueError, msg=f"range={bad!r}"):
                 merge_timeline_view(None, {"range": bad})
+
+    def test_accepts_float_years(self):
+        # 2026-09-02 起浮点年合法（滚轮缩放的日精度窗口）
+        merged = merge_timeline_view(None, {"range": {"start": 2157.5, "end": 2158.0}})
+        self.assertEqual(merged["range"], {"start": 2157.5, "end": 2158.0})
+
+    def test_accepts_single_year_windows(self):
+        # 坐标约定：start=1+起日/365，end=止日/365——窗口落在单年内时 start 可大于 end
+        # 整数 {5,5} = 「只看第 5 年」（365 天窗口），旧规则误判为空窗口
+        merged = merge_timeline_view(None, {"range": {"start": 5, "end": 5}})
+        self.assertEqual(merged["range"], {"start": 5, "end": 5})
+        # 实测事故对：2171 年内的 132 天窗口（start > end 近 1 年，日空间非空合法）
+        pair = {"start": 2171.186301369863, "end": 2170.5479452054797}
+        merged = merge_timeline_view(None, {"range": pair})
+        self.assertEqual(merged["range"], pair)
 
 
 if __name__ == "__main__":
