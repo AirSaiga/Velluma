@@ -47,7 +47,8 @@ async def _spine_intent(chapter_id: str, db) -> str:
 async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 1500, **kw) -> Dict:
     """挂件生发。由 orchestrator 调度，产出写回世界模型缓存。
 
-    kw 可带 direction_weights（5 叙事方向权重），碎片按此分布生成并自标 direction。
+    kw 可带 salience_hints（B7 热层具名提示，SALIENCE_DOCK_LANE 单车道注入）；
+    direction_weights 已退役（B7 忽略；direction 标注仅存分析面）。
     """
     direction_weights = kw.get("direction_weights") or None  # 已退役（B7 忽略）
     # B7 热层单车道：dock 消费 salience 六槽热集的具名提示（A/B 闸：

@@ -145,7 +145,8 @@
   "t_source": "chapter_anchor", // chapter_anchor | prev_anchor | max_event | zero
   "presence": [ { "entity_id": "…", "name": "林尘", "alive": true,
                   "location_name": "北岸要塞", "label": "在途（进度 40%）",
-                  "importance": 8, "visibility": "public" } ],
+                  "importance": 8, "visibility": "public",
+                  "presence_source": null } ],  // "lexical"=位置从事件 note 词法推断（见下）
   "scene": { "location_id": "…", "name": "北岸要塞", "controlling_faction": "统合局" }, // 控制方可空，见下
   "foreshadows": [ { "ledger_key": "…", "content": "红月的秘密", "chapters_open": 15 } ],
   "expectations": [ { "type": "mystery", "description": "身世揭示", "tension": 8 } ],
@@ -153,7 +154,8 @@
 }
 ```
 
-- 时刻解析复用 `resolve_narrative_time` 四级降级；状态复用 `compute_world_state`——**与生成桥接同源是硬约束**（P2）。⚠ 该函数现返回纯 int，需扩为 `(t, t_source)` 并同步 3 处调用方（world_bridge 自身 / rag recall / state-for-chapter 路由），改动小但必须一次改齐。
+- 时刻解析复用 `resolve_narrative_time` 四级降级（W1 已扩为 `NarrativeTime(t, source)` 并同步调用方）；状态复用 `compute_world_state`——**与生成桥接同源是硬约束**（P2）。
+- **在场推导的词法兜底（2026-09-02 约束治理一期，`services/world/lexical_presence.py`）**：结构化参与者链接缺失的实体，若名字出现在事件 note 正文中则补进在场、标 `presence_source=lexical`（前端渲染「据正文推断」badge，兼作补录事件参与者的建议通道；情境浮卡的角色状态行同带该字段）；增强内建在 `compute_world_state` 仓库实现——切片条/浮卡/生成桥接同一口径；死者不复活、歧义不填、不回写事实源；存量可用 `scripts/backfill_event_participants.py` 回填。
 - **伏笔关联规则（验证后重写）**：PlotLedger **没有**实体/地点关联字段，硬交集不可算。降级为——基线取全书开放伏笔（`get_open_hooks` 现成；status 取值 open/closed/dropped），在场实体名/别名子串命中的提权排前（复用 recall `_world_echoes` 的匹配手法），本章新埋（`chapter_id` = 当前章）必进；`chapters_open = 当前章号 − created_at_chapter`（⚠ 该列存的是**章节号 Integer**，非章节 id）。
 - `controlling_faction` 判定：地点有坐标 → 对 territory_states 各 polygon 做点包含（射线法自写，仓库无 shapely 无现成工具）；无坐标（迁移来的地点恒为空）或多命中 → 该子块隐藏，不造数据。
 - 期待块对齐 `reader_mirror` 实际结构：`raw["expectations"]` 过滤 `status ∈ (setup, accumulating)`，字段为 `type/description/current_tension`（与 settings_bundle `_reader_expectations_view` 同源，原稿的 `content` 字段名有误）。

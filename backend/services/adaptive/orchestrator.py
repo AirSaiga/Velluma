@@ -77,9 +77,8 @@ class AdaptiveOrchestrator:
         self._sync_inflight: set = set()  # 停顿档同步组件在飞标记（跨心跳去重，防慢端点下并发双烧 LLM）
         self._last_dock_text_sig: str = ""
         self._last_dock_proj_sig: str = ""
-        # 方向权重（NLE-ADF 3.0）：5 叙事方向的偏好，每次心跳更新，dock_generator 据此分布生成
-        # B7：direction_weights 已退役（尸检见 docs/world-kernel-foundation.md 动因）
-        # 被采纳的方向（缝合降权用，compute 后清空）
+        # B7 已退役并删除字段：方向权重引擎 +「被采纳的方向」缝合降权
+        # （尸检与信号转世见 docs/world-kernel-foundation.md）
         # canon 感知缓存：recent_text 签名未变则复用上次 hints（纯算法但省 DB 查询）
         self._last_canon_text_sig: str = ""
         # 组件注册（延迟 import 避免循环）
@@ -198,7 +197,7 @@ class AdaptiveOrchestrator:
                         continue
                     # 停顿心跳同步组件统一透传实时段落（前端光标段纯文本）——
                     # dock_generator/canon_watch 据此锚定「作者当前段落」；
-                    # dock 另带方向权重（LLM 据此分布生成）
+                    # dock 另可带 salience 具名提示行（B7 单车道注入，取代旧方向权重）
                     extra: Dict[str, Any] = {"recent_text": state.recent_text or ""}
                     self._sync_inflight.add(act.component)
                     try:

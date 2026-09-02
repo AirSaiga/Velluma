@@ -21,7 +21,8 @@
 
 **已存在的相邻设施**（本设计在其上生长，不另起炉灶）：
 
-- 章节大纲（自由文本）：副驾「章节」tab 可编辑，心跳请求已携带
+- 章节大纲（自由文本）：副驾「打算」tab 的大纲编辑卡可编辑（2026-08-22 副驾
+  重排前旧称「章节」tab），心跳请求已携带
   `has_outline`/`outline_text`，是点火卡的唯一燃料；
 - 点火卡（`IgnitionCard.vue`）：空章 + 无生成 + 无幽灵时出现在画布中央，
   两态（有大纲→「⚡ 写个开头」/ 无大纲→引导写大纲），可 dismiss（章内关闭）；
@@ -120,16 +121,22 @@
 └──────────────────────────────────────┘
 ```
 
-- 意图输入失焦即存（`PATCH /chapters/{id}/spine`），一个字不写直接开写也毫无亏欠；
-- 「✨ AI 建议」点击 → `POST /chapters/{id}/spine-suggest`（1×creative，输入：
+- 意图输入失焦即存（`PATCH /api/chapters/{id}/adaptive/spine`），一个字不写直接开写也毫无亏欠；
+- 「✨ AI 建议」点击 → `POST /api/chapters/{id}/adaptive/spine-suggest`（1×creative，输入：
   大纲 + 世界切片 + 前情回响 + 开放伏笔 + 上一章 spine 的未兑现锚点）→ 预填
   意图 + 3-5 锚点 chips，作者逐条收下/改掉/删掉，**未收下的不落库**；
 - dismiss 行为沿用现状（章内关闭，切章重置）。
 
 ### 3.2 写作中：副驾 + 感知带
 
-- **副驾「章节」tab** 顶部加「谋篇」区：意图一行 + 锚点 chips（就地编辑/增删/
-  划掉= dropped）；有大纲时显示「从大纲抓建议」。
+- **副驾「打算」tab**（旧稿称「章节」tab——2026-08-22 副驾重排为 打算/此刻/
+  本章/检查 后，谋篇区落在「打算」）：SpinePanel 谋篇区——意图一行 + 锚点
+  chips（就地编辑/增删/划掉= dropped）；有大纲时显示「从大纲抓建议」。
+- 意图输入的保存链（7003e4e，2026-09-01 丢稿修复后）：面板本地草稿 + 输入即
+  600ms 防抖提交 + 失焦兜底（旧「单向 value + 仅失焦 @change」在失焦前遇心跳
+  重渲染即被清空，输入从未进保存链）→ 入本地状态后 2s 防抖自动保存；切章/
+  离页时在途防抖**冲刷落库不丢弃**（`useChapterSpine._flushPendingSave`，回包
+  快照守卫防串章）。章首复合卡（§3.1）的意图输入仍为失焦即存。
 - **感知带顶部**加一条极细进度行（默认开，可关）：`意图短语 · ⚑⚑⚐⚐` 样式，
   hover 出锚点清单。锚点判 hit 时原地打勾（玩具感的来源——像划掉 todo 的满足
   感，不是弹窗祝贺）。
@@ -158,8 +165,8 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 
 | 端点 | 说明 |
 |---|---|
-| `PATCH /api/chapters/{id}/spine` | 存/改脉络（轻量，不进正文版本历史，不触发 world-refresh） |
-| `POST /api/chapters/{id}/spine-suggest` | 1×creative 建议，**不落库**；REASONING_DISABLED 不适用（要质量，走 creative 默认）；max_tokens = `budget.SPINE_SUGGEST_MAX_TOKENS`（2400，2026-08-25 由 800 上调——800 曾被 MiMo 隐藏思考整个烧光返回空）；空输出兜底重试一次（关思考小预算再试，仍空则按空建议返回，契约不变） |
+| `PATCH /api/chapters/{id}/adaptive/spine` | 存/改脉络（轻量，不进正文版本历史，不触发 world-refresh） |
+| `POST /api/chapters/{id}/adaptive/spine-suggest` | 1×creative 建议，**不落库**；REASONING_DISABLED 不适用（要质量，走 creative 默认）；max_tokens = `budget.SPINE_SUGGEST_MAX_TOKENS`（2400，2026-08-25 由 800 上调——800 曾被 MiMo 隐藏思考整个烧光返回空）；空输出兜底重试一次（关思考小预算再试，仍空则按空建议返回，契约不变） |
 
 ### 4.2 心跳集成（`adaptive.py` heartbeat）
 

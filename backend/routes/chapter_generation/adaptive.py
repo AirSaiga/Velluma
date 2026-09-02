@@ -84,8 +84,9 @@ from backend.services.prompts.adaptive_prompts import (
     build_opening_prompt,
     build_outline_expand_prompt,
 )
-# C1 上屏前快检（P5 §5.1）：完整文本生成后纯算法三类疑点（死者开口/canon
-# 泄底/私有秘密外泄），随 GHOST_DONE 附 warnings——只提示不拦截（§9 红线）
+# C1 上屏前快检（P5 §5.1）：完整文本生成后纯算法疑点检查——四类上帧（死者
+# 开口/canon 泄底/私有秘密外泄/禁忌面命中），out_of_scene shadow 不进帧只落
+# 台账；随 GHOST_DONE 附 warnings——只提示不拦截（§9 红线）
 from backend.services.validation.ghost_guard import check_ghost_text
 from backend.services.observability.run_trace import trace_event
 from backend.services.utils.logging import get_runtime_logger
@@ -1347,7 +1348,7 @@ async def stitch_ghost(
                 logger.debug(f"[adaptive/stitch-ghost] deai 抛光失败（不阻塞生成）: {e}")
 
             # C1 上屏前快检（P5 §5.1）：完整文本（含字数闸截断/碎片拼回后的
-            # 最终形态）生成后、GHOST_DONE 帧前跑纯算法三类疑点检查（<10ms
+            # 最终形态）生成后、GHOST_DONE 帧前跑纯算法疑点检查（四类上帧 + out_of_scene shadow 只落台账；<10ms
             # 零 LLM）。快检自身零报错（内部吞异常恒返回列表），此处再包一层
             # 防御——warnings 是柔性增量字段，绝不让它阻塞幽灵推送。
             ghost_warnings: List[Dict] = []

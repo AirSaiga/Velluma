@@ -377,3 +377,26 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 | 设置 | 设置弹窗「实验：去 AI 味小模型」折叠分区 + `POST /api/system/deai/test` 试一试（表单实时值；事实闸保底回退不算失败） | ✅ 本批 |
 | 训练对收集 | 写作台浮窗「记改前/记改后」两步配对 → `data/deai_pairs.jsonl` → `ingest_behavior_pairs.py` 去重+六闸 → `behavior_sft.jsonl`（数据飞轮手动起点，导师评价轮采纳：bad=主模型原样产出、good=作者亲手版） | ✅ 本批 |
 | v2 扩量 | 叙事类语料收集（deai/data/inbox/ 收集箱，v1 训练语料无小说文本）→ 六闸管线 → 重训重部署 → 仅需换配置里的部署名；句级分片长稿覆盖 / GHOST_DONE `deai` 字段前端消费（抛光 chip）待评估 | ⏸ 搁置（等真实使用回收） |
+
+## 15. 地点内部构造期（2026-09-01，`docs/location-interior.md` 唯一权威）
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| v1+二期 | `world_locations.parent_id` 树零迁移（上图权=parent_id IS NULL 铁律）/ LocationDetailDrawer 二级面板面包屑下钻 / 树删 BFS 父前子后+子树快照撤销 / 幂等闸改同父同名 / 速记与事件表单房间级全路径消歧 | ✅ 3271bd0 |
+| 场景作用域 | `scene_scope_ids` 钉房间祖先算在场；场景身份块带地点档案（无 intro 零变化）；`scene.path` 全路径 | ✅ 3271bd0 |
+| 父地点闸 | update_location 补父存在+同书+非自身+非子孙防环（与 create 同口径，553f4f7） | ✅ 553f4f7 |
+
+## 16. 约束治理期（2026-09-02 一期施工，`docs/constraint-governance.md` 唯一权威）
+
+执法可靠性序=供给切断>输出代码闸>确定性改写>prompt 偏置>事后审计；把「约束」从 prompt 文案升格为注册管理的代码资产。
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| 注册表+台账 | `services/constraints/registry.py` 约束登记册（id/layers/enforcement/status=shadow\|live\|report-only\|retired）+ `events.py`（data/constraint_events.jsonl，信用分数据不可补采） | ✅ 一期 |
+| prompt 编译器 | `prompt_sections.py` 剂量治理分节编译（dock 首租户：节拍子句挂 has_outline_nearby、自检清单已删、强措辞 15+→≤4） | ✅ 一期 |
+| ghost 第五检 | out_of_scene shadow 出生（warning 带 local_only 不进 GHOST_DONE，白名单=称呼表同一产物透传）；回归语料库 `validation/regression_corpus/` 准入即测试；promote 门槛=语料全对+≥20 次真实命中 FP<10% | ✅ shadow |
+| 输入侧 | `scene_visibility.py`（称呼表过滤迁此+after_text 泄漏手术——仅出现于胶囊后文的名字不进称呼表，挂账残留见 constraint-governance §8）；B6 数据缺口=event_parser 三级匹配+`lexical_presence.py` 词法兜底（presence_source=lexical）+切片条「据正文推断」badge+`scripts/backfill_event_participants.py` 回填 | ✅ 一期 |
+| persona 漂移 | `persona_drift.py`（B5 report-only：叙述段第一人称密度超阈值落台账） | ✅ report-only |
+| 明确不做 | constrained decoding / 实时 judge 拦截 / 多轮重试（dock 靠过采样 4-6 枚代替） | — |
+
+另：2026-09-01 死代码批量归档 38 件（314e414——rag 旧检索器全家/V4.0 config 参数推导层等迁 `backend/_deprecated/`，无行为变化，不设期）。
