@@ -1,25 +1,34 @@
 <script setup lang="ts">
 /**
- * 大纲板路由页面（V3.1 F1 占位 / F5 实现）。
+ * 大纲板路由页面（方案 A · 故事线俯视板，2026-09-03 重写）。
  *
- * 规格 §3 + §8：卷/弧 → 章节卡的看板视图（卡片列=弧，卡=章节卡）。
- * F1 阶段：占位，仅展示章节列表（平铺，无看板列）。
- * F5 阶段：实现完整的看板拖拽 + 弧管理 + 章节卡编辑。
+ * 书级规划面：一根章号轴俯视全书（张力折线/伏笔弧线/真相揭示朱点），
+ * 下方章卡纵列承载每章规划（打算/关键情节进度/伏笔埋收/大纲就地编辑）。
+ * 编辑只碰规划层——正文永远回写作台写（画布即事实源不变）；
+ * 与世界页时间轴正交：那边按世界时间排设定事实，这边按章号排叙事节奏。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
+import { useStoryline } from '../composables/useStoryline'
+import {
+  alignTensionSamples,
+  anchorProgress,
+  buildStoryArcs,
+  chapterMarks,
+  spineIntentText,
+} from '../engine/storyline'
+import StorylineAxis from '../presentation/StorylineAxis.vue'
+import ChapterCard, { type ChapterCardData } from '../presentation/ChapterCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 const { showToast } = useToast()
 
-// 解构 ref 供模板使用
 const currentBook = store.currentBook
-const chapters = store.chapters
 const sortedChapters = store.sortedChapters
 
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
@@ -32,6 +41,118 @@ watch(
   },
   { immediate: true }
 )
+
+// ===== 数据聚合（spine/伏笔/张力/真相 四路并行）=====
+
+const chapterIds = computed(() => sortedChapters.value.map((c) => c.id))
+const { spines, ledgers, tensionSamples, reveals } = useStoryline(bookIdFromRoute, chapterIds)
+
+const numberById = computed(() => {
+  const m = new Map<string, number>()
+  sortedChapters.value.forEach((c) => m.set(c.id, c.chapter_number))
+  return m
+})
+const validNumbers = computed(() => new Set(sortedChapters.value.map((c) => c.chapter_number)))
+
+const arcs = computed(() => buildStoryArcs(ledgers.value, numberById.value, validNumbers.value))
+const tensionAligned = computed(() => alignTensionSamples(tensionSamples.value, validNumbers.value))
+
+const openArcCount = computed(() => arcs.value.filter((a) => !a.resolved).length)
+const revealTotal = computed(() => {
+  let n = 0
+  for (const labels of reveals.value.values()) n += labels.length
+  return n
+})
+
+const axisChapters = computed(() =>
+  sortedChapters.value.map((c) => ({
+    id: c.id,
+    number: c.chapter_number,
+    title: c.title || c.chapter_name || '',
+  }))
+)
+
+const cards = computed<ChapterCardData[]>(() =>
+  sortedChapters.value.map((c) => {
+    const n = c.chapter_number
+    const spine = spines.value[c.id] ?? null
+    const prog = anchorProgress(spine)
+    const marks = chapterMarks(arcs.value, n)
+    return {
+      id: c.id,
+      number: n,
+      title: c.title || c.chapter_name || '',
+      status: c.status,
+      wordCount: c.word_count ?? 0,
+      outline: c.outline_text || '',
+      intentText: spineIntentText(spine),
+      anchorDone: prog.done,
+      anchorTotal: prog.total,
+      revealLabels: reveals.value.get(n) ?? [],
+      planted: marks.planted,
+      resolved: marks.resolved,
+    }
+  })
+)
+
+// ===== 大纲就地编辑（2s 防抖落盘；失焦/收起立即冲账）=====
+
+const expandedId = ref<string | null>(null)
+const draft = ref('')
+const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function currentOutlineOf(chapterId: string): string {
+  return sortedChapters.value.find((c) => c.id === chapterId)?.outline_text || ''
+}
+
+async function flushSave() {
+  if (!expandedId.value) return
+  if (draft.value === currentOutlineOf(expandedId.value)) return
+  const id = expandedId.value
+  const text = draft.value
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  saveState.value = 'saving'
+  try {
+    await store.updateChapter(id, { outline_text: text })
+    if (expandedId.value === id && draft.value === text) saveState.value = 'saved'
+  } catch (e: any) {
+    saveState.value = 'error'
+    showToast('大纲保存失败：' + (e?.message || '未知错误'), 'error')
+  }
+}
+
+function onDraftInput(text: string) {
+  draft.value = text
+  if (saveState.value !== 'idle') saveState.value = 'idle'
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    flushSave()
+  }, 2000)
+}
+
+function toggleEdit(ch: ChapterCardData) {
+  if (expandedId.value === ch.id) {
+    flushSave()
+    expandedId.value = null
+    return
+  }
+  flushSave()
+  expandedId.value = ch.id
+  draft.value = ch.outline
+  saveState.value = 'idle'
+}
+
+onBeforeUnmount(() => {
+  if (saveTimer) clearTimeout(saveTimer)
+  flushSave()
+})
+
+// ===== 导航 =====
 
 function backToLibrary() {
   router.push({ name: 'library' })
@@ -46,11 +167,14 @@ function openChapter(chapterId: string) {
   }
 }
 
+function seekChapter(chapterId: string) {
+  // 瞬时滚动：smooth 依赖 rAF，窗口被遮挡/节流时会被冻结成不滚动
+  document.getElementById(`oc-${chapterId}`)?.scrollIntoView({ block: 'center' })
+}
+
 const creating = ref(false)
 
 async function newChapter() {
-  // 真正创建章节（store.createChapter 内部走 POST /api/books/{id}/chapters），
-  // 成功后跳转写作台并选中新章节
   const bookId = bookIdFromRoute.value || store.currentBookId.value
   if (!bookId) {
     showToast('请先选择一本书', 'warning')
@@ -60,7 +184,7 @@ async function newChapter() {
   creating.value = true
   try {
     const nextNumber =
-      chapters.value.reduce((max, c) => Math.max(max, c.chapter_number || 0), 0) + 1
+      sortedChapters.value.reduce((max, c) => Math.max(max, c.chapter_number || 0), 0) + 1
     const chapter = await store.createChapter({
       chapter_number: nextNumber,
       title: `第 ${nextNumber} 章`,
@@ -89,8 +213,9 @@ async function newChapter() {
         <div>
           <h1 class="page-title">大纲板</h1>
           <p class="page-subtitle">
-            {{ currentBook?.title || '' }} ·
-            {{ chapters.length }} 章
+            {{ currentBook?.title || '' }} · {{ sortedChapters.length }} 章
+            <template v-if="openArcCount">· {{ openArcCount }} 条伏笔未收</template>
+            <template v-if="revealTotal">· {{ revealTotal }} 处待揭真相</template>
           </p>
         </div>
       </div>
@@ -101,7 +226,7 @@ async function newChapter() {
     </header>
 
     <div class="outline-body">
-      <div v-if="chapters.length === 0" class="empty-state">
+      <div v-if="sortedChapters.length === 0" class="empty-state">
         <div class="empty-icon"><Icon name="document" :size="48" /></div>
         <h2>暂无章节</h2>
         <p>新建第一个章节开始规划你的故事。</p>
@@ -111,25 +236,29 @@ async function newChapter() {
         </button>
       </div>
 
-      <div v-else class="chapter-cards">
-        <p class="hint">
-          大纲板看板视图（卷/弧分列 + 拖拽排序）将在 F5 阶段实现。当前为平铺章节列表。
-        </p>
-        <article
-          v-for="ch in sortedChapters"
-          :key="ch.id"
-          class="chapter-card"
-          @click="openChapter(ch.id)"
-        >
-          <div class="card-header">
-            <span class="card-num">第 {{ ch.chapter_number }} 章</span>
-            <span v-if="ch.status" class="card-status">{{ ch.status }}</span>
-          </div>
-          <h3 class="card-title">{{ ch.title || ch.chapter_name || '(未命名)' }}</h3>
-          <p v-if="ch.outline_text" class="card-outline">{{ ch.outline_text.slice(0, 120) }}</p>
-          <p v-else class="card-outline muted">暂无大纲</p>
-        </article>
-      </div>
+      <template v-else>
+        <StorylineAxis
+          :chapters="axisChapters"
+          :arcs="arcs"
+          :tension="tensionAligned"
+          :reveals="reveals"
+          @seek="seekChapter"
+        />
+        <div class="chapter-list">
+          <ChapterCard
+            v-for="card in cards"
+            :key="card.id"
+            :chapter="card"
+            :editing="expandedId === card.id"
+            :draft="expandedId === card.id ? draft : ''"
+            :save-state="expandedId === card.id ? saveState : 'idle'"
+            @open="openChapter(card.id)"
+            @toggle-edit="toggleEdit(card)"
+            @draft-input="onDraftInput"
+            @draft-blur="flushSave"
+          />
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -146,7 +275,7 @@ async function newChapter() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 
 .header-left {
@@ -211,75 +340,11 @@ async function newChapter() {
   min-height: 400px;
 }
 
-.hint {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  padding: 0.5rem 0.75rem;
-  margin: 0 0 1rem;
-}
-
-.chapter-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0.75rem;
-}
-
-.chapter-card {
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
-  padding: 0.875rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.chapter-card:hover {
-  border-color: var(--accent-500);
-  transform: translateY(-1px);
-}
-
-.card-header {
+.chapter-list {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.375rem;
-}
-
-.card-num {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.card-status {
-  font-size: 0.625rem;
-  padding: 0.0625rem 0.375rem;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border-radius: 0.1875rem;
-}
-
-.card-title {
-  font-family: var(--font-heading);
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 0.375rem;
-}
-
-.card-outline {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  margin: 0;
-}
-
-.card-outline.muted {
-  color: var(--text-muted);
-  font-style: italic;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 60rem;
 }
 
 .empty-state {
