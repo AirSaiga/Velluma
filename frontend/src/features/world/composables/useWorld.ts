@@ -455,6 +455,7 @@ async function createEntity(
     entity_type: 'character' | 'faction' | 'asset'
     name: string
     intro?: string
+    group_name?: string | null
     props?: Record<string, unknown>
     canvas_x?: number | null
     canvas_y?: number | null
@@ -474,6 +475,7 @@ async function createEntity(
         entity_type: ent.entity_type,
         name: ent.name,
         intro: ent.intro,
+        group_name: ent.group_name,
         props: ent.props,
       })
       entities.value = [...entities.value, r]
@@ -495,6 +497,7 @@ async function deleteEntity(bookId: string, entityId: string) {
           entity_type: snap.entity_type,
           name: snap.name,
           intro: snap.intro,
+          group_name: snap.group_name,
           props: snap.props,
         })
         entities.value = [...entities.value, r]
@@ -626,6 +629,7 @@ type EntityArchivePatch = {
   visibility?: string
   intro?: string
   tags?: string[]
+  group_name?: string | null
   props?: Record<string, unknown>
   field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
   canvas_x?: number | null
@@ -839,8 +843,10 @@ async function deleteMapLayerData(bookId: string, layerId: string) {
   mapLayers.value = mapLayers.value.filter((l) => l.id !== layerId)
 }
 
-async function createMapStroke(bookId: string, color: string, width: number, points: Point[]) {
-  const stroke = await worldApi.createMapStroke(bookId, { color, width, points })
+async function createMapStroke(bookId: string, color: string, width: number, points: Point[], id?: string) {
+  // id 可选：undo/redo 幂等重建（2026-09-04 审计修复）——redo 重建带原 id，
+  // 之后 undo 删原 id 才不会 404
+  const stroke = await worldApi.createMapStroke(bookId, { color, width, points, ...(id ? { id } : {}) })
   mapStrokes.value = [...mapStrokes.value, stroke]
   return stroke
 }

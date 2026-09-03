@@ -133,7 +133,10 @@ async function removeLayer(bookId: string, layerId: string) {
   if (selectedLayerId.value === layerId) selectedLayerId.value = null
   pushEdit({
     undo: async () => {
+      // 幂等重建（2026-09-04 审计修复）：带原 id——redo 删的是原 id，
+      // 此前重建得新 id → redo 404、图层累积重复
       const r = await worldApi.createMapLayer(bookId, {
+        id: layerId,
         image_url: snap.image_url,
         x: snap.x,
         y: snap.y,
@@ -185,7 +188,8 @@ async function addStroke(bookId: string, color: string, width: number, points: P
       await useWorld().deleteMapStrokeData(bookId, s.id)
     },
     redo: async () => {
-      await useWorld().createMapStroke(bookId, color, width, points)
+      // 幂等重建（2026-09-04 审计修复）：带原 id——随后 undo 删原 id 不再 404
+      await useWorld().createMapStroke(bookId, color, width, points, s.id)
     },
   })
   return s
@@ -198,7 +202,8 @@ async function eraseStroke(bookId: string, strokeId: string) {
   await useWorld().deleteMapStrokeData(bookId, strokeId)
   pushEdit({
     undo: async () => {
-      await useWorld().createMapStroke(bookId, snap.color, snap.width, snap.points)
+      // 幂等重建（2026-09-04 审计修复）：带原 id——redo 删原 id 不再 404
+      await useWorld().createMapStroke(bookId, snap.color, snap.width, snap.points, strokeId)
     },
     redo: async () => {
       await useWorld().deleteMapStrokeData(bookId, strokeId)

@@ -35,6 +35,8 @@ export interface WorldEntityCreate {
   name: string
   intro?: string
   tags?: string[]
+  /** 单分组（2026-09-03 资产抽屉分组）：更新时显式传 null = 移出分组 */
+  group_name?: string | null
   props?: Record<string, unknown>
   /** 字段级真相分层（2026-09-03）：{ field_key: { level: private|partial, public_text?, reveal_chapter? } } */
   field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
@@ -385,14 +387,6 @@ export const worldApi = {
       body: JSON.stringify(body),
     }),
 
-  // ===== 推演 =====
-  getState: (bookId: string, t: number) =>
-    requestJson<WorldState>(`/books/${bookId}/world/state?t=${t}`),
-
-  /** 按章节解析叙事时间（本章锚→前序最近锚→事件最大时刻）后推演世界状态 */
-  getStateForChapter: (bookId: string, chapterId: string) =>
-    requestJson<WorldState>(`/books/${bookId}/world/state-for-chapter/${chapterId}`),
-
   /** 章节时刻的世界切片（在场/脚下/头顶的线 + 数据版本）——写作页切片条唯一数据源 */
   getSceneSlice: (bookId: string, chapterId: string) =>
     requestJson<SceneSlice>(`/books/${bookId}/world/scene-slice?chapter_id=${chapterId}`),
@@ -455,8 +449,8 @@ export const worldApi = {
 
   createMapLayer: (
     bookId: string,
-    data: { image_url: string; x: number; y: number; w: number; h: number },
-  ) =>
+    data: { image_url: string; x: number; y: number; w: number; h: number; id?: string },
+  ) =>  // id 可选：undo/redo 幂等重建（2026-09-04 审计修复，同地点/实体先例）
     requestJson<WorldMapLayer>(`/books/${bookId}/world/map/layers`, {
       method: 'POST',
       headers: JSON_HEADERS,
@@ -485,7 +479,7 @@ export const worldApi = {
 
   createMapStroke: (
     bookId: string,
-    data: { color: string; width: number; points: Point[] },
+    data: { color: string; width: number; points: Point[]; id?: string },  // id 可选：undo/redo 幂等重建
   ) =>
     requestJson<WorldMapStroke>(`/books/${bookId}/world/map/strokes`, {
       method: 'POST',

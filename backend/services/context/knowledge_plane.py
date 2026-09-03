@@ -245,6 +245,21 @@ def build_knowledge_entries(bundle: Any) -> List[KnowledgeEntry]:
             selector="恒选·世界观", hard=True,
         ))
 
+    # ---- 势力条目（2026-09-04 审计修复：faction 此前对生成层完全不存在）----
+    # 恒选软条目：势力是一本书的少数派（量级 ≤10、体量有界），作为「舞台归属」
+    # 应与世界观同权常驻；逃逸阀超预算时可整条丢（rank 同 entity 档）。
+    # 无 faction 书 bundle.factions 恒空 → 零条目（零变化契约）。
+    for f in (getattr(bundle, "factions", None) or []):
+        name = str(getattr(f, "name", "") or "")
+        body = str(getattr(f, "static_prompt", "") or "")
+        if not name or not body:
+            continue
+        entries.append(KnowledgeEntry(
+            kind="faction", key=f"faction:{name}", title=name, body=body,
+            aliases=[str(a) for a in (getattr(f, "aliases", None) or []) if str(a).strip()],
+            selector="恒选·势力", hard=False,
+        ))
+
     # ---- 关系条目（world 模式上游已按 t 过滤活跃边=时刻选择；legacy 原样）----
     for r in (getattr(bundle, "relationships", None) or []):
         src = getattr(r, "source_character", None)
@@ -315,8 +330,8 @@ def select_knowledge(
     mentioned: List[str] = []
 
     for e in entries:
-        if e.kind == "worldview" or e.kind == "hook":
-            # 恒选条目（选择器已标）
+        if e.kind in ("worldview", "hook", "faction"):
+            # 恒选条目（选择器已标）；faction 为软恒选——逃逸阀超预算时可整条丢
             selected.append(e)
             continue
         if e.kind in ("entity", "asset"):
@@ -353,8 +368,8 @@ def select_knowledge(
     total = sum(len(e.body) + len(e.title) for e in selected)
     if total > KG_BUDGET_CHARS:
         soft_order = [e for e in selected if not e.hard]
-        # 丢弃序：hook 最先（rank 0）、relation 次之、提及实体最后
-        rank = {"hook": 0, "relation": 1, "entity": 2, "asset": 2, "worldview": 3}
+        # 丢弃序：hook 最先（rank 0）、faction/relation 次之、提及实体最后
+        rank = {"hook": 0, "faction": 1, "relation": 2, "entity": 3, "asset": 3, "worldview": 4}
         soft_order.sort(key=lambda e: rank.get(e.kind, 2))
         dropped_keys = set()
         for e in soft_order:  # 从最不重要的一端（hook）开始丢
@@ -365,9 +380,9 @@ def select_knowledge(
             unselected.append({"key": e.key, "title": e.title, "reason": "预算整条丢弃"})
         selected = [e for e in selected if e.key not in dropped_keys]
 
-    # 渲染序：在场 → 死亡 → 绑定（资产随实体序）→ 关系 → 伏笔；世界观单独块
+    # 渲染序：在场 → 死亡 → 绑定（资产/势力随实体序）→ 关系 → 伏笔；世界观单独块
     order_rank = {
-        "entity": 0, "asset": 1, "relation": 2, "hook": 3, "worldview": 4,
+        "entity": 0, "asset": 1, "faction": 1, "relation": 2, "hook": 3, "worldview": 4,
     }
     selected.sort(key=lambda e: (
         order_rank.get(e.kind, 5),
@@ -686,6 +701,16 @@ def _prefix_signature(bundle: Any) -> tuple:
         spine_hash,
         _sig_hash("\n".join(_entity_sig_line(e) for e in (getattr(bundle, "entities", None) or []))),
         _sig_hash("\n".join(_asset_sig_line(a) for a in (getattr(bundle, "assets", None) or []))),
+        # 势力通路（2026-09-04）：势力档案是恒选前缀内容源——改势力设定必须换签名，
+        # 否则就是「改了设定舱/前缀不刷新」事故的下一个同类
+        _sig_hash("\n".join(
+            "|".join([
+                str(getattr(f, "name", "") or ""),
+                str(getattr(f, "static_prompt", "") or ""),
+                "|".join(str(a) for a in (getattr(f, "aliases", None) or [])),
+            ])
+            for f in (getattr(bundle, "factions", None) or [])
+        )),
         _sig_hash("\n".join(_rel_sig_line(r) for r in (getattr(bundle, "relationships", None) or []))),
         _sig_hash("\n".join(_hook_sig_line(h) for h in (getattr(bundle, "open_hooks", None) or []))),
         _sig_hash(_json.dumps(_worldview_items(getattr(bundle, "book", None)), ensure_ascii=False)),

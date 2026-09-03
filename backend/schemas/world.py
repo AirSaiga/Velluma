@@ -17,7 +17,15 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _norm_group_name(v: Optional[str]) -> Optional[str]:
+    """分组名归一：去首尾空白，空串按未分组（None）。"""
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
 
 
 # ============================================================
@@ -126,11 +134,14 @@ class WorldEntityBase(BaseModel):
     canvas_y: Optional[float] = Field(None, description="画布锚位 y")
     intro: str = Field("")
     tags: List[str] = Field(default_factory=list)
+    group_name: Optional[str] = Field(None, max_length=100, description="单分组（资产抽屉分组依据，组织元数据不进 prompt）")
     props: Dict[str, Any] = Field(default_factory=dict, description="档案字段（appearance/speech_style 等，表驱动 schema）")
     field_layers: Dict[str, Any] = Field(
         default_factory=dict,
         description="字段级真相分层：{field_key: {level: private|partial, public_text?, reveal_chapter?}}；缺键=公开",
     )
+
+    _norm_group = field_validator("group_name")(_norm_group_name)
 
 
 class WorldEntityCreate(WorldEntityBase):
@@ -148,8 +159,11 @@ class WorldEntityUpdate(BaseModel):
     canvas_y: Optional[float] = None
     intro: Optional[str] = None
     tags: Optional[List[str]] = None
+    group_name: Optional[str] = Field(None, max_length=100)  # exclude_unset 语义：显式传 null = 移出分组
     props: Optional[Dict[str, Any]] = None
     field_layers: Optional[Dict[str, Any]] = None
+
+    _norm_group = field_validator("group_name")(_norm_group_name)
 
 
 class WorldEntityResponse(WorldEntityBase):
@@ -424,6 +438,7 @@ class WorldMapLayerBase(BaseModel):
 
 class WorldMapLayerCreate(WorldMapLayerBase):
     book_id: UUID
+    id: Optional[UUID] = None  # 幂等重建（2026-09-04 审计修复：undo/redo 恢复路径，同地点/实体先例）
 
 
 class WorldMapLayerUpdate(BaseModel):
@@ -454,6 +469,7 @@ class WorldMapStrokeCreate(BaseModel):
     color: str = Field("#475569")
     width: float = Field(3.0)
     points: List[List[float]] = Field(..., description="[[x, y], ...] 内部坐标")
+    id: Optional[UUID] = None  # 幂等重建（2026-09-04 审计修复：undo/redo 恢复路径，同地点/实体先例）
 
 
 class WorldMapStrokeResponse(BaseModel):

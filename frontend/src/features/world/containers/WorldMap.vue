@@ -9,7 +9,7 @@
  * 坐标约定：Leaflet [lat,lng]，CRS.Simple 下 lat=y、lng=x；内部坐标 Point=[x,y]。
  * 设计意图：事件溯源的世界地图——拖时间轴，人物/疆域/轨迹/历史事件随 currentTime 回放。
  */
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Icon from '../../../components/Icon.vue'
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 }>()
 
 // ===== D4 比例尺标定：拉线捕获 + 左下角比例尺角标 =====
-import { pxPerDay, formatDistance, blankAtlasSuggestedDays, type MapScale } from '../engine/distance'
+import { pxPerDay, blankAtlasSuggestedDays, type MapScale } from '../engine/distance'
 
 const calibrating = ref(false)
 const calibPoints = ref<[number, number][]>([])
@@ -71,12 +71,14 @@ function renderCalibLine() {
   }
 }
 
-/** 角标：按当前缩放选一个 60~140px 的整数天值画「—— ≈ N 天步程」（玩具感来源） */
+/** 角标：按当前缩放选一个 60~160px 的整数天值画「—— ≈ N 天步程」（玩具感来源） */
 function updateScaleBar() {
   const ppd = pxPerDay(props.mapScale)
   if (!map || ppd == null) { scaleBarText.value = ''; return }
   const zoom = map.getZoom()
-  const unitsPerScreenPx = 256 / (2 ** zoom)  // CRS.Simple：1 screen px = 256/2^z 内部单位
+  // CRS.Simple 覆写了 scale(zoom)=2^zoom（非 EPSG:3857 的 256·2^zoom）：
+  // zoom 0 时 1 tile(256px) 恰覆盖 256 内部单位 → 1 screen px = 1/2^z 内部单位
+  const unitsPerScreenPx = 1 / (2 ** zoom)
   for (const days of [0.5, 1, 2, 5, 10, 20, 50]) {
     const pxLen = (days * ppd) / unitsPerScreenPx
     if (pxLen >= 60 && pxLen <= 160) {
@@ -89,9 +91,14 @@ function updateScaleBar() {
 
 function onCalibrateStart() { startCalibrating() }
 
-onMounted(() => window.addEventListener('velluma:map-calibrate-start', onCalibrateStart))
+onMounted(() => {
+  window.addEventListener('velluma:map-calibrate-start', onCalibrateStart)
+  // 初渲即有角标（2026-09-04 审计修复：此前只在缩放后出现——已标定的书
+  // 加载完成时角标为空，必须先缩放一次才渲染）
+  nextTick(() => updateScaleBar())
+})
 onBeforeUnmount(() => window.removeEventListener('velluma:map-calibrate-start', onCalibrateStart))
-watch(() => props.mapScale, updateScaleBar, { immediate: false })
+watch(() => props.mapScale, () => nextTick(() => updateScaleBar()))
 
 const containerRef = ref<HTMLDivElement | null>(null)
 let map: L.Map | null = null
@@ -1498,11 +1505,23 @@ watch(drawingMap, () => {
 })
 
 /** 聚焦到内部坐标 (x, y)——外部（事件/地点列表点击）调用 */
+let lastFocus: { x: number; y: number; t: number } | null = null
 function focusAt(x: number, y: number, title?: string) {
   if (!map) return
-  map.setView([y, x], Math.max(map.getZoom(), 1), { animate: true })
+  // 连点抑制：setView 动画在飞时中心尚未到位，连点同一目标会从半路重新起飞（地图上看起来就是"不停地移动"）；
+  // 目标已在屏中心附近且缩放够时同样不再动相机，只换气泡。
+  const now = Date.now()
+  const sameAsLast = lastFocus != null && lastFocus.x === x && lastFocus.y === y && now - lastFocus.t < 1200
+  const nearCenter =
+    map.getZoom() >= 1 &&
+    map.latLngToContainerPoint([y, x]).distanceTo(map.getSize().divideBy(2)) < 40
+  if (!sameAsLast && !nearCenter) {
+    map.setView([y, x], Math.max(map.getZoom(), 1), { animate: true })
+  }
+  lastFocus = { x, y, t: now }
   if (title) {
-    L.popup({ closeButton: true })
+    // autoPan 关闭：相机已对准目标，气泡偏移若再触发自动平移会与下一次点击的 setView 互相拉锯
+    L.popup({ closeButton: true, autoPan: false })
       .setLatLng([y, x])
       .setContent(`<b>${esc(title)}</b>`)
       .openOn(map)
@@ -2047,6 +2066,50 @@ onBeforeUnmount(() => {
   color: var(--accent-500);
   background: rgba(124, 106, 173, 0.1);
   font-weight: 600;
+}
+
+/* D4 比例尺角标 + 标定提示（2026-09-04 审计修复：此前模板有元素无样式——
+   未定位块排在地图容器之后的文档流里，实际不可见） */
+.wm-scalebar {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(250, 247, 240, 0.92);
+  border: 1px solid rgba(120, 100, 80, 0.25);
+  color: #6b5c4c;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+.wm-scalebar-line {
+  display: inline-block;
+  width: 56px;
+  height: 0;
+  border-top: 2px solid #6b5c4c;
+  border-left: 2px solid #6b5c4c;
+  border-right: 2px solid #6b5c4c;
+}
+
+.wm-calib-hint {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 650;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(250, 247, 240, 0.95);
+  border: 1px solid rgba(194, 114, 90, 0.45);
+  color: #8c4a38;
+  font-size: 12px;
+  pointer-events: none;
 }
 </style>
 

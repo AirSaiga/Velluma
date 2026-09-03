@@ -606,6 +606,13 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB DEFAULT '{}'",
         "expected_udt_names": {"jsonb"},
     },
+    # 实体单分组（2026-09-03）：资产抽屉分组依据，组织元数据不进 prompt
+    {
+        "table": "world_entities",
+        "column": "group_name",
+        "definition": "VARCHAR(100)",
+        "expected_udt_names": {"varchar"},
+    },
     # 单一画布：实体画布锚位（无推演位置时的作者摆位）
     {
         "table": "world_entities",

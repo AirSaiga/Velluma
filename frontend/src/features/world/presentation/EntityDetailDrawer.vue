@@ -14,6 +14,7 @@ import { useWorld } from '../composables/useWorld'
 import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
 import { archiveFields } from '../engine/entitySchema'
+import { listGroupNames } from '../engine/entityGroups'
 import {
   FIELD_LAYER_LABELS,
   FIELD_LAYER_TITLES,
@@ -27,10 +28,12 @@ import { getTemplate } from '../engine/eventTemplates'
 import { vAutogrow } from './autogrow'
 import type { WorldEntity, WorldEvent, EventType } from '../engine/types'
 
-const props = defineProps<{ bookId: string; entityId: string }>()
+const props = defineProps<{ bookId: string; entityId: string; canGoBack?: boolean }>()
 
 const emit = defineEmits<{
   close: []
+  /** 返回上一级（从图标栏面板钻入时才有上一级；由 WorldView 恢复来路面板） */
+  back: []
   'quick-event': [type: EventType, entityId: string]
   'focus-event': [ev: WorldEvent]
 }>()
@@ -98,11 +101,13 @@ const typeIcon: Record<string, string> = { character: 'user', faction: 'users', 
 
 const nameDraft = ref('')
 const introDraft = ref('')
+const groupDraft = ref('')
 watch(
   entity,
   (e) => {
     nameDraft.value = e?.name || ''
     introDraft.value = e?.intro || ''
+    groupDraft.value = e?.group_name || ''
   },
   { immediate: true },
 )
@@ -151,6 +156,21 @@ async function removeAlias(a: string) {
   await updateEntityArchive(props.bookId, entity.value.id, {
     aliases: (entity.value.aliases || []).filter((x) => x !== a),
   })
+}
+
+// ===== 分组（单分组，2026-09-03）：资产抽屉按它折叠归组；组织元数据不进 prompt =====
+
+/** 本书既有资产分组名（输入候选，防「机甲/机甲 」这类手滑重名裂出两组） */
+const groupSuggestions = computed(() =>
+  listGroupNames(entities.value.filter((e) => e.entity_type === 'asset' && e.id !== props.entityId)),
+)
+
+async function saveGroup() {
+  if (!entity.value) return
+  const g = groupDraft.value.trim()
+  const cur = (entity.value.group_name || '').trim()
+  if (g === cur) return
+  await updateEntityArchive(props.bookId, entity.value.id, { group_name: g || null })
 }
 
 // ===== 档案区（schema 表驱动，失焦即存）=====
@@ -257,6 +277,9 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   <div v-if="entity" class="edd" @keydown.esc="emit('close')">
     <!-- 身份区 -->
     <div class="edd-head">
+      <button v-if="canGoBack" class="edd-back" title="返回上一级" @click="emit('back')">
+        <Icon name="arrow-left" :size="14" />
+      </button>
       <span class="edd-type" :title="typeLabel[entity.entity_type]">
         <Icon :name="typeIcon[entity.entity_type] || 'user'" :size="14" />
       </span>
@@ -312,9 +335,34 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
       />
     </div>
 
-    <!-- 一句话 -->
+    <!-- 分组（仅资产；单分组——资产抽屉按它折叠归组，清空即移出分组） -->
+    <div v-if="entity.entity_type === 'asset'" class="edd-aliases">
+      <span class="edd-lbl">分组</span>
+      <input
+        v-model="groupDraft"
+        class="edd-alias-in edd-group-in"
+        list="edd-group-options"
+        placeholder="未分组（如：机甲 / 武器）"
+        @blur="saveGroup"
+        @keyup.enter="(($event.target as HTMLInputElement).blur())"
+      />
+      <datalist id="edd-group-options">
+        <option v-for="g in groupSuggestions" :key="g" :value="g" />
+      </datalist>
+    </div>
+
+    <!-- 一句话（2026-09-03 起可分层：作者最常把混合内容写在这里——「速度极快」是表，
+         「5 马赫/10G」是里；全文存 intro，半露只需补表） -->
     <div class="edd-intro-row">
-      <span class="edd-lbl edd-lbl--block">一句话</span>
+      <div class="edd-field-head">
+        <span class="edd-lbl edd-lbl--block">一句话</span>
+        <button
+          class="edd-layer"
+          :class="`edd-layer--${layerOf('intro')}`"
+          :title="FIELD_LAYER_TITLES[layerOf('intro')]"
+          @click="cycleLayer('intro')"
+        >{{ FIELD_LAYER_LABELS[layerOf('intro')] }}</button>
+      </div>
       <textarea
         v-model="introDraft"
         v-autogrow
@@ -323,6 +371,29 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
         placeholder="一句话介绍（可空）"
         @blur="saveIntro"
       ></textarea>
+      <div v-if="layerOf('intro') === 'partial'" class="edd-field-layerbox">
+        <label class="edd-field-layerlabel">读者目前看到的版本（表）——留空则整条按秘密处理</label>
+        <textarea
+          v-autogrow
+          class="edd-field-input"
+          rows="2"
+          placeholder="如：这套机甲飞行速度极快（具体数据留在上面，AI 替你守住）"
+          :value="layerSpec('intro')?.public_text || ''"
+          @blur="saveLayerPublicText('intro', ($event.target as HTMLTextAreaElement).value)"
+        ></textarea>
+        <label class="edd-field-layerlabel">第几章揭（可空——写了就会在临近时提醒）</label>
+        <input
+          class="edd-field-input edd-field-layerch"
+          type="number"
+          min="1"
+          placeholder="—"
+          :value="layerSpec('intro')?.reveal_chapter ?? ''"
+          @change="saveLayerChapter('intro', ($event.target as HTMLInputElement).value)"
+        />
+      </div>
+      <div v-else-if="layerOf('intro') === 'private'" class="edd-field-layerhint">
+        只有 AI 知道——可用于铺垫暗示，绝不直接写出；写完可贴段正文查泄密
+      </div>
     </div>
 
     <!-- 档案区（生长式字段） -->
@@ -598,6 +669,24 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   background: var(--hover-bg);
   color: var(--text-primary);
 }
+/* 返回上一级（仅从图标栏面板钻入时出现，与关闭分权：← 回列表 / × 全关） */
+.edd-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.edd-back:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
 
 /* 重要度 */
 .edd-imp {
@@ -689,6 +778,10 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 .edd-alias-in:focus {
   border-color: var(--accent-500);
   border-style: solid;
+}
+.edd-group-in {
+  min-width: 160px;
+  border-radius: 6px;
 }
 
 /* 一句话（v-autogrow 随内容长高，超 max-height 才滚动） */

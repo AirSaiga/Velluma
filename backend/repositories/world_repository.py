@@ -135,6 +135,11 @@ class WorldLocationRepository:
         return True
 
 
+# 显式 null 可清空的实体列（repo update 的 None 跳过白名单例外）。
+# 路由 model_dump(exclude_unset=True) 保证这些键只在客户端显式传 null 时出现。
+_ENTITY_EXPLICIT_NULLABLE = {"group_name"}
+
+
 class WorldEntityRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -161,8 +166,11 @@ class WorldEntityRepository:
         if ent is None:
             return None
         for k, v in fields.items():
-            if v is not None:
-                setattr(ent, k, v)
+            # None=「不改」一律跳过；但路由走 exclude_unset，可清空列（group_name）
+            # 只有客户端显式传 null 才会携带该键——此时 None 是「清空」不是「不改」。
+            if v is None and k not in _ENTITY_EXPLICIT_NULLABLE:
+                continue
+            setattr(ent, k, v)
         await self.db.flush()
         return ent
 

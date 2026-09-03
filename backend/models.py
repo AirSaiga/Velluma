@@ -1594,6 +1594,10 @@ class WorldEntity(Base):
     canvas_y = Column(Float, nullable=True)
     intro = Column(Text, default="")
     tags = Column(JSONB, default=list)
+    # 单分组（2026-09-03 资产抽屉分组）：组织元数据，一个实体至多归一组；
+    # 不进 prompt 档案装配、不进 field_layers——纯前端抽屉分组依据。列名通用，
+    # 角色/势力日后复用同列。不用 tags 承载：tags 留给多标签语义，避免烧掉。
+    group_name = Column(String(100), nullable=True)
     props = Column(JSONB, default=dict)  # 档案字段（appearance/speech_style 等，表驱动 schema）
     # 字段级真相分层（2026-09-03）：{field_key: {level: "private"|"partial",
     # public_text?: str, reveal_chapter?: int|null}}；缺键=公开（零存储）。

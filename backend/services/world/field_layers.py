@@ -21,6 +21,9 @@ from typing import Any, Dict, Iterator, Optional
 
 # 档案字段 key → 用户词标签（对齐 frontend/src/features/world/engine/entitySchema.ts）
 FIELD_LAYER_LABELS: Dict[str, str] = {
+    # 一句话简介（2026-09-03 实测补入：作者最常把混合内容写在这里——
+    # 「飞行速度很快」是表，「5 马赫/10G」是里；全文不在 props 而在 ent.intro）
+    "intro": "一句话",
     # character
     "appearance": "外貌",
     "personality": "性格",
@@ -38,6 +41,8 @@ FIELD_LAYER_LABELS: Dict[str, str] = {
     "description": "描述",
     "origin": "来历",
 }
+
+INTRO_FIELD_KEY = "intro"
 
 LEVEL_PRIVATE = "private"  # 秘密：只有 AI 知道，绝不直接写出
 LEVEL_PARTIAL = "partial"  # 半露：读者只知 public_text（表），其余 AI 死守
@@ -74,7 +79,10 @@ def iter_field_layers(ent: Any) -> Iterator[FieldLayerEntry]:
         level = str(spec.get("level") or "")
         if level not in (LEVEL_PRIVATE, LEVEL_PARTIAL):
             continue
-        full = str(props.get(key) or "").strip()
+        if str(key) == INTRO_FIELD_KEY:
+            full = str(getattr(ent, "intro", "") or "").strip()
+        else:
+            full = str(props.get(key) or "").strip()
         if not full:
             continue
         public_text = str(spec.get("public_text") or "").strip()

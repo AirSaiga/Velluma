@@ -102,12 +102,16 @@ export interface FieldLayerRow {
   revealChapter: number | null
 }
 
+/** 一句话简介的分层 key（全文在 entity.intro 而非 props；2026-09-03 实测补入） */
+export const INTRO_FIELD_KEY = 'intro'
+
 /**
  * 从实体全集派生分层字段行（与后端 iter_field_layers 同口径）：
- * 整人 private 实体跳过（全档案已在秘密通道）；缺内容/坏行不入列。
+ * 整人 private 实体跳过（全档案已在秘密通道）；缺内容/坏行不入列；
+ * key=intro 时全文取 entity.intro。
  */
 export function deriveFieldLayerRows(
-  entities: ReadonlyArray<Pick<WorldEntity, 'id' | 'name' | 'visibility' | 'props' | 'field_layers'>>,
+  entities: ReadonlyArray<Pick<WorldEntity, 'id' | 'name' | 'visibility' | 'props' | 'field_layers' | 'intro'>>,
   labelOf: (fieldKey: string, entityType?: string) => string,
 ): FieldLayerRow[] {
   const rows: FieldLayerRow[] = []
@@ -117,7 +121,10 @@ export function deriveFieldLayerRows(
     const props = ent.props && typeof ent.props === 'object' ? ent.props : {}
     for (const [fieldKey, spec] of Object.entries(layers)) {
       if (!spec || (spec.level !== 'private' && spec.level !== 'partial')) continue
-      const fullText = String((props as Record<string, unknown>)[fieldKey] ?? '').trim()
+      const fullText =
+        fieldKey === INTRO_FIELD_KEY
+          ? String(ent.intro ?? '').trim()
+          : String((props as Record<string, unknown>)[fieldKey] ?? '').trim()
       if (!fullText) continue
       const ch = Number(spec.reveal_chapter)
       rows.push({

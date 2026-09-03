@@ -18,6 +18,7 @@ import { formatTime, displayCandidateTime } from '../engine/timeFormat'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
 import { childrenIndex, collectSubtree, topLevelLocations } from '../engine/locationTree'
+import { groupEntities } from '../engine/entityGroups'
 import type { WorldEvent, WorldLocation, EventType, DrawMode, Point } from '../engine/types'
 import WorldMap from './WorldMap.vue'
 import WorldTimeline from './WorldTimeline.vue'
@@ -72,6 +73,7 @@ const {
   load,
   createLocation,
   renameLocation,
+  updateLocationCoords,
   renameEntity,
   deleteLocation,
   locations,
@@ -162,15 +164,42 @@ async function loadMirrorSummary() {
 // ===== M6 活舆图：图标栏当前抽屉 / ⋯ 菜单 =====
 type SidePanelKey = 'cand' | 'fs' | 'exp' | 'canon' | 'loc' | 'evt' | 'character' | 'faction' | 'asset'
 const activePanel = ref<SidePanelKey | null>(null)
+/** 详情抽屉的「上一级」：从图标栏抽屉钻进详情时由下方 watch 记下；返回=恢复来路，关闭=连来路丢弃 */
+const detailReturnPanel = ref<SidePanelKey | null>(null)
+// 详情抽屉（实体/地点/伏笔/真相）与图标栏抽屉双向互斥——同一时刻画布右缘只存在一层浮层
+// （详情抽屉 right:58px 宽 340/360px 与账本抽屉 right:47px 宽 264px 物理重叠，同开必叠）
+function closeDetailDrawers() {
+  selectedEntityId.value = null
+  selectedLocId.value = null
+  selectedForeshadowId.value = null
+  selectedTruthId.value = null
+}
 function togglePanel(key: SidePanelKey) {
-  activePanel.value = activePanel.value === key ? null : key
+  const opening = activePanel.value !== key
+  activePanel.value = opening ? key : null
+  if (opening) closeDetailDrawers()
+  detailReturnPanel.value = null
 }
 const moreOpen = ref(false)
 
-// 详情抽屉（实体/伏笔/真相）与图标栏抽屉互斥——同一时刻画布右缘只存在一层浮层
-watch([selectedEntityId, selectedForeshadowId, selectedTruthId], ([e, f, t]) => {
-  if (e || f || t) activePanel.value = null
+watch([selectedEntityId, selectedLocId, selectedForeshadowId, selectedTruthId], ([e, l, f, t]) => {
+  if (e || l || f || t) {
+    // 详情抽屉顶掉面板前记下它来路——「← 返回上一级」凭它恢复（只记第一重，防详情间横跳覆盖）
+    if (activePanel.value && !detailReturnPanel.value) detailReturnPanel.value = activePanel.value
+    activePanel.value = null
+  }
 })
+
+function onDetailBack(clear: () => void) {
+  const target = detailReturnPanel.value
+  detailReturnPanel.value = null
+  clear()
+  if (target) activePanel.value = target
+}
+function onDetailClosed(clear: () => void) {
+  detailReturnPanel.value = null
+  clear()
+}
 
 /** 实体抽屉的当前列表（与图标栏选中类型联动，复用实体搜索过滤） */
 const panelEntities = computed(() => {
@@ -421,9 +450,21 @@ function focusEvent(ev: WorldEvent) {
   if (pt) mapRef.value?.focusAt(pt[0], pt[1], eventLabel(ev.event_type))
   else showToast('该事件没有可定位的坐标', 'info')
 }
+/** 「去地图放置」的补坐标目标（2026-09-04 审计修复：无坐标地点此前点击零反应） */
+const relocatingLoc = ref<WorldLocation | null>(null)
+
 function focusLocation(loc: WorldLocation) {
-  if (loc.coord_x == null || loc.coord_y == null) return
-  mapRef.value?.focusAt(loc.coord_x, loc.coord_y, loc.name)
+  if (loc.coord_x != null && loc.coord_y != null) {
+    mapRef.value?.focusAt(loc.coord_x, loc.coord_y, loc.name)
+    return
+  }
+  // 无坐标（未上图/内部构造）→ 进拾取模式补坐标（原实现直接 return=死按钮）
+  exitMapEdit()
+  draftPoint.value = null
+  draftName.value = ''
+  draftKind.value = 'point'
+  relocatingLoc.value = loc
+  pickingMode.value = 'location'
 }
 
 // ===== W4 待确认候选（写作回流收件箱的跨章全貌）=====
@@ -597,7 +638,20 @@ function startPickLocation() {
   exitMapEdit() // 与底图编辑互斥
   pickingMode.value = 'location'
 }
-function onPick(point: [number, number]) {
+async function onPick(point: [number, number]) {
+  // 补坐标拾取：更新既有地点坐标而非新建（来自详情抽屉「去地图放置」）
+  if (relocatingLoc.value) {
+    const loc = relocatingLoc.value
+    relocatingLoc.value = null
+    pickingMode.value = null
+    try {
+      await updateLocationCoords(bookId.value, loc.id, point[0], point[1])
+      showToast(`「${loc.name}」已放置到地图`, 'success')
+    } catch (e: any) {
+      showToast('放置失败：' + (e?.message || ''), 'error')
+    }
+    return
+  }
   draftPoint.value = point
   pickingMode.value = null
 }
@@ -619,6 +673,7 @@ function cancelDraft() {
   draftPoint.value = null
   draftName.value = ''
   pickingMode.value = null
+  relocatingLoc.value = null
 }
 
 // ===== 地点树（列表缩进子树 + 顶层计数口径）=====
@@ -679,6 +734,7 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Escape' && pickingMode.value) {
     pickingMode.value = null
+    relocatingLoc.value = null
   }
 }
 
@@ -811,6 +867,26 @@ function filterAndSortEntities<T extends SidebarEntity>(list: T[]): T[] {
 const visibleCharacters = computed(() => filterAndSortEntities(characters.value))
 const visibleFactions = computed(() => filterAndSortEntities(factions.value))
 const visibleAssets = computed(() => filterAndSortEntities(assets.value))
+
+// ===== 资产抽屉分组（单分组 2026-09-03）：组内保持重要度序，未分组恒居首 =====
+const panelEntityGroups = computed(() =>
+  activePanel.value === 'asset'
+    ? groupEntities(visibleAssets.value)
+    : [{ name: null as string | null, entities: panelEntities.value }],
+)
+/** 全部未分组（或角色/势力面板）→ 平铺渲染不出组头：存量书零视觉变化 */
+const showGroupHeaders = computed(
+  () => panelEntityGroups.value.length > 1 || panelEntityGroups.value[0]?.name != null,
+)
+const collapsedGroups = ref(new Set<string>())
+function toggleGroup(name: string | null) {
+  const key = name ?? ''
+  if (collapsedGroups.value.has(key)) collapsedGroups.value.delete(key)
+  else collapsedGroups.value.add(key)
+}
+function isGroupCollapsed(name: string | null) {
+  return collapsedGroups.value.has(name ?? '')
+}
 </script>
 
 <template>
@@ -927,12 +1003,14 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         </div>
         <div v-if="moreOpen" class="ap-backdrop" @click="moreOpen = false"></div>
 
-        <!-- 实体详情抽屉（点地图人物/脑图节点/侧栏卡片打开） -->
+        <!-- 实体详情抽屉（点地图人物/脑图节点/侧栏卡片打开；从面板钻入时带「← 返回上一级」） -->
         <EntityDetailDrawer
           v-if="selectedEntityId"
           :book-id="bookId"
           :entity-id="selectedEntityId"
-          @close="selectedEntityId = null"
+          :can-go-back="!!detailReturnPanel"
+          @close="onDetailClosed(() => (selectedEntityId = null))"
+          @back="onDetailBack(() => (selectedEntityId = null))"
           @quick-event="onQuickEvent"
           @focus-event="focusEvent"
         />
@@ -942,7 +1020,9 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           v-if="selectedLocId"
           :book-id="bookId"
           :location-id="selectedLocId"
-          @close="selectedLocId = null"
+          :can-go-back="!!detailReturnPanel"
+          @close="onDetailClosed(() => (selectedLocId = null))"
+          @back="onDetailBack(() => (selectedLocId = null))"
           @locate="(loc: WorldLocation) => focusLocation(loc)"
         />
 
@@ -951,7 +1031,9 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           v-if="selectedForeshadowId"
           :book-id="bookId"
           :foreshadow-id="selectedForeshadowId"
-          @close="selectedForeshadowId = null"
+          :can-go-back="!!detailReturnPanel"
+          @close="onDetailClosed(() => (selectedForeshadowId = null))"
+          @back="onDetailBack(() => (selectedForeshadowId = null))"
         />
 
         <!-- 真相详情抽屉（C1：账本行唤起——表里两面就地编辑） -->
@@ -959,7 +1041,9 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
           v-if="selectedTruthId"
           :book-id="bookId"
           :node-id="selectedTruthId"
-          @close="selectedTruthId = null"
+          :can-go-back="!!detailReturnPanel"
+          @close="onDetailClosed(() => (selectedTruthId = null))"
+          @back="onDetailBack(() => (selectedTruthId = null))"
         />
       </div>
 
@@ -1203,14 +1287,33 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
             <input v-model="entityFilter" class="evt-filter-input" placeholder="搜索实体（名字 / 别名）…" />
           </div>
           <div v-if="panelEntities.length" class="side-list">
-            <EntityCard
-              v-for="ent in panelEntities"
-              :key="ent.id"
-              :entity="ent"
-              @click="selectedEntityId = ent.id"
-              @update:name="(n: string) => renameEntity(bookId, ent.id, n)"
-              @delete="removeEntity(ent)"
-            />
+            <template v-for="group in panelEntityGroups" :key="group.name ?? '__ungrouped__'">
+              <button
+                v-if="showGroupHeaders"
+                class="side-group-head"
+                :title="isGroupCollapsed(group.name) ? '展开分组' : '收起分组'"
+                @click="toggleGroup(group.name)"
+              >
+                <Icon
+                  name="chevron-down"
+                  :size="10"
+                  class="side-group-chevron"
+                  :class="{ 'side-group-chevron--collapsed': isGroupCollapsed(group.name) }"
+                />
+                <span>{{ group.name ?? '未分组' }}</span>
+                <span class="side-group-count">{{ group.entities.length }}</span>
+              </button>
+              <template v-if="!isGroupCollapsed(group.name)">
+                <EntityCard
+                  v-for="ent in group.entities"
+                  :key="ent.id"
+                  :entity="ent"
+                  @click="selectedEntityId = ent.id"
+                  @update:name="(n: string) => renameEntity(bookId, ent.id, n)"
+                  @delete="removeEntity(ent)"
+                />
+              </template>
+            </template>
           </div>
           <div v-else class="side-empty">{{ entityEmptyText }}</div>
         </div>
@@ -1792,6 +1895,37 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
   background: var(--bg-tertiary);
   border-radius: 9999px;
   padding: 1px 8px;
+}
+.side-group-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 2px;
+  margin-top: 5px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.side-group-head:first-child {
+  margin-top: 0;
+}
+.side-group-head:hover {
+  color: var(--text-secondary);
+}
+.side-group-chevron {
+  transition: transform 0.15s ease;
+}
+.side-group-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+.side-group-count {
+  margin-left: auto;
+  font-weight: 500;
 }
 /* A5b 待确认分区「全部采纳」——count 的 margin-left:auto 把右缘让给按钮组 */
 .side-batch-btn {

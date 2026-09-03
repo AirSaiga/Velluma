@@ -90,6 +90,10 @@ class SettingsBundle:
     # ---- 世界设定层桥接（world_bridge；docs/world-unified-settings.md §5）----
     # world 优先时 entities/assets/locations/relationships 已换为适配器视图对象
     world_sourced: bool = False
+    # 势力通路（2026-09-04 审计修复）：公开 faction 的知识平面视图
+    # （WorldFactionView，static_prompt 已按字段分层拆好）。无 faction 书恒空
+    # 列表，消费侧零行渲染（零变化契约）。
+    factions: List[Any] = field(default_factory=list)
     world_time: int = 0  # 时间切片时刻 t（叙事时间四级降级解析）
     # t 的解析来源（A4/B2 来源可见性；load_world_overlay 透传，零行为变化）：
     # chapter_anchor=本章锚 | prev_anchor=前序最近锚 | max_event=事件最大时刻 | zero=空世界
@@ -227,7 +231,7 @@ class SettingsBundle:
         }
 
     def proper_nouns(self, limit: int = PROPER_NOUNS_MAX_ENTRIES) -> List[str]:
-        """提取角色名 + 资产名（专名表，防缝合时称呼漂移）。"""
+        """提取角色名 + 资产名 + 势力名（专名表，防缝合时称呼漂移）。"""
         names: List[str] = []
         for e in self.entities:
             name = _entity_name(e)
@@ -235,6 +239,10 @@ class SettingsBundle:
                 names.append(name)
         for a in self.assets:
             name = getattr(a, "name", "") or ""
+            if name and name not in names:
+                names.append(name)
+        for f in self.factions:  # 势力通路（2026-09-04）：AI 必须能原样称呼它看得见的势力
+            name = getattr(f, "name", "") or ""
             if name and name not in names:
                 names.append(name)
         return names[:limit]
@@ -333,6 +341,8 @@ async def load_chapter_settings_bundle(
             if overlay is not None:
                 bundle.entities = overlay["entities"]
                 bundle.assets = overlay["assets"]
+                # 势力通路（2026-09-04 审计修复）：公开 faction 的知识平面视图
+                bundle.factions = overlay.get("factions") or []
                 bundle.locations = overlay["locations"]
                 bundle.relationships = overlay["relationships"]
                 bundle.world_state = overlay["world_state"]
@@ -345,7 +355,7 @@ async def load_chapter_settings_bundle(
                 # world_entity，从此派生快检源（零额外查询）
                 from backend.services.world.field_layers import iter_field_layers
                 fl_secrets: List[Dict[str, str]] = []
-                for _ad in list(bundle.entities) + list(bundle.assets):
+                for _ad in list(bundle.entities) + list(bundle.assets) + list(bundle.factions):
                     _ent = getattr(_ad, "world_entity", None)
                     if _ent is None or getattr(_ent, "visibility", "public") == "private":
                         continue

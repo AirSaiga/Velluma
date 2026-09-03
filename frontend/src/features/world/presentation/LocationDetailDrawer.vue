@@ -18,10 +18,12 @@ import { vAutogrow } from './autogrow'
 import { childrenIndex, collectSubtree } from '../engine/locationTree'
 import type { WorldLocation } from '../engine/types'
 
-const props = defineProps<{ bookId: string; locationId: string }>()
+const props = defineProps<{ bookId: string; locationId: string; canGoBack?: boolean }>()
 
 const emit = defineEmits<{
   close: []
+  /** 返回上一级（从图标栏面板钻入时才有上一级；由 WorldView 恢复来路面板） */
+  back: []
   locate: [loc: WorldLocation]
 }>()
 
@@ -200,6 +202,9 @@ async function removeCurrent() {
 
     <!-- 头部 -->
     <div class="ldd-head">
+      <button v-if="canGoBack" class="ldd-back" title="返回上一级" @click="emit('back')">
+        <Icon name="arrow-left" :size="14" />
+      </button>
       <span class="ldd-type" :title="isInterior ? '内部构造' : LOC_KIND_LABEL[current.kind] || current.kind">
         <Icon :name="isInterior ? 'chevron-down' : 'map-pin'" :size="14" />
       </span>
@@ -406,6 +411,20 @@ async function removeCurrent() {
   border-radius: 6px;
 }
 .ldd-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary, #333);
+}
+/* 返回上一级（仅从图标栏面板钻入时出现，与关闭分权：← 回列表 / × 全关） */
+.ldd-back {
+  background: none;
+  border: none;
+  color: var(--text-muted, #999);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.ldd-back:hover {
   background: rgba(0, 0, 0, 0.05);
   color: var(--text-primary, #333);
 }

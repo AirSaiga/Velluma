@@ -17,9 +17,13 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { formatTime } from '../engine/timeFormat'
 import { vAutogrow } from './autogrow'
 
-const props = defineProps<{ bookId: string; foreshadowId: string }>()
+const props = defineProps<{ bookId: string; foreshadowId: string; canGoBack?: boolean }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  /** 返回上一级（从图标栏面板钻入时才有上一级；由 WorldView 恢复来路面板） */
+  back: []
+}>()
 
 const {
   foreshadows,
@@ -154,6 +158,9 @@ async function remove() {
   <div v-if="foreshadow" class="fdd" @keydown.esc="emit('close')">
     <!-- 头部：状态 + 来源徽标 -->
     <div class="fdd-head">
+      <button v-if="canGoBack" class="fdd-back" title="返回上一级" @click="emit('back')">
+        <Icon name="arrow-left" :size="14" />
+      </button>
       <span class="fdd-status" :class="foreshadow.status">{{ STATUS_LABEL[foreshadow.status] }}</span>
       <span v-if="isAuto" class="fdd-auto" title="由 AI 自动登记">AI 登记</span>
       <button class="fdd-close" title="关闭 (Esc)" @click="emit('close')">
@@ -355,6 +362,26 @@ async function remove() {
 }
 
 .fdd-close:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* 返回上一级（仅从图标栏面板钻入时出现，与关闭分权：← 回列表 / × 全关） */
+.fdd-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.fdd-back:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
 }

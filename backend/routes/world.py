@@ -816,6 +816,7 @@ async def create_map_stroke(book_id: UUID, payload: WorldMapStrokeCreate, db: As
         color=payload.color,
         width=payload.width,
         points=payload.points,
+        **({"id": payload.id} if payload.id else {}),  # 幂等重建（undo/redo 恢复路径）
     )
     await db.commit()
     return stroke

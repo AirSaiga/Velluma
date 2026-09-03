@@ -158,11 +158,14 @@ function typeBadge(n: CanonNode) {
 // ===== 字段级真相分层（2026-09-03）派生区：档案里标了 半露/秘密 的字段在此可见 =====
 // 派生而非节点副本——内容唯一事实源仍是实体档案；点击深链回实体抽屉编辑现场。
 // 受三态过滤但故意不计入 counts（counts 是真实节点数，派生行只是视图）。
-const ARCHIVE_FIELD_LABELS: Record<string, string> = Object.fromEntries(
-  Object.values(ARCHIVE_FIELDS)
-    .flat()
-    .map((f) => [f.key, f.label]),
-)
+const ARCHIVE_FIELD_LABELS: Record<string, string> = {
+  intro: '一句话',
+  ...Object.fromEntries(
+    Object.values(ARCHIVE_FIELDS)
+      .flat()
+      .map((f) => [f.key, f.label]),
+  ),
+}
 const fieldRows = computed(() => {
   const rows = deriveFieldLayerRows(entities.value, (k) => ARCHIVE_FIELD_LABELS[k] || k)
   return filter.value === 'all' ? rows : rows.filter((r) => r.level === filter.value)

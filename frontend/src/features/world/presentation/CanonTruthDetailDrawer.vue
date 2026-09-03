@@ -31,10 +31,12 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { vAutogrow } from './autogrow'
 import type { CanonNodeType, CanonVisibility } from '../../../services/api/domain/canon.api'
 
-const props = defineProps<{ bookId: string; nodeId: string }>()
+const props = defineProps<{ bookId: string; nodeId: string; canGoBack?: boolean }>()
 
 const emit = defineEmits<{
   close: []
+  /** 返回上一级（从真相账本钻入时才有上一级；由 WorldView 恢复来路面板） */
+  back: []
 }>()
 
 const { nodes, updateNode, deleteNode, checkConsistency } = useCanon()
@@ -198,6 +200,9 @@ async function remove() {
   <aside v-if="node" class="ctd" aria-label="真相详情" @keydown.esc="emit('close')">
     <!-- 头部：条目名 + 类型（已挂接 = 只读徽标，类型随对象推演）+ 关闭 -->
     <header class="ctd-head">
+      <button v-if="canGoBack" class="ctd-back" title="返回上一级" @click="emit('back')">
+        <Icon name="arrow-left" :size="14" />
+      </button>
       <input
         v-model="labelDraft"
         class="ctd-name"
@@ -460,6 +465,24 @@ async function remove() {
   cursor: pointer;
 }
 .ctd-close:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+/* 返回上一级（仅从真相账本钻入时出现，与关闭分权：← 回账本 / × 全关） */
+.ctd-back {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ctd-back:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
 }

@@ -42,9 +42,10 @@ from backend.services.world.field_layers import (
 )
 
 
-def _ent(props=None, layers=None, visibility="public", name="林尘"):
+def _ent(props=None, layers=None, visibility="public", name="林尘", intro=None):
     return SimpleNamespace(
         name=name, props=props or {}, field_layers=layers or {}, visibility=visibility,
+        **({"intro": intro} if intro is not None else {}),
     )
 
 
@@ -96,6 +97,48 @@ def test_static_prompt_respect_layers_false_keeps_full():
     assert "背景：表面是电工，实际是卧底" in text
 
 
+# ---- 一句话 intro 进档案通路（2026-09-04 审计修复：intro 此前零消费）----
+
+def test_static_prompt_intro_public_enters_profile():
+    """公开 intro 以「一句话：」行进档案（原来对 AI 不可见）。"""
+    text = static_prompt_from_world_entity(_ent(props=_PROPS, intro="十年前从北岸来的流浪剑客"))
+    assert text.startswith("一句话：十年前从北岸来的流浪剑客\n")
+    assert "外貌：清瘦，戴旧眼镜" in text  # 结构化字段仍在
+
+
+def test_static_prompt_intro_absent_zero_change():
+    """无 intro 属性/空 intro：输出与修复前逐字节一致（零变化契约）。"""
+    text_no_attr = static_prompt_from_world_entity(_ent(props=_PROPS))
+    assert "一句话" not in text_no_attr
+    text_empty = static_prompt_from_world_entity(_ent(props=_PROPS, intro="  "))
+    assert text_empty == text_no_attr
+
+
+def test_static_prompt_intro_private_hidden_in_public_path():
+    """respect_layers=True 且 intro 标私密：整句隐去（canon 虚拟条目接管）。"""
+    layers = {"intro": {"level": LEVEL_PRIVATE}}
+    text = static_prompt_from_world_entity(_ent(props=_PROPS, layers=layers, intro="十年前从北岸来的流浪剑客"))
+    assert "一句话" not in text
+    assert "流浪剑客" not in text
+
+
+def test_static_prompt_intro_partial_shows_public_text():
+    """intro 半露：以「表」顶替全文。"""
+    layers = {"intro": {"level": LEVEL_PARTIAL, "public_text": "一个外来者"}}
+    text = static_prompt_from_world_entity(_ent(props=_PROPS, layers=layers, intro="十年前从北岸来的流浪剑客"))
+    assert "一句话：一个外来者" in text
+    assert "流浪剑客" not in text
+
+
+def test_static_prompt_intro_wholly_private_entity_keeps_intro():
+    """整人 private 走 secrets（respect_layers=False）：intro 随全档案保留。"""
+    layers = {"intro": {"level": LEVEL_PRIVATE}}
+    text = static_prompt_from_world_entity(
+        _ent(props=_PROPS, layers=layers, intro="十年前从北岸来的流浪剑客"), respect_layers=False,
+    )
+    assert "一句话：十年前从北岸来的流浪剑客" in text
+
+
 def test_layered_profile_value_and_iter_defensive():
     """坏数据防御：非法 level/空全文/坏 reveal_chapter 一律安全兜底。"""
     ent = _ent(props={"background": "秘密身世"}, layers={
@@ -105,6 +148,51 @@ def test_layered_profile_value_and_iter_defensive():
     })
     assert layered_profile_value(ent, "background", "秘密身世") == "秘密身世"
     assert list(iter_field_layers(ent)) == []
+
+
+# ============================================================
+# 1b. 一句话（intro）分层（2026-09-03 实测补入：混合内容最常写在一句话里）
+# ============================================================
+
+def test_intro_layer_iter_reads_ent_intro():
+    """key=intro 的分层全文取 ent.intro（不在 props），标签「一句话」。"""
+    ent = _ent(layers={"intro": {"level": LEVEL_PARTIAL, "public_text": "飞行速度极快"}})
+    ent.intro = "等身机甲，最高 5 马赫，加速度超 10G"
+    entries = list(iter_field_layers(ent))
+    assert len(entries) == 1
+    assert entries[0].label == "一句话"
+    assert entries[0].full_text.startswith("等身机甲")
+    assert entries[0].public_text == "飞行速度极快"
+
+
+def test_asset_adapter_intro_layer_split():
+    """资产 static_description 走 intro→description 回退链，逐层拆分：
+    intro 秘密 → 回退 description；intro 半露 → 表顶替；无分层零变化。"""
+    from backend.services.context.world_bridge import WorldAssetAdapter
+
+    def _asset(intro, desc, layers=None):
+        return SimpleNamespace(
+            name="流光", entity_type="asset", importance=5, aliases=[],
+            intro=intro, props={"description": desc},
+            field_layers=layers or {}, visibility="public",
+        )
+
+    # 无分层：旧行为（intro 优先）
+    assert WorldAssetAdapter(_asset("等身机甲，最高 5 马赫", "整体银白色")).static_description == "等身机甲，最高 5 马赫"
+    assert WorldAssetAdapter(_asset("", "整体银白色")).static_description == "整体银白色"
+    # intro 秘密 → 整段隐去，回退 description
+    ent = _asset("等身机甲，最高 5 马赫", "整体银白色", {"intro": {"level": LEVEL_PRIVATE}})
+    assert WorldAssetAdapter(ent).static_description == "整体银白色"
+    # intro 半露 → 表顶替
+    ent = _asset("等身机甲，最高 5 马赫", "整体银白色",
+                 {"intro": {"level": LEVEL_PARTIAL, "public_text": "飞行速度极快"}})
+    assert WorldAssetAdapter(ent).static_description == "飞行速度极快"
+    # intro 半露表空（=按秘密）且 description 也秘密 → 全隐
+    ent = _asset("等身机甲", "整体银白色", {
+        "intro": {"level": LEVEL_PARTIAL, "public_text": ""},
+        "description": {"level": LEVEL_PRIVATE},
+    })
+    assert WorldAssetAdapter(ent).static_description == ""
 
 
 # ============================================================
@@ -118,7 +206,7 @@ def _make_stack(tmp_path):
     return engine, maker
 
 
-def _seed(maker, *, layers, visibility="public"):
+def _seed(maker, *, layers, visibility="public", intro=""):
     book_id = uuid.uuid4()
     entity_id = uuid.uuid4()
 
@@ -127,7 +215,7 @@ def _seed(maker, *, layers, visibility="public"):
             s.add(m.Book(id=book_id, title="分层书"))
             s.add(m.WorldEntity(
                 id=entity_id, book_id=book_id, name="林尘", entity_type="character",
-                visibility=visibility,
+                visibility=visibility, intro=intro,
                 props={
                     "personality": "内向，偏软弱",
                     "background": "表面是电工，实际是卧底",
@@ -191,6 +279,23 @@ def test_canon_prompt_skips_wholly_private_entity(tmp_path):
         ctx = asyncio.run(run())
         assert "林尘·背景" not in ctx
         assert ctx == "（Canon 为空，无强约束）"
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_canon_prompt_intro_virtual_entry(tmp_path):
+    """一句话分层进 [private] 段：标签「实体名·一句话」，全文取 intro。"""
+    engine, maker = _make_stack(tmp_path)
+    try:
+        book_id, _ = _seed(maker, intro="等身机甲，最高 5 马赫", layers={
+            "intro": {"level": LEVEL_PRIVATE},
+        })
+
+        async def run():
+            async with maker() as s:
+                return await build_canon_context_for_prompt(s, book_id)
+        ctx = asyncio.run(run())
+        assert "- 林尘·一句话：等身机甲，最高 5 马赫" in ctx, ctx
     finally:
         asyncio.run(engine.dispose())
 

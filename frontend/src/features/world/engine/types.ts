@@ -46,6 +46,8 @@ export interface WorldEntity {
   canvas_y?: number | null
   intro: string
   tags: string[]
+  /** 单分组（2026-09-03）：组织元数据，不进 prompt；null/缺省=未分组 */
+  group_name?: string | null
   props: Record<string, unknown>
   /** 字段级真相分层（2026-09-03）：缺键=公开；判据见 engine/fieldLayers.ts */
   field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>

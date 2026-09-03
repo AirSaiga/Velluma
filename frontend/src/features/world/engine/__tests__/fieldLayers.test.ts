@@ -111,4 +111,26 @@ describe('deriveFieldLayerRows（CanonSection 派生区口径）', () => {
     expect(deriveFieldLayerRows([], labelOf)).toEqual([])
     expect(deriveFieldLayerRows([{ id: 'x', name: 'x' } as any], labelOf)).toEqual([])
   })
+
+  it('一句话（intro）分层：全文取 ent.intro 而非 props', () => {
+    const rows = deriveFieldLayerRows(
+      [
+        {
+          id: 'e9',
+          name: '流光',
+          entity_type: 'asset',
+          visibility: 'public',
+          intro: '等身机甲，最高 5 马赫，加速度超 10G',
+          props: {},
+          field_layers: { intro: { level: 'partial', public_text: '飞行速度极快', reveal_chapter: 12 } },
+        },
+      ] as any,
+      (k) => (k === 'intro' ? '一句话' : k),
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].fieldLabel).toBe('一句话')
+    expect(rows[0].fullText).toContain('5 马赫')
+    expect(rows[0].publicText).toBe('飞行速度极快')
+    expect(rows[0].revealChapter).toBe(12)
+  })
 })

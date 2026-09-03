@@ -71,8 +71,9 @@ from backend.core.dependencies import (
     get_book_repository,
     get_plot_ledger_repository,
 )
-from backend.core.exceptions import not_found, bad_request
+from backend.core.exceptions import not_found
 from backend.repositories import ChapterRepository, CharacterRepository, MemoryRepository, RelationshipRepository, BookRepository, PlotLedgerRepository, ChapterCardRepository
+from backend.repositories.world_repository import WorldRepository
 from backend.repositories.asset_repository import ChapterAssetRepository
 from backend.schemas import (
     ChapterPublishRequest,
@@ -97,9 +98,6 @@ from backend.services.generation.publish_v2 import (
 from backend.services.generation.character_extraction import (
     execute_character_extraction_workflow,
     CharacterExtractionResult,
-)
-from backend.services.world.state_service import (
-    extract_world_state_snapshot,
 )
 from backend.services.workflows.snapshot_extractor import extract_world_terminal_state
 from backend.world_state_schemas import WorldTerminalState
@@ -189,10 +187,26 @@ async def publish_chapter(
 
     # ========================================================================
     # V4.0: 智能人物提取与关系推断
+    # 世界书止血（2026-09-04 审计修复）：世界页有实体的书跳过整段 legacy 提取。
+    # 此前每发布一章就往 characters/character_relationships/chapter_entities 写
+    # 一批 AI「影子数据」——读侧 world 优先永远看不见，migrate-legacy 时却会
+    # 整批涌入 world_entities 造成设定污染（这是唯一还在写旧表的活跃路径）。
+    # 判据与 world_bridge 旧表兜底严格同源（同 repo 同方法），保证「读侧看得见
+    # 的世界」与「写侧不再写影子」边界完全重合；未迁移书行为不变。
     # ========================================================================
     text_to_extract = chapter.content_text or chapter.draft_text or ""
     _log_to_file(f"[DEBUG] Starting character extraction for chapter {chapter_id}, content length: {len(text_to_extract)}")
-    if text_to_extract:
+    book_has_world = False
+    try:
+        _world_repo = WorldRepository(chapter_repo.get_session())
+        book_has_world = bool(await _world_repo.entities.list_by_book(chapter.book_id))
+    except Exception as e:
+        # 判据失败按非世界书兜底（旧路径），不让发布被世界检查阻塞
+        svc_logger.warning(f"World-backed check failed for chapter {chapter_id}: {e}")
+    if book_has_world:
+        _log_to_file(f"[DEBUG] Skipping legacy character extraction (world-backed book): chapter {chapter_id}")
+        svc_logger.info(f"Skipping legacy character extraction for chapter {chapter_id}: world-backed book")
+    elif text_to_extract:
         try:
             extraction_result = await asyncio.wait_for(
                 execute_character_extraction_workflow(
