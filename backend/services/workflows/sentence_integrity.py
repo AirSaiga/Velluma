@@ -39,9 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 使用方式：
     defects = scan_sentence_defects(final_text)
-    new_text, fixed, failures = await repair_sentence_defects(
-        final_text, defects, registered_names=["白霆"], recorder=recorder,
-    )
+    result = await repair_single_defect(final_text, defects[0], registered_names=["白霆"])
 
 依赖项：
 - services.llm.call_llm_with_usage（定点修复，REASONING_DISABLED）
@@ -236,86 +234,6 @@ async def _repair_one(
     return repaired, "ok"
 
 
-async def repair_sentence_defects(
-    text: str,
-    defects: List[dict],
-    registered_names: Optional[List[str]] = None,
-    recorder: Optional[RunRecorder] = None,
-) -> Tuple[str, int, List[dict]]:
-    """对扫描命中的缺陷句逐条定点修复（每条 1×creative，安全网不过保留原句）。
-
-    Args:
-        text: 原始文本（scan_sentence_defects 的输入，缺陷偏移基于它）
-        defects: scan_sentence_defects 的输出
-        registered_names: 已注册专名清单（修复安全网：原句中已出现的专名
-            不得被修复句删除）
-        recorder: RunRecorder（记 token 用量，可选）
-
-    Returns:
-        (新文本, 修复成功数, 失败列表)。失败列表每条含
-        sentence/type/reason（llm_error/empty_output/still_defective/
-        length_out_of_bounds/name_dropped/repair_cap）。
-    """
-    failures: List[dict] = []
-    if not text or not defects:
-        return text, 0, failures
-    names = [n for n in (registered_names or []) if n]
-
-    # 同一句只修一次（一句可能命中多种缺陷）
-    unique: Dict[int, dict] = {}
-    for d in defects:
-        unique.setdefault(d["position"], d)
-    items = sorted(unique.values(), key=lambda d: d["position"])
-
-    # 成本上限：超出不修，记失败
-    overflow = items[MAX_SENTENCE_REPAIRS:]
-    items = items[:MAX_SENTENCE_REPAIRS]
-    for d in overflow:
-        failures.append({
-            "sentence": d["sentence"][:50],
-            "type": d["type"],
-            "reason": "repair_cap",
-        })
-
-    # 上下文句表基于原始文本算一次（替换不回写它，只用于 prompt）
-    sentences = [sent for sent, _s, _e in _iter_sentences(text)]
-    pos_to_idx = {}
-    for idx, (sent, start, _e) in enumerate(_iter_sentences(text)):
-        pos_to_idx[start] = idx
-
-    new_text = text
-    fixed = 0
-    # 按位置倒序替换：前面的替换不影响后面（位置更靠前）缺陷的偏移
-    for call_index, d in enumerate(reversed(items)):
-        pos = d["position"]
-        sent = d["sentence"]
-        idx = pos_to_idx.get(pos, -1)
-        prev_sent = sentences[idx - 1] if idx > 0 else ""
-        next_sent = sentences[idx + 1] if 0 <= idx < len(sentences) - 1 else ""
-
-        repaired, reason = await _repair_one(
-            d, prev_sent, next_sent, names, recorder, call_index + 1,
-        )
-        if repaired is None:
-            failures.append({
-                "sentence": sent[:50],
-                "type": d["type"],
-                "reason": reason,
-            })
-            trace_event(
-                "sentence_defect_fix_failed",
-                type=d["type"], reason=reason, sentence=sent[:80],
-            )
-            continue
-        new_text = new_text[:pos] + repaired + new_text[pos + len(sent):]
-        fixed += 1
-        trace_event(
-            "sentence_defect_fixed",
-            type=d["type"], before=sent[:80], after=repaired[:80],
-        )
-        logger.info(f"[sentence_fix] 修复残句（{d['type']}）：{sent[:30]}… → {repaired[:30]}…")
-
-    return new_text, fixed, failures
 
 
 async def repair_single_defect(

@@ -51,24 +51,20 @@ from typing import Dict, List, Optional
 # 世界 overlay 角色名单上限——prompt 预算护栏：20+ 角色书只送「在场 → 有事态
 # → 重要度」排序最优的前 16 名（A2 在场提权后第一键为在场）。
 # 首版出处：services/context/world_bridge.py load_world_overlay
-CHARACTERS_MAX_ENTRIES = 16
 
 # 角色 prompt 文本行数上限——bundle 侧二次收口：world 名单 16 条进
 # _characters_text 再截 8（旧章级绑定路径同一函数同一上限）；A1 起先过滤
 # private 后截，公开实体顶替空出的席位。
 # 首版出处：services/context/settings_bundle.py _characters_text
-CHARACTERS_PROMPT_MAX_ENTRIES = 8
 
 # 每角色永恒设定（static_prompt）注入字数——world 八字段结构化档案（外貌/
 # 性格/背景/目标/动机/语言习惯/习惯/技能）的紧凑摘要预算，200 字够放
 # 两三个字段的全文。
 # 首版出处：services/context/settings_bundle.py _characters_text
-CHARACTER_STATIC_MAX_CHARS = 200
 
 # 每角色此刻状态（dynamic_state）注入字数——「位于北岸要塞，在途（进度40%）」
 # 类切片行天然短，150 字封顶防异常长事态灌爆。
 # 首版出处：services/context/settings_bundle.py _characters_text
-CHARACTER_DYNAMIC_MAX_CHARS = 150
 
 # ============================================================
 # 资产（assets）
@@ -77,7 +73,6 @@ CHARACTER_DYNAMIC_MAX_CHARS = 150
 # 世界 overlay 资产名单上限——资产无位置状态（事件溯源哲学），纯重要度
 # 降序取前 8。
 # 首版出处：services/context/world_bridge.py load_world_overlay
-ASSETS_MAX_ENTRIES = 8
 
 # 资产 prompt 文本行数上限——_assets_text 逐行（A1：private 资产先过滤）。
 # 首版出处：services/context/settings_bundle.py _assets_text
@@ -85,7 +80,6 @@ ASSETS_PROMPT_MAX_ENTRIES = 8
 
 # 每条资产简介注入字数——intro/描述只当画面素材，120 字摘要够用。
 # 首版出处：services/context/settings_bundle.py _assets_text
-ASSET_DESC_MAX_CHARS = 120
 
 # ============================================================
 # 地点（locations）
@@ -94,7 +88,6 @@ ASSET_DESC_MAX_CHARS = 120
 # 世界 overlay 地点名单上限——WorldLocation 只取 name 进 prompt（无档案
 # 文本），12 个够覆盖一书的地理骨架。
 # 首版出处：services/context/world_bridge.py load_world_overlay
-LOCATIONS_MAX_ENTRIES = 12
 
 # 地点 prompt 文本行数上限——纯名称行，6 个防罗列。
 # 首版出处：services/context/settings_bundle.py _locations_text
@@ -107,7 +100,6 @@ LOCATIONS_PROMPT_MAX_ENTRIES = 6
 # 世界 overlay 关系名单上限——只留 t 时刻活跃边（A2：任一端在场提前），
 # 仍截 8。
 # 首版出处：services/context/world_bridge.py load_world_overlay
-RELATIONS_MAX_ENTRIES = 8
 
 # 关系 prompt 文本行数上限——旧表路径与世界路径共用 _relationships_text。
 # 首版出处：services/context/settings_bundle.py _relationships_text
@@ -115,7 +107,6 @@ RELATIONS_PROMPT_MAX_ENTRIES = 8
 
 # 每条关系描述注入字数——「师徒（授业三年）」类短语，80 字封顶。
 # 首版出处：services/context/settings_bundle.py _relationships_text
-RELATION_DESC_MAX_CHARS = 80
 
 # ============================================================
 # Canon（真相层：表/里/伏笔）
@@ -311,26 +302,21 @@ BANNED_WORDS_MERGED_MAX_ENTRIES = 60
 # 文本行两级口径）。
 # 首版出处：settings_bundle._style_negative_text（已随任务包 B 双写收敛删除）；
 # 现权威消费方：services/style/prohibitions.py（prompt_text 同口径顿号串）
-BANNED_WORDS_PROMPT_MAX_ENTRIES = 30
 
 # 开放伏笔（open_hooks）prompt 行数上限——「本章可呼应」的提示面。
 # 首版出处：services/context/settings_bundle.py _hooks_text
-HOOKS_PROMPT_MAX_ENTRIES = 8
 
 # 每条伏笔内容注入字数——带/不带 ledger_key 两分支同值。
 # 首版出处：services/context/settings_bundle.py _hooks_text
-HOOK_CONTENT_MAX_CHARS = 120
 
 # 章节卡必达事件条数上限——章节卡文本与软约束两条出口同值（同一
 # must_hit_events 字段的两视角）。
 # 首版出处：services/context/settings_bundle.py _chapter_card_text /
 # _must_hit_events_text
-MUST_HIT_EVENTS_MAX_ENTRIES = 8
 
 # 章节卡伏笔操作条数上限——埋设/推进/回收的操作清单，两条出口同值。
 # 首版出处：services/context/settings_bundle.py _chapter_card_text /
 # _foreshadow_ops_text
-FORESHADOW_OPS_MAX_ENTRIES = 6
 
 # 专名表（proper_nouns）默认上限——角色名+资产名防缝合称呼漂移。
 # 首版出处：services/context/settings_bundle.py SettingsBundle.proper_nouns

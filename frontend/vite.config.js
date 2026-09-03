@@ -82,9 +82,18 @@ export default defineConfig({
             }
           })
           proxy.on('proxyReq', (proxyReq, req, res) => {
-            // SSE 长连接端点（生成/精修/步进推进流式输出）不设超时，避免长流被代理掐断
+            // SSE 长连接端点不设超时，避免长流被代理掐断。
+            // 2026-09-04 审计修复：白名单已过期——advance-beat 随 BS-ADF 归档，
+            // 现役主 SSE /adaptive/stitch-ghost 与 /style/audition 不含旧关键词，
+            // 落入下方 120s 超时桶（stitch-ghost 先完整生成含最多 3 次返修环
+            // LLM 调用再播帧，慢模型下超 120s 静默被掐=「续写失败」无终帧）。
             const url = req.url || ''
-            const isSse = url.includes('generate') || url.includes('refinery') || url.includes('advance-beat')
+            const isSse =
+              url.includes('stitch-ghost') ||
+              url.includes('audition') ||
+              url.includes('generate') ||
+              url.includes('refinery') ||
+              url.includes('advance-beat') // 已归档引擎，保留匹配仅为兼容旧 dev 会话
             if (isSse) return
             // 普通请求添加超时处理
             proxyReq.setTimeout(120000, () => {

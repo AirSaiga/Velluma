@@ -82,8 +82,10 @@ _SEGMENT_MIN_CHARS = 2
 # 禁忌 pattern 集合是低频变动数据（负面清单编辑/系统陈词增删才变），
 # 而段向量每次扫描都不同。key 由 model|dims|sorted(patterns) 派生：
 # 任一要素变（含换 embedding 模型/维度）即 miss 重算，天然失效。
-# value 存 (entry 在传入列表中的下标, 向量) 以保持与调用序对齐。
-_PATTERN_EMB_CACHE: Dict[str, List[Tuple[int, list]]] = {}
+# value 存 {pattern: 向量}：缓存按「集合」命中、还原按「当前调用序」。
+# （2026-09-04 审计修复：原存 (首调下标, 向量)——同集合不同序的后续调用
+# 按首调序还原，段向量与 pattern 错位配对，命中归因与相似度全乱）
+_PATTERN_EMB_CACHE: Dict[str, Dict[str, list]] = {}
 
 # 缓存条目上限（FIFO 淘汰）：防长跑进程里高频改负面清单导致无界增长
 _PATTERN_EMB_CACHE_MAX_SETS = 32
@@ -105,15 +107,15 @@ async def _pattern_vectors(patterns: List[str]) -> List[list]:
     ).hexdigest()
 
     cached = _PATTERN_EMB_CACHE.get(cache_key)
-    if cached is not None:
-        # (idx, vec) 对按 idx 排序还原成与传入序对齐的向量列表
-        return [vec for _, vec in sorted(cached, key=lambda t: t[0])]
+    if cached is not None and all(p in cached for p in patterns):
+        # 按「当前传入序」还原（集合命中不绑首调顺序）
+        return [cached[p] for p in patterns]
 
     vectors = await get_embeddings(patterns)
     if any(vectors):
         if len(_PATTERN_EMB_CACHE) >= _PATTERN_EMB_CACHE_MAX_SETS:
             _PATTERN_EMB_CACHE.pop(next(iter(_PATTERN_EMB_CACHE)))
-        _PATTERN_EMB_CACHE[cache_key] = list(enumerate(vectors))
+        _PATTERN_EMB_CACHE[cache_key] = dict(zip(patterns, vectors))
     return vectors
 
 

@@ -315,6 +315,9 @@ async function loadAdoptedPool() {
 async function collectAdopted(item: AdoptedGhostItem) {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
+  // 在飞守卫（2026-09-04 审计修复）：busy 门此前 key 错位恒不生效，
+  // 双击=同一段 AI 文本重复入库，污染「AI 来源每批 ≤1」配额
+  if (adoptedBusyKey.value !== null) return
   adoptedBusyKey.value = item.ts
   try {
     await styleApi.createSample(bookId, { content: item.text, source: 'adopted_ghost' })

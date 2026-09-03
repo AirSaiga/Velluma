@@ -151,6 +151,30 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // 不因页面切换静默夭折；快照带章号，切章后旧快照作废不串章
   let _lastCtx: { chapterId: string; recentText: string; wordCount: number; cursorAtEnd: boolean } | null = null
 
+  /**
+   * 章节纪元守卫（2026-09-04 审计修复，与心跳响应侧守卫同族）：stitch SSE 的
+   * 回调在发起时闭包捕获章 id，迟到时与当前章比对——切章后到达的
+   * GHOST_START/增量会在**新章**编辑器落幽灵（跨章正文污染），必须吞掉。
+   * 命中即断流+蒸发（蒸发在真实时序里恒为 no-op：切章路径 loadForChapter
+   * 已先蒸发/换稿，此处是兜底），返回 true 表示本次回调已按过期处理。
+   */
+  function _staleEpoch(startChapterId: string): boolean {
+    if (opts.getChapterId() === startChapterId) return false
+    if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
+    evaporateGhost()
+    return true
+  }
+
+  /**
+   * 统一在飞中止（切章 / 退出自适应 / 关辅助开关 / 卸载共用）：断开在飞
+   * stitch 流并收掉思考指示。不蒸发在屏幽灵——幽灵去留是作者主权（Enter
+   * 采纳/Esc 蒸发），切章场景由 loadForChapter 的换稿+防御性蒸发负责。
+   */
+  function abortInflight() {
+    if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
+    hideThinking()
+  }
+
   // ---- 编辑器活动：重置三个计时器 + 隐藏思考指示器 ----
   function _onEditorActivity() {
     if (!assistEnabled.value) return  // AI 辅助关闭（纯手写模式）：心跳/思考点全停
@@ -540,20 +564,22 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       target_chars: mode === 'stitch' ? 120 : 200,
       adopted_direction: adoptedDir,
     }, {
-      onStart: () => { beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => appendGhost(delta),
-      onReject: (p) => _onGhostReject(p, 'stitch'),
+      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
+      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
+      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
       onDone: (result) => {
+        if (_staleEpoch(chapterId)) return
         // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
         setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
       onError: (message) => {
+        if (_staleEpoch(chapterId)) return
         evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
         // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
@@ -651,19 +677,21 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       beat_guidance: guidance,
       target_chars: 700,
     }, {
-      onStart: () => { beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => appendGhost(delta),
-      onReject: (p) => _onGhostReject(p, 'stitch'),
+      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
+      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
+      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
       onDone: (result) => {
+        if (_staleEpoch(chapterId)) return
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
         setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
       onError: (message) => {
+        if (_staleEpoch(chapterId)) return
         evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
         // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
@@ -689,19 +717,21 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       fragment: '', rolling_prefix: '', mode: 'open',
       target_chars: 700,
     }, {
-      onStart: () => { beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => appendGhost(delta),
-      onReject: (p) => _onGhostReject(p, 'stitch'),
+      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
+      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
+      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
       onDone: (result) => {
+        if (_staleEpoch(chapterId)) return
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
         setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
       onError: (message) => {
+        if (_staleEpoch(chapterId)) return
         evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
         // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
@@ -763,19 +793,21 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       target_chars: targetChars,
       serves_anchor: servesAnchor,
     }, {
-      onStart: () => { beginGhost('outline', false, noteEnd); hideThinking() },
-      onChunk: (delta) => appendGhost(delta),
-      onReject: (p) => _onGhostReject(p, 'outline'),
+      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('outline', false, noteEnd); hideThinking() },
+      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
+      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'outline') },
       onDone: (result) => {
+        if (_staleEpoch(chapterId)) return
         setGhostWarnings(result.warnings || [])
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 DONE 帧灌入
+        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
         setGhostRepaired(result.repaired, result.breaker_open)
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
       onError: (message) => {
+        if (_staleEpoch(chapterId)) return
         evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
         opts.reportError?.(message || '细纲扩写失败，请重试')
@@ -843,12 +875,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
    * 的章节 watch 负责（旧章零件是旧章上下文的产物）。
    */
   function detach() {
-    if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
+    abortInflight()
     const editor = chapterEditorHandle.value
     editor?.off('update', _onEditorActivity)
     editor?.off('selectionUpdate', _onEditorActivity)
     window.removeEventListener(OUTLINE_EXPAND_EVENT, _onOutlineExpand)
   }
 
-  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, summonParts, mount, detach }
+  return { requestContinue, requestBurst, requestOpening, requestExpandOutline, settleCurrent, finishChapter, summonParts, mount, detach, abortInflight }
 }

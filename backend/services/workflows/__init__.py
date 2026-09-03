@@ -32,7 +32,7 @@ fortress_candidate / dual_track 包 / detonation 包）已整体迁至 backend/_
 - refining.py: 精修阶段（refine_draft，服务于 chapter_optimization 路由）
 """
 
-from backend.services.workflows.refining import refine_draft, refine_single_beat
+from backend.services.workflows.refining import refine_draft
 
 __all__ = [
     "refine_draft",

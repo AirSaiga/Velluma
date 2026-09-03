@@ -28,8 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 模块组织：
 - chapter_prompts.py: 基础章节生成提示词
 - draft_prompts.py: 主笔 Agent 提示词（初稿生成）
-- planner_prompts.py: 规划师 Agent 提示词（故事节奏拆分）
-- scene_intent_prompts.py: 场景意图分析提示词
 - review_prompts.py: 审阅/精修 Agent 提示词
 - format_prompts.py: 文本格式整理提示词
 - （2026-09-01 归档：bsadf/chapter_card/inspiration_prompts 零运行路径 → _deprecated）
@@ -56,8 +54,6 @@ from backend.services.prompts.draft_prompts import (
     # V4.0+ Dynamic State Update (NEW)
     build_dynamic_state_update_prompt,
 )
-from backend.services.prompts.planner_prompts import build_planner_agent_prompt, parse_planner_result, parse_planner_full_result
-from backend.services.prompts.scene_intent_prompts import build_scene_intent_prompt, parse_scene_intent_result
 from backend.services.prompts.review_prompts import (
     build_review_agent_prompt,
     build_refine_agent_prompt,
@@ -66,7 +62,6 @@ from backend.services.prompts.review_prompts import (
     build_chunk_refine_prompt,
 )
 from backend.services.prompts.format_prompts import build_formatting_prompt
-from backend.services.prompts.pov_prompts import build_pov_assignment_prompt, parse_pov_assignment_result, build_anchor_pov_prompt, parse_anchor_pov_result
 
 __all__ = [
     # Chapter & Draft
@@ -89,12 +84,7 @@ __all__ = [
     "build_chunk_review_prompt",
     "build_chunk_refine_prompt",
     # Planning
-    "build_planner_agent_prompt",
-    "parse_planner_result",
-    "parse_planner_full_result",
     # Scene Intent
-    "build_scene_intent_prompt",
-    "parse_scene_intent_result",
     # Others
     "build_formatting_prompt",
     "build_pov_assignment_prompt",

@@ -18,7 +18,8 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { NovelCreationWizard } from '../../novel-wizard'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
-import { chapterApi } from '../../../services/api'
+import { chapterApi, worldApi } from '../../../services/api'
+import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 import type { Book, Chapter } from '../../../types'
 
@@ -34,6 +35,8 @@ const chapters = store.chapters
 const loading = store.loading
 
 const showWizard = ref(false)
+// 向导组件引用：成功落地后清草稿（clearDraft 由 NovelCreationWizard defineExpose）
+const wizardRef = ref<any>(null)
 const showEditModal = ref(false)
 const editingBook = ref<Book | null>(null)
 const editForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
@@ -163,12 +166,18 @@ async function deleteBook(book: Book) {
   }
 }
 
-// novel-wizard 完成回调（向导 emit start-generation，payload 为嵌套的 WizardFormData）
+// novel-wizard 完成回调（向导 emit start-generation，payload 为嵌套的 WizardFormData）。
+// 2026-09-04 审计修复：此前只消费 story+world——向导强制收集的角色/关系/
+// 第 1 章大纲全部静默丢弃且不建章（新书 0 章）。现按「作者亲笔=已裁决」
+// 直接落地：第 1 章（outline_text）点亮 dock 就近节拍与 stitch 意图大纲
+// 转化；角色/关系直建 world_*（待确认池是给 AI 抽取候选的，亲笔不过池）；
+// 作者意图落第 1 章 spine.intent（打算的最高置信源）。
 async function onWizardFinish(formData: any) {
+  let newBook: Book | undefined
   try {
     // 字段映射：向导的嵌套结构 → 后端 Book 模型支持的扁平字段
     // （world/locations/rules 等后端无对应列的内容并入 worldview_settings dict）
-    const newBook = await store.createBook({
+    newBook = await store.createBook({
       title: formData.story?.title?.trim() || '未命名',
       genre: formData.story?.genre,
       global_sys_prompt: formData.story?.styleGuide,
@@ -179,12 +188,86 @@ async function onWizardFinish(formData: any) {
         rules: formData.world?.rules ?? [],
       },
     } as Partial<Book>)
-    showWizard.value = false
-    showToast('书籍已创建', 'success')
-    if (newBook) openBook(newBook)
   } catch (e: any) {
     showToast('创建失败：' + e.message, 'error')
+    return // 建书失败：向导留着、草稿保留，可改后重试
   }
+  if (!newBook) return
+  const bookId = newBook.id
+  const failures: string[] = []
+
+  // ---- 第 1 章：向导必填的大纲落 outline_text（不再丢弃）----
+  const intent = String(formData.chapter?.authorIntent ?? '').trim()
+  const outline = String(formData.chapter?.outline ?? '').trim()
+  // 意图超 60 字截不进 spine（同 useChapterSpine 截幅），全文并入大纲首行保底
+  const outlineText = intent && intent.length > 60 ? `【作者意图】${intent}\n${outline}` : outline
+  let chapter1Id = ''
+  try {
+    const ch = await chapterApi.create({
+      book_id: bookId,
+      chapter_number: 1,
+      chapter_name: String(formData.chapter?.title ?? '').trim() || '第1章',
+      outline_text: outlineText || undefined,
+      // 向导张力 1-10 → 后端 1-5（默认 5→3 与后端 balanced 缺省对齐）
+      tension_level: Math.min(5, Math.max(1, Math.round((Number(formData.chapter?.tensionLevel) || 5) / 2))),
+      pacing_style: formData.chapter?.pacingStyle || 'balanced',
+    } as any)
+    chapter1Id = (ch as any)?.id || ''
+  } catch (e: any) {
+    failures.push(`第 1 章创建失败（${e?.message || e}）`)
+  }
+
+  // ---- 角色 → world 实体 ----
+  const entityIdByWizardId = new Map<string, string>()
+  for (const c of formData.characters ?? []) {
+    if (!c?.name?.trim()) continue
+    try {
+      const ent = await worldApi.createEntity(bookId, {
+        entity_type: 'character',
+        name: c.name.trim(),
+        intro: String(c.profile ?? '').trim(),
+        importance: c.importance === 'core' || c.importance === 'protagonist' ? 8 : c.importance === 'important' ? 5 : 2,
+        props: c.currentState?.trim() ? { current_state: c.currentState.trim() } : {},
+      } as any)
+      entityIdByWizardId.set(c.id, (ent as any).id)
+    } catch (e: any) {
+      failures.push(`角色「${c.name}」创建失败（${e?.message || e}）`)
+    }
+  }
+
+  // ---- 角色关系（按创建结果解析两端 id；解析不到的跳过）----
+  for (const r of formData.relationships ?? []) {
+    const src = entityIdByWizardId.get(r?.sourceId)
+    const dst = entityIdByWizardId.get(r?.targetId)
+    if (!src || !dst) continue
+    try {
+      await worldApi.createRelation(bookId, {
+        source_entity_id: src,
+        target_entity_id: dst,
+        relation_type: String(r.relationType ?? '').trim() || '关系',
+        affinity: typeof r.affinity === 'number' ? r.affinity : null,
+        static: true,
+      } as any)
+    } catch (e: any) {
+      failures.push(`关系「${r.relationType ?? ''}」创建失败（${e?.message || e}）`)
+    }
+  }
+
+  // ---- 作者意图 → 第 1 章 spine.intent（spine 打算短路=意图最高置信源）----
+  if (chapter1Id && intent) {
+    try {
+      await adaptiveApi.patchSpine(chapter1Id, { intent: { text: intent.slice(0, 60), source: 'author' } })
+    } catch { /* spine 失败不阻塞：意图已并入大纲，走大纲转化兜底 */ }
+  }
+
+  showWizard.value = false
+  wizardRef.value?.clearDraft?.() // 成功落地即清草稿（此前 clearDraft 零调用致草稿跨书复活）
+  if (failures.length) {
+    showToast(`书籍已创建，但部分向导内容未落地：${failures[0]}${failures.length > 1 ? ` 等 ${failures.length} 项` : ''}`, 'warning', 8000)
+  } else {
+    showToast('书籍已创建', 'success')
+  }
+  openBook(newBook)
 }
 
 function onWizardCancel() {
@@ -331,7 +414,7 @@ function openImportModal(book: Book) {
     <!-- novel-wizard 向导（事件名与 NovelCreationWizard 的 emit 对齐） -->
     <Transition name="modal">
       <div v-if="showWizard" class="wizard-overlay">
-        <NovelCreationWizard @start-generation="onWizardFinish" @close="onWizardCancel" />
+        <NovelCreationWizard ref="wizardRef" @start-generation="onWizardFinish" @close="onWizardCancel" />
       </div>
     </Transition>
 

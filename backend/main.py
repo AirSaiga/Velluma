@@ -171,9 +171,6 @@ from backend.routes import (
     style_router,  # CP2.2b 文风体系
 )
 
-from backend.routes.intent_driven import router as intent_driven_router
-logger.info("[Main] 意图驱动路由已加载")
-
 # V4.0 Canon（作者脑中世界图谱）路由
 from backend.routes.canon import router as canon_router
 logger.info("[Main] Canon 路由已加载")
@@ -278,10 +275,6 @@ app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
 app.include_router(critique_router)
 app.include_router(maps_router)
-
-# V4.0 意图驱动层路由
-app.include_router(intent_driven_router)
-logger.info("[Main] 意图驱动路由已注册: /api/intent-driven")
 
 # CP2.2b 文风体系路由
 app.include_router(style_router)

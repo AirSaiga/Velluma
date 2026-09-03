@@ -26,7 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 提供世界状态快照提取和更新
 
 子模块：
-- state_service.py: 世界状态服务实现
 
 主要功能：
 - 世界状态快照提取
@@ -38,11 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - backend.world_state_schemas: 世界状态 schema
 """
 
-from .state_service import (
-    CharacterInfo,
-    extract_world_state_snapshot,
-    update_character_physical_state,
-)
 
 __all__ = [
     "CharacterInfo",

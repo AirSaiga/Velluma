@@ -25,26 +25,6 @@
 - backend.services.llm: LLM 调用接口
 """
 
-from backend.services.validation.pre_generation_checklist import (
-    PreGenerationChecklist,
-    PreGenerationReport,
-    CheckResult,
-    CheckSeverity,
-    CheckCategory,
-    run_pre_generation_checks,
-)
-
-from backend.services.validation.review_repair import (
-    ChapterReviewer,
-    ChapterRepairer,
-    ReviewRepairCycle,
-    ReviewReport,
-    ReviewIssue,
-    IssueSeverity,
-    IssueCategory,
-    RepairStrategy,
-)
-
 # CP3.1b 新增：代码级审计层
 from backend.services.validation.code_auditors import (
     CodeAuditResult,

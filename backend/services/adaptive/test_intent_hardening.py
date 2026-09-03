@@ -528,6 +528,7 @@ class TestDockCacheIntentBust:
         snap = self._snapshot()
         a1 = orch._decide(self._state(""), snap, [])
         assert any(a.component == "dock_generator" for a in a1)  # 冷缓存激活
+        orch._commit_pending_sig("dock_generator")  # 模拟 _activate_sync 成功落账
         a2 = orch._decide(self._state(""), snap, [])
         assert not any(a.component == "dock_generator" for a in a2)  # 命中复用
         # 纠正打算（段落文本未变）→ 缓存 bust，dock 重跑换料
@@ -538,6 +539,7 @@ class TestDockCacheIntentBust:
         orch = self._orch()
         a1 = orch._decide(self._state(""), self._snapshot(1), [])
         assert any(a.component == "dock_generator" for a in a1)
+        orch._commit_pending_sig("dock_generator")  # 模拟 _activate_sync 成功落账
         a2 = orch._decide(self._state(""), self._snapshot(1), [])
         assert not any(a.component == "dock_generator" for a in a2)
         # 反推重算（版本递增）→ 猜测方向换料，缓存 bust
@@ -610,3 +612,44 @@ class TestSpineThrottleExemption:
             self._signals(),
         )
         assert not any(a.component == "intent_inference" for a in acts)
+
+
+class TestDockCacheTimeoutNoCommit:
+    """超时/失败弃账（2026-09-04 审计修复回归锁）：签名只在 _activate_sync
+    成功后落账——决策即落账会让超时后下一轮同文本误判缓存命中，「本轮产出
+    放弃、下轮停顿重算」的承诺失效（首次停顿即超时则挂件舱整章为空）。"""
+
+    def _orch(self):
+        from backend.services.adaptive.orchestrator import AdaptiveOrchestrator
+        return AdaptiveOrchestrator(None, "ch-test")
+
+    def _state(self):
+        from backend.services.adaptive.change_detector import AuthorState
+        return AuthorState(
+            chapter_id="ch-test", word_count=500, paused_ms=5000,
+            cursor_at_paragraph_end=True, recent_text="他握紧扳手。",
+        )
+
+    def _snapshot(self):
+        return {
+            "intent": {"source": "author", "confidence": 0.9},
+            "fact_count": 3, "total_words": 500, "intent_version": 1,
+            "projections": [],
+        }
+
+    def test_timeout_discards_pending_sig(self):
+        orch = self._orch()
+        a1 = orch._decide(self._state(), self._snapshot(), [])
+        assert any(a.component == "dock_generator" for a in a1)
+        # 模拟超时：弃账（不调 _commit_pending_sig）
+        orch._pending_sigs.pop("dock_generator", None)
+        a2 = orch._decide(self._state(), self._snapshot(), [])
+        assert any(a.component == "dock_generator" for a in a2)  # 未命中 → 下轮重算
+
+    def test_commit_applies_pending_sig(self):
+        orch = self._orch()
+        orch._decide(self._state(), self._snapshot(), [])
+        assert "dock_generator" in orch._pending_sigs
+        orch._commit_pending_sig("dock_generator")
+        assert "dock_generator" not in orch._pending_sigs
+        assert orch._last_dock_text_sig != ""  # 落账生效

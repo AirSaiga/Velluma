@@ -57,6 +57,13 @@ function startAnalysis() {
   })
 }
 
+/** 失败重试（2026-09-04 审计修复）：error 态下作者可重跑分析（绕过 started 一次性守卫） */
+function retryAnalysis() {
+  session.startAnalyze(props.chapterId).catch((e: any) => {
+    showToast('分析失败：' + (e?.message || '未知错误'), 'error')
+  })
+}
+
 // 组件挂载即启动
 startAnalysis()
 
@@ -122,8 +129,20 @@ const stepLabel: Record<string, string> = {
 
       <!-- 内容区 -->
       <div class="modal-body">
+        <!-- 失败（2026-09-04 审计修复）：此前 onError 置 error + step 回 idle，
+             而模板把 idle 也渲染成加载视图——失败后永远转圈，无任何错误提示 -->
+        <div v-if="session.error.value && session.step.value === 'idle'" class="error-view">
+          <Icon name="exclamation-circle" :size="40" class="error-icon" />
+          <p class="loading-text">分析失败</p>
+          <p class="loading-hint">{{ session.error.value }}</p>
+          <div class="error-actions">
+            <button class="retry-btn" @click="retryAnalysis">重试</button>
+            <button class="close-text-btn" @click="handleClose">关闭</button>
+          </div>
+        </div>
+
         <!-- idle / analyzing：加载中 -->
-        <div v-if="session.step.value === 'idle' || session.step.value === 'analyzing'" class="loading-view">
+        <div v-else-if="session.step.value === 'idle' || session.step.value === 'analyzing'" class="loading-view">
           <Icon name="arrow-path" :size="40" class="spin" />
           <p class="loading-text">LLM 正在分析正文，提取角色、关系、地点、资产和伏笔……</p>
           <p class="loading-hint">这可能需要 30-60 秒</p>
@@ -270,6 +289,51 @@ const stepLabel: Record<string, string> = {
   gap: 0.5rem;
   color: var(--accent-500);
   text-align: center;
+}
+
+/* 失败态（2026-09-04 审计修复）：错误提示 + 重试/关闭 */
+.error-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: #b0483c;
+  text-align: center;
+}
+
+.error-icon {
+  color: #b0483c;
+}
+
+.error-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.retry-btn {
+  padding: 0.4rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent-500);
+  color: #fff;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.retry-btn:hover {
+  filter: brightness(1.08);
+}
+
+.close-text-btn {
+  padding: 0.4rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, inherit);
+  font-size: 0.875rem;
+  cursor: pointer;
 }
 
 .loading-text {

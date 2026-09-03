@@ -145,6 +145,12 @@ function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor
 }
 // adaptive composing 态才显示「多写几段」入口（SparkDock props 注入）
 const adaptiveComposing = computed(() => session.adaptiveMode.value && session.authorLane.value === 'composing')
+// 感知带挂载条件（2026-09-04 审计修复）：ghostStitching 态也要带在——疑点条/
+// 洗层条/返修条挂在带内 #dock 槽，数据恰在幽灵在屏期间（GHOST_DONE）灌入；
+// 旧条件严格 ==='composing' 使整带在幽灵落屏瞬间卸载，三条 UI 恒不可见
+// （违背模板内「挂件舱自身隐藏，此位恰好空出」的设计意图）。SparkDock 自身
+// 的 v-if="visible && !ghostActive" 已负责舱内避让，burst 入口仍吃原义。
+const adaptiveActive = computed(() => session.adaptiveMode.value && session.authorLane.value !== 'idle')
 
 // 学着闭嘴（2026-08-25 战略定稿）：感知带 × 收起——本地即时摘除该条 +
 // hint_dismiss 埋点（后端累计同类别 ≥3 次即静音，可在副驾收件箱恢复；
@@ -259,7 +265,11 @@ onBeforeUnmount(() => window.removeEventListener('velluma:collab-event', _onColl
 function toggleAssist() {
   setAssistEnabled(!assistEnabled.value)
   // 关闭时若正处于 adaptive 态，退出辅助层（车道复位，键位拦截随之解除）
-  if (!assistEnabled.value && session.adaptiveMode.value) session.exitAdaptive()
+  if (!assistEnabled.value && session.adaptiveMode.value) {
+    // 在飞 stitch 流一并中止（2026-09-04 审计修复）：否则迟到的幽灵灌入已停用辅助的画布
+    adaptiveAssist.abortInflight()
+    session.exitAdaptive()
+  }
   showToast(
     assistEnabled.value ? 'AI 辅助已开启' : 'AI 辅助已关闭：可安静手写，Space 恢复普通空格',
     'info',
@@ -520,6 +530,9 @@ let _activatedChapterId: string | null = null
 watch(selectedChapter, (ch, prev) => {
   if (ch && ch.id !== prev?.id) {
     _activatedChapterId = null
+    // 在飞 stitch 流先断（2026-09-04 审计修复）：GHOST_START 在后端全文生成完
+    // 才发出，换章窗口内旧章幽灵会以新章光标为落点灌进画布（跨章污染）
+    adaptiveAssist.abortInflight()
     // 切章时若在 adaptive 模式，退出（新章需重新激活）
     if (session.adaptiveMode.value) session.exitAdaptive()
     // 切章清空缓存零件——旧章挂件是旧章上下文的产物，留着会被停顿秒弹错章节
@@ -918,7 +931,7 @@ async function confirmDeleteChapter(ch: Chapter) {
             </div>
             <!-- 左缘感知带：写中常驻，Canon 感知（角色/伏笔/矛盾）；放正文左侧避开右边抽屉 -->
             <PerceptionBand
-              v-if="adaptiveComposing"
+              v-if="adaptiveActive"
               :suggestions="session.adaptiveSuggestions.value"
               :spine-progress="chapterSpine.spineProgress.value"
               @dismiss-hint="onDismissHint"

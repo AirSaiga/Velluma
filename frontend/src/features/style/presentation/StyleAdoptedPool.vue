@@ -58,9 +58,9 @@ function timeLabel(ts: string): string {
           <span v-if="g.wash_hits" class="adopted-pool__wash">规避禁忌 {{ g.wash_hits }} 处</span>
           <button
             class="adopted-pool__btn"
-            :disabled="busyId === g.ts + i"
+            :disabled="busyId === g.ts"
             @click="emit('collect', g)"
-          >{{ busyId === g.ts + i ? '收编中…' : '收为样本' }}</button>
+          >{{ busyId === g.ts ? '收编中…' : '收为样本' }}</button>
         </div>
       </div>
     </div>

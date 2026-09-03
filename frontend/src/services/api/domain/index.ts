@@ -3,7 +3,6 @@ import { requestJson, requestRaw } from '../transport'
 
 export const bookApi = {
   getAll: () => requestJson('/books'),
-  get: (id: string) => requestJson(`/books/${id}`),
   create: (data: any) => requestJson('/books', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) => requestJson(`/books/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => requestJson(`/books/${id}`, { method: 'DELETE' }),
@@ -16,16 +15,12 @@ export const bookApi = {
 }
 
 export const characterApi = {
+  // 旧表写路由已删（2026-09-04 死代码清理：旧表冻结、唯一编辑源在世界页）；
+  // 仅保留读回退（entityMention / useAppStore 兜底用）
   getAll: (bookId: string) => {
     const url = bookId ? `/books/${bookId}/characters` : '/characters'
     return requestJson(url)
   },
-  get: (id: string) => requestJson(`/characters/${id}`),
-  create: (data: any) => requestJson('/characters', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => requestJson(`/characters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => requestJson(`/characters/${id}`, { method: 'DELETE' }),
-  updateDynamicState: (id: string, data: any) =>
-    requestJson(`/characters/${id}/update-dynamic-state`, { method: 'POST', body: JSON.stringify(data) })
 }
 
 export const chapterApi = {
@@ -52,46 +47,6 @@ export const relationshipApi = {
     const url = bookId ? `/relationships?book_id=${bookId}` : '/relationships'
     return requestJson(url)
   },
-  create: (data: any) => requestJson('/relationships', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => requestJson(`/relationships/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => requestJson(`/relationships/${id}`, { method: 'DELETE' })
-}
-
-export const mapApi = {
-  getLocations(bookId: string) {
-    return requestJson(`/books/${bookId}/locations`)
-  },
-  createLocation(bookId: string, data: any) {
-    return requestJson(`/books/${bookId}/locations`, {
-      method: 'POST',
-      body: JSON.stringify({ ...data, book_id: bookId })
-    })
-  },
-  updateLocation(id: string, data: any) {
-    return requestJson(`/locations/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    })
-  },
-  deleteLocation(id: string) {
-    return requestJson(`/locations/${id}`, {
-      method: 'DELETE'
-    })
-  },
-  getChapterLocations(chapterId: string) {
-    return requestJson(`/chapters/${chapterId}/locations`)
-  },
-  addLocationToChapter(chapterId: string, locationId: string) {
-    return requestJson(`/chapters/${chapterId}/locations`, {
-      method: 'POST',
-      body: JSON.stringify({ location_id: locationId })
-    })
-  },
-  removeLocationFromChapter(chapterId: string, locationId: string) {
-    return requestJson(`/chapters/${chapterId}/locations/${locationId}`, {
-      method: 'DELETE'
-    })
-  }
 }
 
 export const generateApi = {
@@ -352,7 +307,6 @@ import type {
   StyleExtractResponse,
   AuthorSample,
   AuthorSampleSceneType,
-  AuthorSampleSearchHit,
   StyleFingerprint,
   StyleInboxItem,
   StyleInboxKind,
@@ -477,18 +431,6 @@ export const styleApi = {
       method: 'POST',
       body: JSON.stringify({ kind, detail }),
     }).catch(() => {})
-  },
-
-  /** 向量检索相似样本。 */
-  searchSamples: async (
-    bookId: string,
-    queryText: string,
-    sceneType?: string,
-  ): Promise<AuthorSampleSearchHit[]> => {
-    return requestJson(`/books/${bookId}/samples/search`, {
-      method: 'POST',
-      body: JSON.stringify({ query_text: queryText, scene_type: sceneType || null, limit: 3 }),
-    })
   },
 
   /** 文风指纹：语料聚合 + 逐样本 + 可选章指纹（纯 code 测量，0 LLM）。 */
@@ -694,18 +636,6 @@ export interface PlanSuggestionResponse {
   }>
   canon_summary_excerpt: string
   suggested_questions: PlanSuggestionQuestion[]
-}
-
-export const adfApi = {
-  /**
-   * V4.2 介入点 1：获取章节规划建议（生成前）。
-   */
-  getPlanSuggestion: async (chapterId: string): Promise<PlanSuggestionResponse> => {
-    return await requestJson<PlanSuggestionResponse>(`/chapters/${chapterId}/plan-suggestion`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    })
-  },
 }
 
 // ============================================================

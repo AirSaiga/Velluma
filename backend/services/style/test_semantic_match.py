@@ -323,3 +323,58 @@ def test_empty_vector_positions_skipped(monkeypatch):
     monkeypatch.setattr(sm, "get_embeddings", _embed)
     ps = ProhibitionSet((ProhibitionEntry(pattern="深度禁忌短语"),))
     assert _run("失败句。正常句。", ps) == []  # 失败位跳过，正常位无映射也 []
+
+
+# ============================================================
+# 模式向量缓存：同集合异序不得错位（2026-09-04 审计修复回归锁）
+# ============================================================
+
+def test_pattern_vector_cache_order_independent(monkeypatch):
+    """同集合异序二次调用：向量必须按**当前调用序**还原，不得复用首调顺序。
+
+    事故：缓存值存 (首调下标, 向量)，异序命中按首调序还原 → 段向量与
+    pattern 错位配对，命中归因与相似度全乱。
+    """
+    vec_a, vec_b = [1.0, 0.0], [0.0, 1.0]
+    fake = FakeEmbedder({"模式甲": vec_a, "模式乙": vec_b})
+    _patch(monkeypatch, fake, configured=True)
+
+    ps_first = ProhibitionSet((
+        ProhibitionEntry(pattern="模式甲长词", source="t"),
+        ProhibitionEntry(pattern="模式乙长词", source="t"),
+    ))
+    _run("这是一段足够长的正文内容，可以被切成有效段落。", ps_first)
+    assert len(fake.calls) == 2  # 1 次模式向量 + 1 次段向量
+
+    # 同集合、异序的第二次调用：零新请求，且还原序随当前调用序
+    ps_second = ProhibitionSet((
+        ProhibitionEntry(pattern="模式乙长词", source="t"),
+        ProhibitionEntry(pattern="模式甲长词", source="t"),
+    ))
+    hits = _run("这是另一段足够长的正文内容，同样可以切成有效段落。", ps_second)
+    assert len(fake.calls) == 3  # 首 scan 2 次 + 第二次 scan 仅段向量 1 次
+    # 模式向量未因异序重发，且缓存只留首调那次（按集合命中，与顺序无关）
+    assert ['模式乙长词', '模式甲长词'] not in fake.calls
+    cached_entry = next(iter(sm._PATTERN_EMB_CACHE.values()))
+    key_order = list(cached_entry.keys())
+    # value 已是 {pattern: 向量}——不再存在「首调下标」概念
+    assert all(isinstance(v, list) for v in cached_entry.values())
+    assert set(key_order) == {"模式甲长词", "模式乙长词"}
+
+
+def test_pattern_vector_cache_hit_returns_current_order(monkeypatch):
+    """异序命中还原结果逐位等于当前序的向量（错位回归锁核心断言）。"""
+    vec_a, vec_b = [0.9, 0.1], [0.1, 0.9]
+    fake = FakeEmbedder({"甲": vec_a, "乙": vec_b})
+    _patch(monkeypatch, fake, configured=True)
+
+    async def _grab(patterns):
+        from backend.core.model_config import get_embedding_connection as _g
+        # 直接走 _pattern_vectors（绕过 is_embedding 门控层）
+        return await sm._pattern_vectors(patterns)
+
+    first = asyncio.run(_grab(["甲", "乙"]))
+    second = asyncio.run(_grab(["乙", "甲"]))
+    assert first == [vec_a, vec_b]
+    assert second == [vec_b, vec_a]  # 异序命中 → 按当前序还原
+    assert len(fake.calls) == 1      # 只在首调请求一次

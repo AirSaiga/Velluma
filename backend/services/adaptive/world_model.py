@@ -159,15 +159,6 @@ class WorldModelRepository:
         })
         model.layer1_facts = facts
 
-    async def get_facts(self, chapter_id: str) -> List[Dict]:
-        model = await self.get_or_create(chapter_id)
-        return list(model.layer1_facts or [])
-
-    async def get_full_text(self, chapter_id: str) -> str:
-        """层 1 全文（已锁段落拼接，用于后处理）。"""
-        facts = await self.get_facts(chapter_id)
-        return "\n\n".join(f["text"] for f in facts if f.get("text"))
-
     # ---- 层 2：意图推断（覆盖式，version 递增）----
 
     async def set_intent(self, chapter_id: str, intent: ChapterIntent) -> None:
@@ -176,15 +167,6 @@ class WorldModelRepository:
         model.layer2_intent = intent.to_dict()
         model.intent_version = (model.intent_version or 0) + 1
         model.last_inference_ts = time.time()
-
-    async def get_intent(self, chapter_id: str) -> ChapterIntent:
-        model = await self.get_or_create(chapter_id)
-        return ChapterIntent.from_dict(model.layer2_intent or {})
-
-    async def intent_age_seconds(self, chapter_id: str) -> float:
-        """距上次意图重算的秒数（调度器节流用）。"""
-        model = await self.get_or_create(chapter_id)
-        return time.time() - (model.last_inference_ts or 0)
 
     # ---- 层 3：未来推测（覆盖式）----
 
@@ -202,15 +184,7 @@ class WorldModelRepository:
         ]
         model.layer3_projections = [p.to_dict() for p in projections] + kept
 
-    async def get_projections(self, chapter_id: str) -> List[Dict]:
-        model = await self.get_or_create(chapter_id)
-        return list(model.layer3_projections or [])
-
     # ---- 挂件懒加载签名（projection 没变就不重算挂件）----
-
-    async def get_dock_sig(self, chapter_id: str) -> str:
-        model = await self.get_or_create(chapter_id)
-        return model.last_dock_sig or ""
 
     async def set_dock_sig(self, chapter_id: str, sig: str) -> None:
         model = await self.get_or_create(chapter_id)

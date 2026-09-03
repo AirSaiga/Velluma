@@ -95,12 +95,17 @@ function handleSubmit() {
   const errors = validationErrors.filter(e => e.severity === 'error')
   if (errors.length > 0) {
     // 此前静默 return：用户点「开始生成」没反应且不知道原因
-    showToast(errors[0].message || '请完善必填项后再开始生成', 'warning')
+    showToast(errors[0].message || '请完善必填项后再创建', 'warning')
     return
   }
 
   emit('start-generation', wizard.formData.value)
 }
+
+// 书架页在创建全链成功后调用（2026-09-04 审计修复：clearDraft 此前零调用，
+// 草稿留在 localStorage 跨书复活——下次开向导自动恢复旧书设定诱导重复建书）。
+// 失败路径不由这里清：向导留着可改后重试。
+defineExpose({ clearDraft: () => wizard.clearDraft() })
 
 async function handleClose() {
   // 未保存更改守卫：UI 显示了「• 有未保存的更改」却曾可直接关闭全丢
@@ -313,7 +318,7 @@ async function handleClose() {
                 : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed'
             ]"
           >
-            🚀 开始生成
+            创建书籍
           </button>
         </div>
       </footer>

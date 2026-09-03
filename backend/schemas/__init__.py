@@ -139,7 +139,6 @@ from .misc import (
     ModelTestResponse,
     DeaiTestRequest,
     DeaiTestResponse,
-    RecommendRequest,
     GenerateEmbeddingRequest,
 )
 from .world_state import (
@@ -375,7 +374,6 @@ __all__ = [
     "ModelTestResponse",
     "DeaiTestRequest",
     "DeaiTestResponse",
-    "RecommendRequest",
     "GenerateEmbeddingRequest",
     # World state schemas
     "CharacterTerminalStatus",
@@ -385,7 +383,6 @@ __all__ = [
     "StateValidationResult",
     "merge_world_states",
     # Functions
-    "map_tension_to_workflow_tier",
     # CP2.1b 文风体系 schemas
     "NegativeEntry",
     "StyleCardBase",
@@ -473,6 +470,3 @@ __all__ = [
 ]
 
 
-def map_tension_to_workflow_tier(tension_level: int) -> WorkflowTier:
-    from backend.services.orchestration.tier_mapper import map_tension_to_workflow_tier as _mapper
-    return _mapper(tension_level)

@@ -99,6 +99,8 @@ export async function streamSse(
               }
             } catch (e) {
               console.error('streamSse JSON 解析错误', e)
+              // 连续失败计数（2026-09-04 修复：原累计不清零——「连续 5 帧坏帧
+              // 断流」实为「累计 5 帧断流」，长流偶发坏帧会误杀健康流）
               parseErrors += 1
               if (parseErrors >= 5 && !ended) {
                 ended = true
@@ -108,6 +110,8 @@ export async function streamSse(
               }
             }
           }
+          // 有成功解析的帧 → 计数归零（恢复「连续」语义）
+          parseErrors = 0
         } catch (e) {
           // 业务回调（onPayload）抛异常不应中断流读取
           console.error('[streamSse] chunk 处理异常（不中断流）', e)

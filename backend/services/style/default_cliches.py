@@ -44,16 +44,22 @@ from typing import Any, Dict, List
 # ============================================================
 
 ZH_CLICHE_BLOCKER: List[Dict[str, Any]] = [
-    # 原 validators.py 的 10 条（高频网文腔，无替代价值）
-    {"pattern": "眼底闪过一丝", "alternative": "用具体动作或微表情描写"},
-    {"pattern": "嘴角勾起一抹", "alternative": "直接写笑容或表情"},
-    {"pattern": "不禁倒吸一口凉气", "alternative": "用角色的生理反应或动作"},
-    {"pattern": "倒吸一口凉气", "alternative": "用角色的生理反应或动作"},
-    {"pattern": "勾起一抹冷笑", "alternative": "直接写冷笑或讥讽语气"},
-    {"pattern": "深邃的眼眸", "alternative": "用具体眼神或目光描写"},
-    {"pattern": "不可名状的", "alternative": "具体描述为何难以形容"},
-    {"pattern": "宛如实质般的", "alternative": "用具体比喻"},
-    {"pattern": "难以言喻的", "alternative": "具体描述这种感觉"},
+    # 原 validators.py 的 10 条（高频网文腔，无替代价值）。
+    # ⚠ 故意不带 alternative（2026-09-04 审计修复）：这些是"高频网文腔"，
+    #   不存在可机械替换的替身词；此前误填的编辑指令（"用具体动作或微表情
+    #   描写"）会被洗层当替换词字面拼进正文（"眼底，用具体动作或微表情描写，
+    #   惊讶"）。不带 alternative → 洗层只记录命中（chip 呈现），残留 blocker
+    #   走既有的 P2 句级修补+严格验收路径。用户负面清单里自填的词式
+    #   alternative（如"沉静"）不受影响，照常替换。
+    {"pattern": "眼底闪过一丝"},
+    {"pattern": "嘴角勾起一抹"},
+    {"pattern": "不禁倒吸一口凉气"},
+    {"pattern": "倒吸一口凉气"},
+    {"pattern": "勾起一抹冷笑"},
+    {"pattern": "深邃的眼眸"},
+    {"pattern": "不可名状的"},
+    {"pattern": "宛如实质般的"},
+    {"pattern": "难以言喻的"},
 ]
 
 ZH_CLICHE_WARNING: List[Dict[str, Any]] = [

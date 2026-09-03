@@ -423,6 +423,8 @@ export const adaptiveApi = {
     },
     signal?: AbortSignal,
   ) => {
+    // 终帧哨兵：GHOST_DONE/GHOST_REJECT/ERROR 任一到达即置位（EOF 兜底判定用）
+    let receivedTerminal = false
     streamSse(`/chapters/${chapterId}/adaptive/stitch-ghost`, params, {
       onPayload: payload => {
         if (!payload || !payload.event) return
@@ -432,6 +434,7 @@ export const adaptiveApi = {
           callbacks.onChunk?.(payload.delta || '')
         } else if (payload.event === 'GHOST_DONE') {
           // C1 快检疑点 / P1 洗层 / P5 回流令牌随 DONE 帧到达（向后兼容增量字段）
+          receivedTerminal = true
           const warnings: GhostWarning[] = Array.isArray(payload.warnings) ? payload.warnings : []
           callbacks.onDone?.({
             text: payload.text || '',
@@ -446,6 +449,7 @@ export const adaptiveApi = {
           return true
         } else if (payload.event === 'GHOST_REJECT') {
           // 二期质量拒稿：自动修正未通过，幽灵不上屏（逃生舱载荷随车）
+          receivedTerminal = true
           const rejectWarnings: GhostWarning[] = Array.isArray(payload.warnings) ? payload.warnings : []
           callbacks.onReject?.({
             message: payload.message || '这次没能写出合格的续写',
@@ -455,11 +459,19 @@ export const adaptiveApi = {
           })
           return true
         } else if (payload.event === 'ERROR' || payload.event === 'GHOST_ERROR') {
+          receivedTerminal = true
           callbacks.onError?.(payload.error || '续写失败')
           return true
         }
       },
       onError: message => callbacks.onError?.(message),
+      // EOF 未收到终帧兜底（2026-09-04 审计修复）：流正常关闭但 GHOST_DONE/
+      // REJECT/ERROR 均未到达（后端输出中断/代理掐断）——此前 onDone/onError
+      // 都不触发，authorLane 卡 ghostStitching、幽灵态悬挂。与 diagnose/analyze
+      // 的既有兜底同型。
+      onDone: () => {
+        if (!receivedTerminal) callbacks.onError?.('续写流中断（未收到完成帧），请重试')
+      },
     }, signal).catch(err => { if (!signal?.aborted) callbacks.onError?.(err.message) })
   },
 }

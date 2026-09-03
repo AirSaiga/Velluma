@@ -83,12 +83,31 @@ class AdaptiveOrchestrator:
         # （尸检与信号转世见 docs/world-kernel-foundation.md）
         # canon 感知缓存：recent_text 签名未变则复用上次 hints（纯算法但省 DB 查询）
         self._last_canon_text_sig: str = ""
+        # 缓存签名待定账（2026-09-04 审计修复）：签名在 _decide 决策时算出，但
+        # 落账推迟到 _activate_sync **成功后**——此前决策即落账，12s 超时后旧
+        # 签名已就位，下一轮同文本直接判缓存命中，「超时下轮重算」承诺失效，
+        # 首次停顿即超时则挂件舱整章为空。失败/超时弃账（旧签名保留=下轮重算）
+        self._pending_sigs: Dict[str, Dict[str, str]] = {}
+        # 完稿在飞标记（2026-09-04 审计修复）：原「post_process in _active_tasks」
+        # 守卫恒假（post_process 从不进 _active_tasks），连点完稿=全管线并发双跑
+        self._finish_in_flight: bool = False
         # 组件注册（延迟 import 避免循环）
         self._components: Dict[str, Callable] = {}
 
     def register_component(self, name: str, runner: Callable):
         """注册能力组件（runner 签名：async def(chapter_id, db, model_snapshot, budget) -> result）。"""
         self._components[name] = runner
+
+    def _commit_pending_sig(self, component: str) -> None:
+        """把待定缓存签名落账（_activate_sync 成功路径调用；失败/超时弃账）。"""
+        pending = self._pending_sigs.pop(component, None)
+        if not pending:
+            return
+        if component == "dock_generator":
+            self._last_dock_text_sig = pending.get("text", self._last_dock_text_sig)
+            self._last_dock_proj_sig = pending.get("proj", self._last_dock_proj_sig)
+        elif component == "canon_watch":
+            self._last_canon_text_sig = pending.get("text", self._last_canon_text_sig)
 
     # ============================================================
     # P3-1（C5）组件失败可见化 + P3-2（C4）入参签名
@@ -342,8 +361,8 @@ class AdaptiveOrchestrator:
                     priority="low",
                     budget_tokens=1500,
                 ))
-                self._last_dock_text_sig = cur_text_sig
-                self._last_dock_proj_sig = cur_proj_sig
+                # 签名待定账（成功落账/失败弃账，见 __init__ _pending_sigs）
+                self._pending_sigs["dock_generator"] = {"text": cur_text_sig, "proj": cur_proj_sig}
             # 缓存命中：__dock__ 项仍在 layer3_projections，前端 heartbeat 照常取到
 
         # ---- 规则 4：Canon 感知（停顿 4s + 有正文；hint 主体纯算法 + contradiction 低频 LLM，与 dock 同档同步返回）----
@@ -362,7 +381,8 @@ class AdaptiveOrchestrator:
                     priority="low",
                     budget_tokens=0,  # appearance/callback/leak 纯算法；contradiction 分支的 1×LLM 由组件内 ≥30s/章 节流自控，不走此预算
                 ))
-                self._last_canon_text_sig = canon_text_sig
+                # 签名待定账（成功落账/失败弃账，见 __init__ _pending_sigs）
+                self._pending_sigs["canon_watch"] = {"text": canon_text_sig}
             # 缓存命中：__canon_watch__ 项仍在 layer3_projections，前端 heartbeat 照常取到
 
         # ---- 规则 3：去重（同组件不重复激活）----
@@ -459,8 +479,14 @@ class AdaptiveOrchestrator:
             # 不在此 commit（由 on_heartbeat 统一 commit）
             if act.component == "intent_inference":
                 self._last_inference_ts = time.time()
+            # 缓存签名成功落账（2026-09-04 审计修复：决策即落账会让超时后
+            # 下一轮误判缓存命中——「超时下轮重算」承诺的兑现点）
+            self._commit_pending_sig(act.component)
             self._clear_component_error(act.component)  # P3-1：成功即清
         except asyncio.TimeoutError:
+            # 超时/失败弃账：待定签名丢弃，旧缓存签名保留 → 下一轮同文本仍判
+            # 未命中并重新激活（「本轮产出放弃，下轮重算」成立）
+            self._pending_sigs.pop(act.component, None)
             logger.warning(
                 f"[orchestrator] 同步组件 {act.component} 超时（>{SYNC_COMPONENT_TIMEOUT_S}s），本轮产出放弃"
             )
@@ -469,6 +495,7 @@ class AdaptiveOrchestrator:
                 TimeoutError(f"同步超时 >{SYNC_COMPONENT_TIMEOUT_S}s（端点缓慢，本轮产出放弃，下轮停顿重算）"),
             )
         except Exception as e:
+            self._pending_sigs.pop(act.component, None)
             logger.warning(f"[orchestrator] 同步组件 {act.component} 失败: {e}", exc_info=True)
             self._note_component_error(act.component, e)  # P3-1
 
@@ -548,8 +575,12 @@ class AdaptiveOrchestrator:
         post_runner = self._components.get("post_process")
         if not post_runner:
             return {"finished": False, "reason": "post_process 未注册"}
-        if "post_process" in self._active_tasks:
+        # 并发守卫（2026-09-04 审计修复）：原「post_process in _active_tasks」
+        # 恒假（post_process 走同步路径从不注册后台 task）——连点完稿=审计
+        # +event_scout+记忆重索引全管线并发双跑双烧 token。改用真实在飞标记。
+        if self._finish_in_flight:
             return {"finished": False, "reason": "后处理已在进行中"}
+        self._finish_in_flight = True
 
         # 存量缺陷修复：on_finish 缺此导入 → NameError → /adaptive/finish 一直 500
         # （本文件各方法惯用局部导入防循环依赖，on_settle 有、on_finish 漏了）
@@ -591,7 +622,7 @@ class AdaptiveOrchestrator:
             self._note_component_error("post_process", e)  # P3-1
             return {"finished": False, "reason": str(e)}
         finally:
-            self._active_tasks.pop("post_process", None)
+            self._finish_in_flight = False
 
     async def _fact_count(self) -> int:
         async with self.db_factory() as db:

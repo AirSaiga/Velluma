@@ -89,12 +89,17 @@ const bookUsage = ref<BookUsage | null>(null)
 const usageChapterNumber = ref<number | null>(null)
 
 async function loadAll() {
-  if (!bookIdFromRoute.value) return
+  const bid = bookIdFromRoute.value
+  if (!bid) return
   loading.value = true
   error.value = null
   try {
-    // 同步当前书的章节
-    if (store.currentBookId.value !== bookIdFromRoute.value) {
+    // 同步当前书的章节。切书竞态修复（2026-09-04 审计）：selectBook 同步改
+    // currentBookId、章节列表异步加载——旧判据「currentBookId 不一致」在
+    // loadAll 执行时恒 false，读到的是上一本书的章节（成本/质量/协作三面板
+    // 按错误章号集合拉报告）。改为无条件补拉并 await（与 StyleView 按书取数
+    // 同哲学；store.load 自身幂等）。
+    if (bookIdFromRoute.value) {
       await store.loadCurrentBookData()
     }
     const chaps = sortedChapters.value.slice(-10) // 最近 10 章
@@ -136,6 +141,8 @@ async function loadAll() {
         : Promise.resolve(null),
       usageApi.getBookUsage(bookIdFromRoute.value).catch(() => null),
     ])
+    // 过期守卫（2026-09-04 切书竞态修复）：await 期间已切书 → 本轮结果整体丢弃
+    if (bookIdFromRoute.value !== bid) return
     costReports.value = costs
     qualityReports.value = qualities
     collabReports.value = collabs
@@ -145,7 +152,7 @@ async function loadAll() {
   } catch (e: any) {
     error.value = e.message
   } finally {
-    loading.value = false
+    if (bookIdFromRoute.value === bid) loading.value = false
   }
 }
 

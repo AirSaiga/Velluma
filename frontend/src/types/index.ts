@@ -476,10 +476,6 @@ export interface AuthorSample {
   created_at: string
 }
 
-export interface AuthorSampleSearchHit {
-  sample: AuthorSample
-  distance: number
-}
 
 // ---- 文风指纹（S1 测量层，docs/style-module-redesign.md §7.2）----
 

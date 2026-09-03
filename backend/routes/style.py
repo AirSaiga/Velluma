@@ -828,7 +828,10 @@ async def scan_negative(
         ).scalar_one_or_none()
         if not chapter or chapter.book_id != book_id:
             raise HTTPException(status_code=404, detail="章节不存在")
-        text = chapter.content_text or chapter.draft_text or ""
+        # 剥 HTML（2026-09-04 审计修复）：content_text 是编辑器 HTML，此前直接
+        # 进扫描——word_count 是 HTML 长度、标签打断词边界漏报、occurrences
+        # 偏移锚在 HTML 串上。与同文件指纹/负面命中/收编同一把尺子。
+        text = _plain_text(chapter.content_text or chapter.draft_text or "")
     if not text.strip():
         raise HTTPException(status_code=400, detail="待扫描文本为空")
 

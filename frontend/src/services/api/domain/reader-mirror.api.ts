@@ -79,18 +79,6 @@ export const readerMirrorApi = {
     requestJson<{ deleted: boolean }>(`/books/${bookId}/reader-mirror/expectations/${expectationId}`, {
       method: 'DELETE',
     }),
-
-  recordTension: (bookId: string, chapterNumber: number, data: { overall_tension: number; is_payoff?: boolean; note?: string }) =>
-    requestJson<{ recorded: boolean }>(`/books/${bookId}/reader-mirror/tension/${chapterNumber}`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  infer: (bookId: string, chapterId: string) =>
-    requestJson<{ updated: boolean; expectations_count: number }>(`/books/${bookId}/reader-mirror/infer/${chapterId}`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
 }
 
 export const EXPECTATION_TYPE_LABELS: Record<ExpectationType, string> = {

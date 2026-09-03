@@ -265,10 +265,6 @@ class ModelTestResponse(BaseModel):
     response_time_ms: Optional[float] = None
 
 
-class RecommendRequest(BaseModel):
-    creative_intents: List[str] = Field(..., max_length=2, description="创作意图列表")
-    chapter_goals: Optional[List[str]] = Field(None, description="章节目标列表")
-
 
 class GenerateEmbeddingRequest(BaseModel):
     pass
