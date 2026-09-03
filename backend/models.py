@@ -1595,6 +1595,11 @@ class WorldEntity(Base):
     intro = Column(Text, default="")
     tags = Column(JSONB, default=list)
     props = Column(JSONB, default=dict)  # 档案字段（appearance/speech_style 等，表驱动 schema）
+    # 字段级真相分层（2026-09-03）：{field_key: {level: "private"|"partial",
+    # public_text?: str, reveal_chapter?: int|null}}；缺键=公开（零存储）。
+    # 字段内容本身即「里」，作者不两边维护；真相层消费链（prompt 注入/泄密检测/
+    # 揭示提醒）直接读此列自动感知——派生感知取代物料迁移，不建真相节点副本。
+    field_layers = Column(JSONB, default=dict)
     metadata_ = Column("metadata", JSONB, default=dict)
 
     created_at = Column(DateTime, default=utc_now)

@@ -599,6 +599,13 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "VARCHAR(20) DEFAULT 'public'",
         "expected_udt_names": {"varchar"},
     },
+    # 字段级真相分层（2026-09-03）：档案单字段 公开/半露/秘密，缺键=公开
+    {
+        "table": "world_entities",
+        "column": "field_layers",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
     # 单一画布：实体画布锚位（无推演位置时的作者摆位）
     {
         "table": "world_entities",

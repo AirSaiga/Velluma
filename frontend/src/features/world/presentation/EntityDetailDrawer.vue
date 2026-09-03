@@ -14,6 +14,14 @@ import { useWorld } from '../composables/useWorld'
 import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
 import { archiveFields } from '../engine/entitySchema'
+import {
+  FIELD_LAYER_LABELS,
+  FIELD_LAYER_TITLES,
+  cycleFieldLayer,
+  fieldLayerLevel,
+  getFieldLayer,
+  mergeFieldLayer,
+} from '../engine/fieldLayers'
 import { formatTime } from '../engine/timeFormat'
 import { getTemplate } from '../engine/eventTemplates'
 import { vAutogrow } from './autogrow'
@@ -182,6 +190,43 @@ async function addField(key: string) {
   el?.focus()
 }
 
+// ===== 字段级真相分层（2026-09-03）：字段内容本身即「里」，半露只需补「表」=====
+// 分层状态存 field_layers（缺键=公开）；prompt 注入/泄密检测/揭示提醒由后端自动感知，
+// 作者不两边维护（派生感知取代物料迁移，不建真相节点副本）。
+
+function layerOf(key: string) {
+  return fieldLayerLevel(entity.value, key)
+}
+function layerSpec(key: string) {
+  return getFieldLayer(entity.value, key)
+}
+
+async function cycleLayer(key: string) {
+  if (!entity.value) return
+  await updateEntityArchive(props.bookId, entity.value.id, {
+    field_layers: cycleFieldLayer(entity.value, key),
+  })
+}
+
+async function saveLayerPublicText(key: string, value: string) {
+  if (!entity.value) return
+  const v = value.trim()
+  if ((layerSpec(key)?.public_text || '') === v) return
+  await updateEntityArchive(props.bookId, entity.value.id, {
+    field_layers: mergeFieldLayer(entity.value, key, { public_text: v }),
+  })
+}
+
+async function saveLayerChapter(key: string, value: string) {
+  if (!entity.value) return
+  const n = parseInt(value, 10)
+  const ch = Number.isFinite(n) && n > 0 ? n : null
+  if ((layerSpec(key)?.reveal_chapter ?? null) === ch) return
+  await updateEntityArchive(props.bookId, entity.value.id, {
+    field_layers: mergeFieldLayer(entity.value, key, { reveal_chapter: ch }),
+  })
+}
+
 // ===== 编年史（涉及其的事件）=====
 
 const chronicle = computed(() => {
@@ -230,9 +275,9 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
         <Icon name="x-mark" :size="14" />
       </button>
     </div>
-    <!-- 私有语义消歧（A1）：让作者知道「私有」挡什么、不挡什么 -->
+    <!-- 私有语义消歧（A1 + 2026-09-03 字段分层）：让作者知道两档粒度各管什么 -->
     <p class="edd-vis-note">
-      私有 = AI 知晓但不直接写出；防泄底强制力来自真相层，敏感秘密建议建真相节点
+      整人私有 = 全部档案只给 AI 知晓；单条设定的保密或逐步揭示，用档案字段旁的「公开/半露/秘密」分层
     </p>
 
     <!-- 重要度 -->
@@ -281,7 +326,15 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
     <div class="edd-sec">
       <div class="edd-sec-title">档案</div>
       <div v-for="f in addedFields" :key="f.key" class="edd-field">
-        <label class="edd-field-label">{{ f.label }}</label>
+        <div class="edd-field-head">
+          <label class="edd-field-label">{{ f.label }}</label>
+          <button
+            class="edd-layer"
+            :class="`edd-layer--${layerOf(f.key)}`"
+            :title="FIELD_LAYER_TITLES[layerOf(f.key)]"
+            @click="cycleLayer(f.key)"
+          >{{ FIELD_LAYER_LABELS[layerOf(f.key)] }}</button>
+        </div>
         <textarea
           v-if="f.multiline"
           v-autogrow
@@ -300,6 +353,30 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
           :value="(entity.props?.[f.key] as string) || ''"
           @blur="saveField(f.key, ($event.target as HTMLInputElement).value)"
         />
+        <!-- 半露内联：字段内容=里，只需补「表」；留空则整条按秘密处理 -->
+        <div v-if="layerOf(f.key) === 'partial'" class="edd-field-layerbox">
+          <label class="edd-field-layerlabel">读者目前看到的版本（表）——留空则整条按秘密处理</label>
+          <textarea
+            v-autogrow
+            class="edd-field-input"
+            rows="2"
+            placeholder="读者目前看到的描述（可空）"
+            :value="layerSpec(f.key)?.public_text || ''"
+            @blur="saveLayerPublicText(f.key, ($event.target as HTMLTextAreaElement).value)"
+          ></textarea>
+          <label class="edd-field-layerlabel">第几章揭（可空——写了就会在临近时提醒）</label>
+          <input
+            class="edd-field-input edd-field-layerch"
+            type="number"
+            min="1"
+            placeholder="—"
+            :value="layerSpec(f.key)?.reveal_chapter ?? ''"
+            @change="saveLayerChapter(f.key, ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+        <div v-else-if="layerOf(f.key) === 'private'" class="edd-field-layerhint">
+          只有 AI 知道——可用于铺垫暗示，绝不直接写出；写完可贴段正文查泄密
+        </div>
       </div>
       <div v-if="availableFields.length" class="edd-addwrap">
         <button v-if="!showFieldMenu" class="edd-add" @click="showFieldMenu = true">
@@ -656,6 +733,67 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   font-size: 11px;
   color: var(--text-secondary);
   margin-bottom: 4px;
+}
+/* 字段级真相分层（2026-09-03）：label 行右侧的三态 chip */
+.edd-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.edd-field-head .edd-field-label {
+  margin-bottom: 4px;
+}
+.edd-layer {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  line-height: 1.6;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.edd-layer:hover {
+  opacity: 1;
+  border-color: var(--border-color);
+}
+.edd-layer--partial {
+  color: #7c5faf;
+  border-color: rgba(124, 95, 175, 0.45);
+  opacity: 1;
+}
+.edd-layer--private {
+  color: #a63e2a;
+  border-color: rgba(166, 62, 42, 0.45);
+  opacity: 1;
+}
+.edd-field-layerbox {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px dashed rgba(124, 95, 175, 0.4);
+  border-radius: 8px;
+}
+.edd-field-layerbox .edd-field-input {
+  margin-bottom: 6px;
+}
+.edd-field-layerlabel {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.edd-field-layerch {
+  width: 90px;
+}
+.edd-field-layerhint {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #a63e2a;
+  opacity: 0.85;
 }
 /* 单行/多行共用；多行走 v-autogrow，resize 交给自动高度（手动拖拽会与自动量高打架） */
 .edd-field-input {

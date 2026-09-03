@@ -53,6 +53,11 @@ from backend.models import (
 )
 from backend.repositories import CanonRepository
 from backend.schemas.canon import ConsistencyIssue
+from backend.services.world.field_layers import (
+    LEVEL_PARTIAL,
+    FieldLayerEntry,
+    iter_field_layers,
+)
 
 # A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：canon 段剂量改引 budget 表
 from backend.services.context.budget import (
@@ -98,6 +103,35 @@ def _extract_key_phrases(text: str, max_phrases: int = 10) -> List[str]:
         if len(result) >= max_phrases:
             break
     return result
+
+
+# ============================================================
+# 字段级真相分层（2026-09-03）：实体档案字段作为虚拟真相条目
+# ============================================================
+
+async def _collect_field_layer_entries(
+    db: AsyncSession, book_id: UUID
+) -> List[Tuple[str, FieldLayerEntry]]:
+    """扫描本书实体的 field_layers，产出 [(实体名, 分层条目)]。
+
+    字段内容本身即「里」——不建真相节点副本，真相层消费链直接读字段分层
+    （派生感知取代物料迁移）。整人 private 实体跳过：全档案已在 secrets
+    通道，再进 [private] 段是重复注入。无分层的书返回空列表（零行为变化）。
+    """
+    try:
+        from backend.repositories.world_repository import WorldRepository
+
+        entities = await WorldRepository(db).entities.list_by_book(book_id)
+    except Exception as e:
+        logger.warning(f"[Canon] 加载实体字段分层失败: {e}")
+        return []
+    out: List[Tuple[str, FieldLayerEntry]] = []
+    for ent in entities:
+        if getattr(ent, "visibility", "public") == "private":
+            continue
+        for entry in iter_field_layers(ent):
+            out.append(((ent.name or ""), entry))
+    return out
 
 
 # ============================================================
@@ -154,6 +188,32 @@ async def check_consistency(
                 ],
             ))
 
+    # 字段级真相分层（2026-09-03）：分层字段全文参与同一泄密判据；
+    # partial 字段的抽取集 = 全文短语 − 表文本短语（表里共有的词读者已知，不算泄密）
+    field_entries = await _collect_field_layer_entries(db, book_id)
+    for ent_name, entry in field_entries:
+        phrases = _extract_key_phrases(entry.full_text)
+        if entry.level == LEVEL_PARTIAL and entry.public_text:
+            known = set(_extract_key_phrases(entry.public_text))
+            phrases = [p for p in phrases if p not in known]
+        leaked = [p for p in phrases if p in text]
+        if leaked:
+            label = f"{ent_name}·{entry.label}"
+            private_leak_count += 1
+            issues.append(ConsistencyIssue(
+                severity="error",
+                kind="private_leak",
+                node_id=None,
+                node_label=label,
+                detail=f"分层字段 [{label}] 的关键短语出现在文本中：{leaked[:3]}",
+                evidence=leaked[0] if leaked else None,
+                suggestions=[
+                    f"删除对 '{leaked[0]}' 的直接提及",
+                    f"改为间接暗示（用动作/反应代替直接说明）",
+                    f"如果是有意暴露，请在该字段的分层里把「表」补全或改回公开",
+                ],
+            ))
+
     # ---- 检查 2: 悬空伏笔（HOOK 节点 status=open 且超过 N 章未回收） ----
     try:
         hooks = await repo.nodes.find_hooks(book_id, only_open=True)
@@ -191,7 +251,7 @@ async def check_consistency(
 
     # ---- 统计 ----
     stats = {
-        "private_total": len(private_nodes),
+        "private_total": len(private_nodes) + len(field_entries),
         "private_leaked": private_leak_count,
         "hooks_open": len(hooks),
         "hooks_orphan": orphan_count,
@@ -246,7 +306,11 @@ async def build_canon_context_for_prompt(
     # C2：ref 节点 label 由世界对象推演（一次批量解析，失败静默回退原 label）
     world_names = await _resolve_world_labels(db, book_id, private_nodes)
 
-    if private_nodes:
+    # 字段级真相分层（2026-09-03）：分层字段以虚拟条目并入同一 [private] 段，
+    # 标签「实体名·字段名」；partial 追加「读者目前只知」（表）——段外档案只露表。
+    field_entries = await _collect_field_layer_entries(db, book_id)
+
+    if private_nodes or field_entries:
         parts.append("## 作者脑中的真相 [private] ★ 绝不许在正文直接写出")
         for n in private_nodes[:CANON_PRIVATE_MAX_ENTRIES]:
             label = world_names.get(str(n.ref_id), n.label) if n.ref_id else n.label
@@ -255,6 +319,12 @@ async def build_canon_context_for_prompt(
                 line += f"（揭示计划：{n.reveal_plan[:CANON_REVEAL_PLAN_MAX_CHARS]}）"
             parts.append(line)
             # 关键：明确告诉 LLM 这是 private
+            parts.append(f"  → 写作时可作为角色隐藏动机，但绝不能用对话/叙述/心理独白直接说出")
+        for ent_name, entry in field_entries:
+            line = f"- {ent_name}·{entry.label}：{entry.full_text[:CANON_PRIVATE_TEXT_MAX_CHARS]}"
+            if entry.level == LEVEL_PARTIAL and entry.public_text:
+                line += f"（读者目前只知：{entry.public_text[:CANON_PRIVATE_TEXT_MAX_CHARS]}）"
+            parts.append(line)
             parts.append(f"  → 写作时可作为角色隐藏动机，但绝不能用对话/叙述/心理独白直接说出")
 
     # 2. public 已建立事实

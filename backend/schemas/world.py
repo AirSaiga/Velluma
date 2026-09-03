@@ -127,6 +127,10 @@ class WorldEntityBase(BaseModel):
     intro: str = Field("")
     tags: List[str] = Field(default_factory=list)
     props: Dict[str, Any] = Field(default_factory=dict, description="档案字段（appearance/speech_style 等，表驱动 schema）")
+    field_layers: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="字段级真相分层：{field_key: {level: private|partial, public_text?, reveal_chapter?}}；缺键=公开",
+    )
 
 
 class WorldEntityCreate(WorldEntityBase):
@@ -145,6 +149,7 @@ class WorldEntityUpdate(BaseModel):
     intro: Optional[str] = None
     tags: Optional[List[str]] = None
     props: Optional[Dict[str, Any]] = None
+    field_layers: Optional[Dict[str, Any]] = None
 
 
 class WorldEntityResponse(WorldEntityBase):

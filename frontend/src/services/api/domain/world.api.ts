@@ -36,6 +36,8 @@ export interface WorldEntityCreate {
   intro?: string
   tags?: string[]
   props?: Record<string, unknown>
+  /** 字段级真相分层（2026-09-03）：{ field_key: { level: private|partial, public_text?, reveal_chapter? } } */
+  field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
   canvas_x?: number | null
   canvas_y?: number | null
 }

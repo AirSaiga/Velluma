@@ -121,6 +121,7 @@ def check_ghost_text(
     *,
     canon_private_labels: Optional[List[str]] = None,
     character_secrets: Optional[List[Dict[str, str]]] = None,
+    field_layer_secrets: Optional[List[Dict[str, str]]] = None,
     world_state: Optional[Dict[str, Any]] = None,
     entity_names_by_id: Optional[Dict[str, List[str]]] = None,
     canon_node_ids_by_label: Optional[Dict[str, str]] = None,
@@ -137,6 +138,8 @@ def check_ghost_text(
             world_state/entities 自动取用）
         canon_private_labels: 显式覆盖——Canon [private] 标签词表
         character_secrets: 显式覆盖——A1 私有通道 [{name, text}]
+        field_layer_secrets: 显式覆盖——字段级真相分层快检源
+            [{name, label, level, text, public_text}]；None 且 bundle 形态时自动取用
         world_state: 显式覆盖——t 时刻推演快照（character_states 的 alive）
         entity_names_by_id: 显式覆盖——实体 id → [主名, *别名]（dead_speak 用）
         visible_names: 在场/提及白名单（scene_visible_proper_nouns 同一产物，
@@ -166,6 +169,8 @@ def check_ghost_text(
                 canon_private_labels = _bundle_canon_labels(bundle)
             if character_secrets is None:
                 character_secrets = _bundle_secrets(bundle)
+            if field_layer_secrets is None:
+                field_layer_secrets = getattr(bundle, "field_layer_secrets", None) or None
             if world_state is None:
                 world_state = getattr(bundle, "world_state", None) or None
             if entity_names_by_id is None:
@@ -228,6 +233,28 @@ def check_ghost_text(
                     _hit(
                         "secret_leak", phrase,
                         f"疑似泄底：正文与{owner_note}私有设定片段「{phrase}」重合",
+                    )
+
+        # ---- 3b. secret_leak（字段级真相分层，2026-09-03）：分层档案字段内容
+        # 短语复现。判据与第 3 检同（切段逐字复现，宁漏勿误）；partial 字段剔除
+        # 表文本短语（读者已知的部分不算泄底）。整人 private 实体的字段不入此源
+        # （其档案已整体走第 3 检）。----
+        for fs in (field_layer_secrets or []):
+            if not isinstance(fs, dict):
+                continue
+            phrases = _secret_phrases(str(fs.get("text") or ""))
+            if str(fs.get("level") or "") == "partial":
+                known = set(_secret_phrases(str(fs.get("public_text") or "")))
+                if known:
+                    phrases = [p for p in phrases if p not in known]
+            owner = str(fs.get("name") or "").strip()
+            flabel = str(fs.get("label") or "").strip()
+            who = f"「{owner}·{flabel}」" if owner else (f"「{flabel}」" if flabel else "")
+            for phrase in phrases:
+                if phrase in text:
+                    _hit(
+                        "secret_leak", phrase,
+                        f"疑似泄底：正文直接写出了{who}的保密设定片段「{phrase}」",
                     )
 
         # ---- 4. cliche_hit：禁忌面命中（任务包 A，只提示不拦截）----

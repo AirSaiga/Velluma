@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
+from backend.services.world.field_layers import layered_profile_value
 
 
 # ============================================================
@@ -124,12 +125,17 @@ _STRUCTURED_FIELDS = (
 )
 
 
-def static_prompt_from_world_entity(ent: Any) -> str:
+def static_prompt_from_world_entity(ent: Any, respect_layers: bool = True) -> str:
     """WorldEntity → 旧 Character.static_prompt 等价文本。
 
     结构化 props 字段（键：值；M4 收尾后旧档案迁移并入 background，由
     启动数据迁移兜底摘键，这里不再回退读 legacy_profile）。
     下游自带截断（_characters_text 截 200），这里不做长度控制。
+
+    respect_layers（2026-09-03 字段级真相分层）：private 级字段整段隐去、
+    partial 级以「表」（public_text）顶替全文；无 field_layers 逐字节零变化。
+    整人 private 实体走 secrets 通道时须传 False——全档案本是秘密，再按字段
+    拆分会把 private 字段从所有通道抹掉（AI 连知晓都做不到）。
     """
     props = getattr(ent, "props", None) or {}
     if not isinstance(props, dict):
@@ -137,8 +143,13 @@ def static_prompt_from_world_entity(ent: Any) -> str:
     parts = []
     for key, label in _STRUCTURED_FIELDS:
         v = str(props.get(key) or "").strip()
-        if v:
-            parts.append(f"{label}：{v}")
+        if not v:
+            continue
+        if respect_layers:
+            v = layered_profile_value(ent, key, v) or ""
+            if not v:
+                continue
+        parts.append(f"{label}：{v}")
     return "\n".join(parts)
 
 
@@ -232,7 +243,9 @@ def _entity_secret_text(ent: Any) -> str:
     """
     etype = getattr(ent, "entity_type", "") or ""
     if etype == "character":
-        return static_prompt_from_world_entity(ent)
+        # 整人 private = 全档案皆是秘密，字段分层不再适用（否则 private 字段会被
+        # 从 secrets 通道也抹掉）；故此处显式关闭分层拆分。
+        return static_prompt_from_world_entity(ent, respect_layers=False)
     props = getattr(ent, "props", None) or {}
     desc = str(props.get("description") or "").strip() if isinstance(props, dict) else ""
     return (getattr(ent, "intro", "") or "").strip() or desc

@@ -20,11 +20,14 @@ import { worldApi, type CanonMigrateRow } from '../../../services/api/domain/wor
 import { useToast } from '../../../composables/useToast'
 import { canonApi } from '../../../services/api/domain/canon.api'
 import type { CanonNode, CanonVisibility } from '../../../services/api/domain/canon.api'
+import { deriveFieldLayerRows } from '../engine/fieldLayers'
+import { ARCHIVE_FIELDS } from '../engine/entitySchema'
 
 const props = defineProps<{ bookId: string }>()
 
 const emit = defineEmits<{
   select: [nodeId: string]
+  'select-entity': [entityId: string]
 }>()
 
 const { nodes, ensureLoaded, refresh: refreshCanon, createNode, loading } = useCanon()
@@ -152,6 +155,19 @@ function typeBadge(n: CanonNode) {
   return NODE_TYPE_LABELS[n.type] || n.type
 }
 
+// ===== 字段级真相分层（2026-09-03）派生区：档案里标了 半露/秘密 的字段在此可见 =====
+// 派生而非节点副本——内容唯一事实源仍是实体档案；点击深链回实体抽屉编辑现场。
+// 受三态过滤但故意不计入 counts（counts 是真实节点数，派生行只是视图）。
+const ARCHIVE_FIELD_LABELS: Record<string, string> = Object.fromEntries(
+  Object.values(ARCHIVE_FIELDS)
+    .flat()
+    .map((f) => [f.key, f.label]),
+)
+const fieldRows = computed(() => {
+  const rows = deriveFieldLayerRows(entities.value, (k) => ARCHIVE_FIELD_LABELS[k] || k)
+  return filter.value === 'all' ? rows : rows.filter((r) => r.level === filter.value)
+})
+
 // ===== 句子优先录入：写下这句话就行（Enter 建条并开详情继续补表/揭示计划） =====
 const adding = ref(false)
 const addDraft = ref('')
@@ -242,6 +258,32 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
     <div v-else class="side-empty">
       还没有记录真相——秘而不宣的身世、读者尚不知道的事实，先记在这里。写作时 AI 会替你守住它们。
     </div>
+
+    <!-- 字段级真相分层派生区：档案里标了 半露/秘密 的字段（点击回实体抽屉编辑） -->
+    <template v-if="fieldRows.length">
+      <div class="cs-group-title">来自角色档案 · 字段分层</div>
+      <ul class="side-list">
+        <li
+          v-for="r in fieldRows"
+          :key="`${r.entityId}:${r.fieldKey}`"
+          class="side-card side-card--click cs-row"
+          :class="`cs-row--${r.level}`"
+          title="打开该角色的档案（分层在字段旁维护）"
+          @click="emit('select-entity', r.entityId)"
+        >
+          <div class="sc-body">
+            <div class="cs-head">
+              <span class="cs-dot" :class="r.level"></span>
+              <span class="cs-name">{{ r.entityName }} · {{ r.fieldLabel }}</span>
+              <span class="cs-type cs-type--archive">档案</span>
+              <span v-if="r.level === 'partial'" class="cs-biao-neq" title="读者见过伪装版——表里两面都要维护">表≠里</span>
+              <span v-if="r.revealChapter" class="cs-reveal">第 {{ r.revealChapter }} 章揭</span>
+            </div>
+            <div class="cs-what">{{ r.fullText }}</div>
+          </div>
+        </li>
+      </ul>
+    </template>
 
     <!-- 句子优先录入 -->
     <div class="cs-add">
@@ -451,6 +493,16 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   border: 1px solid rgba(124, 95, 175, 0.4);
   border-radius: 0.1875rem;
   padding: 0 0.25rem;
+}
+/* 字段级真相分层派生区（2026-09-03）：来自角色档案 */
+.cs-group-title {
+  margin: 10px 0 6px;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+.cs-type--archive {
+  background: #8b8578;
 }
 .cs-what {
   font-size: 0.6875rem;

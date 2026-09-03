@@ -629,6 +629,7 @@ async function updateEntityArchive(
     intro?: string
     tags?: string[]
     props?: Record<string, unknown>
+    field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
     canvas_x?: number | null
     canvas_y?: number | null
   },

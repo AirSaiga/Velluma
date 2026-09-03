@@ -1085,6 +1085,7 @@ const visibleAssets = computed(() => filterAndSortEntities(assets.value))
         <CanonSection
           :book-id="bookId"
           @select="(id: string) => (selectedTruthId = id)"
+          @select-entity="(id: string) => (selectedEntityId = id)"
         />
         </template>
 

@@ -104,6 +104,12 @@ class SettingsBundle:
     # adaptive_prompts._secrets_block（canon 块后）；_characters_text 等装配层
     # 同步排除这些实体（双轨纪律：文本轨排除 private props，算法轨吃适配器全量）。
     character_secrets: List[Dict[str, str]] = field(default_factory=list)
+    # 字段级真相分层（2026-09-03）：分层档案字段的快检源
+    # [{name, label, level, text, public_text}]——prompt 轨由 canon [private]
+    # 虚拟条目承载（consistency.py），本列表供 ghost_guard 上屏前泄底快检
+    # （secret_leak 同款判据，partial 剔除表短语）；整人 private 实体不入列
+    # （其档案已整体在 character_secrets）。
+    field_layer_secrets: List[Dict[str, str]] = field(default_factory=list)
     # ---- 禁忌面归一（任务包 A，services/style/prohibitions.py 唯一权威）----
     # 四源合并（SystemCliche + negative_list + style_blacklist + 静态反 AI 词）
     # 的编译视图。None = 未加载/加载失败——任务包 B 起旧三源合并回退已删，
@@ -335,6 +341,23 @@ async def load_chapter_settings_bundle(
                 # A1 私有通道：private 实体档案走 secrets（prompt 侧 _secrets_block
                 # 消费）；entities/assets 装配层已同步排除（见 _characters_text 等）
                 bundle.character_secrets = overlay.get("secrets") or []
+                # 字段级真相分层（2026-09-03）：适配器算法轨自带全量
+                # world_entity，从此派生快检源（零额外查询）
+                from backend.services.world.field_layers import iter_field_layers
+                fl_secrets: List[Dict[str, str]] = []
+                for _ad in list(bundle.entities) + list(bundle.assets):
+                    _ent = getattr(_ad, "world_entity", None)
+                    if _ent is None or getattr(_ent, "visibility", "public") == "private":
+                        continue
+                    for _e in iter_field_layers(_ent):
+                        fl_secrets.append({
+                            "name": getattr(_ent, "name", "") or "",
+                            "label": _e.label,
+                            "level": _e.level,
+                            "text": _e.full_text,
+                            "public_text": _e.public_text,
+                        })
+                bundle.field_layer_secrets = fl_secrets
                 bundle.world_sourced = True
         except Exception:
             pass  # 降级：world 桥失败走旧表（辅助不因桥接阻塞）

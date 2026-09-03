@@ -202,6 +202,37 @@ class IntentRepository:
                 "canon_node_id": str(node.id),
                 "source": "canon",
             })
+        # 第三来源（2026-09-03 字段级真相分层）：实体档案分层字段的 reveal_chapter
+        # （「第几章揭」），标签「实体名·字段名」；整人 private 实体跳过（与
+        # canon 注入/泄密检测同口径）。无分层的书零行为变化。
+        from backend.models import WorldEntity
+        from backend.services.world.field_layers import iter_field_layers
+
+        entities = (await self._db.execute(
+            select(WorldEntity).where(WorldEntity.book_id == bid)
+        )).scalars().all()
+        for ent in entities:
+            if getattr(ent, "visibility", "public") == "private":
+                continue
+            for entry in iter_field_layers(ent):
+                if entry.reveal_chapter is None:
+                    continue
+                if chapter_number is not None and not (
+                    chapter_number - 1
+                    <= entry.reveal_chapter
+                    <= chapter_number + within_chapters
+                ):
+                    continue
+                ref = f"field:{ent.id}:{entry.field_key}"
+                if ref in seen_ref:
+                    continue
+                seen_ref.add(ref)
+                out.append({
+                    "label": f"{ent.name}·{entry.label}",
+                    "expected_reveal_chapter": entry.reveal_chapter,
+                    "canon_node_id": None,
+                    "source": "field_layer",
+                })
         return out
 
 

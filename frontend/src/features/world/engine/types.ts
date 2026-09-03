@@ -47,6 +47,8 @@ export interface WorldEntity {
   intro: string
   tags: string[]
   props: Record<string, unknown>
+  /** 字段级真相分层（2026-09-03）：缺键=公开；判据见 engine/fieldLayers.ts */
+  field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
 }
 
 /**
