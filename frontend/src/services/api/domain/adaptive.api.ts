@@ -258,6 +258,10 @@ export const adaptiveApi = {
       recent_text: string
       /** Tab 显式点名要零件（豁免句子级闸门） */
       summoned?: boolean
+      /** 细纲胶囊速记原文（意图反推素材——胶囊会话级不落库，经心跳供给） */
+      outline_notes?: string[]
+      /** 打算一句话原文（打算变更即时感知：舱换向 + 层 2 转化触发） */
+      spine_intent?: string
     },
   ): Promise<HeartbeatResult> => {
     return requestJson(`/chapters/${chapterId}/adaptive/heartbeat`, {
@@ -382,6 +386,8 @@ export const adaptiveApi = {
       rolling_prefix?: string
       mode?: 'stitch' | 'continue' | 'burst' | 'open' | 'outline'
       picked_parts?: string[]
+      /** 点选零件的功能槽位（与 picked_parts 同序：landing/toward_beat/echo/ambient）——双轨契约选档信号 */
+      picked_slots?: string[]
       target_chars?: number
       chapter_intent?: string
       adopted_direction?: string

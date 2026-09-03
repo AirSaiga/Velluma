@@ -319,6 +319,156 @@ class TestAssembleQueryContract:
 
 
 # ============================================================
+# 3.6 层 2 意图兜底（2026-09-03 线 A：无大纲时 stitch 消费 AI 反推方向）
+# ============================================================
+
+class _FakeResult:
+    def __init__(self, val):
+        self._val = val
+
+    def scalar_one_or_none(self):
+        return self._val
+
+
+class _FakeDb:
+    """只读假 session：execute 直接回预设的 layer2_intent dict。"""
+
+    def __init__(self, layer2):
+        self._layer2 = layer2
+
+    async def execute(self, stmt):
+        return _FakeResult(self._layer2)
+
+
+def _layer2_dict(**kw):
+    base = dict(source="inferred", confidence=0.55, arc="弧线",
+                next_direction="林尘决定夜探仓库", evidence=["依据句"])
+    base.update(kw)
+    return base
+
+
+class TestLayer2IntentFallback:
+    """_layer2_intent_fallback 闸门 + assemble 接线（零变化契约）。"""
+
+    def test_inferred_direction_served_above_gate(self):
+        from backend.services.context.stitch_context import _layer2_intent_fallback
+        text, source = asyncio.run(_layer2_intent_fallback("ch-1", _FakeDb(_layer2_dict())))
+        assert text == "林尘决定夜探仓库"
+        assert source == "inferred"
+
+    def test_below_gate_not_served(self):
+        """证据回查不过的信度（0.4）跌破 dock 消费阈——stitch 同口径不吃。"""
+        from backend.services.context.stitch_context import _layer2_intent_fallback
+        assert asyncio.run(_layer2_intent_fallback(
+            "ch-1", _FakeDb(_layer2_dict(confidence=0.4)))) == ("", "")
+
+    def test_author_source_not_served(self):
+        """作者材料（spine/大纲转化 source=author）不走此兜底——温卡已注入，
+        user 侧不重复。"""
+        from backend.services.context.stitch_context import _layer2_intent_fallback
+        assert asyncio.run(_layer2_intent_fallback(
+            "ch-1", _FakeDb(_layer2_dict(source="author", confidence=0.9)))) == ("", "")
+
+    def test_baton_served_arc_fallback(self):
+        """章首接力棒（线 C）：baton 源上桌；next_direction 缺省回落 arc。"""
+        from backend.services.context.stitch_context import _layer2_intent_fallback
+        text, source = asyncio.run(_layer2_intent_fallback(
+            "ch-1", _FakeDb(_layer2_dict(source="baton", confidence=0.6,
+                                         arc="承接上一章：林尘刚踏进北门",
+                                         next_direction=""))))
+        assert text.startswith("承接上一章")
+        assert source == "baton"
+
+    def test_missing_or_broken_row_zero_change(self):
+        from backend.services.context.stitch_context import _layer2_intent_fallback
+        assert asyncio.run(_layer2_intent_fallback("ch-1", _FakeDb(None))) == ("", "")
+        assert asyncio.run(_layer2_intent_fallback("ch-1", _FakeDb({}))) == ("", "")
+        # db 全坏（None.execute 抛错）也不阻塞装配
+        assert asyncio.run(_layer2_intent_fallback("ch-1", None)) == ("", "")
+
+    def test_assemble_consumes_fallback_when_no_outline(self, monkeypatch):
+        """接线：无大纲 + stitch 档 → 层 2 兜底上桌，intent_source 标记随行。"""
+        capture = _Capture()
+        _mock_bundle(monkeypatch, capture, outline_text="")
+
+        async def _fake_fallback(chapter_id, db):
+            return ("林尘决定夜探仓库", "inferred")
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context._layer2_intent_fallback",
+            _fake_fallback)
+        ctx = asyncio.run(assemble_stitch_context(
+            "ch-1", "stitch", fragment="他", rolling_prefix="夜更深了。", db=None,
+        ))
+        assert ctx.chapter_intent == "林尘决定夜探仓库"
+        assert ctx.intent_source == "inferred"
+        # 抢拍闸素材保持空——推断方向不是作者节拍，不开闸
+        assert ctx.outline_beats == []
+
+    def test_assemble_skips_fallback_for_burst(self, monkeypatch):
+        """burst/outline/open 自带方向载体（走向卡/胶囊/开篇任务），不喂猜测。"""
+        capture = _Capture()
+        _mock_bundle(monkeypatch, capture, outline_text="")
+        called = []
+
+        async def _fake_fallback(chapter_id, db):
+            called.append(1)
+            return ("不该上桌", "inferred")
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context._layer2_intent_fallback",
+            _fake_fallback)
+        ctx = asyncio.run(assemble_stitch_context(
+            "ch-1", "burst", fragment="风更大了。", rolling_prefix="退潮在即。", db=None,
+        ))
+        assert called == []
+        assert ctx.chapter_intent == ""
+        assert ctx.intent_source == ""
+
+    def test_outline_beats_win_over_fallback(self, monkeypatch):
+        """大纲就近节拍优先于层 2 猜测（作者材料 > AI 猜）。"""
+        capture = _Capture()
+        _mock_bundle(monkeypatch, capture, outline_text="大纲节拍一：林尘发现假信。")
+
+        async def _fake_fallback(chapter_id, db):
+            raise AssertionError("有大纲节拍时不应触达层 2 兜底")
+        monkeypatch.setattr(
+            "backend.services.context.stitch_context._layer2_intent_fallback",
+            _fake_fallback)
+        ctx = asyncio.run(assemble_stitch_context(
+            "ch-1", "continue", fragment="他", rolling_prefix="", db=None,
+        ))
+        assert ctx.chapter_intent == "大纲节拍一：林尘发现假信。"
+        assert ctx.intent_source == "outline"
+
+
+class TestIntentSourceFraming:
+    """prompt 措辞分档（builder 纯函数对拍）。"""
+
+    def test_inferred_framing_discloses_ai_guess(self):
+        _sys, user = build_continue_prompt(
+            fragment="他攥紧扳手", rolling_prefix="夜更深了。",
+            chapter_intent="林尘决定夜探仓库", intent_source="inferred")
+        assert "AI 从已写内容猜的" in user
+        assert "林尘决定夜探仓库" in user
+        assert "几步之后的目的地" not in user
+
+    def test_baton_framing(self):
+        _sys, user = build_continue_prompt(
+            fragment="他推开门", rolling_prefix="",
+            chapter_intent="承接上一章：林尘刚踏进北门", intent_source="baton")
+        assert "承接上一章" in user
+
+    def test_default_framing_byte_identical(self):
+        """零变化契约：不传 intent_source（旧调用方）→ 目的地框逐字节不变。"""
+        kw = dict(fragment="他攥紧扳手", rolling_prefix="夜更深了。",
+                  chapter_intent="大纲节拍：林尘发现假信")
+        _s1, u1 = build_continue_prompt(**kw)
+        _s2, u2 = build_continue_prompt(intent_source="", **kw)
+        assert u1 == u2
+        assert "几步之后的目的地" in u1
+
+
+
+# ============================================================
 # 3.5 专名称呼表过滤（2026-09-01 穿帮修复）
 # ============================================================
 

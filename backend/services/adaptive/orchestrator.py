@@ -65,6 +65,8 @@ class AdaptiveOrchestrator:
         # 每 chapter 的瞬态缓存（防并发重复激活 + 大纲签名）
         self._last_inference_ts: float = 0.0
         self._prev_outline_sig: str = ""
+        # 打算一句话签名（2026-09-03 意图入舱）：变更即触发层 2 转化 + 舱换向
+        self._prev_spine_sig: str = ""
         self._active_tasks: Dict[str, asyncio.Task] = {}  # component → running task
         # P3-2（C4）双跑去重：异步激活的入参签名（recent_text 签名 + budget 档）
         self._active_task_sigs: Dict[str, str] = {}
@@ -141,6 +143,16 @@ class AdaptiveOrchestrator:
             if state.has_outline:
                 from backend.services.adaptive.change_detector import _text_sig
                 self._prev_outline_sig = _text_sig(state.outline_text)
+            # 打算变更信号（2026-09-03 意图入舱）：作者写/改/纠正打算一句话 →
+            # severity 0.6 过反推阈值——层 2 走 spine 短路转化（0 LLM），
+            # intent_version 递增连带 bust dock 缓存，舱随纠正换向
+            from backend.services.adaptive.change_detector import _text_sig
+            spine_sig = _text_sig(state.spine_intent or "")
+            if spine_sig != self._prev_spine_sig:
+                self._prev_spine_sig = spine_sig
+                signals.append(ChangeSignal(
+                    kind="spine_updated", evidence="打算一句话变更", severity=0.6,
+                ))
 
             # ---- 热层影子（B7 · 方向权重葬礼后的转世）----
             # 力学模型已删（尸检：18 次恒常量输出）；有价值的信号（未兑现伏笔/
@@ -205,7 +217,13 @@ class AdaptiveOrchestrator:
                     finally:
                         self._sync_inflight.discard(act.component)
                 else:
-                    await self._activate(act, recent_text=state.recent_text or "")
+                    # 意图加固（2026-09-03）：细纲胶囊速记透传给反推组件——
+                    # 胶囊会话级不落库，是作者最稀疏最真实的意图信号
+                    extra = (
+                        {"outline_notes": list(state.outline_notes or [])}
+                        if act.component == "intent_inference" else None
+                    )
+                    await self._activate(act, recent_text=state.recent_text or "", extra=extra)
 
             await db.commit()
             # 同步执行后重新拉快照（挂件已写入）
@@ -286,7 +304,9 @@ class AdaptiveOrchestrator:
             # dock 缓存命中判断：段落文本签名 + projection 签名都没变 → 复用上次碎片
             # 省 ~90% dock 调用（作者没沉淀新段落时，碎片本来就不该变）
             from backend.services.adaptive.change_detector import _text_sig
-            cur_text_sig = _text_sig(state.recent_text or "")
+            # 文本签名并入打算一句话（2026-09-03 意图入舱）：作者纠正打算的瞬间
+            # 段落文本没变，但 dock 的 spine_intent 行该换料了——纠正即换向
+            cur_text_sig = _text_sig(f"{state.recent_text or ''}|{state.spine_intent or ''}")
             # projection 签名基于**接缝裁剪后**集合（2026-08-27）：过滤是 dock 产出
             # 的实际取材池——stage 变化导致 kept 集合变化时必须触发重算，否则
             # 缓存命中会端出旧取材池的碎片
@@ -298,6 +318,10 @@ class AdaptiveOrchestrator:
                 ev = p.get("possible_beats", [{}])[0].get("event", "") if p.get("possible_beats") else ""
                 cur_proj_sig = f"{len(kept_projs)}:{ev[:30]}"
                 break
+            # 意图版本入签名（2026-09-03 意图入舱）：反推重算/作者纠正后
+            # 意图版本递增——猜测方向变了舱里 toward_beat 必须换料，不 bust
+            # 会把旧方向的碎片端给已纠正的作者（纠正手势「舱就换向」的兑现点）
+            cur_proj_sig = f"{cur_proj_sig}:v{intent_ver}"
             dock_cache_hit = (
                 cur_text_sig == self._last_dock_text_sig
                 and cur_proj_sig == self._last_dock_proj_sig
@@ -341,8 +365,12 @@ class AdaptiveOrchestrator:
                 unique.append(a)
         return unique
 
-    async def _activate(self, act: Activation, recent_text: str = ""):
-        """异步激活组件（后台 task，不阻塞心跳）。"""
+    async def _activate(self, act: Activation, recent_text: str = "", extra: Optional[Dict] = None):
+        """异步激活组件（后台 task，不阻塞心跳）。
+
+        extra：透传给 runner 的组件专属入参（**kw 展开——如反推的细纲胶囊
+        速记 outline_notes）；None 时调用形态与旧版一致。
+        """
         runner = self._components.get(act.component)
         if not runner:
             logger.warning(f"[orchestrator] 未注册组件: {act.component}")
@@ -363,7 +391,7 @@ class AdaptiveOrchestrator:
                     from backend.services.adaptive.world_model import WorldModelRepository
                     repo = WorldModelRepository(db)
                     snapshot = await repo.snapshot(self.chapter_id)
-                    await runner(self.chapter_id, db, snapshot, act.budget_tokens)
+                    await runner(self.chapter_id, db, snapshot, act.budget_tokens, **(extra or {}))
                     await db.commit()
                 if act.component == "intent_inference":
                     self._last_inference_ts = time.time()

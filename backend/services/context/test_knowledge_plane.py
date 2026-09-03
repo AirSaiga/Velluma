@@ -230,6 +230,18 @@ class TestRendering(unittest.TestCase):
         self.assertIn("在场：林尘", kv.recency_pin)
         self.assertIn("场景：北岸要塞", kv.recency_pin)
 
+    def test_recency_pin_framed_as_consistency_material(self):
+        # 2026-09-03 名单语义重框（「在场：流光」被当登场指令事故）：在场者
+        # 非空时 pin 带「只供核对一致性／不是登场名单」后缀行；前缀与内容位不变
+        kv, _ = self._kv()
+        self.assertIn("只供核对一致性", kv.recency_pin)
+        self.assertIn("不是登场名单", kv.recency_pin)
+        # 无在场者的书（states 清空）：重框行不出现（零变化面）
+        b3 = self._render_world()
+        b3.world_state = {"character_states": []}
+        kv3 = kp.build_knowledge_view(b3)
+        self.assertNotIn("不是登场名单", kv3.recency_pin)
+
     def test_previous_summary_full_passthrough(self):
         kv, _ = self._kv()
         self.assertEqual(kv.previous_summary, "上一章结尾：他关上了灯。")

@@ -9,6 +9,9 @@
 - out_of_scene 检测判据（ghost_guard 第五检消费）：非白名单实体名 × 上手级
   动词框架共现——与 dock「氛围件/上手件」两分法同一份动词表（导师审查：
   判定库共用，杜绝两侧口径漂移）。
+- location_jump 检测判据（第六检）：转场动词 × 场景作用域外地点名紧邻。
+- mind_leak 检测判据（第九检，2026-09-03 线 D）：非白名单实体名 × 内心
+  动词框架——旁白替不在场者报告内心=相机拍不到的画面。
 
 输入侧（喂什么）与输出侧（收什么）用同一个函数算白名单——运行期数据流走
 参数透传（stitch 路由把 ctx.proper_nouns 递给 check_ghost_text），不重算。
@@ -276,4 +279,69 @@ def find_location_jump_hits(
                 "exempt": exempt,
             })
             break  # 同名只报首个命中（同 out_of_scene 纪律）
+    return hits
+
+
+# ============================================================
+# mind_leak 检测判据（ghost_guard 第九检消费；shadow 出生，2026-09-03 线 D）
+# ============================================================
+
+# 内心动词框架：只有本人能报告的内在状态——旁白替「不在场者」报告内心=
+# 相机拍不到的画面（思绪泄漏）。纪律与 HANDLING_VERBS 同：小而狠——
+# 外显可观察的（说/笑/决定/皱眉）永不进表（第三人称可合法叙述外部行为）。
+MIND_LEAK_VERBS: Tuple[str, ...] = (
+    "心想", "暗想", "思忖", "盘算", "意识到", "明白过来",
+)
+
+
+def find_mind_leak_hits(
+    text: str,
+    visible_names: List[str],
+    all_names: List[str],
+) -> List[Dict[str, Any]]:
+    """思绪泄漏检测（POV 相机的确定性半）：非白名单实体名 × 内心动词框架共现。
+
+    与 out_of_scene 同白名单/同候选宇宙/同窗口判据，只换动词族：
+    「名字 × 上手动词」抓的是越界登场（身体），「名字 × 内心动词」抓的是
+    越界内心（思绪）——不在场者的内心旁白无从拍摄。代词指代（「他想」）
+    无法确定性解析，只抓具名主语（宁漏勿误；shadow 攒精确率再议 promote）。
+    闪回豁免同一份判据（回忆/转述里报告他人内心合法：「听说他那晚心想…」）。
+
+    返回 [{name, verb, sentence, exempt}]；纯函数零 IO。
+    """
+    hits: List[Dict[str, Any]] = []
+    norm_text = _norm(text)
+    if not norm_text:
+        return hits
+    visible = {n for n in (visible_names or []) if n}
+    hidden = [
+        n for n in (all_names or [])
+        if n and len(n) >= NAME_MIN_CHARS and n not in visible
+    ]
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(norm_text) if s]
+    for name in hidden:
+        start = 0
+        while True:
+            idx = norm_text.find(name, start)
+            if idx < 0:
+                break
+            start = idx + 1
+            if not _name_in_text(name, norm_text[max(0, idx - 2): idx + len(name) + 2]):
+                continue
+            window = norm_text[max(0, idx - VERB_WINDOW_CHARS): idx + len(name) + VERB_WINDOW_CHARS]
+            verb = next((v for v in MIND_LEAK_VERBS if v in window), None)
+            if verb is None:
+                continue
+            sentence = next((s for s in sentences if name in s), "")
+            exempt = any(
+                w in sentence or _FLASHBACK_YEARS_RE.search(sentence)
+                for w in FLASHBACK_WORDS
+            ) if sentence else False
+            hits.append({
+                "name": name,
+                "verb": verb,
+                "sentence": sentence[:40],
+                "exempt": exempt,
+            })
+            break  # 同名只报首个命中
     return hits

@@ -333,7 +333,8 @@ class TestRepetitionStats:
         assert fp["repetition"]["bigram_repeat_ratio"] is not None
 
     def test_top_level_key_structure_locked(self):
-        # 结构锁：新键只增不改——既有 14 键 + lexical/repetition，防意外增删键
+        # 结构锁：新键只增不改——既有 14 键 + lexical/repetition/texture
+        # （2026-09-03 质感批次），防意外增删键
         fp = compute_text_fingerprint(PSEUDO_FLAT)
         assert set(fp.keys()) == {
             "char_count", "word_count",
@@ -341,7 +342,7 @@ class TestRepetitionStats:
             "sentence_len_cv", "short_sentence_ratio", "sentence_len_histogram",
             "dialogue_ratio", "paragraph_count", "paragraph_len_mean",
             "short_paragraph_ratio", "punctuation", "rhetoric",
-            "lexical", "repetition",
+            "lexical", "repetition", "texture",
         }
 
 

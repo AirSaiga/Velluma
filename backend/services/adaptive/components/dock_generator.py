@@ -92,6 +92,21 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         written_text(bundle.content_text or ""),
     )
 
+    # 意图入舱（2026-09-03 意图加固批次）：无大纲就近节拍时，层 2 反推的
+    # 下一步方向顶上 toward_beat 的「目的地」位。三级源链——作者写的
+    #（spine_intent 行进 prompt / outline_nearby 供节拍）> 作者纠正的
+    #（纠正手势落 spine.intent，同走作者道）> AI 猜的（此处，证据回查
+    # 过了信度闸才放行；note 如实标注「AI 猜的」不伪装成作者材料）
+    intent_guess = ""
+    if not outline_nearby:
+        from backend.services.adaptive.components.intent_inference import (
+            DOCK_INTENT_MIN_CONFIDENCE,
+        )
+        _intent = model_snapshot.get("intent") or {}
+        if (_intent.get("source") == "inferred"
+                and float(_intent.get("confidence") or 0) >= DOCK_INTENT_MIN_CONFIDENCE):
+            intent_guess = str(_intent.get("next_direction") or "").strip()
+
     sys_p, usr_p = build_dock_generator_prompt(
         recent_text, projections, nutrients, hard,
         direction_weights=direction_weights,
@@ -100,6 +115,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         memory_echoes=memory_echoes or None,
         spine_intent=await _spine_intent(chapter_id, db),
         outline_nearby=outline_nearby,
+        intent_guess=intent_guess,
     )
 
     try:
@@ -150,6 +166,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         valid_parts = _finalize_parts(
             raw_parts,
             outline_nearby=outline_nearby,
+            intent_guess=intent_guess,
             reader_expectations=reader_expectations,
             memory_echoes=memory_echoes,
             violates=lambda t: _violates(t, hard),
@@ -239,11 +256,14 @@ def _clean_echo_note(raw: str) -> str:
     return s.strip(" \t:：,，、;；")
 
 
-def _assemble_note(slot: str, p: Dict, outline_nearby, reader_expectations, memory_echoes) -> str:
+def _assemble_note(slot: str, p: Dict, outline_nearby, reader_expectations, memory_echoes,
+                   intent_guess: str = "") -> str:
     """按槽位拼装后果短语（后端权威，模型不经手出处文本）。
 
     文案纪律（2026-08-29 二轮）：副行必须回答「选它之后那一百字会写成什么」
     ——来历词（呼应/出处）只作谓语，不单独成句。
+    意图入舱（2026-09-03）：无大纲节拍时 toward_beat 由方向猜测供料，
+    note 如实标注「AI 猜的方向」——标签必须承载真实出处，猜测不伪装成大纲。
     """
     if slot == "landing":
         return "接着刚才那句往下写"
@@ -251,6 +271,9 @@ def _assemble_note(slot: str, p: Dict, outline_nearby, reader_expectations, memo
         beats = [str(b).strip() for b in (outline_nearby or []) if b and str(b).strip()]
         if beats:
             return f"往「{beats[0][:10]}」那拍走的第一步"
+        guess = (intent_guess or "").strip()
+        if guess:
+            return f"往「{guess[:10]}」那个方向试试（AI 猜的）"
         return ""
     if slot == "echo":
         try:
@@ -280,6 +303,7 @@ def _finalize_parts(
     raw_parts: List,
     *,
     outline_nearby=None,
+    intent_guess: str = "",
     reader_expectations=None,
     memory_echoes=None,
     violates=None,
@@ -345,7 +369,8 @@ def _finalize_parts(
         if direction not in ("主线", "伏笔", "刻画", "环境", "关系"):
             direction = "环境"
         slot = _normalize_slot(p)
-        note = _assemble_note(slot, p, outline_nearby, reader_expectations, memory_echoes)
+        note = _assemble_note(slot, p, outline_nearby, reader_expectations, memory_echoes,
+                              intent_guess=intent_guess)
         # 槽位拿不到出处 → 降级 ambient（留白而非谎标）
         if slot in ("toward_beat", "echo") and not note:
             slot = "ambient"

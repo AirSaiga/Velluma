@@ -37,10 +37,14 @@ WRITTEN_NOW = (
 
 def test_nearby_picks_next_unwritten_beats():
     got = _outline_nearby(OUTLINE, WRITTEN_NOW)
-    # 第一拍：罗曼·罗兰出处行（作者未写）；第二拍：工头打断（跳过已写的名言行）
+    # 2026-09-03 卷首致辞过滤：出处行（含《》）与名言原文行（整行引语）是
+    # 元信息不是节拍——旧断言把它们当第一拍，正是「致辞进意图块」事故本体。
+    # 现在第一拍=工头打断，第二拍=自嘲处境
     assert len(got) == 2
-    assert "罗曼" in got[0]
-    assert "工头打断" in got[1]
+    assert "工头打断" in got[0]
+    assert "自嘲" in got[1]
+    # 致辞/引语行进不了节拍供给
+    assert all("罗曼" not in b and "一个人的力量" not in b for b in got)
     # 远处的袭击/机甲侵入不得出现在就近节拍里
     assert all("袭击" not in b and "侵入" not in b for b in got)
 

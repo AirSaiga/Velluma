@@ -91,6 +91,9 @@ _ADAPTIVE_SYSTEM = """你是顶级的中文长篇小说作家，此刻在辅助�
 # 措辞以正面任务式为主（「只写新东西」「停在动作上」）：中档模型对任务指令的
 # 服从度高于负面禁令，禁令堆叠只会催生新套路与判断稀释（导师诊断结论）。
 _RULE_NEW_INFO = "- 只写新东西：每一句都要推进——新动作、新事实、时间或处境的变化。作者已写的每一句读者都读过了，不得再提：不复述、不「回味/想起/还在想」、不换一个感官通道重演刚才的状态；凡是回答「刚才怎样」的句子删掉，只回答「接下来发生什么」。"
+# 质感档规则（2026-09-03 双轨契约）：替代 _RULE_NEW_INFO——准许停在当下
+# 细写，唯一的推进是感受的加深；其余戒律（结尾/断点/复读）不受影响
+_RULE_TEXTURE = "- 这一笔停在当下细写：把时间放慢，写此刻具体可感的东西——光线、声响、气味、手上的触感、人物的小动作与神情；不引入新事件、新人物、新物件，在原地停留一整段也完全允许，唯一的推进是感受的加深。"
 _RULE_BREAKPOINT = "- 作者正文停在半句或半个判断上：第一句用最少的字把它补完，补完立即向前走，不再回头对它做文章。"
 _RULE_ENDING = "- 最后一句停在人物自己正在做的事上（一个动作、一句话头、一个没想完的具体念头），不用突然响起的声响或喊声收尾，不总结、不抒情。"
 # 段落级模式（burst/open）共用的收尾律（单行版）
@@ -446,6 +449,8 @@ def build_continue_prompt(
     warm_card: str = "",
     previous_summary: str = "",
     recency_pin: str = "",
+    contract: str = "motion",
+    intent_source: str = "",
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -461,6 +466,12 @@ def build_continue_prompt(
         chapter_intent: 章节意图/大纲片段（可选方向引导）
         style_positive: 作者文风画像文本（settings_bundle.render_style_positive；空=零变化）
         author_samples: 作者笔迹示范 few-shot 样本（retrieval 检索；空=零变化）
+        contract: 双轨生成契约（2026-09-03 质感批次）：motion（默认，逐字节
+            零变化）/ texture（质感档——_RULE_NEW_INFO 换 _RULE_TEXTURE，
+            准许停在当下细写；选档判据在 services/adaptive/texture_contract.py）
+        intent_source: 意图来源分档（2026-09-03 线 A）：outline/request=作者
+            材料（目的地框，默认零变化）/ inferred=AI 反推的下一步方向（亮明
+            「AI 猜的」身份，措辞降级为柔性参照）/ baton=章首接力棒（承接框）
 
     Returns:
         (system_prompt, user_prompt)
@@ -485,9 +496,33 @@ def build_continue_prompt(
         system_prompt += _block
 
     parts_str = "、".join(picked_parts) if picked_parts else "（无——仅按作者原句顺势续写）"
-    intent_line = f"\n# 章节意图（方向参考，非强制）\n{chapter_intent}" if chapter_intent else ""
+    # 意图块措辞定档（2026-09-03 trace 实证）：旧标题「章节意图（方向参考，非
+    # 强制）」+节拍原文 verbatim，模型把节拍当「现在该写的场面」——3/3 幽灵
+    # 落地即消费节拍。重框为「几步之后的目的地」：现在不写它本身，只写通往它
+    # 路上的画面；输出侧由 ghost-guard-beat-rush 代码闸兜底（供给>闸门>偏置）。
+    # 线 A 分档：AI 来源的意图（inferred/baton）必须亮身份——不冒充作者材料，
+    # 措辞降为柔性参照（猜错是常态，模型被明告可以不理会）。
+    if not chapter_intent:
+        intent_line = ""
+    elif intent_source == "inferred":
+        intent_line = (
+            f"\n# 下一步方向（AI 从已写内容猜的，可能猜错——只作柔性参照："
+            f"对得上正文的走势就顺着走，对不上就忽略它）\n{chapter_intent}"
+        )
+    elif intent_source == "baton":
+        intent_line = (
+            f"\n# 承接上一章（章首衔接参照——顺着上一章的走向自然起笔，"
+            f"不急着进新事件）\n{chapter_intent}"
+        )
+    else:
+        intent_line = (
+            f"\n# 几步之后的目的地（只作方向参照：现在不写它本身——它的场面、事件与"
+            f"对白都留给几步之后，此刻只写通往它路上的画面）\n{chapter_intent}"
+        )
     prev_line = _prev_summary_line(previous_summary)
     pin_line = _recency_pin_line(recency_pin)
+    # 双轨契约：质感档把「每句必须推进」换成「停在当下细写」（其余戒律不动）
+    advance_rule = _RULE_TEXTURE if contract == "texture" else _RULE_NEW_INFO
 
     if mode == "stitch":
         # 追加式契约（2026-08-26 实测修复）：幽灵纯追加在作者原句之后，
@@ -503,7 +538,7 @@ def build_continue_prompt(
 {parts_str}
 
 请只输出续写部分：从作者原句的断点顺势接下去（原句停在半句就先自然补完这一句，从断点最后一个词的后面直接续，不要重说断点附近的词），把零件落地为具体画面。零件是画面灵感，作者正文的事实最高优先——零件与正文此刻的场景/时间明显矛盾时（如物件此刻并不在手边），改造零件贴合当下场景，改造不了就舍弃它，绝不硬塞。禁止以任何形式重复原句（原文复读、换说法复述都不行）。
-{_RULE_NEW_INFO}
+{advance_rule}
 {_RULE_ENDING}
 控制在 {target_chars} 字以内。只输出正文，不要标题、不要解释。{pin_line}"""
     else:  # continue
@@ -515,7 +550,7 @@ def build_continue_prompt(
 {fragment}
 
 请顺着作者正文往下续写，控制在 {target_chars} 字以内：
-{_RULE_NEW_INFO}
+{advance_rule}
 {_RULE_BREAKPOINT}
 {_RULE_ENDING}
 只输出续写部分，不要重复作者原文，不要标题、不要解释。{pin_line}"""
@@ -880,11 +915,14 @@ _INTENT_INFERENCE_SYSTEM = """你是资深小说编辑。根据作者已写的�
 
 你要输出：
 - arc：本章的核心弧线（一句话，如"林尘发现真相并决定反抗"）
+- next_direction：窄问题——作者接下来这一步最可能往哪写（一句话，落到画面层面，如"他压着怒火继续上工，等一个私下质问的机会"）。这是卡片舱定向的素材，比 arc 更重要
+- evidence：你的判断依据——从正文里原样摘出的 1-3 句（逐字引用，不得改写）。交不出正文依据的判断会被丢弃
 - emotion_curve：情绪走向（3-5 个阶段，每阶段 {phase, emotion, energy 1-10}）
 - setup_points：本章应铺陈的要点（2-4 个，作者未来写作可呼应）
 - deviations：如果你注意到正文走向与章节卡（must_hit_events/foreshadow_ops）有偏差，列出（每条一句话）；无偏差则空数组
 
 扎根作者已写的正文（这是事实），参考设定养料（角色/世界观/前文摘要）。不要编造没写过的剧情。
+作者亲手写下的材料（打算/速记胶囊/大纲）优先级最高——与正文迹象冲突时，以作者材料为准。
 只输出 JSON，不要解释。"""
 
 
@@ -893,6 +931,13 @@ def build_intent_inference_prompt(
     outline_text: str,
     nutrients: dict,
     soft_constraints: dict,
+    *,
+    spine_intent: str = "",
+    spine_anchors: Optional[List[str]] = None,
+    outline_notes: Optional[List[str]] = None,
+    corrections: Optional[List[dict]] = None,
+    intent_trajectory: Optional[List[str]] = None,
+    correction_count: int = 0,
 ) -> tuple:
     """构建意图反推 prompt。
 
@@ -901,13 +946,80 @@ def build_intent_inference_prompt(
         outline_text: 章节大纲（可为空——此时纯从正文反推）
         nutrients: 设定养料（SettingsBundle.nutrients()）
         soft_constraints: 软约束（SettingsBundle.soft_constraints()，含 must_hit_events）
+        spine_intent: 打算 tab 的一句话意图（作者亲手材料，最高优先级；空=缺席零变化）
+        spine_anchors: 打算里的 pending 锚点文本（空=缺席零变化）
+        outline_notes: 正文里细纲胶囊的速记原文（作者最稀疏最真实的意图信号；空=缺席）
+        corrections: 近期纠正史 [{guessed, corrected}]——作者口味校准教材（空=缺席）
+        intent_trajectory: 前几章作者亲笔「打算」轨迹（按章序「第N章：…」行，
+            2026-09-03 线 B 意图画像——学这位作者的粒度与口吻；空=缺席零变化）
+        correction_count: 纠正史总条数（≥2 时追加保守指令——纠正频繁说明
+            这位作者的方向常被猜错，宁答「方向不明」也别硬编）
 
     Returns:
         (system_prompt, user_prompt)
     """
+    # 作者亲手材料块（意图加固 2026-09-03）：稀疏材料的优先级最高——反推的任务
+    # 是补齐作者没写的，不是覆盖作者写下的
+    author_block = ""
+    parts = []
+    if spine_intent.strip():
+        parts.append(f"本章打算（作者写的方向一句话）：{spine_intent.strip()[:60]}")
+    anchor_lines = [a.strip() for a in (spine_anchors or []) if a and a.strip()]
+    if anchor_lines:
+        parts.append("本章非写不可的情节（作者定的）：" + "；".join(anchor_lines[:5]))
+    note_lines = [n.strip() for n in (outline_notes or []) if n and n.strip()]
+    if note_lines:
+        parts.append("正文里的速记胶囊（作者随手记的剧情备忘）：\n" + "\n".join(f"- {n[:60]}" for n in note_lines[:5]))
+    if parts:
+        author_block = "\n# 作者亲手材料（最高优先级——与它冲突时以它为准）\n" + "\n\n".join(parts) + "\n"
+
+    # 意图画像块（2026-09-03 线 B）：作者在前几章亲手定的「打算」轨迹——
+    # 把「平均作者」往「这位作者」的粒度/口吻上拉（学表达习惯，不抄内容）
+    trajectory_block = ""
+    traj_lines = [t.strip() for t in (intent_trajectory or []) if t and t.strip()]
+    if traj_lines:
+        trajectory_block = (
+            "\n# 这位作者在前几章亲手定的方向（按章序——学他/她写意图的粒度与口吻，"
+            "不是抄内容）\n" + "\n".join(f"- {t[:80]}" for t in traj_lines[:5]) + "\n"
+        )
+
+    # 纠正史块（意图加固 2026-09-03）：作者过去把 AI 的猜测改成过什么——
+    # 口味校准的 few-shot 教材，把「平均作者」往「这位作者」拉。
+    # 线 B 纠正量统计：纠正频繁 = 这位作者的方向常被猜错 → 追加保守指令
+    # （拿不准就答「方向不明」——硬编的猜测会被作者纠正，不如诚实降级）
+    correction_block = ""
+    corr_lines = []
+    for c in (corrections or [])[:3]:
+        if not isinstance(c, dict):
+            continue
+        g = str(c.get("guessed") or "").strip()[:40]
+        r = str(c.get("corrected") or "").strip()[:60]
+        if g and r:
+            corr_lines.append(f"- AI 曾猜「{g}」，作者纠正为「{r}」")
+    if corr_lines:
+        correction_block = (
+            "\n# 这位作者的纠正史（校准口味用——他/她过去怎样修正猜测）\n"
+            + "\n".join(corr_lines) + "\n"
+        )
+        if correction_count >= 2:
+            correction_block += (
+                f"（近期已有 {correction_count} 次纠正——猜保守一点："
+                f"拿不准就在 next_direction 答「方向不明」，别硬编）\n"
+            )
+
+    # 喂全（意图加固 2026-09-03）：开放伏笔与角色此刻状态是判断「接下来往哪走」
+    # 的关键上下文——条件注入，无数据缺席（旧书零变化）
+    extra_lines = ""
+    open_hooks = str(soft_constraints.get("open_hooks") or "").strip()
+    if open_hooks:
+        extra_lines += f"开放伏笔（还没回收的线）：{open_hooks[:200]}\n"
+    dynamics = str(soft_constraints.get("character_dynamics") or "").strip()
+    if dynamics:
+        extra_lines += f"角色此刻状态：{dynamics[:200]}\n"
+
     user_prompt = f"""# 章节大纲
 {outline_text or "（作者未提供大纲，请从正文反推）"}
-
+{author_block}{trajectory_block}{correction_block}
 # 作者已写正文
 {written_text[:2000]}
 
@@ -915,13 +1027,13 @@ def build_intent_inference_prompt(
 角色：{nutrients.get('characters', '（无）')}
 世界观：{nutrients.get('worldview_text', '（无）')[:200]}
 前文摘要：{nutrients.get('previous_summary', '（无）')[:200]}
-
+{extra_lines}
 # 章节卡参考（软约束，作者可偏离，偏离要标注）
 必达事件：{soft_constraints.get('must_hit_events', '（无）')}
 伏笔操作：{soft_constraints.get('foreshadow_ops', '（无）')}
 
 推断本章意图。输出 JSON：
-{{"arc": "...", "emotion_curve": [{{"phase": "开端", "emotion": "紧张", "energy": 6}}], "setup_points": ["..."], "deviations": ["..."]}}"""
+{{"arc": "...", "next_direction": "...", "evidence": ["正文原句 1", "..."], "emotion_curve": [{{"phase": "开端", "emotion": "紧张", "energy": 6}}], "setup_points": ["..."], "deviations": ["..."]}}"""
     return _INTENT_INFERENCE_SYSTEM, user_prompt
 
 
@@ -1049,6 +1161,11 @@ def _dock_system_sections() -> List:
     def _no_nearby(ctx: Dict) -> bool:
         return not bool(ctx.get("has_nearby"))
 
+    def _has_guess_only(ctx: Dict) -> bool:
+        # 意图入舱（2026-09-03）：无大纲就近节拍、但有意图反推的方向猜测时，
+        # toward_beat 槽位改由猜测供料（猜想的「目的地」取代作者大纲节拍）
+        return not bool(ctx.get("has_nearby")) and bool(ctx.get("has_guess"))
+
     return [
         PromptSection(key="role", text="""你是一个物理镜头碎片生成器。基于作者当前段落、本章推测方向和设定养料，生成镜头特写挂件。
 
@@ -1069,6 +1186,11 @@ def _dock_system_sections() -> List:
             key="slot-toward-beat",
             when=_has_nearby,
             text="""- slot=toward_beat【通往节拍】（出 1 枚）：通往「作者大纲·就近节拍」那拍的**第一步**过渡画面，不是节拍本身的画面
+"""),
+        PromptSection(
+            key="slot-toward-guess",
+            when=_has_guess_only,
+            text="""- slot=toward_beat【通往方向】（出 1 枚）：通往「本章方向猜测」那一步的过渡画面——方向是 AI 从正文猜的（作者没写大纲），只取方向感，不编造猜测里没有的情节事件
 """),
         PromptSection(key="slot-echo-ambient", text="""- slot=echo【呼应】（至多 1 枚）：呼应前情回响或读者期待的碎片——呼应哪一条就在 JSON 里标 from_memory/from_expectation + echo_ref（所呼应条目在对应素材块里的序号，从 1 数）。呼应是**当下场景里的新画面**侧面带出旧物/旧事（书页翻到夹层、扳手柄上的旧划痕），不是旧画面换个说法重演——重演前情等于没给选项
 - slot=ambient【氛围】（其余补位）：无叙事包袱的画面（光影/声响/物件质感），作者随手就能用，不指向任何去向
@@ -1136,6 +1258,7 @@ def build_dock_generator_prompt(
     memory_echoes: list = None,
     spine_intent: str = "",
     outline_nearby: list = None,
+    intent_guess: str = "",
 ) -> tuple:
     """构建挂件生发 prompt。
 
@@ -1150,6 +1273,8 @@ def build_dock_generator_prompt(
             呼应期待的碎片须标 from_expectation，呼应=侧面暗示，绝不直接揭晓）
         spine_intent: 章级谋篇意图一句话（P1.4 M2；空=不注入。8-14 字零件吃
             画像的同款克制——只给方向不给展开）
+        intent_guess: 意图反推的下一步方向（2026-09-03 意图入舱；仅无大纲就近
+            节拍时由调用方传入——toward_beat 槽位的猜测供料。空=逐字节零变化）
 
     Returns:
         (system_prompt, user_prompt)
@@ -1157,11 +1282,13 @@ def build_dock_generator_prompt(
     banned = "、".join(hard_constraints.get("banned_words", [])[:30])
     # 分节编译（约束治理一期）：无就近节拍→节拍依赖子句整节缺席；禁词表
     # 经 «BANNED_WORDS» 占位注入（不能用 str.format——prompt 含 JSON 花括号）
+    # 2026-09-03：猜测供料形态（无节拍+有方向猜测）编译进 toward_beat 变体子句
+    guess_only = not outline_nearby and bool(intent_guess.strip())
     from backend.services.constraints.prompt_sections import render_sections
 
     system_prompt = render_sections(
         _dock_system_sections(),
-        {"has_nearby": bool(outline_nearby)},
+        {"has_nearby": bool(outline_nearby), "has_guess": guess_only},
     ).replace("«BANNED_WORDS»", banned or "（无）")
 
     # 推测方向摘要
@@ -1231,13 +1358,28 @@ def build_dock_generator_prompt(
 {nearby_lines}
 """
 
+    # 方向猜测块（2026-09-03 意图入舱）：无大纲就近节拍时，意图反推的
+    # 下一步方向顶上「目的地」位——如实标注是 AI 猜的（作者没写大纲），
+    # 只取方向感；有真节拍时此块缺席（作者材料永远压过猜测）
+    guess_block = ""
+    if guess_only:
+        guess_block = f"""
+# 本章方向猜测（AI 从正文反推的，作者没写大纲——供定向参考；碎片只给通往它的第一步，不编造猜测之外的情节事件）
+{intent_guess.strip()[:80]}
+"""
+
     # 过采样（约束治理一期）：要求 4-6 枚，校对环丢违规件后仍保 3-4——
-    # 检测器误报由过采样吸收；toward_beat 子句仅在有就近节拍时出现
-    beat_clause = "给了就近节拍则含 1 枚 toward_beat；" if outline_nearby else ""
+    # 检测器误报由过采样吸收；toward_beat 子句仅在有就近节拍/方向猜测时出现
+    if outline_nearby:
+        beat_clause = "给了就近节拍则含 1 枚 toward_beat；"
+    elif guess_only:
+        beat_clause = "含 1 枚 toward_beat（通往方向猜测）；"
+    else:
+        beat_clause = ""
 
     user_prompt = f"""# 作者当前段落
 {recent_text[:300]}
-{spine_line}{nearby_block}
+{spine_line}{nearby_block}{guess_block}
 # 接下来的画面方向（方向参考——优先从作者当前段落生发，不得整句照搬推测画面）
 {proj_text}
 {dw_block}{exp_block}{echo_block}

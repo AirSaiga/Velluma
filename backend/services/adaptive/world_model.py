@@ -39,7 +39,7 @@ class SettledSegment:
 @dataclass
 class ChapterIntent:
     """层 2：系统对本章意图的理解。"""
-    source: str = "none"  # author（大纲转化）| inferred（正文反推）| none
+    source: str = "none"  # author（大纲/打算转化）| inferred（正文反推）| none
     confidence: float = 0.0
     arc: str = ""               # 章节弧线一句话（"林尘发现真相并决定反抗"）
     emotion_curve: List[Dict] = field(default_factory=list)  # [{phase, emotion, energy}]
@@ -47,6 +47,12 @@ class ChapterIntent:
     must_hits: List[str] = field(default_factory=list)       # 必达事件（来自 ChapterCard）
     foreshadows: List[str] = field(default_factory=list)     # 伏笔操作
     deviations: List[str] = field(default_factory=list)      # 与 must_hits 的偏差（校对产出）
+    # 意图加固（2026-09-03 意图入舱批次）：
+    # next_direction = 窄问题「接下来这一步往哪走」——dock toward_beat 猜测兜底的
+    # 素材源（arc 是章级弧线，舱要的是步级方向）；evidence = 反推依据的正文原句，
+    # 组件侧代码回查（编造依据即降信度，见 intent_inference._valid_evidence）
+    next_direction: str = ""
+    evidence: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return {
@@ -54,6 +60,7 @@ class ChapterIntent:
             "arc": self.arc, "emotion_curve": self.emotion_curve,
             "setup_points": self.setup_points, "must_hits": self.must_hits,
             "foreshadows": self.foreshadows, "deviations": self.deviations,
+            "next_direction": self.next_direction, "evidence": self.evidence,
         }
 
     @classmethod
@@ -67,6 +74,9 @@ class ChapterIntent:
             must_hits=d.get("must_hits", []),
             foreshadows=d.get("foreshadows", []),
             deviations=d.get("deviations", []),
+            # 存量 layer2 无新键 → 缺省空（零迁移）
+            next_direction=d.get("next_direction", ""),
+            evidence=d.get("evidence", []),
         )
 
 

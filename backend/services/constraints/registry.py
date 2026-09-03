@@ -150,6 +150,49 @@ REGISTRY: List[Constraint] = [
         origin="2026-09-02 用户实测「人物地点穿越」；shadow 攒精确率，promote 门槛同 out_of_scene",
     ),
     Constraint(
+        id="ghost-guard-beat-rush",
+        statement="幽灵字面复用大纲就近节拍措辞（同一拍 ≥2 个 4 字窗，排除正文尾部已有词）→ 抢拍，进返修环带稿改写",
+        layers=[ENFORCE_PROMPT, ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        repair=REPAIR_REWRITE,
+        when="stitch/continue 且大纲存在未写就近节拍（open/outline/burst 的本职就是写节拍，整检关闭）",
+        origin="2026-09-03 trace 实证：意图块 verbatim 供给节拍，3/3 幽灵落地即消费「被工头打断」——"
+               "dock-beat-overlap 的幽灵侧同族闸（单窗→双窗+正文尾排除加严）；prompt 侧同日改「目的地」"
+               "措辞（供给措辞+代码闸双层，同 dock-no-psych 先例）；excise 不授权——抢拍是方向性错误，"
+               "删句对整稿伤害大于改写。live 出生的依据：判据复用已 live 的 dock 同族且加严，FP 面已论证",
+    ),
+    Constraint(
+        id="ghost-guard-cast-roll-call",
+        statement="短幽灵点名 ≥2 个在场者（正文尾部已点名的不计）→ 名单演出疑点（shadow：只落台账）",
+        layers=[ENFORCE_PROMPT, ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW,
+        when="kg 在场名单非空（world 书）",
+        origin="2026-09-03 trace 实证「【此刻·切记】在场：流光」被当登场指令——流光被拉上观察台"
+               "站着没事干；prompt 侧同日把 recency_pin 重框为「一致性校验资料不是登场名单」，"
+               "本检是输出侧计数粗代理（有没有戏份代码判不了），攒精确率后再议 promote",
+    ),
+    Constraint(
+        id="ghost-guard-mind-leak",
+        statement="非在场/提及名单实体名 × 内心动词框架（心想/暗想/思忖/盘算/意识到/明白过来）±10 字 "
+                  "→ 思绪泄漏疑点（shadow：只落台账）；闪回/转述句豁免",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW, repair=REPAIR_NONE,
+        when="visible_names 白名单可用（stitch 链路透传；与 out_of_scene 同候选宇宙）",
+        origin="2026-09-03 线 D（POV 相机确定性半）：旁白替不在场者报告内心=相机拍不到的画面；"
+               "只抓具名主语（代词指代无法确定性解析，宁漏勿误），动词族小而狠（外显可观察词"
+               "永不进表）；shadow 攒精确率再议 promote",
+    ),
+    Constraint(
+        id="ghost-guard-belief-leak",
+        statement="在场者无人知晓的私有真相命题，其里文本短语（≥4 字整段）被逐字写出 → 信念泄漏疑点"
+                  "（shadow：只落台账）；有任一在场者知晓即合法（知情者 POV 叙述）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW, repair=REPAIR_NONE,
+        when="world 书且有 private canon 命题（路由侧预裁「无人知晓」走 belief.fold_belief/"
+             "proposition_status）",
+        origin="2026-09-03 线 D：canon_leak 只护标签词、secret_leak 只护私有实体档案——真相命题"
+               "的里文本内容本身无检出面；B3 信念域设施补「谁知道」判定，无人知晓时逐字复现=旁白漏底",
+    ),
+    Constraint(
         id="ghost-repair-loop",
         statement="硬违规（live 且声明 repair 的约束命中）→ 带稿改写重试 1 次 → 句级切除（三豁免）→ 拒稿不上屏；"
                   "章级滑窗 10min ≥2 次拒稿触发熔断降级为警示上屏",

@@ -320,6 +320,58 @@ def test_route_stitch_compress_empty_falls_back_to_head(monkeypatch):
     assert len(llm_calls) == 2                        # 压缩尝试确实发了
 
 
+# ============================================================
+# 4b. 线 E（2026-09-03）：burst/open 同进两级字数闸——700 字承诺下的
+#     超产=快进剧情（冲章同族风险）；闸只抓 ×1.6 严重超产，正常浮动不碰
+# ============================================================
+
+def test_route_burst_overlong_compressed(monkeypatch):
+    """burst 超产：700 目标产出超 ×1.6 → 同走保头截断 + 压缩改写。"""
+    text = "".join(_sents("火光", 120))   # ~1560 字 > 700×1.6=1120
+    compressed = "火光改后的压缩稿，收在目标内。"
+    req = StitchGhostRequest(
+        fragment="他抬头。", mode="burst",
+        rolling_prefix="前文占位。", target_chars=700,
+        beat_guidance="走向卡：仓库失火",
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
+
+    first_sent = _sents("火光", 120)[0]
+    assert done["text"] == first_sent + compressed   # 首句豁免 + 压缩稿
+    assert len(llm_calls) == 2
+    assert "压缩改写" in llm_calls[1]["user_prompt"]
+    assert "作者正文停在" in llm_calls[1]["user_prompt"]  # burst 有断点坐标
+
+
+def test_route_burst_within_limit_untouched(monkeypatch):
+    """正常浮动不碰：700 目标下 <×1.6 的产出零干预（不触发第二次调用）。"""
+    text = "".join(_sents("火光", 60))   # ~780 字 < 1120
+    req = StitchGhostRequest(
+        fragment="他抬头。", mode="burst",
+        rolling_prefix="前文占位。", target_chars=700,
+        beat_guidance="走向卡：仓库失火",
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text])
+    assert done["text"] == text
+    assert len(llm_calls) == 1
+
+
+def test_route_open_overlong_uses_opening_wording(monkeypatch):
+    """open 超产进闸；无作者断点 → 压缩措辞是「开篇草稿」，不讲「断点」。"""
+    text = "".join(_sents("开场", 120))
+    compressed = "开场压缩稿，收束完毕。"
+    req = StitchGhostRequest(
+        fragment="", mode="open", rolling_prefix="", target_chars=700,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [text, compressed])
+    assert len(llm_calls) == 2
+    prompt2 = llm_calls[1]["user_prompt"]
+    assert "开篇草稿" in prompt2
+    assert "作者正文停在" not in prompt2
+    assert done["text"].endswith(compressed)          # 首句豁免 + 压缩稿
+    assert len(done["text"]) <= int(700 * 1.6)
+
+
 def test_route_stitch_compress_still_over_truncated_again(monkeypatch):
     """压缩产物仍超硬限 → 对压缩稿再句界截一次（吃压缩收益，不整段丢弃）。
 

@@ -23,6 +23,28 @@ from backend.services.adaptive import text_match
 OUTLINE_NEARBY_MIN_LINE = 8
 OUTLINE_NEARBY_LINE_MAX = 60  # 每拍注入上限（速记原文截断，防超长行挤占预算）
 
+# 非剧情行判定的引号字符集（整行被引号包裹=引语原文，不是本章剧情）
+_QUOTE_WRAP_CHARS = "「」『』“”\"'"
+
+
+def outline_line_is_meta(line: str) -> bool:
+    """该行是否非剧情的元信息行（卷首致辞/引语/作品引用/超短指示）。
+
+    2026-09-03 实测：大纲常以「以罗曼·罗兰的巨著《约翰·克利斯朵夫》……
+    名言开篇」这类行开头——不过滤会被当就近节拍喂进 stitch 意图块与 dock
+    挂件取材池，模型照着写进正文（致辞进意图块与进猜测行是两个通道同一个
+    洞，intent_inference._extract_arc_from_outline 与本函数共用此判据）。
+    三选一即元信息：整行引语 / 含《》（作品引用）/ strip 后 <6 字（指示短行）。
+    """
+    l = (line or "").strip()
+    if not l:
+        return True
+    if l[0] in _QUOTE_WRAP_CHARS and l[-1] in _QUOTE_WRAP_CHARS:
+        return True
+    if "《" in l:
+        return True
+    return len(l) < 6
+
 
 def outline_line_written(line: str, written: str) -> bool:
     """大纲行是否已写进正文（共享判据 text_match；无可判片段按已写跳过防噪音）。
@@ -41,9 +63,14 @@ def outline_nearby(outline_text: str, written: str, take: int = 2) -> List[str]:
     """大纲就近节拍：从头扫作者大纲，跳过已写行，取接下来 1-2 拍原文。
 
     已写判定纯算法（outline_line_written）；全部已写（章近尾声）/ 无大纲 →
-    空列表（零注入零变化契约）。
+    空列表（零注入零变化契约）。元信息行（引语/作品引用/指示短行）不进
+    候选（outline_line_is_meta，2026-09-03 卷首致辞进意图块事故）。
     """
-    lines = [l.strip() for l in (outline_text or "").splitlines() if len(l.strip()) >= OUTLINE_NEARBY_MIN_LINE]
+    lines = [
+        l.strip()
+        for l in (outline_text or "").splitlines()
+        if len(l.strip()) >= OUTLINE_NEARBY_MIN_LINE and not outline_line_is_meta(l)
+    ]
     if not lines:
         return []
     out: List[str] = []

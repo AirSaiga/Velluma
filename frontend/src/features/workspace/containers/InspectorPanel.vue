@@ -430,6 +430,33 @@ async function handleResetChapterStyle() {
     console.warn('恢复继承失败:', e)
   }
 }
+
+// ---- 意图纠正手势（2026-09-03 意图入舱批次） ----
+// 「AI 目前的猜测」行的「不对」：一句话修正 → 落 spine 打算（生成链立即
+// 按作者方向走，dock 源链作者层压过猜测层）+ intent_correct 埋点（纠正史
+// 回喂意图反推 prompt——口味校准的 few-shot 教材）
+const correctingIntent = ref(false)
+const correctionDraft = ref('')
+
+function startCorrectIntent() {
+  correctionDraft.value = session.planSuggestions?.value?.arc || ''
+  correctingIntent.value = true
+}
+
+function confirmCorrectIntent() {
+  const text = correctionDraft.value.trim()
+  correctingIntent.value = false
+  if (!text) return
+  const guessed = session.planSuggestions?.value?.arc || ''
+  chapterSpine.correctIntent(text, guessed)
+  // 本地即时反馈（下一次心跳会以后端层 2 快照为准刷新）
+  if (session.planSuggestions?.value) {
+    session.planSuggestions.value = { source: 'author', arc: text, confidence: 1 }
+  }
+}
+
+// 切章即退出纠正态（草稿是旧章的猜测，带过去必误导）
+watch(selectedChapterId, () => { correctingIntent.value = false })
 </script>
 
 <template>
@@ -479,9 +506,31 @@ async function handleResetChapterStyle() {
           />
 
           <!-- 意图反推（心跳带回的后台规划淡建议；降级为打算区下方一行小字，不占独立小节） -->
-          <div v-if="session.planSuggestions?.value?.arc" class="plan-guess">
-            AI 目前的猜测：{{ session.planSuggestions.value.arc }}
-            <span class="muted">（{{ session.planSuggestions.value.source === 'author' ? '来自你写的那句话' : 'AI 推测' }}）</span>
+          <!-- 只在 AI 真推测时出现（2026-09-03 实测修正）：来源是作者大纲/打算时
+               不回显——作者自己的话就在上方打算区，端回来标「AI 猜测」只有怪异感。
+               纠正手势「不对」：一句话修正 → 落 spine 打算（生成链随即按作者方向走）
+               + intent_correct 埋点（纠正史是意图反推的口味校准教材）。 -->
+          <div v-if="session.planSuggestions?.value?.arc && session.planSuggestions.value.source === 'inferred'" class="plan-guess">
+            <template v-if="!correctingIntent">
+              AI 目前的猜测：{{ session.planSuggestions.value.arc }}
+              <button
+                class="guess-correct-btn"
+                title="猜得不对？一句话告诉它这章要写什么——卡片舱与续写随即按你的方向来"
+                @click="startCorrectIntent"
+              >不对</button>
+            </template>
+            <div v-else class="guess-correct-row">
+              <input
+                v-model="correctionDraft"
+                class="guess-correct-input"
+                maxlength="60"
+                placeholder="这章其实是要写……（一句话）"
+                @keydown.enter.prevent="confirmCorrectIntent"
+                @keydown.esc.prevent="correctingIntent = false"
+              />
+              <button class="guess-correct-btn" @click="confirmCorrectIntent">好</button>
+              <button class="guess-correct-btn guess-correct-cancel" @click="correctingIntent = false">算了</button>
+            </div>
           </div>
 
           <!-- 大纲卡（剧情层规划，与上方方向一句话分工：打算=要去哪，大纲=发生什么；标题编辑在纸面页面头） -->
@@ -976,6 +1025,51 @@ async function handleResetChapterStyle() {
   color: var(--text-secondary);
   line-height: 1.5;
   padding: 0 0.125rem;
+}
+
+/* 意图纠正手势（2026-09-03 意图入舱）：「不对」按钮 + 行内修正输入 */
+.guess-correct-btn {
+  margin-left: 0.375rem;
+  padding: 0 0.375rem;
+  font-size: 0.625rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.guess-correct-btn:hover {
+  color: var(--accent-500, var(--text-secondary));
+  border-color: var(--accent-400, var(--border-color));
+}
+
+.guess-correct-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.guess-correct-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--text-primary);
+  background: var(--bg-secondary, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  outline: none;
+}
+
+.guess-correct-input:focus {
+  border-color: var(--accent-400, var(--text-muted));
+}
+
+.guess-correct-cancel {
+  opacity: 0.7;
 }
 
 /* section-label 内的补充说明（非强调） */

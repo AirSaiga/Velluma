@@ -48,6 +48,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                                           100 词；<30 词不判 → None，同碎句率哲学）
 - repetition                              词级 bigram 重复密度 + 频次 top5（<50 词不判；
                                           参考性指标——角色名等正当重复会抬高，不进门禁）
+- texture                                 质感密度（2026-09-03 质感批次第四层）：感官/体感/
+                                          微动作词族 token 占比（每千词）+ 命中 top——「停在
+                                          当下细写」能力的可测量代理；参考性指标，不进门禁
 """
 
 import re
@@ -303,6 +306,102 @@ def _repetition_stats(tokens: List[str]) -> Dict:
 
 
 # ============================================================
+# 质感密度（2026-09-03 质感批次第四层，docs 无外文档——模块头即权威）
+# ============================================================
+# 「停在当下细写」的词面代理：感官（视/听/嗅/触温）+ 身体微动作/神情五族。
+# 词表纪律：只收高特异性多字词（单字「光/声」误报面太大不收）；jieba token
+# 精确匹配（防「光说/亮点」类子串误配）。v1 词表与阈值均待真实语料校准——
+# 指标定位=参考性测量与样本候选挑选，不进门禁、不进审计裁决。
+_TEXTURE_LEXICON = frozenset({
+    # 视觉·光线色温
+    "光线", "灯光", "阳光", "影子", "昏暗", "昏黄", "刺眼", "灰蒙蒙", "漆黑",
+    "雪亮", "亮堂", "通红", "惨白", "暮色", "晨光", "反光", "光斑",
+    # 听觉
+    "声响", "寂静", "嘈杂", "刺耳", "嗡嗡", "轰鸣", "回声", "回响", "吱呀",
+    "咔哒", "闷响", "窸窣",
+    # 嗅觉
+    "气味", "香味", "腥味", "霉味", "汗味", "焦味", "清香", "刺鼻", "机油味",
+    # 触觉·温度
+    "滚烫", "冰凉", "发烫", "冰冷", "温热", "粗糙", "光滑", "黏腻", "湿润",
+    "干燥", "刺痛", "发麻", "硌手", "发紧",
+    # 身体微动作·神情
+    "眯起", "皱眉", "眨眼", "吞咽", "攥紧", "愣住", "发呆", "怔住", "撇嘴",
+    "搓手", "屏住",
+})
+
+_TEX_MIN_TOKENS = 30   # token 不足不判（同 lexical 哲学）
+_TEX_TOP_K = 5
+
+
+def _texture_stats(tokens: List[str]) -> Dict:
+    """质感密度：词表命中 token 数 / 总 token（每千词）+ 命中词 top。
+
+    ⚠ 参考性指标：词典永远收不全「细写」（具体名词与动词同样是质感载体），
+    数值只用于趋势对账与候选挑选，解释权属作者。
+    """
+    n = len(tokens)
+    if n < _TEX_MIN_TOKENS:
+        return {"texture_per_1k": None, "texture_hits": 0, "texture_top": []}
+    counts: Dict[str, int] = {}
+    hits = 0
+    for tok in tokens:
+        if tok in _TEXTURE_LEXICON:
+            counts[tok] = counts.get(tok, 0) + 1
+            hits += 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_TEX_TOP_K]
+    return {
+        "texture_per_1k": round(hits / n * 1000, 1),
+        "texture_hits": hits,
+        "texture_top": [[w, c] for w, c in top],
+    }
+
+
+# ---- 质感富集窗（完稿时挑「本章最会停下来细写的一段」作风样候选）----
+TEX_WINDOW_MIN_CHARS = 120   # 窗下限：太短不成「一段」
+TEX_WINDOW_MAX_CHARS = 320   # 窗上限：样本摘录可读长度
+TEX_PICK_MIN_DENSITY = 20.0  # 候选密度门槛（每千词命中；v1 待校准）
+TEX_PICK_MIN_TOKENS = 40     # 窗内 token 下限（防小样本虚高）
+
+
+def most_textured_window(text: str) -> Optional[Dict]:
+    """正文中质感密度最高的句子连续窗（句界对齐，双指针 O(n)）。
+
+    Returns:
+        {"text", "density_per_1k", "hits"} 或 None（文本太短/无窗过门槛）。
+        同一窗口命中数与密度同时记录——密度同分取命中多者，再取靠前者
+        （确定性，保对拍可复现）。
+    """
+    sentences = split_sentences(text or "")
+    if not sentences:
+        return None
+    best: Optional[Dict] = None
+    lo = 0
+    chars = 0
+    for hi in range(len(sentences)):
+        chars += len(sentences[hi])
+        while chars > TEX_WINDOW_MAX_CHARS and lo < hi:
+            chars -= len(sentences[lo])
+            lo += 1
+        if chars < TEX_WINDOW_MIN_CHARS:
+            continue
+        win_text = "".join(sentences[lo: hi + 1])
+        toks = _tokenize(win_text)
+        if len(toks) < TEX_PICK_MIN_TOKENS:
+            continue
+        st = _texture_stats(toks)
+        density = st["texture_per_1k"] or 0.0
+        if density < TEX_PICK_MIN_DENSITY:
+            continue
+        if (
+            best is None
+            or density > best["density_per_1k"]
+            or (density == best["density_per_1k"] and st["texture_hits"] > best["hits"])
+        ):
+            best = {"text": win_text, "density_per_1k": density, "hits": st["texture_hits"]}
+    return best
+
+
+# ============================================================
 # 出口：单文本指纹 + 语料聚合
 # ============================================================
 
@@ -329,12 +428,13 @@ def compute_text_fingerprint(text: str, *, light: bool = False) -> Dict:
             # 空文本同构返回（token_count=0、其余 None/[]，消费方零判空分支）
             "lexical": _lexical_stats([]),
             "repetition": _repetition_stats([]),
+            "texture": _texture_stats([]),
         }
         return fp
 
     word_count = count_words(text)
     sentences = split_sentences(text)
-    tokens = _tokenize(text)  # 词汇/重复两族共用，只分词一次
+    tokens = _tokenize(text)  # 词汇/重复/质感三族共用，只分词一次
     fingerprint: Dict = {
         "char_count": len(text),
         "word_count": word_count,
@@ -346,6 +446,7 @@ def compute_text_fingerprint(text: str, *, light: bool = False) -> Dict:
         # light 模式也算——jieba 单遍 + 纯算法统计，代价可承受
         "lexical": _lexical_stats(tokens),
         "repetition": _repetition_stats(tokens),
+        "texture": _texture_stats(tokens),
     }
     return fingerprint
 

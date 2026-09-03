@@ -82,7 +82,17 @@ WARNING_CONSTRAINT_IDS: Dict[str, str] = {
     "cliche_hit": "ghost-guard-cliche-hit",
     "out_of_scene": "ghost-guard-out-of-scene",
     "location_jump": "ghost-guard-location-jump",
+    "beat_rush": "ghost-guard-beat-rush",
+    "cast_roll_call": "ghost-guard-cast-roll-call",
+    "mind_leak": "ghost-guard-mind-leak",
+    "belief_leak": "ghost-guard-belief-leak",
 }
+
+# 抢拍判定（beat_rush）：同一节拍行命中 ≥2 个不同的 4 字滑窗才报。
+# 单窗对普通叙事词误报率不可接受（dock 侧单窗 n=4 闸管的是 ~14 字零件，
+# 幽灵是 100-300 字正文，必须加严）；节拍措辞被整段搬用必然命中多窗。
+BEAT_RUSH_GRAM = 4
+BEAT_RUSH_MIN_HITS = 2
 
 
 def _is_shadow(constraint_id: str) -> bool:
@@ -128,6 +138,10 @@ def check_ghost_text(
     visible_names: Optional[List[str]] = None,
     all_names: Optional[List[str]] = None,
     off_scene_locations: Optional[List[str]] = None,
+    outline_beats: Optional[List[str]] = None,
+    written_tail: str = "",
+    present_names: Optional[List[str]] = None,
+    unknown_canon_phrases: Optional[List[Dict[str, str]]] = None,
     on_event=None,
 ) -> List[Dict[str, str]]:
     """幽灵草稿快检：返回 warnings: [{kind, span_text, message}]。
@@ -147,14 +161,29 @@ def check_ghost_text(
         all_names: 书级实体+资产名全集（第五检候选宇宙；bundle 形态自动取用）
         off_scene_locations: 场景作用域外的已知地点名表（第六检候选；调用方
             算好闭包传入——自身+祖先+后裔合法）；None = 第六检不跑（零变化契约）
+        outline_beats: 大纲就近节拍原文表（第七检 beat_rush 候选；仅
+            stitch/continue 装配侧传入——open/outline/burst 的本职就是写节拍，
+            整检关闭）；None = 第七检不跑（零变化契约）
+        written_tail: 作者正文尾部（第七检排除项——幽灵承接作者正在亲笔写
+            的节拍是合法衔接，不算抢拍；第八检同用作连续性排除）
+        present_names: 此刻在场实体名表（第八检 cast_roll_call 候选，shadow：
+            一篇短幽灵点名 ≥2 个在场者=疑似名单演出——trace 实证「在场：X」
+            被模型当登场指令）；None = 第八检不跑（零变化契约）
+        unknown_canon_phrases: 在场者无人知晓的私有真相短语表（第十检
+            belief_leak 候选，2026-09-03 线 D shadow；[{node_id, label, phrase}]，
+            命题级「无人知晓」预裁由调用方走 belief 设施完成）；None = 第十检
+            不跑（零变化契约）
         on_event: 约束事件回调 (constraint_id, outcome, reason, detail)——
-            out_of_scene/location_jump 命中与闪回豁免的台账埋点；None = 不埋
+            out_of_scene/location_jump/beat_rush 命中与闪回豁免的台账埋点；
+            None = 不埋
 
     Returns:
         [{kind: dead_speak|canon_leak|secret_leak|cliche_hit|out_of_scene|
-        location_jump, span_text, message, detail?, local_only?}], 上限
-        MAX_WARNINGS；无输入/无命中/内部异常一律空列表（零报错契约）。
-        detail 仅 cliche_hit/out_of_scene/location_jump 携带；
+        location_jump|beat_rush|cast_roll_call|mind_leak|belief_leak,
+        span_text, message, detail?, local_only?}],
+        上限 MAX_WARNINGS；无输入/无命中/内部异常一律空列表（零报错契约）。
+        detail 仅 cliche_hit/out_of_scene/location_jump/beat_rush/mind_leak/
+        belief_leak 携带；
         **local_only 由约束登记册 status 驱动（二期控制面化）**——status=shadow
         的约束命中带 local_only=True（路由过滤出 SSE 帧只落台账），转 live
         即自动进帧，无需改本模块代码。
@@ -364,6 +393,143 @@ def check_ghost_text(
             except Exception:
                 pass  # 零报错契约：本类快检失败静默跳过
 
+        # ---- 7. beat_rush：幽灵字面复用大纲就近节拍措辞（2026-09-03 抢拍闸，
+        # trace 实证意图块 verbatim 供给→3/3 幽灵落地即消费节拍）。与 dock 侧
+        # beat-overlap 同族加严（双 4 字窗+正文尾排除）；live 出生即进返修环
+        # （rewrite——抢拍是方向性错误，改比重写轻；excise 删句对整稿伤害大，
+        # 不授权）。open/outline/burst 不写节拍反而是违约，调用方不传候选。
+        if outline_beats is not None:
+            try:
+                for h in find_beat_rush_hits(text, outline_beats, written_tail):
+                    if on_event is not None:
+                        try:
+                            on_event("ghost-guard-beat-rush", "hit", "literal_overlap",
+                                     {"beat": h.get("beat"), "matched": h.get("matched")})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    warning = {
+                        "kind": "beat_rush",
+                        "span_text": str(h.get("span") or ""),
+                        "message": (
+                            f"疑似抢拍：这段直接写出了大纲里几步之后的节拍"
+                            f"（「{str(h.get('beat') or '')[:24]}」）——那一拍留给后面，"
+                            f"现在只写通往它路上的画面"
+                        ),
+                        "detail": {"beat": h.get("beat"), "matched": h.get("matched")},
+                    }
+                    if _is_shadow("ghost-guard-beat-rush"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
+        # ---- 8. cast_roll_call：名单演出（2026-09-03 shadow 出生）——一篇短
+        # 幽灵点名 ≥2 个在场者。「在场：X」供给被模型当登场指令时，幽灵会把
+        # 在场者逐个拉上舞台站着没事干（trace 实证流光被拉上观察台）。「有没
+        # 有戏份」代码判不了——计数是粗代理，故只落台账攒精确率，不进帧不
+        # 返修；正文尾部已点过的名不计（作者先写谁在场，幽灵顺着写是连续性）。
+        if present_names is not None:
+            try:
+                named = [
+                    n for n in present_names
+                    if n and len(n) >= NAME_MIN_CHARS
+                    and n in text and (not written_tail or n not in written_tail)
+                ]
+                # 去重保序（同实体多名字段由调用方收敛；此处防名单自身重复）
+                named = list(dict.fromkeys(named))
+                if len(named) >= 2:
+                    if on_event is not None:
+                        try:
+                            on_event("ghost-guard-cast-roll-call", "hit", "present_roll_call",
+                                     {"names": named[:5]})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    warning = {
+                        "kind": "cast_roll_call",
+                        "span_text": "、".join(named[:3]),
+                        "message": (
+                            f"一篇里点名了多位在场者（{'、'.join(named[:3])}）——"
+                            f"在场不代表此刻要有戏份，没戏份的不必写"
+                        ),
+                        "detail": {"names": named[:5]},
+                    }
+                    if _is_shadow("ghost-guard-cast-roll-call"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
+        # ---- 9. mind_leak：思绪泄漏（2026-09-03 线 D shadow 出生）——非在场/
+        # 提及名单实体 × 内心动词框架。旁白替不在场者报告内心=相机拍不到的
+        # 画面（POV 相机的确定性半：具名主语才抓，代词指代认栽——宁漏勿误）。
+        # 与第五检同白名单同候选宇宙，只换动词族。
+        if visible_names is not None:
+            try:
+                from backend.services.context.scene_visibility import find_mind_leak_hits
+
+                candidates = all_names
+                if candidates is None and bundle is not None:
+                    candidates = _bundle_all_names(bundle)
+                for h in find_mind_leak_hits(text, visible_names, candidates or []):
+                    if on_event is not None:
+                        try:
+                            if h.get("exempt"):
+                                on_event("ghost-guard-mind-leak", "exempt", "flashback",
+                                         {"name": h.get("name"), "sentence": h.get("sentence")})
+                            else:
+                                on_event("ghost-guard-mind-leak", "hit", "mind_verb_frame",
+                                         {"name": h.get("name"), "verb": h.get("verb")})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    if h.get("exempt"):
+                        continue
+                    warning = {
+                        "kind": "mind_leak",
+                        "span_text": str(h.get("name") or ""),
+                        "message": (
+                            f"「{h.get('name')}」不在场，旁白却报告了他/她的内心"
+                            f"（「{h.get('verb')}」）——相机拍不到不在场者的思绪"
+                            f"（若是转述/回忆可忽略）"
+                        ),
+                        "detail": {"verb": h.get("verb")},
+                    }
+                    if _is_shadow("ghost-guard-mind-leak"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
+        # ---- 10. belief_leak：信念泄漏（2026-09-03 线 D shadow 出生）——私有
+        # 真相命题的里文本被逐字写出，而此刻在场者无人知晓该命题（有人知晓=
+        # 知情者的合法 POV 叙述，不报）。素材由调用方预裁（命题级判定走
+        # belief.fold_belief/proposition_status），本检只做纯文本比对。
+        if unknown_canon_phrases is not None:
+            try:
+                for item in unknown_canon_phrases:
+                    phrase = str(item.get("phrase") or "").strip()
+                    if len(phrase) < SECRET_PHRASE_MIN_CHARS or phrase not in text:
+                        continue
+                    if on_event is not None:
+                        try:
+                            on_event("ghost-guard-belief-leak", "hit", "unknown_proposition_text",
+                                     {"node_id": item.get("node_id"), "label": item.get("label")})
+                        except Exception:
+                            pass  # 埋点失败不阻塞快检
+                    warning = {
+                        "kind": "belief_leak",
+                        "span_text": phrase,
+                        "message": (
+                            f"这段写出了真相「{str(item.get('label') or '')[:24]}」的内容，"
+                            f"而此刻在场者无人知道它——他们无从说起，旁白漏了底"
+                        ),
+                        "detail": {"node_id": item.get("node_id")},
+                    }
+                    if _is_shadow("ghost-guard-belief-leak"):
+                        warning["local_only"] = True
+                    _hit_dict(warning)
+            except Exception:
+                pass  # 零报错契约：本类快检失败静默跳过
+
         return warnings
     except Exception:
         # 零报错契约：快检是柔性信号，任何异常静默为空（绝不阻塞生成）
@@ -385,8 +551,13 @@ def _bundle_all_names(bundle: Any) -> List[str]:
     """
     names: List[str] = []
     for ent in (getattr(bundle, "entities", None) or []):
-        we = _get_nested(ent, "world_entity", None)
-        etype = str(getattr(we, "entity_type", "") or "") if we is not None else ""
+        we = _get_nested(ent, "world_entity")
+        # world_entity 双形态容忍：ORM/适配器对象走属性，dict 走键（2026-09-03
+        # 修复——旧代码只对对象形态取类型，dict 形态过滤静默失效）
+        if isinstance(we, dict):
+            etype = str(we.get("entity_type") or "")
+        else:
+            etype = str(getattr(we, "entity_type", "") or "") if we is not None else ""
         if etype and etype not in ("character", "asset"):
             continue
         name = str(_get_nested(ent, "character", "name") or "").strip()
@@ -475,6 +646,57 @@ def _secret_phrases(secret_text: str) -> List[str]:
         if phrase not in phrases:
             phrases.append(phrase)
     return phrases
+
+
+def _beat_grams(s: str, n: int = BEAT_RUSH_GRAM) -> List[str]:
+    """文本 → 有序去重的 n 字滑窗表（按标点/空白切段后窗内取——每个 gram
+    都是原文逐字子串，span_text 可在原稿定位，切除/展示不失真）。"""
+    out: List[str] = []
+    for seg in _SECRET_SPLIT_RE.split(s or ""):
+        seg = seg.strip()
+        for i in range(len(seg) - (n - 1)):
+            g = seg[i: i + n]
+            if g not in out:
+                out.append(g)
+    return out
+
+
+def find_beat_rush_hits(
+    text: str,
+    outline_beats: Optional[List[str]],
+    written_tail: str = "",
+) -> List[Dict[str, Any]]:
+    """幽灵文本与大纲就近节拍的字面抢拍命中（ghost-guard-beat-rush 判据）。
+
+    抢拍 = 幽灵把「几步之后的节拍」的场面措辞直接写出来（2026-09-03 trace
+    实证：意图块 verbatim 供给节拍，3/3 幽灵落地即消费「被工头打断」）。
+    判据（宁漏勿误，dock-beat-overlap 同族加严版）：同一节拍行命中 ≥2 个
+    不同的 4 字滑窗；且排除已出现在作者正文尾部的 gram——作者正在亲笔写
+    这一拍时，幽灵顺它写是合法承接不是抢拍（outline_line_written 的 2/3
+    阈值在节拍刚开写时仍判未写，没有这条排除会把合法承接误判成抢拍）。
+    """
+    if not text or not outline_beats:
+        return []
+    text_grams = _beat_grams(text)
+    if len(text_grams) < BEAT_RUSH_MIN_HITS:
+        return []
+    tail_gram_set = set(_beat_grams(written_tail)) if written_tail else set()
+    hits: List[Dict[str, Any]] = []
+    for beat in outline_beats:
+        beat_grams = set(_beat_grams(str(beat or "")))
+        if not beat_grams:
+            continue
+        matched = [
+            g for g in text_grams
+            if g in beat_grams and g not in tail_gram_set
+        ]
+        if len(matched) >= BEAT_RUSH_MIN_HITS:
+            hits.append({
+                "beat": str(beat)[:60],
+                "span": matched[0],
+                "matched": matched[:5],
+            })
+    return hits
 
 
 def _get_nested(obj: Any, *attrs: str) -> Any:

@@ -221,6 +221,30 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     return editor.state.selection.$from.parent.textContent.slice(0, 500)
   }
 
+  /**
+   * 细纲胶囊速记原文收集（2026-09-03 意图入舱）：胶囊会话级不落库
+   * （存盘剥除契约），但它是最稀疏最真实的作者意图信号——经心跳供给
+   * 意图反推。≤5 枚 × ≤60 字，防心跳载荷膨胀。
+   */
+  function _outlineNotes(): string[] {
+    const editor = chapterEditorHandle.value
+    if (!editor) return []
+    try {
+      const notes: string[] = []
+      editor.state.doc.descendants((node) => {
+        if (notes.length >= 5) return false
+        if (node.type.name === 'outlineNote') {
+          const note = String(node.attrs.note || '').trim().slice(0, 60)
+          if (note) notes.push(note)
+        }
+        return true
+      })
+      return notes
+    } catch {
+      return []  // 胶囊收集失败绝不阻塞心跳本体（增强信号，不是前提）
+    }
+  }
+
   async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean; _summonRetry?: boolean }) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
@@ -287,6 +311,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         outline_text: outlineText,
         recent_text: recentText.slice(0, 500),
         summoned: !!flags?.summoned,
+        // 细纲胶囊速记（意图反推素材；编辑器已卸载的感知常驻路径无胶囊可读，传空）
+        outline_notes: editor ? _outlineNotes() : [],
+        // 打算一句话随心跳上行（2026-09-03 意图入舱）：后端据此即时感知「作者
+        // 写/改/纠正了打算」—— bust dock 缓存让舱换向 + 触发层 2 转化（0 LLM）
+        spine_intent: spine.value?.intent?.text || '',
       })
 
       // 章节纪元守卫（2026-08-29 错章零件修复）：发送后切章 → 本响应是旧章的
@@ -470,7 +499,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // ---- 续写：stitch-ghost SSE 灌幽灵草稿 ----
   function requestContinue(
     mode: 'stitch' | 'continue' = 'continue',
-    pickedParts: Array<{ text: string; direction?: string }> = [],
+    pickedParts: Array<{ text: string; direction?: string; slot?: string }> = [],
   ) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
@@ -506,6 +535,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode,
       picked_parts: pickedParts.map((p) => p.text),
+      // 双轨契约选档信号（2026-09-03 质感批次）：零件功能槽位同序上行
+      picked_slots: pickedParts.map((p) => p.slot || ''),
       target_chars: mode === 'stitch' ? 120 : 200,
       adopted_direction: adoptedDir,
     }, {

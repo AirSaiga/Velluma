@@ -164,6 +164,23 @@ export function useChapterSpine() {
     logCollabEvent(currentChapterId, 'spine_intent_set')
   }
 
+  /**
+   * 意图纠正手势（2026-09-03 意图入舱批次，打算 tab「AI 目前的猜测」行的「不对」）。
+   *
+   * 纠正即作者亲手写下打算——落 spine.intent 且 source 恒为 'author'
+   * （覆盖 'ai' 建议来源：作者改过的就是作者的）。埋点 intent_correct
+   * 带旧猜测原文——后端意图反推把纠正史当 few-shot 教材（口味校准），
+   * 这是「越用越像你」的数据飞轮起点。
+   */
+  function correctIntent(text: string, guessed: string) {
+    const s = _ensure()
+    s.intent = { text: text.trim().slice(0, 60), source: 'author' }
+    logCollabEvent(currentChapterId, 'intent_correct', {
+      guessed: (guessed || '').slice(0, 120),
+      corrected: text.trim().slice(0, 60),
+    })
+  }
+
   function addAnchor(text: string) {
     const s = _ensure()
     if (s.anchors!.length >= 5) return
@@ -229,6 +246,6 @@ export function useChapterSpine() {
   return {
     spine, spineSuggestions, spineSuggesting, spineLoaded, spineProgress, highlightAnchorId,
     load, unload, save, suggest, adoptSuggestion, discardSuggestions,
-    setIntent, addAnchor, updateAnchor, removeAnchor,
+    setIntent, correctIntent, addAnchor, updateAnchor, removeAnchor,
   }
 }

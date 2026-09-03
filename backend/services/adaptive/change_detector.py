@@ -43,6 +43,12 @@ class AuthorState:
     recent_text: str = ""        # 当前段落尾部（≤500字）
     latest_fact: Optional[Dict] = None  # 最新沉淀的层1事实（如有）
     summoned: bool = False       # Tab 显式点名要零件（豁免句子级闸门——作者主权）
+    # 细纲胶囊速记原文（2026-09-03 意图加固）：胶囊会话级不落库，经心跳供给
+    # 意图反推——作者随手记的剧情备忘是最稀疏最真实的意图信号
+    outline_notes: List[str] = field(default_factory=list)
+    # 打算一句话原文（2026-09-03 意图入舱）：orchestrator 比对签名感知
+    # 「作者写/改/纠正了打算」——触发层 2 转化（spine 短路 0 LLM）+ 舱换向
+    spine_intent: str = ""
 
 
 # ============================================================

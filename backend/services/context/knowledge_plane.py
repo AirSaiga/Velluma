@@ -70,6 +70,9 @@ class KnowledgeEntry:
     selector: str = ""
     hard: bool = False
     aliases: List[str] = field(default_factory=list)
+    # 世界实体 id（world 模式 entity 条目携带；2026-09-03 线 D 信念泄漏检的
+    # 命题视角集数据源——不在渲染面出现，纯审计/判定用）
+    entity_id: str = ""
 
 
 @dataclass
@@ -89,6 +92,9 @@ class KnowledgeView:
     selected_keys: List[str] = field(default_factory=list)
     present_names: List[str] = field(default_factory=list)
     dead_names: List[str] = field(default_factory=list)
+    # 在场世界实体 id 表（2026-09-03 线 D：信念泄漏检的命题视角集——
+    # 「在场者是否有人知道这条真相」的判定输入；与 present_names 同点产出）
+    present_entity_ids: List[str] = field(default_factory=list)
     unselected: List[Dict[str, str]] = field(default_factory=list)
 
     def total_chars(self) -> int:
@@ -214,6 +220,7 @@ def build_knowledge_entries(bundle: Any) -> List[KnowledgeEntry]:
             aliases=aliases,
             selector="",  # 选择阶段填
             hard=False,
+            entity_id=eid,
         ))
 
     # ---- 资产条目（legacy bundle.assets；world 模式资产已在 world 实体集，此处兜底去重）----
@@ -454,6 +461,7 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
     # ---- 在场与相关人物（档案全文 + 此刻状态；时态标注 + 折叠态优先声明）----
     ent_lines: List[str] = []
     present_names: List[str] = []
+    present_entity_ids: List[str] = []
     dead_names: List[str] = []
     for e in selected:
         if e.kind == "entity":
@@ -466,6 +474,8 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
             else:
                 if e.present:
                     present_names.append(e.title)
+                    if e.entity_id:
+                        present_entity_ids.append(e.entity_id)
                 tag = "〔在场〕" if e.present else ""
                 moment = f"【此刻·{e.temporal}】" if e.temporal else ""
                 head = f"- {e.title}{tag}{moment}"
@@ -487,6 +497,7 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         )
     kv.present_names = present_names
     kv.dead_names = dead_names
+    kv.present_entity_ids = present_entity_ids
 
     # ---- 世界观（条目完整）----
     wv = [e for e in selected if e.kind == "worldview"]
@@ -525,6 +536,14 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
         pin_bits.append(f"t={world_time}")
     if pin_bits:
         kv.recency_pin = "【此刻·切记】" + "｜".join(pin_bits)
+        # 名单语义重框（2026-09-03 质感批次第三层，trace 实证「在场：流光」被
+        # 当登场指令——幽灵把流光拉上观察台站着没事干）：在场名单是供一致性
+        # 核对的资料（别写错），不是要点名的演员表（不必写）。
+        if present_names:
+            kv.recency_pin += (
+                "\n（在场名单只供核对一致性——别让不在场的人登场、别让死者开口；"
+                "它不是登场名单，没有谁此刻必须出场，没戏份的一个都不必写）"
+            )
     # P0 blocker 重钉（三平面分权）：作者硬禁忌正面化编译进 user 尾部——
     # recency 位是模型服从最高区，与「此刻」行同屏重钉
     if blocker_bits:

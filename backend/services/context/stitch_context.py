@@ -71,6 +71,13 @@ class StitchContext:
     bundle: SettingsBundle = field(default_factory=SettingsBundle)
     proper_nouns: List[str] = field(default_factory=list)
     chapter_intent: str = ""
+    # 大纲就近节拍原文表（2026-09-03 抢拍闸素材）：仅意图走大纲兜底时非空
+    # （请求自带意图=节拍未进 prompt，闸关闭零变化）；与 chapter_intent 同源
+    outline_beats: List[str] = field(default_factory=list)
+    # 意图来源（2026-09-03 线 A）：request=请求自带 / outline=大纲就近节拍 /
+    # inferred=层 2 AI 反推方向 / baton=章首接力棒 / 空=无意图块。
+    # prompt 措辞按来源分档（AI 猜的必须亮身份，不冒充作者材料）
+    intent_source: str = ""
     recall_query: str = ""
     memory_echoes: List[str] = field(default_factory=list)
     style_positive: str = ""
@@ -134,6 +141,19 @@ class StitchContext:
 # 装配主入口（stitch 路由与 context-preview 共用）
 # ============================================================
 
+def _nearby_beats_from_outline(bundle: SettingsBundle) -> List[str]:
+    """大纲就近节拍原文表（接下来一两拍；无大纲/全已写 → 空表）。
+
+    2026-09-03 从意图兜底拆出列表形态：抢拍代码闸（ghost-guard-beat-rush）
+    需要节拍原文列表做字面比对，意图块消费 join 后的文本形态——两者同源，
+    同一份计算（防两处各自判定漂移出两个「就近」）。
+    """
+    outline = getattr(bundle, "outline_text", "") or ""
+    if not outline.strip():
+        return []
+    return outline_nearby(outline, written_text(bundle.content_text or ""))
+
+
 def _nearby_intent_from_outline(bundle: SettingsBundle) -> str:
     """章节意图兜底：大纲就近节拍（接下来一两拍原文，换行连接）。
 
@@ -142,11 +162,47 @@ def _nearby_intent_from_outline(bundle: SettingsBundle) -> str:
     现在只给未写的就近一两拍（dock 挂件就近铁律的同源推广）；无大纲 /
     全部已写（章近尾声）→ 空串，意图块整块缺席（零变化契约）。
     """
-    outline = getattr(bundle, "outline_text", "") or ""
-    if not outline.strip():
-        return ""
-    beats = outline_nearby(outline, written_text(bundle.content_text or ""))
-    return "\n".join(beats)
+    return "\n".join(_nearby_beats_from_outline(bundle))
+
+
+async def _layer2_intent_fallback(chapter_id: str, db: AsyncSession) -> tuple:
+    """层 2 意图兜底（2026-09-03 线 A）：无请求意图且大纲兜不到节拍时，
+    消费世界模型层 2 的推断方向——inferred（证据回查过闸、信度达标）或
+    baton（章首接力棒，线 C 的确定性接管）。
+
+    消费阈与 dock 同口径（DOCK_INTENT_MIN_CONFIDENCE）——舱不吃存疑方向，
+    stitch 也不吃（宁缺毋滥）。作者亲笔材料（spine intent）不走这里：它已经
+    由知识平面温卡（warm_card）注入 system 侧，user 侧不重复注入。
+    ⚠ 只读纯 SELECT——不走 get_or_create（读路径不得 INSERT/rollback）。
+    查询失败/无意图/不达标 → ("", "")（零变化契约）。
+
+    Returns:
+        (意图文本, 来源) —— 来源 ∈ ("inferred", "baton") 或空串。
+    """
+    try:
+        from sqlalchemy import select as _select
+
+        from backend.models import WorldModelORM
+        from backend.services.adaptive.components.intent_inference import (
+            DOCK_INTENT_MIN_CONFIDENCE,
+        )
+        from backend.services.adaptive.world_model import ChapterIntent
+
+        row = (await db.execute(
+            _select(WorldModelORM.layer2_intent)
+            .where(WorldModelORM.chapter_id == chapter_id)
+        )).scalar_one_or_none()
+        if not isinstance(row, dict) or not row:
+            return "", ""
+        intent = ChapterIntent.from_dict(row)
+        if intent.source not in ("inferred", "baton"):
+            return "", ""
+        if (intent.confidence or 0.0) < DOCK_INTENT_MIN_CONFIDENCE:
+            return "", ""
+        text = (intent.next_direction or intent.arc or "").strip()[:120]
+        return (text, intent.source) if text else ("", "")
+    except Exception:
+        return "", ""
 
 
 # scene_visible_proper_nouns 已迁 backend/services/context/scene_visibility.py
@@ -179,7 +235,20 @@ async def assemble_stitch_context(
         StitchContext：装配快照。任何子查询失败由 bundle/检索层各自降级为空。
     """
     bundle = await load_chapter_settings_bundle(chapter_id, db)
-    resolved_intent = chapter_intent or _nearby_intent_from_outline(bundle)
+    # 意图解析 + 抢拍闸素材（2026-09-03）：请求自带意图时节拍未进 prompt，
+    # outline_beats 留空（闸关闭零变化）；兜底路径节拍列表与意图文本同源。
+    if chapter_intent:
+        resolved_intent = chapter_intent
+        intent_source = "request"
+        outline_beats: List[str] = []
+    else:
+        outline_beats = _nearby_beats_from_outline(bundle)
+        resolved_intent = "\n".join(outline_beats)
+        intent_source = "outline" if resolved_intent else ""
+        if not resolved_intent and mode in ("stitch", "continue"):
+            # 线 A 兜底（仅 stitch/continue——短续写是「无方向可去」的实证现场；
+            # burst/outline/open 自带方向载体（走向卡/胶囊/开篇任务），不喂猜测）
+            resolved_intent, intent_source = await _layer2_intent_fallback(chapter_id, db)
 
     # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
     # 降级为空列表时 prompt 零变化（不阻塞生成）
@@ -245,6 +314,8 @@ async def assemble_stitch_context(
         bundle=bundle,
         proper_nouns=proper_nouns,
         chapter_intent=resolved_intent,
+        outline_beats=outline_beats,
+        intent_source=intent_source,
         recall_query=recall_query,
         memory_echoes=memory_echoes,
         style_positive=style_positive,

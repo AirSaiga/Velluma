@@ -106,11 +106,14 @@ router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
 OUTLINE_WC_HARD_RATIO = 1.6      # 超过 target×1.6 → 带压缩反馈重试一次
 OUTLINE_WC_TRUNCATE_RATIO = 1.5  # 仍超 → 句界硬截断（截断上限必须 ≤ HARD）
 
-# stitch/continue 字数闸（2026-08-28 扩面）：kimi-k2.6 实测对「控制在 N 字
-# 以内」严重不服从（120 字目标产出 600-700 字、8-10 段，mimo 同病）——
-# prompt 杠杆已尽，上代码闸。与 outline 方向相反：续写的锚在句首（衔接
-# 作者断点），走保头句界截断；不做压缩重试（小目标下压缩=整段重写，
-# 截断免费且首句必连断点）。burst/open 是长文体，超字不截（故意放开）。
+# stitch/continue 字数闸（2026-08-28 扩面，08-29 改两级）：kimi-k2.6 实测对
+# 「控制在 N 字以内」严重不服从（120 字目标产出 600-700 字、8-10 段，mimo
+# 同病）——prompt 杠杆已尽，上代码闸。两级=先保头句界截到 ×1.5，截取稿
+# 发回模型按目标压缩改写（首句豁免压缩，接缝两护见下）。
+# 2026-09-03 线 E 再扩面：burst/open 同进此闸——两者 target=700 的承诺
+# 同样是「约七百字」，kimi/mimo 的超产病在 700 目标下=1400+ 字快进剧情
+# （冲章同族风险：burst 超产=走向卡一步写成三步，open 超产=开篇把第一章
+# 节奏提前烧掉）。闸只抓严重超产（×1.6 才动），正常浮动不碰。
 STITCH_WC_HARD_RATIO = 1.6
 STITCH_WC_TRUNCATE_RATIO = 1.5
 
@@ -420,6 +423,7 @@ _VIOLATION_REPAIR_LINES = {
     "out_of_scene": "「{span}」此刻不在场，不得让它登场行动——删改相关动作，换在场的人/物承接",
     "location_jump": "「{span}」不在当前场景，不得写抵达那里——改为当前场景内的动作",
     "dead_speak": "「{span}」已死亡，不得让它开口或行动（除非明确写成回忆/转述）",
+    "beat_rush": "这段直接写出了大纲里几步之后的节拍场面（命中「{span}」）——那一拍留给后面；改写为通往它路上的画面，不写节拍事件本身",
 }
 
 
@@ -466,6 +470,13 @@ class HeartbeatRequest(BaseModel):
     outline_text: str = ""
     recent_text: str = Field("", description="当前段落尾部（≤500字）")
     summoned: bool = Field(False, description="Tab 显式点名要零件（豁免句子级闸门）")
+    outline_notes: List[str] = Field(
+        default_factory=list,
+        description="正文里细纲胶囊的速记原文（意图反推素材；胶囊会话级不落库，经此供给）",
+    )
+    spine_intent: str = Field(
+        "", description="打算一句话原文（打算变更即时感知：舱换向 + 层 2 转化触发）",
+    )
 
 
 class HeartbeatResponse(BaseModel):
@@ -502,6 +513,7 @@ class StitchGhostRequest(BaseModel):
     rolling_prefix: str = Field("")
     mode: str = Field("stitch", description="stitch|continue|burst（段落级连写）|outline（细纲扩写）|open（点火）")
     picked_parts: List[str] = Field(default_factory=list)
+    picked_slots: List[str] = Field(default_factory=list, description="点选零件的功能槽位（与 picked_parts 同序：landing/toward_beat/echo/ambient）——双轨契约选档信号")
     target_chars: int = 120
     chapter_intent: str = Field("")
     beat_guidance: str = Field("", description="burst 模式：选定走向卡的走向文本（空=自由发挥）")
@@ -538,6 +550,8 @@ async def heartbeat(
         outline_text=request.outline_text,
         recent_text=request.recent_text,
         summoned=request.summoned,
+        outline_notes=request.outline_notes,
+        spine_intent=request.spine_intent,
     )
     result = await orch.on_heartbeat(state)
     snapshot = result.get("snapshot", {})
@@ -1101,6 +1115,60 @@ async def finish(
     if semantic_hits and isinstance(result, dict):
         result["semantic_hits"] = semantic_hits
 
+    # ---- 质感样本候选（2026-09-03 质感批次第四层）：完稿=章节定稿时刻，
+    # 挑「本章最会停下来细写的一段」进文风收件箱（sample_candidate，作者
+    # ✓ 裁决才入样本库——候选不直接生效，红线同 💛 黄金片段/事件候选池）。
+    # 去重纪律：同书收件箱已有同文候选（任何状态——作者忽略过的不重投）
+    # 即跳过。挂在 finish 而非 settle：settle 高频会刷屏，完稿与记忆重索引
+    # 同机位。任何失败仅 log，绝不阻塞完稿。
+    texture_candidate: Optional[Dict] = None
+    try:
+        from backend.models import StyleInboxItem
+        from backend.routes.style import _plain_text
+        from backend.services.style.fingerprint import most_textured_window
+        from backend.services.style.scene_hint import detect_scene_type
+
+        _ch2 = await db.get(Chapter, str(chapter_id))
+        _plain = _plain_text(_ch2.content_text or "") if _ch2 is not None else ""
+        win = most_textured_window(_plain) if _plain else None
+        if win and _ch2 is not None:
+            _existing = (await db.execute(
+                select(StyleInboxItem).where(
+                    StyleInboxItem.book_id == _ch2.book_id,
+                    StyleInboxItem.kind == "sample_candidate",
+                )
+            )).scalars().all()
+            _head = win["text"][:60]
+            if not any(
+                str((i.payload or {}).get("content") or "")[:60] == _head
+                for i in _existing
+            ):
+                db.add(StyleInboxItem(
+                    book_id=_ch2.book_id,
+                    kind="sample_candidate",
+                    payload={
+                        "content": win["text"],
+                        "scene_type": detect_scene_type(win["text"]) or "general",
+                        "density_per_1k": win["density_per_1k"],
+                        "chapter_id": str(chapter_id),
+                        "note": (
+                            f"第{_ch2.chapter_number}章里质感最密的一段"
+                            f"（{win['density_per_1k']}/千词）——若这正是「你的字」"
+                            f"最好的样子，确认后收进样本库"
+                        ),
+                    },
+                    source="texture_pick",
+                ))
+                await db.commit()
+                texture_candidate = {
+                    "density_per_1k": win["density_per_1k"],
+                    "chars": len(win["text"]),
+                }
+    except Exception as e:
+        logger.warning(f"[adaptive/finish] 质感样本候选失败（不影响完稿结果）: {e}")
+    if texture_candidate and isinstance(result, dict):
+        result["texture_sample_candidate"] = texture_candidate
+
     # ---- A5c①：完稿报告附收件箱积压计数（book 级 pending；失败 0 不阻塞完稿）----
     # 与 candidates_created/memory_indexed 同层（响应顶层）——报告区「收件箱」块消费；
     # 完稿整章抽取刚落过候选，顺路失效心跳积压缓存让下轮心跳拿到新计数
@@ -1122,6 +1190,8 @@ async def finish(
         candidates_created=result.get("candidates_created", 0) if isinstance(result, dict) else 0,
         candidates_pending=candidates_pending,
         semantic_hits=len(semantic_hits),
+        texture_candidate=int(texture_candidate is not None),
+        texture_density=(texture_candidate or {}).get("density_per_1k"),
     )
     await flush_adaptive_records(chapter_id)
     return result
@@ -1249,6 +1319,70 @@ async def stitch_ghost(
                 ]
     except Exception:
         _off_scene_loc_names = None
+    # ②b 抢拍闸素材（第七检候选，2026-09-03）：大纲就近节拍原文表（装配侧
+    #    与意图块同源同一份）+ 作者正文尾部（合法承接排除项）。只在
+    #    stitch/continue 开闸——open/outline/burst 的本职就是写节拍/开篇，
+    #    对它们「写节拍」不是违规（整检关闭，零变化）。
+    _rush_beats_guard: Optional[List[str]] = None
+    if request.mode in ("stitch", "continue"):
+        _beats = list(getattr(ctx, "outline_beats", None) or [])
+        if _beats:
+            _rush_beats_guard = _beats
+    _written_tail_guard = ((request.rolling_prefix or "") + " " + (request.fragment or "")).strip()
+    # ②c 名单演出 shadow 素材（第八检候选）：kg 在场名单；空表→None（整检
+    #    关闭，非 world 书/无在场推演的书零变化）
+    _present_names_guard: Optional[List[str]] = (
+        list(getattr(kg, "present_names", None) or []) or None
+    )
+    # ②d 信念泄漏 shadow 素材（第十检候选，2026-09-03 线 D）：私有真相命题中
+    #    「此刻在场者无人知晓」的里文本短语表。命题级判定走 B3 信念域设施
+    #    （fold_belief 折事件流 → proposition_status 四值回答）；有任一在场者
+    #    知晓即合法（知情者的合法 POV 叙述），不进入候选。
+    #    关闭条件（任一即 None，整检不跑零变化）：非 world 书 / 无 private
+    #    canon 命题 / 查询失败。
+    _unknown_canon_phrases: Optional[List[Dict[str, str]]] = None
+    if getattr(bundle, "world_sourced", False) and _bundle_book_id:
+        try:
+            from backend.models import (
+                CanonNode as _CN2,
+                WorldEvent as _WE,
+            )
+            from backend.services.validation.ghost_guard import _secret_phrases
+            from backend.services.world.belief import (
+                KNOWS as _KNOWS,
+                fold_belief as _fold_belief,
+                proposition_status as _prop_status,
+            )
+
+            _priv = (await db.execute(
+                select(_CN2.id, _CN2.label, _CN2.canon_text).where(
+                    _CN2.book_id == _bundle_book_id,
+                    _CN2.visibility == "private",
+                )
+            )).all()
+            if _priv:
+                _t_now = getattr(bundle, "world_time", 0) or 0
+                _ev_rows = (await db.execute(
+                    select(_WE).where(
+                        _WE.book_id == _bundle_book_id,
+                        _WE.time_start <= _t_now,
+                    )
+                )).scalars().all()
+                _belief = _fold_belief(list(_ev_rows), _t_now)
+                _perspective = list(getattr(kg, "present_entity_ids", None) or [])
+                _phrases: List[Dict[str, str]] = []
+                for _nid, _label, _canon_text in _priv:
+                    if _prop_status(str(_nid), _perspective, _belief) == _KNOWS:
+                        continue  # 在场者有人知道——写出来是合法 POV 叙述
+                    for _seg in _secret_phrases(str(_canon_text or "")):
+                        _phrases.append({
+                            "node_id": str(_nid),
+                            "label": str(_label or ""),
+                            "phrase": _seg,
+                        })
+                _unknown_canon_phrases = _phrases
+        except Exception:
+            _unknown_canon_phrases = None  # 零变化契约：素材装配失败整检关闭
     # ③ 快检台账埋点（预检/终检共用同一回调 → (约束, 结果, 明细) 去重，
     #    返修成功后终检不会把同一命中记两次；命中语义=首次检测）
     _guard_event_keys: set = set()
@@ -1302,6 +1436,19 @@ async def stitch_ghost(
     )
     rolling_windowed = (
         sentence_clean_tail(request.rolling_prefix or "", _rolling_cap).strip() if _rolling_cap else ""
+    )
+
+    # 双轨生成契约选档（2026-09-03 质感批次）：stitch/continue 由代码选定
+    # 本笔「推进 or 停在当下细写」——零件槽位优先，无零件走尾部动作密度兜底；
+    # 其余模式恒 motion（各有专职）。埋点供选档分布/采纳率校准。
+    from backend.services.adaptive.texture_contract import pick_contract
+
+    stitch_contract = pick_contract(request.mode, request.picked_slots, rolling_windowed)
+    trace_event(
+        "adaptive_stitch_contract",
+        mode=request.mode, contract=stitch_contract,
+        slots=[str(s) for s in (request.picked_slots or [])][:4],
+        tail_chars=len(rolling_windowed),
     )
 
     if request.mode == "open":
@@ -1389,6 +1536,8 @@ async def stitch_ghost(
             character_secrets=bundle.character_secrets,
             previous_summary=kg.previous_summary,
             recency_pin=kg.recency_pin,
+            contract=stitch_contract,
+            intent_source=getattr(ctx, "intent_source", "") or "",
             **kg_kwargs,
         )
 
@@ -1462,7 +1611,9 @@ async def stitch_ghost(
             # 摘出、只压缩剩余部分，产物=首句+压缩稿——衔接句永不进压缩，
             # 零依赖模型服从（三平面纲领：prompt 管不住的确定性约束下沉代码层）。
             # 压缩 prompt 同时带作者断点尾句，给剩余部分保衔接语义提供坐标。
-            if request.mode in ("stitch", "continue") and request.target_chars > 0:
+            # 线 E（2026-09-03）：burst/open 同进此闸——700 字承诺下的超产=
+            # 快进剧情（冲章同族），闸只抓 ×1.6 严重超产，正常浮动不碰。
+            if request.mode in ("stitch", "continue", "burst", "open") and request.target_chars > 0:
                 stitch_hard_limit = int(request.target_chars * STITCH_WC_HARD_RATIO)
                 if len(text) > stitch_hard_limit:
                     anchor, body = _split_first_sentence(text)
@@ -1483,14 +1634,19 @@ async def stitch_ghost(
                         f"草稿开头的衔接句『{anchor}』已单独保留、不在下面草稿里，"
                         f"压缩稿不要复述它。\n" if anchor else ""
                     )
+                    # open 无作者断点（开篇是整段起笔），措辞适配——不讲「断点」
+                    draft_label = (
+                        "续写草稿，超出了" if request.mode != "open"
+                        else "开篇草稿，超出了"
+                    )
                     compressed = await call_llm_with_usage(
                         system_prompt=system_prompt,
                         user_prompt=(
                             f"{frag_ctx}{anchor_ctx}"
-                            f"下面是紧接作者断点的续写草稿，超出了 {request.target_chars} 字目标"
+                            f"下面是一段{draft_label} {request.target_chars} 字目标"
                             f"（现 {len(head)} 字）。请压缩改写到 {body_target} 字以内："
                             f"保持开头的衔接语义不变，删减修饰与重复动作，每个细节都要推进信息。"
-                            f"只输出压缩后的续写正文，不要解释。\n\n--- 草稿 ---\n{head}"
+                            f"只输出压缩后的正文，不要解释。\n\n--- 草稿 ---\n{head}"
                         ),
                         model_type="creative",
                         temperature=0.7,
@@ -1542,6 +1698,10 @@ async def stitch_ghost(
                     text, bundle, canon_node_ids_by_label=_label_map,
                     visible_names=list(proper_nouns or []),
                     off_scene_locations=_off_scene_loc_names,
+                    outline_beats=_rush_beats_guard,
+                    written_tail=_written_tail_guard,
+                    present_names=_present_names_guard,
+                    unknown_canon_phrases=_unknown_canon_phrases,
                     on_event=_on_guard_event,
                 )
                 _hard = [w for w in _precheck if repair_eligible(w)]
@@ -1576,6 +1736,10 @@ async def stitch_ghost(
                             t, bundle, canon_node_ids_by_label=_label_map,
                             visible_names=list(proper_nouns or []),
                             off_scene_locations=_off_scene_loc_names,
+                            outline_beats=_rush_beats_guard,
+                            written_tail=_written_tail_guard,
+                            present_names=_present_names_guard,
+                            unknown_canon_phrases=_unknown_canon_phrases,
                         ) if repair_eligible(w)]
 
                     outcome = await run_repair_loop(
@@ -1816,6 +1980,10 @@ async def stitch_ghost(
                     # 物件；显式传 proper_nouns() 会混入全类型名，语料库口径分叉）
                     visible_names=list(proper_nouns or []),
                     off_scene_locations=_off_scene_loc_names,
+                    outline_beats=_rush_beats_guard,
+                    written_tail=_written_tail_guard,
+                    present_names=_present_names_guard,
+                    unknown_canon_phrases=_unknown_canon_phrases,
                     on_event=_on_guard_event,
                 )
                 ghost_warnings = [w for w in ghost_warnings if not w.get("local_only")]

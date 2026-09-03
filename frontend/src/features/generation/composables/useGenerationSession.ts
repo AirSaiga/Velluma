@@ -202,7 +202,7 @@ export interface GenerationSession {
   /** 退出自适应模式（切回旧 step 路径或 idle） */
   exitAdaptive: () => void
   /** 注入 adaptive 续写函数（由 useAdaptiveAssist 注入，键位状态机调用） */
-  setAdaptiveContinue: (fn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string }>) => void) | null) => void
+  setAdaptiveContinue: (fn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string; slot?: string }>) => void) | null) => void
   /** 注入 adaptive 沉淀函数（由 useAdaptiveAssist 注入，Ctrl+Enter composing 态触发） */
   setAdaptiveSettle: (fn: (() => void) | null) => void
   /** 注入 adaptive 完稿函数（由 useAdaptiveAssist 注入，InspectorPanel 完稿按钮触发） */
@@ -554,8 +554,8 @@ export function useGenerationSession(): GenerationSession {
 
   // adaptive 续写注入器：由 useAdaptiveAssist 注入（解耦 session 与 API 层）。
   // session 的键位状态机在 adaptive composing 态调它触发续写，不直接 import adaptiveApi。
-  let _adaptiveContinueFn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string }>) => void) | null = null
-  function setAdaptiveContinue(fn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string }>) => void) | null) {
+  let _adaptiveContinueFn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string; slot?: string }>) => void) | null = null
+  function setAdaptiveContinue(fn: ((mode: 'stitch' | 'continue', parts: Array<{ text: string; direction?: string; slot?: string }>) => void) | null) {
     _adaptiveContinueFn = fn
   }
 
@@ -977,7 +977,7 @@ export function useGenerationSession(): GenerationSession {
         if (attachedParts.value.length) {
           e.preventDefault()
           e.stopPropagation()
-          _adaptiveContinueFn?.('stitch', attachedParts.value.map((p) => ({ text: p.text, direction: p.direction })))
+          _adaptiveContinueFn?.('stitch', attachedParts.value.map((p) => ({ text: p.text, direction: p.direction, slot: p.source })))
           // 缝合触发：清吸附意图 + 藏舱让位幽灵（2026-08-28 修复：此前 hideSparkDock
           // 直接退出舱、且 setSparkSticky 全工程零调用——「连续吸附多件缝合」从未生效，
           // 打一个字舱就永久消失，每件都要重新停顿 4s/Tab 唤醒。现改为 sticky+stash：

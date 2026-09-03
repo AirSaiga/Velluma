@@ -55,12 +55,27 @@ function cancelEdit() {
   editingId.value = null
 }
 
+/** 样本候选摘录预览（前 140 字——够判断「这是不是我的字」，全文确认后入库再看） */
+function excerpt(item: StyleInboxItem): string {
+  const c = String(item.payload.content || '')
+  return c.length > 140 ? c.slice(0, 140) + '…' : c
+}
+
+/** 确认按钮文案/提示按候选类型分（禁词入负面清单 vs 样本入样本库） */
+function acceptLabel(item: StyleInboxItem): string {
+  return item.kind === 'sample_candidate' ? '收进样本库' : '收入清单'
+}
+
+function acceptTitle(item: StyleInboxItem): string {
+  if (item.kind === 'sample_candidate') return '确认：这段作为「你的字」的示范收进样本库（AI 学它的语感）'
+  return editedWords.value[item.id] ? `确认：按改后的「${editedWords.value[item.id]}」加入负面清单` : '确认：加入负面清单'
+}
+
 /** 确认：改写过的词块走 overrides 覆盖（后端不带则维持原候选入清单） */
 function confirmItem(item: StyleInboxItem) {
   if (editingId.value === item.id) commitEdit(item)
   const edited = editedWords.value[item.id]
-  emit('confirm', item.id, edited ? { word: edited } : undefined)
-}
+  emit('confirm', item.id, edited ? { word: edited } : undefined)}
 
 // 候选列表刷新后清掉已不在场的本地改写，防止串到同 id 新候选
 watch(() => props.items, (list) => {
@@ -120,16 +135,21 @@ watch(() => props.items, (list) => {
         <span class="inbox-actions">
           <button
             class="btn-accept"
-            :title="editedWords[item.id] ? `确认：按改后的「${editedWords[item.id]}」加入负面清单` : '确认：加入负面清单'"
+            :title="acceptTitle(item)"
             @click="confirmItem(item)"
           >
-            <Icon name="check-circle" :size="13" /> 收入清单
+            <Icon name="check-circle" :size="13" /> {{ acceptLabel(item) }}
           </button>
           <button class="btn-reject" title="忽略此候选" @click="emit('dismiss', item.id)">
             <Icon name="x-mark" :size="13" />
           </button>
         </span>
       </div>
+      <!-- 样本候选（2026-09-03 质感批次）：摘录全文预览 + 来源说明（质感密度） -->
+      <template v-if="item.kind === 'sample_candidate'">
+        <p v-if="item.payload.content" class="inbox-excerpt">{{ excerpt(item) }}</p>
+        <p v-if="item.payload.note" class="inbox-source">{{ item.payload.note }}</p>
+      </template>
       <p v-if="item.payload.source_text" class="inbox-source">{{ item.payload.source_text }}</p>
     </div>
   </section>
@@ -281,5 +301,15 @@ watch(() => props.items, (list) => {
   font-size: 0.6875rem;
   line-height: 1.6;
   color: var(--text-muted);
+}
+
+/* 样本候选摘录（质感批次）：正文大小的衬线预览，与来源说明拉开层级 */
+.inbox-excerpt {
+  margin: 0.375rem 0 0;
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  line-height: 1.75;
+  color: var(--text-primary);
+  white-space: pre-wrap;
 }
 </style>

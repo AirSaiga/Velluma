@@ -19,6 +19,7 @@ vi.mock('../../../services/api/domain/adaptive.api', () => ({
   adaptiveApi: {
     heartbeat: vi.fn(),
     logCollabEvent: vi.fn(),
+    stitchGhost: vi.fn(),
   },
 }))
 
@@ -58,7 +59,10 @@ function mockEditor(paragraphText: string, atEnd = true) {
     on: vi.fn(),
     off: vi.fn(),
     state: {
-      doc: { textContent: 'x'.repeat(200) + paragraphText },
+      doc: {
+        textContent: 'x'.repeat(200) + paragraphText,
+        descendants: vi.fn(),  // 细纲胶囊收集（意图入舱批次）——替身无胶囊
+      },
       selection: {
         $from: {
           parent: { textContent: paragraphText },
@@ -125,6 +129,44 @@ describe('接缝一：dock 零件 source/note 贯通（副行数据不丢）', (
     expect(echo?.note).toBe('顺笔带出前情：第三章·扳手')
     expect(ambient?.source).toBe('ambient')
     expect(ambient?.note).toBeUndefined()
+  })
+
+  it('细纲胶囊速记随心跳上行（意图反推素材；无胶囊传空数组）', async () => {
+    const editor = mockEditor('他握紧扳手。') as any
+    // 替身植入两枚胶囊节点（一枚空 note 被过滤）
+    editor.state.doc.descendants = (cb: any) => {
+      cb({ type: { name: 'outlineNote' }, attrs: { note: ' 让他先忍住，下班才爆发 ' } })
+      cb({ type: { name: 'outlineNote' }, attrs: { note: '  ' } })
+      cb({ type: { name: 'paragraph' }, attrs: {} })
+      return true
+    }
+    chapterEditorHandle.value = editor
+    const assist = useAdaptiveAssist(makeOpts())
+    heartbeat.mockResolvedValue(okResponse() as any)
+
+    assist.summonParts()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = heartbeat.mock.calls[0]?.[1] as any
+    expect(call.outline_notes).toEqual(['让他先忍住，下班才爆发'])
+  })
+
+  it('零件槽位随 stitch 请求上行（双轨契约选档信号，与 picked_parts 同序）', () => {
+    const editor = mockEditor('他握紧扳手。') as any
+    // requestContinue 需要的两件套：$from.start() 与 doc.textBetween()
+    editor.state.selection.$from.start = () => 10
+    editor.state.doc.textBetween = () => '前文尾巴'
+    chapterEditorHandle.value = editor
+    const assist = useAdaptiveAssist(makeOpts())
+
+    assist.requestContinue('stitch', [
+      { text: '灰光浮尘', slot: 'ambient' },
+      { text: '他把书按进内袋', slot: 'landing' },
+    ])
+
+    const call = vi.mocked(adaptiveApi.stitchGhost).mock.calls[0]?.[1] as any
+    expect(call.picked_parts).toEqual(['灰光浮尘', '他把书按进内袋'])
+    expect(call.picked_slots).toEqual(['ambient', 'landing'])
   })
 })
 
