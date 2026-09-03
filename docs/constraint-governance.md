@@ -306,3 +306,43 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   灌入纪律 / beginGhost 重置 / 逃生舱灌回）；
 - 全量回归：后端 963 绿（929 基线 + 34 新）+ 前端 147 绿（136 + 11）+
   vue-tsc 净。
+
+## 12. 三期：质感与意图面检测器（2026-09-03）
+
+四条新登记 + 一条检源扩展，全部挂 ghost_guard（十检终态）；同批 prompt
+侧改动（意图块「目的地」重框 / recency_pin「校验资料非登场名单」重框 /
+双轨生成契约 motion·texture）属供给措辞层，见各 registry origin 字段。
+
+- **ghost-guard-beat-rush（第七检，live + rewrite 出生）**——首个跳过
+  shadow 直接 live 的新检。判据复用已 live 的 dock-beat-overlap 同族并
+  加严（单 4 字窗 → 同拍 ≥2 个 4 字窗 + 正文尾部已有词排除），FP 面事前
+  论证完毕；repair=rewrite，excise 明确不授权（抢拍是方向性错误，删句
+  对整稿伤害大于改写）。when=stitch/continue 且有未写就近节拍——
+  open/outline/burst 的本职就是写节拍，整检关闭。origin=trace 实证 3/3
+  幽灵 verbatim 消费「被工头打断」节拍措辞。
+- **ghost-guard-cast-roll-call（第八检，shadow）**——短幽灵点名 ≥2 个
+  在场者（正文尾部已点名的不计）= 名单演出疑点。输出侧计数粗代理
+  （「有没有戏份」代码判不了），攒精确率后再议 promote。
+- **ghost-guard-mind-leak（第九检，shadow，repair=none）**——非在场/
+  提及名单实体名 × 内心动词六词族（心想/暗想/思忖/盘算/意识到/明白过来）
+  ±10 字 → 思绪泄漏（旁白替不在场者报告内心=POV 相机拍不到的画面）；
+  闪回/转述豁免；只抓具名主语——代词指代无法确定性解析，宁漏勿误。
+- **ghost-guard-belief-leak（第十检，shadow，repair=none）**——在场者
+  无人知晓的私有真相命题，其里文本短语（≥4 字整段）被逐字写出。
+  路由侧预裁「无人知晓」（belief.fold_belief + proposition_status，
+  任一在场者 KNOWS 即合法——知情者 POV 叙述），guard 保持纯文本比对。
+  canon_leak 护标签词、secret_leak 护私有实体档案，本检补「真相里文本
+  内容本身」的检出面缺口。
+- **3b 检源扩展（无新 id）**——字段级真相分层（b8209f5，
+  world_entities.field_layers）的秘密/半露字段内容并入 secret_leak
+  同一判据同一 kind，rewrite 资格随之贯通；bundle.field_layer_secrets
+  由 overlay 适配器派生，零额外查询。
+- shadow 三检 promote 门槛不变（§5：回归语料库准入 + ≥20 次真实命中
+  FP<10% 人工抽检）；前端 warning kind 未登记——shadow 不进帧无需登记，
+  beat_rush 经返修环消化，熔断降级带病上屏时未登记 kind 回退原串不炸
+  （§11.7 既有纪律）。
+- 测试（准入即测试）：`test_beat_rush_gate.py`（23 项）+
+  `test_mind_belief_leak.py`（16 项，含 `_bundle_all_names` 回归锁——
+  None 属性名事故：零报错契约把 out_of_scene 整检死亡吞成静默数月，
+  **新检首轮实测必须确认命中路径可达**）；全量回归后端 1090 绿。
+
