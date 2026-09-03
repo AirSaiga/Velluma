@@ -260,8 +260,17 @@ class AdaptiveOrchestrator:
         elif sev >= INFERENCE_SEVERITY_THRESHOLD:
             # 有强变化信号 → 重算
             should_infer = True
-        # 节流：距上次反推不足 30s 则不触发（即使信号强）
-        if should_infer and (time.time() - self._last_inference_ts) < INFERENCE_MIN_INTERVAL_S:
+        # 节流：距上次反推不足 30s 则不触发（即使信号强）。
+        # 例外（2026-09-03 核实轮修复）：spine_updated 且打算非空 → 豁免——
+        # 打算转化的 spine 路径 0 LLM，节流（为省 token 而设）对它无意义；
+        # 且 spine 信号被吞后 _prev_spine_sig 已更新、不会重发，纠正会在层 2
+        # 滞留到下个变化信号（前端乐观更新被旧猜测回写覆盖，表现为「纠正
+        # 被无视」）。打算清空的 spine_updated 不豁免（那条路可能走 LLM）。
+        spine_hot = bool((state.spine_intent or "").strip()) and any(
+            s.kind == "spine_updated" for s in signals
+        )
+        if (should_infer and not spine_hot
+                and (time.time() - self._last_inference_ts) < INFERENCE_MIN_INTERVAL_S):
             should_infer = False
         if should_infer:
             activations.append(Activation(

@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 意图加固批次对拍单测（2026-09-03 意图入舱）
-# AGPL-3.0
 """
 锁定意图感知入舱的代码侧契约（prompt 杠杆之外的可靠性全在这层）：
 
@@ -542,3 +543,70 @@ class TestDockCacheIntentBust:
         # 反推重算（版本递增）→ 猜测方向换料，缓存 bust
         a3 = orch._decide(self._state(""), self._snapshot(2), [])
         assert any(a.component == "dock_generator" for a in a3)
+
+
+class TestSpineThrottleExemption:
+    """O2 回归锁（2026-09-03 核实轮修复）：spine 纠正不被 30s 反推节流吞。
+
+    spine_updated 信号被节流吞掉后 _prev_spine_sig 已更新、不会重发——
+    纠正会在层 2 滞留到下个变化信号（前端乐观更新被旧猜测回写覆盖，
+    表现为「纠正被无视」）。修复=打算非空的 spine 短路（0 LLM 路径）豁免节流。
+    """
+
+    def _orch(self):
+        from backend.services.adaptive.orchestrator import AdaptiveOrchestrator
+        import time as _time
+        orch = AdaptiveOrchestrator(None, "ch-test")  # _decide 不触 db_factory
+        orch._last_inference_ts = _time.time()  # 刚反推过 → 处于 30s 节流窗口内
+        return orch
+
+    def _signals(self, kind="spine_updated"):
+        from backend.services.adaptive.change_detector import ChangeSignal
+        return [ChangeSignal(kind=kind, evidence="x", severity=0.6)]
+
+    def _state(self, spine_intent=""):
+        from backend.services.adaptive.change_detector import AuthorState
+        return AuthorState(
+            chapter_id="ch-test", word_count=500, paused_ms=5000,
+            cursor_at_paragraph_end=True, recent_text="他握紧扳手。",
+            spine_intent=spine_intent,
+        )
+
+    @staticmethod
+    def _snapshot():
+        return {
+            "intent": {"source": "author", "confidence": 0.9},
+            "fact_count": 3, "total_words": 500,
+            "intent_version": 1,
+            "projections": [{
+                "possible_beats": [{"event": "继续上工", "stage": "now"}],
+                "intent_version": 1,
+            }],
+        }
+
+    def test_spine_correction_bypasses_throttle(self):
+        """30s 窗口内纠正打算 → 转化照常激活（0 LLM 路径不吃 token 节流）。"""
+        orch = self._orch()
+        acts = orch._decide(
+            self._state("他先隐忍上工"), self._snapshot(),
+            self._signals(),
+        )
+        assert any(a.component == "intent_inference" for a in acts)
+
+    def test_normal_signal_still_throttled(self):
+        """普通强信号在节流窗口内仍被吞（token 纪律不变）。"""
+        orch = self._orch()
+        acts = orch._decide(
+            self._state(""), self._snapshot(),
+            self._signals(kind="text_changed"),
+        )
+        assert not any(a.component == "intent_inference" for a in acts)
+
+    def test_spine_cleared_not_exempt(self):
+        """打算清空的 spine_updated 不豁免——清空后可能走 LLM 反推路径。"""
+        orch = self._orch()
+        acts = orch._decide(
+            self._state(""), self._snapshot(),
+            self._signals(),
+        )
+        assert not any(a.component == "intent_inference" for a in acts)

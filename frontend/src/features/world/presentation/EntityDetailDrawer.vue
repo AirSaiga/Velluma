@@ -169,22 +169,23 @@ const showFieldMenu = ref(false)
 
 async function saveField(key: string, value: string) {
   if (!entity.value) return
-  const prev = entity.value.props?.[key]
   const v = value.trim()
-  if ((prev ?? '') === v) return
-  await updateEntityArchive(props.bookId, entity.value.id, {
-    props: { ...entity.value.props, [key]: v },
+  // 函数式 patch：锁内对最新 store 态做「值未变」判定与合并（防亚秒连续编辑互相覆盖）
+  const saved = await updateEntityArchive(props.bookId, entity.value.id, (ent) => {
+    const prev = ent?.props?.[key]
+    if ((prev ?? '') === v) return null
+    return { props: { ...ent?.props, [key]: v } }
   })
-  if (!v) showToast(`已清空字段（可随时再加）`, 'info')
+  if (saved && !v) showToast(`已清空字段（可随时再加）`, 'info')
 }
 
 async function addField(key: string) {
   if (!entity.value) return
   showFieldMenu.value = false
   // 占位须直接落库：saveField 会 trim 成空串再被「值未变」守卫拦下，走它新字段永远写不进去
-  await updateEntityArchive(props.bookId, entity.value.id, {
-    props: { ...entity.value.props, [key]: ' ' },
-  })
+  await updateEntityArchive(props.bookId, entity.value.id, (ent) => ({
+    props: { ...ent?.props, [key]: ' ' },
+  }))
   await nextTick()
   const el = document.querySelector<HTMLInputElement>(`.edd-field-input[data-key="${key}"]`)
   el?.focus()
@@ -203,17 +204,18 @@ function layerSpec(key: string) {
 
 async function cycleLayer(key: string) {
   if (!entity.value) return
-  await updateEntityArchive(props.bookId, entity.value.id, {
-    field_layers: cycleFieldLayer(entity.value, key),
-  })
+  await updateEntityArchive(props.bookId, entity.value.id, (ent) =>
+    ent ? { field_layers: cycleFieldLayer(ent, key) } : null,
+  )
 }
 
 async function saveLayerPublicText(key: string, value: string) {
   if (!entity.value) return
   const v = value.trim()
-  if ((layerSpec(key)?.public_text || '') === v) return
-  await updateEntityArchive(props.bookId, entity.value.id, {
-    field_layers: mergeFieldLayer(entity.value, key, { public_text: v }),
+  await updateEntityArchive(props.bookId, entity.value.id, (ent) => {
+    const spec = ent ? getFieldLayer(ent, key) : null
+    if ((spec?.public_text || '') === v) return null
+    return ent ? { field_layers: mergeFieldLayer(ent, key, { public_text: v }) } : null
   })
 }
 
@@ -221,9 +223,10 @@ async function saveLayerChapter(key: string, value: string) {
   if (!entity.value) return
   const n = parseInt(value, 10)
   const ch = Number.isFinite(n) && n > 0 ? n : null
-  if ((layerSpec(key)?.reveal_chapter ?? null) === ch) return
-  await updateEntityArchive(props.bookId, entity.value.id, {
-    field_layers: mergeFieldLayer(entity.value, key, { reveal_chapter: ch }),
+  await updateEntityArchive(props.bookId, entity.value.id, (ent) => {
+    const spec = ent ? getFieldLayer(ent, key) : null
+    if ((spec?.reveal_chapter ?? null) === ch) return null
+    return ent ? { field_layers: mergeFieldLayer(ent, key, { reveal_chapter: ch }) } : null
   })
 }
 

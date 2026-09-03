@@ -618,25 +618,43 @@ async function deleteRelation(bookId: string, relationId: string) {
 
 // ===== 实体档案（M2：轻量就地编辑，不进 undo——高频微调不值得占历史步）=====
 
+/** 实体档案可就地编辑的键（worldApi.updateEntity 的 PATCH 面） */
+type EntityArchivePatch = {
+  name?: string
+  aliases?: string[]
+  importance?: number
+  visibility?: string
+  intro?: string
+  tags?: string[]
+  props?: Record<string, unknown>
+  field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
+  canvas_x?: number | null
+  canvas_y?: number | null
+}
+
+// 同实体在飞保存串行化（2026-09-03 审计 O1 修复）：props/field_layers 是
+// 读改写型整包提交，亚秒级连续编辑（字段 chip 循环 × blur 保存交错）时，
+// 后发的 PUT 拿旧快照合并会抹掉前一个改动。函数式 patch 在锁内对最新
+// store 状态求值 + 逐实体排队，关闭覆盖窗口；静态 patch（画布摆位等）不受影响。
+const entityArchiveJobs = new Map<string, Promise<unknown>>()
+
 async function updateEntityArchive(
   bookId: string,
   entityId: string,
-  patch: {
-    name?: string
-    aliases?: string[]
-    importance?: number
-    visibility?: string
-    intro?: string
-    tags?: string[]
-    props?: Record<string, unknown>
-    field_layers?: Record<string, { level: string; public_text?: string; reveal_chapter?: number | null }>
-    canvas_x?: number | null
-    canvas_y?: number | null
-  },
+  patch: EntityArchivePatch | ((ent: WorldEntity | undefined) => EntityArchivePatch | null),
 ) {
-  const updated = await worldApi.updateEntity(bookId, entityId, patch)
-  entities.value = entities.value.map((e) => (e.id === entityId ? updated : e))
-  return updated
+  const prev = entityArchiveJobs.get(entityId) ?? Promise.resolve()
+  const job = prev.then(async () => {
+    const ent = entities.value.find((e) => e.id === entityId)
+    const body = typeof patch === 'function' ? patch(ent) : patch
+    if (!body) return undefined // 函数式 patch 判定无需保存（此时读到的已是最新态）
+    const updated = await worldApi.updateEntity(bookId, entityId, body)
+    entities.value = entities.value.map((e) => (e.id === entityId ? updated : e))
+    return updated
+  })
+  // 锁链吞掉失败让后续编辑不被一次网络错误毒死；原始 job 照常向调用方抛
+  entityArchiveJobs.set(entityId, job.catch(() => {}))
+  return job
 }
 
 // ===== 伏笔（M3：PlotLedger 的世界页投影，弧线带数据源；M5：侧栏账本+详情抽屉）=====
