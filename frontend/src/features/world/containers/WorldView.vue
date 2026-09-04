@@ -218,7 +218,7 @@ const entityEmptyText = computed(() => {
         ? factions.value
         : assets.value
   if (entityFilter.value && pool.length) return `没有匹配「${entityFilter.value}」的${label}`
-  return `还没有${label}。点工具条上的「实体」创建——它们只存固有属性，位置与生死由事件推演。`
+  return `还没有${label}。点上方「＋ 新建」创建——它们只存固有属性，位置与生死由事件推演。`
 })
 
 function openEditEvent(ev: WorldEvent) {
@@ -278,12 +278,20 @@ const entityNameInputRef = ref<HTMLInputElement | null>(null)
 async function submitEntity() {
   if (!newName.value.trim()) return
   const label = newType.value === 'character' ? '角色' : newType.value === 'faction' ? '势力' : '资产'
-  await createEntity(bookId.value, {
+  const name = newName.value.trim()
+  const ent = await createEntity(bookId.value, {
     entity_type: newType.value,
-    name: newName.value.trim(),
+    name,
     intro: newIntro.value,
   })
-  showToast(`${label}「${newName.value.trim()}」已建立`, 'success')
+  // 建完的桥：toast 带「补全档案」直达详情抽屉——深加工是选项不是强加（轻动作后不自动弹重表单）
+  showToast(`${label}「${name}」已建立`, 'success', 6000, {
+    label: '补全档案',
+    onClick: () => {
+      closeEntityForm()
+      selectedEntityId.value = ent.id
+    },
+  })
   newName.value = ''
   newIntro.value = ''
   // 类型保留（连续建同类常见）；焦点回名字输入，Enter 连续建
@@ -299,6 +307,18 @@ function closeEntityForm() {
 function onEntityEnter(e: KeyboardEvent) {
   if ((e.target as HTMLElement).tagName === 'BUTTON') return
   submitEntity()
+}
+
+// 侧栏实体抽屉「＋ 新建」：类型按当前抽屉预选（胶囊工具条「＋ 实体」入口不变，缺省角色）
+function createFromEntityPanel() {
+  newType.value =
+    activePanel.value === 'faction' ? 'faction' : activePanel.value === 'asset' ? 'asset' : 'character'
+  showEntityForm.value = true
+}
+// 侧栏地点抽屉「＋ 新建」：收起抽屉让出全图视野，走同一条点选流（Esc 取消）
+function createFromLocPanel() {
+  activePanel.value = null
+  startPickLocation()
 }
 
 async function removeEntity(ent: { id: string; name: string }) {
@@ -1180,6 +1200,7 @@ function isGroupCollapsed(name: string | null) {
             <Icon name="map-pin" :size="13" />
             <span>地点</span>
             <span class="side-count">{{ topLocationCount }}</span>
+            <button class="side-batch-btn" title="收起抽屉，在地图上点选新建" @click="createFromLocPanel">＋ 新建</button>
           </div>
           <ul v-if="locations.length" class="side-list">
             <li
@@ -1222,7 +1243,7 @@ function isGroupCollapsed(name: string | null) {
             </li>
           </ul>
           <div v-else class="side-empty">
-            还没有地点。点工具条上的「地点」按钮，在地图上点选第一个落脚点。
+            还没有地点。点上方「＋ 新建」，在地图上点选第一个落脚点。
           </div>
         </div>
         </template>
@@ -1234,6 +1255,7 @@ function isGroupCollapsed(name: string | null) {
             <Icon name="flag" :size="13" />
             <span>事件</span>
             <span class="side-count">{{ filteredEvents.length }}</span>
+            <button class="side-batch-btn" title="记录一笔历史（事件是世界状态的唯一事实源）" @click="openEventForm()">＋ 记一笔</button>
           </div>
           <div class="evt-filter">
             <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
@@ -1269,7 +1291,7 @@ function isGroupCollapsed(name: string | null) {
             </li>
           </ul>
           <div v-else class="side-empty">
-            {{ evtFilter ? '没有匹配的事件' : '还没有事件。事件是世界状态的唯一事实源——点「记一笔历史」记录第一条。' }}
+            {{ evtFilter ? '没有匹配的事件' : '还没有事件。事件是世界状态的唯一事实源——点上方「＋ 记一笔」记录第一条。' }}
           </div>
         </div>
         </template>
@@ -1281,6 +1303,7 @@ function isGroupCollapsed(name: string | null) {
             <Icon :name="activePanel === 'character' ? 'user' : activePanel === 'faction' ? 'users' : 'star'" :size="13" />
             <span>{{ activePanel === 'character' ? '角色' : activePanel === 'faction' ? '势力' : '资产' }}</span>
             <span class="side-count">{{ panelEntities.length }}</span>
+            <button class="side-batch-btn" title="新建实体（类型已按当前抽屉选好，弹窗里可改）" @click="createFromEntityPanel">＋ 新建</button>
           </div>
           <div class="evt-filter">
             <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
