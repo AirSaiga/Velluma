@@ -43,7 +43,7 @@ const editForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 
 // 简易新建表单（与 novel-wizard 互斥：默认走向导，也可用简易快速创建）
 const showQuickCreate = ref(false)
-const quickForm = ref({ title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' })
+const quickForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 
 onMounted(async () => {
   if (books.value.length === 0) {
@@ -96,7 +96,7 @@ function startWizard() {
 }
 
 function startQuickCreate() {
-  quickForm.value = { title: '', genre: '', global_sys_prompt: '', core_motifs_taboos: '' }
+  quickForm.value = { title: '', genre: '', core_motifs_taboos: '' }
   showQuickCreate.value = true
 }
 
@@ -109,7 +109,6 @@ async function submitQuickCreate() {
     const newBook = await store.createBook({
       title: quickForm.value.title,
       genre: quickForm.value.genre,
-      global_sys_prompt: quickForm.value.global_sys_prompt,
       core_motifs_taboos: quickForm.value.core_motifs_taboos,
     } as Partial<Book>)
     showQuickCreate.value = false
@@ -180,7 +179,6 @@ async function onWizardFinish(formData: any) {
     newBook = await store.createBook({
       title: formData.story?.title?.trim() || '未命名',
       genre: formData.story?.genre,
-      global_sys_prompt: formData.story?.styleGuide,
       core_motifs_taboos: formData.story?.themesAndTaboos,
       worldview_settings: {
         background: formData.world?.background ?? [],
@@ -373,10 +371,6 @@ function openImportModal(book: Book) {
           <div class="form-field">
             <label>核心设定与禁忌</label>
             <textarea v-model="quickForm.core_motifs_taboos" rows="3" placeholder="世界观要点、需要避免的内容" />
-          </div>
-          <div class="form-field">
-            <label>全局提示词（可选）</label>
-            <textarea v-model="quickForm.global_sys_prompt" rows="2" placeholder="写给 AI 的全书要求" />
           </div>
           <div class="modal-actions">
             <button class="btn-secondary" @click="showQuickCreate = false">取消</button>

@@ -30,7 +30,6 @@ const railItems: RailItem[] = [
   { key: 'library', label: '书架', icon: 'book', requiresBook: false },
   { key: 'workspace', label: '写作台', icon: 'pencil-square', requiresBook: true },
   { key: 'outline', label: '大纲', icon: 'document', requiresBook: true },
-  { key: 'bible', label: '设定', icon: 'book-open', requiresBook: true },
   { key: 'world', label: '世界', icon: 'map', requiresBook: true },
   { key: 'style', label: '文风', icon: 'paint-brush', requiresBook: true },
   { key: 'insights', label: '数据', icon: 'sparkles', requiresBook: true },

@@ -134,24 +134,9 @@ function applyTemplate(template: StoryTemplate) {
         </p>
       </div>
       
-      <!-- 写作风格指南 -->
-      <div>
-        <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">
-          写作风格指南
-          <span class="text-xs text-[var(--text-muted)] font-normal ml-1">(可选)</span>
-        </label>
-        <textarea
-          :value="story.styleGuide"
-          @input="updateField('styleGuide', ($event.target as HTMLTextAreaElement).value)"
-          rows="4"
-          placeholder="描述你希望 AI 使用的写作风格，如：&#10;• 对话自然，贴近生活&#10;• 描写细腻，注重心理活动&#10;• 避免过于华丽的辞藻..."
-          class="w-full px-4 py-3 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
-        />
-        <p class="text-xs text-[var(--text-muted)] mt-1">
-          帮助 AI 理解你期望的文风，这些指导会在所有章节生成中生效
-        </p>
-      </div>
-      
+      <!-- 写作风格指南已退役（2026-09-05）：原写 books.global_sys_prompt，
+           消费方全部不在活路；文风意图请到文风页配置（样本/旋钮/画像） -->
+
       <!-- 核心主题与禁忌（仅专家模式） -->
       <Transition name="expand">
         <div v-if="isExpertMode" class="pt-4 border-t border-[var(--border-color)]/30">

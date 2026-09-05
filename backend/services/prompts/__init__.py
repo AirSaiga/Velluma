@@ -26,11 +26,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 设计模式：Facade Pattern，隐藏底层实现细节。
 
 模块组织：
-- chapter_prompts.py: 基础章节生成提示词
-- draft_prompts.py: 主笔 Agent 提示词（初稿生成）
-- review_prompts.py: 审阅/精修 Agent 提示词
+- review_prompts.py: 精修（Refine）提示词（唯一在役消费：refining.py）
 - format_prompts.py: 文本格式整理提示词
 - （2026-09-01 归档：bsadf/chapter_card/inspiration_prompts 零运行路径 → _deprecated）
+- （2026-09-05 归档：chapter_prompts/draft_prompts 全家/review_prompts 死函数——
+  V3 生成链 + global_sys_prompt 死线 → _deprecated）
 
 使用场景：
 - agentic_workflow.py: 调用各 Agent 提示词构建函数
@@ -41,54 +41,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 解析函数负责将 LLM 输出转换为结构化数据
 """
 
-from backend.services.prompts.chapter_prompts import build_chapter_prompt
-from backend.services.prompts.draft_prompts import (
-    build_draft_agent_prompt,
-    build_chunk_draft_prompt,
-    build_subconscious_prompt,
-    build_prose_draft_prompt,
-    # V4.0 Cognitive Streaming (NEW)
-    build_prose_draft_prompt_v25,
-    build_micro_review_prompt,
-    build_emotional_update_prompt,
-    # V4.0+ Dynamic State Update (NEW)
-    build_dynamic_state_update_prompt,
-)
-from backend.services.prompts.review_prompts import (
-    build_review_agent_prompt,
-    build_refine_agent_prompt,
-    parse_review_result,
-    build_chunk_review_prompt,
-    build_chunk_refine_prompt,
-)
+# 2026-09-05 归档：chapter_prompts / draft_prompts 全家 / review_prompts 死函数
+# （V3 生成链 + global_sys_prompt 死线）→ backend/_deprecated/services/prompts/。
+# review_prompts 仅剩在役的 build_refine_agent_prompt（refining.py 消费）。
+from backend.services.prompts.review_prompts import build_refine_agent_prompt
 from backend.services.prompts.format_prompts import build_formatting_prompt
 
 __all__ = [
-    # Chapter & Draft
-    "build_chapter_prompt",
-    "build_draft_agent_prompt",
-    "build_chunk_draft_prompt",
-    # Iceberg Model (NEW)
-    "build_subconscious_prompt",
-    "build_prose_draft_prompt",
-    # V4.0 Cognitive Streaming (NEW)
-    "build_prose_draft_prompt_v25",
-    "build_micro_review_prompt",
-    "build_emotional_update_prompt",
-    # V4.0+ Dynamic State Update (NEW)
-    "build_dynamic_state_update_prompt",
     # Review & Refine
     "build_refine_agent_prompt",
-    "build_review_agent_prompt",
-    "parse_review_result",
-    "build_chunk_review_prompt",
-    "build_chunk_refine_prompt",
-    # Planning
-    # Scene Intent
     # Others
     "build_formatting_prompt",
-    "build_pov_assignment_prompt",
-    "parse_pov_assignment_result",
-    "build_anchor_pov_prompt",
-    "parse_anchor_pov_result",
 ]

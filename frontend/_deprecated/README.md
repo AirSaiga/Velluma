@@ -34,3 +34,22 @@
 ## 文档谎言修正
 
 「规划本章」`startBeat` 入口实际已不存在——6 处注释声称保留、AGENTS.md 同谎，本批全部改为「旧 step 路径已归档，adaptive 是唯一写作路径」。
+
+## 设定中心页整体退役（2026-09-05，global_sys_prompt 死线）
+
+> 审计发现：「创作笔记」写入 `books.global_sys_prompt`，页面承诺「可在全局提示词中使用」——
+> 实际 adaptive 主线（settings_bundle）完全不读该字段；消费方全部不在活路（后端同批归档，
+> 见 `backend/_deprecated/README.md` 2026-09-05 节）。用户拍板退役整条线。本节只留清单，
+> 代码在 git 历史。
+
+| 项 | 位置 | 死因 |
+|---|---|---|
+| `features/bible/` 整目录（BibleView + WorldRedirectCard） | 已删除 | 页面唯一真实编辑面=笔记；其余六分区早已是世界页跳转卡，纯导航化石 |
+| `components/NotesPanel.vue` | 已删除 | 写 `books.global_sys_prompt`，零活消费方 |
+| AppRail「设定」项 + `/bible/:bookId` 路由 | 已删除 | 页面退役；路由改 redirect → 世界页（canon 先例） |
+| 建书快速表单「全局提示词」字段 | LibraryView | 死写同上 |
+| 向导「写作风格指南」字段（styleGuide + 6 预设 styleHint） | novel-wizard | 映射到 global_sys_prompt，虚假承诺「会在所有章节生成中生效」；文风意图正道=文风页 |
+| `Book.global_sys_prompt` 类型字段 | types/index.ts | 后端 schema 同步摘除 |
+
+零变化说明：未在笔记/向导填过内容的书行为不变；填过的历史内容仍在 DB（`books.global_sys_prompt`
+冻结列），不再有任何代码读写。

@@ -271,7 +271,6 @@ export function useNovelWizard(): UseNovelWizardReturn {
   
   function applyStoryTemplate(template: StoryTemplate) {
     formData.value.story.genre = template.genre
-    formData.value.story.styleGuide = template.styleHint
     formData.value.chapter.tensionLevel = template.tensionDefault
     formData.value.chapter.pacingStyle = template.pacingDefault
   }

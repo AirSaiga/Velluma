@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 """
 Velluma - AI Novel Writing Assistant
-Copyright (C) 2026 Velluma Project Contributors
+Copyright (C) 2026 Velluma Contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
@@ -19,12 +19,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-审阅提示词模块。
+审阅提示词模块（2026-09-05 精简）。
 
-职责：提供章节审阅（Review）和精修（Refine）阶段的提示词构建和结果解析功能。
+职责：仅提供精修（Refine）阶段提示词构建——`build_refine_agent_prompt`
+是本模块唯一在役函数（消费方 services/workflows/refining.py，章节优化路由）。
 
-子模块：
-- review_prompts_utils: 边界渲染、问题类型标准化、结果解析
+历史函数 build_review_agent_prompt / build_chunk_review_prompt /
+build_chunk_refine_prompt 与 parse_review_result 转发已随 V3 生成链 +
+global_sys_prompt 死线整体归档至 backend/_deprecated/services/prompts/
+（见该目录 README 2026-09-05 节）。
 """
 
 import json
@@ -32,147 +35,14 @@ import json
 from backend.models import Chapter, Book
 from backend.services.prompts.review_prompts_utils import (
     render_boundary_brief as _render_boundary_brief,
-    parse_review_result,
 )
-
-
-def build_review_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, chapter_outline: str, draft_text: str, beats: list = None):
-    chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
-    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-    worldview_settings = book.worldview_settings or {}
-    worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
-    static_states = []
-    seen_character_ids = set()
-    for entity in entities:
-        character = entity.character if hasattr(entity, "character") else entity
-        if character and character.id not in seen_character_ids:
-            seen_character_ids.add(character.id)
-            if character.static_prompt:
-                static_states.append(f"【{character.name}】{character.static_prompt}")
-    relationship_prompts = []
-    for rel in relationships:
-        if rel.interaction_prompt:
-            source_name = rel.source_character.name if rel.source_character else "角色"
-            target_name = rel.target_character.name if rel.target_character else "角色"
-            relationship_prompts.append(f"【{source_name} ↔ {target_name}】{rel.interaction_prompt}")
-    boundary_brief = _render_boundary_brief(chapter)
-
-    reference_beats_text = ""
-    if beats and isinstance(beats, list):
-        beats_info = []
-        for idx, beat in enumerate(beats, start=1):
-            beat_id = beat.get("beat_id", f"beat_{idx:02d}")
-            summary = beat.get("summary", "") or f"Beat {idx}"
-            beats_info.append(f'{{"beat_id": "{beat_id}", "summary": "{summary}"}}')
-        reference_beats_text = f"\n## 剧情节拍规划 (Reference Beats)\n你正在审阅合并后的完整章节文本。为了方便后续精修定位，我为你提供了本章原本的剧情节拍规划。\n当你在正文中发现 OOC、逻辑硬伤或越界问题时，请对照这个规划表，**推理出该问题情节属于哪个或哪几个 Beat**，并将对应的 `beat_id` 填入 `target_beat_ids` 字段。\n\n[{', '.join(beats_info)}]"
-
-    system_prompt = f"""{global_sys_prompt}
-
-你是一个资深小说编辑。你的首要任务是**保护作者的创意意图**，其次才是检查问题。你明白：完美无瑕但毫无生气的文本，不如有灵气但带点小瑕疵的作品。
-
-{worldview_prompt if worldview_prompt else ''}
-
-## 角色设定
-{chr(10).join(static_states) if static_states else '暂无角色设定'}
-
-## 角色互动约束
-{chr(10).join(relationship_prompts) if relationship_prompts else '暂无互动约束'}
-
-## Boundary & Pacing 边界基线
-{boundary_brief}
-{reference_beats_text}
-
-## 你的任务
-1. 检查初稿是否遵循了章节大纲的核心要求（允许细节上的自由发挥）
-2. 检查角色是否出现**严重** OOC（人设崩塌）—— 注意：小幅的情绪波动、短暂的犹豫、不符合平时作风的一次冲动，属于人性的真实，**不要**标记为 OOC
-3. 检查是否有逻辑硬伤或情节漏洞（如角色明明在 A 地却突然出现在 B 地）
-4. 检查是否遗漏了**关键**剧情点（次要情节的省略是可以接受的）
-5. 检查是否出现严重越界：只有 red_lines 被触碰、或提前触发了下一个 beat 的核心事件，才标记为 PACING_OVERFLOW。小幅的情绪溢出或动作延伸属于正常叙事弹性，**放过**
-6. 检查是否存在大幅删段、关键段落缺失或过度压缩导致的完整性损伤
-
-## 创意偏差容忍度（必须遵守）
-以下情况**一律不算问题**，不得写入 issues：
-- 情绪转变速率偏快（人类情绪本来就是不稳定的）
-- 小幅 pacing 溢出（exit_state 附近 ±15% 的浮动）
-- 形容词略多（3 个以内）或某处略少
-- 轻微的措辞不当、口语化表达、甚至轻微的语法偏差（如果这些反而增加了真实感）
-- 角色偶尔的小幅 OOC（如平时冷静的角色突然吼了一句）—— 这可能是高光时刻
-
-只有以下情况才写入 issues：
-- 硬红线被触碰
-- 严重 OOC（角色做了完全违背其核心设定的事）
-- 世界观污染（科幻出现修仙）
-- 关键剧情遗漏
-- 严重越界（提前触发下一个 beat 的核心事件）
-
-## 输出格式要求
-你必须以 JSON 格式输出，结构如下：
-{{
-    "pass": true/false,
-    "issues": [
-        {{
-            "type": "OOC/剧情遗漏/逻辑硬伤/PACING_OVERFLOW/完整性缺失",
-            "severity": "high/medium/low",
-            "description": "详细描述问题",
-            "target_beat_ids": ["beat_01", "beat_02"]
-        }}
-    ],
-    "revision_plan": "给出具体的重写建议"
-}}
-
-- pass: true 表示所有检查通过，可以直接输出
-- pass: false 表示存在问题，需要重写
-- issues: 列出发现的问题
-- **重要**：每个 issue 必须包含 `target_beat_ids` 字段，值为问题所属的 Beat ID 列表（如 ["beat_03", "beat_04"]）。请根据正文内容与 Reference Beats 地图进行推理定位。
-- 当存在以下情况时，新增 issue.type = "PACING_OVERFLOW"：
-  1) 文本**严重**越过 beat 的 exit_state（如提前触发了下一个 beat 的核心事件、角色在不该死的时候死亡）
-  2) 文本触发任一 beat 的 red_lines 禁忌事件
-  ❗ 注意：小幅的情绪溢出或动作延伸（如角色在 exit_state 基础上多走了一小步）属于正常的叙事弹性，**不要**标记为 PACING_OVERFLOW
-- 当发现重写版本相对原有叙事出现大幅删段、关键段落被删除且未等价重建时，必须新增一条 issue.type = "完整性缺失"
-- revision_plan: 给出具体的重写指导
-- 若存在 PACING_OVERFLOW，revision_plan 必须明确"回退到越界前状态、放慢节奏、悬停在对应 exit_state"
-- 若存在完整性缺失，revision_plan 必须明确"补回被删减的关键段落信息，禁止继续大幅删段"
-
-## 【精修策略指导 - 精准裁剪原则】
-由于 Draft 阶段采用了"冰山模型"，文本生成时放宽了部分红线限制以保持创意流动性。如果发现某段越过 exit_state：
-
-**推荐策略（精准裁剪）**：
-1. 不要要求全部重写
-2. 精准定位越过边界的具体句子或段落
-3. 通过微调动作或添加收束句，使文本停在规定的 exit_state 上
-4. 保持原有的文本灵气和叙事节奏，只调整结尾边界
-
-**示例**：
-- 原文结尾："他冲向门口，推开门，发现敌人已经在走廊尽头。"
-- 如果 exit_state 要求停在"准备开门"：修改为"他冲向门口，手搭在门把上，心跳如鼓。"
-- 这样保留了动作张力，同时遵守了边界约束
-
-**禁止策略**：
-- 不要为了合规而大幅删减关键情节
-- 不要改变原文的整体语气和风格
-- 不要添加突兀的转折或解释
-
-注意：你必须输出合法的 JSON 格式，不要输出任何其他内容！"""
-    user_prompt = f"""请审查以下初稿:
-
-【章节名】{chapter_name}
-【章节标题】{chapter.title or '未命名'}
-【章节大纲】
-{chapter_outline}
-
-【Boundary & Pacing 边界基线】
-{boundary_brief}
-
-【初稿内容】
-{draft_text}
-
-请输出 JSON 格式的审查结果。"""
-    return system_prompt, user_prompt
 
 
 def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, draft_text: str, revision_plan: str, word_count: int):
     chapter_name = chapter.chapter_name or f"第{chapter.chapter_number}章"
-    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
+    # global_sys_prompt 线已退役（2026-09-05）：原读书级创作笔记，唯一在役消费
+    # 就此掐断；固定基线=原空值兜底文案，未填笔记的书 prompt 逐字节零变化。
+    global_sys_prompt = "你是一个专业的小说写作助手。"
     worldview_settings = book.worldview_settings or {}
     worldview_prompt = f"【世界观设定】\n{json.dumps(worldview_settings, ensure_ascii=False)}" if worldview_settings else None
     static_states = []
@@ -285,89 +155,4 @@ def build_refine_agent_prompt(chapter: Chapter, book: Book, entities: list, rela
 4) 修改后的文本长度应与原文接近（±20%），严禁过度压缩
 
 请直接输出修改后的完整小说正文，不需要任何额外说明或标记。请确保剧情完整连贯。"""
-    return system_prompt, user_prompt
-
-
-def build_chunk_review_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str):
-    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-
-    static_states = []
-    seen_character_ids = set()
-    for entity in entities:
-        character = entity.character if hasattr(entity, "character") else entity
-        if character and character.id not in seen_character_ids:
-            seen_character_ids.add(character.id)
-            if character.static_prompt:
-                static_states.append(f"【{character.name}】{character.static_prompt}")
-
-    system_prompt = f"""{global_sys_prompt}
-
-你是一个严格的小说片段质检员。
-请检查生成的片段是否符合剧情要求，且角色行为符合设定。
-
-## 角色设定
-{chr(10).join(static_states) if static_states else '暂无角色设定'}
-
-## 检查标准
-1. **剧情符合度**: 是否完成了剧情摘要(Summary)中的关键动作？
-2. **角色一致性**: 是否存在严重 OOC (Out Of Character)？
-3. **文本质量**: 是否有严重的重复、乱码或未完成的句子？
-
-## 输出格式 (JSON)
-{{
-    "pass": true/false,
-    "issues": ["简短描述问题1", "简短描述问题2"],
-    "revision_instruction": "一句话修改指令"
-}}
-注意：若问题不严重（如轻微措辞不当），请优先判定为 pass: true。仅在严重逻辑错误或 OOC 时返回 false。"""
-
-    user_prompt = f"""请质检以下小说片段:
-
-【剧情摘要】
-{beat_summary}
-
-【生成片段】
-{chunk_text}
-
-请输出 JSON 格式质检结果。"""
-
-    return system_prompt, user_prompt
-
-
-def build_chunk_refine_prompt(chapter: Chapter, book: Book, entities: list, relationships: list, beat_summary: str, chunk_text: str, revision_instruction: str):
-    global_sys_prompt = book.global_sys_prompt or "你是一个专业的小说写作助手。"
-
-    static_states = []
-    seen_character_ids = set()
-    for entity in entities:
-        character = entity.character if hasattr(entity, "character") else entity
-        if character and character.id not in seen_character_ids:
-            seen_character_ids.add(character.id)
-            if character.static_prompt:
-                static_states.append(f"【{character.name}】{character.static_prompt}")
-
-    system_prompt = f"""{global_sys_prompt}
-
-你是一个精修编辑。请根据修改指令，对小说片段进行快速修正。
-
-## 角色设定
-{chr(10).join(static_states) if static_states else '暂无角色设定'}
-
-## 你的任务
-根据指令重写片段，保持原有风格，修复指出的问题。
-直接输出修改后的正文，不要包含任何解释。"""
-
-    user_prompt = f"""请重写以下片段:
-
-【剧情摘要】
-{beat_summary}
-
-【修改指令】
-{revision_instruction}
-
-【原片段】
-{chunk_text}
-
-请直接输出修改后的正文。"""
-
     return system_prompt, user_prompt

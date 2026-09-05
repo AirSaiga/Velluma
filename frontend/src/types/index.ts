@@ -2,7 +2,6 @@ export interface Book {
   id: string
   title: string
   genre: string
-  global_sys_prompt: string
   core_motifs_taboos?: string
 }
 

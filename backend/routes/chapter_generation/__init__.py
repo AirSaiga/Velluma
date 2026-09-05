@@ -5,7 +5,7 @@
 
 职责：
 - 定义 ADF 生成引擎与 Refinery 精修的 API 端点
-- 提供大纲澄清、成本报告、质量报告等附属端点
+- 提供成本报告、质量报告等附属端点
 - 处理 SSE 流式响应
 
 模块结构：
@@ -13,7 +13,7 @@
 - refinery.py: V4.1 Refinery 精修流水线路由
 - adaptive.py: NLE-ADF 3.0 自适应辅助路由（前端默认路径）
 - usage.py: generation_runs 的 adaptive 用量聚合（只读，B3）
-- 本文件: extra_router（clarify-outline / cost-report / quality-report）
+- 本文件: extra_router（cost-report / quality-report）
 
 引擎剥离（2026-07）：V3.0 Detonation / V3.1 Unified / V4.0 DualTrack 三套引擎路由
 及其专属的 stream_handler / progress_tracker / checkpoint_manager 已整体迁至
@@ -26,26 +26,20 @@ backend/_deprecated/，本模块不再注册或导出它们。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func
-from backend.core.dependencies import get_chapter_repository, get_book_repository, get_db
+from sqlalchemy import select
+from backend.core.dependencies import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from backend.repositories import (
-    ChapterRepository, BookRepository, MemoryRepository,
-    PlotLedgerRepository, MapLocationRepository, RelationshipRepository,
-    AssetRepository, ChapterAssetRepository,
+    ChapterRepository, BookRepository,
     ChapterCardRepository, StyleCardRepository, QualityReportRepository,
 )
 from backend.schemas import (
-    ClarifyOutlineRequest,
     QualityReportResponse,
 )
 # CP4.5：preview_agentic_beats / GenerateChapterAgenticRequest / PreviewResponse 已废弃
 # （合并闸门 /plan + /plan/confirm 取代；旧 preview-beats 端点已删除）
 from backend.services.utils.logging import get_runtime_logger
-from backend.services.workflows.clarification_agent import execute_clarification_stage
-from backend.services.context.loader import load_full_chapter_context
-from backend.world_state_schemas import WorldTerminalState
 from backend.models import GenerationRun
 
 # V3.2 ADF（Anchor-Driven Flow）引擎路由（当前默认引擎）
@@ -72,55 +66,9 @@ logger = get_runtime_logger(__name__)
 # CP4.5：/generate_chapter_agentic_preview_beats 已下线（合并闸门 /plan 取代）。
 # 旧端点 body 见 git history。新链路：/plan（联合预览）→ /plan/confirm（确认）→ /generate-chapter（流式生成）。
 
-
-@extra_router.post("/clarify-outline")
-async def clarify_chapter_outline(
-    request: ClarifyOutlineRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """大纲澄清端点 - 用于在生成节拍前澄清和完善章节大纲"""
-    logger.info(f"[ClarifyOutline] 收到大纲澄清请求: chapter_id={request.chapter_id}")
-    
-    repos = {
-        "chapter": ChapterRepository(db),
-        "book": BookRepository(db),
-        "memory": MemoryRepository(db),
-        "plot_ledger": PlotLedgerRepository(db),
-        "map_location": MapLocationRepository(db),
-        "relationship": RelationshipRepository(db),
-        "asset": AssetRepository(db),
-        "chapter_asset": ChapterAssetRepository(db),
-    }
-    
-    context = await load_full_chapter_context(request.chapter_id, repos)
-    
-    if not context or not context.chapter:
-        raise HTTPException(status_code=404, detail="章节或上下文加载失败")
-        
-    chapter = context.chapter
-    book = context.book
-    
-    # previous_world_terminal_state 需要从 previous_world_snapshot 获取
-    previous_world_state = None
-            
-    result = await execute_clarification_stage(
-        ambiguous_text=request.ambiguous_text,
-        book=book,
-        chapter=chapter,
-        entities=context.entities,
-        relationships=context.relationships,
-        open_hooks=context.open_hooks,
-        previous_chapter_summary=context.previous_summary,
-        locations=context.locations,
-        author_intent=request.author_intent,
-        global_taboos=book.core_motifs_taboos if book else None,
-        user_instruction=request.user_instruction,
-        previous_issues=request.previous_issues,
-        previous_chapter_snapshot=context.previous_world_snapshot,
-        previous_world_terminal_state=previous_world_state,
-    )
-    
-    return result
+# 2026-09-05：/clarify-outline 端点已归档——旧 V3 链的大纲澄清步骤，前端零调用；
+# execute_clarification_stage + clarification_prompts 一并迁入 backend/_deprecated/
+# （见该目录 README 2026-09-05 节）。
 
 
 # Phase 0 T1.6：章级成本报告端点（必须在 router 合并前注册到 extra_router）

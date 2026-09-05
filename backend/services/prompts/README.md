@@ -1,52 +1,42 @@
 # Prompts 模块索引
 
-本目录包含所有 LLM 提示词（Prompt）模板构建函数。
+本目录包含所有 LLM 提示词（Prompt）模板构建函数。改后即时生效，无需重建。
 
-## 核心文件
+> 2026-09-05 重写：旧版索引大面积失准（列出的 planner/scene_intent/pov/inspiration/
+> draft_prompts_thinking 等文件已不存在于在役目录）。V3 生成链 prompt 全家
+> （chapter_prompts / draft_prompts 全家 / clarification_prompts / review_prompts 死函数）
+> 已归档至 `backend/_deprecated/services/prompts/`（global_sys_prompt 死线退役，
+> 见该目录 README 2026-09-05 节）。
 
-| 文件 | 职责 | 关键函数 |
-|------|------|----------|
-| `chapter_prompts.py` | 基础章节生成 | `build_chapter_prompt` |
-| `draft_prompts.py` | 起草阶段主入口 | `build_draft_agent_prompt`, `build_chunk_draft_prompt`, `build_prose_draft_prompt_v25` |
-| `planner_prompts.py` | 规划阶段（Story Beats） | `build_planner_agent_prompt`, `parse_planner_result` |
-| `scene_intent_prompts.py` | 场景意图分析 | `build_scene_intent_prompt`, `parse_scene_intent_result` |
-| `review_prompts.py` | 审阅/精修阶段 | `build_review_agent_prompt`, `build_refine_agent_prompt`, `parse_review_result` |
+## 在役文件
 
-## 子模块文件
-
-| 文件 | 职责 | 说明 |
-|------|------|------|
-| `draft_prompts_prose.py` | 正文生成详细模板 | 被 `draft_prompts.py` 调用 |
-| `draft_prompts_thinking.py` | 思考层模板（潜意识/内心独白） | 被 `draft_prompts.py` 调用 |
-| `draft_prompts_subconscious.py` | 潜意识生成专用 | 独立子模块 |
-| `draft_prompts_review.py` | 微审阅提示词 | QC 检查使用 |
-| `draft_prompts_legacy.py` | 旧版本兼容 | 保留用于回溯 |
-| `draft_prompts_utils.py` | 草稿工具函数 | 辅助函数集合 |
-| `review_prompts_utils.py` | 审阅工具函数 | 审阅辅助函数 |
-| `planner_prompts_parser.py` | 规划结果解析 | 解析 LLM 返回的 beats |
-
-## 特殊用途文件
-
-| 文件 | 职责 |
-|------|------|
-| `pov_prompts.py` | 视角（POV）分配 |
-| `world_state_prompts.py` | 世界状态追踪 |
-| `inspiration_prompts.py` | 灵感生成 |
-| `critique_prompts.py` | 评论/反馈生成 |
-| `format_prompts.py` | 文本格式化 |
-| `test_boundary_pacing_prompts.py` | 节奏边界测试（实验性） |
+| 文件 | 职责 | 主要消费方 |
+|------|------|-----------|
+| `adaptive_prompts.py` | ★ NLE-ADF 3.0 自适应流全部 prompt（五模式/dock/感知/沉淀等） | `routes/chapter_generation/adaptive.py` + `services/adaptive/` |
+| `adf_prompts.py` | ADF（V3.2）引擎 prompt（前端无 UI 入口，引擎本体保留） | `services/workflows/adf/` |
+| `nle_prompts.py` | NLE 引擎配套模板 | adaptive 相关工作流 |
+| `refinery_prompts.py` | Refinery（V4.1）独立精修 | `services/refinery/` |
+| `review_prompts.py` | 仅剩 `build_refine_agent_prompt`（精修重写 prompt；2026-09-05 精简） | `services/workflows/refining.py`（章节优化路由） |
+| `review_prompts_utils.py` | 边界基线渲染/审查结果解析工具 | `review_prompts.py` |
+| `audit_prompts.py` | LLM 级审计（质量报告双层） | `services/validation/` + quality-report 路由 |
+| `critique_prompts.py` | 毒舌编辑审阅 | `routes/critique.py` |
+| `format_prompts.py` | 全文格式整理 | 编辑器「全文格式整理」 |
+| `style_extract_prompts.py` | 文风样本提炼 | `services/style/extractor.py` |
+| `character_extraction.py` | 角色抽取 | 沉淀/提取链 |
+| `content_extraction.py` | 内容抽取 | 沉淀/提取链 |
+| `world_event_prompts.py` | 世界事件解析（速记/事件侦察） | world 域服务 |
+| `world_state_prompts.py` | 世界状态追踪 | world 域服务 |
+| `test_*.py`（5 件） | prompt 契约对拍单测 | `python -m pytest` |
 
 ## 使用方式
 
-推荐从统一入口导入：
+统一入口（barrel 只重导出在役且跨域消费的函数）：
 
 ```python
-from backend.services.prompts import (
-    build_draft_agent_prompt,
-    build_planner_agent_prompt,
-    build_review_agent_prompt,
-)
+from backend.services.prompts import build_refine_agent_prompt, build_formatting_prompt
 ```
+
+其余按模块直接导入（如 `from backend.services.prompts.adaptive_prompts import ...`）。
 
 ## 命名规范
 
@@ -56,8 +46,6 @@ from backend.services.prompts import (
 
 ## 版本历史
 
-- **V4.0**: 基础章节生成
-- **V4.0**: 引入 Agentic 工作流
-- **V4.0**: 认知流式生成 (Cognitive Streaming)
-- **V4.0**: 三档工作流（疾速/均衡/堡垒）
-- **V4.0**: 双轨对抗架构（已废弃，相关 stitch/sketch 等模板随引擎归档）
+- **V3.x 生成链**（chapter/draft/review 全家）：已随 global_sys_prompt 死线归档（2026-09-05）
+- **V4.0 双轨对抗**：已废弃，stitch/sketch 等模板随引擎归档
+- **现役**：NLE-ADF 3.0（adaptive）为唯一写作主线

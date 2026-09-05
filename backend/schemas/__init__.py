@@ -109,7 +109,6 @@ from .generation import (
     PlanConfirmRequest,
     ClarificationRequest,
     ClarificationResponse,
-    ClarifyOutlineRequest,
 )
 from .misc import (
     FormatTextRequest,
@@ -345,7 +344,6 @@ __all__ = [
     "PlanConfirmRequest",
     "ClarificationRequest",
     "ClarificationResponse",
-    "ClarifyOutlineRequest",
     # Misc schemas
     "FormatTextRequest",
     "GenerateChapterRequest",

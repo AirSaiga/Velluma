@@ -20,7 +20,6 @@ export interface StoryTemplate {
   id: string
   name: string
   genre: string
-  styleHint: string
   tensionDefault: number
   pacingDefault: PacingStyle
 }
@@ -31,8 +30,6 @@ export interface StoryBasics {
   title: string
   /** 故事类型：奇幻、科幻、都市等 */
   genre: string
-  /** 写作风格指南（原 global_sys_prompt） */
-  styleGuide: string
   /** 核心主题与禁忌（原 core_motifs_taboos）- 仅专家模式 */
   themesAndTaboos: string
 }
@@ -233,7 +230,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'fantasy',
     name: '奇幻',
     genre: '奇幻',
-    styleHint: '注重世界观构建，描写细腻，适当使用古风表达',
     tensionDefault: 5,
     pacingDefault: 'balanced'
   },
@@ -241,7 +237,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'scifi',
     name: '科幻',
     genre: '科幻',
-    styleHint: '注重逻辑性，描写未来科技与人类冲突',
     tensionDefault: 6,
     pacingDefault: 'fast_paced'
   },
@@ -249,7 +244,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'urban',
     name: '都市',
     genre: '都市',
-    styleHint: '贴近现实生活，对话自然，情感细腻',
     tensionDefault: 4,
     pacingDefault: 'balanced'
   },
@@ -257,7 +251,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'suspense',
     name: '悬疑',
     genre: '悬疑',
-    styleHint: '层层设疑，节奏紧凑，注重心理描写',
     tensionDefault: 7,
     pacingDefault: 'fast_paced'
   },
@@ -265,7 +258,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'romance',
     name: '言情',
     genre: '言情',
-    styleHint: '情感丰富，对话为主，注重心理活动',
     tensionDefault: 3,
     pacingDefault: 'slow_burn'
   },
@@ -273,7 +265,6 @@ export const STORY_GENRE_PRESETS: StoryTemplate[] = [
     id: 'wuxia',
     name: '武侠',
     genre: '武侠',
-    styleHint: '江湖气息，动作场面生动，人物性格鲜明',
     tensionDefault: 6,
     pacingDefault: 'balanced'
   }
@@ -287,7 +278,6 @@ export function createDefaultWizardData(): WizardFormData {
     story: {
       title: '',
       genre: '',
-      styleGuide: '',
       themesAndTaboos: ''
     },
     world: {

@@ -5,7 +5,6 @@
  * - /library            书架
  * - /workspace/:bookId/:chapterId?  写作台（★ 主视图）
  * - /outline/:bookId    大纲板
- * - /bible/:bookId      设定中心
  * - /insights/:bookId   数据
  *
  * 模式：createWebHashHistory —— Electron 打包后 file:// 加载 dist/index.html，
@@ -37,10 +36,15 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '大纲板', rail: true, railKey: 'outline' },
   },
   {
+    // 设定中心已整体退役（2026-09-05）：唯一真实编辑面「创作笔记」写入
+    // books.global_sys_prompt，消费方全部不在活路（V3 链归档/精修改固定基线）；
+    // 其余分区此前已是世界页跳转卡。旧深链一律重定向世界页（canon 先例）。
     path: '/bible/:bookId',
     name: 'bible',
-    component: () => import('../features/bible/containers/BibleView.vue'),
-    meta: { title: '设定中心', rail: true, railKey: 'bible' },
+    redirect: (to) => ({
+      name: 'world',
+      params: { bookId: to.params.bookId },
+    }),
   },
   {
     // 文风模块重构 S1：独立文风页（docs/style-module-redesign.md §6.2）——

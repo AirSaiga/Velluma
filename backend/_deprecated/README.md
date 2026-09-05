@@ -123,3 +123,35 @@ _deprecated/
 - `services/orchestration/`：agentic.py + beat_manager.py（tier_mapper 在役留下）。
 - `services/prompts/`：bsadf_prompts / chapter_card_prompts / inspiration_prompts。
 - `services/`：context/engine.py、generation/chapter_card.py、utils/sanitizer.py、workflows/{planning,context_blocks,state_validator}.py（conftest.py 在役留下）。
+
+## 2026-09-05 global_sys_prompt（创作笔记）死线归档
+
+**背景**：前端「创作笔记」/建书「全局提示词」/向导「写作风格指南」三处写入
+`books.global_sys_prompt`，adaptive 主线（settings_bundle）零消费；消费方全部位于
+V3 生成链残骸。用户拍板整线退役。本批由 `git mv` 移入，`git log --follow` 可溯。
+
+**移入文件**（镜像原路径）：
+- `services/prompts/chapter_prompts.py` —— `build_chapter_prompt` 在役代码零调用点
+- `services/prompts/draft_prompts.py` + `draft_prompts_legacy.py` + `draft_prompts_prose.py`
+  + `draft_prompts_review.py` + `draft_prompts_subconscious.py` + `draft_prompts_utils.py`
+  —— V3/V4.0 主笔链，唯二 import 方是 barrel 与彼此（`build_draft_agent_prompt` 唯一
+  调用点在 draft_prompts_legacy 内部），零外部消费者
+- `services/prompts/clarification_prompts.py` + `services/workflows/clarification_agent.py`
+  —— 唯一入口 `/clarify-outline` 前端零调用（旧 BS-ADF/ADF 澄清步骤）
+- 前端侧同步删除（只留清单）：`frontend/_deprecated/README.md` 2026-09-05 节
+
+**在役文件的原位修改**：
+- `services/prompts/review_prompts.py` 精简为仅 `build_refine_agent_prompt`
+  （refining.py/章节优化在用）；删除三个死函数；`global_sys_prompt` 读点改固定基线
+  「你是一个专业的小说写作助手。」（=原空值兜底，未填笔记的书 prompt 逐字节零变化）
+- `services/prompts/__init__.py`：prune 归档重导出（余 build_refine_agent_prompt + format）
+- `services/generation/chapter.py` / `__init__.py`：prune 死 re-export（余
+  call_llm/generate_stream_response/update_character_dynamic_state/refine_draft）
+- `routes/chapter_generation/__init__.py`：摘除 `/clarify-outline` 端点及专属 import
+- `schemas/generation.py`：ClarifyOutline 四件套（Request/Response/ClarifyingQuestion/
+  ClarificationOption）删除；`schemas/book.py`：BookBase/BookUpdate 摘除
+  `global_sys_prompt`；`schemas/__init__.py` prune
+- `models.py`：`books.global_sys_prompt` 列**冻结保留**（style_blacklist 先例）——
+  历史数据不动，代码不再读写；存量书若有旧笔记，无任何活路径再消费
+- 未动：ADF（`setting_resolver.py` 的 `getattr` 读）——引擎本体保留原则；字段无写入方
+  后 ADF 读值只会是历史存量或空，行为自然退化，不改造

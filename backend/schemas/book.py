@@ -30,7 +30,9 @@ from .enums import PacingStyle
 class BookBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
-    global_sys_prompt: Optional[str] = None
+    # global_sys_prompt 已退役（2026-09-05）：原「创作笔记」写入、V3 生成链消费，
+    # 唯一在役消费点（refine 精修）同批掐断。字段不再进出 API；DB 列冻结只读
+    # （历史数据保留在 books 表，见 models.Book）。
     core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = Field(default_factory=dict)
     golden_snippets: Optional[list] = Field(default_factory=list)
@@ -49,7 +51,7 @@ class BookCreate(BookBase):
 class BookUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     genre: Optional[str] = Field(None, max_length=100)
-    global_sys_prompt: Optional[str] = None
+    # global_sys_prompt 不再接受更新（2026-09-05 退役，见 BookBase 注）
     core_motifs_taboos: Optional[str] = None
     worldview_settings: Optional[dict] = None
     golden_snippets: Optional[list] = None
