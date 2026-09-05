@@ -16,11 +16,18 @@
 #   --skip-frontend / -SkipFrontend  跳过前端（dev：跳 Vite；prod：跳 build）
 #   --electron-only / -ElectronOnly  只启动 Electron（假设前后端已就绪）
 #   --dry-run / -DryRun        仅打印将执行的命令，不启动任何进程
+#   --no-log / -NoLog          关闭会话日志落盘
+#
+# 监控台（2026-09-04 与 Windows 版对称改造）：本就是单终端运行，此版把三端输出
+# 逐行加彩色前缀（backend 青 / vite 绿 / electron 黄）合流，不再裸交错；同时 tee
+# 到 logs/console_<mode>_<时间戳>.log。按键聚焦视图（1/2/3/0/s/q）为 Windows 版
+# 专有功能，bash 版以 Ctrl+C（trap 兜底清理）停止全部。
 #
 # 与 Windows 版行为契约一致：
 #   - 端口写 data/port.txt 与 data/frontend_port.txt（vite.config.js / electron/main.cjs 读）
 #   - 为 Electron 设 VELLUMA_BACKEND_PORT / VELLUMA_FRONTEND_PORT / VELLUMA_SERVICES_READY
 #   - debug 模式脚本侧固定后端端口（VELLUMA_PORT），保证热重载期间端口不漂移
+#   - DryRun 不写端口文件（一次试跑就会把运行实例与下次启动的端口协商带偏）
 #   - 退出时按进程树清理，再兜底清理端口监听者，避免孤儿进程占用端口
 # =============================================================================
 
@@ -30,9 +37,15 @@ SKIP_BACKEND=0
 SKIP_FRONTEND=0
 ELECTRON_ONLY=0
 DRY_RUN=0
+NO_LOG=0
+NO_DASHBOARD=0
+BACKEND_PID=""
+VITE_PID=""
+ELECTRON_PID=""
+DASH_URL=""
 
 usage() {
-    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -44,6 +57,8 @@ while [[ $# -gt 0 ]]; do
         --skip-frontend|-SkipFrontend) SKIP_FRONTEND=1; shift ;;
         --electron-only|-ElectronOnly) ELECTRON_ONLY=1; shift ;;
         --dry-run|-DryRun) DRY_RUN=1; shift ;;
+        --no-log|-NoLog) NO_LOG=1; shift ;;
+        --no-dashboard|-NoDashboard) NO_DASHBOARD=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "未知参数: $1"; usage; exit 1 ;;
     esac
@@ -74,6 +89,7 @@ FRONTEND_DIR="$PROJECT_ROOT/frontend"
 FRONTEND_PORT=""             # 实际端口（运行时由 resolve_frontend_port 填充）
 CHILD_PIDS=()
 CLEANUP_DONE=0
+CONSOLE_LOG=""               # 会话日志路径（main 里初始化；空 = 不落盘）
 
 # =============================================================================
 # 日志（一律走 stderr：端口协商等函数经 $() 捕获返回值，stdout 不能混入日志）
@@ -85,6 +101,25 @@ log_err()     { echo -e "${RED}[ERR] $1${NC}" >&2; }
 log_info()    { echo -e "${GRAY}[*] $1${NC}" >&2; }
 log_wait()    { echo -ne "${YELLOW}[...] $1${GRAY}" >&2; }
 die()         { echo "" >&2; log_err "$1"; exit 1; }
+
+# =============================================================================
+# 监控台：三端输出逐行彩色前缀合流 + tee 会话日志
+# =============================================================================
+# 用法：cmd > >(prefix_stream backend 36) 2>&1（36=青 32=绿 33=黄）
+# 屏幕行带 ANSI 色；同时写 logs/dev_<label>.log（"HH:mm:ss 原始行"，网页监控台的
+# 数据源，与 Windows 读线泵同格式——改格式须同步 dev_dashboard.py 的 LINE_RE）
+prefix_stream() {
+    local label="$1" color="$2" ts line
+    local devfile="$PROJECT_ROOT/logs/dev_${label}.log"
+    while IFS= read -r line; do
+        ts="$(date +%H:%M:%S)"
+        printf '\033[0;%sm%s %-8s\033[0m│ %s\n' "$color" "$ts" "$label" "$line"
+        printf '%s %s\n' "$ts" "$line" >> "$devfile"
+        if [[ -n "$CONSOLE_LOG" ]]; then
+            printf '%s [%s] %s\n' "$ts" "$label" "$line" >> "$CONSOLE_LOG"
+        fi
+    done
+}
 
 # =============================================================================
 # 端口与进程工具
@@ -242,6 +277,11 @@ cleanup() {
     echo ""
     log_step "Cleaning up..."
     local pid
+    # DryRun 只做演示：绝不杀树/杀端口，否则一次试跑会清掉正在运行的服务
+    if [[ "$DRY_RUN" = "1" ]]; then
+        log_ok "Cleanup skipped (dry-run)"
+        return
+    fi
     for pid in "${CHILD_PIDS[@]}"; do
         [[ -z "$pid" ]] && continue
         if kill -0 "$pid" 2>/dev/null; then
@@ -336,10 +376,15 @@ start_backend() {
     if [[ "$use_reload" = "1" ]]; then
         # --app-dir .：让 backend.main 可作为顶层模块 import（cwd 已是项目根）
         # --reload-dir backend：仅监听 backend/ 下的 .py 变更，避免误重启
+        # 输出重定向进 [backend] 前缀合流（监控台）；worker 重启继承同一管道，日志不断流
+        # stdin 接 /dev/null：切断终端继承，vite/npm 类子进程的 TTY readline 不会因
+        # 终端侧变动 EPIPE 崩溃（与 Windows 版 stdin 关闭策略对称）
         (cd "$PROJECT_ROOT" && exec "$python_path" -m uvicorn backend.main:app \
             --host 127.0.0.1 --port "$backend_port" \
-            --reload --reload-dir "$PROJECT_ROOT/backend" --app-dir "$PROJECT_ROOT") &
+            --reload --reload-dir "$PROJECT_ROOT/backend" --app-dir "$PROJECT_ROOT") \
+            < /dev/null > >(prefix_stream backend 36) 2>&1 &
         CHILD_PIDS+=($!)
+        BACKEND_PID=$!
         log_wait "Waiting for backend (reload)..."
         wait_for_service "$backend_port" "Backend (reload)" "$BACKEND_TIMEOUT"
         log_ok "Backend ready at http://127.0.0.1:$backend_port (hot-reload ON)"
@@ -347,9 +392,11 @@ start_backend() {
     fi
 
     # dev/prod 模式：走 main.py 的 __main__（内部 find_available_port + save_port）
-    # 后台运行继承当前终端，uvicorn 日志实时输出，方便边用 Electron 边盯后端
-    (cd "$PROJECT_ROOT" && exec "$python_path" -m "$PYTHON_MODULE") &
+    # 后台运行输出进 [backend] 前缀合流（监控台），uvicorn 日志实时可见
+    (cd "$PROJECT_ROOT" && exec "$python_path" -m "$PYTHON_MODULE") \
+        < /dev/null > >(prefix_stream backend 36) 2>&1 &
     CHILD_PIDS+=($!)
+    BACKEND_PID=$!
 
     # 轮询端口文件等待后端启动
     log_wait "Waiting for backend..."
@@ -436,7 +483,9 @@ start_frontend() {
         return 0
     fi
 
-    (cd "$FRONTEND_DIR" && exec npm run dev) &
+    (cd "$FRONTEND_DIR" && exec npm run dev) < /dev/null > >(prefix_stream vite 32) 2>&1 &
+    CHILD_PIDS+=($!)
+    VITE_PID=$!
     CHILD_PIDS+=($!)
 
     log_wait "Waiting for frontend (port $frontend_port)..."
@@ -495,11 +544,70 @@ start_electron() {
     echo -e "${YELLOW}  Electron is running. Close window to stop all services.${NC}" >&2
     echo -e "${GREEN}============================================================${NC}" >&2
 
-    # 前台运行：脚本阻塞至此，Electron 退出（关窗/Ctrl+C）后走 EXIT 清理
+    # 后台运行以便拿到 pid（写状态 JSON 供网页监控台展示），摘要随后打印
     # 注意：electron:dev = "npm run build && electron ."
     #   - 生产模式：build 已由 start_frontend_build 完成，这里再 build 一次是幂等的
     #   - 开发/调试模式：build 产物不会被 main.cjs 使用（走 loadURL），仅浪费数秒，可接受
-    (cd "$FRONTEND_DIR" && exec npm run electron:dev) || true
+    (cd "$FRONTEND_DIR" && exec npm run electron:dev) < /dev/null > >(prefix_stream electron 33) 2>&1 &
+    ELECTRON_PID=$!
+    CHILD_PIDS+=("$ELECTRON_PID")
+}
+
+# =============================================================================
+# 网页监控台（scripts/dev_dashboard.py，纯标准库）：读会话日志 + 状态 JSON
+# =============================================================================
+write_dev_status() {
+    # 状态 JSON 与 Windows 版 Write-DevStatus 同构（网页监控台两端共用）
+    [[ "$DRY_RUN" = "1" ]] && return 0
+    mkdir -p "$PROJECT_ROOT/data"
+    local bp vp ep
+    [[ -n "$BACKEND_PID" ]] && bp="$BACKEND_PID" || bp=null
+    [[ -n "$VITE_PID" ]] && vp="$VITE_PID" || vp=null
+    [[ -n "$ELECTRON_PID" ]] && ep="$ELECTRON_PID" || ep=null
+    local bport vport
+    bport=$(read_port_file "$PORT_FILE" "$DEFAULT_BACKEND_PORT")
+    vport="$FRONTEND_PORT"
+    [[ -z "$vport" ]] && vport=null
+    cat > "$PROJECT_ROOT/data/dev_status.json" << EOF
+{
+  "mode": "$MODE",
+  "started_at": "$(date '+%Y-%m-%d %H:%M:%S')",
+  "log_dir": "$PROJECT_ROOT/logs",
+  "services": {
+    "backend": { "pid": $bp, "port": $bport, "state": "running" },
+    "vite": { "pid": $vp, "port": $vport, "state": "running" },
+    "electron": { "pid": $ep, "port": null, "state": "running" }
+  }
+}
+EOF
+}
+
+start_dashboard() {
+    # 失败不阻塞启动（监控台降级为纯终端合流）
+    [[ "$NO_DASHBOARD" = "1" || "$DRY_RUN" = "1" || -z "$CONSOLE_LOG" ]] && return 0
+    local py="" p
+    if [[ -x "$PROJECT_ROOT/.venv/bin/python3" ]]; then
+        py="$PROJECT_ROOT/.venv/bin/python3"
+    elif [[ -x "$PROJECT_ROOT/venv/bin/python3" ]]; then
+        py="$PROJECT_ROOT/venv/bin/python3"
+    elif command -v python3 >/dev/null 2>&1; then
+        py="python3"
+    fi
+    [[ -z "$py" || ! -f "$PROJECT_ROOT/scripts/dev_dashboard.py" ]] && return 0
+    for p in $(seq 8180 8189); do
+        if ! port_open "$p"; then
+            mkdir -p "$PROJECT_ROOT/logs"
+            ("$py" "$PROJECT_ROOT/scripts/dev_dashboard.py" \
+                --dir "$PROJECT_ROOT/logs" --status "$PROJECT_ROOT/data/dev_status.json" \
+                --port "$p") > "$PROJECT_ROOT/logs/dashboard.log" 2>&1 &
+            CHILD_PIDS+=($!)
+            DASH_URL="http://127.0.0.1:$p"
+            log_ok "Dashboard: $DASH_URL（已自动打开浏览器）"
+            open "$DASH_URL" >/dev/null 2>&1 || true
+            return 0
+        fi
+    done
+    log_info "Dashboard: no free port in 8180..8189, skipped"
 }
 
 # =============================================================================
@@ -518,6 +626,14 @@ main() {
     show_banner
 
     log_info "Project root: $PROJECT_ROOT"
+
+    # dev_*.log（网页监控台数据源）恒写；合流日志 CONSOLE_LOG 受 --no-log 门控
+    mkdir -p "$PROJECT_ROOT/logs"
+    if [[ "$DRY_RUN" != "1" && "$NO_LOG" != "1" ]]; then
+        CONSOLE_LOG="$PROJECT_ROOT/logs/console_${MODE}_$(date +%Y%m%d_%H%M%S).log"
+        log_info "Console log: $CONSOLE_LOG"
+    fi
+
     if [[ "$DRY_RUN" = "1" ]]; then
         log_info "DryRun mode: no processes will be started"
     fi
@@ -536,11 +652,19 @@ main() {
 
     start_electron
 
+    # Electron 已后台化：落状态 JSON + 拉起网页监控台（两者失败均不阻塞）
+    write_dev_status
+    start_dashboard
+
     if [[ "$DRY_RUN" = "1" ]]; then
         log_info "DryRun complete, skipping wait"
         return 0
     fi
 
+    # 等待 Electron 退出（关窗 = 全部收摊，走 EXIT 清理）
+    wait "$ELECTRON_PID" || true
+    # bash 不等进程替换排空：稍候让 prefix_stream 冲掉管道尾行，再打退出日志
+    sleep 0.3
     echo ""
     log_info "Electron exited"
 }
