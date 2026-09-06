@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - World 设定层 schema（地图 + 时间线 + 事件溯源）
-# AGPL-3.0
 """
 World 设定层的 Pydantic schema（独立于 Canon）。
 

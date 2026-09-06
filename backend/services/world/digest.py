@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 冷层世界总账 digest（B8 · docs/world-cognition-architecture.md §2）
-# AGPL-3.0
 """节级键控的世界总账：事实节纯代码 + 综合节结构化 ops + 预算分池。
 
 三条承重规则（导师审阅修正后的形态，拒绝自由文本增量合并）：

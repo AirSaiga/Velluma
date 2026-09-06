@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - canon_watch 出场判定形状修复单测（2026-08-26 实测事故）
-# AGPL-3.0
 """出场提醒形状事故回归锁：
 
 实测（最终武装 26 次心跳 hints 恒 0）：bundle.entities 两种来源都不在顶层挂

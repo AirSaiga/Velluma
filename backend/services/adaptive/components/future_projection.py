@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 未来推测组件（层 3）
-# AGPL-3.0
 """
 基于层 1（已写事实）+ 层 2（意图），LLM 推测接下来的画面方向。
 

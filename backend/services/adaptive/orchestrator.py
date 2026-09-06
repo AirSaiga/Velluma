@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 动态调度器
-# AGPL-3.0
 """
 自适应写作伙伴的大脑——消费作者状态 + 世界模型快照 + 变化信号，
 决定激活哪些能力组件、以什么粒度、花多少 Token。

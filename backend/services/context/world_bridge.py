@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界设定层 → 生成流桥接
-# AGPL-3.0
 """
 world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.md §5）。
 

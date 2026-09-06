@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 接缝裁剪与陈词嗅探单测
-# AGPL-3.0
 """
 2026-08-27 感知逻辑诊断轮（导师裁决）的纯函数契约锁。
 

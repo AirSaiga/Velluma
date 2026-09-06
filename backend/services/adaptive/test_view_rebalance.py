@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 视野配比修复（2026-08-25 实测调窗）单测
-# AGPL-3.0
 """「驴头不对马嘴」治理三件套的回归锚：
 
 1. sentence_clean_tail：窗口起点不落半截句（窗首半截句会让模型误以为要续它）；

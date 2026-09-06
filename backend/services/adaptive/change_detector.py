@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 变化检测器
-# AGPL-3.0
 """
 纯算法变化检测——世界模型的"感觉器官"。
 

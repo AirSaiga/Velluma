@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - provenance 与现实校验测试（B5 · 不变量 5/10）
-# AGPL-3.0
 """信封确定性（同参同哈希）+ 脏派生物必须被抓到（注入谎言回查 fold）。"""
 import asyncio
 import tempfile

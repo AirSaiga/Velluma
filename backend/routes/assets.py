@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
+"""资产域 REST 路由（书级资产 CRUD + 章级资产绑定）。"""
+
 from typing import List
 from uuid import UUID
 

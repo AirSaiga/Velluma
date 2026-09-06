@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 矛盾词对检测单测（2026-08-29「不知所云」重写）
-# AGPL-3.0
 """旧 _has_contradiction 裸子串查单字对（活/死、有/无、左手/右手、年轻/老）
 ——「生活」×「死寂」、「没有」×「毫无」、「老周」×「年轻」全都成对命中，
 矛盾卡遍地误报且作者看不出矛盾在哪（2026-08-29 实测事故）。

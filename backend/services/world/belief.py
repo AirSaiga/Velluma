@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - belief 域折叠（B3 · docs/world-kernel-foundation.md §2 决策 2）
-# AGPL-3.0
 """认知平面的曝光级折叠：各角色以为发生了什么（纯函数，零 LLM/零 NLP）。
 
 粒度纪律（决策 2）：

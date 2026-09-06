@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 续写三律与禁词分层单测
-# AGPL-3.0
 """
 2026-08-27 文学诊断轮的 prompt 契约锁。
 

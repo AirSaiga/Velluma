@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - reader 域与负空间测试（B4 · docs/world-kernel-foundation.md §4 不变量 9/11）
-# AGPL-3.0
 """读者折叠诚实降级 + 戏剧资本差集 + 启发式回填幂等。"""
 import asyncio
 import tempfile

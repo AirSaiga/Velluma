@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 知识检索平面一期单测（docs/knowledge-retrieval-plane.md）
-# AGPL-3.0
 """knowledge_plane 的行为锁：条目化/选择器/时态渲染/逃逸阀/零变化契约。
 
 纯算法测试（无 DB/LLM）：bundle 用命名空间对象伪造，形状对齐

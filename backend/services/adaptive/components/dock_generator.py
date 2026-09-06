@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 挂件生发组件
-# AGPL-3.0
 """
 基于层 3 推测 + 设定养料，LLM 生发 3-4 个镜头特写挂件。
 

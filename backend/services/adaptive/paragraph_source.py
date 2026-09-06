@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 「作者当前段落」/「已写内容」取源
-# AGPL-3.0
 """
 adaptive 组件共用的画布取源口径。
 

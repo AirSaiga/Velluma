@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 段落取源测试
-# AGPL-3.0
 """2026-08-25 事故回归：挂件/感知锚定到已删除的旧事实。
 
 事故链：作者 08-16 沉淀了机甲战斗段落 → 之后整段删掉重写为名言开场 →

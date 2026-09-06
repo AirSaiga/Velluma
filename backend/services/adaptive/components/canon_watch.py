@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 Canon 感知组件
-# AGPL-3.0
 """
 作者写中心跳（停顿 ≥4s）触发：基于最近段落做 Canon 相关的轻感知。
 

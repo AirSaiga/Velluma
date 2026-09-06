@@ -9,8 +9,9 @@
 规则（2026-08-30 文件规范化施工定稿，AGENTS.md「代码规范」节同步）：
 - 范围：git 追踪的全部 .py（backend/ + scripts/ 等），排除 *_deprecated* 整树
         （归档引擎不参与 import 链，动它只会制造「还在维护」的假信号）
-- 幂等：前 5 行已含 SPDX-License-Identifier 或 AGPL 字样即跳过——
-        新文件漏头随时重跑本脚本补齐
+- 幂等：前 5 行已含 SPDX-License-Identifier 即跳过——新文件漏头随时重跑本脚本补齐
+        （⚠ 旧式「# Velluma - X / # AGPL-3.0」头不算合规，2026-09-06 已全量转换为
+        SPDX 形式；本脚本只插入、不改装旧头，见 git 历史转换脚本）
 - 空文件跳过（保留空 __init__.py 的「空包标记」语义）
 - shebang（#!）与 PEP 263 coding 声明必须留在头注释之前（PEP 263 要求
   coding 声明在第 1/2 行，插错位置会把它挤到第 3 行失效）
@@ -75,7 +76,9 @@ def main():
         if not text.strip():
             counts["empty"] += 1
             continue
-        if any("SPDX-License-Identifier" in ln or "AGPL" in ln for ln in lines[:5]):
+        # ⚠ 只认 SPDX 形式——旧式「# AGPL-3.0」行不算合规头（2026-09-06 曾因
+        # 宽松匹配 AGPL 字样漏掉 98 个旧式头文件，CI 一直计缺失）
+        if any("SPDX-License-Identifier" in ln for ln in lines[:5]):
             counts["has_header"] += 1
             continue
 

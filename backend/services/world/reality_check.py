@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - provenance 信封与现实校验（B5 · docs/world-kernel-foundation.md §4 不变量 5/10）
-# AGPL-3.0
 """派生物的可再生成性与真实性检验。
 
 - envelope(...)：provenance 信封——每个派生物（知识视图/场景卡/未来的

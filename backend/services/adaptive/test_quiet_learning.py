@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 学着闭嘴（被拒学习）单测
-# AGPL-3.0
 """quiet_learning 静音派生单测（2026-08-25 战略定稿）。
 
 锁定四条行为契约：

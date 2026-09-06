@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 层 1 事实活性 + 画布取源单测
-# AGPL-3.0
 """2026-08-25 加固回归：画布即事实源贯穿世界模型读取侧。
 
 覆盖三层：

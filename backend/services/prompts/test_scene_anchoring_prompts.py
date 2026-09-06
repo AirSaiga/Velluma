@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 场景锚定 prompt 契约单测
-# AGPL-3.0
 """
 2026-08-27 场景锚定修复轮的契约锁。
 

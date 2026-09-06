@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 认知浮现三时机测试（B9 · 可见性悖论纪律）
-# AGPL-3.0
 """反讽差集（读者知/角色不知）+ 诚实降级 + 总开关。"""
 import asyncio
 import tempfile

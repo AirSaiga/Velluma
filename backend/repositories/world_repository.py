@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - World 设定层 repository（事件溯源 + 推演引擎）
-# AGPL-3.0
 """
 World 设定层数据访问 + 事件溯源推演引擎（独立于 Canon repository）。
 

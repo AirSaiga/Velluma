@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - Intent 仓储（B2 · docs/world-kernel-foundation.md §3）
-# AGPL-3.0
 """统一意图存储的读合并层（双读过渡期唯一读口）。
 
 双读纪律（docs/world-kernel-construction-plan.md §3）：

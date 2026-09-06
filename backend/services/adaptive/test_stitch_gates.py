@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 stitch 字数闸与碎片拼回单测（P1 批次）
-# AGPL-3.0
 """2026-08-25 写作台辅助层治理 P1 批次回归（docs/adaptive-assist-hardening.md）。
 
 覆盖四项：

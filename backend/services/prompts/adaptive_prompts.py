@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 自适应辅助 prompt 模板
-# AGPL-3.0
 """
 作者主导写作流程（自适应辅助）的 prompt 构建。
 

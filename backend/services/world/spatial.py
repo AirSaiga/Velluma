@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界页空间换算（D4 比例尺标定）
-# AGPL-3.0
 """
 CRS.Simple 内部坐标 → 现实距离的纯函数换算层（docs/map-scale-spatial.md §4）。
 

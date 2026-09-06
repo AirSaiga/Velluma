@@ -1,8 +1,5 @@
-"""
-Velluma - AI Novel Writing Assistant
-Copyright (C) 2026 Velluma Project Contributors (AGPL-3.0)
-"""
-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """
 镜头景别规划器（V4.3 Storyboard，集成到 ADF Phase 4）。
 

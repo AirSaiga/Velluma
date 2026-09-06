@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 大纲就近节拍（共享判据：dock 挂件与 stitch 意图块共用）
-# AGPL-3.0
 """
 就近铁律的数据面（2026-08-25 治理 + 实测修复）。
 

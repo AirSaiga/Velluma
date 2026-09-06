@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 章级文风特例卡消费接通（Phase 4）单测
-# AGPL-3.0
 """章级 StyleCard 整卡覆盖语义单测。
 
 语义定档（2026-08-24 拍板）：章级特例卡存在 → 该章完整文风定义（负面清单

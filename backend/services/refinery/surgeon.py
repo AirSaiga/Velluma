@@ -1,8 +1,5 @@
-"""
-Velluma - AI Novel Writing Assistant
-Copyright (C) 2026 Velluma Project Contributors (AGPL-3.0)
-"""
-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """
 工序 4.5.4：局部手术（Surgeon，V4.1 新建，核心创新）。
 

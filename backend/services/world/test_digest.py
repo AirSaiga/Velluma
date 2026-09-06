@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 冷层 digest 测试（B8 · 门控关闭下机件直测）
-# AGPL-3.0
 """事实节纯代码渲染 / ops 解析（宁缺勿残）/ 门控与预算纪律。"""
 import asyncio
 import tempfile

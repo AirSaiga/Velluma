@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 后处理组件
-# AGPL-3.0
 """
 作者完稿时触发：对全章正文做审计/一致性/残句检查。
 

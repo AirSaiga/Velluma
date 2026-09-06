@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - adaptive 流观测层（P0-2）
-# AGPL-3.0
 """
 adaptive 端点的成本核算与 trace（roadmap P0-2，2026-08-18）。
 

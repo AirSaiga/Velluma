@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 辅助层「学着闭嘴」静音查询与宽恕复位端点
-# AGPL-3.0
 """
 2026-08-25 战略定稿「学着闭嘴」的作者可见面：
 

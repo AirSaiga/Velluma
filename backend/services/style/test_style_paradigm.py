@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 三平面分权 单元测试（2026-08-29 文风重构，docs/style-paradigm.md）
-# AGPL-3.0
 """
 覆盖：
 - P0 split_prohibition_tiers：负面块只留 warning；blocker 正面化重钉行

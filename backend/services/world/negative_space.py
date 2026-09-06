@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - reader 域折叠与负空间引擎（B4 · docs/world-kernel-foundation.md §3）
-# AGPL-3.0
 """读者认知折叠 + 可揭示戏剧资本（Iser Leerstellen 的第一个引擎实现）。
 
 - fold_reader(depictions)：confirmed 呈现关系 → 读者已知主体集合；

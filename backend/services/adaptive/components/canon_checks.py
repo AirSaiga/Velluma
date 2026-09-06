@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 Canon 纯算法检测（共享 utils）
-# AGPL-3.0
 """
 Canon 相关的纯算法（零 LLM）检测函数。
 

@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF Prompts
-# Copyright (C) 2026 Velluma. Licensed under AGPL-3.0.
 """
 NLE-ADF（Loop 1 大纲自检 / Loop 3 记忆倒灌）的 LLM prompt 模板。
 

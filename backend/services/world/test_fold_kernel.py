@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - Fold API 内核不变量测试（B1 · docs/world-kernel-foundation.md §4）
-# AGPL-3.0
 """不变量 2（折叠纯度）/ 3（模态封闭）/ 4（三轴无默认值）的检验。
 
 用内存 SQLite 栈（与 test_world_bridge_presence 同款配方）跑真实仓储路径；

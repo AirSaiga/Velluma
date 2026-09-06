@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 涌现实体抽取（Loop 3 思想迁入 adaptive）
-# AGPL-3.0
 """
 从一段定稿正文抽取涌现实体/关系/地点/大纲补遗（1× creative LLM）。
 

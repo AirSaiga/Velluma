@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 沉淀倒灌组件
-# AGPL-3.0
 """
 段落锁死时触发：从锁死正文抽涌现实体/关系/状态变化，可选落库。
 

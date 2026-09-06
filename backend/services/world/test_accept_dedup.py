@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 候选转正重复闸单测（2026-08-26 全书通读实测修复）
-# AGPL-3.0
 """accept_candidate 重复转正闸的行为契约：
 
 同一事件换措辞的候选可并存于 pending 池（跨章抽取/历史存量），全部采纳

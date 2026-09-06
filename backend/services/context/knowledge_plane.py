@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 知识检索平面一期（Knowledge Retrieval Plane v3.1 · 一期）
-# AGPL-3.0
 """
 正文生成的统一知识供给层（docs/knowledge-retrieval-plane.md §4-§7 施工落地）。
 

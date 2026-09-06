@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 文本匹配共享判据
-# AGPL-3.0
 """
 「3 字滑窗」一族噪声匹配的共享判据（P2 治理，2026-08-25）。
 

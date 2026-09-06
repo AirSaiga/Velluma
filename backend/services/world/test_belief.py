@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - belief 域测试（B3 · docs/world-kernel-foundation.md §4 不变量 7）
-# AGPL-3.0
 """四值可答 + 曝光推导 + 误信优先级 + fold belief 域接线 + guard 命题化。"""
 import asyncio
 import tempfile

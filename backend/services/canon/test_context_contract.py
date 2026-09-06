@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - C2 canon 换源契约单测
-# AGPL-3.0
 """
 C2 往返契约测试（docs/canon-world-fusion.md §6 护栏）。
 

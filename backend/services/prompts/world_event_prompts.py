@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界事件解析/抽取 Prompt（W3 速记 + W4 候选回流）
-# AGPL-3.0
 """
 世界事件的自然语言 → 结构化草稿（docs/world-writing-bridge.md §4.3 / §4.5）。
 

@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - World 设定层路由（地图 + 时间线 + 事件溯源）
-# AGPL-3.0
 """
 World 设定层 REST API（独立于 Canon 路由，通过 book_id 隔离）。
 

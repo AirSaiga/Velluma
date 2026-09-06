@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 容错 JSON 解析工具
-# AGPL-3.0
 """LLM 输出常带 ```json 包裹或前后缀文本，此模块提供容错解析。"""
 from __future__ import annotations
 

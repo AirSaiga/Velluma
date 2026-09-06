@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 走向卡活性 + severity 分级校对单测（P0 治理）
-# AGPL-3.0
 """2026-08-25 治理计划（docs/adaptive-assist-hardening.md）P0 两项的对拍：
 
 A1 走向卡整章缺席/冻结——layer3_projections 混装 __dock__/__canon_watch__

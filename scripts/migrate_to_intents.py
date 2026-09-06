@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - Intent 统一存储迁移脚本（B2 · docs/world-kernel-construction-plan.md §3）
-# AGPL-3.0
 """旧源 → world_intents 幂等复制（手动跑，不进启动链）。
 
 用法：python scripts/migrate_to_intents.py

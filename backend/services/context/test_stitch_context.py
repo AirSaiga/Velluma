@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - stitch_context 单测（P5 B2 · AI 所见预览）
-# AGPL-3.0
 """
 stitch-ghost 上下文装配共享器单测（docs/foundation-hardening.md §2.1）。
 

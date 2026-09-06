@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 厂商能力档案 + 采样整形 单元测试（纯算法，不连真实 LLM）
-# AGPL-3.0
 """
 2026-08-28 五厂商调研驱动的护栏（docs/model-vendor-matrix.md 唯一事实源）：
 - detect_provider 新增 GLM/Kimi/百炼新版域名识别

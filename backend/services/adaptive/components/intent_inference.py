@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 意图反推组件（层 2）
-# AGPL-3.0
 """
 从作者已写正文（+可选大纲）推断本章意图，写入世界模型层 2。
 

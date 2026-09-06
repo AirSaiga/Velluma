@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 默认记忆流纯函数（结构化+词法，无 embedding）
-# AGPL-3.0
 """
 默认记忆流的无依赖算法部分（embedding 未配置时的召回路径）。
 

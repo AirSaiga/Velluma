@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 「3 字滑窗」共享判据单测（P2 治理）
-# AGPL-3.0
 """B1/B3/B4 噪声匹配治理的对拍测试（2026-08-25 P2 批次）。
 
 纪律（docs/adaptive-assist-hardening.md「执行约束」）：

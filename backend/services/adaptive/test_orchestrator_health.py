@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 调度器健康观测单测（P3 治理，2026-08-25）
-# AGPL-3.0
 """docs/adaptive-assist-hardening.md P3 · C4/C5 的对拍：
 
 - P3-1（C5）组件失败可见化：异步/同步激活失败记 last_component_errors

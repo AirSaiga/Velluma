@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
+"""资产与章级绑定旧表的 Repository（Asset/ChapterAsset）——世界设定层 world_* 接管生成上下文后保留维护。"""
+
 from typing import List, Optional
 from uuid import UUID
 

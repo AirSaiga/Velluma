@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
+"""ADF 草稿校验管线（文风陈词/OOC/剧情逻辑/节奏四 Validator + DraftValidatorPipeline 编排）。"""
+
 import re
 import logging
 import math

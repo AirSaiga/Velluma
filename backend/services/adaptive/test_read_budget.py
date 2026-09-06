@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 自动阅读预算闸（read_budget）单测
-# AGPL-3.0
 """预算闸行为契约（2026-08-25 战略定稿「系统自己去读」的成本护栏）：
 
 1. 判定序语义：short_text → unchanged → too_soon → daily_cap（「没变」是最常见

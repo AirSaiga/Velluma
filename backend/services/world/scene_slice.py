@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界切片服务（写作页「此刻此地」）
-# AGPL-3.0
 """
 章节时刻的世界切片（docs/world-writing-bridge.md §4.1，W1 切片上桌）。
 

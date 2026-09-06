@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 候选事件抽取组件（W4 写作→世界回流的生产端）
-# AGPL-3.0
 """
 从 settle（段落锁死）/ finish（完稿）的正文抽取候选世界事件（docs/world-writing-bridge.md §4.5）。
 

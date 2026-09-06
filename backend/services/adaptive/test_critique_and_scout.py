@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 完稿审阅窗口 + 世界发现跳过原因单测（P3 治理，2026-08-25）
-# AGPL-3.0
 """docs/adaptive-assist-hardening.md P3 · C3/C6 的对拍：
 
 - P3-3（C3）finish critique 首尾截取：_critique_text_window 首 3000 + 尾 3000

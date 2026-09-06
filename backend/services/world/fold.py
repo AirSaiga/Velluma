@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界折叠唯一入口（Fold API · B1，docs/world-kernel-foundation.md §3）
-# AGPL-3.0
 """
 四域世界模型的统一查询面：fold(t, perspective_set, domains, tx_head)。
 

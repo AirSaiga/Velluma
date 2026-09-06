@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 学着闭嘴（被拒学习）：辅助层提醒/候选的静音派生与宽恕复位
-# AGPL-3.0
 """
 作者拒绝历史 → 静音集合的唯一权威（2026-08-25 战略定稿「学着闭嘴」）。
 

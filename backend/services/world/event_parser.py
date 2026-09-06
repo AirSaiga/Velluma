@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 速记解析器（W3 一句话记历史）
-# AGPL-3.0
 """
 作者一句口语 → 结构化事件草稿（docs/world-writing-bridge.md §4.3）。
 

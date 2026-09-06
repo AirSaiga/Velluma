@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 挂件就近生发单测
-# AGPL-3.0
 """2026-08-25 就近铁律回归：挂件是「下一屏」的画面，不是章末预告。
 
 事故：意图（血噬的觉醒）+ 养料（流光/白霆/红月/血噬）天然指向章末，

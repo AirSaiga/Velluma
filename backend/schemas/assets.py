@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
+"""资产域 Pydantic schema（Asset/ChapterAsset 的 Base/Create/Update/Response）。"""
+
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID

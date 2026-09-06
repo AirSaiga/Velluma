@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 自适应辅助路由
-# AGPL-3.0
 """
 作者主导写作流程的自适应辅助端点（NLE-ADF 3.0）。
 

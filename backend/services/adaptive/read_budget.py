@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 自动阅读预算闸与幂等锚（「系统自己去读」的成本护栏）
-# AGPL-3.0
 """
 2026-08-25 战略定稿「系统自己去读」：观察触发权交给系统后，必须回答
 「系统自己读 = 系统自己花 token」——本模块是这道闸。

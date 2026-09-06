@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 429 重试等待策略 单元测试（纯算法，不连真实 LLM）
-# AGPL-3.0
 """
 背景（2026-08-28 Kimi Tier0 限流实测）：429 文案明说「please try again
 after 1 seconds」，指数退避却排到 16 秒——白等还挤占停顿组件 12s 超时。

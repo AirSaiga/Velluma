@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 采样参数锁自适应 + 进程级缓存 单元测试（纯 mock，不连真实 LLM）
-# AGPL-3.0
 """
 锁行为对拍（2026-08-28 kimi-k2.6 实测事故驱动的护栏）：
 

@@ -1,8 +1,5 @@
-"""
-Velluma - AI Novel Writing Assistant
-Copyright (C) 2026 Velluma Project Contributors (AGPL-3.0)
-"""
-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 """
 Reader Mirror 服务包（V4.2 路径 B 新建）。
 

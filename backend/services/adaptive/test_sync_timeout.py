@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 停顿档同步超时钳制单测
-# AGPL-3.0
 """
 2026-08-27 自动唤醒断掉修复的对拍。
 

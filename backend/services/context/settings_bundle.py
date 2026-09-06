@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 自适应辅助设定数据加载器（NLE-ADF 3.0）
-# AGPL-3.0
 """
 作者主导写作流程的设定数据共享加载器。
 

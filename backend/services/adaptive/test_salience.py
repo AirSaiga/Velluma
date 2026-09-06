@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 热层显著性测试（B7 · docs/world-cognition-architecture.md §4）
-# AGPL-3.0
 """三族信号 × 段距衰减 × 六槽配额 × 防窄化的行为锁。"""
 import unittest
 

@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 挂件功能槽位单测（2026-08-29「不知所云」重构）
-# AGPL-3.0
 """provenance 贯通回归：每枚碎片必须回答「选这枚会发生什么」。
 
 覆盖 _finalize_parts 纯函数：

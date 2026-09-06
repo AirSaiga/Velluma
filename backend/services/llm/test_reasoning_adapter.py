@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Velluma Contributors
 # Velluma - 推理参数 provider 适配层单测
-# AGPL-3.0
 """
 纯算法单测，不连真实 LLM/DB。覆盖：
 - detect_provider 按 base_url 域名识别 6 家 provider + local + unknown
