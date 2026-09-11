@@ -7,6 +7,7 @@ const DEFAULT_PREFS = {
   chapterMetaCollapsed: false,
   sidebarCollapsed: false,
   rightDrawerOpen: false,
+  chapterDirPinned: false,
   zenMode: true,
   worldSliceCollapsed: false,
   worldReaderView: false,

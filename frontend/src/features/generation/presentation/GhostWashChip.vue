@@ -31,11 +31,11 @@ const replacedCount = () => props.wash.hits.filter((h) => h.replaced).length
   <div v-if="wash.hits.length" class="ghost-wash">
     <button
       class="ghost-wash__head"
-      title="生成后自动规避了你的禁忌词（只改 AI 的提案，Enter 采纳后才进正文）"
+      title="AI 写的时候避开了你的禁忌词（只改 AI 的稿子，Enter 采纳才进正文）"
       @click="expanded = !expanded"
     >
       <span class="ghost-wash__icon">✓</span>
-      <span class="ghost-wash__count">已规避 {{ wash.hits.length }} 处禁忌词</span>
+      <span class="ghost-wash__count">已换掉 {{ wash.hits.length }} 处禁忌词</span>
       <span class="ghost-wash__sub">（替换 {{ replacedCount() }}）</span>
       <span class="ghost-wash__toggle">{{ expanded ? '收起' : '明细' }}</span>
     </button>
@@ -46,14 +46,14 @@ const replacedCount = () => props.wash.hits.filter((h) => h.replaced).length
         </span>
         <span class="ghost-wash__span">「{{ h.span }}」</span>
         <span v-if="h.replaced && h.alternative" class="ghost-wash__alt">→ {{ h.alternative }}</span>
-        <span v-else-if="!h.replaced" class="ghost-wash__alt">（无替代词，仅提示）</span>
+        <span v-else-if="!h.replaced" class="ghost-wash__alt">（没有合适的替代词，只标出来）</span>
       </div>
       <div v-if="wash.original_text" class="ghost-wash__actions">
-        <button class="ghost-wash__btn" title="恢复洗前原稿，并将这些词降为提醒档（此书此后不再自动替换）" @click="emit('use-original')">
+        <button class="ghost-wash__btn" title="恢复 AI 原来的稿子，这些词以后只提醒不替换" @click="emit('use-original')">
           用原稿（保留这些词）
         </button>
       </div>
-      <div class="ghost-wash__foot">只改 AI 的提案不碰你的正文 · Enter 采纳 / Esc 蒸发照常</div>
+      <div class="ghost-wash__foot">只改 AI 的稿子，不碰你的正文 · Enter 采纳 / Esc 蒸发照常</div>
     </div>
   </div>
 </template>

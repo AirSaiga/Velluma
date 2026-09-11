@@ -22,13 +22,15 @@ const expanded = ref(false)
 /** kind → 短标签 + 色档（琥珀系：疑点是「请过目」不是「报错」） */
 const KIND_META: Record<GhostWarning['kind'], { label: string; cls: string }> = {
   dead_speak: { label: '死者开口', cls: 'is-dead' },
-  canon_leak: { label: '疑似泄底', cls: 'is-canon' },
-  secret_leak: { label: '私有设定外泄', cls: 'is-secret' },
-  // 二期扩（约束治理 2026-09-02）：禁忌面/不在场/地点穿越/熔断降级
+  canon_leak: { label: '秘密穿帮', cls: 'is-canon' },
+  secret_leak: { label: '秘密外泄', cls: 'is-secret' },
+  // 二期扩（约束治理 2026-09-02）：禁忌面/不在场/地点跳变/熔断降级
   cliche_hit: { label: '禁忌词', cls: 'is-cliche' },
   out_of_scene: { label: '人物不在场', cls: 'is-oos' },
-  location_jump: { label: '地点穿越', cls: 'is-loc' },
+  location_jump: { label: '地点跳变', cls: 'is-loc' },
   quality_breaker: { label: '自动修正暂停', cls: 'is-breaker' },
+  // 抢拍闸（2026-09-03 live）：拒稿逃生舱/熔断降级路径会随帧到前端
+  beat_rush: { label: '抢拍', cls: 'is-rush' },
 }
 
 function meta(kind: GhostWarning['kind']) {
@@ -47,7 +49,7 @@ const kindSummary = computed(() => {
 
 <template>
   <div v-if="warnings.length" class="ghost-warn">
-    <button class="ghost-warn__head" :title="`快检疑点：${kindSummary}（只提示不拦截，Enter 照常采纳）`" @click="expanded = !expanded">
+    <button class="ghost-warn__head" title="自动检查发现的疑点（只提醒，Enter 照常采纳）" @click="expanded = !expanded">
       <span class="ghost-warn__icon">⚠</span>
       <span class="ghost-warn__count">{{ warnings.length }} 处疑点</span>
       <span class="ghost-warn__kinds">{{ kindSummary }}</span>
@@ -64,7 +66,7 @@ const kindSummary = computed(() => {
         <span class="ghost-warn__span" :title="w.span_text">「{{ w.span_text }}」</span>
         <span class="ghost-warn__msg">{{ w.message }}</span>
       </div>
-      <div class="ghost-warn__foot">Enter 采纳 · Esc 蒸发——疑点仅供参照，不拦截任何操作</div>
+      <div class="ghost-warn__foot">Enter 采纳 · Esc 蒸发——疑点只是提醒，不拦你</div>
     </div>
   </div>
 </template>

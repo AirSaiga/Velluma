@@ -9,7 +9,7 @@
 # (at your option) any later version.
 
 """
-LLM 厂商能力档案（2026-08-28 五厂商调研定稿）。
+LLM 厂商能力档案（2026-08-28 五厂商调研定稿；2026-09-10 DeepSeek V4.1 Flash 修订）。
 
 唯一事实源：docs/model-vendor-matrix.md。职责三件事：
 1. **provider 识别**（detect_provider）：base_url 域名 → 厂商 id。
@@ -22,7 +22,7 @@ LLM 厂商能力档案（2026-08-28 五厂商调研定稿）。
    模型候选、能力提示），GET /system/model-catalog 消费。
 
 设计纪律：
-- 档案数据是「截至 2026-08-28 的官方文档实证」，厂商协议随代际变化——
+- 档案数据是「截至 2026-09-10 的官方文档实证」，厂商协议随代际变化——
   改这里必须同步改 docs/model-vendor-matrix.md 并跑 test_vendor_profiles.py。
 - 不做绝对正确性保证：shape 之后仍可能有未知锁定，由自适应层兜底。
 - 纯函数、零副作用、零 LLM。
@@ -120,8 +120,11 @@ class VendorProfile:
     top_p_range: Optional[Tuple[float, float]] = None
     # 双 penalty：False = 一律不发（DeepSeek 已废弃 / GLM 现行文档未定义 / Kimi K 系 schema 不含）
     supports_penalties: bool = True
-    # 思考模式下采样参数静默无效（DeepSeek 文档明言 / MiMo 静默锁 1.0/0.95）——思考开启时整组不发
-    thinking_locks_sampling: bool = False
+    # 思考态/非思考态分别静默无效、发送前删除的采样参数
+    # （2026-09-10 DeepSeek 文档：思考态 temperature 无效、非思考态 top_p 恒 1.0 忽略；
+    #   MiMo 思考态静默锁 1.0/0.95——两组都是「发了也白发」）
+    thinking_drops: Tuple[str, ...] = ()
+    non_thinking_drops: Tuple[str, ...] = ()
     notes: Tuple[str, ...] = ()
     models: Tuple[Dict, ...] = field(default_factory=tuple)
     model_rules: Tuple[ModelRule, ...] = field(default_factory=tuple)
@@ -132,15 +135,18 @@ VENDORS: Dict[str, VendorProfile] = {
         id=DEEPSEEK, label="DeepSeek", base_url="https://api.deepseek.com",
         docs_url="https://api-docs.deepseek.com",
         temperature_range=(0.0, 2.0), top_p_range=(0.0, 1.0),
-        supports_penalties=False, thinking_locks_sampling=True,
+        supports_penalties=False,
+        thinking_drops=("temperature",), non_thinking_drops=("top_p",),
         notes=("峰谷定价：工作日 9-12/14-18 点为高峰（2 倍价），夜间与周末半价。",
-               "深度思考模式下采样参数无效（官方文档明言），关闭思考后温度才生效。"),
+               "思考默认开启；思考模式下 temperature 无效（top_p 生效，低于 0.95 会被抬升），关闭思考后温度才生效。"),
         models=(
-            {"id": "deepseek-v4-flash", "label": "v4-flash（推荐·性价比）", "note": "1M 上下文；空闲档 ¥1.5/百万进 ¥4.5/百万出"},
-            {"id": "deepseek-v4-pro", "label": "v4-pro（旗舰）", "note": "1M 上下文；空闲档 ¥4.5/百万进 ¥13.5/百万出"},
+            # 2026-09-10 V4.1 Flash 发布：规范 id 改 deepseek-flash（旧 v4-flash 名暂时路由到它）
+            {"id": "deepseek-flash", "label": "V4.1 Flash（推荐·性价比）", "note": "原生多模态；1M 上下文/384K 输出；空闲档 ¥1/百万进 ¥4/百万出"},
+            {"id": "deepseek-v4-pro", "label": "v4-pro（旗舰·下线倒计时）", "note": "09-14 12:00 起请求路由到 V4.1 Flash 并按其计费（至 V4.1 Pro 上线）"},
         ),
         model_rules=(
-            # deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用（曾映射 v4-flash 双模）——目录只给 v4 名
+            # deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用；deepseek-v4-flash 已并入
+            # deepseek-flash（旧名暂时路由）——目录只给现行规范名
             ModelRule(prefixes=("deepseek-",), effort_values=("low", "high", "max")),
         ),
     ),
@@ -205,7 +211,7 @@ VENDORS: Dict[str, VendorProfile] = {
         id=MIMO, label="小米 MiMo", base_url="https://api.xiaomimimo.com/v1",
         docs_url="https://mimo.mi.com",
         temperature_range=(0.0, 1.5), top_p_range=(0.01, 1.0),
-        thinking_locks_sampling=True,
+        thinking_drops=("temperature", "top_p"),
         notes=("思考模式下温度/top_p 被服务端静默锁为 1.0/0.95——本应用思考开启时自动不发采样参数。",
                "深度思考默认开启；小预算调用务必显式关闭（本应用已自动处理）。"),
         models=(
@@ -269,7 +275,8 @@ def shape_sampling_params(
 
     规则（docs/model-vendor-matrix.md §六）：
     - Kimi K 系：采样参数全删（schema 不含，传了 400）。
-    - DeepSeek：双 penalty 全模式删（已废弃）；思考态删 temperature/top_p（无效）。
+    - DeepSeek：双 penalty 全模式删；思考态删 temperature（无效）；
+      非思考态删 top_p（恒 1.0 忽略；思考态 top_p 生效，下限 0.95 由服务端抬升，原样透传）。
     - MiMo：思考态删 temperature/top_p（静默锁 1.0/0.95，发了也白发）。
     - GLM：温度钳 ≤1.0；双 penalty 删（现行 API 未定义）。
     - Qwen：温度钳 <2.0、top_p 钳 ≤1.0。
@@ -307,10 +314,9 @@ def shape_sampling_params(
         for key in ("temperature", "top_p"):
             _drop(key)
 
-    # 3. 思考锁采样（DeepSeek/MiMo）：思考开启时采样参数无效，删
-    elif profile.thinking_locks_sampling and thinking_enabled:
-        _drop("temperature")
-        _drop("top_p")
+    # 3. 思考态/非思考态分别静默无效的参数（DeepSeek/MiMo，2026-09-10 档案）
+    for key in (profile.thinking_drops if thinking_enabled else profile.non_thinking_drops):
+        _drop(key)
 
     # 4. 范围钳制（GLM 温度 ≤1.0 等）
     if profile.temperature_range:

@@ -7,6 +7,7 @@
  */
 import { ref, watch } from 'vue'
 import Icon from '../../../components/Icon.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import type { StyleScanResult, StyleScanHit } from '../../../types'
 
 const props = defineProps<{
@@ -52,14 +53,7 @@ function isResolved(word: string): boolean {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="modal-mask" @click.self="emit('close')">
-      <div class="modal-card">
-        <header class="modal-head">
-          <h3 class="modal-title">禁词扫描（审稿模式）</h3>
-          <button class="modal-close" @click="emit('close')">✕</button>
-        </header>
-
+  <ModalShell v-if="open" title="禁词扫描（审稿模式）" width="36rem" @close="emit('close')">
         <div class="modal-body">
           <p class="modal-note">
             用三层禁词（系统陈词库 + 本书黑名单 + 负面清单）扫描本章正文。
@@ -111,57 +105,13 @@ function isResolved(word: string): boolean {
           </div>
         </div>
 
-        <footer class="modal-foot">
+        <template #footer>
           <button class="btn-ghost" @click="emit('close')">关闭</button>
-        </footer>
-      </div>
-    </div>
-  </Teleport>
+        </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.75rem;
-  background: rgb(0 0 0 / 45%);
-}
-.modal-card {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 36rem;
-  max-height: 80vh;
-  overflow: hidden;
-  background: var(--bg-primary);
-  border-radius: 1rem;
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
-}
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-}
-.modal-title {
-  margin: 0;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.modal-close {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
 .modal-body {
   flex: 1;
   padding: 1rem;
@@ -169,7 +119,7 @@ function isResolved(word: string): boolean {
 }
 .modal-note {
   margin: 0 0 0.75rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   line-height: 1.7;
   color: var(--text-muted);
 }
@@ -182,14 +132,15 @@ function isResolved(word: string): boolean {
   flex: 1;
   min-width: 0;
   padding: 0.375rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-base);
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 0.375rem;
 }
 .btn-primary {
+  min-height: 28px;
   padding: 0.375rem 0.875rem;
-  font-size: 0.75rem;
+  font-size: var(--text-base);
   color: white;
   background: var(--accent-500);
   border: none;
@@ -203,7 +154,7 @@ function isResolved(word: string): boolean {
   padding: 1.5rem 0;
   font-size: 0.8125rem;
   text-align: center;
-  color: #047857;
+  color: var(--ok);
 }
 .hit-card {
   padding: 0.625rem 0.75rem;
@@ -228,29 +179,29 @@ function isResolved(word: string): boolean {
 }
 .hit-count {
   padding: 0.0625rem 0.375rem;
-  font-size: 0.625rem;
-  color: #b91c1c;
-  background: #fee2e2;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  background: var(--danger-bg);
   border-radius: 0.25rem;
 }
 /* 硬禁档标识（Phase 3：与负面清单/系统陈词库同款红 chip） */
 .hit-sev {
   padding: 0.0625rem 0.3125rem;
-  font-size: 0.5625rem;
-  color: #b91c1c;
-  background: #fee2e2;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  background: var(--danger-bg);
   border-radius: 0.25rem;
 }
 .hit-alt {
-  font-size: 0.6875rem;
-  color: #047857;
+  font-size: var(--text-xs);
+  color: var(--ok);
 }
 .hit-alt.dim {
   color: var(--text-muted);
 }
 .hit-context {
   margin: 0.375rem 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .hit-actions {
@@ -260,7 +211,7 @@ function isResolved(word: string): boolean {
 }
 .btn-mini {
   padding: 0.25rem 0.5625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
@@ -273,8 +224,8 @@ function isResolved(word: string): boolean {
   background: var(--accent-600);
 }
 .btn-collect {
-  color: #b45309;
-  background: #fef3c7;
+  color: var(--warn);
+  background: var(--warn-bg);
 }
 .btn-ignore {
   color: var(--text-muted);
@@ -284,18 +235,13 @@ function isResolved(word: string): boolean {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.6875rem;
-  color: #047857;
-}
-.modal-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border-color);
+  font-size: var(--text-xs);
+  color: var(--ok);
 }
 .btn-ghost {
+  min-height: 28px;
   padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: none;

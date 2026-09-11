@@ -34,6 +34,8 @@ export interface WorldEntityCreate {
   entity_type: 'character' | 'faction' | 'asset'
   name: string
   intro?: string
+  /** 别名（RAG 检索 / 速记名单匹配用）；速记建档时口述原词自动回填 */
+  aliases?: string[]
   tags?: string[]
   /** 单分组（2026-09-03 资产抽屉分组）：更新时显式传 null = 移出分组 */
   group_name?: string | null
@@ -198,6 +200,21 @@ export interface EventDraft {
 export interface ParseEventResult {
   draft: EventDraft
   confidence: 'high' | 'low' | 'none'
+  /** 速记里名单外的新实体/新地点草拟（关联式录入 2026-09-05）：名字+类型猜测+依据原文 */
+  new_entities: NewEntityDraft[]
+  new_locations: NewLocationDraft[]
+}
+
+export interface NewEntityDraft {
+  name: string
+  kind: 'character' | 'faction' | 'asset' | string
+  /** 速记原文的逐字子串（后端硬闸校验过），展示给作者核对 */
+  evidence: string
+}
+
+export interface NewLocationDraft {
+  name: string
+  evidence: string
 }
 
 export interface WorldEventCandidate {
@@ -405,7 +422,8 @@ export const worldApi = {
   },
 
   // ===== W3 速记解析：一句话 → 事件草稿（只产草稿，绝不落库）=====
-  parseEvent: (bookId: string, chapterId: string, text: string) =>
+  // chapterId 可空（世界页速记入口）：缺省=后端用书级此刻
+  parseEvent: (bookId: string, chapterId: string | null, text: string) =>
     requestJson<ParseEventResult>(`/books/${bookId}/world/parse-event`, {
       method: 'POST',
       headers: JSON_HEADERS,

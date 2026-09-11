@@ -334,7 +334,7 @@ function clearAllCharacters() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
           <span>高级设置</span>
-          <span v-if="isExpertMode" class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+          <span v-if="isExpertMode" class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
         </button>
         
         <Transition name="expand">
@@ -373,7 +373,7 @@ function clearAllCharacters() {
                 placeholder="不要在这一章出现的内容..."
                 class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] placeholder-[var(--text-muted)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
               />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
+              <p class="text-xs text-[var(--text-muted)] mt-1">
                 内部字段：chapter_assets_schema — 定义本章的创作边界
               </p>
             </div>
@@ -382,7 +382,7 @@ function clearAllCharacters() {
             <div v-if="isExpertMode">
               <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
                 <span class="flex items-center gap-1.5">
-                  <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+                  <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
                   记忆检索策略
                 </span>
               </label>
@@ -410,7 +410,7 @@ function clearAllCharacters() {
             <div v-if="isExpertMode">
               <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
                 <span class="flex items-center gap-1.5">
-                  <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+                  <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
                   创作自由度
                 </span>
               </label>
@@ -438,7 +438,7 @@ function clearAllCharacters() {
             <div v-if="isExpertMode">
               <label class="block text-sm font-medium text-[var(--text-primary)] mb-1">
                 <span class="flex items-center gap-1.5">
-                  <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+                  <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
                   精修深度
                 </span>
               </label>

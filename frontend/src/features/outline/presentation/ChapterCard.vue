@@ -132,7 +132,7 @@ function anchorChipClass(done: number, total: number): string {
 .oc-num {
   flex: none;
   width: 4.25rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   padding-top: 0.25rem;
@@ -164,7 +164,7 @@ function anchorChipClass(done: number, total: number): string {
 }
 
 .oc-chip {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   padding: 0.0625rem 0.375rem;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
@@ -183,7 +183,7 @@ function anchorChipClass(done: number, total: number): string {
 
 .oc-words {
   margin-left: auto;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -260,7 +260,7 @@ function anchorChipClass(done: number, total: number): string {
 }
 
 .oc-save-state {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0.375rem 0 0;
 }

@@ -52,7 +52,7 @@ const fallback = '还没有可总结的笔迹——在「你的字」贴入样�
 .status-strip {
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -64,15 +64,16 @@ const fallback = '还没有可总结的笔迹——在「你的字」贴入样�
 }
 .status-text {
   overflow: hidden;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--text-secondary);
 }
 .status-audition {
   flex-shrink: 0;
+  min-height: 28px;
   padding: 0.1875rem 0.625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--accent-500) 35%, var(--border-color));

@@ -411,13 +411,18 @@ async def parse_event(
     """一句话速记 → 事件草稿（预填轻表单，作者过目确认）。
 
     契约红线：只产草稿，绝不写库；解析失败返回空草稿 + confidence=none。
+    chapter_id 缺省（世界页速记入口）→ 书级此刻（最大章锚 → 事件最远处 → 0）。
+    响应带 new_entities/new_locations：速记里名单外的名字草拟（evidence 过硬闸），
+    前端过目单勾选后随事件一并入账——关联式录入（2026-09-05）。
     """
     from backend.models import Chapter
     from backend.services.world.event_parser import parse_event_text
 
-    chapter = await db.get(Chapter, str(payload.chapter_id))
-    if chapter is None or str(chapter.book_id) != str(book_id):
-        raise HTTPException(404, "章节不存在")
+    chapter = None
+    if payload.chapter_id is not None:
+        chapter = await db.get(Chapter, str(payload.chapter_id))
+        if chapter is None or str(chapter.book_id) != str(book_id):
+            raise HTTPException(404, "章节不存在")
     return await parse_event_text(db, str(book_id), chapter, payload.text)
 
 

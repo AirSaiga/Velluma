@@ -176,7 +176,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (!chapter) return
     const content = (chapter.content_text || chapter.draft_text || '').trim()
     if (content.length < 10) {
-      showToast('章节内容太少，无法审阅', 'warning')
+      showToast('本章内容太少——先多写一点，再请编辑看', 'warning')
       return
     }
     showCritiqueModal.value = true
@@ -209,7 +209,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   async function handlePartialOptimize(payload: { selection: any, instruction: string, mode?: string, tone?: string | null }) {
     if (!selectedChapter.value || !props.apiConfig.api_key) {
-      showToast('请先配置 API Key', 'warning')
+      showToast('请先在设置里配置 API Key', 'warning')
       return
     }
 
@@ -237,14 +237,14 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
       if (optimized_text && editorRef.value) {
         editorRef.value.applyOptimizationDiff(optimized_text)
-        showToast('优化生成完成，请确认', 'success')
+        showToast('改好了，请在正文里确认', 'success')
       } else {
         editorRef.value.resetOptimization()
-        showToast('优化未返回有效结果', 'warning')
+        showToast('AI 没给出可用的改写，换个说法再试', 'warning')
       }
     } catch (e: any) {
       console.error('Optimization failed', e)
-      showToast('优化失败: ' + e.message, 'error')
+      showToast('改写失败：' + e.message, 'error')
       if (editorRef.value) {
         editorRef.value.resetOptimization()
       }
@@ -273,7 +273,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
     try {
       if (!props.apiConfig.api_key) {
-        showToast('请先在设置中配置 API Key 以使用智能格式整理功能', 'warning')
+        showToast('请先在设置里配置 API Key 才能整理格式', 'warning')
         return
       }
 
@@ -285,7 +285,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
           return true
         })
         if (hasNote) {
-          showToast('文档含未落笔的细纲胶囊，请先扩写或删除后再整理', 'warning')
+          showToast('文里有还没扩写的细纲胶囊——先扩写或删掉，再整理格式', 'warning')
           return
         }
       }
@@ -294,7 +294,7 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       // 有格式时先确认（原生撤销已恢复，整理后可 Ctrl+Z 反悔）。
       if (!selection && editorRef.value?.editor && docHasRichFormatting(editorRef.value.editor)) {
         const ok = await showConfirm({
-          title: '智能格式整理',
+          title: '整理全文格式',
           message: '全文整理只保留段落结构，将清除加粗、高亮、标题等行内格式。',
           warning: '整理后可按 Ctrl+Z 撤销。',
           confirmText: '继续整理',

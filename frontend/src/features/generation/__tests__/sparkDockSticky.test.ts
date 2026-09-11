@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { nextTick } from 'vue'
 import {
-  sparkDockVisible, sparkSticky, sparkParts,
+  sparkDockVisible, sparkSticky, sparkParts, sparkAnchorPos,
   setSparkParts, setSparkDockGate,
   showSparkDock, hideSparkDock, stashSparkDock, restoreSparkDock, setSparkSticky,
 } from '../composables/useSparkDock'
@@ -26,7 +26,7 @@ function mockEditor() {
       handlers[ev] = (handlers[ev] || []).filter((f) => f !== fn)
     },
     trigger: (ev: string) => { (handlers[ev] || []).forEach((f) => f()) },
-    state: { selection: { $from: { pos: 2, start: () => 0, end: () => 3 } } },
+    state: { selection: { $from: { pos: 2, start: () => 0, end: () => 3, after: () => 3 } } },
     view: { coordsAtPos: () => ({ top: 0, bottom: 10, left: 10 }) },
   } as any
 }
@@ -72,30 +72,55 @@ describe('stash / restore（缝合让位与回弹）', () => {
   })
 })
 
-describe('幽灵落定自动回弹', () => {
-  it('ghostActive 下落沿 + sticky → nextTick 后弹回', async () => {
+describe('幽灵落定不自动回弹（2026-09-09 自动弹出退役）', () => {
+  it('SPARK_DOCK_AUTO_POPUP=false：ghost 落沿（任何结束原因）+ sticky → 舱不弹回，Tab 是唯一入口', async () => {
     showSparkDock()
     setSparkSticky()
     stashSparkDock()
-    ghostActive.value = true   // 缝合幽灵出现（藏舱状态）
-    await nextTick()
-    expect(sparkDockVisible.value).toBe(false)
-    ghostActive.value = false  // Enter 定稿 / Esc 蒸发
-    expect(sparkDockVisible.value).toBe(false) // watch 是 pre-flush，此刻尚未弹
-    // 双跳：第一跳跑 watch 回调，回调内 nextTick(restore) 比本测试的 await 晚注册
-    await nextTick()
-    await nextTick()
-    expect(sparkDockVisible.value).toBe(true)
-  })
-
-  it('非 sticky 的幽灵消失不弹舱（普通续写不打扰）', async () => {
-    hideSparkDock()
     ghostActive.value = true
     await nextTick()
-    ghostActive.value = false
+    ghostActive.value = false   // 无论蒸发/采纳/失败
     await nextTick()
     await nextTick()
     expect(sparkDockVisible.value).toBe(false)
+    expect(sparkSticky.value).toBe(true)   // sticky 保留：手动 restoreSparkDock 仍可弹
+  })
+
+  it('手动 restoreSparkDock 仍是可用 API（stash/restore 对不受开关影响）', () => {
+    showSparkDock()
+    setSparkSticky()
+    stashSparkDock()
+    restoreSparkDock()
+    expect(sparkDockVisible.value).toBe(true)
+  })
+})
+
+describe('行间锚（2026-09-09 布局重构：浮层 → WidgetDecoration）', () => {
+  it('showSparkDock 设 sparkAnchorPos=$from.after()——InlineDock 立装饰的锚', () => {
+    showSparkDock()
+    expect(sparkDockVisible.value).toBe(true)
+    expect(sparkAnchorPos.value).toBe(3)
+  })
+
+  it('锚取不到（编辑器无 after）时不开舱', () => {
+    const editor = chapterEditorHandle.value as any
+    const orig = editor.state.selection.$from.after
+    editor.state.selection.$from.after = () => { throw new Error('no boundary') }
+    showSparkDock()
+    expect(sparkDockVisible.value).toBe(false)
+    editor.state.selection.$from.after = orig
+  })
+
+  it('sticky 态编辑器活动按段落粒度换锚（$from.after 变了才动，打字不抖）', () => {
+    const editor = chapterEditorHandle.value as any
+    showSparkDock()
+    setSparkSticky()
+    expect(sparkAnchorPos.value).toBe(3)
+    editor.trigger('update')   // 同段打字：锚不动
+    expect(sparkAnchorPos.value).toBe(3)
+    editor.state.selection.$from.after = () => 42   // 光标去了别的段
+    editor.trigger('selectionUpdate')
+    expect(sparkAnchorPos.value).toBe(42)
   })
 })
 

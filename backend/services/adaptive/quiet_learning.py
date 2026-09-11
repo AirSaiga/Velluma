@@ -243,6 +243,16 @@ async def load_muted_keys(
     return muted
 
 
+def invalidate_quiet_caches(book_id: str) -> None:
+    """清掉该书两级派生缓存（埋点扫描 + 静音集）——下次读取即时重算。
+
+    消费方：清空协作埋点的测试端点（hint_dismiss 史被删后，30s/60s TTL
+    缓存里的旧静音集不能再苟活）。宽恕路径不走这里（直接 use_cache=False）。
+    """
+    _mutes_cache.pop(str(book_id), None)
+    _hint_scan_cache.pop(str(book_id), None)
+
+
 async def _compute_muted_keys(db: AsyncSession, book_id: str) -> Set[str]:
     book = await db.get(Book, book_id)
     forgiven: Dict[str, Any] = dict(getattr(book, "assist_mutes", None) or {}) if book else {}

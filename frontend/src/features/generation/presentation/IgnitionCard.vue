@@ -39,7 +39,7 @@ const emit = defineEmits<{
       class="ignition-card__intent"
       rows="1"
       :value="spine?.intent?.text || ''"
-      placeholder="一句话：这一章主要讲什么？（可空）"
+      placeholder="这一章主要讲什么？一句话就行，空着也行"
       @change="(e) => emit('update-intent', (e.target as HTMLTextAreaElement).value)"
     ></textarea>
     <template v-if="suggestions">
@@ -67,7 +67,7 @@ const emit = defineEmits<{
     </div>
     <div class="ignition-card__hint">
       <template v-if="hasOutline">生成的是幽灵草稿：Enter 采纳 · Esc 蒸发 · 采纳后随时可改</template>
-      <template v-else>先在副驾「打算」页写两句大纲，就能让 AI 帮你开个头</template>
+      <template v-else>先在右侧「打算」页写两句大纲，AI 就能帮你开个头</template>
     </div>
     <button
       v-if="!suggestions"
@@ -79,32 +79,17 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-/* 画布中央淡卡（与 Spark/Beat Dock 同族磨砂风格，Cyber-Parchment Dark 双主题） */
+/* 纸内页首块（08 期 §4.3：从悬浮封面改为顺文流的页首区——「白纸」状态写在纸面上，
+   不再是压在画布上的卡）。左右 3rem 与页面头/正文列（px-12）同轴。 */
 .ignition-card {
-  position: absolute;
-  left: 50%;
-  top: 38%;
-  transform: translate(-50%, -50%);
-  z-index: 10;
-  width: min(380px, 80%);
-  border-radius: 12px;
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
-  padding: 18px 20px 14px;
+  padding: 0.25rem 3rem 0.75rem;
   text-align: center;
   user-select: none;
 }
 
-:root.dark .ignition-card {
-  background: rgba(30, 32, 37, 0.92);
-  border-color: #2a2d35;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
-}
-
 .ignition-card__title {
-  font-size: 14px;
+  font-family: var(--font-heading, inherit);
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary, #2c2c2c);
 }

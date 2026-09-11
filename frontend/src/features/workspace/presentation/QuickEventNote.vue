@@ -156,7 +156,7 @@ async function commit() {
     close()
     window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
   } catch (e) {
-    console.warn('[QuickEventNote] 入账失败', e)
+    console.warn('[QuickEventNote] 记入世界失败', e)
   } finally {
     saving.value = false
   }
@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-if="!draft">
-          <p class="qen-hint">一句话记下刚发生的剧情事实，AI 解析成事件草稿，你过目后入账。</p>
+          <p class="qen-hint">一句话记下刚发生的剧情事实，AI 整理成事件草稿，你过目后才记入世界。</p>
           <div class="qen-row">
             <input
               v-model="inputText"
@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
               @keydown.enter.prevent="parse"
             />
             <button class="qen-btn primary" :disabled="parsing || !inputText.trim()" @click="parse">
-              {{ parsing ? '解析中…' : '解析' }}
+              {{ parsing ? '整理中…' : '整理' }}
             </button>
           </div>
         </template>
@@ -250,7 +250,7 @@ onBeforeUnmount(() => {
             {{
               confidence === 'none'
                 ? '未能自动解析——直接按下表手填即可。'
-                : '解析把握不高——请核对草稿再入账。'
+                : '整理把握不高——请核对草稿，认可后再记入世界。'
             }}
           </div>
 
@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
           <div class="qen-actions">
             <button class="qen-btn" @click="draft = null">← 重新速记</button>
             <button class="qen-btn primary" :disabled="saving" @click="commit">
-              {{ saving ? '入账中…' : '记入世界' }}
+              {{ saving ? '记入中…' : '记入世界' }}
             </button>
           </div>
         </template>

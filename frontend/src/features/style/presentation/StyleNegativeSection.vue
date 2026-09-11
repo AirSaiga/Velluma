@@ -86,14 +86,14 @@ function hitCount(word: string): number {
     >
       <input
         v-model="item.word"
-        class="neg-input"
+        class="neg-input neg-word"
         placeholder="禁用词/句式"
         @input="emit('dirty')"
       >
-      <span class="neg-arrow">→</span>
+      <span class="neg-arrow" aria-hidden="true">→</span>
       <input
         v-model="item.alternative"
-        class="neg-input"
+        class="neg-input neg-alt"
         placeholder="替代规则（如：删掉，或换成具体动作）"
         @input="emit('dirty')"
       >
@@ -147,21 +147,13 @@ function hitCount(word: string): number {
   padding: 1.25rem 0 1.5rem;
   scroll-margin-top: 4.5rem;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
-.sec-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
+   sec-sub 按 §6 归 token（原 muted 过淡） */
 .sec-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--text-secondary);
 }
 .neg-toolbar {
   display: flex;
@@ -174,20 +166,21 @@ function hitCount(word: string): number {
   gap: 0.375rem;
 }
 .neg-count {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .btn-scan {
+  min-height: 28px;
   padding: 0.25rem 0.625rem;
-  font-size: 0.75rem;
-  color: #1d4ed8;
-  background: #dbeafe;
+  font-size: var(--text-base);
+  color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 .btn-scan:hover {
-  background: #bfdbfe;
+  background: color-mix(in srgb, var(--accent-500) 16%, transparent);
 }
 .btn-ghost {
   padding: 0.25rem 0.625rem;
@@ -209,26 +202,58 @@ function hitCount(word: string): number {
   color: var(--text-muted);
 }
 .neg-row {
-  display: flex;
+  /* §4.5 双档 grid：默认（双栏半宽）两行布局——词/替代词各占整行 40%+，
+     严重度与台账第二行，删除钮跨两行右缘；塌单列全宽时五件单行 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "word alt  del"
+    "sev  hits del";
+  gap: var(--space-2) var(--space-3);
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
+  padding: var(--space-2);
   margin-bottom: 0.375rem;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 0.5rem;
 }
+.neg-arrow {
+  display: none;
+}
+.neg-word {
+  grid-area: word;
+}
+.neg-alt {
+  grid-area: alt;
+}
+.sev-toggle {
+  grid-area: sev;
+  justify-self: start;
+}
+.hit-chip {
+  grid-area: hits;
+  justify-self: start;
+}
+.neg-row .icon-danger {
+  grid-area: del;
+  align-self: center;
+}
+@container stylepage (max-width: 60rem) {
+  .neg-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto auto;
+    grid-template-areas: "word alt sev hits del";
+  }
+}
 .neg-input {
-  flex: 1;
   min-width: 0;
+  min-height: 28px;
   padding: 0.3rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 0.375rem;
 }
 .neg-input:focus {
-  outline: none;
   border-color: var(--accent-400);
 }
 .neg-arrow {
@@ -239,23 +264,23 @@ function hitCount(word: string): number {
 .hit-chip {
   flex-shrink: 0;
   padding: 0.125rem 0.4375rem;
-  font-size: 0.625rem;
-  color: #b91c1c;
-  background: #fee2e2;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  background: var(--danger-bg);
   border-radius: 0.25rem;
   white-space: nowrap;
 }
 .hit-chip.hit-zero {
-  color: var(--text-muted);
+  color: var(--text-faint);
   background: var(--bg-tertiary);
 }
 /* 档位切换：提醒（灰、可点） ⇄ 硬禁（红 chip，同系统陈词库 system-sev 视觉） */
 .sev-toggle {
-  flex-shrink: 0;
+  min-height: 24px;
   padding: 0.125rem 0.4375rem;
-  font-size: 0.625rem;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border: none;
   border-radius: 0.25rem;
   white-space: nowrap;
@@ -265,8 +290,8 @@ function hitCount(word: string): number {
   color: var(--text-secondary);
 }
 .sev-toggle.sev-blocker {
-  color: #b91c1c;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 .icon-danger {
   flex-shrink: 0;
@@ -279,8 +304,8 @@ function hitCount(word: string): number {
   cursor: pointer;
 }
 .icon-danger:hover {
-  color: #dc2626;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 
 /* ---- 系统陈词库 ---- */
@@ -289,7 +314,7 @@ function hitCount(word: string): number {
 }
 .system-toggle {
   padding: 0.25rem 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -300,7 +325,7 @@ function hitCount(word: string): number {
 }
 .exempt-count {
   margin-left: 0.5rem;
-  color: #b45309;
+  color: var(--warn);
 }
 .system-list {
   max-height: 260px;
@@ -313,7 +338,7 @@ function hitCount(word: string): number {
 }
 .system-note {
   margin: 0 0 0.5rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -334,7 +359,7 @@ function hitCount(word: string): number {
   flex-shrink: 0;
   max-width: 40%;
   overflow: hidden;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -346,7 +371,7 @@ function hitCount(word: string): number {
 .system-alt {
   flex: 1;
   overflow: hidden;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -354,22 +379,23 @@ function hitCount(word: string): number {
 .system-sev {
   flex-shrink: 0;
   padding: 0.0625rem 0.3125rem;
-  font-size: 0.5625rem;
-  color: #b91c1c;
-  background: #fee2e2;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  background: var(--danger-bg);
   border-radius: 0.25rem;
 }
 .btn-exempt {
   flex-shrink: 0;
+  min-height: 24px;
   padding: 0.125rem 0.4375rem;
-  font-size: 0.625rem;
-  color: #b45309;
-  background: #fef3c7;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 .btn-exempt:hover {
-  background: #fde68a;
+  background: var(--warn-bg);
 }
 </style>

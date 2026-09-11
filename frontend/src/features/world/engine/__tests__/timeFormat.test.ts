@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { breakdownTime, fromYMD, formatTime } from '../timeFormat'
+import { breakdownTime, fromYMD, formatTime, formatDateShort } from '../timeFormat'
 
 // 历法双射回归：365 = 12×30 + 5，年末余 5 天两侧必须一致记作「13 月 1~5 日」，
 // 否则编辑面「分解→重组」往返丢 30 天（2026-08-24 实测事故）
@@ -26,5 +26,14 @@ describe('timeFormat 历法往返', () => {
     expect(fromYMD(1, 0, 1)).toBe(0)       // 月钳 1
     expect(fromYMD(1, 12, 99)).toBe(359)   // 平月日钳 30
     expect(fromYMD(0, 1, 1)).toBe(0)       // 年钳 1
+  })
+
+  it('formatDateShort：年份剥离只显月日（含 13 月如实显示）', () => {
+    expect(formatDateShort(0)).toBe('1月1日')
+    expect(formatDateShort(359)).toBe('12月30日')
+    expect(formatDateShort(360)).toBe('13月1日')   // 年末余日与 formatTime 同口径
+    expect(formatDateShort(364)).toBe('13月5日')
+    // 第2157年3月1日（红队报告截图实例）→ 组内短格式
+    expect(formatDateShort(fromYMD(2157, 3, 1))).toBe('3月1日')
   })
 })

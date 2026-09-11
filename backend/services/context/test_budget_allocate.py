@@ -136,6 +136,11 @@ class TestZeroChangeUnderDefaultBudgets:
             for key in blocks:
                 if key == "style_positive":
                     continue  # C3 轻档压缩（关键行），另行单测
+                if key == "anti_pseudo_sensory":
+                    # 白描封杀令（2026-09-09）：mode 门控指令分节，非数据块、
+                    # 不进 allocate——stitch/continue 恒在场（另行单测），不参与
+                    # 「默认预算零变化」口径
+                    continue
                 assert blocks[key] == base[key], f"{mode}.{key} 默认预算下发生裁剪"
             _blocks, usages = render_system_blocks_with_usage(**kw, mode=mode)
             assert all(not u.trimmed for u in usages), f"{mode} 默认预算不应裁剪"
@@ -409,11 +414,19 @@ class TestCrowdedBookPresenceSurvives:
 
 class TestEmptyBlocksSafe:
     def test_all_blocks_empty_with_mode(self):
-        """全空块 + 模式预算：全块空串、恒等、不抛错（B6 起 13 键：知识平面 6 块 + 旧 7 块）。"""
+        """全空块 + 模式预算：全数据块空串、恒等、不抛错（14 键 = B6 起 13 键
+        + anti_pseudo_sensory mode 门控指令分节——stitch 档恒在场，非数据块）。"""
         blocks, usages = render_system_blocks_with_usage(mode="stitch")
-        assert len(blocks) == 13
-        assert all(content == "" for _k, content in blocks)
+        assert len(blocks) == 14
+        by_key = dict(blocks)
+        # 白描封杀令是 mode 门控指令（stitch/continue 恒在场），不属于「数据块空」口径
+        assert "白描契约" in by_key["anti_pseudo_sensory"]
+        assert all(content == "" for k, content in blocks if k != "anti_pseudo_sensory")
         assert all(u.chars == 0 and not u.trimmed for u in usages)
+        # burst 档无封杀令：全 14 块皆空
+        blocks_b, _ = render_system_blocks_with_usage(mode="burst")
+        assert len(blocks_b) == 14
+        assert all(content == "" for _k, content in blocks_b)
 
     def test_empty_block_list(self):
         """空块列表：零总额、恒等、usages 空。"""

@@ -1,5 +1,10 @@
 const API_BASE = '/api'
-const DEV_SERVER_PORTS = [5173, 5174, 5175, 5176, 5177]
+// 开发服务器端口区间：启动脚本扫描段 5175~5285（scripts/windows/start.ps1、
+// scripts/macos/start.sh，三端契约见 scripts/check_launcher_contract.py）＋ Vite 自身
+// 默认端口 5173/5174（不经启动脚本裸跑 `npm run dev` 的场景）。
+// ⚠ 勿改回端口白名单常量：脚本扫描上界一变，白名单就静默失效。
+const DEV_SERVER_PORT_MIN = 5173
+const DEV_SERVER_PORT_MAX = 5285
 
 let cachedPort: number | null = null
 let apiBasePromise: Promise<string> | null = null
@@ -39,9 +44,11 @@ async function getBackendPort(): Promise<number> {
 }
 
 async function resolveApiBase(): Promise<string> {
+  const devPort = parseInt(window.location.port, 10)
   const isDevServer =
     window.location.port !== '' &&
-    DEV_SERVER_PORTS.includes(parseInt(window.location.port, 10))
+    devPort >= DEV_SERVER_PORT_MIN &&
+    devPort <= DEV_SERVER_PORT_MAX
 
   if (isDevServer) {
     const port = await getBackendPort()

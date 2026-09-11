@@ -6,7 +6,7 @@
  *      → 阶段 C 呈现对账（进度 + 勾选）→ 完成（世界内核 B4，2026-08-28）。
  * 职责切分：本组件只渲染 + 抛动作，编排全在 useReadBook（composable 层）。
  */
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import type {
   DepictionCandidate, EntityCandidate, LocationCandidate, ReadBookPhase,
 } from '../composables/useReadBook'
@@ -149,10 +149,10 @@ const emit = defineEmits<{
 .rb-progress__label { font-size: 13px; color: var(--text-secondary, #6b6560); margin: 0 0 10px; }
 .rb-bar { height: 6px; border-radius: 3px; background: var(--bg-muted, #f1f0ec); overflow: hidden; }
 .rb-bar__fill { height: 100%; background: var(--accent-500, #7c6aad); transition: width 0.3s ease; }
-.rb-note { font-size: 11px; color: var(--text-muted, #a09a92); margin: 10px 0; }
+.rb-note { font-size: var(--text-xs); color: var(--text-muted, #a09a92); margin: 10px 0; }
 .rb-review__lead { font-size: 13px; color: var(--text-secondary, #6b6560); margin: 0 0 10px; }
 .rb-group { margin-bottom: 12px; }
-.rb-group__label { font-size: 11px; color: var(--text-muted, #a09a92); margin-bottom: 4px; }
+.rb-group__label { font-size: var(--text-xs); color: var(--text-muted, #a09a92); margin-bottom: 4px; }
 .rb-row {
   display: flex; align-items: baseline; gap: 8px;
   padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -160,7 +160,7 @@ const emit = defineEmits<{
 .rb-row:hover { background: var(--bg-muted, #f5f4f0); }
 .rb-row__name { font-weight: 600; flex-shrink: 0; }
 .rb-row__desc { color: var(--text-muted, #a09a92); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rb-row__meta { font-size: 11px; color: var(--text-muted, #a09a92); flex-shrink: 0; }
+.rb-row__meta { font-size: var(--text-xs); color: var(--text-muted, #a09a92); flex-shrink: 0; }
 .rb-done__list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary, #6b6560); }
 .rb-btn {
   padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;

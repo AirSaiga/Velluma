@@ -22,18 +22,29 @@ import { childrenIndex } from '../engine/locationTree'
 import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
 import { formatTime } from '../engine/timeFormat'
 import { relationTypeMeta } from '../engine/relationTypes'
+import {
+  arcControlPoint,
+  countSyntheticTail,
+  distToSeg,
+  pickNearest,
+  pickScaleBarDays,
+  resampleRing,
+} from '../engine/mapGeometry'
+import { escapeHtml as esc } from '../../../shared/utils/htmlText'
 import RelationInlineForm from '../presentation/RelationInlineForm.vue'
 import { BLANK_ATLAS_INNER, BLANK_ATLAS_VIEWBOX } from './blankAtlas'
 import type { DrawMode, WorldLocation, WorldMapLayer, WorldRelation } from '../engine/types'
 
 const props = defineProps<{
   bookId: string
-  /** 拾取模式：null=浏览, 'location'=点选建地点（点击 emit pick） */
-  pickingMode?: 'location' | null
+  /** 拾取模式：null=浏览, 'location'=点选建地点, 'quick-note'=速记新地点标位（点击 emit pick） */
+  pickingMode?: 'location' | 'quick-note' | null
   /** 绘制模式：非 null 时地图点击收集顶点（point 模式单击即完成），双击/Enter/完成闭合后 emit draw-complete */
   drawMode?: DrawMode
   /** D4 比例尺标定（books.map_scale；null=未标定角标显示引导） */
   mapScale?: MapScale | null
+  /** 地标脉冲高亮（面板 📍 定位回指；WorldView 定时摘除——class 常驻会在 zoomend 重渲时随机重播） */
+  highlightLocationId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -41,6 +52,8 @@ const emit = defineEmits<{
   'draw-complete': [points: [number, number][]]
   'entity-click': [entityId: string]
   'location-detail': [locationId: string]
+  /** 地标点击回指（与 popup 并存；父级据此在地点面板内高亮+滚动对应条目） */
+  'location-highlight': [locationId: string]
 }>()
 
 // ===== D4 比例尺标定：拉线捕获 + 左下角比例尺角标 =====
@@ -79,14 +92,8 @@ function updateScaleBar() {
   // CRS.Simple 覆写了 scale(zoom)=2^zoom（非 EPSG:3857 的 256·2^zoom）：
   // zoom 0 时 1 tile(256px) 恰覆盖 256 内部单位 → 1 screen px = 1/2^z 内部单位
   const unitsPerScreenPx = 1 / (2 ** zoom)
-  for (const days of [0.5, 1, 2, 5, 10, 20, 50]) {
-    const pxLen = (days * ppd) / unitsPerScreenPx
-    if (pxLen >= 60 && pxLen <= 160) {
-      scaleBarText.value = `≈ ${days < 1 ? '半日' : days + ' 天'}步程`
-      return
-    }
-  }
-  scaleBarText.value = '已标定'
+  const days = pickScaleBarDays(ppd, unitsPerScreenPx)
+  scaleBarText.value = days == null ? '已标定' : `≈ ${days < 1 ? '半日' : days + ' 天'}步程`
 }
 
 function onCalibrateStart() { startCalibrating() }
@@ -218,12 +225,6 @@ const LOC_KIND_COLOR: Record<string, string> = {
   point: '#7c6aad',
   region: '#10b981',
   route: '#60a5fa',
-}
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"]/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string,
-  )
 }
 
 // ===== 底图：图片拼贴层（常驻最底）+ images 编辑态交互 =====
@@ -467,7 +468,13 @@ function toggleEdit(mode: 'images' | 'draw') {
 
 // ===== 底图：手绘笔迹（canvas 覆盖层，rAF 全量重绘同步地图）=====
 
+// ⚠ canvas 2D 的 strokeStyle 按 CSS <color> 解析，不支持 var()（非法值被静默忽略，
+// 画成上一支笔的颜色，且 var() 字符串会随 addStroke 落库）——画笔必须用固定 hex，
+// 勿换主题 token（token 分主题变色，也不适合作为入库数据的颜色语义）
 const PEN_COLORS = ['#6b5537', '#3f6212', '#1d4ed8', '#475569', '#b91c1c', '#1c1917']
+// 渲染侧兜底：UX 重构期曾有 'var(--info)'/'var(--danger)' 入库，归一回退色
+// （只修显示不改库；redo 按原串重建也照样归一）
+const _STROKE_COLOR_FIX: Record<string, string> = { 'var(--info)': '#1d4ed8', 'var(--danger)': '#b91c1c' }
 const PEN_SIZES = [2, 4, 8]
 
 const strokeCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -517,7 +524,7 @@ function drawStrokes() {
       const cp = map!.latLngToContainerPoint([y, x])
       return [cp.x, cp.y] as [number, number]
     })
-    ctx.strokeStyle = s.color
+    ctx.strokeStyle = _STROKE_COLOR_FIX[s.color] ?? s.color
     ctx.lineWidth = s.width
     ctx.beginPath()
     ctx.moveTo(pts[0][0], pts[0][1])
@@ -605,15 +612,6 @@ function eraseAtPoint(p: [number, number]) {
     }
   }
 }
-function distToSeg(p: L.Point, a: L.Point, b: L.Point): number {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len2 = dx * dx + dy * dy
-  if (len2 === 0) return p.distanceTo(a)
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
-  t = Math.max(0, Math.min(1, t))
-  return p.distanceTo(L.point(a.x + t * dx, a.y + t * dy))
-}
 
 /** 地点子级索引（marker 内部构造记号 / popup 计数行共用） */
 const locChildren = computed(() => childrenIndex(locations.value))
@@ -633,7 +631,7 @@ function renderMarkers() {
     const hasInner = (locKids.get(loc.id) || []).length > 0
     const icon = L.divIcon({
       className: 'wm-loc-icon',
-      html: `<div class="wm-loc${hasInner ? ' wm-loc--inner' : ''}" style="--c:${color}"><span class="wm-loc-ring"></span>${
+      html: `<div class="wm-loc${hasInner ? ' wm-loc--inner' : ''}${props.highlightLocationId === loc.id ? ' wm-loc--hl' : ''}" style="--c:${color}"><span class="wm-loc-ring"></span>${
         hasInner ? '<span class="wm-loc-dot"></span>' : ''
       }${
         withLabel ? `<span class="wm-loc-name">${esc(loc.name)}</span>` : ''
@@ -651,6 +649,8 @@ function renderMarkers() {
       const ll = m.getLatLng()
       updateLocationCoords(props.bookId, loc.id, ll.lng, ll.lat)
     })
+    // 点击回指（popup 照常开；父级据此联动地点面板条目）
+    m.on('click', () => emit('location-highlight', loc.id))
     m.bindPopup(buildLocPopupHtml(loc))
     markerLayer.addLayer(m)
   }
@@ -743,7 +743,7 @@ function entityDisplayPosition(entId: string): EntityDisplay | null {
 }
 
 const NODE_COLOR: Record<string, string> = {
-  character: '#f59e0b',
+  character: 'var(--warn)',
   faction: '#10b981',
   asset: '#c9a227',
 }
@@ -857,15 +857,8 @@ function renderRelations() {
     if (!a || !b) continue
     const meta = relationTypeMeta(r.relation_type)
     const born = prevActiveRelIds.size > 0 && !prevActiveRelIds.has(r.id) // 激活瞬间生长
-    // 三点轻弧（中点垂直偏移），随端点移动伸缩
-    const mx = (a.x + b.x) / 2
-    const my = (a.y + b.y) / 2
-    const dx = b.x - a.x
-    const dy = b.y - a.y
-    const len = Math.hypot(dx, dy) || 1
-    const off = Math.min(60, len * 0.12)
-    const cx = mx - (dy / len) * off
-    const cy = my + (dx / len) * off
+    // 三点轻弧（中点垂直偏移，随端点移动伸缩）
+    const { x: cx, y: cy } = arcControlPoint(a, b)
     const dimmed = !!hl && r.source_entity_id !== hl && r.target_entity_id !== hl
     const line = L.polyline(
       [
@@ -931,17 +924,12 @@ function onLinkPointerUp(e: PointerEvent) {
   const r = containerRef.value.getBoundingClientRect()
   const px = e.clientX - r.left
   const py = e.clientY - r.top
-  let bestId: string | null = null
-  let bestD = 26 * 26
+  const candidates: Array<[string, { x: number; y: number }]> = []
   for (const [id, mk] of entityMarkers) {
     if (id === sourceId) continue
-    const p = map.latLngToContainerPoint(mk.getLatLng())
-    const d = (p.x - px) ** 2 + (p.y - py) ** 2
-    if (d < bestD) {
-      bestD = d
-      bestId = id
-    }
+    candidates.push([id, map.latLngToContainerPoint(mk.getLatLng())])
   }
+  const bestId = pickNearest(px, py, candidates, 26)
   if (bestId) {
     const a = entityDisplayPosition(sourceId)
     const b = entityDisplayPosition(bestId)
@@ -1084,35 +1072,6 @@ interface TerritoryEntry {
 const territoryPolys = new Map<string, TerritoryEntry>()
 let lastStateTime = 0
 
-function resampleRing(pts: [number, number][], n: number): [number, number][] {
-  if (pts.length === 0) return []
-  if (pts.length === 1) return Array.from({ length: n }, () => [...pts[0]] as [number, number])
-  const segs: number[] = []
-  let total = 0
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i]
-    const b = pts[(i + 1) % pts.length] // 闭合环采样
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1])
-    segs.push(len)
-    total += len
-  }
-  const out: [number, number][] = []
-  for (let k = 0; k < n && total > 0; k++) {
-    let target = (k / n) * total
-    for (let i = 0; i < segs.length; i++) {
-      if (target <= segs[i] || i === segs.length - 1) {
-        const t = segs[i] === 0 ? 0 : Math.min(1, target / segs[i])
-        const a = pts[i]
-        const b = pts[(i + 1) % pts.length]
-        out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
-        break
-      }
-      target -= segs[i]
-    }
-  }
-  return out
-}
-
 function morphPolygon(entry: TerritoryEntry, targetPts: [number, number][]) {
   const n = Math.max(16, Math.max(entry.pts.length, targetPts.length))
   const from = resampleRing(entry.pts, n)
@@ -1157,7 +1116,7 @@ function spawnRipples(t: number) {
   for (const e of crossed) {
     const pt = eventPoint(e, locationsById.value)
     if (!pt) continue
-    const color = EVENT_TYPE_COLOR[e.event_type] || '#94a3b8'
+    const color = EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)'
     const big =
       e.event_type === 'battle' || e.event_type === 'territory_change' || e.event_type === 'war_declare'
     const icon = L.divIcon({
@@ -1184,7 +1143,7 @@ function renderEventMarkers() {
     if (e.time_start > t) continue
     const pt = eventPoint(e, locationsById.value)
     if (!pt) continue
-    const color = EVENT_TYPE_COLOR[e.event_type] || '#94a3b8'
+    const color = EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)'
     const label = getTemplate(e.event_type)?.label || e.event_type
     const icon = L.divIcon({
       className: 'wm-evt-icon',
@@ -1343,7 +1302,7 @@ onMounted(() => {
       selectedLayerId.value = null // 点空白取消选中（图上的点击已被 stopPropagation）
       return
     }
-    if (props.pickingMode === 'location') {
+    if (props.pickingMode) {
       emit('pick', [e.latlng.lng, e.latlng.lat])
     }
   })
@@ -1352,18 +1311,8 @@ onMounted(() => {
     // 双击闭合。双击会伴随 1~2 次 click（数量随事件源不定，真实浏览器为 2）——
     // 把「与双击同位置且 600ms 内」的尾部合成顶点剥掉再闭合；
     // 用户真实顶点时间更早或位置不同，不会被误删。
-    const now = Date.now()
-    let removed = 0
-    while (removed < 2) {
-      const last = draftPoints.value[draftPoints.value.length - 1]
-      if (!last) break
-      const sameSpot =
-        Math.abs(last.p[0] - e.latlng.lng) < 0.01 && Math.abs(last.p[1] - e.latlng.lat) < 0.01
-      if (now - last.t < 600 && sameSpot) {
-        draftPoints.value.pop()
-        removed++
-      } else break
-    }
+    const removed = countSyntheticTail(draftPoints.value, e.latlng.lng, e.latlng.lat, Date.now())
+    for (let i = 0; i < removed; i++) draftPoints.value.pop()
     finishDraw()
   })
   map.on('mousemove', (e: L.LeafletMouseEvent) => {
@@ -1451,6 +1400,9 @@ onMounted(() => {
 })
 
 watch(locations, renderMarkers, { deep: true })
+// 面板 📍 回指脉冲：prop 变化重渲 marker 层挂/摘 wm-loc--hl（null→id→null 两次触发，
+// WorldView 侧 nextTick 分离保证连点同目标也能重播）
+watch(() => props.highlightLocationId, () => renderMarkers())
 watch([worldState, currentTime, events], () => {
   spawnRipples(currentTime.value)
   renderTracks()
@@ -1613,9 +1565,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 图例（单一画布的编辑入口可发现性；默认收起为一行，hover 展开手势明细） -->
+    <!-- 图例（单一画布的编辑入口可发现性；默认收起为一行，hover 展开手势明细）。
+         02 期 §5.2：tabindex + focus-within 补键盘对等（pop 是纯信息面板，display 模式保留） -->
     <div v-if="!inEditMode && hasVisibleNodes" class="wm-legend">
-      <span class="wm-legend-tag">图例</span>
+      <span class="wm-legend-tag" tabindex="0">图例</span>
       <div class="wm-legend-pop">
         <div class="wm-legend-row"><kbd>⇧ 拖</kbd><span>甲节点 → 乙节点：结缘</span></div>
         <div class="wm-legend-row"><kbd>右键</kbd><span>空白处：落一个新名字</span></div>
@@ -1991,8 +1944,8 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 .wm-ebtn--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .wm-ebtn--done {
   font-weight: 600;
@@ -2004,7 +1957,7 @@ onBeforeUnmount(() => {
   margin: 0 2px;
 }
 .wm-ehint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -2083,7 +2036,7 @@ onBeforeUnmount(() => {
   background: rgba(250, 247, 240, 0.92);
   border: 1px solid rgba(120, 100, 80, 0.25);
   color: #6b5c4c;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.05em;
   pointer-events: none;
 }
@@ -2164,8 +2117,27 @@ onBeforeUnmount(() => {
 .wm-loc:hover .wm-loc-ring {
   transform: scale(1.25);
 }
+/* 面板 📍 定位/联动回指：地标声呐脉冲（3 拍自止；class 由 WorldView 定时摘除，
+   常驻会在 zoomend 等重渲时机随机重播） */
+.wm-loc--hl .wm-loc-ring {
+  animation: wm-loc-pulse 0.8s ease-out 3;
+}
+@keyframes wm-loc-pulse {
+  0% {
+    box-shadow: 0 1px 5px rgba(60, 44, 22, 0.3), 0 0 0 0 color-mix(in srgb, var(--c, #7c6aad) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 1px 5px rgba(60, 44, 22, 0.3), 0 0 0 16px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wm-loc--hl .wm-loc-ring {
+    animation: none;
+    transform: scale(1.35); /* 降级为静态放大提示 */
+  }
+}
 .wm-loc-name {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-primary, #2c2c2c);
   background: var(--bg-canvas, #fefdfb);
@@ -2191,7 +2163,7 @@ onBeforeUnmount(() => {
   width: 15px;
   height: 15px;
   border-radius: 9999px;
-  background: var(--c, #f59e0b);
+  background: var(--c, var(--warn));
   border: 2.5px solid #f4ead4;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
   animation: wm-breathe 3.2s ease-in-out infinite;
@@ -2206,7 +2178,7 @@ onBeforeUnmount(() => {
 .wm-char-name {
   margin-top: 3px;
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--text-primary, #2c2c2c);
@@ -2259,7 +2231,7 @@ onBeforeUnmount(() => {
   position: relative;
   width: 15px;
   height: 15px;
-  background: var(--c, #f59e0b);
+  background: var(--c, var(--warn));
   border: 2.5px solid #f4ead4;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
   animation: wm-breathe 3.2s ease-in-out infinite;
@@ -2321,7 +2293,7 @@ path.wm-rel-born {
   background: rgba(249, 242, 226, 0.85);
   border: 1px solid rgba(107, 90, 68, 0.3);
   color: rgba(109, 90, 60, 0.85);
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0.28em;
   text-indent: 0.28em;
   cursor: default;
@@ -2338,7 +2310,8 @@ path.wm-rel-born {
   padding: 10px 12px;
   box-shadow: 0 8px 24px rgba(96, 72, 36, 0.18);
 }
-.wm-legend:hover .wm-legend-pop {
+.wm-legend:hover .wm-legend-pop,
+.wm-legend:focus-within .wm-legend-pop {
   display: block;
 }
 .wm-legend-row {
@@ -2346,12 +2319,12 @@ path.wm-rel-born {
   align-items: center;
   gap: 7px;
   margin: 4px 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: rgba(74, 68, 56, 0.85);
 }
 .wm-legend-row kbd {
   font-family: inherit;
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   color: rgba(74, 68, 56, 0.9);
   border: 1px solid rgba(107, 90, 68, 0.35);
   border-bottom-width: 2px;
@@ -2385,7 +2358,7 @@ path.wm-rel-born {
 }
 .wm-ctx-title {
   padding: 3px 8px 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #a89e90);
   border-bottom: 1px solid var(--border-color, #e0dbd3);
   margin-bottom: 4px;
@@ -2470,7 +2443,7 @@ path.wm-rel-born {
 }
 .wm-cform-hint {
   margin-top: 7px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #a89e90);
   line-height: 1.5;
 }
@@ -2501,7 +2474,7 @@ path.wm-track-flow {
   height: 8px;
   margin: -4px 0 0 -4px;
   border-radius: 9999px;
-  border: 2px solid var(--c, #94a3b8);
+  border: 2px solid var(--c, var(--text-muted));
   animation: wm-ripple 1.4s ease-out forwards;
 }
 .wm-ripple::after {
@@ -2509,7 +2482,7 @@ path.wm-track-flow {
   position: absolute;
   inset: -2px;
   border-radius: 9999px;
-  border: 1.5px solid var(--c, #94a3b8);
+  border: 1.5px solid var(--c, var(--text-muted));
   animation: wm-ripple 1.4s 0.22s ease-out forwards;
 }
 .wm-ripple--big,
@@ -2538,7 +2511,7 @@ path.wm-track-flow {
   height: 11px;
   transform: translate(-5.5px, -5.5px) rotate(8deg);
   background: transparent;
-  border: 2.5px solid var(--c, #94a3b8);
+  border: 2.5px solid var(--c, var(--text-muted));
   border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%;
   box-shadow:
     inset 0 0 0 1.5px rgba(244, 234, 212, 0.55),
@@ -2602,7 +2575,7 @@ path.wm-track-flow {
 /* popup 次要文字 */
 .wm-pop-sub {
   color: var(--text-muted, #a89e90);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .wm-pop-title {
   font-weight: 700;
@@ -2612,14 +2585,14 @@ path.wm-track-flow {
 }
 .wm-pop-intro {
   margin-top: 4px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, var(--text-secondary));
   max-width: 200px;
 }
 .wm-pop-inner {
   margin-top: 4px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--accent-400, #8b6de8);
 }
 /* 地点 popup 就地改名/删除 */
@@ -2649,8 +2622,8 @@ path.wm-track-flow {
   border: 1px solid var(--border-color, #e0dbd3);
   border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary, #64748b);
-  font-size: 11px;
+  color: var(--text-secondary, var(--text-secondary));
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -2660,8 +2633,8 @@ path.wm-track-flow {
   color: var(--accent-500, #7c6aad);
 }
 .wm-pop-btn--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* 空白舆图浮动提示卡：纸面卡片浮在手绘世界平面上（插画本体是 svgOverlay，随图缩放平移） */
@@ -2693,14 +2666,14 @@ path.wm-track-flow {
   .wm-blankcard { animation: none; }
 }
 .wm-blankcard-over {
-  font-size: 9px;
+  font-size: var(--text-xs);
   letter-spacing: 0.42em;
   text-indent: 0.42em;
   color: #b08d3e;
 }
 .wm-blankcard-title {
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
-  font-size: 19px;
+  font-size: var(--text-2xl);
   font-weight: 700;
   letter-spacing: 0.14em;
   color: rgba(74, 68, 56, 0.78);
@@ -2711,7 +2684,7 @@ path.wm-track-flow {
 }
 .wm-blankcard-sub {
   margin-top: 5px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.9;
   color: var(--text-muted, #a89e90);
 }

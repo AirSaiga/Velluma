@@ -16,6 +16,11 @@ const props = defineProps<{
   /** 保存状态（真实落库在 WorkspaceView，经 props 下传显示在页面头） */
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   lastSavedAt?: Date | null
+  /** 当前章节字数（WorkspaceView 计算下传，页面头 meta 行显示） */
+  wordCount?: number
+  /** AI 状态短句（08 期 §4.2：顶栏退役后透传至页面头 meta 行） */
+  aiStateLabel?: string
+  aiStateError?: boolean
 }>()
 
 const emit = defineEmits(['update-chapter', 'update-meta-collapsed', 'refresh-characters', 'editor-entity-focus'])
@@ -56,7 +61,12 @@ defineExpose({
     :book-id="props.bookId"
     :save-status="props.saveStatus"
     :last-saved-at="props.lastSavedAt"
-  />
+    :word-count="props.wordCount"
+    :ai-state-label="props.aiStateLabel"
+    :ai-state-error="props.aiStateError"
+  >
+    <template #page-top><slot name="page-top" /></template>
+  </ChapterEditorView>
 
   <InspirationModal
     :show="viewModel.showInspirationModal.value"

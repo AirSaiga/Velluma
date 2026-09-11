@@ -56,6 +56,11 @@ id/条文/layers/enforcement/surface/status/when/origin。**status 是代码内
 outcome=hit|drop|exempt|mute|rewrite。信用分机制一期不做，但数据从第一天
 攒——缺了未来只能补埋点重来。
 
+**读面**：`GET /api/chapters/{chapter_id}/adaptive/constraints/summary` →
+`{chapter_id, total, by_constraint, by_outcome, recent(最新 20 条)}`（324c83a
+落地；按章过滤台账聚合，信用分/服从率度量的数据出口——前端「约束健康」面板
+等数据体量后再接线；failure 静默返回空结构，零报错契约）。
+
 **强措辞 lint** `scan_prompt_wording`：词典=铁律/绝不/必须/禁止/不许/严禁/
 务必（section 标题计入）。dock 编译器验收闸=「铁律」归零、总数较旧基线
 （15+）显著下降。
@@ -346,3 +351,23 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   None 属性名事故：零报错契约把 out_of_scene 整检死亡吞成静默数月，
   **新检首轮实测必须确认命中路径可达**）；全量回归后端 1090 绿。
 
+
+## 13. dock 红队三批新增约束（2026-09-08/09，未提交批内）
+
+红队审查「重力场方案」落地后随批登记的两条新约束（`registry.py`）：
+
+- **`dock-bridge-overlap`**（live，gate）：中插桥接（FIM）机位与后文锚
+  `suffix_anchor` 去标点后 ≥4 字连续重叠 → 撞车丢件——后文已写的事实是
+  禁区，过渡不许提前消耗它。判据复用 `_beats_overlap_hit` 同族 n-gram
+  （纯字符串零算力）。origin=2026-09-09 FIM 红队 R2：rehash/beat_overlap
+  只防前文与大纲，后文防线此前缺位。
+- **`dock-onstage-boundary`**（shadow，gate）：挂件出现非在册实体/资产名 ×
+  上手动词框架（握拿放捡掏开等）→ 在场越界疑点，只落台账不丢件（转正后
+  丢件由过采样吸收）。when=世界书且本场在册非空（`onstage_projection`
+  可得；正文已提及名豁免）。origin=2026-09-08 红队 R3「地面」：dock 曾是
+  唯一不注入场景身份的生成路径，T3 可指涉物白名单代码闸与 ghost_guard
+  out_of_scene 同族判据。
+
+配套行为面见 AGENTS.md NLE-ADF 节「卡舱在场制×分镜组×临时通行证」条
+（在场投影/末句对白优先/anchor_ref 对白分镜组/Guest Pass/意图衰老闸，
+对拍 `test_dock_onstage.py`）。

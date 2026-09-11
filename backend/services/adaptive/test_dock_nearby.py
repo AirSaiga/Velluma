@@ -119,7 +119,7 @@ def _run_dock(monkeypatch, bundle):
     async def fake_recall(db, **kw):
         return []
 
-    async def fake_cache(db, chapter_id, parts):
+    async def fake_cache(db, chapter_id, parts, guests=None):
         pass
 
     monkeypatch.setattr(dg, "load_chapter_settings_bundle", fake_bundle)

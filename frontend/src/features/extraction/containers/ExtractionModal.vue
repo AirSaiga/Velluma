@@ -143,7 +143,7 @@ const stepLabel: Record<string, string> = {
 
         <!-- idle / analyzing：加载中 -->
         <div v-else-if="session.step.value === 'idle' || session.step.value === 'analyzing'" class="loading-view">
-          <Icon name="arrow-path" :size="40" class="spin" />
+          <Icon name="arrow-path" :size="40" class="spin spin-reduced" />
           <p class="loading-text">LLM 正在分析正文，提取角色、关系、地点、资产和伏笔……</p>
           <p class="loading-hint">这可能需要 30-60 秒</p>
         </div>
@@ -158,7 +158,7 @@ const stepLabel: Record<string, string> = {
 
         <!-- committing：提交进度 -->
         <div v-else-if="session.step.value === 'committing'" class="committing-view">
-          <Icon name="arrow-path" :size="32" class="spin" />
+          <Icon name="arrow-path" :size="32" class="spin spin-reduced" />
           <p class="loading-text">正在写入数据库……</p>
           <div class="progress-steps">
             <div
@@ -213,7 +213,7 @@ const stepLabel: Record<string, string> = {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-modal); /* B3：200→110 toast 现在盖它（操作结果不可被遮挡） */
   padding: 2rem;
   backdrop-filter: blur(2px);
 }

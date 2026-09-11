@@ -151,7 +151,7 @@ function navigate(item: RailItem) {
 }
 
 .rail-label {
-  font-size: 9px;
+  font-size: var(--text-xs);
   line-height: 1;
   letter-spacing: 0.02em;
   white-space: nowrap;

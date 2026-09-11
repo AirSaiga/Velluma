@@ -163,7 +163,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                   <li><span class="text-[var(--text-secondary)]">deepseek</span> — Deepseek API（兼容 OpenAI 协议）</li>
                 </ul>
               </div>
-              <p class="text-[10px] text-[var(--text-muted)] mt-3">
+              <p class="text-xs text-[var(--text-muted)] mt-3">
                 修改后请重启后端服务以生效。
               </p>
             </div>
@@ -303,7 +303,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                 max="20"
                 class="w-24 px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
+              <p class="text-xs text-[var(--text-muted)] mt-1">
                 内部字段：rag_top_k — 从历史章节中检索多少条相关记忆
               </p>
             </div>
@@ -335,7 +335,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                     step="0.1"
                     class="w-full"
                   />
-                  <p class="text-[10px] text-[var(--text-muted)]">内部字段：rag_alpha</p>
+                  <p class="text-xs text-[var(--text-muted)]">内部字段：rag_alpha</p>
                 </div>
                 
                 <div>
@@ -352,7 +352,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                     step="0.1"
                     class="w-full"
                   />
-                  <p class="text-[10px] text-[var(--text-muted)]">内部字段：rag_beta — 较近章节的记忆权重更高</p>
+                  <p class="text-xs text-[var(--text-muted)]">内部字段：rag_beta — 较近章节的记忆权重更高</p>
                 </div>
                 
                 <div>
@@ -369,7 +369,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                     step="0.1"
                     class="w-full"
                   />
-                  <p class="text-[10px] text-[var(--text-muted)]">内部字段：rag_gamma — 与伏笔相关的记忆权重更高</p>
+                  <p class="text-xs text-[var(--text-muted)]">内部字段：rag_gamma — 与伏笔相关的记忆权重更高</p>
                 </div>
               </div>
               
@@ -421,7 +421,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                 max="5"
                 class="w-24 px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] text-sm focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40"
               />
-              <p class="text-[10px] text-[var(--text-muted)] mt-1">
+              <p class="text-xs text-[var(--text-muted)] mt-1">
                 内部字段：max_iterations — 生成-审阅-精修的循环次数上限
               </p>
             </div>

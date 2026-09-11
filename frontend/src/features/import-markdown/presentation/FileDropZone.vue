@@ -154,7 +154,7 @@ function triggerFileInput() {
 }
 
 .drop-format {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0.375rem 0 0;
 }
@@ -178,7 +178,7 @@ function triggerFileInput() {
   align-items: center;
   gap: 0.375rem;
   font-size: 0.75rem;
-  color: #b45309;
+  color: var(--warn);
 }
 
 .skip-name {

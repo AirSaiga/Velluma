@@ -9,10 +9,11 @@
  * 轻量编辑不进 undo（与实体档案/改名同策略）；建/删进 undo
  * （useWorld createLocation/deleteLocation 自带逆命令）。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
 import { useToast } from '../../../composables/useToast'
+import { useEscStack } from '../../../composables/useEscStack'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { vAutogrow } from './autogrow'
 import { childrenIndex, collectSubtree } from '../engine/locationTree'
@@ -29,6 +30,14 @@ const emit = defineEmits<{
 
 const { locations, createLocation, updateLocation, deleteLocation } = useWorld()
 const { showToast } = useToast()
+
+// Esc 分层关闭栈（00 期 §4.2）：挂载即入栈（一次 Esc 只关栈顶、焦点不在层内也生效），
+// 卸载即出栈——替代根元素 @keydown.esc（旧路径焦点不在抽屉内时失效）
+const escStack = useEscStack()
+let escId: symbol | null = null
+onMounted(() => { escId = escStack.push(() => emit('close'), 'location-detail-drawer') })
+onUnmounted(() => { if (escId) escStack.remove(escId) })
+
 const { show: showConfirm } = useConfirmDialog()
 
 // ===== 当前层与面包屑 =====
@@ -188,7 +197,7 @@ async function removeCurrent() {
 </script>
 
 <template>
-  <div v-if="current" class="ldd" @keydown.esc="emit('close')">
+  <div v-if="current" class="ldd">
     <!-- 面包屑（下钻路径） -->
     <div v-if="crumbs.length > 1" class="ldd-crumbs">
       <template v-for="(c, i) in crumbs" :key="c.id">
@@ -346,7 +355,7 @@ async function removeCurrent() {
   flex-wrap: wrap;
   gap: 2px;
   margin-bottom: 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #888);
 }
 .ldd-crumb {
@@ -356,7 +365,7 @@ async function removeCurrent() {
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .ldd-crumb:hover {
   background: rgba(139, 109, 232, 0.1);
@@ -437,7 +446,7 @@ async function removeCurrent() {
   margin-top: 12px;
 }
 .ldd-lbl {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #999);
 }
 .ldd-intro {
@@ -447,7 +456,7 @@ async function removeCurrent() {
   background: var(--bg-subtle, rgba(0, 0, 0, 0.02));
   color: var(--text-primary, #333);
   padding: 7px 9px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   resize: none;
   font-family: inherit;
@@ -469,7 +478,7 @@ async function removeCurrent() {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 7px;
   border-radius: 999px;
   background: rgba(107, 90, 68, 0.1);
@@ -489,7 +498,7 @@ async function removeCurrent() {
   border: none;
   border-bottom: 1px dashed var(--border-color, #ccc);
   background: transparent;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 4px;
   color: var(--text-primary, #333);
 }
@@ -504,7 +513,7 @@ async function removeCurrent() {
   align-items: center;
   gap: 6px;
   margin-top: 12px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #888);
 }
 .ldd-link {
@@ -512,7 +521,7 @@ async function removeCurrent() {
   border: none;
   color: var(--accent-400, #8b6de8);
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   padding: 2px 4px;
   border-radius: 4px;
 }
@@ -540,14 +549,14 @@ async function removeCurrent() {
   gap: 6px;
 }
 .ldd-sec-count {
-  font-size: 10px;
+  font-size: var(--text-xs);
   background: rgba(107, 90, 68, 0.12);
   border-radius: 999px;
   padding: 1px 6px;
   color: var(--text-secondary, #6b5a44);
 }
 .ldd-sec-note {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #999);
   margin: 6px 0 8px;
   line-height: 1.5;
@@ -574,19 +583,19 @@ async function removeCurrent() {
   gap: 1px;
 }
 .ldd-child-name {
-  font-size: 12.5px;
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--text-primary, #333);
 }
 .ldd-child-intro {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #999);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .ldd-child-sub {
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted, #999);
   flex: none;
 }
@@ -623,7 +632,7 @@ async function removeCurrent() {
   border-radius: 8px;
   background: var(--bg-subtle, rgba(0, 0, 0, 0.02));
   padding: 6px 9px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-primary, #333);
   font-family: inherit;
 }
@@ -671,7 +680,7 @@ async function removeCurrent() {
   background: none;
   border: none;
   color: #b4543f;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;

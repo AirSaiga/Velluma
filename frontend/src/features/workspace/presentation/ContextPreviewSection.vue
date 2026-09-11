@@ -31,16 +31,16 @@ const emit = defineEmits<{
 
 const MODES: Array<{ key: PreviewMode; label: string }> = [
   { key: 'continue', label: '顺写' },
-  { key: 'stitch', label: '缝合' },
+  { key: 'stitch', label: '拼画面' },
   { key: 'burst', label: '连写' },
   { key: 'outline', label: '细纲' },
-  { key: 'open', label: '点火' },
+  { key: 'open', label: '写开头' },
 ]
 
 const TIME_SOURCE_LABELS: Record<string, string> = {
-  chapter_anchor: '本章锚定',
-  prev_anchor: '前序章锚定',
-  max_event: '事件最大时刻',
+  chapter_anchor: '本章固定',
+  prev_anchor: '上一章固定',
+  max_event: '最新事件',
   zero: '空世界',
 }
 
@@ -48,7 +48,7 @@ const TIME_SOURCE_LABELS: Record<string, string> = {
 const EMPTY_HINTS: Record<string, string> = {
   style_positive: '文风页填画像或选预设后，AI 会照此校准语感',
   author_samples: '文风页收几段亲笔样本，是质量杠杆最大的注入',
-  proper_nouns: '世界页建实体（或在正文 @ 提及），防缝合时称呼漂移',
+  proper_nouns: '世界页建好角色（或在正文 @ 提及），AI 写作时称呼不乱叫',
   canon: '世界页「真相」账本记一条，AI 便知晓事实与秘密',
   secrets: '世界页把实体设为「私有」，AI 知晓其档案但绝不写出',
   echoes: '写过的章节会进记忆，后续章节自动呼应细节',
@@ -77,7 +77,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   <section class="ctx-preview">
     <button class="ctx-toggle" @click="emit('toggle')">
       <Icon name="light-bulb" :size="14" />
-      <span>{{ open ? '收起 AI 此刻所见' : 'AI 此刻所见（预览）' }}</span>
+      <span>{{ open ? '收起 AI 此刻读到的' : 'AI 此刻读到的（预览）' }}</span>
       <Icon :name="open ? 'chevron-down' : 'chevron-up'" :size="12" class="ctx-chevron" />
     </button>
     <p class="ctx-hint">AI 续写时真的会读到这些——这里看到什么它就读到什么；空的块 = 这次用不上。</p>

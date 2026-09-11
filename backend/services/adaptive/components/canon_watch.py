@@ -191,9 +191,14 @@ async def run(
         try:
             from backend.services.adaptive.emergent_facts import extract_emergent_facts
             from backend.services.adaptive.components.sediment import _detect_conflicts
+            from backend.services.adaptive.observing import get_adaptive_recorder
 
             facts_data = await extract_emergent_facts(
-                recent_text, beat_id=f"canonwatch_{chapter_id[:8]}"
+                recent_text, beat_id=f"canonwatch_{chapter_id[:8]}",
+                # 独立 stage 记账（2026-09-10）：contradiction 是心跳链路里
+                # 唯一此前不落账的 LLM 调用，用量面板看不见这部分感知开销
+                recorder=get_adaptive_recorder(str(chapter_id)),
+                stage="adaptive.canon_watch",
             )
             conflicts = _detect_conflicts(facts_data.to_dict(), bundle)
             for c in conflicts[:3]:

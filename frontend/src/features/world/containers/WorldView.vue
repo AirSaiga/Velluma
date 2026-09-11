@@ -15,19 +15,23 @@ import { worldApi } from '../../../services/api'
 import { bookApi } from '../../../services/api/domain'
 import { useAppStore } from '../../app/useAppStore'
 import { formatTime, displayCandidateTime } from '../engine/timeFormat'
-import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
+import { getTemplate } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
 import { childrenIndex, collectSubtree, topLevelLocations } from '../engine/locationTree'
 import { groupEntities } from '../engine/entityGroups'
+import { ensurePinyin, matchesQuery } from '../engine/pinyinMatch'
 import type { WorldEvent, WorldLocation, EventType, DrawMode, Point } from '../engine/types'
 import WorldMap from './WorldMap.vue'
 import WorldTimeline from './WorldTimeline.vue'
 import QuickCapturePanel from '../presentation/QuickCapturePanel.vue'
+import QuickEventNote from '../presentation/QuickEventNote.vue'
 import EntityDetailDrawer from '../presentation/EntityDetailDrawer.vue'
 import LocationDetailDrawer from '../presentation/LocationDetailDrawer.vue'
 import EntityCard from '../presentation/EntityCard.vue'
+import DrawerShell from '../presentation/DrawerShell.vue'
+import EventSpineList from '../presentation/EventSpineList.vue'
 import BulkImportDialog from '../presentation/BulkImportDialog.vue'
-import ModalShell from '../presentation/ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import ForeshadowSection from '../presentation/ForeshadowSection.vue'
 import ForeshadowDetailDrawer from '../presentation/ForeshadowDetailDrawer.vue'
 import ReaderMirrorModal from '../presentation/ReaderMirrorModal.vue'
@@ -86,6 +90,7 @@ const {
   deleteEntity,
   locationsById,
   currentTime,
+  worldState,
   jumpToTime,
   foreshadows,
 } = useWorld()
@@ -122,6 +127,35 @@ function onQuickEvent(type: EventType, entityId: string) {
   eventInitialType.value = type
   eventPresetCharacterId.value = entityId
   showEventForm.value = true
+}
+
+// ===== 世界速记（关联式录入 2026-09-05）=====
+// 裸入口（胶囊条「记一笔历史」/事件抽屉「＋ 记一笔」/Alt+N）开速记——一句话把
+// 事件与新人物/新地点一次带上；带预设上下文的路径（时间轴右键时刻/实体抽屉快捷
+// 事态）仍直达模板表单——有预设时模板比句子快。速记内「按模板逐栏录 →」单向桥接回表单。
+const quickNoteRef = ref<InstanceType<typeof QuickEventNote> | null>(null)
+function openQuickNote() {
+  quickNoteRef.value?.openWith()
+}
+/** 速记「放到地图」：进点选模式记行号，onPick 里按 quick-note 分流回灌 */
+const quickNotePickIndex = ref<number | null>(null)
+function onQuickNoteMapPick(index: number) {
+  exitMapEdit() // 与底图编辑互斥
+  quickNotePickIndex.value = index
+  pickingMode.value = 'quick-note'
+}
+/** 速记标点取消（悬浮条取消 / Esc） */
+function onQuickNotePickCancel() {
+  quickNotePickIndex.value = null
+  if (pickingMode.value === 'quick-note') pickingMode.value = null
+}
+/** 速记入账/撤销后全量刷新（速记不经 useWorld 的 pushCommand，主数据要手动拉） */
+async function onQuickNoteCommitted() {
+  if (bookId.value) await load(bookId.value)
+}
+/** 速记内「按模板逐栏录 →」：游标时刻为默认时刻，直达结构化表单 */
+function onQuickNoteToTemplate() {
+  openEventForm(currentTime.value)
 }
 
 // ===== 实体详情抽屉（M2：档案/编年史/快捷事态的家，三透镜共享选中态）=====
@@ -476,6 +510,7 @@ const relocatingLoc = ref<WorldLocation | null>(null)
 function focusLocation(loc: WorldLocation) {
   if (loc.coord_x != null && loc.coord_y != null) {
     mapRef.value?.focusAt(loc.coord_x, loc.coord_y, loc.name)
+    pulseLocMarker(loc.id)
     return
   }
   // 无坐标（未上图/内部构造）→ 进拾取模式补坐标（原实现直接 return=死按钮）
@@ -485,6 +520,55 @@ function focusLocation(loc: WorldLocation) {
   draftKind.value = 'point'
   relocatingLoc.value = loc
   pickingMode.value = 'location'
+}
+
+/** 右缘任一浮层在场（图标栏抽屉或四个详情抽屉）→ 罗盘左移避让。
+ *  全高 340px 抽屉（right:58px）与罗盘（right:64px, z:660）物理重叠——旧浮层时代
+ *  详情抽屉盖罗盘已有先例，如今外壳统一全高，罗盘主动让位（避让位 58+340+16=414px）。 */
+const rightDrawerOpen = computed(
+  () =>
+    !!(activePanel.value || selectedEntityId.value || selectedLocId.value ||
+      selectedForeshadowId.value || selectedTruthId.value),
+)
+
+// ===== 地图双向联动（二期）=====
+/** 面板 📍 → 地图：地标声呐脉冲（2.4s 自清；null→nextTick→id 分离两次变更，连点同目标也重播） */
+const highlightedLocId = ref<string | null>(null)
+let locPulseTimer: number | undefined
+function pulseLocMarker(id: string) {
+  highlightedLocId.value = null
+  window.clearTimeout(locPulseTimer)
+  void nextTick(() => {
+    highlightedLocId.value = id
+    locPulseTimer = window.setTimeout(() => (highlightedLocId.value = null), 2400)
+  })
+}
+
+/** 地图标地点击 → 地点面板条目回指：行高亮 + 滚入视野 + 展开被折叠的祖先枝。
+ *  仅地点面板开着时联动（面板关着时 popup 已承载信息展示，不硬开面板抢视野）。 */
+const highlightedRowLocId = ref<string | null>(null)
+let rowHlTimer: number | undefined
+function expandLocAncestors(id: string) {
+  const byId = locationsById.value
+  let cur = byId[id]
+  while (cur?.parent_id) {
+    collapsedLocs.value.delete(cur.parent_id)
+    cur = byId[cur.parent_id]
+  }
+}
+function onMapLocationHighlight(id: string) {
+  if (activePanel.value !== 'loc') return
+  expandLocAncestors(id)
+  highlightedRowLocId.value = null
+  window.clearTimeout(rowHlTimer)
+  void nextTick(() => {
+    highlightedRowLocId.value = id
+    rowHlTimer = window.setTimeout(() => (highlightedRowLocId.value = null), 2400)
+    // 祖先展开后行才进 DOM——nextTick 后再滚；被搜索词滤掉的行静默跳过（不动用户的搜索词）
+    document
+      .querySelector(`.atlas-drawer li[data-loc-id="${id}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
 }
 
 // ===== W4 待确认候选（写作回流收件箱的跨章全貌）=====
@@ -638,18 +722,15 @@ const LOC_KIND_LABEL: Record<string, string> = { point: '地点', region: '区�
 // ===== 事件过滤 =====
 const evtFilter = ref('')
 const filteredEvents = computed(() => {
-  const q = evtFilter.value.trim().toLowerCase()
-  if (!q) return sortedEvents.value
-  return sortedEvents.value.filter(
-    (ev) =>
-      eventLabel(ev.event_type).toLowerCase().includes(q) ||
-      ev.event_type.toLowerCase().includes(q) ||
-      eventNote(ev.note).toLowerCase().includes(q),
+  const q = evtFilter.value
+  if (!q.trim()) return sortedEvents.value
+  return sortedEvents.value.filter((ev) =>
+    matchesQuery(q, eventLabel(ev.event_type), ev.event_type, eventNote(ev.note)),
   )
 })
 
 // ===== 点选建地点 =====
-const pickingMode = ref<'location' | null>(null)
+const pickingMode = ref<'location' | 'quick-note' | null>(null)
 const draftPoint = ref<[number, number] | null>(null)
 const draftName = ref('')
 const draftKind = ref<'point' | 'region' | 'route'>('point')
@@ -659,6 +740,14 @@ function startPickLocation() {
   pickingMode.value = 'location'
 }
 async function onPick(point: [number, number]) {
+  // 速记新地点标位：坐标回灌速记草稿对应行（模态由 applyMapPoint 恢复显示）
+  if (pickingMode.value === 'quick-note') {
+    pickingMode.value = null
+    const idx = quickNotePickIndex.value
+    quickNotePickIndex.value = null
+    if (idx !== null) quickNoteRef.value?.applyMapPoint(idx, point)
+    return
+  }
   // 补坐标拾取：更新既有地点坐标而非新建（来自详情抽屉「去地图放置」）
   if (relocatingLoc.value) {
     const loc = relocatingLoc.value
@@ -696,13 +785,35 @@ function cancelDraft() {
   relocatingLoc.value = null
 }
 
-// ===== 地点树（列表缩进子树 + 顶层计数口径）=====
-/** 树序展开：顶层在前、子级紧随父后带深度（列表缩进用） */
+// ===== 地点树（折叠分组 + 搜索 + 顶层计数口径）=====
+/** 折叠的顶层节点集（整枝剪除，只折叠自身子树——房间级以下同规则递归） */
+const collapsedLocs = ref(new Set<string>())
+function toggleLocCollapse(id: string) {
+  if (collapsedLocs.value.has(id)) collapsedLocs.value.delete(id)
+  else collapsedLocs.value.add(id)
+}
+function isLocCollapsed(id: string) {
+  return collapsedLocs.value.has(id)
+}
+const locFilter = ref('')
+/** 树序展开：顶层在前、子级紧随父后带深度（列表缩进用）；折叠枝剪除；
+ *  搜索时改「整枝保留」——自身或后代命中即入列（搜房间能带出父链），折叠态让位自动展开 */
 const orderedLocations = computed(() => {
-  const kids = childrenIndex(locations.value)
+  const kids = locChildren.value
+  const q = locFilter.value.trim().toLowerCase()
+  const hasMatchIn = (l: WorldLocation): boolean => {
+    if (matchesQuery(locFilter.value, l.name)) return true
+    return (kids.get(l.id) || []).some(hasMatchIn)
+  }
   const out: { loc: WorldLocation; depth: number }[] = []
   const walk = (list: WorldLocation[], depth: number) => {
     for (const l of list) {
+      if (q) {
+        if (!hasMatchIn(l)) continue
+      } else if (collapsedLocs.value.has(l.id)) {
+        out.push({ loc: l, depth })
+        continue
+      }
       out.push({ loc: l, depth })
       walk(kids.get(l.id) || [], depth + 1)
     }
@@ -731,6 +842,8 @@ async function removeLoc(loc: WorldLocation) {
 
 // 键盘编排：底图编辑（Esc 退出 / Del 删选中图）→ 绘制（Esc/Enter/Backspace）→ 拾取 Esc
 function onKeydown(e: KeyboardEvent) {
+  // 02 期 §3.4：Esc 栈（window capture 先行）已消费的 Escape 事件让位——防「一次 Esc 同关弹层+退出绘制态」双关
+  if (e.defaultPrevented) return
   const tag = (e.target as HTMLElement | null)?.tagName
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
   if (mapEditMode.value) {
@@ -753,8 +866,13 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'Escape' && pickingMode.value) {
+    const wasQuickNote = pickingMode.value === 'quick-note'
     pickingMode.value = null
     relocatingLoc.value = null
+    if (wasQuickNote) {
+      quickNotePickIndex.value = null
+      quickNoteRef.value?.cancelMapPick() // 速记模态从悬浮条恢复
+    }
   }
 }
 
@@ -820,11 +938,17 @@ function consumeRouteQuery() {
   // M5 伏笔深链（写作页「头顶的线」点击）：?fs=ledger_key 或 id，watch(foreshadows) 兜底
   const fs = route.query.fs
   if (typeof fs === 'string' && fs) pendingFsKey.value = fs
-  // M5 面板深链：?panel=expectations|worldview → 直接开对应模态；C1 起 ?panel=canon → 开真相账本格
+  // M5 面板深链：?panel=expectations|worldview → 直接开对应模态（账本族内容无独立图标，模态是唯一入口）。
+  // 02 期 §9：?panel= 扩展接受图标栏全 8 键 → 走 togglePanel（与点击图标同一路径，开/关/互斥语义一致）；未映射值静默忽略
   const panel = route.query.panel
   if (panel === 'expectations') showExpectations.value = true
   else if (panel === 'worldview') showWorldview.value = true
-  else if (panel === 'canon') activePanel.value = 'canon'
+  else if (typeof panel === 'string' && panel) {
+    const panelKeys: SidePanelKey[] = ['cand', 'fs', 'exp', 'canon', 'loc', 'evt', 'character', 'faction', 'asset']
+    if (panelKeys.includes(panel as SidePanelKey)) {
+      if (activePanel.value !== panel) togglePanel(panel as SidePanelKey)
+    }
+  }
 }
 
 const pendingLocId = ref<string | null>(null)
@@ -855,6 +979,20 @@ const returnChapterId = computed(() => {
   const ch = route.query.chapter
   return route.query.from === 'chapter' && typeof ch === 'string' && ch ? ch : null
 })
+
+// 临时在场角色建档深链（2026-09-09 涌现角色闭环）：?create_entity=明姐
+// &from=chapter&chapter=… → 打开新建实体卡并预填名字（角色档），作者补档案
+// 保存；「返回本章」走既有返程，写作台侧恢复光标。
+void (() => {
+  const name = route.query.create_entity
+  if (typeof name === 'string' && name.trim()) {
+    newType.value = 'character'
+    newName.value = name.trim()
+    newIntro.value = typeof route.query.create_intro === 'string' ? route.query.create_intro : ''
+    showEntityForm.value = true
+    void nextTick(() => entityNameInputRef.value?.focus())
+  }
+})()
 function returnToChapter() {
   if (!returnChapterId.value) return
   router.push({
@@ -871,13 +1009,9 @@ interface SidebarEntity {
   importance?: number
 }
 function filterAndSortEntities<T extends SidebarEntity>(list: T[]): T[] {
-  const q = entityFilter.value.trim().toLowerCase()
-  const filtered = q
-    ? list.filter(
-        (e) =>
-          e.name.toLowerCase().includes(q) ||
-          (e.aliases || []).some((a) => String(a).toLowerCase().includes(q)),
-      )
+  const q = entityFilter.value
+  const filtered = q.trim()
+    ? list.filter((e) => matchesQuery(q, e.name, ...(e.aliases || []).map(String)))
     : [...list]
   filtered.sort(
     (a, b) => (b.importance || 1) - (a.importance || 1) || a.name.localeCompare(b.name, 'zh'),
@@ -887,6 +1021,18 @@ function filterAndSortEntities<T extends SidebarEntity>(list: T[]): T[] {
 const visibleCharacters = computed(() => filterAndSortEntities(characters.value))
 const visibleFactions = computed(() => filterAndSortEntities(factions.value))
 const visibleAssets = computed(() => filterAndSortEntities(assets.value))
+
+// ===== 拼音检索懒加载（二期）：任一抽屉搜索框有输入才拉 pinyin-pro（数百 KB，无搜索零成本） =====
+watch([entityFilter, evtFilter, locFilter], ([a, b, c]) => {
+  if (a.trim() || b.trim() || c.trim()) void ensurePinyin()
+})
+
+// ===== 角色存活状态点（worldState 按当前时刻推演；无事件的角色不标 = 默认活着） =====
+const charAliveById = computed(() => {
+  const m = new Map<string, boolean>()
+  for (const cs of worldState.value.character_states) m.set(cs.entity_id, cs.alive)
+  return m
+})
 
 // ===== 资产抽屉分组（单分组 2026-09-03）：组内保持重要度序，未分组恒居首 =====
 const panelEntityGroups = computed(() =>
@@ -922,11 +1068,13 @@ function isGroupCollapsed(name: string | null) {
           </div>
         </div>
 
-        <!-- 罗盘（点击回到全图：视野收拢到底图+地点+实体；针平时轻摆、点击大摆归北） -->
+        <!-- 罗盘（点击回到全图：视野收拢到底图+地点+实体；针平时轻摆、点击大摆归北）。
+             02 期 §5.1：常驻「全图」caption 治「hover 才知用途」 -->
         <button
           class="atlas-compass"
-          :class="{ 'is-home': compassHome }"
+          :class="{ 'is-home': compassHome, 'is-avoid': rightDrawerOpen }"
           title="回到全图"
+          aria-label="回到全图视野"
           @click="onCompassClick"
         >
           <svg viewBox="0 0 80 92" aria-hidden="true">
@@ -940,12 +1088,13 @@ function isGroupCollapsed(name: string | null) {
             </g>
             <text x="40" y="10" text-anchor="middle" font-size="10" fill="rgba(110,85,45,.55)" font-family="serif">北</text>
           </svg>
+          <span class="ac-caption" aria-hidden="true">全图</span>
         </button>
 
         <!-- 单一画布：实体/关系/事件/疆域全部在地图（脑图已并入，M4 收敛） -->
         <div
           class="world-map-wrap"
-          :class="{ 'is-picking': pickingMode === 'location' }"
+          :class="{ 'is-picking': pickingMode !== null }"
           @drop.prevent="onDropMap"
           @dragover.prevent
         >
@@ -955,10 +1104,12 @@ function isGroupCollapsed(name: string | null) {
             :picking-mode="pickingMode"
             :draw-mode="drawMode"
             :map-scale="(store.currentBook.value as any)?.map_scale ?? null"
+            :highlight-location-id="highlightedLocId"
             @pick="onPick"
             @draw-complete="onDrawComplete"
             @entity-click="(id: string) => (selectedEntityId = id)"
             @location-detail="openLocDetail"
+            @location-highlight="onMapLocationHighlight"
           />
         </div>
 
@@ -976,14 +1127,14 @@ function isGroupCollapsed(name: string | null) {
             ↩ 返回本章
           </button>
           <span class="ap-sep"></span>
-          <button class="ap-btn ap-btn--primary" @click="openEventForm()">
+          <button class="ap-btn ap-btn--primary" title="一句话记下刚发生的事——新提到的人名地名一并认出（Alt+N）" @click="openQuickNote">
             <Icon name="flag" :size="13" />
             记一笔历史
           </button>
           <button
             class="ap-btn"
             :class="{ 'ap-btn--on': pickingMode === 'location' }"
-            :disabled="pickingMode === 'location'"
+            :disabled="pickingMode !== null"
             @click="startPickLocation"
           >
             <Icon name="map-pin" :size="13" />
@@ -998,7 +1149,7 @@ function isGroupCollapsed(name: string | null) {
             世界观
           </button>
           <div class="ap-more">
-            <button class="ap-btn ap-btn--icon" title="更多（批量 / 导入 / 撤销重做）" @click.stop="moreOpen = !moreOpen">
+            <button class="ap-btn ap-btn--icon" title="更多（批量 / 导入 / 撤销重做）" aria-label="更多" @click.stop="moreOpen = !moreOpen">
               ⋯
             </button>
             <div v-if="moreOpen" class="ap-menu" @click.stop>
@@ -1067,64 +1218,117 @@ function isGroupCollapsed(name: string | null) {
         />
       </div>
 
-      <!-- M6 图标栏：原右侧栏收成右缘 46px 栏，点图标浮出抽屉（同一时间只开一格） -->
+      <!-- M6 图标栏：原右侧栏收成右缘 46px 栏，点图标浮出抽屉（同一时间只开一格）。
+           02 期 §2 分组：收件 / 账本 / 名册——按钮顺序逐位不变，仅分隔线易位 + 组首标签 -->
       <div class="atlas-rail">
         <!-- 待确认常驻（2026-08-25 修复冷启动自锁：抽屉承载「通读本书」入口，
              空箱时隐藏图标 = 填满收件箱的入口在收件箱为空时不可达） -->
+        <span class="ar-group" aria-hidden="true">收件</span>
         <button
           class="ar-btn"
-          :class="{ 'ar-btn--on': activePanel === 'cand' }"
+          :class="{ 'ar-btn--on': activePanel === 'cand', 'ar-btn--peek': detailReturnPanel === 'cand' }"
+          :aria-pressed="activePanel === 'cand'"
           title="待确认 · 候选事件"
           @click="togglePanel('cand')"
         >
           <Icon name="clock" :size="15" />
           <span v-if="pendingCandidates.length" class="ar-n">{{ pendingCandidates.length }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'fs' }" title="伏笔" @click="togglePanel('fs')">
+        <span class="ar-sep"></span>
+        <span class="ar-group" aria-hidden="true">账本</span>
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'fs', 'ar-btn--peek': detailReturnPanel === 'fs' }"
+          :aria-pressed="activePanel === 'fs'"
+          title="伏笔"
+          @click="togglePanel('fs')"
+        >
           <Icon name="link" :size="15" />
           <span class="ar-n">{{ foreshadows.length }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'exp' }" title="期待" @click="togglePanel('exp')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'exp', 'ar-btn--peek': detailReturnPanel === 'exp' }"
+          :aria-pressed="activePanel === 'exp'"
+          title="期待"
+          @click="togglePanel('exp')"
+        >
           <Icon name="sparkles" :size="15" />
           <span class="ar-n">{{ mirrorSummary?.active ?? 0 }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'canon' }" title="真相账本——读者知道与不知道的事，秘密 AI 替你守住" @click="togglePanel('canon')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'canon', 'ar-btn--peek': detailReturnPanel === 'canon' }"
+          :aria-pressed="activePanel === 'canon'"
+          title="真相账本——读者知道与不知道的事，秘密 AI 替你守住"
+          @click="togglePanel('canon')"
+        >
           <Icon name="truth" :size="15" />
           <span class="ar-n">{{ canonNodes.length }}</span>
         </button>
         <span class="ar-sep"></span>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'loc' }" title="地点" @click="togglePanel('loc')">
+        <span class="ar-group" aria-hidden="true">名册</span>
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'loc', 'ar-btn--peek': detailReturnPanel === 'loc' }"
+          :aria-pressed="activePanel === 'loc'"
+          title="地点"
+          @click="togglePanel('loc')"
+        >
           <Icon name="map-pin" :size="15" />
           <span class="ar-n">{{ topLocationCount }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'evt' }" title="事件" @click="togglePanel('evt')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'evt', 'ar-btn--peek': detailReturnPanel === 'evt' }"
+          :aria-pressed="activePanel === 'evt'"
+          title="事件"
+          @click="togglePanel('evt')"
+        >
           <Icon name="flag" :size="15" />
           <span class="ar-n">{{ events.length }}</span>
         </button>
-        <span class="ar-sep"></span>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'character' }" title="角色" @click="togglePanel('character')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'character', 'ar-btn--peek': detailReturnPanel === 'character' }"
+          :aria-pressed="activePanel === 'character'"
+          title="角色"
+          @click="togglePanel('character')"
+        >
           <Icon name="user" :size="15" />
           <span class="ar-n">{{ characters.length }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'faction' }" title="势力" @click="togglePanel('faction')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'faction', 'ar-btn--peek': detailReturnPanel === 'faction' }"
+          :aria-pressed="activePanel === 'faction'"
+          title="势力"
+          @click="togglePanel('faction')"
+        >
           <Icon name="users" :size="15" />
           <span class="ar-n">{{ factions.length }}</span>
         </button>
-        <button class="ar-btn" :class="{ 'ar-btn--on': activePanel === 'asset' }" title="资产" @click="togglePanel('asset')">
+        <button
+          class="ar-btn"
+          :class="{ 'ar-btn--on': activePanel === 'asset', 'ar-btn--peek': detailReturnPanel === 'asset' }"
+          :aria-pressed="activePanel === 'asset'"
+          title="资产"
+          @click="togglePanel('asset')"
+        >
           <Icon name="star" :size="15" />
           <span class="ar-n">{{ assets.length }}</span>
         </button>
       </div>
 
-      <!-- M6 浮出抽屉：图标栏当前选中分组的内容 -->
+      <!-- 图标栏抽屉（2026-09 外壳重构）：全高 340px 贴边浮层，与详情抽屉形态统一；
+           统一骨架 DrawerShell（头部/搜索/滚动区），cand/exp/loc/evt/实体五类挂壳，
+           伏笔/真相自带完整分区头直接平铺。互斥与「← 返回上一级」机制不变。 -->
+      <Transition name="drawer">
       <aside v-if="activePanel" class="atlas-drawer">
         <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌；A5b 批量裁决） -->
         <template v-if="activePanel === 'cand'">
-        <div class="side-section">
-          <div class="side-title">
-            <Icon name="clock" :size="13" />
-            <span>待确认</span>
-            <span class="side-count">{{ pendingCandidates.length }}</span>
+        <DrawerShell icon="clock" title="待确认" :count="pendingCandidates.length" @close="activePanel = null">
+          <template #actions>
             <button
               class="side-batch-btn"
               title="AI 自己通读全书正文：先认人（你过目后才建），再把发现的世界变化放进这里"
@@ -1136,7 +1340,7 @@ function isGroupCollapsed(name: string | null) {
               title="逐条预览后批量采纳（可剔除，确认后 6 秒内可整批撤销）"
               @click="batchOpen = true"
             >全部采纳</button>
-          </div>
+          </template>
           <ul class="side-list">
             <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || c.draft?.canon_text || ''">
               <div class="sc-body">
@@ -1156,22 +1360,20 @@ function isGroupCollapsed(name: string | null) {
           <p v-if="!pendingCandidates.length" class="side-empty">
             还没有待确认的世界变化。点上方「通读本书」，让 AI 自己把已写的章节读一遍——它发现的都会放进这里等你过目。
           </p>
-        </div>
+        </DrawerShell>
         </template>
 
-        <!-- 伏笔账本（M5：全量列表——弧线带只渲染有锚的，未锚定的唯一可见处在此） -->
+        <!-- 伏笔账本（M5：全量列表——弧线带只渲染有锚的，未锚定的唯一可见处在此；
+             自带完整分区头，直接平铺不套壳） -->
         <template v-if="activePanel === 'fs'">
-        <ForeshadowSection :book-id="bookId" @select="(id: string) => (selectedForeshadowId = id)" />
+        <div class="drawer-scroll">
+          <ForeshadowSection :book-id="bookId" @select="(id: string) => (selectedForeshadowId = id)" />
+        </div>
         </template>
 
         <!-- 期待（M5：摘要 + 打开账本模态；与写作页「头顶的线」同源） -->
         <template v-if="activePanel === 'exp'">
-        <div class="side-section">
-          <div class="side-title">
-            <Icon name="sparkles" :size="13" />
-            <span>期待</span>
-            <span class="side-count">{{ mirrorSummary?.active ?? 0 }}</span>
-          </div>
+        <DrawerShell icon="sparkles" title="期待" :count="mirrorSummary?.active ?? 0" @close="activePanel = null">
           <div class="exp-summary">
             <p v-if="mirrorSummary?.active" class="exp-summary-text">
               活跃 {{ mirrorSummary.active }} 条<template v-if="mirrorSummary.due">
@@ -1181,37 +1383,57 @@ function isGroupCollapsed(name: string | null) {
             <p v-else class="exp-summary-text">还没有期待。用一句话记下读者此刻最想知道的事。</p>
             <button class="exp-open" @click="showExpectations = true">打开账本</button>
           </div>
+        </DrawerShell>
+        </template>
+
+        <!-- 真相账本（C1：Canon 融入——表里三态过滤 + 句子优先录入；详情在真相详情抽屉；
+             自带完整分区头，直接平铺不套壳） -->
+        <template v-if="activePanel === 'canon'">
+        <div class="drawer-scroll">
+          <CanonSection
+            :book-id="bookId"
+            @select="(id: string) => (selectedTruthId = id)"
+            @select-entity="(id: string) => (selectedEntityId = id)"
+          />
         </div>
         </template>
 
-        <!-- 真相账本（C1：Canon 融入——表里三态过滤 + 句子优先录入；详情在真相详情抽屉） -->
-        <template v-if="activePanel === 'canon'">
-        <CanonSection
-          :book-id="bookId"
-          @select="(id: string) => (selectedTruthId = id)"
-          @select-entity="(id: string) => (selectedEntityId = id)"
-        />
-        </template>
-
-        <!-- 地点（缩进子树：顶层定位地图，内部构造开详情抽屉）-->
+        <!-- 地点（折叠树：整条点击=开详情抽屉；📍=定位地图（顶层有坐标专属）；
+             折叠按顶层整枝剪除，搜索命中时自动展开并整枝保留） -->
         <template v-if="activePanel === 'loc'">
-        <div class="side-section">
-          <div class="side-title">
-            <Icon name="map-pin" :size="13" />
-            <span>地点</span>
-            <span class="side-count">{{ topLocationCount }}</span>
+        <DrawerShell icon="map-pin" title="地点" :count="topLocationCount" @close="activePanel = null">
+          <template #actions>
             <button class="side-batch-btn" title="收起抽屉，在地图上点选新建" @click="createFromLocPanel">＋ 新建</button>
-          </div>
-          <ul v-if="locations.length" class="side-list">
+          </template>
+          <template #search>
+            <div class="evt-filter">
+              <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
+              <input v-model="locFilter" class="evt-filter-input" placeholder="搜索地点（名字）…" />
+            </div>
+          </template>
+          <ul v-if="orderedLocations.length" class="side-list">
             <li
               v-for="{ loc, depth } in orderedLocations"
               :key="loc.id"
-              class="side-card"
-              :class="{ 'side-card--click': depth > 0 || loc.coord_x != null }"
+              class="side-card side-card--click"
+              :class="{ 'side-card--hl': highlightedRowLocId === loc.id }"
+              :data-loc-id="loc.id"
               :style="depth ? { paddingLeft: `${8 + depth * 14}px` } : undefined"
-              :title="depth > 0 ? '点击看详情与内部构造' : loc.coord_x != null ? '点击定位 · 双击名字改名' : '点击看详情'"
-              @click="depth > 0 || loc.coord_x == null ? openLocDetail(loc.id) : focusLocation(loc)"
+              title="点击看详情与内部构造 · 双击名字改名"
+              @click="openLocDetail(loc.id)"
             >
+              <span class="loc-caret-slot">
+                <button
+                  v-if="(locChildren.get(loc.id) || []).length"
+                  class="loc-caret"
+                  :class="{ 'loc-caret--collapsed': isLocCollapsed(loc.id) }"
+                  :title="isLocCollapsed(loc.id) ? `展开内部构造（${(locChildren.get(loc.id) || []).length}）` : '收起内部构造'"
+                  aria-label="展开或收起内部构造"
+                  @click.stop="toggleLocCollapse(loc.id)"
+                >
+                  <Icon name="chevron-down" :size="10" />
+                </button>
+              </span>
               <div class="sc-body">
                 <input
                   v-if="editingLocId === loc.id"
@@ -1226,13 +1448,16 @@ function isGroupCollapsed(name: string | null) {
                 <span v-else class="sc-name" @dblclick.stop="startEditLoc(loc)">{{ loc.name }}</span>
                 <span v-if="depth > 0" class="sc-badge sc-badge--inner">内部</span>
                 <span v-else class="sc-badge">{{ LOC_KIND_LABEL[loc.kind] || loc.kind }}</span>
-                <span
-                  v-if="(locChildren.get(loc.id) || []).length"
-                  class="sc-badge sc-badge--inner"
-                  title="内部构造数"
-                >{{ (locChildren.get(loc.id) || []).length }} 内</span>
               </div>
               <div class="sc-actions">
+                <button
+                  v-if="depth === 0 && loc.coord_x != null"
+                  class="sc-act sc-act--locate"
+                  title="在地图上定位（平移居中）"
+                  @click.stop="focusLocation(loc)"
+                >
+                  <Icon name="map-pin" :size="13" />
+                </button>
                 <button class="sc-act" title="详情 / 内部构造" @click.stop="openLocDetail(loc.id)">
                   <Icon name="information-circle" :size="13" />
                 </button>
@@ -1243,72 +1468,53 @@ function isGroupCollapsed(name: string | null) {
             </li>
           </ul>
           <div v-else class="side-empty">
-            还没有地点。点上方「＋ 新建」，在地图上点选第一个落脚点。
+            {{ locFilter ? `没有匹配「${locFilter}」的地点` : '还没有地点。点上方「＋ 新建」，在地图上点选第一个落脚点。' }}
           </div>
-        </div>
+        </DrawerShell>
         </template>
 
-        <!-- 事件 -->
+        <!-- 事件（纵向编年脊柱：年份分组头承担年份、卡内短日期；整卡点击=定位地图） -->
         <template v-if="activePanel === 'evt'">
-        <div class="side-section">
-          <div class="side-title">
-            <Icon name="flag" :size="13" />
-            <span>事件</span>
-            <span class="side-count">{{ filteredEvents.length }}</span>
-            <button class="side-batch-btn" title="记录一笔历史（事件是世界状态的唯一事实源）" @click="openEventForm()">＋ 记一笔</button>
-          </div>
-          <div class="evt-filter">
-            <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
-            <input v-model="evtFilter" class="evt-filter-input" placeholder="筛选事件（类型 / 备注）…" />
-          </div>
-          <ul v-if="filteredEvents.length" class="side-list">
-            <li
-              v-for="ev in filteredEvents"
-              :key="ev.id"
-              class="side-card side-card--click"
-              title="定位到地图"
-              @click="focusEvent(ev)"
-            >
-              <span
-                class="evt-dot"
-                :style="{ background: EVENT_TYPE_COLOR[ev.event_type] || '#94a3b8' }"
-              ></span>
-              <div class="sc-body sc-body--col">
-                <div class="evt-head">
-                  <span class="sc-name">{{ eventLabel(ev.event_type) }}</span>
-                  <span class="evt-time">{{ formatTime(ev.time_start) }}</span>
-                </div>
-                <div v-if="eventNote(ev.note)" class="evt-note">{{ eventNote(ev.note) }}</div>
-              </div>
-              <div class="sc-actions">
-                <button class="sc-act" title="编辑" @click.stop="openEditEvent(ev)">
-                  <Icon name="pencil" :size="13" />
-                </button>
-                <button class="sc-act sc-act--danger" title="删除" @click.stop="removeEvent(ev)">
-                  <Icon name="trash" :size="13" />
-                </button>
-              </div>
-            </li>
-          </ul>
+        <DrawerShell icon="flag" title="事件" :count="filteredEvents.length" @close="activePanel = null">
+          <template #actions>
+            <button class="side-batch-btn" title="一句话记一笔（AI 解析成草稿，你过目后入账）" @click="openQuickNote">＋ 记一笔</button>
+          </template>
+          <template #search>
+            <div class="evt-filter">
+              <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
+              <input v-model="evtFilter" class="evt-filter-input" placeholder="筛选事件（类型 / 备注）…" />
+            </div>
+          </template>
+          <EventSpineList
+            v-if="filteredEvents.length"
+            :events="filteredEvents"
+            @focus="focusEvent"
+            @edit="openEditEvent"
+            @delete="removeEvent"
+          />
           <div v-else class="side-empty">
             {{ evtFilter ? '没有匹配的事件' : '还没有事件。事件是世界状态的唯一事实源——点上方「＋ 记一笔」记录第一条。' }}
           </div>
-        </div>
+        </DrawerShell>
         </template>
 
-        <!-- 实体（角色/势力/资产）：搜索 + 重要度排序 -->
+        <!-- 实体（角色/势力/资产）：搜索 + 重要度排序 + 紧凑单行矩阵 -->
         <template v-if="activePanel === 'character' || activePanel === 'faction' || activePanel === 'asset'">
-        <div class="side-section">
-          <div class="side-title">
-            <Icon :name="activePanel === 'character' ? 'user' : activePanel === 'faction' ? 'users' : 'star'" :size="13" />
-            <span>{{ activePanel === 'character' ? '角色' : activePanel === 'faction' ? '势力' : '资产' }}</span>
-            <span class="side-count">{{ panelEntities.length }}</span>
+        <DrawerShell
+          :icon="activePanel === 'character' ? 'user' : activePanel === 'faction' ? 'users' : 'star'"
+          :title="activePanel === 'character' ? '角色' : activePanel === 'faction' ? '势力' : '资产'"
+          :count="panelEntities.length"
+          @close="activePanel = null"
+        >
+          <template #actions>
             <button class="side-batch-btn" title="新建实体（类型已按当前抽屉选好，弹窗里可改）" @click="createFromEntityPanel">＋ 新建</button>
-          </div>
-          <div class="evt-filter">
-            <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
-            <input v-model="entityFilter" class="evt-filter-input" placeholder="搜索实体（名字 / 别名）…" />
-          </div>
+          </template>
+          <template #search>
+            <div class="evt-filter">
+              <Icon name="magnifying-glass" :size="12" class="evt-filter-icon" />
+              <input v-model="entityFilter" class="evt-filter-input" placeholder="搜索实体（名字 / 别名）…" />
+            </div>
+          </template>
           <div v-if="panelEntities.length" class="side-list">
             <template v-for="group in panelEntityGroups" :key="group.name ?? '__ungrouped__'">
               <button
@@ -1331,6 +1537,7 @@ function isGroupCollapsed(name: string | null) {
                   v-for="ent in group.entities"
                   :key="ent.id"
                   :entity="ent"
+                  :alive="activePanel === 'character' ? (charAliveById.get(ent.id) ?? null) : null"
                   @click="selectedEntityId = ent.id"
                   @update:name="(n: string) => renameEntity(bookId, ent.id, n)"
                   @delete="removeEntity(ent)"
@@ -1339,9 +1546,10 @@ function isGroupCollapsed(name: string | null) {
             </template>
           </div>
           <div v-else class="side-empty">{{ entityEmptyText }}</div>
-        </div>
+        </DrawerShell>
         </template>
       </aside>
+      </Transition>
     </div>
 
     <!-- 时间轴（拖动改变 currentTime，地图人物位置/疆域随之回放；右键可记录事件/标记章节锚） -->
@@ -1366,6 +1574,18 @@ function isGroupCollapsed(name: string | null) {
       @draw-start="onDrawStart"
       @draw-finish="onDrawFinish"
       @draw-cancel="onDrawCancel"
+    />
+
+    <!-- 世界速记（关联式录入：一句话带出新人物/新地点；裸入口唤起，Alt+N 页面激活即可） -->
+    <QuickEventNote
+      ref="quickNoteRef"
+      :book-id="bookId"
+      :chapter-id="null"
+      :enable-map-pick="true"
+      @committed="onQuickNoteCommitted"
+      @open-template-form="onQuickNoteToTemplate"
+      @request-map-pick="onQuickNoteMapPick"
+      @request-map-pick-cancel="onQuickNotePickCancel"
     />
 
     <!-- 实体创建（连续创建：建立后不关，Esc / 完成 关闭） -->
@@ -1532,6 +1752,9 @@ function isGroupCollapsed(name: string | null) {
   flex-direction: column;
   height: 100%;
   background: var(--bg-primary);
+  /* 页面级层叠隔离（00 期 §3.3）：页内野生 z 值（胶囊条/图标栏/时间轴弹层 640-1200）
+     只在本上下文内竞争，必然低于全局模态(110)与 toast(120) */
+  isolation: isolate;
 }
 
 /* ===== M6 活舆图：水印题字 / 装饰 / 罗盘 ===== */
@@ -1552,7 +1775,7 @@ function isGroupCollapsed(name: string | null) {
 }
 .aw-sub {
   margin-top: 6px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0.34em;
   color: rgba(74, 68, 56, 0.48); /* 水印副行保持淡，但要读得出 */
 }
@@ -1561,7 +1784,7 @@ function isGroupCollapsed(name: string | null) {
   right: 64px;
   bottom: 18px;
   width: 64px;
-  height: 74px;
+  height: 90px; /* 02 期 §5.1：svg 73.6 + caption 12 + 间距——加高容纳「全图」标签 */
   z-index: 660; /* 越过烛光暗角（645）——角落里的罗盘不该被压暗 */
   padding: 0;
   border: none;
@@ -1569,7 +1792,24 @@ function isGroupCollapsed(name: string | null) {
   cursor: pointer;
   user-select: none;
   opacity: 0.75;
-  transition: opacity 0.15s, transform 0.15s;
+  /* right 过渡供抽屉避让（transform 军规：常驻位移会半像素位图模糊，只动 right） */
+  transition: opacity 0.15s, transform 0.15s, right 0.2s ease;
+}
+/* 右缘抽屉在场时左移避让：避让位 = 抽屉 right 58 + 宽 340 + 间距 16 */
+.atlas-compass.is-avoid {
+  right: 414px;
+}
+.atlas-compass svg {
+  display: block;
+}
+/* 02 期 §5.1 常驻 caption：功能自解释（点击回全图） */
+.ac-caption {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--text-muted);
+  text-align: center;
 }
 .atlas-compass:hover {
   opacity: 1;
@@ -1641,7 +1881,7 @@ function isGroupCollapsed(name: string | null) {
   border-radius: 9999px;
   background: transparent;
   color: rgba(74, 68, 56, 0.88);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -1667,7 +1907,7 @@ function isGroupCollapsed(name: string | null) {
 }
 .ap-btn--on {
   background: rgba(245, 158, 11, 0.14);
-  color: #b45309;
+  color: var(--warn);
 }
 .ap-sep {
   width: 1px;
@@ -1698,7 +1938,7 @@ function isGroupCollapsed(name: string | null) {
   border-radius: 7px;
   background: transparent;
   color: rgba(74, 68, 56, 0.88);
-  font-size: 12px;
+  font-size: var(--text-base);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -1765,15 +2005,41 @@ function isGroupCollapsed(name: string | null) {
   outline: 2px solid rgba(124, 106, 173, 0.55);
   outline-offset: 1px;
 }
+/* 02 期 §2.3 组首标签：纯信息元素（aria-hidden），分组语义由按钮自身承担 */
+.ar-group {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  line-height: 1;
+  margin: var(--space-1) 0;
+  user-select: none;
+}
 .ar-btn--on {
-  background: rgba(124, 106, 173, 0.14);
+  background: color-mix(in srgb, var(--accent-500) 14%, transparent);
   color: var(--accent-500);
+  position: relative;
+}
+/* 02 期 §2.4 当前态左缘指示条：扫视时可定位 */
+.ar-btn--on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent-500);
+}
+/* 02 期 §2.4 来路半亮态：详情抽屉是从这个面板长出来的，关掉会回去 */
+.ar-btn--peek {
+  background: color-mix(in srgb, var(--accent-500) 7%, transparent);
+  color: var(--accent-400);
 }
 .ar-n {
   position: absolute;
   top: 1px;
   right: 3px;
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-weight: 700;
   color: #b08d3e;
   font-variant-numeric: tabular-nums;
@@ -1784,36 +2050,55 @@ function isGroupCollapsed(name: string | null) {
   background: rgba(107, 90, 68, 0.22);
   margin: 4px 0;
 }
+/* ===== 图标栏抽屉（2026-09 外壳重构）：全高贴边浮层 =====
+   与四个详情抽屉像素级对齐（top:48 / right:58 / bottom:12 / 宽 340 / 圆角 14）——
+   开合之间无跳变。Overlay 路线（不参与 flex 布局）：地图容器宽度从不变化，
+   Leaflet 无需 invalidateSize（WorldMap 侧零改动）。 */
 .atlas-drawer {
   position: absolute;
-  right: 47px;
-  top: 16px;
-  bottom: 16px;
-  margin-block: auto;
-  height: fit-content;
+  top: 48px;
+  right: 58px;
+  bottom: 12px;
+  width: 340px;
   z-index: 740;
-  width: 264px;
-  max-height: min(560px, 100%);
-  overflow-y: auto;
-  background: rgba(243, 237, 224, 0.97);
-  /* 0.97 不透明度下 backdrop 磨砂本不可见，却会把整层拉进合成层拖垮文字抗锯齿——移除 */
-  border: 1px solid rgba(107, 90, 68, 0.28);
-  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
   box-shadow: -10px 0 30px rgba(96, 72, 36, 0.14);
+  overflow: hidden;
+}
+/* 开合过渡：入场末态 transform 归零（浮层 transform 军规禁的是「居中悬浮态常驻」，
+   进场动画终态无 transform，不会留下半像素常驻模糊） */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+  transform: translateX(14px);
+}
+/* 平铺分区（伏笔/真相自带完整分区头，不套 DrawerShell）的滚动容器 */
+.drawer-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 12px;
 }
 /* 世界页滚动区统一：暖色细条（Chromium/WebKit） */
-.atlas-drawer::-webkit-scrollbar {
+.drawer-scroll::-webkit-scrollbar {
   width: 8px;
 }
-.atlas-drawer::-webkit-scrollbar-thumb {
+.drawer-scroll::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
   border-radius: 4px;
 }
-.atlas-drawer::-webkit-scrollbar-thumb:hover {
+.drawer-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);
 }
-.atlas-drawer::-webkit-scrollbar-track {
+.drawer-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -1827,7 +2112,7 @@ function isGroupCollapsed(name: string | null) {
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -1894,30 +2179,34 @@ function isGroupCollapsed(name: string | null) {
   cursor: crosshair;
 }
 
-/* ===== 抽屉内分组（沿用原侧栏条目语言） ===== */
-.side-section {
-  margin-bottom: 18px;
+/* ===== 抽屉内列表条目（沿用原侧栏条目语言；分区头已由 DrawerShell 承担） ===== */
+/* 地点折叠箭头槽：固定占位保持名字列对齐（无子级的行不偏移） */
+.loc-caret-slot {
+  width: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.side-section:last-child {
-  margin-bottom: 0;
-}
-.side-title {
+.loc-caret {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-.side-count {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 500;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
   color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border-radius: 9999px;
-  padding: 1px 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.12s ease;
+}
+.loc-caret:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.loc-caret--collapsed {
+  transform: rotate(-90deg);
 }
 .side-group-head {
   display: flex;
@@ -1928,7 +2217,7 @@ function isGroupCollapsed(name: string | null) {
   margin-top: 5px;
   border: none;
   background: transparent;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   font-family: inherit;
   color: var(--text-muted);
@@ -1952,7 +2241,7 @@ function isGroupCollapsed(name: string | null) {
 }
 /* A5b 待确认分区「全部采纳」——count 的 margin-left:auto 把右缘让给按钮组 */
 .side-batch-btn {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   background: transparent;
   border: 1px solid var(--accent-500);
@@ -1985,7 +2274,7 @@ function isGroupCollapsed(name: string | null) {
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   outline: none;
 }
@@ -2001,18 +2290,18 @@ function isGroupCollapsed(name: string | null) {
 }
 .exp-summary-text {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.6;
 }
 .exp-due {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 500;
 }
 .exp-open {
   align-self: flex-start;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-secondary);
   background: var(--bg-canvas);
@@ -2049,6 +2338,11 @@ function isGroupCollapsed(name: string | null) {
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(120, 100, 70, 0.1);
 }
+/* 地图回指行高亮（地标点击 → 面板条目；2.4s 自清） */
+.side-card--hl {
+  border-color: var(--accent-500);
+  background: rgba(124, 106, 173, 0.08);
+}
 .sc-body {
   flex: 1;
   min-width: 0;
@@ -2056,14 +2350,8 @@ function isGroupCollapsed(name: string | null) {
   align-items: center;
   gap: 8px;
 }
-/* 事件卡片：头行（类型+时刻）与备注纵向堆叠（基础 .sc-body 是横向行，直接复用会把备注挤到头行右侧并互相遮盖） */
-.sc-body--col {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-}
 .sc-name {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -2076,7 +2364,7 @@ function isGroupCollapsed(name: string | null) {
   padding: 2px 6px;
   border: 1px solid var(--accent-500);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -2085,7 +2373,7 @@ function isGroupCollapsed(name: string | null) {
 }
 .sc-badge {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: var(--bg-tertiary);
   border-radius: 9999px;
@@ -2103,7 +2391,9 @@ function isGroupCollapsed(name: string | null) {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.side-card:hover .sc-actions {
+/* 02 期 §8 H1：hover 显形补键盘对等（focus-within） */
+.side-card:hover .sc-actions,
+.side-card:focus-within .sc-actions {
   opacity: 1;
 }
 .sc-act {
@@ -2123,40 +2413,22 @@ function isGroupCollapsed(name: string | null) {
   background: var(--hover-bg);
   color: var(--text-primary);
 }
-.sc-act--danger:hover {
+.sc-act--danger {
+  opacity: 0.45; /* 02 期 §8 H1 规则三：破坏性操作常态低显 */
+}
+.sc-act--danger:hover,
+.sc-act--danger:focus-visible {
+  opacity: 1;
   background: rgba(220, 38, 38, 0.08);
-  color: #dc2626;
+  color: var(--danger);
 }
-
-/* 事件条目 */
-.evt-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.04);
+/* 地点行定位按钮（📍 地图联动）：与详情按钮同形，accent 色示「地图动作」 */
+.sc-act--locate {
+  color: var(--accent-400, #8b6de8);
 }
-.evt-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-.evt-time {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: ui-monospace, monospace;
-}
-.evt-note {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.sc-act--locate:hover {
+  background: rgba(139, 109, 232, 0.1);
+  color: var(--accent-500);
 }
 
 /* 空状态 */
@@ -2164,7 +2436,7 @@ function isGroupCollapsed(name: string | null) {
   border: 1px dashed var(--border-color);
   border-radius: 10px;
   padding: 14px 12px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--text-muted);
   text-align: center;
@@ -2179,7 +2451,7 @@ function isGroupCollapsed(name: string | null) {
 }
 .form-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -2191,7 +2463,7 @@ function isGroupCollapsed(name: string | null) {
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   transition: border-color 0.15s;
 }
@@ -2215,7 +2487,7 @@ function isGroupCollapsed(name: string | null) {
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s;
@@ -2229,16 +2501,16 @@ function isGroupCollapsed(name: string | null) {
 
 /* D4 标定选档卡 */
 
-.calib-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(20,18,16,.35); display: flex; align-items: center; justify-content: center; }
+.calib-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); /* 标定卡 teleport 在 body，隔离罩不住——按模态语义归位（00 期 §3.1/F-02） */ background: rgba(20,18,16,.35); display: flex; align-items: center; justify-content: center; }
 .calib-card { width: 300px; background: var(--bg-canvas, #fefdfb); border: 1px solid var(--border-color, #e0dbd3); border-radius: 12px; padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
 .calib-title { font-family: var(--font-heading, inherit); font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
 .calib-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
-.calib-mode { border: 1px solid var(--border-color, #e0dbd3); border-radius: 999px; background: none; font-size: 12px; color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
+.calib-mode { border: 1px solid var(--border-color, #e0dbd3); border-radius: 999px; background: none; font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
 .calib-mode.is-on { border-color: #c2725a; color: #c2725a; }
-.calib-custom { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-muted); justify-content: center; }
-.calib-input { width: 70px; border: 1px solid var(--border-color, #e0dbd3); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-primary); padding: 4px 6px; text-align: center; }
+.calib-custom { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: var(--text-sm); color: var(--text-muted); justify-content: center; }
+.calib-input { width: 70px; border: 1px solid var(--border-color, #e0dbd3); border-radius: 6px; background: transparent; font-size: var(--text-sm); color: var(--text-primary); padding: 4px 6px; text-align: center; }
 .calib-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
-.calib-btn { border: 1px solid var(--border-color, #e0dbd3); border-radius: 8px; background: var(--bg-secondary, #faf8f4); color: var(--text-secondary); font-size: 12.5px; padding: 6px 16px; cursor: pointer; }
+.calib-btn { border: 1px solid var(--border-color, #e0dbd3); border-radius: 8px; background: var(--bg-secondary, #faf8f4); color: var(--text-secondary); font-size: var(--text-sm); padding: 6px 16px; cursor: pointer; }
 .calib-btn--primary { background: #c2725a; border-color: #c2725a; color: #fff; }
-.calib-hint { margin: 10px 0 0; font-size: 10.5px; color: var(--text-muted); text-align: center; }
+.calib-hint { margin: 10px 0 0; font-size: var(--text-xs); color: var(--text-muted); text-align: center; }
 </style>

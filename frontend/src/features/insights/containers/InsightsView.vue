@@ -18,8 +18,10 @@ import { reviewApi } from '../../../services/api/domain/review.api'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { usageApi } from '../../../services/api/domain/usage.api'
 import type { BookUsage, ChapterUsage } from '../../../services/api/domain/usage.api'
-import { buildTrendChart, stageBarPercent } from '../usageChart'
+import { buildTrendChart, formatCost, groupStagesByLane, stageBarPercent } from '../usageChart'
+import PriceSettingsModal from '../presentation/PriceSettingsModal.vue'
 import { useToast } from '../../../composables/useToast'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import type { CostReport, QualityReport, FindingItem } from '../../../types'
 
 const route = useRoute()
@@ -87,6 +89,8 @@ const chapterUsage = ref<ChapterUsage | null>(null)
 const bookUsage = ref<BookUsage | null>(null)
 /** 「最近一章」消耗对应的章节号（标签展示用） */
 const usageChapterNumber = ref<number | null>(null)
+/** 「最近一章」消耗对应的章节 id（清空台账按钮的作用对象） */
+const usageChapterId = ref<string | null>(null)
 
 async function loadAll() {
   const bid = bookIdFromRoute.value
@@ -149,6 +153,7 @@ async function loadAll() {
     chapterUsage.value = chapUsage
     bookUsage.value = bkUsage
     usageChapterNumber.value = latestChap?.chapter_number ?? null
+    usageChapterId.value = latestChap?.id ?? null
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -190,11 +195,74 @@ const collabHasData = computed(() => collabReports.value.some((r) => r.report?.t
 
 // ===== B3 · 用量可见 computed（本书汇总 + 按日趋势几何）=====
 const usageHasData = computed(() => (bookUsage.value?.totals?.calls || 0) > 0)
-/** 组件条形归一基准（by_stage 最大 total_tokens；后端已按其降序，首项即峰值） */
-const usageStageMax = computed(() =>
-  Math.max(0, ...(bookUsage.value?.by_stage || []).map((s) => s.total_tokens || 0))
+/** AI 消耗卡分组（真实调用流程：感知→续写→沉淀完稿→自动阅读；组内条形归一） */
+const usageLaneGroups = computed(() =>
+  groupStagesByLane(
+    bookUsage.value?.by_stage || [],
+    bookUsage.value?.by_lane || [],
+    bookUsage.value?.totals?.total_tokens || 0,
+  ),
 )
 const usageTrend = computed(() => buildTrendChart(bookUsage.value?.by_date || []))
+
+/** 价目弹窗（成本核算 2026-09-11）：保存后刷新用量，金额立即上屏 */
+const showPriceModal = ref(false)
+const usageUnpriced = computed(() => bookUsage.value?.totals?.unpriced_tokens || 0)
+function onPricesSaved() {
+  loadAll()
+}
+
+// ===== 清空本章用量台账（测试用，2026-09-11；走全局 ConfirmDialog 确认）=====
+const { show: showConfirm } = useConfirmDialog()
+const clearingUsage = ref(false)
+const chapterUsageEmpty = computed(() => (chapterUsage.value?.totals?.calls || 0) === 0)
+
+async function resetLatestChapterUsage() {
+  const chId = usageChapterId.value
+  if (!chId || clearingUsage.value || chapterUsageEmpty.value) return
+  const ok = await showConfirm({
+    title: '清空本章用量',
+    message: `确定要清空第 ${usageChapterNumber.value ?? '?'} 章的 AI 用量台账吗？本章的 token、调用与成本记录将归零，方便重新测试。`,
+    warning: '正文与世界数据不受影响；记录删除后不可恢复',
+    confirmText: '清空',
+  })
+  if (!ok) return
+  clearingUsage.value = true
+  try {
+    const r = await usageApi.resetChapterUsage(chId)
+    showToast(`已清空第 ${usageChapterNumber.value ?? '?'} 章 ${r.deleted} 条用量记录`, 'success')
+    await loadAll()
+  } catch (e: any) {
+    showToast('清空失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    clearingUsage.value = false
+  }
+}
+
+// ===== 清空本书协作埋点（测试用，2026-09-11；数据源 data/collab_events.jsonl）=====
+const clearingCollab = ref(false)
+
+async function clearCollabData() {
+  const bid = bookIdFromRoute.value
+  if (!bid || clearingCollab.value) return
+  const ok = await showConfirm({
+    title: '清空协作数据',
+    message: `确定要清空《${store.currentBook.value?.title || '本书'}》的全部协作埋点吗？采纳率与协作明细将归零，方便重新测试。`,
+    warning: '「学着闭嘴」的提醒拒收史一并清零（静音集合重置）；正文与世界数据不受影响',
+    confirmText: '清空',
+  })
+  if (!ok) return
+  clearingCollab.value = true
+  try {
+    const r = await adaptiveApi.clearCollabEvents(bid)
+    showToast(`已清空 ${r.deleted} 条协作记录`, 'success')
+    await loadAll()
+  } catch (e: any) {
+    showToast('清空失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    clearingCollab.value = false
+  }
+}
 
 function formatTokens(n: number): string {
   if (n > 1000) return (n / 1000).toFixed(1) + 'k'
@@ -387,7 +455,12 @@ async function rerunQuality(chapterId: string) {
         <article class="cost-item">
           <header class="cost-header">
             <span class="cost-chapter">AI 消耗</span>
-            <span class="cost-total">{{ formatTokens(bookUsage?.totals?.total_tokens || 0) }} token · {{ bookUsage?.totals?.calls || 0 }} 次调用</span>
+            <span class="cost-header-right">
+              <span class="cost-total">
+                {{ formatTokens(bookUsage?.totals?.total_tokens || 0) }} token · {{ bookUsage?.totals?.calls || 0 }} 次调用<template v-if="(bookUsage?.totals?.cost || 0) > 0"> · {{ formatCost(bookUsage?.totals?.cost || 0) }}</template>
+              </span>
+              <button class="price-btn" title="按各厂商公布页填写模型价格（元/百万 token），金额立即生效" @click="showPriceModal = true">价格</button>
+            </span>
           </header>
           <div class="usage-cells">
             <div class="usage-cell">
@@ -403,17 +476,46 @@ async function rerunQuality(chapterId: string) {
               <span class="usage-cap">最近一章 token</span>
             </div>
           </div>
-          <div class="usage-stage-list">
-            <div
-              v-for="s in bookUsage?.by_stage || []"
-              :key="s.stage"
-              class="usage-stage-row"
-              :title="`${s.label}（${s.stage}）：${s.calls} 次 · ${formatTokens(s.total_tokens)} token`"
+          <div class="usage-lane-list">
+            <section v-for="g in usageLaneGroups" :key="g.lane" class="usage-lane">
+              <header class="usage-lane-head">
+                <span class="usage-lane-name">{{ g.label }}</span>
+                <span class="usage-lane-total">
+                  {{ formatTokens(g.totalTokens) }} token · {{ g.share }}%<template v-if="g.cost > 0"> · {{ formatCost(g.cost) }}</template>
+                </span>
+              </header>
+              <div class="usage-stage-list">
+                <div
+                  v-for="s in g.rows"
+                  :key="s.stage"
+                  class="usage-stage-row"
+                  :title="`${s.label}（${s.stage}）：${s.calls} 次 · ${formatTokens(s.total_tokens)} token`"
+                >
+                  <span class="usage-stage-label">{{ s.label }}</span>
+                  <span class="usage-bar-track"><span class="usage-bar" :style="{ width: stageBarPercent(s.total_tokens, g.rowMax) }" /></span>
+                  <span class="usage-stage-val">{{ s.calls }}× · {{ formatTokens(s.total_tokens) }}</span>
+                </div>
+              </div>
+            </section>
+          </div>
+          <!-- 未计价提示（不冒充零成本）：哪些模型没配价，一键去补 -->
+          <p v-if="usageUnpriced > 0" class="usage-unpriced">
+            另有 {{ formatTokens(usageUnpriced) }} token 未计价（
+            {{ (bookUsage?.by_model || []).filter((m) => !m.priced && m.total_tokens > 0).map((m) => m.model).join('、') || '部分模型' }}
+            未配价格）——<button class="usage-unpriced-btn" @click="showPriceModal = true">去补价格</button>
+          </p>
+          <div class="usage-card-footer">
+            <button
+              class="usage-clear-btn"
+              :disabled="clearingUsage || chapterUsageEmpty"
+              :title="chapterUsageEmpty
+                ? '最近一章没有用量记录'
+                : `清空第 ${usageChapterNumber ?? '?'} 章的用量台账（token/调用/成本归零，方便测试）——正文与世界数据不受影响`"
+              @click="resetLatestChapterUsage"
             >
-              <span class="usage-stage-label">{{ s.label }}</span>
-              <span class="usage-bar-track"><span class="usage-bar" :style="{ width: stageBarPercent(s.total_tokens, usageStageMax) }" /></span>
-              <span class="usage-stage-val">{{ s.calls }}× · {{ formatTokens(s.total_tokens) }}</span>
-            </div>
+              <Icon name="arrow-path" :size="12" :class="{ spin: clearingUsage }" />
+              <span>{{ clearingUsage ? '清空中…' : `清空第 ${usageChapterNumber ?? '?'} 章用量` }}</span>
+            </button>
           </div>
         </article>
         <article class="cost-item">
@@ -448,7 +550,7 @@ async function rerunQuality(chapterId: string) {
         </article>
       </div>
       <p v-else class="usage-empty">
-        AI 消耗：暂无记录。用 AI 辅助写作（AI 揣着方向陪你写、Space 续写、沉淀、完稿体检）后，这里会照出每章与每日的用量。
+        AI 消耗：暂无记录。用 AI 辅助写作（写作中感知、Space 续写、沉淀与完稿体检、系统自己去读）后，这里会照出每章与每日的用量。
       </p>
       <div v-if="!collabHasData" class="empty">
         <p>暂无协作数据。在写作台用 AI 辅助写一章（走向卡 / Space 续写 / 细纲胶囊），这里会照出你的采纳习惯。</p>
@@ -486,8 +588,27 @@ async function rerunQuality(chapterId: string) {
             </div>
           </article>
         </div>
+        <div class="usage-card-footer">
+          <button
+            class="usage-clear-btn"
+            :disabled="clearingCollab"
+            title="清空本书全部协作埋点（采纳率/协作明细归零，方便测试）——「学着闭嘴」拒收史一并重置，正文与世界数据不受影响"
+            @click="clearCollabData"
+          >
+            <Icon name="arrow-path" :size="12" :class="{ spin: clearingCollab }" />
+            <span>{{ clearingCollab ? '清空中…' : '清空协作数据' }}</span>
+          </button>
+        </div>
       </template>
     </section>
+
+    <!-- 模型价目表编辑（成本核算 2026-09-11） -->
+    <PriceSettingsModal
+      v-if="showPriceModal"
+      :models="bookUsage?.by_model || []"
+      @close="showPriceModal = false"
+      @saved="onPricesSaved"
+    />
   </div>
 </template>
 
@@ -593,7 +714,7 @@ async function rerunQuality(chapterId: string) {
 }
 
 .summary-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -673,6 +794,77 @@ async function rerunQuality(chapterId: string) {
   font-weight: 500;
 }
 
+.cost-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.price-btn {
+  padding: 0.125rem 0.5rem;
+  font-size: var(--text-xs);
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 0.1875rem;
+  cursor: pointer;
+}
+
+.price-btn:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.usage-unpriced {
+  margin: 0.5rem 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.usage-unpriced-btn {
+  padding: 0;
+  font-size: 11px;
+  color: var(--accent-500);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.usage-unpriced-btn:hover {
+  text-decoration: underline;
+}
+
+.usage-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.625rem;
+}
+
+.usage-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.5rem;
+  font-size: var(--text-xs);
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 0.1875rem;
+  cursor: pointer;
+}
+
+.usage-clear-btn:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
+.usage-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .stage-bars {
   display: flex;
   flex-wrap: wrap;
@@ -686,7 +878,7 @@ async function rerunQuality(chapterId: string) {
   padding: 0.1875rem 0.4375rem;
   background: var(--bg-secondary);
   border-radius: 0.1875rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
 }
 
 .stage-name {
@@ -732,8 +924,34 @@ async function rerunQuality(chapterId: string) {
 }
 
 .usage-cap {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+.usage-lane-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.usage-lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.usage-lane-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.usage-lane-total {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .usage-stage-list {
@@ -744,10 +962,10 @@ async function rerunQuality(chapterId: string) {
 
 .usage-stage-row {
   display: grid;
-  grid-template-columns: 7rem 1fr auto;
+  grid-template-columns: 8.5rem 1fr auto;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
 }
 
 .usage-stage-label {
@@ -798,7 +1016,7 @@ async function rerunQuality(chapterId: string) {
 .usage-trend-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
@@ -814,7 +1032,7 @@ async function rerunQuality(chapterId: string) {
 }
 
 .quality-verdict {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 0.125rem 0.4375rem;
   border-radius: 0.1875rem;
@@ -823,7 +1041,7 @@ async function rerunQuality(chapterId: string) {
 }
 .quality-verdict.pass { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
 .quality-verdict.pass_with_fixes { background: rgba(217, 119, 6, 0.12); color: #d97706; }
-.quality-verdict.fail { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+.quality-verdict.fail { background: rgba(220, 38, 38, 0.12); color: var(--danger); }
 .quality-verdict.unaudited { background: var(--bg-tertiary); color: var(--text-muted); }
 
 .quality-metrics {
@@ -835,7 +1053,7 @@ async function rerunQuality(chapterId: string) {
 .metric-pair {
   display: flex;
   justify-content: space-between;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   padding: 0.1875rem 0;
   border-bottom: 1px dashed var(--border-color);
 }
@@ -852,23 +1070,23 @@ async function rerunQuality(chapterId: string) {
 
 .findings-count {
   margin: 0.5rem 0 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: #d97706;
 }
 
 .collect-btn {
   margin-top: 0.375rem;
   padding: 0.25rem 0.625rem;
-  font-size: 0.6875rem;
-  color: #b45309;
-  background: #fef3c7;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 
 .collect-btn:hover {
-  background: #fde68a;
+  background: var(--warn-bg);
 }
 
 .quality-actions {
@@ -882,7 +1100,7 @@ async function rerunQuality(chapterId: string) {
   align-items: center;
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
@@ -900,7 +1118,7 @@ async function rerunQuality(chapterId: string) {
 
 .no-report {
   margin: 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -922,6 +1140,6 @@ async function rerunQuality(chapterId: string) {
 }
 
 .deg-reason {
-  color: #dc2626;
+  color: var(--danger);
 }
 </style>

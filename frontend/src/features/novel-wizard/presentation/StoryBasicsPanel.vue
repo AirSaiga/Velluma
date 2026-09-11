@@ -142,7 +142,7 @@ function applyTemplate(template: StoryTemplate) {
         <div v-if="isExpertMode" class="pt-4 border-t border-[var(--border-color)]/30">
           <label class="block text-sm font-medium text-[var(--text-primary)] mb-2">
             <span class="flex items-center gap-1.5">
-              <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+              <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
               核心主题与禁忌
             </span>
           </label>

@@ -229,11 +229,11 @@ watch(
   stroke-dasharray: 5 3;
 }
 .wab-arc--closed {
-  stroke: #64748b;
+  stroke: var(--text-secondary);
   opacity: 0.45;
 }
 .wab-tail {
-  font-size: 9px;
+  font-size: var(--text-xs);
   fill: #a855f7;
   opacity: 0.8;
   cursor: pointer;
@@ -272,6 +272,6 @@ watch(
   r: 5.5;
 }
 .wab-handle--resolved {
-  fill: #64748b;
+  fill: var(--text-secondary);
 }
 </style>

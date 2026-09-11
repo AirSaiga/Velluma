@@ -240,7 +240,7 @@ function tooltipFor(ch: AxisChapter): string {
 
 .axis-tick {
   fill: var(--text-muted);
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -295,7 +295,7 @@ function tooltipFor(ch: AxisChapter): string {
 }
 
 .axis-legend {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0.125rem 0 0.25rem;
 }

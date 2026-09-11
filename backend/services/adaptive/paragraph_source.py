@@ -30,14 +30,29 @@ def resolve_current_paragraph(live_recent: str, content_html: str) -> str:
 
     优先心跳实时段（前端光标段纯文本）；不足时回退画布尾部（剥 HTML）。
     两层来源都不足 MIN_PARAGRAPH_CHARS 时返回空串，调用方按「正文不足」跳过。
+
+    短段融合（2026-09-09 实测「接不上」修复）：实时光标段是唯一保证最新
+    的文本——自动保存滞后时画布尾还是旧快照，短光标段被整个丢弃会让组件
+    锚定到旧尾（实测：送别对话写了几分钟，挂件一直锚着修发电机场）。现改
+    为：光标段已出现在画布尾里（保存及时）→ 画布尾原样（含上下文，不重复）；
+    未出现（保存滞后）→ 画布尾补上下文 + 光标段收尾（模型两头都看得见）。
     """
     live = (live_recent or "").strip()
-    if len(live) >= MIN_PARAGRAPH_CHARS:
+    if live and len(live) >= MIN_PARAGRAPH_CHARS:
         return live[-500:]
     plain = written_text(content_html)
-    if len(plain) >= MIN_PARAGRAPH_CHARS:
-        return plain[-500:]
-    return ""
+    tail = plain[-500:] if len(plain) >= MIN_PARAGRAPH_CHARS else ""
+    if not tail:
+        return ""  # 画布与光标段皆不足阈值（上层「正文不足」闸统一判）
+    if not live:
+        return tail
+    norm_live = normalize_for_match(live)
+    if norm_live and norm_live in normalize_for_match(tail):
+        return tail  # 保存及时：光标段已在画布尾里，用带上下文的画布尾
+    # 保存滞后：融合——画布尾给上下文，实时光标段收尾（拼接界是诚实的时间断层）
+    keep = max(MIN_PARAGRAPH_CHARS, 500 - len(live))
+    fused = tail[-keep:] + live
+    return fused[-500:]
 
 
 def written_text(content_html: str) -> str:

@@ -423,8 +423,8 @@ function coverGradient(book: Book): string {
   const palettes = [
     'linear-gradient(135deg, #6d5dab 0%, #a78bfa 100%)',
     'linear-gradient(135deg, #0369a1 0%, #38bdf8 100%)',
-    'linear-gradient(135deg, #b45309 0%, #fbbf24 100%)',
-    'linear-gradient(135deg, #047857 0%, #34d399 100%)',
+    'linear-gradient(135deg, var(--warn) 0%, #fbbf24 100%)',
+    'linear-gradient(135deg, var(--ok) 0%, #34d399 100%)',
     'linear-gradient(135deg, #be185d 0%, #f472b6 100%)',
     'linear-gradient(135deg, #4a4540 0%, #a89e90 100%)',
   ]
@@ -598,7 +598,7 @@ function coverGradient(book: Book): string {
 }
 
 .book-stats {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0;
 }
@@ -613,11 +613,13 @@ function coverGradient(book: Book): string {
   right: 0.5rem;
   display: flex;
   gap: 0.25rem;
+  /* 02 期 §8 H3：focus-within 键盘对等（opacity 保 tab 序） */
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.book-card:hover .book-actions {
+.book-card:hover .book-actions,
+.book-card:focus-within .book-actions {
   opacity: 1;
 }
 
@@ -638,9 +640,17 @@ function coverGradient(book: Book): string {
   background: var(--hover-bg);
   color: var(--text-primary);
 }
+/* 02 期 §8 H3：删除（破坏性）钮常态 45% 低显 */
+.icon-btn.danger {
+  opacity: 0.45;
+}
+.icon-btn.danger:hover,
+.icon-btn.danger:focus-visible {
+  opacity: 1;
+}
 .icon-btn.danger:hover {
-  color: #dc2626;
-  border-color: #dc2626;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 /* Modal 通用 */
@@ -652,7 +662,7 @@ function coverGradient(book: Book): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-overlay);
   padding: 2rem;
 }
 

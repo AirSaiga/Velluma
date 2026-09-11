@@ -15,7 +15,7 @@ import asyncio
 import uuid
 from types import SimpleNamespace
 
-from backend.routes.chapter_generation.adaptive import (
+from backend.routes.chapter_generation.adaptive.heartbeat import (
     WORLD_INBOX_HINT_THRESHOLD,
     _WORLD_INBOX_CACHE,
     _world_inbox_hint_for_heartbeat,

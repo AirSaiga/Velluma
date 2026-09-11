@@ -1,4 +1,4 @@
-import { ref, watch, nextTick, type Ref } from 'vue'
+import { ref, watch, nextTick, onScopeDispose, type Ref } from 'vue'
 
 export function useFocusTrap(containerRef: Ref<HTMLElement | null>, activeRef: Ref<boolean>, options?: { onEscape?: () => void }) {
   let previouslyFocused: Element | null = null
@@ -14,7 +14,12 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>, activeRef: R
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && options?.onEscape) {
+    // Esc 关闭栈（window capture）先行处理并 preventDefault 时让位，
+    // 防同一节点上两个监听各关一层（00 期 §4.2）
+    if (e.defaultPrevented) return
+    // 空守卫：宿主随 v-if 卸载后 ref 置空——此时陷阱已无意义，放行事件
+    // （防监听器以任何路径泄漏时在 document capture 上 stopPropagation 吞掉全页 Esc）
+    if (e.key === 'Escape' && options?.onEscape && containerRef.value) {
       e.stopPropagation()
       options.onEscape()
       return
@@ -69,5 +74,13 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>, activeRef: R
         ;(previouslyFocused as HTMLElement).focus()
       }
     }
+  })
+
+  // v-if 卸载兜底（2026-09-07 审计修复）：宿主随父级 v-if 整体卸载时 active 不会翻
+  // false（watch 随作用域销毁、回调不触发），document 监听器将泄漏——泄漏的 Esc 分支
+  // 会 stopPropagation 吞掉全页 Esc。作用域销毁即强制清理（对 visible-prop 型宿主幂等）
+  onScopeDispose(() => {
+    cleanup()
+    cleanup = () => {}
   })
 }

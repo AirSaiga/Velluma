@@ -4,7 +4,7 @@
  *
  * 内容为 ReaderMirrorBoard（火候看板 + 张力曲线，自设定中心整面板迁入，功能不丢）。
  */
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import ReaderMirrorBoard from './ReaderMirrorBoard.vue'
 
 defineProps<{ bookId: string }>()

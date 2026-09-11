@@ -1,16 +1,18 @@
 /**
  * NLE-ADF 3.0 思考指示器状态（useThinkingIndicator）。
  *
- * 解决「不知道 AI 什么时候会弹 / 不知道是思考太长还是没触发」的可观测性问题。
- * 作者停顿写作时，编辑器光标下方显示一个脉冲点，三态演化：
+ * 作者显式发出 AI 动作时，编辑器光标下方显示一个薄荷色脉冲点：
  *
  *   idle（隐藏）
- *     └─ 停顿 2s（活跃心跳已 reset，但未发停顿心跳）
- *        → waiting（淡灰小点：预览态，「再停一下 AI 要凑过来了」）
- *           → 停顿心跳 / stitch 已发出（后端在算）
- *              → perceiving（彩色强脉冲：「AI 正在读你的文字 / 生发灵感」）
- *                 └─ 挂件返回 / 缝合完成 / 任何打字
- *                    → idle
+ *     └─ 显式动作发出（Space 续写 / Tab 点名 / burst / 点火 / 细纲扩写）
+ *        → perceiving（后端在算，等待有反馈）
+ *           └─ 动作兑现（幽灵上屏 / 舱弹出 / 任何打字 / 失败）
+ *              → idle
+ *
+ * 停顿自动亮灯已退役（2026-09-10，随 2026-09-09「Tab 唯一入口」补齐）：
+ * 停顿心跳照发（感知/走向卡/保鲜不中断）但不再驱动指示器——旧的等待
+ * 预览灰点+停顿绿点承诺「AI 要凑过来了」，舱却永远不会自己来，实测
+ * 被作者当成故障。后台感知保持安静。
  *
  * 定位：位于光标下方 6px。2026-08-28 修复：此前坐标只在阶段切换时算一次
  * （文档注释声称跟随 selectionUpdate，实际从未接线）——按 Tab 弹舱后感知带
@@ -24,7 +26,7 @@ import { ref, watch } from 'vue'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { followEditorLayout } from './editorLayoutFollower'
 
-export type ThinkingPhase = 'idle' | 'waiting' | 'perceiving'
+export type ThinkingPhase = 'idle' | 'perceiving'
 
 /** 当前阶段（idle=不显示） */
 export const thinkingPhase = ref<ThinkingPhase>('idle')

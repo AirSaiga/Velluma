@@ -234,7 +234,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
                 :class="{ active: lockedKeys?.includes(pk.key) }"
                 :title="lockedKeys?.includes(pk.key) ? '已锁定：提炼不会覆盖此字段' : '未锁定：提炼结果可覆盖'"
                 @click="emit('toggle-lock', pk.key)"
-              >{{ lockedKeys?.includes(pk.key) ? '🔒' : '🔓' }}</button>
+              ><Icon :name="lockedKeys?.includes(pk.key) ? 'lock-closed' : 'lock-open'" :size="14" /></button>
             </label>
             <textarea
               v-model="positiveProfile[pk.key]"
@@ -266,24 +266,16 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   padding: 1.25rem 0 1.5rem;
   scroll-margin-top: 4.5rem;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
-.sec-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
+   sec-sub 按 §6 归 token（原 muted 过淡） */
 .sec-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--text-secondary);
 }
 .warn-inline {
-  color: #b45309;
+  color: var(--warn);
 }
 .empty-note {
   padding: 1rem;
@@ -301,7 +293,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 }
 .hist-title {
   margin: 0 0 0.625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 /* 绘图区：柱子贴基线（底线轴），计数在柱顶，桶标签另起一行 */
@@ -323,7 +315,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   height: 100%;
 }
 .hist-count {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 .hist-bar {
@@ -341,7 +333,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 }
 .hist-label {
   flex: 1;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   text-align: center;
   color: var(--text-muted);
 }
@@ -363,7 +355,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   cursor: help;
 }
 .metric-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .metric-value {
@@ -376,7 +368,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--text-muted);
 }
@@ -429,19 +421,19 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 .btn-scope-reset {
   flex-shrink: 0;
   padding: 0.3rem 0.625rem;
-  font-size: 0.6875rem;
-  color: #b45309;
-  background: #fef3c7;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 .btn-scope-reset:hover {
-  background: #fde68a;
+  background: var(--warn-bg);
 }
 .scope-hint {
   margin: 0.375rem 0 0;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .advanced-toolbar {
@@ -459,31 +451,36 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 }
 .btn-lock-all {
   padding: 0.375rem 0.625rem;
-  font-size: 0.6875rem;
-  color: #6d28d9;
-  background: #ede9fe;
+  font-size: var(--text-xs);
+  color: var(--accent-600);
+  background: color-mix(in srgb, var(--accent-500) 15%, transparent);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 .btn-lock-all:hover {
-  background: #ddd6fe;
+  background: color-mix(in srgb, var(--accent-500) 25%, transparent);
 }
 .lock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   margin-left: 0.375rem;
-  padding: 0 0.25rem;
-  font-size: 0.6875rem;
   background: transparent;
   border: none;
+  border-radius: var(--radius-xs);
   cursor: pointer;
-  opacity: 0.45;
+  color: var(--text-muted);
 }
 .lock-btn.active {
+  color: var(--accent-500);
   opacity: 1;
 }
 .advanced-note {
   margin: 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -511,7 +508,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 .field-label {
   display: block;
   margin-bottom: 0.25rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .measured-mark {
@@ -528,7 +525,6 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   resize: vertical;
 }
 .field-textarea:focus {
-  outline: none;
   border-color: var(--accent-400);
 }
 .field-range {

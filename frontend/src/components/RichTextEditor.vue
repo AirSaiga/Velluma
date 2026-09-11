@@ -13,11 +13,18 @@ import Placeholder from '@tiptap/extension-placeholder'
   import { watch, onBeforeUnmount, onMounted, ref, nextTick, computed } from 'vue'
 import { Extension } from '@tiptap/core'
 import GhostDraftMark from '../extensions/GhostDraftMark'
+import InlineDock from '../extensions/InlineDock'
 import CanonHighlight from '../extensions/CanonHighlight'
 import OutlineNoteNode from '../extensions/OutlineNoteNode'
+import ChineseTypography, { normalizeDocumentPunctuation } from '../extensions/chineseTypography'
+import EditorFind from '../extensions/editorFind'
+import { stripForeignInlineStyles, FOREIGN_MARK_NAMES } from '../extensions/foreignStyles'
 import { buildEntityMentionExtensions } from '../extensions/entityMention'
 import { registerChapterEditor } from '../features/chapter-editor/editorHandle'
 import { noHistory, setContentNoHistory } from '../features/chapter-editor/noHistory'
+import { useEditorFind } from '../features/chapter-editor/composables/useEditorFind'
+import EditorFindBar from '../features/chapter-editor/presentation/EditorFindBar.vue'
+import { useEscStack } from '../composables/useEscStack'
 import { reapGhostIfDead } from '../features/generation/composables/useGhostDraft'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -174,15 +181,15 @@ async function addToGoldenSnippets() {
       source: 'golden_snippet',
     })
     styleApi.logStyleEvent(props.bookId, 'golden_to_sample')
-    showToast('已汇入文风样本库', 'success', 6000, {
+    showToast('已存进文风样本库', 'success', 6000, {
       label: '撤销',
       onClick: () => {
         styleApi.deleteSample(props.bookId, sample.id).catch(() => {})
       },
     })
   } catch (e) {
-    console.error('汇入文风样本库失败:', e)
-    showToast('汇入失败: ' + (e.message || ''), 'error')
+    console.error('存进文风样本库失败:', e)
+    showToast('保存失败：' + (e.message || ''), 'error')
   }
 }
 
@@ -246,7 +253,7 @@ async function markDeaiPair() {
     })
     clearPending()
     showToast(
-      `已存第 ${saved.total} 对训练样本（改前 ${r.bad?.length ?? 0} 字 → 改后 ${goodText.length} 字）`,
+      `已存第 ${saved.total} 对「改前→改后」样本（${r.bad?.length ?? 0} 字 → ${goodText.length} 字）`,
       'success',
       6000,
       {
@@ -359,18 +366,18 @@ const getAiIntentLabel = (mode = aiIntentMode.value) => {
 
 const getDynamicInstructionPlaceholder = () => {
   if (aiIntentMode.value === 'expand') {
-    return '扩写方向：补充细节、情绪与动作（Enter 执行）'
+    return '想往哪扩？如：补细节、情绪和动作'
   }
   if (aiIntentMode.value === 'compress') {
-    return '压缩方向：保留关键信息并提升节奏（Enter 执行）'
+    return '想怎么压？如：留信息、提节奏'
   }
   if (aiIntentMode.value === 'describe') {
-    return '描写方向：扩充感官细节（视/听/嗅/触），不推进情节（Enter 执行）'
+    return '想细写什么？如：看到的、听到的、摸到的'
   }
   if (aiIntentMode.value === 'tone_shift') {
     return '换语气：在上方输入目标语气（如 冷峻/诙谐/抒情），此处可补充细节（Enter 执行）'
   }
-  return '润色方向：优化语气、描写和句式（Enter 执行）'
+  return '想怎么润色？如：更紧凑 / 更温柔（Enter 执行）'
 }
 
 /**
@@ -422,6 +429,9 @@ const editor = useEditor({
     Subscript,
     Superscript,
     GhostDraftMark,
+    // 行间推挤式卡片舱（2026-09-09 布局重构）：SparkDock 挂 WidgetDecoration，
+    // 光标段下方流内撑开，替代旧 fixed 浮层
+    InlineDock,
     // NLE-ADF 3.0 细纲胶囊：行内速记 → 落笔扩写（存盘剥除，会话级）
     OutlineNoteNode,
     // NLE-ADF 2.0 行内极速 Hook：@ 角色 / # 资产 提及 + 静默绑定本章
@@ -432,11 +442,20 @@ const editor = useEditor({
     SelectionHighlighter,
     // NLE-ADF 3.0 Canon 词高亮（角色名/伏笔词虚线小标，Decoration 纯视图不入库）
     CanonHighlight,
+    // 中文标点规范化（2026-09-10）：打字即正——半角标点/省略号/直引号落进正文前
+    // 就变中文标点（判据见 chineseTypography 顶部；英文/数字上下文一律不动）
+    ChineseTypography,
+    // 写作台查找/替换（Ctrl+F）：命中高亮走 Decoration 纯视图层，不入库不进撤销栈
+    EditorFind,
   ],
   editorProps: {
     attributes: {
       class: 'prose prose-lg max-w-3xl mx-auto focus:outline-none min-h-[560px] px-12 pt-3 pb-10 text-[var(--text-primary)] leading-[2.0]',
     },
+    // 粘贴净化（2026-09-10）：剥掉外来行内长相样式（颜色/底色/字体族字号）——
+    // 深色主题下粘进来的深色字会变成「纸面隐身」，而作者在主题里找不到原因。
+    // 粗体/斜体/下划线等排版意图保留（判据见 extensions/foreignStyles.ts）。
+    transformPastedHTML: (html) => stripForeignInlineStyles(html),
     // W2 情境浮卡：点击 @/# 提及节点 → 按实体 id 直取浮卡（旁路通知，不拦截默认行为）
     handleClick: (view, pos, event) => {
       const isMention = (n) =>
@@ -466,12 +485,17 @@ const editor = useEditor({
     // sticky 卡舱恢复等不到落沿。每个文档事务后扫一次：状态说有幽灵而文档
     // 扫不到即收尾（作者自己的流式灌入事务里幽灵恒在，纯空转一次树扫）。
     reapGhostIfDead()
+    // 查找条开着时正文在变（作者自己改/AI 写），命中集与条上计数跟着重算
+    if (findOpen.value) refreshFind()
     emit('update:modelValue', editor.getHTML())
   },
   onBlur: ({ editor }) => {
     applyPendingExternalUpdate()
   },
   onSelectionUpdate: ({ editor }) => {
+    // 查找跳转会反复移动选区——查找条开着时不动选区浮窗（否则每跳一条都弹
+    // 「AI 润色/改写」工具条，把查找体验淹没），也不发情境浮卡的跟随通知。
+    if (findOpen.value) return
     // 如果正在处理或审核优化，不要更新选区菜单状态
     if (['processing', 'reviewing'].includes(optimizationState.value)) {
       return
@@ -547,6 +571,116 @@ const editor = useEditor({
 watch(() => props.disabled, (val) => {
   editor.value?.setEditable(!val)
 })
+
+// ===== 查找/替换（Ctrl+F，2026-09-10）=====
+// 状态机在 features/chapter-editor/composables/useEditorFind；命中判据在
+// extensions/editorFind（单一权威）。条不常驻——「纸面常裸」，不搜即不存在。
+const {
+  open: findOpen,
+  term: findTerm,
+  replacement: findReplacement,
+  caseSensitive: findCaseSensitive,
+  activeLabel: findActiveLabel,
+  matchCount: findMatchCount,
+  focusToken: findFocusToken,
+  openFind,
+  close: closeFind,
+  setTerm: setFindTerm,
+  toggleCaseSensitive: toggleFindCaseSensitive,
+  next: findNext,
+  prev: findPrev,
+  replaceCurrent: findReplaceCurrent,
+  replaceAll: findReplaceAll,
+  refresh: refreshFind,
+} = useEditorFind(editor)
+
+// Esc 走全局 Esc 栈（一次 Esc 只剥一层：查找条 > 助手面板），不在输入框里
+// 自处理——window 捕获层的栈先于输入框 bubble 跑，两处都接=一次按键关两层。
+// 注：会话写作 Esc（蒸发幽灵/关卡舱）优先级更高，按既有分层让位（见 useEscStack）。
+const { push: pushEsc, remove: removeEsc } = useEscStack()
+let _findEscId = null
+watch(findOpen, (open) => {
+  if (open && !_findEscId) {
+    _findEscId = pushEsc(() => closeFind(), 'editor-find')
+  } else if (!open && _findEscId) {
+    removeEsc(_findEscId)
+    _findEscId = null
+  }
+})
+
+/** Ctrl/Cmd+F 唤起：挂在编辑器容器上（正文或查找框有焦点时都生效） */
+function handleFindShortcut(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return
+  if (e.key.toLowerCase() !== 'f') return
+  e.preventDefault()
+  e.stopPropagation()
+  openFind()
+}
+
+const setFindReplacement = (value) => {
+  findReplacement.value = value
+}
+
+/**
+ * 整理标点（本地确定性，零 LLM / 零 API Key，单事务可一次 Ctrl+Z 反悔）。
+ * 有选区只整理选区（作者点名范围），无选区整篇。
+ */
+function normalizePunctuation() {
+  const ed = editor.value
+  if (!ed) return
+  const { from, to } = ed.state.selection
+  const scope = from !== to ? { from, to } : undefined
+  const result = normalizeDocumentPunctuation(ed, scope)
+  if (!result.edits) {
+    showToast('标点已经是规整的，没有要改的', 'info')
+    return
+  }
+  const where = scope ? '选区' : '本篇'
+  showToast(`${where}已整理 ${result.edits} 处标点`, 'success', 6000, {
+    label: '撤销',
+    onClick: () => ed.chain().focus().undo().run(),
+  })
+}
+
+/**
+ * 目标范围里有没有「外来长相标记」（textStyle/highlight）——决定提示语说实话。
+ * 只看标记不改文档（命令执行前的预检）。
+ */
+function rangeHasForeignMarks(ed, from, to) {
+  let found = false
+  ed.state.doc.nodesBetween(from, to, (node) => {
+    if (found) return false
+    if (node.isText && node.marks.some((m) => FOREIGN_MARK_NAMES.includes(m.type.name))) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+/**
+ * 清除外来样式：剥掉粘贴带进来的颜色/底色/字体族字号（深色主题下会让字隐身），
+ * 粗体/斜体/下划线/结构一律保留。无选区=整篇。
+ */
+function clearForeignStyles() {
+  const ed = editor.value
+  if (!ed) return
+  const { from, to } = ed.state.selection
+  const scoped = from !== to
+  if (!rangeHasForeignMarks(ed, scoped ? from : 0, scoped ? to : ed.state.doc.content.size)) {
+    showToast('没有可清除的外来样式', 'info')
+    return
+  }
+  const chain = ed.chain()
+  if (!scoped) chain.selectAll()
+  // 摘标记不改文档结构、位置不变——末了还原原选区。整篇清理靠 selectAll，
+  // 不还原的话作者回正文一打字就把整章替换掉（菜单入口尤其危险）
+  for (const mark of FOREIGN_MARK_NAMES) chain.unsetMark(mark)
+  chain.setTextSelection({ from, to }).focus()
+  chain.run()
+  showToast(scoped ? '已清除选区里粘贴带进来的颜色与字体' : '已清除本篇粘贴带进来的颜色与字体', 'success')
+}
 
 // NLE-ADF 2.0：注册全局编辑器句柄（生成会话层的幽灵草稿/Spark Dock
 // 控制器经此直接操作文档；卸载时清空，见 onBeforeUnmount）。
@@ -628,11 +762,17 @@ onBeforeUnmount(() => {
   clearUndoHint()
   registerChapterEditor(null)
   document.removeEventListener('mousedown', handleSelectionMenuOutsidePress)
+  editorContainerRef.value?.removeEventListener('keydown', handleFindShortcut)
+  if (_findEscId) {
+    removeEsc(_findEscId)
+    _findEscId = null
+  }
   editor.value.destroy()
 })
 
 onMounted(() => {
   document.addEventListener('mousedown', handleSelectionMenuOutsidePress)
+  editorContainerRef.value?.addEventListener('keydown', handleFindShortcut)
 })
 
 const toggleBold = () => editor.value.chain().focus().toggleBold().run()
@@ -937,13 +1077,36 @@ defineExpose({
   applyOptimizationDiff,
   resetOptimization,
   formatWholeDocument,
-  getContent: () => editor.value?.getHTML() || ''
+  getContent: () => editor.value?.getHTML() || '',
+  // 2026-09-10 编辑器优化：⋯ 菜单两个本地命令 + 查找条（Ctrl+F 之外的可发现入口）
+  normalizePunctuation,
+  clearForeignStyles,
+  openFind,
 })
 </script>
 
 <template>
-  <div ref="editorContainerRef" class="rich-text-editor bg-parchment-50 overflow-hidden flex flex-col flex-1 min-h-0 relative" :class="{ 'opacity-60': disabled }">
+  <div ref="editorContainerRef" class="rich-text-editor overflow-hidden flex flex-col flex-1 min-h-0 relative" :class="{ 'opacity-60': disabled }">
     <editor-content :editor="editor" class="flex-1 overflow-y-auto custom-scrollbar" />
+
+    <!-- 查找/替换条（Ctrl+F 唤起；Esc / × 收，收后焦点回正文） -->
+    <EditorFindBar
+      v-if="findOpen"
+      :term="findTerm"
+      :replacement="findReplacement"
+      :case-sensitive="findCaseSensitive"
+      :active-label="findActiveLabel"
+      :match-count="findMatchCount"
+      :focus-token="findFocusToken"
+      @update:term="setFindTerm"
+      @update:replacement="setFindReplacement"
+      @toggle-case="toggleFindCaseSensitive"
+      @next="findNext"
+      @prev="findPrev"
+      @replace-current="findReplaceCurrent"
+      @replace-all="findReplaceAll"
+      @close="closeFind"
+    />
 
     <transition name="copilot-menu">
       <div 
@@ -992,7 +1155,7 @@ defineExpose({
           @click="addToGoldenSnippets"
           :disabled="!props.bookId || !hasSelection"
           class="px-2 py-1 text-[10px] rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="将选中片段加入黄金片段（同时汇入文风样本库）"
+          title="把这段存进你的文风样本库，AI 以后会学它的写法"
         >
           <Icon name="star" :size="12" /> 黄金片段
         </button>
@@ -1014,7 +1177,7 @@ defineExpose({
             : 'bg-amber-50 text-amber-600 hover:bg-amber-100'"
           :title="pendingBad
             ? `配对中（改前 ${pendingBad.text.length} 字）——选中你改好的文字，点这里完成配对`
-            : '教去AI味小模型：先记下这段原文（改前），你亲手改完后选中它点「记改后」，成一对训练样本'"
+            : '帮 AI 学你的改法：先记下这段原文，亲手改完后选中它再点这里'"
         >
           <Icon name="check-badge" :size="12" /> {{ pendingBad ? '记改后' : '记改前' }}
         </button>
@@ -1104,7 +1267,7 @@ defineExpose({
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <span>优化生成中...</span>
+          <span>AI 改写中…</span>
         </div>
       </template>
 
@@ -1160,17 +1323,34 @@ defineExpose({
   }
   
   /* Tiptap Prose Customization */
+  /* 排版（字体族/字号/行高）不在这里写死——单一权威是 :root 的 --editor-* token
+     （style.css 的 `.rich-text-editor .ProseMirror`）。此前这里重复声明了
+     font-family/font-size/line-height，scoped 规则晚于全局表注入、同权重胜出，
+     把「实验：编辑器排版（宽排）」的 token 覆写成死档（切 18px/1.8 毫无反应）。
+     2026-09-10 去掉重复声明：改排版只改 token 一处。 */
   :deep(.ProseMirror) {
     height: 100%;
     outline: none;
-    font-family: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
-    font-size: 1rem;
-    line-height: 2.0;
     color: var(--text-primary);
+    /* 行间推挤卡舱（InlineDock）配套：关掉浏览器原生滚动锚定，防止舱展开
+       撑高时锚定节点与 InlineDockHost 的 scrollIntoView(nearest) 互搏跳滚 */
+    overflow-anchor: none;
+  }
+
+  /* 行间推挤卡舱的 widget 外壳（PM 管的 DOM 岛，2026-09-09）：块级、贴满
+     正文列宽；高度动画在 InlineDockHost 根上，这里只保证不额外变形 */
+  :deep(.velluma-inline-dock-widget) {
+    display: block;
+    width: 100%;
   }
   
   :deep(.ProseMirror p) {
     margin-bottom: 1.25em;
+    /* 保持默认左对齐——2026-09-09 试过 justify 后回退（截图像素实测）：
+       Chromium 120 无标点压缩（text-spacing-trim 要 129+），justify 把
+       禁则/半角行的空隙摊成分数像素字距，这些满行的栅格反而涣散；
+       纯中文满行左对齐本就天然齐右缘（834px 行宽实测 910-912 三线齐平），
+       不需要 justify。勿再试 */
   }
 :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-muted);

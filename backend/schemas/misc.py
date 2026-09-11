@@ -18,7 +18,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -209,6 +209,20 @@ class ModelConfigUpdate(BaseModel):
     embedding: Optional[EmbeddingConfigUpdate] = None
     deai: Optional[DeaiConfigUpdate] = None  # 去AI味小模型（可选；未配置=零变化直通）
     proxy: Optional[ProxyConfig] = None
+
+
+class ModelPriceEntry(BaseModel):
+    """单个模型价目（元 / 百万 token）。cached_input 可缺省（=按 input 全价计，
+    保守估算——厂商缓存命中价没查到时不填即可）。"""
+    input: float = Field(ge=0)
+    cached_input: Optional[float] = Field(default=None, ge=0)
+    output: float = Field(ge=0)
+
+
+class ModelPricesUpdate(BaseModel):
+    """价目表整表覆写（PUT /system/model-prices）。键=模型名（与
+    generation_runs.model_name 对齐）。空 prices=清空价目回到未计价态。"""
+    prices: Dict[str, ModelPriceEntry]
 
 
 class EmbeddingProbePayload(BaseModel):

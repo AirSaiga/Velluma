@@ -5,7 +5,7 @@
  * 一次粘贴导入 ≥50 条。
  */
 import { ref, computed } from 'vue'
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import { parseTsv, SAMPLE_TSV } from '../engine/bulkImport'
 import { useWorld } from '../composables/useWorld'
 
@@ -103,7 +103,7 @@ async function doImport() {
   color: #10b981;
 }
 .bi-err {
-  color: #dc2626;
+  color: var(--danger);
   margin-top: 3px;
 }
 .bi-msg {

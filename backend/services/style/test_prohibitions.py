@@ -604,7 +604,7 @@ class TestNegativeEntrySchema:
 
 class TestConfirmNegativeResolve:
     def _resolve(self, payload, **override_kwargs):
-        from backend.routes.style import _resolve_negative_confirm
+        from backend.routes.style.feedback import _resolve_negative_confirm
         from backend.schemas import StyleInboxConfirmRequest
 
         override = StyleInboxConfirmRequest(**override_kwargs) if override_kwargs else None

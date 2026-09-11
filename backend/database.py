@@ -757,6 +757,14 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB DEFAULT '[]'",
         "expected_udt_names": {"jsonb"},
     },
+    # 成本核算（2026-09-11）：缓存命中输入 token——历史行 NULL=厂商未回报，
+    # 计价按未命中全价（保守估算），新行由 _parse_usage 双字段兼容提取
+    {
+        "table": "generation_runs",
+        "column": "cached_tokens",
+        "definition": "INTEGER",
+        "expected_udt_names": {"int4", "integer"},
+    },
 ]
 
 

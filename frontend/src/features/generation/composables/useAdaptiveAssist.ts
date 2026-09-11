@@ -7,13 +7,12 @@
  * - 停顿心跳（停顿 4s + 光标段尾）：作者卡住时发，带 paused_ms=4000，
  *   触发后端 dock_generator 生发挂件。响应里带 dock_parts → 注入 Spark Dock。
  *
- * 时序协调：
- * - Spark Dock 自身的 4s 停顿门控（useSparkDock）负责"何时弹出"
- * - 停顿心跳负责"让后端在停顿时生成挂件"
- * - 两者都基于 4s 停顿，但 Spark Dock 弹出要求 sparkParts 非空——
- *   所以停顿心跳必须先于/同时于 Spark Dock 弹出完成。
- * - 实现：编辑器活动重置两个计时器（活跃心跳 3s + 停顿心跳 4s），
- *   停顿心跳跑完后 sparkParts 已就绪，Spark Dock 此时弹出即有内容。
+ * 时序协调（2026-09-09 起 Tab 唯一入口，自动弹出全线退役）：
+ * - 停顿心跳照发（感知带/走向卡/世界保鲜不中断），但不再自动弹舱、
+ *   也不再点亮思考指示器——后台感知是安静的，光标处亮「AI 要凑过来了」
+ *   的绿点坐等无果（舱不会自己来），实测被当成故障（2026-09-10 修复）。
+ * - 思考指示器只服务显式动作：Space 续写 / Tab 点名（summoned 心跳、
+ *   在飞挂起期） / burst / 点火 / 细纲扩写——作者发了指令才值得亮灯。
  */
 import { watch, ref, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard, type GhostWarning } from '../../../services/api/domain/adaptive.api'
@@ -24,7 +23,7 @@ import {
   ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
   setGhostRepaired, materializeRejectedGhost,
 } from './useGhostDraft'
-import { setSparkParts, showSparkDock, hideSparkDock, sparkDockVisible, sparkSticky, type SparkPart } from './useSparkDock'
+import { setSparkParts, setSparkGuests, showSparkDock, hideSparkDock, sparkDockVisible, SPARK_DOCK_AUTO_POPUP, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
 import { setThinkingPhase, hideThinking } from './useThinkingIndicator'
 import { assistEnabled } from './useAssistEnabled'
@@ -59,7 +58,6 @@ function notifyScoutSkipped(reason?: string | null) {
 
 const ACTIVE_HEARTBEAT_MS = 3000   // 活跃心跳防抖
 const PAUSE_HEARTBEAT_MS = 4000    // 停顿心跳（与 Spark Dock 弹出门控对齐）
-const PREVIEW_DELAY_MS = 2000      // 思考指示器预览态延迟（停顿 2s 即显示淡灰点）
 
 // ---- 句子级闸门的前端镜像（与后端 paragraph_source.ends_mid_sentence 同判据）----
 // 半句悬停时停顿心跳必然被后端静音（dock_muted）——等待/感知灯不该为一个
@@ -109,12 +107,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     _continueAbort = null
     hideThinking()
     showToast(
-      payload.message || '这次没能写出合格的续写（检出设定硬伤，自动修正未通过）',
+      payload.message || '这次没写出合格的续写——有设定错误，自动修正也没修好',
       'warning',
       8000,
       payload.text
         ? {
-            label: '仍以疑点提示上屏',
+            label: '还是贴出来（带疑点标记）',
             onClick: () => {
               materializeRejectedGhost(payload.text, source)
               setGhostWarnings(payload.warnings || [])
@@ -126,7 +124,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
   let _activeTimer: ReturnType<typeof setTimeout> | null = null
   let _pauseTimer: ReturnType<typeof setTimeout> | null = null
-  let _previewTimer: ReturnType<typeof setTimeout> | null = null
   let _lastActiveTs = 0
   let _continueAbort: AbortController | null = null
   let _heartbeatFailedOnce = false
@@ -142,6 +139,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // 作者按 Tab 毫无反应，要等 2~7s 再按一次才灵，体感「Tab 有时灵有时不灵」。
   // 现转挂起：在飞生发响应带回的零件即点名所得，响应落地直接弹舱兑现）
   let _summonPending = false
+  let _summonPendingForce = false  // 挂起点名是否要求换一批（Tab 重复生成）
   // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
   let _lastCardSig = ''
   let _lastDockSig = ''
@@ -175,7 +173,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     hideThinking()
   }
 
-  // ---- 编辑器活动：重置三个计时器 + 隐藏思考指示器 ----
+  // ---- 编辑器活动：重置两只计时器 + 隐藏思考指示器 ----
   function _onEditorActivity() {
     if (!assistEnabled.value) return  // AI 辅助关闭（纯手写模式）：心跳/思考点全停
     _lastActiveTs = Date.now()
@@ -186,22 +184,15 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       const $from = ed.state.selection.$from
       _lastCtx = {
         chapterId: chId,
-        recentText: $from.parent.textContent,
+        // 桥接态快照同口径（切页后 pending 停顿心跳的 recent_text 来源）
+        recentText: _anchorRecentText(),
         wordCount: ed.state.doc.textContent.length,
         cursorAtEnd: $from.pos >= $from.end() - 1,
       }
     }
-    // 作者重新动笔 → 立即隐藏思考点（任何 pending 计时器随之清掉）
+    // 作者重新动笔 → 立即隐藏思考点（任何 pending 计时器随之清掉）。
+    // 等待预览灰点已随自动弹出退役（2026-09-10）：停顿不再预告「AI 要凑过来」
     hideThinking()
-    // 预览计时器：2s 后若无新活动 → 显示淡灰「等待中」点（预示即将凑近）
-    if (_previewTimer) clearTimeout(_previewTimer)
-    _previewTimer = setTimeout(() => {
-      // 仅 composing 态 + 光标在段尾才预览（段中编辑/选词不算停顿思考）
-      if (opts.authorLaneRef.value === 'composing' && _isCursorAtParagraphEnd()) {
-        // 半句不预告：闸门下停顿心跳必空手而归，灰点是许愿不兑现
-        if (!_endsMidSentence(_recentText500())) setThinkingPhase('waiting')
-      }
-    }, PREVIEW_DELAY_MS)
     // 活跃心跳：3s 后发（让后端感知正文推进）
     if (_activeTimer) clearTimeout(_activeTimer)
     _activeTimer = setTimeout(() => { void _sendHeartbeat(0) }, ACTIVE_HEARTBEAT_MS)
@@ -224,8 +215,18 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         // 秒弹同吃半句闸门（2026-08-28 修复）：光标段尾但句子未写完时，心跳
         // 响应必带 dock_muted 清舱——秒弹先亮再被收掉 = 舱一闪即隐（预览灰点
         // 有此闸，秒弹漏了，口径对齐；心跳照发，感知带数据照常带回）。
-        // 秒弹只活在编辑器在场时——作者不在台，弹了也没人看
-        if (editorPresent && !_endsMidSentence(_recentText500())) showSparkDock()
+        // 秒弹只活在编辑器在场时——作者不在台，弹了也没人看。
+        // 上下文键守卫（2026-09-09）：缓存零件只对「为它而生的那份上下文」
+        // 新鲜——字数/段落任一变化即陈旧，秒弹不弹（响应侧带新件再弹），
+        // 杜绝旧零件抢先上屏 2-7 秒被误读为「缓存没失效」。
+        // 停顿秒弹已随自动弹出退役（2026-09-09 SPARK_DOCK_AUTO_POPUP=false）
+        // ——心跳照发（感知/走向卡/保鲜不中断），只是不再自动弹舱
+        if (
+          SPARK_DOCK_AUTO_POPUP
+          && editorPresent
+          && !_endsMidSentence(_recentText500())
+          && _partsForContext === _contextKey()
+        ) showSparkDock()
         void _sendHeartbeat(Date.now() - _lastActiveTs)
       }
     }, PAUSE_HEARTBEAT_MS)
@@ -238,11 +239,68 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     return $from.pos >= $from.end() - 1
   }
 
+  // ---- 缓存零件的上下文键（2026-09-09 实测「缓存还在陈旧」修复）----
+  // 后端签名已并入全书字数（任何画布改动即重算）；前端秒弹是另一条陈旧通路：
+  // 停顿时把上轮缓存零件先弹出来、新件 2-7s 后才到——上下文已变时作者看到的
+  // 是旧零件。键 = 全书字数 + 当前段文本（与后端签名同源意图）；零件入库时记
+  // 下「为哪份上下文而生」，秒弹前比对——不匹配就不弹，等响应带新件。
+  let _partsForContext = ''
+
+  function _contextKey(): string {
+    const editor = chapterEditorHandle.value
+    if (!editor) return ''
+    return `${editor.state.doc.textContent.length}|${editor.state.selection.$from.parent.textContent}`
+  }
+
+  /**
+   * 光标后文锚（2026-09-09 中插桥接/FIM）：骨架跳写时光标停在上下文之间——
+   * 取光标后 ≤150 字原文，句界裁到前 1-2 句（~120 字）；不足 8 字视为无后文
+   * （光标在文尾=普通续写，不进桥接）。仅编辑器在场时可用（桥接需活光标）。
+   */
+  function _suffixAfterCursor(): string {
+    const editor = chapterEditorHandle.value
+    if (!editor) return ''
+    try {
+      const from = editor.state.selection.$from.pos
+      const raw = editor.state.doc.textBetween(
+        from, Math.min(from + 150, editor.state.doc.content.size), '\n\n',
+      )
+      const t = raw.trim()
+      if (t.length < 8) return ''
+      // 句界裁剪：截到第 2 个句末标点（含），无句读则 120 字硬截
+      let end = -1, hits = 0
+      for (let i = 0; i < t.length && i < 160; i++) {
+        if ('。！？…'.includes(t[i])) { hits++; end = i; if (hits >= 2) break }
+      }
+      return (end > 0 ? t.slice(0, end + 1) : t.slice(0, 120)).trim()
+    } catch { return '' }
+  }
+
   /** 与后端同源的光标段文本——心跳发送的 recent_text 就是它的前 500 字 */
   function _recentText500(): string {
     const editor = chapterEditorHandle.value
     if (!editor) return ''
     return editor.state.selection.$from.parent.textContent.slice(0, 500)
+  }
+
+  /**
+   * 心跳取源（桥接感知，2026-09-09 FIM 空段回退事故）：普通态=光标段；
+   * 桥接态（光标后有正文=骨架跳写插入点）=光标前 ≤500 字窗口。
+   * 桥接态断点必须锚光标前文——插入点常是空段，旧口径发空串会让后端
+   * resolve_current_paragraph 回退画布尾=文档末尾，光标之后的已写内容
+   * 整个被当成「作者当前段落」（实测：插入点在送别，卡片全接着文末
+   * 饭桌场景生发，与插入点前文脱节）。与 requestContinue 桥接分支同判据。
+   */
+  function _anchorRecentText(): string {
+    const editor = chapterEditorHandle.value
+    if (!editor) return ''
+    const $from = editor.state.selection.$from
+    if (_suffixAfterCursor()) {
+      return editor.state.doc
+        .textBetween(Math.max(0, $from.pos - 500), $from.pos, '\n\n')
+        .trim().slice(-500)
+    }
+    return $from.parent.textContent
   }
 
   /**
@@ -269,7 +327,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     }
   }
 
-  async function _sendHeartbeat(pausedMs: number, flags?: { summoned?: boolean; _summonRetry?: boolean }) {
+  async function _sendHeartbeat(pausedMs: number, flags?: {
+    summoned?: boolean; _summonRetry?: boolean; forceRefresh?: boolean,
+  }) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return
     if (opts.authorLaneRef.value !== 'composing') return
@@ -280,7 +340,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // 且活跃档快响应曾半路杀绿点（响应侧守卫兜过，但请求本身白烧）；Tab 点名
     // 例外转挂起：_summonPending 由在飞生发响应兑现，不再石沉大海。
     if (_generationHeartbeatsInFlight > 0) {
-      if (flags?.summoned) _summonPending = true
+      if (flags?.summoned) {
+        _summonPending = true
+        _summonPendingForce = !!flags?.forceRefresh
+        // 点名撞上在飞后台生发：后台心跳自己不亮灯了（2026-09-10），挂起等待
+        // 期由点名自己亮——否则按 Tab 到响应兑现之间零反馈
+        setThinkingPhase('perceiving')
+      }
       return
     }
     if (!generationTier && _activeHeartbeatInFlight) return
@@ -294,7 +360,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     if (editor) {
       wordCount = editor.state.doc.textContent.length
       const $from = editor.state.selection.$from
-      recentText = $from.parent.textContent
+      // 桥接态改取光标前窗口（_anchorRecentText）——空段插入点不再发空串
+      // 触发后端文档末尾回退（2026-09-09「卡片接着文末写」事故根因）
+      recentText = _anchorRecentText()
       cursorAtEnd = $from.pos >= $from.end() - 1
     } else if (_lastCtx && _lastCtx.chapterId === chapterId) {
       // 感知常驻（2026-08-29 用户拍板「无论切到哪都不停感知」）：写作台已
@@ -313,12 +381,15 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
     // 仅停顿档切「感知中」：活跃档是后台探查（走向卡缓存/感知带），不该让顶栏
     // 状态闪烁——它 0.3s 后就被自家响应改写，作者只看到标签乱跳（2026-08-27 实测）
-    // 半句静音轮不亮灯：闸门会让本轮必空手而归——绿点亮一下就灭比不亮更伤
-    //（实测被当成断线）。心跳照发：感知带/世界保鲜数据照常带回。Tab 点名豁免。
+    // 半句静音轮不亮状态灯：闸门会让本轮必空手而归（实测被当成断线）。
+    // 心跳照发：感知带/世界保鲜数据照常带回。Tab 点名豁免。
+    // 思考指示器（光标绿点）只随 Tab 点名亮（2026-09-10）：停顿自动生成的
+    // 弹舱承诺已随 2026-09-09 自动弹出退役——后台感知照跑但不在光标处亮
+    // 「AI 正在生发」的脉冲点，作者坐等无果（舱只有点名才来）。
     if (pausedMs >= PAUSE_HEARTBEAT_MS && (flags?.summoned || !_endsMidSentence(recentText.slice(0, 500)))) {
       opts.aiLaneRef.value = 'perceiving'
-      // 停顿心跳发出 → 切强态（后端开始算 dock_generator，让用户看到「AI 正在读」）
-      setThinkingPhase('perceiving')
+      // 停顿心跳发出 + 点名在身 → 切强态（后端开始算 dock_generator，Tab 等待有反馈）
+      if (flags?.summoned) setThinkingPhase('perceiving')
     }
     _activeHeartbeatInFlight = true
     if (generationTier) _generationHeartbeatsInFlight += 1
@@ -333,13 +404,20 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         cursor_at_paragraph_end: flags?.summoned ? true : cursorAtEnd,
         has_outline: hasOutline,
         outline_text: outlineText,
-        recent_text: recentText.slice(0, 500),
+        // 尾切 500（2026-09-09）：超长段保住光标侧——作者的真位置在段尾，
+        // 头切会把当前写作点切掉（实测「接不上」的第三层截断）
+        recent_text: recentText.slice(-500),
         summoned: !!flags?.summoned,
+        // 强制刷新（Tab 重复生成，2026-09-09）：后端跳过 dock 缓存命中判断
+        // 强行重算并覆盖旧缓存——舱在屏上再按 Tab = 「这批不要，换一批」
+        force_refresh: !!flags?.forceRefresh,
         // 细纲胶囊速记（意图反推素材；编辑器已卸载的感知常驻路径无胶囊可读，传空）
         outline_notes: editor ? _outlineNotes() : [],
         // 打算一句话随心跳上行（2026-09-03 意图入舱）：后端据此即时感知「作者
         // 写/改/纠正了打算」—— bust dock 缓存让舱换向 + 触发层 2 转化（0 LLM）
         spine_intent: spine.value?.intent?.text || '',
+        // 光标后文锚（2026-09-09 FIM）：编辑器在场才有——桥接是活光标的位置事实
+        suffix_anchor: editor ? _suffixAfterCursor() : '',
       })
 
       // 章节纪元守卫（2026-08-29 错章零件修复）：发送后切章 → 本响应是旧章的
@@ -353,15 +431,20 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 清舱收卡把「闭嘴」执行到端上。此前只清响应不清前端，旧件（上轮缓存/
       // 章节恢复兜底）一直躺在舱里，作者正写感想半句时卡照样在屏（实测事故）。
       // Tab 点名走 summoned 心跳重取，清舱无损失。
-      // 生发档仍在飞（含活跃档先发慢归竞态）→ 本响应只更数据不动反馈态：
-      // 清舱/hideThinking/状态翻 dormant 都会杀掉作者正盯着等的绿点。
+      // 无条件执行（2026-09-08 实测加固）：旧实现的 sticky 豁免（08-28 连续
+      // 吸附流）与生发在飞豁免会在半句悬停时留下陈旧零件「幽灵挂载」——作者
+      // 误读为门禁未生效。半句=明确的「闭嘴」信号，一律清舱收卡；作者已吸附
+      // 进意图栏的选择（attachedParts）不动——那是作者自己的东西，Space 照常
+      // 消费（缝合后 Tab 可再点名重取，无损）。
       const generationStillBusy = _generationHeartbeatsInFlight > (generationTier ? 1 : 0)
-      // sticky 态豁免（2026-08-28）：作者缝合后显式留下的舱（连续吸附流），
-      // 半句静音管「自动弹出新件」不管作者留下的舱——杀掉它等于打断连续缝合流
-      if (result.dock_muted && !generationStillBusy && !sparkSticky.value) {
+      if (result.dock_muted) {
         setSparkParts([])
+        setSparkGuests([])
+        _partsForContext = ''   // 零件已清，上下文键随之作废（秒弹守卫自然关死）
         hideSparkDock()
       }
+      // 临时在场通行证（2026-09-09）：与零件同帧到达（__dock__ 缓存随件带出）
+      setSparkGuests((result as any).onstage_guests || [])
       const parts: SparkPart[] = (result.dock_parts || []).map((p) => ({
         key: p.key,
         kind: (p.kind as any) || 'anchor',
@@ -377,15 +460,19 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       }))
       if (parts.length) {
         setSparkParts(parts)
+        // 记下这批零件「为哪份上下文而生」（发送侧读数——后端正是拿它签名的）：
+        // 字数/段落任一变化，这批零件即陈旧，秒弹不再弹它们
+        _partsForContext = `${wordCount}|${recentText}`
         // 弹舱看响应时刻的活状态，不用发送时刻的死快照：发送后作者重新动笔
         // （_lastActiveTs 被刷新）或光标已离段尾 → 只静默更新零件供 Tab 用，不弹——
         // 弹了也被下一个按键立刻收掉（2026-08-24 trace 实证：LLM 3~7s 延迟常使
         // 响应落在下一次打字进行中，舱一闪即隐）。Tab 显式召唤例外：点名要的零件，直接弹。
         const authorResumed = _lastActiveTs > sendTs
         if (flags?.summoned) {
-          showSparkDock()
+          showSparkDock()   // Tab 唤醒的兑现（唯一自动可见路径）
         } else if (
-          pausedMs >= PAUSE_HEARTBEAT_MS
+          SPARK_DOCK_AUTO_POPUP   // 停顿响应自动弹：已随自动弹出退役（2026-09-09）
+          && pausedMs >= PAUSE_HEARTBEAT_MS
           && cursorAtEnd
           && !authorResumed
           && _isCursorAtParagraphEnd()
@@ -400,12 +487,16 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 响应处理后执行），延迟一拍补发真 summoned 心跳，其响应走召唤语义
       // 必弹；仅补一次（_summonRetry 防循环），再空则下一按 Tab 全新尝试。
       if (_summonPending) {
+        const pendingForce = _summonPendingForce
         _summonPending = false
+        _summonPendingForce = false
         if (parts.length) {
           showSparkDock()
         } else if (!flags?._summonRetry) {
           setTimeout(() => {
-            void _sendHeartbeat(PAUSE_HEARTBEAT_MS, { summoned: true, _summonRetry: true })
+            void _sendHeartbeat(PAUSE_HEARTBEAT_MS, {
+              summoned: true, _summonRetry: true, forceRefresh: pendingForce,
+            })
           }, 0)
         }
       }
@@ -503,71 +594,83 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   }
 
   // ---- 零件即点取件（Tab 显式召唤：无缓存零件时补一跳停顿级心跳）----
-  function summonParts() {
-    if (_summonInFlight) return  // 连按不叠加 LLM 调用
+  function summonParts(forceRefresh = false) {
+    if (_summonInFlight) return  // 连按不叠加 LLM 调用（生成期间的连按静默合并）
     if (ghostActive.value) return
-    // Tab 点名 = 作者显式要件：拆掉打字武装的三只计时器——它们都会在召唤的
-    // 2~7s LLM 等待期内触发（活跃档响应半路杀绿点、停顿档白烧一次生发、
-    // 预览点降级闪烁），下一次打字会重新武装
+    // Tab 点名 = 作者显式要件：拆掉打字武装的两只计时器——它们都会在召唤的
+    // 2~7s LLM 等待期内触发（活跃档响应半路杀绿点、停顿档白烧一次生发），
+    // 下一次打字会重新武装
     if (_activeTimer) { clearTimeout(_activeTimer); _activeTimer = null }
     if (_pauseTimer) { clearTimeout(_pauseTimer); _pauseTimer = null }
-    if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null }
     _summonInFlight = true
     // 借停顿档（paused_ms=4000）让后端同步跑 dock_generator；summoned 标记让
     // 响应侧跳过段尾/动笔守卫直接弹舱（作者点名要的零件）。期间思考点自动亮
     // （停顿档 setThinkingPhase('perceiving')），等待有反馈。
-    void Promise.resolve(_sendHeartbeat(PAUSE_HEARTBEAT_MS, { summoned: true }))
-      .finally(() => { _summonInFlight = false })
+    void Promise.resolve(_sendHeartbeat(PAUSE_HEARTBEAT_MS, {
+      summoned: true, forceRefresh,
+    })).finally(() => { _summonInFlight = false })
   }
 
   // ---- 续写：stitch-ghost SSE 灌幽灵草稿 ----
-  function requestContinue(
-    mode: 'stitch' | 'continue' = 'continue',
-    pickedParts: Array<{ text: string; direction?: string; slot?: string }> = [],
-  ) {
-    const chapterId = opts.getChapterId()
-    if (!chapterId) return
-    const editor = chapterEditorHandle.value
-    if (!editor || ghostActive.value) return
-    const paraText = editor.state.selection.$from.parent.textContent
-    let fragment = paraText.trim().slice(-200)
-    // 光标在空段落（如正文末尾的空行）时，回退取编辑器最后一个非空段落作为 fragment
-    if (!fragment) {
-      const doc = editor.state.doc
-      doc.descendants((node) => {
-        if (node.isTextblock) {
-          const t = node.textContent.trim()
-          if (t) { fragment = t.slice(-200); return false }
-        }
-        return true
-      })
-    }
-    if (!fragment) return
-    const paraStart = editor.state.selection.$from.start()
-    const rollingPrefix = editor.state.doc.textBetween(Math.max(0, paraStart - 200), paraStart, '\n\n')
+  /** 空段落兜底：光标段为空时取最后一个非空文本块尾 200 字（continue/burst 同判据）。 */
+  function _fallbackFragment(editor: NonNullable<typeof chapterEditorHandle.value>): string {
+    let fragment = ''
+    editor.state.doc.descendants((node) => {
+      if (node.isTextblock) {
+        const t = node.textContent.trim()
+        if (t) { fragment = t.slice(-200); return false }
+      }
+      return true
+    })
+    return fragment
+  }
 
+  /** stitch 链公共起手：中止在飞流、开新 AbortController、置 assisting、亮思考指示。 */
+  function _beginStitchSession() {
     if (_continueAbort) _continueAbort.abort()
     _continueAbort = new AbortController()
     opts.aiLaneRef.value = 'assisting'
-    // 立即显示"AI 正在生成"——不等 GHOST_START（后端 LLM 调用 2-5s，期间作者需要反馈）
     setThinkingPhase('perceiving')
+  }
 
-    // 采纳方向回报：取首个有 direction 的 part，通知后端降权（负反馈）
-    const adoptedDir = pickedParts.find((p) => p.direction)?.direction
-
-    logCollabEvent(chapterId, 'ghost_request', { mode })
-    adaptiveApi.stitchGhost(chapterId, {
-      fragment, rolling_prefix: rollingPrefix, mode,
-      picked_parts: pickedParts.map((p) => p.text),
-      // 双轨契约选档信号（2026-09-03 质感批次）：零件功能槽位同序上行
-      picked_slots: pickedParts.map((p) => p.slot || ''),
-      target_chars: mode === 'stitch' ? 120 : 200,
-      adopted_direction: adoptedDir,
-    }, {
-      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
-      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
-      onDone: (result) => {
+  /**
+   * 幽灵流回调组工厂（2026-09-11 架构批去重）：continue/burst/open/outline 四条
+   * stitch 链的 SSE 回调曾逐字四抄（各约 22 行）——GHOST_DONE 新增字段时要改
+   * 四处（漏一处即接缝断裂）。差异只有三处：beginGhost 入参 / 拒稿逃生舱
+   * kind / 失败文案；其余行为逐字节等价。
+   */
+  function _ghostStreamHandlers(
+    chapterId: string,
+    variant: {
+      begin?: () => void
+      rejectKind?: 'stitch' | 'outline'
+      errorMsg?: string
+    } = {},
+  ) {
+    const { begin, rejectKind = 'stitch', errorMsg = 'AI 续写失败，请重试' } = variant
+    return {
+      onStart: () => {
+        if (_staleEpoch(chapterId)) return
+        if (begin) begin()
+        else beginGhost('stitch')
+        hideThinking()
+      },
+      onChunk: (delta: string) => {
+        if (_staleEpoch(chapterId)) return
+        appendGhost(delta)
+      },
+      onReject: (p: { message: string; mode: string; text: string; warnings: GhostWarning[] }) => {
+        if (_staleEpoch(chapterId)) return
+        _onGhostReject(p, rejectKind)
+      },
+      onDone: (result: {
+        warnings?: GhostWarning[]
+        wash?: { hits: Array<{ pattern: string; span: string; replaced: boolean; alternative: string }>; original_text: string }
+        ghost_token?: string
+        sample_ids?: string[]
+        repaired?: { count: number; kinds: string[]; action: string; items?: GhostWarning[] }
+        breaker_open?: boolean
+      }) => {
         if (_staleEpoch(chapterId)) return
         // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
         setGhostWarnings(result.warnings || [])
@@ -578,14 +681,57 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
       },
-      onError: (message) => {
+      onError: (message: string) => {
         if (_staleEpoch(chapterId)) return
         evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
         hideThinking()
         // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
-        opts.reportError?.(message || 'AI 续写失败，请重试')
+        opts.reportError?.(message || errorMsg)
       },
-    }, _continueAbort.signal)
+    }
+  }
+
+  function requestContinue(
+    mode: 'stitch' | 'continue' = 'continue',
+    pickedParts: Array<{ text: string; direction?: string; slot?: string }> = [],
+  ) {
+    const chapterId = opts.getChapterId()
+    if (!chapterId) return
+    const editor = chapterEditorHandle.value
+    if (!editor || ghostActive.value) return
+    // 中插桥接（2026-09-09 FIM）：光标后有正文=骨架跳写——fragment 改取
+    // **光标前**的段内文本（旧口径取整段会把后文混进「作者原句」），后文锚
+    // 随请求上行，后端注入双端边界与桥接铁律
+    const suffix = _suffixAfterCursor()
+    const $from = editor.state.selection.$from
+    let fragment = suffix
+      ? editor.state.doc.textBetween($from.start(), $from.pos, '\n\n').trim().slice(-200)
+      : $from.parent.textContent.trim().slice(-200)
+    // 光标在空段落（如正文末尾的空行）时，回退取编辑器最后一个非空段落作为 fragment
+    if (!fragment) fragment = _fallbackFragment(editor)
+    if (!fragment) return
+    const paraStart = editor.state.selection.$from.start()
+    const rollingPrefix = editor.state.doc.textBetween(Math.max(0, paraStart - 200), paraStart, '\n\n')
+
+    _beginStitchSession()
+
+    // 采纳方向回报：取首个有 direction 的 part，通知后端降权（负反馈）
+    const adoptedDir = pickedParts.find((p) => p.direction)?.direction
+
+    logCollabEvent(chapterId, 'ghost_request', { mode })
+    adaptiveApi.stitchGhost(chapterId, {
+      fragment, rolling_prefix: rollingPrefix, mode,
+      picked_parts: pickedParts.map((p) => p.text),
+      // 双轨契约选档信号（2026-09-03 质感批次）：零件功能槽位同序上行
+      picked_slots: pickedParts.map((p) => p.slot || ''),
+      // 微缝合目标（第二冲程 2026-09-09）：120 → 50（40-60 微镜头区间）——
+      // 分镜时代的 stitch 是「放大一瞬」不是小段落；后端微镜头闸（target≤60）
+      // 据此走免压缩分支（超 ×1.6 只句界截断，零 LLM 往返）
+      target_chars: mode === 'stitch' ? 50 : 200,
+      // 后文锚（FIM）：桥接扩写的双端边界材料（空=普通追加式续写）
+      suffix_anchor: suffix,
+      adopted_direction: adoptedDir,
+    }, _ghostStreamHandlers(chapterId), _continueAbort!.signal)
   }
 
   // ---- 沉淀：锁死段落 ----
@@ -633,7 +779,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       opts.aiLaneRef.value = 'dormant'
       if (opts.authorLaneRef.value === 'settling') opts.authorLaneRef.value = 'composing'
       // 此前静默 return null：沉淀失败作者完全无感知
-      opts.reportError?.('沉淀失败：' + (e?.message || '未知错误'))
+      opts.reportError?.('整理新设定失败：' + (e?.message || '未知错误'))
       return null
     }
   }
@@ -647,16 +793,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // fragment/rolling_prefix 构建与 requestContinue 相同，但衔接窗口更大（500 字）
     const paraText = editor.state.selection.$from.parent.textContent
     let fragment = paraText.trim().slice(-200)
-    if (!fragment) {
-      const doc = editor.state.doc
-      doc.descendants((node) => {
-        if (node.isTextblock) {
-          const t = node.textContent.trim()
-          if (t) { fragment = t.slice(-200); return false }
-        }
-        return true
-      })
-    }
+    if (!fragment) fragment = _fallbackFragment(editor)
     if (!fragment) return
     const paraStart = editor.state.selection.$from.start()
     const rollingPrefix = editor.state.doc.textBetween(Math.max(0, paraStart - 500), paraStart, '\n\n')
@@ -666,38 +803,14 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       ? card.event + (card.anchors?.length ? `（焦点：${card.anchors.join('、')}）` : '')
       : ''
 
-    if (_continueAbort) _continueAbort.abort()
-    _continueAbort = new AbortController()
-    opts.aiLaneRef.value = 'assisting'
-    setThinkingPhase('perceiving')
+    _beginStitchSession()
 
     logCollabEvent(chapterId, 'card_burst', { event: card?.event || '', from_encounter: !!(card as any)?.from_encounter })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode: 'burst',
       beat_guidance: guidance,
       target_chars: 700,
-    }, {
-      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
-      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
-      onDone: (result) => {
-        if (_staleEpoch(chapterId)) return
-        setGhostWarnings(result.warnings || [])
-        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
-        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
-        setGhostRepaired(result.repaired, result.breaker_open)
-        opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-      },
-      onError: (message) => {
-        if (_staleEpoch(chapterId)) return
-        evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-        // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
-        opts.reportError?.(message || 'AI 续写失败，请重试')
-      },
-    }, _continueAbort.signal)
+    }, _ghostStreamHandlers(chapterId), _continueAbort!.signal)
   }
 
   // ---- 点火（冷启动）：空章 + 大纲 → 开篇引子（幽灵草稿形态）----
@@ -707,37 +820,13 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const editor = chapterEditorHandle.value
     if (!editor || ghostActive.value) return
 
-    if (_continueAbort) _continueAbort.abort()
-    _continueAbort = new AbortController()
-    opts.aiLaneRef.value = 'assisting'
-    setThinkingPhase('perceiving')
+    _beginStitchSession()
 
     logCollabEvent(chapterId, 'ignition')
     adaptiveApi.stitchGhost(chapterId, {
       fragment: '', rolling_prefix: '', mode: 'open',
       target_chars: 700,
-    }, {
-      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('stitch'); hideThinking() },
-      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
-      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'stitch') },
-      onDone: (result) => {
-        if (_staleEpoch(chapterId)) return
-        setGhostWarnings(result.warnings || [])
-        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
-        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
-        setGhostRepaired(result.repaired, result.breaker_open)
-        opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-      },
-      onError: (message) => {
-        if (_staleEpoch(chapterId)) return
-        evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-        // 此前静默失败：作者按 Space 等几秒毫无反应，分不清没触发还是失败
-        opts.reportError?.(message || 'AI 续写失败，请重试')
-      },
-    }, _continueAbort.signal)
+    }, _ghostStreamHandlers(chapterId), _continueAbort!.signal)
   }
 
   // ---- 细纲扩写：胶囊速记 → 双端锚定的小段幽灵正文（mode='outline'）----
@@ -747,7 +836,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const editor = chapterEditorHandle.value
     if (!editor) return
     if (ghostActive.value) {
-      opts.reportError?.('已有幽灵草稿在屏，先 Enter 定稿或 Esc 蒸发再扩写')
+      opts.reportError?.('已有一段 AI 草稿——先 Enter 采纳或 Esc 蒸发，再扩写')
       return
     }
     const target = findOutlineNotes(editor).find((n) => n.id === noteId && n.note.trim())
@@ -780,10 +869,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       ? ((spine.value?.anchors || []).find((a) => a.id === target.anchorId && a.status !== 'dropped')?.text || '')
       : ''
 
-    if (_continueAbort) _continueAbort.abort()
-    _continueAbort = new AbortController()
-    opts.aiLaneRef.value = 'assisting'
-    setThinkingPhase('perceiving')
+    _beginStitchSession()
 
     adaptiveApi.stitchGhost(chapterId, {
       fragment: note,
@@ -792,27 +878,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       mode: 'outline',
       target_chars: targetChars,
       serves_anchor: servesAnchor,
-    }, {
-      onStart: () => { if (_staleEpoch(chapterId)) return; beginGhost('outline', false, noteEnd); hideThinking() },
-      onChunk: (delta) => { if (_staleEpoch(chapterId)) return; appendGhost(delta) },
-      onReject: (p) => { if (_staleEpoch(chapterId)) return; _onGhostReject(p, 'outline') },
-      onDone: (result) => {
-        if (_staleEpoch(chapterId)) return
-        setGhostWarnings(result.warnings || [])
-        // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
-        setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
-        // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
-        setGhostRepaired(result.repaired, result.breaker_open)
-        opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-      },
-      onError: (message) => {
-        if (_staleEpoch(chapterId)) return
-        evaporateGhost(); opts.aiLaneRef.value = 'dormant'; _continueAbort = null
-        hideThinking()
-        opts.reportError?.(message || '细纲扩写失败，请重试')
-      },
-    }, _continueAbort.signal)
+    }, _ghostStreamHandlers(chapterId, {
+      // 扩写幽灵从胶囊钉后长出（insert=false：光标不动，noteEnd 锚点保持有效）
+      begin: () => beginGhost('outline', false, noteEnd),
+      rejectKind: 'outline',
+      errorMsg: '细纲扩写失败，请重试',
+    }), _continueAbort!.signal)
   }
 
   // ---- 完稿 ----
@@ -835,7 +906,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     } catch (e: any) {
       opts.aiLaneRef.value = 'dormant'
       // 此前静默 return null：完稿按钮点了没反应
-      opts.reportError?.('完稿审计失败：' + (e?.message || '未知错误'))
+      opts.reportError?.('完稿体检失败：' + (e?.message || '未知错误'))
       return null
     }
   }
@@ -844,7 +915,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   /** 细纲胶囊「落笔扩写」事件入口（OutlineNoteChip 派发；门控 assistEnabled） */
   function _onOutlineExpand(e: Event) {
     if (!assistEnabled.value) {
-      opts.reportWarn?.('AI 辅助已关闭，细纲扩写不可用（顶栏 ✨ 开关可开启）')
+      opts.reportWarn?.('AI 辅助已关闭，细纲扩写不可用（右上角 ✨ 可开启）')
       return
     }
     const id = (e as CustomEvent).detail?.id

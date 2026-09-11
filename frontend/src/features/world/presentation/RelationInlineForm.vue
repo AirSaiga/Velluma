@@ -7,10 +7,11 @@
  * 时间性二分（设计 §2.2）：一直成立（static）或锚定某事件（static=false + event_ref，
  * 锚事件回放前边不生效——"关系随事态演变"）。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { useEscStack } from '../../../composables/useEscStack'
 import { RELATION_TYPES } from '../engine/relationTypes'
 import { formatTime } from '../engine/timeFormat'
 import { getTemplate } from '../engine/eventTemplates'
@@ -24,6 +25,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ saved: []; cancel: [] }>()
+
+// Esc 分层关闭栈（00 期 §4.2）：挂载即入栈，卸载即出栈（焦点不在表单内也生效）
+const escStack = useEscStack()
+let escId: symbol | null = null
+onMounted(() => { escId = escStack.push(() => emit('cancel'), 'relation-inline-form') })
+onUnmounted(() => { if (escId) escStack.remove(escId) })
 
 const { entities, events, createRelation, updateRelation, deleteRelation } = useWorld()
 const { show: showConfirm } = useConfirmDialog()
@@ -85,7 +92,7 @@ async function remove() {
 </script>
 
 <template>
-  <div class="rif" @keydown.esc="emit('cancel')" @keydown.enter.prevent="submit">
+  <div class="rif" @keydown.enter.prevent="submit">
     <div class="rif-head">
       <Icon name="link" :size="13" />
       <span class="rif-title">{{ entName(sourceId) }} → {{ entName(targetId) }}</span>
@@ -303,8 +310,8 @@ async function remove() {
 }
 .rif-warn {
   margin: -2px 0 8px;
-  font-size: 11px;
-  color: #dc2626;
+  font-size: var(--text-xs);
+  color: var(--danger);
 }
 .rif-foot {
   display: flex;
@@ -347,7 +354,7 @@ async function remove() {
   color: #fff;
 }
 .rif-btn--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 </style>

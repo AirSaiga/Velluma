@@ -2,10 +2,11 @@
 /**
  * NLE-ADF 3.0 思考指示器——光标处脉冲点。
  *
- * 三态（phase）：
+ * 两态（phase）：
  * - idle：不渲染
- * - waiting：停顿 ≥2s 但停顿心跳未发——淡灰小点，预示「再停一下 AI 要凑过来了」
- * - perceiving：停顿心跳 / stitch 已发，后端在算——彩色（薄荷）强脉冲
+ * - perceiving：显式动作（Space/Tab/burst/点火/细纲扩写）已发，后端在算——
+ *   薄荷色强脉冲。停顿自动亮灯已退役（2026-09-10，Tab 唯一入口）：
+ *   后台感知保持安静，不再在光标处亮「AI 要凑过来了」的承诺点。
  *
  * 形态：光标正下方一个 8px 圆点，跟随光标坐标（thinkingPos）定位。
  * 与 SparkDock / GhostDraft 互斥（Dock 弹出或幽灵出现时组件层不显示）。
@@ -28,8 +29,6 @@ const style = computed(() => ({
   top: `${thinkingPos.value.top}px`,
   left: `${thinkingPos.value.left}px`,
 }))
-
-const isPerceiving = computed(() => thinkingPhase.value === 'perceiving')
 </script>
 
 <template>
@@ -38,7 +37,6 @@ const isPerceiving = computed(() => thinkingPhase.value === 'perceiving')
       <div
         v-if="visible"
         class="thinking-dot"
-        :class="{ 'thinking-dot--strong': isPerceiving }"
         :style="style"
         aria-hidden="true"
       >
@@ -64,14 +62,9 @@ const isPerceiving = computed(() => thinkingPhase.value === 'perceiving')
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: var(--text-muted, #a89e90);
-  opacity: 0.5;
-  transition: background 0.2s ease, opacity 0.2s ease;
-}
-
-/* 弱态呼吸（淡灰）：缓慢明暗，暗示「等待中」 */
-.thinking-dot:not(.thinking-dot--strong) .thinking-dot__core {
-  animation: thinking-breathe 1.6s ease-in-out infinite;
+  background: #34d399;  /* mint-400，与幽灵草稿同语义色 */
+  opacity: 1;
+  animation: thinking-pulse 1s ease-in-out infinite;
 }
 
 .thinking-dot__ring {
@@ -80,27 +73,8 @@ const isPerceiving = computed(() => thinkingPhase.value === 'perceiving')
   border-radius: 50%;
   border: 1.5px solid transparent;
   opacity: 0;
-}
-
-/* 强态（perceiving）：薄荷色 + 扩散环 */
-.thinking-dot--strong .thinking-dot__core {
-  background: #34d399;  /* mint-400，与幽灵草稿同语义色 */
-  opacity: 1;
-  animation: thinking-pulse 1s ease-in-out infinite;
-}
-
-.thinking-dot--strong .thinking-dot__ring {
   border-color: rgba(52, 211, 153, 0.5);
   animation: thinking-ring 1.4s ease-out infinite;
-}
-
-:root.dark .thinking-dot:not(.thinking-dot--strong) .thinking-dot__core {
-  background: #6b7280;
-}
-
-@keyframes thinking-breathe {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 0.65; }
 }
 
 @keyframes thinking-pulse {

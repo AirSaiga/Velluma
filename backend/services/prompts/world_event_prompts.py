@@ -43,11 +43,18 @@ _PARSE_SYSTEM = f"""你是小说世界设定的速记解析器。作者用一句
 {_EVENT_TYPE_DOC}
 
 规则：
-- participants 只填角色名单中出现的人（名或别名精确对应），名单外的人不要编 id，留在 note 里
+- participants 只填角色名单中出现的人（名或别名精确对应）
+- 名单外的名字不要编进 participants——报进 new_entities / new_locations（见下），
+  note 里保留原句信息即可
 - location 填地点名单中的名字；名单里「父·子」形式的是某地点的内部构造，重名时用全路径，名单外填 null
 - day_offset：事件发生在「当前时刻」之后几天（之前为负数）；速记里通常没有时间信息，默认 0
 - duration_days：事件持续天数（移动/迁徙类按常理估，其余默认 0）
 - 宁缺勿滥：解析不出就 event_type 填 "custom"、participants 留空数组，不要编造
+- new_entities / new_locations：速记提到但名单里没有的名字不要丢——原词报进去（new_entities
+  填人物/势力等，kind 按 "character"/"faction"/"asset" 猜；new_locations 填地点）。
+  每项只给 name（速记里的原词，不得改写）、kind、evidence（速记原文中包含该名的最短连续
+  片段，逐字摘录）。绝不允许推测任何属性——速记没说的就当不存在；evidence 摘不出
+  （名字是改写/拼凑的）就不要报
 
 输出 JSON：
 {{
@@ -57,7 +64,9 @@ _PARSE_SYSTEM = f"""你是小说世界设定的速记解析器。作者用一句
   "location": "地点名或null",
   "day_offset": 0,
   "duration_days": 0,
-  "note": "保留速记里的关键信息（谁对谁做了什么，≤40字）"
+  "note": "保留速记里的关键信息（谁对谁做了什么，≤40字）",
+  "new_entities": [{{"name": "白塞", "kind": "character", "evidence": "遇到白塞"}}],
+  "new_locations": [{{"name": "北境要塞", "evidence": "在北境要塞"}}]
 }}
 只返回 JSON。"""
 

@@ -126,7 +126,7 @@ class _FakeRecorder:
 
 def _run_open_stitch(monkeypatch, outline: str):
     """直调 stitch_ghost 路由 mode=open（LLM/装配/观测全桩化），返回捕获的 user_prompt。"""
-    from backend.routes.chapter_generation import adaptive as adaptive_route
+    from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
 
     captured: list = []
 
@@ -199,7 +199,7 @@ def test_open_mode_short_outline_fallback(monkeypatch):
 
 def _run_spine_suggest(monkeypatch, llm_contents):
     """直调 spine_suggest 路由（全桩化），返回 (响应 dict, LLM 调用 kwargs 列表)。"""
-    from backend.routes.chapter_generation import adaptive as adaptive_route
+    from backend.routes.chapter_generation.adaptive import spine as adaptive_route
 
     calls: list = []
 

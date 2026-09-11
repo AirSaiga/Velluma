@@ -72,7 +72,6 @@ function timeLabel(ts: string): string {
   border: 1px dashed var(--border-color, #d6d3d1);
   border-radius: 8px;
   padding: 6px 10px;
-  margin-top: 10px;
 }
 .adopted-pool__head {
   display: flex;
@@ -87,9 +86,9 @@ function timeLabel(ts: string): string {
   padding: 2px 0;
 }
 .adopted-pool__title { font-size: 12px; font-weight: 600; }
-.adopted-pool__count { flex: 1; text-align: left; font-size: 11px; color: var(--text-muted, #a09a92); }
-.adopted-pool__toggle { font-size: 10px; border: 1px solid var(--border-color, #d6d3d1); border-radius: 6px; padding: 0 6px; line-height: 1.5; }
-.adopted-pool__note { font-size: 11px; color: var(--text-muted, #a09a92); margin: 4px 0 8px; line-height: 1.6; }
+.adopted-pool__count { flex: 1; text-align: left; font-size: var(--text-sm); color: var(--text-secondary); }
+.adopted-pool__toggle { min-height: 24px; padding: 0.125rem 0.5rem; font-size: var(--text-xs); color: var(--text-secondary); background: transparent; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; }
+.adopted-pool__note { font-size: var(--text-sm); color: var(--text-secondary); margin: 4px 0 8px; line-height: var(--lh-normal); }
 .adopted-pool__list { display: flex; flex-direction: column; gap: 8px; }
 .adopted-pool__item { border: 1px solid var(--border-color, #e7e5e4); border-radius: 8px; padding: 6px 8px; }
 .adopted-pool__text {
@@ -102,11 +101,12 @@ function timeLabel(ts: string): string {
   overflow: hidden;
 }
 .adopted-pool__meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.adopted-pool__time { font-size: 10px; color: var(--text-muted, #a09a92); }
-.adopted-pool__wash { font-size: 10px; color: #047857; }
+.adopted-pool__time { font-size: var(--text-xs); color: var(--text-muted); }
+.adopted-pool__wash { font-size: var(--text-xs); color: var(--ok); }
 .adopted-pool__btn {
   margin-left: auto;
-  font-size: 11px;
+  min-height: 28px;
+  font-size: var(--text-xs);
   padding: 2px 10px;
   border-radius: 6px;
   border: 1px solid var(--accent-400, #9685c2);

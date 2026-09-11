@@ -35,7 +35,7 @@ useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
     >
       <div class="bg-[var(--bg-primary)] rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-hidden flex flex-col">
         <div class="p-3 border-b border-[var(--border-color)] flex items-center justify-between">
-          <h3 class="text-sm font-semibold text-[var(--text-primary)]">编辑审阅</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-primary)]">AI 编辑审阅</h3>
           <button @click="emit('close')" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -80,7 +80,7 @@ useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
             </div>
 
             <div v-else-if="!overallPraise" class="text-center text-sm text-[var(--text-muted)] py-6">
-              暂无审阅结果
+              没有审阅结果
             </div>
           </template>
         </div>

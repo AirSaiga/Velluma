@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { placeFloating } from '../shared/utils/floatGeometry'
 import type { NodeViewProps } from '@tiptap/vue-3'
 import { spine } from '../features/workspace/composables/useChapterSpine'
 
@@ -49,10 +50,19 @@ const targetHint = computed(() => {
 function updatePopPos() {
   const rect = chipEl.value?.getBoundingClientRect()
   if (!rect) return
-  popStyle.value = {
-    top: `${rect.bottom + 6}px`,
-    left: `${Math.max(12, Math.min(rect.left, window.innerWidth - 340))}px`,
-  }
+  // 统一浮层几何（00 期 §4.1）：实测弹层尺寸后 clamp→翻转→maxHeight，
+  // 修「胶囊近视口底时浮层下溢」
+  const result = placeFloating(
+    { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right },
+    {
+      width: popEl.value?.offsetWidth || 320,
+      height: popEl.value?.offsetHeight || 200,
+      gap: 6,
+      margin: 12,
+    },
+    { width: window.innerWidth, height: window.innerHeight },
+  )
+  popStyle.value = { top: `${result.top}px`, left: `${result.left}px` }
 }
 
 function openPopover() {

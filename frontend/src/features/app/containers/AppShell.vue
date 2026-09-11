@@ -73,7 +73,10 @@ defineExpose({
     <AppRail />
     <main class="app-main">
       <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
+        <!-- 并行过渡（不用 mode="out-in"）：out-in 的进入端依赖离开端 after-leave
+             回调，回调被挂起时进入端永不触发 → 整页 opacity:0 隐形（00 期 §5.4）。
+             离开视图绝对定位退出布局流，无等待链，不存在卡死路径。 -->
+        <transition name="fade">
           <component :is="Component" />
         </transition>
       </router-view>
@@ -95,12 +98,17 @@ defineExpose({
   min-width: 0;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .fade-enter-active {
   transition: opacity 0.15s ease-out;
 }
 .fade-leave-active {
+  /* 并行过渡：离开视图绝对定位退出布局流（00 期 §5.4，防 out-in 卡死隐形） */
+  position: absolute;
+  inset: 0;
+  width: 100%;
   transition: opacity 0.1s ease-in;
 }
 .fade-enter-from,

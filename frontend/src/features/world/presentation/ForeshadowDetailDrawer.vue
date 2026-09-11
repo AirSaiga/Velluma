@@ -9,10 +9,11 @@
  *
  * 轻量编辑不进 undo（与改名/拖锚同策略）；删除走 useWorld.deleteForeshadow（带 undo）。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
 import { useToast } from '../../../composables/useToast'
+import { useEscStack } from '../../../composables/useEscStack'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { formatTime } from '../engine/timeFormat'
 import { vAutogrow } from './autogrow'
@@ -36,6 +37,14 @@ const {
   deleteForeshadow,
 } = useWorld()
 const { showToast } = useToast()
+
+// Esc 分层关闭栈（00 期 §4.2）：挂载即入栈（一次 Esc 只关栈顶、焦点不在层内也生效），
+// 卸载即出栈——替代根元素 @keydown.esc（旧路径焦点不在抽屉内时失效）
+const escStack = useEscStack()
+let escId: symbol | null = null
+onMounted(() => { escId = escStack.push(() => emit('close'), 'foreshadow-detail-drawer') })
+onUnmounted(() => { if (escId) escStack.remove(escId) })
+
 const { show: showConfirm } = useConfirmDialog()
 
 const foreshadow = computed(
@@ -155,7 +164,7 @@ async function remove() {
 </script>
 
 <template>
-  <div v-if="foreshadow" class="fdd" @keydown.esc="emit('close')">
+  <div v-if="foreshadow" class="fdd">
     <!-- 头部：状态 + 来源徽标 -->
     <div class="fdd-head">
       <button v-if="canGoBack" class="fdd-back" title="返回上一级" @click="emit('back')">
@@ -317,7 +326,7 @@ async function remove() {
 }
 
 .fdd-status {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 9999px;
@@ -339,7 +348,7 @@ async function remove() {
 }
 
 .fdd-auto {
-  font-size: 10px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   background: rgba(124, 106, 173, 0.12);
   color: var(--accent-500);
@@ -399,7 +408,7 @@ async function remove() {
 }
 
 .fdd-sec-title {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
   margin-bottom: 8px;
@@ -435,7 +444,7 @@ async function remove() {
 }
 
 .fdd-lbl {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   width: 52px;
   flex-shrink: 0;
@@ -450,12 +459,12 @@ async function remove() {
 .fdd-val--none {
   font-family: inherit;
   color: #d97706;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .fdd-link {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 8px;
   background: transparent;
   border: 1px solid var(--border-color);
@@ -497,7 +506,7 @@ async function remove() {
 
 .fdd-evidence-text {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-style: italic;
   line-height: 1.6;
@@ -534,7 +543,7 @@ async function remove() {
 }
 
 .fdd-act--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 </style>

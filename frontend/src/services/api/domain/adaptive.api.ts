@@ -50,11 +50,12 @@ export interface CanonHint {
  * 幽灵草稿上屏前快检疑点（P5 C1，后端 ghost_guard 纯算法产；只提示不拦截）。
  * kind：dead_speak=死者开口 / canon_leak=canon 私有标签泄底 / secret_leak=私有设定片段外泄
  * 二期扩（2026-09-02 约束治理二期）：cliche_hit=禁忌面命中 / out_of_scene=人物不在场
- * （live-warn 转正）/ location_jump=地点穿越（shadow 攒数中）/ quality_breaker=
+ * （live-warn 转正）/ location_jump=地点穿越（shadow 攒数中）/ beat_rush=抢拍
+ * （2026-09-03 live 出生即返修资格，返修条明细随车）/ quality_breaker=
  * 自动修正熔断降级指示（返修环连续失败，转为仅提示）。
  */
 export interface GhostWarning {
-  kind: 'dead_speak' | 'canon_leak' | 'secret_leak' | 'cliche_hit' | 'out_of_scene' | 'location_jump' | 'quality_breaker'
+  kind: 'dead_speak' | 'canon_leak' | 'secret_leak' | 'cliche_hit' | 'out_of_scene' | 'location_jump' | 'beat_rush' | 'quality_breaker'
   /** 命中触发词（实体名/别名/私有标签/秘密关键短语） */
   span_text: string
   /** 人话说明（含「可忽略」口径——回忆/闪回属合法用法） */
@@ -258,6 +259,10 @@ export const adaptiveApi = {
       recent_text: string
       /** Tab 显式点名要零件（豁免句子级闸门） */
       summoned?: boolean
+      /** 强制刷新挂件：跳过 dock 缓存命中强行重算并覆盖（Tab 重复生成——舱在屏再按=换一批） */
+      force_refresh?: boolean
+      /** 光标后文锚（中插桥接/FIM）：骨架跳写、光标停在上下文之间时的后文 1-2 句 */
+      suffix_anchor?: string
       /** 细纲胶囊速记原文（意图反推素材——胶囊会话级不落库，经心跳供给） */
       outline_notes?: string[]
       /** 打算一句话原文（打算变更即时感知：舱换向 + 层 2 转化触发） */
@@ -378,6 +383,14 @@ export const adaptiveApi = {
     return requestJson(`/chapters/${chapterId}/adaptive/events/summary`)
   },
 
+  /**
+   * 清空本书协作埋点（测试用；他书事件保留）。连带效应：本书「学着闭嘴」
+   * 的拒收史派生源一并清零，静音集合回到无史状态。
+   */
+  clearCollabEvents: async (bookId: string): Promise<{ book_id: string; deleted: number }> => {
+    return requestJson(`/books/${bookId}/adaptive/collab-events`, { method: 'DELETE' })
+  },
+
   /** 微缝合幽灵草稿（SSE 打字机推流）；mode='burst' 为段落级连写、'outline' 为细纲扩写 */
   stitchGhost: async (
     chapterId: string,
@@ -391,6 +404,8 @@ export const adaptiveApi = {
       target_chars?: number
       chapter_intent?: string
       adopted_direction?: string
+    /** 中插桥接后文锚（FIM）：注入双端边界与桥接铁律，产出走接缝归一 */
+    suffix_anchor?: string
       beat_guidance?: string
       /** outline 模式：细纲之后的已写正文开头（双端缝合用） */
       after_text?: string
@@ -409,8 +424,12 @@ export const adaptiveApi = {
         /** P5 回流对齐令牌 + 本发注入样本 id（采纳/蒸发埋点回传用） */
         ghost_token?: string
         sample_ids?: string[]
-        /** 二期返修环结果：自动修正了 N 处硬伤（action=repaired/excised；空=未触发） */
-        repaired?: { count: number; kinds: string[]; action: string }
+        /**
+         * 二期返修环结果：自动修正了 N 处硬伤（action=repaired/excised；空=未触发）。
+         * items=逐条人话明细（09-08 作者可见性，与 warnings 同形；点开看修了什么。
+         * 旧后端帧缺省——缺省时返修条退化为纯计数，不出明细入口）
+         */
+        repaired?: { count: number; kinds: string[]; action: string; items?: GhostWarning[] }
         /** 拒稿熔断开启（自动修正连续失败，本次起转为仅提示） */
         breaker_open?: boolean
       }) => void

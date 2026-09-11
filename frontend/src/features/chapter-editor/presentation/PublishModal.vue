@@ -62,7 +62,7 @@ useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
           </div>
 
           <div v-if="characterExtraction && characterExtraction.extracted_characters && characterExtraction.extracted_characters.length > 0" class="mt-6">
-            <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">新提取的角色信息</h4>
+            <h4 class="text-xs font-medium text-[var(--text-secondary)] mb-2">从本章认出的角色</h4>
             <div class="space-y-3">
               <div
                 v-for="character in characterExtraction.extracted_characters"
@@ -87,7 +87,7 @@ useFocusTrap(modalRef, showRef, { onEscape: () => emit('close') })
               </div>
             </div>
             <div class="mt-3 text-xs text-[var(--text-muted)]">
-              共提取 {{ characterExtraction.extracted_characters.length }} 个角色，其中新角色 {{ characterExtraction.new_characters_count }} 个
+              本章共认出 {{ characterExtraction.extracted_characters.length }} 个角色，其中新角色 {{ characterExtraction.new_characters_count }} 个
             </div>
           </div>
         </div>

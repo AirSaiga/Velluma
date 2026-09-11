@@ -1,37 +1,32 @@
 <script setup lang="ts">
 /**
- * 写作台（NLE-ADF 3.0「纸面优先」重构）。
+ * 写作台（08 期「桌上一张纸」完全重构，docs/design/ux-redesign/08-writing-desk-total-redesign.md）。
  *
- * 布局：
- * - 左栏 Binder：章节导航（列表 + 状态徽标 + 新建/导入/分析）
- * - 中栏：纸面画布（ChapterEditorContainer）+ 超薄顶栏（状态文案 + AI 辅助/快捷键/抽屉）
- *   + 底部状态栏（字数 + 保存状态）；作者写的即真实文档，无生成预览投影
- * - 右缘副驾抽屉：此刻 / 谋篇 / 章节 / 审校 / 调试 五 tab（InspectorPanel）
- *
- * splitpanes 提供可拖拽分隔（依赖已装）。
+ * 布局：纸列（ChapterEditorContainer）是唯一常驻主角——
+ * - 左边是书：左缘书签（ChapterSpine）点开目录抽屉（ChapterTocDrawer）；
+ *   无选中章时纸面本体即目录页（TocPage）
+ * - 右边是 AI：右缘助手栏（AssistRail，点击制）+ 浮出助手面板（InspectorPanel 单分区壳）
+ * - 中间是我：纸面上只有我写的，与 AI 递到手边的（光标层卡舱 / 纸左页边批注点）
  */
-import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Splitpanes, Pane } from 'splitpanes'
-import 'splitpanes/dist/splitpanes.css'
-import Icon from '../../../components/Icon.vue'
 import ChapterEditor from '../../../components/ChapterEditor.vue'
-import ChapterBadges from '../presentation/ChapterBadges.vue'
 import PerceptionBand from '../presentation/PerceptionBand.vue'
+import ChapterSpine from '../presentation/ChapterSpine.vue'
+import ChapterTocDrawer from '../presentation/ChapterTocDrawer.vue'
+import TocPage from '../presentation/TocPage.vue'
+import AssistRail from '../presentation/AssistRail.vue'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
 import ExtractionModal from '../../extraction/containers/ExtractionModal.vue'
 import InspectorPanel from './InspectorPanel.vue'
-import SparkDock from '../../generation/presentation/SparkDock.vue'
+import CursorLayer from '../../generation/presentation/CursorLayer.vue'
 import BeatCardDock from '../../generation/presentation/BeatCardDock.vue'
 import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
-import GhostWarningsBar from '../../generation/presentation/GhostWarningsBar.vue'
-import GhostWashChip from '../../generation/presentation/GhostWashChip.vue'
-import GhostRepairedChip from '../../generation/presentation/GhostRepairedChip.vue'
-import { setExtraSparkParts, setSparkParts } from '../../generation/composables/useSparkDock'
-import { showBeatDock, hideBeatDock } from '../../generation/composables/useBeatDock'
-import { ghostActive, ghostWarnings, ghostWash, ghostRepaired, useGhostOriginal } from '../../generation/composables/useGhostDraft'
+import { setExtraSparkParts, setSparkParts, setSparkGuests, setSparkSticky, stashSparkDock, stashGuestReturn, takeGuestReturn } from '../../generation/composables/useSparkDock'
+import { hideBeatDock } from '../../generation/composables/useBeatDock'
+import { ghostActive, ghostWash, useGhostOriginal } from '../../generation/composables/useGhostDraft'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
@@ -41,6 +36,7 @@ import { useChapterSpine } from '../composables/useChapterSpine'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { setCanonTerms, type CanonTerm } from '../../../extensions/CanonHighlight'
+import { bindInlineDockBridge } from '../../../extensions/InlineDock'
 import { loadChapterDraft, clearChapterDraft } from '../../chapter-editor/useChapterDraft'
 import { countChapterWords, stripHtmlToText } from '../../../shared/utils/htmlText'
 import { formatGenerationError } from '../../../shared/utils/errorText'
@@ -50,6 +46,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
+import { useEscStack } from '../../../composables/useEscStack'
 import WorldContextCard from '../presentation/WorldContextCard.vue'
 import QuickEventNote from '../presentation/QuickEventNote.vue'
 import { OPEN_INBOX_EVENT, requestOpenInbox } from '../../world/composables/batchAccept'
@@ -125,12 +122,74 @@ session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode
 session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
 session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
 session.setAdaptiveBurst((card) => adaptiveAssist.requestBurst(card))
+// 卡片舱第 5 槽位·自定义镜头（第二冲程 2026-09-09）：作者一句话镜头 → 复用
+// 同一条 stitch 微缝合流水线（50 字级单镜头，slot=custom 不挂视点锁——
+// 作者亲笔的镜头描述本身就是契约，加锁反而可能与之矛盾）；同款 sticky+stash
+// 收舱让位幽灵
+function onDockCustomStitch(text: string) {
+  if (ghostActive.value) return
+  setSparkSticky()
+  stashSparkDock()
+  adaptiveAssist.requestContinue('stitch', [{ text, slot: 'custom' }])
+}
+
+// 临时在场角色建档往返（2026-09-09 涌现角色闭环）：暂存光标（SPA 模块单例，
+// 无序列化无 origin 漂移）→ 世界页预填新建卡（create_entity 深链）→ 保存或
+// 返回本章（from=chapter 既有返程）→ 编辑器就绪后弹射回原光标。
+function onGuestRegister(name: string) {
+  const chapterId = selectedChapterId.value
+  const editor = chapterEditorHandle.value
+  if (!chapterId || !editor) return
+  const $from = editor.state.selection.$from
+  stashGuestReturn(
+    chapterId,
+    $from.pos,
+    editor.state.doc.textBetween(Math.max(0, $from.pos - 20), $from.pos, '') || '',
+  )
+  router.push({
+    name: 'world',
+    params: { bookId: String(route.params.bookId) },
+    query: {
+      create_entity: name,
+      from: 'chapter',
+      chapter: chapterId,
+    },
+  })
+}
+
+// 行间推挤卡舱的事件桥（2026-09-09 布局重构）：SparkDock 现居 ProseMirror
+// WidgetDecoration（InlineDock.ts），不再经 CursorLayer props/emits 透传——
+// 模块单例桥随挂载绑定，换书/重挂自动覆盖
+onMounted(() => {
+  bindInlineDockBridge({
+    customStitch: onDockCustomStitch,
+    guestRegister: onGuestRegister,
+  })
+})
+
+// 建档返程弹射（2026-09-09）：编辑器句柄就绪且有当章往返单例 → 恢复光标。
+// 韧性防线：pos 按当前文档长度钳位（离开期间自动保存可能改长度）；段头
+// 指纹失配（内容被改）退文档尾——宁可落在末尾也不错位到句中
+watch(chapterEditorHandle, (editor) => {
+  if (!editor) return
+  const trip = takeGuestReturn()
+  if (!trip || trip.chapterId !== selectedChapterId.value) return
+  void nextTick(() => {
+    try {
+      const size = editor.state.doc.content.size
+      let pos = Math.max(0, Math.min(trip.pos, size))
+      const head = editor.state.doc.textBetween(Math.max(0, pos - 20), pos, '') || ''
+      if (trip.paraHead && head !== trip.paraHead) pos = size   // 内容漂移：退文档尾
+      editor.chain().focus().setTextSelection(pos).run()
+    } catch { /* 恢复失败静默——落默认光标即可 */ }
+  })
+})
 // Tab 无缓存零件时的即点取件：未激活章节先激活（Tab 是显式召唤，等同打字意图）再取件
-session.setAdaptiveSummon(() => {
+session.setAdaptiveSummon((forceRefresh?: boolean) => {
   const chapterId = selectedChapterId.value
   if (!chapterId) return
   _activateChapterAssist(chapterId)
-  adaptiveAssist.summonParts()
+  adaptiveAssist.summonParts(forceRefresh)
 })
 
 // 走向卡舱点选（鼠标路径；数字键路径在 session 键位状态机里走 setAdaptiveBurst）
@@ -143,8 +202,6 @@ function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor
   }
   adaptiveAssist.requestBurst(card)
 }
-// adaptive composing 态才显示「多写几段」入口（SparkDock props 注入）
-const adaptiveComposing = computed(() => session.adaptiveMode.value && session.authorLane.value === 'composing')
 // 感知带挂载条件（2026-09-04 审计修复）：ghostStitching 态也要带在——疑点条/
 // 洗层条/返修条挂在带内 #dock 槽，数据恰在幽灵在屏期间（GHOST_DONE）灌入；
 // 旧条件严格 ==='composing' 使整带在幽灵落屏瞬间卸载，三条 UI 恒不可见
@@ -173,7 +230,7 @@ async function onUseGhostOriginal() {
       try { await styleApi.washPreferOriginal(bookId, p) } catch { /* 降级失败不阻塞 */ }
     }
   }
-  showToast('已恢复原稿，这些词此后降为提醒（不再自动替换）', 'info')
+  showToast('已恢复 AI 原稿，这些词以后只提醒不替换', 'info')
 }
 
 // NLE-ADF 3.0 Canon 词高亮词表：本章绑定角色名 + 感知 hints 的角色/伏笔标签
@@ -332,6 +389,9 @@ watch(
   (newChapterId) => {
     if (newChapterId && newChapterId !== store.selectedChapterId.value) {
       store.selectChapter(newChapterId)
+    } else if (!newChapterId && store.selectedChapterId.value) {
+      // 08 期态A 双向一致：路由无章号 = 回目录页（浏览器后退/深链去章号可达）
+      store.selectChapter(null)
     }
   },
   { immediate: true }
@@ -396,79 +456,189 @@ async function _checkDraftRecovery(chapterId: string) {
   clearChapterDraft(chapterId)
 }
 
-// 两栏分栏宽度（持久化数组保持 3 元结构兼容旧 prefs，第三元为历史右栏值不再使用）
-const splitSizes = ref<number[]>(loadUiPrefs().splitSizes || [20, 55, 25])
-// 警示：splitpanes v4 的 resized 载荷是对象 { event, index, panes: [{min,max,size}] }（v3 才是数组）。
-// 且 resized 在 document mouseup 监听器内同步 emit——这里一旦抛异常，库的 mousemove/mouseup
-// 监听器永远不会被移除，拖拽会"卡住停不下来"，因此必须容错、绝不能向上抛。
-function onResize(payload: { panes?: { size: number }[] }) {
+// ============================================================
+// 08 期「桌上一张纸」：目录抽屉 + 右缘助手栏/面板 + 打字沉浸
+// ============================================================
+// 目录抽屉（binder 转世）：左缘书签点开，选章即收（秒级任务，无 pin）。
+const tocOpen = ref(false)
+
+/** 左缘书签竖排标识：「第3章 · 雨夜来客」（截断在 ChapterSpine 内） */
+const spineChapterLabel = computed(() => {
+  const ch = selectedChapter.value
+  if (!ch) return ''
+  const name = ch.title || ch.chapter_name || ''
+  // 章节名仍是自动档「第N章」时不重复（否则签上会读出「第2章 · 第2章」）
+  return name && name !== `第${ch.chapter_number}章` ? `第${ch.chapter_number}章 · ${name}` : `第${ch.chapter_number}章`
+})
+
+/** 抽屉选章：多选模式下走勾选不收抽屉；普通模式切章即收（完成使命即收） */
+function onTocSelect(ch: Chapter, ev: MouseEvent | KeyboardEvent) {
+  handleChapterClick(ch, ev)
+  if (!selectMode.value) tocOpen.value = false
+}
+
+// 助手面板（右缘栏点击开合，世界页「栏—面板」同构）：覆盖式不推纸；
+// pin 态推挤继承既有语义，持久化沿用 uiPrefs.rightDrawerOpen 键（语义=钉住）。
+// 钉住态跨会话恢复即开着（HEAD rightDrawerOpen 同义）。
+const assistPinned = ref(loadUiPrefs().rightDrawerOpen ?? false)
+const assistPanelOpen = ref(assistPinned.value)
+/** 面板当前分区；null = 下次打开时由 InspectorPanel 按章节状态取默认 */
+const activeTab = ref<'planning' | 'now' | 'chapter' | 'review' | 'debug' | null>(null)
+/** 完稿报告到达且尚未看过 → 栏上「检查」朱点 */
+const reportUnread = ref(false)
+const assistPanelEl = ref<HTMLElement | null>(null)
+
+function _persistPinned(v: boolean) {
   try {
-    const panes = payload?.panes
-    if (!Array.isArray(panes)) return
-    const next = panes.map((p) => p.size)
-    // 防御：splitpanes 偶发返回空数组（两栏布局：binder + 画布）
-    if (next.length === 2 && next.every((n) => typeof n === 'number' && n > 0)) {
-      splitSizes.value = [next[0], next[1], splitSizes.value[2] ?? 25]
-      saveUiPrefs({ ...loadUiPrefs(), splitSizes: splitSizes.value })
-    }
+    saveUiPrefs({ ...loadUiPrefs(), rightDrawerOpen: v })
   } catch (e) {
-    console.error('[Workspace] 保存分栏宽度失败', e)
+    console.error('[Workspace] 保存面板固定态失败', e)
   }
 }
 
-// ============================================================
-// NLE-ADF 2.0 画布化：右缘隐形抽屉 + 打字沉浸 + 微观状态栏
-// ============================================================
-// 抽屉：顶栏按钮 / Ctrl+\ 固定切换；右缘触发条 hover 瞥看；覆盖式（不推挤画布）。
-// pinned 态持久化到 uiPrefs（rightDrawerOpen 字段）。
-const drawerHover = ref(false)
-const drawerPinned = ref(loadUiPrefs().rightDrawerOpen ?? false)
-const drawerOpen = computed(() => drawerHover.value || drawerPinned.value)
-
-function toggleDrawerPinned() {
-  drawerPinned.value = !drawerPinned.value
-  if (drawerPinned.value) drawerHover.value = false
-  try {
-    saveUiPrefs({ ...loadUiPrefs(), rightDrawerOpen: drawerPinned.value })
-  } catch (e) {
-    console.error('[Workspace] 保存抽屉固定态失败', e)
+/** 关闭面板：任何关闭路径都同时解 pin（pin 而不开 = 推挤残留） */
+function closeAssistPanel() {
+  assistPanelOpen.value = false
+  if (assistPinned.value) {
+    assistPinned.value = false
+    _persistPinned(false)
   }
 }
 
-function _drawerKeyHandler(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+/** 面板头 pin 钮：开着的面板切 pin 态 */
+function togglePanelPinned() {
+  assistPinned.value = !assistPinned.value
+  _persistPinned(assistPinned.value)
+}
+
+/** 栏点击分区：再点同区收；否则定位 + 开 */
+function onRailSelectTab(tab: string) {
+  if (assistPanelOpen.value && activeTab.value === tab) {
+    closeAssistPanel()
+    return
+  }
+  activeTab.value = tab as typeof activeTab.value
+  assistPanelOpen.value = true
+}
+
+/** InspectorPanel 内 Ctrl+1~5 切区时同步开面板（面板开着时监听才挂，此处兜底语义） */
+function onPanelActivate(tab: 'planning' | 'now' | 'chapter' | 'review' | 'debug') {
+  activeTab.value = tab
+  assistPanelOpen.value = true
+}
+
+// Esc 细则（§4.6）：面板开在 window 层注册 useEscStack；焦点位于 input/textarea/
+// 面板内可编辑区时不收（SpinePanel 内联编辑自带 Esc 语义，防一按两收）；
+// 钉住的面板 Esc 不收（Ctrl+\ 或 × 收）。幽灵蒸发在更早注册的 session 捕获层
+// 先行消费（EscStack 对 defaultPrevented 让位），逐层剥皮顺序不变。
+const { push: _pushPanelEsc, remove: _removePanelEsc } = useEscStack()
+let _panelEscId: symbol | null = null
+
+function _escClosePanel() {
+  if (assistPinned.value) return
+  const ae = document.activeElement as HTMLElement | null
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return
+  if (ae?.isContentEditable && assistPanelEl.value?.contains(ae)) return
+  assistPanelOpen.value = false
+}
+
+watch(assistPanelOpen, (open) => {
+  if (open) {
+    if (!_panelEscId) _panelEscId = _pushPanelEsc(_escClosePanel, 'assist-panel')
+  } else if (_panelEscId) {
+    _removePanelEsc(_panelEscId)
+    _panelEscId = null
+  }
+})
+
+// 外点收（未 pin 时）：点在面板/右缘栏之外且落在桌面区内——模态经 teleport 在
+// 桌面区外（可能由面板内容唤起），不误收。
+function _onDocPointerDownPanel(e: PointerEvent) {
+  if (!assistPanelOpen.value || assistPinned.value) return
+  const t = e.target as HTMLElement | null
+  if (!t) return
+  if (assistPanelEl.value && t instanceof Node && assistPanelEl.value.contains(t)) return
+  if (t.closest?.('.assist-rail')) return
+  if (!t.closest?.('.workspace-view')) return
+  assistPanelOpen.value = false
+}
+
+// Ctrl+\ 三态：关 → 开并 pin / 开未 pin → pin / 已 pin → 收并解 pin。
+// Ctrl+1~5：面板关时按键 = 开 + 定位（面板开时 InspectorPanel 自身监听切区，
+// 两条路汇于同一 activeTab 状态，无双源）。
+const PANEL_TAB_ORDER = ['planning', 'now', 'chapter', 'review', 'debug'] as const
+
+function _panelKeyHandler(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey)) return
+  if (e.key === '\\') {
     e.preventDefault()
-    toggleDrawerPinned()
+    if (!assistPanelOpen.value) {
+      assistPanelOpen.value = true
+      assistPinned.value = true
+      _persistPinned(true)
+    } else if (!assistPinned.value) {
+      assistPinned.value = true
+      _persistPinned(true)
+    } else {
+      closeAssistPanel()
+    }
+    return
+  }
+  if (!e.shiftKey && e.key >= '1' && e.key <= '5') {
+    const tab = PANEL_TAB_ORDER[Number(e.key) - 1]
+    if (!tab) return
+    e.preventDefault()
+    activeTab.value = tab
+    assistPanelOpen.value = true
   }
 }
+
 onMounted(() => {
-  window.addEventListener('keydown', _drawerKeyHandler)
+  window.addEventListener('keydown', _panelKeyHandler)
   window.addEventListener(OPEN_INBOX_EVENT, _onOpenInboxDrawer)
+  document.addEventListener('pointerdown', _onDocPointerDownPanel, true)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', _drawerKeyHandler)
+  window.removeEventListener('keydown', _panelKeyHandler)
   window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInboxDrawer)
+  document.removeEventListener('pointerdown', _onDocPointerDownPanel, true)
+  if (_panelEscId) { _removePanelEsc(_panelEscId); _panelEscId = null }
 })
 
-// 完稿审计报告到达时自动滑出抽屉一次（报告在抽屉「审校」tab；作者手动关过则不反复弹）。
-// 用 hover 态弹出（不 pin、不推挤画布）。
-let _drawerAutoOpened = false
+// 切章后面板若关着，分区复位（下次打开由 InspectorPanel 按章节状态取默认——
+// 空章→打算/有正文→此刻）；开着则由 InspectorPanel 自己的切章 watch 复位。
+watch(selectedChapterId, () => {
+  if (!assistPanelOpen.value) activeTab.value = null
+})
+
+// 完稿审计报告到达 → 面板以「检查」滑出一次（作者手动关过则不反复弹）+ 栏上朱点；
+// 面板在「检查」开过一次即灭。
+let _panelAutoOpened = false
 watch(() => session.finishReport.value, (report) => {
-  if (report && !_drawerAutoOpened && !drawerOpen.value) {
-    drawerHover.value = true
-    _drawerAutoOpened = true
-  } else if (!report) {
-    _drawerAutoOpened = false
+  if (report) {
+    reportUnread.value = true
+    if (!_panelAutoOpened && !assistPanelOpen.value) {
+      activeTab.value = 'review'
+      assistPanelOpen.value = true
+      _panelAutoOpened = true
+    }
+  } else {
+    _panelAutoOpened = false
   }
 })
+watch([assistPanelOpen, activeTab], ([open, tab]) => {
+  if (open && tab === 'review') reportUnread.value = false
+})
 
-// A5d 收件箱直达（toast「去确认」）：滑出抽屉（与完稿报告同款 hover 瞥看，不 pin）；
-// tab 切换与收件箱展开由 InspectorPanel / WorldSceneSlice 各自监听同一事件。
+// A5d 收件箱直达（toast「去确认」）：以「此刻」开面板；
+// 收件箱展开由 InspectorPanel / WorldSceneSlice 各自监听同一事件。
 function _onOpenInboxDrawer() {
-  if (!drawerOpen.value) drawerHover.value = true
+  activeTab.value = 'now'
+  assistPanelOpen.value = true
 }
 
-// 打字沉浸：编辑活动期间顶栏/时间轴降到极低透明度（设计稿"打字时 10%"）。
+// 打字沉浸 2.0（08 期 §4.9）：编辑活动期间左右两条缘签降到 35% 透明度
+// （.workspace-view--typing 挂根，hover/focus-within 即复原；页面头 meta 行不淡）。
 const isTyping = ref(false)
 let _typingTimer: ReturnType<typeof setTimeout> | null = null
 function _onTypingActivity() {
@@ -481,26 +651,28 @@ watch(chapterEditorHandle, (editor, prev) => {
   editor?.on('update', _onTypingActivity)
 }, { immediate: true })
 
-// 顶栏状态文案：只保留与 adaptive / 精修相关的进行态（旧步进管线各阶段的标签已随其 UI 移除）。
-// adaptive 模式下跟随 aiLane；其余时间只在精修/出错时显字，平时留空不打扰。
-const nleStateLabel = computed(() => {
+// 页面头 meta 行 AI 状态件（08 期 §4.1，顶栏状态丸转世，文案=07 表 A1/A2 原文）：
+// 只保留与 adaptive / 润色相关的进行态。adaptive 模式下跟随 aiLane；
+// 其余时间只在润色/出错时显字，平时留空不打扰（空态整件缺席）。
+const aiStateLabel = computed(() => {
   if (session.adaptiveMode.value) {
     switch (session.aiLane.value) {
-      case 'perceiving': return '感知中'
-      case 'suggesting': return '走向已备好'
-      case 'assisting': return '续写中'
-      case 'digesting': return '沉淀中'
-      case 'analyzing': return '通读中'
+      case 'perceiving': return 'AI 正在看你写的'
+      case 'suggesting': return '走向卡备好了 · Ctrl+Space'
+      case 'assisting': return '正在往下写…'
+      case 'digesting': return '正在整理新设定…'
+      case 'analyzing': return '正在通读全章…'
       default: return ''
     }
   }
   switch (session.stage.value) {
-    case 'refining': return '精修中'
-    case 'auditing': return '审校中'
+    case 'refining': return '润色中…'
+    case 'auditing': return '正在检查全文…'
     case 'error': return '生成失败'
     default: return ''
   }
 })
+const aiStateError = computed(() => session.stage.value === 'error')
 
 // Spark Dock 兜底件已移除：原注入的是角色名（"林尘"），与卡片舱"镜头特写碎片"
 // 定位冲突（碎片应是 6-12 字画面，非角色名）。卡片舱现仅显示后端 dock_generator
@@ -538,6 +710,7 @@ watch(selectedChapter, (ch, prev) => {
     // 切章清空缓存零件——旧章挂件是旧章上下文的产物，留着会被停顿秒弹错章节
     setSparkParts([])
     setExtraSparkParts([])
+    setSparkGuests([])   // 临时通行证随章作废（guest 是本章正文的产物）
   }
 }, { immediate: true })
 
@@ -742,12 +915,12 @@ async function handleGenerated(text: string) {
   if (selectedChapter.value && text) {
     try {
       await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
-      showToast('已生成并写入章节', 'success')
+      showToast('已写入本章', 'success')
       // 系统通知（受开关控制；主进程会再次判断窗口焦点兜底分层）
       if (notifyPrefs.value.system && window.electronAPI) {
         const isRefinery = session.lastDoneMode.value === 'refinery'
         window.electronAPI.showCompletionNotification({
-          title: isRefinery ? '精修完成' : '章节生成完成',
+          title: isRefinery ? '润色完成' : '章节生成完成',
           body: `《${selectedChapter.value.title || selectedChapter.value.chapter_name || '未命名'}》已就绪`,
         })
       }
@@ -778,256 +951,154 @@ async function confirmDeleteChapter(ch: Chapter) {
 </script>
 
 <template>
-  <div class="workspace-view" :class="{ 'workspace-view--drawer-pinned': drawerPinned }">
-    <Splitpanes class="workspace-split" @resized="onResize">
-      <!-- 左栏：章节导航 Binder -->
-      <Pane :size="splitSizes[0]" :min-size="14" :max-size="32" class="binder-pane">
-        <aside class="binder">
-          <div class="binder-header">
-            <button class="icon-btn" @click="backToLibrary" title="返回书架">
-              <Icon name="arrow-left" :size="15" />
-            </button>
-            <span class="binder-title" :title="currentBook?.title">{{
-              currentBook?.title || '未选择书籍'
-            }}</span>
-            <button
-              class="icon-btn select-toggle"
-              :class="{ active: selectMode }"
-              :title="selectMode ? '退出多选' : '多选删除'"
-              @click="toggleSelectMode"
-            >
-              <Icon name="check-badge" :size="15" />
-            </button>
-          </div>
-
-          <!-- 多选模式：全选栏 -->
-          <div v-if="selectMode && !loading" class="select-all-bar" @click="toggleCheckAll">
-            <span class="select-checkbox" :class="{ checked: allChecked }">
-              <Icon v-if="allChecked" name="check" :size="12" />
-            </span>
-            <span class="select-all-label">全选（{{ checkedIds.size }}/{{ sortedChapters.length }}）</span>
-          </div>
-
-          <div v-if="loading" class="binder-loading">加载中…</div>
-          <div v-else class="chapter-list">
-            <div
-              v-for="ch in sortedChapters"
-              :key="ch.id"
-              class="chapter-item"
-              :class="{ active: !selectMode && ch.id === selectedChapterId, checked: selectMode && checkedIds.has(ch.id) }"
-              role="button"
-              tabindex="0"
-              @click="handleChapterClick(ch, $event)"
-              @keydown.enter="handleChapterClick(ch, $event)"
-            >
-              <!-- 多选模式：复选框 -->
-              <span v-if="selectMode" class="select-checkbox" :class="{ checked: checkedIds.has(ch.id) }">
-                <Icon v-if="checkedIds.has(ch.id)" name="check" :size="12" />
-              </span>
-              <span class="ch-num">{{ ch.chapter_number }}</span>
-              <span class="ch-name">{{ ch.title || ch.chapter_name || '(未命名)' }}</span>
-              <ChapterBadges v-if="!selectMode" :chapter="ch" />
-              <button
-                v-if="!selectMode"
-                class="ch-delete"
-                title="删除章节"
-                @click.stop="confirmDeleteChapter(ch)"
-              >
-                <Icon name="trash" :size="12" />
-              </button>
-            </div>
-          </div>
-
-          <!-- 多选模式：批量操作栏（替换底部按钮区） -->
-          <div v-if="selectMode" class="batch-actions">
-            <span class="batch-count">已选 {{ checkedIds.size }} 章</span>
-            <div class="batch-btns">
-              <button
-                class="batch-delete-btn"
-                :disabled="checkedIds.size === 0 || batchDeleting"
-                @click="batchDeleteChapters"
-              >
-                <Icon name="trash" :size="14" />
-                <span>{{ batchDeleting ? '删除中…' : '删除选中' }}</span>
-              </button>
-              <button class="batch-cancel-btn" @click="exitSelectMode">
-                <span>取消</span>
-              </button>
-            </div>
-          </div>
-
-          <div v-if="!selectMode" class="binder-actions">
-            <button class="new-chapter-btn" @click="createChapter">
-              <Icon name="plus" :size="14" />
-              <span>新建章节</span>
-            </button>
-            <button class="import-btn" title="从 .md 文件批量导入章节" @click="openImportModal">
-              <Icon name="arrow-up-tray" :size="14" />
-              <span>导入 .md</span>
-            </button>
-            <button
-              class="analyze-btn"
-              title="从当前章节正文逆向提取角色/地点/伏笔等"
-              :disabled="!selectedChapter"
-              @click="openExtractionModal"
-            >
-              <Icon name="sparkles" :size="14" />
-              <span>分析</span>
-            </button>
-          </div>
-        </aside>
-      </Pane>
-
-      <!-- 中栏：编辑器 + 状态栏 -->
-      <Pane :size="100 - splitSizes[0]" :min-size="30" class="editor-pane">
-        <main class="editor-area">
-          <!-- 超薄顶栏：进行态状态文案 + 显性入口三件套（AI 辅助 / 快捷键 / 副驾抽屉）。
-               打字时降到 10% 透明（沉浸）；章节名与标题在纸列页面头展示。 -->
-          <div
-            v-if="selectedChapter"
-            class="nle-topbar"
-            :class="{ 'nle-topbar--dim': isTyping }"
+  <div
+    class="workspace-view"
+    :class="{ 'workspace-view--drawer-pinned': assistPinned, 'workspace-view--typing': isTyping }"
+  >
+    <main class="editor-area">
+      <!-- 编辑器（复用 ChapterEditorContainer 全套；点火卡经 page-top 槽入纸页首） -->
+      <div v-if="selectedChapter" class="editor-host">
+        <div class="editor-main">
+          <ChapterEditor
+            ref="chapterEditorRef"
+            :selected-chapter="selectedChapter"
+            :characters="characters"
+            :api-config="apiConfig"
+            :book-id="currentBook?.id"
+            :save-status="saveStatus"
+            :last-saved-at="lastSavedAt"
+            :word-count="wordCount"
+            :ai-state-label="aiStateLabel"
+            :ai-state-error="aiStateError"
+            @update-chapter="handleUpdateChapter"
+            @refresh-characters="handleRefreshCharacters"
+            @editor-entity-focus="handleEntityFocus"
           >
-            <span v-if="nleStateLabel" class="nle-topbar__state">{{ nleStateLabel }}</span>
-            <button
-              class="nle-topbar__btn"
-              :class="{ 'nle-topbar__btn--active': assistEnabled }"
-              :title="assistEnabled ? 'AI 辅助已开启（点击关闭：Space 恢复普通空格，停顿感知/卡片舱停用）' : 'AI 辅助已关闭（纯手写模式，点击开启）'"
-              @click="toggleAssist"
-            >
-              <Icon name="sparkles" :size="13" />
-            </button>
-            <button
-              class="nle-topbar__btn"
-              title="快捷键一览"
-              @click="showShortcuts = true"
-            >
-              <Icon name="question-mark-circle" :size="13" />
-            </button>
-            <button
-              class="nle-topbar__btn"
-              :class="{ 'nle-topbar__btn--active': drawerOpen }"
-              title="副驾面板（Ctrl+\ 固定）"
-              @click="toggleDrawerPinned"
-            >
-              <Icon name="panel-right" :size="13" />
-            </button>
-          </div>
-          <!-- 编辑器（复用 ChapterEditorContainer 全套） -->
-          <div v-if="selectedChapter" class="editor-host">
-            <div class="editor-main">
-            <ChapterEditor
-              ref="chapterEditorRef"
-              :selected-chapter="selectedChapter"
-              :characters="characters"
-              :api-config="apiConfig"
-              :book-id="currentBook?.id"
-              :save-status="saveStatus"
-              :last-saved-at="lastSavedAt"
-              @update-chapter="handleUpdateChapter"
-              @refresh-characters="handleRefreshCharacters"
-              @editor-entity-focus="handleEntityFocus"
-            />
-            </div>
-            <!-- 左缘感知带：写中常驻，Canon 感知（角色/伏笔/矛盾）；放正文左侧避开右边抽屉 -->
-            <PerceptionBand
-              v-if="adaptiveActive"
-              :suggestions="session.adaptiveSuggestions.value"
-              :spine-progress="chapterSpine.spineProgress.value"
-              @dismiss-hint="onDismissHint"
-            >
-              <template #dock>
-                <SparkDock :show-burst-entry="adaptiveComposing" @burst-entry="showBeatDock()" />
-                <!-- C1 快检疑点条：幽灵在屏且有命中时接在挂件舱位（幽灵在屏时
-                     挂件舱自身隐藏，此位恰好空出；只提示不拦截） -->
-                <GhostWarningsBar v-if="ghostActive && ghostWarnings.length" :warnings="ghostWarnings" />
-                <!-- 二期返修条（约束治理）：设定硬伤已自动修正（改写/删句）的薄荷条 -->
-                <GhostRepairedChip v-if="ghostActive && ghostRepaired" :repaired="ghostRepaired" />
-                <!-- 呈现平面洗层条（三平面分权 P1）：薄荷系「已规避」；用原稿=可逆学习 -->
-                <GhostWashChip
-                  v-if="ghostActive && ghostWash.hits.length"
-                  :wash="ghostWash"
-                  @use-original="onUseGhostOriginal"
-                />
-              </template>
-            </PerceptionBand>
+            <template #page-top>
+              <!-- NLE-ADF 点火卡 → 复合谋篇卡（P1.4 M1：一句话意图 + AI 谋篇建议 + 点火） -->
+              <IgnitionCard
+                v-if="showIgnition"
+                :has-outline="!!(selectedChapter?.outline_text || '').trim()"
+                :spine="chapterSpine.spine.value"
+                :suggestions="chapterSpine.spineSuggestions.value"
+                :suggesting="chapterSpine.spineSuggesting.value"
+                @update-intent="chapterSpine.setIntent"
+                @suggest="chapterSpine.suggest"
+                @adopt="(part) => chapterSpine.adoptSuggestion(part)"
+                @discard-suggestions="chapterSpine.discardSuggestions"
+                @ignite="onIgnite"
+                @dismiss="onIgnitionDismiss"
+              />
+            </template>
+          </ChapterEditor>
+        </div>
+        <!-- 纸左页边批注（08 期 §4.7 几何迁移：圆点守行高 + 覆态读卡右开）；不占布局宽，纸列零位移 -->
+        <PerceptionBand
+          v-if="adaptiveActive"
+          :suggestions="session.adaptiveSuggestions.value"
+          :spine-progress="chapterSpine.spineProgress.value"
+          @dismiss-hint="onDismissHint"
+        />
+        <!-- 光标层：幽灵三条（疑点/返修/洗层）随幽灵尾浮动。
+             SparkDock 卡舱已迁行间推挤（InlineDock WidgetDecoration，
+             2026-09-09 布局重构）——事件经 inlineDockBridge 桥接（见 onMounted） -->
+        <CursorLayer
+          v-if="adaptiveActive"
+          @use-original="onUseGhostOriginal"
+        />
 
-            <!-- W2 情境浮卡（Teleport 到 body；未解析到时组件自行关闭） -->
-            <WorldContextCard
-              v-if="contextCardState && currentBook?.id && selectedChapterId"
-              :key="`${contextCardState.source}:${contextCardState.entityId || contextCardState.keyword}`"
-              :book-id="currentBook.id"
-              :chapter-id="selectedChapterId"
-              :x="contextCardState.x || 0"
-              :y="contextCardState.y || 0"
-              :keyword="contextCardState.keyword"
-              :entity-id="contextCardState.entityId || null"
-              :entity-kind="contextCardState.entityKind || null"
-              @close="contextCardState = null"
-            />
+        <!-- W2 情境浮卡（Teleport 到 body；未解析到时组件自行关闭） -->
+        <WorldContextCard
+          v-if="contextCardState && currentBook?.id && selectedChapterId"
+          :key="`${contextCardState.source}:${contextCardState.entityId || contextCardState.keyword}`"
+          :book-id="currentBook.id"
+          :chapter-id="selectedChapterId"
+          :x="contextCardState.x || 0"
+          :y="contextCardState.y || 0"
+          :keyword="contextCardState.keyword"
+          :entity-id="contextCardState.entityId || null"
+          :entity-kind="contextCardState.entityKind || null"
+          @close="contextCardState = null"
+        />
 
-            <!-- W3 速记框（Alt+N / 浮卡「记一笔」唤起；Teleport 模态 + 撤销胶囊） -->
-            <QuickEventNote :book-id="currentBook?.id || null" :chapter-id="selectedChapterId" />
-          </div>
+        <!-- W3 速记框（Alt+N / 浮卡「记一笔」唤起；Teleport 模态 + 撤销胶囊） -->
+        <QuickEventNote :book-id="currentBook?.id || null" :chapter-id="selectedChapterId" />
+      </div>
 
-          <!-- 空状态 -->
-          <div v-else class="empty-editor">
-            <div class="empty-icon"><Icon name="pencil-square" :size="48" /></div>
-            <h2>选择一个章节开始写作</h2>
-            <p>从左侧选择章节，或新建一个章节。</p>
-            <button class="btn-primary" @click="createChapter">
-              <Icon name="plus" :size="15" />
-              <span>新建章节</span>
-            </button>
-          </div>
+      <!-- 态 A：无选中章 = 目录页（纸面本体即目录，§4.4） -->
+      <TocPage
+        v-else
+        :book-title="currentBook?.title || ''"
+        :chapters="sortedChapters"
+        :loading="loading"
+        @select="(ch) => store.selectChapter(ch.id)"
+        @create="createChapter"
+        @import="openImportModal"
+      />
 
-          <!-- 状态栏 -->
-          <footer v-if="selectedChapter" class="status-bar" :class="{ 'status-bar--dim': isTyping }">
-            <span>{{ wordCount }} 字</span>
-            <span v-if="saveStatus === 'saving'">保存中…</span>
-            <span v-else-if="saveStatus === 'saved'" class="muted">已保存</span>
-            <span v-else-if="saveStatus === 'error'" class="status-error">保存失败（已存本地草稿）</span>
-          </footer>
-          <!-- NLE-ADF 灵感悬浮舱（镜头碎片竖排）已迁入右缘感知带 PerceptionBand #dock slot -->
-          <!-- NLE-ADF 走向卡舱（Ctrl+Space 唤起：选走向 → burst 段落级连写） -->
-          <BeatCardDock @pick="(card) => onBeatCardPick(card)" />
-          <!-- NLE-ADF 点火卡 → 复合谋篇卡（P1.4 M1：一句话意图 + AI 谋篇建议 + 点火） -->
-          <IgnitionCard
-            v-if="showIgnition"
-            :has-outline="!!(selectedChapter?.outline_text || '').trim()"
-            :spine="chapterSpine.spine.value"
-            :suggestions="chapterSpine.spineSuggestions.value"
-            :suggesting="chapterSpine.spineSuggesting.value"
-            @update-intent="chapterSpine.setIntent"
-            @suggest="chapterSpine.suggest"
-            @adopt="(part) => chapterSpine.adoptSuggestion(part)"
-            @discard-suggestions="chapterSpine.discardSuggestions"
-            @ignite="onIgnite"
-            @dismiss="onIgnitionDismiss"
-          />
-          <!-- NLE-ADF 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
-          <ThinkingIndicator />
-          <!-- 快捷键速查弹层（顶栏 ? 按钮触发） -->
-          <ShortcutsCheatsheet v-if="showShortcuts" @close="showShortcuts = false" />
-        </main>
-      </Pane>
+      <!-- NLE-ADF 走向卡舱（Ctrl+Space 唤起：选走向 → burst 段落级连写） -->
+      <BeatCardDock @pick="(card) => onBeatCardPick(card)" />
+      <!-- NLE-ADF 思考指示器（光标处脉冲点；停顿 2s 预览/后端思考中强脉冲） -->
+      <ThinkingIndicator />
+      <!-- 快捷键速查弹层（右缘栏 ? 按钮触发） -->
+      <ShortcutsCheatsheet v-if="showShortcuts" @close="showShortcuts = false" />
+    </main>
 
-    </Splitpanes>
+    <!-- 左缘书签（写中回目录的入口；无选中章时纸面即目录，书签缺席） -->
+    <ChapterSpine
+      v-if="selectedChapter"
+      :chapter-label="spineChapterLabel"
+      @open="tocOpen = true"
+    />
+    <!-- 目录抽屉（binder 转世：选章即收 / Esc / 外点 / 再点书签） -->
+    <ChapterTocDrawer
+      :visible="tocOpen"
+      :book-title="currentBook?.title || ''"
+      :chapters="sortedChapters"
+      :selected-chapter-id="selectedChapterId"
+      :loading="loading"
+      :select-mode="selectMode"
+      :checked-ids="checkedIds"
+      :all-checked="allChecked"
+      :batch-deleting="batchDeleting"
+      :can-extract="!!selectedChapter"
+      @close="tocOpen = false"
+      @back="backToLibrary"
+      @toggle-select-mode="toggleSelectMode"
+      @toggle-check-all="toggleCheckAll"
+      @select="onTocSelect"
+      @delete="confirmDeleteChapter"
+      @batch-delete="batchDeleteChapters"
+      @exit-select-mode="exitSelectMode"
+      @create="createChapter"
+      @import="openImportModal"
+      @extract="openExtractionModal"
+    />
 
-    <!-- NLE-ADF 2.0 右缘隐形抽屉：hover 触发条滑出 / Ctrl+\ 固定（覆盖式不推画布） -->
-    <div
-      class="drawer-edge"
-      :class="{ 'drawer-edge--active': drawerOpen }"
-      title="副驾抽屉（Ctrl+\ 固定）"
-      @mouseenter="drawerHover = true"
-    ></div>
+    <!-- 右缘助手栏（点击制；AI 辅助的唯一的家） -->
+    <AssistRail
+      :assist-enabled="assistEnabled"
+      :active-tab="assistPanelOpen ? activeTab : null"
+      :report-unread="reportUnread"
+      @toggle-assist="toggleAssist"
+      @select-tab="onRailSelectTab"
+      @open-cheatsheet="showShortcuts = true"
+    />
+    <!-- 助手面板（单分区壳；贴栏左开，栏始终可点） -->
     <Transition name="inspector-drawer">
       <aside
-        v-if="drawerOpen"
-        class="inspector-drawer"
-        @mouseleave="drawerHover = false"
+        v-if="assistPanelOpen"
+        ref="assistPanelEl"
+        class="inspector-drawer inspector-drawer--beside-rail"
       >
-        <InspectorPanel :external-session="session" />
+        <InspectorPanel
+          v-model:active-tab="activeTab"
+          :external-session="session"
+          :pinned="assistPinned"
+          @activate="onPanelActivate"
+          @pin="togglePanelPinned"
+          @close="closeAssistPanel"
+        />
       </aside>
     </Transition>
 
@@ -1050,361 +1121,43 @@ async function confirmDeleteChapter(ch: Chapter) {
   height: 100%;
   overflow: hidden;
   background: var(--bg-primary);
-  /* 抽屉固定（Ctrl+\）时推挤内容区：编辑列在剩余空间重新居中，过渡与抽屉滑入同速 */
+  /* 面板 pin 时推挤内容区：纸列在剩余空间重新居中，过渡与面板滑入同速 */
   transition: padding-right 0.22s ease;
-}
-
-/* 推挤量与 .inspector-drawer 宽度同一公式（width:380px; max-width:44vw）。
-   仅 pinned 推挤——hover 瞥看仍是覆盖式，避免鼠标划过右缘时内容反复重排。 */
-.workspace-view--drawer-pinned {
-  padding-right: min(380px, 44vw);
-}
-
-.workspace-split {
-  height: 100%;
-}
-
-/* splitpanes 主题适配 */
-.workspace-split :deep(.splitpanes__splitter) {
-  background: var(--border-color);
+  /* 左缘书签 / 目录抽屉 / 右缘助手栏的 absolute 定位锚 */
   position: relative;
 }
-.workspace-split :deep(.splitpanes__splitter::before) {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  background: transparent;
-  transition: background 0.15s ease;
-}
-.workspace-split :deep(.splitpanes__splitter:hover::before) {
-  background: var(--accent-500);
-  opacity: 0.2;
+
+/* 推挤量 = 面板宽（.inspector-drawer 380px/44vw）+ 右缘栏 44px——
+   面板贴栏左开（--beside-rail），栏的占位不重复推 */
+.workspace-view--drawer-pinned {
+  padding-right: calc(min(380px, 44vw) + 44px);
 }
 
-/* Binder */
-.binder {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-secondary);
-  overflow: hidden;
-}
-
-.binder-header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.binder-title {
-  flex: 1;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.icon-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.binder-loading {
-  padding: 1rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.chapter-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.375rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.chapter-item {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  width: 100%;
-  padding: 0.4375rem 0.5rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.chapter-item:hover {
-  background: var(--hover-bg);
-}
-
-.chapter-item.active {
-  background: var(--hover-bg);
-}
-
-.chapter-item.checked {
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.08);
-}
-
-.select-toggle.active {
-  color: var(--accent-500);
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.1);
-}
-
-/* 多选：全选栏 */
-.select-all-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4375rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s ease;
-}
-
-.select-all-bar:hover {
-  background: var(--hover-bg);
-}
-
-.select-all-label {
-  user-select: none;
-}
-
-/* 复选框（全选栏和章节行共用） */
-.select-checkbox {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  border: 1.5px solid var(--border-color);
-  border-radius: 0.1875rem;
-  background: var(--bg-canvas);
-  color: white;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-
-.select-checkbox.checked {
-  border-color: var(--accent-500);
-  background: var(--accent-500);
-}
-
-/* 多选：批量操作栏 */
-.batch-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-tertiary);
-  flex-shrink: 0;
-}
-
-.batch-count {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.batch-btns {
-  display: flex;
-  gap: 0.375rem;
-}
-
-.batch-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  flex: 1;
-  padding: 0.4375rem;
-  background: #dc2626;
-  color: white;
-  border: none;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.batch-delete-btn:hover:not(:disabled) {
-  background: #b91c1c;
-}
-
-.batch-delete-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.batch-cancel-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.4375rem 0.75rem;
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.batch-cancel-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.ch-num {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-  min-width: 1.25rem;
-}
-
-.ch-delete {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.chapter-item:hover .ch-delete {
-  opacity: 1;
-}
-
-.ch-delete:hover {
-  color: #dc2626;
-  background: rgba(220, 38, 38, 0.08);
-}
-
-.chapter-item.active .ch-num {
-  color: var(--accent-500);
-  font-weight: 600;
-}
-
-.ch-name {
-  flex: 1;
-  font-size: 0.75rem;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chapter-item.active .ch-name {
-  color: var(--accent-500);
-  font-weight: 500;
-}
-
-.binder-actions {
-  display: flex;
-  gap: 0.25rem;
-  margin: 0.375rem;
-  flex-shrink: 0;
-}
-
-.new-chapter-btn,
-.import-btn,
-.analyze-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  flex: 1;
-  padding: 0.4375rem;
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.new-chapter-btn:hover {
-  border-color: var(--accent-500);
-  color: var(--accent-500);
-}
-
-.import-btn:hover {
-  border-color: var(--accent-500);
-  color: var(--accent-500);
-}
-
-.analyze-btn:hover:not(:disabled) {
-  border-color: var(--accent-500);
-  color: var(--accent-500);
-}
-
-.analyze-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 中栏 */
+/* 中栏（书桌区） */
 .editor-area {
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--bg-primary);
   overflow: hidden;
-  /* 点火卡 absolute 居中的定位锚（teleport 到 body 的浮层不受影响） */
+  /* 页内浮层 absolute 定位锚（teleport 到 body 的浮层不受影响） */
   position: relative;
 }
 
 .editor-host {
   flex: 1;
   display: flex;
-  flex-direction: row; /* 正文主区 + 右缘感知带并列 */
+  flex-direction: row;
   overflow: hidden;
   min-height: 0;
   position: relative;
 }
 
-/* 正文主区（ChapterEditor）；感知带在其右侧并列 */
+/* 正文主区（ChapterEditor）：flex-grow 填满可用宽——splitpanes 时代由 Pane 给定
+   宽度，flex: 0 1 auto 在单栏 flex 行里会塌缩成内容固有宽（纸列曾实测 526px，
+   冻结几何 880 失守）；grow 后由 max-width 60rem 封顶、内层 max-w-880 收纸列。 */
 .editor-main {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   max-width: 60rem;
   margin: 0 auto;
   min-width: 0;
@@ -1412,105 +1165,5 @@ async function confirmDeleteChapter(ch: Chapter) {
   flex-direction: column;
   overflow: hidden;
   position: relative;
-}
-
-/* 空状态 */
-.empty-editor {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 2rem;
-}
-
-.empty-icon {
-  margin-bottom: 1rem;
-  opacity: 0.7;
-}
-
-.empty-editor h2 {
-  font-family: var(--font-heading);
-  font-size: 1.0625rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin: 0 0 0.375rem;
-}
-
-.empty-editor p {
-  font-size: 0.8125rem;
-  margin: 0 0 1.25rem;
-}
-
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.4375rem 0.875rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  background: var(--accent-500);
-  color: white;
-  border: none;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.btn-primary:hover {
-  background: var(--accent-600);
-}
-
-/* 状态栏 */
-.status-bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.25rem 0.875rem;
-  background: var(--bg-tertiary);
-  border-top: 1px solid var(--border-color);
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-bar .active {
-  color: var(--accent-500);
-}
-
-.status-bar .muted {
-  opacity: 0.7;
-}
-
-.status-bar .status-error {
-  color: #dc2626;
-}
-
-/* 顶栏显性入口按钮（AI 辅助开关 / 快捷键 / 副驾抽屉） */
-.nle-topbar__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.375rem;
-  height: 1.375rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.nle-topbar__btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-.nle-topbar__btn--active {
-  color: var(--accent-500);
-}
-/* 状态文案缺席时把按钮组推到右侧 */
-.nle-topbar__btn:first-of-type {
-  margin-left: auto;
 }
 </style>

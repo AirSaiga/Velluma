@@ -74,29 +74,33 @@ beforeEach(() => {
 describe('warningKindLabel（二期新 kind 人话映射）', () => {
   it('四个新 kind 全部有人话标签', () => {
     expect(warningKindLabel('out_of_scene')).toBe('人物不在场')
-    expect(warningKindLabel('location_jump')).toBe('地点穿越')
+    expect(warningKindLabel('location_jump')).toBe('地点跳变')
     expect(warningKindLabel('quality_breaker')).toBe('自动修正暂停')
     expect(warningKindLabel('cliche_hit')).toBe('禁忌词')
   })
 
   it('旧三类标签不回归', () => {
     expect(warningKindLabel('dead_speak')).toBe('死者开口')
-    expect(warningKindLabel('canon_leak')).toBe('疑似泄底')
-    expect(warningKindLabel('secret_leak')).toBe('私有设定外泄')
+    expect(warningKindLabel('canon_leak')).toBe('秘密穿帮')
+    expect(warningKindLabel('secret_leak')).toBe('秘密外泄')
   })
 
   it('未登记 kind 回退原串（后端新增枚举不炸前端）', () => {
     expect(warningKindLabel('future_kind')).toBe('future_kind')
   })
+
+  it('抢拍（09-03 live 出生即返修资格）有人话标签', () => {
+    expect(warningKindLabel('beat_rush')).toBe('抢拍')
+  })
 })
 
 describe('summarizeGhostWarnings 二期 kind 进汇总话术', () => {
-  it('穿越两类按人话标签汇总', () => {
+  it('跳变两类按人话标签汇总', () => {
     const s = summarizeGhostWarnings([
       { kind: 'out_of_scene', span_text: '流光', message: 'x' },
       { kind: 'location_jump', span_text: '北岸要塞', message: 'y' },
     ] as GhostWarning[])
-    expect(s).toBe('已采纳，含 2 处疑点：人物不在场、地点穿越（可忽略，仅供参照）')
+    expect(s).toBe('已采纳，含 2 处疑点：人物不在场、地点跳变（只是提醒，可不管）')
   })
 })
 
@@ -105,6 +109,14 @@ describe('setGhostRepaired（返修环结果灌入）', () => {
     setGhostRepaired({ count: 2, kinds: ['canon_leak'], action: 'repaired' }, false)
     expect(ghostRepaired.value).toEqual({ count: 2, kinds: ['canon_leak'], action: 'repaired' })
     expect(ghostBreakerOpen.value).toBe(false)
+  })
+
+  it('items 逐条明细随车透传（09-08 作者可见性：点开看修了什么）', () => {
+    const items: GhostWarning[] = [
+      { kind: 'canon_leak', span_text: '皇室遗孤', message: '疑似泄底：正文直接写出了真相层私有标签「皇室遗孤」' },
+    ]
+    setGhostRepaired({ count: 1, kinds: ['canon_leak'], action: 'repaired', items }, false)
+    expect(ghostRepaired.value?.items).toEqual(items)
   })
 
   it('count=0 / 缺字段 → 不亮条；breaker_open=true 亮熔断', () => {

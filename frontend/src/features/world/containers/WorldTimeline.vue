@@ -9,12 +9,14 @@
  * 叙事时间——章节轴↔世界轴的桥（docs/world-unified-settings.md §2.4）。
  * 右键菜单：在此时刻记录事件 / 标记章节叙事时间 / 埋伏笔（M3）。
  */
-import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch, nextTick } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
 import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { useFloatingLayer } from '../../../composables/useFloatingLayer'
+import { useEscStack } from '../../../composables/useEscStack'
 import ArcBand from '../presentation/ArcBand.vue'
 import { yearOf, formatTime } from '../engine/timeFormat'
 import { fitWindowToContent, buildScaleTicks, formatWindowLabel, assignRows } from '../engine/timelineLayout'
@@ -80,10 +82,10 @@ const rangeForm = ref<{ x: number; y: number; start: string; end: string } | nul
 
 function openRangeForm(e: MouseEvent) {
   rangeForm.value = {
-    // 触发点在屏幕底缘的时间轴头，弹层一律向上开
-    x: Math.max(8, Math.min(e.clientX - 150, window.innerWidth - 260)),
-    y: Math.max(8, e.clientY - 172),
-    // 表单是年粒度（日精度窗口向上取整到覆盖它的整年）
+    // 02 期 §3.4：视口夹紧由 placeFloating 接管，这里只存原始锚点（表单是年粒度，
+    // 日精度窗口向上取整到覆盖它的整年）
+    x: e.clientX,
+    y: e.clientY,
     start: String(yearOf(viewStart.value)),
     end: String(yearOf(Math.max(viewStart.value, viewEnd.value - 1))),
   }
@@ -157,7 +159,7 @@ const eventDots = computed(() => {
       left: pctOf(e.time_start),
       right: pctOf(Math.max(e.time_end, e.time_start)),
       isSpan: e.time_end > e.time_start,
-      color: EVENT_TYPE_COLOR[e.event_type] || '#94a3b8',
+      color: EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)',
       label: getTemplate(e.event_type)?.label || e.event_type,
     }))
   const w = trackWidth.value || 900
@@ -562,6 +564,101 @@ async function submitForeshadow() {
 // 弧线详情弹层
 const arcDetail = ref<{ f: Foreshadow; x: number; y: number } | null>(null)
 
+// ===== 02 期 §3.4：四弹层统一接 placeFloating（点锚、向上优先+翻转+视口夹紧）+ Esc 栈 =====
+// 归位决定（§3.2）：弹层保持页内 DOM、不 teleport、z:800 保留——隔离上下文内层级序正确。
+const escStack = useEscStack()
+
+const ctxEl = ref<HTMLElement | null>(null)
+const fsEl = ref<HTMLElement | null>(null)
+const arcEl = ref<HTMLElement | null>(null)
+const rangeEl = ref<HTMLElement | null>(null)
+
+/** 实测尺寸优先（内容行数影响高度），未挂载时用设计兜底包围盒（§3.4） */
+function measuredSize(el: HTMLElement | null, fallback: { width: number; height: number }) {
+  if (el && el.offsetWidth > 0 && el.offsetHeight > 0) return { width: el.offsetWidth, height: el.offsetHeight }
+  return fallback
+}
+const ctxSize = computed(() => measuredSize(ctxEl.value, { width: 240, height: 320 }))
+const fsSize = computed(() => measuredSize(fsEl.value, { width: 280, height: 230 }))
+const arcSize = computed(() => measuredSize(arcEl.value, { width: 260, height: 240 }))
+const rangeSize = computed(() => measuredSize(rangeEl.value, { width: 236, height: 210 }))
+
+// 时间轴贴视口底缘，向上展开是自然方向；flip 保险朝上空间不足时落下方
+const WT_FLOAT_PLACEMENT = { gap: 8, margin: 8, prefer: 'above' as const, flip: true, align: 'start' as const }
+
+const ctxLayer = useFloatingLayer({
+  anchor: () => (ctxMenu.value ? { x: ctxMenu.value.x, y: ctxMenu.value.y } : null),
+  size: ctxSize,
+  placement: WT_FLOAT_PLACEMENT,
+  open: computed(() => !!ctxMenu.value),
+})
+const fsLayer = useFloatingLayer({
+  anchor: () => (fsForm.value ? { x: fsForm.value.x, y: fsForm.value.y } : null),
+  size: fsSize,
+  placement: WT_FLOAT_PLACEMENT,
+  open: computed(() => !!fsForm.value),
+})
+const arcLayer = useFloatingLayer({
+  anchor: () => (arcDetail.value ? { x: arcDetail.value.x, y: arcDetail.value.y } : null),
+  size: arcSize,
+  placement: WT_FLOAT_PLACEMENT,
+  open: computed(() => !!arcDetail.value),
+})
+const rangeLayer = useFloatingLayer({
+  anchor: () => (rangeForm.value ? { x: rangeForm.value.x, y: rangeForm.value.y } : null),
+  size: rangeSize,
+  placement: WT_FLOAT_PLACEMENT,
+  open: computed(() => !!rangeForm.value),
+})
+const { pos: ctxPos, maxHeight: ctxMaxH } = ctxLayer
+const { pos: fsPos, maxHeight: fsMaxH } = fsLayer
+const { pos: arcPos, maxHeight: arcMaxH } = arcLayer
+const { pos: rangePos, maxHeight: rangeMaxH } = rangeLayer
+
+// Esc 栈：打开时入栈（一次 Esc 只关栈顶一层），关闭时摘除（幂等）。wt-ctx 首次获得 Esc 关闭能力
+let ctxEscId: symbol | undefined
+watch(ctxMenu, (v) => {
+  if (v && !ctxEscId) ctxEscId = escStack.push(closeCtx, 'wt-ctx')
+  else if (!v && ctxEscId) {
+    escStack.remove(ctxEscId)
+    ctxEscId = undefined
+  }
+})
+let fsEscId: symbol | undefined
+watch(fsForm, (v) => {
+  if (v && !fsEscId) fsEscId = escStack.push(() => (fsForm.value = null), 'wt-fs')
+  else if (!v && fsEscId) {
+    escStack.remove(fsEscId)
+    fsEscId = undefined
+  }
+})
+let arcEscId: symbol | undefined
+watch(arcDetail, (v) => {
+  if (v && !arcEscId) arcEscId = escStack.push(() => (arcDetail.value = null), 'wt-arc')
+  else if (!v && arcEscId) {
+    escStack.remove(arcEscId)
+    arcEscId = undefined
+  }
+})
+let rangeEscId: symbol | undefined
+watch(rangeForm, (v) => {
+  if (v && !rangeEscId) rangeEscId = escStack.push(() => (rangeForm.value = null), 'wt-range')
+  else if (!v && rangeEscId) {
+    escStack.remove(rangeEscId)
+    rangeEscId = undefined
+  }
+})
+
+// v-if 挂载后用实测尺寸重算一次（首帧用兜底包围盒）；同层内换锚（再右键他处）也经此重算
+watch([ctxMenu, fsForm, arcDetail, rangeForm], () => {
+  nextTick(() => {
+    if (ctxMenu.value) ctxLayer.recalc()
+    if (fsForm.value) fsLayer.recalc()
+    if (arcDetail.value) arcLayer.recalc()
+    if (rangeForm.value) rangeLayer.recalc()
+  })
+})
+
 async function onArcResolve() {
   const d = arcDetail.value
   if (!d || !loadedBookId.value) return
@@ -771,11 +868,12 @@ onMounted(() => {
       </div>
     </Transition>
 
-    <!-- 右键菜单：在此时刻…… -->
+    <!-- 右键菜单：在此时刻……（02 期 §3.4：定位/钳位由 placeFloating 接管） -->
     <div
       v-if="ctxMenu"
+      ref="ctxEl"
       class="wt-ctx"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      :style="{ left: ctxPos.left + 'px', top: ctxPos.top + 'px', maxHeight: ctxMaxH != null ? ctxMaxH + 'px' : undefined }"
       @mousedown.stop
       @contextmenu.prevent
     >
@@ -815,11 +913,11 @@ onMounted(() => {
     <!-- 埋伏笔内联表单（右键时刻落锚） -->
     <div
       v-if="fsForm"
+      ref="fsEl"
       class="wt-fs"
-      :style="{ left: fsForm.x + 'px', top: fsForm.y + 'px' }"
+      :style="{ left: fsPos.left + 'px', top: fsPos.top + 'px', maxHeight: fsMaxH != null ? fsMaxH + 'px' : undefined }"
       @mousedown.stop
       @contextmenu.prevent
-      @keydown.esc="fsForm = null"
     >
       <div class="wt-fs-title">在 {{ formatTime(fsForm.t) }} 埋伏笔</div>
       <textarea
@@ -846,11 +944,11 @@ onMounted(() => {
     <!-- 伏笔弧线详情 -->
     <div
       v-if="arcDetail"
+      ref="arcEl"
       class="wt-arc"
-      :style="{ left: arcDetail.x + 'px', top: arcDetail.y + 'px' }"
+      :style="{ left: arcPos.left + 'px', top: arcPos.top + 'px', maxHeight: arcMaxH != null ? arcMaxH + 'px' : undefined }"
       @mousedown.stop
       @contextmenu.prevent
-      @keydown.esc="arcDetail = null"
     >
       <div class="wt-arc-status">
         <span class="wt-arc-dot" :class="arcDetail.f.status"></span>
@@ -889,11 +987,11 @@ onMounted(() => {
     <!-- 视野窗口设置：手动起止年份（头部「N 事件 · …」按钮唤起） -->
     <div
       v-if="rangeForm"
+      ref="rangeEl"
       class="wt-range"
-      :style="{ left: rangeForm.x + 'px', top: rangeForm.y + 'px' }"
+      :style="{ left: rangePos.left + 'px', top: rangePos.top + 'px', maxHeight: rangeMaxH != null ? rangeMaxH + 'px' : undefined }"
       @mousedown.stop
       @contextmenu.prevent
-      @keydown.esc="rangeForm = null"
     >
       <div class="wt-range-title">时间轴视野</div>
       <div class="wt-range-row">
@@ -991,7 +1089,7 @@ onMounted(() => {
   box-shadow: 0 0 0 3px rgba(176, 141, 62, 0.18);
 }
 .wt-now {
-  font-size: 17px;
+  font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: 0.05em;
   color: rgba(51, 48, 42, 0.92);
@@ -1014,7 +1112,7 @@ onMounted(() => {
 }
 /* 头部「N 事件 · …」兼作视野窗口入口（点击框定起止年份） */
 .wt-meta {
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0.18em;
   color: var(--text-muted);
   margin-left: auto;
@@ -1128,7 +1226,7 @@ onMounted(() => {
   border-radius: 6px;
   background: rgba(74, 68, 56, 0.88);
   color: #f4eee1;
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: ui-monospace, monospace;
   white-space: nowrap;
   pointer-events: none;
@@ -1151,7 +1249,7 @@ onMounted(() => {
   right: 0;
   top: 8px;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.08em;
   color: rgba(109, 90, 60, 0.55);
   pointer-events: none;
@@ -1197,8 +1295,8 @@ onMounted(() => {
   right: 0;
   bottom: 0;
   height: 14px;
-  font-size: 9.5px;
-  color: rgba(109, 90, 60, 0.75);
+  font-size: var(--text-xs);
+  color: var(--text-secondary); /* 02 期 §4：主刻度数字归 token（原墨色 rgba 0.75 过淡） */
   font-family: ui-monospace, monospace;
   pointer-events: none;
 }
@@ -1228,8 +1326,8 @@ onMounted(() => {
   background: rgba(107, 90, 68, 0.65);
 }
 .wt-tick:not(.major) {
-  font-size: 9px;
-  color: rgba(109, 90, 60, 0.6);
+  font-size: var(--text-xs);
+  color: var(--text-muted); /* 02 期 §4：次刻度数字归 token */
 }
 /* 缘标签防裁切（首末枚贴缘对齐而非居中出界） */
 .wt-tick.edgeL {
@@ -1259,7 +1357,7 @@ onMounted(() => {
   border-radius: 9999px;
   background: rgba(124, 106, 173, 0.12);
   color: var(--accent-500);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: ui-monospace, monospace;
   cursor: pointer;
   transition: all 0.12s ease-out;
@@ -1285,11 +1383,10 @@ onMounted(() => {
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 6px;
-  transform: translate(-8px, -8px);
 }
 .wt-ctx-time {
   padding: 4px 8px 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 4px;
@@ -1326,7 +1423,7 @@ onMounted(() => {
 }
 .wt-ctx-soon {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--text-xs);
   padding: 0 5px;
   border-radius: 4px;
   background: var(--bg-tertiary);
@@ -1348,7 +1445,7 @@ onMounted(() => {
 }
 .wt-ctx-chaptime {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
 }
@@ -1367,7 +1464,7 @@ onMounted(() => {
   z-index: 50;
 }
 .wt-flash-ch {
-  font-size: 26px;
+  font-size: var(--text-3xl);
   font-weight: 800;
   letter-spacing: 0.12em;
   color: #6d5a3c;
@@ -1413,7 +1510,7 @@ onMounted(() => {
   border-radius: 9999px;
   background: rgba(168, 85, 247, 0.1);
   color: #a855f7;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: ui-monospace, monospace;
   cursor: pointer;
   transition: all 0.12s;
@@ -1435,7 +1532,6 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
-  transform: translate(-8px, -8px);
 }
 .wt-fs-title {
   font-size: 12px;
@@ -1502,7 +1598,7 @@ onMounted(() => {
 }
 .wt-fs-hint {
   margin-top: 8px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1517,13 +1613,12 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
-  transform: translate(-8px, -8px);
 }
 .wt-arc-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-bottom: 6px;
 }
@@ -1536,7 +1631,7 @@ onMounted(() => {
   background: #a855f7;
 }
 .wt-arc-dot.closed {
-  background: #64748b;
+  background: var(--text-secondary);
 }
 .wt-arc-dot.dropped {
   background: #9ca3af;
@@ -1548,7 +1643,7 @@ onMounted(() => {
   margin-bottom: 6px;
 }
 .wt-arc-times {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
   margin-bottom: 10px;
@@ -1581,8 +1676,8 @@ onMounted(() => {
   background: rgba(168, 85, 247, 0.12);
 }
 .wt-arc-act--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* ===== 视野窗口设置弹层（鎏金，与时间轴游标同色系） ===== */
@@ -1660,7 +1755,7 @@ onMounted(() => {
 }
 .wt-range-hint {
   margin-top: 8px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1668,7 +1763,7 @@ onMounted(() => {
 /* C3 揭示投影：章节锚刻度上的朱点（预期揭示的真相条目） */
 .wt-reveal {
   color: #c25a4a;
-  font-size: 9px;
+  font-size: var(--text-xs);
   margin-left: 1px;
   pointer-events: auto;
 }

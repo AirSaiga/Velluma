@@ -6,7 +6,7 @@
 漏导，NameError 被 except 吞掉——B5 现实校验自上线起静默死亡。本测试锁死
 「路由模块命名空间必须能解析该符号」，再脱落即红。
 """
-import backend.routes.chapter_generation.adaptive as adaptive_mod
+import backend.routes.chapter_generation.adaptive.settle_finish as adaptive_mod
 
 
 def test_finish_reality_check_symbols_imported():

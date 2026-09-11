@@ -38,8 +38,8 @@ import {
 } from './useGhostDraft'
 import {
   sparkDockVisible, attachedParts,
-  setSparkDockGate, setSparkParts,
-  showSparkDock, hideSparkDock, stashSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky, moveSparkSelection,
+  setSparkDockGate, setSparkParts, sparkParts, sparkSelectedIndex,
+  hideSparkDock, stashSparkDock, clearAttachedParts, attachSparkPart, setSparkSticky, moveSparkSelection,
   type SparkPart,
 } from './useSparkDock'
 import { beatDockVisible, beatCards, showBeatDock, hideBeatDock } from './useBeatDock'
@@ -212,7 +212,7 @@ export interface GenerationSession {
   /** 注入 adaptive 段落级连写函数（由 useAdaptiveAssist 注入，走向卡舱选定后触发） */
   setAdaptiveBurst: (fn: ((card: { event: string; anchors?: string[] } | null) => void) | null) => void
   /** 注入 adaptive 零件即点取件函数（Tab 唤起卡片舱但无缓存零件时触发） */
-  setAdaptiveSummon: (fn: (() => void) | null) => void
+  setAdaptiveSummon: (fn: ((forceRefresh?: boolean) => void) | null) => void
 }
 
 export function useGenerationSession(): GenerationSession {
@@ -583,8 +583,8 @@ export function useGenerationSession(): GenerationSession {
 
   // adaptive 零件即点取件注入器：Tab 唤起卡片舱但无缓存零件时，由 WorkspaceView
   // 注入（未激活章节先激活——Tab 是显式召唤，等同打字意图——再走停顿级心跳取件）
-  let _adaptiveSummonFn: (() => void) | null = null
-  function setAdaptiveSummon(fn: (() => void) | null) {
+  let _adaptiveSummonFn: ((forceRefresh?: boolean) => void) | null = null
+  function setAdaptiveSummon(fn: ((forceRefresh?: boolean) => void) | null) {
     _adaptiveSummonFn = fn
   }
 
@@ -790,6 +790,11 @@ export function useGenerationSession(): GenerationSession {
   function _authoringKeyHandler(e: KeyboardEvent) {
     // 中文输入法组合态全放行：IME 候选期的 Space/Enter/数字是选词键，拦截=灾难
     if (e.isComposing) return
+    // 自定义镜头输入框（卡片舱第 5 槽位，第二冲程）聚焦时全放行：作者在舱内
+    // 输入框码字，数字/空格/回车是输入本身——作者键位让位（Enter 提交与 Esc
+    // 退焦由输入框自身的 keydown 处理，不进本处理器）
+    const _kt = e.target as HTMLElement | null
+    if (_kt && (_kt.tagName === 'INPUT' || _kt.tagName === 'TEXTAREA')) return
     // Alt+Shift+↓ 深度清脂：LLM 重洗当前段落（本地词级规则之外的深度档）
     if (e.altKey && e.shiftKey && e.code === 'ArrowDown') {
       const editor = chapterEditorHandle.value
@@ -838,14 +843,13 @@ export function useGenerationSession(): GenerationSession {
         e.preventDefault()
         e.stopPropagation()
         if (!ghostActive.value) {
-          // 唤起卡片舱（零件有缓存即弹）；弹出失败=无缓存零件 → 即点取件，
-          // 停顿级心跳带回零件即弹（Tab 从「有时灵」变「必然有回应」）
-          if (stage.value === 'beat_authoring' || (
-            adaptiveMode.value && authorLane.value === 'composing'
-          )) {
-            showSparkDock()
-          }
-          if (!sparkDockVisible.value) _adaptiveSummonFn?.()
+          // 卡片舱唯一入口（2026-09-09 用户拍板）：自动弹出全线退役
+          // （SPARK_DOCK_AUTO_POPUP=false），Tab 恒**强制重算**唤醒——
+          // force_refresh 跳过后端缓存命中，每次都是新鲜批次；注入的 summon
+          // fn 内部先激活章节再取件（未激活章节按 Tab 也能唤醒，勿加
+          // authoringCtx 门——2026-09-09 回归教训）；生成期间连按由
+          // _summonInFlight 静默合并，等待期思考点亮；Esc 关舱退出
+          _adaptiveSummonFn?.(true)
         }
         return
       }
@@ -907,16 +911,36 @@ export function useGenerationSession(): GenerationSession {
       }
       return
     }
-    // 数字键 1~4：Dock 打开时吸附对应挂件（拦默认防数字进正文）
+    // 数字键 1~4：Dock 打开时直开单镜头（第二冲程 2026-09-09：极速单镜头
+    // 展开——选中即 50 字微缝合，同款 sticky+stash 收舱让位幽灵）；非创作态
+    // （含幽灵在屏）退回吸附语义（多枚同缝 + Space 的既有流由鼠标点击可达）
     if (sparkDockVisible.value && /^Digit[1-4]$/.test(e.code)) {
       e.preventDefault()
       e.stopPropagation()
-      attachSparkPart(Number(e.code.slice(5)) - 1)
+      const idx = Number(e.code.slice(5)) - 1
+      const part = sparkParts.value[idx]
+      if (part && adaptiveComposing && !ghostActive.value) {
+        _adaptiveContinueFn?.('stitch', [
+          { text: part.text, direction: part.direction, slot: part.source },
+        ])
+        setSparkSticky()
+        stashSparkDock()
+      } else {
+        attachSparkPart(idx)
+      }
       return
     }
     // ↑↓：Dock 打开时浏览高亮碎片（纯视觉；吸附仍数字键/鼠标）。
-    // sticky 态 moveSparkSelection 返回 false → 不拦默认，让 ↑↓ 移光标
+    // sticky 态 moveSparkSelection 返回 false → 不拦默认，让 ↑↓ 移光标。
+    // ↓ 到末位再按 → 焦点切入自定义镜头输入框（第 5 槽位）——零自动焦点
+    // 纪律下唯一的键盘入口（另一入口是直接点击）
     if (sparkDockVisible.value && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+      if (e.code === 'ArrowDown' && sparkSelectedIndex.value >= sparkParts.value.length - 1) {
+        e.preventDefault()
+        e.stopPropagation()
+        window.dispatchEvent(new CustomEvent('velluma:dock-focus-custom'))
+        return
+      }
       if (moveSparkSelection(e.code === 'ArrowUp' ? -1 : 1)) {
         e.preventDefault()
         e.stopPropagation()

@@ -59,6 +59,38 @@ from backend.services.context.budget import (
 logger = logging.getLogger(__name__)
 
 
+# ---- A 流相关性门（2026-09-11 排毒批「前情强买强卖」）----
+# 结构化前情按实体名命中召回，天然只保证「同一人」不保证「同一件事」——
+# 全书仅一条玄幻黑历史时，温馨做饭段落也会被注入 + prompt 又要求呼应件，
+# 逼模型硬塞。门阀：事件与当前段落的 jieba 共享词（≥2 字）≥2 个，或占比
+# ≥0.3——实体名单命中天然贡献 1 个共享词，门槛实际要求**事件词面上还有
+# 第二个当下语境的词**（发电机坏了 vs 正在修发电机 ✓；血噬融合坠落 vs
+# 洗脸做饭 ✗）。纯确定性，jieba 缺失时退「不过滤」（保底供给不误杀）。
+_ECHO_SHARED_TOKEN_MIN = 2
+_ECHO_SHARED_RATIO = 0.3
+
+
+def echo_is_relevant(event_text: str, query_text: str) -> bool:
+    """A 流回响相关性判据（纯函数，测试对拍口径）。"""
+    ev = (event_text or "").strip()
+    q = (query_text or "").strip()
+    if not ev or not q:
+        return False
+    try:
+        import jieba
+
+        ev_tokens = {t for t in jieba.lcut(ev) if len(t) >= 2}
+        q_tokens = {t for t in jieba.lcut(q) if len(t) >= 2}
+    except Exception:
+        return True  # 分词器缺席：宁多勿漏（记忆是增强不是依赖）
+    shared = ev_tokens & q_tokens
+    if not ev_tokens:
+        return True
+    return len(shared) >= _ECHO_SHARED_TOKEN_MIN or (
+        len(shared) / len(ev_tokens)
+    ) >= _ECHO_SHARED_RATIO
+
+
 def merge_echoes(groups: Sequence[List[str]], k: int) -> List[str]:
     """按组序合并召回结果：保序去重（组间质量序 A→V→B），过滤空串，截 k。"""
     seen: set = set()
@@ -91,12 +123,15 @@ async def recall_memories(
         return []
 
     # ---- A 结构化前情（默认流·始终）：世界页事件按叙事时刻精确召回 ----
+    # 相关性门（2026-09-11）：实体名命中≠语境相关，不相关事件进 prompt 会
+    # 逼模型硬塞呼应（强买强卖事故）；无及格事件允许 A 流为空
     a_echoes: List[str] = []
     try:
-        a_echoes = await _world_echoes(
+        a_raw = await _world_echoes(
             db, book_id=book_id, chapter_id=chapter_id,
             query_text=query, limit=min(ECHOES_WORLD_MAX_ENTRIES, k),
         )
+        a_echoes = [e for e in a_raw if echo_is_relevant(e, query)]
     except Exception as e:
         logger.warning(f"[recall] 世界事件前情失败（跳过）: {e}")
 

@@ -214,21 +214,13 @@ const dialogueActiveTier = computed<number | null>(() => {
   padding: 1.25rem 0 1.5rem;
   scroll-margin-top: 4.5rem;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
-.sec-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
+   sec-sub 按 §6 归 token（原 muted 过淡） */
 .sec-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--text-secondary);
 }
 .preset-row {
   display: flex;
@@ -238,12 +230,12 @@ const dialogueActiveTier = computed<number | null>(() => {
   margin-bottom: 0.75rem;
 }
 .preset-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .preset-chip {
   padding: 0.25rem 0.625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
@@ -268,8 +260,9 @@ const dialogueActiveTier = computed<number | null>(() => {
   color: var(--text-secondary);
 }
 .tier-btn {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.6875rem;
+  min-height: 28px;
+  padding: 0.375rem 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
@@ -295,12 +288,12 @@ const dialogueActiveTier = computed<number | null>(() => {
 }
 .anchor-note {
   margin-left: 0.375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
 }
 .deviation-note {
   margin: 0.25rem 0 0.5rem;
-  font-size: 0.6875rem;
-  color: #b45309;
+  font-size: var(--text-xs);
+  color: var(--warn);
 }
 </style>

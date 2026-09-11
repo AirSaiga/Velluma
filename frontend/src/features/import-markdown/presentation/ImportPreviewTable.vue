@@ -169,7 +169,7 @@ function handleImport() {
   border: 1px solid rgba(220, 38, 38, 0.2);
   border-radius: 0.375rem;
   font-size: 0.8125rem;
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .table-hint {
@@ -195,7 +195,7 @@ function handleImport() {
   padding: 0.5rem 0.625rem;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -261,7 +261,7 @@ function handleImport() {
 }
 
 .num-input.has-error {
-  border-color: #dc2626;
+  border-color: var(--danger);
   background: rgba(220, 38, 38, 0.05);
 }
 
@@ -314,7 +314,7 @@ function handleImport() {
 }
 
 .action-btn.danger:hover {
-  color: #dc2626;
+  color: var(--danger);
   background: rgba(220, 38, 38, 0.08);
 }
 

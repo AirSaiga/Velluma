@@ -61,7 +61,7 @@ function onPick(card: DirectionCard | null) {
               <span
                 v-if="card.from_encounter"
                 class="beat-dock__anchor-tag beat-dock__anchor-tag--map"
-                title="来自地图相遇机会——世界页同地角色的戏剧线索"
+                title="来自世界页地图：同在一处的角色，可能撞出戏"
               >🗺</span>
               <!-- 谋篇锚点小签（P1.4 M2 §3.3）：这条建议服务于作者的哪个锚点——可追溯 -->
               <span
@@ -72,7 +72,7 @@ function onPick(card: DirectionCard | null) {
               >⚑ {{ anchorText(card.serves_anchor) }}</span>
             </span>
             <span v-if="card.anchors?.length" class="beat-dock__anchors">
-              焦点：{{ card.anchors.join('、') }}
+              涉及：{{ card.anchors.join('、') }}
             </span>
           </span>
         </button>
@@ -86,7 +86,7 @@ function onPick(card: DirectionCard | null) {
           </span>
         </button>
 
-        <div class="beat-dock__hint">{{ beatCards.length + 1 }} 以内数字键选择 · Esc 关闭</div>
+        <div class="beat-dock__hint">按数字键选 · Esc 关闭</div>
       </div>
     </Transition>
   </Teleport>

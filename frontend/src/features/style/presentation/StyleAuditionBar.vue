@@ -111,7 +111,7 @@ function runAB() {
 }
 .bar-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -126,7 +126,6 @@ function runAB() {
   resize: vertical;
 }
 .bar-textarea:focus {
-  outline: none;
   border-color: var(--accent-400);
 }
 .bar-actions {
@@ -171,7 +170,7 @@ function runAB() {
   cursor: not-allowed;
 }
 .bar-cost {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .bar-results {
@@ -193,7 +192,7 @@ function runAB() {
 .pane-tag {
   display: block;
   margin-bottom: 0.375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .pane-styled .pane-tag {
@@ -206,7 +205,7 @@ function runAB() {
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
-@media (max-width: 640px) {
+@container stylepage (max-width: 48rem) {
   .bar-results {
     flex-direction: column;
   }

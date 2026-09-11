@@ -15,7 +15,7 @@
  *   payload 语义随类型而定，改类型等于换事件，应删除重建）
  */
 import { ref, computed, watch } from 'vue'
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import InlineCreate from './InlineCreate.vue'
 import { EVENT_TEMPLATES, getTemplate, EVENT_TYPE_COLOR } from '../engine/eventTemplates'
 import { parsePointFromNote, stripPointFromNote } from '../engine/eventPoint'

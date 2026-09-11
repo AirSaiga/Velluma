@@ -98,3 +98,48 @@ class TestPromptOnlyBanLayering:
         会把「回味」从句中抠掉打穿句子，词表必须分层。"""
         for w in ("一抹", "氤氲", "指腹", "眸子", "眸光", "回味", "顿了顿"):
             assert w not in DEFAULT_BAN_LIST.banned_words, f"{w} 混入代码删除层"
+
+
+class TestAntiPseudoSensoryBan:
+    """白描契约与假感官封杀令（2026-09-09 实测事故紧急植入）：
+
+    - stitch/continue 两模式注入（system 尾部高服从位）；
+    - burst/open/outline 不受染（各有专职，白描硬约束只圈句级续写）；
+    - 用户逐字拍板的封杀令原样在场（三类禁令 + 白描准则两组标题齐全）。
+    """
+
+    def _continue(self, mode: str = "stitch"):
+        sys_p, _ = build_continue_prompt(
+            fragment="他接过扳手。", rolling_prefix="工棚里很静。", mode=mode,
+        )
+        return sys_p
+
+    def test_stitch_and_continue_carry_the_ban(self):
+        for mode in ("stitch", "continue"):
+            sys_p = self._continue(mode)
+            assert "Anti-Pseudo-Sensory Ban" in sys_p, mode
+            assert "北方硬朗白描" in sys_p, mode
+            # 三类禁令的病灶语料原样在场（实测事故词）
+            for phrase in ("掌心发热/发烫", "震动顺着XX传进掌心", "眼里亮了一下又暗下去",
+                           "倒吸一口凉气", "喉结滚动", "嘴角勾起/扯动", "接错的线头"):
+                assert phrase in sys_p, f"{mode} 缺禁令语料「{phrase}」"
+
+    def test_burst_opening_outline_untouched(self):
+        from backend.services.prompts.adaptive_prompts import build_outline_expand_prompt
+        sys_b, _ = build_burst_prompt(fragment="他接过扳手。", rolling_prefix="前文。")
+        sys_o, _ = build_opening_prompt(outline_text="开头一两拍")
+        sys_e, _ = build_outline_expand_prompt(outline_note="速记", rolling_prefix="前文。")
+        for sys_p, name in ((sys_b, "burst"), (sys_o, "open"), (sys_e, "outline")):
+            assert "Anti-Pseudo-Sensory Ban" not in sys_p, name
+            assert "北方硬朗白描" not in sys_p, name
+
+    def test_ban_sits_at_system_tail(self):
+        """追加在 system 尾部（首尾高服从位）——文风块之后。"""
+        sys_p, _ = build_continue_prompt(
+            fragment="他接过扳手。", rolling_prefix="工棚里很静。", mode="stitch",
+            style_positive="句短，动词多",
+        )
+        # 尾部=白描块收尾（2026-09-11 追加注水禁令后，块尾从「靠拢。」
+        # 变为「宁短勿水。」——注入位不变：仍是 system 末位分节）
+        assert sys_p.rstrip().endswith("宁短勿水。")
+        assert "严禁逗号串联注水" in sys_p

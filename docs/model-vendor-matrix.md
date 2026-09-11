@@ -1,6 +1,6 @@
-# 模型厂商能力矩阵（2026-08-28 调研定稿）
+# 模型厂商能力矩阵（2026-08-28 调研定稿；2026-09-10 修订 DeepSeek 节）
 
-> 五家国内主流厂商 API 参数规范的全量调研记录，`backend/services/llm/vendor_profiles.py`（采样整形/模型规则）与 `reasoning_adapter.py`（思考方言）的唯一事实源。调研日期 2026-08-28，全部结论有官方文档出处；厂商协议随代际变化，**改这里必须同步改代码并跑 `test_vendor_profiles.py`**。
+> 五家国内主流厂商 API 参数规范的全量调研记录，`backend/services/llm/vendor_profiles.py`（采样整形/模型规则）与 `reasoning_adapter.py`（思考方言）的唯一事实源。初版调研日期 2026-08-28，2026-09-10 随 DeepSeek-V4.1 Flash 发布修订 DeepSeek 节；全部结论有官方文档出处；厂商协议随代际变化，**改这里必须同步改代码并跑 `test_vendor_profiles.py`**。
 >
 > 调研背景：kimi-k2.6 切换事故（采样参数 400 撞墙自适应）暴露「每换一次模型都可能踩一遍协议坑」。本矩阵把坑前置到一份档案里。
 
@@ -12,17 +12,17 @@
 4. **`max_tokens` 处于废弃进程中**（Kimi 已弃用→`max_completion_tokens`、Qwen 即将废弃），但五家 OpenAI 兼容层目前均容忍 `max_tokens`；维持发 `max_tokens`，只做记录。
 5. **上下文缓存全部隐式自动**（DeepSeek 硬盘缓存 / Kimi >256 token / Qwen >1024 token / GLM 前缀复用 / MiMo KVCache）——B6 稳定前缀纪律直接受益，无需客户端配置。
 
-## 一、DeepSeek（api.deepseek.com）
+## 一、DeepSeek（api.deepseek.com）（2026-09-10 修订）
 
 | 项 | 值 |
 |---|---|
 | base_url | `https://api.deepseek.com`（现行文档不带 `/v1`；旧 `/v1` 写法容忍） |
-| 模型 | `deepseek-v4-flash`（1M ctx/384K out）、`deepseek-v4-pro`、`deepseek-v4-flash-vision-exp`（实验）。**`deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 弃用**（曾分别映射 v4-flash 非思考/思考模式） |
-| 思考 | `thinking: {"type": enabled/disabled}`（同一模型双模）；`reasoning_effort`: low/high/**max**（默认 high；medium→high 映射）。默认**开** |
-| 采样 | temperature [0,2]（创意写作官方推荐 1.5）/ top_p ≤1；**思考模式下四参数（含双 penalty）全部静默无效** |
+| 模型 | **`deepseek-flash`（=V4.1 Flash，2026-09-10 发布，现行规范 id）**：原生多模态视觉；1M ctx/384K out；并发 2500。**`deepseek-v4-pro` 有序下线中：2026-09-14 12:00 起、V4.1 Pro 上线前，请求全部路由到 V4.1 Flash 并按 Flash 单价计费**（并发 500）。旧名 `deepseek-v4-flash`/`deepseek-v4-flash-vision-exp` 暂时路由到 V4.1 Flash；`deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 弃用 |
+| 思考 | `thinking: {"type": enabled/disabled}`（同一模型双模，默认**开**）；`reasoning_effort`: low/high/**max**（默认 high；映射 minimal→low / medium→high / xhigh→high / ultra→max）。另认 Anthropic 格式 `reasoning.effort`（none=关）与 Responses API `output_config.effort`——本应用走 OpenAI 兼容 `extra_body`，维持 thinking 格式 |
+| 采样 | temperature [0,2]（创意写作官方推荐 1.5）；**思考模式：temperature 与双 penalty 静默无效（设了不报错也不生效），top_p 生效但下限 0.95（低于自动抬升）**；**非思考模式：top_p 恒为 1.0、传入值被忽略** |
 | penalty | frequency/presence_penalty **已 DEPRECATED**（传了不生效）——一律不发 |
 | response_format | text / json_object（提示词须含 "json" 字样） |
-| 定价（元/M，峰/谷=2:1；高峰=工作日 9-12、14-18 点） | flash：命中 0.10/0.05，未命中 3.0/1.5，输出 9.0/4.5；pro：命中 0.30/0.15，未命中 9.0/4.5，输出 27.0/13.5 |
+| 定价（元/M，闲/峰=1:2；高峰=工作日 9-12、14-18 点；flash 价 2026-09-10 调整） | flash：命中 0.02/0.04，未命中 1/2，输出 4/8；pro（下线前现价）：命中 0.15/0.30，未命中 4.5/9.0，输出 13.5/27 |
 
 ## 二、智谱 GLM（open.bigmodel.cn）
 
@@ -76,13 +76,13 @@
 
 ## 六、对代码的三条直接指令
 
-1. **采样整形前置**（`vendor_profiles.shape_sampling_params`）：Kimi K 系全删采样参数；DeepSeek 删双 penalty（全模式）+ 删采样（思考态）；MiMo 删采样（思考态）；GLM 温度钳 ≤1.0 + 不发双 penalty；Qwen 温度 <2 / top_p ≤1 钳制。`client.py` 的 400 自适应缓存降级为最后防线（新厂商/档案过期兜底）。
+1. **采样整形前置**（`vendor_profiles.shape_sampling_params`）：Kimi K 系全删采样参数；DeepSeek 删双 penalty（全模式）+ 思考态删 temperature + 非思考态删 top_p（恒 1.0 忽略；思考态 top_p 生效、下限 0.95 由服务端抬升，原样透传）；MiMo 删采样（思考态）；GLM 温度钳 ≤1.0 + 不发双 penalty；Qwen 温度 <2 / top_p ≤1 钳制。`client.py` 的 400 自适应缓存降级为最后防线（新厂商/档案过期兜底）。
 2. **思考方言补全**（`reasoning_adapter`）：新增 GLM/KIMI 分支；强制思考模型（glm-5.3\*、kimi-k3、kimi-k2.7-code）收到「关闭」请求时**不发参数**（发 disabled 会 400/无效）；effort 枚举归一（medium→high 映射到只认 low/high/max 的厂商）。
 3. **前端厂商预设**（`/system/model-catalog`）：选厂商自动填 base_url + 模型候选清单 + 能力提示（采样锁定/强制思考/弃用警告），模型名保持可自由输入。
 
 ## 来源
 
-- DeepSeek：[api-docs.deepseek.com](https://api-docs.deepseek.com/quick_start/pricing)（pricing / thinking_mode / create-chat-completion / updates）
+- DeepSeek：[api-docs.deepseek.com](https://api-docs.deepseek.com/quick_start/pricing)（pricing / thinking_mode / create-chat-completion / updates；2026-09-10 修订依据 [更新日志](https://api-docs.deepseek.com/zh-cn/updates/) V4.1 Flash 发布条 + thinking_mode 指南）
 - GLM：[docs.bigmodel.cn](https://docs.bigmodel.cn/cn/guide/start/concept-param)（concept-param / 对话补全 API 参考 / thinking-mode / migrate-to-glm-new）+ [docs.z.ai 定价](https://docs.z.ai/guides/overview/pricing)
 - Kimi：[platform.kimi.com](https://platform.kimi.com/docs/api/chat)（chat / models-overview / use-thinking-models / pricing/chat-k26）
 - Qwen：[help.aliyun.com](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)（OpenAI 兼容 / deep-thinking / context-cache / model-pricing）

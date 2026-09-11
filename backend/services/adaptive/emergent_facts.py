@@ -89,8 +89,13 @@ async def extract_emergent_facts(
     beat_id: str,
     prev_state_summary: str = "",
     recorder: Optional[RunRecorder] = None,
+    stage: str = "loop3.emergent_facts",
 ) -> EmergentFacts:
     """从一段定稿正文抽取涌现实体（1× creative LLM）。
+
+    stage：记账标识（用量面板拆账用）——手动沉淀走默认 loop3.emergent_facts；
+    自动认人（read-entities）传 adaptive.read_entities，两条链路在
+    用量视图与自动阅读预算闸（read_budget._AUTO_STAGES）各自可见。
 
     失败时返回空 EmergentFacts（不抛异常）——不阻塞调用方主流程。
     """
@@ -109,7 +114,7 @@ async def extract_emergent_facts(
         text = _unwrap_llm_response(resp)
         # 观测钩子：调用方传 recorder 则记账（P0-2；纯观测非功能）
         if recorder is not None:
-            recorder.record_result("loop3.emergent_facts", resp, model_slot="creative")
+            recorder.record_result(stage, resp, model_slot="creative")
         parsed = _parse_json_safe(text) or {}
         # 类型校验——LLM 返回的列表字段可能是 str/dict/None
         def _safe_list(v):

@@ -30,6 +30,368 @@ from backend.services.utils.json_safe import parse_json_safe
 logger = logging.getLogger(__name__)
 
 
+# 流水线版本盐值（2026-09-08 僵尸缓存修复）：挂件缓存持久化在
+# WorldModelORM.layer3_projections（跨进程存活），而编排器签名只有文本/意图/
+# 在场维度——代码重构后历史章节文本未变即命中库里的旧零件。此后任何规则
+# 大改（槽位分类学/prompt 编译/在场制）递增本版本号，即可让库中陈旧
+# __dock__ 缓存全量安全失效（签名侧 + 读取侧双侧生效）。
+DOCK_PIPELINE_VERSION = "v2.1_onstage_20260908"
+
+# 意图衰老阈值（2026-09-09 时序冻结修复）：反推后正文推进超此字数未刷新
+# → dock 视意图为陈旧（intent_stale），不绑定旧意图副行
+INTENT_STALE_CHARS = 100
+
+
+# ============================================================
+# 在场宇宙投影（2026-09-08 红队「地面」——docs 溯源报告 R3）
+# ============================================================
+# dock 此前是五条生成路径里唯一不注入场景身份的：养料全池投喂（排序不裁剪），
+# 「水泥灰/脚手架」凭空道具有三条合法逃逸（氛围件豁免/上手件出处含全书养料
+# 池/模型不知道作者在哪）。本节为轻量消费侧投影——数据全部来自已加载的
+# bundle（world_state 推演快照 + 场景钉 + 段落提及），零新增查询、零 knowledge_
+# plane 全渲染（红队 R1 轻路径纪律：压缩投影 + 硬上限）。
+
+ONSTAGE_MAX_ENTITIES = 8
+ONSTAGE_MAX_PROPS = 6
+
+
+def _adapter_name(e) -> str:
+    """适配器/ORM/字典三态取名（world 桥适配器 / legacy 对象 / 快照 dict）。
+
+    ⚠ 角色适配器（WorldEntityAdapter）**没有顶层 .name**——名字挂在
+    ent.character.name 访问链（资产适配器才有顶层 .name）。2026-09-09 实测
+    事故：只读顶层致在册人物恒空（在册只剩场景行），AGENTS 2026-08-26
+    canon_watch 同款坑的复发（「勿再读顶层」）。口径对齐 settings_bundle.
+    _entity_name，顶层优先、character 链兜底（资产/混合形态零破坏）。
+    """
+    n = getattr(e, "name", "") or ""
+    if not n:
+        ch = getattr(e, "character", None)
+        if ch is not None:
+            n = getattr(ch, "name", "") or (ch.get("name", "") if isinstance(ch, dict) else "") or ""
+    if not n and isinstance(e, dict):
+        n = e.get("name", "") or ""
+    return str(n).strip()
+
+
+def _adapter_aliases(e) -> List[str]:
+    """别名三态读取（角色适配器的 aliases 同挂在 character 命名空间下）。"""
+    al = getattr(e, "aliases", None)
+    if al is None:
+        ch = getattr(e, "character", None)
+        al = getattr(ch, "aliases", None) if ch is not None else None
+    if al is None and isinstance(e, dict):
+        al = e.get("aliases")
+    return [str(a).strip() for a in (al or []) if str(a).strip()]
+
+
+def _adapter_private(e) -> bool:
+    """整人私有判定（A1 双轨：private 实体不进在册名单——其档案走 secrets 通道）。"""
+    we = getattr(e, "world_entity", None)
+    vis = getattr(we, "visibility", None) if we is not None else None
+    if vis is None:
+        vis = e.get("visibility") if isinstance(e, dict) else None
+    return (vis or "public") == "private"
+
+
+def _adapter_entity_id(e) -> str:
+    eid = getattr(e, "entity_id", "") or ""
+    if not eid:
+        we = getattr(e, "world_entity", None)
+        eid = getattr(we, "id", "") if we is not None else ""
+    if not eid and isinstance(e, dict):
+        eid = e.get("entity_id") or e.get("id") or ""
+    return str(eid or "")
+
+
+def _adapter_dyn(e) -> str:
+    """此刻状态行（适配器 character.dynamic_state；world 桥推演产物）。"""
+    ch = getattr(e, "character", None)
+    if ch is None and isinstance(e, dict):
+        ch = e.get("character")
+    dyn = getattr(ch, "dynamic_state", None)
+    if dyn is None and isinstance(ch, dict):
+        dyn = ch.get("dynamic_state")
+    return str(dyn or "").strip()
+
+
+def onstage_projection(bundle, scene_loc_id: str, recent_text: str):
+    """本场在册压缩投影（纯函数）——T3 白名单 + anchor_ref 坐标系的原料。
+
+    构成（红队 R3 三档物质性的 T3 界）：
+    - 人物 = 场景钉作用域（含祖先链）内存活（world_state 推演）∪ 当前段落提及
+      （名字或 ≥2 字别名命中）；私有实体不进册；
+    - 物件 = 当前段落提及的资产（世界 fold 不携带资产位置——提及即在场）；
+    - 场景行 = 钉定地点名 + intro 截 40 字（panorama 模板的定场质感来源）。
+
+    退化梯子（红队 R4）：legacy 书（world_sourced=False）恒 None；在册/场景行
+    全空 → None——onstage=None 时 prompt 走 legacy 形态（零变化契约）。
+    """
+    if not getattr(bundle, "world_sourced", False):
+        return None
+    recent = recent_text or ""
+    world_state = getattr(bundle, "world_state", None) or {}
+    char_states = {
+        str(cs.get("entity_id")): cs
+        for cs in (world_state.get("character_states") or [])
+        if isinstance(cs, dict)
+    }
+    scene_scope = set()
+    if scene_loc_id:
+        try:
+            from backend.services.world.location_tree import scene_scope_ids
+            scene_scope = scene_scope_ids(getattr(bundle, "locations", None) or [], str(scene_loc_id))
+        except Exception:
+            scene_scope = set()
+
+    def _mentioned(e) -> bool:
+        if not recent:
+            return False
+        n = _adapter_name(e)
+        if n and n in recent:
+            return True
+        return any(a in recent for a in _adapter_aliases(e) if len(a) >= 2)
+
+    entities: List[Dict] = []
+    off_chars: List[str] = []
+    for e in (getattr(bundle, "entities", None) or []):
+        name = _adapter_name(e)
+        if not name or _adapter_private(e):
+            continue
+        cs = char_states.get(_adapter_entity_id(e)) or {}
+        present = (
+            bool(scene_scope)
+            and bool(cs.get("alive", False))
+            and str(cs.get("location_id") or "") in scene_scope
+        )
+        if present or _mentioned(e):
+            if len(entities) < ONSTAGE_MAX_ENTITIES:
+                entities.append({"name": name, "state": _adapter_dyn(e)})
+        else:
+            off_chars.append(name)
+
+    props: List[Dict] = []
+    off_assets: List[str] = []
+    for a in (getattr(bundle, "assets", None) or []):
+        name = _adapter_name(a)
+        if not name or _adapter_private(a):
+            continue
+        if _mentioned(a):
+            if len(props) < ONSTAGE_MAX_PROPS:
+                desc = str(getattr(a, "static_description", "") or "").strip()
+                props.append({"name": name, "desc": desc})
+        else:
+            off_assets.append(name)
+
+    scene_line = ""
+    if scene_loc_id:
+        for loc in (getattr(bundle, "locations", None) or []):
+            if str(getattr(loc, "id", "") or "") == str(scene_loc_id):
+                intro = str(getattr(loc, "intro", "") or "").strip()
+                scene_line = _adapter_name(loc) + (f"——{intro[:40]}" if intro else "")
+                break
+
+    # 临时在场通行证（2026-09-09）：正文高频未建档人名（明姐类）入册——
+    # 标 is_guest，前端据此出「录入档案」入口；不占在册实体配额（附额 ≤2）
+    _known = (
+        {e["name"] for e in entities}
+        | set(off_chars)
+        | {p["name"] for p in props}
+        | set(off_assets)
+        | {_adapter_name(l) for l in (getattr(bundle, "locations", None) or [])}
+    )
+    for g in detect_guest_names(recent, _known):
+        entities.append({
+            "name": g,
+            "state": "正文高频出现 · 未建档（临时在场）",
+            "is_guest": True,
+        })
+
+    if not entities and not props and not scene_line:
+        return None
+    return {
+        "entities": entities,
+        "props": props,
+        "scene_line": scene_line,
+        "offstage_characters": off_chars,
+        "offstage_assets": off_assets,
+    }
+
+
+def presence_fingerprint(scene_loc_id, world_time) -> str:
+    """dock 缓存签名的低频在场键（红队 R2）：钉 id + 叙事锚时刻。
+
+    禁入 dynamic_state 全文（随沉淀抖动）与全章提及集（随他段打字高频失效）
+    ——cur_text_sig 已覆盖最高频维度（当前段前 100 字+长度），本键只补
+    「换景/换锚」两个人工节奏事件。纯函数；空值恒定（无钉书零失效增量）。
+    """
+    return f"{str(scene_loc_id or '-')}:{int(world_time or 0)}"
+
+
+# ---- 末句对白判定（2026-09-09 末句优先原则）----
+# 实测事故：段内夹杂回忆叙述把尾 300 字整窗的对话占比稀释到 0.2，段尾明明
+# 停在对白上却降级 default。末句优先：最后一个非空行**整行以开引号起、闭引号
+# 收** → 无条件 dialogue。名言引用（「他想起那句“人定胜天”」引号在句中）不
+# 满足「行首开引号」——中文小说的对白行惯例整行以引号起，这是天然鉴别位。
+_DIALOGUE_OPEN = ("“", "「", "『", "\"")
+_DIALOGUE_CLOSE = ("”", "」", "』", "\"")
+
+
+def ends_in_dialogue(text: str) -> bool:
+    """末句对白判定（末句优先原则）：最后一个非空行以开引号起、闭引号收。"""
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    if not lines:
+        return False
+    last = lines[-1]
+    return len(last) >= 2 and last[0] in _DIALOGUE_OPEN and last[-1] in _DIALOGUE_CLOSE
+
+
+# ---- 临时在场通行证（Guest Pass，2026-09-09 涌现角色闭环）----
+# 实测事故：「明姐」只活在正文里（世界页无此实体），在册/场外永远看不见她
+# ——分镜主体失明。此函数从当前段识别高频未建档人名：jieba NR 词性 或 中文
+# 称谓后缀模式（X姐/X哥/X叔/X婶/X爷/X嫂…），≥2 次出现，排除已知名与泛称。
+# 污染防线（红队 R4）：村子/路灯类普通名词不携 NR 词性也不称谓后缀，天然
+# 排除；泛称亲属词（姐姐/哥哥…）停用；≤2 名封顶；通行证只是 prompt 素材
+# （is_guest 标记 + 前端「录入档案」入口），不落库、不污染世界模型。
+_GUEST_MAX = 2
+_GUEST_MIN_FREQ = 2
+_ADDRESS_SUFFIXES = ("姐", "哥", "叔", "婶", "姨", "爷", "嫂", "嫂", "婆", "郎")
+_GUEST_STOPWORDS = {
+    "姐姐", "哥哥", "弟弟", "妹妹", "阿姨", "大叔", "奶奶", "爷爷",
+    "妈妈", "爸爸", "姑娘", "媳妇", "老人", "老头", "女人", "男人",
+}
+
+
+# 昵称前缀（阿X/小X/老X）：中文口语里最常见的人物指称变体——「阿尘啊」
+# 说的就是林尘，不是第三个人
+_NICK_PREFIXES = ("阿", "小", "老")
+
+
+def _is_alias_or_ambiguous(name: str, known_names) -> bool:
+    """别名与昵称归一化拦截（2026-09-11 排毒批「阿尘≠第三人」事故）。
+
+    候选人名若是已知人物的昵称/尊称变体 → True（不发通行证）：
+    - 阿X/小X/老X：核心字取**尾字**匹配（昵称取名字末字是中文惯例——
+      阿尘→尾字「尘」命中林尘）；三字形式（阿明轩）核心两字取包含匹配。
+    - X姐/X叔类尊称：剥后缀取前名，单字同样只配尾字（王叔→「王」命中
+      「工头老王」；不会错绑「王阿婆」——尾字是婆）。
+    **唯一命中才绑定；多命中=歧义（林尘/周尘并存时阿尘不知是谁）同样
+    抑制通行证**——发证必致实体分裂+虚假建档，静默压制的最坏结果只是
+    漏一枚芯片（作者仍可手动建档）；零命中返回 False（真·新人物照发，
+    明姐流程不受染——「明」不命中任何尾字）。纯函数。
+    """
+    known = [str(k) for k in (known_names or []) if k]
+    if not known or not name:
+        return False
+    core = None
+    if len(name) == 2 and name[0] in _NICK_PREFIXES:
+        core = name[1]
+    elif len(name) == 3 and name[0] in _NICK_PREFIXES:
+        core = name[1:]
+    elif 2 <= len(name) <= 3 and name[-1] in _ADDRESS_SUFFIXES:
+        core = name[:-1]
+    if not core:
+        return False
+    if len(core) == 1:
+        owners = [k for k in known if k.endswith(core)]
+    else:
+        owners = [k for k in known if core in k]
+    return len(owners) >= 1
+
+
+def detect_guest_names(recent_text: str, known_names) -> List[str]:
+    """正文高频未建档人名识别（临时在场通行证）。纯算法，jieba 缺失退空。"""
+    try:
+        import jieba.posseg as pseg
+    except Exception:
+        return []
+    # 词性/称谓只负责**提名**；频次用子串计数核验——jieba 会把同一名字切成
+    # 不同 token（实测第二处「明姐」被切成「明姐端」nr），token 频次对分词
+    # 漂移零免疫，text.count 稳定（污染防线不变：提名人形仍须过 NR/称谓闸）
+    candidates: List[str] = []
+    for w, flag in pseg.cut(recent_text or ""):
+        w = str(w).strip()
+        if not (2 <= len(w) <= 4):
+            continue
+        is_name = (flag == "nr") or (len(w) <= 3 and w[-1] in _ADDRESS_SUFFIXES)
+        if not is_name or w in _GUEST_STOPWORDS or w in set(known_names or []):
+            continue
+        # 别名归一拦截（2026-09-11）：昵称/尊称变体归入主实体或歧义压制，
+        # 不发独立通行证——「阿尘啊」不把林尘分裂成两个人
+        if _is_alias_or_ambiguous(w, known_names or []):
+            continue
+        if w not in candidates:
+            candidates.append(w)
+    text = recent_text or ""
+    guests = [n for n in candidates if text.count(n) >= _GUEST_MIN_FREQ]
+    guests.sort(key=lambda n: (-text.count(n), n))
+    return guests[:_GUEST_MAX]
+
+
+# 搏杀手势字（红队 R4 combat 判定；小而狠，勿堆叠——CAMERA_STOCK 同纪律）
+_COMBAT_GESTURE_CHARS = ("砸", "劈", "踹", "撞", "扑", "掀", "掐", "掷", "揪", "摔")
+# 入场手势（panorama 判定：初入新地的转场动作/视野词）
+_ENTRY_GESTURES = ("推门", "走进", "踏入", "踏进", "抵达", "穿过", "眼前", "映入")
+
+
+def pick_shot_template(recent_text: str, scene_line: str = "", suffix_anchor: str = "") -> str:
+    """情境分镜模板选择（红队 R4；纯算法 0 LLM，异常/不确定回落 default）。
+
+    优先序（2026-09-09 扩充）：**bridge（光标后有正文=中插桥接，位置事实最硬）
+    > dialogue·末句优先（末行整行以引号起收——无条件点燃，防前文叙述稀释）
+    > dialogue·占比（同一把尺子：对话占比>0.35，尾 300 字）> combat > panorama
+    > default**。bridge 不依赖在场制（骨架跳写是光标位置事实，legacy 书同样
+    受益）；其余场景模板仍仅在场制下分派（调用方纪律）。
+    """
+    try:
+        if str(suffix_anchor or "").strip():
+            return "bridge"
+        tail = (recent_text or "")[-300:]
+        if not tail.strip():
+            return "default"
+        if ends_in_dialogue(tail):
+            return "dialogue"   # 末句优先：叙述稀释救不了末行整行引号
+        from backend.services.style.scene_hint import SCENE_DIALOGUE, detect_scene_type
+        if detect_scene_type(tail) == SCENE_DIALOGUE:
+            return "dialogue"
+        if sum(tail.count(c) for c in _COMBAT_GESTURE_CHARS) >= 3:
+            return "combat"
+        if (
+            scene_line
+            and any(g in tail for g in _ENTRY_GESTURES)
+            and len(tail.strip()) <= 160
+        ):
+            return "panorama"
+        return "default"
+    except Exception:
+        return "default"
+
+
+# 上手动词族（T3 在场边界检的交互动词；与 prompt 上手件定义、ghost_guard
+# out_of_scene 动词框架同族——小而狠）
+_INTERACTION_VERBS = ("握", "拿", "放", "捡", "掏", "开", "抓", "拎", "举", "抄")
+
+
+def find_onstage_boundary_hits(text: str, universe_names, onstage_names, recent_text: str):
+    """T3 在场边界影子检（registry: dock-onstage-boundary，shadow 只落台账）。
+
+    判据 = 非在册实体/资产名（≥2 字）× 上手动词共现（挂件 8-16 字，共现窗天然
+    小于 ghost_guard 的 ±10 字口径）；正文已提及的名字豁免——作者自己写进来
+    的不算模型编造。返回 [(name, verb)]。
+    """
+    hits: List[tuple] = []
+    onstage = set(onstage_names or [])
+    for name in (universe_names or []):
+        if not name or len(name) < 2 or name in onstage or name in (recent_text or ""):
+            continue
+        if name in text:
+            for v in _INTERACTION_VERBS:
+                if v in text:
+                    hits.append((name, v))
+                    break
+    return hits
+
+
 async def _spine_intent(chapter_id: str, db) -> str:
     """章级谋篇意图一行（P1.4 M2；chapters 主键单行取，开销可忽略）。
 
@@ -104,9 +466,45 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             DOCK_INTENT_MIN_CONFIDENCE,
         )
         _intent = model_snapshot.get("intent") or {}
-        if (_intent.get("source") == "inferred"
-                and float(_intent.get("confidence") or 0) >= DOCK_INTENT_MIN_CONFIDENCE):
-            intent_guess = str(_intent.get("next_direction") or "").strip()
+        if _intent.get("source") == "inferred":
+            # 意图衰老闸（2026-09-09 时序冻结修复）：反推后正文推进超 100 字
+            # 未刷新 → 陈旧，不强行绑定旧意图（实测：跨场景 11 分钟，旧「往
+            # 明姐家走」端给了室内场景）。word_count 来自心跳实时上报。
+            _wc = kw.get("word_count")
+            _pc = _intent.get("prose_chars")
+            stale = (
+                isinstance(_wc, int) and isinstance(_pc, int)
+                and _wc - _pc > INTENT_STALE_CHARS
+            )
+            if not stale and float(_intent.get("confidence") or 0) >= DOCK_INTENT_MIN_CONFIDENCE:
+                intent_guess = str(_intent.get("next_direction") or "").strip()
+
+    # ---- 在场宇宙投影 + 情境模板（2026-09-08 红队「地面+重力场」）----
+    # 场景钉来自 Chapter 行单主键取（与 _spine_intent 同款开销结论：可忽略）；
+    # db 不可用（测试 None）时静默空钉——投影退化为纯提及制，梯子不塌。
+    scene_loc_id = ""
+    try:
+        from backend.models import Chapter as _Chapter
+        _ch = await db.get(_Chapter, chapter_id)
+        if _ch is not None:
+            scene_loc_id = str(getattr(_ch, "scene_location_id", "") or "")
+    except Exception:
+        scene_loc_id = ""
+    # 中插桥接锚（2026-09-09 FIM）：光标停在上下文之间时前端透传的后文 1-2 句
+    suffix_anchor = str(kw.get("suffix_anchor") or "").strip()[:120]
+    # 桥接供给切断（同 build_dock_generator_prompt 的 is_bridge 口径）：意图
+    # 猜测以全文为坐标系推导，桥接态=后文剧透——prompt 猜测块与 toward_beat
+    # 的 note 拼装兜底一并断供（实测：猜测端给的全是文末饭桌场景）
+    if suffix_anchor:
+        intent_guess = ""
+    onstage = onstage_projection(bundle, scene_loc_id, recent_text)
+    # bridge 是光标位置事实，不依赖在场制——legacy 书（onstage None）同样分派
+    if suffix_anchor:
+        template = "bridge"
+    elif onstage is not None:
+        template = pick_shot_template(recent_text, (onstage or {}).get("scene_line", ""))
+    else:
+        template = "default"
 
     sys_p, usr_p = build_dock_generator_prompt(
         recent_text, projections, nutrients, hard,
@@ -117,6 +515,9 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         spine_intent=await _spine_intent(chapter_id, db),
         outline_nearby=outline_nearby,
         intent_guess=intent_guess,
+        onstage=onstage,
+        template=template,
+        suffix_anchor=suffix_anchor,
     )
 
     try:
@@ -149,6 +550,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             # 二期 shadow 双跑（只落台账不丢件）：语义抢拍 / ≥3 字面收紧候选
             "beat_rush_semantic": "dock-beat-rush-semantic",
             "beat_overlap_n3": "dock-beat-overlap",
+            # T3 在场边界（2026-09-08 红队「地面」）：shadow 出生只落台账
+            "onstage_violation": "dock-onstage-boundary",
+            # 桥接撞车（2026-09-09 FIM）：live 丢件——下文事实是禁区
+            "suffix_overlap": "dock-bridge-overlap",
         }
 
         def _on_drop(reason: str, text: str = "", outcome: str = "drop") -> None:
@@ -175,6 +580,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             projections=projections,
             check_beat_overlap=True,
             on_drop=_on_drop,
+            onstage=onstage,
+            suffix_anchor=suffix_anchor,
         )
 
         # ---- 抢拍 shadow 双跑（约束治理二期，2026-09-02）：只落台账不丢件——
@@ -202,6 +609,37 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         except Exception:
             pass  # shadow 埋点绝不阻塞校对环
 
+        # ---- T3 在场边界影子检（2026-09-08 红队「地面」；shadow 只落台账不丢件）----
+        # 非在册实体/资产名 × 上手动词共现 → 越界疑点进约束台账攒精确率
+        # （FP<10% 且语料对拍全对才转 live 丢件——registry 生命周期纪律）。
+        try:
+            if onstage is not None and valid_parts:
+                _onstage_names = (
+                    [e["name"] for e in onstage.get("entities") or []]
+                    + [p["name"] for p in onstage.get("props") or []]
+                )
+                _universe = [
+                    n for n in (
+                        _adapter_name(e)
+                        for e in (getattr(bundle, "entities", None) or [])
+                        if not _adapter_private(e)
+                    ) if n
+                ] + [
+                    n for n in (
+                        _adapter_name(a)
+                        for a in (getattr(bundle, "assets", None) or [])
+                        if not _adapter_private(a)
+                    ) if n
+                ]
+                for _p in valid_parts:
+                    _pt = str(_p.get("text") or "")
+                    for _name, _verb in find_onstage_boundary_hits(
+                        _pt, _universe, _onstage_names, recent_text,
+                    ):
+                        _on_drop("onstage_violation", _pt, outcome="hit")
+        except Exception:
+            pass  # shadow 埋点绝不阻塞校对环
+
         # 挂件产出缓存到世界模型（前端 heartbeat 响应里取）
         from backend.services.adaptive.world_model import WorldModelRepository
         repo = WorldModelRepository(db)
@@ -211,7 +649,11 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         # 临时缓存挂件（写到一个临时字段供心跳读取——复用 layer3 的 metadata 思路）
         # 这里直接通过 db session 写一个内存 dict 给路由层取（路由层会重新拉一次）
         # 实际上前端拿挂件是通过 heartbeat 响应，我们把挂件存进 ORM 的临时字段
-        await _cache_dock_parts(db, chapter_id, valid_parts)
+        _guest_names = [
+            e["name"] for e in (onstage or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("is_guest")
+        ]
+        await _cache_dock_parts(db, chapter_id, valid_parts, guests=_guest_names)
 
         return {"count": len(valid_parts)}
     except Exception as e:
@@ -230,8 +672,12 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 #   ambient     氛围：无叙事包袱（note 留白——留白本身是信息）
 # note 一律后端拼装不经 LLM（mimo 服从度教训：模型自由创作出处=编造风险）；
 # 槽位拿不到出处文本就降级 ambient（标签必须承载真实出处，否则不标）。
-SOURCE_PRIORITY = {"landing": 0, "toward_beat": 1, "echo": 2, "ambient": 3}
-_SLOTS = ("landing", "toward_beat", "echo", "ambient")
+# 对白模板新增槽位（2026-09-08 红队 R4 分镜组）：reply=受话人接话微前兆
+# （固定 note，无出处义务——锚的是对白本身）；prop=在场道具/人物特写
+# （anchor_ref 指认在册序号，后端回查拼 note——echo_ref 同一防御哲学）。
+# 前端 Phase 1 零改动：未知槽位值运行时自然降级（排序沉底/符号空/note 兜底）。
+SOURCE_PRIORITY = {"landing": 0, "toward_beat": 1, "reply": 1, "echo": 2, "prop": 2, "ambient": 3}
+_SLOTS = ("landing", "toward_beat", "reply", "echo", "prop", "ambient")
 
 
 def _normalize_slot(p: Dict) -> str:
@@ -258,23 +704,39 @@ def _clean_echo_note(raw: str) -> str:
 
 
 def _assemble_note(slot: str, p: Dict, outline_nearby, reader_expectations, memory_echoes,
-                   intent_guess: str = "") -> str:
+                   intent_guess: str = "", onstage: Dict = None) -> str:
     """按槽位拼装后果短语（后端权威，模型不经手出处文本）。
 
     文案纪律（2026-08-29 二轮）：副行必须回答「选它之后那一百字会写成什么」
     ——来历词（呼应/出处）只作谓语，不单独成句。
     意图入舱（2026-09-03）：无大纲节拍时 toward_beat 由方向猜测供料，
     note 如实标注「AI 猜的方向」——标签必须承载真实出处，猜测不伪装成大纲。
+    分镜组（2026-09-08 红队 R4）：reply 固定 note（锚对白本身，无出处义务）；
+    prop 由 anchor_ref 回查在册名单拼 note——指认失败即降级 ambient（勿谎标）。
     """
     if slot == "landing":
         return "接着刚才那句往下写"
+    if slot == "reply":
+        return "受话人先接住那句话"
+    if slot == "prop":
+        anchors = list((onstage or {}).get("entities") or []) + list((onstage or {}).get("props") or [])
+        try:
+            ref = int(p.get("anchor_ref") or 0)
+        except (TypeError, ValueError):
+            ref = 0
+        if 1 <= ref <= len(anchors):
+            return f"镜头对准「{anchors[ref - 1].get('name')}」"
+        return ""
     if slot == "toward_beat":
         beats = [str(b).strip() for b in (outline_nearby or []) if b and str(b).strip()]
         if beats:
             return f"往「{beats[0][:10]}」那拍走的第一步"
         guess = (intent_guess or "").strip()
         if guess:
-            return f"往「{guess[:10]}」那个方向试试（AI 猜的）"
+            # 优雅截断（2026-09-09 修复）：旧 guess[:10] 硬切曾断在「往明|姐家」
+            # 人名中间读作乱码——改为 12 字窗内向句读/助词回退，仍超长补省略号
+            cut = guess[:12].rstrip("，。、；：的着了在向往和去把被")
+            return f"往「{cut}{'…' if len(guess) > len(cut) else ''}」那个方向试试（AI 猜的）"
         return ""
     if slot == "echo":
         try:
@@ -312,6 +774,8 @@ def _finalize_parts(
     projections=None,
     check_beat_overlap: bool = False,
     on_drop=None,
+    onstage: Dict = None,
+    suffix_anchor: str = "",
 ) -> List[Dict]:
     """校对 + 槽位规整 + note 拼装 + 槽位序排序（landing 首位）。
 
@@ -363,6 +827,11 @@ def _finalize_parts(
         if check_beat_overlap and _beats_overlap_hit(text, outline_nearby):
             _drop("beat_overlap", text)
             continue
+        # 桥接撞车闸（2026-09-09 FIM 红队 R2）：机位文本与后文锚 ≥4 字连续重叠
+        # = 提前消耗下文已写的事实 → 丢件（后文防线，判据与 beat_overlap 同族）
+        if suffix_anchor and _beats_overlap_hit(text, [suffix_anchor]):
+            _drop("suffix_overlap", text)
+            continue
         kind = p.get("type", "action")
         # direction 校验：必须是 5 方向之一，否则回退到"环境"（分析面元数据，
         # 前端已不渲染——2026-08-29 不知所云重构：退役字段不再上屏）
@@ -371,9 +840,9 @@ def _finalize_parts(
             direction = "环境"
         slot = _normalize_slot(p)
         note = _assemble_note(slot, p, outline_nearby, reader_expectations, memory_echoes,
-                              intent_guess=intent_guess)
-        # 槽位拿不到出处 → 降级 ambient（留白而非谎标）
-        if slot in ("toward_beat", "echo") and not note:
+                              intent_guess=intent_guess, onstage=onstage)
+        # 槽位拿不到出处 → 降级 ambient（留白而非谎标）；prop 指认失败同判
+        if slot in ("toward_beat", "echo", "prop") and not note:
             slot = "ambient"
             note = ""
         # 截断到 16 字（prompt 允许 8-14 字，留余量防超长产出被生生截断）
@@ -529,11 +998,13 @@ def _violates(text: str, hard: Dict) -> bool:
     return False
 
 
-async def _cache_dock_parts(db, chapter_id: str, parts: List[Dict]):
+async def _cache_dock_parts(db, chapter_id: str, parts: List[Dict], guests: List[str] = None):
     """把挂件缓存到世界模型（存 layer3_projections 的伴生字段）。
 
     由于 WorldModelORM 没有专门的 dock_parts 字段，复用 layer3_projections
     的最后一项作为缓存载体（带 __dock__ 标记，前端/路由据此识别）。
+    guests（2026-09-09 临时通行证）：在册里的 is_guest 名单随件缓存——路由侧
+    提取进心跳响应 onstage_guests，前端出「录入档案」直达入口。
     """
     from sqlalchemy import select
     from backend.models import WorldModelORM
@@ -541,9 +1012,14 @@ async def _cache_dock_parts(db, chapter_id: str, parts: List[Dict]):
     model = result.scalar_one_or_none()
     if model is None:
         return
-    # 挂件缓存放进 layer3_projections 末尾的特殊项
+    # 挂件缓存放进 layer3_projections 末尾的特殊项（带流水线版本章——读取侧
+    # _extract_dock_parts 据此过滤陈旧版本，签名侧 orchestrator 同源比对）
     projections = list(model.layer3_projections or [])
     # 移除旧 dock 缓存
     projections = [p for p in projections if not (isinstance(p, dict) and p.get("__dock__"))]
-    projections.append({"__dock__": True, "parts": parts, "ts": __import__("time").time()})
+    projections.append({
+        "__dock__": True, "parts": parts, "ver": DOCK_PIPELINE_VERSION,
+        "guests": list(guests or []),
+        "ts": __import__("time").time(),
+    })
     model.layer3_projections = projections

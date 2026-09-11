@@ -18,8 +18,10 @@ adaptive 端点的成本核算与 trace（roadmap P0-2，2026-08-18）。
   task 均生效；事件按 ts 追加，跨多次写作会话共存于同文件。
 
 stage 命名：adaptive.<component>[.<detail>]（intent_inference /
-future_projection / dock_generator / post_process.critique /
-event_scout.{settle|finish} / stitch_ghost[.compress]）。
+future_projection / dock_generator / canon_watch / post_process.critique /
+event_scout.{settle|finish|auto_read} / read_entities /
+stitch_ghost[.compress|.repair] / spine_suggest[.retry]）。
+用量面板的 stage→标签/链路分组唯一权威在 routes/chapter_generation/usage.py。
 """
 from __future__ import annotations
 

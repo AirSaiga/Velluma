@@ -17,7 +17,7 @@
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
 
@@ -350,6 +350,14 @@ def render_system_blocks_with_usage(
         ("spatial", by_key.get("spatial", "")),
         ("style_positive", by_key.get("style_positive", "")),
         ("author_samples", by_key.get("author_samples", "")),
+        # 白描契约与假感官封杀令（2026-09-09 实测事故）：stitch/continue 专属
+        # 末位分节（首尾高服从位；burst/open/outline 各有专职不受染，空串块
+        # 拼接零变化——预览/试衣间同源不变量由此自动保持）。前导空行=块间距
+        # 约定（样本块裸收尾，无前导空行会让两节直接粘连、试衣间的 \n\n#
+        # 块边界提取失位）
+        ("anti_pseudo_sensory", (
+            "\n\n# 白描契约与假感官封杀令（最高优先级）\n" + _ANTI_PSEUDO_SENSORY_BLOCK
+        ) if mode in ("stitch", "continue") else ""),
     ]
     if not entities_text:
         # 专名兜底位：无知识平面实体块时维持旧序位置（entities 后、canon 前）
@@ -428,6 +436,81 @@ def _recency_pin_line(recency_pin: str) -> str:
     return f"\n{recency_pin}" if recency_pin else ""
 
 
+# ============================================================
+# 单焦距主体守恒律（第二冲程 2026-09-09：极速单镜头展开的视点锁）
+# ============================================================
+# 作者点选分镜后的微缝合是「放大一瞬」而非「推进剧情」——依点选槽位注入
+# 互斥的视点锁，防止 50 字微镜头被模型写成「镜头+人物动作+下一拍」的混合体。
+# 措辞纪律：禁令用「不写/不出」（对齐 dock 剂量 lint 的克制精神）；锁相机
+# 不锁情绪——物镜锁明写「情绪不走人物走物件」，防说明文化。
+
+SUBJECT_LOCK_PROP = "prop"        # 物镜锁：prop/ambient → 只写器物/环境自身感官
+SUBJECT_LOCK_SPEAKER = "speaker"  # 发话锁：landing/speaker → 焦点钉在发话者单人
+SUBJECT_LOCK_REPLY = "reply"      # 静音锁：reply → 只写受话者开腔前的缓冲
+
+_SUBJECT_LOCK_TEXTS = {
+    SUBJECT_LOCK_PROP: """# 单焦距·物镜锁（本笔只写器物/环境自身的物理感官）
+- 镜头钉死在选中的器物或环境上：写它的形、色、声、温度、动静变化，写透即止
+- 不写任何人物的动作、视线、台词——人此刻只是这枚镜头的缺席者
+- 情绪不走人物走物件：让此刻的气氛落在物件的细节变化上（震颤的频率、油污的反光、灯光的明暗）——镜头是静的，落在什么上由情境决定
+- 不推进到下一拍剧情；这一笔只是被放大的一瞬""",
+    SUBJECT_LOCK_SPEAKER: """# 单焦距·发话锁（本笔只写发话者单人）
+- 焦点钉死在发话者一人身上：他的生理反应与神态——喉音、呼吸、手指、眼神的落点
+- 其他人此刻不出场、不插话、不做任何实质反应——他们要等下一笔
+- 可以写他说出口的话的余势（尾音、停顿、重复半个词），不替他说下一句
+- 不推进到下一拍剧情，不替任何人接话""",
+    SUBJECT_LOCK_REPLY: """# 单焦距·静音锁（本笔只写受话者开腔前的缓冲）
+- 只写受话者开口之前的身体停顿与微表情：呼吸变了、手指蜷了一下、抬眼又垂下
+- 处于绝对静音期：不出任何回应台词——开口是作者的下一笔
+- 不推进到下一拍剧情，不替他组织好要说的内容""",
+}
+
+
+def pick_subject_lock(picked_slots: Optional[List[str]]) -> str:
+    """依点选槽位选定视点锁（互斥，纯函数）。
+
+    优先序 物镜 > 静音 > 发话：多枚同缝时最独特的相机契约优先（物镜锁的
+    「零人物」契约一旦混入人物动作即失效；发话锁与静音锁是人物焦点的两种
+    相位，最后兜底）。toward_beat/echo/custom/空 → 不锁（默认缝合契约，
+    逐字节零变化）。
+    """
+    slots = {str(s or "").strip() for s in (picked_slots or [])}
+    if slots & {"prop", "ambient"}:
+        return SUBJECT_LOCK_PROP
+    if "reply" in slots:
+        return SUBJECT_LOCK_REPLY
+    if slots & {"landing", "speaker"}:
+        return SUBJECT_LOCK_SPEAKER
+    return ""
+
+
+# ============================================================
+# 白描契约与假感官封杀令（2026-09-09 实测事故紧急植入，用户逐字拍板）
+# ============================================================
+# 病灶语料（通用模型 trace）：「掌心发烫」「震动顺着XX传进掌心」「眼里亮了
+# 一下随即暗下去」——神经敏感式生理微知觉 + AI 模式化情绪开关，严重破坏
+# 小说质感。注入位=render_system_blocks 的 mode 门控末位分节（stitch/
+# continue 专属；burst/open/outline 各有专职不受染）。与 08-27「负面禁令
+# 少而狠」导师结论的张力已申报——本块系实测事故后的用户逐字拍板，最高
+# 优先级偏置；词级执法另由负面清单四源+洗层兜底，prompt 只是第一层防线。
+_ANTI_PSEUDO_SENSORY_BLOCK = """
+【绝对禁止：假感官堆砌与生理微知觉（Anti-Pseudo-Sensory Ban）】
+1. 严禁描写微观生理知觉与伪通感：
+   - 严禁出现："掌心发热/发烫"、"震动顺着XX传进掌心"、"指尖微凉/微颤"、"倒吸一口凉气"、"喉结滚动"、"呼吸一滞/一沉"等神经敏感式生理反应。
+2. 严禁套用AI模式化情绪开关：
+   - 严禁使用："眼里亮了一下又暗下去"、"眼中闪过一丝XX"、"下意识地藏/缩"、"嘴角勾起/扯动"等廉价微表情。
+3. 严禁擅自脑补事故与台词抢跑：
+   - 严禁擅自判定作者写完的动作是"失误/做错的"（如作者写接线成功，严禁脑补"那根接错的线头"）；
+   - 严禁擅自帮在场角色喊出"成了！"或展开下一段剧情争议。
+
+【语言风格准则：北方硬朗白描（Narrative Economy）】
+1. 动词驱动，叙事经济：多用硬朗的动作动词，交代物理事实即可（如"把手在裤腿上蹭了蹭"、"侧耳听机器转动"），少用形容词与副词；
+2. 留白克制，拒绝作文腔：写动作就写动作，写器物就写器物，坚决剔除小学生作文式的通感抒情，语言质感向现实派短句靠拢。
+
+【严禁逗号串联注水】：拒绝为了凑字数使用多个逗号串联同义从句。允许 25~35 字的短促利落单句，交代清楚动作或画面后立即使用句号收尾，宁短勿水。
+"""
+
+
 def build_continue_prompt(
     fragment: str,
     rolling_prefix: str,
@@ -452,6 +535,9 @@ def build_continue_prompt(
     recency_pin: str = "",
     contract: str = "motion",
     intent_source: str = "",
+    subject_lock: str = "",
+    suffix_anchor: str = "",
+    picked_slots: Optional[List[str]] = None,
 ) -> tuple:
     """构建续写/缝合 prompt。
 
@@ -473,6 +559,13 @@ def build_continue_prompt(
         intent_source: 意图来源分档（2026-09-03 线 A）：outline/request=作者
             材料（目的地框，默认零变化）/ inferred=AI 反推的下一步方向（亮明
             「AI 猜的」身份，措辞降级为柔性参照）/ baton=章首接力棒（承接框）
+        subject_lock: 单焦距主体守恒律（第二冲程 2026-09-09，pick_subject_lock
+            产出）：物镜/发话/静音三锁互斥注入；空=零变化
+        suffix_anchor: 中插桥接后文锚（2026-09-09 FIM）：光标后紧邻 1-2 句已写
+            正文——非空注入双端边界块（上文起点/下文落点）与桥接铁律
+        picked_slots: 零件槽位（与 picked_parts 同序）：含 'custom' 时注入
+            「素材指令」规则——自定义镜头是作者给的素材不是成品文本，须用
+            模型自己的句子重写（实测事故：成句自定义被原样吞进幽灵）
 
     Returns:
         (system_prompt, user_prompt)
@@ -520,12 +613,54 @@ def build_continue_prompt(
             f"\n# 几步之后的目的地（只作方向参照：现在不写它本身——它的场面、事件与"
             f"对白都留给几步之后，此刻只写通往它路上的画面）\n{chapter_intent}"
         )
+    # 桥接铁律（FIM）：双端闭环——写完过渡即止，末句引向下文首句门口。
+    # 主角一侧正向约束（2026-09-09 抢场事故）：旧版只说「不写什么」（下文禁
+    # 区），模型面对空档最顺手的填充是把后文的登场反应提前演了（实测：幽灵
+    # 「明姐迎上来攥着湿抹布」vs 后文「明姐端过来脸盆」——同叙事槽位换道具
+    # 演两遍，字面闸零重合拦不住）——正向给出「写什么」：过渡留在主角身上。
+    _has_suffix = bool(str(suffix_anchor or "").strip())
+    bridge_rule = ""
+    if _has_suffix:
+        bridge_rule = (
+            "\n桥接铁律（本笔是上下文之间的过渡）：\n"
+            "- 过渡镜头留在主角一侧——他的换鞋、放包、解外套、闻到的饭香、搓手松肩；"
+            "后文首句写谁登场、端来什么、说什么，那就是下文的——其他人物此刻不出场、不抢戏；"
+            "\n"
+            "- 末句把画面引到下文首句的门口即止，不跨进去；下文里已写的动作、物件、台词"
+            "一概不提前出现（换个道具演同一件事也算提前消耗），写完过渡即止。"
+            "\n"
+        )
     prev_line = _prev_summary_line(previous_summary)
     pin_line = _recency_pin_line(recency_pin)
     # 双轨契约：质感档把「每句必须推进」换成「停在当下细写」（其余戒律不动）
     advance_rule = _RULE_TEXTURE if contract == "texture" else _RULE_NEW_INFO
 
+    # 中插桥接双端边界（2026-09-09 FIM）：光标停在上下文之间——注入下文锚
+    # 与桥接铁律（上文起点=作者原句块天然承担）；空=逐字节零变化
+    suffix_block = ""
+    if str(suffix_anchor or "").strip():
+        _suffix = str(suffix_anchor).strip()[:120]
+        suffix_block = (
+            f"\n# 下文已写（你只补它与上文之间的过渡，下文里的事一概不许提前消耗）\n{_suffix}\n"
+        )
+
+    # 自定义镜头素材指令（2026-09-09 逐字回声事故）：作者的自定义输入常是
+    # 成句散文，模型会原样吞进幽灵（+句号）——明确它是素材不是成品文本。
+    # 仅 custom 槽位注入；空/无 custom=逐字节零变化
+    custom_rule = (
+        "\n自定义镜头是素材指令，不是成品文本：用你自己的句子把这个画面写进正文"
+        "（句式与节奏按正文此刻的文风重新组织），不逐字照抄它的原文。\n"
+        if (picked_slots or []) and "custom" in [str(x) for x in picked_slots]
+        else ""
+    )
+
     if mode == "stitch":
+        # 视点锁注入（第二冲程）：三锁文本在零件块之后、指令区之前——
+        # 相机契约紧贴零件出现，模型把它读作「这枚零件的拍法」；空=逐字节零变化
+        lock_block = (
+            f"\n{_SUBJECT_LOCK_TEXTS[subject_lock]}\n"
+            if subject_lock in _SUBJECT_LOCK_TEXTS else ""
+        )
         # 追加式契约（2026-08-26 实测修复）：幽灵纯追加在作者原句之后，
         # 原句已在画布里——旧契约「原句一字不改保留在片段中」会致屏幕复读。
         user_prompt = f"""# 上文衔接（保持连续，不重复）
@@ -533,12 +668,12 @@ def build_continue_prompt(
 {intent_line}
 
 # 作者原句（已在你身后的画布里——绝不重复它，从它的断点直接往下写）
-{fragment}
+{fragment}{suffix_block}
 
 # 选定镜头零件（必须落地为画面）
 {parts_str}
-
-请只输出续写部分：从作者原句的断点顺势接下去（原句停在半句就先自然补完这一句，从断点最后一个词的后面直接续，不要重说断点附近的词），把零件落地为具体画面。零件是画面灵感，作者正文的事实最高优先——零件与正文此刻的场景/时间明显矛盾时（如物件此刻并不在手边），改造零件贴合当下场景，改造不了就舍弃它，绝不硬塞。禁止以任何形式重复原句（原文复读、换说法复述都不行）。
+{lock_block}{custom_rule}
+请只输出续写部分：从作者原句的断点顺势接下去（原句停在半句就先自然补完这一句，从断点最后一个词的后面直接续，不要重说断点附近的词），把零件落地为具体画面。{bridge_rule}零件是画面灵感，作者正文的事实最高优先——零件与正文此刻的场景/时间明显矛盾时（如物件此刻并不在手边），改造零件贴合当下场景，改造不了就舍弃它，绝不硬塞。禁止以任何形式重复原句（原文复读、换说法复述都不行）。
 {advance_rule}
 {_RULE_ENDING}
 控制在 {target_chars} 字以内。只输出正文，不要标题、不要解释。{pin_line}"""
@@ -1153,7 +1288,13 @@ def build_future_projection_prompt(
 # test_scene_anchoring_prompts.py（对拼装产物断言——原常量断言已重写）。
 
 def _dock_system_sections() -> List:
-    """dock system prompt 的分节定义（when 谓词消费 ctx.has_nearby）。"""
+    """dock system prompt 的分节定义（when 谓词消费 ctx.has_nearby / template）。
+
+    在场制分节（2026-09-08 红队「地面+重力场」重构）：ctx.has_onstage 时启用
+    三档物质性（T1 自然力/T2 派生质感须指源/T3 上手物白名单）与情境模板
+    （dialogue/combat/panorama）分节；legacy 形态（无 onstage）分节集合与
+    拼装顺序逐字节等同旧实现——零变化契约。
+    """
     from backend.services.constraints.prompt_sections import PromptSection
 
     def _has_nearby(ctx: Dict) -> bool:
@@ -1166,6 +1307,31 @@ def _dock_system_sections() -> List:
         # 意图入舱（2026-09-03）：无大纲就近节拍、但有意图反推的方向猜测时，
         # toward_beat 槽位改由猜测供料（猜想的「目的地」取代作者大纲节拍）
         return not bool(ctx.get("has_nearby")) and bool(ctx.get("has_guess"))
+
+    def _onstage(ctx: Dict) -> bool:
+        return bool(ctx.get("has_onstage"))
+
+    def _no_onstage(ctx: Dict) -> bool:
+        return not bool(ctx.get("has_onstage"))
+
+    def _default_tpl(ctx: Dict) -> bool:
+        # 模板只在在场制下分派（build 侧归一：无 onstage 强制 default）——
+        # dialogue/combat/panorama 模板自带槽位取向，toward_beat 子句退位
+        return ctx.get("template") == "default"
+
+    def _dialogue(ctx: Dict) -> bool:
+        return ctx.get("template") == "dialogue"
+
+    def _combat(ctx: Dict) -> bool:
+        return ctx.get("template") == "combat"
+
+    def _panorama(ctx: Dict) -> bool:
+        return ctx.get("template") == "panorama"
+
+    def _bridge(ctx: Dict) -> bool:
+        # 中插桥接（2026-09-09 FIM）：光标停在上下文之间——位置事实最硬，
+        # 优先于一切场景模板，且不依赖在场制（legacy 书同样分派）
+        return ctx.get("template") == "bridge"
 
     return [
         PromptSection(key="role", text="""你是一个物理镜头碎片生成器。基于作者当前段落、本章推测方向和设定养料，生成镜头特写挂件。
@@ -1185,17 +1351,51 @@ def _dock_system_sections() -> List:
 """),
         PromptSection(
             key="slot-toward-beat",
-            when=_has_nearby,
+            when=lambda ctx: _has_nearby(ctx) and _default_tpl(ctx),
             text="""- slot=toward_beat【通往节拍】（出 1 枚）：通往「作者大纲·就近节拍」那拍的**第一步**过渡画面，不是节拍本身的画面
 """),
         PromptSection(
             key="slot-toward-guess",
-            when=_has_guess_only,
+            when=lambda ctx: _has_guess_only(ctx) and _default_tpl(ctx),
             text="""- slot=toward_beat【通往方向】（出 1 枚）：通往「本章方向猜测」那一步的过渡画面——方向是 AI 从正文猜的（作者没写大纲），只取方向感，不编造猜测里没有的情节事件
 """),
-        PromptSection(key="slot-echo-ambient", text="""- slot=echo【呼应】（至多 1 枚）：呼应前情回响或读者期待的碎片——呼应哪一条就在 JSON 里标 from_memory/from_expectation + echo_ref（所呼应条目在对应素材块里的序号，从 1 数）。呼应是**当下场景里的新画面**侧面带出旧物/旧事（书页翻到夹层、扳手柄上的旧划痕），不是旧画面换个说法重演——重演前情等于没给选项
-- slot=ambient【氛围】（其余补位）：无叙事包袱的画面（光影/声响/物件质感），作者随手就能用，不指向任何去向
+        PromptSection(
+            key="slot-echo-mat",
+            when=lambda ctx: bool(ctx.get("has_echo_mat")),
+            text="""- slot=echo【呼应】（至多 1 枚）：呼应前情回响或读者期待的碎片——呼应哪一条就在 JSON 里标 from_memory/from_expectation + echo_ref（所呼应条目在对应素材块里的序号，从 1 数）。呼应是**当下场景里的新画面**侧面带出旧物/旧事（书页翻到夹层、扳手柄上的旧划痕），不是旧画面换个说法重演——重演前情等于没给选项
+"""),
+        PromptSection(
+            key="slot-echo-none",
+            when=lambda ctx: not bool(ctx.get("has_echo_mat")),
+            # 前情强买强卖修复（2026-09-11）：无相关回响/期待素材时不再要求
+            # 呼应件——召回侧已加相关性门，此处同口径放开（允许零呼应）
+            text="""- slot=echo：本批无相关前情或读者期待素材——无需强行生成呼应件，全部生成现场分镜镜头（呼应类允许零枚）
+"""),
+        PromptSection(key="slot-ambient", text="""- slot=ambient【氛围】（其余补位）：无叙事包袱的画面（光影/声响/物件质感），作者随手就能用，不指向任何去向
 
+"""),
+        PromptSection(
+            key="slots-dialogue",
+            when=_dialogue,
+            text="""- slot=reply【接话缓冲】（对白时刻出 1 枚）：受话人接住刚落那句话的微前兆——指尖停住、抬眼、把到嘴边的话咽回去；只写反应的开头，回应与打断本身是作者的
+- slot=prop【在场特写】（出 1 枚）：镜头对准「本场在册」里的一件物或一个人，JSON 里标 "anchor_ref": 序号（在册名单的序号，从 1 数）；半句台词起步（台词+说话人小动作）可作 landing/reply 的形态
+"""),
+        PromptSection(
+            key="slots-combat",
+            when=_combat,
+            text="""- 搏杀时刻的槽位取向：landing 写主角一侧的起手交换（他的身体、他的兵器、他的感知）；ambient 写感官闪现（痛感、呼吸、声响——来源指得出来）；slot=prop 写环境武器（「本场在册」里的物，标 anchor_ref）；破绽、胜负、转折不出——那些是节拍
+"""),
+        PromptSection(
+            key="slots-bridge",
+            when=_bridge,
+            text="""- 中插桥接（本批补写上下文之间的十秒过渡）：机位四取向——物理落脚（脱鞋、放包、解外套）/ 室内感官（饭香、热气、灯光）/ 身体松劲（松肩、揉腕）/ 目光所向（望向下一幕的人或物）
+- 下文已写的事实是禁区：user 材料里「下文已写」块中的事（端来的东西、说出的话、做出的动作）一概不出——过渡只写抵达它之前的路
+- 末枚机位把画面引向下文首句的门口，但不跨进去
+"""),
+        PromptSection(
+            key="slots-panorama",
+            when=_panorama,
+            text="""- 初入新地的槽位取向：ambient 写定场质感（以「本场在册」场景行的地点档案为源）；slot=prop 写第一件可上手物（「本场在册」，标 anchor_ref）；landing 写人物踏入的第一步；新地的人物与物件以「本场在册」为准，册外不添
 """),
         PromptSection(key="nearby-common", text="""【就近要求 —— 碎片是"下一屏"的画面，不是章末预告】
 - 文流第一：碎片与作者当前段落的最后一句**直接衔接**——作者下一句就能顺着接上写，中间不需要任何过渡句
@@ -1216,9 +1416,19 @@ def _dock_system_sections() -> List:
             text="""- 没有大纲节拍可用时，也只在当前文流上就近生发
 
 """),
-        PromptSection(key="scene-anchoring", text="""【场景锚定 —— 碎片长在作者此刻的场景里】
-- 道具分两类：**氛围件**（光线、灰尘、天气、远景、声响）可自由生发，不算发明；**上手件**——人物握、拿、放、捡、掏、开的那个物件——要有出处（本章正文/场景设定/设定养料/就近节拍四处之一）：人物碰过的物件会进入后续所有画面，作者接了它就欠下连续性债
-- 不复述已写：碎片是还没落笔的画面——作者已写的画面（刚引用的原文、刚描写过的物件）换个说法再端上来，等于没给选项
+        PromptSection(key="scene-anchoring-head", text="""【场景锚定 —— 碎片长在作者此刻的场景里】
+"""),
+        PromptSection(
+            key="props-two-class",
+            when=_no_onstage,
+            text="""- 道具分两类：**氛围件**（光线、灰尘、天气、远景、声响）可自由生发，不算发明；**上手件**——人物握、拿、放、捡、掏、开的那个物件——要有出处（本章正文/场景设定/设定养料/就近节拍四处之一）：人物碰过的物件会进入后续所有画面，作者接了它就欠下连续性债
+"""),
+        PromptSection(
+            key="props-three-tier",
+            when=_onstage,
+            text="""- 道具三档（「本场在册」已列出此刻在场的人物与物件）：**自然力**（天气、光线、声响、气温——无主不可拾）自由生发；**派生质感**（气味、反光、震动、浮尘）要指得出它的来源物——指不出来源的质感就是造物；**上手物件与出场人物**只从「本场在册」或本章正文已出现者里取：人物碰过的物件会进入后续所有画面，作者接了它就欠下连续性债
+"""),
+        PromptSection(key="scene-anchoring-rest", text="""- 不复述已写：碎片是还没落笔的画面——作者已写的画面（刚引用的原文、刚描写过的物件）换个说法再端上来，等于没给选项
 - 空间不瞬移：碎片发生在当前段落的同一场景/时刻，或通向下一拍的过渡画面（抵达、开门、天亮——除非抵达本身就是那一拍的事件）
 - 保底本场景：碎片中至少 2 个发生在当前段落的同一场景内——作者不换景就能直接落笔
 
@@ -1260,11 +1470,14 @@ def build_dock_generator_prompt(
     spine_intent: str = "",
     outline_nearby: list = None,
     intent_guess: str = "",
+    onstage: Optional[Dict] = None,
+    template: str = "default",
+    suffix_anchor: str = "",
 ) -> tuple:
     """构建挂件生发 prompt。
 
     Args:
-        recent_text: 作者当前段落（≤300 字）
+        recent_text: 作者当前段落（≤400 字，超长保尾——作者的真位置在段尾）
         projections: 层 3 推测（SegmentProjection.to_dict() 列表）
         nutrients: 设定养料（角色物理特征/资产/地点）
         hard_constraints: 硬约束（banned_words / character_statics / canon_private_labels）
@@ -1276,28 +1489,58 @@ def build_dock_generator_prompt(
             画像的同款克制——只给方向不给展开）
         intent_guess: 意图反推的下一步方向（2026-09-03 意图入舱；仅无大纲就近
             节拍时由调用方传入——toward_beat 槽位的猜测供料。空=逐字节零变化）
+        onstage: 本场在册压缩投影（2026-09-08 红队「地面」；None=零变化契约——
+            legacy 书 prompt 逐字节等同旧实现。结构：
+            {entities: [{name, state}], props: [{name, desc}], scene_line,
+             offstage_characters, offstage_assets}）
+        template: 情境分镜模板（default/dialogue/combat/panorama/bridge；除
+            bridge（光标位置事实，不依赖在场制）外，无 onstage 时强制归一
+            default——场景模板分节只在在场制下分派）
+        suffix_anchor: 中插桥接后文锚（2026-09-09 FIM）：光标后紧邻的 1-2 句
+            已写正文——非空即编译 bridge 模板与「下文已写」禁区块
 
     Returns:
         (system_prompt, user_prompt)
     """
     banned = "、".join(hard_constraints.get("banned_words", [])[:30])
+    # 桥接供给切断（2026-09-09 FIM 实测「卡片接着文末写」事故）：桥的方向由
+    # 后文锚定义——此前只摘了槽位子句，素材块照灌。推测/方向猜测/就近节拍
+    # 全部以画布全文（含光标后已写内容）为坐标系推导，桥接态下是「已写后文
+    # 的剧透」而非方向（实测：插入点在送别，推测块与猜测块全是文末饭桌场景，
+    # 卡片被拽去接着文末写）。切断供给>命令拒绝（同哲学先例：_prebeat_projections
+    # 接缝裁剪——LLM 没见过的素材漏不出来）。空 suffix_anchor=逐字节零变化。
+    is_bridge = bool(str(suffix_anchor or "").strip())
     # 分节编译（约束治理一期）：无就近节拍→节拍依赖子句整节缺席；禁词表
     # 经 «BANNED_WORDS» 占位注入（不能用 str.format——prompt 含 JSON 花括号）
     # 2026-09-03：猜测供料形态（无节拍+有方向猜测）编译进 toward_beat 变体子句
-    guess_only = not outline_nearby and bool(intent_guess.strip())
+    guess_only = not outline_nearby and bool(intent_guess.strip()) and not is_bridge
+    # 在场制归一（2026-09-08 红队「地面」）：无投影时模板强制 default——
+    # 模板分节引用「本场在册」，投影缺席时分节悬空
+    if not onstage and template != "bridge":
+        template = "default"
     from backend.services.constraints.prompt_sections import render_sections
 
     system_prompt = render_sections(
         _dock_system_sections(),
-        {"has_nearby": bool(outline_nearby), "has_guess": guess_only},
+        {
+            # 桥接态按「无节拍供给」编译系统分节（素材块已切断，分节与材料同口径）
+            "has_nearby": bool(outline_nearby) and not is_bridge,
+            "has_guess": guess_only,
+            "has_onstage": bool(onstage),
+            "template": template,
+            # 回响素材有无（2026-09-11 柔性化）：回响与期待都空时 echo 槽位
+            # 分节换「允许零呼应」变体，与召回侧相关性门同口径
+            "has_echo_mat": bool(memory_echoes or reader_expectations),
+        },
     ).replace("«BANNED_WORDS»", banned or "（无）")
 
-    # 推测方向摘要
+    # 推测方向摘要（桥接态切断：推测锚的是全文末尾的「接下来」，插入点处是后文剧透）
     proj_lines = []
-    for p in (projections or [])[:3]:
-        beats = p.get("possible_beats", []) if isinstance(p, dict) else []
-        for b in beats[:2]:
-            proj_lines.append(f"- {b.get('event', '')}（焦点：{b.get('anchors', [])}）")
+    if not is_bridge:
+        for p in (projections or [])[:3]:
+            beats = p.get("possible_beats", []) if isinstance(p, dict) else []
+            for b in beats[:2]:
+                proj_lines.append(f"- {b.get('event', '')}（焦点：{b.get('anchors', [])}）")
     proj_text = "\n".join(proj_lines) if proj_lines else "（无推测，基于当前段落自由生发）"
 
     # 角色永恒设定（防 OOC）
@@ -1352,7 +1595,7 @@ def build_dock_generator_prompt(
     # 接下来 1-2 拍原文。2026-08-26 定位修正：节拍是**目的地**不是碎片内容
     # （实测：碎片直接呈现节拍对白，与作者笔下位置隔着数步，割裂感重）。
     nearby_block = ""
-    if outline_nearby:
+    if outline_nearby and not is_bridge:
         nearby_lines = "\n".join(f"- {b}" for b in outline_nearby[:2])
         nearby_block = f"""
 # 作者大纲·就近节拍（几步之外的目的地——剧情正朝那里去；碎片只给通往它的第一步，不是节拍本身的画面）
@@ -1369,25 +1612,91 @@ def build_dock_generator_prompt(
 {intent_guess.strip()[:80]}
 """
 
+    # 本场在册块（2026-09-08 红队「地面」）：T3 白名单 + anchor_ref 序号坐标系
+    # （entities 在前 props 在后统一编号——模型报序号，后端回查拼 note，模型
+    # 不经手出处文本，与 echo_ref 同一防御哲学）
+    onstage_block = ""
+    if onstage:
+        _ent = onstage.get("entities") or []
+        _prop = onstage.get("props") or []
+        _reg_lines = []
+        for i, e in enumerate(_ent, start=1):
+            _st = str(e.get("state") or "").strip()
+            _reg_lines.append(f"- [{i}] {e.get('name')}" + (f"：{_st[:20]}" if _st else ""))
+        for j, p in enumerate(_prop, start=len(_ent) + 1):
+            _d = str(p.get("desc") or "").strip()
+            _reg_lines.append(f"- [{j}] {p.get('name')}" + (f"：{_d[:16]}" if _d else ""))
+        _scene = str(onstage.get("scene_line") or "").strip()
+        if _reg_lines or _scene:
+            _body = "\n".join(_reg_lines) if _reg_lines else "（此刻无在册人物/物件）"
+            if _scene:
+                _body += f"\n场景：{_scene}"
+            onstage_block = (
+                "\n# 本场在册（此刻在场的人物与物件——上手物件与出场人物只从这里或正文已出现处取；"
+                "特写哪件就标 anchor_ref 序号）\n" + _body + "\n"
+            )
+
+    # 中插桥接后文锚块（2026-09-09 FIM）：下文是禁区边界而非素材——
+    # 过渡机位严禁提前消耗其中事实；空=整块缺席（零变化契约）
+    suffix_block = ""
+    if str(suffix_anchor or "").strip():
+        suffix_block = (
+            "\n# 下文已写（你要补的是它与上文之间的过渡——块里的事一概不许提前发生）\n"
+            f"- {str(suffix_anchor).strip()[:120]}\n"
+        )
+
     # 过采样（约束治理一期）：要求 4-6 枚，校对环丢违规件后仍保 3-4——
-    # 检测器误报由过采样吸收；toward_beat 子句仅在有就近节拍/方向猜测时出现
-    if outline_nearby:
+    # 检测器误报由过采样吸收；toward_beat 子句仅在有就近节拍/方向猜测时出现。
+    # 引力措辞（2026-09-08 红队「重力场」）：在场制下配额退役——节拍/猜测是
+    # 染色矢量不是专职槽位义务；legacy 书保持配额原文（零变化契约）
+    if template == "bridge":
+        beat_clause = ""   # 桥的方向由后文锚定义，不吃大纲引力/意图猜测
+    elif onstage:
+        if outline_nearby:
+            beat_clause = "碎片的画面方向贴近就近节拍即可，无需专职代表；"
+        elif guess_only:
+            beat_clause = "碎片的画面方向贴近方向猜测即可，无需专职代表；"
+        else:
+            beat_clause = ""
+    elif outline_nearby:
         beat_clause = "给了就近节拍则含 1 枚 toward_beat；"
     elif guess_only:
         beat_clause = "含 1 枚 toward_beat（通往方向猜测）；"
     else:
         beat_clause = ""
 
+    # 养料在场制拆分（2026-09-08 红队 R1）：在册全行 + 场外仅名字——上手件
+    # 的「设定养料」全书池出处就地收窄为「本场在册」；无 onstage 用原养料
+    # （legacy 逐字节零变化）
+    if onstage:
+        _ent = onstage.get("entities") or []
+        _chars_text = "；".join(
+            f"{e.get('name')}" + (f"（{str(e.get('state') or '')[:20]}）" if str(e.get("state") or "").strip() else "")
+            for e in _ent
+        ) or "（无在场人物）"
+        _off_chars = onstage.get("offstage_characters") or []
+        if _off_chars:
+            _chars_text += f"\n（场外人物，只可经呼应带出：{'、'.join(_off_chars[:12])}）"
+        _assets_text = "；".join(str(p.get("name")) for p in (onstage.get("props") or [])) or "（无在场物件）"
+        _off_assets = onstage.get("offstage_assets") or []
+        if _off_assets:
+            _assets_text += f"\n（场外物件：{'、'.join(_off_assets[:12])}）"
+        _locations_text = str(onstage.get("scene_line") or "").strip() or "（无场景钉）"
+    else:
+        _chars_text = nutrients.get("characters", "（无）")
+        _assets_text = nutrients.get("assets", "（无）")
+        _locations_text = nutrients.get("locations", "（无）")
+
     user_prompt = f"""# 作者当前段落
-{recent_text[:300]}
-{spine_line}{nearby_block}{guess_block}
+{recent_text[-400:]}
+{onstage_block}{suffix_block}{spine_line}{nearby_block}{guess_block}
 # 接下来的画面方向（方向参考——优先从作者当前段落生发，不得整句照搬推测画面）
 {proj_text}
 {dw_block}{exp_block}{echo_block}
 # 设定养料（角色物理特征/资产/地点，自由用作画面素材）
-角色：{nutrients.get('characters', '（无）')}
-资产：{nutrients.get('assets', '（无）')}
-地点：{nutrients.get('locations', '（无）')}
+角色：{_chars_text}
+资产：{_assets_text}
+地点：{_locations_text}
 
 # 角色永恒设定（动作性格参考资料）
 {chr(10).join(static_lines) if static_lines else '（无）'}

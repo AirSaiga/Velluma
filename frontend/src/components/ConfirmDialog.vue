@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onScopeDispose } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useEscStack } from '../composables/useEscStack'
 
 export interface ConfirmDialogOptions {
   title: string
@@ -40,6 +41,21 @@ function handleCancel() {
 const dialogRef = ref<HTMLElement | null>(null)
 const dialogActive = computed(() => props.visible && !!props.options)
 useFocusTrap(dialogRef, dialogActive, { onEscape: handleCancel })
+
+// Esc 分层关闭栈（00 期 §4.2）：确认框常叠在模态/抽屉之上，入栈保证一次 Esc 只关自己
+const escStack = useEscStack()
+let escId: symbol | null = null
+watch(dialogActive, (on) => {
+  if (on) {
+    if (!escId) escId = escStack.push(handleCancel, 'confirm-dialog')
+  } else if (escId) {
+    escStack.remove(escId)
+    escId = null
+  }
+}, { immediate: true })
+onScopeDispose(() => {
+  if (escId) escStack.remove(escId)
+})
 </script>
 
 <template>
@@ -47,7 +63,7 @@ useFocusTrap(dialogRef, dialogActive, { onEscape: handleCancel })
     <Transition name="modal">
       <div
         v-if="visible && options"
-        class="fixed inset-0 z-[110] flex items-center justify-center"
+        class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
       >
         <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" @click="handleCancel"></div>
         <div

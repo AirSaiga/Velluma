@@ -15,9 +15,10 @@
    too_soon 静默空跑，与「互不封锁」的文档承诺相悖；旧数据里阶段 A 写过的
    last_run_at 只影响事件侧 ≤300s，过期自然失效，无需迁移）。
 3. 每书每日上限：滚动 24h 窗口内自动观察类 LLM 调用 ≤30（口径：
-   event_scout.auto_read + loop3.emergent_facts——后者与手动沉淀的涌现
-   抽取共用 stage，故手动沉淀也占用本池；沉淀是低频手动动作，可接受，
-   注释留证）。计数走 generation_runs 既有台账（经 chapters 归书），零新表。
+   event_scout.auto_read + read_entities——纯自动观察的 stage 集合。
+   2026-09-10 前认人与手动沉淀共用 loop3.emergent_facts，手动沉淀
+   也连带占本池；认人拆分出 adaptive.read_entities 后本池只封
+   「系统自己花」的部分，手动沉淀（Ctrl+Enter 低频作者动作）不再占额）。计数走 generation_runs 既有台账（经 chapters 归书），零新表。
 
 decide_auto_read 是纯函数（单测锚点）；async 装配层负责取数。
 """
@@ -41,7 +42,7 @@ AUTO_READ_MIN_INTERVAL_S = 300  # 同章两次自动阅读最小间隔（秒）
 AUTO_READ_DAILY_CAP = 30        # 每书滚动 24h 自动观察类调用上限
 
 # 自动观察口径的 stage 集合（usage 拆账同源；新增自动观察组件时同步补这里）
-_AUTO_STAGES = ("adaptive.event_scout.auto_read", "loop3.emergent_facts")
+_AUTO_STAGES = ("adaptive.event_scout.auto_read", "adaptive.read_entities")
 
 # 跳过短码 → 人话（作者语言；上屏原文可用）
 AUTO_READ_SKIP_REASONS = {

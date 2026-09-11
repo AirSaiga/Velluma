@@ -21,9 +21,9 @@ import asyncio
 import json
 import uuid
 
-from backend.routes.chapter_generation.adaptive import (
+from backend.routes.chapter_generation.adaptive.schemas import StitchGhostRequest
+from backend.services.adaptive.stitch_gates import (
     STITCH_MAX_TOKENS_FLOOR,
-    StitchGhostRequest,
     _contains_fragment,
     _truncate_at_sentence,
     _truncate_keep_tail,
@@ -171,7 +171,7 @@ def _run_stitch(monkeypatch, request: StitchGhostRequest, llm_contents):
 
     返回 (GHOST_DONE payload 或 None, LLM 调用 kwargs 列表, trace 事件 dict)。
     """
-    from backend.routes.chapter_generation import adaptive as adaptive_route
+    from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
 
     llm_calls = []
     traces = {}
@@ -442,7 +442,7 @@ def _patch_prohibitions(monkeypatch, ps):
 
 def _run_stitch_wash(monkeypatch, req, llm_contents, ps):
     """洗层版 harness：真 db 替身（book 命中）+ 禁忌面注入 + 事件/语义打桩。"""
-    from backend.routes.chapter_generation import adaptive as adaptive_route
+    from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
     import backend.services.style.events as events_mod
     import backend.services.style.semantic_match as sem_mod
 
@@ -472,7 +472,7 @@ def test_route_stitch_wash_replaces_blocker(monkeypatch):
     # 路由级：借 _run_stitch（db=None → 洗层 try 内 db.get 失败静默跳过），
     # 因此路由级断言用可注入 db 的直调。
     async def scenario():
-        from backend.routes.chapter_generation import adaptive as adaptive_route
+        from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
         import backend.services.style.events as events_mod
         import backend.services.style.semantic_match as sem_mod
 
@@ -539,7 +539,7 @@ def test_route_stitch_wash_repair_residual(monkeypatch):
                              rolling_prefix="前文占位。", target_chars=400)
 
     async def scenario():
-        from backend.routes.chapter_generation import adaptive as adaptive_route
+        from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
         import backend.services.style.events as events_mod
         import backend.services.style.semantic_match as sem_mod
 
@@ -636,7 +636,7 @@ def test_strip_tail_repeat_mid_sentence_break():
     03:11 现场：画布『…在这个世道，这句』+ 产出『在这个世道，这句话连垫桌脚
     都嫌薄。…』——不剥则上屏重复「在这个世道，这句」两遍。
     """
-    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+    from backend.services.adaptive.stitch_gates import _strip_fragment_prefix
 
     out = _strip_fragment_prefix(
         "在这个世道，这句话连垫桌脚都嫌薄。他把书按进口袋。", FRAG_MID
@@ -646,7 +646,7 @@ def test_strip_tail_repeat_mid_sentence_break():
 
 def test_strip_tail_repeat_short_suffix():
     """短尾缀（『他握紧』）同样剥：拼合『他握紧刀，…』成完整句。"""
-    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+    from backend.services.adaptive.stitch_gates import _strip_fragment_prefix
 
     out = _strip_fragment_prefix("他握紧刀，刀锋映出他通红的眼。", "他握紧")
     assert out == "刀，刀锋映出他通红的眼。"
@@ -654,7 +654,7 @@ def test_strip_tail_repeat_short_suffix():
 
 def test_strip_no_tail_repeat_when_fragment_at_sentence_end():
     """断点在句末：产出同词开头是新句复用词汇，不是复读——不剥。"""
-    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+    from backend.services.adaptive.stitch_gates import _strip_fragment_prefix
 
     out = _strip_fragment_prefix("他握紧刀把门闩上了。", "他握紧刀。")
     assert out == "他握紧刀把门闩上了。"
@@ -665,14 +665,14 @@ def test_strip_tail_repeat_keeps_following_punct():
 
     剥掉反而腰斩（画布『…指节发白』+『，转身走了。』若剥逗号成连run-on）。
     """
-    from backend.routes.chapter_generation.adaptive import _strip_fragment_prefix
+    from backend.services.adaptive.stitch_gates import _strip_fragment_prefix
 
     out = _strip_fragment_prefix("他握紧。他退后半步。", "他握紧")
     assert out == "。他退后半步。"
 
 
 def test_split_first_sentence():
-    from backend.routes.chapter_generation.adaptive import _split_first_sentence
+    from backend.services.adaptive.stitch_gates import _split_first_sentence
 
     assert _split_first_sentence("话连垫桌脚都嫌薄。他把书按进口袋。") == (
         "话连垫桌脚都嫌薄。", "他把书按进口袋。",
@@ -739,3 +739,319 @@ def test_route_seam_anchor_oversize_degrades_to_whole_text(monkeypatch):
     assert done["text"] == compressed                      # 整稿路径：压缩稿直接落屏
     assert giant_first not in llm_calls[1]["user_prompt"].split("--- 草稿 ---")[0]  # 无锚句声明
     assert "作者正文停在" in llm_calls[1]["user_prompt"]    # 断点坐标仍在
+
+
+# ============================================================
+# 9. 微镜头字数闸（第二冲程 2026-09-09）：stitch target ≤ 60 免压缩
+# ============================================================
+
+def test_micro_lens_oversize_truncates_without_compression(monkeypatch):
+    """微镜头（stitch target=50）超产 130 字 → 只一次 LLM 调用（零压缩往返），
+    保头句界截到 ≤80（×1.6 硬限）；物镜锁随主生成 prompt 下发。"""
+    draft = "".join(_sents("皮带", 12))          # 12 句 × 12 字 = 144 字
+    req = StitchGhostRequest(
+        fragment="他盯着发电机的皮带看了一会儿。",
+        mode="stitch",
+        rolling_prefix="机房里很闷。",
+        target_chars=50,
+        picked_parts=["皮带在轮槽里打着滑"],
+        picked_slots=["prop"],
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft])
+
+    assert len(llm_calls) == 1                    # 免压缩分支（红队 Q1：省一次 2-5s 往返）
+    assert len(done["text"]) <= 80                # ×1.6 = 80 硬限
+    assert done["text"].endswith(("。", "！", "？", "…"))   # 句界截断，不腰斩
+    assert done["text"].startswith("皮带01")      # 保头
+    assert "单焦距·物镜锁" in llm_calls[0]["user_prompt"]  # 视点锁随行
+
+
+def test_micro_lens_mild_oversize_accepted_whole(monkeypatch):
+    """72 字轻微超产（容差带 61~80）→ 全盘接受：句子自然完结优先，不截不压。"""
+    draft = "".join(_sents("皮带", 6))            # 6 × 12 = 72 字
+    req = StitchGhostRequest(
+        fragment="他盯着发电机的皮带看了一会儿。",
+        mode="stitch",
+        rolling_prefix="机房里很闷。",
+        target_chars=50,
+        picked_parts=["皮带在轮槽里打着滑"],
+        picked_slots=["prop"],
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft])
+
+    assert len(llm_calls) == 1
+    assert done["text"] == draft                  # 原样落屏
+
+
+def test_non_micro_stitch_still_two_stage_gate(monkeypatch):
+    """target=120 的旧调用面不走免压缩分支（两级闸照旧）——防呆护栏。"""
+    draft = "".join(_sents("檐水", 20))           # 20 × 11 = 220 字 > 120×1.6
+    req = StitchGhostRequest(
+        fragment="在这个世道，这句话",
+        mode="stitch",
+        rolling_prefix="前文占位。",
+        target_chars=120,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft, "压缩后的整稿两句。"])
+
+    assert len(llm_calls) == 2                    # 压缩往返仍在（仅微镜头豁免）
+
+
+# ============================================================
+# 10. 中插桥接（FIM，2026-09-09）：双端边界注入 + 接缝归一
+# ============================================================
+
+class TestBridgeSeamNormalizer:
+
+    def test_trailing_pause_punct_becomes_period(self):
+        from backend.services.adaptive.stitch_gates import _normalize_bridge_seam
+        out = _normalize_bridge_seam("他在门边解下鞋带，把包放在地上，", "")
+        assert out == "他在门边解下鞋带，把包放在地上。"
+
+    def test_suffix_head_repeat_stripped(self):
+        from backend.services.adaptive.stitch_gates import _normalize_bridge_seam
+        draft = "他把外套挂在门后。明姐端来了准备好的脸盆，满满的清水。"
+        suffix = "明姐端来了准备好的脸盆，满满的清水。“老李那怎么样啦？”"
+        out = _normalize_bridge_seam(draft, suffix)
+        assert "明姐端来" not in out                    # 后文首句复读已剥
+        assert out.endswith("。")
+
+    def test_clean_seam_untouched(self):
+        from backend.services.adaptive.stitch_gates import _normalize_bridge_seam
+        draft = "饭香从灶间飘过来，他松了松肩膀。"
+        assert _normalize_bridge_seam(draft, "“老李那怎么样啦？”明姐问。") == draft
+
+
+def test_route_bridge_injects_dual_boundary_and_normalizes_seam(monkeypatch):
+    """端到端：suffix_anchor 上行 → prompt 带双端边界与铁律 → 产出接缝归一。"""
+    draft = "他把外套挂在门后，饭香混着热气扑到脸上，"   # 尾悬逗号——待归一
+    req = StitchGhostRequest(
+        fragment="林尘推门进屋，把工具包放在门边。",
+        mode="stitch",
+        rolling_prefix="村道上的路灯忽明忽暗。",
+        target_chars=50,
+        suffix_anchor="“今晚回来得晚了些。”明姐端来脸盆。",
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, [draft])
+
+    up = llm_calls[0]["user_prompt"]
+    assert "下文已写" in up and "明姐端来脸盆" in up       # 双端边界的下文锚
+    assert "桥接铁律" in up and "写完过渡即止" in up        # 铁律在场
+    assert done["text"].endswith("。")                     # 尾悬逗号归一为句号
+    assert "，" != done["text"][-2]                        # 无双标点悬空
+
+
+# ============================================================
+# 11. 桥接抢场影子检（2026-09-09 抢场事故：换道具的同槽位撞车）
+# ============================================================
+
+class TestBridgeActorSteal:
+
+    def _steal(self, ghost, suffix, names=("林尘", "明姐")):
+        from backend.services.adaptive.stitch_gates import _bridge_actor_steal
+        return _bridge_actor_steal(ghost, suffix, list(names))
+
+    def test_incident_reproduced(self):
+        """实测事故原样复现：明姐在幽灵末句登场、又是后文首句主演 → 抢场命中。"""
+        ghost = "话音刚落，他侧身挤过门框。明姐迎上来，手里还攥着块湿抹布。"
+        suffix = "“今晚回来得晚了些，累了吧，来，先洗把脸。”明姐端过来准备好的脸盆，满满的清水。"
+        assert self._steal(ghost, suffix) == "明姐"
+
+    def test_protagonist_side_clean_transition_no_fire(self):
+        """主角一侧的干净过渡（明姐只在后文登场）→ 不命中。"""
+        ghost = "话音刚落，他侧身挤过门框，把工具包搁在门边，搓了搓冻僵的手。"
+        suffix = "“今晚回来得晚了些，累了吧，来，先洗把脸。”明姐端过来准备好的脸盆。"
+        assert self._steal(ghost, suffix) is None
+
+    def test_actor_in_ghost_head_not_tail_no_fire(self):
+        """登场者只出现在幽灵前段（非末句）→ 判据只看末句（衔接位），不误报。"""
+        ghost = "明姐在灶间应了一声。他侧身挤过门框，把包搁下，搓了搓手。"
+        suffix = "“回来得晚了些，累了吧。”明姐端过来脸盆。"
+        assert self._steal(ghost, suffix) is None
+
+    def test_route_bridge_rule_carries_protagonist_side(self, monkeypatch):
+        """正向约束进 prompt：主角一侧 + 换道具也算提前消耗。"""
+        req = StitchGhostRequest(
+            fragment="“明姐，我回来了。”", mode="stitch",
+            rolling_prefix="村道上。", target_chars=50,
+            suffix_anchor="明姐端过来准备好的脸盆。",
+        )
+        done, llm_calls, _ = _run_stitch(monkeypatch, req, ["他把包搁在门边。"])
+        up = llm_calls[0]["user_prompt"]
+        assert "过渡镜头留在主角一侧" in up
+        assert "换个道具演同一件事也算提前消耗" in up
+
+
+# ============================================================
+# 11a. 断点口吃对拍锁死（2026-09-11 排毒批 Task1 复盘结论）
+# ============================================================
+
+class TestSeamOverlapRegression:
+    """词尾-词首重叠消解机制 = _strip_fragment_tail_repeat（2026-08-29
+    接缝两护②），炖肉事故原样复盘已剥净——正文从未出现双「一盆」（全景
+    报告展示的是 trace 中模型原始产出）。此处锁死防回退。"""
+
+    def _strip(self, ghost, frag):
+        from backend.services.adaptive.stitch_gates import _strip_fragment_prefix
+        return _strip_fragment_prefix(ghost, frag)
+
+    def test_stewed_meat_incident_replay(self):
+        """事故现场原样重放：端上一盆 + 一盆扣着盖子的菜 → 剥成 扣着盖子的菜…。"""
+        frag = "“那就好，那就好，不然你王叔可得急死。”明姐拿来碗筷，端上一盆"
+        ghost = ("一盆扣着盖子的菜，那是炖肉，香气渗出。"
+                 "明姐掀开盖子把碗塞过去，“快吃，凉了就腥了。”")
+        out = self._strip(ghost, frag)
+        assert out.startswith("扣着盖子的菜")
+        assert not out.startswith("一盆")
+
+    def test_reduplication_not_falsely_stripped(self):
+        """叠词安全：想了想+想清楚 不剥（≥2 字规范化重叠下限，单字太滥）。"""
+        assert self._strip("想清楚了。", "他低头想了想") == "想清楚了。"
+
+    def test_reduplication_strip_stays_natural(self):
+        """真复读剥后拼合自然：看了看+看了看四周 → 看了看四周。"""
+        assert self._strip("看了看四周。", "他低头看了看") == "四周。"
+
+
+# ============================================================
+# 11c. 双开引号碰撞剥除（2026-09-11 排毒批 Task2）
+# ============================================================
+
+class TestQuoteCollision:
+
+    def _strip(self, ghost, frag):
+        from backend.services.adaptive.stitch_gates import _strip_colliding_open_quote
+        return _strip_colliding_open_quote(ghost, frag)
+
+    def test_full_width_collision(self):
+        """断点=悬空“ × 幽灵以“起 → 剥幽灵开引号，拼成一句完整引文。"""
+        assert self._strip("“快吃吧，凉了就腥了。”明姐说。", "明姐掀开锅盖说：“") == \
+            "快吃吧，凉了就腥了。”明姐说。"
+
+    def test_straight_quote_breakpoint(self):
+        """作者打的是半角 "（还没转全角）同样剥。"""
+        assert self._strip("“快吃吧。”", '他说："') == "快吃吧。”"
+
+    def test_mixed_ghost_straight_head(self):
+        """幽灵以半角直引号起、断点是全角 “ → 也剥（随后标点归一转全角）。"""
+        assert self._strip('"快吃吧。”', "他说：“") == "快吃吧。”"
+
+    def test_closed_breakpoint_not_stripped(self):
+        """断点末字符不是开引号（成对闭合后新对白=合法起点）→ 原样。"""
+        ghost = "“好的。”他点头。"
+        assert self._strip(ghost, "他说完。") == ghost
+
+    def test_ghost_without_quote_unchanged(self):
+        """幽灵不以引号起（作者引号自己写内容）→ 原样。"""
+        ghost = "他端起碗。"
+        assert self._strip(ghost, "明姐说：“") == ghost
+
+    def test_route_strips_collision_before_done(self, monkeypatch):
+        """路由级：断点悬空“ + 幽灵“起 → GHOST_DONE 全文无双开引号。"""
+        req = StitchGhostRequest(
+            fragment="明姐掀开锅盖说：“", mode="stitch", target_chars=50)
+        done, _, _ = _run_stitch(
+            monkeypatch, req, ["“快吃吧，凉了就腥了。”明姐说。"])
+        assert done is not None
+        assert not done["text"].startswith("“")
+        assert done["text"].startswith("快吃吧")
+
+
+# ============================================================
+# 11b. 幽灵半角标点归一（2026-09-09 编辑器「对不齐」：半角字符破全角网格）
+# ============================================================
+
+class TestGhostPunctuationNorm:
+
+    def _norm(self, text):
+        from backend.services.adaptive.stitch_gates import _normalize_ghost_punctuation
+        return _normalize_ghost_punctuation(text)
+
+    def test_half_dots_to_full_ellipsis(self):
+        """半角三连点 → 全角省略号（宽度 1.5 字 → 2 字，回网格）。"""
+        assert self._norm("咳咳...阿尘啊...这发电机还能修好吗？") == \
+            "咳咳……阿尘啊……这发电机还能修好吗？"
+
+    def test_four_dots_also_collapse(self):
+        """四连点同样吞成单个全角省略号（中文排版省略号恒 ……）。"""
+        assert self._norm("等等....") == "等等……"
+
+    def test_straight_quotes_pair_alternating(self):
+        """直引号按出现序配对转全角（开闭交替）。"""
+        assert self._norm('她说"快吃，凉了就腥了。"') == "她说“快吃，凉了就腥了。”"
+
+    def test_odd_quote_degrades_to_alternating(self):
+        """孤引号（模型笔误）交替赋值，不劣于原样。"""
+        assert self._norm('"abc') == "“abc"
+
+    def test_clean_text_unchanged(self):
+        """纯全角文本逐字节零变化。"""
+        s = "明姐端过来准备好的脸盆，满满的清水。"
+        assert self._norm(s) == s
+
+    def test_empty(self):
+        assert self._norm("") == ""
+
+    def test_route_done_frame_carries_normalized_text(self, monkeypatch):
+        """路由级：归一发生在所有闸门后、播出前——GHOST_DONE 全文已归一。
+        （mock 尾字不用的原因：1715 行防包裹闸 strip('"') 会先剥掉首尾
+        直引号——中文对白真实闭引号是 ”，不受该闸影响）"""
+        req = StitchGhostRequest(fragment="他推门进屋。", mode="stitch", target_chars=50)
+        done, _, _ = _run_stitch(
+            monkeypatch, req, ['明姐应了一声"饭好了...快趁热吃。"她把碗推过来。'])
+        assert done is not None
+        assert "..." not in done["text"]
+        assert '"' not in done["text"]
+        assert "“饭好了……快趁热吃。”她把碗推过来。" in done["text"]
+
+
+# ============================================================
+# 12. 自定义镜头逐字回声（2026-09-09 实测：成句素材被原样吞进幽灵）
+# ============================================================
+
+class TestCustomVerbatim:
+
+    def test_prompt_carries_rewrite_rule_for_custom_slot(self):
+        from backend.services.prompts.adaptive_prompts import build_continue_prompt
+        _, user = build_continue_prompt(
+            fragment="他推门进屋。", rolling_prefix="村道上。", mode="stitch",
+            picked_parts=["一盆扣着盖子的菜，那是炖肉，香气渗出"],
+            picked_slots=["custom"],
+        )
+        assert "素材指令，不是成品文本" in user
+        assert "不逐字照抄它的原文" in user
+
+    def test_no_custom_slot_no_rule(self):
+        from backend.services.prompts.adaptive_prompts import build_continue_prompt
+        _, user = build_continue_prompt(
+            fragment="他推门进屋。", rolling_prefix="村道上。", mode="stitch",
+            picked_parts=["他在门边解鞋带"],
+            picked_slots=["landing"],
+        )
+        assert "素材指令" not in user     # 普通零件零变化
+
+    def test_route_shadow_fires_on_verbatim_echo(self, monkeypatch):
+        """实测事故复现：幽灵首句=自定义原文 → adaptive_custom_verbatim 台账。"""
+        req = StitchGhostRequest(
+            fragment="他把包搁在门边。", mode="stitch",
+            rolling_prefix="村道上。", target_chars=50,
+            picked_parts=["一盆扣着盖子的菜，那是炖肉，香气渗出"],
+            picked_slots=["custom"],
+        )
+        ghost = "一盆扣着盖子的菜，那是炖肉，香气渗出。明姐掀开盖子把碗塞过去。"
+        done, llm_calls, traces = _run_stitch(monkeypatch, req, [ghost])
+        assert any("adaptive_custom_verbatim" in t for t in traces)
+        # prompt 侧规则同帧在场（防线一）
+        assert "素材指令，不是成品文本" in llm_calls[0]["user_prompt"]
+
+    def test_route_shadow_silent_on_rewrite(self, monkeypatch):
+        """改写良好（素材重组织）→ 零事件——影子只量照抄，不量相似。"""
+        req = StitchGhostRequest(
+            fragment="他把包搁在门边。", mode="stitch",
+            rolling_prefix="村道上。", target_chars=50,
+            picked_parts=["一盆扣着盖子的菜，那是炖肉，香气渗出"],
+            picked_slots=["custom"],
+        )
+        ghost = "灶上的砂锅还温着，肉香混着热气漫过桌沿。他咽了口唾沫。"
+        done, _calls, traces = _run_stitch(monkeypatch, req, [ghost])
+        assert not any("adaptive_custom_verbatim" in t for t in traces)

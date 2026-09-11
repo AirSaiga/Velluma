@@ -246,7 +246,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
           <div class="cs-head">
             <span class="cs-dot" :class="n.visibility"></span>
             <span class="cs-name">{{ displayName(n) }}</span>
-            <span class="cs-type" :style="{ background: NODE_TYPE_COLORS[n.type] || '#6b7280' }">
+            <span class="cs-type" :style="{ background: NODE_TYPE_COLORS[n.type] || 'var(--text-secondary)' }">
               {{ typeBadge(n) }}
             </span>
             <span v-if="n.visibility === 'partial'" class="cs-biao-neq" title="读者见过伪装版——表里两面都要维护">表≠里</span>
@@ -354,7 +354,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
   padding: 0.25rem 0.125rem;
@@ -362,7 +362,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 }
 .side-count {
   margin-left: auto;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
 }
@@ -381,7 +381,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 .cs-value {
   margin: 0;
   padding: 0 0.125rem 0.25rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   line-height: 1.7;
   color: var(--text-muted);
 }
@@ -393,7 +393,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   padding: 0.25rem 0 0.375rem;
 }
 .cs-chip {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   padding: 0.125rem 0.5rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -467,7 +467,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 }
 
 .cs-name {
-  font-size: 0.75rem;
+  font-size: var(--text-base);
   font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
   color: var(--text-primary);
   overflow: hidden;
@@ -476,7 +476,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 }
 .cs-type {
   flex-shrink: 0;
-  font-size: 0.5625rem;
+  font-size: var(--text-xs);
   color: #fff;
   border-radius: 0.1875rem;
   padding: 0.0625rem 0.3125rem;
@@ -484,14 +484,14 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 .cs-reveal {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--accent-500, #b08d3e);
   font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
 }
 /* 半露小标：表里不一一眼可辨，不必点开猜 */
 .cs-biao-neq {
   flex-shrink: 0;
-  font-size: 0.5625rem;
+  font-size: var(--text-xs);
   color: #7c5faf;
   border: 1px solid rgba(124, 95, 175, 0.4);
   border-radius: 0.1875rem;
@@ -500,7 +500,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 /* 字段级真相分层派生区（2026-09-03）：来自角色档案 */
 .cs-group-title {
   margin: 10px 0 6px;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   letter-spacing: 0.05em;
 }
@@ -508,7 +508,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   background: #8b8578;
 }
 .cs-what {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   /* 摘要行是账本的主体文字，text-muted 在 11px 下太浅 */
   color: var(--text-secondary);
   line-height: 1.55;
@@ -519,7 +519,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 
 .side-empty {
   padding: 0.5rem 0.25rem 0.625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -530,7 +530,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   align-items: center;
   gap: 4px;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: #a63e2a;
   background: transparent;
@@ -550,7 +550,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   width: 100%;
   box-sizing: border-box;
   padding: 6px 9px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -563,14 +563,14 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 .cs-sub-acts {
   margin-top: 6px;
   text-align: center;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .cs-sub-act {
   border: none;
   background: none;
   padding: 0;
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-muted);
   border-bottom: 1px dotted var(--text-muted);
@@ -594,7 +594,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 .cs-migrate-x {
@@ -602,13 +602,13 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   background: none;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .cs-migrate-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 .cs-migrate-label {

@@ -38,6 +38,7 @@ from sqlalchemy import delete
 
 from backend.models import MemoryChunk
 from backend.services.llm.embedding import get_embedding, is_embedding_configured
+from backend.services.utils.html_text import html_to_plain
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,12 @@ _CHUNK_SIZE = 1000
 
 
 def _html_to_plain(text: str) -> str:
-    """画布正文是 HTML（编辑器 getHTML 落库），索引前转纯文本。"""
-    plain = re.sub(r"<[^>]+>", "\n", text)
-    # 折叠多余空行（每段之间至多一个空行）
-    return re.sub(r"\n{3,}", "\n\n", plain).strip()
+    """画布正文是 HTML（编辑器 getHTML 落库），索引前转纯文本。
+
+    实现委托 services/utils/html_text.html_to_plain（2026-09-11 收敛：
+    原与 routes/style._plain_text 逐字节双实现）；保留本名供既有 import 方。
+    """
+    return html_to_plain(text)
 
 
 async def index_chapter_memories(

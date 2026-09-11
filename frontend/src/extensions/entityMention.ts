@@ -1,4 +1,5 @@
 import Mention from '@tiptap/extension-mention'
+import { placeFloating } from '../shared/utils/floatGeometry'
 import { PluginKey } from '@tiptap/pm/state'
 import type { Editor } from '@tiptap/vue-3'
 import { characterApi } from '../services/api/domain'
@@ -66,8 +67,21 @@ function _makePopupRenderer() {
     const place = (clientRect?: (() => DOMRect | null) | null) => {
       const rect = clientRect?.()
       if (root && rect) {
-        root.style.top = `${rect.bottom + 6}px`
-        root.style.left = `${Math.max(16, rect.left)}px`
+        // 统一浮层几何（00 期 §4.1）：实测尺寸后 clamp→翻转→maxHeight，
+        // 修「@ 提及在行尾触发时弹窗右溢被裁」
+        const result = placeFloating(
+          { x: rect.left, y: rect.bottom },
+          {
+            width: root.offsetWidth || 300,
+            height: root.offsetHeight || 140,
+            gap: 6,
+            margin: 8,
+          },
+          { width: window.innerWidth, height: window.innerHeight },
+        )
+        root.style.top = `${result.top}px`
+        root.style.left = `${result.left}px`
+        if (result.maxHeight) root.style.maxHeight = `${result.maxHeight}px`
       }
     }
 
@@ -78,9 +92,9 @@ function _makePopupRenderer() {
         selected = 0
         root = document.createElement('div')
         root.className = 'mention-popup'
-        place(p.clientRect)
-        renderItems()
         document.body.appendChild(root)
+        renderItems()
+        place(p.clientRect)
       },
       onUpdate: (p: any) => {
         items = p.items || []
@@ -91,8 +105,8 @@ function _makePopupRenderer() {
           root.className = 'mention-popup'
           document.body.appendChild(root)
         }
-        place(p.clientRect)
         renderItems()
+        place(p.clientRect)
       },
       onKeyDown: ({ event }: any) => {
         if (!root) return false

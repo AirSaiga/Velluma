@@ -48,8 +48,22 @@ def test_none_and_whitespace_live():
     assert resolve_current_paragraph("   \n  ", QUIET_HTML) == QUIET_OPENING
 
 
-def test_live_short_falls_back_to_content():
-    got = resolve_current_paragraph("他抬起头。", f"<p>{QUIET_OPENING}</p>")
+def test_live_short_already_in_content_uses_content_tail():
+    # 保存及时：短光标段已在画布尾里 → 用带上下文的画布尾（不重复拼接）
+    got = resolve_current_paragraph("他抬起头。", f"<p>{QUIET_OPENING}他抬起头。</p>")
+    assert got == QUIET_OPENING + "他抬起头。"
+
+
+def test_live_short_not_in_content_fuses_tail_plus_live():
+    # 保存滞后（2026-09-09 实测「接不上」）：短光标段还没落库 → 画布尾补
+    # 上下文 + 实时光标段收尾——模型同时看见旧尾与新段，锚定不再滞后
+    got = resolve_current_paragraph("“路上当心。”大爷咳了一声。", f"<p>{QUIET_OPENING}</p>")
+    assert got == QUIET_OPENING + "“路上当心。”大爷咳了一声。"
+
+
+def test_empty_live_in_empty_paragraph_returns_canvas_tail():
+    # 光标在空新段（live 空）：纯画布尾，行为与旧版一致
+    got = resolve_current_paragraph("", QUIET_HTML)
     assert got == QUIET_OPENING
 
 
@@ -114,7 +128,7 @@ def _run_dock(monkeypatch, *, with_live: bool):
         def record_result(self, *a, **k):
             pass
 
-    async def fake_cache(db, chapter_id, parts):
+    async def fake_cache(db, chapter_id, parts, guests=None):
         pass
 
     monkeypatch.setattr(dg, "load_chapter_settings_bundle", fake_bundle)

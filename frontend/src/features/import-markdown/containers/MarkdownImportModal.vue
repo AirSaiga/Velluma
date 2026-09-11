@@ -250,7 +250,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-modal); /* B3：200→110 toast 现在盖它（操作结果不可被遮挡） */
   padding: 2rem;
   backdrop-filter: blur(2px);
 }

@@ -263,7 +263,7 @@ async function onBatchConfirm(ids: string[]) {
   const { ok, failed, dup } = summarizeBatch(outcomes)
   if (ok > 0) {
     showToast(
-      `已批量入账 ${ok} 条世界变化` + (dup > 0 ? `（另 ${dup} 条与账本重复，已自动跳过）` : ''),
+      `已把 ${ok} 条世界变化记入世界` + (dup > 0 ? `（另 ${dup} 条与账本重复，已自动跳过）` : ''),
       'success', 6000, {
       label: '撤销',
       // 撤销闭包捕获本批 outcomes——连开两批时旧 toast 只撤旧批
@@ -279,7 +279,7 @@ async function undoBatch(outcomes: BatchAcceptOutcome[]) {
   if (!currentBookId.value) return
   const undone = await undoBatchAccept(currentBookId.value, outcomes)
   showToast(
-    undone > 0 ? `已撤销 ${undone} 条入账（候选回到待确认）` : '撤销未完全成功：可到收件箱逐条处理',
+    undone > 0 ? `已撤销 ${undone} 条记入（候选回到待确认）` : '撤销未完全成功：可到收件箱逐条处理',
     undone > 0 ? 'info' : 'warning',
   )
   window.dispatchEvent(new CustomEvent(WORLD_REFRESH_EVENT))
@@ -383,7 +383,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
             <button
               v-if="slice.t_source !== 'chapter_anchor'"
               class="link-btn"
-              title="本章就固定在此刻——以后录新事件不会再拉动它（与世界页时间轴右键同一功能）"
+              title="本章就固定在这个时间——以后记新事件不会再拉动它"
               @click="anchorHere"
             >
               定在这个时间
@@ -397,7 +397,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
         <div v-show="!collapsed" class="slice-body">
           <!-- 在场 -->
           <section class="setting-group">
-            <div class="setting-group-label">在场<span class="muted">这个时间谁在哪、谁还活着——按世界页的事件推算</span></div>
+            <div class="setting-group-label">在场<span class="muted">谁在哪、谁还活着</span></div>
             <div v-if="!presenceView.length" class="empty-hint">
               世界页还没有这个时间的事态——先给本章定个时间，或
               <button class="link-btn" @click="openQuickNote">补一句</button>（如「老王也到了上海」）。
@@ -442,7 +442,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
               <span v-if="slice.scene.controlling_faction" class="faction-tag">
                 {{ slice.scene.controlling_faction }} 控制区
               </span>
-              <span v-if="slice.scene.pinned" class="pinned-tag" title="已钉住，不随事件推算变动">📌 已定</span>
+              <span v-if="slice.scene.pinned" class="pinned-tag" title="已固定，不随新事件变动">📌 已定</span>
             </div>
             <div v-else class="empty-hint">还没定——不选就按事件推算。</div>
             <div class="scene-actions">
@@ -452,9 +452,9 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
               <button
                 v-if="slice.scene?.pinned"
                 class="link-btn"
-                title="取消钉住，回到按事件推算"
+                title="取消固定，回到按事件自动算"
                 @click="unpinScene"
-              >取消钉住</button>
+              >取消固定</button>
             </div>
             <ul v-if="locPickerOpen" class="loc-picker">
               <li
@@ -476,7 +476,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           <!-- 相遇提示（W5-lite：同地角色的戏剧机会；读者视角只显示全公开参与者的相遇——
                口径定夺：含 private 参与者的相遇是作者层信息，读者不该看到谁在场） -->
           <section v-if="visibleEncounters.length" class="setting-group">
-            <div class="setting-group-label">相遇<span class="muted">同在一地的角色，可能撞出戏</span></div>
+            <div class="setting-group-label">相遇<span class="muted">同在一处的角色，可能撞出戏</span></div>
             <div v-for="(enc, i) in visibleEncounters" :key="i" class="encounter-row">
               {{ enc.names.join(' × ') }}<span class="encounter-loc"> · {{ enc.location_name }}</span>
             </div>
@@ -555,7 +555,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
                   <button
                     class="inbox-btn ok"
                     :disabled="busyCandidateId === c.id"
-                    title="采纳入账（进入世界推算）"
+                    title="采纳，记入世界"
                     @click="onAccept(c)"
                   >
                     ✓
@@ -592,7 +592,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           </div>
 
           <div class="usage-hint">
-            <p>这些都按世界页的事件推算。想改？去世界页记一笔（写作时按 Alt+N 也行），或拖世界页的时间轴。</p>
+            <p>都按世界页的事件推算——想改就去世界页记一笔（或按 Alt+N）。</p>
             <button class="go-world-btn subtle" @click="goWorld()">打开世界页</button>
           </div>
         </div>
@@ -606,7 +606,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
     <!-- 撤销胶囊（✓ 转正后 6 秒可撤：删事件 + 候选回 pending） -->
     <Teleport to="body">
       <div v-if="undoCapsule" class="undo-capsule">
-        <span>已入账：{{ undoCapsule.label }}</span>
+        <span>已记入世界：{{ undoCapsule.label }}</span>
         <button class="undo-btn" @click="undoLastAccept">撤销</button>
       </div>
     </Teleport>

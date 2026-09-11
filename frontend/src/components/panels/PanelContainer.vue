@@ -52,7 +52,7 @@ function handleClose() {
         <div class="panel-header-actions">
           <!-- 加载状态 -->
           <div v-if="loading" class="panel-loading">
-            <div class="loading-spinner" />
+            <div class="loading-spinner spin-reduced" />
             <span>加载中...</span>
           </div>
           
@@ -145,7 +145,7 @@ function handleClose() {
 }
 
 .panel-description {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.4;
   display: -webkit-box;
@@ -188,7 +188,7 @@ function handleClose() {
   align-items: center;
   gap: 4px;
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   border-radius: 6px;
   border: none;
@@ -219,12 +219,12 @@ function handleClose() {
 }
 
 .panel-action-btn.variant-danger {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .panel-action-btn.variant-danger:hover:not(:disabled) {
-  background: #fecaca;
+  background: var(--danger-bg);
 }
 
 .panel-action-btn:disabled {

@@ -54,6 +54,10 @@ class ChapterIntent:
     # 组件侧代码回查（编造依据即降信度，见 intent_inference._valid_evidence）
     next_direction: str = ""
     evidence: List[str] = field(default_factory=list)
+    # 意图衰老（2026-09-09 时序冻结修复）：反推时的正文体量（纯文本字数）——
+    # dock 消费时与当前 word_count 比对，推进超 INTENT_STALE_CHARS 即视为陈旧
+    # （实测：跨场景 11 分钟不重推，旧「往明姐家走」意图端给了室内场景）
+    prose_chars: int = 0
 
     def to_dict(self) -> Dict:
         return {
@@ -62,6 +66,7 @@ class ChapterIntent:
             "setup_points": self.setup_points, "must_hits": self.must_hits,
             "foreshadows": self.foreshadows, "deviations": self.deviations,
             "next_direction": self.next_direction, "evidence": self.evidence,
+            "prose_chars": self.prose_chars,
         }
 
     @classmethod
@@ -78,6 +83,7 @@ class ChapterIntent:
             # 存量 layer2 无新键 → 缺省空（零迁移）
             next_direction=d.get("next_direction", ""),
             evidence=d.get("evidence", []),
+            prose_chars=int(d.get("prose_chars") or 0),
         )
 
 

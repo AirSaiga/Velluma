@@ -53,7 +53,7 @@ function runAction(id: number, action: ToastAction) {
 <template>
   <!-- z-index 分层：drawer(85) < modal/confirm(110) < toast(120)——toast 必须永远可见，
        此前 z-50 会被副驾抽屉（z-85）整个挡住 -->
-  <div class="fixed top-4 right-4 z-[120] flex flex-col gap-2" role="status" aria-live="polite">
+  <div class="toast-region fixed top-4 right-4 flex flex-col gap-2" role="status" aria-live="polite">
     <TransitionGroup name="toast">
       <div
         v-for="toast in toasts"
@@ -96,6 +96,11 @@ function runAction(id: number, action: ToastAction) {
 </template>
 
 <style scoped>
+/* toast 必须永远最上（--z-toast=120，00 期 §3.1） */
+.toast-region {
+  z-index: var(--z-toast);
+}
+
 .toast-enter-active,
 .toast-leave-active {
   transition: all 0.3s ease;

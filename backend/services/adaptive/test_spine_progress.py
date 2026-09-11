@@ -20,7 +20,7 @@ FakeChapter/FakeDB（判定路径自身的写库失败已有吞异常护栏，no
 import asyncio
 import uuid
 
-from backend.routes.chapter_generation.adaptive import (
+from backend.routes.chapter_generation.adaptive.heartbeat import (
     _SPINE_PROG_CACHE,
     _spine_progress_for_heartbeat,
 )
@@ -121,7 +121,7 @@ def test_two_char_anchor_without_fragments_stays_pending():
 
 def test_growth_window_caps_far_text():
     """就近窗口：增量区超 SPINE_GROWTH_TAIL_CHARS 时窗口外老文本不参与判定。"""
-    from backend.routes.chapter_generation.adaptive import SPINE_GROWTH_TAIL_CHARS
+    from backend.routes.chapter_generation.adaptive.heartbeat import SPINE_GROWTH_TAIL_CHARS
 
     chapter = _FakeChapter({"anchors": [_anchor("高山遇伏")]}, "<p>开头。</p>")
     orch = _fresh_orch()

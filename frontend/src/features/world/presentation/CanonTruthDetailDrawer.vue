@@ -23,10 +23,11 @@
  * 编辑框设计：textarea 无边框融入卡片，焦点反馈落在卡片级（:focus-within 描边 + 浮环），
  * 让「正在编辑哪一面」有明确视觉边界；autogrow 随内容长高，超 max-height 恢复内部滚动。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useCanon, NODE_TYPE_LABELS } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
+import { useEscStack } from '../../../composables/useEscStack'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { vAutogrow } from './autogrow'
 import type { CanonNodeType, CanonVisibility } from '../../../services/api/domain/canon.api'
@@ -41,6 +42,14 @@ const emit = defineEmits<{
 
 const { nodes, updateNode, deleteNode, checkConsistency } = useCanon()
 const { showToast } = useToast()
+
+// Esc 分层关闭栈（00 期 §4.2）：挂载即入栈（一次 Esc 只关栈顶、焦点不在层内也生效），
+// 卸载即出栈——替代根元素 @keydown.esc（旧路径焦点不在抽屉内时失效）
+const escStack = useEscStack()
+let escId: symbol | null = null
+onMounted(() => { escId = escStack.push(() => emit('close'), 'canon-truth-drawer') })
+onUnmounted(() => { if (escId) escStack.remove(escId) })
+
 const { show: showConfirm } = useConfirmDialog()
 
 // ===== C3 片段一致性检查（贴一段正文，对照全部真相查泄露/矛盾；纯节点比对，不依赖边）=====
@@ -197,7 +206,7 @@ async function remove() {
 </script>
 
 <template>
-  <aside v-if="node" class="ctd" aria-label="真相详情" @keydown.esc="emit('close')">
+  <aside v-if="node" class="ctd" aria-label="真相详情">
     <!-- 头部：条目名 + 类型（已挂接 = 只读徽标，类型随对象推演）+ 关闭 -->
     <header class="ctd-head">
       <button v-if="canGoBack" class="ctd-back" title="返回上一级" @click="emit('back')">
@@ -415,7 +424,7 @@ async function remove() {
   flex: 1;
   min-width: 0;
   font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--text-primary);
@@ -433,7 +442,7 @@ async function remove() {
 }
 .ctd-type {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-secondary);
   background: var(--bg-secondary);
@@ -446,7 +455,7 @@ async function remove() {
   border-color: var(--accent-500);
 }
 .ctd-type--linked {
-  font-size: 10px;
+  font-size: var(--text-xs);
   padding: 2px 7px;
   color: var(--text-muted);
   cursor: default;
@@ -493,7 +502,7 @@ async function remove() {
   padding: 8px 10px;
   border: 1px dashed var(--border-color);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.7;
   color: var(--text-muted);
 }
@@ -509,7 +518,7 @@ async function remove() {
 .ctd-vis-seg {
   flex: 1;
   padding: 5px 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   border: none;
   border-radius: 9999px;
@@ -535,7 +544,7 @@ async function remove() {
 }
 .ctd-vis-note {
   margin: 6px 2px 0;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -561,11 +570,11 @@ async function remove() {
 }
 .ctd-q-num {
   color: #a63e2a;
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin-right: 6px;
 }
 .ctd-sec-title {
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.28em;
   color: var(--text-muted);
   margin-bottom: 8px;
@@ -580,7 +589,7 @@ async function remove() {
 }
 .ctd-more-summary {
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   user-select: none;
   list-style: none;
@@ -593,7 +602,7 @@ async function remove() {
 }
 .ctd-more-summary::before {
   content: "▸";
-  font-size: 10px;
+  font-size: var(--text-xs);
   transition: transform 0.12s ease;
 }
 .ctd-more[open] > .ctd-more-summary::before {
@@ -651,7 +660,7 @@ async function remove() {
 .ctd-face-badge {
   margin-left: auto;
   font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
   border-radius: 3px;
@@ -666,7 +675,7 @@ async function remove() {
 /* 密印收进头部行内（原位是 absolute 叠卡片右上角，窄宽下会压文字） */
 .ctd-seal {
   font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   color: #a63e2a;
   border: 1px solid #a63e2a;
   border-radius: 3px;
@@ -703,13 +712,13 @@ async function remove() {
   margin-top: 8px;
   padding-top: 7px;
   border-top: 1px dashed rgba(166, 62, 42, 0.45);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 1.7;
   color: #a63e2a;
 }
 .ctd-public-note {
   margin: 8px 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.7;
   padding: 0 2px;
@@ -728,7 +737,7 @@ async function remove() {
 .ctd-lbl {
   flex-shrink: 0;
   width: 64px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .ctd-input {
@@ -754,7 +763,7 @@ async function remove() {
 /* 提醒回声：填章号即见规则（金色，与世界页「还有 N 章」转金同族） */
 .ctd-reveal-echo {
   margin: 2px 2px 0 72px;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 1.7;
   color: #b08d3e;
 }
@@ -812,7 +821,7 @@ async function remove() {
 }
 .ctd-check-item {
   font-size: 12px;
-  color: #b45309;
+  color: var(--warn);
 }
 .ctd-check-empty {
   font-size: 12px;

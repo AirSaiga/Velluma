@@ -137,7 +137,7 @@ class TestBeatRushGuardIntegration:
         assert repair_eligible({"kind": "beat_rush"}) is True
 
     def test_repair_prompt_line_exists(self):
-        from backend.routes.chapter_generation.adaptive import _VIOLATION_REPAIR_LINES
+        from backend.services.adaptive.stitch_gates import _VIOLATION_REPAIR_LINES
 
         assert "beat_rush" in _VIOLATION_REPAIR_LINES
         assert "{span}" in _VIOLATION_REPAIR_LINES["beat_rush"]
@@ -224,3 +224,55 @@ class TestDestinationFraming:
         empty = SimpleNamespace(outline_text="  ", content_text="")
         assert _nearby_beats_from_outline(empty) == []
         assert _nearby_intent_from_outline(empty) == ""
+
+
+# ============================================================
+# ④ 切除兜底口径：beat_rush 不授权 excise（2026-09-09 文档=代码对齐）
+# ============================================================
+
+class TestBeatRushNotExcisable:
+    """AGENTS/ghost_guard 声明 beat_rush「excise 不授权」（抢拍是方向性错误，
+    删句对整稿伤害大于改写）——切除兜底必须同口径：beat_rush 违规改写失败后
+    走拒稿（熔断/逃生舱），绝不删句。事故形态：返修环 excise 回调曾把全部
+    repair-eligible 违规无差别喂给切除，beat_rush 句被静默删掉。"""
+
+    def _viol(self, kind: str, span: str) -> dict:
+        return {"kind": kind, "span_text": span}
+
+    def test_beat_rush_only_not_excised(self):
+        from backend.services.adaptive.stitch_gates import (
+            _excise_violating_sentences,
+        )
+
+        text = (
+            "他握紧手里的扳手，指节因用力而发白。"
+            "工头打断了所有人的争论，车间瞬间安静下来。"
+            "他慢慢退后半步，把扳手塞回工具袋里，转身走向门口的更衣柜。"
+        )
+        # 唯一违规是 beat_rush → 不可切除，返回 None（返修环据此走拒稿）
+        assert _excise_violating_sentences(
+            text, [self._viol("beat_rush", "工头打断")],
+            mode="stitch", target_chars=120,
+        ) is None
+
+    def test_mixed_cuts_only_non_beat_rush(self):
+        from backend.services.adaptive.stitch_gates import (
+            _excise_violating_sentences,
+        )
+
+        text = (
+            "他握紧手里的扳手，指节因用力而发白，掌心的旧茧压出一道浅浅的白痕。"
+            "工头打断了所有人的争论，车间瞬间安静下来，只剩下传送带低沉的嗡鸣。"
+            "流光的螺栓在灯下闪着微光，像一截烧红的铁。"
+            "他慢慢退后半步，把扳手塞回工具袋里，转身走向门口的更衣柜，脚步放得很轻。"
+        )
+        out = _excise_violating_sentences(
+            text,
+            [self._viol("beat_rush", "工头打断"),
+             self._viol("secret_leak", "流光的螺栓")],
+            mode="stitch", target_chars=120,
+        )
+        # secret_leak 句照切；beat_rush 句保住（不是它的切除授权）
+        assert out is not None
+        assert "工头打断" in out
+        assert "流光的螺栓" not in out

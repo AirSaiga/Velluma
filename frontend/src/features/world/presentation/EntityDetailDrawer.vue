@@ -8,11 +8,12 @@
  *
  * 轻量编辑不进 undo（与改名/坐标微调同策略）。
  */
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import { useWorld } from '../composables/useWorld'
 import { useCanon } from '../composables/useCanon'
 import { useToast } from '../../../composables/useToast'
+import { useEscStack } from '../../../composables/useEscStack'
 import { archiveFields } from '../engine/entitySchema'
 import { listGroupNames } from '../engine/entityGroups'
 import {
@@ -44,6 +45,14 @@ const {
   updateEntityArchive,
 } = useWorld()
 const { showToast } = useToast()
+
+// Esc 分层关闭栈（00 期 §4.2）：挂载即入栈（一次 Esc 只关栈顶、焦点不在层内也生效），
+// 卸载即出栈——替代根元素 @keydown.esc（旧路径焦点不在抽屉内时失效）
+const escStack = useEscStack()
+let escId: symbol | null = null
+onMounted(() => { escId = escStack.push(() => emit('close'), 'entity-detail-drawer') })
+onUnmounted(() => { if (escId) escStack.remove(escId) })
+
 
 // ===== 读者认知（C2 §5.3：实体信息面 overlay——本实体的真相/读者所见）=====
 const { nodes: canonNodes, ensureLoaded: ensureCanon, createNode, updateNode } = useCanon()
@@ -274,7 +283,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 </script>
 
 <template>
-  <div v-if="entity" class="edd" @keydown.esc="emit('close')">
+  <div v-if="entity" class="edd">
     <!-- 身份区 -->
     <div class="edd-head">
       <button v-if="canGoBack" class="edd-back" title="返回上一级" @click="emit('back')">
@@ -613,7 +622,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 700;
   color: var(--text-primary);
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
@@ -635,19 +644,19 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-radius: 9999px;
   background: var(--bg-canvas);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
 }
 .edd-vis--private {
-  border-color: #f59e0b;
-  color: #f59e0b;
+  border-color: var(--warn);
+  color: var(--warn);
   background: rgba(245, 158, 11, 0.08);
 }
 /* 私有语义消歧（A1）：切换旁的一行说明，两条底线——知晓不写出 / 强制力在真相层 */
 .edd-vis-note {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-muted);
   opacity: 0.9;
@@ -696,7 +705,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   margin: 10px 0 8px;
 }
 .edd-imp-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-right: 2px;
 }
@@ -719,7 +728,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-color: var(--accent-500);
 }
 .edd-imp-num {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-family: ui-monospace, monospace;
   margin-left: 4px;
@@ -734,7 +743,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   margin-bottom: 8px;
 }
 .edd-lbl {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .edd-lbl--block {
@@ -761,7 +770,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   line-height: 1;
 }
 .edd-alias button:hover {
-  color: #dc2626;
+  color: var(--danger);
 }
 .edd-alias-in {
   flex: 1;
@@ -815,7 +824,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-top: 1px solid var(--border-color);
 }
 .edd-sec-title {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
   margin-bottom: 8px;
@@ -826,7 +835,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 }
 .edd-field-label {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
@@ -847,7 +856,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: inherit;
   line-height: 1.6;
   cursor: pointer;
@@ -878,7 +887,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 }
 .edd-field-layerlabel {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-bottom: 4px;
 }
@@ -887,7 +896,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
 }
 .edd-field-layerhint {
   margin-top: 4px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: #a63e2a;
   opacity: 0.85;
 }
@@ -959,11 +968,11 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   color: var(--accent-500);
 }
 .edd-fieldmenu-hint {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .edd-nofields {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.7;
 }
@@ -994,7 +1003,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   color: var(--text-primary);
 }
 .edd-chron-time {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
   flex-shrink: 0;
@@ -1029,8 +1038,8 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   color: var(--accent-500);
 }
 .edd-act--danger:hover {
-  border-color: #dc2626;
-  color: #dc2626;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* 读者认知（C2 §5.3：实体信息面 overlay 分区，折叠态默认） */
@@ -1054,7 +1063,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   border: 1px solid var(--border-color);
   border-radius: 999px;
   background: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   padding: 2px 10px;
   cursor: pointer;
@@ -1073,7 +1082,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
   max-width: 180px;
 }
 .edd-canon-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .edd-canon-field textarea,

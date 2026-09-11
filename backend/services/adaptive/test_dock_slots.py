@@ -93,8 +93,52 @@ def test_old_shape_parts_zero_damage():
     assert len(parts) == 1
     assert parts[0]["source"] == "ambient"
     assert "note" not in parts[0]
-    assert parts[0]["direction"] == "主线"      # 分析面元数据保留
     assert "origin" not in parts[0]              # 无 from_expectation 无 origin 键
+    assert parts[0]["direction"] == "主线"      # 分析面元数据保留
+
+
+# ============================================================
+# 对白分镜组槽位（2026-09-08 红队 R4）：reply 固定 note、prop 锚点回查
+# ============================================================
+
+_ONSTAGE = {
+    "entities": [{"name": "林尘", "state": ""}, {"name": "老周", "state": ""}],
+    "props": [{"name": "发电机", "desc": ""}],
+    "scene_line": "",
+}
+
+
+class TestDialogueShotSlots:
+
+    def test_reply_note_fixed(self):
+        """reply 锚对白本身——固定后果短语，无出处义务（landing 同款纪律）。"""
+        raw = [{"slot": "reply", "type": "action", "text": "他把到嘴边的劝慰咽了回去"}]
+        parts = _finalize_parts(raw)
+        assert parts[0]["source"] == "reply"
+        assert parts[0]["note"] == "受话人先接住那句话"
+
+    def test_prop_note_resolves_anchor_ref(self):
+        """prop 由 anchor_ref 回查在册名单（entities 在前 props 在后统一编号）。"""
+        raw = [{"slot": "prop", "type": "scene", "text": "机油的气味从底座漫出来", "anchor_ref": 3}]
+        parts = _finalize_parts(raw, onstage=_ONSTAGE)
+        assert parts[0]["source"] == "prop"
+        assert parts[0]["note"] == "镜头对准「发电机」"
+
+    def test_prop_without_anchor_degrades_ambient(self):
+        """指认失败即降级 ambient——标签必须承载真实出处，勿谎标。"""
+        raw = [{"slot": "prop", "type": "scene", "text": "天窗灰光里浮着机油味的尘"}]
+        parts = _finalize_parts(raw, onstage={"entities": [], "props": []})
+        assert parts[0]["source"] == "ambient"
+        assert "note" not in parts[0]
+
+    def test_shot_order_landing_first_then_reply(self):
+        raw = [
+            {"slot": "ambient", "type": "scene", "text": "柴油味在铁皮房里发闷"},
+            {"slot": "reply", "type": "action", "text": "他把到嘴边的劝慰咽了回去"},
+            {"slot": "landing", "type": "action", "text": "林尘把手掌按在底座上"},
+        ]
+        parts = _finalize_parts(raw)
+        assert [p["source"] for p in parts] == ["landing", "reply", "ambient"]
 
 
 def test_violates_drops_part():

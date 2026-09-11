@@ -20,8 +20,12 @@
     直接 tail 上述日志文件——三端彩色日志流 + 状态药丸 + 聚焦/暂停。
     服务状态写 data/dev_status.json（心跳/状态变化时刷新）。
     Electron 关窗仍等于全部收摊（与旧契约一致）。
+    端口契约（与 macos/start.sh、dev_dashboard.py 监督者三端共用）：后端 8002~8100，
+    前端 5175~5285；scripts/check_launcher_contract.py 锁这三处（改一处须同步）。
 .NOTES
     入口：scripts/windows/start-dev.bat / start-debug.bat / start-prod.bat（薄包装透传参数）。
+    -Hidden：后台/无人看守窗口用（不打印按键提示行，但监控循环照跑——心跳、自愈重启、
+    Electron 退出=收摊都依赖它）。真正的隐藏窗口后台模式请用 start-background.vbs。
 #>
 param(
     [ValidateSet('prod', 'dev', 'debug')]
@@ -46,8 +50,9 @@ $ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $Config = @{
     Mode                 = $Mode.ToLower()
     DefaultBackendPort   = 8002
+    BackendPortMax       = 8100   # 与 backend/core/config.py、stop-velluma.ps1 孤儿清扫段对齐
     DefaultFrontendPort  = 5175   # 起始扫描端口（向后兼容）
-    FrontendPortRange    = 100    # 从 5175 起最多扫描 100 个端口（5175~5275）
+    FrontendPortMax      = 5285   # 与 stop-velluma.ps1 孤儿清扫段对齐
     FrontendPort         = $null  # 实际端口（运行时由 Resolve-FrontendPort 填充）
     ProjectRoot          = $ProjectRoot
     BackendTimeout       = 60
@@ -85,145 +90,95 @@ $Global:CleanupDone     = $false
 # =============================================================================
 # Port File Helpers
 # =============================================================================
-function Get-ActualBackendPort {
-    # 优先从端口文件读取实际端口
-    if (Test-Path $Config.PortFile) {
+# 端口契约（后端 8002~8100 / 前端 5175~5285）由本脚本、macos/start.sh、
+# dev_dashboard.py 监督者三份实现共用——scripts/check_launcher_contract.py 锁一致性。
+function ConvertTo-PortOrZero {
+    # 环境变量等外部输入 → 合法端口号；非数字/越界一律归零（调用方按"未指定"处理），
+    # 不抛异常（旧实现 [int]$env 遇脏值直接崩启动链）
+    $port = 0
+    if ($Value -and [int]::TryParse([string]$Value, [ref]$port) -and $port -gt 0) { return $port }
+    return 0
+}
+
+function Read-PortFile([string]$Path, [int]$Fallback = 0) {
+    # 读端口文件；缺失/非法/非正数 → 回退值
+    if (Test-Path $Path) {
         try {
-            $portStr = Get-Content $Config.PortFile -Raw
-            $port = [int]$portStr.Trim()
-            if ($port -gt 0) {
-                return $port
-            }
+            $port = [int]((Get-Content $Path -Raw).Trim())
+            if ($port -gt 0) { return $port }
         } catch {}
     }
-    # 回退到默认端口
-    return $Config.DefaultBackendPort
+    return $Fallback
 }
 
-function Get-ActualFrontendPort {
-    # 优先从端口文件读取实际端口（与后端对称）
-    if (Test-Path $Config.FrontendPortFile) {
-        try {
-            $portStr = Get-Content $Config.FrontendPortFile -Raw
-            $port = [int]$portStr.Trim()
-            if ($port -gt 0) {
-                return $port
-            }
-        } catch {}
-    }
-    return $null
-}
-
-function Find-FreeFrontendPort {
-    # 扫描 5175~(5175+Range) 找第一个空闲端口
-    # 用于避免与其它项目（如 world-atlas）的 Vite 冲突
-    $start = $Config.DefaultFrontendPort
-    $maxOffset = $Config.FrontendPortRange
-    for ($offset = 0; $offset -lt $maxOffset; $offset++) {
-        $candidate = $start + $offset
-        if (-not (Test-PortOpen -Port $candidate)) {
-            return $candidate
-        }
-    }
-    throw "No free frontend port in range $start..$($start + $maxOffset - 1)"
-}
-
-function Find-FreeBackendPort {
-    # 扫描后端端口范围（与 backend/core/config.py 的 DEFAULT_PORT..MAX_PORT 对齐）
-    # 用于 debug 热重载模式下抢占一个稳定端口，避免依赖 main.py 内部扫描
-    $start = $Config.DefaultBackendPort
-    $maxPort = 8100
-    for ($port = $start; $port -le $maxPort; $port++) {
-        if (-not (Test-PortOpen -Port $port)) {
-            return $port
-        }
-    }
-    throw "No free backend port in range $start..$maxPort"
-}
-
-function Resolve-BackendPort {
-    # debug 热重载模式下协商后端端口，优先级：
-    # 1. 环境变量 VELLUMA_PORT（用户强制指定，透传给后端）
-    # 2. 已记录端口（data/port.txt）且该端口空闲 → 复用
-    # 3. 扫描空闲端口（8002 起）
-    # 选中后写入 data/port.txt，并设置 VELLUMA_PORT，使 main.py 跳过自动扫描
-    # 固定端口是热重载的前提：reload 重启 worker 时端口不能漂移，否则前端断连
-    $envPort = $env:VELLUMA_PORT
-    if ($envPort) {
-        $port = [int]$envPort
-        if ($port -gt 0) {
-            Set-BackendPortFile $port
-            return $port
-        }
-    }
-
-    $recorded = Get-ActualBackendPort
-    if ($recorded -and $recorded -gt 0 -and -not (Test-PortOpen -Port $recorded)) {
-        Set-BackendPortFile $recorded
-        return $recorded
-    }
-
-    $freePort = Find-FreeBackendPort
-    Set-BackendPortFile $freePort
-    return $freePort
-}
-
-function Set-BackendPortFile($Port) {
-    # 写入 data/port.txt，供前端 vite.config.js 代理与 electron/main.cjs 读取后端地址
+function Write-PortFile([string]$Path, $Port, [string]$What = "port") {
     # DryRun 只做演示不落盘：否则一次试跑就会把端口文件改指到扫描出的空端口，
     # 正在运行的实例与下次启动的端口协商都会被带偏
     if ($DryRun) { return }
     try {
-        $portDir = Split-Path $Config.PortFile -Parent
-        if (-not (Test-Path $portDir)) {
-            New-Item -ItemType Directory -Path $portDir -Force | Out-Null
-        }
-        [System.IO.File]::WriteAllText($Config.PortFile, $Port.ToString())
+        $dir = Split-Path $Path -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [System.IO.File]::WriteAllText($Path, ([int]$Port).ToString())
     } catch {
-        Log-Error "Failed to write backend port file: $_"
+        Log-Error "Failed to write $What port file: $_"
     }
+}
+
+function Find-FreePort([int]$Start, [int]$End) {
+    # 扫描 [Start, End] 找第一个空闲端口（避开其它项目的 Vite/服务占用）
+    for ($port = $Start; $port -le $End; $port++) {
+        if (-not (Test-PortOpen -Port $port)) { return $port }
+    }
+    throw "No free port in range $Start..$End"
+}
+
+function Resolve-Port {
+    # 端口协商，优先级：
+    # 1. 环境变量（用户强制指定，透传给后端/前端）
+    # 2. 已记录端口（data/*.txt）且该端口空闲 → 复用
+    # 3. 扫描空闲端口（Default 起）
+    # 选中后落盘（-Persist）。固定端口是 debug 热重载的前提：reload 重启 worker 时
+    # 端口不能漂移，否则前端断连。
+    param([int]$Default, [int]$Max, [int]$EnvPort, $Recorded, [scriptblock]$Persist)
+    if ($EnvPort -gt 0) { & $Persist $EnvPort; return $EnvPort }
+    if ($Recorded -and $Recorded -gt 0 -and -not (Test-PortOpen -Port $Recorded)) {
+        & $Persist $Recorded
+        return $Recorded
+    }
+    $free = Find-FreePort -Start $Default -End $Max
+    & $Persist $free
+    return $free
+}
+
+function Get-ActualBackendPort {
+    return Read-PortFile $Config.PortFile $Config.DefaultBackendPort
+}
+
+function Get-ActualFrontendPort {
+    # 前端无「默认端口」语义：文件缺失/非法 → $null（调用方自行决定回退）
+    $port = Read-PortFile $Config.FrontendPortFile 0
+    if ($port -gt 0) { return $port }
+    return $null
+}
+
+function Set-BackendPortFile($Port) { Write-PortFile $Config.PortFile $Port "backend" }
+function Set-FrontendPortFile($Port) { Write-PortFile $Config.FrontendPortFile $Port "frontend" }
+
+function Resolve-BackendPort {
+    # 供 debug 热重载：先协商固定端口并写 data/port.txt + 设 VELLUMA_PORT，
+    # 让 main.py 跳过内部扫描（__main__ 不执行 → save_port 不会被调用）
+    return Resolve-Port -Default $Config.DefaultBackendPort -Max $Config.BackendPortMax `
+        -EnvPort (ConvertTo-PortOrZero $env:VELLUMA_PORT) `
+        -Recorded (Get-ActualBackendPort) `
+        -Persist { param($p) Set-BackendPortFile $p }
 }
 
 function Resolve-FrontendPort {
-    # 协商前端端口，优先级：
-    # 1. 环境变量 VELLUMA_FRONTEND_PORT（用户强制指定）
-    # 2. 已记录的端口（frontend_port.txt）且该端口空闲 → 复用
-    # 3. 扫描空闲端口（5175 起）
-    # 选中后写入 frontend_port.txt，供 vite.config.js 和 electron/main.cjs 读取
-    $envPort = $env:VELLUMA_FRONTEND_PORT
-    if ($envPort) {
-        $port = [int]$envPort
-        if ($port -gt 0) {
-            Set-FrontendPortFile $port
-            return $port
-        }
-    }
-
-    # 检查已记录端口是否仍空闲（可能是上次的残留记录）
-    $recorded = Get-ActualFrontendPort
-    if ($recorded -and -not (Test-PortOpen -Port $recorded)) {
-        Set-FrontendPortFile $recorded
-        return $recorded
-    }
-
-    # 扫描空闲端口
-    $freePort = Find-FreeFrontendPort
-    Set-FrontendPortFile $freePort
-    return $freePort
-}
-
-function Set-FrontendPortFile($Port) {
-    # 写入前端端口文件（供 vite.config.js / electron/main.cjs 协调）；DryRun 不落盘（同上）
-    if ($DryRun) { return }
-    try {
-        $portDir = Split-Path $Config.FrontendPortFile -Parent
-        if (-not (Test-Path $portDir)) {
-            New-Item -ItemType Directory -Path $portDir -Force | Out-Null
-        }
-        [System.IO.File]::WriteAllText($Config.FrontendPortFile, $Port.ToString())
-    } catch {
-        Log-Error "Failed to write frontend port file: $_"
-    }
+    # 选中端口写 frontend_port.txt，供 vite.config.js 和 electron/main.cjs 读取
+    return Resolve-Port -Default $Config.DefaultFrontendPort -Max $Config.FrontendPortMax `
+        -EnvPort (ConvertTo-PortOrZero $env:VELLUMA_FRONTEND_PORT) `
+        -Recorded (Get-ActualFrontendPort) `
+        -Persist { param($p) Set-FrontendPortFile $p }
 }
 
 # =============================================================================
@@ -608,99 +563,104 @@ function Start-MonitorLoop {
 
     # 监控循环期接管 Ctrl+C（作为普通按键读入，统一走"停全部"清理路径）。
     # 启动阶段保持默认语义：Ctrl+C 直接中断管线，由 finally 兜底清理。
-    try { [Console]::TreatControlCAsInput = $true } catch {}
+    $tookOverCtrlC = $false
+    try { [Console]::TreatControlCAsInput = $true; $tookOverCtrlC = $true } catch {}
 
     # 输入被重定向（如从别的脚本/CI 调起）时 KeyAvailable 不可用 → 降级为无键盘模式，
     # 仍保留排水 + 心跳 + Electron 退出即收摊
     $keyboardOk = $true
     try { $null = [Console]::KeyAvailable } catch { $keyboardOk = $false }
 
-    Write-Host ""
-    # 隐藏窗口下无人按键，提示行只留给可见终端
-    if ($Hidden) { return }
+    try {
+        Write-Host ""
 
-    if ($keyboardOk) {
-        Write-Host "  按键 → [1] 后端  [2] 前端  [3] Electron  [0] 全部  [s] 状态  [q] 停止全部（Ctrl+C 同）" -ForegroundColor DarkGray
-    } else {
-        Write-Host "  （输入未接终端，按键不可用；关闭 Electron 窗口或 Ctrl+C 停止全部）" -ForegroundColor DarkGray
-    }
-    Write-Host ""
+        # ⚠ -Hidden 只压提示行，绝不提前 return：心跳、自愈重启、状态 JSON 刷新与
+        # 「Electron 退出=收摊」全在这个循环里，旧版在此 return 等于启动完立刻收摊。
+        if (-not $Hidden) {
+            if ($keyboardOk) {
+                Write-Host "  按键 → [1] 后端  [2] 前端  [3] Electron  [0] 全部  [s] 状态  [q] 停止全部（Ctrl+C 同）" -ForegroundColor DarkGray
+            } else {
+                Write-Host "  （输入未接终端，按键不可用；关闭 Electron 窗口或 Ctrl+C 停止全部）" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+        }
 
-    Show-MonitorStatus
-    Write-DevStatus
-    Set-Restarter
-    $lastStatus = Get-Date
-    $running = $true
+        Show-MonitorStatus
+        Write-DevStatus
+        Set-Restarter
+        $lastStatus = Get-Date
+        $running = $true
 
-    while ($running) {
-        Invoke-DrainDisplayQueue
+        while ($running) {
+            Invoke-DrainDisplayQueue
 
-        if ($keyboardOk) {
-            try {
-                while ([Console]::KeyAvailable) {
-                    $key = [Console]::ReadKey($true)
-                    $isCtrlC = ($key.Key -eq [ConsoleKey]::C) -and (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
-                    switch ($key.Key) {
-                        'D1'      { Set-Focus 'backend' }
-                        'D2'      { Set-Focus 'vite' }
-                        'D3'      { Set-Focus 'electron' }
-                        'D0'      { Set-Focus 'all' }
-                        'NumPad1' { Set-Focus 'backend' }
-                        'NumPad2' { Set-Focus 'vite' }
-                        'NumPad3' { Set-Focus 'electron' }
-                        'NumPad0' { Set-Focus 'all' }
-                        'S'       { Show-MonitorStatus }
-                        'Q'       { $running = $false }
-                        'C'       { if ($isCtrlC) { $running = $false } }
+            if ($keyboardOk -and -not $Hidden) {
+                try {
+                    while ([Console]::KeyAvailable) {
+                        $key = [Console]::ReadKey($true)
+                        $isCtrlC = ($key.Key -eq [ConsoleKey]::C) -and (($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0)
+                        switch ($key.Key) {
+                            'D1'      { Set-Focus 'backend' }
+                            'D2'      { Set-Focus 'vite' }
+                            'D3'      { Set-Focus 'electron' }
+                            'D0'      { Set-Focus 'all' }
+                            'NumPad1' { Set-Focus 'backend' }
+                            'NumPad2' { Set-Focus 'vite' }
+                            'NumPad3' { Set-Focus 'electron' }
+                            'NumPad0' { Set-Focus 'all' }
+                            'S'       { Show-MonitorStatus }
+                            'Q'       { $running = $false }
+                            'C'       { if ($isCtrlC) { $running = $false } }
+                        }
+                        if (-not $running) { break }
                     }
-                    if (-not $running) { break }
-                }
-            } catch { $keyboardOk = $false }
-        }
+                } catch { $keyboardOk = $false }
+            }
 
-        if (-not $running) {
-            Log-Info "Stopping all services..."
-            break
-        }
+            if (-not $running) {
+                Log-Info "Stopping all services..."
+                break
+            }
 
-        # 状态心跳
-        if (((Get-Date) - $lastStatus).TotalSeconds -ge $Config.StatusHeartbeatSec) {
-            Show-MonitorStatus
-            Write-DevStatus
-            $lastStatus = Get-Date
-        }
-
-        # 服务意外退出：红色告警 + 写入 dev_sys.log（隐藏模式下控制台不可见，文件是唯一可见渠道）
-        # + 后端/前端自愈重启（上限 2 次）。Electron 除外——它的退出是收摊契约的锚点。
-        foreach ($t in $Global:TrackedProcs) {
-            if ($t.Key -ne 'electron' -and $t.Proc.HasExited -and -not $t.Alerted) {
-                $t.Alerted = $true
-                Write-Host ("[sys] {0} 进程已退出 (code {1})" -f $t.Label, $t.Proc.ExitCode) -ForegroundColor Red
-                Write-SysLog ("{0} 进程已退出 (code {1})" -f $t.Label, $t.Proc.ExitCode)
+            # 状态心跳
+            if (((Get-Date) - $lastStatus).TotalSeconds -ge $Config.StatusHeartbeatSec) {
+                Show-MonitorStatus
                 Write-DevStatus
-                if ([int]$Global:RestartCount[$t.Key] -lt 2) {
-                    Restart-ServiceByKey -Key $t.Key
+                $lastStatus = Get-Date
+            }
+
+            # 服务意外退出：红色告警 + 写入 dev_sys.log（隐藏模式下控制台不可见，文件是唯一可见渠道）
+            # + 后端/前端自愈重启（上限 2 次）。Electron 除外——它的退出是收摊契约的锚点。
+            foreach ($t in $Global:TrackedProcs) {
+                if ($t.Key -ne 'electron' -and $t.Proc.HasExited -and -not $t.Alerted) {
+                    $t.Alerted = $true
+                    Write-Host ("[sys] {0} 进程已退出 (code {1})" -f $t.Label, $t.Proc.ExitCode) -ForegroundColor Red
+                    Write-SysLog ("{0} 进程已退出 (code {1})" -f $t.Label, $t.Proc.ExitCode)
                     Write-DevStatus
-                } else {
-                    Write-Host ("[sys] {0} 已达重启上限，放弃（按 q 停止全部）" -f $t.Label) -ForegroundColor Red
-                    Write-SysLog ("{0} 已达重启上限，放弃" -f $t.Label)
+                    if ([int]$Global:RestartCount[$t.Key] -lt 2) {
+                        Restart-ServiceByKey -Key $t.Key
+                        Write-DevStatus
+                    } else {
+                        Write-Host ("[sys] {0} 已达重启上限，放弃（按 q 停止全部）" -f $t.Label) -ForegroundColor Red
+                        Write-SysLog ("{0} 已达重启上限，放弃" -f $t.Label)
+                    }
                 }
             }
-        }
 
-        # Electron 退出 = 全部服务收摊（与旧契约一致：关窗即停）
-        if ($ElectronProc -and $ElectronProc.HasExited) {
-            Show-StartupOutputTail
-            Write-Host ""
-            Log-Info "Electron exited (code $($ElectronProc.ExitCode))"
-            $running = $false
-            break
-        }
+            # Electron 退出 = 全部服务收摊（与旧契约一致：关窗即停）
+            if ($ElectronProc -and $ElectronProc.HasExited) {
+                Show-StartupOutputTail
+                Write-Host ""
+                Log-Info "Electron exited (code $($ElectronProc.ExitCode))"
+                $running = $false
+                break
+            }
 
-        Start-Sleep -Milliseconds $Config.MonitorPollMs
+            Start-Sleep -Milliseconds $Config.MonitorPollMs
+        }
+    } finally {
+        if ($tookOverCtrlC) { try { [Console]::TreatControlCAsInput = $false } catch {} }
     }
-
-    try { [Console]::TreatControlCAsInput = $false } catch {}
 }
 
 # =============================================================================
@@ -897,14 +857,20 @@ function Start-Backend() {
 function Start-FrontendBuild() {
     # 生产模式专用：npm run build 生成 dist/ 供 Electron loadFile 载入
     # 不启动 Vite dev server
+    $frontendDir = Join-Path $Config.ProjectRoot "frontend"
+    $distIndex = Join-Path $frontendDir "dist\index.html"
+
     if ($SkipFrontend) {
-        Log-Info "SkipFrontend set, assuming dist/ already built"
+        # 跳过构建 = 断言 dist 已在（Electron 随后 loadFile 它）——缺了就当场说清楚，
+        # 别等到 Electron 白屏
+        if (-not (Test-Path $distIndex)) {
+            throw "SkipFrontend set but dist/index.html missing at $distIndex (先跑一次 npm run build 或去掉 -SkipFrontend)"
+        }
+        Log-Info "SkipFrontend set, using existing dist/"
         return
     }
 
     Write-ProgressLine "[..] build     npm run build..." ([ConsoleColor]::DarkYellow)
-
-    $frontendDir = Join-Path $Config.ProjectRoot "frontend"
 
     if (!(Test-Path (Join-Path $frontendDir "node_modules"))) {
         Clear-ProgressLine
@@ -928,7 +894,6 @@ function Start-FrontendBuild() {
         throw "npm run build failed with exit code $($buildInfo.ExitCode)"
     }
 
-    $distIndex = Join-Path $frontendDir "dist\index.html"
     if (!(Test-Path $distIndex)) {
         Clear-ProgressLine
         throw "Build completed but dist/index.html not found at $distIndex"
@@ -1027,21 +992,17 @@ function Start-Electron() {
 
     if ($DryRun) {
         Clear-ProgressLine
-        Log-Info "[DryRun] Would run: npm run electron:dev (cwd: $frontendDir)"
+        Log-Info "[DryRun] Would run: npm run electron:nobuild (cwd: $frontendDir)"
         return
     }
 
-    # dev/debug 走 electron:nobuild：开发模式 main.cjs 加载的是 vite dev server，
-    # electron:dev 里的 vite build 产物根本不会被加载，白等 30~60 秒；prod 仍走完整
-    # 构建（dist 供 loadFile）
-    $electronScript = if ($Config.Mode -eq 'prod') { "electron:dev" } else { "electron:nobuild" }
-
-    # 注意：electron:nobuild/dev = "electron ." / "npm run build && electron ."
-    #   - 生产模式：build 已由 Start-FrontendBuild 完成，electron:dev 再 build 一次是幂等的（vite build 增量）
-    #     之所以不直接 "electron ."，是为了复用现有 npm script，避免引入新 script 增加维护面
-    #   - 开发/调试模式：跳过 build 直接 "electron ."，窗口秒级弹出
+    # 三模式统一 electron:nobuild（= 直接 "electron ."）：
+    #   - dev/debug：main.cjs 走 loadURL 加载 vite dev server，electron:dev 里的
+    #     vite build 产物根本不会被加载，白等 30~60 秒
+    #   - prod：dist 已由 Start-FrontendBuild 构建并校验过，再 build 一次同样纯属浪费
+    # main.cjs 用 NODE_ENV 决定 loadURL/loadFile，与构建与否无关。
     $proc = Start-MonitoredProcess -FilePath "cmd.exe" `
-        -ArgumentList @("/c", "npm", "run", $electronScript) `
+        -ArgumentList @("/c", "npm", "run", "electron:nobuild") `
         -WorkingDirectory $frontendDir `
         -Key "electron" `
         -EnvVars $electronEnv

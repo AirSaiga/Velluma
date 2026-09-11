@@ -209,7 +209,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .entry-status-row.error {
-  color: #dc2626;
+  color: var(--danger);
   background: rgba(220, 38, 38, 0.04);
 }
 
@@ -241,7 +241,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .entry-error {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   opacity: 0.8;
   max-width: 180px;
   white-space: nowrap;
@@ -278,7 +278,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .done-icon.has-error {
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 .done-title {
@@ -301,7 +301,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .stat-error {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 500;
 }
 
@@ -318,7 +318,7 @@ function statusLabel(status: ImportEntry['status']): string {
 .error-details-title {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #dc2626;
+  color: var(--danger);
   margin: 0 0 0.5rem;
 }
 

@@ -183,7 +183,11 @@ class TestCountAutoReads24h:
                         created_at=now - timedelta(hours=hours_ago),
                     )
                 s.add(run_row("adaptive.event_scout.auto_read", 1))   # 计
-                s.add(run_row("loop3.emergent_facts", 2))           # 计（实体通读同池）
+                s.add(run_row("adaptive.read_entities", 2))          # 计（自动认人同池）
+                s.add(run_row("loop3.emergent_facts", 1))            # 不计（手动沉淀——
+                                                                    # 2026-09-10 认人
+                                                                    # 拆分后本池只封
+                                                                    # 自动观察）
                 s.add(run_row("adaptive.event_scout.settle", 1))    # 不计（手动沉淀）
                 s.add(run_row("adaptive.event_scout.auto_read", 30))  # 不计（出窗）
                 s.add(run_row("adaptive.stitch.continue", 1))       # 不计（非观察类）

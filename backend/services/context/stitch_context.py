@@ -347,6 +347,9 @@ _BLOCK_TITLES = {
     "spatial": "空间常识",
     "style_positive": "文风画像",
     "author_samples": "笔迹示范",
+    # 白描契约与假感官封杀令（2026-09-09）：stitch/continue 专属 mode 门控
+    # 分节（其余模式空串）——预览「AI 此刻所见」同源收录
+    "anti_pseudo_sensory": "白描封杀令",
 }
 
 

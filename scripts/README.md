@@ -1,20 +1,27 @@
 # scripts/ — 启动脚本
 
-Velluma 的启动入口，**按平台分目录**，每个平台内含 dev / debug / prod 三模式。编排核心（端口协商、进程清理）Windows 与 macOS 各一份，行为契约一致。
+Velluma 的启动入口，**按平台分目录**，每个平台内含 dev / debug / prod 三模式。编排核心（端口协商、进程清理）Windows 与 macOS 各一份，另有一份两平台共用的 python 监督者（后台模式），三份实现行为契约一致——契约里的数字（端口段、npm script 名）没法共享代码，由 `check_launcher_contract.py` 对拍防漂移。
 
 ```
 scripts/
-├── windows/                  # Windows（PowerShell + .bat）
-│   ├── start.ps1             #   编排核心：-Mode dev/debug/prod
-│   ├── start-dev.bat         #   开发模式入口（薄包装）
-│   ├── start-debug.bat       #   调试模式入口（薄包装）
-│   └── start-prod.bat        #   生产体验入口（薄包装）
-├── macos/                    # macOS / Linux（bash）
-│   ├── start.sh              #   编排核心：dev/debug/prod
-│   ├── start-dev.sh          #   开发模式入口（薄包装）
-│   ├── start-debug.sh        #   调试模式入口（薄包装）
-│   └── start-prod.sh         #   生产体验入口（薄包装）
-└── *.py                      # 工具脚本（非启动，见下「工具脚本」节）
+├── windows/                    # Windows（PowerShell + .bat/.vbs）
+│   ├── start.ps1               #   编排核心：-Mode dev/debug/prod
+│   ├── start-dev.bat           #   开发模式入口（薄包装）
+│   ├── start-debug.bat         #   调试模式入口（薄包装）
+│   ├── start-prod.bat          #   生产体验入口（薄包装）
+│   ├── start-background.vbs    #   后台模式（python 监督者，无终端窗口）
+│   ├── start-background-debug.vbs
+│   └── stop-velluma.bat / .ps1 #   一键收摊（状态 JSON → 树杀 → 孤儿清扫）
+├── macos/                      # macOS / Linux（bash）
+│   ├── start.sh                #   编排核心：dev/debug/prod
+│   ├── start-dev.sh            #   开发模式入口（薄包装）
+│   ├── start-debug.sh          #   调试模式入口（薄包装）
+│   ├── start-prod.sh           #   生产体验入口（薄包装）
+│   ├── start-background.sh     #   后台模式（nohup 脱离终端）
+│   └── stop-velluma.sh         #   一键收摊（TERM 启动器走 trap 清理）
+├── dev_dashboard.py            # 网页监控台；--supervise = 后台模式进程树主人
+├── check_launcher_contract.py  # 三端契约自检（CI 阻断步，见「契约自检」节）
+└── *.py                        # 工具脚本（非启动，见下「工具脚本」节）
 ```
 
 ## 三种模式（两平台一致）
@@ -82,10 +89,23 @@ scripts/
 
 ## 两平台共同的行为契约
 
+- **端口段**：后端 `8002~8100`（与 `backend/core/config.py` 的 DEFAULT_PORT..MAX_PORT 对齐），前端 `5175~5285`（避开其它项目的 Vite；`stop-velluma` 的孤儿清扫段与之对齐）。协商优先级三端一致：环境变量（`VELLUMA_PORT` / `VELLUMA_FRONTEND_PORT`）→ 已记录端口且空闲则复用 → 扫描首个空闲端口。
 - **端口文件**：后端实际端口写 `data/port.txt`，前端端口写 `data/frontend_port.txt`（`vite.config.js` 代理与 `electron/main.cjs` 读取，两端脚本写法一致）。
 - **Electron 环境变量**：编排核心为 Electron 设 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，prod 另设 `NODE_ENV=production`。
+- **Electron 启动方式**：三模式一律 `npm run electron:nobuild`（= 直接 `electron .`）——dev/debug 下 `main.cjs` 走 `loadURL`，`electron:dev` 里的 vite build 产物根本不会被加载；prod 的 `dist/` 已由编排核心显式构建并校验（`--skip-frontend` 时会断言 `dist/index.html` 在），再 build 一次纯属浪费。`loadURL`/`loadFile` 由 `NODE_ENV` 决定，与是否构建无关。
+- **日志**：每次启动重建 `logs/dev_*.log`（前端车道供网页监控台增量 tail）＋启动器叙事进 `logs/dev_sys.log`；DryRun 不写日志、不写端口文件、不杀任何进程。
 - **项目根推导**：编排核心按 `$PSScriptRoot` / `BASH_SOURCE` 的祖父目录定位项目根，脚本可在任意 cwd 调用。
 - **平台差异**：Python venv 路径（`Scripts\python.exe` vs `bin/python`）、端口探测（TcpClient vs `nc`/`/dev/tcp`）、进程清理（Win32_Process vs `lsof`/`pgrep`）；macOS 版要求 bash（系统自带 3.2 即可），Linux 未专门测试但依赖均为常见内置工具。
+
+## 契约自检
+
+```bash
+python scripts/check_launcher_contract.py     # 一致退 0，漂移退 1（CI 阻断步）
+```
+
+三份编排（`windows/start.ps1` / `macos/start.sh` / `dev_dashboard.py` 监督者）＋ 收摊脚本 ＋ 前端 `frontend/src/services/api/transport/base.ts` 的 dev-server 判定区间，共用同一组数字却无法共享代码，只能靠对拍。历史漂移：前端扫描上界 `5274` / `5275` / `5285` 三版并存、监控台覆盖段与收摊脚本孤儿清扫段对不上。
+
+**改端口段或换 electron npm script 时**：改全部实现 → 改 `check_launcher_contract.py` 里的契约常量 → 跑一次确认变绿。它报错不是噪声，是刚拦下一次真实漂移。
 
 ## 工具脚本（非启动）
 

@@ -93,14 +93,14 @@ function handleBackdropClick(e: MouseEvent) {
   <Transition name="modal">
     <div
       v-if="show"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3"
+      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40 backdrop-blur-sm p-3"
       @click="handleBackdropClick"
     >
       <div class="modal-content bg-[var(--bg-primary)] rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
       <div class="p-4 border-b border-white/60 flex items-center justify-between">
         <div>
-          <h3 class="text-base font-heading font-semibold text-[var(--text-primary)]">点子启发</h3>
-          <p class="text-[11px] text-[var(--text-muted)] mt-0.5">为您的剧情提供灵感火花</p>
+          <h3 class="text-base font-heading font-semibold text-[var(--text-primary)]">找灵感</h3>
+          <p class="text-xs text-[var(--text-muted)] mt-0.5">给这章出几个点子</p>
         </div>
         <button @click="closeModal" class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -111,7 +111,7 @@ function handleBackdropClick(e: MouseEvent) {
 
       <div class="p-4 overflow-y-auto max-h-[calc(85vh-120px)]">
         <div class="mb-4">
-          <label class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">作者意图引导 (可选)</label>
+          <label class="block text-xs font-medium text-[var(--text-muted)] mb-1.5">你想要什么方向？（可空）</label>
           <div class="flex gap-2">
             <textarea
               v-model="authorIntent"
@@ -125,7 +125,7 @@ function handleBackdropClick(e: MouseEvent) {
               :disabled="loading"
               class="px-4 rounded-xl bg-accent-500 text-white text-xs font-medium hover:bg-accent-600 disabled:opacity-50 transition-colors flex flex-col items-center justify-center gap-1 min-w-[60px]"
             >
-              <svg v-if="loading" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <svg v-if="loading" class="animate-spin spin-reduced h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
@@ -137,9 +137,9 @@ function handleBackdropClick(e: MouseEvent) {
         <div v-if="loading" class="flex flex-col items-center justify-center py-8">
           <div class="relative flex items-center justify-center w-16 h-16 mb-4">
             <div class="absolute inset-0 rounded-full border-4 border-accent-50"></div>
-            <div class="absolute inset-0 rounded-full border-4 border-accent-500 border-t-transparent animate-spin"></div>
+            <div class="absolute inset-0 rounded-full border-4 border-accent-500 border-t-transparent animate-spin spin-reduced"></div>
           </div>
-          <p class="text-sm text-[var(--text-secondary)]">正在思考灵感...</p>
+          <p class="text-sm text-[var(--text-secondary)]">正在想点子…</p>
         </div>
 
         <div v-else-if="error" class="flex flex-col items-center justify-center py-8">
@@ -166,7 +166,7 @@ function handleBackdropClick(e: MouseEvent) {
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2">
                 <span
-                  class="px-2 py-0.5 text-[10px] font-medium rounded-full ring-1"
+                  class="px-2 py-0.5 text-xs font-medium rounded-full ring-1"
                   :class="ideaTypeColors[idea.idea_type]"
                 >
                   {{ ideaTypeLabels[idea.idea_type] }}
@@ -180,7 +180,7 @@ function handleBackdropClick(e: MouseEvent) {
             </div>
 
             <div class="space-y-2">
-              <label class="text-[10px] text-[var(--text-muted)]">描述</label>
+              <label class="text-xs text-[var(--text-muted)]">描述</label>
               <textarea
                 v-model="idea.description"
                 rows="3"
@@ -190,7 +190,7 @@ function handleBackdropClick(e: MouseEvent) {
             </div>
 
             <div class="space-y-2">
-              <label class="text-[10px] text-[var(--text-muted)]">影响</label>
+              <label class="text-xs text-[var(--text-muted)]">影响</label>
               <textarea
                 v-model="idea.impact"
                 rows="2"
@@ -207,14 +207,14 @@ function handleBackdropClick(e: MouseEvent) {
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
                 </svg>
-                应用到大纲
+                收进大纲
               </button>
             </div>
           </div>
         </div>
 
         <div v-else class="flex flex-col items-center justify-center py-8">
-          <p class="text-sm text-[var(--text-muted)]">暂无灵感数据</p>
+          <p class="text-sm text-[var(--text-muted)]">还没想到点子</p>
         </div>
       </div>
 
@@ -224,7 +224,7 @@ function handleBackdropClick(e: MouseEvent) {
           :disabled="loading"
           class="px-3 py-1.5 rounded-xl bg-parchment-50 text-[var(--text-secondary)] text-xs ring-1 ring-[var(--border-color)]/60 hover:bg-ink-50 hover:shadow-md transition-all duration-200 disabled:opacity-40"
         >
-          重新生成
+          再想几个
         </button>
         <button
           @click="closeModal"

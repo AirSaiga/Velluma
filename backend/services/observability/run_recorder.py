@@ -74,6 +74,7 @@ class CallRecord:
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     thinking_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None  # 缓存命中输入 token（成本核算；None=厂商未回报）
     latency_ms: Optional[int] = None
     degraded: Optional[Dict[str, Any]] = None  # {reason, action, detail?}
 
@@ -165,6 +166,7 @@ class RunRecorder:
             prompt_tokens=result.usage.get("prompt_tokens") if result.usage else None,
             completion_tokens=result.usage.get("completion_tokens") if result.usage else None,
             thinking_tokens=result.usage.get("reasoning_tokens") if result.usage else None,
+            cached_tokens=result.usage.get("cached_tokens") if result.usage else None,
             latency_ms=result.latency_ms,
             degraded=degraded,
         )
@@ -286,6 +288,7 @@ class RunRecorder:
                     prompt_tokens=record.prompt_tokens,
                     completion_tokens=record.completion_tokens,
                     thinking_tokens=record.thinking_tokens,
+                    cached_tokens=record.cached_tokens,
                     latency_ms=record.latency_ms,
                     degraded=record.degraded,
                 )
@@ -337,6 +340,7 @@ class _CallContext:
             prompt_tokens=self._result.usage.get("prompt_tokens") if self._result.usage else None,
             completion_tokens=self._result.usage.get("completion_tokens") if self._result.usage else None,
             thinking_tokens=self._result.usage.get("reasoning_tokens") if self._result.usage else None,
+            cached_tokens=self._result.usage.get("cached_tokens") if self._result.usage else None,
             latency_ms=self._result.latency_ms,
             degraded=self._degraded,
         )

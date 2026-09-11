@@ -180,6 +180,15 @@ export interface ModelCatalog {
   vendors: VendorCatalogEntry[]
 }
 
+/** 模型价目（元/百万 token）；cached_input 可缺省=按 input 全价（保守） */
+export interface ModelPriceEntryPayload {
+  input: number
+  cached_input?: number
+  output: number
+}
+
+export type ModelPriceTable = Record<string, ModelPriceEntryPayload>
+
 export const systemApi = {
   /**
    * 获取模型配置（LLM / Embedding / 代理）
@@ -187,6 +196,23 @@ export const systemApi = {
    */
   getModelConfig: async (): Promise<ModelConfig> => {
     return requestJson('/system/model-config')
+  },
+
+  /**
+   * 读模型价目表（成本核算，元/百万 token；空表=全部未计价）
+   */
+  getModelPrices: async (): Promise<{ prices: ModelPriceTable }> => {
+    return requestJson('/system/model-prices')
+  },
+
+  /**
+   * 整表覆写模型价目并持久化（空对象=清空回到未计价态）；保存后立即生效
+   */
+  updateModelPrices: async (prices: ModelPriceTable): Promise<{ prices: ModelPriceTable }> => {
+    return requestJson('/system/model-prices', {
+      method: 'PUT',
+      body: JSON.stringify({ prices })
+    })
   },
 
   /**

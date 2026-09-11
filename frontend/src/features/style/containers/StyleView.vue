@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { prefersReducedMotion } from '../../../shared/utils/motion'
 /**
  * 文风页容器（文风模块重构 S1，docs/style-module-redesign.md §6.2/§8）。
  *
@@ -743,7 +744,11 @@ const anchors = [
 ]
 
 function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // reduced-motion 下 JS 平滑滚动同样豁免（00 期 §5.2）
+  document.getElementById(id)?.scrollIntoView({
+    behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    block: 'start',
+  })
 }
 
 function backToLibrary() {
@@ -833,8 +838,9 @@ onUnmounted(() => clearTimeout(autosaveTimer))
               <button class="btn-suggest" :disabled="isExtracting" @click="openExtract">开始提炼</button>
             </div>
 
-            <!-- 事实层配对：左边贴字，右边立刻看到测量（啊哈时刻并排成立） -->
+            <!-- 事实层配对：左边贴字（样本库+采纳池同族支流），右边立刻看到测量（00 期 §2.1） -->
             <div class="section-row duo duo-measure">
+              <div class="duo-col duo-col--samples">
               <StyleSampleSection
                 :samples="samples"
                 :fingerprint-by-sample="fingerprintBySample"
@@ -851,6 +857,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
                 :busy-id="adoptedBusyKey"
                 @collect="collectAdopted"
               />
+              </div>
 
               <StyleFingerprintSection
                 :fingerprint="fingerprint"
@@ -987,13 +994,13 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 .page-title {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--text-primary);
 }
 .book-name {
   overflow: hidden;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--text-muted);
@@ -1001,24 +1008,24 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 .save-badge {
   flex-shrink: 0;
   padding: 0.125rem 0.5rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   border-radius: 0.25rem;
 }
 .badge-dirty {
-  color: #b45309;
-  background: #fef3c7;
+  color: var(--warn);
+  background: var(--warn-bg);
 }
 .badge-saving {
-  color: #1d4ed8;
-  background: #dbeafe;
+  color: var(--info);
+  background: var(--info-bg);
 }
 .badge-saved {
-  color: #047857;
-  background: #d1fae5;
+  color: var(--ok);
+  background: var(--ok-bg);
 }
 .badge-error {
-  color: #b91c1c;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 .anchor-nav {
   display: flex;
@@ -1029,8 +1036,8 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   border-bottom: 1px solid var(--border-color);
 }
 .anchor-btn {
-  padding: 0.25rem 0.75rem;
-  font-size: 0.75rem;
+  padding: 0.375rem 0.875rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid transparent;
@@ -1044,6 +1051,8 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 .style-main {
   flex: 1;
   overflow-y: auto;
+  container-type: inline-size;
+  container-name: stylepage;
 }
 /* 流式宽度：随窗口生长，96rem 封顶（超宽屏不拉疯），侧 padding 随窗宽缩放 */
 .style-column {
@@ -1064,6 +1073,10 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 /* 分区行：hairline 分隔归容器（组件自身不带底线）；duo = 两栏网格 */
 .section-row {
   border-bottom: 1px solid var(--border-color);
+  padding: var(--space-8) 0;
+}
+.section-row:first-of-type {
+  padding-top: var(--space-4);
 }
 .section-row:last-child {
   border-bottom: none;
@@ -1075,14 +1088,22 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 .section-row.duo > :first-child {
   border-right: 1px solid var(--border-color);
 }
+/* §2.1 左列 wrapper：样本库+采纳池同族支流，纵排 */
+.duo-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
 .duo-measure {
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
 }
 .duo-feedback {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
-/* 窄窗兜底：两栏塌回单列，栏间改虚线分隔 */
-@media (max-width: 74rem) {
+/* §2.2 窄可用宽兜底改 container query（视口断点在 minWidth 1200 的桌面应用
+   里永不触发；DPI 缩放 1093px 视口 = 容器 ~64rem，仍在双栏阈值上） */
+@container stylepage (max-width: 60rem) {
   .section-row.duo {
     grid-template-columns: 1fr;
   }
@@ -1104,7 +1125,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   gap: 0.75rem;
   padding: 0.625rem 0.875rem;
   margin: 0.75rem 0 0;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--accent-500) 8%, var(--bg-panel));
   border: 1px solid color-mix(in srgb, var(--accent-500) 30%, var(--border-color));
@@ -1112,8 +1133,9 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 }
 .btn-suggest {
   flex-shrink: 0;
+  min-height: 28px;
   padding: 0.3rem 0.75rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: white;
   background: var(--accent-500);
   border: none;

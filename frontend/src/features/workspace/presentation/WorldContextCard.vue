@@ -141,7 +141,7 @@ function quickNote() {
             <span class="wctx-chronicle-time">{{ formatTime(ev.time_start) }}</span>
           </div>
         </div>
-        <div v-else class="wctx-chronicle-empty">尚无叙事时刻之前的事件记录</div>
+        <div v-else class="wctx-chronicle-empty">这个时间之前，还没有事情被记下</div>
         <div class="wctx-actions">
           <button class="wctx-link" @click="quickNote">记一笔</button>
           <button class="wctx-link" @click="openInWorld">在世界页打开 →</button>

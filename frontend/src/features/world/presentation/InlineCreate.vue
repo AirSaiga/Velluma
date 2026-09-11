@@ -4,11 +4,13 @@
  * 要关模态去侧栏建再回来重填」的流程断裂。
  *
  * 点 ＋ → 展开输入框 → Enter 提交 → created 回传（父组件把 select 值设为新项）。
- * 地点内联创建：坐标取地图中心附近随机落点（建后出现 marker，拖拽调整位置）。
+ * 地点内联创建：坐标传 null（暂不上图，之后从地点抽屉「放到地图」点选补坐标）
+ * ——旧实现随机落点会把地点扔进海里/视野外，纯属伪造。
  * Esc 收起；Enter 已 stop（不会触发外层表单提交）。
  */
 import { ref, computed, nextTick } from 'vue'
 import Icon from '../../../components/Icon.vue'
+import { useToast } from '../../../composables/useToast'
 import { useWorld } from '../composables/useWorld'
 
 const props = defineProps<{
@@ -19,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{ created: [item: { id: string; name: string }] }>()
 
 const { createEntity, createLocation } = useWorld()
+const { showToast } = useToast()
 
 const open = ref(false)
 const name = ref('')
@@ -53,10 +56,12 @@ async function submit() {
     if (props.kind === 'location') {
       const loc = await createLocation(props.bookId, {
         name: n,
-        coord_x: 420 + Math.random() * 160,
-        coord_y: 420 + Math.random() * 160,
+        coord_x: null,
+        coord_y: null,
       })
       item = loc
+      // 无坐标不上图——不提示的话作者下一屏在地图上找不到刚建的地点会困惑
+      showToast(`「${n}」已建立——暂未放置到地图，可在地点抽屉里放上去`, 'info', 6000)
     } else {
       const ent = await createEntity(props.bookId, { entity_type: props.kind, name: n })
       item = ent

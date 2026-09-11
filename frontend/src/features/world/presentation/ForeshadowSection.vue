@@ -176,7 +176,7 @@ function anchorText(f: Foreshadow): string {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
   padding: 0.25rem 0.125rem;
@@ -185,7 +185,7 @@ function anchorText(f: Foreshadow): string {
 
 .side-count {
   margin-left: auto;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
 }
@@ -198,7 +198,7 @@ function anchorText(f: Foreshadow): string {
 }
 
 .fs-chip {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   padding: 0.125rem 0.5rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -284,7 +284,7 @@ function anchorText(f: Foreshadow): string {
 }
 
 .sc-name {
-  font-size: 0.75rem;
+  font-size: var(--text-base);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -293,7 +293,7 @@ function anchorText(f: Foreshadow): string {
 
 .fs-auto {
   flex-shrink: 0;
-  font-size: 0.5625rem;
+  font-size: var(--text-xs);
   padding: 0.0625rem 0.3125rem;
   background: rgba(124, 106, 173, 0.12);
   color: var(--accent-500);
@@ -304,7 +304,7 @@ function anchorText(f: Foreshadow): string {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -326,7 +326,7 @@ function anchorText(f: Foreshadow): string {
 
 .side-empty {
   padding: 0.5rem 0.25rem 0.625rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -341,7 +341,7 @@ function anchorText(f: Foreshadow): string {
   align-items: center;
   gap: 4px;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-secondary);
   background: transparent;
@@ -360,7 +360,7 @@ function anchorText(f: Foreshadow): string {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 9px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-canvas);

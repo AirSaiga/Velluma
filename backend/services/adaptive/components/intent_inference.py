@@ -154,6 +154,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         intent = ChapterIntent(
             source="inferred",
             confidence=confidence,
+            # 意图衰老锚点（2026-09-09）：反推时正文体量——dock 比对当前字数判陈旧
+            prose_chars=len(written_text(bundle.content_text or "")),
             arc=str(parsed.get("arc") or "").strip(),
             emotion_curve=parsed.get("emotion_curve", []),
             setup_points=parsed.get("setup_points", []),

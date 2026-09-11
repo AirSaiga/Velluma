@@ -33,13 +33,18 @@ const props = defineProps<{
   bookId?: string
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   lastSavedAt?: Date | null
+  /** 当前章节字数（WorkspaceView 剥 HTML 计字符下传；底栏删除后由页头 meta 行继承） */
+  wordCount?: number
+  /** AI 状态短句（08 期 §4.2 N9：顶栏退役后住进页面头 meta 行；文案=07 期表 A1/A2 原句） */
+  aiStateLabel?: string
+  aiStateError?: boolean
 }>()
 
 const saveStatusLabel = computed(() => {
   switch (props.saveStatus) {
     case 'saving': return '保存中…'
     case 'saved': return props.lastSavedAt ? `已保存 ${formatTime(props.lastSavedAt)}` : '已保存'
-    case 'error': return '保存失败'
+    case 'error': return '保存失败（已存本地草稿）'
     default: return ''
   }
 })
@@ -91,16 +96,30 @@ function menuFormat() {
   actionMenuOpen.value = false
   editorRef.value?.formatWholeDocument?.()
 }
+// 2026-09-10 编辑器优化：三个本机命令（零 LLM）。Ctrl+F 之外的可发现入口——
+// 键位藏起来的功能等于不存在（快捷键速查表也只覆盖到愿意去看的人）。
+function menuFind() {
+  actionMenuOpen.value = false
+  editorRef.value?.openFind?.()
+}
+function menuNormalizePunctuation() {
+  actionMenuOpen.value = false
+  editorRef.value?.normalizePunctuation?.()
+}
+function menuClearForeignStyles() {
+  actionMenuOpen.value = false
+  editorRef.value?.clearForeignStyles?.()
+}
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden px-5 pt-2 pb-4 flex-1 min-h-0">
+  <div class="h-full flex flex-col overflow-hidden px-5 pt-5 pb-5 flex-1 min-h-0">
     <div v-if="selectedChapter" class="max-w-[var(--editor-max-width)] w-full mx-auto flex flex-col h-full flex-1 min-h-0">
       <!-- 纸列：页面头（章节名 + 大标题 + ⋯ 菜单）+ 正文画布 -->
-      <div class="paper relative rounded-2xl bg-parchment-50 shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div class="paper relative rounded-2xl shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isPublishing"
-          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-parchment-50/80 backdrop-blur-[2px] rounded-2xl transition-all duration-300"
+          class="publish-veil absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-[2px] rounded-2xl transition-all duration-300"
         >
           <div class="relative flex items-center justify-center w-24 h-24 mb-8">
             <div class="absolute inset-0 rounded-full border-[6px] border-accent-100"></div>
@@ -109,10 +128,10 @@ function menuFormat() {
 
           <div class="flex flex-col items-center gap-3">
             <h3 class="text-3xl font-heading font-bold text-accent-900 tracking-tight">
-              发布中...
+              正在发布…
             </h3>
             <p class="text-lg text-accent-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
-              正在更新章节状态及角色动态...
+              正在更新角色近况…
             </p>
           </div>
         </div>
@@ -122,7 +141,9 @@ function menuFormat() {
           <div class="page-head__meta">
             <span class="page-head__chapter">{{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}</span>
             <span v-if="selectedChapter.status === 'published'" class="page-head__published">已发布</span>
-            <span v-if="saveStatusLabel" class="page-head__save">{{ saveStatusLabel }}</span>
+            <span v-if="typeof wordCount === 'number'" class="page-head__words">{{ wordCount }} 字</span>
+            <span v-if="saveStatusLabel" class="page-head__save" :class="{ 'page-head__save--error': saveStatus === 'error' }">{{ saveStatusLabel }}</span>
+            <span v-if="aiStateLabel" class="page-head__ai" :class="{ 'page-head__ai--error': aiStateError }" aria-live="polite"><span class="page-head__ai-dot"></span>{{ aiStateLabel }}</span>
             <div ref="actionMenuRef" class="page-head__actions">
               <button
                 class="page-head__menu-btn"
@@ -140,16 +161,29 @@ function menuFormat() {
                   </button>
                   <button class="action-menu__item" @click="menuInspiration">
                     <Icon name="light-bulb" :size="13" />
-                    <span>获取灵感</span>
+                    <span>找找灵感</span>
                   </button>
                   <button class="action-menu__item" @click="menuCritique">
                     <Icon name="pencil-square" :size="13" />
-                    <span>编辑审阅</span>
+                    <span>AI 编辑审阅</span>
+                  </button>
+                  <div class="action-menu__divider"></div>
+                  <button class="action-menu__item" @click="menuFind">
+                    <Icon name="magnifying-glass" :size="13" />
+                    <span>查找替换<kbd class="action-menu__kbd">Ctrl+F</kbd></span>
+                  </button>
+                  <button class="action-menu__item" title="把 ASCII 省略号、半角逗号句号、直引号统一成中文标点（本机即时完成，不改剧情）" @click="menuNormalizePunctuation">
+                    <Icon name="bolt" :size="13" />
+                    <span>整理标点</span>
+                  </button>
+                  <button class="action-menu__item" title="清掉从别处粘贴带进来的颜色与字体（深色主题下它们会让字看不见）" @click="menuClearForeignStyles">
+                    <Icon name="no-symbol" :size="13" />
+                    <span>清除外来样式</span>
                   </button>
                   <div class="action-menu__divider"></div>
                   <button class="action-menu__item" :disabled="isFormatting" @click="menuFormat">
                     <Icon name="sparkles" :size="13" />
-                    <span>{{ isFormatting ? '格式整理中…' : '智能格式整理' }}</span>
+                    <span>{{ isFormatting ? '正在整理格式…' : '整理全文格式' }}</span>
                   </button>
                 </div>
               </transition>
@@ -163,6 +197,9 @@ function menuFormat() {
           />
         </header>
 
+        <!-- 页首块槽（08 期 §4.3：点火卡从悬浮封面改为纸内页首块，随文流走） -->
+        <slot name="page-top" />
+
         <RichTextEditor
           ref="editorRef"
           :id="selectedChapter.id"
@@ -174,7 +211,7 @@ function menuFormat() {
           @request-partial-optimize="handlePartialOptimize"
           :disabled="isEditorDisabled"
           :is-formatting="isFormatting"
-          placeholder="从这里开始写——Space 续写 · Alt+O 细纲 · Alt+N 记世界"
+          placeholder="从这里开始写——Space 让 AI 接着写 · Alt+O 插细纲 · Alt+N 记一笔"
         />
       </div>
     </div>
@@ -200,6 +237,18 @@ function menuFormat() {
 </template>
 
 <style scoped>
+/* 纸面 token 化（08 期 §4.1：--paper-bg 双主题，根治深色「白纸白字」P0；
+   hairline 边框取代 parchment 色块在深色下的违和） */
+.paper {
+  background: var(--paper-bg);
+  border: 1px solid var(--border-color);
+}
+
+/* 发布遮罩：跟随纸面 token（原 bg-parchment-50/80 深色下又是白纱罩） */
+.publish-veil {
+  background: color-mix(in srgb, var(--paper-bg) 82%, transparent);
+}
+
 /* ===== 纸面页面头：与正文同列（编辑器内容 px-12），标题写在纸面上 ===== */
 .page-head {
   padding: 1.75rem 3rem 0;
@@ -228,10 +277,46 @@ function menuFormat() {
   line-height: 1.4;
 }
 
+.page-head__words {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .page-head__save {
   font-size: 0.6875rem;
   color: var(--text-muted);
   opacity: 0.85;
+}
+
+.page-head__save--error {
+  color: var(--danger);
+  opacity: 1;
+}
+
+/* AI 状态件（08 期 §4.2 N9）：薄荷呼吸点 + 短句；脉冲 keyframes 全局既有（state-pill-pulse） */
+.page-head__ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.page-head__ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #34d399;
+  animation: state-pill-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.page-head__ai--error {
+  color: var(--danger);
+}
+.page-head__ai--error .page-head__ai-dot {
+  background: var(--danger);
+  animation: none;
 }
 
 .page-head__actions {
@@ -310,6 +395,15 @@ function menuFormat() {
   height: 1px;
   margin: 0.25rem 0.375rem;
   background: var(--border-color);
+}
+
+/* 菜单里的键位提示（可发现性：点得到，也看得见 Ctrl+F） */
+.action-menu__kbd {
+  margin-left: auto;
+  padding: 0 0.25rem;
+  font-family: inherit;
+  font-size: 0.625rem;
+  color: var(--text-muted);
 }
 
 .action-menu-enter-active,

@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,14 @@ _VALID_TYPES = {
     "birth", "death", "move", "battle", "territory_change", "found",
     "destroy", "alliance", "war_declare", "coronation", "custom",
 }
+_VALID_KINDS = {"character", "faction", "asset"}
+_MAX_NEW_ENTITIES = 4
+_MAX_NEW_LOCATIONS = 2
+
+
+def _norm(s: Any) -> str:
+    """名字/依据比对用归一化：去全部空白（中文句子无空格，英文两侧同规则即可）。"""
+    return "".join(str(s or "").split())
 
 
 def _resolve_names(names: List[Any], entities: List[Any]) -> Dict[str, Any]:
@@ -118,6 +126,82 @@ def _location_lookup(locations: List[Any], name: str) -> Optional[Any]:
     return bare.get(want)
 
 
+def _collect_new_drafts(
+    parsed: Dict[str, Any],
+    text: str,
+    entities: List[Any],
+    locations: List[Any],
+    resolved: Dict[str, Any],
+    location_name: str,
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[str]]:
+    """速记里名单外的名字 → 新实体/新地点草拟（关联式录入 2026-09-05）。
+
+    LLM 只有提名权没有落笔权——每条过三道闸，任一不过整条丢弃：
+    1. evidence 硬闸：归一化后必须是速记原文的子串且包含 name（逐字摘录失败=改写/编造）；
+    2. 名单闸：与既有实体/地点（名+别名）、本次已解析参与者、发生地同名的跳过——
+       同名说明匹配层漏了（该修匹配）或 LLM 违规重复报告（不该二次建档）；
+    3. 形状闸：kind 白名单外 clamp 为 character；数量 clamp（实体 ≤4 / 地点 ≤2）。
+
+    被闸掉的实体名回落 unresolved_names（诚实兜底不蒸发；地点不回落——
+    地点下拉就在过目单上，且原文仍在 note 里）。
+    """
+    raw_text = _norm(text)
+    known_names: set = set()
+    for e in entities:
+        for n in [e.name] + list(getattr(e, "aliases", None) or []):
+            if n:
+                known_names.add(_norm(n))
+    known_locs = {_norm(l.name) for l in locations if l.name}
+    claimed = {_norm(n) for n in resolved} | {_norm(location_name)}
+
+    new_entities: List[Dict[str, str]] = []
+    fallen: List[str] = []
+    seen: set = set()
+    for item in list(parsed.get("new_entities") or [])[:_MAX_NEW_ENTITIES * 2]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        evidence = str(item.get("evidence") or "").strip()
+        ne, ee = _norm(name), _norm(evidence)
+        ok = (
+            ne and ne in ee and ee in raw_text
+            and ne not in known_names and ne not in claimed and ne not in seen
+        )
+        if not ok:
+            if ne and ne not in seen and ne not in known_names and ne not in claimed:
+                fallen.append(name)
+            continue
+        seen.add(ne)
+        kind = str(item.get("kind") or "").strip()
+        new_entities.append({
+            "name": name,
+            "kind": kind if kind in _VALID_KINDS else "character",
+            "evidence": evidence[:60],
+        })
+    new_entities = new_entities[:_MAX_NEW_ENTITIES]
+
+    new_locations: List[Dict[str, str]] = []
+    seen_loc: set = set()
+    for item in list(parsed.get("new_locations") or [])[:_MAX_NEW_LOCATIONS * 2]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        evidence = str(item.get("evidence") or "").strip()
+        ne, ee = _norm(name), _norm(evidence)
+        ok = (
+            ne and ne in ee and ee in raw_text
+            and ne not in known_locs and ne not in known_names
+            and ne not in claimed and ne not in seen_loc
+        )
+        if not ok:
+            continue
+        seen_loc.add(ne)
+        new_locations.append({"name": name, "evidence": evidence[:60]})
+    new_locations = new_locations[:_MAX_NEW_LOCATIONS]
+
+    return new_entities, new_locations, fallen
+
+
 def normalize_draft(
     parsed: Dict[str, Any],
     t: int,
@@ -149,19 +233,49 @@ def normalize_draft(
     }
 
 
+async def _book_now_t(db: AsyncSession, book_id: str) -> int:
+    """书级此刻（世界页速记无章节上下文时）：最大章锚 → 事件流最远处 → 0。
+
+    与前端 futureEventWarning 的输入同源（resolve_narrative_time 的
+    ②③④级是「某章视角」的降级；这里是整本书写到哪算哪）。
+    """
+    from sqlalchemy import func, select
+
+    from backend.models import Chapter, WorldEvent
+
+    row = await db.execute(
+        select(func.max(Chapter.narrative_time)).where(
+            Chapter.book_id == book_id, Chapter.narrative_time.isnot(None)
+        )
+    )
+    nt = row.scalar()
+    if nt is not None:
+        return int(nt)
+    row = await db.execute(
+        select(func.max(WorldEvent.time_start)).where(WorldEvent.book_id == book_id)
+    )
+    return int(row.scalar() or 0)
+
+
 async def parse_event_text(
     db: AsyncSession,
     book_id: str,
     chapter: Any,
     text: str,
 ) -> Dict[str, Any]:
-    """一句话速记 → {draft, confidence}。失败返回空草稿 + confidence=none。"""
+    """一句话速记 → {draft, confidence, new_entities, new_locations}。
+
+    失败返回空草稿 + confidence=none。chapter=None（世界页入口）用书级此刻。
+    """
     repo = WorldRepository(db)
     entities = await repo.entities.list_by_book(book_id)
-    if not entities:
-        return {"draft": _empty_draft(), "confidence": "none"}
     locations = await repo.locations.list_by_book(book_id)
-    t = (await resolve_narrative_time(db, chapter)).t
+    # 空名册不再早退（2026-09-05 关联式录入）：新书最需要速记建世界——
+    # 名单为空时解析照跑，句子里所有名字自然全部进 new_entities
+    if chapter is not None:
+        t = (await resolve_narrative_time(db, chapter)).t
+    else:
+        t = await _book_now_t(db, book_id)
 
     system_prompt, user_prompt = build_parse_event_prompt(text.strip()[:400], t, entities, locations)
     try:
@@ -185,16 +299,44 @@ async def parse_event_text(
         parsed = {}
 
     if not isinstance(parsed, dict) or not parsed:
-        return {"draft": _empty_draft(t), "confidence": "none"}
+        return {
+            "draft": _empty_draft(t),
+            "confidence": "none",
+            "new_entities": [],
+            "new_locations": [],
+        }
 
     draft = normalize_draft(parsed, t, entities, locations)
+    new_entities, new_locations, fallen = _collect_new_drafts(
+        parsed, text, entities, locations,
+        _resolve_names(list(parsed.get("participants") or []), entities),
+        draft["location_name"],
+    )
+    # P1-2 收口（审查 2026-09-05）：LLM 常把名单外名字同时报进 participants 和
+    # new_entities——已采纳为新建草稿的名字从 unresolved_names 剔除（勾选行已在
+    # 过目单上，双显示让作者困惑哪条生效）。被闸的 fallen 保留（诚实兜底）。
+    adopted = {_norm(d["name"]) for d in new_entities} | {_norm(d["name"]) for d in new_locations}
+    if adopted:
+        draft["unresolved_names"] = [
+            n for n in draft["unresolved_names"] if _norm(n) not in adopted
+        ]
+    if fallen:
+        seen_unresolved = {_norm(n) for n in draft["unresolved_names"]}
+        draft["unresolved_names"] = draft["unresolved_names"] + [
+            n for n in fallen if _norm(n) not in seen_unresolved
+        ]
     if draft["event_type"] == "custom" and not draft["participant_ids"]:
         confidence = "low"
     elif draft["participant_ids"] or draft["location_id"]:
         confidence = "high"
     else:
         confidence = "low"
-    return {"draft": draft, "confidence": confidence}
+    return {
+        "draft": draft,
+        "confidence": confidence,
+        "new_entities": new_entities,
+        "new_locations": new_locations,
+    }
 
 
 def _empty_draft(t: int = 0) -> Dict[str, Any]:

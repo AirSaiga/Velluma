@@ -29,6 +29,13 @@ export type GhostSource = 'stitch' | 'render' | 'outline' | null
 
 /** 当前是否存在幽灵草稿（响应式） */
 export const ghostActive = ref(false)
+/**
+ * 幽灵结束原因（第二冲程 2026-09-09 实测拍板）：sticky 卡舱回弹的分流信号——
+ * 'commit'=Enter 采纳（这一瞬已写完，舱不回弹打扰）；'other'=蒸发/收尸/失败/
+ * 外部中止（镜头不对或没写成，回弹让作者换一枚）。beginGhost 重置为 other，
+ * commitGhost 入口置 commit——消费方是 useSparkDock 的 ghostActive 落沿 watch。
+ */
+export const ghostEndReason = ref<'commit' | 'other'>('other')
 /** 幽灵来源：stitch=微缝合 / render=整段代笔 / outline=细纲扩写 */
 export const ghostSource = ref<GhostSource>(null)
 /** 流式灌入的原文（dirty 检测基准） */
@@ -49,16 +56,19 @@ export const ghostWash = ref<GhostWashPayload>({ hits: [], original_text: '' })
 /** P5 回流 meta：本发幽灵的对齐令牌 + 注入样本 id（采纳/蒸发埋点携带） */
 let _lastGhostMeta: { token: string; sampleIds: string[] } | null = null
 
-/** 快检 kind → 人话短标签（toast 汇总 + 停靠区明细共用一张词表） */
+/** 快检 kind → 人话短标签（toast 汇总 + 停靠区明细共用一张词表；07 期 F4 定稿——
+ *  「穿越」是网文类型词误读风险实测成立，改「跳变」；泄底/外泄改「秘密穿帮/秘密外泄」） */
 const WARNING_KIND_LABELS: Record<GhostWarning['kind'], string> = {
   dead_speak: '死者开口',
-  canon_leak: '疑似泄底',
-  secret_leak: '私有设定外泄',
+  canon_leak: '秘密穿帮',
+  secret_leak: '秘密外泄',
   // 二期扩（约束治理 2026-09-02）
   cliche_hit: '禁忌词',
   out_of_scene: '人物不在场',
-  location_jump: '地点穿越',
+  location_jump: '地点跳变',
   quality_breaker: '自动修正暂停',
+  // 抢拍闸（2026-09-03 live 出生即返修资格——返修条明细会带此 kind）
+  beat_rush: '抢拍',
 }
 
 /** kind → 人话标签（未登记 kind 回退原串——repaired chip 与汇总共用） */
@@ -66,14 +76,21 @@ export function warningKindLabel(kind: string): string {
   return (WARNING_KIND_LABELS as Record<string, string>)[kind] || kind
 }
 
-/** 二期返修环结果（GHOST_DONE 增量字段）：自动修正了 N 处硬伤 */
-export const ghostRepaired = ref<{ count: number; kinds: string[]; action: string } | null>(null)
+/** 二期返修环结果（GHOST_DONE 增量字段）：自动修正了 N 处硬伤。
+ *  items=逐条人话明细（09-08 作者可见性——返修条点开看修了什么；
+ *  旧后端帧缺省，缺省时返修条退化为纯计数）。 */
+export const ghostRepaired = ref<{
+  count: number
+  kinds: string[]
+  action: string
+  items?: GhostWarning[]
+} | null>(null)
 /** 拒稿熔断开启（自动修正连续失败转为仅提示）——感知带指示数据源 */
 export const ghostBreakerOpen = ref(false)
 
 /** GHOST_DONE 帧到达时灌入返修环结果（useAdaptiveAssist 调用；随 begin 重置）。 */
 export function setGhostRepaired(
-  repaired?: { count: number; kinds: string[]; action: string },
+  repaired?: { count: number; kinds: string[]; action: string; items?: GhostWarning[] },
   breakerOpen?: boolean,
 ): void {
   ghostRepaired.value = repaired && repaired.count > 0 ? repaired : null
@@ -82,7 +99,7 @@ export function setGhostRepaired(
 
 /**
  * 疑点汇总话术（纯函数，单测锁定）：
- * 「已采纳，含 2 处疑点：死者开口、疑似泄底（×2 表示该类命中数）」；
+ * 「已采纳，含 2 处疑点：死者开口、秘密穿帮（×2 表示该类命中数）」；
  * 空列表返回空串（调用方据此静默）。
  */
 export function summarizeGhostWarnings(warnings: GhostWarning[]): string {
@@ -93,7 +110,7 @@ export function summarizeGhostWarnings(warnings: GhostWarning[]): string {
     counts.set(label, (counts.get(label) || 0) + 1)
   }
   const parts = [...counts.entries()].map(([label, n]) => (n > 1 ? `${label}×${n}` : label))
-  return `已采纳，含 ${warnings.length} 处疑点：${parts.join('、')}（可忽略，仅供参照）`
+  return `已采纳，含 ${warnings.length} 处疑点：${parts.join('、')}（只是提醒，可不管）`
 }
 
 /** GHOST_DONE 帧到达时灌入快检疑点（useAdaptiveAssist 调用；随 begin/evaporate/commit 重置）。 */
@@ -179,6 +196,7 @@ export function beginGhost(
 ): void {
   // 防御：已有幽灵时先蒸发（正常流程不会叠加，异常重入不污染文档）
   if (ghostActive.value) evaporateGhost()
+  ghostEndReason.value = 'other'   // 每枚新幽灵从「原因未知」起算（回弹分流见声明）
   ghostSource.value = source
   ghostOriginal.value = ''
   ghostDegraded.value = degraded
@@ -319,6 +337,7 @@ export const ghostDirty = computed(() => {
  * （复用 Highlight mark，350ms 后摘除）——作者明确感知"这段算数了"。
  */
 export function commitGhost(): string {
+  ghostEndReason.value = 'commit'   // 采纳落定：sticky 卡舱不随落沿回弹（第二冲程拍板）
   const editor = chapterEditorHandle.value
   const range = findGhostRange()
   if (!editor || !range) {

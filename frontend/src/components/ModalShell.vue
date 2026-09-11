@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * World 模块共享模态骨架（对齐全局新式模态写法）：
- * Teleport body + Transition modal + 遮罩 backdrop-blur + z-110 + useFocusTrap。
+ * 全局共享模态骨架（原 world/presentation/ModalShell 晋升，00 期 §4.3）：
+ * Teleport body + Transition modal + 遮罩 backdrop-blur + z: var(--z-modal)
+ * + useFocusTrap + Esc 关闭栈（一次 Esc 只关栈顶；焦点陷阱作栈外兜底）。
  *
  * 消灭三套自绘 overlay（旧 draft-modal/qc-modal/bi-modal z-1000 违规、无焦点陷阱）。
  * 用法：
@@ -10,9 +11,10 @@
  *     <template #footer>...</template>
  *   </ModalShell>
  */
-import { computed, ref } from 'vue'
-import Icon from '../../../components/Icon.vue'
-import { useFocusTrap } from '../../../composables/useFocusTrap'
+import { computed, ref, watch, onScopeDispose } from 'vue'
+import Icon from './Icon.vue'
+import { useFocusTrap } from '../composables/useFocusTrap'
+import { useEscStack } from '../composables/useEscStack'
 
 const props = withDefaults(
   defineProps<{
@@ -36,6 +38,24 @@ const cardRef = ref<HTMLElement | null>(null)
 // 收起时不陷阱焦点、不接管 Esc（用户在地图上操作）
 const active = computed(() => !props.minimized)
 useFocusTrap(cardRef, active, { onEscape: () => emit('close') })
+
+// Esc 分层关闭栈：打开即入栈（一次 Esc 只关栈顶一层），收起/关闭即出栈
+const escStack = useEscStack()
+let escId: symbol | null = null
+watch(active, (on) => {
+  if (on) {
+    if (!escId) escId = escStack.push(() => emit('close'), 'modal-shell')
+  } else if (escId) {
+    escStack.remove(escId)
+    escId = null
+  }
+}, { immediate: true })
+onScopeDispose(() => {
+  if (escId) {
+    escStack.remove(escId)
+    escId = null
+  }
+})
 </script>
 
 <template>
@@ -83,7 +103,7 @@ useFocusTrap(cardRef, active, { onEscape: () => emit('close') })
 .ms-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110; /* 全局分层表：模态层 */
+  z-index: var(--z-modal); /* 全局分层表：模态层（00 期 §3.1） */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -98,10 +118,12 @@ useFocusTrap(cardRef, active, { onEscape: () => emit('close') })
   position: relative;
   display: flex;
   flex-direction: column;
+  /* 弹窗卡自身作 container（00 期 §2.2-C）：内容分区按卡宽而非视口响应 */
+  container-type: inline-size;
   max-height: 86vh;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   box-shadow: 0 18px 48px rgba(40, 32, 18, 0.22);
   overflow: hidden;
 }
@@ -160,14 +182,14 @@ useFocusTrap(cardRef, active, { onEscape: () => emit('close') })
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 110; /* 与模态同层（绘制期间全页只有这一个浮层） */
+  z-index: var(--z-modal); /* 与模态同层（绘制期间全页只有这一个浮层） */
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 10px 8px 14px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   box-shadow: 0 10px 30px rgba(40, 32, 18, 0.22);
   white-space: nowrap;
 }

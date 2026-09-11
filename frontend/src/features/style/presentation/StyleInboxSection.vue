@@ -160,24 +160,17 @@ watch(() => props.items, (list) => {
   padding: 1.25rem 0 1.5rem;
   scroll-margin-top: 4.5rem;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1），此处仅保留 flex 布局增量 */
 .sec-title {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 .count-badge {
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
-  color: #b45309;
-  background: #fef3c7;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border-radius: 999px;
 }
 .sec-sub {
@@ -201,9 +194,9 @@ watch(() => props.items, (list) => {
 .badge {
   flex-shrink: 0;
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
-  color: #b45309;
-  background: #fef3c7;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
   border-radius: 0.25rem;
 }
 .inbox-word {
@@ -223,7 +216,7 @@ watch(() => props.items, (list) => {
 .btn-edit-word {
   flex-shrink: 0;
   padding: 0.125rem 0.25rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -248,7 +241,6 @@ watch(() => props.items, (list) => {
   border-radius: 0.375rem;
 }
 .edit-input:focus {
-  outline: none;
 }
 .inbox-alt {
   overflow: hidden;
@@ -268,15 +260,15 @@ watch(() => props.items, (list) => {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5625rem;
-  font-size: 0.6875rem;
-  color: #047857;
-  background: #d1fae5;
+  font-size: var(--text-xs);
+  color: var(--ok);
+  background: var(--ok-bg);
   border: none;
   border-radius: 0.375rem;
   cursor: pointer;
 }
 .btn-accept:hover {
-  background: #a7f3d0;
+  background: var(--ok-bg);
 }
 .btn-reject {
   display: inline-flex;
@@ -289,8 +281,8 @@ watch(() => props.items, (list) => {
   cursor: pointer;
 }
 .btn-reject:hover {
-  color: #dc2626;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 .inbox-source {
   display: -webkit-box;
@@ -298,7 +290,7 @@ watch(() => props.items, (list) => {
   -webkit-line-clamp: 2;
   overflow: hidden;
   margin: 0.375rem 0 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }

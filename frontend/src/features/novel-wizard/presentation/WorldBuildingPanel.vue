@@ -299,7 +299,7 @@ function applyImport() {
       <Transition name="expand">
         <section v-if="isExpertMode" class="pt-6 border-t border-[var(--border-color)]/30">
           <div class="flex items-center gap-2 mb-4">
-            <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+            <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
             <h3 class="text-lg font-medium text-[var(--text-primary)]">世界规则</h3>
           </div>
           <p class="text-xs text-[var(--text-muted)] mb-4">

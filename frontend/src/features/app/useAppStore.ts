@@ -204,11 +204,11 @@ function createAppStore(): AppStore {
         })
       )
       chapters.value = chaptersWithEntities
-      // 仅在未选中时默认选第一章（避免覆盖外部主动选择）
-      if (!selectedChapterId.value || !chaptersWithEntities.some(c => c.id === selectedChapterId.value)) {
-        selectedChapterId.value = chaptersWithEntities.length > 0
-          ? [...chaptersWithEntities].sort((a, b) => a.chapter_number - b.chapter_number)[0].id
-          : null
+      // 08 期 §4.4 态A：进写作台的第一眼=纸面目录页（TocPage），不再默认选第一章——
+      // 「选哪章」这个前置任务在纸上完成。仅兜底失效引用（章节被删后残留 id）；
+      // 新章由 createChapter 显式选中，刷新由路由 chapterId 恢复。
+      if (selectedChapterId.value && !chaptersWithEntities.some(c => c.id === selectedChapterId.value)) {
+        selectedChapterId.value = null
       }
     } catch (error) {
       console.error('[AppStore] 加载数据失败:', error)

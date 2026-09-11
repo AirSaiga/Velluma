@@ -1,17 +1,16 @@
 <script setup lang="ts">
 /**
- * 副驾抽屉（NLE-ADF 3.0「纸面优先」写作台重构）。
+ * 助手面板（08 期 §4.6 去 tab 化改造：壳只渲染当前分区，栏位在 AssistRail）。
  *
- * 四 tab（Ctrl+1~4 切换，按写作流程排序）+ 底部「AI 视角」入口（Ctrl+5，引擎观测降级位）：
+ * 五分区（栏图标 / Ctrl+1~5 定位，按写作流程排序）：
  * - 打算：写前规划——章级软脉络（SpinePanel）+ 大纲 + 意图反推
  * - 此刻：世界切片「此刻此地」+ 候选回流收件箱（WorldSceneSlice，与生成上下文同源）
- * - 本章：统计 / 出场角色速查 / 本章文风 / Canon 真相账本跳转——章节档案
+ * - 本章：统计 / 本章文风 / Canon 真相账本跳转——章节档案
  * - 检查：完稿体检（按钮 + 报告）、沉淀抽取、润色（Refinery）、读者反馈——按 检查→修改→反馈 三组排布
- * - AI 视角（原调试 tab）：AI 此刻所见预览 + 世界模型快照——引擎内部观测
+ * - AI 视角（原调试）：AI 此刻所见预览 + 世界模型快照——引擎内部观测
  *
- * 旧 BS-ADF 步进工作台（节拍/聚焦/生成主控/Stepper）已随写作台重构移除；
- * 润色与读者反馈的门控从 stage==='done' 改为「本章有正文」——adaptive 模式 stage 恒 idle，
- * 旧门控使手写章节永远进不了润色/反馈（已知洞的修复）。
+ * 默认分区逻辑（空章→打算/有正文→此刻/用户切过即尊重）与 Ctrl+1~5 监听原样保留；
+ * activeTab 以 v-model:active-tab 与 WorkspaceView 双向同步（面板关闭时容器持 null）。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -54,9 +53,22 @@ const selectedChapterId = store.selectedChapterId
 // session 从外部传入（由 WorkspaceView 创建并与画布辅助层共享）；独立使用时自建兜底
 const props = withDefaults(defineProps<{
   externalSession?: ReturnType<typeof useGenerationSession> | null
+  /** 当前分区（v-model:active-tab；null=按章节状态取默认） */
+  activeTab?: InspectorTab | null
+  /** pin 态（面板头图钉高亮；pin 语义与持久化在 WorkspaceView） */
+  pinned?: boolean
 }>(), {
   externalSession: null,
+  activeTab: null,
+  pinned: false,
 })
+const emit = defineEmits<{
+  (e: 'update:activeTab', v: InspectorTab): void
+  /** 面板内 Ctrl+1~5 切区（容器收到即确保面板开着） */
+  (e: 'activate', key: InspectorTab): void
+  (e: 'pin'): void
+  (e: 'close'): void
+}>()
 const session = props.externalSession || useGenerationSession()
 
 // 字数口径：剥 HTML 标签后计字符（此前 .length 把 <p>/mark 标签计入，虚高）
@@ -65,7 +77,8 @@ const wordCount = computed(() => countChapterWords(selectedChapter.value?.conten
 /** 本章有正文：润色/读者反馈的启用门槛（取代旧 stage==='done' 门控） */
 const chapterHasContent = computed(() => wordCount.value > 0)
 
-// 按写作流程排序：写前打算 → 写中此刻 → 本章档案 → 写后检查；debug 排末位但不进 tab 栏（底部「AI 视角」入口）
+// 按写作流程排序：写前打算 → 写中此刻 → 本章档案 → 写后检查；AI 视角排末位。
+// 栏图标（AssistRail）消费同一份标签/图标——零图标映射变化。
 const tabs: TabDef[] = [
   { key: 'planning', label: '打算', icon: 'light-bulb' },
   { key: 'now', label: '此刻', icon: 'map' },
@@ -73,23 +86,23 @@ const tabs: TabDef[] = [
   { key: 'review', label: '检查', icon: 'check-circle' },
   { key: 'debug', label: 'AI 视角', icon: 'magnifying-glass' },
 ]
-/** tab 栏只渲染前四格；debug 走抽屉底部小按钮 */
-const visibleTabs = tabs.slice(0, 4)
 
-/** 每 tab 一行用途副标题（新手第一眼解释，随激活 tab 切换） */
-const TAB_SUBTITLES: Record<InspectorTab, string> = {
-  planning: '写之前想一想：这章讲什么、哪些情节非写不可——AI 会照着帮你',
-  now: '故事里现在是什么时间、谁在哪——AI 写作时看到的就是这份',
-  chapter: '这章的档案：字数、文风、出场角色、真相',
-  review: '写完后的体检、润色与读者反馈',
-  debug: 'AI 续写时实际读到的内容（引擎观测）',
-}
-
-// 默认 tab 按章节状态：空章落「打算」（写前），有正文落「此刻」（写中参考）。
-// 正文可能异步到达——wordCount 由 0 转正且用户尚未手动切 tab 时补切到「此刻」；
+// 默认分区按章节状态：空章落「打算」（写前），有正文落「此刻」（写中参考）。
+// 正文可能异步到达——wordCount 由 0 转正且用户尚未手动切分区时补切到「此刻」；
 // 用户手动切过一次后即尊重其选择，不再代切。
+// activeTab 经 v-model 与容器双向同步：get 在容器持 null 时按默认推导，set 即 emit。
 const userPickedTab = ref(false)
-const activeTab = ref<InspectorTab>(wordCount.value > 0 ? 'now' : 'planning')
+const activeTab = computed<InspectorTab>({
+  get: () => props.activeTab ?? (wordCount.value > 0 ? 'now' : 'planning'),
+  set: (v) => emit('update:activeTab', v),
+})
+/** 面板头分区名 */
+const activeTabLabel = computed(() => tabs.find((t) => t.key === activeTab.value)?.label || '')
+
+onMounted(() => {
+  // 容器持 null（首次打开/切章后复位）→ 以默认分区回填，栏高亮与面板一致
+  if (!props.activeTab) emit('update:activeTab', activeTab.value)
+})
 
 watch(selectedChapterId, () => {
   userPickedTab.value = false
@@ -124,6 +137,7 @@ function handleKeydown(e: KeyboardEvent) {
     if (idx < tabs.length) {
       activeTab.value = tabs[idx].key
       userPickedTab.value = true
+      emit('activate', tabs[idx].key)
     }
   }
 }
@@ -147,11 +161,11 @@ onBeforeUnmount(() => {
 /** 审校 verdict 中文标签（ADF 审计与 Refinery 回读共用） */
 const VERDICT_LABELS: Record<string, string> = {
   pass: '通过',
-  pass_with_fixes: '修改后通过',
-  needs_refinement: '需要精修',
+  pass_with_fixes: '通过（修改后）',
+  needs_refinement: '需要润色',
   needs_final_touch: '需要再修',
   fail: '未通过',
-  unaudited: '未审校',
+  unaudited: '未检查',
 }
 function verdictLabel(v?: string | null) {
   return (v && VERDICT_LABELS[v]) || v || '—'
@@ -220,9 +234,9 @@ const worldModelText = ref('')
 const COMPONENT_LABELS: Record<string, string> = {
   intent_inference: '方向猜测',
   future_projection: '走向推测',
-  dock_generator: '挂件生发',
+  dock_generator: '卡舱供件',
   canon_watch: '世界感知',
-  sediment: '沉淀整理',
+  sediment: '设定整理',
   post_process: '完稿体检',
   event_scout: '世界发现',
 }
@@ -298,13 +312,20 @@ async function toggleWorldModelDebug() {
         return `· ${String(beat?.event || '').slice(0, 50)}`
       })
       .slice(0, 3)
+    const INTENT_SOURCE_LABELS: Record<string, string> = {
+      inferred: 'AI 猜的',
+      author: '你写的',
+      outline: '大纲',
+      baton: '上一章接力',
+      none: '无',
+    }
     worldModelText.value = [
-      `方向：${intent.source === 'none' ? '（无）' : `${intent.source} · ${(intent.arc || '').slice(0, 40)}`}`,
+      `方向：${intent.source === 'none' ? '（无）' : `${INTENT_SOURCE_LABELS[intent.source] || intent.source} · ${(intent.arc || '').slice(0, 40)}`}`,
       `事实：${snap.fact_count ?? 0} 条（最近 ${facts.length} 条）`,
       ...facts,
       `走向：${projections.length} 条`,
       ...projections,
-      `字数（沉淀）：${snap.total_words ?? 0}`,
+      `已整理字数：${snap.total_words ?? 0}`,
     ].join('\n')
   } catch (e: any) {
     worldModelText.value = `读取失败：${e.message}`
@@ -461,24 +482,23 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 <template>
   <aside class="inspector">
-    <!-- tab 头（四格：打算/此刻/本章/检查；AI 视角在底部入口） -->
-    <div class="tab-bar">
+    <!-- 面板头：分区名 + 固定钮 + 收起钮（栏位在 AssistRail，面板壳只渲染当前分区） -->
+    <div class="panel-head">
+      <span class="panel-head__title">{{ activeTabLabel }}</span>
       <button
-        v-for="t in visibleTabs"
-        :key="t.key"
-        class="tab-btn"
-        :class="{ active: activeTab === t.key }"
-        :title="`${t.label} (Ctrl+${tabs.indexOf(t) + 1})`"
-        @click="activeTab = t.key; userPickedTab = true"
+        class="panel-head__btn"
+        :class="{ 'panel-head__btn--on': pinned }"
+        :title="pinned ? '取消固定' : '固定面板（Ctrl+\\）'"
+        @click="emit('pin')"
       >
-        <Icon :name="t.icon" :size="15" />
-        <span class="tab-label">{{ t.label }}</span>
+        <Icon name="pin" :size="13" />
+      </button>
+      <button class="panel-head__btn" title="收起面板" @click="emit('close')">
+        <Icon name="x-mark" :size="14" />
       </button>
     </div>
-    <!-- 当前 tab 用途副标题（新手第一眼解释） -->
-    <div class="tab-subtitle">{{ TAB_SUBTITLES[activeTab] }}</div>
 
-    <!-- tab 内容 -->
+    <!-- 分区内容 -->
     <div class="tab-content">
       <!-- ====== 此刻 tab：此刻此地世界切片 + 候选收件箱 ====== -->
       <div v-if="activeTab === 'now'" class="panel now-panel">
@@ -515,7 +535,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               AI 目前的猜测：{{ session.planSuggestions.value.arc }}
               <button
                 class="guess-correct-btn"
-                title="猜得不对？一句话告诉它这章要写什么——卡片舱与续写随即按你的方向来"
+                title="猜得不对？一句话告诉它这章要写什么——卡舱和续写马上按你的方向来"
                 @click="startCorrectIntent"
               >不对</button>
             </template>
@@ -572,21 +592,21 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             <div class="style-status-row">
               <span v-if="chapterStyleLoading" class="muted">读取中…</span>
               <template v-else>
-                <span v-if="chapterStyleOverride" class="style-override-badge">章级特例</span>
-                <span v-else class="muted">继承书级文风</span>
+                <span v-if="chapterStyleOverride" class="style-override-badge">本章专属</span>
+                <span v-else class="muted">跟随全书文风</span>
                 <button
                   v-if="chapterStyleOverride"
                   class="btn-mini-reset"
-                  title="删除本章特例，恢复继承书级文风"
+                  title="删掉本章专属，改回跟随全书文风"
                   @click="handleResetChapterStyle"
-                >恢复继承</button>
+                >改回全书文风</button>
               </template>
             </div>
             <button class="btn-refinery" @click="handleEditChapterStyle">
               <Icon name="paint-brush" :size="14" />
-              <span>{{ chapterStyleOverride ? '编辑本章文风特例' : '为本章设文风特例' }}</span>
+              <span>{{ chapterStyleOverride ? '编辑本章专属文风' : '给本章单独定个文风' }}</span>
             </button>
-            <p class="hint">回忆章换个腔调？章级特例只影响这一章的生成，其余章节仍用书级文风。</p>
+            <p class="hint">回忆章想换个腔调？本章专属只管这一章，其他章节不受影响。</p>
           </section>
 
           <!-- 跳世界页真相账本（C1：Canon 融入世界页） -->
@@ -614,7 +634,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             <button
               class="btn-finish"
               :disabled="session.aiLane?.value === 'analyzing' || !(session.adaptiveMode?.value && session.authorLane?.value === 'composing')"
-              :title="session.adaptiveMode?.value && session.authorLane?.value === 'composing' ? '触发全章检查' : '在章节内写满 4 字激活 AI 辅助后可用'"
+              :title="session.adaptiveMode?.value && session.authorLane?.value === 'composing' ? '让 AI 通读全章，出一份检查报告' : '在本章写满 4 个字后可用'"
               @click="session.triggerAdaptiveFinish()"
             >
               <Icon :name="session.aiLane?.value === 'analyzing' ? 'loader' : 'check-circle'" :size="14" />
@@ -656,7 +676,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             </div>
             <!-- 疑似 AI 味变体（语义扫描：embedding 相似度抓「换字逃逸」改写变体；只提示，作者裁决） -->
             <div v-if="session.finishReport.value.semantic_hits?.length" class="report-block report-block--warn">
-              <div class="report-block-label">疑似 AI 味变体（{{ session.finishReport.value.semantic_hits.length }}）</div>
+              <div class="report-block-label">疑似 AI 味的句子（{{ session.finishReport.value.semantic_hits.length }}）</div>
               <div
                 v-for="(hit, i) in session.finishReport.value.semantic_hits.slice(0, 5)"
                 :key="'sem' + i"
@@ -664,7 +684,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               >
                 <div class="fix-sent">{{ hit.segment }}</div>
                 <div class="fix-desc">
-                  ≈「{{ hit.pattern }}」（相似度 {{ hit.similarity }}）<template v-if="hit.alternative"> · 可改为：{{ hit.alternative }}</template>
+                  ≈「{{ hit.pattern }}」<template v-if="hit.alternative"> · 可改为：{{ hit.alternative }}</template>
                 </div>
                 <!-- 回流收件箱（Phase 3 F）：投候选过目，不直接入清单；无书上下文不渲染 -->
                 <div v-if="currentBookId" class="fix-actions">
@@ -724,7 +744,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               <div class="report-block-label">收件箱</div>
               <div class="report-item report-item--inbox">
                 {{ session.finishReport.value.candidates_pending }} 条世界变化待确认
-                <button class="btn-mini-reset btn-mini-reset--primary" title="打开副驾「此刻」tab 的候选收件箱" @click="requestOpenInbox">去处理</button>
+                <button class="btn-mini-reset btn-mini-reset--primary" title="打开右侧「此刻」页的候选收件箱" @click="requestOpenInbox">去处理</button>
               </div>
             </div>
           </section>
@@ -779,7 +799,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
                 @click="handleStartRefinery"
               >
                 <Icon name="sparkles" :size="14" />
-                <span>启动润色（检查 + 修改）</span>
+                <span>开始润色：先检查，再修改</span>
               </button>
               <p class="hint">
                 AI 通读全文找问题 → 你确认 → 逐处修改 → 通读检查 → 定稿润色。
@@ -897,19 +917,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
         </template>
       </div>
     </div>
-
-    <!-- 底部：AI 视角（引擎观测降级入口，不占 tab 格；Ctrl+5） -->
-    <div class="drawer-foot">
-      <button
-        class="foot-btn"
-        :class="{ active: activeTab === 'debug' }"
-        title="AI 续写时实际读到的内容（引擎观测）(Ctrl+5)"
-        @click="activeTab = 'debug'; userPickedTab = true"
-      >
-        <Icon name="magnifying-glass" :size="13" />
-        <span>AI 视角</span>
-      </button>
-    </div>
   </aside>
 </template>
 
@@ -925,87 +932,44 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   overflow: hidden;
 }
 
-/* tab 头 */
-.tab-bar {
-  display: flex;
-  align-items: stretch;
-  gap: 0.125rem;
-  padding: 0.375rem 0.375rem 0;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-tertiary);
-}
-
-.tab-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.1875rem;
-  padding: 0.4375rem 0.25rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem 0.375rem 0 0;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.tab-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.tab-btn.active {
-  color: var(--accent-500);
-  background: var(--bg-secondary);
-  box-shadow: inset 0 -2px 0 var(--accent-500);
-}
-
-.tab-label {
-  font-size: 0.6875rem;
-  font-weight: 500;
-}
-
-/* 当前 tab 用途副标题（tab 栏下方一行小字） */
-.tab-subtitle {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-tertiary);
-}
-
-/* 底部降级入口条（AI 视角） */
-.drawer-foot {
+/* 面板头（08 期 §4.6）：分区名 + 固定/收起钮 */
+.panel-head {
   display: flex;
   align-items: center;
-  padding: 0.25rem 0.5rem;
-  border-top: 1px solid var(--border-color);
+  gap: 0.375rem;
+  padding: 0.5rem 0.625rem 0.5rem 0.875rem;
+  border-bottom: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   flex-shrink: 0;
 }
 
-.foot-btn {
-  display: flex;
+.panel-head__title {
+  flex: 1;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.panel-head__btn {
+  display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
-  font-size: 0.6875rem;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.foot-btn:hover {
+.panel-head__btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
 }
 
-.foot-btn.active {
+.panel-head__btn--on {
   color: var(--accent-500);
 }
 

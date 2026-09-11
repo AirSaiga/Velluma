@@ -53,7 +53,8 @@ MODE = "dev"
 ROOT = ""
 RESTART_LIMIT = 2
 PHASE = "booting"   # booting → backend → vite → electron → ready（网页进度条数据源）
-_service_lock = threading.Lock()
+# RLock：后端热重载线程持锁调 spawn_all_single → spawn_service 再拿锁（同线程可重入）
+_service_lock = threading.RLock()
 _services = {}      # key → {"proc": Popen, "port": int|None, "writer": file}
 # 自愈重启计数：必须独立于 _services 生命周期——条目内字段会随「pop 旧条目 → spawn
 # 重建（归零）」冲掉，快照浅拷贝上的自增也到不了注册表，写条目内=上限恒失效
@@ -154,14 +155,52 @@ def wait_port(port, timeout):
     return False
 
 
+def venv_python():
+    # venv 解释器：Windows 是 Scripts/python.exe，POSIX 是 bin/python3（旧实现自愈
+    # 重启路径写死 Windows 路径，macOS/Linux 下自愈必失败）
+    p = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.exists(p):
+        p = os.path.join(ROOT, ".venv", "bin", "python3")
+    return p
+
+
+def npm(*args):
+    # npm 在 Windows 上是 cmd 批处理，须经 cmd /c；POSIX 直接 exec
+    base = ["cmd", "/c", "npm"] if os.name == "nt" else ["npm"]
+    return base + list(args)
+
+
+def backend_args(port):
+    # ⚠ 不传 --reload（2026-09-06 实测死路）：uvicorn 的 Windows reload restart 靠
+    # os.kill(worker, CTRL_C_EVENT)——需要真实控制台；监督者 CREATE_NO_WINDOW + pythonw
+    # 链下事件打不到 worker，reloader 卡死在 process.join()（表现=打印 Reloading... 后
+    # 永不重启，前台 Git Bash 同样复现）。debug 模式的 backend/**/*.py 热重载由监督者
+    # 自己的 _backend_reload_watcher 承担（杀树重拉，走同一条自愈链路）。
+    return [venv_python(), "-m", "uvicorn", "backend.main:app",
+            "--host", "127.0.0.1", "--port", str(port), "--app-dir", ROOT]
+
+
+def append_build_log(text):
+    # 构建输出落 dev_<key>.log 同格式（"HH:mm:ss 原始行"）——pythonw 下没有控制台可回显，
+    # 落文件才能让网页监控台看到构建过程与失败原因
+    try:
+        with open(os.path.join(LOG_DIR, FILES["vite"]), "a", encoding="utf-8") as f:
+            for line in text.splitlines():
+                f.write("{0} {1}\n".format(now_ts(), line))
+    except OSError:
+        pass
+
+
 def spawn_all():
     # 端口协商与 start.ps1 同契约：recorded 且空闲则复用，否则扫描并写回端口文件。
-    # 启动带阶段推进（PHASE → 网页进度条）：backend 起来再起 vite，vite 起来再起
-    # electron——electron 加载的就是 vite 的 URL，顺序起避免首屏 ERR_CONNECTION_REFUSED。
+    # 启动带阶段推进（PHASE → 网页进度条）：backend 起来再起前端，前端起来再起
+    # electron——electron 加载的就是前端的 URL，顺序起避免首屏 ERR_CONNECTION_REFUSED。
+    # prod 分支与 start.ps1 同构：npm run build 产 dist，再直接 electron .（不起 Vite）。
     global PHASE
     data_dir = os.path.join(ROOT, "data")
     port_file = os.path.join(data_dir, "port.txt")
     fe_file = os.path.join(data_dir, "frontend_port.txt")
+    frontend_dir = os.path.join(ROOT, "frontend")
 
     backend_port = read_recorded_port(port_file, 8002)
     if probe_port(backend_port):
@@ -169,47 +208,59 @@ def spawn_all():
     with open(port_file, "w") as f:
         f.write(str(backend_port))
 
-    fe_port = read_recorded_port(fe_file, 5175)
-    if probe_port(fe_port):
-        fe_port = scan_free_port(5175, 5275)
-    with open(fe_file, "w") as f:
-        f.write(str(fe_port))
-
-    venv_python = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
-    if not os.path.exists(venv_python):
-        venv_python = os.path.join(ROOT, ".venv", "bin", "python3")
-    frontend_dir = os.path.join(ROOT, "frontend")
-
-    backend_args = [venv_python, "-m", "uvicorn", "backend.main:app",
-                    "--host", "127.0.0.1", "--port", str(backend_port)]
-    if MODE == "debug":
-        backend_args += ["--reload", "--reload-dir", os.path.join(ROOT, "backend"),
-                         "--app-dir", ROOT]
-    else:
-        backend_args += ["--app-dir", ROOT]
-
     PHASE = "backend"
-    spawn_service("backend", backend_args, ROOT,
+    spawn_service("backend", backend_args(backend_port), ROOT,
                   {"VELLUMA_PORT": str(backend_port)}, backend_port)
     write_dev_status()
     if not wait_port(backend_port, 60):
         write_sys_log("backend port not up in 60s, continuing")
 
+    if MODE == "prod":
+        # 生产体验：前端构建一次，Electron 以 NODE_ENV=production 走 loadFile('../dist/index.html')
+        # ⚠ 构建输出必须自己接管道读走：pythonw 下父进程无控制台，子进程继承句柄可能直接失败
+        PHASE = "electron"
+        write_sys_log("prod: npm run build ...")
+        try:
+            build = subprocess.run(npm("run", "build"), cwd=frontend_dir,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+        except OSError as e:
+            write_sys_log("npm run build 无法启动: {0}（electron 不启动）".format(e))
+            write_dev_status()
+            return
+        out = build.stdout.decode("utf-8", errors="replace").rstrip()
+        append_build_log(out)
+        if build.returncode != 0:
+            write_sys_log("npm run build 失败 (exit {0})：\n{1}".format(
+                build.returncode, "\n".join(out.splitlines()[-15:])))
+            write_dev_status()
+            return
+        write_sys_log("prod: build 完成，拉起 Electron")
+        fe_recorded = read_recorded_port(fe_file, 0)
+        spawn_service("electron", npm("run", "electron:nobuild"), frontend_dir,
+                      {"VELLUMA_BACKEND_PORT": str(backend_port),
+                       "VELLUMA_FRONTEND_PORT": str(fe_recorded) if fe_recorded else None,
+                       "VELLUMA_SERVICES_READY": "1",
+                       "NODE_ENV": "production"}, None)
+        return
+
+    fe_port = read_recorded_port(fe_file, 5175)
+    if probe_port(fe_port):
+        fe_port = scan_free_port(5175, 5285)
+    with open(fe_file, "w") as f:
+        f.write(str(fe_port))
+
     PHASE = "vite"
-    spawn_service("vite", ["cmd", "/c", "npm", "run", "dev"] if os.name == "nt"
-                  else ["npm", "run", "dev"], frontend_dir,
+    spawn_service("vite", npm("run", "dev"), frontend_dir,
                   {"VELLUMA_FRONTEND_PORT": str(fe_port)}, fe_port)
     write_dev_status()
     if not wait_port(fe_port, 30):
         write_sys_log("vite port not up in 30s, continuing")
 
     # dev/debug 走 electron:nobuild：electron:dev 里的 vite build 产物在开发模式
-    # 根本不会被加载（main.cjs 走 loadURL 的 vite dev server），白等 30~60 秒；
-    # prod 仍走完整构建
+    # 根本不会被加载（main.cjs 走 loadURL 的 vite dev server），白等 30~60 秒
     PHASE = "electron"
-    electron_script = "electron:nobuild" if MODE in ("dev", "debug") else "electron:dev"
-    spawn_service("electron", ["cmd", "/c", "npm", "run", electron_script] if os.name == "nt"
-                  else ["npm", "run", electron_script], frontend_dir,
+    spawn_service("electron", npm("run", "electron:nobuild"), frontend_dir,
                   {"VELLUMA_BACKEND_PORT": str(backend_port),
                    "VELLUMA_FRONTEND_PORT": str(fe_port),
                    "VELLUMA_SERVICES_READY": "1",
@@ -252,6 +303,86 @@ def stop_all():
             pass
 
 
+def _backend_py_mtimes():
+    # backend/**/*.py 的 mtime 快照（排除 __pycache__）——监督者热重载的比对基线
+    out = {}
+    root = os.path.join(ROOT, "backend")
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for fn in filenames:
+            if fn.endswith(".py"):
+                p = os.path.join(dirpath, fn)
+                try:
+                    out[p] = os.stat(p).st_mtime
+                except OSError:
+                    pass
+    return out
+
+
+def _backend_reload_watcher():
+    # 监督者内建后端热重载（debug 模式专用，2026-09-06）。
+    # 为什么不用 uvicorn --reload：其 Windows restart 靠 CTRL_C_EVENT 打断 worker，
+    # 需要真实控制台——CREATE_NO_WINDOW/pythonw 与 Git Bash 等无控制台环境下
+    # reloader 检测到变化后卡死在 process.join()，永不重启（实测复现，见 spawn_all 注）。
+    # 机制：2s 轮询 mtime 快照，变化后防抖 1.5s（编辑器批量落盘合并成一次重启），
+    # 锁内杀树重拉（与自愈同链路；全程持锁让 supervisor_loop 的心跳永远看到
+    # 活进程，不会误触发自愈计数）。显式重载不占 RESTART_LIMIT。
+    baseline = _backend_py_mtimes()
+    while not _shutdown.is_set():
+        time.sleep(2)
+        if _shutdown.is_set():
+            break
+        current = _backend_py_mtimes()
+        changed = {p for p in set(baseline) | set(current)
+                   if baseline.get(p) != current.get(p)}
+        if not changed:
+            continue
+        # 防抖：等文件静默（1.5s 无新变化）再动手
+        while not _shutdown.is_set():
+            time.sleep(1.5)
+            current = _backend_py_mtimes()
+            if current == baseline or {p for p in set(baseline) | set(current)
+                                       if baseline.get(p) != current.get(p)} == changed:
+                break
+            changed = {p for p in set(baseline) | set(current)
+                       if baseline.get(p) != current.get(p)}
+        if _shutdown.is_set():
+            break
+        write_sys_log("backend reload: {0} file(s) changed ({1}) — restarting".format(
+            len(changed), ", ".join(os.path.basename(p) for p in sorted(changed)[:4])
+            + (" …" if len(changed) > 4 else "")))
+        with _service_lock:
+            info = _services.get("backend")
+            if info is None or info["proc"].poll() is not None:
+                # backend 本就不在（自愈上限耗尽等）：照常重拉一次，给作者一条活路
+                _services.pop("backend", None)
+            elif os.name == "nt":
+                try:
+                    subprocess.run(["taskkill", "/T", "/F", "/PID", str(info["proc"].pid)],
+                                   capture_output=True)
+                except OSError:
+                    pass
+                _services.pop("backend", None)
+            else:
+                try:
+                    os.killpg(os.getpgid(info["proc"].pid), signal.SIGTERM)
+                except OSError:
+                    pass
+                _services.pop("backend", None)
+            # info 可能为 None（backend 本就不在：拉起失败/自愈上限耗尽）——
+            # 2026-09-06 审计修复：无守卫的 info["writer"] 抛 TypeError 不在原
+            # except 元组内，观察者线程整条击毙、下面的「照常重拉」也到不了
+            if info is not None:
+                try:
+                    info["writer"].close()
+                except (OSError, ValueError):
+                    pass
+            _restart_counts.pop("backend", None)  # 显式重载不占自愈上限
+            spawn_all_single("backend")
+            write_dev_status()
+        baseline = _backend_py_mtimes()
+
+
 def supervisor_loop():
     # 心跳：状态 JSON 每 5s 刷新；backend/vite 意外退出自愈重启（上限 2 次）；
     # electron 退出 = 收摊契约（停掉其余服务后退出）
@@ -286,9 +417,12 @@ def supervisor_loop():
             b = snapshot.get("backend")
             v = snapshot.get("vite")
             e = snapshot.get("electron")
-            if (b and v and e and b["proc"].poll() is None and v["proc"].poll() is None
-                    and e["proc"].poll() is None
-                    and probe_port(b["port"]) and probe_port(v["port"])):
+            # prod 不启 Vite（dist 直接 loadFile）——vite 缺席不算未就绪，
+            # 否则进度条永远停在「正在拉起应用窗口」
+            vite_ok = MODE == "prod" or (
+                v is not None and v["proc"].poll() is None and probe_port(v["port"]))
+            if (b and e and vite_ok and b["proc"].poll() is None
+                    and e["proc"].poll() is None and probe_port(b["port"])):
                 PHASE = "ready"
                 write_sys_log("all services ready")
         write_dev_status()
@@ -298,23 +432,14 @@ def supervisor_loop():
 
 def spawn_all_single(key):
     # 自愈重启单服务（端口沿用上次的协商结果）
-    info = _services.get(key)
     data_dir = os.path.join(ROOT, "data")
-    venv_python = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
     frontend_dir = os.path.join(ROOT, "frontend")
     if key == "backend":
         port = read_recorded_port(os.path.join(data_dir, "port.txt"), 8002)
-        args = [venv_python, "-m", "uvicorn", "backend.main:app",
-                "--host", "127.0.0.1", "--port", str(port)]
-        if MODE == "debug":
-            args += ["--reload", "--reload-dir", os.path.join(ROOT, "backend"), "--app-dir", ROOT]
-        else:
-            args += ["--app-dir", ROOT]
-        spawn_service("backend", args, ROOT, {"VELLUMA_PORT": str(port)}, port)
+        spawn_service("backend", backend_args(port), ROOT, {"VELLUMA_PORT": str(port)}, port)
     elif key == "vite":
         port = read_recorded_port(os.path.join(data_dir, "frontend_port.txt"), 5175)
-        spawn_service("vite", ["cmd", "/c", "npm", "run", "dev"] if os.name == "nt"
-                      else ["npm", "run", "dev"], frontend_dir,
+        spawn_service("vite", npm("run", "dev"), frontend_dir,
                       {"VELLUMA_FRONTEND_PORT": str(port)}, port)
 
 
@@ -757,18 +882,19 @@ def main():
         SUPERVISE = True
         MODE = args.mode
         ROOT = os.path.abspath(args.root)
+        # 每次启动重建日志视图（自愈重启走 "ab" 追加，不受影响）——⚠ 必须在写任何
+        # sys 叙事之前：先写后截会把本轮第一条叙事自己擦掉
+        for f in FILES.values():
+            try:
+                open(os.path.join(LOG_DIR, f), "wb").close()
+            except OSError:
+                pass
         write_sys_log("supervisor starting (mode={0})".format(MODE))
         # ⚠ 页面优先：HTTP 服务先起 + 浏览器先开（双击后 2~3 秒内就有反馈），服务树
         # 在页面背后由 spawn_all 跟上——phase 变化即时写状态 JSON，进度横幅实时可见。
         # 旧实现是等三端全部起来才起页面，那几秒~十几秒的盲区正是「不知道启动了没」的来源。
         global PHASE
         PHASE = "booting"
-        for f in FILES.values():
-            # 每次启动重建日志视图（自愈重启走 "ab" 追加，不受影响）
-            try:
-                open(os.path.join(LOG_DIR, f), "wb").close()
-            except OSError:
-                pass
         write_dev_status()
         srv = ThreadingHTTPServer(("127.0.0.1", DASH_PORT), Handler)
         srv.daemon_threads = True
@@ -789,6 +915,9 @@ def main():
         except Exception as e:
             # 拉起失败也要让页面活着显示状态（异常进 dev_sys.log，pills 如实变红）
             write_sys_log("spawn_all failed: {0}".format(e))
+        if MODE == "debug":
+            threading.Thread(target=_backend_reload_watcher, daemon=True,
+                             name="backend-reload-watcher").start()
         supervisor_loop()          # 主线程常驻：心跳/自愈/收摊契约
     # ⚠ 绑定必须用 DASH_PORT（--port 0 = 自动扫描），绑 args.port 会拿到系统随机端口，
     # 仪表盘在扫描出的端口上不可达（2026-09-05 实机踩过）

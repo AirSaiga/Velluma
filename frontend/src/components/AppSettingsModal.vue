@@ -6,7 +6,7 @@
  * 每次打开时重新拉取配置；保存后 LLM 与代理立即生效（embedding 维度变更需重启）。
  */
 import { reactive, ref, watch } from 'vue'
-import ModalShell from '../features/world/presentation/ModalShell.vue'
+import ModalShell from './ModalShell.vue'
 import { systemApi } from '../services/api'
 import type { ModelConfig, ModelConfigUpdatePayload, VendorCatalogEntry } from '../services/api'
 import { useAppSettings } from '../composables/useAppSettings'
@@ -57,7 +57,7 @@ const ROLE_HINTS: Record<ProfileRole, string> = {
 }
 
 const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
-  reasoning: '如 deepseek-v4-flash',
+  reasoning: '如 deepseek-flash',
   creative: '如 kimi-k2.6',
 }
 
@@ -114,7 +114,10 @@ function modelWarning(role: ProfileRole): string {
   const b = profileForms[role].base_url.toLowerCase()
   if (!m) return ''
   if (b.includes('deepseek') && (m === 'deepseek-chat' || m === 'deepseek-reasoner')) {
-    return '⚠ 该模型名已于 2026-07-24 弃用，请换 deepseek-v4-flash / deepseek-v4-pro'
+    return '⚠ 该模型名已于 2026-07-24 弃用，请换 deepseek-flash'
+  }
+  if (b.includes('deepseek') && m === 'deepseek-v4-pro') {
+    return '⚠ 09-14 12:00 起该模型将路由到 V4.1 Flash 并按其计费（V4.1 Pro 上线前），建议直接换 deepseek-flash'
   }
   if (b.includes('moonshot') && (m.startsWith('moonshot-v1') || m === 'kimi-k2.5')) {
     return '⚠ 该模型 2026-08-31 全平台下线，请换 kimi-k2.6'
@@ -170,6 +173,24 @@ const deaiTestResult = ref<{
 } | null>(null)
 
 const proxyForm = reactive({ enabled: true, url: '' })
+
+// ============================================================
+// 编辑器排版实验（03 期 §7，00 期 §6.2 预留开关落地）：
+// localStorage 设备本地键 + html class；回退=选「标准」即摘 class 零残留
+// ============================================================
+const EDITOR_TYPOGRAPHY_KEY = 'velluma:editor-typography'
+const showTypography = ref(false)
+const editorTypography = ref<'standard' | 'large'>('standard')
+try {
+  if (localStorage.getItem(EDITOR_TYPOGRAPHY_KEY) === 'large') editorTypography.value = 'large'
+} catch {}
+watch(editorTypography, (mode) => {
+  document.documentElement.classList.toggle('editor-type-large', mode === 'large')
+  try {
+    if (mode === 'large') localStorage.setItem(EDITOR_TYPOGRAPHY_KEY, 'large')
+    else localStorage.removeItem(EDITOR_TYPOGRAPHY_KEY)
+  } catch {}
+})
 
 const loading = ref(false)
 const loadError = ref<string | null>(null)
@@ -359,7 +380,7 @@ watch(visible, (v) => {
   >
     <div v-if="loadError" class="error-banner">{{ loadError }}</div>
     <div v-else-if="loading" class="loading-hint">
-      <Icon name="loader" :size="14" class="spin" />
+      <Icon name="loader" :size="14" class="spin spin-reduced" />
       加载配置中...
     </div>
 
@@ -548,7 +569,7 @@ watch(visible, (v) => {
 
         <div class="deai-actions">
           <button type="button" class="btn-secondary" :disabled="deaiTesting" @click="runDeaiTest">
-            <Icon v-if="deaiTesting" name="loader" :size="14" class="spin" />
+            <Icon v-if="deaiTesting" name="loader" :size="14" class="spin spin-reduced" />
             <Icon v-else name="play" :size="14" />
             {{ deaiTesting ? '试一试中...' : '试一试' }}
           </button>
@@ -565,6 +586,27 @@ watch(visible, (v) => {
             <div>结果：{{ deaiTestResult.output_text }}<span v-if="!deaiTestResult.applied" class="deai-notapplied">（未采纳，见上方说明）</span></div>
           </div>
         </div>
+      </template>
+
+      <!-- 编辑器排版（实验，03 期 §7）：只覆写字号/行高两枚 token，纸列 880px 不变 -->
+      <button type="button" class="advanced-toggle deai-toggle" @click="showTypography = !showTypography">
+        <span>实验：编辑器排版（宽排）</span>
+        <span class="advanced-caret">{{ showTypography ? '▾' : '▸' }}</span>
+      </button>
+
+      <template v-if="showTypography">
+        <div class="field-hint">
+          正文默认 16px / 行高 2.0。「宽排」切到 18px / 行高 1.8（更松的历史排版档）。
+          只影响正文字号与行距，页面宽度与写作辅助几何不变；设备本地生效，随时切回。
+        </div>
+        <label class="field-inline">
+          <input v-model="editorTypography" type="radio" value="standard" name="editor-typography" />
+          <span>标准（16px / 行高 2.0）</span>
+        </label>
+        <label class="field-inline">
+          <input v-model="editorTypography" type="radio" value="large" name="editor-typography" />
+          <span>宽排（18px / 行高 1.8）</span>
+        </label>
       </template>
 
       <!-- 代理 + 通知偏好：各占一列的窄行 -->
@@ -629,13 +671,13 @@ watch(visible, (v) => {
 
     <template #footer>
       <button class="btn-secondary footer-test" :disabled="testing || loading" @click="runTest">
-        <Icon v-if="testing" name="loader" :size="14" class="spin" />
+        <Icon v-if="testing" name="loader" :size="14" class="spin spin-reduced" />
         <Icon v-else name="play" :size="14" />
         {{ testing ? '测试中...' : '连接测试' }}
       </button>
       <span class="footer-hint">保存后 LLM 与代理立即生效，无需重启</span>
       <button class="btn-primary" :disabled="saving || loading" @click="save">
-        <Icon v-if="saving" name="loader" :size="14" class="spin" />
+        <Icon v-if="saving" name="loader" :size="14" class="spin spin-reduced" />
         <Icon v-else name="check" :size="14" />
         {{ saving ? '保存中...' : '保存设置' }}
       </button>
@@ -694,7 +736,7 @@ watch(visible, (v) => {
 
 .profile-hint-sub {
   margin-top: -6px;
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 .field {
@@ -778,7 +820,7 @@ watch(visible, (v) => {
 }
 
 .advanced-caret {
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .field-hint {
@@ -807,13 +849,13 @@ watch(visible, (v) => {
 .field-sub-hint {
   display: block;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-muted);
 }
 
 .follow-missing {
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 /* 模型级动态警示（弃用/下线/强制思考）——比普通提示醒目但不打断 */
@@ -824,7 +866,7 @@ watch(visible, (v) => {
 .field-warning {
   font-size: 12px;
   line-height: 1.5;
-  color: #f59e0b;
+  color: var(--warn);
   padding: 8px 10px;
   background: rgba(245, 158, 11, 0.08);
   border-radius: 6px;
@@ -1029,7 +1071,7 @@ watch(visible, (v) => {
 }
 
 /* 窄屏（小窗口）时双列回落单列 */
-@media (max-width: 640px) {
+@container (max-width: 40rem) {
   .profiles-grid,
   .misc-grid,
   .embedding-grid,

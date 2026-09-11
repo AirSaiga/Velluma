@@ -387,15 +387,39 @@ class EventDraft(BaseModel):
     note: str = ""
 
 
+class NewEntityDraft(BaseModel):
+    """速记里名单外的新实体草拟（关联式录入 2026-09-05）。
+
+    只报三件事：名字（速记原词）+ 类型猜测 + 依据（速记原文逐字子串）。
+    绝不草拟属性——LLM 此刻可见的信息只有一句话，任何属性都是编造。
+    evidence 由后端硬闸校验（归一化后必须是原文子串且包含 name），不过闸整条丢弃。
+    """
+    name: str
+    kind: str = "character"  # character | faction | asset（白名单外 clamp 为 character）
+    evidence: str = ""
+
+
+class NewLocationDraft(BaseModel):
+    """速记里名单外的新地点草拟（同上三件事纪律）。"""
+    name: str
+    evidence: str = ""
+
+
 class ParseEventRequest(BaseModel):
-    chapter_id: UUID
+    chapter_id: Optional[UUID] = Field(None, description="缺省（世界页无章节上下文）时用书级此刻")
     text: str = Field(..., min_length=1, max_length=500, description="作者一句话速记")
 
 
 class ParseEventResponse(BaseModel):
-    """解析失败 → 空草稿 + confidence=none（前端降级为空白轻表单）。"""
+    """解析失败 → 空草稿 + confidence=none（前端降级为空白轻表单）。
+
+    new_entities/new_locations：速记里名单外的名字草拟（勾选后随事件一并入账）。
+    加在 response 而非 EventDraft——draft 形状被候选池复用，保持稳定。
+    """
     draft: EventDraft = Field(default_factory=EventDraft)
     confidence: str = "none"  # high | low | none
+    new_entities: List[NewEntityDraft] = Field(default_factory=list)
+    new_locations: List[NewLocationDraft] = Field(default_factory=list)
 
 
 class WorldEventCandidateResponse(BaseModel):

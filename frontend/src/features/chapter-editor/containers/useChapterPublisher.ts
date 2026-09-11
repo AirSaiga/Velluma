@@ -50,13 +50,12 @@ export function useChapterPublisher(
     }
 
     if (!apiConfig.api_key) {
-      showToast('请先在设置中配置 API Key 以启用角色动态状态更新功能', 'warning')
+      showToast('请先在设置里配置 API Key——发布后 AI 才能更新角色近况', 'warning')
     }
 
     const ok = await showConfirm({
       title: '确认发布',
-      message: '确定要发布本章吗？发布后将会自动更新涉及角色的动态状态。',
-      warning: '发布后会自动分析章节内容并更新角色动态状态'
+      message: '确定发布本章吗？发布后 AI 会通读本章，更新涉及角色的近况。',
     })
     if (!ok) return
 

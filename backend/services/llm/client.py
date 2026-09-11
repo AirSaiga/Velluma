@@ -377,7 +377,8 @@ class LLMResult:
 
     Attributes:
         content: 模型输出文本
-        usage: token 计量 {prompt_tokens, completion_tokens, reasoning_tokens}；无 usage 时为 None
+        usage: token 计量 {prompt_tokens, completion_tokens, reasoning_tokens,
+        cached_tokens}；无 usage 时为 None（cached_tokens 可能为 None——厂商未回报）
         model_name: 实际调用的模型名
         latency_ms: 本次调用耗时（毫秒）
         finish_reason: 模型停止原因（"stop"/"length"/"content_filter"/...）； None 表示未获取。
@@ -392,10 +393,20 @@ class LLMResult:
 
 
 def _parse_usage(response) -> Optional[dict]:
-    """从 OpenAI SDK response 中提取 usage（含 thinking token 拆分）。
+    """从 OpenAI SDK response 中提取 usage（含 thinking 拆分与缓存命中）。
 
     OpenAI 兼容协议下，DeepSeek/Qwen 的思考 token 通常落在
     response.usage.completion_tokens_details.reasoning_tokens。
+
+    缓存命中 token（成本核算用，2026-09-11）：两派字段兼容——
+    - OpenAI 兼容标准 usage.prompt_tokens_details.cached_tokens：
+      Qwen/DashScope（2026-09-11 活探针实证）、GLM（docs.bigmodel.cn
+      对话补全 API 参考）、豆包/火山方舟（volcengine 官方 Context API 文档）、
+      OpenAI/OpenRouter、Kimi 新版平台
+    - DeepSeek 专有 usage.prompt_cache_hit_tokens（Kimi 旧版同形）
+    未回报该字段的厂商（MiMo 暂无公开文档；部分本地端点）→ None →
+    调用方按未命中全价计（保守：宁可高估不低估）。
+    取到后钳位到 ≤ prompt_tokens（防脏数据把账算负）。
     """
     usage = getattr(response, "usage", None)
     if usage is None:
@@ -407,10 +418,23 @@ def _parse_usage(response) -> Optional[dict]:
     reasoning_tokens = None
     if details is not None:
         reasoning_tokens = getattr(details, "reasoning_tokens", None)
+    cached_tokens = None
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    if prompt_details is not None:
+        cached_tokens = getattr(prompt_details, "cached_tokens", None)
+    if cached_tokens is None:
+        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", None)
+    if (
+        cached_tokens is not None
+        and prompt_tokens is not None
+        and cached_tokens > prompt_tokens
+    ):
+        cached_tokens = prompt_tokens
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "reasoning_tokens": reasoning_tokens,
+        "cached_tokens": cached_tokens,
     }
 
 

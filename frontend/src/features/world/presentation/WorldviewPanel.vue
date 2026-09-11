@@ -13,7 +13,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { PanelEmpty } from '../../../components/panels'
 import Icon from '../../../components/Icon.vue'
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import { WORLD_REFRESH_EVENT } from '../composables/useWorldSlice'
 
 const props = defineProps<{ bookId: string }>()
@@ -303,7 +303,7 @@ onUnmounted(() => {
 }
 
 .wv-toolbar-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -354,23 +354,23 @@ onUnmounted(() => {
 }
 
 .status-bar.dirty {
-  background: #fef3c7;
+  background: var(--warn-bg);
   color: #d97706;
 }
 
 .status-bar.saving {
-  background: #dbeafe;
-  color: #2563eb;
+  background: var(--info-bg);
+  color: var(--info);
 }
 
 .status-bar.saved {
-  background: #d1fae5;
+  background: var(--ok-bg);
   color: #059669;
 }
 
 .status-bar.error {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .items-list {
@@ -437,7 +437,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   font-family: inherit;
   color: var(--text-muted);
@@ -449,8 +449,8 @@ onUnmounted(() => {
 }
 
 .action-btn.danger:hover {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .wv-footer {

@@ -44,6 +44,15 @@ export function formatTime(t: Timestamp): string {
 }
 
 /**
+ * 短日期（事件时间轴分组卡内用）：年份由分组头「第N年」承担，卡内只显月日，
+ * 治 264px 浮层「类型名 + 全格式时刻挤同一行」的截断。13 月如实显示（与 formatTime 同口径）。
+ */
+export function formatDateShort(t: Timestamp): string {
+  const { month, day } = breakdownTime(t)
+  return `${month}月${day}日`
+}
+
+/**
  * 候选事件的时刻显示（2026-08-26 实测痛点）：t=0 意味着「没有叙事锚，系统
  * 无法推断时间」——显示成「第1年1月1日」是伪造精度。诚实降级为章节序
  * （第 N 章是真实信息）；无章号再退「未锚定」。

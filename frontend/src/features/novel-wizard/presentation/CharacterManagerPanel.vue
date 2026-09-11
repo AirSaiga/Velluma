@@ -268,13 +268,13 @@ function getAffinityColor(affinity: number): string {
           v-for="char in sortedCharacters"
           :key="char.id"
           @click="openEditCharacter(char)"
-          class="bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)]/50 p-4 cursor-pointer hover:border-accent-500/50 transition-all group"
+          class="bg-[var(--bg-panel)] rounded-xl border border-[var(--border-color)]/50 p-4 cursor-pointer hover:border-accent-500/50 transition-all group reveal-parent"
         >
           <div class="flex items-start justify-between mb-2">
             <div class="flex items-center gap-2">
               <span
                 :class="importanceColors[char.importance]"
-                class="px-2 py-0.5 text-[10px] font-medium rounded-full"
+                class="px-2 py-0.5 text-xs font-medium rounded-full"
               >
                 {{ importanceLabels[char.importance] }}
               </span>
@@ -282,7 +282,7 @@ function getAffinityColor(affinity: number): string {
             </div>
             <button
               @click.stop="deleteCharacter(char.id)"
-              class="p-1 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-rose-500 transition-all"
+              class="p-1 reveal-on-hover--danger text-[var(--text-muted)] hover:text-rose-500 transition-all"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -331,7 +331,7 @@ function getAffinityColor(affinity: number): string {
               v-for="rel in formData.relationships"
               :key="rel.id"
               @click="openEditRelationship(rel)"
-              class="flex items-center justify-between px-3 py-2 bg-[var(--bg-panel)] rounded-lg cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors group"
+              class="flex items-center justify-between px-3 py-2 bg-[var(--bg-panel)] rounded-lg cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors group reveal-parent"
             >
               <div class="flex items-center gap-3">
                 <span class="text-sm font-medium text-[var(--text-primary)]">
@@ -357,7 +357,7 @@ function getAffinityColor(affinity: number): string {
                 </span>
                 <button
                   @click.stop="deleteRelationship(rel.id)"
-                  class="p-1 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-rose-500 transition-all"
+                  class="p-1 reveal-on-hover--danger text-[var(--text-muted)] hover:text-rose-500 transition-all"
                 >
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -388,7 +388,7 @@ function getAffinityColor(affinity: number): string {
     <Transition name="modal">
       <div
         v-if="showCharacterModal"
-        class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
+        class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[var(--z-modal)]"
         @click.self="showCharacterModal = false"
       >
         <div class="bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
@@ -455,7 +455,7 @@ function getAffinityColor(affinity: number): string {
               <div v-if="isExpertMode">
                 <label class="block text-sm text-[var(--text-muted)] mb-1">
                   <span class="flex items-center gap-1.5">
-                    <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
                     此刻状态
                   </span>
                 </label>
@@ -465,7 +465,7 @@ function getAffinityColor(affinity: number): string {
                   placeholder="从世界快照中提取的实时状态..."
                   class="w-full px-3 py-2 bg-[var(--bg-panel)] rounded-xl text-[var(--text-primary)] focus:outline-none ring-1 ring-[var(--border-color)] focus:ring-2 focus:ring-[var(--accent-500)]/40 resize-none"
                 />
-                <p class="text-[10px] text-[var(--text-muted)] mt-1">
+                <p class="text-xs text-[var(--text-muted)] mt-1">
                   内部字段：current_state — 通常在章节发布时自动更新
                 </p>
               </div>
@@ -495,7 +495,7 @@ function getAffinityColor(affinity: number): string {
     <Transition name="modal">
       <div
         v-if="showRelationshipModal"
-        class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
+        class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[var(--z-modal)]"
         @click.self="showRelationshipModal = false"
       >
         <div class="bg-[var(--bg-secondary)] rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
@@ -562,7 +562,7 @@ function getAffinityColor(affinity: number): string {
               <div v-if="isExpertMode">
                 <label class="block text-sm text-[var(--text-muted)] mb-1">
                   <span class="flex items-center gap-1.5">
-                    <span class="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-600 rounded">专家</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-amber-500/10 text-amber-600 rounded">专家</span>
                     互动模式
                   </span>
                 </label>

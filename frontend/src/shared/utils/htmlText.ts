@@ -19,3 +19,10 @@ export function stripHtmlToText(html: string): string {
 export function countChapterWords(html: string): number {
   return stripHtmlToText(html).replace(/\s+/g, '').length
 }
+
+/** HTML 注入转义（popup/tooltip 拼 HTML 时的最小防线：& < > " 四字符实体化）。 */
+export function escapeHtml(s: unknown): string {
+  return String(s ?? '').replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string,
+  )
+}

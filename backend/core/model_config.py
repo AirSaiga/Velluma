@@ -73,7 +73,7 @@ Deepseek 配置示例：
     "reasoning": {
       "api_key": "sk-xxx",
       "base_url": "https://api.deepseek.com",
-      "model": "deepseek-reasoner",
+      "model": "deepseek-flash",
       "enabled": true,
       "effort": "medium",
       "exclude": false
@@ -81,7 +81,7 @@ Deepseek 配置示例：
     "creative": {
       "api_key": "sk-xxx",
       "base_url": "https://api.deepseek.com",
-      "model": "deepseek-chat",
+      "model": "deepseek-flash",
       "enabled": true
     }
   }
@@ -370,6 +370,66 @@ def update_embedding_config(updates: Dict):
     embedding = config.setdefault("embedding", {})
     embedding.update(updates)
     _write_config(config)
+
+
+# ============================================================
+# 模型价目表（2026-09-11 成本核算）
+#
+# 形态（model_config.json 顶层 "prices" 节，按模型名键控——generation_runs
+# 每行存当次 model_name，换模型后历史账仍按各自价格计）：
+#   "prices": {"qwen3.8-flash": {"input": 0.5, "cached_input": 0.1, "output": 2.0}}
+# 单位 = 元 / 百万 token。cached_input 可缺省（缺省=按 input 全价，保守）。
+# 价格来源：用户按各厂商公布页自填（厂商无统一计价 API，本地表是唯一
+# 可靠来源）；删一个模型的价格 = 从 dict 里删键。
+# ============================================================
+
+PRICE_FIELDS = ("input", "cached_input", "output")
+
+
+def get_model_prices() -> Dict[str, Dict[str, float]]:
+    """读价目表（无 prices 节 = 空表，一切调用未计价）。"""
+    raw = _load_config().get("prices") or {}
+    prices: Dict[str, Dict[str, float]] = {}
+    if not isinstance(raw, dict):
+        return prices
+    for model, entry in raw.items():
+        if not isinstance(model, str) or not model.strip() or not isinstance(entry, dict):
+            continue
+        clean = {}
+        for field in PRICE_FIELDS:
+            v = entry.get(field)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+                clean[field] = float(v)
+        if "input" in clean and "output" in clean:
+            prices[model.strip()] = clean
+    return prices
+
+
+def update_model_prices(prices: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    """整表覆写价目并持久化（空 dict = 清空价目，回到未计价态）。
+
+    输入先过同一把清洗（get_model_prices 同款判据：input/output 必填非负，
+    cached_input 可选）；非法条目丢弃不炸——价目表是镜子不是闸门。
+    返回清洗后的实际落盘值。
+    """
+    config = _load_config()
+    cleaned: Dict[str, Dict[str, float]] = {}
+    for model, entry in (prices or {}).items():
+        if not isinstance(model, str) or not model.strip() or not isinstance(entry, dict):
+            continue
+        clean = {}
+        for field in PRICE_FIELDS:
+            v = entry.get(field)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+                clean[field] = float(v)
+        if "input" in clean and "output" in clean:
+            cleaned[model.strip()] = clean
+    if cleaned:
+        config["prices"] = cleaned
+    else:
+        config.pop("prices", None)
+    _write_config(config)
+    return cleaned
 
 
 def _invalidate_cache():

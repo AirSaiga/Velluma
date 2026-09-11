@@ -211,7 +211,8 @@ REASONING_KEYWORDS: List[str] = [
     "claude-3.7", "claude-sonnet-4",
     "grok-3", "glm-z1", "kimi-k2-thinking",
     "doubao-seed", "deepseek-r1",
-    "deepseek-v4",  # DeepSeek V4 系列支持推理模式
+    "deepseek-v4",     # DeepSeek V4 系列支持推理模式
+    "deepseek-flash",  # V4.1 Flash（2026-09-10）：思考默认开，规范 id 已不带 v4
 ]
 
 

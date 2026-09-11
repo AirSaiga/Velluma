@@ -31,6 +31,7 @@
     "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4",
     "markdown-it": "^14.3.0",
+    "pinyin-pro": "^3.29.3",
     "splitpanes": "^4.0.4",
     "vue": "^3.4.15",
     "vue-router": "^4.6.4"

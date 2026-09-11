@@ -10,7 +10,7 @@
  * 「整页只有一个邀请」，用户唯一付出的劳动是复制粘贴，不做任何分类选择
  * （场景类型/时期默认 general/recent，入库后可在样本卡上改）。
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import type { AuthorSample, AuthorSampleSceneType, TextFingerprint } from '../../../types'
 
@@ -36,6 +36,13 @@ const emit = defineEmits<{
 const newSampleContent = ref('')
 const newSampleSceneType = ref<AuthorSampleSceneType>('general')
 const newSampleEra = ref<'recent' | 'early'>('recent')
+
+// §4.1 拆二级滚动：默认收 6 条，展开看全部（页滚动唯一）
+const SAMPLE_COLLAPSED_COUNT = 6
+const expanded = ref(false)
+const visibleSamples = computed(() =>
+  expanded.value ? props.samples : props.samples.slice(0, SAMPLE_COLLAPSED_COUNT),
+)
 
 const sceneTypeLabels: Record<string, string> = {
   dialogue: '对话',
@@ -159,11 +166,11 @@ function saveEdit(sample: AuthorSample) {
         </div>
       </div>
 
-      <!-- 样本列表 -->
+      <!-- 样本列表（§4.1：默认 6 条 + 展开收起，拆掉二级滚动嵌套） -->
       <div class="sample-list">
         <div v-if="samples.length === 0" class="empty-note">暂无样本——贴入第一段字，三秒后就能看到你的句长分布。</div>
         <article
-          v-for="sample in samples"
+          v-for="sample in visibleSamples"
           :key="sample.id"
           class="sample-card"
         >
@@ -234,6 +241,13 @@ function saveEdit(sample: AuthorSample) {
             >{{ sample.era === 'early' ? '标记为近期' : '标记为早期' }}</button>
           </div>
         </article>
+        <button
+          v-if="samples.length > SAMPLE_COLLAPSED_COUNT"
+          class="list-expand-btn"
+          @click="expanded = !expanded"
+        >
+          {{ expanded ? '收起' : `展开其余 ${samples.length - SAMPLE_COLLAPSED_COUNT} 条` }}
+        </button>
       </div>
     </template>
   </section>
@@ -249,21 +263,13 @@ function saveEdit(sample: AuthorSample) {
   padding: 0;
   border-bottom: none;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
-.sec-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
+   sec-sub 按 §6 归 token（原 muted 过淡） */
 .sec-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--text-secondary);
 }
 
 /* ---- 零状态 hero（整页唯一邀请） ---- */
@@ -300,7 +306,6 @@ function saveEdit(sample: AuthorSample) {
   resize: vertical;
 }
 .hero-textarea:focus {
-  outline: none;
   border-color: var(--accent-400);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-500) 10%, transparent);
 }
@@ -368,7 +373,6 @@ function saveEdit(sample: AuthorSample) {
   resize: vertical;
 }
 .upload-textarea:focus {
-  outline: none;
   border-color: var(--accent-400);
 }
 .upload-row {
@@ -418,17 +422,29 @@ function saveEdit(sample: AuthorSample) {
   opacity: 0.5;
 }
 .upload-hint {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .sample-list {
+  /* §4.1 拆二级滚动：不设 max-height/overflow，长列表靠展开收起与页滚动 */
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 24rem;
-  padding-right: 0.25rem;
   margin-top: 0.75rem;
-  overflow-y: auto;
+}
+.list-expand-btn {
+  min-height: 28px;
+  padding: 0.375rem 0.75rem;
+  font-size: var(--text-sm);
+  color: var(--accent-500);
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.list-expand-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-500);
 }
 .empty-note {
   padding: 1rem;
@@ -450,17 +466,17 @@ function saveEdit(sample: AuthorSample) {
 }
 .badge {
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   border-radius: 0.25rem;
   white-space: nowrap;
 }
 .badge-scene {
-  color: #1d4ed8;
-  background: #dbeafe;
+  color: var(--info);
+  background: var(--info-bg);
 }
 .badge-source {
-  color: #047857;
-  background: #d1fae5;
+  color: var(--ok);
+  background: var(--ok-bg);
 }
 .sample-chips {
   display: flex;
@@ -471,7 +487,7 @@ function saveEdit(sample: AuthorSample) {
 }
 .chip {
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   background: var(--bg-tertiary);
   border-radius: 0.25rem;
@@ -492,8 +508,8 @@ function saveEdit(sample: AuthorSample) {
   cursor: pointer;
 }
 .icon-danger:hover {
-  color: #dc2626;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 .icon-btn {
   display: inline-flex;
@@ -533,7 +549,6 @@ function saveEdit(sample: AuthorSample) {
   resize: vertical;
 }
 .sample-edit-textarea:focus {
-  outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-500) 10%, transparent);
 }
 .sample-edit-actions {
@@ -545,7 +560,7 @@ function saveEdit(sample: AuthorSample) {
 }
 .edit-hint {
   flex: 1;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .btn-sm {
@@ -571,12 +586,12 @@ function saveEdit(sample: AuthorSample) {
 }
 .muted-foot {
   flex: 1;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .era-toggle {
   padding: 0.125rem 0.4375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: 1px dashed var(--border-color);
@@ -588,23 +603,23 @@ function saveEdit(sample: AuthorSample) {
   border-color: var(--accent-400);
 }
 .badge-early {
-  color: #6b7280;
-  background: #f3f4f6;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
 }
 .fav-btn {
   flex-shrink: 0;
   padding: 0;
   font-size: 0.875rem;
   line-height: 1;
-  color: #d1d5db;
+  color: var(--text-faint);
   background: transparent;
   border: none;
   cursor: pointer;
 }
 .fav-btn.active {
-  color: #f59e0b;
+  color: var(--warn);
 }
 .fav-btn:hover {
-  color: #f59e0b;
+  color: var(--warn);
 }
 </style>

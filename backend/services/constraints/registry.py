@@ -261,6 +261,44 @@ REGISTRY: List[Constraint] = [
         layers=[ENFORCE_INPUT], enforcement=ENFORCE_INPUT, surface=SURFACE_MENU,
         origin="2026-08-29「不知所云」重构",
     ),
+    Constraint(
+        id="stitch-custom-verbatim",
+        statement="自定义镜头文本（≥8 字）被逐字吞进幽灵 → 素材未重写（shadow：只落台账；"
+                  "prompt 侧已注入素材指令规则，本检攒服从率）",
+        layers=[ENFORCE_PROMPT], enforcement=ENFORCE_PROMPT, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW,
+        origin="2026-09-09 实测：自定义「一盆扣着盖子的菜，那是炖肉，香气渗出」被原样"
+               "作为幽灵首句（+句号）——零件指令只说「落地为画面」，成句素材被当成品",
+    ),
+    Constraint(
+        id="stitch-bridge-actor-steal",
+        statement="桥接幽灵末句与后文首句共享同一登场者名 → 后文登场反应被提前演了"
+                  "（换道具的同槽位撞车，字面 n-gram 盲区）（shadow：只落台账；"
+                  "转正后走返修环带「主角一侧」铁律重新生成）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW,
+        origin="2026-09-09 抢场实测：幽灵「明姐迎上来攥着湿抹布」vs 后文「明姐端过来脸盆」"
+               "——prompt 侧同批已补主角一侧正向约束，本检攒语义撞车语料",
+    ),
+    Constraint(
+        id="dock-bridge-overlap",
+        statement="桥接机位与后文锚（suffix_anchor）去标点后 ≥4 字连续重叠 → 撞车丢件"
+                  "（下文已写的事实是禁区，过渡不许提前消耗它）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_MENU,
+        origin="2026-09-09 中插桥接（FIM）红队 R2：rehash/beat_overlap 只防前文与大纲，"
+               "后文防线复用 _beats_overlap_hit 同族 n-gram 判据（纯字符串零算力）",
+    ),
+    Constraint(
+        id="dock-onstage-boundary",
+        statement="挂件出现非在册实体/资产名 × 上手动词框架（握拿放捡掏开等）→ 在场越界疑点"
+                  "（shadow：只落台账不丢件；转正后丢件由过采样吸收）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_MENU,
+        status=STATUS_SHADOW,
+        when="世界书且本场在册非空（onstage 投影可得；正文已提及名豁免）",
+        origin="2026-09-08 红队 R3「地面」：dock 曾是唯一不注入场景身份的生成路径——"
+               "凭空道具三通道（氛围件豁免/上手件出处含全书养料池/模型不知作者在哪）之一；"
+               "T3 可指涉物白名单代码闸，与 ghost_guard out_of_scene 同族判据小而狠",
+    ),
     # ---- 呈现平面（洗层/保名）----
     Constraint(
         id="wash-blocker-replace",

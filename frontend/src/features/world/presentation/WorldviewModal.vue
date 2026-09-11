@@ -5,7 +5,7 @@
  * 内容为 WorldviewPanel（自设定中心迁入，自动保存/导入导出功能不丢）。
  * 世界观文本经 settings_bundle 进 AI 生成上下文（system prompt 前缀）。
  */
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import WorldviewPanel from './WorldviewPanel.vue'
 
 defineProps<{ bookId: string }>()

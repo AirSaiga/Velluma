@@ -11,7 +11,7 @@
 模块结构：
 - adf.py: V3.2 ADF 引擎路由（引擎本体保留，前端已无 UI 入口）
 - refinery.py: V4.1 Refinery 精修流水线路由
-- adaptive.py: NLE-ADF 3.0 自适应辅助路由（前端默认路径）
+- adaptive/: NLE-ADF 3.0 自适应辅助路由包（前端默认路径；子模块清单见包 __init__）
 - usage.py: generation_runs 的 adaptive 用量聚合（只读，B3）
 - 本文件: extra_router（cost-report / quality-report）
 
@@ -48,7 +48,7 @@ from backend.routes.chapter_generation.adf import router as adf_router
 # V4.1 Refinery 精修流水线路由
 from backend.routes.chapter_generation.refinery import router as refinery_router
 
-# NLE-ADF 3.0 自适应辅助路由（前端默认路径；端点清单以 adaptive.py 的 @router 装饰器为准：
+# NLE-ADF 3.0 自适应辅助路由（前端默认路径；端点清单以 adaptive/ 包各子模块的 @router 装饰器为准：
 # heartbeat / stitch-ghost / settle / finish / fix-sentence / spine GET·PATCH / spine-suggest /
 # model / context-preview / event + events/summary——不存在 perceive/detect-branch/plan-suggest）
 from backend.routes.chapter_generation.adaptive import router as adaptive_router

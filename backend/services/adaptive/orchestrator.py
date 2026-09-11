@@ -80,6 +80,9 @@ class AdaptiveOrchestrator:
         self._sync_inflight: set = set()  # 停顿档同步组件在飞标记（跨心跳去重，防慢端点下并发双烧 LLM）
         self._last_dock_text_sig: str = ""
         self._last_dock_proj_sig: str = ""
+        # dock 缓存低频在场键（2026-09-08 红队 R2）：钉 id + 叙事锚——换景/换锚
+        # 才失效；dynamic_state 与全章提及集禁入键（防沉淀抖动与他段打字风暴）
+        self._last_dock_stage_sig: str = ""
         # B7 已退役并删除字段：方向权重引擎 +「被采纳的方向」缝合降权
         # （尸检与信号转世见 docs/world-kernel-foundation.md）
         # canon 感知缓存：recent_text 签名未变则复用上次 hints（纯算法但省 DB 查询）
@@ -107,6 +110,7 @@ class AdaptiveOrchestrator:
         if component == "dock_generator":
             self._last_dock_text_sig = pending.get("text", self._last_dock_text_sig)
             self._last_dock_proj_sig = pending.get("proj", self._last_dock_proj_sig)
+            self._last_dock_stage_sig = pending.get("stage", self._last_dock_stage_sig)
         elif component == "canon_watch":
             self._last_canon_text_sig = pending.get("text", self._last_canon_text_sig)
 
@@ -212,7 +216,22 @@ class AdaptiveOrchestrator:
                 logger.debug(f"[orchestrator] 热层影子失败（不阻塞心跳）: {e}")
 
             # ---- 决策：哪些组件该激活 ----
-            activations = self._decide(state, snapshot, signals)
+            # 在场低频键（2026-09-08 红队 R2）：Chapter 行单主键取（开销结论同
+            # _spine_intent——可忽略）；异常静默空串=恒定键，零失效增量
+            stage_sig = ""
+            try:
+                from backend.models import Chapter as _Chapter
+                _ch = await db.get(_Chapter, self.chapter_id)
+                if _ch is not None:
+                    from backend.services.adaptive.components.dock_generator import presence_fingerprint
+                    stage_sig = presence_fingerprint(
+                        getattr(_ch, "scene_location_id", None),
+                        getattr(_ch, "narrative_time", None),
+                    )
+            except Exception:
+                stage_sig = ""
+
+            activations = self._decide(state, snapshot, signals, stage_sig)
 
             # 停顿心跳（paused_ms 够长）→ 同步等待 dock_generator 完成，
             # 让本次心跳响应直接带回挂件（避免"首次心跳返回空、要等下次"的时序问题）。
@@ -230,7 +249,13 @@ class AdaptiveOrchestrator:
                     # 停顿心跳同步组件统一透传实时段落（前端光标段纯文本）——
                     # dock_generator/canon_watch 据此锚定「作者当前段落」；
                     # dock 另可带 salience 具名提示行（B7 单车道注入，取代旧方向权重）
-                    extra: Dict[str, Any] = {"recent_text": state.recent_text or ""}
+                    # 停顿心跳同步组件统一透传实时段 + 全书字数（意图衰老判定
+                    # 原料，2026-09-09）+ 后文锚（中插桥接/FIM，2026-09-09）
+                    extra: Dict[str, Any] = {
+                        "recent_text": state.recent_text or "",
+                        "word_count": state.word_count,
+                        "suffix_anchor": state.suffix_anchor or "",
+                    }
                     self._sync_inflight.add(act.component)
                     try:
                         await self._activate_sync(act, db, extra_context=extra)
@@ -261,6 +286,7 @@ class AdaptiveOrchestrator:
         state: AuthorState,
         snapshot: Dict[str, Any],
         signals: List[ChangeSignal],
+        stage_sig: str = "",
     ) -> List[Activation]:
         """规则表决策。返回需激活的组件列表。"""
         activations: List[Activation] = []
@@ -334,12 +360,21 @@ class AdaptiveOrchestrator:
             # 省 ~90% dock 调用（作者没沉淀新段落时，碎片本来就不该变）
             from backend.services.adaptive.change_detector import _text_sig
             # 文本签名并入打算一句话（2026-09-03 意图入舱）：作者纠正打算的瞬间
-            # 段落文本没变，但 dock 的 spine_intent 行该换料了——纠正即换向
-            cur_text_sig = _text_sig(f"{state.recent_text or ''}|{state.spine_intent or ''}")
+            # 段落文本没变，但 dock 的 spine_intent 行该换料了——纠正即换向。
+            # 并入全书字数（2026-09-09 实测拍板「上下文变即重算」）：段落签名只
+            # 盯当前段，盯不住全章上下文——他段增删/幽灵采纳推进/就近节拍前移
+            # 都改 word_count 而不改当前段前 100 字。激活只在停顿档（规则 2 的
+            # paused_ms≥4000 门），放宽签名不会增加活跃档调用；纯停顿不写字
+            # 仍命中缓存（省 ~90% 的承诺保持）。
+            cur_text_sig = _text_sig(
+                f"{state.recent_text or ''}|{state.spine_intent or ''}|wc{state.word_count}"
+            )
             # projection 签名基于**接缝裁剪后**集合（2026-08-27）：过滤是 dock 产出
             # 的实际取材池——stage 变化导致 kept 集合变化时必须触发重算，否则
             # 缓存命中会端出旧取材池的碎片
-            from backend.services.adaptive.components.dock_generator import _prebeat_projections
+            from backend.services.adaptive.components.dock_generator import (
+                DOCK_PIPELINE_VERSION, _prebeat_projections,
+            )
             kept_projs = _prebeat_projections(real_projs)
             # 签名 = 过滤后数量 + 首项 event（简化 hash，沿用旧口径）
             cur_proj_sig = ""
@@ -351,19 +386,33 @@ class AdaptiveOrchestrator:
             # 意图版本递增——猜测方向变了舱里 toward_beat 必须换料，不 bust
             # 会把旧方向的碎片端给已纠正的作者（纠正手势「舱就换向」的兑现点）
             cur_proj_sig = f"{cur_proj_sig}:v{intent_ver}"
+            # 版本盐值入签名（2026-09-08 僵尸缓存修复）：缓存持久化在
+            # layer3_projections 跨进程存活，签名不含流水线版本时——代码
+            # 重构后历史章节文本未变即命中库中旧零件。规则大改递增
+            # DOCK_PIPELINE_VERSION 即全量安全失效（读取侧 _extract_dock_parts
+            # 同源过滤兜底活跃心跳）
+            stage_sig = f"{stage_sig}|{DOCK_PIPELINE_VERSION}"
+            # 在场键入签（2026-09-08 红队 R2）：换景/换锚（两个人工节奏事件）
+            # 后旧在册投影的碎片不再复用——签名三键全同才命中；无钉书恒定
+            # 空串=零失效增量（零变化契约）
             dock_cache_hit = (
                 cur_text_sig == self._last_dock_text_sig
                 and cur_proj_sig == self._last_dock_proj_sig
+                and stage_sig == self._last_dock_stage_sig
                 and cur_text_sig != ""  # 空文本不缓存
             )
-            if not dock_cache_hit:
+            # 强制刷新（2026-09-08）：心跳带 force_refresh（用户主动连续触发）
+            # 时跳过命中判断强行重算并覆盖旧缓存——半句门禁/在飞去重照常生效
+            if not dock_cache_hit or state.force_refresh:
                 activations.append(Activation(
                     component="dock_generator",
                     priority="low",
                     budget_tokens=1500,
                 ))
                 # 签名待定账（成功落账/失败弃账，见 __init__ _pending_sigs）
-                self._pending_sigs["dock_generator"] = {"text": cur_text_sig, "proj": cur_proj_sig}
+                self._pending_sigs["dock_generator"] = {
+                    "text": cur_text_sig, "proj": cur_proj_sig, "stage": stage_sig,
+                }
             # 缓存命中：__dock__ 项仍在 layer3_projections，前端 heartbeat 照常取到
 
         # ---- 规则 4：Canon 感知（停顿 4s + 有正文；hint 主体纯算法 + contradiction 低频 LLM，与 dock 同档同步返回）----

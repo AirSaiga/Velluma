@@ -346,7 +346,7 @@ const roleTypeLabel: Record<string, string> = {
 }
 
 .tab-count {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   background: var(--bg-tertiary);
   padding: 0.0625rem 0.3125rem;
   border-radius: 0.625rem;
@@ -372,7 +372,7 @@ const roleTypeLabel: Record<string, string> = {
 }
 
 .select-all-btn {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -460,7 +460,7 @@ const roleTypeLabel: Record<string, string> = {
   display: inline-flex;
   align-items: center;
   padding: 0.0625rem 0.375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   background: var(--bg-tertiary);
   color: var(--text-muted);
   border-radius: 0.25rem;
@@ -474,7 +474,7 @@ const roleTypeLabel: Record<string, string> = {
 
 .tag.negative {
   background: rgba(220, 38, 38, 0.08);
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .tag.alias {

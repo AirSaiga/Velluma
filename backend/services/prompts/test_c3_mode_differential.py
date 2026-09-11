@@ -199,9 +199,18 @@ class TestContinueStyleCondense:
         )
         assert new_sys == old_sys and new_user == old_user
         assert "作者文风画像" not in old_sys
-        # 无文风卡时压缩是空操作：五档块渲染与恒等路径（mode=""）逐一致
+        # 无文风卡时压缩是空操作：五档数据块渲染与恒等路径（mode=""）逐一致
+        # （anti_pseudo_sensory 除外——mode 门控指令分节，stitch/continue 恒
+        # 在场、其余档空串，2026-09-09 白描封杀令，另行单测）
         for mode in ("continue", "stitch", "burst", "outline", "open"):
-            assert render_system_blocks(mode=mode) == render_system_blocks(mode="")
+            got = {k: v for k, v in render_system_blocks(mode=mode) if k != "anti_pseudo_sensory"}
+            base = {k: v for k, v in render_system_blocks(mode="") if k != "anti_pseudo_sensory"}
+            assert got == base, f"{mode} 数据块应与恒等路径一致"
+        # 封杀令门控边界：句级续写两档在场，其余档缺席
+        for mode in ("continue", "stitch"):
+            assert "白描契约" in dict(render_system_blocks(mode=mode))["anti_pseudo_sensory"]
+        for mode in ("burst", "outline", "open"):
+            assert dict(render_system_blocks(mode=mode))["anti_pseudo_sensory"] == ""
 
     def test_all_modes_keep_full_profile_task_parity(self):
         """知识检索平面 v3.1（2026-08-27）：轻档画像压缩退役——任务平权，

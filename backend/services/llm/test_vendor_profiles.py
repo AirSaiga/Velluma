@@ -5,8 +5,9 @@
 2026-08-28 五厂商调研驱动的护栏（docs/model-vendor-matrix.md 唯一事实源）：
 - detect_provider 新增 GLM/Kimi/百炼新版域名识别
 - match_model_rule 最长前缀优先（kimi-k3 不得被泛化 kimi-k 规则遮蔽）
-- shape_sampling_params：Kimi K 系采样全删 / DeepSeek 废弃 penalty /
-  GLM 温度钳 1.0 / 思考锁采样厂商（DeepSeek/MiMo）思考态删采样
+- shape_sampling_params：Kimi K 系采样全删 / DeepSeek 废弃 penalty +
+  思考态删 temperature / 非思考态删 top_p（2026-09-10 档案：top_p 思考态
+  生效、下限 0.95 服务端抬升）/ GLM 温度钳 1.0 / MiMo 思考态删采样
 - reasoning_adapter 新方言：GLM/Kimi 思考分支 + 强制思考模型（glm-5.3/
   kimi-k3/kimi-k2.7）关闭请求转不发 + effort 白名单归一
 - vendor_catalog 目录结构（前端 /system/model-catalog 消费）
@@ -112,22 +113,28 @@ class TestShapeSampling:
         assert set(dropped) == {"temperature", "top_p"}
 
     def test_deepseek_penalties_dropped_always(self):
-        """DeepSeek 双 penalty 已废弃（全模式），思考关闭时采样保留。"""
+        """DeepSeek 双 penalty 已废弃（全模式）；非思考模式 top_p 恒 1.0 被忽略（删）。"""
         shaped, dropped = shape_sampling_params(
-            DS_URL, "deepseek-v4-flash",
-            {"temperature": 0.7, "frequency_penalty": 0.5, "presence_penalty": 0.3},
+            DS_URL, "deepseek-flash",
+            {"temperature": 0.7, "top_p": 0.9, "frequency_penalty": 0.5, "presence_penalty": 0.3},
             thinking_enabled=False,
         )
         assert shaped["temperature"] == 0.7
+        assert "top_p" not in shaped
         assert "frequency_penalty" not in shaped and "presence_penalty" not in shaped
+        assert set(dropped) == {"top_p", "frequency_penalty", "presence_penalty"}
 
-    def test_deepseek_thinking_mode_drops_sampling(self):
+    def test_deepseek_thinking_drops_temperature_keeps_top_p(self):
+        """思考模式（2026-09-10 档案）：temperature 无效删；top_p 生效原样透传
+        （官方文档：低于 0.95 由服务端抬升，客户端不发无效参数但不替厂商抬值）。"""
         shaped, dropped = shape_sampling_params(
-            DS_URL, "deepseek-v4-pro",
-            {"temperature": 1.5, "top_p": 0.95},
+            DS_URL, "deepseek-flash",
+            {"temperature": 1.5, "top_p": 0.9},
             thinking_enabled=True,
         )
-        assert "temperature" not in shaped and "top_p" not in shaped
+        assert "temperature" not in shaped
+        assert shaped["top_p"] == 0.9
+        assert dropped == ["temperature"]
 
     def test_glm_temperature_clamped_to_1(self):
         shaped, dropped = shape_sampling_params(
@@ -143,7 +150,7 @@ class TestShapeSampling:
         )
         assert "presence_penalty" not in shaped
 
-    def test_mimo_thinking_locks_sampling(self):
+    def test_mimo_thinking_drops_sampling(self):
         shaped, dropped = shape_sampling_params(
             MIMO_URL, "mimo-v2.5", {"temperature": 0.7, "top_p": 0.9}, thinking_enabled=True,
         )
@@ -235,7 +242,7 @@ class TestAdaptGLM:
 class TestEffortNormalization:
 
     def test_deepseek_medium_to_high(self):
-        result = adapt_reasoning_config(_enabled("medium"), DS_URL, "deepseek-v4-flash")
+        result = adapt_reasoning_config(_enabled("medium"), DS_URL, "deepseek-flash")
         assert result["reasoning_effort"] == "high"
 
     def test_openai_max_to_high(self):
@@ -262,6 +269,13 @@ class TestVendorCatalog:
         kimi = next(v for v in vendor_catalog() if v["id"] == KIMI)
         model_ids = {m["id"] for m in kimi["models"]}
         assert {"kimi-k2.6", "kimi-k3"} <= model_ids
+
+    def test_deepseek_models_listed(self):
+        """2026-09-10 起规范 id=deepseek-flash；v4-pro 仍在目录（带下线倒计时 note）。"""
+        ds = next(v for v in vendor_catalog() if v["id"] == DEEPSEEK)
+        model_ids = {m["id"] for m in ds["models"]}
+        assert {"deepseek-flash", "deepseek-v4-pro"} <= model_ids
+        assert "deepseek-v4-flash" not in model_ids  # 已并入 deepseek-flash（旧名暂时路由）
 
     def test_json_serializable(self):
         import json

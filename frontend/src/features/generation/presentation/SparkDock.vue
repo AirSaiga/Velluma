@@ -2,9 +2,10 @@
 /**
  * NLE-ADF 灵感悬浮舱（Spark Dock）——灵感提示 + 补写入口。
  *
- * 光标停顿 4s（段尾）或 Tab 唤起时，在光标下方 8px 淡入 3~4 个
- * 【镜头特写挂件】（"老烟的血手"/"咬平齿的管钳"）。作者吸附挂件 →
- * Space 微缝合（AI 基于挂件指引流式续写，幽灵草稿形态）→ Enter 锁死。
+ * Tab 唤起时在光标段下方行间推挤展开（2026-09-09 布局重构：WidgetDecoration
+ * 流内区块，宿主 InlineDockHost/InlineDock.ts；旧 fixed 浮层遮挡 FIM 后文的
+ * 问题随之消亡），浮现 3~4 个【镜头特写挂件】（"老烟的血手"/"咬平齿的管钳"）。
+ * 作者吸附挂件 → Space 微缝合（AI 基于挂件指引流式续写，幽灵草稿形态）→ Enter 锁死。
  *
  * 挂件来自后端 dock_generator 对 recent_text + projections + 设定(nutrients/
  * hard_constraints) 的 LLM 生发，不是角色名罗列，也不是抽象建议。
@@ -15,26 +16,29 @@
  * 旧五向 direction 标签退役不上屏（分析面元数据）；「接着写」恒居首位。
  *
  * Sticky：缝合触发后舱不消失（连续吸附多件缝合）；Esc 关舱退出 sticky。
+ *
+ * 第 5 槽位·自定义镜头输入（第二冲程 2026-09-09）：作者一句话自定义镜头 →
+ * 回车复用同一条 stitch 微缝合流水线（50 字级单镜头展开）。焦点纪律：
+ * 零自动焦点（弹舱/回弹永不抢正文光标）——进入只两条路：↓ 浏览到底、点击；
+ * 输入框聚焦期间全局作者键位让位（useGenerationSession 顶部守卫）。
  */
-import { computed } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { SparkPart } from '../composables/useSparkDock'
 import {
   sparkDockVisible,
   sparkParts,
+  sparkGuests,
   attachedParts,
   attachSparkPart,
   sparkSelectedIndex,
 } from '../composables/useSparkDock'
 import { ghostActive } from '../composables/useGhostDraft'
 
-defineProps<{
-  /** 是否显示「多写几段」入口（仅 adaptive composing 态，由容器注入） */
-  showBurstEntry?: boolean
-}>()
-
 const emit = defineEmits<{
-  /** 点击「多写几段」→ 打开走向卡舱 */
-  burstEntry: []
+  /** 自定义镜头提交（第 5 槽位回车）→ 复用 stitch 微缝合流水线 */
+  customStitch: [text: string]
+  /** 临时在场角色「录入档案」（2026-09-09 涌现角色闭环）→ 容器接建档往返 */
+  guestRegister: [name: string]
 }>()
 
 const visible = computed(() => sparkDockVisible.value || attachedParts.value.length > 0)
@@ -66,8 +70,33 @@ function onPick(index: number) {
   attachSparkPart(index)
 }
 
-function onBurstEntry() {
-  emit('burstEntry')
+// ---- 第 5 槽位：自定义镜头输入（零自动焦点纪律）----
+const customInput = ref<HTMLInputElement | null>(null)
+const customText = ref('')
+
+/** ↓ 到底/点击切入焦点（velluma:dock-focus-custom 由 useGenerationSession 派发） */
+function _onFocusRequest() {
+  if (sparkDockVisible.value && !ghostActive.value) customInput.value?.focus()
+}
+
+onMounted(() => window.addEventListener('velluma:dock-focus-custom', _onFocusRequest))
+onBeforeUnmount(() => window.removeEventListener('velluma:dock-focus-custom', _onFocusRequest))
+
+/** Enter 提交：IME 组合态的 Enter（选词/确认候选）不提交；空文本忽略；
+ * 提交即退焦（输入框使命完成，光标交还正文） */
+function onCustomEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  const t = customText.value.trim()
+  if (!t) return
+  customText.value = ''
+  customInput.value?.blur()
+  emit('customStitch', t)
+}
+
+/** Esc 只退焦不关舱（stopPropagation 防全局 Esc 栈连坐）——第二次 Esc
+ * （焦点已在正文）才走全局关舱 */
+function onCustomEsc() {
+  customInput.value?.blur()
 }
 </script>
 
@@ -78,7 +107,9 @@ function onBurstEntry() {
         class="spark-dock"
         @mousedown.prevent
       >
-        <!-- 挂件栏（镜头特写 chips，数字键 1~4 吸附） -->
+        <!-- 挂件栏（镜头特写 chips，数字键 1~4 吸附）。2026-09-09 行间推挤化：
+             顶栏自解释行与「多写几段」按钮删除（推挤幅度收敛；Tab 唤起本身
+             已是自解释入口，Ctrl+Space 仍直达走向卡舱） -->
         <div v-if="sparkDockVisible" class="spark-dock__row">
           <button
             v-for="(part, i) in sparkParts"
@@ -100,17 +131,6 @@ function onBurstEntry() {
               </span>
             </span>
           </button>
-          <!-- 段落级连写入口：打开走向卡舱（仅 adaptive composing 态由容器注入显示） -->
-          <button
-            v-if="showBurstEntry"
-            class="spark-dock__burst"
-            title="选一个走向，AI 连写几段（Ctrl+Space）"
-            @click="onBurstEntry"
-          >多写几段 ▸</button>
-          <!-- 后果可见（2026-08-29：作者必须知道选了会发生什么） -->
-          <div v-if="!attachedParts.length" class="spark-dock__tips">
-            选中后 Space：以这枚画面为引接着写约百字 · Esc 收起
-          </div>
         </div>
         <!-- 意图吸附栏（已选挂件 + 操作提示） -->
         <div v-if="attachedParts.length" class="spark-dock__intent">
@@ -123,16 +143,39 @@ function onBurstEntry() {
             <span v-if="symbolOf(part)" class="spark-dock__note-sym">{{ symbolOf(part) }}</span>
             {{ part.text }}
           </span>
-          <span class="spark-dock__hint">Space 以画面为引接着写 · Esc 清空</span>
+          <span class="spark-dock__hint">点选可多枚同缝 · 数字键直接开单镜头</span>
+        </div>
+        <!-- 第 5 槽位：自定义镜头输入 + 临时通行证芯片（同一横排，芯片不占垂直行）。
+             输入 @mousedown.stop：根节点的 @mousedown.prevent（防点舱偷编辑器焦点）
+             会连坐拦掉输入框的原生点击聚焦——在此截断冒泡，让 mousedown 默认行为
+             （聚焦 input）照常发生 -->
+        <div v-if="sparkDockVisible" class="spark-dock__foot">
+          <input
+            ref="customInput"
+            v-model="customText"
+            class="spark-dock__custom-input"
+            placeholder="✏️ 自定义镜头，回车扩写…"
+            @mousedown.stop
+            @keydown.enter="onCustomEnter"
+            @keydown.esc.stop.prevent="onCustomEsc"
+          />
+          <button
+            v-for="g in sparkGuests"
+            :key="g"
+            class="spark-dock__guest"
+            :title="`${g} 还没建档——点一下去世界页录入，建完自动回到原光标`"
+            @mousedown.stop
+            @click="emit('guestRegister', g)"
+          >👤 {{ g }} ➔ 建档</button>
         </div>
       </div>
     </Transition>
-</template>
+  </template>
 
 <style scoped>
 /* 磨砂玻璃浮窗（Cyber-Parchment Dark 双主题自适应） */
 .spark-dock {
-  /* 感知带内流式区块（不再 fixed 浮层）；竖排镜头碎片 */
+  /* 光标层内区块（07 期 §2.5：宿主 CursorLayer 管 fixed 定位与宽度） */
   width: 100%;
   box-sizing: border-box;
   border-radius: 8px;
@@ -140,7 +183,6 @@ function onBurstEntry() {
   border: 1px solid var(--border-color, #e0dbd3);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
   padding: 6px;
-  margin-bottom: 8px;
   user-select: none;
 }
 
@@ -161,14 +203,21 @@ function onBurstEntry() {
 .spark-dock__chip {
   display: flex;
   align-items: flex-start;
-  gap: 5px;
+  gap: 6px;
   max-width: 100%;
-  padding: 4px 10px;
+  padding: 5px 10px;
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
   color: var(--text-primary, #2c2c2c);
-  font-size: 12.5px;
+  /* button 的 UA 样式表默认 text-align:center——chip 自身是 flex 不受影响，
+     但内部 body 无显式值会继承 center，主行（普通 span）满宽后文字整行居中
+     （副行 note 是 flex 容器幸免）。旧浮层窄看不出，行间贴满正文列宽后暴露。
+     与 .beat-dock__card 同款防御 */
+  text-align: left;
+  /* 行间推挤化（2026-09-09）后舱住正文列内，与 16px 正文同屏读——
+     主行 12.5→14px（≈正文 87%），副行 10→12px（75%） */
+  font-size: 14px;
   line-height: 1.5;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -191,13 +240,13 @@ function onBurstEntry() {
 
 .spark-dock__num {
   flex-shrink: 0;
-  width: 14px;
-  height: 14px;
+  width: 17px;
+  height: 17px;
   margin-top: 2px;
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--hover-bg, #eee9df);
   color: var(--text-muted, #a89e90);
-  font-size: 10px;
+  font-size: 11.5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -218,12 +267,12 @@ function onBurstEntry() {
   white-space: normal;
 }
 
-/* 功能出处副行：10px 弱化灰——主行是唯一主角，副行只回答「选这枚会发生什么」 */
+/* 功能出处副行：12px 弱化灰——主行是唯一主角，副行只回答「选这枚会发生什么」 */
 .spark-dock__note {
   display: flex;
   align-items: baseline;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--text-muted, #a89e90);
   word-break: break-word;
@@ -232,20 +281,11 @@ function onBurstEntry() {
 
 .spark-dock__note-sym {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent-500, #7c6aad);
 }
 
-/* 后果提示行（无吸附时显示——作者必须知道选了会发生什么） */
-.spark-dock__tips {
-  padding: 3px 2px 1px;
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--text-muted, #a89e90);
-  border-top: 1px dashed var(--border-color, #e0dbd3);
-  margin-top: 2px;
-}
-
+/* 舱顶自解释行（07 期 §2.5.2：替代旧 tips 行）——2026-09-09 行间推挤化删除 */
 .spark-dock__intent {
   display: flex;
   align-items: center;
@@ -271,7 +311,7 @@ function onBurstEntry() {
   border-radius: 10px;
   background: rgba(52, 211, 153, 0.12);
   color: #059669;
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -282,26 +322,62 @@ function onBurstEntry() {
 .spark-dock__hint {
   margin-left: auto;
   color: var(--text-muted, #a89e90);
-  font-size: 11px;
+  font-size: 12px;
 }
 
-/* 段落级连写入口按钮（走向卡舱） */
-.spark-dock__burst {
+/* 临时通行证芯片（输入行右端）：不换行不占垂直行，多了横向滚动兜底 */
+.spark-dock__guest {
   flex-shrink: 0;
-  margin-top: 2px;
-  padding: 4px 10px;
-  border: 1px dashed rgba(124, 106, 173, 0.45);
+  text-align: left;
+  padding: 2px 8px;
+  border: 1px dashed rgba(52, 211, 153, 0.5);
+  border-radius: 10px;
+  background: rgba(52, 211, 153, 0.06);
+  color: #059669;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+:root.dark .spark-dock__guest { color: #34d399; }
+
+.spark-dock__guest:hover { background: rgba(52, 211, 153, 0.16); }
+
+/* 第 5 槽位脚行：自定义镜头输入 + 临时通行证芯片同排横置（2026-09-09
+   行间推挤化——芯片不再垂直占行，推挤幅度收敛） */
+.spark-dock__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-color, #e0dbd3);
+}
+
+.spark-dock__custom-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color, #e0dbd3);
   border-radius: 10px;
   background: transparent;
-  color: var(--accent-500, #7c6aad);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  color: var(--text-primary, #2c2c2c);
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+  /* 根节点 user-select:none 的豁免——输入框内文本必须可选中可编辑 */
+  user-select: text;
+  transition: border-color 0.12s ease;
 }
 
-.spark-dock__burst:hover {
-  background: rgba(124, 106, 173, 0.1);
+.spark-dock__custom-input:focus {
   border-color: var(--accent-500, #7c6aad);
+}
+
+.spark-dock__custom-input::placeholder {
+  color: var(--text-muted, #a89e90);
 }
 
 /* 淡入下滑（150ms） */

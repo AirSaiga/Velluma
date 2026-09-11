@@ -7,7 +7,7 @@
  * 逻辑在 features/world/composables/batchAccept.ts（两宿主共用同一份）。
  */
 import { computed, ref } from 'vue'
-import ModalShell from './ModalShell.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import { getTemplate } from '../engine/eventTemplates'
 import { displayCandidateTime } from '../engine/timeFormat'
 import type { EventType } from '../engine/types'
@@ -187,12 +187,12 @@ function metaOf(c: WorldEventCandidate): string {
   white-space: nowrap;
 }
 .ba-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .ba-hint {
   margin: 8px 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }

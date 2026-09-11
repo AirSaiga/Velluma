@@ -50,6 +50,8 @@ from backend.core.model_config import (
     get_embedding_connection,
     update_llm_profile,
     update_embedding_config,
+    get_model_prices,
+    update_model_prices,
     get_deai_config,
     update_deai_config,
 )
@@ -59,6 +61,7 @@ from backend.services.llm.vendor_profiles import vendor_catalog
 from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import (
     ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate,
+    ModelPricesUpdate,
     DeaiTestRequest, DeaiTestResponse,
 )
 
@@ -289,6 +292,30 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
 
     svc_logger.info("模型配置已更新")
     return _serialize_model_config()
+
+
+# =============================================================================
+# 模型价目表（成本核算，2026-09-11）——数据页 AI 消耗卡按价算钱的数据面
+# =============================================================================
+
+@router.get("/system/model-prices")
+async def get_model_prices_endpoint():
+    """读价目表（元/百万 token，按模型名键控；无 prices 节 = 空表全未计价）。"""
+    return {"prices": get_model_prices()}
+
+
+@router.put("/system/model-prices")
+async def update_model_prices_endpoint(update: ModelPricesUpdate):
+    """整表覆写价目并持久化到 model_config.json。
+
+    价格按各厂商公布页自填（厂商无统一计价 API）；保存后立即生效——
+    usage 端点每次请求实时读表。空 prices = 清空回到未计价态。
+    """
+    saved = update_model_prices(
+        {model: entry.model_dump(exclude_none=True) for model, entry in update.prices.items()}
+    )
+    svc_logger.info(f"模型价目表已更新（{len(saved)} 个模型）")
+    return {"prices": saved}
 
 
 # =============================================================================

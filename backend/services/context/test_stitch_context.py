@@ -34,7 +34,7 @@ from fastapi import HTTPException
 import backend.models as m
 from backend.db_sqlite import build_sqlite_engine, build_sqlite_sessionmaker
 from backend.db_sqlite.schema import init_db_sqlite
-from backend.routes.chapter_generation.adaptive import context_preview
+from backend.routes.chapter_generation.adaptive.preview import context_preview
 from backend.services.context.settings_bundle import SettingsBundle
 from backend.services.context.stitch_context import (
     StitchContext,
@@ -59,7 +59,8 @@ ENT_ID = uuid.UUID("cc330000-0000-4000-8000-0000000000e1")
 
 # 知识检索平面 v3.1（2026-08-27）：注入序=事实层前于文风层；空 kg 时专名兜底位在 entities 后
 BLOCK_ORDER = ["scene", "warm", "entities", "proper_nouns", "canon", "secrets", "worldview",
-               "relations", "negative", "echoes", "spatial", "style_positive", "author_samples"]
+               "relations", "negative", "echoes", "spatial", "style_positive", "author_samples",
+               "anti_pseudo_sensory"]  # 末位=mode 门控指令分节（stitch/continue 在场，其余空）
 
 # 固定装配值（六块全非空，逼出完整块渲染）
 FIXED = dict(
@@ -648,8 +649,11 @@ async def _seed(session) -> None:
     from backend.repositories.world_repository import WorldRepository
 
     await WorldRepository(session).events.create(
+        # note 与章正文共享「扳手」（2026-09-11 召回相关性门：实体名命中
+        # ≠语境相关，事件须与查询段共享 ≥2 个 ≥2 字词才放行——旧占位
+        # 「林尘出生」只剩实体名交集，会被门拦下致 echoes 块为空）
         book_id=BOOK_ID, event_type="birth", time_start=5, time_end=5,
-        participant_ids=[str(ENT_ID)], payload={}, note="林尘出生",
+        participant_ids=[str(ENT_ID)], payload={}, note="林尘得到第一把扳手",
     )
     await session.commit()
 
@@ -726,8 +730,10 @@ def test_endpoint_empty_book_no_500(tmp_path, monkeypatch):
 
         resp = asyncio.run(run())
         assert len(resp.blocks) == len(BLOCK_ORDER)
-        assert all(b.content == "" and b.chars == 0 for b in resp.blocks)
-        assert resp.total_chars == 0
+        # 数据块全空（「未配置」入口流量）；白描封杀令是 mode 门控指令分节
+        # （continue 档恒在场），不属于数据块空口径
+        assert all(b.content == "" and b.chars == 0 for b in resp.blocks if b.key != "anti_pseudo_sensory")
+        assert any(b.key == "anti_pseudo_sensory" and "白描契约" in b.content for b in resp.blocks)
         assert resp.world_sourced is False
         assert resp.world_time == 0
         assert resp.world_time_source == "zero"

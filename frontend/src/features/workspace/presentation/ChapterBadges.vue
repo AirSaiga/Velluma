@@ -1,25 +1,20 @@
 <script setup lang="ts">
 /**
- * 章节状态徽标（V3.1 F2 新建，规格 §4.1）。
+ * 章节状态徽标（V3.1 F2 新建，规格 §4.1；07 期 B-10 降噪）。
  *
  * 细线小徽标，不喧宾夺主。展示在 binder 章节列表每行：
- * - 定档徽标：高/转/推/过（文字 chip，不用 emoji）
- * - 生成状态：草稿/生成中/已生成
- * - 高潮评分：分数（生成后显示）
- * - 待处理审校问题数
+ * - 定档徽标：高/转/推/过（文字 chip，不用 emoji；存量老书数据）
+ * - 状态：已发布 / 草稿
  *
- * 设计依据：规格 §4.1 "每章一行状态徽标（细线小图标，不喧宾夺主）"
- * + F4 原则 "chrome 界面零 emoji，AI 存在感统一且克制"
+ * 07 期退役：「生成中」（旧引擎字段，adaptive 时代不产生）与「已生成」
+ * （content_text 存在即亮 = 写过的章全顶着它，零信息量）；死 props
+ * climaxScore/auditIssueCount 同删（零消费方）。
  */
 import { computed } from 'vue'
 import type { Chapter } from '../../../types'
 
 const props = defineProps<{
   chapter: Chapter
-  /** 高潮评分（来自质量报告，F4 接入；F2 阶段可能为 null） */
-  climaxScore?: number | null
-  /** 待处理审校问题数（F4 接入） */
-  auditIssueCount?: number | null
 }>()
 
 interface TierBadge {
@@ -46,18 +41,11 @@ const tierBadge = computed<TierBadge | null>(() => {
 
 const generationStatus = computed<{ label: string; cls: string } | null>(() => {
   const status = props.chapter.status
-  const genStatus = (props.chapter as any).generation_status
-  if (genStatus?.generating) {
-    return { label: '生成中', cls: 'gen-active' }
-  }
   if (status === 'published') {
     return { label: '已发布', cls: 'gen-published' }
   }
   if (props.chapter.draft_text && !props.chapter.content_text) {
     return { label: '草稿', cls: 'gen-draft' }
-  }
-  if (props.chapter.content_text) {
-    return { label: '已生成', cls: 'gen-done' }
   }
   return null
 })
@@ -79,20 +67,6 @@ const generationStatus = computed<{ label: string; cls: string } | null>(() => {
       class="badge status"
       :class="generationStatus.cls"
     >{{ generationStatus.label }}</span>
-
-    <!-- 高潮评分 -->
-    <span
-      v-if="climaxScore != null"
-      class="badge score"
-      :title="`高潮评分 ${climaxScore}/10`"
-    >{{ climaxScore }}</span>
-
-    <!-- 待处理审校问题 -->
-    <span
-      v-if="auditIssueCount && auditIssueCount > 0"
-      class="badge issues"
-      :title="`${auditIssueCount} 个待处理审校问题`"
-    >{{ auditIssueCount }}</span>
   </div>
 </template>
 
@@ -138,30 +112,10 @@ const generationStatus = computed<{ label: string; cls: string } | null>(() => {
 }
 
 /* 生成状态 */
-.badge.status.gen-active {
-  color: var(--accent-500);
-}
 .badge.status.gen-published {
   color: #16a34a;
 }
 .badge.status.gen-draft {
   color: var(--text-muted);
-}
-.badge.status.gen-done {
-  color: var(--text-secondary);
-}
-
-/* 高潮评分 */
-.badge.score {
-  background: rgba(124, 106, 173, 0.12);
-  color: var(--accent-500);
-  font-weight: 600;
-}
-
-/* 审校问题 */
-.badge.issues {
-  background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
-  font-weight: 600;
 }
 </style>

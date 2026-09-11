@@ -1,24 +1,27 @@
 <script setup lang="ts">
 /**
- * 左缘感知带（写中常驻 180px 列）。
+ * 纸左缘提醒轨（07 期 §2.4，取代 260px 常驻感知带）。
  *
- * 承载 Canon 感知提示（角色出场 / 伏笔回收 / private 泄露），数据来自
- * session.adaptiveSuggestions（useAdaptiveAssist 心跳接 canon_watch 产出）。
+ * 默认态=28px 透明轨：每条提醒一枚守行高的 8px 圆点（安全类 10px 朱点），
+ * 打算进度一枚 ⚑ 在轨顶，找不到锚/滚出视口的条计进轨底「+N」。
+ * 覆态=232px 读卡层：hover 轨 120ms / focus-within / 点击钉住 打开；
+ * mouseleave / Esc（入 Esc 栈）/ 钉住态外点 关闭。覆于纸列之上不推挤——
+ * 纸列从此零位移（07 期总纲 5）。
  *
- * 设计约束：任何内容都不许盖正文文字——本带是 editor-host 内的独立列，
- * 与正文区（editor-main）flex 并列，物理隔离。镜头碎片舱（SparkDock）经
- * #dock slot 注入。
- *
- * 按行对齐（批次 6.1/6.2）：感知卡锚定到正文里对应词的垂直位置（usePerceptionAlignment
- * 查 .canon-mark 标记元素视口 Y）。找到位置的卡在锚定层 absolute 渲染；
- * 找不到的（orphan/leak，label 不在当前段落）落底部兜底区 + 折叠。
+ * 数据来自 session.adaptiveSuggestions（canon_watch 心跳产出）。锚定算法
+ * （.canon-mark 视口 Y / stackAnchoredTops / rAF 节流）零改动——一份锚定，
+ * 轨点与覆态卡两种渲染（bandEl 指根元素，与旧带体同几何原点）。
  */
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { CanonHint, SpineProgress } from '../../../services/api/domain/adaptive.api'
 import { usePerceptionAlignment, stackAnchoredTops } from '../composables/usePerceptionAlignment'
+import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { useEscStack } from '../../../composables/useEscStack'
 
-/** 兜底区折叠阈值（空间有限） */
+/** 兜底区折叠阈值（覆态底部，空间有限） */
 const COLLAPSE_AT = 4
+/** 圆点纵向夹紧半径（轨高上下各留 8px） */
+const DOT_MARGIN = 8
 
 const props = defineProps<{
   suggestions: CanonHint[]
@@ -33,6 +36,8 @@ const MUTEABLE_KINDS = new Set(['appearance', 'callback', 'style_drift', 'world_
 function dismissable(kind: string) {
   return MUTEABLE_KINDS.has(kind)
 }
+/** 安全类（泄底/矛盾）：轨上朱点提权，永不静音 */
+const SAFETY_KINDS = new Set(['leak', 'contradiction'])
 
 const emit = defineEmits<{
   'dismiss-hint': [payload: { kind: string; label: string }]
@@ -41,6 +46,8 @@ const emit = defineEmits<{
 // 谋篇进度行折叠（默认展开锚点清单；点击行头收起只留旗标）
 const spineCollapsed = ref(false)
 
+// 卡五族色种（07 期 §2.4.5 token 化，零新增 token）：卡/点共用一族，
+// border/背景/tag 由 color-mix 从 --k 派生，深色自动正确。
 function kindMeta(kind: string) {
   switch (kind) {
     case 'appearance':
@@ -48,7 +55,7 @@ function kindMeta(kind: string) {
     case 'callback':
       return { label: '伏笔', icon: '🔑', cls: 'hint-card--hook' }
     case 'leak':
-      return { label: '泄露', icon: '⚠', cls: 'hint-card--leak' }
+      return { label: '泄密', icon: '⚠', cls: 'hint-card--leak' }
     case 'contradiction':
       return { label: '矛盾', icon: '⚡', cls: 'hint-card--leak' }
     case 'style_drift':
@@ -58,60 +65,66 @@ function kindMeta(kind: string) {
       // 收件箱积压（A5c）：全书 pending 候选 >5——柔性提醒去裁决，不弹窗不抢焦点
       return { label: '收件箱', icon: '📥', cls: 'hint-card--inbox' }
     default:
-      return { label: 'Canon', icon: '·', cls: 'hint-card--canon' }
+      return { label: '设定', icon: '·', cls: 'hint-card--canon' }
   }
 }
 
-// 按行对齐：感知带元素 + labels → anchors（每个 label 的 top，null=找不到）
-const bandEl = ref<HTMLElement | null>(null)
-// 顶部固定区实高（header+谋篇行+镜头碎片舱）：锚定卡避让线，动态实测。
-// 旧硬编码 92 只够 header+spine——4 挂件的舱体占 ~230px，卡位落进舱体
-// 范围被 z-2 的舱盖住头部（2026-08-27 实测事故）。舱是临时面（打字/Esc
-// 即收），收舱后 RO 触发重测，卡回到行位。
-const dockSlotEl = ref<HTMLElement | null>(null)
+// ============================================================
+// 锚定（算法零改动，§2.4.4）：bandEl=根元素（轨与覆态同顶缘全高，
+// 相对 Y 语义与旧带体逐像素一致）；topReserve 测量对象=覆态内打算进度行
+// （dock 槽已迁光标层，无 spine 时 reserve=0）。
+// ============================================================
+const bandRoot = ref<HTMLElement | null>(null)
+const overlayEl = ref<HTMLElement | null>(null)
+const spineRowEl = ref<HTMLElement | null>(null)
 const topReservePx = ref(0)
-let _dockRO: ResizeObserver | null = null
+// 覆态开合态（提前声明：topReserve 补测 watch 引用它）
+const bandOpenState = ref(false)
+const pinnedByClick = ref(false)
+let _reserveRO: ResizeObserver | null = null
 function _measureTopReserve() {
-  const el = dockSlotEl.value
+  const el = spineRowEl.value
   if (!el) { topReservePx.value = 0; return }
   topReservePx.value = el.offsetTop + el.offsetHeight + 6
 }
-watch(dockSlotEl, (el) => {
-  _dockRO?.disconnect()
-  _dockRO = null
-  if (!el) return
-  _dockRO = new ResizeObserver(_measureTopReserve)
-  _dockRO.observe(el)
-  _measureTopReserve()
+watch([spineRowEl, overlayEl], () => {
+  _reserveRO?.disconnect()
+  _reserveRO = null
+  const el = spineRowEl.value
+  if (el) {
+    _reserveRO = new ResizeObserver(_measureTopReserve)
+    _reserveRO.observe(el)
+  }
+  nextTick(_measureTopReserve)
 }, { flush: 'post' })
-// offsetTop 变化（谋篇行折叠/出现）不触发 RO，补测；dock 自身高度变化走 RO
-watch([spineCollapsed, () => props.spineProgress], () => { nextTick(_measureTopReserve) })
-onBeforeUnmount(() => { _dockRO?.disconnect(); _dockRO = null })
-const labels = computed(() => props.suggestions.map((h) => h.node_label))
-const { anchors } = usePerceptionAlignment(labels, bandEl, topReservePx)
+// offsetTop 变化（谋篇行折叠/出现/覆态开合）不触发 RO，补测
+watch([spineCollapsed, () => props.spineProgress, bandOpenState], () => { nextTick(_measureTopReserve) })
+onBeforeUnmount(() => { _reserveRO?.disconnect(); _reserveRO = null })
 
-// 锚定卡（找到正文位置）—— absolute 渲染到对应行。
-// 碰撞避让（2026-08-28 重叠修复）：各卡锚 Y 独立而来，相邻行/同 label 多条
-// 提醒会叠在一起——stackAnchoredTops 按 Y 排序逐张下推（卡高按内容估算：
-// 卡体 ~38px + detail 行数 × 15px + 间距）。
+const labels = computed(() => props.suggestions.map((h) => h.node_label))
+const { anchors } = usePerceptionAlignment(labels, bandRoot, topReservePx)
+
+// 锚定卡（找到正文位置）—— 覆态内 absolute 渲染到对应行。
+// 碰撞避让：stackAnchoredTops 按 Y 排序逐张下推（卡高按内容估算）。
 function cardHeight(h: CanonHint): number {
   const detail = h.detail || ''
   const lines = detail ? Math.min(6, Math.ceil(detail.length / 11)) : 0
   return 38 + (lines ? lines * 15 + 6 : 0) + 7
 }
+const stackedTops = computed(() =>
+  stackAnchoredTops(anchors.value, props.suggestions.map(cardHeight)),
+)
 const located = computed(() => {
-  const tops = anchors.value.map((t) => (t === null || t === undefined ? null : t))
-  const stacked = stackAnchoredTops(tops, props.suggestions.map(cardHeight))
   const out: { hint: CanonHint; top: number }[] = []
   for (let i = 0; i < props.suggestions.length; i++) {
-    const top = stacked[i]
+    const top = stackedTops.value[i]
     if (top !== null && top !== undefined) {
       out.push({ hint: props.suggestions[i], top })
     }
   }
   return out
 })
-// 兜底卡（找不到正文位置：orphan/leak 等）—— 底部列表 + 折叠
+// 兜底卡（找不到正文位置：orphan/leak 等）—— 覆态底部列表 + 折叠
 const floating = computed(() =>
   props.suggestions.filter((_, i) => anchors.value[i] === null || anchors.value[i] === undefined),
 )
@@ -124,125 +137,388 @@ const visibleFloating = computed(() => {
 const floatingHidden = computed(() =>
   floatingExpanded.value ? 0 : Math.max(0, floating.value.length - COLLAPSE_AT),
 )
+
+// ============================================================
+// 提醒轨（默认态）：圆点守行高——锚点在视口内的条上点，位置取
+// 堆叠后 Y 夹紧进轨；找不到锚/滚出视口的条计进轨底 +N。
+// ============================================================
+const hostHeight = ref(0)
+let _hostRO: ResizeObserver | null = null
+onMounted(() => {
+  if (bandRoot.value) {
+    hostHeight.value = bandRoot.value.offsetHeight
+    _hostRO = new ResizeObserver(() => {
+      hostHeight.value = bandRoot.value?.offsetHeight ?? 0
+    })
+    _hostRO.observe(bandRoot.value)
+  }
+})
+onBeforeUnmount(() => { _hostRO?.disconnect(); _hostRO = null })
+
+const railDots = computed(() => {
+  const h = hostHeight.value
+  const out: { key: string; top: number; cls: string; safety: boolean; title: string }[] = []
+  if (!h) return out
+  for (let i = 0; i < props.suggestions.length; i++) {
+    const raw = anchors.value[i]
+    if (raw === null || raw === undefined) continue
+    if (raw < 0 || raw > h) continue // 锚点滚出视口 → +N
+    const stacked = stackedTops.value[i] ?? raw
+    const hint = props.suggestions[i]
+    const meta = kindMeta(hint.kind)
+    out.push({
+      key: `dot${i}`,
+      top: Math.max(DOT_MARGIN, Math.min(stacked, h - DOT_MARGIN)),
+      cls: meta.cls,
+      safety: SAFETY_KINDS.has(hint.kind),
+      title: `${meta.label}：${hint.node_label}`,
+    })
+  }
+  return out
+})
+const hiddenCount = computed(() => props.suggestions.length - railDots.value.length)
+const isEmpty = computed(() => props.suggestions.length === 0 && !props.spineProgress)
+
+// ============================================================
+// 覆态开合三态：hover 120ms 驻留 / focus-within / 点击钉住；
+// 关闭 = 指针离开圆点与覆态（无焦点未钉住）/ Esc（入栈，焦点回编辑器）/ 钉住态外点。
+// 08 期 §4.7：根容器 pointer-events:none（不拦截正文选区与点击），
+// pointerenter 不冒泡——hover 三态改挂圆点与覆态两件，双旗标跟踪接力。
+// （bandOpenState / pinnedByClick 声明在上方锚定区，供 topReserve 补测引用）
+// ============================================================
+let _hoverTimer: ReturnType<typeof setTimeout> | null = null
+const { push: pushEsc, remove: removeEsc } = useEscStack()
+let _escId: symbol | null = null
+let _dotHover = false
+let _overlayHover = false
+
+function openBand() {
+  bandOpenState.value = true
+}
+function closeBand() {
+  bandOpenState.value = false
+  pinnedByClick.value = false
+}
+function escCloseBand() {
+  closeBand()
+  // Esc 关覆态后焦点回编辑器（07 期 §4 键盘列）
+  try { chapterEditorHandle.value?.commands?.focus() } catch { /* 编辑器不在时静默 */ }
+}
+watch(bandOpenState, (open) => {
+  if (open) {
+    if (!_escId) _escId = pushEsc(escCloseBand, 'perception-overlay')
+  } else if (_escId) {
+    removeEsc(_escId)
+    _escId = null
+  }
+})
+
+function onHoverEnter() {
+  if (_hoverTimer) clearTimeout(_hoverTimer)
+  _hoverTimer = setTimeout(() => { openBand() }, 120)
+}
+function onDotEnter() {
+  _dotHover = true
+  onHoverEnter()
+}
+function onDotLeave() {
+  _dotHover = false
+  _scheduleHoverLeave()
+}
+function onOverlayEnter() {
+  _overlayHover = true
+  if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null }
+}
+function onOverlayLeave() {
+  _overlayHover = false
+  _scheduleHoverLeave()
+}
+/** 圆点→覆态的指针接力在下一拍落定（leave/enter 同拍连发），避免路过缝隙误收 */
+function _scheduleHoverLeave() {
+  setTimeout(() => {
+    if (_dotHover || _overlayHover) return
+    onHoverLeave()
+  }, 0)
+}
+function onHoverLeave() {
+  if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null }
+  if (!bandOpenState.value) return
+  if (pinnedByClick.value) return
+  const root = bandRoot.value
+  if (root && root.contains(document.activeElement)) return // 焦点在轨/卡内不收
+  closeBand()
+}
+function onFocusIn() {
+  openBand()
+}
+function onFocusOut(e: FocusEvent) {
+  const root = bandRoot.value
+  if (root && e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) return
+  if (pinnedByClick.value) return
+  // 指针仍悬在轨上时不收（hover 语义优先）
+  if (root?.matches(':hover')) return
+  closeBand()
+}
+/** 点击轨体/圆点 = 钉住（覆态常驻至 Esc 或外点） */
+function onRailActivate() {
+  pinnedByClick.value = true
+  openBand()
+}
+function onDocPointerDown(e: PointerEvent) {
+  if (!pinnedByClick.value) return
+  const root = bandRoot.value
+  if (root && e.target instanceof Node && root.contains(e.target)) return
+  closeBand()
+}
+watch(pinnedByClick, (pinned) => {
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  if (pinned) document.addEventListener('pointerdown', onDocPointerDown, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  if (_hoverTimer) clearTimeout(_hoverTimer)
+  if (_escId) { removeEsc(_escId); _escId = null }
+})
+
+/** 覆态/轨上滚轮转发编辑器滚动容器——读卡时滚轮不被截获 */
+function forwardWheel(e: WheelEvent) {
+  const editor = chapterEditorHandle.value
+  const host = editor?.view?.dom?.closest('.overflow-y-auto') as HTMLElement | null
+  if (!host) return
+  e.preventDefault()
+  host.scrollTop += e.deltaY
+}
 </script>
 
 <template>
-  <aside ref="bandEl" class="perception-band">
-    <!-- 顶部固定区：header + 谋篇进度行 + 镜头碎片舱（slot） -->
-    <div class="band-header">Canon 感知</div>
-    <!-- 谋篇进度行（P1.4 M2 §3.2）：意图短语 + ⚑ 旗标；hit 判定后旗标实心（划 todo 的满足感） -->
-    <div v-if="spineProgress" class="spine-progress">
-      <button class="spine-progress__head" :title="spineProgress.hint" @click="spineCollapsed = !spineCollapsed">
-        <span class="spine-progress__intent">{{ spineProgress.intent || '打算' }}</span>
-        <span class="spine-progress__flags">
-          <span
-            v-for="a in spineProgress.anchors"
-            :key="a.id"
-            class="spine-flag"
-            :class="'spine-flag--' + a.status"
-          >{{ a.status === 'hit' ? '⚑' : a.status === 'dropped' ? '⊘' : '⚐' }}</span>
-        </span>
-      </button>
-      <div v-if="!spineCollapsed" class="spine-progress__list">
-        <div
-          v-for="a in spineProgress.anchors"
-          :key="a.id"
-          class="spine-progress__item"
-          :class="'is-' + a.status"
-        >{{ a.status === 'hit' ? '✓ ' : a.status === 'dropped' ? '⊘ ' : '○ ' }}{{ a.text }}</div>
-        <div class="spine-progress__hint">{{ spineProgress.hint }}</div>
-      </div>
-    </div>
-    <div ref="dockSlotEl" class="band-dock-slot">
-      <slot name="dock" />
-    </div>
-    <div v-if="suggestions.length === 0" class="band-empty">
-      写到相关角色 / 伏笔时，<br />这里会浮现提醒
+  <!-- 根：纸列对齐覆层（08 期 §4.7 纸左页边批注；不占布局宽——纸列零位移的物理保证） -->
+  <aside
+    ref="bandRoot"
+    class="hint-rail-host"
+    :aria-hidden="isEmpty ? 'true' : undefined"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+  >
+    <div class="hint-rail" @wheel="forwardWheel">
+      <!-- 打算小旗（详情在覆态读） -->
+      <div v-if="spineProgress" class="hint-rail__flag" :title="spineProgress.hint || '打算进度'">⚑</div>
+      <button
+        v-for="d in railDots"
+        :key="d.key"
+        class="hint-dot"
+        :class="[d.cls, { 'hint-dot--safety': d.safety }]"
+        :style="{ top: d.top + 'px' }"
+        :title="d.title"
+        @pointerenter="onDotEnter"
+        @pointerleave="onDotLeave"
+        @click.stop="onRailActivate"
+      />
+      <div v-if="hiddenCount > 0" class="hint-rail__more" :title="`还有 ${hiddenCount} 条提醒`">+{{ hiddenCount }}</div>
     </div>
 
-    <!-- 锚定层：感知卡按正文行 Y 对齐（absolute，pointer-events 放行顶部区交互） -->
-    <div class="hint-anchor-layer">
+    <!-- 覆态（读卡态）：232px 纯色层自纸左缘向右开（覆于正文上），peek 语义同 07 -->
+    <Transition name="hint-overlay">
       <div
-        v-for="(item, i) in located"
-        :key="'loc' + i"
-        class="hint-card hint-card--anchor"
-        :class="kindMeta(item.hint.kind).cls"
-        :style="{ top: item.top + 'px' }"
+        v-if="bandOpenState"
+        ref="overlayEl"
+        class="hint-overlay"
+        @pointerenter="onOverlayEnter"
+        @pointerleave="onOverlayLeave"
+        @wheel="forwardWheel"
       >
-        <div class="hint-card__head">
-          <span class="hint-card__icon">{{ kindMeta(item.hint.kind).icon }}</span>
-          <span class="hint-card__label" :title="item.hint.node_label">{{ item.hint.node_label }}</span>
-          <span class="hint-card__tag">{{ kindMeta(item.hint.kind).label }}</span>
-          <button
-            v-if="dismissable(item.hint.kind)"
-            class="hint-card__dismiss"
-            title="收起此类提醒（同类多次收起后将少提，可在收件箱恢复）"
-            @click.stop="emit('dismiss-hint', { kind: item.hint.kind, label: item.hint.node_label })"
-          >×</button>
+        <!-- 打算进度行（锚定卡避让测量对象；行内容沿用旧感知带原样） -->
+        <div v-if="spineProgress" ref="spineRowEl" class="spine-progress">
+          <button class="spine-progress__head" :title="spineProgress.hint" @click="spineCollapsed = !spineCollapsed">
+            <span class="spine-progress__intent">{{ spineProgress.intent || '打算' }}</span>
+            <span class="spine-progress__flags">
+              <span
+                v-for="a in spineProgress.anchors"
+                :key="a.id"
+                class="spine-flag"
+                :class="'spine-flag--' + a.status"
+              >{{ a.status === 'hit' ? '⚑' : a.status === 'dropped' ? '⊘' : '⚐' }}</span>
+            </span>
+          </button>
+          <div v-if="!spineCollapsed" class="spine-progress__list">
+            <div
+              v-for="a in spineProgress.anchors"
+              :key="a.id"
+              class="spine-progress__item"
+              :class="'is-' + a.status"
+            >{{ a.status === 'hit' ? '✓ ' : a.status === 'dropped' ? '⊘ ' : '○ ' }}{{ a.text }}</div>
+            <div class="spine-progress__hint">{{ spineProgress.hint }}</div>
+          </div>
         </div>
-        <div v-if="item.hint.detail" class="hint-card__detail">{{ item.hint.detail }}</div>
-      </div>
-    </div>
 
-    <!-- 兜底区：找不到正文位置的提醒（底部固定，流式列表 + 折叠） -->
-    <div v-if="floating.length" class="hint-floating">
-      <div class="band-sub">其他提醒</div>
-      <div
-        v-for="(hint, i) in visibleFloating"
-        :key="'flt' + i"
-        class="hint-card"
-        :class="kindMeta(hint.kind).cls"
-      >
-        <div class="hint-card__head">
-          <span class="hint-card__icon">{{ kindMeta(hint.kind).icon }}</span>
-          <span class="hint-card__label" :title="hint.node_label">{{ hint.node_label }}</span>
-          <span class="hint-card__tag">{{ kindMeta(hint.kind).label }}</span>
-          <button
-            v-if="dismissable(hint.kind)"
-            class="hint-card__dismiss"
-            title="收起此类提醒（同类多次收起后将少提，可在收件箱恢复）"
-            @click.stop="emit('dismiss-hint', { kind: hint.kind, label: hint.node_label })"
-          >×</button>
+        <div v-if="suggestions.length === 0" class="hint-overlay__empty">
+          写到相关角色 / 伏笔时，这里会浮现提醒
         </div>
-        <div v-if="hint.detail" class="hint-card__detail">{{ hint.detail }}</div>
+
+        <!-- 锚定层：感知卡按正文行 Y 对齐（absolute，pointer-events 放行） -->
+        <div class="hint-anchor-layer">
+          <div
+            v-for="(item, i) in located"
+            :key="'loc' + i"
+            class="hint-card hint-card--anchor"
+            :class="kindMeta(item.hint.kind).cls"
+            :style="{ top: item.top + 'px' }"
+          >
+            <div class="hint-card__head">
+              <span class="hint-card__icon">{{ kindMeta(item.hint.kind).icon }}</span>
+              <span class="hint-card__label" :title="item.hint.node_label">{{ item.hint.node_label }}</span>
+              <span class="hint-card__tag">{{ kindMeta(item.hint.kind).label }}</span>
+              <button
+                v-if="dismissable(item.hint.kind)"
+                class="hint-card__dismiss"
+                title="收起这类提醒（多收几次就不再提，可在写作助手里恢复）"
+                @click.stop="emit('dismiss-hint', { kind: item.hint.kind, label: item.hint.node_label })"
+              >×</button>
+            </div>
+            <div v-if="item.hint.detail" class="hint-card__detail">{{ item.hint.detail }}</div>
+          </div>
+        </div>
+
+        <!-- 兜底区：找不到正文位置的提醒（底部固定，流式列表 + 折叠） -->
+        <div v-if="floating.length" class="hint-floating">
+          <div class="hint-sub">其他提醒</div>
+          <div
+            v-for="(hint, i) in visibleFloating"
+            :key="'flt' + i"
+            class="hint-card"
+            :class="kindMeta(hint.kind).cls"
+          >
+            <div class="hint-card__head">
+              <span class="hint-card__icon">{{ kindMeta(hint.kind).icon }}</span>
+              <span class="hint-card__label" :title="hint.node_label">{{ hint.node_label }}</span>
+              <span class="hint-card__tag">{{ kindMeta(hint.kind).label }}</span>
+              <button
+                v-if="dismissable(hint.kind)"
+                class="hint-card__dismiss"
+                title="收起这类提醒（多收几次就不再提，可在写作助手里恢复）"
+                @click.stop="emit('dismiss-hint', { kind: hint.kind, label: hint.node_label })"
+              >×</button>
+            </div>
+            <div v-if="hint.detail" class="hint-card__detail">{{ hint.detail }}</div>
+          </div>
+          <button v-if="floatingHidden > 0" class="hint-more" @click="floatingExpanded = true">
+            +{{ floatingHidden }} 更多
+          </button>
+        </div>
       </div>
-      <button v-if="floatingHidden > 0" class="band-more" @click="floatingExpanded = true">
-        +{{ floatingHidden }} 更多
-      </button>
-    </div>
+    </Transition>
   </aside>
 </template>
 
 <style scoped>
-.perception-band {
-  width: 260px;
-  flex-shrink: 0;
-  position: relative;
-  overflow: hidden;
-  height: 100%;
-  order: -1;  /* 放正文左侧，避开右边 InspectorPanel 抽屉遮挡 */
-  border-right: 1px solid #e2e8f0;
-  background: rgba(248, 250, 252, 0.6);
-}
-.band-header {
-  position: relative;
-  z-index: 2;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
-  margin-bottom: 8px;
-  padding: 8px 8px 0;
-  font-family: ui-monospace, monospace;
+/* 提醒轨宿主：与纸列同轴同宽的对齐覆层（08 期 §4.7 纸左页边批注——圆点落进纸列
+   左页边，批注贴着它所指的段落；纸列零位移的物理保证=不占布局宽）。
+   宽度复算纸列：min(880px, 100% − 编辑器内边距 40px)。pointer-events:none
+   不拦截正文选区与点击——交互件（圆点/覆态）各自回收 pointer-events:auto。 */
+.hint-rail-host {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 0;
+  bottom: 0;
+  width: min(var(--editor-max-width), calc(100% - 40px));
+  z-index: var(--z-page-chrome);
+  pointer-events: none;
 }
 
-/* 谋篇进度行（P1.4 M2）：意图短语 + 旗标，点击行头收起清单 */
+/* 轨道本体透明且惰性（宿主 pointer-events:none 下不拦截；点击/悬停交互在圆点上） */
+.hint-rail {
+  position: absolute;
+  inset: 0;
+}
+.hint-rail__flag {
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent-500);
+}
+.hint-dot {
+  position: absolute;
+  left: 14px;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  /* 色种由卡族类给出（color-mix 双主题自动正确） */
+  background: var(--k, var(--text-muted));
+  opacity: 0.85;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.hint-dot:hover,
+.hint-dot:focus-visible {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.35);
+  outline: none;
+}
+/* 安全类提权（继承旧折叠徽章语义）：10px 朱点 */
+.hint-dot--safety {
+  width: 10px;
+  height: 10px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.hint-rail__more {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  width: 36px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* 覆态：232px 读卡层自纸左缘向右开（覆于正文上），投影值镜像 .inspector-drawer（方向相反） */
+.hint-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 232px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  cursor: default;
+  pointer-events: auto;
+}
+.hint-overlay-enter-active {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.hint-overlay-leave-active {
+  transition: transform 0.14s ease, opacity 0.14s ease;
+}
+.hint-overlay-enter-from,
+.hint-overlay-leave-to {
+  transform: translateX(-8px);
+  opacity: 0;
+}
+.hint-overlay__empty {
+  padding: 12px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* 谋篇进度行：意图短语 + 旗标，点击行头收起清单（内容沿用旧带原样） */
 .spine-progress {
   position: relative;
   z-index: 2;
-  padding: 0 8px 6px;
+  padding: 8px 10px 6px;
   margin-bottom: 6px;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.35);
+  border-bottom: 1px dashed var(--border-color);
+  background: var(--bg-secondary);
 }
 .spine-progress__head {
   display: flex;
@@ -258,9 +534,9 @@ const floatingHidden = computed(() =>
 }
 .spine-progress__intent {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-heading, inherit);
-  color: var(--text-secondary, #6b6560);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -272,10 +548,10 @@ const floatingHidden = computed(() =>
 }
 .spine-flag {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 .spine-flag--hit {
-  color: var(--accent-500, #7c6aad);
+  color: var(--accent-500);
 }
 .spine-flag--dropped {
   opacity: 0.4;
@@ -287,33 +563,22 @@ const floatingHidden = computed(() =>
   padding: 2px 0 4px;
 }
 .spine-progress__item {
-  font-size: 11px;
-  color: var(--text-secondary, #6b6560);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
 .spine-progress__item.is-hit {
-  color: var(--accent-500, #7c6aad);
+  color: var(--accent-500);
 }
 .spine-progress__item.is-dropped {
   opacity: 0.5;
   text-decoration: line-through;
 }
 .spine-progress__hint {
-  font-size: 10px;
-  color: #94a3b8;
-}
-/* 顶部固定区 slot（SparkDock）wrapper：实高供锚定卡避让（topReservePx），z-2 盖在锚定层之上 */
-.band-dock-slot {
-  position: relative;
-  z-index: 2;
-}
-.band-empty {
-  font-size: 11px;
-  color: #cbd5e1;
-  line-height: 1.6;
-  padding: 12px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
-/* 锚定层：覆盖整个带，pointer-events 放行（不挡顶部区交互）；卡片自身回收事件 */
+/* 锚定层：覆盖覆态全高，pointer-events 放行（不挡进度行交互）；卡片自身回收事件 */
 .hint-anchor-layer {
   position: absolute;
   inset: 0;
@@ -326,7 +591,7 @@ const floatingHidden = computed(() =>
   pointer-events: auto;
 }
 
-/* 兜底区：底部固定，顶部渐变避免和锚定卡硬碰 */
+/* 兜底区：底部固定，顶部渐变避免和锚定卡硬碰（渐变底色 token 化） */
 .hint-floating {
   position: absolute;
   left: 0;
@@ -335,40 +600,44 @@ const floatingHidden = computed(() =>
   max-height: 55%;
   overflow-y: auto;
   padding: 14px 8px 8px;
-  background: linear-gradient(to top, rgba(248, 250, 252, 0.98) 72%, rgba(248, 250, 252, 0));
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--bg-secondary) 98%, transparent) 72%,
+    transparent
+  );
   z-index: 3;
 }
-.band-sub {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
+.hint-sub {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   margin-bottom: 5px;
-  font-family: ui-monospace, monospace;
 }
-.band-more {
+.hint-more {
   margin-top: 4px;
   padding: 4px;
   width: 100%;
-  border: 1px dashed #cbd5e1;
+  border: 1px dashed var(--border-color);
   border-radius: 6px;
   background: transparent;
-  color: #64748b;
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
-.band-more:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
+.hint-more:hover {
+  background: var(--hover-bg);
 }
 
-.hint-list,
+/* 卡五族（07 期 §2.4.5）：色种 --k 由族类给出，border/背景/tag 全部 color-mix 派生 */
+.hint-card--character { --k: var(--info); }
+.hint-card--hook { --k: var(--warn); }
+.hint-card--leak { --k: var(--danger); }
+.hint-card--style { --k: var(--accent-500); }
+.hint-card--inbox { --k: var(--ok); }
+.hint-card--canon { --k: var(--text-muted); }
+
 .hint-card {
-  /* 卡片基类（锚定 + 兜底共用） */
-}
-.hint-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: color-mix(in srgb, var(--k, var(--text-muted)) 8%, var(--bg-canvas));
+  border: 1px solid color-mix(in srgb, var(--k, var(--border-color)) 35%, transparent);
   border-radius: 8px;
   padding: 7px 9px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -387,91 +656,48 @@ const floatingHidden = computed(() =>
 .hint-card__label {
   font-size: 12px;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-primary);
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.hint-card--leak .hint-card__label {
+  color: var(--danger);
+}
 .hint-card__tag {
-  font-size: 9px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: 9999px;
-  background: #f1f5f9;
-  color: #64748b;
+  background: color-mix(in srgb, var(--k, var(--text-muted)) 14%, var(--bg-canvas));
+  color: var(--k, var(--text-muted));
   flex-shrink: 0;
 }
-/* 学着闭嘴：× 收起按钮默认隐身、悬停卡片浮现（常驻 × 是视觉噪声——学着闭嘴先从自己做起） */
+/* 学着闭嘴：× 默认隐身，卡 hover/focus-within 双触发显形；24px 命中（padding 4px 6px） */
 .hint-card__dismiss {
   flex-shrink: 0;
   border: none;
   background: none;
-  padding: 0 2px;
+  padding: 4px 6px;
+  margin: -4px -6px;
   font-size: 13px;
   line-height: 1;
-  color: #94a3b8;
+  color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
-.hint-card:hover .hint-card__dismiss {
+.hint-card:hover .hint-card__dismiss,
+.hint-card:focus-within .hint-card__dismiss {
   opacity: 0.85;
 }
 .hint-card__dismiss:hover {
-  color: #475569;
+  color: var(--text-primary);
 }
 .hint-card__detail {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
   line-height: 1.5;
-}
-/* 角色出场 —— indigo */
-.hint-card--character {
-  border-color: #c7d2fe;
-  background: #eef2ff;
-}
-.hint-card--character .hint-card__tag {
-  background: #e0e7ff;
-  color: #4f46e5;
-}
-/* 伏笔回收 —— amber */
-.hint-card--hook {
-  border-color: #fcd34d;
-  background: #fffbeb;
-}
-.hint-card--hook .hint-card__tag {
-  background: #fef3c7;
-  color: #b45309;
-}
-/* private 泄露 —— rose（高优先级） */
-.hint-card--leak {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-.hint-card--leak .hint-card__label {
-  color: #b91c1c;
-}
-.hint-card--leak .hint-card__tag {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-/* 文风漂移 —— violet（S4 补全） */
-.hint-card--style {
-  border-color: #c4b5fd;
-  background: #f5f3ff;
-}
-.hint-card--style .hint-card__tag {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-/* 收件箱积压 —— teal（A5c，参照 style_drift 先例的柔性提醒色档） */
-.hint-card--inbox {
-  border-color: #5eead4;
-  background: #f0fdfa;
-}
-.hint-card--inbox .hint-card__tag {
-  background: #ccfbf1;
-  color: #0f766e;
 }
 </style>

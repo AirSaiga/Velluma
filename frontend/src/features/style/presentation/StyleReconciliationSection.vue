@@ -148,7 +148,7 @@ const rangeLabel = computed(() => {
         <div class="chart-head">
           <span class="chart-title">句长起伏（健康带 {{ cvSeries.band?.[0] }}~{{ cvSeries.band?.[1] }}）</span>
         </div>
-        <svg :viewBox="`0 0 ${W} ${H}`" class="chart" preserveAspectRatio="none" role="img" aria-label="句长起伏趋势">
+        <svg :viewBox="`0 0 ${W} ${H}`" class="chart"  role="img" aria-label="句长起伏趋势">
           <rect
             v-if="bandRect(cvSeries)"
             :x="PAD" :y="bandRect(cvSeries)!.y" :width="W - 2 * PAD" :height="bandRect(cvSeries)!.height"
@@ -169,7 +169,7 @@ const rangeLabel = computed(() => {
             对话占比（目标带 {{ Math.round((dialogueSeries.band?.[0] || 0) * 100) }}%~{{ Math.round((dialogueSeries.band?.[1] || 1) * 100) }}%）
           </span>
         </div>
-        <svg :viewBox="`0 0 ${W} ${H}`" class="chart" preserveAspectRatio="none" role="img" aria-label="对话占比趋势">
+        <svg :viewBox="`0 0 ${W} ${H}`" class="chart"  role="img" aria-label="对话占比趋势">
           <rect
             v-if="bandRect(dialogueSeries)"
             :x="PAD" :y="bandRect(dialogueSeries)!.y" :width="W - 2 * PAD" :height="bandRect(dialogueSeries)!.height"
@@ -196,21 +196,13 @@ const rangeLabel = computed(() => {
   padding: 1.25rem 0 2rem;
   scroll-margin-top: 4.5rem;
 }
-.sec-head {
-  margin-bottom: 0.75rem;
-}
-.sec-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
+   sec-sub 按 §6 归 token（原 muted 过淡） */
 .sec-sub {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--text-secondary);
 }
 .empty-note {
   padding: 1rem;
@@ -220,7 +212,7 @@ const rangeLabel = computed(() => {
 }
 .range-label {
   margin: 0 0 0.5rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .chart-card {
@@ -237,13 +229,13 @@ const rangeLabel = computed(() => {
   margin-bottom: 0.25rem;
 }
 .chart-title {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .chart {
-  display: block;
   width: 100%;
-  height: 96px;
+  height: auto;
+  aspect-ratio: 5 / 1;
 }
 .band {
   fill: color-mix(in srgb, #10b981 12%, transparent);

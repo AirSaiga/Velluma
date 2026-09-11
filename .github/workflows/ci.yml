@@ -36,6 +36,12 @@ jobs:
       - name: Compile-check backend
         run: python -m compileall -q backend/
 
+      # 阻断:启动编排三份实现(win ps1 / macos sh / python 监督者)共用同一套端口段与
+      # electron npm script 契约,历史上飘过(前端扫描上界 5274/5275/5285 三版并存)。
+      # 契约常量、为何不能共享代码、以及漂移后的修法见 scripts/check_launcher_contract.py
+      - name: Launcher contract check
+        run: python scripts/check_launcher_contract.py
+
       # 非阻断:统计缺 AGPL SPDX 头的在役 py 文件数,防缺口再生(批量补齐见 scripts/add_license_headers.py)
       - name: License header check (non-blocking)
         run: |
