@@ -225,6 +225,28 @@ class ModelPricesUpdate(BaseModel):
     prices: Dict[str, ModelPriceEntry]
 
 
+class ModelPresetSave(BaseModel):
+    """模型预设保存（POST /system/model-presets），同名覆盖。
+
+    copy_from_role 提供时以该槽位已保存配置为底（含槽内明文 Key），
+    显式字段覆盖——表单 Key 框留空（「保持不变」语义）也能把整套连接
+    连 Key 存进预设，明文 Key 不必经前端往返。
+    """
+    name: str = Field(..., min_length=1, max_length=80)
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    enabled: Optional[bool] = None
+    effort: Optional[str] = None
+    copy_from_role: Optional[str] = None
+
+
+class ModelPresetApply(BaseModel):
+    """预设切回（POST /system/model-presets/{id}/apply）：五件整卡写入
+    指定槽位，旧值由服务端先行自动存档（maybe_capture_outgoing_slot）。"""
+    role: str
+
+
 class EmbeddingProbePayload(BaseModel):
     """连接测试时的向量模型表单覆盖值（未保存也能测）；api_key 留空沿用已保存 Key。"""
     model: Optional[str] = None

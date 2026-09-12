@@ -135,6 +135,8 @@ from .misc import (
     DeaiConfigUpdate,
     ModelConfigUpdate,
     ModelPricesUpdate,
+    ModelPresetSave,
+    ModelPresetApply,
     ModelTestRequest,
     ModelTestResponse,
     DeaiTestRequest,

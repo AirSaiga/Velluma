@@ -61,6 +61,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     "model": "qwen3-4b-instruct-2507-78a06917f4ca",  // 部署后的 deployed_model（重训会变）
     "base_url": ""            // 留空 = DashScope 原生端点（调优模型不支持 OpenAI 兼容入口）
   },
+  "presets": [                // 模型配置预设（2026-09-11 快速切换，切走不丢 Key）
+    {
+      "id": "a1b2c3d4e5f6",   // uuid 短 id（重名覆盖时保持不变）
+      "name": "DeepSeek 主力",
+      "source": "manual",     // manual=用户点名保存 / auto=覆盖前自动存档
+      "model": "deepseek-flash",
+      "api_key": "sk-...",    // 明文仅存本地 json（同 llm.* 现状）；API 出参一律掩码
+      "base_url": "https://api.deepseek.com/v1",
+      "enabled": true,
+      "effort": "medium"
+    }
+  ],
   "proxy": {
     "enabled": true,
     "url": "http://127.0.0.1:4780"
@@ -90,7 +102,7 @@ Deepseek 配置示例：
 
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -430,6 +442,206 @@ def update_model_prices(prices: Dict[str, Dict[str, float]]) -> Dict[str, Dict[s
         config.pop("prices", None)
     _write_config(config)
     return cleaned
+
+
+# ============================================================
+# 模型配置预设（presets，2026-09-11 快速切换）
+#
+# 业务动机：切换厂商/模型/Key 时旧值直接被覆盖丢失，而重建 Key 很麻烦。
+# 预设池把整套连接配置（model/api_key/base_url + 思考开关）持久化在
+# model_config.json 顶层 "presets" 节，设置面板下拉一点即切回。
+#
+# 纪律：
+# - Key 明文只落本地 json（与 llm.* 现状同待遇）；API 出参一律掩码，
+#   切换动作由服务端 apply 完成——明文 Key 不经前端往返。
+# - source=auto 是安全网：槽位连接三件套即将被覆盖、旧值完整
+#   （model+api_key 均非空）且无同签名预设时，覆盖前静默存一条——
+#   「切走永不丢 Key」不依赖用户记得手动保存。
+# - 签名=(model, api_key, base_url)：已有同签名预设（无论 manual/auto）
+#   就不再存第二条，自动存档不会堆积重复。
+# ============================================================
+
+PRESET_ROLES = ("reasoning", "creative")
+PRESET_EFFORTS = ("low", "medium", "high", "max")
+
+
+def get_model_presets() -> List[Dict]:
+    """读预设池（内部口径：api_key 明文；出参序列化在路由层做掩码）。
+
+    非法条目（缺 id/name、非 dict）静默丢弃——预设池是工具不是闸门，
+    手改 json 写坏了不该炸设置面板。
+    """
+    raw = _load_config().get("presets")
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("id") or not entry.get("name"):
+            continue
+        effort = str(entry.get("effort", "medium") or "medium")
+        out.append({
+            "id": str(entry["id"]),
+            "name": str(entry["name"]),
+            "source": entry.get("source") if entry.get("source") in ("manual", "auto") else "manual",
+            "model": str(entry.get("model", "") or ""),
+            "api_key": str(entry.get("api_key", "") or ""),
+            "base_url": str(entry.get("base_url", "") or ""),
+            "enabled": bool(entry.get("enabled", False)),
+            "effort": effort if effort in PRESET_EFFORTS else "medium",
+        })
+    return out
+
+
+def get_model_preset(preset_id: str) -> Optional[Dict]:
+    """按 id 取单条预设；不存在返回 None。"""
+    for preset in get_model_presets():
+        if preset["id"] == preset_id:
+            return preset
+    return None
+
+
+def _preset_signature(preset: Dict) -> Tuple[str, str, str]:
+    """连接签名：自动存档的去重判据（enabled/effort 不参与）。"""
+    return (preset.get("model", ""), preset.get("api_key", ""), preset.get("base_url", ""))
+
+
+def _unique_preset_name(base_name: str, presets: List[Dict]) -> str:
+    """自动命名撞车时追加 (2)/(3)——手动保存不走这里（同名=用户意图覆盖）。"""
+    names = {p["name"] for p in presets}
+    if base_name not in names:
+        return base_name
+    i = 2
+    while f"{base_name} ({i})" in names:
+        i += 1
+    return f"{base_name} ({i})"
+
+
+def _auto_preset_display_name(conn: Dict) -> str:
+    """自动存档默认名：厂商标签 + 模型名（如「Kimi kimi-k2.6」）。
+
+    vendor_profiles 在 services 层（其包 __init__ 会拉起 llm client，
+    而 client import 本模块），只能惰性导入避免循环依赖；识别失败
+    退化为纯模型名。
+    """
+    model = conn.get("model") or "未命名模型"
+    try:
+        from backend.services.llm.vendor_profiles import detect_provider, vendor_catalog
+        provider = detect_provider(conn.get("base_url", ""), model)
+        if provider and provider != "unknown":
+            label = next((v.get("label") for v in vendor_catalog() if v.get("id") == provider), "")
+            return f"{label or provider} {model}".strip()
+    except Exception:
+        pass
+    return model
+
+
+def upsert_model_preset(name: str, fields: Dict, source: str = "manual") -> Dict:
+    """按名保存/覆盖预设并持久化，返回落盘后的完整预设。
+
+    同名覆盖：id 与原条目保持一致（前端持有的引用不失效），source 以
+    本次为准（手动覆盖自动存档=用户接管该条目）。
+    """
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("预设名不能为空")
+    config = _load_config()
+    presets = get_model_presets()
+    effort = str(fields.get("effort", "medium") or "medium")
+    clean_fields = {
+        "model": str(fields.get("model", "") or ""),
+        "api_key": str(fields.get("api_key", "") or ""),
+        "base_url": str(fields.get("base_url", "") or ""),
+        "enabled": bool(fields.get("enabled", False)),
+        "effort": effort if effort in PRESET_EFFORTS else "medium",
+    }
+    existing = next((p for p in presets if p["name"] == clean_name), None)
+    if existing is not None:
+        existing.update(clean_fields)
+        if source in ("manual", "auto"):
+            existing["source"] = source
+        saved = existing
+    else:
+        import uuid
+        saved = {
+            "id": uuid.uuid4().hex[:12],
+            "name": clean_name,
+            "source": source if source in ("manual", "auto") else "manual",
+            **clean_fields,
+        }
+        presets.append(saved)
+    config["presets"] = presets
+    _write_config(config)
+    return saved
+
+
+def delete_model_preset(preset_id: str) -> bool:
+    """按 id 删预设；不存在返回 False（幂等删除）。"""
+    config = _load_config()
+    presets = get_model_presets()
+    remaining = [p for p in presets if p["id"] != preset_id]
+    if len(remaining) == len(presets):
+        return False
+    config["presets"] = remaining
+    _write_config(config)
+    return True
+
+
+def apply_model_preset(preset_id: str, role: str) -> Dict:
+    """把预设整卡写入指定槽位（model/api_key/base_url/enabled/effort 五件
+    全量覆盖）并持久化。调用方负责先 maybe_capture_outgoing_slot 存档旧值。
+
+    只收 reasoning/creative 两个可见槽（wash UI 已隐藏，语义是「跟随
+    creative」，整卡覆盖会破坏该语义）。
+    """
+    if role not in PRESET_ROLES:
+        raise ValueError(f"预设只能应用到 reasoning/creative 槽，收到: {role}")
+    preset = get_model_preset(preset_id)
+    if preset is None:
+        raise KeyError(f"预设不存在: {preset_id}")
+    update_llm_profile(role, {k: preset[k] for k in ("model", "api_key", "base_url", "enabled", "effort")})
+    return preset
+
+
+def maybe_capture_outgoing_slot(role: str, incoming_fields: Dict) -> Optional[Dict]:
+    """安全网：槽位连接三件套即将被覆盖时，把旧值自动存为预设（source=auto）。
+
+    跳过条件（返回 None）：
+    - role 不是 reasoning/creative（wash 半态/不可见，不存）
+    - 旧值不完整（缺 model 或 api_key——半态槽位本就跟随 creative，无 Key 可丢）
+    - 连接三件套实际未变（只改 enabled/effort/保存 noop）
+    - 已有同签名预设（自动存档不堆积重复；手动预设也算「已存档」）
+
+    incoming_fields 是即将 merge 进槽位的字段（缺省键=保持原值，与
+    update_llm_profile 的合并语义一致）；api_key 由路由层先行剥掉
+    掩码回显值，这里按「未提供=沿用旧 Key」计算新三件套。
+    """
+    if role not in PRESET_ROLES:
+        return None
+    slot = get_llm_config().get(role) or {}
+    old = {
+        "model": slot.get("model", "") or "",
+        "api_key": slot.get("api_key", "") or "",
+        "base_url": slot.get("base_url", "") or "",
+    }
+    if not (old["model"] and old["api_key"]):
+        return None
+    new = dict(old)
+    for key in ("model", "api_key", "base_url"):
+        if incoming_fields.get(key) is not None:
+            new[key] = str(incoming_fields[key])
+    if _preset_signature(new) == _preset_signature(old):
+        return None
+    presets = get_model_presets()
+    if any(_preset_signature(p) == _preset_signature(old) for p in presets):
+        return None
+    name = _unique_preset_name(_auto_preset_display_name(old), presets)
+    return upsert_model_preset(name, {
+        **old,
+        "enabled": bool(slot.get("enabled", False)),
+        "effort": slot.get("effort", "medium") or "medium",
+    }, source="auto")
 
 
 def _invalidate_cache():

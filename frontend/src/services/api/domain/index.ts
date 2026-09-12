@@ -189,6 +189,36 @@ export interface ModelPriceEntryPayload {
 
 export type ModelPriceTable = Record<string, ModelPriceEntryPayload>
 
+/** 模型配置预设条目（GET /system/model-presets；Key 只回掩码） */
+export interface ModelPresetItem {
+  id: string
+  name: string
+  /** manual=用户点名保存 / auto=覆盖前自动存档 */
+  source: 'manual' | 'auto'
+  model: string
+  base_url: string
+  enabled: boolean
+  effort: string
+  has_api_key: boolean
+  api_key_masked: string
+}
+
+/** 预设保存载荷：copy_from_role=以该槽已保存配置为底（含槽内 Key），显式字段覆盖 */
+export interface ModelPresetSavePayload {
+  name: string
+  model?: string
+  base_url?: string
+  /** 留空=沿用 copy_from_role 槽内已存 Key */
+  api_key?: string
+  enabled?: boolean
+  effort?: string
+  copy_from_role?: 'reasoning' | 'creative'
+}
+
+export interface ModelPresetList {
+  presets: ModelPresetItem[]
+}
+
 export const systemApi = {
   /**
    * 获取模型配置（LLM / Embedding / 代理）
@@ -221,6 +251,50 @@ export const systemApi = {
    */
   getModelCatalog: async (): Promise<ModelCatalog> => {
     return requestJson('/system/model-catalog')
+  },
+
+  /**
+   * 读模型配置预设池（快速切换下拉；Key 只回掩码，切换走 applyModelPreset）
+   */
+  getModelPresets: async (): Promise<ModelPresetList> => {
+    return requestJson('/system/model-presets')
+  },
+
+  /**
+   * 保存/覆盖预设（同名覆盖）。copy_from_role 以该槽已保存配置为底，
+   * 表单 Key 框留空也能把槽内 Key 连整套连接存进预设（明文不经前端往返）
+   */
+  saveModelPreset: async (payload: ModelPresetSavePayload): Promise<ModelPresetList & { overwrote: boolean }> => {
+    return requestJson('/system/model-presets', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+
+  /**
+   * 删预设（幂等），返回最新预设池
+   */
+  deleteModelPreset: async (id: string): Promise<ModelPresetList> => {
+    return requestJson(`/system/model-presets/${id}`, { method: 'DELETE' })
+  },
+
+  /**
+   * 预设切回：整卡写入指定槽位立即生效；旧值由服务端先行自动存档
+   * （auto_captured 回存档名，null=同签名已存档/旧值不完整，无需存）。
+   * config 为最新模型配置，按槽就地刷新表单（不牵连另一槽的未保存改动）
+   */
+  applyModelPreset: async (
+    id: string,
+    role: 'reasoning' | 'creative'
+  ): Promise<ModelPresetList & {
+    config: ModelConfig
+    applied: { id: string; name: string }
+    auto_captured: string | null
+  }> => {
+    return requestJson(`/system/model-presets/${id}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ role })
+    })
   },
 
   /**

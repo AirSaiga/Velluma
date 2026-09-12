@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from backend.core.config import get_actual_port, check_reasoning_support
 from backend.core.model_config import (
@@ -54,6 +54,12 @@ from backend.core.model_config import (
     update_model_prices,
     get_deai_config,
     update_deai_config,
+    get_model_presets,
+    get_model_preset,
+    upsert_model_preset,
+    delete_model_preset,
+    apply_model_preset,
+    maybe_capture_outgoing_slot,
 )
 from backend.services.llm import get_proxy_config, set_proxy_config, call_llm
 from backend.services.llm.embedding import probe_embedding
@@ -62,6 +68,7 @@ from backend.services.utils.logging import ServiceLogger, LOG_PREFIX_SYSTEM
 from backend.schemas import (
     ProxyConfig, ModelTestRequest, ModelTestResponse, ModelConfigUpdate,
     ModelPricesUpdate,
+    ModelPresetSave, ModelPresetApply,
     DeaiTestRequest, DeaiTestResponse,
 )
 
@@ -269,6 +276,9 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
         if not fields.get("api_key") or "****" in str(fields.get("api_key")):
             fields.pop("api_key", None)
         if fields:
+            # 安全网：连接三件套即将被覆盖时先把旧值自动存为预设（内部自判
+            # 未变/不完整/已存档，静默跳过），「切走丢 Key」从根上堵死
+            maybe_capture_outgoing_slot(role, fields)
             update_llm_profile(role, fields)
 
     if update.embedding is not None:
@@ -292,6 +302,99 @@ async def update_model_config_endpoint(update: ModelConfigUpdate):
 
     svc_logger.info("模型配置已更新")
     return _serialize_model_config()
+
+
+def _serialize_preset(preset: dict) -> dict:
+    """预设出参：Key 只回掩码（明文仅存 json，切换由服务端 apply 完成）。"""
+    return {
+        "id": preset["id"],
+        "name": preset["name"],
+        "source": preset.get("source", "manual"),
+        "model": preset.get("model", ""),
+        "base_url": preset.get("base_url", ""),
+        "enabled": preset.get("enabled", False),
+        "effort": preset.get("effort", "medium"),
+        "has_api_key": bool(preset.get("api_key")),
+        "api_key_masked": _mask_api_key(preset.get("api_key", "")),
+    }
+
+
+def _serialize_presets() -> list:
+    return [_serialize_preset(p) for p in get_model_presets()]
+
+
+# =============================================================================
+# 模型配置预设（2026-09-11 快速切换）：换厂商/换 Key 前整套存档，下拉一点切回
+# =============================================================================
+
+@router.get("/system/model-presets")
+async def get_model_presets_endpoint():
+    """读预设池（Key 掩码）。设置弹窗两槽共用的快速切换下拉。"""
+    return {"presets": _serialize_presets()}
+
+
+@router.post("/system/model-presets")
+async def save_model_preset_endpoint(payload: ModelPresetSave):
+    """保存/覆盖预设（同名覆盖），返回最新预设池。
+
+    copy_from_role 语义：以该槽位已保存配置为底（含槽内明文 Key——表单
+    Key 框留空=「保持不变」，也要能把整套连接连 Key 存档），显式字段
+    覆盖底值。前端「存为预设」恒带 copy_from_role，保证未保存的表单
+    改动（Key 除外）与已存 Key 都进预设。
+    """
+    base: dict = {}
+    if payload.copy_from_role in ("reasoning", "creative"):
+        base = get_model_config().get("llm", {}).get(payload.copy_from_role, {}) or {}
+    fields = {
+        "model": (payload.model or "").strip() or base.get("model", ""),
+        "base_url": (payload.base_url or "").strip() or base.get("base_url", ""),
+        "api_key": (payload.api_key or "").strip() or base.get("api_key", ""),
+        # 显式掩码回显值防御（同 PUT /system/model-config）
+        "enabled": payload.enabled if payload.enabled is not None else bool(base.get("enabled", False)),
+        "effort": (payload.effort or "").strip() or base.get("effort", "medium"),
+    }
+    if "****" in str(payload.api_key or ""):
+        fields["api_key"] = base.get("api_key", "")
+    # schema 的 min_length 拦不住纯空白名（"   "），这里显式 422 而非落 ValueError 500
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="预设名不能为空")
+    existing_names = {p["name"] for p in get_model_presets()}
+    upsert_model_preset(name, fields, source="manual")
+    return {
+        "presets": _serialize_presets(),
+        "overwrote": name in existing_names,
+    }
+
+
+@router.delete("/system/model-presets/{preset_id}")
+async def delete_model_preset_endpoint(preset_id: str):
+    """删预设（幂等：删不存在的 id 也返回成功与最新列表）。"""
+    delete_model_preset(preset_id)
+    return {"presets": _serialize_presets()}
+
+
+@router.post("/system/model-presets/{preset_id}/apply")
+async def apply_model_preset_endpoint(preset_id: str, payload: ModelPresetApply):
+    """预设切回：五件整卡写入指定槽位并立即生效（每次调用实时读取配置）。
+
+    旧值先行自动存档（同签名已存档则静默跳过），切换动作本身无损。
+    返回最新模型配置供表单就地刷新——只动一个槽，另一槽的未保存表单
+    改动不受牵连（前端按槽应用，不做全量 applyConfig）。
+    """
+    preset = get_model_preset(preset_id)
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"预设不存在: {preset_id}")
+    if payload.role not in ("reasoning", "creative"):
+        raise HTTPException(status_code=422, detail=f"role 只能是 reasoning/creative: {payload.role}")
+    captured = maybe_capture_outgoing_slot(payload.role, preset)
+    apply_model_preset(preset_id, payload.role)
+    return {
+        "presets": _serialize_presets(),
+        "config": _serialize_model_config(),
+        "applied": {"id": preset["id"], "name": preset["name"]},
+        "auto_captured": captured["name"] if captured else None,
+    }
 
 
 # =============================================================================

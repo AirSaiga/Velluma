@@ -8,7 +8,7 @@
 import { reactive, ref, watch } from 'vue'
 import ModalShell from './ModalShell.vue'
 import { systemApi } from '../services/api'
-import type { ModelConfig, ModelConfigUpdatePayload, VendorCatalogEntry } from '../services/api'
+import type { ModelConfig, ModelConfigUpdatePayload, VendorCatalogEntry, ModelPresetItem } from '../services/api'
 import { useAppSettings } from '../composables/useAppSettings'
 import { useToast } from '../composables/useToast'
 import { useNotifyPrefs } from '../composables/useNotifyPrefs'
@@ -59,6 +59,140 @@ const ROLE_HINTS: Record<ProfileRole, string> = {
 const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
   reasoning: '如 deepseek-flash',
   creative: '如 kimi-k2.6',
+}
+
+const ROLE_SHORT_LABELS: Record<ProfileRole, string> = {
+  reasoning: '分析模型',
+  creative: '写作模型',
+}
+
+// ============================================================
+// 模型配置预设（快速切换，2026-09-11）：切走前整套存档（含 Key），下拉一点切回；
+// 服务端另有自动存档安全网——覆盖槽位连接时旧值不完整或已存档才会丢，正常切换永不丢
+// ============================================================
+
+const presets = ref<ModelPresetItem[]>([])
+const presetSelection = reactive<Record<ProfileRole, string>>({ reasoning: '', creative: '' })
+const presetNameDraft = reactive<Record<ProfileRole, string>>({ reasoning: '', creative: '' })
+const showPresetSave = reactive<Record<ProfileRole, boolean>>({ reasoning: false, creative: false })
+const applyingPreset = ref<ProfileRole | null>(null)
+const savingPreset = ref(false)
+/** 删除二次确认：首点进入待确认态（按钮变红），3.5s 未复点自动解除 */
+const armedDeleteRole = ref<ProfileRole | null>(null)
+let armDeleteTimer: ReturnType<typeof setTimeout> | undefined
+
+function presetLabel(p: ModelPresetItem): string {
+  const suffix = p.source === 'auto' ? '（自动存档）' : ''
+  return `${p.name}${suffix} · ${p.model || '未命名模型'}`
+}
+
+async function loadPresets() {
+  try {
+    presets.value = (await systemApi.getModelPresets()).presets
+  } catch {
+    /* 预设池加载失败不阻塞设置面板（下拉置空，其余功能不受影响） */
+  }
+}
+
+function applyRoleConfig(role: ProfileRole, p: ModelConfig['llm'][ProfileRole]) {
+  profileForms[role].model = p.model
+  profileForms[role].base_url = p.base_url
+  profileForms[role].enabled = p.enabled
+  profileForms[role].effort = p.effort
+  profileForms[role].api_key = '' // 不回填明文，留空即保持
+  profileMeta[role].has_api_key = p.has_api_key
+  profileMeta[role].api_key_masked = p.api_key_masked
+  profileMeta[role].configured = p.configured
+  vendorSelection[role] = matchVendorByBaseUrl(p.base_url)
+}
+
+async function onApplyPreset(role: ProfileRole) {
+  const id = presetSelection[role]
+  if (!id || applyingPreset.value) return
+  applyingPreset.value = role
+  try {
+    const res = await systemApi.applyModelPreset(id, role)
+    // 只刷新被切的槽——另一槽未保存的表单改动不受牵连
+    applyRoleConfig(role, res.config.llm[role])
+    presets.value = res.presets
+    showToast(
+      `已切换「${res.applied.name}」→ ${ROLE_SHORT_LABELS[role]}` +
+        (res.auto_captured ? `（旧配置已自动存档「${res.auto_captured}」）` : ''),
+      'success'
+    )
+  } catch (error: any) {
+    presetSelection[role] = ''
+    showToast('切换失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    applyingPreset.value = null
+  }
+}
+
+function openPresetSave(role: ProfileRole) {
+  showPresetSave[role] = true
+  // 预填当前模型名，多数情况一键即存；名字可改成「DeepSeek 主力」这类自己认的
+  presetNameDraft[role] = profileForms[role].model.trim()
+  if (armedDeleteRole.value === role) {
+    armedDeleteRole.value = null
+    clearTimeout(armDeleteTimer)
+  }
+}
+
+function closePresetSave(role: ProfileRole) {
+  showPresetSave[role] = false
+  presetNameDraft[role] = ''
+}
+
+async function savePresetFor(role: ProfileRole) {
+  if (savingPreset.value) return
+  const name = presetNameDraft[role].trim()
+  if (!name) {
+    showToast('请先给这套配置起个名字', 'error')
+    return
+  }
+  savingPreset.value = true
+  try {
+    const res = await systemApi.saveModelPreset({
+      name,
+      copy_from_role: role,
+      model: profileForms[role].model,
+      base_url: profileForms[role].base_url,
+      enabled: profileForms[role].enabled,
+      effort: profileForms[role].effort,
+      // Key 框留空（保持不变语义）时由服务端取槽内已存 Key——明文不经前端
+      api_key: profileForms[role].api_key || undefined,
+    })
+    presets.value = res.presets
+    closePresetSave(role)
+    showToast(`预设「${name}」已保存${res.overwrote ? '（同名覆盖）' : ''}`, 'success')
+  } catch (error: any) {
+    showToast('保存预设失败: ' + (error.message || '未知错误'), 'error')
+  } finally {
+    savingPreset.value = false
+  }
+}
+
+async function onDeletePreset(role: ProfileRole) {
+  const id = presetSelection[role]
+  if (!id) return
+  if (armedDeleteRole.value !== role) {
+    armedDeleteRole.value = role
+    clearTimeout(armDeleteTimer)
+    armDeleteTimer = setTimeout(() => { armedDeleteRole.value = null }, 3500)
+    return
+  }
+  armedDeleteRole.value = null
+  clearTimeout(armDeleteTimer)
+  try {
+    presets.value = (await systemApi.deleteModelPreset(id)).presets
+    // 两槽共用一个池，别槽若正指着被删条目一并复位
+    for (const r of profileRoles) {
+      if (presetSelection[r] === id) presetSelection[r] = ''
+    }
+    showToast('预设已删除', 'success')
+  } catch (error: any) {
+    showToast('删除失败: ' + (error.message || '未知错误'), 'error')
+  }
 }
 
 // ============================================================
@@ -198,16 +332,7 @@ const saving = ref(false)
 
 function applyConfig(config: ModelConfig) {
   for (const role of profileRoles) {
-    const p = config.llm[role]
-    profileForms[role].model = p.model
-    profileForms[role].base_url = p.base_url
-    profileForms[role].enabled = p.enabled
-    profileForms[role].effort = p.effort
-    profileForms[role].api_key = '' // 不回填明文，留空即保持
-    profileMeta[role].has_api_key = p.has_api_key
-    profileMeta[role].api_key_masked = p.api_key_masked
-    profileMeta[role].configured = p.configured
-    vendorSelection[role] = matchVendorByBaseUrl(p.base_url)
+    applyRoleConfig(role, config.llm[role])
   }
   embeddingForm.model = config.embedding.model
   embeddingForm.dimensions = config.embedding.dimensions
@@ -364,8 +489,16 @@ watch(visible, (v) => {
   if (v) {
     loadConfig()
     loadCatalog()
+    loadPresets()
     testResult.value = null
     deaiTestResult.value = null
+    for (const role of profileRoles) {
+      presetSelection[role] = ''
+      showPresetSave[role] = false
+      presetNameDraft[role] = ''
+    }
+    armedDeleteRole.value = null
+    clearTimeout(armDeleteTimer)
   }
 })
 </script>
@@ -392,6 +525,50 @@ watch(visible, (v) => {
           <div class="profile-hint">{{ ROLE_HINTS[role] }}</div>
           <div v-if="role === 'reasoning'" class="profile-hint profile-hint-sub">
             留空（模型名与 Key 均不填）则自动跟随写作模型。
+          </div>
+
+          <!-- 快速切换：两槽共用预设池；选中即切换（服务端先把旧值自动存档，切换无损） -->
+          <div class="preset-row">
+            <select
+              v-model="presetSelection[role]"
+              class="preset-select"
+              :disabled="!presets.length || applyingPreset === role"
+              @change="onApplyPreset(role)"
+            >
+              <option value="" disabled>
+                {{ presets.length ? '已存配置，选中即切换…' : '暂无已存配置' }}
+              </option>
+              <option v-for="p in presets" :key="p.id" :value="p.id">{{ presetLabel(p) }}</option>
+            </select>
+            <button
+              type="button"
+              class="preset-btn"
+              :disabled="applyingPreset === role"
+              title="把当前这套配置（含 Key）存为预设，随时切回"
+              @click="openPresetSave(role)"
+            >存为预设</button>
+            <button
+              type="button"
+              class="preset-btn preset-del"
+              :class="{ armed: armedDeleteRole === role }"
+              :disabled="!presetSelection[role]"
+              :title="presetSelection[role] ? '删除下拉中选中的预设（点两次确认）' : '先在下拉里选中要删的预设'"
+              @click="onDeletePreset(role)"
+            >{{ armedDeleteRole === role ? '确认删除？' : '删除' }}</button>
+          </div>
+          <div v-if="showPresetSave[role]" class="preset-save-row">
+            <input
+              v-model="presetNameDraft[role]"
+              class="field-input preset-name-input"
+              placeholder="给这套配置起个名字，如：DeepSeek 主力"
+              maxlength="80"
+              @keyup.enter="savePresetFor(role)"
+            />
+            <button type="button" class="preset-btn preset-save-btn" :disabled="savingPreset" @click="savePresetFor(role)">
+              <Icon v-if="savingPreset" name="loader" :size="12" class="spin spin-reduced" />
+              保存
+            </button>
+            <button type="button" class="preset-btn" @click="closePresetSave(role)">取消</button>
           </div>
 
           <label class="field">
@@ -714,6 +891,9 @@ watch(visible, (v) => {
 }
 
 .profile-card {
+  /* min-width:0 是布局护栏：预设下拉的长 option 文本有 ~230px 固有宽度，
+     没有 1fr 轨道会被顶破 335px 均分，双列总宽溢出卡壳、右卡被截断（09-12 实测事故） */
+  min-width: 0;
   padding: 12px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -737,6 +917,86 @@ watch(visible, (v) => {
 .profile-hint-sub {
   margin-top: -6px;
   color: var(--warn);
+}
+
+/* ---------- 快速切换（模型配置预设） ---------- */
+
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.preset-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.preset-select:focus {
+  border-color: var(--accent-500);
+}
+
+.preset-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.preset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--accent-500);
+  background: transparent;
+  border: 1px solid var(--accent-500);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover:not(:disabled) {
+  background: var(--accent-500);
+  color: white;
+}
+
+.preset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.preset-del.armed {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.preset-del.armed:hover:not(:disabled) {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
+.preset-save-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px;
+}
+
+.preset-name-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
 }
 
 .field {
