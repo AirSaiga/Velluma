@@ -85,6 +85,7 @@ $Global:OrigConsoleMode = $null # QuickEdit 禁用前的控制台模式（退出
 $Global:DashProc        = $null # 网页监控台子进程（状态 JSON 供 stop 脚本定位）
 $Global:DashPort        = $null
 $Global:RestartCount    = @{}   # backend/vite 意外退出的自愈重启计数（上限 2 次）
+$Global:OwnedPorts      = @()   # 本会话「自己启动过服务」的端口登记（收摊端口扫尾只认这些）
 $Global:CleanupDone     = $false
 
 # =============================================================================
@@ -231,9 +232,27 @@ function Get-ProcessOnPort($Port) {
     return $null
 }
 
+function Register-OwnedPort([int]$Port) {
+    # 本会话端口登记：只有自己亲手启动的服务端口才进册（2026-09-11）——收摊端口
+    # 扫尾只认册上的端口。「已在运行」attach 进来的外部服务（状态 JSON 标 external）
+    # 与陈旧 port.txt 上的无关占用者不连坐。
+    if ($Port -gt 0 -and $Global:OwnedPorts -notcontains $Port) { $Global:OwnedPorts += $Port }
+}
+
 function Kill-ProcessOnPort($Port, $Name) {
+    # 只杀「自己的」监听者：进程命令行须含本项目路径（与 stop-velluma.ps1 孤儿清扫
+    # 同款判据，2026-09-11）。自家服务三形态全带绝对路径：后端=venv python 绝对路径
+    # （uvicorn 另带 --app-dir 绝对）、vite 真正监听的 node=node_modules 绝对脚本
+    # 路径、监督者 backend 同构。他人项目/无关进程占口 → 拒杀留活（dev/prod 模式
+    # 后端内部会顺延扫下一空闲端口，不会卡死启动）。
     $proc = Get-ProcessOnPort -Port $Port
     if ($proc) {
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction SilentlyContinue
+        $marker = "*" + $Config.ProjectRoot + "*"
+        if (-not $cim -or -not $cim.CommandLine -like $marker) {
+            Log-Info "Port $Port held by non-Velluma process (pid $($proc.Id), $($proc.Name)) - not killing"
+            return $false
+        }
         Log-Info "Stopping $Name on port $Port (PID: $($proc.Id))..."
         try {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -700,17 +719,12 @@ function Invoke-Cleanup() {
         }
     }
 
-    $backendPort = Get-ActualBackendPort
-    # 前端端口：优先用已协商的 $Config.FrontendPort，否则读端口文件
-    # 生产模式下没有 Vite 进程，不清理前端端口（避免误杀他人占用的端口）
-    $ports = @($backendPort)
-    if ($Config.Mode -ne 'prod') {
-        $frontendPort = if ($Config.FrontendPort) { $Config.FrontendPort } else { Get-ActualFrontendPort }
-        if ($frontendPort -and $frontendPort -gt 0) {
-            $ports += $frontendPort
-        }
-    }
-    foreach ($port in $ports) {
+    # 端口扫尾只认本会话登记过的端口（Register-OwnedPort，2026-09-11）：「已在运行」
+    # attach 的外部服务绝不收掉（旧实现关 Electron 会把并行会话/用户自启的后端一并
+    # 杀掉）；启动早期失败（如 venv 缺失）时 port.txt 的陈旧端口也不再误伤当时的
+    # 占用者。prod 模式无 Vite 自然不在册，无需模式特判。Kill-ProcessOnPort 内部
+    # 另有归属核验（命令行含项目路径）双保险。
+    foreach ($port in @($Global:OwnedPorts)) {
         Kill-ProcessOnPort -Port $port -Name "service" | Out-Null
     }
 
@@ -810,6 +824,7 @@ function Start-Backend() {
             -WorkingDirectory $Config.ProjectRoot `
             -Key "backend" `
             -EnvVars $backendEnv
+        Register-OwnedPort $backendPort   # 端口由本会话协商固定，入收摊杀册
 
         try {
             $null = Wait-ForService -Port $backendPort -Name "Backend (reload)" -TimeoutSeconds $Config.BackendTimeout
@@ -825,6 +840,9 @@ function Start-Backend() {
     }
 
     # dev/prod 模式：走 main.py 的 __main__（内部 find_available_port + save_port）
+    # 先快照启动前的记录端口与其开闭：收摊登记要用（防把「启动前就开着的他人服务」误入册）
+    $prePort = Get-ActualBackendPort
+    $preOpen = ($prePort -gt 0) -and (Test-PortOpen -Port $prePort)
     $proc = Start-MonitoredProcess -FilePath $pythonPath `
         -ArgumentList @("-m", $Config.PythonModule) `
         -WorkingDirectory $Config.ProjectRoot `
@@ -847,6 +865,13 @@ function Start-Backend() {
         Clear-ProgressLine
         Show-StartupOutputTail
         throw "Backend failed to start within $($Config.BackendTimeout)s"
+    }
+
+    # 端口登记：仅在「端口文件被本会话后端改写」或「启动前记录端口本是空闲」时入册
+    # ——记录端口启动前就开着又没被改写 = 那是别人的服务（误报 [OK] 的老毛病），
+    # 绝不能进收摊杀册
+    if (($actualPort -ne $prePort) -or (-not $preOpen)) {
+        Register-OwnedPort $actualPort
     }
 
     $note = if ($actualPort -ne $Config.DefaultBackendPort) { "（$($Config.DefaultBackendPort) 被占）" } else { "" }
@@ -950,6 +975,7 @@ function Start-Frontend() {
         -WorkingDirectory $frontendDir `
         -Key "vite" `
         -EnvVars @{ VELLUMA_FRONTEND_PORT = $frontendPort.ToString() }
+    Register-OwnedPort $frontendPort   # 端口由本会话协商固定，入收摊杀册
 
     try {
         $null = Wait-ForService -Port $frontendPort -Name "Frontend" -TimeoutSeconds $Config.FrontendTimeout

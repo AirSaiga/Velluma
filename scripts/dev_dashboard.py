@@ -26,6 +26,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -218,12 +219,15 @@ def spawn_all():
     if MODE == "prod":
         # 生产体验：前端构建一次，Electron 以 NODE_ENV=production 走 loadFile('../dist/index.html')
         # ⚠ 构建输出必须自己接管道读走：pythonw 下父进程无控制台，子进程继承句柄可能直接失败
+        # ⚠ CREATE_NO_WINDOW 同 spawn_service：句柄重定向不阻止控制台程序新建可见控制台，
+        #    不加此标志 npm build 的 30~60 秒 = 黑窗常驻 30~60 秒
         PHASE = "electron"
         write_sys_log("prod: npm run build ...")
         try:
             build = subprocess.run(npm("run", "build"), cwd=frontend_dir,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT)
+                                   stderr=subprocess.STDOUT,
+                                   creationflags=0x08000000 if os.name == "nt" else 0)
         except OSError as e:
             write_sys_log("npm run build 无法启动: {0}（electron 不启动）".format(e))
             write_dev_status()
@@ -267,35 +271,64 @@ def spawn_all():
                    "NODE_ENV": None}, None)
 
 
+def _taskkill_tree(pid, proc=None):
+    # Windows 树杀统一入口（2026-09-11「莫名黑窗 + 孤儿 backend」事故）三护：
+    # ① CREATE_NO_WINDOW：pythonw 无控制台，taskkill 这类控制台程序不带此标志会
+    #    **弹一个可见的新控制台**——debug 热重载一次一发、停机一服务一发；用户关掉
+    #    弹窗即打断 taskkill → 杀失败 → 服务孤儿持端口（当晚 stop_all 对 backend
+    #    开火无效、uvicorn 对活 20+ 分钟，正是此路径）。
+    # ② 杀据落日志：旧实现 capture_output=True 吞掉一切，杀失败零痕迹无从追查。
+    # ③ 杀后核验 + 补一发：用 Popen 句柄 poll 核验（不受 PID 重用影响——pid_alive
+    #    裸查 pid 会在 PID 被复用后误杀无辜）；仍活补一发，两发不中大声记日志。
+    creationflags = 0x08000000 if os.name == "nt" else 0
+    for attempt in (1, 2):
+        try:
+            r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                               capture_output=True, creationflags=creationflags)
+            if r.returncode != 0:
+                msg = (r.stderr or r.stdout or b"").decode("gbk", errors="replace").strip()
+                write_sys_log("taskkill {0} attempt {1} rc={2}: {3}".format(
+                    pid, attempt, r.returncode, msg))
+        except OSError as e:
+            write_sys_log("taskkill {0} attempt {1} OSError: {2}".format(pid, attempt, e))
+        time.sleep(0.8)
+        if proc is None or proc.poll() is not None:
+            return True
+    write_sys_log("taskkill {0}: STILL ALIVE after 2 attempts — 孤儿风险，可用 stop-velluma.bat 收拾".format(pid))
+    return False
+
+
 def stop_all():
     with _service_lock:
         items = list(_services.items())
-    if os.name == "nt":
-        # ⚠ Windows 两条路都是坑（均实测复现）：terminate=TerminateProcess 只杀 cmd 树根，
-        # 且根死后 taskkill /T 失去遍历起点（对死 pid 报"找不到"）——npm→node 孙链在两种
-        # 顺序下都会孤儿持端口。必须树杀一步到位：/F 强杀对 dev server 无损（SQLite WAL
-        # 容错，无优雅退出需求）；对已退出的 pid（如 electron 收摊锚点）仅报错无副作用。
-        for key, info in items:
-            try:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(info["proc"].pid)],
-                               capture_output=True)
-            except OSError:
-                pass
-    else:
-        # POSIX：spawn_service 以 start_new_session 建独立进程组，先整组 SIGTERM 礼貌段，
-        # 2s 后整组 SIGKILL——kill 单 pid 只杀 npm 主进程，node 孙链不随父死同样会孤儿
-        for key, info in items:
+    # ⚠ 只杀活 PID（2026-09-11）：死条目（electron 收摊锚点/自愈上限耗尽放弃者）一律
+    # 跳过——taskkill 对死 pid 并非"仅报错无副作用"：PID 被 Windows 回收后 /T 会把
+    # 无辜进程整树带走；放弃重启的死条目可能已死数小时，回收窗口完全敞开。
+    for key, info in items:
+        if info["proc"].poll() is not None:
+            write_sys_log("{0} already exited (pid {1}), skip kill".format(key, info["proc"].pid))
+            continue
+        if os.name == "nt":
+            # ⚠ Windows 两条路都是坑（均实测复现）：terminate=TerminateProcess 只杀 cmd 树根，
+            # 且根死后 taskkill /T 失去遍历起点（对死 pid 报"找不到"）——npm→node 孙链在两种
+            # 顺序下都会孤儿持端口。必须树杀一步到位：/F 强杀对 dev server 无损（SQLite WAL
+            # 容错，无优雅退出需求）。
+            _taskkill_tree(info["proc"].pid, info["proc"])
+        else:
+            # POSIX：spawn_service 以 start_new_session 建独立进程组，先整组 SIGTERM 礼貌段，
+            # 2s 后整组 SIGKILL——kill 单 pid 只杀 npm 主进程，node 孙链不随父死同样会孤儿
             try:
                 os.killpg(os.getpgid(info["proc"].pid), signal.SIGTERM)
             except OSError:
                 pass
+    if os.name != "nt":
         time.sleep(2)
         for key, info in items:
-            try:
-                if info["proc"].poll() is None:
+            if info["proc"].poll() is None:
+                try:
                     os.killpg(os.getpgid(info["proc"].pid), signal.SIGKILL)
-            except OSError:
-                pass
+                except OSError:
+                    pass
     for key, info in items:
         try:
             info["writer"].close()
@@ -357,11 +390,7 @@ def _backend_reload_watcher():
                 # backend 本就不在（自愈上限耗尽等）：照常重拉一次，给作者一条活路
                 _services.pop("backend", None)
             elif os.name == "nt":
-                try:
-                    subprocess.run(["taskkill", "/T", "/F", "/PID", str(info["proc"].pid)],
-                                   capture_output=True)
-                except OSError:
-                    pass
+                _taskkill_tree(info["proc"].pid, info["proc"])
                 _services.pop("backend", None)
             else:
                 try:
@@ -412,6 +441,15 @@ def supervisor_loop():
                 spawn_all_single(key)
             else:
                 write_sys_log("{0} reached restart limit, giving up".format(key))
+                # 死条目即时出册（2026-09-11）：留在 _services 里，停机 stop_all 会
+                # 对它的死 PID 开火——PID 被 Windows 回收后 = 误杀无辜进程整树
+                with _service_lock:
+                    dead = _services.pop(key, None)
+                if dead is not None:
+                    try:
+                        dead["writer"].close()
+                    except (OSError, ValueError):
+                        pass
         # 阶段推进：electron 存活且前后端端口就绪 → ready（网页进度条转绿）
         if PHASE == "electron":
             b = snapshot.get("backend")
@@ -428,6 +466,8 @@ def supervisor_loop():
         write_dev_status()
     # 收摊契约：electron 退出（_shutdown 已置位）→ 停掉其余服务再退出
     stop_all()
+    # 最后一笔把状态 JSON 改写成「全停」，别让陈旧的 running 心跳留给停脚本开火
+    write_stopped_status()
 
 
 def spawn_all_single(key):
@@ -467,6 +507,29 @@ def write_dev_status():
         "log_dir": LOG_DIR,
         "services": services,
         "dashboard": {"pid": os.getpid(), "port": DASH_PORT},
+    }
+    try:
+        with open(STATUS_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except OSError:
+        pass
+
+
+def write_stopped_status():
+    # 停机即除牌（2026-09-11）：监督者优雅停机后把状态 JSON 改写为「全停」——旧实现
+    # 最后一笔心跳永远停在 running，停机数小时后 JSON 里的 PID 被 Windows 回收，
+    # stop-velluma.ps1 拿陈旧 PID 开火时白名单只挡得住名字对不上的、同名照杀。
+    # （taskkill /F 强杀监督者的路径写不了这最后一笔，由停脚本的新鲜度闸兜底。）
+    payload = {
+        "mode": MODE,
+        "hidden": True,
+        "supervised": True,
+        "phase": "stopped",
+        "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "log_dir": LOG_DIR,
+        "services": {key: {"pid": None, "port": None, "state": "stopped"}
+                     for key in ("backend", "vite", "electron")},
+        "dashboard": {"pid": None, "port": None},
     }
     try:
         with open(STATUS_PATH, "w", encoding="utf-8") as f:
@@ -864,7 +927,10 @@ def main():
                 old_pid = (json.load(f).get("dashboard") or {}).get("pid")
             if old_pid and pid_alive(old_pid) and (time.time() - mtime) < 120:
                 write_sys_log("another supervisor (pid {0}) is alive, exiting".format(old_pid))
-                print("supervisor already running (pid {0})".format(old_pid))
+                # pythonw 下 sys.stdout 是 None，裸 print 会 AttributeError 崩溃退出
+                # （行为上碰巧也是退出，但崩溃路径；控制台手动跑时保留回显）
+                if sys.stdout:
+                    print("supervisor already running (pid {0})".format(old_pid))
                 return
         except (OSError, ValueError):
             pass

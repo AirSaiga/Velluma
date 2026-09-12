@@ -16,6 +16,8 @@ If Not fso.FileExists(py) Then
   WScript.Quit 1
 End If
 q = """"
-cmdline = q & py & q & " " & root & "\scripts\dev_dashboard.py --supervise --mode dev --root " & q & root & q & " --dir " & q & root & "\logs" & q & " --status " & q & root & "\data\dev_status.json" & q & " --port 0"
+REM script path needs quoting too: a project dir with spaces would break the
+REM command line at the first space and pythonw would die silently.
+cmdline = q & py & q & " " & q & root & "\scripts\dev_dashboard.py" & q & " --supervise --mode dev --root " & q & root & q & " --dir " & q & root & "\logs" & q & " --status " & q & root & "\data\dev_status.json" & q & " --port 0"
 sh.CurrentDirectory = root
 sh.Run cmdline, 0, False
