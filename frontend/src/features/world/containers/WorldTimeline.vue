@@ -21,7 +21,7 @@ import ArcBand from '../presentation/ArcBand.vue'
 import { yearOf, formatTime } from '../engine/timeFormat'
 import { fitWindowToContent, buildScaleTicks, formatWindowLabel, assignRows } from '../engine/timelineLayout'
 import type { TimelineRange } from '../engine/timelineView'
-import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
+import { EVENT_TYPE_COLOR, eventDisplayName } from '../engine/eventTemplates'
 import type { WorldEvent, ChapterAnchor, Foreshadow } from '../engine/types'
 
 const emit = defineEmits<{
@@ -150,8 +150,18 @@ const trackRef = ref<HTMLDivElement | null>(null)
 const trackWidth = ref(0)
 let resizeObs: ResizeObserver | null = null
 
-// 事件标记（类型色圆点 + 时长条；像素级重叠的纵向分行，保证每枚都可点）
-const eventDots = computed(() => {
+// 事件标记（类型色信标 + 时长条；像素级重叠的纵向分行，保证每枚都可点）。
+// 针脚（beacon stem）：信标底垂直虚线扎到基线，消灭「空中悬浮」——同像素列去重
+// （同列多事件针脚本就完全共线，只画最靠上行=最长那根）+ 密度闸（事件过密时整体
+// 收针，密度语义由金雾直方图承载）。纯视觉层：行位/位置与原实现逐字节一致。
+const DOT_TOP0 = 2 // 与 CSS .wt-evt 行 0 top 对齐
+const DOT_ROW_H = 9 // 与 CSS 行距对齐
+const DOT_H = 8 // 与 CSS .wt-evt 尺寸对齐（命中区恒 8px）
+const BASELINE_Y = 50 // 与 CSS .wt-baseline（bottom:14px @ 轨道高 64px）对齐
+const STEM_DENSITY_MAX = 48
+const STEM_MIN_GAP_PX = 6
+
+const inWinDots = computed(() => {
   const inWin = events.value
     .filter((e) => e.time_start >= viewStart.value && e.time_start < viewEnd.value)
     .map((e) => ({
@@ -160,11 +170,51 @@ const eventDots = computed(() => {
       right: pctOf(Math.max(e.time_end, e.time_start)),
       isSpan: e.time_end > e.time_start,
       color: EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)',
-      label: getTemplate(e.event_type)?.label || e.event_type,
+      label: eventDisplayName(e),
     }))
   const w = trackWidth.value || 900
   const rows = assignRows(inWin.map((d) => (d.left / 100) * w), 8, 3)
   return inWin.map((d, i) => ({ ...d, row: rows[i] }))
+})
+
+/** 针脚密度闸：窗内事件过多或像素中位邻距过窄 → 收针（防「栅栏条形码」） */
+const stemsOn = computed(() => {
+  const dots = inWinDots.value
+  if (dots.length > STEM_DENSITY_MAX) return false
+  const pxs = dots
+    .map((d) => (d.left / 100) * (trackWidth.value || 900))
+    .sort((a, b) => a - b)
+  const gaps: number[] = []
+  for (let i = 1; i < pxs.length; i++) gaps.push(pxs[i] - pxs[i - 1])
+  gaps.sort((a, b) => a - b)
+  const med = gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity
+  return med >= STEM_MIN_GAP_PX
+})
+
+const eventDots = computed(() => {
+  const w = trackWidth.value || 900
+  const colMinRow = new Map<number, number>()
+  if (stemsOn.value) {
+    for (const d of inWinDots.value) {
+      const col = Math.round(((d.left / 100) * w) / 3)
+      const prev = colMinRow.get(col)
+      if (prev === undefined || d.row < prev) colMinRow.set(col, d.row)
+    }
+  }
+  return inWinDots.value.map((d) => {
+    const col = Math.round(((d.left / 100) * w) / 3)
+    const dotBottom = DOT_TOP0 + d.row * DOT_ROW_H + DOT_H
+    return {
+      ...d,
+      stem: stemsOn.value && colMinRow.get(col) === d.row,
+      stemTop: dotBottom,
+      stemH: Math.max(0, BASELINE_Y - dotBottom),
+      // 信标同色光晕（hex 色追加 alpha8；非 hex 兜底色不吃光晕）
+      glow: /^#[0-9a-fA-F]{6}$/.test(d.color)
+        ? `0 0 0 2.5px ${d.color}30, 0 0 9px 1px ${d.color}4d`
+        : 'none',
+    }
+  })
 })
 
 function dotTitle(d: (typeof eventDots.value)[number]): string {
@@ -345,6 +395,54 @@ function scheduleZoomCommit() {
     }
   }, 600)
 }
+
+// ===== 快捷视界胶囊（以游标为中心展开；点击低频走 setTimelineRange 立即落盘——与「框定视野」表单同路径）=====
+type ZoomPreset = 'd7' | 'd30' | 'y1' | 'all'
+const PRESETS: { key: ZoomPreset; label: string; days: number | null }[] = [
+  { key: 'd7', label: '7天', days: 7 },
+  { key: 'd30', label: '30天', days: 30 },
+  { key: 'y1', label: '1年', days: 365 },
+  { key: 'all', label: '全局', days: null },
+]
+/** 预设切换的平滑过渡窗（380ms 后自动摘除；任何按压/滚轮经 capture 即时摘除，平移缩放手感零污染） */
+const trackAnim = ref(false)
+let animTimer: ReturnType<typeof setTimeout> | null = null
+function killAnim() {
+  if (!trackAnim.value && !animTimer) return
+  trackAnim.value = false
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+}
+const activePreset = computed<ZoomPreset | null>(() => {
+  if (!effRange.value) return 'all'
+  const s = span.value
+  if (Math.abs(s - 7) < 1) return 'd7'
+  if (Math.abs(s - 30) < 2) return 'd30'
+  if (Math.abs(s - 365) < 8) return 'y1'
+  return null
+})
+function applyPreset(days: number | null) {
+  if (days == null) {
+    setTimelineRange(null) // 与「缩到最宽即回自动」滚轮手势同语义
+  } else {
+    // 以游标时刻为中心展开（游标=作者正在端详的时刻，居中不丢焦）；触 0 保跨度
+    const ns = Math.max(0, Math.round(currentTime.value - days / 2))
+    const ne = ns + days
+    setTimelineRange({ start: 1 + ns / DAYS_PER_YEAR, end: ne / DAYS_PER_YEAR })
+    // 游标夹窗（中心展开恒在窗内；防御性同 applyRange）
+    if (currentTime.value < viewStart.value || currentTime.value > viewEnd.value) {
+      setCurrentTime(Math.min(viewEnd.value, Math.max(viewStart.value, currentTime.value)))
+    }
+  }
+  killAnim()
+  trackAnim.value = true
+  animTimer = setTimeout(killAnim, 380)
+}
+onBeforeUnmount(() => {
+  if (animTimer) clearTimeout(animTimer)
+})
 
 // 播放（~6s 播完窗口全程，到尾循环回窗口起点；窄窗放慢到每天一帧，防日级窗口频闪）
 const playing = ref(false)
@@ -728,6 +826,17 @@ onMounted(() => {
         </button>
       </div>
       <div :key="nowKey" class="wt-now">{{ formatTime(currentTime) }}</div>
+      <!-- 快捷视界：以游标为中心的跨度预设（全局=回自动视野） -->
+      <div class="wt-zooms" role="group" aria-label="快捷视界">
+        <button
+          v-for="p in PRESETS"
+          :key="p.key"
+          class="wt-zoom"
+          :class="{ active: activePreset === p.key }"
+          :title="p.days == null ? '回到自动全局视野' : `以游标时刻为中心展开到${p.label}`"
+          @click="applyPreset(p.days)"
+        >{{ p.label }}</button>
+      </div>
       <button
         v-if="openCount"
         class="wt-open-badge"
@@ -758,41 +867,48 @@ onMounted(() => {
       @arc-click="(f, at) => (arcDetail = { f, x: at.x, y: at.y })"
       @update-times="onUpdateTimes"
     />
-    <!-- 章节锚刻度层（第N章 ↔ 世界时间，点击跳该章叙事时间；横向重叠纵向分行） -->
+    <!-- 章节锚刻度层（第N章 ↔ 世界时间，点击跳该章叙事时间；书签燕尾指向轨道，底行垂尾接地） -->
     <div
       v-if="chapterChips.length"
       class="wt-chapters"
       :style="{ height: chapterRows * 15 + 1 + 'px' }"
     >
-      <button
+      <div
         v-for="d in chapterChips"
         :key="d.c.id"
-        class="wt-chap"
+        class="wt-chap-wrap"
+        :class="{ base: d.row === chapterRows - 1 }"
         :style="{ left: d.left + '%', top: d.row * 15 + 'px' }"
-        :title="`${d.c.chapter_name || '第' + d.c.chapter_number + '章'} · ${formatTime(d.c.narrative_time!)}`"
-        @click="onChapterChipClick(d.c)"
       >
-        {{ d.c.chapter_number }}章
-        <!-- C3 揭示投影：该章预期揭示的真相（朱点，悬停看条目与计划） -->
-        <span
-          v-for="r in d.reveals"
-          :key="r.id"
-          class="wt-reveal"
-          :title="`◉ 揭示：${r.label}${r.plan ? ' · ' + r.plan : ''}`"
-        >◉</span>
-      </button>
+        <button
+          class="wt-chap"
+          :title="`${d.c.chapter_name || '第' + d.c.chapter_number + '章'} · ${formatTime(d.c.narrative_time!)}`"
+          @click="onChapterChipClick(d.c)"
+        >
+          {{ d.c.chapter_number }}章
+          <!-- C3 揭示投影：该章预期揭示的真相（朱点，悬停看条目与计划） -->
+          <span
+            v-for="r in d.reveals"
+            :key="r.id"
+            class="wt-reveal"
+            :title="`◉ 揭示：${r.label}${r.plan ? ' · ' + r.plan : ''}`"
+          >◉</span>
+        </button>
+      </div>
     </div>
     <div
       ref="trackRef"
       class="wt-track"
-      :class="{ panning }"
+      :class="{ panning, anim: trackAnim }"
       @pointerdown="onDown"
+      @pointerdown.capture="killAnim"
       @pointermove="onMove"
       @pointerup="onUp"
       @pointercancel="onUp"
       @pointerleave="onLeave"
       @contextmenu="onTrackContext"
       @wheel="onWheel"
+      @wheel.capture="killAnim"
     >
       <div class="wt-baseline"></div>
       <div class="wt-bars">
@@ -817,10 +933,16 @@ onMounted(() => {
         ></div>
         <div
           class="wt-evt"
-          :style="{ left: d.left + '%', top: 2 + d.row * 9 + 'px', background: d.color }"
+          :style="{ left: d.left + '%', top: 2 + d.row * 9 + 'px', background: d.color, boxShadow: d.glow }"
           :title="dotTitle(d)"
           @pointerdown.stop
           @click.stop="onDotClick(d.ev)"
+        ></div>
+        <!-- 针脚：信标底虚线垂到基线（悬停由相邻选择器联动点亮为金线；密度闸控制渲染） -->
+        <div
+          v-if="d.stem"
+          class="wt-stem"
+          :style="{ left: d.left + '%', top: d.stemTop + 'px', height: d.stemH + 'px' }"
         ></div>
       </template>
       <div v-if="!events.length" class="wt-empty">
@@ -1089,12 +1211,13 @@ onMounted(() => {
   box-shadow: 0 0 0 3px rgba(176, 141, 62, 0.18);
 }
 .wt-now {
-  font-size: var(--text-lg);
+  /* 蓝图 §5：衬线纪年放大 15% */
+  font-size: calc(var(--text-lg) * 1.15);
   font-weight: 600;
   letter-spacing: 0.05em;
   color: rgba(51, 48, 42, 0.92);
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
-  min-width: 170px;
+  min-width: 190px;
   animation: wt-flip 0.38s ease-out;
   transform-origin: 50% 60%;
 }
@@ -1110,12 +1233,11 @@ onMounted(() => {
     filter: blur(0);
   }
 }
-/* 头部「N 事件 · …」兼作视野窗口入口（点击框定起止年份） */
+/* 头部「N 事件 · …」兼作视野窗口入口（点击框定起止年份）；右距权已移交快捷视界组 */
 .wt-meta {
   font-size: var(--text-xs);
   letter-spacing: 0.18em;
   color: var(--text-muted);
-  margin-left: auto;
   padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -1135,6 +1257,38 @@ onMounted(() => {
   border-color: rgba(176, 141, 62, 0.4);
   background: rgba(176, 141, 62, 0.08);
 }
+
+/* ===== 快捷视界胶囊（以游标为中心展开；active 金态与游标同色系） ===== */
+.wt-zooms {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  align-self: center;
+}
+.wt-zoom {
+  padding: 2px 9px;
+  border: 1px solid rgba(107, 90, 68, 0.3);
+  border-radius: 9999px;
+  background: rgba(255, 252, 245, 0.55);
+  color: rgba(74, 68, 56, 0.8);
+  font-size: var(--text-xs);
+  font-family: ui-monospace, "Noto Serif SC", serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.wt-zoom:hover {
+  border-color: rgba(176, 141, 62, 0.6);
+  color: #8a6d2f;
+  background: rgba(255, 252, 245, 0.92);
+}
+.wt-zoom.active {
+  border-color: rgba(176, 141, 62, 0.75);
+  background: rgba(176, 141, 62, 0.14);
+  color: #8a6d2f;
+  box-shadow: 0 0 0 3px rgba(176, 141, 62, 0.08);
+}
 /* 轨道带：内框带底，与头部区分（编年史「带」的实体感） */
 .wt-track {
   position: relative;
@@ -1150,14 +1304,14 @@ onMounted(() => {
 .wt-track.panning {
   cursor: grabbing;
 }
-/* 基线：刻度上方的刻度尺脊线 */
+/* 基线：刻度尺脊线——针脚的扎线目标，微加重（蓝图 §4） */
 .wt-baseline {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 14px;
   height: 1px;
-  background: rgba(107, 90, 68, 0.28);
+  background: rgba(107, 90, 68, 0.4);
   pointer-events: none;
 }
 .wt-bars {
@@ -1168,35 +1322,50 @@ onMounted(() => {
   bottom: 16px;
   display: flex;
   align-items: flex-end;
-  gap: 1px;
+  gap: 2px;
   pointer-events: none;
 }
+/* 金墨微波（蓝图 §2）：古铜金垂直渐变自日期基底蒸腾而起，顶端 2px 柔圆角 */
 .wt-bar {
   flex: 1;
-  background: linear-gradient(to top, rgba(90, 70, 40, 0.5), rgba(90, 70, 40, 0.16));
-  border-radius: 1px 1px 0 0;
+  background: linear-gradient(to top, rgba(176, 141, 62, 0.28) 0%, rgba(176, 141, 62, 0) 100%);
+  border-radius: 2px 2px 0 0;
   min-height: 0;
 }
 /* 非零柱保底可见（单事件不再隐形） */
 .wt-bar.on {
   min-height: 8%;
 }
-/* 事件标记点：类型色圆点，悬浮加亮放大（纵向位置按行内联） */
+/* 信标（蓝图 §1）：1px 衬边让出视觉芯（8px 命中区=6px 芯+2px 衬），同色光晕经内联
+   boxShadow 注入；8px 元素尺寸恒为命中区，命中手感与旧圆点逐像素一致 */
 .wt-evt {
   position: absolute;
   width: 8px;
   height: 8px;
   margin-left: -4px;
   border-radius: 9999px;
-  border: 1.5px solid var(--bg-canvas);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 252, 245, 0.85);
+  box-sizing: border-box;
   cursor: pointer;
-  transition: transform 0.12s ease-out;
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
   z-index: 2;
 }
 .wt-evt:hover {
   transform: scale(1.6);
   z-index: 3;
+}
+/* 针脚：信标底虚线垂到基线——消灭「空中悬浮」；不接事件（纯视觉连接） */
+.wt-stem {
+  position: absolute;
+  width: 0;
+  border-left: 1px dashed rgba(107, 90, 68, 0.35);
+  pointer-events: none;
+  z-index: 1;
+}
+/* 悬停联动：针脚点亮为实体金线（相邻兄弟选择器，DOM 序=span→信标→针脚） */
+.wt-evt:hover + .wt-stem {
+  border-left-style: solid;
+  border-left-color: rgba(176, 141, 62, 0.9);
 }
 /* 时长条：time_end > time_start 的事件画起讫横段（类型色半透） */
 .wt-span {
@@ -1277,17 +1446,21 @@ onMounted(() => {
   left: -6px;
   right: -6px;
 }
+/* 菱形黄铜指针对齐器（蓝图 §4）：渐变铜面+金晕；包络与旧圆珠同量级，命中面增量≈0 */
 .wt-cursor::before {
   content: '';
   position: absolute;
-  top: -1px;
-  left: -4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: #b08d3e;
-  border: 1.5px solid rgba(255, 252, 245, 0.9);
-  box-shadow: 0 1px 3px rgba(96, 72, 36, 0.35);
+  top: -2px;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  transform: translateX(-50%) rotate(45deg);
+  background: linear-gradient(135deg, #e6c87e 0%, #b08d3e 55%, #8a6d2f 100%);
+  border: 1px solid rgba(255, 252, 245, 0.92);
+  box-shadow:
+    0 0 8px rgba(176, 141, 62, 0.65),
+    0 1px 2px rgba(96, 72, 36, 0.4);
 }
 .wt-ticks {
   position: absolute;
@@ -1297,7 +1470,7 @@ onMounted(() => {
   height: 14px;
   font-size: var(--text-xs);
   color: var(--text-secondary); /* 02 期 §4：主刻度数字归 token（原墨色 rgba 0.75 过淡） */
-  font-family: ui-monospace, monospace;
+  font-family: ui-monospace, "Noto Serif SC", serif;
   pointer-events: none;
 }
 .wt-tick {
@@ -1316,14 +1489,15 @@ onMounted(() => {
   height: 4px;
   background: rgba(107, 90, 68, 0.45);
 }
-/* 刻度分档：major（年界/月界）加重，minor（日网格）淡一度 */
+/* 刻度分档（蓝图 §4 精工层次）：major（年界/月界）松烟墨加重线，minor（日网格）淡一度 */
 .wt-tick.major {
   font-weight: 600;
-  color: rgba(109, 90, 60, 0.9);
+  color: #5c4a32;
 }
 .wt-tick.major .wt-tick-mark {
-  height: 6px;
-  background: rgba(107, 90, 68, 0.65);
+  height: 7px;
+  width: 1.5px;
+  background: rgba(92, 74, 50, 0.75);
 }
 .wt-tick:not(.major) {
   font-size: var(--text-xs);
@@ -1339,35 +1513,52 @@ onMounted(() => {
   align-items: flex-end;
 }
 
-/* ===== 章节锚刻度层（高度随行数内联，重叠片纵向分行） ===== */
+/* ===== 章节书签（蓝图 §3：燕尾缎带，轴线经 wrap 居中精确对齐章始时刻） ===== */
 .wt-chapters {
   position: relative;
   margin-bottom: 3px;
 }
-.wt-chap {
+/* wrap 承绝对定位与居中（原 .wt-chap 的 left/translateX 职责），z 序随之迁移 */
+.wt-chap-wrap {
   position: absolute;
-  top: 0;
   transform: translateX(-50%);
+  z-index: 2;
+}
+.wt-chap-wrap:hover {
+  z-index: 3;
+}
+/* 底行书签垂尾：桥接章节区与轨道顶缘（区高冗余 2px + 区距 3px，净增高度为零） */
+.wt-chap-wrap.base::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 7px;
+  background: linear-gradient(to bottom, rgba(126, 87, 194, 0.6), rgba(126, 87, 194, 0.08));
+}
+.wt-chap {
+  position: relative;
   display: flex;
   align-items: center;
   height: 14px;
   box-sizing: border-box;
   padding: 0 7px;
-  border: 1px solid rgba(124, 106, 173, 0.45);
-  border-radius: 9999px;
-  background: rgba(124, 106, 173, 0.12);
-  color: var(--accent-500);
+  border: none;
+  /* 燕尾：底缘中央内凹 4px 指向章始时刻；filter 阴影沿裁剪后形状描边（border 会被 clip 吃掉） */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 4px), 0 100%);
+  background: linear-gradient(to bottom, rgba(126, 87, 194, 0.2), rgba(126, 87, 194, 0.36));
+  filter: drop-shadow(0 1px 1.5px rgba(80, 60, 140, 0.22));
+  color: #6b4fa8;
   font-size: var(--text-xs);
   font-family: ui-monospace, monospace;
   cursor: pointer;
-  transition: all 0.12s ease-out;
+  transition: background 0.12s ease-out, filter 0.12s ease-out;
   white-space: nowrap;
-  z-index: 2;
 }
 .wt-chap:hover {
-  background: rgba(124, 106, 173, 0.28);
-  border-color: var(--accent-500);
-  z-index: 3;
+  background: linear-gradient(to bottom, rgba(126, 87, 194, 0.32), rgba(126, 87, 194, 0.5));
+  filter: drop-shadow(0 1px 3px rgba(80, 60, 140, 0.35));
 }
 
 /* ===== 右键菜单 ===== */
@@ -1760,11 +1951,40 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-/* C3 揭示投影：章节锚刻度上的朱点（预期揭示的真相条目） */
+/* C3 揭示投影：书签上的朱点（预期揭示的真相条目），朱晕反衬 */
 .wt-reveal {
   color: #c25a4a;
   font-size: var(--text-xs);
   margin-left: 1px;
   pointer-events: auto;
+  text-shadow: 0 0 5px rgba(194, 90, 74, 0.5);
+}
+
+/* ===== 预设切换平滑过渡（仅预设点击后 380ms 内挂载；任何按压/滚轮 capture 即摘除，平移/缩放手感零污染） ===== */
+.wt-track.anim .wt-evt {
+  transition:
+    left 0.32s ease-out,
+    top 0.32s ease-out,
+    transform 0.12s ease-out,
+    box-shadow 0.12s ease-out;
+}
+.wt-track.anim .wt-stem {
+  transition:
+    left 0.32s ease-out,
+    top 0.32s ease-out,
+    height 0.32s ease-out;
+}
+.wt-track.anim .wt-span,
+.wt-track.anim .wt-cursor,
+.wt-track.anim .wt-chap-wrap {
+  transition:
+    left 0.32s ease-out,
+    top 0.32s ease-out;
+}
+.wt-track.anim .wt-tick {
+  transition: left 0.32s ease-out;
+}
+.wt-track.anim .wt-bar {
+  transition: height 0.32s ease-out;
 }
 </style>
