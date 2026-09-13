@@ -93,6 +93,11 @@ class StitchContext:
     # 知识检索平面 v3.1（docs/knowledge-retrieval-plane.md）：条目化+选择+
     # 完整渲染的知识视图——五模式/dock/预览共同消费，任务平权
     kg: KnowledgeView = field(default_factory=KnowledgeView)
+    # 第三弹（2026-09-14 光标派生取景框）：active_loc_id=取景地点（派生命中
+    # 优先/空=回退本章钉——location_jump 穿越闭包消费）；active_scene=完整
+    # 派生信息（{loc_id, loc_name, derived, via}，None=未派生）
+    active_loc_id: str = ""
+    active_scene: Optional[dict] = None
 
     def _kg_kwargs(self) -> Dict[str, str]:
         """知识视图块参数（system_blocks 与 builder 调用同源同参）。"""
@@ -295,10 +300,33 @@ async def assemble_stitch_context(
         sample_ids = [sid for sid, _t in pairs]
         author_samples = [t for _sid, t in pairs]
 
+    # 光标派生取景框（第三弹 · 2026-09-14）：rolling_prefix+fragment 即光标前
+    # 连续正文（桥接态 fragment 分支前端已改取光标前文，同口径适用）——最近
+    # 转场命中随笔尖流转，无命中回退本章钉。失败静默 None（prompt 零变化）。
+    active_scene: Optional[dict] = None
+    try:
+        from backend.services.world.active_scene import resolve_active_scene
+
+        _pre = ((rolling_prefix or "") + (fragment or "")).strip()
+        if _pre:
+            active_scene = resolve_active_scene(
+                _pre,
+                getattr(bundle, "locations", None) or [],
+                str(getattr(getattr(bundle, "chapter", None), "scene_location_id", None) or ""),
+            ).as_dict()
+    except Exception:
+        active_scene = None
+    # 取景地点：派生命中优先，回退本章钉（location_jump 闭包/ctx 暴露共用）
+    active_loc_id = ""
+    if active_scene and active_scene.get("loc_id"):
+        active_loc_id = str(active_scene["loc_id"])
+
     # 知识检索平面 v3.1：条目化→选择→完整渲染（纯 CPU 零新增查询；失败
     # 降级空视图=块缺席=零变化，不阻塞装配）
+    # active_scene 仅在真派生时传参（单参调用=逐字节旧路径，兼容既有测试桩
+    # 与无光标语境调用方——build_knowledge_view 的桩多为单参签名）
     try:
-        kg = build_knowledge_view(bundle)
+        kg = build_knowledge_view(bundle, active_scene=active_scene) if active_scene else build_knowledge_view(bundle)
     except Exception:
         kg = KnowledgeView()
 
@@ -328,6 +356,8 @@ async def assemble_stitch_context(
         mode=mode,
         scene_hint=scene_hint,
         kg=kg,
+        active_loc_id=active_loc_id,
+        active_scene=active_scene,
     )
 
 

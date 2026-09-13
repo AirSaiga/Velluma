@@ -63,6 +63,9 @@ class HeartbeatResponse(BaseModel):
     # P3-1（C5）组件失败可见化：最近一次失败的辅助组件（组件名 → 秒级时间戳 +
     # 一行错误摘要；成功即清）。空 dict = 一切正常（增量字段，旧前端忽略无碍）
     last_component_errors: Dict[str, Dict] = Field(default_factory=dict)
+    # 第三弹（2026-09-14 光标派生取景框）：{loc_id, loc_name, derived, via}——
+    # derived=True=按正文推导（前端切片条微标+一键钉定）；None=无景/派生失败
+    active_scene: Optional[Dict] = Field(None)
 
 
 class SettleRequest(BaseModel):

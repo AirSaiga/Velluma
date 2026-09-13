@@ -434,8 +434,15 @@ def _render_warm_card(bundle: Any) -> str:
 def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
                           unselected: List[Dict[str, str]],
                           chapter_text: str = "",
-                          mentioned: Optional[List[str]] = None) -> KnowledgeView:
-    """渲染知识视图（完整注入；空数据=空串=块缺席=零变化）。"""
+                          mentioned: Optional[List[str]] = None,
+                          active_scene: Optional[Dict] = None) -> KnowledgeView:
+    """渲染知识视图（完整注入；空数据=空串=块缺席=零变化）。
+
+    active_scene（第三弹 · 光标派生取景框）：非空且 derived=True 时，场景身份
+    块的首行换「当前场景：X（按正文推导）」并保留本章钉定行；地点档案链跟随
+    派生地点（AI 知道整条进路以当前取景为准）。None/未派生/与钉一致 → 与旧
+    渲染逐字节一致（零变化契约——preview/dock 等无光标语境的调用方不受影响）。
+    """
     kv = KnowledgeView(unselected=unselected)
     kv.previous_summary = str(getattr(bundle, "previous_summary", "") or "")
     kv.warm_card = _render_warm_card(bundle)
@@ -446,22 +453,30 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
     scene_loc_id = str(getattr(chapter, "scene_location_id", None) or "")
     world_time = getattr(bundle, "world_time", 0) or 0
     world_time_source = str(getattr(bundle, "world_time_source", "zero") or "zero")
-    loc_name = _location_name(bundle, scene_loc_id) if scene_loc_id else ""
+    # 第三弹：派生取景生效时，取景地点=派生地（档案链/首行随它走），钉退居注脚
+    derived = bool(active_scene and active_scene.get("derived")) and str(active_scene.get("loc_id") or "")
+    view_loc_id = (derived or scene_loc_id)
+    loc_name = _location_name(bundle, view_loc_id) if view_loc_id else ""
+    pinned_name = _location_name(bundle, scene_loc_id) if scene_loc_id else ""
     scene_bits = []
-    if loc_name:
+    if derived and loc_name:
+        scene_bits.append(f"当前场景：{loc_name}（按正文推导）")
+        if pinned_name and view_loc_id != scene_loc_id:
+            scene_bits.append(f"本章钉定：{pinned_name}（取景已随笔尖流转）")
+    elif loc_name:
         scene_bits.append(f"本章场景：{loc_name}（作者钉定）")
-    elif scene_loc_id:
+    elif view_loc_id:
         scene_bits.append("本章场景：已钉定（地点档案缺失）")
     # 场景地点档案（location-interior 二期）：场景地点及其祖先链的 intro，从外到内——
     # 钉到「B2 拘留层」时 AI 知道整条进路（基地是什么、这一层是什么）。
     # 全链无 intro 不追加任何行（零变化契约：无内部构造的书 prompt 逐字节不变）。
-    if scene_loc_id:
+    if view_loc_id:
         from backend.services.world.location_tree import ancestor_chain, locations_by_id
 
         by_id = locations_by_id(getattr(bundle, "locations", None) or [])
         archive = [
             f"{l.name}：{str(getattr(l, 'intro', '') or '').strip()}"
-            for l in reversed(ancestor_chain(by_id, scene_loc_id))
+            for l in reversed(ancestor_chain(by_id, view_loc_id))
             if str(getattr(l, "intro", "") or "").strip()
         ]
         if archive:
@@ -730,11 +745,14 @@ def _prefix_signature(bundle: Any) -> tuple:
     )
 
 
-def build_knowledge_view(bundle: Any) -> KnowledgeView:
+def build_knowledge_view(bundle: Any, active_scene: Optional[Dict] = None) -> KnowledgeView:
     """装配入口：条目化 → 选择（前缀冻结）→ 渲染（纯 CPU，零 DB 查询）。
 
     前缀部分（选择+渲染）走章内冻结缓存；提及扫描与 provenance 每调用
     新鲜——「什么随段变、什么章内冻结」在此落锚（B6 验收=prefix byte-equal）。
+    active_scene（第三弹）：光标派生取景框——只影响**渲染面**的场景身份块/
+    地点档案链（渲染每调用新鲜，不进前缀缓存）；选择面（场景恒选集）仍按
+    本章钉（前缀冻结纪律不破）。
     """
     sig = _prefix_signature(bundle)
     cached = _PREFIX_CACHE.get(sig)
@@ -751,7 +769,8 @@ def build_knowledge_view(bundle: Any) -> KnowledgeView:
     # 字段不进缓存）；提及扫描用当前正文——「随段变」只影响后缀行
     chapter_text = str(getattr(bundle, "content_text", "") or "")
     _, _, mentioned = select_knowledge(entries, bundle, chapter_text)
-    kv = render_knowledge_view(bundle, selected, unselected, "", mentioned=mentioned)
+    kv = render_knowledge_view(bundle, selected, unselected, "", mentioned=mentioned,
+                               active_scene=active_scene)
     # provenance 信封（B5）：同参同哈希
     from backend.services.world.reality_check import envelope
 

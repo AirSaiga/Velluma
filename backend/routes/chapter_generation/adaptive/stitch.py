@@ -185,9 +185,12 @@ async def stitch_ghost(
     #    闭包 = 场景钉自身+祖先（scene_scope_ids 既有口径）∪ 全部后裔
     #    （保守裁决：建筑内走到下属房间算合法转场，不误报）。关闭条件（任一
     #    即 None，整检不跑零变化）：非 world 书 / 无场景钉 / 无地点数据。
+    #    第三弹（2026-09-14 光标派生取景框）：闭包中心优先消费光标前正文派生
+    #    的取景地（ctx.active_loc_id）——进屋后续写不再把「明姐家的脸盆」当
+    #    越界候选；未派生回退本章钉（零变化契约）。
     _off_scene_loc_names: Optional[List[str]] = None
     try:
-        _scene_loc_id = (
+        _scene_loc_id = str(getattr(ctx, "active_loc_id", "") or "") or (
             str(getattr(_chapter_row, "scene_location_id", None) or "")
             if _chapter_row is not None else ""
         )

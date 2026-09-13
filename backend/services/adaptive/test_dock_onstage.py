@@ -109,6 +109,26 @@ class TestOnstageProjection:
         assert "脚手架" in view["offstage_assets"]
         assert view["scene_line"].startswith("机房——铁皮机房")
 
+    def test_carry_over_props_across_transit(self):
+        """第三弹「上手即随行」：光标前扫描窗（≈2000 字）内提及过的资产在册——
+        上一场的工具包换到新场景后不被物理抹杀；onstage 的提及窗参数即随行面
+        （dock run 侧传入 pre_cursor 窗，见 run 的 mention_window）。"""
+        window = (
+            "他在机房里翻出工具包，把扳手别回侧袋。"      # 上一场（提及工具包/扳手）
+            + "闲话了几句。" * 80                          # 拉开距离（>500 字旧窗）
+            + "他推门进了哨塔，风灌进来。"
+        )
+        b = _bundle(
+            entities=[_WEnt("e-lin", "林尘")],
+            assets=[_WAsset("工具包"), _WAsset("脚手架")],
+            locations=_LOCS,
+            char_states=[{"entity_id": "e-lin", "alive": True, "location_id": "loc-3"}],
+        )
+        view = onstage_projection(b, "loc-3", window)
+        assert view is not None
+        assert [p["name"] for p in view["props"]] == ["工具包"]  # 随行入册
+        assert "脚手架" in view["offstage_assets"]               # 未提及仍在场外
+
     def test_ancestor_scope_counts_as_present(self):
         """钉到房间（loc-2）时祖先（loc-1 要塞）上的角色也算在场。"""
         states = [{"entity_id": "e-guard", "alive": True, "location_id": "loc-1"}]

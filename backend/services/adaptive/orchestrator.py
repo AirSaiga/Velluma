@@ -223,15 +223,43 @@ class AdaptiveOrchestrator:
 
             # ---- 决策：哪些组件该激活 ----
             # 在场低频键（2026-09-08 红队 R2）：Chapter 行单主键取（开销结论同
-            # _spine_intent——可忽略）；异常静默空串=恒定键，零失效增量
+            # _spine_intent——可忽略）；异常静默空串=恒定键，零失效增量。
+            # 第三弹（2026-09-14 光标派生取景框）：地点源从死钉升级为
+            # resolve_active_scene——recent_text 尾锚定章文本取光标前窗，最近
+            # 转场命中随笔尖流转、无命中回退本章钉（docs/scene-transit-
+            # feasibility.md §3.1）。换景=stage 签名变=dock 整舱重算（既有失效
+            # 链零新设施）；active_loc_id 经 extra 透传给 dock_generator 防重复
+            # 算，active_scene 随心跳响应带给前端切片条微标。
             stage_sig = ""
+            active_scene_dict: Optional[Dict[str, Any]] = None
             try:
                 from backend.models import Chapter as _Chapter
                 _ch = await db.get(_Chapter, self.chapter_id)
                 if _ch is not None:
                     from backend.services.adaptive.components.dock_generator import presence_fingerprint
+                    from backend.services.utils.html_text import html_to_plain
+                    from backend.services.world.active_scene import (
+                        pre_cursor_window, resolve_active_scene,
+                    )
+
+                    base_pin = str(getattr(_ch, "scene_location_id", "") or "")
+                    locs: list = []
+                    try:
+                        from backend.repositories.world_repository import WorldRepository
+                        locs = await WorldRepository(db).locations.list_by_book(str(_ch.book_id))
+                    except Exception:
+                        locs = []
+                    _active = resolve_active_scene(
+                        pre_cursor_window(
+                            html_to_plain(getattr(_ch, "content_text", "") or ""),
+                            state.recent_text or "",
+                        ),
+                        locs,
+                        base_pin,
+                    )
+                    active_scene_dict = _active.as_dict()
                     stage_sig = presence_fingerprint(
-                        getattr(_ch, "scene_location_id", None),
+                        _active.loc_id or base_pin,
                         getattr(_ch, "narrative_time", None),
                     )
             except Exception:
@@ -261,6 +289,8 @@ class AdaptiveOrchestrator:
                         "recent_text": state.recent_text or "",
                         "word_count": state.word_count,
                         "suffix_anchor": state.suffix_anchor or "",
+                        # 第三弹：派生取景框直供 dock（防重复算；缺省 dock 自算同款）
+                        "active_loc_id": (active_scene_dict or {}).get("loc_id", ""),
                     }
                     self._sync_inflight.add(act.component)
                     try:
@@ -285,6 +315,8 @@ class AdaptiveOrchestrator:
             "snapshot": snapshot,
             "activated": [a.component for a in activations],
             "signals": [s.kind for s in signals],
+            # 第三弹：光标派生取景框随响应上桌（前端切片条微标「正文推导」）
+            "active_scene": active_scene_dict,
         }
 
     def _decide(

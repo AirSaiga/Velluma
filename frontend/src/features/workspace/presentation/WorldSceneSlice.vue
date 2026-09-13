@@ -137,6 +137,23 @@ async function clearAnchor() {
 
 // ---- 场景钉（脚下：直接选一个地方即钉住；取消钉住回到按事件推算）----
 const locPickerOpen = ref(false)
+
+// ---- 光标派生取景框（第三弹）：心跳带 active_scene → 微标 + 一键钉定 ----
+const activeScene = ref<{ loc_id: string; loc_name: string; derived: boolean; via?: string } | null>(null)
+function _onActiveScene(e: Event) {
+  const d = (e as CustomEvent).detail as { chapterId?: string; scene?: typeof activeScene.value }
+  // 章号守卫：切章后旧章心跳的取景不落新章（与章节纪元守卫同哲学）
+  if (!d?.scene || (d.chapterId && d.chapterId !== props.chapterId)) return
+  activeScene.value = d.scene
+}
+async function pinActiveScene() {
+  const s = activeScene.value
+  if (!s?.loc_id || !props.chapterId || !currentBookId.value) return
+  await setScenePin(currentBookId.value, props.chapterId, s.loc_id)
+}
+onMounted(() => window.addEventListener('velluma:active-scene', _onActiveScene))
+onBeforeUnmount(() => window.removeEventListener('velluma:active-scene', _onActiveScene))
+watch(() => props.chapterId, () => { activeScene.value = null })
 const locationOptions = ref<WorldLocation[]>([])
 /** 内部构造（有父级）带全路径显示——钉到房间级时无歧义，且能看出进路 */
 const locOptionLabels = computed(() => {
@@ -437,6 +454,20 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           <!-- 脚下（直接选地点即钉住；不选则按事件推算） -->
           <section class="setting-group">
             <div class="setting-group-label">脚下<span class="muted">本章故事发生的地点</span></div>
+            <!-- 第三弹：光标派生取景框微标——正文最近转场命中随笔尖流转，
+                 与钉不同时显示并出一键钉定（钉=作者主权覆盖派生） -->
+            <div v-if="activeScene && activeScene.loc_id" class="active-scene-row">
+              <span class="active-scene-tag" :class="{ 'active-scene-tag--derived': activeScene.derived }">
+                此刻取景：{{ activeScene.loc_name || '未命名地点' }}
+                <template v-if="activeScene.derived">（正文推导）</template>
+              </span>
+              <button
+                v-if="activeScene.derived && activeScene.loc_id !== slice?.scene?.location_id"
+                class="link-btn"
+                title="把本章场景钉定到这里——派生是推断，钉定是作者拍板"
+                @click="pinActiveScene"
+              >钉定</button>
+            </div>
             <div v-if="slice.scene" class="scene-row">
               {{ slice.scene.path || slice.scene.name }}
               <span v-if="slice.scene.controlling_faction" class="faction-tag">
@@ -893,6 +924,20 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 
 .quick-add {
   margin-top: 0.25rem;
+}
+
+/* 第三弹：光标派生取景框微标行 */
+.active-scene-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+}
+.active-scene-tag {
+  color: var(--accent-500);
+}
+.active-scene-tag--derived {
+  border-bottom: 1px dashed var(--accent-400, #9685c2);
 }
 
 .scene-row {

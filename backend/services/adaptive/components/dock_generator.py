@@ -491,14 +491,36 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
                 intent_guess = str(_intent.get("next_direction") or "").strip()
 
     # ---- 在场宇宙投影 + 情境模板（2026-09-08 红队「地面+重力场」）----
-    # 场景钉来自 Chapter 行单主键取（与 _spine_intent 同款开销结论：可忽略）；
-    # db 不可用（测试 None）时静默空钉——投影退化为纯提及制，梯子不塌。
+    # 场景取景框（第三弹 · 光标派生）：优先 orchestrator 派生结果（同函数同输入
+    # 防重复算），缺省自算——本章钉作安全回退，正文最近转场命中则随笔尖流转
+    # （docs/scene-transit-feasibility.md §3.1）。db 不可用（测试 None）时静默
+    # 空钉——投影退化为纯提及制，梯子不塌。
     scene_loc_id = ""
+    active_scene = None
+    pre_cursor = ""
     try:
         from backend.models import Chapter as _Chapter
         _ch = await db.get(_Chapter, chapter_id)
         if _ch is not None:
-            scene_loc_id = str(getattr(_ch, "scene_location_id", "") or "")
+            base_pin = str(getattr(_ch, "scene_location_id", "") or "")
+            override = str(kw.get("active_loc_id") or "")
+            if override:
+                scene_loc_id = override
+                active_scene = None  # orchestrator 已定景；via 不再重算（微标走心跳响应）
+            else:
+                from backend.services.utils.html_text import html_to_plain
+                from backend.services.world.active_scene import (
+                    pre_cursor_window, resolve_active_scene,
+                )
+
+                pre_cursor = pre_cursor_window(
+                    html_to_plain(getattr(_ch, "content_text", "") or ""),
+                    str(kw.get("recent_text") or ""),
+                )
+                active_scene = resolve_active_scene(
+                    pre_cursor, getattr(bundle, "locations", None) or [], base_pin,
+                )
+                scene_loc_id = active_scene.loc_id
     except Exception:
         scene_loc_id = ""
     # 中插桥接锚（2026-09-09 FIM）：光标停在上下文之间时前端透传的后文边界窗
@@ -510,7 +532,11 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     # 的 note 拼装兜底一并断供（实测：猜测端给的全是文末饭桌场景）
     if suffix_anchor:
         intent_guess = ""
-    onstage = onstage_projection(bundle, scene_loc_id, recent_text)
+    # 随行物延续（第三弹「上手即随行」）：在场投影的提及窗从「当前段 500」扩为
+    # 「光标前扫描窗」——上一场被提及/上手的工具包换场后仍在册，脸盆与热饭随
+    # 取景框合法入册；人物 fold 判定（scene_scope）不受影响，只是提及面变宽。
+    mention_window = pre_cursor or recent_text
+    onstage = onstage_projection(bundle, scene_loc_id, mention_window)
     # bridge 是光标位置事实，不依赖在场制——legacy 书（onstage None）同样分派
     if suffix_anchor:
         template = "bridge"

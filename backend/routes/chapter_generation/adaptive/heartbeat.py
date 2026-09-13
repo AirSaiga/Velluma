@@ -171,6 +171,9 @@ async def heartbeat(
         world_version=world_version,
         spine_progress=spine_progress,
         last_component_errors=orch.last_component_errors(),
+        # 第三弹（2026-09-14 光标派生取景框）：{loc_id, loc_name, derived, via}
+        # ——derived=True 表示按正文推导（前端切片条出「正文推导」微标+一键钉定）
+        active_scene=result.get("active_scene"),
     )
 
 

@@ -80,6 +80,8 @@ export interface HeartbeatResult {
   world_version?: { events: number; updated_at: string | null } | null
   /** 章级谋篇进度（P1.4 M2；无脉络/无锚点无此字段——进度行静默缺席） */
   spine_progress?: SpineProgress | null
+  /** 光标派生取景框（第三弹 2026-09-14）：derived=true=按正文推导；无景/失败无此字段 */
+  active_scene?: { loc_id: string; loc_name: string; derived: boolean; via?: string } | null
   /**
    * 最近一次失败的辅助组件（P3-1：组件名 → 秒级时间戳 + 一行错误摘要；
    * 成功即清。空/缺省 = 一切正常——副驾「AI 视角」调试区消费，空则整块不渲染

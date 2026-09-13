@@ -555,6 +555,12 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       opts.suggestionsRef.value = result.canon_hints || []
 
       // 世界切片保鲜：版本搭心跳便车，经事件解耦给 useWorldSlice（静默重取，红点提示）
+      // 第三弹：光标派生取景框 → 切片条微标（WorldSceneSlice 监听；含章号防串章）
+      if (result.active_scene) {
+        window.dispatchEvent(new CustomEvent('velluma:active-scene', {
+          detail: { chapterId, scene: result.active_scene },
+        }))
+      }
       if (result.world_version) {
         window.dispatchEvent(new CustomEvent('velluma:world-version', {
           detail: { chapterId, version: result.world_version },
