@@ -1,10 +1,17 @@
 <script setup lang="ts">
 /**
- * 谋篇区（章级软脉络的编辑面板，P1.4 M1——docs/chapter-planning-spine.md §3.2）。
+ * 叙事引力流面板（第四弹 UI 合流 · docs/spine-outline-merge-feasibility.md 路径 C）。
  *
- * 度优先：意图一行（可空）+ 锚点 chips（≤5，超出文案劝阻）；AI 建议预填
- * 不过目不落库（D-4）；划掉 = dropped（写的过程中决定不写了是合法动作）。
- * 纯展示组件——状态与保存经 useChapterSpine 由容器传入/调用。
+ * 原「打算（SpinePanel）+ 大纲卡」上下双框是作者认知负荷的病灶——底层两字段
+ * 分立是事故换来的稳态（spine.intent 走 system 温卡防冲章 / outline_text 走
+ * user 就近节拍防剧透），本面板只在 **UI 层**合流为单一叙事流编辑面：
+ * - 🎯 本章方向（首行高亮锚） ⇄ chapters.spine.intent.text（≤60 字，600ms
+ *   防抖+失焦兜底，原有链路）；
+ * - 锚点 chips/岔路/建议：spine.anchors 体系原样保留（方向与细节之间）；
+ * - 📝 情节节拍（节拍推进流） ⇄ chapters.outline_text（容器侧 500ms 防抖）；
+ * - 活跃节拍微标：容器传入 outline_nearby 首拍（与 stitch/dock 同一份计算）。
+ * 数据分流边界=控件边界（两个物理控件一个视觉容器）——整段粘贴进方向行被
+ * maxlength 截断引导到节拍区，绝不发生「整段大纲掉进意图」。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ChapterSpine, SpineAnchor, SpineSuggestion } from '../../../services/api/domain/adaptive.api'
@@ -16,6 +23,10 @@ const props = defineProps<{
   suggesting: boolean
   /** 章节未选/不可用时的禁用态 */
   disabled?: boolean
+  /** 情节节拍流（chapters.outline_text；第四弹合流——容器侧防抖保存） */
+  outlineText?: string
+  /** 当前就近节拍（outline_nearby 首拍；空/null=无大纲或全已写=微标缺席） */
+  activeBeat?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +37,8 @@ const emit = defineEmits<{
   (e: 'suggest'): void
   (e: 'adopt', part: 'intent' | 'anchors' | 'all'): void
   (e: 'discard-suggestions'): void
+  (e: 'update-outline', text: string): void
+  (e: 'outline-blur'): void
 }>()
 
 const intentText = computed(() => props.spine?.intent?.text || '')
@@ -100,22 +113,25 @@ function clearBranch() {
 </script>
 
 <template>
-  <section class="spine-panel" :class="{ 'spine-panel--empty': !intentText && !anchors.length }">
+  <section class="spine-panel narrative-stream" :class="{ 'spine-panel--empty': !intentText && !anchors.length && !outlineText }">
     <div class="spine-head">
-      <span class="spine-title">打算</span>
-      <span class="spine-hint">写之前记两句：这章讲什么、哪些情节非写不可</span>
+      <span class="spine-title">叙事流</span>
+      <span class="spine-hint">先定方向，再记节拍——写到哪一拍，AI 就跟到哪</span>
     </div>
 
-    <!-- 意图：一行（本地草稿防抖提交，maxlength 与 store 的 60 字截断对齐） -->
-    <textarea
-      class="spine-intent"
-      rows="1"
-      maxlength="60"
-      :value="intentDraft"
-      placeholder="一句话：这一章主要讲什么？（可空，直接开写也行）"
-      @input="onIntentInput"
-      @blur="commitIntent"
-    ></textarea>
+    <!-- 🎯 本章方向（主方向锚点 ⇄ spine.intent；「不对」纠正手势在容器意图反推行） -->
+    <div class="ns-direction">
+      <label class="ns-tag">🎯 本章方向</label>
+      <textarea
+        class="spine-intent"
+        rows="1"
+        maxlength="60"
+        :value="intentDraft"
+        placeholder="一句话：这一章主要讲什么？（可空，直接开写也行）"
+        @input="onIntentInput"
+        @blur="commitIntent"
+      ></textarea>
+    </div>
 
     <!-- 锚点 chips -->
     <div v-if="anchors.length" class="spine-anchors">
@@ -171,7 +187,27 @@ function clearBranch() {
       />
     </div>
     <p v-if="!anchorFull" class="spine-hint-line">列出来的情节，写到了会自动打勾；AI 续写时也会朝它们使劲</p>
-    <p v-else class="spine-full-hint">最多 5 条——细节留给下面的大纲，这里只记最要紧的</p>
+    <p v-else class="spine-full-hint">最多 5 条——细节留给下面的节拍，这里只记最要紧的</p>
+
+    <!-- 📝 情节节拍（节拍推进流 ⇄ outline_text；容器侧 500ms 防抖+失焦/唤舱/续写冲刷） -->
+    <div class="ns-beats">
+      <div class="ns-beats-head">
+        <label class="ns-tag">📝 情节节拍</label>
+        <span
+          v-if="activeBeat"
+          class="ns-active-beat"
+          :title="`续写正朝这拍走：${activeBeat}`"
+        >▶ {{ activeBeat.length > 18 ? activeBeat.slice(0, 18) + '…' : activeBeat }}</span>
+      </div>
+      <textarea
+        class="ns-beats-input"
+        rows="6"
+        :value="outlineText"
+        placeholder="这一章具体发生什么，一行一拍（AI 续写贴着还没写的拍走）"
+        @input="(e) => emit('update-outline', (e.target as HTMLTextAreaElement).value)"
+        @blur="emit('outline-blur')"
+      ></textarea>
+    </div>
 
     <!-- AI 建议（D-4：未收下的不落库） -->
     <div class="spine-suggest">
@@ -402,5 +438,66 @@ function clearBranch() {
 .spine-suggest__actions {
   display: flex;
   gap: 0.375rem;
+}
+
+/* ===== 第四弹：叙事流合流视觉（单容器/方向行高亮/节拍区无缝衔接） ===== */
+.narrative-stream {
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-canvas);
+}
+.ns-direction {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.375rem 0.5rem;
+  background: color-mix(in srgb, var(--accent-500) 6%, transparent);
+  border-left: 3px solid var(--accent-500);
+  border-radius: 6px;
+}
+.ns-tag {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.ns-direction .spine-intent {
+  font-size: 0.8125rem;
+}
+.ns-beats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ns-beats-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.ns-active-beat {
+  font-size: 0.625rem;
+  color: var(--accent-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ns-beats-input {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  padding: 0.375rem 0.5rem;
+  line-height: 1.6;
+}
+.ns-beats-input:focus {
+  outline: none;
+  border-color: var(--accent-400, #9685c2);
+  border-style: solid;
 }
 </style>

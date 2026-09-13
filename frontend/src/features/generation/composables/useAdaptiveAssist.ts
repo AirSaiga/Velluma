@@ -610,6 +610,9 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   function summonParts(forceRefresh = false) {
     if (_summonInFlight) return  // 连按不叠加 LLM 调用（生成期间的连按静默合并）
     if (ghostActive.value) return
+    // 第四弹（UI 合流）：唤舱前冲刷叙事流在途防抖——舱要吃到最新鲜方向
+    // （双保险：心跳本来随行 spine_intent/outline_text 上行字段）
+    window.dispatchEvent(new CustomEvent('velluma:flush-planning'))
     // Tab 点名 = 作者显式要件：拆掉打字武装的两只计时器——它们都会在召唤的
     // 2~7s LLM 等待期内触发（活跃档响应半路杀绿点、停顿档白烧一次生发），
     // 下一次打字会重新武装
@@ -708,6 +711,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     mode: 'stitch' | 'continue' = 'continue',
     pickedParts: Array<{ text: string; direction?: string; slot?: string }> = [],
   ) {
+    // 第四弹（UI 合流）：续写前冲刷叙事流在途防抖（同 summonParts 注）
+    window.dispatchEvent(new CustomEvent('velluma:flush-planning'))
     const chapterId = opts.getChapterId()
     if (!chapterId) return
     const editor = chapterEditorHandle.value

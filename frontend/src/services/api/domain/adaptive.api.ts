@@ -370,6 +370,11 @@ export const adaptiveApi = {
   },
 
   /** 软脉络读取（null = 本章无脉络，一切 UI 静默缺席） */
+  /** 大纲就近节拍（第四弹叙事流微标；与 stitch/dock 同一份计算，纯算法） */
+  activeBeats: async (chapterId: string): Promise<{ beats: string[] }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/active-beats`)
+  },
+
   getSpine: async (chapterId: string): Promise<{ spine: ChapterSpine | null }> => {
     return requestJson(`/chapters/${chapterId}/adaptive/spine`)
   },

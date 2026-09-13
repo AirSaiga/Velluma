@@ -125,6 +125,26 @@ async def get_spine(chapter_id: str, db: AsyncSession = Depends(get_db)):
     return {"spine": chapter.spine}
 
 
+@router.get("/{chapter_id}/adaptive/active-beats")
+async def get_active_beats(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    """大纲就近节拍（第四弹 UI 合流）：与 stitch 意图块/dock 素材**同一份计算**
+    （stitch_context._nearby_beats_from_outline——outline_nearby 共享判据），
+    供写作台「叙事流」节拍区亮出「续写正朝这拍走」微标。纯算法零 LLM；
+    无大纲/全部已写 → 空表（微标缺席）。
+    """
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    try:
+        bundle = await load_chapter_settings_bundle(chapter_id, db)
+        from backend.services.context.stitch_context import _nearby_beats_from_outline
+
+        return {"beats": _nearby_beats_from_outline(bundle)}
+    except Exception as e:
+        logger.debug(f"[adaptive/active-beats] 就近节拍计算失败（返空表）: {e}")
+        return {"beats": []}
+
+
 @router.patch("/{chapter_id}/adaptive/spine")
 async def patch_spine(
     chapter_id: str,

@@ -17,7 +17,6 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
-import ChapterBadges from '../presentation/ChapterBadges.vue'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import SpinePanel from '../presentation/SpinePanel.vue'
 import ContextPreviewSection from '../presentation/ContextPreviewSection.vue'
@@ -148,15 +147,69 @@ onBeforeUnmount(() => {
   window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInbox)
 })
 
-/** 更新章节大纲，带简易防抖避免每次按键写库（标题编辑在纸面页面头） */
+/** 更新情节节拍（第四弹合流：大纲 textarea 迁入叙事流面板；500ms 防抖不动）。
+ *  draft 只记作者最后一次输入（冲刷消费）；textarea 仍直绑 store 值——
+ *  OutlineView 全书大纲页编辑后经 store 响应式回流，绝不覆盖意图行 */
 let outlineTimer: ReturnType<typeof setTimeout> | undefined
+const outlineDraft = ref('')
 function updateOutline(value: string) {
   if (!selectedChapterId.value) return
+  outlineDraft.value = value
   clearTimeout(outlineTimer)
   outlineTimer = setTimeout(() => {
-    store.updateChapter(selectedChapterId.value!, { outline_text: value })
+    outlineTimer = undefined
+    store.updateChapter(selectedChapterId.value!, { outline_text: outlineDraft.value })
   }, 500)
 }
+/** 节拍冲刷：失焦/唤舱/续写时立即落库（防抖在途作废） */
+function flushOutline() {
+  if (!outlineTimer) return
+  clearTimeout(outlineTimer)
+  outlineTimer = undefined
+  if (selectedChapterId.value && outlineDraft.value) {
+    store.updateChapter(selectedChapterId.value, { outline_text: outlineDraft.value })
+  }
+}
+
+/** 叙事流整体冲刷（velluma:flush-planning：Tab 唤舱/Space 续写前同步派发）——
+ *  spine 2s 防抖（flushNow）+ 大纲 500ms 防抖（flushOutline）一起清账，
+ *  保证生成请求吃到最新鲜方向（心跳上行字段是第二重保险） */
+function flushPlanning() {
+  chapterSpine.flushNow()
+  flushOutline()
+}
+onMounted(() => window.addEventListener('velluma:flush-planning', flushPlanning))
+onBeforeUnmount(() => window.removeEventListener('velluma:flush-planning', flushPlanning))
+
+/** 活跃节拍微标（第四弹）：就近节拍=stitch/dock 同一份计算（后端 active-beats
+ *  端点纯算法零 LLM）；大纲/正文变化防抖 800ms 拉一次，切章复位 */
+const activeBeat = ref('')
+let activeBeatTimer: ReturnType<typeof setTimeout> | undefined
+async function refreshActiveBeat() {
+  const chapterId = selectedChapterId.value
+  if (!chapterId) return
+  try {
+    const r = await adaptiveApi.activeBeats(chapterId)
+    if (selectedChapterId.value === chapterId) activeBeat.value = r.beats?.[0] || ''
+  } catch {
+    activeBeat.value = ''
+  }
+}
+function scheduleActiveBeat() {
+  clearTimeout(activeBeatTimer)
+  activeBeatTimer = setTimeout(refreshActiveBeat, 800)
+}
+watch([() => selectedChapter.value?.outline_text, () => wordCount.value], () => {
+  if (activeTab.value === 'planning') scheduleActiveBeat()
+})
+watch(selectedChapterId, () => {
+  activeBeat.value = ''
+  clearTimeout(activeBeatTimer)
+})
+onMounted(() => { if (activeTab.value === 'planning') scheduleActiveBeat() })
+watch(activeTab, (tab) => {
+  if (tab === 'planning') scheduleActiveBeat()
+})
 
 /** 获取读者反馈（AI 扮演读者写叙述性感受）。门槛：本章有正文。 */
 const readerFeedback = ref('')
@@ -512,11 +565,15 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- 谋篇区（P1.4 M1：章级软脉络——方向先于情节，永远在最上） -->
+          <!-- 叙事引力流（第四弹 UI 合流 · 路径 C）：方向行+锚点+节拍流单卡 ——
+               数据层双字段分立不动（spine 走温卡/outline 走就近节拍），只是
+               作者眼里只有一个连贯编辑面 -->
           <SpinePanel
             :spine="chapterSpine.spine.value"
             :suggestions="chapterSpine.spineSuggestions.value"
             :suggesting="chapterSpine.spineSuggesting.value"
+            :outline-text="selectedChapter.outline_text"
+            :active-beat="activeBeat"
             @update-intent="chapterSpine.setIntent"
             @add-anchor="chapterSpine.addAnchor"
             @update-anchor="(id, patch) => chapterSpine.updateAnchor(id, patch)"
@@ -524,6 +581,8 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             @suggest="chapterSpine.suggest"
             @adopt="(part) => chapterSpine.adoptSuggestion(part)"
             @discard-suggestions="chapterSpine.discardSuggestions"
+            @update-outline="updateOutline"
+            @outline-blur="flushOutline"
           />
 
           <!-- 意图反推（心跳带回的后台规划淡建议；降级为打算区下方一行小字，不占独立小节） -->
@@ -554,21 +613,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             </div>
           </div>
 
-          <!-- 大纲卡（剧情层规划，与上方方向一句话分工：打算=要去哪，大纲=发生什么；标题编辑在纸面页面头） -->
-          <section class="card-strip">
-            <header class="strip-header">
-              <span class="strip-num">第 {{ selectedChapter.chapter_number }} 章 · 详细大纲</span>
-              <ChapterBadges :chapter="selectedChapter" />
-            </header>
-            <textarea
-              class="strip-outline-input"
-              :value="selectedChapter.outline_text"
-              placeholder="这一章具体发生什么（AI 辅助写作会参考）"
-              rows="6"
-              @input="(e) => updateOutline((e.target as HTMLTextAreaElement).value)"
-            ></textarea>
-            <p class="hint">与上方「打算」分工：打算=一句话方向，这里=剧情细节备忘；两者 AI 辅助写作都会参考。</p>
-          </section>
+          <!-- 大纲卡已并入上方叙事流的「情节节拍」区（第四弹合流，2026-09-14） -->
         </template>
       </div>
 
@@ -1083,57 +1128,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   line-height: 1.7;
 }
 
-/* 章节卡（大纲编辑，撑满谋篇 tab 剩余空间） */
-.card-strip {
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  padding: 0.625rem 0.75rem;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.strip-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.25rem;
-}
-
-.strip-num {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.strip-outline-input {
-  width: 100%;
-  flex: 1;
-  min-height: 72px;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 0.25rem;
-  padding: 0.375rem;
-  margin-top: 0.375rem;
-  font-family: inherit;
-  resize: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.strip-outline-input:hover {
-  border-color: var(--border-color);
-  background: var(--bg-primary);
-}
-.strip-outline-input:focus {
-  outline: none;
-  border-color: var(--accent-500);
-  background: var(--bg-primary);
-}
+/* 大纲卡样式已随第四弹合流退役（节拍区样式在 SpinePanel 叙事流） */
 
 .section-label {
   display: flex;

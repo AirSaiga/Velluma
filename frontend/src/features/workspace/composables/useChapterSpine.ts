@@ -243,9 +243,18 @@ export function useChapterSpine() {
     }, 2000)
   }, { deep: true })
 
+  /**
+   * 强制即时冲刷（第四弹 UI 合流）：画布 Tab 唤舱/Space 续写前的「两端都吃
+   * 最新鲜方向」保险——2s 防抖在途立即落库（双保险：心跳本来就随行 spine_intent，
+   * 即使 POST 与心跳竞争，上行字段也是新值）。blur 冲刷同走这里。
+   */
+  function flushNow() {
+    _flushPendingSave()
+  }
+
   return {
     spine, spineSuggestions, spineSuggesting, spineLoaded, spineProgress, highlightAnchorId,
     load, unload, save, suggest, adoptSuggestion, discardSuggestions,
-    setIntent, correctIntent, addAnchor, updateAnchor, removeAnchor,
+    setIntent, correctIntent, addAnchor, updateAnchor, removeAnchor, flushNow,
   }
 }
