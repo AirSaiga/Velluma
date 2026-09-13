@@ -248,6 +248,7 @@ function createLoadingWindow() {
     frame: false,
     alwaysOnTop: true,
     resizable: false,
+    icon: join(__dirname, 'app-icon.png'),  // 应用图标唯一源（换图只换这一个文件）
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true
@@ -330,6 +331,7 @@ async function createMainWindow() {
       minWidth: 1200,
       minHeight: 700,
       show: true,
+      icon: join(__dirname, 'app-icon.png'),  // 应用图标唯一源——窗口左上角/任务栏/打包 exe 都从它出
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,

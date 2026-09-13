@@ -69,10 +69,12 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "electron/app-icon.png"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "electron/app-icon.png"
     },
     "linux": {
       "target": "AppImage"
