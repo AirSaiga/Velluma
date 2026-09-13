@@ -253,9 +253,15 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   }
 
   /**
-   * 光标后文锚（2026-09-09 中插桥接/FIM）：骨架跳写时光标停在上下文之间——
-   * 取光标后 ≤150 字原文，句界裁到前 1-2 句（~120 字）；不足 8 字视为无后文
-   * （光标在文尾=普通续写，不进桥接）。仅编辑器在场时可用（桥接需活光标）。
+   * 光标后文锚（2026-09-09 中插桥接/FIM）：取光标后 ≤300 字边界窗；
+   * 不足 8 字视为无后文（光标在文尾=普通续写，不进桥接）。仅编辑器在场时
+   * 可用（桥接需活光标）。
+   * 2026-09-13 事故修复：旧版只取 150 字且「截到第 2 个句末标点」——中文
+   * 省略号「……」是两个 U+2026 字符，一个省略号即吃光两次配额，锚截在
+   * 「咳咳…」处（连王叔咳嗽、走大路、「巷子里没灯」的物证全没进锚），幽灵
+   * 拿不到后文约束，写出与之矛盾的「路边有灯、出了巷口」。现对齐细纲胶囊
+   * 双端锚定的后文口径（300 字）：≤300 原样带上；更长时回退窗内最后一个
+   * 句末标点保结尾干净——不再数句，省略号自然无害。
    */
   function _suffixAfterCursor(): string {
     const editor = chapterEditorHandle.value
@@ -263,16 +269,17 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     try {
       const from = editor.state.selection.$from.pos
       const raw = editor.state.doc.textBetween(
-        from, Math.min(from + 150, editor.state.doc.content.size), '\n\n',
+        from, Math.min(from + 400, editor.state.doc.content.size), '\n\n',
       )
       const t = raw.trim()
       if (t.length < 8) return ''
-      // 句界裁剪：截到第 2 个句末标点（含），无句读则 120 字硬截
-      let end = -1, hits = 0
-      for (let i = 0; i < t.length && i < 160; i++) {
-        if ('。！？…'.includes(t[i])) { hits++; end = i; if (hits >= 2) break }
+      if (t.length <= 300) return t
+      const win = t.slice(0, 300)
+      let end = -1
+      for (let i = win.length - 1; i >= 0; i--) {
+        if ('。！？…'.includes(win[i])) { end = i; break }
       }
-      return (end > 0 ? t.slice(0, end + 1) : t.slice(0, 120)).trim()
+      return (end > 0 ? win.slice(0, end + 1) : win).trim()
     } catch { return '' }
   }
 

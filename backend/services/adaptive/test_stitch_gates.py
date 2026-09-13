@@ -929,6 +929,29 @@ def test_route_bridge_injects_dual_boundary_and_normalizes_seam(monkeypatch):
     assert "，" != done["text"][-2]                        # 无双标点悬空
 
 
+def test_route_bridge_suffix_window_carries_evidence(monkeypatch):
+    """2026-09-13 事故回归：后文锚旧 120 字窗+省略号截尾让物证缺席（幽灵写
+    「路边有灯」vs 后文「巷子里没灯」）——300 字窗内物证完整进 prompt。"""
+    suffix = (
+        "“这样啊，那你路上当心点，这天晚了，咳咳……”王叔弓着腰咳嗽了几声。"
+        "“路上黑，走大路啊——”王叔的声音从门缝里追出来，被风削掉半截。"
+        "巷子里没灯，只有谁家窗纸透出一点黄，照见脚下坑洼里积的雨水，黑亮亮的一洼。"
+        "林尘没回头，只把手里的包带又紧了紧。"
+    )
+    assert len(suffix) > 120                       # 旧窗必截——本测锁新窗
+    req = StitchGhostRequest(
+        fragment="林尘推门进屋，把工具包放在门边。",
+        mode="stitch",
+        rolling_prefix="村道上的路灯忽明忽暗。",
+        target_chars=50,
+        suffix_anchor=suffix,
+    )
+    done, llm_calls, _ = _run_stitch(monkeypatch, req, ["他把包搁在门边。"])
+    up = llm_calls[0]["user_prompt"]
+    assert "巷子里没灯" in up                      # 物证完整进锚（不被 120 截断）
+    assert "不得与它矛盾" in up                    # 块标题补的物证条款
+
+
 # ============================================================
 # 11. 桥接抢场影子检（2026-09-09 抢场事故：换道具的同槽位撞车）
 # ============================================================
@@ -1000,6 +1023,33 @@ class TestSeamOverlapRegression:
         """真复读剥后拼合自然：看了看+看了看四周 → 看了看四周。"""
         assert self._strip("看了看四周。", "他低头看了看") == "四周。"
 
+    def test_continue_mode_gate_expanded(self, monkeypatch):
+        """2026-09-13 扩门回归：continue 模式同样过复读/尾缀剥离——
+        顺句续写「端上一盆」+幽灵「一盆扣着…」不再穿透成口吃。"""
+        frag = "明姐拿来碗筷，端上一盆"
+        req = StitchGhostRequest(
+            fragment=frag,
+            rolling_prefix="灶上的火正旺。",
+            mode="continue",
+            target_chars=200,
+        )
+        ghost = "一盆扣着盖子的菜，香气渗出来。"
+        done, llm_calls, _ = _run_stitch(monkeypatch, req, [ghost])
+        assert done["text"].startswith("扣着盖子的菜")
+        assert not done["text"].startswith("一盆")
+
+    def test_continue_reduplication_untouched(self, monkeypatch):
+        """continue 模式叠词安全：作者原句尾「想了想」+幽灵「想清楚了」——
+        ≥2 字规范化下限挡住单字重叠，不剥（扩门不得引入叠词误杀）。"""
+        req = StitchGhostRequest(
+            fragment="他低头想了想",
+            rolling_prefix="灯光晃了一下。",
+            mode="continue",
+            target_chars=200,
+        )
+        done, _calls, _ = _run_stitch(monkeypatch, req, ["想清楚了，把扳手放回工具包。"])
+        assert done["text"].startswith("想清楚了")
+
 
 # ============================================================
 # 11c. 双开引号碰撞剥除（2026-09-11 排毒批 Task2）
@@ -1043,6 +1093,56 @@ class TestQuoteCollision:
         assert done is not None
         assert not done["text"].startswith("“")
         assert done["text"].startswith("快吃吧")
+
+
+# ============================================================
+# 11d. 悬空开引号 × 动作前缀（2026-09-13 目标 2·Z+X 路线）
+# ============================================================
+
+class TestDanglingQuoteCollision:
+
+    def _detect(self, ghost, frag):
+        from backend.services.adaptive.stitch_gates import detect_dangling_quote_collision
+        return detect_dangling_quote_collision(ghost, frag)
+
+    def test_incident_form_hit(self):
+        """事故形态：断点悬空“ × 幽灵以动作前缀起 × 内部自带引号对 → 命中。"""
+        assert self._detect(
+            "林尘笑了笑，“今晚做啥好吃的？”", "明姐说：“") is True
+
+    def test_ghost_quote_head_not_hit(self):
+        """幽灵以开引号起 = 既有剥除函数的领地 → 不重复记账。"""
+        assert self._detect(
+            "“今晚做啥好吃的？”", "明姐说：“") is False
+
+    def test_closed_breakpoint_not_hit(self):
+        """断点末字符不是开引号 → 不命中。"""
+        assert self._detect(
+            "林尘笑了笑。", "他说完。") is False
+
+    def test_prompt_handoff_rule_injected(self, monkeypatch):
+        """X 路线：断点悬空引号 → user prompt 注入「断点引号交接」引导。"""
+        req = StitchGhostRequest(
+            fragment="明姐掀开锅盖说：“",
+            rolling_prefix="灶上的火正旺。",
+            mode="stitch",
+            target_chars=50,
+        )
+        done, llm_calls, _ = _run_stitch(monkeypatch, req, ["快吃吧，凉了就腥了。”"])
+        up = llm_calls[0]["user_prompt"]
+        assert "断点引号交接" in up
+        assert "补上闭合引号" in up
+
+    def test_prompt_handoff_rule_absent_without_dangling(self, monkeypatch):
+        """零变化契约：断点非悬空引号 → 引导行缺席（逐字节零变化）。"""
+        req = StitchGhostRequest(
+            fragment="他低头想了想。",
+            rolling_prefix="灯光晃了一下。",
+            mode="continue",
+            target_chars=200,
+        )
+        done, llm_calls, _ = _run_stitch(monkeypatch, req, ["把扳手放回工具包。"])
+        assert "断点引号交接" not in llm_calls[0]["user_prompt"]
 
 
 # ============================================================

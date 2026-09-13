@@ -8,6 +8,7 @@
 """
 
 from backend.services.prompts.adaptive_prompts import (
+    SUBJECT_LOCK_HANDOFF,
     SUBJECT_LOCK_PROP,
     SUBJECT_LOCK_REPLY,
     SUBJECT_LOCK_SPEAKER,
@@ -42,6 +43,25 @@ class TestPickSubjectLock:
         assert pick_subject_lock(["custom"]) == ""
         assert pick_subject_lock(["", " "]) == ""
 
+    def test_bridge_arbitration_speaker_to_handoff(self):
+        """2026-09-13 模式仲裁：桥接态下发话锁切交交接锁——桥接引渡权
+        （过渡留在主角一侧）高于静态发话锁（焦点钉死发话者）。"""
+        assert pick_subject_lock(["landing"], bridge=True) == SUBJECT_LOCK_HANDOFF
+        assert pick_subject_lock(["speaker"], bridge=True) == SUBJECT_LOCK_HANDOFF
+        assert pick_subject_lock(["landing", "echo"], bridge=True) == SUBJECT_LOCK_HANDOFF
+
+    def test_bridge_no_arbitration_for_prop_reply(self):
+        """物镜/静音锁不定义镜头跟谁（只写器物/只写开腔前缓冲），与桥接
+        不冲突——桥接态下维持原映射，不仲裁。"""
+        assert pick_subject_lock(["prop"], bridge=True) == SUBJECT_LOCK_PROP
+        assert pick_subject_lock(["ambient"], bridge=True) == SUBJECT_LOCK_PROP
+        assert pick_subject_lock(["reply"], bridge=True) == SUBJECT_LOCK_REPLY
+
+    def test_no_bridge_keeps_speaker(self):
+        """非桥接态（缺省）零破坏：landing/speaker 仍映射发话锁。"""
+        assert pick_subject_lock(["landing"]) == SUBJECT_LOCK_SPEAKER
+        assert pick_subject_lock(["landing"], bridge=False) == SUBJECT_LOCK_SPEAKER
+
 
 class TestLockInjection:
 
@@ -69,6 +89,17 @@ class TestLockInjection:
         assert "单焦距·发话锁" in user and "不替他说下一句" in user
         _, user = self._build(subject_lock=SUBJECT_LOCK_REPLY)
         assert "单焦距·静音锁" in user and "不出任何回应台词" in user
+
+    def test_handoff_lock_rendered_with_bridge_context(self):
+        """交接锁随桥接态渲染（发话者话音落下→切交主角侧），且只出现
+        交接锁不出现发话锁——同位双主体死锁在 prompt 层不可复现。"""
+        _, user = self._build(
+            subject_lock=SUBJECT_LOCK_HANDOFF,
+            suffix_anchor="“这样啊，那你路上当心点。”王叔弓着腰咳嗽了几声。",
+        )
+        assert "单焦距·交接锁" in user
+        assert "镜头切回主角一侧" in user
+        assert "单焦距·发话锁" not in user
 
     def test_zero_change_without_lock(self):
         """空锁 = 逐字节零变化（与不传参数的产物完全一致）。"""

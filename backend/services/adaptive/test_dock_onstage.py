@@ -617,3 +617,44 @@ class TestBridgeDock:
         )
         assert [p["text"] for p in parts] == ["他在门边解开鞋带"]
         assert "suffix_overlap" in dropped
+
+    def test_suffix_noun_overlap_exempted(self):
+        """2026-09-13 动词门：纯景物名词 4-5 字共现豁免——后文「窗纸透出」
+        被卡片当环境锚点引用（「望向窗纸透出的微光」）不再丢件（旧 n=4
+        无差别判据致卡片舱选项饥饿的病灶形态）。"""
+        from backend.services.adaptive.components.dock_generator import _finalize_parts
+        raw = [
+            {"slot": "ambient", "type": "scene", "text": "望向窗纸透出的微光"},
+        ]
+        parts = _finalize_parts(
+            raw, on_drop=lambda *a, **k: None,
+            suffix_anchor="巷子里没灯，只有谁家窗纸透出一点黄。",
+        )
+        assert [p["text"] for p in parts] == ["望向窗纸透出的微光"]
+
+    def test_suffix_verb_overlap_still_dropped(self):
+        """动词门另一半：4 字窗口含情节动作字仍丢件（豁免不放走事件抢拍）。"""
+        from backend.services.adaptive.components.dock_generator import _suffix_overlap_hit
+        assert _suffix_overlap_hit(
+            "接过明姐递来的碗", "明姐递来了准备好的碗筷", onstage_names=["明姐"]) is True
+        # 豁免走安全构成：感知动词不入动作表，主体感知不推进事件
+        assert _suffix_overlap_hit(
+            "望向窗纸透出的微光", "窗纸透出一点黄") is False
+
+    def test_suffix_long_noun_overlap_dropped(self):
+        """≥6 字连续重合即使无动作字也丢件——长段重合难以「巧合引用」解释。"""
+        from backend.services.adaptive.components.dock_generator import _suffix_overlap_hit
+        assert _suffix_overlap_hit(
+            "巷子深处没有灯", "巷子深处没有灯，只有谁家窗纸透出一点黄。") is True
+
+    def test_suffix_onstage_name_chars_join_safe_set(self):
+        """在册实体名字符并入安全集：卡片引用在册景物不因后文提及同一物件
+        而丢件（onstage_names 参数的实际作用）。"""
+        from backend.services.adaptive.components.dock_generator import _suffix_overlap_hit
+        # 「流光银白」4 字重合，「流」不在内建安全表——不传在册名单时保守丢件
+        assert _suffix_overlap_hit(
+            "它流光银白的外壳", "流光银白色的流线造型。") is True
+        # 传入在册名单后，「流」入安全集 → 全安全构成 → 豁免
+        assert _suffix_overlap_hit(
+            "它流光银白的外壳", "流光银白色的流线造型。",
+            onstage_names=["流光"]) is False

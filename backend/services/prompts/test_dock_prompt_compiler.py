@@ -209,6 +209,18 @@ class TestBridgeForm:
         assert "中插桥接" in system
         assert "本场在册" not in user                    # 无在册块（legacy 形态）
 
+    def test_suffix_evidence_survives_old_120_window(self):
+        """2026-09-13 事故回归：>120 字后文完整进锚（旧窗截断致物证缺席——
+        幽灵写「路边有灯」vs 后文「巷子里没灯」），≤300 窗内一字不截。"""
+        suffix = "巷子里没灯，只有谁家窗纸透出一点黄，照见脚下坑洼里积的雨水。" * 5
+        assert 120 < len(suffix) <= 300
+        system, user = build_dock_generator_prompt(
+            _RECENT, projections=[], nutrients={}, hard_constraints={},
+            onstage=_ONSTAGE, template="bridge", suffix_anchor=suffix,
+        )
+        assert "巷子里没灯" in user
+        assert "不得与之矛盾" in user
+
     def test_suffix_empty_keeps_legacy_bytes(self):
         a = build_dock_generator_prompt(
             _RECENT, projections=[], nutrients={}, hard_constraints={},

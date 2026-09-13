@@ -49,6 +49,7 @@ from backend.services.adaptive.stitch_gates import (
     _strip_fragment_prefix,
     _truncate_at_sentence,
     _truncate_keep_tail,
+    detect_dangling_quote_collision,
 )
 from backend.services.context.budget import (
     STITCH_AFTER_TEXT_MAX_CHARS,
@@ -428,7 +429,12 @@ async def stitch_ghost(
             previous_summary=kg.previous_summary,
             recency_pin=kg.recency_pin,
             contract=stitch_contract,
-            subject_lock=pick_subject_lock(request.picked_slots),
+            # 2026-09-13 模式仲裁：桥接态下交接锁取代发话锁（桥接引渡权
+            # 高于静态发话锁——发话者常非主角，两锁同注即主体死锁）
+            subject_lock=pick_subject_lock(
+                request.picked_slots,
+                bridge=bool((request.suffix_anchor or "").strip()),
+            ),
             picked_slots=[str(x) for x in (request.picked_slots or [])],
             suffix_anchor=(request.suffix_anchor or "").strip(),
             intent_source=getattr(ctx, "intent_source", "") or "",
@@ -490,14 +496,34 @@ async def stitch_ghost(
             fragment = request.fragment.strip()
             # P1-2（A4→2026-08-26 契约反转）：幽灵是纯追加插入，作者原句已在
             # 画布里——拼回（把原句塞回句首）必造成屏幕重复，改为**复读剥离**：
-            # 模型若仍把原句吐回来（prompt 已禁，等价类变体兜底），剥掉前缀只留续写
-            if request.mode == "stitch" and fragment:
+            # 模型若仍把原句吐回来（prompt 已禁，等价类变体兜底），剥掉前缀只留续写。
+            # 2026-09-13 扩门：continue 同受此契约（「端上一盆一盆」口吃穿透——
+            # 顺句续写同样复读断点，词尾重叠消解 _strip_fragment_tail_repeat
+            # 内嵌于此函数）；burst 段尾断点的复读形态少，观察一轮再议
+            if request.mode in ("stitch", "continue") and fragment:
                 text = _strip_fragment_prefix(text, fragment)
             # 双开引号碰撞（2026-09-11）：断点=悬空开引号 × 幽灵以开引号起头
             # → 剥幽灵的开引号（stitch/continue 两模式共用——Space 顺句续写
             # 同样会遇到作者刚打了个 “ 就续写）
             if request.mode in ("stitch", "continue") and fragment:
                 text = _strip_colliding_open_quote(text, fragment)
+                # 悬空开引号 × 动作前缀影子检（2026-09-13 目标 2·Z 路线）：
+                # 幽灵首字符非引号的碰撞形态——既有剥除救不了（那是另一形态），
+                # 修文须触碰画布或重排幽灵（纯追加红线）→ 只落台账攒语料，
+                # 频率数据出来后再定执法路线（prompt 引导同步在案）
+                if detect_dangling_quote_collision(text, fragment):
+                    trace_event("adaptive_dangling_quote", mode=request.mode,
+                                ghost_head=text[:24])
+                    try:
+                        from backend.services.constraints.events import log_constraint_event
+                        log_constraint_event(
+                            str(getattr(getattr(ctx, "bundle", None), "book_id", "") or ""),
+                            str(chapter_id), "stitch-dangling-quote", "hit",
+                            reason="ghost_restarts_after_dangling_quote",
+                            detail={"ghost_head": text[:24]},
+                        )
+                    except Exception:
+                        pass  # 影子埋点绝不阻塞生成
             # 桥接接缝归一（2026-09-09 FIM）：双端边界扩写的尾部与后文首句
             # 交接——归一须在字数闸/返修环之前（归一会改长度）
             if (request.suffix_anchor or "").strip():

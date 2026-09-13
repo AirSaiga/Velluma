@@ -401,4 +401,38 @@ describe('接缝三：FIM 中插桥接取源（2026-09-09「卡片接着文末�
     // 光标段（空段）原样发空串——后端按既有口径回退（文尾场景下画布尾即正确上下文）
     expect(call.recent_text).toBe('')
   })
+
+  it('2026-09-13 事故回归：省略号不再截断后文锚——物证完整上行', async () => {
+    // 旧版「截到第 2 个句末标点」：省略号「……」是两个 U+2026 字符，一个
+    // 省略号吃光两次配额，锚截在「咳咳…」处，「巷子里没灯」的物证没进锚。
+    const suffix = '“这样啊，那你路上当心点，这天晚了，咳咳……”王叔弓着腰咳嗽了几声。巷子里没灯，只有谁家窗纸透出一点黄。'
+    const editor = bridgeEditor('“不用不用。”林尘回头笑了笑。', suffix)
+    chapterEditorHandle.value = editor
+    const assist = useAdaptiveAssist(makeOpts())
+    heartbeat.mockResolvedValue(okResponse() as any)
+
+    assist.summonParts()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = heartbeat.mock.calls[0]?.[1] as any
+    expect(call.suffix_anchor).toContain('咳咳……')
+    expect(call.suffix_anchor).toContain('巷子里没灯')
+  })
+
+  it('超 300 字的后文回退窗内最后句末标点截断（结尾干净、不数句）', async () => {
+    const suffix = '他数着路灯往前走，影子被拉长又缩短。'.repeat(30)  // 450 字
+    const editor = bridgeEditor('前文一句。', suffix)
+    chapterEditorHandle.value = editor
+    const assist = useAdaptiveAssist(makeOpts())
+    heartbeat.mockResolvedValue(okResponse() as any)
+
+    assist.summonParts()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = heartbeat.mock.calls[0]?.[1] as any
+    const anchor = call.suffix_anchor as string
+    expect(anchor.length).toBeLessThanOrEqual(300)
+    expect('。！？…'.includes(anchor[anchor.length - 1])).toBe(true)
+    expect(anchor).toContain('他数着路灯往前走')
+  })
 })

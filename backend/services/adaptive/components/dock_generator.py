@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # 大改（槽位分类学/prompt 编译/在场制）递增本版本号，即可让库中陈旧
 # __dock__ 缓存全量安全失效（签名侧 + 读取侧双侧生效）。
 # v2.2（2026-09-13 B2 输入减肥批）：statics 注入整体移除 + 推测块降 1 条。
-DOCK_PIPELINE_VERSION = "v2.2_diet_20260913"
+DOCK_PIPELINE_VERSION = "v2.3_suffix300_20260913"
 
 # 意图衰老阈值（2026-09-09 时序冻结修复）：反推后正文推进超此字数未刷新
 # → dock 视意图为陈旧（intent_stale），不绑定旧意图副行
@@ -501,8 +501,10 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             scene_loc_id = str(getattr(_ch, "scene_location_id", "") or "")
     except Exception:
         scene_loc_id = ""
-    # 中插桥接锚（2026-09-09 FIM）：光标停在上下文之间时前端透传的后文 1-2 句
-    suffix_anchor = str(kw.get("suffix_anchor") or "").strip()[:120]
+    # 中插桥接锚（2026-09-09 FIM）：光标停在上下文之间时前端透传的后文边界窗
+    # （2026-09-13 扩窗 120→300：旧窗+前端省略号截尾让后文物证缺席，幽灵写出
+    # 与之矛盾的「路边有灯」；与 build_dock_generator_prompt 的 [:300] 同口径）
+    suffix_anchor = str(kw.get("suffix_anchor") or "").strip()[:300]
     # 桥接供给切断（同 build_dock_generator_prompt 的 is_bridge 口径）：意图
     # 猜测以全文为坐标系推导，桥接态=后文剧透——prompt 猜测块与 toward_beat
     # 的 note 拼装兜底一并断供（实测：猜测端给的全是文末饭桌场景）
@@ -838,9 +840,15 @@ def _finalize_parts(
         if check_beat_overlap and _beats_overlap_hit(text, outline_nearby):
             _drop("beat_overlap", text)
             continue
-        # 桥接撞车闸（2026-09-09 FIM 红队 R2）：机位文本与后文锚 ≥4 字连续重叠
-        # = 提前消耗下文已写的事实 → 丢件（后文防线，判据与 beat_overlap 同族）
-        if suffix_anchor and _beats_overlap_hit(text, [suffix_anchor]):
+        # 桥接撞车闸（2026-09-09 FIM 红队 R2）：机位文本与后文锚重叠 = 提前
+        # 消耗下文已写的事实 → 丢件。2026-09-13 换动词门判据（_suffix_overlap_
+        # hit）：纯景物名词的 4-5 字共现豁免——旧 n=4 无差别复用曾致卡片舱
+        # 选项饥饿（后文「窗纸透出」× 卡片「望向窗纸透出的微光」即丢件）
+        if suffix_anchor and _suffix_overlap_hit(
+            text, suffix_anchor,
+            onstage_names=[e.get("name") for e in ((onstage or {}).get("entities") or [])]
+            + [p.get("name") for p in ((onstage or {}).get("props") or [])],
+        ):
             _drop("suffix_overlap", text)
             continue
         kind = p.get("type", "action")
@@ -969,6 +977,8 @@ def _beats_overlap_hit(text: str, outline_nearby: list, n: int = 4) -> bool:
     供给侧切断（_prebeat_projections）后模型仍看得到就近节拍文本——这是
     残余风险的确定性兜底。任何 n 字滑窗命中即等价于 ≥n 连续公共子串。
     n=4 为现役 live 口径；n=3 仅供二期 shadow 收紧候选对拍（不落执法）。
+    ⚠ 2026-09-13 起 suffix 闸不再复用本函数（改 _suffix_overlap_hit 动词
+    门）——节拍没有「合法引用」语义，n=4 无差别判据对本闸维持。
     """
     from backend.services.adaptive.text_match import FRAGMENT_INVALID_CHARS
 
@@ -985,6 +995,77 @@ def _beats_overlap_hit(text: str, outline_nearby: list, n: int = 4) -> bool:
         for i in range(len(cleaned) - (n - 1)):
             if cleaned[i: i + n] in beat_clean:
                 return True
+    return False
+
+
+# ---- suffix_overlap 动词门（2026-09-13 卡片舱选项饥饿修复）----
+# 旧判据复用 _beats_overlap_hit n=4 无差别：后文常规景物名词（「窗纸透出」）
+# 被卡片当环境锚点引用（「望向窗纸透出的微光」）即丢件——无补采机制下
+# 卡片舱严重饥饿（仅剩 1-2 枚）。分诊判据见 _suffix_overlap_hit。
+_SUFFIX_OVERLAP_N_STRICT = 4
+_SUFFIX_OVERLAP_N_NOUN = 6
+# 情节动作字（事件骨架——抢拍的本质是把后文事件提前演）。感知动词（望/看/
+# 瞧/听）不入表：主体感知不推进事件，且正是「引用后文景物」的合法动作。
+_SUFFIX_ACTION_CHARS = set(
+    "端拿放递接抛甩拽拖推抢砸劈踹撞扑掀掐掷揪摔追赶奔跑窜逃攀登跨踩踢"
+    "握拎抄揉搓洗擦拂扛挑背抱搂扶拉扯牵挽解扣喊叫骂说答问吼嚷咳喘吃喝"
+    "念读写画涂点摇头低头弯俯仰靠倚蹲站坐躺卧翻身冲钻挤翻越跳落坠滚跌"
+    "爬起收拾扎捆缠绕点烧浇泼洒吹敲塞填挖刨撬拧旋按捏掐摩揉"
+)
+# 安全字符（景物名词/器物/虚词——窗口完全由此构成=场景锚点共现）；运行期
+# 并入在册实体名字符（_suffix_overlap_hit 的 onstage_names 参数）。
+_SUFFIX_SAFE_CHARS = set(
+    "的了着是在与和及之于上下中里外前后左右进出开关闭合门窗纸光灯光影"
+    "声风雪霜雾烟尘土沙石砖瓦木铁铜钢锡铝锌路桥墙院顶棚檐板桌椅凳床柜"
+    "灶锅碗盆瓶罐壶杯烛火柴禾草树花叶枝根藤天云星月日山河溪泉井田地村"
+    "庄镇街道缝隙洼积透映照飘浮沉亮暗黄白黑红青蓝灰绿紫褐湿干冷热暖旧"
+    "新半满空玉金银珠玻璃晶翡翠玛瑙钻线绳布帛绸缎皮革毛羽翅爪尾角骨血"
+    "肉皮衣袍袖裤鞋袜帽冠带扣环链盒"
+)
+
+
+def _suffix_overlap_hit(text: str, suffix: str, onstage_names=None) -> bool:
+    """dock 卡片 vs 后文锚的抢拍判定（动词门 + 名词豁免，2026-09-13）。
+
+    分诊：
+    ① 任一 ≥4 字重合窗口含情节动作字 → 事件抢跑，丢件（「明姐端来脸盆」）；
+    ② 任一重合窗口 ≥6 字 → 难以「巧合引用」解释，丢件；
+    ③ 4-5 字窗口完全由安全字符（_SUFFIX_SAFE_CHARS ∪ 在册实体名字符）
+       构成 → 场景锚点共现，豁免——后文景物被卡片当环境锚引用是合法行为；
+    ④ 其余 4-5 字窗口保守丢件（非安全构成=性质不明的重合）。
+
+    onstage_names：在册实体/资产名（调用方从 onstage 投影传入）——名字
+    字符并入安全集，卡片引用在册物件不因后文提及同一物件而丢件。
+    """
+    from backend.services.adaptive.text_match import FRAGMENT_INVALID_CHARS
+
+    def _clean(s: str) -> str:
+        return "".join(c for c in (s or "") if c not in FRAGMENT_INVALID_CHARS)
+
+    t = _clean(text)
+    s = _clean(str(suffix or ""))
+    n = _SUFFIX_OVERLAP_N_STRICT
+    if len(t) < n or len(s) < n:
+        return False
+    safe = set(_SUFFIX_SAFE_CHARS)
+    for name in (onstage_names or []):
+        for ch in _clean(str(name or "")):
+            if ch:
+                safe.add(ch)
+    for i in range(len(t) - n + 1):
+        if s.find(t[i: i + n]) < 0:
+            continue
+        length = n
+        while i + length < len(t) and s.find(t[i: i + length + 1]) >= 0:
+            length += 1
+        window = t[i: i + length]
+        if length >= _SUFFIX_OVERLAP_N_NOUN:
+            return True
+        if any(ch in _SUFFIX_ACTION_CHARS for ch in window):
+            return True
+        if all(ch in safe for ch in window):
+            continue  # 场景锚点共现，豁免
+        return True
     return False
 
 

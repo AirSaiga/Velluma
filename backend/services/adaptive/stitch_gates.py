@@ -226,6 +226,30 @@ def _strip_colliding_open_quote(text: str, fragment: str) -> str:
     return text
 
 
+def detect_dangling_quote_collision(text: str, fragment: str) -> bool:
+    """悬空开引号 × 动作前缀碰撞影子检（2026-09-13，Z+X 路线·只落台账）。
+
+    作者断点停在未闭合的开引号上（打了「“」话没说完），模型没接住续话
+    义务、另起动作子句（幽灵首字非引号）——拼合上屏成
+    「“林尘笑了笑，“今晚做啥好吃的？”」双开引号。既有
+    _strip_colliding_open_quote 只救幽灵首字符是开引号的形态，此形态字面
+    穿透。纯检测不修文：修文须触碰画布字符或重排幽灵子句，均违反「幽灵
+    纯追加 + 作者文本不可触碰」红线——影子攒语料定频率后再定执法路线。
+
+    判据（三条件同时成立）：
+    - 断点最后一个非空白字符是开引号；
+    - 幽灵首字符非开引号（那是既有剥除函数的领地，不重复记账）；
+    - 幽灵内部自带引号对（模型另起炉灶的直接证据）。
+    """
+    frag = (fragment or "").rstrip()
+    if not frag or frag[-1] not in _OPEN_QUOTES:
+        return False
+    t = (text or "").lstrip()
+    if not t or t[:1] in _OPEN_QUOTES:
+        return False
+    return any(q in t for q in _OPEN_QUOTES)
+
+
 def _normalize_bridge_seam(text: str, suffix: str) -> str:
     """桥接尾部接缝归一（2026-09-09 FIM 红队 R1：prompt 管不住的确定性下沉）。
 

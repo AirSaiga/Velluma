@@ -199,6 +199,18 @@ REGISTRY: List[Constraint] = [
         layers=[ENFORCE_REWRITE], enforcement=ENFORCE_REWRITE, surface=SURFACE_GHOST,
         origin="2026-09-02 用户拍板：可接受生成变慢，不可接受错误结果上屏；不相信模型自觉",
     ),
+    Constraint(
+        id="stitch-dangling-quote",
+        statement="断点停在未闭合开引号 × 幽灵另起动作子句（首字符非引号且内部自带引号对）→ 拼合双开引号疑点"
+                  "（shadow：只落台账不修文）",
+        layers=[ENFORCE_PROMPT, ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_GHOST,
+        status=STATUS_SHADOW, repair=REPAIR_NONE,
+        when="stitch/continue 且断点尾字符为开引号（幽灵引号起=既有 stitch-repeat-strip "
+             "剥除领地，不重复记账）",
+        origin="2026-09-13 目标 2（Z+X 路线）：确定性修文须触碰画布字符或重排幽灵子句，"
+               "均违反「幽灵纯追加+作者文本不可触碰」红线——prompt 交接指令（断点引号交接）+"
+               "影子检攒语料定频率后再定执法路线",
+    ),
     # ---- dock 挂件校对环族（菜单件可自动丢弃）----
     Constraint(
         id="dock-banned-words",
