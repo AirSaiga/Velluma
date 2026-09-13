@@ -25,7 +25,6 @@ const props = defineProps<{
   isFormatting: boolean
   isPublishing: boolean
   openInspirationModal: () => void
-  openCritiqueModal: () => void
   publishChapter: () => void
   selectedChapter: Chapter | null
   setEditorRef: (editor: any) => void
@@ -87,10 +86,6 @@ function menuPublish() {
 function menuInspiration() {
   actionMenuOpen.value = false
   props.openInspirationModal()
-}
-function menuCritique() {
-  actionMenuOpen.value = false
-  props.openCritiqueModal()
 }
 function menuFormat() {
   actionMenuOpen.value = false
@@ -162,10 +157,6 @@ function menuClearForeignStyles() {
                   <button class="action-menu__item" @click="menuInspiration">
                     <Icon name="light-bulb" :size="13" />
                     <span>找找灵感</span>
-                  </button>
-                  <button class="action-menu__item" @click="menuCritique">
-                    <Icon name="pencil-square" :size="13" />
-                    <span>AI 编辑审阅</span>
                   </button>
                   <div class="action-menu__divider"></div>
                   <button class="action-menu__item" @click="menuFind">

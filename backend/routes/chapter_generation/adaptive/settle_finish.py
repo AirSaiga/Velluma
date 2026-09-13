@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""端点：settle / finish / model / fix-sentence。
+"""端点：settle / finish / model / fix-sentence / reader-feedback。
 
-沉淀（Ctrl+Enter 倒灌）、完稿审计（现实校验/记忆索引/语义扫描/质感候选）
-与残句定点修复同属「完稿闭环」，共享 _SENTENCE_FIX_COUNT 配额状态。
+沉淀（Ctrl+Enter 倒灌）、完稿审计（现实校验/记忆索引/语义扫描/质感候选）、
+残句定点修复与读者反馈同属「完稿闭环」，共享章级 recorder 与配额状态。
 """
 from __future__ import annotations
 
@@ -85,13 +85,18 @@ async def finish(
 
     # B5 现实校验（不变量 10：失败即失效不沉默）：知识视图的生死论断回查
     # fresh fold——mismatches 非空 = 缓存过期/派生物说谎的直接证据，进报告
+    # Phase D 盘活（2026-09-12）：补传场景钉 scene_location_id——激活
+    # present_wrong_loc 分支（在场者位置 vs 场景钉对照，此前恒不触发）
+    _kg = None
     try:
         from backend.services.world.reality_check import run_reality_check
 
         _bundle = await load_chapter_settings_bundle(chapter_id, db)
         _kg = build_knowledge_view(_bundle)
+        _ch_rc = await db.get(Chapter, chapter_id)
         result["reality_check"] = await run_reality_check(
             db, _bundle.book_id, _bundle.world_time, _kg,
+            scene_location_id=str(getattr(_ch_rc, "scene_location_id", None) or "") if _ch_rc else "",
         )
     except Exception as e:
         logger.debug(f"[adaptive/finish] 现实校验失败（不阻塞完稿）: {e}")
@@ -108,8 +113,12 @@ async def finish(
 
         _book = await db.get(_Book2, _bid) if _bid else None
         if _book is None or bool(getattr(_book, "cognition_surfacing", True)):
+            # Phase D 盘活（2026-09-12）：反讽机会补传在场实体集（此前恒空集——
+            # belief 域对空视角一律 UNKNOWN，所有读者已知命题全被计成反讽机会，
+            # docstring 的「在场者不知道」语义名存实亡）
+            _perspectives = list(getattr(_kg, "present_entity_ids", None) or []) if _kg is not None else []
             result["cognition_surface"] = {
-                "irony": await irony_opportunities(db, _bid, _t, []),
+                "irony": await irony_opportunities(db, _bid, _t, _perspectives),
                 "capital_count": len(await dramatic_capital(db, _bid, t=_t)),
             }
     except Exception as e:
@@ -316,3 +325,49 @@ async def fix_sentence(
         return {"fixed": None, "reason": reason}
     _SENTENCE_FIX_COUNT[chapter_id] = _SENTENCE_FIX_COUNT.get(chapter_id, 0) + 1
     return {"fixed": fixed, "reason": "ok"}
+
+
+@router.post("/{chapter_id}/adaptive/reader-feedback")
+async def reader_feedback(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """读者反馈：AI 扮演读者写叙述性读感（1 次 reasoning LLM）。
+
+    完稿体检报告内的**按需独立触发**卡片（Phase 0 拍板：不串行塞入 finish
+    主链——推理槽实测均值 ~17.6s，串行会把体检拖到 60s+）。正文口径与
+    finish/fix-sentence 同源（画布剥 HTML）；反馈文本不落库，只有 LLM 用量
+    进章级 recorder（stage=adaptive.reader_feedback）。
+    """
+    bind_adaptive_trace(chapter_id)
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    from backend.services.adaptive.components.reader_feedback import (
+        generate_reader_feedback,
+    )
+    from backend.services.adaptive.paragraph_source import written_text
+
+    full_text = written_text(chapter.content_text or "")
+    if len(full_text) < 200:
+        raise HTTPException(status_code=422, detail="正文不足 200 字，先写一段再来听读者怎么说")
+
+    result = await generate_reader_feedback(
+        full_text=full_text,
+        chapter_number=int(getattr(chapter, "chapter_number", 0) or 0) or 1,
+        purpose=str(getattr(chapter, "outline_text", "") or "")[:300],
+        recorder=get_adaptive_recorder(chapter_id),
+    )
+    trace_event(
+        "adaptive_reader_feedback",
+        chars=result.get("word_count", 0),
+        error=bool(result.get("error")),
+    )
+    await flush_adaptive_records(chapter_id)
+    return {
+        "chapter_id": chapter_id,
+        "feedback": result.get("feedback", ""),
+        "word_count": result.get("word_count", 0),
+        "error": result.get("error"),
+    }

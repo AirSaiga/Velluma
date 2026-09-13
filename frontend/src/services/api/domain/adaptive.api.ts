@@ -182,6 +182,17 @@ export interface FinishReport {
       verdict?: string
     }
   }
+  /** B5 现实校验（Phase D 2026-09-12 盘活：知识视图生死论断回查 fresh fold；
+   *  失败/零差异后端不设键——卡静默缺席） */
+  reality_check?: {
+    checked: number
+    mismatches?: Array<{ claim: string; kind: string; detail: string }>
+  }
+  /** B9 认知浮现（Phase D 盘活：反讽机会=在场者不知道的信息差 + 戏剧资本计数） */
+  cognition_surface?: {
+    irony?: string[]
+    capital_count?: number
+  }
 }
 
 export interface WorldModelSnapshot {
@@ -346,6 +357,14 @@ export const adaptiveApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+
+  /** 读者反馈（2026-09-12 写后检查收敛：自 Refinery 收编，按需独立触发——
+   *  完稿体检报告卡片用，不串行进 finish 主链；1 次 reasoning ~17.6s 实测均值） */
+  readerFeedback: async (
+    chapterId: string,
+  ): Promise<{ chapter_id: string; feedback: string; word_count: number; error?: string | null }> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/reader-feedback`, { method: 'POST' })
   },
 
   /** 软脉络读取（null = 本章无脉络，一切 UI 静默缺席） */

@@ -6,8 +6,9 @@
  * - 打算：写前规划——章级软脉络（SpinePanel）+ 大纲 + 意图反推
  * - 此刻：世界切片「此刻此地」+ 候选回流收件箱（WorldSceneSlice，与生成上下文同源）
  * - 本章：统计 / 本章文风 / Canon 真相账本跳转——章节档案
- * - 检查：完稿体检（按钮 + 报告）、沉淀抽取、润色（Refinery）、读者反馈——按 检查→修改→反馈 三组排布
- * - AI 视角（原调试）：AI 此刻所见预览 + 世界模型快照——引擎内部观测
+ * - 检查：完稿体检（按钮 + 报告）、沉淀抽取、读者反馈——按 检查→修改→反馈 三组排布（润色 Refinery 已于 2026-09-12 写后检查收敛批拔除）
+ * - AI 视角（原调试，09 期重设计 docs/design/ux-redesign/09-ai-view-redesign.md）：
+ *   健康横幅（有错置顶）→ AI 此刻读到的（分组折叠+保字排版）→ 世界模型快照（结构化摘要）
  *
  * 默认分区逻辑（空章→打算/有正文→此刻/用户切过即尊重）与 Ctrl+1~5 监听原样保留；
  * activeTab 以 v-model:active-tab 与 WorkspaceView 双向同步（面板关闭时容器持 null）。
@@ -17,14 +18,11 @@ import { useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import ChapterBadges from '../presentation/ChapterBadges.vue'
-import RefineryIssuesPanel from '../../generation/presentation/RefineryIssuesPanel.vue'
-import RefineryProgress from '../../generation/presentation/RefineryProgress.vue'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
 import SpinePanel from '../presentation/SpinePanel.vue'
 import ContextPreviewSection from '../presentation/ContextPreviewSection.vue'
 import { useChapterSpine } from '../composables/useChapterSpine'
-import type { IssueDecision, RefineryIssue } from '../../../services/api/domain'
-import { refineryApi, styleApi } from '../../../services/api/domain'
+import { styleApi } from '../../../services/api/domain'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import type { ContextPreview } from '../../../services/api/domain/adaptive.api'
 import { componentErrors } from '../../generation/composables/useAdaptiveAssist'
@@ -113,14 +111,6 @@ watch(wordCount, (n) => {
 })
 
 // 诊断完成（问题清单就绪）/ 完稿报告 / 沉淀结果到达时切到审校 tab
-watch(
-  () => session.stage.value,
-  (newStage) => {
-    if (newStage === 'refining' && session.refineryIssues.value.length > 0) {
-      activeTab.value = 'review'
-    }
-  }
-)
 watch(() => session.finishReport?.value, (report) => {
   if (report) activeTab.value = 'review'
   fixStates.value = {}  // 新一轮审计 → 残句修复裁决态复位
@@ -158,19 +148,6 @@ onBeforeUnmount(() => {
   window.removeEventListener(OPEN_INBOX_EVENT, _onOpenInbox)
 })
 
-/** 审校 verdict 中文标签（ADF 审计与 Refinery 回读共用） */
-const VERDICT_LABELS: Record<string, string> = {
-  pass: '通过',
-  pass_with_fixes: '通过（修改后）',
-  needs_refinement: '需要润色',
-  needs_final_touch: '需要再修',
-  fail: '未通过',
-  unaudited: '未检查',
-}
-function verdictLabel(v?: string | null) {
-  return (v && VERDICT_LABELS[v]) || v || '—'
-}
-
 /** 更新章节大纲，带简易防抖避免每次按键写库（标题编辑在纸面页面头） */
 let outlineTimer: ReturnType<typeof setTimeout> | undefined
 function updateOutline(value: string) {
@@ -181,25 +158,6 @@ function updateOutline(value: string) {
   }, 500)
 }
 
-/** 启动润色（诊断阶段）。门槛：本章有正文（手写章节亦可，不再要求走完生成管线）。 */
-function handleStartRefinery() {
-  if (!selectedChapterId.value || !chapterHasContent.value) return
-  session.startRefinery(selectedChapterId.value, { mode: 'deep', enablePolish: true })
-}
-
-/** 作者确认问题清单后，执行手术+回读+抛光 */
-function handleRefineryConfirm(payload: { run_id: string; decisions: IssueDecision[]; custom_issues: RefineryIssue[] }) {
-  if (!selectedChapterId.value) return
-  session.confirmRefinery(selectedChapterId.value, payload.decisions, payload.custom_issues)
-}
-
-/** 取消润色（清空 refinery 状态，stage 回 idle——adaptive 模式 stage 恒 idle 的约定不被打破） */
-function handleRefineryCancel() {
-  session.refineryIssues.value = []
-  session.refineryRunId.value = null
-  session.stage.value = 'idle'
-}
-
 /** 获取读者反馈（AI 扮演读者写叙述性感受）。门槛：本章有正文。 */
 const readerFeedback = ref('')
 const loadingFeedback = ref(false)
@@ -208,7 +166,7 @@ async function handleReaderFeedback() {
   loadingFeedback.value = true
   readerFeedback.value = ''
   try {
-    const result = await refineryApi.getReaderFeedback(selectedChapterId.value)
+    const result = await adaptiveApi.readerFeedback(selectedChapterId.value)
     readerFeedback.value = result.feedback
   } catch (e: any) {
     readerFeedback.value = `获取失败：${e.message}`
@@ -217,7 +175,7 @@ async function handleReaderFeedback() {
   }
 }
 
-/** 跳世界页真相账本（C1 Canon 融合；RefineryIssuesPanel 改设定 / 章节 tab 入口共用） */
+/** 跳世界页真相账本（C1 Canon 融合；检查报告改设定 / 章节 tab 入口共用） */
 const router = useRouter()
 function handleEditCanon() {
   const bookId = store.currentBookId.value
@@ -225,12 +183,25 @@ function handleEditCanon() {
   router.push({ name: 'world', params: { bookId }, query: { panel: 'canon' } })
 }
 
-// ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次）=====
+// ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次；09 期结构化摘要）=====
 const worldModelOpen = ref(false)
-const worldModelText = ref('')
+interface WorldModelSummary {
+  hasIntent: boolean
+  intentSource: string
+  intentArc: string
+  facts: string[]
+  factCount: number
+  projections: string[]
+  totalWords: number
+}
+const worldModel = ref<WorldModelSummary | null>(null)
+const worldModelLoading = ref(false)
+const worldModelError = ref('')
 
 // ===== AI 辅助组件健康状况（P3-1/C5：最近失败的组件，心跳带回）=====
 // 空 = 一切正常，整块不渲染；成功即清（后端语义），恢复后自动消失
+// 09 期：横幅置顶（有错才出现），默认折叠为一行计数，点开见明细
+const compErrorsOpen = ref(false)
 const COMPONENT_LABELS: Record<string, string> = {
   intent_inference: '方向猜测',
   future_projection: '走向推测',
@@ -252,9 +223,8 @@ function relTimeOf(ts: number) {
   return new Date(ts * 1000).toLocaleDateString()
 }
 
-// ===== AI 此刻所见预览（P5 B2：/adaptive/context-preview，展开即装配一次）=====
+// ===== AI 此刻所见预览（P5 B2；09 期重设计：分区常开，进区自动装配一次）=====
 type PreviewMode = 'stitch' | 'continue' | 'burst' | 'outline' | 'open'
-const contextPreviewOpen = ref(false)
 const contextPreviewMode = ref<PreviewMode>('continue')
 const contextPreviewData = ref<ContextPreview | null>(null)
 const contextPreviewLoading = ref(false)
@@ -274,61 +244,70 @@ async function loadContextPreview() {
   }
 }
 
-function toggleContextPreview() {
-  contextPreviewOpen.value = !contextPreviewOpen.value
-  if (contextPreviewOpen.value && !contextPreviewData.value) {
-    loadContextPreview()
-  }
-}
-
 function switchContextPreviewMode(mode: PreviewMode) {
   if (mode === contextPreviewMode.value) return
   contextPreviewMode.value = mode
-  if (contextPreviewOpen.value) loadContextPreview()
+  if (contextPreviewData.value || contextPreviewError.value) loadContextPreview()
 }
 
-// 切章复位（旧章预览不再示人；重开重装配）
+// 进「AI 视角」分区且尚无数据 → 自动装配一次（拉过即不再自动拉，之后靠手动刷新）
+watch(activeTab, (tab) => {
+  if (tab === 'debug' && selectedChapterId.value && !contextPreviewData.value && !contextPreviewLoading.value) {
+    loadContextPreview()
+  }
+}, { immediate: true })
+
+// 切章复位（旧章预览不再示人；仍在本分区则自动重拉一次=旧「重开重装配」语义）
 watch(selectedChapterId, () => {
-  contextPreviewOpen.value = false
   contextPreviewData.value = null
   contextPreviewError.value = ''
+  worldModelOpen.value = false
+  worldModel.value = null
+  worldModelError.value = ''
+  if (activeTab.value === 'debug' && !contextPreviewLoading.value) loadContextPreview()
 })
+
+/** 意图来源人话标签（世界模型摘要行消费） */
+const INTENT_SOURCE_LABELS: Record<string, string> = {
+  inferred: 'AI 猜的',
+  author: '你写的',
+  outline: '大纲',
+  baton: '上一章接力',
+  none: '无',
+}
 
 async function toggleWorldModelDebug() {
   worldModelOpen.value = !worldModelOpen.value
   if (!worldModelOpen.value) return
   const chapterId = selectedChapterId.value
   if (!chapterId) return
-  worldModelText.value = '读取中…'
+  // 摘要口径与旧版逐行同源：意图 + 事实最近 5 条（各截 50 字）+ 走向 3 条 + 整理字数
+  worldModelLoading.value = true
+  worldModelError.value = ''
   try {
     const snap = await adaptiveApi.model(chapterId)
-    // 摘要视图：意图 + 事实条数 + 投影标题（原文太长，调试只看骨架）
     const intent = snap.intent || {}
-    const facts = (snap.facts || []).slice(-5).map((f: any) => `· ${String(f.text || '').slice(0, 50)}`)
+    const facts = (snap.facts || []).slice(-5).map((f: any) => String(f.text || '').slice(0, 50))
     const projections = (snap.projections || [])
       .filter((p: any) => !p.__dock__ && !p.__canon_watch__)
       .map((p: any) => {
         const beat = p.possible_beats?.[0]
-        return `· ${String(beat?.event || '').slice(0, 50)}`
+        return String(beat?.event || '').slice(0, 50)
       })
       .slice(0, 3)
-    const INTENT_SOURCE_LABELS: Record<string, string> = {
-      inferred: 'AI 猜的',
-      author: '你写的',
-      outline: '大纲',
-      baton: '上一章接力',
-      none: '无',
+    worldModel.value = {
+      hasIntent: Boolean(intent.source) && intent.source !== 'none',
+      intentSource: INTENT_SOURCE_LABELS[intent.source] || intent.source || '',
+      intentArc: String(intent.arc || '').slice(0, 40),
+      facts,
+      factCount: snap.fact_count ?? 0,
+      projections,
+      totalWords: snap.total_words ?? 0,
     }
-    worldModelText.value = [
-      `方向：${intent.source === 'none' ? '（无）' : `${INTENT_SOURCE_LABELS[intent.source] || intent.source} · ${(intent.arc || '').slice(0, 40)}`}`,
-      `事实：${snap.fact_count ?? 0} 条（最近 ${facts.length} 条）`,
-      ...facts,
-      `走向：${projections.length} 条`,
-      ...projections,
-      `已整理字数：${snap.total_words ?? 0}`,
-    ].join('\n')
   } catch (e: any) {
-    worldModelText.value = `读取失败：${e.message}`
+    worldModelError.value = e?.message || '读取失败'
+  } finally {
+    worldModelLoading.value = false
   }
 }
 
@@ -640,7 +619,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               <Icon :name="session.aiLane?.value === 'analyzing' ? 'loader' : 'check-circle'" :size="14" />
               <span>{{ session.aiLane?.value === 'analyzing' ? '通读中…' : '完稿体检' }}</span>
             </button>
-            <p class="hint">AI 通读全章做检查：没写完的句子、关键情节写没写到、秘密穿帮、编辑意见，并更新前情记忆。</p>
+            <p class="hint">AI 通读全章做检查：没写完的句子、关键情节写没写到、秘密穿帮、编辑意见、世界账本对不对得上、能抖什么信息差，并更新前情记忆。</p>
           </section>
 
           <!-- 完稿审计报告 -->
@@ -739,6 +718,32 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             <div v-if="session.finishReport.value.memory_indexed" class="report-block">
               <div class="report-item">前情记忆新增 {{ session.finishReport.value.memory_indexed }} 段（后面的章节能想起这些细节）</div>
             </div>
+            <!-- B5 现实校验（Phase D 2026-09-12 盘活）：知识视图生死论断回查 fresh fold，
+                 mismatches 非空 = 世界账本与推演派生物在说谎——回世界页核对 -->
+            <div v-if="session.finishReport.value.reality_check?.mismatches?.length" class="report-block report-block--warn">
+              <div class="report-block-label">世界账本对不上（{{ session.finishReport.value.reality_check.mismatches.length }} 处）</div>
+              <div
+                v-for="(m, i) in session.finishReport.value.reality_check.mismatches.slice(0, 5)"
+                :key="'rc' + i"
+                class="report-item"
+              >{{ m.claim }}<template v-if="m.detail"> —— {{ m.detail }}</template></div>
+              <p class="hint">这些是世界推演（谁在场/谁死了）与真实事件账本的冲突，去世界页核对后重算。</p>
+            </div>
+            <!-- B9 认知浮现（Phase D 盘活）：反讽机会=在场者不知道的信息差 + 戏剧资本 -->
+            <div
+              v-if="session.finishReport.value.cognition_surface && ((session.finishReport.value.cognition_surface.irony?.length ?? 0) > 0 || (session.finishReport.value.cognition_surface.capital_count ?? 0) > 0)"
+              class="report-block"
+            >
+              <div class="report-block-label">可以抖出来的信息差（{{ session.finishReport.value.cognition_surface.irony?.length ?? 0 }} 个机会）</div>
+              <div
+                v-for="(s, i) in (session.finishReport.value.cognition_surface.irony || []).slice(0, 3)"
+                :key="'irony' + i"
+                class="report-item"
+              >{{ s }}</div>
+              <div v-if="(session.finishReport.value.cognition_surface.capital_count ?? 0) > 0" class="report-item">
+                戏剧资本 {{ session.finishReport.value.cognition_surface.capital_count }} 条（读者知道、人物不知道的事，可攒着引爆）
+              </div>
+            </div>
             <!-- A5c① 收件箱积压（book 级 pending 计数，>0 才显示）：一键直达「此刻」tab 裁决 -->
             <div v-if="(session.finishReport.value.candidates_pending ?? 0) > 0" class="report-block report-block--inbox">
               <div class="report-block-label">收件箱</div>
@@ -778,69 +783,10 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             </div>
           </section>
 
-          <!-- 润色（Refinery：诊断 → 确认 → 手术 + 回读 + 抛光） -->
-          <section class="refine-entry">
-            <div class="section-label">润色</div>
-            <!-- 无正文空态 -->
-            <div v-if="!chapterHasContent" class="empty-inline">
-              本章还没有正文。写一段之后，这里可以启动 AI 润色与读者反馈。
-            </div>
-            <!-- 诊断进行中（stage='auditing'）：过渡态，避免"空白没反应"观感 -->
-            <div v-else-if="session.stage.value === 'auditing' && session.generating.value" class="refine-loading">
-              <div class="empty-icon spinning"><Icon name="sparkles" :size="32" /></div>
-              <p>正在通读全文找问题…</p>
-              <p class="muted">检查 + 归类需要一点时间，请稍候。</p>
-            </div>
-            <!-- 可启动（有正文且不在润色流程中） -->
-            <template v-else-if="session.stage.value !== 'refining'">
-              <button
-                v-if="!session.refineryRunId.value"
-                class="btn-refinery"
-                @click="handleStartRefinery"
-              >
-                <Icon name="sparkles" :size="14" />
-                <span>开始润色：先检查，再修改</span>
-              </button>
-              <p class="hint">
-                AI 通读全文找问题 → 你确认 → 逐处修改 → 通读检查 → 定稿润色。
-              </p>
-            </template>
-          </section>
-
-          <!-- 润色问题清单（诊断完成、等作者确认） -->
-          <RefineryIssuesPanel
-            v-if="session.stage.value === 'refining' && session.refineryIssues.value.length > 0 && session.refineryRunId.value"
-            :issues="session.refineryIssues.value"
-            :run-id="session.refineryRunId.value"
-            @confirm="handleRefineryConfirm"
-            @cancel="handleRefineryCancel"
-            @edit-canon="handleEditCanon"
-          />
-
-          <!-- 润色手术进度 -->
-          <RefineryProgress
-            v-if="session.stage.value === 'refining' && session.refineryRunId.value === null && (session.generating.value || session.refinerySurgeries.value.length > 0)"
-            :surgeries="session.refinerySurgeries.value"
-            :holistic-verdict="session.refineryHolisticVerdict.value"
-            :stage-label="session.stepProgress.value?.label || ''"
-            :stage="session.stage.value"
-          />
-
-          <!-- 润色完成后的手术历史 -->
-          <section v-if="session.refinerySurgeries.value.length && session.stage.value !== 'refining' && session.stage.value !== 'auditing'" class="refine-history">
-            <div class="section-label">润色记录（{{ session.refinerySurgeries.value.filter(s => s.applied).length }}/{{ session.refinerySurgeries.value.length }} 成功）</div>
-            <div v-for="s in session.refinerySurgeries.value" :key="s.operation_id" class="surgery-row" :class="{ failed: !s.applied }">
-              <span class="surgery-status">{{ s.applied ? '✓' : '✗' }}</span>
-              <span class="surgery-diff">{{ s.diff_summary }}</span>
-            </div>
-            <button class="btn-refinery" @click="handleStartRefinery">
-              <Icon name="arrow-path" :size="14" />
-              <span>再次润色</span>
-            </button>
-          </section>
+          <!-- 【润色 Refinery 已拔除 2026-09-12】组二的「AI 从正文发现」（沉淀）仍在上方 -->
 
           <!-- 组三：反馈（读者反馈 + 审校结论；本章无正文且无论断时整组缺席） -->
-          <div v-if="chapterHasContent || session.refineryHolisticVerdict.value" class="group-title">反馈</div>
+          <div v-if="chapterHasContent" class="group-title">反馈</div>
           <!-- 读者反馈 -->
           <section v-if="chapterHasContent" class="feedback-section">
             <div class="section-label">读者反馈</div>
@@ -862,57 +808,73 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             </p>
           </section>
 
-          <!-- 检查结论（润色回读；有数据才显示。旧 ADF 结构检查块已随引擎归档移除） -->
-          <section v-if="session.refineryHolisticVerdict.value" class="audit-section">
-            <div class="section-label">检查结论</div>
-            <div class="audit-block">
-              <div class="audit-row">
-                <span class="audit-label">通读检查</span>
-                <span class="audit-value" :class="`verdict-${session.refineryHolisticVerdict.value.verdict}`">
-                  {{ session.refineryHolisticVerdict.value.verdict === 'pass' ? '✓ 通过' : '⚠ 需要再修' }}
-                </span>
-              </div>
-            </div>
-          </section>
         </template>
       </div>
 
-      <!-- ====== AI 视角（原调试 tab）：AI 所见预览 + 世界模型快照（引擎内部观测，底部入口进入） ====== -->
+      <!-- ====== AI 视角（原调试 tab，09 期重设计）：健康横幅 → 所见预览 → 世界模型 ====== -->
       <div v-else-if="activeTab === 'debug'" class="panel debug-panel">
         <div v-if="!selectedChapter" class="empty">
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- AI 此刻所见（P5 B2：stitch-ghost 真实注入的上下文块预览——与 stitch_context 同源，默认折叠） -->
+          <!-- 组件健康状况（置顶横幅；有错才渲染，默认折叠为一行计数） -->
+          <section v-if="componentErrors.length" class="comp-errors">
+            <button class="comp-toggle" @click="compErrorsOpen = !compErrorsOpen">
+              <Icon name="exclamation-circle" :size="13" class="comp-icon" />
+              <span class="comp-toggle-title">{{ componentErrors.length }} 个辅助功能最近出错</span>
+              <Icon :name="compErrorsOpen ? 'chevron-down' : 'chevron-up'" :size="12" class="comp-chev" />
+            </button>
+            <template v-if="compErrorsOpen">
+              <div v-for="err in componentErrors" :key="err.component" class="comp-error-row">
+                <span class="comp-error-name">{{ componentLabelOf(err.component) }}</span>
+                <span class="comp-error-time">{{ relTimeOf(err.ts) }}</span>
+                <span class="comp-error-detail" :title="err.error">{{ err.error }}</span>
+              </div>
+              <p class="hint">只记最近一次，恢复了会自动消失。</p>
+            </template>
+          </section>
+
+          <!-- AI 此刻读到的（主件：分组折叠 + 保字排版，分区常开） -->
           <ContextPreviewSection
-            :open="contextPreviewOpen"
             :loading="contextPreviewLoading"
             :error="contextPreviewError"
             :preview="contextPreviewData"
             :mode="contextPreviewMode"
-            @toggle="toggleContextPreview"
             @refresh="loadContextPreview"
             @update:mode="switchContextPreviewMode"
           />
 
-          <!-- AI 辅助组件健康状况（P3-1/C5：最近失败记录；空 = 一切正常，整块不渲染） -->
-          <section v-if="componentErrors.length" class="comp-errors">
-            <div class="section-label">AI 辅助遇到的问题</div>
-            <div v-for="err in componentErrors" :key="err.component" class="comp-error-row">
-              <span class="comp-error-name">{{ componentLabelOf(err.component) }}</span>
-              <span class="comp-error-time">{{ relTimeOf(err.ts) }}</span>
-              <span class="comp-error-detail">{{ err.error }}</span>
-            </div>
-            <p class="hint">都是最近一次的记录，恢复了会自动消失，不影响写作。</p>
-          </section>
-
-          <!-- 世界模型快照（P0-5：/adaptive/model 的调试入口） -->
-          <section>
-            <button class="btn-refinery" @click="toggleWorldModelDebug">
+          <!-- 世界模型快照（底部折叠卡，结构化摘要） -->
+          <section class="world-model">
+            <button class="wm-toggle" @click="toggleWorldModelDebug">
               <Icon name="magnifying-glass" :size="14" />
-              <span>{{ worldModelOpen ? '收起' : 'AI 眼中的世界' }}</span>
+              <span class="wm-toggle-title">AI 眼中的世界</span>
+              <Icon :name="worldModelOpen ? 'chevron-down' : 'chevron-up'" :size="12" class="wm-chev" />
             </button>
-            <pre v-if="worldModelOpen" class="world-model-debug">{{ worldModelText }}</pre>
+            <div v-if="worldModelOpen" class="wm-body">
+              <div v-if="worldModelLoading" class="wm-status">读取中…</div>
+              <div v-else-if="worldModelError" class="wm-status wm-status--err">读取失败：{{ worldModelError }}</div>
+              <template v-else-if="worldModel">
+                <div class="wm-row">
+                  <span class="wm-k">方向</span>
+                  <span class="wm-v">{{ worldModel.hasIntent ? `${worldModel.intentSource} · ${worldModel.intentArc}` : '（无）' }}</span>
+                </div>
+                <div class="wm-row">
+                  <span class="wm-k">事实</span>
+                  <span class="wm-v">{{ worldModel.factCount }} 条（最近 {{ worldModel.facts.length }} 条）</span>
+                </div>
+                <div v-for="(f, i) in worldModel.facts" :key="'wmf' + i" class="wm-sub">· {{ f }}</div>
+                <div class="wm-row">
+                  <span class="wm-k">走向</span>
+                  <span class="wm-v">{{ worldModel.projections.length }} 条</span>
+                </div>
+                <div v-for="(p, i) in worldModel.projections" :key="'wmp' + i" class="wm-sub">· {{ p }}</div>
+                <div class="wm-row">
+                  <span class="wm-k">已整理</span>
+                  <span class="wm-v">{{ worldModel.totalWords }} 字</span>
+                </div>
+              </template>
+            </div>
           </section>
         </template>
       </div>
@@ -1305,21 +1267,108 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   margin: 0.375rem 0 0;
 }
 
-/* 世界模型调试快照（P0-5）：等宽小字摘要视图 */
-.world-model-debug {
-  margin: 0.5rem 0 0;
-  padding: 0.5rem 0.625rem;
-  font-family: var(--font-mono, monospace);
-  font-size: 0.6875rem;
-  line-height: 1.6;
+/* 健康横幅（09 期置顶；折叠为一行计数，点开见明细） */
+.comp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  text-align: left;
+}
+.comp-toggle:hover {
+  background: rgba(245, 158, 11, 0.14);
+}
+.comp-icon {
+  color: #d97706;
+  flex-shrink: 0;
+}
+.comp-toggle-title {
+  flex: 1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.comp-chev {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.comp-errors .comp-error-row {
+  margin-top: 0.375rem;
+}
+.comp-errors .hint {
+  margin-bottom: 0;
+}
+
+/* 世界模型快照（底部折叠卡，结构化定义行） */
+.wm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.4375rem 0.5rem;
   color: var(--text-secondary);
-  background: var(--bg-secondary);
+  background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  white-space: pre-wrap;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.wm-toggle:hover {
+  border-color: var(--accent-400, #9685c2);
+  color: var(--text-primary);
+}
+.wm-toggle-title {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+}
+.wm-chev {
+  color: var(--text-muted);
+}
+.wm-body {
+  margin-top: 0.375rem;
+  padding: 0.4375rem 0.625rem;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+.wm-status {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.wm-status--err {
+  color: var(--danger, #c66);
+}
+.wm-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.125rem 0;
+}
+.wm-k {
+  flex: 0 0 3.5em;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.wm-v {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+.wm-sub {
+  margin-left: 4em;
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
   word-break: break-all;
-  max-height: 16rem;
-  overflow-y: auto;
 }
 
 /* AI 辅助组件健康状况（P3-1/C5）：最近失败记录行 */

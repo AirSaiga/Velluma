@@ -39,6 +39,12 @@ INFERENCE_SEVERITY_THRESHOLD = 0.5
 # 把自动唤醒的最坏等待钉死。正常端点（推测 4s+挂件 3s）远够用。
 SYNC_COMPONENT_TIMEOUT_S = 12.0
 
+# Phase D 加固（2026-09-12 写后检查收敛）：finish 链整章 LLM 阶段的超时上限
+# （event_scout；post_process 侧审阅同值见 components/post_process.py）。
+# 12s 同步组件超时只管心跳档——完稿是低频操作、整章调用合法地慢（实测
+# 17-30s），90s=容纳慢而合法、拦住真悬挂。
+FINISH_SCOUT_TIMEOUT_S = 90.0
+
 
 @dataclass
 class Activation:
@@ -648,9 +654,15 @@ class AdaptiveOrchestrator:
             scout_runner = self._components.get("event_scout")
             if scout_runner:
                 try:
+                    import asyncio as _asyncio
+
                     async with self.db_factory() as db:
-                        scout_result = await scout_runner(
-                            self.chapter_id, db, {}, 2500, source="finish"
+                        # Phase D 加固（2026-09-12 写后检查收敛）：事件抽取与审阅同级的
+                        # 整章 LLM 调用（creative 槽实测均值 ~21.5s）——wait_for 给上限，
+                        # 超时按失败语义记组件错误，绝不让完稿响应无限期挂起
+                        scout_result = await _asyncio.wait_for(
+                            scout_runner(self.chapter_id, db, {}, 2500, source="finish"),
+                            timeout=FINISH_SCOUT_TIMEOUT_S,
                         )
                         candidates_created = int(scout_result.get("created", 0))
                         # P3-4（C6）：无候选产出且带跳过原因 → 透出（增量字段，零变化）
@@ -659,7 +671,7 @@ class AdaptiveOrchestrator:
                         await db.commit()
                     self._clear_component_error("event_scout")  # P3-1
                 except Exception as e:
-                    logger.warning(f"[orchestrator] event_scout(finish) 失败: {e}", exc_info=True)
+                    logger.warning(f"[orchestrator] event_scout(finish) 失败/超时（{FINISH_SCOUT_TIMEOUT_S}s）: {e}", exc_info=True)
                     self._note_component_error("event_scout", e)  # P3-1
             result = {"finished": True, "report": report or {}}
             if candidates_created:

@@ -126,9 +126,6 @@ from .misc import (
     InspirationRequest,
     InspirationIdea,
     InspirationResponse,
-    CritiqueRequest,
-    CritiqueItem,
-    CritiqueResponse,
     ProxyConfig,
     LLMProfileUpdate,
     EmbeddingConfigUpdate,
@@ -230,26 +227,6 @@ from .canon import (
     PendingResponse,
 )
 
-from .refinery import (
-    # V4.1 Refinery schemas
-    IssueType,
-    IssueSeverity,
-    IssueStatus,
-    ImpactRadius,
-    OperationType,
-    IssueLocation,
-    Issue,
-    DiagnosticResult,
-    Operation,
-    SurgeryResult,
-    HolisticVerdict,
-    RefineryStats,
-    RefineryResult,
-    IssueDecision,
-    ConfirmRefineryRequest,
-    StartRefineryRequest,
-    RefineryStage,
-)
 
 from .reader_mirror import (
     # V4.2 Reader Mirror schemas
@@ -363,9 +340,6 @@ __all__ = [
     "InspirationRequest",
     "InspirationIdea",
     "InspirationResponse",
-    "CritiqueRequest",
-    "CritiqueItem",
-    "CritiqueResponse",
     "ProxyConfig",
     "LLMProfileUpdate",
     "EmbeddingConfigUpdate",

@@ -62,7 +62,6 @@ from backend.routes.text_formatting import router as text_formatting_router
 from backend.routes.chapter_generation import router as chapter_generation_router
 from backend.routes.chapter_optimization import router as chapter_optimization_router
 from backend.routes.inspiration import router as inspiration_router
-from backend.routes.critique import router as critique_router
 from backend.routes.system import router as system_router
 from backend.routes.maps import router as maps_router
 from backend.routes.style import router as style_router  # CP2.2b 新增
@@ -80,7 +79,6 @@ __all__ = [
     "chapter_generation_router",
     "chapter_optimization_router",
     "inspiration_router",
-    "critique_router",
     "system_router",
     "maps_router",
     "style_router",  # CP2.2b

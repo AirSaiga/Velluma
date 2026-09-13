@@ -1,9 +1,12 @@
 /**
  * 统一生成会话（V3.1 F3 新建，规格 §11.2）。
  *
- * 职责：封装 V3.2 ADF（/generate-adf）生成链路，
- * 外加 V4.1 Refinery 精修（/refinery/diagnose + /refinery/confirm）的两阶段 SSE，
- * 把原始事件流解析为会话状态机供 UI 订阅。
+ * 职责：adaptive 写作路径的会话状态机（键位编排/幽灵/卡舱）+ 键位工具（清脂）。
+ *
+ * 【已拔除 2026-09-12】V4.1 Refinery 两阶段精修（startRefinery/confirmRefinery）
+ * 随写后检查收敛批整体退役——docs/post-writing-checks-audit.md；其手术原语
+ * 后端迁 services/text_surgery/（ADF 一致性守卫消费），读者反馈收编
+ * /adaptive/reader-feedback。
  *
  * 引擎：BS-ADF 步进模式（.start，消费 BSADF_STAGE/ADF_ANCHOR_DESIGNED/... 事件）。
  * V3.1 Unified 引擎后端已剥离（/generate 端点不存在），相关死代码（startUnified 等）已删除。
@@ -13,23 +16,16 @@
  * 【已归档 2026-08-29】BS-ADF 步进链路（startBeat/advanceBeat/重渲/轮询自愈）整体退役，
  * 详见 backend/_deprecated 与 frontend 归档清单（_deprecated/README）。
  *
- * V4.1 Refinery 两阶段（独立于 start，生成完成后调用）：
- * - startRefinery：诊断阶段，产出问题清单后停在 refining 等作者确认
- * - confirmRefinery：作者决策后执行手术 + 回读 + 抛光
- *
- * 会话状态机（stage）：
+ * 会话状态机（stage，最小拔除后仅存 idle 写入点——旧 done/refining/auditing
+ * 写入全随 Refinery 退役，字段保留供快照兼容与旧分支清理批次处理）：
  *   idle → tier_classifying → ... → done / error
  *
  * 关键产物（UI 订阅）：
  * - tierDecision：定档结果（高潮章/转折章/推进章/过渡章 + 理由）
  * - stepProgress：当前步骤（阶段名 + 进度）
- * - streamText：流式正文
- * - adfAnchor/preconditions/emotionCurve/audit：V3.2 ADF 专用产物
- * - refineryIssues/surgeries/holisticVerdict：V4.1 精修产物
- * - degraded：降级事件
  */
 import { ref, computed, watch, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import { refineryApi, chapterApi, type AdfEngine, type RefineryIssue, type RefinerySurgery, type RefineryHolisticVerdict, type IssueDecision, type BeatSlot } from '../../../services/api/domain'
+import { chapterApi, type AdfEngine, type BeatSlot } from '../../../services/api/domain'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { noHistory } from '../../chapter-editor/noHistory'
 import {
@@ -59,19 +55,13 @@ import { defatParagraphAtCursor } from '../../../shared/utils/defat'
 const _STORAGE_PREFIX = 'velluma:gensess:'
 const _SNAPSHOT_VERSION = 1
 
-/** 可序列化的会话快照（ref 值的子集——排除瞬时态，如 inflightEvents / refineryRunId） */
+/** 可序列化的会话快照（ref 值的子集——排除瞬时态） */
 interface SessionSnapshot {
   v: number
   chapterId: string
   stage: SessionStage
   engine: AdfEngine
   stepProgress: StepProgress | null
-  streamText: string
-  finalStats: Record<string, any> | null
-  refineryIssues: RefineryIssue[]
-  refinerySurgeries: RefinerySurgery[]
-  refineryHolisticVerdict: RefineryHolisticVerdict | null
-  refineryStats: Record<string, any> | null
   // 保存时间戳（供调试/未来做过期清理）
   savedAt: number
 }
@@ -143,9 +133,6 @@ export interface StepProgress {
   zone?: string
 }
 
-
-
-
 export interface GenerationSession {
   // 状态
   stage: Ref<SessionStage>
@@ -154,28 +141,13 @@ export interface GenerationSession {
   stepProgress: Ref<StepProgress | null>
   engine: Ref<AdfEngine>
   // 产物
-  streamText: Ref<string>
-  finalStats: Ref<Record<string, any> | null>
-  /** 最近一次完成来自 ADF 还是 Refinery 还是 BS-ADF（弹窗标题用） */
-  lastDoneMode: Ref<'adf' | 'refinery' | 'bsadf' | null>
   // V3.2 ADF 专用产物
-  // V4.1 Refinery 精修产物（2026-08-29 后唯一持久化产物）
-  refineryIssues: Ref<RefineryIssue[]>
-  refineryRunId: Ref<string | null>
-  refinerySurgeries: Ref<RefinerySurgery[]>
-  refineryHolisticVerdict: Ref<RefineryHolisticVerdict | null>
-  refineryStats: Ref<Record<string, any> | null>
   // 派生
   isTerminal: ComputedRef<boolean>
   /** 渲染阶段「当前任务」焦点（驱动右栏焦点条；纯派生，不持久化） */
   // 控制
   cancel: () => void
   reset: () => void
-  /** 失败重试：再次触发最近一次入口（精修诊断 startRefinery） */
-  retry: () => void
-  // V4.1 Refinery 控制
-  startRefinery: (chapterId: string, opts?: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null }) => void
-  confirmRefinery: (chapterId: string, decisions: IssueDecision[], customIssues?: RefineryIssue[]) => void
   loadForChapter: (chapterId: string) => void
   persist: () => void
   // ===== NLE-ADF 3.0 双轴状态机（自适应融合写作台） =====
@@ -244,25 +216,9 @@ export function useGenerationSession(): GenerationSession {
   // 沉淀抽取结果（涌现实体 + 冲突，settleCurrent 写入，InspectorPanel 渲染）
   const settleResult = ref<import('../../../services/api/domain/adaptive.api').SettleResult | null>(null)
 
-
-  const streamText = ref('')
-  const finalStats = ref<Record<string, any> | null>(null)
   /** 最近一次完成来自哪条流程（供完成弹窗区分标题） */
-  const lastDoneMode = ref<'adf' | 'refinery' | 'bsadf' | null>(null)
   /** 本次生成开始时间戳（ms），onDone 时计算耗时；不持久化（刷新后无法准确恢复） */
   let startedAt: number | null = null
-
-
-  // V4.1 Refinery 精修产物
-  const refineryIssues = ref<RefineryIssue[]>([])
-  const refineryRunId = ref<string | null>(null)
-  const refinerySurgeries = ref<RefinerySurgery[]>([])
-  const refineryHolisticVerdict = ref<RefineryHolisticVerdict | null>(null)
-  const refineryStats = ref<Record<string, any> | null>(null)
-
-
-
-
 
   // ============================================================
   // NLE-ADF 2.0 作者模式：拍创作（碎片 + 微缝合 + 代笔 + 锁拍）
@@ -288,7 +244,6 @@ export function useGenerationSession(): GenerationSession {
   // 创作区基线取文档开头（0）——开局自由书写的文字全部归入拍 0，
   // 防 COMPLETE 覆盖落库时丢失开局文字。
   let _freshCanvas = false
-
 
   // Spark Dock 接线：可展示门。
   // NLE-ADF 3.0：gate 从 stage 解耦——自适应 composing 态（authorLane）也激活，
@@ -357,13 +312,7 @@ export function useGenerationSession(): GenerationSession {
     fragmentSnapshots.value.push({ beatId, count, text })
   }
 
-
-
   
-
-
-
-
 
   /** 作者模式瞬时段态复位（终态/取消/切章/重置共用）。 */
   function _resetAuthoringTransient() {
@@ -383,7 +332,6 @@ export function useGenerationSession(): GenerationSession {
 
   const isTerminal = computed(() => stage.value === 'done' || stage.value === 'error')
 
-
   // ---- 持久化：把当前产物序列化到 localStorage ----
 
   /** 收集当前 ref 值为快照（不含版本/章节/时间戳，由 _saveSnapshot 补） */
@@ -392,12 +340,6 @@ export function useGenerationSession(): GenerationSession {
       stage: stage.value,
       engine: engine.value,
       stepProgress: stepProgress.value,
-      streamText: streamText.value,
-      finalStats: finalStats.value,
-      refineryIssues: refineryIssues.value,
-      refinerySurgeries: refinerySurgeries.value,
-      refineryHolisticVerdict: refineryHolisticVerdict.value,
-      refineryStats: refineryStats.value,
     }
   }
 
@@ -441,31 +383,16 @@ export function useGenerationSession(): GenerationSession {
     // 恢复产物
     engine.value = snap.engine
     stepProgress.value = snap.stepProgress
-    streamText.value = snap.streamText
-    finalStats.value = snap.finalStats
-    refineryIssues.value = snap.refineryIssues
-    refinerySurgeries.value = snap.refinerySurgeries
-    refineryHolisticVerdict.value = snap.refineryHolisticVerdict
-    refineryStats.value = snap.refineryStats
     // 旧引擎快照字段（BS-ADF/ADF 产物）已随 2026-08-29 归档移除——旧快照里的
     // 对应数据静默丢弃；瞬时段态统一复位（run 已失效，不复位会残留到目标章）。
     _resetAuthoringTransient()
-    // 中断态归正：刷新后无法续 LLM，强制为已完成的静态展示
-    if (snap.stage === 'done') {
-      stage.value = snap.stage
-    } else {
-      // 上次处于生成中途（tier_classifying/zone_writing/beat_pending 等），刷新后已无法续上
-      // → 若已有正文则记为 done，否则记为 idle（避免显示假的"生成中"进度）
-      // 同时清掉 stepProgress（中断态的进度是旧的，恢复会误导用户以为还在生成）
-      // error 必须同归正、不可原样恢复：错误原文不持久化（下方 error.value 恒恢复为 null），
-      // 恢复 error 只会让顶栏长期挂一句无因由的「生成失败」——消费 error 态的
-      // Overlay/Stepper 错误卡已随步进 UI 删除，live 代码没有 stage='error' 的展示消费者。
-      stepProgress.value = null
-      stage.value = snap.streamText ? 'done' : 'idle'
-    }
+    // 中断态归正：刷新后无法续 LLM；Refinery 退役后 stage 的 done/refining 写入点
+    // 已全部消失，恢复一律归 idle（旧快照里可能存着 done——其产物字段已随本批
+    // 退役，恢复成 done 只会显示假状态）。stepProgress 同理清空（旧进度是失效的）。
+    stepProgress.value = null
+    stage.value = 'idle'
     generating.value = false
     error.value = null
-    refineryRunId.value = null  // runId 是临时会话凭证，刷新后失效
   }
 
   /** 内部 reset（不触碰 currentChapterId，不 persist） */
@@ -475,23 +402,10 @@ export function useGenerationSession(): GenerationSession {
     error.value = null
     stepProgress.value = null
     engine.value = 'v3.2'
-    streamText.value = ''
-    finalStats.value = null
-    refineryIssues.value = []
-    refineryRunId.value = null
-    refinerySurgeries.value = []
-    refineryHolisticVerdict.value = null
-    refineryStats.value = null
-    lastDoneMode.value = null
     // 风险3修复：清理步进轮询定时器 + 清空 steppingRunId（防止拆卸后永久轮询）
     authoringEnabled.value = false
     _resetAuthoringTransient()
   }
-
-  /** 最近一次入口（供失败重试 retry 再次触发）；start / startRefinery 时记录 */
-  let lastAction: (() => void) | null = null
-
-
 
   
 
@@ -588,13 +502,6 @@ export function useGenerationSession(): GenerationSession {
     _adaptiveSummonFn = fn
   }
 
-  /** 失败重试：再次触发最近一次入口（startRefinery 已记录 lastAction） */
-  function retry() {
-    if (generating.value) return
-    error.value = null
-    lastAction?.()
-  }
-
   function reset() {
     if (abortController) {
       abortController.abort()
@@ -606,146 +513,6 @@ export function useGenerationSession(): GenerationSession {
     }
     _resetInternal()
   }
-
-  // ============================================================
-  // V4.1 Refinery 控制：startRefinery + confirmRefinery
-  // ============================================================
-
-  /** 启动精修第一阶段：诊断（产出问题清单后停在对话式介入点 2） */
-  function startRefinery(
-    chapterId: string,
-    opts: { mode?: 'deep' | 'light'; enablePolish?: boolean; rawText?: string | null } = {},
-  ) {
-    // 防重入：若 generating 卡住（上次生成/精修未正确复位），点击会被吞。
-    // 这里给出可见反馈而非静默 return，方便用户排查。
-    if (generating.value) {
-      console.warn('[startRefinery] 已有生成/精修任务进行中（generating=true），已忽略本次点击。若这是误判，请刷新页面后重试。')
-      return
-    }
-    // 不 reset，保留已生成的正文（精修是在生成后做的）
-    // 记录入口供失败后 retry（重试即重新诊断）
-    lastAction = () => startRefinery(chapterId, opts)
-    generating.value = true
-    error.value = null
-    stage.value = 'auditing' // 复用 auditing 阶段标识
-    abortController = new AbortController()
-
-    refineryApi.diagnose(
-      chapterId,
-      {
-        mode: opts.mode || 'deep',
-        enable_polish: opts.enablePolish !== false,
-        raw_text: opts.rawText || null,
-      },
-      {
-        onStage: (stageName) => {
-          if (stageName === 'DIAGNOSTIC') {
-            stepProgress.value = { label: '检查全文' }
-          } else if (stageName === 'DIALOGUE') {
-            stepProgress.value = { label: '等待你确认修改清单' }
-          }
-        },
-        onIssues: (payload) => {
-          refineryIssues.value = payload.issues
-          refineryRunId.value = payload.run_id
-          generating.value = false
-          stage.value = 'refining' // 进入"等确认"状态
-          stepProgress.value = { label: `${payload.issues.length} 个问题待确认` }
-        },
-        onError: (err) => {
-          error.value = err
-          generating.value = false
-          stage.value = 'error'
-          abortController = null
-        },
-      },
-      abortController.signal,
-    )
-  }
-
-  /** 精修第二阶段：作者确认后执行手术+回读+抛光 */
-  function confirmRefinery(
-    chapterId: string,
-    decisions: IssueDecision[],
-    customIssues: RefineryIssue[] = [],
-  ) {
-    const runId = refineryRunId.value
-    if (!runId) {
-      error.value = '缺少 refinery run_id'
-      return
-    }
-    // 立即释放 runId 并清空问题清单：问题清单面板（要求 runId 非空）随之关闭，
-    // 手术进度面板（RefineryProgress，要求 runId===null）接管展示。
-    // 警示：此前整个手术阶段保留 runId，两面板条件互斥导致进度 UI 永不出现。
-    refineryRunId.value = null
-    refineryIssues.value = []
-    generating.value = true
-    stage.value = 'refining'
-    abortController = new AbortController()
-    startedAt = Date.now()  // 精修手术阶段重新计时（诊断等待不算）
-    streamText.value = '' // 清空，准备接收抛光后的新正文
-    refinerySurgeries.value = []
-    refineryHolisticVerdict.value = null
-
-    refineryApi.confirm(
-      chapterId,
-      {
-        run_id: runId,
-        decisions,
-        custom_issues: customIssues,
-        mode: 'deep',
-      },
-      {
-        onStage: (stageName) => {
-          if (stageName === 'SURGERY') stepProgress.value = { label: '逐处修改' }
-          else if (stageName === 'REREAD') stepProgress.value = { label: '通读全文' }
-          else if (stageName === 'POLISH') stepProgress.value = { label: '定稿润色' }
-        },
-        onOperation: (data) => {
-          stepProgress.value = {
-            label: `修改 ${data.operation_index}/${data.total_operations}`,
-            index: data.operation_index,
-            total: data.total_operations,
-          }
-        },
-        onSurgery: (surgery) => {
-          refinerySurgeries.value.push(surgery)
-        },
-        onReread: (verdict) => {
-          refineryHolisticVerdict.value = verdict
-        },
-        onPolish: () => {
-          stepProgress.value = { label: '抛光完成' }
-        },
-        onChunk: (chunk) => {
-          streamText.value += chunk
-        },
-        onDone: (result) => {
-          generating.value = false
-          stage.value = 'done'
-          refineryStats.value = result.stats
-          finalStats.value = startedAt != null
-            ? { ...(result.stats || {}), duration_ms: Date.now() - startedAt }
-            : result.stats
-          lastDoneMode.value = 'refinery'
-          // runId 已在 confirm 开始时释放（进度面板接管），此处幂等确保为空，
-          // 让"启动精修"按钮（要求 stage='done' 且 runId 为空）可以再次显示
-          refineryRunId.value = null
-          abortController = null
-          persist()  // 精修完成：持久化精修产物
-        },
-        onError: (err) => {
-          error.value = err
-          generating.value = false
-          stage.value = 'error'
-          abortController = null
-          persist()
-        },
-      },
-      abortController.signal,
-    )
-  }
-
 
   // ===== NLE-ADF 2.0 作者模式键位（捕获阶段） =====
   // 深度清脂防重入标记（LLM 洗涤期间重复按 Alt+Shift+↓ 不叠加调用）
@@ -1049,16 +816,6 @@ export function useGenerationSession(): GenerationSession {
     error,
     stepProgress,
     engine,
-    streamText,
-    finalStats,
-    lastDoneMode,
-    // V3.2 ADF
-    // V4.1 Refinery
-    refineryIssues,
-    refineryRunId,
-    refinerySurgeries,
-    refineryHolisticVerdict,
-    refineryStats,
     // BS-ADF
     // NLE-ADF 步进
     // rerender-beat 成功后的待落库正文信号（WorkspaceView watch → 落库）
@@ -1066,9 +823,6 @@ export function useGenerationSession(): GenerationSession {
     isTerminal,
     cancel,
     reset,
-    retry,
-    startRefinery,
-    confirmRefinery,
     // 持久化：进入章节时调 loadForChapter 恢复上次产物
     loadForChapter,
     persist,

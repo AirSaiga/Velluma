@@ -44,7 +44,6 @@ import { useGenerationSession } from '../../generation/composables/useGeneration
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
-import { useNotifyPrefs } from '../../../composables/useNotifyPrefs'
 import { loadUiPrefs, saveUiPrefs } from '../../../composables/useUiPrefs'
 import { useEscStack } from '../../../composables/useEscStack'
 import WorldContextCard from '../presentation/WorldContextCard.vue'
@@ -58,7 +57,6 @@ const router = useRouter()
 const store = useAppStore()
 const { showToast } = useToast()
 const { show: showConfirm } = useConfirmDialog()
-const { prefs: notifyPrefs } = useNotifyPrefs()
 
 // 解构 ref 供模板使用
 const currentBook = store.currentBook
@@ -352,17 +350,10 @@ watch(() => session.error.value, (err) => {
   }
 })
 
-// 生成完成时自动把正文写入章节
-// 警示：必须用 oldStage 区分"真正的生成完成"vs"恢复/切章"——
-// loadForChapter 恢复快照时会把 stage 设为 'done'（中断态有正文也强制 done），
-// 若不过滤 oldStage，每次切回已完成章节/刷新首屏都会重触发 handleGenerated，
-// 导致重复写库 + 误弹完成弹窗 + 误发系统通知。
-// 真正完成：oldStage 是生成中的状态（非 idle/done）；恢复：oldStage 是 idle/done。
-watch(() => session.stage.value, (newStage, oldStage) => {
-  if (newStage === 'done' && oldStage !== 'idle' && oldStage !== 'done' && session.streamText.value) {
-    handleGenerated(session.streamText.value)
-  }
-})
+// 【已拔除 2026-09-12】stage='done' → 整章覆写监听随 Refinery 退役（本注释即档案）：
+// 它是「未过目抛光稿直灌画布（noHistory 不可撤销）+ 跨章覆写」风险链的前端入口
+// （docs/post-writing-checks-audit.md §3.5）；stage 的 done 写入点已随 confirmRefinery
+// 一并消失，本监听成为不可达死代码。
 
 // 旧 rerender-beat 落库 watch 已随 BS-ADF 步进链路归档移除（2026-08-29）
 
@@ -908,26 +899,6 @@ function handleRefreshCharacters() {
   store.refreshCharacters().catch((e: any) => {
     showToast('刷新角色失败：' + (e?.message || '未知错误'), 'error')
   })
-}
-
-// 生成完成：把正文灌入编辑器（通过 chapterEditorRef）+ 弹完成弹窗
-async function handleGenerated(text: string) {
-  if (selectedChapter.value && text) {
-    try {
-      await store.updateChapter(selectedChapter.value.id, { content_text: text, draft_text: text })
-      showToast('已写入本章', 'success')
-      // 系统通知（受开关控制；主进程会再次判断窗口焦点兜底分层）
-      if (notifyPrefs.value.system && window.electronAPI) {
-        const isRefinery = session.lastDoneMode.value === 'refinery'
-        window.electronAPI.showCompletionNotification({
-          title: isRefinery ? '润色完成' : '章节生成完成',
-          body: `《${selectedChapter.value.title || selectedChapter.value.chapter_name || '未命名'}》已就绪`,
-        })
-      }
-    } catch (e: any) {
-      showToast('写入失败：' + e.message, 'error')
-    }
-  }
 }
 
 // 字数口径：content_text 是富文本 HTML，剥标签后计字符（此前直接 .length 把标签计入，虚高）

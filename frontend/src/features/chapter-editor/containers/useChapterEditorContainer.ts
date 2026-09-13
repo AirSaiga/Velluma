@@ -2,7 +2,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { chapterApi, generateApi } from '../../../services/api'
-import { reviewApi, type CritiqueItem } from '../../../services/api/domain/review.api'
 import type { ApiConfig, Chapter, Character } from '../../../types'
 import { useChapterPublisher } from './useChapterPublisher'
 import { useChapterAssets } from './useChapterAssets'
@@ -163,41 +162,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
 
   function closeInspirationModal() {
     showInspirationModal.value = false
-  }
-
-  // 章节审阅（POST /api/critique_chapter，毒舌编辑视角，纯文本无需 LLM Key 配置——走后端统一配置）
-  const showCritiqueModal = ref(false)
-  const critiqueLoading = ref(false)
-  const critiqueComments = ref<CritiqueItem[]>([])
-  const critiquePraise = ref('')
-
-  async function openCritiqueModal() {
-    const chapter = selectedChapter.value
-    if (!chapter) return
-    const content = (chapter.content_text || chapter.draft_text || '').trim()
-    if (content.length < 10) {
-      showToast('本章内容太少——先多写一点，再请编辑看', 'warning')
-      return
-    }
-    showCritiqueModal.value = true
-    critiqueLoading.value = true
-    critiqueComments.value = []
-    critiquePraise.value = ''
-    try {
-      const result = await reviewApi.critiqueChapter(content, chapter.title || undefined)
-      critiqueComments.value = result.comments || []
-      critiquePraise.value = result.overall_praise || ''
-    } catch (e: any) {
-      console.error('章节审阅失败:', e)
-      showCritiqueModal.value = false
-      showToast('审阅失败：' + (e?.message || '未知错误'), 'error')
-    } finally {
-      critiqueLoading.value = false
-    }
-  }
-
-  function closeCritiqueModal() {
-    showCritiqueModal.value = false
   }
 
   function handleApplyInspirationToOutline(content: string) {
@@ -371,12 +335,6 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     isPublishing: publisher.isPublishing,
     localMetaCollapsed,
     openInspirationModal,
-    showCritiqueModal,
-    critiqueLoading,
-    critiqueComments,
-    critiquePraise,
-    openCritiqueModal,
-    closeCritiqueModal,
     anchorPov: ref<string | null>(null),
     publishChapter: () => publisher.publishChapter(props.selectedChapter, props.apiConfig),
     selectedChapter,

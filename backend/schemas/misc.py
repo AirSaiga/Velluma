@@ -141,24 +141,6 @@ class InspirationResponse(BaseModel):
     inspirations: List[InspirationIdea] = Field(..., min_length=1)
 
 
-class CritiqueRequest(BaseModel):
-    chapter_content: str = Field(..., min_length=10, description="待审阅的章节内容")
-    chapter_title: Optional[str] = Field(None, description="章节标题")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-
-
-class CritiqueItem(BaseModel):
-    exact_quote: str
-    type: str
-    reader_feeling: str
-    suggestion: str
-
-
-class CritiqueResponse(BaseModel):
-    comments: List[CritiqueItem]
-    overall_praise: str
-
-
 class ProxyConfig(BaseModel):
     enabled: bool
     url: str

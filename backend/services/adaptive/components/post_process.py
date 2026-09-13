@@ -27,6 +27,11 @@ from backend.services.context.settings_bundle import load_chapter_settings_bundl
 
 logger = logging.getLogger(__name__)
 
+# Phase D 加固（2026-09-12）：完稿审阅超时上限。实测本机推理槽整章调用
+# 17-30s（refinery.reader_feedback 均值 17.6s / intent_inference 29.5s），
+# 90s 是「容纳慢而合法的思考型审阅、拦住真悬挂」的保守上限。
+FINISH_CRITIQUE_TIMEOUT_S = 90.0
+
 
 async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 8000, **kw) -> Dict:
     """后处理。由 orchestrator.on_finish 调度。"""
@@ -67,11 +72,18 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 80
 
     # ---- 4. 整章审阅（1 LLM，可选——budget 足够时）----
     if budget_tokens >= 4000:
+        import asyncio
+
         try:
-            critique = await _llm_critique(full_text, bundle)
+            # Phase D 加固（2026-09-12 写后检查收敛）：审阅是推理槽整章调用，
+            # 实测同类调用可达 20-30s——wait_for 给上限防慢端点把「通读中…」
+            # 拖成无期徒刑（超时按既有失败语义静默缺席 critique 键，不误报 verdict）
+            critique = await asyncio.wait_for(
+                _llm_critique(full_text, bundle), timeout=FINISH_CRITIQUE_TIMEOUT_S
+            )
             report["critique"] = critique
         except Exception as e:
-            logger.warning(f"[post_process] LLM 审阅失败: {e}")
+            logger.warning(f"[post_process] LLM 审阅失败/超时（{FINISH_CRITIQUE_TIMEOUT_S}s）: {e}")
 
     return report
 
@@ -111,12 +123,17 @@ def _critique_text_window(text: str) -> str:
 
 
 async def _llm_critique(text: str, bundle) -> Dict:
-    """LLM 整章审阅（复用 critique 路由的纯文本审阅能力）。"""
+    """LLM 整章审阅（Phase D 加固：注入 Canon 真相文本——语义级泄密/矛盾检查
+    此前只能赌模型裸审，prompt 里恰恰没有真相；截 1500 字防膨胀）。"""
     from backend.services.llm.client import call_llm_with_usage
     soft = bundle.soft_constraints()
+    canon_context = str(getattr(bundle, "canon_context", "") or "")[:1500]
     sys_p = "你是资深小说编辑。审阅以下章节正文，找出设定一致性问题、情节漏洞、伏笔遗漏。只输出 JSON。"
     usr_p = f"""# 章节正文
 {_critique_text_window(text)}
+
+# 作者真相（Canon——含 [private] 秘密；[private] 绝不许在正文被直接写出，public 事实必须一致）
+{canon_context or '（无 Canon 记录）'}
 
 # 本章必达事件（校对覆盖）
 {soft.get('must_hit_events', '（无）')}

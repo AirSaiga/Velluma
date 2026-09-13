@@ -1,19 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""
-工序 4.5.4：局部手术（Surgeon，V4.1 新建，核心创新）。
+"""局部手术（Surgeon，自 services/refinery/surgeon.py 抽迁，2026-09-12）。
 
 职责：对每个 Operation，1 次 creative LLM，做最小侵入式修改。
 
-设计依据：docs/generation-v4.1-refinery.md §3.4
-
-核心创新（与"纯局部重写"的区别）：
+核心设计（与"纯局部重写"的区别）：
 - prompt 注入"全文上下文摘要"（让 LLM 改局部时有整体感）
 - 不只看 target_text，还看章节主旨/情绪曲线/角色状态/Canon/伏笔
 - 这样 LLM 不会"局部改对了但破坏了整体"
 
-业务场景：
-- services/refinery/refinery.py 的 refine 阶段调用
+在役消费方：ADF 一致性守卫（stage_prefix="adf.consistency_surgery"）。
 """
 
 import logging
@@ -21,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.services.llm import call_llm_with_usage
 from backend.services.observability.run_recorder import RunRecorder
-from backend.services.prompts.refinery_prompts import (
+from backend.services.text_surgery.prompts import (
     build_surgery_prompt,
     format_diagnosis_for_surgery,
 )
@@ -45,9 +41,9 @@ async def execute_surgery(
     active_hooks: str = "",
     forbidden_terms: str = "",
     recorder: Optional[RunRecorder] = None,
-    stage_prefix: str = "refinery.surgery",
+    stage_prefix: str = "adf.consistency_surgery",
 ) -> Dict[str, Any]:
-    """工序 4.5.4：执行单个手术（1 次 creative LLM）。
+    """执行单个手术（1 次 creative LLM）。
 
     Args:
         operation: Operation dict（含 issue_ids/target_paragraphs/issues 等）
@@ -55,8 +51,8 @@ async def execute_surgery(
         purpose/emotion_curve/character_states/canon_constraints/active_hooks: 上下文
         forbidden_terms: 禁止出现的词（如 private 字段名）
         recorder: RunRecorder
-        stage_prefix: recorder 计量 stage 前缀（默认 refinery.surgery；
-            ADF 一致性守卫复用时传 adf.consistency_surgery）
+        stage_prefix: recorder 计量 stage 前缀（唯一在役消费方 ADF 一致性守卫
+            传 adf.consistency_surgery）
 
     Returns:
         SurgeryResult dict：含 operation_id/original_text/revised_text/diff_summary/applied
@@ -71,7 +67,7 @@ async def execute_surgery(
         if paragraphs:
             target_indices = [len(paragraphs) - 1]
         else:
-            logger.warning(f"[Refinery] 手术 {op_id} 无目标段且章节为空")
+            logger.warning(f"[TextSurgery] 手术 {op_id} 无目标段且章节为空")
             return {
                 "operation_id": op_id,
                 "original_text": "",
@@ -83,7 +79,7 @@ async def execute_surgery(
     # 限制目标段数
     if len(target_indices) > MAX_TARGET_PARAGRAPHS:
         logger.warning(
-            f"[Refinery] 手术 {op_id} 目标段 {len(target_indices)} 过多，截断到 {MAX_TARGET_PARAGRAPHS}"
+            f"[TextSurgery] 手术 {op_id} 目标段 {len(target_indices)} 过多，截断到 {MAX_TARGET_PARAGRAPHS}"
         )
         target_indices = target_indices[:MAX_TARGET_PARAGRAPHS]
 
@@ -91,7 +87,7 @@ async def execute_surgery(
     try:
         original_chunks = [paragraphs[i] for i in target_indices if 0 <= i < len(paragraphs)]
     except IndexError:
-        logger.warning(f"[Refinery] 手术 {op_id} 目标段越界")
+        logger.warning(f"[TextSurgery] 手术 {op_id} 目标段越界")
         return {
             "operation_id": op_id,
             "original_text": "",
@@ -103,7 +99,7 @@ async def execute_surgery(
     original_text = "\n\n".join(original_chunks)
     if len(original_text) > MAX_PARAGRAPH_CHARS * 2:
         original_text = original_text[:MAX_PARAGRAPH_CHARS * 2]
-        logger.warning(f"[Refinery] 手术 {op_id} 原文过长，截断到 {MAX_PARAGRAPH_CHARS * 2} 字")
+        logger.warning(f"[TextSurgery] 手术 {op_id} 原文过长，截断到 {MAX_PARAGRAPH_CHARS * 2} 字")
 
     # 诊断摘要
     diagnosis_summary = format_diagnosis_for_surgery(issues)
@@ -157,7 +153,7 @@ async def execute_surgery(
                 max_tokens=4096,
             )
     except Exception as e:
-        logger.warning(f"[Refinery] 手术 {op_id} LLM 调用失败: {e}")
+        logger.warning(f"[TextSurgery] 手术 {op_id} LLM 调用失败: {e}")
         return {
             "operation_id": op_id,
             "original_text": original_text,
@@ -168,7 +164,7 @@ async def execute_surgery(
 
     revised_text = (result.content or "").strip()
     if not revised_text:
-        logger.warning(f"[Refinery] 手术 {op_id} 返回空，保持原文")
+        logger.warning(f"[TextSurgery] 手术 {op_id} 返回空，保持原文")
         return {
             "operation_id": op_id,
             "original_text": original_text,
@@ -180,7 +176,7 @@ async def execute_surgery(
     # diff 摘要（简单字数对比）
     diff_summary = f"原文 {len(original_text)} 字 → 修改后 {len(revised_text)} 字"
 
-    logger.info(f"[Refinery] 手术 {op_id} 完成：{diff_summary}")
+    logger.info(f"[TextSurgery] 手术 {op_id} 完成：{diff_summary}")
     return {
         "operation_id": op_id,
         "original_text": original_text,

@@ -1,24 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""
-工序 4.5.3：手术规划（Planner，V4.1 新建）。
+"""手术规划（Planner，自 services/refinery/planner.py 抽迁，2026-09-12）。
 
-职责：纯算法，把确认的问题清单转化为手术计划。
-
-设计依据：docs/generation-v4.1-refinery.md §3.3
-
-业务场景：
-- services/refinery/refinery.py 的 refine 阶段调用
+职责：纯算法，把确认的问题清单转化为手术计划（0 LLM）。
 
 核心算法：
 1. 过滤：只保留 status=confirmed 或 status=auto 的 issue
 2. 排序：按 severity 排序（high > medium > low）
 3. 合并：影响范围重叠的 issue 合并为一个 Operation
-4. 生成 context_summary：为每个 Operation 构建全文摘要
+4. context_summary/canon_constraints：调用方透传（本函数不生成）
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +88,7 @@ def plan_operations(
     context_summary_template: str = "",
     canon_constraints: str = "",
 ) -> List[Dict[str, Any]]:
-    """工序 4.5.3：手术规划（纯算法）。
+    """手术规划（纯算法）。
 
     Args:
         confirmed_issues: 作者确认（或自动确认）的 issue 列表
@@ -150,6 +144,6 @@ def plan_operations(
         })
 
     logger.info(
-        f"[Refinery] 手术规划完成：{len(confirmed_issues)} 个 issue → {len(operations)} 个 operation"
+        f"[TextSurgery] 手术规划完成：{len(confirmed_issues)} 个 issue → {len(operations)} 个 operation"
     )
     return operations

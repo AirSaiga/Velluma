@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""
-对话式介入点 3：成品后读者反馈（V4.3 新建）。
+"""读者反馈组件（2026-09-12 写后检查收敛 · Phase A 自 services/refinery/reader_feedback.py 抽迁）。
 
 职责：1 次 reasoning LLM 扮演读者，对成品写叙述性反馈。
 
-设计依据：第 6 轮——把"读者视角"外化为独立 LLM 调用
-
-与 Refinery 诊断的区别：
-- 诊断（Issue）：找"问题"（结构化、可手术）
-- 读者反馈：写"感受"（叙述性、启发作者）
+与完稿体检审阅（critique）的区别：
+- critique：找"问题"（结构化 JSON，编辑视角）
+- 读者反馈：写"感受"（叙述性独白，启发作者——钩子是否有效、哪里出戏）
 
 反馈内容（叙述性，不是清单）：
 - 读到哪一段最被吸引 / 最出戏
@@ -18,9 +15,8 @@
 - 哪里读着累 / 哪里想跳过
 - 整体节奏感受
 
-业务场景：
-- 章节生成 + 精修完成后触发
-- routes/chapter_generation/refinery.py 的 /feedback 端点
+消费方：POST /chapters/{id}/adaptive/reader-feedback（完稿体检报告内的
+按需独立触发卡片——不串行塞入 finish 主链，Phase 0 拍板）。
 """
 
 import logging
@@ -96,7 +92,7 @@ async def generate_reader_feedback(
     try:
         if recorder is not None:
             async with recorder.record_call(
-                stage="refinery.reader_feedback",
+                stage="adaptive.reader_feedback",
                 model_slot="reasoning",
             ) as call_ctx:
                 result = await call_llm_with_usage(

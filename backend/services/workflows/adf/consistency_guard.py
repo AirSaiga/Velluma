@@ -51,8 +51,8 @@ Phase 7: 一致性守卫（Consistency Guard）—— 设定一致性四层防�
     final_text = guard.new_text
 
 依赖项：
-- services.refinery.planner.plan_operations（手术规划，纯算法）
-- services.refinery.surgeon.execute_surgery / apply_surgeries_to_text（定点手术）
+- services.text_surgery.planner.plan_operations（手术规划，纯算法）
+- services.text_surgery.surgeon.execute_surgery / apply_surgeries_to_text（定点手术）
 - services.prompts.adf_prompts（审计 prompt 构建/解析）
 - workflows.adf.name_registry（专名注册表 + 代码预扫）
 """
@@ -70,8 +70,8 @@ from backend.services.prompts.adf_prompts import (
     parse_consistency_audit_response,
     parse_edit_verify_response,
 )
-from backend.services.refinery.planner import plan_operations
-from backend.services.refinery.surgeon import (
+from backend.services.text_surgery.planner import plan_operations
+from backend.services.text_surgery.surgeon import (
     apply_surgeries_to_text,
     execute_surgery,
 )

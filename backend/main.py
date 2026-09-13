@@ -165,7 +165,6 @@ from backend.routes import (
     chapter_generation_router,
     chapter_optimization_router,
     inspiration_router,
-    critique_router,
     system_router,
     maps_router,
     style_router,  # CP2.2b 文风体系
@@ -269,11 +268,11 @@ app.include_router(memories_router)
 app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
 # 章节生成路由（引擎剥离后现状）：V3.2 ADF（/generate-adf，默认引擎，SSE）
-# + V4.1 Refinery（/refinery/diagnose + /confirm，SSE）+ clarify-outline / cost-report / quality-report
+# + clarify-outline / cost-report / quality-report
+# （V4.1 Refinery 已于 2026-09-12 写后检查收敛批整体拔除——docs/post-writing-checks-audit.md）
 
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)
-app.include_router(critique_router)
 app.include_router(maps_router)
 
 # CP2.2b 文风体系路由
