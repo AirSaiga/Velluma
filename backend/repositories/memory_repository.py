@@ -150,6 +150,7 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
         lambda_decay: float = 0.1,
         exclude_chapter_id: Optional[UUID] = None,
         max_chapter_number: Optional[int] = None,
+        return_scores: bool = False,
     ):
         from backend.services.generation.memory_scorer import compute_memory_score
 
@@ -211,4 +212,9 @@ class MemoryRepository(BaseRepository[MemoryChunk]):
             ranked.append((score, cosine_similarity, _as_utc(chunk.created_at), chunk))
 
         ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-        return [item[3] for item in ranked[:limit]]
+        top = ranked[:limit]
+        # return_scores=True（B3 shadow 专用）：带 (chunk, 混合分, cosine_sim)
+        # 三元组返回，供 recall 侧记录相似度分布；默认 False 契约不变。
+        if return_scores:
+            return [(item[3], item[0], item[1]) for item in top]
+        return [item[3] for item in top]

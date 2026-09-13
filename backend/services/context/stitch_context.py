@@ -50,7 +50,7 @@ from backend.services.prompts.adaptive_prompts import (
     render_system_blocks,
     render_system_blocks_with_usage,
 )
-from backend.services.rag.recall import recall_memories
+from backend.services.rag.recall import bundle_mask_names, recall_memories
 from backend.services.style.retrieval import retrieve_author_samples, retrieve_author_samples_with_meta
 from backend.services.style.scene_hint import SCENE_HINT_TAIL_CHARS, detect_scene_type
 
@@ -253,6 +253,8 @@ async def assemble_stitch_context(
 
     # 前情召回（记忆倒灌·检索侧）：query = 当前写作上下文；open 模式无正文用大纲。
     # 降级为空列表时 prompt 零变化（不阻塞生成）
+    # B3 分流去敏（2026-09-13）：V/B 流抹在场实体名防高频主角霸屏；A 流在
+    # recall_memories 内部吃原文（实体名命中=召回机制，红线）。
     if mode == "open":
         recall_query = bundle.outline_text[:STITCH_INTENT_OUTLINE_MAX_CHARS]
     else:
@@ -264,6 +266,7 @@ async def assemble_stitch_context(
         chapter_number=bundle.chapter_number,
         query_text=recall_query,
         k=ECHOES_K_STITCH,
+        mask_names=bundle_mask_names(bundle),
     )
 
     # 文风执行层（S2 E1/E2）：正面画像 + few-shot 笔迹示范注入全部四模式。

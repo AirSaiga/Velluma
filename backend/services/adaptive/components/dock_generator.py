@@ -447,7 +447,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
 
     # 前情召回（记忆倒灌）：让「呼应前情细节」类零件有素材；失败降级为空不阻塞
     # k=2 见 budget 表（A3a 收编：挂件轻路径回响条数与 stitch 分档）
-    from backend.services.rag.recall import recall_memories
+    # B3 分流去敏（2026-09-13）：V/B 流抹在场实体名（与 stitch 同口径）
+    from backend.services.rag.recall import bundle_mask_names, recall_memories
     from backend.services.context.budget import ECHOES_K_DOCK
     memory_echoes = await recall_memories(
         db,
@@ -456,6 +457,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         chapter_number=bundle.chapter_number,
         query_text=recent_text[-300:],
         k=ECHOES_K_DOCK,
+        mask_names=bundle_mask_names(bundle),
     )
     # 读者期待 + 大纲就近节拍：prompt 素材与 _finalize_parts 的 note 拼装共用
     reader_expectations = soft.get("reader_expectations") or None

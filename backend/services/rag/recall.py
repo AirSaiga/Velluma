@@ -69,6 +69,62 @@ logger = logging.getLogger(__name__)
 _ECHO_SHARED_TOKEN_MIN = 2
 _ECHO_SHARED_RATIO = 0.3
 
+# ---- B3 检索分流去敏（2026-09-13 深水区批）----
+# 高频主角名在向量/词法空间霸屏：query 里「林尘」的字面权重把检索拽向
+# 「所有含此名的远古段落」（实测「血噬融合」类远古创伤在生活流段落反复
+# 霸屏），动作/场景语境词权重被稀释。去敏**只作用于 V/B 流**——A 流
+# （结构化事件）的召回机制恰是「实体名子串命中」，抹名=全灭，A 流吃原文
+# 是红线；实体驱动的召回由 A 流独占，V/B 转向动作/场景语境。
+# 相似度阈值先行 shadow：只记录分布不拦截（0.70 占位——语义扫描 0.78
+# 未校准的前车之鉴），攒真实分布后再转 live。
+MEMORY_SIM_THRESHOLD_SHADOW = 0.70
+
+
+def mask_entity_names(text: str, names) -> str:
+    """检索 query 去实体化（纯函数）：最长优先子串替换（同长按集合序稳定）。
+
+    红队 Q3 曾建议 jieba token 边界防「流光石」嵌词误伤——实测 token 方案
+    会漏掉粘连名（「明兰叹了口气」切不出独立的「明兰」token，霸屏治不了），
+    而嵌词过抹只损一个检索词且不进 prompt（只喂向量/关键词），两害相权取
+    彻底抹除：确定性、零依赖、逐字可测。"""
+    ns = sorted(
+        {str(n).strip() for n in (names or []) if len(str(n).strip()) >= 2},
+        key=len,
+        reverse=True,
+    )
+    if not ns or not (text or "").strip():
+        return text
+    masked = text
+    for n in ns:
+        masked = masked.replace(n, "")
+    return masked
+
+
+def bundle_mask_names(bundle) -> List[str]:
+    """去敏名单收集（B3）：书级专名表 + 实体/资产注册别名（≥2 字；world
+    桥适配器的 aliases 挂在 character 命名空间，legacy 对象在顶层）。名单
+    宁全勿缺——query 里不出现的名抹除是零操作。"""
+    names: List[str] = []
+    try:
+        pn = bundle.proper_nouns()
+        names += [str(n) for n in (pn or [])]
+    except Exception:
+        pass
+
+    def _aliases(e) -> List[str]:
+        al = getattr(e, "aliases", None)
+        if al is None:
+            ch = getattr(e, "character", None)
+            al = getattr(ch, "aliases", None) if ch is not None else None
+        if al is None and isinstance(e, dict):
+            al = e.get("aliases")
+        return [str(a).strip() for a in (al or []) if len(str(a).strip()) >= 2]
+
+    for src in (getattr(bundle, "entities", None) or [], getattr(bundle, "assets", None) or []):
+        for e in src:
+            names.extend(_aliases(e))
+    return names
+
 
 def echo_is_relevant(event_text: str, query_text: str) -> bool:
     """A 流回响相关性判据（纯函数，测试对拍口径）。"""
@@ -111,16 +167,21 @@ async def recall_memories(
     chapter_number: int | None,
     query_text: str,
     k: int = ECHOES_K_STITCH,
+    mask_names: Sequence[str] | None = None,
 ) -> List[str]:
     """召回与当前写作上下文最相关的前情片段（每段截 160 字）。
 
     Args:
         query_text: 当前写作上下文（当前段落尾部/衔接前缀/大纲等）
         k: 返回条数上限
+        mask_names: 在场实体名+别名（B3 去敏名单）——**只抹 V/B 流**，
+            A 流（结构化事件）吃原文：实体名子串命中是它的召回机制（红线）。
     """
     query = (query_text or "").strip()
     if len(query) < 8 or not book_id:
         return []
+    # B3 分流去敏：V/B 吃去敏 query（防高频主角名霸屏向量/词法检索）
+    masked_query = mask_entity_names(query, mask_names) if mask_names else query
 
     # ---- A 结构化前情（默认流·始终）：世界页事件按叙事时刻精确召回 ----
     # 相关性门（2026-09-11）：实体名命中≠语境相关，不相关事件进 prompt 会
@@ -140,7 +201,7 @@ async def recall_memories(
     try:
         if is_embedding_configured():
             v_echoes = await _vector_echoes(
-                db, query=query, book_id=book_id, chapter_id=chapter_id,
+                db, query=masked_query, book_id=book_id, chapter_id=chapter_id,
                 chapter_number=chapter_number, k=k,
             )
     except Exception as e:
@@ -148,7 +209,7 @@ async def recall_memories(
 
     # ---- B 词法检索（默认流·始终补足）：关键词命中 memory_chunks 纯文本 ----
     b_echoes: List[str] = []
-    keywords = extract_keywords(query, top_k=8)
+    keywords = extract_keywords(masked_query, top_k=8)
     if keywords:
         try:
             chunks = await MemoryRepository(db).search_lexical(
@@ -166,19 +227,31 @@ async def recall_memories(
 
 
 async def _vector_echoes(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:
-    """向量召回（专业级增强层）：query 向量化 → search_similar 加权排序。"""
+    """向量召回（专业级增强层）：query 向量化 → search_similar 加权排序。
+
+    B3 shadow（2026-09-13）：记录 top-k 余弦分布与假设阈值下的幸存数，
+    不拦截——转 live 时把 shadow 日志换成过滤即可（挂点已在此）。"""
     embedding = await get_embedding(query[:ECHOES_EMBED_QUERY_MAX_CHARS])
     if not embedding:
         return []
     repo = MemoryRepository(db)
-    chunks = await repo.search_similar(
+    scored = await repo.search_similar(
         embedding,
         UUID(book_id),
         limit=k,
         exclude_chapter_id=UUID(chapter_id) if chapter_id else None,
         max_chapter_number=(chapter_number - 1) if chapter_number else None,
+        return_scores=True,
     )
-    return [(c.chunk_text or "")[:ECHOES_MAX_CHARS] for c in chunks if c.chunk_text]
+    if scored:
+        sims = [round(sim, 3) for _c, _sc, sim in scored]
+        survive = sum(1 for s in sims if s >= MEMORY_SIM_THRESHOLD_SHADOW)
+        logger.info(
+            "[recall-shadow] v-flow top%d sims=%s survivors@%.2f=%d/%d"
+            "（shadow 不拦截，攒校准分布）",
+            len(sims), sims, MEMORY_SIM_THRESHOLD_SHADOW, survive, len(sims),
+        )
+    return [(c.chunk_text or "")[:ECHOES_MAX_CHARS] for c, _sc, _sim in scored if c.chunk_text]
 
 
 async def _world_echoes(db, *, book_id, chapter_id, query_text, limit) -> List[str]:
