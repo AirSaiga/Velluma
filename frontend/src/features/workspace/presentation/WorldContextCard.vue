@@ -4,8 +4,7 @@ import { useRouter } from 'vue-router'
 import { worldApi } from '../../../services/api/domain/world.api'
 import type { ContextCard } from '../../../services/api/domain/world.api'
 import { formatTime } from '../../world/engine/timeFormat'
-import { getTemplate } from '../../world/engine/eventTemplates'
-import type { EventType } from '../../world/engine/types'
+import { eventDisplayName } from '../../world/engine/eventTemplates'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
@@ -87,8 +86,8 @@ const chronicle = computed(() => {
   return card.value.kind === 'entity' ? card.value.chronicle : card.value.recent_events
 })
 
-function eventLabel(type: string) {
-  return getTemplate(type as EventType)?.label || type
+function eventLabel(ev: { event_type: string; title?: string | null }) {
+  return eventDisplayName(ev)
 }
 
 function openInWorld() {
@@ -136,7 +135,7 @@ function quickNote() {
         <div v-if="chronicle.length" class="wctx-chronicle">
           <div class="wctx-chronicle-title">{{ card.kind === 'entity' ? '编年史' : '此地事件' }}</div>
           <div v-for="(ev, i) in chronicle" :key="i" class="wctx-chronicle-row">
-            <span class="wctx-chronicle-type">{{ eventLabel(ev.event_type) }}</span>
+            <span class="wctx-chronicle-type">{{ eventLabel(ev) }}</span>
             <span class="wctx-chronicle-note">{{ ev.note || '—' }}</span>
             <span class="wctx-chronicle-time">{{ formatTime(ev.time_start) }}</span>
           </div>

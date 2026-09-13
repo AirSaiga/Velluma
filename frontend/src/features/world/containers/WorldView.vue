@@ -15,7 +15,7 @@ import { worldApi } from '../../../services/api'
 import { bookApi } from '../../../services/api/domain'
 import { useAppStore } from '../../app/useAppStore'
 import { formatTime, displayCandidateTime } from '../engine/timeFormat'
-import { getTemplate } from '../engine/eventTemplates'
+import { getTemplate, eventDisplayName } from '../engine/eventTemplates'
 import { eventPoint, stripPointFromNote } from '../engine/eventPoint'
 import { childrenIndex, collectSubtree, topLevelLocations } from '../engine/locationTree'
 import { groupEntities } from '../engine/entityGroups'
@@ -109,7 +109,8 @@ const eventPresetCharacterId = ref<string | null>(null)
 const sortedEvents = computed(() =>
   [...events.value].sort((a, b) => a.time_start - b.time_start),
 )
-const eventLabel = (type: string) => getTemplate(type as EventType)?.label || type
+const eventTypeLabel = (type: string) => getTemplate(type as EventType)?.label || type
+const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 const eventNote = (note: string) => stripPointFromNote(note)
 
 function openEventForm(t?: number) {
@@ -292,7 +293,7 @@ function onDrawFinish() {
 async function removeEvent(ev: WorldEvent) {
   const ok = await showConfirm({
     title: '删除事件',
-    message: `确定删除「${eventLabel(ev.event_type)} · ${formatTime(ev.time_start)}」吗？`,
+    message: `确定删除「${eventLabel(ev)} · ${formatTime(ev.time_start)}」吗？`,
     warning: '时变状态由事件推演，删除后相关世界状态会随之改变（可用 Ctrl+Z 撤销）。',
     confirmText: '删除',
   })
@@ -501,7 +502,7 @@ async function onCompassClick() {
 }
 function focusEvent(ev: WorldEvent) {
   const pt = eventPoint(ev, locationsById.value)
-  if (pt) mapRef.value?.focusAt(pt[0], pt[1], eventLabel(ev.event_type))
+  if (pt) mapRef.value?.focusAt(pt[0], pt[1], eventLabel(ev))
   else showToast('该事件没有可定位的坐标', 'info')
 }
 /** 「去地图放置」的补坐标目标（2026-09-04 审计修复：无坐标地点此前点击零反应） */
@@ -595,7 +596,7 @@ async function acceptCand(c: { id: string; source?: string; draft?: { summary?: 
       showToast(`已记入真相：${c.draft?.label || '新条目'}（草稿——记得去真相抽屉核实）`, 'success')
     } else {
       await load(bookId.value) // 转正进入推演：事件/状态全量刷新
-      showToast(`已入账：${c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')}`, 'success')
+      showToast(`已入账：${c.draft?.summary || eventTypeLabel(c.draft?.event_type || 'custom')}`, 'success')
     }
   } catch (e: any) {
     showToast('入账失败：' + (e?.message || '未知错误'), 'error')
@@ -725,7 +726,7 @@ const filteredEvents = computed(() => {
   const q = evtFilter.value
   if (!q.trim()) return sortedEvents.value
   return sortedEvents.value.filter((ev) =>
-    matchesQuery(q, eventLabel(ev.event_type), ev.event_type, eventNote(ev.note)),
+    matchesQuery(q, eventLabel(ev), ev.event_type, eventNote(ev.note)),
   )
 })
 
@@ -1344,10 +1345,10 @@ function isGroupCollapsed(name: string | null) {
           <ul class="side-list">
             <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || c.draft?.canon_text || ''">
               <div class="sc-body">
-                <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventLabel(c.draft?.event_type || 'custom')) }}</span>
+                <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventTypeLabel(c.draft?.event_type || 'custom')) }}</span>
                 <span class="sc-badge">
                   <template v-if="c.source === 'canon_extract'">◉ 真相候选 · 待核实</template>
-                  <template v-else>{{ eventLabel(c.draft?.event_type || 'custom') }} · {{ displayCandidateTime(c.draft?.time_start || 0, c.chapter_number) }}</template>
+                  <template v-else>{{ eventTypeLabel(c.draft?.event_type || 'custom') }} · {{ displayCandidateTime(c.draft?.time_start || 0, c.chapter_number) }}</template>
                 </span>
               </div>
               <div class="sc-actions">

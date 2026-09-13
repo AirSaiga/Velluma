@@ -137,6 +137,12 @@ MIGRATIONS: list[dict[str, Any]] = [
         "expected_udt_names": {"uuid", "CHARACTER(36)"},
     },
     {
+        "table": "world_events",
+        "column": "title",
+        "definition": "VARCHAR(200) DEFAULT ''",
+        "expected_udt_names": {"varchar", "character varying"},
+    },
+    {
         "table": "books",
         "column": "worldview_settings",
         "definition": "JSONB DEFAULT '{}'",

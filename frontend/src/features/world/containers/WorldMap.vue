@@ -19,7 +19,7 @@ import { useWorld } from '../composables/useWorld'
 import { useMapEdit, resolveImageUrl, editUndo, editRedo } from '../composables/useMapEdit'
 import { eventPoint, stripPointFromNote, centroid } from '../engine/eventPoint'
 import { childrenIndex } from '../engine/locationTree'
-import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
+import { EVENT_TYPE_COLOR, eventDisplayName } from '../engine/eventTemplates'
 import { formatTime } from '../engine/timeFormat'
 import { relationTypeMeta } from '../engine/relationTypes'
 import {
@@ -1144,7 +1144,7 @@ function renderEventMarkers() {
     const pt = eventPoint(e, locationsById.value)
     if (!pt) continue
     const color = EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)'
-    const label = getTemplate(e.event_type)?.label || e.event_type
+    const label = eventDisplayName(e)
     const icon = L.divIcon({
       className: 'wm-evt-icon',
       html: `<span class="wm-evt" style="--c:${color}" title="${esc(label)}"></span>`,

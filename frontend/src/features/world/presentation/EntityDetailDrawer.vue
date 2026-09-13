@@ -25,7 +25,7 @@ import {
   mergeFieldLayer,
 } from '../engine/fieldLayers'
 import { formatTime } from '../engine/timeFormat'
-import { getTemplate } from '../engine/eventTemplates'
+import { eventDisplayName } from '../engine/eventTemplates'
 import { vAutogrow } from './autogrow'
 import type { WorldEntity, WorldEvent, EventType } from '../engine/types'
 
@@ -279,7 +279,7 @@ const chronicle = computed(() => {
     .reverse()
 })
 
-const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
+const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 </script>
 
 <template>
@@ -488,7 +488,7 @@ const eventLabel = (t: string) => getTemplate(t as EventType)?.label || t
           title="定位到地图"
           @click="emit('focus-event', ev)"
         >
-          <span class="edd-chron-type">{{ eventLabel(ev.event_type) }}</span>
+          <span class="edd-chron-type">{{ eventLabel(ev) }}</span>
           <span class="edd-chron-time">{{ formatTime(ev.time_start) }}</span>
         </button>
       </div>

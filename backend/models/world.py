@@ -75,6 +75,7 @@ class WorldEvent(Base):
     causes = Column(JSONB, default=list)            # [world_event.id, ...] 因果链
     chapter_ref = Column(String, nullable=True)     # 关联章节 id（只读，用于按章过滤世界状态）
     tags = Column(JSONB, default=list)
+    title = Column(String(200), default="")  # 用户自拟标题（空=显示侧回退模板标签，不参与状态推演）
     note = Column(Text, default="")
     metadata_ = Column("metadata", JSONB, default=dict)
     # ---- 世界内核 v2（B1 · 决策 1 三轴分离）----

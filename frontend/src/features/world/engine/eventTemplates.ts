@@ -128,3 +128,14 @@ export const EVENT_TYPE_COLOR: Record<string, string> = {
 export function getTemplate(type: EventType): EventTemplate | undefined {
   return EVENT_TEMPLATES.find((t) => t.type === type)
 }
+
+/**
+ * 事件显示名：用户自拟标题优先，空则回退模板标签（再退 event_type 原文）。
+ * 唯一权威——所有「给人类看的事件名」消费面（列表/时间轴/地图标注/实体编年/浮卡/
+ * 删除确认/搜索匹配）一律走这里，勿再各自 getTemplate(...)?.label 拼一份。
+ */
+export function eventDisplayName(ev: { event_type: string; title?: string | null }): string {
+  const t = (ev.title || '').trim()
+  if (t) return t
+  return getTemplate(ev.event_type as EventType)?.label || ev.event_type
+}

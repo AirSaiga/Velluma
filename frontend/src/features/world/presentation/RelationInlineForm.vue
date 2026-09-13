@@ -14,7 +14,7 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useEscStack } from '../../../composables/useEscStack'
 import { RELATION_TYPES } from '../engine/relationTypes'
 import { formatTime } from '../engine/timeFormat'
-import { getTemplate } from '../engine/eventTemplates'
+import { eventDisplayName } from '../engine/eventTemplates'
 import type { WorldRelation } from '../engine/types'
 
 const props = defineProps<{
@@ -53,7 +53,7 @@ const anchorCandidates = computed(() =>
     .sort((a, b) => a.time_start - b.time_start)
     .map((e) => ({
       id: e.id,
-      desc: `${getTemplate(e.event_type as never)?.label || e.event_type} · ${formatTime(e.time_start)}`,
+      desc: `${eventDisplayName(e)} · ${formatTime(e.time_start)}`,
     })),
 )
 

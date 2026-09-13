@@ -70,6 +70,7 @@ export interface WorldEventCreate {
   causes?: string[]
   chapter_ref?: string | null
   tags?: string[]
+  title?: string
   note?: string
 }
 
@@ -162,6 +163,7 @@ export interface SceneSlice {
 
 export interface ContextChronicleItem {
   event_type: string
+  title?: string
   note: string
   time_start: number
 }

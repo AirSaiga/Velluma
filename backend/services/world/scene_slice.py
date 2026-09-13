@@ -370,6 +370,7 @@ def _events_sorted_desc(events: List[Any]) -> List[Any]:
 def _event_brief(ev: Any) -> Dict[str, Any]:
     return {
         "event_type": ev.event_type or "custom",
+        "title": getattr(ev, "title", None) or "",
         "note": (ev.note or "")[:80],
         "time_start": ev.time_start or 0,
     }

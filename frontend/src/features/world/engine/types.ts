@@ -103,6 +103,8 @@ export interface WorldEvent {
   /** 关联章节 id（只读，按章过滤用） */
   chapter_ref: string | null
   tags: string[]
+  /** 用户自拟标题（2026-09-13）；缺省/null = 显示侧回退模板标签（eventDisplayName），纯显示不参与状态推演 */
+  title?: string | null
   note: string
 }
 

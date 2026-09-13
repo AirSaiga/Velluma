@@ -44,6 +44,7 @@ class WorldEventBase(BaseModel):
     causes: List[UUID] = Field(default_factory=list, description="因果链事件 id")
     chapter_ref: Optional[str] = Field(None, description="关联章节 id（只读，按章过滤用）")
     tags: List[str] = Field(default_factory=list)
+    title: str = Field("", description="用户自拟标题（空=前端回退模板标签；纯显示，不参与状态推演）")
     note: str = Field("")
 
 
@@ -64,6 +65,7 @@ class WorldEventUpdate(BaseModel):
     causes: Optional[List[UUID]] = None
     chapter_ref: Optional[str] = None
     tags: Optional[List[str]] = None
+    title: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -345,6 +347,7 @@ class SceneSliceResponse(BaseModel):
 class ContextChronicleItem(BaseModel):
     """编年史条目：涉其/此地的事件 ≤ 叙事时刻，倒序取近（防剧透，与 RAG A 层同规则）。"""
     event_type: str
+    title: str = ""
     note: str = ""
     time_start: int = 0  # 连续日计数，前端按历法格式化
 

@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { worldApi, plotLedgerApi, type PlotLedgerCreateInput, type WorldLocationCreate } from '../../../services/api'
 import { computeWorldState } from '../engine/computeWorldState'
+import { eventDisplayName } from '../engine/eventTemplates'
 import { collectSubtree } from '../engine/locationTree'
 import {
   normalizeTimelineCursor,
@@ -339,6 +340,7 @@ async function createEvent(
     payload?: Record<string, unknown>
     chapter_ref?: string | null
     note?: string
+    title?: string
     tags?: string[]
   },
 ) {
@@ -348,7 +350,7 @@ async function createEvent(
   })
   events.value = [...events.value, ev]
   pushCommand({
-    description: `记录事件「${ev.event_type}」`,
+    description: `记录事件「${eventDisplayName(ev)}」`,
     undo: async () => {
       await worldApi.deleteEvent(bookId, ev.id)
       events.value = events.value.filter((e) => e.id !== ev.id)
@@ -365,6 +367,7 @@ async function createEvent(
         payload: ev.payload,
         chapter_ref: ev.chapter_ref,
         note: ev.note,
+        title: ev.title || '',
         tags: ev.tags,
       })
       events.value = [...events.value, r]
@@ -379,7 +382,7 @@ async function deleteEvent(bookId: string, eventId: string) {
   events.value = events.value.filter((e) => e.id !== eventId)
   if (snap) {
     pushCommand({
-      description: `删除事件「${snap.event_type}」`,
+      description: `删除事件「${eventDisplayName(snap)}」`,
       undo: async () => {
         const r = await worldApi.createEvent(bookId, {
           id: snap.id, // 幂等恢复：沿用原 id
@@ -392,6 +395,7 @@ async function deleteEvent(bookId: string, eventId: string) {
           payload: snap.payload,
           chapter_ref: snap.chapter_ref,
           note: snap.note,
+          title: snap.title || '',
           tags: snap.tags,
         })
         events.value = [...events.value, r]
@@ -416,6 +420,7 @@ async function updateEvent(
     faction_ids?: string[]
     payload?: Record<string, unknown>
     note?: string
+    title?: string
     tags?: string[]
   },
 ) {
@@ -424,7 +429,7 @@ async function updateEvent(
   events.value = events.value.map((e) => (e.id === eventId ? updated : e))
   if (snap) {
     pushCommand({
-      description: `编辑事件「${snap.event_type}」`,
+      description: `编辑事件「${eventDisplayName(snap)}」`,
       undo: async () => {
         const r = await worldApi.updateEvent(bookId, eventId, {
           time_start: snap.time_start,
@@ -434,6 +439,7 @@ async function updateEvent(
           faction_ids: snap.faction_ids,
           payload: snap.payload,
           note: snap.note,
+          title: snap.title || '',
           tags: snap.tags,
         })
         events.value = events.value.map((e) => (e.id === eventId ? r : e))

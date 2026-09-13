@@ -100,6 +100,7 @@ const pickedPoint = ref<Point | null>(
     (exIsGenericLoc && ex?.note ? parsePointFromNote(ex.note) : null),
 )
 const note = ref(ex?.note ? (exIsGenericLoc ? stripPointFromNote(ex.note) : ex.note) : '')
+const title = ref(ex?.title || '')
 const characterId = ref(
   (ex?.payload.character_id as string | undefined) || props.presetCharacterId || '',
 )
@@ -256,6 +257,7 @@ async function submit() {
       location_id: eventLocationId,
       payload,
       note: note.value,
+      title: title.value.trim(),
     })
   } else {
     await createEvent(props.bookId, {
@@ -265,6 +267,7 @@ async function submit() {
       location_id: eventLocationId,
       payload,
       note: note.value,
+      title: title.value.trim(),
     })
   }
   emit('saved')
@@ -307,6 +310,16 @@ async function submit() {
         </span>
       </div>
       <div class="qc-desc">{{ template?.description }}</div>
+    </div>
+
+    <div class="qc-row">
+      <label class="qc-label">标题</label>
+      <input
+        v-model="title"
+        :placeholder="`（可选）不起名就显示「${template?.label}」`"
+        maxlength="200"
+        class="qc-input"
+      />
     </div>
 
     <div class="qc-row">

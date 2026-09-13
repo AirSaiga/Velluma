@@ -12,10 +12,10 @@
  */
 import { computed } from 'vue'
 import Icon from '../../../components/Icon.vue'
-import { EVENT_TYPE_COLOR, getTemplate } from '../engine/eventTemplates'
+import { EVENT_TYPE_COLOR, eventDisplayName } from '../engine/eventTemplates'
 import { stripPointFromNote } from '../engine/eventPoint'
 import { breakdownTime, formatDateShort, formatTime } from '../engine/timeFormat'
-import type { WorldEvent, EventType } from '../engine/types'
+import type { WorldEvent } from '../engine/types'
 
 const props = defineProps<{ events: WorldEvent[] }>()
 
@@ -26,7 +26,7 @@ const emit = defineEmits<{
   delete: [ev: WorldEvent]
 }>()
 
-const eventLabel = (type: string) => getTemplate(type as EventType)?.label || type
+const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 const eventNote = (note: string) => stripPointFromNote(note)
 
 interface SpineGroup {
@@ -69,7 +69,7 @@ const groups = computed<SpineGroup[]>(() => {
           ></span>
           <div class="esp-body">
             <div class="esp-head">
-              <span class="esp-name">{{ eventLabel(ev.event_type) }}</span>
+              <span class="esp-name">{{ eventLabel(ev) }}</span>
               <span class="esp-time">
                 {{ formatDateShort(ev.time_start) }}<template v-if="ev.time_end > ev.time_start"> – {{ formatDateShort(ev.time_end) }}</template>
               </span>
