@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 # 在场维度——代码重构后历史章节文本未变即命中库里的旧零件。此后任何规则
 # 大改（槽位分类学/prompt 编译/在场制）递增本版本号，即可让库中陈旧
 # __dock__ 缓存全量安全失效（签名侧 + 读取侧双侧生效）。
-DOCK_PIPELINE_VERSION = "v2.1_onstage_20260908"
+# v2.2（2026-09-13 B2 输入减肥批）：statics 注入整体移除 + 推测块降 1 条。
+DOCK_PIPELINE_VERSION = "v2.2_diet_20260913"
 
 # 意图衰老阈值（2026-09-09 时序冻结修复）：反推后正文推进超此字数未刷新
 # → dock 视意图为陈旧（intent_stale），不绑定旧意图副行

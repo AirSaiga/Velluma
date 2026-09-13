@@ -1450,9 +1450,8 @@ def _dock_system_sections() -> List:
         PromptSection(key="hard-rules", text="""硬性要求：
 1. 禁心理描写（"心中一紧"/"感到不安"）、禁比喻（"宛如"）、禁抽象形容词（"压抑"/"紧张"）
 2. 禁词表（以下词汇不用）：«BANNED_WORDS»
-3. 角色动作参考其永恒设定（static_prompt 资料）——写出与设定相悖的动作会穿帮
-4. 多样性：不要全是 action 或全是 line，混搭让作者有不同方向
-5. landing 必居首位；呼应类至多 1 枚
+3. 多样性：不要全是 action 或全是 line，混搭让作者有不同方向
+4. landing 必居首位；呼应类至多 1 枚
 
 只输出 JSON，不要解释。"""),
     ]
@@ -1480,7 +1479,8 @@ def build_dock_generator_prompt(
         recent_text: 作者当前段落（≤400 字，超长保尾——作者的真位置在段尾）
         projections: 层 3 推测（SegmentProjection.to_dict() 列表）
         nutrients: 设定养料（角色物理特征/资产/地点）
-        hard_constraints: 硬约束（banned_words / character_statics / canon_private_labels）
+        hard_constraints: 硬约束（banned_words / canon_private_labels；character_statics
+            键仍在 bundle 但 dock 已不消费——2026-09-13 B2 输入减肥批移除 statics 注入）
         direction_weights: 已退役参数（B7 方向权重葬礼；保留签名兼容，忽略）
         salience_hints: 热层六槽热集的具名提示行（salience.compute_salience 产出；空=无提示块
         reader_expectations: 读者期待（[{type, description, tension}]，最多取前 2 条进块；
@@ -1535,17 +1535,15 @@ def build_dock_generator_prompt(
     ).replace("«BANNED_WORDS»", banned or "（无）")
 
     # 推测方向摘要（桥接态切断：推测锚的是全文末尾的「接下来」，插入点处是后文剧透）
+    # B2 输入减肥（2026-09-13）：降为 1 条×1 拍——8-14 字零件只需要一个方向
+    # 暗示，多条推测喂给小模型实测只会被逐条压缩成挂件（mimo 教训）。
     proj_lines = []
     if not is_bridge:
-        for p in (projections or [])[:3]:
+        for p in (projections or [])[:1]:
             beats = p.get("possible_beats", []) if isinstance(p, dict) else []
-            for b in beats[:2]:
+            for b in beats[:1]:
                 proj_lines.append(f"- {b.get('event', '')}（焦点：{b.get('anchors', [])}）")
     proj_text = "\n".join(proj_lines) if proj_lines else "（无推测，基于当前段落自由生发）"
-
-    # 角色永恒设定（防 OOC）
-    statics = hard_constraints.get("character_statics", {})
-    static_lines = [f"- {k}：{v[:80]}" for k, v in statics.items() if k and v][:5]
 
     # 注意力提示行（B7 · 方向权重葬礼后的转世）：热层六槽热集的具名提示
     # 取代抽象方向百分比——「该盯住谁/什么」比「主线 36%」对模型可操作性强
@@ -1697,9 +1695,6 @@ def build_dock_generator_prompt(
 角色：{_chars_text}
 资产：{_assets_text}
 地点：{_locations_text}
-
-# 角色永恒设定（动作性格参考资料）
-{chr(10).join(static_lines) if static_lines else '（无）'}
 
 # Canon private 禁忌（以下内容绝不能在挂件里出现）
 {hard_constraints.get('canon_private_labels', [])[:5] or '（无）'}
