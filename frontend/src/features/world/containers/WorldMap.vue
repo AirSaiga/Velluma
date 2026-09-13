@@ -33,7 +33,7 @@ import {
 import { escapeHtml as esc } from '../../../shared/utils/htmlText'
 import RelationInlineForm from '../presentation/RelationInlineForm.vue'
 import { BLANK_ATLAS_INNER, BLANK_ATLAS_VIEWBOX } from './blankAtlas'
-import type { DrawMode, WorldLocation, WorldMapLayer, WorldRelation } from '../engine/types'
+import type { DrawMode, WorldEvent, WorldLocation, WorldMapLayer, WorldRelation } from '../engine/types'
 
 const props = defineProps<{
   bookId: string
@@ -674,6 +674,21 @@ function buildLocPopupHtml(loc: WorldLocation): string {
 }
 
 /** move 轨迹线：完成的=点画墨线；在途=青墨虚线流动（行军中） */
+let lastTrackSig = ''
+
+/** 轨迹层帧频门控签名：可见 move 集 + 在途样式位——两者只在游标跨过事件
+ *  time_start/time_end 边界的离散时刻变化，连续滑动帧间恒等（门控跳过重建） */
+function trackSignature(): string {
+  const t = currentTime.value
+  const parts: string[] = []
+  for (const e of events.value) {
+    if (e.event_type !== 'move' || e.time_start > t) continue
+    if ((((e.payload as { path?: unknown })?.path) as unknown[] | undefined)?.length < 2) continue
+    parts.push(`${e.id}:${t < e.time_end ? 1 : 0}`)
+  }
+  return parts.join('|')
+}
+
 function renderTracks() {
   if (!map || !trackLayer) return
   trackLayer.clearLayers()
@@ -710,14 +725,31 @@ function renderTracks() {
     )
     trackLayer.addLayer(line)
   }
+  lastTrackSig = trackSignature()
+}
+
+/** 帧频门控（游标拖动/播放）：签名不变=可见轨迹与在途样式都没变，跳过重建 */
+function syncTracksOnFrame() {
+  if (!map || !trackLayer || !layerVisible.value.tracks) return
+  const sig = trackSignature()
+  if (sig === lastTrackSig) return
+  renderTracks()
 }
 
 // ===== 实体层（单一画布）：所有实体统一上地图 =====
 // 位置解析优先级：事件推演位置（人物 state）/ 疆域质心（势力）→ 画布锚位（作者摆位）。
 // 拖拽语义分流：有故事的角色受历史约束（拖=录 move 事件，可撤销）；
 // 没故事的（无事件角色/资产/无疆域势力）自由摆放（拖=移画布锚位）。
+//
+// P0 性能治理（2026-09-14 世界页审计）：marker 实例跨帧复用——renderEntities 仍是
+// 全量重建入口（数据增删改/缩放/图层开关/高亮走它）；新增 syncEntitiesOnFrame 供
+// 游标拖动的帧频路径：只 setLatLng 挪位、moving/生死翻转才换图标或增删单实例，
+// 不再每帧销毁重建 DOM 节点（move 沿路径插值的顺滑移动 100% 保持——每帧照常挪位）。
 
 const entityMarkers = new Map<string, L.Marker>()
+/** 帧差分快照：位置变了挪 marker；moving 翻转换图标；derived 翻转（故事性变化，
+ *  拖拽语义随变）换单实例重建——语义类别不宜动态改绑，重建单枚成本可忽略 */
+const entityMeta = new Map<string, { x: number; y: number; moving: boolean; derived: boolean }>()
 const highlightEntityId = ref<string | null>(null)
 
 interface EntityDisplay {
@@ -726,11 +758,26 @@ interface EntityDisplay {
   derived: boolean // true=事态推演位置；false=画布锚位
 }
 
-function entityDisplayPosition(entId: string): EntityDisplay | null {
-  const cs = worldState.value.character_states.find((c) => c.entity_id === entId)
+type CharState = (typeof worldState.value)['character_states'][number]
+type TerritoryState = (typeof worldState.value)['territory_states'][number]
+
+/** 帧路径预建索引：renderRelations/sync 系列共用，免逐实体 O(states) 线性扫 */
+function charStateMap(): Map<string, CharState> {
+  return new Map(worldState.value.character_states.map((c) => [c.entity_id, c]))
+}
+function territoryStateMap(): Map<string, TerritoryState> {
+  return new Map(worldState.value.territory_states.map((t) => [t.faction_id, t]))
+}
+
+function entityDisplayPosition(
+  entId: string,
+  csMap: Map<string, CharState> = charStateMap(),
+  tsMap: Map<string, TerritoryState> = territoryStateMap(),
+): EntityDisplay | null {
+  const cs = csMap.get(entId)
   if (cs && !cs.alive) return null // 死者不显示（史书只记生前轨迹；侧栏/抽屉仍可达）
   if (cs?.position) return { x: cs.position[0], y: cs.position[1], derived: true }
-  const ts = worldState.value.territory_states.find((t) => t.faction_id === entId)
+  const ts = tsMap.get(entId)
   if (ts?.polygon?.length) {
     const c = centroid(ts.polygon as [number, number][])
     if (c) return { x: c[0], y: c[1], derived: true }
@@ -748,141 +795,282 @@ const NODE_COLOR: Record<string, string> = {
   asset: '#c9a227',
 }
 
+/** 高亮的「关联圈」：与高亮实体有关系的伙伴不暗（null=无高亮，全员正常亮） */
+function entityRelatedSet(): Set<string> | null {
+  const hl = highlightEntityId.value
+  if (!hl) return null
+  const related = new Set<string>()
+  for (const r of relations.value) {
+    if (r.source_entity_id === hl) related.add(r.target_entity_id)
+    if (r.target_entity_id === hl) related.add(r.source_entity_id)
+  }
+  return related
+}
+
+function buildEntityIcon(
+  ent: { id: string; name: string; entity_type: string; importance?: number },
+  moving: boolean,
+  related: Set<string> | null,
+): L.DivIcon {
+  const hl = highlightEntityId.value
+  const t = ent.entity_type
+  const color = NODE_COLOR[t] || NODE_COLOR.character
+  const star = (ent.importance ?? 1) >= 7
+  const dimmed = !!hl && ent.id !== hl && !related?.has(ent.id)
+  const withLabel = showLabels()
+  return L.divIcon({
+    className: 'wm-char-icon',
+    html: `<div class="wm-node wm-node--${t}${moving ? ' wm-char--moving' : ''}${
+      star ? ' wm-char--star' : ''
+    }${dimmed ? ' wm-node--dim' : ''}" style="--c:${color}"><span class="wm-node-head"></span>${
+      withLabel ? `<span class="wm-char-name">${esc(ent.name)}</span>` : ''
+    }</div>`,
+    iconSize: [0, 0],
+  })
+}
+
+function createEntityMarker(
+  ent: (typeof entities.value)[number],
+  pos: EntityDisplay,
+  related: Set<string> | null,
+  csMap: Map<string, CharState>,
+): L.Marker {
+  const moving = !!csMap.get(ent.id)?.label?.includes('在途')
+  const icon = buildEntityIcon(ent, moving, related)
+  const [x, y] = [pos.x, pos.y]
+  const t = ent.entity_type
+  // 有疆域的势力节点不可拖（疆域几何是事实）；其余可拖
+  const draggable = !inEditMode.value && !(pos.derived && t === 'faction')
+  const m = L.marker([y, x], { icon, zIndexOffset: 500, draggable, interactive: !inEditMode.value })
+  entityMarkers.set(ent.id, m)
+  entityMeta.set(ent.id, { x, y, moving, derived: pos.derived })
+
+  m.on('click', () => {
+    if (inEditMode.value) return
+    highlightEntityId.value = ent.id
+    emit('entity-click', ent.id)
+  })
+
+  // ⇧+按下 = 建关系手势起点（临时禁用拖拽，松手恢复）
+  m.on('mousedown', (e) => {
+    const oe = e.originalEvent as MouseEvent & { shiftKey?: boolean }
+    if (!oe.shiftKey || inEditMode.value) return
+    L.DomEvent.stopPropagation(e as unknown as Event)
+    e.target.dragging?.disable()
+    startLink(ent.id, e)
+  })
+
+  if (pos.derived && t === 'character') {
+    // 有故事的角色：拖拽松手 = 在游标时刻录 move 事件（直接创建，可撤销）
+    let from: L.LatLng | null = null
+    m.on('dragstart', (e) => {
+      from = (e.target as L.Marker).getLatLng()
+    })
+    m.on('dragend', async (e) => {
+      const to = (e.target as L.Marker).getLatLng()
+      if (!from || (Math.abs(to.lng - from.lng) < 2 && Math.abs(to.lat - from.lat) < 2)) return
+      await createEvent(props.bookId, {
+        event_type: 'move',
+        time_start: currentTime.value,
+        time_end: currentTime.value,
+        payload: {
+          character_ids: [ent.id],
+          path: [
+            [from.lng, from.lat],
+            [to.lng, to.lat],
+          ],
+        },
+      })
+      showToast(`已记录「${ent.name}」的移动（游标时刻）· Ctrl+Z 撤销`, 'success')
+      from = null
+    })
+  } else if (draggable) {
+    // 没故事的实体：拖拽 = 移画布锚位（轻量落库）
+    m.on('dragend', async (e) => {
+      const to = (e.target as L.Marker).getLatLng()
+      await updateEntityArchive(props.bookId, ent.id, { canvas_x: to.lng, canvas_y: to.lat })
+    })
+  }
+  return m
+}
+
+function removeEntityMarker(entId: string) {
+  const m = entityMarkers.get(entId)
+  if (m) entityLayer?.removeLayer(m)
+  entityMarkers.delete(entId)
+  entityMeta.delete(entId)
+}
+
 function renderEntities() {
   if (!map || !entityLayer) return
   entityLayer.clearLayers()
   entityMarkers.clear()
+  entityMeta.clear()
   if (!layerVisible.value.characters) return
-  const withLabel = showLabels()
-  const hl = highlightEntityId.value
-  const related = new Set<string>()
-  if (hl) {
-    for (const r of relations.value) {
-      if (r.source_entity_id === hl) related.add(r.target_entity_id)
-      if (r.target_entity_id === hl) related.add(r.source_entity_id)
+  const related = entityRelatedSet()
+  const csMap = charStateMap()
+  const tsMap = territoryStateMap()
+  for (const ent of entities.value) {
+    const pos = entityDisplayPosition(ent.id, csMap, tsMap)
+    if (!pos) continue
+    entityLayer.addLayer(createEntityMarker(ent, pos, related, csMap))
+  }
+}
+
+/** 帧频差分（游标拖动/播放）：挪位为主，增删/换图标为辅——严禁 clearLayers */
+function syncEntitiesOnFrame() {
+  if (!map || !entityLayer || !layerVisible.value.characters) return
+  const related = entityRelatedSet()
+  const csMap = charStateMap()
+  const tsMap = territoryStateMap()
+  const seen = new Set<string>()
+  for (const ent of entities.value) {
+    const pos = entityDisplayPosition(ent.id, csMap, tsMap)
+    if (!pos) continue // 死亡/无位：下方统一按未见清理
+    seen.add(ent.id)
+    const meta = entityMeta.get(ent.id)
+    const m = entityMarkers.get(ent.id)
+    if (!m || !meta) {
+      entityLayer.addLayer(createEntityMarker(ent, pos, related, csMap))
+      continue
+    }
+    // 拖拽语义类别翻转（无故事↔有故事）→ 单实例重建换绑 handler
+    if (meta.derived !== pos.derived) {
+      removeEntityMarker(ent.id)
+      entityLayer.addLayer(createEntityMarker(ent, pos, related, csMap))
+      continue
+    }
+    const moving = !!csMap.get(ent.id)?.label?.includes('在途')
+    if (meta.moving !== moving) {
+      m.setIcon(buildEntityIcon(ent, moving, related))
+      meta.moving = moving
+    }
+    if (meta.x !== pos.x || meta.y !== pos.y) {
+      m.setLatLng([pos.y, pos.x])
+      meta.x = pos.x
+      meta.y = pos.y
     }
   }
-  for (const ent of entities.value) {
-    const pos = entityDisplayPosition(ent.id)
-    if (!pos) continue
-    const [x, y] = [pos.x, pos.y]
-    const t = ent.entity_type
-    const color = NODE_COLOR[t] || NODE_COLOR.character
-    const star = (ent.importance ?? 1) >= 7
-    const cs = worldState.value.character_states.find((c) => c.entity_id === ent.id)
-    const moving = !!cs?.label?.includes('在途')
-    const dimmed = !!hl && ent.id !== hl && !related.has(ent.id)
-    const icon = L.divIcon({
-      className: 'wm-char-icon',
-      html: `<div class="wm-node wm-node--${t}${moving ? ' wm-char--moving' : ''}${
-        star ? ' wm-char--star' : ''
-      }${dimmed ? ' wm-node--dim' : ''}" style="--c:${color}"><span class="wm-node-head"></span>${
-        withLabel ? `<span class="wm-char-name">${esc(ent.name)}</span>` : ''
-      }</div>`,
-      iconSize: [0, 0],
-    })
-    // 有疆域的势力节点不可拖（疆域几何是事实）；其余可拖
-    const draggable = !inEditMode.value && !(pos.derived && t === 'faction')
-    const m = L.marker([y, x], { icon, zIndexOffset: 500, draggable, interactive: !inEditMode.value })
-    entityMarkers.set(ent.id, m)
-
-    m.on('click', () => {
-      if (inEditMode.value) return
-      highlightEntityId.value = ent.id
-      emit('entity-click', ent.id)
-    })
-
-    // ⇧+按下 = 建关系手势起点（临时禁用拖拽，松手恢复）
-    m.on('mousedown', (e) => {
-      const oe = e.originalEvent as MouseEvent & { shiftKey?: boolean }
-      if (!oe.shiftKey || inEditMode.value) return
-      L.DomEvent.stopPropagation(e as unknown as Event)
-      e.target.dragging?.disable()
-      startLink(ent.id, e)
-    })
-
-    if (pos.derived && t === 'character') {
-      // 有故事的角色：拖拽松手 = 在游标时刻录 move 事件（直接创建，可撤销）
-      let from: L.LatLng | null = null
-      m.on('dragstart', (e) => {
-        from = (e.target as L.Marker).getLatLng()
-      })
-      m.on('dragend', async (e) => {
-        const to = (e.target as L.Marker).getLatLng()
-        if (!from || (Math.abs(to.lng - from.lng) < 2 && Math.abs(to.lat - from.lat) < 2)) return
-        await createEvent(props.bookId, {
-          event_type: 'move',
-          time_start: currentTime.value,
-          time_end: currentTime.value,
-          payload: {
-            character_ids: [ent.id],
-            path: [
-              [from.lng, from.lat],
-              [to.lng, to.lat],
-            ],
-          },
-        })
-        showToast(`已记录「${ent.name}」的移动（游标时刻）· Ctrl+Z 撤销`, 'success')
-        from = null
-      })
-    } else if (draggable) {
-      // 没故事的实体：拖拽 = 移画布锚位（轻量落库）
-      m.on('dragend', async (e) => {
-        const to = (e.target as L.Marker).getLatLng()
-        await updateEntityArchive(props.bookId, ent.id, { canvas_x: to.lng, canvas_y: to.lat })
-      })
-    }
-    entityLayer.addLayer(m)
+  // 消失的：死亡翻转/删除/失去位置
+  for (const entId of [...entityMarkers.keys()]) {
+    if (!seen.has(entId)) removeEntityMarker(entId)
   }
 }
 
 // ===== 关系层：活跃边画在两端实体当前位置之间，随游标演变 =====
+// P0 性能治理（2026-09-14）：polyline 实例跨帧复用——帧频路径 syncRelationsOnFrame
+// 只 setLatLngs 随端点伸缩（端点=实体 marker 同款差分挪位），激活/失活增删单线；
+// 生长动画语义原样保留（born 仅对帧路径中新激活的边为真）。
 
 let prevActiveRelIds = new Set<string>()
+const relationLines = new Map<string, L.Polyline>()
+
+function buildRelationLine(
+  r: WorldRelation,
+  a: EntityDisplay,
+  b: EntityDisplay,
+  born: boolean,
+): L.Polyline {
+  const meta = relationTypeMeta(r.relation_type)
+  const hl = highlightEntityId.value
+  // 三点轻弧（中点垂直偏移，随端点移动伸缩）
+  const { x: cx, y: cy } = arcControlPoint(a, b)
+  const dimmed = !!hl && r.source_entity_id !== hl && r.target_entity_id !== hl
+  const line = L.polyline(
+    [
+      [a.y, a.x],
+      [cy, cx],
+      [b.y, b.x],
+    ] as [number, number][],
+    {
+      color: meta.color,
+      weight: 2,
+      opacity: dimmed ? 0.1 : 0.72,
+      dashArray: r.static ? undefined : '6 5',
+      className: born ? 'wm-rel wm-rel-born' : 'wm-rel',
+      interactive: !inEditMode.value,
+    },
+  )
+  const label = r.label || meta.label
+  line.bindTooltip(`${esc(label)}${r.static ? '' : ' · 事件锚定'}`, { direction: 'top', sticky: true })
+  line.on('click', (e) => {
+    if (inEditMode.value) return
+    L.DomEvent.stopPropagation(e as unknown as Event)
+    openRelationForm(r, e.originalEvent as MouseEvent)
+  })
+  return line
+}
 
 function renderRelations() {
   if (!map || !relationLayer) return
   relationLayer.clearLayers()
+  relationLines.clear()
   if (!layerVisible.value.relations) {
     prevActiveRelIds = new Set()
     return
   }
   const activeIds = new Set<string>()
   for (const rs of worldState.value.relation_states) if (rs.active) activeIds.add(rs.relation_id)
-  const hl = highlightEntityId.value
   for (const r of relations.value) {
     if (!activeIds.has(r.id)) continue
     const a = entityDisplayPosition(r.source_entity_id)
     const b = entityDisplayPosition(r.target_entity_id)
     if (!a || !b) continue
-    const meta = relationTypeMeta(r.relation_type)
     const born = prevActiveRelIds.size > 0 && !prevActiveRelIds.has(r.id) // 激活瞬间生长
-    // 三点轻弧（中点垂直偏移，随端点移动伸缩）
-    const { x: cx, y: cy } = arcControlPoint(a, b)
-    const dimmed = !!hl && r.source_entity_id !== hl && r.target_entity_id !== hl
-    const line = L.polyline(
-      [
+    const line = buildRelationLine(r, a, b, born)
+    relationLines.set(r.id, line)
+    relationLayer.addLayer(line)
+  }
+  prevActiveRelIds = activeIds
+}
+
+/** 帧频差分（游标拖动/播放）：随实体端点 setLatLngs 伸缩，激活增/失活删——严禁 clearLayers */
+function syncRelationsOnFrame() {
+  if (!map || !relationLayer) return
+  if (!layerVisible.value.relations) {
+    if (relationLines.size) {
+      relationLayer.clearLayers()
+      relationLines.clear()
+      prevActiveRelIds = new Set()
+    }
+    return
+  }
+  const activeIds = new Set<string>()
+  for (const rs of worldState.value.relation_states) if (rs.active) activeIds.add(rs.relation_id)
+  for (const [rid, line] of [...relationLines]) {
+    if (!activeIds.has(rid)) {
+      relationLayer.removeLayer(line)
+      relationLines.delete(rid)
+    }
+  }
+  const csMap = charStateMap()
+  const tsMap = territoryStateMap()
+  for (const r of relations.value) {
+    if (!activeIds.has(r.id)) continue
+    const a = entityDisplayPosition(r.source_entity_id, csMap, tsMap)
+    const b = entityDisplayPosition(r.target_entity_id, csMap, tsMap)
+    if (!a || !b) {
+      const line = relationLines.get(r.id)
+      if (line) {
+        relationLayer.removeLayer(line)
+        relationLines.delete(r.id)
+      }
+      continue
+    }
+    let line = relationLines.get(r.id)
+    if (!line) {
+      const born = prevActiveRelIds.size > 0 && !prevActiveRelIds.has(r.id) // 激活瞬间生长
+      line = buildRelationLine(r, a, b, born)
+      relationLines.set(r.id, line)
+      relationLayer.addLayer(line)
+    } else {
+      const { x: cx, y: cy } = arcControlPoint(a, b)
+      line.setLatLngs([
         [a.y, a.x],
         [cy, cx],
         [b.y, b.x],
-      ] as [number, number][],
-      {
-        color: meta.color,
-        weight: 2,
-        opacity: dimmed ? 0.1 : 0.72,
-        dashArray: r.static ? undefined : '6 5',
-        className: born ? 'wm-rel wm-rel-born' : 'wm-rel',
-        interactive: !inEditMode.value,
-      },
-    )
-    const label = r.label || meta.label
-    line.bindTooltip(`${esc(label)}${r.static ? '' : ' · 事件锚定'}`, { direction: 'top', sticky: true })
-    line.on('click', (e) => {
-      if (inEditMode.value) return
-      L.DomEvent.stopPropagation(e as unknown as Event)
-      openRelationForm(r, e.originalEvent as MouseEvent)
-    })
-    relationLayer.addLayer(line)
+      ] as [number, number][])
+    }
   }
   prevActiveRelIds = activeIds
 }
@@ -1133,31 +1321,66 @@ function spawnRipples(t: number) {
 /**
  * 事件标记层（本页核心红利）：time_start ≤ 当前时刻、可定位的历史事件
  * 以类型色小菱形标注在地图上——拖时间轴，历史逐帧浮现。
+ * P0 性能治理（2026-09-14）：marker 实例按事件 id 复用——帧频路径
+ * syncEventMarkersOnFrame 按「可见集」增删差分（前扫浮现/回拖消失），
+ * 不再每帧销毁重建全部 divIcon+popup。
  */
+const eventMarkers = new Map<string, L.Marker>()
+
+function createEventMarker(e: WorldEvent): L.Marker | null {
+  const pt = eventPoint(e, locationsById.value)
+  if (!pt) return null
+  const color = EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)'
+  const label = eventDisplayName(e)
+  const icon = L.divIcon({
+    className: 'wm-evt-icon',
+    html: `<span class="wm-evt" style="--c:${color}" title="${esc(label)}"></span>`,
+    iconSize: [0, 0],
+  })
+  const m = L.marker([pt[1], pt[0]], { icon, zIndexOffset: 200, interactive: !inEditMode.value })
+  const note = stripPointFromNote(e.note)
+  m.bindPopup(
+    `<b>${esc(label)}</b> <span class="wm-pop-sub">${esc(formatTime(e.time_start))}</span>${
+      note ? `<br/>${esc(note)}` : ''
+    }`,
+  )
+  return m
+}
+
 function renderEventMarkers() {
   if (!map || !eventLayer) return
   eventLayer.clearLayers()
+  eventMarkers.clear()
   if (!layerVisible.value.events) return
   const t = currentTime.value
   for (const e of events.value) {
     if (e.time_start > t) continue
-    const pt = eventPoint(e, locationsById.value)
-    if (!pt) continue
-    const color = EVENT_TYPE_COLOR[e.event_type] || 'var(--text-muted)'
-    const label = eventDisplayName(e)
-    const icon = L.divIcon({
-      className: 'wm-evt-icon',
-      html: `<span class="wm-evt" style="--c:${color}" title="${esc(label)}"></span>`,
-      iconSize: [0, 0],
-    })
-    const m = L.marker([pt[1], pt[0]], { icon, zIndexOffset: 200, interactive: !inEditMode.value })
-    const note = stripPointFromNote(e.note)
-    m.bindPopup(
-      `<b>${esc(label)}</b> <span class="wm-pop-sub">${esc(formatTime(e.time_start))}</span>${
-        note ? `<br/>${esc(note)}` : ''
-      }`,
-    )
+    const m = createEventMarker(e)
+    if (!m) continue
+    eventMarkers.set(e.id, m)
     eventLayer.addLayer(m)
+  }
+}
+
+/** 帧频差分（游标拖动/播放）：按可见集增删单枚——严禁 clearLayers */
+function syncEventMarkersOnFrame() {
+  if (!map || !eventLayer || !layerVisible.value.events) return
+  const t = currentTime.value
+  const visible = new Set<string>()
+  for (const e of events.value) {
+    if (e.time_start > t) continue
+    visible.add(e.id)
+    if (eventMarkers.has(e.id)) continue
+    const m = createEventMarker(e)
+    if (!m) continue
+    eventMarkers.set(e.id, m)
+    eventLayer.addLayer(m)
+  }
+  for (const [id, m] of [...eventMarkers]) {
+    if (!visible.has(id)) {
+      eventLayer.removeLayer(m)
+      eventMarkers.delete(id)
+    }
   }
 }
 
@@ -1403,7 +1626,13 @@ watch(locations, renderMarkers, { deep: true })
 // 面板 📍 回指脉冲：prop 变化重渲 marker 层挂/摘 wm-loc--hl（null→id→null 两次触发，
 // WorldView 侧 nextTick 分离保证连点同目标也能重播）
 watch(() => props.highlightLocationId, () => renderMarkers())
-watch([worldState, currentTime, events], () => {
+// ===== 渲染管线（P0 性能治理 2026-09-14：高频/低频分离）=====
+// 低频：宏观数据真正增删改（事件/地点——地点变更经 locationsById 波及事件点/
+// 实体回退位）→ 全量重建全部数据层。保留 deep：增删改可能就地变更数组元素，
+// 低频路径的深比较开销可忽略（此前每帧版 deep 才是杀手）。
+// （mapLayers/mapStrokes 有意不入此监听：底图/笔迹不进这五层、各有专属 watch，
+//   blanket 监听会让笔迹逐笔触发全层重建。）
+watch([events, locations], () => {
   spawnRipples(currentTime.value)
   renderTracks()
   renderEntities()
@@ -1411,6 +1640,18 @@ watch([worldState, currentTime, events], () => {
   renderTerritory()
   renderEventMarkers()
 }, { deep: true })
+// 高频：游标拖动/播放（上游 rAF 节流至每帧一次）→ 只做差分，严禁 clearLayers
+// 全量重建——实体 marker 复用 setLatLng 挪位（move 沿路径插值移动效果不变）、
+// 关系线 setLatLngs 随端点伸缩、事件 marker 按可见集增删、轨迹签名门控
+// （仅跨事件边界才重建）、疆域层本就是形变差分（territoryPolys Map）。
+watch(currentTime, () => {
+  spawnRipples(currentTime.value)
+  syncTracksOnFrame()
+  syncEntitiesOnFrame()
+  syncRelationsOnFrame()
+  renderTerritory()
+  syncEventMarkersOnFrame()
+})
 watch(layerVisible, () => {
   renderMarkers()
   renderTracks()
