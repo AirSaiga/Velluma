@@ -247,7 +247,10 @@ async def retrieve_author_samples_with_meta(
                     ((s, vec_adjust(s, d)) for s, d in hits),
                     key=lambda t: t[1],
                 )
-                samples = _cap_ai_source([s for s, _ in hits], k)
+                # 零命中回落兜底流（B4 顺修）：本书零样本/样本全无向量时
+                # search_by_style 返 []——旧代码把 [] 当「有结果」直接短路，
+                # 兜底流永不激活（模块 docstring 声称的「无命中走兜底」名不副实）
+                samples = _cap_ai_source([s for s, _ in hits], k) or None
         except Exception as e:
             logger.info(f"[StyleRetrieval] 向量检索降级（走新近兜底）: {e}")
             samples = None
@@ -256,6 +259,24 @@ async def retrieve_author_samples_with_meta(
     if samples is None:
         try:
             pool = (await repo.list_by_book(book_id, scene_type=scene_type))[: max(k * 3, k)]
+            if not pool:
+                # B4 跨书冷启动兜底（2026-09-13 深水区批）：本书零样本（新书
+                # 第一章）→ 作者级黄金池（其它书 favorite/golden，排除
+                # adopted_ghost）。挂点纪律：只在检索层兜**样本**，不动
+                # get_effective_card——文风卡（画像/负面清单/旋钮）永远书级
+                # 隔离，防题材串味与「负面清单写错归宿」（红队 Q5）。
+                try:
+                    pool = await repo.list_golden_across_books(
+                        book_id, limit=max(k * 2, k),
+                    )
+                except Exception as cross_e:
+                    logger.info(f"[StyleRetrieval] 跨书兜底查询失败（忽略）: {cross_e}")
+                    pool = []
+                if pool:
+                    logger.info(
+                        "[StyleRetrieval] 跨书冷启动兜底：%d 条黄金样本（book=%s）",
+                        len(pool), book_id,
+                    )
 
             def fallback_rank(s: Any) -> tuple:
                 favorite = 0 if getattr(s, "favorite", False) else 1

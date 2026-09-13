@@ -110,6 +110,34 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
         rows = result.all()
         return [(row[0], float(row[1])) for row in rows]
 
+    async def list_golden_across_books(
+        self,
+        exclude_book_id: UUID | str,
+        limit: int = 3,
+    ) -> List[AuthorSample]:
+        """跨书作者黄金池（B4 冷启动兜底，2026-09-13 深水区批）。
+
+        其它书的 favorite / golden_snippet 样本——排除 adopted_ghost（AI 学
+        AI 不跨书传播）与 manual/published_chapter（跨书未做题材过滤，只吃
+        作者明确认证过的好样本，收窄串味面——红队 Q5 拍板口径）。"""
+        from sqlalchemy import or_
+
+        query = (
+            select(AuthorSample)
+            .where(
+                AuthorSample.book_id != UUID(str(exclude_book_id)),
+                AuthorSample.source != "adopted_ghost",
+                or_(
+                    AuthorSample.favorite.is_(True),
+                    AuthorSample.source == "golden_snippet",
+                ),
+            )
+            .order_by(AuthorSample.created_at.desc())
+            .limit(limit)
+        )
+        result = await self._db.execute(query)
+        return list(result.scalars().all())
+
     async def create_with_embedding(
         self,
         book_id: UUID,
