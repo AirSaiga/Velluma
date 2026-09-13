@@ -200,6 +200,14 @@ def onstage_projection(bundle, scene_loc_id: str, recent_text: str):
         | set(off_assets)
         | {_adapter_name(l) for l in (getattr(bundle, "locations", None) or [])}
     )
+    # 注册别名并入抑制面（2026-09-13 别名一等公民补口）：非昵称形的注册
+    # 别名此前不在 _known——正文提及时 _mentioned 让主实体经别名入册，但
+    # guest 名单不认识别名 → 照发通行证 → 同台双身份（在册「流光」+guest
+    # 「白露」）。别名是「已知名」，与主名同权进抑制面（≥2 字口径对齐
+    # _mentioned 的别名命中）。
+    for _src in (getattr(bundle, "entities", None) or [], getattr(bundle, "assets", None) or []):
+        for _e in _src:
+            _known.update(a for a in _adapter_aliases(_e) if len(a) >= 2)
     for g in detect_guest_names(recent, _known):
         entities.append({
             "name": g,

@@ -595,6 +595,94 @@ def test_route_stitch_wash_repair_residual(monkeypatch):
     assert wash["hits"] == [] and wash["original_text"] == ""  # 修补稿零命中
 
 
+def test_route_micro_lens_bypasses_deai_and_p2(monkeypatch):
+    """微镜头旁路（2026-09-13 B1 深水区批）：target=50 的 stitch 单镜头——
+
+    - deai 不调 polish_fragment（deai payload 记 micro_lens_bypass 原因）；
+    - P2 残留修补不发 LLM（唯一一次调用 = 主生成）；
+    - 残余禁词原样上屏但 chip 标记（hits 带 replaced=False）——提示链保留，
+      消失的只是自动修补（红队 Q4 核查的兜底口径）。
+    """
+    from backend.services.style.prohibitions import ProhibitionEntry, ProhibitionSet
+
+    async def scenario():
+        from backend.routes.chapter_generation.adaptive import stitch as adaptive_route
+        import backend.services.style.events as events_mod
+        import backend.services.style.semantic_match as sem_mod
+        import backend.services.deai as deai_mod
+
+        monkeypatch.setattr(events_mod, "append_style_event", lambda *a, **k: None)
+
+        async def _no_sem(text, ps_):
+            return []
+        monkeypatch.setattr(sem_mod, "semantic_scan_text", _no_sem)
+
+        ps = ProhibitionSet((
+            ProhibitionEntry(pattern="指腹", is_regex=False, alternative=None,
+                             severity="blocker", source="test"),
+        ))
+        _patch_prohibitions(monkeypatch, ps)
+
+        # deai 强制「已配置」：证明旁路先于配置判定生效（不依赖本机 model_config）
+        deai_calls = []
+
+        async def _spy_polish(text, **kw):
+            deai_calls.append(text)
+            return text
+        monkeypatch.setattr(deai_mod, "is_deai_configured", lambda: True)
+        monkeypatch.setattr(deai_mod, "polish_fragment", _spy_polish)
+
+        calls = []
+
+        async def fake_llm(system_prompt, user_prompt, **kw):
+            calls.append(user_prompt)
+            return _Result("他的指腹磨出茧，握紧了刀柄。")
+
+        async def fake_assemble(**kw):
+            return _Ctx()
+        monkeypatch.setattr(adaptive_route, "call_llm_with_usage", fake_llm)
+        monkeypatch.setattr(adaptive_route, "assemble_stitch_context", fake_assemble)
+        monkeypatch.setattr(adaptive_route, "_spine_anchor_rows_for_prompt",
+                            lambda cid, db: None)
+        monkeypatch.setattr(adaptive_route, "get_adaptive_recorder", lambda cid: _Rec())
+
+        async def _flush(cid):
+            return None
+        monkeypatch.setattr(adaptive_route, "flush_adaptive_records", _flush)
+        monkeypatch.setattr(adaptive_route, "bind_adaptive_trace", lambda cid: None)
+        monkeypatch.setattr(adaptive_route, "trace_event", lambda *a, **k: None)
+        monkeypatch.setattr(adaptive_route, "_style_drift_hint_for_heartbeat",
+                            lambda ch, db: None)
+        monkeypatch.setattr(adaptive_route, "_GHOST_REPAIR_TS", {})
+
+        req = StitchGhostRequest(fragment="他握紧刀。", mode="stitch",
+                                 rolling_prefix="前文占位。", target_chars=50)
+        resp = await adaptive_route.stitch_ghost(CH, req, _FakeDb())
+        frames = []
+        async for chunk in resp.body_iterator:
+            frames.append(chunk if isinstance(chunk, str) else chunk.decode("utf-8"))
+        return frames, calls, deai_calls
+
+    frames, calls, deai_calls = asyncio.run(scenario())
+    done = None
+    for f in frames:
+        if f.startswith("data: "):
+            payload = json.loads(f[len("data: "):].strip())
+            if payload.get("event") == "GHOST_DONE":
+                done = payload
+
+    assert done is not None
+    assert len(calls) == 1                    # 只有主生成：无 P2 修补调用
+    assert deai_calls == []                   # deai 旁路：polish_fragment 未被调
+    assert done["deai"]["reason"] == "micro_lens_bypass"
+    assert "指腹" in done["text"]             # 残余禁词原样上屏（作者裁决）
+    wash = done["wash"]
+    assert len(wash["hits"]) == 1 and wash["hits"][0]["replaced"] is False
+    # 契约：original_text 快照只在发生替换时保留（可回退用）——本例全是
+    # 无替代表的残余命中，文本未变，快照为空串是正确行为
+    assert wash["original_text"] == ""
+
+
 def test_route_trace_rolling_window_fields_and_token_floor(monkeypatch):
     """P1-3 短窗观测 + P1-4 预算下限：continue 短窗截窗可见、下限 2200 生效。
 

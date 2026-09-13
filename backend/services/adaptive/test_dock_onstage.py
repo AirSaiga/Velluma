@@ -489,6 +489,29 @@ class TestAliasCanonicalizer:
         text = "“咳咳……阿尘啊……这发电机还能修得好吗？”阿尘慌忙摆手，阿尘把线头接上。"
         assert detect_guest_names(text, known_names=["林尘", "大爷"]) == []
 
+    def test_registered_alias_exact_match_suppressed(self):
+        """注册别名（非昵称形）精确命中抑制面 → 不发证。
+
+        明姐是「明兰」的注册别名（称谓后缀提名不依赖 jieba NR 判定，确定性
+        路径）——别名进 _known 后 detect_guest_names 的已知名排除直接拦下。
+        """
+        text = "“明姐，我回来了。”明姐端来脸盆。明姐问累不累。"
+        assert detect_guest_names(text, known_names=["明兰", "明姐"]) == []
+
+    def test_registered_alias_no_dual_identity(self):
+        """端到端：注册别名（明姐→明兰）入抑制面——主实体经别名提及入册，
+        别名绝不作为独立 guest 出现（同台双身份事故的锁，2026-09-13 B1）。"""
+        b = _bundle(
+            entities=[_WEnt("e-ming", "明兰", aliases=["明姐"], dyn="在灶间忙")],
+            assets=[], locations=_LOCS, char_states=[],
+        )
+        view = onstage_projection(b, "loc-2", "“明姐，我回来了。”明姐端来脸盆。")
+        assert view is not None
+        names = [e["name"] for e in view["entities"]]
+        assert "明兰" in names                     # 别名提及 → 主实体入册
+        assert "明姐" not in names                 # 别名不发独立通行证
+        assert not any(e.get("is_guest") for e in view["entities"])
+
 
 class TestGuestPass:
     """临时在场通行证：正文高频未建档人名入册；普通名词/泛称不污染。"""

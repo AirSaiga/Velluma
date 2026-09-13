@@ -781,11 +781,18 @@ async def stitch_ghost(
             # 逐字节零变化（零变化契约，同 embedding 未配置短路纪律）。
             # ============================================================
             deai_payload: Dict = {"applied": False, "reason": "", "warnings": []}
+            # 微镜头旁路（2026-09-13 B1 深水区批）：≤60 字单镜头出字竞速优先
+            # ——微镜头截断封顶 96 字恒进 deai ≤100 契约窗，一次往返常态 1-3s
+            # 对「按 Space 即出字」是纯延迟；模型层洗味让位确定性 P1 洗层
+            # （有替代表照换）+ 终检 cliche_hit（live 进 warnings 帧），兜底链不缺。
+            _micro_lens = _is_micro_lens(request.mode, request.target_chars)
+            if _micro_lens:
+                deai_payload["reason"] = "micro_lens_bypass"
             try:
                 from backend.services.deai import is_deai_configured, polish_fragment
                 from backend.services.style.events import append_style_event
 
-                if is_deai_configured():
+                if is_deai_configured() and not _micro_lens:
                     # 保名闸素材（导师审 P1-1）：契约专名闸只护引文/书名与
                     # 拉丁 token，中文名不在其内——用 kg 在场/死者名单给
                     # 抛光稿加一道「原文出现的实体名必须逐字保留」的加护
@@ -857,7 +864,10 @@ async def stitch_ghost(
 
                 # P2：残留 blocker（无替代词，洗层只记录未替换）→ 单次句级修补。
                 # 严格验收：修补稿重洗后零残留才采纳，否则维持洗层结果带 chip。
-                if wash_result.residual_hits:
+                # 微镜头旁路（2026-09-13 B1）：单次 LLM 往返与竞速冲突——
+                # 残余禁词由 chip「已标记」+ 终检 cliche_hit warnings 保底呈现，
+                # 作者裁决链完整（红队 Q4 核查：消失的只是自动修补，不是提示）。
+                if wash_result.residual_hits and not _micro_lens:
                     cid = str(chapter_id)
                     now = time.time()
                     if (
