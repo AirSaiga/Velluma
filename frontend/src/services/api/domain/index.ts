@@ -543,10 +543,11 @@ export const styleApi = {
     return requestJson(`/books/${bookId}/style-fingerprint${query}`)
   },
 
-  /** 从已发布章节一键收编作者样本（零状态坡道兜底）。 */
+  /** 从已发布章节一键收编作者样本（零状态坡道兜底）；chapter_id=单章收编
+   *  （2026-09-14 装填通道：写作台「收本章为范例」一键动作，不限发布状态）。 */
   createSamplesFromChapters: async (
     bookId: string,
-    opts?: { max_chapters?: number; excerpt_chars?: number },
+    opts?: { chapter_id?: string; max_chapters?: number; excerpt_chars?: number },
   ): Promise<AuthorSample[]> => {
     return requestJson(`/books/${bookId}/samples/from-chapters`, {
       method: 'POST',

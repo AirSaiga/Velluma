@@ -182,20 +182,11 @@ class TestSamplePrior:
 
 
 # ============================================================
-# P5/P6：检索扩展
+# P5/P6：检索扩展（P6 旋钮选择器已退役 2026-09-14——数学空转实证，
+# docs/style-parameter-effectiveness-audit.md §1.3；轻指纹设施一并移除）
 # ============================================================
 
 class TestRetrievalExtensions:
-    def test_light_stats(self):
-        from backend.services.style.retrieval import sample_light_stats
-        mean, ratio = sample_light_stats("他走了。她笑了。“你说什么？”")
-        assert 0 < mean < 10
-        assert ratio > 0
-
-    def test_empty_stats(self):
-        from backend.services.style.retrieval import sample_light_stats
-        assert sample_light_stats("") == (0.0, 0.0)
-
     def test_ai_source_cap(self):
         from backend.services.style.retrieval import _cap_ai_source
 
@@ -206,26 +197,9 @@ class TestRetrievalExtensions:
         ordered = [S("a1", "adopted_ghost"), S("a2", "adopted_ghost"), S("m1")]
         assert [s.name for s in _cap_ai_source(ordered, 3)] == ["a1", "m1"]  # AI ≤1
 
-    def test_selector_adjust_neutral_without_knob(self):
-        from backend.services.style.retrieval import _selector_adjust
+    def test_selector_retired_no_import(self):
+        """旋钮选择器退役验收：retrieval 模块不再暴露 _selector_adjust/sample_light_stats。"""
+        import backend.services.style.retrieval as retrieval
 
-        class Card:
-            style_knobs = {}
-            dialogue_ratio_target = None
-
-        assert _selector_adjust(type("S", (), {"content": "短句。"}), Card()) == 0.0
-
-    def test_selector_adjust_rhythm_short_knob(self):
-        from backend.services.style.retrieval import _selector_adjust
-
-        class Card:
-            style_knobs = {"rhythm": 1}   # 极快 → 目标句均 ~10
-            dialogue_ratio_target = None
-
-        class SampleShort:
-            content = "走。跑。停。"          # 句均 ~2 字 → 贴近
-
-        class SampleLong:
-            content = "他沿着那条被雨水浸得发亮的长街一直走到尽头才终于停下脚步歇了口气环顾四周无人。"  # 单长句 ~35 字 → 远离档位锚
-
-        assert _selector_adjust(SampleShort(), Card()) < _selector_adjust(SampleLong(), Card())
+        assert not hasattr(retrieval, "_selector_adjust")
+        assert not hasattr(retrieval, "sample_light_stats")

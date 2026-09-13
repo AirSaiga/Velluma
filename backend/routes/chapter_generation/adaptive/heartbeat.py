@@ -399,17 +399,23 @@ async def _style_drift_hint_for_heartbeat(chapter: Any, db: AsyncSession) -> Opt
     hint: Optional[Dict] = None
     if len(content) >= 400:
         try:
-            from backend.repositories import StyleCardRepository
-            from backend.services.style.fingerprint import compute_style_drift_hint
+            from backend.repositories import AuthorSampleRepository
+            from backend.services.style.fingerprint import (
+                aggregate_corpus, compute_style_drift_hint,
+            )
             from backend.services.validation.thresholds import CV_THRESHOLD_LO, CV_THRESHOLD_HI
 
-            # Phase 4：漂移参照取生效卡（章级特例整卡覆盖，回退书级）
-            card = await StyleCardRepository(db).get_effective_card(
-                chapter.book_id, chapter.id,
-            )
+            # 2026-09-14 去参数化：对话目标不再读作者拨的浮点数（已冻结只读），
+            # 改为「与你自己语料的实测对话占比比」——样本聚合即作者自己的锚，
+            # 比拍脑袋的目标数字诚实；零样本 → None（该维提示缺席，CV/重复度照常）。
+            # （原生效卡查询随之退役——漂移提示不再消费卡的任何字段。）
             target = None
-            if card is not None and card.dialogue_ratio_target is not None:
-                target = float(card.dialogue_ratio_target)
+            samples = await AuthorSampleRepository(db).list_by_book(chapter.book_id)
+            if samples:
+                corpus_fp = aggregate_corpus(
+                    [s.content or "" for s in samples], max_chars=8000,
+                )
+                target = corpus_fp.get("dialogue_ratio") or None
             message = compute_style_drift_hint(
                 content[-3000:], target, CV_THRESHOLD_LO, CV_THRESHOLD_HI,
             )

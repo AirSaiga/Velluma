@@ -658,12 +658,16 @@ _PROFILE_LABELS = {
 
 
 def render_style_positive(style_card: Any) -> str:
-    """把 StyleCard 的正面画像渲染为 prompt 用文本（画像 ≤10 行 + 旋钮意图行）。
+    """把 StyleCard 的正面画像渲染为 prompt 用文本（画像 ≤10 行）。
 
-    包含：positive_profile 五维（键名翻译为中文标签）+ 段落节奏 + 对话占比目标
-    + 意图旋钮行（S4：style_knobs 手动档渲染为「意图」行，自动档不注入）。
+    包含：positive_profile 五维（键名翻译为中文标签）+ 段落节奏。
     空卡/无有效字段 → 空串（调用方 prompt 零变化）。
     独立成公共函数供 adaptive 路由与 bundle 内部共用（单一渲染口径）。
+
+    2026-09-14 去参数化（第三期审计 docs/style-parameter-effectiveness-audit.md）：
+    意图旋钮行（style_knobs）彻底移除——rhythm/dialogue 早已零注入（编译进检索器
+    且数学空转），density/warmth 与白描封杀令指令内战；对话占比目标不再进任何
+    prompt（对账/漂移提示改语料实测锚）。「范例>形容」：注意力让给亲笔样本。
     """
     if style_card is None:
         return ""
@@ -679,18 +683,6 @@ def render_style_positive(style_card: Any) -> str:
     paragraph_rhythm = _get_attr(style_card, "paragraph_rhythm")
     if paragraph_rhythm:
         lines.append(f"- 段落节奏：{str(paragraph_rhythm)[:STYLE_PARAGRAPH_RHYTHM_MAX_CHARS]}")
-    # P6 选择平面（2026-08-29，docs/style-paradigm.md §3.1）：可测维度不再写
-    # 进 prompt——对话占比目标与节奏旋钮编译为样本检索排序条件
-    # （retrieval._selector_adjust），prompt 画像只留样本筛选表达不了的全局
-    # 维度（语域/浓淡/冷热/作者亲笔的节奏描述）。「测量>声明、范例>形容」。
-    # 意图旋钮行（S4）：手动档才渲染，自动档零注入（节奏档除外——已编译进选择器）
-    from backend.services.style.knobs import render_knob_lines
-
-    knobs = _get_attr(style_card, "style_knobs")
-    for knob_line in render_knob_lines(knobs if isinstance(knobs, dict) else {}):
-        if knob_line.startswith("节奏"):
-            continue
-        lines.append(f"- {knob_line}")
     return "\n".join(lines[:STYLE_POSITIVE_MAX_LINES])
 
 

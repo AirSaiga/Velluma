@@ -21,7 +21,6 @@ import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useAppStore } from '../../app/useAppStore'
 import StyleSampleSection from '../presentation/StyleSampleSection.vue'
 import StyleFingerprintSection from '../presentation/StyleFingerprintSection.vue'
-import StyleKnobsSection from '../presentation/StyleKnobsSection.vue'
 import StyleNegativeSection from '../presentation/StyleNegativeSection.vue'
 import StyleReconciliationSection from '../presentation/StyleReconciliationSection.vue'
 import StyleExtractModal from '../presentation/StyleExtractModal.vue'
@@ -39,7 +38,6 @@ import type {
   StyleInboxItem,
   StyleScanResult,
   StyleScanHit,
-  StyleKnobKey,
 } from '../../../types'
 
 const route = useRoute()
@@ -75,10 +73,10 @@ const samples = ref<AuthorSample[]>([])
 // 文风卡字段
 const positiveProfile = ref<Record<string, string>>({})
 const negativeList = ref<NegativeItem[]>([])
-const dialogueRatioTarget = ref<number | null>(null)
 const paragraphRhythm = ref('')
-const styleKnobs = ref<Record<string, number>>({})
 const lockedKeys = ref<string[]>([])
+// 2026-09-14 去参数化（第三期审计）：dialogue_ratio_target / style_knobs 已冻结
+// 只读退役——前端不再持有编辑态、不再上送（后端 PUT 一律剥离）。
 // 双写收敛（任务包 B）：book.style_blacklist 同步通道已删——历史书级黑名单由后端
 // 启动迁移并入 negative_list，负面清单唯一权威是文风卡。
 
@@ -116,13 +114,11 @@ const PROFILE_KEYS = [
 
 const hasStyleConfig = computed(() =>
   PROFILE_KEYS.some(k => (positiveProfile.value[k] || '').trim()) ||
-  negativeList.value.some(n => n.word.trim()) ||
-  Object.keys(styleKnobs.value).length > 0 ||
-  dialogueRatioTarget.value !== null,
+  negativeList.value.some(n => n.word.trim()),
 )
 
 // 零状态门闸：无样本且无任何既有配置才进坡道——旧 StyleCardManager 时代
-// 填过负面清单/画像/旋钮的书，不能被整页折叠成粘贴邀请（既有配置必须可见可改）
+// 填过负面清单/画像的书，不能被整页折叠成粘贴邀请（既有配置必须可见可改）
 const zeroState = computed(() => samples.value.length === 0 && !hasStyleConfig.value)
 
 /** 坡道三幕（设计稿 §6.3「页面随数据生长」）：
@@ -197,9 +193,7 @@ async function loadAll() {
             id: `neg_${i}_${Date.now()}`,
           } as NegativeItem))
         : []
-      dialogueRatioTarget.value = styleCard.dialogue_ratio_target ?? null
       paragraphRhythm.value = styleCard.paragraph_rhythm || ''
-      styleKnobs.value = { ...(styleCard.style_knobs || {}) }
       lockedKeys.value = [...(styleCard.locked_keys || [])]
     }
     for (const key of PROFILE_KEYS) {
@@ -265,9 +259,7 @@ async function saveStyleCard() {
           alternative: n.alternative?.trim() || null,
           ...(n.severity ? { severity: n.severity } : {}),
         })),
-      dialogue_ratio_target: dialogueRatioTarget.value,
       paragraph_rhythm: paragraphRhythm.value || null,
-      style_knobs: { ...styleKnobs.value },
       locked_keys: [...lockedKeys.value],
     }
     // 章级特例：保存只落该章的覆盖卡
@@ -459,9 +451,6 @@ async function runExtract(validSamples: string[]) {
         id: `neg_extract_${i}_${Date.now()}`,
       } as NegativeItem))
     }
-    if (result.dialogue_ratio_target !== null && result.dialogue_ratio_target !== undefined) {
-      dialogueRatioTarget.value = result.dialogue_ratio_target
-    }
     if (result.paragraph_rhythm) {
       paragraphRhythm.value = result.paragraph_rhythm
     }
@@ -474,24 +463,8 @@ async function runExtract(validSamples: string[]) {
   }
 }
 
-// ============ 意图旋钮（S4）============
-function updateKnob(key: StyleKnobKey, tier: number | null) {
-  if (tier === null) {
-    delete styleKnobs.value[key]
-  } else {
-    styleKnobs.value[key] = tier
-  }
-}
-
-function applyPreset(preset: { label?: string; knobs: Record<string, number>; profilePatch: Record<string, string>; dialogueTarget: number }) {
-  styleKnobs.value = { ...preset.knobs }
-  positiveProfile.value = { ...positiveProfile.value, ...preset.profilePatch }
-  dialogueRatioTarget.value = preset.dialogueTarget
-  const bookId = bookIdFromRoute.value
-  if (bookId) styleApi.logStyleEvent(bookId, 'apply_preset', preset.label || undefined)
-  markDirty()
-  showToast('预设已套用（可继续手调，试听听效果）', 'success')
-}
+// （意图旋钮 S4 已退役 2026-09-14：档位/预设 UI 与状态整体下线，
+//   docs/style-parameter-effectiveness-audit.md——两根支柱=亲笔样本+负面清单）
 
 // ============ 章级特例（S3）============
 async function switchScope(chapterId: string) {
@@ -517,14 +490,12 @@ async function switchScope(chapterId: string) {
   applyCardToFields(card)
 }
 
-function applyCardToFields(card: { positive_profile?: Record<string, string>; negative_list?: NegativeItem[]; dialogue_ratio_target?: number | null; paragraph_rhythm?: string | null; style_knobs?: Record<string, number> | null; locked_keys?: string[] | null } | null) {
+function applyCardToFields(card: { positive_profile?: Record<string, string>; negative_list?: NegativeItem[]; paragraph_rhythm?: string | null; locked_keys?: string[] | null } | null) {
   positiveProfile.value = { ...(card?.positive_profile || {}) }
   negativeList.value = Array.isArray(card?.negative_list)
     ? card!.negative_list!.map(n => ({ word: n.word || '', alternative: n.alternative || '', severity: n.severity }))
     : []
-  dialogueRatioTarget.value = card?.dialogue_ratio_target ?? null
   paragraphRhythm.value = card?.paragraph_rhythm || ''
-  styleKnobs.value = { ...(card?.style_knobs || {}) }
   lockedKeys.value = [...(card?.locked_keys || [])]
   for (const key of PROFILE_KEYS) {
     if (!(key in positiveProfile.value)) positiveProfile.value[key] = ''
@@ -575,7 +546,6 @@ function currentDraftOverride() {
   return {
     positive_profile: { ...positiveProfile.value },
     negative_list: negativeList.value.filter(n => n.word.trim()),
-    dialogue_ratio_target: dialogueRatioTarget.value,
     paragraph_rhythm: paragraphRhythm.value || null,
   }
 }
@@ -879,20 +849,6 @@ onUnmounted(() => clearTimeout(autosaveTimer))
             </div>
 
             <template v-if="growthStage === 'full'">
-              <!-- S4 意图旋钮：档位制 + 预设 + 实测锚偏差提示（整宽） -->
-              <div class="section-row">
-                <StyleKnobsSection
-                  :knobs="styleKnobs"
-                  :dialogue-target="dialogueRatioTarget"
-                  :corpus-sentence-mean="fingerprint?.corpus?.sentence_len_mean ?? null"
-                  :corpus-dialogue="fingerprint?.corpus?.dialogue_ratio ?? null"
-                  @dirty="markDirty"
-                  @update-knob="updateKnob"
-                  @update-dialogue="v => { dialogueRatioTarget = v }"
-                  @apply-preset="applyPreset"
-                />
-              </div>
-
               <!-- 反馈层配对：禁令台账 + 结果回看 -->
               <div class="section-row duo duo-feedback">
                 <StyleNegativeSection
@@ -918,7 +874,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 
             <!-- 第二幕长成预告：数据再长一点，这些分区会展开 -->
             <div v-else class="grow-teaser">
-              负面清单 · 意图旋钮 · 逐章核对 —— 再贴 {{ Math.max(0, 3 - samples.length) }} 条样本，这些分区会在这里长出来
+              负面清单 · 逐章核对 —— 再贴 {{ Math.max(0, 3 - samples.length) }} 条样本，这些分区会在这里长出来
             </div>
           </template>
         </template>

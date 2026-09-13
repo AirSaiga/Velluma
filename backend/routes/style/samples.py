@@ -167,6 +167,9 @@ async def create_samples_from_chapters(
 
     已发布章节优先；一本从未发布的书回落到有正文的章节
     （作者主导写作模式下正文即作者的字）。摘取章节开头至句界。
+
+    chapter_id 非空 = 单章模式（2026-09-14 装填通道：写作台「收本章为范例」
+    一键动作）——作者明示收这章，不限发布状态；幂等：该章已收编过则 409。
     """
     book = await book_repo.get_by_id(book_id)
     if not book:
@@ -177,24 +180,34 @@ async def create_samples_from_chapters(
         # （_plain_text 已提升为模块级函数：指纹/命中/收编三处测量共用同一剥法）
         return bool(html_to_plain(c.content_text))
 
-    base = (
-        select(Chapter)
-        .where(Chapter.book_id == book_id)
-        .order_by(Chapter.chapter_number.desc())
-        .limit(50)
-    )
-    result = await db.execute(base)
-    recent = list(result.scalars().all())
-
-    published = [c for c in recent if c.status == "published" and _has_content(c)][: payload.max_chapters]
-    picked = published or [c for c in recent if _has_content(c)][: payload.max_chapters]
-    if not picked:
-        raise HTTPException(status_code=404, detail="本书尚无可收编的章节正文")
-
     # 幂等：已收编过的章节跳过（防重复点击产生重复样本，与 from-golden 去重同原则）
     existing = await repo.list_by_book(book_id)
     collected_chapter_ids = {s.chapter_id for s in existing if s.source == "published_chapter" and s.chapter_id}
-    picked = [c for c in picked if c.id not in collected_chapter_ids]
+
+    if payload.chapter_id is not None:
+        chapter = await db.get(Chapter, payload.chapter_id)
+        if not chapter or str(chapter.book_id) != str(book_id):
+            raise HTTPException(status_code=404, detail="章节不存在")
+        if not _has_content(chapter):
+            raise HTTPException(status_code=422, detail="本章还没有可收编的正文")
+        if chapter.id in collected_chapter_ids:
+            raise HTTPException(status_code=409, detail="本章已收编过范例（样本库里能找到它）")
+        picked = [chapter]
+    else:
+        base = (
+            select(Chapter)
+            .where(Chapter.book_id == book_id)
+            .order_by(Chapter.chapter_number.desc())
+            .limit(50)
+        )
+        result = await db.execute(base)
+        recent = list(result.scalars().all())
+
+        published = [c for c in recent if c.status == "published" and _has_content(c)][: payload.max_chapters]
+        picked = published or [c for c in recent if _has_content(c)][: payload.max_chapters]
+        if not picked:
+            raise HTTPException(status_code=404, detail="本书尚无可收编的章节正文")
+        picked = [c for c in picked if c.id not in collected_chapter_ids]
 
     picked.reverse()  # 按章号升序收编，样本列表时序自然
 

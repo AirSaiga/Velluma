@@ -87,7 +87,7 @@ def fat_kwargs() -> dict:
     canon_parts.append("\n## 活跃伏笔 [hook]（本章可推进/回收）")
     canon_parts.extend(f"- [{N16}] 强度=999：{'伏' * 100}" for _ in range(8))
     return dict(
-        style_positive="\n".join(f"- {N16}：{'值' * 120}" for _ in range(14)),
+        style_positive="\n".join(f"- {N16}：{'值' * 120}" for _ in range(10)),  # STYLE_POSITIVE_MAX_LINES（14→10，2026-09-14 去参数化）
         author_samples=["样" * 1200, "本" * 1200],
         proper_nouns=[N16] * 20,
         canon_context="\n".join(canon_parts),
@@ -275,7 +275,7 @@ class TestTrimOrder:
         by_key2 = {b.key: b for b in result2.blocks}
         assert by_key2["author_samples"].render() == ""
         assert by_key2["spatial"].render() == ""
-        assert u2["style_positive"].entries_kept == 14   # 画像最后才动
+        assert u2["style_positive"].entries_kept == 10   # 画像最后才动（STYLE_POSITIVE_MAX_LINES=10）
 
     def test_hard_blocks_survive_full_squeeze(self):
         """软块全部让空仍超支 → 硬块逐字节不动（宁可超支不丢强约束）。"""

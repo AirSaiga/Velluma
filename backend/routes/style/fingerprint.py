@@ -75,9 +75,11 @@ async def get_book_style_fingerprint(
         for s in samples
     ]
 
-    # 对账目标：书级文风卡的对话占比目标 + 审计侧 CV 健康区间（同一参考系）
+    # 对账参考：审计侧 CV 健康区间 + 对话占比「语料实测锚」（2026-09-14 去参数化：
+    # 不再读文风卡上作者拨的 dialogue_ratio_target 浮点数——冻结只读后该值陈旧，
+    # 对账带直接用作者自己语料的实测对话占比做目标带，零样本 → None 该带缺席）
     card = await style_repo.get_effective_card(book_id, chapter_id=None)
-    dialogue_target = float(card.dialogue_ratio_target) if card and card.dialogue_ratio_target is not None else None
+    dialogue_target = corpus.get("dialogue_ratio") or None if recent_samples else None
 
     chapters_payload: Optional[List[dict]] = None
     negative_hit_counts: Dict[str, int] = {}

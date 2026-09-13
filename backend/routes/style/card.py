@@ -60,9 +60,14 @@ async def upsert_book_style_card(
         raise HTTPException(status_code=404, detail="书籍不存在")
 
     # exclude_unset 而非 exclude_none：前端 StyleView 总是全量发送，显式 null
-    # 是「清除」语义（如 dialogue_ratio_target=null 拨回「自动」档）——
-    # exclude_none 会把 null 键丢掉，DB 旧值复活（「自动」档清不掉事故）
+    # 是「清除」语义（如段落节奏=null 清空）——exclude_none 会把 null 键丢掉，
+    # DB 旧值复活（清不掉事故）。
     fields = payload.model_dump(exclude={"chapter_id"}, exclude_unset=True)
+    # 2026-09-14 去参数化冻结（第三期审计）：style_knobs / dialogue_ratio_target
+    # 退役为只读——PUT 一律剥离（列保留、历史值可读，下游消费已全部改道语料
+    # 实测/移除）。提炼结果里的 dialogue_ratio_target 也经此闸自然丢弃。
+    fields.pop("style_knobs", None)
+    fields.pop("dialogue_ratio_target", None)
     chapter_id = payload.chapter_id
 
     if chapter_id is None:

@@ -414,6 +414,28 @@ watch(selectedChapterId, async (chapterId) => {
   }
 }, { immediate: true })
 
+// ===== 本章一键收为文风范例（2026-09-14 装填通道）=====
+// 去参数化后的两根支柱之一：亲笔样本 few-shot 是质量杠杆最大的一环，但样本库
+// 零库存曾让它全程空转（7 次生成 sample_ids 全空）——把「收本章为范例」放在
+// 作者看得见的地方，亲笔正文秒级入库（摘开头至句界，幂等：已收编过 409 提示）。
+const harvestingSample = ref(false)
+async function harvestChapterSample() {
+  const bookId = store.currentBookId.value
+  if (!bookId || !selectedChapterId.value || harvestingSample.value) return
+  harvestingSample.value = true
+  try {
+    const created = await styleApi.createSamplesFromChapters(bookId, { chapter_id: selectedChapterId.value })
+    showToast(`已收为文风范例（摘 ${created[0]?.word_count ?? 0} 字）——续写会用你的字当示范`, 'success')
+  } catch (e: any) {
+    const msg = String(e?.message || '')
+    if (e?.status === 409 || msg.includes('已收编')) showToast('本章已收编过范例——样本库里能找到它', 'info')
+    else if (e?.status === 422 || msg.includes('正文')) showToast('本章还没有可收编的正文', 'warning')
+    else showToast('收录失败: ' + msg, 'error')
+  } finally {
+    harvestingSample.value = false
+  }
+}
+
 function handleEditChapterStyle() {
   const bookId = store.currentBookId.value
   if (!bookId || !selectedChapterId.value) return
@@ -584,6 +606,17 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
             <button class="btn-refinery" @click="handleEditChapterStyle">
               <Icon name="paint-brush" :size="14" />
               <span>{{ chapterStyleOverride ? '编辑本章专属文风' : '给本章单独定个文风' }}</span>
+            </button>
+            <!-- 装填通道（2026-09-14）：亲笔正文一键入库为 few-shot 示范——
+                 样本库空转的根治入口，比任何参数都管用 -->
+            <button
+              class="btn-refinery secondary"
+              :disabled="!chapterHasContent || harvestingSample"
+              :title="chapterHasContent ? '把本章开头摘为文风范例——AI 续写时用它当你的笔迹示范' : '本章写了字才能收'"
+              @click="harvestChapterSample"
+            >
+              <Icon name="heart" :size="14" />
+              <span>{{ harvestingSample ? '收录中…' : '收本章为文风范例' }}</span>
             </button>
             <p class="hint">回忆章想换个腔调？本章专属只管这一章，其他章节不受影响。</p>
           </section>

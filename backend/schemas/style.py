@@ -245,8 +245,13 @@ class StyleFingerprintResponse(BaseModel):
 
 
 class SamplesFromChaptersRequest(BaseModel):
-    """从已发布章节收编作者样本（零状态坡道兜底通路，设计稿 §6.3）。"""
-    max_chapters: int = Field(3, ge=1, le=10, description="最多收编章数")
+    """从已发布章节收编作者样本（零状态坡道兜底通路，设计稿 §6.3）。
+
+    chapter_id 非空 = 单章模式（2026-09-14 装填通道：写作台「收本章为范例」
+    一键动作——作者亲笔正文明示入册，不限发布状态）。
+    """
+    chapter_id: Optional[UUID] = Field(None, description="单章收编（写作台一键动作）")
+    max_chapters: int = Field(3, ge=1, le=10, description="最多收编章数（批量模式）")
     excerpt_chars: int = Field(2000, ge=200, le=8000, description="每章摘取字数上限")
 
 

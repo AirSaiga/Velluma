@@ -251,10 +251,11 @@ STYLE_PROFILE_VALUE_MAX_CHARS = 120
 # 首版出处：services/context/settings_bundle.py render_style_positive
 STYLE_PARAGRAPH_RHYTHM_MAX_CHARS = 80
 
-# 画像块总行数上限——五维（≤5）+ 段落节奏（1）+ 对话目标（1）+ 意图旋钮
-# （≤4，S4 手动档）理论最多 11 行，14 是防御性封顶（防画像字段膨胀）。
+# 画像块总行数上限——五维（≤5）+ 段落节奏（1）理论最多 6 行，10 是防御性
+# 封顶（防画像字段膨胀）。2026-09-14 去参数化：旋钮行（≤3）与对话目标行
+# 移除后由 14 收缩回 10——省出的注意力让给亲笔样本（few-shot 示范块）。
 # 首版出处：services/context/settings_bundle.py render_style_positive
-STYLE_POSITIVE_MAX_LINES = 14
+STYLE_POSITIVE_MAX_LINES = 10
 
 # ============================================================
 # 空间常识（D4 比例尺切片，docs/map-scale-spatial.md §5）
@@ -413,10 +414,10 @@ _NAME_ALLOWANCE_CHARS = 16
 # 逐块 worst-case 计算（固定头按 adaptive_prompts._xxx_block 实际文案逐字数，
 # 条目按本表常量上限 + 名字 16 字假设；数值向上取整，吸收逐字计数误差）：
 #
-# style_positive = 2020
-#   固定头 56（两行标题+说明行）+ 14 行（STYLE_POSITIVE_MAX_LINES）×
-#   139（"- "+标签16+"："+画像值 STYLE_PROFILE_VALUE_MAX_CHARS=120）+ 13 个换行
-#   ——实测 2015，取整 2020。
+# style_positive = 1460
+#   固定头 56（两行标题+说明行）+ 10 行（STYLE_POSITIVE_MAX_LINES，2026-09-14
+#   旋钮行移除后 14→10）× 139（"- "+标签16+"："+画像值 120）+ 9 个换行
+#   ——56+1390+9=1455，取整 1460。
 # author_samples = 2500
 #   固定头 42 + 2 条（AUTHOR_SAMPLES_MAX_K）×（"【示范 1】\n" 7 字 +
 #   AUTHOR_SAMPLE_MAX_CHARS=1200）+ 条间 "\n\n" 2 + 尾句 37——实测 2494。
@@ -447,7 +448,7 @@ _NAME_ALLOWANCE_CHARS = 16
 # 「实测」= 按上述口径构造满配输入、用 adaptive_prompts 现行块渲染函数量出的
 # 精确长度（2026-08-20）；test_budget_allocate 的零变化锁用同一口径复验。
 BLOCK_CHAR_BUDGETS: Dict[str, int] = {
-    "style_positive": 2020,
+    "style_positive": 1460,
     "author_samples": 2500,
     "proper_nouns": 420,
     "canon": 5480,

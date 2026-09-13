@@ -105,7 +105,7 @@ const summary = computed<string[]>(() => {
   const target = props.fingerprint?.reference.dialogue_target
   const [dLo, dHi] = dialogueSeries.value.band || [0.2, 0.5]
   const avgDlg = avg(last.map(c => c.fingerprint.dialogue_ratio))
-  const targetLabel = target !== null && target !== undefined ? `目标 ${Math.round(target * 100)}%` : '默认目标'
+  const targetLabel = target !== null && target !== undefined ? `语料实测 ${Math.round(target * 100)}%` : '默认目标'
   if (avgDlg < dLo) {
     notes.push(`对话占比 ${Math.round(avgDlg * 100)}%，低于${targetLabel}区间——叙事密度偏高。`)
   } else if (avgDlg > dHi) {

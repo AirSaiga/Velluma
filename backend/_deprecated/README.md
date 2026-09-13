@@ -155,3 +155,8 @@ V3 生成链残骸。用户拍板整线退役。本批由 `git mv` 移入，`git
   历史数据不动，代码不再读写；存量书若有旧笔记，无任何活路径再消费
 - 未动：ADF（`setting_resolver.py` 的 `getattr` 读）——引擎本体保留原则；字段无写入方
   后 ADF 读值只会是历史存量或空，行为自然退化，不改造
+
+- `style_knobs.py`（2026-09-14 去参数化，docs/style-parameter-effectiveness-audit.md）：
+  意图旋钮档位表 + render_knob_lines 退役——rhythm/dialogue 零注入+检索数学空转，
+  density/warmth 与白描封杀令指令内战；`style_cards.style_knobs`/`dialogue_ratio_target`
+  两列冻结只读（列保留、历史值可读），API 写入路径一律剥离。

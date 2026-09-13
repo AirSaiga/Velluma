@@ -210,8 +210,8 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 
           <div class="advanced-toolbar">
             <p class="advanced-note">
-              这些文本会随意图旋钮一起注入 AI 生成的文风约束。锁定的字段不被「从样本提炼」覆盖
-              （亲笔描述/特殊文体保护）。
+              画像由「从样本提炼」生成、锁定字段不被覆盖（亲笔描述/特殊文体保护）。
+              手填表单已下线（2026-09-14 去参数化）——画像只信从你的字里提出来的。
             </p>
             <span class="advanced-actions">
               <button
@@ -236,13 +236,9 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
                 @click="emit('toggle-lock', pk.key)"
               ><Icon :name="lockedKeys?.includes(pk.key) ? 'lock-closed' : 'lock-open'" :size="14" /></button>
             </label>
-            <textarea
-              v-model="positiveProfile[pk.key]"
-              rows="2"
-              class="field-textarea"
-              placeholder="例：短句与长句交替，平均 15 字"
-              @input="emit('dirty')"
-            ></textarea>
+            <!-- 手填已下线：只读展示提炼产物（空=未提炼；改内容走「从样本提炼」或字段锁保护亲笔值） -->
+            <p v-if="(positiveProfile[pk.key] || '').trim()" class="field-readonly">{{ positiveProfile[pk.key] }}</p>
+            <p v-else class="field-readonly field-readonly--empty">未提炼（「从样本提炼」生成）</p>
           </div>
 
           <div class="profile-field">
@@ -526,6 +522,21 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 }
 .field-textarea:focus {
   border-color: var(--accent-400);
+}
+/* 画像只读展示（手填下线 2026-09-14）——与 field-textarea 同排版基因，无焦点态 */
+.field-readonly {
+  margin: 0;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 0.375rem;
+  white-space: pre-wrap;
+}
+.field-readonly--empty {
+  color: var(--text-muted);
 }
 .field-range {
   width: 100%;

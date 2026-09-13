@@ -41,8 +41,8 @@ C2 场景匹配（docs/foundation-hardening.md §5.2）：scene_hint（v1 仅
   向量流距离 ÷ 因子（0.8~1.2）、兜底流作排序末位键——只调序不筛选；
 - P5 漂移锚样：drift_anchor=True 时收藏样本 +0.1（漂移检出 → 作者认证的
   最佳示范优先，v1 锚样启发式）；
-- P6 旋钮选择器：意图旋钮/对话目标编译为样本轻指纹（句均长/对话占比）的
-  匹配度微调——「描述」不再写给模型看，编译成挑样本的条件；
+- P6 旋钮选择器：已退役（2026-09-14 去参数化——数学空转实证，见
+  docs/style-parameter-effectiveness-audit.md §1.3）；
 - P5 AI 来源配比：source=adopted_ghost 的样本每批 ≤1 条（防采纳幽灵自蒸馏
   污染样本库——长期回流会让文风向 AI 味收敛）。
 
@@ -51,7 +51,6 @@ C2 场景匹配（docs/foundation-hardening.md §5.2）：scene_hint（v1 仅
 """
 
 import logging
-import re
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,55 +129,11 @@ def order_samples_for_fallback(samples: List[Any], scene_hint: Optional[str] = N
 
 # ============================================================
 # P6 样本轻指纹（选择器用，纯算法——候选池小，逐条现算可接受）
+# —— 2026-09-14 去参数化（第三期审计）：_selector_adjust 与其轻指纹设施整体
+#    退役。旋钮/对话目标在向量流无 hint 路径 fetch_limit=k 下连换序空间都不
+#    存在（数学空转），兜底流是第 5 排序键几乎恒被前四键屏蔽；两字段已在
+#    API 层冻结只读。检索排序回归真实信号：相似度/场景/收藏/新旧/采纳先验。
 # ============================================================
-
-_SENT_SPLIT_RE = re.compile(r"[。！？!?…]+")
-
-
-def sample_light_stats(text: str) -> Tuple[float, float]:
-    """样本轻指纹：(句均长, 对话占比)。空文本 → (0, 0)。
-
-    句长切分与 fingerprint.split_sentences 同判据（。！？!?…）；对话占比按
-    中英引号字符密度近似（选择器只需相对可比，不必与审计尺子逐位对齐）。
-    """
-    t = text or ""
-    if not t.strip():
-        return (0.0, 0.0)
-    parts = [p for p in _SENT_SPLIT_RE.split(t) if p.strip()]
-    mean_len = (len(t.strip()) / len(parts)) if parts else 0.0
-    quotes = sum(t.count(c) for c in "“”「」\"")
-    ratio = min(1.0, quotes / 2 / max(len(parts), 1))
-    return (round(mean_len, 1), round(ratio, 2))
-
-
-# 旋钮档位 → 目标句均长锚（rhythm 1-5；档间线性近似，选择器只比相对距离）
-_RHYTHM_TARGET_MEAN_LEN = {1: 10.0, 2: 16.0, 3: 22.0, 4: 30.0, 5: 38.0}
-
-
-def _selector_adjust(sample: Any, style_card: Any) -> float:
-    """P6 选择器微调量（向量流加到距离上、兜底流作排序键；越小越好）。
-
-    旋钮/对话目标是「筛选条件」不是「prompt 声明」：rhythm 手动档 → 样本
-    句均长与档位锚的距离（归一）；dialogue_ratio_target → 样本对话占比与
-    目标的距离。无卡/自动档 → 0（零变化）。
-    """
-    if style_card is None:
-        return 0.0
-    knobs = getattr(style_card, "style_knobs", None)
-    knobs = knobs if isinstance(knobs, dict) else {}
-    mean_len, dialogue_ratio = sample_light_stats(getattr(sample, "content", "") or "")
-    adj = 0.0
-    rhythm = knobs.get("rhythm")
-    if isinstance(rhythm, int) and rhythm in _RHYTHM_TARGET_MEAN_LEN:
-        target = _RHYTHM_TARGET_MEAN_LEN[rhythm]
-        adj += 0.1 * min(1.0, abs(mean_len - target) / 15.0)
-    target_ratio = getattr(style_card, "dialogue_ratio_target", None)
-    if target_ratio is not None and dialogue_ratio > 0:
-        try:
-            adj += 0.05 * min(1.0, abs(dialogue_ratio - float(target_ratio)) / 0.3)
-        except (TypeError, ValueError):
-            pass
-    return adj
 
 
 def _cap_ai_source(ordered: List[Any], k: int) -> List[Any]:
@@ -205,7 +160,7 @@ async def retrieve_author_samples_with_meta(
     max_chars: int = AUTHOR_SAMPLE_MAX_CHARS,
     scene_type: Optional[str] = None,
     scene_hint: Optional[str] = None,
-    style_card: Any = None,
+    style_card: Any = None,  # 2026-09-14 冻结：旋钮/对话目标退役后无消费，保留形参防调用方断裂
     drift_anchor: bool = False,
 ) -> List[Tuple[str, str]]:
     """检索 few-shot 样本（带样本 id——P5 回流埋点用）。
@@ -235,10 +190,9 @@ async def retrieve_author_samples_with_meta(
                 )
 
                 def vec_adjust(s: Any, d: float) -> float:
-                    """距离微调：场景加成（既有）+ 先验因子 + 旋钮选择器 + 漂移锚。"""
+                    """距离微调：场景加成（既有）+ 先验因子 + 漂移锚。"""
                     adj = d - SCENE_HINT_BONUS if _scene_match(s, scene_hint) else d
                     adj /= sample_prior_factor(book_id, str(getattr(s, "id", "") or ""))
-                    adj += _selector_adjust(s, style_card)
                     if drift_anchor and getattr(s, "favorite", False):
                         adj -= 0.1
                     return adj
@@ -285,8 +239,7 @@ async def retrieve_author_samples_with_meta(
                 # 先验因子升序键（factor∈[0.8,1.2] → 键∈[0,0.4]，越大越靠后）
                 prior_key = PRIOR_FACTOR_MAX - sample_prior_factor(
                     book_id, str(getattr(s, "id", "") or ""))
-                return (favorite, era, scene, round(prior_key, 3),
-                        round(_selector_adjust(s, style_card), 3))
+                return (favorite, era, scene, round(prior_key, 3))
 
             ordered = sorted(pool, key=fallback_rank)
             samples = _cap_ai_source(ordered, k)

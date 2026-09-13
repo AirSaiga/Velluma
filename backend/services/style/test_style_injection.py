@@ -212,38 +212,24 @@ class TestAuditionPrompt:
 
 
 # ============================================================
-# 意图旋钮（S4）：档位渲染 + 自动档零注入
+# 意图旋钮（S4）：已退役（2026-09-14 去参数化，docs/style-parameter-effectiveness-audit.md）
+# —— render_knob_lines/knobs.py 归档 _deprecated；此处锁定「旋钮字段冻结不注入」
 # ============================================================
 
-class TestStyleKnobs:
-    def test_render_knob_lines_manual_tiers(self):
-        from backend.services.style.knobs import render_knob_lines
+class TestStyleKnobsRetired:
+    def test_render_style_positive_ignores_knobs(self):
+        """旋钮字段即便有历史值也不再渲染任何意图行（冻结只读零注入）。"""
 
-        lines = render_knob_lines({"rhythm": 1, "register": 5})
-        assert len(lines) == 2
-        assert lines[0].startswith("句长节奏意图：极快——")
-        assert lines[1].startswith("文白意图：极文——")
-
-    def test_render_knob_lines_auto_and_invalid(self):
-        from backend.services.style.knobs import render_knob_lines
-
-        # 空/全自动 → 零行（prompt 零变化）
-        assert render_knob_lines({}) == []
-        assert render_knob_lines(None) == []
-        # 非法档（越界/非数字/未知键）静默跳过
-        assert render_knob_lines({"rhythm": 9, "register": "快", "unknown": 3}) == []
-
-    def test_render_style_positive_includes_knobs(self):
-        class CardWithKnobs:
+        class CardWithLegacyKnobs:
             positive_profile = {"register": "冷峻"}
             paragraph_rhythm = None
             dialogue_ratio_target = None
-            style_knobs = {"density": 1, "warmth": 4}
+            style_knobs = {"density": 1, "warmth": 4, "register": 5}
 
-        text = render_style_positive(CardWithKnobs())
+        text = render_style_positive(CardWithLegacyKnobs())
         assert "- 语域偏好：冷峻" in text
-        assert "- 浓淡意图：极淡——" in text
-        assert "- 冷热意图：偏热——" in text
+        assert "意图：" not in text
+        assert "浓淡" not in text and "冷热" not in text
 
     def test_render_style_positive_without_knobs_zero_change(self):
         """无旋钮字段（旧卡）→ 渲染与 S2 行为一致，无意图行。"""
