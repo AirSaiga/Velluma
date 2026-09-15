@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
- * 书架页（V3.1 F1 新建，规格 §3 + §8）。
+ * 书架页（V3.1 F1 新建，规格 §3 + §8；2026-09-15 向导退役后为唯一建书入口）。
  *
  * 职责：
- * - 书籍卡片网格（封面色块 + 书名 + 题材 + 章节数 + 最近编辑）
- * - "新建书籍"入口：启用现成的 novel-wizard（5 步向导）
+ * - 书籍卡片网格（封面 + 书名 + 题材 + 章节数 + 字数）
+ * - "新建书籍"：轻表单（书名/题材/核心设定/一句话打算）——意图直落第 1 章
+ *   spine（打算的最高置信源），其余设定随写作在世界页/写作台生长
+ *   （novel-wizard 五步向导 2026-09-15 整体退役：三书零本向导出品，前置
+ *   规划流程与「打字即激活、设定随写作生长」的写作台思路相悖）
  * - 点击书籍卡片进入写作台
  * - 卡片右键/管理：编辑/删除书籍
- *
- * 设计依据：规格 §3 "书架：书籍卡片网格；'新建书籍'启用现成的 novel-wizard"
  */
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -16,9 +17,8 @@ import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
-import { NovelCreationWizard } from '../../novel-wizard'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
-import { chapterApi, worldApi } from '../../../services/api'
+import { chapterApi } from '../../../services/api'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 import type { Book, Chapter } from '../../../types'
@@ -34,16 +34,13 @@ const currentBookId = store.currentBookId
 const chapters = store.chapters
 const loading = store.loading
 
-const showWizard = ref(false)
-// 向导组件引用：成功落地后清草稿（clearDraft 由 NovelCreationWizard defineExpose）
-const wizardRef = ref<any>(null)
 const showEditModal = ref(false)
 const editingBook = ref<Book | null>(null)
 const editForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
 
-// 简易新建表单（与 novel-wizard 互斥：默认走向导，也可用简易快速创建）
+// 新建表单（唯一建书入口）
 const showQuickCreate = ref(false)
-const quickForm = ref({ title: '', genre: '', core_motifs_taboos: '' })
+const quickForm = ref({ title: '', genre: '', core_motifs_taboos: '', intent: '' })
 
 onMounted(async () => {
   if (books.value.length === 0) {
@@ -91,12 +88,8 @@ async function loadBookStats(book: Book) {
   }
 }
 
-function startWizard() {
-  showWizard.value = true
-}
-
 function startQuickCreate() {
-  quickForm.value = { title: '', genre: '', core_motifs_taboos: '' }
+  quickForm.value = { title: '', genre: '', core_motifs_taboos: '', intent: '' }
   showQuickCreate.value = true
 }
 
@@ -105,23 +98,44 @@ async function submitQuickCreate() {
     showToast('请填写书名', 'warning')
     return
   }
+  let newBook: Book | undefined
   try {
-    const newBook = await store.createBook({
+    newBook = await store.createBook({
       title: quickForm.value.title,
       genre: quickForm.value.genre,
       core_motifs_taboos: quickForm.value.core_motifs_taboos,
     } as Partial<Book>)
-    showQuickCreate.value = false
-    showToast('书籍已创建', 'success')
-    if (newBook) {
-      // D2 修复（GUI 实测 2026-08-30）：路由 fade 是 out-in——旧视图离场与弹窗
-      // 离场过渡并发时换装可能被挂起（URL 已切、视图停在书架+弹窗 >25s）。
-      // 先关弹窗、等它的 0.2s 离场完成再跳转，彻底错开两段过渡。
-      setTimeout(() => openBook(newBook), 250)
-    }
   } catch (e: any) {
     showToast('创建失败：' + e.message, 'error')
+    return
   }
+  if (!newBook) return
+
+  // 一句话打算 → 第 1 章 spine.intent（作者亲笔=最高置信意图源，向导退役后
+  // 唯一保留的意图通道；不填则跳过，进写作台「打算」面板随时补）
+  const intent = quickForm.value.intent.trim()
+  if (intent) {
+    try {
+      const ch = await chapterApi.create({
+        book_id: newBook.id,
+        chapter_number: 1,
+        chapter_name: '第1章',
+      } as any)
+      // 意图截 60 字（同 useChapterSpine 截幅）；spine 失败不阻塞开书
+      await adaptiveApi
+        .patchSpine((ch as any)?.id || '', { intent: { text: intent.slice(0, 60), source: 'author' } })
+        .catch(() => {})
+    } catch {
+      /* 第 1 章创建失败不阻塞：意图进写作台再补 */
+    }
+  }
+
+  showQuickCreate.value = false
+  showToast('书籍已创建', 'success')
+  // D2 修复（GUI 实测 2026-08-30）：路由 fade 是 out-in——旧视图离场与弹窗
+  // 离场过渡并发时换装可能被挂起（URL 已切、视图停在书架+弹窗 >25s）。
+  // 先关弹窗、等它的 0.2s 离场完成再跳转，彻底错开两段过渡。
+  setTimeout(() => openBook(newBook!), 250)
 }
 
 function openEditModal(book: Book) {
@@ -165,113 +179,6 @@ async function deleteBook(book: Book) {
   }
 }
 
-// novel-wizard 完成回调（向导 emit start-generation，payload 为嵌套的 WizardFormData）。
-// 2026-09-04 审计修复：此前只消费 story+world——向导强制收集的角色/关系/
-// 第 1 章大纲全部静默丢弃且不建章（新书 0 章）。现按「作者亲笔=已裁决」
-// 直接落地：第 1 章（outline_text）点亮 dock 就近节拍与 stitch 意图大纲
-// 转化；角色/关系直建 world_*（待确认池是给 AI 抽取候选的，亲笔不过池）；
-// 作者意图落第 1 章 spine.intent（打算的最高置信源）。
-async function onWizardFinish(formData: any) {
-  let newBook: Book | undefined
-  try {
-    // 字段映射：向导的嵌套结构 → 后端 Book 模型支持的扁平字段
-    // （world/locations/rules 等后端无对应列的内容并入 worldview_settings dict）
-    newBook = await store.createBook({
-      title: formData.story?.title?.trim() || '未命名',
-      genre: formData.story?.genre,
-      core_motifs_taboos: formData.story?.themesAndTaboos,
-      worldview_settings: {
-        background: formData.world?.background ?? [],
-        locations: formData.world?.locations ?? [],
-        rules: formData.world?.rules ?? [],
-      },
-    } as Partial<Book>)
-  } catch (e: any) {
-    showToast('创建失败：' + e.message, 'error')
-    return // 建书失败：向导留着、草稿保留，可改后重试
-  }
-  if (!newBook) return
-  const bookId = newBook.id
-  const failures: string[] = []
-
-  // ---- 第 1 章：向导必填的大纲落 outline_text（不再丢弃）----
-  const intent = String(formData.chapter?.authorIntent ?? '').trim()
-  const outline = String(formData.chapter?.outline ?? '').trim()
-  // 意图超 60 字截不进 spine（同 useChapterSpine 截幅），全文并入大纲首行保底
-  const outlineText = intent && intent.length > 60 ? `【作者意图】${intent}\n${outline}` : outline
-  let chapter1Id = ''
-  try {
-    const ch = await chapterApi.create({
-      book_id: bookId,
-      chapter_number: 1,
-      chapter_name: String(formData.chapter?.title ?? '').trim() || '第1章',
-      outline_text: outlineText || undefined,
-      // 向导张力 1-10 → 后端 1-5（默认 5→3 与后端 balanced 缺省对齐）
-      tension_level: Math.min(5, Math.max(1, Math.round((Number(formData.chapter?.tensionLevel) || 5) / 2))),
-      pacing_style: formData.chapter?.pacingStyle || 'balanced',
-    } as any)
-    chapter1Id = (ch as any)?.id || ''
-  } catch (e: any) {
-    failures.push(`第 1 章创建失败（${e?.message || e}）`)
-  }
-
-  // ---- 角色 → world 实体 ----
-  const entityIdByWizardId = new Map<string, string>()
-  for (const c of formData.characters ?? []) {
-    if (!c?.name?.trim()) continue
-    try {
-      const ent = await worldApi.createEntity(bookId, {
-        entity_type: 'character',
-        name: c.name.trim(),
-        intro: String(c.profile ?? '').trim(),
-        importance: c.importance === 'core' || c.importance === 'protagonist' ? 8 : c.importance === 'important' ? 5 : 2,
-        props: c.currentState?.trim() ? { current_state: c.currentState.trim() } : {},
-      } as any)
-      entityIdByWizardId.set(c.id, (ent as any).id)
-    } catch (e: any) {
-      failures.push(`角色「${c.name}」创建失败（${e?.message || e}）`)
-    }
-  }
-
-  // ---- 角色关系（按创建结果解析两端 id；解析不到的跳过）----
-  for (const r of formData.relationships ?? []) {
-    const src = entityIdByWizardId.get(r?.sourceId)
-    const dst = entityIdByWizardId.get(r?.targetId)
-    if (!src || !dst) continue
-    try {
-      await worldApi.createRelation(bookId, {
-        source_entity_id: src,
-        target_entity_id: dst,
-        relation_type: String(r.relationType ?? '').trim() || '关系',
-        affinity: typeof r.affinity === 'number' ? r.affinity : null,
-        static: true,
-      } as any)
-    } catch (e: any) {
-      failures.push(`关系「${r.relationType ?? ''}」创建失败（${e?.message || e}）`)
-    }
-  }
-
-  // ---- 作者意图 → 第 1 章 spine.intent（spine 打算短路=意图最高置信源）----
-  if (chapter1Id && intent) {
-    try {
-      await adaptiveApi.patchSpine(chapter1Id, { intent: { text: intent.slice(0, 60), source: 'author' } })
-    } catch { /* spine 失败不阻塞：意图已并入大纲，走大纲转化兜底 */ }
-  }
-
-  showWizard.value = false
-  wizardRef.value?.clearDraft?.() // 成功落地即清草稿（此前 clearDraft 零调用致草稿跨书复活）
-  if (failures.length) {
-    showToast(`书籍已创建，但部分向导内容未落地：${failures[0]}${failures.length > 1 ? ` 等 ${failures.length} 项` : ''}`, 'warning', 8000)
-  } else {
-    showToast('书籍已创建', 'success')
-  }
-  openBook(newBook)
-}
-
-function onWizardCancel() {
-  showWizard.value = false
-}
-
 const isEmpty = computed(() => books.value.length === 0)
 
 // Markdown 批量导入：从指定书籍卡片触发（需先选中该书）
@@ -290,33 +197,24 @@ function openImportModal(book: Book) {
     <header class="library-header">
       <div>
         <h1 class="page-title">书架</h1>
-        <p class="page-subtitle">{{ books.length }} 本书 · 点击进入写作</p>
+        <p class="page-subtitle"><span class="tnum">{{ books.length }}</span> 卷藏书 · 点击进入写作</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary" @click="startQuickCreate">
+        <button class="btn-primary btn-primary-instrument" @click="startQuickCreate">
           <Icon name="plus" :size="16" />
-          <span>快速创建</span>
-        </button>
-        <button class="btn-primary" @click="startWizard">
-          <Icon name="sparkles" :size="16" />
-          <span>新建书籍向导</span>
+          <span>新建书籍</span>
         </button>
       </div>
     </header>
 
     <!-- 空状态 -->
     <div v-if="isEmpty && !loading" class="empty-state">
-      <div class="empty-icon"><Icon name="book" :size="48" /></div>
-      <h2>开始你的第一本书</h2>
-      <p>用向导一步步搭建故事骨架，或快速创建一本空白书籍。</p>
+      <h2 class="empty-state__title">开始你的第一本书</h2>
+      <p>起个书名就能开写——角色、世界观随写作慢慢长出来。</p>
       <div class="empty-actions">
-        <button class="btn-primary" @click="startWizard">
-          <Icon name="sparkles" :size="16" />
-          <span>使用向导创建</span>
-        </button>
-        <button class="btn-secondary" @click="startQuickCreate">
+        <button class="btn-primary btn-primary-instrument" @click="startQuickCreate">
           <Icon name="plus" :size="16" />
-          <span>快速创建</span>
+          <span>新建书籍</span>
         </button>
       </div>
     </div>
@@ -330,14 +228,48 @@ function openImportModal(book: Book) {
         @click="openBook(book)"
         @mouseenter="loadBookStats(book)"
       >
-        <div class="book-cover" :style="{ background: coverGradient(book) }">
-          <span class="cover-title">{{ book.title?.charAt(0) || '?' }}</span>
+        <div class="book-cover" :style="{ background: bookCloth(book) }">
+          <!-- 几何母题：按书名 hash 六选一，同色系烫印质感，题材中立 -->
+          <svg class="cover-motif" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+            <g v-if="coverMotif(book) === 'arcs'" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="26">
+              <circle cx="318" cy="-52" r="128" />
+              <circle cx="318" cy="-52" r="200" opacity="0.62" />
+              <circle cx="318" cy="-52" r="272" opacity="0.38" />
+              <circle cx="318" cy="-52" r="344" opacity="0.22" />
+            </g>
+            <g v-else-if="coverMotif(book) === 'stripes'" fill="rgba(255,255,255,0.13)" transform="rotate(-18 150 200)">
+              <rect x="-60" y="112" width="420" height="34" />
+              <rect x="-60" y="188" width="420" height="34" />
+              <rect x="-60" y="264" width="420" height="34" opacity="0.5" />
+            </g>
+            <g v-else-if="coverMotif(book) === 'dots'" fill="rgba(255,255,255,0.15)">
+              <circle v-for="p in DOT_GRID" :key="p.x + '-' + p.y" :cx="p.x" :cy="p.y" r="6" />
+            </g>
+            <g v-else-if="coverMotif(book) === 'ridge'" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="-20,300 70,190 150,265 240,140 320,230" />
+              <polyline points="-20,360 80,290 170,340 260,240 320,300" opacity="0.45" />
+            </g>
+            <g v-else-if="coverMotif(book) === 'moon'">
+              <circle cx="208" cy="120" r="112" fill="rgba(255,255,255,0.13)" />
+              <circle cx="208" cy="120" r="112" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2" />
+            </g>
+            <g v-else stroke="rgba(255,255,255,0.14)" stroke-width="2">
+              <path d="M60 0V400 M120 0V400 M180 0V400 M240 0V400" />
+              <path d="M0 100H300 M0 200H300 M0 300H300" />
+              <rect x="180" y="100" width="60" height="100" fill="rgba(255,255,255,0.16)" stroke="none" />
+            </g>
+          </svg>
+          <div class="cover-titles">
+            <span v-if="book.genre" class="cover-genre">{{ book.genre }}</span>
+            <span class="cover-name" :style="{ fontSize: coverNameFont(book.title) }">{{ book.title || '未命名' }}</span>
+          </div>
         </div>
         <div class="book-info">
           <h3 class="book-title">{{ book.title }}</h3>
-          <p v-if="book.genre" class="book-genre">{{ book.genre }}</p>
           <p class="book-stats">
-            <span v-if="hasStats(book)">{{ bookStats(book).chapterCount }} 章</span>
+            <template v-if="hasStats(book)"
+              >{{ bookStats(book).chapterCount }} 章 · {{ formatWords(bookStats(book).totalWords) }}</template
+            >
             <span v-else class="muted">点击查看</span>
           </p>
         </div>
@@ -353,28 +285,49 @@ function openImportModal(book: Book) {
           </button>
         </div>
       </article>
+
+      <!-- 新书幽灵卡：网格尾部常驻，虚线书位 -->
+      <button class="book-card ghost-card" type="button" @click="startQuickCreate">
+        <div class="ghost-cover">
+          <Icon name="plus" :size="20" />
+          <span class="ghost-label">新的一本书</span>
+        </div>
+        <div class="book-info">
+          <h3 class="book-title">开新书</h3>
+          <p class="book-stats">起个书名，马上开写</p>
+        </div>
+      </button>
     </div>
 
-    <!-- 快速创建 Modal -->
+    <!-- 快速创建 Modal（唯一建书入口） -->
     <Transition name="modal">
       <div v-if="showQuickCreate" class="modal-overlay" @click.self="showQuickCreate = false">
         <div class="modal-content quick-create-modal">
-          <h3>快速创建书籍</h3>
+          <h3>新建书籍</h3>
           <div class="form-field">
             <label>书名 *</label>
-            <input v-model="quickForm.title" placeholder="为这本书起个名字" autofocus />
+            <input v-model="quickForm.title" class="field" placeholder="为这本书起个名字" autofocus />
           </div>
           <div class="form-field">
             <label>题材</label>
-            <input v-model="quickForm.genre" placeholder="如：奇幻、科幻、悬疑" />
+            <input v-model="quickForm.genre" class="field" placeholder="如：奇幻、科幻、悬疑" />
+          </div>
+          <div class="form-field">
+            <label>一句话打算</label>
+            <textarea
+              v-model="quickForm.intent"
+              class="field"
+              rows="2"
+              placeholder="这本书大概要写什么（可不填，进写作台「打算」面板随时补）"
+            />
           </div>
           <div class="form-field">
             <label>核心设定与禁忌</label>
-            <textarea v-model="quickForm.core_motifs_taboos" rows="3" placeholder="世界观要点、需要避免的内容" />
+            <textarea v-model="quickForm.core_motifs_taboos" class="field" rows="3" placeholder="世界观要点、需要避免的内容" />
           </div>
           <div class="modal-actions">
-            <button class="btn-secondary" @click="showQuickCreate = false">取消</button>
-            <button class="btn-primary" @click="submitQuickCreate">创建</button>
+            <button class="btn-secondary btn-ghost" @click="showQuickCreate = false">取消</button>
+            <button class="btn-primary btn-primary-instrument" @click="submitQuickCreate">创建并进入写作</button>
           </div>
         </div>
       </div>
@@ -387,28 +340,21 @@ function openImportModal(book: Book) {
           <h3>编辑书籍</h3>
           <div class="form-field">
             <label>书名</label>
-            <input v-model="editForm.title" />
+            <input v-model="editForm.title" class="field" />
           </div>
           <div class="form-field">
             <label>题材</label>
-            <input v-model="editForm.genre" />
+            <input v-model="editForm.genre" class="field" />
           </div>
           <div class="form-field">
             <label>核心设定与禁忌</label>
-            <textarea v-model="editForm.core_motifs_taboos" rows="3" />
+            <textarea v-model="editForm.core_motifs_taboos" class="field" rows="3" />
           </div>
           <div class="modal-actions">
-            <button class="btn-secondary" @click="showEditModal = false">取消</button>
-            <button class="btn-primary" @click="submitEdit">保存</button>
+            <button class="btn-secondary btn-ghost" @click="showEditModal = false">取消</button>
+            <button class="btn-primary btn-primary-instrument" @click="submitEdit">保存</button>
           </div>
         </div>
-      </div>
-    </Transition>
-
-    <!-- novel-wizard 向导（事件名与 NovelCreationWizard 的 emit 对齐） -->
-    <Transition name="modal">
-      <div v-if="showWizard" class="wizard-overlay">
-        <NovelCreationWizard ref="wizardRef" @start-generation="onWizardFinish" @close="onWizardCancel" />
       </div>
     </Transition>
 
@@ -418,22 +364,53 @@ function openImportModal(book: Book) {
 </template>
 
 <script lang="ts">
-// 封面色块的渐变生成（基于书名 hash，稳定且无 emoji）
-function coverGradient(book: Book): string {
-  const palettes = [
-    'linear-gradient(135deg, #6d5dab 0%, #a78bfa 100%)',
-    'linear-gradient(135deg, #0369a1 0%, #38bdf8 100%)',
-    'linear-gradient(135deg, var(--warn) 0%, #fbbf24 100%)',
-    'linear-gradient(135deg, var(--ok) 0%, #34d399 100%)',
-    'linear-gradient(135deg, #be185d 0%, #f472b6 100%)',
-    'linear-gradient(135deg, #4a4540 0%, #a89e90 100%)',
-  ]
+// 封面底色：低饱和深色板（浅深双主题下同一副面孔——封面是「内容」而非
+// UI 表皮，不进全局 token）。按书名 hash 稳定取色：同一本书永远同一件书衣。
+function bookCloth(book: Book): string {
+  const palettes = ['#34506b', '#7a3e3e', '#52466b', '#3f5747', '#75563a', '#514c46']
   const name = book.title || book.id || ''
   let hash = 0
   for (let i = 0; i < name.length; i++) {
     hash = (hash * 31 + name.charCodeAt(i)) | 0
   }
   return palettes[Math.abs(hash) % palettes.length]
+}
+
+// 母题类型：hash 右移取独立位，与底色不相关——同色不同纹、同纹不同色都可能出现
+type MotifKey = 'arcs' | 'stripes' | 'dots' | 'ridge' | 'moon' | 'grid'
+function coverMotif(book: Book): MotifKey {
+  const keys: MotifKey[] = ['arcs', 'stripes', 'dots', 'ridge', 'moon', 'grid']
+  const name = book.title || book.id || ''
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) | 0
+  }
+  return keys[Math.abs(hash >> 3) % keys.length]
+}
+
+// dots 母题的点阵坐标（6 列 × 8 行，封面 viewBox 300×400）
+const DOT_GRID: Array<{ x: number; y: number }> = (() => {
+  const pts: Array<{ x: number; y: number }> = []
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 6; col++) {
+      pts.push({ x: 36 + col * 46, y: 34 + row * 46 })
+    }
+  }
+  return pts
+})()
+
+// 封面书名字号：短书名大字、长书名降档（另有两行 clamp 兜底）
+function coverNameFont(title?: string): string {
+  const len = (title || '').length
+  if (len <= 4) return '1.375rem'
+  if (len <= 8) return '1.125rem'
+  return '0.9375rem'
+}
+
+// 字数人话化：≥1 万收敛为「X.X 万字」
+function formatWords(words: number): string {
+  if (words >= 10000) return `${(words / 10000).toFixed(1)} 万字`
+  return `${words} 字`
 }
 </script>
 
@@ -442,19 +419,20 @@ function coverGradient(book: Book): string {
   height: 100%;
   overflow-y: auto;
   background: var(--bg-primary);
-  padding: 2rem 2.5rem;
+  padding: 2.5rem 2.75rem 3rem;
 }
 
 .library-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  margin-bottom: 2rem;
+  margin-bottom: 2.25rem;
 }
 
 .page-title {
   font-family: var(--font-heading);
-  font-size: 1.5rem;
+  font-size: var(--text-3xl);
+  letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -471,64 +449,30 @@ function coverGradient(book: Book): string {
   gap: 0.5rem;
 }
 
+/* N3 §4：新建表单（非书封部分）收编仪器工具类——书封六色板豁免面不动 */
 .btn-primary,
 .btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.4375rem 0.875rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  border: 1px solid transparent;
-}
-
-.btn-primary {
-  background: var(--accent-500);
-  color: white;
-}
-.btn-primary:hover {
-  background: var(--accent-600);
-}
-
-.btn-secondary {
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  border-color: var(--border-color);
-}
-.btn-secondary:hover {
-  background: var(--hover-bg);
+  /* 挂点：皮肤由 .btn-primary-instrument / .btn-ghost 提供 */
 }
 
 /* 空状态 */
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  text-align: center;
-  color: var(--text-secondary);
+  /* 04 §D3 空态统一规格：全局类出 ❦ 饰符，此处只留节奏微调 */
+  padding: var(--space-12) var(--space-8);
 }
 
-.empty-icon {
-  color: var(--text-muted);
-  margin-bottom: 1rem;
-}
-
-.empty-state h2 {
+.empty-state__title {
   font-family: var(--font-heading);
-  font-size: 1.25rem;
+  font-size: var(--text-xl);
   font-weight: 500;
   color: var(--text-primary);
-  margin: 0 0 0.5rem;
+  margin: 0;
 }
 
 .empty-state p {
-  font-size: 0.875rem;
-  margin: 0 0 1.5rem;
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  margin: 0 0 var(--space-3);
 }
 
 .empty-actions {
@@ -539,62 +483,154 @@ function coverGradient(book: Book): string {
 /* 书籍网格 */
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: var(--space-5);
 }
 
 .book-card {
   position: relative;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  padding: 0.875rem;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-3) var(--space-4);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: var(--space-2);
+  font: inherit;
+  text-align: left;
 }
 
 .book-card:hover {
-  border-color: var(--accent-500);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: var(--accent-400);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
 }
 
+/* 深色主题：黑阴影透明度加深一档，保住 hover 的浮起感 */
+:global(html.dark) .book-card:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+/* 封面底：径向柔光 + 经纬细纹 + 内衬描边（哑光纸板质感），
+   底色由 bookCloth() 按书名 hash 供给；封面是内容，双主题同一副面孔 */
 .book-cover {
+  position: relative;
   width: 100%;
   aspect-ratio: 3 / 4;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-xs);
+  background-image:
+    radial-gradient(130% 95% at 50% 38%, rgba(255, 255, 255, 0.06), transparent 62%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 4px);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  transition: box-shadow 0.18s ease;
+}
+
+.book-card:hover .book-cover {
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 1px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* 几何母题：铺满封面的低对比烫印图形（题材中立，hash 六选一） */
+.cover-motif {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 封面书名区：底部渐晕压深保可读，母题重心在上 2/3 让位 */
+.cover-titles {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2.25rem 1rem 1rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.36), rgba(0, 0, 0, 0.14) 55%, transparent);
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cover-genre {
+  font-size: 0.6875rem;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.cover-name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 新书幽灵卡：虚线书位。边框取 faint 档而非常规 border——虚线本身的
+   存在感弱于实线，深色主题下常规 --border-color (#3a3530) 几乎不可见 */
+.ghost-card {
+  background: transparent;
+  border: 1px dashed var(--text-faint);
+  align-items: stretch;
+}
+
+.ghost-card:hover {
+  border-color: var(--accent-400);
+  background: var(--bg-canvas);
+  transform: translateY(-2px);
+}
+
+.ghost-cover {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius-xs);
+  border: 1px dashed var(--text-faint);
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.95);
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.ghost-card:hover .ghost-cover {
+  color: var(--accent-500);
+  border-color: var(--accent-400);
+}
+
+.ghost-label {
   font-family: var(--font-heading);
-  font-size: 2.5rem;
-  font-weight: 600;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  font-size: var(--text-sm);
+  letter-spacing: 0.15em;
 }
 
 .book-info {
   flex: 1;
   min-width: 0;
+  padding: 0 var(--space-1);
 }
 
 .book-title {
-  font-size: 0.9375rem;
+  font-family: var(--font-heading);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 0.125rem;
+  margin: 0 0 0.375rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.book-genre {
-  font-size: 0.75rem;
-  color: var(--accent-500);
-  margin: 0 0 0.25rem;
 }
 
 .book-stats {
@@ -603,14 +639,10 @@ function coverGradient(book: Book): string {
   margin: 0;
 }
 
-.book-stats .muted {
-  opacity: 0.6;
-}
-
 .book-actions {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: var(--space-2);
+  right: var(--space-2);
   display: flex;
   gap: 0.25rem;
   /* 02 期 §8 H3：focus-within 键盘对等（opacity 保 tab 序） */
@@ -629,15 +661,16 @@ function coverGradient(book: Book): string {
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  /* 纸色底：钮落在深色书衣上，双主题恒定（封面上的控件跟封面走） */
+  background: color-mix(in srgb, var(--paper-bg) 92%, transparent);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .icon-btn:hover {
-  background: var(--hover-bg);
+  background: var(--paper-bg);
   color: var(--text-primary);
 }
 /* 02 期 §8 H3：删除（破坏性）钮常态 45% 低显 */
@@ -654,8 +687,7 @@ function coverGradient(book: Book): string {
 }
 
 /* Modal 通用 */
-.modal-overlay,
-.wizard-overlay {
+.modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
@@ -668,15 +700,11 @@ function coverGradient(book: Book): string {
 
 .modal-content {
   background: var(--bg-canvas);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 1.5rem;
   width: 100%;
   max-width: 420px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-}
-
-.wizard-overlay {
-  padding: 1rem;
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-content h3 {
@@ -699,23 +727,10 @@ function coverGradient(book: Book): string {
   margin-bottom: 0.25rem;
 }
 
+/* N3 §4：表单控件收编 .field（皮肤工具类提供） */
 .form-field input,
 .form-field textarea {
-  width: 100%;
-  padding: 0.4375rem 0.625rem;
-  font-size: 0.8125rem;
-  font-family: inherit;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  color: var(--text-primary);
-  resize: vertical;
-}
-
-.form-field input:focus,
-.form-field textarea:focus {
-  outline: none;
-  border-color: var(--accent-500);
+  /* 挂点：皮肤由 .field 提供 */
 }
 
 .modal-actions {
