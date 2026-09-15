@@ -48,7 +48,7 @@ function anchorChipClass(done: number, total: number): string {
 </script>
 
 <template>
-  <article :id="`oc-${chapter.id}`" class="oc-card" :class="{ editing }">
+  <article :id="`oc-${chapter.id}`" class="oc-card card-std" :class="{ editing }">
     <div class="oc-main" :class="{ clickable: !editing }" @click="!editing && emit('open')">
       <span class="oc-num">第 {{ chapter.number }} 章</span>
       <div class="oc-mid">
@@ -68,7 +68,7 @@ function anchorChipClass(done: number, total: number): string {
           >真相 {{ chapter.revealLabels.length }}</span>
           <span v-if="chapter.planted" class="oc-chip" :title="`本章埋下 ${chapter.planted} 条伏笔`">埋 {{ chapter.planted }}</span>
           <span v-if="chapter.resolved" class="oc-chip" :title="`本章收拢 ${chapter.resolved} 条伏笔`">收 {{ chapter.resolved }}</span>
-          <span v-if="chapter.wordCount" class="oc-words">{{ chapter.wordCount }} 字</span>
+          <span v-if="chapter.wordCount" class="oc-words tnum">{{ chapter.wordCount }} 字</span>
         </div>
         <p v-if="chapter.intentText" class="oc-intent">打算：{{ chapter.intentText }}</p>
         <p v-if="chapter.outline" class="oc-outline">{{ chapter.outline }}</p>
@@ -103,11 +103,11 @@ function anchorChipClass(done: number, total: number): string {
 </template>
 
 <style scoped>
+/* N3 §4：章卡收编 card-std 壳（阴影/线阶/半径）——padding 归 0（内层 oc-main 自带节奏），
+   hover accent 描边为本卡特有语义保留 */
 .oc-card {
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
-  transition: border-color 0.15s ease;
+  padding: 0;
+  transition: border-color var(--dur-2) var(--ease-out);
 }
 
 .oc-card:hover {
@@ -168,7 +168,7 @@ function anchorChipClass(done: number, total: number): string {
   padding: 0.0625rem 0.375rem;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 
@@ -177,8 +177,8 @@ function anchorChipClass(done: number, total: number): string {
 }
 
 .oc-chip.zhu {
-  background: rgba(166, 62, 42, 0.12); /* 朱砂语义（真相层视觉签名） */
-  color: #a63e2a;
+  background: color-mix(in srgb, var(--cinnabar) 12%, transparent); /* 朱砂语义（真相层视觉签名） */
+  color: var(--cinnabar);
 }
 
 .oc-words {
@@ -223,13 +223,13 @@ function anchorChipClass(done: number, total: number): string {
   height: 1.625rem;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   cursor: pointer;
 }
 
 .oc-edit-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
@@ -249,7 +249,7 @@ function anchorChipClass(done: number, total: number): string {
   color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   padding: 0.5rem 0.625rem;
   box-sizing: border-box;
 }
@@ -270,6 +270,6 @@ function anchorChipClass(done: number, total: number): string {
 }
 
 .oc-save-state.error {
-  color: #a63e2a;
+  color: var(--cinnabar);
 }
 </style>

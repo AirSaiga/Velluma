@@ -54,7 +54,8 @@ function _makePopupRenderer() {
       }
       items.forEach((item, i) => {
         const btn = document.createElement('button')
-        btn.className = 'mention-item' + (i === selected ? ' mention-item--active' : '')
+        // N2 §3.5：@提及项收编 .menu-item（激活高亮保留 mention-item--active 薄荷）
+        btn.className = 'mention-item menu-item' + (i === selected ? ' mention-item--active' : '')
         btn.textContent = item.create ? `＋ 创建「${item.name}」` : item.name
         btn.onmousedown = (e) => {
           e.preventDefault()  // 防编辑器失焦吞掉点击

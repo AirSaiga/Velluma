@@ -69,8 +69,8 @@ function timeLabel(ts: string): string {
 
 <style scoped>
 .adopted-pool {
-  border: 1px dashed var(--border-color, #d6d3d1);
-  border-radius: 8px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
   padding: 6px 10px;
 }
 .adopted-pool__head {
@@ -82,19 +82,19 @@ function timeLabel(ts: string): string {
   background: none;
   cursor: pointer;
   font-family: inherit;
-  color: var(--text-secondary, #6b6560);
+  color: var(--text-secondary);
   padding: 2px 0;
 }
-.adopted-pool__title { font-size: 12px; font-weight: 600; }
+.adopted-pool__title { font-size: var(--text-xs); font-weight: 600; }
 .adopted-pool__count { flex: 1; text-align: left; font-size: var(--text-sm); color: var(--text-secondary); }
-.adopted-pool__toggle { min-height: 24px; padding: 0.125rem 0.5rem; font-size: var(--text-xs); color: var(--text-secondary); background: transparent; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; }
+.adopted-pool__toggle { min-height: 24px; padding: 0.125rem 0.5rem; font-size: var(--text-xs); color: var(--text-secondary); background: transparent; border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; }
 .adopted-pool__note { font-size: var(--text-sm); color: var(--text-secondary); margin: 4px 0 8px; line-height: var(--lh-normal); }
 .adopted-pool__list { display: flex; flex-direction: column; gap: 8px; }
-.adopted-pool__item { border: 1px solid var(--border-color, #e7e5e4); border-radius: 8px; padding: 6px 8px; }
+.adopted-pool__item { border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 6px 8px; }
 .adopted-pool__text {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.7;
-  color: var(--text-primary, #292524);
+  color: var(--text-primary);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -108,12 +108,12 @@ function timeLabel(ts: string): string {
   min-height: 28px;
   font-size: var(--text-xs);
   padding: 2px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--accent-400, #9685c2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-400);
   background: transparent;
-  color: var(--accent-500, #7c6aad);
+  color: var(--accent-500);
   cursor: pointer;
 }
 .adopted-pool__btn:disabled { opacity: 0.5; cursor: default; }
-.adopted-pool__btn:hover:not(:disabled) { background: rgba(124, 106, 173, 0.08); }
+.adopted-pool__btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-500) 8%, transparent); }
 </style>

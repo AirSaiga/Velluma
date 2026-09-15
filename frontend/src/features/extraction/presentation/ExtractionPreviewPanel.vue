@@ -330,31 +330,31 @@ const roleTypeLabel: Record<string, string> = {
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .tab-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .tab-btn.active {
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.1);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
   color: var(--accent-500);
-  border-color: rgba(var(--accent-500-rgb, 124, 58, 237), 0.2);
+  border-color: color-mix(in srgb, var(--accent-500) 20%, transparent);
 }
 
 .tab-count {
   font-size: var(--text-xs);
   background: var(--bg-tertiary);
   padding: 0.0625rem 0.3125rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-lg);
   color: var(--text-muted);
 }
 
 .tab-btn.active .tab-count {
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.15);
+  background: color-mix(in srgb, var(--accent-500) 15%, transparent);
   color: var(--accent-500);
 }
 
@@ -396,19 +396,19 @@ const roleTypeLabel: Record<string, string> = {
   gap: 0.625rem;
   padding: 0.625rem;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   margin-bottom: 0.375rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .item-card:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .item-card.checked {
-  border-color: rgba(var(--accent-500-rgb, 124, 58, 237), 0.3);
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.04);
+  border-color: color-mix(in srgb, var(--accent-500) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-500) 4%, transparent);
 }
 
 .checkbox {
@@ -418,12 +418,12 @@ const roleTypeLabel: Record<string, string> = {
   width: 1.125rem;
   height: 1.125rem;
   border: 1.5px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   background: var(--bg-canvas);
-  color: white;
+  color: var(--bg-canvas);
   flex-shrink: 0;
   margin-top: 0.0625rem;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .checkbox.checked {
@@ -463,17 +463,17 @@ const roleTypeLabel: Record<string, string> = {
   font-size: var(--text-xs);
   background: var(--bg-tertiary);
   color: var(--text-muted);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 
 .tag.positive {
-  background: rgba(5, 150, 105, 0.08);
-  color: #059669;
+  background: color-mix(in srgb, var(--mint) 8%, transparent);
+  color: var(--mint-ink);
 }
 
 .tag.negative {
-  background: rgba(220, 38, 38, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--danger);
 }
 
@@ -499,15 +499,15 @@ const roleTypeLabel: Record<string, string> = {
   padding: 0.5rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
   border: 1px solid transparent;
 }
 
 .btn-primary {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -526,6 +526,6 @@ const roleTypeLabel: Record<string, string> = {
 }
 
 .btn-secondary:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 </style>

@@ -5,6 +5,7 @@
  * 拖动轨道改 currentTime → worldState computed 自动重算 → 地图人物/疆域/事件回放。
  * 事件标记点：每条历史一个类型色圆点，点击跳到该时刻并聚焦地图——
  * 「哪段历史事多」看直方图，「具体什么事」点标记。
+ * 主题豁免（01-theme-architecture §7）：鎏金游标/金墨柱/燕尾书签等装饰色跨主题恒定（灯下看地图）。
  * 章节锚刻度（M1）：narrative_time 已设的章节显示为「第N章」小片，点击游标跳到该章
  * 叙事时间——章节轴↔世界轴的桥（docs/world-unified-settings.md §2.4）。
  * 右键菜单：在此时刻记录事件 / 标记章节叙事时间 / 埋伏笔（M3）。
@@ -1216,7 +1217,7 @@ onMounted(() => {
   font-weight: 600;
   letter-spacing: 0.05em;
   color: rgba(51, 48, 42, 0.92);
-  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-family: var(--font-atlas); /* 古地图字体恒定衬线（主题系统 01 §7 豁免） */
   min-width: 190px;
   animation: wt-flip 0.38s ease-out;
   transform-origin: 50% 60%;
@@ -1273,7 +1274,7 @@ onMounted(() => {
   background: rgba(255, 252, 245, 0.55);
   color: rgba(74, 68, 56, 0.8);
   font-size: var(--text-xs);
-  font-family: ui-monospace, "Noto Serif SC", serif;
+  font-family: var(--font-mono);
   letter-spacing: 0.05em;
   cursor: pointer;
   transition: all 0.12s;
@@ -1470,7 +1471,7 @@ onMounted(() => {
   height: 14px;
   font-size: var(--text-xs);
   color: var(--text-secondary); /* 02 期 §4：主刻度数字归 token（原墨色 rgba 0.75 过淡） */
-  font-family: ui-monospace, "Noto Serif SC", serif;
+  font-family: var(--font-mono);
   pointer-events: none;
 }
 .wt-tick {

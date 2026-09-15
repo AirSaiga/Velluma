@@ -285,7 +285,7 @@ async function submit() {
     <!-- 收起态悬浮条动作 -->
     <template #bar-actions>
       <button class="bar-btn" @click="emit('draw-cancel')">取消</button>
-      <button class="bar-btn bar-btn--primary" @click="emit('draw-finish')">完成</button>
+      <button class="bar-btn bar-btn--primary btn-primary-instrument" @click="emit('draw-finish')">完成</button>
     </template>
     <div class="qc-body" @keydown.enter="onEnter">
     <!-- 模板选择（编辑模式锁定类型） -->
@@ -506,7 +506,7 @@ async function submit() {
     <template #footer>
       <button class="wbtn" @click="emit('cancel')">取消</button>
       <button
-        class="wbtn wbtn--primary"
+        class="wbtn wbtn--primary btn-primary-instrument"
         :disabled="territoryInvalid"
         :title="territoryInvalid ? '请先在地图上圈绘至少 3 个顶点的疆域' : ''"
         @click="submit"
@@ -523,7 +523,7 @@ async function submit() {
 }
 .qc-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -540,11 +540,11 @@ async function submit() {
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   background: var(--bg-canvas);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.13s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .qc-tpl:hover {
   border-color: var(--accent-500);
@@ -552,7 +552,7 @@ async function submit() {
 }
 .qc-tpl.active {
   border-color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.1);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
   color: var(--accent-500);
   font-weight: 600;
 }
@@ -565,7 +565,7 @@ async function submit() {
   border-radius: 9999px;
 }
 .qc-desc {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-top: 7px;
 }
@@ -573,17 +573,17 @@ async function submit() {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 .qc-num {
   width: 56px;
   padding: 6px 8px;
   border: 1px solid var(--border-color);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: ui-monospace, monospace;
 }
 .qc-num:focus {
@@ -596,10 +596,10 @@ async function submit() {
   box-sizing: border-box;
   padding: 8px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   transition: border-color 0.15s;
 }
@@ -607,7 +607,7 @@ async function submit() {
 .qc-select:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.12);
+  box-shadow: var(--ring-soft);
 }
 .qc-selrow {
   display: flex;
@@ -633,32 +633,32 @@ async function submit() {
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   background: var(--bg-canvas);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.13s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .qc-chip.active {
   border-color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.12);
+  background: color-mix(in srgb, var(--accent-500) 12%, transparent);
   color: var(--accent-500);
   font-weight: 600;
 }
 .qc-empty-hint {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .qc-hint {
-  font-size: 12px;
-  color: #a855f7;
+  font-size: var(--text-xs);
+  color: var(--foreshadow);
   margin-top: 5px;
 }
 .qc-hint--dim {
   color: var(--text-muted);
 }
 .qc-hint--warn {
-  color: #d97706;
+  color: var(--warn);
 }
 
 /* 绘制入口按钮：虚线框，邀请「去地图上画」 */
@@ -667,22 +667,22 @@ async function submit() {
   padding: 9px 12px;
   border: 1.5px dashed var(--accent-500);
   border-radius: 9px;
-  background: rgba(124, 106, 173, 0.05);
+  background: color-mix(in srgb, var(--accent-500) 5%, transparent);
   color: var(--accent-500);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s;
 }
 .qc-draw-btn:hover {
-  background: rgba(124, 106, 173, 0.12);
+  background: color-mix(in srgb, var(--accent-500) 12%, transparent);
 }
 .qc-draw-summary {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 .qc-draw-ok {
   color: var(--text-primary);
@@ -692,7 +692,7 @@ async function submit() {
   border: none;
   background: none;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   font-family: inherit;
   cursor: pointer;
@@ -711,25 +711,22 @@ async function submit() {
   border-radius: 999px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.13s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .bar-btn:hover {
   border-color: var(--accent-500);
   color: var(--accent-500);
 }
 .bar-btn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 .bar-btn--primary:hover {
   background: var(--accent-600);
   border-color: var(--accent-600);
-  color: #fff;
+  color: var(--bg-canvas);
 }
 .wbtn:disabled {
   opacity: 0.45;
@@ -743,10 +740,10 @@ async function submit() {
   gap: 5px;
   padding: 7px 16px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -754,18 +751,15 @@ async function submit() {
 .wbtn:hover:not(:disabled) {
   border-color: var(--accent-500);
   color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.06);
+  background: color-mix(in srgb, var(--accent-500) 6%, transparent);
 }
 .wbtn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 .wbtn--primary:hover:not(:disabled) {
   background: var(--accent-600);
   border-color: var(--accent-600);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.25);
+  color: var(--bg-canvas);
+  box-shadow: var(--glow-accent);
   transform: translateY(-1px);
 }
 </style>

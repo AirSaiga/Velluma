@@ -299,7 +299,7 @@ function saveEdit(sample: AuthorSample) {
   font-size: 0.9375rem;
   line-height: 1.9;
   text-align: left;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
   border-radius: 0.75rem;
   box-shadow: 0 1px 2px color-mix(in srgb, black 3%, transparent);
@@ -319,12 +319,12 @@ function saveEdit(sample: AuthorSample) {
 .hero-btn {
   padding: 0.625rem 2rem;
   font-size: 0.9375rem;
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 .hero-btn:hover:not(:disabled) {
   background: var(--accent-600);
@@ -358,9 +358,9 @@ function saveEdit(sample: AuthorSample) {
 /* ---- 常态上传卡 ---- */
 .upload-card {
   padding: 0.75rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .upload-textarea {
   width: 100%;
@@ -369,7 +369,7 @@ function saveEdit(sample: AuthorSample) {
   line-height: 1.7;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 .upload-textarea:focus {
@@ -387,15 +387,15 @@ function saveEdit(sample: AuthorSample) {
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 .btn-primary {
   padding: 0.375rem 0.875rem;
   font-size: 0.8125rem;
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-primary:hover:not(:disabled) {
@@ -411,7 +411,7 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-secondary);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-ghost:hover:not(:disabled) {
@@ -443,7 +443,7 @@ function saveEdit(sample: AuthorSample) {
   cursor: pointer;
 }
 .list-expand-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   border-color: var(--accent-500);
 }
 .empty-note {
@@ -454,9 +454,15 @@ function saveEdit(sample: AuthorSample) {
 }
 .sample-card {
   padding: 0.625rem 0.75rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
+  /* 04 §A2-2 可点卡统一微抬（.card-hover 规格） */
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.sample-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 .sample-meta {
   display: flex;
@@ -467,7 +473,7 @@ function saveEdit(sample: AuthorSample) {
 .badge {
   padding: 0.0625rem 0.4375rem;
   font-size: var(--text-xs);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 .badge-scene {
@@ -490,7 +496,7 @@ function saveEdit(sample: AuthorSample) {
   font-size: var(--text-xs);
   color: var(--text-secondary);
   background: var(--bg-tertiary);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 .chip-dim {
@@ -504,7 +510,7 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .icon-danger:hover {
@@ -519,7 +525,7 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .icon-btn:hover {
@@ -545,7 +551,7 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--accent-400);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 .sample-edit-textarea:focus {
@@ -595,7 +601,7 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-muted);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .era-toggle:hover {

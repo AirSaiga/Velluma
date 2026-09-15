@@ -16,6 +16,8 @@ defineProps<{
   title: string
   /** 徽标数字；null/undefined 不渲染（exp 摘要等无计数场景） */
   count?: number | null
+  /** 待裁决计数=朱批语义（04 §B3-7：待确认池等「等你过目」的数挂此态） */
+  countPending?: boolean
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -26,7 +28,7 @@ const emit = defineEmits<{ close: [] }>()
     <div class="ds-head">
       <Icon :name="icon" :size="14" />
       <span class="ds-title">{{ title }}</span>
-      <span v-if="count != null" class="ds-count">{{ count }}</span>
+      <span v-if="count != null" class="ds-count tnum" :class="{ 'ds-count--pending': countPending }">{{ count }}</span>
       <div class="ds-actions"><slot name="actions" /></div>
       <button class="ds-close" title="收起（再点右缘图标可重开）" aria-label="收起面板" @click="emit('close')">
         <Icon name="x-mark" :size="13" />
@@ -73,6 +75,11 @@ const emit = defineEmits<{ close: [] }>()
   border-radius: 9999px;
   padding: 1px 8px;
 }
+/* 04 §B3-7 待裁决计数=朱批语义（「等你过目的数」）；通用壳不默认朱砂，调用方挂修饰类 */
+.ds-count--pending {
+  color: var(--cinnabar);
+  background: color-mix(in srgb, var(--cinnabar) 10%, transparent);
+}
 /* 主操作按钮区（＋ 新建 / 通读本书等——沿用调用方 .side-batch-btn 样式） */
 .ds-actions {
   margin-left: auto;
@@ -89,14 +96,14 @@ const emit = defineEmits<{ close: [] }>()
   height: 22px;
   flex-shrink: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .ds-close:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .ds-search {
@@ -121,7 +128,7 @@ const emit = defineEmits<{ close: [] }>()
 }
 .ds-body::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .ds-body::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);

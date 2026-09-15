@@ -68,7 +68,7 @@ async function doImport() {
 
     <template #footer>
       <button class="wbtn" @click="emit('cancel')">取消</button>
-      <button class="wbtn wbtn--primary" :disabled="importing || !result.rows.length" @click="doImport">
+      <button class="wbtn wbtn--primary btn-primary-instrument" :disabled="importing || !result.rows.length" @click="doImport">
         {{ importing ? '导入中…' : `导入 ${result.rows.length} 条` }}
       </button>
     </template>
@@ -82,25 +82,25 @@ async function doImport() {
   height: 200px;
   padding: 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: var(--text-xs);
   resize: vertical;
   transition: border-color 0.15s;
 }
 .bi-textarea:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.12);
+  box-shadow: var(--ring-soft);
 }
 .bi-preview {
   margin-top: 12px;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 .bi-ok {
-  color: #10b981;
+  color: var(--ok);
 }
 .bi-err {
   color: var(--danger);
@@ -119,10 +119,10 @@ async function doImport() {
   gap: 5px;
   padding: 7px 16px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -130,22 +130,19 @@ async function doImport() {
 .wbtn:hover:not(:disabled) {
   border-color: var(--accent-500);
   color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.06);
+  background: color-mix(in srgb, var(--accent-500) 6%, transparent);
 }
 .wbtn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .wbtn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 .wbtn--primary:hover:not(:disabled) {
   background: var(--accent-600);
   border-color: var(--accent-600);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.25);
+  color: var(--bg-canvas);
+  box-shadow: var(--glow-accent);
   transform: translateY(-1px);
 }
 </style>

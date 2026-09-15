@@ -83,9 +83,9 @@ function run() {
   padding: 0.375rem 0.5rem;
   font-size: var(--text-base);
   line-height: var(--lh-normal);
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 .field-textarea:focus {
@@ -96,19 +96,19 @@ function run() {
   padding: 0.375rem 0.75rem;
   font-size: var(--text-base);
   color: var(--text-secondary);
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-primary {
   min-height: 28px;
   padding: 0.375rem 0.875rem;
   font-size: var(--text-base);
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-primary:hover:not(:disabled) {

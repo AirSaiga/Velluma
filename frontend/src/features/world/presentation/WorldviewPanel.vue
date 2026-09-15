@@ -211,7 +211,7 @@ onUnmounted(() => {
           <Icon name="arrow-up-tray" :size="13" />
           导入/导出
         </button>
-        <button class="wv-btn primary" @click="addItem">
+        <button class="wv-btn primary btn-primary-instrument" @click="addItem">
           <Icon name="plus" :size="13" />
           新增条目
         </button>
@@ -281,7 +281,7 @@ onUnmounted(() => {
       />
       <template #footer>
         <button class="wv-btn" @click="showImportExport = false">关闭</button>
-        <button class="wv-btn primary" @click="applyImport">导入并应用</button>
+        <button class="wv-btn primary btn-primary-instrument" @click="applyImport">导入并应用</button>
       </template>
     </ModalShell>
   </div>
@@ -318,14 +318,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .wv-btn:hover {
@@ -334,9 +334,6 @@ onUnmounted(() => {
 }
 
 .wv-btn.primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 
 .wv-btn.primary:hover {
@@ -348,14 +345,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
 .status-bar.dirty {
   background: var(--warn-bg);
-  color: #d97706;
+  color: var(--warn);
 }
 
 .status-bar.saving {
@@ -365,7 +362,7 @@ onUnmounted(() => {
 
 .status-bar.saved {
   background: var(--ok-bg);
-  color: #059669;
+  color: var(--mint-ink);
 }
 
 .status-bar.error {
@@ -382,7 +379,7 @@ onUnmounted(() => {
 .item-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -392,14 +389,14 @@ onUnmounted(() => {
 .item-title-input {
   width: 100%;
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-family: inherit;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 .item-title-input:focus {
@@ -410,16 +407,16 @@ onUnmounted(() => {
 .item-content-textarea {
   width: 100%;
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-family: inherit;
   resize: vertical;
   min-height: 72px;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 .item-content-textarea:focus {
@@ -443,9 +440,9 @@ onUnmounted(() => {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 .action-btn.danger:hover {
@@ -464,20 +461,20 @@ onUnmounted(() => {
   justify-content: center;
   gap: 6px;
   padding: 9px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   font-family: inherit;
   color: var(--text-muted);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 .save-btn.has-changes {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
   border-color: var(--accent-500);
 }
 
@@ -494,12 +491,12 @@ onUnmounted(() => {
   width: 100%;
   padding: 12px;
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   resize: vertical;
   min-height: 300px;
 }

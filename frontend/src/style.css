@@ -11,7 +11,7 @@
   --bg-canvas: #fefdfb;
   /* 纸面底色（08 期 §4.1：纸为唯一承载面；双主题 token 根治深色白纸白字 P0） */
   --paper-bg: #fefdfb;
-  --bg-panel: #f0ece3;
+  --bg-panel: #f0ece3; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */
 
   /* 文本色 - 深墨色系（muted 按 00 期 §2.4 调深：2.4:1 → 4.7:1 达 WCAG AA；
      旧值降级为纯装饰档 --text-faint，见 :root 尾部） */
@@ -90,7 +90,7 @@
 
   /* ---- §2.5 补未定义 token（消灭 var() 兜底出题外色） ---- */
   --accent: var(--accent-500);
-  --bg-elevated: #fefdfb;   /* 浮层/弹出卡底色 */
+  --bg-elevated: #ffffff;   /* 浮层/弹出卡底色（P1 §8.2：float 向 #fff 提） */
   --focus-ring: var(--accent-500);
 
   /* ---- §2.4 纯装饰淡字档（任何承载信息的文字禁用） ---- */
@@ -116,6 +116,107 @@
   --editor-font-family: 'Songti SC', 'STSong', 'SimSun', 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
   --editor-font-size: 1rem;
   --editor-line-height: 2.0;
+
+  /* ============================================================
+     主题系统（docs/design/theme-system/01-theme-architecture.md）
+     —— 签名恒定色（浅档）：跨主题不换的品牌件，四主题块不得覆写。
+     「薄荷=AI 在场 / 朱砂=真相朱批 / 伏笔紫=叙事线索 / 鎏金=此刻编年」
+     —— 可爱的是界面，笔还是那支笔。
+     ============================================================ */
+  --mint: #34d399;             /* AI 在场/幽灵品牌色（呼吸点/脉冲环/assist 点亮） */
+  --mint-ink: #047857;         /* 薄荷文字级 */
+  --mint-bg: #ecfdf5;          /* 薄荷 chip 底 */
+  --mint-line: #6ee7b7;        /* 薄荷描边 */
+  --mint-soft: rgba(16, 185, 129, 0.15); /* 幽灵草稿底色（ghost-draft--mint 平移） */
+  --cinnabar: #a63e2a;         /* 朱批/真相/印章 · 文字级（岔路朱 #c2725a 并入 bright 档） */
+  --cinnabar-bright: #c25a4a;  /* 朱点/时间轴小点/岔路 · 点状高亮级 */
+  --foreshadow: #a855f7;       /* 伏笔弧紫（与交互 accent 是两个语义，各司其职） */
+  --gold: #b08d3e;             /* 鎏金 · 此刻/编年游标（世界页恒定） */
+  --gold-deep: #8a6d2f;        /* 黄铜渐变深端 */
+  --gold-pale: #e6c87e;        /* 黄铜渐变浅端 */
+  --gold-star: #c9a227;        /* 核心角色金环星芒 */
+  --truth-secret: var(--cinnabar); /* 三态真相 · 秘密 */
+  --truth-partial: #7c5faf;    /* 三态真相 · 半露 */
+  --truth-open: #5f7d5a;       /* 三态真相 · 公开 */
+  /* 古地图豁免锚点集（浅深恒定；本期只定义不替换，为未来「地图皮肤」留挂点） */
+  --atlas-paper: #e7d7b6;
+  --atlas-paper-2: #ecdfc3;
+  --atlas-ink: #6e552d;
+  --atlas-river: #3f6f8f;
+  --atlas-float: #ece4d3;
+  /* 字体别名修复：--font-serif/--font-mono 此前全仓未定义恒走 fallback（盘点 §7-2） */
+  --font-serif: var(--font-heading);
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  --font-atlas: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', serif; /* 古地图字体恒定衬线（地图是古籍，不随主题换栈） */
+  /* 阴影四件套（浅档；每主题有性格差——极简硬、柔和软、二次元带粉调） */
+  --shadow-sm: 0 1px 2px rgba(18, 38, 63, 0.05);
+  --shadow-md: 0 4px 12px rgba(18, 38, 63, 0.08);
+  --shadow-lg: 0 12px 32px rgba(18, 38, 63, 0.12);
+  --shadow-paper: 0 8px 20px rgba(18, 38, 63, 0.06);
+
+  /* ===== 表面阶梯（P0 alias 期：映射现值，P1 按主题调值；
+     05-visual-modernization-plan §7.1——var() 别名只在 :root 声明一次，
+     主题块/ .dark 覆写底层 --bg-* 即可，此处不得重复声明） ===== */
+  --surface-base: var(--bg-canvas);
+  --surface-sunken: var(--bg-tertiary);
+  --surface-raised: var(--bg-secondary);
+  --surface-overlay: var(--bg-panel);
+  --surface-float: var(--bg-elevated);
+  /* 线阶 */
+  --line-faint: color-mix(in srgb, var(--border-color) 55%, transparent);
+  --line: var(--border-color);
+  --line-strong: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  /* State 色板（active/selected 本期无消费方，先立账） */
+  --state-hover: var(--hover-bg); /* P2 热修：P1 换名 codemod 曾把本行误改成自引用，hover 背景全失效——已复原 */
+  --state-active: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --state-selected: color-mix(in srgb, var(--accent-500) 15%, transparent); /* P2 §9.3：12%→15%——浅档近白底上可辨度不足（14-16% 带内单点调，组件不动） */
+  /* Motion（P1 终值：05 §8.1——dur-2/3/4 定档 .18/.24/.36s，全仓 var(--dur-N) 引用自动升格） */
+  --dur-1: .12s; --dur-2: .18s; --dur-3: .24s; --dur-4: .36s;
+  --ease-out: cubic-bezier(.2,.8,.2,1);
+  --ease-in: cubic-bezier(.4,0,1,1);
+  --ease-spring: cubic-bezier(.34,1.3,.4,1);
+  --stagger-1: 40ms; --stagger-2: 80ms; --stagger-3: 120ms;
+
+  /* ===== Chrome 仪器底座（06 §2：N1 token 增量；只在 :root 声明一次） ===== */
+  /* ---- §2.1 控件几何（仪器密度阶；任何 chrome 控件取其一） ---- */
+  --control-h-sm: 1.75rem;   /* 28 chip/小钮 */
+  --control-h-md: 2rem;      /* 32 按钮/输入/分段 默认档 */
+  --control-h-lg: 2.25rem;   /* 36 模态主钮/工具行 */
+  --control-h-xs: 1.25rem;   /* 20 行内微钮（N3：rerun/usage-clear 等） */
+  --control-px: 0.625rem;    /* 10px 横向内衬（按钮/输入统一） */
+  --menu-item-h: 1.75rem;    /* 28 菜单项 */
+  --chrome-gap: 0.25rem;     /* 控件组内间距（取代散写 6/8px） */
+  /* ---- §2.2 字排/图标阶 ---- */
+  --tracking-label: 0.02em;    /* 按钮/标签 */
+  --tracking-eyebrow: 0.06em;  /* 分区眉标（uppercase 中文不生效=预期） */
+  --icon-sm: 0.875rem;         /* 14 紧凑图标（chip 内/菜单） */
+  --icon-md: 1rem;             /* 16 chrome 默认图标 */
+  /* ---- §2.3 浅档 chrome 层次（深色档自动成立；零硬编码透明度） ---- */
+  --well-bg: var(--surface-sunken);                                 /* 凹槽底：分段轨道/凹槽卡 */
+  --well-inset: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent);
+                                                                    /* 凹槽内 hairline（浅档凹槽感来源） */
+  --field-bg: var(--bg-canvas);                                     /* 输入框面 */
+  --hover-line: color-mix(in srgb, var(--text-primary) 12%, transparent);
+                                                                    /* hover 描边加深档（Linear 式，替代底色块 hover） */
+  --shadow-menu: var(--shadow-md);                                  /* 菜单/popover 统一 elev-2 档 */
+  /* @提及 色（#资产侧同构用 --warn，不另设 token） */
+  --mention-char: #1d4ed8;
+  --mention-char-bg: color-mix(in srgb, var(--info) 14%, transparent);
+  /* 编辑器查找命中（class 消费，color-mix 以 token 为输入即主题安全） */
+  --find-match: color-mix(in srgb, var(--warn) 22%, transparent);
+  --find-match-active: color-mix(in srgb, var(--warn) 42%, transparent);
+  /* diff mark 底色（RichTextEditor diff-add/diff-del class 消费） */
+  --diff-add-bg: rgba(16, 185, 129, 0.18);
+  --diff-del-bg: rgba(220, 60, 60, 0.16);
+  /* 模态遮罩 */
+  --overlay-bg: rgba(20, 16, 10, 0.38);
+  /* 纸纹（默认关；外观「纸纹」背景写入 SVG data-URI） */
+  --paper-texture: none;
+  /* 纸缘色（04 §A2：border-color 向 text-faint 走 40%——纸的「裁切边缘」，比边框深半档） */
+  --paper-edge: #cac3b8;
+  /* 焦点柔环 / accent 辉光（04 §C1；color-mix 以 token 为输入即主题自适应） */
+  --ring-soft: 0 0 0 3px color-mix(in srgb, var(--accent-500) 12%, transparent);
+  --glow-accent: 0 4px 12px color-mix(in srgb, var(--accent-500) 25%, transparent);
 }
 
 /* 编辑器排版实验（00 期 §6.2 预留开关，03 期 §7 落地）：宽排档。
@@ -130,12 +231,12 @@
 :root.dark {
   /* 背景色 - 暖深色（深牛皮纸感） */
   --bg-primary: #1a1815;
-  --bg-secondary: #211f1b;
-  --bg-tertiary: #2c2923;
+  --bg-secondary: #292724;
+  --bg-tertiary: #1a1915;
   --bg-canvas: #1e1c18;
   /* 纸面底色（08 期 §4.1）：灯下纸——比桌面 --bg-primary 亮一档 */
   --paper-bg: #26231e;
-  --bg-panel: #2c2923;
+  --bg-panel: #25231f; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */
 
   /* 文本色 - 暖白 */
   --text-primary: #ede8df;
@@ -165,11 +266,168 @@
   --info: #93c5fd;
   --info-bg: #15243d;
 
-  /* ---- §2.5 深色浮层底色 ---- */
-  --bg-elevated: #2c2923;
+  /* ---- §2.5 深色浮层底色（P1 §8.2 阶梯：float=canvas+7% 白混） ---- */
+  --bg-elevated: #2e2c28;
 
   /* ---- §2.4 纯装饰淡字档（深色侧） ---- */
   --text-faint: #6b6459;
+
+  /* ---- 签名恒定色（深档）：mint-ink/bg/line 提亮保对比；gold/atlas 族浅深同值不覆写 ---- */
+  --mint-ink: #6ee7b7;
+  --mint-bg: rgba(20, 46, 38, 0.55);
+  --mint-line: rgba(110, 231, 183, 0.35);
+  --cinnabar: #c8553c;
+  --cinnabar-bright: #e0684f;
+  --foreshadow: #c084fc;
+  --truth-partial: #a98fd4;
+  --truth-open: #86a383;
+  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-md: 0 4px 12px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
+  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
+  --shadow-paper: 0 8px 20px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --mention-char: #93c5fd;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  --paper-edge: #4e4840;
+}
+
+/* ============================================================
+   主题覆写块（01-theme-architecture §1.1/§3）
+   二维正交：主题 id 挂 data-theme，明暗继续挂 .dark class。
+   data-theme='paper' 时无覆写块——:root 即暖纸，旧用户零回归。
+   每块只覆写颜色/阴影/字体栈；几何 token（字阶/间距/圆角/z 表/
+   --editor-*）任何主题不得覆写。八块值全部照 01 §3.2-§3.5 落表。
+   预览色值同源维护于 components/appearancePreviewPresets.ts（05 §9.1
+   THEME_PREVIEW_PRESETS 集中）——改主题实色两边一起改。
+   ============================================================ */
+
+/* ---- 极简 minimal：高对比黑白灰 · 一点冷钢蓝 · 标题换无衬线（「校样稿」） ---- */
+[data-theme='minimal'] {
+  --bg-primary: #f4f4f2; --bg-secondary: #fafafa; --bg-tertiary: #eaeae7;
+  --bg-canvas: #ffffff; --paper-bg: #ffffff; --bg-panel: #eaeae7; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #ffffff;
+  --text-primary: #161616; --text-secondary: #4f4f4f; --text-muted: #6d6d6d; --text-faint: #a6a6a6;
+  --border-color: #e0e0dd; --hover-bg: #ececea;
+  --scrollbar-thumb: #c6c6c3; --scrollbar-thumb-hover: #9e9e9b;
+  --accent-400: #6f90f2; --accent-500: #3b62d8; --accent-600: #2e4db0;
+  --ok: #0b7a4b; --ok-bg: #e2f2e9; --warn: #96620a; --warn-bg: #f8eed7;
+  --danger: #c02c2c; --danger-bg: #fae7e7; --info: #2e4db0; --info-bg: #e6ecfb;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --shadow-paper: 0 4px 14px rgba(0, 0, 0, 0.05);
+  --paper-edge: #c9c9c7;
+  --font-heading: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+[data-theme='minimal'].dark {
+  --bg-primary: #0e0e0e; --bg-secondary: #1e1e1e; --bg-tertiary: #0f0f0f;
+  --bg-canvas: #121212; --paper-bg: #191919; --bg-panel: #191919; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #232323;
+  --text-primary: #ececec; --text-secondary: #b3b3b3; --text-muted: #8c8c8c; --text-faint: #565656;
+  --border-color: #2b2b2b; --hover-bg: #242424;
+  --scrollbar-thumb: #3a3a3a; --scrollbar-thumb-hover: #4e4e4e;
+  --accent-400: #7aa0f5; --accent-500: #94b4f8; --accent-600: #b6ccfb;
+  --ok: #5cc98e; --ok-bg: #12291d; --warn: #e0b054; --warn-bg: #2e2410;
+  --danger: #e57373; --danger-bg: #331414; --info: #94b4f8; --info-bg: #18223d;
+  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-md: 0 4px 12px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
+  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
+  --shadow-paper: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --paper-edge: #3c3c3c;
+}
+
+/* ---- 柔和 soft：低饱和奶油 · 雾玫瑰 accent · 阴影大而软（「羊绒毯上的奶茶」） ---- */
+[data-theme='soft'] {
+  --bg-primary: #f5f0e8; --bg-secondary: #faf6ef; --bg-tertiary: #efe7da;
+  --bg-canvas: #fdfaf4; --paper-bg: #fdfaf4; --bg-panel: #efe7da; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #ffffff;
+  --text-primary: #4b423b; --text-secondary: #7d7166; --text-muted: #8d8172; --text-faint: #b3a898;
+  --border-color: #e6dccd; --hover-bg: #f0e8db;
+  --scrollbar-thumb: #d3c7b4; --scrollbar-thumb-hover: #b5a891;
+  --accent-400: #cfa0ab; --accent-500: #b77e8d; --accent-600: #a36778;
+  --ok: #5d8a6a; --ok-bg: #e3ede2; --warn: #b08a4a; --warn-bg: #f5ecd9;
+  --danger: #b65b5b; --danger-bg: #f5e4e4; --info: #7d93ad; --info-bg: #e6ecf1;
+  --shadow-sm: 0 1px 3px rgba(120, 100, 80, 0.08);
+  --shadow-md: 0 6px 18px rgba(120, 100, 80, 0.10);
+  --shadow-lg: 0 16px 40px rgba(120, 100, 80, 0.14);
+  --shadow-paper: 0 6px 16px rgba(120, 100, 80, 0.07);
+  --paper-edge: #d2c7b8;
+}
+[data-theme='soft'].dark {
+  --bg-primary: #221d19; --bg-secondary: #302b24; --bg-tertiary: #201c16;
+  --bg-canvas: #252019; --paper-bg: #2d2822; --bg-panel: #2c2720; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #343029;
+  --text-primary: #ece2d6; --text-secondary: #c3b6a6; --text-muted: #9b8f80; --text-faint: #6e6455;
+  --border-color: #3e372f; --hover-bg: #37312a;
+  --scrollbar-thumb: #4a423a; --scrollbar-thumb-hover: #5d5348;
+  --accent-400: #d3a4b1; --accent-500: #d9a7b0; --accent-600: #e5bec5;
+  --ok: #8fb896; --ok-bg: #25301f; --warn: #d3ac6c; --warn-bg: #35290f;
+  --danger: #d98b8b; --danger-bg: #382020; --info: #9db4c9; --info-bg: #232e38;
+  --shadow-sm: 0 1px 3px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.45);
+  --shadow-md: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-lg: 0 16px 40px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
+  --shadow-paper: 0 6px 16px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.45);
+  --paper-edge: #51493e;
+}
+
+/* ---- 专业 pro：冷灰蓝工作台 · 钢蓝 accent · 阴影冷调（「编辑部日光灯/夜班审校台」） ---- */
+[data-theme='pro'] {
+  --bg-primary: #eef1f5; --bg-secondary: #f5f7fa; --bg-tertiary: #e4e9ef;
+  --bg-canvas: #fbfcfe; --paper-bg: #ffffff; --bg-panel: #e4e9ef; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #ffffff;
+  --text-primary: #20262e; --text-secondary: #525c68; --text-muted: #66707c; --text-faint: #9aa3ad;
+  --border-color: #d6dde4; --hover-bg: #e6ebf1;
+  --scrollbar-thumb: #bcc5cf; --scrollbar-thumb-hover: #9aa5b2;
+  --accent-400: #5d8fd1; --accent-500: #2f6db3; --accent-600: #265a98;
+  --ok: #177a52; --ok-bg: #def0e7; --warn: #a06a08; --warn-bg: #f9efd6;
+  --danger: #bb3232; --danger-bg: #f9e4e4; --info: #2f6db3; --info-bg: #e2ecf7;
+  --shadow-sm: 0 1px 2px rgba(30, 50, 70, 0.06);
+  --shadow-md: 0 4px 14px rgba(30, 50, 70, 0.09);
+  --shadow-lg: 0 12px 32px rgba(30, 50, 70, 0.13);
+  --shadow-paper: 0 6px 18px rgba(30, 50, 70, 0.07);
+  --paper-edge: #bec6ce;
+}
+[data-theme='pro'].dark {
+  --bg-primary: #10151b; --bg-secondary: #1e242a; --bg-tertiary: #0f151b;
+  --bg-canvas: #12181f; --paper-bg: #1a222b; --bg-panel: #191f26; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #23282f;
+  --text-primary: #e3e9ef; --text-secondary: #b0bac5; --text-muted: #8792a0; --text-faint: #5c6672;
+  --border-color: #2a343f; --hover-bg: #232d38;
+  --scrollbar-thumb: #39444f; --scrollbar-thumb-hover: #4b5764;
+  --accent-400: #6fa3dc; --accent-500: #82b3e5; --accent-600: #a4c8ec;
+  --ok: #5cb98d; --ok-bg: #14271f; --warn: #d9a94f; --warn-bg: #2d2410;
+  --danger: #e07b7b; --danger-bg: #341919; --info: #82b3e5; --info-bg: #182738;
+  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-md: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
+  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
+  --shadow-paper: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --paper-edge: #3e4853;
+}
+
+/* ---- 二次元 anime：樱饼浅档/霓虹夜空深档 · 圆体标题栈（「轻小说文库本」） ---- */
+[data-theme='anime'] {
+  --bg-primary: #fff2f6; --bg-secondary: #fff8fa; --bg-tertiary: #fbe6ee;
+  --bg-canvas: #fffcfd; --paper-bg: #fffdfd; --bg-panel: #fbe6ee; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #ffffff;
+  --text-primary: #43304e; --text-secondary: #7d6586; --text-muted: #8d7595; --text-faint: #bba8c0;
+  --border-color: #f2d7e3; --hover-bg: #fbe9f1;
+  --scrollbar-thumb: #ecc3d4; --scrollbar-thumb-hover: #d9a3bb;
+  --accent-400: #f77bab; --accent-500: #ef5390; --accent-600: #d63d7c;
+  --ok: #1fae7d; --ok-bg: #d9f5ea; --warn: #d98a12; --warn-bg: #fdf0d7;
+  --danger: #e84a6f; --danger-bg: #fde3ea; --info: #5b8def; --info-bg: #e3ecfd;
+  --shadow-sm: 0 1px 3px rgba(200, 80, 130, 0.10);
+  --shadow-md: 0 4px 14px rgba(200, 80, 130, 0.12);
+  --shadow-lg: 0 14px 36px rgba(200, 80, 130, 0.16);
+  --shadow-paper: 0 6px 18px rgba(200, 80, 130, 0.10);
+  --paper-edge: #dcc4d5;
+  --font-heading: 'Yuanti SC', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+[data-theme='anime'].dark {
+  --bg-primary: #17101f; --bg-secondary: #241e2c; --bg-tertiary: #160f1c;
+  --bg-canvas: #191221; --paper-bg: #221a2c; --bg-panel: #201928; /* deprecated: 由 --surface-overlay 接替，P2 后删除 */ --bg-elevated: #292331;
+  --text-primary: #f3eafd; --text-secondary: #cbb8dd; --text-muted: #a08bb3; --text-faint: #6e5c80;
+  --border-color: #372847; --hover-bg: #2c2139;
+  --scrollbar-thumb: #46355c; --scrollbar-thumb-hover: #5a4674;
+  --accent-400: #ff8fbb; --accent-500: #ffa5c8; --accent-600: #ffc2d9;
+  --ok: #4fd6a4; --ok-bg: #142b24; --warn: #f0b95a; --warn-bg: #33260e;
+  --danger: #ff7d9c; --danger-bg: #3a1824; --info: #8ab0ff; --info-bg: #1b2540;
+  --shadow-sm: 0 1px 3px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-md: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
+  --shadow-lg: 0 14px 36px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
+  --shadow-paper: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --paper-edge: #4d3d5e;
 }
 
 /* 全局样式 */
@@ -193,6 +451,31 @@ body {
   color: var(--text-primary);
 }
 
+/* ---- 自定义背景层（01 §1.4）：只换「桌面层」，纸面/古地图/书封不动 ----
+   属性由 useAppearance.apply() 写在 documentElement 上（body 继承）；
+   index.html 内联防闪脚本同源写入。--user-bg-* 缺省=跟随主题（层透明零成本）。 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--user-bg-color, none);
+  background-image: var(--user-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+/* 遮罩层：深浅档自动反色（浅=白纱/深=黑纱），保证桌面内容不被背景图吞掉可读性 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--user-bg-veil, none);
+  pointer-events: none;
+}
+
 input,
 textarea,
 [contenteditable='true'] {
@@ -211,7 +494,7 @@ textarea,
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -231,38 +514,39 @@ textarea,
 
 /* 选中文字样式 */
 ::selection {
-  background: rgba(124, 106, 173, 0.25);
+  background: color-mix(in srgb, var(--accent-500) 25%, transparent);
 }
 
 /* ====== 全局交互动效 ====== */
 
 /* 主按钮微交互 */
 .btn-primary {
-  transition: all 0.2s ease-out;
+  transition: all var(--dur-3) var(--ease-out);
 }
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.2);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-500) 20%, transparent);
 }
 .btn-primary:active {
   transform: scale(0.98) translateY(0);
 }
 
-/* 卡片悬停效果 */
+/* 卡片悬停效果（06 评审点 4 拍板：N2 去 translateY 抬升，改「阴影档提升+描边加深」——
+   仪器式克制，位移 hover 与本语言冲突；motion-low 毯式覆盖不变） */
 .card-hover {
-  transition: all 0.2s ease-out;
+  transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
 }
 .card-hover:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(120, 100, 70, 0.08);
+  box-shadow: var(--shadow-md);
+  border-color: var(--hover-line);
 }
 
 /* 模态框进出动画 */
 .modal-enter-active {
-  transition: all 0.25s ease-out;
+  transition: all var(--dur-3) var(--ease-out);
 }
 .modal-leave-active {
-  transition: all 0.2s ease-in;
+  transition: all var(--dur-3) var(--ease-in);
 }
 .modal-enter-from {
   opacity: 0;
@@ -281,15 +565,15 @@ textarea,
 
 /* 模态内容过渡 */
 .modal-content {
-  transition: all 0.25s ease-out;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 /* 淡入动画（用于标签页内容切换） */
 .fade-enter-active {
-  transition: opacity 0.2s ease-out;
+  transition: opacity var(--dur-3) var(--ease-out);
 }
 .fade-leave-active {
-  transition: opacity 0.15s ease-in;
+  transition: opacity var(--dur-2) var(--ease-in);
 }
 .fade-enter-from,
 .fade-leave-to {
@@ -298,10 +582,10 @@ textarea,
 
 /* 滑入动画（用于侧边面板） */
 .slide-fade-enter-active {
-  transition: all 0.25s ease-out;
+  transition: all var(--dur-3) var(--ease-out);
 }
 .slide-fade-leave-active {
-  transition: all 0.2s ease-in;
+  transition: all var(--dur-3) var(--ease-in);
 }
 .slide-fade-enter-from {
   opacity: 0;
@@ -328,14 +612,14 @@ textarea,
 }
 
 .ghost-draft--mint {
-  background-color: rgba(16, 185, 129, 0.15);
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.12);
+  background-color: var(--mint-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mint) 12%, transparent);
 }
 
 .ghost-draft--amber {
   /* 降级段代笔：琥珀警示（呼应 degraded 语义） */
-  background-color: rgba(251, 191, 36, 0.15);
-  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
+  background-color: color-mix(in srgb, var(--warn) 15%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
 @keyframes ghost-draft-breathe {
@@ -353,20 +637,20 @@ textarea,
   align-items: center;
   gap: 4px;
   vertical-align: baseline;
-  border: 1px dashed var(--text-muted, #8b8f98);
+  border: 1px dashed var(--text-muted);
   border-radius: 9999px;
   padding: 0 8px;
   margin: 0 2px;
-  background-color: color-mix(in srgb, var(--text-muted, #8b8f98) 8%, transparent);
+  background-color: color-mix(in srgb, var(--text-muted) 8%, transparent);
   font-size: 0.82em;
-  color: var(--text-muted, #8b8f98);
+  color: var(--text-muted);
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
 
 .outline-note:hover {
-  border-color: var(--accent-500, #10b981);
+  border-color: var(--accent-500);
   color: var(--text-primary, inherit);
 }
 
@@ -401,34 +685,34 @@ textarea,
   position: fixed;
   z-index: var(--z-pop);
   width: 320px;
-  border-radius: 10px;
-  border: 1px solid var(--border-color, #2d2f36);
-  background-color: var(--bg-elevated, #1c1e24);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
   padding: 10px;
 }
 
 .outline-note-pop__input {
   width: 100%;
   resize: vertical;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #2d2f36);
-  background-color: var(--bg-primary, #14161b);
-  color: var(--text-primary, #e6e6e6);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   line-height: 1.6;
   padding: 8px;
 }
 
 .outline-note-pop__input:focus {
   outline: none;
-  border-color: var(--accent-500, #10b981);
+  border-color: var(--accent-500);
 }
 
 .outline-note-pop__hint {
   margin: 6px 2px 8px;
   font-size: var(--text-xs);
-  color: var(--text-muted, #8b8f98);
+  color: var(--text-muted);
 }
 
 .outline-note-pop__actions {
@@ -438,24 +722,24 @@ textarea,
 }
 
 .outline-note-pop__btn {
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #2d2f36);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
   background: transparent;
-  color: var(--text-muted, #8b8f98);
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   padding: 4px 12px;
   cursor: pointer;
 }
 
 .outline-note-pop__btn--primary {
-  background-color: var(--accent-500, #10b981);
-  border-color: var(--accent-500, #10b981);
-  color: #fff;
+  background-color: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--bg-canvas);
 }
 
 .outline-note-pop__btn--danger:hover {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
 /* 04 期 §2.2 状态丸：呼吸点 + 完整短句（薄荷=幽灵品牌色系，字面值先例） */
@@ -465,7 +749,7 @@ textarea,
   gap: 6px;
   padding: 2px 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, #34d399 8%, transparent);
+  background: color-mix(in srgb, var(--mint) 8%, transparent);
   font-size: var(--text-sm);
   color: var(--text-secondary);
   white-space: nowrap;
@@ -474,7 +758,7 @@ textarea,
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: #34d399;
+  background: var(--mint);
   animation: state-pill-pulse 1.6s ease-in-out infinite;
 }
 @keyframes state-pill-pulse {
@@ -502,10 +786,10 @@ textarea,
   color: var(--text-muted);
   font-size: var(--text-base);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .assist-toggle:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .assist-toggle--on {
@@ -518,7 +802,7 @@ textarea,
   background: var(--text-faint);
 }
 .assist-toggle--on .assist-toggle__dot {
-  background: #34d399;
+  background: var(--mint);
 }
 
 /* 04 期 §2.1：底栏已删，字数/保存态上移页面头——底栏样式段一并移除 */
@@ -537,10 +821,10 @@ textarea,
    inspector-drawer 过渡名被助手面板 Transition 复用，仅保留过渡规则 */
 
 .inspector-drawer-enter-active {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out);
 }
 .inspector-drawer-leave-active {
-  transition: transform 0.18s ease, opacity 0.18s ease;
+  transition: transform var(--dur-2) var(--ease-in), opacity var(--dur-2) var(--ease-in);
 }
 .inspector-drawer-enter-from,
 .inspector-drawer-leave-to {
@@ -571,31 +855,31 @@ textarea,
    其余命中用淡黄底——一眼分得清「现在跳到哪一条」。
    ============================================================ */
 .rich-text-editor .ProseMirror .editor-find-match {
-  background: rgba(251, 191, 36, 0.22);
+  background: var(--find-match);
   border-radius: 2px;
 }
 .rich-text-editor .ProseMirror .editor-find-match--active {
-  background: rgba(251, 146, 60, 0.42);
-  box-shadow: inset 0 -1px 0 rgba(180, 83, 9, 0.4);
+  background: var(--find-match-active);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
 /* ============================================================
    NLE-ADF 2.0 行内极速 Hook（@ 角色 / # 资产 提及）
    ============================================================ */
 .entity-mention {
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   font-size: 0.92em;
 }
 
 .entity-mention--character {
-  background: rgba(96, 165, 250, 0.14);
-  color: #93c5fd;
+  background: var(--mention-char-bg);
+  color: var(--mention-char);
 }
 
 .entity-mention--asset {
-  background: rgba(251, 191, 36, 0.12);
-  color: #fcd34d;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
 }
 
 .mention-popup {
@@ -603,29 +887,17 @@ textarea,
   z-index: var(--z-pop);
   min-width: 180px;
   max-width: 300px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   padding: 4px;
 }
 
 .mention-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-primary, #2c2c2c);
-  font-size: 13px;
-  cursor: pointer;
+  /* N2 §3.5：挂点——项皮肤由 .menu-item 提供（renderer 已挂类）；激活高亮=薄荷保留 */
 }
-
 .mention-item--active,
 .mention-item:hover {
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--mint) 10%, transparent);
 }
 
 .mention-item--empty {
@@ -687,7 +959,7 @@ textarea,
    破坏性操作用 .reveal-on-hover--danger（常态 45% 低显，不以隐藏为常态）。 */
 .reveal-on-hover {
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out);
 }
 .reveal-parent:hover .reveal-on-hover,
 .reveal-parent:focus-within .reveal-on-hover {
@@ -712,10 +984,26 @@ textarea,
   margin-bottom: var(--space-4);
 }
 .sec-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-family: var(--font-heading);
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-primary);
+}
+/* 04 §B1 小节符+短钉线：❦ 走纯装饰档不上朱砂；钉线固定 1.5rem 不延伸行尾（防挤副行） */
+.sec-title::before {
+  content: '❦';
+  font-size: 0.72em;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+.sec-title::after {
+  content: '';
+  width: 1.5rem;
+  height: 1px;
+  background: var(--border-color);
 }
 .sec-hint {
   font-size: var(--text-sm);
@@ -744,6 +1032,21 @@ textarea,
   }
 }
 
+/* ---- motion-low（01 §4.3）：「外观→降低动效」开关挂 documentElement class，
+   与 prefers-reduced-motion 同一毯式规则体（同一套 CSS 写两个选择器，零新增动画代码） ---- */
+.motion-low *,
+.motion-low *::before,
+.motion-low *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+.motion-low .spin-reduced,
+.motion-low .spin-reduced::before,
+.motion-low .spin-reduced::after {
+  animation: reduce-pulse 2s ease-in-out infinite !important;
+}
+
 @keyframes reduce-pulse {
   50% {
     opacity: 0.4;
@@ -764,19 +1067,20 @@ textarea,
   width: 380px;
   max-width: 44vw;
   z-index: 85;
-  background: var(--bg-secondary, #faf8f4);
-  border-left: 1px solid var(--border-color, #e0dbd3);
-  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.45);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  /* 04 §A2-3 多层纸叠影：-4px 硬偏移=画布侧露出下层纸错边，叠加主题大影 */
+  box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .inspector-drawer-enter-active {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out);
 }
 .inspector-drawer-leave-active {
-  transition: transform 0.18s ease, opacity 0.18s ease;
+  transition: transform var(--dur-2) var(--ease-in), opacity var(--dur-2) var(--ease-in);
 }
 .inspector-drawer-enter-from,
 .inspector-drawer-leave-to {
@@ -811,7 +1115,7 @@ textarea,
   color: var(--text-muted);
   cursor: pointer;
   z-index: var(--z-page-chrome);
-  transition: opacity 0.3s ease;
+  transition: opacity var(--dur-4) var(--ease-out);
 }
 .desk-spine:hover {
   color: var(--text-primary);
@@ -835,16 +1139,17 @@ textarea,
   z-index: var(--z-drawer);
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
-  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.45); /* 镜像复用 .inspector-drawer 投影（I-04 豁免） */
+  /* 04 §A2-3 多层纸叠影（镜像：右缘抽出，下层纸露左缘） */
+  box-shadow: 4px 0 0 -1px var(--paper-edge), var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 .toc-drawer-enter-active {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out);
 }
 .toc-drawer-leave-active {
-  transition: transform 0.18s ease, opacity 0.18s ease;
+  transition: transform var(--dur-2) var(--ease-in), opacity var(--dur-2) var(--ease-in);
 }
 .toc-drawer-enter-from,
 .toc-drawer-leave-to {
@@ -869,7 +1174,7 @@ textarea,
   border-right: none;
   border-radius: var(--radius-lg) 0 0 var(--radius-lg);
   z-index: var(--z-page-chrome);
-  transition: opacity 0.3s ease;
+  transition: opacity var(--dur-4) var(--ease-out);
 }
 .assist-rail__btn {
   position: relative;
@@ -879,14 +1184,15 @@ textarea,
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: none;
+  border: 1px solid transparent; /* N3：hover 描边化的承载位 */
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .assist-rail__btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
+  border-color: var(--hover-line); /* N3 §4：hover 描边化 */
   color: var(--text-primary);
 }
 .assist-rail__btn--active {
@@ -911,7 +1217,7 @@ textarea,
   background: var(--text-faint);
 }
 .assist-rail__dot--on {
-  background: #34d399; /* 薄荷品牌值（04 期 §2.2 先例，I-04 豁免） */
+  background: var(--mint); /* 薄荷品牌（04 期 §2.2 先例，签名恒定 token） */
 }
 .assist-rail__badge {
   position: absolute;
@@ -920,7 +1226,7 @@ textarea,
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--danger);
+  background: var(--cinnabar-bright); /* 04 §B3-6「有新批注」不是错误，danger 回收给真错误 */
 }
 
 /* ---- §4.4 目录页（态A：无章节选中时，目录上纸） ---- */
@@ -933,10 +1239,11 @@ textarea,
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--paper-bg);
-  border: 1px solid var(--border-color);
+  background-color: var(--paper-bg);
+  background-image: var(--paper-texture); /* 04 §A1：纸纹通道（缺省 none 零成本） */
+  border: 1px solid var(--paper-edge);
   border-radius: var(--radius-xl);
-  box-shadow: 0 8px 20px rgba(18, 38, 63, 0.06); /* 与 .paper 阴影同值复用 */
+  box-shadow: var(--shadow-paper); /* 纸张投影统一吃 --shadow-paper token */
 }
 
 /* ---- §4.6 助手面板贴栏左开：右缘栏在位期间面板让出 44px，栏始终可点 ---- */
@@ -955,4 +1262,689 @@ textarea,
 .workspace-view--typing .assist-rail:hover,
 .workspace-view--typing .assist-rail:focus-within {
   opacity: 1;
+}
+
+
+/* ============================================================
+   组件视觉语言层（docs/design/theme-system/04-visual-language-layer.md）
+   —— 纸感 / 装饰语言 / 卡片三档 / 空状态，全部 token 化五主题自动成立
+   ============================================================ */
+
+/* ---- §A1/§D2 纸面质感：纸面色+纸纹+纸缘描边+纸影（选「纸纹」背景时纸面同步得纹） ---- */
+.paper-face {
+  background-color: var(--paper-bg);
+  background-image: var(--paper-texture);
+  border: 1px solid var(--paper-edge);
+  box-shadow: var(--shadow-paper);
+}
+
+/* ---- §5.3 数字对齐 utility（06 N3：.num-serif 升格改名 .tnum——只给 tabular-nums，
+   字体继承消费处；衬线大数字展示由消费处自带 font-heading，如 .metric-value） ---- */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- §D2 卡片三档（留白节奏归一；可点卡另叠 .card-hover） ---- */
+/* 紧凑卡：列表条目/指标格 */
+.card-compact {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+/* 标准卡：样本卡/实体卡/章卡（阴影/边框收编 .elev-1 规则组；
+   N2 §3.7：padding 16→12、radius-lg→radius-md 仪器密度档） */
+.card-std {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
+}
+/* 凹槽卡（06 §3.7）：well 底+内 hairline、无 border——嵌入仪表格专用
+   （N2 试点=文风指纹指标格/数据页用量格，不大面积推广=N3 事项） */
+.card-well {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--well-bg);
+  box-shadow: var(--well-inset);
+}
+/* 纸面卡：文书语义卡（真相表/里、完稿报告、指纹大卡）——纸面规格直通 */
+.paper-card {
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-lg);
+  background-color: var(--paper-bg);
+  background-image: var(--paper-texture);
+  border: 1px solid var(--paper-edge);
+  box-shadow: var(--shadow-paper);
+}
+
+/* ---- §D3 空状态统一规格：❦ + 衬线主句 + 灰副句 + 主行动 ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12) var(--space-8);
+  text-align: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+}
+.empty-state::before {
+  content: '❦'; /* ❦ 饰符取代 48px 灰 icon——纯装饰档 */
+  font-size: 16px;
+  color: var(--text-faint);
+}
+.empty-state__title {
+  font-family: var(--font-heading);
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.empty-state__sub {
+  font-size: var(--text-sm);
+  max-width: 26rem;
+  line-height: var(--lh-normal);
+}
+.empty-state__action {
+  margin-top: var(--space-2);
+}
+
+/* ---- §C1 Elevation 四档（05-visual-modernization-plan §7.2；P0 只定义不推广，
+   组件收编规则=仅当现有 box-shadow 值与档 token 值逐字相同且已有同色边框才换类，
+   其余留 P1） ---- */
+.elev-0 { box-shadow: none; }
+.elev-1, .card-std { box-shadow: var(--shadow-sm); border: 1px solid var(--line); }
+.elev-2, .mention-popup { box-shadow: var(--shadow-md); border: 1px solid var(--line); }
+.elev-3 { box-shadow: var(--shadow-lg); border: 1px solid var(--line-strong); }
+/* P1 §8.3：暗档 elev-3 顶部 1px 内高光——浮层「被台下灯照亮」的上缘 */
+.dark .elev-3 { box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+
+/* ---- 世界速记模态族 .qen-*（05 §7.6 双份合一：共享样式单一事实源。
+   workspace/world 两份 QuickEventNote 脚本各自保留（props 已分化），样式统一收此；
+   两副本历史字号漂移（workspace 裸 rem vs world token 档）以各自 scoped 覆盖保留，
+   统一提 token 档留 P2（01 §9-5 裸字号项）。qen-new/qen-pickbar 等关联式录入件
+   仅世界页模板消费，workspace 零引用零成本 ---- */
+.qen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal); /* 模态带：遮罩须压副驾抽屉（--z-drawer 85） */
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+}
+.qen-modal {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 0.8rem 0.9rem;
+}
+.qen-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.qen-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.qen-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font-size: 1.05rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.qen-hint {
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+  line-height: 1.5;
+}
+.qen-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.qen-input {
+  flex: 1;
+  padding: 6px var(--control-px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  box-shadow: var(--well-inset);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+.qen-input:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  box-shadow: var(--well-inset), var(--ring-soft);
+}
+/* N1 §3.1：qen 按钮收编仪器工具类（btn-ghost 供边框/底色/文字，scoped 只留 padding） */
+.qen-btn {
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.qen-btn.primary {
+  /* 实底/边框/文字由 .btn-primary-instrument 提供（模板挂类） */
+}
+.qen-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.qen-template-link {
+  margin-top: 0.55rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--accent-500);
+  font-family: inherit;
+  cursor: pointer;
+}
+.qen-template-link:hover {
+  text-decoration: underline;
+}
+.qen-warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.qen-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.qen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+}
+.qen-field select,
+.qen-field input {
+  padding: 6px var(--control-px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  box-shadow: var(--well-inset);
+  color: var(--text-primary);
+}
+.qen-preview {
+  color: var(--accent-500);
+}
+.qen-ymd {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.qen-ymd input {
+  width: 3rem;
+  text-align: center;
+}
+.qen-ymd input.qen-ymd-year {
+  width: 3.8rem;
+}
+.qen-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.qen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.qen-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--accent-500);
+  border-radius: 999px;
+  color: var(--accent-500);
+}
+.qen-chip-x {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.qen-add {
+  padding: 0.2rem 0.4rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.qen-unresolved {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 「同时新建」勾选区（关联式录入）——旧硬编码 accent 紫（#7c6aad=rgb(124,106,173)）
+   已换 color-mix(var(--accent-500))（05 §9.2），alpha 逐字保留、随主题换色 */
+.qen-new {
+  border: 1px dashed color-mix(in srgb, var(--accent-500) 45%, transparent);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: color-mix(in srgb, var(--accent-500) 4%, transparent);
+}
+.qen-new-title {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.qen-new-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.qen-new-row input[type='checkbox'] {
+  flex-shrink: 0;
+  accent-color: var(--accent-500);
+}
+.qen-new-name {
+  width: 7.5rem;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  box-shadow: var(--well-inset);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.qen-new-kind {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  box-shadow: var(--well-inset);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+.qen-new-kind--loc {
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 0 0.2rem;
+}
+.qen-new-evidence {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.qen-map-btn {
+  flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
+  border: 1px dashed var(--accent-500);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-500) 5%, transparent);
+  color: var(--accent-500);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qen-map-btn:hover {
+  background: color-mix(in srgb, var(--accent-500) 14%, transparent);
+}
+.qen-skip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-top: 0.1rem;
+}
+.qen-skip-row input {
+  accent-color: var(--accent-500);
+}
+
+/* 地图标点中悬浮条（模态收起态；top 让开胶囊工具条一行）——模态族层：
+   标点期间须盖过页面抽屉/图标栏，作者才看得到「Esc 取消」指引 */
+.qen-pickbar {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--surface-overlay);
+  border: 1px solid var(--accent-500);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  max-width: calc(100vw - 48px);
+}
+.qen-pickbar-cancel {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 0.12rem 0.6rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.qen-pickbar-cancel:hover {
+  border-color: var(--accent-500);
+  color: var(--accent-500);
+}
+
+.qen-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.qen-capsule {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: calc(var(--z-modal) + 1); /* 撤销胶囊同族最上（仍低于 Toast 120） */
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.45rem 0.8rem;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums; /* N3 §5.3：胶囊时刻/计数数字对齐 */
+  color: var(--text-primary);
+}
+.qen-capsule-undo {
+  background: none;
+  border: 1px solid var(--accent-500);
+  border-radius: 999px;
+  color: var(--accent-500);
+  padding: 0.12rem 0.6rem;
+  cursor: pointer;
+}
+.qen-capsule--warn {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}
+
+/* ============================================================
+   Chrome 仪器底座控件族（06 §3：N1 工具类——组件换挂这些类，
+   删除被替代的散写皮肤；色态全部 token，照此可施工）
+   ============================================================ */
+
+/* ---- §3.6 eyebrow 分区眉标：12/600/tracking-eyebrow/muted + hairline ---- */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--chrome-gap);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--text-muted);
+  text-transform: uppercase; /* 中文不生效=预期，拉丁标签大写化 */
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-faint);
+  margin-bottom: 10px;
+}
+
+/* ---- §3.1 按钮：primary（信号实底，C6 范式） ---- */
+.btn-primary-instrument {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--chrome-gap);
+  min-height: var(--control-h-md);
+  padding: 0 var(--control-px);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  font-family: inherit;
+  white-space: nowrap; /* N2 前置修复：flex 挤压下 CJK 钮文案不折行（既有病灶） */
+  border-radius: var(--radius-sm);
+  background: var(--accent-500);
+  border: 1px solid var(--accent-500);
+  color: var(--bg-canvas);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.btn-primary-instrument:hover:not(:disabled) {
+  background: var(--accent-600);
+  box-shadow: var(--glow-accent);
+}
+.btn-primary-instrument:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn-primary-instrument:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- §3.1 按钮：ghost（默认钮；hover=Linear 式描边加深+微底） ---- */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--chrome-gap);
+  min-height: var(--control-h-md);
+  padding: 0 var(--control-px);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  font-family: inherit;
+  white-space: nowrap; /* N2 前置修复：flex 挤压下 CJK 钮文案不折行 */
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--hover-line);
+  background: var(--state-hover);
+}
+.btn-ghost:active:not(:disabled) {
+  background: var(--state-active);
+  transform: scale(0.98);
+}
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* ghost 紧凑档：图标旁小钮/行内次要钮（N2 §3.1 补 family） */
+.btn-ghost--sm {
+  min-height: var(--control-h-sm);
+  padding: 0 8px;
+  font-size: var(--text-xs);
+}
+/* ghost 微档：行内微钮 ~20px（N3 §2.1 --control-h-xs；rerun/usage-clear 等） */
+.btn-ghost--xs {
+  min-height: var(--control-h-xs);
+  padding: 0 6px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-xs);
+}
+/* icon 钮规范（N3：方钮宽=高 h-sm 28，hover 描边化；icon 14 走 --icon-sm） */
+.icon-btn-instrument {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.icon-btn-instrument:hover:not(:disabled) {
+  background: var(--state-hover);
+  border-color: var(--hover-line);
+  color: var(--text-primary);
+}
+
+/* ---- §3.2 chip（h-28 px-10 pill；选中=state-selected+accent 文字） ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--chrome-gap);
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  font-size: var(--text-xs);
+  font-family: inherit;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.chip:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--hover-line);
+  background: var(--state-hover);
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chip--on {
+  background: var(--state-selected);
+  border-color: color-mix(in srgb, var(--accent-500) 35%, transparent);
+  color: var(--accent-500);
+  font-weight: 600;
+}
+.chip--on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-500) 20%, transparent);
+  color: var(--accent-500);
+  border-color: color-mix(in srgb, var(--accent-500) 35%, transparent);
+}
+
+/* ---- §3.3 field（输入/下拉/textarea；凹槽=border+well-inset；focus=accent+ring） ---- */
+.field {
+  width: 100%;
+  min-height: var(--control-h-md);
+  padding: 6px var(--control-px);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--well-inset);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+.field:hover:not(:disabled) {
+  border-color: var(--hover-line);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent-500);
+  box-shadow: var(--well-inset), var(--ring-soft);
+}
+.field:disabled {
+  opacity: 0.5;
+}
+textarea.field {
+  min-height: 4em;
+  line-height: var(--lh-normal);
+  resize: vertical;
+}
+
+/* ---- §3.5 菜单族（06 §3.5：壳=elev-2+radius-md+padding4；项=h-28/px8/radius-sm） ----
+   入场=mount 播放的 animation（motion-low 毯式自动归零）；壳底色=canvas */
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.menu-shell {
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-menu);
+  animation: menu-pop var(--dur-2) var(--ease-out);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--menu-item-h);
+  padding: 0 8px;
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--state-hover);
+  color: var(--text-primary);
+}
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.menu-item--danger {
+  color: var(--danger);
+}
+.menu-item--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.menu-item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.menu-item:hover:not(:disabled) svg {
+  color: var(--text-primary);
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line-faint);
+  border: none;
+}
+.menu-kbd {
+  margin-left: auto;
+  padding-left: 16px;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }

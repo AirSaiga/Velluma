@@ -26,11 +26,13 @@ const emit = defineEmits<{
   'remove': [id: number]
 }>()
 
-const typeStyles: Record<ToastType, string> = {
-  success: 'bg-[var(--accent-500)] text-white',
-  error: 'bg-rose-500 text-white',
-  warning: 'bg-amber-500 text-white',
-  info: 'bg-blue-500 text-white'
+/** P1 §8.6：弃实底语义色——float 表面 + 左侧 3px 语义色条 + 语义色图标/动作。
+ *  每枚 toast 以 --toast-bar 注入本型语义色（ok/danger/warn/info token）。 */
+const barColors: Record<ToastType, string> = {
+  success: 'var(--ok)',
+  error: 'var(--danger)',
+  warning: 'var(--warn)',
+  info: 'var(--info)'
 }
 
 const typeIcons: Record<ToastType, string> = {
@@ -58,22 +60,34 @@ function runAction(id: number, action: ToastAction) {
       <div
         v-for="toast in toasts"
         :key="toast.id"
-        :class="[
-          'px-4 py-3 rounded-lg shadow-lg min-w-[200px] max-w-[400px]',
-          typeStyles[toast.type]
-        ]"
+        class="toast-card elev-3"
+        :style="{ '--toast-bar': barColors[toast.type] }"
       >
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-sm font-medium">{{ toast.message }}</span>
+        <div class="toast-row">
+          <svg
+            class="toast-icon"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path :d="typeIcons[toast.type]" />
+          </svg>
+          <span class="toast-msg tnum">{{ toast.message }}</span>
           <div class="flex items-center gap-2">
             <button
               v-if="toast.action"
+              class="toast-action"
               @click="runAction(toast.id, toast.action)"
-              class="text-sm font-semibold underline underline-offset-2 opacity-90 hover:opacity-100 transition-opacity"
             >{{ toast.action.label }}</button>
             <button
+              class="toast-close"
+              title="关闭"
               @click="removeToast(toast.id)"
-              class="opacity-70 hover:opacity-100 transition-opacity"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -86,8 +100,8 @@ function runAction(id: number, action: ToastAction) {
           <button
             v-for="a in toast.actions"
             :key="a.label"
+            class="toast-chip"
             @click="runAction(toast.id, a)"
-            class="text-xs font-semibold px-2 py-1 rounded bg-white/20 hover:bg-white/35 transition-colors"
           >{{ a.label }}</button>
         </div>
       </div>
@@ -101,18 +115,83 @@ function runAction(id: number, action: ToastAction) {
   z-index: var(--z-toast);
 }
 
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.3s ease;
+/* P1 §8.6：float 表面 + 毛玻璃 + elev-3（暗档自动 chroma 影+顶部内高光），
+   左侧 3px 语义色条 = 本型唯一强信号（弃整块实底） */
+.toast-card {
+  min-width: 200px;
+  max-width: 400px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-float);
+  backdrop-filter: blur(8px);
+  border-left: 3px solid var(--toast-bar);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.toast-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--toast-bar);
+}
+.toast-msg {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  line-height: var(--lh-normal);
+}
+.toast-action {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--toast-bar);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.toast-action:hover {
+  filter: brightness(1.15);
+}
+.toast-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--text-muted);
+  transition: color var(--dur-1) var(--ease-out);
+}
+.toast-close:hover {
+  color: var(--text-primary);
+}
+/* 多动作 chip：语义色浅底（color-mix，新透明度唯一通道） */
+.toast-chip {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--toast-bar) 12%, transparent);
+  color: var(--text-primary);
+  transition: background var(--dur-1) var(--ease-out);
+}
+.toast-chip:hover {
+  background: color-mix(in srgb, var(--toast-bar) 24%, transparent);
 }
 
+/* P1 §8.6：入场上浮淡入 8px→0（dur-3 ease-out），退场 dur-2 ease-in */
+.toast-enter-active {
+  transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+}
+.toast-leave-active {
+  transition: opacity var(--dur-2) var(--ease-in), transform var(--dur-2) var(--ease-in);
+}
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(100%);
+  transform: translateY(8px);
 }
-
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(100%);
+  transform: translateY(8px);
 }
 </style>

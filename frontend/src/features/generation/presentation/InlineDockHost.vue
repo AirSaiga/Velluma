@@ -116,6 +116,6 @@ onBeforeUnmount(() => {
   height: 0;
   margin: 6px 0;
   overflow: hidden;
-  transition: height 0.16s ease-out;
+  transition: height var(--dur-2) var(--ease-out);
 }
 </style>

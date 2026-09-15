@@ -170,7 +170,7 @@ function clearBranch() {
         placeholder="当面撕破&#10;隐忍试探"
       ></textarea>
       <div class="spine-branch-editor__actions">
-        <button class="spine-suggest__btn spine-suggest__btn--primary" @click="saveBranch">保存</button>
+        <button class="spine-suggest__btn spine-suggest__btn--primary btn-primary-instrument" @click="saveBranch">保存</button>
         <button v-if="branchEditor.hasExisting" class="spine-suggest__btn" @click="clearBranch">清除</button>
       </div>
     </div>
@@ -228,7 +228,7 @@ function clearBranch() {
             >{{ a }}</span>
           </div>
           <div class="spine-suggest__actions">
-            <button class="spine-suggest__btn spine-suggest__btn--primary" @click="emit('adopt', 'all')">全部收下</button>
+            <button class="spine-suggest__btn spine-suggest__btn--primary btn-primary-instrument" @click="emit('adopt', 'all')">全部收下</button>
             <button class="spine-suggest__btn" @click="emit('discard-suggestions')">不用</button>
           </div>
         </div>
@@ -254,7 +254,7 @@ function clearBranch() {
   color: var(--text-primary);
 }
 .spine-hint {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .spine-intent {
@@ -263,7 +263,7 @@ function clearBranch() {
   border: none;
   border-bottom: 1px dashed var(--border-color);
   background: transparent;
-  font-family: var(--font-heading, inherit);
+  font-family: var(--font-heading);
   font-size: 0.8125rem;
   color: var(--text-primary);
   padding: 0.25rem 0;
@@ -271,7 +271,7 @@ function clearBranch() {
 }
 .spine-intent:focus {
   outline: none;
-  border-bottom-color: var(--accent-400, #9685c2);
+  border-bottom-color: var(--accent-400);
 }
 .spine-anchors {
   display: flex;
@@ -285,7 +285,7 @@ function clearBranch() {
   padding: 0.125rem 0.5rem;
   border: 1px solid var(--border-color);
   border-radius: 999px;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   background: var(--bg-secondary);
 }
@@ -294,26 +294,26 @@ function clearBranch() {
   text-decoration: line-through;
 }
 .spine-chip--hit {
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .spine-chip--branch {
-  border-color: #c2725a;
+  border-color: var(--cinnabar-bright);
 }
 .spine-chip__branch-mark {
-  font-size: 0.625rem;
-  color: #c2725a;
+  font-size: var(--text-xs);
+  color: var(--cinnabar-bright);
 }
 .spine-branch-editor {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
   padding: 0.5rem;
-  border: 1px solid #c2725a;
-  border-radius: 8px;
+  border: 1px solid var(--cinnabar-bright);
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
 .spine-branch-editor__head {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
@@ -324,7 +324,7 @@ function clearBranch() {
   width: 100%;
   resize: none;
   border: 1px dashed var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font-size: 0.75rem;
   color: var(--text-primary);
@@ -333,7 +333,7 @@ function clearBranch() {
 }
 .spine-branch-editor__input:focus {
   outline: none;
-  border-color: #c2725a;
+  border-color: var(--cinnabar-bright);
 }
 .spine-branch-editor__actions {
   display: flex;
@@ -341,11 +341,11 @@ function clearBranch() {
 }
 .spine-chip--flash {
   animation: spine-flash 0.5s ease 2;
-  border-color: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500);
 }
 @keyframes spine-flash {
   0%, 100% { background: var(--bg-secondary); }
-  50% { background: var(--accent-400, #9685c2); color: #fff; }
+  50% { background: var(--accent-400); color: var(--bg-canvas); }
 }
 .spine-chip--ghost {
   border-style: dashed;
@@ -355,7 +355,7 @@ function clearBranch() {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   padding: 0 0.125rem;
 }
@@ -363,40 +363,40 @@ function clearBranch() {
   color: var(--text-primary);
 }
 .spine-anchor-count {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   text-align: right;
 }
 .spine-add__input {
   width: 100%;
   border: 1px dashed var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   padding: 0.25rem 0.5rem;
 }
 .spine-add__input:focus {
   outline: none;
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .spine-full-hint {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0;
 }
 .spine-hint-line {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0;
   line-height: 1.5;
 }
 .spine-suggest__btn {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   padding: 0.25rem 0.625rem;
   cursor: pointer;
 }
@@ -405,17 +405,14 @@ function clearBranch() {
   cursor: default;
 }
 .spine-suggest__btn--primary {
-  background: var(--accent-500, #7c6aad);
-  border-color: var(--accent-500, #7c6aad);
-  color: #fff;
 }
 .spine-suggest__card {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
   padding: 0.5rem;
-  border: 1px solid var(--accent-400, #9685c2);
-  border-radius: 8px;
+  border: 1px solid var(--accent-400);
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
 .spine-suggest__intent {
@@ -426,7 +423,7 @@ function clearBranch() {
   gap: 0.375rem;
 }
 .spine-suggest__label {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -444,7 +441,7 @@ function clearBranch() {
 .narrative-stream {
   padding: 0.5rem;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg-canvas);
 }
 .ns-direction {
@@ -454,10 +451,10 @@ function clearBranch() {
   padding: 0.375rem 0.5rem;
   background: color-mix(in srgb, var(--accent-500) 6%, transparent);
   border-left: 3px solid var(--accent-500);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .ns-tag {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -477,7 +474,7 @@ function clearBranch() {
   gap: 0.5rem;
 }
 .ns-active-beat {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -488,7 +485,7 @@ function clearBranch() {
   min-height: 96px;
   resize: vertical;
   border: 1px dashed var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font-size: 0.75rem;
   color: var(--text-primary);
@@ -497,7 +494,7 @@ function clearBranch() {
 }
 .ns-beats-input:focus {
   outline: none;
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
   border-style: solid;
 }
 </style>

@@ -12,6 +12,7 @@
  */
 import { ref, computed } from 'vue'
 import Icon from '../../../components/Icon.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -173,26 +174,19 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="!isImporting && handleClose()">
-    <div class="modal-content import-modal">
-      <!-- 头部 -->
-      <header class="modal-header">
-        <div class="header-left">
-          <h2 class="modal-title">{{ stepTitle }}</h2>
-          <!-- 步骤指示器 -->
-          <div class="step-indicator">
-            <div
-              v-for="n in 3"
-              :key="n"
-              class="step-dot"
-              :class="{ active: stepNumber >= n, current: stepNumber === n }"
-            ></div>
-          </div>
-        </div>
-        <button class="close-btn" title="关闭" @click="handleClose">
-          <Icon name="x-mark" :size="18" />
-        </button>
-      </header>
+  <!-- 02 §5 收编 ModalShell：Teleport/焦点陷阱/Esc 栈/遮罩统一托底（导入中禁关） -->
+  <ModalShell :title="stepTitle" width="720px" @close="!isImporting && handleClose()">
+    <template #subtitle>
+      <!-- 步骤指示器 -->
+      <div class="step-indicator">
+        <div
+          v-for="n in 3"
+          :key="n"
+          class="step-dot"
+          :class="{ active: stepNumber >= n, current: stepNumber === n }"
+        ></div>
+      </div>
+    </template>
 
       <!-- 内容区 -->
       <div class="modal-body">
@@ -232,62 +226,16 @@ const emit = defineEmits<{
       </div>
 
       <!-- 底部操作（仅 preview 步骤显示返回） -->
-      <footer v-if="step === 'preview'" class="modal-footer">
+      <template v-if="step === 'preview'" #footer>
         <button class="btn-secondary" @click="handleBack">
           <Icon name="arrow-left" :size="14" />
           <span>重新选择</span>
         </button>
-      </footer>
-    </div>
-  </div>
+      </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal); /* B3：200→110 toast 现在盖它（操作结果不可被遮挡） */
-  padding: 2rem;
-  backdrop-filter: blur(2px);
-}
-
-.import-modal {
-  background: var(--bg-canvas);
-  border-radius: 0.625rem;
-  width: 100%;
-  max-width: 720px;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.modal-title {
-  font-family: var(--font-heading);
-  font-size: 1.0625rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
 
 .step-indicator {
   display: flex;
@@ -299,7 +247,7 @@ const emit = defineEmits<{
   height: 3px;
   border-radius: 2px;
   background: var(--border-color);
-  transition: background 0.2s ease;
+  transition: background var(--dur-3) var(--ease-out);
 }
 
 .step-dot.active {
@@ -308,26 +256,7 @@ const emit = defineEmits<{
 
 .step-dot.current {
   background: var(--accent-600);
-  box-shadow: 0 0 0 2px rgba(var(--accent-500-rgb, 124, 58, 237), 0.2);
-}
-
-.close-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.close-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-500) 20%, transparent);
 }
 
 .modal-body {
@@ -335,14 +264,6 @@ const emit = defineEmits<{
   overflow-y: auto;
   padding: 1.25rem;
   min-height: 0;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-start;
-  padding: 0.75rem 1.25rem;
-  border-top: 1px solid var(--border-color);
-  flex-shrink: 0;
 }
 
 .btn-secondary {
@@ -355,12 +276,12 @@ const emit = defineEmits<{
   background: var(--bg-canvas);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .btn-secondary:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 </style>

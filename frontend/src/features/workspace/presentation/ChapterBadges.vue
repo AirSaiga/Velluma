@@ -79,13 +79,14 @@ const generationStatus = computed<{ label: string; cls: string } | null>(() => {
 }
 
 .badge {
-  font-size: 0.5625rem;
+  /* 9px→12px：全站可读底线（01 §9-5）；微徽标改轻 chip 观感 */
+  font-size: var(--text-xs);
   line-height: 1;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  padding: 0.09375rem 0.25rem;
-  border-radius: 0.1875rem;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: var(--radius-xs);
   font-weight: 500;
 }
 
@@ -94,11 +95,11 @@ const generationStatus = computed<{ label: string; cls: string } | null>(() => {
   font-weight: 600;
 }
 .badge.tier-climax {
-  background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
 }
 .badge.tier-turn {
-  background: rgba(124, 106, 173, 0.14);
+  background: color-mix(in srgb, var(--accent-500) 14%, transparent);
   color: var(--accent-500);
 }
 .badge.tier-progress {
@@ -113,7 +114,7 @@ const generationStatus = computed<{ label: string; cls: string } | null>(() => {
 
 /* 生成状态 */
 .badge.status.gen-published {
-  color: #16a34a;
+  color: var(--ok);
 }
 .badge.status.gen-draft {
   color: var(--text-muted);

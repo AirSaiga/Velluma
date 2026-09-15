@@ -120,7 +120,7 @@ function quickNote() {
          与既有选区菜单的 @mousedown.prevent 同一惯用法 -->
     <div
       ref="rootRef"
-      class="wctx-card"
+      class="wctx-card elev-2"
       :style="{ left: pos.left + 'px', top: pos.top + 'px' }"
       @pointerdown.prevent
     >
@@ -154,13 +154,11 @@ function quickNote() {
 <style scoped>
 .wctx-card {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-pop); /* 归表：光标跟随带（原 90 表外值） */
   width: 280px;
   max-width: calc(100vw - 16px);
-  background: var(--bg-panel, #fff);
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  background: var(--surface-overlay);
+  border-radius: var(--radius-md);
   padding: 0.6rem 0.7rem;
   font-size: 0.78rem;
   color: var(--text-primary);
@@ -172,7 +170,7 @@ function quickNote() {
 }
 .wctx-badge {
   flex-shrink: 0;
-  font-size: 0.62rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   border: 1px solid var(--accent-500);
   border-radius: 999px;
@@ -201,12 +199,12 @@ function quickNote() {
 .wctx-state {
   margin-top: 0.4rem;
   color: var(--accent-500);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
 }
 .wctx-intro {
   margin-top: 0.35rem;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 .wctx-chronicle {
@@ -215,7 +213,7 @@ function quickNote() {
   padding-top: 0.4rem;
 }
 .wctx-chronicle-title {
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-bottom: 0.25rem;
 }
@@ -223,7 +221,7 @@ function quickNote() {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   padding: 0.12rem 0;
 }
 .wctx-chronicle-type {
@@ -240,13 +238,13 @@ function quickNote() {
 .wctx-chronicle-time {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: 0.62rem;
+  font-size: var(--text-xs);
 }
 .wctx-chronicle-empty {
   margin-top: 0.5rem;
   border-top: 1px dashed var(--border-color);
   padding-top: 0.4rem;
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -260,13 +258,13 @@ function quickNote() {
   background: none;
   border: none;
   color: var(--accent-500);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   cursor: pointer;
   padding: 0.15rem 0.2rem;
 }
 .wctx-loading {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   padding: 0.2rem 0;
 }
 </style>

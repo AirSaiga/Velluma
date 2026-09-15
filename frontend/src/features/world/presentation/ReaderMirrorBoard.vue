@@ -342,13 +342,13 @@ watch(() => props.bookId, loadData)
 .plan-card {
   padding: 0.75rem;
   background: var(--bg-secondary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   margin-bottom: 0.75rem;
   border-left: 3px solid var(--accent-500);
 }
 .plan-card.payoff-recommended {
   border-left-color: var(--danger);
-  background: #fef2f2;
+  background: var(--danger-bg);
 }
 .plan-head {
   display: flex;
@@ -362,13 +362,13 @@ watch(() => props.bookId, loadData)
 .plan-badges { display: flex; gap: 0.375rem; margin-bottom: 0.375rem; }
 .badge {
   padding: 0.125rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
   font-weight: 500;
 }
 .badge.payoff { background: var(--danger-bg); color: var(--danger); }
 .badge.accumulate { background: var(--warn-bg); color: var(--warn); }
-.badge.setup { background: var(--bg-tertiary); color: #475569; }
+.badge.setup { background: var(--bg-tertiary); color: var(--text-secondary); }
 .hint { font-size: var(--text-xs); color: var(--text-muted); margin: 0; font-style: italic; }
 
 .actions { display: flex; gap: 0.375rem; margin-bottom: 0.75rem; }
@@ -377,12 +377,12 @@ watch(() => props.bookId, loadData)
   font-size: var(--text-xs);
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   color: var(--text-secondary);
   font-family: inherit;
 }
-.btn-mini.primary { background: var(--accent-500); color: white; border-color: var(--accent-500); }
+.btn-mini.primary { background: var(--accent-500); color: var(--bg-canvas); border-color: var(--accent-500); }
 .btn-mini.payoff { color: var(--danger); border-color: var(--danger); }
 .btn-mini.danger { color: var(--danger); }
 .btn-mini:hover { opacity: 0.85; }
@@ -391,7 +391,7 @@ watch(() => props.bookId, loadData)
 .form-card {
   padding: 0.625rem;
   background: var(--bg-secondary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   margin-bottom: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -400,7 +400,7 @@ watch(() => props.bookId, loadData)
 .input {
   padding: 0.375rem;
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.75rem;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -434,7 +434,7 @@ watch(() => props.bookId, loadData)
 .exp-card {
   padding: 0.625rem;
   background: var(--bg-secondary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border-left: 3px solid transparent;
 }
 .exp-card.inactive { opacity: 0.5; }
@@ -445,15 +445,15 @@ watch(() => props.bookId, loadData)
   margin-bottom: 0.375rem;
   font-size: var(--text-xs);
 }
-.type-tag { padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-weight: 500; }
-.status-tag { padding: 0.125rem 0.375rem; background: var(--hover-bg); border-radius: 0.25rem; color: var(--text-muted); }
-.source-tag { padding: 0.125rem 0.375rem; background: var(--info-bg); color: #1e40af; border-radius: 0.25rem; }
+.type-tag { padding: 0.125rem 0.375rem; border-radius: var(--radius-xs); font-weight: 500; }
+.status-tag { padding: 0.125rem 0.375rem; background: var(--state-hover); border-radius: var(--radius-xs); color: var(--text-muted); }
+.source-tag { padding: 0.125rem 0.375rem; background: var(--info-bg); color: #1e40af; border-radius: var(--radius-xs); }
 .source-tag.auto { background: var(--bg-tertiary); color: var(--text-secondary); }
 .exp-desc { font-size: 0.8125rem; margin-bottom: 0.375rem; line-height: 1.4; color: var(--text-primary); }
 .tension-bar {
   position: relative;
   height: 16px;
-  background: var(--hover-bg);
+  background: var(--state-hover);
   border-radius: 999px;
   margin-bottom: 0.375rem;
   overflow: hidden;
@@ -461,7 +461,7 @@ watch(() => props.bookId, loadData)
 .tension-fill {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.3s ease;
+  transition: width var(--dur-4) var(--ease-out);
 }
 .tension-num {
   position: absolute;
@@ -484,7 +484,7 @@ watch(() => props.bookId, loadData)
 .author-override {
   padding: 0.25rem 0.5rem;
   background: var(--warn-bg);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
   color: var(--warn);
   margin-bottom: 0.375rem;

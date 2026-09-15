@@ -107,8 +107,8 @@ function metaOf(c: WorldEventCandidate): string {
     <p class="ba-hint">✓ 后立即生效（真相候选进真相账本）；确认后 6 秒内可整批撤销。</p>
 
     <template #footer>
-      <button class="ba-btn" :disabled="busy" @click="emit('close')">取消</button>
-      <button class="ba-btn ba-btn--primary" :disabled="busy || selectedIds.length === 0" @click="confirmBatch">
+      <button class="ba-btn btn-ghost" :disabled="busy" @click="emit('close')">取消</button>
+      <button class="ba-btn ba-btn--primary btn-primary-instrument" :disabled="busy || selectedIds.length === 0" @click="confirmBatch">
         <template v-if="busy">
           采纳中 {{ progress ? `${progress.done}/${progress.total}` : '…' }}
         </template>
@@ -125,14 +125,14 @@ function metaOf(c: WorldEventCandidate): string {
   gap: 6px;
   padding: 6px 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   user-select: none;
 }
 .ba-selectall:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .ba-count {
   margin-left: auto;
@@ -140,7 +140,7 @@ function metaOf(c: WorldEventCandidate): string {
 }
 .ba-check {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
 }
 .ba-check.checked {
@@ -162,12 +162,12 @@ function metaOf(c: WorldEventCandidate): string {
   gap: 8px;
   padding: 7px 9px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   user-select: none;
 }
 .ba-row:hover {
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .ba-row.off {
   opacity: 0.5;
@@ -180,7 +180,7 @@ function metaOf(c: WorldEventCandidate): string {
   gap: 2px;
 }
 .ba-title {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -198,11 +198,9 @@ function metaOf(c: WorldEventCandidate): string {
 }
 .ba-btn {
   padding: 7px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  background: transparent;
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .ba-btn:hover:not(:disabled) {
@@ -210,12 +208,9 @@ function metaOf(c: WorldEventCandidate): string {
   color: var(--accent-500);
 }
 .ba-btn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 .ba-btn--primary:hover:not(:disabled) {
-  color: #fff;
+  color: var(--bg-canvas);
   opacity: 0.92;
 }
 .ba-btn:disabled {

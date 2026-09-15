@@ -142,12 +142,12 @@ const groups = computed<SpineGroup[]>(() => {
   align-items: flex-start;
   gap: 8px;
   padding: 7px 2px 7px 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out);
 }
 .esp-item:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .esp-dot {
   width: 8px;
@@ -213,14 +213,14 @@ const groups = computed<SpineGroup[]>(() => {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .esp-act:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .esp-act--danger {

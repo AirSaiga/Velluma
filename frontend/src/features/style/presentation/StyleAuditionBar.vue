@@ -94,9 +94,9 @@ function runAB() {
 .audition-bar {
   padding: 1rem 0.875rem;
   margin: 0.75rem 0;
-  background: color-mix(in srgb, var(--accent-500) 4%, var(--bg-panel));
+  background: color-mix(in srgb, var(--accent-500) 4%, var(--surface-overlay));
   border: 1px solid color-mix(in srgb, var(--accent-500) 25%, var(--border-color));
-  border-radius: 0.625rem;
+  border-radius: var(--radius-lg);
   scroll-margin-top: 4.5rem;
 }
 .bar-head {
@@ -122,7 +122,7 @@ function runAB() {
   line-height: 1.7;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   resize: vertical;
 }
 .bar-textarea:focus {
@@ -139,10 +139,10 @@ function runAB() {
   align-items: center;
   padding: 0.4rem 0.875rem;
   font-size: 0.75rem;
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-primary:hover:not(:disabled) {
@@ -158,7 +158,7 @@ function runAB() {
   color: var(--text-secondary);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-ghost:hover:not(:disabled) {
@@ -184,7 +184,7 @@ function runAB() {
   padding: 0.625rem 0.75rem;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .pane-baseline {
   opacity: 0.75;

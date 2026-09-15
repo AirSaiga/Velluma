@@ -213,5 +213,6 @@ export const VISIBILITY_LABELS: Record<CanonVisibility, string> = {
   partial: '半露',
 }
 
-/** 秘密/半露的朱砂语义色（docs/design/canon-fusion 朱点贯穿令牌） */
+/** 秘密/半露的朱砂语义色（docs/design/canon-fusion 朱点贯穿令牌）。
+ *  值=--cinnabar 浅档（地图画布恒亮，JS 恒取浅档自洽；深档差异由 CSS 消费侧承担）。 */
 export const ZHU_COLOR = '#a63e2a'

@@ -1093,7 +1093,7 @@ async function confirmDeleteChapter(ch: Chapter) {
   overflow: hidden;
   background: var(--bg-primary);
   /* 面板 pin 时推挤内容区：纸列在剩余空间重新居中，过渡与面板滑入同速 */
-  transition: padding-right 0.22s ease;
+  transition: padding-right var(--dur-3) var(--ease-out);
   /* 左缘书签 / 目录抽屉 / 右缘助手栏的 absolute 定位锚 */
   position: relative;
 }

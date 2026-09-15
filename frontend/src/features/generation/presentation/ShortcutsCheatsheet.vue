@@ -1,11 +1,9 @@
 <script setup lang="ts">
 /**
  * 快捷键速查弹层（UX 修复：键位可发现性）。
- *
- * 此前 Alt+↓ 清脂等键位在全工程任何 UI 文本中都不出现，
- * 用户无从知晓。顶栏「?」按钮触发本弹层。
+ * 02 §5 收编 ModalShell（Esc 栈/焦点陷阱统一托底），dark: 手工补丁双轨随之消灭。
  */
-import { onMounted, onBeforeUnmount } from 'vue'
+import ModalShell from '../../../components/ModalShell.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -42,48 +40,62 @@ const groups = [
     ],
   },
 ]
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    e.stopPropagation()
-    emit('close')
-  }
-}
-onMounted(() => document.addEventListener('keydown', onKeydown, true))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div class="fixed inset-0 z-[110] flex items-center justify-center" @click.self="emit('close')">
-        <div class="fixed inset-0 bg-black/40 backdrop-blur-sm"></div>
-        <div
-          class="modal-content relative bg-parchment-50 dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="快捷键一览"
-        >
-          <div class="flex items-center justify-between px-6 py-4 border-b border-ink-100 dark:border-gray-700">
-            <h3 class="text-base font-heading font-semibold text-gray-900 dark:text-gray-100">快捷键一览</h3>
-            <button
-              class="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-sm px-2 py-1"
-              @click="emit('close')"
-            >Esc 关闭</button>
-          </div>
-          <div class="px-6 py-4 max-h-[70vh] overflow-y-auto space-y-5">
-            <section v-for="g in groups" :key="g.title">
-              <h4 class="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-2">{{ g.title }}</h4>
-              <ul class="space-y-1.5">
-                <li v-for="item in g.items" :key="item[0]" class="flex items-center justify-between gap-4 text-sm">
-                  <kbd class="shrink-0 px-2 py-0.5 rounded-md bg-ink-50 dark:bg-gray-700 border border-ink-200 dark:border-gray-600 text-xs font-mono text-gray-800 dark:text-gray-200">{{ item[0] }}</kbd>
-                  <span class="flex-1 text-right text-gray-600 dark:text-gray-300">{{ item[1] }}</span>
-                </li>
-              </ul>
-            </section>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  <ModalShell title="快捷键一览" width="32rem" @close="emit('close')">
+    <div class="sc-groups">
+      <section v-for="g in groups" :key="g.title">
+        <h4 class="sc-group-title">{{ g.title }}</h4>
+        <ul class="sc-list">
+          <li v-for="item in g.items" :key="item[0]" class="sc-item">
+            <kbd class="sc-kbd">{{ item[0] }}</kbd>
+            <span class="sc-desc">{{ item[1] }}</span>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </ModalShell>
 </template>
+
+<style scoped>
+.sc-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.sc-group-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+.sc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+.sc-kbd {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.sc-desc {
+  flex: 1;
+  text-align: right;
+  color: var(--text-secondary);
+}
+</style>

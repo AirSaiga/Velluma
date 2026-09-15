@@ -341,11 +341,11 @@ async function removeCurrent() {
   flex-direction: column;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   padding: 14px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* 面包屑 */
@@ -356,22 +356,22 @@ async function removeCurrent() {
   gap: 2px;
   margin-bottom: 8px;
   font-size: var(--text-xs);
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 .ldd-crumb {
   background: none;
   border: none;
-  color: var(--accent-400, #8b6de8);
+  color: var(--accent-400);
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
 }
 .ldd-crumb:hover {
-  background: rgba(139, 109, 232, 0.1);
+  background: color-mix(in srgb, var(--accent-400) 10%, transparent);
 }
 .ldd-crumb--cur {
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   cursor: default;
 }
 .ldd-crumb-sep {
@@ -390,52 +390,52 @@ async function removeCurrent() {
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 8px;
-  background: rgba(107, 90, 68, 0.1);
-  color: var(--text-secondary, #6b5a44);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-secondary);
   flex: none;
 }
 .ldd-name {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-primary, #333);
+  color: var(--text-primary);
   padding: 3px 6px;
 }
 .ldd-name:hover,
 .ldd-name:focus {
-  border-color: var(--border-color, #ddd);
+  border-color: var(--border-color);
   outline: none;
 }
 .ldd-close {
   background: none;
   border: none;
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .ldd-close:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--text-primary, #333);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  color: var(--text-primary);
 }
 /* 返回上一级（仅从图标栏面板钻入时出现，与关闭分权：← 回列表 / × 全关） */
 .ldd-back {
   background: none;
   border: none;
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 .ldd-back:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--text-primary, #333);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  color: var(--text-primary);
 }
 
 /* 简述 */
@@ -447,14 +447,14 @@ async function removeCurrent() {
 }
 .ldd-lbl {
   font-size: var(--text-xs);
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
 }
 .ldd-intro {
   width: 100%;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 8px;
-  background: var(--bg-subtle, rgba(0, 0, 0, 0.02));
-  color: var(--text-primary, #333);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent); /* 旧 --bg-subtle 未定义 */
+  color: var(--text-primary);
   padding: 7px 9px;
   font-size: var(--text-sm);
   line-height: 1.55;
@@ -463,7 +463,7 @@ async function removeCurrent() {
 }
 .ldd-intro:focus {
   outline: none;
-  border-color: var(--accent-400, #8b6de8);
+  border-color: var(--accent-400);
 }
 
 /* 标签 */
@@ -481,8 +481,8 @@ async function removeCurrent() {
   font-size: var(--text-xs);
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(107, 90, 68, 0.1);
-  color: var(--text-secondary, #6b5a44);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-secondary);
 }
 .ldd-tag button {
   background: none;
@@ -490,21 +490,21 @@ async function removeCurrent() {
   cursor: pointer;
   color: inherit;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 .ldd-tag-in {
   width: 64px;
   border: none;
-  border-bottom: 1px dashed var(--border-color, #ccc);
+  border-bottom: 1px dashed var(--border-color);
   background: transparent;
   font-size: var(--text-xs);
   padding: 2px 4px;
-  color: var(--text-primary, #333);
+  color: var(--text-primary);
 }
 .ldd-tag-in:focus {
   outline: none;
-  border-bottom-color: var(--accent-400, #8b6de8);
+  border-bottom-color: var(--accent-400);
 }
 
 /* 位置区 */
@@ -514,35 +514,35 @@ async function removeCurrent() {
   gap: 6px;
   margin-top: 12px;
   font-size: var(--text-xs);
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 .ldd-link {
   background: none;
   border: none;
-  color: var(--accent-400, #8b6de8);
+  color: var(--accent-400);
   cursor: pointer;
   font-size: var(--text-xs);
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .ldd-link:hover {
-  background: rgba(139, 109, 232, 0.1);
+  background: color-mix(in srgb, var(--accent-400) 10%, transparent);
 }
 .ldd-link--danger {
-  color: #b4543f;
+  color: var(--danger);
 }
 .ldd-link--danger:hover {
-  background: rgba(180, 84, 63, 0.1);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* 内部构造区 */
 .ldd-sec {
   margin-top: 14px;
-  border-top: 1px solid var(--border-color, #e5e0d5);
+  border-top: 1px solid var(--border-color);
   padding-top: 10px;
 }
 .ldd-sec-title {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -550,14 +550,14 @@ async function removeCurrent() {
 }
 .ldd-sec-count {
   font-size: var(--text-xs);
-  background: rgba(107, 90, 68, 0.12);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   border-radius: 999px;
   padding: 1px 6px;
-  color: var(--text-secondary, #6b5a44);
+  color: var(--text-secondary);
 }
 .ldd-sec-note {
   font-size: var(--text-xs);
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
   margin: 6px 0 8px;
   line-height: 1.5;
 }
@@ -566,14 +566,14 @@ async function removeCurrent() {
   align-items: center;
   gap: 6px;
   padding: 7px 8px;
-  border: 1px solid var(--border-color, #e5e0d5);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   margin-bottom: 6px;
   cursor: pointer;
-  transition: border-color 0.12s;
+  transition: border-color var(--dur-1) var(--ease-out);
 }
 .ldd-child:hover {
-  border-color: var(--accent-400, #8b6de8);
+  border-color: var(--accent-400);
 }
 .ldd-child-main {
   flex: 1;
@@ -585,22 +585,22 @@ async function removeCurrent() {
 .ldd-child-name {
   font-size: var(--text-base);
   font-weight: 500;
-  color: var(--text-primary, #333);
+  color: var(--text-primary);
 }
 .ldd-child-intro {
   font-size: var(--text-xs);
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .ldd-child-sub {
   font-size: var(--text-xs);
-  color: var(--text-muted, #999);
+  color: var(--text-muted);
   flex: none;
 }
 .ldd-child-arrow {
-  color: var(--text-muted, #bbb);
+  color: var(--text-muted);
   flex: none;
 }
 
@@ -610,15 +610,15 @@ async function removeCurrent() {
   align-items: center;
   gap: 6px;
   padding: 7px 8px;
-  border: 1px dashed var(--border-color, #ccc);
-  border-radius: 8px;
-  color: var(--text-muted, #888);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 .ldd-add:hover {
-  border-color: var(--accent-400, #8b6de8);
-  color: var(--accent-400, #8b6de8);
+  border-color: var(--accent-400);
+  color: var(--accent-400);
 }
 .ldd-add-form {
   display: flex;
@@ -628,12 +628,12 @@ async function removeCurrent() {
 .ldd-add-name,
 .ldd-add-intro {
   width: 100%;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 8px;
-  background: var(--bg-subtle, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent); /* 旧 --bg-subtle 未定义 */
   padding: 6px 9px;
   font-size: var(--text-sm);
-  color: var(--text-primary, #333);
+  color: var(--text-primary);
   font-family: inherit;
 }
 .ldd-add-intro {
@@ -643,7 +643,7 @@ async function removeCurrent() {
 .ldd-add-name:focus,
 .ldd-add-intro:focus {
   outline: none;
-  border-color: var(--accent-400, #8b6de8);
+  border-color: var(--accent-400);
 }
 .ldd-add-actions {
   display: flex;
@@ -651,10 +651,10 @@ async function removeCurrent() {
 }
 .ldd-btn {
   border: none;
-  border-radius: 7px;
-  background: var(--accent-400, #8b6de8);
-  color: #fff;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-400);
+  color: var(--bg-canvas);
+  font-size: var(--text-xs);
   padding: 5px 12px;
   cursor: pointer;
 }
@@ -664,8 +664,8 @@ async function removeCurrent() {
 }
 .ldd-btn--ghost {
   background: transparent;
-  color: var(--text-muted, #888);
-  border: 1px solid var(--border-color, #ddd);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
 }
 
 /* 底部删除 */
@@ -679,13 +679,13 @@ async function removeCurrent() {
   gap: 5px;
   background: none;
   border: none;
-  color: #b4543f;
+  color: var(--danger);
   font-size: var(--text-xs);
   cursor: pointer;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .ldd-del:hover {
-  background: rgba(180, 84, 63, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 </style>

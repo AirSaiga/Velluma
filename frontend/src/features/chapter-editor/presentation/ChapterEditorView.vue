@@ -111,7 +111,7 @@ function menuClearForeignStyles() {
   <div class="h-full flex flex-col overflow-hidden px-5 pt-5 pb-5 flex-1 min-h-0">
     <div v-if="selectedChapter" class="max-w-[var(--editor-max-width)] w-full mx-auto flex flex-col h-full flex-1 min-h-0">
       <!-- 纸列：页面头（章节名 + 大标题 + ⋯ 菜单）+ 正文画布 -->
-      <div class="paper relative rounded-2xl shadow-[0_8px_20px_rgba(18,38,63,0.06)] flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div class="paper relative rounded-2xl shadow-[var(--shadow-paper)] flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           v-if="isPublishing"
           class="publish-veil absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-[2px] rounded-2xl transition-all duration-300"
@@ -125,7 +125,7 @@ function menuClearForeignStyles() {
             <h3 class="text-3xl font-heading font-bold text-accent-900 tracking-tight">
               正在发布…
             </h3>
-            <p class="text-lg text-accent-600/90 font-medium max-w-xl text-center px-6 leading-relaxed">
+            <p class="text-lg text-accent-600 font-medium max-w-xl text-center px-6 leading-relaxed">
               正在更新角色近况…
             </p>
           </div>
@@ -136,7 +136,7 @@ function menuClearForeignStyles() {
           <div class="page-head__meta">
             <span class="page-head__chapter">{{ selectedChapter.chapter_name || `第${selectedChapter.chapter_number}章` }}</span>
             <span v-if="selectedChapter.status === 'published'" class="page-head__published">已发布</span>
-            <span v-if="typeof wordCount === 'number'" class="page-head__words">{{ wordCount }} 字</span>
+            <span v-if="typeof wordCount === 'number'" class="page-head__words tnum">{{ wordCount }} 字</span>
             <span v-if="saveStatusLabel" class="page-head__save" :class="{ 'page-head__save--error': saveStatus === 'error' }">{{ saveStatusLabel }}</span>
             <span v-if="aiStateLabel" class="page-head__ai" :class="{ 'page-head__ai--error': aiStateError }" aria-live="polite"><span class="page-head__ai-dot"></span>{{ aiStateLabel }}</span>
             <div ref="actionMenuRef" class="page-head__actions">
@@ -149,30 +149,30 @@ function menuClearForeignStyles() {
                 <Icon name="ellipsis" :size="16" />
               </button>
               <transition name="action-menu">
-                <div v-if="actionMenuOpen" class="action-menu" @mousedown.stop>
-                  <button class="action-menu__item" @click="menuPublish">
+                <div v-if="actionMenuOpen" class="action-menu menu-shell" @mousedown.stop>
+                  <button class="action-menu__item menu-item" @click="menuPublish">
                     <Icon name="arrow-up-tray" :size="13" />
                     <span>{{ selectedChapter.status === 'published' ? '撤回发布' : '发布本章' }}</span>
                   </button>
-                  <button class="action-menu__item" @click="menuInspiration">
+                  <button class="action-menu__item menu-item" @click="menuInspiration">
                     <Icon name="light-bulb" :size="13" />
                     <span>找找灵感</span>
                   </button>
-                  <div class="action-menu__divider"></div>
-                  <button class="action-menu__item" @click="menuFind">
+                  <div class="action-menu__divider menu-sep"></div>
+                  <button class="action-menu__item menu-item" @click="menuFind">
                     <Icon name="magnifying-glass" :size="13" />
-                    <span>查找替换<kbd class="action-menu__kbd">Ctrl+F</kbd></span>
+                    <span>查找替换<kbd class="action-menu__kbd menu-kbd">Ctrl+F</kbd></span>
                   </button>
-                  <button class="action-menu__item" title="把 ASCII 省略号、半角逗号句号、直引号统一成中文标点（本机即时完成，不改剧情）" @click="menuNormalizePunctuation">
+                  <button class="action-menu__item menu-item" title="把 ASCII 省略号、半角逗号句号、直引号统一成中文标点（本机即时完成，不改剧情）" @click="menuNormalizePunctuation">
                     <Icon name="bolt" :size="13" />
                     <span>整理标点</span>
                   </button>
-                  <button class="action-menu__item" title="清掉从别处粘贴带进来的颜色与字体（深色主题下它们会让字看不见）" @click="menuClearForeignStyles">
+                  <button class="action-menu__item menu-item" title="清掉从别处粘贴带进来的颜色与字体（深色主题下它们会让字看不见）" @click="menuClearForeignStyles">
                     <Icon name="no-symbol" :size="13" />
                     <span>清除外来样式</span>
                   </button>
-                  <div class="action-menu__divider"></div>
-                  <button class="action-menu__item" :disabled="isFormatting" @click="menuFormat">
+                  <div class="action-menu__divider menu-sep"></div>
+                  <button class="action-menu__item menu-item" :disabled="isFormatting" @click="menuFormat">
                     <Icon name="sparkles" :size="13" />
                     <span>{{ isFormatting ? '正在整理格式…' : '整理全文格式' }}</span>
                   </button>
@@ -186,6 +186,7 @@ function menuClearForeignStyles() {
             class="page-head__title"
             placeholder="未命名章节"
           />
+          <div class="page-head__ornament" aria-hidden="true">❦</div>
         </header>
 
         <!-- 页首块槽（08 期 §4.3：点火卡从悬浮封面改为纸内页首块，随文流走） -->
@@ -208,13 +209,10 @@ function menuClearForeignStyles() {
     </div>
 
     <div v-else class="h-full flex items-center justify-center">
-      <div class="text-center">
-        <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-[var(--bg-panel)] flex items-center justify-center">
-          <svg class="w-6 h-6 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-        </div>
-        <p class="text-xs text-[var(--text-muted)]">选择一个章节或新建章节开始编辑</p>
+      <!-- 04 §D3 空态统一规格：❦ + 衬线主句 + 灰副句 -->
+      <div class="empty-state">
+        <p class="empty-state__title">这本书还空着</p>
+        <p class="empty-state__sub">从左缘书签打开目录，选一章或新起一章开始写</p>
       </div>
     </div>
   </div>
@@ -228,11 +226,13 @@ function menuClearForeignStyles() {
 </template>
 
 <style scoped>
-/* 纸面 token 化（08 期 §4.1：--paper-bg 双主题，根治深色「白纸白字」P0；
-   hairline 边框取代 parchment 色块在深色下的违和） */
+/* 纸面 token 化（08 期 §4.1：--paper-bg 双主题，根治深色「白纸白字」P0）。
+   04 §A1/A2：拆 background 简写接 --paper-texture（选「纸纹」背景时纸面得纹，
+   ⚠ 简写会把 background-image 重置回 none）；边框升纸缘色 --paper-edge。 */
 .paper {
-  background: var(--paper-bg);
-  border: 1px solid var(--border-color);
+  background-color: var(--paper-bg);
+  background-image: var(--paper-texture);
+  border: 1px solid var(--paper-edge);
 }
 
 /* 发布遮罩：跟随纸面 token（原 bg-parchment-50/80 深色下又是白纱罩） */
@@ -253,18 +253,36 @@ function menuClearForeignStyles() {
 }
 
 .page-head__chapter {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  /* 04 §A3-1 章号眉标化：小而疏的灰眉标——「第N章」从标签升格为书页眉 */
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.22em;
   color: var(--text-muted);
 }
 
+.page-head__ornament {
+  /* 04 §A3-2 章饰：左 ❦ + 右延细线（左对齐随标题；编辑器画布安静优先，符走纯装饰档） */
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--text-faint);
+}
+.page-head__ornament::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
 .page-head__published {
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   padding: 0 0.375rem;
   border-radius: 999px;
-  background: rgba(16, 185, 129, 0.12);
-  color: #059669;
+  background: color-mix(in srgb, var(--mint) 12%, transparent);
+  color: var(--mint-ink);
   line-height: 1.4;
 }
 
@@ -275,7 +293,7 @@ function menuClearForeignStyles() {
 }
 
 .page-head__save {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   opacity: 0.85;
 }
@@ -298,7 +316,7 @@ function menuClearForeignStyles() {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: #34d399;
+  background: var(--mint);
   animation: state-pill-pulse 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -323,11 +341,11 @@ function menuClearForeignStyles() {
   height: 1.625rem;
   background: transparent;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 /* 平时收起，悬停纸面/焦点时浮现（画布安静优先） */
 .paper:hover .page-head__menu-btn,
@@ -336,46 +354,22 @@ function menuClearForeignStyles() {
   opacity: 1;
 }
 .page-head__menu-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
+/* N2 §3.5：⋯菜单收编 .menu-shell/.menu-item 族——壳只留定位，项/分隔线/kbd 皮肤全交工具类 */
 .action-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: 30;
+  z-index: var(--z-page-chrome); /* 归表：页内菜单带（原 30 表外值） */
   min-width: 10rem;
-  padding: 0.25rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.625rem;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
   display: flex;
   flex-direction: column;
 }
-
 .action-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.4375rem 0.625rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem;
-  font-size: 0.75rem;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.12s ease;
-}
-.action-menu__item:hover:not(:disabled) {
-  background: var(--hover-bg);
-}
-.action-menu__item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  /* 挂点：皮肤由 .menu-item 提供 */
 }
 .action-menu__item :deep(svg) {
   color: var(--text-muted);
@@ -383,9 +377,7 @@ function menuClearForeignStyles() {
 }
 
 .action-menu__divider {
-  height: 1px;
-  margin: 0.25rem 0.375rem;
-  background: var(--border-color);
+  /* 挂点：皮肤由 .menu-sep 提供 */
 }
 
 /* 菜单里的键位提示（可发现性：点得到，也看得见 Ctrl+F） */
@@ -393,13 +385,15 @@ function menuClearForeignStyles() {
   margin-left: auto;
   padding: 0 0.25rem;
   font-family: inherit;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
-.action-menu-enter-active,
+.action-menu-enter-active {
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
 .action-menu-leave-active {
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition: opacity var(--dur-1) var(--ease-in), transform var(--dur-1) var(--ease-in);
 }
 .action-menu-enter-from,
 .action-menu-leave-to {
@@ -421,7 +415,7 @@ function menuClearForeignStyles() {
   background: transparent;
   border: none;
   border-bottom: 1px solid transparent;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out);
 }
 .page-head__title::placeholder {
   color: var(--text-muted);

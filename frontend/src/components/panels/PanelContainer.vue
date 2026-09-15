@@ -138,7 +138,7 @@ function handleClose() {
 }
 
 .panel-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.3;
@@ -166,14 +166,14 @@ function handleClose() {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--accent-500);
 }
 
 .loading-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--bg-panel);
+  border: 2px solid var(--surface-overlay);
   border-top-color: var(--accent-500);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -190,32 +190,32 @@ function handleClose() {
   padding: 5px 10px;
   font-size: var(--text-xs);
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
   white-space: nowrap;
 }
 
 .panel-action-btn.variant-default {
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   color: var(--text-secondary);
 }
 
 .panel-action-btn.variant-default:hover:not(:disabled) {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
 .panel-action-btn.variant-primary {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
 }
 
 .panel-action-btn.variant-primary:hover:not(:disabled) {
   background: var(--accent-600);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.25);
+  box-shadow: var(--glow-accent);
 }
 
 .panel-action-btn.variant-danger {
@@ -238,17 +238,17 @@ function handleClose() {
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
   margin-left: 4px;
 }
 
 .panel-close-btn:hover {
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   color: var(--text-primary);
 }
 
@@ -271,7 +271,7 @@ function handleClose() {
 
 .panel-content::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .panel-content::-webkit-scrollbar-thumb:hover {

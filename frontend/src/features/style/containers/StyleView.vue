@@ -932,12 +932,12 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   color: var(--text-secondary);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .icon-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .title-block {
@@ -950,7 +950,8 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 .page-title {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: var(--text-xl);
+  font-size: var(--text-2xl);
+  letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -965,7 +966,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   flex-shrink: 0;
   padding: 0.125rem 0.5rem;
   font-size: var(--text-xs);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 .badge-dirty {
   color: var(--warn);
@@ -1002,7 +1003,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 }
 .anchor-btn:hover {
   color: var(--accent-500);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .style-main {
   flex: 1;
@@ -1083,19 +1084,19 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   margin: 0.75rem 0 0;
   font-size: var(--text-sm);
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--accent-500) 8%, var(--bg-panel));
+  background: color-mix(in srgb, var(--accent-500) 8%, var(--surface-overlay));
   border: 1px solid color-mix(in srgb, var(--accent-500) 30%, var(--border-color));
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .btn-suggest {
   flex-shrink: 0;
   min-height: 28px;
   padding: 0.3rem 0.75rem;
   font-size: var(--text-sm);
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-suggest:hover:not(:disabled) {
@@ -1112,6 +1113,6 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   text-align: center;
   color: var(--text-muted);
   border: 1px dashed var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 </style>

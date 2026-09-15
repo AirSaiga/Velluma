@@ -466,8 +466,8 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
           <Icon name="plus" :size="12" />
           添加字段
         </button>
-        <div v-else class="edd-fieldmenu">
-          <button v-for="f in availableFields" :key="f.key" @click="addField(f.key)">
+        <div v-else class="edd-fieldmenu elev-2 menu-shell">
+          <button v-for="f in availableFields" :key="f.key" class="menu-item" @click="addField(f.key)">
             {{ f.label }}<span class="edd-fieldmenu-hint">{{ f.hint }}</span>
           </button>
         </div>
@@ -581,18 +581,18 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   flex-direction: column;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius-lg);
+  box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .edd::-webkit-scrollbar {
   width: 8px;
 }
 .edd::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .edd::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);
@@ -611,7 +611,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-tertiary);
   color: var(--accent-500);
   flex-shrink: 0;
@@ -620,15 +620,15 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   flex: 1;
   min-width: 0;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   font-size: var(--text-xl);
   font-weight: 700;
   color: var(--text-primary);
-  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-family: var(--font-heading);
   padding: 3px 6px;
   outline: none;
-  transition: border-color 0.12s;
+  transition: border-color var(--dur-1) var(--ease-out);
 }
 .edd-name:hover,
 .edd-name:focus {
@@ -668,14 +668,14 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
 }
 .edd-close:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 /* 返回上一级（仅从图标栏面板钻入时出现，与关闭分权：← 回列表 / × 全关） */
@@ -686,14 +686,14 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
 }
 .edd-back:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
@@ -717,7 +717,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   background: var(--bg-canvas);
   cursor: pointer;
   padding: 0;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .edd-imp-dot:hover {
   transform: scale(1.25);
@@ -730,7 +730,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-imp-num {
   font-size: var(--text-xs);
   color: var(--text-secondary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   margin-left: 4px;
 }
 
@@ -758,14 +758,14 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   border-radius: 9999px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 .edd-alias button {
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 0;
   line-height: 1;
 }
@@ -780,7 +780,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   border-radius: 9999px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   outline: none;
 }
@@ -790,7 +790,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 }
 .edd-group-in {
   min-width: 160px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 /* 一句话（v-autogrow 随内容长高，超 max-height 才滚动） */
@@ -802,10 +802,10 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   box-sizing: border-box;
   padding: 8px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   font-family: inherit;
   resize: none;
@@ -814,7 +814,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 }
 .edd-intro:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 
 /* 档案区 */
@@ -867,12 +867,12 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   border-color: var(--border-color);
 }
 .edd-layer--partial {
-  color: #7c5faf;
+  color: var(--truth-partial);
   border-color: rgba(124, 95, 175, 0.45);
   opacity: 1;
 }
 .edd-layer--private {
-  color: #a63e2a;
+  color: var(--truth-secret); /* --cinnabar 同源 */
   border-color: rgba(166, 62, 42, 0.45);
   opacity: 1;
 }
@@ -880,7 +880,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   margin-top: 6px;
   padding: 8px 10px;
   border: 1px dashed rgba(124, 95, 175, 0.4);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .edd-field-layerbox .edd-field-input {
   margin-bottom: 6px;
@@ -897,7 +897,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-field-layerhint {
   margin-top: 4px;
   font-size: var(--text-xs);
-  color: #a63e2a;
+  color: var(--truth-secret); /* --cinnabar 同源 */
   opacity: 0.85;
 }
 /* 单行/多行共用；多行走 v-autogrow，resize 交给自动高度（手动拖拽会与自动量高打架） */
@@ -906,10 +906,10 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   box-sizing: border-box;
   padding: 7px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   font-family: inherit;
   outline: none;
@@ -918,7 +918,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 }
 .edd-field-input:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 .edd-addwrap {
   position: relative;
@@ -929,10 +929,10 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   gap: 4px;
   padding: 5px 12px;
   border: 1px dashed var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
 }
@@ -940,31 +940,18 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   border-color: var(--accent-500);
   color: var(--accent-500);
 }
+/* N2 §3.5：字段选择菜单收编 .menu-shell/.menu-item——壳只留结构，项皮肤交工具类
+   （hover accent 文字为本菜单特有语义，scoped 保留） */
 .edd-fieldmenu {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-canvas);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   overflow: hidden;
 }
 .edd-fieldmenu button {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 7px 10px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 .edd-fieldmenu button:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--accent-500);
 }
 .edd-fieldmenu-hint {
@@ -990,13 +977,13 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   gap: 8px;
   padding: 6px 9px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .edd-chron-item:hover {
   border-color: var(--accent-500);
@@ -1005,7 +992,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-chron-time {
   font-size: var(--text-xs);
   color: var(--text-muted);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   flex-shrink: 0;
 }
 
@@ -1025,13 +1012,13 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   gap: 5px;
   padding: 7px 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .edd-act:hover {
   border-color: var(--accent-500);
@@ -1069,8 +1056,8 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   cursor: pointer;
 }
 .edd-canon-vis-btn.is-on {
-  border-color: #c2725a;
-  color: #c2725a;
+  border-color: var(--cinnabar-bright);
+  color: var(--cinnabar-bright); /* 读者认知朱开关（岔路朱并入 bright 档） */
 }
 .edd-canon-field {
   display: flex;
@@ -1088,9 +1075,9 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-canon-field textarea,
 .edd-canon-input {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   padding: 5px 8px;
   line-height: 1.5;
@@ -1101,10 +1088,10 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-canon-field textarea:focus,
 .edd-canon-input:focus {
   outline: none;
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .edd-canon-empty p {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 8px 0 6px;
 }

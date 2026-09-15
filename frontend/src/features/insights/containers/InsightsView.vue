@@ -334,7 +334,7 @@ async function rerunQuality(chapterId: string) {
   <div class="insights-view">
     <header class="insights-header">
       <div class="header-left">
-        <button class="icon-btn" @click="backToLibrary" title="返回书架">
+        <button class="icon-btn icon-btn-instrument" @click="backToLibrary" title="返回书架">
           <Icon name="arrow-left" :size="16" />
         </button>
         <div>
@@ -384,10 +384,10 @@ async function rerunQuality(chapterId: string) {
         <p>暂无用量数据。生成章节后，AI 的消耗会在此汇总。</p>
       </div>
       <div v-else class="chapter-cost-list">
-        <article v-for="cr in costReports.filter((r) => r.report)" :key="cr.chapterId" class="cost-item">
+        <article v-for="cr in costReports.filter((r) => r.report)" :key="cr.chapterId" class="cost-item card-well">
           <header class="cost-header">
             <span class="cost-chapter">第 {{ cr.chapterNumber }} 章</span>
-            <span class="cost-total">{{ formatTokens(cr.report?.totals?.total_tokens || 0) }} token</span>
+            <span class="cost-total tnum">{{ formatTokens(cr.report?.totals?.total_tokens || 0) }} token</span>
           </header>
           <div class="stage-bars">
             <div
@@ -416,7 +416,7 @@ async function rerunQuality(chapterId: string) {
             <div class="quality-actions">
               <span v-if="qr.report?.verdict" class="quality-verdict" :class="qr.report?.verdict">{{ qr.report?.verdict }}</span>
               <button
-                class="rerun-btn"
+                class="rerun-btn btn-ghost btn-ghost--xs"
                 :disabled="rerunningIds.has(qr.chapterId)"
                 :title="qr.report ? '基于当前正文重新做一遍质量检查' : '本章尚无质量报告，点击做首次检查'"
                 @click="rerunQuality(qr.chapterId)"
@@ -452,11 +452,11 @@ async function rerunQuality(chapterId: string) {
     <section v-else-if="activePanel === 'collab'" class="data-panel">
       <!-- B3 · 用量可见两卡（generation_runs 聚合；独立于协作埋点数据源，二者可独立有/无数据） -->
       <div v-if="usageHasData" class="usage-cards">
-        <article class="cost-item">
+        <article class="cost-item card-well">
           <header class="cost-header">
             <span class="cost-chapter">AI 消耗</span>
             <span class="cost-header-right">
-              <span class="cost-total">
+              <span class="cost-total tnum">
                 {{ formatTokens(bookUsage?.totals?.total_tokens || 0) }} token · {{ bookUsage?.totals?.calls || 0 }} 次调用<template v-if="(bookUsage?.totals?.cost || 0) > 0"> · {{ formatCost(bookUsage?.totals?.cost || 0) }}</template>
               </span>
               <button class="price-btn" title="按各厂商公布页填写模型价格（元/百万 token），金额立即生效" @click="showPriceModal = true">价格</button>
@@ -506,7 +506,7 @@ async function rerunQuality(chapterId: string) {
           </p>
           <div class="usage-card-footer">
             <button
-              class="usage-clear-btn"
+              class="usage-clear-btn btn-ghost btn-ghost--xs"
               :disabled="clearingUsage || chapterUsageEmpty"
               :title="chapterUsageEmpty
                 ? '最近一章没有用量记录'
@@ -518,10 +518,10 @@ async function rerunQuality(chapterId: string) {
             </button>
           </div>
         </article>
-        <article class="cost-item">
+        <article class="cost-item card-well">
           <header class="cost-header">
             <span class="cost-chapter">按日趋势</span>
-            <span class="cost-total">近 {{ usageTrend.bars.length }} 天 · 峰值 {{ formatTokens(usageTrend.maxTotal) }} token/日</span>
+            <span class="cost-total tnum">近 {{ usageTrend.bars.length }} 天 · 峰值 {{ formatTokens(usageTrend.maxTotal) }} token/日</span>
           </header>
           <svg
             :viewBox="`0 0 ${usageTrend.width} ${usageTrend.height}`"
@@ -575,10 +575,10 @@ async function rerunQuality(chapterId: string) {
           </div>
         </div>
         <div class="chapter-cost-list">
-          <article v-for="cr in collabReports.filter((r) => r.report?.total)" :key="cr.chapterId" class="cost-item">
+          <article v-for="cr in collabReports.filter((r) => r.report?.total)" :key="cr.chapterId" class="cost-item card-well">
             <header class="cost-header">
               <span class="cost-chapter">第 {{ cr.chapterNumber }} 章</span>
-              <span class="cost-total">{{ cr.report?.total }} 次协作交互</span>
+              <span class="cost-total tnum">{{ cr.report?.total }} 次协作交互</span>
             </header>
             <div class="stage-bars">
               <div v-for="(v, k) in cr.report?.by_kind || {}" :key="k" class="stage-bar" :title="`${collabKindLabel(String(k))}: ${v} 次`">
@@ -590,7 +590,7 @@ async function rerunQuality(chapterId: string) {
         </div>
         <div class="usage-card-footer">
           <button
-            class="usage-clear-btn"
+            class="usage-clear-btn btn-ghost btn-ghost--xs"
             :disabled="clearingCollab"
             title="清空本书全部协作埋点（采纳率/协作明细归零，方便测试）——「学着闭嘴」拒收史一并重置，正文与世界数据不受影响"
             @click="clearCollabData"
@@ -617,7 +617,7 @@ async function rerunQuality(chapterId: string) {
   height: 100%;
   overflow-y: auto;
   background: var(--bg-primary);
-  padding: 1.5rem 2rem;
+  padding: var(--space-8) var(--space-10);
 }
 
 .insights-header {
@@ -635,7 +635,8 @@ async function rerunQuality(chapterId: string) {
 
 .page-title {
   font-family: var(--font-heading);
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
+  letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -653,14 +654,12 @@ async function rerunQuality(chapterId: string) {
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   cursor: pointer;
 }
 .icon-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .btn-secondary {
@@ -672,7 +671,7 @@ async function rerunQuality(chapterId: string) {
   background: var(--bg-canvas);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-secondary:disabled {
@@ -698,7 +697,7 @@ async function rerunQuality(chapterId: string) {
 .summary-card {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.875rem 1rem;
   display: flex;
   flex-direction: column;
@@ -707,6 +706,7 @@ async function rerunQuality(chapterId: string) {
 
 .summary-num {
   font-family: var(--font-heading);
+  font-variant-numeric: tabular-nums;
   font-size: 1.5rem;
   font-weight: 600;
   color: var(--accent-500);
@@ -719,30 +719,45 @@ async function rerunQuality(chapterId: string) {
 }
 
 /* 面板 tabs */
+/* N2 §3.6：页签体系——h-32/px12，选中=主色 600 + 2px accent 下划条（scaleX 滑动 dur-2） */
 .panel-tabs {
   display: flex;
   gap: 0.25rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   margin-bottom: 1rem;
 }
 
 .panel-tab {
-  padding: 0.4375rem 0.875rem;
-  font-size: 0.8125rem;
+  position: relative;
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  font-size: var(--text-sm);
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-2) var(--ease-out);
+}
+.panel-tab::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent-500);
+  transform: scaleX(0);
+  transition: transform var(--dur-2) var(--ease-out);
 }
 .panel-tab:hover {
   color: var(--text-primary);
 }
 .panel-tab.active {
-  color: var(--accent-500);
-  border-bottom-color: var(--accent-500);
-  font-weight: 500;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.panel-tab.active::after {
+  transform: scaleX(1);
 }
 
 .loading,
@@ -763,13 +778,18 @@ async function rerunQuality(chapterId: string) {
   gap: 0.625rem;
 }
 
-.cost-item,
+/* N3 §3.7 统一：四张成本/用量/collab 卡收编 .card-well 凹槽档——cost-item 从共享规则拆出
+   （质量/降级卡保留原样），N2 的 usage-cards 特例随之下线 */
 .quality-item,
 .degraded-item {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.75rem 0.875rem;
+}
+
+.cost-item {
+  /* 挂点：皮肤由 .card-well 提供（4 处模板已挂类） */
 }
 
 .cost-header,
@@ -806,25 +826,25 @@ async function rerunQuality(chapterId: string) {
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
 .price-btn:hover {
   color: var(--text-primary);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .usage-unpriced {
   margin: 0.5rem 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-muted);
 }
 
 .usage-unpriced-btn {
   padding: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   background: transparent;
   border: none;
@@ -847,10 +867,8 @@ async function rerunQuality(chapterId: string) {
   gap: 0.25rem;
   padding: 0.1875rem 0.5rem;
   font-size: var(--text-xs);
-  background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -877,7 +895,7 @@ async function rerunQuality(chapterId: string) {
   gap: 0.25rem;
   padding: 0.1875rem 0.4375rem;
   background: var(--bg-secondary);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
 }
 
@@ -911,7 +929,7 @@ async function rerunQuality(chapterId: string) {
   gap: 0.125rem;
   padding: 0.5rem 0.625rem;
   background: var(--bg-secondary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .usage-num {
@@ -979,7 +997,7 @@ async function rerunQuality(chapterId: string) {
   display: block;
   height: 0.375rem;
   background: var(--bg-secondary);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
@@ -1028,20 +1046,20 @@ async function rerunQuality(chapterId: string) {
   color: var(--text-muted);
   text-align: center;
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .quality-verdict {
   font-size: var(--text-xs);
   font-weight: 600;
   padding: 0.125rem 0.4375rem;
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
 }
-.quality-verdict.pass { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
-.quality-verdict.pass_with_fixes { background: rgba(217, 119, 6, 0.12); color: #d97706; }
-.quality-verdict.fail { background: rgba(220, 38, 38, 0.12); color: var(--danger); }
+.quality-verdict.pass { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+.quality-verdict.pass_with_fixes { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+.quality-verdict.fail { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .quality-verdict.unaudited { background: var(--bg-tertiary); color: var(--text-muted); }
 
 .quality-metrics {
@@ -1071,7 +1089,7 @@ async function rerunQuality(chapterId: string) {
 .findings-count {
   margin: 0.5rem 0 0;
   font-size: var(--text-xs);
-  color: #d97706;
+  color: var(--warn);
 }
 
 .collect-btn {
@@ -1081,7 +1099,7 @@ async function rerunQuality(chapterId: string) {
   color: var(--warn);
   background: var(--warn-bg);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -1101,14 +1119,12 @@ async function rerunQuality(chapterId: string) {
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
   font-size: var(--text-xs);
-  background: transparent;
   color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .rerun-btn:hover:not(:disabled) {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .rerun-btn:disabled {

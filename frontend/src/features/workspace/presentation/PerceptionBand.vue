@@ -435,7 +435,7 @@ function forwardWheel(e: WheelEvent) {
   top: 6px;
   left: 18px;
   transform: translateX(-50%);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1;
   color: var(--accent-500);
 }
@@ -453,7 +453,7 @@ function forwardWheel(e: WheelEvent) {
   /* 色种由卡族类给出（color-mix 双主题自动正确） */
   background: var(--k, var(--text-muted));
   opacity: 0.85;
-  transition: transform 0.12s ease, opacity 0.12s ease;
+  transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
 }
 .hint-dot:hover,
 .hint-dot:focus-visible {
@@ -488,16 +488,16 @@ function forwardWheel(e: WheelEvent) {
   width: 232px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
-  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.45);
+  box-shadow: 12px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 覆态读卡同款纸叠影 */
   overflow: hidden;
   cursor: default;
   pointer-events: auto;
 }
 .hint-overlay-enter-active {
-  transition: transform 0.18s ease, opacity 0.18s ease;
+  transition: transform var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
 }
 .hint-overlay-leave-active {
-  transition: transform 0.14s ease, opacity 0.14s ease;
+  transition: transform var(--dur-1) var(--ease-in), opacity var(--dur-1) var(--ease-in);
 }
 .hint-overlay-enter-from,
 .hint-overlay-leave-to {
@@ -535,7 +535,7 @@ function forwardWheel(e: WheelEvent) {
 .spine-progress__intent {
   flex: 1;
   font-size: var(--text-xs);
-  font-family: var(--font-heading, inherit);
+  font-family: var(--font-heading);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -547,7 +547,7 @@ function forwardWheel(e: WheelEvent) {
   flex-shrink: 0;
 }
 .spine-flag {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .spine-flag--hit {
@@ -617,14 +617,14 @@ function forwardWheel(e: WheelEvent) {
   padding: 4px;
   width: 100%;
   border: 1px dashed var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
   cursor: pointer;
 }
 .hint-more:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 /* 卡五族（07 期 §2.4.5）：色种 --k 由族类给出，border/背景/tag 全部 color-mix 派生 */
@@ -638,9 +638,9 @@ function forwardWheel(e: WheelEvent) {
 .hint-card {
   background: color-mix(in srgb, var(--k, var(--text-muted)) 8%, var(--bg-canvas));
   border: 1px solid color-mix(in srgb, var(--k, var(--border-color)) 35%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 9px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 6px;
 }
 .hint-card__head {
@@ -650,11 +650,11 @@ function forwardWheel(e: WheelEvent) {
   margin-bottom: 3px;
 }
 .hint-card__icon {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 .hint-card__label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-primary);
   flex: 1;
@@ -667,7 +667,7 @@ function forwardWheel(e: WheelEvent) {
   color: var(--danger);
 }
 .hint-card__tag {
-  font-size: 10px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: 9999px;
   background: color-mix(in srgb, var(--k, var(--text-muted)) 14%, var(--bg-canvas));
@@ -681,12 +681,12 @@ function forwardWheel(e: WheelEvent) {
   background: none;
   padding: 4px 6px;
   margin: -4px -6px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1;
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out);
 }
 .hint-card:hover .hint-card__dismiss,
 .hint-card:focus-within .hint-card__dismiss {
@@ -696,7 +696,7 @@ function forwardWheel(e: WheelEvent) {
   color: var(--text-primary);
 }
 .hint-card__detail {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   line-height: 1.5;
 }

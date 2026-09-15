@@ -72,7 +72,7 @@ function onReplacementKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="find-bar" role="search" aria-label="查找替换">
+  <div class="find-bar elev-2" role="search" aria-label="查找替换">
     <Icon name="magnifying-glass" :size="13" class="find-bar__glyph" />
     <input
       ref="termInput"
@@ -141,9 +141,7 @@ function onReplacementKeydown(e: KeyboardEvent) {
   max-width: calc(100% - var(--space-6));
   padding: var(--space-1) var(--space-2);
   background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 24px rgba(18, 38, 63, 0.1);
   font-size: var(--text-xs);
   color: var(--text-primary);
   line-height: var(--lh-compact);
@@ -191,11 +189,11 @@ function onReplacementKeydown(e: KeyboardEvent) {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 .find-bar__icon-btn:hover:not(:disabled),
 .find-bar__btn:hover:not(:disabled) {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .find-bar__icon-btn:disabled,

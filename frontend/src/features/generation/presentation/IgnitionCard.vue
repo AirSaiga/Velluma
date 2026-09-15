@@ -49,14 +49,14 @@ const emit = defineEmits<{
           <span v-for="(a, i) in suggestions.anchors" :key="i">{{ a }}</span>
         </div>
         <div class="ignition-card__suggest-actions">
-          <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('adopt', 'all')">收下建议</button>
+          <button class="ignition-card__btn ignition-card__btn--primary btn-primary-instrument" @click="emit('adopt', 'all')">收下建议</button>
           <button class="ignition-card__btn" @click="emit('discard-suggestions')">不用</button>
         </div>
       </div>
     </template>
     <div v-else class="ignition-card__actions">
       <template v-if="hasOutline">
-        <button class="ignition-card__btn ignition-card__btn--primary" @click="emit('ignite')">
+        <button class="ignition-card__btn ignition-card__btn--primary btn-primary-instrument" @click="emit('ignite')">
           ⚡ 写个开头
         </button>
         <button class="ignition-card__btn" @click="emit('dismiss')">我自己写</button>
@@ -88,10 +88,10 @@ const emit = defineEmits<{
 }
 
 .ignition-card__title {
-  font-family: var(--font-heading, inherit);
+  font-family: var(--font-heading);
   font-size: var(--text-lg);
   font-weight: 600;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
 }
 
 /* 谋篇意图（复合卡新增）：一行衬线输入，失焦即存 */
@@ -101,33 +101,33 @@ const emit = defineEmits<{
   resize: none;
   text-align: left;
   border: none;
-  border-bottom: 1px dashed var(--border-color, #e0dbd3);
+  border-bottom: 1px dashed var(--border-color);
   background: transparent;
-  font-family: var(--font-heading, inherit);
-  font-size: 13px;
-  color: var(--text-primary, #2c2c2c);
+  font-family: var(--font-heading);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
   padding: 4px 2px;
   line-height: 1.5;
 }
 .ignition-card__intent:focus {
   outline: none;
-  border-bottom-color: var(--accent-400, #9685c2);
+  border-bottom-color: var(--accent-400);
 }
 .ignition-card__intent::placeholder {
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
 }
 
 .ignition-card__suggest {
   margin-top: 10px;
   padding: 10px;
   text-align: left;
-  border: 1px solid var(--accent-400, #9685c2);
-  border-radius: 8px;
-  background: var(--bg-secondary, #faf8f4);
+  border: 1px solid var(--accent-400);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
 }
 .ignition-card__suggest-intent {
   font-size: 12.5px;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
   line-height: 1.5;
 }
 .ignition-card__suggest-anchors {
@@ -137,11 +137,11 @@ const emit = defineEmits<{
   gap: 6px;
 }
 .ignition-card__suggest-anchors span {
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 8px;
-  border: 1px dashed var(--border-color, #e0dbd3);
+  border: 1px dashed var(--border-color);
   border-radius: 999px;
-  color: var(--text-secondary, #6b6560);
+  color: var(--text-secondary);
 }
 .ignition-card__suggest-actions {
   margin-top: 8px;
@@ -158,41 +158,38 @@ const emit = defineEmits<{
 
 .ignition-card__btn {
   padding: 6px 14px;
-  border: 1px solid var(--border-color, #e0dbd3);
-  border-radius: 8px;
-  background: var(--bg-secondary, #faf8f4);
-  color: var(--text-secondary, #6b6560);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   font-size: 12.5px;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
 }
 
 .ignition-card__btn:hover {
-  background: var(--hover-bg, #eee9df);
+  background: var(--state-hover);
 }
 
 .ignition-card__btn--primary {
-  background: var(--accent-500, #7c6aad);
-  border-color: var(--accent-500, #7c6aad);
-  color: #fff;
 }
 
 .ignition-card__btn--primary:hover {
-  background: var(--accent-600, #6d5dab);
+  background: var(--accent-600);
 }
 
 .ignition-card__hint {
   margin-top: 10px;
   font-size: 10.5px;
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
 }
 
 .ignition-card__suggest-link {
   margin-top: 6px;
   border: none;
   background: none;
-  font-size: 11px;
-  color: var(--accent-500, #7c6aad);
+  font-size: var(--text-xs);
+  color: var(--accent-500);
   cursor: pointer;
 }
 .ignition-card__suggest-link:disabled {

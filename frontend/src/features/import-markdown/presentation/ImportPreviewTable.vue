@@ -165,9 +165,9 @@ function handleImport() {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: rgba(220, 38, 38, 0.08);
-  border: 1px solid rgba(220, 38, 38, 0.2);
-  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
+  border-radius: var(--radius-sm);
   font-size: 0.8125rem;
   color: var(--danger);
 }
@@ -182,7 +182,7 @@ function handleImport() {
 
 .preview-table {
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   max-height: 340px;
   overflow-y: auto;
@@ -218,7 +218,7 @@ function handleImport() {
   border-bottom: 1px solid var(--border-color);
   align-items: center;
   font-size: 0.8125rem;
-  transition: background 0.1s ease;
+  transition: background var(--dur-1) var(--ease-out);
 }
 
 .table-row:last-child {
@@ -226,11 +226,11 @@ function handleImport() {
 }
 
 .table-row:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .table-row.conflict {
-  background: rgba(220, 38, 38, 0.04);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
 }
 
 .col-seq {
@@ -250,7 +250,7 @@ function handleImport() {
   font-size: 0.8125rem;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   font-family: inherit;
 }
@@ -262,7 +262,7 @@ function handleImport() {
 
 .num-input.has-error {
   border-color: var(--danger);
-  background: rgba(220, 38, 38, 0.05);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
 .num-input:focus,
@@ -302,20 +302,20 @@ function handleImport() {
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 
 .action-btn:hover:not(:disabled) {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
 .action-btn.danger:hover {
   color: var(--danger);
-  background: rgba(220, 38, 38, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .action-btn:disabled {
@@ -343,11 +343,11 @@ function handleImport() {
   font-size: 0.8125rem;
   font-weight: 500;
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 
 .btn-primary:hover:not(:disabled) {

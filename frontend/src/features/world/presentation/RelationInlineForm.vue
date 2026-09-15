@@ -165,7 +165,7 @@ async function remove() {
       </button>
       <span class="rif-spacer"></span>
       <button class="rif-btn" @click="emit('cancel')">取消</button>
-      <button class="rif-btn rif-btn--primary" :disabled="invalid" @click="submit">
+      <button class="rif-btn rif-btn--primary btn-primary-instrument" :disabled="invalid" @click="submit">
         {{ existing ? '保存' : '建立' }}
       </button>
     </div>
@@ -177,10 +177,10 @@ async function remove() {
   width: 300px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   padding: 12px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   z-index: 30;
 }
 .rif-head {
@@ -205,13 +205,13 @@ async function remove() {
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
 .rif-x:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .rif-row {
@@ -223,7 +223,7 @@ async function remove() {
 .rif-label {
   flex-shrink: 0;
   width: 44px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 .rif-types {
@@ -238,10 +238,10 @@ async function remove() {
   border-radius: 9999px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .rif-type:hover {
   border-color: var(--accent-500);
@@ -255,10 +255,10 @@ async function remove() {
   min-width: 0;
   padding: 6px 8px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   outline: none;
 }
@@ -269,7 +269,7 @@ async function remove() {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   cursor: pointer;
   white-space: nowrap;
@@ -279,7 +279,7 @@ async function remove() {
   accent-color: var(--accent-500);
 }
 .rif-aff {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-family: ui-monospace, monospace;
   min-width: 36px;
@@ -294,18 +294,18 @@ async function remove() {
   flex: 1;
   padding: 5px 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .rif-seg-btn.active {
   border-color: var(--accent-500);
   color: var(--accent-500);
-  background: rgba(124, 106, 173, 0.08);
+  background: color-mix(in srgb, var(--accent-500) 8%, transparent);
   font-weight: 600;
 }
 .rif-warn {
@@ -328,13 +328,13 @@ async function remove() {
   gap: 4px;
   padding: 5px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .rif-btn:hover:not(:disabled) {
   border-color: var(--accent-500);
@@ -345,13 +345,10 @@ async function remove() {
   cursor: default;
 }
 .rif-btn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 .rif-btn--primary:hover:not(:disabled) {
   background: var(--accent-600);
-  color: #fff;
+  color: var(--bg-canvas);
 }
 .rif-btn--danger:hover {
   border-color: var(--danger);

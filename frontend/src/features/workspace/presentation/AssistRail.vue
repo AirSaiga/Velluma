@@ -41,7 +41,7 @@ const SECTION_TABS = [
       :title="assistEnabled ? 'AI 辅助开着——Space 会叫 AI 接着写，停顿会浮出卡舱；点击关闭' : 'AI 辅助已关——Space 是普通空格；点击开启'"
       @click="emit('toggleAssist')"
     >
-      <Icon name="sparkles" :size="15" />
+      <Icon name="sparkles" :size="16" />
       <span class="assist-rail__dot" :class="{ 'assist-rail__dot--on': assistEnabled }"></span>
     </button>
 
@@ -55,7 +55,7 @@ const SECTION_TABS = [
       :title="`${t.label}（Ctrl+${i + 1}）`"
       @click="emit('selectTab', t.key)"
     >
-      <Icon :name="t.icon" :size="15" />
+      <Icon :name="t.icon" :size="16" />
       <span v-if="t.key === 'review' && reportUnread" class="assist-rail__badge"></span>
     </button>
 
@@ -67,7 +67,7 @@ const SECTION_TABS = [
       title="AI 视角（Ctrl+5）"
       @click="emit('selectTab', 'debug')"
     >
-      <Icon name="magnifying-glass" :size="15" />
+      <Icon name="magnifying-glass" :size="16" />
     </button>
 
     <button
@@ -75,7 +75,7 @@ const SECTION_TABS = [
       title="快捷键一览"
       @click="emit('openCheatsheet')"
     >
-      <Icon name="question-mark-circle" :size="15" />
+      <Icon name="question-mark-circle" :size="16" />
     </button>
   </nav>
 </template>

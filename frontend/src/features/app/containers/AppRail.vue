@@ -16,7 +16,12 @@ import { useAppSettings } from '../../../composables/useAppSettings'
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
-const { open: openSettings } = useAppSettings()
+const {
+  open: openSettings,
+  openApi: openApiSettings,
+  toggleAppearance,
+  appearanceVisible,
+} = useAppSettings()
 
 interface RailItem {
   key: string
@@ -74,15 +79,29 @@ function navigate(item: RailItem) {
       :disabled="item.requiresBook && !hasBook"
       @click="navigate(item)"
     >
-      <Icon :name="item.icon" :size="20" class="rail-icon" />
+      <Icon :name="item.icon" :size="18" class="rail-icon" />
       <span class="rail-label">{{ item.label }}</span>
     </button>
 
     <div class="rail-spacer"></div>
 
-    <!-- 全局设置（应用级配置，非导航目的地，无书亦可达） -->
-    <button class="rail-item" title="设置" @click="openSettings">
-      <Icon name="settings" :size="20" class="rail-icon" />
+    <!-- 底部工具簇（2026-09-15 设置拆分：外观抽屉 + 模型与 API 弹窗 + 通用设置；
+         均为应用级配置，非导航目的地，无书亦可达） -->
+    <button
+      class="rail-item"
+      :class="{ active: appearanceVisible }"
+      title="外观（主题/明暗/背景/排版，即时生效）"
+      @click="toggleAppearance"
+    >
+      <Icon name="sun" :size="18" class="rail-icon" />
+      <span class="rail-label">外观</span>
+    </button>
+    <button class="rail-item" title="模型与 API（Key/厂商/预设/向量/代理）" @click="openApiSettings">
+      <Icon name="bolt" :size="18" class="rail-icon" />
+      <span class="rail-label">API</span>
+    </button>
+    <button class="rail-item" title="设置（通知偏好）" @click="openSettings">
+      <Icon name="settings" :size="18" class="rail-icon" />
       <span class="rail-label">设置</span>
     </button>
   </nav>
@@ -101,29 +120,33 @@ function navigate(item: RailItem) {
   overflow: hidden;
 }
 
+/* N1 §3.9：仪器密度——项高 40（4+18+2+12+4=40）、icon 18（模板）、label 12/500 */
 .rail-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.125rem;
-  padding: 0.5rem 0.25rem;
+  padding: 0.25rem 0.25rem;
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 0.375rem;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
   position: relative;
 }
 
 .rail-item:hover:not(.disabled) {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
+/* P1 §8.7：激活态= pill（--state-selected 底 + accent 文字/图标），
+   不再是实底色块；左缘 accent 小条保留（rail 既有记号） */
 .rail-item.active {
   color: var(--accent-500);
-  background: var(--hover-bg);
+  background: var(--state-selected);
+  border-radius: var(--radius-md);
 }
 
 .rail-item.active::before {
@@ -152,8 +175,9 @@ function navigate(item: RailItem) {
 
 .rail-label {
   font-size: var(--text-xs);
+  font-weight: 500;
   line-height: 1;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-label);
   white-space: nowrap;
 }
 </style>

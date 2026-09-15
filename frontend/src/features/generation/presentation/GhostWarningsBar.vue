@@ -72,18 +72,15 @@ const kindSummary = computed(() => {
 </template>
 
 <style scoped>
+/* 琥珀系：「请过目」警示语义 → --warn 族 token（暗档由 token 自带） */
 .ghost-warn {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #fcd34d;
-  border-radius: 8px;
-  background: #fffbeb;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-canvas));
   padding: 5px 8px;
   margin-bottom: 8px;
-}
-:root.dark .ghost-warn {
-  background: rgba(45, 40, 30, 0.55);
-  border-color: rgba(252, 211, 77, 0.35);
 }
 
 .ghost-warn__head {
@@ -97,19 +94,16 @@ const kindSummary = computed(() => {
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  color: #92400e;
-}
-:root.dark .ghost-warn__head {
-  color: #fcd34d;
+  color: var(--warn);
 }
 
 .ghost-warn__icon {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 
 .ghost-warn__count {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -117,7 +111,7 @@ const kindSummary = computed(() => {
 .ghost-warn__kinds {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   opacity: 0.85;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -126,16 +120,12 @@ const kindSummary = computed(() => {
 
 .ghost-warn__toggle {
   flex-shrink: 0;
-  font-size: 10px;
-  color: #b45309;
-  border: 1px solid #fcd34d;
-  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: var(--radius-sm);
   padding: 0 6px;
   line-height: 1.5;
-}
-:root.dark .ghost-warn__toggle {
-  color: #fcd34d;
-  border-color: rgba(252, 211, 77, 0.4);
 }
 
 .ghost-warn__list {
@@ -144,64 +134,55 @@ const kindSummary = computed(() => {
   gap: 4px;
   padding-top: 5px;
   margin-top: 4px;
-  border-top: 1px dashed rgba(180, 83, 9, 0.3);
+  border-top: 1px dashed color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 .ghost-warn__item {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  color: #57534e;
+  color: var(--text-secondary);
   flex-wrap: wrap;
-}
-:root.dark .ghost-warn__item {
-  color: #d6d3d1;
 }
 
 .ghost-warn__tag {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: 9999px;
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--warn-bg);
+  color: var(--warn);
   white-space: nowrap;
 }
 .ghost-warn__item.is-dead .ghost-warn__tag {
-  background: #e0e7ff;
-  color: #4f46e5;
+  background: var(--info-bg);
+  color: var(--info);
 }
 .ghost-warn__item.is-canon .ghost-warn__tag {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 .ghost-warn__item.is-secret .ghost-warn__tag {
-  background: #f5f3ff;
-  color: #7c3aed;
+  background: color-mix(in srgb, var(--foreshadow) 14%, var(--bg-canvas));
+  color: var(--foreshadow);
 }
 
 .ghost-warn__span {
   font-weight: 600;
-  color: #92400e;
+  color: var(--warn);
   word-break: break-all;
-}
-:root.dark .ghost-warn__span {
-  color: #fcd34d;
 }
 
 .ghost-warn__msg {
   flex: 1;
   min-width: 100%;
-  color: #78716c;
-}
-:root.dark .ghost-warn__msg {
-  color: #a8a29e;
+  color: var(--text-muted);
 }
 
 .ghost-warn__foot {
-  font-size: 10px;
-  color: #a8a29e;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 </style>

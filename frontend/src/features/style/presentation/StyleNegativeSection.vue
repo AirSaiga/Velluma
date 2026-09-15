@@ -176,7 +176,7 @@ function hitCount(word: string): number {
   color: var(--accent-500);
   background: color-mix(in srgb, var(--accent-500) 10%, transparent);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-scan:hover {
@@ -188,7 +188,7 @@ function hitCount(word: string): number {
   color: var(--text-secondary);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-ghost:hover {
@@ -213,9 +213,9 @@ function hitCount(word: string): number {
   align-items: center;
   padding: var(--space-2);
   margin-bottom: 0.375rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .neg-arrow {
   display: none;
@@ -251,7 +251,7 @@ function hitCount(word: string): number {
   font-size: var(--text-sm);
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 .neg-input:focus {
   border-color: var(--accent-400);
@@ -267,7 +267,7 @@ function hitCount(word: string): number {
   font-size: var(--text-xs);
   color: var(--danger);
   background: var(--danger-bg);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 .hit-chip.hit-zero {
@@ -282,7 +282,7 @@ function hitCount(word: string): number {
   color: var(--warn);
   background: var(--warn-bg);
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -300,7 +300,7 @@ function hitCount(word: string): number {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .icon-danger:hover {
@@ -332,9 +332,9 @@ function hitCount(word: string): number {
   padding: 0.5rem 0.625rem;
   margin-top: 0.25rem;
   overflow-y: auto;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .system-note {
   margin: 0 0 0.5rem;
@@ -382,7 +382,7 @@ function hitCount(word: string): number {
   font-size: var(--text-xs);
   color: var(--danger);
   background: var(--danger-bg);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 .btn-exempt {
   flex-shrink: 0;
@@ -392,7 +392,7 @@ function hitCount(word: string): number {
   color: var(--warn);
   background: var(--warn-bg);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-exempt:hover {

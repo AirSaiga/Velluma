@@ -50,7 +50,7 @@ const style = computed(() => ({
 <style scoped>
 .thinking-dot {
   position: fixed;
-  z-index: 89;  /* 略低于 spark-dock(90)，Dock 弹出会盖住 */
+  z-index: var(--z-pop); /* 归表：光标跟随带（原 89 表外值） */
   width: 8px;
   height: 8px;
   pointer-events: none;
@@ -62,7 +62,7 @@ const style = computed(() => ({
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: #34d399;  /* mint-400，与幽灵草稿同语义色 */
+  background: var(--mint); /* 薄荷=AI 在场，与幽灵草稿同语义色 */
   opacity: 1;
   animation: thinking-pulse 1s ease-in-out infinite;
 }
@@ -73,7 +73,7 @@ const style = computed(() => ({
   border-radius: 50%;
   border: 1.5px solid transparent;
   opacity: 0;
-  border-color: rgba(52, 211, 153, 0.5);
+  border-color: color-mix(in srgb, var(--mint) 50%, transparent);
   animation: thinking-ring 1.4s ease-out infinite;
 }
 
@@ -89,10 +89,10 @@ const style = computed(() => ({
 
 /* 淡入（120ms，比 spark-dock 略快——指示器要立刻可见） */
 .thinking-dot-enter-active {
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-1) var(--ease-out);
 }
 .thinking-dot-leave-active {
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-in);
 }
 .thinking-dot-enter-from,
 .thinking-dot-leave-to {

@@ -205,7 +205,7 @@ function tooltipFor(ch: AxisChapter): string {
         </template>
       </g>
 
-      <!-- 真相揭示朱点（与时间轴 C3 同语义色 #c25a4a） -->
+      <!-- 真相揭示朱点（--cinnabar-bright 档，与时间轴 C3 同语义） -->
       <g v-for="(d, i) in revealDots" :key="`r${i}`">
         <circle :cx="d.x" :cy="d.y" r="3" class="axis-reveal">
           <title>{{ d.tooltip }}</title>
@@ -220,7 +220,7 @@ function tooltipFor(ch: AxisChapter): string {
 .axis-wrap {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem 0.25rem;
   margin-bottom: 1rem;
 }
@@ -230,7 +230,7 @@ function tooltipFor(ch: AxisChapter): string {
 }
 
 .axis-col-hl {
-  fill: var(--hover-bg);
+  fill: var(--state-hover);
 }
 
 .axis-col-hit {
@@ -262,7 +262,7 @@ function tooltipFor(ch: AxisChapter): string {
 }
 
 .axis-tension-dot.payoff {
-  fill: var(--bg-panel);
+  fill: var(--surface-overlay);
   stroke: var(--accent-600);
   stroke-width: 1.5;
 }
@@ -291,7 +291,7 @@ function tooltipFor(ch: AxisChapter): string {
 }
 
 .axis-reveal {
-  fill: #c25a4a; /* 朱砂语义色（真相层视觉签名，与 WorldTimeline 揭示朱点同值） */
+  fill: var(--cinnabar-bright); /* 朱砂语义色（真相层视觉签名，与 WorldTimeline 揭示朱点同源） */
 }
 
 .axis-legend {

@@ -394,18 +394,18 @@ async function remove() {
   flex-direction: column;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius-lg);
+  box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .ctd::-webkit-scrollbar {
   width: 8px;
 }
 .ctd::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .ctd::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);
@@ -423,7 +423,7 @@ async function remove() {
 .ctd-name {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+  font-family: var(--font-serif);
   font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -447,7 +447,7 @@ async function remove() {
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   padding: 3px 4px;
   outline: none;
 }
@@ -468,13 +468,13 @@ async function remove() {
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
 .ctd-close:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 /* 返回上一级（仅从真相账本钻入时出现，与关闭分权：← 回账本 / × 全关） */
@@ -486,13 +486,13 @@ async function remove() {
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
 .ctd-back:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
@@ -501,7 +501,7 @@ async function remove() {
   margin: 10px 0 0;
   padding: 8px 10px;
   border: 1px dashed var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-xs);
   line-height: 1.7;
   color: var(--text-muted);
@@ -525,22 +525,22 @@ async function remove() {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .ctd-vis-seg:hover:not(.active) {
   color: var(--text-secondary);
 }
 .ctd-vis-seg--private.active {
-  background: #a63e2a;
-  color: #fff;
+  background: var(--cinnabar);
+  color: var(--bg-canvas);
 }
 .ctd-vis-seg--partial.active {
-  background: #7c5faf;
-  color: #fff;
+  background: var(--truth-partial);
+  color: var(--bg-canvas);
 }
 .ctd-vis-seg--public.active {
-  background: #5f7d5a;
-  color: #fff;
+  background: var(--truth-open);
+  color: var(--bg-canvas);
 }
 .ctd-vis-note {
   margin: 6px 2px 0;
@@ -561,15 +561,15 @@ async function remove() {
   border-top: none;
 }
 .ctd-q-title {
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 13px;
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
   letter-spacing: 0.06em;
   color: var(--text-secondary);
   margin-bottom: 8px;
   user-select: none;
 }
 .ctd-q-num {
-  color: #a63e2a;
+  color: var(--cinnabar);
   font-size: var(--text-xs);
   margin-right: 6px;
 }
@@ -603,7 +603,7 @@ async function remove() {
 .ctd-more-summary::before {
   content: "▸";
   font-size: var(--text-xs);
-  transition: transform 0.12s ease;
+  transition: transform var(--dur-1) var(--ease-out);
 }
 .ctd-more[open] > .ctd-more-summary::before {
   transform: rotate(90deg);
@@ -621,25 +621,28 @@ async function remove() {
    textarea 无边框融入纸面；焦点反馈在卡片级（:focus-within），
    让「正在编辑哪一面、失焦即存的边界在哪」一眼可辨。 */
 .ctd-face {
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+  /* 04 §D2 纸面卡：文书语义卡走纸面规格（纸色+纸纹通道+纸缘+纸影） */
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--radius-lg);
   padding: 9px 12px 10px;
-  background: var(--bg-secondary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background-color: var(--paper-bg);
+  background-image: var(--paper-texture);
+  box-shadow: var(--shadow-paper);
+  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
   margin-top: 8px;
 }
 .ctd-face--biao:focus-within {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 .ctd-face--li {
   background: rgba(166, 62, 42, 0.07);
   border-color: rgba(166, 62, 42, 0.32);
-  border-left: 3px solid #a63e2a;
+  border-left: 3px solid var(--cinnabar);
 }
 .ctd-face--li:focus-within {
-  border-color: #a63e2a;
-  box-shadow: 0 0 0 3px rgba(166, 62, 42, 0.1);
+  border-color: var(--cinnabar);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cinnabar) 10%, transparent); /* 「里」卡朱晕 */
 }
 .ctd-face-head {
   display: flex;
@@ -648,37 +651,37 @@ async function remove() {
   margin-bottom: 4px;
 }
 .ctd-face-key {
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 13px;
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
   font-weight: 700;
   color: var(--text-primary);
 }
 .ctd-face--li .ctd-face-key {
-  color: #a63e2a;
+  color: var(--cinnabar);
 }
 /* 表/里退居角标（品牌词保留，不占主标题位） */
 .ctd-face-badge {
   margin-left: auto;
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+  font-family: var(--font-serif);
   font-size: var(--text-xs);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
   letter-spacing: 0.1em;
   user-select: none;
 }
 .ctd-face-badge--li {
-  color: #a63e2a;
-  border-color: #a63e2a;
+  color: var(--cinnabar);
+  border-color: var(--cinnabar);
 }
 /* 密印收进头部行内（原位是 absolute 叠卡片右上角，窄宽下会压文字） */
 .ctd-seal {
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+  font-family: var(--font-serif);
   font-size: var(--text-xs);
-  color: #a63e2a;
-  border: 1px solid #a63e2a;
-  border-radius: 3px;
+  color: var(--cinnabar);
+  border: 1px solid var(--cinnabar);
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   letter-spacing: 0.1em;
   user-select: none;
@@ -687,8 +690,8 @@ async function remove() {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
-  font-size: 13px;
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
   line-height: 1.8;
   color: var(--text-primary);
   background: transparent;
@@ -714,7 +717,7 @@ async function remove() {
   border-top: 1px dashed rgba(166, 62, 42, 0.45);
   font-size: var(--text-xs);
   line-height: 1.7;
-  color: #a63e2a;
+  color: var(--cinnabar);
 }
 .ctd-public-note {
   margin: 8px 0 0;
@@ -743,19 +746,19 @@ async function remove() {
 .ctd-input {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .ctd-input:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 .ctd-input--num {
   max-width: 96px;
@@ -765,7 +768,7 @@ async function remove() {
   margin: 2px 2px 0 72px;
   font-size: var(--text-xs);
   line-height: 1.7;
-  color: #b08d3e;
+  color: var(--gold); /* 鎏金=揭示编年语义 */
 }
 
 /* ===== 动作 ===== */
@@ -783,13 +786,13 @@ async function remove() {
   gap: 5px;
   padding: 7px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .ctd-act:hover {
   border-color: var(--accent-500);
@@ -797,11 +800,11 @@ async function remove() {
 }
 .ctd-act--danger {
   margin-left: auto;
-  color: #a63e2a;
+  color: var(--cinnabar);
 }
 .ctd-act--danger:hover {
-  border-color: #a63e2a;
-  color: #a63e2a;
+  border-color: var(--cinnabar);
+  color: var(--cinnabar);
   background: rgba(166, 62, 42, 0.06);
 }
 
@@ -820,20 +823,20 @@ async function remove() {
   gap: 4px;
 }
 .ctd-check-item {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--warn);
 }
 .ctd-check-empty {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 6px 0;
 }
 .ctd-check-input {
   width: 100%;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   padding: 6px 8px;
   line-height: 1.5;
@@ -842,7 +845,7 @@ async function remove() {
 }
 .ctd-check-input:focus {
   outline: none;
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .ctd-check-actions {
   display: flex;

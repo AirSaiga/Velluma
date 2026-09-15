@@ -113,9 +113,9 @@ function triggerFileInput() {
   gap: 0.375rem;
   padding: 2.5rem 1.5rem;
   border: 2px dashed var(--border-color);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
   text-align: center;
   background: var(--bg-primary);
 }
@@ -123,7 +123,7 @@ function triggerFileInput() {
 .drop-area:hover,
 .drop-area.drag-over {
   border-color: var(--accent-500);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .drop-area.parsing {
@@ -168,9 +168,9 @@ function triggerFileInput() {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.625rem 0.75rem;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 20%, transparent);
+  border-radius: var(--radius-sm);
 }
 
 .skipped-item {

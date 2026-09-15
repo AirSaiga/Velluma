@@ -167,7 +167,7 @@ async function save() {
 
     <template #footer>
       <button class="ps-btn" :disabled="saving" @click="emit('close')">取消</button>
-      <button class="ps-btn ps-btn--primary" :disabled="saving || loading" @click="save">
+      <button class="ps-btn ps-btn--primary btn-primary-instrument" :disabled="saving || loading" @click="save">
         {{ saving ? '保存中…' : '保存' }}
       </button>
     </template>
@@ -178,7 +178,7 @@ async function save() {
 .ps-loading {
   padding: 24px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -192,7 +192,7 @@ async function save() {
 
 .ps-head {
   padding: 0 2px 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -213,17 +213,17 @@ async function save() {
 }
 
 .ps-usage {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   padding-left: 6px;
 }
 
 .ps-input {
   padding: 4px 6px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   min-width: 0;
 }
@@ -246,27 +246,27 @@ async function save() {
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
 }
 
 .ps-del:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--danger);
 }
 
 .ps-add {
   margin-top: 2px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -276,31 +276,28 @@ async function save() {
 
 .ps-warn {
   margin: 8px 0 0;
-  font-size: 11px;
-  color: var(--warn, #d97706);
+  font-size: var(--text-xs);
+  color: var(--warn);
 }
 
 .ps-hint {
   margin: 8px 0 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-muted);
 }
 
 .ps-btn {
   padding: 5px 14px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   background: var(--bg-canvas);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
 .ps-btn--primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
 }
 
 .ps-btn:disabled {

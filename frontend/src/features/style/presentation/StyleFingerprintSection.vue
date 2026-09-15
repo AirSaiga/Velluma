@@ -168,9 +168,9 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 
       <!-- 指标网格 -->
       <div class="metric-grid">
-        <div v-for="m in metrics" :key="m.label" class="metric-cell" :title="m.hint">
+        <div v-for="m in metrics" :key="m.label" class="metric-cell card-well" :title="m.hint">
           <span class="metric-label">{{ m.label }}</span>
-          <span class="metric-value">{{ m.value }}</span>
+          <span class="metric-value tnum">{{ m.value }}</span>
           <span class="metric-hint">{{ m.hint }}</span>
         </div>
       </div>
@@ -283,9 +283,9 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 .histogram-card {
   padding: 0.875rem 1rem 0.625rem;
   margin-bottom: 0.75rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .hist-title {
   margin: 0 0 0.625rem;
@@ -340,14 +340,11 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
+/* N2 §3.7：指标格试点 .card-well（凹槽卡；皮肤由工具类提供） */
 .metric-cell {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.5rem 0.625rem;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
   cursor: help;
 }
 .metric-label {
@@ -355,6 +352,9 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--text-muted);
 }
 .metric-value {
+  /* 04 §B4 页码感：展示大数字=衬线等宽（20px ≥16px 阈值） */
+  font-family: var(--font-heading);
+  font-variant-numeric: tabular-nums;
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-primary);
@@ -381,19 +381,19 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .advanced-toggle:hover {
   color: var(--text-secondary);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .advanced-body {
   padding: 0.75rem;
   margin-top: 0.25rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px dashed var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .scope-block {
   padding-bottom: 0.75rem;
@@ -412,7 +412,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 .btn-scope-reset {
   flex-shrink: 0;
@@ -421,7 +421,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--warn);
   background: var(--warn-bg);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-scope-reset:hover {
@@ -451,7 +451,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--accent-600);
   background: color-mix(in srgb, var(--accent-500) 15%, transparent);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-lock-all:hover {
@@ -486,10 +486,10 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   flex-shrink: 0;
   padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-primary:hover:not(:disabled) {
@@ -517,7 +517,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 .field-textarea:focus {
@@ -532,7 +532,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px dashed var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
 .field-readonly--empty {

@@ -28,7 +28,7 @@ const emit = defineEmits<{
     <div class="toc-page">
       <header class="toc-page__head">
         <h1 class="toc-page__title">{{ bookTitle || '未选择书籍' }}</h1>
-        <div class="toc-page__sub">目录</div>
+        <div class="toc-page__sub"><span class="toc-page__sub-mark" aria-hidden="true">❦</span>目录<span class="toc-page__sub-mark" aria-hidden="true">❦</span></div>
       </header>
 
       <div v-if="loading" class="toc-page__loading">加载中…</div>
@@ -87,7 +87,7 @@ const emit = defineEmits<{
   font-size: var(--text-3xl);
   font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -99,6 +99,12 @@ const emit = defineEmits<{
   font-size: var(--text-sm);
   color: var(--text-muted);
   letter-spacing: 0.3em;
+}
+/* 04 §A3-3 扉页饰符：对称 ❦ 之间「目录」——扉页成立；符色纯装饰档 */
+.toc-page__sub-mark {
+  font-size: 0.8em;
+  color: var(--text-faint);
+  margin: 0 0.5em;
 }
 
 .toc-page__loading {
@@ -130,7 +136,7 @@ const emit = defineEmits<{
   font-size: var(--text-base);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .toc-page__new:hover {
   border-color: var(--accent-500);
@@ -145,6 +151,12 @@ const emit = defineEmits<{
   justify-content: center;
   gap: var(--space-4);
   padding: var(--space-6);
+}
+/* 04 §D3 空态统一：❦ 饰符（纯装饰档）+衬线主句 */
+.toc-page__empty::before {
+  content: '❦';
+  font-size: var(--text-lg);
+  color: var(--text-faint);
 }
 
 .toc-page__empty-text {
@@ -162,11 +174,11 @@ const emit = defineEmits<{
   font-size: var(--text-base);
   font-weight: 500;
   background: var(--accent-500);
-  color: #fff;
+  color: var(--bg-canvas);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 .toc-page__primary:hover {
   background: var(--accent-600);
@@ -185,7 +197,7 @@ const emit = defineEmits<{
   font-size: var(--text-xs);
   color: var(--text-faint);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--dur-2) var(--ease-out);
 }
 .toc-page__import:hover {
   color: var(--text-secondary);

@@ -121,14 +121,14 @@ async function submit() {
   width: 26px;
   height: 26px;
   border: 1px dashed var(--accent-500);
-  border-radius: 7px;
-  background: rgba(124, 106, 173, 0.05);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-500) 5%, transparent);
   color: var(--accent-500);
   cursor: pointer;
-  transition: all 0.13s;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .ic-btn:hover {
-  background: rgba(124, 106, 173, 0.14);
+  background: color-mix(in srgb, var(--accent-500) 14%, transparent);
 }
 .ic-btn:disabled {
   opacity: 0.4;
@@ -137,7 +137,7 @@ async function submit() {
 .ic-btn--go {
   border-style: solid;
   background: var(--accent-500);
-  color: #fff;
+  color: var(--bg-canvas);
 }
 .ic-row {
   display: inline-flex;
@@ -148,12 +148,12 @@ async function submit() {
   width: 120px;
   padding: 4px 8px;
   border: 1px solid var(--accent-500);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   outline: none;
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.12);
+  box-shadow: var(--ring-soft);
 }
 </style>

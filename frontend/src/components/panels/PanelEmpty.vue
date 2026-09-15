@@ -54,19 +54,19 @@ function handleAction() {
   height: 64px;
   margin-bottom: 16px;
   border-radius: 16px;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   color: var(--text-muted);
 }
 
 .empty-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
 .empty-description {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
   max-width: 240px;
@@ -75,18 +75,18 @@ function handleAction() {
 
 .empty-action {
   padding: 8px 16px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--accent-500);
   background: transparent;
   border: 1px solid var(--accent-500);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-3) var(--ease-out);
 }
 
 .empty-action:hover {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
 }
 </style>

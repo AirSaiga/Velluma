@@ -59,19 +59,15 @@ const replacedCount = () => props.wash.hits.filter((h) => h.replaced).length
 </template>
 
 <style scoped>
-/* 薄荷系：洗是「已处理」，与幽灵草稿同语义色（区别疑点条琥珀） */
+/* 薄荷系：洗是「已处理」，与幽灵草稿同语义色（区别疑点条琥珀）——签名恒定 --mint-* token */
 .ghost-wash {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #6ee7b7;
-  border-radius: 8px;
-  background: #ecfdf5;
+  border: 1px solid var(--mint-line);
+  border-radius: var(--radius-md);
+  background: var(--mint-bg);
   padding: 5px 8px;
   margin-bottom: 8px;
-}
-:root.dark .ghost-wash {
-  background: rgba(16, 46, 38, 0.5);
-  border-color: rgba(110, 231, 183, 0.35);
 }
 
 .ghost-wash__head {
@@ -85,28 +81,21 @@ const replacedCount = () => props.wash.hits.filter((h) => h.replaced).length
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  color: #065f46;
-}
-:root.dark .ghost-wash__head {
-  color: #6ee7b7;
+  color: var(--mint-ink);
 }
 
-.ghost-wash__icon { font-size: 12px; line-height: 1; }
-.ghost-wash__count { font-size: 12px; font-weight: 600; white-space: nowrap; }
-.ghost-wash__sub { flex: 1; min-width: 0; font-size: 11px; opacity: 0.8; }
+.ghost-wash__icon { font-size: var(--text-xs); line-height: 1; }
+.ghost-wash__count { font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+.ghost-wash__sub { flex: 1; min-width: 0; font-size: var(--text-xs); opacity: 0.8; }
 
 .ghost-wash__toggle {
   flex-shrink: 0;
-  font-size: 10px;
-  color: #047857;
-  border: 1px solid #6ee7b7;
-  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--mint-ink);
+  border: 1px solid var(--mint-line);
+  border-radius: var(--radius-sm);
   padding: 0 6px;
   line-height: 1.5;
-}
-:root.dark .ghost-wash__toggle {
-  color: #6ee7b7;
-  border-color: rgba(110, 231, 183, 0.4);
 }
 
 .ghost-wash__list {
@@ -115,47 +104,43 @@ const replacedCount = () => props.wash.hits.filter((h) => h.replaced).length
   gap: 4px;
   padding-top: 5px;
   margin-top: 4px;
-  border-top: 1px dashed rgba(4, 120, 87, 0.3);
+  border-top: 1px dashed color-mix(in srgb, var(--mint) 30%, transparent);
 }
 
 .ghost-wash__item {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  color: #57534e;
+  color: var(--text-secondary);
   flex-wrap: wrap;
 }
-:root.dark .ghost-wash__item { color: #d6d3d1; }
 
 .ghost-wash__tag {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: 9999px;
   white-space: nowrap;
 }
-.ghost-wash__tag.is-fixed { background: #d1fae5; color: #047857; }
-.ghost-wash__tag.is-kept { background: #f3f4f6; color: #6b7280; }
+.ghost-wash__tag.is-fixed { background: color-mix(in srgb, var(--mint) 15%, var(--bg-canvas)); color: var(--mint-ink); }
+.ghost-wash__tag.is-kept { background: var(--bg-tertiary); color: var(--text-muted); }
 
-.ghost-wash__span { font-weight: 600; color: #065f46; word-break: break-all; }
-:root.dark .ghost-wash__span { color: #6ee7b7; }
-.ghost-wash__alt { color: #78716c; }
-:root.dark .ghost-wash__alt { color: #a8a29e; }
+.ghost-wash__span { font-weight: 600; color: var(--mint-ink); word-break: break-all; }
+.ghost-wash__alt { color: var(--text-muted); }
 
 .ghost-wash__actions { margin-top: 2px; }
 .ghost-wash__btn {
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 3px 10px;
-  border-radius: 6px;
-  border: 1px solid #6ee7b7;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--mint-line);
   background: transparent;
-  color: #047857;
+  color: var(--mint-ink);
   cursor: pointer;
 }
-.ghost-wash__btn:hover { background: rgba(110, 231, 183, 0.15); }
-:root.dark .ghost-wash__btn { color: #6ee7b7; }
+.ghost-wash__btn:hover { background: color-mix(in srgb, var(--mint) 15%, transparent); }
 
-.ghost-wash__foot { font-size: 10px; color: #a8a29e; }
+.ghost-wash__foot { font-size: var(--text-xs); color: var(--text-muted); }
 </style>

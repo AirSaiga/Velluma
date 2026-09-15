@@ -62,7 +62,7 @@ onScopeDispose(() => {
   <Teleport to="body">
     <!-- 收起态：顶部居中悬浮小条（无遮罩、不挡地图交互） -->
     <Transition name="modal">
-      <div v-if="minimized" class="ms-bar" role="status">
+      <div v-if="minimized" class="ms-bar elev-3" role="status">
         <Icon name="pencil-square" :size="14" class="ms-bar-icon" />
         <span class="ms-bar-title">{{ title }}</span>
         <span class="ms-bar-actions"><slot name="bar-actions" /></span>
@@ -73,7 +73,7 @@ onScopeDispose(() => {
         <div class="ms-backdrop" @click="emit('close')"></div>
         <div
           ref="cardRef"
-          class="modal-content ms-card"
+          class="modal-content ms-card elev-3"
           :style="{ width, maxWidth: '92vw' }"
           role="dialog"
           aria-modal="true"
@@ -111,8 +111,9 @@ onScopeDispose(() => {
 .ms-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
+  background: var(--overlay-bg);
+  /* P1 §8.5：仅遮罩层 blur 2px→10px——纸面/滚动区永不上 blur */
+  backdrop-filter: blur(10px);
 }
 .ms-card {
   position: relative;
@@ -122,9 +123,7 @@ onScopeDispose(() => {
   container-type: inline-size;
   max-height: 86vh;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
-  box-shadow: 0 18px 48px rgba(40, 32, 18, 0.22);
   overflow: hidden;
 }
 .ms-header {
@@ -136,13 +135,13 @@ onScopeDispose(() => {
   border-bottom: 1px solid var(--border-color);
 }
 .ms-title {
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-primary);
 }
 .ms-subtitle {
   margin-top: 3px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -153,14 +152,14 @@ onScopeDispose(() => {
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .ms-close:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 .ms-body {
@@ -173,7 +172,7 @@ onScopeDispose(() => {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint); /* N2 §3.8：footer 顶 hairline */
   background: var(--bg-secondary);
 }
 /* ---- 收起态悬浮小条 ---- */
@@ -188,9 +187,7 @@ onScopeDispose(() => {
   gap: 10px;
   padding: 8px 10px 8px 14px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
-  box-shadow: 0 10px 30px rgba(40, 32, 18, 0.22);
   white-space: nowrap;
 }
 .ms-bar-icon {
@@ -198,7 +195,7 @@ onScopeDispose(() => {
   flex-shrink: 0;
 }
 .ms-bar-title {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
 }

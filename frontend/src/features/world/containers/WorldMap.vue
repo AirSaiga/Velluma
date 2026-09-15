@@ -8,6 +8,10 @@
  *
  * 坐标约定：Leaflet [lat,lng]，CRS.Simple 下 lat=y、lng=x；内部坐标 Point=[x,y]。
  * 设计意图：事件溯源的世界地图——拖时间轴，人物/疆域/轨迹/历史事件随 currentTime 回放。
+
+ * 主题豁免（docs/design/theme-system/01-theme-architecture.md §7）：古地图永远是古地图——
+ * 羊皮画布/鎏金/暖墨/烛光暗角等装饰色浅深与任何主题下恒定；深色下保持亮图=「灯下看地图」，
+ * 由 2026-09-15 主题系统重设计正式追认为设计决定（此前是无意幸运）。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import L from 'leaflet'
@@ -2380,9 +2384,9 @@ onBeforeUnmount(() => {
 .wm-loc-name {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--text-primary, #2c2c2c);
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
+  color: var(--text-primary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
   padding: 1px 6px;
   border-radius: 6px;
   white-space: nowrap;
@@ -2418,11 +2422,11 @@ onBeforeUnmount(() => {
 }
 .wm-char-name {
   margin-top: 3px;
-  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-family: var(--font-atlas); /* 古地图字体恒定衬线（主题系统 01 §7 豁免） */
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
   background: rgba(249, 242, 226, 0.85);
   border: none;
   border-bottom: 1px solid rgba(107, 90, 68, 0.4);
@@ -2590,8 +2594,8 @@ path.wm-rel-born {
   position: absolute;
   z-index: 850;
   min-width: 150px;
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 6px;
@@ -2600,8 +2604,8 @@ path.wm-rel-born {
 .wm-ctx-title {
   padding: 3px 8px 6px;
   font-size: var(--text-xs);
-  color: var(--text-muted, #a89e90);
-  border-bottom: 1px solid var(--border-color, #e0dbd3);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
   margin-bottom: 4px;
 }
 .wm-ctx-item {
@@ -2620,15 +2624,15 @@ path.wm-rel-born {
   cursor: pointer;
 }
 .wm-ctx-item:hover {
-  background: var(--hover-bg, #f0ebe2);
+  background: var(--hover-bg);
   color: var(--accent-500);
 }
 .wm-cform,
 .wm-rform {
   position: absolute;
   z-index: 860;
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
@@ -2652,7 +2656,7 @@ path.wm-rel-born {
 .wm-cform-seg-btn {
   flex: 1;
   padding: 5px 0;
-  border: 1px solid var(--border-color, #e0dbd3);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
@@ -2671,9 +2675,9 @@ path.wm-rel-born {
   width: 100%;
   box-sizing: border-box;
   padding: 7px 9px;
-  border: 1px solid var(--border-color, #e0dbd3);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--bg-canvas, #fefdfb);
+  background: var(--bg-canvas);
   color: var(--text-primary);
   font-size: 13px;
   font-family: inherit;
@@ -2685,7 +2689,7 @@ path.wm-rel-born {
 .wm-cform-hint {
   margin-top: 7px;
   font-size: var(--text-xs);
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 
@@ -2815,14 +2819,14 @@ path.wm-track-flow {
 
 /* popup 次要文字 */
 .wm-pop-sub {
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 .wm-pop-title {
   font-weight: 700;
   font-size: 13px;
   margin-bottom: 2px;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
 }
 .wm-pop-intro {
   margin-top: 4px;
@@ -2834,7 +2838,7 @@ path.wm-track-flow {
 .wm-pop-inner {
   margin-top: 4px;
   font-size: var(--text-xs);
-  color: var(--accent-400, #8b6de8);
+  color: var(--accent-400);
 }
 /* 地点 popup 就地改名/删除 */
 .wm-pop-edit {
@@ -2847,20 +2851,20 @@ path.wm-track-flow {
   flex: 1;
   min-width: 140px;
   padding: 4px 8px;
-  border: 1px solid var(--border-color, #e0dbd3);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--bg-canvas, #fff);
-  color: var(--text-primary, #2c2c2c);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
   font-size: 12px;
   font-family: inherit;
   outline: none;
 }
 .wm-pop-input:focus {
-  border-color: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500);
 }
 .wm-pop-btn {
   padding: 3px 8px;
-  border: 1px solid var(--border-color, #e0dbd3);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   background: transparent;
   color: var(--text-secondary, var(--text-secondary));
@@ -2870,8 +2874,8 @@ path.wm-track-flow {
   white-space: nowrap;
 }
 .wm-pop-btn:hover {
-  border-color: var(--accent-500, #7c6aad);
-  color: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500);
+  color: var(--accent-500);
 }
 .wm-pop-btn--danger:hover {
   border-color: var(--danger);
@@ -2913,7 +2917,7 @@ path.wm-track-flow {
   color: #b08d3e;
 }
 .wm-blankcard-title {
-  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-family: var(--font-atlas); /* 古地图字体恒定衬线（主题系统 01 §7 豁免） */
   font-size: var(--text-2xl);
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -2927,6 +2931,6 @@ path.wm-track-flow {
   margin-top: 5px;
   font-size: var(--text-xs);
   line-height: 1.9;
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
 }
 </style>

@@ -60,22 +60,17 @@ function toggle(): void {
 </template>
 
 <style scoped>
-/* 薄荷系：与洗层条同语义色（「已处理」，区别疑点条琥珀） */
+/* 薄荷系：与洗层条同语义色（「已处理」，区别疑点条琥珀）——签名恒定 --mint-* token，双档自带 */
 .ghost-repaired {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #6ee7b7;
-  border-radius: 8px;
-  background: #ecfdf5;
+  border: 1px solid var(--mint-line);
+  border-radius: var(--radius-md);
+  background: var(--mint-bg);
   padding: 5px 8px;
   margin-bottom: 8px;
-  font-size: 12px;
-  color: #047857;
-}
-:root.dark .ghost-repaired {
-  background: rgba(20, 46, 38, 0.55);
-  border-color: rgba(110, 231, 183, 0.35);
-  color: #6ee7b7;
+  font-size: var(--text-xs);
+  color: var(--mint-ink);
 }
 
 .ghost-repaired__head {
@@ -98,7 +93,7 @@ function toggle(): void {
 }
 
 .ghost-repaired__icon {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 
@@ -108,7 +103,7 @@ function toggle(): void {
 }
 
 .ghost-repaired__kinds {
-  color: #059669;
+  color: var(--mint-ink);
   opacity: 0.85;
   flex: 1;
   min-width: 0;
@@ -116,22 +111,15 @@ function toggle(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-:root.dark .ghost-repaired__kinds {
-  color: #34d399;
-}
 
 .ghost-repaired__toggle {
   flex-shrink: 0;
-  font-size: 10px;
-  color: #047857;
-  border: 1px solid #6ee7b7;
-  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--mint-ink);
+  border: 1px solid var(--mint-line);
+  border-radius: var(--radius-sm);
   padding: 0 6px;
   line-height: 1.5;
-}
-:root.dark .ghost-repaired__toggle {
-  color: #6ee7b7;
-  border-color: rgba(110, 231, 183, 0.4);
 }
 
 .ghost-repaired__list {
@@ -140,34 +128,27 @@ function toggle(): void {
   gap: 4px;
   padding-top: 5px;
   margin-top: 4px;
-  border-top: 1px dashed rgba(5, 150, 105, 0.3);
+  border-top: 1px dashed color-mix(in srgb, var(--mint) 30%, transparent);
 }
 
 .ghost-repaired__item {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  color: #065f46;
+  color: var(--mint-ink);
   flex-wrap: wrap;
-}
-:root.dark .ghost-repaired__item {
-  color: #a7f3d0;
 }
 
 .ghost-repaired__tag {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: 9999px;
-  background: #d1fae5;
-  color: #047857;
+  background: color-mix(in srgb, var(--mint) 15%, var(--bg-canvas));
+  color: var(--mint-ink);
   white-space: nowrap;
-}
-:root.dark .ghost-repaired__tag {
-  background: rgba(6, 95, 70, 0.5);
-  color: #a7f3d0;
 }
 
 .ghost-repaired__span {
@@ -182,7 +163,7 @@ function toggle(): void {
 }
 
 .ghost-repaired__foot {
-  font-size: 10px;
+  font-size: var(--text-xs);
   opacity: 0.7;
 }
 </style>

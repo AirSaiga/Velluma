@@ -351,8 +351,10 @@ async function createMainWindow() {
           responseHeaders: {
             ...details.responseHeaders,
             // script-src 不含 unsafe-eval/unsafe-inline：Vite dev 走原生 ESM + ws HMR，
-            // 均不需要二者；保留会触发 Electron 的 Insecure CSP 安全警告
-            'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
+            // 均不需要二者；保留会触发 Electron 的 Insecure CSP 安全警告。
+            // index.html 内联防闪脚本以 sha256 hash 放行——hash 按 LF 归一化后的脚本
+            // 文本计算（HTML 解析器会把 CRLF 归一为 LF）；改防闪脚本必须重算并同步此处
+            'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'sha256-cYp2XYhQFdE+TDwcR5h3VNrB5Od7GHzE5eMVgVUuKzY='; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
           }
         })
       })

@@ -16,14 +16,16 @@ import { useRoute } from 'vue-router'
 import Toast from '../../../components/Toast.vue'
 import ConfirmDialog from '../../../components/ConfirmDialog.vue'
 import AppSettingsModal from '../../../components/AppSettingsModal.vue'
+import ApiSettingsModal from '../../../components/ApiSettingsModal.vue'
+import AppearancePanel from '../../../components/AppearancePanel.vue'
 import AppRail from './AppRail.vue'
-import { useTheme } from '../../../composables/useTheme'
+import { useAppearance } from '../../../composables/useAppearance'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { provideAppStore } from '../useAppStore'
 
 const route = useRoute()
-const { initTheme } = useTheme()
+const { initAppearance } = useAppearance()
 const { toasts, showToast, removeToast } = useToast()
 const {
   visible: confirmDialogVisible,
@@ -40,7 +42,7 @@ const store = provideAppStore()
 const pageTitle = computed(() => (route.meta.title as string) || 'Velluma')
 
 onMounted(async () => {
-  initTheme()
+  initAppearance()
   try {
     await store.loadBooks()
   } catch (e: any) {
@@ -59,7 +61,7 @@ defineExpose({
 </script>
 
 <template>
-  <!-- 全局 Toast / ConfirmDialog / 设置弹窗 -->
+  <!-- 全局 Toast / ConfirmDialog / 设置弹窗（2026-09-15 拆分：通用设置 + 模型与 API + 外观抽屉） -->
   <Toast :toasts="toasts" @remove="removeToast" />
   <ConfirmDialog
     :visible="confirmDialogVisible"
@@ -68,6 +70,8 @@ defineExpose({
     @cancel="handleCancelDialog"
   />
   <AppSettingsModal />
+  <ApiSettingsModal />
+  <AppearancePanel />
 
   <div class="app-shell">
     <AppRail />
@@ -109,7 +113,7 @@ defineExpose({
   position: absolute;
   inset: 0;
   width: 100%;
-  transition: opacity 0.1s ease-in;
+  transition: opacity var(--dur-1) var(--ease-in);
 }
 .fade-enter-from,
 .fade-leave-to {

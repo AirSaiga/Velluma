@@ -84,7 +84,7 @@ function save() {
   min-height: 32px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   transition: all 0.15s ease-out;
 }
 .entity-card.ec-clickable {
@@ -92,15 +92,15 @@ function save() {
 }
 .entity-card:hover {
   border-color: var(--accent-500);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(120, 100, 70, 0.1);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 .ec-dot {
   width: 8px;
   height: 8px;
   border-radius: 9999px;
   flex-shrink: 0;
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-primary) 4%, transparent);
 }
 .ec-dot--dead {
   opacity: 0.55;
@@ -109,7 +109,7 @@ function save() {
 .ec-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
   cursor: text;
@@ -122,8 +122,8 @@ function save() {
   min-width: 0;
   padding: 1px 6px;
   border: 1px solid var(--accent-500);
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -145,11 +145,11 @@ function save() {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--dur-1) var(--ease-out);
   flex-shrink: 0;
 }
 /* 02 期 §8 H2：破坏性操作常态 45% 低显 + focus-within 键盘对等（hover/focus 升全亮） */

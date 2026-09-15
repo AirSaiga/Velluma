@@ -167,15 +167,15 @@ function statusLabel(status: ImportEntry['status']): string {
   width: 100%;
   height: 6px;
   background: var(--bg-tertiary);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
   background: var(--accent-500);
-  border-radius: 3px;
-  transition: width 0.3s ease;
+  border-radius: var(--radius-xs);
+  transition: width var(--dur-4) var(--ease-out);
 }
 
 .progress-percent {
@@ -199,18 +199,18 @@ function statusLabel(status: ImportEntry['status']): string {
   align-items: center;
   gap: 0.5rem;
   padding: 0.375rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.8125rem;
   background: var(--bg-primary);
 }
 
 .entry-status-row.success {
-  color: #059669;
+  color: var(--mint-ink);
 }
 
 .entry-status-row.error {
   color: var(--danger);
-  background: rgba(220, 38, 38, 0.04);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
 }
 
 .entry-status-row.importing {
@@ -273,7 +273,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .done-icon {
-  color: #059669;
+  color: var(--mint-ink);
   margin-bottom: 0.5rem;
 }
 
@@ -296,7 +296,7 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .stat-success {
-  color: #059669;
+  color: var(--mint-ink);
   font-weight: 500;
 }
 
@@ -310,9 +310,9 @@ function statusLabel(status: ImportEntry['status']): string {
   width: 100%;
   text-align: left;
   padding: 0.75rem;
-  background: rgba(220, 38, 38, 0.04);
-  border: 1px solid rgba(220, 38, 38, 0.15);
-  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
+  border-radius: var(--radius-sm);
 }
 
 .error-details-title {
@@ -355,15 +355,15 @@ function statusLabel(status: ImportEntry['status']): string {
   padding: 0.5rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
   border: 1px solid transparent;
 }
 
 .btn-primary {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
 }
 
 .btn-primary:hover {
@@ -377,6 +377,6 @@ function statusLabel(status: ImportEntry['status']): string {
 }
 
 .btn-secondary:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 </style>

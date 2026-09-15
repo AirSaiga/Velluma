@@ -39,7 +39,7 @@ function onPick(card: DirectionCard | null) {
     <Transition name="beat-dock">
       <div
         v-if="beatDockVisible"
-        class="beat-dock"
+        class="beat-dock elev-2"
         :style="style"
         @mousedown.prevent
       >
@@ -96,12 +96,10 @@ function onPick(card: DirectionCard | null) {
 /* 磨砂玻璃浮窗（与 Spark Dock 同族，Cyber-Parchment Dark 双主题自适应） */
 .beat-dock {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-dock); /* 归表：卡舱带（原 90 表外值） */
   width: min(420px, 80vw);
-  border-radius: 8px;
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
   padding: 8px;
   user-select: none;
   display: flex;
@@ -110,15 +108,14 @@ function onPick(card: DirectionCard | null) {
 }
 
 :root.dark .beat-dock {
-  background: rgba(30, 32, 37, 0.92);
-  border-color: #2a2d35;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
 .beat-dock__title {
-  font-size: 11px;
-  color: var(--text-muted, #a89e90);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   padding: 2px 6px;
 }
 
@@ -128,30 +125,30 @@ function onPick(card: DirectionCard | null) {
   gap: 8px;
   padding: 6px 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
 }
 
 .beat-dock__card:hover {
-  background: rgba(124, 106, 173, 0.1);
-  border-color: rgba(124, 106, 173, 0.3);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-500) 30%, transparent);
 }
 
 /* 作者声明岔路（P1.4 M3）：硬提示——朱色描边+浅底，视觉权重区别日常柔性建议 */
 .beat-dock__card--branch {
-  border-color: #c2725a;
-  background: rgba(194, 114, 90, 0.08);
+  border-color: var(--cinnabar-bright);
+  background: color-mix(in srgb, var(--cinnabar-bright) 8%, transparent);
 }
 .beat-dock__card--branch:hover {
-  background: rgba(194, 114, 90, 0.16);
-  border-color: #c2725a;
+  background: color-mix(in srgb, var(--cinnabar-bright) 16%, transparent);
+  border-color: var(--cinnabar-bright);
 }
 .beat-dock__branch-mark {
-  color: #c2725a;
-  font-size: 12px;
+  color: var(--cinnabar-bright);
+  font-size: var(--text-xs);
   margin-right: 2px;
 }
 /* 谋篇锚点小签（P1.4 M2）：这条建议服务于哪个锚点 */
@@ -159,21 +156,21 @@ function onPick(card: DirectionCard | null) {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
-  border: 1px solid var(--accent-400, #9685c2);
+  border: 1px solid var(--accent-400);
   border-radius: 999px;
-  font-size: 10px;
-  color: var(--accent-500, #7c6aad);
+  font-size: var(--text-xs);
+  color: var(--accent-500);
   cursor: pointer;
   vertical-align: middle;
 }
 .beat-dock__anchor-tag--map {
-  border-color: #4a8f7d;
-  color: #4a8f7d;
+  border-color: var(--truth-open); /* 地图小签墨绿 → 三态公开绿档 */
+  color: var(--truth-open);
   cursor: default;
 }
 
 .beat-dock__card--free {
-  border-top: 1px dashed var(--border-color, #e0dbd3);
+  border-top: 1px dashed var(--border-color);
   border-radius: 0 0 8px 8px;
 }
 
@@ -182,10 +179,10 @@ function onPick(card: DirectionCard | null) {
   width: 16px;
   height: 16px;
   margin-top: 1px;
-  border-radius: 4px;
-  background: var(--hover-bg, #eee9df);
-  color: var(--text-muted, #a89e90);
-  font-size: 10px;
+  border-radius: var(--radius-xs);
+  background: var(--state-hover);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -201,27 +198,27 @@ function onPick(card: DirectionCard | null) {
 .beat-dock__event {
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
   word-break: break-word;
 }
 
 .beat-dock__anchors {
-  font-size: 10.5px;
-  color: var(--text-muted, #a89e90);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .beat-dock__hint {
-  font-size: 10.5px;
-  color: var(--text-muted, #a89e90);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   padding: 2px 6px 0;
 }
 
 /* 淡入下滑（150ms，与 Spark Dock 一致） */
 .beat-dock-enter-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .beat-dock-leave-active {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
 .beat-dock-enter-from,
 .beat-dock-leave-to {

@@ -182,9 +182,9 @@ watch(() => props.items, (list) => {
 .inbox-card {
   padding: 0.625rem 0.75rem;
   margin-bottom: 0.375rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .inbox-meta {
   display: flex;
@@ -197,7 +197,7 @@ watch(() => props.items, (list) => {
   font-size: var(--text-xs);
   color: var(--warn);
   background: var(--warn-bg);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 .inbox-word {
   font-size: 0.8125rem;
@@ -220,12 +220,12 @@ watch(() => props.items, (list) => {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 .btn-edit-word:hover {
   color: var(--accent-500);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .word-edit {
   display: inline-flex;
@@ -238,7 +238,7 @@ watch(() => props.items, (list) => {
   font-size: 0.75rem;
   background: transparent;
   border: 1px solid var(--accent-400);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 .edit-input:focus {
 }
@@ -264,7 +264,7 @@ watch(() => props.items, (list) => {
   color: var(--ok);
   background: var(--ok-bg);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-accept:hover {
@@ -277,7 +277,7 @@ watch(() => props.items, (list) => {
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .btn-reject:hover {

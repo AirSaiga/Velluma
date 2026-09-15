@@ -956,7 +956,7 @@ const applyOptimizationDiff = (optimizedText) => {
     .command(noHistory)
     .setTextSelection({ from, to })
     .setStrike()
-    .setHighlight({ color: '#ffcccc' })
+    .setHighlight({ color: 'var(--diff-del-bg)' })
     .run()
 
   // 2. 插入新文 (Green Highlight)
@@ -967,7 +967,7 @@ const applyOptimizationDiff = (optimizedText) => {
     .insertContentAt(insertPos, optimizedText)
     .setTextSelection({ from: insertPos, to: insertPos + optimizedText.length })
     .unsetStrike()
-    .setHighlight({ color: '#ccffcc' })
+    .setHighlight({ color: 'var(--diff-add-bg)' })
     .run()
 
   // 记录临时数据以便确认/取消
@@ -1121,7 +1121,7 @@ defineExpose({
       <template v-if="optimizationState === 'toolbar'">
         <button
           @click="toggleBold"
-          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors"
+          class="px-2 py-1 text-xs rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors"
           :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('bold') }"
           title="加粗"
         >
@@ -1129,7 +1129,7 @@ defineExpose({
         </button>
         <button
           @click="toggleItalic"
-          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors italic"
+          class="px-2 py-1 text-xs rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors italic"
           :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('italic') }"
           title="斜体"
         >
@@ -1137,7 +1137,7 @@ defineExpose({
         </button>
         <button
           @click="toggleUnderline"
-          class="px-2 py-1 text-[11px] rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors underline"
+          class="px-2 py-1 text-xs rounded-md text-ink-600 hover:text-ink-900 hover:bg-parchment-100 transition-colors underline"
           :class="{ 'bg-accent-50 text-accent-600': editor?.isActive('underline') }"
           title="下划线"
         >
@@ -1146,7 +1146,7 @@ defineExpose({
         <div class="w-px h-4 bg-[var(--border-color)]"></div>
         <button
           @click="openAiRewrite"
-          class="px-2.5 py-1 text-[11px] rounded-md bg-accent-600 text-white font-medium hover:bg-accent-500 transition-colors"
+          class="px-2.5 py-1 text-xs rounded-md bg-accent-600 text-[var(--bg-canvas)] font-medium hover:bg-accent-500 transition-colors"
         >
           <Icon name="sparkles" :size="12" /> AI 润色/改写
         </button>
@@ -1154,7 +1154,7 @@ defineExpose({
         <button
           @click="addToGoldenSnippets"
           :disabled="!props.bookId || !hasSelection"
-          class="px-2 py-1 text-[10px] rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="px-2 py-1 text-xs rounded-md bg-[color-mix(in_srgb,var(--gold)_14%,transparent)] text-[color-mix(in_srgb,var(--gold)_75%,var(--text-primary))] hover:bg-[color-mix(in_srgb,var(--gold)_24%,transparent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="把这段存进你的文风样本库，AI 以后会学它的写法"
         >
           <Icon name="star" :size="12" /> 黄金片段
@@ -1162,7 +1162,7 @@ defineExpose({
         <button
           @click="notLikeMyStyle"
           :disabled="!props.bookId || !hasSelection"
-          class="px-2 py-1 text-[10px] rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="px-2 py-1 text-xs rounded-md bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_18%,transparent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="这段不像你写的——记为负面清单候选（进文风收件箱，过目后生效）"
         >
           <Icon name="x-mark" :size="12" /> 这不像我
@@ -1171,10 +1171,10 @@ defineExpose({
         <button
           @click="markDeaiPair"
           :disabled="!props.bookId || !hasSelection"
-          class="px-2 py-1 text-[10px] rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="px-2 py-1 text-xs rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           :class="pendingBad
-            ? 'bg-amber-200 text-amber-800 hover:bg-amber-300 font-medium'
-            : 'bg-amber-50 text-amber-600 hover:bg-amber-100'"
+            ? 'bg-[color-mix(in_srgb,var(--warn)_22%,transparent)] text-[var(--warn)] hover:bg-[color-mix(in_srgb,var(--warn)_32%,transparent)] font-medium'
+            : 'bg-[color-mix(in_srgb,var(--warn)_8%,transparent)] text-[var(--warn)] hover:bg-[color-mix(in_srgb,var(--warn)_16%,transparent)]'"
           :title="pendingBad
             ? `配对中（改前 ${pendingBad.text.length} 字）——选中你改好的文字，点这里完成配对`
             : '帮 AI 学你的改法：先记下这段原文，亲手改完后选中它再点这里'"
@@ -1184,7 +1184,7 @@ defineExpose({
         <button
           v-if="pendingBad"
           @click="cancelDeaiPairMark"
-          class="px-1.5 py-1 text-[10px] rounded-md text-amber-500 hover:text-amber-700 hover:bg-amber-100 transition-colors"
+          class="px-1.5 py-1 text-xs rounded-md text-[var(--warn)] hover:bg-[color-mix(in_srgb,var(--warn)_14%,transparent)] transition-colors"
           title="放弃这次配对"
         >
           <Icon name="x-mark" :size="12" />
@@ -1195,35 +1195,35 @@ defineExpose({
         <div class="flex items-center gap-1">
           <button
             @click="setAiIntentMode('polish')"
-            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            class="px-2 py-1 text-xs rounded-md border transition-colors"
             :class="aiIntentMode === 'polish' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             润色
           </button>
           <button
             @click="setAiIntentMode('describe')"
-            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            class="px-2 py-1 text-xs rounded-md border transition-colors"
             :class="aiIntentMode === 'describe' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             描写
           </button>
           <button
             @click="setAiIntentMode('expand')"
-            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            class="px-2 py-1 text-xs rounded-md border transition-colors"
             :class="aiIntentMode === 'expand' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             扩写
           </button>
           <button
             @click="setAiIntentMode('compress')"
-            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            class="px-2 py-1 text-xs rounded-md border transition-colors"
             :class="aiIntentMode === 'compress' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             压缩
           </button>
           <button
             @click="setAiIntentMode('tone_shift')"
-            class="px-2 py-1 text-[10px] rounded-md border transition-colors"
+            class="px-2 py-1 text-xs rounded-md border transition-colors"
             :class="aiIntentMode === 'tone_shift' ? 'bg-accent-50 text-accent-600 border-accent-200' : 'bg-[var(--bg-primary)] text-ink-500 border-[var(--border-color)] hover:bg-parchment-100'"
           >
             换语气
@@ -1274,7 +1274,7 @@ defineExpose({
       <template v-else-if="optimizationState === 'reviewing'">
         <button 
           @click="confirmOptimization"
-          class="px-3 py-1 text-xs bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded border border-emerald-200 transition-colors"
+          class="px-3 py-1 text-xs bg-[color-mix(in_srgb,var(--ok)_10%,transparent)] text-[var(--ok)] hover:bg-[color-mix(in_srgb,var(--ok)_18%,transparent)] rounded border border-[color-mix(in_srgb,var(--ok)_35%,transparent)] transition-colors"
         >
           替换原文
         </button>
@@ -1291,7 +1291,7 @@ defineExpose({
     <transition name="undo-hint">
       <button
         v-if="showUndoHint"
-        class="absolute right-4 bottom-4 z-40 px-3 py-1.5 rounded-full text-xs bg-ink-900 text-white shadow-lg hover:bg-ink-800 transition-colors"
+        class="absolute right-4 bottom-4 z-40 px-3 py-1.5 rounded-full text-xs bg-[var(--text-primary)] text-[var(--bg-canvas)] shadow-lg hover:opacity-90 transition-opacity"
         @click="undoLastOptimization"
       >
         已替换 · 撤销
@@ -1316,7 +1316,7 @@ defineExpose({
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background-color: var(--border-color);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background-color: var(--text-muted);
@@ -1361,7 +1361,7 @@ defineExpose({
   pointer-events: none;
 }
 :deep(.fake-selection-highlight) {
-  background-color: #b4d5fe;
+  background-color: color-mix(in srgb, var(--info) 30%, transparent); /* 伪造选区（旧浏览器默认选区蓝 #b4d5fe 语义平移） */
 }
 
 /* NLE-ADF 3.0 Canon 词高亮：正文角色名/伏笔词虚线小标（Decoration，不入库） */
@@ -1371,23 +1371,25 @@ defineExpose({
   cursor: help;
 }
 :deep(.canon-mark--character) {
-  border-bottom-color: #818cf8;
+  border-bottom-color: var(--info);
 }
 :deep(.canon-mark--hook) {
-  border-bottom-color: #fbbf24;
+  border-bottom-color: var(--warn);
 }
 :deep(.canon-mark--contradiction) {
-  border-bottom-color: #f43f5e;
-  background: rgba(244, 63, 94, 0.06);
+  border-bottom-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 /* 矛盾段左缘条（Decoration.node，整段标识） */
 :deep(.canon-para--contradiction) {
-  box-shadow: inset 3px 0 0 #f43f5e;
+  box-shadow: inset 3px 0 0 var(--danger); /* 矛盾段左缘朱条=红笔批注 */
 }
 
-.copilot-menu-enter-active,
+.copilot-menu-enter-active {
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
 .copilot-menu-leave-active {
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition: opacity var(--dur-1) var(--ease-in), transform var(--dur-1) var(--ease-in);
 }
 
 .copilot-menu-enter-from,
@@ -1398,7 +1400,7 @@ defineExpose({
 
 .undo-hint-enter-active,
 .undo-hint-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 
 .undo-hint-enter-from,

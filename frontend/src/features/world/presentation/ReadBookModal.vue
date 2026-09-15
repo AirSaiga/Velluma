@@ -57,7 +57,7 @@ const emit = defineEmits<{
         />
       </div>
       <p class="rb-note">已读过的章会自动跳过，中断后重跑只补未读的。</p>
-      <button class="rb-btn rb-btn--ghost" @click="emit('cancel')">中断</button>
+      <button class="rb-btn rb-btn--ghost btn-ghost" @click="emit('cancel')">中断</button>
     </div>
 
     <!-- 实体过目 -->
@@ -146,29 +146,29 @@ const emit = defineEmits<{
 
 <style scoped>
 .rb-progress { padding: 8px 0; }
-.rb-progress__label { font-size: 13px; color: var(--text-secondary, #6b6560); margin: 0 0 10px; }
-.rb-bar { height: 6px; border-radius: 3px; background: var(--bg-muted, #f1f0ec); overflow: hidden; }
-.rb-bar__fill { height: 100%; background: var(--accent-500, #7c6aad); transition: width 0.3s ease; }
-.rb-note { font-size: var(--text-xs); color: var(--text-muted, #a09a92); margin: 10px 0; }
-.rb-review__lead { font-size: 13px; color: var(--text-secondary, #6b6560); margin: 0 0 10px; }
+.rb-progress__label { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 10px; }
+.rb-bar { height: 6px; border-radius: var(--radius-xs); background: var(--state-hover); /* 旧 --bg-muted 未定义 */ overflow: hidden; }
+.rb-bar__fill { height: 100%; background: var(--accent-500); transition: width var(--dur-4) var(--ease-out); }
+.rb-note { font-size: var(--text-xs); color: var(--text-muted); margin: 10px 0; }
+.rb-review__lead { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 10px; }
 .rb-group { margin-bottom: 12px; }
-.rb-group__label { font-size: var(--text-xs); color: var(--text-muted, #a09a92); margin-bottom: 4px; }
+.rb-group__label { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 4px; }
 .rb-row {
   display: flex; align-items: baseline; gap: 8px;
-  padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm);
 }
-.rb-row:hover { background: var(--bg-muted, #f5f4f0); }
+.rb-row:hover { background: var(--state-hover); /* 旧 --bg-muted 未定义 */ }
 .rb-row__name { font-weight: 600; flex-shrink: 0; }
-.rb-row__desc { color: var(--text-muted, #a09a92); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rb-row__meta { font-size: var(--text-xs); color: var(--text-muted, #a09a92); flex-shrink: 0; }
-.rb-done__list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary, #6b6560); }
+.rb-row__desc { color: var(--text-muted); font-size: var(--text-xs); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rb-row__meta { font-size: var(--text-xs); color: var(--text-muted); flex-shrink: 0; }
+.rb-done__list { margin: 8px 0 0; padding-left: 18px; font-size: var(--text-sm); color: var(--text-secondary); }
 .rb-btn {
-  padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
-  border: 1px solid var(--border-color, #d6d3d1); background: transparent; color: inherit;
+  padding: 6px 14px; border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer;
+  color: inherit;
 }
-.rb-btn--primary { background: var(--accent-500, #7c6aad); border-color: transparent; color: #fff; }
+.rb-btn--primary { background: var(--accent-500); border-color: transparent; color: var(--bg-canvas); }
 .rb-btn--primary:disabled { opacity: 0.4; cursor: default; }
 .rb-btn--ghost:disabled { opacity: 0.4; cursor: default; }
-.rb-creating { font-size: 12px; color: var(--text-muted, #a09a92); margin-right: auto; align-self: center; }
-.rb-btn--ghost:hover { background: var(--bg-muted, #f5f4f0); }
+.rb-creating { font-size: var(--text-xs); color: var(--text-muted); margin-right: auto; align-self: center; }
+.rb-btn--ghost:hover { background: var(--state-hover); /* 旧 --bg-muted 未定义 */ }
 </style>

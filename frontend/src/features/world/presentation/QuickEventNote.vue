@@ -478,7 +478,7 @@ defineExpose({ openWith, applyMapPoint, cancelMapPick })
               autofocus
               @keydown.enter.prevent="parse"
             />
-            <button class="qen-btn primary" :disabled="parsing || !inputText.trim()" @click="parse">
+            <button class="qen-btn btn-primary-instrument" :disabled="parsing || !inputText.trim()" @click="parse">
               {{ parsing ? '整理中…' : '整理' }}
             </button>
           </div>
@@ -598,8 +598,8 @@ defineExpose({ openWith, applyMapPoint, cancelMapPick })
           </div>
 
           <div class="qen-actions">
-            <button class="qen-btn" @click="draft = null">← 重新速记</button>
-            <button class="qen-btn primary" :disabled="saving" @click="commit">
+            <button class="qen-btn btn-ghost" @click="draft = null">← 重新速记</button>
+            <button class="qen-btn btn-primary-instrument" :disabled="saving" @click="commit">
               {{ saving ? '记入中…' : skipEvent ? '建立名字' : '记入世界' }}
             </button>
           </div>
@@ -623,341 +623,22 @@ defineExpose({ openWith, applyMapPoint, cancelMapPick })
 </template>
 
 <style scoped>
-.qen-overlay {
-  position: fixed;
-  inset: 0;
-  /* 模态语义走 --z-modal（2026-09-07 审计修复：曾用 --z-pop=60 低于副驾抽屉 85，
-     写作页（无 isolation）上遮罩压不住抽屉） */
-  z-index: var(--z-modal);
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 18vh;
-}
-.qen-modal {
-  width: 460px;
-  max-width: calc(100vw - 32px);
-  background: var(--bg-panel, #fff);
-  border: 1px solid var(--border-color);
-  border-radius: 0.6rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-  padding: 0.8rem 0.9rem;
-}
-.qen-head {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-.qen-title {
-  font-weight: 600;
-  font-size: var(--text-lg);
-  color: var(--text-primary);
-}
-.qen-close {
-  margin-left: auto;
-  background: none;
-  border: none;
-  font-size: 1.05rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.qen-hint {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  margin: 0 0 0.5rem;
-  line-height: 1.5;
-}
-.qen-row {
-  display: flex;
-  gap: 0.5rem;
-}
-.qen-input {
-  flex: 1;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.35rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: 0.82rem;
-}
-.qen-btn {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.35rem;
-  background: var(--bg-canvas);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.qen-btn.primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
-}
-.qen-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.qen-template-link {
-  margin-top: 0.55rem;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--text-xs);
-  color: var(--accent-500);
-  font-family: inherit;
-  cursor: pointer;
-}
-.qen-template-link:hover {
-  text-decoration: underline;
-}
-.qen-warn {
-  font-size: var(--text-xs);
-  color: #d4a017;
-  background: rgba(212, 160, 23, 0.08);
-  border-radius: 0.3rem;
-  padding: 0.35rem 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.qen-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.qen-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
+/* 共享结构/配色收 style.css 组件层 .qen-* 块（05 §7.6 双份合一）。
+   此处仅保留本副本 token 档字号 + 胶囊/撤销钮的两条本副本独有声明
+   （max-width / flex-shrink）；workspace 副本保留其裸 rem 覆盖，漂移
+   统一留 P2（01 §9-5 裸字号项）。 */
+.qen-title { font-size: var(--text-lg); }
+.qen-hint { font-size: var(--text-xs); }
+.qen-btn { font-size: var(--text-sm); }
+.qen-warn { font-size: var(--text-xs); }
+.qen-field { font-size: var(--text-xs); }
 .qen-field select,
-.qen-field input {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.3rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-}
-.qen-preview {
-  font-size: var(--text-xs);
-  color: var(--accent-500);
-}
-.qen-ymd {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-.qen-ymd input {
-  width: 3rem;
-  text-align: center;
-}
-.qen-ymd input.qen-ymd-year {
-  width: 3.8rem;
-}
-.qen-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-}
-.qen-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  align-items: center;
-}
-.qen-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.12rem 0.5rem;
-  border: 1px solid var(--accent-500);
-  border-radius: 999px;
-  color: var(--accent-500);
-  font-size: var(--text-xs);
-}
-.qen-chip-x {
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  font-size: var(--text-xs);
-  line-height: 1;
-}
-.qen-add {
-  padding: 0.2rem 0.4rem;
-  border: 1px dashed var(--border-color);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-.qen-unresolved {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-/* ===== 「同时新建」勾选区（关联式录入）===== */
-.qen-new {
-  border: 1px dashed rgba(124, 106, 173, 0.45);
-  border-radius: 0.4rem;
-  padding: 0.45rem 0.55rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  background: rgba(124, 106, 173, 0.04);
-}
-.qen-new-title {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.qen-new-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-.qen-new-row input[type='checkbox'] {
-  flex-shrink: 0;
-  accent-color: var(--accent-500);
-}
-.qen-new-name {
-  width: 7.5rem;
-  flex-shrink: 0;
-  padding: 0.22rem 0.45rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.3rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-}
-.qen-new-kind {
-  flex-shrink: 0;
-  padding: 0.22rem 0.3rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.3rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: var(--text-xs);
-}
-.qen-new-kind--loc {
-  border: none;
-  background: none;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  padding: 0 0.2rem;
-}
-.qen-new-evidence {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
-}
-.qen-map-btn {
-  flex-shrink: 0;
-  padding: 0.2rem 0.5rem;
-  border: 1px dashed var(--accent-500);
-  border-radius: 999px;
-  background: rgba(124, 106, 173, 0.05);
-  color: var(--accent-500);
-  font-size: var(--text-xs);
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.qen-map-btn:hover {
-  background: rgba(124, 106, 173, 0.14);
-}
-
-/* 标点中悬浮条（模态收起态；top 让开胶囊工具条 14px 那一行）——模态族层：
-   标点期间须盖过页面抽屉/图标栏，作者才看得到「Esc 取消」指引 */
-.qen-pickbar {
-  position: fixed;
-  top: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.5rem 0.9rem;
-  background: var(--bg-panel, #2a2a33);
-  border: 1px solid var(--accent-500);
-  border-radius: 999px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  max-width: calc(100vw - 48px);
-}
-.qen-pickbar-cancel {
-  background: none;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  padding: 0.12rem 0.6rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.qen-pickbar-cancel:hover {
-  border-color: var(--accent-500);
-  color: var(--accent-500);
-}
-.qen-skip-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  margin-top: 0.1rem;
-}
-.qen-skip-row input {
-  accent-color: var(--accent-500);
-}
-.qen-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-}
-
-.qen-capsule {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: calc(var(--z-modal) + 1); /* 撤销胶囊同族最上（仍低于 Toast 120） */
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.45rem 0.8rem;
-  background: var(--bg-panel, #2a2a33);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  font-size: 0.75rem;
-  color: var(--text-primary);
-  max-width: calc(100vw - 48px);
-}
-.qen-capsule-undo {
-  background: none;
-  border: 1px solid var(--accent-500);
-  border-radius: 999px;
-  color: var(--accent-500);
-  font-size: var(--text-xs);
-  padding: 0.12rem 0.6rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.qen-capsule--warn {
-  border-color: rgba(212, 160, 23, 0.55);
-}
+.qen-field input { font-size: var(--text-sm); }
+.qen-preview { font-size: var(--text-xs); }
+.qen-chip { font-size: var(--text-xs); }
+.qen-chip-x { font-size: var(--text-xs); }
+.qen-add { font-size: var(--text-xs); }
+.qen-unresolved { font-size: var(--text-xs); }
+.qen-capsule { max-width: calc(100vw - 48px); }
+.qen-capsule-undo { font-size: var(--text-xs); flex-shrink: 0; }
 </style>

@@ -218,9 +218,9 @@ const rangeLabel = computed(() => {
 .chart-card {
   padding: 0.625rem 0.75rem 0.375rem;
   margin-bottom: 0.5rem;
-  background: var(--bg-panel);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .chart-head {
   display: flex;
@@ -238,7 +238,7 @@ const rangeLabel = computed(() => {
   aspect-ratio: 5 / 1;
 }
 .band {
-  fill: color-mix(in srgb, #10b981 12%, transparent);
+  fill: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 .line {
   fill: none;
@@ -250,7 +250,7 @@ const rangeLabel = computed(() => {
   fill: var(--accent-500);
 }
 .dot-out {
-  fill: #ef4444;
+  fill: var(--danger);
 }
 .summary-list {
   margin: 0.5rem 0 0;

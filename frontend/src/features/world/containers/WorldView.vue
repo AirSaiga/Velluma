@@ -4,6 +4,10 @@
  *
  * 设计对齐全局设计语言：CSS 变量暖纸质感 / Icon.vue / ModalShell 模态 /
  * useConfirmDialog 删除确认 / useToast 操作反馈；深色模式随变量自适应。
+
+ * 主题豁免（docs/design/theme-system/01-theme-architecture.md §7）：古地图永远是古地图——
+ * 羊皮画布/鎏金/暖墨/烛光暗角等装饰色浅深与任何主题下恒定；深色下保持亮图=「灯下看地图」，
+ * 由 2026-09-15 主题系统重设计正式追认为设计决定（此前是无意幸运）。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -1328,7 +1332,7 @@ function isGroupCollapsed(name: string | null) {
       <aside v-if="activePanel" class="atlas-drawer">
         <!-- 待确认（W4 候选回流：写作沉淀/完稿抽出的候选事件，跨章全貌；A5b 批量裁决） -->
         <template v-if="activePanel === 'cand'">
-        <DrawerShell icon="clock" title="待确认" :count="pendingCandidates.length" @close="activePanel = null">
+        <DrawerShell icon="clock" title="待确认" :count="pendingCandidates.length" count-pending @close="activePanel = null">
           <template #actions>
             <button
               class="side-batch-btn"
@@ -1769,7 +1773,7 @@ function isGroupCollapsed(name: string | null) {
   color: rgba(74, 68, 56, 0.28);
 }
 .aw-title {
-  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  font-family: var(--font-atlas); /* 古地图字体恒定衬线（主题系统 01 §7 豁免） */
   font-size: 38px;
   font-weight: 700;
   letter-spacing: 0.22em;
@@ -1819,7 +1823,7 @@ function isGroupCollapsed(name: string | null) {
 .atlas-compass:focus-visible {
   outline: 2px solid rgba(124, 106, 173, 0.55);
   outline-offset: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 /* 罗盘针：transform-box 让 SVG 内 rotate 绕自身中心（针形对称，盒中心即盘心） */
 .ac-needle {
@@ -1871,7 +1875,7 @@ function isGroupCollapsed(name: string | null) {
   backdrop-filter: blur(4px);
   border: 1px solid rgba(107, 90, 68, 0.3);
   border-radius: 9999px;
-  box-shadow: 0 6px 24px rgba(96, 72, 36, 0.18);
+  box-shadow: var(--shadow-lg);
 }
 .ap-btn {
   display: inline-flex;
@@ -1926,8 +1930,8 @@ function isGroupCollapsed(name: string | null) {
   min-width: 168px;
   background: rgba(249, 242, 226, 0.98);
   border: 1px solid rgba(107, 90, 68, 0.3);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(96, 72, 36, 0.2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   padding: 5px;
   z-index: 760;
 }
@@ -1936,7 +1940,7 @@ function isGroupCollapsed(name: string | null) {
   width: 100%;
   padding: 7px 10px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: rgba(74, 68, 56, 0.88);
   font-size: var(--text-base);
@@ -1981,7 +1985,7 @@ function isGroupCollapsed(name: string | null) {
   border: 1px solid rgba(107, 90, 68, 0.28);
   border-right: none;
   border-radius: 12px 0 0 12px;
-  box-shadow: -4px 0 18px rgba(96, 72, 36, 0.12);
+  box-shadow: var(--shadow-lg);
 }
 .ar-btn {
   position: relative;
@@ -1991,7 +1995,7 @@ function isGroupCollapsed(name: string | null) {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: rgba(109, 90, 60, 0.75);
   cursor: pointer;
@@ -2066,8 +2070,9 @@ function isGroupCollapsed(name: string | null) {
   flex-direction: column;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: -10px 0 30px rgba(96, 72, 36, 0.14);
+  border-radius: var(--radius-lg);
+  /* 04 §A2-3：纸叠边+主题大影（旧暖棕调字面影退役） */
+  box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg);
   overflow: hidden;
 }
 /* 开合过渡：入场末态 transform 归零（浮层 transform 军规禁的是「居中悬浮态常驻」，
@@ -2094,7 +2099,7 @@ function isGroupCollapsed(name: string | null) {
 }
 .drawer-scroll::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .drawer-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);
@@ -2110,7 +2115,7 @@ function isGroupCollapsed(name: string | null) {
   gap: 5px;
   padding: 6px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -2142,7 +2147,7 @@ function isGroupCollapsed(name: string | null) {
   background: var(--accent-600);
   border-color: var(--accent-600);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(124, 106, 173, 0.25);
+  box-shadow: var(--glow-accent);
   transform: translateY(-1px);
 }
 .wbtn--picking {
@@ -2196,7 +2201,7 @@ function isGroupCollapsed(name: string | null) {
   width: 16px;
   height: 16px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -2262,7 +2267,7 @@ function isGroupCollapsed(name: string | null) {
   margin-bottom: 8px;
   padding: 4px 8px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
 }
 .evt-filter-icon {
@@ -2307,7 +2312,7 @@ function isGroupCollapsed(name: string | null) {
   color: var(--text-secondary);
   background: var(--bg-canvas);
   border: 1px dashed var(--border-color);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.12s ease;
 }
@@ -2328,7 +2333,7 @@ function isGroupCollapsed(name: string | null) {
   padding: 8px 10px;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   transition: all 0.15s ease-out;
 }
 .side-card--click {
@@ -2337,7 +2342,7 @@ function isGroupCollapsed(name: string | null) {
 .side-card--click:hover {
   border-color: var(--accent-500);
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(120, 100, 70, 0.1);
+  box-shadow: var(--shadow-md);
 }
 /* 地图回指行高亮（地标点击 → 面板条目；2.4s 自清） */
 .side-card--hl {
@@ -2364,7 +2369,7 @@ function isGroupCollapsed(name: string | null) {
   min-width: 0;
   padding: 2px 6px;
   border: 1px solid var(--accent-500);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
@@ -2382,7 +2387,7 @@ function isGroupCollapsed(name: string | null) {
 }
 /* 内部构造徽标（缩进子级行 / 子数提示）：与地点类型徽标同形不同色 */
 .sc-badge--inner {
-  color: var(--accent-400, #8b6de8);
+  color: var(--accent-400);
   background: rgba(139, 109, 232, 0.1);
 }
 .sc-actions {
@@ -2404,7 +2409,7 @@ function isGroupCollapsed(name: string | null) {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -2425,7 +2430,7 @@ function isGroupCollapsed(name: string | null) {
 }
 /* 地点行定位按钮（📍 地图联动）：与详情按钮同形，accent 色示「地图动作」 */
 .sc-act--locate {
-  color: var(--accent-400, #8b6de8);
+  color: var(--accent-400);
 }
 .sc-act--locate:hover {
   background: rgba(139, 109, 232, 0.1);
@@ -2435,7 +2440,7 @@ function isGroupCollapsed(name: string | null) {
 /* 空状态 */
 .side-empty {
   border: 1px dashed var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   padding: 14px 12px;
   font-size: var(--text-sm);
   line-height: 1.6;
@@ -2461,7 +2466,7 @@ function isGroupCollapsed(name: string | null) {
   box-sizing: border-box;
   padding: 8px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -2471,7 +2476,7 @@ function isGroupCollapsed(name: string | null) {
 .form-input:focus {
   outline: none;
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.12);
+  box-shadow: var(--ring-soft);
 }
 .type-seg {
   display: flex;
@@ -2485,7 +2490,7 @@ function isGroupCollapsed(name: string | null) {
   gap: 5px;
   padding: 7px 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -2503,15 +2508,15 @@ function isGroupCollapsed(name: string | null) {
 /* D4 标定选档卡 */
 
 .calib-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); /* 标定卡 teleport 在 body，隔离罩不住——按模态语义归位（00 期 §3.1/F-02） */ background: rgba(20,18,16,.35); display: flex; align-items: center; justify-content: center; }
-.calib-card { width: 300px; background: var(--bg-canvas, #fefdfb); border: 1px solid var(--border-color, #e0dbd3); border-radius: 12px; padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
-.calib-title { font-family: var(--font-heading, inherit); font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
+.calib-card { width: 300px; background: var(--bg-canvas); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
+.calib-title { font-family: var(--font-heading); font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
 .calib-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
-.calib-mode { border: 1px solid var(--border-color, #e0dbd3); border-radius: 999px; background: none; font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
+.calib-mode { border: 1px solid var(--border-color); border-radius: 999px; background: none; font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
 .calib-mode.is-on { border-color: #c2725a; color: #c2725a; }
 .calib-custom { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: var(--text-sm); color: var(--text-muted); justify-content: center; }
-.calib-input { width: 70px; border: 1px solid var(--border-color, #e0dbd3); border-radius: 6px; background: transparent; font-size: var(--text-sm); color: var(--text-primary); padding: 4px 6px; text-align: center; }
+.calib-input { width: 70px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; font-size: var(--text-sm); color: var(--text-primary); padding: 4px 6px; text-align: center; }
 .calib-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
-.calib-btn { border: 1px solid var(--border-color, #e0dbd3); border-radius: 8px; background: var(--bg-secondary, #faf8f4); color: var(--text-secondary); font-size: var(--text-sm); padding: 6px 16px; cursor: pointer; }
+.calib-btn { border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-secondary); font-size: var(--text-sm); padding: 6px 16px; cursor: pointer; }
 .calib-btn--primary { background: #c2725a; border-color: #c2725a; color: #fff; }
 .calib-hint { margin: 10px 0 0; font-size: var(--text-xs); color: var(--text-muted); text-align: center; }
 </style>

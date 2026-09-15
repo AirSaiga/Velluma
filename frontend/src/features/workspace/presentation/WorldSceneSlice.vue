@@ -382,7 +382,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           </div>
           <span class="time-preview">{{ timePreview }}</span>
           <div class="time-actions">
-            <button class="mini-btn primary" title="把本章固定在输入的时间" @click="applyTime">确定</button>
+            <button class="mini-btn primary btn-primary-instrument" title="把本章固定在输入的时间" @click="applyTime">确定</button>
             <button
               v-if="slice.t_source === 'chapter_anchor'"
               class="mini-btn"
@@ -566,7 +566,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
           <!-- W4 候选回流收件箱（本章变化）+ A5b 批量裁决 -->
           <section v-if="candidates.length" class="setting-group inbox">
             <div class="setting-group-label inbox-head" @click="inboxOpen = !inboxOpen">
-              <span class="inbox-badge">{{ candidates.length }}</span>
+              <span class="inbox-badge tnum">{{ candidates.length }}</span>
               本章带来的世界变化
               <button
                 class="mini-btn"
@@ -688,7 +688,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   font-size: 0.8rem;
 }
 .reader-toggle {
-  font-size: 0.62rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: 1px solid var(--border-color);
@@ -702,7 +702,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 .update-dot {
   margin-left: auto;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   background: transparent;
   border: 1px solid var(--accent-500);
@@ -713,8 +713,8 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 .chevron {
   color: var(--text-muted);
-  font-size: 0.7rem;
-  transition: transform 0.15s ease;
+  font-size: var(--text-xs);
+  transition: transform var(--dur-2) var(--ease-out);
 }
 .chevron.open {
   transform: rotate(0deg);
@@ -723,7 +723,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   transform: rotate(-90deg);
 }
 .chevron.small {
-  font-size: 0.6rem;
+  font-size: var(--text-xs);
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -743,7 +743,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .time-row-actions {
@@ -755,7 +755,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   background: none;
   border: none;
   color: var(--accent-500);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   cursor: pointer;
   padding: 0.1rem 0.3rem;
 }
@@ -765,7 +765,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   gap: 0.4rem;
   padding: 0.5rem 0.6rem;
   border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.75rem;
   color: var(--text-muted);
 }
@@ -780,7 +780,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   text-align: center;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   font-size: 0.78rem;
 }
@@ -798,15 +798,13 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   padding: 0.2rem 0.7rem;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 .mini-btn.primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
+  min-height: var(--control-h-sm);
 }
 
 .slice-body {
@@ -830,7 +828,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   gap: 0.5rem;
 }
 .setting-group-label .muted {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: normal;
   color: var(--text-muted);
 }
@@ -855,7 +853,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   align-items: center;
   gap: 0.375rem;
   margin-top: 0.375rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .mute-chip {
@@ -863,15 +861,15 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   align-items: center;
   gap: 0.25rem;
   padding: 0.0625rem 0.375rem;
-  border: 1px dashed var(--border-color, #d6d3d1);
+  border: 1px dashed var(--border-color);
   border-radius: 9999px;
 }
 .mute-chip__restore {
   border: none;
   background: none;
   padding: 0;
-  font-size: 0.6875rem;
-  color: var(--accent-500, #7c6aad);
+  font-size: var(--text-xs);
+  color: var(--accent-500);
   cursor: pointer;
 }
 .mute-chip__restore:hover {
@@ -891,7 +889,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   align-items: baseline;
   gap: 0.75rem;
   padding: 0.3rem 0.25rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.78rem;
 }
 .presence-row.dead {
@@ -901,7 +899,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   cursor: pointer;
 }
 .presence-row.clickable:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .presence-name {
   color: var(--text-primary);
@@ -909,12 +907,12 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 .presence-where {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
 }
 
 .presence-inferred {
-  color: var(--accent-400, #9685c2);
-  font-size: 0.66rem;
+  color: var(--accent-400);
+  font-size: var(--text-xs);
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0 0.35rem;
@@ -931,13 +929,13 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
 }
 .active-scene-tag {
   color: var(--accent-500);
 }
 .active-scene-tag--derived {
-  border-bottom: 1px dashed var(--accent-400, #9685c2);
+  border-bottom: 1px dashed var(--accent-400);
 }
 
 .scene-row {
@@ -949,14 +947,14 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   gap: 0.5rem;
 }
 .faction-tag {
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   border: 1px dashed var(--border-color);
   border-radius: 999px;
   padding: 0.05rem 0.45rem;
 }
 .pinned-tag {
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .scene-actions {
@@ -969,7 +967,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   margin: 0.25rem 0 0;
   padding: 0.25rem;
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: var(--bg-canvas);
   max-height: 10rem;
   overflow-y: auto;
@@ -978,7 +976,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   padding: 0.3rem 0.5rem;
   font-size: 0.78rem;
   color: var(--text-primary);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 /* 内部构造选项：全路径 + 缩进，一眼分清大地点与房间 */
@@ -987,7 +985,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   color: var(--text-secondary, var(--text-primary));
 }
 .loc-option:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .loc-option.current {
   color: var(--accent-500);
@@ -1001,15 +999,15 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 
 .encounter-row {
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   padding: 0.22rem 0.45rem;
   background: color-mix(in srgb, var(--accent-500) 5%, transparent);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 .encounter-loc {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
 }
 
 .thread-list {
@@ -1026,13 +1024,13 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   gap: 0.5rem;
   font-size: 0.75rem;
   padding: 0.25rem 0.4rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 .thread-row.foreshadow {
   background: color-mix(in srgb, var(--accent-500) 6%, transparent);
 }
 .thread-row.expectation {
-  background: color-mix(in srgb, #d4a017 6%, transparent);
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
 }
 .thread-row.clickable {
   cursor: pointer;
@@ -1043,7 +1041,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 .thread-tag {
   flex-shrink: 0;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .thread-text {
@@ -1055,11 +1053,11 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .thread-meta {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .more-hint {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--accent-500);
   cursor: pointer;
   padding-left: 0.4rem;
@@ -1072,7 +1070,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 }
 .inbox-head .mini-btn {
   margin-left: auto;
-  font-size: 0.62rem;
+  font-size: var(--text-xs);
   padding: 0.08rem 0.5rem;
 }
 .inbox-badge {
@@ -1083,9 +1081,10 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   height: 1.1rem;
   padding: 0 0.25rem;
   border-radius: 999px;
-  background: var(--accent-500);
-  color: #fff;
-  font-size: 0.65rem;
+  /* 04 §B3-7 收件箱计数=朱批语义（「等你过目的数」），accent/#fff 退役 */
+  background: color-mix(in srgb, var(--cinnabar) 12%, transparent);
+  color: var(--cinnabar);
+  font-size: var(--text-xs);
   font-weight: 600;
   align-self: center;
 }
@@ -1103,13 +1102,13 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   gap: 0.4rem;
   padding: 0.28rem 0.45rem;
   border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.73rem;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
 }
 .inbox-type {
   flex-shrink: 0;
   color: var(--accent-500);
-  font-size: 0.66rem;
+  font-size: var(--text-xs);
 }
 .inbox-text {
   flex: 1;
@@ -1121,7 +1120,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .inbox-meta {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: 0.63rem;
+  font-size: var(--text-xs);
 }
 .inbox-actions {
   flex-shrink: 0;
@@ -1131,7 +1130,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .inbox-btn {
   width: 1.4rem;
   height: 1.4rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border-color);
   background: transparent;
   color: var(--text-muted);
@@ -1144,15 +1143,15 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   border-color: var(--accent-500);
 }
 .inbox-btn.no:hover {
-  color: #d45454;
-  border-color: #d45454;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 .inbox-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .inbox-hint {
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-style: italic;
   cursor: pointer;
@@ -1163,8 +1162,8 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   padding: 0.75rem;
   background: var(--bg-canvas);
   border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.72rem;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1174,10 +1173,10 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
 .go-world-btn {
   padding: 0.3rem 0.9rem;
   background: var(--accent-500);
-  color: #fff;
+  color: var(--bg-canvas);
   border: none;
-  border-radius: 0.25rem;
-  font-size: 0.72rem;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 .go-world-btn.subtle {
@@ -1197,10 +1196,10 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   align-items: center;
   gap: 0.7rem;
   padding: 0.45rem 0.8rem;
-  background: var(--bg-panel, #2a2a33);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-color);
   border-radius: 999px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg);
   font-size: 0.75rem;
   color: var(--text-primary);
 }
@@ -1209,7 +1208,7 @@ function goWorld(entityId?: string, extra?: Record<string, string>) {
   border: 1px solid var(--accent-500);
   border-radius: 999px;
   color: var(--accent-500);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   padding: 0.12rem 0.6rem;
   cursor: pointer;
 }

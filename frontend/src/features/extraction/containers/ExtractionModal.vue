@@ -9,6 +9,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import Icon from '../../../components/Icon.vue'
+import ModalShell from '../../../components/ModalShell.vue'
 import { useToast } from '../../../composables/useToast'
 import { useExtractionSession } from '../composables/useExtractionSession'
 import ExtractionPreviewPanel from '../presentation/ExtractionPreviewPanel.vue'
@@ -112,21 +113,8 @@ const stepLabel: Record<string, string> = {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="!session.isProcessing.value && handleClose()">
-    <div class="modal-content extraction-modal">
-      <!-- 头部 -->
-      <header class="modal-header">
-        <h2 class="modal-title">{{ stepTitle }}</h2>
-        <button
-          class="close-btn"
-          title="关闭"
-          :disabled="session.isProcessing.value"
-          @click="handleClose"
-        >
-          <Icon name="x-mark" :size="18" />
-        </button>
-      </header>
-
+  <!-- 02 §5 收编 ModalShell：Teleport/焦点陷阱/Esc 栈/遮罩统一托底（处理中禁关） -->
+  <ModalShell :title="stepTitle" width="640px" @close="!session.isProcessing.value && handleClose()">
       <!-- 内容区 -->
       <div class="modal-body">
         <!-- 失败（2026-09-04 审计修复）：此前 onError 置 error + step 回 idle，
@@ -201,75 +189,10 @@ const stepLabel: Record<string, string> = {
           <button class="btn-primary" @click="handleClose">完成</button>
         </div>
       </div>
-    </div>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal); /* B3：200→110 toast 现在盖它（操作结果不可被遮挡） */
-  padding: 2rem;
-  backdrop-filter: blur(2px);
-}
-
-.extraction-modal {
-  background: var(--bg-canvas);
-  border-radius: 0.625rem;
-  width: 100%;
-  max-width: 640px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.modal-title {
-  font-family: var(--font-heading);
-  font-size: 1.0625rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.close-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.close-btn:hover:not(:disabled) {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.close-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .modal-body {
   flex: 1;
   overflow: hidden;
@@ -299,12 +222,12 @@ const stepLabel: Record<string, string> = {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  color: #b0483c;
+  color: var(--danger);
   text-align: center;
 }
 
 .error-icon {
-  color: #b0483c;
+  color: var(--danger);
 }
 
 .error-actions {
@@ -316,9 +239,9 @@ const stepLabel: Record<string, string> = {
 .retry-btn {
   padding: 0.4rem 1.2rem;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--accent-500);
-  color: #fff;
+  color: var(--bg-canvas);
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -331,7 +254,7 @@ const stepLabel: Record<string, string> = {
   padding: 0.4rem 1rem;
   border: none;
   background: transparent;
-  color: var(--text-muted, inherit);
+  color: var(--text-muted);
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -382,7 +305,7 @@ const stepLabel: Record<string, string> = {
   align-items: center;
   gap: 0.375rem;
   font-size: 0.8125rem;
-  color: #059669;
+  color: var(--mint-ink);
 }
 
 /* 完成视图 */
@@ -398,7 +321,7 @@ const stepLabel: Record<string, string> = {
 }
 
 .done-icon {
-  color: #059669;
+  color: var(--mint-ink);
 }
 
 .done-view h3 {
@@ -423,7 +346,7 @@ const stepLabel: Record<string, string> = {
   padding: 0.375rem 0.625rem;
   font-size: 0.8125rem;
   background: var(--bg-primary);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .summary-row span:first-child {
@@ -443,11 +366,11 @@ const stepLabel: Record<string, string> = {
   font-size: 0.8125rem;
   font-weight: 500;
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
   margin-top: 0.5rem;
 }
 

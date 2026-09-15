@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
               autofocus
               @keydown.enter.prevent="parse"
             />
-            <button class="qen-btn primary" :disabled="parsing || !inputText.trim()" @click="parse">
+            <button class="qen-btn btn-primary-instrument" :disabled="parsing || !inputText.trim()" @click="parse">
               {{ parsing ? '整理中…' : '整理' }}
             </button>
           </div>
@@ -323,8 +323,8 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="qen-actions">
-            <button class="qen-btn" @click="draft = null">← 重新速记</button>
-            <button class="qen-btn primary" :disabled="saving" @click="commit">
+            <button class="qen-btn btn-ghost" @click="draft = null">← 重新速记</button>
+            <button class="qen-btn btn-primary-instrument" :disabled="saving" @click="commit">
               {{ saving ? '记入中…' : '记入世界' }}
             </button>
           </div>
@@ -341,199 +341,21 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.qen-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 95;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 18vh;
-}
-.qen-modal {
-  width: 460px;
-  max-width: calc(100vw - 32px);
-  background: var(--bg-panel, #fff);
-  border: 1px solid var(--border-color);
-  border-radius: 0.6rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-  padding: 0.8rem 0.9rem;
-}
-.qen-head {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-.qen-title {
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--text-primary);
-}
-.qen-close {
-  margin-left: auto;
-  background: none;
-  border: none;
-  font-size: 1.05rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.qen-hint {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin: 0 0 0.5rem;
-  line-height: 1.5;
-}
-.qen-row {
-  display: flex;
-  gap: 0.5rem;
-}
-.qen-input {
-  flex: 1;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.35rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: 0.82rem;
-}
-.qen-btn {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.35rem;
-  background: var(--bg-canvas);
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.qen-btn.primary {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
-}
-.qen-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.qen-warn {
-  font-size: 0.72rem;
-  color: #d4a017;
-  background: rgba(212, 160, 23, 0.08);
-  border-radius: 0.3rem;
-  padding: 0.35rem 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.qen-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.qen-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
+/* 共享结构/配色收 style.css 组件层 .qen-* 块（05 §7.6 双份合一）。
+   本副本历史裸 rem 字号已于 P2（05 §9.2）统一映射最近 token 档——
+   0.85→text-base / 0.78→text-xs / 0.8→text-sm / 0.72/0.7/0.68/0.66→text-xs；
+   与 world 副本的 token 档漂移自此收敛（逐值映射表见 P2 施工报告）。 */
+.qen-title { font-size: var(--text-base); }
+.qen-hint { font-size: var(--text-xs); }
+.qen-btn { font-size: var(--text-xs); }
+.qen-warn { font-size: var(--text-xs); }
+.qen-field { font-size: var(--text-xs); }
 .qen-field select,
-.qen-field input {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.3rem;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-size: 0.78rem;
-}
-.qen-preview {
-  font-size: 0.68rem;
-  color: var(--accent-500);
-}
-.qen-ymd {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-.qen-ymd input {
-  width: 3rem;
-  text-align: center;
-}
-.qen-ymd input.qen-ymd-year {
-  width: 3.8rem;
-}
-.qen-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-}
-.qen-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  align-items: center;
-}
-.qen-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.12rem 0.5rem;
-  border: 1px solid var(--accent-500);
-  border-radius: 999px;
-  color: var(--accent-500);
-  font-size: 0.72rem;
-}
-.qen-chip-x {
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  font-size: 0.8rem;
-  line-height: 1;
-}
-.qen-add {
-  padding: 0.2rem 0.4rem;
-  border: 1px dashed var(--border-color);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 0.7rem;
-}
-.qen-unresolved {
-  font-size: 0.66rem;
-  color: var(--text-muted);
-  font-style: italic;
-}
-.qen-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-}
-
-.qen-capsule {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 96;
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.45rem 0.8rem;
-  background: var(--bg-panel, #2a2a33);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  font-size: 0.75rem;
-  color: var(--text-primary);
-}
-.qen-capsule-undo {
-  background: none;
-  border: 1px solid var(--accent-500);
-  border-radius: 999px;
-  color: var(--accent-500);
-  font-size: 0.7rem;
-  padding: 0.12rem 0.6rem;
-  cursor: pointer;
-}
+.qen-field input { font-size: var(--text-xs); }
+.qen-preview { font-size: var(--text-xs); }
+.qen-chip { font-size: var(--text-xs); }
+.qen-chip-x { font-size: var(--text-sm); }
+.qen-add { font-size: var(--text-xs); }
+.qen-unresolved { font-size: var(--text-xs); }
+.qen-capsule-undo { font-size: var(--text-xs); }
 </style>

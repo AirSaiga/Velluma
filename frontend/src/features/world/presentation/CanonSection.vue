@@ -225,8 +225,8 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
       <button
         v-for="opt in FILTER_OPTS"
         :key="opt.k"
-        class="cs-chip"
-        :class="{ active: filter === opt.k }"
+        class="cs-chip chip"
+        :class="{ 'chip--on': filter === opt.k }"
         @click="filter = opt.k"
       >
         {{ opt.l }} {{ counts[opt.k] }}
@@ -372,8 +372,8 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
-  background: #a63e2a;
-  box-shadow: 0 0 0 2px rgba(166, 62, 42, 0.14);
+  background: var(--cinnabar);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cinnabar) 14%, transparent);
   flex-shrink: 0;
 }
 
@@ -392,23 +392,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   gap: 0.25rem;
   padding: 0.25rem 0 0.375rem;
 }
-.cs-chip {
-  font-size: var(--text-xs);
-  padding: 0.125rem 0.5rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 9999px;
-  /* 小字号 + 过浅灰会读作「模糊」——过滤词是高频阅读对象，提到次级墨色 */
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-.cs-chip:hover { color: var(--text-secondary); }
-.cs-chip.active {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
-}
+/* N1 §3.2：过滤 chip 收编 .chip/.chip--on 工具类（选中=state-selected 不再实底） */
 
 .side-list {
   list-style: none;
@@ -426,7 +410,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-left-width: 2.5px;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 .side-card--click { cursor: pointer; }
 .side-card--click:hover { border-color: var(--accent-500); }
@@ -449,26 +433,26 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   border-radius: 9999px;
   flex-shrink: 0;
 }
-.cs-dot.private { background: #a63e2a; }
-.cs-dot.partial { background: #7c5faf; }
-.cs-dot.public { background: #5f7d5a; }
+.cs-dot.private { background: var(--cinnabar); }
+.cs-dot.partial { background: var(--truth-partial); }
+.cs-dot.public { background: var(--truth-open); }
 
-.cs-row--private { border-left-color: #a63e2a; }
-.cs-row--partial { border-left-color: #7c5faf; }
-.cs-row--public { border-left-color: #5f7d5a; }
+.cs-row--private { border-left-color: var(--cinnabar); }
+.cs-row--partial { border-left-color: var(--truth-partial); }
+.cs-row--public { border-left-color: var(--truth-open); }
 
 /* 新记账短暂闪朱（记账反馈，2.6s 后消退） */
 .cs-row--fresh {
   animation: cs-fresh 2.6s ease-out;
 }
 @keyframes cs-fresh {
-  0% { box-shadow: 0 0 0 3px rgba(166, 62, 42, 0.28); background: rgba(166, 62, 42, 0.07); }
-  100% { box-shadow: 0 0 0 0 rgba(166, 62, 42, 0); background: var(--bg-secondary); }
+  0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cinnabar) 28%, transparent); background: color-mix(in srgb, var(--cinnabar) 7%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar) 0%, transparent); background: var(--bg-secondary); }
 }
 
 .cs-name {
   font-size: var(--text-base);
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+  font-family: var(--font-serif);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -477,24 +461,24 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 .cs-type {
   flex-shrink: 0;
   font-size: var(--text-xs);
-  color: #fff;
-  border-radius: 0.1875rem;
+  color: var(--bg-canvas);
+  border-radius: var(--radius-xs);
   padding: 0.0625rem 0.3125rem;
 }
 .cs-reveal {
   margin-left: auto;
   flex-shrink: 0;
   font-size: var(--text-xs);
-  color: var(--accent-500, #b08d3e);
-  font-family: var(--font-serif, 'Noto Serif SC', 'STSong', serif);
+  color: var(--accent-500);
+  font-family: var(--font-serif);
 }
 /* 半露小标：表里不一一眼可辨，不必点开猜 */
 .cs-biao-neq {
   flex-shrink: 0;
   font-size: var(--text-xs);
-  color: #7c5faf;
+  color: var(--truth-partial);
   border: 1px solid rgba(124, 95, 175, 0.4);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   padding: 0 0.25rem;
 }
 /* 字段级真相分层派生区（2026-09-03）：来自角色档案 */
@@ -505,7 +489,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   letter-spacing: 0.05em;
 }
 .cs-type--archive {
-  background: #8b8578;
+  background: var(--text-faint); /* 归档=纯装饰档灰 */
 }
 .cs-what {
   font-size: var(--text-xs);
@@ -532,12 +516,12 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   padding: 4px 12px;
   font-size: var(--text-xs);
   font-family: inherit;
-  color: #a63e2a;
+  color: var(--cinnabar);
   background: transparent;
   border: 1px dashed rgba(166, 62, 42, 0.5);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 .cs-add-btn:hover { background: rgba(166, 62, 42, 0.08); }
 /* 主按钮独占整行：账本只剩这一个主动作 */
@@ -554,8 +538,8 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-canvas);
-  border: 1px solid #a63e2a;
-  border-radius: 7px;
+  border: 1px solid var(--cinnabar);
+  border-radius: var(--radius-sm);
   outline: none;
 }
 
@@ -588,7 +572,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   margin: 6px 0;
   padding: 8px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .cs-migrate-head {
   display: flex;

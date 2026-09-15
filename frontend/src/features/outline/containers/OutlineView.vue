@@ -207,7 +207,7 @@ async function newChapter() {
   <div class="outline-view">
     <header class="outline-header">
       <div class="header-left">
-        <button class="icon-btn" @click="backToLibrary" title="返回书架">
+        <button class="icon-btn icon-btn-instrument" @click="backToLibrary" title="返回书架">
           <Icon name="arrow-left" :size="16" />
         </button>
         <div>
@@ -227,8 +227,7 @@ async function newChapter() {
 
     <div class="outline-body">
       <div v-if="sortedChapters.length === 0" class="empty-state">
-        <div class="empty-icon"><Icon name="document" :size="48" /></div>
-        <h2>暂无章节</h2>
+        <h2 class="empty-state__title">暂无章节</h2>
         <p>新建第一个章节开始规划你的故事。</p>
         <button class="btn-primary" :disabled="creating || !currentBook" @click="newChapter">
           <Icon name="plus" :size="16" />
@@ -268,7 +267,7 @@ async function newChapter() {
   height: 100%;
   overflow-y: auto;
   background: var(--bg-primary);
-  padding: 1.5rem 2rem;
+  padding: var(--space-8) var(--space-10);
 }
 
 .outline-header {
@@ -286,7 +285,8 @@ async function newChapter() {
 
 .page-title {
   font-family: var(--font-heading);
-  font-size: 1.25rem;
+  font-size: var(--text-2xl);
+  letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -304,14 +304,12 @@ async function newChapter() {
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   cursor: pointer;
 }
 .icon-btn:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .btn-primary {
@@ -322,11 +320,11 @@ async function newChapter() {
   font-size: 0.8125rem;
   font-weight: 500;
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 .btn-primary:hover {
   background: var(--accent-600);
@@ -348,25 +346,16 @@ async function newChapter() {
 }
 
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 3rem 2rem;
-  text-align: center;
-  color: var(--text-muted);
+  /* 04 §D3 空态统一规格（全局类出 ❦ 饰符+布局） */
+  padding: var(--space-12) var(--space-8);
 }
 
-.empty-icon {
-  margin-bottom: 1rem;
-}
-
-.empty-state h2 {
+.empty-state__title {
   font-family: var(--font-heading);
-  font-size: 1.125rem;
+  font-size: var(--text-xl);
   font-weight: 500;
-  color: var(--text-secondary);
-  margin: 0 0 0.375rem;
+  color: var(--text-primary);
+  margin: 0;
 }
 
 .empty-state p {

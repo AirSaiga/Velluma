@@ -218,7 +218,7 @@ watch(
   fill: none;
   stroke-width: 2;
   cursor: pointer;
-  transition: stroke-width 0.12s;
+  transition: stroke-width var(--dur-1) var(--ease-out);
 }
 .wab-arc:hover {
   stroke-width: 3.5;
@@ -264,7 +264,7 @@ watch(
 }
 .wab-handle {
   fill: #a855f7;
-  stroke: var(--bg-canvas, #fff);
+  stroke: var(--bg-canvas);
   stroke-width: 1.5;
   cursor: ew-resize;
 }

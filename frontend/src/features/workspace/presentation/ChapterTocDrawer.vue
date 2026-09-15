@@ -80,19 +80,19 @@ onBeforeUnmount(() => {
   <Transition name="toc-drawer">
     <aside v-if="visible" ref="rootEl" class="toc-drawer">
       <div class="toc-drawer__head">
-        <button class="toc-icon-btn" title="返回书架" @click="emit('back')">
+        <button class="icon-btn-instrument" title="返回书架" @click="emit('back')">
           <Icon name="arrow-left" :size="15" />
         </button>
         <span class="toc-drawer__title" :title="bookTitle">{{ bookTitle || '未选择书籍' }}</span>
         <button
-          class="toc-icon-btn"
-          :class="{ active: selectMode }"
+          class="icon-btn-instrument"
+          :class="{ 'is-active': selectMode }"
           :title="selectMode ? '退出多选' : '多选删除'"
           @click="emit('toggleSelectMode')"
         >
           <Icon name="check-badge" :size="15" />
         </button>
-        <button class="toc-icon-btn" title="收起目录" @click="emit('close')">
+        <button class="icon-btn-instrument" title="收起目录" @click="emit('close')">
           <Icon name="x-mark" :size="14" />
         </button>
       </div>
@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
         <span class="select-checkbox" :class="{ checked: allChecked }">
           <Icon v-if="allChecked" name="check" :size="12" />
         </span>
-        <span class="select-all-label">全选（{{ checkedIds.size }}/{{ chapters.length }}）</span>
+        <span class="select-all-label tnum">全选（{{ checkedIds.size }}/{{ chapters.length }}）</span>
       </div>
 
       <div v-if="loading" class="toc-drawer__loading">加载中…</div>
@@ -119,33 +119,32 @@ onBeforeUnmount(() => {
 
       <!-- 多选模式：批量操作栏（替换底部按钮区） -->
       <div v-if="selectMode" class="batch-actions">
-        <span class="batch-count">已选 {{ checkedIds.size }} 章</span>
+        <span class="batch-count tnum">已选 {{ checkedIds.size }} 章</span>
         <div class="batch-btns">
           <button
             class="batch-delete-btn"
             :disabled="checkedIds.size === 0 || batchDeleting"
             @click="emit('batchDelete')"
-          >
-            <Icon name="trash" :size="14" />
+          >            <Icon name="trash" :size="14" />
             <span>{{ batchDeleting ? '删除中…' : '删除选中' }}</span>
           </button>
-          <button class="batch-cancel-btn" @click="emit('exitSelectMode')">
+          <button class="btn-ghost btn-ghost--sm" @click="emit('exitSelectMode')">
             <span>取消</span>
           </button>
         </div>
       </div>
 
       <div v-else class="toc-drawer__actions">
-        <button class="toc-action-btn toc-action-btn--primary" @click="emit('create')">
+        <button class="toc-action-grow btn-primary-instrument" @click="emit('create')">
           <Icon name="plus" :size="14" />
           <span>新建章节</span>
         </button>
-        <button class="toc-action-btn" title="从 .md 文件批量导入章节" @click="emit('import')">
+        <button class="toc-action-grow btn-ghost btn-ghost--sm" title="从 .md 文件批量导入章节" @click="emit('import')">
           <Icon name="arrow-up-tray" :size="14" />
           <span>导入 .md</span>
         </button>
         <button
-          class="toc-action-btn"
+          class="toc-action-grow btn-ghost btn-ghost--sm"
           title="从这一章的正文里认出角色、地点、伏笔，收进世界页"
           :disabled="!canExtract"
           @click="emit('extract')"
@@ -178,34 +177,18 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.toc-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  background: transparent;
-  border: none;
-  border-radius: 0.25rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-.toc-icon-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-.toc-icon-btn.active {
-  color: var(--accent-500);
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.1);
-}
-
 .toc-drawer__loading {
   padding: 1rem;
   font-size: 0.75rem;
   color: var(--text-muted);
   text-align: center;
+}
+
+/* N3：头部 icon 钮收编 .icon-btn-instrument（style.css 组件层）；
+   仅保留多选激活态覆盖（激活=accent 文字+tint 底，优先级高于工具类默认 muted） */
+.icon-btn-instrument.is-active {
+  color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
 }
 
 /* 多选：全选栏 */
@@ -219,10 +202,10 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 .select-all-bar:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .select-all-label {
   user-select: none;
@@ -234,11 +217,11 @@ onBeforeUnmount(() => {
   width: 1rem;
   height: 1rem;
   border: 1.5px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   background: var(--bg-canvas);
-  color: white;
+  color: var(--bg-canvas);
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .select-checkbox.checked {
   border-color: var(--accent-500);
@@ -264,44 +247,36 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 0.375rem;
 }
+/* N3 §3.1 danger：实底散写收编为「透明底+danger 文字/描边，hover 叠 8% 底」
+   （仪器语言：实底保留给主信号钮；删除是危险信号但非本栏主行动） */
 .batch-delete-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
   flex: 1;
-  padding: 0.4375rem;
-  background: #dc2626;
-  color: white;
-  border: none;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--control-px);
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
 }
 .batch-delete-btn:hover:not(:disabled) {
-  background: #b91c1c;
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.batch-delete-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 .batch-delete-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-.batch-cancel-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.4375rem 0.75rem;
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.batch-cancel-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
 }
 
 /* 底部三钮 */
@@ -311,27 +286,9 @@ onBeforeUnmount(() => {
   margin: 0.375rem;
   flex-shrink: 0;
 }
-.toc-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
+/* 底部三钮（N3：皮肤由 .btn-primary-instrument / .btn-ghost--sm 提供；
+   本类只做布局——三钮等分抽屉宽） */
+.toc-action-grow {
   flex: 1;
-  padding: 0.4375rem;
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.toc-action-btn:hover:not(:disabled) {
-  border-color: var(--accent-500);
-  color: var(--accent-500);
-}
-.toc-action-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 </style>

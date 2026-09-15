@@ -81,7 +81,7 @@ const fallback = '还没有可总结的笔迹——在「你的字」贴入样�
   cursor: pointer;
 }
 .status-audition:hover {
-  color: white;
+  color: var(--bg-canvas);
   background: var(--accent-500);
   border-color: var(--accent-500);
 }

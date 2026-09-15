@@ -77,22 +77,22 @@ const emit = defineEmits<{
   padding: 0.4375rem 0.5rem;
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-out);
 }
 
 .chapter-item:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .chapter-item.active {
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 
 .chapter-item.checked {
-  background: rgba(var(--accent-500-rgb, 124, 58, 237), 0.08);
+  background: color-mix(in srgb, var(--accent-500) 8%, transparent);
 }
 
 /* 复选框（与目录抽屉全选栏同款） */
@@ -103,11 +103,11 @@ const emit = defineEmits<{
   width: 1rem;
   height: 1rem;
   border: 1.5px solid var(--border-color);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   background: var(--bg-canvas);
-  color: white;
+  color: var(--bg-canvas);
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .select-checkbox.checked {
@@ -116,7 +116,7 @@ const emit = defineEmits<{
 }
 
 .ch-num {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -152,11 +152,11 @@ const emit = defineEmits<{
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), background var(--dur-2) var(--ease-out);
 }
 
 .chapter-item:hover .ch-delete,
@@ -165,13 +165,18 @@ const emit = defineEmits<{
 }
 
 .ch-delete:hover {
-  color: #dc2626;
-  background: rgba(220, 38, 38, 0.08);
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 
 /* ---- page 变体（目录页 §4.4）：行高放宽至 2.4rem，标题左对齐，徽标同行 ---- */
 .toc-list--page {
   padding: 0 var(--space-6);
+}
+/* 04 §A3-3 目录页章号=页码感衬线（仅 page 变体；抽屉变体保持紧凑无衬线） */
+.toc-list--page .ch-num {
+  font-family: var(--font-heading);
+  color: var(--text-faint);
 }
 
 .toc-list--page .chapter-item {

@@ -299,18 +299,18 @@ async function remove() {
   flex-direction: column;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius-lg);
+  box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .fdd::-webkit-scrollbar {
   width: 8px;
 }
 .fdd::-webkit-scrollbar-thumb {
   background: rgba(120, 95, 50, 0.22);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .fdd::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 95, 50, 0.38);
@@ -333,13 +333,13 @@ async function remove() {
 }
 
 .fdd-status.open {
-  background: rgba(217, 119, 6, 0.12);
-  color: #d97706;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
 }
 
 .fdd-status.closed {
-  background: rgba(22, 163, 74, 0.12);
-  color: #16a34a;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 .fdd-status.dropped {
@@ -350,9 +350,9 @@ async function remove() {
 .fdd-auto {
   font-size: var(--text-xs);
   padding: 1px 5px;
-  background: rgba(124, 106, 173, 0.12);
+  background: color-mix(in srgb, var(--accent-500) 12%, transparent);
   color: var(--accent-500);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .fdd-close {
@@ -363,7 +363,7 @@ async function remove() {
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -371,7 +371,7 @@ async function remove() {
 }
 
 .fdd-close:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
@@ -383,7 +383,7 @@ async function remove() {
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -391,7 +391,7 @@ async function remove() {
 }
 
 .fdd-back:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
 }
 
@@ -420,10 +420,10 @@ async function remove() {
   box-sizing: border-box;
   padding: 8px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   line-height: 1.7;
   resize: none;
@@ -433,7 +433,7 @@ async function remove() {
 
 .fdd-content:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 
 .fdd-row {
@@ -451,14 +451,14 @@ async function remove() {
 }
 
 .fdd-val {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-primary);
   font-family: ui-monospace, monospace;
 }
 
 .fdd-val--none {
   font-family: inherit;
-  color: #d97706;
+  color: var(--warn);
   font-size: var(--text-xs);
 }
 
@@ -468,7 +468,7 @@ async function remove() {
   padding: 2px 8px;
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -484,10 +484,10 @@ async function remove() {
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-family: inherit;
   outline: none;
 }
@@ -495,7 +495,7 @@ async function remove() {
 .fdd-input:focus,
 .fdd-select:focus {
   border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(124, 106, 173, 0.1);
+  box-shadow: var(--ring-soft);
 }
 
 .fdd-evidence {
@@ -528,13 +528,13 @@ async function remove() {
   gap: 5px;
   padding: 7px 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 
 .fdd-act:hover {

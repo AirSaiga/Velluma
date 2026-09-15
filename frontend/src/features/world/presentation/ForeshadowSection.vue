@@ -103,8 +103,8 @@ function anchorText(f: Foreshadow): string {
       <button
         v-for="opt in FILTER_OPTS"
         :key="opt.k"
-        class="fs-chip"
-        :class="{ active: filter === opt.k }"
+        class="fs-chip chip"
+        :class="{ 'chip--on': filter === opt.k }"
         @click="filter = opt.k"
       >
         {{ opt.l }} {{ counts[opt.k] }}
@@ -197,26 +197,7 @@ function anchorText(f: Foreshadow): string {
   padding: 0.25rem 0 0.375rem;
 }
 
-.fs-chip {
-  font-size: var(--text-xs);
-  padding: 0.125rem 0.5rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 9999px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.fs-chip:hover {
-  color: var(--text-secondary);
-}
-
-.fs-chip.active {
-  background: var(--accent-500);
-  border-color: var(--accent-500);
-  color: #fff;
-}
+/* N1 §3.2：过滤 chip 收编 .chip/.chip--on 工具类 */
 
 .side-list {
   list-style: none;
@@ -234,7 +215,7 @@ function anchorText(f: Foreshadow): string {
   padding: 0.375rem 0.5rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .side-card--click {
@@ -267,11 +248,11 @@ function anchorText(f: Foreshadow): string {
 }
 
 .fs-status.open {
-  background: #d97706;
+  background: var(--warn);
 }
 
 .fs-status.closed {
-  background: #16a34a;
+  background: var(--ok);
 }
 
 .fs-status.dropped {
@@ -295,9 +276,9 @@ function anchorText(f: Foreshadow): string {
   flex-shrink: 0;
   font-size: var(--text-xs);
   padding: 0.0625rem 0.3125rem;
-  background: rgba(124, 106, 173, 0.12);
+  background: color-mix(in srgb, var(--accent-500) 12%, transparent);
   color: var(--accent-500);
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
 }
 
 .fs-meta {
@@ -321,7 +302,7 @@ function anchorText(f: Foreshadow): string {
 
 .fs-anchor--none {
   font-family: inherit;
-  color: #d97706;
+  color: var(--warn);
 }
 
 .side-empty {
@@ -346,9 +327,9 @@ function anchorText(f: Foreshadow): string {
   color: var(--text-secondary);
   background: transparent;
   border: 1px dashed var(--border-color);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-1) var(--ease-out);
 }
 
 .fs-add-btn:hover {
@@ -365,7 +346,7 @@ function anchorText(f: Foreshadow): string {
   color: var(--text-primary);
   background: var(--bg-canvas);
   border: 1px solid var(--accent-500);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   outline: none;
 }
 </style>
