@@ -134,9 +134,10 @@ export function computeWorldState(
     }
   }
 
-  // 生死最终判定（决策①）：born≤t 且 (无 death 或 death>t)
+  // 生死最终判定（决策①；2026-09-14 卫生修正：出场即活——无 birth 事件但已被
+  // 推演回放的角色默认活着，death 才是死亡证据；与后端 compute_world_state_from_events 同构）
   for (const [cid, s] of characterStates) {
-    s.alive = born.has(cid) && (!dead.has(cid) || (dead.get(cid) as number) > t)
+    s.alive = !dead.has(cid) || (dead.get(cid) as number) > t
   }
 
   // 决策④：关系边激活状态（static 恒活跃；锚事件已回放才活跃）

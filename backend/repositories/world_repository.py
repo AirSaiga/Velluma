@@ -366,9 +366,11 @@ def compute_world_state_from_events(
                 location_exists[tid] = False
         # battle/alliance/war_declare/coronation/custom：M1 不改世界状态
 
-    # 生死最终判定（决策①）
+    # 生死最终判定（决策①；2026-09-14 卫生修正：出场即活——无 birth 事件但已被
+    # 推演回放（move 等建过 character_states 条目）的角色默认活着。整书批量导入的
+    # 世界常没有 birth 事件，严格 born 语义会把全部出场角色判死；death 才是死亡证据）
     for cid, state in character_states.items():
-        state["alive"] = born.get(cid, False) and (cid not in dead or dead[cid] > t)
+        state["alive"] = (cid not in dead) or (dead[cid] > t)
 
     # 决策④：关系边激活状态（static 恒活跃；锚事件已回放才活跃）
     relation_states: List[Dict[str, Any]] = []

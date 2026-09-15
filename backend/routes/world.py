@@ -13,6 +13,8 @@ World 设定层 REST API（独立于 Canon 路由，通过 book_id 隔离）。
 from __future__ import annotations
 
 import os
+import re
+import uuid
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
@@ -54,13 +56,56 @@ from backend.schemas.world import (
 router = APIRouter(prefix="/api/books", tags=["world-v1"])
 
 
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def _norm_id_str(x) -> str:
+    """id 引用统一为标准带连字符 UUID 字符串。
+
+    历史层积：早期写入路径把 hex32（无连字符）存进了 events 的 JSONB 引用列，
+    而全部读侧（fold/world_bridge/前端 engine）用 str(UUID)（带连字符）匹配——
+    hex 格式引用静默失配。写入侧统一在本闸归一（scripts/check_db_hygiene.py
+    清存量）。
+    """
+    s = str(x)
+    if _UUID_RE.match(s):
+        return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:32]}".lower()
+    return s
+
+
+def _normalize_id_values(obj):
+    """递归归一 dict/list 里所有 id 样式字符串（payload 深层用）。"""
+    if isinstance(obj, dict):
+        return {k: _normalize_id_values(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_id_values(v) for v in obj]
+    if isinstance(obj, str) and (_UUID_RE.match(obj) or _is_dashed_uuid(obj)):
+        return _norm_id_str(obj)
+    return obj
+
+
+def _is_dashed_uuid(s: str) -> bool:
+    try:
+        uuid.UUID(s)
+        return "-" in s
+    except ValueError:
+        return False
+
+
 def _normalize_event_fields(fields: dict) -> dict:
-    """payload 里 UUID list → str list（JSONB 存 str），location_id → str。"""
+    """payload 里 UUID list → str list（JSONB 存 str），location_id → str。
+
+    id 引用一律经 _norm_id_str 归一为带连字符标准格式（含 payload 深层——
+    birth/move 的 character_id/character_ids/to_location_id 是 fold 推演的
+    key 源，格式漂移=推演断链）。
+    """
     for k in ("participant_ids", "faction_ids", "causes"):
         if fields.get(k):
-            fields[k] = [str(x) for x in fields[k]]
+            fields[k] = [_norm_id_str(x) for x in fields[k]]
     if fields.get("location_id"):
-        fields["location_id"] = str(fields["location_id"])
+        fields["location_id"] = _norm_id_str(fields["location_id"])
+    if fields.get("payload"):
+        fields["payload"] = _normalize_id_values(fields["payload"])
     return fields
 
 
