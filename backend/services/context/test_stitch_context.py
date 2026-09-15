@@ -4,17 +4,20 @@
 """
 stitch-ghost 上下文装配共享器单测（docs/foundation-hardening.md §2.1）。
 
-覆盖四层：
+覆盖五层：
 1. 同源红线（纯函数）：预览块拼接 + 基座 == 四个 stitch builder 的真实
    system prompt，逐字节一致；空上下文 → 全空块、builder prompt 零残留。
 2. 预览载荷契约：块序 = 注入序（画像→样本→专名→canon→私有→回响→空间）、
    total_chars/world 字段透传、来源徽标分流（世界实体 vs 章级绑定、
    真相层含私有 vs 公开、私有设定）。
+2.6 战局态势简报（2026-09-15 轻量化）：briefing 行级行为（行空不入 dict）、
+   场景派生/钉回退/中插标记、在场投影复用、双秘密通道、意图优先级、
+   端点光标窗口真切片（before_cursor 转场派生 vs 落库尾部路径）。
 3. 装配口径（mock bundle）：open/非 open 的召回 query 构造、chapter_intent
    兜底、无 book_id 不检索样本——与旧 stitch 路由内联段逐条对齐。
 4. 端点级（真实 SQLite 栈）：种子书跑通 context_preview 全程（含 HTML 剥离），
    预览块与同一装配结果再喂 builder 的 system prompt 逐字节一致；
-   空设定书（章节不存在）七块全空不抛错；非法 mode 422。
+   空设定书（章节不存在）全空块不抛错；非法 mode 422。
 
 配方：临时文件 SQLite + 真实 repo 栈（同 test_world_bridge_presence.py）；
 embedding 一律 monkeypatch 为未配置（防本地 model_config.json 触发真实
@@ -56,6 +59,7 @@ from backend.services.style import retrieval as retrieval_mod
 BOOK_ID = uuid.UUID("cc330000-0000-4000-8000-000000000001")
 CH_ID = uuid.UUID("cc330000-0000-4000-8000-0000000000b1")
 ENT_ID = uuid.UUID("cc330000-0000-4000-8000-0000000000e1")
+LOC_ID = uuid.UUID("cc330000-0000-4000-8000-000000000011")
 
 # 知识检索平面 v3.1（2026-08-27）：注入序=事实层前于文风层；空 kg 时专名兜底位在 entities 后
 BLOCK_ORDER = ["scene", "warm", "entities", "proper_nouns", "canon", "secrets", "worldview",
@@ -189,6 +193,102 @@ class TestBuildContextPreview:
         ctx.scene_hint = "general"
         by_key = {b["key"]: b for b in build_context_preview(ctx, "continue")["blocks"]}
         assert by_key["author_samples"]["source"] == "文风样本库"
+
+
+# ============================================================
+# 2.6 战局态势简报（2026-09-15 轻量化：装配快照 → 结构化五行，零 LLM 零新查询）
+# ============================================================
+
+class TestBriefing:
+    """_build_briefing 行级行为：行空不入 dict（exclude_none 省略）、
+    场景派生/钉回退、在场投影复用、双秘密通道、意图优先级。"""
+
+    def test_empty_context_briefing_no_rows(self):
+        """空上下文 → briefing 空 dict（不造任何催收行）。"""
+        payload = build_context_preview(StitchContext(), "open")
+        assert payload["briefing"] == {}
+
+    def test_briefing_key_always_present(self):
+        """briefing 键恒在场（增量字段契约；旧断言不受影响的根因）。"""
+        assert "briefing" in build_context_preview(StitchContext(), "open")
+
+    def test_scene_from_active_scene_derived(self):
+        """光标派生取景（第三弹）→ 场景行带 derived/via；bridge 参数透传中插标记。"""
+        ctx = StitchContext(active_scene={
+            "loc_id": "loc-1", "loc_name": "机房", "derived": True, "via": "走进·机房",
+        })
+        b = build_context_preview(ctx, "continue")["briefing"]
+        assert b["scene"] == {"name": "机房", "derived": True, "via": "走进·机房", "bridge": False}
+        b2 = build_context_preview(ctx, "continue", bridge=True)["briefing"]
+        assert b2["scene"]["bridge"] is True
+
+    def test_scene_pin_fallback_lookup(self):
+        """active_scene 缺席（空章未派生）→ 名册直查本章钉，derived=False。"""
+        bundle = SettingsBundle(
+            chapter=SimpleNamespace(scene_location_id="loc-1"),
+            locations=[SimpleNamespace(id="loc-1", name="北岸要塞", parent_id=None)],
+        )
+        b = build_context_preview(StitchContext(bundle=bundle), "continue")["briefing"]
+        assert b["scene"] == {"name": "北岸要塞", "derived": False, "via": "", "bridge": False}
+
+    def test_onstage_and_props_via_projection(self):
+        """世界书 → 复用 dock 在场投影：场景作用域内存活人物（含此刻状态）+
+        当前段落提及资产（提及即在场）——与卡舱同一名册同一推演。"""
+        bundle = SettingsBundle(
+            world_sourced=True,
+            chapter=SimpleNamespace(scene_location_id="loc-1"),
+            locations=[SimpleNamespace(id="loc-1", name="机房", parent_id=None)],
+            entities=[SimpleNamespace(
+                entity_id="e-1",
+                character=SimpleNamespace(name="林尘", dynamic_state="在途·进度40%"),
+            )],
+            assets=[SimpleNamespace(
+                name="锈铁盒", static_description="周砚随身携带的铁盒",
+            )],
+            world_state={"character_states": [{
+                "entity_id": "e-1", "alive": True, "location_id": "loc-1",
+            }]},
+        )
+        b = build_context_preview(
+            StitchContext(bundle=bundle), "continue",
+            recent_text="他攥着锈铁盒站在门口。",
+        )["briefing"]
+        assert b["onstage"] == ["林尘（在途·进度40%）"]
+        assert b["props"] == ["锈铁盒——周砚随身携带的铁盒"]
+
+    def test_legacy_book_no_onstage_rows(self):
+        """退化梯子同 dock：legacy 书（world_sourced=False）不产在场/物件行。"""
+        bundle = SettingsBundle(world_sourced=False)
+        b = build_context_preview(
+            StitchContext(bundle=bundle), "continue", recent_text="他攥着锈铁盒。",
+        )["briefing"]
+        assert "onstage" not in b and "props" not in b
+
+    def test_secrets_two_channels_partial_excluded(self):
+        """守死秘密 = 整人私有 + 字段级 secret；半露（partial）不算守死不入行。"""
+        bundle = SettingsBundle(
+            character_secrets=[{"name": "周砚", "text": "知道女儿还活着，装作不知"}],
+            field_layer_secrets=[
+                {"name": "周砚", "label": "左手", "level": "secret", "text": "义手"},
+                {"name": "明姐", "label": "年龄", "level": "partial", "text": "四十九"},
+            ],
+        )
+        b = build_context_preview(StitchContext(bundle=bundle), "continue")["briefing"]
+        assert b["secrets"] == ["周砚：知道女儿还活着，装作不知", "周砚·左手：义手"]
+
+    def test_intent_priority_assembly_over_spine(self):
+        """引力行：装配意图（request/outline/inferred/baton）优先于 spine 打算。"""
+        ctx = StitchContext(
+            chapter_intent="林尘决定夜探仓库", intent_source="inferred",
+        )
+        b = build_context_preview(ctx, "continue")["briefing"]
+        assert b["intent"] == "林尘决定夜探仓库"
+        assert b["intent_source"] == "inferred"
+        # 装配意图缺席 → spine 打算补位（与温卡同一事实源 chapters.spine）
+        bundle = SettingsBundle(chapter=SimpleNamespace(spine={"intent": "送别之后回城"}))
+        b2 = build_context_preview(StitchContext(bundle=bundle), "continue")["briefing"]
+        assert b2["intent"] == "送别之后回城"
+        assert b2["intent_source"] == "spine"
 
 
 # ============================================================
@@ -644,6 +744,9 @@ async def _seed(session) -> None:
         id=ENT_ID, book_id=BOOK_ID, entity_type="character",
         name="林尘", importance=8, props={},
     ))
+    # 地点名册行（2026-09-15 briefing 端到端用：光标窗转场派生取景的目标地点；
+    # 章正文与既有断言均不含「机房」，对既有用例零影响）
+    session.add(m.WorldLocation(id=LOC_ID, book_id=BOOK_ID, name="机房", kind="point"))
     await session.flush()
     # 事件走 repo.create（sequence_num 由 repo 分配，直插会违反非空约束）
     from backend.repositories.world_repository import WorldRepository
@@ -775,5 +878,36 @@ def test_endpoint_open_mode_query_from_outline(tmp_path, monkeypatch):
             by_key = {b.key: b for b in r.blocks}
             assert "entities" in by_key  # B6：无在场者时实体块空（提及走后缀）
             assert by_key["style_positive"].chars > 0
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_endpoint_cursor_window_true_slice(tmp_path, monkeypatch):
+    """光标真切片（2026-09-15 FIM 修复）：before_cursor 命中转场 → 简报场景行
+    按光标现场派生（derived），after_cursor → 中插标记；不传光标=落库尾部路径
+    （章正文无地点名 → 无派生场景），两路径互不渗漏。"""
+    _disable_embedding(monkeypatch)
+    engine, maker = _make_stack(tmp_path, "cursor.db")
+    try:
+        async def run():
+            async with maker() as s:
+                await _seed(s)
+                bridged = await context_preview(
+                    str(CH_ID), "continue", s,
+                    before_cursor="灯下。他走进机房。",
+                    after_cursor="身后的铁门缓缓合拢。",
+                )
+                plain = await context_preview(str(CH_ID), "continue", s)
+                return bridged, plain
+
+        bridged, plain = asyncio.run(run())
+        # 光标路径：转场「走进机房」+ 句末完结 → 场景行派生 + 中插标记
+        assert bridged.briefing.scene is not None
+        assert bridged.briefing.scene.name == "机房"
+        assert bridged.briefing.scene.derived is True
+        assert bridged.briefing.scene.via == "走进·机房"
+        assert bridged.briefing.scene.bridge is True
+        # 落库路径（旧默认）：章正文与章钉均无机房 → 无场景行（零变化契约）
+        assert plain.briefing.scene is None
     finally:
         asyncio.run(engine.dispose())

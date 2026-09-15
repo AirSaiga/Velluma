@@ -166,7 +166,8 @@ function flushOutline() {
   if (!outlineTimer) return
   clearTimeout(outlineTimer)
   outlineTimer = undefined
-  if (selectedChapterId.value && outlineDraft.value) {
+  // outlineDraft 可为空串——清空也是有效写入，真值守卫会丢清空动作
+  if (selectedChapterId.value) {
     store.updateChapter(selectedChapterId.value, { outline_text: outlineDraft.value })
   }
 }
@@ -283,13 +284,34 @@ const contextPreviewData = ref<ContextPreview | null>(null)
 const contextPreviewLoading = ref(false)
 const contextPreviewError = ref('')
 
+/**
+ * 光标窗口（2026-09-15 FIM 真切片）：光标前 500 字 / 后 150 字——预览按光标
+ * 现场装配（中插不再读到章节尾部语境）。编辑器不在场（切页/未进章）发空串，
+ * 后端回退落库路径。取窗口径与 useAdaptiveAssist._anchorRecentText 同角色。
+ */
+function _previewCursorWindow(): { before: string; after: string } {
+  const ed = chapterEditorHandle.value
+  if (!ed) return { before: '', after: '' }
+  const $from = ed.state.selection.$from
+  const docEnd = ed.state.doc.content.size
+  const before = ed.state.doc
+    .textBetween(Math.max(0, $from.pos - 500), $from.pos, '\n\n')
+    .trim().slice(-500)
+  const after = ed.state.doc
+    .textBetween($from.pos, Math.min($from.pos + 150, docEnd), '\n\n')
+    .trim().slice(0, 150)
+  return { before, after }
+}
+
 async function loadContextPreview() {
   const chapterId = selectedChapterId.value
   if (!chapterId || contextPreviewLoading.value) return
   contextPreviewLoading.value = true
   contextPreviewError.value = ''
   try {
-    contextPreviewData.value = await adaptiveApi.contextPreview(chapterId, contextPreviewMode.value)
+    contextPreviewData.value = await adaptiveApi.contextPreview(
+      chapterId, contextPreviewMode.value, _previewCursorWindow(),
+    )
   } catch (e: any) {
     contextPreviewError.value = e?.message || '读取失败'
   } finally {
@@ -540,14 +562,14 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
     <div class="panel-head">
       <span class="panel-head__title">{{ activeTabLabel }}</span>
       <button
-        class="panel-head__btn"
+        class="panel-head__btn icon-btn-instrument"
         :class="{ 'panel-head__btn--on': pinned }"
         :title="pinned ? '取消固定' : '固定面板（Ctrl+\\）'"
         @click="emit('pin')"
       >
         <Icon name="pin" :size="13" />
       </button>
-      <button class="panel-head__btn" title="收起面板" @click="emit('close')">
+      <button class="panel-head__btn icon-btn-instrument" title="收起面板" @click="emit('close')">
         <Icon name="x-mark" :size="14" />
       </button>
     </div>
@@ -724,7 +746,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
                 <template v-else-if="fixStates[i].fixed">
                   <div class="fix-sent fix-sent--result">{{ fixStates[i].fixed }}</div>
                   <div class="fix-actions">
-                    <button class="btn-mini-reset btn-mini-reset--primary" @click="adoptFix(i, d)">采纳</button>
+                    <button class="btn-mini-reset btn-mini-reset--primary btn-primary-instrument" @click="adoptFix(i, d)">采纳</button>
                     <button class="btn-mini-reset" @click="dismissFix(i)">放弃</button>
                   </div>
                 </template>
@@ -827,7 +849,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               <div class="report-block-label">收件箱</div>
               <div class="report-item report-item--inbox">
                 {{ session.finishReport.value.candidates_pending }} 条世界变化待确认
-                <button class="btn-mini-reset btn-mini-reset--primary" title="打开右侧「此刻」页的候选收件箱" @click="requestOpenInbox">去处理</button>
+                <button class="btn-mini-reset btn-mini-reset--primary btn-primary-instrument" title="打开右侧「此刻」页的候选收件箱" @click="requestOpenInbox">去处理</button>
               </div>
             </div>
           </section>
@@ -985,37 +1007,20 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 .panel-head__title {
   flex: 1;
-  font-size: var(--text-md);
+  /* N3 §5.2：chrome 字号归位 12/13/14 阶——15px(--text-md) 档回收 */
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.panel-head__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.panel-head__btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
+/* N3：皮肤由 .icon-btn-instrument（style.css 组件层）提供；本类仅保留固定态覆盖 */
 .panel-head__btn--on {
   color: var(--accent-500);
 }
 
 /* 检查 tab 流程组标题（检查→修改→反馈），层级高于 .section-label */
 .group-title {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 0.08em;
@@ -1025,7 +1030,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 /* 打算 tab：意图反推降级小字行 */
 .plan-guess {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-secondary);
   line-height: 1.5;
   padding: 0 0.125rem;
@@ -1035,12 +1040,12 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 .guess-correct-btn {
   margin-left: 0.375rem;
   padding: 0 0.375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
   line-height: 1.4;
   color: var(--text-muted);
   background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -1060,11 +1065,11 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   flex: 1;
   min-width: 0;
   padding: 0.125rem 0.375rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-primary);
-  background: var(--bg-secondary, transparent);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   outline: none;
 }
 
@@ -1100,7 +1105,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 .tab-content::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 .tab-content::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
@@ -1124,7 +1129,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   padding: 2.5rem 1rem;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   line-height: 1.7;
 }
 
@@ -1134,7 +1139,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.05em;
@@ -1165,24 +1170,25 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   flex: 1;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.5rem;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out);
 }
 .stat:hover {
-  border-color: rgba(124, 106, 173, 0.4);
+  border-color: color-mix(in srgb, var(--accent-500) 40%, transparent);
 }
 
 .stat-num {
   font-family: var(--font-heading);
-  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--accent-500);
   line-height: 1;
 }
 
 .stat-label {
-  font-size: 0.625rem;
+  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
   color: var(--text-muted);
   margin-top: 0.125rem;
 }
@@ -1197,16 +1203,16 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   background: var(--bg-secondary);
   color: var(--accent-500);
   border: 1px solid var(--accent-500);
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 
 .btn-refinery:hover {
   background: var(--accent-500);
-  color: white;
+  color: var(--bg-canvas);
 }
 
 .btn-refinery.secondary {
@@ -1232,32 +1238,32 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 .style-override-badge {
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
-  color: #b45309;
-  background: #fef3c7;
-  border-radius: 0.25rem;
+  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: var(--radius-xs);
 }
 
 .btn-mini-reset {
   padding: 0.1875rem 0.5rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
   color: var(--text-muted);
   background: var(--bg-tertiary);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
 .btn-mini-reset:hover {
-  color: #dc2626;
-  background: #fee2e2;
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 
 .style-status-section .btn-refinery {
   margin-top: 0.125rem;
 }
 .btn-refinery.secondary:hover {
-  background: var(--hover-bg);
+  background: var(--state-hover);
   color: var(--text-primary);
   border-color: var(--accent-500);
 }
@@ -1270,18 +1276,18 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   margin-top: 0.625rem;
   padding: 0.625rem;
   /* 半透明琥珀底：浅色/深色主题下均可读 */
-  background: rgba(202, 138, 4, 0.1);
-  border-left: 3px solid #ca8a04;
-  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-md);
 }
 .rf-header {
-  font-size: 0.6875rem;
-  color: #d97706;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
+  color: var(--warn);
   margin-bottom: 0.375rem;
   font-weight: 600;
 }
 .rf-text {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-primary);
   margin: 0;
@@ -1289,7 +1295,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 
 .hint {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0.375rem 0 0;
@@ -1302,22 +1308,22 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   gap: 0.375rem;
   width: 100%;
   padding: 0.375rem 0.5rem;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
 }
 .comp-toggle:hover {
-  background: rgba(245, 158, 11, 0.14);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
 }
 .comp-icon {
-  color: #d97706;
+  color: var(--warn);
   flex-shrink: 0;
 }
 .comp-toggle-title {
   flex: 1;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -1342,13 +1348,13 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   color: var(--text-secondary);
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out);
 }
 .wm-toggle:hover {
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
   color: var(--text-primary);
 }
 .wm-toggle-title {
@@ -1364,14 +1370,14 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   padding: 0.4375rem 0.625rem;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 .wm-status {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
 }
 .wm-status--err {
-  color: var(--danger, #c66);
+  color: var(--danger);
 }
 .wm-row {
   display: flex;
@@ -1381,19 +1387,19 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 .wm-k {
   flex: 0 0 3.5em;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   font-weight: 600;
   color: var(--text-muted);
 }
 .wm-v {
   flex: 1;
   min-width: 0;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--text-primary);
 }
 .wm-sub {
   margin-left: 4em;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-secondary);
   line-height: 1.6;
   word-break: break-all;
@@ -1409,11 +1415,11 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   align-items: baseline;
   gap: 0.375rem;
   padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  background: rgba(245, 158, 11, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--radius-sm);
   margin-bottom: 0.375rem;
 }
 .comp-error-name {
@@ -1422,7 +1428,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   flex-shrink: 0;
 }
 .comp-error-time {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -1438,34 +1444,32 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   gap: 0.25rem;
 }
 .fix-sent {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-primary);
 }
 .fix-sent--result {
   padding: 0.375rem 0.5rem;
   background: var(--bg-secondary);
-  border: 1px solid var(--accent-400, #9685c2);
-  border-radius: 6px;
+  border: 1px solid var(--accent-400);
+  border-radius: var(--radius-sm);
 }
 .fix-desc {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
 }
 .fix-status {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
 }
-.fix-status--ok { color: var(--ok, #4a9); }
-.fix-status--err { color: var(--danger, #c66); }
+.fix-status--ok { color: var(--ok); }
+.fix-status--err { color: var(--danger); }
 .fix-actions {
   display: flex;
   gap: 0.375rem;
 }
 .btn-mini-reset--primary {
-  color: #fff;
-  background: var(--accent-500, #7c6aad);
-  border-color: var(--accent-500, #7c6aad);
+  min-height: var(--control-h-sm);
 }
 
 /* ====== 完稿审计 / 沉淀抽取 ===== */
@@ -1481,18 +1485,18 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   padding: 0.5rem 0.625rem;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .settle-block--warn,
 .report-block--warn {
-  border-color: rgba(245, 158, 11, 0.4);
-  background: rgba(245, 158, 11, 0.05);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
 }
 
 .settle-block-label,
 .report-block-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 0.25rem;
@@ -1500,7 +1504,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 .settle-item,
 .report-item {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-primary);
   padding: 0.125rem 0;
@@ -1522,14 +1526,14 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 .conflict-entity {
   font-weight: 600;
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 .report-item--miss {
-  color: #f59e0b;
+  color: var(--warn);
 }
 .report-item--warn {
-  color: #ef4444;
+  color: var(--danger);
 }
 /* A5c① 收件箱积压行：文案 + 「去处理」同行 */
 .report-item--inbox {
@@ -1540,9 +1544,9 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 .issue-cat {
   display: inline-block;
-  font-size: 0.625rem;
+  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
   padding: 0 0.25rem;
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-xs);
   background: var(--border-color);
   color: var(--text-muted);
   margin-right: 0.25rem;
@@ -1556,13 +1560,13 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   width: 100%;
   padding: 0.5rem 0.75rem;
   border: none;
-  border-radius: 0.375rem;
-  background: var(--accent, #6366f1);
-  color: #fff;
-  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-500);
+  color: var(--bg-canvas);
+  font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out);
 }
 .btn-finish:hover:not(:disabled) {
   opacity: 0.9;
@@ -1591,7 +1595,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   animation: refine-spin 1.4s ease-in-out infinite;
 }
 .refine-loading .muted {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   margin-top: 0.375rem;
   opacity: 0.8;
 }
@@ -1602,7 +1606,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 
 .empty .muted {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   margin-top: 0.375rem;
   opacity: 0.8;
 }
@@ -1617,36 +1621,36 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 .char-item {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.4375rem 0.5rem;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .char-item:hover {
-  border-color: rgba(124, 106, 173, 0.45);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-color: color-mix(in srgb, var(--accent-500) 45%, transparent);
+  box-shadow: var(--shadow-sm);
 }
 
 .char-name {
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
   display: block;
 }
 
 .char-state {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
   display: block;
   margin-top: 0.125rem;
 }
 
 .empty-inline {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-muted);
   padding: 0.5rem;
   background: var(--bg-canvas);
   border: 1px dashed var(--border-color);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   line-height: 1.5;
 }
 
@@ -1654,7 +1658,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 .audit-block {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.5rem 0.625rem;
   margin-bottom: 0.5rem;
 }
@@ -1664,7 +1668,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   justify-content: space-between;
   align-items: baseline;
   gap: 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   padding: 0.125rem 0;
 }
 
@@ -1680,36 +1684,36 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 }
 
 .audit-value.warn {
-  color: #d97706;
+  color: var(--warn);
   font-weight: 400;
 }
 
-.audit-value.verdict-pass { color: #16a34a; }
-.audit-value.verdict-pass_with_fixes { color: #65a30d; }
+.audit-value.verdict-pass { color: var(--ok); }
+.audit-value.verdict-pass_with_fixes { color: var(--ok); }
 .audit-value.verdict-needs_refinement,
-.audit-value.verdict-needs_final_touch { color: #d97706; }
-.audit-value.verdict-fail { color: #dc2626; }
+.audit-value.verdict-needs_final_touch { color: var(--warn); }
+.audit-value.verdict-fail { color: var(--danger); }
 .audit-value.verdict-unaudited { color: var(--text-muted); }
 
 /* ===== 润色记录 ===== */
 .surgery-row {
   display: flex;
   gap: 0.375rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   padding: 0.375rem 0.5rem;
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   margin-bottom: 0.375rem;
 }
 
 .surgery-status {
   flex-shrink: 0;
-  color: #16a34a;
+  color: var(--ok);
 }
 
 .surgery-row.failed .surgery-status {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .surgery-diff {

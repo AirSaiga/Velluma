@@ -47,6 +47,10 @@ class HeartbeatResponse(BaseModel):
     # 临时在场通行证名单（2026-09-09 涌现角色闭环）：在册里的 is_guest 实体
     # 名单随心跳上帧——前端出「录入档案」直达入口，建档后自动转正
     onstage_guests: List[str] = Field(default_factory=list)
+    # 本帧挂件的缓存年龄（秒；2026-09-15 槽位治理）：dock 重算失败时旧缓存照发
+    # （成功落账/失败弃账，不逐出旧件），前端据此在舱内标「N 分钟前的旧卡」
+    # 而非伪装新鲜。None=无件或缓存无时间戳
+    dock_parts_age_s: Optional[int] = None
     direction_cards: List[Dict] = Field(default_factory=list)  # 走向卡（层3推测首 beat：event+anchors）
     intent_source: str = "none"
     intent_arc: str = ""
@@ -113,6 +117,29 @@ class ContextPreviewUnselectedItem(BaseModel):
     reason: str
 
 
+class ContextPreviewBriefingScene(BaseModel):
+    """简报·场景行：光标派生取景（derived=True）或本章钉回退。"""
+    name: str = ""
+    derived: bool = False
+    via: str = ""          # 派生命中的转场动词（钉回退空串）
+    bridge: bool = False   # FIM 中插态（光标后有正文，简报按光标现场装配）
+
+
+class ContextPreviewBriefing(BaseModel):
+    """战局态势简报（2026-09-15 轻量化）：装配快照的结构化提炼，零 LLM 零新查询。
+
+    行级静音契约：某行数据缺失时该键为 None（response_model_exclude_none
+    直接省略），前端整行不渲染——简报层不做「还没录」式催收。数据从同一
+    StitchContext 派生（同源红线），不另起查询链。
+    """
+    scene: Optional[ContextPreviewBriefingScene] = None
+    onstage: Optional[List[str]] = None   # 在场存活人物（含此刻状态后缀）
+    props: Optional[List[str]] = None     # 焦点物件（在场投影提及资产）
+    secrets: Optional[List[str]] = None   # 守死秘密摘要（整人私有 + 字段级 secret）
+    intent: Optional[str] = None          # 当前引力（意图文本）
+    intent_source: Optional[str] = None   # request/outline/inferred/baton/spine
+
+
 class ContextPreviewResponse(BaseModel):
     mode: str
     blocks: List[ContextPreviewBlock] = Field(default_factory=list)
@@ -120,6 +147,8 @@ class ContextPreviewResponse(BaseModel):
     world_time: int = 0
     world_time_source: str = "zero"  # chapter_anchor|prev_anchor|max_event|zero
     world_sourced: bool = False
+    # 战局态势简报（增量字段：旧客户端可忽略；空书各键省略）
+    briefing: ContextPreviewBriefing = Field(default_factory=ContextPreviewBriefing)
     # 知识平面「已选/未选」两栏（向后兼容增量字段：前端未消费前可忽略）
     unselected: List[ContextPreviewUnselectedItem] = Field(default_factory=list)
 

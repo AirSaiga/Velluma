@@ -1,15 +1,16 @@
 <script setup lang="ts">
 /**
- * 「AI 此刻读到的」主件（P5 B2 · 09 期重设计 docs/design/ux-redesign/09-ai-view-redesign.md）。
+ * 「AI 此刻读到的」主件（P5 B2 · 09 期重设计 docs/design/ux-redesign/09-ai-view-redesign.md
+ * · 2026-09-15 轻量化重构 docs/ai-view-briefing-feasibility.md）。
  *
  * 展示 stitch-ghost 实际注入的上下文块（与真实 system prompt 同源——后端
- * context-preview 与 stitch 路由共用同一装配函数）。09 期三改造：
- * 分区常开（无大按钮）；块默认折叠只留头行（头行即仪表盘：标题/字数/来源/
- * 预算条），展开即全量阅读（无嵌套滚动，滚动交给面板整体）；块正文保字排版
- * （contextBlockFormat 解析为排版结构，字不增不删，「原文」开关逐字核对）。
- * 块按注入序切三段（事实与设定/约束与记忆/文风与笔感），序可感知。
- * 空块单行虚线 +「去哪补录」引导——「什么值得录」的回报可见。
- * 纯展示组件：数据获取在容器（InspectorPanel）。
+ * context-preview 与 stitch 路由共用同一装配函数）。轻量化三改造：
+ * ①顶层「战局态势」简报卡（后端 briefing 增量字段，零 LLM）——4~5 行高密
+ *   态势一眼可辨，行空整行不渲染（简报层不做催收）；
+ * ②底层原始块收进默认折叠手风琴（逃生舱），展开完整继承 09 期宪法级资产
+ *   （保字排版/原文逐字核对/注入序三段）；
+ * ③空块全量静音（未配置块不渲染，EMPTY_HINTS 催收框退役——09 稿批注 #4）。
+ * 数据获取在容器（InspectorPanel，光标窗口随请求上行=中插态真切片）。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../../../components/Icon.vue'
@@ -56,21 +57,22 @@ const TIME_SOURCE_LABELS: Record<string, string> = {
   zero: '空世界',
 }
 
-/** 空块的体检提示（一句话告诉作者去哪补录——「什么值得录」的回报可见） */
-const EMPTY_HINTS: Record<string, string> = {
-  style_positive: '文风页填画像或选预设后，AI 会照此校准语感',
-  author_samples: '文风页收几段亲笔样本，是质量杠杆最大的注入',
-  proper_nouns: '世界页建好角色（或在正文 @ 提及），AI 写作时称呼不乱叫',
-  canon: '世界页「真相」账本记一条，AI 便知晓事实与秘密',
-  secrets: '世界页把实体设为「私有」，AI 知晓其档案但绝不写出',
-  echoes: '写过的章节会进记忆，后续章节自动呼应细节',
-  spatial: '世界页设定地图比例尺后，距离与行程会带常识感',
+/** 简报·引力行来源人话（对齐世界模型卡 INTENT_SOURCE_LABELS 口径——AI 猜的必须亮身份） */
+const BRIEF_INTENT_LABELS: Record<string, string> = {
+  request: '本次请求',
+  outline: '大纲',
+  inferred: 'AI 猜的',
+  baton: '上一章接力',
+  spine: '你的打算',
 }
 
 // ===== 折叠态（组件内不持久化；切章数据置空时随 watch 复位回默认） =====
 
-/** 默认只展开「场景身份」：恒居注入序首位且短，让保字排版第一眼可见 */
+/** 块级展开：默认只展开「场景身份」（恒居注入序首位且短，保字排版第一眼可见） */
 const expandedKeys = ref<Set<string>>(new Set(['scene']))
+/** 底层手风琴（逃生舱）：默认折叠——模式切换/刷新不重置（旧数据冻结流不置空
+ * preview），只有切章复位（watch preview→null）收回，保持整洁折叠态 */
+const rawOpen = ref(false)
 /** 「原文」对照开关：全部块正文回退等宽逐字直出（信任逃生舱，不持久化） */
 const rawView = ref(false)
 const blocksEl = ref<HTMLElement | null>(null)
@@ -78,7 +80,11 @@ const blocksEl = ref<HTMLElement | null>(null)
 watch(
   () => props.preview,
   (n) => {
-    if (!n) expandedKeys.value = new Set(['scene'])
+    if (!n) {
+      expandedKeys.value = new Set(['scene'])
+      rawOpen.value = false
+      rawView.value = false
+    }
   },
 )
 
@@ -100,6 +106,12 @@ function toggleBlock(b: ContextPreviewBlock) {
   }
 }
 
+/** 原文开关（驻手风琴头行）：打开时顺带展开手风琴——逐字核对需要看得见正文 */
+function toggleRawView() {
+  rawView.value = !rawView.value
+  if (rawView.value) rawOpen.value = true
+}
+
 // ===== 汇总行 =====
 
 const totalLabel = computed(() => (props.preview ? props.preview.total_chars.toLocaleString('zh-CN') : ''))
@@ -115,14 +127,45 @@ const worldTimeLabel = computed(() => {
 const isReloading = computed(() => props.loading && !!props.preview)
 const isFirstLoad = computed(() => props.loading && !props.preview)
 
+// ===== 战局态势简报（顶层高密卡：行空整行不渲染；全空单行状态陈述非催收） =====
+
+type BriefRow =
+  | { kind: 'scene'; label: string; name: string; derived: boolean; bridge: boolean }
+  | { kind: 'items'; label: string; items: string[]; sourceLabel?: string }
+
+const briefingRows = computed<BriefRow[]>(() => {
+  const b = props.preview?.briefing
+  if (!b) return []
+  const rows: BriefRow[] = []
+  if (b.scene?.name) {
+    rows.push({
+      kind: 'scene', label: '场景',
+      name: b.scene.name,
+      derived: !!b.scene.derived,
+      bridge: !!b.scene.bridge,
+    })
+  }
+  if (b.onstage?.length) rows.push({ kind: 'items', label: '在场', items: b.onstage })
+  if (b.props?.length) rows.push({ kind: 'items', label: '焦点物件', items: b.props })
+  if (b.secrets?.length) rows.push({ kind: 'items', label: '守死秘密', items: b.secrets })
+  if (b.intent) {
+    rows.push({
+      kind: 'items', label: '引力', items: [b.intent],
+      sourceLabel: b.intent_source ? BRIEF_INTENT_LABELS[b.intent_source] || b.intent_source : undefined,
+    })
+  }
+  return rows
+})
+
 // ===== 段分组（注入序切段；段是视觉切分，块才是折叠单元） =====
 
+// 空块静音（2026-09-15）：未配置块不渲染，整段皆空的段自动消失——不造催收框
 const segments = computed(() => {
   if (!props.preview) return []
   return SEGMENT_ORDER.map((id) => ({
     id,
     title: SEGMENT_TITLES[id],
-    blocks: props.preview!.blocks.filter((b) => segmentOfKey(b.key) === id),
+    blocks: props.preview!.blocks.filter((b) => b.content && segmentOfKey(b.key) === id),
   })).filter((s) => s.blocks.length > 0)
 })
 
@@ -180,32 +223,41 @@ function isHot(b: ContextPreviewBlock): boolean {
 <template>
   <section class="ctx-preview">
     <div class="ctx-title">AI 此刻读到的</div>
-    <p class="ctx-hint">AI 续写时读到的，就是下面这些字。空着的块 = 这次用不上。</p>
+    <p class="ctx-hint">AI 续写时将参考以下事实与约束；态势一眼可辨，逐字细节收在底层。</p>
 
     <template v-if="preview">
       <div class="ctx-summary">
-        <div class="sum-line1">
-          <span class="sum-total"><b>{{ totalLabel }}</b> 字</span>
-          <span class="sum-actions">
-            <button
-              class="sum-raw"
-              :class="{ on: rawView }"
-              title="显示 AI 实际读到的原始文本（逐字等宽）"
-              @click="rawView = !rawView"
-            >原文</button>
-            <button
-              class="sum-refresh"
-              title="按当前正文与设定重新读取"
-              :disabled="loading"
-              @click="emit('refresh')"
-            ><Icon name="arrow-path" :size="13" :class="{ spin: loading }" /></button>
-          </span>
-        </div>
-        <div class="sum-line2">
-          <span>{{ worldTimeLabel }}</span>
-          <span class="dot">·</span>
-          <span>{{ preview.world_sourced ? '设定来自世界页' : '设定来自章节' }}</span>
-        </div>
+        <span>{{ worldTimeLabel }}</span>
+        <span class="dot">·</span>
+        <span>{{ preview.world_sourced ? '设定来自世界页' : '设定来自章节' }}</span>
+        <button
+          class="sum-refresh"
+          title="按当前正文与设定重新读取"
+          :disabled="loading"
+          @click="emit('refresh')"
+        ><Icon name="arrow-path" :size="13" :class="{ spin: loading }" /></button>
+      </div>
+
+      <!-- 战局态势简报（顶层高密卡；行空整行不渲染，全空单行状态陈述） -->
+      <div class="ctx-briefing" :class="{ 'is-reloading': isReloading }">
+        <div class="bf-head">战局态势</div>
+        <template v-if="briefingRows.length">
+          <div v-for="row in briefingRows" :key="row.label" class="bf-row">
+            <span class="bf-k">{{ row.label }}</span>
+            <span class="bf-v">
+              <template v-if="row.kind === 'scene'">
+                <span class="bf-scene">{{ row.name }}</span>
+                <span class="bf-tag" :class="{ 'is-derived': row.derived }">{{ row.derived ? '正文推导' : '本章钉' }}</span>
+                <span v-if="row.bridge" class="bf-tag is-bridge">中插</span>
+              </template>
+              <template v-else>
+                <span v-for="(item, i) in row.items" :key="i" class="bf-item" :title="item">{{ item }}</span>
+                <span v-if="row.sourceLabel" class="bf-src">{{ row.sourceLabel }}</span>
+              </template>
+            </span>
+          </div>
+        </template>
+        <div v-else class="bf-none">暂无态势</div>
       </div>
     </template>
 
@@ -245,62 +297,74 @@ function isHot(b: ContextPreviewBlock): boolean {
         <span>重新读取中…</span>
       </div>
 
-      <div ref="blocksEl" class="ctx-blocks" :class="{ 'is-reloading': isReloading }">
-        <section v-for="seg in segments" :key="seg.id" class="ctx-seg">
-          <div class="seg-label">{{ seg.title }}</div>
-          <template v-for="b in seg.blocks" :key="b.key">
-            <!-- 空块：单行虚线 + 补录引导 -->
-            <div v-if="!b.content" class="blk-empty">
-              <span class="blk-empty-title">{{ b.title }}</span>
-              <span class="blk-empty-tag">还没录</span>
-              <span class="blk-empty-hint">{{ EMPTY_HINTS[b.key] || '' }}</span>
-            </div>
-            <!-- 满块：折叠头行（仪表盘）+ 展开全量正文 -->
-            <div v-else class="blk" :class="{ 'is-open': isOpen(b) }" :data-blk="b.key">
-              <button class="blk-head" @click="toggleBlock(b)">
-                <Icon name="chevron-right" :size="12" class="blk-chev" />
-                <span class="blk-title">{{ b.title }}</span>
-                <span class="blk-meta">{{ b.chars.toLocaleString('zh-CN') }} 字<template v-if="b.source"> · {{ friendlySource(b.source) }}</template></span>
-              </button>
-              <div v-if="b.budget_chars > 0" class="blk-meter">
-                <div class="blk-meter-track" :title="`${b.chars} / ${b.budget_chars} 字（上限）`">
-                  <div class="blk-meter-fill" :class="{ hot: isHot(b) }" :style="{ width: fillWidth(b) }" />
-                </div>
-                <span v-if="b.trimmed" class="blk-meter-trim">{{ b.trimmed }}</span>
-              </div>
-              <div class="blk-body">
-                <div class="blk-clip">
-                  <div class="blk-inner">
-                    <pre v-if="rawView" class="blk-raw">{{ b.content }}</pre>
-                    <template v-else>
-                      <template v-for="(vm, i) in vmsOf(b)" :key="i">
-                        <div v-if="vm.kind === 'heading'" class="nd nd-heading">{{ vm.text }}</div>
-                        <div v-else-if="vm.kind === 'sample'" class="nd nd-sample">{{ vm.text }}</div>
-                        <div v-else-if="vm.kind === 'note'" class="nd nd-note">{{ vm.text }}</div>
-                        <div v-else-if="vm.kind === 'plain'" class="nd nd-plain">{{ vm.text }}</div>
-                        <div v-else-if="vm.kind === 'kv'" class="nd nd-kv">
-                          <span class="k" :class="{ 'is-pin': vm.pin }">{{ vm.k }}</span>
-                          <span class="v">{{ vm.v }}</span>
+      <!-- 底层逃生舱：原始提示词块手风琴（默认折叠；展开继承 09 期全部资产） -->
+      <div class="ctx-raw" :class="{ 'is-open': rawOpen }">
+        <div class="raw-head">
+          <button class="raw-toggle" @click="rawOpen = !rawOpen">
+            <Icon name="chevron-right" :size="12" class="raw-chev" />
+            <span class="raw-title">查看底层原始提示词细节<template v-if="totalLabel">（共 {{ totalLabel }} 字）</template></span>
+          </button>
+          <button
+            class="sum-raw"
+            :class="{ on: rawView }"
+            title="显示 AI 实际读到的原始文本（逐字等宽）"
+            @click="toggleRawView"
+          >原文</button>
+        </div>
+        <div class="raw-body">
+          <div class="raw-clip">
+            <div ref="blocksEl" class="ctx-blocks" :class="{ 'is-reloading': isReloading }">
+              <section v-for="seg in segments" :key="seg.id" class="ctx-seg">
+                <div class="seg-label">{{ seg.title }}</div>
+                <template v-for="b in seg.blocks" :key="b.key">
+                  <div class="blk" :class="{ 'is-open': isOpen(b) }" :data-blk="b.key">
+                    <button class="blk-head" @click="toggleBlock(b)">
+                      <Icon name="chevron-right" :size="12" class="blk-chev" />
+                      <span class="blk-title">{{ b.title }}</span>
+                      <span class="blk-meta">{{ b.chars.toLocaleString('zh-CN') }} 字<template v-if="b.source"> · {{ friendlySource(b.source) }}</template></span>
+                    </button>
+                    <div v-if="b.budget_chars > 0" class="blk-meter">
+                      <div class="blk-meter-track" :title="`${b.chars} / ${b.budget_chars} 字（上限）`">
+                        <div class="blk-meter-fill" :class="{ hot: isHot(b) }" :style="{ width: fillWidth(b) }" />
+                      </div>
+                      <span v-if="b.trimmed" class="blk-meter-trim">{{ b.trimmed }}</span>
+                    </div>
+                    <div class="blk-body">
+                      <div class="blk-clip">
+                        <div class="blk-inner">
+                          <pre v-if="rawView" class="blk-raw">{{ b.content }}</pre>
+                          <template v-else>
+                            <template v-for="(vm, i) in vmsOf(b)" :key="i">
+                              <div v-if="vm.kind === 'heading'" class="nd nd-heading">{{ vm.text }}</div>
+                              <div v-else-if="vm.kind === 'sample'" class="nd nd-sample">{{ vm.text }}</div>
+                              <div v-else-if="vm.kind === 'note'" class="nd nd-note">{{ vm.text }}</div>
+                              <div v-else-if="vm.kind === 'plain'" class="nd nd-plain">{{ vm.text }}</div>
+                              <div v-else-if="vm.kind === 'kv'" class="nd nd-kv">
+                                <span class="k" :class="{ 'is-pin': vm.pin }">{{ vm.k }}</span>
+                                <span class="v">{{ vm.v }}</span>
+                              </div>
+                              <div v-else-if="vm.kind === 'item'" class="nd nd-item">
+                                <span v-if="vm.name" class="it-name">{{ vm.name }}：</span>
+                                <span
+                                  v-for="(sp, si) in vm.spans"
+                                  :key="si"
+                                  :class="sp.mark ? ['it-mark', `tone-${markTone(sp.text)}`] : 'it-text'"
+                                >{{ sp.text }}</span>
+                              </div>
+                              <div v-else-if="vm.kind === 'profile'" class="nd nd-profile" :class="{ 'is-arrow': vm.arrow }">
+                                <span v-if="vm.label" class="pf-label">{{ vm.label }}</span>{{ vm.text }}
+                              </div>
+                            </template>
+                          </template>
                         </div>
-                        <div v-else-if="vm.kind === 'item'" class="nd nd-item">
-                          <span v-if="vm.name" class="it-name">{{ vm.name }}：</span>
-                          <span
-                            v-for="(sp, si) in vm.spans"
-                            :key="si"
-                            :class="sp.mark ? ['it-mark', `tone-${markTone(sp.text)}`] : 'it-text'"
-                          >{{ sp.text }}</span>
-                        </div>
-                        <div v-else-if="vm.kind === 'profile'" class="nd nd-profile" :class="{ 'is-arrow': vm.arrow }">
-                          <span v-if="vm.label" class="pf-label">{{ vm.label }}</span>{{ vm.text }}
-                        </div>
-                      </template>
-                    </template>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </template>
+              </section>
             </div>
-          </template>
-        </section>
+          </div>
+        </div>
       </div>
     </template>
   </section>
@@ -332,57 +396,42 @@ function isHot(b: ContextPreviewBlock): boolean {
 }
 
 .ctx-hint {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0;
 }
 
-/* ===== 汇总两行 ===== */
+/* ===== 汇总行（时刻/来源一行 + 刷新；总字数移驻手风琴头行） ===== */
 .ctx-summary {
   display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-.sum-line1 {
-  display: flex;
   align-items: center;
-}
-.sum-total {
-  font-size: 0.6875rem;
+  gap: 0.3rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
-.sum-total b {
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: var(--font-heading);
-}
-.sum-actions {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
+.ctx-summary .dot {
+  opacity: 0.5;
 }
 .sum-raw {
   padding: 0.0625rem 0.4375rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .sum-raw:hover {
   color: var(--accent-500);
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .sum-raw.on {
   color: var(--accent-500);
-  border-color: var(--accent-400, #9685c2);
-  background: color-mix(in srgb, var(--accent-400, #9685c2) 14%, transparent);
+  border-color: var(--accent-400);
+  background: color-mix(in srgb, var(--accent-400) 14%, transparent);
 }
 .sum-refresh {
   display: inline-flex;
@@ -390,15 +439,16 @@ function isHot(b: ContextPreviewBlock): boolean {
   justify-content: center;
   width: 22px;
   height: 22px;
+  margin-left: auto;
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .sum-refresh:hover {
   color: var(--accent-500);
-  background: var(--hover-bg);
+  background: var(--state-hover);
 }
 .sum-refresh:disabled {
   cursor: default;
@@ -409,16 +459,145 @@ function isHot(b: ContextPreviewBlock): boolean {
 @keyframes ctx-spin {
   to { transform: rotate(360deg); }
 }
-.sum-line2 {
+
+/* ===== 战局态势简报（顶层高密卡；行空不渲染） ===== */
+.ctx-briefing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.ctx-briefing.is-reloading {
+  opacity: 0.5;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.bf-head {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+.bf-row {
   display: flex;
   align-items: baseline;
-  gap: 0.3rem;
-  font-size: 0.6875rem;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.bf-k {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+  font-size: var(--text-xs);
+  font-weight: 600;
   color: var(--text-muted);
+}
+.bf-v {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.375rem;
+  color: var(--text-primary);
+}
+.bf-scene {
+  font-weight: 600;
+}
+.bf-tag {
+  display: inline-block;
+  padding: 0.03125rem 0.3125rem;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  border-radius: 999px;
+  vertical-align: 0.0625rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+}
+.bf-tag.is-derived {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.bf-tag.is-bridge {
+  color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-400) 14%, transparent);
+}
+.bf-item {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.bf-src {
+  font-size: var(--text-xs);
+  font-style: italic;
+  color: var(--text-muted);
+}
+.bf-none {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ===== 底层逃生舱（原始块手风琴，默认折叠） ===== */
+.ctx-raw {
+  margin-top: 0.25rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid var(--border-color);
+}
+.raw-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.raw-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.75rem;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.raw-toggle:hover {
+  color: var(--text-primary);
+}
+.raw-chev {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.ctx-raw.is-open .raw-chev {
+  transform: rotate(90deg);
+  color: var(--accent-500);
+}
+.raw-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.sum-line2 .dot {
-  opacity: 0.5;
+.raw-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-3) var(--ease-out);
+}
+.ctx-raw.is-open .raw-body {
+  grid-template-rows: 1fr;
+}
+.raw-clip {
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* ===== 模式五档 ===== */
@@ -429,22 +608,22 @@ function isHot(b: ContextPreviewBlock): boolean {
 .mode-btn {
   flex: 1;
   padding: 0.25rem 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-2) var(--ease-out);
 }
 .mode-btn:hover {
   color: var(--text-primary);
-  border-color: var(--accent-400, #9685c2);
+  border-color: var(--accent-400);
 }
 .mode-btn.active {
   color: var(--accent-500);
-  border-color: var(--accent-400, #9685c2);
-  background: color-mix(in srgb, var(--accent-400, #9685c2) 14%, transparent);
+  border-color: var(--accent-400);
+  background: color-mix(in srgb, var(--accent-400) 14%, transparent);
   font-weight: 600;
 }
 
@@ -455,11 +634,11 @@ function isHot(b: ContextPreviewBlock): boolean {
   gap: 0.375rem;
 }
 .ctx-loading-text {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .skel-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.05em;
@@ -467,7 +646,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 }
 .skel-row {
   height: 1.75rem;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   animation: ctx-pulse 1.4s ease-in-out infinite;
 }
@@ -482,29 +661,29 @@ function isHot(b: ContextPreviewBlock): boolean {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.625rem;
-  border: 1px solid var(--danger, #c66);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--danger, #c66) 6%, transparent);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 .ctx-error-text {
   flex: 1;
-  font-size: 0.6875rem;
-  color: var(--danger, #c66);
+  font-size: var(--text-xs);
+  color: var(--danger);
   word-break: break-all;
 }
 .ctx-error-retry {
   flex-shrink: 0;
   padding: 0.1875rem 0.625rem;
-  font-size: 0.625rem;
-  color: var(--danger, #c66);
+  font-size: var(--text-xs);
+  color: var(--danger);
   background: transparent;
-  border: 1px solid var(--danger, #c66);
-  border-radius: 0.375rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .ctx-error-retry:hover {
-  color: #fff;
-  background: var(--danger, #c66);
+  color: var(--bg-canvas);
+  background: var(--danger);
 }
 
 /* ===== 重读指示（扫描条 + 列表冻结） ===== */
@@ -515,7 +694,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 }
 .ctx-reloading span {
   flex-shrink: 0;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .scanbar {
@@ -533,7 +712,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   width: 30%;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent-400, #9685c2);
+  background: var(--accent-400);
   animation: ctx-scan 1.1s ease-in-out infinite;
 }
 @keyframes ctx-scan {
@@ -543,7 +722,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 .ctx-blocks.is-reloading {
   opacity: 0.5;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out);
 }
 
 /* ===== 段分组 ===== */
@@ -551,7 +730,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   margin-top: 0.25rem;
 }
 .seg-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.05em;
@@ -561,49 +740,15 @@ function isHot(b: ContextPreviewBlock): boolean {
   margin-top: 0.25rem;
 }
 
-/* ===== 空块单行 ===== */
-.blk-empty {
-  display: flex;
-  align-items: baseline;
-  gap: 0.375rem;
-  padding: 0.3125rem 0.625rem;
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-sm, 4px);
-  opacity: 0.85;
-}
-.blk + .blk,
-.blk + .blk-empty,
-.blk-empty + .blk,
-.blk-empty + .blk-empty {
-  margin-top: 0.375rem;
-}
-.blk-empty-title {
-  flex-shrink: 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.blk-empty-tag {
-  flex-shrink: 0;
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  font-style: italic;
-}
-.blk-empty-hint {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-}
-
 /* ===== 满块折叠卡 ===== */
 .blk {
   background: var(--bg-canvas);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   padding: 0.375rem 0.625rem;
+}
+.blk + .blk {
+  margin-top: 0.375rem;
 }
 .blk-head {
   display: flex;
@@ -620,7 +765,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 .blk-chev {
   flex-shrink: 0;
   color: var(--text-muted);
-  transition: transform 0.2s ease;
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .blk.is-open .blk-chev {
   transform: rotate(90deg);
@@ -643,7 +788,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -666,23 +811,23 @@ function isHot(b: ContextPreviewBlock): boolean {
 .blk-meter-fill {
   height: 100%;
   border-radius: 999px;
-  background: var(--accent-400, #9685c2);
-  transition: width 0.2s ease;
+  background: var(--accent-400);
+  transition: width var(--dur-3) var(--ease-out);
 }
 .blk-meter-fill.hot {
-  background: var(--danger, #c66);
+  background: var(--danger);
 }
 .blk-meter-trim {
   flex-shrink: 0;
-  font-size: 0.625rem;
-  color: var(--danger, #c66);
+  font-size: var(--text-xs);
+  color: var(--danger);
 }
 
 /* 展开动画（grid 0fr→1fr，无依赖）；展开即全量，滚动交给面板 */
 .blk-body {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.2s ease;
+  transition: grid-template-rows var(--dur-3) var(--ease-out);
 }
 .blk.is-open .blk-body {
   grid-template-rows: 1fr;
@@ -698,8 +843,8 @@ function isHot(b: ContextPreviewBlock): boolean {
 /* 原文对照视图（等宽逐字） */
 .blk-raw {
   margin: 0;
-  font-family: var(--font-mono, monospace);
-  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -720,13 +865,13 @@ function isHot(b: ContextPreviewBlock): boolean {
   font-family: var(--font-heading);
 }
 .nd-heading {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-secondary);
   margin: 0.25rem 0;
 }
 .nd-sample {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
   margin: 0.5rem 0 0.125rem;
@@ -735,7 +880,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   margin-top: 0;
 }
 .nd-note {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-style: italic;
   margin-top: 0.375rem;
@@ -748,7 +893,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 .nd-kv .k {
   flex: 0 0 auto;
   min-width: 3.5em;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -787,19 +932,19 @@ function isHot(b: ContextPreviewBlock): boolean {
   display: inline-block;
   margin: 0 0.0625rem;
   padding: 0.03125rem 0.3125rem;
-  font-size: 0.625rem;
+  font-size: var(--text-xs);
   line-height: 1.4;
   border-radius: 999px;
   vertical-align: 0.0625rem;
 }
 .it-mark.tone-present {
-  color: var(--ok, #4a9);
-  background: color-mix(in srgb, var(--ok, #4a9) 12%, transparent);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 .it-mark.tone-dead {
-  color: var(--danger, #c66);
+  color: var(--danger);
   font-weight: 600;
-  background: color-mix(in srgb, var(--danger, #c66) 10%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 .it-mark.tone-moment {
   color: var(--text-secondary);
@@ -818,12 +963,12 @@ function isHot(b: ContextPreviewBlock): boolean {
   border-left: 2px solid var(--border-color);
 }
 .nd-profile.is-arrow {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 .pf-label {
   display: block;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
 }

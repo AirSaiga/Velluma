@@ -64,8 +64,11 @@ export interface GhostWarning {
 
 export interface HeartbeatResult {
   dock_parts: DockPart[]
-  /** 句子级闸门触发（半句悬停，挂件应静默）——前端据此清舱收卡 */
+  /** 句子级闸门触发（半句悬停，挂件应静音）——前端据此清舱收卡 */
   dock_muted?: boolean
+  /** 本帧挂件的缓存年龄（秒；2026-09-15 槽位治理）——dock 重算失败时旧缓存
+   *  照发，前端据此在舱内标「N 分钟前的旧卡」；无件/无时间戳缺省 */
+  dock_parts_age_s?: number | null
   direction_cards: DirectionCard[]
   intent_source: string
   intent_arc: string
@@ -227,12 +230,30 @@ export interface SpineSuggestion {
 }
 
 // ===== AI 所见预览（P5 B2，docs/foundation-hardening.md §2.1）=====
+/** 预览块 key 全集（=后端 render_system_blocks 注入序 14 块；2026-09-15
+ *  从 P5 时代 7 键补齐——此前 scene/warm/entities/relations/negative/
+ *  anti_pseudo_sensory 等七键被类型联合漏收，运行时靠 any 透传才没炸） */
+export type ContextPreviewBlockKey =
+  | 'scene'
+  | 'warm'
+  | 'entities'
+  | 'proper_nouns'
+  | 'canon'
+  | 'secrets'
+  | 'worldview'
+  | 'relations'
+  | 'negative'
+  | 'echoes'
+  | 'spatial'
+  | 'style_positive'
+  | 'author_samples'
+  | 'anti_pseudo_sensory'
+
 /** 预览块（与 stitch-ghost 真实注入同源——后端与 stitch 路由共用同一装配函数） */
 export interface ContextPreviewBlock {
-  /** style_positive|author_samples|proper_nouns|canon|secrets|echoes|spatial（注入序；secrets=A1 私有设定） */
-  key: 'style_positive' | 'author_samples' | 'proper_nouns' | 'canon' | 'secrets' | 'echoes' | 'spatial'
+  key: ContextPreviewBlockKey
   title: string
-  /** 块渲染文本；空串 = 该块未配置（「未配置」灰字提示） */
+  /** 块渲染文本；空串 = 该块未配置（前端静音不渲染，2026-09-15） */
   content: string
   chars: number
   /** 来源徽标（世界实体/章级绑定/真相层/私有设定/文风卡/文风样本库/记忆召回/世界比例尺） */
@@ -241,6 +262,33 @@ export interface ContextPreviewBlock {
   budget_chars: number
   /** 被裁信息（预算超支时该块条目收缩的人话说明；未触发裁剪时无此字段） */
   trimmed?: string | null
+}
+
+/** 战局态势简报·场景行（光标派生取景或本章钉回退） */
+export interface ContextBriefingScene {
+  name: string
+  /** true=正文转场推导；false=本章钉 */
+  derived: boolean
+  /** 派生命中的转场动词（钉回退空串） */
+  via: string
+  /** FIM 中插态：简报按光标现场（而非文末）装配 */
+  bridge?: boolean
+}
+
+/** 战局态势简报（2026-09-15 轻量化）：装配快照的结构化提炼，零 LLM。
+ *  行级静音契约：数据缺失的行后端省略（exclude_none），前端整行不渲染。 */
+export interface ContextBriefing {
+  scene?: ContextBriefingScene | null
+  /** 在场存活人物（含此刻状态后缀，如「林尘（在途·进度40%）」） */
+  onstage?: string[] | null
+  /** 焦点物件（在场投影提及资产） */
+  props?: string[] | null
+  /** 守死秘密摘要（整人私有 + 字段级 secret） */
+  secrets?: string[] | null
+  /** 当前引力（意图文本摘要） */
+  intent?: string | null
+  /** request/outline/inferred/baton/spine（AI 猜的必须亮身份） */
+  intent_source?: string | null
 }
 
 export interface ContextPreview {
@@ -252,6 +300,8 @@ export interface ContextPreview {
   world_time_source: 'chapter_anchor' | 'prev_anchor' | 'max_event' | 'zero'
   /** 世界页桥接是否生效（实体/关系来自活舆图而非旧章级绑定表） */
   world_sourced: boolean
+  /** 战局态势简报（增量字段；空书各键省略） */
+  briefing?: ContextBriefing | null
 }
 
 // ============================================================
@@ -330,12 +380,19 @@ export const adaptiveApi = {
   /**
    * AI 此刻所见预览（P5 B2）：stitch-ghost 将注入的全部上下文块，按注入序返回。
    * 只跑装配不调 LLM 文本生成；mode 五档（stitch/continue/burst/outline/open）缺省 continue。
+   * cursor（2026-09-15 FIM 真切片）：编辑器在场时传光标窗口（before ≤500 字/after
+   * ≤150 字）——中插（骨架跳写）时预览/简报按光标现场装配，不再读到章节尾部语境；
+   * 缺省不传=后端读落库章节尾部（旧路径）。空串字段不上行（URL 长度纪律）。
    */
   contextPreview: async (
     chapterId: string,
     mode: 'stitch' | 'continue' | 'burst' | 'outline' | 'open' = 'continue',
+    cursor?: { before: string; after: string },
   ): Promise<ContextPreview> => {
-    return requestJson(`/chapters/${chapterId}/adaptive/context-preview?mode=${mode}`)
+    const params = new URLSearchParams({ mode })
+    if (cursor?.before) params.set('before_cursor', cursor.before)
+    if (cursor?.after) params.set('after_cursor', cursor.after)
+    return requestJson(`/chapters/${chapterId}/adaptive/context-preview?${params.toString()}`)
   },
 
   /** 协作交互埋点（P0-3 本地 jsonl 零上报；词表见后端端点 6 注释） */

@@ -44,6 +44,8 @@ async def context_preview(
     chapter_id: str,
     mode: str = "continue",
     db: AsyncSession = Depends(get_db),
+    before_cursor: str = "",
+    after_cursor: str = "",
 ):
     """AI 此刻所见预览：stitch-ghost 将注入的全部上下文块，按注入序返回。
 
@@ -51,32 +53,49 @@ async def context_preview(
     rolling_prefix 取章节正文纯文本尾部（stitch 由前端送纯文本；这里从落库
     HTML 剥成纯文本，与 memory_indexing 同口径），assemble 内部仍按各模式
     统一截 [-150:] 拼 query。open 模式 query 走大纲（同 stitch）。
+
+    光标真切片（2026-09-15 FIM 修复，docs/ai-view-briefing-feasibility.md §5）：
+    前端编辑器在场时送 before_cursor（光标前 ≤500 字）/after_cursor（光标后
+    ≤150 字）——传入即以光标前文取代落库章节尾部作装配输入，中插（骨架跳写）
+    时预览/简报反映真实光标现场而非文末语境；after_cursor 仅作中插态标记
+    （briefing.scene.bridge），不进装配（与 stitch 桥接态语义一致——后文
+    不入称呼表过滤）。缺省双空串=旧路径逐字节不变。双端硬截断防 URL 超限
+    （uvicorn h11 / vite 代理 16KB 上限，600+200 汉字编码后 ≈7KB）。
+    ⚠ 参数序：db 居第三位是直调兼容契约（单测 positionally 传 session），
+    新增 query 参数一律排 db 之后，勿按 FastAPI 惯例重排。
     """
     if mode not in _PREVIEW_MODES:
         raise HTTPException(422, detail=f"mode 仅支持 {'/'.join(_PREVIEW_MODES)}")
 
-    # rolling_prefix = 章节正文尾部（剥 HTML；失败/无章退化为空串，open 模式不消费）
-    # 句界净截与 stitch 路由同源（预览与注入同源红线，2026-08-25 调窗后同步；
-    # 2026-09-04 修复：截窗 cap 补齐 mode-aware——此前预览对所有模式统一 LONG
-    # 1200，stitch/continue 真实注入只有 SHORT 800，称呼表过滤/scene_hint 取材
-    # 两端口径不一致，预览可能显示真实注入里被过滤掉的名字）
-    rolling_prefix = ""
-    try:
-        chapter = await db.get(Chapter, chapter_id)
-        if chapter is not None:
-            from backend.services.rag.memory_indexing import _html_to_plain
+    before_cursor = (before_cursor or "")[:600]
+    after_cursor = (after_cursor or "")[:200]
 
-            _preview_cap = (
-                0 if mode == "open"
-                else STITCH_ROLLING_LONG_MAX_CHARS if mode in ("outline", "burst")
-                else STITCH_ROLLING_SHORT_MAX_CHARS
-            )
-            if _preview_cap:
-                rolling_prefix = sentence_clean_tail(
-                    _html_to_plain(chapter.content_text or ""), _preview_cap,
-                )
-    except Exception:
+    if before_cursor.strip():
+        # 光标路径：编辑器活态文本（与 stitch 前端送纯文本同口径），跳过落库读取
+        rolling_prefix = before_cursor
+    else:
+        # rolling_prefix = 章节正文尾部（剥 HTML；失败/无章退化为空串，open 模式不消费）
+        # 句界净截与 stitch 路由同源（预览与注入同源红线，2026-08-25 调窗后同步；
+        # 2026-09-04 修复：截窗 cap 补齐 mode-aware——此前预览对所有模式统一 LONG
+        # 1200，stitch/continue 真实注入只有 SHORT 800，称呼表过滤/scene_hint 取材
+        # 两端口径不一致，预览可能显示真实注入里被过滤掉的名字）
         rolling_prefix = ""
+        try:
+            chapter = await db.get(Chapter, chapter_id)
+            if chapter is not None:
+                from backend.services.rag.memory_indexing import _html_to_plain
+
+                _preview_cap = (
+                    0 if mode == "open"
+                    else STITCH_ROLLING_LONG_MAX_CHARS if mode in ("outline", "burst")
+                    else STITCH_ROLLING_SHORT_MAX_CHARS
+                )
+                if _preview_cap:
+                    rolling_prefix = sentence_clean_tail(
+                        _html_to_plain(chapter.content_text or ""), _preview_cap,
+                    )
+        except Exception:
+            rolling_prefix = ""
 
     ctx = await assemble_stitch_context(
         chapter_id=chapter_id,
@@ -87,4 +106,8 @@ async def context_preview(
     )
     # 显式构造 response model：response_model 只在路由层做文档/序列化，直调
     # （单测/内部复用）也拿到结构化对象而非裸 dict
-    return ContextPreviewResponse(**build_context_preview(ctx, mode))
+    return ContextPreviewResponse(**build_context_preview(
+        ctx, mode,
+        bridge=bool(after_cursor.strip()),
+        recent_text=rolling_prefix[:600],
+    ))

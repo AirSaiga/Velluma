@@ -430,12 +430,156 @@ def _trim_note(entries_total: int, entries_kept: int) -> str:
     return f"预算超支，{entries_total} 条 → {entries_kept} 条"
 
 
-def build_context_preview(ctx: StitchContext, mode: str) -> Dict[str, Any]:
-    """把装配快照转成预览 JSON（块序=注入序；空块原样返回，前端显示「未配置」）。
+# ============================================================
+# 战局态势简报（2026-09-15 轻量化 · docs/ai-view-briefing-feasibility.md）
+# 从装配快照提炼结构化五行（零 LLM、零新增查询——全部是装配顺产副产品）。
+# 行级静音契约：数据缺失的行不进 briefing dict（exclude_none 省略键）。
+# ============================================================
+
+def _brief_clip(s: str, n: int) -> str:
+    """简报条目截断（保一个省略号位）。"""
+    s = (s or "").strip()
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _briefing_scene(ctx: StitchContext, bridge: bool) -> Optional[dict]:
+    """场景行：光标派生取景（含钉回退，derived 标志区分）> 本章钉名册直查。"""
+    sc = ctx.active_scene or {}
+    name = str(sc.get("loc_name") or "").strip()
+    if name:
+        return {
+            "name": name,
+            "derived": bool(sc.get("derived")),
+            "via": str(sc.get("via") or ""),
+            "bridge": bridge,
+        }
+    # active_scene=None（空章装配跳过派生）或派生回退未带名：名册直查章钉
+    pin = str(getattr(getattr(ctx.bundle, "chapter", None), "scene_location_id", None) or "")
+    if pin:
+        for loc in (getattr(ctx.bundle, "locations", None) or []):
+            if str(getattr(loc, "id", "") or "") == pin:
+                nm = str(getattr(loc, "name", "") or "").strip()
+                if nm:
+                    return {"name": nm, "derived": False, "via": "", "bridge": bridge}
+    return None
+
+
+def _briefing_onstage(ctx: StitchContext, recent_text: str) -> tuple:
+    """在场人物/焦点物件：复用 dock 在场投影纯函数（同一名册同一推演，零新查询）。
+
+    退化梯子同 dock：legacy 书（world_sourced=False）恒 (None, None)——
+    简报两行不渲染，不回退旧表（旧表无在场语义）。
+    """
+    bundle = ctx.bundle
+    if not getattr(bundle, "world_sourced", False):
+        return None, None
+    loc_id = ctx.active_loc_id or str(
+        getattr(getattr(bundle, "chapter", None), "scene_location_id", None) or ""
+    )
+    try:
+        # 惰性 import 防反向依赖成环（services/adaptive → context 已有正向边）
+        from backend.services.adaptive.components.dock_generator import onstage_projection
+
+        proj = onstage_projection(bundle, loc_id, recent_text)
+    except Exception:
+        proj = None
+    if not proj:
+        return None, None
+    onstage: List[str] = []
+    for ent in (proj.get("entities") or []):
+        nm = str(ent.get("name") or "").strip()
+        if not nm:
+            continue
+        state = str(ent.get("state") or "").strip()
+        onstage.append(f"{nm}（{state}）" if state else nm)
+    props: List[str] = []
+    for p in (proj.get("props") or []):
+        nm = str(p.get("name") or "").strip()
+        if not nm:
+            continue
+        desc = str(p.get("desc") or "").strip()
+        props.append(f"{nm}——{desc[:18]}" if desc else nm)
+    return (onstage or None), (props or None)
+
+
+def _briefing_secrets(ctx: StitchContext) -> Optional[List[str]]:
+    """守死秘密摘要：整人私有通道 + 字段级 secret（半露 partial 不算守死，不入行）。"""
+    out: List[str] = []
+    for s in (getattr(ctx.bundle, "character_secrets", None) or []):
+        if not isinstance(s, dict):
+            continue
+        nm = str(s.get("name") or "").strip()
+        text = str(s.get("text") or "").strip()
+        if not nm and not text:
+            continue
+        out.append(_brief_clip(f"{nm}：{text}" if nm else text, 36))
+    for fl in (getattr(ctx.bundle, "field_layer_secrets", None) or []):
+        if not isinstance(fl, dict) or str(fl.get("level") or "") != "secret":
+            continue
+        head = "·".join(x for x in (
+            str(fl.get("name") or "").strip(), str(fl.get("label") or "").strip(),
+        ) if x)
+        text = str(fl.get("text") or "").strip()
+        if not head and not text:
+            continue
+        out.append(_brief_clip(f"{head}：{text}" if head else text, 36))
+    return out[:6] or None
+
+
+def _briefing_intent(ctx: StitchContext) -> tuple:
+    """引力行：装配意图（request/outline/inferred/baton）> 章级 spine 打算（作者亲笔）。
+
+    spine 意图不走 chapter_intent（它经知识平面温卡注入 system 侧），简报侧
+    直接读 chapters.spine 补位——装配时零成本，且与温卡同一事实源。
+    """
+    if (ctx.chapter_intent or "").strip():
+        return _brief_clip(ctx.chapter_intent, 80), (ctx.intent_source or "")
+    spine = getattr(getattr(ctx.bundle, "chapter", None), "spine", None)
+    if isinstance(spine, dict):
+        text = str(spine.get("intent") or "").strip()
+        if text:
+            return _brief_clip(text, 80), "spine"
+    return None, None
+
+
+def _build_briefing(ctx: StitchContext, bridge: bool = False, recent_text: str = "") -> Dict[str, Any]:
+    """简报组装（纯函数，装配快照 → 结构化五行；行空不入 dict）。"""
+    briefing: Dict[str, Any] = {}
+    scene = _briefing_scene(ctx, bridge)
+    if scene:
+        briefing["scene"] = scene
+    onstage, props = _briefing_onstage(ctx, recent_text)
+    if onstage:
+        briefing["onstage"] = onstage
+    if props:
+        briefing["props"] = props
+    secrets = _briefing_secrets(ctx)
+    if secrets:
+        briefing["secrets"] = secrets
+    intent, source = _briefing_intent(ctx)
+    if intent:
+        briefing["intent"] = intent
+        if source:
+            briefing["intent_source"] = source
+    return briefing
+
+
+def build_context_preview(
+    ctx: StitchContext,
+    mode: str,
+    bridge: bool = False,
+    recent_text: str = "",
+) -> Dict[str, Any]:
+    """把装配快照转成预览 JSON（块序=注入序；空块原样返回，前端静音不渲染）。
 
     A3b：每块带 budget_chars（该块配额=budget.BLOCK_CHAR_BUDGETS 常量上限）与
     trimmed（被裁信息；无裁剪省略该键）——预览即调参界面，占用条与被裁事件
     与真实注入同源（system_blocks_with_usage 同一渲染函数）。
+
+    briefing（2026-09-15 轻量化）：同一装配快照的结构化提炼（零 LLM 零新
+    查询）。bridge=光标中插态标记（preview 路由按 after_cursor 传入）；
+    recent_text=光标前窗口（在场投影的提及判定源，与 dock 心跳同角色）。
+    两参缺省=纯函数旧路径（既有单测直调两参签名零破坏）。
     """
     rendered, usages = ctx.system_blocks_with_usage()
     usage_by_key = {u.key: u for u in usages} if usages is not None else {}
@@ -460,6 +604,8 @@ def build_context_preview(ctx: StitchContext, mode: str) -> Dict[str, Any]:
         "world_time": ctx.bundle.world_time,
         "world_time_source": ctx.bundle.world_time_source,
         "world_sourced": ctx.bundle.world_sourced,
+        # 战局态势简报（结构化提炼层；行空不入 dict，exclude_none 省略）
+        "briefing": _build_briefing(ctx, bridge=bridge, recent_text=recent_text),
         # 知识平面审计面（v3.1 §5 纠正回路②）：未选清单含原因——完备性
         # 从暗箱变成可审计、可申诉；前端未消费前为向后兼容增量字段
         "unselected": ctx.kg.unselected[:60],
