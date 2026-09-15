@@ -95,10 +95,30 @@ svc_logger_summary = ServiceLogger(logger, LOG_PREFIX_SUMMARY)
 REASONING_DISABLED: dict = {"reasoning": {"enabled": False}}
 
 
+def _is_local_endpoint_exception(exception: Exception) -> bool:
+    """连接错误是否指向本地端点（localhost/127.0.0.1/::1）。
+
+    快速失败判据（2026-09-15 槽位治理）：本地端点连接失败≈「服务没启动」，
+    30 秒内不会自愈——5 连指数退避重试纯属浪费（Tab 重算被拖 12~30s 才报错，
+    日志实证）。远端端点的连接错误仍可能是瞬时网络抖动，保持重试。
+    """
+    request = getattr(exception, "request", None)
+    url = getattr(request, "url", None) if request is not None else None
+    try:
+        host = str(url.host or "") if url is not None else ""
+    except Exception:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
+
 def _should_retry_exception(exception: Exception) -> bool:
     from openai import APIConnectionError, RateLimitError, InternalServerError, APIStatusError
 
-    if isinstance(exception, (APIConnectionError, RateLimitError, InternalServerError)):
+    if isinstance(exception, APIConnectionError):
+        # 本地端点（Ollama/vLLM/LM Studio）连接失败快速失败——不重试；
+        # 远端保持重试（瞬时网络抖动真实存在）
+        return not _is_local_endpoint_exception(exception)
+    if isinstance(exception, (RateLimitError, InternalServerError)):
         return True
     if isinstance(exception, APIStatusError):
         return exception.status_code >= 500
@@ -641,4 +661,7 @@ async def optimize_selection_with_llm(
         model=model,
         model_type=model_type,
         temperature=0.7,
+        # 选区改写与 stitch 同族（改写作者文本、延迟敏感）：显式关 thinking，
+        # 防槽位配推理模型时长思考拖住浮窗交互（stitch 主调用同款）。
+        reasoning_config=REASONING_DISABLED,
     )

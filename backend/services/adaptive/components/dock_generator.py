@@ -563,13 +563,20 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
         result = await call_llm_with_usage(
             system_prompt=sys_p,
             user_prompt=usr_p,
-            model_type="creative",
+            # 槽位归位（2026-09-15）：在场白名单匹配/三档物质性/结构化 JSON 编译
+            # 是强逻辑任务，归分析槽（reasoning），与 intent_inference 同判据。
+            # Tab 毫秒级唤醒要求延迟敏感：REASONING_DISABLED 必须保持——推理
+            # 模型把脑力聚焦在「遵守在场约束与输出 JSON」而非深度思考链。
+            model_type="reasoning",
             temperature=0.75,
-            max_tokens=budget_tokens,
+            # 预算下限 1600（state_tracker 同款先例）：实测 deepseek 类推理模型
+            # 无视 REASONING_DISABLED 照样烧 800-1000 隐藏思考 tokens，1500 下限
+            # 会被思考挤占致 content 空 → 空舱。
+            max_tokens=max(1600, budget_tokens),
             reasoning_config=REASONING_DISABLED,
         )
         get_adaptive_recorder(str(chapter_id)).record_result(
-            "adaptive.dock_generator", result, model_slot="creative")
+            "adaptive.dock_generator", result, model_slot="reasoning")
         parsed = parse_json_safe(result.content or "") or {}
         raw_parts = parsed.get("parts", [])
 

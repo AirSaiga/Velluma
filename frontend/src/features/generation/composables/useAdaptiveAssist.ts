@@ -51,6 +51,22 @@ export function setComponentErrors(raw?: Record<string, { ts: number; error: str
   }))
 }
 
+/**
+ * Tab 重算失败可见化（2026-09-15 槽位治理）：点名强制重算失败时，后端旧缓存
+ * 照发（成功落账/失败弃账）——舱内不再静默喂尸，亮一行报错并标注旧卡年龄。
+ * 模块级单例——SparkDock 直接读；null=正常（点名成功即清）。
+ */
+export interface DockRefreshError { brief: string; partsAgeS: number | null }
+export const dockRefreshError = ref<DockRefreshError | null>(null)
+
+/** 组件错误原文 → 舱内人话（错误串是开发者视角的 Connection error/超时等） */
+function _dockErrBrief(err: string): string {
+  const e = err || ''
+  if (/connect/i.test(e)) return '分析模型连接不上'
+  if (/超时|timeout/i.test(e)) return '分析模型响应超时'
+  return `生成失败（${e.slice(0, 24)}）`
+}
+
 /** P3-4（C6）：把 settle/finish 带回的「世界发现」跳过原因广播给收件箱空态（null = 清除） */
 function notifyScoutSkipped(reason?: string | null) {
   window.dispatchEvent(new CustomEvent(SCOUT_SKIPPED_EVENT, { detail: { reason: reason || null } }))
@@ -467,6 +483,10 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       }))
       if (parts.length) {
         setSparkParts(parts)
+        // 后台生发成功（新件年龄很小）→ 撤舱内报错行（「旧卡」提示已失真）
+        if (result.dock_parts_age_s != null && result.dock_parts_age_s < 30) {
+          dockRefreshError.value = null
+        }
         // 记下这批零件「为哪份上下文而生」（发送侧读数——后端正是拿它签名的）：
         // 字数/段落任一变化，这批零件即陈旧，秒弹不再弹它们
         _partsForContext = `${wordCount}|${recentText}`
@@ -486,6 +506,16 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         ) {
           showSparkDock()
         }
+      }
+      // —— Tab 重算失败可见化（2026-09-15 槽位治理）：点名/兑现响应里
+      // dock_generator 组件错误新鲜（60s 窗）= 本轮强制重算失败，舱里是旧
+      // 缓存——亮报错行而非静默喂尸；点名流程无错误即清。
+      const dockErrEntry = (result.last_component_errors || {}).dock_generator
+      const dockErrFresh = !!dockErrEntry && (Date.now() / 1000 - Number(dockErrEntry.ts || 0)) < 60
+      if (flags?.summoned || _summonPending) {
+        dockRefreshError.value = dockErrFresh
+          ? { brief: _dockErrBrief(String(dockErrEntry?.error || '')), partsAgeS: result.dock_parts_age_s ?? null }
+          : null
       }
       // 挂起的 Tab 点名兑现（2026-08-28）：本轮生发响应的零件即点名所得，
       // 弹舱条件同召唤语义（点名要的直接弹，不受段尾/动笔守卫）。

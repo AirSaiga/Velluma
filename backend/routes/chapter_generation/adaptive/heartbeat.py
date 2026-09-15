@@ -84,6 +84,9 @@ async def heartbeat(
 
     # 从世界模型拉挂件缓存（dock_generator 写入的 __dock__ 项）
     dock_parts = _extract_dock_parts(snapshot)
+    # 旧卡年龄（2026-09-15 槽位治理）：dock 重算失败时旧缓存照发，前端据此刻
+    # 在舱内标「N 分钟前的旧卡」；无件/无时间戳为 None
+    dock_parts_age_s = _dock_parts_age_s(snapshot) if dock_parts else None
     # 句子级闸门（2026-08-25）：作者段落停在半句（无句末标点）时挂件闭嘴——
     # 此刻要的是把句子写完（Space 续写的活），缓存旧件也一并藏起；
     # 空段=段界不判半句（写完一段回车进新段是挂件黄金时机）；
@@ -96,6 +99,7 @@ async def heartbeat(
     if ends_mid_sentence(request.recent_text) and not request.summoned:
         dock_parts = []
         dock_muted = True
+        dock_parts_age_s = None  # 件已清，年龄随之无意义
     # 走向卡（层 3 推测首 beat）——Ctrl+Space 走向卡舱的数据源
     direction_cards = _extract_direction_cards(snapshot, spine=chapter.spine if chapter is not None else None)
     # Canon 感知（canon_watch 写入的 __canon_watch__ 项）
@@ -158,6 +162,7 @@ async def heartbeat(
     return HeartbeatResponse(
         dock_parts=dock_parts,
         dock_muted=dock_muted,
+        dock_parts_age_s=dock_parts_age_s,
         onstage_guests=_extract_onstage_guests(snapshot),
         direction_cards=direction_cards,
         intent_source=intent.get("source", "none"),
@@ -192,6 +197,25 @@ def _extract_dock_parts(snapshot: Dict) -> List[Dict]:
                 return []
             return proj.get("parts", [])
     return []
+
+
+def _dock_parts_age_s(snapshot: Dict) -> Optional[int]:
+    """当前 __dock__ 缓存项的年龄（秒；2026-09-15 槽位治理）。
+
+    缓存写入侧带 ts（dock_generator._cache_dock_parts）；版本过滤同
+    _extract_dock_parts——不匹配视为无件。无项/无 ts 返回 None。
+    """
+    import time as _time
+    from backend.services.adaptive.components.dock_generator import DOCK_PIPELINE_VERSION
+    for proj in (snapshot.get("projections") or []):
+        if isinstance(proj, dict) and proj.get("__dock__"):
+            if proj.get("ver") != DOCK_PIPELINE_VERSION:
+                return None
+            ts = proj.get("ts")
+            if not isinstance(ts, (int, float)) or ts <= 0:
+                return None
+            return max(0, int(_time.time() - ts))
+    return None
 
 
 def _extract_onstage_guests(snapshot: Dict) -> List[str]:

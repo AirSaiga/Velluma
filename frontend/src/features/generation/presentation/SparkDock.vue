@@ -33,6 +33,16 @@ import {
   sparkSelectedIndex,
 } from '../composables/useSparkDock'
 import { ghostActive } from '../composables/useGhostDraft'
+import { dockRefreshError } from '../composables/useAdaptiveAssist'
+
+/** 旧卡年龄人话（秒 → 「N 分钟前」；与报错行同帧捕获，不做活钟） */
+const dockAgeText = computed(() => {
+  const s = dockRefreshError.value?.partsAgeS
+  if (s == null || !Number.isFinite(s)) return ''
+  if (s < 60) return `${s} 秒前`
+  if (s < 5400) return `${Math.round(s / 60)} 分钟前`
+  return `${Math.round(s / 3600)} 小时前`
+})
 
 const emit = defineEmits<{
   /** 自定义镜头提交（第 5 槽位回车）→ 复用 stitch 微缝合流水线 */
@@ -104,9 +114,15 @@ function onCustomEsc() {
     <Transition name="spark-dock">
       <div
         v-if="visible && !ghostActive"
-        class="spark-dock"
+        class="spark-dock elev-2"
         @mousedown.prevent
       >
+        <!-- Tab 重算失败可见化（2026-09-15 槽位治理）：点名强制重算失败时旧缓存
+             照发——这行把真相摆到脸上，旧卡维持可用但不再伪装新鲜 -->
+        <div v-if="dockRefreshError" class="spark-dock__err">
+          <span class="spark-dock__err-sym">⚠</span>
+          刷新失败：{{ dockRefreshError.brief }}<template v-if="sparkParts.length && dockAgeText">——下面是 {{ dockAgeText }}的旧卡</template><template v-else>——暂无卡片</template>
+        </div>
         <!-- 挂件栏（镜头特写 chips，数字键 1~4 吸附）。2026-09-09 行间推挤化：
              顶栏自解释行与「多写几段」按钮删除（推挤幅度收敛；Tab 唤起本身
              已是自解释入口，Ctrl+Space 仍直达走向卡舱） -->
@@ -178,19 +194,17 @@ function onCustomEsc() {
   /* 光标层内区块（07 期 §2.5：宿主 CursorLayer 管 fixed 定位与宽度） */
   width: 100%;
   box-sizing: border-box;
-  border-radius: 8px;
-  background: var(--bg-canvas, #fefdfb);
-  border: 1px solid var(--border-color, #e0dbd3);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
   padding: 6px;
   user-select: none;
 }
 
+/* 深色档：背景随 --bg-elevated token，毛玻璃保留（阴影 lg 盖过 elev-2 的 md，维持现状） */
 :root.dark .spark-dock {
-  background: rgba(30, 32, 37, 0.92);
-  border-color: #2a2d35;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
 .spark-dock__row {
@@ -207,9 +221,9 @@ function onCustomEsc() {
   max-width: 100%;
   padding: 5px 10px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: transparent;
-  color: var(--text-primary, #2c2c2c);
+  color: var(--text-primary);
   /* button 的 UA 样式表默认 text-align:center——chip 自身是 flex 不受影响，
      但内部 body 无显式值会继承 center，主行（普通 span）满宽后文字整行居中
      （副行 note 是 flex 容器幸免）。旧浮层窄看不出，行间贴满正文列宽后暴露。
@@ -217,25 +231,25 @@ function onCustomEsc() {
   text-align: left;
   /* 行间推挤化（2026-09-09）后舱住正文列内，与 16px 正文同屏读——
      主行 12.5→14px（≈正文 87%），副行 10→12px（75%） */
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.5;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
 }
 
 .spark-dock__chip:hover {
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--mint) 10%, transparent);
 }
 
 .spark-dock__chip--attached {
-  border-color: rgba(52, 211, 153, 0.4);
-  background: rgba(52, 211, 153, 0.08);
+  border-color: color-mix(in srgb, var(--mint) 40%, transparent);
+  background: color-mix(in srgb, var(--mint) 8%, transparent);
 }
 /* ↑↓ 浏览选中（纯视觉，不影响吸附） */
 .spark-dock__chip--selected {
-  border-color: var(--accent-500, #7c6aad);
-  background: rgba(124, 106, 173, 0.1);
-  box-shadow: 0 0 0 2px rgba(124, 106, 173, 0.15);
+  border-color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-500) 15%, transparent);
 }
 
 .spark-dock__num {
@@ -243,9 +257,9 @@ function onCustomEsc() {
   width: 17px;
   height: 17px;
   margin-top: 2px;
-  border-radius: 5px;
-  background: var(--hover-bg, #eee9df);
-  color: var(--text-muted, #a89e90);
+  border-radius: var(--radius-sm);
+  background: var(--state-hover);
+  color: var(--text-muted);
   font-size: 11.5px;
   display: inline-flex;
   align-items: center;
@@ -272,17 +286,36 @@ function onCustomEsc() {
   display: flex;
   align-items: baseline;
   gap: 3px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.4;
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
   word-break: break-word;
   white-space: normal;
 }
 
 .spark-dock__note-sym {
   flex-shrink: 0;
-  font-size: 12px;
-  color: var(--accent-500, #7c6aad);
+  font-size: var(--text-xs);
+  color: var(--accent-500);
+}
+
+/* Tab 重算失败行（2026-09-15 槽位治理）：朱色警示但不抢交互——一行事实，
+   告诉作者旧卡是旧的、为什么没换新 */
+.spark-dock__err {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--cinnabar);
+  word-break: break-word;
+  white-space: normal;
+  padding-bottom: 4px;
+}
+
+.spark-dock__err-sym {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
 }
 
 /* 舱顶自解释行（07 期 §2.5.2：替代旧 tips 行）——2026-09-09 行间推挤化删除 */
@@ -293,7 +326,7 @@ function onCustomEsc() {
   gap: 6px;
   padding-top: 4px;
   margin-top: 4px;
-  border-top: 1px dashed var(--border-color, #e0dbd3);
+  border-top: 1px dashed var(--border-color);
 }
 
 .spark-dock__intent:first-child {
@@ -303,26 +336,22 @@ function onCustomEsc() {
 }
 
 .spark-dock__intent-pin {
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .spark-dock__picked {
   padding: 1px 8px;
-  border-radius: 10px;
-  background: rgba(52, 211, 153, 0.12);
-  color: #059669;
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mint) 12%, transparent);
+  color: var(--mint-ink);
+  font-size: var(--text-sm);
   white-space: nowrap;
-}
-
-:root.dark .spark-dock__picked {
-  color: #34d399;
 }
 
 .spark-dock__hint {
   margin-left: auto;
-  color: var(--text-muted, #a89e90);
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 /* 临时通行证芯片（输入行右端）：不换行不占垂直行，多了横向滚动兜底 */
@@ -330,19 +359,17 @@ function onCustomEsc() {
   flex-shrink: 0;
   text-align: left;
   padding: 2px 8px;
-  border: 1px dashed rgba(52, 211, 153, 0.5);
-  border-radius: 10px;
-  background: rgba(52, 211, 153, 0.06);
-  color: #059669;
+  border: 1px dashed color-mix(in srgb, var(--mint) 50%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mint) 6%, transparent);
+  color: var(--mint-ink);
   font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--dur-1) var(--ease-out);
 }
 
-:root.dark .spark-dock__guest { color: #34d399; }
-
-.spark-dock__guest:hover { background: rgba(52, 211, 153, 0.16); }
+.spark-dock__guest:hover { background: color-mix(in srgb, var(--mint) 16%, transparent); }
 
 /* 第 5 槽位脚行：自定义镜头输入 + 临时通行证芯片同排横置（2026-09-09
    行间推挤化——芯片不再垂直占行，推挤幅度收敛） */
@@ -352,7 +379,7 @@ function onCustomEsc() {
   gap: 6px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px dashed var(--border-color, #e0dbd3);
+  border-top: 1px dashed var(--border-color);
 }
 
 .spark-dock__custom-input {
@@ -360,32 +387,32 @@ function onCustomEsc() {
   min-width: 0;
   box-sizing: border-box;
   padding: 5px 10px;
-  border: 1px solid var(--border-color, #e0dbd3);
-  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   background: transparent;
-  color: var(--text-primary, #2c2c2c);
-  font-size: 14px;
+  color: var(--text-primary);
+  font-size: var(--text-base);
   line-height: 1.5;
   outline: none;
   /* 根节点 user-select:none 的豁免——输入框内文本必须可选中可编辑 */
   user-select: text;
-  transition: border-color 0.12s ease;
+  transition: border-color var(--dur-1) var(--ease-out);
 }
 
 .spark-dock__custom-input:focus {
-  border-color: var(--accent-500, #7c6aad);
+  border-color: var(--accent-500);
 }
 
 .spark-dock__custom-input::placeholder {
-  color: var(--text-muted, #a89e90);
+  color: var(--text-muted);
 }
 
 /* 淡入下滑（150ms） */
 .spark-dock-enter-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .spark-dock-leave-active {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
 .spark-dock-enter-from,
 .spark-dock-leave-to {
