@@ -178,13 +178,29 @@ class TestAdaptDoubao:
 
 
 class TestAdaptLocal:
-    """本地端点：默认不发推理参数（行为不可靠）。"""
+    """本地端点：关闭态发 reasoning_effort=none（2026-09-15 实测修复），开启态不发。
 
-    def test_localhost_returns_none(self):
+    实测背景（qwen3.5:9b @ Ollama /v1）：思考默认开且其余关思考通路全数无效
+    （chat_template_kwargs / /no_think 软开关 / think 字段均被无视）；思考会把
+    completion 预算全烧光（1600/2000/8000 三档全灭、content 恒空）——不发参数
+    =零产出。reasoning_effort:"none" 是 Ollama /v1 唯一认的关思考参数。
+    """
+
+    def test_disabled_sends_reasoning_effort_none(self):
+        assert adapt_reasoning_config(
+            REASONING_DISABLED, "http://localhost:11434/v1"
+        ) == {"reasoning_effort": "none"}
+
+    def test_disabled_127(self):
+        assert adapt_reasoning_config(
+            REASONING_DISABLED, "http://127.0.0.1:1234/v1"
+        ) == {"reasoning_effort": "none"}
+        # 注：[::1] 不在 detect_provider 的本地域名规则里（前后端同判据只认
+        # localhost/127.0.0.1），走 unknown 兜底——IPv6 环回配置极罕见，不扩改动面
+
+    def test_enabled_returns_none(self):
+        """开启态仍不发：effort→预算档位映射未实测，宁可不发不乱发。"""
         assert adapt_reasoning_config(ENABLED_HIGH, "http://localhost:11434/v1") is None
-
-    def test_127_returns_none(self):
-        assert adapt_reasoning_config(REASONING_DISABLED, "http://127.0.0.1:1234/v1") is None
 
 
 class TestAdaptUnknown:
@@ -269,10 +285,13 @@ class TestDefaultReasoningConfigSemantics:
         }
 
     def test_explicit_disable_safe_for_openai_and_local(self):
-        """零变化契约：显式关闭经适配层后，OpenAI/本地端点依然不发任何参数。"""
+        """显式关闭经适配层后：OpenAI 依然不发任何参数；本地端点发
+        reasoning_effort=none（2026-09-15 实测修复——不发=思考烧光预算零产出）。"""
         disabled = {"reasoning": {"enabled": False}}
         assert adapt_reasoning_config(disabled, "https://api.openai.com/v1") is None
-        assert adapt_reasoning_config(disabled, "http://localhost:11434/v1") is None
+        assert adapt_reasoning_config(disabled, "http://localhost:11434/v1") == {
+            "reasoning_effort": "none"
+        }
 
     def test_explicit_disable_reaches_default_on_vendors(self):
         """修复的目标：默认即开的厂商能收到显式关闭（MiMo 为代表）。"""

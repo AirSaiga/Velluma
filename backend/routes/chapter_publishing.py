@@ -524,6 +524,8 @@ async def test_character_extraction(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            # 发布时角色提取是结构化分析任务（2026-09-15 槽位显式化）
+            model_type="reasoning",
             temperature=0.3,
         )
         

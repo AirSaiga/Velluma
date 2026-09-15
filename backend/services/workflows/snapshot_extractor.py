@@ -155,6 +155,8 @@ class SnapshotExtractorAgent:
                 call_llm(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
+                    # 世界终局状态提取是结构化分析任务（2026-09-15 槽位显式化）
+                    model_type="reasoning",
                     temperature=0.2,
                     max_tokens=3000,
                     response_format={"type": "json_object"}

@@ -246,6 +246,8 @@ async def generate_inspirations(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            # 灵感生成是文学创意产出（2026-09-15 槽位归位），归写作槽
+            model_type="creative",
             temperature=temperature,
             max_tokens=3000,
             response_format={"type": "json_object"},
@@ -323,6 +325,8 @@ async def expand_inspiration(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            # 灵感生成是文学创意产出（2026-09-15 槽位归位），归写作槽
+            model_type="creative",
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
@@ -369,6 +373,8 @@ async def expand_outline(
         response = await call_llm(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            # 灵感生成是文学创意产出（2026-09-15 槽位归位），归写作槽
+            model_type="creative",
             temperature=temperature,
             max_tokens=max_tokens,
         )

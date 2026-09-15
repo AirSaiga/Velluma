@@ -104,6 +104,9 @@ async def llm_based_formatting(
         formatted = await call_llm(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=f"请对以下小说文本进行智能格式整理：\n\n{text}",
+            # 格式整理是机械编辑（分段/标点/空行，不增删文字），维持分析槽
+            # 并显式化（2026-09-15）；LLM 失败本就回退规则引擎，离线韧性无虞
+            model_type="reasoning",
             temperature=0.3,  # 低温度，保持稳定性
             max_tokens=8192
         )

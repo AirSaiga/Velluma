@@ -138,6 +138,9 @@ async def optimize_selection(
         mode=request.mode,
         tone=request.tone,
         style_context=style_context,
+        # 槽位归位（2026-09-15）：选区润色/改写是文学语言修辞，归写作槽——
+        # 与 stitch 同族语义（改写作者文本），文风样本注入与续写 100% 同源。
+        model_type="creative",
     )
 
     return {"optimized_text": optimized_text}

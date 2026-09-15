@@ -101,6 +101,8 @@ async def generate_chapter_summary(
         summary = await _timeout_manager.call_with_timeout(
             llm_generate_summary(
                 text=text,
+                # 章节摘要是归纳分析任务（2026-09-15 槽位显式化）
+                model_type="reasoning",
             ),
             operation_type="summary",
             custom_timeout=timeout,

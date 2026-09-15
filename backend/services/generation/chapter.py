@@ -108,6 +108,8 @@ async def update_character_dynamic_state(
     new_state = await call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
+        # 角色动态状态归纳是分析任务（2026-09-15 槽位显式化）
+        model_type="reasoning",
         temperature=0.7,
         max_tokens=1000,
     )

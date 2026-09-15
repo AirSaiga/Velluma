@@ -36,7 +36,9 @@ LLM 推理参数 provider 适配层。
 - Qwen/通义：enable_thinking（布尔）+ thinking_budget（整数 token）
 - 火山豆包：thinking.type（enabled/disabled），无 effort 控制
 - 小米 MiMo：thinking.type（唯一方言，实测+官方双证）；无 effort/budget 字段
-- 本地（Ollama/vLLM/LM Studio）：推理参数支持不可靠/忽略，默认不发
+- 本地（Ollama/vLLM/LM Studio）：关闭态发 reasoning_effort:"none"（Ollama /v1
+  实测有效——思考默认开的本地模型不关=预算被 reasoning_content 烧光零产出）；
+  开启态不发（档位映射未实测）
 
 副作用：无（纯函数）。改后即时生效（无需重建）。
 """
@@ -264,8 +266,16 @@ def adapt_reasoning_config(
         return {"thinking": {"type": "enabled" if enabled else "disabled"}}
 
     if provider == LOCAL:
-        # 本地 OpenAI 兼容端点（Ollama/vLLM/LM Studio）：推理参数支持不可靠/忽略。
-        # 默认不发，避免触发不可预期行为（vLLM 可能容忍、LM Studio 静默忽略、Ollama 行为不定）。
+        # 本地 OpenAI 兼容端点（Ollama/vLLM/LM Studio）。
+        # 关闭态（2026-09-15 实测 qwen3.5:9b）：Ollama /v1 认 OpenAI 标准
+        # reasoning_effort:"none"——其余关思考通路全数无效（chat_template_kwargs、
+        # Qwen3 老系 /no_think 软开关、/v1 think 字段均被无视）。思考默认开的
+        # 本地模型会把 completion 预算全烧在 reasoning_content 上（1600/2000/
+        # 8000 三档预算实测全灭、content 恒空），不发参数=零产出，必须显式关。
+        # LM Studio 静默忽略该参数、vLLM 容忍（vendor notes 既有结论）。
+        # 开启态仍不发：effort→预算档位映射未实测，宁可不发不乱发。
+        if not enabled:
+            return {"reasoning_effort": "none"}
         return None
 
     # unknown：默认按 OpenRouter 协议透传（向后兼容——Velluma 历史行为即 OpenRouter 协议）。

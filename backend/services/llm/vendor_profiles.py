@@ -335,7 +335,7 @@ def shape_sampling_params(
 _GENERIC_ENDPOINTS: Tuple[Dict, ...] = (
     {"id": OPENAI, "label": "OpenAI", "base_url": "https://api.openai.com/v1", "docs_url": "https://platform.openai.com/docs", "notes": (), "models": ()},
     {"id": OPENROUTER, "label": "OpenRouter（聚合）", "base_url": "https://openrouter.ai/api/v1", "docs_url": "https://openrouter.ai/docs", "notes": ("统一 reasoning 协议，一家 Key 调多家模型。",), "models": ()},
-    {"id": LOCAL, "label": "本地端点（Ollama/vLLM 等）", "base_url": "http://localhost:11434/v1", "docs_url": "", "notes": ("推理参数支持不可靠，本应用对本地端点不发思考参数。",), "models": ()},
+    {"id": LOCAL, "label": "本地端点（Ollama/vLLM 等）", "base_url": "http://localhost:11434/v1", "docs_url": "", "notes": ("关闭思考时发 reasoning_effort=none（Ollama 实测有效）；思考默认开的模型不关=预算被思考烧光零产出，本地槽建议关思考。",), "models": ()},
 )
 
 
