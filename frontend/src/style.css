@@ -281,10 +281,10 @@
   --foreshadow: #c084fc;
   --truth-partial: #a98fd4;
   --truth-open: #86a383;
-  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
-  --shadow-md: 0 4px 12px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
-  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
-  --shadow-paper: 0 8px 20px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-sm: 0 1px 2px rgba(20, 17, 30, 0.5);
+  --shadow-md: 0 4px 12px rgba(20, 17, 30, 0.55);
+  --shadow-lg: 0 12px 32px rgba(20, 17, 30, 0.6);
+  --shadow-paper: 0 8px 20px rgba(20, 17, 30, 0.5);
   --mention-char: #93c5fd;
   --overlay-bg: rgba(0, 0, 0, 0.55);
   --paper-edge: #4e4840;
@@ -326,10 +326,10 @@
   --accent-400: #7aa0f5; --accent-500: #94b4f8; --accent-600: #b6ccfb;
   --ok: #5cc98e; --ok-bg: #12291d; --warn: #e0b054; --warn-bg: #2e2410;
   --danger: #e57373; --danger-bg: #331414; --info: #94b4f8; --info-bg: #18223d;
-  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
-  --shadow-md: 0 4px 12px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
-  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
-  --shadow-paper: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-sm: 0 1px 2px rgba(18, 22, 30, 0.5);
+  --shadow-md: 0 4px 12px rgba(18, 22, 30, 0.55);
+  --shadow-lg: 0 12px 32px rgba(18, 22, 30, 0.6);
+  --shadow-paper: 0 4px 14px rgba(18, 22, 30, 0.5);
   --paper-edge: #3c3c3c;
 }
 
@@ -358,10 +358,10 @@
   --accent-400: #d3a4b1; --accent-500: #d9a7b0; --accent-600: #e5bec5;
   --ok: #8fb896; --ok-bg: #25301f; --warn: #d3ac6c; --warn-bg: #35290f;
   --danger: #d98b8b; --danger-bg: #382020; --info: #9db4c9; --info-bg: #232e38;
-  --shadow-sm: 0 1px 3px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.45);
-  --shadow-md: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
-  --shadow-lg: 0 16px 40px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
-  --shadow-paper: 0 6px 16px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.45);
+  --shadow-sm: 0 1px 3px rgba(26, 20, 21, 0.45);
+  --shadow-md: 0 6px 18px rgba(26, 20, 21, 0.5);
+  --shadow-lg: 0 16px 40px rgba(26, 20, 21, 0.55);
+  --shadow-paper: 0 6px 16px rgba(26, 20, 21, 0.45);
   --paper-edge: #51493e;
 }
 
@@ -390,10 +390,10 @@
   --accent-400: #6fa3dc; --accent-500: #82b3e5; --accent-600: #a4c8ec;
   --ok: #5cb98d; --ok-bg: #14271f; --warn: #d9a94f; --warn-bg: #2d2410;
   --danger: #e07b7b; --danger-bg: #341919; --info: #82b3e5; --info-bg: #182738;
-  --shadow-sm: 0 1px 2px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
-  --shadow-md: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
-  --shadow-lg: 0 12px 32px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
-  --shadow-paper: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-sm: 0 1px 2px rgba(16, 21, 27, 0.5);
+  --shadow-md: 0 4px 14px rgba(16, 21, 27, 0.55);
+  --shadow-lg: 0 12px 32px rgba(16, 21, 27, 0.6);
+  --shadow-paper: 0 6px 18px rgba(16, 21, 27, 0.5);
   --paper-edge: #3e4853;
 }
 
@@ -423,10 +423,10 @@
   --accent-400: #ff8fbb; --accent-500: #ffa5c8; --accent-600: #ffc2d9;
   --ok: #4fd6a4; --ok-bg: #142b24; --warn: #f0b95a; --warn-bg: #33260e;
   --danger: #ff7d9c; --danger-bg: #3a1824; --info: #8ab0ff; --info-bg: #1b2540;
-  --shadow-sm: 0 1px 3px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
-  --shadow-md: 0 4px 14px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.55);
-  --shadow-lg: 0 14px 36px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.6);
-  --shadow-paper: 0 6px 18px rgb(from color-mix(in srgb, #000 88%, var(--accent-500)) r g b / 0.5);
+  --shadow-sm: 0 1px 3px rgba(31, 20, 24, 0.5);
+  --shadow-md: 0 4px 14px rgba(31, 20, 24, 0.55);
+  --shadow-lg: 0 14px 36px rgba(31, 20, 24, 0.6);
+  --shadow-paper: 0 6px 18px rgba(31, 20, 24, 0.5);
   --paper-edge: #4d3d5e;
 }
 

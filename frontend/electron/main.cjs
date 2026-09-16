@@ -7,6 +7,26 @@ const fs = require('fs')
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
+// 白屏事故收口（2026-09-16，真根因=style.css 主题批的 CSS 相对颜色语法
+// `rgb(from color-mix(...))` 在 Electron 28 (Chromium 120) 渲染器上原生崩溃，
+// 已改为预计算 rgba——见 style.css 五主题 .dark 块。以下两处为共存保险，可摘：
+// ① 软渲染：排查期误判 GPU 所加；写作应用无重动画负载，代价可接受。
+app.disableHardwareAcceleration()
+
+// ② renderer 观测：Chromium 层 console/崩溃原因写日志文件——renderer 崩溃在
+// Windows 事件日志与 Crashpad 均无记录，此开关是唯一第一手死因来源（本次靠它
+// 拿到 reason/exitCode 破案）。⚠ 必须用 file 形态：默认 stderr 形态会强制弹一个
+// 独立黑色控制台窗口（2026-09-16 实测被当成「莫名其妙的终端」）。
+if (isDev) {
+  app.commandLine.appendSwitch('enable-logging', 'file')
+  app.commandLine.appendSwitch('log-file', join(dirname(dirname(__dirname)), 'logs', 'electron_chrome.log'))
+}
+
+// ③ 与本机安全/反作弊软件（腾讯 ACE 等）共存：其注入模块会触发 Windows
+// RendererCodeIntegrity 杀进程（同 STATUS_BREAKPOINT 症状）。Slack/Discord/
+// VSCode 同问题标准修复。代价：renderer 对注入 DLL 的防御下降（本地写作应用可接受）。
+app.commandLine.appendSwitch('disable-features', 'RendererCodeIntegrity')
+
 let backendProcess = null
 // 主窗口引用缓存（供 IPC handler 引用，避免闭包丢失窗口实例）
 let mainWindow = null
@@ -344,7 +364,13 @@ async function createMainWindow() {
     win.on('closed', () => {
       mainWindow = null
     })
-    
+
+    // renderer 死因观测（2026-09-16 白屏排查）：仅记录 reason/exitCode，无任何自动动作。
+    // Crashpad 在本机不落盘，这是唯一能拿到崩溃分类（oom/segfault 等）的通道。
+    win.webContents.on('render-process-gone', (_e, details) => {
+      console.error(`[Main] renderer gone: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+
     if (isDev) {
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         callback({
