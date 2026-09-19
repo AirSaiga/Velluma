@@ -230,6 +230,10 @@ def normalize_draft(
         "location_id": str(loc.id) if loc is not None else None,
         "location_name": (loc.name or "") if loc is not None else "",
         "note": str(parsed.get("note") or "")[:80],
+        # W4 候选回流出处（02 修缮 M1）：LLM 逐字摘录的正文原句，供作者裁决对照；
+        # 速记链路（parse）prompt 无此字段 → 恒空串，形状不变。校验在 event_scout
+        # （那边才持有正文），此处只做长度钳制。
+        "evidence": str(parsed.get("evidence") or "")[:60],
     }
 
 

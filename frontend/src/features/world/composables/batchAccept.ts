@@ -3,8 +3,8 @@
  *
  * 批量裁决 = 「全部采纳」逐条预览（可勾选剔除）→ 确认后逐条走既有 accept 端点
  * （/world/candidates/{id}/accept，不改后端语义）→ toast 6 秒可撤销。
- * 撤销 = 逐条复合操作：删转正产物（事件 / canon 真相节点）+ reopen 候选回 pending
- * （与 useWorldSlice.undoAccept 单条撤销同一契约，批量化）。
+ * 撤销 = 逐条走单事务撤销端点（/undo-accept：删转正产物 + reopen 服务端一步
+ * 完成，02 候选回流修缮 P2b；useWorldSlice.undoAccept 单条撤销同一契约，批量化）。
  *
  * 勾选/剔除/汇总为纯函数（__tests__/batchAccept.test.ts 锁行为）；
  * 串行执行沿用批量删除的防竞态约定（不并行打后端）。
@@ -12,8 +12,6 @@
 import { ref } from 'vue'
 import { worldApi } from '../../../services/api/domain/world.api'
 import type { WorldEventCandidate } from '../../../services/api/domain/world.api'
-import { canonApi } from '../../../services/api/domain/canon.api'
-import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 
 // ============================================================
 // A5d 收件箱直达：toast action → 副驾抽屉滑出 + 切「此刻」tab + 收件箱展开
@@ -74,8 +72,6 @@ export interface BatchAcceptOutcome {
   ok: boolean
   /** 命中重复转正闸（账本已有同义事件）——未建事件、候选已留痕，不算失败也不进撤销名单 */
   duplicated: boolean
-  /** 候选归属章（埋点归账用；跨章批量时逐章计数） */
-  chapterId: string | null
   /** event_scout/settle 候选转正创建的事件 id（撤销时删；canon 候选为 null） */
   eventId: string | null
   /** canon_extract 候选转正建的真相节点 id（撤销时删；事件候选为 null） */
@@ -106,7 +102,6 @@ export function undoableOutcomes(outcomes: BatchAcceptOutcome[]): BatchAcceptOut
 
 /**
  * 逐条采纳（串行防后端竞态）。onProgress 驱动确认按钮进度文案。
- * 埋点：按候选归属章逐章记 batch_accept（世界页跨章批量也能归账）。
  */
 export async function runBatchAccept(
   bookId: string,
@@ -117,7 +112,7 @@ export async function runBatchAccept(
   let done = 0
   for (const c of candidates) {
     const item: BatchAcceptOutcome = {
-      candidateId: c.id, ok: false, duplicated: false, chapterId: c.chapter_id || null,
+      candidateId: c.id, ok: false, duplicated: false,
       eventId: null, canonNodeId: null,
     }
     try {
@@ -136,13 +131,13 @@ export async function runBatchAccept(
     done++
     onProgress?.(done, candidates.length)
   }
-  _logBatchAccept(outcomes.filter((o) => o.ok), false)
   return outcomes
 }
 
 /**
- * 复合撤销：逐条「删转正产物 + reopen 回 pending」。
- * 单条撤销失败不阻断其余（链断降级为仅逐条），返回实际撤销条数。
+ * 复合撤销：逐条走单事务撤销端点（02 修缮 P2b——旧「删产物 + reopen」两条
+ * 独立请求链断会留孤儿态，服务端一步完成后断链不可能发生）。
+ * 单条撤销失败不阻断其余，返回实际撤销条数。
  */
 export async function undoBatchAccept(
   bookId: string,
@@ -151,30 +146,14 @@ export async function undoBatchAccept(
   const undoneItems: BatchAcceptOutcome[] = []
   for (const o of undoableOutcomes(outcomes)) {
     try {
-      if (o.eventId) await worldApi.deleteEvent(bookId, o.eventId)
-      if (o.canonNodeId) await canonApi.deleteNode(bookId, o.canonNodeId)
-      await worldApi.reopenCandidate(bookId, o.candidateId)
+      await worldApi.undoAcceptCandidate(bookId, o.candidateId, {
+        event_id: o.eventId,
+        canon_node_id: o.canonNodeId,
+      })
       undoneItems.push(o)
     } catch {
-      // 链断降级：该条保持已采纳（候选可在收件箱重开流程里人工处理）
+      // 单条失败不连坐：该条保持已采纳（候选可在收件箱重开流程里人工处理）
     }
   }
-  _logBatchAccept(undoneItems, true)
   return undoneItems.length
-}
-
-/** 埋点：按候选归属章逐章归账（undone=1 不计入 batch_accept_count 采纳条数）；失败静默 */
-function _logBatchAccept(items: BatchAcceptOutcome[], undone: boolean): void {
-  try {
-    const byChapter = new Map<string, number>()
-    for (const o of items) {
-      if (!o.chapterId) continue
-      byChapter.set(o.chapterId, (byChapter.get(o.chapterId) || 0) + 1)
-    }
-    for (const [chId, count] of byChapter) {
-      void adaptiveApi.logCollabEvent(chId, 'batch_accept', { count, undone: undone ? 1 : 0 })
-    }
-  } catch {
-    // 埋点绝不阻塞业务
-  }
 }

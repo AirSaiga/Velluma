@@ -69,13 +69,13 @@ describe('A5b 批量勾选（默认全选 + 逐条剔除）', () => {
 
 describe('A5b 批次汇总与撤销名单', () => {
   const ok = (id: string, extra?: Partial<BatchAcceptOutcome>): BatchAcceptOutcome => ({
-    candidateId: id, ok: true, duplicated: false, chapterId: 'ch1', eventId: null, canonNodeId: null, ...extra,
+    candidateId: id, ok: true, duplicated: false, eventId: null, canonNodeId: null, ...extra,
   })
   const fail = (id: string): BatchAcceptOutcome => ({
-    candidateId: id, ok: false, duplicated: false, chapterId: 'ch1', eventId: null, canonNodeId: null,
+    candidateId: id, ok: false, duplicated: false, eventId: null, canonNodeId: null,
   })
   const dup = (id: string): BatchAcceptOutcome => ({
-    candidateId: id, ok: false, duplicated: true, chapterId: 'ch1', eventId: null, canonNodeId: null,
+    candidateId: id, ok: false, duplicated: true, eventId: null, canonNodeId: null,
   })
 
   it('summarizeBatch：成功/失败分账', () => {

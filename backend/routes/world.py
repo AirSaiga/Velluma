@@ -562,6 +562,10 @@ async def accept_candidate(
             confidence="tentative",
         )
         db.add(node)
+        await db.flush()  # 催生 node.id（列 default 在 INSERT 时才赋值，add 后读是 None）
+        # 转正产物 id 记入 draft（02 修缮 P2b）：单事务撤销端点据此删产物，
+        # 前端无需自持 id（刷新/重开窗后撤销仍可用）
+        cand.draft = {**d, "accepted_canon_node_id": str(node.id)}
         await repo.candidates.set_status(str(candidate_id), "accepted")
         await db.commit()
         return {"candidate_id": cand.id, "event": None, "canon_node_id": str(node.id)}
@@ -595,6 +599,8 @@ async def accept_candidate(
             return {"candidate_id": cand.id, "event": None, "duplicated": True}
 
     ev = await repo.events.create(str(book_id), **_event_fields_from_draft(cand.draft or {}))
+    # 转正产物 id 记入 draft（02 修缮 P2b）：单事务撤销端点据此删产物
+    cand.draft = {**(cand.draft or {}), "accepted_event_id": str(ev.id)}
     await repo.candidates.set_status(str(candidate_id), "accepted")
     await db.commit()
     return AcceptCandidateResponse(event=ev, candidate_id=cand.id)
@@ -626,6 +632,65 @@ async def reopen_candidate(
     await repo.candidates.set_status(str(candidate_id), "pending")
     await db.commit()
     return {"status": "pending"}
+
+
+class UndoAcceptRequest(BaseModel):
+    """单事务撤销的可选显式产物 id（02 修缮 P2b）。
+
+    存量已采纳候选（端点上线前）draft 里没有 accepted_*_id——前端把 accept
+    时拿到的 id 显式带上；新候选优先用 draft 记录值，两路都没有则只 reopen。
+    """
+
+    event_id: Optional[UUID] = None
+    canon_node_id: Optional[UUID] = None
+
+
+@router.post("/{book_id}/world/candidates/{candidate_id}/undo-accept")
+async def undo_accept_candidate(
+    book_id: UUID,
+    candidate_id: UUID,
+    payload: Optional[UndoAcceptRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """单事务撤销入账（02 候选回流修缮 P2b）：删转正产物 + 候选回 pending 一步完成。
+
+    旧链路是前端两条独立请求（删事件 / reopen），链断会留「事件已删、候选仍
+    accepted」孤儿态；本端点在同一个 commit 里完成两件事，断链不可能发生。
+    产物缺失（已被单独删除）不视为错误——幂等撤销照样 reopen。
+    """
+    repo = WorldRepository(db)
+    cand = await repo.candidates.get(str(candidate_id))
+    if cand is None or str(cand.book_id) != str(book_id):
+        raise HTTPException(404, "候选不存在")
+    if cand.status != "accepted":
+        raise HTTPException(409, f"候选未处于已采纳态（{cand.status}）")
+
+    d = cand.draft or {}
+    payload = payload or UndoAcceptRequest()
+    canon_node_id = payload.canon_node_id or d.get("accepted_canon_node_id")
+    event_id = payload.event_id or d.get("accepted_event_id")
+
+    deleted: Optional[str] = None
+    if canon_node_id:
+        from backend.models import CanonNode as _CanonNode
+
+        node = await db.get(_CanonNode, str(canon_node_id))
+        if node is not None and str(node.book_id) == str(book_id):
+            await db.delete(node)
+            deleted = "canon_node"
+    elif event_id:
+        # 归属校验后再删（与 canon 分支同纪律）：event_id 可能来自请求体，
+        # 误传/恶意传他书 id 不能删掉别人账本里的事件
+        from backend.models import WorldEvent as _WE
+
+        ev = await db.get(_WE, str(event_id))
+        if ev is not None and str(ev.book_id) == str(book_id):
+            await db.delete(ev)
+            deleted = "event"
+
+    await repo.candidates.set_status(str(candidate_id), "pending")
+    await db.commit()
+    return {"status": "pending", "deleted": deleted}
 
 
 @router.post("/{book_id}/world/migrate-legacy")

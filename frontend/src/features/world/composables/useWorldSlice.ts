@@ -62,9 +62,16 @@ function signature(s: SceneSlice): string {
 }
 
 async function loadCandidates(bookId: string, chapterId: string) {
+  // 竞态守卫（与 load 同口径，2026-09-17 补齐）：请求期间已切章 → 丢弃过期
+  // 响应——此前 slice 有守卫而 candidates 没有，切章途中旧章候选会落地覆盖
+  const reqKey = { bookId, chapterId }
+  const stale = () => currentKey?.bookId !== reqKey.bookId || currentKey?.chapterId !== reqKey.chapterId
   try {
-    candidates.value = await worldApi.listCandidates(bookId, chapterId, 'pending')
+    const list = await worldApi.listCandidates(bookId, chapterId, 'pending')
+    if (stale()) return
+    candidates.value = list
   } catch {
+    if (stale()) return
     candidates.value = [] // 收件箱缺席不影响切片本体
   }
 }
@@ -131,10 +138,10 @@ async function rejectCandidate(bookId: string, candidateId: string) {
   if (currentKey) await loadCandidates(currentKey.bookId, currentKey.chapterId)
 }
 
-/** W4 撤销入账：删事件 + 候选回 pending */
-async function undoAccept(bookId: string, candidateId: string, eventId: string) {
-  await worldApi.deleteEvent(bookId, eventId)
-  await worldApi.reopenCandidate(bookId, candidateId)
+/** W4 撤销入账：单事务端点一步完成（02 修缮 P2b，删事件 + 回 pending 原子化；
+ *  eventId 显式带上覆盖存量候选——draft.accepted_event_id 上线前的已采纳者） */
+async function undoAccept(bookId: string, candidateId: string, eventId?: string) {
+  await worldApi.undoAcceptCandidate(bookId, candidateId, { event_id: eventId || null })
   if (currentKey) await load(currentKey.bookId, currentKey.chapterId, { silent: true })
 }
 

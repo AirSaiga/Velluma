@@ -101,6 +101,8 @@ export interface ScenePresence {
   name: string
   alive: boolean
   location_name: string
+  /** 结构化位置 id（双层分立）：空=位置未知——取景/章范围子树闭包过滤的依据 */
+  location_id: string
   label: string
   /** 词法兜底标记：lexical=位置从事件 note 推断（据正文推断 badge） */
   presence_source: string | null
@@ -136,6 +138,17 @@ export interface SceneExpectation {
   tension: number
 }
 
+export interface SceneChapterActor {
+  /** 全章正文活跃名册条目（方向 B）：正文有戏份的角色（含零事件者） */
+  name: string
+  /** 判定证据：对白/交互/动作/在场/未建档 */
+  via: string
+  /** guest（未建档）无档案故空 */
+  entity_id: string
+  /** registered=已建档 | guest=未建档高频人名 */
+  source: 'registered' | 'guest'
+}
+
 export interface SceneSlice {
   t: number
   /** chapter_anchor | prev_anchor | max_event | zero（四级降级来源） */
@@ -146,6 +159,8 @@ export interface SceneSlice {
   t_source_chapter?: number | null
   presence: ScenePresence[]
   scene: SceneBlock | null
+  /** 全章正文活跃名册（2026-09-17 方向 B）：与 presence 并集渲染出场名册 */
+  chapter_actors: SceneChapterActor[]
   encounters: SceneEncounter[]
   foreshadows: SceneForeshadow[]
   expectations: SceneExpectation[]
@@ -197,6 +212,11 @@ export interface EventDraft {
   location_id: string | null
   location_name: string
   note: string
+  /** 出处原句（02 修缮 M1）：后端已校验为正文逐字子串；旧候选无此字段（可缺席） */
+  evidence?: string
+  /** 转正产物 id（02 修缮 P2b，accept 时后端写入 draft）——单事务撤销据此删产物 */
+  accepted_event_id?: string
+  accepted_canon_node_id?: string
 }
 
 export interface ParseEventResult {
@@ -462,6 +482,26 @@ export const worldApi = {
     requestJson<{ status: string }>(`/books/${bookId}/world/candidates/${candidateId}/reopen`, {
       method: 'POST',
     }),
+
+  /** 单事务撤销入账（02 修缮 P2b）：删转正产物 + 候选回 pending 服务端一步完成——
+   *  取代前端「删事件 / reopen」两条独立请求（链断留孤儿态）。产物 id 缺省由
+   *  后端读 draft.accepted_*_id；显式传参覆盖存量候选（端点上线前采纳的）。 */
+  undoAcceptCandidate: (
+    bookId: string,
+    candidateId: string,
+    ids?: { event_id?: string | null; canon_node_id?: string | null },
+  ) =>
+    requestJson<{ status: string; deleted: string | null }>(
+      `/books/${bookId}/world/candidates/${candidateId}/undo-accept`,
+      {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          event_id: ids?.event_id || null,
+          canon_node_id: ids?.canon_node_id || null,
+        }),
+      },
+    ),
 
   // ===== 底图：图片拼贴层 =====
   listMapLayers: (bookId: string) =>

@@ -50,14 +50,24 @@ class WorldEventRepository:
         self.db = db
 
     async def list_all_by_book(self, book_id: str) -> List[WorldEvent]:
-        """按 sequence_num 升序返回全书事件（回放用）。"""
+        """按 sequence_num 升序返回全书事件（回放用）。
+
+        修订链读侧过滤（2026-09-16 隐式图谱批补漏）：被 supersede 的过期
+        事件不在列表中——链头（最新一代）才是当前真相。fold 推演/编年史/
+        RAG 结构化召回/世界页列表全部消费本入口，一处过滤全链生效；
+        当前库 supersedes 零使用=行为逐字节不变（零变化契约）。
+        """
         stmt = (
             select(WorldEvent)
             .where(WorldEvent.book_id == book_id)
             .order_by(WorldEvent.sequence_num.asc())
         )
         result = await self.db.execute(stmt)
-        return list(result.scalars().all())
+        events = list(result.scalars().all())
+        superseded = {e.supersedes for e in events if e.supersedes}
+        if not superseded:
+            return events
+        return [e for e in events if e.id not in superseded]
 
     async def next_sequence_num(self, book_id: str) -> int:
         stmt = select(func.coalesce(func.max(WorldEvent.sequence_num), 0)).where(
@@ -541,6 +551,34 @@ class WorldCandidateRepository:
         cand.status = status
         await self.db.flush()
         return cand
+
+    async def list_recent_rejected(
+        self,
+        book_id: str,
+        limit: int = 200,
+        window_days: int = 30,
+    ) -> List[WorldEventCandidate]:
+        """近期被 ✗ 的候选（02 候选回流修缮 P3 拒绝史防重素材）。
+
+        按 updated_at（状态变更即触碰 onupdate）倒序取窗口内最近 N 条——窗口化
+        防「永久误挡同名不同事」，旧拒绝过期后新事仍可进箱。与 read_budget 的
+        24h 窗同口径：DB 存 naive UTC，比较前剥 tz。
+        """
+        from datetime import datetime, timedelta, timezone
+
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window_days)
+        stmt = (
+            select(WorldEventCandidate)
+            .where(
+                WorldEventCandidate.book_id == book_id,
+                WorldEventCandidate.status == "rejected",
+                WorldEventCandidate.updated_at >= since,
+            )
+            .order_by(WorldEventCandidate.updated_at.desc())
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
 
 
 # ============================================================

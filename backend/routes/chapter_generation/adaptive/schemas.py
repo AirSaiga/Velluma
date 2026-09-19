@@ -3,7 +3,7 @@
 """NLE-ADF 3.0 自适应路由的请求/响应模型（纯 schema，无业务逻辑）。"""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -181,6 +181,8 @@ class AutoReadResponse(BaseModel):
     ran: bool
     created: int = 0
     suppressed_muted: int = 0
+    # 拒绝史防重命中数（02 候选回流修缮 P3）——「重复投递拦截次数」度量口径
+    suppressed_rejected: int = 0
     skipped: Optional[Dict[str, str]] = None
     budget: Optional[Dict[str, int]] = None
 

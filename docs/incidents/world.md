@@ -61,3 +61,13 @@
 ### 隐式图谱投影器原型实装（2026-09-16，未提交批内）
 
 - 按 `docs/implicit-graph-projection-feasibility.md` 调研结论实装 `services/world/implicit_graph.py` 三件；当前消费方暂无（纯原型），P1 接 knowledge_plane event_card 通道/前缀签名并入事件哈希待拍板。契约与对拍见档案。
+
+### 候选回流链路修缮（2026-09-18，设计稿 docs/next-phase/02-candidate-reflow-repairs.md，未提交批内）
+
+- 动机：系统懂这本书的唯一途径是「读正文→提候选→作者勾选入账」，作者点勾那一下决定此后全部辅助质量——修缮让那一下既有把握（出处原句可对）又不费劲（键盘批阅/回场补读）。设计稿定性为「修缮非新建」，链路本体（幂等/去重闸/批量采纳）不动。
+- M1 候选补出处：旧候选只有「类型+概括+章号」，作者凭 AI 一句话做重裁决（对比：Alt+N 速记反而带 evidence 硬闸——轻场景厚证据、重场景薄证据的倒挂）。修法=抽取 prompt 要求逐字摘录 evidence + event_scout 落池前 `verify_evidence`（去空白子串；标点不同即判改写）。取舍：出处过不了校验**剥出处保留候选**（降级回无出处档）而非整条丢弃——宁降级不丢事件，编造原句绝不递给作者。
+- P2b 撤销链非事务：旧撤销=「删事件」+「reopen」两条独立请求，链断留「事件已删候选仍 accepted」孤儿态。修法选单事务端点（`/undo-accept`）而非启动对账——防在源头优于事后扫。施工坑：canon 分支 `str(node.id)` 在 flush 前读得 None（列 default 到 INSERT 才赋值），先 `await db.flush()` 再记 draft。
+- P3 拒绝史防重：✗ 掉的事件换措辞/跨章曾会再进箱（唯一收敛是类型级静音）。窗口取 30 天/200 条防永久误挡同名不同事；`auto_reject=duplicate` 系统假拒绝不计（账本判重本就会拦）。
+- P6 两小修 + 一枚顺带实锤：给 world_read 补测试时发现 `adaptive/schemas.py` 缺 `Any` 导入（`from __future__ import annotations` 惰性求值把错误掩盖到首次实例化）——**read-entities 端点响应此前从未成功过**（工作照跑、候选照抽，FastAPI 序列化必炸）。补一行导入修复。
+- M3 键盘裁决 / M4 回场补读：`inboxKeyboard.ts` 纯函数三宿主接线（收件箱/待确认抽屉/批量模态）；WorkspaceView 进章也发枪 auto-read，哈希幂等闸兜底「已读未变零成本」。
+- 测试：新增 `test_emergent_facts.py`(6)/`test_observing_shutdown.py`(3)/`test_world_read.py`(3)/inboxKeyboard(11) + event_scout 扩 13 项 + accept_dedup 扩 6 项。既有测试假件坑：`test_event_scout_dedup` 的 fake 实体缺 `id` 属性——旧测试的去重用例实际静默走 normalize 异常路径（bare except 吞掉），P6 计数化后立刻显形，补 `id` 修复归位被测路径。

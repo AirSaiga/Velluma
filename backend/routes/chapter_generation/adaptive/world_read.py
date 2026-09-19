@@ -83,6 +83,7 @@ async def auto_read_chapter(chapter_id: str, db: AsyncSession = Depends(get_db))
         ran=True,
         created=result.get("created", 0),
         suppressed_muted=result.get("suppressed_muted", 0),
+        suppressed_rejected=result.get("suppressed_rejected", 0),
         budget={"daily_used": daily_used + 1, "daily_cap": AUTO_READ_DAILY_CAP},
     )
 
@@ -148,9 +149,15 @@ async def read_chapter_entities(
     )
     await flush_adaptive_records(chapter_id)
 
-    # 空结果无法区分「没有涌现」与「LLM 失败」（extract 契约静默），照样写锚——
-    # 重试入口是全书通读的整批重跑或正文变化，不为罕见失败保留热路径。
+    # 失败不写幂等锚（02 候选回流修缮 P6，与 auto_read 事件阶段同纪律）：
+    # extract 带 failed 标记区分「LLM 失败」与「无涌现」——失败保留重试资格，
+    # 下次进「通读本书」或正文变化时重跑；无涌现照写锚（空手而归也是合法结果）。
     # 间隔时间键与事件侧分立（entities_last_run_at）：认人刚跑完不封锁记事
+    if facts.failed:
+        return ReadEntitiesResponse(
+            ran=False,
+            skipped={"code": "llm_failed", "reason": AUTO_READ_SKIP_REASONS["llm_failed"]},
+        )
     chapter.auto_read_state = {
         **state,
         "entities_hash": fp,

@@ -12,6 +12,8 @@ adaptive 端点的成本核算与 trace（roadmap P0-2，2026-08-18）。
   组件在任意请求/后台 task 里 record_result 累积，任意端点离开时
   flush（drain + 落库 + commit，失败塞回防丢账，per-chapter 锁防并发
   重复落库）。后台异步组件的账由下一次心跳/settle/finish 顺路冲走。
+  **停机冲账**（02 候选回流修缮 P2a）：lifespan 关闭钩子 + atexit 兜底
+  双路 flush_all_adaptive_records——「失败塞回后进程退出」的尾巴不再丢账。
 - **trace 按 chapter 一个文件**（logs/trace_adaptive_{chapter_id}.jsonl）：
   路由入口 bind_adaptive_trace 绑定 contextvar，llm/client 的自动埋点
   （llm_call 事件含 prompt/usage/latency）对请求内与由其派生的后台
@@ -26,6 +28,7 @@ stitch_ghost[.compress|.repair] / spine_suggest[.retry]）。
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 from typing import Dict
 
@@ -80,3 +83,36 @@ async def flush_adaptive_records(chapter_id: str) -> int:
             logger.warning(f"[adaptive/observing] 落库失败（记录塞回待下次冲走）: {e}")
             rec.restore(records)
             return 0
+
+
+async def flush_all_adaptive_records() -> int:
+    """全量冲账：遍历所有章节 recorder 逐章 flush（02 候选回流修缮 P2a）。
+
+    背景：recorder 内存累积 + 失败塞回，端点冲账兜不到的尾巴（最后一次
+    落库失败塞回后进程退出）在重启场景丢账——「防丢账」承诺靠停机冲账补全。
+    逐章独立 try/except：单章失败不连坐其余。
+    """
+    total = 0
+    for chapter_id in list(_RECORDERS.keys()):
+        try:
+            total += await flush_adaptive_records(chapter_id)
+        except Exception as e:  # pragma: no cover - 防御分支
+            logger.warning(f"[adaptive/observing] 停机冲账单章失败（跳过）: {chapter_id} {e}")
+    return total
+
+
+def _flush_all_atexit() -> None:
+    """atexit 兜底：优雅停机钩子没跑到（强杀/信号路径）时的最后努力。
+
+    asyncio.run 自建新循环（此时原 loop 已关/不可用）；解释器收尾阶段任何
+    环节都可能掉（import 已卸载/引擎已 dispose），全部吞掉只留日志。
+    """
+    try:
+        count = asyncio.run(flush_all_adaptive_records())
+        if count:
+            logger.info(f"[adaptive/observing] atexit 冲账 {count} 条")
+    except Exception as e:  # pragma: no cover - 解释器收尾防御
+        logger.warning(f"[adaptive/observing] atexit 冲账失败（缓冲丢弃）: {e}")
+
+
+atexit.register(_flush_all_atexit)

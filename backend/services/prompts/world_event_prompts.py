@@ -98,6 +98,8 @@ _EXTRACT_SYSTEM = f"""你是小说世界设定的事件抽取器。从正文段�
 只抽确定性事实（正文明确发生了的），不抽计划、愿望、传闻和对话中的假设。
 优先级：位置变化(move)、生死(birth/death)、势力消长(battle/found/destroy/alliance/war_declare/territory_change)。
 每个候选给 day_offset：以本章时刻 t 为基准，段落内相对时序（同段多个事件用小偏移区分先后）。
+每个候选必须给 evidence：正文中支撑该事件的原句（逐字摘录的连续片段，≤60字，不得改写、
+拼凑或概括）——它是作者裁决「有没有这事」的依据；摘不出逐字原句的事件就不要报。
 
 输出 JSON：
 {{
@@ -109,7 +111,8 @@ _EXTRACT_SYSTEM = f"""你是小说世界设定的事件抽取器。从正文段�
       "location": "地点名或null",
       "day_offset": 0,
       "duration_days": 0,
-      "note": "正文依据（≤40字）"
+      "note": "正文依据（≤40字）",
+      "evidence": "正文原句（逐字摘录，≤60字）"
     }}
   ]
 }}

@@ -219,7 +219,17 @@ async def lifespan(_: FastAPI):
     # 启动阶段：初始化数据库（创建表结构、连接池）
     await init_db()
     yield
-    # 关闭阶段：由 asynccontextmanager 自动处理资源清理
+    # 关闭阶段：adaptive 用量记账停机冲账（02 候选回流修缮 P2a）——recorder
+    # 内存缓冲/失败塞回的尾巴在此落库，atexit 兜底只覆盖信号路径；单章失败
+    # 不阻塞其余（flush_all 内部已逐章 try/except）
+    try:
+        from backend.services.adaptive.observing import flush_all_adaptive_records
+
+        flushed = await flush_all_adaptive_records()
+        if flushed:
+            logger.info(f"[Lifespan] 停机冲账 {flushed} 条 adaptive 用量记录")
+    except Exception as e:  # pragma: no cover - 停机防御
+        logger.warning(f"[Lifespan] 停机冲账失败: {e}")
 
 
 # =============================================================================

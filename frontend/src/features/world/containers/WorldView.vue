@@ -52,6 +52,7 @@ import {
 } from '../composables/batchAccept'
 import { useCanon } from '../composables/useCanon'
 import { useReadBook } from '../composables/useReadBook'
+import { inboxNavKey, moveInboxIndex, verdictFromKey } from '../composables/inboxKeyboard'
 import { readerMirrorApi } from '../../../services/api/domain/reader-mirror.api'
 import { useWorldHistory, useUndoShortcut } from '../composables/useWorldHistory'
 import { useMapEdit, editUndo, editRedo } from '../composables/useMapEdit'
@@ -618,6 +619,37 @@ async function rejectCand(c: { id: string }) {
     busyCandidateId.value = null
     await loadCandidates()
   }
+}
+
+// ===== 键盘裁决（02 候选回流修缮 M3）：待确认列表获焦后 ↑↓ 移动 / →·Enter ✓ / ←·Delete ✗ =====
+const candCursor = ref(0)
+watch(
+  () => pendingCandidates.value.length,
+  (len) => { if (candCursor.value >= len) candCursor.value = Math.max(0, len - 1) },
+)
+function onCandListKeydown(ev: KeyboardEvent) {
+  if (!pendingCandidates.value.length) return
+  const nav = inboxNavKey(ev.key)
+  if (nav !== 0) {
+    ev.preventDefault()
+    ev.stopPropagation()
+    candCursor.value = moveInboxIndex(candCursor.value, nav, pendingCandidates.value.length)
+    return
+  }
+  const verdict = verdictFromKey(ev.key)
+  if (!verdict) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  const c = pendingCandidates.value[candCursor.value]
+  if (!c || busyCandidateId.value) return
+  if (verdict === 'accept') void acceptCand(c)
+  else void rejectCand(c)
+}
+/** 出处原句（02 修缮 M1）：悬停见正文原句（后端已校验逐字子串），canon 候选回落既有 title */
+function candTitleOf(c: typeof pendingCandidates.value[number]): string {
+  const ev = (c.draft as { evidence?: string } | undefined)?.evidence
+  if (ev) return `原句：${ev}`
+  return c.draft?.note || c.draft?.canon_text || ''
 }
 
 // ===== A5b 批量裁决：全部采纳 → 预览剔除 → 串行 accept → toast 6 秒整批撤销 =====
@@ -1346,8 +1378,19 @@ function isGroupCollapsed(name: string | null) {
               @click="batchOpen = true"
             >全部采纳</button>
           </template>
-          <ul class="side-list">
-            <li v-for="c in pendingCandidates" :key="c.id" class="side-card" :title="c.draft?.note || c.draft?.canon_text || ''">
+          <ul
+            class="side-list cand-kb"
+            tabindex="0"
+            title="点一下这里就能用键盘批：↑↓ 选条，→ 或 Enter 采纳，← 或 Delete 丢弃"
+            @keydown="onCandListKeydown"
+          >
+            <li
+              v-for="(c, i) in pendingCandidates"
+              :key="c.id"
+              class="side-card"
+              :class="{ 'cand-cursor': i === candCursor }"
+              :title="candTitleOf(c)"
+            >
               <div class="sc-body">
                 <span class="sc-name">{{ c.source === 'canon_extract' ? (c.draft?.label || '真相候选') : (c.draft?.summary || eventTypeLabel(c.draft?.event_type || 'custom')) }}</span>
                 <span class="sc-badge">
@@ -1875,7 +1918,7 @@ function isGroupCollapsed(name: string | null) {
   backdrop-filter: blur(4px);
   border: 1px solid rgba(107, 90, 68, 0.3);
   border-radius: 9999px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 .ap-btn {
   display: inline-flex;
@@ -1931,7 +1974,7 @@ function isGroupCollapsed(name: string | null) {
   background: rgba(249, 242, 226, 0.98);
   border: 1px solid rgba(107, 90, 68, 0.3);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   padding: 5px;
   z-index: 760;
 }
@@ -1985,7 +2028,7 @@ function isGroupCollapsed(name: string | null) {
   border: 1px solid rgba(107, 90, 68, 0.28);
   border-right: none;
   border-radius: 12px 0 0 12px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 .ar-btn {
   position: relative;
@@ -2114,7 +2157,7 @@ function isGroupCollapsed(name: string | null) {
   align-items: center;
   gap: 5px;
   padding: 6px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -2148,7 +2191,6 @@ function isGroupCollapsed(name: string | null) {
   border-color: var(--accent-600);
   color: #fff;
   box-shadow: var(--glow-accent);
-  transform: translateY(-1px);
 }
 .wbtn--picking {
   border-color: #d97706;
@@ -2266,7 +2308,7 @@ function isGroupCollapsed(name: string | null) {
   gap: 6px;
   margin-bottom: 8px;
   padding: 4px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
 }
@@ -2332,7 +2374,7 @@ function isGroupCollapsed(name: string | null) {
   gap: 8px;
   padding: 8px 10px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   transition: all 0.15s ease-out;
 }
@@ -2341,13 +2383,25 @@ function isGroupCollapsed(name: string | null) {
 }
 .side-card--click:hover {
   border-color: var(--accent-500);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elev-2-shadow);
 }
 /* 地图回指行高亮（地标点击 → 面板条目；2.4s 自清） */
 .side-card--hl {
   border-color: var(--accent-500);
   background: rgba(124, 106, 173, 0.08);
+}
+/* 键盘裁决（02 候选回流修缮 M3）：待确认列表获焦态 + 光标行高亮 */
+.cand-kb {
+  outline: none;
+}
+.cand-kb:focus-visible {
+  outline: 1px solid var(--accent-400);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+.side-card.cand-cursor {
+  border-color: var(--accent-400);
+  background: color-mix(in srgb, var(--accent-400) 8%, transparent);
 }
 .sc-body {
   flex: 1;
@@ -2465,7 +2519,7 @@ function isGroupCollapsed(name: string | null) {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -2489,7 +2543,7 @@ function isGroupCollapsed(name: string | null) {
   justify-content: center;
   gap: 5px;
   padding: 7px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -2508,15 +2562,15 @@ function isGroupCollapsed(name: string | null) {
 /* D4 标定选档卡 */
 
 .calib-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); /* 标定卡 teleport 在 body，隔离罩不住——按模态语义归位（00 期 §3.1/F-02） */ background: rgba(20,18,16,.35); display: flex; align-items: center; justify-content: center; }
-.calib-card { width: 300px; background: var(--bg-canvas); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
+.calib-card { width: 300px; background: var(--bg-canvas); border: 1px solid var(--line-faint); border-radius: var(--radius-lg); padding: 16px 18px; box-shadow: 0 10px 32px rgba(0,0,0,.14); }
 .calib-title { font-family: var(--font-heading); font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
 .calib-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
-.calib-mode { border: 1px solid var(--border-color); border-radius: 999px; background: none; font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
+.calib-mode { border: 1px solid var(--line-faint); border-radius: 999px; background: none; font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 12px; cursor: pointer; }
 .calib-mode.is-on { border-color: #c2725a; color: #c2725a; }
 .calib-custom { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: var(--text-sm); color: var(--text-muted); justify-content: center; }
-.calib-input { width: 70px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; font-size: var(--text-sm); color: var(--text-primary); padding: 4px 6px; text-align: center; }
+.calib-input { width: 70px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; font-size: var(--text-sm); color: var(--text-primary); padding: 4px 6px; text-align: center; }
 .calib-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
-.calib-btn { border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-secondary); font-size: var(--text-sm); padding: 6px 16px; cursor: pointer; }
+.calib-btn { border: 1px solid var(--line-faint); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-secondary); font-size: var(--text-sm); padding: 6px 16px; cursor: pointer; }
 .calib-btn--primary { background: #c2725a; border-color: #c2725a; color: #fff; }
 .calib-hint { margin: 10px 0 0; font-size: var(--text-xs); color: var(--text-muted); text-align: center; }
 </style>

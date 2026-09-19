@@ -85,7 +85,11 @@
 - ③ **世界速记**：`POST /world/parse-event`（Alt+N；**解析/落库分离红线**——只产草稿，作者过目才入账）。
   - `chapter_id` 可空：世界页速记入口缺省书级此刻（最大章锚→事件最远处→0）。
   - 响应带 `new_entities`/`new_locations`（速记里名单外的名字草拟：名字+类型猜测+`evidence` 原文逐字子串过后端硬闸）与既有实体 `aliases` 口述原词自动回填。
-- ④ **候选回流**：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销。
+- ④ **候选回流**：`event_scout` 独立组件（orchestrator 注册，settle 带段/finish 带整章各触发一次，auto_read 为主产源）→ `world_event_candidates` 待确认池（与事件账本物理隔离）→ 切片条收件箱 + 世界页「待确认」分区 ✓/✗/撤销。**02 候选回流修缮四件套（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`）**：
+  - **候选补出处（M1）**：抽取 prompt 要求 LLM 给 `evidence`（正文原句逐字摘录 ≤60 字）；event_scout 落池前 `verify_evidence` 校验（去空白子串——标点不同=改写判废；剥除+`evidence_invalid` 计数，候选保留降级无出处档）；前端三面展示（收件箱行悬停/批量模态引文行/世界页卡片悬停）；旧候选无 evidence 零报错。
+  - **单事务撤销（P2b）**：`POST /world/candidates/{id}/undo-accept` 删转正产物+回 pending 一个 commit 完成；accept 时产物 id 记入 draft（`accepted_event_id`/`accepted_canon_node_id`），存量候选请求体显式 id 兜底，产物已被单独删除幂等 reopen，非 accepted 态 409。
+  - **拒绝史防重（P3）**：`WorldCandidateRepository.list_recent_rejected`（30 天窗/近 200 条，updated_at 倒序）进归一化判重（`auto_reject` 系统假拒绝不计）；命中不入箱静默落台账 + `suppressed_rejected` 计数（auto-read 响应带出——「重复投递拦截次数」度量口径）；池加载失败按空池继续。
+  - **键盘裁决（M3）**：↑↓ 移动 / →·Enter ✓ / ←·Delete ✗ 全键盘批候选（纯函数 `composables/inboxKeyboard.ts` 对拍锁定；批量模态另支持 Space 勾选剔除 + Enter 确认；鼠标路径不变）。
 - ⑤ **保鲜三时机**：章节切换/心跳 `world_version`/窗口聚焦（`useWorldSlice` 单例）。
 - ⑥ **深链往返**：世界页 URL `?entity|loc|fs=&time=&from=chapter&chapter=`（世界页「返回本章」）；`?fs=` 开伏笔详情抽屉；`?panel=expectations|worldview|canon` 开对应账本/真相格；写作页「头顶的线」伏笔/期待行可点击。
 - ⑦ **本章场景钉**：`chapters.scene_location_id`。

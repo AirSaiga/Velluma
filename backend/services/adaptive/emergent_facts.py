@@ -31,12 +31,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EmergentFacts:
-    """涌现实体抽取结果（单段）。"""
+    """涌现实体抽取结果（单段）。
+
+    failed=True（02 候选回流修缮 P6）：LLM 调用异常/返回不可解析——与「无涌现」
+    （failed=False 且全空列表）显式区分，调用方可据此保留重试资格（不写幂等锚）。
+    """
 
     new_entities: List[dict] = field(default_factory=list)
     relationship_changes: List[dict] = field(default_factory=list)
     new_locations: List[dict] = field(default_factory=list)
     outline_addenda: List[dict] = field(default_factory=list)
+    failed: bool = False
 
     def is_empty(self) -> bool:
         return (
@@ -115,7 +120,13 @@ async def extract_emergent_facts(
         # 观测钩子：调用方传 recorder 则记账（P0-2；纯观测非功能）
         if recorder is not None:
             recorder.record_result(stage, resp, model_slot="creative")
-        parsed = _parse_json_safe(text) or {}
+        parsed = _parse_json_safe(text)
+        # 空响应/不可解析 = 抽取失败（02 修缮 P6）：与「无涌现」区分——调用方
+        # （read-entities）据此不写幂等锚保留重试资格。无涌现的合法形态是
+        # 可解析 JSON 的全空列表，走到 None 只有失败一条路。
+        if parsed is None:
+            logger.warning("extract_emergent_facts 输出不可解析 (beat=%s)", beat_id)
+            return EmergentFacts(failed=True)
         # 类型校验——LLM 返回的列表字段可能是 str/dict/None
         def _safe_list(v):
             return v if isinstance(v, list) else []
@@ -127,4 +138,4 @@ async def extract_emergent_facts(
         )
     except Exception as e:
         logger.warning("extract_emergent_facts 失败 (beat=%s): %s", beat_id, e)
-        return EmergentFacts()
+        return EmergentFacts(failed=True)

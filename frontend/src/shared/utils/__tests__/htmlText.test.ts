@@ -49,22 +49,15 @@ describe('countChapterWords', () => {
   })
 
   it('标签字符不计入（字数口径统一红线）', () => {
-    const div = {
-      _html: '',
-      set innerHTML(v: string) {
-        this._html = v
-      },
-      get textContent() {
-        return this._html.replace(/<[^>]+>/g, '')
-      },
-    }
-    vi.stubGlobal('document', { createElement: () => div })
-    try {
-      // 标签字符（<p></p> 共 7 字符）不得虚增字数
-      expect(countChapterWords('<p>正文字数</p>')).toBe(4)
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    // 2026-09-17 起为纯正则快路径（不再 DOM 解析）：长章字数重算不再抖主线程
+    expect(countChapterWords('<p>正文字数</p>')).toBe(4)
+    expect(countChapterWords('<p>他推门。</p><p><strong>风雪</strong>扑面。</p>')).toBe(9)
+  })
+
+  it('常见实体按解码后字符计（快路径与 DOM 精确路径口径一致）', () => {
+    expect(countChapterWords('A&amp;B')).toBe(3)
+    expect(countChapterWords('「&quot;q&quot;」')).toBe(5) // 引号解码后是真实字符，照计
+    expect(countChapterWords('他&nbsp;们')).toBe(2) // nbsp 属空白，去掉
   })
 })
 
