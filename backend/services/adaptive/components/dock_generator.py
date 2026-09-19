@@ -314,6 +314,9 @@ def detect_guest_names(recent_text: str, known_names) -> List[str]:
         import jieba.posseg as pseg
     except Exception:
         return []
+    # 已知名注入 jieba 词典（幂等）：专名恒为单 token，提名不被默认碎切拖累
+    from backend.services.world.jieba_lexicon import register_terms
+    register_terms(known_names or [])
     # 词性/称谓只负责**提名**；频次用子串计数核验——jieba 会把同一名字切成
     # 不同 token（实测第二处「明姐」被切成「明姐端」nr），token 频次对分词
     # 漂移零免疫，text.count 稳定（污染防线不变：提名人形仍须过 NR/称谓闸）

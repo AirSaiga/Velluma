@@ -239,25 +239,55 @@ class AdaptiveOrchestrator:
                     from backend.services.adaptive.components.dock_generator import presence_fingerprint
                     from backend.services.utils.html_text import html_to_plain
                     from backend.services.world.active_scene import (
-                        pre_cursor_window, resolve_active_scene,
+                        _ACTOR_WINDOW_CHARS, dedupe_guest_names, extract_active_actors,
+                        known_name_terms, pre_cursor_window, resolve_active_scene,
                     )
 
                     base_pin = str(getattr(_ch, "scene_location_id", "") or "")
                     locs: list = []
+                    ents: list = []
                     try:
                         from backend.repositories.world_repository import WorldRepository
-                        locs = await WorldRepository(db).locations.list_by_book(str(_ch.book_id))
+                        _repo = WorldRepository(db)
+                        locs = await _repo.locations.list_by_book(str(_ch.book_id))
+                        ents = await _repo.entities.list_by_book(str(_ch.book_id))
+                        # 专名注入 jieba 词典（jieba_lexicon，幂等）——guest 提名
+                        # posseg 与 token 边界匹配对书级专名稳定命中
+                        from backend.services.world.jieba_lexicon import register_entity_terms
+                        register_entity_terms(ents)
                     except Exception:
                         locs = []
-                    _active = resolve_active_scene(
-                        pre_cursor_window(
-                            html_to_plain(getattr(_ch, "content_text", "") or ""),
-                            state.recent_text or "",
-                        ),
-                        locs,
-                        base_pin,
+                    _win = pre_cursor_window(
+                        html_to_plain(getattr(_ch, "content_text", "") or ""),
+                        state.recent_text or "",
                     )
+                    _active = resolve_active_scene(_win, locs, base_pin)
                     active_scene_dict = _active.as_dict()
+                    # 正文活跃者（2026-09-16 双轨在场）：光标窗内说话/交互/动作的
+                    # 已知角色无条件入镜——纯词表 0 LLM
+                    try:
+                        _cast = extract_active_actors(_win, ents)
+                        if _cast:
+                            active_scene_dict["cast"] = _cast
+                    except Exception:
+                        pass
+                    # 未建档 guest 实时识别（2026-09-17 解耦批）：detect_guest_names
+                    # 本是无状态纯函数（jieba 提名+子串计数双核验+别名归一，全程
+                    # 0 LLM），此前只随 dock 生成管线尾部落缓存——正在说话的明姐
+                    # 要等「停顿+LLM 跑完+下次心跳」数十秒才上镜。上提到取景计算
+                    # 同点直调（同一份 known_name_terms 名册词表=与宏观名册身份
+                    # 同构），当次心跳即带回 active_scene.guests。
+                    try:
+                        from backend.services.adaptive.components.dock_generator import (
+                            detect_guest_names,
+                        )
+                        _guests = dedupe_guest_names(detect_guest_names(
+                            _win[-_ACTOR_WINDOW_CHARS:], known_name_terms(ents),
+                        ))
+                        if _guests:
+                            active_scene_dict["guests"] = _guests
+                    except Exception:
+                        pass
                     stage_sig = presence_fingerprint(
                         _active.loc_id or base_pin,
                         getattr(_ch, "narrative_time", None),

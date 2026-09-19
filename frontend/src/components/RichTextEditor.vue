@@ -16,6 +16,9 @@ import GhostDraftMark from '../extensions/GhostDraftMark'
 import InlineDock from '../extensions/InlineDock'
 import CanonHighlight from '../extensions/CanonHighlight'
 import OutlineNoteNode from '../extensions/OutlineNoteNode'
+import AskNoteNode from '../extensions/AskNoteNode'
+import GhostTrack from '../extensions/GhostTrack'
+import { mapTrackedPositions } from '../features/generation/composables/useGhostPairTracker'
 import ChineseTypography, { normalizeDocumentPunctuation } from '../extensions/chineseTypography'
 import EditorFind from '../extensions/editorFind'
 import { stripForeignInlineStyles, FOREIGN_MARK_NAMES } from '../extensions/foreignStyles'
@@ -434,6 +437,10 @@ const editor = useEditor({
     InlineDock,
     // NLE-ADF 3.0 细纲胶囊：行内速记 → 落笔扩写（存盘剥除，会话级）
     OutlineNoteNode,
+    // 问书手势（04 下一阶段）：行内 ?? → 只读浅字答案（Esc 蒸发不进正文，会话级）
+    AskNoteNode,
+    // 幽灵书签未审标记（03 下一阶段 M3）：转正段细虚线，碰过即消
+    GhostTrack,
     // NLE-ADF 2.0 行内极速 Hook：@ 角色 / # 资产 提及 + 静默绑定本章
     ...buildEntityMentionExtensions({
       getBookId: () => props.bookId,
@@ -479,12 +486,16 @@ const editor = useEditor({
       return false
     },
   },
-  onUpdate: ({ editor }) => {
+  onUpdate: ({ editor, transaction }) => {
     // 幽灵死亡收割（2026-08-29 手动删除事故）：作者退格/选删亲手删光幽灵
     // 文本时 ghostActive 残留真值——僵尸态吃 Tab、禁 Space、卡 authorLane、
     // sticky 卡舱恢复等不到落沿。每个文档事务后扫一次：状态说有幽灵而文档
     // 扫不到即收尾（作者自己的流式灌入事务里幽灵恒在，纯空转一次树扫）。
     reapGhostIfDead()
+    // 03 下一阶段 M1 书签位置映射：文档事务把已采纳幽灵的首尾书签 map 过去
+    //（插字后移/删句靠拢/整段塌缩守原地——「删了重打」重新张开照样成对）。
+    // 幽灵自身流式灌入的事务也走这里：此时书签尚未放下（采纳后才跟踪），空转。
+    if (transaction.docChanged) mapTrackedPositions(transaction.mapping)
     // 查找条开着时正文在变（作者自己改/AI 写），命中集与条上计数跟着重算
     if (findOpen.value) refreshFind()
     emit('update:modelValue', editor.getHTML())

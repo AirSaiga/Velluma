@@ -6,10 +6,13 @@ import type { ApiConfig, Chapter, Character } from '../../../types'
 import { useChapterPublisher } from './useChapterPublisher'
 import { useChapterAssets } from './useChapterAssets'
 import { saveChapterDraft } from '../useChapterDraft'
+import { registerPendingSaveFlush } from '../pendingSave'
+import { flushGhostPairs } from '../../generation/composables/useGhostPairTracker'
+import { chapterEditorHandle } from '../editorHandle'
 import type { EntityFocusPayload } from '../../../shared/types'
 
 // V3.1 清理：旧双轨生成路径（startGenerate → 节拍预览弹窗 → 双轨 SSE）已移除。
-// 章节生成统一由 generation 特性的 useGenerationSession（Inspector「本章」tab）驱动。
+// 章节生成统一由 generation 特性的 useGenerationSession（Inspector「检查」tab 完稿体检）驱动。
 // 本容器只保留编辑器自身职责：内容编辑、发布、灵感、格式整理/选区优化、角色/资产勾选。
 export interface ChapterEditorContainerProps {
   selectedChapter: Chapter | null
@@ -100,13 +103,19 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   let contentPending: { chapterId: string; updates: Record<string, any> } | null = null
   // NLE-ADF 2.0/3.0：落库前剥除幽灵草稿与细纲胶囊——两者都是"未确认 AI 中间态"
   // （幽灵 Esc 可蒸发；细纲扩写未落笔），1s 防抖落库撞上其在屏时不能进库
-  // （刷新后复活 = 事故）。细纲胶囊连速记文本一起剥除（数据库永远只有正文）。
-  // 只改 outgoing 副本，绝不动编辑器文档（画布上正常存活）。
+  // （刷新后复活 = 事故）。细纲胶囊连速记文本一起剥除（数据库永远只有正文）；
+  // 问书胶囊（04 下一阶段）同契约剥除。只改 outgoing 副本，绝不动编辑器文档
+  //（画布上正常存活）。
   function stripGhostDraftHtml(html: string): string {
-    if (!html.includes('data-ghost-draft') && !html.includes('data-outline-note')) return html
+    if (
+      !html.includes('data-ghost-draft') &&
+      !html.includes('data-outline-note') &&
+      !html.includes('data-ask-note')
+    ) return html
     const doc = new DOMParser().parseFromString(html, 'text/html')
     doc.querySelectorAll('[data-ghost-draft]').forEach((el) => el.remove())
     doc.querySelectorAll('[data-outline-note]').forEach((el) => el.remove())
+    doc.querySelectorAll('[data-ask-note]').forEach((el) => el.remove())
     return doc.body.innerHTML
   }
   function handleContentUpdate(content: string) {
@@ -122,7 +131,11 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
       const p = contentPending
       contentPending = null
       updateTimeout = undefined
-      if (p) updateChapter(p.chapterId, p.updates)
+      if (p) {
+        updateChapter(p.chapterId, p.updates)
+        // 03 M1「跨保存存活」：保存时对比并更新（同一幽灵只留最新版；干净采纳安静跳过）
+        void checkpointGhostPairs(p.chapterId)
+      }
     }, 1000)
   }
 
@@ -131,7 +144,21 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
     if (metaUpdateTimeout) { clearTimeout(metaUpdateTimeout); metaUpdateTimeout = undefined }
     if (updateTimeout) { clearTimeout(updateTimeout); updateTimeout = undefined }
     if (metaPending) { const p = metaPending; metaPending = null; updateChapter(p.chapterId, p.updates) }
-    if (contentPending) { const p = contentPending; contentPending = null; updateChapter(p.chapterId, p.updates) }
+    if (contentPending) {
+      const p = contentPending; contentPending = null; updateChapter(p.chapterId, p.updates)
+      void checkpointGhostPairs(p.chapterId)
+    }
+  }
+
+  /** 03 下一阶段 M1「跨保存存活」：保存时刻的书签冲账（对比并更新，非定稿）。 */
+  function checkpointGhostPairs(chapterId: string) {
+    const editor = chapterEditorHandle.value
+    if (!editor) return
+    const bookId = (selectedChapter.value as (Chapter & { book_id?: string }) | null)?.book_id || null
+    void flushGhostPairs(chapterId, bookId, (from, to) => {
+      const size = editor.state.doc.content.size
+      return editor.state.doc.textBetween(Math.min(from, size), Math.min(to, size), '\n\n')
+    }).catch(() => {})
   }
 
   const localMetaCollapsed = ref(props.metaCollapsed ?? false)
@@ -311,7 +338,15 @@ export function useChapterEditorContainer(props: ChapterEditorContainerProps, em
   )
 
   // 卸载（路由离开写作台等）前同样冲刷，防挂起保存丢失或错章落库
-  onBeforeUnmount(() => flushPendingSaves())
+  // 注销完稿体检等消费方的冲刷入口（编辑器没了，没人可 flush）
+  onBeforeUnmount(() => {
+    registerPendingSaveFlush(null)
+    flushPendingSaves()
+  })
+
+  // 登记冲刷回调：完稿体检等「读库前必须最新」的动作经 pendingSave 单例触发
+  // （组件链四层深，prop/emit 钻取会把生成逻辑泄漏进通用组件——同 editorHandle 解法）
+  registerPendingSaveFlush(flushPendingSaves)
 
   assets.watchChapterAssets(() => props.selectedChapter)
 
