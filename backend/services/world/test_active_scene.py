@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from backend.services.world.active_scene import (
     ActiveScene,
+    dedupe_guest_names,
+    extract_active_actors,
+    known_name_terms,
     pre_cursor_window,
     resolve_active_scene,
 )
@@ -44,11 +47,15 @@ def test_transit_hit_derives_new_scene():
 
 
 def test_non_adjacent_mention_does_not_switch():
-    """动词与地名被其他词隔开（「推门进屋，明姐家的灯…」）→ 不算转场：
-    转场语义由动宾紧邻承载（与穿越闸同判据），隔空提及不切换。"""
+    """动词与地名被其他词隔开（「推门进屋，明姐家的灯…」）→ 宏观不切换：
+    转场语义由动宾紧邻承载（与穿越闸同判据），隔空提及不换据点——但
+    「推门进屋」本身是合法的微观空间动势（2026-09-16 姿态层）：室内姿态
+    成立、derived=True，宏观留在钉上。"""
     text = "老王在维修棚里修发电机。推门进屋，明姐家的灯还亮着。"
     r = resolve_active_scene(text, NAMES, base_loc_id="loc-repair")
-    assert r.derived is False and r.loc_id == "loc-repair"
+    assert r.loc_id == "loc-repair"          # 宏观据点不动
+    assert r.derived is True                 # 正文确实推导出了东西（微观姿态）
+    assert r.posture == {"kind": "indoor_living", "label": "室内生活", "cue": "进屋"}
 
 
 def test_verb_adherence_required():
@@ -177,3 +184,170 @@ def test_end_to_end_window_then_resolve():
     r = resolve_active_scene(win, NAMES, base_loc_id=None)
     assert r.loc_id == "loc-repair" and r.derived is True
     assert "明姐家" not in win or r.loc_id == "loc-repair"
+
+
+# ============================================================
+# 微观空间姿态（Spatial Posture · 2026-09-16 第四批）
+# ============================================================
+
+def test_posture_only_fires_without_roster_room():
+    """主场景（第四批任务书）：名册只有宏观据点，正文「推开门」——地名匹配
+    失败但姿态成立：宏观回退钉 + 微观室内生活，derived=True。"""
+    VILLAGE_ONLY = [Loc("loc-village", "林尘序章生活的村子")]
+    text = "林尘回到林尘序章生活的村子。他推开门，屋里飘着饭菜香。"
+    r = resolve_active_scene(text, VILLAGE_ONLY, base_loc_id="loc-village")
+    assert r.loc_id == "loc-village" and r.loc_name == "林尘序章生活的村子"
+    assert r.derived is True
+    # 「回到×村名」是合法地名转场（via 记地名证据）；更靠后的「屋里」叠加为姿态后缀
+    assert r.via == "回到·林尘序章生活的村子"
+    assert r.posture == {"kind": "indoor_living", "label": "室内生活", "cue": "屋里"}
+
+
+def test_posture_rightmost_wins_across_kinds():
+    """Q3 优先级覆盖：开头「修车棚」（工位）后文「进屋」（室内）——逆扫取
+    最右命中，后期室内绝对覆盖早期工位，与类别无关。"""
+    text = "他一早蹲在修车棚里拆机箱。忙到晌午。推门进屋，明姐已经把饭摆上了桌。"
+    r = resolve_active_scene(text, NAMES, base_loc_id=None)
+    assert r.derived is True
+    assert r.posture is not None and r.posture["kind"] == "indoor_living"
+    assert r.posture["cue"] == "进屋"
+
+
+def test_posture_without_pin_still_derives():
+    """无钉无名册命中但有姿态 → derived=True、loc_id 空（宏观无锚）。"""
+    text = "他掀帘进了屋，灶台上还温着一锅粥。"
+    r = resolve_active_scene(text, NAMES, base_loc_id=None)
+    assert r.derived is True and r.loc_id == ""
+    assert r.posture["kind"] == "indoor_living" and r.posture["cue"] == "灶台"
+
+
+def test_posture_unfinished_sentence_does_not_fire():
+    """半截防抖同闸：作者正在写「他推门」（句未完结）→ 姿态不成立。"""
+    text = "他放下碗。他推门"
+    r = resolve_active_scene(text, NAMES, base_loc_id="loc-repair")
+    assert r.derived is False and r.loc_id == "loc-repair" and r.posture is None
+
+
+def test_posture_flashback_exempt():
+    """闪回里的空间不算当前镜头：想起当年炕上 → 姿态豁免回退钉。"""
+    text = "他站在院里。他忽然想起当年炕上听师父说书的冬夜。"
+    r = resolve_active_scene(text, NAMES, base_loc_id="loc-repair")
+    assert r.derived is False and r.posture is None
+
+
+def test_posture_appends_after_later_than_loc_hit():
+    """地名命中后作者继续往里走（cue 更靠后）→ 姿态作补充后缀；
+    cue 早于地名命中 → 不叠（进「明姐家厨房」之前的「推门」不重复计）。"""
+    text = "他推门走进明姐家厨房。在桌边坐下。"
+    r = resolve_active_scene(text, NAMES, base_loc_id=None)
+    assert r.loc_id == "loc-mingjie" and r.derived is True
+    assert r.posture is not None and r.posture["cue"] == "桌边"
+
+    early = "他推开门。走进明姐家厨房，灶上炖着肉。"
+    r2 = resolve_active_scene(early, NAMES, base_loc_id=None)
+    assert r2.loc_id == "loc-mingjie" and r2.posture is None
+
+
+# ============================================================
+# 正文活跃者（Active Actors · 2026-09-16 双轨在场）
+# ============================================================
+
+class Ent:
+    def __init__(self, id, name, entity_type="character", aliases=None, visibility="public"):
+        self.id = id
+        self.name = name
+        self.entity_type = entity_type
+        self.aliases = aliases or []
+        self.visibility = visibility
+
+
+def test_actor_speaker_and_action_qualify():
+    """明姐说了四段话+端肉（无任何 move 事件）→ 无条件入镜（对白/动作）。"""
+    ents = [Ent("e-lin", "林尘"), Ent("e-ming", "明姐")]
+    text = (
+        "林尘推门进屋。明姐端来一碗肉。"
+        "“快吃。”明姐说。林尘低头扒饭。明姐又添了半勺汤。"
+    )
+    actors = extract_active_actors(text, ents)
+    names = {a["name"] for a in actors}
+    assert names == {"林尘", "明姐"}
+    by_name = {a["name"]: a for a in actors}
+    assert by_name["明姐"]["via"] in ("对白", "动作", "交互", "在场")
+
+
+def test_actor_recall_mention_excluded():
+    """想起远方的老张（纯回忆提及）→ 不入镜；同窗内老张无任何正向姿态。"""
+    ents = [Ent("e-lin", "林尘"), Ent("e-zhang", "老张")]
+    text = "林尘坐在桌边。他忽然想起了远方的老张，不知道他现在怎么样。"
+    actors = extract_active_actors(text, ents)
+    assert {a["name"] for a in actors} == {"林尘"}  # 老张被闪回句豁免
+
+
+def test_actor_bare_mention_not_enough():
+    """纯位置陈述（老张在上海）无对白/交互/动作且仅出现一次 → 不入镜。"""
+    ents = [Ent("e-lin", "林尘"), Ent("e-zhang", "老张")]
+    text = "林尘端起碗。据说老张在千里之外的上海。"
+    actors = extract_active_actors(text, ents)
+    assert {a["name"] for a in actors} == {"林尘"}
+
+
+def test_actor_high_frequency_with_dialogue_counts():
+    """对白语境高频出现（≥2 次）→ 以「在场」入镜（泛对话参与者）。"""
+    ents = [Ent("e-lin", "林尘"), Ent("e-ming", "明姐")]
+    text = "“明姐，尝尝这个。”林尘把碗递过去。明姐笑了笑没接。明姐看着窗外。"
+    actors = extract_active_actors(text, ents)
+    names = {a["name"] for a in actors}
+    assert names == {"林尘", "明姐"}
+
+
+def test_actor_alias_maps_to_display_name_and_filters():
+    """别名（老周师傅）命中归正名（周砚）；非角色类型与私有实体不参评。"""
+    ents = [
+        Ent("e-zhou", "周砚", aliases=["老周师傅"]),
+        Ent("e-sword", "青锋", entity_type="asset"),
+        Ent("e-boss", "幕后主使", visibility="private"),
+    ]
+    text = "老周师傅递过茶。青锋躺在匣子里。幕后主使在京城。"
+    actors = extract_active_actors(text, ents)
+    assert {a["name"] for a in actors} == {"周砚"}
+
+
+def test_actor_window_truncated_to_tail():
+    """扫描窗=尾部 500 字：窗外更早的说话不计（与 dock 段级窗口同口径）。"""
+    ents = [Ent("e-old", "王屠户"), Ent("e-lin", "林尘")]
+    text = "王屠户说今天收摊早。" + "铺垫。" * 300 + "林尘端起碗。"
+    actors = extract_active_actors(text, ents)
+    assert {a["name"] for a in actors} == {"林尘"}
+
+
+# ============================================================
+# 双轨身份同构（2026-09-17 解耦批）
+# ============================================================
+
+def test_known_name_terms_flattens_roles_only():
+    """名册词表=正名+别名展平；非角色/私有实体不入词表（两层共用此单一来源）。"""
+    ents = [
+        Ent("e-zhou", "周砚", aliases=["老周师傅"]),
+        Ent("e-sword", "青锋", entity_type="asset", aliases=["小青"]),
+        Ent("e-boss", "幕后主使", visibility="private"),
+    ]
+    assert known_name_terms(ents) == ["周砚", "老周师傅"]
+
+
+def test_extract_active_actors_full_chapter_mode():
+    """window_chars=None 全章模式：章首的戏份不因尾部铺垫被截掉（宏观名册用）。"""
+    ents = [Ent("e-wang", "王大爷"), Ent("e-lin", "林尘")]
+    text = "王大爷递过旱烟。" + "铺垫。" * 400 + "林尘端起碗。"
+    tail_only = extract_active_actors(text, ents)  # 默认 500 字窗只见林尘
+    assert {a["name"] for a in tail_only} == {"林尘"}
+    full = extract_active_actors(text, ents, window_chars=None, max_actors=12)
+    assert {a["name"] for a in full} == {"王大爷", "林尘"}
+
+
+def test_dedupe_guest_names_drops_jieba_artifacts():
+    """分词伪影包含去重：「明姐端」（明姐+端来的 nr 伪影）被真名包含 → 出局；
+    完全不同的名字互不误伤。"""
+    assert dedupe_guest_names(["明姐", "明姐端"]) == ["明姐"]
+    assert dedupe_guest_names(["明姐端", "明姐"]) == ["明姐"]
+    assert dedupe_guest_names(["明姐", "王叔"]) == ["明姐", "王叔"]
+    assert dedupe_guest_names([]) == []

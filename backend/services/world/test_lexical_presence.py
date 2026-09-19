@@ -107,6 +107,44 @@ def test_gap_event_fires_per_fill():
     assert detail == {"entity_id": "e1", "name": "林尘", "event_id": "ev-9"}
 
 
+def test_embedded_compound_not_filled():
+    """token 边界加固（2026-09-17）：名嵌在更长成词里不算在场——「流光溢彩」
+    是单 token，不再因子串命中凭空造在场（裸子串时代此条会误填）。"""
+    state = {"character_states": []}
+    enrich_state_with_lexical_presence(
+        state, [_ev(1, "流光溢彩之间他沉默了")],
+        [_ent("e1", "流光")], {"loc-1": _loc("loc-1")}, 100,
+    )
+    assert state["character_states"] == []
+
+
+def test_substring_fallback_when_jieba_missing(monkeypatch):
+    """jieba 缺失退子串柔性红线（判据可降级，兜底不失明）。"""
+    import backend.services.world.lexical_presence as lp
+
+    monkeypatch.setattr(lp, "_token_accs", lambda _text: None)
+    state = {"character_states": []}
+    enrich_state_with_lexical_presence(
+        state, [_ev(1, "林尘在统合局基地搬货")],
+        [_ent("e1", "林尘")], {"loc-1": _loc("loc-1")}, 100,
+    )
+    assert len(state["character_states"]) == 1
+
+
+def test_lexicon_registered_before_matching():
+    """词典注入挂点（2026-09-17）：enrich 顺手把名表注册进 jieba——
+    生僻专名恒为单 token，token 边界命中不依赖默认词典恰好认识它。"""
+    import jieba
+
+    state = {"character_states": []}
+    enrich_state_with_lexical_presence(
+        state, [_ev(1, "云漪端着药走进统合局基地")],
+        [_ent("e1", "云漪")], {"loc-1": _loc("loc-1")}, 100,
+    )
+    assert len(state["character_states"]) == 1
+    assert "云漪" in list(jieba.cut("云漪端着药"))
+
+
 # ============================================================
 # _resolve_names 三级匹配
 # ============================================================

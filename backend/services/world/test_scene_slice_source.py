@@ -216,6 +216,108 @@ def test_a4_max_event_note_fallback_and_tie(tmp_path):
         asyncio.run(engine.dispose())
 
 
+def test_presence_location_id_passthrough(tmp_path):
+    """2026-09-16 双层分立：presence 行携带结构化 location_id（同室/章范围过滤的数据前提）。
+
+    厨房（村子内部构造）与千里外基地各有一人——两条 presence 行各自带正确
+    location_id，前端才能做「取景点子树闭包」过滤（场外角色收敛世界页）。
+    """
+    engine, maker = _make_stack(tmp_path)
+    try:
+        book_id = uuid.uuid4()
+        kitchen, base = uuid.uuid4(), uuid.uuid4()
+        lin, liu = uuid.uuid4(), uuid.uuid4()
+
+        async def seed():
+            async with maker() as s:
+                s.add(m.Book(id=book_id, title="取景器测试书"))
+                village = uuid.uuid4()
+                s.add(m.WorldLocation(id=village, book_id=book_id, name="村子"))
+                s.add(m.WorldLocation(id=kitchen, book_id=book_id, name="明姐家厨房", parent_id=village))
+                s.add(m.WorldLocation(id=base, book_id=book_id, name="统全局基地"))
+                s.add(m.WorldEntity(id=lin, book_id=book_id, name="林尘", entity_type="character", importance=2))
+                s.add(m.WorldEntity(id=liu, book_id=book_id, name="流光", entity_type="character", importance=9))
+                s.add(m.WorldEvent(
+                    book_id=book_id, sequence_num=1, event_type="move", time_start=10, time_end=10,
+                    participant_ids=[str(lin)],
+                    payload={"character_ids": [str(lin)], "to_location_id": str(kitchen)},
+                ))
+                s.add(m.WorldEvent(
+                    book_id=book_id, sequence_num=2, event_type="move", time_start=10, time_end=10,
+                    participant_ids=[str(liu)],
+                    payload={"character_ids": [str(liu)], "to_location_id": str(base)},
+                ))
+                s.add(m.Chapter(id=uuid.uuid4(), book_id=book_id, chapter_number=1,
+                                chapter_name="厨房章", narrative_time=100))
+                await s.commit()
+        asyncio.run(seed())
+
+        chapter_id = asyncio.run(_chapter_id(maker, book_id))
+        sl = asyncio.run(_slice(maker, book_id, chapter_id))
+        by_name = {p["name"]: p for p in sl["presence"]}
+        assert by_name["林尘"]["location_id"] == str(kitchen)
+        assert by_name["林尘"]["location_name"] == "明姐家厨房"
+        # 场外高重要度角色不再被上限挤出（榜完整性=章范围名册不漏人的前提）
+        assert by_name["流光"]["location_id"] == str(base)
+    finally:
+        asyncio.run(engine.dispose())
+
+
+async def _chapter_id(maker, book_id):
+    async with maker() as s:
+        chapter = (await s.execute(
+            select(m.Chapter).where(m.Chapter.book_id == book_id)
+        )).scalars().first()
+        return chapter.id
+
+
+def test_chapter_actors_full_text_scan(tmp_path):
+    """方向 B（2026-09-17）：全章正文活跃名册——零事件≠零戏份。
+
+    明姐（未建档，正文说话+端肉）与王叔（已建档但零事件，正文递茶）都必须
+    出现在 chapter_actors；md5 缓存同内容二跑结果逐字节相等。
+    """
+    engine, maker = _make_stack(tmp_path)
+    try:
+        book_id = uuid.uuid4()
+        wang = uuid.uuid4()
+
+        async def seed():
+            async with maker() as s:
+                s.add(m.Book(id=book_id, title="全章名册测试书"))
+                s.add(m.WorldEntity(id=wang, book_id=book_id, name="王叔",
+                                    entity_type="character", importance=3))
+                s.add(m.Chapter(
+                    id=uuid.uuid4(), book_id=book_id, chapter_number=1,
+                    chapter_name="厨房章", narrative_time=100,
+                    content_text=(
+                        "<p>林尘推门进屋。</p>"
+                        "<p>明姐端来一碗肉。“快吃。”明姐说。</p>"
+                        "<p>王叔递过茶，没说话。</p>"
+                    ),
+                ))
+                await s.commit()
+        asyncio.run(seed())
+
+        chapter_id = asyncio.run(_chapter_id(maker, book_id))
+        sl = asyncio.run(_slice(maker, book_id, chapter_id))
+        actors = {a["name"]: a for a in sl["chapter_actors"]}
+        # 王叔：已建档零事件——正文轨（registered）补位
+        assert actors["王叔"]["source"] == "registered"
+        assert actors["王叔"]["entity_id"] == str(wang)
+        assert actors["王叔"]["via"] in ("交互", "动作", "对白", "在场")
+        # 明姐：未建档高频人名——guest 轨（jieba 双核验）
+        assert actors["明姐"]["source"] == "guest"
+        assert actors["明姐"]["entity_id"] == ""
+        # 林尘不在实体名册也未达 guest 门槛（出现 1 次）→ 不在名册
+        assert "林尘" not in actors
+        # md5 缓存：同内容二跑逐字节相等
+        sl2 = asyncio.run(_slice(maker, book_id, chapter_id))
+        assert sl2["chapter_actors"] == sl["chapter_actors"]
+    finally:
+        asyncio.run(engine.dispose())
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))

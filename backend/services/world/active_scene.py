@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from backend.services.context.scene_visibility import (
     FLASHBACK_WORDS,
@@ -59,15 +59,52 @@ _SENTENCE_END_RE = re.compile(r"[。！？；;!?…\n]")
 
 NAME_MIN_CHARS = 2  # 与 scene_visibility.NAME_MIN_CHARS 同口径
 
+# ---- 微观空间姿态（Spatial Posture · 2026-09-16 双层修正第四批）----
+# 名册匹配的死板性补丁：作者只建宏观据点（村子），正文写「推开门」时名册里
+# 根本没有「厨房」——地名匹配必然失败。姿态层从正文逆扫**微观空间动势词**，
+# 叠加在宏观据点之上（村子 · 室内生活），作者不为任何房间建档即自然换景。
+# 纯词表 0 LLM；最右命中绝对优先（后期「进屋」覆盖早期「修车棚」）。
+POSTURE_KINDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    # 室内/居所 → 室内生活
+    ("indoor_living", ("推开门", "推门", "进了屋", "进屋", "屋内", "屋里", "房里", "室内", "灶台", "桌边", "桌前", "床沿", "炕上", "掀帘")),
+    # 工棚/维修 → 维修工位
+    ("workshop", ("修车棚", "工棚", "车间", "机箱", "机房", "扳手", "柴油")),
+    # 室外/街巷 → 室外街巷
+    ("street", ("巷口", "街上", "路上", "泥泞", "冷风", "夜色", "大路", "门外")),
+)
+POSTURE_LABELS: Dict[str, str] = {
+    "indoor_living": "室内生活",
+    "workshop": "维修工位",
+    "street": "室外街巷",
+}
+
+# ---- 正文活跃者（Active Actors · 2026-09-16 双轨在场）----
+# 世界事件推演只认有显式事件的角色——正文里端水端饭说了四段话的明姐被物理
+# 抹杀。本组词表把「光标窗内作为说话人/交互对象/动作主」的已知角色无条件
+# 计入镜头前名单（纯代码 0 LLM；闪回句豁免防「想起远方的老张」误入镜）。
+_ACTOR_WINDOW_CHARS = 500   # 任务书口径：光标前 500 字窗
+_ACTOR_MAX = 6
+_SPEAK_VERBS: Tuple[str, ...] = ("说", "道", "问", "答", "喊", "叫", "骂", "笑", "叹", "应", "开口", "嘀咕", "嘟囔", "低声")
+_INTERACT_PREPS: Tuple[str, ...] = ("给", "向", "对", "朝", "替", "帮", "跟", "与", "拉", "扶")
+_ACT_VERBS: Tuple[str, ...] = ("端", "递", "拿", "放", "提", "搬", "倒", "盛", "夹", "添", "斟", "坐", "站", "转", "抬头", "低头", "点头", "摇头")
+_QUOTE_CHARS: Tuple[str, ...] = ("“", "「", "『", "《")
+_POSTURE_KIND_BY_CUE: Dict[str, str] = {cue: kind for kind, cues in POSTURE_KINDS for cue in cues}
+
 
 @dataclass
 class ActiveScene:
-    """派生结果：loc_id 空串 = 无景（derived=False 且无钉）。"""
+    """派生结果：loc_id 空串 = 无景（derived=False 且无钉）。
+
+    posture（2026-09-16）：微观空间姿态 {kind,label,cue}——地名匹配失败但正文
+    有空间动势时叠加在宏观据点上（此时 derived=True，宏观回退钉）；有地名命中
+    且姿态 cue 更靠后时作为补充后缀。None = 无姿态信息（逐字节旧语义）。
+    """
 
     loc_id: str = ""
     loc_name: str = ""
     derived: bool = False  # True=正文推导；False=回退本章钉/无钉
     via: str = ""          # 触发证据（「走进·明姐家厨房」），台账/微标用
+    posture: Optional[dict] = None
 
     def as_dict(self) -> dict:
         return {
@@ -75,6 +112,7 @@ class ActiveScene:
             "loc_name": self.loc_name,
             "derived": self.derived,
             "via": self.via,
+            "posture": self.posture,
         }
 
 
@@ -126,6 +164,35 @@ def _location_name_index(locations: Iterable[Any]) -> List[Tuple[str, str]]:
 _VERB_LOOKBEHIND = max(len(v) for v in TRANSIT_VERBS) + _FILLER_CHARS
 
 
+def _scan_posture(text: str) -> Optional[Tuple[int, str, str]]:
+    """微观姿态逆扫（纯函数）：全词表最右命中 → (pos, cue, kind)。
+
+    三道闸与地名转场同纪律：
+    - **最右绝对优先**——不分类别取位置最大者（后期「进屋」覆盖早期「修车棚」）；
+    - **命中句须已完结**——cue 之后到文本尾须有句末标点（正在写的半截不动）；
+    - **闪回豁免**——命中句含回忆词/「N年前」则跳过、向左找次右命中。
+    """
+    hits: List[Tuple[int, str, str]] = []
+    for cue, kind in _POSTURE_KIND_BY_CUE.items():
+        start = 0
+        while True:
+            pos = text.find(cue, start)
+            if pos < 0:
+                break
+            hits.append((pos, cue, kind))
+            start = pos + 1
+    if not hits:
+        return None
+    for pos, cue, kind in sorted(hits, key=lambda h: h[0], reverse=True):
+        if not _SENTENCE_END_RE.search(text, pos + len(cue)):
+            continue  # 半截句防抖
+        sentence = _sentence_of(text, pos, pos + len(cue))
+        if any(w in sentence for w in FLASHBACK_WORDS) or _FLASHBACK_YEARS_RE.search(sentence):
+            continue  # 闪回里的空间不算当前镜头
+        return pos, cue, kind
+    return None
+
+
 def resolve_active_scene(
     pre_cursor_text: str,
     locations: Iterable[Any],
@@ -139,16 +206,21 @@ def resolve_active_scene(
         base_loc_id: 本章显式钉（无命中时的安全回退）。
 
     Returns:
-        ActiveScene——derived=True 表示正文推导命中；False 表示回退钉
-        （loc_id=base_loc_id，名册里查得到名则带名）或无景。
+        ActiveScene——derived=True 表示正文推导命中（地名转场，或名册无此房
+        但姿态词成立）；False 表示回退钉（loc_id=base_loc_id，名册里查得到名
+        则带名）或无景。姿态（posture）在有地名命中且 cue 更靠后时作为补充。
     """
     text = _norm(pre_cursor_text)
     if not text:
         return _fallback_scene(locations, base_loc_id)
 
+    posture_hit = _scan_posture(text)
+
     index = _location_name_index(locations)
     if not index:
-        return _fallback_scene(locations, base_loc_id)
+        # 名册为空（或名册里根本没有「厨房」这类房间）——姿态层独立成立：
+        # 宏观回退钉/无景，微观姿态照常派生（derived=True）
+        return _posture_scene(posture_hit, locations, base_loc_id)
 
     # 收集全部命中并按位置聚组：同位置的嵌名（「明姐家」⊂「明姐家厨房」）取最长
     hits: dict = {}
@@ -177,9 +249,38 @@ def resolve_active_scene(
         sentence = _sentence_of(text, pos, end)
         if any(w in sentence for w in FLASHBACK_WORDS) or _FLASHBACK_YEARS_RE.search(sentence):
             continue
-        return ActiveScene(loc_id=loc_id, loc_name=name, derived=True, via=f"{verb}·{name}")
+        scene = ActiveScene(loc_id=loc_id, loc_name=name, derived=True, via=f"{verb}·{name}")
+        # 地名命中后作者继续往里走（cue 位置更靠后）→ 姿态作为补充后缀
+        if posture_hit and posture_hit[0] > pos:
+            scene.posture = _posture_dict(posture_hit)
+        return scene
 
-    return _fallback_scene(locations, base_loc_id)
+    return _posture_scene(posture_hit, locations, base_loc_id)
+
+
+def _posture_dict(hit: Tuple[int, str, str]) -> dict:
+    _, cue, kind = hit
+    return {"kind": kind, "label": POSTURE_LABELS[kind], "cue": cue}
+
+
+def _posture_scene(
+    posture_hit: Optional[Tuple[int, str, str]],
+    locations: Iterable[Any],
+    base_loc_id: Optional[str],
+) -> ActiveScene:
+    """无合法地名命中时的收尾：姿态成立 → 宏观回退钉 + 微观姿态（derived=True）。
+
+    被闪回/半截句否决的地名命中**不**约束姿态参评——姿态只凭自身三闸成立
+    （曾有 loc_hit_pos 约束参数，两个调用点恒传 -1 沦为死代码，2026-09-17
+    随文档与实现对齐一并摘除）。
+    """
+    if posture_hit is None:
+        return _fallback_scene(locations, base_loc_id)
+    scene = _fallback_scene(locations, base_loc_id)
+    scene.derived = True
+    scene.posture = _posture_dict(posture_hit)
+    scene.via = f"{posture_hit[1]}·{POSTURE_LABELS[posture_hit[2]]}"
+    return scene
 
 
 def _fallback_scene(locations: Iterable[Any], base_loc_id: Optional[str]) -> ActiveScene:
@@ -225,3 +326,130 @@ def pre_cursor_window(
     if end < 0:
         end = len(plain)  # 找不到锚（改写中/异步未落库）→ 章尾窗
     return plain[max(0, end - window_chars):end]
+
+
+# ============================================================
+# 正文活跃者（Active Actors · 2026-09-16 双轨在场第四批）
+# ============================================================
+
+def _entity_display_terms(e: Any) -> Tuple[str, List[str]]:
+    """(显示名, 匹配词表)——正名 + ≥2 字别名；非角色/私有实体返回空名。"""
+    if str(getattr(e, "entity_type", "character") or "character") != "character":
+        return "", []
+    if str(getattr(e, "visibility", "public") or "public") == "private":
+        return "", []
+    name = str(getattr(e, "name", "") or "").strip()
+    if len(name) < NAME_MIN_CHARS:
+        return "", []
+    terms = [name]
+    for a in getattr(e, "aliases", None) or []:
+        alias = str(a or "").strip()
+        if len(alias) >= NAME_MIN_CHARS and alias != name:
+            terms.append(alias)
+    return name, terms
+
+
+def known_name_terms(entities: Iterable[Any]) -> List[str]:
+    """已建档角色名册词表（正名+别名展平）——**双轨身份同构的单一来源**：
+
+    微观取景器（orchestrator 实时 guest 识别）与宏观名册（scene_slice 全章
+    扫描）都必须用它喂 detect_guest_names 的 known_names——同一份词表保证
+    两层对「明姐」的判定（是否未建档/是否别名归主）逐字节一致，不发生
+    一层当 guest 一层不当的分裂。
+    """
+    terms: List[str] = []
+    seen: set = set()
+    for e in entities or []:
+        display, ts = _entity_display_terms(e)
+        if not display:
+            # 非角色/私有实体不入角色名册词表（资产名撞人名的边界各调用方自理）
+            continue
+        for t in ts:
+            if t not in seen:
+                seen.add(t)
+                terms.append(t)
+    return terms
+
+
+def dedupe_guest_names(guests: List[str]) -> List[str]:
+    """guest 名单包含去重（分词伪影治理）：「明姐端」是 jieba 把「明姐+端来」
+    切成 nr 词的伪影（子串计数对它免疫——count(明姐端) 也 ≥2，与真名同时
+    拿到通行证）。规则：一个 guest 完整包含另一个 guest → 丢长留短。
+    微观/宏观两调用点共用本函数（身份同构的一部分），dock 内部行为不动。
+    """
+    items = [str(g or "").strip() for g in guests or [] if g]
+    out: List[str] = []
+    for g in items:
+        if any(g != k and k in g for k in items):
+            continue  # 被更短的真名包含 → 伪影出局
+        out.append(g)
+    return out
+
+
+def extract_active_actors(
+    window_text: str,
+    entities: Iterable[Any],
+    window_chars: Optional[int] = _ACTOR_WINDOW_CHARS,
+    max_actors: int = _ACTOR_MAX,
+) -> List[Dict[str, str]]:
+    """光标窗内的正文活跃者（纯函数 0 LLM，双轨在场的「正文轨」）。
+
+    判定=正向模式门槛（纯提及不够，防「想起远方的老张」式误入镜）：
+    - **对白**：名后 ≤2 字内是说话动词（明姐说/明姐道…），或紧跟冒号引号；
+    - **交互**：名前 ≤3 字内是交互介词（给/向/对/朝/替/帮/跟/与/拉/扶）；
+    - **动作**：名后 ≤3 字内是身体动作动词（端/递/拿/放…——明姐端肉即入镜）；
+    - **在场**：窗内出现 ≥2 次且窗内有引号（对白语境的高频在场者）。
+
+    闪回防线：出现所在句含 FLASHBACK_WORDS/「N年前」→ 该次出现不计（与地名
+    转场同闸）；泛称路人天然出局（不在实体名册）。别名命中归正名显示。
+    window_chars=None → 全章模式（不截尾，宏观名册用）；max_actors 同步放宽。
+    """
+    text = _norm(window_text or "")
+    if window_chars:
+        text = text[-window_chars:]
+    if not text:
+        return []
+    has_dialogue = any(q in text for q in _QUOTE_CHARS)
+    out: List[Dict[str, str]] = []
+    seen: set = set()
+    for e in entities or []:
+        display, terms = _entity_display_terms(e)
+        if not display or display in seen:
+            continue
+        occ_total = 0
+        via = ""
+        for term in terms:
+            start = 0
+            while True:
+                pos = text.find(term, start)
+                if pos < 0:
+                    break
+                start = pos + 1
+                occ_total += 1
+                if via:
+                    continue
+                end = pos + len(term)
+                sentence = _sentence_of(text, pos, end)
+                if any(w in sentence for w in FLASHBACK_WORDS) or _FLASHBACK_YEARS_RE.search(sentence):
+                    continue  # 回忆里的人不在镜头前
+                after = text[end:end + 2]
+                act_after = text[end:end + 3]  # 动作允许宾语提前（「把碗递」「将茶端」）
+                before = text[max(0, pos - 3):pos]
+                if any(v in after for v in _SPEAK_VERBS) or text[end:end + 1] in ("：", ":"):
+                    via = "对白"
+                elif any(p in before for p in _INTERACT_PREPS):
+                    via = "交互"
+                elif any(v in act_after for v in _ACT_VERBS):
+                    via = "动作"
+        if not via and occ_total >= 2 and has_dialogue:
+            via = "在场"
+        if via:
+            seen.add(display)
+            out.append({
+                "name": display,
+                "via": via,
+                "entity_id": str(getattr(e, "id", "") or ""),
+            })
+            if len(out) >= max_actors:
+                break
+    return out

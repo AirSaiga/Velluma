@@ -58,23 +58,33 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
 
 
+def _token_accs(text: str) -> Optional[frozenset]:
+    """连续 token 拼接集合（≤6 token 滑窗）——token 边界判据的唯一实现。
+
+    供「一次切词、多名查验」的消费方复用（词法兜底按事件切一次查整张名表）；
+    jieba 缺失/空文本返回 None，调用方退子串匹配（柔性红线，宁多勿漏）。
+    """
+    if _jieba is None or not text:
+        return None
+    tokens = [t for t in _jieba.cut(text) if t.strip()]
+    accs = set()
+    for i in range(len(tokens)):
+        acc = ""
+        for j in range(i, min(i + 6, len(tokens))):
+            acc += tokens[j]
+            accs.add(acc)
+    return frozenset(accs)
+
+
 def _name_in_text(name: str, text: str) -> bool:
     """专有名词 vs 分词边界匹配（canon_watch._name_in_text 同款纪律）：
     连续 token 拼接恰为该词才算命中，杜绝「流光石」「流光溢彩」嵌词误报；
     jieba 缺失退子串匹配（柔性红线，宁多勿漏）。"""
     if not name or not text:
         return False
-    if _jieba is not None:
-        tokens = [t for t in _jieba.cut(text) if t.strip()]
-        for i in range(len(tokens)):
-            acc = ""
-            for j in range(i, min(i + 6, len(tokens))):
-                acc += tokens[j]
-                if acc == name:
-                    return True
-                if len(acc) > len(name):
-                    break
-        return False
+    accs = _token_accs(text)
+    if accs is not None:
+        return name in accs
     return name in text
 
 

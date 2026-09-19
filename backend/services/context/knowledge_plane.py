@@ -458,9 +458,17 @@ def render_knowledge_view(bundle: Any, selected: List[KnowledgeEntry],
     view_loc_id = (derived or scene_loc_id)
     loc_name = _location_name(bundle, view_loc_id) if view_loc_id else ""
     pinned_name = _location_name(bundle, scene_loc_id) if scene_loc_id else ""
+    # 第四批（2026-09-16 微观空间姿态）：正文有空间动势但名册无此房时，
+    # 宏观据点叠加微观场态——AI 知道镜头在「室内生活/桌边」而非悬在村口
+    posture = (active_scene or {}).get("posture") if active_scene else None
     scene_bits = []
     if derived and loc_name:
-        scene_bits.append(f"当前场景：{loc_name}（按正文推导）")
+        if isinstance(posture, dict) and posture.get("label"):
+            scene_bits.append(
+                f"当前场景：{loc_name}（当前镜头位于{posture['label']}，正文推导）"
+            )
+        else:
+            scene_bits.append(f"当前场景：{loc_name}（按正文推导）")
         if pinned_name and view_loc_id != scene_loc_id:
             scene_bits.append(f"本章钉定：{pinned_name}（取景已随笔尖流转）")
     elif loc_name:

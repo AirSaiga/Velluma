@@ -16,16 +16,24 @@ participant_ids 全空 → character_states 恒空 → 在场实体档案块永�
 - 死者不吃词法在场（任何 death 事件引用过的实体跳过——宁可缺席不可复活）；
 - 只取 ≤t 且带 location_id 的事件；同名命中多实体（歧义）不填；同名多事件
   取 sequence_num 最新；
+- **匹配判据=token 边界**（2026-09-17 加固，与写入侧 event_parser 三级匹配
+  同款纪律：连续 token 拼接恰为该名才命中，嵌词「流光溢彩」不再凭空造在场；
+  jieba 缺失退子串柔性红线）；名表注册进 jieba 词典（jieba_lexicon），
+  专名恒为单 token 后命中稳定——进程级幂等副作用，不破函数的结果确定性；
 - **不回写 participant_ids**（append-only 事实源保持纯洁，只读面 enrich）；
 - 命中标 presence_source="lexical"——切片条渲染「据正文推断」badge（补录
   建议的载体），台账记数据缺口（event-participant-gap 由回填脚本/调用方计）。
 
-幂等：对已增强的 state 重复调用是 no-op（缺失集为空）。纯函数零 IO。
+幂等：对已增强的 state 重复调用是 no-op（缺失集为空）。纯函数零 IO（jieba
+词典注册为进程级幂等副作用，不读写外部状态）。
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Dict, List
+
+from backend.services.context.scene_visibility import _token_accs
+from backend.services.world.jieba_lexicon import register_entity_terms
 
 _WS_RE = re.compile(r"\s+")
 
@@ -79,6 +87,10 @@ def enrich_state_with_lexical_presence(
         if not unambiguous:
             return state
 
+        # 专名注入 jieba 词典（2026-09-17）：名表恒为单 token 后 token 边界
+        # 命中稳定；幂等进程级副作用，失败静默（jieba 缺失时匹配退子串）
+        register_entity_terms(entities)
+
         # 死者排除：任何 death 事件引用过的实体（≤t 或未来都不复活）
         dead_ids = set()
         for e in events:
@@ -107,10 +119,17 @@ def enrich_state_with_lexical_presence(
 
         for ev in candidate_events:
             note = _norm_note(getattr(ev, "note", ""))
+            # token 边界判据：每事件切一次词查整张名表；None=jieba 缺失退子串
+            accs = _token_accs(note)
             loc_id = str(ev.location_id)
             for name, ent in unambiguous.items():
                 eid = str(getattr(ent, "id", ""))
-                if eid in have or eid in dead_ids or name not in note:
+                if eid in have or eid in dead_ids:
+                    continue
+                if accs is not None:
+                    if name not in accs:
+                        continue
+                elif name not in note:
                     continue
                 states.append({
                     "entity_id": eid,

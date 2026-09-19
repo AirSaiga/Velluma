@@ -15,6 +15,7 @@ compute_world_state（事件折叠），保证「作者看到的在场 = AI 看�
 """
 from __future__ import annotations
 
+from hashlib import md5
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -28,9 +29,67 @@ from backend.repositories.world_repository import (
 from backend.services.context.settings_bundle import _reader_expectations_view
 from backend.services.context.world_bridge import resolve_narrative_time
 
-_PRESENCE_LIMIT = 6        # 在场角色上限（切片条截断展示）
+_PRESENCE_LIMIT = 40       # 在场角色上限（2026-09-16 双层分立：前端按取景/章范围过滤，上限只防极端长书全量倾泻）
 _FORESHADOW_LIMIT = 4      # 伏笔上限（前端展示前 2 条 + 计数）
 _EXPECTATION_LIMIT = 3     # 期待上限
+_CHAPTER_ACTORS_MAX = 12   # 全章名册正文轨上限（事件轨另有 _PRESENCE_LIMIT）
+_CHAPTER_ACTORS_CACHE_CAP = 64  # 章级扫描缓存容量（超限整体清空——书章数远小于此量级）
+
+# 章级扫描缓存：md5(纯文本) → 扫描结果。内容不变零重扫（切片保鲜三时机反复
+# 调用只付一次 md5 的钱）；内存级，进程重启即空，无失效协议负担
+_CHAPTER_ACTORS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def extract_chapter_actors(
+    content_text: str,
+    entities: List[Any],
+) -> List[Dict[str, Any]]:
+    """全章正文活跃名册（纯代码 0 LLM，方向 B · docs 通告单语义）。
+
+    双轨并集的「正文轨」：对整章纯文本跑同一套活跃者判定——
+    - 已建档角色：extract_active_actors 全章模式（对白/交互/动作/对白密度，
+      闪回句豁免，别名归正名）——与微观取景器共用同一函数与名册词表
+      （known_name_terms），身份判定逐字节同构；
+    - 未建档角色：detect_guest_names（jieba 提名+子串计数双核验+泛称停用，
+      ≤2 名）——与 dock 的临时通行证同一实现；
+    输出 [{name, via, entity_id?, source: 'registered'|'guest'}]。
+    md5(纯文本) 缓存：同内容零重扫（10k 字首次约 15-30ms，此后 ~0）。
+    """
+    from backend.services.utils.html_text import html_to_plain
+
+    plain = html_to_plain(content_text or "")
+    if not plain:
+        return []
+    key = md5(plain.encode("utf-8")).hexdigest()
+    cached = _CHAPTER_ACTORS_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    from backend.services.world.active_scene import (
+        dedupe_guest_names, extract_active_actors, known_name_terms,
+    )
+
+    actors: List[Dict[str, Any]] = [
+        {**a, "source": "registered"}
+        for a in extract_active_actors(plain, entities, window_chars=None, max_actors=_CHAPTER_ACTORS_MAX)
+    ]
+    known = {a["name"] for a in actors} | set(known_name_terms(entities))
+    if len(actors) < _CHAPTER_ACTORS_MAX:
+        try:
+            from backend.services.adaptive.components.dock_generator import detect_guest_names
+
+            # 超长章护栏（jieba posseg 实测 ~26ms/千字）：>30k 字时 guest 提名退
+            # 化为尾 8k 窗（registered 轨是纯名词表匹配仍全章——0.07ms/千字）
+            guest_text = plain if len(plain) <= 30000 else plain[-8000:]
+            for g in dedupe_guest_names(detect_guest_names(guest_text, sorted(known))):
+                actors.append({"name": g, "via": "未建档", "entity_id": "", "source": "guest"})
+        except Exception:
+            pass
+    actors = actors[:_CHAPTER_ACTORS_MAX]
+    if len(_CHAPTER_ACTORS_CACHE) >= _CHAPTER_ACTORS_CACHE_CAP:
+        _CHAPTER_ACTORS_CACHE.clear()
+    _CHAPTER_ACTORS_CACHE[key] = actors
+    return actors
 
 
 def _point_in_polygon(x: float, y: float, polygon: List[List[float]]) -> bool:
@@ -186,6 +245,9 @@ async def build_scene_slice(
                 "name": ent.name or "",
                 "alive": bool(cs.get("alive")),
                 "location_name": (loc.name or "") if loc is not None else "",
+                # 结构化位置 id（2026-09-16 双层分立）：同 _location_id 对外暴露——
+                # 前端按取景/章范围子树闭包过滤；_location_id/_xy 仍为内部消费
+                "location_id": loc_id,
                 "label": str(cs.get("label") or ""),
                 # 词法兜底标记（lexical=据正文推断，前端渲染补录建议 badge）
                 "presence_source": str(cs.get("presence_source") or "") or None,
@@ -327,6 +389,12 @@ async def build_scene_slice(
         "encounters": encounters,
         "foreshadows": foreshadows,
         "expectations": expectations,
+        # 全章正文活跃名册（2026-09-17 方向 B）：正文说话/交互/动作的角色（含
+        # 未建档 guest）与事件推演名册并集——零事件不等于零戏份，明姐/王叔
+        # 们不因没写 move 事件就从通告单上消失
+        "chapter_actors": extract_chapter_actors(
+            getattr(chapter, "content_text", "") or "", entities,
+        ),
         "version": await repo.world_version(book_id),
         "world_empty": False,
     }

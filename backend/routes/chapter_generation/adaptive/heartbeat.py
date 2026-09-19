@@ -159,11 +159,20 @@ async def heartbeat(
     )
     await flush_adaptive_records(chapter_id)
 
+    # 第四批（2026-09-16 双轨在场）：guests 并入 active_scene 载荷——取景器
+    # 镜头前名单三源（事件推演∪正文活跃者∪guest）单通道取齐。优先级（2026-09-17
+    # 解耦批）：orchestrator 的**实时纯代码识别**（当次心跳直出）压过 dock 缓存
+    # 里的陈旧名单（dock 跑完才有值）；dock 版仅在实时通道缺席时兜底（如异常路径）
+    active_scene_payload = result.get("active_scene")
+    _guests = _extract_onstage_guests(snapshot)
+    if isinstance(active_scene_payload, dict) and _guests and not active_scene_payload.get("guests"):
+        active_scene_payload = {**active_scene_payload, "guests": _guests}
+
     return HeartbeatResponse(
         dock_parts=dock_parts,
         dock_muted=dock_muted,
         dock_parts_age_s=dock_parts_age_s,
-        onstage_guests=_extract_onstage_guests(snapshot),
+        onstage_guests=_guests,
         direction_cards=direction_cards,
         intent_source=intent.get("source", "none"),
         intent_arc=intent.get("arc", ""),
@@ -176,9 +185,11 @@ async def heartbeat(
         world_version=world_version,
         spine_progress=spine_progress,
         last_component_errors=orch.last_component_errors(),
-        # 第三弹（2026-09-14 光标派生取景框）：{loc_id, loc_name, derived, via}
-        # ——derived=True 表示按正文推导（前端切片条出「正文推导」微标+一键钉定）
-        active_scene=result.get("active_scene"),
+        # 第三弹（2026-09-14 光标派生取景框）：{loc_id, loc_name, derived, via,
+        # posture?, cast?, guests?}——derived=True 表示按正文推导（前端切片条
+        # 出「正文推导」微标+一键钉定）；posture=微观空间姿态、cast=正文活跃
+        # 者、guests=未建档临时在场（2026-09-16 第四批，全部纯代码 0 LLM）
+        active_scene=active_scene_payload,
     )
 
 

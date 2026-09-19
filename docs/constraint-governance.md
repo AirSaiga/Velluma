@@ -95,7 +95,9 @@ outcome=hit|drop|exempt|mute|rewrite。信用分机制一期不做，但数据�
    无状态实体从 ≤t 且带 location_id 事件的 note 词法命中补在场，标
    `presence_source="lexical"`。四个调用点统一同一函数（repo 汇聚点 +
    scene_slice 三处直调点），死者不复活、歧义不填、不回写 participant_ids
-   （append-only 事实源保持纯洁）；
+   （append-only 事实源保持纯洁）；匹配判据 2026-09-17 升级为 **jieba token
+   边界**（与写入侧同款纪律，嵌词不成词不命中；jieba 缺失退子串），名表
+   同步注入 jieba 词典（`services/world/jieba_lexicon.py`）保专名单 token；
 3. **缺口可见**：切片条在场行渲染「据正文推断」badge（补录建议载体；浮卡
    后端字段 `presence_source` 已备、前端渲染挂账）；每个词法补填落一条
    `event-participant-gap` 事件（on_event 回调，缺口可聚合度量）；

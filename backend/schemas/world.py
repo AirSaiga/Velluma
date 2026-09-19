@@ -274,12 +274,28 @@ class ScenePresenceItem(BaseModel):
     name: str
     alive: bool = True
     location_name: str = ""
+    # 结构化位置 id（2026-09-16 取景器双层分立）：空=位置未知——前端按当前
+    # 取景/本章据点的子树闭包过滤同室名单与章范围名册（场外角色收敛世界页）
+    location_id: str = ""
     label: str = ""  # "在途（进度 40%）" / "驻留" / "出生" / "已死亡"
     # 词法兜底标记（2026-09-02）：lexical=位置从事件 note 推断（结构化链接缺失）
     # ——前端渲染「据正文推断」badge，兼作补录事件参与者的建议通道
     presence_source: Optional[str] = None
     importance: int = 1
     visibility: str = "public"
+
+
+class SceneChapterActorItem(BaseModel):
+    """全章正文活跃名册条目（2026-09-17 方向 B）：正文有戏份的角色——含零事件者。
+
+    与 presence（事件推演轨）并集去重后渲染「本章出场名册」：registered=已
+    建档（via=对白/交互/动作/在场），guest=未建档高频人名（明姐类，jieba
+    双核验）——前端以「正文活跃/未建档」微标区分。
+    """
+    name: str
+    via: str = ""            # 判定证据：对白/交互/动作/在场/未建档
+    entity_id: str = ""      # guest 无档案故空
+    source: str = "registered"  # registered | guest
 
 
 class SceneBlockResponse(BaseModel):
@@ -328,6 +344,8 @@ class SceneSliceResponse(BaseModel):
     t_source_chapter: Optional[int] = None
     presence: List[ScenePresenceItem] = Field(default_factory=list)
     scene: Optional[SceneBlockResponse] = None
+    # 全章正文活跃名册（2026-09-17 方向 B）：与 presence 并集渲染出场名册
+    chapter_actors: List[SceneChapterActorItem] = Field(default_factory=list)
     encounters: List[SceneEncounterItem] = Field(default_factory=list)
     foreshadows: List[SceneForeshadowItem] = Field(default_factory=list)
     expectations: List[SceneExpectationItem] = Field(default_factory=list)
