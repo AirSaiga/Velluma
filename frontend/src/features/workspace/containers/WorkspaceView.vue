@@ -24,9 +24,10 @@ import BeatCardDock from '../../generation/presentation/BeatCardDock.vue'
 import IgnitionCard from '../../generation/presentation/IgnitionCard.vue'
 import ThinkingIndicator from '../../generation/presentation/ThinkingIndicator.vue'
 import ShortcutsCheatsheet from '../../generation/presentation/ShortcutsCheatsheet.vue'
-import { setExtraSparkParts, setSparkParts, setSparkGuests, setSparkSticky, stashSparkDock, stashGuestReturn, takeGuestReturn } from '../../generation/composables/useSparkDock'
+import { setExtraSparkParts, setSparkParts, setSparkGuests, setSparkSticky, stashSparkDock, stashGuestReturn, takeGuestReturn, getSparkPartsChapterId } from '../../generation/composables/useSparkDock'
 import { hideBeatDock } from '../../generation/composables/useBeatDock'
-import { ghostActive, ghostWash, useGhostOriginal } from '../../generation/composables/useGhostDraft'
+import { ghostActive, ghostWash, useGhostOriginal, setGhostPairContext } from '../../generation/composables/useGhostDraft'
+import { finalizeGhostPairs } from '../../generation/composables/useGhostPairTracker'
 import { useAdaptiveAssist } from '../../generation/composables/useAdaptiveAssist'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { logCollabEvent } from '../../../composables/useCollabTelemetry'
@@ -35,6 +36,7 @@ import { styleApi } from '../../../services/api'
 import { useChapterSpine } from '../composables/useChapterSpine'
 import { assistEnabled, setAssistEnabled } from '../../generation/composables/useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { trackChapterSave } from '../../chapter-editor/pendingSave'
 import { setCanonTerms, type CanonTerm } from '../../../extensions/CanonHighlight'
 import { bindInlineDockBridge } from '../../../extensions/InlineDock'
 import { loadChapterDraft, clearChapterDraft } from '../../chapter-editor/useChapterDraft'
@@ -120,6 +122,8 @@ session.setAdaptiveContinue((mode, parts) => adaptiveAssist.requestContinue(mode
 session.setAdaptiveSettle(() => adaptiveAssist.settleCurrent())
 session.setAdaptiveFinish(() => adaptiveAssist.finishChapter())
 session.setAdaptiveBurst((card) => adaptiveAssist.requestBurst(card))
+// 03 三键「未灌完不上膛」：流式期间按键只打断不采纳——中止在飞 SSE
+session.setAdaptiveAbort(() => adaptiveAssist.abortInflight())
 // 卡片舱第 5 槽位·自定义镜头（第二冲程 2026-09-09）：作者一句话镜头 → 复用
 // 同一条 stitch 微缝合流水线（50 字级单镜头，slot=custom 不挂视点锁——
 // 作者亲笔的镜头描述本身就是契约，加锁反而可能与之矛盾）；同款 sticky+stash
@@ -196,7 +200,6 @@ function onBeatCardPick(card: { event: string; anchors?: string[]; serves_anchor
   // M3 作者声明岔路：选向即决岔——清除该锚点的岔路标记（岔路是一次性抉择）
   if (card?.is_branch && card.serves_anchor) {
     chapterSpine.updateAnchor(card.serves_anchor, { branch: undefined })
-    dispatchCollabEvent('branch_resolved', { option: card.event })
   }
   adaptiveAssist.requestBurst(card)
 }
@@ -301,20 +304,64 @@ function onIgnite() {
 const chapterSpine = useChapterSpine()
 function onIgnitionDismiss() {
   dismissedIgnitionChapterId.value = selectedChapter.value?.id || null
-  dispatchCollabEvent('ignition_dismiss')
 }
 onMounted(() => adaptiveAssist.mount())
 // 感知常驻（2026-08-29 用户拍板）：切页只 detach（解除编辑器监听/中止需要
 // 活编辑器的 SSE），pending 感知计时器与舱内零件保留——感知只随应用关闭停机
 onBeforeUnmount(() => adaptiveAssist.detach())
 
-// 协作埋点桥（P0-3）：展示组件派发的 velluma:collab-event 统一转发后端本地 jsonl
+// 协作埋点桥（P0-3 → 05 瘦身后仅机制事件走此路：hint_dismiss / ghost_adopt /
+// ghost_discard / ghost_discard_reason）：展示组件派发的 velluma:collab-event
+// 统一转发后端本地 jsonl（机制消费方见 events.py 词表）
 function _onCollabEvent(e: Event) {
   const d = (e as CustomEvent<{ kind: string; detail?: Record<string, unknown> }>).detail
   if (d?.kind) logCollabEvent(selectedChapterId.value, d.kind, d.detail || {})
 }
 onMounted(() => window.addEventListener('velluma:collab-event', _onCollabEvent as EventListener))
 onBeforeUnmount(() => window.removeEventListener('velluma:collab-event', _onCollabEvent as EventListener))
+
+// ---- 问书（04 下一阶段）：?? 手势 → /adaptive/ask-book → 答案回投行间胶囊 ----
+// 容器只做编排（调 API + 回投事件）；呈现与出处点验在 AskNoteChip
+async function _onAskBook(e: Event) {
+  const d = (e as CustomEvent<{ question: string; noteId: string }>).detail
+  const chId = selectedChapterId.value
+  if (!d?.question || !chId) return
+  let answer: import('../../../services/api/domain/adaptive.api').AskBookAnswer
+  try {
+    answer = await adaptiveApi.askBook(chId, d.question)
+  } catch {
+    answer = { kind: 'not_found', text: '没查到——问书服务没应上，稍后再试。', sources: [] }
+  }
+  window.dispatchEvent(new CustomEvent('velluma:ask-book-answer', {
+    detail: { noteId: d.noteId, answer },
+  }))
+}
+// 出处点验（唯一的跳走动作，只发生在作者主动点击）：章 → 就地切章；世界对象 → 深链世界页
+function _onAskSource(e: Event) {
+  const d = (e as CustomEvent<{ source: Record<string, string> }>).detail
+  const s = d?.source
+  if (!s) return
+  if (s.type === 'chapter' && s.chapter_id) {
+    store.selectChapter(s.chapter_id)
+    return
+  }
+  const bookId = currentBook.value?.id
+  if (!bookId) return
+  const query: Record<string, string> = { from: 'chapter' }
+  if (s.type === 'location' && s.location_id) query.loc = s.location_id
+  else if (s.type === 'foreshadow' && s.ledger_key) query.fs = s.ledger_key
+  else if (s.type === 'canon') query.panel = 'canon'
+  else return
+  router.push({ path: `/world/${bookId}`, query })
+}
+onMounted(() => {
+  window.addEventListener('velluma:ask-book', _onAskBook as EventListener)
+  window.addEventListener('velluma:ask-source', _onAskSource as EventListener)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('velluma:ask-book', _onAskBook as EventListener)
+  window.removeEventListener('velluma:ask-source', _onAskSource as EventListener)
+})
 
 // AI 辅助总开关（顶栏 sparkles 按钮）：关闭=纯手写模式（Space 恢复普通空格）
 function toggleAssist() {
@@ -410,10 +457,27 @@ watch(selectedChapterId, (newId, oldId) => {
   } else {
     chapterSpine.unload()
   }
+  // 03 下一阶段 M1：书签寿命=整个章节会话——切章定稿（读旧章两书签间现文，
+  // 有改动自动成对 + 聚合提示/按批撤销），再换上下文到新章
+  if (oldId && oldId !== newId) {
+    const editor = chapterEditorHandle.value
+    const bookId = currentBook.value?.id || null
+    if (editor) {
+      void finalizeGhostPairs(oldId, bookId, (from, to) =>
+        editor.state.doc.textBetween(Math.min(from, editor.state.doc.content.size), Math.min(to, editor.state.doc.content.size), '\n\n'))
+    }
+  }
+  setGhostPairContext(newId)
   // 系统自己去读（2026-08-25 战略定稿）：离开一章即发枪——后端哈希幂等闸
   // 保证「没变不读/太短不读/超预算不读」，前端无需跟踪内容变化，静默失败不打扰
   if (oldId && oldId !== newId) {
     void adaptiveApi.autoRead(oldId).catch(() => {})
+  }
+  // 回场补读（02 候选回流修缮 M4）：进章也发枪——覆盖「应用关闭前未切章导致
+  // 整章未读」的盲区（离开触发从未发生）。哈希幂等闸照旧兜底：读过且内容
+  // 没变 → 后端 unchanged 秒回零成本；预算闸（间隔/每日上限）行为不变
+  if (newId) {
+    void adaptiveApi.autoRead(newId).catch(() => {})
   }
 }, { immediate: true })
 
@@ -474,7 +538,7 @@ function onTocSelect(ch: Chapter, ev: MouseEvent | KeyboardEvent) {
 const assistPinned = ref(loadUiPrefs().rightDrawerOpen ?? false)
 const assistPanelOpen = ref(assistPinned.value)
 /** 面板当前分区；null = 下次打开时由 InspectorPanel 按章节状态取默认 */
-const activeTab = ref<'planning' | 'now' | 'chapter' | 'review' | 'debug' | null>(null)
+const activeTab = ref<'planning' | 'now' | 'review' | 'debug' | null>(null)
 /** 完稿报告到达且尚未看过 → 栏上「检查」朱点 */
 const reportUnread = ref(false)
 const assistPanelEl = ref<HTMLElement | null>(null)
@@ -512,8 +576,8 @@ function onRailSelectTab(tab: string) {
   assistPanelOpen.value = true
 }
 
-/** InspectorPanel 内 Ctrl+1~5 切区时同步开面板（面板开着时监听才挂，此处兜底语义） */
-function onPanelActivate(tab: 'planning' | 'now' | 'chapter' | 'review' | 'debug') {
+/** InspectorPanel 内 Ctrl+1~4 切区时同步开面板（面板开着时监听才挂，此处兜底语义） */
+function onPanelActivate(tab: 'planning' | 'now' | 'review' | 'debug') {
   activeTab.value = tab
   assistPanelOpen.value = true
 }
@@ -555,9 +619,9 @@ function _onDocPointerDownPanel(e: PointerEvent) {
 }
 
 // Ctrl+\ 三态：关 → 开并 pin / 开未 pin → pin / 已 pin → 收并解 pin。
-// Ctrl+1~5：面板关时按键 = 开 + 定位（面板开时 InspectorPanel 自身监听切区，
+// Ctrl+1~4：面板关时按键 = 开 + 定位（面板开时 InspectorPanel 自身监听切区，
 // 两条路汇于同一 activeTab 状态，无双源）。
-const PANEL_TAB_ORDER = ['planning', 'now', 'chapter', 'review', 'debug'] as const
+const PANEL_TAB_ORDER = ['planning', 'now', 'review', 'debug'] as const
 
 function _panelKeyHandler(e: KeyboardEvent) {
   if (!(e.ctrlKey || e.metaKey)) return
@@ -575,7 +639,7 @@ function _panelKeyHandler(e: KeyboardEvent) {
     }
     return
   }
-  if (!e.shiftKey && e.key >= '1' && e.key <= '5') {
+  if (!e.shiftKey && e.key >= '1' && e.key <= '4') {
     const tab = PANEL_TAB_ORDER[Number(e.key) - 1]
     if (!tab) return
     e.preventDefault()
@@ -691,7 +755,21 @@ watch(
 let _activatedChapterId: string | null = null
 
 watch(selectedChapter, (ch, prev) => {
-  if (ch && ch.id !== prev?.id) {
+  if (!ch) return
+  // remount 首跑（prev=undefined，2026-09-17 契约修复）：写作台无 keep-alive，
+  // 切页往返必经此处——此前 prev?.id 恒 undefined 使条件恒真，把 detach 刻意
+  // 保留的舱内零件当场清空，「感知常驻·回台秒弹」被 remount 无效化（感知链
+  // 全部重跑）。现在只清「归属 ≠ 当前章」的存货（换书/换章后直落新章的首跑
+  // 仍防旧件串章），同章回台保住秒弹零件。
+  if (prev === undefined) {
+    if (getSparkPartsChapterId() && getSparkPartsChapterId() !== ch.id) {
+      setSparkParts([])
+      setExtraSparkParts([])
+      setSparkGuests([])
+    }
+    return
+  }
+  if (ch.id !== prev?.id) {
     _activatedChapterId = null
     // 在飞 stitch 流先断（2026-09-04 审计修复）：GHOST_START 在后端全文生成完
     // 才发出，换章窗口内旧章幽灵会以新章光标为落点灌进画布（跨章污染）
@@ -884,7 +962,10 @@ function backToLibrary() {
 async function handleUpdateChapter(id: string, updates: Record<string, unknown>) {
   saveStatus.value = 'saving'
   try {
-    await store.updateChapter(id, updates as any)
+    const savePromise = store.updateChapter(id, updates as any)
+    // 登记在飞写库：完稿体检等消费方 flush 后据此等待「库内=屏上」再发枪
+    trackChapterSave(savePromise)
+    await savePromise
     saveStatus.value = 'saved'
     lastSavedAt.value = new Date()
     // 正文落库成功 → 清本地草稿兜底（失败则保留，下次输入自动重试/进章弹恢复）
@@ -1091,7 +1172,7 @@ async function confirmDeleteChapter(ch: Chapter) {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--bg-primary);
+  background: var(--surface-desk); /* 06-modern §2.1：页面根=桌面（纸列浮起） */
   /* 面板 pin 时推挤内容区：纸列在剩余空间重新居中，过渡与面板滑入同速 */
   transition: padding-right var(--dur-3) var(--ease-out);
   /* 左缘书签 / 目录抽屉 / 右缘助手栏的 absolute 定位锚 */

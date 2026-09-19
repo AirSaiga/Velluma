@@ -1,5 +1,6 @@
 /**
- * 协作交互埋点（roadmap P0-3，本地 jsonl 零上报——个人镜子，非增长分析）。
+ * 协作交互埋点写侧（roadmap P0-3 → 05 瘦身后仅机制事件：intent_correct 与
+ * DOM 桥转发的 hint_dismiss/ghost_adopt/ghost_discard 等；本地 jsonl 零上报）。
  *
  * `logCollabEvent`：composables / 容器用（持有 chapterId 时直接记，fire-and-forget）。
  * 展示组件请用 `collabEventBus.ts` 的 dispatchCollabEvent（零依赖，WorkspaceView 桥接）。

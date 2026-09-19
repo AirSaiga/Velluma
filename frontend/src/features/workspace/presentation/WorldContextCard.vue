@@ -5,7 +5,6 @@ import { worldApi } from '../../../services/api/domain/world.api'
 import type { ContextCard } from '../../../services/api/domain/world.api'
 import { formatTime } from '../../world/engine/timeFormat'
 import { eventDisplayName } from '../../world/engine/eventTemplates'
-import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
  * 情境浮卡（docs/world-writing-bridge.md W2 查询闭环）。
@@ -33,7 +32,6 @@ const rootRef = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
   document.addEventListener('pointerdown', onOutsidePress, true)
-  dispatchCollabEvent('context_card', { keyword: props.keyword })
   try {
     card.value = await worldApi.getContextCard(props.bookId, props.chapterId, {
       name: props.keyword,
@@ -157,8 +155,12 @@ function quickNote() {
   z-index: var(--z-pop); /* 归表：光标跟随带（原 90 表外值） */
   width: 280px;
   max-width: calc(100vw - 16px);
-  background: var(--surface-overlay);
+  background: var(--surface-veil); /* 06-modern §6.2：z-pop 级毛玻璃浮卡 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-radius: var(--radius-md);
+  box-shadow: var(--elev-2-shadow);
+  border: 1px solid var(--line-faint);
   padding: 0.6rem 0.7rem;
   font-size: 0.78rem;
   color: var(--text-primary);

@@ -47,7 +47,8 @@ from backend.routes.chapter_generation.adf import router as adf_router
 
 # NLE-ADF 3.0 自适应辅助路由（前端默认路径；端点清单以 adaptive/ 包各子模块的 @router 装饰器为准：
 # heartbeat / stitch-ghost / settle / finish / fix-sentence / reader-feedback / spine GET·PATCH / spine-suggest /
-# model / context-preview / event + events/summary——不存在 perceive/detect-branch/plan-suggest）
+# model / context-preview / event / constraints/summary / opening-card / ask-book
+# （05 瘦身后 events/summary 已拆——不存在 perceive/detect-branch/plan-suggest））
 from backend.routes.chapter_generation.adaptive import router as adaptive_router
 
 # B3 · 用量可见（P5 地基加固期批次 1）：generation_runs 的 adaptive 消耗聚合（只读）

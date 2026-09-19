@@ -35,8 +35,8 @@ const groups = [
     title: '界面',
     items: [
       ['Ctrl + \\', '固定 / 收起助手面板'],
-      ['Ctrl + 1~4', '打开助手面板：打算 / 此刻 / 本章 / 检查'],
-      ['Ctrl + 5', '打开助手面板：AI 视角'],
+      ['Ctrl + 1~3', '打开助手面板：打算 / 此刻 / 检查'],
+      ['Ctrl + 4', '打开助手面板：AI 视角'],
     ],
   },
 ]
@@ -88,7 +88,7 @@ const groups = [
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--text-primary);

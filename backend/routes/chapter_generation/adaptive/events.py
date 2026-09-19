@@ -1,9 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""端点：event / constraints/summary / events/summary —— 协作埋点与约束台账读面。
+"""端点：event / constraints/summary —— 协作埋点写侧与约束台账读面。
 
-本地 JSONL 零上报（个人镜子）；路径推导/轮转写在这里，usage.py 的清空端点
+本地 JSONL 零上报；路径推导/轮转写在这里，usage.py 的清空端点
 借同一份文件坐标（勿复制路径规则）。
+
+05 埋点瘦身（2026-09-18，docs/next-phase/05-telemetry-slimming.md）：
+分析层（GET /events/summary 聚合端点 + insights 协作面板）已拆；事件总线
+保留——上面还接着四个运行时机制零件。现役事件词表（机制消费，勿删发射侧）：
+  hint_dismiss {kind,label}     感知带提醒收起 → quiet_learning 30 天窗静音
+  ghost_adopt {text,...}        幽灵落地 → sample_prior 文风采纳率先验 +
+                                feedback 幽灵收编池（detail.text 供收编，必带）
+  ghost_discard {...}           幽灵蒸发 → sample_prior 先验
+  intent_correct {from,to}      打算「不对」纠正手势 → intent_inference 纠正史教材
+  ghost_discard_reason {reason} 蒸发理由 chips——失败分类学传感器采集（暂无
+                                后端消费方，nle-adf 档案在册的未来机制）
 """
 from __future__ import annotations
 
@@ -26,22 +37,9 @@ router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
 
 
 # ============================================================
-# 端点 6：event — 协作交互埋点（P0-3，本地 JSONL 零上报）
+# 端点 6：event — 协作交互埋点写侧（P0-3 → 05 瘦身后仅机制消费）
 # ============================================================
-# 用途定位（roadmap §0.1/§1）：个人镜子——自我可见性（协作质量与 token 成本），
-# 非增长分析。事件词表（前端 dispatchCollabEvent / logCollabEvent）：
-#   cards_delivered {count}      走向卡亮出（前端按卡集签名去重，防心跳重复计）
-#   card_burst {event}           走向卡连写（Ctrl+Space 选卡）
-#   ghost_request {mode}         Space 续写/缝合触发
-#   ghost_adopt / ghost_discard  Enter 落地 / Esc 蒸发
-#   capsule_create / capsule_expand {note_id}  细纲胶囊创建 / 落笔扩写
-#   slice_mode {mode}            切片条读者视角档切换
-#   context_card                 情境浮卡打开
-#   quick_note {action}          世界速记 commit / undo
-#   batch_accept {count, undone} 批量采纳候选（A5b；undone=1 表示整批已撤销）
-#   ignition / settle {commit} / finish / sentence_fix {action: propose|adopt|reject}
-#   spine_intent_set / spine_anchor_add|drop|remove / spine_suggest /
-#   spine_suggest_adopt {part} / spine_suggest_discard（P1.4 章级谋篇）
+# 用途定位：机制零件的数据水管（词表见模块 docstring）；分析层已拆。
 # ============================================================
 
 # 埋点文件路径锚定项目根（与 backend/database.py 的 _sqlite_db_path 同款推导）：
@@ -69,8 +67,9 @@ def _append_collab_event(book_id: str, chapter_id: str, kind: str, detail: Dict)
     """追加事件到本地 JSONL（失败静默——埋点绝不阻塞业务）。
 
     无界增长防护：追加前检查当前文件超 5MB 则先轮转（当前 → .1，覆盖旧 .1——
-    单文件曾承载所有书所有章，不轮转会无限膨胀且 summary 全文件逐行扫越扫越慢）。
-    读侧 summary 对称读两份。轮转自身失败随外层静默契约吞掉（继续追加原文件）。
+    单文件曾承载所有书所有章，不轮转会无限膨胀）。读侧（quiet_learning /
+    sample_prior / intent_inference / usage 清空端点）对称读两份。轮转自身
+    失败随外层静默契约吞掉（继续追加原文件）。
     """
     import json as _json
     from datetime import datetime, timezone as _tz
@@ -157,87 +156,4 @@ async def constraints_summary(
         "by_constraint": data.get("by_constraint", {}),
         "by_outcome": data.get("by_outcome", {}),
         "recent": data.get("recent", []),
-    }
-
-
-@router.get("/{chapter_id}/adaptive/events/summary")
-async def collab_events_summary(
-    chapter_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊的采纳率——P0 出口标准）。"""
-    import json as _json
-    from collections import Counter as _Counter
-
-    book_id = ""
-    try:
-        chapter = await db.get(Chapter, chapter_id)
-        if chapter is not None:
-            book_id = str(chapter.book_id)
-    except Exception:
-        pass
-
-    counts: Dict = _Counter()
-    # quick_note 的 action 拆分计数（独立于 counts）：前端同 kind 发 commit/undo
-    # 两种 action，quick_note_commit 出口只应计入落账动作。不并入 counts——
-    # total/by_kind 保持纯 kind 口径（insights「协作」面板消费 by_kind['quick_note']
-    # 总数，并入会双计 total 且污染 by_kind）。
-    quick_note_actions: Dict = _Counter()
-    # quick_note 连带建档求和（关联式录入 2026-09-05）：commit 埋点 detail 携带
-    # created_entities/created_locations——「关联录入到底用没用」的度量面
-    quick_note_created = [0, 0]
-    # batch_accept 的 count 求和（独立于 counts）：A5b 批量裁决采纳条数总量
-    batch_accept_count = 0
-    encounter_cards = 0
-    encounter_bursts = 0
-    try:
-        # 读侧与写侧轮转对称：当前文件 + 单份 .1 轮转（两次 open 复用同一段逐行统计）
-        for path in (_collab_events_path(), _collab_events_rotated_path()):
-            if not path.exists():
-                continue
-            with path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        ev = _json.loads(line)
-                        if ev.get("chapter_id") == chapter_id:
-                            kind = ev.get("kind", "?")
-                            counts[kind] += 1
-                            detail = ev.get("detail") or {}
-                            if kind == "quick_note":
-                                quick_note_actions[detail.get("action") or "commit"] += 1
-                                if not detail.get("undone"):
-                                    quick_note_created[0] += int(detail.get("created_entities") or 0)
-                                    quick_note_created[1] += int(detail.get("created_locations") or 0)
-                            if kind == "batch_accept" and not detail.get("undone"):
-                                batch_accept_count += int(detail.get("count") or 0)
-                            # W5 桥验证指标：地图来源卡的亮出/连写（roadmap §3.2）
-                            if kind == "cards_delivered":
-                                encounter_cards += int(detail.get("encounter_count") or 0)
-                            elif kind == "card_burst" and detail.get("from_encounter"):
-                                encounter_bursts += 1
-                    except Exception:
-                        continue
-    except Exception:
-        pass
-
-    def _rate(num: str, den: str):
-        n, d = counts.get(num, 0), counts.get(den, 0)
-        return round(n / d, 3) if d > 0 else None
-
-    return {
-        "chapter_id": chapter_id,
-        "book_id": book_id,
-        "total": sum(counts.values()),
-        "by_kind": dict(counts),
-        "card_burst_rate": _rate("card_burst", "cards_delivered"),
-        "ghost_adopt_rate": _rate("ghost_adopt", "ghost_request"),
-        "capsule_expand_count": counts.get("capsule_expand", 0),
-        # 只含 action=='commit'（世界速记落账）；undo 不计（防误计拉高采纳面貌）
-        "quick_note_commit": quick_note_actions.get("commit", 0),
-        # 关联式录入度量：速记连带新建的实体/地点个数（entities, locations）
-        "quick_note_created_entities": quick_note_created[0],
-        "quick_note_created_locations": quick_note_created[1],
-        # A5b 批量裁决：累计采纳条数（by_kind['batch_accept'] 是操作次数，这是条数）
-        "batch_accept_count": batch_accept_count,
-        "encounter_card_burst_rate": round(encounter_bursts / encounter_cards, 3) if encounter_cards > 0 else None,
     }

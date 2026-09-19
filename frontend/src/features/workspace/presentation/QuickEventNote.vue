@@ -5,7 +5,6 @@ import type { EventDraft } from '../../../services/api/domain/world.api'
 import { formatTime, breakdownTime, fromYMD } from '../../world/engine/timeFormat'
 import { EVENT_TEMPLATES, getTemplate } from '../../world/engine/eventTemplates'
 import type { EventType, WorldEntity, WorldLocation } from '../../world/engine/types'
-import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 
 /**
  * 速记框（docs/world-writing-bridge.md W3 一句话记历史）。
@@ -152,7 +151,6 @@ async function commit() {
       note: d.note || d.summary || undefined,
     })
     showCapsule(ev.id, `${d.summary || typeLabel.value} · ${formatTime(d.time_start)}`)
-    dispatchCollabEvent('quick_note', { action: 'commit', event_type: d.event_type })
     close()
     window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
   } catch (e) {
@@ -175,7 +173,6 @@ async function undo() {
   if (capsuleTimer) window.clearTimeout(capsuleTimer)
   try {
     await worldApi.deleteEvent(props.bookId, eventId)
-    dispatchCollabEvent('quick_note', { action: 'undo' })
     window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
   } catch (e) {
     console.warn('[QuickEventNote] 撤销失败', e)

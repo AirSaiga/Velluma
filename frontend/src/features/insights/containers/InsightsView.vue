@@ -15,7 +15,6 @@ import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import { costReportApi, qualityReportApi, styleApi } from '../../../services/api/domain'
 import { reviewApi } from '../../../services/api/domain/review.api'
-import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
 import { usageApi } from '../../../services/api/domain/usage.api'
 import type { BookUsage, ChapterUsage } from '../../../services/api/domain/usage.api'
 import { buildTrendChart, formatCost, groupStagesByLane, stageBarPercent } from '../usageChart'
@@ -28,41 +27,6 @@ const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 const sortedChapters = store.sortedChapters
-
-/** 协作埋点 kind → 中文标签（未收录的键原样显示，防新埋点漏映射） */
-const COLLAB_KIND_LABELS: Record<string, string> = {
-  card_burst: '走向卡弹出',
-  cards_delivered: '走向卡送达',
-  dock_delivered: '灵感零件送达',
-  ghost_request: '请求幽灵续写',
-  ghost_adopt: '采纳幽灵稿',
-  ghost_discard: '蒸发幽灵稿',
-  capsule_create: '记细纲胶囊',
-  capsule_expand: '扩写细纲胶囊',
-  quick_note: '世界速记',
-  sentence_fix: '句子修复',
-  context_card: '情境浮卡',
-  slice_mode: '切片读者档切换',
-  branch_resolved: '选定走向',
-  ignition: 'AI 开头（点火）',
-  ignition_dismiss: '放弃 AI 开头',
-  settle: '沉淀',
-  finish: '完稿体检',
-  spine_intent_set: '定方向一句话',
-  spine_anchor_add: '加关键情节',
-  spine_anchor_drop: '划掉情节',
-  spine_anchor_remove: '删情节',
-  spine_suggest: '要 AI 建议',
-  spine_suggest_adopt: '收下 AI 建议',
-  spine_suggest_discard: '不用 AI 建议',
-  batch_accept: '批量入账',
-  // 学着闭嘴（2026-08-25）：幽灵蒸发理由反馈 + 感知带提醒收起
-  ghost_discard_reason: '幽灵稿蒸发理由',
-  hint_dismiss: '收起提醒',
-}
-function collabKindLabel(k: string): string {
-  return COLLAB_KIND_LABELS[k] || k
-}
 
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
 watch(
@@ -77,12 +41,13 @@ watch(
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-type PanelKey = 'cost' | 'quality' | 'collab'
+// 05 埋点瘦身（2026-09-18）：协作镜像面板（四采纳率卡/逐章分布/COLLAB_KIND_LABELS）
+// 已拆；本面板只剩「用量」——generation_runs 聚合的观测面（不属于埋点，保留）。
+type PanelKey = 'cost' | 'quality' | 'usage'
 const activePanel = ref<PanelKey>('cost')
 
 const costReports = ref<{ chapterId: string; chapterNumber: number; report: CostReport | null }[]>([])
 const qualityReports = ref<{ chapterId: string; chapterNumber: number; report: QualityReport | null }[]>([])
-const collabReports = ref<{ chapterId: string; chapterNumber: number; report: Awaited<ReturnType<typeof adaptiveApi.collabEventsSummary>> | null }[]>([])
 
 // ===== B3 · 用量可见（generation_runs 聚合，独立于协作埋点数据源）=====
 const chapterUsage = ref<ChapterUsage | null>(null)
@@ -108,7 +73,7 @@ async function loadAll() {
     }
     const chaps = sortedChapters.value.slice(-10) // 最近 10 章
     const latestChap = chaps.length ? chaps[chaps.length - 1] : null
-    const [costs, qualities, collabs, chapUsage, bkUsage] = await Promise.all([
+    const [costs, qualities, chapUsage, bkUsage] = await Promise.all([
       Promise.all(
         chaps.map(async (c) => {
           try {
@@ -129,16 +94,6 @@ async function loadAll() {
           }
         })
       ),
-      Promise.all(
-        chaps.map(async (c) => {
-          try {
-            const r = await adaptiveApi.collabEventsSummary(c.id)
-            return { chapterId: c.id, chapterNumber: c.chapter_number, report: r }
-          } catch {
-            return { chapterId: c.id, chapterNumber: c.chapter_number, report: null }
-          }
-        })
-      ),
       // B3：最近一章 + 本书消耗（零值结构也是有效响应；失败降级 null 由模板空态兜底）
       latestChap
         ? usageApi.getChapterUsage(latestChap.id).catch(() => null)
@@ -149,7 +104,6 @@ async function loadAll() {
     if (bookIdFromRoute.value !== bid) return
     costReports.value = costs
     qualityReports.value = qualities
-    collabReports.value = collabs
     chapterUsage.value = chapUsage
     bookUsage.value = bkUsage
     usageChapterNumber.value = latestChap?.chapter_number ?? null
@@ -176,22 +130,6 @@ const totalCost = computed(() =>
 function backToLibrary() {
   router.push({ name: 'library' })
 }
-
-// ===== 协作采纳率聚合（P1.3 走向卡质量环：个人镜子——roadmap §2.3）=====
-const collabTotals = computed(() => {
-  const by: Record<string, number> = {}
-  for (const cr of collabReports.value) {
-    if (!cr.report) continue
-    for (const [k, v] of Object.entries(cr.report.by_kind || {})) by[k] = (by[k] || 0) + v
-  }
-  return by
-})
-const collabRate = (num: string, den: string) => {
-  const n = collabTotals.value[num] || 0
-  const d = collabTotals.value[den] || 0
-  return d > 0 ? Math.round((n / d) * 100) + '%' : '—'
-}
-const collabHasData = computed(() => collabReports.value.some((r) => r.report?.total))
 
 // ===== B3 · 用量可见 computed（本书汇总 + 按日趋势几何）=====
 const usageHasData = computed(() => (bookUsage.value?.totals?.calls || 0) > 0)
@@ -236,31 +174,6 @@ async function resetLatestChapterUsage() {
     showToast('清空失败：' + (e?.message || '未知错误'), 'error')
   } finally {
     clearingUsage.value = false
-  }
-}
-
-// ===== 清空本书协作埋点（测试用，2026-09-11；数据源 data/collab_events.jsonl）=====
-const clearingCollab = ref(false)
-
-async function clearCollabData() {
-  const bid = bookIdFromRoute.value
-  if (!bid || clearingCollab.value) return
-  const ok = await showConfirm({
-    title: '清空协作数据',
-    message: `确定要清空《${store.currentBook.value?.title || '本书'}》的全部协作埋点吗？采纳率与协作明细将归零，方便重新测试。`,
-    warning: '「学着闭嘴」的提醒拒收史一并清零（静音集合重置）；正文与世界数据不受影响',
-    confirmText: '清空',
-  })
-  if (!ok) return
-  clearingCollab.value = true
-  try {
-    const r = await adaptiveApi.clearCollabEvents(bid)
-    showToast(`已清空 ${r.deleted} 条协作记录`, 'success')
-    await loadAll()
-  } catch (e: any) {
-    showToast('清空失败：' + (e?.message || '未知错误'), 'error')
-  } finally {
-    clearingCollab.value = false
   }
 }
 
@@ -366,7 +279,7 @@ async function rerunQuality(chapterId: string) {
         v-for="p in [
           { k: 'cost', l: '成本' },
           { k: 'quality', l: '质量' },
-          { k: 'collab', l: '协作' },
+          { k: 'usage', l: '用量' },
         ]"
         :key="p.k"
         class="panel-tab"
@@ -448,9 +361,8 @@ async function rerunQuality(chapterId: string) {
       </div>
     </section>
 
-    <!-- 协作面板（P1.3 走向卡质量环：本地埋点的个人镜子——采纳率决定协作件调优方向） -->
-    <section v-else-if="activePanel === 'collab'" class="data-panel">
-      <!-- B3 · 用量可见两卡（generation_runs 聚合；独立于协作埋点数据源，二者可独立有/无数据） -->
+    <!-- 用量面板（B3 · generation_runs 聚合观测面；05 瘦身：协作镜像已拆） -->
+    <section v-else-if="activePanel === 'usage'" class="data-panel">
       <div v-if="usageHasData" class="usage-cards">
         <article class="cost-item card-well">
           <header class="cost-header">
@@ -552,54 +464,6 @@ async function rerunQuality(chapterId: string) {
       <p v-else class="usage-empty">
         AI 消耗：暂无记录。用 AI 辅助写作（写作中感知、Space 续写、沉淀与完稿体检、系统自己去读）后，这里会照出每章与每日的用量。
       </p>
-      <div v-if="!collabHasData" class="empty">
-        <p>暂无协作数据。在写作台用 AI 辅助写一章（走向卡 / Space 续写 / 细纲胶囊），这里会照出你的采纳习惯。</p>
-      </div>
-      <template v-else>
-        <div class="summary-cards">
-          <div class="summary-card">
-            <span class="summary-num">{{ collabRate('card_burst', 'cards_delivered') }}</span>
-            <span class="summary-label">走向卡连写率</span>
-          </div>
-          <div class="summary-card">
-            <span class="summary-num">{{ collabRate('ghost_adopt', 'ghost_request') }}</span>
-            <span class="summary-label">幽灵稿采纳率</span>
-          </div>
-          <div class="summary-card">
-            <span class="summary-num">{{ (collabTotals['capsule_expand'] || 0) + (collabTotals['capsule_create'] || 0) }}</span>
-            <span class="summary-label">细纲胶囊使用</span>
-          </div>
-          <div class="summary-card">
-            <span class="summary-num">{{ collabTotals['quick_note'] || 0 }}</span>
-            <span class="summary-label">世界速记入账</span>
-          </div>
-        </div>
-        <div class="chapter-cost-list">
-          <article v-for="cr in collabReports.filter((r) => r.report?.total)" :key="cr.chapterId" class="cost-item card-well">
-            <header class="cost-header">
-              <span class="cost-chapter">第 {{ cr.chapterNumber }} 章</span>
-              <span class="cost-total tnum">{{ cr.report?.total }} 次协作交互</span>
-            </header>
-            <div class="stage-bars">
-              <div v-for="(v, k) in cr.report?.by_kind || {}" :key="k" class="stage-bar" :title="`${collabKindLabel(String(k))}: ${v} 次`">
-                <span class="stage-name">{{ collabKindLabel(String(k)) }}</span>
-                <span class="stage-calls">{{ v }}×</span>
-              </div>
-            </div>
-          </article>
-        </div>
-        <div class="usage-card-footer">
-          <button
-            class="usage-clear-btn btn-ghost btn-ghost--xs"
-            :disabled="clearingCollab"
-            title="清空本书全部协作埋点（采纳率/协作明细归零，方便测试）——「学着闭嘴」拒收史一并重置，正文与世界数据不受影响"
-            @click="clearCollabData"
-          >
-            <Icon name="arrow-path" :size="12" :class="{ spin: clearingCollab }" />
-            <span>{{ clearingCollab ? '清空中…' : '清空协作数据' }}</span>
-          </button>
-        </div>
-      </template>
     </section>
 
     <!-- 模型价目表编辑（成本核算 2026-09-11） -->
@@ -616,7 +480,7 @@ async function rerunQuality(chapterId: string) {
 .insights-view {
   height: 100%;
   overflow-y: auto;
-  background: var(--bg-primary);
+  background: var(--surface-desk); /* 06-modern §2.1：页面根=桌面 */
   padding: var(--space-8) var(--space-10);
 }
 
@@ -670,7 +534,7 @@ async function rerunQuality(chapterId: string) {
   font-size: 0.8125rem;
   background: var(--bg-canvas);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
@@ -696,7 +560,7 @@ async function rerunQuality(chapterId: string) {
 
 .summary-card {
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   padding: 0.875rem 1rem;
   display: flex;
@@ -783,7 +647,7 @@ async function rerunQuality(chapterId: string) {
 .quality-item,
 .degraded-item {
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   padding: 0.75rem 0.875rem;
 }
@@ -825,7 +689,7 @@ async function rerunQuality(chapterId: string) {
   font-size: var(--text-xs);
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-xs);
   cursor: pointer;
 }

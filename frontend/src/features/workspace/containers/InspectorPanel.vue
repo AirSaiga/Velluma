@@ -2,19 +2,21 @@
 /**
  * 助手面板（08 期 §4.6 去 tab 化改造：壳只渲染当前分区，栏位在 AssistRail）。
  *
- * 五分区（栏图标 / Ctrl+1~5 定位，按写作流程排序）：
+ * 四分区（栏图标 / Ctrl+1~4 定位，按写作流程排序）：
  * - 打算：写前规划——章级软脉络（SpinePanel）+ 大纲 + 意图反推
  * - 此刻：世界切片「此刻此地」+ 候选回流收件箱（WorldSceneSlice，与生成上下文同源）
- * - 本章：统计 / 本章文风 / Canon 真相账本跳转——章节档案
- * - 检查：完稿体检（按钮 + 报告）、沉淀抽取、读者反馈——按 检查→修改→反馈 三组排布（润色 Refinery 已于 2026-09-12 写后检查收敛批拔除）
+ * - 检查：双卡并立——全章质检（完稿体检 + 体检报告流 + 沉淀发现）/ 读者回响（读者反馈）；
+ *   体检报告末承载「收本章为文风范例」装填动作
  * - AI 视角（原调试，09 期重设计 docs/design/ux-redesign/09-ai-view-redesign.md）：
  *   健康横幅（有错置顶）→ AI 此刻读到的（分组折叠+保字排版）→ 世界模型快照（结构化摘要）
  *
- * 默认分区逻辑（空章→打算/有正文→此刻/用户切过即尊重）与 Ctrl+1~5 监听原样保留；
+ * 「本章」分区已下线（2026-09 物理减负：章级文风特例违背文风统一律、草稿态诱导收编
+ * 时序倒置、真相跳转与顶部字数统计冗余）——字数常驻正文顶部栏；收编范例归位检查分区；
+ * 章级文风特例仍可从文风页作用域切换进入，后端 get_effective_card 兼容不动。
+ * 默认分区逻辑（空章→打算/有正文→此刻/用户切过即尊重）与 Ctrl+1~4 监听原样保留；
  * activeTab 以 v-model:active-tab 与 WorkspaceView 双向同步（面板关闭时容器持 null）。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
 import { useAppStore } from '../../app/useAppStore'
 import WorldSceneSlice from '../presentation/WorldSceneSlice.vue'
@@ -27,12 +29,13 @@ import type { ContextPreview } from '../../../services/api/domain/adaptive.api'
 import { componentErrors } from '../../generation/composables/useAdaptiveAssist'
 import { useGenerationSession } from '../../generation/composables/useGenerationSession'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
-import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { useToast } from '../../../composables/useToast'
 import { requestOpenInbox, OPEN_INBOX_EVENT, inboxAutoOpen } from '../../world/composables/batchAccept'
 import { countChapterWords } from '../../../shared/utils/htmlText'
+import { loadUiPrefs, openingCardEnabled } from '../../../composables/useUiPrefs'
+import OpeningCard from '../presentation/OpeningCard.vue'
 
-type InspectorTab = 'now' | 'planning' | 'chapter' | 'review' | 'debug'
+type InspectorTab = 'now' | 'planning' | 'review' | 'debug'
 
 interface TabDef {
   key: InspectorTab
@@ -71,15 +74,20 @@ const session = props.externalSession || useGenerationSession()
 // 字数口径：剥 HTML 标签后计字符（此前 .length 把 <p>/mark 标签计入，虚高）
 const wordCount = computed(() => countChapterWords(selectedChapter.value?.content_text || ''))
 
-/** 本章有正文：润色/读者反馈的启用门槛（取代旧 stage==='done' 门控） */
+/** 本章有正文：完稿体检/润色/读者反馈的启用门槛（取代旧 stage==='done' 门控） */
 const chapterHasContent = computed(() => wordCount.value > 0)
 
-// 按写作流程排序：写前打算 → 写中此刻 → 本章档案 → 写后检查；AI 视角排末位。
+// 开章卡（01 下一阶段 M1）：只在空章「打算」页出现——非空章「此刻」页已有同类行
+// 不重复建设（一期）；读响应式镜像（缺陷 #1a 修复：关掉即整块消失，不等切章）
+const openingCardVisible = computed(() =>
+  wordCount.value === 0 && openingCardEnabled.value && !!selectedChapterId.value,
+)
+
+// 按写作流程排序：写前打算 → 写中此刻 → 写后检查；AI 视角排末位。
 // 栏图标（AssistRail）消费同一份标签/图标——零图标映射变化。
 const tabs: TabDef[] = [
   { key: 'planning', label: '打算', icon: 'light-bulb' },
   { key: 'now', label: '此刻', icon: 'map' },
-  { key: 'chapter', label: '本章', icon: 'document' },
   { key: 'review', label: '检查', icon: 'check-circle' },
   { key: 'debug', label: 'AI 视角', icon: 'magnifying-glass' },
 ]
@@ -227,14 +235,6 @@ async function handleReaderFeedback() {
   } finally {
     loadingFeedback.value = false
   }
-}
-
-/** 跳世界页真相账本（C1 Canon 融合；检查报告改设定 / 章节 tab 入口共用） */
-const router = useRouter()
-function handleEditCanon() {
-  const bookId = store.currentBookId.value
-  if (!bookId) return
-  router.push({ name: 'world', params: { bookId }, query: { panel: 'canon' } })
 }
 
 // ===== 世界模型快照（P0-5：/adaptive/model 调试入口，展开即拉一次；09 期结构化摘要）=====
@@ -395,7 +395,6 @@ async function handleFixSentence(i: number, d: any) {
   const sentence = typeof d === 'string' ? d : d?.sentence
   if (!chapterId || !sentence) return
   fixStates.value = { ...fixStates.value, [i]: { loading: true } }
-  dispatchCollabEvent('sentence_fix', { action: 'propose' })
   try {
     const r = await adaptiveApi.fixSentence(chapterId, {
       sentence,
@@ -436,12 +435,10 @@ function adoptFix(i: number, d: any) {
     return
   }
   fixStates.value = { ...fixStates.value, [i]: { fixed, adopted: true } }
-  dispatchCollabEvent('sentence_fix', { action: 'adopt' })
 }
 
 function dismissFix(i: number) {
   fixStates.value = { ...fixStates.value, [i]: {} }
-  dispatchCollabEvent('sentence_fix', { action: 'reject' })
 }
 
 // ===== 语义命中 → 文风收件箱（Phase 3 F：疑似 AI 味变体逐条回流）=====
@@ -470,29 +467,10 @@ async function collectSemanticHit(i: number, hit: { segment: string; alternative
   }
 }
 
-// ===== 本章文风卡（S3：章级特例状态 + 跳文风页深链）=====
-const chapterStyleOverride = ref<any>(null)
-const chapterStyleLoading = ref(false)
-
-watch(selectedChapterId, async (chapterId) => {
-  chapterStyleOverride.value = null
-  const bookId = store.currentBookId.value
-  if (!chapterId || !bookId) return
-  chapterStyleLoading.value = true
-  try {
-    const card = await styleApi.get(bookId, chapterId).catch(() => null)
-    // 后端无章级覆盖时回退返回书级卡（回退是特性）——
-    // 判「本章有特例」必须看 chapter_id 非空，否则书级卡会被误报成章级特例
-    chapterStyleOverride.value = card?.chapter_id ? card : null
-  } finally {
-    chapterStyleLoading.value = false
-  }
-}, { immediate: true })
-
-// ===== 本章一键收为文风范例（2026-09-14 装填通道）=====
+// ===== 本章一键收为文风范例（2026-09-14 装填通道；「本章」分区下线后归位于检查分区体检报告末）=====
 // 去参数化后的两根支柱之一：亲笔样本 few-shot 是质量杠杆最大的一环，但样本库
-// 零库存曾让它全程空转（7 次生成 sample_ids 全空）——把「收本章为范例」放在
-// 作者看得见的地方，亲笔正文秒级入库（摘开头至句界，幂等：已收编过 409 提示）。
+// 零库存曾让它全程空转（7 次生成 sample_ids 全空）——放在完稿体检报告末尾：
+// 整章通读完正是收编的文学时序，亲笔正文秒级入库（摘开头至句界，幂等：已收编过 409 提示）。
 const harvestingSample = ref(false)
 async function harvestChapterSample() {
   const bookId = store.currentBookId.value
@@ -508,23 +486,6 @@ async function harvestChapterSample() {
     else showToast('收录失败: ' + msg, 'error')
   } finally {
     harvestingSample.value = false
-  }
-}
-
-function handleEditChapterStyle() {
-  const bookId = store.currentBookId.value
-  if (!bookId || !selectedChapterId.value) return
-  router.push({ name: 'style', params: { bookId }, query: { chapter: selectedChapterId.value } })
-}
-
-async function handleResetChapterStyle() {
-  const bookId = store.currentBookId.value
-  if (!bookId || !selectedChapterId.value || !chapterStyleOverride.value) return
-  try {
-    await styleApi.deleteChapterOverride(bookId, selectedChapterId.value)
-    chapterStyleOverride.value = null
-  } catch (e: any) {
-    console.warn('恢复继承失败:', e)
   }
 }
 
@@ -587,6 +548,10 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
+          <!-- 开章卡（01 下一阶段）：空章开写前的四面镜子，置于计划编辑区上方；
+               全空整块不渲染，零强制交互 -->
+          <OpeningCard v-if="openingCardVisible" :chapter-id="selectedChapterId" />
+
           <!-- 叙事引力流（第四弹 UI 合流 · 路径 C）：方向行+锚点+节拍流单卡 ——
                数据层双字段分立不动（spine 走温卡/outline 走就近节拍），只是
                作者眼里只有一个连贯编辑面 -->
@@ -639,91 +604,29 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
         </template>
       </div>
 
-      <!-- ====== 本章 tab：统计 + 出场角色 + 本章文风 + Canon 跳转（章节档案） ====== -->
-      <div v-else-if="activeTab === 'chapter'" class="panel chapter-panel">
-        <div v-if="!selectedChapter" class="empty">
-          <p>从左侧选择一个章节。</p>
-        </div>
-        <template v-else>
-          <!-- 统计（出场角色卡已退役 2026-08-29：旧 chapter_entities 表口径，
-               世界页「此刻·在场」推演取代——统计恒 0 还会误导） -->
-          <section class="stats-section">
-            <div class="stat">
-              <span class="stat-num">{{ wordCount }}</span>
-              <span class="stat-label">字</span>
-            </div>
-          </section>
-
-          <!-- 本章文风（S3：章级特例状态一眼可见） -->
-          <section class="style-status-section">
-            <div class="section-label">本章文风</div>
-            <div class="style-status-row">
-              <span v-if="chapterStyleLoading" class="muted">读取中…</span>
-              <template v-else>
-                <span v-if="chapterStyleOverride" class="style-override-badge">本章专属</span>
-                <span v-else class="muted">跟随全书文风</span>
-                <button
-                  v-if="chapterStyleOverride"
-                  class="btn-mini-reset"
-                  title="删掉本章专属，改回跟随全书文风"
-                  @click="handleResetChapterStyle"
-                >改回全书文风</button>
-              </template>
-            </div>
-            <button class="btn-refinery" @click="handleEditChapterStyle">
-              <Icon name="paint-brush" :size="14" />
-              <span>{{ chapterStyleOverride ? '编辑本章专属文风' : '给本章单独定个文风' }}</span>
-            </button>
-            <!-- 装填通道（2026-09-14）：亲笔正文一键入库为 few-shot 示范——
-                 样本库空转的根治入口，比任何参数都管用 -->
-            <button
-              class="btn-refinery secondary"
-              :disabled="!chapterHasContent || harvestingSample"
-              :title="chapterHasContent ? '把本章开头摘为文风范例——AI 续写时用它当你的笔迹示范' : '本章写了字才能收'"
-              @click="harvestChapterSample"
-            >
-              <Icon name="heart" :size="14" />
-              <span>{{ harvestingSample ? '收录中…' : '收本章为文风范例' }}</span>
-            </button>
-            <p class="hint">回忆章想换个腔调？本章专属只管这一章，其他章节不受影响。</p>
-          </section>
-
-          <!-- 跳世界页真相账本（C1：Canon 融入世界页） -->
-          <section>
-            <button class="btn-refinery" @click="handleEditCanon">
-              <Icon name="truth" :size="14" />
-              <span>在世界页查看真相</span>
-            </button>
-            <p class="hint">表（读者所见）与里（作者真相）的账本——秘密设定 / 揭示计划</p>
-          </section>
-        </template>
-      </div>
-
-      <!-- ====== 检查 tab：完稿体检 + 沉淀 + 润色 + 读者反馈（按 检查→修改→反馈 三组排布） ====== -->
+      <!-- ====== 检查分区：双卡并立——全章质检（完稿体检+报告流）· 读者回响（读者反馈） ====== -->
       <div v-else-if="activeTab === 'review'" class="panel review-panel">
         <div v-if="!selectedChapter" class="empty">
           <p>从左侧选择一个章节。</p>
         </div>
         <template v-else>
-          <!-- 组一：检查 -->
-          <div class="group-title">检查</div>
-          <!-- 完稿审计 -->
-          <section class="adaptive-finish">
-            <div class="section-label">完稿体检</div>
+          <!-- 卡片一：全章质检。主操作=完稿体检（门槛=有正文且不在通读中；发送前
+               finishChapter 会冲刷 1s 防抖落库，审计对象=屏上最新正文）；承接体检
+               报告流 + 沉淀「AI 从正文发现」。2026-09 写后检查收敛：原 检查/修改/
+               反馈 三组骨架废除，沉淀发现收进本卡 -->
+          <section class="qa-card">
+            <div class="card-label">全章质检</div>
             <button
               class="btn-finish"
-              :disabled="session.aiLane?.value === 'analyzing' || !(session.adaptiveMode?.value && session.authorLane?.value === 'composing')"
-              :title="session.adaptiveMode?.value && session.authorLane?.value === 'composing' ? '让 AI 通读全章，出一份检查报告' : '在本章写满 4 个字后可用'"
+              :disabled="session.aiLane?.value === 'analyzing' || !chapterHasContent"
+              :title="chapterHasContent ? '让 AI 通读全章，出一份检查报告' : '本章还没有正文，写完再体检'"
               @click="session.triggerAdaptiveFinish()"
             >
               <Icon :name="session.aiLane?.value === 'analyzing' ? 'loader' : 'check-circle'" :size="14" />
               <span>{{ session.aiLane?.value === 'analyzing' ? '通读中…' : '完稿体检' }}</span>
             </button>
-            <p class="hint">AI 通读全章做检查：没写完的句子、关键情节写没写到、秘密穿帮、编辑意见、世界账本对不对得上、能抖什么信息差，并更新前情记忆。</p>
-          </section>
-
-          <!-- 完稿审计报告 -->
-          <section v-if="session.finishReport?.value?.report" class="adaptive-report">
+            <!-- 体检报告流（内部块结构保持原样） -->
+            <div v-if="session.finishReport?.value?.report" class="adaptive-report">
             <div class="section-label">检查报告</div>
             <!-- 残句（P1.2：每条可定点修复——修复句过目，采纳才落正文） -->
             <div v-if="session.finishReport.value.report.sentence_defects?.length" class="report-block report-block--warn">
@@ -852,12 +755,61 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
                 <button class="btn-mini-reset btn-mini-reset--primary btn-primary-instrument" title="打开右侧「此刻」页的候选收件箱" @click="requestOpenInbox">去处理</button>
               </div>
             </div>
-          </section>
+            <!-- 读者清单（01 下一阶段 M2）：真相层折出的「读者此刻」——只读到这章的
+                 读者知道什么/还不知道什么；镜子只呈现，核对我写没写是作者的事 -->
+            <div v-if="session.finishReport.value.reader_ledger" class="report-block report-block--reader">
+              <div class="report-block-label">读者此刻</div>
+              <div v-if="session.finishReport.value.reader_ledger.new_known?.length" class="report-item">
+                <span class="issue-cat">本章新知道</span>
+                <div
+                  v-for="(r, i) in session.finishReport.value.reader_ledger.new_known"
+                  :key="'rl-n' + i"
+                  class="reader-row"
+                >{{ r.label }}<template v-if="r.public_text"> —— 读者看到：{{ r.public_text }}</template></div>
+              </div>
+              <div v-if="session.finishReport.value.reader_ledger.known?.length" class="report-item">
+                <span class="issue-cat">已经知道（{{ session.finishReport.value.reader_ledger.known.length }}）</span>
+                <div
+                  v-for="(r, i) in session.finishReport.value.reader_ledger.known.slice(0, 8)"
+                  :key="'rl-k' + i"
+                  class="reader-row"
+                >{{ r.label }}</div>
+                <div v-if="session.finishReport.value.reader_ledger.known.length > 8" class="reader-row reader-row--more">
+                  …共 {{ session.finishReport.value.reader_ledger.known.length }} 条（揭示计划页码见世界页真相账本）
+                </div>
+              </div>
+              <div v-if="session.finishReport.value.reader_ledger.upcoming?.length" class="report-item">
+                <span class="issue-cat">还不知道（按计划揭的章排）</span>
+                <div
+                  v-for="g in session.finishReport.value.reader_ledger.upcoming"
+                  :key="'rl-u' + g.chapter"
+                  class="reader-row"
+                >第 {{ g.chapter }} 章：{{ g.items.map((r) => r.label).join('；') }}</div>
+              </div>
+              <div v-if="session.finishReport.value.reader_ledger.unscheduled?.length" class="report-item">
+                <span class="issue-cat">还没排期</span>
+                <div class="reader-row">{{ session.finishReport.value.reader_ledger.unscheduled.map((r) => r.label).join('；') }}</div>
+              </div>
+              <p class="hint">清单只按你的揭示计划折算——「我以为读者该知道了」的那条，写出来了吗？</p>
+            </div>
+            <!-- 体检末尾装填（「本章」分区下线后归位于此）：整章通读完正是收编范例的
+                 文学时序——摘开头至句界入库（幂等：已收编过 409 提示），续写拿亲笔当示范 -->
+            <div class="report-harvest">
+              <button
+                class="btn-refinery secondary"
+                :disabled="harvestingSample"
+                title="把本章开头摘为文风范例——AI 续写时用它当你的笔迹示范"
+                @click="harvestChapterSample"
+              >
+                <Icon name="heart" :size="14" />
+                <span>{{ harvestingSample ? '收录中…' : '收本章为文风范例' }}</span>
+              </button>
+              <p class="hint">通读完正是收编时：摘入样本库后，续写会用你的亲笔当示范。</p>
+            </div>
+            </div>
 
-          <!-- 组二：修改（沉淀抽取 + 润色全流程） -->
-          <div class="group-title">修改</div>
-          <!-- 沉淀抽取结果（涌现实体 + 冲突；作者主权：冲突不自动改） -->
-          <section v-if="session.settleResult?.value?.emergent_facts || session.settleResult?.value?.conflicts?.length" class="adaptive-settle">
+            <!-- 沉淀抽取结果（AI 从正文发现：涌现实体 + 冲突；作者主权：冲突不自动改） -->
+            <section v-if="session.settleResult?.value?.emergent_facts || session.settleResult?.value?.conflicts?.length" class="adaptive-settle">
             <div class="section-label">AI 从正文发现</div>
             <!-- 新面孔 -->
             <div v-if="session.settleResult.value.emergent_facts?.new_entities?.length" class="settle-block">
@@ -882,14 +834,11 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               </div>
             </div>
           </section>
+          </section>
 
-          <!-- 【润色 Refinery 已拔除 2026-09-12】组二的「AI 从正文发现」（沉淀）仍在上方 -->
-
-          <!-- 组三：反馈（读者反馈 + 审校结论；本章无正文且无论断时整组缺席） -->
-          <div v-if="chapterHasContent" class="group-title">反馈</div>
-          <!-- 读者反馈 -->
-          <section v-if="chapterHasContent" class="feedback-section">
-            <div class="section-label">读者反馈</div>
+          <!-- 卡片二：读者回响（叙述性第一人称感受，非检查清单；本章有正文才出现） -->
+          <section v-if="chapterHasContent" class="feedback-card">
+            <div class="card-label">读者回响</div>
             <button
               class="btn-refinery secondary"
               :disabled="loadingFeedback"
@@ -903,9 +852,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
               <div class="rf-header">📖 读者反馈</div>
               <p class="rf-text">{{ readerFeedback }}</p>
             </div>
-            <p v-else class="hint">
-              AI 扮演读者写叙述性感受（不是检查清单）。
-            </p>
           </section>
 
         </template>
@@ -988,8 +934,9 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   flex-direction: column;
   width: 100%;
   flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
+  background: var(--surface-panel);
+  background-image: var(--paper-texture); /* 06-modern §4.3：文房件纸纹（默认 none） */
+  border-left: 1px solid var(--line-faint);
   height: 100%;
   overflow: hidden;
 }
@@ -1000,7 +947,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   align-items: center;
   gap: 0.375rem;
   padding: 0.5rem 0.625rem 0.5rem 0.875rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   background: var(--bg-tertiary);
   flex-shrink: 0;
 }
@@ -1016,16 +963,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 /* N3：皮肤由 .icon-btn-instrument（style.css 组件层）提供；本类仅保留固定态覆盖 */
 .panel-head__btn--on {
   color: var(--accent-500);
-}
-
-/* 检查 tab 流程组标题（检查→修改→反馈），层级高于 .section-label */
-.group-title {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.08em;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--border-color);
 }
 
 /* 打算 tab：意图反推降级小字行 */
@@ -1044,7 +981,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   line-height: 1.4;
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-xs);
   cursor: pointer;
 }
@@ -1068,7 +1005,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   font-size: var(--text-xs); /* 11px→12px 最低可读档 */
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   outline: none;
 }
@@ -1157,42 +1094,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   flex-shrink: 0;
 }
 
-.stats-section {
-  display: flex;
-  gap: 0.75rem;
-  flex-shrink: 0;
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 1;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 0.5rem;
-  transition: border-color var(--dur-2) var(--ease-out);
-}
-.stat:hover {
-  border-color: color-mix(in srgb, var(--accent-500) 40%, transparent);
-}
-
-.stat-num {
-  font-family: var(--font-heading);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--text-xl);
-  font-weight: 600;
-  color: var(--accent-500);
-  line-height: 1;
-}
-
-.stat-label {
-  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
-  color: var(--text-muted);
-  margin-top: 0.125rem;
-}
-
 .btn-refinery {
   display: inline-flex;
   align-items: center;
@@ -1222,28 +1123,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   background: var(--bg-secondary);
 }
 
-/* ===== 本章文风卡（S3）===== */
-.style-status-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.style-status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 1.5rem;
-}
-
-.style-override-badge {
-  padding: 0.0625rem 0.4375rem;
-  font-size: var(--text-xs); /* 10px→12px 最低可读档 */
-  color: var(--warn);
-  background: var(--warn-bg);
-  border-radius: var(--radius-xs);
-}
-
 .btn-mini-reset {
   padding: 0.1875rem 0.5rem;
   font-size: var(--text-xs); /* 10px→12px 最低可读档 */
@@ -1259,9 +1138,6 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   background: var(--danger-bg);
 }
 
-.style-status-section .btn-refinery {
-  margin-top: 0.125rem;
-}
 .btn-refinery.secondary:hover {
   background: var(--state-hover);
   color: var(--text-primary);
@@ -1347,7 +1223,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   padding: 0.4375rem 0.5rem;
   color: var(--text-secondary);
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   font-size: var(--text-xs);
   cursor: pointer;
@@ -1369,7 +1245,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   margin-top: 0.375rem;
   padding: 0.4375rem 0.625rem;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .wm-status {
@@ -1472,11 +1348,33 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   min-height: var(--control-h-sm);
 }
 
+/* ====== 检查分区双卡（2026-09 写后检查收敛：检查/修改/反馈 三组骨架归并的并立卡） ===== */
+/* 透明底+描边成卡：卡内报告/沉淀块保持 --bg-canvas 对抽屉 --bg-secondary 的既有对比不动 */
+.qa-card,
+.feedback-card {
+  flex-shrink: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-md);
+}
+.card-label {
+  margin-bottom: 0.5rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+/* 卡头与主操作的间距由 .card-label 承担（.btn-refinery.secondary 自带 margin-top
+   服务卡外堆叠钮（如体检报告末的收录钮），卡内覆盖归零） */
+.feedback-card .btn-refinery.secondary {
+  margin-top: 0;
+}
+
 /* ====== 完稿审计 / 沉淀抽取 ===== */
 .adaptive-settle,
-.adaptive-report,
-.adaptive-finish {
+.adaptive-report {
   flex-shrink: 0;
+  margin-top: 0.5rem;
 }
 
 .adaptive-settle .settle-block,
@@ -1484,7 +1382,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   margin-top: 0.5rem;
   padding: 0.5rem 0.625rem;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
 }
 
@@ -1508,6 +1406,18 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   line-height: 1.5;
   color: var(--text-primary);
   padding: 0.125rem 0;
+}
+
+/* 读者清单行（01 下一阶段 M2）：段内逐行，非警示色——镜子不是警告 */
+.report-block--reader .report-item {
+  margin-bottom: 0.35rem;
+}
+.reader-row {
+  padding-left: 0.75rem;
+  color: var(--text-secondary);
+}
+.reader-row--more {
+  color: var(--text-muted);
 }
 
 .settle-item .muted,
@@ -1620,14 +1530,14 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 
 .char-item {
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   padding: 0.4375rem 0.5rem;
   transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .char-item:hover {
   border-color: color-mix(in srgb, var(--accent-500) 45%, transparent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-1-shadow);
 }
 
 .char-name {
@@ -1657,7 +1567,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
 /* ===== 审校结论 ===== */
 .audit-block {
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   padding: 0.5rem 0.625rem;
   margin-bottom: 0.5rem;
@@ -1702,7 +1612,7 @@ watch(selectedChapterId, () => { correctingIntent.value = false })
   font-size: var(--text-xs);
   padding: 0.375rem 0.5rem;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   margin-bottom: 0.375rem;
 }

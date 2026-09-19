@@ -15,32 +15,44 @@ services/adaptive/stitch_gates.py。
                     GET /adaptive/model
 - stitch.py:       POST /adaptive/stitch-ghost（SSE 五模式）
 - preview.py:      GET  /adaptive/context-preview
-- spine.py:        GET/PATCH /adaptive/spine + POST /adaptive/spine-suggest
+- spine.py:        GET/PATCH /adaptive/spine + POST /adaptive/spine-suggest;
+                    GET /api/books/{id}/adaptive/spines（书级批量，大纲板用）
 - world_read.py:   POST /adaptive/auto-read | /adaptive/read-entities
-- events.py:       POST /adaptive/event + GET /adaptive/constraints/summary |
-                    /adaptive/events/summary
+- events.py:       POST /adaptive/event + GET /adaptive/constraints/summary
+                   （GET /adaptive/events/summary 已随 05 埋点瘦身拆除）
+- opening_card.py: GET /adaptive/opening-card + POST /adaptive/opening-card/touch
+                   （01 开章卡：空章镜子 + 专用计数，零 LLM）
+- ask_book.py:     POST /adaptive/ask-book（04 问书：六类纯代码直答 +
+                   M2 意图笼 + M3 材料内合成，逐条出处零创作）
 - schemas.py:      请求/响应模型
 
 设定数据来源：services.context.settings_bundle（分级访问 hard/soft/nutrients）。
 """
 from fastapi import APIRouter
 
+from .ask_book import router as ask_book_router
 from .events import router as events_router
 from .heartbeat import router as heartbeat_router
+from .opening_card import router as opening_card_router
 from .preview import router as preview_router
 from .settle_finish import router as settle_finish_router
+from .spine import book_router as spine_book_router
 from .spine import router as spine_router
 from .stitch import router as stitch_router
 from .world_read import router as world_read_router
 
-# 合并路由（子模块各自 prefix="/api/chapters"，路径与拆分前逐条一致）
+# 合并路由（子模块各自 prefix="/api/chapters"，路径与拆分前逐条一致；
+# spine 另带书级批量路由 prefix="/api/books"）
 router = APIRouter()
 router.include_router(heartbeat_router)
 router.include_router(settle_finish_router)
 router.include_router(stitch_router)
 router.include_router(preview_router)
 router.include_router(spine_router)
+router.include_router(spine_book_router)
 router.include_router(world_read_router)
 router.include_router(events_router)
+router.include_router(opening_card_router)
+router.include_router(ask_book_router)
 
 __all__ = ["router"]

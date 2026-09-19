@@ -500,12 +500,14 @@ async def reset_chapter_adaptive_usage(
 
 @router.delete("/books/{book_id}/adaptive/collab-events")
 async def clear_book_collab_events(book_id: str):
-    """清空本书协作埋点（测试用，2026-09-11）。
+    """清空本书协作埋点（测试用，2026-09-11；05 瘦身后保留——机制数据的重置口）。
 
-    协作面板（采纳率/协作明细）的数据源是本地 JSONL（data/collab_events.jsonl
-    当前份 + 轮转 .1，跨书共存）：滤除本书事件、他书保留，两份文件都重写
-    （临时文件 + 原子替换）。损坏行不是本书事件，原样保留。挂在 usage 路由
-    而非 adaptive.py——那边 router 前缀是 /api/chapters，书级路径放不进去。
+    05 埋点瘦身（2026-09-18）拆掉了 insights 协作面板与 events/summary 端点，
+    本端点保留：data/collab_events.jsonl（当前份 + 轮转 .1，跨书共存）现在是
+    四个机制零件的数据源（静音/文风先验/意图纠正/幽灵收编），重置它们的历史
+    仍需此口。滤除本书事件、他书保留，两份文件都重写（临时文件 + 原子替换）。
+    损坏行不是本书事件，原样保留。挂在 usage 路由而非 adaptive.py——那边
+    router 前缀是 /api/chapters，书级路径放不进去。
 
     连带效应（如实声明）：
     - 「学着闭嘴」的 hint_dismiss 拒收史派生源被清——该书静音集合回到

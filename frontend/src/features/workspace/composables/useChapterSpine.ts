@@ -141,13 +141,11 @@ export function useChapterSpine() {
         })),
       ]
     }
-    logCollabEvent(currentChapterId, 'spine_suggest_adopt', { part })
     await save(patch)
   }
 
   function discardSuggestions() {
     spineSuggestions.value = null
-    logCollabEvent(currentChapterId, 'spine_suggest_discard')
   }
 
   // ---- 就地编辑动作（直接改 spine.value → 2s 防抖自动保存） ----
@@ -161,7 +159,6 @@ export function useChapterSpine() {
   function setIntent(text: string) {
     const s = _ensure()
     s.intent = { text: text.trim().slice(0, 60), source: s.intent?.source || 'author' }
-    logCollabEvent(currentChapterId, 'spine_intent_set')
   }
 
   /**
@@ -190,14 +187,12 @@ export function useChapterSpine() {
       source: 'author',
       status: 'pending',
     }]
-    logCollabEvent(currentChapterId, 'spine_anchor_add')
   }
 
   function updateAnchor(id: string, patch: Partial<SpineAnchor>) {
     const s = spine.value
     if (!s?.anchors) return
     s.anchors = s.anchors.map((a) => (a.id === id ? { ...a, ...patch } : a))
-    if (patch.status === 'dropped') logCollabEvent(currentChapterId, 'spine_anchor_drop')
   }
 
   async function removeAnchor(id: string) {
@@ -211,13 +206,11 @@ export function useChapterSpine() {
       await save({ anchors: [] }).catch(() => {})
       spine.value = null  // 全空 = 无脉络
     }
-    logCollabEvent(currentChapterId, 'spine_anchor_remove')
   }
 
   async function suggest() {
     if (!currentChapterId || spineSuggesting.value) return
     spineSuggesting.value = true
-    logCollabEvent(currentChapterId, 'spine_suggest')
     try {
       spineSuggestions.value = await adaptiveApi.spineSuggest(currentChapterId)
     } catch {
