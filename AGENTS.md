@@ -6,7 +6,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 >
 > **演进唯一权威**：`docs/iteration-roadmap.md`。**各领域带日期的施工/事故叙事**（控制台冻结、续写接缝事故、样本创建链路等过程记录）已归入 `docs/incidents/`，本文件只沉淀稳定契约与不变量。
 >
-> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿、Ctrl+Space 走向卡连写、细纲胶囊（`[[` 速记扩写）、Ctrl+Enter 手动沉淀、完稿审计、世界速记 Alt+N、情境浮卡、候选回流收件箱。**感知常驻（用户拍板「无论切到哪都不停感知，除非关闭应用」）**：切页只 `detach`（解除编辑器监听/中止需活编辑器的 SSE），pending 感知计时器照发——卸载后心跳用 `_lastCtx` 上下文快照（带章号防串章，切章后旧快照作废），结果进世界模型缓存回台秒弹可用；心跳响应带章节纪元守卫（发送后切章=旧章感知产物整包丢弃）；全量停机只随应用关闭发生。
+> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿（三键阶梯：**Tab 采纳·Enter 暂留·Esc 丢弃**——03 下一阶段；采纳起书签自动跟踪改稿喂 deai 飞轮）、Ctrl+Space 走向卡连写、细纲胶囊（`[[` 速记扩写）、Ctrl+Enter 手动沉淀、完稿审计、世界速记 Alt+N、情境浮卡、候选回流收件箱、`??` 问书行间速查。**感知常驻（用户拍板「无论切到哪都不停感知，除非关闭应用」）**：切页只 `detach`（解除编辑器监听/中止需活编辑器的 SSE），pending 感知计时器照发——卸载后心跳用 `_lastCtx` 上下文快照（带章号防串章，切章后旧快照作废），结果进世界模型缓存回台秒弹可用；心跳响应带章节纪元守卫（发送后切章=旧章感知产物整包丢弃）；全量停机只随应用关闭发生。
 
 ## 领域档案索引（改代码前按需必读）
 
@@ -16,7 +16,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 |------------|----------|----------------|
 | NLE-ADF：心跳/挂件 dock/stitch 续写/细纲胶囊/沉淀/完稿审计/意图感知/上下文装配/约束治理 | `docs/agent/nle-adf.md` | `docs/incidents/nle-adf.md` |
 | 世界设定层：活舆图/事件溯源推演/时间轴/world_bridge/写作桥/真相层 Canon | `docs/agent/world.md` | `docs/incidents/world.md` |
-| 文风页：指纹/样本库/负面清单/试衣间/语义扫描/章级特例卡 | `docs/agent/style.md` | `docs/incidents/style.md` |
+| 文风页：指纹/样本库/负面清单/写作规矩/试衣间/语义扫描/章级特例卡 | `docs/agent/style.md` | `docs/incidents/style.md` |
 | 启动器/监控台/端口契约/日志架构/收摊停止 | `scripts/README.md` | `docs/incidents/launcher.md` |
 | deai 去 AI 味小模型集成 | `docs/deai-integration.md` | — |
 | 测试怎么写/放哪/怎么跑/改码后更新哪些 | `docs/testing-guide.md` | — |
@@ -140,7 +140,7 @@ data/ logs/ .venv/
 
 | 引擎 | 端点 | 主类/模块 | 用途 |
 |------|------|------|------|
-| ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`+`/fix-sentence`+`/spine`+`/spine-suggest`+`/model`+`/context-preview`+`/usage`+`/event`+`/constraints/summary` 等 | `adaptive/` 路由包 + `settings_bundle.py` + `adaptive_prompts.py` + `stitch_gates.py` | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
+| ★ **NLE-ADF 3.0** | `/adaptive/heartbeat`+`/stitch-ghost`+`/settle`+`/finish`（响应带 `reader_ledger` 读者清单）+`/fix-sentence`+`/spine`+`/spine-suggest`+`/model`+`/context-preview`+`/usage`+`/event`+`/constraints/summary`+`/opening-card`（开章卡：空章四面镜子零 LLM）+`/ask-book`（问书：`??` 行间手势，六类纯代码直答+LLM 笼）等 | `adaptive/` 路由包 + `settings_bundle.py` + `adaptive_prompts.py` + `stitch_gates.py` + `services/world/reader_ledger.py`（开章卡/读者清单聚合）+ `services/world/ask_book.py`（问书混合驱动） | **前端默认**（作者主导写作+AI 柔性共生，无预设拍） |
 | **BS-ADF** | （端点已摘除） | （已归档 `backend/_deprecated/bsadf/`） | **已归档 2026-08-19**（思想去向见 `_deprecated/README.md`） |
 | ADF | `/generate-adf` | `ADFWorkflow`（`workflows/adf/`） | 引擎本体，前端已无 UI 入口 |
 | ~~Refinery~~ | （已拔除 2026-09-12） | 手术原语迁 `services/text_surgery/`；读者反馈迁 `/adaptive/reader-feedback` | **整体退役** |
@@ -156,7 +156,7 @@ data/ logs/ .venv/
 - stitch 装配唯一入口 `services/context/stitch_context.py`，与 `GET /adaptive/context-preview` **同源共用（红线：禁止平行实现）**；注入序唯一权威 `adaptive_prompts.render_system_blocks`（事实层前于文风层）；专名称呼表按可见文本过滤（`scene_visibility.py`）；条目原子永不劈开，唯一体量约束=条目级逃逸阀 `KG_BUDGET_CHARS`。
 - 约束治理：登记册 `services/constraints/registry.py` + ghost_guard 快检 + 缝合返修环 `services/validation/repair_loop.py`（用户拍板「可慢不可错」：检出→带稿改写→验收→句级切除→拒稿 GHOST_REJECT→熔断器 quality_breaker）；执法可靠性序=供给切断>输出代码闸>确定性改写>prompt 偏置>事后审计；信用分数据落 `data/constraint_events.jsonl` 不可补采。
 - 沉淀 `/adaptive/settle` **纯手动** Ctrl+Enter；完稿审计 `/adaptive/finish`；意图三级源链（spine 打算 0.9 短路 > 大纲转化 0.85 > LLM 反推 0.55/0.4，dock/stitch 消费阈 0.5；意图衰老闸 `INTENT_STALE_CHARS=100`）。
-- 协作埋点 `POST /adaptive/event` + `data/collab_events.jsonl`（本地零上报）；系统自己去读 `/adaptive/auto-read`（哈希幂等+每书每日 30 次预算闸）；学着闭嘴 `services/adaptive/quiet_learning.py` 唯一权威（静音集合行为派生不落库，安全类永不静音）。
+- 协作埋点 `POST /adaptive/event` + `data/collab_events.jsonl`（本地零上报；**05 瘦身 2026-09-18**：分析层已拆——events/summary 聚合端点与 insights 协作面板退役，事件总线只留机制四件 hint_dismiss/ghost_adopt/ghost_discard/intent_correct + 传感器 ghost_discard_reason，词表与消费方见 `adaptive/events.py` 模块头；「新功能必须配埋点」纪律废除，新原则=埋点不当门卫只当刽子手，见 `docs/ai-writing-philosophy.md` §8）；系统自己去读 `/adaptive/auto-read`（切章离开+进章回场补读双触发，哈希幂等+每书每日 30 次预算闸）；候选回流收件箱带出处原句（evidence 逐字校验，编造出处剥除）、撤销走单事务端点 `/undo-accept`、拒绝史防重、键盘裁决（02 候选回流修缮，详见 `docs/agent/nle-adf.md` 与 `docs/agent/world.md`）；学着闭嘴 `services/adaptive/quiet_learning.py` 唯一权威（静音集合行为派生不落库，安全类永不静音）。
 
 ### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
 
@@ -175,6 +175,7 @@ data/ logs/ .venv/
 
 - **同一把尺子**：`services/style/fingerprint.py` 是句长切分/字数/CV/对话统计的规范实现，审计侧 `code_auditors.py` 从此 import；改任一侧统计口径先跑 `test_fingerprint.py`（19 项对拍锁定）。
 - 负面清单四源唯一权威 `services/style/prohibitions.py`（`load_prohibition_set`：SystemCliche+negative_list+book_blacklist+静态反 AI 词表）；severity 两档 提醒/硬禁，硬禁只提示、**绝不自动改正文**。
+- **写作规矩（质感契约）唯一权威 `services/style/texture_contracts.py`**（2026-09 白描封杀令收编批）：系统级写作纪律（话语级契约 stitch/continue 末位注入 + 病灶词执法词表 13 条 blocker）按书可覆盖（`books.texture_contracts` 列，缺键=系统默认零变化）；执法词表**旁路合并**（洗层/ghost_guard/完稿审计三处），不进四源（保零变化契约与挂件防线）；文风页「写作规矩」区编辑/恢复默认。详见 `docs/agent/style.md`。
 - 零变化契约：无文风卡/无样本的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；章级卡（`style_cards.chapter_id` 非空）= 该章**整卡覆盖**语义，统一入口 `StyleCardRepository.get_effective_card`。
 - 语义扫描挂点**仅在** `/adaptive/finish`（`semantic_hits`），不进收件箱/scan-negative/任何 SSE 路径（红线）；阈值 0.78 未校准。
 - 意图旋钮已退役（`style_knobs`/`dialogue_ratio_target` 冻结只读，`_selector_adjust` 已删）；文风收敛两根支柱 = 亲笔样本 few-shot（`style/retrieval.py`）+ 负面清单执法。
@@ -187,12 +188,12 @@ data/ logs/ .venv/
 - 配置节 `model_config.json` 的 `deai`（enabled/api_key/model/base_url；**未配置=零调用、幽灵文本逐字节零变化**）；服务包 `backend/services/deai/`（`polish_fragment` 公共入口 + 契约§6 事实闸保底回退原文 + 宿主侧保名闸——kg 在场/死者名单中原文出现的实体名必须在改写稿逐字保留否则回退；`gates.py` 为运行时闸门移植副本，判据唯一权威在 `deai/scripts/validate_pairs.py`，改判据先改那边跑 `--selftest` 再同步）。
 - 挂点 stitch-ghost 呈现平面（字数闸后、ghost_guard 快检前；≤100 字契约窗内短稿生效，burst/outline 长稿自动跳过；微镜头同窗旁路）；deai 不进 generation_runs 用量聚合，用量以 trace `deai_polish` 为准。
 - 训练对收集（§5a 数据飞轮）：写作台选中浮窗「记改前/记改后」两步配对（`useDeaiPairMark` 模块单例暂存、6s 撤销）→ `POST /api/deai/pairs` → `data/deai_pairs.jsonl` → `deai/scripts/ingest_behavior_pairs.py` 去重+六闸 → `behavior_sft.jsonl`（合并进训练集须人工过目）；闸门执法全在入库侧，收集箱 `deai/data/inbox/`。v1 训练语料为产品/公告/观点类，叙事文本未训练。
-- 设置弹窗「实验：去 AI 味小模型」折叠分区 + `POST /api/system/deai/test` 试一试（表单实时值，事实闸保底回退不算失败）。
+- 「API」设置弹窗「实验：去 AI 味小模型」分区（左侧导航独立分区）+ `POST /api/system/deai/test` 试一试（表单实时值，事实闸保底回退不算失败）。
 - ⚠ 调用三要点（勿改）：DashScope **原生**端点（调优模型不走 OpenAI 兼容入口）/ model 填部署名（非 ft-ID）/ `enable_thinking=false`；超时 8s 挂死上限，超时即保底回退。
 
 ### ⚠ 后端运行/落库边界（编辑前必读）
 
-1. **adaptive 观测已接**（`services/adaptive/observing.py`）：chapter 级常驻 RunRecorder（run_id=`adaptive_{chapter_id}`，per-chapter 锁 drain/restore 原子冲账防重复防丢账）；trace 按 chapter 单文件 `logs/trace_adaptive_{chapter_id}.jsonl` 追加；协作埋点本地 `data/collab_events.jsonl`（零上报）。**用量可见**：`GET /chapters/{id}/adaptive/usage` + `GET /books/{id}/adaptive/usage`（`routes/chapter_generation/usage.py`，generation_runs 纯聚合零写，stage 按组件拆账），insights「协作」面板消费。
+1. **adaptive 观测已接**（`services/adaptive/observing.py`）：chapter 级常驻 RunRecorder（run_id=`adaptive_{chapter_id}`，per-chapter 锁 drain/restore 原子冲账防重复防丢账）；trace 按 chapter 单文件 `logs/trace_adaptive_{chapter_id}.jsonl` 追加；协作埋点本地 `data/collab_events.jsonl`（零上报）。**用量可见**：`GET /chapters/{id}/adaptive/usage` + `GET /books/{id}/adaptive/usage`（`routes/chapter_generation/usage.py`，generation_runs 纯聚合零写，stage 按组件拆账），insights「用量」面板消费（05 瘦身：原「协作」面板已拆，仅存 generation_runs 观测面）。
 2. **Refinery 已整体拔除（2026-09-12）**——同名不同实家族只剩 `workflows/refining.py`（章节优化 refine_draft）与 ADF `refiner.py`（Phase 6 补埋器）；`services/text_surgery/` 是 ADF 一致性守卫的手术原语新家。
 
 ### ⚠ thinking 关闭的正确姿势（`services/llm/client.py`）
@@ -240,7 +241,7 @@ data/ logs/ .venv/
 
 ### model_config.json（主要配置入口，已 gitignore）
 
-LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`deai`（见 docs/deai-integration.md）/`proxy`/可选 `presets`（模型配置预设）/可选 `prices`（价目节，零默认价）。除手动编辑外可通过前端「API」弹窗（`ApiSettingsModal.vue`）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：设置面板默认折叠；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
+LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`deai`（见 docs/deai-integration.md）/`proxy`/可选 `presets`（模型配置预设）/可选 `prices`（价目节，零默认价）。除手动编辑外可通过前端「API」弹窗（`ApiSettingsModal.vue`，2026-09 UX 重构为左侧导航式：左栏六项导航——写作/分析模型分分区编辑 + 预设库独立分区 + 向量/deai/代理分区，底部连接测试）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：弹窗内独立导航分区（非常驻默认分区）；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
 
 ### 环境变量（.env 可选，仅以下几个实际生效）
 
@@ -269,7 +270,7 @@ services/api/transport  ← 底层 HTTP
 ```
 ❌ `presentation → transport/stream` 禁止（见 `features/README.md`）。该约束 features/ 内执行良好；⚠ 通用组件层 `components/` 不受约束。命名：Feature 目录 kebab-case，容器 `*Container.vue`，展示 `*View.vue`/`*Panel.vue`（弹窗多用 `*Modal.vue`）。
 
-**UI 文案术语口径**：品牌隐喻词保留（幽灵草稿/蒸发、走向卡、清脂、卡舱/挂件/零件、收编、真相·表·里、此刻此地、黄金片段、这不像我、细纲胶囊、沉淀）；⚠「谋篇」「锚点」「岔路」已退出界面词（非作者语言）——上屏分别用「打算」「（非写不可的）情节/关键情节」「（可能的）发展/走向」，代码/文档概念名（spine、anchor、branch）可保留；工程黑话不上屏——用作者语言（完稿体检/检查报告、AI 从正文发现、秘密穿帮、前情记忆、样本统计、AI 用量 等）；英文残留除设置弹窗技术参数外不直接上屏；采纳动词统一「采纳」；埋点枚举键上屏须过 `InsightsView` 的 `COLLAB_KIND_LABELS` 映射。
+**UI 文案术语口径**：品牌隐喻词保留（幽灵草稿/蒸发、走向卡、清脂、卡舱/挂件/零件、收编、真相·表·里、此刻此地、黄金片段、这不像我、细纲胶囊、沉淀）；⚠「谋篇」「锚点」「岔路」已退出界面词（非作者语言）——上屏分别用「打算」「（非写不可的）情节/关键情节」「（可能的）发展/走向」，代码/文档概念名（spine、anchor、branch）可保留；工程黑话不上屏——用作者语言（完稿体检/检查报告、AI 从正文发现、秘密穿帮、前情记忆、样本统计、AI 用量 等）；英文残留除设置弹窗技术参数外不直接上屏；采纳动词统一「采纳」（05 瘦身：「埋点枚举键上屏须过 COLLAB_KIND_LABELS 映射」纪律随协作面板一并废除）。
 
 ---
 

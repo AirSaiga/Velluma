@@ -2,6 +2,8 @@
 
 > 五家国内主流厂商 API 参数规范的全量调研记录，`backend/services/llm/vendor_profiles.py`（采样整形/模型规则）与 `reasoning_adapter.py`（思考方言）的唯一事实源。初版调研日期 2026-08-28，2026-09-10 随 DeepSeek-V4.1 Flash 发布修订 DeepSeek 节；全部结论有官方文档出处；厂商协议随代际变化，**改这里必须同步改代码并跑 `test_vendor_profiles.py`**。
 >
+> **范围外补充（2026-09-16）**：本地端点（Ollama/vLLM/LM Studio，厂商目录 `local` 条目）不在五厂商矩阵内——思考关闭方言为 OpenAI 系顶层 `reasoning_effort:"none"`（Ollama `/v1` 实测修复，`4666ca9`，实现在 `reasoning_adapter.py`；api_key 须占位值否则判未配置回退）；槽位路由见 `docs/model-slot-coverage-report.md`。
+>
 > 调研背景：kimi-k2.6 切换事故（采样参数 400 撞墙自适应）暴露「每换一次模型都可能踩一遍协议坑」。本矩阵把坑前置到一份档案里。
 
 ## 零、跨厂商共性（先读这个）

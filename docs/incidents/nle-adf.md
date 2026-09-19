@@ -144,3 +144,56 @@
 ### 词法匹配升级（2026-09-17）
 
 - event_parser 三级匹配升 jieba token 边界（嵌词不成词不命中），名表经 `services/world/jieba_lexicon.py` 注入词典保专名单 token，四处挂点幂等。
+
+### 协作埋点瘦身（2026-09-18，docs/next-phase/05-telemetry-slimming.md，未提交批内）
+
+- 动机：单人项目 n=1 + 不外放，埋点的统计价值前提（人多稀释噪声）永远不成立；路线图一批「视数据再议」缓行件被数据门判无期徒刑。作者裁决删除，代码核实后发现 collab_events.jsonl 上有四个运行时机制消费方——收敛为拆分析层留机制层。
+- 手术边界（防误伤的关键发现）：insights「协作」面板里住着 B3 AI 消耗两卡（generation_runs 观测面，设计明确保留）——只摘协作镜像件（四率卡/逐章分布/COLLAB_KIND_LABELS/清空埋点按钮），面板改「用量」tab 保住消耗卡。清空埋点 DELETE 端点保留（机制数据历史重置口，test_collab_clear 锁定）。
+- M1 清点结论：保留 5 种（hint_dismiss→静音、ghost_adopt/ghost_discard→sample_prior 先验+收编池、intent_correct→意图纠正教材、ghost_discard_reason→传感器采集），拆除 19 种纯分析。ghost_discard_reason 无后端消费但保留：它是档案在册「失败分类学」的采集 UI，拆发射等于拆 chips 交互面，超出瘦身范围。
+- 连带死代码：cards/dock 亮出去重签名变量（只为埋点存在）、BatchAcceptOutcome.chapterId 字段、两处 QuickEventNote 的 quick_note 发射。
+- 验证：机制对拍点名跑（test_quiet_learning + test_intent_hardening + test_collab_clear 66 项、style sample_prior 5 项）全绿；全量 1562+381+tsc 净。运行时人工验证挂账：真机收起提醒 ×3 确认静音仍生效（设计 §6 要求，自动化对拍已覆盖同一逻辑）。
+
+### 开章卡与读者清单（2026-09-18，docs/next-phase/01-opening-card-and-reader-ledger.md，未提交批内）
+
+- 两面镜子：开写前（空章「打算」页顶部四行：该揭/别说破/线头/此刻）与完稿后（finish 报告「读者此刻」栏三段清单）——零 LLM 纯查表/章号算术，作者自己的数据折出来摆在眼前。
+- 数据底座一处两用：`services/world/reader_ledger.py` 的 `load_reveal_rows`（read_merge_reveals 全量不窗化）同时供开章卡与 reader_ledger；为携带展开内容（规则二：表/里/揭示计划原文）扩了 read_merge_reveals 行文本三件（加键纯增量）。施工坑：扩 field_layer 分支时替换块整体少了一层缩进——ref/append 摔出 entry 循环，被既有 test_field_layers 的窗外缺席断言当场逮住（测试锁的是真契约）。
+- 口径纪律（规则一）：L2 别说破空章常见无在场 → 退全书口径 + scope 徽标；L4 无世界书的 zero 兜底时刻整行消失（「第1年1月1日」是噪音不是信息）。在场复用 build_scene_slice 无平行实现。
+- 专用计数（05 瘦身口径首发）：`/adaptive/opening-card/touch`（shown/expand）写独立 `data/opening_card_metrics.jsonl`，不接协作事件总线。
+- 字号闸实测：chromeFontSize 对拍逮住 10px 徽标/箭头字号——改 --text-xs（12px 最低可读档）。
+
+### 问书（2026-09-18，docs/next-phase/04-ask-the-book.md，未提交批内）
+
+- 行间手势 `??`（AskNoteNode/AskNoteChip 镜像细纲胶囊家族：InputRule + NodeView + Teleport 浮层 + 存盘剥除）；答案幽灵式浅字只读、Esc 蒸发、永不进正文——无采纳语义天然杜绝滑向代笔。
+- 六类纯代码直答零 LLM（线头/该揭/距离/上次出场/谁知道/哪章写过）；「谁知道」双路：Y 是真相→belief 四值判定（proposition_status），Y 是角色→Level 0 同场扫描。M2 意图笼硬闸=名单外名字拒答；M3 材料内合成=引用出处 id 必须都在材料袋，编造整稿拒收（宁拒勿假）。
+- 施工坑两枚：① record_result 只吃 LLMResult 形状，测试 (text,usage) 二元组 mock 直接炸被 except 吞成 no_match——testing-guide 的「mock 形状」教训反向显形，照 event_scout 先例 tuple 跳过记账；②「哪章写过」整句当关键词永远不命中——分类时显式截疑问词前的关键词 + jieba 抽词兜底（复合问句单串不命中）。
+- 落点收窄：正则抓到 last_appearance 但名字解析不出（口语称呼）才回落 LLM 笼——真 not_found（地点不存在/没写过）是正确答案，不重烧。
+
+### 幽灵改稿自动捕获与三键（2026-09-18，docs/next-phase/03-ghost-edit-capture.md，未提交批内）
+
+- deai 数据飞轮收集端零操作化：手动两步五步实质停滞（10 天 2 对）→ 书签位置映射全自动。「不找文字，跟住位置」——采纳瞬间暂存 AI 原样 + 首尾 ProseMirror position（纯内存不进 HTML），RichTextEditor onUpdate 随事务映射（插字后移/删句靠拢/整段塌缩零宽守原地——「删了重打」重新张开照样成对）；保存时对比并更新（同幽灵只留最新版=POST+DELETE），切章定稿聚合提示+按批撤销。
+- 三键阶梯（作者逐点拍板）：Tab 采纳（正承诺）/ Enter 暂留（零承诺——最易手滑的键映射到无害动作）/ Esc 丢弃+60s 找回窗（Space 原样重现不重新生成）。上膛纪律：流式期间按键只打断（中止 SSE）不采纳；GHOST_DONE 后 400ms 缓冲窗。一期一个暂留位；暂留最终丢弃=「看过了但没要」强信号（ghost_discard 带 parked 标记）。
+- 实现要点：位置映射挂 RichTextEditor onUpdate（扩展层不 import feature 层——GhostTrack 只管未审虚线装饰）；未审标记碰过即消（插件 state 存加标时文本，docChanged 比对）；reapGhostIfDead 对暂留天然豁免（ghostActive=false 不被收割看护）。Enter 旧语义=采纳 → 新语义=暂留：键位状态机 Enter 分支重写，commit 统一出口不变（commitGhost 内挂书签+未审标记，暂留回场 Tab 也走它）。
+- 施工坑：mapTrackedPositions 初版用 Math.min/max 单调钳位防漂——直接废掉「删句靠拢/塌缩」两条正路（测试当场逮住：书签永不收缩）；钳位只保留塌缩保护（to<from 时归位）。meta.source 三源（manual_mark/auto_ghost/capsule）落 pairs 后端白名单。
+- 对拍：ghostPairTracker.test.ts 17 项（决策纯函数/映射三形态/覆盖语义/final 清账/失败静默/上膛窗）；ghostReap/heartbeatSeam 等既有对拍全数无恙。
+
+### 交叉验证轮（2026-09-18，五稿互检，未提交批内）
+
+对 next-phase 五稿做代码实态互检（不依赖测试绿灯），抓出三枚接缝缺陷当场修复：
+- **04 手势冲突实锤（设计稿 §6 预警项）**：chineseTypography 会把「前一位是中文」的半角 `?` 即时转全角 `？`——只认 `??` 则手势在中文正文后永不触发。修：InputRule 改 `[?？]{2}`（半/全角两形态都认）。
+- **03 流式判据用错标志**：session 的 `stitching` ref 是旧路径遗物、从未被置真——「未灌完不上膛」形同虚设（流式中 Tab/Enter 可直接采纳半截幽灵）。修：useGhostDraft 新增 `ghostStreaming`（beginGhost 起 / GHOST_DONE·commit·evaporate·reap 止），ghostActionReady 内聚判据。
+- **03 暂留位静态位置漂移**：parked 存 from/to 缓存位置，暂留期间作者任何编辑都会使其漂移——丢弃时删错区间=数据损失。修：parked 只存 {source}，一切范围操作现扫 ghostDraft mark（与 findGhostRange 同哲学，对编辑天然免疫）+ parkGhost 重入防御。
+- 顺修：父包 `chapter_generation/__init__.py` 端点注释漂移（仍称 events/summary 存在）、三处「Enter 采纳」陈旧注释同步三键语义（session 两处 + useSparkDock 两处）。
+- 复验：pytest 1585 / vitest 398 / tsc 净 / **npm run build 过**（本批首次——GhostTrack/AskNote 的 @tiptap/pm 子路径导入有 editorFind 先例无风险）。
+
+### GUI 自动化测试轮（2026-09-19，web-gui-tester 第一档，未提交批内）
+
+环境：复用用户在跑的后端（8002，--reload 已含新代码）与 vite（5176）；`scripts/gui_test_seed.py` 造两本「GUI测试·」书（正文哈希预锚保证零 LLM）。全程 Playwright 角色 click 卡 actionability（疑常驻动画稳定性检查不过）→ 改 CUA 坐标点击；IAB 键盘字符经系统输入法转全角。
+
+**通过**：T1 开章卡（四行三显+空集消失+就地展开表里计划；截图 gui-test-screenshots/）；T4 insights（协作 tab 拆净/用量 tab 存活/空态诚实）；T2 键盘裁决全链（↑↓光标/Enter 采纳+撤销胶囊/Delete 丢弃/批量模态 Space+Enter+引文行）；T3 问答链路 API 佐证六问全对（含距离 2.4 天/章号换算/原句出处）。
+
+**缺陷三枚**：
+- **#1a 开章卡开关非即时**（已修）：computed 读 localStorage 无响应性。修=useUiPrefs 增响应式镜像 `openingCardEnabled` + 唯一写口 `setOpeningCardEnabled`（双写存储）；InspectorPanel/AppSettingsModal 改读镜像。
+- **#2 问书「知道」正则截短**（已修）：Y 组懒惰匹配无行尾锚取最短（「明姐的身世吗」→「明」）→ canon 标签匹配失败降级同场分支；**单测断言太松假绿**（降级文案也含「知道」）。修=Y 组贪婪+`_strip_knows_tail` 剥语气词；断言收紧至命题分支专属措辞+回归用例（1586 项含新增）。运行时验证：「林尘知道明姐的身世吗」→「按认知账本：林尘知道『明姐的身世』」。
+- **#1b 打算分区切章 stale**（挂账未修，预存在）：切章后 SpinePanel 意图框与开章卡均显示旧章数据，tab 往返自愈。代码推演锁定两条疑机制（SpinePanel intentDirty 挡外部同步遗留；OpeningCard 章切换未重取），需浏览器可观察调试定谳——测试中 IAB 输入注入通道整体故障（CUA 点击 0 事件达 window 层，双 tab+reload 复现）无法继续。留真机/浏览器修复会话。
+
+**环境阻断**：？？/[[ 手势在 IAB 合成输入下均不触发（TipTap InputRule 不 firing，对照实验定责环境非手势缺陷）；真机验证挂账。小观察：撤销胶囊 label 用 note（「正文提及」）非 summary，观感欠佳（预存在）。

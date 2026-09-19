@@ -13,15 +13,17 @@
 | `POST /adaptive/heartbeat` | 心跳感知，响应携 dock_parts/direction_cards/canon_hints/意图信息 | 活跃防抖 3s / 停顿 4s+光标段尾 |
 | `POST /adaptive/stitch-ghost` | 幽灵草稿（SSE 打字机） | mode 五档：stitch/continue/burst/open/outline |
 | `POST /adaptive/settle` | 手动沉淀（Ctrl+Enter，纯手动无自动门槛） | 另触发 event_scout 候选事件 |
-| `POST /adaptive/finish` | 完稿审计 | 报告残句条目可走 fix-sentence |
+| `POST /adaptive/finish` | 完稿审计 | 报告残句条目可走 fix-sentence；响应顶层 `reader_ledger`（01 读者清单：本章新知道/已经知道/还不知道按计划章分桶，零 LLM 纯章号算术，三段全空不设键） |
+| `GET /adaptive/opening-card` + `POST …/opening-card/touch` | 开章卡（01 下一阶段 M1）：空章「打算」页顶部四面镜子（该揭/别说破/线头/此刻）+ 专用计数（shown/expand 独立 jsonl，05 瘦身口径） | 零 LLM 纯查表；三规则宪法（真实总数+口径徽标/就地展开/空集零像素）见设计稿；设置弹窗可关 |
+| `POST /adaptive/ask-book` | 问书（04 下一阶段 M1-M3）：行间 `??` 手势 → {kind,text,sources} | **图书管理员不是合著者**：六类纯代码直答（线头/该揭/距离/上次出场/谁知道/哪章写过，零 LLM）→ M2 意图解析笼（LLM 只翻译，名单外名字硬闸拒答）→ M3 材料内合成（引用出处 id 必须都在材料袋，编造整稿拒收）；not_found/no_match 是合法答案；问题原文落 data/ask_book_metrics.jsonl |
 | `POST /adaptive/fix-sentence` | 残句定点修复 | 只产修复句不改正文，采纳才替换 |
 | `GET /adaptive/model` | 世界模型快照 | 副驾「调试」tab（`InspectorPanel.vue`） |
 | `GET/PATCH /adaptive/spine` | 章级软脉络 | `chapters.spine` JSONB，部分合并；2s 防抖自动保存 |
 | `POST /adaptive/spine-suggest` | 谋篇建议 | 1×creative 建议不落库（D-4 红线） |
 | `GET /adaptive/active-beats` | 活跃节拍微标数据 | 与 stitch/dock 同一份 outline_nearby 计算，纯算法，前端防抖 800ms 拉取 |
 | `GET /adaptive/context-preview` | AI 所见预览 | 与 stitch 装配同源（见「上下文装配」节） |
-| `POST /adaptive/event` + `GET /adaptive/events/summary` | 协作埋点 | 本地 `data/collab_events.jsonl`，零上报；book_id 服务端解析防伪 |
-| `POST /adaptive/auto-read` | 切章自动阅读刚离开的章 | 哈希幂等 + 同章 300s 间隔 + 每书每日 30 次预算闸 `services/adaptive/read_budget.py` |
+| `POST /adaptive/event` | 协作埋点写侧（**05 瘦身**：仅机制四件+传感器，词表见 `adaptive/events.py` 模块头；`GET /events/summary` 聚合端点已拆） | 本地 `data/collab_events.jsonl`，零上报；book_id 服务端解析防伪 |
+| `POST /adaptive/auto-read` | 自动阅读（切章离开发枪 + **进章回场补读**双触发） | 哈希幂等 + 同章 300s 间隔 + 每书每日 30 次预算闸 `services/adaptive/read_budget.py` |
 | `POST /adaptive/read-entities` | 全书向导阶段 A 认人 | 只产草稿不落库，作者勾选才建 |
 | `POST /adaptive/reader-feedback` | 读者反馈（按需触发） | 检查分区消费 |
 | `GET /world/context-card` | 情境浮卡 | 选中 1-12 字或点击 @/# 提及；解析不到静默缺席 |
@@ -40,6 +42,7 @@
 
 - 切页只 `detach`（解除编辑器监听/中止需活编辑器的 stitch SSE），pending 感知计时器照发。
 - 卸载后心跳用 `_lastCtx` 上下文快照（带章号防串章，切章后旧快照作废），结果进世界模型缓存，回台秒弹可用。
+- **回台秒弹的舱内零件归属闸（2026-09-17）**：写作台无 keep-alive，切页往返=remount——`WorkspaceView` 章切换 watch 首跑（prev=undefined）曾恒清舱，把 detach 保留的零件当场清空（感知链全部重跑）。现 `useSparkDock.setSparkPartsForChapter` 携章 id 记录归属，remount 首跑只清「归属 ≠ 当前章」的存货（换书/换章直落新章仍防旧件串章）。
 - 心跳响应带**章节纪元守卫**：发送后切章 = 旧章感知产物整包丢弃（防错章零件污染秒弹 + 生发档让路压制新章刷新的窗口）。
 - 全量停机只随应用关闭发生。
 
@@ -118,8 +121,17 @@
   2. **半句断点尾缀复读 `_strip_fragment_tail_repeat`**——模型从悬空处重启复读的是原句**尾缀**非整句。断点非句末且产出以尾缀开头即剥；句末断点不开此闸（同词开头是新句复用词汇不是复读）；切割点后标点保留。对拍 `test_stitch_gates.py` §6。
 - **中插桥接（FIM）**：骨架跳写、光标停在上下文之间时请求带 `suffix_anchor`（**光标后 ≤300 字后文锚**；前端 `_suffixAfterCursor` 取 ≤300 带、后端 dock 入口与两 prompt 编译器同口径 `[:300]`；心跳与 stitch 双路上行）。prompt 注入双端边界与桥接铁律、桥接态断点改取光标前文；产出尾部接缝 `_normalize_bridge_seam` 归一（≤24 字最长重叠优先，归一在字数闸/返修环之前）；dock 侧 `dock-bridge-overlap` 闸拦「桥接机位与后文 ≥4 字重叠 = 提前写掉已写事实」。
 - **心跳/挂件侧桥接取源 + 供给切断**：心跳 `recent_text` 桥接态改送光标前 ≤500 字窗口（`_anchorRecentText`，与 stitch fragment 分支同判据；`_lastCtx` 感知常驻快照同口径）。后端 `build_dock_generator_prompt` 桥接态（`is_bridge`）切断推测/方向猜测/就近节拍素材块——三者全以含后文的画布全文推导 = 后文剧透，供给切断>命令拒绝（`intent_guess` 在 dock_generator.run 消费前清零，含 note 拼装兜底）；空 suffix_anchor 逐字节零变化。对拍 `test_dock_prompt_compiler.py` TestBridgeForm + 前端 `heartbeatSeam.test.ts` 接缝三。
-- **主体锁 + 白描封杀令**：单焦距主体守恒律 `pick_subject_lock` 三锁——物镜（prop/ambient 只写器物/环境自身物理感官，情绪不走人物走物件）/ 发话（landing/speaker 焦点钉发话者单人，其余人等下一笔）/ 静音（reply 只写受话者开腔前的缓冲）；自定义输入不锁。`render_system_blocks` 末位「白描契约与假感官封杀令」块（stitch/continue 专属、空串拼接零变化，措辞用户逐字拍板）。
-- **幽灵死亡收割 `reapGhostIfDead`（勿删）**：作者退格/选删亲手删光幽灵（而非 Esc 蒸发）时 ghostActive 残留真值——僵尸态吃 Tab（结构闸「ghostActive 只吞不唤」）、禁 Space、卡 authorLane 在 ghostStitching、sticky 卡舱恢复等不到落沿。RichTextEditor onUpdate 每个文档事务后扫一次：状态说有幽灵而文档扫不到 ghostDraft 节点即按「作者亲手蒸发」收尾（埋 `ghost_discard` 供学习回流、不弹理由 toast 问第二遍）；部分删除/改词不触发（mark 存活走 ghostDirty 微调语义）。对拍 `__tests__/ghostReap.test.ts`。
+- **主体锁 + 白描封杀令**：单焦距主体守恒律 `pick_subject_lock` 三锁——物镜（prop/ambient 只写器物/环境自身物理感官，情绪不走人物走物件）/ 发话（landing/speaker 焦点钉发话者单人，其余人等下一笔）/ 静音（reply 只写受话者开腔前的缓冲）；自定义输入不锁。`render_system_blocks` 末位「白描契约与假感官封杀令」块（stitch/continue 专属、空串拼接零变化，措辞用户逐字拍板）。**唯一权威在文风模块** `services/style/texture_contracts.py`（2026-09 收编批；支持按书覆盖 `books.texture_contracts`，装配链 bundle→builder/预览同参透传），病灶词执法词表经洗层/上屏快检/完稿审计旁路合并——详见 `docs/agent/style.md` 写作规矩节。
+- **幽灵死亡收割 `reapGhostIfDead`（勿删）**：作者退格/选删亲手删光幽灵（而非 Esc 蒸发）时 ghostActive 残留真值——僵尸态吃 Tab（结构闸「ghostActive 只吞不唤」）、禁 Space、卡 authorLane 在 ghostStitching、sticky 卡舱恢复等不到落沿。RichTextEditor onUpdate 每个文档事务后扫一次：状态说有幽灵而文档扫不到 ghostDraft 节点即按「作者亲手蒸发」收尾（埋 `ghost_discard` 供学习回流、不弹理由 toast 问第二遍）；部分删除/改词不触发（mark 存活走 ghostDirty 微调语义）。暂留态天然豁免（ghostActive=false 收割不看）。对拍 `__tests__/ghostReap.test.ts`。
+
+## 三键承诺阶梯 + 改稿自动捕获（03 下一阶段，2026-09-18）
+
+- **三键阶梯（防呆交互模型，作者逐点拍板）**：**Tab=采纳**（正承诺：转正为正文，书签开始跟踪；回场光标在暂留段内时也走此键）/**Enter=暂留**（零承诺：幽灵不蒸发停在原地，光标移到其下新行续写；一期一个暂留位——新暂留/新召唤蒸发旧的）/**Esc=丢弃**（负承诺：蒸发；60s 找回窗内重按 Space 原样重现不重新生成，一次性消费）。最易手滑的 Enter 映射到零承诺动作——误触无害。
+- **上膛纪律**：流式灌出期间按键只打断不采纳（中止在飞 SSE，`session.setAdaptiveAbort` 注入 `abortInflight`）；GHOST_DONE 后 400ms 缓冲窗内同（防生成延迟期误触）。**判据=`useGhostDraft.ghostStreaming`**（beginGhost 起/GHOST_DONE·commit·evaporate·reap 止——session 的 stitching 是旧路径遗物从未置真，交叉验证修正）。
+- **暂留终局**：回场 Tab=转正（走 commitGhost 统一出口）/光标在内 Esc=丢弃（「看过了但没要」强信号，`ghost_discard` 带 parked 标记喂学习）；新召唤/复位/切章都清暂留。**暂留位不缓存位置**——一切范围操作现扫 ghostDraft mark（暂留期间编辑会使缓存位置漂移，删错区间=数据损失；交叉验证修正）。
+- **改稿自动捕获（deai 数据飞轮零操作化，M1）**：采纳瞬间暂存 AI 原样原文 + 首尾书签（纯内存 ProseMirror position，不进保存的 HTML）；`useGhostPairTracker.mapTrackedPositions` 随每个文档事务映射（RichTextEditor onUpdate 挂点）——插字后移/删句靠拢/整段删除塌缩为零宽守原地（删了重打照样成对）。自动保存时「对比并更新」（同一幽灵只留最新版：POST 新对+DELETE 旧对）；切章定稿聚合提示「本章记下 N 对（可撤销）」。干净采纳静默跳过；塌缩=完全否决不成对。对拍 `__tests__/ghostPairTracker.test.ts`（17 项）。
+- **视觉（M3）**：幽灵边界轻增强=mint 点线下划线（边界虚线方案，框体已否决）；转正段「AI 来源·未审」细虚线标记（`extensions/GhostTrack.ts` Decoration=书签可视化，碰过即消）。
+- 数据纪律：bad 由构造保证=AI 原样（≤100 字契约窗，一期只收短稿）；source=auto_ghost/capsule/manual_mark 三源同池；六闸与人工过目入库侧不变（`docs/deai-integration.md` §5a）。
 
 ## 细纲胶囊
 
@@ -127,6 +139,13 @@
 - 双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」，clamp 100-800、缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门（闸门全文见主指南「关键质量护栏」节）。
 - 扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）。
 - 编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）。
+
+## 问书（行间手势速查，04 下一阶段）
+
+- 入口：行内输入 `??`（`extensions/AskNoteNode.ts` + `AskNoteChip.vue`，与 `[[` 胶囊同族手势；**半/全角两形态都认**——中文标点规则会把中文后的半角 `?` 即时转 `？`，只认半角则手势永不触发，交叉验证修正）；浮层输入问题 → Enter 派发 `velluma:ask-book`（WorkspaceView 编排调 `/adaptive/ask-book`）→ 答案以幽灵式浅字浮现于行间：**只读、不可采纳、不进正文、Esc 蒸发**（与幽灵同视觉语言，无采纳语义——图书管理员不是合著者）。
+- 出处点验：答案逐条 sources 可点（章→就地切章；地点/伏笔/真相→世界页深链）——唯一的跳走动作，只发生在作者主动点击。
+- **会话级，存盘剥除**（`stripGhostDraftHtml` 一并剥 `[data-ask-note]`；renderText 空串不污染 word_count/正文提取）。
+- 后端六类直答/LLM 笼契约见端点表；零数据书全答「没查到」（零变化契约，不设补偿）。
 
 ## 章级谋篇（spine）
 
@@ -156,8 +175,10 @@
 ## 沉淀（`/adaptive/settle`）
 
 - **纯手动** Ctrl+Enter，无自动字数门槛；抽涌现实体 + 可选落库（设定逆向生长）。
-- 另触发 event_scout 抽候选事件进收件箱——**三重去重**（prompt 排除近 15 条已入账事件 + 归一化双向子串预筛 + pending 池幂等）。
-- 收件箱**批量裁决**（逐条预览剔除 + 6s 复合撤销=删产物+reopen）；积压 >5 走心跳 canon_hints 的 `kind=world_inbox` 感知带提示；settle 完成 toast 直达收件箱。
+- 另触发 event_scout 抽候选事件进收件箱——**四道去重闸**（prompt 排除近 15 条已入账事件 + 归一化双向子串预筛 + pending 池幂等 + **拒绝史防重**：近期 30 天/近 200 条作者 ✗ 过的同义候选不再进箱，02 修缮 P3）。
+- **候选出处铁律（02 修缮 M1）**：抽取 prompt 要求 LLM 逐字摘录 `evidence` 原句（≤60 字）；event_scout 落池前 `verify_evidence` 校验「去空白后为正文子串」（标点不同=改写判废）——编造出处剥除不上屏（候选保留降级回无出处档，`evidence_invalid` 计数）；前端候选卡悬停见原句、批量预览逐条引文行；旧候选无 evidence 零报错。
+- 收件箱**批量裁决**（逐条预览剔除 + 6s 撤销）；积压 >5 走心跳 canon_hints 的 `kind=world_inbox` 感知带提示；settle 完成 toast 直达收件箱。**撤销=单事务端点（02 修缮 P2b）**：`POST /world/candidates/{id}/undo-accept` 删转正产物+回 pending 服务端一个 commit 完成（accept 时产物 id 记入 `draft.accepted_event_id/accepted_canon_node_id`；存量候选请求体显式 id 兜底）——旧「删事件/reopen」两请求链断的孤儿态不再可能。
+- 收件箱**键盘裁决（02 修缮 M3）**：列表获焦后 ↑↓ 移动、→/Enter ✓、←/Delete ✗（纯函数 `features/world/composables/inboxKeyboard.ts`；写作页收件箱/世界页待确认/批量模态三宿主；批量模态另支持 Space 勾选剔除+Enter 确认；鼠标路径不变）。
 
 ## 完稿审计（`/adaptive/finish`）
 
@@ -166,6 +187,9 @@
 ## 系统自己去读
 
 - 观察触发权交给系统：切章自动阅读刚离开的章（`POST /adaptive/auto-read`，内容哈希幂等 + 同章 300s 间隔 + 每书每日 30 次预算闸 `services/adaptive/read_budget.py`）。
+- **回场补读（02 候选回流修缮 M4）**：进章也发枪（前端 `WorkspaceView` 进/离双触发）——覆盖「应用关闭前未切章导致整章未读」盲区；哈希幂等闸照旧兜底（读过未变=unchanged 秒回零成本），预算闸行为不变。
+- **read-entities 失败不写幂等锚（02 修缮 P6）**：`extract_emergent_facts` 带 `failed` 标记区分「LLM 失败」与「无涌现」（空响应/不可解析=failed；可解析全空列表=无涌现合法）——失败返回 `skipped.code=llm_failed` 保留重试资格，无涌现照写锚。⚠ 同批顺修预存在隐患：`adaptive/schemas.py` 缺 `Any` 导入（`from __future__ import annotations` 惰性求值掩盖），`ReadEntitiesResponse` 实例化必炸——端点响应此前从未成功过。
+- **用量停机冲账（02 修缮 P2a）**：recorder 内存缓冲在 lifespan 关闭钩子 + atexit 兜底双路 `flush_all_adaptive_records`——「落库失败塞回后进程退出」的尾巴不再丢账（单章失败不连坐其余）。
 - 世界页待确认抽屉「通读本书」全书向导：阶段 A 认人 `/adaptive/read-entities`（只产草稿不落库 → 作者勾选才建）→ 阶段 B 记事。
 - 实体/地点创建服务端按（书+归一化名+类型）幂等。
 - 候选池判重全书级归一化子串 + 转正前账本判重闸（命中标 `auto_reject=duplicate` 不建事件）；无叙事锚时候选显示「第 N 章」不伪造默认日期。
@@ -249,10 +273,10 @@
 
 ### 助手面板四分区
 
-- **打算**（写前规划）：章级软脉络 SpinePanel + 大纲编辑卡 + 意图反推小字行（带「不对」纠正手势）。
+- **打算**（写前规划）：章级软脉络 SpinePanel + 大纲编辑卡 + 意图反推小字行（带「不对」纠正手势）；**开章卡**（01 下一阶段）：空章时置于计划编辑区上方——四面镜子（该揭/别说破/线头/此刻）零 LLM 纯查表，三规则宪法（计数=真实总数+口径徽标/点一下就地展开/空集零像素），设置弹窗「写作台」可关。
 - **此刻**：世界场景切片 + 候选收件箱。
 - **本章**：字数与出场角色统计、本章文风、真相账本跳转（世界页 `?panel=canon` 深链）。
-- **检查**（按 检查→修改→反馈 三组排布）：完稿体检按钮+报告（含 Phase D 加固：编辑审阅注入 Canon 真相 / 世界账本核对卡 / 信息差卡）、沉淀抽取结果、读者反馈（按需触发，走 /adaptive/reader-feedback）。Refinery 润色全家已拔除（stage-done→handleGenerated 整章覆写监听连带剪断，stage 轴最小拔除仅存 idle 写入点）。
+- **检查**（按 检查→修改→反馈 三组排布）：完稿体检按钮+报告（含 Phase D 加固：编辑审阅注入 Canon 真相 / 世界账本核对卡 / 信息差卡；**读者此刻栏**——`reader_ledger` 三段清单：本章新知道/已经知道/还不知道按计划章分桶，01 下一阶段 M2 零 LLM）、沉淀抽取结果、读者反馈（按需触发，走 /adaptive/reader-feedback）。Refinery 润色全家已拔除（stage-done→handleGenerated 整章覆写监听连带剪断，stage 轴最小拔除仅存 idle 写入点）。
 
 ### AI 视角分区
 

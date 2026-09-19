@@ -88,15 +88,14 @@ P0 度量先行 → P1 协作交互深化 → P2 世界页数据喂协作 → P3
 |---|------|------|
 | P0-1 | 提交在途批次 | ✅ 2026-08-18：5 个逻辑提交（C1 融合+空白舆图 / embedding 解耦+设置弹窗 / 文风 PATCH+500 修复 / SQLite 备好零接线 / 启动脚本路径修正）；顺手修复记忆中三处单参 repo.update() 必 500 与表数断言 30→31。 |
 | P0-2 | **adaptive 观测落库** | ✅ 2026-08-18：新增 `services/adaptive/observing.py`（chapter 级常驻 RunRecorder + per-chapter 锁 drain/restore 原子冲账 + `trace_adaptive_{chapter_id}.jsonl` 单文件追加）；五端点 bind trace + 事件 + 冲账（stitch 在 SSE finally）；六组件 record_result（intent/future/dock/critique/event_scout/settle 涌现抽取——补全 memory_ingestion 预留未接线的 recorder 参数）。 |
-| P0-3 | **协作交互埋点** | ✅ 2026-08-18：`POST /adaptive/event` + `GET /adaptive/events/summary`（本地 `data/collab_events.jsonl` 零上报，book_id 服务端解析）；前端 15 处接线（亮出按签名去重防心跳重复计）——composables 直调 logCollabEvent，展示组件派发 `velluma:collab-event` DOM 事件由 WorkspaceView 桥接（分层合规）。 |
+| P0-3 | **协作交互埋点** | ✅ 2026-08-18 落地；**05 瘦身 2026-09-18 改造**（`docs/next-phase/05-telemetry-slimming.md`，本行为历史记录、现状以该稿为准）：分析层（`GET /events/summary` + insights 协作面板 + 纯分析事件接线）已拆；事件总线保留承载机制四件（hint_dismiss 静音 / ghost_adopt·ghost_discard 文风先验+收编池 / intent_correct 意图纠正教材）+ ghost_discard_reason 传感器。 |
 | P0-4 | 双轴状态机补洞 | ✅ 2026-08-18：三枚举全部**接线**（顶栏「走向已备好」文案此前是死代码）——ghostStitching 由 ghostActive 单点 watch 驱动；settling 在 settleCurrent 首尾置位回落；suggesting=心跳带回挂件/走向卡时。Ctrl+Enter 在幽灵在屏时的沉淀行为保持不变（gate 显式覆盖 ghostStitching）。 |
 | P0-5 | `/adaptive/model` 处置 | ✅ 2026-08-18：副驾「章节」tab 尾部「世界模型（调试）」折叠按钮，展开拉快照渲染摘要视图（意图/最近事实/走向/沉淀字数）。 |
 
 **出口标准**：✅ 已达成（2026-08-18）——token 成本看 `generation_runs` 表（run_id=
 `adaptive_{chapter_id}`，stage 按组件拆账）+ `logs/trace_adaptive_{chapter_id}.jsonl`
-（llm/client 自动埋点含 prompt/usage/延迟）；协作采纳看
-`GET /adaptive/{id}/events/summary`（card_burst_rate / ghost_adopt_rate /
-capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，离线可算。
+（llm/client 自动埋点含 prompt/usage/延迟）。（05 瘦身注：协作采纳率出口随
+events/summary 端点退役——采纳率语义现存于文风 sample_prior 先验，不再做面板。）
 
 ---
 
@@ -117,13 +116,16 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 - 修复产出 diff 交作者裁决后落正文——「作者裁决即闸门」，不引入自动改稿；
 - 一致性手术是否同批接入，视 P0 观测到的审计命中率再定。
 
-### 2.3 走向卡质量环 ✅（6694dc4：insights 第四面板「协作」——四采纳率卡+逐章分布）
+### 2.3 走向卡质量环 ✅（6694dc4：insights 第四面板「协作」——四采纳率卡+逐章分布；**05 瘦身 2026-09-18 已拆**）
 
 - 基于 P0-3 埋点，在数据页（insights）出「协作采纳率」区：走向卡采纳率、胶囊扩写
   采纳率、各模式 stitch 使用分布；
 - 这是「相遇→走向卡桥」（§3.2）上线后的验证仪表，也是 D3 复议的唯一依据。
+- （05 瘦身注：本节产物已退役——单人项目里任何「率」都无意义且永远不会有意义；
+  面板与 summary 端点拆除记录见 `docs/next-phase/05-telemetry-slimming.md`，insights
+  现仅存成本/质量/用量三面板。）
 
-### 2.4 章级谋篇 ✅（M1 747244e / M2 6efb889 / M3 0f2937d；M4 DDE 自动岔路按数据门不启动）
+### 2.4 章级谋篇 ✅（M1 747244e / M2 6efb889 / M3 0f2937d；M4 DDE 自动岔路——05 瘦身后数据门已废，改推理分诊）
 
 > ✅ D2 已拍板（2026-08-18）：可行，**核心约束「度」**——谋篇的前置心智成本必须
 > 趋近于零，不得损害写作效率与心流。设计稿：`docs/chapter-planning-spine.md`
@@ -211,9 +213,9 @@ capsule_expand_count / quick_note_commit）。「无视」= 亮出减采纳，�
 
 ---
 
-## 5. P4 数据驱动缓行件（触发条件制，不预排期）
+## 5. P4 数据驱动缓行件（触发条件制，不预排期；**05 瘦身 2026-09-18：数据门已废，改推理分诊**——下表触发条件原挂协作埋点总线，总线已缩至机制四件；各缓行件后续按推理与体感逐项重新分诊，不自动等于取消）
 
-| 候选项 | 出处 | 激活触发条件 |
+| 候选项 | 出处 | 激活触发条件（原口径，历史记录） |
 |---|---|---|
 | 世界页全图读者滤镜（纯作者视角工具；**读者分享版地图已随「不社区化」拍板移除**） | world-writing-bridge W5 缓行③ | P0 埋点显示切片条读者视角档使用率高 |
 | 切片条升级 editor-host 常驻列 | world-writing-bridge §10.1 | P0 埋点显示切片条使用率证明常驻价值 |
@@ -409,4 +411,32 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 
 大纲板重写为故事线俯视板（d1bafd5：章号轴伏笔弧线/真相朱点/张力折线 + 章卡规划列就地编辑）/09-04 审计修复两批 + 死代码清理（2cc4bb7/2e2b441：B5 现实校验复活/幽灵跨章双防线等 21 项）/世界侧栏直达创建入口（f40f1bc）/启动脚本单窗口监控台 + 网页监控台 + 后台 python 监督者（556aa6b）/设定中心页整体退役 + global_sys_prompt 死线归档（d75abef）/SPDX 协议头 100% 规范化（ecbeb94）。
 
-另：2026-09-07 起前端 UX 重构多期（地基 Esc 栈/浮层钳位 + 世界页图标栏三组 + 写作台 08 期「桌上一张纸」，设计稿 `docs/design/ux-redesign/`）与 dock 红队三批（在场制/对白分镜组/FIM 中插桥接/临时通行证）在未提交工作区，随提交立期。
+另：2026-09-07 起前端 UX 重构多期（地基 Esc 栈/浮层钳位 + 世界页图标栏三组 + 写作台 08 期「桌上一张纸」，设计稿 `docs/design/ux-redesign/`）与 dock 红队三批（在场制/对白分镜组/FIM 中插桥接/临时通行证）原在未提交工作区——已随 2026-09-13～16 提交收录，行为记录见 §19/§20 与 AGENTS.md。
+
+## 19. 写后检查收敛与深水区加固期（2026-09-11～09-13，已提交）
+
+架构优化双轮七项（a66ffd3：backend/models 35 表按域拆 8 子模块 + adaptive 路由拆 8 子模块 + style 路由拆 6 子模块 + 四对双实现收敛 + FK 排雷；成本核算 `services/llm/pricing.py` 价目纯函数随批入库）/启停脚本防误杀加固（de035eb：OwnedPort 端口登记+状态 JSON 新鲜度闸+taskkill 树杀三护）/模型配置预设快速切换（28664b3：整套存档一键切回+自动存档安全网）/**写后检查收敛（d1a5b38：Refinery 与 /critique_chapter 整体拔除——未过目整章覆写/noHistory 不可撤销/跨章覆写三连风险；手术原语迁 `services/text_surgery/`、读者反馈收编 `/adaptive/reader-feedback`，唯一权威 `docs/post-writing-checks-audit.md`；AI 视角面板 09 期重设计同批——保字排版/三段分组/折叠头行仪表盘）**/事件可编辑标题（21c640c：`world_events.title` 列 + `eventDisplayName` 回退链）/时间轴视觉升级（9179868：信标针脚/金墨直方图/燕尾书签/黄铜菱形游标/快捷视界胶囊）/应用图标单源（8b0db19：`frontend/electron/app-icon.png`）/深水区红队四件（cb5ee8f 别名归一补口+微镜头旁路 deai/P2、594bc28 dock 输入减肥 DOCK_PIPELINE_VERSION→v2.2、456ccc0 RAG 检索分流去敏——V/B 抹在场实体名 A 流保原文、a165f8e 跨书文风黄金池冷启动兜底）/桥接后文锚扩窗 300 字+六目标边界修复（6607adb，DOCK_PIPELINE_VERSION→v2.3）/卡片舱与文风链路调研报告归档（ea4cfa3）。
+
+## 20. 文风去参数化、叙事四弹与主题焕新期（2026-09-14～09-16，已提交）
+
+叙事四弹（b89f804 世界页时间轴 60 帧性能重塑 / a5f102c 文风去参数化——旋钮滑块退役+亲笔样本真实装填通道，`docs/style-parameter-effectiveness-audit.md` / 0050eed 场次流转第三弹——光标派生取景 `active_scene` 纯函数+四线接流，`docs/scene-transit-feasibility.md` / edce677 第四弹——打算与大纲 UI 单轨合流叙事引力流面板 + `/adaptive/active-beats`，`docs/spine-outline-merge-feasibility.md`）/主题系统五主题×明暗+chrome 视觉现代化+设置拆三入口与 Electron CSP 防闪收口（9cab473，设计稿 `docs/design/theme-system/`）/AI 视角简报化（e8cd82c：战局态势卡+空块静音+preview 光标真切片，`docs/ai-view-briefing-feasibility.md` + 使用说明 `docs/ai-view-panel-guide.md`）/Tab 重算失败可见化（5606689：本地端点快速失败+旧卡年龄+舱内朱色报错行）/模型槽显式化（4666ca9：全链 model_type 归位+Ollama reasoning_effort=none 思考关闭实测修复，`docs/model-slot-coverage-report.md`）/数据库卫生批（dc74486：事件 id 引用格式归一+fold 出场即活语义+幂等检测脚本 `scripts/check_db_hygiene.py`）/书架视觉改版 v2+novel-wizard 向导整体退役（81d53c0：新建唯一入口=快速创建，一句话打算直落第 1 章 spine）/全量测试补全批（ec0fe8e：改码→测试映射纪律文档 `docs/testing-guide.md`）。
+
+## 21. 候选回流链路修缮期（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`，未提交批内）
+
+修缮非新建（链路本体幂等/去重/批量采纳不动）：候选补出处（抽取 prompt 要求 evidence 逐字摘录 + event_scout 落池「去空白子串」校验，编造出处剥除不上屏、候选降级无出处档；前端收件箱悬停/批量模态引文/世界页卡片三面展示）/ 撤销单事务化（`POST /world/candidates/{id}/undo-accept` 删转正产物+回 pending 一个 commit；accept 记录产物 id 入 draft）/ 拒绝史进防重（30 天窗/200 条归一化判重，auto_reject 假拒绝不计，suppressed_rejected 计数）/ 键盘裁决（↑↓/→·Enter/←·Delete，`inboxKeyboard.ts` 纯函数三宿主）/ 回场补读（进章也发枪 auto-read，哈希幂等闸兜底零成本重进）/ read-entities 失败不写幂等锚（`EmergentFacts.failed` 区分失败与无涌现）+ 顺修 `adaptive/schemas.py` 缺 `Any` 导入致 read-entities 响应必炸的预存在隐患 / 用量停机冲账（lifespan+atexit 双路 `flush_all_adaptive_records`）。叙事见 `docs/incidents/world.md`，契约见 `docs/agent/world.md` ④ 与 `docs/agent/nle-adf.md`。测试基线：后端 1531→1562、前端 370→381。
+
+## 22. 协作埋点瘦身期（2026-09-18，设计稿 `docs/next-phase/05-telemetry-slimming.md`，未提交批内）
+
+拆分析层留机制层：`GET /adaptive/events/summary` 聚合端点与 insights「协作」面板（四采纳率卡/逐章分布/COLLAB_KIND_LABELS/清空埋点按钮）退役——面板只剩成本/质量/用量三 tab（B3 用量两卡是 generation_runs 观测面，原样保留）；纯分析事件接线 19 种全拆（前端发射点收缩到机制 3 文件 5 处：hint_dismiss/ghost_adopt/ghost_discard/intent_correct + 传感器 ghost_discard_reason）；事件总线与写侧保留（机制四件的水管），`DELETE collab-events` 端点保留为机制数据重置口。原则修订落 `docs/ai-writing-philosophy.md` §8（埋点不当门卫只当刽子手；两纪律废除：新功能必须配埋点 / COLLAB_KIND_LABELS 上屏映射）；§5 缓行表与 §2.3/§2.4 数据门标注「已废改推理分诊」。M1 全量清点清单在 05 稿附录。机制对拍（quiet_learning 66 项/intent_hardening/style_paradigm sample_prior 5 项）全绿；基线 1562+381+tsc 净不变。
+
+## 23. 开章卡与读者清单期（2026-09-18，设计稿 `docs/next-phase/01-opening-card-and-reader-ledger.md`，未提交批内）
+
+两面镜子零 LLM：**开章卡**（M1——`GET /adaptive/opening-card`：空章「打算」页顶部四行：该揭（含逾期深度）/别说破（scope 徽标全书·在场两档）/线头（真实总数+最久）/此刻；三规则宪法=真实总数+口径徽标·点一下就地展开·空集零像素；设置弹窗「写作台」开关；专用计数 touch 端点写独立 jsonl——05 瘦身口径首发）/ **读者清单**（M2——finish 响应 `reader_ledger`：本章新知道/已经知道/还不知道按计划章分桶+未排期，报告末尾「读者此刻」栏）。数据底座 `services/world/reader_ledger.py` 复用 read_merge_reveals（扩文本三件）+ build_scene_slice（在场口径无平行实现）。测试 +6（test_reader_ledger.py：分类/空 None/文本携带/卡片行/空书/路由防御），基线 1568+381+tsc 净。M3 调参（超载阈值 6/排序键）待真实使用数据。
+
+## 24. 问书期（2026-09-18，设计稿 `docs/next-phase/04-ask-the-book.md`，未提交批内）
+
+行间手势速查：`??` 触发（AskNoteNode 手势族）→ `POST /adaptive/ask-book`——六类纯代码直答零 LLM（`services/world/ask_book.py`：线头/该揭/距离 spatial/上次出场/谁知道 belief 四值/哪章写过 jieba）→ M2 意图解析笼（LLM 只翻译+名单硬闸）→ M3 材料内合成（出处 id 校验，编造拒收）→「没查到」是一等功能。答案幽灵式浅字只读 Esc 蒸发不进正文；出处点验=章就地切/世界页深链。问题原文落 data/ask_book_metrics.jsonl（M4 分布回看）。测试 +17（test_ask_book.py：分类/六类哨兵防 LLM/硬闸/合成校验/路由/度量），基线 1585+381+tsc 净。
+
+## 25. 幽灵改稿自动捕获与三键期（2026-09-18，设计稿 `docs/next-phase/03-ghost-edit-capture.md`，未提交批内）
+
+deai 数据飞轮收集端零操作化 + 幽灵交互防呆：**书签位置映射**（`useGhostPairTracker`：采纳瞬间暂存 AI 原样+首尾 position 纯内存，随事务映射塌缩守原地；保存时对比并更新同幽灵只留最新版，切章定稿聚合提示+按批撤销；干净采纳跳过/塌缩=完全否决/≤100 字窗外不收）+ **三键阶梯**（Tab 采纳·Enter 暂留零承诺·Esc 丢弃+60s 找回窗；流式只打断不采纳+GHOST_DONE 400ms 缓冲窗；一期一个暂留位，暂留终局丢弃喂学习）+ **视觉**（mint 点线边界+转正段未审虚线 GhostTrack 装饰碰过即消）。pairs 后端 source 三源白名单（manual_mark/auto_ghost/capsule）。测试 +17 前端（ghostPairTracker），基线 1585+398+tsc 净。M4 度量（粮食速率/干净采纳率/暂留转化率/自动对六闸通过率）待真实写作数据。

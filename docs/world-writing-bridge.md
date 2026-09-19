@@ -155,7 +155,7 @@
 ```
 
 - 时刻解析复用 `resolve_narrative_time` 四级降级（W1 已扩为 `NarrativeTime(t, source)` 并同步调用方）；状态复用 `compute_world_state`——**与生成桥接同源是硬约束**（P2）。
-- **在场推导的词法兜底（2026-09-02 约束治理一期，`services/world/lexical_presence.py`）**：结构化参与者链接缺失的实体，若名字出现在事件 note 正文中则补进在场、标 `presence_source=lexical`（前端渲染「据正文推断」badge，兼作补录事件参与者的建议通道；情境浮卡的角色状态行同带该字段）；增强内建在 `compute_world_state` 仓库实现——切片条/浮卡/生成桥接同一口径；死者不复活、歧义不填、不回写事实源；存量可用 `scripts/backfill_event_participants.py` 回填。
+- **在场推导的词法兜底（2026-09-02 约束治理一期，`services/world/lexical_presence.py`）**：结构化参与者链接缺失的实体，若名字出现在事件 note 正文中则补进在场、标 `presence_source=lexical`（前端渲染「据正文推断」badge，兼作补录事件参与者的建议通道；情境浮卡的角色状态行同带该字段）；增强内建在 `compute_world_state` 仓库实现——切片条/浮卡/生成桥接同一口径；死者不复活、歧义不填、不回写事实源；匹配判据 2026-09-17 升级为 jieba token 边界（嵌词不成词不命中，名表注入 `jieba_lexicon` 词典保专名单 token；jieba 缺失退子串）；存量可用 `scripts/backfill_event_participants.py` 回填。
 - **伏笔关联规则（验证后重写）**：PlotLedger **没有**实体/地点关联字段，硬交集不可算。降级为——基线取全书开放伏笔（`get_open_hooks` 现成；status 取值 open/closed/dropped），在场实体名/别名子串命中的提权排前（复用 recall `_world_echoes` 的匹配手法），本章新埋（`chapter_id` = 当前章）必进；`chapters_open = 当前章号 − created_at_chapter`（⚠ 该列存的是**章节号 Integer**，非章节 id）。
 - `controlling_faction` 判定：地点有坐标 → 对 territory_states 各 polygon 做点包含（射线法自写，仓库无 shapely 无现成工具）；无坐标（迁移来的地点恒为空）或多命中 → 该子块隐藏，不造数据。
 - 期待块对齐 `reader_mirror` 实际结构：`raw["expectations"]` 过滤 `status ∈ (setup, accumulating)`，字段为 `type/description/current_tension`（与 settings_bundle `_reader_expectations_view` 同源，原稿的 `content` 字段名有误）。
@@ -243,6 +243,8 @@ created_at
 > ① **P5 地基加固（2026-08-21，`e44dd59`，详见 `foundation-hardening.md` A5b）**——收件箱**批量裁决**（「全部采纳」→ 逐条预览可剔除 → 6s 复合撤销 = 删产物 + reopen，前端 `features/world/composables/batchAccept.ts` + `BatchAcceptModal.vue`）；settle 候选**三重去重**（prompt 排除近 15 条已入账 + 归一化双向子串预筛 + pending 池幂等）；积压 >5 心跳 `kind=world_inbox` 感知带提示 + settle 完成 toast 直达收件箱。
 > ② **战略定稿期（2026-08-25/26，详见 `auto-read-quiet-learning.md`）**——自动阅读 / 全书通读的候选入池（新 source）；候选判重升**全书级**归一化子串 + 转正前账本判重闸（命中标 `auto_reject=duplicate`）；accept 服务端实体/地点创建按（书 + 归一化名 + 类型）**幂等**（治连点重复建事故）；候选联表补 `chapter_number`（无叙事锚显示「第 N 章」不伪造默认日期）。
 > ③ 收件箱随切片条位于副驾「此刻」tab（2026-08-17 写作台重构迁入切片条所在 tab，2026-08-22 副驾四 tab 化后沿用，组件仍为 `WorldSceneSlice`）；世界页「待确认」图标栏改为**常驻**（空箱也可开抽屉发起通读，2026-08-25 `28c8e73` 修冷启动自锁）。
+> ④ **场次流转第三弹（2026-09-14，`0050eed`，唯一权威 `docs/scene-transit-feasibility.md`）**——切片条「此刻此地」的场景来源升级：**光标派生取景 `active_scene` 优先、本章钉回退**（`services/world/active_scene.py` 纯函数：光标前 ≤2000 字窗逆扫「转场动词×名册地点名（含别名/无坐标房间）」最近命中，命中句须已完结+闪回豁免）；心跳响应带 `active_scene`，切片条出「此刻取景（正文推导）」微标+一键钉定；dock 在场投影提及窗随光标前窗扩为**随身物随行**（上一场提及的上手件换场仍在册）。本表 W5 行「钉定优先于推演」为当时口径，取景来源以本条为准（钉退居派生无命中时的回退）。
+> ⑤ **候选回流链路修缮（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`）**——①候选补出处：抽取要求 LLM 逐字摘录 evidence 原句，落池前「去空白子串」校验，编造出处剥除不上屏（候选降级无出处档）；前端收件箱悬停/批量模态引文行/世界页卡片三面展示。②撤销单事务化：`/undo-accept` 端点删转正产物+回 pending 一个 commit 完成（accept 记录产物 id 入 draft）——两请求链断的孤儿态不再可能。③拒绝史防重：近期 30 天/200 条 ✗ 过的候选 summary 进归一化判重（auto_reject 假拒绝不计），命中不入箱+`suppressed_rejected` 计数。④键盘裁决：↑↓/→·Enter/←·Delete 全键盘批候选（`inboxKeyboard.ts` 纯函数）。⑤回场补读：进章也发枪 auto-read（覆盖「关应用前未切章整章未读」盲区，哈希幂等闸不变）。⑥read-entities 失败不写幂等锚（`EmergentFacts.failed` 区分失败与无涌现）+顺修 `adaptive/schemas.py` 缺 `Any` 导入致端点响应必炸的预存在隐患。⑦用量停机冲账（lifespan+atexit 双路 flush_all）。契约细节见 `docs/agent/world.md` ④ 与 `docs/agent/nle-adf.md`。
 
 ---
 
