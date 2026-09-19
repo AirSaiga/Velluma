@@ -1,14 +1,21 @@
 <script setup lang="ts">
 /**
- * 模型与 API 弹窗（2026-09-15 设置拆分：从旧「设置」大弹窗独立）。
+ * 模型与 API 弹窗（2026-09-15 设置拆分：从旧「设置」大弹窗独立；
+ * 2026-09 设置拆分后续：UX 重构为左侧导航式）。
  *
- * 只管「AI 用什么模型、连什么服务」：LLM 双槽（分析/写作）+ 配置预设 +
- * 厂商目录 + 向量记忆 + 去 AI 味小模型 + 网络代理 + 连接测试。全局生效、
- * 与书籍无关；每次打开重拉配置，保存后 LLM 与代理立即生效（向量维度变更
- * 需重启）。外观/通知已分设独立入口，不再混装于此。
+ * 只管「AI 用什么模型、连什么服务」：左栏六项导航（写作/分析模型、预设库、
+ * 向量记忆、去 AI 味、网络代理，各带实时状态小字）+ 右栏单分区呈现（本地
+ * activeSection 切换，一次只渲染当前分区，默认落「写作模型」）。编辑表单拆
+ * components/api/ModelSlotPane.vue（双槽共用）、预设库拆
+ * components/api/PresetLibraryPane.vue。全局生效、与书籍无关；每次打开重拉配置，
+ * 保存后 LLM 与代理立即生效（向量维度变更需重启）。外观/通知已分设独立入口，
+ * 不再混装于此。
  */
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import ModalShell from './ModalShell.vue'
+import ModelSlotPane from './api/ModelSlotPane.vue'
+import PresetLibraryPane from './api/PresetLibraryPane.vue'
+import type { ProfileRole, ProfileForm } from './api/ModelSlotPane.vue'
 import { systemApi } from '../services/api'
 import type { ModelConfig, ModelConfigUpdatePayload, VendorCatalogEntry, ModelPresetItem } from '../services/api'
 import { useAppSettings } from '../composables/useAppSettings'
@@ -19,18 +26,16 @@ const { apiVisible: visible, closeApi: close } = useAppSettings()
 const { showToast } = useToast()
 
 // ============================================================
-// 表单状态
+// 分区导航（本地切换，一次只渲染当前分区）
 // ============================================================
 
-type ProfileRole = 'reasoning' | 'creative'
+type SectionId = ProfileRole | 'presets' | 'embedding' | 'deai' | 'proxy'
 
-interface ProfileForm {
-  model: string
-  api_key: string // 留空表示保持不变（服务端仅返回掩码）
-  base_url: string
-  enabled: boolean
-  effort: string
-}
+const activeSection = ref<SectionId>('creative')
+
+// ============================================================
+// 表单状态
+// ============================================================
 
 const profileRoles: ProfileRole[] = ['reasoning', 'creative']
 
@@ -45,52 +50,27 @@ const profileMeta = reactive<Record<ProfileRole, { has_api_key: boolean; api_key
   creative: { has_api_key: false, api_key_masked: '' },
 })
 
-const ROLE_LABELS: Record<ProfileRole, string> = {
-  reasoning: '分析模型（审阅·诊断）',
-  creative: '写作模型（正文生成）',
-}
-
-/** 每个槽位的职责说明（帮助用户理解该配什么模型） */
-const ROLE_HINTS: Record<ProfileRole, string> = {
-  reasoning: '审阅章节、推断写作意图、检查一致性等「判断」任务',
-  creative: '续写正文、生成挂件、缝合碎片等所有「写作」任务',
-}
-
-const MODEL_PLACEHOLDERS: Record<ProfileRole, string> = {
-  reasoning: '如 deepseek-flash',
-  creative: '如 kimi-k2.6',
-}
-
 const ROLE_SHORT_LABELS: Record<ProfileRole, string> = {
   reasoning: '分析模型',
   creative: '写作模型',
 }
 
 // ============================================================
-// 模型配置预设（快速切换，2026-09-11）：切走前整套存档（含 Key），下拉一点切回；
+// 模型配置预设（快速切换，2026-09-11）：切走前整套存档（含 Key），预设库分区一点切回；
 // 服务端另有自动存档安全网——覆盖槽位连接时旧值不完整或已存档才会丢，正常切换永不丢
 // ============================================================
 
 const presets = ref<ModelPresetItem[]>([])
-const presetSelection = reactive<Record<ProfileRole, string>>({ reasoning: '', creative: '' })
-const presetNameDraft = reactive<Record<ProfileRole, string>>({ reasoning: '', creative: '' })
-const showPresetSave = reactive<Record<ProfileRole, boolean>>({ reasoning: false, creative: false })
 const applyingPreset = ref<ProfileRole | null>(null)
 const savingPreset = ref(false)
-/** 删除二次确认：首点进入待确认态（按钮变红），3.5s 未复点自动解除 */
-const armedDeleteRole = ref<ProfileRole | null>(null)
-let armDeleteTimer: ReturnType<typeof setTimeout> | undefined
-
-function presetLabel(p: ModelPresetItem): string {
-  const suffix = p.source === 'auto' ? '（自动存档）' : ''
-  return `${p.name}${suffix} · ${p.model || '未命名模型'}`
-}
+/** 保存成功信号：拨 +1 通知对应槽位的 ModelSlotPane 收起内联命名行（失败不收起，同旧版） */
+const presetSavedTick = reactive<Record<ProfileRole, number>>({ reasoning: 0, creative: 0 })
 
 async function loadPresets() {
   try {
     presets.value = (await systemApi.getModelPresets()).presets
   } catch {
-    /* 预设池加载失败不阻塞设置面板（下拉置空，其余功能不受影响） */
+    /* 预设池加载失败不阻塞设置面板（预设库置空，其余功能不受影响） */
   }
 }
 
@@ -106,9 +86,8 @@ function applyRoleConfig(role: ProfileRole, p: ModelConfig['llm'][ProfileRole]) 
   vendorSelection[role] = matchVendorByBaseUrl(p.base_url)
 }
 
-async function onApplyPreset(role: ProfileRole) {
-  const id = presetSelection[role]
-  if (!id || applyingPreset.value) return
+async function onApplyPreset(id: string, role: ProfileRole) {
+  if (applyingPreset.value) return
   applyingPreset.value = role
   try {
     const res = await systemApi.applyModelPreset(id, role)
@@ -121,31 +100,14 @@ async function onApplyPreset(role: ProfileRole) {
       'success'
     )
   } catch (error: any) {
-    presetSelection[role] = ''
     showToast('切换失败: ' + (error.message || '未知错误'), 'error')
   } finally {
     applyingPreset.value = null
   }
 }
 
-function openPresetSave(role: ProfileRole) {
-  showPresetSave[role] = true
-  // 预填当前模型名，多数情况一键即存；名字可改成「DeepSeek 主力」这类自己认的
-  presetNameDraft[role] = profileForms[role].model.trim()
-  if (armedDeleteRole.value === role) {
-    armedDeleteRole.value = null
-    clearTimeout(armDeleteTimer)
-  }
-}
-
-function closePresetSave(role: ProfileRole) {
-  showPresetSave[role] = false
-  presetNameDraft[role] = ''
-}
-
-async function savePresetFor(role: ProfileRole) {
+async function savePresetFor(role: ProfileRole, name: string) {
   if (savingPreset.value) return
-  const name = presetNameDraft[role].trim()
   if (!name) {
     showToast('请先给这套配置起个名字', 'error')
     return
@@ -163,7 +125,7 @@ async function savePresetFor(role: ProfileRole) {
       api_key: profileForms[role].api_key || undefined,
     })
     presets.value = res.presets
-    closePresetSave(role)
+    presetSavedTick[role] += 1
     showToast(`预设「${name}」已保存${res.overwrote ? '（同名覆盖）' : ''}`, 'success')
   } catch (error: any) {
     showToast('保存预设失败: ' + (error.message || '未知错误'), 'error')
@@ -172,23 +134,9 @@ async function savePresetFor(role: ProfileRole) {
   }
 }
 
-async function onDeletePreset(role: ProfileRole) {
-  const id = presetSelection[role]
-  if (!id) return
-  if (armedDeleteRole.value !== role) {
-    armedDeleteRole.value = role
-    clearTimeout(armDeleteTimer)
-    armDeleteTimer = setTimeout(() => { armedDeleteRole.value = null }, 3500)
-    return
-  }
-  armedDeleteRole.value = null
-  clearTimeout(armDeleteTimer)
+async function onDeletePreset(id: string) {
   try {
     presets.value = (await systemApi.deleteModelPreset(id)).presets
-    // 两槽共用一个池，别槽若正指着被删条目一并复位
-    for (const r of profileRoles) {
-      if (presetSelection[r] === id) presetSelection[r] = ''
-    }
     showToast('预设已删除', 'success')
   } catch (error: any) {
     showToast('删除失败: ' + (error.message || '未知错误'), 'error')
@@ -232,10 +180,6 @@ function matchVendorByBaseUrl(url: string): string {
 
 function currentVendor(role: ProfileRole): VendorCatalogEntry | null {
   return vendorCatalog.value.find((v) => v.id === vendorSelection[role]) || null
-}
-
-function vendorModels(role: ProfileRole): { id: string; label: string; note: string }[] {
-  return currentVendor(role)?.models || []
 }
 
 /** 厂商能力提示 + 模型级动态警示（弃用/下线/强制思考） */
@@ -286,14 +230,11 @@ const embeddingInherited = reactive<{ source: 'creative' | 'reasoning' | null; b
   base_url: '',
   has_api_key: false,
 })
-/** 专业级折叠：向量记忆（默认收起——未配置时走结构化+词法默认记忆流） */
-const showAdvanced = ref(false)
 
 // ============================================================
 // 去 AI 味小模型（deai/ 子项目，实验）：卡片舱续写短稿上屏前的抛光
 // ============================================================
 
-const showDeai = ref(false)
 const deaiForm = reactive({ enabled: false, model: '', api_key: '', base_url: '' })
 const deaiMeta = reactive({ has_api_key: false, api_key_masked: '', effective_model: '', effective_base_url: '' })
 const deaiTesting = ref(false)
@@ -466,21 +407,44 @@ async function runDeaiTest() {
   }
 }
 
-// 每次打开弹窗重新拉取配置（本地后端，开销可忽略），并清掉上次测试结果
+// ============================================================
+// 左栏导航状态行（实时反映当前表单/配置）
+// ============================================================
+
+const reasoningNavStatus = computed(() => {
+  if (!profileForms.reasoning.model && !profileForms.reasoning.api_key && !profileMeta.reasoning.has_api_key) {
+    return '跟随写作模型'
+  }
+  return profileForms.reasoning.model || '未配置'
+})
+
+const embeddingNavStatus = computed(() => {
+  if (embeddingForm.follow_llm) {
+    return embeddingInherited.has_api_key ? '已配置·跟随写作模型' : '跟随写作模型（缺 Key）'
+  }
+  if (embeddingMeta.has_api_key || embeddingForm.model) return '已配置'
+  return '未配置（默认记忆流）'
+})
+
+const navItems = computed(() => [
+  { id: 'creative' as SectionId, icon: 'pencil-square', title: '写作模型', status: profileForms.creative.model || '未配置' },
+  { id: 'reasoning' as SectionId, icon: 'magnifying-glass', title: '分析模型', status: reasoningNavStatus.value },
+  { id: 'presets' as SectionId, icon: 'inbox', title: '预设库', status: presets.value.length ? `${presets.value.length} 套已存` : '暂无' },
+  { id: 'embedding' as SectionId, icon: 'link', title: '向量记忆', status: embeddingNavStatus.value },
+  { id: 'deai' as SectionId, icon: 'wand', title: '去 AI 味', status: deaiForm.enabled ? '已启用' : '未启用' },
+  { id: 'proxy' as SectionId, icon: 'settings', title: '网络代理', status: proxyForm.enabled ? '已启用' : '已关闭' },
+])
+
+// 每次打开弹窗重新拉取配置（本地后端，开销可忽略），并清掉上次测试结果、
+// 分区回落「写作模型」（槽位内表单/预设命名行等子件状态随 v-if 卸载自动归零）
 watch(visible, (v) => {
   if (v) {
+    activeSection.value = 'creative'
     loadConfig()
     loadCatalog()
     loadPresets()
     testResult.value = null
     deaiTestResult.value = null
-    for (const role of profileRoles) {
-      presetSelection[role] = ''
-      showPresetSave[role] = false
-      presetNameDraft[role] = ''
-    }
-    armedDeleteRole.value = null
-    clearTimeout(armDeleteTimer)
   }
 })
 </script>
@@ -490,7 +454,7 @@ watch(visible, (v) => {
     v-if="visible"
     title="模型与 API"
     subtitle="AI 用什么模型写作、连什么服务——全局生效，与具体书籍无关"
-    width="720px"
+    width="880px"
     @close="close"
   >
     <div v-if="loadError" class="error-banner">{{ loadError }}</div>
@@ -499,304 +463,239 @@ watch(visible, (v) => {
       加载配置中...
     </div>
 
-    <template v-else>
-      <!-- LLM 双模型并排（字段集相同，天然对称） -->
-      <div class="profiles-grid">
-        <section v-for="role in profileRoles" :key="role" class="profile-card">
-          <div class="profile-title">{{ ROLE_LABELS[role] }}</div>
-          <div class="profile-hint">{{ ROLE_HINTS[role] }}</div>
-          <div v-if="role === 'reasoning'" class="profile-hint profile-hint-sub">
-            留空（模型名与 Key 均不填）则自动跟随写作模型。
+    <div v-else class="api-layout">
+      <!-- 左栏导航：图标 + 标题 + 一行状态小字 -->
+      <nav class="api-nav">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          type="button"
+          class="api-nav-item"
+          :class="{ active: activeSection === item.id }"
+          @click="activeSection = item.id"
+        >
+          <Icon :name="item.icon" :size="16" class="api-nav-icon" />
+          <span class="api-nav-text">
+            <span class="api-nav-title">{{ item.title }}</span>
+            <span class="api-nav-status">{{ item.status }}</span>
+          </span>
+        </button>
+      </nav>
+
+      <!-- 右栏：单分区呈现，独立滚动 -->
+      <div class="api-content">
+        <ModelSlotPane
+          v-if="activeSection === 'creative'"
+          v-model:vendor-selection="vendorSelection.creative"
+          :form="profileForms.creative"
+          :meta="profileMeta.creative"
+          role="creative"
+          :vendor-catalog="vendorCatalog"
+          :notes="vendorNotes('creative')"
+          :warning="modelWarning('creative')"
+          :saving-preset="savingPreset"
+          :preset-saved-tick="presetSavedTick.creative"
+          @vendor-change="onVendorChange('creative')"
+          @save-preset="(name: string) => savePresetFor('creative', name)"
+        />
+        <ModelSlotPane
+          v-else-if="activeSection === 'reasoning'"
+          v-model:vendor-selection="vendorSelection.reasoning"
+          :form="profileForms.reasoning"
+          :meta="profileMeta.reasoning"
+          role="reasoning"
+          :vendor-catalog="vendorCatalog"
+          :notes="vendorNotes('reasoning')"
+          :warning="modelWarning('reasoning')"
+          :saving-preset="savingPreset"
+          :preset-saved-tick="presetSavedTick.reasoning"
+          @vendor-change="onVendorChange('reasoning')"
+          @save-preset="(name: string) => savePresetFor('reasoning', name)"
+        />
+
+        <PresetLibraryPane
+          v-else-if="activeSection === 'presets'"
+          :presets="presets"
+          :applying="applyingPreset"
+          @apply="onApplyPreset"
+          @remove="onDeletePreset"
+        />
+
+        <!-- 向量记忆（专业级：未配置时走结构化+词法默认记忆流） -->
+        <section v-else-if="activeSection === 'embedding'" class="pane">
+          <div class="pane-title">向量记忆</div>
+          <div class="field-hint">
+            未配置时使用结构化 + 词法记忆（默认，无需额外服务）；配置后启用向量召回增强（任意 OpenAI 兼容 Embedding 服务 + pgvector）。
           </div>
 
-          <!-- 快速切换：两槽共用预设池；选中即切换（服务端先把旧值自动存档，切换无损） -->
-          <div class="preset-row">
-            <select
-              v-model="presetSelection[role]"
-              class="preset-select"
-              :disabled="!presets.length || applyingPreset === role"
-              @change="onApplyPreset(role)"
-            >
-              <option value="" disabled>
-                {{ presets.length ? '已存配置，选中即切换…' : '暂无已存配置' }}
-              </option>
-              <option v-for="p in presets" :key="p.id" :value="p.id">{{ presetLabel(p) }}</option>
-            </select>
-            <button
-              type="button"
-              class="preset-btn"
-              :disabled="applyingPreset === role"
-              title="把当前这套配置（含 Key）存为预设，随时切回"
-              @click="openPresetSave(role)"
-            >存为预设</button>
-            <button
-              type="button"
-              class="preset-btn preset-del"
-              :class="{ armed: armedDeleteRole === role }"
-              :disabled="!presetSelection[role]"
-              :title="presetSelection[role] ? '删除下拉中选中的预设（点两次确认）' : '先在下拉里选中要删的预设'"
-              @click="onDeletePreset(role)"
-            >{{ armedDeleteRole === role ? '确认删除？' : '删除' }}</button>
-          </div>
-          <div v-if="showPresetSave[role]" class="preset-save-row">
-            <input
-              v-model="presetNameDraft[role]"
-              class="field field-input preset-name-input"
-              placeholder="给这套配置起个名字，如：DeepSeek 主力"
-              maxlength="80"
-              @keyup.enter="savePresetFor(role)"
-            />
-            <button type="button" class="preset-btn preset-save-btn" :disabled="savingPreset" @click="savePresetFor(role)">
-              <Icon v-if="savingPreset" name="loader" :size="12" class="spin spin-reduced" />
-              保存
-            </button>
-            <button type="button" class="preset-btn" @click="closePresetSave(role)">取消</button>
-          </div>
-
-          <label class="field">
-            <span class="field-label">厂商</span>
-            <select
-              v-model="vendorSelection[role]"
-              class="field field-input"
-              @change="onVendorChange(role)"
-            >
-              <option value="custom">自定义 / 其他</option>
-              <option v-for="v in vendorCatalog" :key="v.id" :value="v.id">{{ v.label }}</option>
-            </select>
+          <label class="field-inline follow-toggle">
+            <input v-model="embeddingForm.follow_llm" type="checkbox" />
+            <span>连接跟随文本模型（与写作模型共用 Key 与 Base URL，换文本模型即同步）</span>
           </label>
 
-          <label class="field">
-            <span class="field-label">模型</span>
-            <input
-              v-model="profileForms[role].model"
-              class="field field-input"
-              :list="`model-options-${role}`"
-              :placeholder="MODEL_PLACEHOLDERS[role]"
-            />
-            <datalist :id="`model-options-${role}`">
-              <option v-for="m in vendorModels(role)" :key="m.id" :value="m.id">{{ m.label }}——{{ m.note }}</option>
-            </datalist>
-          </label>
-
-          <label class="field">
-            <span class="field-label">API Key</span>
-            <input
-              v-model="profileForms[role].api_key"
-              type="password"
-              class="field field-input"
-              :placeholder="profileMeta[role].has_api_key
-                ? `已保存 (${profileMeta[role].api_key_masked})，留空保持不变`
-                : '输入 API Key'"
-              autocomplete="new-password"
-            />
-          </label>
-
-          <label class="field">
-            <span class="field-label">Base URL</span>
-            <input
-              v-model="profileForms[role].base_url"
-              class="field field-input"
-              placeholder="https://api.deepseek.com/v1"
-            />
-          </label>
-
-          <div class="flags-row">
-            <label class="field-inline">
-              <input v-model="profileForms[role].enabled" type="checkbox" />
-              <span>深度思考（Reasoning）</span>
+          <div class="embedding-grid" :class="{ follow: embeddingForm.follow_llm }">
+            <label class="field">
+              <span class="field-label">模型</span>
+              <input v-model="embeddingForm.model" class="field field-input" placeholder="text-embedding-v2" />
             </label>
-            <select v-if="profileForms[role].enabled" v-model="profileForms[role].effort" class="effort-select">
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="max">max</option>
-            </select>
+
+            <label v-if="!embeddingForm.follow_llm" class="field">
+              <span class="field-label">API Key</span>
+              <input
+                v-model="embeddingForm.api_key"
+                type="password"
+                class="field field-input"
+                :placeholder="embeddingMeta.has_api_key
+                  ? `已保存 (${embeddingMeta.api_key_masked})，留空保持不变`
+                  : '输入 API Key'"
+                autocomplete="new-password"
+              />
+            </label>
+
+            <label class="field">
+              <span class="field-label">向量维度</span>
+              <input v-model.number="embeddingForm.dimensions" type="number" min="1" class="field field-input" />
+            </label>
           </div>
-
-          <!-- 厂商能力提示（目录静态）+ 模型级动态警示（弃用/下线/强制思考） -->
-          <div v-for="n in vendorNotes(role)" :key="n" class="field-sub-hint">{{ n }}</div>
-          <div v-if="modelWarning(role)" class="field-sub-hint profile-warn">{{ modelWarning(role) }}</div>
-        </section>
-      </div>
-
-      <!-- Embedding 配置（专业级：默认折叠——未配置时走结构化+词法记忆流） -->
-      <button type="button" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
-        <span>专业级：向量记忆（Embedding）</span>
-        <span class="advanced-caret">{{ showAdvanced ? '▾' : '▸' }}</span>
-      </button>
-
-      <template v-if="showAdvanced">
-        <div class="field-hint">
-          未配置时使用结构化 + 词法记忆（默认，无需额外服务）；配置后启用向量召回增强（任意 OpenAI 兼容 Embedding 服务 + pgvector）。
-        </div>
-
-        <label class="field-inline follow-toggle">
-          <input v-model="embeddingForm.follow_llm" type="checkbox" />
-          <span>连接跟随文本模型（与写作模型共用 Key 与 Base URL，换文本模型即同步）</span>
-        </label>
-
-        <div class="embedding-grid" :class="{ follow: embeddingForm.follow_llm }">
-          <label class="field">
-            <span class="field-label">模型</span>
-            <input v-model="embeddingForm.model" class="field field-input" placeholder="text-embedding-v2" />
-          </label>
 
           <label v-if="!embeddingForm.follow_llm" class="field">
-            <span class="field-label">API Key</span>
+            <span class="field-label">Base URL</span>
             <input
-              v-model="embeddingForm.api_key"
-              type="password"
+              v-model="embeddingForm.base_url"
               class="field field-input"
-              :placeholder="embeddingMeta.has_api_key
-                ? `已保存 (${embeddingMeta.api_key_masked})，留空保持不变`
-                : '输入 API Key'"
-              autocomplete="new-password"
+              placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
             />
+            <span class="field-sub-hint">任意 OpenAI 兼容端点；留空默认阿里云 DashScope 兼容模式。</span>
           </label>
 
-          <label class="field">
-            <span class="field-label">向量维度</span>
-            <input v-model.number="embeddingForm.dimensions" type="number" min="1" class="field field-input" />
-          </label>
-        </div>
+          <div v-else class="field-hint" :class="{ 'follow-missing': !embeddingInherited.has_api_key }">
+            <template v-if="embeddingInherited.has_api_key">
+              将使用{{ embeddingInherited.source === 'reasoning' ? '分析' : '写作' }}模型的连接：{{ embeddingInherited.base_url || '（默认端点）' }}，向量模型名填该服务商提供的 Embedding 模型。
+            </template>
+            <template v-else>
+              写作/分析模型均未配置 API Key——跟随模式下向量记忆不可用，请先在上面配置文本模型。
+            </template>
+          </div>
 
-        <label v-if="!embeddingForm.follow_llm" class="field">
-          <span class="field-label">Base URL</span>
+          <div class="field-warning">
+            修改维度需重启后端；重启迁移会删列重建，清空全部向量记忆数据。
+          </div>
+        </section>
+
+        <!-- 去 AI 味小模型（deai/ 子项目，实验）：卡片舱续写短稿上屏前的抛光 -->
+        <section v-else-if="activeSection === 'deai'" class="pane">
+          <div class="pane-title">实验：去 AI 味小模型（续写短稿抛光）</div>
+          <div class="field-hint">
+            续写草稿上屏前，用部署在阿里云百炼的自训小模型再做一轮「像人改写」——只改语言质感，
+            不动事实、数字、专名；模型改坏事实会自动回退原文。只处理 100 字以内的短稿，长稿自动跳过。
+          </div>
+
+          <label class="field-inline follow-toggle">
+            <input v-model="deaiForm.enabled" type="checkbox" />
+            <span>启用（未启用或未填 Key 时，写作流程零变化）</span>
+          </label>
+
+          <div class="deai-grid">
+            <label class="field">
+              <span class="field-label">模型（部署名）</span>
+              <input
+                v-model="deaiForm.model"
+                class="field field-input"
+                :placeholder="deaiMeta.effective_model || 'qwen3-4b-instruct-2507-…'"
+              />
+              <span class="field-sub-hint">百炼「部署管理」里的部署名；重新部署后会变，需回来更新。</span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">API Key</span>
+              <input
+                v-model="deaiForm.api_key"
+                type="password"
+                class="field field-input"
+                :placeholder="deaiMeta.has_api_key
+                  ? `已保存 (${deaiMeta.api_key_masked})，留空保持不变`
+                  : '阿里云百炼 DashScope API Key'"
+                autocomplete="new-password"
+              />
+            </label>
+          </div>
+
+          <div class="deai-actions">
+            <button type="button" class="btn-secondary" :disabled="deaiTesting" @click="runDeaiTest">
+              <Icon v-if="deaiTesting" name="loader" :size="14" class="spin spin-reduced" />
+              <Icon v-else name="play" :size="14" />
+              {{ deaiTesting ? '试一试中...' : '试一试' }}
+            </button>
+            <span v-if="deaiMeta.effective_base_url" class="field-sub-hint">{{ deaiMeta.effective_base_url }}</span>
+          </div>
+
+          <div v-if="deaiTestResult" class="deai-result" :class="{ success: deaiTestResult.success, error: !deaiTestResult.success }">
+            <div class="test-status">
+              <span class="status-text">{{ deaiTestResult.message }}</span>
+              <span v-if="deaiTestResult.elapsed_ms" class="response-time">{{ deaiTestResult.elapsed_ms }}ms</span>
+            </div>
+            <div v-if="deaiTestResult.input_text" class="deai-diff">
+              <div>原文：{{ deaiTestResult.input_text }}</div>
+              <div>结果：{{ deaiTestResult.output_text }}<span v-if="!deaiTestResult.applied" class="deai-notapplied">（未采纳，见上方说明）</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 网络代理（随 API 拆入：只为 LLM/向量出站服务） -->
+        <section v-else-if="activeSection === 'proxy'" class="pane">
+          <div class="pane-title">网络代理</div>
+          <label class="field-inline">
+            <input v-model="proxyForm.enabled" type="checkbox" />
+            <span>启用代理</span>
+          </label>
           <input
-            v-model="embeddingForm.base_url"
+            v-if="proxyForm.enabled"
+            v-model="proxyForm.url"
             class="field field-input"
-            placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            placeholder="http://127.0.0.1:4780"
           />
-          <span class="field-sub-hint">任意 OpenAI 兼容端点；留空默认阿里云 DashScope 兼容模式。</span>
-        </label>
-
-        <div v-else class="field-hint" :class="{ 'follow-missing': !embeddingInherited.has_api_key }">
-          <template v-if="embeddingInherited.has_api_key">
-            将使用{{ embeddingInherited.source === 'reasoning' ? '分析' : '写作' }}模型的连接：{{ embeddingInherited.base_url || '（默认端点）' }}，向量模型名填该服务商提供的 Embedding 模型。
-          </template>
-          <template v-else>
-            写作/分析模型均未配置 API Key——跟随模式下向量记忆不可用，请先在上面配置文本模型。
-          </template>
-        </div>
-
-        <div class="field-warning">
-          修改维度需重启后端；重启迁移会删列重建，清空全部向量记忆数据。
-        </div>
-      </template>
-
-      <!-- 去 AI 味小模型（deai/ 子项目，实验）：卡片舱续写短稿上屏前的抛光 -->
-      <button type="button" class="advanced-toggle deai-toggle" @click="showDeai = !showDeai">
-        <span>实验：去 AI 味小模型（续写短稿抛光）</span>
-        <span class="advanced-caret">{{ showDeai ? '▾' : '▸' }}</span>
-      </button>
-
-      <template v-if="showDeai">
-        <div class="field-hint">
-          续写草稿上屏前，用部署在阿里云百炼的自训小模型再做一轮「像人改写」——只改语言质感，
-          不动事实、数字、专名；模型改坏事实会自动回退原文。只处理 100 字以内的短稿，长稿自动跳过。
-        </div>
-
-        <label class="field-inline follow-toggle">
-          <input v-model="deaiForm.enabled" type="checkbox" />
-          <span>启用（未启用或未填 Key 时，写作流程零变化）</span>
-        </label>
-
-        <div class="deai-grid">
-          <label class="field">
-            <span class="field-label">模型（部署名）</span>
-            <input
-              v-model="deaiForm.model"
-              class="field field-input"
-              :placeholder="deaiMeta.effective_model || 'qwen3-4b-instruct-2507-…'"
-            />
-            <span class="field-sub-hint">百炼「部署管理」里的部署名；重新部署后会变，需回来更新。</span>
-          </label>
-
-          <label class="field">
-            <span class="field-label">API Key</span>
-            <input
-              v-model="deaiForm.api_key"
-              type="password"
-              class="field field-input"
-              :placeholder="deaiMeta.has_api_key
-                ? `已保存 (${deaiMeta.api_key_masked})，留空保持不变`
-                : '阿里云百炼 DashScope API Key'"
-              autocomplete="new-password"
-            />
-          </label>
-        </div>
-
-        <div class="deai-actions">
-          <button type="button" class="btn-secondary" :disabled="deaiTesting" @click="runDeaiTest">
-            <Icon v-if="deaiTesting" name="loader" :size="14" class="spin spin-reduced" />
-            <Icon v-else name="play" :size="14" />
-            {{ deaiTesting ? '试一试中...' : '试一试' }}
-          </button>
-          <span v-if="deaiMeta.effective_base_url" class="field-sub-hint">{{ deaiMeta.effective_base_url }}</span>
-        </div>
-
-        <div v-if="deaiTestResult" class="deai-result" :class="{ success: deaiTestResult.success, error: !deaiTestResult.success }">
-          <div class="test-status">
-            <span class="status-text">{{ deaiTestResult.message }}</span>
-            <span v-if="deaiTestResult.elapsed_ms" class="response-time">{{ deaiTestResult.elapsed_ms }}ms</span>
-          </div>
-          <div v-if="deaiTestResult.input_text" class="deai-diff">
-            <div>原文：{{ deaiTestResult.input_text }}</div>
-            <div>结果：{{ deaiTestResult.output_text }}<span v-if="!deaiTestResult.applied" class="deai-notapplied">（未采纳，见上方说明）</span></div>
-          </div>
-        </div>
-      </template>
-
-      <!-- 网络代理（随 API 拆入：只为 LLM/向量出站服务） -->
-      <section class="proxy-section">
-        <div class="misc-title">网络代理</div>
-        <label class="field-inline">
-          <input v-model="proxyForm.enabled" type="checkbox" />
-          <span>启用代理</span>
-        </label>
-        <input
-          v-if="proxyForm.enabled"
-          v-model="proxyForm.url"
-          class="field field-input"
-          placeholder="http://127.0.0.1:4780"
-        />
-      </section>
-
-      <!-- 连接测试结果（紧凑条） -->
-      <div v-if="testResult" class="test-result" :class="{ success: testResult.success, error: !testResult.success }">
-        <div class="test-status">
-          <Icon v-if="testResult.success" name="check-circle" :size="14" class="status-icon" />
-          <Icon v-else name="x-circle" :size="14" class="status-icon" />
-          <span class="status-text">{{ testResult.success ? '连接成功' : '连接失败' }}</span>
-          <span v-if="testResult.response_time_ms" class="response-time">{{ testResult.response_time_ms }}ms</span>
-        </div>
-        <div class="test-message">{{ testResult.message }}</div>
-        <div v-if="testResult.model_info" class="test-detail">
-          推理 {{ testResult.model_info.reasoning_model }} {{ testResult.model_info.reasoning_success ? '✓' : '✗' }}
-          · 写作 {{ testResult.model_info.creative_model }} {{ testResult.model_info.creative_success ? '✓' : '✗' }}
-          · 深度思考{{ testResult.reasoning_supported ? '支持' : '不支持' }}
-          <template v-if="testResult.model_info.embedding_configured === false">
-            · 向量 未配置（跳过）
-          </template>
-          <template v-else-if="testResult.model_info.embedding_model">
-            · 向量 {{ testResult.model_info.embedding_model }} {{ testResult.model_info.embedding_success ? '✓' : '✗' }}<template v-if="testResult.model_info.embedding_dimensions_returned">（{{ testResult.model_info.embedding_dimensions_returned }} 维）</template>
-          </template>
-        </div>
+        </section>
       </div>
-    </template>
+    </div>
 
     <template #footer>
-      <button class="btn-secondary footer-test btn-ghost" :disabled="testing || loading" @click="runTest">
-        <Icon v-if="testing" name="loader" :size="14" class="spin spin-reduced" />
-        <Icon v-else name="play" :size="14" />
-        {{ testing ? '测试中...' : '连接测试' }}
-      </button>
-      <span class="footer-hint">保存后 LLM 与代理立即生效，无需重启</span>
-      <button class="btn-primary btn-primary-instrument" :disabled="saving || loading" @click="save">
-        <Icon v-if="saving" name="loader" :size="14" class="spin spin-reduced" />
-        <Icon v-else name="check" :size="14" />
-        {{ saving ? '保存中...' : '保存设置' }}
-      </button>
+      <div class="footer-stack">
+        <!-- 连接测试结果条（渲染在按钮行上方） -->
+        <div v-if="testResult" class="test-result" :class="{ success: testResult.success, error: !testResult.success }">
+          <div class="test-status">
+            <Icon v-if="testResult.success" name="check-circle" :size="14" class="status-icon" />
+            <Icon v-else name="x-circle" :size="14" class="status-icon" />
+            <span class="status-text">{{ testResult.success ? '连接成功' : '连接失败' }}</span>
+            <span v-if="testResult.response_time_ms" class="response-time">{{ testResult.response_time_ms }}ms</span>
+          </div>
+          <div class="test-message">{{ testResult.message }}</div>
+          <div v-if="testResult.model_info" class="test-detail">
+            推理 {{ testResult.model_info.reasoning_model }} {{ testResult.model_info.reasoning_success ? '✓' : '✗' }}
+            · 写作 {{ testResult.model_info.creative_model }} {{ testResult.model_info.creative_success ? '✓' : '✗' }}
+            · 深度思考{{ testResult.reasoning_supported ? '支持' : '不支持' }}
+            <template v-if="testResult.model_info.embedding_configured === false">
+              · 向量 未配置（跳过）
+            </template>
+            <template v-else-if="testResult.model_info.embedding_model">
+              · 向量 {{ testResult.model_info.embedding_model }} {{ testResult.model_info.embedding_success ? '✓' : '✗' }}<template v-if="testResult.model_info.embedding_dimensions_returned">（{{ testResult.model_info.embedding_dimensions_returned }} 维）</template>
+            </template>
+          </div>
+        </div>
+
+        <div class="footer-row">
+          <button class="btn-secondary footer-test btn-ghost" :disabled="testing || loading" @click="runTest">
+            <Icon v-if="testing" name="loader" :size="14" class="spin spin-reduced" />
+            <Icon v-else name="play" :size="14" />
+            {{ testing ? '测试中...' : '连接测试' }}
+          </button>
+          <span class="footer-hint">保存后 LLM 与代理立即生效，无需重启</span>
+          <button class="btn-primary btn-primary-instrument" :disabled="saving || loading" @click="save">
+            <Icon v-if="saving" name="loader" :size="14" class="spin spin-reduced" />
+            <Icon v-else name="check" :size="14" />
+            {{ saving ? '保存中...' : '保存设置' }}
+          </button>
+        </div>
+      </div>
     </template>
   </ModalShell>
 </template>
@@ -820,123 +719,111 @@ watch(visible, (v) => {
   border-radius: var(--radius-md);
 }
 
-/* ---------- 双模型并排 ---------- */
+/* ---------- 两栏骨架：负 margin 吃掉 ms-body 的 16/18 padding，左栏贴边 ---------- */
 
-.profiles-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 12px;
+.api-layout {
+  display: flex;
+  align-items: stretch;
+  /* 与右栏固定高一致，内容短时导航栏也不塌 */
+  min-height: min(560px, 62vh);
+  margin: -16px -18px;
 }
 
-.profile-card {
-  /* min-width:0 是布局护栏：预设下拉的长 option 文本有 ~230px 固有宽度，
-     没有 1fr 轨道会被顶破 335px 均分，双列总宽溢出卡壳、右卡被截断（09-12 实测事故） */
-  min-width: 0;
-  padding: 12px 14px;
+.api-nav {
+  width: 190px;
+  flex-shrink: 0;
+  padding: 10px 8px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border-right: 1px solid var(--line-faint);
 }
 
-.profile-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
+.api-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-2) var(--ease-out);
+}
+
+.api-nav-item:hover {
+  background: var(--state-hover);
+}
+
+.api-nav-item.active {
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
+}
+
+/* 左侧 2px 指示条 */
+.api-nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-500);
+}
+
+.api-nav-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.api-nav-item.active .api-nav-icon {
   color: var(--accent-500);
+}
+
+.api-nav-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.api-nav-title {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.api-nav-item.active .api-nav-title {
+  font-weight: 600;
+}
+
+.api-nav-status {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-content {
+  flex: 1;
+  min-width: 0;
+  height: min(560px, 62vh);
+  overflow-y: auto;
+  padding: 16px 18px 8px 20px;
+}
+
+/* ---------- 分区标题层级 ---------- */
+
+.pane-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
   margin-bottom: 4px;
 }
 
-.profile-hint {
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-}
-
-.profile-hint-sub {
-  margin-top: -6px;
-  color: var(--warn);
-}
-
-/* ---------- 快速切换（模型配置预设） ---------- */
-
-.preset-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.preset-select {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  font-size: var(--text-xs);
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  outline: none;
-  transition: border-color var(--dur-3) var(--ease-out);
-}
-
-.preset-select:focus {
-  border-color: var(--accent-500);
-}
-
-.preset-select:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.preset-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  font-size: var(--text-xs);
-  white-space: nowrap;
-  color: var(--accent-500);
-  background: transparent;
-  border: 1px solid var(--accent-500);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--dur-2) var(--ease-out);
-}
-
-.preset-btn:hover:not(:disabled) {
-  background: var(--accent-500);
-  color: var(--bg-canvas);
-}
-
-.preset-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.preset-del.armed {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.preset-del.armed:hover:not(:disabled) {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: var(--bg-canvas);
-}
-
-.preset-save-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: -4px 0 10px;
-}
-
-.preset-name-input {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-xs);
-}
+/* ---------- 表单工具类（与 ModelSlotPane 局部同名，各管各的 scoped） ---------- */
 
 .field {
   display: block;
@@ -955,12 +842,6 @@ watch(visible, (v) => {
   /* 皮肤由 .field 提供（模板挂 class="field field-input"） */
 }
 
-.flags-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .field-inline {
   display: flex;
   align-items: center;
@@ -971,69 +852,6 @@ watch(visible, (v) => {
   cursor: pointer;
 }
 
-.flags-row .field-inline {
-  margin-bottom: 0;
-}
-
-.effort-select {
-  padding: 4px 6px;
-  font-size: var(--text-xs);
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  outline: none;
-}
-
-/* ---------- 专业级折叠（向量记忆） ---------- */
-
-.advanced-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 6px 8px;
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
-}
-
-.advanced-toggle:hover {
-  color: var(--text-secondary);
-  border-color: var(--text-muted);
-}
-
-.advanced-caret {
-  font-size: var(--text-xs);
-}
-
-.field-hint {
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  color: var(--text-muted);
-  padding: 8px 2px 4px;
-}
-
-.embedding-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 110px;
-  gap: 10px;
-}
-
-.embedding-grid.follow {
-  grid-template-columns: 1fr 110px;
-}
-
-.follow-toggle {
-  margin: 4px 0 10px;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
 .field-sub-hint {
   display: block;
   margin-top: 4px;
@@ -1042,13 +860,12 @@ watch(visible, (v) => {
   color: var(--text-muted);
 }
 
-.follow-missing {
-  color: var(--warn);
-}
-
-/* 模型级动态警示（弃用/下线/强制思考）——比普通提示醒目但不打断 */
-.profile-warn {
-  color: var(--warn);
+.field-hint {
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 0 2px 4px;
+  margin-bottom: 8px;
 }
 
 .field-warning {
@@ -1061,11 +878,27 @@ watch(visible, (v) => {
   margin-bottom: 10px;
 }
 
-/* ---------- 去 AI 味小模型（deai） ---------- */
-
-.deai-toggle {
-  margin-top: 12px;
+.follow-toggle {
+  margin: 4px 0 10px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
+
+.follow-missing {
+  color: var(--warn);
+}
+
+.embedding-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 110px;
+  gap: 10px;
+}
+
+.embedding-grid.follow {
+  grid-template-columns: 1fr 110px;
+}
+
+/* ---------- 去 AI 味小模型（deai） ---------- */
 
 .deai-grid {
   display: grid;
@@ -1083,7 +916,7 @@ watch(visible, (v) => {
 .deai-result {
   margin-bottom: 10px;
   padding: 10px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   font-size: var(--text-xs);
 }
@@ -1117,27 +950,11 @@ watch(visible, (v) => {
   color: var(--text-muted);
 }
 
-/* ---------- 网络代理 ---------- */
-
-.proxy-section {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.misc-title {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-/* ---------- 连接测试结果（紧凑条） ---------- */
+/* ---------- 连接测试结果（紧凑条，footer 内按钮行上方） ---------- */
 
 .test-result {
-  margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   font-size: var(--text-xs);
 }
@@ -1203,6 +1020,20 @@ watch(visible, (v) => {
   cursor: not-allowed;
 }
 
+/* footer slot 内套一层 column 容器：测试结果条在按钮行上方 */
+.footer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .footer-test {
   margin-right: auto;
 }
@@ -1227,9 +1058,22 @@ watch(visible, (v) => {
   }
 }
 
-/* 窄屏（小窗口）时双列回落单列 */
+/* 窄屏（小窗口）时导航收缩为 56px 纯图标列 */
 @container (max-width: 40rem) {
-  .profiles-grid,
+  .api-nav {
+    width: 56px;
+    padding: 10px 6px;
+  }
+
+  .api-nav-item {
+    justify-content: center;
+    padding: 10px 0;
+  }
+
+  .api-nav-text {
+    display: none;
+  }
+
   .embedding-grid,
   .deai-grid {
     grid-template-columns: 1fr;
