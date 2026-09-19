@@ -298,7 +298,7 @@ async function remove() {
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
@@ -398,7 +398,7 @@ async function remove() {
 .fdd-sec {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 
 .fdd-sec:first-of-type {
@@ -419,7 +419,7 @@ async function remove() {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -467,7 +467,7 @@ async function remove() {
   font-size: var(--text-xs);
   padding: 2px 8px;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
@@ -483,7 +483,7 @@ async function remove() {
   flex: 1;
   min-width: 0;
   padding: 6px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -517,7 +517,7 @@ async function remove() {
   gap: 6px;
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 
 .fdd-act {
@@ -527,7 +527,7 @@ async function remove() {
   justify-content: center;
   gap: 5px;
   padding: 7px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);

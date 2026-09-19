@@ -81,7 +81,7 @@ async function doImport() {
   box-sizing: border-box;
   height: 200px;
   padding: 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -118,7 +118,7 @@ async function doImport() {
   align-items: center;
   gap: 5px;
   padding: 7px 16px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -143,6 +143,5 @@ async function doImport() {
   border-color: var(--accent-600);
   color: var(--bg-canvas);
   box-shadow: var(--glow-accent);
-  transform: translateY(-1px);
 }
 </style>

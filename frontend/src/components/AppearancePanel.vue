@@ -403,11 +403,11 @@ onScopeDispose(() => {
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--line-faint);
+  border-top: 1px solid var(--line-faint);
+  border-bottom: 1px solid var(--line-faint);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 
 /* P1 挂账（05 §9.1）：抽屉自身过渡 token 化 */
@@ -426,7 +426,7 @@ onScopeDispose(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 12px 10px 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   flex-shrink: 0;
 }
 
@@ -482,7 +482,7 @@ onScopeDispose(() => {
   gap: 10px;
   padding: 6px 8px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   cursor: pointer;
   position: relative;
@@ -513,7 +513,7 @@ onScopeDispose(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-1-shadow);
 }
 .tm-check svg {
   width: 11px;
@@ -645,7 +645,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: 5px;
   padding: 8px 6px 7px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-primary);
   cursor: pointer;
@@ -717,7 +717,7 @@ onScopeDispose(() => {
   border-radius: 999px;
   background: var(--accent-500);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-1-shadow);
   cursor: pointer;
 }
 .bg-veil input[type='range']::-moz-range-thumb {
@@ -726,7 +726,7 @@ onScopeDispose(() => {
   border-radius: 999px;
   background: var(--accent-500);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-1-shadow);
   cursor: pointer;
 }
 

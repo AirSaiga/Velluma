@@ -5,7 +5,6 @@ import type { EventDraft } from '../../../services/api/domain/world.api'
 import { formatTime, breakdownTime, fromYMD } from '../engine/timeFormat'
 import { EVENT_TEMPLATES, getTemplate } from '../engine/eventTemplates'
 import type { EventType, WorldEntity, WorldLocation, Point } from '../engine/types'
-import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { useEscStack } from '../../../composables/useEscStack'
 import { useToast } from '../../../composables/useToast'
 
@@ -370,9 +369,6 @@ async function commit() {
       .filter(Boolean)
       .join(' · ')
     showCapsule({ eventId, createdEntityIds, createdLocationIds, label })
-    // 埋点带连带建档计数（insights「协作」面板的关联录入度量面）
-    if (eventId) dispatchCollabEvent('quick_note', { action: 'commit', event_type: d.event_type, created_entities: createdEntityIds.length, created_locations: createdLocationIds.length })
-    else dispatchCollabEvent('quick_note', { action: 'commit', event_type: 'entities_only', created_entities: createdEntityIds.length, created_locations: createdLocationIds.length })
     close()
     window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
     emit('committed')
@@ -414,7 +410,6 @@ async function undo() {
     // 本地名单同步剔除已删项：缓存与库即刻一致（openWith 的刷新是下次打开才兜底）
     entities.value = entities.value.filter((e) => !createdEntityIds.includes(e.id))
     locations.value = locations.value.filter((l) => !createdLocationIds.includes(l.id))
-    dispatchCollabEvent('quick_note', { action: 'undo' })
     window.dispatchEvent(new CustomEvent('velluma:world-refresh'))
     emit('committed')
   } catch (e) {

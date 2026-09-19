@@ -158,7 +158,7 @@ const emit = defineEmits<{
 
 .ignition-card__btn {
   padding: 6px 14px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-secondary);

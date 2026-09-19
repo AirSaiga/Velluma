@@ -340,9 +340,9 @@ async function removeCurrent() {
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   padding: 14px;
   overflow-y: auto;
   font-size: var(--text-sm);
@@ -451,7 +451,7 @@ async function removeCurrent() {
 }
 .ldd-intro {
   width: 100%;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--text-primary) 2%, transparent); /* 旧 --bg-subtle 未定义 */
   color: var(--text-primary);
@@ -538,7 +538,7 @@ async function removeCurrent() {
 /* 内部构造区 */
 .ldd-sec {
   margin-top: 14px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
   padding-top: 10px;
 }
 .ldd-sec-title {
@@ -566,7 +566,7 @@ async function removeCurrent() {
   align-items: center;
   gap: 6px;
   padding: 7px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   margin-bottom: 6px;
   cursor: pointer;
@@ -628,7 +628,7 @@ async function removeCurrent() {
 .ldd-add-name,
 .ldd-add-intro {
   width: 100%;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--text-primary) 2%, transparent); /* 旧 --bg-subtle 未定义 */
   padding: 6px 9px;
@@ -665,7 +665,7 @@ async function removeCurrent() {
 .ldd-btn--ghost {
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
 }
 
 /* 底部删除 */

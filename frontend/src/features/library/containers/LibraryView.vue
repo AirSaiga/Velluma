@@ -222,9 +222,11 @@ function openImportModal(book: Book) {
     <!-- 书籍网格 -->
     <div v-else class="books-grid">
       <article
-        v-for="book in books"
+        v-for="(book, i) in books"
         :key="book.id"
         class="book-card"
+        :class="{ 'book-card--stagger': i < 6 }"
+        :style="i < 6 ? { animationDelay: `calc(var(--stagger-1) * ${i})` } : undefined"
         @click="openBook(book)"
         @mouseenter="loadBookStats(book)"
       >
@@ -418,7 +420,7 @@ function formatWords(words: number): string {
 .library-view {
   height: 100%;
   overflow-y: auto;
-  background: var(--bg-primary);
+  background: var(--surface-desk); /* 06-modern §2.1：页面根=桌面（卡与纸面浮起） */
   padding: 2.5rem 2.75rem 3rem;
 }
 
@@ -489,12 +491,13 @@ function formatWords(words: number): string {
 
 .book-card {
   position: relative;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-1-shadow);
   padding: var(--space-3) var(--space-3) var(--space-4);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -502,15 +505,23 @@ function formatWords(words: number): string {
   text-align: left;
 }
 
+/* 06-modern §7 首屏 stagger：fade-up 8px 递进（≤6 项；motion-low 毯式归零） */
+.book-card--stagger {
+  animation: book-card-in var(--dur-2) var(--ease-out) backwards;
+}
+@keyframes book-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .book-card:hover {
-  border-color: var(--accent-400);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  border-color: var(--line);
+  box-shadow: var(--elev-2-shadow);
 }
 
 /* 深色主题：黑阴影透明度加深一档，保住 hover 的浮起感 */
 :global(html.dark) .book-card:hover {
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-2-shadow);
 }
 
 /* 封面底：径向柔光 + 经纬细纹 + 内衬描边（哑光纸板质感），
@@ -588,7 +599,6 @@ function formatWords(words: number): string {
 .ghost-card:hover {
   border-color: var(--accent-400);
   background: var(--bg-canvas);
-  transform: translateY(-2px);
 }
 
 .ghost-cover {
@@ -704,7 +714,7 @@ function formatWords(words: number): string {
   padding: 1.5rem;
   width: 100%;
   max-width: 420px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 
 .modal-content h3 {

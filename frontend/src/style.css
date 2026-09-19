@@ -70,12 +70,13 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* ---- §2.3 圆角尺度 ---- */
-  --radius-xs: 0.25rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;       /* 模态统一 */
+  /* ---- §2.3 圆角尺度（06-modern §3.1 re-tier：6/8/12/16/20 单点改值，394 处消费自动升档；
+       编辑器内行内标记不升档——.ghost-draft/.editor-find-match/.entity-mention 各自就地钉死） ---- */
+  --radius-xs: 0.375rem;   /* 6 */
+  --radius-sm: 0.5rem;     /* 8 */
+  --radius-md: 0.75rem;    /* 12 */
+  --radius-lg: 1rem;       /* 16 */
+  --radius-xl: 1.25rem;    /* 20 模态统一 */
   --radius-pill: 999px;
 
   /* ---- §2.5 语义状态色八件套（前景/背景成对，浅深双主题） ---- */
@@ -154,14 +155,24 @@
   --shadow-lg: 0 12px 32px rgba(18, 38, 63, 0.12);
   --shadow-paper: 0 8px 20px rgba(18, 38, 63, 0.06);
 
-  /* ===== 表面阶梯（P0 alias 期：映射现值，P1 按主题调值；
-     05-visual-modernization-plan §7.1——var() 别名只在 :root 声明一次，
-     主题块/ .dark 覆写底层 --bg-* 即可，此处不得重复声明） ===== */
-  --surface-base: var(--bg-canvas);
-  --surface-sunken: var(--bg-tertiary);
+  /* ===== 表面阶梯（06-modern §2.1 五档角色制——公式引用既有 --bg-*，
+     10 主题块零必改；var() 别名只在 :root 声明一次，主题块/ .dark 覆写
+     底层 --bg-* 即自动透传，此处不得重复声明） ===== */
+  --surface-desk:  color-mix(in srgb, var(--bg-primary) 75%, var(--bg-tertiary) 25%); /* 桌面：页面根/主滚动底 */
+  --surface-panel: var(--bg-secondary);                                               /* 栏/抽屉/面板底 */
+  --surface-card:  var(--bg-canvas);                                                  /* 卡面 */
+  --surface-well:  color-mix(in srgb, var(--bg-canvas) 88%, var(--bg-tertiary) 12%);  /* 卡内凹槽 */
+  --surface-veil:  color-mix(in srgb, var(--bg-elevated) 86%, transparent);           /* 毛玻璃浮层底（z-pop 专用） */
+  --surface-base: var(--surface-panel);   /* 改向（06 §2.1：panel 角色规范名；原 bg-canvas 直连零消费方） */
+  --surface-sunken: var(--surface-well);  /* 改向（4 消费方自动获得凹槽语义） */
   --surface-raised: var(--bg-secondary);
   --surface-overlay: var(--bg-panel);
   --surface-float: var(--bg-elevated);
+  /* ===== 换代 elevation 合成（06-modern §2.4：接触影+环境影，消费既有主题影 token，块零改动） ===== */
+  --elev-1-shadow: var(--shadow-sm);                       /* 静置卡：仅接触影 */
+  --elev-2-shadow: var(--shadow-sm), var(--shadow-md);     /* 浮起：接触+环境 */
+  --elev-3-shadow: var(--shadow-sm), var(--shadow-lg);     /* 悬浮（模态）：接触+远环境 */
+  --hl-top: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent); /* 顶缘受光线（浅档近白面不可见=预期；暗档成立） */
   /* 线阶 */
   --line-faint: color-mix(in srgb, var(--border-color) 55%, transparent);
   --line: var(--border-color);
@@ -198,7 +209,7 @@
   --field-bg: var(--bg-canvas);                                     /* 输入框面 */
   --hover-line: color-mix(in srgb, var(--text-primary) 12%, transparent);
                                                                     /* hover 描边加深档（Linear 式，替代底色块 hover） */
-  --shadow-menu: var(--shadow-md);                                  /* 菜单/popover 统一 elev-2 档 */
+  --shadow-menu: var(--elev-2-shadow);                              /* 菜单/popover 统一 elev-2 档（06-modern §2.4 改向合成影） */
   /* @提及 色（#资产侧同构用 --warn，不另设 token） */
   --mention-char: #1d4ed8;
   --mention-char-bg: color-mix(in srgb, var(--info) 14%, transparent);
@@ -229,6 +240,11 @@
 
 /* 主题 CSS 变量 - 深色主题 */
 :root.dark {
+  /* ===== 换代表面暗档配方（06-modern §2.1：desk 再压深一档；well 改向黑混合——
+     暗档 tertiary 与 canvas 几乎同值，浅档 12% 混不可辨） ===== */
+  --surface-desk: color-mix(in srgb, var(--bg-primary) 94%, #000);
+  --surface-well: color-mix(in srgb, var(--bg-canvas) 92%, #000);
+
   /* 背景色 - 暖深色（深牛皮纸感） */
   --bg-primary: #1a1815;
   --bg-secondary: #292724;
@@ -520,16 +536,7 @@ textarea,
 /* ====== 全局交互动效 ====== */
 
 /* 主按钮微交互 */
-.btn-primary {
-  transition: all var(--dur-3) var(--ease-out);
-}
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-500) 20%, transparent);
-}
-.btn-primary:active {
-  transform: scale(0.98) translateY(0);
-}
+/* 06-modern §6.3：.btn-primary 旧 hover 浮起/落影段退役——立体规格收编 .btn-primary-instrument */
 
 /* 卡片悬停效果（06 评审点 4 拍板：N2 去 translateY 抬升，改「阴影档提升+描边加深」——
    仪器式克制，位移 hover 与本语言冲突；motion-low 毯式覆盖不变） */
@@ -537,16 +544,22 @@ textarea,
   transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
 }
 .card-hover:hover {
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elev-2-shadow);
   border-color: var(--hover-line);
 }
 
-/* 模态框进出动画 */
+/* 模态框进出动画（2026-09-17 all→白名单：防误动画布局属性，合成器只管 opacity/transform） */
 .modal-enter-active {
-  transition: all var(--dur-3) var(--ease-out);
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+.modal-enter-active .modal-content {
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out);
 }
 .modal-leave-active {
-  transition: all var(--dur-3) var(--ease-in);
+  transition: opacity var(--dur-3) var(--ease-in);
+}
+.modal-leave-active .modal-content {
+  transition: transform var(--dur-3) var(--ease-in), opacity var(--dur-3) var(--ease-in);
 }
 .modal-enter-from {
   opacity: 0;
@@ -565,7 +578,7 @@ textarea,
 
 /* 模态内容过渡 */
 .modal-content {
-  transition: all var(--dur-3) var(--ease-out);
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out);
 }
 
 /* 淡入动画（用于标签页内容切换） */
@@ -614,6 +627,11 @@ textarea,
 .ghost-draft--mint {
   background-color: var(--mint-soft);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--mint) 12%, transparent);
+  /* 03 下一阶段 M3 边界轻增强（边界虚线方案）：还是文字，但边界一眼可辨——
+     底色光环只勾勒色块，点线勾出「这一段是幽灵」的文字级边界 */
+  text-decoration: underline dotted color-mix(in srgb, var(--mint) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
 }
 
 .ghost-draft--amber {
@@ -625,6 +643,14 @@ textarea,
 @keyframes ghost-draft-breathe {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.25); }
+}
+
+/* 03 下一阶段 M3：转正后幽灵段的「AI 来源·未审」细虚线标记（= 书签可视化，
+   GhostTrack Decoration 注 class；持续到作者首次编辑该段——碰过即消） */
+.ghost-unreviewed {
+  text-decoration: underline dashed color-mix(in srgb, var(--mint) 40%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
 }
 
 /* ============================================================
@@ -686,17 +712,107 @@ textarea,
   z-index: var(--z-pop);
   width: 320px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   background-color: var(--bg-elevated);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   padding: 10px;
 }
+
+/* 问书手势胶囊（04 下一阶段：行间 ?? → 只读浅字答案，Esc 蒸发不进正文） */
+.ask-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px dashed var(--line);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ask-note__icon {
+  color: var(--accent-500);
+  font-weight: 600;
+}
+
+.ask-note-pop {
+  position: fixed;
+  z-index: var(--z-pop);
+  width: 360px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-faint);
+  background-color: var(--bg-elevated);
+  box-shadow: var(--elev-3-shadow);
+  padding: 10px;
+}
+
+.ask-note-pop__input {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  padding: 8px;
+}
+
+.ask-note-pop__input:focus {
+  outline: none;
+  border-color: var(--accent-500);
+}
+
+.ask-note-pop__hint {
+  margin: 6px 2px 2px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ask-note-pop__loading {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 8px 4px;
+}
+
+/* 幽灵式浅字只读答案：与幽灵草稿同视觉语言，但无采纳语义 */
+.ask-note-pop__answer {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  padding: 4px 2px 6px;
+}
+
+.ask-note-pop__sources {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px;
+}
+
+.ask-note-pop__source {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--accent-500);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 1px 2px;
+  text-align: left;
+}
+
+.ask-note-pop__source:hover {
+  text-decoration: underline;
+}
+
 
 .outline-note-pop__input {
   width: 100%;
   resize: vertical;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -723,7 +839,7 @@ textarea,
 
 .outline-note-pop__btn {
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   background: transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -888,7 +1004,9 @@ textarea,
   min-width: 180px;
   max-width: 300px;
   border-radius: var(--radius-md);
-  background: var(--bg-canvas, #fefdfb);
+  background: var(--surface-veil);      /* 06-modern §6.2：悬浮于稿纸上的毛玻璃小卡 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   padding: 4px;
 }
 
@@ -1010,6 +1128,14 @@ textarea,
   color: var(--text-secondary);
   line-height: var(--lh-normal);
 }
+/* 组眉标：栏内小组标题（列头之下的次级分组名），比 sec-title 低一档
+   （文风页重设计 2026-09-17：替代组件内 15px 伪 sec-title） */
+.style-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--text-muted);
+}
 
 /* ---- §5.2 prefers-reduced-motion：毯式灭一切动效（漏网=静态的安全失败方向） ---- */
 @media (prefers-reduced-motion: reduce) {
@@ -1068,7 +1194,7 @@ textarea,
   max-width: 44vw;
   z-index: 85;
   background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
+  border-left: 1px solid var(--line-faint);
   /* 04 §A2-3 多层纸叠影：-4px 硬偏移=画布侧露出下层纸错边，叠加主题大影 */
   box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg);
   overflow: hidden;
@@ -1109,7 +1235,7 @@ textarea,
   align-items: center;
   gap: var(--space-2);
   background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-left: none;
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   color: var(--text-muted);
@@ -1137,8 +1263,9 @@ textarea,
   width: 320px;
   max-width: 86vw;
   z-index: var(--z-drawer);
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
+  background: var(--surface-panel);
+  background-image: var(--paper-texture); /* 06-modern §4.3：文房件纸纹（外观设置控制，默认 none） */
+  border-right: 1px solid var(--line-faint);
   /* 04 §A2-3 多层纸叠影（镜像：右缘抽出，下层纸露左缘） */
   box-shadow: 4px 0 0 -1px var(--paper-edge), var(--shadow-lg);
   display: flex;
@@ -1170,7 +1297,7 @@ textarea,
   gap: 2px;
   padding: var(--space-2) 0;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-right: none;
   border-radius: var(--radius-lg) 0 0 var(--radius-lg);
   z-index: var(--z-page-chrome);
@@ -1290,7 +1417,7 @@ textarea,
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
 }
 /* 标准卡：样本卡/实体卡/章卡（阴影/边框收编 .elev-1 规则组；
    N2 §3.7：padding 16→12、radius-lg→radius-md 仪器密度档） */
@@ -1352,11 +1479,14 @@ textarea,
    组件收编规则=仅当现有 box-shadow 值与档 token 值逐字相同且已有同色边框才换类，
    其余留 P1） ---- */
 .elev-0 { box-shadow: none; }
-.elev-1, .card-std { box-shadow: var(--shadow-sm); border: 1px solid var(--line); }
-.elev-2, .mention-popup { box-shadow: var(--shadow-md); border: 1px solid var(--line); }
-.elev-3 { box-shadow: var(--shadow-lg); border: 1px solid var(--line-strong); }
-/* P1 §8.3：暗档 elev-3 顶部 1px 内高光——浮层「被台下灯照亮」的上缘 */
-.dark .elev-3 { box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+.elev-1, .card-std { box-shadow: var(--elev-1-shadow); border: 1px solid var(--line-faint); }
+.elev-2, .mention-popup { box-shadow: var(--elev-2-shadow); border: 1px solid var(--line-faint); }
+.elev-3 { box-shadow: var(--elev-3-shadow), var(--hl-top); border: 1px solid var(--line-strong); }
+/* P1 §8.3 暗档 elev-3 内高光已并入 --hl-top（06-modern §2.4 合成式，避免双写） */
+
+/* ---- 按压重量感（06-modern §7：控件有「重量」的第一来源；挂 .press 即得） ---- */
+.press { transition: transform var(--dur-1) var(--ease-out); }
+.press:active { transform: scale(0.98); }
 
 /* ---- 世界速记模态族 .qen-*（05 §7.6 双份合一：共享样式单一事实源。
    workspace/world 两份 QuickEventNote 脚本各自保留（props 已分化），样式统一收此；
@@ -1377,9 +1507,9 @@ textarea,
   width: 460px;
   max-width: calc(100vw - 32px);
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   padding: 0.8rem 0.9rem;
 }
 .qen-head {
@@ -1636,14 +1766,14 @@ textarea,
   background: var(--surface-overlay);
   border: 1px solid var(--accent-500);
   border-radius: 999px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   font-size: var(--text-sm);
   color: var(--text-primary);
   max-width: calc(100vw - 48px);
 }
 .qen-pickbar-cancel {
   background: none;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -1674,9 +1804,9 @@ textarea,
   gap: 0.7rem;
   padding: 0.45rem 0.8rem;
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums; /* N3 §5.3：胶囊时刻/计数数字对齐 */
   color: var(--text-primary);
@@ -1733,11 +1863,16 @@ textarea,
   cursor: pointer;
   transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
+.btn-primary-instrument {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent),
+              0 1px 2px color-mix(in srgb, var(--accent-500) 28%, transparent);
+}
 .btn-primary-instrument:hover:not(:disabled) {
   background: var(--accent-600);
-  box-shadow: var(--glow-accent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 25%, transparent), var(--glow-accent);
 }
 .btn-primary-instrument:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-600) 92%, #000);
   transform: scale(0.98);
 }
 .btn-primary-instrument:disabled {
@@ -1777,6 +1912,15 @@ textarea,
 .btn-ghost:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.btn-ghost--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.btn-ghost--danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 /* ghost 紧凑档：图标旁小钮/行内次要钮（N2 §3.1 补 family） */
 .btn-ghost--sm {
@@ -1890,8 +2034,8 @@ textarea.field {
 .menu-shell {
   padding: 4px;
   border-radius: var(--radius-md);
-  background: var(--bg-canvas);
-  border: 1px solid var(--line);
+  background: var(--surface-float); /* 06-modern §6.2：浮层=float 面（禁 blur——高频密文字） */
+  border: 1px solid var(--line-faint);
   box-shadow: var(--shadow-menu);
   animation: menu-pop var(--dur-2) var(--ease-out);
 }

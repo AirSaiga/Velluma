@@ -275,7 +275,7 @@ const emit = defineEmits<{
   font-weight: 500;
   background: var(--bg-canvas);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--dur-2) var(--ease-out);

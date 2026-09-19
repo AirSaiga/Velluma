@@ -199,7 +199,7 @@ function closeModal() {
   padding: 8px 12px;
   border-radius: var(--radius-lg);
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   font-size: var(--text-xs);
   line-height: var(--lh-normal);
   color: var(--text-primary);
@@ -232,11 +232,11 @@ function closeModal() {
 .im-card {
   padding: var(--space-4);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   transition: box-shadow var(--dur-3) var(--ease-out);
 }
-.im-card:hover { box-shadow: var(--shadow-md); }
+.im-card:hover { box-shadow: var(--elev-2-shadow); }
 .im-title {
   font-size: var(--text-sm);
   font-weight: 600;
@@ -266,7 +266,7 @@ function closeModal() {
 .im-apply:hover { background: var(--accent-600); }
 .im-secondary {
   padding: 6px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   background: var(--bg-secondary);
   color: var(--text-secondary);

@@ -487,7 +487,7 @@ function forwardWheel(e: WheelEvent) {
   bottom: 0;
   width: 232px;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--line-faint);
   box-shadow: 12px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 覆态读卡同款纸叠影 */
   overflow: hidden;
   cursor: default;
@@ -640,7 +640,7 @@ function forwardWheel(e: WheelEvent) {
   border: 1px solid color-mix(in srgb, var(--k, var(--border-color)) 35%, transparent);
   border-radius: var(--radius-md);
   padding: 7px 9px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-1-shadow);
   margin-bottom: 6px;
 }
 .hint-card__head {

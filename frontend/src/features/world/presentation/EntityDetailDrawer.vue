@@ -580,7 +580,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
@@ -640,7 +640,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-vis {
   flex-shrink: 0;
   padding: 3px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 9999px;
   background: var(--bg-canvas);
   color: var(--text-muted);
@@ -713,7 +713,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   width: 12px;
   height: 12px;
   border-radius: 9999px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   background: var(--bg-canvas);
   cursor: pointer;
   padding: 0;
@@ -801,7 +801,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -821,7 +821,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 .edd-sec {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .edd-sec-title {
   font-size: var(--text-xs);
@@ -905,7 +905,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   width: 100%;
   box-sizing: border-box;
   padding: 7px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -976,7 +976,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   justify-content: space-between;
   gap: 8px;
   padding: 6px 9px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -1002,7 +1002,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   gap: 6px;
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .edd-act {
   flex: 1;
@@ -1011,7 +1011,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   justify-content: center;
   gap: 5px;
   padding: 7px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -1047,7 +1047,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
   margin-top: 8px;
 }
 .edd-canon-vis-btn {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
   background: none;
   font-size: var(--text-xs);
@@ -1074,7 +1074,7 @@ const eventLabel = (ev: WorldEvent) => eventDisplayName(ev)
 }
 .edd-canon-field textarea,
 .edd-canon-input {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: transparent;
   font-size: var(--text-xs);

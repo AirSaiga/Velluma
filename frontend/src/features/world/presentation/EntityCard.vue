@@ -83,7 +83,7 @@ function save() {
   padding: 5px 8px;
   min-height: 32px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   transition: all 0.15s ease-out;
 }
@@ -92,8 +92,7 @@ function save() {
 }
 .entity-card:hover {
   border-color: var(--accent-500);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elev-2-shadow);
 }
 .ec-dot {
   width: 8px;

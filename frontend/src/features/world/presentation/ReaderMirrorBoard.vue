@@ -375,7 +375,7 @@ watch(() => props.bookId, loadData)
 .btn-mini {
   padding: 0.25rem 0.625rem;
   font-size: var(--text-xs);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   background: var(--bg-secondary);
   border-radius: var(--radius-xs);
   cursor: pointer;
@@ -399,7 +399,7 @@ watch(() => props.bookId, loadData)
 }
 .input {
   padding: 0.375rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   font-size: 0.75rem;
   background: var(--bg-primary);
@@ -499,7 +499,7 @@ watch(() => props.bookId, loadData)
 }
 .empty.error { color: var(--danger); }
 
-.curve-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); }
+.curve-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--line-faint); }
 .curve-section h4 { font-size: 0.75rem; margin: 0 0 0.5rem; color: var(--text-secondary); }
 .curve { display: flex; gap: 2px; height: 60px; align-items: flex-end; }
 .curve-bar {

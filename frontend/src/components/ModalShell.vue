@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * 全局共享模态骨架（原 world/presentation/ModalShell 晋升，00 期 §4.3）：
- * Teleport body + Transition modal + 遮罩 backdrop-blur + z: var(--z-modal)
- * + useFocusTrap + Esc 关闭栈（一次 Esc 只关栈顶；焦点陷阱作栈外兜底）。
+ * Teleport body + Transition modal + 半透明遮罩（blur 已撤，见 .ms-backdrop 注）
+ * + z: var(--z-modal) + useFocusTrap + Esc 关闭栈（一次 Esc 只关栈顶；焦点陷阱
+ * 作栈外兜底）。
  *
  * 消灭三套自绘 overlay（旧 draft-modal/qc-modal/bi-modal z-1000 违规、无焦点陷阱）。
  * 用法：
@@ -112,8 +113,9 @@ onScopeDispose(() => {
   position: fixed;
   inset: 0;
   background: var(--overlay-bg);
-  /* P1 §8.5：仅遮罩层 blur 2px→10px——纸面/滚动区永不上 blur */
-  backdrop-filter: blur(10px);
+  /* 2026-09-17 撤全屏 backdrop-blur：视觉上与纯遮罩不可辨（实测），但每帧
+     全屏高斯模糊是模态开合/背后页面重绘的掉帧大户（GPU 合成也贵，软件渲染
+     下灾难）。纸面/滚动区永不上 blur 的纪律不变，遮罩层现在也不上了。 */
 }
 .ms-card {
   position: relative;
@@ -122,7 +124,7 @@ onScopeDispose(() => {
   /* 弹窗卡自身作 container（00 期 §2.2-C）：内容分区按卡宽而非视口响应 */
   container-type: inline-size;
   max-height: 86vh;
-  background: var(--bg-primary);
+  background: var(--surface-float); /* 06-modern §6.2：浮层不涂桌面色 */
   border-radius: var(--radius-xl);
   overflow: hidden;
 }
@@ -132,7 +134,7 @@ onScopeDispose(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 18px 12px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
 }
 .ms-title {
   font-size: var(--text-md);
@@ -186,7 +188,7 @@ onScopeDispose(() => {
   align-items: center;
   gap: 10px;
   padding: 8px 10px 8px 14px;
-  background: var(--bg-primary);
+  background: var(--surface-float); /* 06-modern §6.2：ms-bar 浮层同规格 */
   border-radius: var(--radius-pill);
   white-space: nowrap;
 }

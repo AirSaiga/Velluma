@@ -537,7 +537,7 @@ async function submit() {
   align-items: center;
   gap: 5px;
   padding: 5px 11px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 9999px;
   background: var(--bg-canvas);
   font-size: var(--text-xs);
@@ -579,7 +579,7 @@ async function submit() {
 .qc-num {
   width: 56px;
   padding: 6px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -595,7 +595,7 @@ async function submit() {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -630,7 +630,7 @@ async function submit() {
 }
 .qc-chip {
   padding: 5px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 9999px;
   background: var(--bg-canvas);
   font-size: var(--text-xs);
@@ -707,7 +707,7 @@ async function submit() {
 /* 悬浮条按钮（收起态） */
 .bar-btn {
   padding: 5px 14px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -739,7 +739,7 @@ async function submit() {
   align-items: center;
   gap: 5px;
   padding: 7px 16px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -760,6 +760,5 @@ async function submit() {
   border-color: var(--accent-600);
   color: var(--bg-canvas);
   box-shadow: var(--glow-accent);
-  transform: translateY(-1px);
 }
 </style>

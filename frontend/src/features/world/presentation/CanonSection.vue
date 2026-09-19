@@ -348,7 +348,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
 /* 复刻 ForeshadowSection 的侧栏语言（其样式 scoped 不可复用） */
 .side-section {
   padding: 0.375rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
 }
 .side-title {
   display: flex;
@@ -408,7 +408,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   gap: 0.375rem;
   padding: 0.375rem 0.5rem;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-left-width: 2.5px;
   border-radius: var(--radius-sm);
 }
@@ -571,7 +571,7 @@ let freshTimer: ReturnType<typeof setTimeout> | null = null
   gap: 4px;
   margin: 6px 0;
   padding: 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .cs-migrate-head {

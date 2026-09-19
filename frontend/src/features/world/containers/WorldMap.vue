@@ -2675,7 +2675,7 @@ path.wm-rel-born {
   width: 100%;
   box-sizing: border-box;
   padding: 7px 9px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -2851,7 +2851,7 @@ path.wm-track-flow {
   flex: 1;
   min-width: 140px;
   padding: 4px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-canvas);
   color: var(--text-primary);

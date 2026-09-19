@@ -204,7 +204,7 @@ function onCustomEsc() {
 :root.dark .spark-dock {
   background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
   backdrop-filter: blur(8px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 
 .spark-dock__row {
@@ -387,7 +387,7 @@ function onCustomEsc() {
   min-width: 0;
   box-sizing: border-box;
   padding: 5px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-primary);

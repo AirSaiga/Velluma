@@ -181,7 +181,7 @@ function handleImport() {
 }
 
 .preview-table {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   overflow: hidden;
   max-height: 340px;
@@ -194,7 +194,7 @@ function handleImport() {
   gap: 0.5rem;
   padding: 0.5rem 0.625rem;
   background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-secondary);
@@ -215,7 +215,7 @@ function handleImport() {
   grid-template-columns: 32px 80px 1fr 160px 60px 100px;
   gap: 0.5rem;
   padding: 0.4375rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   align-items: center;
   font-size: 0.8125rem;
   transition: background var(--dur-1) var(--ease-out);
@@ -249,7 +249,7 @@ function handleImport() {
   padding: 0.25rem 0.375rem;
   font-size: 0.8125rem;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text-primary);
   font-family: inherit;

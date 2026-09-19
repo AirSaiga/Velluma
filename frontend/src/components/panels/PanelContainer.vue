@@ -104,7 +104,7 @@ function handleClose() {
 .panel-header {
   flex-shrink: 0;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   background: var(--bg-primary);
 }
 
@@ -214,7 +214,6 @@ function handleClose() {
 
 .panel-action-btn.variant-primary:hover:not(:disabled) {
   background: var(--accent-600);
-  transform: translateY(-1px);
   box-shadow: var(--glow-accent);
 }
 
@@ -282,7 +281,7 @@ function handleClose() {
 .panel-footer {
   flex-shrink: 0;
   padding: 12px 20px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
   background: var(--bg-secondary);
 }
 </style>

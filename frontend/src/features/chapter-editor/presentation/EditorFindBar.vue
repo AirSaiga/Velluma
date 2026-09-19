@@ -159,7 +159,7 @@ function onReplacementKeydown(e: KeyboardEvent) {
   font-size: var(--text-xs);
   color: var(--text-primary);
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   outline: none;
 }

@@ -4,7 +4,7 @@
  * 心智：图标栏常驻右缘、点击开、一次一格、Esc/外点收。hover 瞥看已退役（拍板 P-2）。
  *
  * 栏位序（自上而下固定）：✨ AI 辅助总开关（带状态点）→ 分隔线 →
- * 打算/此刻/本章/检查（Ctrl+1~4）→ 分隔线 → AI 视角（Ctrl+5）→ ？快捷键一览。
+ * 打算/此刻/检查（Ctrl+1~3）→ 分隔线 → AI 视角（Ctrl+4）→ ？快捷键一览。
  * 检查图标带 6px 朱点 = 完稿报告到达且尚未看过。纯受控件，状态全在容器。
  */
 import Icon from '../../../components/Icon.vue'
@@ -27,7 +27,6 @@ const emit = defineEmits<{
 const SECTION_TABS = [
   { key: 'planning', label: '打算', icon: 'light-bulb' },
   { key: 'now', label: '此刻', icon: 'map' },
-  { key: 'chapter', label: '本章', icon: 'document' },
   { key: 'review', label: '检查', icon: 'check-circle' },
 ] as const
 </script>
@@ -64,7 +63,7 @@ const SECTION_TABS = [
     <button
       class="assist-rail__btn"
       :class="{ 'assist-rail__btn--active': activeTab === 'debug' }"
-      title="AI 视角（Ctrl+5）"
+      title="AI 视角（Ctrl+4）"
       @click="emit('selectTab', 'debug')"
     >
       <Icon name="magnifying-glass" :size="16" />

@@ -1181,7 +1181,6 @@ onMounted(() => {
 .wt-step:hover:not(:disabled) {
   border-color: rgba(74, 68, 56, 0.7);
   background: rgba(255, 252, 245, 0.9);
-  transform: translateY(-1px);
 }
 .wt-step:disabled {
   opacity: 0.35;
@@ -1203,7 +1202,6 @@ onMounted(() => {
 }
 .wt-play:hover {
   background: rgba(74, 68, 56, 1);
-  transform: translateY(-1px);
   box-shadow: 0 3px 10px rgba(96, 72, 36, 0.3);
 }
 .wt-play.playing {
@@ -1571,7 +1569,7 @@ onMounted(() => {
   max-height: 320px;
   overflow-y: auto;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 6px;
@@ -1580,7 +1578,7 @@ onMounted(() => {
   padding: 4px 8px 6px;
   font-size: var(--text-xs);
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   margin-bottom: 4px;
 }
 .wt-ctx-title {
@@ -1720,7 +1718,7 @@ onMounted(() => {
   z-index: 800;
   width: 280px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
@@ -1735,7 +1733,7 @@ onMounted(() => {
   width: 100%;
   box-sizing: border-box;
   padding: 7px 9px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -1755,7 +1753,7 @@ onMounted(() => {
 }
 .wt-fs-select {
   padding: 5px 6px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -1766,7 +1764,7 @@ onMounted(() => {
 .wt-fs-cancel {
   margin-left: auto;
   padding: 5px 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
@@ -1801,7 +1799,7 @@ onMounted(() => {
   z-index: 800;
   width: 260px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
@@ -1847,7 +1845,7 @@ onMounted(() => {
 .wt-arc-act {
   flex: 1;
   padding: 6px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
@@ -1878,7 +1876,7 @@ onMounted(() => {
   z-index: 800;
   width: 236px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   padding: 12px;
@@ -1900,7 +1898,7 @@ onMounted(() => {
 .wt-range-input {
   width: 58px;
   padding: 5px 6px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -1921,7 +1919,7 @@ onMounted(() => {
 .wt-range-reset {
   flex: 1;
   padding: 6px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 8px;
   background: transparent;
   color: var(--text-muted);

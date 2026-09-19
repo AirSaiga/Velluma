@@ -91,7 +91,7 @@ const cancelText = computed(() => props.options?.cancelText ?? '取消')
   font-weight: 500;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--dur-2) var(--ease-out);

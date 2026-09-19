@@ -393,7 +393,7 @@ async function remove() {
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   box-shadow: -4px 0 0 -1px var(--paper-edge), var(--shadow-lg); /* 04 §A2-3 纸叠影 */
   padding: 16px;
@@ -446,7 +446,7 @@ async function remove() {
   font-family: inherit;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   padding: 3px 4px;
   outline: none;
@@ -553,7 +553,7 @@ async function remove() {
 .ctd-sec {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .ctd-sec--first {
   margin-top: 12px;
@@ -585,7 +585,7 @@ async function remove() {
 .ctd-more {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .ctd-more-summary {
   cursor: pointer;
@@ -665,7 +665,7 @@ async function remove() {
   font-family: var(--font-serif);
   font-size: var(--text-xs);
   color: var(--text-muted);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-xs);
   padding: 0 5px;
   letter-spacing: 0.1em;
@@ -750,7 +750,7 @@ async function remove() {
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 6px 10px;
   outline: none;
@@ -777,7 +777,7 @@ async function remove() {
   gap: 6px;
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .ctd-act {
   display: inline-flex;
@@ -785,7 +785,7 @@ async function remove() {
   justify-content: center;
   gap: 5px;
   padding: 7px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -812,7 +812,7 @@ async function remove() {
 .ctd-check {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .ctd-check-list {
   list-style: none;
@@ -833,7 +833,7 @@ async function remove() {
 }
 .ctd-check-input {
   width: 100%;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: transparent;
   font-size: var(--text-xs);

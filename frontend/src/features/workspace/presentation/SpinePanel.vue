@@ -116,18 +116,17 @@ function clearBranch() {
   <section class="spine-panel narrative-stream" :class="{ 'spine-panel--empty': !intentText && !anchors.length && !outlineText }">
     <div class="spine-head">
       <span class="spine-title">叙事流</span>
-      <span class="spine-hint">先定方向，再记节拍——写到哪一拍，AI 就跟到哪</span>
     </div>
 
-    <!-- 🎯 本章方向（主方向锚点 ⇄ spine.intent；「不对」纠正手势在容器意图反推行） -->
+    <!-- 本章方向（主方向锚点 ⇄ spine.intent；「不对」纠正手势在容器意图反推行） -->
     <div class="ns-direction">
-      <label class="ns-tag">🎯 本章方向</label>
+      <label class="ns-tag">本章方向</label>
       <textarea
         class="spine-intent"
         rows="1"
         maxlength="60"
         :value="intentDraft"
-        placeholder="一句话：这一章主要讲什么？（可空，直接开写也行）"
+        placeholder="本章核心意图（一句话）…"
         @input="onIntentInput"
         @blur="commitIntent"
       ></textarea>
@@ -142,13 +141,13 @@ function clearBranch() {
         :class="{ 'spine-chip--dropped': a.status === 'dropped', 'spine-chip--hit': a.status === 'hit', 'spine-chip--flash': highlightAnchorId === a.id, 'spine-chip--branch': !!a.branch }"
         :title="a.branch ? `可能的发展：${a.branch.options.join(' / ')}` : (a.status === 'dropped' ? '已划掉（本章不写了）' : a.status === 'hit' ? '已写到' : a.text)"
       >
-        <span v-if="a.branch" class="spine-chip__branch-mark" title="这条情节你想了几种可能的发展">⚡</span>
+        <span v-if="a.branch" class="spine-chip__branch-mark" title="这条情节你想了几种可能的发展">岔</span>
         <span class="spine-chip__text">{{ a.text }}</span>
         <button
-          class="spine-chip__btn"
+          class="spine-chip__branch-toggle"
           :title="a.branch ? '改改这几种发展' : '还没想好怎么发展？列几种可能'"
           @click="openBranchEditor(a)"
-        >⚡</button>
+        >岔</button>
         <button
           class="spine-chip__btn"
           :title="a.status === 'dropped' ? '恢复' : '划掉（写的过程中决定不写了）'"
@@ -186,13 +185,12 @@ function clearBranch() {
         @keydown.enter.prevent="submitAnchor"
       />
     </div>
-    <p v-if="!anchorFull" class="spine-hint-line">列出来的情节，写到了会自动打勾；AI 续写时也会朝它们使劲</p>
-    <p v-else class="spine-full-hint">最多 5 条——细节留给下面的节拍，这里只记最要紧的</p>
+    <p v-if="anchorFull" class="spine-full-hint">最多 5 条锚点</p>
 
-    <!-- 📝 情节节拍（节拍推进流 ⇄ outline_text；容器侧 500ms 防抖+失焦/唤舱/续写冲刷） -->
+    <!-- 情节节拍（节拍推进流 ⇄ outline_text；容器侧 500ms 防抖+失焦/唤舱/续写冲刷） -->
     <div class="ns-beats">
       <div class="ns-beats-head">
-        <label class="ns-tag">📝 情节节拍</label>
+        <label class="ns-tag">情节节拍</label>
         <span
           v-if="activeBeat"
           class="ns-active-beat"
@@ -203,7 +201,7 @@ function clearBranch() {
         class="ns-beats-input"
         rows="6"
         :value="outlineText"
-        placeholder="这一章具体发生什么，一行一拍（AI 续写贴着还没写的拍走）"
+        placeholder="1. 节拍一&#10;2. 节拍二…"
         @input="(e) => emit('update-outline', (e.target as HTMLTextAreaElement).value)"
         @blur="emit('outline-blur')"
       ></textarea>
@@ -212,7 +210,7 @@ function clearBranch() {
     <!-- AI 建议（D-4：未收下的不落库） -->
     <div class="spine-suggest">
       <button class="spine-suggest__btn" :disabled="suggesting || disabled" @click="emit('suggest')">
-        {{ suggesting ? '思考中…' : '✨ 帮我想想这章怎么走' }}
+        {{ suggesting ? '思考中…' : '谋篇建议' }}
       </button>
       <template v-if="suggestions">
         <div class="spine-suggest__card">
@@ -253,15 +251,11 @@ function clearBranch() {
   font-weight: 600;
   color: var(--text-primary);
 }
-.spine-hint {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
 .spine-intent {
   width: 100%;
   resize: none;
   border: none;
-  border-bottom: 1px dashed var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   background: transparent;
   font-family: var(--font-heading);
   font-size: 0.8125rem;
@@ -271,7 +265,7 @@ function clearBranch() {
 }
 .spine-intent:focus {
   outline: none;
-  border-bottom-color: var(--accent-400);
+  border-bottom-color: var(--gold);
 }
 .spine-anchors {
   display: flex;
@@ -283,7 +277,7 @@ function clearBranch() {
   align-items: center;
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
   font-size: var(--text-xs);
   color: var(--text-primary);
@@ -294,14 +288,31 @@ function clearBranch() {
   text-decoration: line-through;
 }
 .spine-chip--hit {
-  border-color: var(--accent-400);
+  border-color: var(--gold);
 }
 .spine-chip--branch {
   border-color: var(--cinnabar-bright);
 }
-.spine-chip__branch-mark {
-  font-size: var(--text-xs);
+.spine-chip__branch-mark,
+.spine-chip__branch-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  border: 1px solid color-mix(in srgb, var(--cinnabar-bright) 45%, transparent);
+  border-radius: var(--radius-xs);
+  font-size: 0.625rem;
+  line-height: 1;
   color: var(--cinnabar-bright);
+}
+.spine-chip__branch-toggle {
+  cursor: pointer;
+  background: none;
+  padding: 0;
+}
+.spine-chip__branch-toggle:hover {
+  border-color: var(--cinnabar-bright);
 }
 .spine-branch-editor {
   display: flex;
@@ -323,7 +334,7 @@ function clearBranch() {
 .spine-branch-editor__input {
   width: 100%;
   resize: none;
-  border: 1px dashed var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   background: transparent;
   font-size: 0.75rem;
@@ -341,14 +352,14 @@ function clearBranch() {
 }
 .spine-chip--flash {
   animation: spine-flash 0.5s ease 2;
-  border-color: var(--accent-500);
+  border-color: var(--gold);
 }
 @keyframes spine-flash {
   0%, 100% { background: var(--bg-secondary); }
-  50% { background: var(--accent-400); color: var(--bg-canvas); }
+  50% { background: var(--gold); color: var(--bg-canvas); }
 }
 .spine-chip--ghost {
-  border-style: dashed;
+  opacity: 0.8;
   color: var(--text-secondary);
 }
 .spine-chip__btn {
@@ -369,7 +380,7 @@ function clearBranch() {
 }
 .spine-add__input {
   width: 100%;
-  border: 1px dashed var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   background: transparent;
   font-size: var(--text-xs);
@@ -378,21 +389,15 @@ function clearBranch() {
 }
 .spine-add__input:focus {
   outline: none;
-  border-color: var(--accent-400);
+  border-color: var(--gold);
 }
 .spine-full-hint {
   font-size: var(--text-xs);
   color: var(--text-muted);
   margin: 0;
 }
-.spine-hint-line {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  margin: 0;
-  line-height: 1.5;
-}
 .spine-suggest__btn {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -411,7 +416,7 @@ function clearBranch() {
   flex-direction: column;
   gap: 0.375rem;
   padding: 0.5rem;
-  border: 1px solid var(--accent-400);
+  border: 1px solid var(--gold);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
@@ -440,7 +445,7 @@ function clearBranch() {
 /* ===== 第四弹：叙事流合流视觉（单容器/方向行高亮/节拍区无缝衔接） ===== */
 .narrative-stream {
   padding: 0.5rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   background: var(--bg-canvas);
 }
@@ -449,8 +454,8 @@ function clearBranch() {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.375rem 0.5rem;
-  background: color-mix(in srgb, var(--accent-500) 6%, transparent);
-  border-left: 3px solid var(--accent-500);
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+  border-left: 3px solid var(--gold);
   border-radius: var(--radius-sm);
 }
 .ns-tag {
@@ -475,7 +480,7 @@ function clearBranch() {
 }
 .ns-active-beat {
   font-size: var(--text-xs);
-  color: var(--accent-500);
+  color: var(--gold-deep);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -484,7 +489,7 @@ function clearBranch() {
   width: 100%;
   min-height: 96px;
   resize: vertical;
-  border: 1px dashed var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   background: transparent;
   font-size: 0.75rem;
@@ -494,7 +499,6 @@ function clearBranch() {
 }
 .ns-beats-input:focus {
   outline: none;
-  border-color: var(--accent-400);
-  border-style: solid;
+  border-color: var(--gold);
 }
 </style>

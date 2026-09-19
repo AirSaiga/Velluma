@@ -176,9 +176,9 @@ async function remove() {
 .rif {
   width: 300px;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
   padding: 12px;
   font-size: var(--text-sm);
   z-index: 30;
@@ -234,7 +234,7 @@ async function remove() {
 }
 .rif-type {
   padding: 3px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 9999px;
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -254,7 +254,7 @@ async function remove() {
   flex: 1;
   min-width: 0;
   padding: 6px 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-primary);
@@ -293,7 +293,7 @@ async function remove() {
 .rif-seg-btn {
   flex: 1;
   padding: 5px 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);
@@ -327,7 +327,7 @@ async function remove() {
   align-items: center;
   gap: 4px;
   padding: 5px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   background: var(--bg-canvas);
   color: var(--text-secondary);

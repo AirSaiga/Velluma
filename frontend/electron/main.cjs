@@ -9,9 +9,11 @@ const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged
 
 // 白屏事故收口（2026-09-16，真根因=style.css 主题批的 CSS 相对颜色语法
 // `rgb(from color-mix(...))` 在 Electron 28 (Chromium 120) 渲染器上原生崩溃，
-// 已改为预计算 rgba——见 style.css 五主题 .dark 块。以下两处为共存保险，可摘：
-// ① 软渲染：排查期误判 GPU 所加；写作应用无重动画负载，代价可接受。
-app.disableHardwareAcceleration()
+// 已改为预计算 rgba——见 style.css 五主题 .dark 块。以下为共存保险，可摘：
+// ① 软渲染保险已于 2026-09-17 摘除（app.disableHardwareAcceleration()）：
+//    排查期误判 GPU 所加；真根因修复后软件渲染成为全页切换卡顿的主放大器
+//    （Leaflet 画布/路由双树过渡/遮罩层逐帧 CPU 光栅）。若白屏复发，先清
+//    %APPDATA%\velluma 的 GPUCache 再排查，勿直接加回本行。
 
 // ② renderer 观测：Chromium 层 console/崩溃原因写日志文件——renderer 崩溃在
 // Windows 事件日志与 Crashpad 均无记录，此开关是唯一第一手死因来源（本次靠它

@@ -110,7 +110,7 @@ function onPick(card: DirectionCard | null) {
 :root.dark .beat-dock {
   background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
   backdrop-filter: blur(8px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elev-3-shadow);
 }
 
 .beat-dock__title {

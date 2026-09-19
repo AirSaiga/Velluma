@@ -116,7 +116,7 @@ function navigate(item: RailItem) {
   flex-shrink: 0;
   padding: 0.5rem 0.25rem;
   background: var(--bg-tertiary);
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--line-faint);
   overflow: hidden;
 }
 

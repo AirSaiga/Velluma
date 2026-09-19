@@ -120,7 +120,7 @@ const emit = defineEmits<{ close: [] }>()
 .ds-footer {
   flex-shrink: 0;
   padding: 8px 12px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 /* 世界页滚动区统一：暖色细条（Chromium/WebKit） */
 .ds-body::-webkit-scrollbar {

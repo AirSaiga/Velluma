@@ -419,7 +419,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: 999px;
   cursor: pointer;
   transition: all var(--dur-2) var(--ease-out);
@@ -467,7 +467,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   gap: 0.25rem;
   padding: 0.5rem 0.625rem;
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
 }
 .ctx-briefing.is-reloading {
@@ -545,7 +545,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 .ctx-raw {
   margin-top: 0.25rem;
   padding-top: 0.375rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
 }
 .raw-head {
   display: flex;
@@ -611,7 +611,7 @@ function isHot(b: ContextPreviewBlock): boolean {
   font-size: var(--text-xs);
   color: var(--text-muted);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--dur-2) var(--ease-out);
@@ -743,7 +743,7 @@ function isHot(b: ContextPreviewBlock): boolean {
 /* ===== 满块折叠卡 ===== */
 .blk {
   background: var(--bg-canvas);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   padding: 0.375rem 0.625rem;
 }

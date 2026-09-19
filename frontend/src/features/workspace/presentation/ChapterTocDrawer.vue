@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.5rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   flex-shrink: 0;
 }
 
@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.4375rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line);
   font-size: 0.75rem;
   color: var(--text-secondary);
   cursor: pointer;
@@ -234,7 +234,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
   background: var(--bg-tertiary);
   flex-shrink: 0;
 }

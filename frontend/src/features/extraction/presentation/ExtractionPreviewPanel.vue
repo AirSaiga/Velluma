@@ -315,7 +315,7 @@ const roleTypeLabel: Record<string, string> = {
   display: flex;
   gap: 0.25rem;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
   padding-bottom: 0.5rem;
   margin-bottom: 0.5rem;
 }
@@ -395,7 +395,7 @@ const roleTypeLabel: Record<string, string> = {
   display: flex;
   gap: 0.625rem;
   padding: 0.625rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   margin-bottom: 0.375rem;
   cursor: pointer;
@@ -487,7 +487,7 @@ const roleTypeLabel: Record<string, string> = {
   justify-content: flex-end;
   gap: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--line-faint);
   margin-top: 0.5rem;
 }
 

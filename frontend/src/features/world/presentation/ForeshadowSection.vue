@@ -169,7 +169,7 @@ function anchorText(f: Foreshadow): string {
 /* 与 WorldView 侧栏分组同语言（其样式 scoped 不可复用，这里复刻一份精简版） */
 .side-section {
   padding: 0.375rem 0.625rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
 }
 
 .side-title {
@@ -214,7 +214,7 @@ function anchorText(f: Foreshadow): string {
   gap: 0.375rem;
   padding: 0.375rem 0.5rem;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
 }
 

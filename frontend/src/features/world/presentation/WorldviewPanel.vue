@@ -322,7 +322,7 @@ onUnmounted(() => {
   font-family: inherit;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--dur-2) var(--ease-out);
@@ -378,7 +378,7 @@ onUnmounted(() => {
 
 .item-card {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-lg);
   padding: 12px 14px;
   display: flex;
@@ -393,7 +393,7 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   font-family: inherit;
   transition: all var(--dur-3) var(--ease-out);
@@ -411,7 +411,7 @@ onUnmounted(() => {
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   font-family: inherit;
   resize: vertical;
@@ -466,7 +466,7 @@ onUnmounted(() => {
   font-family: inherit;
   color: var(--text-muted);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--dur-3) var(--ease-out);
@@ -495,7 +495,7 @@ onUnmounted(() => {
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   resize: vertical;
   min-height: 300px;

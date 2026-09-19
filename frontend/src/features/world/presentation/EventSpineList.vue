@@ -104,7 +104,7 @@ const groups = computed<SpineGroup[]>(() => {
   gap: 6px;
   padding: 6px 2px 5px;
   background: var(--bg-canvas);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
 }
 .esp-year-label {
   font-size: var(--text-xs);

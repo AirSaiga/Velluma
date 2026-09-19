@@ -56,8 +56,13 @@ export default {
         line: 'var(--line)',
         'line-faint': 'var(--line-faint)',
         'line-strong': 'var(--line-strong)',
-        // 表面阶梯五档（P0 alias 期映射现值，P1 按主题调值）
+        // 表面阶梯（06-modern §2.1 五档角色制 + 既有别名，全部 :root 公式一次声明）
         surface: {
+          desk: 'var(--surface-desk)',
+          panel: 'var(--surface-panel)',
+          card: 'var(--surface-card)',
+          well: 'var(--surface-well)',
+          veil: 'var(--surface-veil)',
           base: 'var(--surface-base)',
           sunken: 'var(--surface-sunken)',
           raised: 'var(--surface-raised)',
@@ -70,11 +75,11 @@ export default {
         heading: ['var(--font-heading)'],
         serif: ['var(--font-heading)'],
       },
-      // Elevation 三档（05 §7.2；与 style.css .elev-1/2/3 同源，走 shadow token 即主题自适应）
+      // Elevation 三档（06-modern §2.4 双层合成——接触影+环境影，与 style.css .elev-1/2/3 同源）
       boxShadow: {
-        e1: 'var(--shadow-sm)',
-        e2: 'var(--shadow-md)',
-        e3: 'var(--shadow-lg)',
+        e1: 'var(--elev-1-shadow)',
+        e2: 'var(--elev-2-shadow)',
+        e3: 'var(--elev-3-shadow)',
       },
     },
   },

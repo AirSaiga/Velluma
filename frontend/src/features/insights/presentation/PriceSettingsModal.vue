@@ -222,7 +222,7 @@ async function save() {
   padding: 4px 6px;
   font-size: var(--text-xs);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text-primary);
   min-width: 0;
@@ -292,7 +292,7 @@ async function save() {
   font-size: var(--text-xs);
   background: var(--bg-canvas);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-xs);
   cursor: pointer;
 }

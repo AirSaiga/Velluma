@@ -94,14 +94,14 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 3px;
   background: var(--surface-sunken);
-  border-radius: var(--radius-lg);
+  border-radius: 999px; /* 06-modern §6.5：轨道 pill 钉死（radius-lg 升 16 后非全圆） */
 }
 .seg-pill__thumb {
   position: absolute;
   top: 3px;
   bottom: 3px;
   left: 0;
-  border-radius: var(--radius-lg);
+  border-radius: 999px; /* 同上：thumb 钉全圆 */
   background: var(--surface-float);
   /* transform/width 双过渡，滑动 thumb（§8.7 规格） */
   transition: transform var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out);
