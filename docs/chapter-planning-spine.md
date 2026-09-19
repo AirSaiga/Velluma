@@ -21,7 +21,8 @@
 
 **已存在的相邻设施**（本设计在其上生长，不另起炉灶）：
 
-- 章节大纲（自由文本）：副驾「打算」tab 的大纲编辑卡可编辑（2026-08-22 副驾
+- 章节大纲（自由文本）：副驾「打算」分区叙事引力流面板的「情节节拍」区可编辑
+  （2026-09-14 第四弹前为独立「大纲编辑卡」，沿革见文末修订注；2026-08-22 副驾
   重排前旧称「章节」tab），心跳请求已携带
   `has_outline`/`outline_text`，是点火卡的唯一燃料；
 - 点火卡（`IgnitionCard.vue`）：空章 + 无生成 + 无幽灵时出现在画布中央，
@@ -166,6 +167,8 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 | 端点 | 说明 |
 |---|---|
 | `PATCH /api/chapters/{id}/adaptive/spine` | 存/改脉络（轻量，不进正文版本历史，不触发 world-refresh） |
+| `GET /api/chapters/{id}/adaptive/spine` | 单章读（NULL → `{"spine": null}`，前端静默缺席）；新建章增量补拉仍走此路 |
+| `GET /api/books/{id}/adaptive/spines` | 书级批量读（2026-09-17）：一把 SELECT 全书非空 spine，消费方唯一=大纲板 useStoryline——此前逐章 GET 是 N 请求风暴；无 spine 的书返回空映射不 404 |
 | `POST /api/chapters/{id}/adaptive/spine-suggest` | 1×creative 建议，**不落库**；REASONING_DISABLED 不适用（要质量，走 creative 默认）；max_tokens = `budget.SPINE_SUGGEST_MAX_TOKENS`（2400，2026-08-25 由 800 上调——800 曾被 MiMo 隐藏思考整个烧光返回空）；空输出兜底重试一次（关思考小预算再试，仍空则按空建议返回，契约不变） |
 
 ### 4.2 心跳集成（`adaptive.py` heartbeat）
@@ -262,3 +265,9 @@ M4 的开启条件：P0 埋点显示 spine 覆盖率 ≥50% 且走向卡采纳�
   绝不引入 LLM 判定（成本+延迟换不来信任）。
 - **spine-suggest 质量依赖大纲**：无大纲无世界数据的新书建议必然空泛——此时按钮
   文案降级为「先写两句大纲，建议才靠谱」（点火卡无大纲态的同款诚实）。
+
+---
+
+## 修订注（2026-09-14 第四弹 UI 单轨合流）
+
+本章 M1-M3 数据契约（`chapters.spine` JSONB · `GET/PATCH /adaptive/spine` · spine-suggest · 锚点进度判定 · 走向卡 ⚑ 挂锚）**不变**；UI 层已按路径 C 单轨合流（edce677）——副驾「打算」分区重构为**叙事引力流面板**（SpinePanel：🎯 方向行=spine.intent 高亮锚 + 锚点 chips + 📝 情节节拍区=outline_text 迁入，旧「大纲编辑卡」删除），活跃节拍微标「▶ 续写正朝这拍走」走新端点 `GET /adaptive/active-beats`（与 stitch/dock 同一份 `outline_nearby` 计算，纯算法），Tab/Space 入口前经 `velluma:flush-planning` 事件强制冲刷 + 心跳上行携带双保险，节拍区 blur 冲刷。第四弹唯一权威：`docs/spine-outline-merge-feasibility.md`。

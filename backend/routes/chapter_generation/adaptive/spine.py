@@ -31,6 +31,8 @@ from .schemas import SpineAnchor, SpineUpdateRequest
 logger = get_runtime_logger(__name__)
 
 router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
+# 书级批量路由（2026-09-17）：大纲板逐章拉 spine 是 N 请求风暴，同一张表一把查
+book_router = APIRouter(prefix="/api/books", tags=["adaptive"])
 
 
 # ============================================================
@@ -123,6 +125,24 @@ async def get_spine(chapter_id: str, db: AsyncSession = Depends(get_db)):
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     return {"spine": chapter.spine}
+
+
+@book_router.get("/{book_id}/adaptive/spines")
+async def get_book_spines(book_id: str, db: AsyncSession = Depends(get_db)):
+    """一本书全部章的 spine 批量读（2026-09-17，消费方唯一=大纲板 useStoryline）。
+
+    此前进大纲页对每章发一个 GET spine（N 请求排队）；spine 是 chapters.spine
+    单列 JSONB，一把 SELECT 即可。只返回 spine 非空的章（无脉络章前端按缺席
+    处理，与单章端点 null 语义合流）；无 spine 的书返回空映射不 404（D-3）。
+    """
+    result = await db.execute(
+        select(Chapter.id, Chapter.spine).where(Chapter.book_id == book_id)
+    )
+    spines: dict[str, dict] = {}
+    for chapter_id, spine in result.all():
+        if spine:
+            spines[str(chapter_id)] = spine
+    return {"book_id": book_id, "spines": spines}
 
 
 @router.get("/{chapter_id}/adaptive/active-beats")

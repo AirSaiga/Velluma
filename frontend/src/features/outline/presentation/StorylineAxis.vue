@@ -219,7 +219,7 @@ function tooltipFor(ch: AxisChapter): string {
 <style scoped>
 .axis-wrap {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem 0.25rem;
   margin-bottom: 1rem;

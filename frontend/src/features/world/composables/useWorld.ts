@@ -192,13 +192,20 @@ function jumpToTime(t: number) {
 }
 
 async function load(bookId: string) {
+  // 重置视图状态只在真正切书时做（2026-09-17）：世界页无 keep-alive，每次进入
+  // 都调 load()——同书重入若照旧清零再由服务端快照恢复，computeWorldState 事件
+  // 回放跑两遍、时间轴全量重建两遍，是重进世界页卡顿的一环。数据仍全量重拉
+  // （新鲜度不回退），只是不再推翻内存里同书的视图状态（时间游标/视野窗口）。
+  const bookChanged = loadedBookId.value !== bookId
   loadedBookId.value = bookId
-  viewReadyBookId = null
-  // 默认值先落地（服务端快照到达前不渲染上一本书的旧状态）；?time= 深链经
-  // pendingDeepLinkTime 在 load 末尾覆盖恢复值——深链优先
-  currentTime.value = 0
-  timelineRange.value = null
-  clearHistory() // 切书清空 undo 栈（避免指向被覆盖的旧数据）
+  if (bookChanged) {
+    viewReadyBookId = null
+    // 默认值先落地（服务端快照到达前不渲染上一本书的旧状态）；?time= 深链经
+    // pendingDeepLinkTime 在 load 末尾覆盖恢复值——深链优先
+    currentTime.value = 0
+    timelineRange.value = null
+  }
+  clearHistory() // 每次 load 都清 undo 栈：重拉会整包替换 refs，旧快照指向被覆盖数据
   const [locs, evs, ents, rels, chapters, ledgers, layers, strokes, view] = await Promise.all([
     worldApi.listLocations(bookId),
     worldApi.listEvents(bookId),

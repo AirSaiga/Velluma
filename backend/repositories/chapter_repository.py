@@ -49,6 +49,19 @@ class ChapterRepository(BaseRepository[Chapter]):
             spec=spec
         )
 
+    async def list_entities_by_book(self, book_id: UUID):
+        """
+        一本书全部章节的实体关联（单次 JOIN）：供前端 loadCurrentBookData 批量取
+        各章 character_ids——替代逐章 list_entities 的 N+1 请求风暴
+        （章数多的书进任何页都要发 N 个 GET，浏览器 HTTP/1.1 每域 6 连接排队）。
+        """
+        spec = (
+            QuerySpec.create(ChapterEntity)
+            .join(Chapter)
+            .where(Chapter.book_id == book_id)
+        )
+        return await self.find_all(spec=spec)
+
     async def list_entities_with_character(self, chapter_id: UUID):
         """
         查询章节关联实体并预加载角色详情：避免 N+1 查询问题。

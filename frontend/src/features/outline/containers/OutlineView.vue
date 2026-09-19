@@ -266,7 +266,7 @@ async function newChapter() {
 .outline-view {
   height: 100%;
   overflow-y: auto;
-  background: var(--bg-primary);
+  background: var(--surface-desk); /* 06-modern §2.1：页面根=桌面 */
   padding: var(--space-8) var(--space-10);
 }
 

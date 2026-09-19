@@ -113,6 +113,23 @@ async def get_chapter_entities(chapter_id: UUID, repo: ChapterRepository = Depen
     return {"entity_ids": [str(e.entity_id) for e in entities]}
 
 
+@router.get("/books/{book_id}/chapter-entity-ids")
+async def get_book_chapter_entity_ids(book_id: UUID, repo: ChapterRepository = Depends(get_chapter_repository)):
+    """业务目的：一本书全部章节的角色关联 ID 映射（批量版，2026-09-17）。
+
+    消费方唯一：前端 useAppStore.loadCurrentBookData——此前对每章发一个
+    GET /chapters/{id}/entities（N+1 请求风暴，章多的书切页显著变慢）。
+
+    返回形状：{entity_ids_by_chapter: {chapter_id: [entity_id, ...]}}；
+    无关联的书返回空映射（与单章端点「无关联=空列表」语义一致，不 404）。
+    """
+    entities = await repo.list_entities_by_book(book_id)
+    by_chapter: dict[str, list[str]] = {}
+    for e in entities:
+        by_chapter.setdefault(str(e.chapter_id), []).append(str(e.entity_id))
+    return {"book_id": str(book_id), "entity_ids_by_chapter": by_chapter}
+
+
 @router.post("/chapters/{chapter_id}/entities", response_model=ChapterResponse)
 async def link_entity_to_chapter(
     chapter_id: UUID,

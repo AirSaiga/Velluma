@@ -31,7 +31,8 @@ function toStorylineLedger(l: PlotLedgerEntry): StorylineLedger {
  *
  * 四路全并行、逐路降级（任一路失败不影响其余——张力曲线与真相多为空数据，
  * 不是错误）；带过期响应守卫（快速切书旧响应整包丢弃，与 useWorld 同纪律）。
- * spine 无批量端点（章列表响应不含 spine 列），逐章 GET 并行拉取，单章失败静默 null。
+ * spine 走书级批量端点（GET /books/{id}/adaptive/spines，2026-09-17 前
+ * 逐章并行 GET 是 N 请求风暴）；新建章的增量补拉仍逐章 GET，单章失败静默 null。
  */
 export function useStoryline(bookId: Ref<string | null>, chapterIds: Ref<string[]>) {
   /** 章ID → spine（null = 无打算/加载失败，卡片按缺席处理） */
@@ -86,7 +87,14 @@ export function useStoryline(bookId: Ref<string | null>, chapterIds: Ref<string[
         .listNodes(bid)
         .then((ns) => groupReveals(ns))
         .catch(() => new Map<number, string[]>()),
-      loadSpines(chapterIds.value, base),
+      // 书级批量拉 spine（2026-09-17）：替代逐章 GET 的 N 请求风暴（spine 是
+      // chapters.spine 单列，一把 SELECT 即可）。失败降级沿用旧缓存；无脉络章
+      // 不在返回里=缺席，消费侧 `spines[c.id] ?? null` 与 null 同渲染。新建章
+      // 的增量补拉仍走 loadSpines 逐章路径（见下 watch）。
+      adaptiveApi
+        .getSpinesByBook(bid)
+        .then((r) => r.spines as Record<string, ChapterSpine | null>)
+        .catch(() => base),
     ])
     // 过期守卫：加载期间切书，旧响应整包丢弃
     if (bookId.value !== bid) return

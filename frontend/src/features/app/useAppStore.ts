@@ -193,16 +193,20 @@ function createAppStore(): AppStore {
       ])
       characters.value = chars
       relationships.value = rels
-      const chaptersWithEntities = await Promise.all(
-        chaps.map(async (chapter: Chapter) => {
-          try {
-            const entityData = await chapterApi.getEntities(chapter.id)
-            return { ...chapter, character_ids: entityData.entity_ids || [] }
-          } catch {
-            return { ...chapter, character_ids: [] }
-          }
-        })
-      )
+      // 书级批量取各章角色关联（2026-09-17）：此前对每章发一个 GET（N+1 请求
+      // 风暴——章多的书每次 loadCurrentBookData 都要排 N 个请求，浏览器 HTTP/1.1
+      // 每域 6 连接排队，切页显著变慢）。失败降级全空（与原逐章 catch 同语义）。
+      let entityIdsByChapter: Record<string, string[]> = {}
+      try {
+        const batch = await chapterApi.getBookChapterEntityIds(currentBookId.value)
+        entityIdsByChapter = batch.entity_ids_by_chapter || {}
+      } catch {
+        entityIdsByChapter = {}
+      }
+      const chaptersWithEntities = chaps.map((chapter: Chapter) => ({
+        ...chapter,
+        character_ids: entityIdsByChapter[chapter.id] || [],
+      }))
       chapters.value = chaptersWithEntities
       // 08 期 §4.4 态A：进写作台的第一眼=纸面目录页（TocPage），不再默认选第一章——
       // 「选哪章」这个前置任务在纸上完成。仅兜底失效引用（章节被删后残留 id）；

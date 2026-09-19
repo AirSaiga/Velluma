@@ -222,7 +222,7 @@ function anchorChipClass(done: number, total: number): string {
   width: 1.625rem;
   height: 1.625rem;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   cursor: pointer;
@@ -248,7 +248,7 @@ function anchorChipClass(done: number, total: number): string {
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   padding: 0.5rem 0.625rem;
   box-sizing: border-box;
