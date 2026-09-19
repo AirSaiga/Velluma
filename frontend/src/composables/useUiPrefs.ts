@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'velluma_ui_prefs_v1'
 
+import { ref } from 'vue'
+
 const DEFAULT_PREFS = {
   version: 1,
   splitSizes: [22, 56, 22],
@@ -11,9 +13,24 @@ const DEFAULT_PREFS = {
   zenMode: true,
   worldSliceCollapsed: false,
   worldReaderView: false,
+  /** 开章卡（01 下一阶段）：空章「打算」页顶部的四面镜子；关掉=写作体验与现状一致 */
+  openingCardEnabled: true,
 }
 
 export type UiPrefs = typeof DEFAULT_PREFS
+
+/**
+ * 开章卡开关的响应式镜像（GUI 交叉验证缺陷 #1a 修复）：localStorage 读取不具
+ * 响应性，computed 直接读 loadUiPrefs() 在切换开关后不会失效——卡要等切章/
+ * 字数变化才消失，违反设计稿「关掉即整块消失」。唯一写口=setOpeningCardEnabled
+ * （同时写镜像与存储）；消费面（InspectorPanel）读 ref 即时生效。
+ */
+export const openingCardEnabled = ref(loadUiPrefs().openingCardEnabled)
+
+export function setOpeningCardEnabled(v: boolean): void {
+  openingCardEnabled.value = v
+  saveUiPrefs({ ...loadUiPrefs(), openingCardEnabled: v })
+}
 
 export function loadUiPrefs(): UiPrefs {
   try {

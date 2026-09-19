@@ -154,8 +154,9 @@ async def finish(
         from backend.models import Book
         from backend.repositories import StyleCardRepository
         from backend.services.utils.html_text import html_to_plain
-        from backend.services.style.prohibitions import load_prohibition_set
+        from backend.services.style.prohibitions import ProhibitionSet, load_prohibition_set
         from backend.services.style.semantic_match import semantic_scan_text
+        from backend.services.style.texture_contracts import texture_enforcement_entries
 
         chapter = await db.get(Chapter, str(chapter_id))
         if chapter is not None:
@@ -167,6 +168,12 @@ async def finish(
                     chapter.book_id, chapter.id,
                 ),
             )
+            # 质感契约执法词表旁路合并（2026-09 收编批，与 stitch 洗层同口径）：
+            # 完稿审计的语义扫描同样覆盖病灶词——系统护栏本书无配置也生效。
+            _tex = texture_enforcement_entries()
+            if _tex:
+                _base = ps.entries if ps is not None else ()
+                ps = ProhibitionSet(tuple(_base) + _tex)
             content = html_to_plain(chapter.content_text or "")
             semantic_hits = await semantic_scan_text(content, ps)
     except Exception as e:
@@ -241,6 +248,20 @@ async def finish(
         logger.debug(f"[adaptive/finish] 收件箱计数失败（不影响完稿结果）: {e}")
     if isinstance(result, dict):
         result["candidates_pending"] = candidates_pending
+
+    # ---- 读者清单（01 开章卡与读者清单 M2）：真相层折出的「读者此刻」三段清单 ----
+    # 纯章号算术零 LLM；沿用报告区既有模式——try/except 不阻塞完稿、零命中不设键
+    # （响应增量最小，docs/next-phase/01-opening-card-and-reader-ledger.md §3）
+    try:
+        from backend.services.world.reader_ledger import load_reader_ledger
+
+        _ch_rl = await db.get(Chapter, str(chapter_id))
+        if _ch_rl is not None and _ch_rl.chapter_number:
+            _ledger = await load_reader_ledger(db, str(_ch_rl.book_id), int(_ch_rl.chapter_number))
+            if _ledger:
+                result["reader_ledger"] = _ledger
+    except Exception as e:
+        logger.debug(f"[adaptive/finish] 读者清单聚合失败（不影响完稿结果）: {e}")
 
     trace_event(
         "adaptive_finish",

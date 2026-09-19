@@ -9,9 +9,13 @@
 import ModalShell from './ModalShell.vue'
 import { useAppSettings } from '../composables/useAppSettings'
 import { useNotifyPrefs } from '../composables/useNotifyPrefs'
+import { setOpeningCardEnabled, openingCardEnabled } from '../composables/useUiPrefs'
 
 const { visible, close } = useAppSettings()
 const { prefs: notifyPrefs, setInApp, setSystem } = useNotifyPrefs()
+
+// 开章卡开关（01 下一阶段）：响应式镜像+存储双写——关掉副驾里的卡即时消失
+// （GUI 交叉验证缺陷 #1a 修复：localStorage 直读无响应性）
 </script>
 
 <template>
@@ -41,6 +45,19 @@ const { prefs: notifyPrefs, setInApp, setSystem } = useNotifyPrefs()
         <span>切走时使用 Windows 系统通知</span>
       </label>
       <p class="section-hint">只保存在这台设备上，改完即生效。</p>
+    </section>
+
+    <section class="notify-section">
+      <div class="section-title">写作台</div>
+      <label class="check-row">
+        <input
+          type="checkbox"
+          :checked="openingCardEnabled"
+          @change="setOpeningCardEnabled(($event.target as HTMLInputElement).checked)"
+        />
+        <span>开新章时，在「打算」页顶部显示开章卡（该揭的事 / 不能说破的 / 没收的线头）</span>
+      </label>
+      <p class="section-hint">卡片只汇总你自己录入的揭示计划、真相与伏笔——不出主意，只提醒你在哪。</p>
     </section>
   </ModalShell>
 </template>

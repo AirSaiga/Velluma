@@ -141,6 +141,57 @@ export interface ReadEntitiesResult {
 }
 
 /** 完稿后处理审计报告 */
+/** 揭示行（开章卡/读者清单共用形状）：label 概括 + 展开内容（表/里/揭示计划原文） */
+export interface RevealRow {
+  label: string
+  expected_chapter: number | null
+  public_text: string
+  canon_text: string
+  reveal_plan: string
+  source: string
+  /** 开章卡 L1 专用：逾期章数（0=本章该揭） */
+  overdue_by?: number
+}
+
+/** 读者清单（完稿报告「读者此刻」栏；每段独立空集缺席） */
+export interface ReaderLedger {
+  /** 本章新知道：预期揭示章 == 本章 */
+  new_known?: RevealRow[]
+  /** 已经知道：预期揭示章 < 本章（按揭示先后排） */
+  known?: RevealRow[]
+  /** 还不知道：按计划章升序的前瞻时间线 */
+  upcoming?: Array<{ chapter: number; items: RevealRow[] }>
+  /** 未排期揭示计划的真相（单列一组） */
+  unscheduled?: RevealRow[]
+}
+
+/** 开章卡（空章「打算」页顶部四面镜子；每行独立空集缺席，全空={}） */
+export interface OpeningCard {
+  /** L1 该揭（含逾期；逾期深度升序） */
+  due_reveals?: RevealRow[]
+  /** L2 别说破：scope=presence（与在场相关）/ book（全书口径徽标） */
+  untold?: { scope: 'presence' | 'book'; items: RevealRow[] }
+  /** L3 线头：真实总数 + 最久吊的章数 + 全量（展开用） */
+  threads?: { count: number; oldest: number; items: Array<{ content: string; ledger_key: string; chapters_open: number | null }> }
+  /** L4 此刻：时间/地点/谁在场 */
+  scene?: { t: number; t_source: string; location: string; present: string[] }
+}
+
+/** 问书答案（04 下一阶段）：kind=not_found/no_match 也是合法答案（诚实是功能） */
+export interface AskBookAnswer {
+  kind: string
+  text: string
+  sources?: Array<{
+    label: string
+    type: 'chapter' | 'world_event' | 'canon' | 'location' | 'foreshadow' | 'material' | string
+    chapter_id?: string
+    event_id?: string
+    location_id?: string
+    ledger_key?: string
+    label_text?: string
+  }>
+}
+
 export interface FinishReport {
   finished: boolean
   reason?: string
@@ -150,6 +201,9 @@ export interface FinishReport {
   memory_indexed?: number
   /** P3-4：世界发现被跳过的原因（无实体/正文不足等；有候选产出时缺省不出） */
   scout_skipped?: { code: string; reason: string }
+  /** 读者清单（01 开章卡与读者清单 M2）：真相层折出的「读者此刻」三段清单——
+   *  纯章号算术零 LLM；三段全空时后端不设此键（空集零像素） */
+  reader_ledger?: ReaderLedger
   /**
    * 疑似 AI 味变体（D 包语义扫描：embedding 余弦相似度抓「换字逃逸」改写变体，
    * 只提示作者裁决不改正文；未配置 embedding / 零命中时后端不设此键）
@@ -436,6 +490,11 @@ export const adaptiveApi = {
     return requestJson(`/chapters/${chapterId}/adaptive/spine`)
   },
 
+  /** 书级 spine 批量读（2026-09-17）：只含 spine 非空的章，无脉络章按缺席处理 */
+  getSpinesByBook: async (bookId: string): Promise<{ book_id: string; spines: Record<string, ChapterSpine> }> => {
+    return requestJson(`/books/${bookId}/adaptive/spines`)
+  },
+
   /** 软脉络部分合并保存（只改传了的字段；锚点硬上限 5） */
   patchSpine: async (
     chapterId: string,
@@ -452,27 +511,33 @@ export const adaptiveApi = {
     return requestJson(`/chapters/${chapterId}/adaptive/spine-suggest`, { method: 'POST' })
   },
 
-  /** 协作交互汇总（个人镜子：走向卡/幽灵稿/胶囊采纳率） */
-  collabEventsSummary: async (chapterId: string): Promise<{
-    total: number
-    by_kind: Record<string, number>
-    card_burst_rate: number | null
-    ghost_adopt_rate: number | null
-    capsule_expand_count: number
-    quick_note_commit: number
-    /** A5b 批量裁决累计采纳条数（undone 批不计入） */
-    batch_accept_count: number
-  }> => {
-    return requestJson(`/chapters/${chapterId}/adaptive/events/summary`)
+  // ===== 开章卡（01 下一阶段）：空章镜子，零 LLM 纯查表 =====
+  getOpeningCard: async (chapterId: string): Promise<OpeningCard> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/opening-card`)
   },
 
-  /**
-   * 清空本书协作埋点（测试用；他书事件保留）。连带效应：本书「学着闭嘴」
-   * 的拒收史派生源一并清零，静音集合回到无史状态。
-   */
-  clearCollabEvents: async (bookId: string): Promise<{ book_id: string; deleted: number }> => {
-    return requestJson(`/books/${bookId}/adaptive/collab-events`, { method: 'DELETE' })
+  /** 专用计数（05 瘦身口径：独立 jsonl，不接协作事件总线）；失败静默 */
+  touchOpeningCard: async (chapterId: string, action: 'shown' | 'expand'): Promise<void> => {
+    await requestJson(`/chapters/${chapterId}/adaptive/opening-card/touch`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    })
   },
+
+  // ===== 问书（04 下一阶段）：行间手势速查——图书管理员不是合著者 =====
+  askBook: async (
+    chapterId: string,
+    question: string,
+  ): Promise<AskBookAnswer> => {
+    return requestJson(`/chapters/${chapterId}/adaptive/ask-book`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    })
+  },
+
+  // 05 埋点瘦身（2026-09-18）：collabEventsSummary / clearCollabEvents 前端绑定随
+  // insights 协作面板一并拆除（后端 summary 端点已删；DELETE 端点保留作机制数据
+  // 测试重置口，无前端入口）。事件总线绑定 logCollabEvent 保留（机制四件消费）。
 
   /** 微缝合幽灵草稿（SSE 打字机推流）；mode='burst' 为段落级连写、'outline' 为细纲扩写 */
   stitchGhost: async (

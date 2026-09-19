@@ -165,6 +165,17 @@ class IntentRepository:
 
         out: List[Dict[str, Any]] = []
         seen_ref = set()
+
+        def _node_text_row(node) -> Dict[str, Any]:
+            """canon 节点 → 行文本三件（表/里/揭示计划原文）——01 开章卡与读者
+            清单的展开内容（规则二：一次点击彻底回答）。加键是纯增量，
+            既有消费方只读 label/expected_reveal_chapter/canon_node_id。"""
+            return {
+                "public_text": str(node.public_text or "").strip(),
+                "canon_text": str(node.canon_text or "").strip(),
+                "reveal_plan": str(getattr(node, "reveal_plan", None) or "").strip(),
+            }
+
         for it in await self.list_open(bid, kinds=["reveal"]):
             sk = it.source_key or ""
             parts = sk.split(":", 2)
@@ -184,6 +195,8 @@ class IntentRepository:
                 "expected_reveal_chapter": target_ch,
                 "canon_node_id": it.target_ref,
                 "source": "intent",
+                **(_node_text_row(node_by_id[it.target_ref])
+                   if it.target_ref in node_by_id else {}),
             })
         # 旧源兜底：canon_nodes.expected_reveal_chapter（让位+ref 去重后不重复）
         for node in nodes:
@@ -202,6 +215,7 @@ class IntentRepository:
                 "expected_reveal_chapter": node.expected_reveal_chapter,
                 "canon_node_id": str(node.id),
                 "source": "canon",
+                **_node_text_row(node),
             })
         # 第三来源（2026-09-03 字段级真相分层）：实体档案分层字段的 reveal_chapter
         # （「第几章揭」），标签「实体名·字段名」；整人 private 实体跳过（与
@@ -233,6 +247,10 @@ class IntentRepository:
                     "expected_reveal_chapter": entry.reveal_chapter,
                     "canon_node_id": None,
                     "source": "field_layer",
+                    # 字段分层的表/里：字段内容即「里」，半露的表在 layer spec
+                    "public_text": entry.public_text,
+                    "canon_text": entry.full_text,
+                    "reveal_plan": "",
                 })
         return out
 
