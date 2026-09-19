@@ -368,6 +368,7 @@ async def stitch_ghost(
             spatial_brief=bundle.spatial_brief,
             character_secrets=bundle.character_secrets,
             recency_pin=kg.recency_pin,
+            texture_contract_overrides=getattr(bundle, "texture_contracts", None),
             **kg_kwargs,
         )
     elif request.mode == "outline":
@@ -393,6 +394,7 @@ async def stitch_ghost(
             spine_anchors=spine_anchor_rows,
             previous_summary=kg.previous_summary,
             recency_pin=kg.recency_pin,
+            texture_contract_overrides=getattr(bundle, "texture_contracts", None),
             **kg_kwargs,
         )
     elif request.mode == "burst":
@@ -412,6 +414,7 @@ async def stitch_ghost(
             character_secrets=bundle.character_secrets,
             previous_summary=kg.previous_summary,
             recency_pin=kg.recency_pin,
+            texture_contract_overrides=getattr(bundle, "texture_contracts", None),
             **kg_kwargs,
         )
     else:
@@ -441,6 +444,7 @@ async def stitch_ghost(
             picked_slots=[str(x) for x in (request.picked_slots or [])],
             suffix_anchor=(request.suffix_anchor or "").strip(),
             intent_source=getattr(ctx, "intent_source", "") or "",
+            texture_contract_overrides=getattr(bundle, "texture_contracts", None),
             **kg_kwargs,
         )
 
@@ -876,10 +880,11 @@ async def stitch_ghost(
             repaired_flag = False
             try:
                 from backend.models import Book as _BookM
-                from backend.services.style.prohibitions import load_prohibition_set
+                from backend.services.style.prohibitions import ProhibitionSet, load_prohibition_set
                 from backend.services.style.ghost_wash import wash_ghost_text, build_repair_prompt
                 from backend.services.style.events import append_style_event
                 from backend.services.style.semantic_match import semantic_scan_text
+                from backend.services.style.texture_contracts import texture_enforcement_entries
 
                 _prohibitions = None
                 if bundle.book_id:
@@ -888,6 +893,13 @@ async def stitch_ghost(
                         book=await db.get(_BookM, bundle.book_id),
                         style_card=getattr(bundle, "style_card", None),
                     )
+                # 质感契约执法词表旁路合并（2026-09 收编批）：病灶词不进四源合并
+                # （保零变化契约与挂件防线），洗层/P2 重洗/语义扫描前在此并集——
+                # 契约是系统级护栏，本书无配置（甚至禁忌面加载失败）也生效。
+                _tex_entries = texture_enforcement_entries()
+                if _tex_entries:
+                    _base_entries = _prohibitions.entries if _prohibitions is not None else ()
+                    _prohibitions = ProhibitionSet(tuple(_base_entries) + _tex_entries)
                 wash_result = wash_ghost_text(text, _prohibitions)
                 text = wash_result.text
 

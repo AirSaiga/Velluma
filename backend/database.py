@@ -771,6 +771,16 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "INTEGER",
         "expected_udt_names": {"int4", "integer"},
     },
+    # 写作规矩按书覆盖（2026-09 白描封杀令收编批）：系统质感契约
+    # （services/style/texture_contracts.py 唯一权威）的本书定制
+    # {contract_key: {body: str, updated_at: iso}}；缺键=系统默认，
+    # 列缺失/NULL/{} 全部默认——prompt 逐字节零变化
+    {
+        "table": "books",
+        "column": "texture_contracts",
+        "definition": "JSONB DEFAULT '{}'",
+        "expected_udt_names": {"jsonb"},
+    },
 ]
 
 

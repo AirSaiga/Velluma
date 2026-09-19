@@ -49,6 +49,9 @@ canon_private_labels / character_secrets / world_state + entity_names_by_id
 import re
 from typing import Any, Dict, List, Optional
 
+from backend.services.style.prohibitions import ProhibitionSet
+from backend.services.style.texture_contracts import texture_enforcement_entries
+
 # 实体名/别名最短长度（1 字名在中文正文里子串误报率不可接受，宁漏勿误）
 NAME_MIN_CHARS = 2
 # secret 短语最短长度（spec：≥4 字连续片段；太短的常见词会大面积误报）
@@ -295,6 +298,14 @@ def check_ghost_text(
         try:
             if bundle is not None:
                 ps = getattr(bundle, "prohibitions", None)
+                if ps is not None:
+                    # 质感契约执法词表旁路合并（2026-09 收编批，与 stitch 洗层
+                    # 同口径）：病灶词不进四源合并（保零变化契约/挂件防线），
+                    # 上屏快检前在此并集；prohibitions 整体加载失败（None）时
+                    # 以契约词表单独成集——系统护栏本书无配置也生效。
+                    _tex = texture_enforcement_entries()
+                    if _tex:
+                        ps = ProhibitionSet(tuple(ps.entries) + _tex)
                 if ps:
                     total_hits = 0
                     has_blocker = False

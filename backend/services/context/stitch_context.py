@@ -121,6 +121,7 @@ class StitchContext:
             memory_echoes=self.memory_echoes,
             spatial_brief=self.bundle.spatial_brief,
             mode=self.mode,
+            texture_contract_overrides=getattr(self.bundle, "texture_contracts", None),
             **self._kg_kwargs(),
         )
 
@@ -139,6 +140,7 @@ class StitchContext:
             memory_echoes=self.memory_echoes,
             spatial_brief=self.bundle.spatial_brief,
             mode=self.mode,
+            texture_contract_overrides=getattr(self.bundle, "texture_contracts", None),
             **self._kg_kwargs(),
         )
 
@@ -406,6 +408,10 @@ def _block_source(key: str, bundle: SettingsBundle, scene_hint: str = "") -> str
         return "世界页 · 关系（t 时刻活跃）"
     if key == "negative":
         return "文风页负面清单 + 系统陈词"
+    if key == "anti_pseudo_sensory":
+        # 质感契约收编批：唯一权威在 services/style/texture_contracts.py
+        # （文风模块管辖；支持按书覆盖，books.texture_contracts 列）
+        return "文风模块 · 写作规矩"
     if key == "canon":
         return "真相层（含私有）" if "[private]" in (bundle.canon_context or "") else "真相层"
     if key == "secrets":

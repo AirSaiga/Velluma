@@ -121,6 +121,11 @@ class SettingsBundle:
     # None 时消费侧降级为空（load_prohibition_set 内部各层独立降级，整体
     # None 仅在极端异常时出现）。类型 Any：避免与 ORM 层耦合。
     prohibitions: Any = None
+    # ---- 写作规矩按书覆盖（质感契约收编批）----
+    # 系统质感契约（services/style/texture_contracts.py 唯一权威）的本书
+    # 定制：{contract_key: {"body": str}}。None/{} = 全部系统默认（prompt
+    # 逐字节零变化）；body 覆盖只换正文，块头「最高优先级」框定恒由系统持有。
+    texture_contracts: Optional[Dict[str, Dict[str, str]]] = None
 
     def to_prompt_context(self) -> Dict[str, Any]:
         """生成供 prompt 拼接的扁平 dict（文本化版本）。
@@ -421,6 +426,14 @@ async def load_chapter_settings_bundle(
     if bundle.book:
         bundle.core_motifs_taboos = getattr(bundle.book, "core_motifs_taboos", "") or ""
         bundle.rolling_summary = getattr(bundle.book, "rolling_summary", "") or ""
+
+    # ---- 写作规矩按书覆盖（质感契约收编批；纯读列，失败/无列=系统默认）----
+    if bundle.book is not None:
+        try:
+            _tc = getattr(bundle.book, "texture_contracts", None)
+            bundle.texture_contracts = _tc if isinstance(_tc, dict) and _tc else None
+        except Exception:
+            bundle.texture_contracts = None
 
     # ---- 禁忌面（任务包 A 归一：四源合并唯一权威）----
     # load_prohibition_set 内部各层独立降级；整体异常时置 None，

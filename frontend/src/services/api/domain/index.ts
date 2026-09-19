@@ -33,6 +33,8 @@ export const chapterApi = {
   update: (id: string, data: any) => requestJson(`/chapters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => requestJson(`/chapters/${id}`, { method: 'DELETE' }),
   getEntities: (chapterId: string) => requestJson(`/chapters/${chapterId}/entities`),
+  /** 书级批量：全部章的实体关联 ID 映射（替代逐章 N+1；无关联=空映射） */
+  getBookChapterEntityIds: (bookId: string) => requestJson(`/books/${bookId}/chapter-entity-ids`),
   updateEntities: (chapterId: string, entityIds: any) =>
     requestJson(`/chapters/${chapterId}/entities`, { method: 'PUT', body: JSON.stringify(entityIds) }),
   /** NLE-ADF 2.0 深度清脂（Alt+Shift+↓）：LLM 重洗当前段落（AI 味密度超阈值才调 LLM） */
@@ -378,13 +380,16 @@ export const systemApi = {
 export const deaiApi = {
   /**
    * 存一对训练样本（bad=卡片舱生成原样文本，good=作者改定版）
-   * 落本地 data/deai_pairs.jsonl（零上报）；返回 id 供 6 秒撤销胶囊
+   * 落本地 data/deai_pairs.jsonl（零上报）；返回 id 供 6 秒撤销胶囊。
+   * source（03 下一阶段）：manual_mark=手动两步 / auto_ghost=书签自动捕获 /
+   * capsule=细纲扩写采纳（meta.source 分组统计入库质量用）
    */
   savePair: async (payload: {
     bad: string
     good: string
     book_id?: string
     chapter_id?: string
+    source?: 'manual_mark' | 'auto_ghost' | 'capsule'
   }): Promise<{ id: string; total: number }> => {
     return requestJson('/deai/pairs', {
       method: 'POST',
@@ -411,6 +416,8 @@ import type {
   StyleInboxItem,
   StyleInboxKind,
   StyleScanResult,
+  TextureContractItem,
+  TextureContractsResponse,
   CostReport,
   QualityReport,
 } from '../../../types'
@@ -525,6 +532,22 @@ export const styleApi = {
     })
   },
 
+  /** 写作规矩（质感契约按书覆盖，2026-09 收编批）：本书生效视图。 */
+  getTextureContracts: async (bookId: string): Promise<TextureContractsResponse> => {
+    return requestJson(`/books/${bookId}/texture-contracts`)
+  },
+
+  /** 写作规矩整体覆盖写：{key: {body|disabled_rules}}；空=恢复默认；{}=全部恢复。 */
+  putTextureContracts: async (
+    bookId: string,
+    overrides: Record<string, { body?: string | null; disabled_rules?: string[] }>,
+  ): Promise<TextureContractsResponse> => {
+    return requestJson(`/books/${bookId}/texture-contracts`, {
+      method: 'PUT',
+      body: JSON.stringify({ overrides }),
+    })
+  },
+
   /** 文风使用埋点（本地 JSONL，fire-and-forget，绝不阻塞业务）。 */
   logStyleEvent: (bookId: string, kind: string, detail?: string): void => {
     requestRaw(`/books/${bookId}/style/events`, {
@@ -544,7 +567,7 @@ export const styleApi = {
   },
 
   /** 从已发布章节一键收编作者样本（零状态坡道兜底）；chapter_id=单章收编
-   *  （2026-09-14 装填通道：写作台「收本章为范例」一键动作，不限发布状态）。 */
+   *  （2026-09-14 装填通道：写作台检查分区体检报告末「收本章为范例」一键动作，不限发布状态）。 */
   createSamplesFromChapters: async (
     bookId: string,
     opts?: { chapter_id?: string; max_chapters?: number; excerpt_chars?: number },
@@ -613,13 +636,15 @@ export const styleApi = {
     })
   },
 
-  /** 试听（试衣间，SSE 打字机）：给定段落 + 文风配置 → 真实注入管线改写。 */
+  /** 试听（试衣间，SSE 打字机）：给定段落 + 文风配置 → 真实注入管线改写。
+   *  bare=true = 裸奔基线（验枪靶场栏①：跳过画像与样本，只留系统基座）。 */
   audition: (
     bookId: string,
     data: {
       text: string
       style_override?: Partial<StyleCard> | null
       use_samples?: boolean
+      bare?: boolean
       target_chars?: number
       chapter_id?: string
     },

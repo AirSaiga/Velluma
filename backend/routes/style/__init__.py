@@ -19,6 +19,7 @@ from fastapi import APIRouter
 
 from .card import router as card_router
 from .cliches import router as cliches_router
+from .contracts import router as contracts_router
 from .events import router as events_router
 from .feedback import router as feedback_router
 from .fingerprint import router as fingerprint_router
@@ -31,6 +32,7 @@ router.include_router(samples_router)
 router.include_router(fingerprint_router)
 router.include_router(feedback_router)
 router.include_router(cliches_router)
+router.include_router(contracts_router)
 router.include_router(events_router)
 
 __all__ = ["router"]

@@ -595,6 +595,30 @@ export interface StyleScanResult {
   hits: StyleScanHit[]
 }
 
+// ---- 写作规矩（质感契约按书覆盖，2026-09 白描封杀令收编批）----
+
+export interface TextureRuleItem {
+  key: string
+  title: string
+  enabled: boolean
+}
+
+export interface TextureContractItem {
+  key: string
+  title: string
+  modes: string[]
+  body: string
+  is_default: boolean
+  default_body: string
+  /** 定制方式：''=默认 / rules=规矩开关 / body=整文编辑 */
+  customized_via: string
+  rules: TextureRuleItem[]
+}
+
+export interface TextureContractsResponse {
+  contracts: TextureContractItem[]
+}
+
 // ---- 成本报告（CostReport，Phase 0 观测层）----
 
 export interface CostReportStage {

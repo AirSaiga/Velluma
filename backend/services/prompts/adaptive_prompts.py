@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
+from backend.services.style.texture_contracts import render_texture_contract
 
 # A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：注入剂量改引 budget 表。
 # SECRETS_* 在此 import 再导出——test_private_channel 等既有消费方仍从本模块
@@ -304,6 +305,7 @@ def render_system_blocks_with_usage(
     relations_text: str = "",
     negative_constraints: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> tuple:
     """渲染 system 知识块（知识检索平面 v3.1 注入序权威）。
 
@@ -356,12 +358,12 @@ def render_system_blocks_with_usage(
         ("author_samples", by_key.get("author_samples", "")),
         # 白描契约与假感官封杀令（2026-09-09 实测事故）：stitch/continue 专属
         # 末位分节（首尾高服从位；burst/open/outline 各有专职不受染，空串块
-        # 拼接零变化——预览/试衣间同源不变量由此自动保持）。前导空行=块间距
-        # 约定（样本块裸收尾，无前导空行会让两节直接粘连、试衣间的 \n\n#
-        # 块边界提取失位）
-        ("anti_pseudo_sensory", (
-            "\n\n# 白描契约与假感官封杀令（最高优先级）\n" + _ANTI_PSEUDO_SENSORY_BLOCK
-        ) if mode in ("stitch", "continue") else ""),
+        # 拼接零变化——预览/试衣间同源不变量由此自动保持）。
+        # 质感契约唯一权威在 services/style/texture_contracts.py（2026-09
+        # 收编批；支持按书覆盖，overrides=books.texture_contracts），此处仅消费
+        ("anti_pseudo_sensory", render_texture_contract(
+            "anti_pseudo_sensory", mode, texture_contract_overrides,
+        )),
     ]
     if not entities_text:
         # 专名兜底位：无知识平面实体块时维持旧序位置（entities 后、canon 前）
@@ -384,6 +386,7 @@ def render_system_blocks(
     relations_text: str = "",
     negative_constraints: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> List[tuple]:
     """按真实注入序渲染 system 知识块，返回 [(key, block_text)]。
 
@@ -419,6 +422,7 @@ def render_system_blocks(
         relations_text=relations_text,
         negative_constraints=negative_constraints,
         warm_card=warm_card,
+        texture_contract_overrides=texture_contract_overrides,
     )
     return blocks
 
@@ -508,28 +512,12 @@ def pick_subject_lock(picked_slots: Optional[List[str]], bridge: bool = False) -
 # ============================================================
 # 白描契约与假感官封杀令（2026-09-09 实测事故紧急植入，用户逐字拍板）
 # ============================================================
-# 病灶语料（通用模型 trace）：「掌心发烫」「震动顺着XX传进掌心」「眼里亮了
-# 一下随即暗下去」——神经敏感式生理微知觉 + AI 模式化情绪开关，严重破坏
-# 小说质感。注入位=render_system_blocks 的 mode 门控末位分节（stitch/
-# continue 专属；burst/open/outline 各有专职不受染）。与 08-27「负面禁令
-# 少而狠」导师结论的张力已申报——本块系实测事故后的用户逐字拍板，最高
-# 优先级偏置；词级执法另由负面清单四源+洗层兜底，prompt 只是第一层防线。
-_ANTI_PSEUDO_SENSORY_BLOCK = """
-【绝对禁止：假感官堆砌与生理微知觉（Anti-Pseudo-Sensory Ban）】
-1. 严禁描写微观生理知觉与伪通感：
-   - 严禁出现："掌心发热/发烫"、"震动顺着XX传进掌心"、"指尖微凉/微颤"、"倒吸一口凉气"、"喉结滚动"、"呼吸一滞/一沉"等神经敏感式生理反应。
-2. 严禁套用AI模式化情绪开关：
-   - 严禁使用："眼里亮了一下又暗下去"、"眼中闪过一丝XX"、"下意识地藏/缩"、"嘴角勾起/扯动"等廉价微表情。
-3. 严禁擅自脑补事故与台词抢跑：
-   - 严禁擅自判定作者写完的动作是"失误/做错的"（如作者写接线成功，严禁脑补"那根接错的线头"）；
-   - 严禁擅自帮在场角色喊出"成了！"或展开下一段剧情争议。
-
-【语言风格准则：北方硬朗白描（Narrative Economy）】
-1. 动词驱动，叙事经济：多用硬朗的动作动词，交代物理事实即可（如"把手在裤腿上蹭了蹭"、"侧耳听机器转动"），少用形容词与副词；
-2. 留白克制，拒绝作文腔：写动作就写动作，写器物就写器物，坚决剔除小学生作文式的通感抒情，语言质感向现实派短句靠拢。
-
-【严禁逗号串联注水】：拒绝为了凑字数使用多个逗号串联同义从句。允许 25~35 字的短促利落单句，交代清楚动作或画面后立即使用句号收尾，宁短勿水。
-"""
+# 已迁出本模块（2026-09 收编批）→ services/style/texture_contracts.py
+# （文章质感契约注册表，文风模块唯一权威；含按书覆盖与执法词表）。
+# 病史留存：病灶=神经敏感式生理微知觉 + AI 模式化情绪开关（通用模型
+# trace），与 08-27「负面禁令少而狠」导师结论的张力已申报——本块系实测
+# 事故后的用户逐字拍板，最高优先级偏置。词级执法由 texture_contracts
+# 执法词表经洗层/上屏快检/完稿审计旁路兜底，prompt 只是第一层防线。
 
 
 def build_continue_prompt(
@@ -552,6 +540,7 @@ def build_continue_prompt(
     relations_text: str = "",
     negative_constraints: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
     previous_summary: str = "",
     recency_pin: str = "",
     contract: str = "motion",
@@ -608,6 +597,7 @@ def build_continue_prompt(
         relations_text=relations_text,
         negative_constraints=negative_constraints,
         warm_card=warm_card,
+        texture_contract_overrides=texture_contract_overrides,
     ):
         system_prompt += _block
 
@@ -757,6 +747,7 @@ def build_burst_prompt(
     relations_text: str = "",
     negative_constraints: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
     previous_summary: str = "",
     recency_pin: str = "",
 ) -> tuple:
@@ -796,6 +787,7 @@ def build_burst_prompt(
         relations_text=relations_text,
         negative_constraints=negative_constraints,
         warm_card=warm_card,
+        texture_contract_overrides=texture_contract_overrides,
     ):
         system_prompt += _block
 
@@ -879,6 +871,7 @@ def build_outline_expand_prompt(
     relations_text: str = "",
     negative_constraints: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
     previous_summary: str = "",
     recency_pin: str = "",
 ) -> tuple:
@@ -927,6 +920,7 @@ def build_outline_expand_prompt(
         relations_text=relations_text,
         negative_constraints=negative_constraints,
         warm_card=warm_card,
+        texture_contract_overrides=texture_contract_overrides,
     ):
         system_prompt += _block
 
@@ -1019,6 +1013,7 @@ def build_opening_prompt(
     author_samples: Optional[List[str]] = None,
     spatial_brief: str = "",
     warm_card: str = "",
+    texture_contract_overrides: Optional[Dict[str, Dict[str, str]]] = None,
     scene_identity: str = "",
     entities_text: str = "",
     relations_text: str = "",
@@ -1061,6 +1056,7 @@ def build_opening_prompt(
         relations_text=relations_text,
         negative_constraints=negative_constraints,
         warm_card=warm_card,
+        texture_contract_overrides=texture_contract_overrides,
     ):
         system_prompt += _block
 

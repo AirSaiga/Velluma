@@ -33,7 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from datetime import datetime
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -301,6 +301,7 @@ class StyleAuditionRequest(BaseModel):
     text: str = Field(..., min_length=10, max_length=4000, description="待试听段落")
     style_override: Optional[StyleCardBase] = Field(None, description="草稿文风配置（不落库）")
     use_samples: bool = Field(True, description="是否注入作者笔迹示范（A/B 基线版传 False）")
+    bare: bool = Field(False, description="裸奔基线：跳过画像与样本，只留系统基座（验枪靶场栏①）")
     target_chars: int = Field(400, ge=80, le=2000, description="目标字数（约等于原段）")
     chapter_id: Optional[UUID] = Field(None, description="章级编辑态传入，baseline 取该章生效卡")
 
@@ -332,6 +333,56 @@ class AuthorSamplePatchRequest(BaseModel):
 class ClicheExemptionsUpdate(BaseModel):
     """系统陈词库本书豁免列表（整体覆盖写）。"""
     patterns: List[str] = Field(default_factory=list, description="被豁免的 SystemCliche pattern 列表")
+
+
+# ============================================================
+# 写作规矩（质感契约按书覆盖，2026-09 白描封杀令收编批）
+# ============================================================
+
+class TextureRuleItem(BaseModel):
+    """契约内单条可开关规矩的生效视图。"""
+    key: str = Field(..., description="规矩稳定键")
+    title: str = Field(..., description="人话标题（开关标签）")
+    enabled: bool = Field(..., description="True=在岗；False=本书已关掉")
+
+
+class TextureContractItem(BaseModel):
+    """单条质感契约的生效视图（系统默认与本书覆盖合并后）。"""
+    key: str = Field(..., description="稳定键（preview 块 key 同源）")
+    title: str = Field(..., description="人话标题（文风页「写作规矩」区展示）")
+    modes: List[str] = Field(default_factory=list, description="生效生成模式（stitch-ghost 子集）")
+    body: str = Field(..., description="生效正文（系统默认或本书覆盖）")
+    is_default: bool = Field(..., description="True=系统默认原文；False=本书定制")
+    default_body: str = Field(..., description="系统默认全文（「恢复默认」回填用）")
+    customized_via: str = Field(
+        default="", description="定制方式：\"\"=默认 / rules=规矩开关 / body=整文编辑",
+    )
+    rules: List[TextureRuleItem] = Field(
+        default_factory=list, description="可开关规矩清单（body 整文覆盖时 enabled 全 True 仅供参考）",
+    )
+
+
+class TextureContractsResponse(BaseModel):
+    """本书写作规矩全量视图（系统契约逐个列出，合并本书覆盖）。"""
+    contracts: List[TextureContractItem] = Field(default_factory=list)
+
+
+class TextureContractOverride(BaseModel):
+    """单条契约的本书覆盖；body=None/空串 且 disabled_rules 空=恢复系统默认。
+
+    body 非空=整文覆盖（高级编辑态，优先于开关）；disabled_rules=关掉的规矩键。
+    """
+    body: Optional[str] = Field(None, max_length=8000, description="契约正文（整文覆盖；空=不覆盖）")
+    disabled_rules: Optional[List[str]] = Field(
+        None, description="关掉的规矩键列表（规矩开关；空/None=不覆盖）",
+    )
+
+
+class TextureContractsUpdate(BaseModel):
+    """写作规矩整体覆盖写（books.texture_contracts 列；缺键=系统默认）。"""
+    overrides: Dict[str, TextureContractOverride] = Field(
+        default_factory=dict, description="{contract_key: 覆盖}；整体覆盖写，传 {} = 全部恢复默认",
+    )
 
 
 class StyleEventRequest(BaseModel):

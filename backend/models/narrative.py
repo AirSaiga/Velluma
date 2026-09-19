@@ -53,6 +53,11 @@ class Book(Base):
     # 系统陈词库本书豁免（完整落地批，设计稿 §6.4）：被豁免的 SystemCliche pattern 列表——
     # 审计/扫描/三层合并时跳过（不删全局层，只本书不生效）
     style_cliche_exemptions = Column(JSONB, default=list)
+    # 写作规矩按书覆盖（2026-09 白描封杀令收编批）：系统质感契约
+    # （services/style/texture_contracts.py 唯一权威）的本书定制。
+    # {contract_key: {body: str, updated_at: iso}}；缺键=系统默认，
+    # 列缺失/NULL/{} = 全部默认（prompt 逐字节零变化）。
+    texture_contracts = Column(JSONB, default=dict)
     # 地图比例尺标定（docs/map-scale-spatial.md §2.1，D4）：CRS.Simple 内部坐标 →
     # 现实距离的换算锚。{refs:[{ax,ay,bx,by,days_foot,label}], detour_factor,
     # modes:{...}}；NULL=未标定（距离功能静默降级，prompt 零变化）
