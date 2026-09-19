@@ -19,7 +19,7 @@ import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult
 import { useToast } from '../../../composables/useToast'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
-  ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
+  ghostActive, ghostStreaming, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
   setGhostRepaired, materializeRejectedGhost, markGhostDone,
 } from './useGhostDraft'
 import { setSparkPartsForChapter, setSparkGuests, showSparkDock, hideSparkDock, sparkDockVisible, SPARK_DOCK_AUTO_POPUP, type SparkPart } from './useSparkDock'
@@ -183,6 +183,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
    */
   function abortInflight() {
     if (_continueAbort) { _continueAbort.abort(); _continueAbort = null }
+    // 流式中被打断（切章/关辅助等）：abort 抑制 SSE 终态回调（sse.ts/adaptive.api.ts
+    // 双侧都判 signal.aborted），GHOST_DONE 不会再来——这里补关流式标志，否则
+    // ghostStreaming 永久 true（模块级 ref 切页不自愈），部分灌入的幽灵
+    // Tab/Enter 失效只能 Esc 丢弃。守卫：非流式中不打扰既有幽灵的缓冲窗。
+    if (ghostStreaming.value) markGhostDone()
     hideThinking()
   }
 

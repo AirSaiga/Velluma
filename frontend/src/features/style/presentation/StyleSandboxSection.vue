@@ -32,7 +32,6 @@ const emit = defineEmits<{
 
 // 引子默认放空：引子应是一句开头，不是自家原文——零成本诉求由作者自填。
 const inputText = ref('')
-const wrapperRef = ref<HTMLElement | null>(null)
 const styledPaneRef = ref<HTMLElement | null>(null)
 const banChip = ref<{ x: number; y: number; text: string } | null>(null)
 
@@ -66,13 +65,14 @@ function onStyledMouseUp() {
     banChip.value = null
     return
   }
-  const wrap = wrapperRef.value
-  if (!wrap) return
-  const wr = wrap.getBoundingClientRect()
+  // 坐标基准=styled pane 本体（chip 渲染在它里面，position:relative 的原点
+  // 就是它）——按 .ab-row 算会整体偏出 pane 自身偏移量，且可能被
+  // overflow:hidden 裁掉。
+  const pr = styledPaneRef.value!.getBoundingClientRect()
   banChip.value = {
     text: hit.text,
-    x: Math.max(4, hit.rect.left - wr.left),
-    y: Math.max(4, hit.rect.top - wr.top - 36),
+    x: Math.max(4, hit.rect.left - pr.left),
+    y: Math.max(4, hit.rect.top - pr.top - 36),
   }
 }
 
@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
       >{{ runningAny ? '正在写…' : '现场试写' }}</button>
     </div>
 
-    <div ref="wrapperRef" class="ab-row">
+    <div class="ab-row">
       <div class="ab-pane bare">
         <div class="ab-label">
           不带你的文风

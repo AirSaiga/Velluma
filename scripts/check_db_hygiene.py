@@ -136,9 +136,12 @@ def check_r1(con: sqlite3.Connection, rep: Report, fix: bool) -> list[str]:
     ent_ids = {strip_dash(r[0]) for r in con.execute("SELECT id FROM world_entities")}
     loc_ids = {strip_dash(r[0]) for r in con.execute("SELECT id FROM world_locations")}
     evt_ids = {strip_dash(r[0]) for r in con.execute("SELECT id FROM world_events")}
-    known = {"entity": ent_ids, "location": loc_ids, "event": evt_ids}
-    # 命中不了实体/地点/事件的 id 无法归一（真孤儿）——不知道目标格式
-    all_known = ent_ids | loc_ids | evt_ids
+    # canon_nodes 也要收：认知事件（told/misbelieve）的 proposition_ref 指向
+    # canon 节点——漏收会把合法引用误报「真孤儿」（2026-09-19 GUI 测试书实测踩过）
+    canon_ids = {strip_dash(r[0]) for r in con.execute("SELECT id FROM canon_nodes")}
+    known = {"entity": ent_ids, "location": loc_ids, "event": evt_ids, "canon": canon_ids}
+    # 命中不了实体/地点/事件/canon 的 id 无法归一（真孤儿）——不知道目标格式
+    all_known = ent_ids | loc_ids | evt_ids | canon_ids
 
     touched = []
     orphans = []

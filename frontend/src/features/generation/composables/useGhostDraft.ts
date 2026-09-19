@@ -84,6 +84,9 @@ export function tryReviveGhost(): boolean {
   _lastEvaporated = null
   beginGhost(source || 'stitch')
   appendGhost(text)
+  // 本地重放不走 SSE，GHOST_DONE 不会来——不手动关流式标志的话，
+  // 找回的幽灵 Tab/Enter 被「未灌完不上膛」永久吃键（只能再 Esc 丢一次）。
+  markGhostDone()
   return true
 }
 

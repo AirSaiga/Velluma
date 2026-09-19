@@ -298,14 +298,14 @@ def check_ghost_text(
         try:
             if bundle is not None:
                 ps = getattr(bundle, "prohibitions", None)
-                if ps is not None:
-                    # 质感契约执法词表旁路合并（2026-09 收编批，与 stitch 洗层
-                    # 同口径）：病灶词不进四源合并（保零变化契约/挂件防线），
-                    # 上屏快检前在此并集；prohibitions 整体加载失败（None）时
-                    # 以契约词表单独成集——系统护栏本书无配置也生效。
-                    _tex = texture_enforcement_entries()
-                    if _tex:
-                        ps = ProhibitionSet(tuple(ps.entries) + _tex)
+                # 质感契约执法词表旁路合并（2026-09 收编批，与 stitch 洗层
+                # 同口径）：病灶词不进四源合并（保零变化契约/挂件防线），
+                # 上屏快检前在此并集；prohibitions 整体加载失败（None）时
+                # 以契约词表单独成集——系统护栏本书无配置也生效。
+                _tex = texture_enforcement_entries()
+                if _tex:
+                    _base = ps.entries if ps is not None else ()
+                    ps = ProhibitionSet(tuple(_base) + _tex)
                 if ps:
                     total_hits = 0
                     has_blocker = False

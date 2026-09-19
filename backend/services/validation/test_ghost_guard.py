@@ -28,7 +28,8 @@ C1 上屏前快检单测（P5 批次 4，docs/foundation-hardening.md §5.1 + §
 3. canon_leak：canon [private] 标签命中（显式参数 + bundle 两种入口）；
 4. secret_leak：私有档案 ≥4 字连续片段命中；
 5. <4 字片段/1 字名不误报（宁漏勿误口径）；
-6. 干净文本空 warnings；空 bundle 全零（零报错契约）。
+6. 干净文本空 warnings；空 bundle 全零（零报错契约）；
+7. cliche_hit：prohibitions=None 时质感契约词表单独成集照常执法（H3 修复）。
 
 运行：python -m pytest backend/services/validation/test_ghost_guard.py -v
 """
@@ -238,6 +239,26 @@ def test_mixed_kinds_capped_and_deduped():
     for w in warnings:
         assert set(w.keys()) == {"kind", "span_text", "message"}
         assert w["span_text"] and w["message"]
+
+
+# ============================================================
+# 5. cliche_hit 质感契约 None 分支（2026-09-19 审计 H3 修复对拍）
+# ============================================================
+
+def test_texture_contract_standalone_when_prohibitions_none():
+    """prohibitions 整体加载失败（None）时，契约执法词表单独成集照常执法。
+
+    修复前：_tex 合并嵌在 `if ps is not None:` 内——None 时契约词表整条
+    丢失（注释宣称的「系统护栏本书无配置也生效」不成立）。与 stitch 洗层/
+    settle_finish 语义扫描同口径（两处均 `_base = ps.entries if ps is not None
+    else ()`）。语料用 ENFORCEMENT_ENTRY_SPECS 首条「掌心发热」（blocker）。
+    """
+    # 空 bundle：prohibitions 默认 None → 只有契约词表在岗
+    warnings = check_ghost_text("他掌心发热，一时说不出话。", SettingsBundle())
+    hits = [w for w in warnings if w["kind"] == "cliche_hit"]
+    assert len(hits) == 1 and "掌心发热" in hits[0]["span_text"]
+    # 干净文本不受影响（零误报面不变）
+    assert check_ghost_text("甲拨了拨火堆。", SettingsBundle()) == []
 
 
 if __name__ == "__main__":
