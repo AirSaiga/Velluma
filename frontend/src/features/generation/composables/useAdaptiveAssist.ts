@@ -16,18 +16,18 @@
  */
 import { watch, ref, type Ref } from 'vue'
 import { adaptiveApi, type HeartbeatResult, type FinishReport, type SettleResult, type DirectionCard, type GhostWarning } from '../../../services/api/domain/adaptive.api'
-import { logCollabEvent } from '../../../composables/useCollabTelemetry'
 import { useToast } from '../../../composables/useToast'
 import { applySpineProgress, spine } from '../../workspace/composables/useChapterSpine'
 import {
   ghostActive, beginGhost, appendGhost, evaporateGhost, setGhostWarnings, setGhostWash,
-  setGhostRepaired, materializeRejectedGhost,
+  setGhostRepaired, materializeRejectedGhost, markGhostDone,
 } from './useGhostDraft'
-import { setSparkParts, setSparkGuests, showSparkDock, hideSparkDock, sparkDockVisible, SPARK_DOCK_AUTO_POPUP, type SparkPart } from './useSparkDock'
+import { setSparkPartsForChapter, setSparkGuests, showSparkDock, hideSparkDock, sparkDockVisible, SPARK_DOCK_AUTO_POPUP, type SparkPart } from './useSparkDock'
 import { setBeatCards } from './useBeatDock'
 import { setThinkingPhase, hideThinking } from './useThinkingIndicator'
 import { assistEnabled } from './useAssistEnabled'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
+import { flushPendingChapterSave, awaitPendingSaveSettled } from '../../chapter-editor/pendingSave'
 import { findOutlineNotes } from '../../../extensions/OutlineNoteNode'
 
 /** 细纲胶囊「落笔扩写」事件（OutlineNoteChip 派发，本层监听编排） */
@@ -156,9 +156,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   // 现转挂起：在飞生发响应带回的零件即点名所得，响应落地直接弹舱兑现）
   let _summonPending = false
   let _summonPendingForce = false  // 挂起点名是否要求换一批（Tab 重复生成）
-  // 埋点去重签名（P0-3）：心跳重复返回同一批卡/零件不重复计「亮出」
-  let _lastCardSig = ''
-  let _lastDockSig = ''
   // 感知上下文快照（2026-08-29 感知常驻拍板）：每次编辑器活动时记下
   // {章, 段文本, 字数, 段尾}——写作台卸载（切到世界页/文风页等）后 pending
   // 计时器照发心跳，用快照代替已卸载的编辑器读数，切页前的最后一次感知
@@ -461,7 +458,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       // 消费（缝合后 Tab 可再点名重取，无损）。
       const generationStillBusy = _generationHeartbeatsInFlight > (generationTier ? 1 : 0)
       if (result.dock_muted) {
-        setSparkParts([])
+        setSparkPartsForChapter([], chapterId)
         setSparkGuests([])
         _partsForContext = ''   // 零件已清，上下文键随之作废（秒弹守卫自然关死）
         hideSparkDock()
@@ -482,7 +479,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         note: p.note || undefined,
       }))
       if (parts.length) {
-        setSparkParts(parts)
+        setSparkPartsForChapter(parts, chapterId)
         // 后台生发成功（新件年龄很小）→ 撤舱内报错行（「旧卡」提示已失真）
         if (result.dock_parts_age_s != null && result.dock_parts_age_s < 30) {
           dockRefreshError.value = null
@@ -556,21 +553,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
       // 谋篇进度（P1.4 M2）：回写 useChapterSpine 单例（感知带进度行 + 本地锚点状态同步）
       applySpineProgress(result.spine_progress)
-
-      // 埋点（P0-3 个人镜子）：亮出按卡集签名去重——「无视」= 亮出减采纳，离线可算
-      const cardSig = (result.direction_cards || []).map((c) => c.event).join('|')
-      if (cardSig && cardSig !== _lastCardSig) {
-        logCollabEvent(chapterId, 'cards_delivered', {
-          count: (result.direction_cards || []).length,
-          encounter_count: (result.direction_cards || []).filter((c: any) => c.from_encounter).length,
-        })
-      }
-      _lastCardSig = cardSig
-      const dockSig = parts.map((p) => p.text).join('|')
-      if (dockSig && dockSig !== _lastDockSig) {
-        logCollabEvent(chapterId, 'dock_delivered', { count: parts.length })
-      }
-      _lastDockSig = dockSig
 
       // 意图建议 → planSuggestions
       if (result.intent_source !== 'none') {
@@ -720,6 +702,8 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
         if (_staleEpoch(chapterId)) return
         // C1 快检疑点随 DONE 帧到达 → 幽灵草稿状态（感知带停靠区展示 + 采纳 toast）
         setGhostWarnings(result.warnings || [])
+        // 03 三键「灌完缓冲窗」：GHOST_DONE 起短窗内按键不触发采纳（防生成延迟期误触）
+        markGhostDone()
         // 呈现平面 P1/P5：洗层结果 + 回流 meta 随 GHOST_DONE 灌入幽灵状态
         setGhostWash(result.wash, { token: result.ghost_token, sampleIds: result.sample_ids })
         // 二期返修环结果（自动修正 N 处/熔断标记）随 GHOST_DONE 灌入
@@ -766,7 +750,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     // 采纳方向回报：取首个有 direction 的 part，通知后端降权（负反馈）
     const adoptedDir = pickedParts.find((p) => p.direction)?.direction
 
-    logCollabEvent(chapterId, 'ghost_request', { mode })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode,
       picked_parts: pickedParts.map((p) => p.text),
@@ -789,7 +772,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     hideThinking()  // 显式动作 → 隐藏指示器
     const editor = chapterEditorHandle.value
     if (!editor) return null
-    logCollabEvent(chapterId, 'settle', { commit })
     const $from = editor.state.selection.$from
     let text = $from.parent.textContent.trim()
     if (!text) {
@@ -853,7 +835,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
     _beginStitchSession()
 
-    logCollabEvent(chapterId, 'card_burst', { event: card?.event || '', from_encounter: !!(card as any)?.from_encounter })
     adaptiveApi.stitchGhost(chapterId, {
       fragment, rolling_prefix: rollingPrefix, mode: 'burst',
       beat_guidance: guidance,
@@ -870,7 +851,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
 
     _beginStitchSession()
 
-    logCollabEvent(chapterId, 'ignition')
     adaptiveApi.stitchGhost(chapterId, {
       fragment: '', rolling_prefix: '', mode: 'open',
       target_chars: 700,
@@ -890,7 +870,6 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const target = findOutlineNotes(editor).find((n) => n.id === noteId && n.note.trim())
     if (!target) return
     const note = target.note.trim()
-    logCollabEvent(chapterId, 'capsule_expand', { note_id: noteId })
 
     // 双端缝合上下文：胶囊前正文尾 500 字 + 胶囊后正文头 300 字
     // （章末/回补段后无正文时 after 为空 → 后端退化为单端锚定）
@@ -939,8 +918,11 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
     const chapterId = opts.getChapterId()
     if (!chapterId) return null
     hideThinking()  // 显式动作 → 隐藏指示器
+    // 审计以库内正文为对象，而编辑器落库有 1s 防抖：先冲刷挂起保存并等在飞写库
+    // 返回，否则最后一句可能没进库 → 残句检查把屏上的完整句误报成「没写完」
+    flushPendingChapterSave()
+    await awaitPendingSaveSettled()
     opts.aiLaneRef.value = 'analyzing'
-    logCollabEvent(chapterId, 'finish')
     try {
       const result = await adaptiveApi.finish(chapterId)
       // 审计报告写入 ref（InspectorPanel 渲染）

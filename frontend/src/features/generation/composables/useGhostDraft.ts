@@ -4,13 +4,15 @@ import { noHistory } from '../../chapter-editor/noHistory'
 import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { useToast } from '../../../composables/useToast'
 import type { GhostWarning } from '../../../services/api/domain/adaptive.api'
+import { trackAdoptedGhost } from './useGhostPairTracker'
+import { addUnreviewedMark } from '../../../extensions/GhostTrack'
 
 /**
  * NLE-ADF 2.0 幽灵草稿控制器（useGhostDraft）。
  *
  * 管理文档中"待确认 AI 草稿"（GhostDraftMark 文本）的全生命周期：
- *   begin → append × N（SSE chunk 流式灌入）→ commit（Enter 锁死摘 mark）
- *         ↘ evaporate（Esc 蒸发连节点删除）
+ *   begin → append × N（SSE chunk 流式灌入）→ commit（03 三键：Tab 锁死摘 mark；
+ *         Enter 暂留零承诺；Esc 蒸发连节点删除，60s 找回窗内 Space 原样重现）
  *
  * 全局单例：同一时刻全文档至多一个幽灵区（交互契约——作者的注意力焦点唯一）。
  *
@@ -29,6 +31,120 @@ export type GhostSource = 'stitch' | 'render' | 'outline' | null
 
 /** 当前是否存在幽灵草稿（响应式） */
 export const ghostActive = ref(false)
+
+// ============================================================
+// 03 下一阶段：三键交互配套态（暂留/找回窗/上膛缓冲）
+// ============================================================
+
+/** 暂留位（Enter 零承诺）：幽灵保持 mark 停在原地，光标移到其下新行续写；
+ *  一期只允许一个暂留位（新暂留/新召唤会蒸发旧的）；随时回来 Tab 转正 / Esc 丢弃。
+ *  ⚠ 不存 from/to 静态位置——暂留期间作者编辑会让任何缓存位置漂移（删错区间
+ *  =数据损失）；一切范围操作现扫 ghostDraft mark（对编辑天然免疫）。 */
+export const ghostParked = ref<{ source: GhostSource } | null>(null)
+
+/** 蒸发找回窗（Esc 后重按 Space 原样重现，不重新生成）；一次性消费 */
+export const REVIVE_WINDOW_MS = 60_000
+let _lastEvaporated: { text: string; source: GhostSource; ts: number } | null = null
+
+/** 真流式标志（03 三键「未灌完不上膛」的判据）：beginGhost 起、GHOST_DONE 止。
+ *  区别于 ghostActive（幽灵在屏到采纳/蒸发为止）——流式只是其中前半程；
+ *  session 的 stitching ref 是旧路径遗物从未置真，不能当判据。 */
+export const ghostStreaming = ref(false)
+
+/** 灌完缓冲窗（GHOST_DONE 后短窗内按键不触发采纳——防生成延迟期误触） */
+export const GHOST_READY_BUFFER_MS = 400
+let _ghostReadyAt = 0
+
+/** 书签跟踪的章上下文（WorkspaceView 切章时设置；commitGhost 需要它归档） */
+let _pairChapterId: string | null = null
+export function setGhostPairContext(chapterId: string | null): void {
+  _pairChapterId = chapterId
+}
+
+/** GHOST_DONE 到达时调（useAdaptiveAssist）：关流式标志 + 开缓冲窗 */
+export function markGhostDone(): void {
+  ghostStreaming.value = false
+  _ghostReadyAt = Date.now()
+}
+
+/** 三键是否「上膛」：流式中或灌完缓冲窗内都算未上膛（按键只打断不采纳）。 */
+export function ghostActionReady(): boolean {
+  if (ghostStreaming.value) return false
+  return Date.now() - _ghostReadyAt >= GHOST_READY_BUFFER_MS
+}
+
+/** Esc 找回：窗内重按触发键原样重现（一次性消费；不重新生成） */
+export function tryReviveGhost(): boolean {
+  if (!_lastEvaporated) return false
+  if (Date.now() - _lastEvaporated.ts > REVIVE_WINDOW_MS) {
+    _lastEvaporated = null
+    return false
+  }
+  const { text, source } = _lastEvaporated
+  _lastEvaporated = null
+  beginGhost(source || 'stitch')
+  appendGhost(text)
+  return true
+}
+
+/** 暂留段是否包含光标（回场 Tab 转正 / Esc 丢弃的命中判据；现扫 mark 免漂移） */
+export function parkedContainsCursor(): boolean {
+  if (!ghostParked.value) return false
+  const editor = chapterEditorHandle.value
+  const range = editor ? findGhostRange() : null
+  if (!editor || !range) return false
+  const pos = editor.state.selection.from
+  return pos >= range.from && pos <= range.to
+}
+
+/** 蒸发暂留段（强信号：看过了但没要——比未看即蒸发更真实，喂学着闭嘴）。
+ *  范围现扫 mark：暂留期间作者编辑会使任何缓存位置漂移，删错区间=数据损失。 */
+export function discardParkedGhost(): void {
+  const parked = ghostParked.value
+  const editor = chapterEditorHandle.value
+  const range = editor ? findGhostRange() : null
+  ghostParked.value = null
+  if (!parked || !editor || !range) return
+  dispatchCollabEvent('ghost_discard', {
+    source: parked.source,
+    parked: 1,
+  })
+  editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).run()
+}
+
+/** 采纳暂留段（回场 Tab）：清暂留态后走 commitGhost 统一出口（书签照样跟踪）。 */
+export function adoptParkedGhost(): string {
+  ghostParked.value = null
+  return commitGhost()
+}
+
+/** Enter 暂留（零承诺）：幽灵不蒸发停在原地；光标移到其下方新起一行。 */
+export function parkGhost(): boolean {
+  if (!ghostActive.value) return false  // 暂留只对在屏活幽灵有意义（重入防御）
+  const editor = chapterEditorHandle.value
+  const range = findGhostRange()
+  if (!editor || !range) return false
+  // 一期只允许一个暂留位：新暂留蒸发旧的（beginGhost 已保证 parked 不会与
+  // 活幽灵并存，此分支仅为防御性完备）
+  if (ghostParked.value) discardParkedGhost()
+  ghostParked.value = { source: ghostSource.value }
+  ghostActive.value = false
+  ghostStreaming.value = false
+  ghostSource.value = null
+  ghostAnchorPos = null
+  ghostWarnings.value = []
+  ghostWash.value = { hits: [], original_text: '' }
+  // 幽灵文本保持 mark 原样停在原地；在其末段后新起一行放光标
+  const paraEnd = editor.state.doc.resolve(range.to).after()
+  const size = editor.state.doc.content.size
+  const insertAt = Math.min(paraEnd, size)
+  editor.chain()
+    .command(noHistory)
+    .insertContentAt(insertAt, { type: 'paragraph' })
+    .setTextSelection(Math.min(insertAt + 1, editor.state.doc.content.size))
+    .run()
+  return true
+}
 /**
  * 幽灵结束原因（第二冲程 2026-09-09 实测拍板）：sticky 卡舱回弹的分流信号——
  * 'commit'=Enter 采纳（这一瞬已写完，舱不回弹打扰）；'other'=蒸发/收尸/失败/
@@ -194,9 +310,12 @@ export function beginGhost(
   degraded = false,
   anchorPos?: number | null,
 ): void {
-  // 防御：已有幽灵时先蒸发（正常流程不会叠加，异常重入不污染文档）
+  // 防御：已有幽灵时先蒸发（正常流程不会叠加，异常重入不污染文档）；
+  // 暂留位同理让位（一期一个暂留位——新召唤=旧暂留的最终丢弃）
   if (ghostActive.value) evaporateGhost()
+  if (ghostParked.value) discardParkedGhost()
   ghostEndReason.value = 'other'   // 每枚新幽灵从「原因未知」起算（回弹分流见声明）
+  ghostStreaming.value = true      // 流式开始（GHOST_DONE/markGhostDone 关）
   ghostSource.value = source
   ghostOriginal.value = ''
   ghostDegraded.value = degraded
@@ -366,6 +485,16 @@ export function commitGhost(): string {
     })
     .setTextSelection(range.to)
     .run()
+  // 03 下一阶段 M1：书签开始跟踪（bad=AI 原样产出 ghostOriginal；首尾位置系统
+  // 自知放置必精确）+ M3 未审虚线标记（碰过即消）。细纲扩写采纳标 capsule 源。
+  trackAdoptedGhost(
+    _pairChapterId || '',
+    ghostOriginal.value,
+    range.from,
+    range.to,
+    ghostSource.value === 'outline' ? 'capsule' : 'auto_ghost',
+  )
+  addUnreviewedMark(editor, range.from, range.to)
   // 锁死闪烁：薄荷绿高亮脉冲一次后摘除（350ms；作者继续打字位置漂移时
   // 摘除范围按原记录，Highlight 只影响底色、误摘无害）
   const flashFrom = range.from
@@ -392,6 +521,7 @@ export function commitGhost(): string {
   // 疑点随快检在 GHOST_DONE 灌入；作者可能已微调幽灵文本，话术按「参照」口径。
   const adoptedWarnings = ghostWarnings.value
   ghostActive.value = false
+  ghostStreaming.value = false
   ghostSource.value = null
   ghostAnchorPos = null
   ghostWarnings.value = []
@@ -415,11 +545,16 @@ export function evaporateGhost(): void {
       ghost_token: _lastGhostMeta?.token || '',
       sample_ids: _lastGhostMeta?.sampleIds || [],
     })
-    // 失败理由埋点（2026-08-25 实测主线「失败分类学」）：先取文本再删——
-    // ≥30 字的蒸发才问（琐碎蒸发多是试键/误触，问了也是噪声）；
-    // 可点可无视 8s 自灭，零打扰红线；理由枚举见 InsightsView COLLAB_KIND_LABELS。
     const discardedText = editor.state.doc.textBetween(range.from, range.to, '\n\n')
+    // 03 下一阶段 M2：蒸发找回窗载荷——窗内重按 Space 原样重现（不重新生成）；
+    // 记当前屏上文本（含作者微调——重现的是他刚看到的那个样子）
+    _lastEvaporated = discardedText.trim()
+      ? { text: discardedText, source, ts: Date.now() }
+      : null
     editor.chain().command(noHistory).deleteRange({ from: range.from, to: range.to }).run()
+    // 失败理由埋点（2026-08-25 实测主线「失败分类学」）：≥30 字的蒸发才问
+    // （琐碎蒸发多是试键/误触，问了也是噪声）；可点可无视 8s 自灭，零打扰红线；
+    // 05 瘦身后仍保留（机制传感器采集，事件词表见 adaptive/events.py 模块头）。
     if (discardedText.trim().length >= 30) {
       const mk = (reason: string, label: string) => ({
         label,
@@ -440,6 +575,7 @@ export function evaporateGhost(): void {
     }
   }
   ghostActive.value = false
+  ghostStreaming.value = false
   ghostSource.value = null
   ghostOriginal.value = ''
   ghostDegraded.value = false
@@ -468,6 +604,7 @@ export function reapGhostIfDead(): void {
     sample_ids: _lastGhostMeta?.sampleIds || [],
   })
   ghostActive.value = false
+  ghostStreaming.value = false
   ghostSource.value = null
   ghostOriginal.value = ''
   ghostDegraded.value = false

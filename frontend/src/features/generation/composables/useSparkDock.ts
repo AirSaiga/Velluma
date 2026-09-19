@@ -73,7 +73,7 @@ export const sparkAnchorPos = ref<number | null>(null)
  * ⚠ 2026-08-28 排查发现：setSparkSticky 曾全工程零调用（死代码）——缝合后
  * 舱即被 hideSparkDock 永久收走，"连续吸附多件缝合"从未生效。现复活：
  * 缝合触发时 setSparkSticky + stashSparkDock（藏舱让位幽灵），幽灵落定
- * （蒸发/失败回弹；Enter 采纳自第二冲程 2026-09-09 起不回弹——采纳即写完）
+ * （蒸发/失败/暂留回弹；Tab 采纳不回弹——采纳即写完。03 三键改 Tab 采纳、Enter 暂留）
  * 由下方 watch 自动 restore——打字不再收舱。
  */
 export const sparkSticky = ref(false)
@@ -144,6 +144,24 @@ export function setSparkParts(parts: SparkPart[]): void {
   _baseParts.value = parts
 }
 
+// ---- 零件归属章（2026-09-17 回台秒弹契约修复）----
+// 写作台无 keep-alive，切页往返 = remount；此前 WorkspaceView 的章切换 watch
+// 首跑（prev=undefined）恒清舱，把 detach 刻意保留的「回台秒弹」零件当场清空
+// ——感知常驻白做、感知链全部重跑。现在 setSparkParts 携章 id 记录归属，
+// remount 首跑只清「归属 ≠ 当前章」的存货（旧章/旧书零件绝不落进新章画布）。
+let _partsOwnerChapterId: string | null = null
+
+/** 带归属写入零件（心跳响应路径专用）；不传 chapterId 的调用维持旧语义（不动归属） */
+export function setSparkPartsForChapter(parts: SparkPart[], chapterId: string): void {
+  _partsOwnerChapterId = chapterId
+  _baseParts.value = parts
+}
+
+/** 当前舱内零件归属章（null=从未记录/已清空） */
+export function getSparkPartsChapterId(): string | null {
+  return _partsOwnerChapterId
+}
+
 /**
  * 注入额外挂件（章级兜底，现仅用于切章清空）。
  * 角色名兜底件已废弃——与"镜头碎片"定位冲突。
@@ -177,7 +195,7 @@ export function restoreSparkDock(): void {
 // nextTick 推迟：本 watch 在模块加载时注册，先于 session 的 authorLane 回写
 // watch 执行——不推迟的话弹舱时闸门还停在 ghostStitching，回弹被静默吞掉。
 // 门禁由 showSparkDock 自守。
-// 回弹分流（第二冲程 2026-09-09 实测拍板）：Enter 采纳（ghostEndReason='commit'）
+// 回弹分流：Tab 采纳（ghostEndReason='commit'，03 三键起 Tab；Enter 已改暂留会回弹）
 // 不回弹——采纳=这一瞬已写完，弹回是打扰（08-28 的「连续吸附」语义随数字键
 // 直开单镜头而退役）；蒸发/收尸/失败回弹——镜头不对，换一枚正好要舱。Tab
 // 随时可再唤，无损失。

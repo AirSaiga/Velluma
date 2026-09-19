@@ -31,6 +31,8 @@ import { noHistory } from '../../chapter-editor/noHistory'
 import {
   ghostActive, ghostSource, ghostDirty,
   beginGhost, appendGhost, ghostText, commitGhost, evaporateGhost,
+  parkGhost, discardParkedGhost, parkedContainsCursor, adoptParkedGhost,
+  tryReviveGhost, ghostActionReady, ghostParked, ghostStreaming,
 } from './useGhostDraft'
 import {
   sparkDockVisible, attachedParts,
@@ -40,7 +42,6 @@ import {
 } from './useSparkDock'
 import { beatDockVisible, beatCards, showBeatDock, hideBeatDock } from './useBeatDock'
 import { assistEnabled } from './useAssistEnabled'
-import { dispatchCollabEvent } from '../../../composables/collabEventBus'
 import { defatParagraphAtCursor } from '../../../shared/utils/defat'
 
 // ============================================================
@@ -185,6 +186,8 @@ export interface GenerationSession {
   setAdaptiveBurst: (fn: ((card: { event: string; anchors?: string[] } | null) => void) | null) => void
   /** 注入 adaptive 零件即点取件函数（Tab 唤起卡片舱但无缓存零件时触发） */
   setAdaptiveSummon: (fn: ((forceRefresh?: boolean) => void) | null) => void
+  /** 03 三键「未灌完不上膛」：中止在飞 SSE（流式期间按键只打断不采纳） */
+  setAdaptiveAbort: (fn: (() => void) | null) => void
 }
 
 export function useGenerationSession(): GenerationSession {
@@ -291,6 +294,16 @@ export function useGenerationSession(): GenerationSession {
     return true
   }
 
+  /** 03 三键「上膛」判定：流式中（中止流）或灌完缓冲窗内 → 按键只打断不采纳。
+   *  返回 true=事件已被吃掉（未上膛，调用方直接 return）。判据在 useGhostDraft
+   *  的 ghostStreaming（begin→GHOST_DONE）——session 的 stitching 是旧路径
+   *  遗物从未置真，不能当流式判据（交叉验证修正）。 */
+  function ghostArmedGuard(): boolean {
+    if (ghostActionReady()) return false
+    if (ghostStreaming.value) _adaptiveAbortFn?.()  // 只打断：中止流式，已灌部分留待裁决
+    return true
+  }
+
   // ===== 碎片快照（幽灵时间轴回拨的数据源） =====
   // 每次碎片锁死存一份完整文档纯文本（章级体量，快照极便宜）。
   // 划轨 = 全量恢复该时刻文档——语义直白：回到那一次锁死的瞬间。
@@ -323,8 +336,10 @@ export function useGenerationSession(): GenerationSession {
     fragmentCounts.value = {}
     fragmentSnapshots.value = []
     beatBaseStack.length = 0
-    // 防御：复位时幽灵草稿不该存在；存在即蒸发（AI 临时元素零残留）
+    // 防御：复位时幽灵草稿不该存在；存在即蒸发（AI 临时元素零残留）；
+    // 暂留段同理让位（03 三键：复位=离开本章，暂留不跨章）
     if (ghostActive.value) evaporateGhost()
+    if (ghostParked.value) discardParkedGhost()
   }
 
   let abortController: AbortController | null = null
@@ -458,7 +473,7 @@ export function useGenerationSession(): GenerationSession {
   }
 
   // P0-4 接线：幽灵生命周期 ↔ authorLane.ghostStitching（枚举此前从未赋值）。
-  // 单点 watch 覆盖全部进出路径（SSE onStart / Enter 落地 / Esc 蒸发 / 出错回滚）；
+  // 单点 watch 覆盖全部进出路径（SSE onStart / Tab 落地 / Enter 暂留 / Esc 蒸发 / 出错回滚）；
   // 只在 composing↔ghostStitching 之间往返，不触碰 idle（会话未激活不介入）。
   watch(ghostActive, (active) => {
     if (!adaptiveMode.value) return
@@ -500,6 +515,13 @@ export function useGenerationSession(): GenerationSession {
   let _adaptiveSummonFn: ((forceRefresh?: boolean) => void) | null = null
   function setAdaptiveSummon(fn: ((forceRefresh?: boolean) => void) | null) {
     _adaptiveSummonFn = fn
+  }
+
+  // adaptive 在飞流中止注入器（03 三键「未灌完不上膛」：流式期间按键只打断
+  // 不采纳——中止 SSE，已灌部分保持幽灵态待后续裁决）
+  let _adaptiveAbortFn: (() => void) | null = null
+  function setAdaptiveAbort(fn: (() => void) | null) {
+    _adaptiveAbortFn = fn
   }
 
   function reset() {
@@ -594,7 +616,6 @@ export function useGenerationSession(): GenerationSession {
       if (editor && t?.isContentEditable && !ghostActive.value && assistEnabled.value) {
         e.preventDefault()
         e.stopPropagation()
-        dispatchCollabEvent('capsule_create', { via: 'alt_o' })
         editor.commands.insertOutlineNote()
       }
       return
@@ -609,6 +630,16 @@ export function useGenerationSession(): GenerationSession {
       if (tabTarget?.isContentEditable) {
         e.preventDefault()
         e.stopPropagation()
+        // 03 三键：Tab=正承诺（采纳）——幽灵在屏时转正为正文（书签开始跟踪，
+        // 03 M1）；暂留段上有光标时回场转正。未上膛（流式/缓冲窗）只打断不采纳。
+        if (ghostActive.value) {
+          if (!ghostArmedGuard()) commitGhostFragment()
+          return
+        }
+        if (ghostParked.value && parkedContainsCursor()) {
+          adoptParkedGhost()
+          return
+        }
         if (!ghostActive.value) {
           // 卡片舱唯一入口（2026-09-09 用户拍板）：自动弹出全线退役
           // （SPARK_DOCK_AUTO_POPUP=false），Tab 恒**强制重算**唤醒——
@@ -637,12 +668,19 @@ export function useGenerationSession(): GenerationSession {
     // 编辑器外的表单控件不拦（岔路面板自定义走向文本框等）
     if (target && !target.isContentEditable && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
 
-    // Esc：蒸发幽灵 > 关走向卡舱 > 关 Dock > 清空吸附（逐层退出 AI 临时元素）
+    // Esc：蒸发幽灵 > 丢弃暂留段（光标在内时） > 关走向卡舱 > 关 Dock > 清空吸附
+    //（逐层退出 AI 临时元素）
     if (e.key === 'Escape') {
       if (ghostActive.value) {
         e.preventDefault()
         e.stopPropagation()
         evaporateGhost()
+        return
+      }
+      if (ghostParked.value && parkedContainsCursor()) {
+        e.preventDefault()
+        e.stopPropagation()
+        discardParkedGhost()  // 暂留最终丢弃=「看过了但没要」强信号，喂学着闭嘴
         return
       }
       if (beatDockVisible.value) {
@@ -714,11 +752,12 @@ export function useGenerationSession(): GenerationSession {
       }
       return
     }
-    // Enter：幽灵在屏 = 锁死碎片（摘 mark 变正文；拦默认防多插一个换行）
+    // Enter：幽灵在屏 = 暂留（03 三键：零承诺——最易手滑的键映射到无害动作，
+    // 幽灵停在原地光标下移新行；随时回来 Tab 转正 / Esc 丢弃）
     if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && ghostActive.value) {
       e.preventDefault()
       e.stopPropagation()
-      commitGhostFragment()
+      if (!ghostArmedGuard()) parkGhost()
       return
     }
     // Ctrl+Enter：锁死本拍（创作态/代笔裁决态）或沉淀当前段（adaptive composing 态）
@@ -772,7 +811,7 @@ export function useGenerationSession(): GenerationSession {
           // 缝合触发：清吸附意图 + 藏舱让位幽灵（2026-08-28 修复：此前 hideSparkDock
           // 直接退出舱、且 setSparkSticky 全工程零调用——「连续吸附多件缝合」从未生效，
           // 打一个字舱就永久消失，每件都要重新停顿 4s/Tab 唤醒。现改为 sticky+stash：
-          // 视觉上藏（避免与幽灵草稿重叠），幽灵落定（Enter/Esc）后自动弹回，
+          // 视觉上藏（避免与幽灵草稿重叠），幽灵落定（Tab/Esc）后自动弹回，
           // 打字不再收舱——Esc 关舱仍是唯一退出 sticky 的手动出口）
           clearAttachedParts()
           setSparkSticky()
@@ -783,6 +822,8 @@ export function useGenerationSession(): GenerationSession {
         if ($fromAd.parent.textContent.trim() !== '') {
           e.preventDefault()
           e.stopPropagation()
+          // 03 找回窗：Esc 蒸发后短窗内重按 Space 原样重现上一枚幽灵（不重新生成）
+          if (tryReviveGhost()) return
           _adaptiveContinueFn?.('continue', [])
           // 顺句续写同样藏舱让位幽灵（2026-08-29 实测事故：此分支漏了
           // sticky+stash——幽灵流式插入触发编辑器活动，非 sticky 态走
@@ -844,6 +885,7 @@ export function useGenerationSession(): GenerationSession {
     triggerAdaptiveFinish,
     setAdaptiveBurst,
     setAdaptiveSummon,
+    setAdaptiveAbort,
   }
 }
 

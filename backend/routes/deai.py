@@ -33,6 +33,9 @@ class DeaiPairCreate(BaseModel):
     good: str
     book_id: Optional[str] = None
     chapter_id: Optional[str] = None
+    # 03 下一阶段 §5：manual_mark（手动两步）/ auto_ghost（书签自动捕获）/
+    # capsule（细纲扩写采纳）——同池不同源，入库侧分组统计质量
+    source: Optional[str] = None
 
 
 @router.post("/pairs")
@@ -44,6 +47,7 @@ async def create_deai_pair(payload: DeaiPairCreate):
             good=payload.good,
             book_id=payload.book_id,
             chapter_id=payload.chapter_id,
+            source=payload.source or "manual_mark",
         )
     except PairValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))

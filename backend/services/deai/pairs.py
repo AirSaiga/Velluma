@@ -65,11 +65,14 @@ def save_pair(
     good: str,
     book_id: Optional[str] = None,
     chapter_id: Optional[str] = None,
+    source: str = "manual_mark",
 ) -> dict:
     """写入一对训练样本。返回 {"id", "total"}。
 
     副作用：追加一行到 data/deai_pairs.jsonl（不存在则创建）。
     抛 PairValidationError：bad/good 为空、bad 超 100 字、good 超硬顶。
+    source（03 下一阶段 §5）：manual_mark=手动两步 / auto_ghost=书签自动捕获 /
+    capsule=细纲扩写采纳——入库侧分组统计质量用；白名单外回退 manual_mark。
     """
     bad = (bad or "").strip()
     good = (good or "").strip()
@@ -85,13 +88,15 @@ def save_pair(
         raise PairValidationError(
             f"改后 {len(good)} 字异常（上限 {GOOD_MAX_CHARS}），请确认选中的是改后那一段"
         )
+    if source not in ("manual_mark", "auto_ghost", "capsule"):
+        source = "manual_mark"
 
     record = {
         "id": "m" + uuid.uuid4().hex[:10],
         "bad": bad,
         "good": good,
         "meta": {
-            "source": "manual_mark",
+            "source": source,
             "book_id": book_id or "",
             "chapter_id": chapter_id or "",
             "ts": datetime.now(timezone.utc).isoformat(),
