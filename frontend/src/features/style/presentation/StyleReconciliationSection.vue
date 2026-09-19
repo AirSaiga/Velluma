@@ -95,11 +95,11 @@ const summary = computed<string[]>(() => {
   const [cvLo, cvHi] = props.fingerprint?.reference.cv_healthy || [0.35, 0.8]
   const avgCv = avg(last.map(c => c.fingerprint.sentence_len_cv))
   if (avgCv < cvLo) {
-    notes.push(`最近三章句长起伏 ${avgCv.toFixed(2)}，低于健康下限 ${cvLo}——句子偏匀速，是 AI 腔的典型征兆。`)
+    notes.push(`最近三章句长起伏 ${avgCv.toFixed(2)}，低于参考下限 ${cvLo}——句子偏匀速。`)
   } else if (avgCv > cvHi) {
     notes.push(`最近三章句长起伏 ${avgCv.toFixed(2)}，节奏很跳（高于 ${cvHi}）——若非有意为之，检查短句连发。`)
   } else {
-    notes.push(`句长起伏 ${avgCv.toFixed(2)}，在健康区间内。`)
+    notes.push(`句长起伏 ${avgCv.toFixed(2)}，在参考区间内。`)
   }
 
   const target = props.fingerprint?.reference.dialogue_target
@@ -134,7 +134,7 @@ const rangeLabel = computed(() => {
   <section id="style-sec-recon" class="style-section">
     <header class="sec-head">
       <h2 class="sec-title">逐章核对</h2>
-      <p class="sec-sub">每章实测和目标区间比一比——同一把尺子量你的样本和 AI 的章节，数字可直接互相印证。</p>
+      <p class="sec-sub">每章的实测和你的基准比一比——量你的字和量章节用的是同一把尺子，数字可以直接互相印证。</p>
     </header>
 
     <div v-if="chapters.length === 0" class="empty-note">本书还没有章节正文——开始写作后，这里会长出趋势线。</div>
@@ -146,7 +146,7 @@ const rangeLabel = computed(() => {
       <!-- 句长起伏 -->
       <div class="chart-card">
         <div class="chart-head">
-          <span class="chart-title">句长起伏（健康带 {{ cvSeries.band?.[0] }}~{{ cvSeries.band?.[1] }}）</span>
+          <span class="chart-title">句长起伏（参考范围 {{ cvSeries.band?.[0] }}~{{ cvSeries.band?.[1] }}）</span>
         </div>
         <svg :viewBox="`0 0 ${W} ${H}`" class="chart"  role="img" aria-label="句长起伏趋势">
           <rect
@@ -166,7 +166,7 @@ const rangeLabel = computed(() => {
       <div class="chart-card">
         <div class="chart-head">
           <span class="chart-title">
-            对话占比（目标带 {{ Math.round((dialogueSeries.band?.[0] || 0) * 100) }}%~{{ Math.round((dialogueSeries.band?.[1] || 1) * 100) }}%）
+            对话占比（你的基准 {{ Math.round((dialogueSeries.band?.[0] || 0) * 100) }}%~{{ Math.round((dialogueSeries.band?.[1] || 1) * 100) }}%）
           </span>
         </div>
         <svg :viewBox="`0 0 ${W} ${H}`" class="chart"  role="img" aria-label="对话占比趋势">
@@ -219,7 +219,7 @@ const rangeLabel = computed(() => {
   padding: 0.625rem 0.75rem 0.375rem;
   margin-bottom: 0.5rem;
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .chart-head {

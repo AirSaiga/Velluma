@@ -8,6 +8,7 @@
  * 仅本书审计/扫描/合并不生效）——设计稿 §6.4。
  */
 import { ref } from 'vue'
+import Icon from '../../../components/Icon.vue'
 import type { NegativeItem } from '../../../types'
 
 export interface SystemClicheItem {
@@ -59,9 +60,9 @@ function hitCount(word: string): number {
 <template>
   <section id="style-sec-negative" class="style-section">
     <header class="sec-head">
-      <h2 class="sec-title">负面清单</h2>
+      <h2 class="sec-title">禁词全量与陈词库</h2>
       <p class="sec-sub">
-        每条禁令配一条替代规则——AI 写作与审校时三层禁词（系统陈词库 + 本书黑名单 + 本清单）合并生效。
+        这里管全部禁词：逐条改词、改替代写法、换档位；下方内置陈词库可按这本书逐条豁免。
       </p>
     </header>
 
@@ -90,7 +91,6 @@ function hitCount(word: string): number {
         placeholder="禁用词/句式"
         @input="emit('dirty')"
       >
-      <span class="neg-arrow" aria-hidden="true">→</span>
       <input
         v-model="item.alternative"
         class="neg-input neg-alt"
@@ -109,13 +109,16 @@ function hitCount(word: string): number {
         title="硬禁：检查时命中即判不通过（只提示，绝不自动改正文）/ 提醒：仅提示与统计"
         @click="toggleSeverity(item)"
       >{{ item.severity === 'blocker' ? '硬禁' : '提醒' }}</button>
-      <button class="icon-danger" title="删除此条" @click="removeNegative(idx)">✕</button>
+      <button class="icon-danger" title="删除此条" @click="removeNegative(idx)">
+        <Icon name="x-mark" :size="12" />
+      </button>
     </div>
 
     <!-- 系统陈词库：全局层折叠可见 + 本书豁免 -->
     <div class="system-block">
       <button class="system-toggle" @click="showSystem = !showSystem">
-        {{ showSystem ? '▾' : '▸' }} AI 高频陈词库（全局共享 · {{ (systemCliches || []).length }} 条）
+        <Icon :name="showSystem ? 'chevron-down' : 'chevron-right'" :size="12" />
+        AI 高频陈词库（全局共享 · {{ (systemCliches || []).length }} 条）
         <span v-if="(exemptions || []).length > 0" class="exempt-count">本书已豁免 {{ exemptions!.length }} 条</span>
       </button>
       <div v-if="showSystem" class="system-list">
@@ -130,7 +133,9 @@ function hitCount(word: string): number {
           :class="{ exempted: exemptions?.includes(c.pattern) }"
         >
           <span class="system-pattern">{{ c.pattern }}</span>
-          <span v-if="c.alternative" class="system-alt">→ {{ c.alternative }}</span>
+          <span v-if="c.alternative" class="system-alt">
+            <Icon name="arrow-right" :size="12" /> {{ c.alternative }}
+          </span>
           <span v-if="c.severity === 'blocker'" class="system-sev">硬禁</span>
           <button
             class="btn-exempt"
@@ -214,11 +219,8 @@ function hitCount(word: string): number {
   padding: var(--space-2);
   margin-bottom: 0.375rem;
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
-}
-.neg-arrow {
-  display: none;
 }
 .neg-word {
   grid-area: word;
@@ -234,10 +236,6 @@ function hitCount(word: string): number {
   grid-area: hits;
   justify-self: start;
 }
-.neg-row .icon-danger {
-  grid-area: del;
-  align-self: center;
-}
 @container stylepage (max-width: 60rem) {
   .neg-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto auto;
@@ -250,16 +248,11 @@ function hitCount(word: string): number {
   padding: 0.3rem 0.5rem;
   font-size: var(--text-sm);
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 .neg-input:focus {
   border-color: var(--accent-400);
-}
-.neg-arrow {
-  flex-shrink: 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
 }
 .hit-chip {
   flex-shrink: 0;
@@ -274,10 +267,11 @@ function hitCount(word: string): number {
   color: var(--text-faint);
   background: var(--bg-tertiary);
 }
-/* 档位切换：提醒（灰、可点） ⇄ 硬禁（红 chip，同系统陈词库 system-sev 视觉） */
+/* 档位切换：提醒（灰、可点） ⇄ 硬禁（红 chip，同系统陈词库 system-sev 视觉）；
+   2026-09-17：点击目标升 --control-h-sm（28px） */
 .sev-toggle {
-  min-height: 24px;
-  padding: 0.125rem 0.4375rem;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--warn);
   background: var(--warn-bg);
@@ -294,9 +288,14 @@ function hitCount(word: string): number {
   background: var(--danger-bg);
 }
 .icon-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 0.25rem 0.375rem;
-  font-size: 0.75rem;
+  grid-area: del;
+  align-self: center;
+  width: 24px;
+  height: 24px;
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -313,7 +312,10 @@ function hitCount(word: string): number {
   margin-top: 0.875rem;
 }
 .system-toggle {
-  padding: 0.25rem 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
   font-size: var(--text-xs);
   color: var(--text-muted);
   background: transparent;
@@ -333,7 +335,7 @@ function hitCount(word: string): number {
   margin-top: 0.25rem;
   overflow-y: auto;
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .system-note {
@@ -369,7 +371,11 @@ function hitCount(word: string): number {
   text-decoration: line-through;
 }
 .system-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   font-size: var(--text-xs);
   color: var(--text-muted);

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { prefersReducedMotion } from '../../../shared/utils/motion'
 /**
  * 文风页容器（文风模块重构 S1，docs/style-module-redesign.md §6.2/§8）。
  *
@@ -12,9 +11,10 @@ import { prefersReducedMotion } from '../../../shared/utils/motion'
  * - 从样本提炼（不落库红线保持）/ 章节收编（零状态兜底）
  * presentation 组件纯渲染 + 抛事件（分层规范）。
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '../../../components/Icon.vue'
+import SegmentedPill from '../../../components/SegmentedPill.vue'
 import { styleApi, bookApi, chapterApi } from '../../../services/api'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
@@ -24,11 +24,15 @@ import StyleFingerprintSection from '../presentation/StyleFingerprintSection.vue
 import StyleNegativeSection from '../presentation/StyleNegativeSection.vue'
 import StyleReconciliationSection from '../presentation/StyleReconciliationSection.vue'
 import StyleExtractModal from '../presentation/StyleExtractModal.vue'
-import StyleAuditionBar, { type AuditionRunState } from '../presentation/StyleAuditionBar.vue'
 import StyleInboxSection from '../presentation/StyleInboxSection.vue'
 import StyleAdoptedPool, { type AdoptedGhostItem } from '../presentation/StyleAdoptedPool.vue'
 import StyleScanModal from '../presentation/StyleScanModal.vue'
-import StyleStatusStrip from '../presentation/StyleStatusStrip.vue'
+import StyleSignatureCard from '../presentation/StyleSignatureCard.vue'
+import StyleContractsSection from '../presentation/StyleContractsSection.vue'
+// v4「笔迹谱」双视图：工坊（作者日常面）+ 实验室（全部数据与指标）
+import StyleBanList from '../presentation/StyleBanList.vue'
+import StyleRulesSwitches from '../presentation/StyleRulesSwitches.vue'
+import StyleSandboxSection, { type SandboxRunState } from '../presentation/StyleSandboxSection.vue'
 import type {
   StyleCard,
   StyleFingerprint,
@@ -38,6 +42,7 @@ import type {
   StyleInboxItem,
   StyleScanResult,
   StyleScanHit,
+  TextureContractItem,
 } from '../../../types'
 
 const route = useRoute()
@@ -83,6 +88,9 @@ const lockedKeys = ref<string[]>([])
 // 系统陈词库 + 本书豁免（补全批）
 const systemCliches = ref<Array<{ id: string; pattern: string; alternative?: string | null; severity: string }>>([])
 const clicheExemptions = ref<string[]>([])
+// 写作规矩（质感契约按书覆盖，2026-09 收编批）：系统默认 + 本书定制生效视图
+const textureContracts = ref<TextureContractItem[]>([])
+const contractsSectionRef = ref<InstanceType<typeof StyleContractsSection> | null>(null)
 // 存量黄金片段数（导入样本库入口的显隐依据）
 const goldenSnippetCount = ref(0)
 
@@ -98,7 +106,7 @@ const chapters = ref<Array<{ id: string; chapter_number: number; title: string |
 const scopeChapterId = ref('')
 const scopeHasOverride = ref(false)
 // 试听（A/B 双轨）
-const auditionRuns = ref<{ baseline: AuditionRunState; styled: AuditionRunState }>({
+const auditionRuns = ref<{ baseline: SandboxRunState; styled: SandboxRunState }>({
   baseline: { running: false, text: '' },
   styled: { running: false, text: '' },
 })
@@ -136,12 +144,6 @@ const growthStage = computed<'ramp' | 'early' | 'full'>(() => {
 const corpusReady = computed(() => (fingerprint.value?.corpus?.word_count || 0) > 0)
 const negativeActiveCount = computed(() => negativeList.value.filter(n => n.word.trim()).length)
 
-/** 试听默认测试段：样本库里最长的一条（截 600 字） */
-const auditionDefaultText = computed(() => {
-  const longest = [...samples.value].sort((a, b) => b.word_count - a.word_count)[0]
-  return longest ? longest.content.slice(0, 600) : ''
-})
-
 const fingerprintBySample = computed<Record<string, StyleFingerprint['samples'][number]['fingerprint']>>(() => {
   const map: Record<string, StyleFingerprint['samples'][number]['fingerprint']> = {}
   for (const s of fingerprint.value?.samples || []) {
@@ -172,7 +174,7 @@ async function loadAll() {
   if (!bookId) return
   isLoading.value = true
   try {
-    const [styleCard, samplesData, fingerprintData, inboxData, chapterData, exemptionData, systemClicheData, goldenData] = await Promise.all([
+    const [styleCard, samplesData, fingerprintData, inboxData, chapterData, exemptionData, systemClicheData, goldenData, textureData] = await Promise.all([
       styleApi.get(bookId).catch(() => null),
       styleApi.listSamples(bookId).catch(() => []),
       styleApi.getFingerprint(bookId, true, 50).catch(() => null),
@@ -181,6 +183,7 @@ async function loadAll() {
       styleApi.getClicheExemptions(bookId).catch(() => []),
       styleApi.listSystemCliches().catch(() => []),
       bookApi.getGoldenSnippets(bookId).catch(() => ({ golden_snippets: [] })),
+      styleApi.getTextureContracts(bookId).catch(() => ({ contracts: [] })),
     ])
 
     if (styleCard) {
@@ -205,6 +208,7 @@ async function loadAll() {
     inboxItems.value = inboxData as StyleInboxItem[]
     clicheExemptions.value = exemptionData as string[]
     systemCliches.value = systemClicheData as typeof systemCliches.value
+    textureContracts.value = ((textureData as { contracts?: TextureContractItem[] })?.contracts || [])
     goldenSnippetCount.value = ((goldenData as { golden_snippets?: string[] })?.golden_snippets || []).length
     chapters.value = ((chapterData as any[]) || [])
       .map((c: any) => ({ id: String(c.id), chapter_number: c.chapter_number, title: c.title || c.chapter_name || null }))
@@ -213,7 +217,8 @@ async function loadAll() {
     status.value = 'idle'
     errorText.value = ''
 
-    // 深链：?chapter=<id> 直达章级特例编辑（副驾「本章文风」卡跳转入口）
+    // 深链：?chapter=<id> 直达章级特例编辑（原副驾「本章」入口已下线，直达能力保留；
+    // 章级特例仍可从本页作用域切换进入，后端章级卡读写兼容不动）
     const queryChapter = route.query.chapter as string
     if (queryChapter && chapters.value.some(c => c.id === queryChapter)) {
       await switchScope(queryChapter)
@@ -316,7 +321,7 @@ async function collectAdopted(item: AdoptedGhostItem) {
     await styleApi.createSample(bookId, { content: item.text, source: 'adopted_ghost' })
     adoptedPool.value = adoptedPool.value.filter((g) => g !== item)
     await reloadSamplesAndFingerprint()
-    showToast('已收为样本（AI 来源，每批示范至多占 1 条）', 'success')
+    showToast('已收进字帖（AI 写的，每次续写至多当一小段范例）', 'success')
   } catch (error: unknown) {
     showToast('收编失败: ' + ((error as Error)?.message || ''), 'error')
   } finally {
@@ -331,9 +336,9 @@ async function uploadSample(content: string, sceneType: AuthorSampleSceneType, e
   try {
     await styleApi.createSample(bookId, { content, scene_type: sceneType, era })
     await reloadSamplesAndFingerprint()
-    showToast('样本已存入——指纹已更新', 'success')
+    showToast('已收进字帖——AI 马上按新字学', 'success')
   } catch (error: unknown) {
-    showToast('上传失败: ' + ((error as Error)?.message || ''), 'error')
+    showToast('存入失败: ' + ((error as Error)?.message || ''), 'error')
   } finally {
     isBusy.value = false
   }
@@ -363,7 +368,7 @@ async function importFromGolden() {
     const created = await styleApi.createSamplesFromGolden(bookId)
     await reloadSamplesAndFingerprint()
     goldenSnippetCount.value = Math.max(0, goldenSnippetCount.value - created.length)
-    showToast(created.length > 0 ? `已导入 ${created.length} 条黄金片段为文风样本` : '黄金片段都已导入过了', 'success')
+    showToast(created.length > 0 ? `已把 ${created.length} 条黄金片段收进字帖` : '黄金片段都已导入过了', 'success')
   } catch (error: unknown) {
     showToast('导入失败: ' + ((error as Error)?.message || ''), 'error')
   } finally {
@@ -375,9 +380,9 @@ async function deleteSample(sampleId: string) {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
   const ok = await showConfirm({
-    title: '删除文风样本',
-    message: '确定删除这条文风样本吗？',
-    warning: '样本及其向量将一并删除，不可恢复。',
+    title: '从字帖删字',
+    message: '确定从字帖里删掉这段字吗？',
+    warning: '删掉后不可恢复。',
   })
   if (!ok) return
   try {
@@ -397,7 +402,7 @@ async function importFromChapters() {
     const created = await styleApi.createSamplesFromChapters(bookId)
     await reloadSamplesAndFingerprint()
     showToast(
-      created.length > 0 ? `已从章节收编 ${created.length} 条样本` : '有正文的章节都已收编过了，没有新增样本',
+      created.length > 0 ? `已从章节收进 ${created.length} 段字` : '有正文的章节都收进过了，没有新增',
       created.length > 0 ? 'success' : 'info',
     )
   } catch (error: unknown) {
@@ -514,7 +519,7 @@ function toggleLockAll() {
   const allLocked = PROFILE_KEYS.every(k => lockedKeys.value.includes(k))
   lockedKeys.value = allLocked ? [] : [...PROFILE_KEYS]
   if (!allLocked) {
-    showToast('已锁定全部画像字段——「从样本提炼」将不再覆盖它们（特殊文体/亲笔描述保护）', 'info')
+    showToast('已全部上锁——「开始提炼」不会再覆盖这些条目（特殊文体/亲笔描述保护）', 'info')
   }
   markDirty()
 }
@@ -523,14 +528,14 @@ async function resetOverride() {
   const bookId = bookIdFromRoute.value
   if (!bookId || !scopeChapterId.value) return
   const ok = await showConfirm({
-    title: '恢复继承书级文风',
-    message: '删除本章的文风特例，本章生成回到全书默认文风？',
-    warning: '章级特例删除后不可恢复（可重新配置）。',
+    title: '恢复用全书默认文风',
+    message: '放下这一章单独设的文风，改回全书默认？',
+    warning: '这一章的单独设置删掉后不可恢复（可以重新配）。',
   })
   if (!ok) return
   try {
     await styleApi.deleteChapterOverride(bookId, scopeChapterId.value)
-    showToast('已恢复继承书级文风', 'success')
+    showToast('已恢复全书默认文风', 'success')
     scopeChapterId.value = ''
     scopeHasOverride.value = false
     const card = await styleApi.get(bookId).catch(() => null)
@@ -560,8 +565,11 @@ async function runAuditionOnce(track: 'baseline' | 'styled', text: string) {
       bookId,
       {
         text,
-        style_override: isBaseline ? null : currentDraftOverride(),
-        use_samples: !isBaseline,
+        // 靶场批（2026-09）：栏①裸奔= bare 开关（跳过画像+样本，只留系统基座，
+        // 演示通用模型塑料味）；栏②= 草稿画像+亲笔样本全上（stitch 同源管线）
+        ...(isBaseline
+          ? { style_override: null, use_samples: false, bare: true }
+          : { style_override: currentDraftOverride(), use_samples: true }),
         target_chars: Math.min(2000, Math.max(80, text.length)),
         // 章级编辑态：baseline 轨对照的应是该章生效卡（章级特例整卡覆盖）
         ...(scopeChapterId.value ? { chapter_id: scopeChapterId.value } : {}),
@@ -601,7 +609,7 @@ async function confirmInbox(itemId: string, overrides?: { word?: string; alterna
   try {
     await styleApi.confirmInboxItem(bookId, itemId, overrides)
     if (bookId) styleApi.logStyleEvent(bookId, 'inbox_confirm')
-    showToast('已生效（负面清单已更新）', 'success')
+    showToast('已生效（拦截清单已更新）', 'success')
     // 重载卡字段 + 收件箱（负面清单变了）
     const [card, inboxData] = await Promise.all([
       scopeChapterId.value ? Promise.resolve(null) : styleApi.get(bookId).catch(() => null),
@@ -638,6 +646,113 @@ async function toggleExemption(pattern: string, exempted: boolean) {
     clicheExemptions.value = next
   } catch (error: unknown) {
     showToast('豁免设置失败: ' + ((error as Error)?.message || ''), 'error')
+  }
+}
+
+// ============ 写作规矩（质感契约按书覆盖，2026-09 收编批）============
+
+/** 以当前生效视图重建全部定制键（保留各键定制方式：rules 开关 / body 整文）。
+ *  excludeKey 可选剔除（恢复默认路径用）。 */
+function collectContractOverrides(excludeKey?: string): Record<string, { body?: string | null; disabled_rules?: string[] }> {
+  const overrides: Record<string, { body?: string | null; disabled_rules?: string[] }> = {}
+  for (const c of textureContracts.value) {
+    if (c.is_default || c.key === excludeKey) continue
+    if (c.customized_via === 'rules') {
+      overrides[c.key] = { disabled_rules: c.rules.filter(r => !r.enabled).map(r => r.key) }
+    } else {
+      overrides[c.key] = { body: c.body }
+    }
+  }
+  return overrides
+}
+
+/** 编辑保存：整体覆盖写该键契约（其余键不动——PUT 先读后写合并）。 */
+async function saveTextureContract(key: string, body: string) {
+  const bookId = bookIdFromRoute.value
+  try {
+    if (!bookId) return
+    // PUT 为整体覆盖写：以当前生效视图重建全部定制键，再叠本次修改
+    const overrides = collectContractOverrides()
+    overrides[key] = { body }
+    const res = await styleApi.putTextureContracts(bookId, overrides)
+    textureContracts.value = res.contracts || []
+    contractsSectionRef.value?.closeEdit()
+    showToast('写作规矩已保存', 'success')
+  } catch (error: unknown) {
+    showToast('写作规矩保存失败: ' + ((error as Error)?.message || ''), 'error')
+  } finally {
+    // 子件的 busy 只置位、复位全靠本容器回调——任何出口（成功/失败/无书早退）
+    // 都必须解锁，否则保存/取消双按钮永久禁用；成功路径 unlock 幂等
+    contractsSectionRef.value?.unlock()
+  }
+}
+
+/** 恢复默认：该键覆盖置空（后端 body 空=回系统默认），其余定制保留。 */
+async function resetTextureContract(key: string) {
+  const bookId = bookIdFromRoute.value
+  if (!bookId) return
+  try {
+    const overrides = collectContractOverrides(key)
+    overrides[key] = { body: null }
+    const res = await styleApi.putTextureContracts(bookId, overrides)
+    textureContracts.value = res.contracts || []
+    showToast('已恢复系统默认', 'success')
+  } catch (error: unknown) {
+    showToast('恢复默认失败: ' + ((error as Error)?.message || ''), 'error')
+  }
+}
+
+// ============ 负面词清洗库（模块 B，靶场批）============
+
+/** 主契约（写作规矩开关的数据源；注册表当前唯一契约） */
+const textureContract = computed(() => textureContracts.value[0] || null)
+const rulesBusy = ref(false)
+
+/** 划词/回车入禁：硬禁档（代码确定性拦截），去重后入清单头。 */
+function addBanWord(word: string) {
+  const w = word.trim()
+  if (!w) return
+  if (negativeList.value.some(n => n.word.trim() === w)) {
+    showToast(`「${w}」已在清洗库里`, 'info')
+    return
+  }
+  negativeList.value.unshift({ word: w, alternative: '', severity: 'blocker', id: `neg_ban_${Date.now()}` } as NegativeItem)
+  markDirty()  // 2s 防抖自动保存落库
+  showToast(`「${w}」已加入清洗库（硬禁）`, 'success')
+}
+
+function removeBanWord(index: number) {
+  negativeList.value.splice(index, 1)
+  markDirty()
+}
+
+/** 档位切换（与负面清单区同口径）：提醒 ⇄ 硬禁 */
+function toggleBanItem(item: NegativeItem) {
+  item.severity = item.severity === 'blocker' ? 'warning' : 'blocker'
+  markDirty()
+}
+
+// ============ 写作规矩开关（模块 C，靶场批）============
+
+/** 开关落库：以当前视图重建全部定制，再叠本次开关（整体覆盖写）。 */
+async function toggleTextureRule(ruleKey: string, enabled: boolean) {
+  const bookId = bookIdFromRoute.value
+  const contract = textureContract.value
+  if (!bookId || !contract || rulesBusy.value) return
+  rulesBusy.value = true
+  try {
+    const overrides = collectContractOverrides()
+    const currentDisabled = contract.rules.filter(r => !r.enabled).map(r => r.key)
+    const disabled = enabled
+      ? currentDisabled.filter(k => k !== ruleKey)
+      : [...new Set([...currentDisabled, ruleKey])]
+    overrides[contract.key] = { disabled_rules: disabled }
+    const res = await styleApi.putTextureContracts(bookId, overrides)
+    textureContracts.value = res.contracts || []
+  } catch (error: unknown) {
+    showToast('开关保存失败: ' + ((error as Error)?.message || ''), 'error')
+  } finally {
+    rulesBusy.value = false
   }
 }
 
@@ -705,19 +820,18 @@ function ignoreHit(hit: StyleScanHit) {
   scanResolvedWords.value.push(hit.word)
 }
 
-// ============ 导航 ============
-const anchors = [
-  { id: 'style-sec-samples', label: '你的字' },
-  { id: 'style-sec-fingerprint', label: '笔迹指纹' },
-  { id: 'style-sec-negative', label: '负面清单' },
-  { id: 'style-sec-recon', label: '逐章核对' },
+// v4「笔迹谱」双视图（2026-09-18 实装）：工坊（默认，作者日常面——零数字零术语）
+// ↔ 实验室（全部测量数据与设定指标）。v-show 驻留——两视图组件不卸载，
+// 贴字草稿/规矩开关/试写结果零丢失。
+const activeView = ref('work')
+const viewOptions = [
+  { label: '工坊', value: 'work' },
+  { label: '实验室', value: 'lab' },
 ]
 
-function scrollToSection(id: string) {
-  // reduced-motion 下 JS 平滑滚动同样豁免（00 期 §5.2）
-  document.getElementById(id)?.scrollIntoView({
-    behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-    block: 'start',
+function scrollToSandbox() {
+  nextTick(() => {
+    document.getElementById('style-sec-sandbox')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   })
 }
 
@@ -740,9 +854,14 @@ onUnmounted(() => clearTimeout(autosaveTimer))
         <Icon name="arrow-left" :size="16" />
       </button>
       <div class="title-block">
-        <h1 class="page-title">文风</h1>
+        <h1 class="page-title">文风设定</h1>
         <span class="book-name">{{ currentBook?.title || '' }}</span>
       </div>
+      <SegmentedPill
+        v-model="activeView"
+        :options="viewOptions"
+        class="view-seg"
+      />
       <span
         v-if="statusLabel"
         class="save-badge"
@@ -754,15 +873,6 @@ onUnmounted(() => clearTimeout(autosaveTimer))
         }"
       >{{ statusLabel }}</span>
     </header>
-
-    <nav v-if="growthStage === 'full' && !isLoading" class="anchor-nav">
-      <button
-        v-for="a in anchors"
-        :key="a.id"
-        class="anchor-btn"
-        @click="scrollToSection(a.id)"
-      >{{ a.label }}</button>
-    </nav>
 
     <main class="style-main">
       <div class="style-column" :class="{ 'ramp-mode': growthStage === 'ramp' && !isLoading }">
@@ -782,53 +892,110 @@ onUnmounted(() => clearTimeout(autosaveTimer))
           />
 
           <template v-else>
-            <!-- 顶部常驻状态条：一句话总结 + ▶ 试听（设计稿 §6.2） -->
-            <StyleStatusStrip
-              v-if="growthStage === 'full'"
-              :sample-count="fingerprint?.sample_count ?? samples.length"
-              :cv="corpusReady ? (fingerprint?.corpus.sentence_len_cv ?? null) : null"
-              :cv-healthy="fingerprint?.reference.cv_healthy ?? null"
-              :dialogue-ratio="corpusReady ? (fingerprint?.corpus.dialogue_ratio ?? null) : null"
-              :negative-count="negativeActiveCount"
-              @audition="scrollToSection('style-sec-audition')"
-            />
+            <!-- ============ 视图一 · 工坊（作者日常面：零数字零术语） ============ -->
+            <div v-show="activeView === 'work'" class="view-work">
+              <!-- 开场白：状态灯 + 一句话（替代旧状态条；只答「起作用了吗·像不像」） -->
+              <section class="opening">
+                <div>
+                  <div class="opening-eyebrow"><span class="opening-dot"></span>文风正在生效</div>
+                  <p class="opening-line">AI 每次续写，都带着你的亲笔字、避开你拦下的词——像不像你，试写两句就知道。</p>
+                </div>
+                <button class="btn-try" @click="scrollToSandbox">
+                  <Icon name="play" :size="12" />
+                  试写两句，亲眼看
+                </button>
+              </section>
 
-            <!-- S3 试听横条：调了看得见（full 才摊开，early 暂无配置可听） -->
-            <StyleAuditionBar
-              v-if="growthStage === 'full'"
-              :default-text="auditionDefaultText"
-              :runs="auditionRuns"
-              :has-style-config="hasStyleConfig"
-              @run="runAudition"
-            />
-
-            <!-- 第三幕建议：样本够了，画像还没建 -->
-            <div v-if="suggestExtract" class="suggest-banner">
-              <span>样本攒够 {{ samples.length }} 条了——要不要提炼一份文风画像？</span>
-              <button class="btn-suggest" :disabled="isExtracting" @click="openExtract">开始提炼</button>
-            </div>
-
-            <!-- 事实层配对：左边贴字（样本库+采纳池同族支流），右边立刻看到测量（00 期 §2.1） -->
-            <div class="section-row duo duo-measure">
-              <div class="duo-col duo-col--samples">
-              <StyleSampleSection
-                :samples="samples"
-                :fingerprint-by-sample="fingerprintBySample"
-                :golden-count="goldenSnippetCount"
-                :busy="isBusy"
-                @upload="uploadSample"
-                @delete="deleteSample"
-                @import-chapters="importFromChapters"
-                @import-golden="importFromGolden"
-                @update-sample="patchSample"
-              />
-              <StyleAdoptedPool
-                :items="adoptedPool"
-                :busy-id="adoptedBusyKey"
-                @collect="collectAdopted"
-              />
+              <!-- 三栏工坊：字帖（你的字）/ 试写对比（像不像的裁判）/ 底线（护栏） -->
+              <div class="workshop-row">
+                <div class="workshop-col">
+                  <div class="col-head">
+                    <h3>亲笔字帖</h3>
+                    <span class="col-hint">AI 学你写字，只认这里的字</span>
+                  </div>
+                  <StyleSampleSection
+                    :samples="samples"
+                    :fingerprint-by-sample="fingerprintBySample"
+                    :golden-count="goldenSnippetCount"
+                    :busy="isBusy"
+                    @upload="uploadSample"
+                    @delete="deleteSample"
+                    @import-chapters="importFromChapters"
+                    @import-golden="importFromGolden"
+                    @update-sample="patchSample"
+                  />
+                  <StyleAdoptedPool
+                    :items="adoptedPool"
+                    :busy-id="adoptedBusyKey"
+                    @collect="collectAdopted"
+                  />
+                </div>
+                <div class="workshop-col">
+                  <div class="col-head">
+                    <h3>试写对比</h3>
+                    <span class="col-hint">同一句开头写两遍：一遍不带你的文风，一遍带上</span>
+                  </div>
+                  <StyleSandboxSection
+                    :runs="auditionRuns"
+                    @run="text => runAudition(text, true)"
+                    @ban="addBanWord"
+                  />
+                </div>
+                <div class="workshop-col">
+                  <div class="col-head">
+                    <h3>写作底线</h3>
+                    <span class="col-hint">给 AI 立的规矩，越线就拦</span>
+                  </div>
+                  <StyleRulesSwitches
+                    :contract="textureContract"
+                    :busy="rulesBusy"
+                    @toggle="toggleTextureRule"
+                  />
+                  <StyleBanList
+                    :items="negativeList"
+                    @add="addBanWord"
+                    @remove="removeBanWord"
+                    @toggle="toggleBanItem"
+                  />
+                  <button class="scan-link" @click="openScan">用禁词清单查一整章正文——查到的每个词，由你决定：替换、收进清单，还是放过</button>
+                </div>
               </div>
 
+              <!-- 收件箱：候审横幅（空则整区隐藏；零数字——朱印代替计数） -->
+              <StyleInboxSection
+                v-if="growthStage === 'full'"
+                :items="inboxItems"
+                @confirm="confirmInbox"
+                @dismiss="dismissInbox"
+              />
+            </div>
+
+            <!-- ============ 视图二 · 实验室（全部测量数据与设定指标） ============ -->
+            <section v-show="activeView === 'lab'" class="view-lab">
+              <div class="lab-top">
+                <div>
+                  <div class="lab-eyebrow">实验室</div>
+                  <p class="lab-lead">全部数据和指标都集中在这里——从你的文字实测得出，不是 AI 猜的；怎么解读，由你定。</p>
+                </div>
+                <button class="btn-back" @click="activeView = 'work'">
+                  <Icon name="arrow-left" :size="12" />
+                  回工坊
+                </button>
+              </div>
+
+              <!-- 提炼建议（行动引导归实验室）：字攒够了，画像还没建 -->
+              <div v-if="suggestExtract" class="suggest-banner">
+                <span>亲笔字攒够了——要不要提炼一份文风画像？AI 会从你的字里总结你的写法，你过目后才生效。</span>
+                <button class="btn-suggest" :disabled="isExtracting" @click="openExtract">开始提炼</button>
+              </div>
+
+              <!-- 笔迹签名：墨迹图 + 金线 + 事实数（实验室首屏） -->
+              <StyleSignatureCard
+                :fingerprint="fingerprint"
+                :negative-count="negativeActiveCount"
+              />
+
+              <!-- 指标格 + 画像/按章设文风（高级面板） -->
               <StyleFingerprintSection
                 :fingerprint="fingerprint"
                 :positive-profile="positiveProfile"
@@ -846,36 +1013,29 @@ onUnmounted(() => clearTimeout(autosaveTimer))
                 @toggle-lock="toggleLock"
                 @lock-all="toggleLockAll"
               />
-            </div>
 
-            <template v-if="growthStage === 'full'">
-              <!-- 反馈层配对：禁令台账 + 结果回看 -->
-              <div class="section-row duo duo-feedback">
-                <StyleNegativeSection
-                  :negative-list="negativeList"
-                  :hit-counts="fingerprint?.negative_hit_counts"
-                  :system-cliches="systemCliches"
-                  :exemptions="clicheExemptions"
-                  @dirty="markDirty"
-                  @scan="openScan"
-                  @toggle-exemption="toggleExemption"
-                />
+              <!-- 逐章核对：两张趋势图 + 一句人话总结 -->
+              <StyleReconciliationSection :fingerprint="fingerprint" />
 
-                <StyleReconciliationSection :fingerprint="fingerprint" />
-              </div>
-
-              <!-- S3 收件箱：候选过目区（空则整区隐藏） -->
-              <StyleInboxSection
-                :items="inboxItems"
-                @confirm="confirmInbox"
-                @dismiss="dismissInbox"
+              <!-- 写作规矩整文编辑（日常开关在工坊右栏） -->
+              <StyleContractsSection
+                ref="contractsSectionRef"
+                :contracts="textureContracts"
+                @save="saveTextureContract"
+                @reset="resetTextureContract"
               />
-            </template>
 
-            <!-- 第二幕长成预告：数据再长一点，这些分区会展开 -->
-            <div v-else class="grow-teaser">
-              负面清单 · 逐章核对 —— 再贴 {{ Math.max(0, 3 - samples.length) }} 条样本，这些分区会在这里长出来
-            </div>
+              <!-- 禁词全量与陈词库 -->
+              <StyleNegativeSection
+                :negative-list="negativeList"
+                :hit-counts="fingerprint?.negative_hit_counts"
+                :system-cliches="systemCliches"
+                :exemptions="clicheExemptions"
+                @dirty="markDirty"
+                @scan="openScan"
+                @toggle-exemption="toggleExemption"
+              />
+            </section>
           </template>
         </template>
       </div>
@@ -912,7 +1072,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--bg-canvas);
+  background: var(--surface-desk); /* 06-modern §2.1：页面根=桌面 */
 }
 .style-header {
   display: flex;
@@ -921,7 +1081,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   flex-shrink: 0;
   padding: 0.625rem 1rem;
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--line-faint);
 }
 .icon-btn {
   display: inline-flex;
@@ -984,26 +1144,184 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   color: var(--danger);
   background: var(--danger-bg);
 }
-.anchor-nav {
-  display: flex;
-  gap: 0.25rem;
+/* ---- v4 双视图 ---- */
+/* SegmentedPill 根默认 width:100%（整行铺满用法）——页头场景必须收成内容宽，
+   否则巨轨挤塌标题（2026-09-18 真机 bug 修复） */
+.view-seg {
+  width: fit-content;
+  margin-left: auto;
   flex-shrink: 0;
-  padding: 0.375rem 1rem;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  align-self: center;
 }
-.anchor-btn {
-  padding: 0.375rem 0.875rem;
+.view-work,
+.view-lab {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.view-lab {
+  gap: var(--space-8);
+}
+
+/* ---- 开场白（工坊首行：状态灯 + 一句话，零数字零术语） ---- */
+.opening {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--line-faint);
+}
+.opening-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  letter-spacing: 0.18em;
+  color: var(--cinnabar);
+  font-weight: 600;
+}
+/* 薄荷呼吸点 = AI 正在带着你的字（状态灯，非数据） */
+.opening-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mint);
+  animation: opening-breathe 2.4s ease-in-out infinite;
+}
+@keyframes opening-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+.opening-line {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-heading);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+.btn-try {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  min-height: var(--control-h-md);
+  padding: 0 var(--space-5);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--bg-canvas);
+  background: var(--accent-500);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-left: auto;
+}
+.btn-try:hover {
+  background: var(--accent-600);
+}
+
+/* ---- 三栏工坊：字帖（窄）/ 试写对比（弹性主角）/ 底线（窄） ---- */
+.workshop-row {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  gap: var(--space-6);
+  align-items: start;
+  padding-top: var(--space-6);
+}
+.workshop-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.col-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--line-strong);
+}
+.col-head h3 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.col-hint {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+}
+@container stylepage (max-width: 60rem) {
+  .workshop-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- 扫描入口（工坊右栏底部；模态复用既有 StyleScanModal） ---- */
+.scan-link {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--lh-normal);
+  color: var(--accent-500);
+  text-align: left;
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--accent-500) 40%, transparent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.scan-link:hover {
+  background: color-mix(in srgb, var(--accent-500) 7%, transparent);
+}
+/* ---- 实验室视图头（全部数据与指标的入口叙事） ---- */
+.lab-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding-top: var(--space-6);
+}
+.lab-eyebrow {
+  font-size: var(--text-xs);
+  letter-spacing: 0.18em;
+  color: var(--cinnabar);
+  font-weight: 600;
+}
+.lab-lead {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-heading);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  min-height: var(--control-h-md);
+  margin-left: auto;
+  padding: 0 var(--space-4);
   font-size: var(--text-sm);
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.anchor-btn:hover {
+.btn-back:hover {
   color: var(--accent-500);
-  background: var(--state-hover);
+  border-color: var(--accent-400);
+}
+.view-lab .suggest-banner {
+  margin: 0;
 }
 .style-main {
   flex: 1;
@@ -1026,48 +1344,6 @@ onUnmounted(() => clearTimeout(autosaveTimer))
   min-height: 100%;
   padding-top: 0;
   padding-bottom: 0;
-}
-/* 分区行：hairline 分隔归容器（组件自身不带底线）；duo = 两栏网格 */
-.section-row {
-  border-bottom: 1px solid var(--border-color);
-  padding: var(--space-8) 0;
-}
-.section-row:first-of-type {
-  padding-top: var(--space-4);
-}
-.section-row:last-child {
-  border-bottom: none;
-}
-.section-row.duo {
-  display: grid;
-  gap: 0 2.5rem;
-}
-.section-row.duo > :first-child {
-  border-right: 1px solid var(--border-color);
-}
-/* §2.1 左列 wrapper：样本库+采纳池同族支流，纵排 */
-.duo-col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  min-width: 0;
-}
-.duo-measure {
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-}
-.duo-feedback {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-/* §2.2 窄可用宽兜底改 container query（视口断点在 minWidth 1200 的桌面应用
-   里永不触发；DPI 缩放 1093px 视口 = 容器 ~64rem，仍在双栏阈值上） */
-@container stylepage (max-width: 60rem) {
-  .section-row.duo {
-    grid-template-columns: 1fr;
-  }
-  .section-row.duo > :first-child {
-    border-right: none;
-    border-bottom: 1px dashed var(--border-color);
-  }
 }
 .loading-note {
   padding: 3rem 0;
@@ -1104,15 +1380,5 @@ onUnmounted(() => clearTimeout(autosaveTimer))
 }
 .btn-suggest:disabled {
   opacity: 0.5;
-}
-/* 第二幕长成预告（单行细带） */
-.grow-teaser {
-  padding: 0.625rem 1rem;
-  margin-top: 0.5rem;
-  font-size: 0.75rem;
-  text-align: center;
-  color: var(--text-muted);
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-md);
 }
 </style>

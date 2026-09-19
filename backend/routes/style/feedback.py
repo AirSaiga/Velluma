@@ -226,12 +226,16 @@ async def style_audition(
     与 stitch-ghost 同一套基座/画像块/示范块（build_audition_prompt）——
     作者在文风页看到的改写效果，就是写作台续写会走的效果。
     style_override 非空 = 试听未保存的草稿配置；use_samples=False = A/B 基线版。
+    bare=True = 裸奔基线（验枪靶场栏①）：画像与样本全跳过，只留系统基座，
+    演示通用模型的塑料味——与 styled 轨的差值即「字帖+规矩」的纯收益。
     """
     book = await book_repo.get_by_id(book_id)
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    if request.style_override is not None:
+    if request.bare:
+        style_positive = ""
+    elif request.style_override is not None:
         style_positive = render_style_positive(request.style_override)
     else:
         # Phase 4：章级编辑态的 baseline 取该章生效卡（章级特例整卡覆盖）
@@ -239,7 +243,7 @@ async def style_audition(
         style_positive = render_style_positive(card)
 
     author_samples: List[str] = []
-    if request.use_samples:
+    if request.use_samples and not request.bare:
         author_samples = await retrieve_author_samples(
             db, str(book_id), request.text[:200], k=2,
         )

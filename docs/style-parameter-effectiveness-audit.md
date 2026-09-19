@@ -82,7 +82,7 @@ P5 先验（±20% 乘性因子）的数据源是 ghost_adopt/ghost_discard 埋�
 | 治理面 | 位置 | 内容要点 |
 |---|---|---|
 | **基座 `_ADAPTIVE_SYSTEM`**（全模式共享） | adaptive_prompts.py:88-125 | 反 AI 腔四禁令（病态微操/套路比喻/匀速句式/解释性插嘴）+ 禁词表 + 「禁止直接心理升华与内心独白」+ 细节功能尺子 |
-| **白描契约 `_ANTI_PSEUDO_SENSORY_BLOCK`**（stitch/continue 专属末位，**自称最高优先级**，用户逐字拍板） | :517-532 | 假感官封杀 + 「北方硬朗白描…少用形容词与副词…坚决剔除小学生作文式的通感抒情，语言质感向现实派短句靠拢」+ 逗号注水禁令 |
+| **白描契约 `_ANTI_PSEUDO_SENSORY_BLOCK`**（stitch/continue 专属末位，**自称最高优先级**，用户逐字拍板） | ~~:517-532~~（2026-09 收编批已迁 `services/style/texture_contracts.py`，文案逐字不变；病灶词另列执法词表经洗层/上屏快检/完稿审计旁路合并，见 docs/agent/style.md 写作规矩节） | 假感官封杀 + 「北方硬朗白描…少用形容词与副词…坚决剔除小学生作文式的通感抒情，语言质感向现实派短句靠拢」+ 逗号注水禁令 |
 | **画像+旋钮行**（render_style_positive ≤14 行） | settings_bundle.py:660-694 | 五维画像 + 段落节奏 + register/density/warmth 意图行 |
 
 逐维度冲突/冗余判定：

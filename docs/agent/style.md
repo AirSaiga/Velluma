@@ -47,16 +47,27 @@
 - 系统陈词库折叠可见 + 单条**本书豁免**：`books.style_cliche_exemptions`（validator/ClichéAuditor/scan 三处消费）。
 - 数据页质量报告「＋收入负面清单」抓虫：高频项 → 收件箱。
 
+## 写作规矩（质感契约注册表，2026-09 白描封杀令收编批）
+
+- **唯一权威 `services/style/texture_contracts.py`**：系统级质感约束（保护性写作纪律，非作者个人口味）统一由此管辖。原硬编码在 `adaptive_prompts.py` 的「白描契约与假感官封杀令」（2026-09-09 实测事故后用户逐字拍板）已迁入，文案逐字保留。
+- **词令分家**：契约正文 = 话语级行为规矩（禁脑补事故/禁台词抢跑/白描准则/禁逗号注水），stitch/continue 专属末位高服从位注入（`render_system_blocks` 经 `render_texture_contract(key, mode, overrides)` 消费，mode 门控下沉注册表）；病灶词（喉结滚动/嘴角勾起等 13 条）另列**执法词表**（全 blocker、无替代词、2 条正则）。
+- **执法词表走旁路不进四源合并**——`ProhibitionSet(ps.entries + texture_enforcement_entries())` 在 stitch 洗层（含 P2 重洗/语义 shadow）、ghost_guard cliche_hit、finish 语义扫描三处扫描前并集。原因：进四源会撞「无卡无样本 prompt 逐字节不变」零变化契约（blocker 会渲染进 user 尾部重钉），且 `hard_constraints` 的 blocker 面会静默杀死挂件/走向卡候选。
+- **按书覆盖**：`books.texture_contracts` JSON 列 `{key: {body, updated_at}}`，缺键/空 body=系统默认（prompt 零变化）；块头「最高优先级」框定恒由系统持有，覆盖只换正文。装配：`settings_bundle` 加载 → 四 builder + `StitchContext.system_blocks(_with_usage)` 同参透传（预览/注入同源红线不破）。
+- **端点**：`GET/PUT /api/books/{id}/texture-contracts`（`routes/style/contracts.py`，整体覆盖写；PUT {} = 全部恢复默认）。文风页「写作规矩」区（`StyleContractsSection.vue`）：系统默认/本书定制徽标、展开全文、编辑（textarea）、恢复默认；编辑只动正文，执法词表不受作者编辑影响（病灶词自动查改始终有效）。
+- 策展口径：执法词表**不带 alternative**（对齐 default_cliches 2026-09-04 审计修复——机械替身词会被洗层字面拼进正文），命中=记录+P2 句级修补；「倒吸一口凉气」不重复收录（SystemCliche blocker 种子已覆盖，尊重系统层开关/豁免）。
+- 对拍：`test_texture_contracts.py`（正文逐字/mode 门控/覆盖语义/词表口径）+ `test_continuation_rules.py::TestAntiPseudoSensoryBan`（builder 级端到端）。
+
 ## 页面结构
 
-- 分区叙事线：①你的字（样本库，每条带指纹速览 chips）②笔迹指纹（句长直方图 + 指标网格 + 高级折叠[五维画像/提炼入口/章级特例]）③负面清单 ④对账（章 CV 与对话占比趋势 SVG，参考底色带 = CV 健康区间/目标±0.2，出带点标红，人话总结含「与语料实测差 >0.15」漂移探测）。
-- 两栏仪表盘：①+② 并排 5:7、负面清单+对账并排 1:1；流式宽度 96rem 封顶，<74rem 窗宽塌单列，hairline 分隔归容器 `.section-row`。
-- 零状态坡道三幕：`zeroState` = 无样本**且无既有配置**（`hasStyleConfig`）→ 整页 hero 邀请 + 章节收编兜底；1-2 条 → 只长样本+指纹（长成预告细带）；≥3 条且画像空 → 浮出提炼建议。章级特例深链强制 full 防死路。
-- **提炼红线**：不落库，过目才存；2s 防抖自动保存。
-- 顶部常驻状态条 `StyleStatusStrip.vue`：一句话总结实测指标 + ▶试听滚动锚点，sticky，语料为空不报假数字。
-- 直方图规格：柱子贴基线/柱顶计数/按最高桶归一峰值 96px/底线轴；样本列表限高 24rem 内滚。
-- `--accent-400` 全局 token（浅色 #9685c2 / 深色 #8b6de8）：直方图渐变/hover 边框/焦点环等 14 处引用消费——该 token 未定义时全部静默失效。
-- 高级面板：五维画像只读展示 + 保留「从样本提炼」与字段锁（手填表单已下线）。
+- **渐进式呈现（渐进批 2026-09）：前台亲民工坊 + 深层 Beta 实验室**。前台主视界默认全屏、0 术语：50/50 对等双列（`<60rem` 容器塌单列，纪律同 duo），**双列栏头对称（视觉归一批 2026-09-17）**——左「亲笔字帖」(pencil-square Icon)/右「写作底线」(no-symbol Icon) 同 sec-title 规格，组件内重复标题退役、「已拦截的禁词」降 `.style-eyebrow` 组眉标（style.css 增量工具类）；右列上=规矩四开关、下=禁词标签池+实体输入组 `[输入想屏蔽的词…][加入拦截]`。左列卡片只留场景标签/字数/星标（star Icon），统计噪音不上卡。
+- **深层【Beta 实验室】**：页底 `<details>` 折叠舱（视觉归一批升级为舱盖条形态：chevron 旋转+light-bulb+Beta chip+一行内容预告），默认折叠绝不主动打扰——收纳 A/B 试写靶场（基准输出/文风装载输出，文案中立化，贫嘴全洗）、写作规矩整文编辑（高级面）、指纹 9 卡+直方图（"健康区间/带"改"参考区间/带"，取消不达标暗示）、逐章对账、负面清单全量面（系统陈词库/豁免/扫描审稿）。`:open` 受控+`@toggle` 回写+`openBetaLab()` 展开滚动三件套契约不变；details 不拦截 props/emits 链路，组件常驻挂载事件零中断。
+- **状态条联动**：`StyleStatusStrip`「去实验室试听」= `openBetaLab()`（展开折叠舱+平滑滚动到位）；收件箱（空则隐藏）保留 full 阶段；零状态坡道 ramp 整页邀请不变。
+- **文案大静音**：全页区块只留标题（亲笔字帖/写作规矩/已拦截的禁词/A/B 试写靶场），原理解释与网梗自嘲全部清除。
+- **A/B 试写口径**：`POST /style/audition` 单轨 SSE，A/B=前端并发双发；基准输出 `bare: true`（跳过画像+样本只留系统基座）；装载输出=草稿画像+样本（stitch 同源管线）。
+- **划词入禁**：在装载输出中划选词语 → 浮签「添入禁词库」（no-symbol Icon）→ 硬禁入清单头（2s 防抖落库）；全前端首处 getSelection 消费，commonAncestor 容器包含判定 + 1~20 字词级 + 卸载清监听。
+- **视觉方言与身份（视觉归一批 2026-09-17，设计稿 `docs/design/style-page-redesign.md`）**：全 feature 统一 token 方言——零 `var(--x,#hex)` 二参/零裸 hex/零 @media（Sandbox 断点= `@container stylepage (max-width:48rem)` 塌单列）/字号下限 --text-xs/图标钮 24px、文字钮 28px；卡面七类归 card-std 档（--surface-card）；界面 emoji 全量 Icon 化（❦ 伪元素保留）；「习字簿」身份四件——样本正文/采纳池摘录/收件箱摘录衬线化（--editor-font-family）、字数 chip 量尺规格（衬线+.tnum）、硬禁行朱批 tick（`inset 2px 0 0 var(--cinnabar-bright)`）、直方图基线 --line-strong。
+- 直方图规格：柱子贴基线/柱顶计数/按最高桶归一峰值 96px/底线轴（--line-strong）；样本列表 6 条收展+页滚动唯一（无二级滚动）。
+- `--accent-400` 全局 token（浅色 #9685c2 / 深色 #8b6de8）：未定义时静默失效。
 
 ## 执行层：样本检索与 prompt 注入
 

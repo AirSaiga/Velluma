@@ -57,7 +57,7 @@ const profileKeys = [
 const corpus = computed<TextFingerprint | null>(() => props.fingerprint?.corpus || null)
 const hasCorpus = computed(() => (corpus.value?.word_count || 0) > 0)
 
-// ---- 指标网格 ----
+// ---- 指标格（v4 实验室：hint 一律白话完整句；直方图已迁笔迹签名卡） ----
 interface MetricRow {
   label: string
   value: string
@@ -72,68 +72,41 @@ const metrics = computed<MetricRow[]>(() => {
     {
       label: '句长起伏',
       value: fp.sentence_len_cv.toFixed(2),
-      hint: `健康区间 ${props.fingerprint?.reference.cv_healthy[0]}~${props.fingerprint?.reference.cv_healthy[1]}，越低越匀速`,
+      hint: `参考范围 ${props.fingerprint?.reference.cv_healthy[0]}~${props.fingerprint?.reference.cv_healthy[1]}`,
     },
-    { label: '句均字数', value: `${fp.sentence_len_mean}`, hint: `中位数 ${fp.sentence_len_median} 字` },
-    { label: '碎句率', value: pct(fp.short_sentence_ratio), hint: '≤5 字碎句占全部句子的比例，健康通常 <10%' },
-    { label: '对话占比', value: pct(fp.dialogue_ratio), hint: dialogueTargetHint.value },
-    { label: '段均字数', value: `${fp.paragraph_len_mean}`, hint: `短段（≤15字）占 ${pct(fp.short_paragraph_ratio)}` },
+    { label: '句均字数', value: `${fp.sentence_len_mean}`, hint: `一半句子比 ${fp.sentence_len_median} 字长、一半比它短` },
+    { label: '碎句率', value: pct(fp.short_sentence_ratio), hint: '不超过五个字的短句占比，一般不超过 10%' },
+    { label: '对话占比', value: pct(fp.dialogue_ratio), hint: '以你自己写的字为准' },
+    { label: '段均字数', value: `${fp.paragraph_len_mean}`, hint: `短段（不超过 15 字）占 ${pct(fp.short_paragraph_ratio)}` },
     {
       label: '标点习惯',
       value: `${fp.punctuation.dash_per_1k}/${fp.punctuation.ellipsis_per_1k}`,
-      hint: `每千字 破折号/省略号；叹号 ${fp.punctuation.exclaim_per_1k}、问号 ${fp.punctuation.question_per_1k}`,
+      hint: `每千字破折号 / 省略号；叹号 ${fp.punctuation.exclaim_per_1k}、问号 ${fp.punctuation.question_per_1k}`,
     },
   ]
   if (fp.rhetoric) {
     rows.push({
       label: '修辞密度',
       value: `${fp.rhetoric.metaphor_per_500}`,
-      hint: `每500字比喻；微操 ${fp.rhetoric.micro_action_per_500}；AI 味综合 ${fp.rhetoric.ai_taste_score}`,
+      hint: `每 500 字的比喻数量；微动作 ${fp.rhetoric.micro_action_per_500}；AI 味综合 ${fp.rhetoric.ai_taste_score}`,
     })
   }
-  // 词汇丰富度 / 重复度（NLP 扩展）：旧指纹无此键或数据不足（null）则整格不渲染
+  // 词汇丰富度 / 重复度：旧指纹无此键或数据不足（null）则整格不渲染
   if (fp.lexical?.mattr != null) {
     rows.push({
       label: '词汇丰富度',
       value: fp.lexical.mattr.toFixed(2),
-      hint: `词汇多样性（0-1），越低越说明翻来覆去用同一批词；TTR ${fp.lexical.ttr ?? '—'}`,
+      hint: '用词的多样程度，越高越丰富',
     })
   }
   if (fp.repetition?.bigram_repeat_ratio != null) {
     rows.push({
       label: '重复度',
       value: pct(fp.repetition.bigram_repeat_ratio),
-      hint: '反复出现的相邻词组占比，偏高疑似套路化表达（人名等正常重复也算）',
+      hint: '前后相邻的重复词组占比，偏高说明表达套路化（人名等正常重复也算）',
     })
   }
   return rows
-})
-
-const dialogueTargetHint = computed(() => {
-  const t = props.fingerprint?.reference.dialogue_target
-  return t !== null && t !== undefined
-    ? `你的目标 ${Math.round(t * 100)}%`
-    : '未设目标（高级面板可设）'
-})
-
-// ---- 直方图 ----
-const histogramBars = computed(() => {
-  const h = corpus.value?.sentence_len_histogram
-  if (!h) return []
-  const defs = [
-    { key: 'lte5' as const, label: '≤5' },
-    { key: '6_10' as const, label: '6-10' },
-    { key: '11_20' as const, label: '11-20' },
-    { key: '21_30' as const, label: '21-30' },
-    { key: 'gt30' as const, label: '>30' },
-  ]
-  const maxCount = Math.max(1, ...defs.map(d => h[d.key]))
-  return defs.map(d => ({
-    label: d.label,
-    count: h[d.key],
-    // 相对最高桶归一（峰值 96px）——保证任何分布形态都有视觉对比
-    height: Math.max(4, Math.round((h[d.key] / maxCount) * 96)),
-  }))
 })
 
 const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
@@ -142,31 +115,17 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 <template>
   <section id="style-sec-fingerprint" class="style-section">
     <header class="sec-head">
-      <h2 class="sec-title">笔迹指纹</h2>
+      <h2 class="sec-title">笔迹指标</h2>
       <p class="sec-sub">
-        从你的样本实测得出（纯算法测量，非 AI 猜测）。
-        <span v-if="fingerprint?.low_confidence" class="warn-inline">样本尚少（{{ sampleCount }} 条），仅供参考。</span>
+        从你的字实测得出（纯算法，不是 AI 猜的）。
+        <span v-if="fingerprint?.low_confidence" class="warn-inline">亲笔字还少（{{ sampleCount }} 条），仅供参考。</span>
       </p>
     </header>
 
-    <div v-if="!hasCorpus" class="empty-note">还没有样本——在「你的字」里贴入样本后，这里会长出你的句长分布。</div>
+    <div v-if="!hasCorpus" class="empty-note">还没有可量的字——工坊贴入亲笔字后，这里会长出指标。</div>
 
     <template v-else>
-      <!-- 句长分布直方图：第一个「原来我写字长这样」时刻 -->
-      <div class="histogram-card">
-        <p class="hist-title">句长分布（{{ corpus!.sentence_count }} 句）</p>
-        <div class="hist-plot">
-          <div v-for="bar in histogramBars" :key="bar.label" class="hist-col">
-            <span class="hist-count">{{ bar.count }}</span>
-            <div class="hist-bar" :style="{ height: `${bar.height}px` }"></div>
-          </div>
-        </div>
-        <div class="hist-labels">
-          <span v-for="bar in histogramBars" :key="bar.label" class="hist-label">{{ bar.label }}</span>
-        </div>
-      </div>
-
-      <!-- 指标网格 -->
+      <!-- 指标格：每格一句白话解释（句长分布墨迹图见上方笔迹签名卡） -->
       <div class="metric-grid">
         <div v-for="m in metrics" :key="m.label" class="metric-cell card-well" :title="m.hint">
           <span class="metric-label">{{ m.label }}</span>
@@ -179,20 +138,20 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
       <div class="advanced">
         <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
           <Icon :name="showAdvanced ? 'chevron-down' : 'chevron-right'" :size="12" />
-          高级画像与目标{{ showAdvanced ? '' : '（爱折腾再展开）' }}
+          画像与按章设文风{{ showAdvanced ? '' : '（点开编辑）' }}
         </button>
 
         <div v-if="showAdvanced" class="advanced-body">
-          <!-- 章级特例（S3）：编辑对象切换 + 恢复继承 -->
+          <!-- 按章单独设文风（选一章=只改那一章） -->
           <div v-if="chapters && chapters.length > 0" class="scope-block">
-            <label class="field-label">编辑对象（章级特例只影响该章生成）</label>
+            <label class="field-label">正在改哪一层的文风（选一章=只改那一章）</label>
             <div class="scope-row">
               <select
                 class="scope-select"
                 :value="scopeChapterId || ''"
                 @change="emit('edit-scope', ($event.target as HTMLSelectElement).value)"
               >
-                <option value="">书级（全书默认）</option>
+                <option value="">全书默认</option>
                 <option v-for="c in chapters" :key="c.id" :value="c.id">
                   第{{ c.chapter_number }}章{{ c.title ? ` · ${c.title.slice(0, 10)}` : '' }}{{ }}
                 </option>
@@ -201,27 +160,27 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
                 v-if="scopeChapterId && hasOverride"
                 class="btn-scope-reset"
                 @click="emit('reset-override')"
-              >恢复继承书级</button>
+              >恢复用全书默认</button>
             </div>
             <p class="scope-hint">
-              {{ scopeChapterId ? '正在编辑该章的特例文风——保存只影响这一章。' : '回忆章换个腔调？选一章为它单独设文风。' }}
+              {{ scopeChapterId ? '现在改的是这一章自己的文风——保存只影响它。' : '想让某一章换腔调？选一章，为它单独设文风。' }}
             </p>
           </div>
 
           <div class="advanced-toolbar">
             <p class="advanced-note">
-              画像由「从样本提炼」生成、锁定字段不被覆盖（亲笔描述/特殊文体保护）。
-              手填表单已下线（2026-09-14 去参数化）——画像只信从你的字里提出来的。
+              画像由「开始提炼」从你的字里生成；上了锁的条目不会被覆盖（保护亲笔描述/特殊文体）。
+              没有手填——画像只信从你的字里提出来的。
             </p>
             <span class="advanced-actions">
               <button
                 class="btn-lock-all"
-                title="锁死全部画像字段——特殊文体（诗歌/剧本）或亲笔描述的保护"
+                title="全部上锁——特殊文体（诗歌/剧本）或亲笔描述的保护"
                 @click="emit('lock-all')"
               >{{ profileKeys.every(pk => lockedKeys?.includes(pk.key)) ? '全部解锁' : '全部锁定' }}</button>
               <button class="btn-primary" :disabled="isExtracting" @click="emit('extract')">
                 <Icon name="bolt" :size="12" class="mr-0.5" />
-                {{ isExtracting ? '提炼中…' : '从样本提炼' }}
+                {{ isExtracting ? '提炼中…' : '开始提炼' }}
               </button>
             </span>
           </div>
@@ -232,13 +191,13 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
               <button
                 class="lock-btn"
                 :class="{ active: lockedKeys?.includes(pk.key) }"
-                :title="lockedKeys?.includes(pk.key) ? '已锁定：提炼不会覆盖此字段' : '未锁定：提炼结果可覆盖'"
+                :title="lockedKeys?.includes(pk.key) ? '已上锁：提炼不会覆盖这一条' : '未上锁：提炼结果可以覆盖这一条'"
                 @click="emit('toggle-lock', pk.key)"
               ><Icon :name="lockedKeys?.includes(pk.key) ? 'lock-closed' : 'lock-open'" :size="14" /></button>
             </label>
-            <!-- 手填已下线：只读展示提炼产物（空=未提炼；改内容走「从样本提炼」或字段锁保护亲笔值） -->
+            <!-- 手填已下线：只读展示提炼产物（空=未提炼；改内容走「开始提炼」或上锁保护亲笔值） -->
             <p v-if="(positiveProfile[pk.key] || '').trim()" class="field-readonly">{{ positiveProfile[pk.key] }}</p>
-            <p v-else class="field-readonly field-readonly--empty">未提炼（「从样本提炼」生成）</p>
+            <p v-else class="field-readonly field-readonly--empty">还没提炼——点上方「开始提炼」生成</p>
           </div>
 
           <div class="profile-field">
@@ -280,60 +239,6 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   color: var(--text-muted);
 }
 
-.histogram-card {
-  padding: 0.875rem 1rem 0.625rem;
-  margin-bottom: 0.75rem;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-}
-.hist-title {
-  margin: 0 0 0.625rem;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-/* 绘图区：柱子贴基线（底线轴），计数在柱顶，桶标签另起一行 */
-.hist-plot {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-  height: 118px;
-  padding: 0 0.25rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
-}
-.hist-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.3rem;
-  flex: 1;
-  height: 100%;
-}
-.hist-count {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-.hist-bar {
-  width: 72%;
-  max-width: 88px;
-  min-height: 4px;
-  background: linear-gradient(180deg, var(--accent-400), var(--accent-600));
-  border-radius: 3px 3px 0 0;
-}
-.hist-labels {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0 0.25rem;
-  margin-top: 0.375rem;
-}
-.hist-label {
-  flex: 1;
-  font-size: var(--text-xs);
-  text-align: center;
-  color: var(--text-muted);
-}
-
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
@@ -362,7 +267,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
 .metric-hint {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
   font-size: var(--text-xs);
   line-height: 1.45;
@@ -411,7 +316,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   padding: 0.3rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 .btn-scope-reset {
@@ -516,7 +421,7 @@ const sampleCount = computed(() => props.fingerprint?.sample_count ?? 0)
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   resize: vertical;
 }

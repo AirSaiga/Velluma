@@ -89,12 +89,13 @@ watch(() => props.items, (list) => {
 
 <template>
   <section id="style-sec-inbox" v-if="items.length > 0" class="inbox-section">
-    <header class="sec-head">
-      <h2 class="sec-title">
-        文风收件箱
-        <span class="count-badge">{{ items.length }}</span>
-      </h2>
-      <p class="sec-sub">写作台「这不像我」等入口攒下的候选——过目后才生效。</p>
+    <header class="inbox-head">
+      <!-- 工坊零数字（v4）：候审计数改朱印「候」标记 -->
+      <span class="inbox-seal" aria-hidden="true">候</span>
+      <div class="inbox-head-text">
+        <h2 class="inbox-title">文风收件箱 · 有东西等你过目</h2>
+        <p class="inbox-sub">写作台「这不像我」攒下来的——你点头才生效，可以先改词再收。</p>
+      </div>
     </header>
 
     <div
@@ -129,9 +130,11 @@ watch(() => props.items, (list) => {
             class="btn-edit-word"
             title="改写词块——确认时按改后的词入清单"
             @click="startEdit(item)"
-          >✎</button>
+          ><Icon name="pencil-square" :size="12" /></button>
         </template>
-        <span v-if="item.payload.alternative" class="inbox-alt">→ {{ item.payload.alternative }}</span>
+        <span v-if="item.payload.alternative" class="inbox-alt">
+          <Icon name="arrow-right" :size="12" /> {{ item.payload.alternative }}
+        </span>
         <span class="inbox-actions">
           <button
             class="btn-accept"
@@ -157,33 +160,53 @@ watch(() => props.items, (list) => {
 
 <style scoped>
 .inbox-section {
-  padding: 1.25rem 0 1.5rem;
+  margin-top: var(--space-8);
+  padding: var(--space-4) var(--space-5);
   scroll-margin-top: 4.5rem;
+  background: color-mix(in srgb, var(--warn) 5%, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border-color));
+  border-radius: var(--radius-md);
 }
-/* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1），此处仅保留 flex 布局增量 */
-.sec-title {
+.inbox-head {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
-.count-badge {
-  padding: 0.0625rem 0.4375rem;
-  font-size: var(--text-xs);
+.inbox-seal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  font-family: var(--font-heading);
+  font-size: var(--text-lg);
+  font-weight: 700;
   color: var(--warn);
-  background: var(--warn-bg);
-  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 6px;
 }
-.sec-sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.75rem;
+.inbox-head-text {
+  min-width: 0;
+}
+.inbox-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.inbox-sub {
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-muted);
 }
 .inbox-card {
-  padding: 0.625rem 0.75rem;
-  margin-bottom: 0.375rem;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  padding: 0.625rem var(--space-3);
+  margin-bottom: var(--space-2);
+  background: var(--surface-card);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .inbox-meta {
@@ -214,9 +237,12 @@ watch(() => props.items, (list) => {
   border-bottom-color: var(--accent-400);
 }
 .btn-edit-word {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 0.125rem 0.25rem;
-  font-size: var(--text-xs);
+  width: 24px;
+  height: 24px;
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -243,6 +269,9 @@ watch(() => props.items, (list) => {
 .edit-input:focus {
 }
 .inbox-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   overflow: hidden;
   font-size: 0.75rem;
   white-space: nowrap;

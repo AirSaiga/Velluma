@@ -95,12 +95,12 @@ function saveEdit(sample: AuthorSample) {
     <!-- 零状态 hero：整页只有一个邀请（设计稿 §6.3 第一幕） -->
     <div v-if="ramp" class="ramp-hero">
       <h2 class="hero-title">贴一段你写过的字</h2>
-      <p class="hero-sub">你的文风以这里为准——指纹、画像、负面清单，都从这里长出来。</p>
+      <p class="hero-sub">你的文风以这里为准——AI 学你写字、躲你圈词，都从这段字开始。</p>
       <textarea
         v-model="newSampleContent"
         rows="9"
         class="hero-textarea"
-        placeholder="粘贴你写过的原文（建议 200–2000 字，对话/动作/抒情各来一段更好）"
+        placeholder="贴一段你自己写的字（对话、打斗、抒情都行）"
         @keydown.ctrl.enter="submit"
       ></textarea>
       <div class="hero-actions">
@@ -108,24 +108,19 @@ function saveEdit(sample: AuthorSample) {
           class="hero-btn"
           :disabled="busy || !newSampleContent.trim()"
           @click="submit"
-        >开始测量我的笔迹</button>
+        >存进字帖</button>
         <button
           class="hero-link"
           :disabled="busy"
-          title="从本书已发布章节自动摘取样本（无需手动粘贴）"
+          title="从本书已发布章节自动摘字（无需手动粘贴）"
           @click="emit('importChapters')"
         >或从已发布章节自动采样</button>
       </div>
-      <p class="hero-note">贴入后几秒（纯算法测量，不创作不改写）就能看到你的句长分布。</p>
+      <p class="hero-note">存好就能在「试写对比」里亲眼看 AI 学得像不像；AI 不会改你贴的字。</p>
     </div>
 
     <template v-else>
-      <header class="sec-head">
-        <h2 class="sec-title">你的字</h2>
-        <p class="sec-sub">
-          贴一段你写过的文字——你的文风以这里为准，指纹与画像都从这里长出来。
-        </p>
-      </header>
+      <!-- 2026-09-17 重设计：分区标题退役——栏头「亲笔字帖」在容器接管（避免双标题） -->
 
       <!-- 上传卡 -->
       <div class="upload-card">
@@ -133,14 +128,14 @@ function saveEdit(sample: AuthorSample) {
           v-model="newSampleContent"
           rows="3"
           class="upload-textarea"
-          placeholder="粘贴你写过的原文（建议 200-2000 字，对话/动作/抒情各来一段更好）"
+          placeholder="贴一段你自己写的字（对话、打斗、抒情都行）——AI 学你写字，从这里开始"
           @keydown.ctrl.enter="submit"
         ></textarea>
         <div class="upload-row">
-          <select v-model="newSampleSceneType" class="scene-select">
+          <select v-model="newSampleSceneType" class="scene-select" title="这段字的类型（帮 AI 按场合挑范例）">
             <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
           </select>
-          <select v-model="newSampleEra" class="scene-select" title="近期的样本参与统计和检索；早期的只存档">
+          <select v-model="newSampleEra" class="scene-select" title="近期的字会被 AI 挑作范例；早期的只存档备查">
             <option value="recent">近期</option>
             <option value="early">早期</option>
           </select>
@@ -148,7 +143,7 @@ function saveEdit(sample: AuthorSample) {
             class="btn-primary"
             :disabled="busy || !newSampleContent.trim()"
             @click="submit"
-          >存入样本库</button>
+          >存进字帖</button>
           <button
             class="btn-ghost"
             :disabled="busy"
@@ -159,16 +154,16 @@ function saveEdit(sample: AuthorSample) {
             v-if="goldenCount && goldenCount > 0"
             class="btn-ghost"
             :disabled="busy"
-            :title="`把本书已有的 ${goldenCount} 条黄金片段导入样本库（AI 照着范例学，也进统计）`"
+            :title="`把本书已有的 ${goldenCount} 条黄金片段收进字帖（AI 会照着学）`"
             @click="emit('importGolden')"
-          >导入黄金片段（{{ goldenCount }}）</button>
+          >导入黄金片段</button>
           <span v-else class="upload-hint">Ctrl+Enter 快速存入</span>
         </div>
       </div>
 
       <!-- 样本列表（§4.1：默认 6 条 + 展开收起，拆掉二级滚动嵌套） -->
       <div class="sample-list">
-        <div v-if="samples.length === 0" class="empty-note">暂无样本——贴入第一段字，三秒后就能看到你的句长分布。</div>
+        <div v-if="samples.length === 0" class="empty-note">字帖还空着——贴入第一段字，马上就能去「试写对比」看效果。</div>
         <article
           v-for="sample in visibleSamples"
           :key="sample.id"
@@ -180,25 +175,19 @@ function saveEdit(sample: AuthorSample) {
               :class="{ active: sample.favorite }"
               :title="sample.favorite ? '取消收藏（AI 找范例时不再优先带这条）' : '收藏：AI 找范例时优先带这条'"
               @click="emit('update-sample', sample.id, { favorite: !sample.favorite })"
-            >{{ sample.favorite ? '★' : '☆' }}</button>
+            ><Icon name="star" :size="14" /></button>
             <select
               class="badge badge-scene scene-edit"
-              title="场景类型（统计与检索按此分类）"
+              title="这段字的类型（帮 AI 按场合挑范例）"
               :value="sample.scene_type"
               @change="emit('update-sample', sample.id, { scene_type: ($event.target as HTMLSelectElement).value as AuthorSampleSceneType })"
             >
               <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
             </select>
             <span v-if="sample.source !== 'manual'" class="badge badge-source">{{ sourceLabels[sample.source] || sample.source }}</span>
-            <span v-if="sample.era === 'early'" class="badge badge-early" title="早期样本只存档，不参与统计">早期</span>
-            <span class="sample-chips">
-              <template v-if="fingerprintBySample[sample.id]">
-                <span class="chip">句均 {{ fingerprintBySample[sample.id].sentence_len_mean }} 字</span>
-                <span class="chip">对话 {{ Math.round((fingerprintBySample[sample.id].dialogue_ratio || 0) * 100) }}%</span>
-                <span class="chip">起伏 {{ fingerprintBySample[sample.id].sentence_len_cv }}</span>
-              </template>
-              <span class="chip chip-dim">{{ sample.word_count }} 字</span>
-            </span>
+            <span v-if="sample.era === 'early'" class="badge badge-early" title="早期的字只存档备查，AI 不会挑它作范例">早期</span>
+            <!-- 工坊零数字（v4）：字数等测量信息不上卡——只留场景/来源/收藏 -->
+            <span class="sample-chips" />
             <button
               v-if="editingId !== sample.id"
               class="icon-btn"
@@ -222,7 +211,7 @@ function saveEdit(sample: AuthorSample) {
               @keydown.esc="cancelEdit"
             ></textarea>
             <div class="sample-edit-actions">
-              <span class="edit-hint">保存后将重新测量指纹并重算向量 · Ctrl+Enter 保存 · Esc 取消</span>
+              <span class="edit-hint">保存后 AI 会重新学一遍这段字 · Ctrl+Enter 保存 · Esc 取消</span>
               <button class="era-toggle" @click="cancelEdit">取消</button>
               <button
                 class="btn-primary btn-sm"
@@ -234,7 +223,7 @@ function saveEdit(sample: AuthorSample) {
           <p v-else class="sample-content">{{ sample.content }}</p>
 
           <div v-if="editingId !== sample.id" class="sample-foot">
-            <span v-if="sample.era === 'early'" class="muted-foot">早期样本不参与统计——若仍代表现在的你，可切回近期</span>
+            <span v-if="sample.era === 'early'" class="muted-foot">标记为早期的字不会被 AI 挑作范例——若它仍代表现在的你，可切回近期</span>
             <button
               class="era-toggle"
               @click="emit('update-sample', sample.id, { era: sample.era === 'early' ? 'recent' : 'early' })"
@@ -255,7 +244,8 @@ function saveEdit(sample: AuthorSample) {
 
 <style scoped>
 .style-section {
-  padding: 1.25rem 0 1.5rem;
+  /* 2026-09-17：顶部 padding 归零——列头（容器 sec-head）正上方，与右列同顶对齐 */
+  padding: 0 0 var(--space-6);
   scroll-margin-top: 4.5rem;
 }
 .style-section.ramp {
@@ -264,13 +254,7 @@ function saveEdit(sample: AuthorSample) {
   border-bottom: none;
 }
 /* .sec-head/.sec-title 吃 style.css 全局工具类（00 期 §3.1）；
-   sec-sub 按 §6 归 token（原 muted 过淡） */
-.sec-sub {
-  margin: 0.25rem 0 0;
-  font-size: var(--text-sm);
-  line-height: var(--lh-normal);
-  color: var(--text-secondary);
-}
+   分区标题已随 2026-09-17 重设计退役（栏头接管） */
 
 /* ---- 零状态 hero（整页唯一邀请） ---- */
 .ramp-hero {
@@ -300,7 +284,7 @@ function saveEdit(sample: AuthorSample) {
   line-height: 1.9;
   text-align: left;
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: 0.75rem;
   box-shadow: 0 1px 2px color-mix(in srgb, black 3%, transparent);
   resize: vertical;
@@ -355,11 +339,11 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-muted);
 }
 
-/* ---- 常态上传卡 ---- */
+/* ---- 常态上传卡（2026-09-17：卡面归一 card-std 档） ---- */
 .upload-card {
-  padding: 0.75rem;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  padding: var(--space-3);
+  background: var(--surface-card);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .upload-textarea {
@@ -368,7 +352,7 @@ function saveEdit(sample: AuthorSample) {
   font-size: 0.8125rem;
   line-height: 1.7;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   resize: vertical;
 }
@@ -386,7 +370,7 @@ function saveEdit(sample: AuthorSample) {
   padding: 0.3rem 0.5rem;
   font-size: 0.75rem;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 .btn-primary {
@@ -453,16 +437,15 @@ function saveEdit(sample: AuthorSample) {
   color: var(--text-muted);
 }
 .sample-card {
-  padding: 0.625rem 0.75rem;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  padding: 0.625rem var(--space-3);
+  background: var(--surface-card);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
   /* 04 §A2-2 可点卡统一微抬（.card-hover 规格） */
   transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .sample-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elev-2-shadow);
 }
 .sample-meta {
   display: flex;
@@ -579,6 +562,8 @@ function saveEdit(sample: AuthorSample) {
   -webkit-line-clamp: 3;
   overflow: hidden;
   margin: 0;
+  /* 身份层①：样本正文衬线化（宋体系=字帖墨迹感），字号/行数钳制不动 */
+  font-family: var(--editor-font-family);
   font-size: 0.75rem;
   line-height: 1.7;
   color: var(--text-secondary);
@@ -613,10 +598,12 @@ function saveEdit(sample: AuthorSample) {
   background: var(--bg-tertiary);
 }
 .fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 0;
-  font-size: 0.875rem;
-  line-height: 1;
+  width: 24px;
+  height: 24px;
   color: var(--text-faint);
   background: transparent;
   border: none;

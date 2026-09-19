@@ -86,7 +86,9 @@ function isResolved(word: string): boolean {
               <span class="hit-word">「{{ hit.word }}」</span>
               <span class="hit-count">× {{ hit.count }}</span>
               <span v-if="hit.severity === 'blocker'" class="hit-sev" title="硬禁：检查时命中即判不通过（只提示，绝不自动改正文）">硬禁</span>
-              <span v-if="hit.alternative" class="hit-alt">→ {{ hit.alternative }}</span>
+              <span v-if="hit.alternative" class="hit-alt">
+                <Icon name="arrow-right" :size="12" /> {{ hit.alternative }}
+              </span>
               <span v-else class="hit-alt dim">（无替代建议）</span>
             </div>
             <p class="hit-context">…{{ hit.occurrences[0]?.context }}…</p>
@@ -134,7 +136,7 @@ function isResolved(word: string): boolean {
   padding: 0.375rem 0.5rem;
   font-size: var(--text-base);
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 .btn-primary {
@@ -157,10 +159,10 @@ function isResolved(word: string): boolean {
   color: var(--ok);
 }
 .hit-card {
-  padding: 0.625rem 0.75rem;
-  margin-bottom: 0.5rem;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  padding: 0.625rem var(--space-3);
+  margin-bottom: var(--space-2);
+  background: var(--surface-card);
+  border: 1px solid var(--line-faint);
   border-radius: var(--radius-md);
 }
 .hit-card.resolved {
@@ -193,6 +195,9 @@ function isResolved(word: string): boolean {
   border-radius: var(--radius-xs);
 }
 .hit-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--text-xs);
   color: var(--ok);
 }

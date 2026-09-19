@@ -84,7 +84,7 @@ function run() {
   font-size: var(--text-base);
   line-height: var(--lh-normal);
   background: var(--surface-overlay);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   resize: vertical;
 }

@@ -1,5 +1,7 @@
 # 文风三平面分权（2026-08-29 定稿施工）
 
+> ⚠ **2026-09-14 去参数化修订**：P6「旋钮编译为选择器」整体退役——`_selector_adjust` 连同轻指纹设施删除（数学空转实证：零样本书检索池恒空，旋钮参数从未真实影响过任何一次挑样，审计与裁决见 `docs/style-parameter-effectiveness-audit.md`）；`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读。本文 P6 节与「旋钮」字样按当时设计保留、勿据此施工——选择平面现役机制=P5 先验/漂移锚样/收编池/场景匹配/跨书冷启动兜底。
+>
 > 导师方案（teacher-kimi）定稿的文风数据运用重构。**一句话纲领：凡是实证过 prompt 管不住的确定性约束，一律下沉代码层；prompt 只承担概率性偏置。** 这是字数闸（120 字指令实测产出 700 字 → 代码闸一上即治）教训的宪法化。
 >
 > 权威代码入口：`services/style/ghost_wash.py`（洗层）· `services/style/sample_prior.py`（先验）· `services/style/retrieval.py`（选择平面）· `routes/chapter_generation/adaptive.py`（呈现平面接线）· `knowledge_plane.split_prohibition_tiers`（P0 分档）。测试：`test_style_paradigm.py` + `test_stitch_gates.py` §5。
@@ -10,7 +12,7 @@
 |---|---|---|---|
 | **偏置平面** | prompt | 软引导残余 | 静态反 AI 契约（system 头部）+ 作者 blocker 禁忌 user 尾部重钉（P0）+ 压缩画像（P6） |
 | **呈现平面** | 生成后、**采纳线前** | 负面约束执法 | P1 确定性洗 → P2 单次句级修补 → P4 语义警示（shadow 期只落事件） |
-| **选择平面** | 生成前 | 正面文风精进 | P5 采纳率先验（±20% 调序）+ 漂移锚样 + P6 旋钮编译为样本排序条件 + AI 来源配比 |
+| **选择平面** | 生成前 | 正面文风精进 | P5 采纳率先验（±20% 调序）+ 漂移锚样 + AI 来源配比（P6 旋钮编译已于 2026-09-14 退役，见顶部修订注） |
 | **审计平面** | 采纳后 | 闭环观测 | finish 扫描/对账/漂移（既有）+ 洗率对账（ghost_wash 事件） |
 
 **架构不变量：采纳线。** 线前（AI 提案）可做确定性干预+自我修订；线后（作者文本）永远只提示。「作者裁决即闸门」从口号变成架构边界。
@@ -55,7 +57,7 @@ stitch 链是**先生成后播放**（非流式生成完整文本再逐 chunk �
 
 数据链：GHOST_DONE 带 `ghost_token + sample_ids` → 前端 `ghost_adopt`/`ghost_discard` 事件回传同 token + sample_ids（adopt 另带正文 ≤400 字）→ `sample_prior.py` 从 `collab_events.jsonl` 派生每样本贝叶斯先验 `(adopted+1)/(total+2)` → 因子 0.8~1.2（线性封顶）：
 
-- 向量流：距离 ÷ 因子；兜底流：排序末位键（收藏→时期→场景→先验→旋钮）；
+- 向量流：距离 ÷ 因子；兜底流：排序末位键（收藏→时期→场景→先验；原「旋钮」尾键已随 P6 退役移除）；
 - **只调序不筛选**（scene_hint 软加成同款纪律）；冷启动均匀先验=1.0 零变化；mtime 缓存防检索路径全文件扫。
 
 ### P5 漂移锚样
@@ -66,7 +68,11 @@ stitch 链是**先生成后播放**（非流式生成完整文本再逐 chunk �
 
 文风页「AI 写的、你留下的」池（`GET /books/{id}/style/adopted-ghosts` 读 adopt 事件正文）→ 作者点「收为样本」才入库（`source=adopted_ghost`）→ **装配配比：AI 来源样本每批 ≤1**（`_cap_ai_source`）——防采纳幽灵自蒸馏把文风拉向 AI 味。
 
-### P6 画像编译为选择器
+### P5 跨书冷启动兜底（B4，2026-09-13）
+
+本书样本为零时，`retrieval.py` 回退作者级黄金池（`list_golden_across_books`——其它书 favorite/golden 样本）供 few-shot，卡层隔离不动；对拍 `test_cross_book_fallback.py`。
+
+### P6 画像编译为选择器（❌ 已退役 2026-09-14）
 
 「声明不再写给模型看，编译成挑样本的条件」（`_selector_adjust`，纯轻指纹现算）：
 
