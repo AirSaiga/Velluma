@@ -45,7 +45,7 @@ const PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'port.txt')
 const FRONTEND_PORT_FILE = join(dirname(dirname(__dirname)), 'data', 'frontend_port.txt')
 
 function readFrontendPortFromFile() {
-  // 优先环境变量（启动脚本 start.ps1 / start.sh 会设置 VELLUMA_FRONTEND_PORT）
+  // 优先环境变量（启动脚本 start-all.ps1 / start-all.sh / 单服务 electron 脚本会设置 VELLUMA_FRONTEND_PORT）
   if (process.env.VELLUMA_FRONTEND_PORT) {
     const p = parseInt(process.env.VELLUMA_FRONTEND_PORT, 10)
     if (!isNaN(p) && p > 0) return p
@@ -382,7 +382,10 @@ async function createMainWindow() {
             // 均不需要二者；保留会触发 Electron 的 Insecure CSP 安全警告。
             // index.html 内联防闪脚本以 sha256 hash 放行——hash 按 LF 归一化后的脚本
             // 文本计算（HTML 解析器会把 CRLF 归一为 LF）；改防闪脚本必须重算并同步此处
-            'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'sha256-cYp2XYhQFdE+TDwcR5h3VNrB5Od7GHzE5eMVgVUuKzY='; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
+            // img-src：外观纹理/自定义背景是 data:image/svg+xml 与压缩产物 data URL
+            // （useAppearance.ts/AppearancePanel.vue），blob: 是图片压缩解码中转，
+            // 后端 localhost 是世界页底图（Leaflet ImageOverlay 直连 :8002 段）
+            'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'sha256-cYp2XYhQFdE+TDwcR5h3VNrB5Od7GHzE5eMVgVUuKzY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:* http://127.0.0.1:*; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"]
           }
         })
       })
