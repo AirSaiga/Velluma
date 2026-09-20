@@ -1,7 +1,10 @@
 # Velluma 新生成架构总览（V3.2 + V4.0 + V4.1 + V4.2 + V4.3）
 
+> ⚠️ **【历史快照 2026-07-21，2026-09-19 标注归档】**本文是 ADF 主线时代的全景图，此后格局已多次更迭：现行主线为 **NLE-ADF 3.0 自适应流**（见 AGENTS.md「引擎对照」与 `docs/agent/nle-adf.md`）；Refinery 已拔除（2026-09-12）；设定中心页已退役（2026-09-05）；`features/canon` 前端从未落地（后端 canon 服务仍在役）；V4.2 Reader Mirror / V4.3 Storyboard 仅存于本文的设计记载，从未实施。运行事实一律以 AGENTS.md 为准，本文只作设计考古。
+> （后端 canon 14 端点与 reader_mirror 服务仍在 `main.py` 注册服役——查真相层现状请读 `docs/agent/world.md`。）
+
 > **版本**：V3.2 ADF + V4.0 Canon + V4.1 Refinery + V4.2 Reader Mirror + V4.3 Storyboard
-> **状态**：全栈搭建完成，全量验证通过
+> **状态**（写作时点）：全栈搭建完成，全量验证通过
 > **日期**：2026-07-21
 > **本文作用**：把分散在 4 个设计文档里的模块整合为一张全景图
 

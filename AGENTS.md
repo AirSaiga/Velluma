@@ -2,11 +2,9 @@
 
 AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许可证：AGPL-3.0。
 
-> **引擎现状**：后端生成设施——**NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）；**BS-ADF 已整体归档** `backend/_deprecated/`（2026-08-19，涌现抽取迁出为 `services/adaptive/emergent_facts.py`，思想去向与归档清单见该目录 README）；**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）；**Refinery 已拔除**（2026-09-12：手术原语迁 `services/text_surgery/`，读者反馈收编 `/adaptive/reader-feedback`）。
+> **引擎现状**：后端生成设施——**NLE-ADF 3.0 自适应流**（`/adaptive/*`，**前端默认且是未来唯一主线**）；**BS-ADF 已整体归档** `backend/_deprecated/`（2026-08-19，涌现抽取迁出为 `services/adaptive/emergent_facts.py`）；**ADF**（V3.2，引擎本体保留但前端已无 UI 入口）；**Refinery 已拔除**（2026-09-12：手术原语迁 `services/text_surgery/`，读者反馈收编 `/adaptive/reader-feedback`）。
 >
-> **演进唯一权威**：`docs/iteration-roadmap.md`。**各领域带日期的施工/事故叙事**（控制台冻结、续写接缝事故、样本创建链路等过程记录）已归入 `docs/incidents/`，本文件只沉淀稳定契约与不变量。
->
-> **NLE-ADF 3.0 自适应融合写作台**：作者主导写作 + AI 柔性共生。不预设拍、不跑整章管线；作者进章节打字 ≥4 字即激活辅助层（`composing` 态）。核心交互：心跳感知（挂件/走向卡/Canon 提示）、Space 续写幽灵草稿（三键阶梯：**Tab 采纳·Enter 暂留·Esc 丢弃**——03 下一阶段；采纳起书签自动跟踪改稿喂 deai 飞轮）、Ctrl+Space 走向卡连写、细纲胶囊（`[[` 速记扩写）、Ctrl+Enter 手动沉淀、完稿审计、世界速记 Alt+N、情境浮卡、候选回流收件箱、`??` 问书行间速查。**感知常驻（用户拍板「无论切到哪都不停感知，除非关闭应用」）**：切页只 `detach`（解除编辑器监听/中止需活编辑器的 SSE），pending 感知计时器照发——卸载后心跳用 `_lastCtx` 上下文快照（带章号防串章，切章后旧快照作废），结果进世界模型缓存回台秒弹可用；心跳响应带章节纪元守卫（发送后切章=旧章感知产物整包丢弃）；全量停机只随应用关闭发生。
+> **演进唯一权威**：`docs/iteration-roadmap.md`（已完结期次长叙事归档于 `docs/roadmap-archive.md`）。**各领域带日期的施工/事故叙事**已归入 `docs/incidents/`。本文件只沉淀全局契约与速查：领域细节以「领域档案索引」表所指档案为唯一权威，本文件对应节只留速查红线+指针。
 
 ## 领域档案索引（改代码前按需必读）
 
@@ -15,6 +13,7 @@ AI 驱动的长篇小说写作桌面应用（FastAPI + Vue3 + Electron）。许�
 | 要动的领域 | 必读档案 | 施工/事故日志 |
 |------------|----------|----------------|
 | NLE-ADF：心跳/挂件 dock/stitch 续写/细纲胶囊/沉淀/完稿审计/意图感知/上下文装配/约束治理 | `docs/agent/nle-adf.md` | `docs/incidents/nle-adf.md` |
+| 编辑器本体：标点归一/粘贴净化/查找替换/排版 token | `docs/agent/editor.md` | `docs/incidents/nle-adf.md` |
 | 世界设定层：活舆图/事件溯源推演/时间轴/world_bridge/写作桥/真相层 Canon | `docs/agent/world.md` | `docs/incidents/world.md` |
 | 文风页：指纹/样本库/负面清单/写作规矩/试衣间/语义扫描/章级特例卡 | `docs/agent/style.md` | `docs/incidents/style.md` |
 | 启动器/监控台/端口契约/日志架构/收摊停止 | `scripts/README.md` | `docs/incidents/launcher.md` |
@@ -54,33 +53,40 @@ npm run build        # 生产构建
 
 ### 桌面应用（推荐开发方式）
 
-启动脚本收敛于 `scripts/`，按平台分目录，每平台 dev/debug/prod 三模式（根目录 start.bat 已移除）：
+启动脚本收敛于 `scripts/`，2026-09-19 起按**环境/功能完全隔离**分文件夹（用户拍板）：`scripts/dev/`（开发调试·后端热重载）与 `scripts/prod/`（正式生产）各四入口（后端 / 前端 / Electron / 一键三端），`scripts/monitor/`（.vbs 网页监控台+后台监督者）完全自持，`scripts/macos/{dev,prod}/` 为 macOS 对称实现，收摊脚本 `scripts/stop-velluma.{bat,ps1,sh}` 在 scripts 根全局通用。**每文件夹互不复用、互不引用**（monitor 的 dev_dashboard.py 是私有副本，即使逻辑相同也单独一份）：
 
 ```powershell
 # Windows
-.\scripts\windows\start-dev.bat    # 开发模式（启动前后端+Electron，自动开 DevTools）
-.\scripts\windows\start-debug.bat  # 调试模式（后端 uvicorn --reload 热重载）
-.\scripts\windows\start-prod.bat   # npm run build + Electron 载入 dist
-.\scripts\windows\start.ps1 -Mode dev -ElectronOnly   # 仅 Electron（前后端已在运行）
-.\scripts\windows\start.ps1 -Mode dev -SkipBackend    # 跳过后端
-.\scripts\windows\start-dev.bat -Force                # 清理端口冲突后启动
+.\scripts\dev\start-all.bat        # 开发调试（后端热重载 + Vite + Electron，自动开 DevTools）
+.\scripts\dev\start-backend.bat    # 单独后端（热重载前台直跑；frontend/electron 同款单飞脚本）
+.\scripts\prod\start-all.bat       # 生产体验（npm run build + Electron 载入 dist，无 Vite 无 DevTools）
+.\scripts\dev\start-all.ps1 -ElectronOnly   # 仅 Electron（前后端已在运行）
+.\scripts\dev\start-all.ps1 -SkipBackend    # 跳过后端
+.\scripts\dev\start-all.bat -Force          # 清理端口冲突后启动
+.\scripts\stop-velluma.bat         # 全局一键收摊（dev/prod/monitor 通用）
 ```
 
 ```bash
-# macOS / Linux（bash，编排逻辑与 start.ps1 对称）
-./scripts/macos/start-dev.sh       # 开发模式
-./scripts/macos/start-debug.sh     # 调试模式（后端热重载）
-./scripts/macos/start-prod.sh      # 生产体验
-./scripts/macos/start.sh dev --dry-run               # 仅打印将执行的命令
+# macOS / Linux（bash，编排逻辑与 Windows 对称）
+./scripts/macos/dev/start-all.sh   # 开发调试（后端热重载）
+./scripts/macos/prod/start-all.sh  # 生产体验
+./scripts/macos/dev/start-all.sh --dry-run     # 仅打印将执行的命令
+./scripts/stop-velluma.sh          # 全局收摊
 ```
 
-**完整启动器契约见 `scripts/README.md`（编辑启动脚本/监控台前必读），事故史见 `docs/incidents/launcher.md`。**核心不变量：
+```powershell
+# 网页监控台（scripts/monitor/，与前台启动完全隔离）
+wscript scripts\monitor\start-background.vbs          # 后台模式·无热重载（无终端窗口）
+wscript scripts\monitor\start-background-debug.vbs    # 后台模式·监督者 mtime 热重载
+```
 
-- **三端契约自检 `scripts/check_launcher_contract.py`（CI 阻断步）**：端口段（后端 8002~8100 / 前端 5175~5285）与 electron npm script 名写在四份实现（两份编排 / python 监督者 / 前端 `transport/base.ts` 判定区间）里无法共享代码，由该脚本对拍防漂移；改端口段须同时改全部实现再改该脚本常量。
-- **日志架构=文件为真相源**：读线泵直写 `logs/dev_backend.log`/`dev_vite.log`/`dev_electron.log`（每次启动重建）+ 启动器叙事进 `dev_sys.log`；控制台显示可弃，数据不丢。改 dashboard 协议字段须同步 `dev_dashboard.py` 的 `build_status`/`LINE_RE`/`FILES` 与 `data/dev_status.json` 消费面。
-- **收摊/停止双闸**：只杀命令行含本项目路径的进程；状态 JSON 新鲜度闸 >120s 无心跳即跳过一切 JSON 衍生杀（`stop-velluma` 同）。DryRun 不写端口文件、不杀任何树/端口。
-- **三模式统一 `electron:nobuild`**（loadURL/loadFile 由 NODE_ENV 决定，与构建无关）；图标单源 `frontend/electron/app-icon.png`（方形 PNG ≥256×256）。
-- 子进程 stdin 一律切断（vite EPIPE 事故）；vbs 必须纯 ASCII+CRLF；pythonw 断"启动器+真解释器"两进程对链；改 start.ps1 防 .NET 方法调用参数位内联 `-f` 逗号坑（先求值到临时变量再传参）。
+**完整启动器契约见 `scripts/README.md`（编辑启动脚本/监控台前必读），事故史见 `docs/incidents/launcher.md`。**速查三红线：
+
+- **全端契约自检 `scripts/check_launcher_contract.py`（CI 阻断步）**：端口段（后端 8002~8100 / 前端 5175~5285，前端段仅 dev 环境持有）与 electron npm script 名写在 22 个检查面里对拍防漂移；改端口段须同时改全部实现再改该脚本常量。
+- **环境/功能隔离纪律（用户拍板勿回退）**：dev / prod / monitor 三文件夹各自成文互不复用（宁可重复不可共享）；新入口进对应文件夹自带一份实现。
+- **日志架构=文件为真相源**：编排核心直写 `logs/dev_backend.log`/`dev_vite.log`/`dev_electron.log` + 启动器叙事进 `dev_sys.log`；控制台显示可弃，数据不丢。
+
+其余六条不变量（收摊/停止双闸、`electron:nobuild` 统一、stdin 切断、vbs 纯 ASCII+CRLF、pythonw 两进程对链、.ps1 编码与 `-f` 坑）全文见 `scripts/README.md`。
 
 ---
 
@@ -107,12 +113,12 @@ backend/
     ├── rag/  (三活件：recall.py 唯一检索入口 + lexical.py 纯函数 + memory_indexing.py 写侧)
     ├── style/  (★ 文风体系：extractor.py 样本提炼 / cliche_provider / fingerprint.py 统计规范实现 / retrieval.py 作者样本检索)
     ├── validation/  (代码级 + LLM 级审计，服务 /chapters/{id}/quality-report 路由)
-    ├── workflows/
+    └── workflows/
     │   ├── adf/            # V3.2 ADF 引擎（自包含，前端无入口）：adf_workflow 主类 + 各 phase 模块 + 3 单测
     │   ├── conftest.py     # ★ autouse fixture，防 asyncio 事件循环污染（见"测试"节，勿删）
     │   ├── sentence_integrity.py  # 残句门禁 + repair_single_defect 单条修复（服务 /adaptive/fix-sentence）
     │   └── refining.py     # ★ 共享（前端在用，非废弃），服务 chapter_optimization 路由
-    └── refinery/           # V4.1 独立精修（refinery/diagnostician/planner/surgeon/holistic_reader/polisher）
+    （refinery/ 已随 Refinery 拔除移除；手术原语现居 services/text_surgery/，见引擎对照表）
 
 frontend/
 └── src/
@@ -148,48 +154,41 @@ data/ logs/ .venv/
 
 ### NLE-ADF 3.0 自适应融合写作台（前端默认且唯一写作路径）
 
-作者主导打字 ≥4 字即激活（`authorLane=composing`），AI 柔性共生、不跑整章管线。**完整领域参考 `docs/agent/nle-adf.md`（编辑前必读）**，施工/事故史见 `docs/incidents/nle-adf.md`。核心不变量：
+作者主导打字 ≥4 字即激活（`authorLane=composing`），AI 柔性共生、不跑整章管线。**完整契约唯一权威 `docs/agent/nle-adf.md`（编辑前必读——端点总表/状态机/挂件铁律/三键阶梯/细纲胶囊/问书/意图/装配/约束治理/关键质量护栏/RAG 记忆流全在档案）**，施工/事故史见 `docs/incidents/nle-adf.md`。速查红线：
 
-- 心跳 `/adaptive/heartbeat` → 挂件四槽位（landing/toward_beat/echo/ambient，拿不到出处即降级 ambient，**note 一律后端拼装不经 LLM**）；卡舱入口=Tab 唯一（`SPARK_DOCK_AUTO_POPUP=false`，Tab 恒 force_refresh 强制重算）；段落停在半句不生发不回缓存旧件且响应带 `dock_muted=true`（空段=段界不判半句，勿回退）。
-- 续写 `/adaptive/stitch-ghost` 五模式（stitch/continue/burst/open/outline）；**追加式契约勿回退拼回**（幽灵纯追加在光标后，复读剥离 `_strip_fragment_prefix` + 接缝三护 `_split_first_sentence`/`_strip_fragment_tail_repeat`/`_strip_colliding_open_quote`）；FIM 中插桥接 `suffix_anchor`（光标后 ≤300 字后文锚，桥接态切断推测/方向猜测/就近节拍素材供给）；幽灵死亡收割 `reapGhostIfDead` 勿删。
-- 「当前段落/已写内容」取源唯一权威 `services/adaptive/paragraph_source.py`（layer1_facts 只是沉淀审计账，**不得代替正文**进 prompt/审阅对象；`world_model.snapshot` 事实带派生活性只计活事实）。
-- stitch 装配唯一入口 `services/context/stitch_context.py`，与 `GET /adaptive/context-preview` **同源共用（红线：禁止平行实现）**；注入序唯一权威 `adaptive_prompts.render_system_blocks`（事实层前于文风层）；专名称呼表按可见文本过滤（`scene_visibility.py`）；条目原子永不劈开，唯一体量约束=条目级逃逸阀 `KG_BUDGET_CHARS`。
-- 约束治理：登记册 `services/constraints/registry.py` + ghost_guard 快检 + 缝合返修环 `services/validation/repair_loop.py`（用户拍板「可慢不可错」：检出→带稿改写→验收→句级切除→拒稿 GHOST_REJECT→熔断器 quality_breaker）；执法可靠性序=供给切断>输出代码闸>确定性改写>prompt 偏置>事后审计；信用分数据落 `data/constraint_events.jsonl` 不可补采。
-- 沉淀 `/adaptive/settle` **纯手动** Ctrl+Enter；完稿审计 `/adaptive/finish`；意图三级源链（spine 打算 0.9 短路 > 大纲转化 0.85 > LLM 反推 0.55/0.4，dock/stitch 消费阈 0.5；意图衰老闸 `INTENT_STALE_CHARS=100`）。
-- 协作埋点 `POST /adaptive/event` + `data/collab_events.jsonl`（本地零上报；**05 瘦身 2026-09-18**：分析层已拆——events/summary 聚合端点与 insights 协作面板退役，事件总线只留机制四件 hint_dismiss/ghost_adopt/ghost_discard/intent_correct + 传感器 ghost_discard_reason，词表与消费方见 `adaptive/events.py` 模块头；「新功能必须配埋点」纪律废除，新原则=埋点不当门卫只当刽子手，见 `docs/ai-writing-philosophy.md` §8）；系统自己去读 `/adaptive/auto-read`（切章离开+进章回场补读双触发，哈希幂等+每书每日 30 次预算闸）；候选回流收件箱带出处原句（evidence 逐字校验，编造出处剥除）、撤销走单事务端点 `/undo-accept`、拒绝史防重、键盘裁决（02 候选回流修缮，详见 `docs/agent/nle-adf.md` 与 `docs/agent/world.md`）；学着闭嘴 `services/adaptive/quiet_learning.py` 唯一权威（静音集合行为派生不落库，安全类永不静音）。
+- 心跳 `/adaptive/heartbeat` → 挂件四槽位（landing/toward_beat/echo/ambient，note 一律后端拼装不经 LLM）；卡舱入口=Tab 唯一恒 force_refresh；段落停在半句不生发且 `dock_muted=true`。
+- 续写 `/adaptive/stitch-ghost` 五模式**追加式契约勿回退拼回**（接缝三护+复读剥离）；FIM 中插桥接 `suffix_anchor`；`reapGhostIfDead` 勿删；三键阶梯 Tab 采纳·Enter 暂留·Esc 丢弃。
+- 取源唯一权威 `services/adaptive/paragraph_source.py`（layer1_facts 不得代替正文进 prompt）；装配唯一入口 `services/context/stitch_context.py` 与 `/adaptive/context-preview` **同源共用（红线：禁止平行实现）**；注入序唯一权威 `render_system_blocks`。
+- 沉淀 `/adaptive/settle` 纯手动 Ctrl+Enter；意图三级源链（spine 0.9 > 大纲 0.85 > LLM 反推 0.55/0.4，消费阈 0.5，衰老闸 `INTENT_STALE_CHARS=100`）。
+- 感知常驻（用户拍板）：切页只 `detach`、心跳用 `_lastCtx` 快照+章节纪元守卫；全量停机只随应用关闭。协作埋点只留机制四件+传感器（05 瘦身）；auto-read 双触发+预算闸；`quiet_learning` 静音派生不落库。
 
 ### 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
 
-事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`/`world_locations`（parent_id 树）/`world_relations` 折叠推演，活舆图单画布（Leaflet+编年史时间轴）。**完整领域参考 `docs/agent/world.md`（编辑前必读）**，施工日志 `docs/incidents/world.md`。核心不变量：
+事件溯源式世界建模器：`world_events`（append-only 事实源，11 种事件类型）+ `world_entities`/`world_locations`（parent_id 树）/`world_relations` 折叠推演，活舆图单画布（Leaflet+编年史时间轴）。**完整领域参考 `docs/agent/world.md`（编辑前必读）**，施工日志 `docs/incidents/world.md`。速查红线：
 
-- 推演唯一权威 `compute_world_state_from_events` 纯函数，**前后端同构**（`features/world/engine/`，改任一侧必须同步）；生死语义「出场即活」（无 birth 事件但被回放的角色默认活、death 才死）。
-- 生成桥接 `services/context/world_bridge.py`：世界页有实体即 world 优先（鸭子类型适配旧 Character/Asset 形状，`dynamic_state` 携带叙事时刻推演状态）；`visibility=private` 档案不进 prompt 文本、改入 secrets 通道（双轨纪律）；叙事时间四级降级；桥接失败/世界为空回退旧表（未迁移书行为不变）。
-- 时间轴持久化红线：视野窗口浮点年 `[round((start-1)*365), round(end*365))`，合法性只看日空间非空（**勿改回 start<end**）；`PATCH /books/{id}/timeline-view` 必须携带 `{cursor, range}` 全量快照（服务端键级合并，分头发必丢键）；勿用 localStorage 存世界页状态（端口扫描换 origin 即漂移）。
-- 写作桥：`GET /world/scene-slice`（此刻切片）、`GET /world/context-card`（情境浮卡）、`POST /world/parse-event`（Alt+N 速记，**解析/落库分离红线**——只产草稿绝不落库）、`GET /world/state-for-chapter/{id}`（在场推演）；光标派生场景 `services/world/active_scene.py`（`resolve_active_scene` 纯函数，接流四线）。
-- 真相层：生成消费链 `[private]/[public]/[hook]` 三段格式**冻结不动**；字段级分层 `world_entities.field_layers` 五条消费线（对拍 `test_field_layers.py` + `fieldLayers.test.ts`）；因果图谱已退役但后端边表/CRUD 与 `/impact` 路由保留勿删。
-- 运维工具：数据库卫生检测修复 `scripts/check_db_hygiene.py`（R1-R5 幂等，`--fix` 自动备份；剥 HTML 比对必须用 `html_to_plain` 唯一权威）；隐式图谱投影器 `services/world/implicit_graph.py` 暂无消费方（EventCard 超边永不展开 N² 点对，node_cap=40）。
+- 推演唯一权威 `compute_world_state_from_events` 纯函数，**前后端同构**（`features/world/engine/`，改任一侧必须同步）；生死语义「出场即活」。
+- 生成桥接 `services/context/world_bridge.py`：世界有实体即 world 优先；`visibility=private` 档案不进 prompt 文本、改入 secrets 通道（双轨纪律）；桥接失败/世界为空回退旧表。
+- 时间轴持久化红线：视野窗口浮点年合法性只看日空间非空（**勿改回 start<end**）；`PATCH /books/{id}/timeline-view` 必须携带 `{cursor, range}` 全量快照；勿用 localStorage 存世界页状态。
+- 写作桥：`/world/scene-slice`（此刻切片）/`context-card`（情境浮卡）/`parse-event`（Alt+N 速记，**解析/落库分离红线**——只产草稿绝不落库）/`state-for-chapter/{id}`（在场推演）；光标派生场景 `active_scene.py`。
+- 真相层：`[private]/[public]/[hook]` 三段格式**冻结不动**；字段级分层 `field_layers` 五条消费线；因果图谱已退役但后端边表/CRUD 与 `/impact` 路由保留勿删。
 
 ### 文风页（Style）
 
-作者笔迹独立工作台（`/style/:bookId`，`features/style/`），权威设计 `docs/style-paradigm.md`（三平面分权）/ `docs/style-module-redesign.md`。**完整领域参考 `docs/agent/style.md`（编辑前必读）**，施工日志 `docs/incidents/style.md`。核心不变量：
+作者笔迹独立工作台（`/style/:bookId`，`features/style/`），权威设计 `docs/style-paradigm.md`（三平面分权）/ `docs/style-module-redesign.md`。**完整领域参考 `docs/agent/style.md`（编辑前必读）**，施工日志 `docs/incidents/style.md`。速查红线：
 
-- **同一把尺子**：`services/style/fingerprint.py` 是句长切分/字数/CV/对话统计的规范实现，审计侧 `code_auditors.py` 从此 import；改任一侧统计口径先跑 `test_fingerprint.py`（19 项对拍锁定）。
-- 负面清单四源唯一权威 `services/style/prohibitions.py`（`load_prohibition_set`：SystemCliche+negative_list+book_blacklist+静态反 AI 词表）；severity 两档 提醒/硬禁，硬禁只提示、**绝不自动改正文**。
-- **写作规矩（质感契约）唯一权威 `services/style/texture_contracts.py`**（2026-09 白描封杀令收编批）：系统级写作纪律（话语级契约 stitch/continue 末位注入 + 病灶词执法词表 13 条 blocker）按书可覆盖（`books.texture_contracts` 列，缺键=系统默认零变化）；执法词表**旁路合并**（洗层/ghost_guard/完稿审计三处），不进四源（保零变化契约与挂件防线）；文风页「写作规矩」区编辑/恢复默认。详见 `docs/agent/style.md`。
-- 零变化契约：无文风卡/无样本的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；章级卡（`style_cards.chapter_id` 非空）= 该章**整卡覆盖**语义，统一入口 `StyleCardRepository.get_effective_card`。
-- 语义扫描挂点**仅在** `/adaptive/finish`（`semantic_hits`），不进收件箱/scan-negative/任何 SSE 路径（红线）；阈值 0.78 未校准。
-- 意图旋钮已退役（`style_knobs`/`dialogue_ratio_target` 冻结只读，`_selector_adjust` 已删）；文风收敛两根支柱 = 亲笔样本 few-shot（`style/retrieval.py`）+ 负面清单执法。
-- 架构不变量=采纳线：线前可干预 AI 提案，线后作者文本永远只提示。
+- **同一把尺子**：`services/style/fingerprint.py` 是句长切分/字数/CV/对话统计的规范实现，审计侧从此 import；改统计口径先跑 `test_fingerprint.py`（19 项对拍锁定）。
+- 负面清单四源唯一权威 `services/style/prohibitions.py`；severity 两档，硬禁只提示、**绝不自动改正文**。
+- 写作规矩（质感契约）唯一权威 `services/style/texture_contracts.py`（按书可覆盖，缺键=系统默认零变化）；执法词表旁路合并不进四源。
+- 零变化契约：无文风卡/无样本的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；章级卡=整卡覆盖，统一入口 `get_effective_card`。
+- 意图旋钮已退役（字段冻结只读）；收敛两支柱=亲笔样本 few-shot + 负面清单执法；语义扫描挂点**仅在** `/adaptive/finish`（红线）；架构不变量=采纳线：线后作者文本永远只提示。
 
 ### deai 去 AI 味小模型（子项目，`deai/`）
 
-自训「去AI味」改写小模型（百炼 SFT Qwen3-4B+LoRA；契约唯一权威 `deai/docs/contract.md`）。宿主集成唯一权威 **`docs/deai-integration.md`**，核心契约：
+自训「去AI味」改写小模型（百炼 SFT Qwen3-4B+LoRA）。**宿主集成唯一权威 `docs/deai-integration.md`、模型侧契约唯一权威 `deai/docs/contract.md`（编辑前必读）**，本节只留三速查：
 
-- 配置节 `model_config.json` 的 `deai`（enabled/api_key/model/base_url；**未配置=零调用、幽灵文本逐字节零变化**）；服务包 `backend/services/deai/`（`polish_fragment` 公共入口 + 契约§6 事实闸保底回退原文 + 宿主侧保名闸——kg 在场/死者名单中原文出现的实体名必须在改写稿逐字保留否则回退；`gates.py` 为运行时闸门移植副本，判据唯一权威在 `deai/scripts/validate_pairs.py`，改判据先改那边跑 `--selftest` 再同步）。
-- 挂点 stitch-ghost 呈现平面（字数闸后、ghost_guard 快检前；≤100 字契约窗内短稿生效，burst/outline 长稿自动跳过；微镜头同窗旁路）；deai 不进 generation_runs 用量聚合，用量以 trace `deai_polish` 为准。
-- 训练对收集（§5a 数据飞轮）：写作台选中浮窗「记改前/记改后」两步配对（`useDeaiPairMark` 模块单例暂存、6s 撤销）→ `POST /api/deai/pairs` → `data/deai_pairs.jsonl` → `deai/scripts/ingest_behavior_pairs.py` 去重+六闸 → `behavior_sft.jsonl`（合并进训练集须人工过目）；闸门执法全在入库侧，收集箱 `deai/data/inbox/`。v1 训练语料为产品/公告/观点类，叙事文本未训练。
-- 「API」设置弹窗「实验：去 AI 味小模型」分区（左侧导航独立分区）+ `POST /api/system/deai/test` 试一试（表单实时值，事实闸保底回退不算失败）。
-- ⚠ 调用三要点（勿改）：DashScope **原生**端点（调优模型不走 OpenAI 兼容入口）/ model 填部署名（非 ft-ID）/ `enable_thinking=false`；超时 8s 挂死上限，超时即保底回退。
+- 配置节 `model_config.json` 的 `deai`（enabled/api_key/model/base_url）：**未配置=零调用、幽灵文本逐字节零变化**。
+- 服务包 `backend/services/deai/`：`polish_fragment` 公共入口 + 契约§6 事实闸保底回退原文 + 宿主侧保名闸；挂点 stitch-ghost 呈现平面（≤100 字契约窗，burst/outline 长稿跳过）。
+- ⚠ 调用三要点（勿改）：DashScope **原生**端点 / model 填部署名（非 ft-ID）/ `enable_thinking=false`；超时 8s，超时即保底回退。
 
 ### ⚠ 后端运行/落库边界（编辑前必读）
 
@@ -204,24 +203,12 @@ data/ logs/ .venv/
 
 ### 关键质量护栏（事故根因，勿回退）
 
-> 各护栏的事故经过见 `docs/incidents/nle-adf.md`；此处只留规则本体。已归档引擎（`_deprecated/bsadf/`）里的护栏仅作迁移取材，不随 live 代码演进。
+> **全文唯一权威已迁 `docs/agent/nle-adf.md`「关键质量护栏」「RAG / 记忆流」两节**（字数硬闸门 adaptive 现役形态/接缝三护/微镜头免压缩/REFINE 完整性/enrich 幻觉/POV 名/残句门禁/ghost_guard 十检全表/状态卡降级/RAG 三层 A·V·B 细节）；事故经过见 `docs/incidents/nle-adf.md`。速查清单：
 
-- **字数硬闸门**：超 target×1.6 带压缩反馈重试，末次仍超句界截断到 target×1.5（截断上限必须 ≤1.6）；末段（结局段）豁免截断。**adaptive 现役形态**：outline 走保尾双闸（`_truncate_keep_tail`）；stitch/continue 走「保头截断 + 压缩改写」——超 ×1.6 先 `_truncate_at_sentence` 保头截到 ×1.5，截取稿发回模型按目标字数压缩改写；压缩产物仍超硬限对压缩稿再句界截一次，空产出回落截取稿（永不劣于纯截断）。**微镜头免压缩**：stitch 且 target ≤60（`MICRO_STITCH_TARGET_MAX`）超硬限保头句界截断即止、不走压缩改写，同窗旁路 deai 抛光与 P2 残留句级修补（残余禁词由 P1 洗层兜底）；先复读剥离后量配额。**burst/open 同进两级闸**（闸只抓 ×1.6 严重超产、正常浮动不碰）。**接缝三护**（勿回退）：①断点衔接首句豁免压缩——`_split_first_sentence` 把草稿首句物理摘出只压缩剩余，产物=首句+压缩稿（首句超 target×0.6 退整稿路径），压缩 prompt 带断点尾句坐标；②半句断点尾缀复读剥离 `_strip_fragment_tail_repeat`——断点非句末且产出以尾缀（≥2 规范化字符）开头即剥；句末断点不开此闸；③双开引号碰撞剥除 `_strip_colliding_open_quote`——断点=悬空开引号 × 幽灵以开引号起头则剥幽灵开引号（stitch/continue 双模式）。对拍 `test_stitch_gates.py`。
-- **REFINE 完整性闸门**：补埋输出采纳前强制句末完整性校验，回退后丢失过半则整段放弃（宁缺勿残）。
-- **enrich 幻觉闸门**：空种子禁自由扩写；剧情关键词/零接地双向过滤。
-- **POV 名闸门**：状态卡已知 POV 角色时正文必须出现其名至少一次。
-- **残句门禁与单条修复**（`workflows/sentence_integrity.py`，在役）：高精确度正则扫残句（宁漏勿误），`repair_single_defect` 定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，批处理上限 5）——现服务 `/adaptive/fix-sentence`。
-- **上屏前快检 ghost_guard（`services/validation/ghost_guard.py`）**：stitch-ghost 完整文本生成后、GHOST_DONE 前纯算法扫疑点，共十检。随 GHOST_DONE 上帧五类：①dead_speak 死者开口 ②canon_leak 泄底（private 标签）③secret_leak 私有短语外泄（含 3b 字段级扩展——字段分层档案的秘密/半露字段同判据）④cliche_hit 禁忌面命中 ⑤out_of_scene 人物不在场；**beat_rush 抢拍**（live+rewrite：幽灵字面复用大纲就近节拍措辞进返修环带稿改写，仅 stitch/continue 开，excise 不授权）；**shadow 四检只落台账**：location_jump 地点穿越 / cast_roll_call 名单演出 / mind_leak 思绪泄漏 / belief_leak 信念泄漏。前端感知带疑点条，local_only 由 registry status 驱动。**二期起不再是纯「只提示不拦截」**：repair 字段声明资格的约束（canon_leak/secret_leak/beat_rush=rewrite）进缝合返修环（检出→带稿改写→句级切除→拒稿不上屏）；无世界数据零报错契约不变。⚠ 零报错契约的反面教训：候选宇宙构造若对生产形态实体必抛异常被静默吞掉，整检会全灭数月不可见——**新检第一轮实测必须确认命中路径可达**。
-- **状态卡抽取失败**：沿用旧卡显式记 `result.degraded`（不静默）；max_tokens=1600 兜底。
-
-### RAG / 记忆流（`recall_memories`：默认流始终打底 + 向量流增强叠加）
-
-唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定），三层按质量序 `merge_echoes` 保序去重截 k：
-
-- **A 结构化前情（始终）**：查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）。**相关性门 `echo_is_relevant`**：实体名命中≠语境相关——事件与查询段 jieba 共享词（≥2 字）≥2 个或占比 ≥0.3 才放行；无及格事件允许 A 流为空（对拍 `test_recall_gate.py`）。
-- **V 向量增强（embedding 已配置时叠加——不替换默认流，A/B 恒在）**：任意 OpenAI 兼容 Embedding 服务（`model_config.json` 的 `embedding` 节：`api_key`/`base_url`/`model` 默认 `text-embedding-v2`/`dimensions` 1536；`follow_llm=true` 时连接跟随文本模型槽——creative 优先、缺 Key 回退 reasoning；`base_url` 留空回退 DashScope 兼容端点；Key 来自 model_config 不读环境变量）；`search_similar` 权重（`repositories/memory_repository.py` 查询 + `services/generation/memory_scorer.py` 计分）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
-- **B 词法检索（始终补足）**：`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。**检索分流去敏**：`mask_entity_names`/`bundle_mask_names` 把书级专名+注册别名（≥2 字）从查询抹除**只喂 V/B 流**（防高频主角名霸屏），A 流保原文（对拍 `test_recall_masking.py`）。
-- **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过。检索限当前章之前（防未来信息泄露），三层同规则。
+- **字数硬闸门**：超 target×1.6 压缩重试、×1.5 句界截断上限（≤1.6）；outline 保尾双闸、stitch/continue 保头截断+压缩改写、微镜头（target ≤60）免压缩；对拍 `test_stitch_gates.py`。
+- **ghost_guard 上屏前快检十检**：随 GHOST_DONE 上帧五类（dead_speak/canon_leak/secret_leak/cliche_hit/out_of_scene）+ beat_rush live+rewrite + shadow 四检只落台账（location_jump/cast_roll_call/mind_leak/belief_leak）；repair 资格约束进缝合返修环。
+- **残句门禁**（`workflows/sentence_integrity.py`，在役）服务 `/adaptive/fix-sentence`；REFINE 完整性/enrich 幻觉/POV 名/状态卡降级详见档案。
+- **RAG / 记忆流**：唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（stitch 五模式 k=3、dock k=2，签名稳定）；A 结构化+B 词法恒在、V 向量已配置时叠加；检索限当前章之前（防未来泄露）。三层与去敏细节见档案。
 
 ---
 
@@ -230,6 +217,8 @@ data/ logs/ .venv/
 **双路径（2026-08-19 起 SQLite 默认）**：不设 `DATABASE_URL` → SQLite 文件库 `data/velluma.db`（单机桌面零外部依赖；实现于 `backend/db_sqlite/`——`engine.py` WAL/外键/忙等 pragma 逐连接设置 + NullPool 防锁竞争，`type_compat.py` JSONB/Vector→SQLite 方言编译 + **UUID str 入参容忍补丁（⚠ 勿删：repo 惯约向 UUID 列传 str，PG+asyncpg 驱动层容忍，删此补丁 SQLite 下 world 查询全线 500）**，models 零改动；数据目录可用 `VELLUMA_DATA_DIR` 覆盖）。显式设 `DATABASE_URL=postgresql+asyncpg://…` → PG 原路径全保留（pgvector 向量记忆/连接池/维度迁移，专业级）。存量 PG→SQLite 一次性搬迁：`scripts/migrate_pg_to_sqlite.py`（PG 只读拓扑序，先对源库补齐 MIGRATIONS 缺失列再搬运，行数对照+外键校验）。
 
 **启动时自动迁移**（非 Alembic）：`backend/database.py` 的 `MIGRATIONS` 列表定义增量列变更，`init_db()` 启动时自动补齐（SQLite 路径走 `db_sqlite/schema.py` 的 `init_db_sqlite`：建表+同源列迁移+legacy 数据迁移+种子化）。改 ORM 后须同步加 MIGRATIONS 条目，重启即应用。
+
+**书籍备份/还原闭环（2026-09-19，`services/book_archive/` 唯一权威）**：书架「备份 → 删除 → 还原」。`GET /books/{id}/backup` 导出单 JSON 文件（`.vellumabook`：34 张书籍级表全部行 + `data/world_images/{book_id}/` 底图 base64 + 6 个 jsonl 台账按书过滤——collab_events 是四个机制零件的数据源，必须随备份走）；`POST /books/restore` 还原（**原 ID 直复**：canon_nodes.ref_id 软关联与 world_intents.source_key 字符串内嵌 ID 按原 ID 存活，重映射即静默切断；同 ID 已存在 409 拒绝；台账滤旧再追加幂等）。`DELETE /books/{id}` 连带清理文件侧（底图目录/台账本书记录/章级 trace+prompt 日志）——不清理则「删→还原」后台账双份。不变量：①新增书籍级表必须进 `tables.py` 注册表（圈行谓词三类：直接 book_id/经 chapter/经 character），否则备份静默漏表；②导入逐表按 `sorted_tables` 拓扑序 flush（裸 FK 不进单元工作排序——relationship 缺失即乱序插炸外键）+ 自引用列两阶段回填（world_events.supersedes/world_locations.parent_id）；③embedding 走 b64f32 打包、仅 PG 回填（SQLite 方言向量列恒 NULL 契约）。
 
 ⚠ **向量维度迁移破坏性**（仅 PG 路径）：启动时 `migrate_vector_dimension` 若 embedding 维度与库列不匹配会**删列重建**（清空全部向量数据）。切维度前注意。
 
@@ -241,7 +230,7 @@ data/ logs/ .venv/
 
 ### model_config.json（主要配置入口，已 gitignore）
 
-LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`deai`（见 docs/deai-integration.md）/`proxy`/可选 `presets`（模型配置预设）/可选 `prices`（价目节，零默认价）。除手动编辑外可通过前端「API」弹窗（`ApiSettingsModal.vue`，2026-09 UX 重构为左侧导航式：左栏六项导航——写作/分析模型分分区编辑 + 预设库独立分区 + 向量/deai/代理分区，底部连接测试）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：弹窗内独立导航分区（非常驻默认分区）；未配置时记忆流走结构化+词法默认路径（见 RAG 节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
+LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.py`）：`llm.reasoning`/`llm.creative`/可选 `llm.wash`/`embedding`/`deai`（见 docs/deai-integration.md）/`proxy`/可选 `presets`（模型配置预设）/可选 `prices`（价目节，零默认价）。除手动编辑外可通过前端「API」弹窗（`ApiSettingsModal.vue`，2026-09 UX 重构为左侧导航式：左栏六项导航——写作/分析模型分分区编辑 + 预设库独立分区 + 向量/deai/代理分区，底部连接测试）经 `GET/PUT /api/system/model-config` 读写（GET 只回掩码，PUT 留空 api_key 表保持）。LLM/代理保存即时生效，embedding 维度变更需重启。**embedding 已降级为专业级**：弹窗内独立导航分区（非常驻默认分区）；未配置时记忆流走结构化+词法默认路径（三层细节见 `docs/agent/nle-adf.md`「RAG / 记忆流」节）。⚠ **当前工作区副本含真实 API Key，勿提交或外发**。
 
 ### 环境变量（.env 可选，仅以下几个实际生效）
 
@@ -251,6 +240,7 @@ LLM/Embedding/代理实际配置来源（schema 见 `backend/core/model_config.p
 | `VELLUMA_DATA_DIR` | SQLite 数据目录（打包/便携场景覆盖 `data/`） | 项目根 `data/` |
 | `DB_POOL_PRE_PING` | 连接池预检（仅 PG 路径；SQLite NullPool 不涉及） | Win=false / 其他=true |
 | `VELLUMA_PORT` | 固定后端端口 | 无（默认 8002 起扫描） |
+| `VELLUMA_LOG_LEVEL` | 业务日志级别（backend* 命名空间；非法值回退 INFO） | `INFO` |
 
 ⚠ 实际代理配置由 `model_config.json` 的 `proxy` 节决定（`get_active_proxy()`），不读环境变量。代码中**不存在**以下环境变量：`PROXY_URL`/`DISABLE_PROXY`、`DASHSCOPE_API_KEY`/`OPENAI_API_KEY`（Key 全来自 model_config.json）。
 
@@ -276,7 +266,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 测试
 
-后端 pytest 1496 项（114 文件）+ 前端 vitest 368 项（43 文件）全绿（2026-09-17 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
+后端 pytest 1614 项（124 文件）+ 前端 vitest 413 项（47 文件）全绿（2026-09-20 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过
 - ADF：`workflows/adf/` 下 `test_consistency_guard`/`test_beat_patcher`/`test_state_tracker`
@@ -284,7 +274,7 @@ services/api/transport  ← 底层 HTTP
 
 ⚠ **`workflows/conftest.py`（autouse）勿删**：每个测试结束重置全新 current event loop。存在原因——`IsolatedAsyncioTestCase` 与 `asyncio.run` 收尾会把事件循环策略 `_set_called` 置位且 current loop 置空，污染同进程后续 `asyncio.get_event_loop()`。跨多文件跑 pytest 时删除会随机失败。
 
-**开发验证**：后端 `/api/health`；前端浏览器 DevTools + Vue DevTools；Prompt 日志 `logs/prompt_log_*.json`；生成全流程 trace `logs/trace_{run_id}.jsonl`（adaptive 流按章单文件 `logs/trace_adaptive_{chapter_id}.jsonl`）（JSONL 实时追加，含 run_start/阶段事件/每次 llm_call 的 system+user+响应+usage+延迟/final_text/run_complete；质量 debug 先按 run_id 定位文件再逐事件排查）。
+**开发验证**：后端 `/api/health`；前端浏览器 DevTools + Vue DevTools；Prompt 日志 `logs/prompt_log_*.json`；生成全流程 trace `logs/trace_{run_id}.jsonl`（adaptive 流按章单文件 `logs/trace_adaptive_{chapter_id}.jsonl`）（JSONL 实时追加，含 run_start/阶段事件/每次 llm_call 的 system+user+响应+usage+延迟/final_text/run_complete；质量 debug 先按 run_id 定位文件再逐事件排查）。**请求级链路日志（2026-09-20，`backend/core/request_observability.py` 唯一权威）**：控制台/dev_backend.log 直读——`[REQ] 方法 路由模板 -> 状态 耗时 req=xxxx handler=... ?query`（每请求一行，响应带 `X-Request-ID` 头可对账）、`[LLM]`（每次 LLM 调用的槽位/模型/耗时/token）、`[HTTP]`（4xx WARNING/未捕获 500 ERROR+traceback）；所有 `backend.*` 业务日志自动携带 `[req=...]` 关联（contextvar 过滤器挂 root handler）；uvicorn access log 与 httpx INFO 行已降噪收编。翻 `VELLUMA_LOG_LEVEL=DEBUG` 可看请求入口行与 adaptive/上下文装配内部链路。
 
 ---
 
@@ -304,7 +294,7 @@ services/api/transport  ← 底层 HTTP
 ## Agent 速查
 
 - **加 API 端点**：`schemas/` 定义 → `routes/` 加模块（`chapter_generation` 是包，在包内加并在 `__init__.py` 合并）→ `main.py` 注册（如未注册）→ 前端 `services/api/domain/` 加调用。⚠ NLE-ADF 3.0 的 adaptive 端点 schema 在 `routes/chapter_generation/adaptive/schemas.py`（Pydantic BaseModel）。
-- **改数据库模型**：`backend/models/` 对应领域子模块改 ORM（新表进对应模块；⚠ 同一 flush 新建父子表必须补 relationship 依赖边——flush 跨表排序按 relationship 而非裸 FK）→ `database.py` 的 `MIGRATIONS` 加列迁移 → 重启自动应用。
+- **改数据库模型**：`backend/models/` 对应领域子模块改 ORM（新表进对应模块；⚠ 同一 flush 新建父子表必须补 relationship 依赖边——flush 跨表排序按 relationship 而非裸 FK）→ `database.py` 的 `MIGRATIONS` 加列迁移 → 重启自动应用。⚠ 新增**书籍级**表还须进 `services/book_archive/tables.py` 注册表（否则备份/还原静默漏表）。
 - **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建），建议查 `logs/prompt_log_*.json` 验证。
 - **前端加 Feature**：`features/` 建目录，按 `containers/`+`presentation/` 分层，经 `services/api/domain` 通信。
 - **改四大领域前先读领域档案**：见顶部「领域档案索引」表（`docs/agent/*.md` + `scripts/README.md`）。

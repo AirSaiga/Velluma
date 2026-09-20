@@ -2,7 +2,7 @@
 
 > 本文自 AGENTS.md 拆分而来（编辑本领域代码前必读）
 
-权威设计文档：`docs/style-paradigm.md`（三平面分权唯一权威）、`docs/style-module-redesign.md`（S1-S5 设计稿）、`docs/style-parameter-effectiveness-audit.md`（去参数化审计）。施工与事故叙事见 `docs/incidents/style.md`。
+权威设计文档：`docs/style-paradigm.md`（三平面分权唯一权威）、`docs/style-module-redesign.md`（S1-S5 设计稿）、`docs/reports/style-parameter-effectiveness-audit.md`（去参数化审计）。⚠ 三份「文风页设计稿」分工（勿拿错版本）：**功能架构**=`docs/style-module-redesign.md`（S1-S5，含 2026-09-14 去参数化修订警示）；**视觉方言**=`docs/design/style-page-redesign.md`（2026-09-17，头部自述「现状权威：代码」）；**早期 UX 稿**=`docs/design/ux-redesign/01-style-page.md`（11 组件期，已被视觉归一批的 13 组件超越）。施工与事故叙事见 `docs/incidents/style.md`。
 
 ## 领域定位
 

@@ -1,6 +1,6 @@
 # Velluma AI 小说写作助手
 
-**专为长篇小说创作设计的 AI 驱动写作助手，采用 NLE-ADF 自适应写作流（前端默认）+ ADF 锚驱动生成 + Refinery 精修架构**
+**专为长篇小说创作设计的 AI 驱动写作助手，采用 NLE-ADF 3.0 自适应融合写作流（前端默认主线）+ ADF 锚驱动生成引擎**
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Vue.js](https://img.shields.io/badge/Vue-3.4-green.svg)](https://vuejs.org/)
@@ -29,7 +29,7 @@
 
 ## 项目简介
 
-Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器）。写作主线为 **NLE-ADF 3.0 自适应融合写作台**（作者主导写作 + AI 柔性共生，打字即激活辅助层），并保留 ADF（锚驱动正向流）引擎与 Refinery 精修流水线。它专为长篇叙事设计，支持：
+Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electron 容器）。写作主线为 **NLE-ADF 3.0 自适应融合写作台**（作者主导写作 + AI 柔性共生，打字即激活辅助层），并保留 ADF（锚驱动正向流）引擎本体与章节重写/局部优化功能。它专为长篇叙事设计，支持：
 
 - 角色状态追踪与关系图谱
 - 基于 RAG 的智能记忆系统
@@ -47,7 +47,18 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 ## 核心特性
 
-### 🤖 ADF 锚驱动生成引擎 (V3.2)
+### 🌊 NLE-ADF 3.0 自适应融合写作台（前端默认主线）
+
+作者主导写作 + AI 柔性共生：不预设拍、不跑整章管线，进章节打字即激活辅助层：
+
+- **心跳感知挂件**：作者写作间隙后台感知，Tab 唤出卡舱（landing 落点 / toward_beat 走向 / echo 前情回响 / ambient 氛围）
+- **Space 幽灵草稿续写**：三键阶梯——Tab 采纳 · Enter 暂留 · Esc 丢弃；五模式（stitch / continue / burst / open / outline）
+- **走向卡连写**（Ctrl+Space）、**细纲胶囊**（`[[` 速记扩写）、**世界速记**（Alt+N）、**`??` 问书**（行间速查）
+- **沉淀与完稿审计**：Ctrl+Enter 手动沉淀；完稿时体检报告（读者清单 + 语义扫描 + 约束核查）
+
+**核心思想**：作者永远主导，AI 只在停笔的缝隙里柔性共生。详见 `AGENTS.md`「NLE-ADF 3.0」节。
+
+### 🤖 ADF 锚驱动生成引擎（V3.2，本体保留、前端已无 UI 入口）
 
 先定"终点锚"（本章高潮 + 必埋/必收的伏笔），再正向逐段写作逼近锚点，全程串行 + 双重自检：
 
@@ -63,21 +74,7 @@ Velluma 是一个 AI 驱动的长篇小说写作助手**桌面应用**（Electro
 
 **核心思想**：边走边自检，没到终点就回头补。详细架构见 `docs/generation-v3.2-adf.md`。
 
-### ✨ Refinery 精修流水线 (V4.1)
-
-独立的"医生看病式"人工精修工具，可对任意已有草稿（无论哪个引擎生成）做诊断 → 作者确认 → 手术：
-
-| 工序 | 功能 | 说明 |
-|------|------|------|
-| Diagnose | 诊断 | LLM 列出问题清单，等待作者勾选确认 |
-| Planner | 规划 | 纯算法规划每个问题改哪一段 |
-| Surgeon | 手术 | 定点改段落（不动无关内容） |
-| Holistic Reader | 回读 | 检查改完是否前后矛盾 |
-| Polisher | 抛光 | 全文润色 |
-
-**核心思想**：把"AI 觉得有问题"和"作者认可的问题"分开，避免 AI 自作主张乱改。详细设计见 `docs/generation-v4.1-refinery.md`。
-
-> 已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / BS-ADF——2026-08-19 归档）的代码与设计文档已归档至 `backend/_deprecated/`（代码）与 `backend/_deprecated/docs/`（设计文档），不再参与运行。
+> **已退役引擎**：Refinery 精修流水线已于 2026-09-12 整体拔除（手术原语迁 `services/text_surgery/`，读者反馈收编 `/adaptive/reader-feedback`，设计文档 `docs/generation-v4.1-refinery.md` 留档）；已废弃引擎（V3.0 Detonation / V3.1 Unified / V4.0 DualTrack / BS-ADF——2026-08-19 归档）的代码与设计文档已归档至 `backend/_deprecated/`（代码）与 `backend/_deprecated/docs/`（设计文档），不再参与运行。
 
 ### 🧠 长篇记忆与状态管理
 
@@ -187,17 +184,15 @@ npm install
 Windows（PowerShell）：
 
 ```powershell
-.\scripts\windows\start-dev.bat       # 开发模式（后端 + Vite + Electron，自动开 DevTools）
-.\scripts\windows\start-debug.bat     # 调试模式（后端 uvicorn --reload 热重载）
-.\scripts\windows\start-prod.bat      # 生产体验（npm run build 后 Electron 载入 dist）
+.\scripts\dev\start-all.bat          # 开发调试（后端热重载 + Vite + Electron，自动开 DevTools）
+.\scripts\prod\start-all.bat         # 生产体验（npm run build 后 Electron 载入 dist）
 ```
 
 macOS / Linux（bash）：
 
 ```bash
-./scripts/macos/start-dev.sh          # 开发模式
-./scripts/macos/start-debug.sh        # 调试模式（后端热重载）
-./scripts/macos/start-prod.sh         # 生产体验
+./scripts/macos/dev/start-all.sh      # 开发调试（后端热重载）
+./scripts/macos/prod/start-all.sh     # 生产体验
 ```
 
 **仅后端开发**
@@ -224,17 +219,14 @@ npm run dev
 
 ```
 Velluma/
-├── scripts/                  # 启动脚本（按平台分目录，每目录 dev/debug/prod 三模式）
-│   ├── windows/              # Windows 入口（.bat 薄包装 + start.ps1 编排核心）
-│   │   ├── start-dev.bat     # 开发入口（Vite + DevTools）
-│   │   ├── start-debug.bat   # 调试入口（后端热重载）
-│   │   ├── start-prod.bat    # 生产体验入口（载入 dist）
-│   │   └── start.ps1         # 核心脚本：-Mode prod/dev/debug
-│   ├── macos/                # macOS/Linux 入口（.sh 薄包装 + start.sh 编排核心）
-│   │   ├── start-dev.sh
-│   │   ├── start-debug.sh
-│   │   ├── start-prod.sh
-│   │   └── start.sh          # 核心脚本：dev/debug/prod
+├── scripts/                  # 启动脚本（按环境/功能完全隔离：dev / prod / monitor）
+│   ├── dev/                  # 开发调试环境·Windows（后端热重载）
+│   │   ├── start-all.bat     # 一键三端（编排核心 start-all.ps1 + 控制台监控台）
+│   │   └── start-backend / start-frontend / start-electron   # 单服务前台直跑
+│   ├── prod/                 # 正式生产环境·Windows（同四入口；前端=npm run build）
+│   ├── monitor/              # 网页监控台+后台监督者（完全隔离，dev_dashboard.py 私有副本）
+│   ├── macos/                # macOS/Linux 入口（dev/ 与 prod/ 两环境，同四入口）
+│   ├── stop-velluma.bat/.ps1/.sh  # 全局一键收摊（三平台）
 │   └── make_blank_atlas.py   # 工具：世界页空白舆图 SVG 生成器（平台无关）
 ├── requirements.txt          # Python 依赖
 ├── model_config.example.json # LLM/Embedding/代理配置模板（复制为 model_config.json）
@@ -243,23 +235,24 @@ Velluma/
 │
 ├── backend/                  # FastAPI 后端
 │   ├── main.py               # 应用入口、路由注册（21 个）、CORS、SPA fallback
-│   ├── models.py             # 31 个 SQLAlchemy ORM 模型
+│   ├── models/               # ORM 模型包（35 张表按领域分 8 个子模块）
 │   ├── database.py           # 异步引擎（SQLite 默认 / PG 可选）、启动时自动迁移
 │   ├── core/                 # config（端口扫描）、model_config、依赖注入
-│   ├── config/               # V4.0 统一配置推导层
+│   ├── config/               # 意图引擎活件（V4.0 参数推导层已归档 _deprecated/config/）
 │   ├── routes/               # 20 个 API 路由模块（另含 chapter_generation 包）
 │   ├── schemas/              # Pydantic 模型
 │   ├── repositories/         # 数据访问层（Repository 模式）
 │   ├── services/             # 业务逻辑层
-│   │   ├── llm/              # LLM 调用、Embedding、代理
-│   │   ├── context/          # 上下文加载
-│   │   ├── generation/       # 生成服务入口
+│   │   ├── llm/              # LLM 调用、Embedding、代理、厂商能力档案
+│   │   ├── context/          # 上下文加载（settings_bundle / stitch_context / world_bridge）
+│   │   ├── generation/       # 生成服务入口（含记忆计分）
 │   │   ├── prompts/          # Prompt 模板库
-│   │   ├── rag/              # RAG 检索系统
-│   │   ├── state_machine/    # 角色状态机
+│   │   ├── rag/              # RAG 检索系统（recall 唯一入口 + 词法检索）
+│   │   ├── adaptive/         # NLE-ADF 3.0 辅助层服务（感知/意图/观测/静音学习等）
+│   │   ├── text_surgery/     # 一致性守卫手术原语（Refinery 遗产新家）
+│   │   ├── book_archive/     # 书籍备份/还原（34 表注册表）
 │   │   ├── workflows/        # 工作流（adf/ 引擎包 + 共享设施）
-│   │   ├── refinery/         # Refinery 精修流水线
-│   │   ├── world/            # 世界状态服务
+│   │   ├── world/            # 世界状态服务（事件推演/写作桥/问书/读者清单）
 │   │   └── utils/            # SSE、日志、超时等工具
 │   └── ...
 │
@@ -283,11 +276,11 @@ Velluma/
 
 ## 生成引擎
 
-当前保留：**NLE-ADF 3.0 自适应流（前端默认主线）** + ADF 引擎（本体保留，前端已无 UI 入口）+ Refinery 精修 + 章节优化功能。
+当前保留：**NLE-ADF 3.0 自适应流（前端默认主线）** + ADF 引擎（本体保留，前端已无 UI 入口）+ 章节优化功能。Refinery 精修已于 2026-09-12 整体拔除。
 
 ### NLE-ADF 3.0 自适应写作台（前端默认）
 
-作者主导写作 + AI 柔性共生：不预设拍、不跑整章管线，进章节打字即激活辅助层（心跳感知 / Space 幽灵草稿 / 走向卡连写 / 细纲胶囊扩写 / 沉淀与完稿审计 / 世界速记与情境浮卡）。编排代码：`backend/routes/chapter_generation/adaptive.py` + `backend/services/context/settings_bundle.py`。详见 `AGENTS.md`「NLE-ADF 3.0」节。
+作者主导写作 + AI 柔性共生：不预设拍、不跑整章管线，进章节打字即激活辅助层（心跳感知 / Space 幽灵草稿 / 走向卡连写 / 细纲胶囊扩写 / 沉淀与完稿审计 / 世界速记与情境浮卡 / `??` 问书）。编排代码：`backend/routes/chapter_generation/adaptive/`（包）+ `backend/services/context/settings_bundle.py`。详见 `AGENTS.md`「NLE-ADF 3.0」节。
 
 主要端点：`/adaptive/heartbeat`（心跳感知）、`/adaptive/stitch-ghost`（续写，SSE）、`/adaptive/settle`（手动沉淀）、`/adaptive/finish`（完稿审计）、`/adaptive/fix-sentence`（残句定点修复）、`/adaptive/spine` + `/adaptive/spine-suggest`（章级谋篇）、`/adaptive/model`（世界模型快照）。
 
@@ -313,24 +306,17 @@ CONTEXT_ASSEMBLING → SPINE_BUILDING → ANCHOR_DESIGN → TIER_DECIDE
 7. **ANCHOR_AUDIT** — 锚点审计（代码级 + LLM 双审计取并集）
 8. **REFINE** — 条件补埋（审计未通过时，补写漏掉的伏笔）
 
-### Refinery 精修（V4.1，独立工具）
-
-**编排代码**：
-- `backend/routes/chapter_generation/refinery.py` — 入口路由（diagnose + confirm）
-- `backend/services/refinery/refinery.py` — 主类 `Refinery`
-
-两阶段流程：`diagnose`（诊断出问题清单）→ 作者勾选确认 → `confirm`（手术 → 回读 → 抛光，真·实时 SSE）。
+> Refinery 精修（V4.1 独立工具）已于 2026-09-12 整体拔除，设计文档 `docs/generation-v4.1-refinery.md` 留档。
 
 ### API 端点
 
 - `POST /api/chapters/{id}/adaptive/*` — NLE-ADF 3.0 自适应流（前端默认，见上节端点清单）
 - `POST /api/chapters/{id}/generate-adf` — ADF 流式生成（SSE）
 - `POST /api/chapters/{id}/plan-suggestion` — 生成前章节规划建议
-- `POST /api/chapters/{id}/refinery/diagnose` — Refinery 诊断
-- `POST /api/chapters/{id}/refinery/confirm` — Refinery 精修（实时 SSE）
 - `POST /api/optimize_chapter` / `/optimize_selection` — 章节重写/局部优化（共享功能）
+- `GET /api/books/{id}/backup` / `POST /api/books/restore` — 书籍备份导出（`.vellumabook` 单 JSON 文件）与还原（原 ID 直复，2026-09-19）
 
-> 已废弃端点 `/generate`（V3.1）、`/generate-v3`（V3.0）、`/generate-chapter`（V4.0）已随引擎移除；`/generate-bsadf`、`/advance-beat`、`/stepping-run/{id}/state`、`/rerender-beat`、`/cancel-run` 已随 BS-ADF 归档移除（2026-08-19）。
+> 已废弃端点 `/generate`（V3.1）、`/generate-v3`（V3.0）、`/generate-chapter`（V4.0）已随引擎移除；`/generate-bsadf`、`/advance-beat`、`/stepping-run/{id}/state`、`/rerender-beat`、`/cancel-run` 已随 BS-ADF 归档移除（2026-08-19）；`/refinery/diagnose`、`/refinery/confirm` 已随 Refinery 拔除移除（2026-09-12）。
 
 ---
 
@@ -353,7 +339,7 @@ Book (书籍)
 └── GenerationTask (异步生成任务)
 ```
 
-全部 31 个模型定义于 `backend/models.py`（除上述核心表外，还包括世界层 `world_*` 事件溯源表族与候选池、文风族 `author_samples`/`style_cards`/`style_inbox_items`、真相面 canon/plot_ledgers 扩展列等）。
+全部 35 张表定义于 `backend/models/`（ORM 模型包，按领域分 8 个子模块；除上述核心表外，还包括世界层 `world_*` 事件溯源表族与候选池、文风族 `author_samples`/`style_cards`/`style_inbox_items`、真相面 canon/plot_ledgers 扩展列等）。
 
 ---
 
@@ -361,7 +347,7 @@ Book (书籍)
 
 **Embedding 走 OpenAI 兼容协议**（任意兼容服务均可接入；默认模型 `text-embedding-v2`、1536 维，`follow_llm=true` 时连接跟随文本模型槽；`base_url` 留空回退 DashScope 兼容端点，历史 Key 零迁移）。API Key 来自 `model_config.json`，**不读环境变量**。未配置 embedding 时记忆流自动走结构化前情 + 词法双路由默认流（向量层为专业级增强，三层叠加）。
 
-**检索权重参数**（`backend/services/rag/scoring.py`）：
+**检索权重参数**（查询在 `backend/repositories/memory_repository.py`，计分在 `backend/services/generation/memory_scorer.py`）：
 
 | 参数 | 含义 | 默认 |
 |------|------|------|
@@ -402,7 +388,7 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 > - `AGENTIC_BEAT_CONCURRENCY` / `AGENTIC_FORCE_FAST_MODE`（原双轨引擎的概念，该引擎已废弃归档）
 > - `DASHSCOPE_API_KEY` / `OPENAI_API_KEY`（Key 全部来自 `model_config.json`）
 
-> 启动脚本（`scripts/windows/start.ps1` / `scripts/macos/start.sh`）会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。
+> 启动脚本（`scripts/dev/start-all.ps1` / `scripts/prod/start-all.ps1` / `scripts/macos/{dev,prod}/start-all.sh`）会为 Electron 进程设置 `VELLUMA_BACKEND_PORT` / `VELLUMA_FRONTEND_PORT` / `VELLUMA_SERVICES_READY`，属进程内传递，无需用户配置。生产模式下额外设置 `NODE_ENV=production`，让 `main.cjs` 载入 `dist/index.html` 而非 Vite dev server。
 
 ---
 
@@ -411,21 +397,21 @@ LLM、Embedding、代理的实际配置来源。该文件已 gitignore，**当�
 ### 桌面应用启动
 
 ```powershell
-# Windows
-.\scripts\windows\start-dev.bat    # 开发模式（后端 + Vite + Electron）
-.\scripts\windows\start-debug.bat  # 调试模式（后端热重载）
-.\scripts\windows\start-prod.bat   # 生产体验（npm run build + 载入 dist）
+# Windows（scripts/dev 与 scripts/prod 各含 backend / frontend / electron / all 四入口）
+.\scripts\dev\start-all.bat       # 开发调试（后端热重载 + Vite + Electron）
+.\scripts\dev\start-backend.bat   # 单独后端（frontend / electron 同款单飞脚本）
+.\scripts\prod\start-all.bat      # 生产体验（npm run build + 载入 dist）
 
-# 常用参数（透传给编排核心 start.ps1 / start.sh）
-.\scripts\windows\start-dev.bat -Force             # 强制清理端口冲突后启动
-.\scripts\windows\start-dev.bat -SkipBackend       # 跳过后端（假设已运行）
-.\scripts\windows\start.ps1 -Mode dev -DryRun      # 仅打印将执行的命令，不启动进程
+# 常用参数（透传给编排核心 start-all.ps1 / start-all.sh）
+.\scripts\dev\start-all.bat -Force             # 强制清理端口冲突后启动
+.\scripts\dev\start-all.bat -SkipBackend       # 跳过后端（假设已运行）
+.\scripts\dev\start-all.ps1 -DryRun            # 仅打印将执行的命令，不启动进程
+.\scripts\stop-velluma.bat                     # 全局一键收摊（dev/prod/monitor 通用）
 
 # macOS / Linux
-./scripts/macos/start-dev.sh       # 开发模式
-./scripts/macos/start-debug.sh     # 调试模式（后端热重载）
-./scripts/macos/start-prod.sh      # 生产体验
-./scripts/macos/start.sh dev --force --skip-backend   # 参数用长选项风格
+./scripts/macos/dev/start-all.sh       # 开发调试（后端热重载）
+./scripts/macos/prod/start-all.sh      # 生产体验
+./scripts/macos/dev/start-all.sh --force --skip-backend   # 参数用长选项风格
 ```
 
 ### 后端
@@ -469,7 +455,7 @@ npm run electron:build  # 打包 Electron 安装包
 | API 文档 | http://127.0.0.1:8002/docs |
 | 健康检查 | http://127.0.0.1:8002/api/health |
 
-> 端口为协商值：后端 8002~8100 扫描，前端 5175~5275 扫描，实际端口见 `data/port.txt` 与 `data/frontend_port.txt`。
+> 端口为协商值：后端 8002~8100 扫描，前端 5175~5285 扫描，实际端口见 `data/port.txt` 与 `data/frontend_port.txt`。
 
 ---
 
@@ -504,7 +490,7 @@ Get-NetTCPConnection -LocalPort 8002
 Get-NetTCPConnection -LocalPort 5175
 
 # 强制清理后启动
-.\scripts\windows\start-dev.bat -Force
+.\scripts\dev\start-all.bat -Force
 ```
 
 ```bash
@@ -513,7 +499,7 @@ lsof -nP -iTCP:8002 -sTCP:LISTEN
 lsof -nP -iTCP:5175 -sTCP:LISTEN
 
 # 强制清理后启动
-./scripts/macos/start-dev.sh --force
+./scripts/macos/dev/start-all.sh --force
 ```
 
 ### 前端连接失败

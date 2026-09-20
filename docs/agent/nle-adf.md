@@ -4,7 +4,7 @@
 
 前端默认且唯一的写作路径。核心理念：**作者永远在写，AI 在画布上柔性共生**——不预设拍划分、不跑整章管线前置；作者进章节打字即激活辅助层。与已归档 BS-ADF 步进模式的根本区别在此。施工/事故史见 `docs/incidents/nle-adf.md`。
 
-设计文档唯一权威（本文不重复其内容）：章级谋篇 `docs/chapter-planning-spine.md`；上下文装配 `docs/knowledge-retrieval-plane.md`；约束治理 `docs/constraint-governance.md`；自动阅读与闭嘴 `docs/auto-read-quiet-learning.md`；spine×大纲合流 `docs/spine-outline-merge-feasibility.md`；AI 视角面板 `docs/ai-view-panel-guide.md` + `docs/ai-view-briefing-feasibility.md` + `docs/design/ux-redesign/09-ai-view-redesign.md`；写作台布局 `docs/design/ux-redesign/08-writing-desk-total-redesign.md`；deai 挂点 `docs/deai-integration.md`；字数硬闸门全文见主指南「关键质量护栏」节。
+设计文档唯一权威（本文不重复其内容）：章级谋篇 `docs/chapter-planning-spine.md`；上下文装配 `docs/knowledge-retrieval-plane.md`；约束治理 `docs/constraint-governance.md`；自动阅读与闭嘴 `docs/reports/auto-read-quiet-learning.md`；spine×大纲合流 `docs/reports/spine-outline-merge-feasibility.md`；AI 视角面板 `docs/ai-view-panel-guide.md` + `docs/reports/ai-view-briefing-feasibility.md` + `docs/design/ux-redesign/09-ai-view-redesign.md`；写作台布局 `docs/design/ux-redesign/08-writing-desk-total-redesign.md`；deai 挂点 `docs/deai-integration.md`。字数硬闸门/ghost_guard 十检/RAG 记忆流全文在本文「关键质量护栏」「RAG / 记忆流」节。
 
 ## 端点总表
 
@@ -116,9 +116,10 @@
 有零件=缝合续写 / 无零件=顺句续写。SSE 打字机灌幽灵草稿，复用 `useGhostDraft`。S2 起四模式 prompt 均注入文风：正面画像块 + 作者笔迹示范 few-shot（`style/retrieval.py` 按当前上下文检索 k≤2，无样本零变化）。
 
 - **stitch 追加式契约（勿回退拼回）**：幽灵纯追加在光标后、原句已在画布——prompt 只要求从断点直接续（禁复读原句/不重说断点附近的词）；路由侧「拼回」已废除，改**复读剥离** `_strip_fragment_prefix`（等价类前缀匹配，语义变体不剥）。模型复读原句必致屏幕重复。
-- **接缝两护**：
+- **接缝三护**：
   1. **压缩改写首句豁免**——压缩模型看不到作者断点，会把补完断点的首句当修饰删除致半句悬空。`_split_first_sentence` 首句物理摘出、只压缩剩余、产物=首句+压缩稿；压缩 prompt 带断点尾句坐标（首句超 target×0.6 退整稿路径）。
   2. **半句断点尾缀复读 `_strip_fragment_tail_repeat`**——模型从悬空处重启复读的是原句**尾缀**非整句。断点非句末且产出以尾缀开头即剥；句末断点不开此闸（同词开头是新句复用词汇不是复读）；切割点后标点保留。对拍 `test_stitch_gates.py` §6。
+  3. **双开引号碰撞剥除 `_strip_colliding_open_quote`**——断点=悬空开引号 × 幽灵以开引号起头，直接拼接会产生成对闭合错乱的双开引号；剥幽灵侧开引号（stitch/continue 双模式）。对拍 `test_stitch_gates.py`。
 - **中插桥接（FIM）**：骨架跳写、光标停在上下文之间时请求带 `suffix_anchor`（**光标后 ≤300 字后文锚**；前端 `_suffixAfterCursor` 取 ≤300 带、后端 dock 入口与两 prompt 编译器同口径 `[:300]`；心跳与 stitch 双路上行）。prompt 注入双端边界与桥接铁律、桥接态断点改取光标前文；产出尾部接缝 `_normalize_bridge_seam` 归一（≤24 字最长重叠优先，归一在字数闸/返修环之前）；dock 侧 `dock-bridge-overlap` 闸拦「桥接机位与后文 ≥4 字重叠 = 提前写掉已写事实」。
 - **心跳/挂件侧桥接取源 + 供给切断**：心跳 `recent_text` 桥接态改送光标前 ≤500 字窗口（`_anchorRecentText`，与 stitch fragment 分支同判据；`_lastCtx` 感知常驻快照同口径）。后端 `build_dock_generator_prompt` 桥接态（`is_bridge`）切断推测/方向猜测/就近节拍素材块——三者全以含后文的画布全文推导 = 后文剧透，供给切断>命令拒绝（`intent_guess` 在 dock_generator.run 消费前清零，含 note 拼装兜底）；空 suffix_anchor 逐字节零变化。对拍 `test_dock_prompt_compiler.py` TestBridgeForm + 前端 `heartbeatSeam.test.ts` 接缝三。
 - **主体锁 + 白描封杀令**：单焦距主体守恒律 `pick_subject_lock` 三锁——物镜（prop/ambient 只写器物/环境自身物理感官，情绪不走人物走物件）/ 发话（landing/speaker 焦点钉发话者单人，其余人等下一笔）/ 静音（reply 只写受话者开腔前的缓冲）；自定义输入不锁。`render_system_blocks` 末位「白描契约与假感官封杀令」块（stitch/continue 专属、空串拼接零变化，措辞用户逐字拍板）。**唯一权威在文风模块** `services/style/texture_contracts.py`（2026-09 收编批；支持按书覆盖 `books.texture_contracts`，装配链 bundle→builder/预览同参透传），病灶词执法词表经洗层/上屏快检/完稿审计旁路合并——详见 `docs/agent/style.md` 写作规矩节。
@@ -126,7 +127,7 @@
 
 ## 三键承诺阶梯 + 改稿自动捕获（03 下一阶段，2026-09-18）
 
-- **三键阶梯（防呆交互模型，作者逐点拍板）**：**Tab=采纳**（正承诺：转正为正文，书签开始跟踪；回场光标在暂留段内时也走此键）/**Enter=暂留**（零承诺：幽灵不蒸发停在原地，光标移到其下新行续写；一期一个暂留位——新暂留/新召唤蒸发旧的）/**Esc=丢弃**（负承诺：蒸发；60s 找回窗内重按 Space 原样重现不重新生成，一次性消费）。最易手滑的 Enter 映射到零承诺动作——误触无害。
+- **三键阶梯（防呆交互模型，作者逐点拍板）**：**Tab=采纳**（正承诺：转正为正文，书签开始跟踪；回场光标在暂留段内时也走此键）/**Enter=暂留**（零承诺：幽灵不蒸发停在原地，光标移到其下新行续写；一期一个暂留位——新暂留/新召唤蒸发旧的）/**Esc=丢弃**（负承诺：蒸发；60s 找回窗内重按 Space 原样重现不重新生成，一次性消费）。最易手滑的 Enter 映射到零承诺动作——误触无害。**上屏可见性（引导体系重构 2026-09-20）**：前 3 枚幽灵在幽灵尾随附一行「Tab 采纳 · Enter 暂留 · Esc 蒸发」（CursorLayer 与疑点条同锚，确实显示过的那枚落沿计数，`useProgressiveHint('ghost_three_keys')` 淡出）。
 - **上膛纪律**：流式灌出期间按键只打断不采纳（中止在飞 SSE，`session.setAdaptiveAbort` 注入 `abortInflight`）；GHOST_DONE 后 400ms 缓冲窗内同（防生成延迟期误触）。**判据=`useGhostDraft.ghostStreaming`**（beginGhost 起/GHOST_DONE·commit·evaporate·reap 止——session 的 stitching 是旧路径遗物从未置真，交叉验证修正）。
 - **暂留终局**：回场 Tab=转正（走 commitGhost 统一出口）/光标在内 Esc=丢弃（「看过了但没要」强信号，`ghost_discard` 带 parked 标记喂学习）；新召唤/复位/切章都清暂留。**暂留位不缓存位置**——一切范围操作现扫 ghostDraft mark（暂留期间编辑会使缓存位置漂移，删错区间=数据损失；交叉验证修正）。
 - **改稿自动捕获（deai 数据飞轮零操作化，M1）**：采纳瞬间暂存 AI 原样原文 + 首尾书签（纯内存 ProseMirror position，不进保存的 HTML）；`useGhostPairTracker.mapTrackedPositions` 随每个文档事务映射（RichTextEditor onUpdate 挂点）——插字后移/删句靠拢/整段删除塌缩为零宽守原地（删了重打照样成对）。自动保存时「对比并更新」（同一幽灵只留最新版：POST 新对+DELETE 旧对）；切章定稿聚合提示「本章记下 N 对（可撤销）」。干净采纳静默跳过；塌缩=完全否决不成对。对拍 `__tests__/ghostPairTracker.test.ts`（17 项）。
@@ -136,7 +137,7 @@
 ## 细纲胶囊
 
 - 入口：Alt+O / 输入 `[[` / 选中文本转换（`extensions/OutlineNoteNode.ts` + `OutlineNoteChip.vue`）。作者亲笔剧情速记以胶囊嵌在正文任意位置 →「落笔扩写」走 stitch-ghost mode=outline。
-- 双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」，clamp 100-800、缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门（闸门全文见主指南「关键质量护栏」节）。
+- 双端锚定：胶囊前 500 字 + 后 300 字；目标字数解析速记中「约N字」，clamp 100-800、缺省 400；×1.6 压缩重试 + ×1.5 句界截断硬闸门（闸门全文见本文「关键质量护栏」节）。
 - 扩写启动即塌缩为钉 ⚑ 可再扩写；**会话级，存盘剥除**（与幽灵同契约，`stripGhostDraftHtml` 一并剥 `[data-outline-note]`）。
 - 编排经 `velluma:outline-expand` 事件解耦（`useAdaptiveAssist.requestExpandOutline`）。
 
@@ -150,7 +151,7 @@
 ## 章级谋篇（spine）
 
 - `GET`/`PATCH /adaptive/spine`（`chapters.spine` JSONB，部分合并；2s 防抖自动保存）+ `POST /adaptive/spine-suggest`。
-- **叙事引力流面板**（spine×大纲单轨合流，路径 C 见 `docs/spine-outline-merge-feasibility.md`）：🎯方向行（spine.intent 高亮锚）+ 锚点 chips + 📝情节节拍区（outline_text 迁入，InspectorPanel 旧大纲卡已删除）单卡连贯。**数据层双字段与 prompt 剂量位零改动**（分割边界=控件边界，maxlength 拦截整段粘贴进方向行）。
+- **叙事引力流面板**（spine×大纲单轨合流，路径 C 见 `docs/reports/spine-outline-merge-feasibility.md`）：🎯方向行（spine.intent 高亮锚）+ 锚点 chips + 📝情节节拍区（outline_text 迁入，InspectorPanel 旧大纲卡已删除）单卡连贯。**数据层双字段与 prompt 剂量位零改动**（分割边界=控件边界，maxlength 拦截整段粘贴进方向行）。
 - 活跃节拍微标「▶ 续写正朝这拍走」= `GET /adaptive/active-beats`（与 stitch/dock **同一份** outline_nearby 计算，纯算法，防抖 800ms 拉取）。
 - **强制冲刷**：`velluma:flush-planning` 事件——useAdaptiveAssist 的 summonParts/requestContinue 入口 dispatch → InspectorPanel 监听执行 `chapterSpine.flushNow()` + outline 500ms 防抖冲账；双保险=心跳上行本就携带 spine_intent/outline_text；节拍区 blur 也冲刷。
 - OutlineView 全书大纲页编辑经 store 响应式回流（textarea 直绑 store 值，draft 仅记作者输入）。
@@ -171,6 +172,27 @@
 2. **双轨生成契约** `texture_contract.pick_contract`——motion（动作推进，旧行为零变化）/ texture（停在当下细写）两档进 stitch prompt；槽位映射 landing/toward_beat→motion、echo/ambient→texture。
 3. 输出侧代码闸见「约束治理」节 ghost_guard（beat_rush live+rewrite / cast_roll_call shadow）。
 4. 质感密度可测量化进 fingerprint texture 键 + finish 质感样本候选（见文风领域）。
+
+## 关键质量护栏（事故根因，勿回退）
+
+> 各护栏的事故经过见 `docs/incidents/nle-adf.md`；此处只留规则本体。已归档引擎（`_deprecated/bsadf/`）里的护栏仅作迁移取材，不随 live 代码演进。
+
+- **字数硬闸门**：超 target×1.6 带压缩反馈重试，末次仍超句界截断到 target×1.5（截断上限必须 ≤1.6）；末段（结局段）豁免截断。**adaptive 现役形态**：outline 走保尾双闸（`_truncate_keep_tail`）；stitch/continue 走「保头截断 + 压缩改写」——超 ×1.6 先 `_truncate_at_sentence` 保头截到 ×1.5，截取稿发回模型按目标字数压缩改写；压缩产物仍超硬限对压缩稿再句界截一次，空产出回落截取稿（永不劣于纯截断）。**微镜头免压缩**：stitch 且 target ≤60（`MICRO_STITCH_TARGET_MAX`）超硬限保头句界截断即止、不走压缩改写，同窗旁路 deai 抛光与 P2 残留句级修补（残余禁词由 P1 洗层兜底）；先复读剥离后量配额。**burst/open 同进两级闸**（闸只抓 ×1.6 严重超产、正常浮动不碰）。**接缝三护**见「续写」节（①断点衔接首句豁免压缩 ②半句断点尾缀复读剥离 ③双开引号碰撞剥除）。对拍 `test_stitch_gates.py`。
+- **REFINE 完整性闸门**：补埋输出采纳前强制句末完整性校验，回退后丢失过半则整段放弃（宁缺勿残）。
+- **enrich 幻觉闸门**：空种子禁自由扩写；剧情关键词/零接地双向过滤。
+- **POV 名闸门**：状态卡已知 POV 角色时正文必须出现其名至少一次。
+- **残句门禁与单条修复**（`workflows/sentence_integrity.py`，在役）：高精确度正则扫残句（宁漏勿误），`repair_single_defect` 定点修复（1×creative + REASONING_DISABLED + max_tokens=1600，批处理上限 5）——现服务 `/adaptive/fix-sentence`。
+- **上屏前快检 ghost_guard（`services/validation/ghost_guard.py`）**：stitch-ghost 完整文本生成后、GHOST_DONE 前纯算法扫疑点，共十检。随 GHOST_DONE 上帧五类：①dead_speak 死者开口 ②canon_leak 泄底（private 标签）③secret_leak 私有短语外泄（含 3b 字段级扩展——字段分层档案的秘密/半露字段同判据）④cliche_hit 禁忌面命中 ⑤out_of_scene 人物不在场；**beat_rush 抢拍**（live+rewrite：幽灵字面复用大纲就近节拍措辞进返修环带稿改写，仅 stitch/continue 开，excise 不授权）；**shadow 四检只落台账**：location_jump 地点穿越 / cast_roll_call 名单演出 / mind_leak 思绪泄漏 / belief_leak 信念泄漏。前端感知带疑点条，local_only 由 registry status 驱动。**二期起不再是纯「只提示不拦截」**：repair 字段声明资格的约束（canon_leak/secret_leak/beat_rush=rewrite）进缝合返修环（检出→带稿改写→句级切除→拒稿不上屏，详见「约束治理」节）；无世界数据零报错契约不变。⚠ 零报错契约的反面教训：候选宇宙构造若对生产形态实体必抛异常被静默吞掉，整检会全灭数月不可见——**新检第一轮实测必须确认命中路径可达**。各检详设（promote 门槛/语料库/回归判据）见「约束治理」节与 `docs/constraint-governance.md`。
+- **状态卡抽取失败**：沿用旧卡显式记 `result.degraded`（不静默）；max_tokens=1600 兜底。
+
+## RAG / 记忆流（`recall_memories`：默认流始终打底 + 向量流增强叠加）
+
+唯一检索入口 `services/rag/recall.py` 的 `recall_memories`（消费方：stitch-ghost 五模式 k=3、dock_generator k=2，签名稳定），三层按质量序 `merge_echoes` 保序去重截 k：
+
+- **A 结构化前情（始终）**：查询中出现的世界实体（名/别名匹配，≤4 个）× 叙事时刻之前（`resolve_narrative_time`）的 world_events，倒序取 3 条格式化为【前情事件·类型】（世界页无数据自动跳过）。**相关性门 `echo_is_relevant`**：实体名命中≠语境相关——事件与查询段 jieba 共享词（≥2 字）≥2 个或占比 ≥0.3 才放行；无及格事件允许 A 流为空（对拍 `test_recall_gate.py`）。
+- **V 向量增强（embedding 已配置时叠加——不替换默认流，A/B 恒在）**：任意 OpenAI 兼容 Embedding 服务（`model_config.json` 的 `embedding` 节：`api_key`/`base_url`/`model` 默认 `text-embedding-v2`/`dimensions` 1536；`follow_llm=true` 时连接跟随文本模型槽——creative 优先、缺 Key 回退 reasoning；`base_url` 留空回退 DashScope 兼容端点；Key 来自 model_config 不读环境变量）；`search_similar` 权重（`repositories/memory_repository.py` 查询 + `services/generation/memory_scorer.py` 计分）：alpha 0.6（语义）/ beta 0.2（时间衰减）/ gamma 0.2（伏笔）/ lambda_decay 0.1。
+- **B 词法检索（始终补足）**：`jieba.analyse` 抽关键词（top 8）→ `MemoryRepository.search_lexical`（SQL ILIKE 预筛 ≤60 候选 + Python 重排：`lexical.keyword_coverage` 命中计分单关键词封顶 3 次 + 开放伏笔章 +1 + 新近 tiebreak）。**检索分流去敏**：`mask_entity_names`/`bundle_mask_names` 把书级专名+注册别名（≥2 字）从查询抹除**只喂 V/B 流**（防高频主角名霸屏），A 流保原文（对拍 `test_recall_masking.py`）。
+- **写路径**：完稿重索引（`memory_indexing`）/提取确认/发布摘要块——**块文本一律落库**，embedding 仅在已配置时生成（`is_embedding_configured()` 门控），未配置不再整块跳过。检索限当前章之前（防未来信息泄露），三层同规则。
 
 ## 沉淀（`/adaptive/settle`）
 
@@ -301,30 +323,4 @@ Ctrl+1~4 打开助手面板对应分区、Ctrl+5 打开 AI 视角、Ctrl+\\ 固�
 
 ## 编辑器本体优化
 
-### 中文标点规范化（`extensions/chineseTypography.ts`）
-
-- 判据铁律=**只在中日韩上下文动手**（`3.5`/`1,000`/`Mr. Smith`/`Hello... world` 一律原样）。
-- 输入侧 InputRules 打字即正：`...`→`……`、`--`→`——`、半角 `,.?!:;()` 前一位是中文时转全角、直双引号按段内左右引号数判开闭；正则一律**零宽后顾**（range 只覆盖标点本身，不重建前一个汉字的文本节点）。
-- 批处理侧 `normalizeDocumentPunctuation`（⋯ 菜单「整理标点」，零 LLM/零 API Key，单事务一次 Ctrl+Z 反悔，**保留命中处行内格式**）。
-- 两消费面共用逐字符单遍扫描的 `punctuationEdits`（**按位置升序返回是契约**——引号规则会先记右引号的账，不排会让拼接错位）。
-
-### 粘贴净化 + 清除外来样式（`extensions/foreignStyles.ts`）
-
-- `transformPastedHTML` 剥长相类样式 color/background/font-family/font-size（粗斜下划线等排版意图保留）。
-- ⋯ 菜单「清除外来样式」治存量——**带预检**（区间内真有无外来标记）决定提示语；整篇清理靠 selectAll 后**必须还原原选区**（否则作者回正文一打字替换整章）。
-
-### 查找替换
-
-- `extensions/editorFind.ts`（插件：搜索态 + Decoration 纯视图命中高亮，未搜索零成本短路）+ `composables/useEditorFind.ts`（状态机）+ `presentation/EditorFindBar.vue`（纸面右上浮出单行条，Esc 走全局 Esc 栈不自行处理）。
-- 块内扫描不跨段、原子节点占位挡住、跨文本节点命中位置映射走共享 `extensions/blockTextMap.ts`（与标点归一同一底座）。
-- 替换逐条独立事务、全部替换单事务；跳转只移选区不抢焦点（**查找条开着时屏蔽选区浮窗**）；替换走 JSON 内容/裸 `tr.insertText`（字符串会被当 HTML 解析）。
-- **关条焦点用 `ed.view.focus()` 而非 `commands.focus()`**（后者把 view.focus() 推迟进 rAF，窗口不可见时 rAF 被节流→焦点停在 body）。
-
-### 排版
-
-- `RichTextEditor.vue` 的 scoped `:deep(.ProseMirror)` 不重复声明 font-family/size/line-height——排版唯一权威= `--editor-*` token。
-- `--editor-font-family` 栈底补 `SimSun`（栈里一个中文衬线都命中不到时，`“”…` 会被 Georgia 先抓走致字与标点对不齐）。
-
-### 入口与对拍
-
-⋯ 章节动作菜单「查找替换（Ctrl+F）/整理标点/清除外来样式」+ 快捷键速查表补 Ctrl+F。对拍 `extensions/__tests__/{chineseTypography,editorFind,foreignStyles}.test.ts`（34 项）。
+标点归一/粘贴净化/查找替换/排版 token 等编辑器自体契约与生成引擎零耦合，已拆出独立档案 **`docs/agent/editor.md`**（改编辑器相关代码前必读）。

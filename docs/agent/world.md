@@ -2,7 +2,7 @@
 
 # 世界设定层（World，★ 静态设定的唯一编辑源与生成数据源）
 
-事件溯源式世界建模器。已有设计文档（勿重复，此处只收契约）：`docs/location-interior.md`、`docs/world-writing-bridge.md`、`docs/canon-world-fusion.md`、`docs/implicit-graph-projection-feasibility.md`、`docs/scene-transit-feasibility.md`、`docs/design/canon-fusion/`、`docs/design/truth-ux/`。时效施工/事故叙事见 `docs/incidents/world.md`。
+事件溯源式世界建模器。已有设计文档（勿重复，此处只收契约）：`docs/reports/location-interior.md`、`docs/world-writing-bridge.md`、`docs/reports/canon-world-fusion.md`、`docs/reports/implicit-graph-projection-feasibility.md`、`docs/reports/scene-transit-feasibility.md`、`docs/design/canon-fusion/`、`docs/design/truth-ux/`。时效施工/事故叙事见 `docs/incidents/world.md`。
 
 ## 数据模型与推演内核
 
@@ -11,7 +11,7 @@
   - 单分组 `group_name`：详情抽屉「分组」输入失焦即存 + 既有组 datalist 候选；资产面板按组折叠、未分组恒居首、全未分组零视觉变化；纯组织元数据**不进 prompt 档案装配**。
   - ⚠ 清空靠 repo update 白名单 `_ENTITY_EXPLICIT_NULLABLE`——显式 null 才写 NULL，勿回退成裸 `if v is not None` 跳过。
   - 分组判据纯函数 `engine/entityGroups.ts`（带对拍）。
-- `world_locations`：内部构造 `parent_id` 树（`docs/location-interior.md`）。
+- `world_locations`：内部构造 `parent_id` 树（`docs/reports/location-interior.md`）。
   - 渲染不变量：上图权 = `parent_id IS NULL`。
   - LocationDetailDrawer 二级面板面包屑下钻；速记/事件表单/场景钉/浮卡全房间级可达。
   - 场景作用域 `scene_scope_ids`：钉房间时祖先算在场；场景身份块带地点档案（无 intro 零变化）。
@@ -93,7 +93,7 @@
 - ⑤ **保鲜三时机**：章节切换/心跳 `world_version`/窗口聚焦（`useWorldSlice` 单例）。
 - ⑥ **深链往返**：世界页 URL `?entity|loc|fs=&time=&from=chapter&chapter=`（世界页「返回本章」）；`?fs=` 开伏笔详情抽屉；`?panel=expectations|worldview|canon` 开对应账本/真相格；写作页「头顶的线」伏笔/期待行可点击。
 - ⑦ **本章场景钉**：`chapters.scene_location_id`。
-- ⑧ **光标派生取景框**（`docs/scene-transit-feasibility.md` 唯一权威）：`services/world/active_scene.py` 纯函数 `resolve_active_scene`。
+- ⑧ **光标派生取景框**（`docs/reports/scene-transit-feasibility.md` 唯一权威）：`services/world/active_scene.py` 纯函数 `resolve_active_scene`。
   - 光标前 ≤2000 字窗逆扫「转场动词×名册地点名（含别名/无坐标房间）」最近命中；动词表=`LOCATION_JUMP_VERBS` 11 词+室内扩充推门/跨进/拐进/摸进/闪进。
   - 命中句须已完结（地名后到尾有句末标点=无状态滞回防抖）+闪回豁免（`FLASHBACK_WORDS` 跳过继续向左）；无命中回退本章钉。
   - `pre_cursor_window`=recent_text 尾锚定章文本取窗，找不到锚回章尾。
@@ -103,7 +103,7 @@
 
 ## 真相层（Canon 融合 C1/C2/C3）
 
-设计文档：`docs/canon-world-fusion.md` + UX 稿 `docs/design/canon-fusion/`、`docs/design/truth-ux/`。信息层（作者真相 vs 读者认知）并入活舆图，图标栏账本族第四格「真相」。
+设计文档：`docs/reports/canon-world-fusion.md` + UX 稿 `docs/design/canon-fusion/`、`docs/design/truth-ux/`。信息层（作者真相 vs 读者认知）并入活舆图，图标栏账本族第四格「真相」。
 
 ### 真相账本与详情抽屉
 
@@ -177,7 +177,7 @@
 
 ## 隐式图谱投影器（原型，消费方暂无）
 
-- 调研：`docs/implicit-graph-projection-feasibility.md`。`services/world/implicit_graph.py` 三件：
+- 调研：`docs/reports/implicit-graph-projection-feasibility.md`。`services/world/implicit_graph.py` 三件：
   - 数据契约：`EventCard` 超边原子 / `SubgraphNode` / `SubgraphSlice`。
   - `project_active_subgraph` 纯函数（事件流→在场连通子图）：1 跳在场共现 + 2 跳仅 `MAJOR_TYPES`{death/battle/territory_change/destroy/coronation}∪近 90 天窗外扩；**EventCard 超边永不展开 N² 点对**（battle 十人混战=1 张卡）；三道帽=每根 per_root_cards 张 / 2 跳每成员一卡且总数 ≤second_hop_cards_cap / 全局 node_cap=40；时态纪律同 fold：`time_start≤t` + supersedes 排除 + `(time_start,sequence_num)` 倒序最新优先。
   - `format_subgraph_for_prompt`：空卡空串零变化契约；时刻换算与前端 `timeFormat.ts` 同构（365 日/年 30 日/月创世元年）；note 缺失回退参与者名单。

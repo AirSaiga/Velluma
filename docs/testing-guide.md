@@ -7,14 +7,16 @@
 
 ---
 
-## 1. 当前覆盖面（2026-09-18 基线）
+## 1. 当前覆盖面（2026-09-19 基线）
 
 | 面 | 数量 | 运行方式 |
 |---|---|---|
-| 后端 pytest | **1586 项**（121 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
-| 前端 vitest | **398 项**（45 文件） | `cd frontend && npm run test` |
+| 后端 pytest | **1614 项**（124 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
+| 前端 vitest | 413 项（47 文件） | `cd frontend && npm run test` |
 | 前端类型 | vue-tsc 零错 | `cd frontend && npm run typecheck` |
 
+- 2026-09-20 基线变动（请求级链路日志批）：+16 后端（`core/test_request_observability.py`——[REQ] 完成行/X-Request-ID 头/降噪策略/异常落日志/流式不缓冲/VELLUMA_LOG_LEVEL 解析语义锁）；`test_view_rebalance.py` 的 `_FakeResult` 补 `finish_reason` 与真实 LLMResult 同形。
+- 2026-09-19 基线变动（书籍备份批）：书级备份/还原/删除清理 +11 后端（`services/book_archive/test_book_archive.py` 真实 SQLite 往返对拍 + `routes/test_book_backup_routes.py` 路由冒烟）+ 前端备份预览纯逻辑 +12（`features/library/__tests__/backupPreview.test.ts`）；配套 `scripts/smoke_book_backup.py` 真实库副本冒烟（隔离承诺见脚本头）。
 - 2026-09-18 基线变动（next-phase 五稿批）：候选回流修缮 +31 后端 +11 前端；埋点瘦身零增净删（拆 summary 端点与协作面板，机制测试保留）；开章卡 +6 后端（`test_reader_ledger.py`）；问书 +17 后端（`test_ask_book.py`）；幽灵三键/自动捕获 +17 前端（`ghostPairTracker.test.ts`——决策纯函数/映射三形态/覆盖语义/上膛窗）。2026-09-19 GUI 交叉验证轮：+1 后端（问书「知道」语气词回归用例，缺陷 #2 修复配套——旧断言太松假绿的教训：断言必须钉分支专属措辞）。
 
 - 后端测试与被测模块**同目录 colocate**：`services/style/fingerprint.py` ↔ `services/style/test_fingerprint.py`。跨模块的接缝测试也放在主要消费方目录下（如 `routes/chapter_generation/test_collab_clear.py`）。

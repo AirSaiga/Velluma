@@ -1,6 +1,6 @@
 # 写作台「此刻」面板底层实现调研报告
 
-> 调研日期：2026-09-16。调研方式：三个子智能体分头摸底（前端 UI 层 / 后端场景切片 / 候选收件箱链路），本文为主 agent 汇总提炼。所有行号以当前工作区为准，会漂移。
+> 调研日期：2026-09-16。**状态（2026-09-19 标注）：纯调研，未施工·待拍板**——十条设计原则与双轨在场方案仍是提案；若决定动工，先对拍 `docs/agent/world.md` 与 `docs/agent/nle-adf.md` 的现行契约。调研方式：三个子智能体分头摸底（前端 UI 层 / 后端场景切片 / 候选收件箱链路），本文为主 agent 汇总提炼。所有行号以调研时工作区为准，会漂移。
 
 「此刻」面板是写作台右侧助手面板（InspectorPanel）的默认工作分区之一，承载两件事：**「此刻此地」世界场景切片条**（作者写到哪，世界此刻长什么样）与**候选回流收件箱**（AI 从正文里读出的世界变化，等作者批示）。它是「世界设定层 → 写作现场」双向桥（docs/world-writing-bridge.md）在写作台的主要落点。
 
@@ -236,6 +236,6 @@ pending > 5（`WORLD_INBOX_HINT_THRESHOLD`，heartbeat.py:479）产 `kind=world_
 
 **设计文档**
 - `docs/world-writing-bridge.md` — 写作桥 W1-W5 唯一权威
-- `docs/scene-transit-feasibility.md` — 光标派生取景框设计
-- `docs/foundation-hardening.md` — P5 叙事时间来源可见/在场提权
-- `docs/auto-read-quiet-learning.md` — 系统自动读 + 学着闭嘴战略
+- `docs/reports/scene-transit-feasibility.md` — 光标派生取景框设计
+- `docs/reports/foundation-hardening.md` — P5 叙事时间来源可见/在场提权
+- `docs/reports/auto-read-quiet-learning.md` — 系统自动读 + 学着闭嘴战略
