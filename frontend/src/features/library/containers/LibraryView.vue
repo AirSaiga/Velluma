@@ -18,8 +18,10 @@ import { useAppStore } from '../../app/useAppStore'
 import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import MarkdownImportModal from '../../import-markdown/containers/MarkdownImportModal.vue'
-import { chapterApi } from '../../../services/api'
+import BookRestoreModal from './BookRestoreModal.vue'
+import { bookApi, chapterApi } from '../../../services/api'
 import { adaptiveApi } from '../../../services/api/domain/adaptive.api'
+import { backupFileName } from '../backupPreview'
 import { countChapterWords } from '../../../shared/utils/htmlText'
 import type { Book, Chapter } from '../../../types'
 
@@ -168,7 +170,7 @@ async function deleteBook(book: Book) {
   const ok = await showConfirm({
     title: '确认删除',
     message: `确定要删除《${book.title}》吗？此操作会删除其下所有章节与角色。`,
-    warning: '此操作不可撤销',
+    warning: '此操作不可撤销。如需日后还原，请先用卡片上的「备份」导出。',
   })
   if (!ok) return
   try {
@@ -176,6 +178,40 @@ async function deleteBook(book: Book) {
     showToast('已删除', 'success')
   } catch (e: any) {
     showToast('删除失败：' + e.message, 'error')
+  }
+}
+
+// 书级备份：下载单个 .vellumabook 文件（删书后可从「还原备份」原样放回）
+const backingUpId = ref<string | null>(null)
+
+async function backupBook(book: Book) {
+  backingUpId.value = book.id
+  try {
+    const blob = await bookApi.backup(book.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = backupFileName(book.title || '未命名')
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    showToast('备份已下载', 'success')
+  } catch (e: any) {
+    showToast('备份失败：' + (e?.message || '未知错误'), 'error')
+  } finally {
+    backingUpId.value = null
+  }
+}
+
+// 还原备份：Modal 成功后刷新书架
+const showRestoreModal = ref(false)
+
+async function onBookRestored() {
+  try {
+    await store.loadBooks()
+  } catch {
+    /* 刷新失败静默——用户可手动刷新页面 */
   }
 }
 
@@ -200,6 +236,10 @@ function openImportModal(book: Book) {
         <p class="page-subtitle"><span class="tnum">{{ books.length }}</span> 卷藏书 · 点击进入写作</p>
       </div>
       <div class="header-actions">
+        <button class="btn-secondary btn-ghost" @click="showRestoreModal = true">
+          <Icon name="arrow-uturn-left" :size="16" />
+          <span>还原备份</span>
+        </button>
         <button class="btn-primary btn-primary-instrument" @click="startQuickCreate">
           <Icon name="plus" :size="16" />
           <span>新建书籍</span>
@@ -215,6 +255,10 @@ function openImportModal(book: Book) {
         <button class="btn-primary btn-primary-instrument" @click="startQuickCreate">
           <Icon name="plus" :size="16" />
           <span>新建书籍</span>
+        </button>
+        <button class="btn-secondary btn-ghost" @click="showRestoreModal = true">
+          <Icon name="arrow-uturn-left" :size="16" />
+          <span>还原备份</span>
         </button>
       </div>
     </div>
@@ -276,6 +320,14 @@ function openImportModal(book: Book) {
           </p>
         </div>
         <div class="book-actions" @click.stop>
+          <button
+            class="icon-btn"
+            :title="backingUpId === book.id ? '正在备份…' : '备份（导出整本书数据）'"
+            :disabled="backingUpId === book.id"
+            @click="backupBook(book)"
+          >
+            <Icon :name="backingUpId === book.id ? 'arrow-path' : 'arrow-down-tray'" :size="14" :class="{ spin: backingUpId === book.id }" />
+          </button>
           <button class="icon-btn" title="导入 .md 章节" @click="openImportModal(book)">
             <Icon name="arrow-up-tray" :size="14" />
           </button>
@@ -362,6 +414,9 @@ function openImportModal(book: Book) {
 
     <!-- Markdown 批量导入 Modal -->
     <MarkdownImportModal v-if="showImportModal" @close="showImportModal = false" />
+
+    <!-- 还原备份 Modal（书级备份闭环的回流口） -->
+    <BookRestoreModal v-if="showRestoreModal" @close="showRestoreModal = false" @restored="onBookRestored" />
   </div>
 </template>
 
@@ -682,6 +737,21 @@ function formatWords(words: number): string {
 .icon-btn:hover {
   background: var(--paper-bg);
   color: var(--text-primary);
+}
+
+/* 备份进行中：钮禁用 + 图标旋转 */
+.icon-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.icon-btn .spin {
+  animation: icon-btn-spin 1s linear infinite;
+}
+
+@keyframes icon-btn-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 /* 02 期 §8 H3：删除（破坏性）钮常态 45% 低显 */
 .icon-btn.danger {

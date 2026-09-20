@@ -35,16 +35,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - WorldviewUpdate: 世界观/设定更新
 """
 
+import json
 import math
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.dependencies import get_book_repository, get_plot_ledger_repository, get_db
+from backend.models import Chapter
 from backend.repositories import BookRepository, PlotLedgerRepository
 from backend.schemas import BookCreate, BookUpdate, BookResponse, ChapterResponse, WorldviewUpdate, PlotLedgerResponse, PlotLedgerCreate, PlotLedgerUpdate
+from backend.services.book_archive import (
+    BackupFormatError,
+    BookAlreadyExistsError,
+    export_book_payload,
+    import_book_payload,
+    purge_book_files,
+)
 
 
 router = APIRouter(prefix="/api", tags=["books"])
@@ -141,7 +154,11 @@ async def update_book(book_id: UUID, book_data: BookUpdate, repo: BookRepository
 
 
 @router.delete("/books/{book_id}")
-async def delete_book(book_id: UUID, repo: BookRepository = Depends(get_book_repository)):
+async def delete_book(
+    book_id: UUID,
+    repo: BookRepository = Depends(get_book_repository),
+    db: AsyncSession = Depends(get_db),
+):
     """业务目的：删除书籍及其所有关联数据。
 
     参数来源：
@@ -150,6 +167,9 @@ async def delete_book(book_id: UUID, repo: BookRepository = Depends(get_book_rep
     副作用：
     - 数据库 DELETE 操作
     - 警示：此操作会触发级联删除（章节、角色、关系等），不可逆
+    - DB 外连带清理（书籍备份批 2026-09-19）：world_images/{book_id}/
+      底图目录、6 个 jsonl 台账的本书记录、该书各章 trace/prompt 日志
+      ——不清理则「删→还原」后台账双份（学习状态双计）
 
     权衡点：
     - 未实现软删除（is_deleted 标志），因为书籍作为顶层聚合根，
@@ -159,8 +179,90 @@ async def delete_book(book_id: UUID, repo: BookRepository = Depends(get_book_rep
     book = await repo.get_by_id(book_id)
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
+    # 章节清单必须在 DB 删除前收集（trace 日志文件名按 chapter_id 命名）
+    chapter_ids_result = await db.execute(select(Chapter.id).where(Chapter.book_id == book_id))
+    chapter_ids = [str(row) for row in chapter_ids_result.scalars().all()]
     await repo.delete(book)
-    return {"message": "书籍已删除", "id": str(book_id)}
+    purged = purge_book_files(book_id, chapter_ids)
+    return {"message": "书籍已删除", "id": str(book_id), "purged": purged}
+
+
+# =============================================================================
+# 书籍备份 / 还原 - 「导出备份 → 删除 → 导入还原」闭环（2026-09-19）
+# =============================================================================
+
+@router.get("/books/{book_id}/backup")
+async def backup_book(
+    book_id: UUID,
+    repo: BookRepository = Depends(get_book_repository),
+    db: AsyncSession = Depends(get_db),
+):
+    """业务目的：导出一本书的完整备份（单个 JSON 文件，扩展名 .vellumabook）。
+
+    参数来源：
+    - book_id: 路径参数
+
+    数据流：
+    - 34 张书籍级表的全部行 + 地图底图 base64 + 6 个 jsonl 台账
+      （services/book_archive/ 唯一权威），DB 纯读无写入
+
+    副作用：
+    - 无（纯读）；响应带 Content-Disposition 供浏览器落盘
+    """
+    book = await repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    payload = await export_book_payload(db, book_id)
+
+    filename = _backup_filename(book.title or "未命名")
+    return JSONResponse(
+        content=payload,
+        headers={
+            # RFC 5987：中文书名走 filename*，ascii 兜底防老客户端乱码
+            "Content-Disposition": (
+                f"attachment; filename=\"backup-{str(book_id)[:8]}.vellumabook\"; "
+                f"filename*=UTF-8''{quote(filename)}"
+            )
+        },
+    )
+
+
+@router.post("/books/restore")
+async def restore_book(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """业务目的：从备份文件还原一本书（原 ID 直复，书架已有同 ID 书则拒绝）。
+
+    参数来源：
+    - file: multipart 文件字段（前端 FormData 上传，world 地图上传同款）
+
+    副作用：
+    - 数据库 INSERT（单事务：全表拓扑序插入 + 自引用列两阶段回填）
+    - 文件写入：world_images/{book_id}/ 底图、6 个 jsonl 台账（滤旧再追加）
+    - 重复还原 → 409；格式/版本不符 → 400
+
+    权衡点：
+    - 还原保留原始 UUID 不重映射：canon 软关联与 source_key 字符串
+      引用都按原 ID 存活，重映射会静默切断（services/book_archive 契约）
+    """
+    raw = await file.read()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="备份文件不是有效的 UTF-8 JSON")
+    try:
+        report = await import_book_payload(db, payload)
+    except BackupFormatError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except BookAlreadyExistsError:
+        raise HTTPException(status_code=409, detail="书架中已存在这本书，不能重复还原")
+    return report
+
+
+def _backup_filename(title: str) -> str:
+    """落盘文件名：{书名}-备份-{YYYYMMDD-HHmm}.vellumabook。"""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    # 文件名非法字符兜底（Windows 保留字符）
+    safe_title = "".join(c if c not in '\\/:*?"<>|' else "_" for c in title).strip() or "未命名"
+    return f"{safe_title}-备份-{stamp}.vellumabook"
 
 
 # =============================================================================

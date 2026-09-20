@@ -10,6 +10,21 @@ export const bookApi = {
   updateWorldview: (id: string, data: any) =>
     requestJson(`/books/${id}/worldview`, { method: 'PATCH', body: JSON.stringify(data) }),
   getGoldenSnippets: (id: string) => requestJson(`/books/${id}/golden-snippets`),
+  /** 书级备份下载（34 表 + 底图 + 台账，单 JSON 文件）；返回 Blob 供 a[download] 落盘 */
+  backup: async (id: string): Promise<Blob> => {
+    const res = await requestRaw(`/books/${id}/backup`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '备份失败' }))
+      throw new Error(err.detail || '备份失败')
+    }
+    return res.blob()
+  },
+  /** 从备份文件还原一本书（原 ID 直复；书架已有同 ID 书后端 409） */
+  restoreBackup: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return requestJson('/books/restore', { method: 'POST', body: form })
+  },
   // 双写收敛（任务包 B）：updateGoldenSnippets / GET+PUT style-blacklist 通道已删——
   // 黄金片段只写文风样本库（styleApi.createSample），负面清单唯一入口是 style-card。
 }

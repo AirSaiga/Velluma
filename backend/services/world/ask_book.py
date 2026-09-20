@@ -630,11 +630,16 @@ async def answer_question(
 # 度量（05 瘦身口径：独立 jsonl，问题原文供 M4 分布校准）
 # ============================================================
 
+def _metrics_path() -> Path:
+    """问书度量台账坐标（书级备份 book_archive 借用，不复制路径规则）。"""
+    root = Path(__file__).resolve().parents[3]
+    data_dir = Path(os.getenv("VELLUMA_DATA_DIR") or (root / "data"))
+    return data_dir / "ask_book_metrics.jsonl"
+
+
 def log_ask_metric(book_id: str, chapter_id: str, question: str, kind: str) -> None:
     try:
-        root = Path(__file__).resolve().parents[3]
-        data_dir = Path(os.getenv("VELLUMA_DATA_DIR") or (root / "data"))
-        path = data_dir / "ask_book_metrics.jsonl"
+        path = _metrics_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({
