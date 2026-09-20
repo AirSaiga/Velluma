@@ -186,10 +186,23 @@ watch(chapterEditorHandle, (editor) => {
     } catch { /* 恢复失败静默——落默认光标即可 */ }
   })
 })
-// Tab 无缓存零件时的即点取件：未激活章节先激活（Tab 是显式召唤，等同打字意图）再取件
+// Tab 无缓存零件时的即点取件：未激活章节先激活（Tab 是显式召唤，等同打字意图）再取件。
+// B1 静默修复（引导体系重构 2026-09-20）：空章按 Tab 此前三层静默（激活无反馈 →
+// summon 照发 → 心跳被 authorLane 守卫拦下）——现在正文不够激活门槛时明说原因，
+// 每章只提示一次（切章重置），不与点火卡冷启动抢戏。
+let _tabHintChapterId: string | null = null
 session.setAdaptiveSummon((forceRefresh?: boolean) => {
   const chapterId = selectedChapterId.value
   if (!chapterId) return
+  const editor = chapterEditorHandle.value
+  const typed = editor ? editor.state.doc.textContent.trim().length : 0
+  if (typed < MIN_ACTIVATE_CHARS) {
+    if (_tabHintChapterId !== chapterId) {
+      _tabHintChapterId = chapterId
+      showToast('AI 要有上下文才能接——先写满 4 个字，或点上面的「⚡ 写个开头」', 'info')
+    }
+    return
+  }
   _activateChapterAssist(chapterId)
   adaptiveAssist.summonParts(forceRefresh)
 })
@@ -378,8 +391,16 @@ function toggleAssist() {
   )
 }
 
-// 快捷键速查弹层
+// 快捷键速查弹层（? 键 + 右缘栏 ? 按钮双入口；正文/输入框里打问号不触发）
 const showShortcuts = ref(false)
+function _onQuestionKeyToggle(e: KeyboardEvent) {
+  if (e.key !== '?' || e.isComposing) return
+  const t = e.target as HTMLElement | null
+  if (t?.isContentEditable || t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA') return
+  showShortcuts.value = !showShortcuts.value
+}
+onMounted(() => window.addEventListener('keydown', _onQuestionKeyToggle))
+onBeforeUnmount(() => window.removeEventListener('keydown', _onQuestionKeyToggle))
 
 // 画布即事实源：作者写的即真实文档，无生成预览投影（旧预览链已随步进 UI 移除）。
 
@@ -399,7 +420,7 @@ watch(() => session.error.value, (err) => {
 
 // 【已拔除 2026-09-12】stage='done' → 整章覆写监听随 Refinery 退役（本注释即档案）：
 // 它是「未过目抛光稿直灌画布（noHistory 不可撤销）+ 跨章覆写」风险链的前端入口
-// （docs/post-writing-checks-audit.md §3.5）；stage 的 done 写入点已随 confirmRefinery
+// （docs/reports/post-writing-checks-audit.md §3.5）；stage 的 done 写入点已随 confirmRefinery
 // 一并消失，本监听成为不可达死代码。
 
 // 旧 rerender-beat 落库 watch 已随 BS-ADF 步进链路归档移除（2026-08-29）
@@ -771,6 +792,7 @@ watch(selectedChapter, (ch, prev) => {
   }
   if (ch.id !== prev?.id) {
     _activatedChapterId = null
+    _tabHintChapterId = null
     // 在飞 stitch 流先断（2026-09-04 审计修复）：GHOST_START 在后端全文生成完
     // 才发出，换章窗口内旧章幽灵会以新章光标为落点灌进画布（跨章污染）
     adaptiveAssist.abortInflight()
@@ -783,6 +805,10 @@ watch(selectedChapter, (ch, prev) => {
   }
 }, { immediate: true })
 
+/** 激活门槛（章正文 ≥4 字）：空章防误触——空章走点火卡冷启动。
+ *  常量同时供 Tab 召唤的 B1 提示判断用（两处口径必须一致）。 */
+const MIN_ACTIVATE_CHARS = 4
+
 /** 激活指定章节的 adaptive 辅助层（幂等）。打字 ≥4 字与 Tab 显式召唤共用入口。 */
 function _activateChapterAssist(chapterId: string) {
   if (_activatedChapterId === chapterId) return  // 已激活
@@ -790,7 +816,7 @@ function _activateChapterAssist(chapterId: string) {
   if (session.generating.value && session.stage.value !== 'idle') return
   const editor = chapterEditorHandle.value
   const typed = editor ? editor.state.doc.textContent.trim().length : 0
-  if (typed < 4) return  // 够 4 字才激活（空章防误触——空章走点火卡冷启动）
+  if (typed < MIN_ACTIVATE_CHARS) return  // 够 4 字才激活（空章防误触——空章走点火卡冷启动）
   _activatedChapterId = chapterId
   session.enterAdaptive(chapterId)
 }

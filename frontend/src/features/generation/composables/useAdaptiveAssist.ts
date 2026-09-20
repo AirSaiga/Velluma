@@ -143,6 +143,7 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
   let _lastActiveTs = 0
   let _continueAbort: AbortController | null = null
   let _heartbeatFailedOnce = false
+  let _emptyFragmentHintShown = false  // B3 静默修复：空 fragment 提示每会话一次
   let _summonInFlight = false  // Tab 即点取件在飞标记（连按不叠加 LLM 调用）
   // 心跳在飞去重（2026-08-27 Tab 实测事故）：生发档（停顿/召唤）要跑 2~7s LLM，
   // 期间打字武装的活跃档计时器照常触发，其快速响应带着 dock_muted 清舱 +
@@ -746,7 +747,15 @@ export function useAdaptiveAssist(opts: AdaptiveAssistOptions) {
       : $from.parent.textContent.trim().slice(-200)
     // 光标在空段落（如正文末尾的空行）时，回退取编辑器最后一个非空段落作为 fragment
     if (!fragment) fragment = _fallbackFragment(editor)
-    if (!fragment) return
+    if (!fragment) {
+      // B3 静默修复（引导体系重构 2026-09-20）：全文无正文时按 Space 此前静默
+      // return——明说一次，重按不刷屏
+      if (!_emptyFragmentHintShown) {
+        _emptyFragmentHintShown = true
+        opts.reportWarn?.('这里还没有可接的内容——先写一两句再让 AI 接着写')
+      }
+      return
+    }
     const paraStart = editor.state.selection.$from.start()
     const rollingPrefix = editor.state.doc.textBetween(Math.max(0, paraStart - 200), paraStart, '\n\n')
 

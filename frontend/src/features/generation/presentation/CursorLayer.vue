@@ -10,14 +10,17 @@
  *
  * 槽位 · 幽灵三条：GHOST_DONE 帧到达时锚定幽灵尾（[data-ghost-draft]
  * 末元素实时 rect，滚动自跟随；找不到回落当帧光标），纵叠 gap 4px。
+ * 槽位 · 三键阶梯渐进提示：前 3 枚幽灵在三条之下随附一行键位提示
+ * （Tab 采纳 · Enter 暂留 · Esc 蒸发），看过即淡出（useProgressiveHint）。
  */
 import { computed, ref, watch, onScopeDispose } from 'vue'
 import GhostWarningsBar from './GhostWarningsBar.vue'
 import GhostWashChip from './GhostWashChip.vue'
 import GhostRepairedChip from './GhostRepairedChip.vue'
 import { sparkDockPos } from '../composables/useSparkDock'
-import { ghostActive, ghostWarnings, ghostWash, ghostRepaired } from '../composables/useGhostDraft'
+import { ghostActive, ghostStreaming, ghostWarnings, ghostWash, ghostRepaired } from '../composables/useGhostDraft'
 import { useFloatingLayer } from '../../../composables/useFloatingLayer'
+import { useProgressiveHint } from '../../../composables/useProgressiveHint'
 
 const emit = defineEmits<{
   /** 洗层条「用原稿」（可逆学习，容器接线） */
@@ -25,14 +28,31 @@ const emit = defineEmits<{
 }>()
 
 // ============================================================
-// 幽灵三条（疑点 → 返修 → 洗层，纵叠）：
+// 幽灵三条（疑点 → 返修 → 洗层，纵叠）+ 三键阶梯渐进提示：
 // 三条数据在 GHOST_DONE 帧到达（流式毕），挂载即锚定，天然无抖动面。
+// 三键提示（Tab 采纳 · Enter 暂留 · Esc 蒸发）前 3 枚幽灵随层显示，
+// 确实显示过的那枚在落沿计数，看过即淡出（useProgressiveHint）。
 // ============================================================
+const ghostHint = useProgressiveHint('ghost_three_keys')
+const ghostHintVisible = computed(() => !ghostStreaming.value && ghostHint.visible.value)
 const ghostChipsVisible = computed(
   () =>
     ghostActive.value &&
     (ghostWarnings.value.length > 0 || !!ghostRepaired.value || ghostWash.value.hits.length > 0),
 )
+const ghostLayerVisible = computed(
+  () => ghostActive.value && (ghostChipsVisible.value || ghostHintVisible.value),
+)
+let _hintShownThisGhost = false
+watch([ghostActive, ghostHintVisible], () => {
+  if (ghostActive.value && ghostHintVisible.value) _hintShownThisGhost = true
+})
+watch(ghostActive, (active) => {
+  if (!active && _hintShownThisGhost) {
+    _hintShownThisGhost = false
+    ghostHint.markSeen()
+  }
+})
 const ghostRootEl = ref<HTMLElement | null>(null)
 const ghostSize = ref({ width: 360, height: 120 })
 // 锚=幽灵尾（mark 末元素实时 rect → 滚动/回流自跟随）；幽灵不在 DOM 时回落当帧光标
@@ -53,9 +73,9 @@ const ghostLayer = useFloatingLayer({
   anchor: ghostAnchor,
   size: ghostSize,
   placement: { gap: 8, margin: 8, prefer: 'below', flip: true, align: 'start' },
-  open: ghostChipsVisible,
+  open: ghostLayerVisible,
 })
-watch([ghostRootEl, ghostChipsVisible], () => {
+watch([ghostRootEl, ghostLayerVisible], () => {
   const el = ghostRootEl.value
   if (el && ghostChipsVisible.value) {
     ghostSize.value = { width: el.offsetWidth || 360, height: el.offsetHeight || 120 }
@@ -83,9 +103,9 @@ onScopeDispose(() => ghostResize?.disconnect())
 
 <template>
   <Teleport to="body">
-    <!-- 幽灵三条，纵叠贴幽灵尾 -->
+    <!-- 幽灵三条 + 三键渐进提示，纵叠贴幽灵尾 -->
     <div
-      v-if="ghostChipsVisible && ghostReady"
+      v-if="ghostLayerVisible && ghostReady"
       ref="ghostRootEl"
       class="cursor-layer cursor-layer--ghost"
       :class="{ 'cursor-layer--flipped': ghostLayer.pos.value.flipped }"
@@ -102,6 +122,7 @@ onScopeDispose(() => ghostResize?.disconnect())
         :wash="ghostWash"
         @use-original="emit('useOriginal')"
       />
+      <div v-if="ghostHintVisible" class="cursor-layer__hint">Tab 采纳 · Enter 暂留 · Esc 蒸发</div>
     </div>
   </Teleport>
 </template>
@@ -117,6 +138,12 @@ onScopeDispose(() => ghostResize?.disconnect())
 }
 .cursor-layer--ghost {
   width: min(360px, 80vw);
+}
+/* 三键阶梯渐进提示行（与走向卡舱 hint 同款小字规格） */
+.cursor-layer__hint {
+  padding: 2px 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 /* 翻转时入场方向取反（07 期 §2.5.1：从上往下淡入改为从下往上） */
 .cursor-layer--flipped :deep(.spark-dock-enter-from),

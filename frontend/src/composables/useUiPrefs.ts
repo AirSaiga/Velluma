@@ -15,6 +15,8 @@ const DEFAULT_PREFS = {
   worldReaderView: false,
   /** 开章卡（01 下一阶段）：空章「打算」页顶部的四面镜子；关掉=写作体验与现状一致 */
   openingCardEnabled: true,
+  /** 渐进引导（引导体系重构 2026-09-20）：各就地提示的已看次数——看过 N 次自动淡出 */
+  hintsSeen: {} as Record<string, number>,
 }
 
 export type UiPrefs = typeof DEFAULT_PREFS
@@ -48,6 +50,7 @@ export function loadUiPrefs(): UiPrefs {
       ...parsed,
       rightTab: normalizedRightTab || DEFAULT_PREFS.rightTab,
       splitSizes: Array.isArray(parsed.splitSizes) && parsed.splitSizes.length === 3 ? parsed.splitSizes : DEFAULT_PREFS.splitSizes,
+      hintsSeen: { ...DEFAULT_PREFS.hintsSeen, ...(parsed.hintsSeen || {}) },
     }
   } catch {
     return { ...DEFAULT_PREFS }

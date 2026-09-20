@@ -86,7 +86,7 @@ function onPick(card: DirectionCard | null) {
           </span>
         </button>
 
-        <div class="beat-dock__hint">按数字键选 · Esc 关闭</div>
+        <div class="beat-dock__hint">按数字键选 · Esc 关闭 · 打字即收起（当作没问过）</div>
       </div>
     </Transition>
   </Teleport>

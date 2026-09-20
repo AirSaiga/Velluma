@@ -12,7 +12,7 @@
 
 ### 系统自己去读 / 连点事故（2026-08-25 战略定稿第七问）
 
-- 观察触发权交给系统（详见 docs/auto-read-quiet-learning.md）。
+- 观察触发权交给系统（详见 docs/reports/auto-read-quiet-learning.md）。
 - 实体/地点创建曾连点重复建档 → 服务端按（书+归一化名+类型）幂等。
 
 ### 句子级闸门「闭嘴到端」（2026-08-26）
@@ -119,15 +119,15 @@
 
 ### Refinery 润色全家拔除（2026-09-12）
 
-- stage-done→handleGenerated 整章覆写监听连带剪断，stage 轴最小拔除仅存 idle 写入点（后端拔除详见 docs/post-writing-checks-audit.md）。
+- stage-done→handleGenerated 整章覆写监听连带剪断，stage 轴最小拔除仅存 idle 写入点（后端拔除详见 docs/reports/post-writing-checks-audit.md）。
 
 ### AI 视角重设计与轻量化（2026-09-12 09 期 + 2026-09-15 Phase 0）
 
-- 09 期重设计（docs/design/ux-redesign/09-ai-view-redesign.md）；2026-09-15 轻量化重构（Phase 0 报告 docs/ai-view-briefing-feasibility.md，09 稿批注 #4）：顶层新增「战局态势」简报卡；09 稿红线行「空块补录引导」经批注推翻 → 空块全量静音。
+- 09 期重设计（docs/design/ux-redesign/09-ai-view-redesign.md）；2026-09-15 轻量化重构（Phase 0 报告 docs/reports/ai-view-briefing-feasibility.md，09 稿批注 #4）：顶层新增「战局态势」简报卡；09 稿红线行「空块补录引导」经批注推翻 → 空块全量静音。
 
 ### spine×大纲第四弹单轨合流（2026-09-14 施工）
 
-- SpinePanel 重构为叙事引力流面板（docs/spine-outline-merge-feasibility.md 路径 C）。
+- SpinePanel 重构为叙事引力流面板（docs/reports/spine-outline-merge-feasibility.md 路径 C）。
 
 ### 阿尘≠第三人事故（2026-09-11）
 
@@ -197,3 +197,14 @@
 - **#1b 打算分区切章 stale**（挂账未修，预存在）：切章后 SpinePanel 意图框与开章卡均显示旧章数据，tab 往返自愈。代码推演锁定两条疑机制（SpinePanel intentDirty 挡外部同步遗留；OpeningCard 章切换未重取），需浏览器可观察调试定谳——测试中 IAB 输入注入通道整体故障（CUA 点击 0 事件达 window 层，双 tab+reload 复现）无法继续。留真机/浏览器修复会话。
 
 **环境阻断**：？？/[[ 手势在 IAB 合成输入下均不触发（TipTap InputRule 不 firing，对照实验定责环境非手势缺陷）；真机验证挂账。小观察：撤销胶囊 label 用 note（「正文提及」）非 summary，观感欠佳（预存在）。
+
+### 写作台引导体系重构（2026-09-20，审计 §6 一层 4 落地，未提交批内）
+
+用户抱怨写作台「提示不明显缺引导 / 快捷键全堆一处冗杂」。三件同源施工（均前端提示层，不动门控/状态机语义）：
+
+- **渐进引导基础设施**：`composables/useProgressiveHint.ts`——「前 N 次显示、确实显示过的回合落沿计数、看过淡出」，次数持久化 `useUiPrefs.hintsSeen`（velluma_ui_prefs_v1，version 不动靠 spread 兼容合并）；模块级缓存同 key 共享实例（防多处消费各持 ref 漂移）。单测 3 项（初始可见/持久化读回/共享实例）。
+- **就地渐进提示两枚**：①幽灵三键阶梯「Tab 采纳 · Enter 暂留 · Esc 蒸发」——CursorLayer 幽灵尾浮层可见条件从「三条数据任一」扩为「或提示未淡出」，与疑点条同锚，上膛后（!ghostStreaming）才显示；②卡片舱首开引导行「数字键直写单镜头 · ↑↓ 浏览 · 点选可吸附多枚 · Esc 关」——09-09 删掉的舱顶自解释行以限次形态回归（常驻版嫌冗杂、零提示又不会用，折中「头几次教你」）。走向舱常驻 hint 补「打字即收起」（B8）；点火卡 hint 10.5px→text-xs。
+- **速查表场景化重写**：ShortcutsCheatsheet 从「键位字典」（16 条平铺 3 组、内容漂移）改为「什么时候按什么」四组（写的时候/幽灵在屏/改稿/记进世界与界面），每条=键+动作+条件小字；补齐审计 §2.2 全部漂移（Alt+O/`[[`/↑↓/两卡舱分写/Space ≥4 字门槛/Esc 逐层含走向舱）；新增全局 `?` 键唤出（正文/输入框/IME 组合态不触发）。
+- **静默失败反馈（审计 B1/B3/B4/B5）**：空章 Tab（三层静默）→ 正文<4 字明说一次「先写满 4 个字，或点『⚡ 写个开头』」并跳过 summon（激活阈值提成常量 MIN_ACTIVATE_CHARS=4 双处同口径）；requestContinue 空 fragment → reportWarn 一次；Ctrl+Enter 不满足沉淀 → 吞键但解释一次（仍吞：作者意图是沉淀不插换行）；走向舱数字键非写作态 → inAuthoringContext 追加 beatDockVisible（舱开着=写作上下文，Esc/数字键不再死在舱上）+ 关舱解释一次。各提示均每章/每会话一次闸防刷屏。
+- placeholder 双态：AI 辅助关闭时不再承诺 Space 续写（审计 §6-E）；开启态 Alt+N 让位给 Tab（卡片舱唯一入口更该占位）。
+- 验证：vue-tsc 净 / vitest 48 文件 416 项全绿（413 基线+新增 3）。未做（另属产品决策拍板）：B6 走向卡鼠标路径门控、B7 `[[` 无门、assistEnabled 总开关边界、新手 tour。

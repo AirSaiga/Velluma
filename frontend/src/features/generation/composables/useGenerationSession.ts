@@ -4,7 +4,7 @@
  * 职责：adaptive 写作路径的会话状态机（键位编排/幽灵/卡舱）+ 键位工具（清脂）。
  *
  * 【已拔除 2026-09-12】V4.1 Refinery 两阶段精修（startRefinery/confirmRefinery）
- * 随写后检查收敛批整体退役——docs/post-writing-checks-audit.md；其手术原语
+ * 随写后检查收敛批整体退役——docs/reports/post-writing-checks-audit.md；其手术原语
  * 后端迁 services/text_surgery/（ADF 一致性守卫消费），读者反馈收编
  * /adaptive/reader-feedback。
  *
@@ -26,6 +26,7 @@
  */
 import { ref, computed, watch, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
 import { chapterApi, type AdfEngine, type BeatSlot } from '../../../services/api/domain'
+import { useToast } from '../../../composables/useToast'
 import { chapterEditorHandle } from '../../chapter-editor/editorHandle'
 import { noHistory } from '../../chapter-editor/noHistory'
 import {
@@ -574,6 +575,11 @@ export function useGenerationSession(): GenerationSession {
     }
   }
 
+  // 静默失败提示的每会话一次闸（B4/B5，引导体系重构 2026-09-20）——
+  // 不满足条件的吞键只解释一次，重按不刷屏
+  let _ctrlEnterHintShown = false
+  let _beatDockDeadKeyHintShown = false
+
   // 幽灵/缝合/锁拍快捷键在编辑器内生效——必须捕获阶段拦截（bubble 阶段
   // ProMirror 已先消费按键把 Space/Enter 插进文档，拦截失效）。
   function _authoringKeyHandler(e: KeyboardEvent) {
@@ -663,6 +669,9 @@ export function useGenerationSession(): GenerationSession {
       // Space（缝合/续写）/ Enter（Ctrl+沉淀）/ 数字（吸附）必须在捕获阶段拦截，
       // 否则 ProMirror 在 bubble 阶段先把 Space/Enter 插进文档，拦截失效。
       || adaptiveComposing
+      // B5 静默修复（引导体系重构 2026-09-20）：走向舱开着=写作上下文——
+      // 非 composing 态（如沉淀中）Esc/数字键也必须可达，否则按键死在舱上
+      || beatDockVisible.value
     if (!inAuthoringContext) return
     const target = e.target as HTMLElement | null
     // 编辑器外的表单控件不拦（岔路面板自定义走向文本框等）
@@ -713,6 +722,10 @@ export function useGenerationSession(): GenerationSession {
       hideBeatDock()
       if (adaptiveComposing) {
         _adaptiveBurstFn?.(card)
+      } else if (!_beatDockDeadKeyHintShown) {
+        // B5 静默修复：非写作态数字键此前关舱无稿零反馈——明说一次
+        _beatDockDeadKeyHintShown = true
+        useToast().showToast('走向卡先收起了——AI 此刻不在写作态，写几个字后再试', 'info')
       }
       return
     }
@@ -774,6 +787,12 @@ export function useGenerationSession(): GenerationSession {
       }
       e.preventDefault()
       e.stopPropagation()
+      // B4 吞键修复（引导体系重构 2026-09-20）：不满足沉淀条件时此前静默吞键——
+      // 作者按了没反应以为坏了；明说一次（仍吞键：作者意图是沉淀，不插换行）
+      if (!_ctrlEnterHintShown) {
+        _ctrlEnterHintShown = true
+        useToast().showToast('沉淀要 AI 辅助开着、且本章写满 4 个字后才可用', 'info')
+      }
       return
     }
     // Ctrl+Space：走向卡舱（adaptive composing 态的段落级连写入口）。

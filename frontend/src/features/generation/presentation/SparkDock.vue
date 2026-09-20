@@ -22,7 +22,7 @@
  * 零自动焦点（弹舱/回弹永不抢正文光标）——进入只两条路：↓ 浏览到底、点击；
  * 输入框聚焦期间全局作者键位让位（useGenerationSession 顶部守卫）。
  */
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { SparkPart } from '../composables/useSparkDock'
 import {
   sparkDockVisible,
@@ -34,6 +34,7 @@ import {
 } from '../composables/useSparkDock'
 import { ghostActive } from '../composables/useGhostDraft'
 import { dockRefreshError } from '../composables/useAdaptiveAssist'
+import { useProgressiveHint } from '../../../composables/useProgressiveHint'
 
 /** 旧卡年龄人话（秒 → 「N 分钟前」；与报错行同帧捕获，不做活钟） */
 const dockAgeText = computed(() => {
@@ -52,6 +53,20 @@ const emit = defineEmits<{
 }>()
 
 const visible = computed(() => sparkDockVisible.value || attachedParts.value.length > 0)
+
+// ---- 首次开启引导行（渐进，前 3 次开舱显示；确实显示过的那回在关舱沿计数）----
+// 2026-09-09 删除的舱顶自解释行以限次形态回归：常驻版嫌冗杂，零提示又不知
+// 怎么用——折中是「头几次教你，学会了就闭嘴」（useProgressiveHint）。
+const { visible: introVisible, markSeen: markIntroSeen } = useProgressiveHint('spark_dock_intro')
+const dockShown = computed(() => visible.value && !ghostActive.value && sparkDockVisible.value)
+let _introShownThisOpen = false
+watch(dockShown, (now, was) => {
+  if (now && introVisible.value) _introShownThisOpen = true
+  if (was && !now && _introShownThisOpen) {
+    _introShownThisOpen = false
+    markIntroSeen()
+  }
+})
 
 /** 槽位 → 功能符号（landing=▸ 承接 / toward_beat=⚑ 锚点语言 / echo=◆ / ambient=○） */
 const SOURCE_SYMBOL: Record<NonNullable<SparkPart['source']>, string> = {
@@ -183,6 +198,10 @@ function onCustomEsc() {
             @mousedown.stop
             @click="emit('guestRegister', g)"
           >👤 {{ g }} ➔ 建档</button>
+        </div>
+        <!-- 首次开启引导行（渐进：前 3 次显示，看过淡出） -->
+        <div v-if="dockShown && introVisible" class="spark-dock__hint">
+          数字键直写单镜头 · ↑↓ 浏览 · 点选可吸附多枚 · Esc 关
         </div>
       </div>
     </Transition>

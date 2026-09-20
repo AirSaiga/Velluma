@@ -180,7 +180,7 @@ const emit = defineEmits<{
 
 .ignition-card__hint {
   margin-top: 10px;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 

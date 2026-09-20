@@ -5,6 +5,7 @@ import PublishModal from './PublishModal.vue'
 import Icon from '../../../components/Icon.vue'
 import type { Chapter } from '../../../types'
 import type { EntityFocusPayload } from '../../../shared/types'
+import { assistEnabled } from '../../generation/composables/useAssistEnabled'
 
 // 纸面优先：标题/动作收敛进纸列页面头（大标题 + ⋯ 菜单），编辑器本体无常驻工具栏。
 const props = defineProps<{
@@ -38,6 +39,14 @@ const props = defineProps<{
   aiStateLabel?: string
   aiStateError?: boolean
 }>()
+
+// 占位引导双态（审计 §6-E 修复）：AI 辅助关闭时不再承诺 Space 续写；
+// 开启态给三个高频入口（Tab 是卡片舱唯一入口，优先于 Alt+N——后者在速查表）
+const editorPlaceholder = computed(() =>
+  assistEnabled.value
+    ? '从这里开始写——Space 让 AI 接着写 · Tab 找镜头 · Alt+O 插细纲'
+    : '从这里开始写',
+)
 
 const saveStatusLabel = computed(() => {
   switch (props.saveStatus) {
@@ -203,7 +212,7 @@ function menuClearForeignStyles() {
           @request-partial-optimize="handlePartialOptimize"
           :disabled="isEditorDisabled"
           :is-formatting="isFormatting"
-          placeholder="从这里开始写——Space 让 AI 接着写 · Alt+O 插细纲 · Alt+N 记一笔"
+          :placeholder="editorPlaceholder"
         />
       </div>
     </div>
