@@ -34,10 +34,13 @@ V4.0 更新：
 - 导出前的最终排版
 """
 
+import logging
 import re
 from fastapi import APIRouter
 from backend.schemas import FormatTextRequest
 from backend.services.workflows.formatting_utils import rule_based_formatting
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["text_formatting"])
 
@@ -219,7 +222,7 @@ async def format_text(request: FormatTextRequest):
     
     # 长文本使用增强规则引擎（避免 LLM Token 限制）
     if len(text) > LLM_FORMATTING_MAX_CHARS:
-        print(f"[format_text] Text too long ({len(text)} chars), using enhanced rule-based formatting")
+        logger.warning("[format_text] 文本过长（%d 字），走增强规则引擎", len(text))
         formatted_text = enhanced_rule_formatting(text)
         return {"formatted_text": formatted_text}
     
@@ -237,11 +240,14 @@ async def format_text(request: FormatTextRequest):
         
         if formatted_text and (original_len * 0.5 <= result_len <= original_len * 1.5):
             return {"formatted_text": formatted_text}
-        
-        print(f"[format_text] LLM result abnormal (len: {result_len} vs {original_len}), using enhanced rule-based")
-        
+
+        logger.warning(
+            "[format_text] LLM 结果异常（%d vs %d 字），走增强规则引擎",
+            result_len, original_len,
+        )
+
     except Exception as e:
-        print(f"[format_text] LLM error: {e}, using enhanced rule-based")
+        logger.warning("[format_text] LLM 失败: %s，走增强规则引擎", e)
     
     # 回退到增强规则引擎
     formatted_text = enhanced_rule_formatting(text)

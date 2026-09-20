@@ -52,6 +52,13 @@ import sys
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
+# 项目根入 sys.path：直启 `python backend/main.py` 时 sys.path[0] 是 backend/
+# 目录，backend.* 包不可见（会 ModuleNotFoundError）；launcher 的
+# `-m uvicorn backend.main:app` / `-m backend.main` 路径自带项目根不受影响
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 # =============================================================================
 # 启动阶段：解决终端编码问题（必须在所有日志配置之前）
 # =============================================================================
@@ -68,34 +75,83 @@ sys.stderr.reconfigure(encoding='utf-8')
 # 关键：logging.basicConfig() 只在第一次调用时生效
 # 如果在其他模块导入后才配置，那些模块的 logger 会使用默认的 WARNING 级别
 # 这会导致 INFO 日志不输出
+
+# .env 提前静默加载（load_dotenv 幂等不覆盖已有环境变量；下方主加载点保持
+# 不变）——VELLUMA_LOG_LEVEL 写在 .env 里也要在这里生效
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+
+
+def _resolve_log_level() -> int:
+    """VELLUMA_LOG_LEVEL（默认 INFO）→ logging 级别；非法值回退 INFO。"""
+    raw = (os.getenv("VELLUMA_LOG_LEVEL") or "INFO").strip().upper()
+    level = logging.getLevelName(raw)
+    return level if isinstance(level, int) else logging.INFO
+
+
+_ENV_LOG_LEVEL = _resolve_log_level()
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=_ENV_LOG_LEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - [req=%(req_id)s] %(message)s',
     force=True  # 强制重新配置，覆盖已有的配置
 )
 logger = logging.getLogger(__name__)
 
-# 强制设置根 logger 级别为 INFO（这会影响到所有子 logger）
-logging.getLogger().setLevel(logging.INFO)
+# 强制设置根 logger 级别（VELLUMA_LOG_LEVEL=DEBUG 时业务内部链路全部可见）
+logging.getLogger().setLevel(_ENV_LOG_LEVEL)
 
-# 强制设置所有已知 logger 的级别为 INFO
-# 包含 backend 根命名空间，确保所有子模块继承 INFO 级别
-for logger_name in [
-    "uvicorn", "uvicorn.error", "uvicorn.access",
-    "backend", "backend.services", "backend.routes", "backend.core",
-    "backend.repositories", "backend.config",
+# 按命名空间设置级别：
+# - backend* 业务命名空间跟随 VELLUMA_LOG_LEVEL（默认 INFO；翻 DEBUG 后存量
+#   logger.debug 全部复活，可看 adaptive/上下文装配内部链路）
+# - uvicorn/uvicorn.error 恒 INFO（启动横幅）；uvicorn.access 恒 WARNING——
+#   访问行由 [REQ] 中间件行替代（旧行无路由归因且与本行双行重复）
+# - httpx/httpcore 恒 WARNING——LLM 外呼行由 client.py 的 [LLM] 行替代
+for logger_name, logger_level in [
+    ("uvicorn", logging.INFO),
+    ("uvicorn.error", logging.INFO),
+    ("uvicorn.access", logging.WARNING),
+    ("httpx", logging.WARNING),
+    ("httpcore", logging.WARNING),
+    # DEBUG 开关只管 backend.* 业务日志——三方库的 DEBUG 洪流恒压回 INFO，
+    # 否则 VELLUMA_LOG_LEVEL=DEBUG 会被 SQL/事件循环跟踪淹没（jieba 的
+    # DEBUG 级别在它被 import 时自设，启动期压不住，属存量启动噪音不处理）
+    ("asyncio", logging.INFO),
+    ("aiosqlite", logging.INFO),
+    ("sqlalchemy", logging.INFO),
+    ("backend", _ENV_LOG_LEVEL),
+    ("backend.services", _ENV_LOG_LEVEL),
+    ("backend.routes", _ENV_LOG_LEVEL),
+    ("backend.core", _ENV_LOG_LEVEL),
+    ("backend.repositories", _ENV_LOG_LEVEL),
+    ("backend.config", _ENV_LOG_LEVEL),
 ]:
-    logging.getLogger(logger_name).setLevel(logging.INFO)
+    logging.getLogger(logger_name).setLevel(logger_level)
 
-# 添加全局过滤器，确保所有 INFO 日志都能输出
+# 添加全局过滤器，确保 INFO 及以上日志都能输出
 class InfoLogFilter(logging.Filter):
     def filter(self, record):
         # 只过滤 DEBUG 级别，允许 INFO 及以上级别输出
-        return record.levelno >= logging.INFO
+        return record.levelno >= _ENV_LOG_LEVEL
 
 # 为根 logger 添加过滤器
 root_logger = logging.getLogger()
 root_logger.addFilter(InfoLogFilter())
+
+# 请求关联过滤器：必须在任何 backend.core.* import 之前挂上 root handler——
+# 过滤器住在零依赖的 backend/logging_context.py（若住在 backend.core 包内，
+# import 它本身就会触发包依赖链的 import 期日志，在过滤器挂上前到达 root
+# handler，导致 %(req_id)s 格式化 KeyError）。挂上后所有 backend.* 业务日志
+# 自动携带 [req=...]，并发请求的日志可归因到具体请求
+from backend.logging_context import RequestContextFilter  # noqa: E402
+
+_req_filter = RequestContextFilter()
+for _handler in list(root_logger.handlers):
+    _handler.addFilter(_req_filter)
+
+from backend.core.request_observability import (  # noqa: E402  (须在日志配置之后)
+    RequestLoggingMiddleware,
+    register_exception_handlers,
+)
 
 
 # =============================================================================
@@ -261,6 +317,16 @@ app.add_middleware(
 )
 
 # =============================================================================
+# 请求级链路观测（backend/core/request_observability.py）
+# =============================================================================
+# [REQ] 请求完成行（方法/路由模板/状态/耗时/req id/handler/query）+ X-Request-ID
+# 响应头 + 4xx/5xx/未捕获异常落日志。注册在 CORS 之后 = 最外层，计时含全栈。
+# 业务日志的 [req=...] 关联由 root handler 上的 RequestContextFilter 提供
+# （见上方日志配置区）。
+app.add_middleware(RequestLoggingMiddleware)
+register_exception_handlers(app)
+
+# =============================================================================
 # 路由注册
 # =============================================================================
 # 顺序考量：system_router 放在最前，优先处理健康检查等系统级请求
@@ -279,7 +345,7 @@ app.include_router(text_formatting_router)
 app.include_router(chapter_generation_router)
 # 章节生成路由（引擎剥离后现状）：V3.2 ADF（/generate-adf，默认引擎，SSE）
 # + clarify-outline / cost-report / quality-report
-# （V4.1 Refinery 已于 2026-09-12 写后检查收敛批整体拔除——docs/post-writing-checks-audit.md）
+# （V4.1 Refinery 已于 2026-09-12 写后检查收敛批整体拔除——docs/reports/post-writing-checks-audit.md）
 
 app.include_router(chapter_optimization_router)
 app.include_router(inspiration_router)

@@ -59,9 +59,11 @@ LOG_PREFIX_SYSTEM = "[System]"
 
 
 def get_runtime_logger(name: str | None = None) -> logging.Logger:
-    uvicorn_logger = logging.getLogger("uvicorn.error")
-    if uvicorn_logger.handlers or uvicorn_logger.getEffectiveLevel() <= logging.INFO:
-        return uvicorn_logger
+    """返回模块命名空间 logger（backend.*）。
+
+    历史实现借用 uvicorn.error（日志归因全部错显为 uvicorn.error），已归真：
+    backend.* 命名空间自动继承根配置级别并携带 [req=...] 请求关联。
+    """
     return logging.getLogger(name or __name__)
 
 

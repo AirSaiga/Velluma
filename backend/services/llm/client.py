@@ -553,6 +553,15 @@ async def call_llm_with_usage(
             latency_ms=latency_ms,
             finish_reason=finish_reason,
         )
+        # 控制台一行账：trace 只进 JSONL 文件，无 trace 绑定的路由此前对每次
+        # LLM 调用完全无痕（唯一痕迹是 httpx 行）；[req=...] 由过滤器自动附加
+        logger.info(
+            "[LLM] slot=%s model=%s %dms tokens p=%s/c=%s finish=%s",
+            model_type, resolved_model, latency_ms,
+            (usage or {}).get("prompt_tokens"),
+            (usage or {}).get("completion_tokens"),
+            finish_reason,
+        )
         return LLMResult(
             content=content, usage=usage, model_name=resolved_model,
             latency_ms=latency_ms, finish_reason=finish_reason,

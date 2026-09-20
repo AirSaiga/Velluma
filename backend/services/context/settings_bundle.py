@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,8 @@ from backend.services.context.budget import (
 from backend.services.context.loader import load_full_chapter_context
 from backend.services.canon.consistency import build_canon_context_for_prompt
 from backend.services.workflows.adf.setting_resolver import build_worldview_text
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -88,7 +91,7 @@ class SettingsBundle:
     chapter_number: Optional[int] = None
     outline_text: str = ""
     content_text: str = ""
-    # ---- 世界设定层桥接（world_bridge；docs/world-unified-settings.md §5）----
+    # ---- 世界设定层桥接（world_bridge；docs/reports/world-unified-settings.md §5）----
     # world 优先时 entities/assets/locations/relationships 已换为适配器视图对象
     world_sourced: bool = False
     # 势力通路（2026-09-04 审计修复）：公开 faction 的知识平面视图
@@ -100,10 +103,10 @@ class SettingsBundle:
     # chapter_anchor=本章锚 | prev_anchor=前序最近锚 | max_event=事件最大时刻 | zero=空世界
     world_time_source: str = "zero"
     world_state: Dict[str, Any] = field(default_factory=dict)  # t 时刻推演快照
-    # D4-3 空间常识块（docs/map-scale-spatial.md §5）：双门槛（world_sourced 且
+    # D4-3 空间常识块（docs/reports/map-scale-spatial.md §5）：双门槛（world_sourced 且
     # 已标定）才有内容；未标定恒空串——四模式 prompt 逐字节零变化
     spatial_brief: str = ""
-    # A1 私有通道（docs/foundation-hardening.md §3.1，D5 语义「AI 知晓但绝不
+    # A1 私有通道（docs/reports/foundation-hardening.md §3.1，D5 语义「AI 知晓但绝不
     # 直接写出」）：visibility=private 世界实体（character/faction/asset 统一）的
     # [{name, text}]，由 world_bridge.load_world_overlay 供给。进 prompt 走
     # adaptive_prompts._secrets_block（canon 块后）；_characters_text 等装配层
@@ -306,7 +309,8 @@ async def load_chapter_settings_bundle(
     book_repo = BookRepository(db)
     try:
         chapter = await chapter_repo.get_by_id(chapter_id)
-    except Exception:
+    except Exception as e:
+        logger.debug("[settings_bundle] 章节本体查询降级: %s", e)
         chapter = None
     if not chapter:
         return bundle  # 章节不存在，返回空 bundle
@@ -319,14 +323,16 @@ async def load_chapter_settings_bundle(
     if bundle.book_id:
         try:
             bundle.book = await book_repo.get_by_id(bundle.book_id)
-        except Exception:
+        except Exception as e:
+            logger.debug("[settings_bundle] 书档案查询降级: %s", e)
             bundle.book = None
 
     # ---- 章级绑定池（角色/资产/地点/关系/伏笔）----
     repos = _build_repos(db)
     try:
         ctx = await load_full_chapter_context(chapter_id, repos)
-    except Exception:
+    except Exception as e:
+        logger.debug("[settings_bundle] 章级绑定池加载降级: %s", e)
         ctx = None
     if ctx:
         bundle.entities = ctx.entities or []
@@ -375,8 +381,9 @@ async def load_chapter_settings_bundle(
                         })
                 bundle.field_layer_secrets = fl_secrets
                 bundle.world_sourced = True
-        except Exception:
-            pass  # 降级：world 桥失败走旧表（辅助不因桥接阻塞）
+        except Exception as e:
+            # 降级：world 桥失败走旧表（辅助不因桥接阻塞）；DEBUG 显形防静默
+            logger.debug("[settings_bundle] world 桥降级走旧表: %s", e)
 
     # ---- D4-3 空间常识块（双门槛：world_sourced 且已标定；失败静默空串零变化） ----
     if bundle.world_sourced and bundle.book_id:
@@ -387,7 +394,8 @@ async def load_chapter_settings_bundle(
                 from backend.services.world.scene_slice import build_scene_slice
                 _slice = await build_scene_slice(db, bundle.book_id, bundle.chapter)
                 bundle.spatial_brief = _slice.get("spatial_brief") or ""
-        except Exception:
+        except Exception as e:
+            logger.debug("[settings_bundle] 空间常识块降级为空: %s", e)
             bundle.spatial_brief = ""
 
     # ---- 书级 Canon 图谱 ----
@@ -396,14 +404,16 @@ async def load_chapter_settings_bundle(
             bundle.canon_context = await build_canon_context_for_prompt(
                 db, bundle.book_id, chapter_number=bundle.chapter_number,
             )
-        except Exception:
+        except Exception as e:
+            logger.debug("[settings_bundle] Canon 上下文降级为空: %s", e)
             bundle.canon_context = ""
 
     # ---- 世界观设定 ----
     if bundle.book:
         try:
             bundle.worldview_text = build_worldview_text(bundle.book)
-        except Exception:
+        except Exception as e:
+            logger.debug("[settings_bundle] 世界观文本降级为空: %s", e)
             bundle.worldview_text = ""
 
     # ---- 章节卡（must_hit_events / foreshadow_ops / continuity / purpose）----
@@ -419,8 +429,8 @@ async def load_chapter_settings_bundle(
             bundle.style_card = await StyleCardRepository(db).get_effective_card(
                 bundle.book_id, chapter_id,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[settings_bundle] 章节/文风卡加载降级: %s", e)
 
     # ---- 书级硬约束 ----
     if bundle.book:
@@ -432,7 +442,8 @@ async def load_chapter_settings_bundle(
         try:
             _tc = getattr(bundle.book, "texture_contracts", None)
             bundle.texture_contracts = _tc if isinstance(_tc, dict) and _tc else None
-        except Exception:
+        except Exception as e:
+            logger.debug("[settings_bundle] 质感契约读取降级: %s", e)
             bundle.texture_contracts = None
 
     # ---- 禁忌面（任务包 A 归一：四源合并唯一权威）----
@@ -443,8 +454,20 @@ async def load_chapter_settings_bundle(
         bundle.prohibitions = await load_prohibition_set(
             db, book=bundle.book, style_card=bundle.style_card,
         )
-    except Exception:
+    except Exception as e:
+        logger.debug("[settings_bundle] 禁忌面加载降级为 None: %s", e)
         bundle.prohibitions = None
+
+    # 链路可见性：一次装配的命中面一行账（章节号/世界源/绑定池/Canon/双卡/禁忌）
+    logger.info(
+        "[settings_bundle] ch=%s book=%s world=%s ent=%d ast=%d loc=%d rel=%d "
+        "hooks=%d canon=%d字 章卡=%s 风卡=%s 禁忌=%s",
+        bundle.chapter_number, bool(bundle.book), bundle.world_sourced,
+        len(bundle.entities), len(bundle.assets), len(bundle.locations),
+        len(bundle.relationships), len(bundle.open_hooks),
+        len(bundle.canon_context), bool(bundle.chapter_card),
+        bool(bundle.style_card), bundle.prohibitions is not None,
+    )
 
     return bundle
 
@@ -478,7 +501,7 @@ def _entity_name(ent: Any) -> str:
 
 
 def _entity_is_private(ent: Any) -> bool:
-    """A1 私有判定（docs/foundation-hardening.md §3.1，D5 语义）。
+    """A1 私有判定（docs/reports/foundation-hardening.md §3.1，D5 语义）。
 
     - world 适配器：读 world_entity.visibility（world_entities.visibility 列，
       models.py；character/faction/asset 三类统一）
@@ -677,7 +700,7 @@ def render_style_positive(style_card: Any) -> str:
     空卡/无有效字段 → 空串（调用方 prompt 零变化）。
     独立成公共函数供 adaptive 路由与 bundle 内部共用（单一渲染口径）。
 
-    2026-09-14 去参数化（第三期审计 docs/style-parameter-effectiveness-audit.md）：
+    2026-09-14 去参数化（第三期审计 docs/reports/style-parameter-effectiveness-audit.md）：
     意图旋钮行（style_knobs）彻底移除——rhythm/dialogue 早已零注入（编译进检索器
     且数学空转），density/warmth 与白描封杀令指令内战；对话占比目标不再进任何
     prompt（对账/漂移提示改语料实测锚）。「范例>形容」：注意力让给亲笔样本。

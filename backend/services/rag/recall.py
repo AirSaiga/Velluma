@@ -45,7 +45,7 @@ from backend.repositories.memory_repository import MemoryRepository
 from backend.services.llm.embedding import get_embedding, is_embedding_configured
 from backend.services.rag.lexical import extract_keywords, format_event_echo
 
-# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：回响剂量改引 budget 表
+# A3a 截断常量收敛（docs/reports/foundation-hardening.md §4.1）：回响剂量改引 budget 表
 # （原模块内私有常量 _WORLD_ECHO_LIMIT / _MATCHED_ENTITY_LIMIT 收编为
 #  ECHOES_WORLD_MAX_ENTRIES / ECHOES_MATCHED_ENTITY_MAX，值不变）
 from backend.services.context.budget import (
@@ -223,7 +223,13 @@ async def recall_memories(
         except Exception as e:
             logger.warning(f"[recall] 词法召回失败（跳过）: {e}")
 
-    return merge_echoes([a_echoes, v_echoes, b_echoes], k)
+    merged = merge_echoes([a_echoes, v_echoes, b_echoes], k)
+    # 链路可见性：三层命中一行账（A 结构化 / V 向量 / B 词法；未配置 embedding 时 V 恒 0）
+    logger.info(
+        "[recall] A=%d V=%d B=%d → 合并 %d 条 (k=%d)",
+        len(a_echoes), len(v_echoes), len(b_echoes), len(merged), k,
+    )
+    return merged
 
 
 async def _vector_echoes(db, *, query, book_id, chapter_id, chapter_number, k) -> List[str]:

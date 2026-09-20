@@ -30,10 +30,13 @@ LLM 智能文本格式化模块 - V4.0
 - 保持人物对话的完整性
 """
 
+import logging
 import re
 from typing import Optional
 
 from backend.services.llm.client import call_llm
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """你是一位专业的小说编辑，擅长中文排版和叙事结构优化。
@@ -118,7 +121,7 @@ async def llm_based_formatting(
         
     except Exception as e:
         # LLM 失败时返回原文
-        print(f"[LLM Formatting] Error: {e}")
+        logger.warning("[LLM Formatting] LLM 失败，回退原文: %s", e)
         return text
 
 
@@ -167,5 +170,5 @@ async def hybrid_formatting(
         return llm_result
     
     # 否则回退到规则引擎
-    print(f"[hybrid_formatting] LLM result abnormal, falling back to rule-based")
+    logger.warning("[hybrid_formatting] LLM 结果异常，回退规则引擎")
     return rule_based_formatting(text)

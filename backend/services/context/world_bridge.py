@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界设定层 → 生成流桥接
 """
-world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.md §5）。
+world_* 六表 → SettingsBundle 的读时映射（docs/reports/world-unified-settings.md §5）。
 
 三原则：读时适配（不动写路径）、世界优先 / 旧表兜底、世界快照作为新增上下文。
 
@@ -13,7 +13,7 @@ world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.
   （hard_constraints / soft_constraints / _characters_text / sediment 冲突检测
   的 `ent.character.static_prompt` 鸭子取值链）零改动吃到世界数据。
   ⚠ 适配器永远携带全量档案（双轨纪律的「算法轨」）——private 过滤只发生在
-  settings_bundle 的 prompt 文本装配层（A1，docs/foundation-hardening.md §3.1）。
+  settings_bundle 的 prompt 文本装配层（A1，docs/reports/foundation-hardening.md §3.1）。
 - load_world_overlay：WorldRepository 一站式加载 + t 时刻切片，供
   settings_bundle 装配；世界页无实体时返回 None（旧表兜底，未迁移书零影响）。
   另产 secrets 通道（A1）：visibility=private 实体（character/faction/asset
@@ -23,6 +23,7 @@ world_* 六表 → SettingsBundle 的读时映射（docs/world-unified-settings.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from sqlalchemy import func, select
@@ -31,6 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models import Chapter, WorldEvent
 from backend.repositories.world_repository import WorldRepository
 from backend.services.world.field_layers import layered_profile_value
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -47,7 +50,7 @@ class NarrativeTime(NamedTuple):
     - zero：空世界兜底
 
     chapter_number 仅 prev_anchor 时有值（来源章号。A4 来源可见展示用，
-    docs/foundation-hardening.md §2.2——纯附加信息，t/source 解析语义零变化）。
+    docs/reports/foundation-hardening.md §2.2——纯附加信息，t/source 解析语义零变化）。
     """
 
     t: int
@@ -352,6 +355,8 @@ async def load_world_overlay(
     repo = WorldRepository(db)
     entities_all = await repo.entities.list_by_book(book_id)
     if not entities_all:
+        # 数据源决策行：世界页无实体 → 消费方保持旧表数据（未迁移书行为不变）
+        logger.info("[world_bridge] 书 %s 无世界实体 → 旧表兜底", book_id)
         return None
 
     nt = await resolve_narrative_time(db, chapter)
@@ -371,7 +376,7 @@ async def load_world_overlay(
         str(cs.get("entity_id")): cs for cs in state.get("character_states", [])
     }
 
-    # A2 在场提权（docs/foundation-hardening.md §2.3）：本章钉了场景地点时，
+    # A2 在场提权（docs/reports/foundation-hardening.md §2.3）：本章钉了场景地点时，
     # 切片时刻位于该地点的实体构成「在场集」作排序第一键——当前场景的次要角色
     # 不再被高重要度远端角色挤出 16 名单。无场景钉时在场集恒空、第一键恒 0，
     # 排序与旧逻辑逐一致（零变化契约）。chapter 走 getattr 防御（鸭子类型对象）。
@@ -441,7 +446,7 @@ async def load_world_overlay(
             )
         )
 
-    # A1 私有通道（docs/foundation-hardening.md §3.1，D5 拍板）：private 实体的
+    # A1 私有通道（docs/reports/foundation-hardening.md §3.1，D5 拍板）：private 实体的
     # 档案不进正文上下文（过滤在 settings_bundle 装配层），改走 secrets——
     # AI 知晓这些秘密以协助铺垫与暗示，但 prompt 侧要求绝不直接写出。
     # 无私有实体 → 空列表（下游块渲染零变化）。
@@ -453,6 +458,13 @@ async def load_world_overlay(
         if (e.name or "").strip() and text:
             secrets.append({"name": (e.name or "").strip(), "text": text})
 
+    # 数据源决策行：world 优先命中面（t 切片时刻/来源 + 各池计数）
+    logger.info(
+        "[world_bridge] 书 %s → world 优先（t=%d 源=%s 角色=%d 资产=%d 势力=%d "
+        "地点=%d 活跃关系=%d 秘密=%d）",
+        book_id, t, nt.source, len(characters), len(assets), len(factions),
+        len(locations), len(relationships), len(secrets),
+    )
     return {
         "entities": characters,
         "assets": assets,
