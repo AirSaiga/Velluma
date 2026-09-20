@@ -1,12 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Velluma 一键收摊：停止后台/前台启动的全部服务。
+    Velluma 一键收摊：停止后台/前台启动的全部服务（dev / prod / monitor 通用）。
 .DESCRIPTION
-    停止顺序（给优雅路径优先权）：
-      1. 按状态 JSON（data/dev_status.json）杀 Electron + 网页监控台
+    位于 scripts/ 根，项目根 = $PSScriptRoot 的父目录。停止顺序（给优雅路径优先权）：
+      1. 按状态 JSON（data/dev_status.json）杀 Electron + 后台监督者（monitor）
          ——启动器探测到 Electron 退出后会自行清理后端/前端并退出；
-      2. 等 3 秒后扫尾：残余 start.ps1 启动器、recorded 端口上的残留监听者。
+      2. 等 3 秒后扫尾：残余 start-all.ps1 / 单服务 start-*.ps1 启动器、
+         recorded 端口上的残留监听者。
     ⚠ 三重防误杀（2026-09-11 加固）：
       a. PID 重用：只杀进程名在白名单内的 PID；监控台还须命令行含本项目路径
          （electron 是 cmd /c npm 包装、命令行无路径，靠新鲜度闸兜底）；
@@ -18,7 +19,8 @@
 #>
 $ErrorActionPreference = "SilentlyContinue"
 
-$ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+# 本脚本位于 scripts/ 根，项目根 = $PSScriptRoot 的父目录
+$ProjectRoot = Split-Path $PSScriptRoot -Parent
 $StatusPath = Join-Path $ProjectRoot "data\dev_status.json"
 $projectMarker = "*" + $ProjectRoot + "*"
 
@@ -72,11 +74,20 @@ if ($statusFresh -and $services) {
 Start-Sleep -Seconds 3
 
 # 2. 扫尾：残余启动器（正常应已自退；卡死/冻结的在这里收掉）——命令行须含本项目
-#    路径，别的项目同名 start.ps1 不连坐（2026-09-11）
+#    路径，别的项目同名脚本不连坐（2026-09-11）。匹配新布局的四类入口：
+#    start-all.ps1（编排核心）与 start-backend/frontend/electron.ps1（单服务前台脚本，
+#    其子进程是真正的服务，由端口段/孤儿清扫兜住，这里收脚本宿主本身）
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like '*start.ps1*' -and $_.CommandLine -like $projectMarker } |
+    Where-Object { $_.CommandLine -like '*start-all.ps1*' -and $_.CommandLine -like $projectMarker } |
     ForEach-Object {
         Write-Host "  stopped launcher (pid $($_.ProcessId))" -ForegroundColor Green
+        & taskkill /T /F /PID $_.ProcessId 2>&1 | Out-Null
+    }
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*\scripts\dev\start-*.ps1*' -or $_.CommandLine -like '*\scripts\prod\start-*.ps1*' } |
+    Where-Object { $_.CommandLine -like $projectMarker } |
+    ForEach-Object {
+        Write-Host "  stopped standalone script (pid $($_.ProcessId))" -ForegroundColor Green
         & taskkill /T /F /PID $_.ProcessId 2>&1 | Out-Null
     }
 

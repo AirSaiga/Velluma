@@ -59,7 +59,8 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: FRONTEND_PORT,
-    // strictPort: true 保留 —— 端口已由启动脚本（scripts/windows/start.ps1、scripts/macos/start.sh）预先扫描为空闲，
+    // strictPort: true 保留 —— 端口已由启动脚本（scripts/dev/start-all.ps1、scripts/dev/start-frontend.ps1、
+    // scripts/macos/dev/ 等，全端契约见 scripts/check_launcher_contract.py）预先扫描为空闲，
     // 若仍冲突则直接报错（不自动换端口，避免与 Electron 加载的 URL 不一致）
     strictPort: true,
     proxy: {

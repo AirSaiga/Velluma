@@ -50,3 +50,14 @@
 ### 应用图标单源化（2026-09-13）
 
 - 换图收敛到 `frontend/electron/app-icon.png` 单文件（两处 BrowserWindow icon 直读 + build.win.icon/mac.icon 同指），替代此前散落的图标路径；`scripts/make_app_icon.py` 只生成出厂占位图。Windows 图标缓存可能滞后属已知现象。
+
+### 目录重组：环境/功能完全隔离（2026-09-19）
+
+- 用户拍板按**环境/功能完全隔离**重排 scripts/：`scripts/dev/`（开发调试·后端热重载）与 `scripts/prod/`（生产）各四入口（backend/frontend/electron/all），`scripts/monitor/` 网页监控台+后台监督者完全自持（vbs 与其依赖 `dev_dashboard.py` 私有副本——即使逻辑相同也单独一份、永不复用），`scripts/macos/{dev,prod}/` 对称两模式，收摊脚本 `scripts/stop-velluma.{bat,ps1,sh}` 升 scripts/ 根全局通用。旧三模式收敛为两模式（原 debug 热重载形态=新 dev；原无热重载 dev 退役）。
+- 编排核心由现役 `start.ps1`/`start.sh` 派生后**模式硬焊死**（dev 副本只留 reload 分支、prod 副本只留 main.py/`__main__`+build 分支），互不复用；单服务脚本是新增能力（前台直跑、端口协商与全端同契约、编排核心的 stdin 切断纪律不适用——独占终端时 vite 交互快捷键反而可用）。
+- 网页监控台从编排核心剥离（控制台 start-all 不再自动拉 dashboard/开浏览器）——监控台成为 monitor 文件夹专属产品；`scripts/dev_dashboard.py` 根副本删除，唯一实现=monitor 私有副本。
+- `check_launcher_contract.py` 检查面从 5 扩到 22（双平台编排×4 + 单服务×6 + monitor 副本 + 收摊 + 前端判定）；前端端口段仅 dev 侧持有（prod 无 Vite）。
+- monitor 副本补 POSIX SIGTERM/SIGINT 处理器（置停机标志→≤5s stop_all 收拢服务树）：新 `monitor/start-background.sh`（macOS 后台入口，nohup 拉监督者，不再走控制台 start.sh）需要它，否则 TERM 打死监督者后独立进程组里的子服务全孤儿。`stop-velluma.sh` 重写：TERM 编排启动器+TERM 监督者+带归属闸（`grep -qF 项目根`）的端口段清扫（单服务前台脚本 exec 后不是启动器子进程，trap 够不到）。
+- 施工误触与意外收获：验证 vbs 时误用 `cscript` 直接执行（会拉起整棵服务树含 Electron 窗口）——当场用新 `stop-velluma.ps1` 收干净（status JSON 杀监督者 + 孤儿清扫扫其余），反而完成了一次 vbs→监督者→三端→收摊的全链路实测。**教训：vbs 没有 parse-only 模式，cscript 即执行，验证只能靠审读。**
+- 同步面：scripts/README.md 重写、AGENTS.md 启动器章节（新增「环境/功能隔离纪律勿回退」不变量）、根 README 四段、前端三处注释（vite.config.js / main.cjs / base.ts，纯注释）。CI 命令路径不变（`python scripts/check_launcher_contract.py`）。
+- 编码纪律新增：`.ps1` 必须 UTF-8 带 BOM+CRLF（PS 5.1 无 BOM 按 ANSI 解码中文即乱）；新 .bat/.vbs CRLF、.sh LF。

@@ -36,8 +36,9 @@ jobs:
       - name: Compile-check backend
         run: python -m compileall -q backend/
 
-      # 阻断:启动编排三份实现(win ps1 / macos sh / python 监督者)共用同一套端口段与
-      # electron npm script 契约,历史上飘过(前端扫描上界 5274/5275/5285 三版并存)。
+      # 阻断:启动脚本按环境/功能隔离后(2026-09-19 dev/prod/monitor 三文件夹互不复用),
+      # 同一套端口段与 electron npm script 契约写进 22 个检查面(双平台编排核心+单服务
+      # 脚本+monitor 副本+收摊+前端判定),历史上飘过(前端扫描上界 5274/5275/5285 三版并存)。
       # 契约常量、为何不能共享代码、以及漂移后的修法见 scripts/check_launcher_contract.py
       - name: Launcher contract check
         run: python scripts/check_launcher_contract.py

@@ -1,12 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""==== Velluma 开发监控台（网页版）====
+"""==== Velluma 网页监控台 / 后台监督者（monitor 文件夹私有副本）====
 
-启动脚本的配套观测面板：纯标准库 HTTP 服务（零第三方依赖、零构建），
-tail 启动器写下的各服务日志文件（logs/dev_backend.log / dev_vite.log /
-dev_electron.log / dev_sys.log，由 start.ps1 的读线泵落盘）+ 状态 JSON，
-浏览器打开即三端彩色日志流。由 scripts/windows/start.ps1 / scripts/macos/start.sh
-拉起并随其清理，不参与产品运行时，仅本地开发用。
+⚠ 本文件是 scripts/monitor/ 的私有副本（2026-09-19 目录重组）：即使逻辑与
+scripts/dev、scripts/prod 的编排相似，也按「完全隔离」纪律单独存在、互不复用、
+互不引用——改这里不要求改那边，反之亦然（端口契约仍由
+scripts/check_launcher_contract.py 对拍锁定）。
+
+两种身份：
+  - 监督者（--supervise，由本文件夹 start-background.vbs / start-background.sh 拉起）：
+    后台模式的关键路径拥有者——端口协商 + 拉起 backend/vite/electron（stdin=DEVNULL、
+    CREATE_NO_WINDOW/独立进程组）+ 状态 JSON 心跳（5s）+ 意外退出自愈（上限 2）+
+    electron 退出=收摊；debug 模式另有 mtime 热重载观察线程。纯标准库、零构建。
+  - 观测面板：tail 启动器写下的各服务日志文件（logs/dev_backend.log / dev_vite.log /
+    dev_electron.log / dev_sys.log，由各环境 start-all 编排的读线泵落盘）+ 状态 JSON，
+    浏览器打开即三端彩色日志流。不参与产品运行时，仅本地开发用。
 
 端点：
   GET /    单页面板（内嵌 HTML，无外部资源）
@@ -15,8 +23,8 @@ dev_electron.log / dev_sys.log，由 start.ps1 的读线泵落盘）+ 状态 JSO
   GET /api/status
            服务状态（状态 JSON + 端口 TCP 探活 + PID 存活核验）
 
-警示：日志行格式由 start.ps1 的读线泵决定（"HH:mm:ss 原始行"），两端改格式须同步
-本文件的 LINE_RE；文件名见 FILES。
+警示：日志行格式由各 start-all 编排的读线泵决定（"HH:mm:ss 原始行"），两端改格式
+须同步本文件的 LINE_RE；文件名见 FILES。
 """
 import argparse
 import ctypes
@@ -948,6 +956,15 @@ def main():
         SUPERVISE = True
         MODE = args.mode
         ROOT = os.path.abspath(args.root)
+        if os.name != "nt":
+            # POSIX 干净停机（2026-09-19 monitor 重组补）：TERM/INT（stop-velluma.sh /
+            # 手动 Ctrl+C）→ 置 _shutdown，supervisor_loop 下一轮（≤5s）走 stop_all
+            # 收摊并写「全停」状态。不注册的话 TERM 直接打死监督者，独立进程组里的
+            # 子服务全部孤儿。Windows 侧 taskkill /F 是硬杀，由停脚本新鲜度闸兜底。
+            def _graceful_stop(signum, frame):
+                _shutdown.set()
+            signal.signal(signal.SIGTERM, _graceful_stop)
+            signal.signal(signal.SIGINT, _graceful_stop)
         # 每次启动重建日志视图（自愈重启走 "ab" 追加，不受影响）——⚠ 必须在写任何
         # sys 叙事之前：先写后截会把本轮第一条叙事自己擦掉
         for f in FILES.values():

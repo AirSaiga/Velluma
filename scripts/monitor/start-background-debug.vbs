@@ -1,11 +1,15 @@
-REM Velluma background start (dev, no terminal window).
+REM Velluma background start (debug, no terminal window) - monitor folder.
 REM A python supervisor owns the service tree: spawns backend/vite/electron,
 REM auto-restarts on crash, serves the web dashboard. The app window appears
 REM after the first frontend build finishes (about 30-60 seconds).
-REM Stop everything: run stop-velluma.bat in this folder.
+REM Stop everything: run scripts\stop-velluma.bat (at scripts root).
 REM NOTE: this file must stay ASCII-only; paths with spaces need quote handling.
 REM pythonw = no console at all: killing/w closing anything cannot teardown-kill
 REM the supervisor via console destruction (that chain killed it once).
+REM This folder is fully self-contained: the supervisor script dev_dashboard.py
+REM is a private copy living HERE, never shared with scripts/dev or scripts/prod.
+REM debug flavor: the supervisor polls backend/**/*.py mtimes and restarts the
+REM backend on change (uvicorn --reload cannot work without a real console).
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
@@ -18,6 +22,6 @@ End If
 q = """"
 REM script path needs quoting too: a project dir with spaces would break the
 REM command line at the first space and pythonw would die silently.
-cmdline = q & py & q & " " & q & root & "\scripts\dev_dashboard.py" & q & " --supervise --mode dev --root " & q & root & q & " --dir " & q & root & "\logs" & q & " --status " & q & root & "\data\dev_status.json" & q & " --port 0"
+cmdline = q & py & q & " " & q & scriptDir & "\dev_dashboard.py" & q & " --supervise --mode debug --root " & q & root & q & " --dir " & q & root & "\logs" & q & " --status " & q & root & "\data\dev_status.json" & q & " --port 0"
 sh.CurrentDirectory = root
 sh.Run cmdline, 0, False

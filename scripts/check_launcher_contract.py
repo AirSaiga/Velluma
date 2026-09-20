@@ -2,22 +2,24 @@
 # Copyright (C) 2026 Velluma Contributors
 """==== 启动脚本契约自检 ====
 
-启动编排有三份实现（不同平台/运行方式各自的语言），却必须守同一套契约：
+2026-09-19 目录重组后，启动编排按「环境/功能完全隔离」分成多个自持文件夹：
 
-    scripts/windows/start.ps1         可见终端监控台（Windows）
-    scripts/macos/start.sh            可见终端监控台（macOS/Linux）
-    scripts/dev_dashboard.py          后台监督者（--supervise，两平台共用）
-    scripts/windows/stop-velluma.ps1  收摊脚本的孤儿清扫端口段
+    scripts/dev/start-all.ps1            开发（热重载）编排·Windows
+    scripts/prod/start-all.ps1           生产编排·Windows
+    scripts/macos/dev/start-all.sh       开发（热重载）编排·macOS/Linux
+    scripts/macos/prod/start-all.sh      生产编排·macOS/Linux
+    scripts/monitor/dev_dashboard.py     后台监督者+网页监控台（monitor 私有副本）
+    scripts/{dev,prod}/start-backend*.   单服务前台脚本（dev 侧持有端口协商）
+    scripts/stop-velluma.ps1             收摊脚本的孤儿清扫端口段
     frontend/src/services/api/transport/base.ts   前端 dev-server 端口判定
 
-契约本身没法用共享代码表达，就退化成"同一组数字写在五处"——历史上已经飘过
-（前端扫描上界 5274 / 5275 / 5285 三版并存，监控台与收摊脚本覆盖范围对不上）。
-本脚本把这些数字抽出来对拍，防静默漂移：
+隔离的代价是同一组契约数字写进更多文件——历史已经飘过（前端扫描上界
+5274 / 5275 / 5285 三版并存，监控台与收摊脚本覆盖范围对不上）。本脚本把这些
+数字抽出来对拍，防静默漂移：
 
   - 后端端口段：8002~8100（与 backend/core/config.py 的 DEFAULT_PORT..MAX_PORT 对齐）
-  - 前端端口段：5175~5285
-  - 三份编排的 electron 启动脚本名一致（electron:nobuild——loadURL/loadFile 由
-    NODE_ENV 决定，dev/debug 的 vite build 产物根本不会被加载）
+  - 前端端口段：5175~5285（仅 dev 环境持有：prod 无 Vite、无前端端口协商）
+  - 全部 Electron 启动路径统一 electron:nobuild（loadURL/loadFile 由 NODE_ENV 决定）
 
 用法：
     python scripts/check_launcher_contract.py     # CI 与本地都可跑，不一致即退出 1
@@ -29,12 +31,28 @@ import os
 import re
 import sys
 
+# Windows 下 stdout 为管道/重定向时编码回落 ANSI 代码页（中文系统=GBK），
+# 汇总段的 ⊇/✅/❌ 不在 GBK 内会 UnicodeEncodeError（交互式控制台走
+# WriteConsoleW 不受影响，崩的是重定向场景）——统一 UTF-8，与 backend/main.py
+# 启动期同款处理
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PS1 = "scripts/windows/start.ps1"
-SH = "scripts/macos/start.sh"
-SUP = "scripts/dev_dashboard.py"
-STOP = "scripts/windows/stop-velluma.ps1"
+# ---- 检查面（新布局）----
+PS1_DEV_ALL = "scripts/dev/start-all.ps1"
+PS1_PROD_ALL = "scripts/prod/start-all.ps1"
+PS1_DEV_BACKEND = "scripts/dev/start-backend.ps1"
+PS1_DEV_FRONTEND = "scripts/dev/start-frontend.ps1"
+PS1_PROD_BACKEND = "scripts/prod/start-backend.ps1"
+SH_DEV_ALL = "scripts/macos/dev/start-all.sh"
+SH_PROD_ALL = "scripts/macos/prod/start-all.sh"
+SH_DEV_BACKEND = "scripts/macos/dev/start-backend.sh"
+SH_DEV_FRONTEND = "scripts/macos/dev/start-frontend.sh"
+SH_PROD_BACKEND = "scripts/macos/prod/start-backend.sh"
+SUP = "scripts/monitor/dev_dashboard.py"
+STOP = "scripts/stop-velluma.ps1"
 FE_BASE = "frontend/src/services/api/transport/base.ts"
 
 # 契约本体（唯一的"应该值"）：两端编排端口段 + 统一 electron 启动脚本
@@ -59,7 +77,7 @@ def grab(text, pattern, rel, what, group=1):
 
 
 def grab_int(text, pattern, rel, what):
-    # 端口常量一律按 int 取：三处解析结果要能直接互比（正则命中即字符串）
+    # 端口常量一律按 int 取：多处解析结果要能直接互比（正则命中即字符串）
     v = grab(text, pattern, rel, what)
     return None if v is None else int(v)
 
@@ -70,24 +88,45 @@ def expect(rel, what, got, want):
     return "{0}: {1} = {2}".format(rel, what, got)
 
 
-def parse_ps1():
-    text = read(PS1)
-    return {
-        "backend": (grab_int(text, r"DefaultBackendPort\s*=\s*(\d+)", PS1, "DefaultBackendPort"),
-                    grab_int(text, r"BackendPortMax\s*=\s*(\d+)", PS1, "BackendPortMax")),
-        "frontend": (grab_int(text, r"DefaultFrontendPort\s*=\s*(\d+)", PS1, "DefaultFrontendPort"),
-                     grab_int(text, r"FrontendPortMax\s*=\s*(\d+)", PS1, "FrontendPortMax")),
-    }
+def parse_ps1(rel, keys):
+    # keys ⊆ {"backend", "frontend"}：该文件应持有的端口段常量
+    text = read(rel)
+    out = {}
+    if "backend" in keys:
+        out["backend"] = (grab_int(text, r"DefaultBackendPort\s*=\s*(\d+)", rel, "DefaultBackendPort"),
+                          grab_int(text, r"BackendPortMax\s*=\s*(\d+)", rel, "BackendPortMax"))
+    if "frontend" in keys:
+        out["frontend"] = (grab_int(text, r"DefaultFrontendPort\s*=\s*(\d+)", rel, "DefaultFrontendPort"),
+                           grab_int(text, r"FrontendPortMax\s*=\s*(\d+)", rel, "FrontendPortMax"))
+    return out
 
 
-def parse_sh():
-    text = read(SH)
-    return {
-        "backend": (grab_int(text, r"^DEFAULT_BACKEND_PORT=(\d+)", SH, "DEFAULT_BACKEND_PORT"),
-                    grab_int(text, r"^BACKEND_PORT_MAX=(\d+)", SH, "BACKEND_PORT_MAX")),
-        "frontend": (grab_int(text, r"^DEFAULT_FRONTEND_PORT=(\d+)", SH, "DEFAULT_FRONTEND_PORT"),
-                     grab_int(text, r"^FRONTEND_PORT_MAX=(\d+)", SH, "FRONTEND_PORT_MAX")),
-    }
+def parse_sh(rel, keys):
+    text = read(rel)
+    out = {}
+    if "backend" in keys:
+        out["backend"] = (grab_int(text, r"^DEFAULT_BACKEND_PORT=(\d+)", rel, "DEFAULT_BACKEND_PORT"),
+                          grab_int(text, r"^BACKEND_PORT_MAX=(\d+)", rel, "BACKEND_PORT_MAX"))
+    if "frontend" in keys:
+        out["frontend"] = (grab_int(text, r"^DEFAULT_FRONTEND_PORT=(\d+)", rel, "DEFAULT_FRONTEND_PORT"),
+                           grab_int(text, r"^FRONTEND_PORT_MAX=(\d+)", rel, "FRONTEND_PORT_MAX"))
+    return out
+
+
+PS1_SURFACES = [
+    (PS1_DEV_ALL, {"backend", "frontend"}),
+    (PS1_PROD_ALL, {"backend"}),
+    (PS1_DEV_BACKEND, {"backend"}),
+    (PS1_DEV_FRONTEND, {"frontend"}),
+    (PS1_PROD_BACKEND, {"backend"}),
+]
+SH_SURFACES = [
+    (SH_DEV_ALL, {"backend", "frontend"}),
+    (SH_PROD_ALL, {"backend"}),
+    (SH_DEV_BACKEND, {"backend"}),
+    (SH_DEV_FRONTEND, {"frontend"}),
+    (SH_PROD_BACKEND, {"backend"}),
+]
 
 
 def parse_supervisor():
@@ -134,24 +173,45 @@ def parse_frontend():
 
 
 def check_electron_script():
+    # 一切 Electron 启动路径（编排核心 ×4 + 单飞脚本 ×4 + 监督者）都走 electron:nobuild
+    surfaces = [
+        PS1_DEV_ALL, PS1_PROD_ALL, PS1_DEV_ELECTRON, PS1_PROD_ELECTRON,
+        SH_DEV_ALL, SH_PROD_ALL, SH_DEV_ELECTRON, SH_PROD_ELECTRON,
+        SUP,
+    ]
     out = []
-    for rel in (PS1, SH, SUP):
+    for rel in surfaces:
         if ELECTRON_SCRIPT not in read(rel):
-            failures.append("{0}: 未使用 {1}（三端须一致：dev/debug 下 vite build 产物不被加载）".format(
+            failures.append("{0}: 未使用 {1}（全端须一致：vite build 产物在 dev 不被加载）".format(
                 rel, ELECTRON_SCRIPT))
         else:
             out.append("{0}: {1}".format(rel, ELECTRON_SCRIPT))
     return out
 
 
+PS1_DEV_ELECTRON = "scripts/dev/start-electron.ps1"
+PS1_PROD_ELECTRON = "scripts/prod/start-electron.ps1"
+SH_DEV_ELECTRON = "scripts/macos/dev/start-electron.sh"
+SH_PROD_ELECTRON = "scripts/macos/prod/start-electron.sh"
+
+
 def main():
     print("启动脚本契约自检（后端 {0[0]}~{0[1]} / 前端 {1[0]}~{1[1]}）\n".format(
         BACKEND_RANGE, FRONTEND_RANGE))
 
-    for rel, parsed in ((PS1, parse_ps1()), (SH, parse_sh()), (SUP, parse_supervisor())):
-        for key, want in (("backend", BACKEND_RANGE), ("frontend", FRONTEND_RANGE)):
-            got = parsed[key]
-            print("  " + expect(rel, key, got, want))
+    for rel, keys in PS1_SURFACES:
+        for key in sorted(keys):
+            want = BACKEND_RANGE if key == "backend" else FRONTEND_RANGE
+            print("  " + expect(rel, key, parse_ps1(rel, {key})[key], want))
+
+    for rel, keys in SH_SURFACES:
+        for key in sorted(keys):
+            want = BACKEND_RANGE if key == "backend" else FRONTEND_RANGE
+            print("  " + expect(rel, key, parse_sh(rel, {key})[key], want))
+
+    print("\n  —— 监督者（monitor 私有副本）")
+    for key, want in (("backend", BACKEND_RANGE), ("frontend", FRONTEND_RANGE)):
+        print("  " + expect(SUP, key, parse_supervisor()[key], want))
 
     print("\n  —— 收摊脚本孤儿清扫段（窗口自身端口段为 5175~5285 / 8002~8100）")
     for line in parse_stop_sweep():
@@ -170,9 +230,9 @@ def main():
         print("\n❌ 契约不一致 {0} 处：".format(len(failures)))
         for f in failures:
             print("   - " + f)
-        print("\n修法：改全部实现（三份编排 + 收摊脚本 + 前端判定），再改本文件的契约常量。")
+        print("\n修法：改全部实现（编排核心×4 + 单服务脚本 + 监督者副本 + 收摊脚本 + 前端判定），再改本文件的契约常量。")
         return 1
-    print("\n✅ 三端契约一致。")
+    print("\n✅ 全端契约一致。")
     return 0
 
 

@@ -1,52 +1,42 @@
 #!/bin/bash
 # =============================================================================
-# Velluma 启动脚本·macOS 编排（与 windows/start.ps1 对称）
+# Velluma 正式生产环境·macOS 一键三端（后端 + 预构建前端 + Electron 生产壳）
 # =============================================================================
-# 本脚本位于 scripts/macos/ 下，项目根 = 脚本目录的祖父目录。
-# 用法：start.sh [dev|debug|prod] [flags]，模式也可用 -m/--mode 指定。
-#   - prod : 生产体验模式。npm run build 预构建 dist，Electron 载入本地 dist 文件
-#            （NODE_ENV=production），不启动 Vite dev server，不开 DevTools。
-#            后端仍用本地 .venv 启动。
-#   - dev  : 开发模式（默认）。后端 + Vite dev server + Electron（自动开 DevTools）。
-#   - debug: 调试模式。后端 uvicorn --reload 热重载（保存 backend/ 下任意 .py 即自动
-#            重启），前端 Vite + Electron。
+# scripts/macos/prod/ 四件套的编排核心（与 scripts/macos/dev/start-all.sh 完全独立、
+# 互不复用）。本脚本位于 scripts/macos/prod/ 下，项目根 = 脚本目录的曾祖父目录。
+#   - 后端：python -m backend.main（无热重载，走 main.py __main__ 的内部端口扫描
+#     并自写 data/port.txt）；
+#   - 前端：npm run build 预构建 dist/（不启动 Vite dev server）；
+#   - Electron：NODE_ENV=production 走 loadFile('../dist/index.html')，不开 DevTools。
 # flags:
 #   --force / -Force           端口被占用时强制清理后重启
 #   --skip-backend / -SkipBackend    跳过后端（假设已运行）
-#   --skip-frontend / -SkipFrontend  跳过前端（dev：跳 Vite；prod：跳 build）
+#   --skip-frontend / -SkipFrontend  跳过构建（断言 dist 已在）
 #   --electron-only / -ElectronOnly  只启动 Electron（假设前后端已就绪）
 #   --dry-run / -DryRun        仅打印将执行的命令，不启动任何进程
 #   --no-log / -NoLog          关闭会话日志落盘
 #
-# 监控台（2026-09-04 与 Windows 版对称改造）：本就是单终端运行，此版把三端输出
-# 逐行加彩色前缀（backend 青 / vite 绿 / electron 黄）合流，不再裸交错；同时 tee
-# 到 logs/console_<mode>_<时间戳>.log。按键聚焦视图（1/2/3/0/s/q）为 Windows 版
-# 专有功能，bash 版以 Ctrl+C（trap 兜底清理）停止全部。
+# 监控台：输出逐行彩色前缀合流 + tee 到 logs/console_prod_<时间戳>.log；
+# Ctrl+C（trap 兜底清理）停止全部。网页监控台已隔离到 scripts/monitor/。
 #
-# 与 Windows 版行为契约一致：
-#   - 端口写 data/port.txt 与 data/frontend_port.txt（vite.config.js / electron/main.cjs 读）
-#     端口段两端一致：后端 8002~8100、前端 5175~5285（scripts/check_launcher_contract.py 锁三端）
-#   - 为 Electron 设 VELLUMA_BACKEND_PORT / VELLUMA_FRONTEND_PORT / VELLUMA_SERVICES_READY
-#   - debug 模式脚本侧固定后端端口（VELLUMA_PORT），保证热重载期间端口不漂移
-#   - DryRun 不写端口文件、不杀任何进程（一次试跑就会把运行实例与下次启动的端口协商带偏）
-#   - 三模式 Electron 一律 electron:nobuild（= 直接 "electron ."；loadURL/loadFile 由 NODE_ENV
-#     决定，dev/debug 的 vite build 产物根本不会被加载，白等 30~60 秒）
-#   - 每次启动重建 logs/dev_*.log（网页监控台数据源，与 Windows 读线泵同契约）
+# 行为契约（与 Windows 双端、monitor 监督者一致，check_launcher_contract.py 对拍）：
+#   - 端口写 data/port.txt（vite.config.js / electron/main.cjs 读）
+#   - 为 Electron 设 VELLUMA_BACKEND_PORT / VELLUMA_SERVICES_READY / NODE_ENV=production
+#   - DryRun 不写端口文件、不杀任何进程
+#   - Electron 一律 electron:nobuild（= 直接 "electron ."；loadURL/loadFile 由 NODE_ENV
+#     决定，dist 已构建再 build 一次纯属浪费）
+#   - 每次启动重建 logs/dev_*.log
 #   - 退出时按进程树清理，再兜底清理端口监听者，避免孤儿进程占用端口
 # =============================================================================
 
-MODE="dev"
 FORCE=0
 SKIP_BACKEND=0
 SKIP_FRONTEND=0
 ELECTRON_ONLY=0
 DRY_RUN=0
 NO_LOG=0
-NO_DASHBOARD=0
 BACKEND_PID=""
-VITE_PID=""
 ELECTRON_PID=""
-DASH_URL=""
 
 usage() {
     # 头部注释块即用法：从源码抽取到最后一行注释为止（不写死行号——改头注释不用同步）
@@ -55,48 +45,37 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        dev|debug|prod) MODE="$1"; shift ;;
-        -m|--mode|-Mode) MODE="${2:-}"; shift 2 ;;
         --force|-Force) FORCE=1; shift ;;
         --skip-backend|-SkipBackend) SKIP_BACKEND=1; shift ;;
         --skip-frontend|-SkipFrontend) SKIP_FRONTEND=1; shift ;;
         --electron-only|-ElectronOnly) ELECTRON_ONLY=1; shift ;;
         --dry-run|-DryRun) DRY_RUN=1; shift ;;
         --no-log|-NoLog) NO_LOG=1; shift ;;
-        --no-dashboard|-NoDashboard) NO_DASHBOARD=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "未知参数: $1"; usage; exit 1 ;;
     esac
 done
 
-case "$MODE" in
-    dev|debug|prod) ;;
-    *) echo "无效模式: $MODE（可选 dev / debug / prod）"; exit 1 ;;
-esac
-
 # =============================================================================
 # Config
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# scripts/macos/prod/ → 项目根要向上三层
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 DEFAULT_BACKEND_PORT=8002
 BACKEND_PORT_MAX=8100        # 与 backend/core/config.py、stop-velluma 孤儿清扫段对齐
-DEFAULT_FRONTEND_PORT=5175   # 起始扫描端口
-FRONTEND_PORT_MAX=5285       # 与 stop-velluma 孤儿清扫段对齐
 BACKEND_TIMEOUT=60
-FRONTEND_TIMEOUT=30
 HEALTH_CHECK_INTERVAL=0.5
 PYTHON_MODULE="backend.main"
 PORT_FILE="$PROJECT_ROOT/data/port.txt"
 FRONTEND_PORT_FILE="$PROJECT_ROOT/data/frontend_port.txt"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
-FRONTEND_PORT=""             # 实际端口（运行时由 resolve_frontend_port 填充）
 CHILD_PIDS=()
 CLEANUP_DONE=0
 CONSOLE_LOG=""               # 会话日志路径（main 里初始化；空 = 不落盘）
-SYS_LOG=""                   # logs/dev_sys.log（网页监控台 sys 车道；空 = 不写）
+SYS_LOG=""                   # logs/dev_sys.log（停脚本/监控台 sys 车道；空 = 不写）
 
 # =============================================================================
 # 日志（一律走 stderr：端口协商等函数经 $() 捕获返回值，stdout 不能混入日志）
@@ -116,7 +95,7 @@ die()         { echo "" >&2; log_err "$1"; exit 1; }
 # =============================================================================
 # 用法：cmd > >(prefix_stream backend 36) 2>&1（36=青 32=绿 33=黄）
 # 屏幕行带 ANSI 色；同时写 logs/dev_<label>.log（"HH:mm:ss 原始行"，网页监控台的
-# 数据源，与 Windows 读线泵同格式——改格式须同步 dev_dashboard.py 的 LINE_RE）
+# 数据源，与 Windows 读线泵同格式——改格式须同步 monitor/dev_dashboard.py 的 LINE_RE）
 prefix_stream() {
     local label="$1" color="$2" ts line
     local devfile="$PROJECT_ROOT/logs/dev_${label}.log"
@@ -155,57 +134,9 @@ read_port_file() {
     echo "$fallback"
 }
 
-write_port_file() {
-    # 写端口文件（供 vite.config.js 代理与 electron/main.cjs 读取）
-    # ⚠ DryRun 绝不落盘：一次试跑就会把端口文件改指到扫描出的空端口，正在运行的实例
-    # 与下次启动的端口协商都会被带偏（与 Windows Write-PortFile 同契约）
-    [[ "$DRY_RUN" = "1" ]] && return 0
-    local file="$1" port="$2"
-    mkdir -p "$(dirname "$file")"
-    printf '%s' "$port" > "$file" || log_err "Failed to write port file: $file"
-}
-
-find_free_port() {
-    # 扫描 [start, end] 找第一个空闲端口（避开其它项目的 Vite/服务占用）
-    local start="$1" end="$2" port
-    for ((port = start; port <= end; port++)); do
-        if ! port_open "$port"; then echo "$port"; return 0; fi
-    done
-    die "No free port in range $start..$end"
-}
-
-resolve_port() {
-    # 端口协商（与 windows/start.ps1 的 Resolve-Port 同契约），优先级：
-    # 1. 环境变量（用户强制指定）2. 已记录端口且空闲 → 复用 3. 扫描空闲端口
-    # 选中后落盘（DryRun 由 write_port_file 内部跳过）；固定端口是 debug 热重载的前提：
-    # reload 重启 worker 时端口不能漂移，否则前端断连
-    local env_port="$1" default="$2" max="$3" file="$4" label="$5"
-    local recorded free_port
-    if [[ -n "$env_port" && "$env_port" =~ ^[0-9]+$ && "$env_port" -gt 0 ]]; then
-        write_port_file "$file" "$env_port"
-        log_info "$label port from env: $env_port"
-        echo "$env_port"; return 0
-    fi
-    recorded=$(read_port_file "$file" "")
-    if [[ -n "$recorded" ]] && ! port_open "$recorded"; then
-        write_port_file "$file" "$recorded"
-        echo "$recorded"; return 0
-    fi
-    free_port=$(find_free_port "$default" "$max")
-    write_port_file "$file" "$free_port"
-    if [[ "$free_port" -ne "$default" ]]; then
-        log_info "$label default port $default busy, using $free_port"
-    fi
-    echo "$free_port"
-}
-
-resolve_backend_port() {
-    resolve_port "$VELLUMA_PORT" "$DEFAULT_BACKEND_PORT" "$BACKEND_PORT_MAX" "$PORT_FILE" "Backend"
-}
-
-resolve_frontend_port() {
-    resolve_port "$VELLUMA_FRONTEND_PORT" "$DEFAULT_FRONTEND_PORT" "$FRONTEND_PORT_MAX" "$FRONTEND_PORT_FILE" "Frontend"
-}
+# prod 无脚本侧端口协商：后端走 main.py __main__ 的内部扫描并自写 port.txt，
+# 前端无 dev server。端口段常量（8002~8100）与全端契约一致，
+# check_launcher_contract.py 对拍。
 
 kill_port_listener() {
     # 杀掉端口监听者（兜底清理；依赖 lsof，macOS 内置）
@@ -278,15 +209,10 @@ cleanup() {
             log_info "Stopped PID $pid"
         fi
     done
-    local ports=() p fp
+    local ports=() p
     p=$(read_port_file "$PORT_FILE" "$DEFAULT_BACKEND_PORT")
     [[ -n "$p" ]] && ports+=("$p")
-    # 生产模式下没有 Vite 进程，不清理前端端口（避免误杀他人占用的端口）
-    if [[ "$MODE" != "prod" ]]; then
-        fp="$FRONTEND_PORT"
-        [[ -z "$fp" ]] && fp=$(read_port_file "$FRONTEND_PORT_FILE" "")
-        [[ -n "$fp" && "$fp" -gt 0 ]] && ports+=("$fp")
-    fi
+    # prod 无 Vite，不清理前端端口（历史 frontend_port.txt 是 dev 会话留的，别误杀他人占用者）
     for p in "${ports[@]}"; do
         kill_port_listener "$p" "service" >/dev/null
     done
@@ -310,7 +236,7 @@ find_python() {
 }
 
 start_backend() {
-    local backend_port use_reload=0 python_path
+    local backend_port python_path
     backend_port=$(read_port_file "$PORT_FILE" "$DEFAULT_BACKEND_PORT")
     if [[ "$SKIP_BACKEND" = "1" || "$ELECTRON_ONLY" = "1" ]]; then
         if port_open "$backend_port"; then
@@ -320,30 +246,15 @@ start_backend() {
         die "Backend not running but skip flag set"
     fi
 
-    # debug 模式启用 uvicorn --reload 后端热重载：保存 Python 文件即自动重启
-    # 热重载的关键约束（与 Windows 版一致）：
-    #   1. --reload 必须传 import path（backend.main:app），不能走 main.py 的 __main__
-    #   2. reload 重启 worker 时端口必须固定 → 脚本侧协商端口并设 VELLUMA_PORT
-    #   3. __main__ 不执行 → save_port 不会被调用 → port.txt 必须由脚本侧写好
-    [[ "$MODE" = "debug" ]] && use_reload=1
-    if [[ "$use_reload" = "1" ]]; then
-        # die 发生在 $() 子 shell 内：|| exit 1 让父进程同步失败并触发 EXIT 清理
-        backend_port=$(resolve_backend_port) || exit 1
-        export VELLUMA_PORT="$backend_port"
-        log_info "Debug mode: backend hot-reload enabled (VELLUMA_PORT=$backend_port)"
-    fi
-
+    # prod 环境：走 main.py 的 __main__（内部 find_available_port + save_port），无热重载
+    #——uvicorn --reload 属于 dev 环境的形态（scripts/macos/dev/start-all.sh）
     log_step "Starting Backend..."
 
     if port_open "$backend_port"; then
         if [[ "$FORCE" = "1" ]]; then
             kill_port_listener "$backend_port" "backend" >/dev/null
         else
-            if [[ "$use_reload" = "1" ]]; then
-                log_ok "Backend already running on port $backend_port (reload disabled for existing process)"
-            else
-                log_ok "Backend already running on port $backend_port"
-            fi
+            log_ok "Backend already running on port $backend_port"
             return 0
         fi
     fi
@@ -354,33 +265,10 @@ start_backend() {
     export PYTHONUNBUFFERED=1
 
     if [[ "$DRY_RUN" = "1" ]]; then
-        if [[ "$use_reload" = "1" ]]; then
-            log_info "[DryRun] Would start (reload): $python_path -m uvicorn backend.main:app --host 127.0.0.1 --port $backend_port --reload --reload-dir backend --app-dir ."
-        else
-            log_info "[DryRun] Would start: $python_path -m $PYTHON_MODULE"
-        fi
+        log_info "[DryRun] Would start: $python_path -m $PYTHON_MODULE"
         return 0
     fi
 
-    if [[ "$use_reload" = "1" ]]; then
-        # --app-dir .：让 backend.main 可作为顶层模块 import（cwd 已是项目根）
-        # --reload-dir backend：仅监听 backend/ 下的 .py 变更，避免误重启
-        # 输出重定向进 [backend] 前缀合流（监控台）；worker 重启继承同一管道，日志不断流
-        # stdin 接 /dev/null：切断终端继承，vite/npm 类子进程的 TTY readline 不会因
-        # 终端侧变动 EPIPE 崩溃（与 Windows 版 stdin 关闭策略对称）
-        (cd "$PROJECT_ROOT" && exec "$python_path" -m uvicorn backend.main:app \
-            --host 127.0.0.1 --port "$backend_port" \
-            --reload --reload-dir "$PROJECT_ROOT/backend" --app-dir "$PROJECT_ROOT") \
-            < /dev/null > >(prefix_stream backend 36) 2>&1 &
-        CHILD_PIDS+=($!)
-        BACKEND_PID=$!
-        log_wait "Waiting for backend (reload)..."
-        wait_for_service "$backend_port" "Backend (reload)" "$BACKEND_TIMEOUT"
-        log_ok "Backend ready at http://127.0.0.1:$backend_port (hot-reload ON)"
-        return 0
-    fi
-
-    # dev/prod 模式：走 main.py 的 __main__（内部 find_available_port + save_port）
     # 后台运行输出进 [backend] 前缀合流（监控台），uvicorn 日志实时可见
     (cd "$PROJECT_ROOT" && exec "$python_path" -m "$PYTHON_MODULE") \
         < /dev/null > >(prefix_stream backend 36) 2>&1 &
@@ -436,65 +324,13 @@ start_frontend_build() {
     log_ok "Frontend built to dist/"
 }
 
-start_frontend() {
-    # 开发/调试模式：启动 Vite dev server（端口动态协商）
-    local frontend_port
-    frontend_port=$(resolve_frontend_port) || exit 1
-    FRONTEND_PORT="$frontend_port"
-
-    if [[ "$SKIP_FRONTEND" = "1" || "$ELECTRON_ONLY" = "1" ]]; then
-        if port_open "$frontend_port"; then
-            log_ok "Frontend already running on port $frontend_port"
-            return 0
-        fi
-        die "Frontend not running but skip flag set"
-    fi
-
-    log_step "Starting Frontend (port $frontend_port)..."
-
-    if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-        die "node_modules not found. Please run: cd frontend && npm install"
-    fi
-
-    if port_open "$frontend_port"; then
-        if [[ "$FORCE" = "1" ]]; then
-            kill_port_listener "$frontend_port" "frontend" >/dev/null
-        else
-            log_ok "Frontend already running on port $frontend_port"
-            return 0
-        fi
-    fi
-
-    log_info "Starting Vite dev server..."
-
-    # 设置环境变量供 vite.config.js 读取（双保险：env + frontend_port.txt）
-    export VELLUMA_FRONTEND_PORT="$frontend_port"
-
-    if [[ "$DRY_RUN" = "1" ]]; then
-        log_info "[DryRun] Would start: npm run dev (cwd: $FRONTEND_DIR, port $frontend_port)"
-        return 0
-    fi
-
-    (cd "$FRONTEND_DIR" && exec npm run dev) < /dev/null > >(prefix_stream vite 32) 2>&1 &
-    CHILD_PIDS+=($!)
-    VITE_PID=$!
-
-    log_wait "Waiting for frontend (port $frontend_port)..."
-    wait_for_service "$frontend_port" "Frontend" "$FRONTEND_TIMEOUT"
-    log_ok "Frontend ready at http://127.0.0.1:$frontend_port"
-}
-
 start_electron() {
     local backend_port fe_port
     backend_port=$(read_port_file "$PORT_FILE" "$DEFAULT_BACKEND_PORT")
 
-    # 公共环境变量
+    # 公共环境变量；prod 不启 Vite，历史 frontend_port.txt 仅作环境变量兜底
     export VELLUMA_BACKEND_PORT="$backend_port"
-    # 生产模式不启动 Vite，FRONTEND_PORT 可能为空——读端口文件兜底，再不行留空
-    fe_port="$FRONTEND_PORT"
-    if [[ -z "$fe_port" && "$MODE" = "prod" ]]; then
-        fe_port=$(read_port_file "$FRONTEND_PORT_FILE" "")
-    fi
+    fe_port=$(read_port_file "$FRONTEND_PORT_FILE" "")
     if [[ -n "$fe_port" ]]; then
         export VELLUMA_FRONTEND_PORT="$fe_port"
     else
@@ -502,15 +338,9 @@ start_electron() {
     fi
     export VELLUMA_SERVICES_READY=1
 
-    # 模式差异：生产模式设 NODE_ENV=production，让 main.cjs 走 loadFile('../dist/index.html')
-    # 开发/调试模式保持 NODE_ENV 不设（main.cjs 的 isDev = true，走 loadURL + openDevTools）
-    if [[ "$MODE" = "prod" ]]; then
-        export NODE_ENV="production"
-        log_info "NODE_ENV=production (Electron will load dist/index.html)"
-    else
-        unset NODE_ENV 2>/dev/null || true
-        log_info "NODE_ENV unset (Electron will load Vite dev server, DevTools auto-open)"
-    fi
+    # prod：NODE_ENV=production，让 main.cjs 走 loadFile('../dist/index.html') 分支
+    export NODE_ENV="production"
+    log_info "NODE_ENV=production (Electron will load dist/index.html)"
 
     log_step "Starting Electron..."
 
@@ -526,89 +356,49 @@ start_electron() {
     echo "" >&2
     echo -e "${GRAY}  Backend:  http://127.0.0.1:$backend_port${NC}" >&2
     echo -e "${GRAY}  API Docs: http://127.0.0.1:$backend_port/docs${NC}" >&2
-    if [[ "$MODE" = "prod" ]]; then
-        echo -e "${GRAY}  Frontend: dist/index.html (built)${NC}" >&2
-    else
-        echo -e "${GRAY}  Frontend: http://127.0.0.1:$FRONTEND_PORT (Vite dev)${NC}" >&2
-    fi
+    echo -e "${GRAY}  Frontend: dist/index.html (built)${NC}" >&2
     echo "" >&2
     echo -e "${YELLOW}  Electron is running. Close window to stop all services.${NC}" >&2
     echo -e "${GREEN}============================================================${NC}" >&2
 
-    # 后台运行以便拿到 pid（写状态 JSON 供网页监控台展示），摘要随后打印
-    # 三模式统一 electron:nobuild（= 直接 "electron ."）：
-    #   - dev/debug：main.cjs 走 loadURL 加载 vite dev server，electron:dev 里的 vite build
-    #     产物根本不会被加载，白等 30~60 秒
-    #   - prod：dist 已由 start_frontend_build 构建并校验，再 build 一次纯属浪费
-    # loadURL/loadFile 由 NODE_ENV 决定，与是否构建无关。
+    # 后台运行以便拿到 pid（写状态 JSON 供停脚本/监控台消费），摘要随后打印
+    # electron:nobuild（= 直接 "electron ."）：dist 已由 start_frontend_build 构建并
+    # 校验，再 build 一次（electron:* 系脚本）纯属浪费；loadURL/loadFile 由 NODE_ENV 决定。
     (cd "$FRONTEND_DIR" && exec npm run electron:nobuild) < /dev/null > >(prefix_stream electron 33) 2>&1 &
     ELECTRON_PID=$!
     CHILD_PIDS+=("$ELECTRON_PID")
 }
 
 # =============================================================================
-# 网页监控台（scripts/dev_dashboard.py，纯标准库）：读会话日志 + 状态 JSON
+# 状态 JSON（scripts/monitor/ 的监督者/网页监控台与停脚本消费）
 # =============================================================================
 write_dev_status() {
-    # 状态 JSON 与 Windows 版 Write-DevStatus 同构（网页监控台两端共用）
+    # 状态 JSON 与 Windows 版 Write-DevStatus 同构（停脚本/监控台消费）
+    # prod 无 Vite——vite 键恒空（schema 与 dev/监督者一致，消费方按空值跳过）
     [[ "$DRY_RUN" = "1" ]] && return 0
     mkdir -p "$PROJECT_ROOT/data"
-    # 如实报状态：pid 在跑=running，pid 已死=exited，无 pid=-（旧版一律写 running，
-    # 服务崩了监控台仍绿灯）
+    # 如实报状态：pid 在跑=running，pid 已死=exited，无 pid=-
     svc_state() {
         [[ -z "$1" ]] && { echo '"-"'; return; }
         if kill -0 "$1" 2>/dev/null; then echo '"running"'; else echo '"exited"'; fi
     }
-    local bp vp ep bstate vstate estate bport vport
+    local bp ep bstate estate bport
     [[ -n "$BACKEND_PID" ]] && bp="$BACKEND_PID" || bp=null
-    [[ -n "$VITE_PID" ]] && vp="$VITE_PID" || vp=null
     [[ -n "$ELECTRON_PID" ]] && ep="$ELECTRON_PID" || ep=null
-    bstate=$(svc_state "$BACKEND_PID"); vstate=$(svc_state "$VITE_PID"); estate=$(svc_state "$ELECTRON_PID")
+    bstate=$(svc_state "$BACKEND_PID"); estate=$(svc_state "$ELECTRON_PID")
     bport=$(read_port_file "$PORT_FILE" "$DEFAULT_BACKEND_PORT")
-    vport="$FRONTEND_PORT"
-    [[ -z "$vport" ]] && vport=null
     cat > "$PROJECT_ROOT/data/dev_status.json" << EOF
 {
-  "mode": "$MODE",
+  "mode": "prod",
   "started_at": "$(date '+%Y-%m-%d %H:%M:%S')",
   "log_dir": "$PROJECT_ROOT/logs",
   "services": {
     "backend": { "pid": $bp, "port": $bport, "state": $bstate },
-    "vite": { "pid": $vp, "port": $vport, "state": $vstate },
+    "vite": { "pid": null, "port": null, "state": "-" },
     "electron": { "pid": $ep, "port": null, "state": $estate }
   }
 }
 EOF
-}
-
-start_dashboard() {
-    # 失败不阻塞启动（监控台降级为纯终端合流）
-    # ⚠ 门控只看 --no-dashboard / --dry-run：监控台读的是 dev_*.log（恒写），与 --no-log
-    # 的合流日志无关（旧实现拿 CONSOLE_LOG 当开关，--no-log 会连坐关掉监控台）
-    [[ "$NO_DASHBOARD" = "1" || "$DRY_RUN" = "1" ]] && return 0
-    local py="" p
-    if [[ -x "$PROJECT_ROOT/.venv/bin/python3" ]]; then
-        py="$PROJECT_ROOT/.venv/bin/python3"
-    elif [[ -x "$PROJECT_ROOT/venv/bin/python3" ]]; then
-        py="$PROJECT_ROOT/venv/bin/python3"
-    elif command -v python3 >/dev/null 2>&1; then
-        py="python3"
-    fi
-    [[ -z "$py" || ! -f "$PROJECT_ROOT/scripts/dev_dashboard.py" ]] && return 0
-    for p in $(seq 8180 8189); do
-        if ! port_open "$p"; then
-            mkdir -p "$PROJECT_ROOT/logs"
-            ("$py" "$PROJECT_ROOT/scripts/dev_dashboard.py" \
-                --dir "$PROJECT_ROOT/logs" --status "$PROJECT_ROOT/data/dev_status.json" \
-                --port "$p") > "$PROJECT_ROOT/logs/dashboard.log" 2>&1 &
-            CHILD_PIDS+=($!)
-            DASH_URL="http://127.0.0.1:$p"
-            log_ok "Dashboard: $DASH_URL（已自动打开浏览器）"
-            open "$DASH_URL" >/dev/null 2>&1 || true
-            return 0
-        fi
-    done
-    log_info "Dashboard: no free port in 8180..8189, skipped"
 }
 
 # =============================================================================
@@ -618,7 +408,7 @@ show_banner() {
     # 全部脚本自身输出走 stderr（与日志一致），stdout 留给子进程，避免管道下交错
     echo -e "\n${CYAN}============================================================" >&2
     echo -e "     Velluma AI Novel Writing Assistant" >&2
-    echo -e "     Mode: $(echo "$MODE" | tr '[:lower:]' '[:upper:]')  ($OSTYPE)" >&2
+    echo -e "     Mode: PROD  ($OSTYPE)" >&2
     echo -e "============================================================${NC}" >&2
     echo "" >&2
 }
@@ -626,18 +416,16 @@ show_banner() {
 main() {
     show_banner
 
-    # dev_*.log（网页监控台数据源）恒写；合流日志 CONSOLE_LOG 受 --no-log 门控
+    # dev_*.log 恒写；合流日志 CONSOLE_LOG 受 --no-log 门控
     mkdir -p "$PROJECT_ROOT/logs"
     if [[ "$DRY_RUN" != "1" ]]; then
-        # 每次启动重建 dev_*.log：与 Windows 读线泵「每次启动重建」同契约。追加模式下
-        # 跨会话日志无限堆积，且仪表盘「文件变小 = 新一轮启动」的清屏判定永不触发。
-        # 自愈/重启的写入走 >> 追加，不受影响。
+        # 每次启动重建 dev_*.log：与 Windows 读线泵「每次启动重建」同契约。
         SYS_LOG="$PROJECT_ROOT/logs/dev_sys.log"
         local f
-        for f in backend vite electron sys; do : > "$PROJECT_ROOT/logs/dev_$f.log"; done
+        for f in backend electron sys; do : > "$PROJECT_ROOT/logs/dev_$f.log"; done
     fi
     if [[ "$DRY_RUN" != "1" && "$NO_LOG" != "1" ]]; then
-        CONSOLE_LOG="$PROJECT_ROOT/logs/console_${MODE}_$(date +%Y%m%d_%H%M%S).log"
+        CONSOLE_LOG="$PROJECT_ROOT/logs/console_prod_$(date +%Y%m%d_%H%M%S).log"
         log_info "Console log: $CONSOLE_LOG"
     fi
 
@@ -651,19 +439,11 @@ main() {
     fi
 
     start_backend
-
-    # 按模式分流前端阶段
-    if [[ "$MODE" = "prod" ]]; then
-        start_frontend_build
-    else
-        start_frontend
-    fi
-
+    start_frontend_build
     start_electron
 
-    # Electron 已后台化：落状态 JSON + 拉起网页监控台（两者失败均不阻塞）
+    # Electron 已后台化：落状态 JSON（失败不阻塞）
     write_dev_status
-    start_dashboard
 
     if [[ "$DRY_RUN" = "1" ]]; then
         log_info "DryRun complete, skipping wait"

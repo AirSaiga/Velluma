@@ -1,41 +1,35 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Velluma 启动脚本（生产/开发/调试三模式）——单窗口监控台 + 网页监控 GUI。
+    Velluma 开发调试环境·一键三端（后端热重载）。
 .DESCRIPTION
-    Windows 启动编排（与 macos/start.sh 对称）。本脚本位于 scripts/windows/ 子目录，
-    项目根 = $PSScriptRoot 的祖父目录。通过 -Mode 参数区分三种运行方式：
-      - prod   : 生产体验模式。npm run build 预构建 dist，Electron 载入本地 dist 文件（NODE_ENV=production），
-                 不启动 Vite dev server，不开 DevTools。后端仍用本地 .venv 启动。
-      - dev    : 开发模式（默认）。后端 + Vite dev server + Electron（载入 http://localhost:vitePort，自动开 DevTools）。
-      - debug  : 调试模式。dev + 后端 uvicorn --reload 热重载（保存 backend/ 下任意 .py 即自动重启）。
-
-    日志架构（2026-09-05 重构，文件为真相源）：三端 stdout/stderr 由独立读线线程
-    （runspace 泵）直接写入 logs/dev_backend.log / dev_vite.log / dev_electron.log，
-    与控制台完全解耦——控制台（或任何宿主怪癖）冻结都不影响日志落盘与网页监控台。
-    控制台显示为尽力而为：读线线程同时入队，主循环非阻塞排水上屏（彩色前缀）：
+    scripts/dev/ 四件套的编排核心（与 prod/start-all.ps1 完全独立、互不复用）。
+    本脚本位于 scripts/dev/ 子目录，项目根 = $PSScriptRoot 的祖父目录。
+      - 后端：uvicorn --reload 热重载（保存 backend/ 下任意 .py 即自动重启），
+        端口由脚本侧协商固定并写 data/port.txt；
+      - 前端：Vite dev server（端口协商写 data/frontend_port.txt）；
+      - Electron：载入 http://localhost:<vitePort>，自动 openDevTools()。
+    日志架构（文件为真相源）：三端 stdout/stderr 由独立读线线程（runspace 泵）
+    直接写入 logs/dev_backend.log / dev_vite.log / dev_electron.log，与控制台完全
+    解耦——控制台（或任何宿主怪癖）冻结都不影响日志落盘。控制台显示为尽力而为：
+    读线线程同时入队，主循环非阻塞排水上屏（彩色前缀）：
       1/2/3     只看 后端 / Vite / Electron      0     回到全部视图
       s         立即打印各端状态                 q / Ctrl+C  停止全部服务并退出
-    网页监控 GUI（scripts/dev_dashboard.py，-NoDashboard 关闭）：自动打开浏览器，
-    直接 tail 上述日志文件——三端彩色日志流 + 状态药丸 + 聚焦/暂停。
-    服务状态写 data/dev_status.json（心跳/状态变化时刷新）。
-    Electron 关窗仍等于全部收摊（与旧契约一致）。
-    端口契约（与 macos/start.sh、dev_dashboard.py 监督者三端共用）：后端 8002~8100，
-    前端 5175~5285；scripts/check_launcher_contract.py 锁这三处（改一处须同步）。
+    网页监控台不归本脚本管（scripts/monitor/ 单独隔离）；要网页监控用 monitor 下的入口。
+    服务状态写 data/dev_status.json（心跳/状态变化时刷新，stop-velluma 读它按 PID 收摊）。
+    Electron 关窗等于全部收摊。
+    端口契约（与 prod/start-all.ps1、macos 双端、monitor/dev_dashboard.py 监督者共用）：
+    后端 8002~8100，前端 5175~5285；scripts/check_launcher_contract.py 锁这些实现
+    （改一处须同步）。
 .NOTES
-    入口：scripts/windows/start-dev.bat / start-debug.bat / start-prod.bat（薄包装透传参数）。
-    -Hidden：后台/无人看守窗口用（不打印按键提示行，但监控循环照跑——心跳、自愈重启、
-    Electron 退出=收摊都依赖它）。真正的隐藏窗口后台模式请用 start-background.vbs。
+    入口：本目录 start-all.bat（薄包装透传参数）。单服务调试用同目录
+    start-backend.bat / start-frontend.bat / start-electron.bat（各自独立，前台运行）。
 #>
 param(
-    [ValidateSet('prod', 'dev', 'debug')]
-    [string]$Mode = 'dev',
     [switch]$Force,
     [switch]$SkipBackend,
     [switch]$SkipFrontend,
     [switch]$ElectronOnly,
-    [switch]$NoDashboard,
-    [switch]$Hidden,
     [switch]$DryRun
 )
 
@@ -44,11 +38,10 @@ $ErrorActionPreference = "Stop"
 # =============================================================================
 # Config
 # =============================================================================
-# 脚本位于 scripts/windows/ 下，项目根是 $PSScriptRoot 的祖父目录
+# 脚本位于 scripts/dev/ 下，项目根是 $PSScriptRoot 的祖父目录
 $ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
 $Config = @{
-    Mode                 = $Mode.ToLower()
     DefaultBackendPort   = 8002
     BackendPortMax       = 8100   # 与 backend/core/config.py、stop-velluma.ps1 孤儿清扫段对齐
     DefaultFrontendPort  = 5175   # 起始扫描端口（向后兼容）
@@ -57,9 +50,7 @@ $Config = @{
     ProjectRoot          = $ProjectRoot
     BackendTimeout       = 60
     FrontendTimeout      = 30
-    BuildTimeout         = 600    # npm run build 超时（秒），生产模式专用
     HealthCheckInterval  = 500
-    PythonModule         = "backend.main"
     VenvPaths            = @(
         ".venv\Scripts\python.exe"
         "venv\Scripts\python.exe"
@@ -70,8 +61,7 @@ $Config = @{
     MonitorPollMs        = 60     # 监控循环轮询间隔
     StatusHeartbeatSec   = 15     # 状态心跳行间隔（秒）
     LogDir               = Join-Path $ProjectRoot "logs"
-    StatusFile           = Join-Path $ProjectRoot "data\dev_status.json"   # 网页监控台数据源
-    DashboardPortStart   = 8180
+    StatusFile           = Join-Path $ProjectRoot "data\dev_status.json"   # stop-velluma 数据源
 }
 
 $Global:ChildProcesses  = @()   # 全部子进程（Process 对象），退出时按树清理
@@ -82,8 +72,6 @@ $Global:DisplayQueue    = New-Object System.Collections.Concurrent.ConcurrentQue
 $Global:TrackedProcs    = @()   # 服务级跟踪（每服务一条，供状态行/退出告警）
 $Global:Focus           = 'all' # 当前视图：all | backend | vite | electron
 $Global:OrigConsoleMode = $null # QuickEdit 禁用前的控制台模式（退出时恢复）
-$Global:DashProc        = $null # 网页监控台子进程（状态 JSON 供 stop 脚本定位）
-$Global:DashPort        = $null
 $Global:RestartCount    = @{}   # backend/vite 意外退出的自愈重启计数（上限 2 次）
 $Global:OwnedPorts      = @()   # 本会话「自己启动过服务」的端口登记（收摊端口扫尾只认这些）
 $Global:CleanupDone     = $false
@@ -91,8 +79,8 @@ $Global:CleanupDone     = $false
 # =============================================================================
 # Port File Helpers
 # =============================================================================
-# 端口契约（后端 8002~8100 / 前端 5175~5285）由本脚本、macos/start.sh、
-# dev_dashboard.py 监督者三份实现共用——scripts/check_launcher_contract.py 锁一致性。
+# 端口契约（后端 8002~8100 / 前端 5175~5285）由本脚本、prod/start-all.ps1、macos 双端、
+# monitor/dev_dashboard.py 监督者共用——scripts/check_launcher_contract.py 锁一致性。
 function ConvertTo-PortOrZero {
     # 环境变量等外部输入 → 合法端口号；非数字/越界一律归零（调用方按"未指定"处理），
     # 不抛异常（旧实现 [int]$env 遇脏值直接崩启动链）
@@ -502,8 +490,9 @@ function Start-MonitoredProcess {
 }
 
 function Write-DevStatus {
-    # 状态 JSON（网页监控台数据源）：启动完成、心跳、状态变化时重写。
-    # 前后端协议见 scripts/dev_dashboard.py 的 build_status（两端改字段须同步）。
+    # 状态 JSON（stop-velluma 数据源）：启动完成、心跳、状态变化时重写。
+    # 网页监控台已隔离到 scripts/monitor/（本环境无 dashboard 子进程，恒写 null）。
+    # 前后端协议见 monitor/dev_dashboard.py 的 build_status（两端改字段须同步）。
     try {
         $knownPorts = @{
             backend  = Get-ActualBackendPort
@@ -523,12 +512,12 @@ function Write-DevStatus {
             }
         }
         $payload = @{
-            mode       = $Config.Mode
-            hidden     = [bool]$Hidden
+            mode       = "dev"
+            hidden     = $false
             started_at = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
             log_dir    = $Config.LogDir
             services   = $services
-            dashboard  = @{ pid = $(if ($Global:DashProc) { $Global:DashProc.Id } else { $null }); port = $Global:DashPort }
+            dashboard  = @{ pid = $null; port = $null }
         }
         $dir = Split-Path $Config.StatusFile -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -593,16 +582,12 @@ function Start-MonitorLoop {
     try {
         Write-Host ""
 
-        # ⚠ -Hidden 只压提示行，绝不提前 return：心跳、自愈重启、状态 JSON 刷新与
-        # 「Electron 退出=收摊」全在这个循环里，旧版在此 return 等于启动完立刻收摊。
-        if (-not $Hidden) {
-            if ($keyboardOk) {
-                Write-Host "  按键 → [1] 后端  [2] 前端  [3] Electron  [0] 全部  [s] 状态  [q] 停止全部（Ctrl+C 同）" -ForegroundColor DarkGray
-            } else {
-                Write-Host "  （输入未接终端，按键不可用；关闭 Electron 窗口或 Ctrl+C 停止全部）" -ForegroundColor DarkGray
-            }
-            Write-Host ""
+        if ($keyboardOk) {
+            Write-Host "  按键 → [1] 后端  [2] 前端  [3] Electron  [0] 全部  [s] 状态  [q] 停止全部（Ctrl+C 同）" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  （输入未接终端，按键不可用；关闭 Electron 窗口或 Ctrl+C 停止全部）" -ForegroundColor DarkGray
         }
+        Write-Host ""
 
         Show-MonitorStatus
         Write-DevStatus
@@ -613,7 +598,7 @@ function Start-MonitorLoop {
         while ($running) {
             Invoke-DrainDisplayQueue
 
-            if ($keyboardOk -and -not $Hidden) {
+            if ($keyboardOk) {
                 try {
                     while ([Console]::KeyAvailable) {
                         $key = [Console]::ReadKey($true)
@@ -765,17 +750,13 @@ function Start-Backend() {
         throw "Backend not running but skip flag set"
     }
 
-    # debug 模式启用 uvicorn --reload 后端热重载：保存 Python 文件即自动重启
+    # uvicorn --reload 后端热重载（dev 环境唯一形态）：保存 Python 文件即自动重启
     # 热重载的关键约束：
     #   1. --reload 必须传 import path（backend.main:app），不能传 app 对象（main.py 的 __main__ 不走）
     #   2. reload 重启 worker 时端口必须固定，否则前端断连 → 由脚本侧协商端口并设 VELLUMA_PORT
     #   3. main.py 的 __main__ 不会执行 → save_port 不会被调用 → port.txt 必须由脚本侧写好
-    $useReload = ($Config.Mode -eq 'debug')
-
-    if ($useReload) {
-        # 先抢占固定端口并写 data/port.txt + 设环境变量，让 main.py 跳过内部扫描
-        $backendPort = Resolve-BackendPort
-    }
+    # 先抢占固定端口并写 data/port.txt + 设环境变量，让 main.py 跳过内部扫描
+    $backendPort = Resolve-BackendPort
 
     Write-ProgressLine "[..] backend   starting..." ([ConsoleColor]::DarkYellow)
 
@@ -791,141 +772,86 @@ function Start-Backend() {
 
     $pythonPath = Find-Python
 
-    # PYTHONIOENCODING：管道下 python 默认跟随系统代码页（GBK），中文日志经 UTF-8 解码会乱码
-    $backendEnv = @{ PYTHONUNBUFFERED = "1"; PYTHONIOENCODING = "utf-8" }
-
     if ($DryRun) {
         Clear-ProgressLine
-        if ($useReload) {
-            Log-Info "[DryRun] Would start (reload): $pythonPath -m uvicorn backend.main:app --port $backendPort --reload"
-        } else {
-            Log-Info "[DryRun] Would start: $pythonPath -m $($Config.PythonModule)"
-        }
+        Log-Info "[DryRun] Would start (reload): $pythonPath -m uvicorn backend.main:app --port $backendPort --reload"
         return
     }
 
-    if ($useReload) {
-        # uvicorn --reload：reloader 父进程 + worker 子进程
-        # --app-dir .：让 backend.main 可作为顶层模块 import（cwd 已是项目根）
-        # --reload-dir backend：仅监听 backend/ 下的 .py 变更，避免 frontend/data/logs 触发误重启
-        # 输出由读线泵落 logs/dev_backend.log + 尽力而为上屏；重启 worker 继承同一管道，日志不断流
-        $backendDir = Join-Path $Config.ProjectRoot "backend"
-        $argList = @(
-            "-m", "uvicorn", "backend.main:app",
-            "--host", "127.0.0.1",
-            "--port", $backendPort.ToString(),
-            "--reload",
-            "--reload-dir", $backendDir,
-            "--app-dir", $Config.ProjectRoot
-        )
-        $backendEnv["VELLUMA_PORT"] = $backendPort.ToString()
-        $proc = Start-MonitoredProcess -FilePath $pythonPath `
-            -ArgumentList $argList `
-            -WorkingDirectory $Config.ProjectRoot `
-            -Key "backend" `
-            -EnvVars $backendEnv
-        Register-OwnedPort $backendPort   # 端口由本会话协商固定，入收摊杀册
+    # PYTHONIOENCODING：管道下 python 默认跟随系统代码页（GBK），中文日志经 UTF-8 解码会乱码
+    $backendEnv = @{ PYTHONUNBUFFERED = "1"; PYTHONIOENCODING = "utf-8"; VELLUMA_PORT = $backendPort.ToString() }
 
-        try {
-            $null = Wait-ForService -Port $backendPort -Name "Backend (reload)" -TimeoutSeconds $Config.BackendTimeout
-        } catch {
-            Clear-ProgressLine
-            Show-StartupOutputTail
-            throw
-        }
-        $note = if ($backendPort -ne $Config.DefaultBackendPort) { "（$($Config.DefaultBackendPort) 被占）" } else { "" }
-        Write-ProgressLine "[OK] backend   http://127.0.0.1:$backendPort (hot-reload ON)$note" ([ConsoleColor]::Cyan)
-        Write-Host ""
-        return
-    }
-
-    # dev/prod 模式：走 main.py 的 __main__（内部 find_available_port + save_port）
-    # 先快照启动前的记录端口与其开闭：收摊登记要用（防把「启动前就开着的他人服务」误入册）
-    $prePort = Get-ActualBackendPort
-    $preOpen = ($prePort -gt 0) -and (Test-PortOpen -Port $prePort)
+    # uvicorn --reload：reloader 父进程 + worker 子进程
+    # --app-dir .：让 backend.main 可作为顶层模块 import（cwd 已是项目根）
+    # --reload-dir backend：仅监听 backend/ 下的 .py 变更，避免 frontend/data/logs 触发误重启
+    # 输出由读线泵落 logs/dev_backend.log + 尽力而为上屏；重启 worker 继承同一管道，日志不断流
+    $backendDir = Join-Path $Config.ProjectRoot "backend"
+    $argList = @(
+        "-m", "uvicorn", "backend.main:app",
+        "--host", "127.0.0.1",
+        "--port", $backendPort.ToString(),
+        "--reload",
+        "--reload-dir", $backendDir,
+        "--app-dir", $Config.ProjectRoot
+    )
     $proc = Start-MonitoredProcess -FilePath $pythonPath `
-        -ArgumentList @("-m", $Config.PythonModule) `
+        -ArgumentList $argList `
         -WorkingDirectory $Config.ProjectRoot `
         -Key "backend" `
         -EnvVars $backendEnv
+    Register-OwnedPort $backendPort   # 端口由本会话协商固定，入收摊杀册
 
-    # 轮询端口文件等待后端启动
-    $waitStart = Get-Date
-    $actualPort = $null
-    while (((Get-Date) - $waitStart).TotalSeconds -lt $Config.BackendTimeout) {
-        Start-Sleep -Milliseconds $Config.HealthCheckInterval
-        $actualPort = Get-ActualBackendPort
-        if ($actualPort -and (Test-PortOpen -Port $actualPort)) {
-            break
-        }
-        $actualPort = $null
-    }
-
-    if (-not $actualPort) {
+    try {
+        $null = Wait-ForService -Port $backendPort -Name "Backend (reload)" -TimeoutSeconds $Config.BackendTimeout
+    } catch {
         Clear-ProgressLine
         Show-StartupOutputTail
-        throw "Backend failed to start within $($Config.BackendTimeout)s"
+        throw
     }
-
-    # 端口登记：仅在「端口文件被本会话后端改写」或「启动前记录端口本是空闲」时入册
-    # ——记录端口启动前就开着又没被改写 = 那是别人的服务（误报 [OK] 的老毛病），
-    # 绝不能进收摊杀册
-    if (($actualPort -ne $prePort) -or (-not $preOpen)) {
-        Register-OwnedPort $actualPort
-    }
-
-    $note = if ($actualPort -ne $Config.DefaultBackendPort) { "（$($Config.DefaultBackendPort) 被占）" } else { "" }
-    Write-ProgressLine "[OK] backend   http://127.0.0.1:$actualPort$note" ([ConsoleColor]::Cyan)
+    $note = if ($backendPort -ne $Config.DefaultBackendPort) { "（$($Config.DefaultBackendPort) 被占）" } else { "" }
+    Write-ProgressLine "[OK] backend   http://127.0.0.1:$backendPort (hot-reload ON)$note" ([ConsoleColor]::Cyan)
     Write-Host ""
 }
 
-function Start-FrontendBuild() {
-    # 生产模式专用：npm run build 生成 dist/ 供 Electron loadFile 载入
-    # 不启动 Vite dev server
+function Start-Electron() {
+    Write-ProgressLine "[..] electron  starting..." ([ConsoleColor]::DarkYellow)
+
     $frontendDir = Join-Path $Config.ProjectRoot "frontend"
-    $distIndex = Join-Path $frontendDir "dist\index.html"
+    $backendPort = Get-ActualBackendPort
 
-    if ($SkipFrontend) {
-        # 跳过构建 = 断言 dist 已在（Electron 随后 loadFile 它）——缺了就当场说清楚，
-        # 别等到 Electron 白屏
-        if (-not (Test-Path $distIndex)) {
-            throw "SkipFrontend set but dist/index.html missing at $distIndex (先跑一次 npm run build 或去掉 -SkipFrontend)"
-        }
-        Log-Info "SkipFrontend set, using existing dist/"
-        return
+    # 公共环境变量（按进程精确注入，不污染脚本会话环境）
+    $electronEnv = @{
+        VELLUMA_BACKEND_PORT   = $backendPort.ToString()
+        VELLUMA_SERVICES_READY = "1"
+    }
+    if ($Config.FrontendPort) {
+        $electronEnv["VELLUMA_FRONTEND_PORT"] = $Config.FrontendPort.ToString()
+    } else {
+        $electronEnv["VELLUMA_FRONTEND_PORT"] = $null
     }
 
-    Write-ProgressLine "[..] build     npm run build..." ([ConsoleColor]::DarkYellow)
-
-    if (!(Test-Path (Join-Path $frontendDir "node_modules"))) {
-        Clear-ProgressLine
-        throw "node_modules not found. Please run: cd frontend && npm install"
-    }
+    # dev 环境：显式删除 NODE_ENV（外部环境残留会让 main.cjs 误判走 loadFile 分支）
+    $electronEnv["NODE_ENV"] = $null
 
     if ($DryRun) {
         Clear-ProgressLine
-        Log-Info "[DryRun] Would run: npm run build (cwd: $frontendDir)"
+        Log-Info "[DryRun] Would run: npm run electron:nobuild (cwd: $frontendDir)"
         return
     }
 
-    # 同步执行 npm run build，捕获退出码（构建是前台串行阶段，输出直出监控台即可）
-    $buildInfo = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "npm", "run", "build" `
+    # electron:nobuild（= 直接 "electron ."）：main.cjs 走 loadURL 加载 vite dev server，
+    # electron:dev 里的 vite build 产物根本不会被加载，白等 30~60 秒；
+    # loadURL/loadFile 由 NODE_ENV 决定，与构建无关。
+    $proc = Start-MonitoredProcess -FilePath "cmd.exe" `
+        -ArgumentList @("/c", "npm", "run", "electron:nobuild") `
         -WorkingDirectory $frontendDir `
-        -Wait -PassThru -NoNewWindow
+        -Key "electron" `
+        -EnvVars $electronEnv
 
-    if ($buildInfo.ExitCode -ne 0) {
-        Clear-ProgressLine
-        throw "npm run build failed with exit code $($buildInfo.ExitCode)"
-    }
-
-    if (!(Test-Path $distIndex)) {
-        Clear-ProgressLine
-        throw "Build completed but dist/index.html not found at $distIndex"
-    }
-
-    Write-ProgressLine "[OK] build     dist/" ([ConsoleColor]::Green)
+    Write-ProgressLine "[OK] electron  pid $($proc.Id)" ([ConsoleColor]::Yellow)
     Write-Host ""
+
+    return $proc
 }
 
 function Start-Frontend() {
@@ -989,104 +915,20 @@ function Start-Frontend() {
     Write-Host ""
 }
 
-function Start-Electron() {
-    Write-ProgressLine "[..] electron  starting..." ([ConsoleColor]::DarkYellow)
-
-    $frontendDir = Join-Path $Config.ProjectRoot "frontend"
-    $backendPort = Get-ActualBackendPort
-
-    # 公共环境变量（按进程精确注入，不污染脚本会话环境）
-    $electronEnv = @{
-        VELLUMA_BACKEND_PORT   = $backendPort.ToString()
-        VELLUMA_SERVICES_READY = "1"
-    }
-    # 生产模式不启动 Vite，FrontendPort 可能为 null——读端口文件兜底，再不行留空
-    $fePort = if ($Config.FrontendPort) { $Config.FrontendPort } elseif ($Config.Mode -eq 'prod') { Get-ActualFrontendPort } else { $null }
-    if ($fePort) {
-        $electronEnv["VELLUMA_FRONTEND_PORT"] = $fePort.ToString()
-    } else {
-        $electronEnv["VELLUMA_FRONTEND_PORT"] = $null
-    }
-
-    # 模式差异：生产模式设 NODE_ENV=production，让 main.cjs 走 loadFile('../dist/index.html') 分支
-    # 开发/调试模式显式删除 NODE_ENV（外部环境残留会让 main.cjs 误判）
-    if ($Config.Mode -eq 'prod') {
-        $electronEnv["NODE_ENV"] = "production"
-    } else {
-        $electronEnv["NODE_ENV"] = $null
-    }
-
-    if ($DryRun) {
-        Clear-ProgressLine
-        Log-Info "[DryRun] Would run: npm run electron:nobuild (cwd: $frontendDir)"
-        return
-    }
-
-    # 三模式统一 electron:nobuild（= 直接 "electron ."）：
-    #   - dev/debug：main.cjs 走 loadURL 加载 vite dev server，electron:dev 里的
-    #     vite build 产物根本不会被加载，白等 30~60 秒
-    #   - prod：dist 已由 Start-FrontendBuild 构建并校验过，再 build 一次同样纯属浪费
-    # main.cjs 用 NODE_ENV 决定 loadURL/loadFile，与构建与否无关。
-    $proc = Start-MonitoredProcess -FilePath "cmd.exe" `
-        -ArgumentList @("/c", "npm", "run", "electron:nobuild") `
-        -WorkingDirectory $frontendDir `
-        -Key "electron" `
-        -EnvVars $electronEnv
-
-    $tag = if ($Config.Mode -eq 'prod') { "http://127.0.0.1:$backendPort（单进程生产壳）" } else { "pid $($proc.Id)" }
-    Write-ProgressLine "[OK] electron  $tag" ([ConsoleColor]::Yellow)
-    Write-Host ""
-
-    return $proc
-}
-
-function Start-Dashboard() {
-    # 网页监控 GUI（scripts/dev_dashboard.py，纯标准库）：tail 各服务日志文件 + 状态 JSON，
-    # 浏览器打开即三端彩色日志流。失败不阻塞启动（监控台降级为纯控制台）。
-    if ($NoDashboard -or $DryRun) { return $null }
-    try {
-        $pythonPath = Find-Python
-        $dashScript = Join-Path $Config.ProjectRoot "scripts\dev_dashboard.py"
-        if (!(Test-Path $dashScript)) { return $null }
-        for ($p = $Config.DashboardPortStart; $p -lt $Config.DashboardPortStart + 10; $p++) {
-            if (-not (Test-PortOpen -Port $p)) {
-                $proc = Start-MonitoredProcess -FilePath $pythonPath `
-                    -ArgumentList @($dashScript, "--dir", $Config.LogDir, "--status", $Config.StatusFile, "--port", $p.ToString()) `
-                    -WorkingDirectory $Config.ProjectRoot `
-                    -Key "dash" `
-                    -Quiet
-                Write-ProgressLine "[OK] dashboard http://127.0.0.1:$p" ([ConsoleColor]::Magenta)
-                Write-Host ""
-                return @{ Proc = $proc; Port = $p }
-            }
-        }
-    } catch {
-        Log-Info "Dashboard unavailable: $_"
-    }
-    return $null
-}
-
 # =============================================================================
 # Main
 # =============================================================================
 function Show-Header() {
-    $modeLabel = $Config.Mode.ToUpper()
     Write-Host ""
-    Write-Host "  Velluma · $modeLabel" -ForegroundColor Cyan
+    Write-Host "  Velluma · DEV（热重载）" -ForegroundColor Cyan
     Write-Host ""
 }
 
-function Show-ReadyBlock([string]$DashUrl) {
+function Show-ReadyBlock() {
     Write-Host ("─" * 74) -ForegroundColor DarkGray
-    if ($DashUrl) {
-        Write-Host "  网页监控台  $DashUrl   （已自动打开浏览器；-NoDashboard 可关闭）" -ForegroundColor Magenta
-    }
     Write-Host "  日志        logs\dev_backend.log · dev_vite.log · dev_electron.log" -ForegroundColor DarkGray
-    if ($Hidden) {
-        Write-Host "  后台模式：本窗口已隐藏。停止全部服务 → scripts\windows\stop-velluma.bat" -ForegroundColor Yellow
-    } else {
-        Write-Host "  关闭 Electron 窗口 / 按 q → 停止全部服务" -ForegroundColor Yellow
-    }
+    Write-Host "  网页监控台  scripts\monitor\（独立文件夹，与本次启动互不影响）" -ForegroundColor DarkGray
+    Write-Host "  关闭 Electron 窗口 / 按 q → 停止全部服务；后台收摊 → scripts\stop-velluma.bat" -ForegroundColor Yellow
     Write-Host ("─" * 74) -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1094,29 +936,17 @@ function Show-ReadyBlock([string]$DashUrl) {
 function Main() {
     Show-Header
 
-    # QuickEdit 禁用须最先做（DryRun/后台模式除外）：启动期间用户点击窗口同样会冻结输出。
-    # 后台模式的窗口本来就不可见不可点，控制台模式保持原样。
-    if (-not $DryRun -and -not $Hidden) {
-        $quickEditOff = Disable-QuickEdit
-        if (-not $quickEditOff) {
-            Log-Info "（未能禁用快速编辑模式：请勿在本窗口点选文本，会冻结监控输出）"
-        }
+    # QuickEdit 禁用须最先做（DryRun 除外）：启动期间用户点击窗口同样会冻结输出
+    $quickEditOff = Disable-QuickEdit
+    if (-not $quickEditOff) {
+        Log-Info "（未能禁用快速编辑模式：请勿在本窗口点选文本，会冻结监控输出）"
     }
 
     try {
         Start-Backend
-
-        # 按模式分流前端阶段
-        if ($Config.Mode -eq 'prod') {
-            Start-FrontendBuild
-        } else {
-            Start-Frontend
-        }
+        Start-Frontend
 
         $electronProc = Start-Electron
-        $dash = Start-Dashboard
-        $Global:DashProc = if ($dash) { $dash.Proc } else { $null }
-        $Global:DashPort = if ($dash) { $dash.Port } else { $null }
 
         if ($DryRun) {
             Log-Info "DryRun complete, no processes started"
@@ -1124,12 +954,7 @@ function Main() {
         }
 
         Write-DevStatus
-        Show-ReadyBlock $(if ($dash) { "http://127.0.0.1:$($dash.Port)" } else { $null })
-
-        # 自动打开网页监控台（失败不打扰——控制台监控台仍然在）
-        if ($dash) {
-            try { Start-Process "http://127.0.0.1:$($dash.Port)" } catch {}
-        }
+        Show-ReadyBlock
 
         # 监控主循环：排水（显示）+ 状态心跳 + 按键交互；Electron 退出 = 全部收摊
         Start-MonitorLoop -ElectronProc $electronProc
