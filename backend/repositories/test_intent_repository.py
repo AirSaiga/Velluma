@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-# Velluma - Intent 双读往返测试（B2 · docs/world-kernel-construction-plan.md §3）
+# Velluma - Intent 双读往返测试（B2 · docs/reports/world-kernel-construction-plan.md §3）
 """往返等价 + 幂等迁移 + 去重合并的锁定（迁移风险最高步的护栏）。
 
 配方与 test_world_bridge_presence 同款（内存 SQLite 栈；UUID 带字母防

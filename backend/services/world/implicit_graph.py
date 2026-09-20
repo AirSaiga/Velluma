@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""事件流隐式图谱投影器（原型实装 · docs/implicit-graph-projection-feasibility.md §3）。
+"""事件流隐式图谱投影器（原型实装 · docs/reports/implicit-graph-projection-feasibility.md §3）。
 
 定位：确定性的结构化历史提取引擎——以在场实体（onstage）为根，从
 world_events 事件流投影 1~2 跳关联子图，产出「事件卡（超边原子）」。
@@ -51,7 +51,7 @@ EVENT_TYPE_LABELS: Dict[str, str] = {
 
 
 # ============================================================
-# 数据契约（docs/implicit-graph-projection-feasibility.md §3.1）
+# 数据契约（docs/reports/implicit-graph-projection-feasibility.md §3.1）
 # ============================================================
 
 @dataclass

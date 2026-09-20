@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - NLE-ADF 3.0 stitch 字数闸与碎片拼回单测（P1 批次）
-"""2026-08-25 写作台辅助层治理 P1 批次回归（docs/adaptive-assist-hardening.md）。
+"""2026-08-25 写作台辅助层治理 P1 批次回归（docs/reports/adaptive-assist-hardening.md）。
 
 覆盖四项：
 1. 保尾截断 _truncate_keep_tail（P1-1/A3）：outline 超字截断改「保尾」——

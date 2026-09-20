@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - 世界页空间换算（D4 比例尺标定）
 """
-CRS.Simple 内部坐标 → 现实距离的纯函数换算层（docs/map-scale-spatial.md §4）。
+CRS.Simple 内部坐标 → 现实距离的纯函数换算层（docs/reports/map-scale-spatial.md §4）。
 
 设计约束（S1-S3）：
 - 未标定（map_scale 为 None/无 refs）一切函数静默降级（返回 None / 原样）——

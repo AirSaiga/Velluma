@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-# Velluma - context_manifest 观测分析（B0.2 · docs/world-kernel-construction-plan.md §1）
+# Velluma - context_manifest 观测分析（B0.2 · docs/reports/world-kernel-construction-plan.md §1）
 """解析 logs/trace_adaptive_*.jsonl 的 context_manifest 事件，产出观测指标：
 
 1. 注入未消费率：context_manifest.selected 的实体条目 × 同次生成文本的提及重叠

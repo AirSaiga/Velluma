@@ -15,7 +15,7 @@ import { worldApi } from '../services/api/domain/world.api'
  *
  * M4 变更：建议列表与创建均 world 优先（世界页无实体时回退旧表）；
  * 「静默绑定到本章」已退役——本章在场由世界页事件按叙事时刻推演
- * （docs/world-unified-settings.md §8），不再写 chapter_entities/chapter_assets。
+ * （docs/reports/world-unified-settings.md §8），不再写 chapter_entities/chapter_assets。
  *
  * 自包含在通用组件层（components/ 不受 features 分层约束）；
  * bookId/chapterId 以 getter 注入（编辑器实例一次创建，章节切换不换扩展）。

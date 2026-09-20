@@ -131,7 +131,7 @@ class CanonNode(Base):
     source = Column(String(20), default="author")  # author | auto_extracted | mixed
     metadata_ = Column("metadata", JSONB, default=dict)  # 自由扩展（避开 SQL 保留字）
 
-    # C2 信息面挂接（docs/canon-world-fusion.md §4.1）：ref 指向世界对象
+    # C2 信息面挂接（docs/reports/canon-world-fusion.md §4.1）：ref 指向世界对象
     # （entity | location | ledger），label/type 读取时由世界对象推演（根治名字漂移
     # →泄密漏检）。无单一外键（三possible 目标），唯一性与级联清理在应用层：
     # migrate-canon 建立 / world 对象删除时同步清 overlay（world_repository）。

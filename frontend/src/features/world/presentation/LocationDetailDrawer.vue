@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 地点详情抽屉（docs/location-interior.md）——地点的「二级面板」。
+ * 地点详情抽屉（docs/reports/location-interior.md）——地点的「二级面板」。
  *
  * 大地点上图、内部细节进这里：parent_id 树的子地点一律不上地图，
  * 只在本抽屉的「内部构造」区呈现。面包屑下钻支持任意深度

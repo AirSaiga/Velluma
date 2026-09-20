@@ -2,7 +2,7 @@
 
 > 状态：设计稿（2026-08-16 已对照代码逐项验证，修正见 §11 验证附录；剩余拍板见 §10）
 > 范围：`frontend/src/features/workspace/`（写作页）+ `frontend/src/features/world/`（沙盘）+ `backend/routes/world.py` + `backend/services/context/` + adaptive 沉淀链路
-> 前置文档：`docs/world-unified-settings.md`（事件溯源底座、单一画布收敛、生成侧桥接）
+> 前置文档：`docs/reports/world-unified-settings.md`（事件溯源底座、单一画布收敛、生成侧桥接）
 > 一句话：**沙盘一寸不动，把它的价值半径延伸到笔尖旁边。**
 
 ---
@@ -243,7 +243,7 @@ created_at
 > ① **P5 地基加固（2026-08-21，`e44dd59`，详见 `foundation-hardening.md` A5b）**——收件箱**批量裁决**（「全部采纳」→ 逐条预览可剔除 → 6s 复合撤销 = 删产物 + reopen，前端 `features/world/composables/batchAccept.ts` + `BatchAcceptModal.vue`）；settle 候选**三重去重**（prompt 排除近 15 条已入账 + 归一化双向子串预筛 + pending 池幂等）；积压 >5 心跳 `kind=world_inbox` 感知带提示 + settle 完成 toast 直达收件箱。
 > ② **战略定稿期（2026-08-25/26，详见 `auto-read-quiet-learning.md`）**——自动阅读 / 全书通读的候选入池（新 source）；候选判重升**全书级**归一化子串 + 转正前账本判重闸（命中标 `auto_reject=duplicate`）；accept 服务端实体/地点创建按（书 + 归一化名 + 类型）**幂等**（治连点重复建事故）；候选联表补 `chapter_number`（无叙事锚显示「第 N 章」不伪造默认日期）。
 > ③ 收件箱随切片条位于副驾「此刻」tab（2026-08-17 写作台重构迁入切片条所在 tab，2026-08-22 副驾四 tab 化后沿用，组件仍为 `WorldSceneSlice`）；世界页「待确认」图标栏改为**常驻**（空箱也可开抽屉发起通读，2026-08-25 `28c8e73` 修冷启动自锁）。
-> ④ **场次流转第三弹（2026-09-14，`0050eed`，唯一权威 `docs/scene-transit-feasibility.md`）**——切片条「此刻此地」的场景来源升级：**光标派生取景 `active_scene` 优先、本章钉回退**（`services/world/active_scene.py` 纯函数：光标前 ≤2000 字窗逆扫「转场动词×名册地点名（含别名/无坐标房间）」最近命中，命中句须已完结+闪回豁免）；心跳响应带 `active_scene`，切片条出「此刻取景（正文推导）」微标+一键钉定；dock 在场投影提及窗随光标前窗扩为**随身物随行**（上一场提及的上手件换场仍在册）。本表 W5 行「钉定优先于推演」为当时口径，取景来源以本条为准（钉退居派生无命中时的回退）。
+> ④ **场次流转第三弹（2026-09-14，`0050eed`，唯一权威 `docs/reports/scene-transit-feasibility.md`）**——切片条「此刻此地」的场景来源升级：**光标派生取景 `active_scene` 优先、本章钉回退**（`services/world/active_scene.py` 纯函数：光标前 ≤2000 字窗逆扫「转场动词×名册地点名（含别名/无坐标房间）」最近命中，命中句须已完结+闪回豁免）；心跳响应带 `active_scene`，切片条出「此刻取景（正文推导）」微标+一键钉定；dock 在场投影提及窗随光标前窗扩为**随身物随行**（上一场提及的上手件换场仍在册）。本表 W5 行「钉定优先于推演」为当时口径，取景来源以本条为准（钉退居派生无命中时的回退）。
 > ⑤ **候选回流链路修缮（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`）**——①候选补出处：抽取要求 LLM 逐字摘录 evidence 原句，落池前「去空白子串」校验，编造出处剥除不上屏（候选降级无出处档）；前端收件箱悬停/批量模态引文行/世界页卡片三面展示。②撤销单事务化：`/undo-accept` 端点删转正产物+回 pending 一个 commit 完成（accept 记录产物 id 入 draft）——两请求链断的孤儿态不再可能。③拒绝史防重：近期 30 天/200 条 ✗ 过的候选 summary 进归一化判重（auto_reject 假拒绝不计），命中不入箱+`suppressed_rejected` 计数。④键盘裁决：↑↓/→·Enter/←·Delete 全键盘批候选（`inboxKeyboard.ts` 纯函数）。⑤回场补读：进章也发枪 auto-read（覆盖「关应用前未切章整章未读」盲区，哈希幂等闸不变）。⑥read-entities 失败不写幂等锚（`EmergentFacts.failed` 区分失败与无涌现）+顺修 `adaptive/schemas.py` 缺 `Any` 导入致端点响应必炸的预存在隐患。⑦用量停机冲账（lifespan+atexit 双路 flush_all）。契约细节见 `docs/agent/world.md` ④ 与 `docs/agent/nle-adf.md`。
 
 ---
@@ -322,7 +322,7 @@ created_at
 
 ## 12. 测试与修复归档（2026-08-16，任务收官记录）
 
-**GUI 测试轮**（依据 `docs/world-writing-bridge-test.md`，真实键盘/鼠标黑盒）：执行 54 项 + 复跑 13 项受阻用例，发现缺陷 5 项（含 2 项存量）——全部修复并经 GUI 复测通过。
+**GUI 测试轮**（依据 `docs/reports/world-writing-bridge-test.md`，真实键盘/鼠标黑盒）：执行 54 项 + 复跑 13 项受阻用例，发现缺陷 5 项（含 2 项存量）——全部修复并经 GUI 复测通过。
 
 | # | 缺陷 | 根因 | 修复 |
 |---|------|------|------|

@@ -58,7 +58,7 @@ class Book(Base):
     # {contract_key: {body: str, updated_at: iso}}；缺键=系统默认，
     # 列缺失/NULL/{} = 全部默认（prompt 逐字节零变化）。
     texture_contracts = Column(JSONB, default=dict)
-    # 地图比例尺标定（docs/map-scale-spatial.md §2.1，D4）：CRS.Simple 内部坐标 →
+    # 地图比例尺标定（docs/reports/map-scale-spatial.md §2.1，D4）：CRS.Simple 内部坐标 →
     # 现实距离的换算锚。{refs:[{ax,ay,bx,by,days_foot,label}], detour_factor,
     # modes:{...}}；NULL=未标定（距离功能静默降级，prompt 零变化）
     map_scale = Column(JSONB, nullable=True)
@@ -124,7 +124,7 @@ class Chapter(Base):
     summary = Column(Text, nullable=True)
     review_feedback = Column(JSONB, default=dict)
     map_activity_range = Column(Text, nullable=True)
-    # 世界页章节叙事时间锚（连续日计数，与历法解耦；设计见 docs/world-unified-settings.md §2.4）
+    # 世界页章节叙事时间锚（连续日计数，与历法解耦；设计见 docs/reports/world-unified-settings.md §2.4）
     narrative_time = Column(Integer, nullable=True)
     # 本章场景钉（W5-lite）：作者显式钉定本章发生的地点——切片「脚下」的第一优先级，
     # 缺省时回落到事件/在场推演（docs/world-writing-bridge.md §10.2）
@@ -354,7 +354,7 @@ class PlotLedger(Base):
     world_time_planted = Column(Integer, nullable=True)
     world_time_resolved = Column(Integer, nullable=True)
     meta = Column("metadata", JSONB, default=dict)
-    # C2 真相面（docs/canon-world-fusion.md §4.2）：伏笔天然是信息层对象——
+    # C2 真相面（docs/reports/canon-world-fusion.md §4.2）：伏笔天然是信息层对象——
     # 埋设=建立「表象—真相」差集，回收=差集收敛。canon hook 并入本表后，
     # [hook] prompt 段装配源切到此（open 取前 8，格式冻结 K3）。
     canon_text = Column(Text, default="")    # 里：作者真相（空=无双层需求）

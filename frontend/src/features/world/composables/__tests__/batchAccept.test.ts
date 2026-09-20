@@ -1,5 +1,5 @@
 /**
- * A5b 批量裁决纯逻辑 + A5d 收件箱直达旗标（P5 docs/foundation-hardening.md §3.2）。
+ * A5b 批量裁决纯逻辑 + A5d 收件箱直达旗标（P5 docs/reports/foundation-hardening.md §3.2）。
  *
  * 网络/端点链路（runBatchAccept/undoBatchAccept 的 accept/delete/reopen 串序）
  * 走 GUI 手动验证（与既有 W4 候选回流测试口径一致——世界域此前无 api mock harness，

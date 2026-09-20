@@ -180,7 +180,7 @@ class TestAuditionPrompt:
     def test_same_blocks_as_continue_prompt(self):
         """试听与写作台共用同一套块——「所见即所得」的机制保证。
 
-        C3（docs/foundation-hardening.md §5.3）后 continue/stitch 档画像压缩
+        C3（docs/reports/foundation-hardening.md §5.3）后 continue/stitch 档画像压缩
         为关键行，与试听的完整画像**有意**不同（试听展示配置的画像全貌，
         顺句档只注入关键行）——因此：①示范块与 continue 仍逐字一致；
         ②完整画像块的对拍改挂 burst 档（段落级模式不压缩，见下测）。
@@ -212,7 +212,7 @@ class TestAuditionPrompt:
 
 
 # ============================================================
-# 意图旋钮（S4）：已退役（2026-09-14 去参数化，docs/style-parameter-effectiveness-audit.md）
+# 意图旋钮（S4）：已退役（2026-09-14 去参数化，docs/reports/style-parameter-effectiveness-audit.md）
 # —— render_knob_lines/knobs.py 归档 _deprecated；此处锁定「旋钮字段冻结不注入」
 # ============================================================
 

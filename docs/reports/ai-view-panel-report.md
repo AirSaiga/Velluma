@@ -1,7 +1,9 @@
+> **归档说明（2026-09-19）**：面板全景调研（2026-09-14），是简报化施工的输入；§12 所列三处漂移在 09-15 施工后已修，引用前需复核。
+
 # 「AI 视角」侧栏调研报告
 
 > 调研对象：写作台右缘「AI 视角」面板（截图所示：AI 此刻读到的 + 分组折叠块 + 模式五档 + AI 眼中的世界）。
-> 调研日：2026-09-14。行号锚点以当日 HEAD 为准。设计权威：`docs/design/ux-redesign/09-ai-view-redesign.md`（09 期重设计）；出身文档：`docs/foundation-hardening.md` §2.1（P5 B2「AI 所见预览」）。
+> 调研日：2026-09-14。行号锚点以当日 HEAD 为准。设计权威：`docs/design/ux-redesign/09-ai-view-redesign.md`（09 期重设计）；出身文档：`docs/reports/foundation-hardening.md` §2.1（P5 B2「AI 所见预览」）。
 
 ## 0. 三句话结论
 
@@ -19,7 +21,7 @@
 
 | 阶段 | 时间 | 内容 |
 |---|---|---|
-| P5 B2 出生 | 2026-08-21 前后（`docs/foundation-hardening.md`） | 从 stitch 路由抽出共享装配器 `stitch_context.py`，预览与注入同源；初版 7 块平铺 |
+| P5 B2 出生 | 2026-08-21 前后（`docs/reports/foundation-hardening.md`） | 从 stitch 路由抽出共享装配器 `stitch_context.py`，预览与注入同源；初版 7 块平铺 |
 | 知识平面 v3.1 | 2026-08-27 | 块从 7 个扩到 14 个（场景身份/温卡/实体/世界观/关系/禁词五块由 `knowledge_plane.py` 预渲染），预算器上线（A3b） |
 | 09 期重设计 | 2026-09-12（提交 `d1a5b38`） | 「去大按钮、块默认折叠、保字排版、注入序三段分组、空块补录引导」——即截图形态 |
 | 第三弹接流 | 2026-09-14（提交 `0050eed`） | 场景身份块支持光标派生取景（`active_scene`），预览随装配自动获得 |

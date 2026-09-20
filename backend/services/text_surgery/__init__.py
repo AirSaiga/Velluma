@@ -7,7 +7,7 @@
 唯一在役消费方是 ADF 一致性守卫（workflows/adf/consistency_guard.py，其实现
 比 Refinery 本体多两道安全网：_surgery_safe 手术安全网 + 复验回滚）。
 
-迁移动机见 docs/post-writing-checks-audit.md 与 Phase 0 红队审查报告：
+迁移动机见 docs/reports/post-writing-checks-audit.md 与 Phase 0 红队审查报告：
 services/refinery 整体退役时，被反向依赖的 planner/surgeon 三件必须先落到
 中立包，否则 import 链断裂。算法与 prompt 与 Refinery 时代逐字节同源。
 """

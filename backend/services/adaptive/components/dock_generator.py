@@ -496,7 +496,7 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
     # ---- 在场宇宙投影 + 情境模板（2026-09-08 红队「地面+重力场」）----
     # 场景取景框（第三弹 · 光标派生）：优先 orchestrator 派生结果（同函数同输入
     # 防重复算），缺省自算——本章钉作安全回退，正文最近转场命中则随笔尖流转
-    # （docs/scene-transit-feasibility.md §3.1）。db 不可用（测试 None）时静默
+    # （docs/reports/scene-transit-feasibility.md §3.1）。db 不可用（测试 None）时静默
     # 空钉——投影退化为纯提及制，梯子不塌。
     scene_loc_id = ""
     active_scene = None

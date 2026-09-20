@@ -91,7 +91,7 @@ def _normalize_spine(current: Optional[Dict], req: SpineUpdateRequest) -> Dict:
 
 
 async def _spine_anchor_rows_for_prompt(chapter_id: str, db: AsyncSession) -> List[dict]:
-    """outline 档 stitch-ghost 的 spine 锚点行数据源（C3 · docs/foundation-hardening.md §5.3）。
+    """outline 档 stitch-ghost 的 spine 锚点行数据源（C3 · docs/reports/foundation-hardening.md §5.3）。
 
     从 chapter.spine（JSONB，字段口径同 _normalize_spine：{intent, anchors}）
     抽 [{text, status}] 供 build_outline_expand_prompt 渲染全锚点行——胶囊
@@ -238,6 +238,10 @@ async def spine_suggest(chapter_id: str, db: AsyncSession = Depends(get_db)):
     if not (parsed.get("intent") or parsed.get("anchors")):
         # 空输出兜底重试一次：关思考小预算再试（烧光预算型空输出的针对性解法）；
         # 还空就算了——建议本就柔性，空结果契约不变
+        logger.warning(
+            "[spine] 谋篇建议空输出（finish=%s len=%d），关思考小预算兜底重试",
+            result.finish_reason, len(result.content or ""),
+        )
         retry = await call_llm_with_usage(
             system_prompt=sys_p, user_prompt=usr_p,
             model_type="creative", temperature=0.4, max_tokens=800,

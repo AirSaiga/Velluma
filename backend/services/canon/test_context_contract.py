@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - C2 canon 换源契约单测
 """
-C2 往返契约测试（docs/canon-world-fusion.md §6 护栏）。
+C2 往返契约测试（docs/reports/canon-world-fusion.md §6 护栏）。
 
 锁定：build_canon_context_for_prompt 换源（ref 挂接 label 推演 + [hook] 装配源
 切 plot_ledgers）后，三段输出格式**逐字节不变**——段标记 / 行格式 / 截断长度，

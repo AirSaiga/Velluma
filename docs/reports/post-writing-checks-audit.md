@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：写后检查三件套后端实调审计（2026-09-12），直接触发 Refinery 拔除（d1a5b38）。
+
 # 写后检查三件套 · 后端实调报告
 
 > 2026-09-12 · 只读全量代码考察（三路并行扫描 + 用量数据核对 + 关键链路人工亲验）· 范围：**完稿体检**（/adaptive/finish）、**润色 Refinery**（/refinery/diagnose + confirm）、**读者反馈**（/reader-feedback）、**AI 编辑审阅**（/critique_chapter）· 只诊断不施工。

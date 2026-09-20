@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-分模式差异化注入单测（P5 批次 4 · C3，docs/foundation-hardening.md §5.3）。
+分模式差异化注入单测（P5 批次 4 · C3，docs/reports/foundation-hardening.md §5.3）。
 
 克制首版三处的 prompt 级契约（纯函数，不连 LLM/DB）：
 1. burst 样本加量（k 2→3）：无样本书 prompt 逐字节不变（零变化锁）；

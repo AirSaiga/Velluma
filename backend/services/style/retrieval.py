@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 2. 兜底流（未配置/向量化失败/无命中）：按 created_at 新近优先取 k 条
    （list_by_book 即新→旧序）——文风会进化，近期的字更能代表现在的作者
 
-C2 场景匹配（docs/foundation-hardening.md §5.2）：scene_hint（v1 仅
+C2 场景匹配（docs/reports/foundation-hardening.md §5.2）：scene_hint（v1 仅
 "dialogue"）生效时同型样本获软加成——向量流得分 +0.1（距离 -0.1 重排）、
 兜底流同型在同档内排前。**软加成不等于 scene_type 硬过滤**：异型样本仍在
 候选池内（宁缺排序变化，不做排他筛选）。hint 为 None/"general" 时行为与
@@ -42,7 +42,7 @@ C2 场景匹配（docs/foundation-hardening.md §5.2）：scene_hint（v1 仅
 - P5 漂移锚样：drift_anchor=True 时收藏样本 +0.1（漂移检出 → 作者认证的
   最佳示范优先，v1 锚样启发式）；
 - P6 旋钮选择器：已退役（2026-09-14 去参数化——数学空转实证，见
-  docs/style-parameter-effectiveness-audit.md §1.3）；
+  docs/reports/style-parameter-effectiveness-audit.md §1.3）；
 - P5 AI 来源配比：source=adopted_ghost 的样本每批 ≤1 条（防采纳幽灵自蒸馏
   污染样本库——长期回流会让文风向 AI 味收敛）。
 
@@ -58,9 +58,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories import AuthorSampleRepository
 from backend.services.llm.embedding import get_embedding, is_embedding_configured
 
-# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：样本剂量改引 budget 表
+# A3a 截断常量收敛（docs/reports/foundation-hardening.md §4.1）：样本剂量改引 budget 表
 from backend.services.context.budget import AUTHOR_SAMPLE_MAX_CHARS, AUTHOR_SAMPLES_MAX_K
-# C2 场景匹配（docs/foundation-hardening.md §5.2）：dialogue hint 下同型样本加成
+# C2 场景匹配（docs/reports/foundation-hardening.md §5.2）：dialogue hint 下同型样本加成
 from backend.services.style.scene_hint import SCENE_GENERAL
 from backend.services.style.sample_prior import PRIOR_FACTOR_MAX, sample_prior_factor
 

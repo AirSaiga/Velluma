@@ -183,7 +183,7 @@ class TestSamplePrior:
 
 # ============================================================
 # P5/P6：检索扩展（P6 旋钮选择器已退役 2026-09-14——数学空转实证，
-# docs/style-parameter-effectiveness-audit.md §1.3；轻指纹设施一并移除）
+# docs/reports/style-parameter-effectiveness-audit.md §1.3；轻指纹设施一并移除）
 # ============================================================
 
 class TestRetrievalExtensions:

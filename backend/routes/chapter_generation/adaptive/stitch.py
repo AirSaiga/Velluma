@@ -291,7 +291,7 @@ async def stitch_ghost(
             str(_bundle_book_id or ""), str(chapter_id), cid, outcome,
             reason=reason, detail=detail,
         )
-    # B0.2 context_manifest（docs/world-kernel-construction-plan.md §1）：
+    # B0.2 context_manifest（docs/reports/world-kernel-construction-plan.md §1）：
     # 每次生成记录逐块明细 + 稳定前缀哈希——「注入未消费率」与前缀稳定性
     # 观测的数据源（scripts/analyze_context_manifest.py 消费），B8 冷层的
     # 第一道开工许可按此数据签发
@@ -374,7 +374,7 @@ async def stitch_ghost(
     elif request.mode == "outline":
         # 细纲扩写：作者亲笔速记 + 双端正文锚定 → 小段正文（前文承接 + 后文引向）
         # M3 三锚定：胶囊挂了锚点时，锚点文本一并注入意图块
-        # C3（docs/foundation-hardening.md §5.3）：spine 全锚点行——全章谋篇
+        # C3（docs/reports/foundation-hardening.md §5.3）：spine 全锚点行——全章谋篇
         # 盘面（含兑现状态）随意图区注入；无 spine → 行缺席，prompt 逐字节不变
         spine_anchor_rows = await _spine_anchor_rows_for_prompt(chapter_id, db)
         system_prompt, user_prompt = build_outline_expand_prompt(

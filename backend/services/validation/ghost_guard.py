@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
 """
-幽灵草稿上屏前轻量前置校验（P5 批次 4 C1，docs/foundation-hardening.md §5.1）。
+幽灵草稿上屏前轻量前置校验（P5 批次 4 C1，docs/reports/foundation-hardening.md §5.1）。
 
 职责：
 - stitch-ghost 完整文本生成后、GHOST_DONE 帧前跑纯算法快检（<10ms，零 LLM）

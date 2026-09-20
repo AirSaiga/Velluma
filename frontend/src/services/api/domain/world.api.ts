@@ -22,7 +22,7 @@ export interface WorldLocationCreate {
   id?: string // 幂等重建（undo/redo 恢复路径）
   name: string
   kind?: string
-  parent_id?: string | null // 非空 = 内部构造（上图权 = parent_id IS NULL，docs/location-interior.md）
+  parent_id?: string | null // 非空 = 内部构造（上图权 = parent_id IS NULL，docs/reports/location-interior.md）
   coord_x?: number | null
   coord_y?: number | null
   intro?: string
@@ -113,7 +113,7 @@ export interface ScenePresence {
 export interface SceneBlock {
   location_id: string
   name: string
-  /** 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/location-interior.md） */
+  /** 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/reports/location-interior.md） */
   path?: string
   controlling_faction: string | null
   /** True=作者显式钉定（chapters.scene_location_id） */
@@ -167,7 +167,7 @@ export interface SceneSlice {
   version: WorldVersion
   /** 世界页无实体（旧表兜底书）→ 前端显示迁移引导 */
   world_empty: boolean
-  /** D4-2 比例尺距离（docs/map-scale-spatial.md §5）：未标定整段缺席 */
+  /** D4-2 比例尺距离（docs/reports/map-scale-spatial.md §5）：未标定整段缺席 */
   proximities?: { a: string; b: string; text: string }[]
   nearest_anchor?: { name: string; text: string } | null
   /** D4-3 空间常识块（settings_bundle 消费；切片 API 顺带携带） */

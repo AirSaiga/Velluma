@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：世界页架构审计（2026-09-14），一期外壳重构已入库（a66ffd3）；二期深化状态见 incidents。
+
 # 世界页全链路架构与空间联动重构可行性审计报告
 
 > 2026-09-14 · 系统架构重构调研第四期 · 纯只读审计（零代码改动）
@@ -192,4 +194,4 @@ fs（伏笔）与 canon（真相）因自带完整分区头而「直接平铺不
 - Fold 算力：computeWorldState.ts 全文（:26-29 排序、:91-105 move 插值、:143-152 O(R×E) 关系判定）· WorldTimeline.vue:285-291（rAF 节流）,448-460（播放）· 1137-1161（事件层无裁剪）
 - 坐标与联动：WorldMap.vue:3,9,92,203,273（CRS.Simple/0-1000 画布）· 1461-1473（focusAt）· 1486-1498（fitAll）· WorldView.vue:503-524（focusEvent/focusLocation）
 - 接缝：locationTree.ts:12-55 · EventSpineList.vue:11,36-45 · EntityCard.vue:10-15,56-72 · timelineLayout.ts（204 行纯函数）
-- 交叉引用：docs/location-interior.md（树模型）· docs/map-scale-spatial.md（比例尺）· world-panel-redesign 记忆档（a66ffd3 两期施工）
+- 交叉引用：docs/reports/location-interior.md（树模型）· docs/reports/map-scale-spatial.md（比例尺）· world-panel-redesign 记忆档（a66ffd3 两期施工）

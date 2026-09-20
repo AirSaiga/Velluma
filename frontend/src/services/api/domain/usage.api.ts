@@ -1,5 +1,5 @@
 /**
- * B3 · 用量可见 API（P5 地基加固期批次 1，docs/foundation-hardening.md §2.5）。
+ * B3 · 用量可见 API（P5 地基加固期批次 1，docs/reports/foundation-hardening.md §2.5）。
  *
  * adaptive 流的 token 消耗聚合（generation_runs 表，run_id=adaptive_{chapter_id}，
  * 后端 routes/chapter_generation/usage.py 只读聚合）。独立成模块而非并入

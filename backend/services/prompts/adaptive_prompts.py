@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 from backend.services.nlg.anti_ai_rules import DEFAULT_BAN_LIST
 from backend.services.style.texture_contracts import render_texture_contract
 
-# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：注入剂量改引 budget 表。
+# A3a 截断常量收敛（docs/reports/foundation-hardening.md §4.1）：注入剂量改引 budget 表。
 # SECRETS_* 在此 import 再导出——test_private_channel 等既有消费方仍从本模块
 # 取名，收编不改任何 import 面。
 # A3b（§4.2）：跨块预算分配器同源——块定义（头/条目格式）在本模块，分配策略
@@ -107,7 +107,7 @@ _RULE_ENDING_PARA = "- 收尾停在人物自己正在做的事上，不用突然
 
 
 def _spatial_block(spatial_brief: str) -> str:
-    """D4-3 空间常识块（docs/map-scale-spatial.md §5）：≤3 行粗估；空=零变化。"""
+    """D4-3 空间常识块（docs/reports/map-scale-spatial.md §5）：≤3 行粗估；空=零变化。"""
     return _spatial_block_def(spatial_brief).render()
 
 
@@ -200,7 +200,7 @@ def _spatial_block_def(spatial_brief: str) -> BudgetBlock:
 
 
 # ---- A1 私有设定块（D5 拍板语义；截断常量已收编 services/context/budget.py ----
-# ---- ——A3a，docs/foundation-hardening.md §4.1；本模块 import 再导出， ----
+# ---- ——A3a，docs/reports/foundation-hardening.md §4.1；本模块 import 再导出， ----
 # ---- test_private_channel 等既有消费方取名不变）----
 # 原取舍（值随常量迁 budget 表，理由见彼处注释）：上限 8 条与 canon 表/里
 # （各 10 条）同量级取保守值；每条截 150 字与 canon 表条目同口径；私有序列
@@ -229,7 +229,7 @@ def _secrets_block_def(character_secrets: Optional[List[dict]]) -> BudgetBlock:
 
 
 def _secrets_block(character_secrets: Optional[List[dict]]) -> str:
-    """作者私有设定块（A1 · docs/foundation-hardening.md §3.1，D5 拍板语义）。
+    """作者私有设定块（A1 · docs/reports/foundation-hardening.md §3.1，D5 拍板语义）。
 
     私有 = AI 知晓但绝不能直接写出（对齐 canon [private]，而非从上下文删除
     ——作者写暗示/铺垫时 AI 需知晓秘密才能协助）。输入是 bundle.character_secrets
@@ -281,7 +281,7 @@ def _author_samples_block(author_samples: Optional[List[str]]) -> str:
 
 
 # ============================================================
-# system 块渲染（注入序权威，P5 B2 · docs/foundation-hardening.md §2.1；
+# system 块渲染（注入序权威，P5 B2 · docs/reports/foundation-hardening.md §2.1；
 # A3b 跨块预算接线点，§4.2）
 # ============================================================
 
@@ -821,7 +821,7 @@ def build_burst_prompt(
 # 细纲扩写 prompt（作者亲笔速记 → 双端锚定的小段正文）
 # ============================================================
 
-# ---- C3 outline 全锚点行（docs/foundation-hardening.md §5.3）----
+# ---- C3 outline 全锚点行（docs/reports/foundation-hardening.md §5.3）----
 # 状态标签与 spine 端点口径对齐（pending|hit|dropped，_normalize_spine）；
 # dropped 不入行——作者已划掉的锚不应反过来引导扩写方向。
 _SPINE_ANCHOR_STATUS_LABELS = {"pending": "待兑现", "hit": "已兑现"}

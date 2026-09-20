@@ -1,7 +1,7 @@
 # Velluma - 地点树（内部构造）单测
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""location_tree.py / 速记匹配 / prompt 名单的纯函数对拍（docs/location-interior.md）。
+"""location_tree.py / 速记匹配 / prompt 名单的纯函数对拍（docs/reports/location-interior.md）。
 
 渲染契约不变量：上图权 = parent_id IS NULL——collect_subtree_ids 的删除顺序
 （父前子后）与 location_path 的全路径消歧是这条契约的两侧支撑。

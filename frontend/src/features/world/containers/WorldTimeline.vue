@@ -7,7 +7,7 @@
  * 「哪段历史事多」看直方图，「具体什么事」点标记。
  * 主题豁免（01-theme-architecture §7）：鎏金游标/金墨柱/燕尾书签等装饰色跨主题恒定（灯下看地图）。
  * 章节锚刻度（M1）：narrative_time 已设的章节显示为「第N章」小片，点击游标跳到该章
- * 叙事时间——章节轴↔世界轴的桥（docs/world-unified-settings.md §2.4）。
+ * 叙事时间——章节轴↔世界轴的桥（docs/reports/world-unified-settings.md §2.4）。
  * 右键菜单：在此时刻记录事件 / 标记章节叙事时间 / 埋伏笔（M3）。
  */
 import { ref, computed, onBeforeUnmount, onMounted, watch, nextTick } from 'vue'

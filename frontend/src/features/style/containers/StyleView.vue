@@ -469,7 +469,7 @@ async function runExtract(validSamples: string[]) {
 }
 
 // （意图旋钮 S4 已退役 2026-09-14：档位/预设 UI 与状态整体下线，
-//   docs/style-parameter-effectiveness-audit.md——两根支柱=亲笔样本+负面清单）
+//   docs/reports/style-parameter-effectiveness-audit.md——两根支柱=亲笔样本+负面清单）
 
 // ============ 章级特例（S3）============
 async function switchScope(chapterId: string) {

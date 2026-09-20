@@ -104,7 +104,7 @@ class ContextPreviewBlock(BaseModel):
     content: str      # 块渲染文本（与真实 system prompt 对应段逐字节一致；空块=""）
     chars: int
     source: str       # 来源徽标（世界实体/章级绑定/真相层/文风卡/…）
-    # A3b 预算条数据（docs/foundation-hardening.md §4.2）：配额=块常量上限；
+    # A3b 预算条数据（docs/reports/foundation-hardening.md §4.2）：配额=块常量上限；
     # 0=该次渲染未过预算器（mode 无档）。trimmed 只在被裁时出现（exclude_none）。
     budget_chars: int = 0
     trimmed: Optional[str] = None

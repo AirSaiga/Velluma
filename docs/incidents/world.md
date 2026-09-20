@@ -34,7 +34,7 @@
 
 ### 写作桥第三弹——光标派生取景框（2026-09-14）
 
-- 动机：光标中插写作时旧口径把光标后已写内容整个当「作者当前段落」（实测：插入点在送别、卡片全接着文末饭桌场景生发），取景需从「本章钉」细化到「正文推导的当前场景」。设计唯一权威 `docs/scene-transit-feasibility.md`，判据与接流四线见档案「写作桥⑧」。
+- 动机：光标中插写作时旧口径把光标后已写内容整个当「作者当前段落」（实测：插入点在送别、卡片全接着文末饭桌场景生发），取景需从「本章钉」细化到「正文推导的当前场景」。设计唯一权威 `docs/reports/scene-transit-feasibility.md`，判据与接流四线见档案「写作桥⑧」。
 
 ### 数据库卫生批（2026-09-14）
 
@@ -60,7 +60,7 @@
 
 ### 隐式图谱投影器原型实装（2026-09-16，未提交批内）
 
-- 按 `docs/implicit-graph-projection-feasibility.md` 调研结论实装 `services/world/implicit_graph.py` 三件；当前消费方暂无（纯原型），P1 接 knowledge_plane event_card 通道/前缀签名并入事件哈希待拍板。契约与对拍见档案。
+- 按 `docs/reports/implicit-graph-projection-feasibility.md` 调研结论实装 `services/world/implicit_graph.py` 三件；当前消费方暂无（纯原型），P1 接 knowledge_plane event_card 通道/前缀签名并入事件哈希待拍板。契约与对拍见档案。
 
 ### 候选回流链路修缮（2026-09-18，设计稿 docs/next-phase/02-candidate-reflow-repairs.md，未提交批内）
 

@@ -302,7 +302,7 @@ class SceneBlockResponse(BaseModel):
     """脚下（场景地点）。controlling_faction 仅在地点有坐标且对疆域 polygon 唯一命中时有值。"""
     location_id: str
     name: str
-    path: str = ""  # 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/location-interior.md）
+    path: str = ""  # 全路径「父·子」（内部构造脚下无歧义显示；顶层=裸名，docs/reports/location-interior.md）
     controlling_faction: Optional[str] = None
     pinned: bool = False  # True=作者显式钉定（chapters.scene_location_id）
 
@@ -337,7 +337,7 @@ class SceneSliceResponse(BaseModel):
     """章节时刻的世界切片：写作页切片条唯一数据源，与生成桥接共用时间解析与推演。"""
     t: int = 0
     t_source: str = "zero"  # chapter_anchor | prev_anchor | max_event | zero
-    # A4 叙事时间来源可见（docs/foundation-hardening.md §2.2）：max_event 时附
+    # A4 叙事时间来源可见（docs/reports/foundation-hardening.md §2.2）：max_event 时附
     # time_start 最大事件摘要（note 优先、event_type 兜底，截 30 字；缺席省略）
     t_source_note: Optional[str] = None
     # A4：prev_anchor 时来源章号（「来自第N章锚」；缺席省略）
@@ -351,7 +351,7 @@ class SceneSliceResponse(BaseModel):
     expectations: List[SceneExpectationItem] = Field(default_factory=list)
     version: WorldVersionResponse = Field(default_factory=WorldVersionResponse)
     world_empty: bool = False  # 世界页无实体 → 前端显示迁移引导
-    # D4-2 比例尺距离（docs/map-scale-spatial.md §5）：未标定整段缺席（零变化契约）
+    # D4-2 比例尺距离（docs/reports/map-scale-spatial.md §5）：未标定整段缺席（零变化契约）
     proximities: List[Dict] = Field(default_factory=list)  # [{a, b, text}] 异地近邻对
     nearest_anchor: Optional[Dict] = None                 # {name, text} 脚下最近锚点
     # D4-3 空间常识块（settings_bundle 消费；未标定缺席）

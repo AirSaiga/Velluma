@@ -3,7 +3,7 @@
 # Velluma - NLE-ADF 3.0 「3 字滑窗」共享判据单测（P2 治理）
 """B1/B3/B4 噪声匹配治理的对拍测试（2026-08-25 P2 批次）。
 
-纪律（docs/adaptive-assist-hardening.md「执行约束」）：
+纪律（docs/reports/adaptive-assist-hardening.md「执行约束」）：
 - 先写「现状行为快照测试」锁住 B1（direction_weights._is_met）与
   B3（dock_generator._outline_line_written）的现有判定，跑绿后再改判据；
 - 行为有意变化的断言逐条更新为新预期，并加注释

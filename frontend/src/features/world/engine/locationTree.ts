@@ -1,5 +1,5 @@
 /**
- * 地点树工具（前端侧，docs/location-interior.md）。
+ * 地点树工具（前端侧，docs/reports/location-interior.md）。
  *
  * 与后端 services/world/location_tree.py 同构——改口径两侧同步（各配单测对拍）。
  * 渲染契约不变量：上图权 = parent_id IS NULL——有父级的地点一律不上地图，

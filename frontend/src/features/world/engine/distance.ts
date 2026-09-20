@@ -1,5 +1,5 @@
 /**
- * D4 空间换算（前端侧，docs/map-scale-spatial.md §4）。
+ * D4 空间换算（前端侧，docs/reports/map-scale-spatial.md §4）。
  *
  * 与后端 services/world/spatial.py 同构——改口径两侧同步（各配单测对拍）。
  * 未标定（map_scale 无 refs）一切函数静默降级：距离功能缺席不影响任何既有行为。
@@ -73,7 +73,7 @@ export function encounterBand(days: number | null | undefined): string | null {
   return '更远'
 }
 
-// ---- 空白舆图隐含地球尺度（docs/map-scale-spatial.md §2.2，与后端 blank_atlas_suggested_scale 同构）----
+// ---- 空白舆图隐含地球尺度（docs/reports/map-scale-spatial.md §2.2，与后端 blank_atlas_suggested_scale 同构）----
 const KM_PER_DAY_FOOT = 30
 const EARTH_CIRCUMFERENCE_KM = 40075
 

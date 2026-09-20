@@ -11,7 +11,7 @@
 3. source_refs 承担 dirty-tracking：world_version 变更 → diff 脏节 → 只再生
    脏节；未变节 frozen 逐字节冻结（前缀缓存友好）。
 
-门控纪律（docs/world-kernel-construction-plan.md §9）：DIGEST_ENABLED 默认
+门控纪律（docs/reports/world-kernel-construction-plan.md §9）：DIGEST_ENABLED 默认
 False——stitch 消费双门（B0 manifest 数据 + 双模型对照）未开前不接生成
 主链；finish/audit 侧验证先行。Kill criterion：上线 N 章采纳率/canon 合规
 无可测提升 → 回退 v3.1 全注入，本模块维护停用。

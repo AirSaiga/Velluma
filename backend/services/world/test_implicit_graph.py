@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""implicit_graph 单测（docs/implicit-graph-projection-feasibility.md §5 红队四问的机械化）。
+"""implicit_graph 单测（docs/reports/implicit-graph-projection-feasibility.md §5 红队四问的机械化）。
 
 覆盖六组契约 + 修订链读侧过滤（repo 级真实 SQLite 栈）：
 1. 时态单调：未来事件绝不入图；superseded 事件绝不入图（纯函数层）。

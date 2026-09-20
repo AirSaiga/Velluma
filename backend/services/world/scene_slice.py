@@ -214,7 +214,7 @@ async def build_scene_slice(
         state, events, entities, locations_by_id, t, on_event=_gap_logger(book_id, chapter),
     )
 
-    # ---- A4 叙事时间来源可见（docs/foundation-hardening.md §2.2，零行为变化）----
+    # ---- A4 叙事时间来源可见（docs/reports/foundation-hardening.md §2.2，零行为变化）----
     # max_event：附 time_start 最大事件的摘要（note 优先、event_type 兜底，截 30 字）——
     # 让「未锚定被远期事件拉走」从隐形变可见。找不到摘要则省略字段，不报错。
     t_source_note: Optional[str] = None
@@ -337,7 +337,7 @@ async def build_scene_slice(
     book = await db.get(Book, book_id)
     expectations = _reader_expectations_view(book)[:_EXPECTATION_LIMIT]
 
-    # ---- D4-2：比例尺标定后的诚实距离（docs/map-scale-spatial.md §5；未标定整段缺席） ----
+    # ---- D4-2：比例尺标定后的诚实距离（docs/reports/map-scale-spatial.md §5；未标定整段缺席） ----
     proximities: List[Dict[str, Any]] = []
     nearest_anchor = None
     scale = getattr(book, "map_scale", None) if book is not None else None

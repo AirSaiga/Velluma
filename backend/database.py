@@ -579,7 +579,7 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "BOOLEAN DEFAULT FALSE",
         "expected_udt_names": {"boolean", "bool"},
     },
-    # 世界页 M1：章节叙事时间锚（docs/world-unified-settings.md §2.4，章节轴↔世界轴的桥）
+    # 世界页 M1：章节叙事时间锚（docs/reports/world-unified-settings.md §2.4，章节轴↔世界轴的桥）
     {
         "table": "chapters",
         "column": "narrative_time",
@@ -661,7 +661,7 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "JSONB",
         "expected_udt_names": {"jsonb"},
     },
-    # C2 信息面挂接（docs/canon-world-fusion.md §4.1）：canon_nodes 挂世界对象
+    # C2 信息面挂接（docs/reports/canon-world-fusion.md §4.1）：canon_nodes 挂世界对象
     {
         "table": "canon_nodes",
         "column": "ref_type",
@@ -693,7 +693,7 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "TEXT DEFAULT ''",
         "expected_udt_names": {"text"},
     },
-    # D4 比例尺标定（docs/map-scale-spatial.md §2.1）：书级地图尺度锚（NULL=未标定）
+    # D4 比例尺标定（docs/reports/map-scale-spatial.md §2.1）：书级地图尺度锚（NULL=未标定）
     {
         "table": "books",
         "column": "map_scale",

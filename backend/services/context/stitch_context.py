@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - stitch-ghost 上下文装配共享器（P5 B2 · AI 所见预览）
 """
-stitch-ghost 的上下文装配段（单一装配源，docs/foundation-hardening.md §2.1）。
+stitch-ghost 的上下文装配段（单一装配源，docs/reports/foundation-hardening.md §2.1）。
 
 设计意图（防漂移红线）：此前装配逻辑内联在 stitch-ghost 路由里，预览只能
 平行实现一份——「看到的是一套、注入的是另一套」。抽出为独立函数后，
@@ -281,7 +281,7 @@ async def assemble_stitch_context(
     # prompt 零变化（不阻塞生成）
     # C2 场景匹配：rolling_prefix 尾 300 字判两档——dialogue 时同型样本检索
     # 加成；general/空 → 检索行为与无 hint 逐一致（零变化契约）
-    # C3 burst 样本加量（docs/foundation-hardening.md §5.3）：走向卡连写是
+    # C3 burst 样本加量（docs/reports/foundation-hardening.md §5.3）：走向卡连写是
     # 段落级生成，范例权重最高 → burst 档 k=3；其余四模式维持 k=2（零变化）。
     # 预算连锁在 budget.MODE_CONTEXT_BUDGETS["burst"]（已同步上调，满配不裁剪）
     style_positive = render_style_positive(bundle.style_card)
@@ -437,7 +437,7 @@ def _trim_note(entries_total: int, entries_kept: int) -> str:
 
 
 # ============================================================
-# 战局态势简报（2026-09-15 轻量化 · docs/ai-view-briefing-feasibility.md）
+# 战局态势简报（2026-09-15 轻量化 · docs/reports/ai-view-briefing-feasibility.md）
 # 从装配快照提炼结构化五行（零 LLM、零新增查询——全部是装配顺产副产品）。
 # 行级静音契约：数据缺失的行不进 briefing dict（exclude_none 省略键）。
 # ============================================================

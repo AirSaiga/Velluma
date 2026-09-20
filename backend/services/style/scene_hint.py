@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-写作场景判定（P5 C2 · 样本场景匹配，docs/foundation-hardening.md §5.2）。
+写作场景判定（P5 C2 · 样本场景匹配，docs/reports/foundation-hardening.md §5.2）。
 
 职责：对当前写作上下文（stitch 装配处传 rolling_prefix 尾 300 字）跑
 fingerprint 的现成对话占比统计，判出场景档位，供 retrieve_author_samples

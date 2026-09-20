@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-A2 在场提权单测（docs/foundation-hardening.md §2.3）。
+A2 在场提权单测（docs/reports/foundation-hardening.md §2.3）。
 
 覆盖：
 - 有场景钉：低重要度在场角色击败高重要度远端角色进 16 名单；任一端点在场的

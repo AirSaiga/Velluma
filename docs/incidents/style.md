@@ -44,7 +44,7 @@
 ### 跨书冷启动兜底 B4（2026-09-13）
 - 本书零样本时回退作者级黄金池 `list_golden_across_books`（其它书 favorite/golden 样本，卡层隔离不动），对拍 `test_cross_book_fallback.py`。
 
-### 意图旋钮去参数化（2026-09-14，第三期审计 `docs/style-parameter-effectiveness-audit.md`）
+### 意图旋钮去参数化（2026-09-14，第三期审计 `docs/reports/style-parameter-effectiveness-audit.md`）
 - 动机两条实证：①`_selector_adjust` 样本排序条件数学空转；②此前 7 次真实生成 sample_ids 全空——根因是作者样本库零库存（零注入元凶），非检索拦截。
 - 退役清单：四旋钮 UI/预设/对话滑块下线；`knobs.py` 归档 `_deprecated/style_knobs.py`；`style_cards.style_knobs`/`dialogue_ratio_target` 冻结只读（PUT 剥离）；`render_style_positive` 不再渲染意图行（上限 14→10 行，块配额 2020→1460）；`_selector_adjust` 连同轻指纹设施删除；漂移提示与对账参考带的对话锚改语料实测均值；五维画像手填表单下线。
 - 同日新增「收本章为文风范例」一键装填（`samples/from-chapters` 支持 `chapter_id` 单章收编，不限发布状态、幂等 409）。

@@ -104,7 +104,7 @@ LLM 的角色被压到最小：**它是翻译和文员，不是知情人；知�
 - 词法检索：`backend/services/rag/recall.py`（唯一检索入口）+ `backend/repositories/memory_repository.py::search_lexical`
 - 世界折叠推演：`compute_world_state_from_events`（前后端同构，`backend/repositories/world_repository.py`）
 - 认知域四值判定：世界内核 B3（`backend/services/world/` belief/field_layers 相关）
-- 比例尺换算：D4 标定与双端同构换算（docs/map-scale-spatial.md）
+- 比例尺换算：D4 标定与双端同构换算（docs/reports/map-scale-spatial.md）
 - 揭示合并读：`backend/repositories/intent_repository.py::read_merge_reveals`
 - Alt+N 解析范式（LLM 只理解不生效）：`backend/services/world/event_parser.py::parse_event_text`
 - 细纲胶囊输入规则（手势同族先例）：`frontend/src/extensions/`（`[[` TipTap 输入规则）

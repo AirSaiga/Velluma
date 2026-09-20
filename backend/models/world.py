@@ -135,7 +135,7 @@ class WorldIntent(Base):
 
     双读过渡（B2）：迁移脚本幂等复制旧源（source_key 记来源去重），
     IntentRepository 读合并（新表优先/旧表兜底），旧表在全部消费方切走
-    并稳定一章后冻结只读（docs/world-kernel-construction-plan.md §3）。
+    并稳定一章后冻结只读（docs/reports/world-kernel-construction-plan.md §3）。
     """
 
     __tablename__ = "world_intents"
@@ -210,7 +210,7 @@ class WorldDigestSection(Base):
     derived='llm'（悬置之事/弧线张力/基调——只输出结构化 ops 由代码执行）。
     纯派生缓存（不变量 1：可全量重建，DB 是唯一事实源）。
 
-    门控纪律（docs/world-kernel-construction-plan.md §9）：stitch 消费
+    门控纪律（docs/reports/world-kernel-construction-plan.md §9）：stitch 消费
     双门未开（manifest 数据 + 双模型对照）前保持关闭；kill criterion
     上线时即存在。预算分池：DIGEST_DAILY_LLM_CALLS 与 auto-read 隔离。
     """
@@ -276,7 +276,7 @@ class WorldEntity(Base):
     book = relationship("Book")
     entity_type = Column(String(20), nullable=False, index=True)  # character/faction/asset
     name = Column(String(200), nullable=False)
-    # M2 档案扩展（docs/world-unified-settings.md §2.1）：别名（RAG/POV 名闸门吃它）、
+    # M2 档案扩展（docs/reports/world-unified-settings.md §2.1）：别名（RAG/POV 名闸门吃它）、
     # 重要度（上下文注入优先级）、可见性（public=读者已知 / private=作者已知，防 AI 泄底）
     aliases = Column(JSONB, default=list)
     importance = Column(Integer, default=1)
@@ -353,7 +353,7 @@ class WorldMapStroke(Base):
 class WorldRelation(Base):
     """世界设定层·实体关系边（脑图透镜的边）。
 
-    设计（docs/world-unified-settings.md §2.2）：
+    设计（docs/reports/world-unified-settings.md §2.2）：
     - 有向边：source 对 target 的认知/态度（不对称）
     - 时间性二分：static=True 一直成立；static=False 且 event_ref 非空时
       由事件回放推演激活（锚事件 time_start≤t 才生效）——"关系随事态演变"

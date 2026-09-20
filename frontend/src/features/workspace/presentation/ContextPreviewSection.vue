@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 「AI 此刻读到的」主件（P5 B2 · 09 期重设计 docs/design/ux-redesign/09-ai-view-redesign.md
- * · 2026-09-15 轻量化重构 docs/ai-view-briefing-feasibility.md）。
+ * · 2026-09-15 轻量化重构 docs/reports/ai-view-briefing-feasibility.md）。
  *
  * 展示 stitch-ghost 实际注入的上下文块（与真实 system prompt 同源——后端
  * context-preview 与 stitch 路由共用同一装配函数）。轻量化三改造：

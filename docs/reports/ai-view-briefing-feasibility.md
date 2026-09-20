@@ -1,8 +1,10 @@
+> **归档说明（2026-09-19）**：一次性调研（2026-09-15），简报化结论已于当日施工落地（e8cd82c）；现行行为见 `docs/ai-view-panel-guide.md`。
+
 # AI 视角轻量化与态势简报化 · Phase 0 可行性调研报告
 
 > 调研日：2026-09-15 · 性质：**纯只读调研**（未改任何代码） · 行号锚点以当日工作区为准
 > 调研对象：写作台助手面板「AI 视角」分区（`InspectorPanel.vue` debug 分区 + `ContextPreviewSection.vue`）
-> 前置权威：`docs/design/ux-redesign/09-ai-view-redesign.md`（09 期重设计）、`docs/ai-view-panel-report.md`（2026-09-14 面板全景调研）、`docs/foundation-hardening.md` §2.1（同源红线出身）
+> 前置权威：`docs/design/ux-redesign/09-ai-view-redesign.md`（09 期重设计）、`docs/reports/ai-view-panel-report.md`（2026-09-14 面板全景调研）、`docs/reports/foundation-hardening.md` §2.1（同源红线出身）
 > 目标形态：上层 4~5 行极简高密【战局态势简报】（当前场景/在场存活人物及状态/焦点道具/守死秘密/当前引力）+ 下层原始 14 块折叠逃生舱 + 空块「还没录」催收框全量静音。
 
 ---
@@ -33,7 +35,7 @@ GET /adaptive/context-preview?mode=…
 
 关键事实：**结构化 → 渲染的折叠点在 `build_context_preview`**。渲染成 Markdown 字符串是最后一步；此前的 `StitchContext` 全程是结构化对象。简报要做的事 = 在这个折叠点上「抄近道」，把结构化字段分流一份给 briefing，不经过 Markdown 渲染。
 
-前次调研（`docs/ai-view-panel-report.md` §12）已发现的三处漂移与本报告直接相关：前端 `ContextPreviewBlock.key` 联合类型停在 7 键（实际 14 键，`adaptive.api.ts:233`）；后端 `selected_keys` 被 response schema 静默丢弃（schemas.py:116-124 未收录）；`unselected` 已下发但前端从未消费。三者共同说明：**「后端加增量字段」这条路是畅通的，且已有半成品躺着**。
+前次调研（`docs/reports/ai-view-panel-report.md` §12）已发现的三处漂移与本报告直接相关：前端 `ContextPreviewBlock.key` 联合类型停在 7 键（实际 14 键，`adaptive.api.ts:233`）；后端 `selected_keys` 被 response schema 静默丢弃（schemas.py:116-124 未收录）；`unselected` 已下发但前端从未消费。三者共同说明：**「后端加增量字段」这条路是畅通的，且已有半成品躺着**。
 
 ---
 

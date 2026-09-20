@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-场景判定 + 检索场景加成单测（P5 C2，docs/foundation-hardening.md §5.2）。
+场景判定 + 检索场景加成单测（P5 C2，docs/reports/foundation-hardening.md §5.2）。
 
 覆盖三块（纯算法/LLM-mock——不连 LLM/DB，同项目单测惯例）：
 1. 判定口径：detect_scene_type 阈值边界（0.35 上/下/恰等）、空文本兜底

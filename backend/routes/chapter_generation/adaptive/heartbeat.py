@@ -249,7 +249,7 @@ _STYLE_HINT_CACHE: Dict[str, tuple] = {}
 _SPINE_PROG_CACHE: Dict[str, tuple] = {}
 
 
-# ---- B2（2026-08-25 治理，docs/adaptive-assist-hardening.md P2）：判定参数 ----
+# ---- B2（2026-08-25 治理，docs/reports/adaptive-assist-hardening.md P2）：判定参数 ----
 # hit 档阈值=全部滑窗片段命中：hit 是「3 字滑窗」一族三处判定里唯一写库的
 # （pending→hit 只前进不回退，不可逆），取最严档。旧判据 jieba topK=3 通用词
 # 全命中——「他没有」「不多时」类词几乎必然散落在任何长文本里，大面积误 hit；

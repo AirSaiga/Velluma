@@ -167,7 +167,7 @@ function onQuickNoteToTemplate() {
 // ===== 实体详情抽屉（M2：档案/编年史/快捷事态的家，三透镜共享选中态）=====
 const selectedEntityId = ref<string | null>(null)
 
-// ===== 地点详情抽屉（docs/location-interior.md：内部构造的二级面板）=====
+// ===== 地点详情抽屉（docs/reports/location-interior.md：内部构造的二级面板）=====
 const selectedLocId = ref<string | null>(null)
 function openLocDetail(id: string) {
   selectedLocId.value = id
@@ -178,7 +178,7 @@ const selectedForeshadowId = ref<string | null>(null)
 const showExpectations = ref(false)
 const showWorldview = ref(false)
 
-// ===== C1 真相层（Canon 融入）：真相详情抽屉（docs/canon-world-fusion.md）=====
+// ===== C1 真相层（Canon 融入）：真相详情抽屉（docs/reports/canon-world-fusion.md）=====
 // 2026-09-03：因果图谱模态退役（建边零入口——边恒为零，图谱永远是一屏孤立圆点；
 // 后端边表/CRUD 保留零数据风险），设计稿 docs/design/truth-ux/
 const selectedTruthId = ref<string | null>(null)
@@ -379,7 +379,7 @@ const showBulkImport = ref(false)
 let removeShortcut: (() => void) | null = null
 
 // ===== 旧设定中心迁移（幂等；详见后端 migrate_legacy_settings 注释）=====
-// ===== D4 比例尺标定（docs/map-scale-spatial.md §3：拉线→选档→完成，≤3 步）=====
+// ===== D4 比例尺标定（docs/reports/map-scale-spatial.md §3：拉线→选档→完成，≤3 步）=====
 const calibDialog = ref<{ points: [number, number][] } | null>(null)
 const calibDays = ref('1')
 const calibMode = ref<'foot' | 'horse' | 'boat' | 'custom'>('foot')

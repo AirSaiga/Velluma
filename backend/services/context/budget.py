@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-上下文预算常量表（P5 批次 3 · A3a，docs/foundation-hardening.md §4.1）。
+上下文预算常量表（P5 批次 3 · A3a，docs/reports/foundation-hardening.md §4.1）。
 
 收编自适应辅助注入链（设定 bundle / canon / RAG 回响 / 文风样本 /
 stitch-ghost 五模式）散落的全部上下文截断与配额魔法数字。
@@ -224,7 +224,7 @@ ECHOES_EMBED_QUERY_MAX_CHARS = 500
 # 首版出处：services/style/retrieval.py
 AUTHOR_SAMPLES_MAX_K = 2
 
-# burst 档样本条数（C3 · docs/foundation-hardening.md §5.3）：走向卡连写是
+# burst 档样本条数（C3 · docs/reports/foundation-hardening.md §5.3）：走向卡连写是
 # 段落级生成，范例权重最高 → k 2→3 加量；其余四模式维持 MAX_K=2 不变
 # （stitch 装配按 mode 选 k）。首版出处：services/context/stitch_context.py
 AUTHOR_SAMPLES_K_BURST = 3
@@ -258,7 +258,7 @@ STYLE_PARAGRAPH_RHYTHM_MAX_CHARS = 80
 STYLE_POSITIVE_MAX_LINES = 10
 
 # ============================================================
-# 空间常识（D4 比例尺切片，docs/map-scale-spatial.md §5）
+# 空间常识（D4 比例尺切片，docs/reports/map-scale-spatial.md §5）
 # ============================================================
 
 # spatial_brief 注入字数——「≤3 行粗估」的距离行块，300 字封顶；双门槛
@@ -267,7 +267,7 @@ STYLE_POSITIVE_MAX_LINES = 10
 SPATIAL_BRIEF_MAX_CHARS = 300
 
 # ============================================================
-# 私有设定（A1 secrets 通道，docs/foundation-hardening.md §3.1）
+# 私有设定（A1 secrets 通道，docs/reports/foundation-hardening.md §3.1）
 # ============================================================
 
 # 私有块条数上限——与 canon 表/里（各 10 条）同量级取保守值：秘密条目过多
@@ -372,7 +372,7 @@ STITCH_RECALL_QUERY_TAIL_CHARS = 150
 # 首版出处：services/context/stitch_context.py assemble_stitch_context
 STITCH_INTENT_OUTLINE_MAX_CHARS = 200
 
-# outline 档 spine 全锚点行条数上限（C3 · docs/foundation-hardening.md §5.3）
+# outline 档 spine 全锚点行条数上限（C3 · docs/reports/foundation-hardening.md §5.3）
 # ——「本章锚点：A（待兑现）；B（已兑现）…」注入意图区。与路由侧
 # SPINE_MAX_ANCHORS=5（routes/chapter_generation/adaptive.py 端点 5.6）同值：
 # spine 存档即已 ≤5，此处是 builder 直调调用方的防御性封顶。
@@ -387,7 +387,7 @@ SPINE_SUGGEST_MAX_TOKENS = 2400
 
 
 # ============================================================
-# 跨块动态分配（A3b · docs/foundation-hardening.md §4.2，2026-08-20）
+# 跨块动态分配（A3b · docs/reports/foundation-hardening.md §4.2，2026-08-20）
 # ============================================================
 
 # 机制分两级：
@@ -560,7 +560,7 @@ def allocate(
 ) -> AllocationResult:
     """把块列表压进总预算（纯函数；默认预算下恒等，注入逐字节不变）。
 
-    规则（docs/foundation-hardening.md §4.2）：
+    规则（docs/reports/foundation-hardening.md §4.2）：
     1. 总字符 ≤ 预算 → 恒等返回（零变化安全绳——初值表即按此设计）；
     2. 超支 → 软块按 SOFT_BLOCK_TRIM_ORDER 从最可让的块开始，从尾往前逐条
        弃置（生产者优先级序的尾部=最不重要），减到零该块整块缺席；

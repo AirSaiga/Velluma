@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - B2 spine 锚点进度判定单测（P2 治理，2026-08-25）
-"""docs/adaptive-assist-hardening.md P2 · B2 的对拍：spine 锚点进度判定改走
+"""docs/reports/adaptive-assist-hardening.md P2 · B2 的对拍：spine 锚点进度判定改走
 text_match 共享判据 + 首轮只记基线 + 缓存键改内容 hash。
 
 锁定的修复后行为：

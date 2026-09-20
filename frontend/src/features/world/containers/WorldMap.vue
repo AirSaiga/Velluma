@@ -628,7 +628,7 @@ function renderMarkers() {
   // 有子级标记（内部构造提示）：环点内加一点
   const locKids = locChildren.value
   for (const loc of locations.value) {
-    // 上图权 = parent_id IS NULL（docs/location-interior.md 渲染契约）：内部构造只进详情抽屉
+    // 上图权 = parent_id IS NULL（docs/reports/location-interior.md 渲染契约）：内部构造只进详情抽屉
     if (loc.parent_id) continue
     if (loc.coord_x == null || loc.coord_y == null) continue
     const color = LOC_KIND_COLOR[loc.kind] || LOC_KIND_COLOR.point

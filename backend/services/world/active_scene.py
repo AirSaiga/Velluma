@@ -3,7 +3,7 @@
 """光标派生取景框（Intra-Chapter Scene Transit · 2026-09-14 第三弹）。
 
 文学的空间单元是场景/镜头而非章节——一章一地（chapters.scene_location_id）
-在 500 字跨三地时白名单与穿越闸严重错位（docs/scene-transit-feasibility.md
+在 500 字跨三地时白名单与穿越闸严重错位（docs/reports/scene-transit-feasibility.md
 第二期报告）。本模块把「当前写的是哪场」做成**光标位置的派生视图**：
 
     resolve_active_scene(光标前文本, 地点名册, 本章钉) -> ActiveScene

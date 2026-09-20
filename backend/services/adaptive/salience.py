@@ -4,7 +4,7 @@
 """注意力窗：三族信号 × 段距指数衰减 + 六槽配额（纯代码，参数个位数）。
 
 取代方向权重引擎（尸检：18 次恒常量输出——抽象向量无观测无回路）。
-信号转世关系（docs/world-kernel-construction-plan.md §8）：
+信号转世关系（docs/reports/world-kernel-construction-plan.md §8）：
 - 期待张力（原读者力）→ 世界信号一票；
 - 未兑现伏笔计数（原推动力）→ 「被冷落的重要」槽；
 - 采纳反馈（原负反馈）→ 行为乘子（quiet_learning 纪律：一次肯定胜过

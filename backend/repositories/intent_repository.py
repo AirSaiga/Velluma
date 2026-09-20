@@ -3,7 +3,7 @@
 # Velluma - Intent 仓储（B2 · docs/world-kernel-foundation.md §3）
 """统一意图存储的读合并层（双读过渡期唯一读口）。
 
-双读纪律（docs/world-kernel-construction-plan.md §3）：
+双读纪律（docs/reports/world-kernel-construction-plan.md §3）：
 - world_intents（新表）优先；旧表（plot_ledgers / canon 揭示列 / 期待账本）
   兜底——迁移脚本复制后，旧表行按 source_key 去重不再重复出现；
 - 回退路径：任何时点可把消费方切回旧表直读（旧表在过渡期恒为事实源备份）；

@@ -223,7 +223,7 @@ async def delete_location(book_id: UUID, location_id: UUID, db: AsyncSession = D
     from backend.services.world.location_tree import collect_subtree_ids
 
     repo = WorldRepository(db)
-    # 树删（docs/location-interior.md）：内部构造随父地点一并删除；父前子后顺序执行，
+    # 树删（docs/reports/location-interior.md）：内部构造随父地点一并删除；父前子后顺序执行，
     # 不让 DB 的 ondelete=SET NULL 把子级悬空成顶层孤儿
     ids = collect_subtree_ids(await repo.locations.list_by_book(str(book_id)), str(location_id))
     if not ids:
@@ -707,7 +707,7 @@ async def migrate_legacy_settings(book_id: UUID, db: AsyncSession = Depends(get_
 
 
 # ============================================================
-# C2：canon 信息面挂接迁移（docs/canon-world-fusion.md §4.4）
+# C2：canon 信息面挂接迁移（docs/reports/canon-world-fusion.md §4.4）
 # ============================================================
 
 class CanonMigrateDecision(BaseModel):
@@ -1118,7 +1118,7 @@ async def compile_digest_route(
 ):
     """编译世界总账：事实节（纯代码恒产出）+ 综合节（门控+预算分池）。
 
-    门控纪律（docs/world-kernel-construction-plan.md §9）：DIGEST_ENABLED
+    门控纪律（docs/reports/world-kernel-construction-plan.md §9）：DIGEST_ENABLED
     双门签发前为 False——综合节编译被挡（响应 skipped 带人话原因），
     事实节与机件照常可用/可测；kill criterion 已写入设计。
     """

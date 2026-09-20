@@ -1,9 +1,11 @@
 # Velluma 生成引擎 V3.2 — ADF（Anchor-Driven Flow）设计文档
 
+> ⚠️ **【已降级 2026-09-19 标注】**「当前默认引擎」地位已于 2026-08 月中让位给 **NLE-ADF 3.0 自适应流**（`/adaptive/*`，前端默认且唯一写作路径，见 `docs/agent/nle-adf.md`）。ADF 引擎**本体保留在役**（`workflows/adf/` + `routes/chapter_generation/adf.py`），但前端已无 UI 入口。本文转为引擎设计档案，7 阶段契约仍与实现一致；运行事实以 AGENTS.md 为准。
+
 > **版本**：V3.2（Anchor-Driven Flow，锚点驱动正向流）
-> **状态**：当前默认（且唯一保留的）生成引擎；V3.0/V3.1/V4.0 已废弃归档
+> **状态**（写作时点）：当时默认（且唯一保留的）生成引擎；V3.0/V3.1/V4.0 已废弃归档
 > **日期**：2026-07-21
-> **前置**：V3.1 统一引擎（`docs/generation-v3.1-unified.md`，已废弃）
+> **前置**：V3.1 统一引擎（已归档至 `backend/_deprecated/docs/generation-v3.1-unified.md`）
 > **关系**：原计划与 V3.1 并存；经 2026-07-24 引擎剥离后，V3.1/V3.0/V4.0 端点均已移除，V3.2 ADF（`POST /api/chapters/{id}/generate-adf`）成为唯一保留的生成引擎
 
 ---

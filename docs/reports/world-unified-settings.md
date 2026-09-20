@@ -1,6 +1,6 @@
 # 世界页统一设定入口设计（静态数据录入与可视化融合）
 
-> 状态：设计稿（待评审）
+> 状态（2026-09-19 复核）：**已落地**（M1-M6+ 随活舆图各期施工入库；设定中心页本身已于 2026-09-05 退役，世界页为静态设定唯一编辑源——现行契约见 `docs/agent/world.md`）。本文留作设计出处与决策记录。
 > 范围：`frontend/src/features/world/` + `backend/routes/world.py` + 桥接层
 > 前置讨论：世界页以事件溯源为底座（`computeWorldState` 纯函数推演），本设计把设定中心
 > （`BibleView` 九分区）中以表单录入的静态数据融合进世界页，实现"零翻译录入 + 单一事实聚合视图"。
@@ -331,7 +331,7 @@ features/world/
 
 - **Canon（CanonView）**：本设计不直接动它。实体底座统一后（M2+），CanonNode 的
   character/place/object/hook 与世界实体合并评估，另行设计。
-  → **已另行设计**：`docs/canon-world-fusion.md`（信息层并入活舆图，C1 UI 承载 /
+  → **已另行设计**：`docs/reports/canon-world-fusion.md`（信息层并入活舆图，C1 UI 承载 /
   C2 数据收敛 / C3 能力激活三期）。
 - **章级绑定（AssetPanel 勾选）**：M2 后由"时间切片快照 + 作者焦点标记"逐步替代。
 - **ReaderMirror 期待账本 / PlotLedger 伏笔账本**：表和 API 不动。M5 起设定中心的两个面板

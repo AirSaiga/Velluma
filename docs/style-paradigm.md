@@ -1,6 +1,6 @@
 # 文风三平面分权（2026-08-29 定稿施工）
 
-> ⚠ **2026-09-14 去参数化修订**：P6「旋钮编译为选择器」整体退役——`_selector_adjust` 连同轻指纹设施删除（数学空转实证：零样本书检索池恒空，旋钮参数从未真实影响过任何一次挑样，审计与裁决见 `docs/style-parameter-effectiveness-audit.md`）；`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读。本文 P6 节与「旋钮」字样按当时设计保留、勿据此施工——选择平面现役机制=P5 先验/漂移锚样/收编池/场景匹配/跨书冷启动兜底。
+> ⚠ **2026-09-14 去参数化修订**：P6「旋钮编译为选择器」整体退役——`_selector_adjust` 连同轻指纹设施删除（数学空转实证：零样本书检索池恒空，旋钮参数从未真实影响过任何一次挑样，审计与裁决见 `docs/reports/style-parameter-effectiveness-audit.md`）；`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读。本文 P6 节与「旋钮」字样按当时设计保留、勿据此施工——选择平面现役机制=P5 先验/漂移锚样/收编池/场景匹配/跨书冷启动兜底。
 >
 > 导师方案（teacher-kimi）定稿的文风数据运用重构。**一句话纲领：凡是实证过 prompt 管不住的确定性约束，一律下沉代码层；prompt 只承担概率性偏置。** 这是字数闸（120 字指令实测产出 700 字 → 代码闸一上即治）教训的宪法化。
 >

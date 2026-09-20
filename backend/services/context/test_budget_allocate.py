@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-上下文预算动态分配单测（P5 批次 3 · A3b，docs/foundation-hardening.md §4.2）。
+上下文预算动态分配单测（P5 批次 3 · A3b，docs/reports/foundation-hardening.md §4.2）。
 
 四件套（任务书指定）：
 1. 零变化锁：默认 MODE_CONTEXT_BUDGETS（=各块 worst-case 总和）下，五模式

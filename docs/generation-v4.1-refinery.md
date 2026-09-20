@@ -1,6 +1,6 @@
 # Velluma V4.1 — 精修流水线 + 对话式协同（Refinery + Conversational Co-Creation）
 
-> ⚠️ **【已整体拔除 2026-09-12】**Refinery 引擎随写后检查收敛批退役（docs/post-writing-checks-audit.md）：
+> ⚠️ **【已整体拔除 2026-09-12】**Refinery 引擎随写后检查收敛批退役（docs/reports/post-writing-checks-audit.md）：
 > 手术原语（planner/surgeon）迁 `backend/services/text_surgery/`（ADF 一致性守卫消费）；
 > 读者反馈收编 `POST /adaptive/reader-feedback`；前端问题清单/进度/手术历史 UI 删除。
 > 本文档转为历史设计档案，运行事实以 AGENTS.md 为准。文中「事后可回滚」承诺从未实现（拔除原因之一）。

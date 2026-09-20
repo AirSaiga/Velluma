@@ -1,5 +1,5 @@
 /**
- * 预算占用条纯函数（P5 A3b · docs/foundation-hardening.md §4.2）。
+ * 预算占用条纯函数（P5 A3b · docs/reports/foundation-hardening.md §4.2）。
  *
  * 「AI 此刻所见」预览每块的占用条数据换算——纯展示计算，无组件依赖，
  * 供 ContextPreviewSection.vue 渲染与 __tests__/contextBudget.test.ts 锁定。

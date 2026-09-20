@@ -309,7 +309,7 @@ async function updateLocationCoords(
   )
 }
 
-/** 树删：内部构造随父地点一并删除（docs/location-interior.md 删除语义）。
+/** 树删：内部构造随父地点一并删除（docs/reports/location-interior.md 删除语义）。
  *  删前收整棵子树快照，undo 按「父前子后」顺序带原 id 幂等重建。 */
 async function deleteLocation(bookId: string, locationId: string) {
   const tree = collectSubtree(locations.value, locationId)

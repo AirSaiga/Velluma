@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/chapters", tags=["adaptive"])
 
 
 # ============================================================
-# AI 此刻所见预览（P5 B2，docs/foundation-hardening.md §2.1）：跑 stitch-ghost
+# AI 此刻所见预览（P5 B2，docs/reports/foundation-hardening.md §2.1）：跑 stitch-ghost
 # 全套上下文装配（与真实注入同源——共用 assemble_stitch_context +
 # adaptive_prompts.render_system_blocks，禁止平行实现），**不调 LLM 文本生成**。
 # ============================================================
@@ -54,7 +54,7 @@ async def context_preview(
     HTML 剥成纯文本，与 memory_indexing 同口径），assemble 内部仍按各模式
     统一截 [-150:] 拼 query。open 模式 query 走大纲（同 stitch）。
 
-    光标真切片（2026-09-15 FIM 修复，docs/ai-view-briefing-feasibility.md §5）：
+    光标真切片（2026-09-15 FIM 修复，docs/reports/ai-view-briefing-feasibility.md §5）：
     前端编辑器在场时送 before_cursor（光标前 ≤500 字）/after_cursor（光标后
     ≤150 字）——传入即以光标前文取代落库章节尾部作装配输入，中插（骨架跳写）
     时预览/简报反映真实光标现场而非文末语境；after_cursor 仅作中插态标记

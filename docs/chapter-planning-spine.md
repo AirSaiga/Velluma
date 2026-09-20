@@ -8,7 +8,7 @@
 > OutlineNoteNode。
 > 前置：`docs/iteration-roadmap.md` §2.4（P1.4 章级谋篇）；BS-ADF 章级规划层已退役，
 > 本设计**不是**它的复刻，而是「作者主导」哲学下的重新发明。
-> 关联：`docs/canon-world-fusion.md`（设计稿格式先例）；`docs/world-writing-bridge.md`
+> 关联：`docs/reports/canon-world-fusion.md`（设计稿格式先例）；`docs/world-writing-bridge.md`
 > （切片/感知带设施）。
 
 ---
@@ -184,7 +184,7 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 
 ### 4.3 进度判定（纯算法，宁漏勿误——D-5 同款保守）
 
-> **2026-08-25 B2 治理修订**（3b466d5，台账见 `docs/adaptive-assist-hardening.md`
+> **2026-08-25 B2 治理修订**（3b466d5，台账见 `docs/reports/adaptive-assist-hardening.md`
 > §P2）：初版「jieba 关键词全词命中」被实测噪声推翻（通用关键词误 hit + 进程
 > 重启后 growth=全文 + 等长改写吃旧缓存）。现行判据如下。
 
@@ -270,4 +270,4 @@ M4 的开启条件：P0 埋点显示 spine 覆盖率 ≥50% 且走向卡采纳�
 
 ## 修订注（2026-09-14 第四弹 UI 单轨合流）
 
-本章 M1-M3 数据契约（`chapters.spine` JSONB · `GET/PATCH /adaptive/spine` · spine-suggest · 锚点进度判定 · 走向卡 ⚑ 挂锚）**不变**；UI 层已按路径 C 单轨合流（edce677）——副驾「打算」分区重构为**叙事引力流面板**（SpinePanel：🎯 方向行=spine.intent 高亮锚 + 锚点 chips + 📝 情节节拍区=outline_text 迁入，旧「大纲编辑卡」删除），活跃节拍微标「▶ 续写正朝这拍走」走新端点 `GET /adaptive/active-beats`（与 stitch/dock 同一份 `outline_nearby` 计算，纯算法），Tab/Space 入口前经 `velluma:flush-planning` 事件强制冲刷 + 心跳上行携带双保险，节拍区 blur 冲刷。第四弹唯一权威：`docs/spine-outline-merge-feasibility.md`。
+本章 M1-M3 数据契约（`chapters.spine` JSONB · `GET/PATCH /adaptive/spine` · spine-suggest · 锚点进度判定 · 走向卡 ⚑ 挂锚）**不变**；UI 层已按路径 C 单轨合流（edce677）——副驾「打算」分区重构为**叙事引力流面板**（SpinePanel：🎯 方向行=spine.intent 高亮锚 + 锚点 chips + 📝 情节节拍区=outline_text 迁入，旧「大纲编辑卡」删除），活跃节拍微标「▶ 续写正朝这拍走」走新端点 `GET /adaptive/active-beats`（与 stitch/dock 同一份 `outline_nearby` 计算，纯算法），Tab/Space 入口前经 `velluma:flush-planning` 事件强制冲刷 + 心跳上行携带双保险，节拍区 blur 冲刷。第四弹唯一权威：`docs/reports/spine-outline-merge-feasibility.md`。

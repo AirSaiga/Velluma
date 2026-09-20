@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：文风参数审计（2026-09-14），废旋钮实证依据；去参数化已落地（a5f102c），文风页 v4（55befcc）收束。
+
 # 文风控制参数真实有效性审计报告
 
 > 2026-09-14 · 系统架构重构调研第三期 · 纯只读审计（零代码改动）
@@ -186,4 +188,4 @@ light 模式（章节批量指纹+心跳漂移+scene_hint）现在仍计算 lexi
 - 真实数据：data/collab_events.jsonl（35 事件分布：dock_delivered 9/cards 7/ghost_discard 6/batch_accept 5/ghost_request 4/context_card 2/spine 2/ghost_adopt 1；**7 个 sample_ids 全空**；ghost_adopt 文本见 §2.1）· data/style_events.jsonl **不存在**
 - 文本冲突：adaptive_prompts.py:88-125（基座）· :517-532（白描契约，"最高优先级"+北方硬朗白描）· :86-105（句级三律）
 - 指标消费：fingerprint.py 全文（:315-330 词表 55 词、:359-401 质感窗、:484-491 台账、:494-531 漂移）· code_auditors.py:267-309,380-403（RhythmAuditor/DialogueAuditor）· thresholds.py:76（重复度阈值）· scene_hint.py:46-78 · extractor.py（grep fingerprint 零命中）
-- 交叉引用：docs/style-paradigm.md（三平面分权）· docs/style-mechanism-report.md · 生成质量诊断档案（文风页零使用结论同源）
+- 交叉引用：docs/style-paradigm.md（三平面分权）· docs/reports/style-mechanism-report.md · 生成质量诊断档案（文风页零使用结论同源）

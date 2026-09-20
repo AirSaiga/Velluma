@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""A4 叙事时间来源可见（docs/foundation-hardening.md §2.2）单测。
+"""A4 叙事时间来源可见（docs/reports/foundation-hardening.md §2.2）单测。
 
 锁两件事：
 1. resolve_narrative_time 四级降级的 t/source 值**逐分支不变**（D6 零行为变化），

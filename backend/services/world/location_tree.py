@@ -1,4 +1,4 @@
-# Velluma - 地点树工具（内部构造 · docs/location-interior.md）
+# Velluma - 地点树工具（内部构造 · docs/reports/location-interior.md）
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
 """
@@ -98,7 +98,7 @@ def ancestor_chain(by_id: Dict[str, Any], loc_id: str) -> List[Any]:
 
 
 def scene_scope_ids(locations: List[Any], scene_loc_id: str) -> set:
-    """场景作用域（docs/location-interior.md 二期）：场景地点自身 + 全部祖先 id。
+    """场景作用域（docs/reports/location-interior.md 二期）：场景地点自身 + 全部祖先 id。
 
     场景钉到房间时，钉在基地（祖先）的角色也算在场——「在建筑物里」是
     「在这个房间的场景里」的合理上界。消费方：world_bridge 在场提权、

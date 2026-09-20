@@ -117,6 +117,7 @@ class TestNearbyIntentFromOutline:
 class _FakeResult:
     def __init__(self, content):
         self.content = content
+        self.finish_reason = None  # 与真实 LLMResult 同形（spine 空输出重试告警会读）
 
 
 class _FakeRecorder:

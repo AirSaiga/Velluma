@@ -1,5 +1,5 @@
 /**
- * A5b 批量裁决 + A5d 收件箱直达（P5 docs/foundation-hardening.md §3.2）。
+ * A5b 批量裁决 + A5d 收件箱直达（P5 docs/reports/foundation-hardening.md §3.2）。
  *
  * 批量裁决 = 「全部采纳」逐条预览（可勾选剔除）→ 确认后逐条走既有 accept 端点
  * （/world/candidates/{id}/accept，不改后端语义）→ toast 6 秒可撤销。

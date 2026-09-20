@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""A5c · 收件箱积压提醒单测（P5 docs/foundation-hardening.md §3.2）。
+"""A5c · 收件箱积压提醒单测（P5 docs/reports/foundation-hardening.md §3.2）。
 
 覆盖：
 - build_world_inbox_hint 纯判定：空池/阈值内不提示、>5 提示、文案计数正确

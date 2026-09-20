@@ -1,5 +1,5 @@
 /**
- * 预算占用条纯函数单测（P5 A3b · docs/foundation-hardening.md §4.2）。
+ * 预算占用条纯函数单测（P5 A3b · docs/reports/foundation-hardening.md §4.2）。
  *
  * 占用条是纯展示（无 @vue/test-utils，不写组件测试）；比例与变色阈值
  * 抽成纯函数在此锁定。阈值契约：>90% 变色（0.9 恰好不算吃紧）。

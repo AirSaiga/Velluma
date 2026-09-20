@@ -1,13 +1,13 @@
 # 文风模块重构设计（笔迹：测量式文风指纹 + 意图旋钮 + 反馈环）
 
 > 状态：✅ 全部落地（S1 测量层 / S2 执行层接通 / S3 交互环 / S4 抽象与切分 / S4+ 补全批次 / S5 UX 打磨与样本链路修复，2026-08-18；唯一不做项 E4 见 §8 评估结论）
-> ⚠ **2026-09-14 去参数化修订**：S4 旋钮体系（`style_knobs` 四维旋钮/四风格预设/对话目标五档）已整体退役——UI 下线、`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读、`render_style_positive` 不再渲染意图行（上限 14→10 行）；五维画像手填表单同批下线（高级面板只读+保留「从样本提炼」与字段锁）。文风收敛两根支柱=亲笔样本 few-shot + 负面清单执法，「收本章为文风范例」一键装填为样本主通道。本文 §5 意图层/大旋钮/对话滑条等描述按当时设计保留、勿据此施工——审计与裁决见 `docs/style-parameter-effectiveness-audit.md`。
+> ⚠ **2026-09-14 去参数化修订**：S4 旋钮体系（`style_knobs` 四维旋钮/四风格预设/对话目标五档）已整体退役——UI 下线、`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读、`render_style_positive` 不再渲染意图行（上限 14→10 行）；五维画像手填表单同批下线（高级面板只读+保留「从样本提炼」与字段锁）。文风收敛两根支柱=亲笔样本 few-shot + 负面清单执法，「收本章为文风范例」一键装填为样本主通道。本文 §5 意图层/大旋钮/对话滑条等描述按当时设计保留、勿据此施工——审计与裁决见 `docs/reports/style-parameter-effectiveness-audit.md`。
 > 范围：`frontend/src/components/StyleCardManager.vue`（已删除，拆解迁入 `features/style/`）；
 > `backend/routes/style.py` + `services/style/`（新 fingerprint 模块）+
 > `services/context/settings_bundle.py` + adaptive stitch-ghost + `services/refinery/` +
 > `workflows/validators.py` / `validation/code_auditors.py`（已改为共用 fingerprint 原语）
-> 前置：`docs/canon-world-fusion.md`（C1 已落地，设定页仅剩文风+笔记两个真分区）；
-> `docs/world-unified-settings.md`（M1-M6+ 全部落地，文风为其明确非目标）
+> 前置：`docs/reports/canon-world-fusion.md`（C1 已落地，设定页仅剩文风+笔记两个真分区）；
+> `docs/reports/world-unified-settings.md`（M1-M6+ 全部落地，文风为其明确非目标）
 
 ---
 

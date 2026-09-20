@@ -1,8 +1,10 @@
+> **归档说明（2026-09-19）**：可行性调研（2026-09-14），场次流转已施工（0050eed）。
+
 # 动态场次流转与场景钉解绑可行性分析报告
 
 > 2026-09-14 · 系统架构重构调研第二期 · 纯只读调研（零代码改动）
 > 议题：文学空间单元是「场景/镜头」而系统钉死「一章一地」（`chapters.scene_location_id`）——500 字内「维修棚→村道→明姐家厨房」三场流转在当前架构下如何困境重重，以及章内动态转场（Intra-Chapter Scene Transit）三种设想的穿透审查。
-> 行号以 2026-09-14 工作区为准；所有关键结论附代码证据。第一期报告（docs/spine-outline-merge-feasibility.md）结论在本文中被引用两处。
+> 行号以 2026-09-14 工作区为准；所有关键结论附代码证据。第一期报告（docs/reports/spine-outline-merge-feasibility.md）结论在本文中被引用两处。
 
 ---
 
@@ -168,4 +170,4 @@ models/world.py 全部 12 张表：WorldEvent / WorldEventEdge / WorldIntent / W
 - 场景钉消费：models/narrative.py:126 · world_bridge.py:381-405 · knowledge_plane.py:158,446,701 · orchestrator.py:227-238,400-412 · dock_generator.py:501,119-227 · stitch.py:185-213 · scene_slice.py:219 · settle_finish.py:88-99 · reality_check.py:85-140 · schemas/world.py:291 · routes/world.py:1057
 - 缓存响应：dock_generator.py:230-237（presence_fingerprint）· orchestrator.py:340-343,404-412（停顿档门+三键）· knowledge_plane.py:626-632（前缀签名）· fold.py:34-80（无缓存纯查询）· useWorldSlice.ts:72-92（silent 重取）
 - 沉睡资产：models/world.py（12 表无 scenes）· eventTemplates.ts:32-40（move/path 弧长）· change_detector.py:66-69,96-106（scene_shift 词表+首句 40 字窗）· scene_visibility.py:212-274（11 动词+填充窗+闪回豁免）· scene_hint.py:46-78（dialogue/general 两档）· location_tree.py:100-111（树闭包）· dock_generator.py:126-131（提及即在场）· OutlineNoteNode 先例
-- 交叉引用：第一期 docs/spine-outline-merge-feasibility.md（节拍消耗品/大纲自由散文红线/三签名纪律）；09-09 dock literary diagnosis 档案（scene_shift 词表不含室内转场的实证）
+- 交叉引用：第一期 docs/reports/spine-outline-merge-feasibility.md（节拍消耗品/大纲自由散文红线/三签名纪律）；09-09 dock literary diagnosis 档案（scene_shift 词表不含室内转场的实证）

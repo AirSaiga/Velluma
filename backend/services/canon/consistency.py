@@ -59,7 +59,7 @@ from backend.services.world.field_layers import (
     iter_field_layers,
 )
 
-# A3a 截断常量收敛（docs/foundation-hardening.md §4.1）：canon 段剂量改引 budget 表
+# A3a 截断常量收敛（docs/reports/foundation-hardening.md §4.1）：canon 段剂量改引 budget 表
 from backend.services.context.budget import (
     CANON_HOOK_LEDGER_FETCH_LIMIT,
     CANON_HOOK_MAX_ENTRIES,
@@ -284,7 +284,7 @@ async def build_canon_context_for_prompt(
     2. public 已建立事实（必须遵守）
     3. 悬空伏笔（本章可回收/累积）
 
-    C2 换源（docs/canon-world-fusion.md §6，格式冻结 K3）：
+    C2 换源（docs/reports/canon-world-fusion.md §6，格式冻结 K3）：
     - 段1/2 的 label：ref 挂接节点由世界对象推演（实体/地点改名后词表跟随，
       根治名字漂移→泄密漏检）；无 ref 保持原 label。
     - 段3 [hook]：装配源切到 plot_ledgers（open + 有真相面文本，取前 8）；

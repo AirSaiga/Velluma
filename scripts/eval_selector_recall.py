@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-# Velluma - 选择器召回金标准评测（B0.3 · docs/world-kernel-construction-plan.md §1）
+# Velluma - 选择器召回金标准评测（B0.3 · docs/reports/world-kernel-construction-plan.md §1）
 """知识平面选择器的 recall/precision 评测（可证伪性验收，WCA §10）。
 
 两步用法：

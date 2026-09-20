@@ -1,5 +1,5 @@
 /**
- * 叙事时间来源可见 + 录入侧警示的纯函数（A4，docs/foundation-hardening.md §2.2）。
+ * 叙事时间来源可见 + 录入侧警示的纯函数（A4，docs/reports/foundation-hardening.md §2.2）。
  *
  * 两个消费方：
  * - WorldSceneSlice（写作页切片条）：时刻行来源小字 + 锚定本章按钮的显隐

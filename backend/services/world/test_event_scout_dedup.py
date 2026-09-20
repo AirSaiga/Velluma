@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 """event_scout 候选去重单测（A5a，mock LLM——不连真实 LLM/DB）。
 
-覆盖（docs/foundation-hardening.md §2.4 + 02 候选回流修缮 M1/P3/P6）：
+覆盖（docs/reports/foundation-hardening.md §2.4 + 02 候选回流修缮 M1/P3/P6）：
 - 零变化契约：无 recent_events（旧调用形态）/ None / [] 三种入参下
   user prompt 与改版前逐字节一致，system prompt 恒不变
 - 排除块注入：「第N日 类型：note截断」行格式、空 note 跳过、40 字截断

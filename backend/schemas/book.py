@@ -57,7 +57,7 @@ class BookUpdate(BaseModel):
     golden_snippets: Optional[list] = None
     outline: Optional[str] = None
     rolling_summary: Optional[str] = None
-    # D4 比例尺标定（docs/map-scale-spatial.md §2.1）：refs ≤5 取均值；None=不动，
+    # D4 比例尺标定（docs/reports/map-scale-spatial.md §2.1）：refs ≤5 取均值；None=不动，
     # 显式空 dict = 清除标定（未标定书距离功能静默降级）
     map_scale: Optional[dict] = None
     # 双写收敛（任务包 B）：style_blacklist 不再接受更新——历史书级黑名单已启动

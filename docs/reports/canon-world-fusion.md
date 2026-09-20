@@ -1,9 +1,11 @@
+> **归档说明（2026-09-19）**：真相层融合设计（C1-C3，已随 2026-08-17/19 各批实施）；现行契约见 `docs/agent/world.md`。
+
 # Canon × 世界页融合设计（信息层并入活舆图）
 
 > 状态：已实施——C1 ✅ 2026-08-17、C2/C3 ✅ 2026-08-19（分期表见 §7，落地差异在各期注记）
 > 范围：`frontend/src/features/canon/` → `frontend/src/features/world/` + `backend/routes/canon.py`
 > + `backend/services/canon/` + `services/context/settings_bundle.py`
-> 前置：`docs/world-unified-settings.md`（M1-M6+ 已全部落地）——其 §8 承诺的
+> 前置：`docs/reports/world-unified-settings.md`（M1-M6+ 已全部落地）——其 §8 承诺的
 > "CanonNode 与世界实体合并评估，另行设计"即本文档。
 
 ---

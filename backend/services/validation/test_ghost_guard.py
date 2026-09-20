@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-C1 上屏前快检单测（P5 批次 4，docs/foundation-hardening.md §5.1 + §9 红线）。
+C1 上屏前快检单测（P5 批次 4，docs/reports/foundation-hardening.md §5.1 + §9 红线）。
 
 覆盖（纯算法，不连 LLM/DB）：
 1. dead_speak：死者名命中 + 别名命中（别名与主名同表）；

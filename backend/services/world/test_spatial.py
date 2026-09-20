@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - D4 空间换算单测
-"""spatial.py 纯函数对拍（docs/map-scale-spatial.md §6 D4-1 出口标准）。"""
+"""spatial.py 纯函数对拍（docs/reports/map-scale-spatial.md §6 D4-1 出口标准）。"""
 
 from backend.services.world.spatial import (
     px_per_day,

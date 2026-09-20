@@ -283,7 +283,7 @@ export interface SpineSuggestion {
   anchors: string[]
 }
 
-// ===== AI 所见预览（P5 B2，docs/foundation-hardening.md §2.1）=====
+// ===== AI 所见预览（P5 B2，docs/reports/foundation-hardening.md §2.1）=====
 /** 预览块 key 全集（=后端 render_system_blocks 注入序 14 块；2026-09-15
  *  从 P5 时代 7 键补齐——此前 scene/warm/entities/relations/negative/
  *  anti_pseudo_sensory 等七键被类型联合漏收，运行时靠 any 透传才没炸） */

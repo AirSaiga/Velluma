@@ -7,7 +7,7 @@
  *   ⚠ 边 CRUD 与 analyzeImpact 现无 UI 消费（2026-09-03 因果图谱模态退役——建边
  *   零入口致边恒为零；后端边表/路由保留，此处契约同步保留，勿删）
  *
- * 设计依据：docs/canon-world-fusion.md（C1：UI 承载融合，后端零改动）
+ * 设计依据：docs/reports/canon-world-fusion.md（C1：UI 承载融合，后端零改动）
  * 术语表里化（docs/design/canon-fusion）：canon_text→里 / public_text→表 /
  * private→秘密 / partial→半露。
  */

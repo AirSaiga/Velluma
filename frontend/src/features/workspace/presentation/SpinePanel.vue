@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 叙事引力流面板（第四弹 UI 合流 · docs/spine-outline-merge-feasibility.md 路径 C）。
+ * 叙事引力流面板（第四弹 UI 合流 · docs/reports/spine-outline-merge-feasibility.md 路径 C）。
  *
  * 原「打算（SpinePanel）+ 大纲卡」上下双框是作者认知负荷的病灶——底层两字段
  * 分立是事故换来的稳态（spine.intent 走 system 温卡防冲章 / outline_text 走

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Velluma Contributors
 # Velluma - stitch_context 单测（P5 B2 · AI 所见预览）
 """
-stitch-ghost 上下文装配共享器单测（docs/foundation-hardening.md §2.1）。
+stitch-ghost 上下文装配共享器单测（docs/reports/foundation-hardening.md §2.1）。
 
 覆盖五层：
 1. 同源红线（纯函数）：预览块拼接 + 基座 == 四个 stitch builder 的真实

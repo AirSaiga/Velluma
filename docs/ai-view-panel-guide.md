@@ -2,7 +2,7 @@
 
 > 现状基线：2026-09-15 轻量化重构后（简报卡 + 空块静音 + 底层手风琴 + 光标真切片，全部已施工）。
 > 定位一句话：**让作者两秒钟看懂「AI 懂不懂现在的现场」，想逐字核对时随时能下潜到 AI 读到的每一个字**——上层是提炼，下层是原文，两层出自同一次装配。
-> 相关文档：设计稿 `docs/design/ux-redesign/09-ai-view-redesign.md`（含 2026-09-15 批注 #4）、可行性报告 `docs/ai-view-briefing-feasibility.md`、前次调研 `docs/ai-view-panel-report.md`。
+> 相关文档：设计稿 `docs/design/ux-redesign/09-ai-view-redesign.md`（含 2026-09-15 批注 #4）、可行性报告 `docs/reports/ai-view-briefing-feasibility.md`、前次调研 `docs/reports/ai-view-panel-report.md`。
 
 ---
 

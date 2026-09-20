@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 """
-A1「私有」语义统一单测（docs/foundation-hardening.md §3.1，D5 拍板：
+A1「私有」语义统一单测（docs/reports/foundation-hardening.md §3.1，D5 拍板：
 私有 = AI 知晓但绝不能直接写出，对齐 canon [private]，而非从上下文删除）。
 
 双轨纪律（§9 红线）锁定四件套：

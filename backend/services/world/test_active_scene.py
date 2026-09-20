@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Velluma Contributors
-"""光标派生取景框单测（第三弹 · docs/scene-transit-feasibility.md §3.1）。
+"""光标派生取景框单测（第三弹 · docs/reports/scene-transit-feasibility.md §3.1）。
 
 运行：python -m pytest backend/services/world/test_active_scene.py -v
 """

@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：世界内核期执行计划（2026-08-28，B0-B9 全部完成）；现行契约见 `docs/agent/world.md`，设计地基 `docs/world-kernel-foundation.md`。
+
 # 世界内核施工计划（B0-B9）
 
 > 2026-08-28 · 状态：B0-B9 全部施工完成（707 绿，逐批独立提交）；开放项：金标准标注（作者）、B8 stitch 双门签发、DeepSeek 双模型对照（B4 前端阶段 C 已于同日补齐：useReadBook/ReadBookModal/WorldView 三阶段接线+5 项 vitest+vue-tsc 净） · 上游设计：`docs/world-kernel-foundation.md`（内核地基）、`docs/world-cognition-architecture.md`（WCA 四层）、`docs/knowledge-retrieval-plane.md`（v3.1 注入车道，已施工）。

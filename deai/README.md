@@ -38,7 +38,7 @@ logs/        检查脚本报告
 - [x] 阶段4：facts 溯源复检 → clean_sft.jsonl 定稿为 30 条 {"bad","good"}（2026-08-31）
 - [x] 阶段5：train30.jsonl（messages 格式）+ eval15.jsonl（评测提示，15 条新事实）+ check_jsonl.py（2026-08-31）
 - [x] 阶段6：docs/bailian_clickpath.md 百炼点选指引（终点=计费确认页）（2026-08-31）
-- [x] 阶段7：百炼SFT训练成功，模型 qwen3-4b-instruct-2507_1c29d112（2026-08-31）
+- [x] 阶段7：百炼SFT训练成功，模型 qwen3-4b-instruct-2507_1c29d112（2026-08-31。⚠ 这是**训练任务产物名**；实际调用走部署实例 `qwen3-4b-instruct-2507-78a06917f4ca`，即 model_config.json `deai.model` 应填的**部署名**——两名字并存勿混）
 - [x] 阶段8：独立评测 14/15 六闸通过（93%），唯一失败为数字形式改动（2026-08-31）
 - [x] 阶段9：DPO 评估后跳过（数据量不足，官方建议上百条；升级时再考虑）
 - [x] 阶段10：收尾完成——deai_rewrite.py 调用封装（保底实测生效）+ docs/usage.md（2026-08-31，**项目收官，模型可用**）

@@ -71,7 +71,7 @@ backend/_archive/
 
 # ---- 文档(本地设计/规划文档,不入库) ----
 # docs/ 根目录的核心设计文档已入库；仅 superpowers/ 工作产物本地保留
-docs/superpowers/
+docs/archive/superpowers/
 
 # ---- 测试产物 ----
 .test-dist/

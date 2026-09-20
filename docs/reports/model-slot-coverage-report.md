@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：模型槽全景报告（2026-09-15）；权威在 `docs/model-vendor-matrix.md` 与 AGENTS.md。
+
 # 模型槽全景覆盖报告（2026-09-15）
 
 > 调研动机：用户把分析槽指到本地 Ollama 后退出 Ollama，卡片舱照常出卡——实测确认卡片舱走写作槽。本报告全量盘点 `model_config.json` 五个模型通道（reasoning / creative / wash / embedding / deai）在后端**全部真实调用点**上的分工，含伪槽位、回退链与纯算法零 LLM 的易误认区。

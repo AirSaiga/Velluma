@@ -1,5 +1,5 @@
 /**
- * 实体档案字段 schema（表驱动，docs/world-unified-settings.md §2.1）。
+ * 实体档案字段 schema（表驱动，docs/reports/world-unified-settings.md §2.1）。
  *
  * 档案字段存 WorldEntity.props（JSONB），字段集会随反馈演化——加字段只改这里的数组，
  * 抽屉据此动态渲染行 +「添加字段」菜单过滤已加过的。设计原则：字段按需出现（生长式），

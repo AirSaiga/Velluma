@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：侧栏编辑项链路调研（2026-09-13）；05 瘦身与大纲合流后部分描述已失真，仅作当时记录。
+
 # 写作台侧栏可编辑内容的生成生效链路（调研报告）
 
 > 2026-09-13 · 只读调研 · 行号以当日工作区为准（会漂移，函数名为准）
@@ -55,7 +57,7 @@
 
 - **dock 零件舱**：`dock_generator.run` 直读 `chapter.spine.intent`（`components/dock_generator.py:404-413` `_spine_intent`），进 prompt 的 spine_line：`# 本章意图（方向参考）`（`backend/services/prompts/adaptive_prompts.py:1632`）。另有无大纲时的方向猜测块（仅 source=inferred 且置信 ≥0.5 且未衰老，dock_generator.py:471-491；桥接态清零 :511-512）。
 - **走向卡/推测**：层2 意图（arc/情绪/铺陈）进 `build_future_projection_prompt` 的「本章意图」区（adaptive_prompts.py:1300 附近）。
-- **stitch 续写**：spine 意图与锚点经知识平面**温卡（warm_card）进 system 侧**——「# 本章打算（作者定的方向，软约束）」，五模式全注入、注入序第 2 位（`backend/services/context/knowledge_plane.py:407-431` `_render_warm_card` + `adaptive_prompts.py:346`）。user 侧意图块则只认大纲就近节拍或层2 inferred/baton（`stitch_context.py:169-204` 注释「不走这里…已由温卡注入 system 侧，user 侧不重复注入」——是**去重**不是无视）。〔2026-09-14 修正：本报告初版误判为「spine 不进 stitch」，详见 docs/spine-outline-merge-feasibility.md §1.3〕
+- **stitch 续写**：spine 意图与锚点经知识平面**温卡（warm_card）进 system 侧**——「# 本章打算（作者定的方向，软约束）」，五模式全注入、注入序第 2 位（`backend/services/context/knowledge_plane.py:407-431` `_render_warm_card` + `adaptive_prompts.py:346`）。user 侧意图块则只认大纲就近节拍或层2 inferred/baton（`stitch_context.py:169-204` 注释「不走这里…已由温卡注入 system 侧，user 侧不重复注入」——是**去重**不是无视）。〔2026-09-14 修正：本报告初版误判为「spine 不进 stitch」，详见 docs/reports/spine-outline-merge-feasibility.md §1.3〕
 
 ### 1.4 情节锚点 → 四条消费线
 
@@ -187,5 +189,5 @@
 2. **dock 缓存签名三键**：文本签名（recent_text+spine_intent+word_count）× projection 签名（接缝裁剪后集合+intent_version）× stage 签名（presence_fingerprint=场景钉:叙事锚+DOCK_PIPELINE_VERSION）（orchestrator.py:375-408）——侧栏任一时空编辑（改锚/换钉）都必然穿透缓存；Tab 点名另有 force_refresh 全豁免。
 3. **hit 只前进不回退**：锚点自动打勾不可逆（宁漏勿误，漏判有 finish spine_note 兜底）；作者唯一回退手段是手动划掉（dropped 不再参与判定与警示）。
 4. **两条「不落库」红线在侧栏直接可见**：spine-suggest 建议（收下才写）、世界速记草稿（过目才建事件）；一条「不直接生效」红线：AI 味候选（confirm 后才进负面清单）。
-5. **spine 意图与 stitch 的关系**（2026-09-14 修正）：spine 意图+锚点**确实进 stitch**——经知识平面温卡注入 system 前缀（五模式全通，knowledge_plane.py:407-431），且 spine 整体哈希进章内冻结前缀缓存签名（knowledge_plane.py:688-702——改 spine 必失效前缀，正确行为）。层2 兜底只认 inferred/baton 是 user 侧意图块的**去重纪律**（同一信息不在 user 侧二遍注入），不是供给缺口。user 侧「目的地」槽刻意只收大纲就近节拍——弧线级材料进该槽会复现 08-25 冲章事故（见 docs/spine-outline-merge-feasibility.md §1.4）。chapter_intent 请求档前端零发送（§1.9）。
+5. **spine 意图与 stitch 的关系**（2026-09-14 修正）：spine 意图+锚点**确实进 stitch**——经知识平面温卡注入 system 前缀（五模式全通，knowledge_plane.py:407-431），且 spine 整体哈希进章内冻结前缀缓存签名（knowledge_plane.py:688-702——改 spine 必失效前缀，正确行为）。层2 兜底只认 inferred/baton 是 user 侧意图块的**去重纪律**（同一信息不在 user 侧二遍注入），不是供给缺口。user 侧「目的地」槽刻意只收大纲就近节拍——弧线级材料进该槽会复现 08-25 冲章事故（见 docs/reports/spine-outline-merge-feasibility.md §1.4）。chapter_intent 请求档前端零发送（§1.9）。
 6. **世界侧编辑全部即时**（无 bundle 缓存、每请求现读+fold 现算）；文风/负面清单同样现读无缓存。唯一的延迟面：候选 ✗ 的静音效果（累计 3 次+60s 缓存）与记忆重索引（只随 finish）。

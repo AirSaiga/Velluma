@@ -667,7 +667,7 @@ class WorldRepository:
     # ============================================================
 
     async def migrate_legacy_settings(self, book_id: str) -> Dict[str, Any]:
-        """设定中心旧表迁入世界页（M4 前置；docs/world-unified-settings.md）。
+        """设定中心旧表迁入世界页（M4 前置；docs/reports/world-unified-settings.md）。
 
         映射：
         - characters → WorldEntity(character)：name/aliases/importance；

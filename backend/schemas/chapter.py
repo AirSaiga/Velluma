@@ -37,7 +37,7 @@ class ChapterBase(BaseModel):
     summary: Optional[str] = None
     review_feedback: Optional[dict] = Field(default_factory=dict)
     map_activity_range: Optional[str] = None
-    # 世界页章节叙事时间锚（连续日计数；docs/world-unified-settings.md §2.4）
+    # 世界页章节叙事时间锚（连续日计数；docs/reports/world-unified-settings.md §2.4）
     narrative_time: Optional[int] = None
     # 本章场景钉（写作桥 W5-lite）：显式钉定本章地点，切片「脚下」第一优先级
     # ⚠ 必须是 UUID 而非 str：ORM 返回 UUID 对象，str 声明会让章节列表响应 500

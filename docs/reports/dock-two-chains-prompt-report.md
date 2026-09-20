@@ -1,3 +1,5 @@
+> **归档说明（2026-09-19）**：卡片舱两链 prompt 实编译快照（2026-09-11），随代码漂移，仅作当时记录。
+
 # 卡片舱两条链全量 Prompt 与逻辑链调研报告
 
 > 交付日期：2026-09-13。代码版本：`DOCK_PIPELINE_VERSION = v2.3_suffix300_20260913`（backend/services/adaptive/components/dock_generator.py:39）。
