@@ -33,6 +33,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 主要功能：
 - 单文本向量化（get_embedding：失败静默降级返回 []）
+- 批量向量化（get_embeddings / get_embeddings_api_only：按
+  EMBEDDING_BATCH_SIZE 透明分批，防模型单请求条数上限整体 400）
 - 连通性探测（probe_embedding：设置面板「连接测试」用，结构化报错不静默）
 - 连接可跟随文本模型（follow_llm：复用写作/分析模型槽的 api_key+base_url）
   或自管 api_key/base_url（见 model_config.get_embedding_connection）
@@ -131,6 +133,14 @@ def _supports_dimensions_param(model: str) -> bool:
     return model.lower().startswith(_DIMENSIONS_PARAM_PREFIXES)
 
 
+# 单次 embedding 请求的 input 条数上限（批量透明分批粒度）。
+# 来源：当前配置的 qwen3.7-text-embedding（DashScope 兼容端点）实测单批
+# >20 条直接 400「batch size is invalid, it should not be larger than 20」
+# ——docs/reports/semantic-threshold-calibration.md §6.1；其他已知模型上限
+# 不低于此（text-embedding-v3/v4 为 25，待证），20 对全部已知模型安全。
+EMBEDDING_BATCH_SIZE = 20
+
+
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     """余弦相似度（纯函数）：空向量/零模返回 0.0。
 
@@ -160,8 +170,30 @@ async def _request_embedding(
     """底层调用：成功返回向量；网络/鉴权/参数错误直接抛异常（调用方决定降级或上报）。
 
     input 兼容单文本（str → 单向量）与批量（List[str] → 按输入序对齐的
-    向量列表，OpenAI 兼容协议一次请求带全量 input）。
+    向量列表，OpenAI 兼容协议单请求带一批 input）。
+
+    批量透明分批（2026-09-24 生产修复，校准报告 §6.1）：List 输入按
+    EMBEDDING_BATCH_SIZE 切分、逐批串行请求（批间不并发，避免触发限流）、
+    按输入序拼接，签名与返回形状不变，对调用方完全透明。存储门控路径
+    （get_embeddings）与纯 API 路径（get_embeddings_api_only）均经本函数
+    发送，分批天然同时覆盖两者（单文本 get_embedding/probe_embedding 传
+    str 不进分批支路，行为零变化）。单批失败直接抛异常中止后续批次——
+    与分批前「单次请求失败=整体失败」的错误语义一致，由调用方统一降级
+    为全空（不产出半截结果，避免部分段落静默漏检）。
     """
+    if isinstance(text, list) and len(text) > EMBEDDING_BATCH_SIZE:
+        vectors: List[list] = []
+        for start in range(0, len(text), EMBEDDING_BATCH_SIZE):
+            vectors.extend(await _request_embedding(
+                list(text[start:start + EMBEDDING_BATCH_SIZE]),
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                dimensions=dimensions,
+                timeout=timeout,
+            ))
+        return vectors
+
     call_kwargs: dict = {"model": model, "input": text}
     if _supports_dimensions_param(model):
         call_kwargs["dimensions"] = dimensions
@@ -234,7 +266,9 @@ async def get_embeddings(
     model: Optional[str] = None,
     timeout: int = 120,
 ) -> List[list]:
-    """批量版 get_embedding：一次 API 调用带全量 input（省往返次数）。
+    """批量版 get_embedding：批量请求经 _request_embedding 按
+    EMBEDDING_BATCH_SIZE 透明分批（≤20 条仍为单次调用，超限切批串行
+    拼接），签名与返回形状不变。
 
     静默降级风格与 get_embedding 一致：
     - 空列表 → []；未配置（is_embedding_configured() False，含 SQLite
@@ -301,7 +335,7 @@ async def get_embeddings_api_only(
     纪律：调用方不得把产物写向量列（写侧永远走 get_embeddings——SQLite
     下它正确地空转省钱，本入口放行是因为比对面根本不碰存储）。降级行为
     与 get_embeddings 完全一致（未配置/异常/条数不齐/维度不符 → 对应位
-    置 []）。
+    置 []）；分批同经 _request_embedding 透明覆盖（EMBEDDING_BATCH_SIZE）。
     """
     if not texts:
         return []

@@ -8,8 +8,8 @@ semantic_overlap_hits 合成向量单测（纯算法——monkeypatch 掉 embedd
 合成向量精确控制余弦（2 维 [1, t] 向量族，cos([1,0],[1,t]) = 1/sqrt(1+t²)）：
 - [1,0] × [1,0]    → 1.0（平行，必命中）
 - [1,0] × [0,1]    → 0.0（正交，必不命中）
-- [1,0] × [1,0.75] → 0.8（阈值 0.80 之上，命中——≥ 含等号）
-- [1,0] × [1,0.85] → ≈0.762（阈值之下，不命中）
+- [1,0] × [1,0.75] → 0.8（阈值 0.78 之上，命中）
+- [1,0] × [1,0.85] → ≈0.762（阈值 0.78 之下，不命中）
 
 覆盖：未配置零调用直返 / 空输入与短目标过滤 / 阈值边界 / 正交不中 /
 best-target 选最近者 / 目标向量缓存（二次比对目标零重嵌、段向量每次新鲜）
@@ -82,16 +82,16 @@ def test_empty_inputs_safe(monkeypatch):
 
 
 def test_threshold_boundary_hit_and_miss(monkeypatch):
-    """cos=0.8（≥0.80）命中、≈0.762 不命中；命中带 segment/target/similarity。"""
+    """cos=0.8（≥0.78）命中、≈0.762 不命中；命中带 segment/target/similarity。"""
     fake = FakeEmbedder(mapping={
         SEG: [1.0, 0.0],
-        "恰在阈值上的节拍": [1.0, 0.75],
+        "高过阈值的节拍": [1.0, 0.75],
     })
     _patch(monkeypatch, fake)
-    hits = _run(SEG, ["恰在阈值上的节拍"])
+    hits = _run(SEG, ["高过阈值的节拍"])
     assert len(hits) == 1
     assert hits[0]["segment"] == SEG
-    assert hits[0]["target"] == "恰在阈值上的节拍"
+    assert hits[0]["target"] == "高过阈值的节拍"
     assert hits[0]["similarity"] == 0.8
 
     fake2 = FakeEmbedder(mapping={

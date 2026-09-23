@@ -295,7 +295,7 @@ services/api/transport  ← 底层 HTTP
 
 - **加 API 端点**：`schemas/` 定义 → `routes/` 加模块（`chapter_generation` 是包，在包内加并在 `__init__.py` 合并）→ `main.py` 注册（如未注册）→ 前端 `services/api/domain/` 加调用。⚠ NLE-ADF 3.0 的 adaptive 端点 schema 在 `routes/chapter_generation/adaptive/schemas.py`（Pydantic BaseModel）。
 - **改数据库模型**：`backend/models/` 对应领域子模块改 ORM（新表进对应模块；⚠ 同一 flush 新建父子表必须补 relationship 依赖边——flush 跨表排序按 relationship 而非裸 FK）→ `database.py` 的 `MIGRATIONS` 加列迁移 → 重启自动应用。⚠ 新增**书籍级**表还须进 `services/book_archive/tables.py` 注册表（否则备份/还原静默漏表）。
-- **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建），建议查 `logs/prompt_log_*.json` 验证。
+- **改 Prompt**：定位 `services/prompts/` 下文件，改后即时生效（无需重建）。**纪律（2026-09-24 起）**：动 stitch/dock prompt 措辞的提交必须递增 `services/prompts/prompt_version.py` 的 `PROMPT_VERSION`（进 trace 与快照，供跨版本归因）；stitch 基座文案有 SHA256 快照锁（`test_stitch_base_snapshot.py`，改一字即红，更新程序见该文件头注释）；改版前后用 `scripts/prompt_snapshot.py` + `scripts/prompt_replay.py` 做快照对拍与双跑对照（设计稿 `docs/next-phase/06-prompt-governance-hardening.md`）。
 - **前端加 Feature**：`features/` 建目录，按 `containers/`+`presentation/` 分层，经 `services/api/domain` 通信。
 - **改四大领域前先读领域档案**：见顶部「领域档案索引」表（`docs/agent/*.md` + `scripts/README.md`）。
 

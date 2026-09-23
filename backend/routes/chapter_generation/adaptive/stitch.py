@@ -68,6 +68,7 @@ from backend.services.prompts.adaptive_prompts import (
     build_outline_expand_prompt,
     pick_subject_lock,
 )
+from backend.services.prompts.prompt_version import PROMPT_VERSION
 from backend.services.utils.logging import get_runtime_logger
 from backend.services.utils.sse import build_sse_event, build_sse_error
 from backend.services.validation.ghost_guard import check_ghost_text
@@ -1103,6 +1104,9 @@ async def stitch_ghost(
             trace_event(
                 "adaptive_stitch_complete",
                 mode=request.mode,
+                # F2d 全局 prompt 版本：归因本次生成用的 prompt 措辞版
+                # （快照对拍 scripts/prompt_snapshot.py 的对照锚点）
+                prompt_version=PROMPT_VERSION,
                 target_chars=request.target_chars,
                 actual_chars=len(text),
                 warnings=len(ghost_warnings),

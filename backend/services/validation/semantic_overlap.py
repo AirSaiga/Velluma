@@ -34,8 +34,10 @@ from backend.services.style.semantic_match import _split_segments
 
 logger = logging.getLogger(__name__)
 
-# 抢拍 shadow 阈值占位（未经实测校准——分离度校准后定档；shadow 期只攒分布）
-BEAT_RUSH_SHADOW_THRESHOLD = 0.80
+# 抢拍 shadow 阈值定档 2026-09-24，依据 docs/reports/semantic-threshold-calibration.md：
+# 改写式抢拍 6 对全部 ≥0.780、同章硬负例最大 0.745（分离度 +0.036）——0.78 取
+# 建议带 0.76~0.78 最保守端（6/6 全抓 0 误报；0.80 漏 1/6）。shadow 期只攒分布。
+BEAT_RUSH_SHADOW_THRESHOLD = 0.78
 # 桥接后文撞车 shadow 阈值占位（2026-09-23 同纪律：碎片 8-16 字 vs 后文分句，
 # 短文本相似度分布与节拍闸不同——独立常量分开校准，勿与 BEAT_RUSH 混用）
 SUFFIX_OVERLAP_SHADOW_THRESHOLD = 0.80

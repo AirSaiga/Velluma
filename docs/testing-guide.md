@@ -7,13 +7,15 @@
 
 ---
 
-## 1. 当前覆盖面（2026-09-19 基线）
+## 1. 当前覆盖面（2026-09-24 基线）
 
 | 面 | 数量 | 运行方式 |
 |---|---|---|
-| 后端 pytest | **1618 项**（124 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
+| 后端 pytest | **1646 项**（126 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
 | 前端 vitest | 416 项（48 文件） | `cd frontend && npm run test` |
 | 前端类型 | vue-tsc 零错 | `cd frontend && npm run typecheck` |
+
+- 2026-09-24 基线变动（next-phase 06 prompt 治理批）：+28 后端（`services/prompts/test_stitch_base_snapshot.py` stitch 基座 SHA256 快照锁 17 块 +20；`services/llm/test_embedding_batching.py` embedding 20 条/批透明分批对拍 +8）；配套阈值定档落码（扫描 0.72 / 抢拍 shadow 0.78，依据 `docs/reports/semantic-threshold-calibration.md`）与新工具 `scripts/prompt_snapshot.py`/`prompt_replay.py`（快照对拍+双跑对照）。
 
 - 2026-09-23 基线变动（语义后文闸 shadow 批）：+3 后端（`test_governance.py` registry 登记对拍 +1；`test_dock_onstage.py` 桥接语义撞车 shadow 双跑「命中落台账不丢件」+ 无 suffix 零调用 +2）；另 +1 系工作区既有 vendor_profiles 批（非本批）。前端 416/48 实测（指南原记 413/47 系基线陈旧，非本批改动——本批零前端代码）。
 

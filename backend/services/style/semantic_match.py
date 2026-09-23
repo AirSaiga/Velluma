@@ -35,8 +35,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   False）→ 立即返回 []，零网络调用零成本——SQLite 默认路径行为逐字节
   不变。
 - 全程 try/except：任何失败返回 []，绝不阻塞完稿审计。
-- 阈值/上限常量未经真实写作校准（见校准脚本
-  scripts/calibrate_semantic_threshold.py），命中一律按「疑似」呈现。
+- 阈值已按实测分离度定档（2026-09-24，
+  docs/reports/semantic-threshold-calibration.md）；上限类常量仍为工程估计。
+  命中一律按「疑似」呈现。
 
 切段口径：与文风指纹同一把尺子（fingerprint.split_sentences 句切），
 超长句再按逗号类标点二次细分——段太长会稀释 embedding 信号。
@@ -59,10 +60,13 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# 常量（待实测校准——scripts/calibrate_semantic_threshold.py）
+# 常量（阈值已定档 2026-09-24 见下；上限类仍为工程估计）
 # ============================================================
 
-SEMANTIC_HIT_THRESHOLD = 0.78        # 命中阈值（变体句/无关句分离度待校准）
+# 定档 2026-09-24，依据 docs/reports/semantic-threshold-calibration.md：
+# 0.72 抓 9/20 换字变体、干净负例（106 条剔 2 真陈词）0 误报，距干净负例最大
+# 0.630 有 ≥0.09 安全边距——建议带 0.70~0.72 取保守端。
+SEMANTIC_HIT_THRESHOLD = 0.72
 SEMANTIC_SCAN_MAX_SEGMENTS = 200     # 单次扫描段数上限（防超长章拖爆批量）
 SEMANTIC_MIN_PATTERN_CHARS = 4       # 更短的词靠精确匹配已覆盖，不进语义流
 SEMANTIC_SEGMENT_MAX_CHARS = 60      # 超长段按逗号类标点二次细切的门槛

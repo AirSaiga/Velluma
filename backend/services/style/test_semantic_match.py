@@ -25,8 +25,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 合成向量精确控制余弦值（2 维 [1, t] 向量族，cos = 1/sqrt(1+t²)）：
 - [1,0] × [1,0] → 1.0（平行，必命中）
 - [1,0] × [0,1] → 0.0（正交，必不命中）
-- [1,0] × [1,0.76] → ≈0.796（阈值 0.78 之上，命中）
-- [1,0] × [1,0.85] → ≈0.762（阈值之下，不命中）
+- [1,0] × [1,0.91] → ≈0.740（阈值 0.72 之上，命中）
+- [1,0] × [1,1.02] → ≈0.700（阈值之下，不命中）
 
 覆盖：阈值边界 / is_regex 与短模式跳过 / 长句二切与段数上限 /
 每 pattern 3 段与总 20 截断 / 模式向量缓存命中（二次扫描零模式请求）/
@@ -108,11 +108,11 @@ def test_empty_prohibitions_and_text_safe(monkeypatch):
 # ============================================================
 
 def test_threshold_boundary_hit_and_miss(monkeypatch):
-    """cos ≈0.796（≥0.78）命中、≈0.762（<0.78）不命中；hit 六键齐全。"""
+    """cos ≈0.740（≥0.72）命中、≈0.700（<0.72）不命中；hit 六键齐全。"""
     fake = FakeEmbedder(mapping={
         "深度禁忌短语": [1.0, 0.0],
-        "这句很接近了": [1.0, 0.76],   # cos = 1/sqrt(1+0.5776) ≈ 0.7963
-        "这句稍远一点": [1.0, 0.85],   # cos = 1/sqrt(1+0.7225) ≈ 0.7622
+        "这句很接近了": [1.0, 0.91],   # cos = 1/sqrt(1+0.8281) ≈ 0.7396
+        "这句稍远一点": [1.0, 1.02],   # cos = 1/sqrt(1+1.0404) ≈ 0.7001
     })
     _patch(monkeypatch, fake, configured=True)
     ps = ProhibitionSet((ProhibitionEntry(
@@ -124,7 +124,7 @@ def test_threshold_boundary_hit_and_miss(monkeypatch):
     hit = hits[0]
     assert hit["segment"] == "这句很接近了"
     assert hit["pattern"] == "深度禁忌短语"
-    assert hit["similarity"] == pytest.approx(0.796, abs=0.001)
+    assert hit["similarity"] == pytest.approx(0.740, abs=0.001)
     assert hit["severity"] == "blocker"
     assert hit["alternative"] == "换个写法"
     assert hit["source"] == "negative_list"
