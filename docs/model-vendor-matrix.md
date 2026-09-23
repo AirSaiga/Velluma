@@ -1,6 +1,6 @@
-# 模型厂商能力矩阵（2026-08-28 调研定稿；2026-09-10 修订 DeepSeek 节）
+# 模型厂商能力矩阵（2026-08-28 调研定稿；2026-09-10 DeepSeek、2026-09-22 MiMo 修订）
 
-> 五家国内主流厂商 API 参数规范的全量调研记录，`backend/services/llm/vendor_profiles.py`（采样整形/模型规则）与 `reasoning_adapter.py`（思考方言）的唯一事实源。初版调研日期 2026-08-28，2026-09-10 随 DeepSeek-V4.1 Flash 发布修订 DeepSeek 节；全部结论有官方文档出处；厂商协议随代际变化，**改这里必须同步改代码并跑 `test_vendor_profiles.py`**。
+> 五家国内主流厂商 API 参数规范的全量调研记录，`backend/services/llm/vendor_profiles.py`（采样整形/模型规则）与 `reasoning_adapter.py`（思考方言）的唯一事实源。初版调研日期 2026-08-28，2026-09-10 随 DeepSeek-V4.1 Flash 发布修订 DeepSeek 节，2026-09-22 随 MiMo-V2.6 发布修订 MiMo 节；全部结论有官方文档出处；厂商协议随代际变化，**改这里必须同步改代码并跑 `test_vendor_profiles.py`**。
 >
 > **范围外补充（2026-09-16）**：本地端点（Ollama/vLLM/LM Studio，厂商目录 `local` 条目）不在五厂商矩阵内——思考关闭方言为 OpenAI 系顶层 `reasoning_effort:"none"`（Ollama `/v1` 实测修复，`4666ca9`，实现在 `reasoning_adapter.py`；api_key 须占位值否则判未配置回退）；槽位路由见 `docs/reports/model-slot-coverage-report.md`。
 >
@@ -9,7 +9,7 @@
 ## 零、跨厂商共性（先读这个）
 
 1. **思考方言已收敛**：DeepSeek V4 / MiMo / Kimi K2.x / GLM 4.5+ 统一走 `thinking: {"type": "enabled"|"disabled"}`（OpenAI SDK 经 `extra_body` 传）；**Qwen 是独苗** `enable_thinking`（布尔）+ `thinking_budget`（整数）。OpenAI/OpenRouter 各自是 `reasoning_effort` / 嵌套 `reasoning`。
-2. **默认思考开的厂商占多数**：DeepSeek V4（默认 effort=high）、MiMo v2.5 系、Kimi K 系、GLM 4.7/5.x、Qwen 3.5+ 商业版全部默认开——「不表态=开」是常态，**显式关闭纪律（REASONING_DISABLED）是生死线**。仅 Qwen 上代商业版（qwen-plus/flash/turbo/qwen3-max）默认关。
+2. **默认思考开的厂商占多数**：DeepSeek V4（默认 effort=high）、MiMo 全系（V2.5/V2.6）、Kimi K 系、GLM 4.7/5.x、Qwen 3.5+ 商业版全部默认开——「不表态=开」是常态，**显式关闭纪律（REASONING_DISABLED）是生死线**。仅 Qwen 上代商业版（qwen-plus/flash/turbo/qwen3-max）默认关。
 3. **思考模式吃采样参数**：DeepSeek（文档明言不支持）、MiMo（静默锁 1.0/0.95）、Kimi K 系（schema 不含，传了 400）——思考开启时采样参数要么无效要么报错，一律不发。
 4. **`max_tokens` 处于废弃进程中**（Kimi 已弃用→`max_completion_tokens`、Qwen 即将废弃），但五家 OpenAI 兼容层目前均容忍 `max_tokens`；维持发 `max_tokens`，只做记录。
 5. **上下文缓存全部隐式自动**（DeepSeek 硬盘缓存 / Kimi >256 token / Qwen >1024 token / GLM 前缀复用 / MiMo KVCache）——B6 稳定前缀纪律直接受益，无需客户端配置。
@@ -64,17 +64,17 @@
 | 缓存 | 隐式自动（≥1024 token 前缀），命中=input 单价 20%（3.8 系例外未公布） |
 | 定价（元/M，北京） | 3.8-max：12/36；3.7-plus：2/8（思考 8/8，256K-1M 阶梯翻倍）；3.8-flash：0.8/2.7；3.7-flash：0.2-1.2/0.8-4.8；qwen-flash 最便宜 0.15/1.5。免费形式=每模型 100 万 token 90 天赠额 |
 
-## 五、小米 MiMo（api.xiaomimimo.com）
+## 五、小米 MiMo（api.xiaomimimo.com）（2026-09-22 修订）
 
 | 项 | 值 |
 |---|---|
 | base_url | `https://api.xiaomimimo.com/v1`（文档站 mimo.mi.com，控制台 platform.xiaomimimo.com） |
-| 模型 | `mimo-v2.5-pro`（1M ctx/128K out）、`mimo-v2.5`（1M，多模态）。**无 v3；v2 系已 2026-06-30 下线** |
+| 模型 | 2026-09-21 V2.6 系发布：`mimo-v2.6-pro`（1M ctx/128K out，全模态，开源旗舰）、`mimo-v2.6-flash`（1M/128K，官方称全面超 v2.5-pro）、`mimo-v2.6-pro-ultraspeed`（推理提速至 20×，限流需联系商务，无批量 API）。**v2.5/v2.5-pro 将于 2026-10-21 10:00 下线（与 V2.6 同价，直接换名迁移）**；v2 系已 2026-06-30 下线；V3 未发布 |
 | 思考 | `thinking: {"type": enabled/disabled}`（唯一方言，实测+官方双证）；**默认开**；无 effort/budget 字段（思考长度只能靠 max_completion_tokens 总闸） |
 | 采样 | temperature [0, 1.5] 默认 1.0 / top_p [0.01, 1.0] 默认 0.95 / 双 penalty [-2,2]；**思考模式下温度/top_p 静默锁 1.0/0.95** |
 | token 参数 | 官方表用 `max_completion_tokens`（pro 默认 131072，含思考 token）；`max_tokens` 被兼容层容忍（实测在用） |
 | response_format | text / json_object |
-| 定价（元/M） | v2.5-pro：命中 0.025/未命中 3.0/输出 6.0；v2.5：0.02/1.0/2.0。KVCache 服务端自动，官方称平均命中率 93% |
+| 定价（元/M） | V2.6 与 V2.5 持价：pro 档（v2.6-pro/v2.5-pro）命中 0.025/未命中 3.0/输出 6.0；flash 档（v2.6-flash/v2.5）0.02/1.0/2.0；v2.6-pro-ultraspeed 0.25/30/60（10 倍价买速度）。V2.6 pro/flash 另支持批量 API 半价（ultraspeed 与 V2.5 系不支持）。KVCache 服务端自动，官方称平均命中率 93% |
 
 ## 六、对代码的三条直接指令
 

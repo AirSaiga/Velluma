@@ -277,6 +277,13 @@ class TestVendorCatalog:
         assert {"deepseek-flash", "deepseek-v4-pro"} <= model_ids
         assert "deepseek-v4-flash" not in model_ids  # 已并入 deepseek-flash（旧名暂时路由）
 
+    def test_mimo_models_listed(self):
+        """2026-09-21 V2.6 系上线（与 V2.5 同价）；v2.5 系 2026-10-21 下线前保留倒计时条目。"""
+        mimo = next(v for v in vendor_catalog() if v["id"] == MIMO)
+        model_ids = {m["id"] for m in mimo["models"]}
+        assert {"mimo-v2.6-flash", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"} <= model_ids
+        assert {"mimo-v2.5", "mimo-v2.5-pro"} <= model_ids  # 10-21 下线后随目录一并移除
+
     def test_json_serializable(self):
         import json
         json.dumps(vendor_catalog(), ensure_ascii=False)  # 不抛即通过

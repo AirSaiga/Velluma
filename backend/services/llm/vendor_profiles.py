@@ -9,7 +9,7 @@
 # (at your option) any later version.
 
 """
-LLM 厂商能力档案（2026-08-28 五厂商调研定稿；2026-09-10 DeepSeek V4.1 Flash 修订）。
+LLM 厂商能力档案（2026-08-28 五厂商调研定稿；2026-09-10 DeepSeek V4.1 Flash、2026-09-22 MiMo V2.6 修订）。
 
 唯一事实源：docs/model-vendor-matrix.md。职责三件事：
 1. **provider 识别**（detect_provider）：base_url 域名 → 厂商 id。
@@ -22,7 +22,7 @@ LLM 厂商能力档案（2026-08-28 五厂商调研定稿；2026-09-10 DeepSeek 
    模型候选、能力提示），GET /system/model-catalog 消费。
 
 设计纪律：
-- 档案数据是「截至 2026-09-10 的官方文档实证」，厂商协议随代际变化——
+- 档案数据是「截至 2026-09-22 的官方文档实证」，厂商协议随代际变化——
   改这里必须同步改 docs/model-vendor-matrix.md 并跑 test_vendor_profiles.py。
 - 不做绝对正确性保证：shape 之后仍可能有未知锁定，由自适应层兜底。
 - 纯函数、零副作用、零 LLM。
@@ -213,10 +213,21 @@ VENDORS: Dict[str, VendorProfile] = {
         temperature_range=(0.0, 1.5), top_p_range=(0.01, 1.0),
         thinking_drops=("temperature", "top_p"),
         notes=("思考模式下温度/top_p 被服务端静默锁为 1.0/0.95——本应用思考开启时自动不发采样参数。",
-               "深度思考默认开启；小预算调用务必显式关闭（本应用已自动处理）。"),
+               "深度思考默认开启；小预算调用务必显式关闭（本应用已自动处理）。",
+               "2026-09-21 V2.6 系列上线（价格与 V2.5 持平）；v2.5/v2.5-pro 将于 10-21 10:00 下线。"),
         models=(
-            {"id": "mimo-v2.5", "label": "MiMo-v2.5（推荐）", "note": "1M；¥1/¥2 每百万"},
-            {"id": "mimo-v2.5-pro", "label": "MiMo-v2.5-pro", "note": "1M；¥3/¥6 每百万"},
+            # 2026-09-21 V2.6 发布（与 V2.5 同价）：flash 全面超上代 pro 成为性价比档；
+            # v2.5 系沿用 DeepSeek v4-pro 先例保留目录 + 下线倒计时标注
+            {"id": "mimo-v2.6-flash", "label": "MiMo-v2.6-flash（推荐）",
+             "note": "1M 上下文/128K 输出；¥1/¥2 每百万；全面超 v2.5-pro"},
+            {"id": "mimo-v2.6-pro", "label": "MiMo-v2.6-pro（旗舰·全模态）",
+             "note": "1M 上下文/128K 输出；¥3/¥6 每百万；开源旗舰"},
+            {"id": "mimo-v2.6-pro-ultraspeed", "label": "MiMo-v2.6-pro-ultraspeed（极速档）",
+             "note": "推理提速至 20×；¥30/¥60 每百万；限流需联系商务定制"},
+            {"id": "mimo-v2.5", "label": "MiMo-v2.5（下线倒计时）",
+             "note": "10-21 10:00 下线，同价迁 mimo-v2.6-flash"},
+            {"id": "mimo-v2.5-pro", "label": "MiMo-v2.5-pro（下线倒计时）",
+             "note": "10-21 10:00 下线，同价迁 mimo-v2.6-pro"},
         ),
         model_rules=(),
     ),
