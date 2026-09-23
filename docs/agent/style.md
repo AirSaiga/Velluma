@@ -106,7 +106,7 @@
 - 挂点**仅在** `/adaptive/finish` 报告 `semantic_hits`（前端报告区「疑似 AI 味变体」块，作者裁决）；**不进收件箱/scan-negative/任何 SSE 流式路径**（红线）。
 - `is_embedding_configured()` 门控：未配置/SQLite 默认路径第一时刻短路直返 []，行为逐字节零变化。
 - 切段与指纹同一把尺子（split_sentences + 超长句逗号细切）；批量向量走 `embedding.get_embeddings`（单次全量 input）；模式向量进程级缓存（key 含 model/dims/patterns）。
-- 阈值 0.78 **未经实测校准**；校准工具 `scripts/calibrate_semantic_threshold.py`（陈词×变体句/无关句分离度矩阵，手动跑不进 CI）。
+- 阈值 **0.72**（2026-09-24 实测定档：抓 9/20 变体、干净负例 0 误报，依据 `docs/reports/semantic-threshold-calibration.md`；校准工具 `scripts/calibrate_semantic_threshold.py`，手动跑不进 CI）。
 - 单测 `test_semantic_match.py`（14 项合成向量锁行为）。
 
 ## 章级特例卡（整卡覆盖语义）

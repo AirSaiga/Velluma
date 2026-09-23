@@ -266,7 +266,7 @@
 - **两级独立开关**：status 管进帧可见性（ghost_guard local_only 读 registry.status_of()，不硬编码）；Constraint.repair 字段管返修资格（fail-closed 缺省 none，repair_eligible 三重门；canon_leak/secret_leak=rewrite 初始登记）。
 - **终检移位 wash P2 之后**（旧链修补稿不重检的既有洞已堵）；违规原稿不进任何可回退通道（wash original_text 存过检稿）。
 - **第六检 location_jump**（shadow）：转场动词 11 词 + ≤2 字填充紧邻作用域外地点名；闭包=场景钉自身+祖先+后裔；非 world 书/无场景钉/无地点整检关闭零变化；语料 location_jump_cases.json 准入即测试。
-- **语义抢拍闸全 shadow 双跑**（`services/validation/semantic_overlap.py` 通用 A-vs-B 余弦比对）：纯 API 比对走 `get_embeddings_api_only()`（绕过 SQLite 存储门控；写侧仍走 get_embeddings 正确空转省钱）；阈值 0.80 占位偏高待校准；dock 语义版 + ≥3 字面加强版双跑落台账、stitch 幽灵 vs 就近节拍 shadow；转正只走返修不切除。
+- **语义抢拍闸全 shadow 双跑**（`services/validation/semantic_overlap.py` 通用 A-vs-B 余弦比对）：纯 API 比对走 `get_embeddings_api_only()`（绕过 SQLite 存储门控；写侧仍走 get_embeddings 正确空转省钱）；阈值已实测定档（2026-09-24：beat_rush 0.78、suffix 撞车 0.80 维持，依据 `docs/reports/semantic-threshold-calibration.md`）；dock 语义版 + ≥3 字面加强版双跑落台账、stitch 幽灵 vs 就近节拍 shadow；转正只走返修不切除。⚠ embedding 批量超 20 条会整体 400 静默全空——`embedding.py` 已透明分批（EMBEDDING_BATCH_SIZE=20），改发送路径勿绕过。
 - GHOST_DONE 增 repaired/breaker_open 字段 + 前端 GhostRepairedChip「已自动修正 N 处穿帮」（薄荷系只展示计数不暴露原稿）。
 
 ## 画布即事实源

@@ -446,7 +446,8 @@ E2/refiner bug 可提前单独修；S3 依赖 S2（试听走真实注入管线�
     瞬时故障毒化）。
   - 上限：每 pattern ≤3 段、总命中按相似度降序截 20、短模式（<4 字）与
     正则条目不进语义流（精确匹配已覆盖/句式形状语义不同）。
-  - **阈值 0.78 未经实测校准**（遗留风险：可能漏抓或误报）——校准脚本
+  - **阈值 0.72**（2026-09-24 实测定档：抓 9/20 变体、干净负例 0 误报，
+    依据 `docs/reports/semantic-threshold-calibration.md`）——校准脚本
     `scripts/calibrate_semantic_threshold.py`（约 10 条种子陈词 × 手写同义
     变体句 vs 无关句的相似度矩阵与分离度建议，手动小工具不进 CI；
     只调 embedding API 不碰向量库，不受 SQLite 方言门控影响）。

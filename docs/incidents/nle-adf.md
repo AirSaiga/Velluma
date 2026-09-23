@@ -208,3 +208,9 @@
 - **静默失败反馈（审计 B1/B3/B4/B5）**：空章 Tab（三层静默）→ 正文<4 字明说一次「先写满 4 个字，或点『⚡ 写个开头』」并跳过 summon（激活阈值提成常量 MIN_ACTIVATE_CHARS=4 双处同口径）；requestContinue 空 fragment → reportWarn 一次；Ctrl+Enter 不满足沉淀 → 吞键但解释一次（仍吞：作者意图是沉淀不插换行）；走向舱数字键非写作态 → inAuthoringContext 追加 beatDockVisible（舱开着=写作上下文，Esc/数字键不再死在舱上）+ 关舱解释一次。各提示均每章/每会话一次闸防刷屏。
 - placeholder 双态：AI 辅助关闭时不再承诺 Space 续写（审计 §6-E）；开启态 Alt+N 让位给 Tab（卡片舱唯一入口更该占位）。
 - 验证：vue-tsc 净 / vitest 48 文件 416 项全绿（413 基线+新增 3）。未做（另属产品决策拍板）：B6 走向卡鼠标路径门控、B7 `[[` 无门、assistEnabled 总开关边界、新手 tour。
+
+### 语义阈值定档与 embedding 批量静默失效（2026-09-24，next-phase 06 F3）
+
+- 三个语义阈值（扫描 0.78 / beat_rush 0.80 / suffix 0.80）原为拍脑袋占位；经 `scripts/calibrate_semantic_threshold.py` 真实语料分离度校测定档：**扫描 0.72**（抓变体 9/20、干净负例 0 误报）、**beat_rush 0.78**（改写式抢拍 6/6 全抓，0.80 漏 1/6）、**suffix 维持 0.80**（0.82 断崖至 3/8）。全过程见 `docs/reports/semantic-threshold-calibration.md`。
+- **事故级发现**：该校准顺带实锤 qwen3.7-text-embedding 单批上限 20 条——生产 `_request_embedding` 不分批整包直发，>20 条整体 400 被吞成**全空向量且零报错**；语义扫描（finish，可达 200 段）与两个语义 shadow 检对长文**此前整体失效**。这是「shadow 检长期零命中」的根因之一，再次印证前科教训：**零命中不等于零事件，可能是采集链静默全灭——新检第一轮必须实测确认命中路径可达**。修：`embedding.py` 透明分批（EMBEDDING_BATCH_SIZE=20，串行不并发、单批失败整体降级同既有语义），8 项对拍 + 真实 API 冒烟 25 条通过。
+- 结构性遗留（降阈值治不了，报告 §6）：铺陈式抢拍语义上合法抓不住；8-16 字短碎片 vs 长句余弦天花板 0.6-0.87。

@@ -274,7 +274,12 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   SQLite 下它正确地空转省钱）。实测分离度：近义转述对 0.695 vs 无关句
   0.29——**阈值占位 0.80 偏高**（转述对都过不了），转正前必须用真实
   卡片×节拍语料跑分离度校准（scripts/calibrate_semantic_threshold.py
-  同思路）定档；
+  同思路）定档；**已执行（2026-09-24）**：实测定档 beat_rush=0.78
+  （改写式抢拍 6/6 全抓 0 误报）、suffix=0.80 维持（0.82 断崖）、
+  style 扫描 0.72——全过程与遗留边界见
+  `docs/reports/semantic-threshold-calibration.md`；⚠ 同批修复
+  embedding 单批 >20 条整体 400 静默全空（`embedding.py` 透明分批），
+  此前语义检对长文整体失效——shadow 零命中数据自此才可信；
 - dock 侧：≥4 字字面闸保持 live 不动；语义版与「≥3 字+动词重合」加强版
   shadow 双跑落台账对比，攒数据后再转正（丢件由既有 4-6 枚过采样吸收）；
 - stitch 侧：幽灵全文 vs 就近节拍语义重合，shadow 只落台账；转正后只走
@@ -364,7 +369,8 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   （纯字符串零算力）。origin=2026-09-09 FIM 红队 R2：rehash/beat_overlap
   只防前文与大纲，后文防线此前缺位。
 - **`dock-bridge-overlap-semantic`**（shadow，gate，2026-09-23）：桥接机位
-  与后文锚**语义**重合（向量 ≥`SUFFIX_OVERLAP_SHADOW_THRESHOLD` 占位 0.80）
+  与后文锚**语义**重合（向量 ≥`SUFFIX_OVERLAP_SHADOW_THRESHOLD` = 0.80，
+  2026-09-24 校准实测维持——6/8 抓 0 误报恰在甜点，0.82 断崖至 3/8）
   → 预演后文疑点，只落台账不丢件。when=embedding API 已配置且 suffix_anchor
   非空。origin=2026-09-22 实测：舱内「明姐在围裙上擦干手走向门口」预演后文
   「明姐端过来脸盆」——字面重合 <4 字过词法闸，与改写式抢拍（§11.6）同族

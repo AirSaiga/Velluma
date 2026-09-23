@@ -49,7 +49,7 @@ stitch 链是**先生成后播放**（非流式生成完整文本再逐 chunk �
 
 ### P4 语义 shadow
 
-`semantic_scan_text`（embedding 比对 blocker 模式向量，抓「换字逃逸」变体）前移到 ghost 链，**shadow 纪律**：只落事件（trace `ghost_semantic_shadow` + style_events），不改文不弹 chip；未配置 embedding（SQLite 默认路径）内部零调用短路。攒 2-4 周数据与 finish 扫描对拍校准 0.78 阈值后，再决定升 chip 警示——**ghost 链永不做语义自动替换**。
+`semantic_scan_text`（embedding 比对 blocker 模式向量，抓「换字逃逸」变体）前移到 ghost 链，**shadow 纪律**：只落事件（trace `ghost_semantic_shadow` + style_events），不改文不弹 chip；未配置 embedding（SQLite 默认路径）内部零调用短路。finish 扫描阈值已定档 0.72（2026-09-24 实测，见 `docs/reports/semantic-threshold-calibration.md`）；攒 2-4 周数据与 finish 扫描对拍后再决定 ghost 链是否升 chip 警示——**ghost 链永不做语义自动替换**。
 
 ## 四、选择平面（P5/P6）
 
