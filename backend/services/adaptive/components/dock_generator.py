@@ -603,6 +603,8 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
             "onstage_violation": "dock-onstage-boundary",
             # 桥接撞车（2026-09-09 FIM）：live 丢件——下文事实是禁区
             "suffix_overlap": "dock-bridge-overlap",
+            # 桥接后文语义撞车（2026-09-23 shadow 双跑）：只落台账不丢件
+            "suffix_overlap_semantic": "dock-bridge-overlap-semantic",
         }
 
         def _on_drop(reason: str, text: str = "", outcome: str = "drop") -> None:
@@ -655,6 +657,31 @@ async def run(chapter_id: str, db, model_snapshot: Dict, budget_tokens: int = 15
                         _on_drop("beat_rush_semantic", _pt, outcome="hit")
                     if _beats_overlap_hit(_pt, outline_nearby, n=3):
                         _on_drop("beat_overlap_n3", _pt, outcome="hit")
+        except Exception:
+            pass  # shadow 埋点绝不阻塞校对环
+
+        # ---- 桥接后文语义撞车 shadow 双跑（2026-09-23）：只落台账不丢件——
+        # 词法 _suffix_overlap_hit 要求 ≥4 字字面重合，抓不住「改写式预演」
+        # （实测舱内「明姐在围裙上擦干手走向门口」预演后文「明姐端过来脸盆」，
+        # 字面重合 <4 字全盲）。与语义抢拍闸同构：向量比对攒校准数据，转正
+        # （registry status 翻 live）后才执法；未配置 embedding / 任何失败静默跳过。
+        try:
+            if suffix_anchor and valid_parts:
+                from backend.services.style.fingerprint import split_sentences
+                from backend.services.validation.semantic_overlap import (
+                    SUFFIX_OVERLAP_SHADOW_THRESHOLD,
+                    semantic_overlap_hits,
+                )
+
+                _sfx_targets = [s for s in split_sentences(str(suffix_anchor)) if len(s) >= 4]
+                for _p in valid_parts:
+                    _pt = str(_p.get("text") or "")
+                    if not _pt or not _sfx_targets:
+                        continue
+                    _sem = await semantic_overlap_hits(
+                        _pt, _sfx_targets, threshold=SUFFIX_OVERLAP_SHADOW_THRESHOLD)
+                    if _sem:
+                        _on_drop("suffix_overlap_semantic", _pt, outcome="hit")
         except Exception:
             pass  # shadow 埋点绝不阻塞校对环
 

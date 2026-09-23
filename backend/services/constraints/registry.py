@@ -301,6 +301,17 @@ REGISTRY: List[Constraint] = [
                "后文防线复用 _beats_overlap_hit 同族 n-gram 判据（纯字符串零算力）",
     ),
     Constraint(
+        id="dock-bridge-overlap-semantic",
+        statement="桥接机位与后文锚（suffix_anchor）语义重合（向量相似度超阈）→ 预演后文疑点"
+                  "（shadow：只落台账不丢件；与 ≥4 字面闸双跑攒校准数据）",
+        layers=[ENFORCE_GATE], enforcement=ENFORCE_GATE, surface=SURFACE_MENU,
+        status=STATUS_SHADOW,
+        when="embedding API 已配置（is_embedding_api_configured）且 suffix_anchor 非空（中插桥接态）",
+        origin="2026-09-22 实测：舱内「明姐在围裙上擦干手走向门口」预演后文「明姐端过来"
+               "脸盆」——字面重合 <4 字过词法闸，改写式预演与改写式抢拍（§11.6）同族盲区；"
+               "转正门槛同 §5，丢件由 4-6 枚过采样吸收",
+    ),
+    Constraint(
         id="dock-onstage-boundary",
         statement="挂件出现非在册实体/资产名 × 上手动词框架（握拿放捡掏开等）→ 在场越界疑点"
                   "（shadow：只落台账不丢件；转正后丢件由过采样吸收）",

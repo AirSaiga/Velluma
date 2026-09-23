@@ -363,6 +363,13 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   禁区，过渡不许提前消耗它。判据复用 `_beats_overlap_hit` 同族 n-gram
   （纯字符串零算力）。origin=2026-09-09 FIM 红队 R2：rehash/beat_overlap
   只防前文与大纲，后文防线此前缺位。
+- **`dock-bridge-overlap-semantic`**（shadow，gate，2026-09-23）：桥接机位
+  与后文锚**语义**重合（向量 ≥`SUFFIX_OVERLAP_SHADOW_THRESHOLD` 占位 0.80）
+  → 预演后文疑点，只落台账不丢件。when=embedding API 已配置且 suffix_anchor
+  非空。origin=2026-09-22 实测：舱内「明姐在围裙上擦干手走向门口」预演后文
+  「明姐端过来脸盆」——字面重合 <4 字过词法闸，与改写式抢拍（§11.6）同族
+  盲区；后文分句作目标集（`split_sentences` 同一把尺子），转正门槛同 §5，
+  丢件由 4-6 枚过采样吸收。
 - **`dock-onstage-boundary`**（shadow，gate）：挂件出现非在册实体/资产名 ×
   上手动词框架（握拿放捡掏开等）→ 在场越界疑点，只落台账不丢件（转正后
   丢件由过采样吸收）。when=世界书且本场在册非空（`onstage_projection`

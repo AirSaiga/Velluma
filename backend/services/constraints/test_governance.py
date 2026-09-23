@@ -48,6 +48,15 @@ def test_unknown_constraint_status_falls_back_live():
     assert status_of("ghost-guard-location-jump") == "shadow"
 
 
+def test_bridge_semantic_shadow_registered():
+    """2026-09-23：语义后文闸 shadow 出生——登记状态=status 快照的数据源，转正只翻 status。"""
+    c = get_constraint("dock-bridge-overlap-semantic")
+    assert c is not None
+    assert c.status == "shadow"
+    assert "gate" in c.layers
+    assert status_of("dock-bridge-overlap-semantic") == "shadow"
+
+
 def test_repair_policy_fail_closed():
     """返修资格 fail-closed：未知 id/未声明一律 none；显式声明才返修。"""
     assert repair_policy("no-such-constraint") == REPAIR_NONE

@@ -11,9 +11,11 @@
 
 | 面 | 数量 | 运行方式 |
 |---|---|---|
-| 后端 pytest | **1614 项**（124 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
-| 前端 vitest | 413 项（47 文件） | `cd frontend && npm run test` |
+| 后端 pytest | **1618 项**（124 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
+| 前端 vitest | 416 项（48 文件） | `cd frontend && npm run test` |
 | 前端类型 | vue-tsc 零错 | `cd frontend && npm run typecheck` |
+
+- 2026-09-23 基线变动（语义后文闸 shadow 批）：+3 后端（`test_governance.py` registry 登记对拍 +1；`test_dock_onstage.py` 桥接语义撞车 shadow 双跑「命中落台账不丢件」+ 无 suffix 零调用 +2）；另 +1 系工作区既有 vendor_profiles 批（非本批）。前端 416/48 实测（指南原记 413/47 系基线陈旧，非本批改动——本批零前端代码）。
 
 - 2026-09-20 基线变动（请求级链路日志批）：+16 后端（`core/test_request_observability.py`——[REQ] 完成行/X-Request-ID 头/降噪策略/异常落日志/流式不缓冲/VELLUMA_LOG_LEVEL 解析语义锁）；`test_view_rebalance.py` 的 `_FakeResult` 补 `finish_reason` 与真实 LLMResult 同形。
 - 2026-09-19 基线变动（书籍备份批）：书级备份/还原/删除清理 +11 后端（`services/book_archive/test_book_archive.py` 真实 SQLite 往返对拍 + `routes/test_book_backup_routes.py` 路由冒烟）+ 前端备份预览纯逻辑 +12（`features/library/__tests__/backupPreview.test.ts`）；配套 `scripts/smoke_book_backup.py` 真实库副本冒烟（隔离承诺见脚本头）。

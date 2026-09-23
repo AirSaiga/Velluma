@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 # 抢拍 shadow 阈值占位（未经实测校准——分离度校准后定档；shadow 期只攒分布）
 BEAT_RUSH_SHADOW_THRESHOLD = 0.80
+# 桥接后文撞车 shadow 阈值占位（2026-09-23 同纪律：碎片 8-16 字 vs 后文分句，
+# 短文本相似度分布与节拍闸不同——独立常量分开校准，勿与 BEAT_RUSH 混用）
+SUFFIX_OVERLAP_SHADOW_THRESHOLD = 0.80
 # 目标文本最短长度（更短的片段向量语义噪声大，不进比对）
 _MIN_TARGET_CHARS = 4
 # 命中上报上限（按相似度降序）

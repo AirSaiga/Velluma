@@ -250,7 +250,8 @@ _PARTS = {
 }
 
 
-def _run_onstage_dock(monkeypatch, llm_parts, recent=None, snapshot=None, word_count=None):
+def _run_onstage_dock(monkeypatch, llm_parts, recent=None, snapshot=None, word_count=None,
+                      suffix_anchor=None):
     from backend.services.adaptive.components import dock_generator as dg
 
     captured = {}
@@ -299,6 +300,8 @@ def _run_onstage_dock(monkeypatch, llm_parts, recent=None, snapshot=None, word_c
     extra = {"recent_text": _RECENT if recent is None else recent}
     if word_count is not None:
         extra["word_count"] = word_count
+    if suffix_anchor is not None:
+        extra["suffix_anchor"] = suffix_anchor
     # db=None：场景钉取数静默失败 → 纯提及制在场
     result = asyncio.run(dg.run("ch-onstage-1", None, snap, 1500, **extra))
     return result, captured, events
@@ -326,6 +329,62 @@ def test_generator_dialogue_scene_end_to_end(monkeypatch):
     # （log_constraint_event 位置参数序：book_id, chapter_id, constraint_id, outcome）
     assert any(a[2] == "dock-onstage-boundary" and a[3] == "hit" for a, k in events)
     assert any(p["text"] == "他抄起脚手架上的短管" for p in parts)
+
+
+def test_bridge_semantic_shadow_dual_run_keeps_part(monkeypatch):
+    """桥接后文语义撞车 shadow（2026-09-23）：命中只落台账不丢件。
+
+    实测事故对拍：舱内「明姐在围裙上擦干手走向门口」预演后文「明姐端过来
+    脸盆」——字面重合 <4 字过词法闸。语义版与词法闸双跑攒校准数据，
+    转正（registry status 翻 live）后才执法。
+    """
+    from backend.services.validation import semantic_overlap as so
+
+    async def fake_hits(text, targets, *, threshold):
+        # 只对预演后文那枚报命中（真实现按向量相似度；shadow 对拍锁的是
+        # 「命中→落台账→不丢件」的接缝，不是相似度算法本身）
+        if "擦干手" in text:
+            return [{"segment": text, "target": targets[0], "similarity": 0.91}]
+        return []
+
+    monkeypatch.setattr(so, "semantic_overlap_hits", fake_hits)
+
+    raw = {
+        "parts": [
+            {"slot": "landing", "type": "action", "text": "林尘拎起工具包跨出门槛"},
+            {"slot": "ambient", "type": "action", "text": "明姐在围裙上擦干手走向门口"},
+        ]
+    }
+    suffix = "“好嘞，那王叔您早点休息啊。”说罢，林尘把包带往肩上紧了紧，侧身挤进夜色。" \
+             "明姐端过来准备好的脸盆，满满的清水。"
+    result, captured, events = _run_onstage_dock(
+        monkeypatch, raw, suffix_anchor=suffix)
+
+    # shadow 纪律：命中落台账，件一枚不丢
+    assert result == {"count": 2}
+    texts = [p["text"] for p in captured["cached"]]
+    assert "明姐在围裙上擦干手走向门口" in texts
+    assert any(a[2] == "dock-bridge-overlap-semantic" and a[3] == "hit" for a, k in events)
+    # 未命中那枚不落事件（只有 1 条语义事件）
+    sem_events = [a for a, k in events if a[2] == "dock-bridge-overlap-semantic"]
+    assert len(sem_events) == 1
+
+
+def test_bridge_semantic_shadow_skipped_without_suffix(monkeypatch):
+    """无 suffix_anchor（非桥接态）→ 语义后文闸整段不跑——零调用零事件。"""
+    from backend.services.validation import semantic_overlap as so
+
+    calls = []
+
+    async def fake_hits(text, targets, *, threshold):
+        calls.append(text)
+        return []
+
+    monkeypatch.setattr(so, "semantic_overlap_hits", fake_hits)
+    result, captured, events = _run_onstage_dock(monkeypatch, _PARTS)
+    assert result == {"count": 4}
+    assert calls == []
+    assert not any(a[2] == "dock-bridge-overlap-semantic" for a, k in events)
 
 
 # ============================================================
