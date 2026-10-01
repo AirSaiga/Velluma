@@ -266,7 +266,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 测试
 
-后端 pytest 1614 项（124 文件）+ 前端 vitest 413 项（47 文件）全绿（2026-09-20 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
+后端 pytest 1646 项（126 文件）+ 前端 vitest 416 项（48 文件）全绿（2026-09-24 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过
 - ADF：`workflows/adf/` 下 `test_consistency_guard`/`test_beat_patcher`/`test_state_tracker`

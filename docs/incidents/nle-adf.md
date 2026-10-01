@@ -214,3 +214,10 @@
 - 三个语义阈值（扫描 0.78 / beat_rush 0.80 / suffix 0.80）原为拍脑袋占位；经 `scripts/calibrate_semantic_threshold.py` 真实语料分离度校测定档：**扫描 0.72**（抓变体 9/20、干净负例 0 误报）、**beat_rush 0.78**（改写式抢拍 6/6 全抓，0.80 漏 1/6）、**suffix 维持 0.80**（0.82 断崖至 3/8）。全过程见 `docs/reports/semantic-threshold-calibration.md`。
 - **事故级发现**：该校准顺带实锤 qwen3.7-text-embedding 单批上限 20 条——生产 `_request_embedding` 不分批整包直发，>20 条整体 400 被吞成**全空向量且零报错**；语义扫描（finish，可达 200 段）与两个语义 shadow 检对长文**此前整体失效**。这是「shadow 检长期零命中」的根因之一，再次印证前科教训：**零命中不等于零事件，可能是采集链静默全灭——新检第一轮必须实测确认命中路径可达**。修：`embedding.py` 透明分批（EMBEDDING_BATCH_SIZE=20，串行不并发、单批失败整体降级同既有语义），8 项对拍 + 真实 API 冒烟 25 条通过。
 - 结构性遗留（降阈值治不了，报告 §6）：铺陈式抢拍语义上合法抓不住；8-16 字短碎片 vs 长句余弦天花板 0.6-0.87。
+
+### prompt 治理加固 F1/F2（2026-09-24，next-phase 06——与上节 F3 同批施工 `d930314`）
+
+- 动机：2026-09-19 prompt 敏感性调研定论「敏感性高且被反复实证，dock 侧管理较好、**stitch 侧基座裸奔**」——微调措辞不炸任何测试、行为静默改变，只能事后翻 trace。
+- **F1 stitch 基座快照锁**：`services/prompts/test_stitch_base_snapshot.py` 对基座 17 块常量文案（`_ADAPTIVE_SYSTEM`/续写五律/视点锁四锁/桥接铁律块/五模式 user 模板代表渲染）做 SHA256 锁，改一字即红——「动基座」从此必须显式更新哈希确认（更新程序在测试文件头注释）；对齐质感契约哈希锁先例（`texture_contracts.py`）。
+- **F2 快照对拍 + 双跑工具**：`scripts/prompt_snapshot.py` 纯渲染快照落 `logs/prompt_snapshots/{ts}/`（复用现有装配函数，零 LLM 只读 DB）；`scripts/prompt_replay.py` 旧/新 prompt 同模型双跑，确定性闸门（字数闸/禁词/ghost_guard 快检）自动判分，裁决落 `data/prompt_replay_log.jsonl` 供 AI 二次修改反馈。非目标：不做产品化 A/B 平台、本轮不动 prompt 文案本身。
+- **F2d 全局版本号**：`services/prompts/prompt_version.py` 持 `PROMPT_VERSION`（首版 `2026-09-24.1`）进 `adaptive_stitch_complete` trace 事件与快照 manifest；与 DOCK_PIPELINE_VERSION 缓存盐职责互斥（一个管措辞归因、一个管缓存失效），递增纪律写入 AGENTS「改 Prompt」条。测试基线随批 1618→1646（快照锁 +20 / embedding 分批对拍 +8）。
