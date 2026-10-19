@@ -1,6 +1,6 @@
 # 文风三平面分权（2026-08-29 定稿施工）
 
-> ⚠ **2026-09-14 去参数化修订**：P6「旋钮编译为选择器」整体退役——`_selector_adjust` 连同轻指纹设施删除（数学空转实证：零样本书检索池恒空，旋钮参数从未真实影响过任何一次挑样，审计与裁决见 `docs/reports/style-parameter-effectiveness-audit.md`）；`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读。本文 P6 节与「旋钮」字样按当时设计保留、勿据此施工——选择平面现役机制=P5 先验/漂移锚样/收编池/场景匹配/跨书冷启动兜底。
+> ⚠ **2026-09-14 去参数化修订**：P6「旋钮编译为选择器」整体退役——`_selector_adjust` 连同轻指纹设施删除（数学空转实证：零样本书检索池恒空，旋钮参数从未真实影响过任何一次挑样，审计与裁决见 `docs/reports/style-parameter-effectiveness-audit.md`）；`style_cards.style_knobs`/`dialogue_ratio_target` 两列冻结只读。本文 P6 节与「旋钮」字样按当时设计保留、勿据此施工——选择平面现役机制=P5 先验/漂移锚样/收编池/场景匹配/全局笔迹库（scope 补位——「跨书冷启动兜底」旧文已退役）。
 >
 > 导师方案（teacher-kimi）定稿的文风数据运用重构。**一句话纲领：凡是实证过 prompt 管不住的确定性约束，一律下沉代码层；prompt 只承担概率性偏置。** 这是字数闸（120 字指令实测产出 700 字 → 代码闸一上即治）教训的宪法化。
 >
@@ -68,9 +68,9 @@ stitch 链是**先生成后播放**（非流式生成完整文本再逐 chunk �
 
 文风页「AI 写的、你留下的」池（`GET /books/{id}/style/adopted-ghosts` 读 adopt 事件正文）→ 作者点「收为样本」才入库（`source=adopted_ghost`）→ **装配配比：AI 来源样本每批 ≤1**（`_cap_ai_source`）——防采纳幽灵自蒸馏把文风拉向 AI 味。
 
-### P5 跨书冷启动兜底（B4，2026-09-13）
+### P5 跨书冷启动兜底（B4，2026-09-13；❌ 已退役 2026-10-05——全局笔迹库 scope 维度接棒）
 
-本书样本为零时，`retrieval.py` 回退作者级黄金池（`list_golden_across_books`——其它书 favorite/golden 样本）供 few-shot，卡层隔离不动；对拍 `test_cross_book_fallback.py`。
+本节按当时设计保留、勿据此施工：`list_golden_across_books` 旧门票暗道（本书零样本时回退其它书 favorite/golden 样本）已整体退役，`list_global` 接棒——样本 `scope` 两档（book/global），检索候选=本书 ∪ global、本书绝对优先不足 k 条才补位（「补位不抢位」，向量流与兜底流同律），卡层隔离不动；对拍 `test_cross_book_fallback.py` + `test_global_scope_vector.py`。现役口径见 `docs/agent/style.md`「执行层」节，施工叙事 `docs/incidents/style.md`（2026-10-05 全局笔迹库批）。
 
 ### P6 画像编译为选择器（❌ 已退役 2026-09-14）
 

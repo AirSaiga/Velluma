@@ -7,13 +7,19 @@
 
 ---
 
-## 1. 当前覆盖面（2026-09-24 基线）
+## 1. 当前覆盖面（2026-10-14 基线）
 
 | 面 | 数量 | 运行方式 |
 |---|---|---|
-| 后端 pytest | **1646 项**（126 文件） | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
-| 前端 vitest | 416 项（48 文件） | `cd frontend && npm run test` |
+| 后端 pytest | **1690 项** | `.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q` |
+| 前端 vitest | **434 项**（50 文件） | `cd frontend && npm run test` |
 | 前端类型 | vue-tsc 零错 | `cd frontend && npm run typecheck` |
+
+- 2026-10-14 基线变动（外来样本收回修复批）：+4 后端——`routes/style/test_samples_scope.py` 7→11 项（recall 端点：book 副本字段对拍/原行不动/本书样本 422/缺失 404×2/内容去重 409 幂等，桩补 embedding 字段）；+4 前端——`sampleBuckets.test.ts` 12→15 项（`extractPrefillCandidates` 外来样本过滤纯函数）+ `patchSampleScope.test.ts` 2→3 项（`recallSample` 独立端点对拍）。
+
+- 2026-10-05 基线变动（文风双跑实验批）：+24 后端——`services/style/test_scene_hint.py` 18→40 项（v2 四档扩档+v3 fragment 优先两段式+显式 `scene_type` 优先链）；新增 `routes/style/test_samples_favorite.py`（favorite 落库链路，2 项）。
+
+- 2026-10-05 基线变动（全局笔迹库 scope 批）：+16 后端净增——`test_cross_book_fallback.py` 整体改写为新语义（补位不抢位/零变化/门票迁移/卡层隔离，旧 3→6 项）；新增 `services/style/test_global_scope_vector.py`（向量流档位对拍，6 项）与 `routes/style/test_samples_scope.py`（scope 路由契约+422 双闸，7 项）；+14 前端（`features/style/__tests__/`：`sampleBuckets.test.ts` 12 项分桶纯函数+`patchSampleScope.test.ts` 2 项，48→50 文件）。
 
 - 2026-09-24 基线变动（next-phase 06 prompt 治理批）：+28 后端（`services/prompts/test_stitch_base_snapshot.py` stitch 基座 SHA256 快照锁 17 块 +20；`services/llm/test_embedding_batching.py` embedding 20 条/批透明分批对拍 +8）；配套阈值定档落码（扫描 0.72 / 抢拍 shadow 0.78，依据 `docs/reports/semantic-threshold-calibration.md`）与新工具 `scripts/prompt_snapshot.py`/`prompt_replay.py`（快照对拍+双跑对照）。
 

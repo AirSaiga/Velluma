@@ -83,3 +83,22 @@
 - 卡面归一 card-std 档（--surface-card）：上传卡/样本卡/规矩卡/A·B 靶栏/契约卡/收件箱卡/扫描命中卡七类。
 - 验收：grep 机检六项零命中 + vue-tsc 净 + vitest 370/370 + build 过 + 浏览器实测三景（浅色工坊/深色禁词区含朱批 tick/深色靶场）全部通过；测试禁词经 UI 加入→删除还原（API 复核 negative=0）。
 - 顺手修正：docs/agent/style.md 页面结构节「样本列表限高 24rem 内滚」陈旧描述（06 期起已是 6 条收展+页滚动）随本批一并校正。
+
+### 文风双跑实验暴露两笔机制债：场景检索名存实亡 ＆ favorite 落库恒 0（2026-10-05，双跑实验批）
+- 背景：为验证「亲笔样本 few-shot」杠杆有效性做受控双跑实验（对照=零样本，实验=注入 6 条按场景标签的亲笔样本，三断点盲评，样本组 3 胜 1 负）；实验暴露两笔机制债并当日修复。
+- 债 1（样本检索场景维度名存实亡）：根因 a——`scene_hint.py` 判定器 v1 只有 dialogue/general 两档，永产不出 action/lyrical，场景加成对多数场景失活，兜底排序退化为 created_at 新→旧。修复 a——判定器扩四档（dialogue 原样；action=动词密度≥18/千字+短句率/CV 佐证，≥25 豁免；lyrical=质感密度≥33+低动作低对白；保守优先，信号不强一律回落 general），用《弦上灰》17 章 1383 窗回测校准（general 兜底 63.3%，已知场景命中正确）。修复 b——`StitchGhostRequest` 加可选 `scene_type` 显式传参，优先级 显式>自动。根因 c（端到端复验抓出）——判定输入只含 rolling_prefix 尾 300 字，动作断点的描写性尾巴把强动作 fragment（密度 71.4/千字）稀释至 15.4 落 general。修复 c——fragment 优先两段式：fragment 单独过强信号线（action 用豁免线 25、dialogue 用对白占比线、lyrical 因封闭词表短句误判风险本轮不开放）则采信 fragment，否则拼接判定；preview 经 assemble_stitch_context 共用装配源零破坏。测试——`test_scene_hint.py` 扩至 40 项，相关域 409 passed。
+- 债 2（favorite 创建链路丢字段）：根因——POST `/books/{id}/samples` 的 schema 接受 favorite 但路由未传、仓储 `create_with_embedding` 无此形参，落库恒 0；连带暗伤：跨书冷启动黄金池 `list_golden_across_books` 按 favorite=True 过滤恒空——新书第一章兜底通路实际失效。修复——仓储补 favorite 形参+路由补传；from-golden/from-chapters/feedback 收编三通路语义核定保持 False（golden 已按 source 特权、批量收编不等于作者认证收藏，收藏走 PATCH 手动标记）。测试——`test_samples_favorite.py` 新增 2 项锁定。
+- 遗留认知：①lyrical 自动判定受封闭质感词表口径限制，多数静观段落仍回落 general，本轮接受；②后端直跑 `python backend/main.py` 无热重载，代码修复后需重启才生效（本次验证一度因此误报修复无效）。
+
+### 全局笔迹库：scope 两档取代跨书冷启动暗道（2026-10-05，全局笔迹库批）
+- 动因：旧跨书兜底（B4，2026-09-13）是「本书零样本才触发」的暗道——favorite/golden_snippet 门票规则作者不可见、样本界面不可控、也无从把某条亲笔样本主动放出来跨书用；同日双跑实验批还实证 favorite 落库恒 0 时该暗道实际空转。作者要求跨书取用改成明规则：可见、可控。
+- 方案：`author_samples.scope` 两档（book=默认仅本书 / global=我的笔迹库全库可用），取用规则「补位不抢位」——检索候选 = 本书 ∪ global，SQL 层 `(tier, cosine_distance)` 排序锁死本书样本绝对优先、不足 k 条才从 global 补位，向量流（重排键 tier 前置，scene 加成/先验/漂移锚只档内生效）与兜底流（fallback_rank 键扩为 tier/favorite/era/scene/prior，外来样本 era 键恒 0）同律。`list_golden_across_books` 整体退役，`list_global` 接棒。
+- 红线三处同口径：`source=adopted_ghost` 禁入 global（创建/PATCH 共用 422 闸、迁移不升、检索池排除——AI 学 AI 不跨库扩散，本书内不受限）；global 不参与 era（era 是书级坐标），scene 匹配照常；from-golden 导入默认 global，from-chapters/feedback 收编维持 book。
+- 迁移与 API：`_migrate_author_sample_scope`（PG/SQLite 双侧共用，幂等锚 = scope IS NULL，列迁移刻意不带 DEFAULT）——favorite=1 或 golden_snippet 且非 adopted_ghost → global，其余 → book，二跑零写入。GET `/books/{id}/samples` 合并本书段+global 段（排除本书行防重复）并逐条回显 `scope`；POST/PATCH `scope` 可选可改。卡层隔离红线不变：文风卡/负面清单永远书级。
+- 测试：`test_cross_book_fallback.py` 改写 6 项（含 global 空池零变化对拍与旧口径次序锁）+ 新增 `services/style/test_global_scope_vector.py` 6 项、`routes/style/test_samples_scope.py` 7 项；后端全量 1686 passed / 0 failed（既有零变化锁定套件原样通过）。
+
+### 外来样本收回通路修复：recall 独立端点 + 提炼预填过滤（2026-10-14，审计修复批）
+- 动因：连日 24h 审计（10-07 首报，第 6 次复核仍在）钉死两枚高置信前端缺陷——①外来样本「收回本书」恒 404：列表端点合并外来 global 段，但 PATCH 书域闸（`sample.book_id != book_id` → 404）对外来行必拒，而「收回本书」是 2026-09 用户拍板的外来条目唯一可操作项，功能死路；②提炼弹窗预填从含外来段的合并列表按字数取前 3 无过滤，别书的字会顶着「你写的文字」进本书指纹提炼预填框。两者均为前端测试盲区（API 层单测只测键透传，容器层零覆盖）。
+- 方案（收回语义定档）：**复制挂入非改档**——`POST /books/{id}/samples/{sid}/recall` 在当前书创建 scope=book 副本，原书 global 行不动。否决转移归属方案：会把样本从原书列表静默抽走，违反「所有权归原书（改内容去原书文风页）」拍板。副本字段口径：content/scene_type/embedding 保留（内容同源向量可复用，SQLite 路径恒 None）；era=recent（era 是书级坐标）/ favorite=False / source=manual / chapter_id 置空（指原书章节不可跨书携带）。幂等闸与 from-golden 同口径按内容精确去重 → 409；本书样本误走 → 422 指路 PATCH。
+- 前端：`patchSample` 对外来行 scope=book 自动转交 `recallSample`（新 API 层方法）；提炼预填改走 `sampleBuckets.ts` 新纯函数 `extractPrefillCandidates`（过滤外来样本后按字数降序取前 3，本书零样本返回空数组走手贴路径）；收回成功重算语料与指纹（副本进本书字帖）。
+- 测试：`test_samples_scope.py` 扩 4 项（副本字段对拍/原行不动/422/404×2/409 幂等，桩补 embedding 字段）→ 11 项；前端 `sampleBuckets.test.ts` 扩 3 项预填纯函数、`patchSampleScope.test.ts` 扩 1 项 recall 端点对拍。

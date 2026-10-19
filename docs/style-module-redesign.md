@@ -339,13 +339,17 @@ StyleCardManager 拆解迁移，bible 页剩笔记（bible 改名/保留另行�
 | `POST /api/books/{id}/style/audition` | 试听：给定段落 + 当前/指定文风配置，走真实注入管线改写（SSE 流式）✅ S3 |
 | `POST /api/books/{id}/samples/from-golden` | 黄金片段汇入样本（✅ 补全批：按内容去重导入存量 golden_snippets） |
 | `POST /api/books/{id}/samples/from-chapters` | 已发布章节一键收编（零状态坡道兜底）✅ S1 |
-| `PATCH /api/books/{id}/samples/{sample_id}` | 样本局部更新：era / favorite（✅ 补全批）/ scene_type / content（正文变更重算字数并重向量化，失败清 None 宁缺勿旧） |
+| `PATCH /api/books/{id}/samples/{sample_id}` | 样本局部更新：era / favorite（✅ 补全批）/ scene_type / content（正文变更重算字数并重向量化，失败清 None 宁缺勿旧）/ scope（✅ 2026-10 全局笔迹库批：book↔global 归属切换，adopted_ghost 改 global 422 拒） |
 | `GET/PUT /api/books/{id}/cliche-exemptions` | 系统陈词库本书豁免（✅ 补全批：validator/auditor/scan 三处消费） |
 | `GET/POST /api/books/{id}/style/inbox` + `POST .../inbox/{item_id}/confirm|dismiss` | 文风收件箱 ✅ S3 |
 | `POST /api/books/{id}/style/events` + `GET .../events/summary` | 使用埋点（✅ 补全批：本地 JSONL 零外部上报，audition/golden/⚠/收件箱/预设/抓虫全打点，summary 含收件箱采纳率） |
 
 stitch-ghost / settle / finish / refinery 的请求 schema **不改**——文风注入在服务端
 settings_bundle 层自动生效，前端零改动（与 world_bridge 的接入方式同款）。
+
+> ⚠ **2026-10 修订**：上述「schema 不改」已被一处破例——`/adaptive/stitch-ghost` 请求体
+> 新增可选 `scene_type`（场景匹配显式传参，口径见 `docs/agent/style.md` 执行层节）；另
+> refinery 已于 2026-09-12 整体拔除。其余端点的服务端自动生效原则不变。
 
 ### 7.3 共享统计模块
 

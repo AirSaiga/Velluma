@@ -31,7 +31,9 @@
 包结构：card/samples/fingerprint/feedback/cliches/events 六子模块 + `_deps` 仓储依赖。剥 HTML 规范实现收敛于 `services/utils/html_text.html_to_plain`（唯一权威；`rag/memory_indexing` 保留委托别名）。
 
 - `GET /books/{id}/style-fingerprint`：语料聚合 `aggregate_corpus` 拼接整体测 + 逐样本 light 指纹 + `with_chapters=true` 时最近 N 章**实时计算**章指纹 + reference{cv_healthy, dialogue_target} + 负面清单近 10 章命中计数 `negative_hit_counts`（零命中灰显）。**不建新表不回填 QualityReport**——实时算永远与正文同步且不遮蔽审计报告。
-- `POST /books/{id}/samples/from-chapters`：已发布章节→样本收编（`source=published_chapter`，摘章节开头至句界；未发布书回落有正文章节）。剥 HTML 转纯文本（html_to_plain 唯一权威）+ 纯文本判空（`<p></p>` 空文档不误判）+ 已收编章节幂等跳过。支持 `chapter_id` 单章收编（不限发布状态、幂等 409）——副驾「本章」「收本章为文风范例」一键装填消费。
+- `POST /books/{id}/samples/from-chapters`：已发布章节→样本收编（`source=published_chapter`，摘章节开头至句界；未发布书回落有正文章节）。剥 HTML 转纯文本（html_to_plain 唯一权威）+ 纯文本判空（`<p></p>` 空文档不误判）+ 已收编章节幂等跳过。支持 `chapter_id` 单章收编（不限发布状态、幂等 409）——副驾「本章」「收本章为文风范例」一键装填消费；scope 维持默认 book。
+- `GET/POST /books/{id}/samples`、`PATCH /books/{id}/samples/{sid}`（scope 契约，全局笔迹库批）：GET 合并返回本书段（新→旧，可按 `scene_type` 过滤）+ global 段（其它书 scope=global 样本，排除本书行防重复），每条回显 `scope: "book"|"global"`；POST `scope` 可选默认 book；PATCH 可改 book↔global（书域闸：`book_id` 不符恒 404）；`source=adopted_ghost` × `scope=global` 创建/改档双 422（`_reject_adopted_ghost_global` 共用闸，原值不动）。
+- `POST /books/{id}/samples/{sid}/recall`（2026-10-14 修复批）：外来样本「收回本书」= **复制挂入非改档**——当前书创建 scope=book 副本（content/scene_type/embedding 保留，era=recent/source=manual/chapter_id 置空——era 是书级坐标、chapter_id 指原书章节），原书 global 行不动；按内容精确去重（与 from-golden 同口径）→ 409 幂等；本书样本 → 422 指路走 PATCH。前端 `patchSample` 对外来行 scope=book 自动转交此端点（StyleSampleSection 外来只读拍板的唯一操作项）。
 - `POST /style/audition`：SSE 试衣间 + 文风页顶部试听横条。`build_audition_prompt` 与 stitch 四模式共用同一套文风块（「所见即所得」有单测锁定）；`style_override` 可试听未保存草稿；A/B = 基线不注入 vs 当前文风；baseline 轨请求带 chapter_id（扫哪章用哪章生效卡）。
 - `DELETE /style-card?chapter_id=`：删章级特例卡。
 - `POST /style/scan-negative`：三层禁词扫描，纯 code。
@@ -51,7 +53,7 @@
 
 - **唯一权威 `services/style/texture_contracts.py`**：系统级质感约束（保护性写作纪律，非作者个人口味）统一由此管辖。原硬编码在 `adaptive_prompts.py` 的「白描契约与假感官封杀令」（2026-09-09 实测事故后用户逐字拍板）已迁入，文案逐字保留。
 - **词令分家**：契约正文 = 话语级行为规矩（禁脑补事故/禁台词抢跑/白描准则/禁逗号注水），stitch/continue 专属末位高服从位注入（`render_system_blocks` 经 `render_texture_contract(key, mode, overrides)` 消费，mode 门控下沉注册表）；病灶词（喉结滚动/嘴角勾起等 13 条）另列**执法词表**（全 blocker、无替代词、2 条正则）。
-- **执法词表走旁路不进四源合并**——`ProhibitionSet(ps.entries + texture_enforcement_entries())` 在 stitch 洗层（含 P2 重洗/语义 shadow）、ghost_guard cliche_hit、finish 语义扫描三处扫描前并集。原因：进四源会撞「无卡无样本 prompt 逐字节不变」零变化契约（blocker 会渲染进 user 尾部重钉），且 `hard_constraints` 的 blocker 面会静默杀死挂件/走向卡候选。
+- **执法词表走旁路不进四源合并**——`ProhibitionSet(ps.entries + texture_enforcement_entries())` 在 stitch 洗层（含 P2 重洗/语义 shadow）、ghost_guard cliche_hit、finish 语义扫描三处扫描前并集。原因：进四源会撞「无卡、无样本且笔迹库为空的书 prompt 逐字节不变」零变化契约（blocker 会渲染进 user 尾部重钉），且 `hard_constraints` 的 blocker 面会静默杀死挂件/走向卡候选。
 - **按书覆盖**：`books.texture_contracts` JSON 列 `{key: {body, updated_at}}`，缺键/空 body=系统默认（prompt 零变化）；块头「最高优先级」框定恒由系统持有，覆盖只换正文。装配：`settings_bundle` 加载 → 四 builder + `StitchContext.system_blocks(_with_usage)` 同参透传（预览/注入同源红线不破）。
 - **端点**：`GET/PUT /api/books/{id}/texture-contracts`（`routes/style/contracts.py`，整体覆盖写；PUT {} = 全部恢复默认）。文风页「写作规矩」区（`StyleContractsSection.vue`）：系统默认/本书定制徽标、展开全文、编辑（textarea）、恢复默认；编辑只动正文，执法词表不受作者编辑影响（病灶词自动查改始终有效）。
 - 策展口径：执法词表**不带 alternative**（对齐 default_cliches 2026-09-04 审计修复——机械替身词会被洗层字面拼进正文），命中=记录+P2 句级修补；「倒吸一口凉气」不重复收录（SystemCliche blocker 种子已覆盖，尊重系统层开关/豁免）。
@@ -60,6 +62,7 @@
 ## 页面结构
 
 - **渐进式呈现（渐进批 2026-09）：前台亲民工坊 + 深层 Beta 实验室**。前台主视界默认全屏、0 术语：50/50 对等双列（`<60rem` 容器塌单列，纪律同 duo），**双列栏头对称（视觉归一批 2026-09-17）**——左「亲笔字帖」(pencil-square Icon)/右「写作底线」(no-symbol Icon) 同 sec-title 规格，组件内重复标题退役、「已拦截的禁词」降 `.style-eyebrow` 组眉标（style.css 增量工具类）；右列上=规矩四开关、下=禁词标签池+实体输入组 `[输入想屏蔽的词…][加入拦截]`。左列卡片只留场景标签/字数/星标（star Icon），统计噪音不上卡。
+- **样本两分区（我的笔迹库批 2026-10）**：样本区按 `scope` 分桶两分区——「本书样本」/「我的笔迹库」（scope=global 跨书补位池，分区头部待命文案让补位机制作者可见）；分桶纯函数 `features/style/sampleBuckets.ts`（bucketSamples/canEnterLibrary/isForeignSample/extractPrefillCandidates）。外来样本（book_id≠当前书）只读——编辑/收藏/场景控件全禁用，唯一操作「收回本书」走 recall 端点复制挂入（见端点节）；本书条目「转入笔迹库 ⇄ 收回本书」（PATCH scope），AI 亲录（adopted_ghost）转入置灰（后端 422 闸同口径兜底）；提炼预填候选=extractPrefillCandidates（过滤外来按字数取前 3）。对拍 `features/style/__tests__/`（sampleBuckets 15 项+patchSampleScope 3 项）。
 - **深层【Beta 实验室】**：页底 `<details>` 折叠舱（视觉归一批升级为舱盖条形态：chevron 旋转+light-bulb+Beta chip+一行内容预告），默认折叠绝不主动打扰——收纳 A/B 试写靶场（基准输出/文风装载输出，文案中立化，贫嘴全洗）、写作规矩整文编辑（高级面）、指纹 9 卡+直方图（"健康区间/带"改"参考区间/带"，取消不达标暗示）、逐章对账、负面清单全量面（系统陈词库/豁免/扫描审稿）。`:open` 受控+`@toggle` 回写+`openBetaLab()` 展开滚动三件套契约不变；details 不拦截 props/emits 链路，组件常驻挂载事件零中断。
 - **状态条联动**：`StyleStatusStrip`「去实验室试听」= `openBetaLab()`（展开折叠舱+平滑滚动到位）；收件箱（空则隐藏）保留 full 阶段；零状态坡道 ramp 整页邀请不变。
 - **文案大静音**：全页区块只留标题（亲笔字帖/写作规矩/已拦截的禁词/A/B 试写靶场），原理解释与网梗自嘲全部清除。
@@ -72,10 +75,10 @@
 ## 执行层：样本检索与 prompt 注入
 
 - `services/style/retrieval.py` 的 `retrieve_author_samples`：向量流 `search_by_style` 优先 + 新近兜底，k≤2 × 1200 字句界截断，失败 → 空列表。
-- 跨书冷启动兜底（B4）：本书零样本回退作者级黄金池 `list_golden_across_books`（其它书 favorite/golden 样本，卡层隔离不动），对拍 `test_cross_book_fallback.py`。
-- 场景匹配（P5 C2）：stitch 链路按 rolling 尾 300 字对话占比 >0.35 判 `scene_hint=dialogue`，向量流同型样本 +0.1 软加成、兜底流同档提前；None/general 逐字节零变化。burst 模式 k=3。
+- 全局笔迹库（scope 维度，2026-09 重设计批）：`author_samples.scope` book（默认，仅本书）/ global（我的笔迹库，全库可用）。取用规则「补位不抢位」——检索候选 = 本书 ∪ global（`list_global`，取代已退役的 `list_golden_across_books` 旧门票暗道），本书样本绝对优先、不足 k 条才从 global 补位；向量流与兜底流同律。红线：①`source=adopted_ghost` 禁止 global（创建/PATCH 422——AI 学 AI 不跨库扩散，本书内不受限）；②global 样本不参与 era 维度（era 是书级坐标），scene 匹配照常；③from-golden 导入默认 global，from-chapters/feedback 收编维持 book；④global 池为空时全部已有行为逐字节不变；⑤存量门票（favorite=1 或 golden_snippet）由启动迁移 `_migrate_author_sample_scope` 升 global（幂等锚 = scope IS NULL；adopted_ghost 即便 favorite=1 也不升——与 422 闸、检索排除三处同口径）。卡层隔离红线不变：文风卡/负面清单永远书级。对拍 `test_cross_book_fallback.py` + `test_global_scope_vector.py` + `routes/style/test_samples_scope.py`。
+- 场景匹配（P5 C2，v2 扩档+v3 fragment 优先两段式）：自动判定四档 dialogue/action/lyrical/general（永不产出 suspense）——dialogue=尾 300 字对话占比 >0.35（v1 原样）；action=动词密度 ≥18/千字+短句率/CV 佐证（≥25 豁免）；lyrical=质感密度 ≥33+低动作低对白；信号不强一律回落 general。判定输入两段式（v3）：fragment 非空先单独判强信号（dialogue=对白占比线 / action=动词密度豁免线 25；lyrical 短窗不开放），无强信号回落「rolling 尾 300 字+fragment」拼接判定，fragment 空=与 v2 逐字节一致；显式 `StitchGhostRequest.scene_type` 传参最优先（dialogue/action/lyrical/suspense/general，空/非法回落自动判定）。同型样本向量流 +0.1 软加成、兜底流同档提前；general/空逐字节零变化。burst 模式 k=3。
 - 注入面：stitch-ghost 四模式 prompt 注入「作者笔迹示范」块（学语感禁复制）；ADF `adf.py` 的 `author_samples` 传 List[str]、k=3；`settings_bundle.render_style_positive`（五维中文标签，≤10 行，块配额 1460）经 `to_prompt_context`/`soft_constraints` 暴露 `style_positive`，四 builder 注入「作者文风画像」块；refinery `_build_refinery_context` 填 `author_samples`（polisher 休眠签名接活）+ 负面清单进 `forbidden_terms`；`/optimize_selection` 注入文风约束块；`adf/refiner.py` 经 `_build_style_contract` 统一口径。
-- **零变化契约**：无文风卡/无样本的书 prompt 逐字节不变（`test_style_injection.py` 锁定）。
+- **零变化契约**：无文风卡、本书无样本**且全局笔迹库为空**的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；global 池非空时外来样本按上文「补位不抢位」参与注入，不属零变化面。
 - dock 零件 prompt 有意不注入画像（8-14 字零件吃不到画像，防膨胀轻路径）。
 
 ## 交互环
@@ -96,7 +99,7 @@
 
 - `author_samples.era/favorite`：语料聚合只取近期；兜底检索收藏优先。
 - `style_cards.fingerprint`：写穿缓存，读仍实时算。`style_cards.locked_keys`：画像字段锁（🔒 逐字段/全部锁定 = 特殊文体让位，提炼跳过锁定字段）。
-- from-golden：存量黄金片段去重导入 + 文风页入口。
+- from-golden：存量黄金片段去重导入 + 文风页入口；新样本默认 `scope='global'` 直入我的笔迹库（全局笔迹库批）。
 - 心跳漂移提醒：章尾 3000 字同尺测量，`kind=style_drift` 并入 canon_hints 走感知带，按内容长度缓存。
 - 埋点：本地 `data/style_events.jsonl` 零上报，kind = audition/golden/⚠/收件箱/预设/抓虫。
 
@@ -111,7 +114,7 @@
 
 ## 章级特例卡（整卡覆盖语义）
 
-- 章级卡（`style_cards.chapter_id` 非空）存在即该章**完整文风定义**：负面清单/正面画像/段落节奏整卡生效（旋钮/对话目标列已冻结、随卡亦不生效），书级不再参与（前端编辑本是「书级基底快照+全量保存」，语义自洽）；无章级卡回退书级，无卡逐字节零变化。
+- 章级卡（`style_cards.chapter_id` 非空）存在即该章**完整文风定义**：负面清单/正面画像/段落节奏整卡生效（旋钮/对话目标列已冻结、随卡亦不生效），书级不再参与（前端编辑本是「书级基底快照+全量保存」，语义自洽）；无章级卡回退书级；无卡、无样本且笔迹库为空时逐字节零变化。
 - 统一入口 `StyleCardRepository.get_effective_card(book_id, chapter_id)`，消费点：settings_bundle（主通路 → stitch-ghost 五模式/dock/context-preview/finish 审阅/ghost_guard）、ADF、选区改写、defat、心跳漂移参照、finish 语义扫描、quality-report 审计上下文（`_build_audit_context`）、scan-negative（扫哪章用哪章生效卡）、试听 baseline 轨。
 - **保持书级**：指纹对账参考带（书级仪表盘）、收件箱确认写路径。
 - prohibitions 四源权威与 prompt 排序零改动。

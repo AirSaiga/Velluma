@@ -179,7 +179,7 @@ data/ logs/ .venv/
 - **同一把尺子**：`services/style/fingerprint.py` 是句长切分/字数/CV/对话统计的规范实现，审计侧从此 import；改统计口径先跑 `test_fingerprint.py`（19 项对拍锁定）。
 - 负面清单四源唯一权威 `services/style/prohibitions.py`；severity 两档，硬禁只提示、**绝不自动改正文**。
 - 写作规矩（质感契约）唯一权威 `services/style/texture_contracts.py`（按书可覆盖，缺键=系统默认零变化）；执法词表旁路合并不进四源。
-- 零变化契约：无文风卡/无样本的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；章级卡=整卡覆盖，统一入口 `get_effective_card`。
+- 零变化契约：无文风卡、本书无样本且全局笔迹库为空的书 prompt 逐字节不变（`test_style_injection.py` 锁定）；章级卡=整卡覆盖，统一入口 `get_effective_card`。
 - 意图旋钮已退役（字段冻结只读）；收敛两支柱=亲笔样本 few-shot + 负面清单执法；语义扫描挂点**仅在** `/adaptive/finish`（红线）；架构不变量=采纳线：线后作者文本永远只提示。
 
 ### deai 去 AI 味小模型（子项目，`deai/`）
@@ -266,7 +266,7 @@ services/api/transport  ← 底层 HTTP
 
 ## 测试
 
-后端 pytest 1646 项（126 文件）+ 前端 vitest 416 项（48 文件）全绿（2026-09-24 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
+后端 pytest 1690 项（129 文件）+ 前端 vitest 434 项（50 文件）全绿（2026-10-14 基线，**测试怎么写/放哪/怎么跑/改码后更新哪些测试的唯一权威=`docs/testing-guide.md`**，含勿删清单与有意不测台账）。后端工作流测试均为纯算法/LLM-mock 单测（不连真实 LLM/DB）：`.venv\Scripts\python.exe -m pytest backend --ignore=backend/_deprecated -q`（必须 venv 解释器+排除归档）。GUI 测试证据截图不入库、一律本地留存。
 
 - 前端 vitest **只收集 `src/**/__tests__/**`**——新测试文件必须放 `__tests__/` 目录，放别处会被静默跳过
 - ADF：`workflows/adf/` 下 `test_consistency_guard`/`test_beat_patcher`/`test_state_tracker`
