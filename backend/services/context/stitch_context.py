@@ -52,7 +52,7 @@ from backend.services.prompts.adaptive_prompts import (
 )
 from backend.services.rag.recall import bundle_mask_names, recall_memories
 from backend.services.style.retrieval import retrieve_author_samples, retrieve_author_samples_with_meta
-from backend.services.style.scene_hint import SCENE_HINT_TAIL_CHARS, detect_scene_type
+from backend.services.style.scene_hint import SCENE_HINT_TAIL_CHARS, resolve_scene_type
 
 
 # ============================================================
@@ -227,6 +227,7 @@ async def assemble_stitch_context(
     chapter_intent: str = "",
     drift_anchor: bool = False,
     after_text: str = "",
+    scene_type: Optional[str] = None,
 ) -> StitchContext:
     """装配 stitch-ghost 的全套上下文（五模式共用，行为与旧路由内联段一致）。
 
@@ -238,6 +239,9 @@ async def assemble_stitch_context(
         db: 异步 DB session
         chapter_intent: 请求携带的章节意图（空=大纲就近节拍兜底，见
             _nearby_intent_from_outline）
+        scene_type: 显式场景类型（请求体携带；合法值=样本侧词表，空/非法
+            → 回落两段式自动判定（fragment 强信号 > 尾窗+fragment 拼接），
+            见 resolve_scene_type）
 
     Returns:
         StitchContext：装配快照。任何子查询失败由 bundle/检索层各自降级为空。
@@ -279,13 +283,27 @@ async def assemble_stitch_context(
     # 文风执行层（S2 E1/E2）：正面画像 + few-shot 笔迹示范注入全部四模式。
     # 检索锚 = 记忆召回同一 query（当前写作上下文）；无样本/无文风卡 → 空，
     # prompt 零变化（不阻塞生成）
-    # C2 场景匹配：rolling_prefix 尾 300 字判两档——dialogue 时同型样本检索
-    # 加成；general/空 → 检索行为与无 hint 逐一致（零变化契约）
+    # C2 场景匹配（v2 扩档；v3 fragment 优先两段式）：rolling_prefix 尾
+    # 300 字 + fragment 两段式判四档（dialogue/action/lyrical/general，见
+    # scene_hint.detect_scene_hint）——同型样本检索加成；general/空 → 检索
+    # 行为与无 hint 逐一致（零变化契约）。显式 scene_type 请求字段优先
+    # （resolve_scene_type）
     # C3 burst 样本加量（docs/reports/foundation-hardening.md §5.3）：走向卡连写是
     # 段落级生成，范例权重最高 → burst 档 k=3；其余四模式维持 k=2（零变化）。
     # 预算连锁在 budget.MODE_CONTEXT_BUDGETS["burst"]（已同步上调，满配不裁剪）
     style_positive = render_style_positive(bundle.style_card)
-    scene_hint = detect_scene_type((rolling_prefix or "")[-SCENE_HINT_TAIL_CHARS:])
+    # v2 双通路：显式 scene_type 优先（合法性校验，非法/空回落自动判定）；
+    # 自动判定已扩四档（dialogue/action/lyrical/general，见 scene_hint 模块头）。
+    # v3（2026-10-05 fragment 优先两段式）：fragment 非空时先单独判强信号
+    # （dialogue=对白占比线 / action=动词风暴豁免线 25/千字），无强信号回落
+    # 「尾窗+fragment」拼接判定——断点处正在写的动作碎片不再被描写性尾巴
+    # 稀释（实测见 logs/style_ab/repro_scene_hint.py）；fragment 为空时与旧
+    # 通路逐字节一致（preview 经同一函数共用装配源，禁止平行实现红线不破）
+    scene_hint = resolve_scene_type(
+        scene_type,
+        (rolling_prefix or "")[-SCENE_HINT_TAIL_CHARS:],
+        (fragment or "").strip(),
+    )
     samples_k = AUTHOR_SAMPLES_K_BURST if mode == "burst" else AUTHOR_SAMPLES_MAX_K
     author_samples: List[str] = []
     sample_ids: List[str] = []

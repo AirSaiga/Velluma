@@ -91,6 +91,7 @@ class StitchGhostRequest(BaseModel):
     after_text: str = Field("", description="outline 模式：细纲之后的已写正文开头（双端缝合用，可空）")
     adopted_direction: Optional[str] = Field(None, description="作者缝合采纳的叙事方向（主线/伏笔/刻画/环境/关系），用于负反馈降权")
     serves_anchor: str = Field("", description="outline 模式：胶囊挂的谋篇锚点文本（M3 三锚定；空=双端锚定不变）")
+    scene_type: Optional[str] = Field(None, description="显式场景类型（dialogue/action/lyrical/suspense/general；空/非法=按 rolling_prefix 自动判定）")
 
 
 

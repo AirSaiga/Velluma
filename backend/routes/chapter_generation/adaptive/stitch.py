@@ -152,6 +152,8 @@ async def stitch_ghost(
         # 2026-09-02 after_text 泄漏手术：仅出现于胶囊后文的名字不进称呼表
         # （scene_visible_proper_nouns 内部判定；其余模式空串零变化）
         after_text=request.after_text or "",
+        # v2 显式场景双通路：合法值透传样本检索，空/非法回落自动判定
+        scene_type=request.scene_type,
     )
     bundle = ctx.bundle
     proper_nouns = ctx.proper_nouns
