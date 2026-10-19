@@ -69,6 +69,7 @@ async def init_db_sqlite(engine, sessionmaker: Optional[Any] = None) -> None:
     if sessionmaker is not None:
         await _seed_system_cliches_sqlite(sessionmaker)
         await _migrate_style_blacklist_sqlite(sessionmaker)
+        await _migrate_author_sample_scope_sqlite(sessionmaker)
 
 
 async def _sqlite_table_columns(conn, table_name: str) -> Optional[set[str]]:
@@ -174,3 +175,18 @@ async def _migrate_style_blacklist_sqlite(sessionmaker) -> None:
             await _migrate_style_blacklist_into_negative_cards(session)
     except Exception as e:
         logger.error(f"[MIGRATION-SQLITE] style_blacklist → negative_list 迁移失败（不阻断启动）: {e}")
+
+
+async def _migrate_author_sample_scope_sqlite(sessionmaker) -> None:
+    """author_samples.scope 存量门票迁移（复用 database.py 单一实现，双侧同源）。
+
+    语义与挂点纪律同 _migrate_style_blacklist_sqlite：开会话 + 兜底
+    try/except，迁移失败只 log 不阻断启动。
+    """
+    from backend.database import _migrate_author_sample_scope
+
+    try:
+        async with sessionmaker() as session:
+            await _migrate_author_sample_scope(session)
+    except Exception as e:
+        logger.error(f"[MIGRATION-SQLITE] author_samples.scope 门票迁移失败（不阻断启动）: {e}")

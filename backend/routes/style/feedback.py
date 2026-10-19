@@ -172,6 +172,9 @@ async def confirm_style_inbox_item(
             content=content,
             scene_type=str(item.payload.get("scene_type") or "general"),
             source="golden_snippet",
+            # scope 维持默认 book（全局笔迹库批拍板）：feedback 收编是本书
+            # 写作中产生的候选确认，维持书级；进「我的笔迹库」由作者事后
+            # PATCH scope=global 明示（from-golden 导入才默认 global）
             embedding=embedding,
         )
     else:

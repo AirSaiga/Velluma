@@ -125,6 +125,11 @@ class AuthorSampleBase(BaseModel):
     source: str = Field("manual", description="来源：manual/golden_snippet/published_chapter")
     era: str = Field("recent", description="时期：recent=近期（进语料聚合）/early=早期（仅存档）")
     favorite: bool = Field(False, description="收藏（检索兜底流优先）")
+    scope: str = Field(
+        "book",
+        pattern="^(book|global)$",
+        description="归属：book=仅本书（默认）/ global=我的笔迹库（全库可用；adopted_ghost 禁止 global）",
+    )
 
 
 class AuthorSampleCreate(AuthorSampleBase):
@@ -324,6 +329,10 @@ class AuthorSamplePatchRequest(BaseModel):
     """
     era: Optional[str] = Field(None, pattern="^(recent|early)$", description="recent/early")
     favorite: Optional[bool] = None
+    scope: Optional[str] = Field(
+        None, pattern="^(book|global)$",
+        description="归属维度：book=仅本书 / global=我的笔迹库（adopted_ghost 样本禁改 global，422）",
+    )
     scene_type: Optional[str] = Field(
         None, pattern="^(dialogue|action|lyrical|suspense|general)$", description="场景类型"
     )

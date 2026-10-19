@@ -756,6 +756,15 @@ MIGRATIONS: list[dict[str, Any]] = [
         "definition": "BOOLEAN DEFAULT FALSE",
         "expected_udt_names": {"bool", "boolean"},
     },
+    # 全局笔迹库批：样本归属维度 book/global。⚠ 定义刻意不带 DEFAULT——
+    # 存量行补列后为 NULL，NULL 即「未迁移」标记（下方 _migrate_author_sample_scope
+    # 的幂等锚；跑过一次后无 NULL 行，后续启动零写入）。
+    {
+        "table": "author_samples",
+        "column": "scope",
+        "definition": "VARCHAR(10)",
+        "expected_udt_names": {"varchar", "character varying", "text"},
+    },
     # 系统陈词库本书豁免（三层禁词的系统层可见性 + 豁免，设计稿 §6.4）
     {
         "table": "books",
@@ -1000,6 +1009,48 @@ async def _migrate_style_blacklist_into_negative_cards(session: AsyncSession) ->
         )
 
 
+async def _migrate_author_sample_scope(session: AsyncSession) -> None:
+    """author_samples.scope 存量门票迁移（全局笔迹库批，幂等，双侧共用）。
+
+    规则（用户拍板）：favorite=1 或 source='golden_snippet' 的存量样本 →
+    scope='global'（我的笔迹库）；其余（含 NULL）→ 'book'。⚠ adopted_ghost
+    即便 favorite=1 也不升 global——AI 学 AI 不跨库扩散（与创建/修改侧的
+    422 校验同口径；旧跨书池 list_golden_across_books 本就排除它）。
+
+    幂等锚：列迁移定义不带 DEFAULT，存量行补列后 scope 为 NULL；本函数
+    只动 NULL 行，跑过一次后无 NULL（新行由 ORM 默认 'book' 落值），
+    后续启动两条 UPDATE 均零命中。
+    副作用：由调用方包裹 try/except（失败只 log，绝不阻断启动）。
+    """
+    from sqlalchemy import or_, update
+
+    from backend.models import AuthorSample
+
+    golden = await session.execute(
+        update(AuthorSample)
+        .where(
+            AuthorSample.scope.is_(None),
+            AuthorSample.source != "adopted_ghost",
+            or_(
+                AuthorSample.favorite.is_(True),
+                AuthorSample.source == "golden_snippet",
+            ),
+        )
+        .values(scope="global")
+    )
+    rest = await session.execute(
+        update(AuthorSample)
+        .where(AuthorSample.scope.is_(None))
+        .values(scope="book")
+    )
+    await session.commit()
+    if (golden.rowcount or 0) or (rest.rowcount or 0):
+        logger.info(
+            f"[MIGRATION] author_samples.scope 门票迁移: "
+            f"{golden.rowcount or 0} 条 → global / {rest.rowcount or 0} 条 → book"
+        )
+
+
 async def init_db():
     """
     初始化数据库表结构。
@@ -1080,6 +1131,13 @@ async def init_db():
             await _migrate_style_blacklist_into_negative_cards(session)
     except Exception as e:
         logger.error(f"[MIGRATION] style_blacklist → negative_list 迁移失败（不阻断启动）: {e}")
+
+    # 全局笔迹库批：author_samples.scope 存量门票迁移（幂等；失败只 log）
+    try:
+        async with AsyncSessionLocal() as session:
+            await _migrate_author_sample_scope(session)
+    except Exception as e:
+        logger.error(f"[MIGRATION] author_samples.scope 门票迁移失败（不阻断启动）: {e}")
 
 
 async def _seed_system_cliches_if_empty() -> None:

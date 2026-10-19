@@ -48,6 +48,15 @@ C2 场景匹配（docs/reports/foundation-hardening.md §5.2）：scene_hint（v
 
 红线：任何失败降级为空列表，调用方 prompt 零变化（不阻塞生成）。
 预算：k≤2 × max_chars（默认 1200）≈ 单次注入 ≤2400 字（设计稿 §4 E1）。
+
+全局笔迹库批（scope 维度，取代旧跨书黄金池冷启动暗道）：
+- 候选池扩为 本书样本 ∪ 全局样本（scope='global'）；
+- 「补位不抢位」：本书样本绝对优先（档位键置于一切排序键之前），
+  本书样本不足 k 条时 global 池按同样规则补位；global 池为空时
+  所有行为与旧版逐一致（零变化契约）；
+- global 样本不参与 era（创作时期）维度的匹配/加分——era 是书级坐标，
+  跨书样本谈「早期/近期」无意义；scene 匹配照常参与；
+- era 为书级坐标的推论：fallback_rank 对 global（外来）样本 era 键恒 0。
 """
 
 import logging
@@ -104,6 +113,18 @@ def truncate_sample(text: str, max_chars: int) -> str:
     if cut < max_chars * 0.5:
         cut = max(window.rfind("！"), window.rfind("？"), window.rfind("…"))
     return window[: cut + 1] if cut >= max_chars * 0.5 else window
+
+
+def _is_foreign_sample(sample: Any, book_id: str) -> bool:
+    """样本是否来自其它书（global 补位候选）。缺 book_id 属性的测试桩/
+    异常形态一律视为本书（零变化兜底，不炸不误伤）。"""
+    sid = getattr(sample, "book_id", None)
+    return sid is not None and str(sid) != str(book_id)
+
+
+def _tier_key(sample: Any, book_id: str) -> int:
+    """补位不抢位的档位键：本书=0 / 外书 global=1，置于一切排序键之前。"""
+    return 1 if _is_foreign_sample(sample, book_id) else 0
 
 
 def order_samples_for_fallback(samples: List[Any], scene_hint: Optional[str] = None) -> List[Any]:
@@ -197,9 +218,13 @@ async def retrieve_author_samples_with_meta(
                         adj -= 0.1
                     return adj
 
+                # 补位不抢位：重排不越档——本书样本（tier 0）内部按微调距离
+                # 竞争，global 候选（tier 1）整体垫后只做补位；search_by_style
+                # 的 SQL 已按 (tier, distance) 预排，此处键补齐防越档。
+                # global 池为空时 tier 恒 0，与旧排序逐一致（零变化契约）。
                 hits = sorted(
                     ((s, vec_adjust(s, d)) for s, d in hits),
-                    key=lambda t: t[1],
+                    key=lambda t: (_tier_key(t[0], book_id), t[1]),
                 )
                 # 零命中回落兜底流（B4 顺修）：本书零样本/样本全无向量时
                 # search_by_style 返 []——旧代码把 [] 当「有结果」直接短路，
@@ -209,37 +234,32 @@ async def retrieve_author_samples_with_meta(
             logger.info(f"[StyleRetrieval] 向量检索降级（走新近兜底）: {e}")
             samples = None
 
-    # ---- 兜底流：收藏优先 → 近期优先 → 场景 → 先验 → 旋钮（全为软排序键）----
+    # ---- 兜底流：本书档 → 收藏 → 近期 → 场景 → 先验（全为软排序键）----
     if samples is None:
         try:
             pool = (await repo.list_by_book(book_id, scene_type=scene_type))[: max(k * 3, k)]
-            if not pool:
-                # B4 跨书冷启动兜底（2026-09-13 深水区批）：本书零样本（新书
-                # 第一章）→ 作者级黄金池（其它书 favorite/golden，排除
-                # adopted_ghost）。挂点纪律：只在检索层兜**样本**，不动
-                # get_effective_card——文风卡（画像/负面清单/旋钮）永远书级
-                # 隔离，防题材串味与「负面清单写错归宿」（红队 Q5）。
-                try:
-                    pool = await repo.list_golden_across_books(
-                        book_id, limit=max(k * 2, k),
-                    )
-                except Exception as cross_e:
-                    logger.info(f"[StyleRetrieval] 跨书兜底查询失败（忽略）: {cross_e}")
-                    pool = []
-                if pool:
-                    logger.info(
-                        "[StyleRetrieval] 跨书冷启动兜底：%d 条黄金样本（book=%s）",
-                        len(pool), book_id,
-                    )
+            # 全局笔迹库补位池（scope='global'，取代旧跨书黄金池冷启动暗道）：
+            # 不论本书池是否为空都取——排序层本书样本绝对优先，global 只在
+            # 本书候选不足 k 条时自然补位。挂点纪律不变：只在检索层兜**样本**，
+            # 文风卡（画像/负面清单/写作规矩）永远书级隔离。
+            try:
+                pool = pool + await repo.list_global(
+                    exclude_book_id=book_id, limit=max(k * 3, k),
+                )
+            except Exception as cross_e:
+                logger.info(f"[StyleRetrieval] 全局池查询失败（忽略）: {cross_e}")
 
             def fallback_rank(s: Any) -> tuple:
+                tier = _tier_key(s, book_id)
+                foreign = tier == 1
                 favorite = 0 if getattr(s, "favorite", False) else 1
-                era = 0 if (getattr(s, "era", "recent") or "recent") != "early" else 1
+                # era 是书级坐标：global（外来）样本不参与时期维度——键恒 0
+                era = 0 if foreign or (getattr(s, "era", "recent") or "recent") != "early" else 1
                 scene = 0 if _scene_match(s, scene_hint) else 1
                 # 先验因子升序键（factor∈[0.8,1.2] → 键∈[0,0.4]，越大越靠后）
                 prior_key = PRIOR_FACTOR_MAX - sample_prior_factor(
                     book_id, str(getattr(s, "id", "") or ""))
-                return (favorite, era, scene, round(prior_key, 3))
+                return (tier, favorite, era, scene, round(prior_key, 3))
 
             ordered = sorted(pool, key=fallback_rank)
             samples = _cap_ai_source(ordered, k)

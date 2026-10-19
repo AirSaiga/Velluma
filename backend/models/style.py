@@ -115,6 +115,11 @@ class AuthorSample(Base):
     era = Column(String(16), default="recent")
     # 收藏（完整落地批）：检索兜底流优先取收藏样本（作者认证的最佳示范）
     favorite = Column(Boolean, default=False)
+    # 归属维度（全局笔迹库批）：book=仅本书（默认）/ global=我的笔迹库（全库可用）。
+    # 存量门票（favorite=1 或 source=golden_snippet）由启动迁移自动升为 global；
+    # adopted_ghost 禁止 global（创建/修改 422——防 AI 学 AI 跨库扩散）。
+    # nullable 列 + Python 侧默认：迁移路径以 NULL 为「未迁移」标记（幂等锚）。
+    scope = Column(String(10), default="book")
     created_at = Column(DateTime, default=utc_now)
 
 

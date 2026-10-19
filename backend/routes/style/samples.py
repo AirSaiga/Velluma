@@ -37,6 +37,19 @@ logger = get_runtime_logger(__name__)
 router = APIRouter(prefix="/api", tags=["style"])
 
 
+def _reject_adopted_ghost_global(source: Optional[str], scope: Optional[str]) -> None:
+    """红线校验（全局笔迹库批）：source=adopted_ghost 的样本禁止成为 global。
+
+    AI 学 AI 不跨库扩散——采纳幽灵收编的样本只能留在本书内做 few-shot；
+    创建与修改通路共用此闸（422）。scope 为 book/缺省时不受限。
+    """
+    if str(source or "") == "adopted_ghost" and str(scope or "book") == "global":
+        raise HTTPException(
+            status_code=422,
+            detail="采纳幽灵样本不能进「我的笔迹库」（AI 学 AI 不跨库扩散，本书内使用不受限）",
+        )
+
+
 # ============================================================
 # AuthorSample 端点
 # ============================================================
@@ -48,12 +61,24 @@ async def list_author_samples(
     repo: AuthorSampleRepository = Depends(get_author_sample_repo),
     book_repo: BookRepository = Depends(get_book_repo),
 ):
-    """列出书籍的作者样本。"""
+    """列出书籍的作者样本（本书 + 全库 global 合并，各段内新→旧）。
+
+    本书样本在前，「我的笔迹库」global 样本（其它书挂入的）在后补位展示；
+    每条回显 scope 字段供前端分区渲染。scene_type 过滤只作用于本书段
+    （global 段是跨书池，无本书场景对齐口径）。
+    """
     book = await book_repo.get_by_id(book_id)
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
-    return await repo.list_by_book(book_id, scene_type=scene_type)
+    book_samples = await repo.list_by_book(book_id, scene_type=scene_type)
+    try:
+        global_samples = await repo.list_global(exclude_book_id=book_id)
+    except Exception as e:
+        # 展示面兜底：全局池查询失败只降级为本书段，不让列表 500
+        logger.warning(f"[AuthorSample] 全局池查询失败（降级为本书段）: {e}")
+        global_samples = []
+    return book_samples + global_samples
 
 
 @router.post("/books/{book_id}/samples", response_model=AuthorSampleResponse, status_code=201)
@@ -69,6 +94,8 @@ async def create_author_sample(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
 
+    _reject_adopted_ghost_global(payload.source, payload.scope)
+
     # 向量化（失败不阻断，embedding 留空）
     embedding = None
     try:
@@ -83,6 +110,8 @@ async def create_author_sample(
         chapter_id=payload.chapter_id,
         source=payload.source,
         era=payload.era,
+        favorite=payload.favorite,
+        scope=payload.scope,
         embedding=embedding,
     )
     await db.commit()
@@ -227,6 +256,11 @@ async def create_samples_from_chapters(
             scene_type="general",
             chapter_id=chapter.id,
             source="published_chapter",
+            # scope 维持默认 book（批量收编维持书级——全局笔迹库批拍板：
+            # 只有作者逐条明示（PATCH/POST 带 scope=global）或黄金片段导入
+            # 才进「我的笔迹库」，批量动作不整体上抬）
+            # favorite 保持默认 False：批量收编不是作者逐条认证的收藏动作，
+            # 收藏应由作者事后 PATCH 手动标记（与 from-golden 同口径）
             embedding=embedding,
         )
         created.append(sample)
@@ -261,20 +295,26 @@ async def patch_author_sample(
     db: AsyncSession = Depends(get_db),
     repo: AuthorSampleRepository = Depends(get_author_sample_repo),
 ):
-    """样本局部更新：时期标记 / 收藏 / 场景类型 / 正文。
+    """样本局部更新：时期标记 / 收藏 / 场景类型 / 正文 / 归属（scope）。
 
     正文变更时重算 word_count 并重新向量化。旧向量与新文本不再同义，
     重向量化失败（含未配置 embedding，get_embedding 返回 []）时清空为
     None——宁缺勿旧：无向量的样本仍走检索层的新近兜底，带旧向量的样本
     会按改前的文本错配。
+
+    scope 可改（book ↔ global）；adopted_ghost 样本改 global 被 422 拒绝
+    （AI 学 AI 不跨库扩散——见 _reject_adopted_ghost_global）。
     """
     sample = await repo.get_by_id(sample_id)
     if not sample or sample.book_id != book_id:
         raise HTTPException(status_code=404, detail="样本不存在")
+    _reject_adopted_ghost_global(sample.source, payload.scope)
     if payload.era is not None:
         sample.era = payload.era
     if payload.favorite is not None:
         sample.favorite = payload.favorite
+    if payload.scope is not None:
+        sample.scope = payload.scope
     if payload.scene_type is not None:
         sample.scene_type = payload.scene_type
     if payload.content is not None:
@@ -293,6 +333,51 @@ async def patch_author_sample(
     return sample
 
 
+@router.post("/books/{book_id}/samples/{sample_id}/recall", response_model=AuthorSampleResponse, status_code=201)
+async def recall_foreign_sample(
+    book_id: UUID,
+    sample_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    repo: AuthorSampleRepository = Depends(get_author_sample_repo),
+    book_repo: BookRepository = Depends(get_book_repo),
+):
+    """外来样本收回本书（2026-09 用户拍板：外来条目唯一可操作项）。
+
+    语义 = 在当前书创建 scope=book 副本，原书 global 行不动——所有权归原书
+    （改内容去原书文风页），副本在「补位不抢位」检索中升为本书样本绝对优先。
+    PATCH 的书域 404 闸对外来行恒拒：收回不是改档而是复制挂入，故独立端点。
+
+    副本字段口径：content/scene_type/embedding 保留（内容同源，向量可直接
+    复用，SQLite 路径恒 None）；era=recent / favorite=False / source=manual /
+    chapter_id 置空——era 是书级坐标，chapter_id 指向原书章节不可跨书携带。
+    与 from-golden 同口径按内容精确去重：本书已有同文样本 → 409 幂等拒绝。
+    """
+    book = await book_repo.get_by_id(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    sample = await repo.get_by_id(sample_id)
+    if not sample:
+        raise HTTPException(status_code=404, detail="样本不存在")
+    if sample.book_id == book_id:
+        raise HTTPException(status_code=422, detail="本书样本不走收回——用「收回本书」转移归属即可")
+
+    existing = await repo.list_by_book(book_id)
+    if (sample.content or "").strip() in {(s.content or "").strip() for s in existing}:
+        raise HTTPException(status_code=409, detail="本书字帖里已有这段字")
+
+    copy = await repo.create_with_embedding(
+        book_id=book_id,
+        content=sample.content,
+        scene_type=sample.scene_type or "general",
+        source="manual",
+        scope="book",
+        embedding=sample.embedding,
+    )
+    await db.commit()
+    await db.refresh(copy)
+    return copy
+
+
 @router.post("/books/{book_id}/samples/from-golden", response_model=List[AuthorSampleResponse], status_code=201)
 async def create_samples_from_golden(
     book_id: UUID,
@@ -305,6 +390,10 @@ async def create_samples_from_golden(
     设计稿 §7.2 端点补全：按内容精确去重（已导入过的跳过）；
     导入后 source=golden_snippet、era=recent。存量书的黄金片段
     由此一次性进入 few-shot 与指纹语料（评估结论：旧表维持双写，见 §11）。
+
+    全局笔迹库批：黄金片段是作者逐条认证的好字，新样本默认 scope='global'
+    （进「我的笔迹库」全库可用）；旧门票语义（favorite/golden 特权跨书）
+    由显式 scope 维度收编。
     """
     book = await book_repo.get_by_id(book_id)
     if not book:
@@ -330,6 +419,9 @@ async def create_samples_from_golden(
             content=snippet,
             scene_type="general",
             source="golden_snippet",
+            scope="global",
+            # favorite 保持默认 False：global 池资格已由 scope 显式表达，
+            # 无需再叠加 favorite，避免语义重复
             embedding=embedding,
         )
         created.append(sample)

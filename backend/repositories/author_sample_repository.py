@@ -36,7 +36,7 @@ import logging
 from typing import List, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import AuthorSample
@@ -77,10 +77,16 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
         scene_type: Optional[str] = None,
         limit: int = 3,
     ) -> List[Tuple[AuthorSample, float]]:
-        """按风格向量检索相似样本。
+        """按风格向量检索相似样本（全局笔迹库批：补位不抢位）。
 
         复用 MemoryChunk.cosine_distance 模式，但去掉时间衰减与 PlotLedger 权重
         （作者样本是固定样本集，不应受时间影响）。
+
+        候选池 = 本书样本（book_id == X）∪ 全局样本（scope == 'global'，
+        含其它书挂进「我的笔迹库」的样本）。排序铁律「本书样本绝对优先」：
+        先按归属档（本书=0 / global=1）再按 cosine_distance 升序——本书样本
+        再不相似也排在 global 之前，global 只在本书候选不足时补位。
+        scene_type 过滤对两档同样生效（与旧口径一致）。
 
         Args:
             embedding: 查询文本的向量
@@ -89,52 +95,50 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
             limit: 返回数量（默认 3，对应蓝图 P0 候选"作者样本 2-3 段"）
 
         Returns:
-            List[Tuple[AuthorSample, float]]: [(样本, cosine_distance), ...] 按 distance 升序
+            List[Tuple[AuthorSample, float]]: [(样本, cosine_distance), ...]
+            按（归属档, distance）升序
         """
         if not embedding:
             return []
 
         distance_expr = AuthorSample.embedding.cosine_distance(embedding)
+        tier_expr = case((AuthorSample.book_id == book_id, 0), else_=1).label("tier")
         query = (
             select(AuthorSample, distance_expr.label("distance"))
             .where(
-                AuthorSample.book_id == book_id,
+                or_(
+                    AuthorSample.book_id == book_id,
+                    AuthorSample.scope == "global",
+                ),
                 AuthorSample.embedding.is_not(None),
             )
         )
         if scene_type:
             query = query.where(AuthorSample.scene_type == scene_type)
 
-        query = query.order_by(distance_expr.asc()).limit(limit)
+        query = query.order_by(tier_expr.asc(), distance_expr.asc()).limit(limit)
         result = await self._db.execute(query)
         rows = result.all()
         return [(row[0], float(row[1])) for row in rows]
 
-    async def list_golden_across_books(
+    async def list_global(
         self,
-        exclude_book_id: UUID | str,
-        limit: int = 3,
+        exclude_book_id: Optional[UUID | str] = None,
+        limit: Optional[int] = None,
     ) -> List[AuthorSample]:
-        """跨书作者黄金池（B4 冷启动兜底，2026-09-13 深水区批）。
+        """列出「我的笔迹库」全局样本（scope == 'global'，全局笔迹库批）。
 
-        其它书的 favorite / golden_snippet 样本——排除 adopted_ghost（AI 学
-        AI 不跨书传播）与 manual/published_chapter（跨书未做题材过滤，只吃
-        作者明确认证过的好样本，收窄串味面——红队 Q5 拍板口径）。"""
-        from sqlalchemy import or_
-
-        query = (
-            select(AuthorSample)
-            .where(
-                AuthorSample.book_id != UUID(str(exclude_book_id)),
-                AuthorSample.source != "adopted_ghost",
-                or_(
-                    AuthorSample.favorite.is_(True),
-                    AuthorSample.source == "golden_snippet",
-                ),
-            )
-            .order_by(AuthorSample.created_at.desc())
-            .limit(limit)
-        )
+        取代退役的 list_golden_across_books（旧门票语义：favorite/golden 特权
+        已被显式 scope 维度收编——作者标 global 才全库可用）。排除本书行
+        （exclude_book_id）：本书自己的样本在 list_by_book 里已出现，合并
+        展示/检索候选时不重复计数。
+        """
+        query = select(AuthorSample).where(AuthorSample.scope == "global")
+        if exclude_book_id is not None:
+            query = query.where(AuthorSample.book_id != UUID(str(exclude_book_id)))
+        query = query.order_by(AuthorSample.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
         result = await self._db.execute(query)
         return list(result.scalars().all())
 
@@ -147,8 +151,14 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
         source: str = "manual",
         embedding: Optional[List[float]] = None,
         era: str = "recent",
+        favorite: bool = False,
+        scope: str = "book",
     ) -> AuthorSample:
         """创建作者样本（含可选 embedding）。
+
+        scope：book=仅本书（默认）/ global=我的笔迹库（全库可用）。
+        ⚠ adopted_ghost 样本禁止 global——该红线在路由层校验（422），
+        仓储层不做重复拦截（内部测试/fixtures 可直接构造）。
 
         警示：BaseRepository.create 接受 dict payload（内部 commit + refresh），
         直接传 ORM 实例会 TypeError（** 解包要求 mapping）。
@@ -162,4 +172,6 @@ class AuthorSampleRepository(BaseRepository[AuthorSample]):
             "word_count": len(content),
             "source": source,
             "era": era,
+            "favorite": favorite,
+            "scope": scope,
         })
