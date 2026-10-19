@@ -480,10 +480,10 @@ export const styleApi = {
     return requestJson(`/books/${bookId}/samples${query}`)
   },
 
-  /** 创建作者样本（保存时自动向量化）。 */
+  /** 创建作者样本（保存时自动向量化；scope 默认 book）。 */
   createSample: async (
     bookId: string,
-    payload: { content: string; scene_type?: string; chapter_id?: string; source?: string; era?: string },
+    payload: { content: string; scene_type?: string; chapter_id?: string; source?: string; era?: string; scope?: 'book' | 'global' },
   ): Promise<AuthorSample> => {
     return requestJson(`/books/${bookId}/samples`, {
       method: 'POST',
@@ -496,16 +496,21 @@ export const styleApi = {
     await requestRaw(`/books/${bookId}/samples/${sampleId}`, { method: 'DELETE' })
   },
 
-  /** 样本局部更新：时期/收藏/场景类型/正文（正文变更时后端重算字数并重向量化）。 */
+  /** 样本局部更新：时期/收藏/场景类型/正文/归属（scope=转入笔迹库·收回本书）。 */
   patchSample: async (
     bookId: string,
     sampleId: string,
-    patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string },
+    patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string; scope?: 'book' | 'global' },
   ): Promise<AuthorSample> => {
     return requestRaw(`/books/${bookId}/samples/${sampleId}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }).then((r: any) => r.json())
+  },
+
+  /** 外来样本收回本书：当前书创建 book 作用域副本，原书 global 行不动（409=已收回过）。 */
+  recallSample: async (bookId: string, sampleId: string): Promise<AuthorSample> => {
+    return requestJson(`/books/${bookId}/samples/${sampleId}/recall`, { method: 'POST' })
   },
 
   /** 黄金片段（旧表）一键导入文风样本库（按内容去重）。 */

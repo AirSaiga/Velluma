@@ -20,6 +20,7 @@ import { useToast } from '../../../composables/useToast'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import { useAppStore } from '../../app/useAppStore'
 import StyleSampleSection from '../presentation/StyleSampleSection.vue'
+import { extractPrefillCandidates, isForeignSample } from '../sampleBuckets'
 import StyleFingerprintSection from '../presentation/StyleFingerprintSection.vue'
 import StyleNegativeSection from '../presentation/StyleNegativeSection.vue'
 import StyleReconciliationSection from '../presentation/StyleReconciliationSection.vue'
@@ -55,6 +56,12 @@ const currentBook = store.currentBook
 
 // ============ 路由与书 ============
 const bookIdFromRoute = computed(() => (route.params.bookId as string) || null)
+// 书名映射（外来样本只读悬停解释点名用——笔迹库分区里指出样本来自哪本书）
+const bookTitleById = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const b of store.books.value) map[b.id] = b.title
+  return map
+})
 watch(
   bookIdFromRoute,
   (newBookId) => {
@@ -344,18 +351,42 @@ async function uploadSample(content: string, sceneType: AuthorSampleSceneType, e
   }
 }
 
-/** 样本局部更新（时期/收藏/场景类型/正文） */
-async function patchSample(sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string }) {
+/** 样本局部更新（时期/收藏/场景类型/正文/归属）。归属转移（转入笔迹库·收回本书）
+ *  只改分区不动语料；AI 亲录样本转笔迹库会被后端 422 拦下（前端已置灰兜底）。
+ *  外来样本的「收回本书」不走此通路——PATCH 书域闸对外来行恒 404，转交 recallForeignSample。 */
+async function patchSample(sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string; scope?: 'book' | 'global' }) {
   const bookId = bookIdFromRoute.value
   if (!bookId) return
+  const target = samples.value.find(s => s.id === sampleId)
+  if (patch.scope === 'book' && target && isForeignSample(target, bookId)) {
+    await recallForeignSample(sampleId)
+    return
+  }
   try {
     const updated = await styleApi.patchSample(bookId, sampleId, patch)
     const idx = samples.value.findIndex(s => s.id === sampleId)
     if (idx >= 0) samples.value[idx] = updated
+    if (patch.scope === 'global') showToast('已转入笔迹库——别的书缺范例时会用它补位', 'success')
+    else if (patch.scope === 'book') showToast('已收回本书——这段字只在本书内当范例', 'success')
     // 时期/正文变化影响语料聚合与样本指纹 → 重算指纹
     if (patch.era || patch.content) await reloadSamplesAndFingerprint()
   } catch (error: unknown) {
     showToast('更新失败: ' + ((error as Error)?.message || ''), 'error')
+  }
+}
+
+/** 外来样本收回本书（2026-09 用户拍板的外来条目唯一操作）：当前书创建
+ *  book 作用域副本、原书 global 行不动；本书语料与指纹随副本重算。 */
+async function recallForeignSample(sampleId: string) {
+  const bookId = bookIdFromRoute.value
+  if (!bookId) return
+  try {
+    await styleApi.recallSample(bookId, sampleId)
+    await reloadSamplesAndFingerprint()
+    showToast('已收回本书——这段字进了本书字帖，笔迹库原条目不动', 'success')
+  } catch (error: unknown) {
+    const message = (error as Error)?.message || ''
+    showToast(message.includes('409') ? '本书字帖里已有这段字——不用再收' : '收回失败: ' + message, 'error')
   }
 }
 
@@ -368,7 +399,7 @@ async function importFromGolden() {
     const created = await styleApi.createSamplesFromGolden(bookId)
     await reloadSamplesAndFingerprint()
     goldenSnippetCount.value = Math.max(0, goldenSnippetCount.value - created.length)
-    showToast(created.length > 0 ? `已把 ${created.length} 条黄金片段收进字帖` : '黄金片段都已导入过了', 'success')
+    showToast(created.length > 0 ? `已把 ${created.length} 条黄金片段收进笔迹库（全库待命）` : '黄金片段都已导入过了', 'success')
   } catch (error: unknown) {
     showToast('导入失败: ' + ((error as Error)?.message || ''), 'error')
   } finally {
@@ -415,11 +446,8 @@ async function importFromChapters() {
 
 // ============ 提炼（不落库红线保持） ============
 function openExtract() {
-  // 预填样本库里最长的 3 条（零状态坡道第三幕承接）
-  extractPrefill.value = [...samples.value]
-    .sort((a, b) => b.word_count - a.word_count)
-    .slice(0, 3)
-    .map(s => s.content)
+  // 预填本书样本里最长的 3 条（零状态坡道第三幕承接）；外来样本不进预填
+  extractPrefill.value = extractPrefillCandidates(samples.value, bookIdFromRoute.value)
   showExtractModal.value = true
 }
 
@@ -886,6 +914,7 @@ onUnmounted(() => clearTimeout(autosaveTimer))
             :fingerprint-by-sample="fingerprintBySample"
             :ramp="true"
             :busy="isBusy"
+            :current-book-id="bookIdFromRoute"
             @upload="uploadSample"
             @delete="deleteSample"
             @import-chapters="importFromChapters"
@@ -918,6 +947,8 @@ onUnmounted(() => clearTimeout(autosaveTimer))
                     :fingerprint-by-sample="fingerprintBySample"
                     :golden-count="goldenSnippetCount"
                     :busy="isBusy"
+                    :current-book-id="bookIdFromRoute"
+                    :book-title-by-id="bookTitleById"
                     @upload="uploadSample"
                     @delete="deleteSample"
                     @import-chapters="importFromChapters"

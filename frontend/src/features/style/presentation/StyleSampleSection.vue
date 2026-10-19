@@ -13,6 +13,7 @@
 import { computed, ref } from 'vue'
 import Icon from '../../../components/Icon.vue'
 import type { AuthorSample, AuthorSampleSceneType, TextFingerprint } from '../../../types'
+import { bucketSamples, canEnterLibrary, foreignSampleHint, isForeignSample, libraryStandbyLabel } from '../sampleBuckets'
 
 const props = defineProps<{
   samples: AuthorSample[]
@@ -23,6 +24,10 @@ const props = defineProps<{
   busy?: boolean
   /** 存量黄金片段数（>0 显示「导入黄金片段」入口） */
   goldenCount?: number
+  /** 当前文风页的书 ID——外来样本（book_id ≠ 当前书）在笔迹库分区只读 */
+  currentBookId?: string | null
+  /** 书名映射（book_id → title），外来样本只读悬停解释点名用；缺省退化为通用文案 */
+  bookTitleById?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -30,19 +35,29 @@ const emit = defineEmits<{
   (e: 'delete', sampleId: string): void
   (e: 'importChapters'): void
   (e: 'importGolden'): void
-  (e: 'update-sample', sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string }): void
+  (e: 'update-sample', sampleId: string, patch: { era?: 'recent' | 'early'; favorite?: boolean; scene_type?: AuthorSampleSceneType; content?: string; scope?: 'book' | 'global' }): void
 }>()
 
 const newSampleContent = ref('')
 const newSampleSceneType = ref<AuthorSampleSceneType>('general')
 const newSampleEra = ref<'recent' | 'early'>('recent')
 
-// §4.1 拆二级滚动：默认收 6 条，展开看全部（页滚动唯一）
+// §4.1 拆二级滚动：默认收 6 条，展开看全部（页滚动唯一）；只作用于本书段
 const SAMPLE_COLLAPSED_COUNT = 6
 const expanded = ref(false)
-const visibleSamples = computed(() =>
-  expanded.value ? props.samples : props.samples.slice(0, SAMPLE_COLLAPSED_COUNT),
+
+// 我的笔迹库批（2026-09）：按 scope 分桶——本书样本 / 我的笔迹库（跨书补位池）
+const buckets = computed(() => bucketSamples(props.samples))
+const bookSamples = computed(() =>
+  expanded.value ? buckets.value.book : buckets.value.book.slice(0, SAMPLE_COLLAPSED_COUNT),
 )
+const libraryLabel = computed(() => libraryStandbyLabel(buckets.value.library.length))
+
+/** 两分区渲染面：本书样本（可折叠）→ 我的笔迹库（全量，头部待命文案） */
+const renderGroups = computed(() => [
+  { key: 'book' as const, isLibrary: false, items: bookSamples.value },
+  { key: 'library' as const, isLibrary: true, items: buckets.value.library },
+])
 
 const sceneTypeLabels: Record<string, string> = {
   dialogue: '对话',
@@ -65,11 +80,20 @@ function submit() {
   newSampleContent.value = ''
 }
 
+// ---- 外来样本只读（2026-09 用户拍板）：book_id ≠ 当前书的条目禁一切修改，仅可看与「收回本书」 ----
+function isForeign(sample: AuthorSample): boolean {
+  return isForeignSample(sample, props.currentBookId)
+}
+function foreignHint(sample: AuthorSample): string {
+  return foreignSampleHint(sample, props.bookTitleById)
+}
+
 // ---- 样本就地编辑（正文） ----
 const editingId = ref<string | null>(null)
 const editingContent = ref('')
 
 function startEdit(sample: AuthorSample) {
+  if (isForeign(sample)) return // 外来样本只读，兜底（按钮已禁用）
   editingId.value = sample.id
   editingContent.value = sample.content
 }
@@ -154,90 +178,125 @@ function saveEdit(sample: AuthorSample) {
             v-if="goldenCount && goldenCount > 0"
             class="btn-ghost"
             :disabled="busy"
-            :title="`把本书已有的 ${goldenCount} 条黄金片段收进字帖（AI 会照着学）`"
+            :title="`把本书已有的 ${goldenCount} 条黄金片段收进笔迹库（新书缺范例时自动补位）`"
             @click="emit('importGolden')"
-          >导入黄金片段</button>
+          >导入黄金片段进笔迹库</button>
           <span v-else class="upload-hint">Ctrl+Enter 快速存入</span>
         </div>
       </div>
 
-      <!-- 样本列表（§4.1：默认 6 条 + 展开收起，拆掉二级滚动嵌套） -->
-      <div class="sample-list">
-        <div v-if="samples.length === 0" class="empty-note">字帖还空着——贴入第一段字，马上就能去「试写对比」看效果。</div>
-        <article
-          v-for="sample in visibleSamples"
-          :key="sample.id"
-          class="sample-card"
-        >
-          <div class="sample-meta">
-            <button
-              class="fav-btn"
-              :class="{ active: sample.favorite }"
-              :title="sample.favorite ? '取消收藏（AI 找范例时不再优先带这条）' : '收藏：AI 找范例时优先带这条'"
-              @click="emit('update-sample', sample.id, { favorite: !sample.favorite })"
-            ><Icon name="star" :size="14" /></button>
-            <select
-              class="badge badge-scene scene-edit"
-              title="这段字的类型（帮 AI 按场合挑范例）"
-              :value="sample.scene_type"
-              @change="emit('update-sample', sample.id, { scene_type: ($event.target as HTMLSelectElement).value as AuthorSampleSceneType })"
-            >
-              <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
-            </select>
-            <span v-if="sample.source !== 'manual'" class="badge badge-source">{{ sourceLabels[sample.source] || sample.source }}</span>
-            <span v-if="sample.era === 'early'" class="badge badge-early" title="早期的字只存档备查，AI 不会挑它作范例">早期</span>
-            <!-- 工坊零数字（v4）：字数等测量信息不上卡——只留场景/来源/收藏 -->
-            <span class="sample-chips" />
-            <button
-              v-if="editingId !== sample.id"
-              class="icon-btn"
-              title="编辑样本正文"
-              @click="startEdit(sample)"
-            >
-              <Icon name="pencil-square" :size="12" />
-            </button>
-            <button class="icon-danger" title="删除样本" @click="emit('delete', sample.id)">
-              <Icon name="x-mark" :size="12" />
-            </button>
-          </div>
-
-          <!-- 就地编辑态：正文可改，保存后后端重算字数并重向量化 -->
-          <template v-if="editingId === sample.id">
-            <textarea
-              v-model="editingContent"
-              class="sample-edit-textarea"
-              rows="6"
-              @keydown.ctrl.enter="saveEdit(sample)"
-              @keydown.esc="cancelEdit"
-            ></textarea>
-            <div class="sample-edit-actions">
-              <span class="edit-hint">保存后 AI 会重新学一遍这段字 · Ctrl+Enter 保存 · Esc 取消</span>
-              <button class="era-toggle" @click="cancelEdit">取消</button>
+      <!-- 样本两分区（我的笔迹库批）：本书样本 / 我的笔迹库（scope 分桶，§4.1 折叠仅本书段） -->
+      <section v-for="group in renderGroups" :key="group.key" class="bucket" :class="{ 'bucket-library': group.isLibrary }">
+        <div v-if="group.isLibrary" class="library-head" :title="'收进笔迹库的字全库可用：新书或本书缺某个场景的范例时，自动用它补位，绝不抢本书样本的位置'">
+          <Icon name="book-open" :size="12" />
+          <span>{{ libraryLabel }}</span>
+        </div>
+        <div class="sample-list">
+          <div v-if="group.items.length === 0 && !group.isLibrary" class="empty-note">字帖还空着——贴入第一段字，马上就能去「试写对比」看效果。</div>
+          <div v-else-if="group.items.length === 0" class="empty-note library-empty">笔迹库还空着——本书样本卡上点「转入笔迹库」，最像你的字就能在别的书里接着用。</div>
+          <article
+            v-for="sample in group.items"
+            :key="sample.id"
+            class="sample-card"
+            :class="{ 'card-library': sample.scope === 'global' }"
+          >
+            <div class="sample-meta">
               <button
-                class="btn-primary btn-sm"
-                :disabled="busy || !editingContent.trim()"
-                @click="saveEdit(sample)"
-              >保存</button>
+                class="fav-btn"
+                :class="{ active: sample.favorite }"
+                :disabled="isForeign(sample)"
+                :title="isForeign(sample) ? foreignHint(sample) : (sample.favorite ? '取消收藏（AI 找范例时不再优先带这条）' : '收藏：AI 找范例时优先带这条（本书内优先）')"
+                @click="emit('update-sample', sample.id, { favorite: !sample.favorite })"
+              ><Icon name="star" :size="14" /></button>
+              <select
+                class="badge badge-scene scene-edit"
+                :disabled="isForeign(sample)"
+                :title="isForeign(sample) ? foreignHint(sample) : '这段字的类型（帮 AI 按场合挑范例）'"
+                :value="sample.scene_type"
+                @change="emit('update-sample', sample.id, { scene_type: ($event.target as HTMLSelectElement).value as AuthorSampleSceneType })"
+              >
+                <option v-for="(label, key) in sceneTypeLabels" :key="key" :value="key">{{ label }}</option>
+              </select>
+              <span v-if="sample.source !== 'manual' && sample.source !== 'adopted_ghost'" class="badge badge-source">{{ sourceLabels[sample.source] || sample.source }}</span>
+              <span v-if="sample.source === 'adopted_ghost'" class="badge badge-source" title="AI 写的——只能在本书内当范例，不能进笔迹库">AI 写的</span>
+              <span v-if="sample.scope === 'global'" class="badge badge-library" title="全库可用：别的书缺范例时会用它补位">笔迹库</span>
+              <span v-if="sample.era === 'early'" class="badge badge-early" title="早期的字只存档备查，AI 不会挑它作范例">早期</span>
+              <!-- 工坊零数字（v4）：字数等测量信息不上卡——只留场景/来源/收藏 -->
+              <span class="sample-chips" />
+              <button
+                v-if="editingId !== sample.id"
+                class="icon-btn"
+                :disabled="isForeign(sample)"
+                :title="isForeign(sample) ? foreignHint(sample) : '编辑样本正文'"
+                @click="startEdit(sample)"
+              >
+                <Icon name="pencil-square" :size="12" />
+              </button>
+              <button
+                class="icon-danger"
+                :disabled="isForeign(sample)"
+                :title="isForeign(sample) ? foreignHint(sample) : '删除样本'"
+                @click="emit('delete', sample.id)"
+              >
+                <Icon name="x-mark" :size="12" />
+              </button>
             </div>
-          </template>
-          <p v-else class="sample-content">{{ sample.content }}</p>
 
-          <div v-if="editingId !== sample.id" class="sample-foot">
-            <span v-if="sample.era === 'early'" class="muted-foot">标记为早期的字不会被 AI 挑作范例——若它仍代表现在的你，可切回近期</span>
-            <button
-              class="era-toggle"
-              @click="emit('update-sample', sample.id, { era: sample.era === 'early' ? 'recent' : 'early' })"
-            >{{ sample.era === 'early' ? '标记为近期' : '标记为早期' }}</button>
-          </div>
-        </article>
-        <button
-          v-if="samples.length > SAMPLE_COLLAPSED_COUNT"
-          class="list-expand-btn"
-          @click="expanded = !expanded"
-        >
-          {{ expanded ? '收起' : `展开其余 ${samples.length - SAMPLE_COLLAPSED_COUNT} 条` }}
-        </button>
-      </div>
+            <!-- 就地编辑态：正文可改，保存后后端重算字数并重向量化 -->
+            <template v-if="editingId === sample.id">
+              <textarea
+                v-model="editingContent"
+                class="sample-edit-textarea"
+                rows="6"
+                @keydown.ctrl.enter="saveEdit(sample)"
+                @keydown.esc="cancelEdit"
+              ></textarea>
+              <div class="sample-edit-actions">
+                <span class="edit-hint">保存后 AI 会重新学一遍这段字 · Ctrl+Enter 保存 · Esc 取消</span>
+                <button class="era-toggle" @click="cancelEdit">取消</button>
+                <button
+                  class="btn-primary btn-sm"
+                  :disabled="busy || !editingContent.trim()"
+                  @click="saveEdit(sample)"
+                >保存</button>
+              </div>
+            </template>
+            <p v-else class="sample-content">{{ sample.content }}</p>
+
+            <div v-if="editingId !== sample.id" class="sample-foot">
+              <span v-if="sample.era === 'early'" class="muted-foot">标记为早期的字不会被 AI 挑作范例——若它仍代表现在的你，可切回近期</span>
+              <!-- 转移操作（我的笔迹库批）：本书 ⇄ 笔迹库；AI 亲录样本置灰（后端也拦） -->
+              <button
+                v-if="sample.scope !== 'global'"
+                class="era-toggle transfer-btn"
+                :disabled="busy || !canEnterLibrary(sample)"
+                :title="canEnterLibrary(sample) ? '转入笔迹库：这段字全库可用，别的书缺范例时自动补位' : 'AI 写的字只能留在本书当范例——不进笔迹库，免得 AI 学 AI'"
+                @click="emit('update-sample', sample.id, { scope: 'global' })"
+              >转入笔迹库</button>
+              <button
+                v-else
+                class="era-toggle transfer-btn"
+                :disabled="busy"
+                title="收回本书：这段字只在本书内当范例"
+                @click="emit('update-sample', sample.id, { scope: 'book' })"
+              >收回本书</button>
+              <button
+                class="era-toggle"
+                :disabled="isForeign(sample)"
+                :title="isForeign(sample) ? foreignHint(sample) : undefined"
+                @click="emit('update-sample', sample.id, { era: sample.era === 'early' ? 'recent' : 'early' })"
+              >{{ sample.era === 'early' ? '标记为近期' : '标记为早期' }}</button>
+            </div>
+          </article>
+          <button
+            v-if="!group.isLibrary && buckets.book.length > SAMPLE_COLLAPSED_COUNT"
+            class="list-expand-btn"
+            @click="expanded = !expanded"
+          >
+            {{ expanded ? '收起' : `展开其余 ${buckets.book.length - SAMPLE_COLLAPSED_COUNT} 条` }}
+          </button>
+        </div>
+      </section>
     </template>
   </section>
 </template>
@@ -415,6 +474,43 @@ function saveEdit(sample: AuthorSample) {
   flex-direction: column;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+/* ---- 我的笔迹库分区（两分区批）：跨书补位池的作者可见面 ---- */
+.bucket-library {
+  margin-top: 0.75rem;
+}
+.library-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  font-size: var(--text-xs);
+  color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 7%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent-500) 35%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: help;
+}
+.badge-library {
+  color: var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 10%, transparent);
+}
+.card-library {
+  border-color: color-mix(in srgb, var(--accent-500) 25%, var(--line-faint));
+}
+.transfer-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 外来样本只读：禁用态统一灰显 + 悬停解释靠 title（Chromium 对 disabled 元素仍显示原生 tooltip） */
+.sample-card button:disabled,
+.sample-card select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.library-empty {
+  border: 1px dashed var(--line-faint);
+  border-radius: var(--radius-sm);
 }
 .list-expand-btn {
   min-height: 28px;

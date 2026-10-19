@@ -470,8 +470,10 @@ export interface AuthorSample {
   source: string
   /** 时期标记：recent=近期（进语料聚合）/early=早期（仅存档） */
   era?: 'recent' | 'early' | string
-  /** 收藏（检索兜底流优先） */
+  /** 收藏（检索兜底流优先——本书内优先） */
   favorite?: boolean
+  /** 归属：book=仅本书（默认）/ global=我的笔迹库（全库可用；采纳幽灵样本禁入） */
+  scope?: 'book' | 'global'
   created_at: string
 }
 
