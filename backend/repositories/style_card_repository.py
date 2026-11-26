@@ -98,5 +98,5 @@ class StyleCardRepository(BaseRepository[StyleCard]):
             await self._db.refresh(existing)
             return existing
         # 设计意图：BaseRepository.create(payload: dict) 内部 model(**payload)——
-        # 必须传 dict（与 6e6670b 修 AuthorSampleRepository 同款），传 ORM 实例必 TypeError
+        # 必须传 dict（与 ae2f0c3 修 AuthorSampleRepository 同款），传 ORM 实例必 TypeError
         return await self.create({"book_id": book_id, **fields})

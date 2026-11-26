@@ -9,7 +9,7 @@
    新会话仍能读到行，测试即红）。
 2. ChapterCardRepository.get_or_create_for_chapter 旧实现把 ORM 实例传给
    BaseRepository.create(payload: dict)（内部 model(**payload)），首访必
-   TypeError（与 6e6670b AuthorSampleRepository 同款）。锁 = 首访建卡成功
+   TypeError（与 ae2f0c3 AuthorSampleRepository 同款）。锁 = 首访建卡成功
    且跨会话幂等。
 
 配方与 test_intent_repository 同款（内存 SQLite 栈；UUID 带字母防全数字坑）。

@@ -30,7 +30,7 @@
 - 2026-09-18 基线变动（next-phase 五稿批）：候选回流修缮 +31 后端 +11 前端；埋点瘦身零增净删（拆 summary 端点与协作面板，机制测试保留）；开章卡 +6 后端（`test_reader_ledger.py`）；问书 +17 后端（`test_ask_book.py`）；幽灵三键/自动捕获 +17 前端（`ghostPairTracker.test.ts`——决策纯函数/映射三形态/覆盖语义/上膛窗）。2026-09-19 GUI 交叉验证轮：+1 后端（问书「知道」语气词回归用例，缺陷 #2 修复配套——旧断言太松假绿的教训：断言必须钉分支专属措辞）。
 
 - 后端测试与被测模块**同目录 colocate**：`services/style/fingerprint.py` ↔ `services/style/test_fingerprint.py`。跨模块的接缝测试也放在主要消费方目录下（如 `routes/chapter_generation/test_collab_clear.py`）。
-- 前端测试**只收集 `src/**/__tests__/**/*.test.ts`**（`vitest.config.js` include）——新测试必须放 `__tests__/` 目录，放别处会被**静默跳过**（distance.test.ts 曾中招，4be1568）。
+- 前端测试**只收集 `src/**/__tests__/**/*.test.ts`**（`vitest.config.js` include）——新测试必须放 `__tests__/` 目录，放别处会被**静默跳过**（distance.test.ts 曾中招，156573c）。
 - `backend/_deprecated/` 不参与任何 import 链，测试同理不跑（全量命令必须带 `--ignore`，否则收集错误中断）。
 
 ## 2. 运行命令与已知坑

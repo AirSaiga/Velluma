@@ -57,7 +57,7 @@ outcome=hit|drop|exempt|mute|rewrite。信用分机制一期不做，但数据�
 攒——缺了未来只能补埋点重来。
 
 **读面**：`GET /api/chapters/{chapter_id}/adaptive/constraints/summary` →
-`{chapter_id, total, by_constraint, by_outcome, recent(最新 20 条)}`（324c83a
+`{chapter_id, total, by_constraint, by_outcome, recent(最新 20 条)}`（5701020
 落地；按章过滤台账聚合，信用分/服从率度量的数据出口——前端「约束健康」面板
 等数据体量后再接线；failure 静默返回空结构，零报错契约）。
 
@@ -345,7 +345,7 @@ semantic_match 同一把尺子；目标向量进程级缓存——大纲节拍�
   任一在场者 KNOWS 即合法——知情者 POV 叙述），guard 保持纯文本比对。
   canon_leak 护标签词、secret_leak 护私有实体档案，本检补「真相里文本
   内容本身」的检出面缺口。
-- **3b 检源扩展（无新 id）**——字段级真相分层（b8209f5，
+- **3b 检源扩展（无新 id）**——字段级真相分层（1277607，
   world_entities.field_layers）的秘密/半露字段内容并入 secret_leak
   同一判据同一 kind，rewrite 资格随之贯通；bundle.field_layer_secrets
   由 overlay 适配器派生，零额外查询。

@@ -87,7 +87,7 @@ class ChapterCardRepository(BaseRepository[ChapterCard]):
         if existing:
             return existing
         # 设计意图：BaseRepository.create(payload: dict) 内部 model(**payload)——
-        # 必须传 dict（与 6e6670b 修 AuthorSampleRepository / S5 修 style_card 同款），
+        # 必须传 dict（与 ae2f0c3 修 AuthorSampleRepository / S5 修 style_card 同款），
         # 传 ORM 实例必 TypeError（2026-09-01 审计发现的潜伏雷，修于有人接线之前）
         return await self.create({
             "book_id": book_id,

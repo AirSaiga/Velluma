@@ -46,8 +46,8 @@
 数据写入侧（世界页/文风页/spine 端点）、事件折叠、world_bridge 适配器全部保留——本设计是消费面的统一，不是推翻。
 
 > **召回层/装配面后续演变（表后注，2026-09-13/16）**：
-> ① **B3 检索分流去敏（2026-09-13，`456ccc0`）**——三层召回的 V（向量）/B（词法）流改吃**去敏查询**：`recall_memories(mask_names=...)` 经 `mask_entity_names` 抹除书级专名+实体/资产注册别名（≥2 字，`bundle_mask_names` 收集），防高频主角名霸屏向量/词法检索、动作/场景语境词权重被稀释；**A 结构化前情流保原文**。对拍 `services/rag/test_recall_masking.py`。
-> ② **preview 光标真切片（2026-09-16，`e8cd82c`）**——`GET /adaptive/context-preview` 增可选 `before_cursor`(≤600)/`after_cursor`(≤200) query 参：传入即以**光标前文取代落库章节尾部装配**（中插写作不再读文末语境，与 stitch 桥接态 fragment 同语义；`after_cursor` 只标 briefing.scene.bridge 不进装配）。
+> ① **B3 检索分流去敏（2026-09-13，`83f8383`）**——三层召回的 V（向量）/B（词法）流改吃**去敏查询**：`recall_memories(mask_names=...)` 经 `mask_entity_names` 抹除书级专名+实体/资产注册别名（≥2 字，`bundle_mask_names` 收集），防高频主角名霸屏向量/词法检索、动作/场景语境词权重被稀释；**A 结构化前情流保原文**。对拍 `services/rag/test_recall_masking.py`。
+> ② **preview 光标真切片（2026-09-16，`2a17f81`）**——`GET /adaptive/context-preview` 增可选 `before_cursor`(≤600)/`after_cursor`(≤200) query 参：传入即以**光标前文取代落库章节尾部装配**（中插写作不再读文末语境，与 stitch 桥接态 fragment 同语义；`after_cursor` 只标 briefing.scene.bridge 不进装配）。
 
 ## 3. 后端完整链条（目标态全景）
 

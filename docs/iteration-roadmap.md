@@ -102,7 +102,7 @@ P0 度量先行 → P1 协作交互深化 → P2 世界页数据喂协作 → P3
 | P2 | 世界页完善：C2 真相挂接 / 相遇→走向卡桥 / C3 激活 / M4 收尾 / D4 比例尺 | 数据主线 | ✅ 2026-08-19 完成 |
 | P3 | SQLite 切换日 + BS-ADF 归档 | 基建/架构债 | ✅ 2026-08-19 完成 |
 | P4 | 缓行件激活 | 数据驱动（归档 §5 触发条件；05 瘦身后数据门已废改推理分诊） | ⏸ 按推理逐项重新分诊 |
-| P5 | 地基加固期：契约修复（私有语义/在场提权/叙事时间可见/回流闭环）+ 录入回报可见（AI 所见预览/用量）+ 预算管理器 + 生成效果调优 | 加固/体验/效果 | ✅ 施工完成 2026-08-21（`e44dd59`，后端 365/0 首次全绿、前端 85；实测期事项与 B4 待真实使用验证） |
+| P5 | 地基加固期：契约修复（私有语义/在场提权/叙事时间可见/回流闭环）+ 录入回报可见（AI 所见预览/用量）+ 预算管理器 + 生成效果调优 | 加固/体验/效果 | ✅ 施工完成 2026-08-21（`c8ffe51`，后端 365/0 首次全绿、前端 85；实测期事项与 B4 待真实使用验证） |
 | §12+ | 此后各期（战略定稿/世界内核/deai/约束治理/真相质感/运维收口/去参数化/写后收敛/next-phase 五批等）见本文 §21 起与 `docs/roadmap-archive.md` §9–§20 | 连续编年 | ✅ 逐期登记在案 |
 
 ---
@@ -124,33 +124,33 @@ P0 度量先行 → P1 协作交互深化 → P2 世界页数据喂协作 → P3
 
 ---
 
-## 21. 候选回流链路修缮期（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`，已提交 c304440；09-19 补测试 124df8a）
+## 21. 候选回流链路修缮期（2026-09-18，设计稿 `docs/next-phase/02-candidate-reflow-repairs.md`，已提交 60ee822；09-19 补测试 6c2110d）
 
-修缮非新建（链路本体幂等/去重/批量采纳不动）：候选补出处（抽取 prompt 要求 evidence 逐字摘录 + event_scout 落池「去空白子串」校验，编造出处剥除不上屏、候选降级无出处档；前端收件箱悬停/批量模态引文/世界页卡片三面展示）/ 撤销单事务化（`POST /world/candidates/{id}/undo-accept` 删转正产物+回 pending 一个 commit；accept 记录产物 id 入 draft）/ 拒绝史进防重（30 天窗/200 条归一化判重，auto_reject 假拒绝不计，suppressed_rejected 计数）/ 键盘裁决（↑↓/→·Enter/←·Delete，`inboxKeyboard.ts` 纯函数三宿主）/ 回场补读（进章也发枪 auto-read，哈希幂等闸兜底零成本重进）/ read-entities 失败不写幂等锚（`EmergentFacts.failed` 区分失败与无涌现）+ 顺修 `adaptive/schemas.py` 缺 `Any` 导入致 read-entities 响应必炸的预存在隐患 / 用量停机冲账（lifespan+atexit 双路 `flush_all_adaptive_records`）。叙事见 `docs/incidents/world.md`，契约见 `docs/agent/world.md` ④ 与 `docs/agent/nle-adf.md`。测试基线：后端 1531→1562、前端 370→381；09-19 补齐批（124df8a）加 observing 停机冲账行为契约 + 涌现失败/无涌现显式区分，基线至 1586+398。
+修缮非新建（链路本体幂等/去重/批量采纳不动）：候选补出处（抽取 prompt 要求 evidence 逐字摘录 + event_scout 落池「去空白子串」校验，编造出处剥除不上屏、候选降级无出处档；前端收件箱悬停/批量模态引文/世界页卡片三面展示）/ 撤销单事务化（`POST /world/candidates/{id}/undo-accept` 删转正产物+回 pending 一个 commit；accept 记录产物 id 入 draft）/ 拒绝史进防重（30 天窗/200 条归一化判重，auto_reject 假拒绝不计，suppressed_rejected 计数）/ 键盘裁决（↑↓/→·Enter/←·Delete，`inboxKeyboard.ts` 纯函数三宿主）/ 回场补读（进章也发枪 auto-read，哈希幂等闸兜底零成本重进）/ read-entities 失败不写幂等锚（`EmergentFacts.failed` 区分失败与无涌现）+ 顺修 `adaptive/schemas.py` 缺 `Any` 导入致 read-entities 响应必炸的预存在隐患 / 用量停机冲账（lifespan+atexit 双路 `flush_all_adaptive_records`）。叙事见 `docs/incidents/world.md`，契约见 `docs/agent/world.md` ④ 与 `docs/agent/nle-adf.md`。测试基线：后端 1531→1562、前端 370→381；09-19 补齐批（6c2110d）加 observing 停机冲账行为契约 + 涌现失败/无涌现显式区分，基线至 1586+398。
 
-## 22. 协作埋点瘦身期（2026-09-18，设计稿 `docs/next-phase/05-telemetry-slimming.md`，已提交 6845578）
+## 22. 协作埋点瘦身期（2026-09-18，设计稿 `docs/next-phase/05-telemetry-slimming.md`，已提交 180a9f2）
 
 拆分析层留机制层：`GET /adaptive/events/summary` 聚合端点与 insights「协作」面板（四采纳率卡/逐章分布/COLLAB_KIND_LABELS/清空埋点按钮）退役——面板只剩成本/质量/用量三 tab（B3 用量两卡是 generation_runs 观测面，原样保留）；纯分析事件接线 19 种全拆（前端发射点收缩到机制 3 文件 5 处：hint_dismiss/ghost_adopt/ghost_discard/intent_correct + 传感器 ghost_discard_reason）；事件总线与写侧保留（机制四件的水管），`DELETE collab-events` 端点保留为机制数据重置口。原则修订落 `docs/ai-writing-philosophy.md` §8（埋点不当门卫只当刽子手；两纪律废除：新功能必须配埋点 / COLLAB_KIND_LABELS 上屏映射）；归档 §5 缓行表与 §2.3/§2.4 数据门标注「已废改推理分诊」。M1 全量清点清单在 05 稿附录。机制对拍（quiet_learning 66 项/intent_hardening/style_paradigm sample_prior 5 项）全绿；基线 1562+381+tsc 净不变。
 
-## 23. 开章卡与读者清单期（2026-09-18，设计稿 `docs/next-phase/01-opening-card-and-reader-ledger.md`，已提交 ce48e09）
+## 23. 开章卡与读者清单期（2026-09-18，设计稿 `docs/next-phase/01-opening-card-and-reader-ledger.md`，已提交 21bade4）
 
 两面镜子零 LLM：**开章卡**（M1——`GET /adaptive/opening-card`：空章「打算」页顶部四行：该揭（含逾期深度）/别说破（scope 徽标全书·在场两档）/线头（真实总数+最久）/此刻；三规则宪法=真实总数+口径徽标·点一下就地展开·空集零像素；设置弹窗「写作台」开关；专用计数 touch 端点写独立 jsonl——05 瘦身口径首发）/ **读者清单**（M2——finish 响应 `reader_ledger`：本章新知道/已经知道/还不知道按计划章分桶+未排期，报告末尾「读者此刻」栏）。数据底座 `services/world/reader_ledger.py` 复用 read_merge_reveals（扩文本三件）+ build_scene_slice（在场口径无平行实现）。测试 +6（test_reader_ledger.py：分类/空 None/文本携带/卡片行/空书/路由防御），基线 1568+381+tsc 净。M3 调参（超载阈值 6/排序键）待真实使用数据。
 
-## 24. 问书期（2026-09-18，设计稿 `docs/next-phase/04-ask-the-book.md`，已提交 e4d1f6c）
+## 24. 问书期（2026-09-18，设计稿 `docs/next-phase/04-ask-the-book.md`，已提交 87cfd9d）
 
 行间手势速查：`??` 触发（AskNoteNode 手势族）→ `POST /adaptive/ask-book`——六类纯代码直答零 LLM（`services/world/ask_book.py`：线头/该揭/距离 spatial/上次出场/谁知道 belief 四值/哪章写过 jieba）→ M2 意图解析笼（LLM 只翻译+名单硬闸）→ M3 材料内合成（出处 id 校验，编造拒收）→「没查到」是一等功能。答案幽灵式浅字只读 Esc 蒸发不进正文；出处点验=章就地切/世界页深链。问题原文落 data/ask_book_metrics.jsonl（M4 分布回看）。测试 +17（test_ask_book.py：分类/六类哨兵防 LLM/硬闸/合成校验/路由/度量），基线 1585+381+tsc 净。
 
-## 25. 幽灵改稿自动捕获与三键期（2026-09-18，设计稿 `docs/next-phase/03-ghost-edit-capture.md`，已提交 c48fc32）
+## 25. 幽灵改稿自动捕获与三键期（2026-09-18，设计稿 `docs/next-phase/03-ghost-edit-capture.md`，已提交 9c45642）
 
 deai 数据飞轮收集端零操作化 + 幽灵交互防呆：**书签位置映射**（`useGhostPairTracker`：采纳瞬间暂存 AI 原样+首尾 position 纯内存，随事务映射塌缩守原地；保存时对比并更新同幽灵只留最新版，切章定稿聚合提示+按批撤销；干净采纳跳过/塌缩=完全否决/≤100 字窗外不收）+ **三键阶梯**（Tab 采纳·Enter 暂留零承诺·Esc 丢弃+60s 找回窗；流式只打断不采纳+GHOST_DONE 400ms 缓冲窗；一期一个暂留位，暂留终局丢弃喂学习）+ **视觉**（mint 点线边界+转正段未审虚线 GhostTrack 装饰碰过即消）。pairs 后端 source 三源白名单（manual_mark/auto_ghost/capsule）。测试 +17 前端（ghostPairTracker），基线 1585+398+tsc 净。M4 度量（粮食速率/干净采纳率/暂留转化率/自动对六闸通过率）待真实写作数据。
 
 ## 26. 视觉焕新、性能与契约收编期（2026-09-16～09-19，已提交）
 
-AGENTS.md 拆分瘦身（b48bdfb：133KB→39KB——四大领域档案 `docs/agent/*.md` 拆出按需加载 + `docs/incidents/` 施工/事故叙事体系建立）/主题白屏收口（1cd39c0：五主题暗块影子 rgb(from color-mix) 相对色语法预计算 rgba）/隐式图谱投影器原型落地（2eb895b：事件流确定性隐式关系投影，09-16 可行性结论兑现，暂无消费方，`docs/reports/implicit-graph-projection-feasibility.md`）/写作规矩（质感契约按书覆盖）收编批（6044011：系统级写作纪律从硬编码升为可编辑契约，唯一权威 `services/style/texture_contracts.py`）/N+1 批量端点收口（e6500a5：章实体关联/书级 spine/世界页重入三处页切卡顿根治）/取景器双层分立+微观空间姿态+名册正文轨（563c6d9：在场感知增强，09-16/17 双层修正残余）/API 弹窗左侧导航式重构（baba41f：左栏六项导航分区+底部连接测试）/设计令牌体系迁移+视觉焕新 P1（801c5ef：线/影/层次三族令牌全仓扫面 --line/--elev-*）/文风页「笔迹谱·双视图」v4（55befcc：前台亲民工坊+深层 Beta 实验室，09-17 降噪/渐进/视觉三批+09-18 收敛）。
+AGENTS.md 拆分瘦身（f157d6f：133KB→39KB——四大领域档案 `docs/agent/*.md` 拆出按需加载 + `docs/incidents/` 施工/事故叙事体系建立）/主题白屏收口（bee4091：五主题暗块影子 rgb(from color-mix) 相对色语法预计算 rgba）/隐式图谱投影器原型落地（0d83896：事件流确定性隐式关系投影，09-16 可行性结论兑现，暂无消费方，`docs/reports/implicit-graph-projection-feasibility.md`）/写作规矩（质感契约按书覆盖）收编批（a440622：系统级写作纪律从硬编码升为可编辑契约，唯一权威 `services/style/texture_contracts.py`）/N+1 批量端点收口（d6753e1：章实体关联/书级 spine/世界页重入三处页切卡顿根治）/取景器双层分立+微观空间姿态+名册正文轨（e1ee6e2：在场感知增强，09-16/17 双层修正残余）/API 弹窗左侧导航式重构（5ab1c62：左栏六项导航分区+底部连接测试）/设计令牌体系迁移+视觉焕新 P1（e12d8ce：线/影/层次三族令牌全仓扫面 --line/--elev-*）/文风页「笔迹谱·双视图」v4（8fc7024：前台亲民工坊+深层 Beta 实验室，09-17 降噪/渐进/视觉三批+09-18 收敛）。
 
 ## 27. GUI 自动化测试与审计收口期（2026-09-19，已提交）
 
-GUI 自动化测试轮种子脚本（1275ff5：web-gui-tester 第一档配套——浏览器 GUI 黑盒测试起步）/09-19 审计四高置信修复（f8677ac：幽灵状态机死键×2 + 质感契约 None 分支 + 试衣间浮签坐标系 + R1 canon 收编）/02 修缮批测试补齐（124df8a：observing 停机冲账行为契约 + 涌现失败/无涌现显式区分，基线 1586 后端/398 前端+tsc 三绿）/next-phase 五批设计稿入册+领域文档同步（cfdad3d）。
+GUI 自动化测试轮种子脚本（30f46d5：web-gui-tester 第一档配套——浏览器 GUI 黑盒测试起步）/09-19 审计四高置信修复（24fe2d8：幽灵状态机死键×2 + 质感契约 None 分支 + 试衣间浮签坐标系 + R1 canon 收编）/02 修缮批测试补齐（6c2110d：observing 停机冲账行为契约 + 涌现失败/无涌现显式区分，基线 1586 后端/398 前端+tsc 三绿）/next-phase 五批设计稿入册+领域文档同步（97f1d9a）。
 
 ## 28. 书籍备份/还原闭环期（2026-09-19，未提交批内——随本批提交）
 
@@ -160,9 +160,9 @@ GUI 自动化测试轮种子脚本（1275ff5：web-gui-tester 第一档配套—
 
 启动脚本按**环境/功能完全隔离**重排（用户拍板勿回退）：`scripts/dev/`（开发调试·后端热重载）与 `scripts/prod/`（正式生产）各四入口（后端/前端/Electron/一键三端），`scripts/monitor/`（.vbs 网页监控台+后台监督者）完全自持（dev_dashboard.py 私有副本），`scripts/macos/{dev,prod}/` 对称两模式，收摊脚本 `scripts/stop-velluma.{bat,ps1,sh}` 升 scripts 根全局通用。**每文件夹互不复用、互不引用**（宁可重复不可共享）。旧三模式收敛为两模式（原 debug 热重载形态=新 dev；原无热重载 dev 退役）。契约自检 `scripts/check_launcher_contract.py` 检查面 5→22（双平台编排核心×4 + 单服务脚本×6 + monitor 副本 + 收摊脚本 + 前端 `transport/base.ts` 判定区间），保持 CI 阻断绿。完整契约唯一权威 `scripts/README.md`，施工叙事 `docs/incidents/launcher.md`。
 
-## 30. 语义撞车 shadow 检与 prompt 治理加固期（2026-09-22～09-24，已提交 50b6238 / 2eed4b1 / d930314；设计稿 `docs/next-phase/06-prompt-governance-hardening.md`）
+## 30. 语义撞车 shadow 检与 prompt 治理加固期（2026-09-22～09-24，已提交 ec81d77 / e306e96 / c6cf581；设计稿 `docs/next-phase/06-prompt-governance-hardening.md`）
 
-MiMo V2.6 系目录上线（50b6238：v2.6-pro/flash/ultraspeed 三档入册，v2.5 系 10-21 下线倒计时标注，矩阵文档同步）/桥接后文语义撞车 shadow 检（2eed4b1：`dock-bridge-overlap-semantic`——「改写式预演」（字面重合 <4 字）是词法闸盲区，由向量比对与字面闸双跑攒校准，只落台账不丢件，embedding 未配置静默跳过；语义重叠模块的 SUFFIX 常量经 hunk 级拆分随本提交，BEAT_RUSH 定档随下批）/**prompt 治理批**（d930314，next-phase 06：①stitch 基座 17 块 SHA256 快照锁 `test_stitch_base_snapshot.py`——改一字即红，更新程序在文件头；②`scripts/prompt_snapshot.py` 纯渲染快照 + `scripts/prompt_replay.py` diff/双跑对照+闸门判分+裁决台账——prompt 改版前后效果可见可裁决；③全局 `PROMPT_VERSION`（`services/prompts/prompt_version.py`）进 stitch trace，动措辞必递增纪律入 AGENTS.md；④语义阈值实测定档：扫描 0.78→0.72、抢拍 shadow 0.80→0.78、后文撞车维持 0.80，依据 `docs/reports/semantic-threshold-calibration.md`；⑤**embedding 批量上限 20 静默失效修复**——`_request_embedding` 透明分批（该模型 >20 条/批整体 400 被吞成全空向量，语义扫描与两个 shadow 检对长文此前整体失效，系 shadow 检长期零命中根因之一）。测试基线：后端 1646 / 前端 416 / tsc 净。
+MiMo V2.6 系目录上线（ec81d77：v2.6-pro/flash/ultraspeed 三档入册，v2.5 系 10-21 下线倒计时标注，矩阵文档同步）/桥接后文语义撞车 shadow 检（e306e96：`dock-bridge-overlap-semantic`——「改写式预演」（字面重合 <4 字）是词法闸盲区，由向量比对与字面闸双跑攒校准，只落台账不丢件，embedding 未配置静默跳过；语义重叠模块的 SUFFIX 常量经 hunk 级拆分随本提交，BEAT_RUSH 定档随下批）/**prompt 治理批**（c6cf581，next-phase 06：①stitch 基座 17 块 SHA256 快照锁 `test_stitch_base_snapshot.py`——改一字即红，更新程序在文件头；②`scripts/prompt_snapshot.py` 纯渲染快照 + `scripts/prompt_replay.py` diff/双跑对照+闸门判分+裁决台账——prompt 改版前后效果可见可裁决；③全局 `PROMPT_VERSION`（`services/prompts/prompt_version.py`）进 stitch trace，动措辞必递增纪律入 AGENTS.md；④语义阈值实测定档：扫描 0.78→0.72、抢拍 shadow 0.80→0.78、后文撞车维持 0.80，依据 `docs/reports/semantic-threshold-calibration.md`；⑤**embedding 批量上限 20 静默失效修复**——`_request_embedding` 透明分批（该模型 >20 条/批整体 400 被吞成全空向量，语义扫描与两个 shadow 检对长文此前整体失效，系 shadow 检长期零命中根因之一）。测试基线：后端 1646 / 前端 416 / tsc 净。
 
 ## 31. 文风双跑实验与全局笔迹库期（2026-10-05，未提交批内——随本批提交；施工叙事 `docs/incidents/style.md`）
 

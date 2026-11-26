@@ -34,7 +34,7 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 - 感知带行对齐与提示密度打磨（避免协作信息过载——协作的前提是「柔性可忽略」不被
   打扰感破坏）。
 
-### 2.2 审校闭环：finish 修复型护栏 ✅（bbbea94：repair_single_defect + /adaptive/fix-sentence 作者裁决式 + 审校 tab 修复按钮，每轮审计上限 5 处）
+### 2.2 审校闭环：finish 修复型护栏 ✅（200dc0a：repair_single_defect + /adaptive/fix-sentence 作者裁决式 + 审校 tab 修复按钮，每轮审计上限 5 处）
 
 - 审校 tab 审计报告每条残句给「定点修复」按钮：1×creative + REASONING_DISABLED +
   max_tokens=1600 + 上限 5 处（沿用 BS-ADF Phase 7.5 参数，`sentence_integrity.py`
@@ -42,7 +42,7 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 - 修复产出 diff 交作者裁决后落正文——「作者裁决即闸门」，不引入自动改稿；
 - 一致性手术是否同批接入，视 P0 观测到的审计命中率再定。
 
-### 2.3 走向卡质量环 ✅（6694dc4：insights 第四面板「协作」——四采纳率卡+逐章分布；**05 瘦身 2026-09-18 已拆**）
+### 2.3 走向卡质量环 ✅（e9d69a3：insights 第四面板「协作」——四采纳率卡+逐章分布；**05 瘦身 2026-09-18 已拆**）
 
 - 基于 P0-3 埋点，在数据页（insights）出「协作采纳率」区：走向卡采纳率、胶囊扩写
   采纳率、各模式 stitch 使用分布；
@@ -51,7 +51,7 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
   面板与 summary 端点拆除记录见 `docs/next-phase/05-telemetry-slimming.md`，insights
   现仅存成本/质量/用量三面板。）
 
-### 2.4 章级谋篇 ✅（M1 747244e / M2 6efb889 / M3 0f2937d；M4 DDE 自动岔路——05 瘦身后数据门已废，改推理分诊）
+### 2.4 章级谋篇 ✅（M1 dec5fb0 / M2 611bf6b / M3 5eb902f；M4 DDE 自动岔路——05 瘦身后数据门已废，改推理分诊）
 
 > ✅ D2 已拍板（2026-08-18）：可行，**核心约束「度」**——谋篇的前置心智成本必须
 > 趋近于零，不得损害写作效率与心流。设计稿：`docs/chapter-planning-spine.md`
@@ -87,7 +87,7 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 
 ## 3. P2 世界页完善 ✅（2026-08-19 全部完成）
 
-### 3.1 C2 真相层挂接 ✅（fb0d8e0 + 04662a7：ref 列/hook 并入/migrate-canon/prompt 换源+往返契约单测/EntityDetailDrawer 读者认知分区/挂接治理三处级联清理）
+### 3.1 C2 真相层挂接 ✅（1b8b240 + 6e0f72b：ref 列/hook 并入/migrate-canon/prompt 换源+往返契约单测/EntityDetailDrawer 读者认知分区/挂接治理三处级联清理）
 
 - canon_nodes 加 ref_type/ref_id 挂世界对象——根治**名字漂移使泄密检测静默失效**
   （角色改名 → canon label 脱钩 → `check_canon_compliance` 漏检）；
@@ -96,7 +96,7 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 - `build_canon_context_for_prompt` 换源 + 往返单测锁三段格式契约；
 - 移除 CanonSection 裸建实体入口。详设见 `canon-world-fusion.md` §4/§7。
 
-### 3.2 W5 桥接件：相遇→走向卡桥 ✅（30621fc：encounters 注入推测+from_encounter 闸+🗺徽标+encounter_card_burst_rate 度量）
+### 3.2 W5 桥接件：相遇→走向卡桥 ✅（84cdeac：encounters 注入推测+from_encounter 闸+🗺徽标+encounter_card_burst_rate 度量）
 
 原缓行理由是「等切片数据密度验证」。方向拍板后改策略为**带度量上线，由数据决定
 留存与调优**（P0-3 埋点先行，§2.3 仪表验证）：
@@ -105,20 +105,20 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
   权重：走向卡可出现「地图来源」建议（「甲与乙同在北岸要塞——要安排相遇吗」）；
 - 验证指标：走向卡里地图来源建议的采纳率（与整体采纳率对比）。
 
-### 3.3 C3 真相能力激活 ✅（9f3359e：连锁分析/查片段接 UI+提取候选入待确认池（accept 分流建真相节点）+时间轴揭示朱点+心跳揭示临近提醒）
+### 3.3 C3 真相能力激活 ✅（b9994f2：连锁分析/查片段接 UI+提取候选入待确认池（accept 分流建真相节点）+时间轴揭示朱点+心跳揭示临近提醒）
 
 - 一致性检查 / 连锁分析接真相详情抽屉 UI（后端 API 就绪休眠中）；
 - canon 提取候选并入「待确认」收件箱（与 W4 候选事件同一物理池语义）；
 - 揭示章投影到时间轴刻度 + 揭示临近提醒（写作中接近揭示章时感知带提示）。
 
-### 3.4 世界页收尾与打磨 ✅（a0a3431：旧表冻结声明 8 处+切章红点修复+读者视角相遇口径定夺）
+### 3.4 世界页收尾与打磨 ✅（db9858b：旧表冻结声明 8 处+切章红点修复+读者视角相遇口径定夺）
 
 - M4 旧表收尾：audit/publish/inspiration/chapter_optimization 四路由换源 world 或
   显式声明冻结；
 - 写作桥 §12 遗留观察小修（章节切换误亮红点、读者视角相遇块口径、名单外提示）；
 - 期待弧线带维持暂缓（触发条件见 §5）。
 
-### 3.5 比例尺标定与空间简报 ✅（380df52：D4-1 标定+换算双端对拍+角标；D4-2 切片距离行/邻近对；D4-3 spatial_brief 进四模式 prompt 零变化契约）
+### 3.5 比例尺标定与空间简报 ✅（5dc9a48：D4-1 标定+换算双端对拍+角标；D4-2 切片距离行/邻近对；D4-3 spatial_brief 进四模式 prompt 零变化契约）
 
 > ✅ D4 已拍板（2026-08-18）：投入，设计委托 Agent 完成。设计稿：
 > `docs/reports/map-scale-spatial.md`（books.map_scale / 三步拉线标定 / 步行日内部基准 /
@@ -134,8 +134,8 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 
 | # | 任务 | 说明 |
 |---|------|------|
-| P3-1 | **SQLite 切换日** ✅（f745ee5：默认 data/velluma.db，DATABASE_URL 显式给出走 PG；canon 兼容层四查询接通；端到端建库验证） | 按 `backend/db_sqlite/__init__.py` 清单执行：aiosqlite 入 requirements、`main.py` init_db 分支（默认 SQLite，`DATABASE_URL` 显式给出仍走 PG）、canon_repository 接 compat_queries、启动脚本与打包数据目录、存量迁移入口（`scripts/migrate_pg_to_sqlite.py`，新装默认 SQLite/存量首启引导迁移）。C2 已在 §3.1 先行，schema 收敛约束自然满足。 |
-| P3-2 | **BS-ADF 整体归档** ✅（dc7af61+50099af：emergent_facts 迁出→引擎/路由/schema 归档 _deprecated；前端 -1168 行；原「顺带拆 composable」升格为独立后续任务 T1，见 §9） | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
+| P3-1 | **SQLite 切换日** ✅（8462127：默认 data/velluma.db，DATABASE_URL 显式给出走 PG；canon 兼容层四查询接通；端到端建库验证） | 按 `backend/db_sqlite/__init__.py` 清单执行：aiosqlite 入 requirements、`main.py` init_db 分支（默认 SQLite，`DATABASE_URL` 显式给出仍走 PG）、canon_repository 接 compat_queries、启动脚本与打包数据目录、存量迁移入口（`scripts/migrate_pg_to_sqlite.py`，新装默认 SQLite/存量首启引导迁移）。C2 已在 §3.1 先行，schema 收敛约束自然满足。 |
+| P3-2 | **BS-ADF 整体归档** ✅（059b0f7+8f30a05：emergent_facts 迁出→引擎/路由/schema 归档 _deprecated；前端 -1168 行；原「顺带拆 composable」升格为独立后续任务 T1，见 §9） | §2.4 取材完成后：引擎移入 `backend/_deprecated/`；前端删 `useGenerationSession.ts` 约 2000 行休眠步进逻辑 + `bsadfApi` + Track A/B 类型；顺带把 adaptive 逻辑从 3371 行单文件拆为独立 composable。 |
 
 ---
 
@@ -163,8 +163,8 @@ events/summary 端点退役——采纳率语义现存于文风 sample_prior 先
 ## 10. 收尾记录（2026-08-19 归档）
 
 P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
-1. **存量数据未随切换迁移**（206efc7）：切换日只换默认引擎，旧 PG 数据需显式跑 `scripts/migrate_pg_to_sqlite.py`；脚本同批增补「源 PG 结构补齐」——源库未跑过启动迁移时（ORM 新列缺失）先过一遍 MIGRATIONS 清单再搬（只加列不动行）。实测 3 书 20 章 1266 行全过。
-2. **SQLite 方言 UUID 字符串不容忍**（53b2828）：repo 惯约 str 传参在 PG+asyncpg 被驱动容忍，SQLite 下 `value.hex` 崩 → world 查询全 500。修在 `db_sqlite/type_compat` 的类型级容忍（str 先解析为 UUID），一处覆盖所有调用点，PG 路径零变化。
+1. **存量数据未随切换迁移**（60fb033）：切换日只换默认引擎，旧 PG 数据需显式跑 `scripts/migrate_pg_to_sqlite.py`；脚本同批增补「源 PG 结构补齐」——源库未跑过启动迁移时（ORM 新列缺失）先过一遍 MIGRATIONS 清单再搬（只加列不动行）。实测 3 书 20 章 1266 行全过。
+2. **SQLite 方言 UUID 字符串不容忍**（93270bb）：repo 惯约 str 传参在 PG+asyncpg 被驱动容忍，SQLite 下 `value.hex` 崩 → world 查询全 500。修在 `db_sqlite/type_compat` 的类型级容忍（str 先解析为 UUID），一处覆盖所有调用点，PG 路径零变化。
 
 后续：真实写作使用数据（协作面板/埋点）驱动 P4 缓行件与 M4 数据门评估；T1（useGenerationSession 拆分）独立排期（§9）。归档时工作区干净、157 后端测试 + 21 前端测试全绿。
 
@@ -202,14 +202,14 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 | 批次 | 内容 | 状态 |
 |---|---|---|
 | 战略定稿 | 六问拍板（严肃作者/大局镜子/铁律不动/更懂这本书/带得走/只自写）+ 第七问「系统自己去读」破喂养死循环；实测双轨（读《弦上灰》写《最终武装》） | ✅ 2026-08-25 |
-| WP1 学着闭嘴 | 被拒学习双通道（收件箱类型级 + 感知带提醒级）、静音派生不落库、宽恕锚点 assist_mutes、幽灵蒸发理由条 | ✅ fb8e3c7 |
-| WP2 自动阅读 | 预算闸 read_budget（哈希幂等/间隔/每日上限）+ auto-read/read-entities 端点 + 切章发枪 + 全书通读两阶段向导 | ✅ 4d992c6 |
-| WP3 视野配比 | 续写窗 200→800/500→1200（P1-3 数据门达成）+ 大纲就近化（outline_nearby 共享）+ 句界净截 | ✅ 4d992c6 |
-| WP4 剂量与预算 | 点火剂量闸（防冲章实证事故）+ spine-suggest 2400+空输出重试 | ✅ 4d992c6 |
-| 语义修复 | 思考关闭从「不表态」改显式关闭（MiMo 默认开实证） | ✅ 862132d |
-| 首秀实测四修 | 冷启动自锁 / 层叠穿帮 / 跨章重复+默认日期 / 连点事故双闸+清库 | ✅ 28c8e73 cdfb740 61bdd01 b4e38b8 |
-| 审计二修+文档同步 | 通读阶段 B 静默空跑（ts_key 分立）/unknown 厂商关闭态；五处文档滞后 | ✅ c017837 a3b7441 |
-| 感知链五连修 | 出场卡形状修复/dock_muted 闭嘴到端/场景锚定/缝合契约反转（复读剥离）/文流第一 | ✅ ec4974d a2088e8 7d266d2 501b982 1c16243 |
+| WP1 学着闭嘴 | 被拒学习双通道（收件箱类型级 + 感知带提醒级）、静音派生不落库、宽恕锚点 assist_mutes、幽灵蒸发理由条 | ✅ b7e3963 |
+| WP2 自动阅读 | 预算闸 read_budget（哈希幂等/间隔/每日上限）+ auto-read/read-entities 端点 + 切章发枪 + 全书通读两阶段向导 | ✅ bd45b8d |
+| WP3 视野配比 | 续写窗 200→800/500→1200（P1-3 数据门达成）+ 大纲就近化（outline_nearby 共享）+ 句界净截 | ✅ bd45b8d |
+| WP4 剂量与预算 | 点火剂量闸（防冲章实证事故）+ spine-suggest 2400+空输出重试 | ✅ bd45b8d |
+| 语义修复 | 思考关闭从「不表态」改显式关闭（MiMo 默认开实证） | ✅ 585784c |
+| 首秀实测四修 | 冷启动自锁 / 层叠穿帮 / 跨章重复+默认日期 / 连点事故双闸+清库 | ✅ 6844cf6 16455ca 1bb6320 6a4c106 |
+| 审计二修+文档同步 | 通读阶段 B 静默空跑（ts_key 分立）/unknown 厂商关闭态；五处文档滞后 | ✅ bc8361d c58e229 |
+| 感知链五连修 | 出场卡形状修复/dock_muted 闭嘴到端/场景锚定/缝合契约反转（复读剥离）/文流第一 | ✅ c0cec2e 2c51725 708322d f3ae72e 587774f |
 
 出口标准（实测数据回收后验收，见执行文档 §5-6）：收件箱采纳率、蒸发理由分布、
 静音准确性、模型 A/B 归因（**卡 DeepSeek Key 失效**——A/B 乙侧与 mimo 禁令
@@ -229,15 +229,15 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 
 | 批次 | 内容 | 状态 |
 |---|---|---|
-| B0 | 清账提交 + context_manifest 观测 + 注入未消费率脚本 + 金标准评测工具 | ✅ 68f6f21 |
-| B1 | Event v2（time_precision/supersedes/认知事件家族/时序边）+ Fold API 唯一入口 | ✅ b13bf7f |
-| B2 | Intent 统一存储（伏笔/期待/揭示迁入；spine/大纲因作者主权保留原状）+ 双读迁移 | ✅ cd08985 |
-| B3 | belief 域折叠（四值 clearance）+ 泄密检测命题化（视角配给随数据激活） | ✅ c88481b |
-| B4 | Depiction 呈现关系 + 回填气闸端点 + reader 折叠 + 负空间差集（阶段 C 前端 UI 待接） | ✅ 4eb3619 |
-| B5 | provenance 信封 + 现实校验挂 finish | ✅ dc4a4df |
-| B6 | 温层计划层温卡 + 提及逐出前缀 + 章内冻结缓存（prefix byte-equal 测试锁） | ✅ e6cd2e7 |
-| B7 | 热层显著性（影子常开）+ 方向权重引擎删除（信号转世）+ dock 具名提示单车道 | ✅ 3921bbc |
-| B8 | 冷层 digest（节级键控+事实节纯代码+ops 编译器+预算分池；**门控关闭中**——stitch 双门未签发） | ✅ 56a86ac |
+| B0 | 清账提交 + context_manifest 观测 + 注入未消费率脚本 + 金标准评测工具 | ✅ 9eeb852 |
+| B1 | Event v2（time_precision/supersedes/认知事件家族/时序边）+ Fold API 唯一入口 | ✅ 6fc74de |
+| B2 | Intent 统一存储（伏笔/期待/揭示迁入；spine/大纲因作者主权保留原状）+ 双读迁移 | ✅ 66adfbf |
+| B3 | belief 域折叠（四值 clearance）+ 泄密检测命题化（视角配给随数据激活） | ✅ 9bc76ab |
+| B4 | Depiction 呈现关系 + 回填气闸端点 + reader 折叠 + 负空间差集（阶段 C 前端 UI 待接） | ✅ 848a3fe |
+| B5 | provenance 信封 + 现实校验挂 finish | ✅ 065662a |
+| B6 | 温层计划层温卡 + 提及逐出前缀 + 章内冻结缓存（prefix byte-equal 测试锁） | ✅ 5a37f2d |
+| B7 | 热层显著性（影子常开）+ 方向权重引擎删除（信号转世）+ dock 具名提示单车道 | ✅ 6c31473 |
+| B8 | 冷层 digest（节级键控+事实节纯代码+ops 编译器+预算分池；**门控关闭中**——stitch 双门未签发） | ✅ 2b52cef |
 | B9 | 认知浮现三时机 + books.cognition_surfacing 总开关（可见性悖论防线） | ✅ 本批 |
 
 不变量验收（11 条，见地基文档 §4）与每批回退路径随批登记。
@@ -265,9 +265,9 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 
 | 项 | 内容 | 状态 |
 |---|---|---|
-| v1+二期 | `world_locations.parent_id` 树零迁移（上图权=parent_id IS NULL 铁律）/ LocationDetailDrawer 二级面板面包屑下钻 / 树删 BFS 父前子后+子树快照撤销 / 幂等闸改同父同名 / 速记与事件表单房间级全路径消歧 | ✅ 3271bd0 |
-| 场景作用域 | `scene_scope_ids` 钉房间祖先算在场；场景身份块带地点档案（无 intro 零变化）；`scene.path` 全路径 | ✅ 3271bd0 |
-| 父地点闸 | update_location 补父存在+同书+非自身+非子孙防环（与 create 同口径，553f4f7） | ✅ 553f4f7 |
+| v1+二期 | `world_locations.parent_id` 树零迁移（上图权=parent_id IS NULL 铁律）/ LocationDetailDrawer 二级面板面包屑下钻 / 树删 BFS 父前子后+子树快照撤销 / 幂等闸改同父同名 / 速记与事件表单房间级全路径消歧 | ✅ 99bbc33 |
+| 场景作用域 | `scene_scope_ids` 钉房间祖先算在场；场景身份块带地点档案（无 intro 零变化）；`scene.path` 全路径 | ✅ 99bbc33 |
+| 父地点闸 | update_location 补父存在+同书+非自身+非子孙防环（与 create 同口径，bbba648） | ✅ bbba648 |
 
 ## 16. 约束治理期（2026-09-02 一期施工，`docs/constraint-governance.md` 唯一权威）
 
@@ -282,22 +282,22 @@ P0-P3 + D4 全量完成并经真机首验。上线后两起事故当场修复：
 | persona 漂移 | `persona_drift.py`（B5 report-only：叙述段第一人称密度超阈值落台账） | ✅ report-only |
 | 明确不做 | constrained decoding / 实时 judge 拦截 / 多轮重试（dock 靠过采样 4-6 枚代替） | — |
 
-另：2026-09-01 死代码批量归档 38 件（314e414——rag 旧检索器全家/V4.0 config 参数推导层等迁 `backend/_deprecated/`，无行为变化，不设期）。
+另：2026-09-01 死代码批量归档 38 件（d30c4ab——rag 旧检索器全家/V4.0 config 参数推导层等迁 `backend/_deprecated/`，无行为变化，不设期）。
 
-## 17. 真相与意图质感期（2026-09-03 三连施工，已提交 b8209f5/d7337d8/2a040fd/e51adcc/defcf49 + 时间轴 3fc79be 09-02）
+## 17. 真相与意图质感期（2026-09-03 三连施工，已提交 1277607/24ec1fa/275fe29/3f85faf/e1b5101 + 时间轴 c4cb57c 09-02）
 
 真相层 UX 人话化重修（因果图谱+连锁分析退役——建边零入口实证；详情两问重排「读者现在知道吗/打算怎么抖出来」，设计稿 docs/design/truth-ux/）/字段级真相分层（档案字段三态 chip + 派生感知五消费线，零变化契约锁定）/时间轴 UX 两轮（内容贴合自动视野/三档刻度/浮点年日精度/拖拽平移）/意图感知入舱（三级源链 spine>大纲>AI 猜 +「不对」纠正手势 + 后续线 A-E：stitch 意图兜底/意图画像/章首接力棒/双 shadow 检）/续写质感治理（双轨 motion·texture 契约 + beat_rush live+rewrite + 质感密度测量与 finish 样本候选）。
 
 ## 18. 大纲板与运维收口期（2026-09-04～09-06，已提交）
 
-大纲板重写为故事线俯视板（d1bafd5：章号轴伏笔弧线/真相朱点/张力折线 + 章卡规划列就地编辑）/09-04 审计修复两批 + 死代码清理（2cc4bb7/2e2b441：B5 现实校验复活/幽灵跨章双防线等 21 项）/世界侧栏直达创建入口（f40f1bc）/启动脚本单窗口监控台 + 网页监控台 + 后台 python 监督者（556aa6b）/设定中心页整体退役 + global_sys_prompt 死线归档（d75abef）/SPDX 协议头 100% 规范化（ecbeb94）。
+大纲板重写为故事线俯视板（9d186fa：章号轴伏笔弧线/真相朱点/张力折线 + 章卡规划列就地编辑）/09-04 审计修复两批 + 死代码清理（b285a59/0a5e383：B5 现实校验复活/幽灵跨章双防线等 21 项）/世界侧栏直达创建入口（d4ed823）/启动脚本单窗口监控台 + 网页监控台 + 后台 python 监督者（271fe90）/设定中心页整体退役 + global_sys_prompt 死线归档（8efff3f）/SPDX 协议头 100% 规范化（8ef55ae）。
 
 另：2026-09-07 起前端 UX 重构多期（地基 Esc 栈/浮层钳位 + 世界页图标栏三组 + 写作台 08 期「桌上一张纸」，设计稿 `docs/design/ux-redesign/`）与 dock 红队三批（在场制/对白分镜组/FIM 中插桥接/临时通行证）原在未提交工作区——已随 2026-09-13～16 提交收录，行为记录见 §19/§20 与 AGENTS.md。
 
 ## 19. 写后检查收敛与深水区加固期（2026-09-11～09-13，已提交）
 
-架构优化双轮七项（a66ffd3：backend/models 35 表按域拆 8 子模块 + adaptive 路由拆 8 子模块 + style 路由拆 6 子模块 + 四对双实现收敛 + FK 排雷；成本核算 `services/llm/pricing.py` 价目纯函数随批入库）/启停脚本防误杀加固（de035eb：OwnedPort 端口登记+状态 JSON 新鲜度闸+taskkill 树杀三护）/模型配置预设快速切换（28664b3：整套存档一键切回+自动存档安全网）/**写后检查收敛（d1a5b38：Refinery 与 /critique_chapter 整体拔除——未过目整章覆写/noHistory 不可撤销/跨章覆写三连风险；手术原语迁 `services/text_surgery/`、读者反馈收编 `/adaptive/reader-feedback`，唯一权威 `docs/reports/post-writing-checks-audit.md`；AI 视角面板 09 期重设计同批——保字排版/三段分组/折叠头行仪表盘）**/事件可编辑标题（21c640c：`world_events.title` 列 + `eventDisplayName` 回退链）/时间轴视觉升级（9179868：信标针脚/金墨直方图/燕尾书签/黄铜菱形游标/快捷视界胶囊）/应用图标单源（8b0db19：`frontend/electron/app-icon.png`）/深水区红队四件（cb5ee8f 别名归一补口+微镜头旁路 deai/P2、594bc28 dock 输入减肥 DOCK_PIPELINE_VERSION→v2.2、456ccc0 RAG 检索分流去敏——V/B 抹在场实体名 A 流保原文、a165f8e 跨书文风黄金池冷启动兜底）/桥接后文锚扩窗 300 字+六目标边界修复（6607adb，DOCK_PIPELINE_VERSION→v2.3）/卡片舱与文风链路调研报告归档（ea4cfa3）。
+架构优化双轮七项（5f324e2：backend/models 35 表按域拆 8 子模块 + adaptive 路由拆 8 子模块 + style 路由拆 6 子模块 + 四对双实现收敛 + FK 排雷；成本核算 `services/llm/pricing.py` 价目纯函数随批入库）/启停脚本防误杀加固（5d43501：OwnedPort 端口登记+状态 JSON 新鲜度闸+taskkill 树杀三护）/模型配置预设快速切换（5a239af：整套存档一键切回+自动存档安全网）/**写后检查收敛（b6f064c：Refinery 与 /critique_chapter 整体拔除——未过目整章覆写/noHistory 不可撤销/跨章覆写三连风险；手术原语迁 `services/text_surgery/`、读者反馈收编 `/adaptive/reader-feedback`，唯一权威 `docs/reports/post-writing-checks-audit.md`；AI 视角面板 09 期重设计同批——保字排版/三段分组/折叠头行仪表盘）**/事件可编辑标题（c965cc7：`world_events.title` 列 + `eventDisplayName` 回退链）/时间轴视觉升级（d410a89：信标针脚/金墨直方图/燕尾书签/黄铜菱形游标/快捷视界胶囊）/应用图标单源（e140a69：`frontend/electron/app-icon.png`）/深水区红队四件（0e5e469 别名归一补口+微镜头旁路 deai/P2、e141ebb dock 输入减肥 DOCK_PIPELINE_VERSION→v2.2、83f8383 RAG 检索分流去敏——V/B 抹在场实体名 A 流保原文、323bf2c 跨书文风黄金池冷启动兜底）/桥接后文锚扩窗 300 字+六目标边界修复（d578625，DOCK_PIPELINE_VERSION→v2.3）/卡片舱与文风链路调研报告归档（9430ed8）。
 
 ## 20. 文风去参数化、叙事四弹与主题焕新期（2026-09-14～09-16，已提交）
 
-叙事四弹（b89f804 世界页时间轴 60 帧性能重塑 / a5f102c 文风去参数化——旋钮滑块退役+亲笔样本真实装填通道，`docs/reports/style-parameter-effectiveness-audit.md` / 0050eed 场次流转第三弹——光标派生取景 `active_scene` 纯函数+四线接流，`docs/reports/scene-transit-feasibility.md` / edce677 第四弹——打算与大纲 UI 单轨合流叙事引力流面板 + `/adaptive/active-beats`，`docs/reports/spine-outline-merge-feasibility.md`）/主题系统五主题×明暗+chrome 视觉现代化+设置拆三入口与 Electron CSP 防闪收口（9cab473，设计稿 `docs/design/theme-system/`）/AI 视角简报化（e8cd82c：战局态势卡+空块静音+preview 光标真切片，`docs/reports/ai-view-briefing-feasibility.md` + 使用说明 `docs/ai-view-panel-guide.md`）/Tab 重算失败可见化（5606689：本地端点连接快速失败不重试+旧卡年龄+舱内朱色报错行）/模型槽显式化（4666ca9：全链 model_type 归位+Ollama reasoning_effort=none 思考关闭实测修复，含槽位全景报告 `docs/reports/model-slot-coverage-report.md`）/数据库卫生批（dc74486：事件 id 引用格式归一+fold 出场即活语义+幂等检测脚本 `scripts/check_db_hygiene.py`）/书架视觉改版 v2+novel-wizard 向导整体退役（81d53c0：新建唯一入口=快速创建，一句话打算直落第 1 章 spine）/全量测试补全批（ec0fe8e：改码→测试映射纪律文档 `docs/testing-guide.md`）。
+叙事四弹（819335f 世界页时间轴 60 帧性能重塑 / 21c26ce 文风去参数化——旋钮滑块退役+亲笔样本真实装填通道，`docs/reports/style-parameter-effectiveness-audit.md` / 44fb841 场次流转第三弹——光标派生取景 `active_scene` 纯函数+四线接流，`docs/reports/scene-transit-feasibility.md` / 9b73dfd 第四弹——打算与大纲 UI 单轨合流叙事引力流面板 + `/adaptive/active-beats`，`docs/reports/spine-outline-merge-feasibility.md`）/主题系统五主题×明暗+chrome 视觉现代化+设置拆三入口与 Electron CSP 防闪收口（6624197，设计稿 `docs/design/theme-system/`）/AI 视角简报化（2a17f81：战局态势卡+空块静音+preview 光标真切片，`docs/reports/ai-view-briefing-feasibility.md` + 使用说明 `docs/ai-view-panel-guide.md`）/Tab 重算失败可见化（4584df2：本地端点连接快速失败不重试+旧卡年龄+舱内朱色报错行）/模型槽显式化（90d0c66：全链 model_type 归位+Ollama reasoning_effort=none 思考关闭实测修复，含槽位全景报告 `docs/reports/model-slot-coverage-report.md`）/数据库卫生批（6291db8：事件 id 引用格式归一+fold 出场即活语义+幂等检测脚本 `scripts/check_db_hygiene.py`）/书架视觉改版 v2+novel-wizard 向导整体退役（a557721：新建唯一入口=快速创建，一句话打算直落第 1 章 spine）/全量测试补全批（827a07e：改码→测试映射纪律文档 `docs/testing-guide.md`）。

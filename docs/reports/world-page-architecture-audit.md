@@ -1,4 +1,4 @@
-> **归档说明（2026-09-19）**：世界页架构审计（2026-09-14），一期外壳重构已入库（a66ffd3）；二期深化状态见 incidents。
+> **归档说明（2026-09-19）**：世界页架构审计（2026-09-14），一期外壳重构已入库（5f324e2）；二期深化状态见 incidents。
 
 # 世界页全链路架构与空间联动重构可行性审计报告
 
@@ -10,7 +10,7 @@
 
 ## 0. 结论摘要（TL;DR）——先校正一个关键前提
 
-**任务书构想的「DrawerShell 升级」大半已是现状。** a66ffd3（2026-09-10 入库，记忆与代码双证）已完成：**340px 全高贴边抽屉**（`.atlas-drawer`，WorldView.vue:1328；罗盘避让 414px，:526-533）、**DrawerShell 统一骨架**（presentation/DrawerShell.vue，9 面板中 7 个已套壳）、**地点折叠树**（loc 面板内联，折叠整枝剪除+搜索展开）、**EventSpineList 年份分组脊柱**（evt 面板）、**地图双向联动**（面板 📍 → 地图声呐脉冲 :539-546；地图点地标 → 面板行回指滚动+展开祖先 :550-569）。**250px 悬浮小气泡时代已经结束**——本期审计因此以「现状盘点 + 二期深化差距」框定，而非从零推演。
+**任务书构想的「DrawerShell 升级」大半已是现状。** 5f324e2（2026-09-10 入库，记忆与代码双证）已完成：**340px 全高贴边抽屉**（`.atlas-drawer`，WorldView.vue:1328；罗盘避让 414px，:526-533）、**DrawerShell 统一骨架**（presentation/DrawerShell.vue，9 面板中 7 个已套壳）、**地点折叠树**（loc 面板内联，折叠整枝剪除+搜索展开）、**EventSpineList 年份分组脊柱**（evt 面板）、**地图双向联动**（面板 📍 → 地图声呐脉冲 :539-546；地图点地标 → 面板行回指滚动+展开祖先 :550-569）。**250px 悬浮小气泡时代已经结束**——本期审计因此以「现状盘点 + 二期深化差距」框定，而非从零推演。
 
 四个核心答案：
 
@@ -156,7 +156,7 @@ fs（伏笔）与 canon（真相）因自带完整分区头而「直接平铺不
 | template | 1059-1748 | **689** | 其中**内联面板体仅 ~180 行**（cand 34/exp 11/loc 树 70/evt 21/实体 47，:1330-1550）；其余=地图/时间轴/模态群/详情抽屉/图标栏/胶囊条的**组件挂载点**（非废代码） |
 | scoped CSS | 1750-2517 | **767** | **隐形巨石**——抽屉/胶囊/表单样式全压在容器；组件化后大头可随迁 |
 
-**「抽象出 DrawerShell 可以删掉多少行」的诚实答案**：DrawerShell **已经抽象**（2026-09-10）。进一步可迁移量：loc 树/实体面板体/cand/exp 五块内联体 ~180 模板行 + 对应 script 逻辑（折叠集/过滤/分组 computed/待确认池 ~150 行）+ 随迁样式（est. 100-200 行）≈ **合计约 400-500 行可离开容器**，WorldView 收敛到 ~2000 行的纯编排壳。**没有「气泡废代码」可一刀删——2517 行里找不到成片死区**（旧气泡已在 a66ffd3 那轮清理）。
+**「抽象出 DrawerShell 可以删掉多少行」的诚实答案**：DrawerShell **已经抽象**（2026-09-10）。进一步可迁移量：loc 树/实体面板体/cand/exp 五块内联体 ~180 模板行 + 对应 script 逻辑（折叠集/过滤/分组 computed/待确认池 ~150 行）+ 随迁样式（est. 100-200 行）≈ **合计约 400-500 行可离开容器**，WorldView 收敛到 ~2000 行的纯编排壳。**没有「气泡废代码」可一刀删——2517 行里找不到成片死区**（旧气泡已在 5f324e2 那轮清理）。
 
 ---
 
@@ -188,10 +188,10 @@ fs（伏笔）与 canon（真相）因自带完整分区头而「直接平铺不
 
 ## 附录：证据索引
 
-- 现状重构：DrawerShell.vue:1-60（契约）· WorldView.vue:31,1328,1404-1474,1503-1550 · a66ffd3（2026-09-10 提交）
+- 现状重构：DrawerShell.vue:1-60（契约）· WorldView.vue:31,1328,1404-1474,1503-1550 · 5f324e2（2026-09-10 提交）
 - 状态总线：useWorld.ts:45,56-57,76-96,188-189 · WorldView.vue:200-237,486-569
 - 渲染拓扑：WorldMap.vue:1402-1451（watch 面）· 619-655/753/845/1015/1139（clearLayers 五层）
 - Fold 算力：computeWorldState.ts 全文（:26-29 排序、:91-105 move 插值、:143-152 O(R×E) 关系判定）· WorldTimeline.vue:285-291（rAF 节流）,448-460（播放）· 1137-1161（事件层无裁剪）
 - 坐标与联动：WorldMap.vue:3,9,92,203,273（CRS.Simple/0-1000 画布）· 1461-1473（focusAt）· 1486-1498（fitAll）· WorldView.vue:503-524（focusEvent/focusLocation）
 - 接缝：locationTree.ts:12-55 · EventSpineList.vue:11,36-45 · EntityCard.vue:10-15,56-72 · timelineLayout.ts（204 行纯函数）
-- 交叉引用：docs/reports/location-interior.md（树模型）· docs/reports/map-scale-spatial.md（比例尺）· world-panel-redesign 记忆档（a66ffd3 两期施工）
+- 交叉引用：docs/reports/location-interior.md（树模型）· docs/reports/map-scale-spatial.md（比例尺）· world-panel-redesign 记忆档（5f324e2 两期施工）

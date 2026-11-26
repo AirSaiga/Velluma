@@ -133,7 +133,7 @@
 - **副驾「打算」tab**（旧稿称「章节」tab——2026-08-22 副驾重排为 打算/此刻/
   本章/检查 后，谋篇区落在「打算」）：SpinePanel 谋篇区——意图一行 + 锚点
   chips（就地编辑/增删/划掉= dropped）；有大纲时显示「从大纲抓建议」。
-- 意图输入的保存链（7003e4e，2026-09-01 丢稿修复后）：面板本地草稿 + 输入即
+- 意图输入的保存链（a0da176，2026-09-01 丢稿修复后）：面板本地草稿 + 输入即
   600ms 防抖提交 + 失焦兜底（旧「单向 value + 仅失焦 @change」在失焦前遇心跳
   重渲染即被清空，输入从未进保存链）→ 入本地状态后 2s 防抖自动保存；切章/
   离页时在途防抖**冲刷落库不丢弃**（`useChapterSpine._flushPendingSave`，回包
@@ -184,7 +184,7 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
 
 ### 4.3 进度判定（纯算法，宁漏勿误——D-5 同款保守）
 
-> **2026-08-25 B2 治理修订**（3b466d5，台账见 `docs/reports/adaptive-assist-hardening.md`
+> **2026-08-25 B2 治理修订**（3e2dd2e，台账见 `docs/reports/adaptive-assist-hardening.md`
 > §P2）：初版「jieba 关键词全词命中」被实测噪声推翻（通用关键词误 hit + 进程
 > 重启后 growth=全文 + 等长改写吃旧缓存）。现行判据如下。
 
@@ -203,7 +203,7 @@ finish 审计报告加附注行：「未兑现锚点：⚑2 压住不表（pendi
   **首轮只记基线不判定**——进程重启/重新进章后 growth=全文的大面积误 hit
   不可逆（hit 只前进不回退）；改写收缩（正文变短）退化为尾部 500 字；
 - 结果按**内容 hash** 缓存（治等长改写吃旧缓存），心跳零 LLM；
-- 写库防并发（9d6c066）：判 hit 期间作者侧防抖 PATCH 可能已改 spine——
+- 写库防并发（8d7b878）：判 hit 期间作者侧防抖 PATCH 可能已改 spine——
   commit 前结束读事务 refresh 重读整行，hit 按 id 单向（pending→hit）应用
   到新鲜 anchors 再写回（逐锚点浅拷贝防 JSONB 按值相等漏 UPDATE）；作者
   已清空锚点则不回写（编辑权在作者）；
@@ -270,4 +270,4 @@ M4 的开启条件：P0 埋点显示 spine 覆盖率 ≥50% 且走向卡采纳�
 
 ## 修订注（2026-09-14 第四弹 UI 单轨合流）
 
-本章 M1-M3 数据契约（`chapters.spine` JSONB · `GET/PATCH /adaptive/spine` · spine-suggest · 锚点进度判定 · 走向卡 ⚑ 挂锚）**不变**；UI 层已按路径 C 单轨合流（edce677）——副驾「打算」分区重构为**叙事引力流面板**（SpinePanel：🎯 方向行=spine.intent 高亮锚 + 锚点 chips + 📝 情节节拍区=outline_text 迁入，旧「大纲编辑卡」删除），活跃节拍微标「▶ 续写正朝这拍走」走新端点 `GET /adaptive/active-beats`（与 stitch/dock 同一份 `outline_nearby` 计算，纯算法），Tab/Space 入口前经 `velluma:flush-planning` 事件强制冲刷 + 心跳上行携带双保险，节拍区 blur 冲刷。第四弹唯一权威：`docs/reports/spine-outline-merge-feasibility.md`。
+本章 M1-M3 数据契约（`chapters.spine` JSONB · `GET/PATCH /adaptive/spine` · spine-suggest · 锚点进度判定 · 走向卡 ⚑ 挂锚）**不变**；UI 层已按路径 C 单轨合流（9b73dfd）——副驾「打算」分区重构为**叙事引力流面板**（SpinePanel：🎯 方向行=spine.intent 高亮锚 + 锚点 chips + 📝 情节节拍区=outline_text 迁入，旧「大纲编辑卡」删除），活跃节拍微标「▶ 续写正朝这拍走」走新端点 `GET /adaptive/active-beats`（与 stitch/dock 同一份 `outline_nearby` 计算，纯算法），Tab/Space 入口前经 `velluma:flush-planning` 事件强制冲刷 + 心跳上行携带双保险，节拍区 blur 冲刷。第四弹唯一权威：`docs/reports/spine-outline-merge-feasibility.md`。

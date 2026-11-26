@@ -38,7 +38,7 @@
 
 ## 2. 拆除清单（分析层）
 
-1. **insights 数据页「协作」面板**：四采纳率卡 + 逐章分布（P1 §2.3 产物，commit 6694dc4）；
+1. **insights 数据页「协作」面板**：四采纳率卡 + 逐章分布（P1 §2.3 产物，commit e9d69a3）；
 2. **`GET /adaptive/events/summary`** 聚合端点；
 3. **纯分析用途的事件种类**及其前端接线（胶囊扩写计数、quick_note_commit 等
    只喂面板的事件；`velluma:collab-event` DOM 事件桥随接线收缩评估去留）；

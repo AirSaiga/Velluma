@@ -212,7 +212,7 @@ class TestAdaptUnknown:
         assert result["reasoning"]["enabled"] is True
 
     def test_disabled_returns_none(self):
-        """关闭态不发参数（2026-08-26 修复）：862132d 语义修复后 unknown 分支曾把
+        """关闭态不发参数（2026-08-26 修复）：585784c 语义修复后 unknown 分支曾把
         reasoning.enabled=false 透传给未知网关——不认该协议的网关无感（参数本就
         无效），严格校验 body 的网关却会 400（全槽位失败）。恢复「不发」的历史
         行为；需要显式关闭的服务端默认思考厂商，正路是加 detect 分支（MiMo 先例）。"""
